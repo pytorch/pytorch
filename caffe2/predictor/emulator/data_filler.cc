@@ -67,19 +67,33 @@ DataRandomFiller::DataRandomFiller(
     const auto& op_types = input_types[i];
     CAFFE_ENFORCE(
         op_dims.size() == op.input_size(),
-        op.name() + " has " + caffe2::to_string(op.input_size()) +
+        op.name() + " has " + c10::to_string(op.input_size()) +
             " inputs; while the input dimension size is " +
-            caffe2::to_string(op_dims.size()));
+            c10::to_string(op_dims.size()));
     CAFFE_ENFORCE(
         op_types.size() == op.input_size(),
-        op.name() + " has " + caffe2::to_string(op.input_size()) +
+        op.name() + " has " + c10::to_string(op.input_size()) +
             " inputs; while the input type size is " +
-            caffe2::to_string(op_types.size()));
+            c10::to_string(op_types.size()));
 
     for (size_t j = 0; j < op.input_size(); ++j) {
-      inputs_.emplace(
-          op.input(j),
-          std::make_pair(get_tensor_filler(op, j, op_dims), op_types[j]));
+      inputs_[op.input(j)] =
+          std::make_pair(get_tensor_filler(op, j, op_dims), op_types[j]);
+    }
+
+    // Hack, we normal have a path of
+    // length -> LengthsiRangeFill -> Gather -> w -> SparseLengthsWeighted*
+    //       \---------------------------------------/
+    // So when we generate the value of length, we need to bound it to the size
+    // of weight input of Gather too
+    if (op.type().find("SparseLengthsWeighted") == 0 && i > 0) {
+      const auto& prev_op = run_net.op(i - 1);
+      if (prev_op.type() == "Gather") {
+        const auto& prev_dims = input_dims[i - 1];
+        VLOG(1) << "Setting max length value to " << prev_dims[0].front()
+                << " for " << op.input(3);
+        inputs_[op.input(3)].first.Max(prev_dims[0].front());
+      }
     }
 
     for (size_t j = 0; j < op.output_size(); ++j) {

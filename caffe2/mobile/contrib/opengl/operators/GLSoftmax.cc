@@ -42,9 +42,9 @@ class GLSoftmaxReduce : public GLFilter {
             input_bindings(),
             {/* no uniform_blocks_bindings */},
             {/* no attributes */},
-            {{"COMPUTE_SUM", caffe2::to_string((int)compute_sum_)},
-             {"INPUT_TILE_X", caffe2::to_string(input_tile_x)},
-             {"TILED_SOFTMAX", caffe2::to_string(int(tiled))}}) {}
+            {{"COMPUTE_SUM", c10::to_string((int)compute_sum_)},
+             {"INPUT_TILE_X", c10::to_string(input_tile_x)},
+             {"TILED_SOFTMAX", c10::to_string(int(tiled))}}) {}
 
   template <typename T>
   void reduce(const GLImage<T>* input_image,
@@ -190,8 +190,8 @@ class GLSoftmaxScale : public GLFilter {
             input_bindings(),
             {/* no uniform blocks */},
             {/* no attributes */},
-            {{"COMPUTE_EXP", caffe2::to_string((int)_compute_exp)},
-             {"TILED_SOFTMAX", caffe2::to_string((int)tiled)}}) {}
+            {{"COMPUTE_EXP", c10::to_string((int)_compute_exp)},
+             {"TILED_SOFTMAX", c10::to_string((int)tiled)}}) {}
 
   template <typename T>
   void scale(const GLImage<T>* input_image,

@@ -26,8 +26,6 @@ C10_DEFINE_bool(
 
 C10_DECLARE_bool(caffe2_dag_net_collect_stats);
 
-C10_DECLARE_bool(caffe2_net_async_finish_chain);
-
 C10_DECLARE_int(caffe2_streams_per_gpu);
 
 C10_DECLARE_bool(caffe2_net_async_check_stream_status);
@@ -113,7 +111,7 @@ int AsyncDAGNet::stream(const DeviceOption& device_option) {
   int stream_id = 0;
   if (device_option.device_type() == PROTO_CUDA) {
     int gpu_id = device_option.device_id();
-    CAFFE_ENFORCE_GE(gpu_id, 0, "Invalid gpu id: " + caffe2::to_string(gpu_id));
+    CAFFE_ENFORCE_GE(gpu_id, 0, "Invalid gpu id: " + c10::to_string(gpu_id));
     if ((unsigned)gpu_id >= stream_counters_.size()) {
       stream_counters_.resize(gpu_id + 1, 0);
     }
@@ -184,9 +182,6 @@ bool AsyncDAGNet::RunAt(int chain_id, const std::vector<int>& chain) {
   }
 
   const auto& sink_idx = chain.back();
-  if (success && FLAGS_caffe2_net_async_finish_chain) {
-    operator_nodes_[sink_idx].operator_->event().Finish();
-  }
   CAFFE_ENFORCE(
       !eventRecorded_[sink_idx],
       "An event for ",

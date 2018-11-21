@@ -2,6 +2,7 @@
 
 #include "ATen/cuda/CUDAContext.h"
 #include "ATen/cuda/CUDAGuard.h"
+#include "ATen/cuda/CUDAMultiStreamGuard.h"
 #include "ATen/cuda/CUDAEvent.h"
 
 #include "cuda_runtime.h"
@@ -175,7 +176,7 @@ TEST(TestStream, CUDAGuardTest) {
 TEST(TestStream, StreamPoolTest) {
   std::vector<at::cuda::CUDAStream> streams{};
   for (int i = 0; i < 200; ++i) {
-    streams.emplace_back(at::cuda::detail::CUDAStream_getStreamFromPool());
+    streams.emplace_back(at::cuda::impl::CUDAStream_getStreamFromPool());
   }
 
   std::unordered_set<cudaStream_t> stream_set{};
@@ -219,8 +220,8 @@ TEST(TestStream, CUDAEventSyncTest) {
   const auto wait_stream0 = at::cuda::getStreamFromPool();
   const auto wait_stream1 = at::cuda::getStreamFromPool();
 
-  wait_stream0.synchronize_with(event);
-  wait_stream1.synchronize_with(event);
+  event.block(wait_stream0);
+  event.block(wait_stream1);
 
   cudaStreamSynchronize(wait_stream0);
   ASSERT_TRUE(event.happened());
@@ -245,7 +246,7 @@ TEST(TestStream, CrossDeviceTest) {
 
   ASSERT_EQ_CUDA(event0.device(), 1);
 
-  stream0.synchronize_with(event0);
+  event0.block(stream0);
 
   cudaStreamSynchronize(stream0);
   ASSERT_TRUE(event0.happened());

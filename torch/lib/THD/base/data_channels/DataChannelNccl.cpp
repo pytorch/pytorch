@@ -1,5 +1,5 @@
 #include "DataChannelNccl.hpp"
-#include "../Cuda.hpp"
+#include <THD/base/Cuda.hpp>
 #include "DataChannelUtils.hpp"
 
 #include <ATen/ATen.h>

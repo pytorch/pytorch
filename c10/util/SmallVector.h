@@ -53,7 +53,7 @@ static inline uint64_t NextPowerOf2(uint64_t A) {
 } // namespace detail
 
 /// This is all the non-templated stuff common to all SmallVectors.
-class CAFFE2_API SmallVectorBase {
+class C10_API SmallVectorBase {
  protected:
   void *BeginX, *EndX, *CapacityX;
 

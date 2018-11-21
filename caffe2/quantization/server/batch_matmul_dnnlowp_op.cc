@@ -39,8 +39,7 @@ BatchMatMulDNNLowPOp<T>::BatchMatMulDNNLowPOp(
       trans_b_(OperatorBase::GetSingleArgument<int>("trans_b", 0)),
       broadcast_(OperatorBase::GetSingleArgument<int>("broadcast", 0)),
       is_B_constant_(
-          OperatorBase::GetSingleArgument<bool>("constant_B", false)) {
-}
+          OperatorBase::GetSingleArgument<bool>("constant_B", false)) {}
 
 template <typename T>
 bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
@@ -171,24 +170,14 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
           K,
           dims_B[ndims_B - 1],
           dimMismatchErrorString(
-              K_dim,
-              K,
-              ndims_B - 1,
-              dims_B[ndims_B - 1],
-              trans_a_,
-              trans_b_));
+              K_dim, K, ndims_B - 1, dims_B[ndims_B - 1], trans_a_, trans_b_));
     } else {
       N = dims_B[ndims_B - 1];
       CAFFE_ENFORCE_EQ(
           K,
           dims_B[ndims_B - 2],
           dimMismatchErrorString(
-              K_dim,
-              K,
-              ndims_B - 2,
-              dims_B[ndims_B - 2],
-              trans_a_,
-              trans_b_));
+              K_dim, K, ndims_B - 2, dims_B[ndims_B - 2], trans_a_, trans_b_));
     }
 
     // Calculate output tensor shapes [B..., (M), (N)]
@@ -296,8 +285,8 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
     is_B_constant_ = false;
     Bq_packed_.clear();
   }
-  bool fast_path = std::is_same<T, uint8_t>::value && GetCpuId().avx2() &&
-      is_B_constant_;
+  bool fast_path =
+      std::is_same<T, uint8_t>::value && GetCpuId().avx2() && is_B_constant_;
 
   if (fast_path) {
     // Quantize B
@@ -406,7 +395,7 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
     GetOutputQuantizationParams_();
 
     float real_multiplier =
-      in_qparams_[0].scale * B_qparams_[0].scale / out_qparams_.scale;
+        in_qparams_[0].scale * B_qparams_[0].scale / out_qparams_.scale;
     requantization_params_[0] = qfactory_->ChooseRequantizationMultiplier(
         real_multiplier, out_qparams_);
   }
@@ -422,8 +411,7 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
     if (A.template IsType<T>() || !dequantize_output_) {
       // Only when input and output are float, we don't need input to be
       // quantized.
-      A_quantized = QuantizeInputIfNeeded<T>(
-          this, 0, in_qparams_[0], A_temp, qfactory_.get());
+      A_quantized = QuantizeInputIfNeeded<T>(this, 0, in_qparams_[0], A_temp);
     }
 
 #ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
@@ -614,10 +602,10 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
   } else {
     // slow path
     // Quantize inputs
-    const T* A_quantized = QuantizeInputIfNeeded<T>(
-        this, 0, in_qparams_[0], A_temp, qfactory_.get());
-    const T* B_quantized = QuantizeInputIfNeeded<T>(
-        this, 1, B_qparams_[0], B_temp, qfactory_.get());
+    const T* A_quantized =
+        QuantizeInputIfNeeded<T>(this, 0, in_qparams_[0], A_temp);
+    const T* B_quantized =
+        QuantizeInputIfNeeded<T>(this, 1, B_qparams_[0], B_temp);
 
     T* Y_quantized = GetQuantizedOutputData_();
     Y_int32_.resize(Y->numel());
@@ -646,7 +634,7 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
         const T* B_quantized_i = B_quantized + p * B_stride + i * K * N;
 
         int32_t const_offset =
-          in_qparams_[0].zero_point * B_qparams_[0].zero_point * K;
+            in_qparams_[0].zero_point * B_qparams_[0].zero_point * K;
         vector<int32_t> column_offsets(N);
         for (int n = 0; n < N; ++n) {
           int32_t sum = 0;
@@ -654,8 +642,7 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
             for (int k = 0; k < K; ++k) {
               sum += B_quantized_i[k + n * K];
             }
-          }
-          else {
+          } else {
             for (int k = 0; k < K; ++k) {
               sum += B_quantized_i[k * N + n];
             }
@@ -669,8 +656,7 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
             for (int k = 0; k < K; ++k) {
               row_offset += A_quantized_i[m + k * M];
             }
-          }
-          else {
+          } else {
             for (int k = 0; k < K; ++k) {
               row_offset += A_quantized_i[m * K + k];
             }
@@ -681,35 +667,28 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
             int32_t sum = 0;
             if (!trans_a_ && !trans_b_) {
               for (int k = 0; k < K; ++k) {
-                sum +=
-                  static_cast<int32_t>(A_quantized_i[m * K + k]) *
-                  static_cast<int32_t>(B_quantized_i[k * N + n]);
+                sum += static_cast<int32_t>(A_quantized_i[m * K + k]) *
+                    static_cast<int32_t>(B_quantized_i[k * N + n]);
               }
-            }
-            else if (!trans_a_ && trans_b_) {
+            } else if (!trans_a_ && trans_b_) {
               for (int k = 0; k < K; ++k) {
-                sum +=
-                  static_cast<int32_t>(A_quantized_i[m * K + k]) *
-                  static_cast<int32_t>(B_quantized_i[k + n * K]);
+                sum += static_cast<int32_t>(A_quantized_i[m * K + k]) *
+                    static_cast<int32_t>(B_quantized_i[k + n * K]);
               }
-            }
-            else if (trans_a_ && !trans_b_) {
+            } else if (trans_a_ && !trans_b_) {
               for (int k = 0; k < K; ++k) {
-                sum +=
-                  static_cast<int32_t>(A_quantized_i[m + k * M]) *
-                  static_cast<int32_t>(B_quantized_i[k * N + n]);
+                sum += static_cast<int32_t>(A_quantized_i[m + k * M]) *
+                    static_cast<int32_t>(B_quantized_i[k * N + n]);
               }
-            }
-            else if (trans_a_ && trans_b_) {
+            } else if (trans_a_ && trans_b_) {
               for (int k = 0; k < K; ++k) {
-                sum +=
-                  static_cast<int32_t>(A_quantized_i[m + k * M]) *
-                  static_cast<int32_t>(B_quantized_i[k + n * K]);
+                sum += static_cast<int32_t>(A_quantized_i[m + k * M]) *
+                    static_cast<int32_t>(B_quantized_i[k + n * K]);
               }
             }
 
             Y_int32_[p * Y_stride + i * M * N + m * N + n] =
-              sum - row_offset - column_offsets[n] + const_offset;
+                sum - row_offset - column_offsets[n] + const_offset;
           } // for each output col
         } // for each output row
 
@@ -729,11 +708,17 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
 }
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-  BatchMatMul, DNNLOWP, BatchMatMulDNNLowPOp<uint8_t>);
+    BatchMatMul,
+    DNNLOWP,
+    BatchMatMulDNNLowPOp<uint8_t>);
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-  BatchMatMul, DNNLOWP_16, BatchMatMulDNNLowPOp<uint16_t>);
+    BatchMatMul,
+    DNNLOWP_16,
+    BatchMatMulDNNLowPOp<uint16_t>);
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-  Int8BatchMatMul, DNNLOWP, BatchMatMulDNNLowPOp<uint8_t>);
+    Int8BatchMatMul,
+    DNNLOWP,
+    BatchMatMulDNNLowPOp<uint8_t>);
 
 } // namespace caffe2

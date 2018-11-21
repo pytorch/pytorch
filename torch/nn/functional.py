@@ -4,8 +4,6 @@ from __future__ import division
 import warnings
 import math
 import types
-from operator import mul
-from functools import reduce
 
 import torch
 from torch._C import _infer_size, _add_docstr
@@ -968,7 +966,9 @@ def _get_softmax_dim(name, ndim, stacklevel):
     return ret
 
 
+@torch._jit_internal.weak_script
 def softmin(input, dim=None, _stacklevel=3, dtype=None):
+    # type: (Tensor, Optional[int], int, Optional[int]) -> Tensor
     r"""Applies a softmin function.
 
     Note that :math:`\text{Softmin}(x) = \text{Softmax}(-x)`. See softmax definition for mathematical formula.
@@ -985,10 +985,14 @@ def softmin(input, dim=None, _stacklevel=3, dtype=None):
     """
     if dim is None:
         dim = _get_softmax_dim('softmin', input.dim(), _stacklevel)
-    if dtype is None:
-        return (-input).softmax(dim)
     else:
-        return (-input).softmax(dim, dtype=dtype)
+        dim = torch.jit._unwrap_optional(dim)
+    if dtype is None:
+        ret = (-input).softmax(dim)
+    else:
+        dtype = torch.jit._unwrap_optional(dtype)
+        ret = (-input).softmax(dim, dtype=dtype)
+    return ret
 
 
 @torch._jit_internal.weak_script
@@ -1032,6 +1036,7 @@ def softmax(input, dim=None, _stacklevel=3, dtype=None):
 
 
 def _sample_gumbel(shape, eps=1e-10, out=None):
+    # type: (Tensor, float, Optional[Tensor]) -> Tensor
     """
     Sample from Gumbel(0, 1)
 
@@ -1039,11 +1044,15 @@ def _sample_gumbel(shape, eps=1e-10, out=None):
     https://github.com/ericjang/gumbel-softmax/blob/3c8584924603869e90ca74ac20a6a03d99a91ef9/Categorical%20VAE.ipynb ,
     (MIT license)
     """
-    U = out.resize_(shape).uniform_() if out is not None else torch.rand(shape)
+    if out is None:
+        U = torch.rand(shape)
+    else:
+        U = torch.jit._unwrap_optional(out).resize_(shape).uniform_()
     return - torch.log(eps - torch.log(U + eps))
 
 
 def _gumbel_softmax_sample(logits, tau=1, eps=1e-10):
+    # type: (Tensor, float, float) -> Tensor
     """
     Draw a sample from the Gumbel-Softmax distribution
 
@@ -1058,6 +1067,7 @@ def _gumbel_softmax_sample(logits, tau=1, eps=1e-10):
 
 
 def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10):
+    # type: (Tensor, float, bool, float) -> Tensor
     r"""
     Sample from the Gumbel-Softmax distribution and optionally discretize.
 
@@ -1401,23 +1411,39 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
     return ret
 
 
+@torch._jit_internal.weak_script
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
                training=False, momentum=0.1, eps=1e-5):
+    # type: (Tensor, Tensor, Tensor, Optional[Tensor], Optional[Tensor], bool, float, float) -> Tensor
     r"""Applies Batch Normalization for each channel across a batch of data.
 
     See :class:`~torch.nn.BatchNorm1d`, :class:`~torch.nn.BatchNorm2d`,
     :class:`~torch.nn.BatchNorm3d` for details.
     """
     if training:
-        size = list(input.size())
-        if reduce(mul, size[2:], size[0]) == 1:
+        size = input.size()
+        # XXX: JIT script does not support the reduce from functools, and mul op is a
+        # builtin, which cannot be used as a value to a func yet, so rewrite this size
+        # check to a simple equivalent for loop
+        #
+        # TODO: make use of reduce like below when JIT is ready with the missing features:
+        # from operator import mul
+        # from functools import reduce
+        #
+        #   if reduce(mul, size[2:], size[0]) == 1
+        size_prods = size[0]
+        for i in range(len(size) - 2):
+            size_prods *= size[i + 2]
+        if size_prods == 1:
             raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
+
     return torch.batch_norm(
         input, weight, bias, running_mean, running_var,
         training, momentum, eps, torch.backends.cudnn.enabled
     )
 
 
+@torch._jit_internal.weak_script
 def instance_norm(input, running_mean=None, running_var=None, weight=None,
                   bias=None, use_input_stats=True, momentum=0.1, eps=1e-5):
     # type: (Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor], bool, float, float) -> Tensor  # noqa
@@ -1433,7 +1459,9 @@ def instance_norm(input, running_mean=None, running_var=None, weight=None,
     )
 
 
+@torch._jit_internal.weak_script
 def layer_norm(input, normalized_shape, weight=None, bias=None, eps=1e-5):
+    # type: (Tensor, List[int], Optional[Tensor], Optional[Tensor], float) -> Tensor
     r"""Applies Layer Normalization for last certain number of dimensions.
 
     See :class:`~torch.nn.LayerNorm` for details.
@@ -1442,7 +1470,9 @@ def layer_norm(input, normalized_shape, weight=None, bias=None, eps=1e-5):
                             torch.backends.cudnn.enabled)
 
 
+@torch._jit_internal.weak_script
 def group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
+    # type: (Tensor, int, Optional[Tensor], Optional[Tensor], float) -> Tensor
     r"""Applies Group Normalization for last certain number of dimensions.
 
     See :class:`~torch.nn.GroupNorm` for details.
@@ -1451,6 +1481,7 @@ def group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
                             torch.backends.cudnn.enabled)
 
 
+@torch._jit_internal.weak_script
 def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1.):
     # type: (Tensor, int, float, float, float) -> Tensor
     r"""Applies local response normalization over an input signal composed of
@@ -1565,9 +1596,7 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
         >>> output.backward()
     """
     if size_average is not None or reduce is not None:
-        _size_average = torch.jit._unwrap_optional(size_average)
-        _reduce = torch.jit._unwrap_optional(reduce)
-        reduction = _Reduction.legacy_get_string(_size_average, _reduce)
+        reduction = _Reduction.legacy_get_string(size_average, reduce)
     dim = input.dim()
     if dim < 2:
         raise ValueError('Expected 2 or more dimensions (got {})'.format(dim))
@@ -1644,10 +1673,12 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
         mask = target > 1
         loss[mask] += (target * torch.log(target) - target + 0.5 * torch.log(2 * math.pi * target))[mask]
     if reduction is 'none':
-        return loss
+        ret = loss
     if reduction is 'mean':
-        return torch.mean(loss)
-    return torch.sum(loss)
+        ret = torch.mean(loss)
+    else:
+        ret = torch.sum(loss)
+    return ret
 
 
 @torch._jit_internal.weak_script
@@ -1677,16 +1708,15 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
             specifying either of those two args will override :attr:`reduction`. Default: 'mean'
     """
     if size_average is not None or reduce is not None:
-        _size_average = torch.jit._unwrap_optional(size_average)
-        _reduce = torch.jit._unwrap_optional(reduce)
-        _reduction_enum = _Reduction.legacy_get_enum(_size_average, _reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        _reduction_enum = _Reduction.get_enum(reduction)
-    return torch.kl_div(input, target, _reduction_enum)
+        reduction_enum = _Reduction.get_enum(reduction)
+    return torch.kl_div(input, target, reduction_enum)
 
 
 def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-100,
                   reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, Optional[Tensor], Optional[bool], int, Optional[bool], str) -> Tensor
     r"""This criterion combines `log_softmax` and `nll_loss` in a single
     function.
 
@@ -1769,11 +1799,9 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
         >>> loss.backward()
     """
     if size_average is not None or reduce is not None:
-        _size_average = torch.jit._unwrap_optional(size_average)
-        _reduce = torch.jit._unwrap_optional(reduce)
-        _reduction_enum = _Reduction.legacy_get_enum(_size_average, _reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        _reduction_enum = _Reduction.get_enum(reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
     if not (target.size() == input.size()):
         warnings.warn("Using a target size ({}) that is different to the input size ({}) is deprecated. "
                       "Please ensure they have the same size.".format(target.size(), input.size()))
@@ -1786,11 +1814,13 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
         weight = weight.expand(new_size)
 
     return torch._C._nn.binary_cross_entropy(
-        input, target, weight, _reduction_enum)
+        input, target, weight, reduction_enum)
 
 
+@torch._jit_internal.weak_script
 def binary_cross_entropy_with_logits(input, target, weight=None, size_average=None,
                                      reduce=None, reduction='mean', pos_weight=None):
+    # type: (Tensor, Tensor, Optional[Tensor], Optional[bool], Optional[bool], str, Optional[Tensor]) -> Tensor
     r"""Function that measures Binary Cross Entropy between target and output
     logits.
 
@@ -1827,14 +1857,14 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=No
          >>> loss.backward()
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction = _Reduction.get_enum(reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
 
     if not (target.size() == input.size()):
         raise ValueError("Target size ({}) must be the same as input size ({})".format(target.size(), input.size()))
 
-    return torch.binary_cross_entropy_with_logits(input, target, weight, pos_weight, reduction)
+    return torch.binary_cross_entropy_with_logits(input, target, weight, pos_weight, reduction_enum)
 
 
 def _pointwise_loss(lambd, lambd_optimized, input, target, reduction='mean'):
@@ -1892,61 +1922,71 @@ def mse_loss(input, target, size_average=None, reduce=None, reduction='mean'):
     return _pointwise_loss(lambda a, b: (a - b) ** 2, torch._C._nn.mse_loss, input, target, reduction)
 
 
+@torch._jit_internal.weak_script
 def margin_ranking_loss(input1, input2, target, margin=0, size_average=None,
                         reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, Tensor, float, Optional[bool], Optional[bool], str) -> Tensor
     r"""margin_ranking_loss(input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MarginRankingLoss` for details.
     """  # noqa
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction = _Reduction.get_enum(reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
     if input1.dim() == 0 or input2.dim() == 0 or target.dim() == 0:
         raise RuntimeError(("margin_ranking_loss does not support scalars, got sizes: "
                             "input1: {}, input2: {}, target: {} ".format(input1.size(), input2.size(), target.size())))
-    return torch.margin_ranking_loss(input1, input2, target, margin, reduction)
+    return torch.margin_ranking_loss(input1, input2, target, margin, reduction_enum)
 
 
+@torch._jit_internal.weak_script
 def hinge_embedding_loss(input, target, margin=1.0, size_average=None,
                          reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, float, Optional[bool], Optional[bool], str) -> Tensor
     r"""hinge_embedding_loss(input, target, margin=1.0, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.HingeEmbeddingLoss` for details.
     """  # noqa
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction = _Reduction.get_enum(reduction)
-    return torch.hinge_embedding_loss(input, target, margin, reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
+    return torch.hinge_embedding_loss(input, target, margin, reduction_enum)
 
 
+@torch._jit_internal.weak_script
 def multilabel_margin_loss(input, target, size_average=None, reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
     r"""multilabel_margin_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MultiLabelMarginLoss` for details.
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction = _Reduction.get_enum(reduction)
-    return torch._C._nn.multilabel_margin_loss(input, target, reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
+    return torch._C._nn.multilabel_margin_loss(input, target, reduction_enum)
 
 
+@torch._jit_internal.weak_script
 def soft_margin_loss(input, target, size_average=None, reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
     r"""soft_margin_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.SoftMarginLoss` for details.
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction = _Reduction.get_enum(reduction)
-    return torch._C._nn.soft_margin_loss(input, target, reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
+    return torch._C._nn.soft_margin_loss(input, target, reduction_enum)
 
 
+@torch._jit_internal.weak_script
 def multilabel_soft_margin_loss(input, target, weight=None, size_average=None,
                                 reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, Optional[Tensor], Optional[bool], Optional[bool], str) -> Tensor
     r"""multilabel_soft_margin_loss(input, target, weight=None, size_average=None) -> Tensor
 
     See :class:`~torch.nn.MultiLabelSoftMarginLoss` for details.
@@ -1957,50 +1997,58 @@ def multilabel_soft_margin_loss(input, target, weight=None, size_average=None,
     loss = -(target * logsigmoid(input) + (1 - target) * logsigmoid(-input))
 
     if weight is not None:
-        loss = loss * weight
+        loss = loss * torch.jit._unwrap_optional(weight)
 
     loss = loss.sum(dim=1) / input.size(1)  # only return N loss values
 
     if reduction == 'none':
-        return loss
+        ret = loss
     elif reduction == 'mean':
-        return loss.mean()
+        ret = loss.mean()
     elif reduction == 'sum':
-        return loss.sum()
+        ret = loss.sum()
     else:
+        ret = input
         raise ValueError(reduction + " is not valid")
+    return ret
 
 
+@torch._jit_internal.weak_script
 def cosine_embedding_loss(input1, input2, target, margin=0, size_average=None,
                           reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, Tensor, float, Optional[bool], Optional[bool], str) -> Tensor
     r"""cosine_embedding_loss(input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.CosineEmbeddingLoss` for details.
     """  # noqa
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction = _Reduction.get_enum(reduction)
-    return torch.cosine_embedding_loss(input1, input2, target, margin, reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
+    return torch.cosine_embedding_loss(input1, input2, target, margin, reduction_enum)
 
 
+@torch._jit_internal.weak_script
 def multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None,
                       reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, int, int, Optional[Tensor], Optional[bool], Optional[bool], str) -> Tensor
     r"""multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None,
                           reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MultiMarginLoss` for details.
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction = _Reduction.get_enum(reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
     if p != 1 and p != 2:
         raise ValueError('only p == 1 and p == 2 supported')
-    if weight is not None and weight.dim() != 1:
-        raise ValueError('weight must be one-dimensional')
+    if weight is not None:
+        weight = torch.jit._unwrap_optional(weight)
+        if weight.dim() != 1:
+            raise ValueError('weight must be one-dimensional')
 
-    return torch._C._nn.multi_margin_loss(input, target, p, margin, weight, reduction)
+    return torch._C._nn.multi_margin_loss(input, target, p, margin, weight, reduction_enum)
 
 
 pixel_shuffle = _add_docstr(torch.pixel_shuffle, r"""
@@ -2234,7 +2282,9 @@ GRID_SAMPLE_PADDING_MODES = {
 }
 
 
+@torch._jit_internal.weak_script
 def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
+    # type: (Tensor, Tensor, str, str) -> Tensor
     r"""Given an :attr:`input` and a flow-field :attr:`grid`, computes the
     ``output`` using :attr:`input` values and pixel locations from :attr:`grid`.
 
@@ -2289,15 +2339,27 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
         output (Tensor): output Tensor
 
     """
-    if mode not in GRID_SAMPLE_INTERPOLATION_MODES:
+    if mode != 'bilinear' and mode != 'nearest':
         raise ValueError("nn.functional.grid_sample(): expected mode to be "
                          "'bilinear' or 'nearest', but got: '{}'".format(mode))
-    if padding_mode not in GRID_SAMPLE_PADDING_MODES:
+    if padding_mode != 'zeros' and padding_mode != 'border' and padding_mode != 'reflection':
         raise ValueError("nn.functional.grid_sample(): expected padding_mode "
                          "to be 'zeros', 'border', or 'reflection', "
                          "but got: '{}'".format(padding_mode))
-    return torch.grid_sampler(input, grid, GRID_SAMPLE_INTERPOLATION_MODES[mode],
-                              GRID_SAMPLE_PADDING_MODES[padding_mode])
+
+    if mode == 'bilinear':
+        mode_enum = 0
+    else:
+        mode_enum = 1
+
+    if padding_mode == 'zeros':
+        padding_mode_enum = 0
+    elif padding_mode == 'border':
+        padding_mode_enum = 1
+    else:
+        padding_mode_enum = 2
+
+    return torch.grid_sampler(input, grid, mode_enum, padding_mode_enum)
 
 
 def affine_grid(theta, size):
@@ -2316,7 +2378,9 @@ def affine_grid(theta, size):
     return vision.affine_grid_generator(theta, size)
 
 
+@torch._jit_internal.weak_script
 def pad(input, pad, mode='constant', value=0):
+    # type: (Tensor, List[int], str, float) -> Tensor
     r"""Pads tensor.
 
     Pading size:
@@ -2365,32 +2429,46 @@ def pad(input, pad, mode='constant', value=0):
     assert len(pad) % 2 == 0, 'Padding length must be divisible by 2'
     assert len(pad) // 2 <= input.dim(), 'Padding length too large'
     if mode == 'constant':
-        return _VF.constant_pad_nd(input, pad, value)
+        ret = _VF.constant_pad_nd(input, pad, value)
     else:
         assert value == 0, 'Padding mode "{}"" doesn\'t take in value argument'.format(mode)
         if input.dim() == 3:
             assert len(pad) == 2, '3D tensors expect 2 values for padding'
             if mode == 'reflect':
-                return torch._C._nn.reflection_pad1d(input, pad)
+                ret = torch._C._nn.reflection_pad1d(input, pad)
             elif mode == 'replicate':
-                return torch._C._nn.replication_pad1d(input, pad)
+                ret = torch._C._nn.replication_pad1d(input, pad)
+            else:
+                ret = input  # TODO: remove this when jit raise supports control flow
+                raise NotImplementedError
+
         elif input.dim() == 4:
             assert len(pad) == 4, '4D tensors expect 4 values for padding'
             if mode == 'reflect':
-                return torch._C._nn.reflection_pad2d(input, pad)
+                ret = torch._C._nn.reflection_pad2d(input, pad)
             elif mode == 'replicate':
-                return torch._C._nn.replication_pad2d(input, pad)
+                ret = torch._C._nn.replication_pad2d(input, pad)
+            else:
+                ret = input  # TODO: remove this when jit raise supports control flow
+                raise NotImplementedError
+
         elif input.dim() == 5:
             assert len(pad) == 6, '5D tensors expect 6 values for padding'
             if mode == 'reflect':
+                ret = input  # TODO: remove this when jit raise supports control flow
                 raise NotImplementedError
             elif mode == 'replicate':
-                return torch._C._nn.replication_pad3d(input, pad)
+                ret = torch._C._nn.replication_pad3d(input, pad)
+            else:
+                ret = input  # TODO: remove this when jit raise supports control flow
+                raise NotImplementedError
         else:
+            ret = input  # TODO: remove this when jit raise supports control flow
             raise NotImplementedError("Only 3D, 4D, 5D padding with non-constant padding are supported for now")
-
+    return ret
 
 # distance
+
 
 @torch._jit_internal.weak_script
 def pairwise_distance(x1, x2, p=2., eps=1e-6, keepdim=False):
@@ -2453,20 +2531,24 @@ Example::
 """)
 
 
+@torch._jit_internal.weak_script
 def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, swap=False, size_average=None,
                         reduce=None, reduction="mean"):
+    # type: (Tensor, Tensor, Tensor, float, float, float, bool, Optional[bool], Optional[bool], str) -> Tensor
     r"""
     See :class:`~torch.nn.TripletMarginLoss` for details
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction = _Reduction.get_enum(reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
     return torch.triplet_margin_loss(anchor, positive, negative, margin, p, eps,
-                                     swap, reduction)
+                                     swap, reduction_enum)
 
 
+@torch._jit_internal.weak_script
 def normalize(input, p=2, dim=1, eps=1e-12, out=None):
+    # type: (Tensor, float, int, float, Optional[Tensor]) -> Tensor
     r"""Performs :math:`L_p` normalization of inputs over specified dimension.
 
     For a tensor :attr:`input` of sizes :math:`(n_0, ..., n_{dim}, ..., n_k)`, each
@@ -2487,10 +2569,11 @@ def normalize(input, p=2, dim=1, eps=1e-12, out=None):
     """
     if out is None:
         denom = input.norm(p, dim, True).clamp(min=eps).expand_as(input)
-        return input / denom
+        ret = input / denom
     else:
         denom = input.norm(p, dim, True).clamp_(min=eps).expand_as(input)
-        return torch.div(input, denom, out=out)
+        ret = torch.div(input, denom, out=torch.jit._unwrap_optional(out))
+    return ret
 
 
 def assert_int_or_pair(arg, arg_name, message):

@@ -92,6 +92,9 @@ class ProcessGroupNCCL : public ProcessGroup {
     // The CUDA events tracking this work item on multiple CUDA devices
     std::vector<at::cuda::CUDAEvent> cudaEvents_;
 
+    // Tensors used for barrier op
+    std::vector<at::Tensor> barrierTensors_;
+
     friend class ProcessGroupNCCL;
   };
 
@@ -196,6 +199,9 @@ class ProcessGroupNCCL : public ProcessGroup {
 
   // ID of this process group
   std::string processGroupID_;
+
+  // Devices used from the last collective call
+  std::vector<at::Device> lastDevices_;
 
   // processGroupID tracking
   static std::mutex pgTrackingLock_;

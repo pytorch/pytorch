@@ -138,7 +138,6 @@ public:
   }
   bool isNone() const {
     return type()->kind() == TypeKind::NoneType;
-
   }
   size_t unique() const {
     return unique_;
@@ -170,6 +169,10 @@ public:
   // TODO: make this more const correct
   const use_list & uses() const {
     return uses_;
+  }
+
+  bool hasUses() const {
+    return !uses().empty();
   }
 
   TORCH_API void replaceFirstUseWith(Value * newValue);
@@ -836,9 +839,12 @@ public:
   TORCH_API Node * create(NodeKind kind, size_t num_outputs=1);
   TORCH_API Node * create(NodeKind kind, ArrayRef<Value*> inputs, size_t num_outputs=1);
 
+
+  TORCH_API Node* createNone(TypePtr typ); // value of None with type Optional[typ]
   TORCH_API Node* createUndefined();
   TORCH_API Node* createNoneGenerator();
   TORCH_API Node* createFusionGroup();
+  TORCH_API Node* createDifferentiableSubgraph();
   TORCH_API Node* createTuple(at::ArrayRef<Value*> values);
   TORCH_API Node* createTupleUnpack(Value * v);
   TORCH_API Node* createTupleIndex(Value * tup, int64_t index);
