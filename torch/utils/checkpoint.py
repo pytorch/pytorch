@@ -21,13 +21,18 @@ def check_backward_validity(inputs):
         warnings.warn("None of the inputs have requires_grad=True. Gradients will be None")
 
 
+# Global switch to toggle whether or not checkpointed passes stash and restore
+# the RNG state.  If True, any checkpoints making use of RNG should achieve deterministic
+# output compared to non-checkpointed passes.
+preserve_rng_state = True
+
+
 class CheckpointFunction(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, run_function, preserve_rng_state, *args):
+    def forward(ctx, run_function, *args):
         check_backward_validity(args)
         ctx.run_function = run_function
-        ctx.preserve_rng_state = preserve_rng_state
         if preserve_rng_state:
             # We can't know if the user will transfer some args from the host
             # to the device during their run_fn.  Therefore, we stash both
@@ -57,7 +62,7 @@ class CheckpointFunction(torch.autograd.Function):
         if not torch.autograd._is_checkpoint_valid():
             raise RuntimeError("Checkpointing is not compatible with .grad(), please use .backward() if possible")
         inputs = ctx.saved_tensors
-        if ctx.preserve_rng_state:
+        if preserve_rng_state:
             # Stash the surrounding rng state, and mimic the state that was
             # present at this time during forward.  If cuda was not initialized
             # at this time during the original forward, we assume that the imminent
@@ -70,7 +75,7 @@ class CheckpointFunction(torch.autograd.Function):
         detached_inputs = detach_variable(inputs)
         with torch.enable_grad():
             outputs = ctx.run_function(*detached_inputs)
-        if ctx.preserve_rng_state:
+        if preserve_rng_state:
             # Restore the surrounding rng state
             torch.set_rng_state(current_cpu_rng_state)
             if ctx.had_cuda_in_fwd:
@@ -82,7 +87,7 @@ class CheckpointFunction(torch.autograd.Function):
         return (None, None) + tuple(inp.grad for inp in detached_inputs)
 
 
-def checkpoint(function, *args, preserve_rng_state=False):
+def checkpoint(function, *args):
     r"""Checkpoint a model or part of the model
 
     Checkpointing works by trading compute for memory. Rather than storing all
@@ -114,15 +119,6 @@ def checkpoint(function, *args, preserve_rng_state=False):
         grads are needed for model inputs, otherwise the checkpointed part of the
         model won't have gradients.
 
-    .. warning:
-        Checkpointing is implemented by rerunning a forward-pass segment for
-        each checkpointed segment during backward.  This can result in running
-        states like the RNG state used for dropout to be advanced more than
-        they would be without checkpointing, which can cause checkpoints that
-        include dropout invocations to have non-deterministic output
-        compared to non-checkpointed passes.  Use ``preserve_rng_state`` if
-        bitwise accuracy is desired.
-
     Args:
         function: describes what to run in the forward pass of the model or
             part of the model. It should also know how to handle the inputs
@@ -130,18 +126,14 @@ def checkpoint(function, *args, preserve_rng_state=False):
             ``(activation, hidden)``, :attr:`function` should correctly use the
             first input as ``activation`` and the second input as ``hidden``
         args: tuple containing inputs to the :attr:`function`
-        preserve_rng_state (bool, optional, default=False): If ``True``, stashes
-            and restores the RNG state such that checkpointed segments making use of
-            the RNG state (via e.g. dropout) are bitwise accurate with non-checkpointed passes.
-            This can incur a moderate performance hit depending on the runtime of each segment.
 
     Returns:
         Output of running :attr:`function` on :attr:`*args`
     """
-    return CheckpointFunction.apply(function, preserve_rng_state, *args)
+    return CheckpointFunction.apply(function, *args)
 
 
-def checkpoint_sequential(functions, segments, *inputs, preserve_rng_state=False):
+def checkpoint_sequential(functions, segments, *inputs):
     r"""A helper function for checkpointing sequential models.
 
     Sequential models execute a list of modules/functions in order
@@ -167,10 +159,6 @@ def checkpoint_sequential(functions, segments, *inputs, preserve_rng_state=False
             functions (comprising the model) to run sequentially.
         segments: Number of chunks to create in the model
         inputs: tuple of Tensors that are inputs to :attr:`functions`
-        preserve_rng_state (bool, optional, default=False): If ``True``, stashes
-            and restores the RNG state such that checkpointed segments making use of
-            the RNG state (via e.g. dropout) are bitwise accurate with non-checkpointed passes.
-            This can incur a moderate performance hit depending on the runtime of each segment.
 
     Returns:
         Output of running :attr:`functions` sequentially on :attr:`*inputs`
@@ -196,8 +184,7 @@ def checkpoint_sequential(functions, segments, *inputs, preserve_rng_state=False
     end = -1
     for start in range(0, segment_size * (segments - 1), segment_size):
         end = start + segment_size - 1
-        inputs = checkpoint(run_function(start, end, functions), *inputs,
-                            preserve_rng_state=preserve_rng_state)
+        inputs = checkpoint(run_function(start, end, functions), *inputs)
         if not isinstance(inputs, tuple):
             inputs = (inputs,)
     return run_function(end + 1, len(functions) - 1, functions)(*inputs)
