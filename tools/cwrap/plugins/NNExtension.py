@@ -14,10 +14,11 @@ MODULE_HEAD = """
 // handle both the CUDA and ROCM cases.
 #if defined(USE_CUDA)
 #include <c10/cuda/CUDAGuard.h>
+using SpecializedDeviceGuard = CUDAGuard;
 #elif defined(USE_ROCM)
 #include <c10/hip/HIPGuard.h>
+using SpecializedDeviceGuard = HIPGuard;
 #endif
-
 """
 REGISTER_METHOD_TEMPLATE = Template('  {"$name", (PyCFunction)$name, METH_STATIC | METH_VARARGS, NULL},\n')
 
