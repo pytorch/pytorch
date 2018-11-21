@@ -4703,7 +4703,8 @@ Args:
     input (Tensor): the input tensor
     shifts (int or tuple of ints): The number of places by which the elements
         of the tensor are shifted. If shifts is a tuple, dims must be a tuple of
-        the same size, and each dimension will be rolled by corresponding value
+        the same size, and each dimension will be rolled by the corresponding
+        value
     dims (int or tuple of ints): Axis along which to roll
 
 Example::
@@ -4724,6 +4725,11 @@ Example::
             [5, 6],
             [7, 8],
             [1, 2]])
+    >>> torch.roll(x, shifts=(2, 1), dims=(0, 1))
+    tensor([[6, 5],
+            [8, 7],
+            [2, 1],
+            [4, 3]])
 """)
 
 add_docstr(torch.rot90,

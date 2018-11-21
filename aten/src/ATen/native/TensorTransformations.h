@@ -34,6 +34,7 @@ static inline void flip_check_errors(int64_t total_dims, int64_t flip_dims_size,
 }
 
 static inline Tensor roll_common(const Tensor& self, IntList shifts, IntList dims) {
+  AT_CHECK(shifts.size() > 0, "`shifts` required");
   if (dims.size() == 0 && shifts.size() == 1) {
     auto flattened = self.contiguous().view(self.numel());
     return roll(flattened, shifts[0], 0).view(self.sizes());
