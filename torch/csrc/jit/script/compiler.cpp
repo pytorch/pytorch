@@ -436,8 +436,8 @@ static inline bool isIntOrFloatUsedAsList(
   if (v_type != FloatType::get() && v_type != IntType::get())
     return false;
   auto arg_type = arg.type();
-  if (arg_type->cast<OptionalType>())
-    arg_type = arg_type->cast<OptionalType>()->getElementType();
+  //if (arg_type->cast<OptionalType>())
+    //arg_type = arg_type->cast<OptionalType>()->getElementType();
   auto list_type = arg_type->cast<ListType>();
   return list_type && list_type->getElementType() == v_type && arg.N();
 }
@@ -1856,7 +1856,7 @@ private:
       if (apply.attributes().size() > 0) {
         throw ErrorReport(loc) << "attribute takes no keyword arguments";
       }
-      TypePtr type = parseTypeFromExpr(apply.inputs()[0]).type;
+      TypePtr type = parseTypeFromExpr(apply.inputs()[0]);
       Value* expr = tryConvertToType(
           apply.range(),
           *graph,
@@ -2483,28 +2483,28 @@ const std::unordered_map<std::string, TypePtr> &ident_to_type_lut() {
   return map;
 }
 
-const std::unordered_map<std::string, std::function<TypeInfo(Subscript)>> &subscript_to_type_fns() {
-  static std::unordered_map<std::string, std::function<TypeInfo(Subscript)>> map = {
-    {"Tuple", [](Subscript subscript) -> TypeInfo {
+const std::unordered_map<std::string, std::function<TypePtr(Subscript)>> &subscript_to_type_fns() {
+  static std::unordered_map<std::string, std::function<TypePtr(Subscript)>> map = {
+    {"Tuple", [](Subscript subscript) -> TypePtr {
       std::vector<TypePtr> subscript_expr_types;
       for (auto expr : subscript.subscript_exprs()) {
-        subscript_expr_types.push_back(parseTypeFromExpr(expr).type);
+        subscript_expr_types.push_back(parseTypeFromExpr(expr));
       }
-      return TypeInfo(TupleType::create(subscript_expr_types));
+      return TupleType::create(subscript_expr_types);
     }},
-    {"List", [](Subscript subscript) -> TypeInfo {
-      if (subscript.subscript_exprs().size() != 1) {
-        throw ErrorReport(subscript) << " expected exactly one element type but found " << subscript.subscript_exprs().size();
-      }
-      auto elem_type = parseTypeFromExpr(*subscript.subscript_exprs().begin()).type;
-      return TypeInfo(ListType::create(elem_type));
-    }},
-    {"Optional", [](Subscript subscript) -> TypeInfo {
+    {"List", [](Subscript subscript) -> TypePtr {
       if (subscript.subscript_exprs().size() != 1) {
         throw ErrorReport(subscript) << " expected exactly one element type but found " << subscript.subscript_exprs().size();
       }
       auto elem_type = parseTypeFromExpr(*subscript.subscript_exprs().begin());
-      return TypeInfo(OptionalType::create(elem_type.type), elem_type.N);
+      return ListType::create(elem_type);
+    }},
+    {"Optional", [](Subscript subscript) -> TypePtr {
+      if (subscript.subscript_exprs().size() != 1) {
+        throw ErrorReport(subscript) << " expected exactly one element type but found " << subscript.subscript_exprs().size();
+      }
+      auto elem_type = parseTypeFromExpr(*subscript.subscript_exprs().begin());
+      return OptionalType::create(elem_type);
     }},
   };
   return map;
@@ -2573,14 +2573,9 @@ c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(Expr expr) {
   return std::pair<TypePtr, int32_t>(list_ptr, len_v);
 }
 
-TypeInfo parseTypeFromExpr(Expr expr) {
-  TypePtr type;
+TypePtr parseTypeFromExpr(Expr expr) {
   if (expr.kind() == TK_SUBSCRIPT) {
     auto subscript = Subscript(expr);
-    auto maybe_broad_list = handleBroadcastList(subscript);
-    if (maybe_broad_list) {
-      return TypeInfo(maybe_broad_list->first, maybe_broad_list->second);
-    }
     auto value_name = parseBaseTypeName(subscript.value());
     if (!value_name) {
       throw ErrorReport(subscript.value().range()) << "Subscripted type must be a type identifier";
@@ -2588,11 +2583,11 @@ TypeInfo parseTypeFromExpr(Expr expr) {
     if (!subscript_to_type_fns().count(*value_name)) {
       throw ErrorReport(subscript.range()) << "Unknown type constructor " << *value_name;
     }
-    return TypeInfo(subscript_to_type_fns().at(*value_name)(subscript));
+    return subscript_to_type_fns().at(*value_name)(subscript);
   } else if (auto name = parseBaseTypeName(expr)) {
     auto itr = ident_to_type_lut().find(*name);
     if (itr != ident_to_type_lut().end()) {
-      return TypeInfo(itr->second);
+      return itr->second;
     }
     throw ErrorReport(expr) << "Unknown type name " << *name;
   }
@@ -2600,18 +2595,28 @@ TypeInfo parseTypeFromExpr(Expr expr) {
                                   << " cannot be used in a type expression";
 }
 
-
 std::vector<Argument> parseArgsFromDecl(Decl decl, bool is_method) {
   std::vector<Argument> retval;
   size_t i = is_method ? 1 : 0;
   for (; i < decl.params().size(); ++i) {
     auto decl_arg = decl.params()[i];
 
-    TypeInfo typeInfo = parseTypeFromExpr(decl_arg.type());
+    TypePtr type;
+    c10::optional<int32_t> N;
+
+    //BroadcastList list can only appear at the argument level
+    if (auto maybe_broad_list = handleBroadcastList(decl_arg.type())) {
+      type = maybe_broad_list->first;
+      N = maybe_broad_list->second;
+    } else {
+      type = parseTypeFromExpr(decl_arg.type());
+      N = c10::nullopt;
+    }
+
     auto arg = Argument(
         decl_arg.ident().name(),
-        typeInfo.type,
-        typeInfo.N,
+        type,
+        N,
         /*default_value =*/c10::nullopt,
         /*kwarg_only =*/false);
     retval.push_back(arg);
@@ -2623,7 +2628,7 @@ std::vector<Argument> parseReturnsFromDecl(Decl decl) {
   JIT_ASSERT(decl.return_type().present());
   if (handleBroadcastList(decl.return_type().get()))
     throw ErrorReport(decl.return_type().range()) << "Broadcastable lists cannot appear as a return type";
-  auto parsed_type = parseTypeFromExpr(decl.return_type().get()).type;
+  auto parsed_type = parseTypeFromExpr(decl.return_type().get());
   if (auto tuple_type = parsed_type->cast<TupleType>()) {
     // Flatten a single return type of type Tuple into its constituent types
     std::vector<Argument> retval;

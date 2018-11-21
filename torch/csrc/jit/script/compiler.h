@@ -233,14 +233,7 @@ TORCH_API Value* emitBuiltinCall(
   // otherwise it will return nullptr if the builtin is not found.
   bool required);
 
-struct TypeInfo {
-  TypeInfo(TypePtr t, c10::optional<int32_t> n = c10::nullopt)
-      : type(t), N(n) {}
-  TypePtr type;
-  c10::optional<int32_t> N;
-};
-
-TORCH_API TypeInfo parseTypeFromExpr(Expr expr);
+TORCH_API TypePtr parseTypeFromExpr(Expr expr);
 
 } // namespace script
 } // namespace jit
