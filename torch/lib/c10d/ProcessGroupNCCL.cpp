@@ -491,7 +491,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
-    std::vector<at::Tensor>& inputTensors) {
+    std::vector<at::Tensor>& inputTensors,
+    const AllgatherOptions& opts) {
   if (outputTensors.size() != inputTensors.size()) {
     throw std::runtime_error("allgather: input and output size mismatch");
   }
@@ -562,7 +563,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
   return work;
 }
 
-std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier() {
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier(
+    const BarrierOptions& opts) {
   std::vector<at::Device> devices;
   if (lastDevices_.empty()) {
     // This means there is not yet a NCCL collective being called

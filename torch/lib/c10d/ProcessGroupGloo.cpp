@@ -738,7 +738,8 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
     std::vector<std::vector<at::Tensor>>& outputs,
-    std::vector<at::Tensor>& inputs) {
+    std::vector<at::Tensor>& inputs,
+    const AllgatherOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
     throw std::invalid_argument("ProcessGroupGloo::allgather: " + msg);
   };
@@ -1050,7 +1051,8 @@ class AsyncBarrierWork : public ProcessGroupGloo::AsyncWork {
 
 } // namespace
 
-std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::barrier() {
+std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::barrier(
+    const BarrierOptions& opts) {
   auto work = std::make_shared<AsyncBarrierWork>(contexts_[0], nextTag());
   enqueue(std::bind(AsyncWork::execute, work));
   return work;
