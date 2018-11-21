@@ -175,7 +175,7 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event, pin_fn):
         else:
             idx, batch = r
             try:
-                batch = pin_memory_batch(batch, pin_fn)
+                batch = pin_fn(batch)
             except Exception:
                 out_queue.put((idx, ExceptionWrapper(sys.exc_info())))
             else:
@@ -234,9 +234,7 @@ def default_collate(batch):
     raise TypeError((error_msg.format(type(batch[0]))))
 
 
-def pin_memory_batch(batch, pin_fn=None):
-    if pin_fn is not None:
-        return pin_fn(batch)
+def pin_memory_batch(batch):
     if isinstance(batch, torch.Tensor):
         return batch.pin_memory()
     elif isinstance(batch, string_classes):
@@ -617,7 +615,7 @@ class _DataLoaderIter(object):
             indices = next(self.sample_iter)  # may raise StopIteration
             batch = self.collate_fn([self.dataset[i] for i in indices])
             if self.pin_memory:
-                batch = pin_memory_batch(batch, self.pin_fn)
+                batch = self.pin_fn(batch)
             return batch
 
         # check if the next sample has already been generated
@@ -775,7 +773,7 @@ class DataLoader(object):
     __initialized = False
 
     def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None, batch_sampler=None,
-                 num_workers=0, collate_fn=default_collate, pin_memory=False, pin_fn=None,
+                 num_workers=0, collate_fn=default_collate, pin_memory=False, pin_fn=pin_memory_batch,
                  drop_last=False, timeout=0, worker_init_fn=None):
         self.dataset = dataset
         self.batch_size = batch_size
