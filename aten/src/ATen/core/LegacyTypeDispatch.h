@@ -38,6 +38,9 @@ struct CAFFE2_API LegacyTypeInitInterface {
   virtual void initCUDA() const {
     AT_ERROR("cannot use CUDA without ATen CUDA library");
   }
+  virtual void initHIP() const {
+    AT_ERROR("cannot use HIP without ATen HIP library");
+  }
   virtual void initComplex() const {
     AT_ERROR("cannot use complex without ATen Complex library");
   }
@@ -134,6 +137,10 @@ private:
     } else if (p == DeviceType::CUDA) {
       std::call_once(cuda_once, [] {
         getLegacyTypeInit().initCUDA();
+      });
+    } else if (p == DeviceType::HIP) {
+      std::call_once(cuda_once, [] {
+        getLegacyTypeInit().initHIP();
       });
     }
   }

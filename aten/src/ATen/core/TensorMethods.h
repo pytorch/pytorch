@@ -22,6 +22,10 @@ inline Tensor Tensor::cuda() const {
   return toType(type().cuda());
 }
 
+inline Tensor Tensor::hip() const {
+  return toType(type().hip());
+}
+
 inline Tensor & Tensor::copy_(const Tensor & src, bool non_blocking) {
   return type().copy_(*this, src, non_blocking);
 }
@@ -1274,6 +1278,15 @@ inline bool Tensor::is_cuda() const {
 
 inline bool is_cuda(Tensor self) {
   return self.is_cuda();
+}
+
+inline bool Tensor::is_hip() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->is_hip();
+}
+
+inline bool is_hip(Tensor self) {
+  return self.is_hip();
 }
 
 inline bool Tensor::is_sparse() const {

@@ -178,6 +178,9 @@ public:
   /// Returns if a `Tensor` has CUDA backend.
   bool is_cuda() const;
 
+  /// Returns if a `Tensor` has HIP backend.
+  bool is_hip() const;
+
   /// Returns if a `Tensor` has sparse backend.
   bool is_sparse() const;
 
@@ -234,6 +237,7 @@ public:
 
   Tensor cpu() const;
   Tensor cuda() const;
+  Tensor hip() const;
 
   // ~~~~~ Autograd API ~~~~~
 

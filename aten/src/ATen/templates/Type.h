@@ -59,6 +59,7 @@ struct CAFFE2_API Type {
   virtual Backend backend() const = 0;
   Layout layout() const noexcept { return layout_from_backend(backend()); }
   virtual bool is_cuda() const = 0;
+  virtual bool is_hip() const = 0;
   virtual bool is_sparse() const = 0;
   virtual bool is_distributed() const = 0;
   bool is_variable() const noexcept { return is_variable_; }
@@ -87,6 +88,9 @@ struct CAFFE2_API Type {
   }
   Type & cuda() const {
     return this->toBackend(at::backendToCUDA(this->backend()));
+  }
+  Type & hip() const {
+    return this->toBackend(at::backendToHIP(this->backend()));
   }
   // contiguous IDs for all types in the system
   // for external dispatch
