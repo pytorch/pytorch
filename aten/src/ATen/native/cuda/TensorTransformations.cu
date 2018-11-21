@@ -130,7 +130,7 @@ Tensor flip_cuda(const Tensor& self, IntList dims) {
 template <typename scalar_t>
 __global__
 void roll_cuda_kernel(scalar_t* in_tensor, scalar_t* out_tensor, int64_t N,
-                      int64_t roll_dim, int64_t shift, int64_t start,
+                      int64_t roll_dim, int64_t start,
                       int64_t size, int64_t stride, int64_t total_dims) {
   int64_t linear_index = blockIdx.x * blockDim.x + threadIdx.x;
   if (linear_index >= N) {
@@ -179,7 +179,7 @@ Tensor roll_cuda(const Tensor& self, IntList shifts, IntList dims) {
   AT_DISPATCH_ALL_TYPES_AND_HALF(in_tensor.type(), "roll_cuda", [&] {
     roll_cuda_kernel<<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
       in_tensor.data<scalar_t>(), out_tensor.data<scalar_t>(), N,
-      dim, shifts[0], start,
+      dim, start,
       size,
       in_tensor.stride(dim),
       total_dims);
