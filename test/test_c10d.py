@@ -961,14 +961,15 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             timeout=timedelta(seconds=0.5))
 
         # Wait on barrier
-        self.assertTrue(pg.barrier().wait())
+        pg.barrier().wait()
 
         # Sleep on one of the processes to trigger barrier timeout
         if self.rank == 0:
             time.sleep(0.6)
 
         # The barrier will now time output
-        self.assertFalse(pg.barrier().wait())
+        with self.assertRaisesRegex(RuntimeError, " (Timed out|closed) "):
+            pg.barrier().wait()
 
 
 class ProcessGroupNCCLTest(TestCase):

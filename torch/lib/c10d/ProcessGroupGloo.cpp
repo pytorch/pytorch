@@ -157,66 +157,13 @@ void initializeStreamsEvents(
 
 } // namespace
 
-bool ProcessGroupGloo::AsyncWork::isCompleted() {
-  return completed_;
-}
-
-bool ProcessGroupGloo::AsyncWork::isSuccess() const {
-  return eptr_ == nullptr;
-}
-
-void ProcessGroupGloo::AsyncWork::synchronize() {}
-
-bool ProcessGroupGloo::AsyncWork::wait() {
-  std::unique_lock<std::mutex> lock(m_);
-  while (!completed_) {
-    cv_.wait(lock);
-  }
-  auto success = isSuccess();
-  if (success) {
-    synchronize();
-  }
-  return success;
-}
-
-const std::exception& ProcessGroupGloo::AsyncWork::exception() const {
-  std::rethrow_exception(eptr_);
-}
-
-void ProcessGroupGloo::AsyncWork::finish(std::exception_ptr eptr) {
-  std::unique_lock<std::mutex> lock(m_);
-  completed_ = true;
-  eptr_ = eptr;
-  cv_.notify_all();
-}
-
 ProcessGroupGloo::SendWork::SendWork(
     at::Tensor& tensor,
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer)
     : tensor_(tensor), buffer_(std::move(buffer)) {}
 
-bool ProcessGroupGloo::SendWork::isCompleted() {
-  // No way to poll for completion yet
-  return true;
-}
-
-bool ProcessGroupGloo::SendWork::isSuccess() const {
-  // No way to fail yet
-  return true;
-}
-
-void ProcessGroupGloo::SendWork::synchronize() {
-  // CPU only, no need to synchronize
-  return;
-}
-
-bool ProcessGroupGloo::SendWork::wait() {
+void ProcessGroupGloo::SendWork::wait() {
   buffer_->waitSend();
-  return true;
-}
-
-const std::exception& ProcessGroupGloo::SendWork::exception() const {
-  throw std::runtime_error("no exception");
 }
 
 ProcessGroupGloo::RecvWork::RecvWork(
@@ -225,28 +172,8 @@ ProcessGroupGloo::RecvWork::RecvWork(
     int* srcRank)
     : tensor_(tensor), buffer_(std::move(buffer)), srcRank_(srcRank) {}
 
-bool ProcessGroupGloo::RecvWork::isCompleted() {
-  // No way to poll for completion yet
-  return true;
-}
-
-bool ProcessGroupGloo::RecvWork::isSuccess() const {
-  // No way to fail yet
-  return true;
-}
-
-void ProcessGroupGloo::RecvWork::synchronize() {
-  // CPU only, no need to synchronize
-  return;
-}
-
-bool ProcessGroupGloo::RecvWork::wait() {
+void ProcessGroupGloo::RecvWork::wait() {
   buffer_->waitRecv(srcRank_);
-  return true;
-}
-
-const std::exception& ProcessGroupGloo::RecvWork::exception() const {
-  throw std::runtime_error("no exception");
 }
 
 ProcessGroupGloo::Options::Options()
