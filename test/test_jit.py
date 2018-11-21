@@ -9928,10 +9928,7 @@ def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=()
 
 
 def add_nn_module_test(*args, **kwargs):
-    if 'module_name' in kwargs:
-        name = kwargs['module_name']
-    else:
-        name = kwargs['fullname']
+    name = kwargs.get('module_name', kwargs.get('fullname'))
 
     class_name = name.split("_")[0]
     module = getattr(torch.nn, class_name, None)
@@ -9944,7 +9941,7 @@ def add_nn_module_test(*args, **kwargs):
             constructor_args = []
         else:
             nn_module = getattr(torch.nn, name)
-            constructor_args = kwargs['constructor_args']
+            constructor_args = kwargs.get('constructor_args', ())
 
         # Construct a script module that passes arguments through
         # to self.submodule
@@ -9957,7 +9954,7 @@ def add_nn_module_test(*args, **kwargs):
             script = script_method_template.format(method_args, call)
 
             submodule_constants = []
-            if 'is_constant' in kwargs and kwargs['is_constant']:
+            if kwargs.get('is_constant'):
                 submodule_constants = ['submodule']
 
             # Create module to use the script method

@@ -598,6 +598,7 @@ class Softplus(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+    __constants__ = ['beta, threshold']
 
     def __init__(self, beta=1, threshold=20):
         super(Softplus, self).__init__()
