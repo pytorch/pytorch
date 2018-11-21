@@ -254,6 +254,31 @@ Tensor & leaky_relu_(Tensor & self, Scalar negative_slope) {
   return at::_thnn_leaky_relu_(self, negative_slope);
 }
 
+Tensor & log_sigmoid_out(Tensor & output, const Tensor & self) {
+  Tensor buffer = at::empty({0}, self.options());
+  return std::get<0>(at::_thnn_log_sigmoid_forward_out(output, buffer, self));
+}
+
+Tensor log_sigmoid(const Tensor & self) {
+  return std::get<0>(at::log_sigmoid_forward(self));
+}
+
+std::tuple<Tensor &,Tensor &> log_sigmoid_forward_out(Tensor & output, Tensor & buffer, const Tensor & self) {
+  return at::_thnn_log_sigmoid_forward_out(output, buffer, self);
+}
+
+std::tuple<Tensor,Tensor> log_sigmoid_forward(const Tensor & self) {
+  return at::_thnn_log_sigmoid_forward(self);
+}
+
+Tensor & log_sigmoid_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, const Tensor & buffer) {
+  return at::_thnn_log_sigmoid_backward_out(grad_input, grad_output, self, buffer);
+}
+
+Tensor log_sigmoid_backward(const Tensor & grad_output, const Tensor & self, const Tensor & buffer) {
+  return at::_thnn_log_sigmoid_backward(grad_output, self, buffer);
+}
+
 Tensor & rrelu_with_noise_out(Tensor & output, const Tensor & self, const Tensor & noise, Scalar lower, Scalar upper, bool training, Generator * generator) {
   return at::_thnn_rrelu_with_noise_out(output, self, noise, lower, upper, training, generator);
 }
