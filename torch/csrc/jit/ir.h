@@ -171,6 +171,10 @@ public:
     return uses_;
   }
 
+  bool hasUses() const {
+    return !uses().empty();
+  }
+
   TORCH_API void replaceFirstUseWith(Value * newValue);
 
   // Replaces all uses of this value with 'newValue'.

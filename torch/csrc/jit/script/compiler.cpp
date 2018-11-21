@@ -124,6 +124,21 @@ private:
   TypePtr type;
 };
 
+// we consider _N where N is a number, to be a non-meaningful name
+// and do not record it as a unique name. This allows python printing to
+// be able to export and import more consistently named graphs
+static bool meaningfulName(const std::string& name) {
+  if (name.size() == 0)
+    return false;
+  if (name[0] != '_')
+    return true;
+  for (size_t i = 1; i < name.size(); ++i) {
+    if (!isdigit(name[i]))
+      return true;
+  }
+  return false;
+}
+
 // Auxiliary data structure for desugaring variable binding into our always
 // explicitly scoped language as we descend down
 // nested control structures in the frontend (which themselves don't introduce
@@ -213,15 +228,23 @@ struct Environment {
   }
 
   SugaredValuePtr createCapturedInput(Value* orig, const std::string& name) {
+    // insert the captured input alphabetically in the capture list.
+    // this ensures consistency of the order of loop-carried dependencies
+    // even when the use in the loop is in a different order
+    size_t insert_pos = 0;
+    while (insert_pos < captured_inputs.size() && name > captured_inputs[insert_pos]) {
+      insert_pos++;
+    }
+    captured_inputs.insert(captured_inputs.begin() + insert_pos, name);
+
     // Create the input
-    Value* new_input = b->addInput()->setType(orig->type());
+    const size_t loop_carried_block_inputs_offset = 1;
+    Value* new_input = b->insertInput(loop_carried_block_inputs_offset + insert_pos)
+                           ->setType(orig->type());
 
     // Associate this name with this value
     auto sv = std::make_shared<SimpleValue>(new_input);
     value_table[name] = sv;
-
-    // List as a positional input
-    captured_inputs.push_back(name);
 
     return sv;
   }
@@ -266,8 +289,9 @@ struct Environment {
 
   void setSugaredVar(const SourceRange& loc, const std::string& name, SugaredValuePtr value) {
     Value* as_simple_value = asSimple(value);
-    if (as_simple_value && !as_simple_value->hasUniqueName())
+    if (as_simple_value && !as_simple_value->hasUniqueName() && meaningfulName(name)) {
       as_simple_value->setUniqueName(name);
+    }
     // prevent re-assignment involving any sugared values
     // any reassignment like:
     // a = ...
@@ -842,7 +866,10 @@ struct to_ir {
     for(;it != end; ++it) {
       auto& name = (*it).ident().name();
       // Add the input to the graph
-      Value *new_input = graph->addInput(name);
+      Value *new_input = graph->addInput();
+      if (meaningfulName(name)) {
+        new_input->setUniqueName(name);
+      }
       environment_stack->setVar((*it).ident().range(), name, new_input);
 
       // Record the type for the schema and set the Type on the Value*
