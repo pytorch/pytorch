@@ -350,29 +350,37 @@ def fractional_max_pool2d(input, kernel_size, output_size=None,
 
 
 @torch._jit_internal.weak_script
-def max_pool1d_with_indices(input, kernel_size, stride, padding=0,
+def max_pool1d_with_indices(input, kernel_size, stride=None, padding=0,
                             dilation=1, ceil_mode=False):
-    # type: (Tensor, BroadcastingList1[int], BroadcastingList1[int], int, int, bool) -> Tuple[Tensor, Tensor]
+    # type: (Tensor, BroadcastingList1[int], Optional[BroadcastingList1[int]], int, int, bool) -> Tuple[Tensor, Tensor]
     r"""Applies a 1D max pooling over an input signal composed of several input
     planes.
 
     See :class:`~torch.nn.MaxPool1d` for details.
     """
+    if stride is None:
+        _stride = torch.jit.annotate(List[int], [])
+    else:
+        _stride = torch.jit._unwrap_optional(stride)
     return torch.max_pool1d_with_indices(
-        input, kernel_size, stride, padding, dilation, ceil_mode)
+        input, kernel_size, _stride, padding, dilation, ceil_mode)
 
 
 @torch._jit_internal.weak_script
-def max_pool1d(input, kernel_size, stride, padding=0, dilation=1,
+def max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False):
-    # type: (Tensor, BroadcastingList1[int], BroadcastingList1[int], int, int, bool) -> Tensor
+    # type: (Tensor, BroadcastingList1[int], Optional[BroadcastingList1[int]], int, int, bool) -> Tensor
     r"""Applies a 1D max pooling over an input signal composed of several input
     planes.
 
     See :class:`~torch.nn.MaxPool1d` for details.
     """
+    if stride is None:
+        _stride = torch.jit.annotate(List[int], [])
+    else:
+        _stride = torch.jit._unwrap_optional(stride)
     return torch.max_pool1d_with_indices(
-        input, kernel_size, stride, padding, dilation, ceil_mode)[0]
+        input, kernel_size, _stride, padding, dilation, ceil_mode)[0]
 
 max_pool1d = torch._jit_internal.boolean_dispatch(
     arg_name='return_indices',
