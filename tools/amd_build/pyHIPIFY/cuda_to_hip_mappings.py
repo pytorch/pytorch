@@ -2282,6 +2282,8 @@ C10_MAPPINGS = collections.OrderedDict([
     ("cuda::set_device", ("hip::set_device", API_C10)),
     ("cuda::CUDAGuard", ("hip::HIPGuard", API_C10)),
     ("CUDAGuard", ("HIPGuard", API_C10)),
+    ("cuda::OptionalCUDAGuard", ("hip::OptionalHIPGuard", API_C10)),
+    ("OptionalCUDAGuard", ("OptionalHIPGuard", API_C10)),
     ("cuda::CUDAStream", ("hip::HIPStream", API_C10)),
     ("CUDAStream", ("HIPStream", API_C10)),
     ("cuda::getStreamFromPool", ("hip::getStreamFromPool", API_C10)),
