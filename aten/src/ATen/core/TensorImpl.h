@@ -467,7 +467,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     }
     const auto device_type = detail::computeDeviceType(tid);
     bool not_cpu = device_type != DeviceType::CPU;
-    return Device(device_type, not_cpu ? -1 : get_device());
+    return Device(device_type, not_cpu ? get_device() : -1);
   }
 
   Layout layout() const {
