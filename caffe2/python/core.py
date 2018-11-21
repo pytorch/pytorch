@@ -2430,11 +2430,9 @@ def InjectCrossDeviceCopies(net, blob_to_device=None, blob_remap=None,
 
                     def _gen_new_name(blob, device_option):
                         CPU = caffe2_pb2.CPU
-                        CUDA = caffe2_pb2.CUDA
-                        HIP = caffe2_pb2.HIP
                         if device_option.device_type == CPU:
                             suffix = '_cpu'
-                        elif device_option.device_type in {CUDA, HIP}:
+                        elif IsGPUDeviceType(device_option.device_type):
                             suffix = '_gpu_' + str(device_option.device_id)
                         else:
                             raise RuntimeError(

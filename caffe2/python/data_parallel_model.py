@@ -812,7 +812,7 @@ def ConvertNetForDevice(net, device=None):
     if device is None:
         device = scope.CurrentDeviceScope()
 
-    device_prefix = "gpu" if device.device_type == workspace.GpuDeviceType else "cpu"
+    device_prefix = "gpu" if core.IsGPUDeviceType(device.device_type) else "cpu"
 
     namescope = "{}_{}/".format(device_prefix, device.device_id)
     for op in mnet.Proto().op:
@@ -1589,7 +1589,7 @@ def _InferBlobDevice(model):
 
 def _IsGPUBlob(model, blob_name):
     if blob_name in model._blob_to_device:
-        return model._blob_to_device[blob_name].device_type == workspace.GpuDeviceType
+        return core.IsGPUDeviceType(model._blob_to_device[blob_name].device_type)
     else:
         blob_name = "{}_{}/{}".format(
             model._device_prefix, model._devices[0], blob_name
