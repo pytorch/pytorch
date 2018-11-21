@@ -209,7 +209,9 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
         "the GPU devices are not known");
   }
 
-  lastDevices_ = devices;
+  for (auto& device : devices) {
+    usedDeviceIdxs_.insert(device.index());
+  }
 
   if (devNCCLCommMap_.find(devicesKey) != devNCCLCommMap_.end()) {
     // Reuse the cached communicator if there is one.
@@ -564,7 +566,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier() {
   std::vector<at::Device> devices;
-  if (lastDevices_.empty()) {
+  if (usedDeviceIdxs_.empty()) {
     // This means there is not yet a NCCL collective being called
     // Here we have to use the best guesses and will use a single GPU to call
     // allreduce to achieve barrier.
@@ -574,7 +576,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier() {
     int16_t deviceIdx = static_cast<int16_t>(rank_ % numGPUs);
     devices.push_back(at::Device(at::DeviceType::CUDA, deviceIdx));
   } else {
-    devices = lastDevices_;
+    for (auto usedDeviceIdx : usedDeviceIdxs_) {
+      devices.push_back(at::Device(at::DeviceType::CUDA, usedDeviceIdx));
+    }
   }
 
   std::vector<at::Tensor> barrierTensors;
