@@ -22,6 +22,7 @@
 
 #include <c10/Device.h>
 #include <c10/Stream.h>
+#include <c10/cuda/CUDAGuard.h>
 
 namespace caffe2 {
 
@@ -84,7 +85,7 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
       gpu_streams.resize(stream_id + 1, nullptr);
     }
     if (!gpu_streams[stream_id]) {
-      DeviceGuard guard(gpu);
+      CUDAGuard guard(gpu);
       CUDA_ENFORCE(cudaStreamCreateWithFlags(
           &gpu_streams[stream_id], cudaStreamNonBlocking));
     }
@@ -99,7 +100,7 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
   }
 
   cublasHandle_t GetHandle(DeviceIndex gpu, StreamId stream_id) {
-    DeviceGuard guard(gpu);
+    CUDAGuard guard(gpu);
     vector<cublasHandle_t>& gpu_handles = cublas_handles_[gpu];
     if (gpu_handles.size() <= (unsigned)stream_id) {
       gpu_handles.resize(stream_id + 1, nullptr);
@@ -126,7 +127,7 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
   }
 
   cudnnHandle_t GetCudnnHandle(DeviceIndex gpu, StreamId stream_id) {
-    DeviceGuard guard(gpu);
+    CUDAGuard guard(gpu);
     vector<cudnnHandle_t>& gpu_handles = cudnn_handles_[gpu];
     if (gpu_handles.size() <= (unsigned)stream_id) {
       gpu_handles.resize(stream_id + 1, nullptr);
@@ -242,7 +243,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
 
   curandGenerator_t& curand_generator() {
     if (!curand_generator_) {
-      DeviceGuard guard(gpu_id_);
+      CUDAGuard guard(gpu_id_);
       CURAND_ENFORCE(
           curandCreateGenerator(&curand_generator_, CURAND_RNG_PSEUDO_DEFAULT));
       CURAND_ENFORCE(

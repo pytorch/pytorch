@@ -141,7 +141,7 @@ static void Caffe2InitializeCuda() {
       "). Increase that and recompile the caffe binary.");
 
   for (DeviceIndex i = 0; i < NumCudaDevices(); ++i) {
-    DeviceGuard g(i);
+    CUDAGuard g(i);
     // Enable peer access.
     const int peer_group = i / CAFFE2_CUDA_MAX_PEER_SIZE;
     const int peer_start = peer_group * CAFFE2_CUDA_MAX_PEER_SIZE;
