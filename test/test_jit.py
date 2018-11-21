@@ -24,6 +24,9 @@ import numpy as np
 import tempfile
 import shutil
 import warnings
+import math
+import types
+
 from common_methods_invocations import method_tests as autograd_method_tests
 from common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
@@ -219,32 +222,43 @@ class JitTestCase(TestCase):
         if not JitTestCase._restored_warnings:
             torch.jit.TracerWarning.ignore_lib_warnings()
             JitTestCase._restored_warnings = True
-        if os.environ.get('TORCH_JIT_TEST_PRETTY_PRINT', False):
-            torch._C._jit_set_emit_module_hook(self.emitModuleHook)
+        torch._C._jit_set_emit_module_hook(self.emitModuleHook)
 
     def tearDown(self):
         # needs to be cleared because python might be unloaded before
         # the callback gets destucted
         torch._C._jit_set_emit_module_hook(None)
 
+    @contextmanager
+    def disableModuleHook(self):
+        torch._C._jit_set_emit_module_hook(None)
+        yield None
+        torch._C._jit_set_emit_module_hook(self.emitModuleHook)
+
     def emitModuleHook(self, module):
         # disable the hook while we parse code, otherwise we will re-enter the hook
-        torch._C._jit_set_emit_module_hook(None)
-        for name in module._method_names():
-            graph = module._get_method(name).graph
-            try:
-                pp, constant_table = graph.python_print()
-            except RuntimeError as e:
-                if "could not export python function" not in str(e):
-                    raise
-                else:
-                    continue
+        with self.disableModuleHook():
+            for name in module._method_names():
+                graph = module._get_method(name).graph
+                try:
+                    pp, constant_table = graph.python_print()
+                except RuntimeError as e:
+                    if "could not export python function" not in str(e):
+                        raise
+                    else:
+                        continue
 
-            pp = "op_version_set = 0\n{}".format(pp)
-            sm = torch.jit.ScriptModule()
-            torch._C._jit_import_method(sm, pp, constant_table)
+                ppv = "op_version_set = 0\n{}".format(pp)
+                sm = torch.jit.ScriptModule()
+                torch._C._jit_import_method(sm, ppv, constant_table)
 
-        torch._C._jit_set_emit_module_hook(self.emitModuleHook)
+                pp2, _ = sm.script.graph.python_print()
+                if pp != pp2:
+                    print(graph)
+                    print(pp)
+                    print(sm.script.graph)
+                    print(pp2)
+                    self.assertMultiLineEqual(pp, pp2)
 
     def getExportImportCopy(self, m):
         # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
@@ -2874,6 +2888,27 @@ class TestScript(JitTestCase):
 
         return ge
 
+    def test_annoying_doubles(self):
+        mod = types.ModuleType("temp")
+        mod.inf = float("inf")
+        mod.ninf = float("-inf")
+        mod.nan = float("nan")
+
+        with self.disableModuleHook():
+            @torch.jit.script
+            def foo():
+                return math.pi, 0.1, mod.inf, mod.ninf, 2.225073858507201e-308, mod.nan
+
+            pp, table = foo.graph.python_print()
+            ppv = "op_version_set = 0\n{}".format(pp)
+            sm = torch.jit.ScriptModule()
+            torch._C._jit_import_method(sm, ppv, table)
+            r = foo()
+            r2 = sm.script()
+            # use precise assert, we are checking floating point details
+            self.assertTrue(r[:-1] == r2[:-1])
+            self.assertTrue(math.isnan(r[-1]) and math.isnan(r2[-1]))
+
     def test_type_annotate(self):
 
         def foo(a):
@@ -3433,7 +3468,7 @@ a")
                     y = torch.rand(1)
                 print(d, e, f, x, y, z)
             b = b - a
-            return a, b, c, x
+            return a, b, c, x, y
 
         self.checkScript(func, torch.tensor([1]))
         graph = torch.jit.script(func).graph
