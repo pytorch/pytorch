@@ -644,7 +644,7 @@ void THTensor_(arange)(THTensor *r_, accreal xmin, accreal xmax, accreal step) {
               , 2, "upper bound and larger bound inconsistent with step sign");
 
   double size_d = ceil(static_cast<double>(xmax - xmin) / step);
-  THArgCheck(size_d >= 0 && size_d <= static_cast<double>(__PTRDIFF_MAX__)
+  THArgCheck(size_d >= 0 && size_d <= static_cast<double>(PTRDIFF_MAX)
              , 1, "invalid size, possible overflow?");
   size = static_cast<ptrdiff_t>(size_d);
 

@@ -467,7 +467,7 @@ void THCTensor_(arange)(THCState* state, THCTensor *r_, accreal xmin, accreal xm
   THArgCheck(((step > 0) && (xmax >= xmin)) || ((step < 0) && (xmax <= xmin))
               , 2, "upper bound and larger bound inconsistent with step sign");
   double size_d = ceil(ScalarConvert<accreal, double>::to(xmax - xmin) / step);
-  THArgCheck(size_d >= 0 && size_d <= (double)__PTRDIFF_MAX__
+  THArgCheck(size_d >= 0 && size_d <= static_cast<double>(PTRDIFF_MAX)
               , 1, "invalid size, possible overflow?");
   ptrdiff_t size = static_cast<ptrdiff_t>(size_d);
 
