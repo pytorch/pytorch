@@ -68,12 +68,14 @@ Tensor multi_margin_loss_backward(const Tensor & grad_output, const Tensor & sel
                                   Scalar p, Scalar margin, const Tensor & weight, int64_t reduction) {
   return at::_thnn_multi_margin_loss_backward(grad_output, self, target, p, margin, weight, reduction);
 }
+
 Tensor & multilabel_margin_loss_out(Tensor & output, const Tensor & self, const Tensor & target, int64_t reduction) {
-  return at::_thnn_multilabel_margin_loss_out(output, self, target, reduction);
+  Tensor is_target = at::empty({0}, self.options());
+  return std::get<0>(at::multilabel_margin_loss_forward_out(output, is_target, self, target, reduction));
 }
 
 Tensor multilabel_margin_loss(const Tensor & self, const Tensor & target, int64_t reduction) {
-  return at::_thnn_multilabel_margin_loss(self, target, reduction);
+  return std::get<0>(at::multilabel_margin_loss_forward(self, target, reduction));
 }
 
 std::tuple<Tensor &,Tensor &> multilabel_margin_loss_forward_out(Tensor & output, Tensor & is_target, const Tensor & self, const Tensor & target, int64_t reduction) {
@@ -90,6 +92,56 @@ Tensor & multilabel_margin_loss_backward_out(Tensor & grad_input, const Tensor &
 
 Tensor multilabel_margin_loss_backward(const Tensor & grad_output, const Tensor & self, const Tensor & target, int64_t reduction, const Tensor & is_target) {
   return at::_thnn_multilabel_margin_loss_backward(grad_output, self, target, reduction, is_target);
+}
+
+Tensor & nll_loss_out(Tensor & output, const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index) {
+  Tensor total_weight = at::empty({0}, self.options());
+  return std::get<0>(at::nll_loss_forward_out(output, total_weight, self, target, weight, reduction, ignore_index));
+}
+
+Tensor nll_loss(const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index) {
+  return std::get<0>(at::nll_loss_forward(self, target, weight, reduction, ignore_index));
+}
+
+std::tuple<Tensor &,Tensor &> nll_loss_forward_out(Tensor & output, Tensor & total_weight, const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index) {
+  return at::_thnn_nll_loss_forward_out(output, total_weight, self, target, weight, reduction, ignore_index);
+}
+
+std::tuple<Tensor,Tensor> nll_loss_forward(const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index) {
+  return at::_thnn_nll_loss_forward(self, target, weight, reduction, ignore_index);
+}
+
+Tensor & nll_loss_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index, const Tensor & total_weight) {
+  return at::_thnn_nll_loss_backward_out(grad_input, grad_output, self, target, weight, reduction, ignore_index, total_weight);
+}
+
+Tensor nll_loss_backward(const Tensor & grad_output, const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index, const Tensor & total_weight) {
+  return at::_thnn_nll_loss_backward(grad_output, self, target, weight, reduction, ignore_index, total_weight);
+}
+
+Tensor & nll_loss2d_out(Tensor & output, const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index) {
+  Tensor total_weight = at::empty({0}, self.options());
+  return std::get<0>(at::nll_loss2d_forward_out(output, total_weight, self, target, weight, reduction, ignore_index));
+}
+
+Tensor nll_loss2d(const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index) {
+  return std::get<0>(at::nll_loss2d_forward(self, target, weight, reduction, ignore_index));
+}
+
+std::tuple<Tensor &,Tensor &> nll_loss2d_forward_out(Tensor & output, Tensor & total_weight, const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index) {
+  return at::_thnn_nll_loss2d_forward_out(output, total_weight, self, target, weight, reduction, ignore_index);
+}
+
+std::tuple<Tensor,Tensor> nll_loss2d_forward(const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index) {
+  return at::_thnn_nll_loss2d_forward(self, target, weight, reduction, ignore_index);
+}
+
+Tensor & nll_loss2d_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index, const Tensor & total_weight) {
+  return at::_thnn_nll_loss2d_backward_out(grad_input, grad_output, self, target, weight, reduction, ignore_index, total_weight);
+}
+
+Tensor nll_loss2d_backward(const Tensor & grad_output, const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index, const Tensor & total_weight) {
+  return at::_thnn_nll_loss2d_backward(grad_output, self, target, weight, reduction, ignore_index, total_weight);
 }
 
 Tensor & smooth_l1_loss_out(Tensor & output, const Tensor & self, const Tensor & target, int64_t reduction) {

@@ -3049,6 +3049,42 @@
 - func: multilabel_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction, Tensor is_target) -> Tensor
   python_module: nn
 
+- func: nll_loss_out(Tensor output, Tensor self, Tensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean, int64_t ignore_index=-100) -> Tensor
+  python_module: nn
+
+- func: nll_loss(Tensor self, Tensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean, int64_t ignore_index=-100) -> Tensor
+  python_module: nn
+
+- func: nll_loss_forward_out(Tensor output, Tensor total_weight, Tensor self, Tensor target, Tensor? weight, int64_t reduction, int64_t ignore_index) -> (Tensor, Tensor)
+  python_module: nn
+
+- func: nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int64_t reduction, int64_t ignore_index) -> (Tensor output, Tensor total_weight)
+  python_module: nn
+
+- func: nll_loss_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int64_t reduction, int64_t ignore_index, Tensor total_weight) -> Tensor
+  python_module: nn
+
+- func: nll_loss_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int64_t reduction, int64_t ignore_index, Tensor total_weight) -> Tensor
+  python_module: nn
+
+- func: nll_loss2d_out(Tensor output, Tensor self, Tensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean, int64_t ignore_index=-100) -> Tensor
+  python_module: nn
+
+- func: nll_loss2d(Tensor self, Tensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean, int64_t ignore_index=-100) -> Tensor
+  python_module: nn
+
+- func: nll_loss2d_forward_out(Tensor output, Tensor total_weight, Tensor self, Tensor target, Tensor? weight, int64_t reduction, int64_t ignore_index) -> (Tensor, Tensor)
+  python_module: nn
+
+- func: nll_loss2d_forward(Tensor self, Tensor target, Tensor? weight, int64_t reduction, int64_t ignore_index) -> (Tensor output, Tensor total_weight)
+  python_module: nn
+
+- func: nll_loss2d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int64_t reduction, int64_t ignore_index, Tensor total_weight) -> Tensor
+  python_module: nn
+
+- func: nll_loss2d_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int64_t reduction, int64_t ignore_index, Tensor total_weight) -> Tensor
+  python_module: nn
+
 - func: smooth_l1_loss_out(Tensor output, Tensor self, Tensor target, int64_t reduction=Reduction::Mean) -> Tensor
   python_module: nn
 
@@ -3128,6 +3164,24 @@
   python_module: nn
 
 - func: leaky_relu_(Tensor self, Scalar negative_slope=0.01) -> Tensor
+  python_module: nn
+
+- func: log_sigmoid_out(Tensor output, Tensor self) -> Tensor
+  python_module: nn
+
+- func: log_sigmoid(Tensor self) -> Tensor
+  python_module: nn
+
+- func: log_sigmoid_forward_out(Tensor output, Tensor buffer, Tensor self) -> (Tensor, Tensor)
+  python_module: nn
+
+- func: log_sigmoid_forward(Tensor self) -> (Tensor output, Tensor buffer)
+  python_module: nn
+
+- func: log_sigmoid_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, Tensor buffer) -> Tensor
+  python_module: nn
+
+- func: log_sigmoid_backward(Tensor grad_output, Tensor self, Tensor buffer) -> Tensor
   python_module: nn
 
 - func: rrelu_with_noise_out(Tensor output, Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=false, Generator* generator=nullptr) -> Tensor

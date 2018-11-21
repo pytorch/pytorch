@@ -30,14 +30,14 @@
     output: reduction != Reduction::None || self_->dim() == 0
     is_target: target_->dim() == 0
 
-- name: nll_loss(Tensor self, LongTensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean, int64_t ignore_index=-100)
+- name: _thnn_nll_loss(Tensor self, LongTensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean, int64_t ignore_index=-100)
   cname: ClassNLLCriterion
   buffers: [total_weight]
   scalar_check:
     output: reduction != Reduction::None || self_->dim() == 0
     total_weight: 'true'
 
-- name: nll_loss2d(Tensor self, LongTensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean, int64_t ignore_index=-100)
+- name: _thnn_nll_loss2d(Tensor self, LongTensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean, int64_t ignore_index=-100)
   cname: SpatialClassNLLCriterion
   buffers: [total_weight]
   scalar_check:
@@ -87,7 +87,7 @@
     output: 'false'
     grad_input: 'false'
 
-- name: log_sigmoid(Tensor self)
+- name: _thnn_log_sigmoid(Tensor self)
   cname: LogSigmoid
   buffers: [buffer]
   scalar_check:
