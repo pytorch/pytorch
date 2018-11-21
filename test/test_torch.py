@@ -927,7 +927,7 @@ class _TestTorchMixin(object):
             self.assertEqual(x.mean().item(), 16.0 / 6)
             self.assertEqual(x.mean(0), torch.FloatTensor([2.0, 2.5, 7.0 / 2]))
             self.assertEqual(x.mean(1), torch.FloatTensor([2.0 / 3, 14.0 / 3]))
-            self.assertEqual(x.mean(), x.mean((0,1)))
+            self.assertEqual(x.mean(), x.mean((0, 1)))
 
         for dtype in types:
             x = cast(torch.tensor(example, dtype=dtype))
@@ -1977,7 +1977,6 @@ class _TestTorchMixin(object):
         check_mean_dim(self._make_tensors((50, 50, 50), use_integral=False), 2)
         check_mean_dim(self._make_tensors((50, 50, 50), use_integral=False), (1, 2))
         check_mean_dim(self._make_tensors((50, 50, 50), use_integral=False), (1, -1))
-
 
     def test_sum_out(self):
         x = torch.rand(100, 100)
