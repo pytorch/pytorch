@@ -169,7 +169,7 @@ class TestCheckpoint(TestCase):
             state = torch.get_rng_state()
 
             out = phase1(inp)
-            out = checkpoint(run_fn, out, preserve_rng_state=True)
+            out = checkpoint(run_fn, out)
             out.sum().backward()
             grad_with_checkpointing = inp.grad
 
@@ -198,7 +198,7 @@ class TestCheckpoint(TestCase):
             state = torch.cuda.get_rng_state()
 
             out = phase1(inp)
-            out = checkpoint(run_fn, out, preserve_rng_state=True)
+            out = checkpoint(run_fn, out)
             out.sum().backward()
             grad_with_checkpointing = inp.grad
 
