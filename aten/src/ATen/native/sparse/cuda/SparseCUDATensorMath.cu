@@ -515,8 +515,12 @@ __global__ void _sparse_sum_backward_cuda_kernel(
 }
 
 Tensor _sparse_sum_backward_cuda(const Tensor& grad, const SparseTensor& input, IntList dims_to_sum, bool keepdim) {
-  AT_CHECK(grad.is_cuda(), "sparse_sum_backward_cuda: expected 'grad' to be CUDA tensor, but got CPU tensor");
-  AT_CHECK(input.is_cuda(), "sparse_sum_backward_cuda: expected 'input' to be CUDA tensor, but got CPU tensor");
+  AT_CHECK(grad.is_cuda(), "_sparse_sum_backward_cuda: expected 'grad' to be CUDA tensor, but got CPU tensor");
+  AT_CHECK(input.is_cuda(), "_sparse_sum_backward_cuda: expected 'input' to be CUDA tensor, but got CPU tensor");
+
+  if (input._nnz() == 0) {
+    return input.to(grad.type());
+  }
 
   const int64_t input_dim = input.dim();
   auto dims_to_sum_b = dim_list_to_bitset(dims_to_sum, input_dim);
@@ -548,7 +552,7 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad, const SparseTensor& input, 
   const bool sum_sparse_dim = (sparse_dims_to_sum_size > 0);
 
   if (sum_all_sparse_dim) {
-    AT_CHECK(!grad.is_sparse(), "sparse_sum_backward_cuda: expected grad Tensor to be dense since all sparse dims are summed");
+    AT_CHECK(!grad.is_sparse(), "_sparse_sum_backward_cuda: expected grad Tensor to be dense since all sparse dims are summed");
     auto grad_input_values = grad;
     if (keepdim) {
       for (int64_t i = dims_to_sum_v.size()-1; i >= 0; i--) {
@@ -566,8 +570,8 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad, const SparseTensor& input, 
     return at::_sparse_coo_tensor_with_dims_and_tensors(input_sparse_dim, input_dense_dim, input_sizes, input_indices.clone(), grad_input_values,  input.options().dtype(grad.dtype())); // convert to grad dtype
   }
   else {
-    AT_CHECK(grad.is_sparse(), "sparse_sum_backward_cuda: expected grad Tensor to be sparse, but got dense");
-    AT_CHECK(grad.is_coalesced(), "sparse_sum_backward_cuda: expected grad Tensor has to be coalesced, but got uncoalesced");
+    AT_CHECK(grad.is_sparse(), "_sparse_sum_backward_cuda: expected grad Tensor to be sparse, but got dense");
+    AT_CHECK(grad.is_coalesced(), "_sparse_sum_backward_cuda: expected grad Tensor to be coalesced, but got uncoalesced");
     LongTensor grad_indices = grad._indices();
     Tensor grad_values = grad._values();
     const int64_t grad_sparse_dim = grad.sparse_dim();
@@ -625,7 +629,7 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad, const SparseTensor& input, 
       int64_t total_threads = input_nnz;
       const dim3 block = dim3(std::min(static_cast<int64_t>(cuda::getApplyBlock().x), total_threads));
       dim3 grid;
-      AT_CHECK(cuda::getApplyGrid(total_threads, grid, curDevice), "sparse_sum_backward_cuda: input too large or too many dimensions");
+      AT_CHECK(cuda::getApplyGrid(total_threads, grid, curDevice), "_sparse_sum_backward_cuda: input too large or too many dimensions");
 
       auto grad_indices_ti = getTensorInfo<int64_t, int64_t>(grad_indices_1D);
       auto input_indices_ti = getTensorInfo<int64_t, int64_t>(input_indices_1D);

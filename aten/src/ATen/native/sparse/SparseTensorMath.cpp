@@ -843,8 +843,12 @@ Tensor _sparse_sum(const SparseTensor& input, IntList dims_to_sum, bool keepdim,
   return at::_sparse_sum(input.to(dtype), dims_to_sum, keepdim);
 }
 
-Tensor _sparse_sum(const SparseTensor& input, IntList dims_to_sum, bool keepdim) {
-  AT_CHECK(input.is_coalesced(), "sparse_sum: sparse_sum doesn't support uncoalesced SparseTensor");
+Tensor _sparse_sum(const SparseTensor& _input, IntList dims_to_sum, bool keepdim) {
+  // AT_CHECK(input.is_coalesced(), "_sparse_sum: sparse_sum doesn't support uncoalesced SparseTensor");
+  auto input = _input.coalesce();
+  if (input._nnz() == 0) {
+    return input._values().sum();
+  }
 
   const int64_t input_dim = input.dim();
   auto dims_to_sum_b = dim_list_to_bitset(dims_to_sum, input_dim);
@@ -874,12 +878,7 @@ Tensor _sparse_sum(const SparseTensor& input, IntList dims_to_sum, bool keepdim)
   // new values
   Tensor new_values;
   if (sum_dense_dim) {
-    new_values = values.sum(dense_dims_to_sum_v);
-    if (keepdim) {
-      auto new_values_size = values.sizes().vec();
-      for (auto d : dense_dims_to_sum_v) new_values_size[d] = 1;
-      new_values = new_values.view(new_values_size);
-    }
+    new_values = values.sum(dense_dims_to_sum_v, keepdim);
   }
   else {
     new_values = values.clone();
@@ -895,7 +894,7 @@ Tensor _sparse_sum(const SparseTensor& input, IntList dims_to_sum, bool keepdim)
     }
     return new_values;
   }
-  else {
+  else { // !sum_all_sparse_dim
     // new indices
     LongTensor new_indices;
     if (sparse_dims_to_sum_size == 0) {
@@ -904,23 +903,16 @@ Tensor _sparse_sum(const SparseTensor& input, IntList dims_to_sum, bool keepdim)
     else {
       if (keepdim) {
         new_indices = at::zeros_like(indices);
-        if (!sum_all_sparse_dim) {
-          for (int64_t d = 0; d < sparse_dim; d++) {
-            if (!dims_to_sum_b[d]) new_indices[d].copy_(indices[d]);
-          }
+        for (int64_t d = 0; d < sparse_dim; d++) {
+          if (!dims_to_sum_b[d]) new_indices[d].copy_(indices[d]);
         }
       }
       else {
-        if (sum_all_sparse_dim) {
-          new_indices = at::zeros({1, input._nnz()}, indices.options());
-        }
-        else {
-          new_indices = at::empty({sparse_dim - sparse_dims_to_sum_size, input._nnz()}, indices.options());
-          for (int64_t i = 0; i < dims_to_keep_v.size(); i++) {
-            int64_t d = dims_to_keep_v[i];
-            if (d < sparse_dim) new_indices[i].copy_(indices[d]);
-            else break;
-          }
+        new_indices = at::empty({sparse_dim - sparse_dims_to_sum_size, input._nnz()}, indices.options());
+        for (int64_t i = 0; i < dims_to_keep_v.size(); i++) {
+          int64_t d = dims_to_keep_v[i];
+          if (d < sparse_dim) new_indices[i].copy_(indices[d]);
+          else break;
         }
       }
     }
@@ -987,8 +979,12 @@ Tensor _sparse_sum(const SparseTensor& input, IntList dims_to_sum, bool keepdim)
 // - grad.values might have zeros
 // --------------------------------------------------------------------
 Tensor _sparse_sum_backward_cpu(const Tensor& grad, const SparseTensor& input, IntList dims_to_sum, bool keepdim) {
-  AT_CHECK(!grad.is_cuda(), "sparse_sum_backward_cpu: expected 'grad' to be CPU tensor, but got CUDA tensor");
-  AT_CHECK(!input.is_cuda(), "sparse_sum_backward_cpu: expected 'input' to be CPU tensor, but got CUDA tensor");
+  AT_CHECK(!grad.is_cuda(), "_sparse_sum_backward_cpu: expected 'grad' to be CPU tensor, but got CUDA tensor");
+  AT_CHECK(!input.is_cuda(), "_sparse_sum_backward_cpu: expected 'input' to be CPU tensor, but got CUDA tensor");
+
+  if (input._nnz() == 0) {
+    return input.to(grad.type());
+  }
 
   const int64_t input_dim = input.dim();
   auto dims_to_sum_b = dim_list_to_bitset(dims_to_sum, input_dim);
@@ -1020,7 +1016,7 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad, const SparseTensor& input, I
   const bool sum_sparse_dim = (sparse_dims_to_sum_size > 0);
 
   if (sum_all_sparse_dim) {
-    AT_CHECK(!grad.is_sparse(), "sparse_sum_backward_cpu: expected grad Tensor has to be dense since all sparse dims are summed");
+    AT_CHECK(!grad.is_sparse(), "_sparse_sum_backward_cpu: expected grad Tensor to be dense since all sparse dims are summed");
     auto grad_input_values = grad;
     if (keepdim) {
       for (int64_t i = dims_to_sum_v.size()-1; i >= 0; i--) {
@@ -1039,8 +1035,8 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad, const SparseTensor& input, I
     return at::_sparse_coo_tensor_with_dims_and_tensors(input_sparse_dim, input_dense_dim, input_sizes, input_indices.clone(), grad_input_values, input.options().dtype(grad.dtype())); // convert to grad dtype
   }
   else {
-    AT_CHECK(grad.is_sparse(), "sparse_sum_backward_cpu: expected grad Tensor to be sparse, but got dense");
-    AT_CHECK(grad.is_coalesced(), "sparse_sum_backward_cpu: expected grad Tensor has to be coalesced, but got uncoalesced");
+    AT_CHECK(grad.is_sparse(), "_sparse_sum_backward_cpu: expected grad Tensor to be sparse, but got dense");
+    AT_CHECK(grad.is_coalesced(), "_sparse_sum_backward_cpu: expected grad Tensor to be coalesced, but got uncoalesced");
     LongTensor grad_indices = grad._indices();
     Tensor grad_values = grad._values();
     const int64_t grad_sparse_dim = grad.sparse_dim();
