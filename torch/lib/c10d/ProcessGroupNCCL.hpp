@@ -35,6 +35,9 @@ namespace c10d {
 // return true since ProcessGroupNCCL is single threaded. Every single NCCL
 // or CUDA failure will simply raise std::runtime_error.
 //
+// Therefore, WorkNCCL::exception() is not supported since isSuccess() always
+// returns true.
+//
 // Also note that WorkNCCL::finishedGPUExecution() is a helper function only
 // provided by ProcessGroupNCCL to check if the NCCL operation of WorkNCCL has
 // finished execution on the GPU (not just scheduled).
@@ -64,18 +67,18 @@ class ProcessGroupNCCL : public ProcessGroup {
     // Non-blocking operation.
     bool isCompleted() override;
 
-    // Will always return true.
-    bool isSuccess() const override;
+    // Same as calling synchronize() for NCCL work.
+    void wait() override;
 
-    // Will always throw because it should not be called (isSuccess() -> true).
-    std::exception_ptr exception() const override;
+    // Will always return true
+    bool isSuccess() const override;
 
     // Let current stream wait on the completing of the NCCL work
     // Throws on exceptions. Non-blocking operation.
     void synchronize() override;
 
-    // Same as calling synchronize() for NCCL work.
-    void wait() override;
+    // Will always throw because it should not be called (isSuccess() -> true).
+    std::exception_ptr exception() const override;
 
     // Helper function that checks if the NCCL kernels have finished
     // execution on the GPUs
