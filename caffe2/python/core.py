@@ -82,6 +82,10 @@ def IsOperatorWithEngine(op_type, engine):
     return C.op_registry_key(op_type, engine) in _REGISTERED_OPERATORS
 
 
+def IsGPUDeviceType(device_type):
+    return device_type in {caffe2_pb2.CUDA, caffe2_pb2.HIP}
+
+
 def DeviceOption(
     device_type,
     device_id=0,
@@ -2280,12 +2284,13 @@ def remap_input(op, blob_name_remapping):
 
 def copy_func_between_devices(src, dst):
     CPU = caffe2_pb2.CPU
-    GPU = workspace.GpuDeviceType
+    is_src_gpu = IsGPUDeviceType(src.device_type)
+    is_dst_gpu = IsGPUDeviceType(dst.device_type)
 
     if src.device_type == CPU and dst.device_type == CPU:
         return None
 
-    if src.device_type == GPU and dst.device_type == GPU:
+    if is_src_gpu and is_dst_gpu:
         if src.device_id == dst.device_id:
             return None
         else:
@@ -2294,13 +2299,13 @@ def copy_func_between_devices(src, dst):
                     return net.Copy(*args, **kw)
             return fun
 
-    if src.device_type == GPU and dst.device_type == CPU:
+    if is_src_gpu and dst.device_type == CPU:
         def fun(net, *args, **kw):
             with DeviceScope(src):
                 return net.CopyGPUToCPU(*args, **kw)
         return fun
 
-    if src.device_type == CPU and dst.device_type == GPU:
+    if src.device_type == CPU and is_dst_gpu:
         def fun(net, *args, **kw):
             with DeviceScope(dst):
                 return net.CopyCPUToGPU(*args, **kw)

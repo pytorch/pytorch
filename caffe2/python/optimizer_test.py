@@ -434,11 +434,12 @@ class TestYellowFin(OptimizerTestBase, TestCase):
                 )
 
     @unittest.skip("Results might vary too much. Only for individual use.")
-    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
+    @unittest.skipIf(not workspace.has_gpu_support
+                    and not workspace.has_hip_support, "No gpu support")
     def test_caffe2_gpu_vs_numpy(self):
         n_dim = 1000000
         n_iter = 50
-        gpu_device_opt = core.DeviceOption(caffe2_pb2.CUDA, 0)
+        gpu_device_opt = core.DeviceOption(workspace.GpuDeviceType, 0)
         with core.DeviceScope(gpu_device_opt):
             for zero_debias in [False, True]:
                 for grad_coef in [1.0, 0.1, 0.01]:
