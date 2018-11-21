@@ -824,6 +824,7 @@ inline bool isSupportedListElementType(TypePtr type) {
 }
 
 static FunctionSchema extractSchemaFromDef(const Def &def, bool is_method);
+TypePtr parseTypeFromExpr(Expr expr);
 
 struct to_ir {
   to_ir(

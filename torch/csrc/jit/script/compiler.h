@@ -232,9 +232,6 @@ TORCH_API Value* emitBuiltinCall(
   // if true, emitBuiltinCall will throw an exception if this builtin does not exist,
   // otherwise it will return nullptr if the builtin is not found.
   bool required);
-
-TORCH_API TypePtr parseTypeFromExpr(Expr expr);
-
 } // namespace script
 } // namespace jit
 } // namespace torch
