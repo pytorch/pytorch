@@ -7,8 +7,11 @@ namespace caffe2 {
 template <>
 bool RMACRegionsOp<CPUContext>::RunOnDevice() {
   const auto& X = Input(0); // Input tensor
-  auto* output = Output(0); // RoIs
-  output->Resize(0, 5); // [batch_id x1 y1 x2 y2] format of ROIPoolOp
+                            // RoIs
+  auto* output = Output(
+      0,
+      {0, 5},
+      at::dtype<float>()); // [batch_id x1 y1 x2 y2] format of ROIPoolOp
 
   if (X.numel() == 0) {
     return true;

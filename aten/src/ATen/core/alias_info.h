@@ -1,8 +1,8 @@
 #pragma once
 #include <unordered_set>
 #include <vector>
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/interned_strings.h"
+#include <ATen/core/interned_strings.h>
+#include "c10/util/Exception.h"
 
 namespace c10 {
 class AliasInfo {
@@ -31,7 +31,7 @@ class AliasInfo {
   }
 
   Symbol set() const {
-    JIT_ASSERT(sets_.size() == 1);
+    AT_ASSERT(sets_.size() == 1);
     return *sets_.begin();
   }
 

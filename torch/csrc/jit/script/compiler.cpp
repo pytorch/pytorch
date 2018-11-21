@@ -9,6 +9,7 @@
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/script/builtin_functions.h"
+#include "torch/csrc/jit/hooks_for_testing.h"
 
 #include "torch/csrc/jit/constants.h"
 
@@ -123,6 +124,21 @@ private:
   TypePtr type;
 };
 
+// we consider _N where N is a number, to be a non-meaningful name
+// and do not record it as a unique name. This allows python printing to
+// be able to export and import more consistently named graphs
+static bool meaningfulName(const std::string& name) {
+  if (name.size() == 0)
+    return false;
+  if (name[0] != '_')
+    return true;
+  for (size_t i = 1; i < name.size(); ++i) {
+    if (!isdigit(name[i]))
+      return true;
+  }
+  return false;
+}
+
 // Auxiliary data structure for desugaring variable binding into our always
 // explicitly scoped language as we descend down
 // nested control structures in the frontend (which themselves don't introduce
@@ -212,15 +228,23 @@ struct Environment {
   }
 
   SugaredValuePtr createCapturedInput(Value* orig, const std::string& name) {
+    // insert the captured input alphabetically in the capture list.
+    // this ensures consistency of the order of loop-carried dependencies
+    // even when the use in the loop is in a different order
+    size_t insert_pos = 0;
+    while (insert_pos < captured_inputs.size() && name > captured_inputs[insert_pos]) {
+      insert_pos++;
+    }
+    captured_inputs.insert(captured_inputs.begin() + insert_pos, name);
+
     // Create the input
-    Value* new_input = b->addInput()->setType(orig->type());
+    const size_t loop_carried_block_inputs_offset = 1;
+    Value* new_input = b->insertInput(loop_carried_block_inputs_offset + insert_pos)
+                           ->setType(orig->type());
 
     // Associate this name with this value
     auto sv = std::make_shared<SimpleValue>(new_input);
     value_table[name] = sv;
-
-    // List as a positional input
-    captured_inputs.push_back(name);
 
     return sv;
   }
@@ -265,8 +289,9 @@ struct Environment {
 
   void setSugaredVar(const SourceRange& loc, const std::string& name, SugaredValuePtr value) {
     Value* as_simple_value = asSimple(value);
-    if (as_simple_value && !as_simple_value->hasUniqueName())
+    if (as_simple_value && !as_simple_value->hasUniqueName() && meaningfulName(name)) {
       as_simple_value->setUniqueName(name);
+    }
     // prevent re-assignment involving any sugared values
     // any reassignment like:
     // a = ...
@@ -433,6 +458,45 @@ inline bool convertibleToList(TypePtr type, TypePtr list_type_) {
   return false;
 }
 
+// applies implict conversion from value trying to turn it into type concrete_type
+// it succeeds if the return_value->isSubclassOf(concrete_type)
+Value* tryConvertToType(
+    const SourceRange& loc,
+    Graph& graph,
+    TypePtr concrete_type,
+    Value* value,
+    bool convert_tensors_to_nums) {
+  // Allow homogeneous tuples to be casted implicitly to lists of appropriate
+  // types
+  if (convertibleToList(value->type(), concrete_type) &&
+      value->type()->kind() == TypeKind::TupleType) {
+    auto unpacked = createTupleUnpack(value);
+    auto elem_type = concrete_type->expect<ListType>()->getElementType();
+    value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
+  }
+
+  if (value->type()->isSubtypeOf(NoneType::get()) && !concrete_type->isSubtypeOf(NoneType::get())){
+    if (concrete_type->isSubtypeOf(GeneratorType::get())) {
+      value = graph.insertNode(graph.createNoneGenerator())->output();
+    } else if (concrete_type->isSubtypeOf(OptionalType::ofTensor())) {
+      // create undefined tensor when None pass to a optional[tensor] formal arg
+      value = graph.insertNode(graph.createUndefined())->output();
+    } else if (auto optional_type = concrete_type->cast<OptionalType>()) {
+      value = graph.insertNode(graph.createNone(optional_type->getElementType()))->output();
+    }
+  }
+
+  //implicit conversion of tensors to scalars
+  if(convert_tensors_to_nums && concrete_type->isSubtypeOf(NumberType::get())
+      && value->type()->isSubtypeOf(DynamicType::get())) {
+      auto n = graph.createImplicitTensorToNum(concrete_type, value);
+      value = graph.insertNode(n)
+        ->setSourceLocation(std::make_shared<SourceRange>(loc))
+        ->output();
+  }
+  return value;
+}
+
 Value* tryMatchArgument(
     const Argument& arg,
     Graph& graph,
@@ -462,32 +526,7 @@ Value* tryMatchArgument(
   }
   const auto concrete_type = *matched_type.type;
 
-  // Allow homogeneous tuples to be casted implicitly to lists of appropriate types
-  if (convertibleToList(value->type(), concrete_type) &&
-      value->type()->kind() == TypeKind::TupleType) {
-    auto unpacked = createTupleUnpack(value);
-    auto elem_type = concrete_type->expect<ListType>()->getElementType();
-    value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
-  }
-
-  if (value->type()->isSubtypeOf(NoneType::get()) && !concrete_type->isSubtypeOf(NoneType::get())){
-    if (concrete_type->isSubtypeOf(GeneratorType::get())) {
-      value = graph.insertNode(graph.createNoneGenerator())->output();
-    }
-    if (concrete_type->isSubtypeOf(OptionalType::ofTensor())) {
-      // create undefined tensor when None pass to a optional[tensor] formal arg
-      value = graph.insertNode(graph.createUndefined())->output();
-    }
-  }
-
-  //implicit conversion of tensors to scalars
-  if(convert_tensors_to_nums && concrete_type->isSubtypeOf(NumberType::get())
-      && value->type()->isSubtypeOf(DynamicType::get())) {
-      auto n = graph.createImplicitTensorToNum(concrete_type, value);
-      value = graph.insertNode(n)
-        ->setSourceLocation(std::make_shared<SourceRange>(loc))
-        ->output();
-  }
+  value = tryConvertToType(loc, graph, concrete_type, value, convert_tensors_to_nums);
 
   if(!value->type()->isSubtypeOf(concrete_type)) {
     err() << "expected a value of type " << concrete_type->str() << " for argument '" << arg.name() << "' but found "
@@ -726,7 +765,6 @@ Value* emitBuiltinCall(
           attributes,
           failure_messages,
           convert_tensors_to_nums);
-
       if (matched_schema) {
         return emitBuiltinNode(*matched_schema, loc, graph, name);
       }
@@ -828,7 +866,10 @@ struct to_ir {
     for(;it != end; ++it) {
       auto& name = (*it).ident().name();
       // Add the input to the graph
-      Value *new_input = graph->addInput(name);
+      Value *new_input = graph->addInput();
+      if (meaningfulName(name)) {
+        new_input->setUniqueName(name);
+      }
       environment_stack->setVar((*it).ident().range(), name, new_input);
 
       // Record the type for the schema and set the Type on the Value*
@@ -866,11 +907,11 @@ struct to_ir {
       }
       auto range = return_stmt.range();
       size_t return_type_idx = 0;
-      for (auto& r : results) {
-        graph->registerOutput(r);
+      for (auto r : results) {
         TypePtr type = DynamicType::get();
         if (!schema.is_varret()) {
           type = schema.returns().at(return_type_idx).type();
+          r = tryConvertToType(range, *graph, type, r, /*convert_tensors_to_nums=*/false);
           if (!r->type()->isSubtypeOf(type)) {
             throw ErrorReport(return_stmt.range()) << "Return value at position "
               << return_type_idx << " was annotated as having type " << type->str()
@@ -878,6 +919,7 @@ struct to_ir {
           }
           return_type_idx++;
         }
+        graph->registerOutput(r);
         returns.emplace_back("", type);
       }
     } else if (schema.returns().size() > 0) {
@@ -1399,6 +1441,9 @@ private:
       case TK_VAR: {
         emitAugAssignmentToVar(stmt);
       } break;
+      case '.': {
+        emitAugAssignmentToSelectVar(stmt);
+      } break;
       case TK_SUBSCRIPT: {
         emitAugAssignmentToSubscript(stmt);
       } break;
@@ -1406,6 +1451,45 @@ private:
         throw ErrorReport(stmt.lhs())
             << "unexpected expression on "
             << "left-hand side of augmented assignment.";
+    }
+  }
+
+  // This will be called when there is a class param or module buffer
+  // mutation which make the LHS of the expr be a select expression
+  //
+  // Example like:
+  // class A(Module):
+  //  def __init__():
+  //    self.register_buffer("running_var", torch.zeros(1))
+  //
+  //  def forward():
+  //    self.num_batches += 1
+  //
+  // In this case we will only consider the scenario that the module
+  // buffer type is a tensor, and we emit the corresponding tensor
+  // in place op, and throw error for other unsupported types
+  void emitAugAssignmentToSelectVar(const AugAssign& stmt) {
+    const auto lhs = Select(stmt.lhs());
+    const auto lhsSugaredVar = environment_stack->getSugaredVar(Var(lhs.value()).name());
+    const auto lhsValue = lhsSugaredVar->attr(lhs.range(), method, lhs.selector().name())->asValue(lhs.range(), method);
+    if (lhsValue->type()->isSubtypeOf(DynamicType::get())) {
+      // for module parameter/buffer assignment, only consider tensor types,
+      // emit the corresponding in-place op
+      const auto rhs = NamedValue(stmt.rhs().range(), emitExpr(stmt.rhs()));
+      const auto self = NamedValue(stmt.lhs().range(), "self", lhsValue);
+      emitBuiltinCall(
+          stmt.range(),
+          *method.graph(),
+          getAugOp(stmt, /*isTensor=*/true),
+          self,
+          {rhs},
+          {},
+          /*required=*/true);
+
+    } else {
+        throw ErrorReport(stmt.lhs())
+            << "left-hand side of augmented assignment to module "
+            << "parameters/buffers can only be tensor types";
     }
   }
 
@@ -1771,7 +1855,12 @@ private:
         throw ErrorReport(loc) << "attribute takes no keyword arguments";
       }
       TypePtr type = parseTypeFromExpr(apply.inputs()[0]);
-      Value* expr = emitExpr(apply.inputs()[1], type);
+      Value* expr = tryConvertToType(
+          apply.range(),
+          *graph,
+          type,
+          emitExpr(apply.inputs()[1], type),
+          /*convert_tensors_to_nums=*/true);
       if (!expr->type()->isSubtypeOf(type)) {
         throw ErrorReport(apply.inputs())
             << "expected an expression of type " << type->python_str()
@@ -2340,7 +2429,7 @@ std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> input
   return outputs;
 }
 
-void defineMethodsInModule(Module & m, const std::vector<Def>& definitions, const std::vector<Resolver>& resolvers, SugaredValuePtr self) {
+void defineMethodsInModule(std::shared_ptr<Module> m, const std::vector<Def>& definitions, const std::vector<Resolver>& resolvers, SugaredValuePtr self) {
   JIT_ASSERT(definitions.size() == resolvers.size());
   auto resolver_it = resolvers.begin();
   std::vector<Method*> methods;
@@ -2368,13 +2457,14 @@ void defineMethodsInModule(Module & m, const std::vector<Def>& definitions, cons
       JIT_ASSERT(resolver);
       to_ir(def, resolver, self,  method);
     };
-    Method& method = m.create_method(name, creator);
+    Method& method = m->create_method(name, creator);
     function_table[name] = &method;
     methods.push_back(&method);
   }
   for(Method* method : methods) {
     method->ensure_defined();
   }
+  didFinishEmitModule(m);
 }
 
 const std::unordered_map<std::string, TypePtr> &ident_to_type_lut() {
@@ -2384,6 +2474,9 @@ const std::unordered_map<std::string, TypePtr> &ident_to_type_lut() {
     {"float", FloatType::get()},
     {"bool", BoolType::get()},
     {"str", StringType::get()},
+    // technically this is not a python type but we need it when
+    // parsing serialized methods that use implicit converions to Scalar
+    {"number", NumberType::get()},
   };
   return map;
 }
@@ -2570,7 +2663,7 @@ FunctionSchema extractSchemaFromDef(const Def &def, bool is_method) {
     return FunctionSchema(name, args, returns, false, is_varret);
 }
 
-void defineMethodsInModule(Module & m, const std::string& source, Resolver resolver, SugaredValuePtr self) {
+void defineMethodsInModule(std::shared_ptr<Module> m, const std::string& source, Resolver resolver, SugaredValuePtr self) {
   Parser p(source);
   std::vector<Def> definitions;
   std::vector<Resolver> resolvers;

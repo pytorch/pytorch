@@ -16,14 +16,15 @@ class GLSigmoid : public GLFilter {
   binding* outputSize;
 
   GLSigmoid(OpType opType)
-      : GLFilter("GLSigmoid",
-                 vertex_shader,
-                 fragment_shader,
-                 {BINDING(outputSize), BINDING(inputData)},
-                 {/* no uniform blocks */},
-                 {/* no attributes */},
-                 {{"SIGMOID", caffe2::to_string(opType == Sigmoid)},
-                  {"TANH", caffe2::to_string(opType == Tanh)}}) {}
+      : GLFilter(
+            "GLSigmoid",
+            vertex_shader,
+            fragment_shader,
+            {BINDING(outputSize), BINDING(inputData)},
+            {/* no uniform blocks */},
+            {/* no attributes */},
+            {{"SIGMOID", c10::to_string(opType == Sigmoid)},
+             {"TANH", c10::to_string(opType == Tanh)}}) {}
 
   template <typename T>
   void sigmoid(const GLImageVector<T>& input_images, const GLImageVector<T>& output_images);

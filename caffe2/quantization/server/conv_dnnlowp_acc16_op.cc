@@ -144,12 +144,12 @@ bool ConvDNNLowPAcc16Op<ReluFused>::GetQuantizationParameters_() {
     }
     if (nbits_in_non_outlier_ < 8 &&
         ConvPoolOpBase<CPUContext>::order_ != StorageOrder::NHWC) {
-        static int log_occurences = 0;
-        if (log_occurences < 32) {
-          ++log_occurences;
-          LOG(WARNING) << "Outlier-aware quantization only supports "
-                          "NHWC layout";
-        }
+      static int log_occurences = 0;
+      if (log_occurences < 32) {
+        ++log_occurences;
+        LOG(WARNING) << "Outlier-aware quantization only supports "
+                        "NHWC layout";
+      }
     }
     first_invocation_ = false;
   }

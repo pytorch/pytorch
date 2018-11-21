@@ -198,7 +198,7 @@ void Graph::dumpPretty() {
 
 static void checkSameDevice(const Node* node) {
   bool has_device = false;
-  int device;
+  c10::optional<at::Device> device = c10::nullopt;
   auto checkValue = [&](const Value* v) {
     if(CompleteTensorTypePtr type = v->type()->cast<CompleteTensorType>()) {
       if(!has_device) {
@@ -1215,6 +1215,12 @@ Node* Graph::create(NodeKind kind, ArrayRef<Value*> inputs, size_t num_outputs) 
 
 Node* Graph::createUndefined() {
   return create(prim::Undefined);
+}
+
+Node* Graph::createNone(TypePtr typ) {
+  Node * n = create(prim::None);
+  n->output()->setType(OptionalType::create(typ));
+  return n;
 }
 
 Node * Graph::createNoneGenerator() {
