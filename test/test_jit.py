@@ -10153,7 +10153,6 @@ for test in nn_functional_tests:
 
 for test in module_tests + new_module_tests:
     add_nn_module_test(**test)
-print("DONE ADDING")
 
 if __name__ == '__main__':
     run_tests()
