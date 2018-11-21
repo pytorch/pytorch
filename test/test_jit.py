@@ -6653,7 +6653,7 @@ a")
                 hx, cx = lstm_cell(x[i], hx, cx, w_ih, w_hh, b_ih, b_hh)
             return hx
 
-        inputs = get_lstm_inputs('cuda', training=True, seq_length=10)
+        inputs = get_lstm_inputs('cpu', training=True, seq_length=10)
         lstm(*inputs).sum().backward()
         fw_graph = lstm.graph_for(*inputs)
         bw_graph = backward_graph(lstm, diff_graph_idx=0)
