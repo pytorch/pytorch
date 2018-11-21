@@ -66,7 +66,6 @@ static bool sizes_match_except(IntList s1, IntList s2, int64_t dim_except /* sho
 static void check_cat_sparse_dims(Tensor const &t,
   int64_t pos /* used only for debug messages */,
   IntList sizes,
-  int64_t dim,
   int64_t wrapped,
   int64_t sparse_dim,
   int64_t dense_dim) {
@@ -88,10 +87,9 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
   int64_t dense_dim = tensors[0].dense_dim();
   IntList sizes = tensors[0].sizes();
   if (wrapped < sparse_dim) {
-    IntList sizes = tensors[0].sizes();
     for (size_t i = 0; i < tensors.size(); ++i) {
       auto const &t = tensors[i];
-      check_cat_sparse_dims(t, i, sizes, dim, wrapped, sparse_dim, dense_dim);
+      check_cat_sparse_dims(t, i, sizes, wrapped, sparse_dim, dense_dim);
       indices.push_back(t._indices());
       values.push_back(t._values());
     }
@@ -152,7 +150,7 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
     std::vector<Tensor> idxs_pieces;
     for (size_t i = 0; i < tensors.size(); ++i) {
       auto const &t = tensors[i];
-      check_cat_sparse_dims(t, i, sizes, dim, wrapped, sparse_dim, dense_dim);
+      check_cat_sparse_dims(t, i, sizes, wrapped, sparse_dim, dense_dim);
       // dimension 0 of values corresponds to the number of values,
       // rather than to any logical dimension of the sparse tensor.
       zeros_sizes[0] = t._values().size(0);
