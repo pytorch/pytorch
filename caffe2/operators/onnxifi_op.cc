@@ -118,10 +118,11 @@ OnnxifiOp<float, CPUContext>::BuildInitializationList(
 
 template <>
 bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
+  CAFFE_ENFORCE_EQ(input_desc_.size(), InputSize());
   for (unsigned i = 0U; i < InputSize(); ++i) {
     const auto& input_tensor = Input(i);
     const auto tensor_dims = input_tensor.sizes();
-    auto& tensor_descriptor = input_desc_.at(i);
+    auto& tensor_descriptor = input_desc_[i];
     tensor_descriptor.tag = ONNXIFI_TAG_TENSOR_DESCRIPTOR_V1;
     tensor_descriptor.memoryType = ONNXIFI_MEMORY_TYPE_CPU;
     tensor_descriptor.dimensions = tensor_dims.size();
@@ -130,10 +131,11 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
     SetInputTensorDescriptorTypeAndBuffer(input_tensor, &tensor_descriptor);
   }
 
+  CAFFE_ENFORCE_EQ(output_desc_.size(), OutputSize());
   for (unsigned i = 0U; i < OutputSize(); ++i) {
     std::vector<size_t> tensor_dims;
     uint64_t type = SetOutputShapeAndType(i, &tensor_dims);
-    auto& tensor_descriptor = output_desc_.at(i);
+    auto& tensor_descriptor = output_desc_[i];
     tensor_descriptor.tag = ONNXIFI_TAG_TENSOR_DESCRIPTOR_V1;
     tensor_descriptor.memoryType = ONNXIFI_MEMORY_TYPE_CPU;
     tensor_descriptor.dimensions = tensor_dims.size();
