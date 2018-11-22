@@ -7,9 +7,10 @@ namespace dnnlowp {
 class QuantizationErrorMinimization {
  public:
   virtual TensorQuantizationParams ChooseQuantizationParams(
-    const Histogram& hist, bool preserve_sparsity = false, int precision = 8)
-    = 0;
-  virtual ~QuantizationErrorMinimization() {};
+      const Histogram& hist,
+      bool preserve_sparsity = false,
+      int precision = 8) = 0;
+  virtual ~QuantizationErrorMinimization(){};
 };
 
 class NormMinimization : public QuantizationErrorMinimization {
@@ -25,11 +26,14 @@ class NormMinimization : public QuantizationErrorMinimization {
    * Faster approximate search
    */
   TensorQuantizationParams NonlinearQuantizationParamsSearch(
-    const Histogram& hist, bool preserve_sparsity = false, int precision = 8);
+      const Histogram& hist,
+      bool preserve_sparsity = false,
+      int precision = 8);
 
   TensorQuantizationParams ChooseQuantizationParams(
-    const Histogram& hist, bool preserve_sparsity = false, int precision = 8)
-    override;
+      const Histogram& hist,
+      bool preserve_sparsity = false,
+      int precision = 8) override;
 
  protected:
   Kind kind_;
@@ -43,8 +47,9 @@ class L1ErrorMinimization : public NormMinimization {
 class P99 : public QuantizationErrorMinimization {
  public:
   TensorQuantizationParams ChooseQuantizationParams(
-    const Histogram& hist, bool preserve_sparsity = true, int precision = 8)
-    override;
+      const Histogram& hist,
+      bool preserve_sparsity = true,
+      int precision = 8) override;
 }; // class P99QuantizationFactory
 
 } // namespace dnnlowp
