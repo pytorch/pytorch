@@ -20,34 +20,57 @@
 
 namespace caffe2 {
 
+// NOTE: make sure explicitly instantiate the corresponding template classes
+// in fully_connected_fake_lowp_op_avx2.cc !
+
 // IEEE FP16
-REGISTER_CPU_OPERATOR_WITH_ENGINE(FC, FAKE_FP16,
-  FullyConnectedFakeLowpFPOp<fp32_to_fp16, CPUContext>);
-REGISTER_CPU_OPERATOR_WITH_ENGINE(FCGradient, FAKE_FP16,
-  FullyConnectedGradientFakeLowpFPOp<fp32_to_fp16, CPUContext>);
+REGISTER_CPU_OPERATOR_WITH_ENGINE(
+    FC,
+    FAKE_FP16,
+    FullyConnectedFakeLowpFPOp<fp32_to_fp16, CPUContext>);
+REGISTER_CPU_OPERATOR_WITH_ENGINE(
+    FCGradient,
+    FAKE_FP16,
+    FullyConnectedGradientFakeLowpFPOp<fp32_to_fp16, CPUContext>);
 
 // BFLOAT 16
-REGISTER_CPU_OPERATOR_WITH_ENGINE(FC, FAKE_BFP_16,
-  FullyConnectedFakeLowpFPOp<fp32_to_bfp16, CPUContext>);
-REGISTER_CPU_OPERATOR_WITH_ENGINE(FCGradient, FAKE_BFP_16,
-  FullyConnectedGradientFakeLowpFPOp<fp32_to_bfp16, CPUContext>);
+REGISTER_CPU_OPERATOR_WITH_ENGINE(
+    FC,
+    FAKE_BFP_16,
+    FullyConnectedFakeLowpFPOp<fp32_to_bfp16, CPUContext>);
+REGISTER_CPU_OPERATOR_WITH_ENGINE(
+    FCGradient,
+    FAKE_BFP_16,
+    FullyConnectedGradientFakeLowpFPOp<fp32_to_bfp16, CPUContext>);
 
 // BFLOAT 24 (chop the least significant 8 bits)
-REGISTER_CPU_OPERATOR_WITH_ENGINE(FC, FAKE_BFP_24,
-  FullyConnectedFakeLowpFPOp<fp32_to_bfp24, CPUContext>);
-REGISTER_CPU_OPERATOR_WITH_ENGINE(FCGradient, FAKE_BFP_24,
-  FullyConnectedGradientFakeLowpFPOp<fp32_to_bfp24, CPUContext>);
+REGISTER_CPU_OPERATOR_WITH_ENGINE(
+    FC,
+    FAKE_BFP_24,
+    FullyConnectedFakeLowpFPOp<fp32_to_bfp24, CPUContext>);
+REGISTER_CPU_OPERATOR_WITH_ENGINE(
+    FCGradient,
+    FAKE_BFP_24,
+    FullyConnectedGradientFakeLowpFPOp<fp32_to_bfp24, CPUContext>);
 
 // BFLOAT 14 (chop 2 extra bits from BFLOAT 16)
-REGISTER_CPU_OPERATOR_WITH_ENGINE(FC, FAKE_BFP_14,
-  FullyConnectedFakeLowpFPOp<fp32_to_bfp14, CPUContext>);
-REGISTER_CPU_OPERATOR_WITH_ENGINE(FCGradient, FAKE_BFP_14,
-  FullyConnectedGradientFakeLowpFPOp<fp32_to_bfp14, CPUContext>);
+REGISTER_CPU_OPERATOR_WITH_ENGINE(
+    FC,
+    FAKE_BFP_14,
+    FullyConnectedFakeLowpFPOp<fp32_to_bfp14, CPUContext>);
+REGISTER_CPU_OPERATOR_WITH_ENGINE(
+    FCGradient,
+    FAKE_BFP_14,
+    FullyConnectedGradientFakeLowpFPOp<fp32_to_bfp14, CPUContext>);
 
 // BFLOAT16 with rounding
-REGISTER_CPU_OPERATOR_WITH_ENGINE(FC, FAKE_BFP_16_ROUND,
-  FullyConnectedFakeLowpFPOp<fp32_to_bfp16_round, CPUContext>);
-REGISTER_CPU_OPERATOR_WITH_ENGINE(FCGradient, FAKE_BFP_16_ROUND,
-  FullyConnectedGradientFakeLowpFPOp<fp32_to_bfp16_round, CPUContext>);
+REGISTER_CPU_OPERATOR_WITH_ENGINE(
+    FC,
+    FAKE_BFP_16_ROUND,
+    FullyConnectedFakeLowpFPOp<fp32_to_bfp16_round, CPUContext>);
+REGISTER_CPU_OPERATOR_WITH_ENGINE(
+    FCGradient,
+    FAKE_BFP_16_ROUND,
+    FullyConnectedGradientFakeLowpFPOp<fp32_to_bfp16_round, CPUContext>);
 
 } // namespace caffe2

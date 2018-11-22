@@ -123,6 +123,11 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
     auto currentStream = at::cuda::getCurrentCUDAStream(devices_[i].index());
     // Block the current stream on the NCCL stream
     cudaEvents_[i].block(currentStream);
+    // If we use the work to do barrier, we should block here
+    if (!barrierTensors_.empty()) {
+      at::cuda::CUDAGuard gpuGuard(devices_[i]);
+      AT_CUDA_CHECK(cudaDeviceSynchronize());
+    }
   }
 }
 
@@ -203,6 +208,11 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
         "Not able to create/get the NCCL Communicator since "
         "the GPU devices are not known");
   }
+
+  for (auto& device : devices) {
+    usedDeviceIdxs_.insert(device.index());
+  }
+
   if (devNCCLCommMap_.find(devicesKey) != devNCCLCommMap_.end()) {
     // Reuse the cached communicator if there is one.
     return devNCCLCommMap_[devicesKey];
@@ -289,8 +299,8 @@ void ProcessGroupNCCL::tensorCheckHelper(
 
   for (size_t i = 0; i < input.size(); ++i) {
     //  Check to make sure it's a GPU dense tensor
-    if (!(input[i].is_cuda() && !input[i].is_sparse() &&
-          output[i].is_cuda() && !output[i].is_sparse())) {
+    if (!(input[i].is_cuda() && !input[i].is_sparse() && output[i].is_cuda() &&
+          !output[i].is_sparse())) {
       throw std::runtime_error(
           "Only CUDA dense tensor is supported for NCCL "
           "collective operations");
@@ -554,6 +564,45 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
   return work;
 }
 
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier() {
+  std::vector<at::Device> devices;
+  if (usedDeviceIdxs_.empty()) {
+    // This means there is not yet a NCCL collective being called
+    // Here we have to use the best guesses and will use a single GPU to call
+    // allreduce to achieve barrier.
+    // In case the multiple processes fall into the same node, we use rank to
+    // ensure that each process is on a different GPU
+    auto numGPUs = at::cuda::getNumGPUs();
+    int16_t deviceIdx = static_cast<int16_t>(rank_ % numGPUs);
+    devices.push_back(at::Device(at::DeviceType::CUDA, deviceIdx));
+  } else {
+    for (auto usedDeviceIdx : usedDeviceIdxs_) {
+      devices.push_back(at::Device(at::DeviceType::CUDA, usedDeviceIdx));
+    }
+  }
+
+  std::vector<at::Tensor> barrierTensors;
+  barrierTensors.reserve(devices.size());
+
+  at::cuda::OptionalCUDAGuard gpuGuard;
+  for (auto& device : devices) {
+    gpuGuard.set_index(device.index());
+    barrierTensors.push_back(at::empty(
+        {1},
+        at::TensorOptions().device(at::DeviceType::CUDA).dtype(at::kByte)));
+  }
+
+  // All reduce to achieve the barrier
+  auto work = allreduce(barrierTensors);
+
+  // Work will take over barrierTensors
+  auto ncclWork = dynamic_cast<ProcessGroupNCCL::WorkNCCL*>(work.get());
+  AT_CHECK(ncclWork);
+  ncclWork->barrierTensors_ = std::move(barrierTensors);
+
+  return work;
+}
+
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(
     std::vector<std::vector<at::Tensor>>& /* unused */,
     std::vector<at::Tensor>& /* unused */,
@@ -587,10 +636,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::recvAnysource(
     int* /* unused */,
     int /* unused */) {
   throw std::runtime_error("ProcessGroupNCCL does not support recv");
-}
-
-std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier() {
-  throw std::runtime_error("ProcessGroupNCCL does not support barrier");
 }
 
 std::unordered_map<int, int> ProcessGroupNCCL::getGroupRank() {

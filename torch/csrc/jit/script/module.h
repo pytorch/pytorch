@@ -138,14 +138,14 @@ struct Method {
     for (size_t i=0; i < retval->inputs().size(); ++i) {
       auto scalar_type = inputs[i].type().scalarType();
       auto sizes = inputs[i].sizes();
-      auto type = torch::jit::CompleteTensorType::create(scalar_type, -1, sizes);
+      auto type = torch::jit::CompleteTensorType::create(scalar_type, at::kCPU, sizes);
       retval->inputs()[i]->setType(type);
     }
     JIT_ASSERT(retval->outputs().size() == outputs.size());
     for (size_t i=0; i < retval->outputs().size(); ++i) {
       auto scalar_type = outputs[i].type().scalarType();
       auto sizes = outputs[i].sizes();
-      auto type = torch::jit::CompleteTensorType::create(scalar_type, -1, sizes);
+      auto type = torch::jit::CompleteTensorType::create(scalar_type, at::kCPU, sizes);
       retval->outputs()[i]->setType(type);
     }
     return retval;
@@ -314,6 +314,10 @@ struct Module {
   // added afterward.
   void set_optimized(bool o) {
     optimize = o;
+  }
+
+  bool is_optimized() const {
+    return optimize; 
   }
 
   IValue forward(std::vector<IValue> inputs) {

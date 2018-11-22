@@ -1,9 +1,10 @@
-#pragma once
+#ifndef TENSOR_TYPE_ID_H_
+#define TENSOR_TYPE_ID_H_
 
 #include <iostream>
 #include <string>
-#include <c10/util/IdWrapper.h>
-#include <c10/macros/Macros.h>
+#include "c10/macros/Macros.h"
+#include "c10/util/IdWrapper.h"
 
 namespace c10 {
 
@@ -33,8 +34,10 @@ class C10_API TensorTypeId final
   friend C10_API std::ostream& operator<<(std::ostream&, TensorTypeId);
 };
 
-C10_API std::ostream& operator<<(std::ostream&, at::TensorTypeId);
+C10_API std::ostream& operator<<(std::ostream&, c10::TensorTypeId);
 
 } // namespace c10
 
 C10_DEFINE_HASH_FOR_IDWRAPPER(c10::TensorTypeId)
+
+#endif // TENSOR_TYPE_ID_H_
