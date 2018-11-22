@@ -480,7 +480,7 @@ void initPythonIRBindings(PyObject * module_) {
       return std::static_pointer_cast<Type>(t.expect<CompleteTensorType>()->contiguous());
     })
     .def("scalarType",[](Type& t) {
-      return at::toString(t.expect<TensorType>()->scalarType());
+      return toString(t.expect<TensorType>()->scalarType());
     })
     .def("__eq__", [](std::shared_ptr<Type>& self, std::shared_ptr<Type>& other) {
 		  return *self == *other;
