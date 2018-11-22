@@ -522,6 +522,13 @@ struct CAFFE2_API ListType : public SingleElementType<TypeKind::ListType, ListTy
     ss << "List[" << getElementType()->python_str() << "]";
     return ss.str();
   }
+  bool isSubtypeOf(const TypePtr rhs) const override {
+    if(auto rhs_ = rhs->cast<OptionalType>()) {
+      return this->isSubtypeOf(rhs_->getElementType());
+    }
+    return *this == *rhs;
+  }
+
   TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
     return create(contained_types.at(0));
   }

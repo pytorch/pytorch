@@ -435,7 +435,10 @@ static inline bool isIntOrFloatUsedAsList(
   auto v_type = value->type();
   if (v_type != FloatType::get() && v_type != IntType::get())
     return false;
-  auto list_type = arg.type()->cast<ListType>();
+  auto arg_type = arg.type();
+  if (arg_type->cast<OptionalType>())
+    arg_type = arg_type->cast<OptionalType>()->getElementType();
+  auto list_type = arg_type->cast<ListType>();
   return list_type && list_type->getElementType() == v_type && arg.N();
 }
 
@@ -2508,7 +2511,7 @@ const std::unordered_map<std::string, std::function<TypePtr(Subscript)>> &subscr
   return map;
 }
 
-bool  isTorch(Expr expr) {
+bool isTorch(Expr expr) {
   return expr.kind() == TK_VAR && Var(expr).name().name() == "torch";
 }
 
@@ -2551,7 +2554,6 @@ TypePtr parseTypeFromExpr(Expr expr) {
                                   << " cannot be used in a type expression";
 }
 
-
 c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(Expr expr) {
   if (expr.kind() != TK_SUBSCRIPT)
     return c10::nullopt;
@@ -2559,16 +2561,26 @@ c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(Expr expr) {
   if (subscript.value().kind() != TK_VAR)
     return c10::nullopt;
   auto var = Var(subscript.value());
+  auto subscript_exprs = subscript.subscript_exprs();
 
-  if (var.name().name().find("BroadcastingList") != 0) {
+  // handle the case where the BroadcastingList is wrapped in a Optional type
+  if(var.name().name() == "Optional") {
+    auto broadcast_list = handleBroadcastList(subscript_exprs[0]);
+    if (broadcast_list) {
+      TypePtr opt_type = OptionalType::create(broadcast_list->first);
+      return std::pair<TypePtr, int32_t>(opt_type, broadcast_list->second);
+    } else {
+      return c10::nullopt;
+    }
+  } else if (var.name().name().find("BroadcastingList") != 0) {
     return c10::nullopt;
   }
 
-  if (subscript.subscript_exprs().size() != 1)
+  if (subscript_exprs.size() != 1)
     throw ErrorReport(subscript.subscript_exprs().range())
-      << "BroadcastingList must be subscripted with a type";
+      << "BroadcastingList/Optional[BroadcastingList] must be subscripted with a type";
 
-  auto typ = subscript.subscript_exprs()[0];
+  auto typ = subscript_exprs[0];
   auto len = var.name().name().substr(strlen("BroadcastingList"));
 
   if (typ.kind() != TK_VAR)
