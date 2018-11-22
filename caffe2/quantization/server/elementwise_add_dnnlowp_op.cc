@@ -52,7 +52,7 @@ class AddDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, AddFp32Op> {
 #pragma omp parallel for
 #endif
         for (int j = 0; j < InputTensorCPU_(i).numel(); ++j) {
-          quantized_in[j] = Requantize<int32_t>(
+          quantized_in[j] = fbgemm::Requantize<int32_t>(
               input_data[j] - in_qparams_[i].zero_point,
               in_requantization_params);
         }
@@ -63,7 +63,7 @@ class AddDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, AddFp32Op> {
 #pragma omp parallel for
 #endif
         for (int j = 0; j < InputTensorCPU_(i).numel(); ++j) {
-          quantized_in[j] = Quantize<uint32_t>(
+          quantized_in[j] = fbgemm::Quantize<uint32_t>(
               input_data[j],
               intermediate_qparams_.zero_point,
               intermediate_qparams_.scale,
@@ -87,7 +87,7 @@ class AddDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, AddFp32Op> {
 #endif
       for (int i = 0; i < C->numel(); ++i) {
         int32_t raw = A_quantized[i] + B_quantized[i] - intermediate_zero_point;
-        C_quantized[i] = Requantize<T>(raw, requantization_params_);
+        C_quantized[i] = fbgemm::Requantize<T>(raw, requantization_params_);
       }
     } else if (B.numel() == 1) {
 #ifdef _OPENMP
@@ -95,7 +95,7 @@ class AddDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, AddFp32Op> {
 #endif
       for (int i = 0; i < C->numel(); ++i) {
         int32_t raw = A_quantized[i] + B_quantized[0] - intermediate_zero_point;
-        C_quantized[i] = Requantize<T>(raw, requantization_params_);
+        C_quantized[i] = fbgemm::Requantize<T>(raw, requantization_params_);
       }
     } else {
       size_t pre, n, post;
@@ -110,7 +110,7 @@ class AddDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, AddFp32Op> {
             int32_t raw = A_quantized[((i * n) + j) * post + k] +
                 B_quantized[j] - intermediate_zero_point;
             C_quantized[((i * n) + j) * post + k] =
-                Requantize<T>(raw, requantization_params_);
+                fbgemm::Requantize<T>(raw, requantization_params_);
           }
         }
       }
