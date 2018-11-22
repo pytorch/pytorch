@@ -19,7 +19,7 @@ class ConvDNNLowPOp : public ConvPoolDNNLowPOpBase<T, ConvFp32Op> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS(CPUContext);
   USE_CONV_POOL_DNNLOWP_OPERATOR_BASE_FUNCTIONS(T, ConvFp32Op);
-  ConvDNNLowPOp(const OperatorDef& operator_def, Workspace *ws);
+  ConvDNNLowPOp(const OperatorDef& operator_def, Workspace* ws);
   virtual ~ConvDNNLowPOp();
 
  protected:
@@ -91,8 +91,10 @@ class ConvDNNLowPOp : public ConvPoolDNNLowPOpBase<T, ConvFp32Op> {
   bool TakeDepthWise3x3FastPath_();
   bool TakeDepthWise3x3x3FastPath_();
 
-  template <typename InType> bool RunOnDeviceWithOrderNCHWAndType_();
-  template <typename InType> bool RunOnDeviceWithOrderNHWCAndType_();
+  template <typename InType>
+  bool RunOnDeviceWithOrderNCHWAndType_();
+  template <typename InType>
+  bool RunOnDeviceWithOrderNHWCAndType_();
 
   template <typename InType>
   void ConvNHWCCore_(

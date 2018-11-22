@@ -1,7 +1,7 @@
 #include "torch/csrc/jit/autodiff.h"
 
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/jit/passes/common_subexpression_elimination.h"
+#include "torch/csrc/jit/passes/constant_pooling.h"
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/utils/functional.h"
@@ -77,7 +77,9 @@ bool isDifferentiable(Node * n) {
     "aten::trunc(Tensor self) -> Tensor",
     "aten::log_softmax(Tensor self, int dim) -> Tensor",
     "aten::avg_pool2d(Tensor self, int[] kernel_size, int[] stride, int[] padding, bool ceil_mode, bool count_include_pad) -> Tensor",
-    "aten::max_pool2d_with_indices(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> (Tensor, Tensor)"
+    "aten::max_pool2d_with_indices(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> (Tensor, Tensor)",
+    "aten::thnn_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor? bias, int[] stride, int[] padding) -> (Tensor, Tensor, Tensor)",
+    "aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)",
   };
 
   // TODO: add support for the following fusible operators.
@@ -401,6 +403,45 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       });
       return {backward_value->node()->output(0), nullptr, nullptr, nullptr, nullptr, nullptr};
 
+    } else if (node->matches("aten::thnn_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor? bias, int[] stride, int[] padding) -> (Tensor, Tensor, Tensor)")) {
+      auto graph = node->owningGraph();
+      auto backward_value = graph->insert(aten::thnn_conv2d_backward, {
+	grads.at(0).value(),
+	inputs.at(0).value(),
+	inputs.at(1).value(),
+	node->namedInput(attr::kernel_size),
+	node->namedInput(attr::stride),
+	node->namedInput(attr::padding),
+	outputs.at(1).value(),
+	outputs.at(2).value(),
+	graph->insertConstant(std::vector<bool>{true, true, true})
+      });
+      // graph->insert returns a tuple automatically if multiple outputs are returned. So unpack them again.
+      Node* tuple_unpack_node = graph->insertNode(graph->createTupleUnpack(backward_value));
+      auto tuple_outputs = tuple_unpack_node->outputs();
+      JIT_ASSERT(tuple_outputs.size() == size_t(3));
+      return {tuple_outputs[0], tuple_outputs[1], nullptr, tuple_outputs[2], nullptr, nullptr};
+
+    } else if (node->matches("aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)")) {
+      auto graph = node->owningGraph();
+      auto backward_value = graph->insert(aten::native_batch_norm_backward, {
+	grads.at(0).value(),
+	inputs.at(0).value(),
+	inputs.at(1).value(),
+	inputs.at(3).value(),
+	inputs.at(4).value(),
+	outputs.at(1).value(),
+	outputs.at(2).value(),
+	inputs.at(5).value(),
+	inputs.at(7).value(),
+	graph->insertConstant(std::vector<bool>{true, true, true})
+      });
+      // graph->insert returns a tuple automatically if multiple outputs are returned. So unpack them again.
+      Node* tuple_unpack_node = graph->insertNode(graph->createTupleUnpack(backward_value));
+      auto tuple_outputs = tuple_unpack_node->outputs();
+      JIT_ASSERT(tuple_outputs.size() == size_t(3));
+      return {tuple_outputs[0], tuple_outputs[1], tuple_outputs[2], nullptr, nullptr, nullptr, nullptr, nullptr};
+
     } else if (node->matches("aten::log_softmax(Tensor self, int dim) -> Tensor")) {
       JIT_ASSERT(grads.size() == 1);
       auto graph = node->owningGraph();
@@ -579,10 +620,6 @@ static void liftConstants(Gradient& grad_desc, ReverseDetails& rev_info) {
       }
     }
   }
-
-  // It's possible the we've cloned the same constants many times,
-  // so we use CSE to deduplicate them.
-  EliminateCommonSubexpression(reverse_block);
 }
 
 // Takes a grad_desc.f returned from `addReverseInline` and splits off the
@@ -730,6 +767,9 @@ Gradient differentiate(std::shared_ptr<Graph>& graph) {
   // Fills in f, df, f_real_outputs, df_input_captures,
   // modifies df_input_vjps (new vjps are added for temporaries)
   lambdaLiftReverse(grad_desc, rev_info);
+  // It's possible the we've cloned the same constants many times, so
+  // de-duplicate them
+  ConstantPooling(grad_desc.df);
   return grad_desc;
 }
 
