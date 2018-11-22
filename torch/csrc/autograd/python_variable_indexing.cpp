@@ -196,7 +196,7 @@ static std::vector<Tensor> typeConvertIndices(const Variable& self, const variab
   for (size_t i = 0; i < indices.size(); ++i) {
     const auto &ind = indices[i];
     if (ind.defined()) {
-      converted_inds[i] = ind.to(self.device());
+      converted_inds[i] = ind.to(ind.options().device(self.device()));
     } else {
       converted_inds[i] = indices[i];
     }
