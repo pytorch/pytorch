@@ -343,6 +343,7 @@ struct CAFFE2_API IValue final {
     return Tag::None == tag;
   }
   std::string toNone() const {
+    AT_ASSERT(isNone());
     return "None";
   }
   // Scalar, which gets encoded as either an Int or a Double

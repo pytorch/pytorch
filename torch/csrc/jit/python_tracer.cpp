@@ -6,6 +6,7 @@
 #include "torch/csrc/jit/pybind.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/csrc/jit/passes/lower_tuples.h"
 
 #include "c10/util/Exception.h"
 
@@ -63,6 +64,8 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
     tracer::exit(toStack(out));
     auto graph = enter_info.first->graph;
     EliminateDeadCode(graph);
+    LowerSimpleTuples(graph);
+
     return graph;
   } catch (...) {
     tracer::abandon();

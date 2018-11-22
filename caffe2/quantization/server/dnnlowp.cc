@@ -11,46 +11,57 @@
 #endif
 
 C10_DEFINE_int32(
-  dnnlowp_activation_quantization_precision, 8,
-  "Precision used for activation tensors");
+    dnnlowp_activation_quantization_precision,
+    8,
+    "Precision used for activation tensors");
 C10_DEFINE_int32(
-  dnnlowp_weight_quantization_precision, 8,
-  "Precision used for weight tensors");
+    dnnlowp_weight_quantization_precision,
+    8,
+    "Precision used for weight tensors");
 C10_DEFINE_int32(
-  dnnlowp_requantization_multiplier_precision, 32,
-  "Precision of integer multipliers used for rescaling quantized numbers");
+    dnnlowp_requantization_multiplier_precision,
+    32,
+    "Precision of integer multipliers used for rescaling quantized numbers");
 C10_DEFINE_int32(
-  dnnlowp_eltwise_quantization_precision, 16,
-  "Precision used for intermediate numbers during elementwise operations");
+    dnnlowp_eltwise_quantization_precision,
+    16,
+    "Precision used for intermediate numbers during elementwise operations");
 C10_DEFINE_bool(
-  dnnlowp_force_scale_power_of_two, false,
-  "When true, force quantization scales to a power of two");
+    dnnlowp_force_scale_power_of_two,
+    false,
+    "When true, force quantization scales to a power of two");
 C10_DEFINE_bool(
-  dnnlowp_preserve_activation_sparsity, false,
-  "When true, 0 is mapped to 0 after quantization: "
-  "i.e., symmetric quantization");
+    dnnlowp_preserve_activation_sparsity,
+    false,
+    "When true, 0 is mapped to 0 after quantization: "
+    "i.e., symmetric quantization");
 C10_DEFINE_bool(
-  dnnlowp_preserve_weight_sparsity, false,
-  "When true, 0 is mapped to 0 after quantization: "
-  "i.e., symmetric quantization");
+    dnnlowp_preserve_weight_sparsity,
+    false,
+    "When true, 0 is mapped to 0 after quantization: "
+    "i.e., symmetric quantization");
 C10_DEFINE_string(
-  dnnlowp_activation_quantization_kind, "min_max",
-  "Quantization method for activation tensors. "
-  "Allowed values: min_max, l2, l2_approx, kl, l1, p99");
+    dnnlowp_activation_quantization_kind,
+    "min_max",
+    "Quantization method for activation tensors. "
+    "Allowed values: min_max, l2, l2_approx, kl, l1, p99");
 C10_DEFINE_string(
-  dnnlowp_weight_quantization_kind, "min_max",
-  "Quantization method for weight tensors. "
-  "Allowed values: min_max, l2, l2_approx, kl, l1, p99");
+    dnnlowp_weight_quantization_kind,
+    "min_max",
+    "Quantization method for weight tensors. "
+    "Allowed values: min_max, l2, l2_approx, kl, l1, p99");
 C10_DEFINE_int32(
-  dnnlowp_nbits_in_non_outlier, 8,
-  "When outlier-aware quantization is used, if a quantized number can be "
-  "represented by this number of bits, it is considered not an outlier so "
-  "handled with 16-bit accumulation");
+    dnnlowp_nbits_in_non_outlier,
+    8,
+    "When outlier-aware quantization is used, if a quantized number can be "
+    "represented by this number of bits, it is considered not an outlier so "
+    "handled with 16-bit accumulation");
 C10_DEFINE_int32(
-  dnnlowp_copy_to_32bit_frequency, 32,
-  "When outlier-aware quantization is used, this option specifies how often "
-  "we spill 16-bit accumulated numbers to 32-bit during the first pass");
-DEFINE_bool(
+    dnnlowp_copy_to_32bit_frequency,
+    32,
+    "When outlier-aware quantization is used, this option specifies how often "
+    "we spill 16-bit accumulated numbers to 32-bit during the first pass");
+C10_DEFINE_bool(
     caffe2_dnnlowp_force_slow_path,
     false,
     "When true, use slow path in quantization");
@@ -78,7 +89,9 @@ int64_t SaturatingRoundingMulWithShift(int32_t a, int32_t b, int right_shift) {
 
 #ifdef __AVX2__
 void RequantizeFixedPointAvx2(
-    const int32_t *src, uint8_t *dst, int len,
+    const int32_t* src,
+    uint8_t* dst,
+    int len,
     const RequantizationParams& params) {
   constexpr int VLEN = 8;
 
@@ -98,16 +111,44 @@ void RequantizeFixedPointAvx2(
   __m256i max_v = _mm256_set1_epi32(numeric_limits<uint8_t>::max());
 
   __m256i shuffle_mask_v = _mm256_set_epi8(
-    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-    0xff, 0xff, 0xff, 0xff, 0x0c, 0x08, 0x04, 0x00,
-    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-    0xff, 0xff, 0xff, 0xff, 0x0c, 0x08, 0x04, 0x00);
-  __m256i permute_mask_v = _mm256_set_epi32(
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00);
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0x0c,
+      0x08,
+      0x04,
+      0x00,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0x0c,
+      0x08,
+      0x04,
+      0x00);
+  __m256i permute_mask_v =
+      _mm256_set_epi32(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00);
 
   int i = 0;
-  for ( ; i < len / VLEN * VLEN; i += VLEN) {
-    __m256i a_v = _mm256_loadu_si256((const __m256i *)(src + i));
+  for (; i < len / VLEN * VLEN; i += VLEN) {
+    __m256i a_v = _mm256_loadu_si256((const __m256i*)(src + i));
 
     // a = a0 | a1 | a2 | a3 | a4 | a5 | a6 | a7
     // b = b0 | b1 | b3 | b3 | b4 | b5 | b6 | b7
@@ -124,29 +165,30 @@ void RequantizeFixedPointAvx2(
         _mm256_srli_epi64(even_rounded_v, params.right_shift),
         post_shift_nudge);
     __m256i odd_result_v = _mm256_add_epi64(
-        _mm256_srli_epi64(odd_rounded_v, params.right_shift),
-        post_shift_nudge);
+        _mm256_srli_epi64(odd_rounded_v, params.right_shift), post_shift_nudge);
     odd_result_v = _mm256_slli_si256(odd_result_v, 4);
 
     // even_result_v has numbers we want in its even 32-bit SIMD lanes, and
     // odd_result_v has numbers we want in its odd 32-bit SIMD lanes.
     // Use blend to combine them.
     __m256i result_v = _mm256_blend_epi32(even_result_v, odd_result_v, 0xaa);
-    __m256i clipped_v = _mm256_max_epi32(
-      min_v, _mm256_min_epi32(max_v, result_v));
+    __m256i clipped_v =
+        _mm256_max_epi32(min_v, _mm256_min_epi32(max_v, result_v));
 
     clipped_v = _mm256_shuffle_epi8(clipped_v, shuffle_mask_v);
     clipped_v = _mm256_permutevar8x32_epi32(clipped_v, permute_mask_v);
-    *(int64_t *)(dst + i) = _mm256_extract_epi64(clipped_v, 0);
+    *(int64_t*)(dst + i) = _mm256_extract_epi64(clipped_v, 0);
   }
 
-  for ( ; i < len; ++i) {
+  for (; i < len; ++i) {
     dst[i] = RequantizeFixedPoint<uint8_t>(src[i], params);
   }
 }
 
 void RequantizeAvx2(
-    const int32_t *src, uint8_t *dst, int len,
+    const int32_t* src,
+    uint8_t* dst,
+    int len,
     const RequantizationParams& params) {
   // Adoption of implementation at QNNPACK/src/requantization/fp32-sse2.c
   // using AVX2 instructions
@@ -162,7 +204,7 @@ void RequantizeAvx2(
       _mm256_set_epi32(0x07, 0x03, 0x06, 0x02, 0x05, 0x01, 0x04, 0x00);
 
   int i = 0;
-  for ( ; i < len / (VLEN * 4) * (VLEN * 4); i += (VLEN * 4)) {
+  for (; i < len / (VLEN * 4) * (VLEN * 4); i += (VLEN * 4)) {
     __m256i x_v = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + i));
     __m256i y_v =
         _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + i + VLEN));
@@ -248,7 +290,7 @@ void RequantizeAvx2(
     _mm256_storeu_si256(reinterpret_cast<__m256i*>(dst + i), xyzw_clamped_v);
   } // i loop vectorized and unrolled 4x
 
-  for ( ; i < len / VLEN * VLEN; i += VLEN) {
+  for (; i < len / VLEN * VLEN; i += VLEN) {
     __m256i x_v = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + i));
     __m256 x_scaled_v = _mm256_mul_ps(_mm256_cvtepi32_ps(x_v), multiplier_v);
     __m256i x_rounded_v = _mm256_cvtps_epi32(x_scaled_v);
@@ -262,8 +304,7 @@ void RequantizeAvx2(
      * x_clamped_v has results in the following layout so we need to permute:
      * x0-3 garbage0-11 x4-7 garbage12-23
      */
-    x_clamped_v =
-        _mm256_permutevar8x32_epi32(x_clamped_v, permute_mask_v);
+    x_clamped_v = _mm256_permutevar8x32_epi32(x_clamped_v, permute_mask_v);
 
     /*
      * 1x CVTDQ2PS
@@ -283,7 +324,7 @@ void RequantizeAvx2(
         _mm256_castsi256_si128(x_clamped_v));
   } // i loop vectorized
 
-  for ( ; i < len; ++i) {
+  for (; i < len; ++i) {
     dst[i] = Requantize<uint8_t>(src[i], params);
   } // i loop remainder
 }
@@ -325,7 +366,6 @@ void Quantize(
     T* dst,
     int len,
     const TensorQuantizationParams& qparams) {
-
 #if defined(__AVX2__) && defined(__FMA__)
   caffe2::CpuId cpuid = caffe2::GetCpuId();
   bool avx2_support = cpuid.avx2();
@@ -345,7 +385,7 @@ void Quantize(
           _mm256_max_ps(transformed_v, _mm256_set1_ps(0.f)),
           _mm256_set1_ps(255.f));
       __m256i rounded_v = _mm256_cvtps_epi32(clipped_v);
-      std::int32_t temp_int32[VLEN] __attribute__((aligned(64)));
+      alignas(64) std::int32_t temp_int32[VLEN];
       _mm256_store_si256((__m256i*)temp_int32, rounded_v);
       for (int j = 0; j < VLEN; ++j) {
         dst[i + j] = temp_int32[j];
@@ -426,46 +466,41 @@ QuantizationFactory::QuantizationKind StringToKind(const string& s) {
   }
 }
 
-QuantizationFactory *QuantizationFactory::GetDefaultInstance() {
+QuantizationFactory* QuantizationFactory::GetDefaultInstance() {
   static QuantizationFactory singleton(
-    FLAGS_dnnlowp_activation_quantization_precision,
-    FLAGS_dnnlowp_weight_quantization_precision,
-    FLAGS_dnnlowp_requantization_multiplier_precision,
-    FLAGS_dnnlowp_eltwise_quantization_precision,
-    FLAGS_dnnlowp_preserve_activation_sparsity,
-    FLAGS_dnnlowp_preserve_weight_sparsity,
-    FLAGS_dnnlowp_force_scale_power_of_two,
-    StringToKind(FLAGS_dnnlowp_activation_quantization_kind),
-    StringToKind(FLAGS_dnnlowp_weight_quantization_kind));
+      FLAGS_dnnlowp_activation_quantization_precision,
+      FLAGS_dnnlowp_weight_quantization_precision,
+      FLAGS_dnnlowp_requantization_multiplier_precision,
+      FLAGS_dnnlowp_eltwise_quantization_precision,
+      FLAGS_dnnlowp_preserve_activation_sparsity,
+      FLAGS_dnnlowp_preserve_weight_sparsity,
+      FLAGS_dnnlowp_force_scale_power_of_two,
+      StringToKind(FLAGS_dnnlowp_activation_quantization_kind),
+      StringToKind(FLAGS_dnnlowp_weight_quantization_kind));
 
   static bool log_printed = false;
   if (!log_printed) {
-    LOG(INFO) <<
-      "activation_precision " <<
-      FLAGS_dnnlowp_activation_quantization_precision;
-    LOG(INFO) <<
-      "weight_precision " << FLAGS_dnnlowp_weight_quantization_precision;
-    LOG(INFO) <<
-      "requantization_multiplier_precision " <<
-      FLAGS_dnnlowp_requantization_multiplier_precision;
-    LOG(INFO) <<
-      "eltwise_quantize_precision " <<
-      FLAGS_dnnlowp_eltwise_quantization_precision;
-    LOG(INFO) <<
-      "preserve_activation_sparsity " <<
-      FLAGS_dnnlowp_preserve_activation_sparsity;
-    LOG(INFO) <<
-      "preserve_weight_sparsity " << FLAGS_dnnlowp_preserve_weight_sparsity;
-    LOG(INFO) <<
-      "force_scale_power_of_two " << FLAGS_dnnlowp_force_scale_power_of_two;
-    LOG(INFO) <<
-      "activation_quantization_kind " <<
-      FLAGS_dnnlowp_activation_quantization_kind;
-    LOG(INFO) <<
-      "weight_quantization_kind " << FLAGS_dnnlowp_weight_quantization_kind;
+    LOG(INFO) << "activation_precision "
+              << FLAGS_dnnlowp_activation_quantization_precision;
+    LOG(INFO) << "weight_precision "
+              << FLAGS_dnnlowp_weight_quantization_precision;
+    LOG(INFO) << "requantization_multiplier_precision "
+              << FLAGS_dnnlowp_requantization_multiplier_precision;
+    LOG(INFO) << "eltwise_quantize_precision "
+              << FLAGS_dnnlowp_eltwise_quantization_precision;
+    LOG(INFO) << "preserve_activation_sparsity "
+              << FLAGS_dnnlowp_preserve_activation_sparsity;
+    LOG(INFO) << "preserve_weight_sparsity "
+              << FLAGS_dnnlowp_preserve_weight_sparsity;
+    LOG(INFO) << "force_scale_power_of_two "
+              << FLAGS_dnnlowp_force_scale_power_of_two;
+    LOG(INFO) << "activation_quantization_kind "
+              << FLAGS_dnnlowp_activation_quantization_kind;
+    LOG(INFO) << "weight_quantization_kind "
+              << FLAGS_dnnlowp_weight_quantization_kind;
     LOG(INFO) << "nbits_in_non_outlier " << FLAGS_dnnlowp_nbits_in_non_outlier;
-    LOG(INFO) <<
-      "copy_to_32bit_frequency " << FLAGS_dnnlowp_copy_to_32bit_frequency;
+    LOG(INFO) << "copy_to_32bit_frequency "
+              << FLAGS_dnnlowp_copy_to_32bit_frequency;
     LOG(INFO) << "omp_get_max_threads() " << caffe2::dnnlowp_get_max_threads();
 
     log_printed = true;
@@ -482,74 +517,85 @@ QuantizationFactory::QuantizationFactory(
     bool preserve_activation_sparsity,
     bool preserve_weight_sparsity,
     bool force_scale_power_of_two,
-    QuantizationKind activation_kind, QuantizationKind weight_kind) :
-  activation_precision_(activation_precision),
-  weight_precision_(weight_precision),
-  requantization_multiplier_precision_(requantization_multiplier_precision),
-  eltwise_quantize_precision_(eltwise_quantize_precision),
-  preserve_activation_sparsity_(preserve_activation_sparsity),
-  preserve_weight_sparsity_(preserve_weight_sparsity),
-  force_scale_power_of_two_(force_scale_power_of_two),
-  activation_kind_(activation_kind), weight_kind_(weight_kind) {
-}
+    QuantizationKind activation_kind,
+    QuantizationKind weight_kind)
+    : activation_precision_(activation_precision),
+      weight_precision_(weight_precision),
+      requantization_multiplier_precision_(requantization_multiplier_precision),
+      eltwise_quantize_precision_(eltwise_quantize_precision),
+      preserve_activation_sparsity_(preserve_activation_sparsity),
+      preserve_weight_sparsity_(preserve_weight_sparsity),
+      force_scale_power_of_two_(force_scale_power_of_two),
+      activation_kind_(activation_kind),
+      weight_kind_(weight_kind) {}
 
 TensorQuantizationParams QuantizationFactory::ChooseQuantizationParams(
-    const Histogram& hist, QuantizationKind kind,
-    int precision, bool preserve_sparsity) const {
+    const Histogram& hist,
+    QuantizationKind kind,
+    int precision,
+    bool preserve_sparsity) const {
   switch (kind) {
-  case L2_MIN_QUANTIZATION:
-    return L2ErrorMinimization().ChooseQuantizationParams(
-      hist, preserve_sparsity, precision);
-  case L2_MIN_QUANTIZATION_APPROX:
-    return L2ErrorMinimization().NonlinearQuantizationParamsSearch(
-      hist, preserve_sparsity, precision);
-  case L1_MIN_QUANTIZATION:
-    return L1ErrorMinimization().ChooseQuantizationParams(
-      hist, preserve_sparsity, precision);
-  case KL_MIN_QUANTIZATION:
-    return KLDivergenceMinimization().ChooseQuantizationParams(
-      hist, preserve_sparsity, precision);
-  case P99_QUANTIZATION:
-    assert(preserve_sparsity);
-    return P99().ChooseQuantizationParams(hist, preserve_sparsity, precision);
-  case MIN_MAX_QUANTIZATION:
-  default:
-    return ChooseQuantizationParams(
-        hist.Min(), hist.Max(), precision, preserve_sparsity);
+    case L2_MIN_QUANTIZATION:
+      return L2ErrorMinimization().ChooseQuantizationParams(
+          hist, preserve_sparsity, precision);
+    case L2_MIN_QUANTIZATION_APPROX:
+      return L2ErrorMinimization().NonlinearQuantizationParamsSearch(
+          hist, preserve_sparsity, precision);
+    case L1_MIN_QUANTIZATION:
+      return L1ErrorMinimization().ChooseQuantizationParams(
+          hist, preserve_sparsity, precision);
+    case KL_MIN_QUANTIZATION:
+      return KLDivergenceMinimization().ChooseQuantizationParams(
+          hist, preserve_sparsity, precision);
+    case P99_QUANTIZATION:
+      assert(preserve_sparsity);
+      return P99().ChooseQuantizationParams(hist, preserve_sparsity, precision);
+    case MIN_MAX_QUANTIZATION:
+    default:
+      return ChooseQuantizationParams(
+          hist.Min(), hist.Max(), precision, preserve_sparsity);
   }
 }
 
 TensorQuantizationParams QuantizationFactory::ChooseQuantizationParams(
-    const Histogram& hist, bool is_weight) const {
+    const Histogram& hist,
+    bool is_weight) const {
   if (is_weight) {
     return ChooseQuantizationParams(
-        hist, GetWeightKind(), GetWeightPrecision(),
+        hist,
+        GetWeightKind(),
+        GetWeightPrecision(),
         GetPreserveWeightSparsity());
-  }
-  else {
+  } else {
     return ChooseQuantizationParams(
-        hist, GetActivationKind(), GetActivationPrecision(),
+        hist,
+        GetActivationKind(),
+        GetActivationPrecision(),
         GetPreserveActivationSparsity());
   }
 }
 
 TensorQuantizationParams QuantizationFactory::ChooseQuantizationParams_(
-    float min, float max,
-    int32_t qmin, int32_t qmax, bool preserve_sparsity) const {
-
+    float min,
+    float max,
+    int32_t qmin,
+    int32_t qmax,
+    bool preserve_sparsity) const {
   if (min < 0 && max > 0 && preserve_sparsity) {
     int symmetric_qmin = -((qmax - qmin) / 2 + 1);
     int symmetric_qmax = (qmax - qmin) / 2;
     double max_scale =
-      std::max(fabs(min / symmetric_qmin), fabs(max / symmetric_qmax));
+        std::max(fabs(min / symmetric_qmin), fabs(max / symmetric_qmax));
     min = max_scale * symmetric_qmin;
     max = max_scale * symmetric_qmax;
   }
 
   double scale =
-    (std::max(max, 0.f) - std::min(min, 0.f)) / ((double)qmax - qmin);
-  if (scale == 0) scale = 0.1;
-    // If scale is 0, we arbitrary adjust the scale to 0.1
+      (std::max(max, 0.f) - std::min(min, 0.f)) / ((double)qmax - qmin);
+  if (scale == 0) {
+    scale = 0.1;
+  }
+  // If scale is 0, we arbitrary adjust the scale to 0.1
   assert(scale > 0);
 
   // We extend the [min, max] interval to ensure that it contains 0.
@@ -560,9 +606,8 @@ TensorQuantizationParams QuantizationFactory::ChooseQuantizationParams_(
 
   if (force_scale_power_of_two_) {
     if (scale < 1) {
-      scale = 1./(1 << (int)floor(log2(1/scale)));
-    }
-    else {
+      scale = 1. / (1 << (int)floor(log2(1 / scale)));
+    } else {
       scale = 1 << (int)ceil(log2(scale));
     }
   }
@@ -580,8 +625,9 @@ TensorQuantizationParams QuantizationFactory::ChooseQuantizationParams_(
   double zero_point_from_min_error = std::abs(qmin) + std::abs(min / scale);
   double zero_point_from_max_error = std::abs(qmax) + std::abs(max / scale);
   double initial_zero_point =
-    zero_point_from_min_error < zero_point_from_max_error
-    ? zero_point_from_min : zero_point_from_max;
+      zero_point_from_min_error < zero_point_from_max_error
+      ? zero_point_from_min
+      : zero_point_from_max;
 
   // for symmetric quantization (min == -max), we force zero_point to 128
   // to model signed integer (FIXME: this is a workaround that gemmlowp
@@ -612,15 +658,17 @@ TensorQuantizationParams QuantizationFactory::ChooseQuantizationParams_(
 }
 
 TensorQuantizationParams QuantizationFactory::ChooseQuantizationParams(
-    const float *values, int len, QuantizationKind kind,
-    int precision, bool preserve_sparsity) const {
+    const float* values,
+    int len,
+    QuantizationKind kind,
+    int precision,
+    bool preserve_sparsity) const {
   float min = 0, max = 0;
   FindMinMax(values, &min, &max, len);
 
   if (MIN_MAX_QUANTIZATION == kind) {
     return ChooseQuantizationParams(min, max, precision, preserve_sparsity);
-  }
-  else {
+  } else {
     if (0 == len) {
       return ChooseQuantizationParams(min, max, precision, preserve_sparsity);
     }
@@ -635,15 +683,22 @@ TensorQuantizationParams QuantizationFactory::ChooseQuantizationParams(
 }
 
 TensorQuantizationParams QuantizationFactory::ChooseQuantizationParams(
-    const float *values, int len, bool is_weight) const {
+    const float* values,
+    int len,
+    bool is_weight) const {
   if (is_weight) {
     return ChooseQuantizationParams(
-        values, len, GetWeightKind(), GetWeightPrecision(),
+        values,
+        len,
+        GetWeightKind(),
+        GetWeightPrecision(),
         GetPreserveWeightSparsity());
-  }
-  else {
+  } else {
     return ChooseQuantizationParams(
-        values, len, GetActivationKind(), GetActivationPrecision(),
+        values,
+        len,
+        GetActivationKind(),
+        GetActivationPrecision(),
         GetPreserveActivationSparsity());
   }
 }
@@ -652,7 +707,6 @@ void QuantizationFactory::ChooseRequantizationMultiplier_(
     float real_multiplier,
     int32_t* quantized_multiplier,
     int* right_shift) const {
-
   assert(real_multiplier != 0.f);
 
   // Assuming requantization_multiplier_precision_ = 31,
@@ -708,12 +762,12 @@ RequantizationParams QuantizationFactory::ChooseRequantizationMultiplier(
   params.real_multiplier = real_multiplier;
 
   ChooseRequantizationMultiplier_(
-    real_multiplier, &params.multiplier, &params.right_shift);
+      real_multiplier, &params.multiplier, &params.right_shift);
 
   return params;
 }
 
-void FindMinMax(const float *a, float* min, float* max, int len) {
+void FindMinMax(const float* a, float* min, float* max, int len) {
   if (len <= 0) {
     *min = 0.0f;
     *max = 0.0f;
@@ -727,7 +781,7 @@ void FindMinMax(const float *a, float* min, float* max, int len) {
   __m256 min_v = _mm256_set1_ps(*a), max_v = _mm256_set1_ps(*a);
   constexpr int VLEN = 8;
   if (len >= VLEN) {
-    for ( ; i < len / VLEN * VLEN; i += VLEN) {
+    for (; i < len / VLEN * VLEN; i += VLEN) {
       min_v = _mm256_min_ps(min_v, _mm256_loadu_ps(a + i));
       max_v = _mm256_max_ps(max_v, _mm256_loadu_ps(a + i));
     }
@@ -742,7 +796,7 @@ void FindMinMax(const float *a, float* min, float* max, int len) {
   }
 #endif
 
-  for ( ; i < len; i++) {
+  for (; i < len; i++) {
     temp_min = std::min(temp_min, a[i]);
     temp_max = std::max(temp_max, a[i]);
   }

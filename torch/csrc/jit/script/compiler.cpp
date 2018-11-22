@@ -124,6 +124,21 @@ private:
   TypePtr type;
 };
 
+// we consider _N where N is a number, to be a non-meaningful name
+// and do not record it as a unique name. This allows python printing to
+// be able to export and import more consistently named graphs
+static bool meaningfulName(const std::string& name) {
+  if (name.size() == 0)
+    return false;
+  if (name[0] != '_')
+    return true;
+  for (size_t i = 1; i < name.size(); ++i) {
+    if (!isdigit(name[i]))
+      return true;
+  }
+  return false;
+}
+
 // Auxiliary data structure for desugaring variable binding into our always
 // explicitly scoped language as we descend down
 // nested control structures in the frontend (which themselves don't introduce
@@ -213,15 +228,23 @@ struct Environment {
   }
 
   SugaredValuePtr createCapturedInput(Value* orig, const std::string& name) {
+    // insert the captured input alphabetically in the capture list.
+    // this ensures consistency of the order of loop-carried dependencies
+    // even when the use in the loop is in a different order
+    size_t insert_pos = 0;
+    while (insert_pos < captured_inputs.size() && name > captured_inputs[insert_pos]) {
+      insert_pos++;
+    }
+    captured_inputs.insert(captured_inputs.begin() + insert_pos, name);
+
     // Create the input
-    Value* new_input = b->addInput()->setType(orig->type());
+    const size_t loop_carried_block_inputs_offset = 1;
+    Value* new_input = b->insertInput(loop_carried_block_inputs_offset + insert_pos)
+                           ->setType(orig->type());
 
     // Associate this name with this value
     auto sv = std::make_shared<SimpleValue>(new_input);
     value_table[name] = sv;
-
-    // List as a positional input
-    captured_inputs.push_back(name);
 
     return sv;
   }
@@ -266,8 +289,9 @@ struct Environment {
 
   void setSugaredVar(const SourceRange& loc, const std::string& name, SugaredValuePtr value) {
     Value* as_simple_value = asSimple(value);
-    if (as_simple_value && !as_simple_value->hasUniqueName())
+    if (as_simple_value && !as_simple_value->hasUniqueName() && meaningfulName(name)) {
       as_simple_value->setUniqueName(name);
+    }
     // prevent re-assignment involving any sugared values
     // any reassignment like:
     // a = ...
@@ -842,7 +866,10 @@ struct to_ir {
     for(;it != end; ++it) {
       auto& name = (*it).ident().name();
       // Add the input to the graph
-      Value *new_input = graph->addInput(name);
+      Value *new_input = graph->addInput();
+      if (meaningfulName(name)) {
+        new_input->setUniqueName(name);
+      }
       environment_stack->setVar((*it).ident().range(), name, new_input);
 
       // Record the type for the schema and set the Type on the Value*
@@ -1414,6 +1441,9 @@ private:
       case TK_VAR: {
         emitAugAssignmentToVar(stmt);
       } break;
+      case '.': {
+        emitAugAssignmentToSelectVar(stmt);
+      } break;
       case TK_SUBSCRIPT: {
         emitAugAssignmentToSubscript(stmt);
       } break;
@@ -1421,6 +1451,45 @@ private:
         throw ErrorReport(stmt.lhs())
             << "unexpected expression on "
             << "left-hand side of augmented assignment.";
+    }
+  }
+
+  // This will be called when there is a class param or module buffer
+  // mutation which make the LHS of the expr be a select expression
+  //
+  // Example like:
+  // class A(Module):
+  //  def __init__():
+  //    self.register_buffer("running_var", torch.zeros(1))
+  //
+  //  def forward():
+  //    self.num_batches += 1
+  //
+  // In this case we will only consider the scenario that the module
+  // buffer type is a tensor, and we emit the corresponding tensor
+  // in place op, and throw error for other unsupported types
+  void emitAugAssignmentToSelectVar(const AugAssign& stmt) {
+    const auto lhs = Select(stmt.lhs());
+    const auto lhsSugaredVar = environment_stack->getSugaredVar(Var(lhs.value()).name());
+    const auto lhsValue = lhsSugaredVar->attr(lhs.range(), method, lhs.selector().name())->asValue(lhs.range(), method);
+    if (lhsValue->type()->isSubtypeOf(DynamicType::get())) {
+      // for module parameter/buffer assignment, only consider tensor types,
+      // emit the corresponding in-place op
+      const auto rhs = NamedValue(stmt.rhs().range(), emitExpr(stmt.rhs()));
+      const auto self = NamedValue(stmt.lhs().range(), "self", lhsValue);
+      emitBuiltinCall(
+          stmt.range(),
+          *method.graph(),
+          getAugOp(stmt, /*isTensor=*/true),
+          self,
+          {rhs},
+          {},
+          /*required=*/true);
+
+    } else {
+        throw ErrorReport(stmt.lhs())
+            << "left-hand side of augmented assignment to module "
+            << "parameters/buffers can only be tensor types";
     }
   }
 
