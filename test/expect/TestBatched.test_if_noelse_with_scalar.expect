@@ -12,7 +12,7 @@ graph(%a.1_data : Dynamic
   %11 : bool = prim::TensorToBool(%10)
   %12 : Long() = prim::NumToTensor(%6)
   %alpha : float = prim::TensorToNum(%12)
-  %data.1 : Dynamic = aten::add(%a.1_data, %b_data, %alpha)
+  %data : Dynamic = aten::add(%a.1_data, %b_data, %alpha)
   %mask : Dynamic = aten::mul(%a.1_mask, %b_mask)
   %dims : Dynamic = aten::__or__(%a.1_dims, %b_dims)
   %17 : bool = prim::Constant[value=1]()
@@ -21,24 +21,24 @@ graph(%a.1_data : Dynamic
   %data.2 : Dynamic = aten::mul(%10, %19)
   %21 : int = aten::dim(%data.2)
   %22 : bool = aten::eq(%21, %18)
-  %cond_data : Dynamic, %cond_mask : Dynamic, %data : Dynamic = prim::If(%22)
+  %cond_data : Dynamic, %cond_mask : Dynamic = prim::If(%22)
     block0() {
-      %26 : int = aten::dim(%data.1)
-      %27 : int = aten::sub(%26, %18)
-      %data.4 : Dynamic = prim::Loop(%27, %17, %data.2)
-        block0(%_ : int, %30 : Dynamic) {
-          %31 : int = aten::dim(%30)
-          %data.3 : Dynamic = aten::unsqueeze(%30, %31)
+      %25 : int = aten::dim(%data)
+      %26 : int = aten::sub(%25, %18)
+      %data.4 : Dynamic = prim::Loop(%26, %17, %data.2)
+        block0(%28 : int, %29 : Dynamic) {
+          %30 : int = aten::dim(%29)
+          %data.3 : Dynamic = aten::unsqueeze(%29, %30)
           -> (%17, %data.3)
         }
-      %cond_data.1 : Dynamic = aten::expand_as(%data.4, %data.1)
+      %cond_data.1 : Dynamic = aten::expand_as(%data.4, %data)
       %cond_mask.1 : Dynamic = aten::expand_as(%data.4, %mask)
-      -> (%cond_data.1, %cond_mask.1, %data.4)
+      -> (%cond_data.1, %cond_mask.1)
     }
     block1() {
-      -> (%data.2, %data.2, %data.2)
+      -> (%data.2, %data.2)
     }
-  %res_data : Dynamic = aten::where(%cond_data, %data.1, %a.1_data)
+  %res_data : Dynamic = aten::where(%cond_data, %data, %a.1_data)
   %res_mask : Dynamic = aten::where(%cond_mask, %mask, %a.1_mask)
   %res_dims : Dynamic = aten::__or__(%dims, %a.1_dims)
   return (%res_data, %res_mask, %res_dims);
