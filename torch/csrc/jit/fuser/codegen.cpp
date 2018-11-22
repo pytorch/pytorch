@@ -4,6 +4,7 @@
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/assertions.h"
+#include "torch/csrc/jit/fuser/compiler.h"
 #include "torch/csrc/jit/fuser/config.h"
 #include "torch/csrc/jit/fuser/interface.h"
 #include "torch/csrc/jit/fuser/tensor_info.h"
@@ -390,6 +391,9 @@ generateKernel(
     #endif // USE_CPU_FUSER
   }
 
+  if (debugFuser()) {
+    std::cerr << "fusion code:" << code_string << std::endl;
+  }
   return std::make_tuple(code_string, std::move(chunk_desc), std::move(concat_desc), has_random);
 }
 

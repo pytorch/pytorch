@@ -75,6 +75,8 @@ struct Use {
   }
 };
 
+class AliasDb;
+
 // Note [User node does not uniquely identify use]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // A while back, we wrote some code manipulating uses that looked like this:
@@ -169,6 +171,10 @@ public:
   // TODO: make this more const correct
   const use_list & uses() const {
     return uses_;
+  }
+
+  bool hasUses() const {
+    return !uses().empty();
   }
 
   TORCH_API void replaceFirstUseWith(Value * newValue);
@@ -478,7 +484,7 @@ public:
   //
   // Returns `false` if it's impossible to move `this` after `n` without
   // violating dependencies, otherwise executes the move and returns `true`
-  TORCH_API bool moveAfterTopologicallyValid(Node* n);
+  TORCH_API bool moveAfterTopologicallyValid(Node* n, const AliasDb& aliasDb);
 
   // Move a node 'n' (already in the graph) before 'this' in the topological
   // order.
@@ -502,7 +508,7 @@ public:
   //
   // Returns `false` if it's impossible to move `this` after `n` without
   // violating dependencies, otherwise executes the move and returns `true`
-  TORCH_API bool moveBeforeTopologicallyValid(Node* n);
+  TORCH_API bool moveBeforeTopologicallyValid(Node* n, const AliasDb& aliasDb);
 
   // Remove the input at 'i' from this node.
   //
@@ -583,7 +589,7 @@ public:
 
  private:
   enum class MoveSide { BEFORE, AFTER };
-  bool tryMove(Node* movePoint, MoveSide moveSide);
+  bool tryMove(Node* movePoint, MoveSide moveSide, const AliasDb& aliasDb);
   void move(Node* movePoint, MoveSide moveSide);
 
   std::pair<Value*, const Argument&> findInput(Symbol name);

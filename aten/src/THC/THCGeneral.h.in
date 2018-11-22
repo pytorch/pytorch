@@ -8,9 +8,14 @@
 #undef log2
 #undef expm1
 
+#ifdef __cplusplus
+#include <ATen/cuda/CUDAStream.h>
+#endif
+
 #include "cuda.h"
 #include "cuda_runtime.h"
 #include "cublas_v2.h"
+
 #include "cusparse.h"
 
 #cmakedefine USE_MAGMA
@@ -44,7 +49,12 @@
 #endif
 
 struct THCRNGState;  /* Random number generator state. */
-typedef struct CUDAStreamInternals THCStream;
+#ifdef __cplusplus
+typedef at::cuda::impl::CUDAStreamInternals THCStream;
+#else
+typdef struct at_cuda_impl_CUDAStreamInternals at_cuda_impl_CUDAStreamInternals;
+typedef at_cuda_impl_CUDAStreamInternals THCStream;
+#endif
 typedef struct THCState THCState;
 struct THCState;
 

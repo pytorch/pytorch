@@ -1,5 +1,5 @@
-#include "l2_minimization.h"
 #include "caffe2/core/logging.h"
+#include "l2_minimization.h"
 
 #include <cassert>
 #include <cmath>
@@ -17,8 +17,8 @@ TensorQuantizationParams P99::ChooseQuantizationParams(
   float min = hist.Min(), max = hist.Max();
   assert(min <= 0.f);
   assert(max >= 0.f);
-  float bin_width = (max - min)/nbins;
-  int zero_bin = ceil(-min/bin_width);
+  float bin_width = (max - min) / nbins;
+  int zero_bin = ceil(-min / bin_width);
 
   int best_width = 0;
   double total_sum = 0;
@@ -31,8 +31,7 @@ TensorQuantizationParams P99::ChooseQuantizationParams(
     if (min == 0) {
       i_begin = 0;
       i_end = width - 1;
-    }
-    else {
+    } else {
       i_begin = std::max(0, zero_bin - width);
       i_end = std::min(nbins - 1, zero_bin + width);
     }
@@ -51,13 +50,12 @@ TensorQuantizationParams P99::ChooseQuantizationParams(
   if (min == 0) {
     min = hist.Min();
     max = hist.Min() + bin_width * best_width;
-  }
-  else {
+  } else {
     min = hist.Min() + bin_width * (zero_bin - best_width);
     max = hist.Min() + bin_width * (zero_bin + best_width + 1);
   }
 
-  QuantizationFactory *qfactory = QuantizationFactory::GetDefaultInstance();
+  QuantizationFactory* qfactory = QuantizationFactory::GetDefaultInstance();
   return qfactory->ChooseQuantizationParams(min, max);
 } // ChooseQuantizationParams
 
