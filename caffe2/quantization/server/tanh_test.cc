@@ -24,10 +24,11 @@ TEST(Tanh, TanhUnitTest) {
     float sq_err_sum = 0, max_err = 0;
     for (int i = 0; i < NSAMPLES; ++i) {
       float x = distribution(generator);
-      uint8_t x_q =
-          Quantize<uint8_t>(x, tanh_approx.GetInputQuantizationParams());
+      uint8_t x_q = fbgemm::Quantize<uint8_t>(
+          x, tanh_approx.GetInputQuantizationParams());
       uint8_t y_q = tanh_approx.Compute(x_q);
-      float y = Dequantize(y_q, tanh_approx.GetOutputQuantizationParams());
+      float y =
+          fbgemm::Dequantize(y_q, tanh_approx.GetOutputQuantizationParams());
       float err = fabs(tanh(x) - y);
       sq_err_sum += err * err;
       max_err = std::max(err, max_err);
