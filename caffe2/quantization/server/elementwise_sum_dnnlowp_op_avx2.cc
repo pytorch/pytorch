@@ -207,7 +207,7 @@ bool SumDNNLowPOp<T, ReluFused>::RunOnDevice() {
         for (int j = j_begin; j < j_end; ++j) {
           int32_t acc = 0;
           for (int i = 0; i < InputSize(); ++i) {
-            acc += Requantize<int32_t>(
+            acc += fbgemm::Requantize<int32_t>(
                 input_data[i][j] - in_qparams_[i].zero_point,
                 in_requantization_params[i]);
           }
@@ -215,7 +215,8 @@ bool SumDNNLowPOp<T, ReluFused>::RunOnDevice() {
           if (ReluFused) {
             raw = std::max(0, raw);
           }
-          output_data[j] = Requantize<T>(raw, out_requantization_params_);
+          output_data[j] =
+              fbgemm::Requantize<T>(raw, out_requantization_params_);
         }
       }
     }
@@ -237,7 +238,7 @@ bool SumDNNLowPOp<T, ReluFused>::RunOnDevice() {
       for (int j = j_begin; j < j_end; ++j) {
         int32_t acc = 0;
         for (int i = 0; i < InputSize(); ++i) {
-          acc += Quantize<int32_t>(
+          acc += fbgemm::Quantize<int32_t>(
               ((const float*)input_data[i])[j],
               intermediate_qparams_.zero_point,
               intermediate_qparams_.scale,
@@ -247,7 +248,7 @@ bool SumDNNLowPOp<T, ReluFused>::RunOnDevice() {
         if (ReluFused) {
           raw = std::max(0, raw);
         }
-        output_data[j] = Requantize<T>(raw, out_requantization_params_);
+        output_data[j] = fbgemm::Requantize<T>(raw, out_requantization_params_);
       }
     }
   } // !InputTensorCPU_(0).template IsType<T>()

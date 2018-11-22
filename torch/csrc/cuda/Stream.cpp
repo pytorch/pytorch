@@ -36,7 +36,7 @@ static PyObject * THCPStream_pynew(PyTypeObject *type, PyObject *args, PyObject 
     stream = (THCStream*) cdata;
   } else {
     const bool isHighPriority = priority < 0 ? true : false;
-    stream = at::cuda::detail::CUDAStream_getStreamFromPool(isHighPriority);
+    stream = at::cuda::impl::CUDAStream_getStreamFromPool(isHighPriority);
   }
 
   THCPStream* self = (THCPStream *)ptr.get();

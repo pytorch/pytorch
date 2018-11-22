@@ -14,14 +14,13 @@
  * limitations under the License.
  */
 
-#ifndef CAFFE2_OPERATORS_FULLY_CONNECTED_FP16_OP_H_
-#define CAFFE2_OPERATORS_FULLY_CONNECTED_FP16_OP_H_
+#pragma once
 
+#include <immintrin.h>
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/conversions.h"
 #include "caffe2/utils/math.h"
-#include <immintrin.h>
 
 namespace caffe2 {
 
@@ -95,7 +94,9 @@ template <
 class FullyConnectedGradientFakeLowpFPOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  FullyConnectedGradientFakeLowpFPOp(const OperatorDef& operator_def, Workspace* ws)
+  FullyConnectedGradientFakeLowpFPOp(
+      const OperatorDef& operator_def,
+      Workspace* ws)
       : Operator<Context>(operator_def, ws),
         axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 1)),
         axis_w_(OperatorBase::GetSingleArgument<int32_t>("axis_w", 1)),
@@ -134,5 +135,3 @@ class FullyConnectedGradientFakeLowpFPOp : public Operator<Context> {
 };
 
 } // namespace caffe2
-
-#endif // CAFFE2_OPERATORS_FULLY_CONNECTED_FP16_OP_H_
