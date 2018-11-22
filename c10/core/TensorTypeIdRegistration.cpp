@@ -13,8 +13,7 @@ TensorTypeIds& TensorTypeIds::singleton() {
 
 TensorTypeIdCreator::TensorTypeIdCreator() : last_id_(0) {}
 
-at::TensorTypeId TensorTypeIdCreator::create() {
-
+c10::TensorTypeId TensorTypeIdCreator::create() {
   auto id = TensorTypeId(++last_id_);
 
   if (last_id_ == 0) { // overflow happened!
@@ -31,23 +30,23 @@ at::TensorTypeId TensorTypeIdCreator::create() {
 
 TensorTypeIdRegistry::TensorTypeIdRegistry() : registeredTypeIds_(), mutex_() {}
 
-void TensorTypeIdRegistry::registerId(at::TensorTypeId id) {
+void TensorTypeIdRegistry::registerId(c10::TensorTypeId id) {
   std::lock_guard<std::mutex> lock(mutex_);
   registeredTypeIds_.emplace(id);
 }
 
-void TensorTypeIdRegistry::deregisterId(at::TensorTypeId id) {
+void TensorTypeIdRegistry::deregisterId(c10::TensorTypeId id) {
   std::lock_guard<std::mutex> lock(mutex_);
   registeredTypeIds_.erase(id);
 }
 
-at::TensorTypeId TensorTypeIds::createAndRegister() {
-  at::TensorTypeId id = creator_.create();
+c10::TensorTypeId TensorTypeIds::createAndRegister() {
+  c10::TensorTypeId id = creator_.create();
   registry_.registerId(id);
   return id;
 }
 
-void TensorTypeIds::deregister(at::TensorTypeId id) {
+void TensorTypeIds::deregister(c10::TensorTypeId id) {
   registry_.deregisterId(id);
 }
 

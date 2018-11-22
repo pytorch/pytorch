@@ -23,12 +23,7 @@ class DNNLowPResizeNearestOpTest(hu.HypothesisTestCase):
     def test_resize_nearest(self, N, H, W, C, scale_w, scale_h, gc, dc):
         X = np.round(np.random.rand(N, H, W, C) * 255).astype(np.float32)
 
-        quantize = core.CreateOperator(
-            "Quantize",
-            ["X"],
-            ["X_q"],
-            engine="DNNLOWP",
-        )
+        quantize = core.CreateOperator("Quantize", ["X"], ["X_q"], engine="DNNLOWP")
         resize_nearest = core.CreateOperator(
             "Int8ResizeNearest",
             ["X_q"],

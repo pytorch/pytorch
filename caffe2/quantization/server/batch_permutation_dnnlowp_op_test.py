@@ -17,17 +17,9 @@ class DNNLowPBatchPermutationOpTest(hu.HypothesisTestCase):
         indices = np.arange(N).astype(np.int32)
         np.random.shuffle(indices)
 
-        quantize = core.CreateOperator(
-            "Quantize",
-            ["X"],
-            ["X_q"],
-            engine="DNNLOWP",
-        )
+        quantize = core.CreateOperator("Quantize", ["X"], ["X_q"], engine="DNNLOWP")
         batch_perm = core.CreateOperator(
-            "BatchPermutation",
-            ["X_q", "indices"],
-            ["Y_q"],
-            engine="DNNLOWP",
+            "BatchPermutation", ["X_q", "indices"], ["Y_q"], engine="DNNLOWP"
         )
 
         net = core.Net("test_net")

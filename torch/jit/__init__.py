@@ -1379,8 +1379,6 @@ def _find_builtin(fn):
 
 
 _register_builtin(len, 'aten::len')
-
-
 _register_builtin(_wait, 'aten::wait')
 
 # torch.jit.Error
