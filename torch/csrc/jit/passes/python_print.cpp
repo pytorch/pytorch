@@ -17,6 +17,9 @@ namespace jit {
     "CONSTANTS",
     "fork",
     "attribute",
+    "_", // avoid the confusing unnamed _
+    "inf",
+    "nan",
     // the python keywords
     "False",
     "None",
@@ -97,28 +100,64 @@ struct PythonPrintPass {
   // The inductive step is that the right-most input should be produced by the node
   // immediatly before the current node if it is in tree order.
 
+  bool isConstantLike(const Node* n) {
+    switch(n->kind()) {
+      case prim::Constant:
+      case prim::NoneGenerator:
+      case prim::Undefined:
+      case prim::None:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  bool canInline(const Value* v) {
+    const Node* n = v->node();
+    // there must be only 1 values, otherwise we need an assignment to handle the multiple outout values
+    if (n->outputs().size() != 1)
+      return false;
+    // if it is used more than once, then we need a variable
+    if (v->uses().size() != 1)
+      return false;
+    auto use = v->uses().at(0);
+    // if it has a name set, then it was written as a variable so preserve that
+    // unless it is being fed directly to the end of the block.
+    // in which case it is not as useful to give it a name just to return it
+    if (v->hasUniqueName() && use.user->kind() != prim::Return)
+      return false;
+    // don't try to inline control blocks
+    if (n->blocks().size() != 0)
+      return false;
+    // if it is a loop-carried input, we need a variable
+    // otherwise the condition or trip count may be emitted in the wrong order w.r.t. to it
+    if (use.user->kind() == prim::Loop && use.offset >= 2)
+      return false;
+    return true;
+  }
+
   // block_point is the current node in the reverse linear scan of the emitted nodes
   // v is the current value in the tree traversal that may match with block_point's output.
   const Node* scanValue(const Node* block_point, const Value* v) {
     const Node* n = v->node();
-    JIT_ASSERT(n->kind() == prim::Constant || output_inline_.count(n) == 0);
+    JIT_ASSERT(isConstantLike(n) || output_inline_.count(n) == 0);
 
-    if (n == block_point && // the node must be at the expected point of the typical tree traversal
-        n->outputs().size() == 1 && // there must be only 1 values, otherwise we need an assignment to handle the multiple outout values
-        v->uses().size() == 1 && // if it is used more than once, then we need a variable
-        n->blocks().size() == 0 && // don't try to inline control blocks,
-        !v->hasUniqueName() && // if it has a name set, then it was written as a variable so preserve that
-        (v->uses().at(0).user->kind() != prim::Loop // if it is a loop-carried input, we need a variable
-         || v->uses().at(0).offset < 2)) {          // otherwise the condition or trip count may be emitted in the wrong order w.r.t. to it
+    if (n == block_point && canInline(v)) { // the node must be at the expected point of the typical tree traversal
       // recursively see if we can inline the inputs to this input
       block_point = scanNode(block_point);
       output_inline_.insert(n);
-    } else if (n->kind() == prim::Constant) {
+    } else if (isConstantLike(n)) {
       // constant nodes can always be inlined, we will de-dup them on parsing
       // and put them at the top of the function regardless
       output_inline_.insert(n);
     }
     return block_point;
+  }
+  const Node* previousNonConstant(const Node* n) {
+    do {
+      n = n->prev();
+    } while(isConstantLike(n));
+    return n;
   }
 
   const Node* scanNode(const Node* n) {
@@ -129,7 +168,7 @@ struct PythonPrintPass {
     for(auto b : n->blocks()) {
       scanBlock(b);
     }
-    const Node* block_point = n->prev();
+    const Node* block_point = previousNonConstant(n);
     for(auto it = n->inputs().rbegin(),
              end = n->inputs().rend(); it != end; ++it) {
       block_point = scanValue(block_point, *it);
@@ -144,6 +183,37 @@ struct PythonPrintPass {
     }
   }
 
+  size_t getOrAddTensorConstant(at::Tensor t) {
+    // XXX - N^2 warning. This code does the exact same thing as
+    // ConstantPool, which is also N^2 in the size of the constants,
+    // because it doesn't hash any information about the tensors.
+    // We will probably need to optimize this at some point using hashing.
+    for(size_t i = 0; i < tensor_constants.size(); ++i) {
+      if (t.type() == tensor_constants[i].type() && t.equal(tensor_constants[i])) {
+        return i;
+      }
+    }
+    tensor_constants.emplace_back(std::move(t));
+    return tensor_constants.size() - 1;
+  }
+
+  std::unordered_set<const Node*> seen_constants;
+  void buildConstantList(const Node* n, std::vector<const Node*>& constants) {
+    for(auto input : n->inputs()) {
+      if (isConstantLike(input->node()) && seen_constants.count(input->node()) == 0) {
+        constants.push_back(input->node());
+        seen_constants.insert(input->node());
+      }
+    }
+    for(auto b : n->blocks()) {
+      buildConstantList(b, constants);
+    }
+  }
+  void buildConstantList(const Block* b, std::vector<const Node*>& constants) {
+    for(auto n : b->nodes())
+      buildConstantList(n, constants);
+    buildConstantList(b->return_node(), constants);
+  }
   // get a new name unique across calls to uniqueName() and
   // anything we have used.
   size_t next_id = 0;
@@ -185,7 +255,7 @@ struct PythonPrintPass {
   // use the uniqueName if it was set, otherwise generate a name.
   std::string genUniqueNameFor(const Value* v) {
     return genName(
-        v->hasUniqueName() ? makeValidIdentifier(v->uniqueName()) : "t");
+        v->hasUniqueName() ? makeValidIdentifier(v->uniqueName()) : "_");
   }
 
   // map from Value to how it should be printed at each use
@@ -362,7 +432,9 @@ struct PythonPrintPass {
     }
   }
 
-  void printNode(const Node* node) {
+  void printNode(const Node* node, bool print_const) {
+    if (!print_const && isConstantLike(node))
+      return;
     switch (node->kind()) {
       case prim::Return:
         if (node->inputs().size() > 0) {
@@ -412,11 +484,6 @@ struct PythonPrintPass {
         }
         out << ss.str() << "\n";
     }
-  }
-
-  size_t addTensorConstant(at::Tensor t) {
-    tensor_constants.emplace_back(std::move(t));
-    return tensor_constants.size() - 1;
   }
 
   void printMaybeAnnotatedConstantList(
@@ -506,15 +573,14 @@ struct PythonPrintPass {
       case prim::Constant: {
         IValue v = toIValue(node->output()).value();
         if(v.isTensor()) {
-          stmt << "CONSTANTS.c" << addTensorConstant(std::move(v).toTensor());
+          stmt << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
         } else if(v.isString()) {
           printQuotedString(stmt, v.toStringRef());
         } else if(v.isTensorList()) {
-          auto tl = v.toTensorListRef();
           stmt << "[";
           const char* delim = "";
-          for(at::Tensor t : tl) {
-            stmt << delim << "CONSTANTS.c" << addTensorConstant(std::move(t));
+          for(auto t : v.toTensorListRef()) {
+            stmt << delim << "CONSTANTS.c" << getOrAddTensorConstant(t);
             delim = ", ";
           }
           stmt << "]";
@@ -658,13 +724,19 @@ struct PythonPrintPass {
       out << "pass\n";
     }
     for (const auto* node : root->nodes()) {
-      printNode(node);
+      printNode(node, /*print_const=*/false);
     }
     return out;
   }
 
   void printOneFunction(const Graph& graph, const std::string& name) {
     used_names_.clear(); // each graph can reuse local names
+
+    // we always print constants at the top of the function, in the order
+    // in which they are used.
+    std::vector<const Node*> constants;
+    buildConstantList(graph.block(), constants);
+
     // current graph is used to de-dup names within a single graph
     scanBlock(graph.block());
     assignValuesToTheirUniqueNames(graph.inputs());
@@ -675,10 +747,15 @@ struct PythonPrintPass {
     out << ") -> " << resultType(graph)->python_str() << ":\n";
     {
       auto guard = WithIndented();
+      // Print initial constant table (most are just inlined into their use,
+      // but some like long strings do get emitted)
+      for (const Node* n : constants) {
+        printNode(n, /*print_const=*/true);
+      }
       // Print body
       printBlock(
           graph.block(), graph.block()->return_node()->inputs().size() > 0);
-      printNode(graph.block()->return_node());
+      printNode(graph.block()->return_node(), /*print_const=*/false);
     }
   }
 

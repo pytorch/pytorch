@@ -1,5 +1,4 @@
-#ifndef DEEPLEARNING_QUANTIZATION_CAFFE2_GROUP_NORM_DNNLOWP_OP_H_
-#define DEEPLEARNING_QUANTIZATION_CAFFE2_GROUP_NORM_DNNLOWP_OP_H_
+#pragma once
 
 #include <vector>
 
@@ -172,5 +171,3 @@ class GroupNormDNNLowPOp final : public DNNLowPOp<T, GroupNormFP32Op> {
 };
 
 } // namespace caffe2
-
-#endif // DEEPLEARNING_QUANTIZATION_CAFFE2_GROUP_NORM_DNNLOWP_OP_H_
