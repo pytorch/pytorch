@@ -6647,18 +6647,26 @@ a")
     def test_mm_batching(self):
         lstm_cell = torch.jit.script(LSTMCellS)
 
-        @torch.jit.script
         def lstm(x, hx, cx, w_ih, w_hh, b_ih, b_hh):
             for i in range(x.size(0)):
                 hx, cx = lstm_cell(x[i], hx, cx, w_ih, w_hh, b_ih, b_hh)
             return hx
 
+        slstm = torch.jit.script(lstm)
+
         inputs = get_lstm_inputs('cpu', training=True, seq_length=10)
-        lstm(*inputs).sum().backward()
-        fw_graph = lstm.graph_for(*inputs)
-        bw_graph = backward_graph(lstm, diff_graph_idx=0)
+        slstm(*inputs).sum().backward()
+
+        fw_graph = slstm.graph_for(*inputs)
+        bw_graph = backward_graph(slstm, diff_graph_idx=0)
         self.assertTrue('prim::MMBatchSide' in str(fw_graph))
         self.assertTrue('prim::MMTreeReduce' in str(bw_graph))
+
+        sout = slstm(*inputs)
+        out = lstm(*inputs)
+        self.assertEqual(slstm(*inputs), lstm(*inputs))
+        self.assertEqual(torch.autograd.grad(slstm(*inputs).sum(), inputs),
+                         torch.autograd.grad(lstm(*inputs).sum(), inputs))
 
     def test_loop_unrolling(self):
         def fn(x):

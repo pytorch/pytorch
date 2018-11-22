@@ -2,6 +2,7 @@
 
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/peephole.h"
+#include "torch/csrc/jit/passes/alias_analysis.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/symbolic_variable.h"
@@ -306,8 +307,8 @@ RegisterOperators mm_batch_side_reg({
 });
 
 std::pair<std::vector<Node*>, std::vector<Node*>>
-gatherIndependentMMUses(Value *value, const AliasDb& db) {
-  static const auto postprocess = [](std::vector<Node*> mms) {
+gatherIndependentMMUses(Value *value, const AliasDb& alias_db) {
+  const auto postprocess = [&](std::vector<Node*> mms) {
     if (mms.size() == 0) {
       return mms;
     }
@@ -349,7 +350,7 @@ void BatchMMSide(Block * block, const AliasDb& alias_db) {
   const auto batch_side = [&](std::vector<Node*>& mms, Side side) {
     JIT_ASSERT(!mms.empty());
     for (int64_t i = static_cast<int64_t>(mms.size()) - 2; i >= 0; --i) {
-      bool move_ok = mms[i]->moveBeforeTopologicallyValid(mms[i + 1]);
+      bool move_ok = mms[i]->moveBeforeTopologicallyValid(mms[i + 1], alias_db);
       JIT_ASSERT(move_ok);
     }
     WithInsertPoint insert_guard { mms[0] };
@@ -373,7 +374,7 @@ void BatchMMSide(Block * block, const AliasDb& alias_db) {
         if (/*bool not_inserted = */!considered_values.emplace(input).second) {
           continue;
         }
-        auto uses_with_many = gatherIndependentMMUses(input);
+        auto uses_with_many = gatherIndependentMMUses(input, alias_db);
         if (uses_with_many.first.size() >= how_many_is_many) {
           batch_side(uses_with_many.first, Side::LHS);
         }

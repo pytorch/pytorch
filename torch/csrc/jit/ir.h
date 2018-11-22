@@ -488,7 +488,7 @@ public:
 
   // Like moveAfterTopologicallyValid, but only returns if the move is
   // possible, without actually performing it.
-  TORCH_API bool couldMoveAfterTopologically(Node* n);
+  TORCH_API bool couldMoveAfterTopologically(Node* n, const AliasDb& aliasdb);
 
   // Move a node 'n' (already in the graph) before 'this' in the topological
   // order.
@@ -516,7 +516,7 @@ public:
 
   // Like moveBeforeTopologicallyValid, but only returns if the move is
   // possible, without actually performing it.
-  TORCH_API bool couldMoveBeforeTopologically(Node* n);
+  TORCH_API bool couldMoveBeforeTopologically(Node* n, const AliasDb& aliasDb);
 
   // Remove the input at 'i' from this node.
   //

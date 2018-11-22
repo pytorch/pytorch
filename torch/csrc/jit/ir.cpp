@@ -917,6 +917,7 @@ Node* Node::insertAfter(Node * n) {
 
 bool Node::moveAfterTopologicallyValid(Node* n, const AliasDb& aliasDb) {
   return tryMove(n, MoveSide::AFTER, aliasDb, /*dryRun=*/false);
+}
 
 bool Node::couldMoveAfterTopologically(Node* n, const AliasDb& aliasDb) {
   return tryMove(n, MoveSide::AFTER, aliasDb, /*dryRun=*/true);
