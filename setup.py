@@ -941,7 +941,6 @@ main_sources = [
     "torch/csrc/utils/object_ptr.cpp",
     "torch/csrc/utils/python_arg_parser.cpp",
     "torch/csrc/utils/tensor_apply.cpp",
-    "torch/csrc/utils/tensor_conversion_dispatch.cpp",
     "torch/csrc/utils/tensor_dtypes.cpp",
     "torch/csrc/utils/tensor_flatten.cpp",
     "torch/csrc/utils/tensor_layouts.cpp",

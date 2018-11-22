@@ -20,7 +20,6 @@
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/utils/python_tuples.h"
 #include "torch/csrc/utils/tensor_apply.h"
-#include "torch/csrc/utils/tensor_conversion_dispatch.h"
 #include "torch/csrc/utils/tensor_list.h"
 #include "torch/csrc/utils/tensor_new.h"
 #include "torch/csrc/utils/tensor_numpy.h"
@@ -606,10 +605,11 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
     throw TypeError("dtype must be a type, str, or dtype object");
   }
   auto self_device_type = torch::getDeviceType(self_.type());
-  auto& type = is_dtype ? torch::getVariableType(r.scalartype(0), *torch::getLayout(self_.type().backend()), self_device_type) :
-                          torch::utils::type_from_string(type_name);
-  return THPVariable_Wrap(torch::utils::dispatch_type_conversion(
-      self_, type, c10::nullopt, r.toBool(1)));
+  auto scalar_type = is_dtype ? r.scalartype(0) : torch::utils::type_from_string(type_name).scalarType();
+  return THPVariable_Wrap([&]() {
+      AutoNoGIL no_gil;
+      return self_.to(scalar_type, r.toBool(1));
+    }());
   END_HANDLE_TH_ERRORS
 }
 
