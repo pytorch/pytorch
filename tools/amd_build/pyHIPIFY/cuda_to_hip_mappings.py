@@ -2268,7 +2268,14 @@ C10_MAPPINGS = collections.OrderedDict([
     ("c10/cuda/CUDAException.h", ("c10/hip/HIPException.h", API_C10)),
     ("c10/cuda/CUDAMacros.h", ("c10/hip/HIPMacros.h", API_C10)),
     ("c10/cuda/CUDAMathCompat.h", ("c10/hip/HIPMathCompat.h", API_C10)),
+    ("c10/cuda/CUDAFunctions.h", ("c10/hip/HIPFunctions.h", API_C10)),
     ("C10_CUDA_CHECK", ("C10_HIP_CHECK", API_C10)),
+    ("c10::cuda", ("c10::hip", API_C10)),
+    # This substitution is not permissible, because there's another copy of this
+    # function in torch/cuda.h
+    # ("cuda::device_count", ("hip::device_count", API_C10)),
+    ("cuda::current_device", ("hip::current_device", API_C10)),
+    ("cuda::set_device", ("hip::set_device", API_C10)),
 ])
 
 # NB: C10 mappings are more specific than Caffe2 mappings, so run them

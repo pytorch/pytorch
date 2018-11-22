@@ -18,9 +18,10 @@ namespace onnx {
 class OnnxExporter;
 }
 
-class CAFFE2_API OnnxifiTransformer {
+class CAFFE2_API OnnxifiTransformer final {
  public:
   explicit OnnxifiTransformer(bool infer_shapes, bool debug);
+  ~OnnxifiTransformer();
 
   void Transform(
       Workspace* ws,

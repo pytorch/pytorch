@@ -1,6 +1,5 @@
 #include <torch/csrc/python_headers.h>
 
-#include <c10d/Def.hpp>
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/ProcessGroupGloo.hpp>

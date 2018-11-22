@@ -53,13 +53,26 @@
 // Simply define the namespace, in case a dependent library want to refer to
 // the c10 namespace but not any nontrivial files.
 namespace c10 {} // namespace c10
+namespace c10 { namespace cuda {} }
+namespace c10 { namespace hip {} }
 
 // Since C10 is the core library for caffe2 (and aten), we will simply reroute
 // all abstractions defined in c10 to be available in caffe2 as well.
 // This is only for backwards compatibility. Please use the symbols from the
 // c10 namespace where possible.
-namespace caffe2 {using namespace c10;}
-namespace at {using namespace c10;}
+namespace caffe2 { using namespace c10; }
+namespace at { using namespace c10; }
+namespace at { namespace cuda { using namespace c10::cuda; }}
+
+// WARNING!!! THIS IS A GIANT HACK!!!
+// This line means you cannot simultaneously include c10/hip
+// and c10/cuda and then use them from the at::cuda namespace.
+// This is true in practice, because HIPIFY works inplace on
+// files in ATen/cuda, so it assumes that c10::hip is available
+// from at::cuda.  This namespace makes that happen.  When
+// HIPIFY is no longer out-of-place, we can switch the cuda
+// here to hip and everyone is happy.
+namespace at { namespace cuda { using namespace c10::hip; }}
 
 // C10_NORETURN
 #if defined(_MSC_VER)

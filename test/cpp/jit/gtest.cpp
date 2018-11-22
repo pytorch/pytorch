@@ -27,6 +27,7 @@ JIT_TEST(SchemaParser)
 JIT_TEST(TopologicalIndex)
 JIT_TEST(TopologicalMove)
 JIT_TEST(SubgraphUtils)
+JIT_TEST(AliasAnalysis)
 
 JIT_TEST(THNNConv)
 JIT_TEST(ATenNativeBatchNorm)

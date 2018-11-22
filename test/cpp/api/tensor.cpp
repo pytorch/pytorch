@@ -210,12 +210,12 @@ TEST(TensorTest, ContainsCorrectValuesWhenConstructedFromVector) {
 }
 
 TEST(TensorTest, UsesOptionsThatAreSupplied) {
-  auto tensor = at::tensor(123, dtype(at::kFloat)) + 0.5;
+  auto tensor = at::tensor(123, at::dtype(at::kFloat)) + 0.5;
   ASSERT_EQ(tensor.numel(), 1);
   ASSERT_EQ(tensor.dtype(), at::kFloat);
   ASSERT_TRUE(almost_equal(tensor[0], 123.5));
 
-  tensor = at::tensor({1.1, 2.2, 3.3}, dtype(at::kInt));
+  tensor = at::tensor({1.1, 2.2, 3.3}, at::dtype(at::kInt));
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.dtype(), at::kInt);
   ASSERT_EQ(tensor.layout(), at::kStrided);
