@@ -293,7 +293,7 @@ struct GraphExecutorImpl {
 
   static std::shared_ptr<Graph> prepareGraph(std::shared_ptr<Graph>& graph) {
     auto copy = graph->copy();
-    EraseShapeInformation(*copy);
+    EraseShapeInformation(copy);
     return copy;
   }
 
@@ -427,7 +427,7 @@ private:
     //          constants, and constant propagation doesn't need shape information
     //          anyway, so it's better to run it first.
     ConstantPropagation(opt_graph);
-    PropagateInputShapes(*opt_graph);
+    PropagateInputShapes(opt_graph);
     PropagateRequiresGrad(opt_graph);
 
     // Phase 3. Run differentiable optimizations (i.e. simple graph rewrites that
@@ -513,7 +513,7 @@ private:
     // been set.
     auto local_graph = this->graph->copy();
     setInputTypes(*local_graph, spec);
-    PropagateInputShapes(*local_graph);
+    PropagateInputShapes(local_graph);
     auto output_values = script::inlineCallTo(*state->graph, *local_graph, input_values);
 
     auto outputs = last(stack, num_outputs);

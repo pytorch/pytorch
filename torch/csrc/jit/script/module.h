@@ -121,7 +121,7 @@ struct Method {
     }
     const auto size = stack.size();
     setInputTypes(*retval, ArgumentSpec(with_grad, std::move(stack), size));
-    PropagateInputShapes(*retval);
+    PropagateInputShapes(retval);
     return retval;
   }
 
@@ -132,7 +132,7 @@ struct Method {
     }
     if (propagate) {
       setInputTypes(*retval, ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
-      PropagateInputShapes(*retval);
+      PropagateInputShapes(retval);
     }
     JIT_ASSERT(retval->inputs().size() == inputs.size());
     for (size_t i=0; i < retval->inputs().size(); ++i) {
@@ -317,7 +317,7 @@ struct Module {
   }
 
   bool is_optimized() const {
-    return optimize; 
+    return optimize;
   }
 
   IValue forward(std::vector<IValue> inputs) {
