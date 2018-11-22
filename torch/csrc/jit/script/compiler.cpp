@@ -2563,20 +2563,22 @@ c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(Expr expr) {
   auto var = Var(subscript.value());
   auto subscript_exprs = subscript.subscript_exprs();
 
-  if (subscript_exprs.size() != 1)
-    throw ErrorReport(subscript.subscript_exprs().range())
-      << "BroadcastingList/Optional[BroadcastingList] must be subscripted with a type";
-
   // handle the case where the BroadcastingList is wrapped in a Optional type
   if(var.name().name() == "Optional") {
     auto broadcast_list = handleBroadcastList(subscript_exprs[0]);
-    TypePtr opt_type = OptionalType::create(broadcast_list->first);
-    return std::pair<TypePtr, int32_t>(opt_type, broadcast_list->second);
-  }
-
-  if (var.name().name().find("BroadcastingList") != 0) {
+    if (broadcast_list) {
+      TypePtr opt_type = OptionalType::create(broadcast_list->first);
+      return std::pair<TypePtr, int32_t>(opt_type, broadcast_list->second);
+    } else {
+      return c10::nullopt;
+    }
+  } else if (var.name().name().find("BroadcastingList") != 0) {
     return c10::nullopt;
   }
+
+  if (subscript_exprs.size() != 1)
+    throw ErrorReport(subscript.subscript_exprs().range())
+      << "BroadcastingList/Optional[BroadcastingList] must be subscripted with a type";
 
   auto typ = subscript_exprs[0];
   auto len = var.name().name().substr(strlen("BroadcastingList"));
