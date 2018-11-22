@@ -8,10 +8,11 @@ namespace caffe2 {
 
 template <typename T>
 class FullyConnectedRowWiseDNNLowPOp final
-  : public DNNLowPOp<T, FullyConnectedOp<CPUContext>> {
+    : public DNNLowPOp<T, FullyConnectedOp<CPUContext>> {
  public:
-  FullyConnectedRowWiseDNNLowPOp
-    (const OperatorDef& operator_def, Workspace *ws);
+  FullyConnectedRowWiseDNNLowPOp(
+      const OperatorDef& operator_def,
+      Workspace* ws);
   bool RunOnDevice() override;
 
   USE_OPERATOR_FUNCTIONS(CPUContext);
