@@ -6,6 +6,7 @@ import math
 import types
 from operator import mul
 from functools import reduce
+from typing import List
 
 import torch
 from torch._C import _infer_size, _add_docstr
