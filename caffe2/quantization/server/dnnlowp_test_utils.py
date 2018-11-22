@@ -8,8 +8,7 @@ from hypothesis import assume
 # floating point results (output[0]).
 # The error bound is derived based on assumption that there's no input
 # quantization error.
-def check_quantized_results_close(
-        outputs, ref=None, symmetric=False, atol_scale=0.53):
+def check_quantized_results_close(outputs, ref=None, symmetric=False, atol_scale=0.53):
     if ref is None:
         ref = outputs[0][0]
     ref_min = min(np.min(ref), 0)
@@ -44,15 +43,7 @@ def nchw2nhwc(tensor):
 
 # Make sure we won't have overflows from vpmaddubsw instruction used in fbgemm)
 def avoid_vpmaddubsw_overflow_fc(
-    batch_size,
-    input_channels,
-    output_channels,
-    X,
-    X_min,
-    X_max,
-    W,
-    W_min,
-    W_max,
+    batch_size, input_channels, output_channels, X, X_min, X_max, W, W_min, W_max
 ):
     for i, j in np.ndindex((batch_size, output_channels)):
         for k in range(0, input_channels // 2 * 2, 2):
@@ -75,6 +66,7 @@ def avoid_vpmaddubsw_overflow_fc(
             w0 = W[j, k] - 128 - W_min
             w1 = W[j, k + 1] - 128 - W_min
             assert -(1 << 15) <= x0 * w0 + x1 * w1 < (1 << 15)
+
 
 # Make sure we won't have overflows from vpmaddubsw instruction used in
 # fbgemm (FIXME: this assumes fbgemm is used only for NHWC and im2col
@@ -273,7 +265,7 @@ def generate_convnd_inputs(
             X[..., g * input_channels_per_group : (g + 1) * input_channels_per_group],
             X_min,
             X_max,
-            W[g * output_channels_per_group : (g + 1) * output_channels_per_group, ],
+            W[g * output_channels_per_group : (g + 1) * output_channels_per_group,],
             W_min + (g if different_range_per_group else 0),
             W_max + (g if different_range_per_group else 0),
         )
