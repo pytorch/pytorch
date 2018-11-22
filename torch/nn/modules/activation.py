@@ -79,7 +79,7 @@ class ReLU(Threshold):
     """
 
     def __init__(self, inplace=False):
-        super(ReLU, self).__init__(0, 0, inplace)
+        super(ReLU, self).__init__(0., 0., inplace)
 
     def extra_repr(self):
         inplace_str = 'inplace' if self.inplace else ''
@@ -182,7 +182,7 @@ class Hardtanh(Module):
     """
     __constants__ = ['min_val', 'max_val', 'inplace']
 
-    def __init__(self, min_val=-1, max_val=1, inplace=False, min_value=None, max_value=None):
+    def __init__(self, min_val=-1., max_val=1., inplace=False, min_value=None, max_value=None):
         super(Hardtanh, self).__init__()
         if min_value is not None:
             warnings.warn("keyword argument min_value is deprecated and renamed to min_val")
@@ -232,7 +232,7 @@ class ReLU6(Hardtanh):
     """
 
     def __init__(self, inplace=False):
-        super(ReLU6, self).__init__(0, 6, inplace)
+        super(ReLU6, self).__init__(0., 6., inplace)
 
     def extra_repr(self):
         inplace_str = 'inplace' if self.inplace else ''
