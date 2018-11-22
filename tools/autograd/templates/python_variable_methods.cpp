@@ -604,7 +604,6 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   } else {
     throw TypeError("dtype must be a type, str, or dtype object");
   }
-  auto self_device_type = torch::getDeviceType(self_.type());
   auto scalar_type = is_dtype ? r.scalartype(0) : torch::utils::type_from_string(type_name).scalarType();
   return THPVariable_Wrap([&]() {
       AutoNoGIL no_gil;
