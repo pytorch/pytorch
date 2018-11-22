@@ -6,18 +6,17 @@ set PATH=%INSTALL_DIR%\bin;%PATH%
 : The following environment variables are used exclusively by cmake and should have forward slashes rather than backslashes
 set BASE_DIR=%cd:\=/%
 set TORCH_LIB_DIR=%cd:\=/%/torch/lib
-set INSTALL_DIR=%cd:\=/%/torch/lib/tmp_install
 set THIRD_PARTY_DIR=%cd:\=/%/third_party
 set BASIC_C_FLAGS=
 set BASIC_CUDA_FLAGS=
 
-IF NOT DEFINED CMAKE_INSTALL_PREFIX (
-  set "CMAKE_INSTALL_PREFIX=%INSTALL_DIR%"
+IF NOT DEFINED INSTALL_DIR (
+  set "INSTALL_DIR=%cd:\=/%/torch/lib/tmp_install"
 ) ELSE (
-  set "CMAKE_INSTALL_PREFIX=%CMAKE_INSTALL_PREFIX:\=/%"
+  set "INSTALL_DIR=%INSTALL_DIR:\=/%"
 )
 
-set LDFLAGS=/LIBPATH:%CMAKE_INSTALL_PREFIX%/lib
+set LDFLAGS=/LIBPATH:%INSTALL_DIR%/lib
 :: set TORCH_CUDA_ARCH_LIST=6.1
 
 set C_FLAGS=%BASIC_C_FLAGS% /D_WIN32 /Z7 /EHa /DNOMINMAX
@@ -147,11 +146,11 @@ FOR %%a IN (%_BUILD_ARGS%) DO (
 : Copy Artifacts
 cd torch\lib
 
-copy /Y "%CMAKE_INSTALL_PREFIX%\lib\*" .
-IF EXIST "%CMAKE_INSTALL_PREFIX%\bin" (
-  copy /Y "%CMAKE_INSTALL_PREFIX%\bin\*" .
+copy /Y "%INSTALL_DIR%\lib\*" .
+IF EXIST "%INSTALL_DIR%\bin" (
+  copy /Y "%INSTALL_DIR%\bin\*" .
 )
-xcopy /Y /E "%CMAKE_INSTALL_PREFIX%\include\*.*" include\*.*
+xcopy /Y /E "%INSTALL_DIR%\include\*.*" include\*.*
 xcopy /Y ..\..\aten\src\THNN\generic\THNN.h  .
 xcopy /Y ..\..\aten\src\THCUNN\generic\THCUNN.h .
 
@@ -166,7 +165,7 @@ goto:eof
   if not exist build mkdir build\%~1
   pushd build\%~1
   cmake ../../%~1 %CMAKE_GENERATOR_COMMAND% ^
-                  -DCMAKE_INSTALL_PREFIX="%CMAKE_INSTALL_PREFIX%" ^
+                  -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
                   -DCMAKE_C_FLAGS="%C_FLAGS%" ^
                   -DCMAKE_SHARED_LINKER_FLAGS="%LINK_FLAGS%" ^
                   -DCMAKE_CXX_FLAGS="%C_FLAGS% %CPP_FLAGS%" ^
@@ -243,7 +242,7 @@ goto:eof
                   -DCUDNN_LIBRARY="%CUDNN_LIBRARY%" ^
                   -DUSE_MKLDNN=%USE_MKLDNN% ^
                   -DATEN_NO_CONTRIB=1 ^
-                  -DCMAKE_INSTALL_PREFIX="%CMAKE_INSTALL_PREFIX%" ^
+                  -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
                   -DCMAKE_C_FLAGS="%USER_CFLAGS%" ^
                   -DCMAKE_CXX_FLAGS="/EHa %USER_CFLAGS%" ^
                   -DCMAKE_EXE_LINKER_FLAGS="%USER_LDFLAGS%" ^
