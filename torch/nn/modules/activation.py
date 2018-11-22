@@ -9,8 +9,6 @@ from ..._jit_internal import weak_module, weak_script_method
 
 @torch._jit_internal.weak_module
 class Threshold(Module):
-    __constants__ = ['threshold', 'value', 'inplace']
-
     r"""Thresholds each element of the input Tensor
 
     Threshold is defined as:
@@ -38,6 +36,7 @@ class Threshold(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+    __constants__ = ['threshold', 'value', 'inplace']
 
     def __init__(self, threshold, value, inplace=False):
         super(Threshold, self).__init__()
@@ -181,6 +180,7 @@ class Hardtanh(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+    __constants__ = ['min_val', 'max_val', 'inplace']
 
     def __init__(self, min_val=-1, max_val=1, inplace=False, min_value=None, max_value=None):
         super(Hardtanh, self).__init__()
@@ -316,6 +316,7 @@ class ELU(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+    __constants__ = ['alpha', 'inplace']
 
     def __init__(self, alpha=1., inplace=False):
         super(ELU, self).__init__()
@@ -360,6 +361,7 @@ class CELU(Module):
     .. _`Continuously Differentiable Exponential Linear Units`:
         https://arxiv.org/abs/1704.07483
     """
+    __constants__ = ['alpha', 'inplace']
 
     def __init__(self, alpha=1., inplace=False):
         super(CELU, self).__init__()
@@ -405,6 +407,7 @@ class SELU(Module):
 
     .. _Self-Normalizing Neural Networks: https://arxiv.org/abs/1706.02515
     """
+    __constants__ = ['inplace']
 
     def __init__(self, inplace=False):
         super(SELU, self).__init__()
@@ -439,6 +442,7 @@ class GLU(Module):
         >>> input = torch.randn(4, 2)
         >>> output = m(input)
     """
+    __constants__ = ['dim']
 
     def __init__(self, dim=-1):
         super(GLU, self).__init__()
@@ -528,6 +532,7 @@ class LeakyReLU(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+    __constants__ = ['inplace', 'negative_slope']
 
     def __init__(self, negative_slope=1e-2, inplace=False):
         super(LeakyReLU, self).__init__()
@@ -598,7 +603,7 @@ class Softplus(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
-    __constants__ = ['beta, threshold']
+    __constants__ = ['beta', 'threshold']
 
     def __init__(self, beta=1, threshold=20):
         super(Softplus, self).__init__()
@@ -799,6 +804,7 @@ class Softmin(Module):
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
     """
+    __constants__ = ['dim']
 
     def __init__(self, dim=None):
         super(Softmin, self).__init__()
@@ -843,6 +849,7 @@ class Softmax(Module):
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
     """
+    __constants__ = ['dim']
 
     def __init__(self, dim=None):
         super(Softmax, self).__init__()
@@ -913,6 +920,7 @@ class LogSoftmax(Module):
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
     """
+    __constants__ = ['dim']
 
     def __init__(self, dim=None):
         super(LogSoftmax, self).__init__()
