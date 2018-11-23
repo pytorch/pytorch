@@ -81,6 +81,14 @@ static const char* scalarTypeName(const at::ScalarType type) {
   }
 }
 
+static const char* calcScalarTypeName(const at::ScalarType type) {
+  if (type == at::ScalarType::Half) {
+    return "float";
+  }
+  return scalarTypeName(type);
+}
+
+
 static std::string variableType(const std::shared_ptr<c10::Type> t) {
   if (t->kind() == TypeKind::IntType) {
     return "int";
@@ -88,10 +96,32 @@ static std::string variableType(const std::shared_ptr<c10::Type> t) {
     return "float";
   } else if (t->kind() == TypeKind::TensorType) {
     auto const tt = t->cast<TensorType>();
-    return scalarTypeName(tt->scalarType());
+    return calcScalarTypeName(tt->scalarType());
   }
   // TODO: we might also error out if we think the above should cover everything
   return "auto";
+}
+
+static std::string typeCastedValueName(const std::shared_ptr<c10::Type> t, const at::ScalarType outtype, const std::string& vn) {
+  if (t->kind() == TypeKind::IntType) {
+    if (! isIntegralType(outtype)) {
+      return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
+    }
+    return vn;
+  } else if (t->kind() == TypeKind::FloatType) {
+    if (! isFloatingType(outtype)) {
+      return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
+    }
+    return vn;
+  } else if (t->kind() == TypeKind::TensorType) {
+    auto const tt = t->cast<TensorType>();
+    if (tt->scalarType() != outtype) {
+      return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
+    }
+    return vn;
+  }
+  // TODO: we might also error out if we think the above should cover everything
+  return vn;
 }
 
 // Writes "simple mappable" ops
@@ -119,13 +149,13 @@ static std::string encodeRHS(const Node* n) {
     {aten::atan, "atanf(${0})"},
     {aten::tanh, "tanhf(${0})"},
     {aten::sqrt, "sqrtf(${0})"},
-    {aten::rsqrt, "rsqrtf(${0})"},
+    {aten::rsqrt, "1.f/sqrtf(${0})"},
     {aten::ceil, "ceilf(${0})"},
     {aten::floor, "floorf(${0})"},
     {aten::round, "roundf(${0})"},
     {aten::trunc, "truncf(${0})"},
     {aten::frac, "fracf(${0})"},
-    {aten::reciprocal, "reciprocalf(${0})"},
+    {aten::reciprocal, "1.f/(${0})"},
     {aten::neg, "-${0}"},
     //simple binary
     {aten::atan2, "atan2(${0}, ${1})"},
@@ -142,22 +172,22 @@ static std::string encodeRHS(const Node* n) {
     {aten::__or__, "${0} || ${1}"},
     {aten::__rshift__, "${0} >> ${1}"},
     {aten::__xor__, "${0} ^ ${1}"},
-    {aten::div, "${0} / ${1}"},
+    {aten::div, "${cast_0} / ${cast_1}"},
     {aten::eq, "${0} == ${1}"},
-    {aten::fmod, "fmodf(${0}, ${1})"},
+    {aten::fmod, "fmodf(${cast_0}, ${cast_1})"},
     {aten::ge, "(${0} >= ${1})"},
     {aten::gt, "${0} > ${1}"},
     {aten::le, "(${0} <= ${1})"},
     {aten::lt, "${0} < ${1}"},
-    {aten::type_as, "(${0})"}, //everything is implicitly convertible to float
-    {aten::mul, "${0} * ${1}"},
+    {aten::type_as, "(${cast_0})"},
+    {aten::mul, "${cast_0} * ${cast_1}"},
     {aten::ne, "${0} != ${1}"},
     {aten::remainder, "remainderf(${0}, ${1})"},
-    {aten::pow, "powf(${0}, ${1})"},
+    {aten::pow, "powf(${cast_0}, ${cast_1})"},
 
     //alpha
-    {aten::add, "${0} + ${2}*${1}"},
-    {aten::sub, "(${0} - ${2}*${1})"},
+    {aten::add, "${cast_0} + ${cast_2}*${cast_1}"},
+    {aten::sub, "(${cast_0} - ${cast_2}*${cast_1})"},
     {aten::rand_like, "uniform(rnd())"},
 
     // min, max
@@ -188,8 +218,13 @@ static std::string encodeRHS(const Node* n) {
 
   TemplateEnv env;
   size_t i = 0;
+  auto outtype = n->output()->type()->expect<c10::TensorType const>()->scalarType();
   for(auto in : n->inputs()) {
-    env.s(std::to_string(i++), valueName(in));
+    // PyTorch converts (scalar) argument types to result before applying the operator
+    // e.g. 1.4-torch.tensor(3) = -2
+    env.s(std::to_string(i), valueName(in));
+    env.s(std::string("cast_")+std::to_string(i), typeCastedValueName(in->type(), outtype, valueName(in)));
+    i++;
   }
 
   const auto & str = simple_map_ops.at(n->kind());
@@ -331,7 +366,7 @@ generateKernel(
     } else {
       env.s("access", format("t${formal}.data[t${formal}_offset]", env));
     }
-    env.s("lhs_type", scalarTypeName(input.second.scalar_type));
+    env.s("lhs_type", calcScalarTypeName(input.second.scalar_type));
 
     body << format("${lhs_type} ${node} = ${access};\n", env);
   }
