@@ -2552,9 +2552,13 @@
 
 - func: tril_(Tensor self, int64_t diagonal=0) -> Tensor
   variants: method
+  dispatch:
+    CPU: _tril_cpu_
 
 - func: triu_(Tensor self,  int64_t diagonal=0) -> Tensor
   variants: method
+  dispatch:
+    CPU: _triu_cpu_
 
 - func: digamma_(Tensor self) -> Tensor
   variants: method
@@ -2655,11 +2659,15 @@
   variants: method, function
 
 - func: triu_out(Tensor result, Tensor self, int64_t diagonal=0) -> Tensor
+  dispatch:
+    CPU: _triu_cpu_out
 
 - func: triu(Tensor self, int64_t diagonal=0) -> Tensor
   variants: method, function
 
 - func: tril_out(Tensor result, Tensor self, int64_t diagonal=0) -> Tensor
+  dispatch:
+    CPU: _tril_cpu_out
 
 - func: tril(Tensor self, int64_t diagonal=0) -> Tensor
   variants: method, function

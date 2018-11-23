@@ -371,6 +371,93 @@ Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
   }
 }
 
+template <typename T, bool upper>
+struct BatchTensorTriOp {
+  BatchTensorTriOp(T* start_, int64_t stride_batch_, int64_t stride_row_, int64_t stride_col_, int64_t k_)
+    : start(start_), stride_batch(stride_batch_), stride_row(stride_row_), stride_col(stride_col_), k(k_) {}
+
+  __device__ __forceinline__ int mask(T* result) {
+    ptrdiff_t n = result - start;
+    bool stride_cond = stride_row > stride_col;
+    int64_t stride_max = stride_cond ? stride_row : stride_col;
+    int64_t stride_min = stride_cond ? stride_col : stride_row;
+
+    if (stride_batch > stride_max) {
+      n = n % stride_batch;
+    } else if (stride_batch > stride_min) {
+      n = n - n % stride_max + n % stride_batch;
+    }
+
+    int64_t row, col;
+    if (stride_cond) {
+      row = (int64_t) (n / stride_row);
+      col = (int64_t) ((n % stride_row) / stride_col);
+    } else {
+      row = (int64_t) ((n % stride_col) / stride_row);
+      col = (int64_t) (n / stride_col);
+    }
+    return upper ? (col - row >= k) : (col - row <= k);
+  }
+
+  __device__ __forceinline__ void operator()(T* result, T* self) {
+    *result = mask(*result) ? *self : scalar_cast<T>(0);
+  }
+
+  __device__ __forceinline__ void operator()(T* v) {
+    if (!mask(*v))
+      *v = scalar_cast<T>(0);
+  }
+
+  const T* start;
+  const int64_t stride_batch, stride_row, stride_col, k;
+};
+
+template <typename scalar_t, bool inplace, bool upper>
+void apply_triu_tril(Tensor& result, const Tensor& self, int64_t k) {
+  auto result_batch_stride = matrixStride(result);
+  scalar_t* result_data = result.data<scalar_t>();
+
+  auto result_row_stride = result.stride(-2);
+  auto result_column_stride = result.stride(-1);
+
+  BatchTensorTriOp<scalar_t, upper> op(result_data, result_batch_stride, result_row_stride, result_column_stride, k);
+  if (!inplace) {
+    at::cuda::CUDA_tensor_apply2<scalar_t, scalar_t> (result, self, op);
+  } else {
+    at::cuda::CUDA_tensor_apply1<scalar_t> (result, op);
+  }
+}
+
+Tensor& _tril_cuda_(Tensor &self, int64_t k) {
+  AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "tril", [&]{
+    apply_triu_tril<scalar_t, true, false>(self, self, k);
+  });
+  return self;
+}
+
+Tensor& _tril_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
+  result.resize_as_(self);
+  AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "tril", [&]{
+    apply_triu_tril<scalar_t, false, false>(result, self, k);
+  });
+  return result;
+}
+
+Tensor& _triu_cuda_(Tensor &self, int64_t k) {
+  AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "triu", [&]{
+    apply_triu_tril<scalar_t, true, true>(self, self, k);
+  });
+  return self;
+}
+
+Tensor& _triu_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
+  result.resize_as_(self);
+  AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "triu", [&]{
+    apply_triu_tril<scalar_t, false, true>(result, self, k);
+  });
+  return result;
+}
+
 }}  // namespace at::native
 
 #undef ALLOCATE_ARRAY

@@ -375,4 +375,89 @@ Tensor& cholesky_out(Tensor &result, const Tensor &self, bool upper) {
   return result;
 }
 
+template <typename scalar_t, bool inplace, bool upper>
+void apply_triu_tril(Tensor& result, const Tensor& self, int64_t k) {
+  auto n = self.size(-2);
+  auto m = self.size(-1);
+  auto stride = matrixStride(self);
+  auto batchsize = batchCount(self);
+  auto self_data = self.data<scalar_t>();
+  auto result_data = result.data<scalar_t>();
+
+  auto self_row_stride = self.stride(-2);
+  auto self_column_stride = self.stride(-1);
+  auto result_row_stride = result.stride(-2);
+  auto result_column_stride = result.stride(-1);
+
+  constexpr int64_t zero = 0;
+
+  for (int64_t b = 0; b < batchsize; b++) {
+    scalar_t* self_batch = &self_data[b * stride];
+    scalar_t* result_batch = &result_data[b * stride];
+    for (int64_t i = 0; i < n; i++) {
+      if (upper) {
+        for (int64_t j = 0; j < std::min(m, i + k); j++) {
+          result_batch[i * result_row_stride + j * result_column_stride] = 0;
+        }
+        if (!inplace) {
+          for (int64_t j = std::max(zero, i + k); j < m; j++) {
+            result_batch[i * result_row_stride + j * result_column_stride] = self_batch[i * self_row_stride + j * self_column_stride];
+          }
+        }
+      } else {
+        for (int64_t j = std::max(zero, i + k + 1); j < m; j++) {
+          result_batch[i * result_row_stride + j * result_column_stride] = 0;
+        }
+        if (!inplace) {
+          for (int64_t j = zero; j < std::min(m, i + k + 1); j++) {
+            result_batch[i * result_row_stride + j * result_column_stride] = self_batch[i * self_row_stride + j * self_column_stride];
+          }
+        }
+      }
+    }
+  }
+}
+
+Tensor tril(const Tensor& self, int64_t k) {
+  auto result = at::empty_like(self);
+  at::tril_out(result, self, k);
+  return result;
+}
+
+Tensor& _tril_cpu_(Tensor &self, int64_t k) {
+  AT_DISPATCH_ALL_TYPES(self.type(), "tril", [&]{
+    apply_triu_tril<scalar_t, true, false>(self, self, k);
+  });
+  return self;
+}
+
+Tensor& _tril_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
+  result.resize_as_(self);
+  AT_DISPATCH_ALL_TYPES(self.type(), "tril", [&]{
+    apply_triu_tril<scalar_t, false, false>(result, self, k);
+  });
+  return result;
+}
+
+Tensor triu(const Tensor& self, int64_t k) {
+  auto result = at::empty_like(self);
+  at::triu_out(result, self, k);
+  return result;
+}
+
+Tensor& _triu_cpu_(Tensor &self, int64_t k) {
+  AT_DISPATCH_ALL_TYPES(self.type(), "triu", [&]{
+    apply_triu_tril<scalar_t, true, true>(self, self, k);
+  });
+  return self;
+}
+
+Tensor& _triu_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
+  result.resize_as_(self);
+  AT_DISPATCH_ALL_TYPES(self.type(), "triu", [&]{
+    apply_triu_tril<scalar_t, false, true>(result, self, k);
+  });
+  return result;
+}
+
 }}  // namespace at::native
