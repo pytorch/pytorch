@@ -257,8 +257,14 @@ void PropagateCatShape(Node * cat_node) {
     }
     return false;
   };
-  auto list_node = cat_node->namedInput(attr::tensors)->node();
-  if (list_node->kind() == prim::ListConstruct) {
+  if (cat_node->kind() == prim::FusedConcat) {
+    auto tensors = cat_node->inputs();
+  }
+  auto list_node = ((cat_node->kind() == prim::FusedConcat)
+		    ? cat_node
+                    : cat_node->namedInput(attr::tensors)->node());
+  if (list_node->kind() == prim::ListConstruct
+      || cat_node->kind() == prim::FusedConcat) {
     auto tensors = list_node->inputs();
     if (!tensors.empty()) {
       if (propagate_complete(cat_node, tensors)) {
@@ -362,7 +368,8 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     default:
       break; // fall-through
   }
-  if (node->matches("aten::cat(Tensor[] tensors, int dim) -> Tensor")) {
+  if (node->matches("aten::cat(Tensor[] tensors, int dim) -> Tensor")
+      || node->kind() == prim::FusedConcat) {
     return PropagateCatShape(node);
   }
 
