@@ -92,6 +92,8 @@ bool isSimpleMap(Node *node) {
     "aten::lt(Tensor self, Scalar other) -> Tensor",
 
     "aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor",
+
+    "aten::type_as(Tensor self, Tensor other) -> Tensor",
   }};
   if (!simple_mappable.find(node)) {
     return false;
