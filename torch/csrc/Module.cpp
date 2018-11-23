@@ -230,7 +230,7 @@ PyObject *THPModule_addDocStr(PyObject *_unused, PyObject *args)
           "attribute '%s' already has a docstring", m->d_getset->name);
     }
     // This field is written as const in cpython doc but not in the code
-    m->d_getset->doc = (char *)doc_str;
+    m->d_getset->doc = const_cast<char *>(doc_str);
   } else {
     return PyErr_Format(PyExc_TypeError,
         "don't know how to add docstring to type '%s'", Py_TYPE(obj)->tp_name);
