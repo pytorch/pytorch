@@ -171,7 +171,7 @@ std::shared_ptr<FusedKernel> compileKernel(
     if (output->node()->kind() == prim::FusedConcat) {
       sizes.at(output->node()->i(attr::dim)) *= output->node()->inputs().size();
     }
-    auto scalar_type = graph->outputs()[0]->type()->cast<c10::TensorType const>()->scalarType();
+    auto scalar_type = output->type()->expect<c10::TensorType const>()->scalarType();
     auto type = CompleteTensorType::create(scalar_type, device, sizes);
     output_desc.emplace_back(std::move(type));
   }
