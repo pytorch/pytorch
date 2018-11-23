@@ -143,7 +143,7 @@ def save(m, f):
         f.write(ret)
 
 
-def get_trace_graph(f, args=(), kwargs=None, try_outplace=False):
+def get_trace_graph(f, args=(), kwargs=None, force_outplace=False):
     """
     Trace a function or model, returning a tuple consisting of the both the
     *trace* of an execution, as well as the original return value.
@@ -169,7 +169,7 @@ def get_trace_graph(f, args=(), kwargs=None, try_outplace=False):
         kwargs = {}
     if not isinstance(args, tuple):
         args = (args,)
-    return LegacyTracedModule(f, try_outplace)(*args, **kwargs)
+    return LegacyTracedModule(f, force_outplace)(*args, **kwargs)
 
 
 def _unique_state_dict(module, keep_vars=False):
@@ -206,13 +206,13 @@ def _create_interpreter_name_lookup_fn(frames_up=1):
 
 
 class LegacyTracedModule(Module):
-    def __init__(self, inner, try_outplace=False):
+    def __init__(self, inner, force_outplace=False):
         super(LegacyTracedModule, self).__init__()
         # inner may be a Module, or it may be an arbitrary callable
         # If it's a Module, we get its parameters automatically, which lets
         # us avoid a special casing functions versus modules.
         self.inner = inner
-        self.try_outplace = try_outplace
+        self.force_outplace = force_outplace
 
     def forward(self, *args):
         in_vars, in_desc = _flatten(args)
@@ -220,7 +220,7 @@ class LegacyTracedModule(Module):
         # This differs from the compiler path, which doesn't support it at the moment.
         module_state = list(_unique_state_dict(self, keep_vars=True).values())
         trace, all_trace_inputs = torch._C._tracer_enter(*(in_vars + module_state))
-        torch._C._tracer_set_try_outplace(self.try_outplace)
+        torch._C._tracer_set_force_outplace(self.force_outplace)
         torch._C._tracer_set_get_unique_name_fn(_create_interpreter_name_lookup_fn())
         try:
             trace_inputs = _unflatten(all_trace_inputs[:len(in_vars)], in_desc)
@@ -397,7 +397,7 @@ class TracingCheckError(Exception):
 
 # Check the traced module against a set of user-provided validation inputs
 @torch.no_grad()
-def _check_trace(check_inputs, func, executor_options, module, check_tolerance, try_outplace):
+def _check_trace(check_inputs, func, executor_options, module, check_tolerance, force_outplace):
     # Note: tracing is independent of optimizations, which consume the trace
     executor_options['optimize'] = False
     for inputs in check_inputs:
@@ -407,7 +407,7 @@ def _check_trace(check_inputs, func, executor_options, module, check_tolerance, 
             func,
             _clone_inputs(inputs),
             check_trace=False,
-            try_outplace=try_outplace,
+            force_outplace=force_outplace,
             **executor_options)
 
         def graph_diagnostic_info():
@@ -539,7 +539,7 @@ def trace(func,
           check_trace=True,
           check_inputs=None,
           check_tolerance=1e-5,
-          try_outplace=False):
+          force_outplace=False):
     """
     Trace a function and return an executable trace that will be optimized
     using just-in-time compilation.
@@ -584,7 +584,7 @@ def trace(func,
         check_tolerance (float, optional): Floating-point comparison tolerance to use in the checker procedure.
                                            This can be used to relax the checker strictness in the event that
                                            results diverge numerically for a known reason, such as operator fusion.
-        try_outplace (bool, optional): If set, then the tracer will attempt to convert in-place ops to their
+        force_outplace (bool, optional): If set, then the tracer will attempt to convert in-place ops to their
                                        out-of-place equivalents (e.g. ``add_`` to ``add``). Default: ``False``.
 
     Returns:
@@ -610,14 +610,14 @@ def trace(func,
     module = TopLevelTracedModule(func, **executor_options)
     var_lookup_fn = _create_interpreter_name_lookup_fn(0)
     module._create_method_from_trace('forward', func, example_inputs,
-                                     var_lookup_fn, try_outplace)
+                                     var_lookup_fn, force_outplace)
 
     # Check the trace against new traces created from user-specified inputs
     if check_trace:
         if check_inputs is not None:
-            _check_trace(check_inputs, func, executor_options, module, check_tolerance, try_outplace)
+            _check_trace(check_inputs, func, executor_options, module, check_tolerance, force_outplace)
         else:
-            _check_trace([example_inputs], func, executor_options, module, check_tolerance, try_outplace)
+            _check_trace([example_inputs], func, executor_options, module, check_tolerance, force_outplace)
 
     return module
 

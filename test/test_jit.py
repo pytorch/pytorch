@@ -1133,7 +1133,7 @@ class TestJit(JitTestCase):
             y = RegularFn.apply(y)
             return y
 
-        trace, _ = torch.jit.get_trace_graph(fn, (x,), try_outplace=True)
+        trace, _ = torch.jit.get_trace_graph(fn, (x,), force_outplace=True)
         self.run_pass('dce', trace)
         ops = [n for n in trace.graph().nodes()]
         for op in ops:
@@ -1158,7 +1158,7 @@ class TestJit(JitTestCase):
             return MyInplaceFn.apply(x)
 
         x = torch.randn(5, 5)
-        ge = torch._C.GraphExecutor(fn, (x,), lambda var: '', try_outplace=True)
+        ge = torch._C.GraphExecutor(fn, (x,), lambda var: '', force_outplace=True)
         with self.assertRaisesRegex(RuntimeError, 'inplace MyInplaceFn'):
             ge(x)
 
@@ -1373,7 +1373,7 @@ class TestJit(JitTestCase):
 
     def test_batchnorm(self):
         x = torch.ones(2, 2, 2, 2)
-        trace, _ = torch.jit.get_trace_graph(nn.BatchNorm2d(2), x, try_outplace=True)
+        trace, _ = torch.jit.get_trace_graph(nn.BatchNorm2d(2), x, force_outplace=True)
         self.assertExpectedGraph(trace)
 
     def test_dropout(self):
@@ -5259,7 +5259,7 @@ a")
                 self.g = torch.jit.trace(
                     TestScript.StarTestSumAndReturnThree(),
                     (torch.ones(4, 3), torch.ones(4, 3), torch.ones(4, 3)),
-                    try_outplace=True)
+                    force_outplace=True)
                 self.define('''
             def forward(self, rep):
                 *head, tail = self.g(rep, rep, rep)
@@ -5276,7 +5276,7 @@ a")
                 self.g = torch.jit.trace(
                     TestScript.StarTestSumAndReturnThree(),
                     (torch.ones(4, 3), torch.ones(4, 3), torch.ones(4, 3)),
-                    try_outplace=False)
+                    force_outplace=False)
                 self.define('''
             def forward(self, rep):
                 *head, tail = self.g(rep, rep, rep)
@@ -7849,7 +7849,7 @@ a")
         self.assertWarnsRegex(lambda: torch.jit.trace(foo,
                                                       torch.rand(3, 4),
                                                       check_inputs=[torch.rand(5, 6)],
-                                                      try_outplace=True),
+                                                      force_outplace=True),
                               'Output nr 1. of the traced function does not match the '
                               'corresponding output of the Python function')
 
@@ -7857,7 +7857,7 @@ a")
         def foo(x):
             x[0, 1] = 4
             return x
-        self.checkTracerWarning(foo, torch.rand(3, 4))
+        self.checkTracerWarning(foo, torch.rand(3, 4), force_outplace=True)
 
     def test_lhs_index_trivial(self):
         def foo(y, x):
@@ -7869,7 +7869,7 @@ a")
         def foo(x):
             x.view(-1).add_(-x.view(-1))
             return x
-        self.checkTracerWarning(foo, torch.rand(3, 4), try_outplace=True)
+        self.checkTracerWarning(foo, torch.rand(3, 4), force_outplace=True)
 
     @suppress_warnings
     def test_trace_checker_dropout_train(self):

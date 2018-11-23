@@ -130,12 +130,16 @@ if (${cond}) {
 RECORD_FUNCTION = CodeTemplate("""\
 profiler::RecordFunction profiler("${name}", Function::peek_at_next_sequence_nr());""")
 
-SELECT_OUTPLACE = CodeTemplate("""\
-  if (tracer_state->try_outplace) {
-    ${outplace_trace}
-  } else {
-    ${inplace_trace}
-  }
+SELECT = CodeTemplate("""\
+if (${cond}) {
+  ${true}
+} else {
+  ${false}
+}
+""")
+
+OP_NAME = CodeTemplate("""\
+op_name = jit::Symbol::fromQualString("aten::${trace_name}");
 """)
 
 PRE_RECORD_TRACE = CodeTemplate("""\
@@ -143,18 +147,15 @@ torch::jit::Node* node = nullptr;
 std::shared_ptr<jit::tracer::TracingState> tracer_state;
 if (jit::tracer::isTracing()) {
   tracer_state = jit::tracer::getTracingState();
-  ${maybe_select_outplace}
+  at::Symbol op_name;
+  ${set_op_name}
+  node = tracer_state->graph->create(op_name, /*num_outputs=*/0);
+  jit::tracer::recordSourceLocation(node);
+  ${add_trace_inputs}
+  tracer_state->graph->appendNode(node);
+  ${inplace_guard}
+  jit::tracer::setTracingState(nullptr);
 }
-""")
-
-RECORD_TRACE_BODY = CodeTemplate("""\
-const static auto op_name = jit::Symbol::fromQualString("aten::${trace_name}");
-node = tracer_state->graph->create(op_name, /*num_outputs=*/0);
-jit::tracer::recordSourceLocation(node);
-${add_trace_inputs}
-tracer_state->graph->appendNode(node);
-${inplace_guard}
-jit::tracer::setTracingState(nullptr);
 """)
 
 INPLACE_GUARD = CodeTemplate("""\
@@ -165,13 +166,8 @@ ADD_TRACE_INPUT = CodeTemplate("""jit::tracer::addInputs(node, "${name}", ${inpu
 
 POST_RECORD_TRACE = CodeTemplate("""\
 if (tracer_state) {
-  const bool try_outplace = tracer_state->try_outplace;
   jit::tracer::setTracingState(std::move(tracer_state));
-  if (try_outplace) {
-    ${outplace_record_trace_outputs}
-  } else {
-    ${inplace_record_trace_outputs}
-  }
+  ${add_trace_outputs}
 }
 """)
 
@@ -202,76 +198,117 @@ def should_trace(declaration):
     return True
 
 
-def record_trace_outputs(declaration, try_outplace):
-    if try_outplace and declaration['name'].endswith('_out'):
-        output_names = [arg['name'] for arg in declaration['arguments'] if arg.get('output', False)]
-    else:
-        output_names = [r['name'] for r in declaration['returns']]
-    return ['jit::tracer::addOutput(node, {});'.format(n) for n in output_names]
+def is_out_overload(declaration):
+    return declaration['api_name'].endswith('_out')
 
 
-def prerecord_trace(declaration, try_outplace):
-    local = {}
-    if try_outplace:
+def format_postrecord_trace(declaration):
+    # For outplacing ops, *_out overloads require special handling to move the
+    # output *argument* to a return value
+    if is_out_overload(declaration):
+        output_names_outplace = [arg['name'] for arg in declaration['arguments'] if arg.get('output', False)]
+        output_names_inplace = [r['name'] for r in declaration['returns']]
+
+        if output_names_outplace == output_names_inplace:
+            outputs = ['jit::tracer::addOutput(node, {});'.format(n) for n in output_names_outplace]
+            return POST_RECORD_TRACE.substitute(add_trace_outputs=outputs)
+
+        local = {}
+        local['cond'] = 'force_outplace'
+        local['true'] = ['jit::tracer::addOutput(node, {});'.format(n) for n in output_names_outplace]
+        local['false'] = ['jit::tracer::addOutput(node, {});'.format(n) for n in output_names_inplace]
+        selection = SELECT.substitute(local)
+        return POST_RECORD_TRACE.substitute(add_trace_outputs=selection)
+
+    output_names = [r['name'] for r in declaration['returns']]
+    outputs = ['jit::tracer::addOutput(node, {});'.format(n) for n in output_names]
+    return POST_RECORD_TRACE.substitute(add_trace_outputs=outputs)
+
+
+def format_trace_op_name(declaration):
+    def rename(trace_name):
+        if trace_name in RENAME_TRACE:
+            trace_name = RENAME_TRACE[trace_name]
+        return trace_name
+
+    is_inplace = declaration['api_name'] != uninplace_api_name(declaration['api_name'])
+
+    if not is_inplace or is_out_overload(declaration):
+        # special case for *_out functions: the in-place and out-of-place ops
+        # are overloaded with the same name in the JIT
         trace_name = uninplace_api_name(declaration['api_name'])
-    else:
-        trace_name = declaration['api_name']
+        trace_name = rename(trace_name)
+        return OP_NAME.substitute(trace_name=trace_name)
 
-    if trace_name.endswith('_out'):
-        trace_name = trace_name[:-4]
+    # otherwise, this is an in-place op and we need to emit both in- and
+    # out-of-place versions
+    outplace_trace_name = uninplace_api_name(declaration['api_name'])
+    inplace_trace_name = declaration['api_name']
+    outplace_trace_name = rename(outplace_trace_name)
+    inplace_trace_name = rename(inplace_trace_name)
 
-    local['trace_name'] = trace_name
+    select_params = {}
+    select_params['cond'] = 'tracer_state->force_outplace'
+    select_params['true'] = OP_NAME.substitute(trace_name=outplace_trace_name)
+    select_params['false'] = OP_NAME.substitute(trace_name=inplace_trace_name)
 
+    return SELECT.substitute(select_params)
+
+
+def format_trace_inputs(declaration):
     trace_inputs = declaration['arguments']
 
-    if declaration['name'].endswith('_out'):
-        # *_out functions take the result as a first argument, but since we're
-        # going to de-inplace the call, we need to remove it from the argument list
+    if is_out_overload(declaration):
+        # *_out functions take the result as a first argument, but they are the
+        # last argument in the JIT schema.
+        out_input = trace_inputs[0]
         trace_inputs = trace_inputs[1:]
 
     trace_input_spec = [(i['name'], i['name']) for i in trace_inputs]
 
-    # factories are a bit special because their out-of-place overloads
-    # take an extra TensorOptions argument, which is missing in the _out function
-    has_factory_name = trace_name in FACTORY_FUNCTION_NAMES
-    is_out_overload = any(arg['name'] == 'result' for arg in declaration['arguments'])
-    if has_factory_name and is_out_overload:
-        if try_outplace:
-            trace_input_spec.append(('result', 'result.options()'))
-        else:
-            trace_input_spec.append(('result', 'result'))
-
-    local['add_trace_inputs'] = \
+    trace_inputs = \
         '\n'.join(ADD_TRACE_INPUT.substitute(name=name, input=value) for name, value in trace_input_spec)
 
+    if is_out_overload(declaration):
+        # for *_out functions, handle the result argument differently for inplace/outplace.
+        # For inplace: just add the input to the end to confirm with the JIT schema
+        inplace = ADD_TRACE_INPUT.substitute(name=out_input['name'], input=out_input['name'])
+
+        # for outplace: do nothing, except if the declaration is a factory.
+        # Factories are a bit special because their out-of-place overloads
+        # take an extra TensorOptions argument, which is missing in the _out function
+        trace_name = uninplace_api_name(declaration['api_name'])
+        has_factory_name = trace_name in FACTORY_FUNCTION_NAMES
+        if has_factory_name:
+            outplace = ADD_TRACE_INPUT.substitute(name='result', input='result.options()')
+        else:
+            outplace = ''
+
+        trace_inputs += '\n'
+        trace_inputs += SELECT.substitute(
+            cond='tracer_state->force_outplace', true=outplace, false=inplace)
+
+    return trace_inputs
+
+
+def format_prerecord_trace(declaration):
+    local = {}
+    is_inplace = declaration['api_name'] != uninplace_api_name(declaration['api_name'])
+
+    local['set_op_name'] = format_trace_op_name(declaration)
+    local['add_trace_inputs'] = format_trace_inputs(declaration)
+
     local['inplace_guard'] = ''
-    if try_outplace:
-        # Record inplace operations as out-of-place operations (e.g.,
-        # not add_ but add)
-        if local['trace_name'] != declaration['api_name']:
-            local['inplace_guard'] = INPLACE_GUARD.substitute(
-                name=declaration['api_name'],
-                mutable_input=declaration['arguments'][0]['name'])
+    if is_inplace:
+        local['inplace_guard'] = INPLACE_GUARD.substitute(
+            name=declaration['api_name'],
+            mutable_input=declaration['arguments'][0]['name'])
 
-    if local['trace_name'] in RENAME_TRACE:
-        local['trace_name'] = RENAME_TRACE[local['trace_name']]
-
-    return RECORD_TRACE_BODY.substitute(local)
+    return PRE_RECORD_TRACE.substitute(local)
 
 
 def format_trace(declaration):
-    local = {}
-    if declaration['api_name'] != uninplace_api_name(declaration['api_name']):
-        local['outplace_trace'] = prerecord_trace(declaration, try_outplace=True)
-        local['inplace_trace'] = prerecord_trace(declaration, try_outplace=False)
-        local['maybe_select_outplace'] = SELECT_OUTPLACE.substitute(local)
-    else:
-        local['maybe_select_outplace'] = prerecord_trace(declaration, try_outplace=False)
-
-    local['outplace_record_trace_outputs'] = record_trace_outputs(declaration, try_outplace=True)
-    local['inplace_record_trace_outputs'] = record_trace_outputs(declaration, try_outplace=False)
-
-    return (PRE_RECORD_TRACE.substitute(local), POST_RECORD_TRACE.substitute(local))
+    return (format_prerecord_trace(declaration), format_postrecord_trace(declaration))
 
 
 def gen_variable_type(out, aten_declarations, template_path):

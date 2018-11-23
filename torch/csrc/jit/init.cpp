@@ -223,16 +223,16 @@ void initJITBindings(PyObject *module) {
                       py::tuple inputs,
                       py::function var_name_lookup_fn,
                       bool optimize,
-                      bool try_outplace) {
+                      bool force_outplace) {
             auto graph = tracer::createGraphByTracing(
-                func, toStack(inputs), var_name_lookup_fn, try_outplace);
+                func, toStack(inputs), var_name_lookup_fn, force_outplace);
             return GraphExecutor(graph, optimize);
           }),
           py::arg("func"),
           py::arg("inputs"),
           py::arg("var_name_lookup_fn"),
           py::arg("optimize") = true,
-          py::arg("try_outplace") = false)
+          py::arg("force_outplace") = false)
       .def(
           py::init([](std::shared_ptr<Graph> graph, bool optimize) {
             return GraphExecutor(std::move(graph), optimize);

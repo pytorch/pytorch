@@ -531,7 +531,7 @@ void initJitScriptBindings(PyObject* module) {
         py::function func,
         py::tuple input_tuple,
         py::function var_lookup_fn,
-        bool try_outplace) {
+        bool force_outplace) {
           // prereq: Module's buffers and parameters are unique
           // this was ensured in python before calling this function
           std::vector<at::Tensor*> parameters;
@@ -541,7 +541,7 @@ void initJitScriptBindings(PyObject* module) {
             inputs.emplace_back(*param);
           }
           auto graph = tracer::createGraphByTracing(
-              func, inputs, var_lookup_fn, try_outplace, input_tuple.size());
+              func, inputs, var_lookup_fn, force_outplace, input_tuple.size());
           self->create_method(name, std::move(graph), std::move(parameters));
           didFinishEmitModule(self);
       })
