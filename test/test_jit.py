@@ -3136,8 +3136,7 @@ a")
             c = s(a, b)
             c.sum().backward()
             graph = backward_graph(s)
-            self.assertEqual(set([node.kind() for node in graph.nodes()]),
-                             set(['prim::Constant', 'aten::ge', 'aten::le', 'aten::type_as', 'prim::FusionGroup']))
+            self.assertAllFused(graph)
 
     def test_mul(self):
         def func(a, b):
