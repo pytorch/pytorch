@@ -227,7 +227,7 @@ goto:eof
                   -DUSE_DISTRIBUTED=%USE_DISTRIBUTED% ^
                   -DUSE_FBGEMM=%USE_FBGEMM% ^
                   -DUSE_NUMPY=%USE_NUMPY% ^
-                  -DNUMPY_INCLUDE_DIR=%NUMPY_INCLUDE_DIR% ^
+                  -DNUMPY_INCLUDE_DIR="%NUMPY_INCLUDE_DIR%" ^
                   -DUSE_NNPACK=%USE_NNPACK% ^
                   -DUSE_LEVELDB=%USE_LEVELDB% ^
                   -DUSE_LMDB=%USE_LMDB% ^
