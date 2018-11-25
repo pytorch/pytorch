@@ -16,7 +16,7 @@ namespace cuda {
 /*
 * Philox Engine implementation
 * Originally implemented in PyTorch's fusion compiler
-* Refer to: https://ieeexplore.ieee.org/document/6114424
+* Refer to: http://www.thesalmons.org/john/random123/papers/random123sc11.pdf
 * for details regarding the engine.
 *
 * The Philox engine is currently used in CUDA distributions
