@@ -604,11 +604,19 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   } else {
     throw TypeError("dtype must be a type, str, or dtype object");
   }
-  auto scalar_type = is_dtype ? r.scalartype(0) : torch::utils::type_from_string(type_name).scalarType();
-  return THPVariable_Wrap([&]() {
-      AutoNoGIL no_gil;
-      return self_.to(scalar_type, r.toBool(1));
-    }());
+  ScalarType scalar_type;
+  Device device = self_.device();
+  if (is_dtype) {
+    scalar_type = r.scalartype(0);
+  } else {
+    auto& type = torch::utils::type_from_string(type_name);
+    scalar_type = type.scalarType();
+    auto device_type = backendToDeviceType(type.backend());
+    if (device_type != device.type()) {
+      device = at::Device(device_type);
+    }
+  }
+  return THPVariable_Wrap(dispatch_to(self_, device, scalar_type, /*non_blocking=*/ r.toBool(1), /*copy=*/ false));
   END_HANDLE_TH_ERRORS
 }
 
