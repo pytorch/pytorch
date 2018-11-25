@@ -248,7 +248,7 @@ def long_type(t):
 
 def new_t(*sizes):
     def tmp(t):
-        torch.manual_seed(73939133)
+        torch.manual_seed(2147483647)
         return t(*sizes).copy_(torch.randn(*sizes))
     return tmp
 
@@ -512,6 +512,8 @@ custom_precision = {
     'cumprod': 1e-4,
     'qr': 3e-4,
     'digamma': 1e0,  # large values lead to large absolute error but small relative error
+    'pow': 1.6e-5,
+    'reciprocal': 1.6e-5,
 }
 
 custom_half_precision = {
@@ -552,6 +554,7 @@ custom_half_precision = {
     'norm': 1e-1,
     'pow': 4e-1,
     'prod': 1e-3,
+    'put_': 1e-3,
     'reciprocal': 4e-1,
     'remainder': 1e-3,
     'renorm': 1e-3,

@@ -839,7 +839,7 @@ class TestSparse(TestCase):
         test_shape(1000, 100, 0, 20)
 
     def _test_spadd_shape(self, nnz, shape_i, shape_v=None):
-        torch.manual_seed(7393)
+        torch.manual_seed(0)
         shape = shape_i + (shape_v or [])
         x, _, _ = self._gen_sparse(len(shape_i), nnz, shape)
         y = self.randn(*shape)

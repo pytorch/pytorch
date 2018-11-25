@@ -1977,7 +1977,7 @@ class TestDistributions(TestCase):
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @skipIfRocm
     def test_gamma_gpu_sample(self):
-        set_rng_seed(1)
+        set_rng_seed(3)
         for alpha, beta in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
             a, b = torch.tensor([alpha]).cuda(), torch.tensor([beta]).cuda()
             self._check_sampler_sampler(Gamma(a, b),
@@ -3995,7 +3995,7 @@ class TestTransforms(TestCase):
                 continue
 
     def test_jit_fwd(self):
-        set_rng_seed(7393)
+        set_rng_seed(2147483647)
         for transform in self.unique_transforms:
             x = self._generate_data(transform).requires_grad_()
 
