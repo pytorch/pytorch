@@ -93,39 +93,68 @@ with prim::DifferentiableGraph_0 = graph(%13 : Tensor
 testDifferentiate
 graph(%0 : Float(2, 3, 4)
       %1 : Float(2, 3, 4)) {
+  %23 : int[] = aten::size(%0)
+  %26 : int[] = aten::size(%1)
   %2 : Float(2, 3, 4) = aten::mul(%0, %1)
+  %15 : int[] = aten::size(%2)
+  %18 : int[] = aten::size(%0)
   %3 : Float(2, 3, 4) = aten::mul(%2, %0)
   %4 : int = prim::Constant[value=1]()
+  %7 : int[] = aten::size(%3)
+  %10 : int[] = aten::size(%1)
   %5 : Float(2, 3, 4) = aten::add(%3, %1, %4)
-  return (%5, %2);
+  return (%5, %23, %26, %2, %15, %18, %7, %10);
 }
 graph(%0 : Float(2, 3, 4)
       %1 : Float(2, 3, 4)
       %2 : Float(2, 3, 4)
       %3 : Float(2, 3, 4)
-      %4 : Float(2, 3, 4)) {
-  %5 : int = prim::Constant[value=1]()
-  %6 : Float(2, 3, 4), %7 : Float(2, 3, 4) = prim::GradOf[name="aten::add"](%0)
+      %4 : int[]
+      %5 : int[]
+      %6 : Float(2, 3, 4)
+      %7 : int[]
+      %8 : int[]
+      %9 : int[]
+      %10 : int[]) {
+  %11 : int = prim::Constant[value=1]()
+  %12 : Dynamic, %13 : Dynamic = prim::GradOf[name="aten::add"](%0)
     block0() {
-      %8 : Float(2, 3, 4) = aten::mul(%0, %5)
-      -> (%0, %8)
+      %14 : Dynamic = prim::SumToSize(%0, %9)
+      %15 : Float(2, 3, 4) = aten::mul(%0, %11)
+      %16 : Dynamic = prim::SumToSize(%15, %10)
+      -> (%14, %16)
     }
-  %9 : Float(2, 3, 4), %10 : Float(2, 3, 4) = prim::GradOf[name="aten::mul"](%6)
+  %17 : Dynamic, %18 : Dynamic = prim::GradOf[name="aten::mul"](%12)
     block0() {
-      %11 : Float(2, 3, 4) = aten::mul(%6, %2)
-      %12 : Float(2, 3, 4) = aten::mul(%6, %4)
-      -> (%11, %12)
+      %19 : Dynamic = aten::mul(%12, %2)
+      %20 : Dynamic = prim::SumToSize(%19, %7)
+      %21 : Dynamic = aten::mul(%12, %6)
+      %22 : Dynamic = prim::SumToSize(%21, %8)
+      -> (%20, %22)
     }
+<<<<<<< 4c11dee0e82c5877eb629533d6aca2e32d2193b6
   %13 : Tensor = prim::AutogradAdd(%1, %9)
   %14 : Float(2, 3, 4), %15 : Float(2, 3, 4) = prim::GradOf[name="aten::mul"](%13)
+=======
+  %23 : Dynamic = prim::AutogradAdd(%1, %17)
+  %24 : Dynamic, %25 : Dynamic = prim::GradOf[name="aten::mul"](%23)
+>>>>>>> Reduce broadcasted inputs in derivative code
     block0() {
-      %16 : Float(2, 3, 4) = aten::mul(%13, %3)
-      %17 : Float(2, 3, 4) = aten::mul(%13, %2)
-      -> (%16, %17)
+      %26 : Dynamic = aten::mul(%23, %3)
+      %27 : Dynamic = prim::SumToSize(%26, %4)
+      %28 : Dynamic = aten::mul(%23, %2)
+      %29 : Dynamic = prim::SumToSize(%28, %5)
+      -> (%27, %29)
     }
+<<<<<<< 4c11dee0e82c5877eb629533d6aca2e32d2193b6
   %18 : Tensor = prim::AutogradAdd(%10, %14)
   %19 : Tensor = prim::AutogradAdd(%7, %15)
   return (%18, %19);
+=======
+  %30 : Dynamic = prim::AutogradAdd(%18, %24)
+  %31 : Dynamic = prim::AutogradAdd(%13, %25)
+  return (%30, %31);
+>>>>>>> Reduce broadcasted inputs in derivative code
 }
 
 testDifferentiateWithRequiresGrad
@@ -135,15 +164,22 @@ graph(%0 : Float(*)
   %3 : int = prim::Constant[value=1]()
   %4 : Float(*) = aten::add(%2, %1, %3)
   %5 : int = prim::Constant[value=1]()
+  %26 : int[] = aten::size(%4)
+  %29 : int[] = aten::size(%0)
   %6 : Float(*) = aten::add(%4, %0, %5)
+  %19 : int[] = aten::size(%6)
+  %22 : int[] = aten::size(%0)
   %7 : Float(*) = aten::mul(%6, %0)
   %8 : int = prim::Constant[value=1]()
+  %11 : int[] = aten::size(%7)
+  %14 : int[] = aten::size(%1)
   %9 : Float(*) = aten::add(%7, %1, %8)
-  return (%4, %9, %6);
+  return (%4, %9, %26, %29, %6, %19, %22, %11, %14);
 }
 graph(%0 : Float(*)
       %1 : Float(*)
       %2 : Float(*)
+<<<<<<< 4c11dee0e82c5877eb629533d6aca2e32d2193b6
       %3 : Float(*)) {
   %4 : int = prim::Constant[value=1]()
   %6 : Float(*), %7 : Tensor = prim::GradOf[name="aten::add"](%0)
@@ -165,5 +201,40 @@ graph(%0 : Float(*)
     }
   %17 : Tensor = prim::AutogradAdd(%10, %15)
   return (%17);
+=======
+      %3 : int[]
+      %4 : int[]
+      %5 : Float(*)
+      %6 : int[]
+      %7 : int[]
+      %8 : int[]
+      %9 : int[]) {
+  %10 : int = prim::Constant[value=1]()
+  %12 : Dynamic, %13 : Dynamic = prim::GradOf[name="aten::add"](%0)
+    block0() {
+      %14 : Dynamic = prim::SumToSize(%0, %8)
+      %15 : Dynamic = aten::mul(%0, %10)
+      %16 : Dynamic = prim::SumToSize(%15, %9)
+      -> (%14, %16)
+    }
+  %17 : Dynamic, %18 : Dynamic = prim::GradOf[name="aten::mul"](%12)
+    block0() {
+      %19 : Dynamic = aten::mul(%12, %2)
+      %20 : Dynamic = prim::SumToSize(%19, %6)
+      %21 : Dynamic = aten::mul(%12, %5)
+      %22 : Dynamic = prim::SumToSize(%21, %7)
+      -> (%20, %22)
+    }
+  %23 : Dynamic = prim::AutogradAdd(%1, %17)
+  %24 : Dynamic, %25 : Dynamic = prim::GradOf[name="aten::add"](%23)
+    block0() {
+      %26 : Dynamic = prim::SumToSize(%23, %3)
+      %27 : Dynamic = aten::mul(%23, %10)
+      %28 : Dynamic = prim::SumToSize(%27, %4)
+      -> (%26, %28)
+    }
+  %29 : Dynamic = prim::AutogradAdd(%18, %25)
+  return (%29);
+>>>>>>> Reduce broadcasted inputs in derivative code
 }
 

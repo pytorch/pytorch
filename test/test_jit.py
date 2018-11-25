@@ -358,7 +358,7 @@ class JitTestCase(TestCase):
                 vs = vs[:-drop]
             # we don't want all the grad for all the outputs to be the same
             # so we multiply each by a constant
-            return sum([(i + 1) * v.sum() for i, v in enumerate(vs) if v is not None])
+            return sum([math.log(i + 2) * v.sum() for i, v in enumerate(vs) if v is not None])
         if input_tensors is None:
             input_tensors = reference_tensors
 
@@ -433,10 +433,11 @@ class JitTestCase(TestCase):
 
         return ge
 
-    def assertAllFused(self, graph):
+    def assertAllFused(self, graph, except_for=()):
         if [n.kind() for n in graph.nodes()] == ['prim::DifferentiableGraph']:
             graph = next(graph.nodes()).g('Subgraph')
-        self.assertTrue(all(node.kind() in {'prim::Constant', 'prim::FusionGroup'} for node in graph.nodes()),
+        allowed_nodes = {'prim::Constant', 'prim::FusionGroup'} | set(except_for)
+        self.assertTrue(all(node.kind() in allowed_nodes for node in graph.nodes()),
                         'got {}'.format(graph))
         self.assertTrue([node.kind() for node in graph.nodes()].count('prim::FusionGroup') == 1)
 
@@ -3225,12 +3226,12 @@ a")
         funcs = (func2, funcInf)
         for f in funcs:
             s = self.checkScript(f, (a, b))
-            self.assertAllFused(s.graph_for(a, b))
+            self.assertAllFused(s.graph_for(a, b), except_for={'aten::size'})
 
             c = s(a, b)
             c.sum().backward()
             graph = backward_graph(s)
-            self.assertAllFused(graph)
+            self.assertAllFused(graph, except_for={'prim::SumToSize'})
 
     def test_mul(self):
         def func(a, b):
@@ -4212,8 +4213,9 @@ a")
         inputs = get_lstm_inputs('cuda', training=True)
         module = self.checkScript(LSTMCellS, inputs)
         forward_graph = module.graph_for(*inputs)
-        self.assertGraphContainsExactly(
-            forward_graph, 'prim::FusionGroup', 1, consider_subgraphs=True)
+        with self.assertRaises(AssertionError):
+            self.assertGraphContainsExactly(
+                forward_graph, 'prim::FusionGroup', 1, consider_subgraphs=True)
         self.assertExpectedGraph(forward_graph, subname='forward')
 
         hy, cy = module(*inputs)
@@ -4227,8 +4229,9 @@ a")
         inputs = get_milstm_inputs('cuda', training=True)
         module = self.checkScript(MiLSTMCell, inputs)
         forward_graph = module.graph_for(*inputs)
-        self.assertGraphContainsExactly(
-            forward_graph, 'prim::FusionGroup', 1, consider_subgraphs=True)
+        with self.assertRaises(AssertionError):
+            self.assertGraphContainsExactly(
+                forward_graph, 'prim::FusionGroup', 1, consider_subgraphs=True)
         self.assertExpectedGraph(forward_graph, subname='forward')
 
         hy, cy = module(*inputs)
