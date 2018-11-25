@@ -17,8 +17,15 @@ class GatherOp : public Operator<Context> {
         this, this->template Input<Tensor>(INDICES, CPU));
   }
 
-  template <typename Index>
+  template <typename TIndex>
   bool DoRunWithType() {
+    return DispatchHelper<
+        TensorTypes2<uint8_t, int, long, float, double, int32_t, int64_t, GenericTensorImplementation>,
+        TIndex>::call(this, Input(DATA));
+  }
+
+  template <typename TIndex, typename TData>
+  bool DoRunWithType2() {
     // If we endup using it on GPU doing O(N) memcpy is probably not best :)
     // TODO: implement prefetching if it starts mattering (TF does it)
     auto& data = Input(DATA);
@@ -38,7 +45,7 @@ class GatherOp : public Operator<Context> {
     int N = indices.numel();
 
     auto src_base = static_cast<const char*>(data.raw_data());
-    const Index* idxs = indices.template data<Index>();
+    const TIndex* idxs = indices.template data<TIndex>();
     auto out = static_cast<char*>(output->raw_mutable_data(data.dtype()));
 
     if (output->numel() == 0) {
@@ -61,6 +68,17 @@ class GatherOp : public Operator<Context> {
     }
     return true;
   }
+
+  template <typename TIndex>
+  bool DoRunWithOtherType2() {
+    CAFFE_THROW(
+        "Gather is not implemented on tensor of type ",
+        Input(DATA).meta().name(),
+        " Consider adding it a type in the list DispatchHelper or implementing "
+        "a generic version (which won't work for duplicated indices though)");
+  }
+
+
 
   INPUT_TAGS(DATA, INDICES);
 };

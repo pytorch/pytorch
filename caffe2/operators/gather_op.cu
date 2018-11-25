@@ -3,17 +3,17 @@
 
 namespace caffe2 {
 
-template <typename T_INDEX>
+template <typename TData, typename TIndex>
 __global__ void GatherKernel(
-    const float* X,
-    float* Y,
-    const T_INDEX* indices,
+    const TData* X,
+    TData* Y,
+    const TIndex * indices,
     const int N,
     const int block_size) {
   for (int i = blockIdx.x; i < N; i += gridDim.x) {
-    T_INDEX idx = indices[i];
-    const float* src_offset = X + idx * block_size;
-    float* dst_offset = Y + i * block_size;
+    TIndex idx = indices[i];
+    const TData* src_offset = X + idx * block_size;
+    TData* dst_offset = Y + i * block_size;
     for (int j = threadIdx.x; j < block_size; j += blockDim.x) {
       dst_offset[j] = src_offset[j];
     }
@@ -27,8 +27,16 @@ bool GatherOp<CUDAContext>::RunOnDevice() {
 }
 
 template <>
-template <typename Index>
+template <typename TIndex>
 bool GatherOp<CUDAContext>::DoRunWithType() {
+  return DispatchHelper<
+      TensorTypes2<uint8_t, int, long, float, double, int32_t, int64_t, GenericTensorImplementation>,
+      TIndex>::call(this, OperatorBase::Input<Tensor>(DATA, CUDA));
+}
+
+template <>
+template <typename TIndex, typename TData>
+bool GatherOp<CUDAContext>::DoRunWithType2() {
   auto& data = Input(DATA);
   auto& indices = Input(INDICES);
   auto* output = Output(0);
@@ -45,9 +53,9 @@ bool GatherOp<CUDAContext>::DoRunWithType() {
       "block_bytesize should be consistent with data dim");
   int N = indices.size();
 
-  auto src_base = static_cast<const float*>(data.raw_data());
-  const Index* idxs = indices.template data<Index>();
-  auto out = static_cast<float*>(output->raw_mutable_data(data.meta()));
+  auto src_base = static_cast<const TData*>(data.raw_data());
+  const TIndex* idxs = indices.template data<TIndex>();
+  auto out = static_cast<TData*>(output->raw_mutable_data(data.meta()));
 
   // return early when the input is empty, since CUDA kernel will fail for
   // empty input.
