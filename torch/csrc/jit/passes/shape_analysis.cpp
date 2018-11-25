@@ -257,9 +257,6 @@ void PropagateCatShape(Node * cat_node) {
     }
     return false;
   };
-  if (cat_node->kind() == prim::FusedConcat) {
-    auto tensors = cat_node->inputs();
-  }
   auto list_node = ((cat_node->kind() == prim::FusedConcat)
 		    ? cat_node
                     : cat_node->namedInput(attr::tensors)->node());

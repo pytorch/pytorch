@@ -305,10 +305,6 @@ bool runFusion(
     if (t.device() != device) {
       return false;
     }
-    // TODO relax this
-    //if (t.type().scalarType() != dtype) {
-    //  return false;
-    //}
   }
 
   // Attempts to run fallback if device fusion is disabled

@@ -149,7 +149,7 @@ static std::string encodeRHS(const Node* n) {
     {aten::atan, "atanf(${0})"},
     {aten::tanh, "tanhf(${0})"},
     {aten::sqrt, "sqrtf(${0})"},
-    {aten::rsqrt, "1.f/sqrtf(${0})"},
+    {aten::rsqrt, "rsqrtf(${0})"},
     {aten::ceil, "ceilf(${0})"},
     {aten::floor, "floorf(${0})"},
     {aten::round, "roundf(${0})"},

@@ -152,15 +152,8 @@ std::shared_ptr<FusedKernel> compileKernel(
   c10::optional<at::ScalarType> scalar_type;
   for (size_t i = 0; i < input_desc.size(); i++) {
     const auto& desc = input_desc[i];
-    // prefer floating, but take integers if it's the only one
-    // (to care for where)
-    if ((!scalar_type.has_value()) ||
-	 (isFloatingType(desc.scalar_type) && ! isFloatingType(*scalar_type))) {
-      scalar_type = desc.scalar_type;
-    }
     graph->inputs()[i]->setType(TensorType::create(desc.scalar_type, device, desc.nDim())); // TODO: nDim is bad, as it is collapsed
   }
-  JIT_ASSERT(scalar_type);
 
   PropagateInputShapes(*graph);
 
