@@ -448,7 +448,7 @@ TEST(DataTest, TensorLambdaWorksforAnyTargetType) {
   ASSERT_EQ(batch[1].target, "2");
 }
 
-struct UnCopyableDataset : public datasets::Dataset<UnCopyableDataset> {
+struct UnCopyableDataset : datasets::Dataset<UnCopyableDataset> {
   UnCopyableDataset() = default;
 
   UnCopyableDataset(const UnCopyableDataset&) = delete;

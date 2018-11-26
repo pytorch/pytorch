@@ -5,6 +5,7 @@
 #include <torch/data/detail/sequencers.h>
 #include <torch/data/iterator.h>
 #include <torch/data/samplers.h>
+#include <torch/data/datasets.h>
 #include <torch/data/worker_exception.h>
 #include <torch/types.h>
 
@@ -291,12 +292,21 @@ std::unique_ptr<DataLoader<Dataset, Sampler>> make_data_loader(
 
 /// Creates a new `DataLoader`, with chunk loading support.
 template <typename Dataset>
-std::unique_ptr<DataLoader<Dataset, samplers::BatchSizeSampler>>
+std::unique_ptr<DataLoader<datasets::SharedBatchDataset<Dataset>, samplers::BatchSizeSampler>>
 make_chunk_data_loader(Dataset dataset, DataLoaderOptions options) {
-  // TODO: wrap the dataset with SharedDataSet.
-  // waiting for the pull request https://github.com/pytorch/pytorch/pull/13800
-  return torch::make_unique<DataLoader<Dataset, samplers::BatchSizeSampler>>(
-      std::move(dataset),
+  AT_CHECK(
+      options.chunk_loading() == true,
+      "chunk_loading must be set to true when creating a chunk dataloader.");
+
+  // chunk dataset builds the chunk descriptions in its constructor by
+  // inspecting the whole dataset. It also maintains a set of preload threads.
+  // To avoid copying chunk dataset for each worker, here we wrap it using the
+  // ShareBatchDataset before passing to the dataloader.
+  datasets::SharedBatchDataset<Dataset> shared_chunk_dataset =
+      datasets::make_shared_dataset<Dataset>(dataset);
+  return torch::make_unique<DataLoader<
+      datasets::SharedBatchDataset<Dataset>, samplers::BatchSizeSampler>>(
+      std::move(shared_chunk_dataset),
       std::move(options),
       std::move(samplers::BatchSizeSampler()));
 }

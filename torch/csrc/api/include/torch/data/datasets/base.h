@@ -58,10 +58,10 @@ class BatchDataset {
   virtual void reset() {}
 
   /// Serializes any internal state of the `Dataset` to the `archive`.
-  virtual void save(serialize::OutputArchive& archive) {};
+  virtual void save(serialize::OutputArchive& archive) {}
 
   /// Deserializes a `Dataset` from the `archive`.
-  virtual void load(serialize::InputArchive& archive) {};
+  virtual void load(serialize::InputArchive& archive) {}
 
   /// Creates a `MapDataset` that applies the given `transform` to this dataset.
   template <typename TransformType>

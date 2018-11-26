@@ -37,6 +37,20 @@ struct MapDataset : BatchDataset<
     return dataset.size();
   }
 
+  void reset() override {
+    dataset.reset();
+  }
+
+  /// Serializes any internal state of the `Dataset` to the `archive`.
+  void save(serialize::OutputArchive& archive) override{
+    dataset.save(archive);
+  }
+
+  /// Deserializes a `Dataset` from the `archive`.
+  void load(serialize::InputArchive& archive) override{
+    dataset.load(archive);
+  }
+
   SourceDataset dataset;
   AppliedTransform transform;
 };

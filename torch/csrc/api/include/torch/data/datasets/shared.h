@@ -42,6 +42,22 @@ class SharedBatchDataset : BatchDataset<
     return dataset_->size();
   }
 
+  // Reset the underlying dataset.
+  void reset() override {
+    dataset_->reset();
+  }
+
+  /// Serializes any internal state of the underlying `Dataset` to the
+  /// `archive`.
+  void save(serialize::OutputArchive& archive) override {
+    dataset_->save(archive);
+  }
+
+  /// Deserializes the underlying `Dataset` from the `archive`.
+  void load(serialize::InputArchive& archive) override {
+    dataset_->load(archive);
+  }
+
   /// Accesses the underlying dataset.
   UnderlyingDataset& operator*() {
     return *dataset_;
