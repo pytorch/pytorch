@@ -204,7 +204,7 @@ bool FullyConnectedRowWiseDNNLowPOp<T>::RunOnDevice() {
               in_qparams_[0].zero_point * column_offsets_[j] +
               rowwise_qparams_[j].zero_point * row_offset;
           Y_int32_[i * N + j] += b_quantized_[j];
-          Ydata[i * N + j] = Requantize<T>(
+          Ydata[i * N + j] = fbgemm::Requantize<T>(
               Y_int32_[i * N + j], rowwise_requantization_params_[j]);
         }
       }
@@ -259,7 +259,7 @@ bool FullyConnectedRowWiseDNNLowPOp<T>::GetQuantizationParameters_() {
               W.template data<float>() + K * i, K, true /*weight*/);
           rowwise_qparams_[i].zero_point -=
               (1 << (qfactory_->GetWeightPrecision() - 1));
-          Quantize<T_signed>(
+          fbgemm::Quantize<T_signed>(
               W.template data<float>() + K * i,
               W_quantized_.data() + K * i,
               K,
@@ -290,7 +290,7 @@ bool FullyConnectedRowWiseDNNLowPOp<T>::GetQuantizationParameters_() {
     LOG(WARNING) << "Not supporting nonconstant weights";
     in_qparams_[1] =
         GetInputTensorQuantizationParamsOf(this, 1, qfactory_.get());
-    Quantize<T_signed>(
+    fbgemm::Quantize<T_signed>(
         W.template data<float>(),
         W_quantized_.data(),
         W_quantized_.size(),
@@ -324,7 +324,7 @@ bool FullyConnectedRowWiseDNNLowPOp<T>::GetQuantizationParameters_() {
     const auto& b = InputTensorCPU_(2);
     const float* b_data = b.template data<float>();
     for (int j = 0; j < N; ++j) {
-      b_quantized_[j] = Quantize<int32_t>(
+      b_quantized_[j] = fbgemm::Quantize<int32_t>(
           b_data[j], 0, in_qparams_[0].scale * rowwise_qparams_[j].scale, 32);
     }
   }

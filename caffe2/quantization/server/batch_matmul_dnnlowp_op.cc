@@ -317,7 +317,7 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
           // Adjust for the fact that B will actually use signed.
           B_qparams_[i].zero_point += signed_min;
 
-          Quantize<int8_t>(
+          fbgemm::Quantize<int8_t>(
               B.template data<float>() + i * B_quantized_temp.size(),
               B_quantized_temp.data(),
               B_quantized_temp.size(),
@@ -694,7 +694,7 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
 
         // Requantization
         for (int j = 0; j < M * N; ++j) {
-          Y_quantized[p * Y_stride + i * M * N + j] = Requantize<T>(
+          Y_quantized[p * Y_stride + i * M * N + j] = fbgemm::Requantize<T>(
               Y_int32_[p * Y_stride + i * M * N + j],
               requantization_params_[0]);
         }

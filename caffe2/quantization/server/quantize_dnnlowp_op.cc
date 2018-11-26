@@ -51,7 +51,7 @@ bool QuantizeDNNLowPOp<T>::RunOnDevice() {
     int i_begin, i_end;
     tie(i_begin, i_end) = Get1DPartition(
         Input(0).numel(), dnnlowp_get_num_threads(), dnnlowp_get_thread_num());
-    Quantize<T>(
+    fbgemm::Quantize<T>(
         in_data + i_begin, out_data + i_begin, i_end - i_begin, in_qparams);
   }
 

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ATen/core/ATenGeneral.h"
-#include "ATen/StorageImpl.h"
+#include "ATen/core/StorageImpl.h"
 #include "ATen/core/UndefinedTensorImpl.h"
 
 #include <ATen/core/ScalarType.h>

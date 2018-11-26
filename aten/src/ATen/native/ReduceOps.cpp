@@ -87,9 +87,9 @@ static std::unique_ptr<TensorIterator> make_reduction(
   AT_CHECK(
       !result.defined() || result.type().scalarType() == dtype,
       name, ": provided dtype must match dtype of result. Got ",
-      at::toString(result.type().scalarType()),
+      toString(result.type().scalarType()),
       " and ",
-      at::toString(dtype),
+      toString(dtype),
       ".");
   int ndim = self.dim();
   auto mask = make_dim_mask(dim, ndim);
@@ -118,9 +118,9 @@ static inline Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim
   AT_CHECK(
       !dtype.has_value() || (result.type().scalarType() == dtype.value()),
       "provided dtype must match dtype of result in cumsum. Got ",
-      at::toString(result.type().scalarType()),
+      toString(result.type().scalarType()),
       " and ",
-      at::toString(dtype.value()),
+      toString(dtype.value()),
       ".");
   return at::_th_cumsum_out(result, self.toType(result.type().scalarType()), dim);
 }
@@ -150,9 +150,9 @@ static inline Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t di
   AT_CHECK(
       !dtype.has_value() || (result.type().scalarType() == dtype.value()),
       "provided dtype must match dtype of result in cumprod. Got ",
-      at::toString(result.type().scalarType()),
+      toString(result.type().scalarType()),
       " and ",
-      at::toString(dtype.value()),
+      toString(dtype.value()),
       ".");
   return at::_th_cumprod_out(result, self.toType(result.type().scalarType()), dim);
 }
@@ -172,7 +172,7 @@ static inline Tensor mean(const Tensor &self, optional<ScalarType> dtype) {
   AT_CHECK(
       at::isFloatingType(scalarType),
       "Can only calculate the mean of floating types. Got ",
-      at::toString(scalarType),
+      toString(scalarType),
       " instead.");
   if (self.numel() > 0) {
     Tensor result = at::native::sum(self);
@@ -266,7 +266,7 @@ static inline Tensor &mean_out(Tensor &result, const Tensor &self, int64_t dim,
   AT_CHECK(
       at::isFloatingType(scalarType),
       "Can only calculate the mean of floating types. Got ",
-      at::toString(scalarType),
+      toString(scalarType),
       " instead.");
   at::native::sum_out(
       result, self.toType(result.type().scalarType()), dim, keepdim);
@@ -325,7 +325,7 @@ static inline Tensor mean(const Tensor &self, int64_t dim, bool keepdim, optiona
   AT_CHECK(
       at::isFloatingType(scalarType),
       "Can only calculate the mean of floating types. Got ",
-      at::toString(scalarType),
+      toString(scalarType),
       " instead.");
   Tensor result = at::native::sum(self, dim, keepdim);
   if (result.numel() > 0 && self.ndimension() > 0) {
@@ -416,7 +416,7 @@ Tensor& _norm_out_cpu(Tensor& result, const Tensor& self, Scalar p, int64_t dim_
 
 Tensor& norm_out(Tensor &result, const Tensor &self, Scalar p, int64_t dim, bool keepdim) {
   AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "norm only supports CPU AND CUDA backend, got: ", at::toString(self.type().backend()));
+           "norm only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   AT_CHECK(at::isFloatingType(self.type().scalarType()), "norm only supports floating-point dtypes");
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial(result, self, 0, dim, keepdim)) {
@@ -435,7 +435,7 @@ Tensor _norm(const Tensor &self, Scalar p) {
     return at::native_norm(self, p);
   } else {
     AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-             "norm only supports CPU AND CUDA backend, got: ", at::toString(self.type().backend()));
+             "norm only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
     AT_CHECK(at::isFloatingType(self.type().scalarType()), "norm only supports floating-point dtypes");
     if (self.is_cuda()) {
       return at::_th_norm(self, p);
@@ -467,7 +467,7 @@ Tensor all(const Tensor& self, int64_t dim, bool keepdim) {
 
 Tensor &all_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
   AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "all only supports CPU AND CUDA backend, got: ", at::toString(self.type().backend()));
+           "all only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   AT_CHECK(self.type().scalarType() == at::ScalarType::Byte, "all only supports torch.uint8 dtype");
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial(result, self, 1, dim, keepdim)) {
@@ -484,7 +484,7 @@ Tensor any(const Tensor& self, int64_t dim, bool keepdim) {
 
 Tensor &any_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
   AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "any only supports CPU AND CUDA backend, got: ", at::toString(self.type().backend()));
+           "any only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   AT_CHECK(self.type().scalarType() == at::ScalarType::Byte, "any only supports torch.uint8 dtype");
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial(result, self, 0, dim, keepdim)) {
@@ -496,7 +496,7 @@ Tensor &any_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
 
 Tensor var(const Tensor& self, bool unbiased) {
   AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "var only supports CPU AND CUDA backend, got: ", at::toString(self.type().backend()));
+           "var only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   AT_CHECK(at::isFloatingType(self.type().scalarType()), "var only supports floating-point dtypes");
   auto trivial_return = _allreduce_return_trivial(self, std::numeric_limits<double>::quiet_NaN());
   return trivial_return.has_value() ? trivial_return.value() : at::_th_var(self, unbiased);
@@ -509,7 +509,7 @@ Tensor var(const Tensor& self, int64_t dim, bool unbiased, bool keepdim) {
 
 Tensor &var_out(Tensor &result, const Tensor &self, int64_t dim, bool unbiased, bool keepdim) {
   AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "var only supports CPU AND CUDA backend, got: ", at::toString(self.type().backend()));
+           "var only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   AT_CHECK(at::isFloatingType(self.type().scalarType()), "var only supports floating-point dtypes");
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial(result, self, std::numeric_limits<double>::quiet_NaN(), dim, keepdim)) {
@@ -521,7 +521,7 @@ Tensor &var_out(Tensor &result, const Tensor &self, int64_t dim, bool unbiased, 
 
 Tensor std(const Tensor& self, bool unbiased) {
   AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "std only supports CPU AND CUDA backend, got: ", at::toString(self.type().backend()));
+           "std only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   AT_CHECK(at::isFloatingType(self.type().scalarType()), "std only supports floating-point dtypes");
   auto trivial_return = _allreduce_return_trivial(self, std::numeric_limits<double>::quiet_NaN());
   return trivial_return.has_value() ? trivial_return.value() : at::_th_std(self, unbiased);
@@ -534,7 +534,7 @@ Tensor std(const Tensor& self, int64_t dim, bool unbiased, bool keepdim) {
 
 Tensor &std_out(Tensor &result, const Tensor &self, int64_t dim, bool unbiased, bool keepdim) {
   AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "std only supports CPU AND CUDA backend, got: ", at::toString(self.type().backend()));
+           "std only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   AT_CHECK(at::isFloatingType(self.type().scalarType()), "std only supports floating-point dtypes");
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial(result, self, std::numeric_limits<double>::quiet_NaN(), dim, keepdim)) {

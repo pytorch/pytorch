@@ -114,7 +114,7 @@ C10_API std::ostream& operator<<(std::ostream& stream, const Stream& s);
 namespace std {
   template <>
   struct hash<c10::Stream> {
-    size_t operator()(c10::Stream s) const {
+    size_t operator()(c10::Stream s) const noexcept {
       return std::hash<uint64_t>{}(s.pack());
     }
   };
