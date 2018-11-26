@@ -285,25 +285,15 @@ struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
     c10::optional<bool> result;
     Graph& graph = *(caller.graph());
 
-    std::vector<NamedValue> new_inputs = inputs.vec();
-    std::vector<NamedValue> new_attributes = attributes.vec();
     auto index = py::cast<size_t>(dispatched_fn_["index"]);
     auto arg_name = py::str(dispatched_fn_["arg_name"]);
 
     if (index < inputs.size()) {
       // Dispatch flag is in arg list
       result = constant_as<bool>(inputs.at(index).value(graph));
-
-      // Slice out index of dispatch flag
-      new_inputs = removeIndex(inputs, index);
-      n_binders -= 1;
     } else if (auto i = findInputWithName(arg_name, attributes)) {
       // Dispatch flag is in kwargs
       result = constant_as<bool>(attributes[*i].value(graph));
-
-      // Slice out index of dispatch flag
-      new_attributes = removeIndex(attributes, *i);
-      n_binders -= 1;
     } else {
       // Didn't find dispatch flag, so use default value
       result = py::cast<bool>(dispatched_fn_["default"]);
@@ -319,7 +309,7 @@ struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
     } else {
       value = toSugaredValue(dispatched_fn_["if_false"], caller, loc);
     }
-    return value->call(loc, caller, new_inputs, new_attributes, n_binders);
+    return value->call(loc, caller, inputs, attributes, n_binders);
   }
 
  private:

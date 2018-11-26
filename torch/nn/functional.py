@@ -302,10 +302,10 @@ Args:
 """)
 
 
-@torch._jit_internal.weak_script
-def fractional_max_pool2d_with_indices(input, kernel_size, output_size=None,
-                                       output_ratio=None, _random_samples=None):
-    # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList1[int]], float, Tensor) -> Tuple[Tensor, Tensor]
+def fractional_max_pool2d(input, kernel_size, output_size=None,
+                          output_ratio=None, return_indices=False,
+                          _random_samples=None):
+    # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList1[int]], float, bool, Tensor) -> Tuple[Tensor, Tensor]  # noqa
     r"""Applies 2D fractional max pooling over an input signal composed of several input planes.
 
     Fractional MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
@@ -339,34 +339,22 @@ def fractional_max_pool2d_with_indices(input, kernel_size, output_size=None,
         raise ValueError("fractional_max_pool2d requires specifying either "
                          "an output_size, or a output_ratio")
     if output_size is None:
-        output_ratio = _pair(output_ratio)
-        output_size = (int(input.size(2) * output_ratio[0]),
-                       int(input.size(3) * output_ratio[1]))
+        _output_ratio = _pair(output_ratio)
+        _output_size = (int(input.size(2) * _output_ratio[0]),
+                        int(input.size(3) * _output_ratio[1]))
+    else:
+        _output_size = torch.jit._unwrap_optional(output_size)
 
     if _random_samples is None:
         _random_samples = input.new(input.size(0), input.size(1), 2).uniform_()
-    return torch._C._nn.fractional_max_pool2d(input, kernel_size, output_size, _random_samples)
-
-
-@torch._jit_internal.weak_script
-def _fractional_max_pool2d(input, kernel_size, output_size=None,
-                           output_ratio=None, _random_samples=None):
-    # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList1[int]], float, Tensor) -> Tensor
-    return fractional_max_pool2d_with_indices(
-        input, kernel_size, output_size, output_ratio, _random_samples)[0]
-
-fractional_max_pool2d = torch._jit_internal.boolean_dispatch(
-    arg_name='return_indices',
-    arg_index=4,
-    default=False,
-    if_true=fractional_max_pool2d_with_indices,
-    if_false=_fractional_max_pool2d)
+    ret = torch._C._nn.fractional_max_pool2d(input, kernel_size, _output_size, _random_samples)
+    return ret if return_indices else ret[0]
 
 
 @torch._jit_internal.weak_script
 def max_pool1d_with_indices(input, kernel_size, stride=None, padding=0,
-                            dilation=1, ceil_mode=False):
-    # type: (Tensor, BroadcastingList1[int], Optional[BroadcastingList1[int]], int, int, bool) -> Tuple[Tensor, Tensor]
+                            dilation=1, ceil_mode=False, return_indices=False):
+    # type: (Tensor, BroadcastingList1[int], Optional[BroadcastingList1[int]], int, int, bool, bool) -> Tuple[Tensor, Tensor]  # noqa
     r"""Applies a 1D max pooling over an input signal composed of several input
     planes.
 
@@ -382,8 +370,8 @@ def max_pool1d_with_indices(input, kernel_size, stride=None, padding=0,
 
 @torch._jit_internal.weak_script
 def _max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
-                ceil_mode=False):
-    # type: (Tensor, BroadcastingList1[int], Optional[BroadcastingList1[int]], int, int, bool) -> Tensor
+                ceil_mode=False, return_indices=False):
+    # type: (Tensor, BroadcastingList1[int], Optional[BroadcastingList1[int]], int, int, bool, bool) -> Tensor
     return max_pool1d_with_indices(
         input, kernel_size, stride, padding, dilation, ceil_mode)[0]
 
@@ -397,8 +385,8 @@ max_pool1d = torch._jit_internal.boolean_dispatch(
 
 @torch._jit_internal.weak_script
 def max_pool2d_with_indices(input, kernel_size, stride=None, padding=0, dilation=1,
-                            ceil_mode=False):
-    # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], int, int, bool) -> Tuple[Tensor, Tensor]
+                            ceil_mode=False, return_indices=False):
+    # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], int, int, bool, bool) -> Tuple[Tensor, Tensor]  # noqa
     r"""Applies a 2D max pooling over an input signal composed of several input
     planes.
 
@@ -410,8 +398,8 @@ def max_pool2d_with_indices(input, kernel_size, stride=None, padding=0, dilation
 
 @torch._jit_internal.weak_script
 def _max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
-                ceil_mode=False):
-    # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], int, int, bool) -> Tensor
+                ceil_mode=False, return_indices=False):
+    # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], int, int, bool, bool) -> Tensor
     return max_pool2d_with_indices(
         input, kernel_size, stride, padding, dilation, ceil_mode)[0]
 
@@ -425,8 +413,8 @@ max_pool2d = torch._jit_internal.boolean_dispatch(
 
 @torch._jit_internal.weak_script
 def max_pool3d_with_indices(input, kernel_size, stride=None, padding=0,
-                            dilation=1, ceil_mode=False):
-    # type: (Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], int, int, bool) -> Tuple[Tensor, Tensor]
+                            dilation=1, ceil_mode=False, return_indices=False):
+    # type: (Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], int, int, bool, bool) -> Tuple[Tensor, Tensor]  # noqa
     r"""Applies a 3D max pooling over an input signal composed of several input
     planes.
 
@@ -438,8 +426,8 @@ def max_pool3d_with_indices(input, kernel_size, stride=None, padding=0,
 
 @torch._jit_internal.weak_script
 def _max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1,
-                ceil_mode=False):
-    # type: (Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], int, int, bool) -> Tensor
+                ceil_mode=False, return_indices=False):
+    # type: (Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], int, int, bool, bool) -> Tensor
     return torch._C._nn.max_pool3d_with_indices(
         input, kernel_size, stride, padding, dilation, ceil_mode)[0]
 
@@ -560,8 +548,8 @@ def lp_pool1d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
 
 
 @torch._jit_internal.weak_script
-def adaptive_max_pool1d_with_indices(input, output_size):
-    # type: (Tensor, BroadcastingList1[int]) -> Tuple[Tensor, Tensor]
+def adaptive_max_pool1d_with_indices(input, output_size, return_indices=False):
+    # type: (Tensor, BroadcastingList1[int], bool) -> Tuple[Tensor, Tensor]
     r"""Applies a 1D adaptive max pooling over an input signal composed of
     several input planes.
 
@@ -575,8 +563,8 @@ def adaptive_max_pool1d_with_indices(input, output_size):
 
 
 @torch._jit_internal.weak_script
-def _adaptive_max_pool1d(input, output_size):
-    # type: (Tensor, BroadcastingList1[int]) -> Tensor
+def _adaptive_max_pool1d(input, output_size, return_indices=False):
+    # type: (Tensor, BroadcastingList1[int], bool) -> Tensor
     return adaptive_max_pool1d_with_indices(input, output_size)[0]
 
 adaptive_max_pool1d = torch._jit_internal.boolean_dispatch(
@@ -588,8 +576,8 @@ adaptive_max_pool1d = torch._jit_internal.boolean_dispatch(
 
 
 @torch._jit_internal.weak_script
-def adaptive_max_pool2d_with_indices(input, output_size):
-    # type: (Tensor, BroadcastingList1[int]) -> Tuple[Tensor, Tensor]
+def adaptive_max_pool2d_with_indices(input, output_size, return_indices=False):
+    # type: (Tensor, BroadcastingList1[int], bool) -> Tuple[Tensor, Tensor]
     r"""Applies a 2D adaptive max pooling over an input signal composed of
     several input planes.
 
@@ -605,8 +593,8 @@ def adaptive_max_pool2d_with_indices(input, output_size):
 
 
 @torch._jit_internal.weak_script
-def _adaptive_max_pool2d(input, output_size):
-    # type: (Tensor, BroadcastingList1[int]) -> Tuple[Tensor, Tensor]
+def _adaptive_max_pool2d(input, output_size, return_indices=False):
+    # type: (Tensor, BroadcastingList1[int], bool) -> Tuple[Tensor, Tensor]
     return adaptive_max_pool2d_with_indices(input, output_size)[0]
 
 adaptive_max_pool2d = torch._jit_internal.boolean_dispatch(
@@ -618,8 +606,8 @@ adaptive_max_pool2d = torch._jit_internal.boolean_dispatch(
 
 
 @torch._jit_internal.weak_script
-def adaptive_max_pool3d_with_indices(input, output_size):
-    # type: (Tensor, BroadcastingList1[int]) -> Tuple[Tensor, Tensor]
+def adaptive_max_pool3d_with_indices(input, output_size, return_indices=False):
+    # type: (Tensor, BroadcastingList1[int], bool) -> Tuple[Tensor, Tensor]
     r"""Applies a 3D adaptive max pooling over an input signal composed of
     several input planes.
 
@@ -635,8 +623,8 @@ def adaptive_max_pool3d_with_indices(input, output_size):
 
 
 @torch._jit_internal.weak_script
-def _adaptive_max_pool3d(input, output_size):
-    # type: (Tensor, BroadcastingList1[int]) -> Tensor
+def _adaptive_max_pool3d(input, output_size, return_indices=False):
+    # type: (Tensor, BroadcastingList1[int], bool) -> Tensor
     return adaptive_max_poo31d_with_indices(input, output_size)[0]
 
 adaptive_max_pool3d = torch._jit_internal.boolean_dispatch(

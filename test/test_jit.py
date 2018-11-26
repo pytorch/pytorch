@@ -9196,13 +9196,6 @@ EXCLUDE_SCRIPT = {
     'test_norm_fro',
     'test_norm_fro_default',
     'test_norm_nuc',
-    # skipped nn functional tests
-    # ops involves sampling which could not test
-
-    'test_nn_adaptive_max_pool1d',
-    'test_nn_adaptive_max_pool2d',
-    'test_nn_adaptive_max_pool3d',
-
 
     # argument has custom behavior
     'test_nn_fractional_max_pool2d',

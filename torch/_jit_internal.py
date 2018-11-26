@@ -121,18 +121,15 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
 
     def fn(*args, **kwargs):
         dispatch_flag = False
-        new_args = args
         if arg_name in kwargs:
             dispatch_flag = kwargs[arg_name]
-            del kwargs[arg_name]
         elif arg_index < len(args):
             dispatch_flag = args[arg_index]
-            new_args = args[:arg_index] + args[arg_index + 1:]
 
         if dispatch_flag:
-            return if_true(*new_args, **kwargs)
+            return if_true(*args, **kwargs)
         else:
-            return if_false(*new_args, **kwargs)
+            return if_false(*args, **kwargs)
 
     if if_true.__doc__ is None and if_false.__doc__ is not None:
         doc = if_false.__doc__
