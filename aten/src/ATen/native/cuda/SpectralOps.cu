@@ -225,7 +225,7 @@ static inline Tensor _run_cufft(
     } else {
       std::ostringstream ss;
       ss << "hipFFT doesn't support tensor of type: "
-         << at::toString(input.type().scalarType());
+         << toString(input.type().scalarType());
       AT_ERROR(ss.str());
     }
 #else
