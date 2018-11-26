@@ -594,7 +594,7 @@ def adaptive_max_pool2d_with_indices(input, output_size, return_indices=False):
 
 @torch._jit_internal.weak_script
 def _adaptive_max_pool2d(input, output_size, return_indices=False):
-    # type: (Tensor, BroadcastingList1[int], bool) -> Tuple[Tensor, Tensor]
+    # type: (Tensor, BroadcastingList1[int], bool) -> Tensor
     return adaptive_max_pool2d_with_indices(input, output_size)[0]
 
 adaptive_max_pool2d = torch._jit_internal.boolean_dispatch(
@@ -625,7 +625,7 @@ def adaptive_max_pool3d_with_indices(input, output_size, return_indices=False):
 @torch._jit_internal.weak_script
 def _adaptive_max_pool3d(input, output_size, return_indices=False):
     # type: (Tensor, BroadcastingList1[int], bool) -> Tensor
-    return adaptive_max_poo31d_with_indices(input, output_size)[0]
+    return adaptive_max_pool3d_with_indices(input, output_size)[0]
 
 adaptive_max_pool3d = torch._jit_internal.boolean_dispatch(
     arg_name='return_indices',
