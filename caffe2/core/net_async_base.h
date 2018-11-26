@@ -4,7 +4,6 @@
 #include "c10/util/Registry.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/net.h"
-#include "caffe2/core/net_async_base.h"
 #include "caffe2/core/net_dag_utils.h"
 #include "caffe2/core/prof_dag_counters.h"
 #include "caffe2/core/stats.h"

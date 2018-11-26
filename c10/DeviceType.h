@@ -41,9 +41,3 @@ template <> struct hash<c10::DeviceType> {
   }
 };
 } // namespace std
-
-// TODO: Remove me when we get a global c10 namespace using in at
-namespace at {
-using c10::DeviceType;
-using c10::DeviceTypeName;
-}

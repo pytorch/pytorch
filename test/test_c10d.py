@@ -970,6 +970,25 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         # The barrier will now time output
         self.assertFalse(pg.barrier().wait())
 
+    @unittest.skip("Implementation of this functionality pending; see #14373")
+    def test_barrier_implies_wait(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        # Kick off allreduce operations
+        size = (100, 100)
+        num = 16
+        tensors = [torch.full(size, float(i)) for i in range(num)]
+        for tensor in tensors:
+            # Note: leak the returned work handle
+            pg.allreduce(tensor)
+
+        # Barrier should ensure all previous work has completed
+        pg.barrier()
+
+        for i, tensor in enumerate(tensors):
+            self.assertEqual(torch.full(size, float(i * (i + 1) / 2)), tensor)
+
 
 class ProcessGroupNCCLTest(TestCase):
     MAIN_PROCESS_RANK = 0
@@ -1112,6 +1131,36 @@ class ProcessGroupNCCLTest(TestCase):
         for device_ts in output_ts:
             for s_idx, t in enumerate(device_ts):
                 self.assertEqual(torch.Tensor([s_idx]), t)
+
+    def test_barrier(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        def allreduce(tensors):
+            opts = c10d.AllreduceOptions()
+            work = pg.allreduce(tensors, opts)
+            return work
+
+        # Making the collective to operate on
+        # 1, 2, 3, 4, .... self.num_gpus GPUs
+        tensors_list = [[] for _ in range(2, self.num_gpus + 1)]
+        for i in range(2, self.num_gpus + 1):
+            for j in range(i):
+                tensors_list[i - 2].append(torch.Tensor([j + 1]).cuda(j))
+
+        works = []
+        for tensors in tensors_list:
+            work = allreduce(tensors)
+            works.append(work)
+
+        # Barrier will ensure that all previous work is completed
+        pg.barrier()
+
+        for i in range(2, self.num_gpus + 1):
+            for j in range(i):
+                self.assertEqual(
+                    torch.Tensor([float(i * (i + 1) / 2)]),
+                    tensors_list[i - 2][j])
 
 
 class Net(nn.Module):
