@@ -10058,7 +10058,11 @@ def add_nn_module_test(*args, **kwargs):
             return module(*args)
 
         # Check against Python module as reference
-        args_variable, kwargs_variable = create_input((kwargs['input_size'],))
+        if 'input_fn' in kwargs:
+            input_size = tuple(kwargs['input_fn']().size())
+        else:
+            input_size = kwargs['input_size']
+        args_variable, kwargs_variable = create_input((input_size,))
         f_args_variable = deepcopy(unpack_variables(args_variable))
 
         check_against_reference(self, create_script_module, create_nn_module, f_args_variable)
