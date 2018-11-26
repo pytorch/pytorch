@@ -417,6 +417,7 @@ class TestCppExtension(common.TestCase):
         else:
             ext = "so"
         root = os.path.join("cpp_extensions", "no_python_abi_suffix_test", "build")
+        print(list(os.walk(os.path.join("cpp_extensions", "no_python_abi_suffix_test"))))
         matches = [f for _, _, fs in os.walk(root) for f in fs if f.endswith(ext)]
         self.assertEqual(len(matches), 1, str(matches))
         self.assertEqual(matches[0], "{}.{}".format("no_python_abi_suffix_test", ext), str(matches))
