@@ -415,7 +415,7 @@ def _unpool_output_size(input, kernel_size, stride, padding, output_size):
 @torch._jit_internal.weak_script
 def max_unpool1d(input, indices, kernel_size, stride=None, padding=0,
                  output_size=None):
-    # type: (Tensor, Tensor, BroadcastingList1[int], Optional[BroadcastingList1[int]], BroadcastingList1[int], Optional[BroadcastingList1[int]]) -> Tensor
+    # type: (Tensor, Tensor, BroadcastingList1[int], Optional[BroadcastingList1[int]], BroadcastingList1[int], Optional[BroadcastingList1[int]]) -> Tensor  # noqa
     r"""Computes a partial inverse of :class:`MaxPool1d`.
 
     See :class:`~torch.nn.MaxUnpool1d` for details.
@@ -434,7 +434,7 @@ def max_unpool1d(input, indices, kernel_size, stride=None, padding=0,
 @torch._jit_internal.weak_script
 def max_unpool2d(input, indices, kernel_size, stride=None, padding=0,
                  output_size=None):
-    # type: (Tensor, Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], BroadcastingList2[int], Optional[BroadcastingList2[int]]) -> Tensor
+    # type: (Tensor, Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], BroadcastingList2[int], Optional[BroadcastingList2[int]]) -> Tensor  # noqa
     r"""Computes a partial inverse of :class:`MaxPool2d`.
 
     See :class:`~torch.nn.MaxUnpool2d` for details.
@@ -453,7 +453,7 @@ def max_unpool2d(input, indices, kernel_size, stride=None, padding=0,
 @torch._jit_internal.weak_script
 def max_unpool3d(input, indices, kernel_size, stride=None, padding=0,
                  output_size=None):
-    # type: (Tensor, Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], BroadcastingList3[int], Optional[BroadcastingList3[int]]) -> Tensor
+    # type: (Tensor, Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], BroadcastingList3[int], Optional[BroadcastingList3[int]]) -> Tensor  # noqa
     r"""Computes a partial inverse of :class:`MaxPool3d`.
 
     See :class:`~torch.nn.MaxUnpool3d` for details.
