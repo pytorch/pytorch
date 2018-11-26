@@ -6,12 +6,27 @@ from .thnn.auto import function_by_name
 import torch.backends.cudnn as cudnn
 
 
+@torch._jit_internal.weak_script
 def affine_grid_generator(theta, size):
     if theta.data.is_cuda and cudnn.enabled and cudnn.is_acceptable(theta.data) and len(size) == 4:
         N, C, H, W = size
-        return torch.cudnn_affine_grid_generator(theta, N, C, H, W)
+        ret = torch.cudnn_affine_grid_generator(theta, N, C, H, W)
     else:
-        return AffineGridGenerator.apply(theta, size)
+        ret = torch.affine_grid_generator(theta, size)
+    return ret
+
+# @torch._jit_internal.weak_script
+# def affine_grid_generator(theta, size):
+#     # type: (Tensor, List[int]) -> Tensor
+#
+#     # import pdb; pdb.set_trace()
+#     # if theta.data.is_cuda and cudnn.enabled and cudnn.is_acceptable(theta.data) and len(size) == 4:
+#     #     N, C, H, W = size
+#     #     return torch.cudnn_affine_grid_generator(theta, N, C, H, W)
+#     # elif len(size) < 3:
+#     #     return AffineGridGenerator.apply(theta, size)
+#     # else:
+#     return torch.affine_grid_generator(theta, size)
 
 
 # TODO: Port these completely into C++

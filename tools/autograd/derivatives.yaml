@@ -127,6 +127,9 @@
   vec1: grad.mv(vec2) * alpha
   vec2: grad.t().mv(vec1) * alpha
 
+- name: affine_grid_generator(Tensor theta, IntList size)
+  theta: affine_grid_generator_backward(grad, size)
+
 - name: alias(Tensor self)
   self: grad
 
