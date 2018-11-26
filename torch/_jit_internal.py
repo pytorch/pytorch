@@ -10,7 +10,6 @@ try:
     import builtins  # PY3
 except Exception:
     import __builtin__ as builtins  # PY2
-from torch._C import _add_docstr
 
 # Tracks standalone weak script functions
 _compiled_weak_fns = weakref.WeakKeyDictionary()
@@ -135,9 +134,15 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
         else:
             return if_false(*new_args, **kwargs)
 
-    if if_true.__doc__ != if_false.__doc__:
-        raise RuntimeError("mismatched docstrings on functions")
-    fn.__doc__ = if_true.__doc__
+    if if_true.__doc__ == "" and if_false.__doc__ != "":
+        doc = if_false.__doc__
+        if_true.__doc__ = doc
+    elif if_false.__doc__ == "" and if_true.__doc__ != "":
+        doc = if_true.__doc__
+        if_false.__doc__ = doc
+    else:
+        raise RuntimeError("only one function can have a docstring")
+    fn.__doc__ = doc
 
     _boolean_dispatched[fn] = {
         "if_true": if_true,
