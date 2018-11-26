@@ -146,8 +146,8 @@ void initPythonIRBindings(PyObject * module_) {
       ss << g;
       return ss.str();
     })
-    .def("propagate_shapes", [](Graph& g, std::vector<at::Tensor> inputs, bool with_grad) {
-      setInputTypes(g, ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
+    .def("propagate_shapes", [](std::shared_ptr<Graph> g, std::vector<at::Tensor> inputs, bool with_grad) {
+      setInputTypes(*g, ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
       PropagateInputShapes(g);
     })
     .def("export", [](const std::shared_ptr<Graph> g, const std::vector<at::Tensor>& initializers,
@@ -480,7 +480,7 @@ void initPythonIRBindings(PyObject * module_) {
       return std::static_pointer_cast<Type>(t.expect<CompleteTensorType>()->contiguous());
     })
     .def("scalarType",[](Type& t) {
-      return at::toString(t.expect<TensorType>()->scalarType());
+      return toString(t.expect<TensorType>()->scalarType());
     })
     .def("__eq__", [](std::shared_ptr<Type>& self, std::shared_ptr<Type>& other) {
 		  return *self == *other;

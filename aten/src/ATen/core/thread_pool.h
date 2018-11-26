@@ -3,7 +3,7 @@
 #include <functional>
 #include <queue>
 
-#include <ATen/core/intrusive_ptr.h>
+#include <c10/util/intrusive_ptr.h>
 
 namespace c10 {
 
