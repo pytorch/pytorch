@@ -486,6 +486,10 @@ public:
   // violating dependencies, otherwise executes the move and returns `true`
   TORCH_API bool moveAfterTopologicallyValid(Node* n, const AliasDb& aliasDb);
 
+  // Like moveAfterTopologicallyValid, but only returns if the move is
+  // possible, without actually performing it.
+  TORCH_API bool couldMoveAfterTopologically(Node* n, const AliasDb& aliasdb);
+
   // Move a node 'n' (already in the graph) before 'this' in the topological
   // order.
   //
@@ -509,6 +513,10 @@ public:
   // Returns `false` if it's impossible to move `this` after `n` without
   // violating dependencies, otherwise executes the move and returns `true`
   TORCH_API bool moveBeforeTopologicallyValid(Node* n, const AliasDb& aliasDb);
+
+  // Like moveBeforeTopologicallyValid, but only returns if the move is
+  // possible, without actually performing it.
+  TORCH_API bool couldMoveBeforeTopologically(Node* n, const AliasDb& aliasDb);
 
   // Remove the input at 'i' from this node.
   //
@@ -589,7 +597,7 @@ public:
 
  private:
   enum class MoveSide { BEFORE, AFTER };
-  bool tryMove(Node* movePoint, MoveSide moveSide, const AliasDb& aliasDb);
+  bool tryMove(Node* movePoint, MoveSide moveSide, const AliasDb& aliasDb, bool dryRun);
   void move(Node* movePoint, MoveSide moveSide);
 
   std::pair<Value*, const Argument&> findInput(Symbol name);
