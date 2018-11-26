@@ -973,7 +973,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         with self.assertRaisesRegex(RuntimeError, " (Timed out|closed) "):
             pg.barrier().wait()
 
-    @unittest.skip("Implementation of this functionality pending; see #14373")
     def test_barrier_implies_wait(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
@@ -987,10 +986,10 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             pg.allreduce(tensor)
 
         # Barrier should ensure all previous work has completed
-        pg.barrier()
+        pg.barrier().wait()
 
         for i, tensor in enumerate(tensors):
-            self.assertEqual(torch.full(size, float(i * (i + 1) / 2)), tensor)
+            self.assertEqual(torch.full(size, float(i * self.world_size)), tensor)
 
 
 class ProcessGroupNCCLTest(TestCase):

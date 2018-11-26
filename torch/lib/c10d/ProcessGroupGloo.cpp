@@ -223,22 +223,23 @@ ProcessGroupGloo::ProcessGroupGloo(
   }
 
   threads_.resize(options.threads);
+  workInProgress_.resize(options.threads);
   for (size_t i = 0; i < threads_.size(); i++) {
-    threads_[i] = std::thread(&ProcessGroupGloo::runLoop, this);
+    threads_[i] = std::thread(&ProcessGroupGloo::runLoop, this, i);
   }
 }
 
 ProcessGroupGloo::~ProcessGroupGloo() {
-  std::unique_lock<std::mutex> lock(queueMutex_);
-  while (!queue_.empty()) {
-    queueConsumeCV_.wait(lock);
+  std::unique_lock<std::mutex> lock(workMutex_);
+  while (!workQueue_.empty()) {
+    workConsumeCV_.wait(lock);
   }
 
   // Queue is empty, signal stop
   stop_ = true;
 
   // Release lock to allow threads to terminate
-  queueProduceCV_.notify_all();
+  workProduceCV_.notify_all();
   lock.unlock();
 
   // Wait for worker threads to terminate
@@ -251,29 +252,31 @@ uint32_t ProcessGroupGloo::nextTag() {
   return collectiveCounter_++;
 }
 
-void ProcessGroupGloo::runLoop(void) {
-  std::unique_lock<std::mutex> lock(queueMutex_);
+void ProcessGroupGloo::runLoop(int threadIndex) {
+  std::unique_lock<std::mutex> lock(workMutex_);
 
   while (!stop_) {
-    if (queue_.empty()) {
-      queueProduceCV_.wait(lock);
+    if (workQueue_.empty()) {
+      workProduceCV_.wait(lock);
       continue;
     }
 
-    auto fn = std::move(queue_.front());
-    queue_.pop_front();
-    queueConsumeCV_.notify_one();
+    auto work = std::move(workQueue_.front());
+    workQueue_.pop_front();
+    workConsumeCV_.notify_one();
 
+    workInProgress_[threadIndex] = work;
     lock.unlock();
-    fn();
+    AsyncWork::execute(std::move(work));
     lock.lock();
+    workInProgress_[threadIndex] = nullptr;
   }
 }
 
-void ProcessGroupGloo::enqueue(std::function<void()> fn) {
-  std::unique_lock<std::mutex> lock(queueMutex_);
-  queue_.push_back(fn);
-  queueProduceCV_.notify_one();
+void ProcessGroupGloo::enqueue(std::shared_ptr<AsyncWork> work) {
+  std::unique_lock<std::mutex> lock(workMutex_);
+  workQueue_.push_back(std::move(work));
+  workProduceCV_.notify_one();
 }
 
 namespace {
@@ -418,7 +421,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
     throw std::runtime_error("Invalid backend");
   }
 
-  enqueue(std::bind(AsyncWork::execute, work));
+  enqueue(work);
   return work;
 }
 
@@ -560,7 +563,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
     throw std::runtime_error("Invalid backend");
   }
 
-  enqueue(std::bind(AsyncWork::execute, work));
+  enqueue(work);
   return work;
 }
 
@@ -636,7 +639,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce(
       opts.rootTensor,
       opts.reduceOp,
       nextTag());
-  enqueue(std::bind(AsyncWork::execute, work));
+  enqueue(work);
   return work;
 }
 
@@ -724,7 +727,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
 
   auto work = std::make_shared<AsyncAllgatherWork>(
       contexts_[0], outputs, inputs, nextTag());
-  enqueue(std::bind(AsyncWork::execute, work));
+  enqueue(work);
   return work;
 }
 
@@ -811,7 +814,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
 
   auto work = std::make_shared<AsyncGatherWork>(
       contexts_[0], outputs, inputs, opts.rootRank, nextTag());
-  enqueue(std::bind(AsyncWork::execute, work));
+  enqueue(work);
   return work;
 }
 
@@ -887,7 +890,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
 
   auto work = std::make_shared<AsyncScatterWork>(
       contexts_[0], outputs, inputs, opts.rootRank, nextTag());
-  enqueue(std::bind(AsyncWork::execute, work));
+  enqueue(work);
   return work;
 }
 
@@ -983,13 +986,25 @@ namespace {
 
 class AsyncBarrierWork : public ProcessGroupGloo::AsyncWork {
  public:
-  AsyncBarrierWork(const std::shared_ptr<gloo::Context>& context, uint32_t tag)
-      : context(context), tag(tag) {}
+  AsyncBarrierWork(
+      const std::shared_ptr<gloo::Context>& context,
+      std::vector<std::weak_ptr<AsyncWork>> priorWork,
+      uint32_t tag)
+      : context(context), priorWork(std::move(priorWork)), tag(tag) {}
 
   std::shared_ptr<gloo::Context> context;
+  std::vector<std::weak_ptr<AsyncWork>> priorWork;
   const uint32_t tag;
 
   void run() override {
+    // Wait on prior work to complete
+    for (auto& weakWork : priorWork) {
+      auto work = weakWork.lock();
+      if (work) {
+        work->wait();
+      }
+    }
+
     gloo::BarrierOptions opts(context);
     opts.setTag(tag);
     gloo::barrier(opts);
@@ -1000,8 +1015,21 @@ class AsyncBarrierWork : public ProcessGroupGloo::AsyncWork {
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::barrier(
     const BarrierOptions& opts) {
-  auto work = std::make_shared<AsyncBarrierWork>(contexts_[0], nextTag());
-  enqueue(std::bind(AsyncWork::execute, work));
+  std::vector<std::weak_ptr<AsyncWork>> priorWork;
+
+  // Snapshot all in progress and pending work as weak_ptr.
+  // When executing a barrier, we need to ensure that all prior work
+  // has completed before completing itself.
+  {
+    std::unique_lock<std::mutex> lock(workMutex_);
+    priorWork.insert(
+        priorWork.end(), workInProgress_.begin(), workInProgress_.end());
+    priorWork.insert(priorWork.end(), workQueue_.begin(), workQueue_.end());
+  }
+
+  auto work = std::make_shared<AsyncBarrierWork>(
+      contexts_[0], std::move(priorWork), nextTag());
+  enqueue(work);
   return work;
 }
 
