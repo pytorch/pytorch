@@ -9170,7 +9170,6 @@ EXCLUDE_SCRIPT = {
 
     # argument has custom behavior
     'test_nn_fractional_max_pool2d',
-    'test_nn_max_unpool3d',
     'test_nn_embedding',
     'test_nn_embedding_bag',
     'test_nn_batch_norm',
@@ -9178,7 +9177,6 @@ EXCLUDE_SCRIPT = {
     # aten op has additional cudnn argument
     'test_nn_group_norm',
     'test_nn_unfold',
-    'test_nn_max_unpool2d',
 
     # argument type not supported
     'test_nn_affine_grid',
@@ -9189,7 +9187,6 @@ EXCLUDE_SCRIPT = {
     'test_nn_cross_entropy',
     'test_nn_interpolate',
     'test_nn_fold',
-    'test_nn_max_unpool1d',
     'test_nn_poisson_nll_loss',
     'test_nn_poisson_nll_loss_full',
 }
