@@ -182,6 +182,8 @@ void AliasDb::analyze(Node* node) {
     case prim::TupleConstruct:
     case prim::Undefined:
     case prim::FusedConcat:
+    case prim::MMTreeReduce:
+    case prim::MMBatchSide:
       return analyzeCreator(node);
     case prim::TupleUnpack:
     case prim::TupleIndex:
@@ -354,7 +356,9 @@ void AliasDb::analyzeSubgraph(Node* node) {
 
 // For nodes that generate a fresh value from nothing
 void AliasDb::analyzeCreator(Node* node) {
-  giveFreshAlias(node->output());
+  for (Value * output : node->outputs()) {
+    giveFreshAlias(output);
+  }
 }
 
 // For nodes that extract values from a composite type. Right now, this just
