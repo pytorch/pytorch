@@ -1101,7 +1101,8 @@ TEST(DataTest, DataLoaderWithChunkSupportSingleWorker) {
       transforms::Lambda<int>([](int x) { return x + 1; }));
 
   auto data_loader = torch::data::make_chunk_data_loader(
-      std::move(dataset), DataLoaderOptions().batch_size(kBatchSize));
+      std::move(dataset),
+      DataLoaderOptions().batch_size(kBatchSize).chunk_loading(true));
 
   auto iterator = data_loader->begin();
   for (size_t i = 0; i < 3; ++i, ++iterator) {
@@ -1121,7 +1122,10 @@ TEST(DataTest, DataLoaderWithChunkSupportMultiWorkers) {
 
   auto data_loader = torch::data::make_chunk_data_loader(
       std::move(dataset),
-      DataLoaderOptions().batch_size(kBatchSize).workers(3));
+      DataLoaderOptions()
+          .batch_size(kBatchSize)
+          .workers(3)
+          .chunk_loading(true));
 
   auto iterator = data_loader->begin();
   for (size_t i = 0; i < 3; ++i, ++iterator) {
