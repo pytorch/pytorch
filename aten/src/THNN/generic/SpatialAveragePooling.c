@@ -2,6 +2,8 @@
 #define TH_GENERIC_FILE "generic/SpatialAveragePooling.c"
 #else
 
+#include "pooling_shape.h"
+
 static inline void THNN_(SpatialAveragePooling_shapeCheck)(
 	THTensor *input, THTensor *gradOutput,
 	int kH, int kW, int dH, int dW, int padH, int padW,
@@ -34,29 +36,10 @@ static inline void THNN_(SpatialAveragePooling_shapeCheck)(
   int64_t nInputPlane = input->size(dimh-1);
   int64_t inputHeight = input->size(dimh);
   int64_t inputWidth = input->size(dimw);
-  int64_t outputHeight, outputWidth;
   int64_t nOutputPlane = nInputPlane;
 
-  if(ceil_mode)
-  {
-    outputHeight = (int64_t)(ceil((float)(inputHeight - kH + 2*padH) / dH)) + 1;
-    outputWidth  = (int64_t)(ceil((float)(inputWidth  - kW + 2*padW) / dW)) + 1;
-  }
-  else
-  {
-    outputHeight = (int64_t)(floor((float)(inputHeight - kH + 2*padH) / dH)) + 1;
-    outputWidth  = (int64_t)(floor((float)(inputWidth  - kW + 2*padW) / dW)) + 1;
-  }
-
-  if (padW || padH)
-  {
-    // ensure that the last pooling starts inside the image
-    // needed to avoid problems in ceil mode
-    if ((outputHeight - 1)*dH >= inputHeight + padH)
-      --outputHeight;
-    if ((outputWidth  - 1)*dW >= inputWidth  + padW)
-      --outputWidth;
-  }
+  int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, 1, ceil_mode);
+  int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, 1, ceil_mode);
 
   if (outputWidth < 1 || outputHeight < 1)
     THError("Given input size: (%dx%dx%d). "
@@ -113,25 +96,8 @@ void THNN_(SpatialAveragePooling_updateOutput)(
   inputHeight = input->size(dimh);
   nInputPlane = input->size(dimc);
 
-  if(ceil_mode)
-  {
-    outputWidth  = (int64_t)(ceil((float)(inputWidth  - kW + 2*padW) / dW)) + 1;
-    outputHeight = (int64_t)(ceil((float)(inputHeight - kH + 2*padH) / dH)) + 1;
-  }
-  else
-  {
-    outputWidth  = (int64_t)(floor((float)(inputWidth  - kW + 2*padW) / dW)) + 1;
-    outputHeight = (int64_t)(floor((float)(inputHeight - kH + 2*padH) / dH)) + 1;
-  }
-  if (padW || padH)
-  {
-    // ensure that the last pooling starts inside the image
-    // needed to avoid problems in ceil mode
-    if ((outputHeight - 1)*dH >= inputHeight + padH)
-      --outputHeight;
-    if ((outputWidth  - 1)*dW >= inputWidth  + padW)
-      --outputWidth;
-  }
+  outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, 1, ceil_mode);
+  outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, 1, ceil_mode);
 
   if (input->dim() == 3)
     THTensor_(resize3d)(output, nInputPlane, outputHeight, outputWidth);
@@ -243,25 +209,8 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
   inputHeight = input->size(dimh);
   nInputPlane = input->size(dimc);
 
-  if(ceil_mode)
-  {
-    outputWidth  = (int64_t)(ceil((float)(inputWidth  - kW + 2*padW) / dW)) + 1;
-    outputHeight = (int64_t)(ceil((float)(inputHeight - kH + 2*padH) / dH)) + 1;
-  }
-  else
-  {
-    outputWidth  = (int64_t)(floor((float)(inputWidth  - kW + 2*padW) / dW)) + 1;
-    outputHeight = (int64_t)(floor((float)(inputHeight - kH + 2*padH) / dH)) + 1;
-  }
-  if (padW || padH)
-  {
-    // ensure that the last pooling starts inside the image
-    // needed to avoid problems in ceil mode
-    if ((outputHeight - 1)*dH >= inputHeight + padH)
-      --outputHeight;
-    if ((outputWidth  - 1)*dW >= inputWidth  + padW)
-      --outputWidth;
-  }
+  outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, 1, ceil_mode);
+  outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, 1, ceil_mode);
 
   THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimh, outputHeight);
   THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimw, outputWidth);
