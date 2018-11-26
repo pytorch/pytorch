@@ -719,7 +719,7 @@ struct GraphFuser {
   }
 
   void replaceIntermediateBroadcastingChunks() {
-    for (auto it = block->nodes().rbegin(); it != block->nodes().rend();) {
+    for (auto it = block_->nodes().rbegin(); it != block_->nodes().rend();) {
       auto * node = *it;
       ++it;  // We might delete node, so increment the iterator now.
       if (node->kind() != prim::BroadcastingChunk) {
@@ -728,7 +728,7 @@ struct GraphFuser {
       auto * bchunk = node;
       insertExplicitBroadcast(bchunk);
 
-      auto * graph = block->owningGraph();
+      auto * graph = block_->owningGraph();
       size_t nchunks = bchunk->i(attr::chunks);
       WithInsertPoint guard(bchunk->next());
 
