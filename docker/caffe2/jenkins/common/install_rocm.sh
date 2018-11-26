@@ -30,7 +30,8 @@ install_ubuntu() {
                    rocsparse \
                    hipsparse \
                    rocrand \
-                   hip-thrust
+                   hip-thrust \
+                   rccl
 
     # HIP has a bug that drops DEBUG symbols in generated MakeFiles.
     # https://github.com/ROCm-Developer-Tools/HIP/pull/588
@@ -74,7 +75,8 @@ install_centos() {
                    cxlactivitylogger \
                    rocsparse \
                    hipsparse \
-                   rocrand
+                   rocrand \
+                   rccl
 
 
   # Cleanup
