@@ -79,8 +79,23 @@ class Lock {
 
 class File {
  public:
-  explicit File(const std::string& path, int flags) {
-    fd_ = syscall(std::bind(::open, path.c_str(), flags, 0644));
+  explicit File(
+      const std::string& path,
+      int flags,
+      std::chrono::milliseconds timeout) {
+    const auto start = std::chrono::steady_clock::now();
+    while (true) {
+      fd_ = syscall(std::bind(::open, path.c_str(), flags, 0644));
+      if (fd_ >= 0) {
+        break;
+      }
+      const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+          std::chrono::steady_clock::now() - start);
+      if (timeout != c10d::Store::kNoTimeout && elapsed > timeout) {
+        break;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
     SYSASSERT(fd_, "open(" + path + ")");
   }
 
@@ -214,7 +229,7 @@ FileStore::~FileStore() {
 
 void FileStore::set(const std::string& key, const std::vector<uint8_t>& value) {
   std::string regKey = regularPrefix_ + key;
-  File file(path_, O_RDWR | O_CREAT);
+  File file(path_, O_RDWR | O_CREAT, timeout_);
   auto lock = file.lockExclusive();
   file.seek(0, SEEK_END);
   file.write(regKey);
@@ -225,7 +240,7 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
   std::string regKey = regularPrefix_ + key;
   const auto start = std::chrono::steady_clock::now();
   while (true) {
-    File file(path_, O_RDONLY);
+    File file(path_, O_RDONLY, timeout_);
     auto lock = file.lockShared();
     auto size = file.size();
     if (cache_.count(regKey) == 0 && size == pos_) {
@@ -251,7 +266,7 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
 }
 
 int64_t FileStore::addHelper(const std::string& key, int64_t i) {
-  File file(path_, O_RDWR | O_CREAT);
+  File file(path_, O_RDWR | O_CREAT, timeout_);
   auto lock = file.lockExclusive();
   pos_ = refresh(file, pos_, cache_);
 
@@ -277,7 +292,7 @@ int64_t FileStore::add(const std::string& key, int64_t i) {
 }
 
 bool FileStore::check(const std::vector<std::string>& keys) {
-  File file(path_, O_RDONLY);
+  File file(path_, O_RDONLY, timeout_);
   auto lock = file.lockShared();
   pos_ = refresh(file, pos_, cache_);
 
