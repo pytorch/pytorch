@@ -9113,7 +9113,6 @@ class TestPytorchExportModes(JitTestCase):
     # If you plan to remove fmod from aten, or found this test failed.
     # please contact @Rui.
     @skipIfRocm
-    @skipIfNoLapack
     def test_onnx_aten(self):
         class ModelWithAtenFmod(nn.Module):
             def forward(self, x, y):
