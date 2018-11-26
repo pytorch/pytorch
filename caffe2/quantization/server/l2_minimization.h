@@ -18,6 +18,8 @@ class L2ErrorMinimization : public NormMinimization {
   L2ErrorMinimization() : NormMinimization(L2){};
 };
 
+namespace internal {
+
 float L2MinimizationKernelAVX2(
     int precision,
     float* bins,
@@ -25,5 +27,7 @@ float L2MinimizationKernelAVX2(
     float bin_width,
     float dst_bin_width,
     int start_bin);
+
+} // namespace internal
 
 } // namespace dnnlowp
