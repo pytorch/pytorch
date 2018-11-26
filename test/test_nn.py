@@ -59,7 +59,7 @@ NO_HALF_TENSORTYPES = [torch.float,
 
 DOUBLE_TENSORTYPES = [torch.double]
 
-dtype2prec = {torch.float: 2e-5,
+dtype2prec = {torch.float: 2.5e-5,
               torch.double: 1e-5,
               torch.half: 1e-2}
 

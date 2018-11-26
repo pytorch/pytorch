@@ -3995,7 +3995,7 @@ class TestTransforms(TestCase):
                 continue
 
     def test_jit_fwd(self):
-        set_rng_seed(2147483647)
+        set_rng_seed(0)
         for transform in self.unique_transforms:
             x = self._generate_data(transform).requires_grad_()
 
