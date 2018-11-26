@@ -694,15 +694,17 @@ class TestSparse(TestCase):
 
         # mismatched sizes
         test_shapes([(3, 10, [2, 3, 4]), (3, 10, [2, 1, 4])], 0,
-                    "Concatenating tensor.*of sizes \\[2, 1, 4].*of sizes \\[2, 3, 4]")
+                    "All tensors must have the same shape: \\[2, 3, 4].*\\[2, 1, 4]")
         # hybrid sparse/dense
         test_shapes(
             [(2, 10, [2, 3, 4]), (2, 10, [2, 1, 4]), (2, 10, [2, 4, 4])], 1)
-        test_shapes([(2, 10, [2, 3, 4]), (2, 10, [2, 1, 4])], 2,
-                    "Concatenating.*along non-sparse dimension 2")
+        # cat along dense dim
+        test_shapes([(2, 10, [2, 3, 4]), (2, 10, [2, 3, 7])], 2)
+        test_shapes([(1, 10, [2, 3, 4]), (1, 10, [2, 3, 4])], 1)
+        test_shapes([(1, 10, [2, 3, 4]), (1, 10, [2, 3, 4])], 2)
         # mismatched dimensions
         test_shapes([(2, 10, [2, 3, 4]), (3, 10, [2, 3, 4])], 0,
-                    "has dimension: sparse 3, dense 0.*Concatenating with tensor of dimensions 2, 1")
+                    "All tensors must have the same.*2, 1, but tensor at position 1 has 3, 0.")
         # wrapped dimension
         test_shapes(
             [(3, 10, [2, 3, 4]), (3, 10, [2, 1, 4]), (3, 10, [2, 4, 4])], -2)
@@ -711,8 +713,39 @@ class TestSparse(TestCase):
         sp = self._gen_sparse(3, 10, [2, 3, 4])[0]
         dn = sp.to_dense()
         with self.assertRaisesRegex(RuntimeError,
-                                    "Concatenating dense tensor.*with sparse"):
+                                    "Concatenating sparse tensors, but a dense tensor was found at position 1."):
             torch.cat((sp, dn))
+
+    @skipIfRocm
+    def test_unsqueeze(self):
+        def test_shape(sparse_dims, nnz, sizes, unsqueeze_dim, fail_message=None):
+            x, _, _ = self._gen_sparse(sparse_dims, nnz, sizes)
+            if fail_message:
+                with self.assertRaisesRegex(RuntimeError, fail_message):
+                    torch.unsqueeze(x, unsqueeze_dim)
+            else:
+                result = torch.unsqueeze(x, unsqueeze_dim)
+                dense_result = torch.unsqueeze(x.to_dense(), unsqueeze_dim)
+                self.assertEqual(dense_result, result.to_dense())
+
+        # basic case
+        test_shape(3, 10, [5, 7, 11], 0)
+
+        # hybrid sparse/dense, unsqueeze along sparse dim
+        test_shape(3, 10, [5, 7, 11, 13, 17], 0)
+        test_shape(3, 10, [5, 7, 11, 13, 17], 3)
+
+        # unsqueeze along dense dimensions
+        test_shape(3, 10, [5, 7, 11, 13, 17], 4)
+        test_shape(3, 10, [5, 7, 11, 13, 17], 5)
+
+        # wrapped dimensions
+        test_shape(3, 10, [5, 7, 11, 13, 17], -1)
+        test_shape(3, 10, [5, 7, 11, 13, 17], -6)
+
+        # bounds
+        test_shape(3, 10, [5, 7, 11, 13, 17], -7, "Dimension out of range")
+        test_shape(3, 10, [5, 7, 11, 13, 17], 6, "Dimension out of range")
 
     @cpu_only
     def test_mm(self):

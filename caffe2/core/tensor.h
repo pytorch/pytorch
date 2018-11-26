@@ -5,7 +5,7 @@
 #include "caffe2/core/tensor_impl.h"
 
 #include <ATen/core/UndefinedTensorImpl.h>
-#include <ATen/core/intrusive_ptr.h>
+#include <c10/util/intrusive_ptr.h>
 #include "ATen/core/TensorOptions.h"
 
 namespace caffe2 {
@@ -61,6 +61,11 @@ class CAFFE2_API Tensor final {
     // and immediately discard it in Resize() since
     // reset_tensor will be true and FreeMemory will be called,
     // we might want to avoid creating Storage twice?
+    Resize(dims);
+  }
+
+  // we want to preserve index information
+  explicit Tensor(at::IntList dims, at::Device device): Tensor(device) {
     Resize(dims);
   }
 
@@ -523,12 +528,16 @@ void TensorPrinter::Print(const Tensor& tensor) {
   // One most likely doesn't want to print int64-number of items for visual
   // inspection, so we cast down to int here.
   int total_count = static_cast<int>(std::min(tensor.numel(), int64_t(limit_)));
+
   const T* tensor_data = tensor.template data<T>();
   for (int i = 0; i < total_count - 1; ++i) {
     values_stream << tensor_data[i] << ",";
   }
-  // We do not add a comma after the last item.
-  values_stream << tensor_data[total_count - 1];
+  if (total_count) {
+    // We do not add a comma after the last item.
+    values_stream << tensor_data[total_count - 1];
+  }
+
   if (to_file_) {
     (*log_file_) << MetaStr(tensor) << values_stream.str() << std::endl;
   } else {

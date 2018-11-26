@@ -145,11 +145,6 @@ if [[ $USE_GLOO_IBVERBS -eq 1 ]]; then
     GLOO_FLAGS+=" -DUSE_IBVERBS=1"
     THD_FLAGS="-DUSE_GLOO_IBVERBS=1"
 fi
-CWRAP_FILES="\
-$BASE_DIR/torch/lib/ATen/Declarations.cwrap;\
-$BASE_DIR/torch/lib/THNN/generic/THNN.h;\
-$BASE_DIR/torch/lib/THCUNN/generic/THCUNN.h;\
-$BASE_DIR/torch/lib/ATen/nn.yaml"
 CUDA_NVCC_FLAGS=$C_FLAGS
 if [[ -z "$CUDA_DEVICE_DEBUG" ]]; then
   CUDA_DEVICE_DEBUG=0
@@ -218,6 +213,7 @@ function build_caffe2() {
 		       -DUSE_DISTRIBUTED=$USE_DISTRIBUTED \
 		       -DUSE_FBGEMM=$USE_FBGEMM \
 		       -DUSE_NUMPY=$USE_NUMPY \
+		       -DNUMPY_INCLUDE_DIR=$NUMPY_INCLUDE_DIR \
 		       -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
 		       -DUSE_ROCM=$USE_ROCM \
 		       -DUSE_NNPACK=$USE_NNPACK \

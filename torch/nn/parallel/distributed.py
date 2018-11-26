@@ -122,6 +122,17 @@ class DistributedDataParallel(Module):
         won't be invoked anymore, unless the hooks are initialized in the
         :meth:`forward` method.
 
+    .. warning::
+        You should never try to change your model's parameters after wrapping
+        up your model with DistributedDataParallel. In other words, when
+        wrapping up your model with DistributedDataParallel, the constructor of
+        DistributedDataParallel will register the additional gradient
+        reduction functions on all the parameters of the model itself at the
+        time of construction. If you change the model's parameters after
+        the DistributedDataParallel construction, this is not supported and
+        unexpected behaviors can happen, since some parameters' gradient
+        reduction functions might not get called.
+
     .. note::
         Parameters are never broadcast between processes. The module performs
         an all-reduce step on gradients and assumes that they will be modified
@@ -254,7 +265,6 @@ class DistributedDataParallel(Module):
         self._check_default_group()
         attrs = copy.copy(self.__dict__)
         del attrs['process_group'], \
-            attrs['allreduce_opts'], \
             attrs['default_streams'], \
             attrs['_grad_accs']
         return attrs
@@ -338,8 +348,6 @@ class DistributedDataParallel(Module):
         for dev_id in self.device_ids:
             with torch.cuda.device(dev_id):
                 self.default_streams.append(torch.cuda.current_stream())
-
-        self.allreduce_opts = dist.AllreduceOptions()
 
         for device_idx, module in enumerate(self._module_copies):
             for p in module.parameters():

@@ -5,10 +5,10 @@ namespace caffe2 {
 template <>
 bool DropoutOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
-
   auto* Y = Output(0, X.sizes(), at::dtype<float>());
+
   if (is_test_) {
-    if (Y != &X) {
+    if (!IsInputOutputAlias(0, 0)) {
       context_.CopyFromCPU<float>(
           X.numel(), X.data<float>(), Y->template mutable_data<float>());
     }

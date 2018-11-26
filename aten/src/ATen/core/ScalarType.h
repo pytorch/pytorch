@@ -1,8 +1,8 @@
 #pragma once
 
-#include "ATen/core/ArrayRef.h"
+#include <c10/util/ArrayRef.h>
 #include "ATen/core/Half.h"
-#include "ATen/core/typeid.h"
+#include <c10/util/typeid.h>
 
 #include <cstdint>
 #include <iostream>
@@ -203,7 +203,7 @@ typedef ArrayRef<Tensor> TensorList;
 inline std::ostream& operator<<(
     std::ostream& stream,
     at::ScalarType scalar_type) {
-  return stream << at::toString(scalar_type);
+  return stream << toString(scalar_type);
 }
 
 } // namespace at

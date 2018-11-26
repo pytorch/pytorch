@@ -564,7 +564,7 @@ void ProcessGroupGloo::createAllreduce(AlgorithmEntry& entry) {
 #endif
 
   throw std::runtime_error(
-      "Unhandled backend: " + std::string(at::toString(backend)));
+      "Unhandled backend: " + std::string(toString(backend)));
 }
 
 template <typename T>
@@ -602,7 +602,7 @@ void ProcessGroupGloo::createBroadcast(AlgorithmEntry& entry) {
 #endif
 
   throw std::runtime_error(
-      "Unhandled backend: " + std::string(at::toString(backend)));
+      "Unhandled backend: " + std::string(toString(backend)));
 }
 
 // Constructs an AlgorithmEntry instance, except for the algorithm
@@ -737,7 +737,7 @@ class AsyncBroadcastWork : public ProcessGroupGloo::AsyncWork {
 
     // Copy to non-root tensors
     for (size_t i = 0; i < inputs.size(); i++) {
-      if (i == rootTensor) {
+      if (i == static_cast<size_t>(rootTensor)) {
         continue;
       }
       inputs[i].copy_(inputs[rootTensor]);
@@ -1217,7 +1217,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
   assertCPU(invalidArgument, inputs);
 
   if (getRank() == opts.rootRank) {
-    if (outputs.size() != 1 || outputs[0].size() != getSize()) {
+    if (outputs.size() != 1 ||
+        outputs[0].size() != static_cast<size_t>(getSize())) {
       invalidArgument(
           "requires a single-element output list "
           "containing a list with <size> tensors");
@@ -1293,7 +1294,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
   assertCPU(invalidArgument, outputs);
 
   if (getRank() == opts.rootRank) {
-    if (inputs.size() != 1 || inputs[0].size() != getSize()) {
+    if (inputs.size() != 1 ||
+        inputs[0].size() != static_cast<size_t>(getSize())) {
       invalidArgument(
           "requires a single-element input list "
           "containing a list with <size> tensors");

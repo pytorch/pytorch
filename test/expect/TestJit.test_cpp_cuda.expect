@@ -65,31 +65,29 @@ graph(%0 : Dynamic
       %3 : Dynamic
       %4 : Dynamic) {
   %7 : int = prim::Constant[value=1]()
-  %19 : int = prim::Constant[value=1]()
-  %23 : Dynamic, %24 : Dynamic = prim::DifferentiableGraph_0(%0, %3, %1, %4, %2)
-  return (%24, %23);
+  %23 : Dynamic, %24 : Dynamic = prim::DifferentiableGraph_0(%2, %1, %4, %0, %3)
+  return (%23, %24);
 }
-with prim::DifferentiableGraph_0 = graph(%1 : Dynamic
-      %2 : Dynamic
-      %4 : Dynamic
-      %5 : Dynamic
-      %17 : Dynamic) {
-  %0 : Dynamic = aten::mm(%1, %2)
-  %3 : Dynamic = aten::mm(%4, %5)
-  %7 : int = prim::Constant[value=1]()
-  %6 : Dynamic = aten::add(%0, %3, %7)
-  %8 : Dynamic, %9 : Dynamic, %10 : Dynamic, %11 : Dynamic = prim::ConstantChunk[chunks=4, dim=1](%6)
-  %12 : Dynamic = aten::sigmoid(%8)
-  %13 : Dynamic = aten::sigmoid(%11)
-  %14 : Dynamic = aten::tanh(%10)
-  %15 : Dynamic = aten::sigmoid(%9)
-  %16 : Dynamic = aten::mul(%15, %17)
-  %18 : Dynamic = aten::mul(%12, %14)
-  %20 : int = prim::Constant[value=1]()
-  %19 : Dynamic = aten::add(%16, %18, %20)
-  %21 : Dynamic = aten::tanh(%19)
-  %22 : Dynamic = aten::mul(%13, %21)
-  return (%19, %22);
+with prim::DifferentiableGraph_0 = graph(%13 : Dynamic
+      %32 : Dynamic
+      %33 : Dynamic
+      %35 : Dynamic
+      %36 : Dynamic) {
+  %37 : Dynamic = aten::mm(%35, %36)
+  %34 : Dynamic = aten::mm(%32, %33)
+  %30 : int = prim::Constant[value=1]()
+  %31 : Dynamic = aten::add(%37, %34, %30)
+  %24 : Dynamic, %25 : Dynamic, %26 : Dynamic, %27 : Dynamic = prim::ConstantChunk[chunks=4, dim=1](%31)
+  %22 : Dynamic = aten::sigmoid(%24)
+  %20 : Dynamic = aten::sigmoid(%27)
+  %18 : Dynamic = aten::tanh(%26)
+  %16 : Dynamic = aten::sigmoid(%25)
+  %14 : Dynamic = aten::mul(%16, %13)
+  %11 : Dynamic = aten::mul(%22, %18)
+  %8 : Dynamic = aten::add(%14, %11, %30)
+  %4 : Dynamic = aten::tanh(%8)
+  %2 : Dynamic = aten::mul(%20, %4)
+  return (%2, %8);
 }
 
 testDifferentiate
@@ -148,24 +146,24 @@ graph(%0 : Float(*)
       %2 : Float(*)
       %3 : Float(*)) {
   %4 : int = prim::Constant[value=1]()
-  %5 : Float(*), %6 : Dynamic = prim::GradOf[name="aten::add"](%0)
+  %6 : Float(*), %7 : Dynamic = prim::GradOf[name="aten::add"](%0)
     block0() {
-      %7 : Dynamic = aten::mul(%0, %4)
-      -> (%0, %7)
+      %8 : Dynamic = aten::mul(%0, %4)
+      -> (%0, %8)
     }
-  %8 : Dynamic, %9 : Dynamic = prim::GradOf[name="aten::mul"](%5)
+  %9 : Dynamic, %10 : Dynamic = prim::GradOf[name="aten::mul"](%6)
     block0() {
-      %10 : Dynamic = aten::mul(%5, %2)
-      %11 : Dynamic = aten::mul(%5, %3)
-      -> (%10, %11)
+      %11 : Dynamic = aten::mul(%6, %2)
+      %12 : Dynamic = aten::mul(%6, %3)
+      -> (%11, %12)
     }
-  %12 : Dynamic = prim::AutogradAdd(%1, %8)
-  %13 : Dynamic, %14 : Dynamic = prim::GradOf[name="aten::add"](%12)
+  %13 : Dynamic = prim::AutogradAdd(%1, %9)
+  %14 : Dynamic, %15 : Dynamic = prim::GradOf[name="aten::add"](%13)
     block0() {
-      %15 : Dynamic = aten::mul(%12, %4)
-      -> (%12, %15)
+      %16 : Dynamic = aten::mul(%13, %4)
+      -> (%13, %16)
     }
-  %16 : Dynamic = prim::AutogradAdd(%9, %14)
-  return (%16);
+  %17 : Dynamic = prim::AutogradAdd(%10, %15)
+  return (%17);
 }
 

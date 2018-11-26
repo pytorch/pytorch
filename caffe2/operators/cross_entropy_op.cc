@@ -80,8 +80,8 @@ bool SigmoidCrossEntropyWithLogitsOp<float, CPUContext>::RunOnDevice() {
 
   std::vector<int64_t> dims;
   if (logits.dim() != 0) {
-    dims = std::vector<int64_t>(
-        logits.sizes().begin(), logits.sizes().end() - 1);
+    dims =
+        std::vector<int64_t>(logits.sizes().begin(), logits.sizes().end() - 1);
   }
   auto* out = Output(0, dims, at::dtype<float>());
   auto* out_ptr = out->template mutable_data<float>();
@@ -161,8 +161,8 @@ bool WeightedSigmoidCrossEntropyWithLogitsOp<float, CPUContext>::RunOnDevice() {
 
   std::vector<int64_t> dims;
   if (logits.dim() != 0) {
-    dims = std::vector<int64_t>(
-        logits.sizes().begin(), logits.sizes().end() - 1);
+    dims =
+        std::vector<int64_t>(logits.sizes().begin(), logits.sizes().end() - 1);
   }
 
   auto* out = Output(0, dims, at::dtype<float>());

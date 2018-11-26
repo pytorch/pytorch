@@ -188,6 +188,7 @@ class BinaryElementwiseWithArgsOp final : public Operator<Context> {
         CAFFE_ENFORCE_EQ(C_dims_int, B_dims);
       }
     }
+
     auto* C = Output(
         0, C_dims, at::dtype<typename OutputTypeMap::template type<T>>());
     auto* C_data =

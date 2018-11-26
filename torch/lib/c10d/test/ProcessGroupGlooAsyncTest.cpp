@@ -1,6 +1,7 @@
 #include <gloo/transport/tcp/device.h>
 
 #include <ATen/cuda/CUDAGuard.h>
+#include <ATen/cuda/CUDAMultiStreamGuard.h>
 
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
@@ -45,7 +46,7 @@ class AsyncTest {
   }
 
   void start(int rank, int size) {
-    auto store = std::make_shared<::c10d::FileStore>(path_);
+    auto store = std::make_shared<::c10d::FileStore>(path_, size);
 
     // Use tiny timeout to make this test run fast
     ::c10d::ProcessGroupGloo::Options options;

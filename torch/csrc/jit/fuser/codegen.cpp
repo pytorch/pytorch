@@ -4,6 +4,7 @@
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/assertions.h"
+#include "torch/csrc/jit/fuser/compiler.h"
 #include "torch/csrc/jit/fuser/config.h"
 #include "torch/csrc/jit/fuser/interface.h"
 #include "torch/csrc/jit/fuser/tensor_info.h"
@@ -80,7 +81,7 @@ static const char* scalarTypeName(const at::ScalarType type) {
 static std::string encodeRHS(const Node* n) {
   static std::unordered_map<NodeKind, std::string> simple_map_ops = {
     // unary
-    {aten::abs, "absf(${0})"},
+    {aten::abs, "fabs(${0})"},
     {aten::sigmoid, "1.f / (1.f + expf(-${0}))"},
     {aten::relu, "${0} < 0 ? 0.f : ${0} "},
     {aten::log, "logf(${0})"},
@@ -390,6 +391,9 @@ generateKernel(
     #endif // USE_CPU_FUSER
   }
 
+  if (debugFuser()) {
+    std::cerr << "fusion code:" << code_string << std::endl;
+  }
   return std::make_tuple(code_string, std::move(chunk_desc), std::move(concat_desc), has_random);
 }
 

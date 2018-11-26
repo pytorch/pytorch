@@ -73,7 +73,6 @@ if(NOT BUILD_ATEN_ONLY)
   add_subdirectory(predictor)
   add_subdirectory(core/nomnigraph)
   add_subdirectory(core/nomscheduler)
-  add_subdirectory(core/dispatch)
   add_subdirectory(serialize)
   if (USE_NVRTC)
     add_subdirectory(cuda_rtc)
@@ -325,6 +324,7 @@ if(USE_CUDA)
   torch_cuda_based_add_library(caffe2_gpu ${Caffe2_GPU_SRCS})
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   target_link_libraries(caffe2_gpu INTERFACE caffe2::cudart)
+  target_link_libraries(caffe2_gpu PUBLIC c10_cuda)
 
   target_include_directories(
       caffe2_gpu INTERFACE $<INSTALL_INTERFACE:include>)
@@ -375,15 +375,16 @@ if(USE_ROCM)
   # Call again since Caffe2_HIP_INCLUDES is extended with ATen include dirs.
   hip_include_directories(${Caffe2_HIP_INCLUDES})
 
-  filter_list(__caffe2_hip_srcs_cpp Caffe2_HIP_SRCS "\\.(cc|cpp|cu)$")
+  filter_list(__caffe2_hip_srcs_cpp Caffe2_HIP_SRCS "\\.(cu|hip)$")
   set_source_files_properties(${__caffe2_hip_srcs_cpp} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 
   # FindHIP.CMake checks if the SHARED flag is set and adds extra logic accordingly.
   hip_add_library(caffe2_hip ${Caffe2_HIP_SRCS})
 
   # Since PyTorch files contain HIP headers, these flags are required for the necessary definitions to be added.
-  target_compile_options(caffe2_hip PRIVATE ${HIP_HCC_FLAGS})
+  target_compile_options(caffe2_hip PRIVATE ${HIP_CXX_FLAGS})
   target_link_libraries(caffe2_hip PUBLIC caffe2)
+  target_link_libraries(caffe2_hip PUBLIC c10_hip)
   target_link_libraries(caffe2_hip PUBLIC ${Caffe2_HIP_DEPENDENCY_LIBS})
 
   # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
@@ -436,7 +437,6 @@ if (BUILD_TEST)
 
   if(USE_ROCM)
     foreach(test_src ${Caffe2_HIP_TEST_SRCS})
-      set_source_files_properties(${test_src} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
       get_filename_component(test_name ${test_src} NAME_WE)
       add_executable(${test_name} "${test_src}")
       target_link_libraries(${test_name} ${Caffe2_MAIN_LIBS} gtest_main)
@@ -463,7 +463,7 @@ if (BUILD_PYTHON)
   # Python site-packages
   # Get canonical directory for python site packages (relative to install
   # location).  It varies from system to system.
-  # We should pin the path separator to the forward slash on Windows. 
+  # We should pin the path separator to the forward slash on Windows.
   # More details can be seen at
   # https://github.com/pytorch/pytorch/tree/master/tools/build_pytorch_libs.bat#note-backslash-munging-on-windows
   pycmd(PYTHON_SITE_PACKAGES "
@@ -526,6 +526,7 @@ if (BUILD_PYTHON)
       caffe2_pybind11_state caffe2_library)
   if (WIN32)
     target_link_libraries(caffe2_pybind11_state ${PYTHON_LIBRARIES})
+    target_link_libraries(caffe2_pybind11_state onnx_proto)
   endif(WIN32)
 
   # Install caffe2_pybind11_state(_gpu|hip) in site-packages/caffe2/python,
@@ -550,6 +551,7 @@ if (BUILD_PYTHON)
         caffe2_pybind11_state_gpu caffe2_library caffe2_gpu_library)
     if (WIN32)
       target_link_libraries(caffe2_pybind11_state_gpu ${PYTHON_LIBRARIES})
+      target_link_libraries(caffe2_pybind11_state_gpu onnx_proto)
     endif(WIN32)
 
     # Install with same rpath as non-gpu caffe2_pybind11_state

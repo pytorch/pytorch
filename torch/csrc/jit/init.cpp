@@ -112,13 +112,13 @@ void initJITBindings(PyObject *module) {
      return Canonicalize(g);
    })
    .def("_jit_pass_lint", LintGraph)
-   .def("_jit_pass_shape_analysis", [](Graph& graph, std::vector<at::Tensor> inputs, bool with_grad) {
-     setInputTypes(graph, ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
+   .def("_jit_pass_shape_analysis", [](std::shared_ptr<Graph> graph, std::vector<at::Tensor> inputs, bool with_grad) {
+     setInputTypes(*graph, ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
      PropagateInputShapes(graph);
    })
-   .def("_jit_pass_complete_shape_analysis", [](Graph& graph, py::tuple inputs, bool with_grad) {
-     CompleteArgumentSpec spec(with_grad, evilDeprecatedBadCreateStackDoNotUse(inputs, graph.inputs()));
-     auto graph_inputs = graph.inputs();
+   .def("_jit_pass_complete_shape_analysis", [](std::shared_ptr<Graph> graph, py::tuple inputs, bool with_grad) {
+     CompleteArgumentSpec spec(with_grad, evilDeprecatedBadCreateStackDoNotUse(inputs, graph->inputs()));
+     auto graph_inputs = graph->inputs();
      JIT_ASSERT(spec.size() == graph_inputs.size());
      for (size_t i = 0; i < graph_inputs.size(); ++i) {
        graph_inputs[i]->setType(spec.at(i));
@@ -133,7 +133,7 @@ void initJITBindings(PyObject *module) {
      return ConstantPropagation(g);
    })
    .def("_jit_pass_erase_shape_information", EraseShapeInformation)
-   .def("_jit_pass_create_autodiff_subgraphs", [](Graph& graph) {
+   .def("_jit_pass_create_autodiff_subgraphs", [](std::shared_ptr<Graph> graph) {
      CreateAutodiffSubgraphs(graph);
    })
    .def("_jit_run_cpp_tests", [] {

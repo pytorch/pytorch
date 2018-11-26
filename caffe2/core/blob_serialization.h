@@ -9,7 +9,7 @@
 #include "caffe2/core/blob.h"
 #include "caffe2/core/blob_serializer_base.h"
 #include "caffe2/core/tensor.h"
-#include "caffe2/core/typeid.h"
+#include <c10/util/typeid.h>
 #include "caffe2/core/types.h"
 #include "caffe2/utils/simple_queue.h"
 

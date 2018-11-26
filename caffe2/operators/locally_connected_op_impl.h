@@ -433,9 +433,10 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   }
   if (!no_bias_) {
     std::vector<int64_t> dbias_dims;
-    for (auto dim : output_image_dims) {
-      dbias_dims.push_back(dim);
-    }
+    std::copy(
+        output_image_dims.cbegin(),
+        output_image_dims.cend(),
+        std::back_inserter(dbias_dims));
     dbias_dims.push_back(shape.M);
     auto* dbias = Output(BIAS_OR_INPUT_GRAD, dbias_dims, at::dtype<T>());
     ConvPoolOpBase<Context>::template SetBiasMultiplier<T>(
@@ -521,7 +522,10 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   }
   if (!no_bias_) {
     std::vector<int64_t> dbias_dims;
-    std::copy(output_image_dims.cbegin(), output_image_dims.cend(), std::back_inserter(dbias_dims));
+    std::copy(
+        output_image_dims.cbegin(),
+        output_image_dims.cend(),
+        std::back_inserter(dbias_dims));
     dbias_dims.push_back(shape.M);
     auto* dbias = Output(BIAS_OR_INPUT_GRAD, dbias_dims, at::dtype<T>());
     ConvPoolOpBase<Context>::template SetBiasMultiplier<T>(

@@ -13,7 +13,7 @@
 #include <torch/csrc/utils/memory.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
-#include <ATen/core/ArrayRef.h>
+#include <c10/util/ArrayRef.h>
 #include "c10/util/Optional.h"
 
 #include <functional>
@@ -78,11 +78,11 @@ struct Method {
     }
     return get_executor().graphFor(inputs);
   }
-  std::shared_ptr<Graph> graph() const {
+  TORCH_API std::shared_ptr<Graph> graph() const {
     return graph_;
   }
 
-  const std::string & name() const {
+  TORCH_API const std::string & name() const {
     return name_;
   }
   // emit a function call by inlining the callees Graph into this one
@@ -92,13 +92,13 @@ struct Method {
   std::vector<Value*> emit_call_to(SourceRange loc, Method & callee, ArrayRef<NamedValue> args, ArrayRef<NamedValue> kwargs);
 
   // if this isn't yet defined, run its method_creator function
-  void ensure_defined();
+  TORCH_API void ensure_defined();
 
 
   size_t num_inputs() const {
     return graph()->inputs().size() - member_inputs.size();
   }
-  Value * get_or_add_parameter(at::Tensor* slot) {
+  TORCH_API Value * get_or_add_parameter(at::Tensor* slot) {
     auto it = member_input_index.find(slot);
     if(it != member_input_index.end()) {
       return graph()->inputs().at(it->second);
@@ -121,7 +121,7 @@ struct Method {
     }
     const auto size = stack.size();
     setInputTypes(*retval, ArgumentSpec(with_grad, std::move(stack), size));
-    PropagateInputShapes(*retval);
+    PropagateInputShapes(retval);
     return retval;
   }
 
@@ -132,26 +132,26 @@ struct Method {
     }
     if (propagate) {
       setInputTypes(*retval, ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
-      PropagateInputShapes(*retval);
+      PropagateInputShapes(retval);
     }
     JIT_ASSERT(retval->inputs().size() == inputs.size());
     for (size_t i=0; i < retval->inputs().size(); ++i) {
       auto scalar_type = inputs[i].type().scalarType();
       auto sizes = inputs[i].sizes();
-      auto type = torch::jit::CompleteTensorType::create(scalar_type, -1, sizes);
+      auto type = torch::jit::CompleteTensorType::create(scalar_type, at::kCPU, sizes);
       retval->inputs()[i]->setType(type);
     }
     JIT_ASSERT(retval->outputs().size() == outputs.size());
     for (size_t i=0; i < retval->outputs().size(); ++i) {
       auto scalar_type = outputs[i].type().scalarType();
       auto sizes = outputs[i].sizes();
-      auto type = torch::jit::CompleteTensorType::create(scalar_type, -1, sizes);
+      auto type = torch::jit::CompleteTensorType::create(scalar_type, at::kCPU, sizes);
       retval->outputs()[i]->setType(type);
     }
     return retval;
   }
 
-  std::vector<at::Tensor*> params() {
+  std::vector<at::Tensor*> params() const {
     return member_inputs;
   }
 
@@ -160,7 +160,7 @@ struct Method {
     return *this;
   }
 
-  const FunctionSchema& getSchema() const {
+  TORCH_API const FunctionSchema& getSchema() const {
     if(schema == nullptr) {
       schema = make_unique<FunctionSchema>(defaultSchemaFor(*this));
     }
@@ -182,7 +182,7 @@ struct Method {
     return get_executor().debugDisableAutodiffSubgraphInlining();
   }
 
-  bool is_optimized() {
+  bool is_optimized() const {
     return optimize;
   }
 
@@ -314,6 +314,10 @@ struct Module {
   // added afterward.
   void set_optimized(bool o) {
     optimize = o;
+  }
+
+  bool is_optimized() const {
+    return optimize;
   }
 
   IValue forward(std::vector<IValue> inputs) {

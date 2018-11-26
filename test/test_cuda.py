@@ -1529,6 +1529,22 @@ class TestCuda(TestCase):
         self.assertEqual(x.sum(dim=(-1, -2)).cpu(), y.sum(dim=(-1, -2)))
         self.assertEqual(x.sum(dim=(1, 3)).cpu(), y.sum(dim=(1, 3)))
 
+    @skipIfRocm
+    def test_sum_fp16(self):
+        x = torch.zeros(10, device='cuda', dtype=torch.float16)
+        self.assertEqual(x.sum(), 0)
+
+        x = torch.ones(65504, device='cuda', dtype=torch.float16)
+        self.assertEqual(x.sum(), 65504)
+
+        a = torch.zeros(1203611).bernoulli_(0.0005)
+        x = a.to(device='cuda', dtype=torch.float16)
+        self.assertEqual(x.sum().item(), a.sum().item())
+
+        a = torch.zeros(100, 121, 80).bernoulli_(0.0005)
+        x = a.to(device='cuda', dtype=torch.float16)
+        self.assertEqual(x.sum((0, 2)).float().cpu(), a.sum((0, 2)))
+
     @staticmethod
     def _select_broadcastable_dims(dims_full=None):
         return _TestTorchMixin._select_broadcastable_dims(dims_full)
@@ -1576,6 +1592,14 @@ class TestCuda(TestCase):
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_potrs_batched_dims(self):
         _TestTorchMixin._test_potrs_batched_dims(self, lambda t: t.cuda())
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_cholesky(self):
+        _TestTorchMixin._test_cholesky(self, lambda t: t.cuda())
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_cholesky_batched(self):
+        _TestTorchMixin._test_cholesky_batched(self, lambda t: t.cuda())
 
     def test_view(self):
         _TestTorchMixin._test_view(self, lambda t: t.cuda())
@@ -2043,6 +2067,7 @@ class TestCuda(TestCase):
         b = a.half()
         self.assertGreater(b.norm().item(), 0)
 
+    @skipIfRocm
     # Test that wrap_with_cuda_memory_check successfully detects leak
     def test_cuda_memory_leak_detection(self):
         l = []

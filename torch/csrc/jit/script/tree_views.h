@@ -262,6 +262,10 @@ struct Expr : public TreeView {
       case TK_TUPLE_LITERAL:
       case '@':
       case TK_POW:
+      case TK_FLOOR_DIV:
+      case '&':
+      case '^':
+      case '|':
         return;
       default:
         throw ErrorReport(tree) << kindToString(tree->kind()) << " is not a valid Expr";
@@ -577,6 +581,10 @@ struct BinOp : public Expr {
       case '@':
       case TK_POW:
       case '%':
+      case '&':
+      case '^':
+      case '|':
+      case TK_FLOOR_DIV:
         if (tree->trees().size() != 2)
           throw ErrorReport(tree) << "BinOp expected 2 subtrees, found " << tree->trees().size();
         return;
@@ -626,7 +634,7 @@ struct Const : public Expr {
     return std::stoll(subtree(0)->stringValue());
   }
   double asFloatingPoint() const {
-    return std::stod(subtree(0)->stringValue());
+    return SharedParserData::strtod_c(subtree(0)->stringValue().c_str(), nullptr);
   }
   const std::string& text() const {
     return subtree(0)->stringValue();

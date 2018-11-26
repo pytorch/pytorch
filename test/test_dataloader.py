@@ -15,7 +15,7 @@ from torch import multiprocessing as mp
 from torch.utils.data import Dataset, TensorDataset, DataLoader, ConcatDataset
 from torch.utils.data.dataset import random_split
 from torch.utils.data.dataloader import default_collate, ExceptionWrapper, MP_STATUS_CHECK_INTERVAL
-from common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN,
+from common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, IS_PPC, NO_MULTIPROCESSING_SPAWN,
                           skipIfRocm, load_tests)
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -34,7 +34,7 @@ if not NO_MULTIPROCESSING_SPAWN:
     mp = mp.get_context(method='spawn')
 
 
-JOIN_TIMEOUT = 17.0 if IS_WINDOWS else 8.5
+JOIN_TIMEOUT = 17.0 if IS_WINDOWS or IS_PPC else 8.5
 
 
 class TestDatasetRandomSplit(TestCase):
@@ -866,6 +866,48 @@ class TestDictDataLoader(TestCase):
         for batch_ndx, sample in enumerate(loader):
             self.assertTrue(sample['a_tensor'].is_pinned())
             self.assertTrue(sample['another_dict']['a_number'].is_pinned())
+
+
+class SimpleWrapper:
+    def __init__(self, data):
+        transposed_data = list(zip(*data))
+        self.inp = torch.stack(transposed_data[0], 0)
+        self.tgt = torch.stack(transposed_data[1], 0)
+
+
+def collate_wrapper(batch):
+    return SimpleWrapper(batch)
+
+
+def pin_wrapper(batch):
+    batch.inp = batch.inp.pin_memory()
+    batch.tgt = batch.tgt.pin_memory()
+    return batch
+
+
+class TestCustomPinFn(TestCase):
+    def setUp(self):
+        inps = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
+        tgts = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
+        self.dataset = TensorDataset(inps, tgts)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
+    def test_custom_pin_fn(self):
+        loader = DataLoader(self.dataset, batch_size=2, collate_fn=collate_wrapper,
+                            pin_memory=True, pin_fn=pin_wrapper)
+        for batch_ndx, sample in enumerate(loader):
+            self.assertTrue(sample.inp.is_pinned())
+            self.assertTrue(sample.tgt.is_pinned())
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
+    def test_custom_pin_fn_worker(self):
+        loader = DataLoader(self.dataset, batch_size=2, collate_fn=collate_wrapper,
+                            pin_memory=True, pin_fn=pin_wrapper, num_workers=1)
+        for batch_ndx, sample in enumerate(loader):
+            self.assertTrue(sample.inp.is_pinned())
+            self.assertTrue(sample.tgt.is_pinned())
 
 
 class TestWorkerQueueDataset(Dataset):
