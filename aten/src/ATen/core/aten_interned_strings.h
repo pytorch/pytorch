@@ -306,6 +306,7 @@ _(aten, embedding_backward) \
 _(aten, embedding_bag) \
 _(aten, embedding_dense_backward) \
 _(aten, embedding_renorm) \
+_(aten, no_grad_embedding_renorm) \
 _(aten, embedding_sparse_backward) \
 _(aten, empty) \
 _(aten, empty_like) \
