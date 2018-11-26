@@ -169,14 +169,14 @@ void copy_from_cpu(Tensor& dst, const Tensor& src) {
 
   CUDAStream stream = getCurrentCUDAStream();
 
+  AT_CUDA_CHECK(cudaMemcpyAsync(
+      dst_contig.data_ptr(),
+      src_contig.data_ptr(),
+      src.numel() * src.dtype().itemsize(),
+      cudaMemcpyHostToDevice,
+      stream));
+  AT_CUDA_CHECK(cudaStreamSynchronize(stream));
   AT_DISPATCH_ALL_TYPES_AND_HALF(src.type(), "copy_from_cpu", [&]() {
-    AT_CUDA_CHECK(cudaMemcpyAsync(
-        dst_contig.data<scalar_t>(),
-        src_contig.data<scalar_t>(),
-        src.numel() * sizeof(scalar_t),
-        cudaMemcpyHostToDevice,
-        stream));
-    AT_CUDA_CHECK(cudaStreamSynchronize(stream));
     copy_device_to_device<scalar_t, scalar_t>(dst, dst_contig);
   });
 }
@@ -185,30 +185,28 @@ void copy_to_cpu(Tensor& dst, const Tensor& src) {
   Tensor dst_contig = dst.contiguous();
   Tensor src_contig = src.contiguous();
 
-  DeviceGuard device_guard{src.device()};
+  cuda::CUDAGuard device_guard(src.device());
   CUDAStream stream = getCurrentCUDAStream();
 
-  AT_DISPATCH_ALL_TYPES_AND_HALF(src.type(), "copy_to_cpu", [&]() {
-    AT_CUDA_CHECK(cudaMemcpyAsync(
-        dst_contig.data<scalar_t>(),
-        src_contig.data<scalar_t>(),
-        src.numel() * sizeof(scalar_t),
-        cudaMemcpyDeviceToHost,
-        stream));
-    AT_CUDA_CHECK(cudaStreamSynchronize(stream));
-    _copy_same_type_(dst, dst_contig);
-  });
+  AT_CUDA_CHECK(cudaMemcpyAsync(
+      dst_contig.data_ptr(),
+      src_contig.data_ptr(),
+      src.numel() * src.dtype().itemsize(),
+      cudaMemcpyDeviceToHost,
+      stream));
+  AT_CUDA_CHECK(cudaStreamSynchronize(stream));
+  _copy_same_type_(dst, dst_contig);
 }
 
 void copy_from_cpu_async_(Tensor& dst, const Tensor& src) {
-  AT_ASSERT(dst.is_contiguous());
-  AT_ASSERT(src.is_contiguous());
+  AT_CHECK(dst.is_contiguous(), "Target tensor must be contiguous.");
+  AT_CHECK(src.is_contiguous(), "Source tensor must be contiguous.");
 
   if (dst.numel() == 0) {
     return;
   }
 
-  DeviceGuard device_guard{dst.device()};
+  cuda::CUDAGuard device_guard(dst.device());
   CUDAStream stream = getCurrentCUDAStream();
 
   AT_DISPATCH_ALL_TYPES_AND_HALF(src.type(), "copy_from_cpu_async", [&]() {
@@ -224,14 +222,14 @@ void copy_from_cpu_async_(Tensor& dst, const Tensor& src) {
 }
 
 void copy_to_cpu_async_(Tensor& dst, const Tensor& src) {
-  AT_ASSERT(dst.is_contiguous());
-  AT_ASSERT(src.is_contiguous());
+  AT_CHECK(dst.is_contiguous(), "Target tensor must be contiguous.");
+  AT_CHECK(src.is_contiguous(), "Source tensor must be contiguous.");
 
   if (dst.numel() == 0) {
     return;
   }
 
-  DeviceGuard device_guard{dst.device()};
+  cuda::CUDAGuard device_guard(src.device());
   CUDAStream stream = getCurrentCUDAStream();
 
   AT_DISPATCH_ALL_TYPES_AND_HALF(src.type(), "copy_to_cpu_async", [&]() {
@@ -256,28 +254,28 @@ void _copy__cuda(Tensor& dst, const Tensor& src, bool non_blocking) {
       if (std::is_same<dst_T, scalar_t>::value) {
         if (non_blocking) {
           copy_from_cpu_async_(dst, src);
-          return;
+        } else {
+          copy_from_cpu(dst, src);
         }
-        copy_from_cpu(dst, src);
-        return;
+      } else {
+        // Do a dtype converting copy on the CPU, then copy to device
+        Tensor srcf = at::empty_like(src, src.options().dtype(dst.dtype()));
+        _copy_(srcf, src);
+        copy_from_cpu(dst, srcf);
       }
-      // Do a dtype converting copy on the CPU, then copy to device
-      Tensor srcf = at::empty_like(src, src.options().dtype(dst.dtype()));
-      _copy_(srcf, src);
-      copy_from_cpu(dst, srcf);
     } else {
       if (std::is_same<dst_T, scalar_t>::value) {
         if (non_blocking) {
           copy_to_cpu_async_(dst, src);
-          return;
+        } else {
+          copy_to_cpu(dst, src);
         }
-        copy_to_cpu(dst, src);
-        return;
+      } else {
+        // Copy to CPU as the same dtype, then do a dtype converting copy
+        Tensor srcf = at::empty_like(src, dst.options().dtype(src.dtype()));
+        copy_to_cpu(srcf, src);
+        _copy_(dst, srcf);
       }
-      // Copy to CPU as the same dtype, then do a dtype converting copy
-      Tensor srcf = at::empty_like(src, dst.options().dtype(src.dtype()));
-      copy_to_cpu(srcf, src);
-      _copy_(dst, srcf);
     }
   });
 }
