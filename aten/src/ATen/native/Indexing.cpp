@@ -3,7 +3,7 @@
 // This corresponds to "advanced indexing" in NumPy. The two operations are:
 //
 //  index(Tensor self, indices) -> Tensor
-//  index_put_(Tensor self, indices, value)
+//  index_put_(Tensor self, indices, value, accumulate=false)
 //
 // The index is a TensorList containg kLong or kByte tensors or nulls. Byte
 // tensors (boolean masks) are expanded to long tensors via nonzero(). Null
@@ -20,6 +20,33 @@
 // Note 2: The behavior is more complicated when the index tensors are not all
 // adjacent (e.g. x[[0, 1], :, [2, 3]]). In this case, self and the index
 // tensors are transposed to the front: x.transpose(1, 2)[[0, 1], [2, 3]]
+//
+// The code contains two implementations of indexing. The more efficient
+// implementation treats indexing like an elementwise operation over the
+// tensors `result`, `x`, `ind_1`, `ind_2`, etc. This implementation does
+// not work for index_put_ with accumulate=True. The other implementation
+// combines the indexed tensors into a single linear index that is used
+// with Tensor.put_. This is used for index_put_ with accumulate=True.
+//
+// The more efficient implementation takes the following steps for the
+// above operation:
+//
+// 1) Broadcast ind_1, ind_2, ind_3 together to a common shape
+// 2) Record x.stride(i) for each indexed dimension `i`
+// 3) Replace the indexed subspace of `x` with the shape of the corresponding
+//    subspace of `result` but with stride 0
+// 4) Add dimensions of size 1 to the index tensors (ind_1, ind_2, etc.) so
+//    that their shape is compatible with the result shape
+//
+// The CPU or CUDA kernel then computes element-wise over the broadcasted
+// and restrided result, x, ind_1,  ind_2, etc.:
+//
+//   result[...] = *(&x[...] +
+//                   ind_1[...] * x.stride(1) +
+//                   ind_2[...] * x.stride(2) +
+//                   ...)
+//
+// where & and * represent the C-style address-of and indirection operations.
 
 #include <ATen/native/Indexing.h>
 
@@ -268,6 +295,10 @@ struct AdvancedIndex {
   int64_t dims_after;
 };
 
+// Replace indexed dimensions in src with stride 0 and the size of the result tensor.
+// The offset in these dimensions is computed by the kernel using the index tensor's
+// values and the stride of src. The new shape is not meaningful. It's used to make
+// the shape compatible with the result tensor.
 static Tensor restride_src(const Tensor& src, int64_t dims_before, int64_t dims_indexed,
                            IntList replacement_shape) {
   auto shape = DimVector(src.sizes());
@@ -280,6 +311,8 @@ static Tensor restride_src(const Tensor& src, int64_t dims_before, int64_t dims_
   return src.as_strided(shape, strides);
 }
 
+// Add dimensions of size 1 to an index tensor so that it's can be broadcast to the result
+// shape and iterated over element-wise like the result tensor and the restrided src.
 static Tensor reshape_indexer(const Tensor& index, int64_t dims_before, int64_t dims_after) {
   auto orig_shape = index.sizes();
   auto shape = DimVector();
@@ -351,16 +384,6 @@ static AdvancedIndex make_info(Tensor self, TensorList orig) {
     std::tie(self, indices) = transposeToFront(self, indices);
   }
   return AdvancedIndex(self, indices);
-}
-
-static Tensor make_bogus_tensor(const Tensor& self, const AdvancedIndex& info) {
-  auto shape = DimVector(info.src.sizes());
-  auto strides = DimVector(shape.size(), 0);
-  strides[strides.size() - 1] = 1;
-  for (int dim = strides.size() - 2; dim >= 0; dim--) {
-    strides[dim] = strides[dim + 1] * shape[dim + 1];
-  }
-  return info.src.as_strided(shape, strides);
 }
 
 static std::unique_ptr<TensorIterator> make_index_iterator(const AdvancedIndex& info) {
