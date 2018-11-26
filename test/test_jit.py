@@ -9376,8 +9376,8 @@ EXCLUDE_SCRIPT = {
     # argument has custom behavior
     'test_nn_fractional_max_pool2d',
     'test_nn_max_unpool3d',
-    'test_nn_embedding',
-    'test_nn_embedding_bag',
+    # 'test_nn_embedding',
+    # 'test_nn_embedding_bag',
     'test_nn_batch_norm',
 
     # aten op has additional cudnn argument
@@ -9924,8 +9924,11 @@ nn_module_tests = [
     ('Tanh', (), ((S,),)),
     ('Tanhshrink', (), ((S,),)),
     ('Threshold', (2., 2.), ((S,),)),
+    ('Embedding', (4, 3), (torch.empty(2, 3, dtype=torch.long).random_(4)),),
     ('Sequential', (torch.nn.Sigmoid(), torch.nn.Threshold(1., 2.)), ((S,),), True),
 ]
+
+
 
 # NB: JIT script tests for all nn functional interfaces, script mode does
 # not support in_place operations yet, so no inplace operation tests added.

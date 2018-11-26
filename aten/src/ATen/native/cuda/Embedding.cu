@@ -52,7 +52,7 @@ __global__ void embedding_backward_feature_kernel
     if(batch_start + tid < n)
       indices_batch[tid] = (int)indices[batch_start + tid];
 
-    int batch_end = batch_start + blockDim.x*blockDim.y < n ? 
+    int batch_end = batch_start + blockDim.x*blockDim.y < n ?
                     batch_start + blockDim.x*blockDim.y : n;
 
     // Loop over the batch of <= 1024 loaded indices in chunks of blockDim.y = 32
@@ -62,7 +62,7 @@ __global__ void embedding_backward_feature_kernel
       // leaders are done with their accumulates before other warps start loading again.
       __syncthreads();
 
-      int n_this_chunk = (batch_end - chunk_start) < blockDim.y ? 
+      int n_this_chunk = (batch_end - chunk_start) < blockDim.y ?
                          (batch_end - chunk_start) : blockDim.y;
 
       int src_row = chunk_start + threadIdx.y;
@@ -383,6 +383,13 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
   THCudaCheck(cudaGetLastError());
 
   return self;
+}
+
+// This is a workaround to not being able to call with.no_grad():
+// in script. No derivatives are set when calling no_grad_embedding_renorm_cuda_
+Tensor & no_grad_embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
+                                double max_norm, double norm_type) {
+  return embedding_renorm_cuda_(self, indices, max_norm, norm_type);
 }
 
 }}  // namespace at::native
