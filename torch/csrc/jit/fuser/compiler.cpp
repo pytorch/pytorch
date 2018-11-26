@@ -34,8 +34,17 @@ namespace torch { namespace jit { namespace fuser {
 // Counter for number of kernels compiled, used for debugging and
 // creating arbitrary kernel names.
 static std::atomic<size_t> next_kernel_id{0};
+static int debug_fusion{-1};
 
 size_t nCompiledKernels() { return next_kernel_id.load(); }
+
+int debugFuser() {
+  if (debug_fusion < 0) {
+    const char* debug_env = getenv("PYTORCH_FUSION_DEBUG");
+    debug_fusion = debug_env ? atoi(debug_env) : 0;
+  }
+  return debug_fusion;
+}
 
 // If the given node is used once by a chunk node, returns that node.
 // Returns nullptr otherwise.
@@ -119,7 +128,7 @@ static void upfrontCompilation(KernelSpec& spec) {
 int64_t registerFusion(const Node* fusion_group) {
   // Creates and stores the FusionSpec
   auto graph = fusion_group->g(attr::Subgraph)->copy();
-  EraseShapeInformation(*graph);
+  EraseShapeInformation(graph);
   const auto key = store(graph);
 
   if (canFuseOnCPU() || canFuseOnGPU()) {

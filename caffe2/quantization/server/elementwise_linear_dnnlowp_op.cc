@@ -61,7 +61,7 @@ bool ElementwiseLinearDNNLowPOp<T>::RunOnDevice() {
 #pragma omp parallel for
 #endif
   for (int i = 0; i < b.numel(); ++i) {
-    b_quantized[i] = Quantize<int32_t>(
+    b_quantized[i] = fbgemm::Quantize<int32_t>(
         b_data[i],
         0,
         in_qparams_[0].scale * in_qparams_[1].scale,
@@ -78,7 +78,8 @@ bool ElementwiseLinearDNNLowPOp<T>::RunOnDevice() {
       int32_t raw = (X_quantized[n * D + d] - in_qparams_[0].zero_point) *
               (a_quantized_[d] - in_qparams_[1].zero_point) +
           b_quantized[d];
-      Y_quantized[n * D + d] = Requantize<T>(raw, requantization_params_);
+      Y_quantized[n * D + d] =
+          fbgemm::Requantize<T>(raw, requantization_params_);
     }
   }
 
@@ -101,7 +102,7 @@ bool ElementwiseLinearDNNLowPOp<T>::GetQuantizationParameters_() {
         a.template data<float>(), a.numel(), true /*weight*/);
 
     a_quantized_.resize(a.numel());
-    Quantize<T>(
+    fbgemm::Quantize<T>(
         a.template data<float>(),
         a_quantized_.data(),
         a_quantized_.size(),

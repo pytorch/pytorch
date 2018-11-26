@@ -56,7 +56,7 @@ class MulDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, MulFp32Op> {
       for (int i = 0; i < C->size(); ++i) {
         int32_t raw = (A_quantized[i] - in_qparams_[0].zero_point) *
             (B_quantized[i] - in_qparams_[1].zero_point);
-        C_quantized[i] = Requantize<T>(raw, requantization_params_);
+        C_quantized[i] = fbgemm::Requantize<T>(raw, requantization_params_);
       }
     } else if (B.size() == 1) {
 #ifdef _OPENMP
@@ -65,7 +65,7 @@ class MulDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, MulFp32Op> {
       for (int i = 0; i < C->size(); ++i) {
         int32_t raw = (A_quantized[i] - in_qparams_[0].zero_point) *
             (B_quantized[0] - in_qparams_[1].zero_point);
-        C_quantized[i] = Requantize<T>(raw, requantization_params_);
+        C_quantized[i] = fbgemm::Requantize<T>(raw, requantization_params_);
       }
     } else {
       size_t pre, n, post;
@@ -81,7 +81,7 @@ class MulDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, MulFp32Op> {
                            in_qparams_[0].zero_point) *
                 (B_quantized[j] - in_qparams_[1].zero_point);
             C_quantized[((i * n) + j) * post + k] =
-                Requantize<T>(raw, requantization_params_);
+                fbgemm::Requantize<T>(raw, requantization_params_);
           }
         }
       }
