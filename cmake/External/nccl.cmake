@@ -17,21 +17,18 @@ if (NOT __NCCL_INCLUDED)
       string(REPLACE ";-gencode" " -gencode" NVCC_GENCODE "${NVCC_GENCODE}")
     endif()
 
-    string(REPLACE "/opt/cache/bin:" "" PATH_MINUS_SCCACHE "$ENV{PATH}")
-    string(REPLACE "/var/lib/jenkins/workspace:" "" PATH_MINUS_SCCACHE "${PATH_MINUS_SCCACHE}")
-
-
     ExternalProject_Add(nccl_external
       SOURCE_DIR ${PROJECT_SOURCE_DIR}/third_party/nccl/nccl
       BUILD_IN_SOURCE 1
       CONFIGURE_COMMAND ""
       BUILD_COMMAND
         env
-        "PATH=${PATH_MINUS_SCCACHE}"
+        "CCACHE_DISABLE=1"
+        "SCCACHE_DISABLE=1"
         make
-        "CXX=c++"
+        "CXX=${CMAKE_CXX_COMPILER}"
         "CUDA_HOME=${CUDA_TOOLKIT_ROOT_DIR}"
-        "NVCC=nvcc"
+        "NVCC=${CUDA_NVCC_EXECUTABLE}"
         "NVCC_GENCODE=${NVCC_GENCODE}"
         "BUILDDIR=${CMAKE_CURRENT_BINARY_DIR}/nccl"
         "VERBOSE=0"
