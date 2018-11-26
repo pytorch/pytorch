@@ -388,6 +388,7 @@ def build_libs(libs):
     my_env["USE_OPENCV"] = "ON" if USE_OPENCV else "OFF"
     my_env["USE_FFMPEG"] = "ON" if USE_FFMPEG else "OFF"
     my_env["USE_DISTRIBUTED"] = "ON" if USE_DISTRIBUTED else "OFF"
+    my_env["USE_SYSTEM_NCCL"] = "ON" if USE_SYSTEM_NCCL else "OFF"
 
     try:
         os.mkdir('build')
