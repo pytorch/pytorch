@@ -241,8 +241,8 @@ struct DynamicType;
 using DynamicTypePtr = std::shared_ptr<DynamicType>;
 // This type represents a single Tensor, with an unknown shape.
 // Subtype hierarchy for Tensor Types (DynamicType as the base type):
-// DynamicType -> TensorType -> CompleteTensorType
-// DynamicType -> UndefinedTensorType
+// CompleteTensorType <: TensorType <: DynamicType
+// UndefinedTensorType <: DynamicType
 struct CAFFE2_API DynamicType : public Type {
   static DynamicTypePtr create() {
     return DynamicTypePtr(new DynamicType()); // NOLINT(modernize-make-shared)
@@ -492,12 +492,6 @@ struct CAFFE2_API ListType : public SingleElementType<TypeKind::ListType, ListTy
   static ListTypePtr create( T&& ... all ) {
     return ListTypePtr(new ListType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
   }
-  bool isSubtypeOf(const TypePtr rhs) const override {
-    if(auto rhs_ = rhs->cast<OptionalType>()) {
-      return this->isSubtypeOf(rhs_->getElementType());
-    }
-    return Type::isSubtypeOf(rhs);
-  }
   DEFINE_IS_SUBCLASS(ListType);
   std::string str() const override {
     std::stringstream ss;
@@ -513,9 +507,8 @@ struct CAFFE2_API ListType : public SingleElementType<TypeKind::ListType, ListTy
     if(auto rhs_ = rhs->cast<OptionalType>()) {
       return this->isSubtypeOf(rhs_->getElementType());
     }
-    return *this == *rhs;
+    return Type::isSubtypeOf(rhs);
   }
-
   TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
     return create(contained_types.at(0));
   }
@@ -648,8 +641,8 @@ struct NumberType;
 using NumberTypePtr = std::shared_ptr<NumberType>;
 // This type represents a Python number
 // Subtype hierarchy for Number Types (NumberType as the base type):
-// NumberType -> IntType
-// NumberType -> FloatType
+// IntType <: NumberType
+// FloatType <: NumberType
 struct CAFFE2_API NumberType : public Type {
   static NumberTypePtr create() {
     return NumberTypePtr(new NumberType()); // NOLINT(modernize-make-shared)
@@ -756,7 +749,7 @@ struct CAFFE2_API BoolType : public Type {
     if(auto rhs_ = rhs->cast<OptionalType>()) {
       return this->isSubtypeOf(rhs_->getElementType());
     }
-    return *this == *rhs || rhs->kind() == TypeKind::BoolType;
+    return Type::isSubtypeOf(rhs) || rhs->kind() == TypeKind::BoolType;
   }
   static const TypeKind Kind = TypeKind::BoolType;
   // global singleton
@@ -787,7 +780,7 @@ struct CAFFE2_API StringType : public Type {
     if(auto rhs_ = rhs->cast<OptionalType>()) {
       return this->isSubtypeOf(rhs_->getElementType());
     }
-    return *this == *rhs;
+    return Type::isSubtypeOf(rhs);
   }
   static const TypeKind Kind = TypeKind::StringType;
   // global singleton
