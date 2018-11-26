@@ -79,6 +79,7 @@ namespace c10 {
   _(aten, __isnot__)               \
   _(aten, copy_)                   \
   _(aten, _set_item)               \
+  _(aten, index_put_)              \
   FORALL_ATEN_BASE_SYMBOLS(_)      \
   _(onnx, Add)                     \
   _(onnx, Concat)                  \
