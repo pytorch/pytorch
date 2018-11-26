@@ -502,6 +502,7 @@ if (BUILD_PYTHON)
     ${TORCH_SRC_DIR}/csrc/PtrWrapper.cpp
     ${TORCH_SRC_DIR}/csrc/Size.cpp
     ${TORCH_SRC_DIR}/csrc/Storage.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/python/init.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/functions/init.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.cpp
@@ -572,6 +573,7 @@ if (BUILD_PYTHON)
     ${TORCH_ROOT}/third_party/pybind11/include
 
     ${TORCH_SRC_DIR}/csrc
+    ${TORCH_SRC_DIR}/csrc/api/include
     ${TORCH_SRC_DIR}/lib
     )
 

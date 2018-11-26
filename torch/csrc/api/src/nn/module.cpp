@@ -227,18 +227,15 @@ OrderedDict<std::string, std::shared_ptr<Module>> Module::named_children()
   return children_;
 }
 
-void Module::train() {
+void Module::train(bool on) {
   for (auto& child : children_) {
-    child.value()->train();
+    child.value()->train(on);
   }
-  is_training_ = true;
+  is_training_ = on;
 }
 
 void Module::eval() {
-  for (auto& child : children_) {
-    child.value()->eval();
-  }
-  is_training_ = false;
+  train(/*on=*/false);
 }
 
 void Module::to(torch::Device device, torch::Dtype dtype, bool non_blocking) {

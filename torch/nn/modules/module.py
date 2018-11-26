@@ -3,6 +3,7 @@ import functools
 import itertools
 
 import torch
+import torch._six
 from ..backends.thnn import backend as thnn_backend
 from ..parameter import Parameter
 import torch.utils.hooks as hooks
@@ -20,7 +21,19 @@ def _addindent(s_, numSpaces):
     return s
 
 
-class Module(object):
+class ModuleMeta(type):
+    '''
+    A metaclass for torch.nn.Module to enable isinstance(m, torch.nn.Module) to
+    return true when ``m`` is a C++ module bound into Python.
+    '''
+    def __instancecheck__(self, instance):
+        # See https://docs.python.org/3/reference/datamodel.html#customizing-instance-and-subclass-checks
+        if isinstance(instance, torch.cpp.nn.Module):
+            return True
+        return super(ModuleMeta, self).__instancecheck__(instance)
+
+
+class Module(torch._six.with_metaclass(ModuleMeta)):
     r"""Base class for all neural network modules.
 
     Your models should also subclass this class.

@@ -1,21 +1,18 @@
 #include <torch/extension.h>
 
 struct Net : torch::nn::Module {
-  Net(int64_t in, int64_t out)
-      : fc(in, out),
-        bn(torch::nn::BatchNormOptions(out).stateful(true)),
-        dropout(0.5) {
+  Net(int64_t in, int64_t out) : fc(in, out) {
     register_module("fc", fc);
-    register_module("bn", bn);
-    register_module("dropout", dropout);
+    buffer = register_buffer("buf", torch::eye(5));
   }
 
   torch::Tensor forward(torch::Tensor x) {
-    return dropout->forward(bn->forward(torch::relu(fc->forward(x))));
+    return fc->forward(x);
   }
 
   void set_bias(torch::Tensor bias) {
-    fc->bias = bias;
+    torch::NoGradGuard guard;
+    fc->bias.set_(bias);
   }
 
   torch::Tensor get_bias() const {
@@ -23,14 +20,12 @@ struct Net : torch::nn::Module {
   }
 
   torch::nn::Linear fc;
-  torch::nn::BatchNorm bn;
-  torch::nn::Dropout dropout;
+  torch::Tensor buffer;
 };
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   torch::python::bind_module<Net>(m, "Net")
       .def(py::init<int64_t, int64_t>())
-      .def("forward", &Net::forward)
       .def("set_bias", &Net::set_bias)
       .def("get_bias", &Net::get_bias);
 }
