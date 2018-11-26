@@ -155,7 +155,7 @@ std::shared_ptr<FusedKernel> compileKernel(
     graph->inputs()[i]->setType(TensorType::create(desc.scalar_type, device, desc.nDim())); // TODO: nDim is bad, as it is collapsed
   }
 
-  PropagateInputShapes(*graph);
+  PropagateInputShapes(graph);
 
   // Creates output descriptions
   std::vector<TensorDesc> output_desc;
