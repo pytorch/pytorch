@@ -29,7 +29,7 @@ IS_WINDOWS = sys.platform == 'win32'
 
 class TestCppExtension(common.TestCase):
     def setUp(self):
-        if sys.platform != 'win32':
+        if not IS_WINDOWS:
             default_build_root = torch.utils.cpp_extension.get_default_build_root()
             if os.path.exists(default_build_root):
                 shutil.rmtree(default_build_root)
@@ -121,7 +121,7 @@ class TestCppExtension(common.TestCase):
     @unittest.skipIf(not TEST_CUDNN, "CuDNN not found")
     def test_jit_cudnn_extension(self):
         # implementation of CuDNN ReLU
-        if sys.platform == 'win32':
+        if IS_WINDOWS:
             extra_ldflags = ['cudnn.lib']
         else:
             extra_ldflags = ['-lcudnn']
@@ -410,7 +410,12 @@ class TestCppExtension(common.TestCase):
         # library does not have an ABI suffix like
         # "cpython-37m-x86_64-linux-gnu" before the library suffix, e.g. "so".
         # On Python 2 there is no ABI suffix anyway.
-        ext = {"win32": "dll", "linux": "so", "darwin": "dylib"}[sys.platform]
+        if IS_WINDOWS:
+            ext = "dll"
+        elif sys.platform.startswith("darwin"):
+            ext = "dylib"
+        else:
+            ext = "so"
         root = os.path.join("cpp_extensions", "no_python_abi_suffix_test", "install")
         matches = [f for _, _, fs in os.walk(root) for f in fs if f.endswith(ext)]
         self.assertEqual(len(matches), 1)

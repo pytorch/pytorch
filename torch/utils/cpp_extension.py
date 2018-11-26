@@ -84,7 +84,6 @@ with compiling PyTorch from source.
 
                               !! WARNING !!
 '''
-ACCEPTED_COMPILERS_FOR_PLATFORM = {'darwin': ['clang++', 'clang'], 'linux': ['g++', 'gcc']}
 CUDA_HOME = _find_cuda_home()
 CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
 # PyTorch releases have the version pattern major.minor.patch, whereas when
@@ -104,6 +103,10 @@ JIT_EXTENSION_VERSIONER = ExtensionVersioner()
 
 def _is_binary_build():
     return not BUILT_FROM_SOURCE_VERSION_PATTERN.match(torch.version.__version__)
+
+
+def _accepted_compilers_for_platform():
+    return ['clang++', 'clang'] if sys.platform.startswith('darwin') else ['g++', 'gcc']
 
 
 def get_default_build_root():
@@ -135,8 +138,7 @@ def check_compiler_ok_for_platform(compiler):
     which = subprocess.check_output(['which', compiler], stderr=subprocess.STDOUT)
     # Use os.path.realpath to resolve any symlinks, in particular from 'c++' to e.g. 'g++'.
     compiler_path = os.path.realpath(which.decode().strip())
-    accepted_compilers = ACCEPTED_COMPILERS_FOR_PLATFORM[sys.platform]
-    return any(name in compiler_path for name in accepted_compilers)
+    return any(name in compiler_path for name in _accepted_compilers_for_platform())
 
 
 def check_compiler_abi_compatibility(compiler):
@@ -160,15 +162,15 @@ def check_compiler_abi_compatibility(compiler):
     if not check_compiler_ok_for_platform(compiler):
         warnings.warn(WRONG_COMPILER_WARNING.format(
             user_compiler=compiler,
-            pytorch_compiler=ACCEPTED_COMPILERS_FOR_PLATFORM[sys.platform][0],
+            pytorch_compiler=_accepted_compilers_for_platform()[0],
             platform=sys.platform))
         return False
 
-    if sys.platform == 'darwin':
+    if sys.platform.startswith('darwin'):
         # There is no particular minimum version we need for clang, so we're good here.
         return True
     try:
-        if sys.platform == 'linux':
+        if sys.platform.startswith('linux'):
             minimum_required_version = MINIMUM_GCC_VERSION
             version = subprocess.check_output([compiler, '-dumpfullversion', '-dumpversion'])
             version = version.decode().strip().split('.')
@@ -1033,7 +1035,7 @@ def _write_ninja_file(path,
     else:
         ldflags = ['-shared'] + extra_ldflags
     # The darwin linker needs explicit consent to ignore unresolved symbols.
-    if sys.platform == 'darwin':
+    if sys.platform.startswith('darwin'):
         ldflags.append('-undefined dynamic_lookup')
     elif IS_WINDOWS:
         ldflags = _nt_quote_args(ldflags)
