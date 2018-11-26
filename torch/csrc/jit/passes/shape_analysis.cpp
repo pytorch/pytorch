@@ -928,6 +928,15 @@ class ShapePropagator {
         }};
 
 
+    // Requirements:
+    //   dims           : preserved if keepdim == false, dim->size() smaller otherwise
+    //   scalar type    : preserved
+    //   device         : preserved
+    //   tensor inputs  : 1
+    //   tensor outputs : 1
+    // Additionally:
+    //   - First input should be the only tensor input
+    //   - has a bool keepdim argument
     static const register_formula_for multidim_reduce_ops {
         {
             "aten::mean(Tensor self, int[] dim, bool keepdim) -> Tensor",
