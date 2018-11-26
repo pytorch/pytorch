@@ -163,7 +163,17 @@ ProcessGroupGloo::SendWork::SendWork(
     : tensor_(tensor), buffer_(std::move(buffer)) {}
 
 void ProcessGroupGloo::SendWork::wait() {
-  buffer_->waitSend();
+  std::unique_lock<std::mutex> lock(mutex_);
+  try {
+    buffer_->waitSend();
+  } catch (...) {
+    exception_ = std::current_exception();
+  }
+
+  completed_ = true;
+  if (exception_) {
+    std::rethrow_exception(exception_);
+  }
 }
 
 ProcessGroupGloo::RecvWork::RecvWork(
@@ -173,7 +183,17 @@ ProcessGroupGloo::RecvWork::RecvWork(
     : tensor_(tensor), buffer_(std::move(buffer)), srcRank_(srcRank) {}
 
 void ProcessGroupGloo::RecvWork::wait() {
-  buffer_->waitRecv(srcRank_);
+  std::unique_lock<std::mutex> lock(mutex_);
+  try {
+    buffer_->waitRecv(srcRank_);
+  } catch (...) {
+    exception_ = std::current_exception();
+  }
+
+  completed_ = true;
+  if (exception_) {
+    std::rethrow_exception(exception_);
+  }
 }
 
 ProcessGroupGloo::Options::Options()

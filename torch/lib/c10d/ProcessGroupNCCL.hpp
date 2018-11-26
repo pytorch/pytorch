@@ -201,8 +201,8 @@ class ProcessGroupNCCL : public ProcessGroup {
   // ID of this process group
   std::string processGroupID_;
 
-  // Devices used from the last collective call
-  std::vector<at::Device> lastDevices_;
+  // Device Indexes used for all collectives in this group
+  std::set<int> usedDeviceIdxs_;
 
   // processGroupID tracking
   static std::mutex pgTrackingLock_;
