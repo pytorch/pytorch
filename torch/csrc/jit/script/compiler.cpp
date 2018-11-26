@@ -892,31 +892,31 @@ private:
 
   std::vector<IValue> evaluateDefaults(const SourceRange& r, const std::vector<Expr>& default_types, const std::vector<Expr>& default_exprs) {
     std::vector<IValue> default_values;
-    if (default_exprs.size() > 0) {
-      // To evaluate the default expressions, we create a graph with no inputs,
-      // and whose returns are the default values we need.
-      // We then run constant prop on this graph and check the results are constant.
-      // This approach avoids having to have separate handling of default arguments
-      // from standard expressions by piecing together existing machinery for
-      // graph generation, constant propgation, and constant extraction.
-      auto tuple_type = Subscript::create(
-          r,
-          Var::create(r, Ident::create(r, "Tuple")),
-          List<Expr>::create(r, default_types));
-      auto blank_decl =
-          Decl::create(r, List<Param>::create(r, {}), Maybe<Expr>::create(r, tuple_type));
+    if (default_exprs.empty())
+      return default_values;
+    // To evaluate the default expressions, we create a graph with no inputs,
+    // and whose returns are the default values we need.
+    // We then run constant prop on this graph and check the results are constant.
+    // This approach avoids having to have separate handling of default arguments
+    // from standard expressions by piecing together existing machinery for
+    // graph generation, constant propgation, and constant extraction.
+    auto tuple_type = Subscript::create(
+        r,
+        Var::create(r, Ident::create(r, "Tuple")),
+        List<Expr>::create(r, default_types));
+    auto blank_decl =
+        Decl::create(r, List<Param>::create(r, {}), Maybe<Expr>::create(r, tuple_type));
 
-      auto tuple_expr = TupleLiteral::create(r, List<Expr>::create(r, default_exprs));
-      auto ret = Return::create(r, List<Expr>::create(r, { tuple_expr }));
-      auto def = Def::create(
-          r,
-          Ident::create(r, "defaults"),
-          blank_decl,
-          List<Stmt>::create(r, {ret}));
-      auto m = std::make_shared<Module>();
-      defineMethodsInModule(m, {def}, {resolver}, nullptr);
-      m->get_method("defaults").run(default_values);
-    }
+    auto tuple_expr = TupleLiteral::create(r, List<Expr>::create(r, default_exprs));
+    auto ret = Return::create(r, List<Expr>::create(r, { tuple_expr }));
+    auto def = Def::create(
+        r,
+        Ident::create(r, "defaults"),
+        blank_decl,
+        List<Stmt>::create(r, {ret}));
+    auto m = std::make_shared<Module>();
+    defineMethodsInModule(m, {def}, {resolver}, nullptr);
+    m->get_method("defaults").run(default_values);
     return default_values;
   }
 

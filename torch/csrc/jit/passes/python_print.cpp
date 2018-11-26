@@ -336,7 +336,7 @@ struct PythonPrintPass {
     }
   }
 
-  void printIf(IfStmt stmt) {
+  void printIf(IfView stmt) {
     assignValuesToTheirUniqueNames(stmt.outputs());
     indent() << "if " << useOf(stmt.cond()) << ":\n";
     {
@@ -356,7 +356,7 @@ struct PythonPrintPass {
   // our way of encoding loops makes them difficult to turn back into python syntax.
   // we have to check properties of the condition and trip count inputs to
   // figure out which one it initially was
-  static bool shouldEmitAsForLoop(LoopStmt stmt) {
+  static bool shouldEmitAsForLoop(LoopView stmt) {
       auto trip_count = toIValue(stmt.maxTripCount());
       auto cond_input = toIValue(stmt.inputCond());
       auto cond_next = toIValue(stmt.nextCond());
@@ -381,7 +381,7 @@ struct PythonPrintPass {
       }
   }
 
-  void printLoop(LoopStmt stmt) {
+  void printLoop(LoopView stmt) {
 
     // Loop carried dependencies are handled by assigning their initial
     // values to the node->outputs() before the loop,
@@ -442,10 +442,10 @@ struct PythonPrintPass {
         }
         break;
       case prim::Loop:
-        printLoop(LoopStmt(node));
+        printLoop(LoopView(node));
         break;
       case prim::If:
-        printIf(IfStmt(node));
+        printIf(IfView(node));
         break;
       case prim::TupleUnpack:
       case prim::ListUnpack:

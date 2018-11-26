@@ -3,8 +3,8 @@
 namespace torch {
 namespace jit {
 
-struct IfStmt {
-  explicit IfStmt(Node* node) : node_(node) {
+struct IfView {
+  explicit IfView(Node* node) : node_(node) {
     JIT_ASSERT(node->kind() == prim::If);
   }
   Value* cond() const {
@@ -36,8 +36,8 @@ struct IfStmt {
   Node* node_;
 };
 
-struct LoopStmt {
-  explicit LoopStmt(Node* node) : node_(node) {
+struct LoopView {
+  explicit LoopView(Node* node) : node_(node) {
     JIT_ASSERT(node->kind() == prim::Loop);
   }
   Block* bodyBlock() const {
