@@ -232,7 +232,7 @@ void AffineBatchChannelAndRequantizeNCHWAVX2<uint8_t>(
           (Y_ptr + j));
     }
     for (int j = 0; j < r; ++j) {
-      Y_ptr[n + j] = dnnlowp::Requantize<uint8_t>(
+      Y_ptr[n + j] = fbgemm::Requantize<uint8_t>(
           static_cast<int32_t>(X_ptr[n + j]) * scale[i] + bias[i], params);
     }
   }
@@ -283,7 +283,7 @@ void AffineBatchChannelAndRequantizeNHWCAVX2<uint8_t>(
           (Y_ptr + j));
     }
     for (int j = 0; j < r; ++j) {
-      Y_ptr[n + j] = dnnlowp::Requantize<uint8_t>(
+      Y_ptr[n + j] = fbgemm::Requantize<uint8_t>(
           static_cast<int32_t>(X_ptr[n + j]) * scale[c + n + j] +
               bias[c + n + j],
           params);
@@ -364,7 +364,7 @@ void GroupNormDNNLowPOp<T>::QuantizeGamma() {
         if (dequantize_output_) {
           gamma_dequantized_.resize(C);
           gamma_dequantized_data_ = gamma_dequantized_.data();
-          dnnlowp::Dequantize<int32_t>(
+          fbgemm::Dequantize<int32_t>(
               gamma_quantized_data_,
               gamma_dequantized_.data(),
               C,
@@ -394,7 +394,7 @@ void GroupNormDNNLowPOp<T>::QuantizeGammaImpl() {
 #pragma omp parallel for
 #endif
   for (int i = 0; i < C; ++i) {
-    gamma_quantized_[i] = dnnlowp::Quantize<int32_t>(
+    gamma_quantized_[i] = fbgemm::Quantize<int32_t>(
         gamma_dequantized_data_[i],
         gamma_qparams.zero_point,
         gamma_qparams.scale,
@@ -424,7 +424,7 @@ void GroupNormDNNLowPOp<T>::QuantizeBeta() {
       if (dequantize_output_) {
         beta_dequantized_.resize(C);
         beta_dequantized_data_ = beta_dequantized_.data();
-        dnnlowp::Dequantize<int32_t>(
+        fbgemm::Dequantize<int32_t>(
             beta_quantized_data_, beta_dequantized_.data(), C, beta_qparams);
       }
     } else {
@@ -437,7 +437,7 @@ void GroupNormDNNLowPOp<T>::QuantizeBeta() {
 #pragma omp parallel for
 #endif
       for (int i = 0; i < C; ++i) {
-        beta_quantized_[i] = dnnlowp::Quantize<int32_t>(
+        beta_quantized_[i] = fbgemm::Quantize<int32_t>(
             beta_dequantized_data_[i],
             beta_qparams.zero_point,
             beta_qparams.scale,
@@ -482,7 +482,7 @@ void GroupNormDNNLowPOp<T>::QuantizedGroupMomentsNCHW(
     const float var =
         static_cast<float>(sumsq) / static_cast<float>(inner_size) -
         mean * mean;
-    rsig_dequantized_[i] = dnnlowp::Dequantize<float>(var, var_qparams);
+    rsig_dequantized_[i] = fbgemm::Dequantize<float>(var, var_qparams);
   }
   ComputeQuantizedInvStd(
       outer_size, rsig_dequantized_.data(), rsig_dequantized_.data(), rsig);
@@ -527,7 +527,7 @@ void GroupNormDNNLowPOp<T>::QuantizedGroupMomentsNHWC(
     const float var =
         static_cast<float>(sumsq) / static_cast<float>(inner_size) -
         mean * mean;
-    rsig_dequantized_[i] = dnnlowp::Dequantize<float>(var, var_qparams);
+    rsig_dequantized_[i] = fbgemm::Dequantize<float>(var, var_qparams);
   }
   ComputeQuantizedInvStd(
       outer_size, rsig_dequantized_.data(), rsig_dequantized_.data(), rsig);
@@ -547,7 +547,7 @@ void GroupNormDNNLowPOp<T>::DequantizedGroupMomentsNCHW(
   const int outer_size = N * G;
   const int inner_size = K * HxW;
   X_dequantized_.resize(size);
-  dnnlowp::Dequantize<T>(X, X_dequantized_.data(), size, in_qparams_[INPUT]);
+  fbgemm::Dequantize<T>(X, X_dequantized_.data(), size, in_qparams_[INPUT]);
   const std::array<int, 2> dims = {outer_size, inner_size};
   const int axis = 1;
   math::Moments<float, CPUContext>(
@@ -568,7 +568,7 @@ void GroupNormDNNLowPOp<T>::DequantizedGroupMomentsNHWC(
   const int size = N * C * HxW;
   const int outer_size = N * G;
   X_dequantized_.resize(size);
-  dnnlowp::Dequantize<T>(X, X_dequantized_.data(), size, in_qparams_[INPUT]);
+  fbgemm::Dequantize<T>(X, X_dequantized_.data(), size, in_qparams_[INPUT]);
   const std::array<int, 4> dims = {N, HxW, G, K};
   const std::array<int, 2> axes = {1, 3};
   math::Moments<float, CPUContext>(
@@ -644,7 +644,7 @@ bool GroupNormDNNLowPOp<T>::RunOnDeviceWithOrderNCHW() {
         bias_data);
     AffineBatchChannelQuantizedNCHW(
         N, C, HxW, X_data, scale_data, bias_data, Y_data);
-    PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
+    dnnlowp::PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
   }
   MeasureQuantizationError_();
   return true;
@@ -712,7 +712,7 @@ bool GroupNormDNNLowPOp<T>::RunOnDeviceWithOrderNHWC() {
         bias_data);
     AffineBatchChannelQuantizedNHWC(
         N, C, HxW, X_data, scale_data, bias_data, Y_data);
-    PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
+    dnnlowp::PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
   }
   MeasureQuantizationError_();
   return true;
@@ -736,7 +736,7 @@ void GroupNormDNNLowPOp<T>::ComputeQuantizedInvStd(
 #pragma omp parallel for
 #endif
   for (int i = 0; i < N; ++i) {
-    rsig_quantized[i] = dnnlowp::Quantize<int32_t>(
+    rsig_quantized[i] = fbgemm::Quantize<int32_t>(
         rsig[i], rsig_qparams_.zero_point, rsig_qparams_.scale, 32);
   }
 }
@@ -765,7 +765,7 @@ void GroupNormDNNLowPOp<T>::ComputeQuantizedFusedParams(
       qfactory_->ChooseRequantizationMultiplier(
           real_multiplier, internal_qparams_);
   for (int i = 0; i < C; ++i) {
-    bias[i] = dnnlowp::Requantize<int32_t>(
+    bias[i] = fbgemm::Requantize<int32_t>(
         beta[i],
         internal_qparams_.zero_point,
         beta_requantization_params.multiplier,
@@ -848,7 +848,7 @@ void GroupNormDNNLowPOp<T>::AffineBatchChannelQuantizedNCHW(
          ConstEigenVectorArrayMap<int32_t>(scale, N * C).transpose())
             .rowwise() +
         ConstEigenVectorArrayMap<int32_t>(bias, N * C).transpose();
-    dnnlowp::Requantize<T>(Y_int32_data, Y, size, out_requantization_params);
+    fbgemm::Requantize<T>(Y_int32_data, Y, size, out_requantization_params);
   }
 }
 
@@ -883,7 +883,7 @@ void GroupNormDNNLowPOp<T>::AffineBatchChannelQuantizedNHWC(
               .colwise() +
           ConstEigenVectorArrayMap<int32_t>(bias + i * C, C);
     }
-    dnnlowp::Requantize<T>(Y_int32_.data(), Y, size, out_requantization_params);
+    fbgemm::Requantize<T>(Y_int32_.data(), Y, size, out_requantization_params);
   }
 }
 
