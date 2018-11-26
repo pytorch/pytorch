@@ -381,7 +381,6 @@ class TestCppExtension(common.TestCase):
         self.assertEqual(len(net.parameters()), 4)
 
         p = net.named_parameters()
-        self.assertEqual(type(p), dict)
         self.assertEqual(len(p), 4)
         self.assertIn('fc.weight', p)
         self.assertIn('fc.bias', p)
@@ -418,8 +417,8 @@ class TestCppExtension(common.TestCase):
             ext = "so"
         root = os.path.join("cpp_extensions", "no_python_abi_suffix_test", "install")
         matches = [f for _, _, fs in os.walk(root) for f in fs if f.endswith(ext)]
-        self.assertEqual(len(matches), 1)
-        self.assertEqual(matches[0], "{}.{}".format("no_python_abi_suffix_test", ext))
+        self.assertEqual(len(matches), 1, str(matches))
+        self.assertEqual(matches[0], "{}.{}".format("no_python_abi_suffix_test", ext), str(matches))
 
 
 if __name__ == '__main__':
