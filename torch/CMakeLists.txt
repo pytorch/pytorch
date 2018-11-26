@@ -29,9 +29,12 @@ endif()
 
 # RPATH stuff
 # see https://cmake.org/Wiki/CMake_RPATH_handling
-if(APPLE)
+if (APPLE)
   set(CMAKE_MACOSX_RPATH ON)
-endif()
+  set(_rpath_portable_origin "@loader_path")
+else()
+  set(_rpath_portable_origin $ORIGIN)
+endif(APPLE)
 # Use separate rpaths during build and install phases
 set(CMAKE_SKIP_BUILD_RPATH  FALSE)
 # Don't use the install-rpath during the build phase
@@ -40,11 +43,6 @@ set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 # Automatically add all linked folders that are NOT in the build directory to
 # the rpath (per library?)
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
-# Always ensure that CMAKE_INSTALL_PREFIX/lib is in the rpath
-list(FIND CMAKE_PLATFORM_IMPLICIT_LINK_DIRECTORIES "${CMAKE_INSTALL_PREFIX}/lib" isSystemDir)
-if("${isSystemDir}" STREQUAL "-1")
-  list(APPEND CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
-endif()
 
 # Get the correct Python executable
 if (DEFINED ENV{PYTORCH_PYTHON})
