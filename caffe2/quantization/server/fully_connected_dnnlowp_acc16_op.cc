@@ -140,13 +140,14 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
       DoNothing<> doNothingObj{};
       ReQuantizeOutput<false /* fuse relu */> reqObj(
           doNothingObj,
-          requantization_params_.real_multiplier,
+          &requantization_params_.real_multiplier,
           out_qparams_.zero_point,
           in_qparams_[0].zero_point,
-          in_qparams_[1].zero_point,
+          &in_qparams_[1].zero_point,
           packA.getRowOffsetBuffer(),
           column_offsets_.data(),
-          this->b_quantized_data_);
+          this->b_quantized_data_,
+          N); // ncols per quant group
 
       if (nbits_in_non_outlier_ < 8) {
         DoSpmdmOnInpBuffer<
@@ -180,12 +181,13 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
       ReQuantizeForFloat<false /* FUSE_RELU*/> reqObj(
           doNothingObj,
           in_qparams_[0].scale,
-          in_qparams_[1].scale,
+          &in_qparams_[1].scale,
           in_qparams_[0].zero_point,
-          in_qparams_[1].zero_point,
+          &in_qparams_[1].zero_point,
           packA.getRowOffsetBuffer(),
           column_offsets_.data(),
-          this->b_dequantized_data_);
+          this->b_dequantized_data_,
+          N); // ncols per quant group
 
       if (nbits_in_non_outlier_ < 8) {
         DoSpmdmOnInpBuffer<
@@ -254,13 +256,14 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
             N,
             Y_int32_.data() + i * N,
             Ydata + i * N,
-            requantization_params_.real_multiplier,
+            &requantization_params_.real_multiplier,
             out_qparams_.zero_point,
             in_qparams_[0].zero_point,
-            in_qparams_[1].zero_point,
+            &in_qparams_[1].zero_point,
             &row_offset,
             column_offsets_.data(),
-            b_quantized_.data());
+            b_quantized_.data(),
+            N); // ncols per quant group
       }
     }
   }
