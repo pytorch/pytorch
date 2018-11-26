@@ -9192,9 +9192,6 @@ EXCLUDE_SCRIPT = {
     'test_nn_interpolate',
     'test_nn_fold',
     'test_nn_max_unpool1d',
-    'test_nn_lp_pool1d',
-    'test_nn_lp_pool2d',
-    'test_nn_gumbel_softmax',
     'test_nn_poisson_nll_loss',
     'test_nn_poisson_nll_loss_full',
 }
@@ -9714,6 +9711,26 @@ S = 5
 #     use_as_constant (should the submodule be listed in __constants__?)
 # )
 nn_module_tests = [
+    ('AlphaDropout', (), ((S,),)),
+    ('BatchNorm1d', (10,), ((S, 10),)),
+    ('BatchNorm2d', (10,), ((S, 10, S, S),)),
+    ('BatchNorm3d', (10,), ((S, 10, S, S, S),)),
+    ('Dropout', (), ((S,),)),
+    ('Dropout2d', (), ((S, S),)),
+    ('Dropout3d', (), ((S, S, S),)),
+    ('FeatureAlphaDropout', (), ((S, S),)),
+    ('Hardshrink', (), ((S,),)),
+    ('LPPool1d', (2, 3, 2), ((S, S, S),)),
+    ('LPPool2d', (2, 3, 2), ((S, S, S, S),)),
+    ('PReLU', (), ((S,),)),
+    ('PairwiseDistance', (), ((S, S), (S, S))),
+    ('RReLU', (), ((S,),)),
+    ('Sigmoid', (), ((S,),)),
+    ('Softshrink', (), ((S,),)),
+    ('Softsign', (), ((S,),)),
+    ('Tanh', (), ((S,),)),
+    ('Tanhshrink', (), ((S,),)),
+    ('Threshold', (2., 2.), ((S,),)),
     ('Sequential', (torch.nn.Sigmoid(), torch.nn.Threshold(1., 2.)), ((S,),), True),
 ]
 
@@ -9751,8 +9768,8 @@ nn_functional_tests = [
     ('max_unpool1d', torch.tensor([[[2., 4]]]), (torch.tensor([[[1, 3]]]), 2, 2, 0)),
     ('max_unpool2d', torch.tensor([[[[2., 4]]]]), (torch.tensor([[[[1, 3]]]]), 2, 2, 0)),
     ('max_unpool3d', torch.tensor([[[[[2., 4]]]]]), (torch.tensor([[[[[1, 3]]]]]), 2, 2, 0)),
-    ('lp_pool1d', (S, S, S), (2, 3, 2,)),
-    ('lp_pool2d', (S, S, S, S), (2, 3, 2,)),
+    ('lp_pool1d', (S, S, S), (2., 3, 2,)),
+    ('lp_pool2d', (S, S, S, S), (2., 3, 2,)),
     ('adaptive_max_pool1d', (S, S, S), (5,)),
     ('adaptive_max_pool2d', (S, S, S, S), ([5, 7],)),
     ('adaptive_max_pool3d', (S, S, S, S, S), ([3, 2, 2],)),
@@ -9828,7 +9845,8 @@ nn_functional_tests = [
     ('unfold', (S, S, S, S), ([2, 3]),),
     ('fold', (1, 3 * 2 * 2, 12), ([4, 5], [2, 2]),),
     ('grid_sample', (S, S, S, S), (non_differentiable(torch.rand(S, S, S, 2)),),),
-    ('gumbel_softmax', (S, S), (2,),),
+    ('gumbel_softmax', (S, S), (2.,),),
+    ('gumbel_softmax', (S, S), (2., True,), 'hard'),
     ('multilabel_margin_loss', torch.tensor([[0.2, -0.2, 0.07]]), (torch.tensor([[0, 0, 1]]),),),
     ('multi_margin_loss', (S, S), (non_differentiable(torch.randint(S, (S, ), dtype=torch.int64)), \
                                    1, 1, non_differentiable(torch.randn(S))),),

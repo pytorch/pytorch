@@ -6,7 +6,6 @@
 
 #include "caffe2/core/tensor_int8.h"
 #include "caffe2/operators/conv_pool_op_base.h"
-#include "caffe2/quantization/server/caffe2_dnnlowp_utils.h"
 #include "caffe2/quantization/server/op_wrapper.h"
 
 #ifdef _OPENMP
@@ -107,7 +106,7 @@ class ConvPoolDNNLowPOpBase : public ConvPoolOpBase<CPUContext> {
           OutputTensorCPU_(0)->size(),
           out_qparams_);
     } else {
-      PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
+      dnnlowp::PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
     }
 
     MeasureQuantizationError_();

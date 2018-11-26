@@ -152,7 +152,7 @@ class DNNLowPOp : public Operator<CPUContext> {
           OutputTensorCPU_(0)->numel(),
           out_qparams_);
     } else {
-      PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
+      dnnlowp::PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
     }
 
     MeasureQuantizationError_();

@@ -1113,6 +1113,36 @@ class ProcessGroupNCCLTest(TestCase):
             for s_idx, t in enumerate(device_ts):
                 self.assertEqual(torch.Tensor([s_idx]), t)
 
+    def test_barrier(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        def allreduce(tensors):
+            opts = c10d.AllreduceOptions()
+            work = pg.allreduce(tensors, opts)
+            return work
+
+        # Making the collective to operate on
+        # 1, 2, 3, 4, .... self.num_gpus GPUs
+        tensors_list = [[] for _ in range(2, self.num_gpus + 1)]
+        for i in range(2, self.num_gpus + 1):
+            for j in range(i):
+                tensors_list[i - 2].append(torch.Tensor([j + 1]).cuda(j))
+
+        works = []
+        for tensors in tensors_list:
+            work = allreduce(tensors)
+            works.append(work)
+
+        # Barrier will ensure that all previous work is completed
+        pg.barrier()
+
+        for i in range(2, self.num_gpus + 1):
+            for j in range(i):
+                self.assertEqual(
+                    torch.Tensor([float(i * (i + 1) / 2)]),
+                    tensors_list[i - 2][j])
+
 
 class Net(nn.Module):
     def __init__(self):

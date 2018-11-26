@@ -128,7 +128,7 @@ static void upfrontCompilation(KernelSpec& spec) {
 int64_t registerFusion(const Node* fusion_group) {
   // Creates and stores the FusionSpec
   auto graph = fusion_group->g(attr::Subgraph)->copy();
-  EraseShapeInformation(*graph);
+  EraseShapeInformation(graph);
   const auto key = store(graph);
 
   if (canFuseOnCPU() || canFuseOnGPU()) {
