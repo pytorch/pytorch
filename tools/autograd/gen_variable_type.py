@@ -159,7 +159,7 @@ if (jit::tracer::isTracing()) {
 """)
 
 INPLACE_GUARD = CodeTemplate("""\
-jit::tracer::ensureUnique("${name}", ${mutable_input});
+jit::tracer::ensureUniqueIfOutOfPlaced("${name}", ${mutable_input});
 """)
 
 ADD_TRACE_INPUT = CodeTemplate("""jit::tracer::addInputs(node, "${name}", ${input});""")
@@ -209,6 +209,8 @@ def format_postrecord_trace(declaration):
         output_names_outplace = [arg['name'] for arg in declaration['arguments'] if arg.get('output', False)]
         output_names_inplace = [r['name'] for r in declaration['returns']]
 
+        # Code size optimization: the common case is that the return value is
+        # the same for both variants
         if output_names_outplace == output_names_inplace:
             outputs = ['jit::tracer::addOutput(node, {});'.format(n) for n in output_names_outplace]
             return POST_RECORD_TRACE.substitute(add_trace_outputs=outputs)
@@ -226,26 +228,21 @@ def format_postrecord_trace(declaration):
 
 
 def format_trace_op_name(declaration):
-    def rename(trace_name):
-        if trace_name in RENAME_TRACE:
-            trace_name = RENAME_TRACE[trace_name]
-        return trace_name
-
     is_inplace = declaration['api_name'] != uninplace_api_name(declaration['api_name'])
 
     if not is_inplace or is_out_overload(declaration):
         # special case for *_out functions: the in-place and out-of-place ops
         # are overloaded with the same name in the JIT
         trace_name = uninplace_api_name(declaration['api_name'])
-        trace_name = rename(trace_name)
+        trace_name = RENAME_TRACE.get(trace_name, trace_name)
         return OP_NAME.substitute(trace_name=trace_name)
 
     # otherwise, this is an in-place op and we need to emit both in- and
     # out-of-place versions
     outplace_trace_name = uninplace_api_name(declaration['api_name'])
     inplace_trace_name = declaration['api_name']
-    outplace_trace_name = rename(outplace_trace_name)
-    inplace_trace_name = rename(inplace_trace_name)
+    outplace_trace_name = RENAME_TRACE.get(outplace_trace_name, outplace_trace_name)
+    inplace_trace_name = RENAME_TRACE.get(inplace_trace_name, inplace_trace_name)
 
     select_params = {}
     select_params['cond'] = 'tracer_state->force_outplace'
