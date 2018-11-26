@@ -546,8 +546,7 @@ TEST(DataTest, DataShuttlePopResultTimesOut) {
 }
 
 struct UncopyableDataset : datasets::Dataset<UncopyableDataset, int> {
-  UncopyableDataset(const std::string& /* unused */)
-      : mutex(torch::make_unique<std::mutex>()) {}
+  UncopyableDataset(const std::string& /* unused */) {}
 
   UncopyableDataset(UncopyableDataset&&) = default;
   UncopyableDataset& operator=(UncopyableDataset&&) = default;
@@ -556,32 +555,29 @@ struct UncopyableDataset : datasets::Dataset<UncopyableDataset, int> {
   UncopyableDataset& operator=(const UncopyableDataset&) = delete;
 
   int get(size_t index) override {
-    {
-      std::lock_guard<std::mutex> guard(*mutex);
-      thread_ids.insert(std::this_thread::get_id());
-    }
     return 1 + index;
   }
   torch::optional<size_t> size() const override {
     return 100;
   }
-
-  std::unique_ptr<std::mutex> mutex;
-  std::unordered_set<std::thread::id> thread_ids;
 };
 
 TEST(DataTest, SharedBatchDatasetReallyIsShared) {
+  // This test will only compile if we really are not making any copies.
+  // There is otherwise no logic to test and because it is not deterministic
+  // how many and when worker threads access the shareddataset, we don't have
+  // any additional assertions here.
+
   auto shared_dataset =
       torch::data::datasets::make_shared_dataset<UncopyableDataset>(
           "uncopyable");
+
   auto data_loader = torch::data::make_data_loader(
       shared_dataset, torch::data::DataLoaderOptions().workers(3));
 
   for (auto batch : *data_loader) {
     /* exhaust */
   }
-
-  ASSERT_EQ(shared_dataset->thread_ids.size(), 3);
 }
 
 TEST(DataTest, SharedBatchDatasetDoesNotIncurCopyWhenPassedDatasetObject) {
