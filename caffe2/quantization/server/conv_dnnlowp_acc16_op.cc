@@ -679,7 +679,6 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNHWCAndType_() {
                     group_ * kernel_dim,
                     X_pack_buf_.data() + tid * x_pack_buf_size_per_thread,
                     1, // group
-                    in_qparams_[INPUT].zero_point,
                     row_offsets_.data() + tid * row_offset_size_per_thread);
 
                 DoNothing<> doNothingObj{};
@@ -743,8 +742,7 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNHWCAndType_() {
                         (i_begin * group_ + group_id) * kernel_dim,
                     group_ * kernel_dim,
                     X_pack_buf_.data() + tid * x_pack_buf_size_per_thread,
-                    1, // group
-                    in_qparams_[INPUT].zero_point);
+                    1); // group
 
                 DoNothing<int32_t, int32_t> doNothingObj{};
                 memCopy<> memCopyObj(doNothingObj);
