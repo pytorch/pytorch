@@ -2155,7 +2155,7 @@ class TestNN(NNTestCase):
         self._test_gumbel_softmax_st(True, dtype=dtype)
 
     def _test_EmbeddingBag(self, cuda, mode, sparse, dtype=torch.double):
-        torch.manual_seed(2147483647)
+        torch.manual_seed(7393)
         # check a known test example
         device = torch.device("cuda") if cuda else torch.device("cpu")
         es = nn.EmbeddingBag(5, 2, mode=mode, sparse=sparse).to(device, dtype)

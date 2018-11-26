@@ -154,7 +154,7 @@ class TestOptim(TestCase):
         for i in range(20):
             optimizer.step(fn)
             optimizer_cuda.step(fn_cuda)
-            self.assertEqual(weight, weight_cuda)
+            self.assertEqual(weight, weight_cuda, prec=1.4e-5)
             self.assertEqual(bias, bias_cuda)
 
     def _test_basic_cases(self, constructor, ignore_multidevice=False):

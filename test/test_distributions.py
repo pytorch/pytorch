@@ -3999,8 +3999,8 @@ class TestTransforms(TestCase):
         for transform in self.unique_transforms:
             x = self._generate_data(transform).requires_grad_()
 
-            def f(x):
-                return transform(x)
+            def f(input_x):
+                return transform(input_x)
 
             try:
                 traced_f = torch.jit.trace(f, (x,))

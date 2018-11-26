@@ -839,7 +839,6 @@ class TestSparse(TestCase):
         test_shape(1000, 100, 0, 20)
 
     def _test_spadd_shape(self, nnz, shape_i, shape_v=None):
-        torch.manual_seed(0)
         shape = shape_i + (shape_v or [])
         x, _, _ = self._gen_sparse(len(shape_i), nnz, shape)
         y = self.randn(*shape)
@@ -867,13 +866,13 @@ class TestSparse(TestCase):
         nnz = i.size(1)
 
         # Non contiguous sparse indices tensor
-        x_ = self.SparseTensor(i[:, ::2], v[:int(nnz / 2)], x.shape)
+        x_ = self.SparseTensor(i[:, ::2], v[:int((nnz + 2 - 1) / 2)], x.shape)
         res = torch.add(y, r, x_)
         expected = y + r * self.safeToDense(x_)
         self.assertEqual(res, expected)
 
         # Non contiguous sparse values tensor
-        x_ = self.SparseTensor(i[:, :int(nnz / 2)], v[::2], x.shape)
+        x_ = self.SparseTensor(i[:, :int((nnz + 2 - 1) / 2)], v[::2], x.shape)
         res = torch.add(y, r, x_)
         expected = y + r * self.safeToDense(x_)
         self.assertEqual(res, expected)
