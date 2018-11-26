@@ -14,6 +14,11 @@
 #
 #   torch
 
+# If ON, generates a file cling_pragmas.h under the install root that can be
+# included in the cling interpreter to load all necessary include paths, library
+# paths and libraries.
+option(TORCH_GENERATE_CLING_PRAGMAS OFF)
+
 include(FindPackageHandleStandardArgs)
 
 if (DEFINED ENV{TORCH_INSTALL_PREFIX})
@@ -66,6 +71,14 @@ if (@USE_CUDA@)
       ${CUDA_LIBRARIES})
   endif()
   list(APPEND TORCH_LIBRARIES ${TORCH_CUDA_LIBRARIES})
+endif()
+
+if (TORCH_GENERATE_CLING_PRAGMAS)
+  add_custom_command instead
+  configure_file(
+      ${CMAKE_CURRENT_LIST_DIR}/cling_pragmas.h
+      ${TORCH_INSTALL_PREFIX}/cling_pragmas.h
+      @ONLY)
 endif()
 
 # When we build libtorch with the old GCC ABI, dependent libraries must too.
