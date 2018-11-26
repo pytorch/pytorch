@@ -5,7 +5,7 @@
 #include <ATen/core/TensorImpl.h>
 #include <ATen/core/UndefinedTensorImpl.h>
 #include <ATen/core/blob.h>
-#include <ATen/core/intrusive_ptr.h>
+#include <c10/util/intrusive_ptr.h>
 #include <ATen/core/thread_pool.h>
 
 #include <type_traits>

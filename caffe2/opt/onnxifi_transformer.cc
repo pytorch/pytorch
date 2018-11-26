@@ -171,13 +171,19 @@ OperatorDef OnnxifiTransformer::BuildOnnxifiOp(
   }
 
   // Add the input/output
+  auto* input_names = op.add_arg();
+  input_names->set_name("input_names");
   for (const auto& input : net.external_input()) {
     if (!initialization_list.count(input)) {
       op.add_input(input);
+      input_names->add_strings(input);
     }
   }
+  auto* output_names = op.add_arg();
+  output_names->set_name("output_names");
   for (const auto& output : net.external_output()) {
     op.add_output(output);
+    output_names->add_strings(output);
   }
 
   // Add output size hints

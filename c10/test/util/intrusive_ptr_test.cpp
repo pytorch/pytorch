@@ -1,4 +1,4 @@
-#include "ATen/core/intrusive_ptr.h"
+#include <c10/util/intrusive_ptr.h>
 
 #include <gtest/gtest.h>
 #include <map>
@@ -11,6 +11,8 @@ using c10::intrusive_ptr_target;
 using c10::make_intrusive;
 using c10::weak_intrusive_ptr;
 
+#pragma GCC diagnostic ignored "-Wpragmas"
+#pragma GCC diagnostic ignored "-Wunknown-warning-option"
 #pragma GCC diagnostic ignored "-Wself-move"
 
 namespace {

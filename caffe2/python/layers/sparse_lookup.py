@@ -50,7 +50,9 @@ class SparseLookup(ModelLayer):
         'WeightedSum', 'WeightedMean', 'Sqrt', 'None']
 
     _id_score_list_supported_reducers = [
-        'PositionWeighted', 'Mean', 'Sum', 'WeightedSum', 'WeightedMean', 'None']
+        'PositionWeighted', 'RecencyWeighted', 'Mean', 'Sum', 'WeightedSum',
+        'WeightedMean', 'None'
+    ]
 
     def __init__(self, model, input_record, inner_shape, reducer,
                  weight_init=None, weight_optim=None,
@@ -70,6 +72,11 @@ class SparseLookup(ModelLayer):
                 "PositionWeighted only support IdScoreList, but got {} " +
                 "please use PositionWeighted layer to convert IdList " +
                 "to IdScoreList").format(repr(self.input_record))
+            self.external_weights = input_record.values()
+
+        elif reducer == "RecencyWeighted":
+            assert _is_id_score_list(self.input_record), (
+                "RecencyWeighted only supports IdScoreList.")
             self.external_weights = input_record.values()
         self.reducer = reducer
 
@@ -323,7 +330,7 @@ class SparseLookup(ModelLayer):
                 raise "Unsupported version of operator in SparseLookUp " +\
                     "layer: {0}".format(version)
 
-        elif self.reducer == 'PositionWeighted':
+        elif self.reducer in ['PositionWeighted', 'RecencyWeighted']:
             self._sparse_lengths_weighted_reducer(
                 self.input_record.keys(),
                 self.external_weights,
