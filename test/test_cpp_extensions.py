@@ -410,17 +410,11 @@ class TestCppExtension(common.TestCase):
         # library does not have an ABI suffix like
         # "cpython-37m-x86_64-linux-gnu" before the library suffix, e.g. "so".
         # On Python 2 there is no ABI suffix anyway.
-        if IS_WINDOWS:
-            ext = "dll"
-        elif sys.platform.startswith("darwin"):
-            ext = "dylib"
-        else:
-            ext = "so"
         root = os.path.join("cpp_extensions", "no_python_abi_suffix_test", "build")
         print(list(os.walk(os.path.join("cpp_extensions", "no_python_abi_suffix_test"))))
-        matches = [f for _, _, fs in os.walk(root) for f in fs if f.endswith(ext)]
+        matches = [f for _, _, fs in os.walk(root) for f in fs if f.endswith("so")]
         self.assertEqual(len(matches), 1, str(matches))
-        self.assertEqual(matches[0], "{}.{}".format("no_python_abi_suffix_test", ext), str(matches))
+        self.assertEqual(matches[0], "no_python_abi_suffix_test.so", str(matches))
 
 
 if __name__ == '__main__':
