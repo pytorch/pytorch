@@ -19,6 +19,7 @@ namespace c10 {
   _(namespaces, scope)             \
   _(namespaces, namespaces)        \
   _(prim, Assign)                  \
+  _(prim, BroadcastingChunk)       \
   _(prim, Constant)                \
   _(prim, None)                    \
   _(prim, Drop)                    \
