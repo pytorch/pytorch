@@ -401,6 +401,7 @@ class TestCppExtension(common.TestCase):
             is_python_module=False)
         self.assertEqual(torch.ops.test.func(torch.eye(5)), torch.eye(5))
 
+    @unittest.skipIf(IS_WINDOWS, "Not available on Windows")
     def test_no_python_abi_suffix_sets_the_correct_library_name(self):
         # For this test, run_test.py will call `python setup.py install` in the
         # cpp_extensions/no_python_abi_suffix_test folder, where the
@@ -415,7 +416,7 @@ class TestCppExtension(common.TestCase):
             ext = "dylib"
         else:
             ext = "so"
-        root = os.path.join("cpp_extensions", "no_python_abi_suffix_test", "install")
+        root = os.path.join("cpp_extensions", "no_python_abi_suffix_test", "build")
         matches = [f for _, _, fs in os.walk(root) for f in fs if f.endswith(ext)]
         self.assertEqual(len(matches), 1, str(matches))
         self.assertEqual(matches[0], "{}.{}".format("no_python_abi_suffix_test", ext), str(matches))
