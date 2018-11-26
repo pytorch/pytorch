@@ -65,7 +65,7 @@ class OpWrapper {
 
     float min, max;
     auto& out_tensor = local_output_blobs_[index]->template Get<TensorCPU>();
-    FindMinMax(
+    fbgemm::FindMinMax(
         out_tensor.template data<float>(), &min, &max, out_tensor.numel());
     if (op_->OperatorBase::GetSingleArgument<std::string>("followed_by", "") ==
         "Relu") {
