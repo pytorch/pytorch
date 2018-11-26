@@ -1767,7 +1767,7 @@ class _TestTorchMixin(object):
 
     @staticmethod
     def _test_int_pow(self, cast):
-        torch.manual_seed(123)
+        torch.manual_seed(3594)
         if not TEST_NUMPY:
             return
         import numpy as np
@@ -1791,7 +1791,6 @@ class _TestTorchMixin(object):
         shape = (11, 5)
         tensor = cast(torch.LongTensor(shape).random_(-10, 10))
         exps = [0, 1, 2, 5, cast(torch.LongTensor(shape).random_(0, 20))]
-
         for typecast in typecasts:
             for exp in exps:
                 t = typecast(tensor)
