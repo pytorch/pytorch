@@ -255,7 +255,6 @@ class JitTestCase(TestCase):
                     raise
                 else:
                     return
-
             ppv = "op_version_set = 0\n{}".format(pp)
             sm = copy_structure_and_params(module)
             torch._C._jit_import_methods(sm, ppv, constant_table)

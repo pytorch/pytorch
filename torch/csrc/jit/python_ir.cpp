@@ -150,12 +150,12 @@ void initPythonIRBindings(PyObject * module_) {
       setInputTypes(*g, ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
       PropagateInputShapes(g);
     })
-    .def("export", [](const std::shared_ptr<Graph> g, const std::vector<at::Tensor>& initializers,
+    .def("_export_onnx", [](const std::shared_ptr<Graph> g, const std::vector<at::Tensor>& initializers,
                       int64_t onnx_opset_version, bool defer_weight_export,
                       ::torch::onnx::OperatorExportTypes operator_export_type) {
       std::string graph;
       RawDataExportMap export_map;
-      std::tie(graph, export_map) = ExportGraph(
+      std::tie(graph, export_map) = export_onnx(
         g, initializers, onnx_opset_version, defer_weight_export, operator_export_type);
       std::unordered_map<std::string, py::bytes> python_serialized_export_map;
       for (auto& kv : export_map) {
@@ -171,12 +171,12 @@ void initPythonIRBindings(PyObject * module_) {
        py::arg("onnx_opset_version")=0,
        py::arg("defer_weight_export")=false,
        py::arg("operator_export_type")=::torch::onnx::OperatorExportTypes::ONNX)
-    .def("prettyPrintExport", [](const std::shared_ptr<Graph> g,
+    .def("_pretty_print_onnx", [](const std::shared_ptr<Graph> g,
           const std::vector<at::Tensor>& initializers,
           int64_t onnx_opset_version, bool defer_weight_export,
           ::torch::onnx::OperatorExportTypes operator_export_type,
           bool google_printer) {
-      return PrettyPrintExportedGraph(
+      return pretty_print_onnx(
         g, initializers, onnx_opset_version, defer_weight_export, operator_export_type,
         google_printer);
     }, py::arg("initializers"),
