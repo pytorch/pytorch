@@ -1104,8 +1104,11 @@ if _enabled:
             # Copy Parameters / Modules / Buffers
             for name in dir(original):
                 item = getattr(original, name)
-                if isinstance(item, Parameter) or (isinstance(item, Module) and item is not self):
+                if isinstance(item, Module) and item is not self:
                     ScriptModule.__setattr__(self, name, item)
+
+            for name in original._parameters:
+                self.register_parameter(name, original._parameters[name])
             for name in original._buffers:
                 self.register_buffer(name, original._buffers[name])
 

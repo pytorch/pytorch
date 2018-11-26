@@ -9820,7 +9820,7 @@ S = 5
 # )
 nn_module_tests = [
     ('AlphaDropout', (), ((S,),)),
-    ('BatchNorm1d', (10,), ((S, 10),)),
+    ('BatchNorm1d', (10, 1e-5, 0.1, False), ((S, 10),)),
     ('BatchNorm2d', (10,), ((S, 10, S, S),)),
     ('BatchNorm3d', (10,), ((S, 10, S, S, S),)),
     ('Dropout', (), ((S,),)),

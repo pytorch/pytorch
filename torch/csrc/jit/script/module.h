@@ -324,13 +324,15 @@ struct Module {
     return get_method("forward")(inputs);
   }
 
-  void register_parameter(const std::string & name, autograd::Variable v, bool is_buffer) {
+  void register_parameter(const std::string & name, c10::optional<autograd::Variable> v, bool is_buffer) {
+    // If Module parameter is None from Python, turn it into undefined tensor
+    auto v_val = v.value_or(at::Tensor());
     if(auto p = parameters.find(name)){
-      *p->slot() = v;
+      *p->slot() = v_val;
       p->is_buffer = is_buffer;
       return;
     }
-    parameters.insert(name, NamedParameter(name, std::move(v), is_buffer));
+    parameters.insert(name, NamedParameter(name, std::move(v_val), is_buffer));
   }
   void register_module(const std::string& name, std::shared_ptr<Module> module) {
     modules.insert(name, {name, std::move(module)});
