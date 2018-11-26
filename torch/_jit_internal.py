@@ -134,10 +134,10 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
         else:
             return if_false(*new_args, **kwargs)
 
-    if if_true.__doc__ == "" and if_false.__doc__ != "":
+    if if_true.__doc__ is None and if_false.__doc__ is not None:
         doc = if_false.__doc__
         if_true.__doc__ = doc
-    elif if_false.__doc__ == "" and if_true.__doc__ != "":
+    elif if_false.__doc__ is None and if_true.__doc__ is not None:
         doc = if_true.__doc__
         if_false.__doc__ = doc
     else:
