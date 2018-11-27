@@ -13,7 +13,7 @@
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
 
-namespace at {
+namespace c10 {
 
 #if defined(__CUDACC__) || defined(__HIP_PLATFORM_HCC__)
 template <>

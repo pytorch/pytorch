@@ -2,7 +2,7 @@
 
 #include <c10/core/ScalarType.h>
 
-namespace at {
+namespace c10 {
 
 template <typename T>
 struct CTypeToScalarType {
@@ -16,4 +16,4 @@ struct CTypeToScalarType<ct> {                                     \
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_TO_SCALAR_TYPE)
 #undef DEFINE_TO_SCALAR_TYPE
 
-} // namespace at
+} // namespace c10
