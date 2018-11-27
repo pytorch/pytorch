@@ -8,8 +8,6 @@ __all__ = [
 
 def addmm(mat, mat1, mat2, beta=1, alpha=1):
     r"""
-    .. function:: torch.sparse.addmm(mat, mat1, mat2, beta=1, alpha=1) -> Tensor
-
     This function does exact same thing as :meth:`~Torch.addmm` in the forward,
     except that it supports backward for coalesced sparse matrix `mat1`.
 
