@@ -4,9 +4,10 @@ from torch.nn.parameter import Parameter
 from .module import Module
 from .. import functional as F
 from .. import init
+from torch._jit_internal import weak_module, weak_script, weak_script_method
 
 
-@torch._jit_internal.weak_module
+@weak_module
 class Embedding(Module):
     r"""A simple lookup table that stores embeddings of a fixed dictionary and size.
 
@@ -110,7 +111,7 @@ class Embedding(Module):
             with torch.no_grad():
                 self.weight[self.padding_idx].fill_(0)
 
-    @torch._jit_internal.weak_script_method
+    @weak_script_method
     def forward(self, input):
         return F.embedding(
             input, self.weight, self.padding_idx, self.max_norm,
@@ -165,7 +166,7 @@ class Embedding(Module):
         return embedding
 
 
-@torch._jit_internal.weak_module
+@weak_module
 class EmbeddingBag(Module):
     r"""Computes sums or means of 'bags' of embeddings, without instantiating the
     intermediate embeddings.
@@ -249,7 +250,7 @@ class EmbeddingBag(Module):
     def reset_parameters(self):
         init.normal_(self.weight)
 
-    @torch._jit_internal.weak_script_method
+    @weak_script_method
     def forward(self, input, offsets=None):
         # type: (Tensor, Optional[Tensor]) -> Tensor
         return F.embedding_bag(input, self.weight, offsets,

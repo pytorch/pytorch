@@ -387,6 +387,7 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
 
 // This is a workaround to not being able to call with.no_grad():
 // in script. No derivatives are set when calling no_grad_embedding_renorm_cuda_
+// TODO: remove when script supports set_grad_enabled
 Tensor & no_grad_embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
                                 double max_norm, double norm_type) {
   return embedding_renorm_cuda_(self, indices, max_norm, norm_type);
