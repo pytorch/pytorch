@@ -318,11 +318,11 @@ inline Tensor Tensor::index(TensorList indices) const {
 inline Tensor & Tensor::index_copy_(int64_t dim, const Tensor & index, const Tensor & source) {
     return type().index_copy_(*this, dim, index, source);
 }
-inline Tensor Tensor::index_put(TensorList indices, const Tensor & values) const {
-    return type().index_put(*this, indices, values);
+inline Tensor Tensor::index_put(TensorList indices, const Tensor & values, bool accumulate) const {
+    return type().index_put(*this, indices, values, accumulate);
 }
-inline Tensor & Tensor::index_put_(TensorList indices, const Tensor & values) {
-    return type().index_put_(*this, indices, values);
+inline Tensor & Tensor::index_put_(TensorList indices, const Tensor & values, bool accumulate) {
+    return type().index_put_(*this, indices, values, accumulate);
 }
 inline Tensor Tensor::inverse() const {
     return type().inverse(*this);
