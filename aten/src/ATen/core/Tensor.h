@@ -1,16 +1,16 @@
 #pragma once
 
-#include "c10/Device.h"
+#include <c10/Device.h>
 #include "ATen/core/Layout.h"
-#include "ATen/core/Scalar.h"
-#include "ATen/core/ScalarType.h"
+#include <c10/core/Scalar.h>
+#include <c10/core/ScalarType.h>
 #include "ATen/core/SparseTensorRef.h"
-#include "ATen/core/Storage.h"
+#include "c10/core/Storage.h"
 #include "ATen/core/TensorAccessor.h"
 #include "ATen/core/TensorImpl.h"
 #include "ATen/core/UndefinedTensorImpl.h"
-#include "c10/util/Exception.h"
-#include "c10/util/Optional.h"
+#include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 
 namespace at {
 struct Generator;
@@ -178,6 +178,9 @@ public:
   /// Returns if a `Tensor` has CUDA backend.
   bool is_cuda() const;
 
+  /// Returns if a `Tensor` has HIP backend.
+  bool is_hip() const;
+
   /// Returns if a `Tensor` has sparse backend.
   bool is_sparse() const;
 
@@ -234,6 +237,7 @@ public:
 
   Tensor cpu() const;
   Tensor cuda() const;
+  Tensor hip() const;
 
   // ~~~~~ Autograd API ~~~~~
 

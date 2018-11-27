@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ATen/core/Tensor.h"
-#include "ATen/core/Scalar.h"
+#include <c10/core/Scalar.h>
 #include "ATen/core/SparseTensorRef.h"
 #include "ATen/core/Type.h"
 #include "ATen/core/TensorOptions.h"
@@ -20,6 +20,10 @@ inline Tensor Tensor::cpu() const {
 
 inline Tensor Tensor::cuda() const {
   return toType(type().cuda());
+}
+
+inline Tensor Tensor::hip() const {
+  return toType(type().hip());
 }
 
 inline Tensor & Tensor::copy_(const Tensor & src, bool non_blocking) {
@@ -1276,6 +1280,15 @@ inline bool is_cuda(Tensor self) {
   return self.is_cuda();
 }
 
+inline bool Tensor::is_hip() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->is_hip();
+}
+
+inline bool is_hip(Tensor self) {
+  return self.is_hip();
+}
+
 inline bool Tensor::is_sparse() const {
   // NB: this is not a native function to avoid dispatching overhead.
   return impl_->is_sparse();
@@ -1293,7 +1306,7 @@ inline bool is_sparse(Tensor self) {
         "expected scalar type ",                 \
         #name,                                   \
         " but found ",                           \
-        at::toString(type().scalarType()));      \
+        c10::toString(type().scalarType()));     \
     return static_cast<T*>(this->data_ptr());    \
   }
 

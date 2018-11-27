@@ -223,11 +223,6 @@ void initPythonIRBindings(PyObject * module_) {
       g.prettyPrint(oss);
       return oss.str();
     })
-    .def("python_print", [](Graph &g) {
-      std::ostringstream oss;
-      std::vector<at::Tensor> constants = PythonPrint(oss, g, true);
-      return std::make_pair(oss.str(), std::move(constants));
-    })
     .GS(createFusionGroup)
     .def("createClone",[](Graph & g, Node * n, py::object fn) {
       return g.createClone(n, [&](Value * e) {

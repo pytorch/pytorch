@@ -90,4 +90,21 @@ class GatherDNNLowPOp final : public GatherOp<CPUContext> {
   bool arguments_parsed_{false};
 }; // class GatherDNNLowPOp
 
+namespace internal {
+
+template <typename T, bool ReluFused>
+void ElementWiseSumAVX2(
+    const T* input0,
+    const T* input1,
+    T* output,
+    int len,
+    float a_scale,
+    int32_t a_zero_point,
+    float b_scale,
+    int32_t b_zero_point,
+    float c_scale,
+    int32_t c_zero_points);
+
+}
+
 } // namespace caffe2

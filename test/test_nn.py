@@ -2955,6 +2955,27 @@ class TestNN(NNTestCase):
     def test_max_pool_nan(self, dtype=torch.float):
         self._test_max_pool_nan(self, device="cpu")
 
+    @staticmethod
+    def _test_pool_large_size(self, device, dtype=torch.float):
+        for op in ('max', 'avg'):
+            for num_dim in [1, 2, 3]:
+                fn_name = '{}_pool{}d'.format(op, num_dim)
+                fn = getattr(F, fn_name)
+                # 16777217 is the smallest integer not expressible in float32
+                x = torch.ones([1, 1, 16777217] + (num_dim - 1) * [1],
+                               device=device, dtype=dtype)
+                res = fn(x, 1, stride=1, padding=0)
+                # check if the output shape was still computed correctly
+                self.assertEqual(x.shape[2], res.shape[2])
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @repeat_test_for_types(ALL_TENSORTYPES)
+    def test_pool_large_size_cuda(self, dtype=torch.float):
+        self._test_pool_large_size(self, device="cuda", dtype=dtype)
+
+    def test_pool_large_size(self, dtype=torch.float):
+        self._test_pool_large_size(self, device="cpu")
+
     def _test_scatter(self, tensor):
         x = tensor.detach().requires_grad_()
         result = dp.scatter(x, (0, 1))

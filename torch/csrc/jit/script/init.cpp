@@ -14,6 +14,7 @@
 #include "torch/csrc/jit/script/parser.h"
 #include "torch/csrc/jit/import_method.h"
 #include "torch/csrc/jit/hooks_for_testing.h"
+#include "torch/csrc/jit/passes/python_print.h"
 
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 
@@ -469,6 +470,7 @@ void initJitScriptBindings(PyObject* module) {
           ++defs_it;
           ++defaults_it;
         }
+        didFinishEmitModule(m);
       })
       .def("_get_method",
       [](Module& self, const std::string& name) -> const Method& {
@@ -538,7 +540,8 @@ void initJitScriptBindings(PyObject* module) {
         const std::string& name,
         py::function func,
         py::tuple input_tuple,
-        py::function var_lookup_fn) {
+        py::function var_lookup_fn,
+        bool force_outplace) {
           // prereq: Module's buffers and parameters are unique
           // this was ensured in python before calling this function
           std::vector<at::Tensor*> parameters;
@@ -547,7 +550,8 @@ void initJitScriptBindings(PyObject* module) {
           for(at::Tensor* param : parameters) {
             inputs.emplace_back(*param);
           }
-          auto graph = tracer::createGraphByTracing(func, inputs, var_lookup_fn, input_tuple.size());
+          auto graph = tracer::createGraphByTracing(
+              func, inputs, var_lookup_fn, force_outplace, input_tuple.size());
           self->create_method(name, std::move(graph), std::move(parameters));
           didFinishEmitModule(self);
       })
@@ -611,7 +615,12 @@ void initJitScriptBindings(PyObject* module) {
       return self.graph_for(createStackForSchema(self.getSchema(), tuple_slice(std::move(args), 1), std::move(kwargs)));
     })
     .def("debug_disable_autodiff_subgraph_inlining", &Method::debugDisableAutodiffSubgraphInlining)
-    .def("pretty_print_schema", &Method::pretty_print_schema);
+    .def("pretty_print_schema", &Method::pretty_print_schema)
+    .def("python_print", [](Method &m) {
+      std::ostringstream oss;
+      std::vector<at::Tensor> constants = PythonPrint(oss, m, true);
+      return std::make_pair(oss.str(), std::move(constants));
+    });
 
   m.def("_jit_script_compile", [](std::shared_ptr<Module> mod, const Def &def, ResolutionCallback rcb, FunctionDefaults defaults) {
     auto def_f = def.withName("forward");
@@ -619,6 +628,7 @@ void initJitScriptBindings(PyObject* module) {
     auto& method = mod->get_method("forward");
     method.setSchema(getSchemaWithNameAndDefaults(
         def.range(), method.getSchema(), def.name().name(), defaults));
+    didFinishEmitModule(mod);
     return mod;
   });
 
