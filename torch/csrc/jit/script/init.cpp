@@ -104,7 +104,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   }
 
   // call it like a function, e.g. `outputs = this(inputs)`
-  virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & m, at::ArrayRef<NamedValue> inputs_, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
+  std::shared_ptr<SugaredValue> call(SourceRange loc, Method & m, at::ArrayRef<NamedValue> inputs_, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
     auto inputs = toValues(*m.graph(), inputs_);
     auto schema = getSchema(inputs.size(), n_binders);
 
@@ -130,7 +130,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     return std::make_shared<SimpleValue>(packOutputs(*m.graph(), outputs));
   }
 
-  virtual std::string kind() const override {
+  std::string kind() const override {
     std::stringstream ss;
     ss << "python value of type '" << typeString(self) << "'";
     return ss.str();
@@ -203,12 +203,12 @@ struct ModuleValue : public SugaredValue {
   ModuleValue(std::shared_ptr<Module> module)
   : module(std::move(module)) {}
 
-  virtual std::string kind() const override {
+  std::string kind() const override {
     return "module";
   }
 
   // select an attribute on it, e.g. `this.field`
-  virtual std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override {
+  std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override {
     if(NamedModule* v = module->find_module(field)) {
       return std::make_shared<ModuleValue>(v->module);
     } else if(Method* v = module->find_method(field)) {
@@ -232,11 +232,11 @@ struct ModuleValue : public SugaredValue {
   }
 
   // call module.forward
-  virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<NamedValue> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
+  std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<NamedValue> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
     return attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, n_binders);
   }
 
-  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(
+  std::vector<std::shared_ptr<SugaredValue>> asTuple(
       SourceRange loc,
       Method& m,
       c10::optional<size_t> size_hint = {}) override {
