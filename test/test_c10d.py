@@ -1135,7 +1135,7 @@ class ProcessGroupNCCLTest(TestCase):
             works.append(work)
 
         # Barrier will ensure that all previous work is completed
-        pg.barrier()
+        pg.barrier().wait()
 
         for i in range(2, self.num_gpus + 1):
             for j in range(i):
