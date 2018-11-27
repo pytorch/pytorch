@@ -12,6 +12,7 @@
 
 namespace at {
 class Tensor;
+class Type;
 }
 
 namespace c10 {
@@ -86,7 +87,7 @@ private:
     //    error: designator may not specify a non-POD subobject
     double z[2];
   } v;
-  friend struct Type;
+  friend struct at::Type;
 };
 
 // define the scalar.to<int64_t>() specializations

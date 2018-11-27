@@ -456,7 +456,9 @@ SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor
 }
 
 // --------------------------------------------------------------------
-// addmm(Tensor, SparseTensorRef, Tensor, Scalar, Scalar)  [broadcasts]
+// addmm(D1, S, D2, beta, alpha) -> D  [broadcasts]
+//
+// D = beta * D1 + alpha * mm(S, D2)
 // --------------------------------------------------------------------
 
 // NB: OMP pragmas have to get their own functions; can't put them in lambdas
@@ -584,6 +586,17 @@ Tensor& s_addmm_sparse_dense_cpu_(
   return s_addmm_out_sparse_dense_cpu(t, t, sparse, dense, beta, alpha);
 }
 
+Tensor _sparse_addmm(
+  const Tensor& t,
+  const SparseTensor& sparse,
+  const Tensor& dense,
+  Scalar beta,
+  Scalar alpha
+) {
+  AT_CHECK(sparse.is_coalesced(), "_sparse_addmm doesn't support uncoalesced SparseTensor");
+  return at::s_native_addmm(t, sparse, dense, beta, alpha);
+}
+
 
 // --------------------------------------------------------------------
 // hspmm(SparseTensor mat1, Tensor mat2)
@@ -665,7 +678,9 @@ SparseTensor hspmm_sparse_cpu(const SparseTensor& sparse, const Tensor& dense) {
 }
 
 // --------------------------------------------------------------------
-// sspaddmm
+// sspaddmm(S1, S2, D, beta, alpha) -> S
+//
+// S = beta * S1 + alpha * mm(S2, D)
 // --------------------------------------------------------------------
 
 SparseTensor& _sspaddmm_out_cpu(
