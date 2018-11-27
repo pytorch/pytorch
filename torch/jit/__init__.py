@@ -3,6 +3,7 @@ from torch import Tensor
 from torch.autograd import Variable, function
 from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
 from torch.jit.frontend import get_jit_ast, get_default_args
+import torch.backends.cudnn as cudnn
 import torch.jit.annotations
 from torch._six import raise_from, with_metaclass, get_function_from_type
 from .._jit_internal import createResolutionCallback, _compiled_weak_fns, \
@@ -1366,6 +1367,7 @@ def _get_builtin_table():
     _builtin_table[id(_quadruple)] = "aten::_quadruple"
     _builtin_table[id(_list_with_default)] = "aten::list_with_default"
     _builtin_table[id(_unwrap_optional)] = "aten::_unwrap_optional"
+    _builtin_table[id(cudnn.is_acceptable)] = "aten::cudnn_is_acceptable"
 
     return _builtin_table
 

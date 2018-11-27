@@ -3,7 +3,7 @@
 
 namespace at { namespace native {
 
-at::Tensor linspace_or_neg_one(const Tensor& grid, int64_t val) {
+at::Tensor linspace_from_neg_one(const Tensor& grid, int64_t val) {
   if (val > 1) {
     return at::linspace(-1, 1, val, grid.options());
   } else {
@@ -14,8 +14,8 @@ at::Tensor linspace_or_neg_one(const Tensor& grid, int64_t val) {
 Tensor make_base_grid_4D(const Tensor& theta, int64_t N, int64_t C, int64_t H, int64_t W) {
   auto base_grid = at::empty({N, H, W, 3}, theta.options());
 
-  base_grid.select(-1, 0) = linspace_or_neg_one(theta, W);
-  base_grid.select(-1, 1) = linspace_or_neg_one(theta, H).unsqueeze_(-1);
+  base_grid.select(-1, 0) = linspace_from_neg_one(theta, W);
+  base_grid.select(-1, 1) = linspace_from_neg_one(theta, H).unsqueeze_(-1);
   base_grid.select(-1, 2) = 1;
   return base_grid;
 
@@ -24,9 +24,9 @@ Tensor make_base_grid_4D(const Tensor& theta, int64_t N, int64_t C, int64_t H, i
 Tensor make_base_grid_5D(const Tensor& theta, int64_t N, int64_t C, int64_t D, int64_t H, int64_t W) {
   auto base_grid = at::empty({N, D, H, W, 4}, theta.options());
 
-  base_grid.select(-1, 0) = linspace_or_neg_one(theta, W);
-  base_grid.select(-1, 1) = linspace_or_neg_one(theta, H).unsqueeze_(-1);
-  base_grid.select(-1, 2) = linspace_or_neg_one(theta, D).unsqueeze_(-1).unsqueeze_(-1);
+  base_grid.select(-1, 0) = linspace_from_neg_one(theta, W);
+  base_grid.select(-1, 1) = linspace_from_neg_one(theta, H).unsqueeze_(-1);
+  base_grid.select(-1, 2) = linspace_from_neg_one(theta, D).unsqueeze_(-1).unsqueeze_(-1);
   base_grid.select(-1, 3) = 1;
 
   return base_grid;
@@ -44,7 +44,7 @@ Tensor affine_grid_generator_4D(const Tensor& theta, int64_t N, int64_t C, int64
 Tensor affine_grid_generator_5D(const Tensor& theta, int64_t N, int64_t C, int64_t D, int64_t H, int64_t W) {
 
   Tensor base_grid = make_base_grid_5D(theta, N, C, D, H, W);
-  auto grid = at::bmm(base_grid.view({N, D * H * W, 4}), theta.transpose(1, 2));
+  auto grid = base_grid.view({N, D * H * W, 4}).bmm(theta.transpose(1, 2));
   grid = grid.view({N, D, H, W, 3});
 
   return grid;
@@ -78,20 +78,20 @@ Tensor affine_grid_generator_5D_backward(const Tensor& grad_grid,
   auto base_grid = make_base_grid_5D(grad_grid, N, C, D, H, W);
   IntList exp_size = {N, D, H, W, 3};
   AT_ASSERT(grad_grid.sizes() == exp_size);
-  auto grad_theta = at::bmm(base_grid.view({N, D * H * W, 4}).transpose(1, 2), grad_grid.view({N, D * H * W, 3}));
+  auto grad_theta = base_grid.view({N, D * H * W, 4}).transpose(1, 2).bmm(grad_grid.view({N, D * H * W, 3}));
   grad_theta = grad_theta.transpose(1, 2);
 
   return grad_theta;
 }
 
 Tensor affine_grid_generator_backward(const Tensor& grad, IntList size) {
-  Tensor t;
+  AT_CHECK(size.size() == 4 || size.size() == 5,
+           "AffineGridGenerator needs 4d (spatial) or 5d (volumetric) inputs.");
   if (size.size() == 4) {
-    t = affine_grid_generator_4D_backward(grad, size[0], size[1], size[2], size[3]);
+    return affine_grid_generator_4D_backward(grad, size[0], size[1], size[2], size[3]);
   } else {
-    t = affine_grid_generator_5D_backward(grad, size[0], size[1], size[2], size[3], size[4]);
+    return affine_grid_generator_5D_backward(grad, size[0], size[1], size[2], size[3], size[4]);
   }
-  return t;
 }
 
 }}  // namespace at::native
