@@ -204,7 +204,7 @@ class ProcessGroupGloo : public ProcessGroup {
   uint32_t nextTag();
 
   // Entrypoint for worker threads.
-  void runLoop(int threadIndex);
+  void runLoop(int workerIndex);
 
   // Queue work to run on worker thread.
   void enqueue(std::shared_ptr<AsyncWork> work);

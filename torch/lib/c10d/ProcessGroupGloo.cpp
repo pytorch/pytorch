@@ -222,8 +222,13 @@ ProcessGroupGloo::ProcessGroupGloo(
     contexts_.push_back(std::move(context));
   }
 
-  threads_.resize(options.threads);
+  // Every worker thread stores the AsyncWork object it's currently
+  // working on in the workInProgress_ vector. It must have size equal
+  // to the number of workers such that they can simply index into it
+  // using the worker index they are started with.
   workInProgress_.resize(options.threads);
+
+  threads_.resize(options.threads);
   for (size_t i = 0; i < threads_.size(); i++) {
     threads_[i] = std::thread(&ProcessGroupGloo::runLoop, this, i);
   }
@@ -252,7 +257,7 @@ uint32_t ProcessGroupGloo::nextTag() {
   return collectiveCounter_++;
 }
 
-void ProcessGroupGloo::runLoop(int threadIndex) {
+void ProcessGroupGloo::runLoop(int workerIndex) {
   std::unique_lock<std::mutex> lock(workMutex_);
 
   while (!stop_) {
@@ -265,11 +270,11 @@ void ProcessGroupGloo::runLoop(int threadIndex) {
     workQueue_.pop_front();
     workConsumeCV_.notify_one();
 
-    workInProgress_[threadIndex] = work;
+    workInProgress_[workerIndex] = work;
     lock.unlock();
     AsyncWork::execute(std::move(work));
     lock.lock();
-    workInProgress_[threadIndex] = nullptr;
+    workInProgress_[workerIndex] = nullptr;
   }
 }
 
