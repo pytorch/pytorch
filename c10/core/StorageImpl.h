@@ -12,7 +12,7 @@ struct Type;
 
 namespace c10 {
 
-struct CAFFE2_API StorageImpl final : public c10::intrusive_ptr_target {
+struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
  public:
   StorageImpl(
       caffe2::TypeMeta data_type,
