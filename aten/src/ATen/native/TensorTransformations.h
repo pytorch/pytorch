@@ -43,7 +43,7 @@ static inline Tensor roll_common(const Tensor& self, IntList shifts, IntList dim
     shifts.size() == dims.size(),
     "shifts and dimensions must align. shifts: ", shifts.size(), ", dims:", dims.size()
   );
-  AT_CHECK(dims.size() > 1, "this code should only be reached for handling multi-dim rolling" );
+  AT_ASSERT(dims.size() > 1);
   auto tail_shifts = shifts.slice(1);
   auto tail_dims = dims.slice(1);
   auto first_dim_rolled = roll(self, shifts[0], dims[0]);
