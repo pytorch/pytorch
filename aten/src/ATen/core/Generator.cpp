@@ -23,12 +23,11 @@ static std::vector<std::unique_ptr<Generator>> default_gens_cuda;
 */
 static void initGlobalCPUGeneratorState(){
   GeneratorState default_gen_state_cpu;
-  default_gen_state_cpu.philox_offset_per_thread = 0;
+  default_gen_state_cpu.cuda_philox_offset_per_thread = 0;
   default_gen_state_cpu.device = -1;
   default_gen_state_cpu.device_type = at::kCPU;
   default_gen_state_cpu.current_seed = 67280421310721;
-  std::seed_seq seq({67280421310721});
-  default_gen_state_cpu.cpu_engine = std::mt19937_64(seq);
+  default_gen_state_cpu.cpu_engine = at::Philox4_32_10(67280421310721);
   default_gen_cpu = c10::guts::make_unique<Generator>(default_gen_state_cpu);
 }
 
@@ -56,7 +55,7 @@ static void initGlobalCUDAGeneratorState(int64_t device = -1){
   // Switches to the requested device so engines are properly associated
   // with it.
   GeneratorState default_gen_state_cuda;
-  default_gen_state_cuda.philox_offset_per_thread = 0;
+  default_gen_state_cuda.cuda_philox_offset_per_thread = 0;
   default_gen_state_cuda.device = device;
   default_gen_state_cuda.device_type = at::kCUDA;
   default_gen_state_cuda.current_seed = 67280421310721; // keep cpu/cuda default seed same;
@@ -101,13 +100,12 @@ GeneratorState createGenerator(DeviceType device_type, int64_t device) {
     #endif
   }
   GeneratorState new_gen_state;
-  new_gen_state.philox_offset_per_thread = 0;
+  new_gen_state.cuda_philox_offset_per_thread = 0;
   new_gen_state.device = device;
   new_gen_state.device_type = device_type;
   new_gen_state.current_seed = 67280421310721;
   if(device_type == kCPU){
-    std::seed_seq seq({67280421310721});
-    new_gen_state.cpu_engine = std::mt19937_64(seq);
+    new_gen_state.cpu_engine = at::Philox4_32_10(67280421310721);
   }
   return new_gen_state;
 }
@@ -162,18 +160,16 @@ uint64_t Generator::getCurrentSeed() {
 void Generator::setCurrentSeed(uint64_t seed) {
   std::lock_guard<std::mutex> lock(this->mutex);
   this->state_->current_seed = seed;
-  this->state_->philox_offset_per_thread = 0;
+  this->state_->cuda_philox_offset_per_thread = 0;
   if(this->state_->device_type == at::kCPU) {
-    // Check this out: http://www.pcg-random.org/posts/cpp-seeding-surprises.html
-    std::seed_seq seq({seed});
-    this->state_->cpu_engine.seed(seq);
+    this->state_->cpu_engine = at::Philox4_32_10(seed);
   }
 }
 
 /* 
 * Gets the CPU engine. Throws error for other engines
 */
-std::mt19937_64& Generator::getCPUEngine() {
+at::Philox4_32_10& Generator::getCPUEngine() {
   std::lock_guard<std::mutex> lock(this->mutex);
   if(this->state_->device_type != at::kCPU) {
     AT_ERROR("getCPUEngine() function called for this Generator. it is only valid in CPU Generator");
@@ -184,24 +180,12 @@ std::mt19937_64& Generator::getCPUEngine() {
 /* 
 * Sets the CPU engine. Throws error for other engines
 */
-void Generator::setCPUEngine(std::mt19937_64 engine) {
+void Generator::setCPUEngine(at::Philox4_32_10 engine) {
   std::lock_guard<std::mutex> lock(this->mutex);
   if(this->state_->device_type != at::kCPU) {
-    AT_ERROR("setCPUEngine(std::mt19937_64 engine) Invalid function called for this Generator. It is only valid in CPU Generator");
+    AT_ERROR("setCPUEngine(at::Philox4_32_10 engine) Invalid function called for this Generator. It is only valid in CPU Generator");
   }
-  this->state_->cpu_engine = std::mt19937_64(engine);
-}
-
-/* 
-* Gets a 64 bit random number.
-* Throws error for other engines
-*/
-uint64_t Generator::random64() {
-  std::lock_guard<std::mutex> lock(this->mutex);
-  if(this->state_->device_type != at::kCPU) {
-    AT_ERROR("random64() function called for this Generator. It is only valid in CPU Generator");
-  }
-  return this->state_->cpu_engine();
+  this->state_->cpu_engine = engine;
 }
 
 /* 
@@ -277,15 +261,15 @@ std::pair<uint64_t, uint64_t> Generator::incrementPhiloxOffset(uint64_t total_el
   // on the single formula.
   uint64_t numel_per_thread = (total_elements - 1)/(block_size * grid_size * 4) + 1;
   uint64_t increment = numel_per_thread * num_engine_calls;
-  // we do a fetch_add such that, the philox_offset_per_thread is in a running state.
+  // we do a fetch_add such that, the cuda_philox_offset_per_thread is in a running state.
   // i.e. if you want to fork the philox RNG, you should create a new generator instance
-  // philox_offset_per_thread is the only way we are exposing the state of the engine from the cuda
+  // cuda_philox_offset_per_thread is the only way we are exposing the state of the engine from the cuda
   // generator.
   // Each kernel using philox has to sensibly increment offset for future users of philox. So it gets the 
   // "old" value for itself (before add), and tells subsequent users which offset they should use, 
   // since only the kernel knows how many randoms it intends to generate.
-  uint64_t offset = this->state_->philox_offset_per_thread;
-  this->state_->philox_offset_per_thread += increment;
+  uint64_t offset = this->state_->cuda_philox_offset_per_thread;
+  this->state_->cuda_philox_offset_per_thread += increment;
   return std::make_pair(this->state_->current_seed, offset);
 }
 

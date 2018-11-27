@@ -2,7 +2,7 @@
 
 #include "ATen/ATen.h"
 #include "ATen/cuda/CUDAContext.h"
-#include "ATen/cuda/PhiloxRNGEngine.h"
+#include "ATen/core/PhiloxRNGEngine.h"
 #include "cuda.h"
 #include "cuda_fp16.h"
 #include "cuda_runtime.h"
@@ -18,8 +18,8 @@ using namespace at;
 
 __global__ void testEngineReproducibility(){
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  at::cuda::Philox4_32_10 engine1(0, idx, 4);
-  at::cuda::Philox4_32_10 engine2(0, idx, 4);
+  at::Philox4_32_10 engine1(0, idx, 4);
+  at::Philox4_32_10 engine2(0, idx, 4);
   assert(engine1() == engine2());
 }
 
@@ -40,11 +40,11 @@ TEST(CUDAGenerator, TestPhiloxEngineReproducibility) {
 }
 
 __global__ void testEngineOffset1(){
-  at::cuda::Philox4_32_10 engine1(123, 1, 0);
+  at::Philox4_32_10 engine1(123, 1, 0);
   // Note: offset is a multiple of 4.
   // So if you want to skip 8 values, offset would
   // be 2, since 2*4=8.
-  at::cuda::Philox4_32_10 engine2(123, 1, 2);
+  at::Philox4_32_10 engine2(123, 1, 2);
   for(int i = 0; i < 8; i++){
     // Note: instead of using the engine() call 8 times
     // we could have achieved the same functionality by
@@ -74,8 +74,8 @@ TEST(CUDAGenerator, TestPhiloxEngineOffset1) {
 
 __global__ void testEngineOffset2(){
   unsigned long long increment_val = ::ldexp(1.0, 64);
-  at::cuda::Philox4_32_10 engine1(123, 0, increment_val);
-  at::cuda::Philox4_32_10 engine2(123, increment_val, increment_val);
+  at::Philox4_32_10 engine1(123, 0, increment_val);
+  at::Philox4_32_10 engine2(123, increment_val, increment_val);
   
   engine2.incr_n(increment_val);
   engine2.incr();
@@ -101,8 +101,8 @@ TEST(CUDAGenerator, TestPhiloxEngineOffset2) {
 
 __global__ void testEngineOffset3(){
   unsigned long long increment_val = ::ldexp(1.0, 64);
-  at::cuda::Philox4_32_10 engine1(123, 0, increment_val);
-  at::cuda::Philox4_32_10 engine2(123, 1, 0);
+  at::Philox4_32_10 engine1(123, 0, increment_val);
+  at::Philox4_32_10 engine2(123, 1, 0);
   engine1.incr();
   assert(engine1() == engine2());
 }
@@ -125,8 +125,8 @@ TEST(CUDAGenerator, TestPhiloxEngineOffset3) {
 }
 
 __global__ void testEngineThreadIndex(){
-  at::cuda::Philox4_32_10 engine1(123456, 0, 4);
-  at::cuda::Philox4_32_10 engine2(123456, 1, 4);
+  at::Philox4_32_10 engine1(123456, 0, 4);
+  at::Philox4_32_10 engine2(123456, 1, 4);
   assert(engine1() != engine2());
 }
 
@@ -194,30 +194,31 @@ TEST(CUDAGenerator, TestSeeding) {
 TEST(CUDAGenerator, TestCallingCPUGeneratorMethod) {
   auto& default_gen = at::globalContext().getDefaultGenerator(at::kCUDA);
   ASSERT_THROW(default_gen.getCPUEngine(), c10::Error);
-  std::mt19937_64 engine;
+  at::Philox4_32_10 engine;
   ASSERT_THROW(default_gen.setCPUEngine(engine), c10::Error);
-  ASSERT_THROW(default_gen.random64(), c10::Error);
 }
 
 template <typename scalar_t>
 __global__ void testIncrementPhiloxOffset1(scalar_t* ret, std::pair<uint64_t, uint64_t> seeds){
   int64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-  at::cuda::Philox4_32_10 engine(seeds.first, idx, seeds.second);
-  ret[idx] = at::cuda::standard_uniform_distribution(engine);
+  at::Philox4_32_10 engine(seeds.first, idx, seeds.second);
+  at::uniform_real_distribution<scalar_t> standard_uniform(0,1);
+  ret[idx] = standard_uniform(engine);
 }
 
 template <typename scalar_t>
 __global__ void testIncrementPhiloxOffset1Assert(scalar_t* ret, uint64_t offset){
   for(int i = 0; i < 512; i++){
-    at::cuda::Philox4_32_10 engine(123, i, offset);
-    assert(ret[i] == at::cuda::standard_uniform_distribution(engine));
+    at::Philox4_32_10 engine(123, i, offset);
+    at::uniform_real_distribution<scalar_t> standard_uniform(0,1);
+    assert(ret[i] == standard_uniform(engine));
   }
 }
 
 TEST(CUDAGenerator, TestIncrementPhiloxOffset1) {
   // Test Description:
   //   Tests that when yielding one element per thread and one engine call, 
-  //   philox_offset_per_thread increments by 1. Also demonstrates the running state of
+  //   cuda_philox_offset_per_thread increments by 1. Also demonstrates the running state of
   //   a generator.
   //   Launch 32 blocks of 16 threads processing 512 elements.
   //   Then manually produce those elements in a single thread and assert
@@ -238,30 +239,30 @@ TEST(CUDAGenerator, TestIncrementPhiloxOffset1) {
   auto seeds = gen.incrementPhiloxOffset(numel, grid.x, block_size, 1);
   // assert starting offset is 0 and current offset is 1 (1 element per thread and 1 engine call)
   ASSERT_EQ(seeds.second, 0);
-  ASSERT_EQ(gen.getState()->philox_offset_per_thread, 1);
+  ASSERT_EQ(gen.getState()->cuda_philox_offset_per_thread, 1);
 
   // get a tensor filled with uniformly distributed samples
-  AT_DISPATCH_ALL_TYPES_AND_HALF(ret.type(), "TestIncrementPhiloxOffset1", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.type(), "TestIncrementPhiloxOffset1", [&] {
     testIncrementPhiloxOffset1<<<grid, block_size>>>(ret.data<scalar_t>(), seeds);
   });
 
   // check if the samples are correctly produced
-  AT_DISPATCH_ALL_TYPES_AND_HALF(ret.type(), "TestIncrementPhiloxOffset1", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.type(), "TestIncrementPhiloxOffset1", [&] {
     testIncrementPhiloxOffset1Assert<<<1, 1>>>(ret.data<scalar_t>(), 0);
   });
 
-  // now repeat the same thing and notice the nature of philox_offset_per_thread
+  // now repeat the same thing and notice the nature of cuda_philox_offset_per_thread
   seeds = gen.incrementPhiloxOffset(numel, grid.x, block_size, 1);
   ASSERT_EQ(seeds.second, 1); // see how we are using 1 increment by the previous kernel launch
-  ASSERT_EQ(gen.getState()->philox_offset_per_thread, 2); // 2 is for the next kernel launch
+  ASSERT_EQ(gen.getState()->cuda_philox_offset_per_thread, 2); // 2 is for the next kernel launch
 
   // get a tensor filled with uniformly distributed samples
-  AT_DISPATCH_ALL_TYPES_AND_HALF(ret.type(), "TestIncrementPhiloxOffset1", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.type(), "TestIncrementPhiloxOffset1", [&] {
     testIncrementPhiloxOffset1<<<grid, block_size>>>(ret.data<scalar_t>(), seeds);
   });
 
   // check if the samples are correctly produced
-  AT_DISPATCH_ALL_TYPES_AND_HALF(ret.type(), "TestIncrementPhiloxOffset1", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.type(), "TestIncrementPhiloxOffset1", [&] {
     testIncrementPhiloxOffset1Assert<<<1, 1>>>(ret.data<scalar_t>(), 1);
   });
   
@@ -274,10 +275,11 @@ TEST(CUDAGenerator, TestIncrementPhiloxOffset1) {
 template <typename scalar_t>
 __global__ void testIncrementPhiloxOffset2(scalar_t* ret, std::pair<uint64_t, uint64_t> seeds){
   int64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-  at::cuda::Philox4_32_10 engine(seeds.first, idx, seeds.second);
+  at::Philox4_32_10 engine(seeds.first, idx, seeds.second);
   for(int ii = 0; ii < 4; ii+=2){
     // demonstrating normal returns two values at once
-    float2 result = at::cuda::normal_distribution(engine);
+    at::normal_distribution<float> normal(0,1);
+    float2 result = normal(engine);
     int li = idx + blockDim.x * gridDim.x * ii;
     ret[li] = result.x;
     li = idx + blockDim.x * gridDim.x * (ii+1);
@@ -288,10 +290,11 @@ __global__ void testIncrementPhiloxOffset2(scalar_t* ret, std::pair<uint64_t, ui
 template <typename scalar_t>
 __global__ void testIncrementPhiloxOffset2Assert(scalar_t* ret, uint64_t offset){
   for(int i = 0; i < 512; i++){
-    at::cuda::Philox4_32_10 engine(123, i, offset);
+    at::Philox4_32_10 engine(123, i, offset);
     for(int ii = 0; ii < 4; ii+=2){
       // demonstrating normal returns two values at once
-      float2 result = at::cuda::normal_distribution(engine);
+      at::normal_distribution<float> normal(0,1);
+      float2 result = normal(engine);
       int li = i + 16 * 32 * ii;
       assert(ret[li] == result.x);
       li = i + 16 * 32 * (ii+1);
@@ -303,7 +306,7 @@ __global__ void testIncrementPhiloxOffset2Assert(scalar_t* ret, uint64_t offset)
 TEST(CUDAGenerator, TestIncrementPhiloxOffset2) {
   // Test Description:
   //   Tests that when yielding 4 element per thread with 2 engine calls,
-  //   number of randoms needed is 4*2 = 8 and hence, philox_offset_per_thread increments by 2. 
+  //   number of randoms needed is 4*2 = 8 and hence, cuda_philox_offset_per_thread increments by 2. 
   //   Also demonstrates the running state of a generator.
   //   Launch 32 blocks of 16 threads processing 2048 elements.
   //   Then manually produce those elements in a single thread and assert
@@ -319,30 +322,30 @@ TEST(CUDAGenerator, TestIncrementPhiloxOffset2) {
   auto seeds = gen.incrementPhiloxOffset(numel, grid.x, block_size, 2);
   // assert starting offset is 0 and current offset is 2 (4 element per thread and 2 engine calls)
   ASSERT_EQ(seeds.second, 0);
-  ASSERT_EQ(gen.getState()->philox_offset_per_thread, 2);
+  ASSERT_EQ(gen.getState()->cuda_philox_offset_per_thread, 2);
 
   // get a tensor filled with normally distributed samples
-  AT_DISPATCH_ALL_TYPES_AND_HALF(ret.type(), "TestIncrementPhiloxOffset2", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.type(), "TestIncrementPhiloxOffset2", [&] {
     testIncrementPhiloxOffset2<<<grid, block_size>>>(ret.data<scalar_t>(), seeds);
   });
 
   // check if the samples are correctly produced
-  AT_DISPATCH_ALL_TYPES_AND_HALF(ret.type(), "TestIncrementPhiloxOffset2", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.type(), "TestIncrementPhiloxOffset2", [&] {
     testIncrementPhiloxOffset2Assert<<<1, 1>>>(ret.data<scalar_t>(), 0);
   });
 
-  // now repeat the same thing and notice the nature of philox_offset_per_thread
+  // now repeat the same thing and notice the nature of cuda_philox_offset_per_thread
   seeds = gen.incrementPhiloxOffset(numel, grid.x, block_size, 2);
   ASSERT_EQ(seeds.second, 2); // see how we are using 2 increment by the previous kernel launch
-  ASSERT_EQ(gen.getState()->philox_offset_per_thread, 4); // 4 is for the next kernel launch
+  ASSERT_EQ(gen.getState()->cuda_philox_offset_per_thread, 4); // 4 is for the next kernel launch
 
   // get a tensor filled with normally distributed samples
-  AT_DISPATCH_ALL_TYPES_AND_HALF(ret.type(), "TestIncrementPhiloxOffset2", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.type(), "TestIncrementPhiloxOffset2", [&] {
     testIncrementPhiloxOffset2<<<grid, block_size>>>(ret.data<scalar_t>(), seeds);
   });
 
   // check if the samples are correctly produced
-  AT_DISPATCH_ALL_TYPES_AND_HALF(ret.type(), "TestIncrementPhiloxOffset2", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.type(), "TestIncrementPhiloxOffset2", [&] {
     testIncrementPhiloxOffset2Assert<<<1, 1>>>(ret.data<scalar_t>(), 2);
   });
 

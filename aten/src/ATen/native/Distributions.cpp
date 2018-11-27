@@ -51,7 +51,8 @@ namespace {
 
 
 int64_t sample_poisson(double lambda, at::Generator* generator) {
-  std::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
+  at::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
+  auto& cpu_engine = generator->getCPUEngine();
   if (lambda >= 10) {
     // transformed rejection method, (Hoermann, 1993)
     int64_t k;
@@ -65,8 +66,8 @@ int64_t sample_poisson(double lambda, at::Generator* generator) {
     vr = 0.9277 - 3.6224 / (b - 2);
 
     while (1) {
-      U = standard_uniform(generator->getCPUEngine()) - 0.5;
-      V = standard_uniform(generator->getCPUEngine());
+      U = standard_uniform(cpu_engine) - 0.5;
+      V = standard_uniform(cpu_engine);
       us = 0.5 - std::fabs(U);
       k = (int64_t)std::floor((2 * a / us + b) * U + lambda + 0.43);
       if ((us >= 0.07) && (V <= vr)) {
@@ -90,7 +91,7 @@ int64_t sample_poisson(double lambda, at::Generator* generator) {
     X = 0;
     prod = 1.0;
     while (1) {
-      U = standard_uniform(generator->getCPUEngine());
+      U = standard_uniform(cpu_engine);
       prod *= U;
       if (prod > enlam) {
         X += 1;
@@ -124,22 +125,23 @@ Tensor& bernoulli_out(Tensor& result, const Tensor& self, Generator* gen) {
 Tensor& bernoulli_tensor_cpu_(Tensor& self, const Tensor& p_, Generator* gen) {
   AT_DISPATCH_ALL_TYPES(self.type(), "bernoulli_tensor_cpu_self_", [&] {
     Generator* generator = detail::checkGeneratorWithDefault(gen, &detail::getDefaultGenerator(kCPU));
+    auto& cpu_engine = generator->getCPUEngine();
     using self_t = scalar_t;
     if (p_.type().scalarType() == kDouble) {
       auto p = std::get<0>(expand_inplace(self, p_.to(kCPU)));
       CPU_tensor_apply2<self_t, double>(
-        self, p, [generator](self_t& ret_val, double& p_val) {
-          std::bernoulli_distribution bernoulli(p_val);
-          ret_val = static_cast<self_t>(bernoulli(generator->getCPUEngine()));
+        self, p, [&cpu_engine](self_t& ret_val, double& p_val) {
+          at::bernoulli_distribution<double> bernoulli(p_val);
+          ret_val = static_cast<self_t>(bernoulli(cpu_engine));
         });
     } else {
       AT_DISPATCH_FLOATING_TYPES(p_.type(), "bernoulli_tensor_cpu_p_", [&] {
         auto p = std::get<0>(expand_inplace(self, p_.to(kCPU)));
         using p_t = scalar_t;
         CPU_tensor_apply2<self_t, p_t>(
-          self, p, [generator](self_t& ret_val, p_t& p_val) {
-            std::bernoulli_distribution bernoulli(p_val);
-            ret_val = static_cast<self_t>(bernoulli(generator->getCPUEngine()));
+          self, p, [&cpu_engine](self_t& ret_val, p_t& p_val) {
+            at::bernoulli_distribution<float> bernoulli(p_val);
+            ret_val = static_cast<self_t>(bernoulli(cpu_engine));
           });
       });
     }
@@ -159,10 +161,11 @@ Tensor& bernoulli_scalar_cpu_(Tensor& self, double p, Generator* gen) {
 #endif
   AT_DISPATCH_ALL_TYPES(self.type(), "bernoulli_scalar_cpu_", [&] {
     Generator* generator = detail::checkGeneratorWithDefault(gen, &detail::getDefaultGenerator(kCPU));
+    auto& cpu_engine = generator->getCPUEngine();
     CPU_tensor_apply1<scalar_t>(
-        self, [generator, p](scalar_t& ret_val) {
-          std::bernoulli_distribution bernoulli(p);
-          ret_val = static_cast<scalar_t>(bernoulli(generator->getCPUEngine()));
+        self, [&cpu_engine, p](scalar_t& ret_val) {
+          at::bernoulli_distribution<double> bernoulli(p);
+          ret_val = static_cast<scalar_t>(bernoulli(cpu_engine));
         });
   });
   return self;
@@ -202,15 +205,16 @@ Tensor _s_gamma_cpu(const Tensor& alpha, Generator *gen) {
   Tensor ret = at::zeros(alpha.sizes(), alpha.type());
   AT_DISPATCH_FLOATING_TYPES(ret.type(), "gamma", [&] {
     Generator* generator = detail::checkGeneratorWithDefault(gen, &detail::getDefaultGenerator(kCPU));
+    auto& cpu_engine = generator->getCPUEngine();
     CPU_tensor_apply2<scalar_t, scalar_t>(ret, alpha,
-      [generator](scalar_t& ret_val, const scalar_t& alpha){
-        BaseSampler<double> standard_uniform([generator] () {
-          std::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
-          return standard_uniform(generator->getCPUEngine());
+      [&cpu_engine](scalar_t& ret_val, const scalar_t& alpha){
+        BaseSampler<double> standard_uniform([&cpu_engine] () {
+          at::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
+          return standard_uniform(cpu_engine);
         });
-        BaseSampler<double> standard_normal([generator] () {
-          std::normal_distribution<double> normal{0.0, 1.0};
-          return normal(generator->getCPUEngine());
+        BaseSampler<double> standard_normal([&cpu_engine] () {
+          at::normal_distribution<double> normal(0.0, 1.0);
+          return normal(cpu_engine).x;
         });
         auto sample = sample_gamma<scalar_t, double>(alpha, standard_uniform, standard_normal);
         ret_val = std::max(std::numeric_limits<scalar_t>::min(), (scalar_t) sample);

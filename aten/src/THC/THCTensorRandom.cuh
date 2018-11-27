@@ -4,7 +4,7 @@
 #include "THCNumerics.cuh"
 #include "THCReduceApplyUtils.cuh"
 #include "THCTensorMathReduce.cuh"
-#include "ATen/cuda/PhiloxRNGEngine.h"
+#include "ATen/core/PhiloxRNGEngine.h"
 
 #define MAX_NUM_BLOCKS 200
 #define BLOCK_SIZE 256
@@ -12,48 +12,44 @@
 template <typename T>
 __global__ void generateLogNormal(std::pair<uint64_t, uint64_t> seeds, int size, T *result, double mean, double stddev)
 {
-  int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;
-  at::cuda::Philox4_32_10 engine(seeds.first, idx, seeds.second);
-  int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;
-  float2 normal_vals = make_float2(0,0);
-  int cached_normal = 0;
-  for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {
-    if(cached_normal){
-      cached_normal = 0;
-      if (i < size) {
-        result[i] = ScalarConvert<float, T>::to(normal_vals.y);
-      }
-    }else{
-      normal_vals = static_cast<float2>(at::cuda::lognormal_distribution(engine, mean, stddev));
-      cached_normal = 1;
-      if (i < size) {
-        result[i] = ScalarConvert<float, T>::to(normal_vals.x);
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  at::Philox4_32_10 engine(seeds.first, idx, seeds.second);
+  int UNROLL = 2;
+  int rounded_size = ((size - 1)/(blockDim.x * gridDim.x * UNROLL)+1) * blockDim.x * gridDim.x * UNROLL;
+  for (int i = idx; i < rounded_size; i += gridDim.x * blockDim.x*UNROLL) {
+    float2 dist_vals = at::lognormal_distribution<float>(mean, stddev)(engine);
+    for (int ii = 0; ii < UNROLL; ii++) {
+      int li = i + blockDim.x * gridDim.x * ii;
+      if (li < size) {                         
+        if(ii == 0)
+          result[li] = ScalarConvert<float, T>::to(dist_vals.x);
+        else;
+          result[li] = ScalarConvert<float, T>::to(dist_vals.y);                                        
       }
     }
+    __syncthreads();
   }
 }
 
 template <>
 __global__ void generateLogNormal<double>(std::pair<uint64_t, uint64_t> seeds, int size, double *result, double mean, double stddev)
 {
-  int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;
-  at::cuda::Philox4_32_10 engine(seeds.first, idx, seeds.second);
-  int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;
-  float2 normal_vals;
-  int cached_normal = 0;
-  for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {
-    if(cached_normal){
-      cached_normal = 0;
-      if (i < size) {
-        result[i] = static_cast<double>(normal_vals.y);
-      }
-    }else{
-      normal_vals = static_cast<float2>(at::cuda::lognormal_distribution(engine, mean, stddev));
-      cached_normal = 1;
-      if (i < size) {
-        result[i] = static_cast<double>(normal_vals.x);
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  at::Philox4_32_10 engine(seeds.first, idx, seeds.second);
+  int UNROLL = 2;
+  int rounded_size = ((size - 1)/(blockDim.x * gridDim.x * UNROLL)+1) * blockDim.x * gridDim.x * UNROLL;
+  for (int i = idx; i < rounded_size; i += gridDim.x * blockDim.x*UNROLL) {
+    double2 dist_vals = at::lognormal_distribution<double>(mean, stddev)(engine);
+    for (int ii = 0; ii < UNROLL; ii++) {
+      int li = i + blockDim.x * gridDim.x * ii;
+      if (li < size) {                         
+        if(ii == 0)
+          result[li] = dist_vals.x;
+        else;
+          result[li] = dist_vals.y;                                        
       }
     }
+    __syncthreads();
   }
 }
 
@@ -328,7 +324,7 @@ sampleMultinomialWithReplacement(std::pair<uint64_t, uint64_t> seeds,
 
   // The block determines the distribution for which we generate a point
   int idx = blockIdx.x * blockDim.x * blockDim.y + threadIdx.x;                                              \
-  at::cuda::Philox4_32_10 engine(seeds.first, idx, seeds.second);
+  at::Philox4_32_10 engine(seeds.first, idx, seeds.second);
   for (int64_t curDist = blockIdx.x;
        curDist < distributions;
        curDist += gridDim.x) {
@@ -338,7 +334,8 @@ sampleMultinomialWithReplacement(std::pair<uint64_t, uint64_t> seeds,
       int sample = sampleBase + threadIdx.y;
 
       // All threads participate in this
-      T r = ScalarConvert<float, T>::to(at::cuda::standard_uniform_distribution(engine));
+      at::uniform_real_distribution<float> standard_uniform(0,1);
+      T r = ScalarConvert<float, T>::to(standard_uniform(engine));
 
       if (threadIdx.x == 0 && sample < totalSamples) {
         // Find the bucket that a uniform sample lies in
@@ -373,7 +370,7 @@ sampleMultinomialWithoutReplacement(std::pair<uint64_t, uint64_t> seeds,
   // The block and warp determines the distribution for which we
   // generate a point
   int idx = blockIdx.x * blockDim.x * blockDim.y + threadIdx.x;                                          \
-  at::cuda::Philox4_32_10 engine(seeds.first, idx, seeds.second);
+  at::Philox4_32_10 engine(seeds.first, idx, seeds.second);
   for (int64_t curDistBase = blockIdx.x * blockDim.y;
        curDistBase < distributions;
        curDistBase += gridDim.x * blockDim.y) {
@@ -381,7 +378,8 @@ sampleMultinomialWithoutReplacement(std::pair<uint64_t, uint64_t> seeds,
     int64_t curDist = curDistBase + threadIdx.y;
 
     // All threads must participate in this
-    T r = ScalarConvert<float, T>::to(at::cuda::standard_uniform_distribution(engine));
+    at::uniform_real_distribution<float> standard_uniform(0,1);
+    T r = ScalarConvert<float, T>::to(standard_uniform(engine));
 
     if (threadIdx.x == 0 && curDist < distributions) {
       // Find the bucket that a uniform sample lies in

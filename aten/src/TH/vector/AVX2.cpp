@@ -76,6 +76,7 @@ void THFloatVector_normal_fill_AVX2(float *data,
                                     const float stddev)
 {
   THAssert(size >= 16 && "Size must be >= 16 for AVX2 normal fill");
+  auto& cpu_engine = generator->getCPUEngine();
   const __m256 two_pi = _mm256_set1_ps(2.0f * M_PI);
   const __m256 one = _mm256_set1_ps(1.0f);
   const __m256 minus_two = _mm256_set1_ps(-2.0f);
@@ -87,8 +88,8 @@ void THFloatVector_normal_fill_AVX2(float *data,
   // we need exactly as much space for uniform and normal numbers and can just
   // use the single buffer for both.
   for (int64_t i = 0; i < size; ++i) {
-    std::uniform_real_distribution<float> uniform(0, 1);
-    data[i] = uniform(generator->getCPUEngine());
+    at::uniform_real_distribution<float> uniform(0, 1);
+    data[i] = uniform(cpu_engine);
   }
 
   for (int64_t i = 0; i < size - 15; i += 16) {
@@ -99,8 +100,8 @@ void THFloatVector_normal_fill_AVX2(float *data,
     // We rewind so that we have 16 values and then compute them in one step.
     data = data + size - 16;
     for (int i = 0; i < 16; ++i) {
-      std::uniform_real_distribution<float> uniform(0, 1);
-      data[i] = uniform(generator->getCPUEngine());
+      at::uniform_real_distribution<float> uniform(0, 1);
+      data[i] = uniform(cpu_engine);
     }
     normal_fill_16_AVX2(data, &two_pi, &one, &minus_two, &mean_v, &stddev_v);
   }

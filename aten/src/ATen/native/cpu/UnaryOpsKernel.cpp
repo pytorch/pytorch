@@ -120,9 +120,10 @@ void bernoulli_mkl_kernel(Tensor &output, const double p, Generator* gen) {
 #else
 void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
   Generator* generator = detail::checkGeneratorWithDefault(gen, &detail::getDefaultGenerator(kCPU));
+  auto& cpu_engine = generator->getCPUEngine();
   int64_t seed;
   {
-    seed = generator->random64();
+    seed = ((((uint64_t)cpu_engine()) << 32) | (uint64_t)cpu_engine());
   }
   int64_t n = self.numel();
   bool contig = self.is_contiguous();

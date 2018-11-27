@@ -653,6 +653,7 @@ void THTensor_(randperm)(THTensor *r_, at::Generator *_generator, int64_t n)
   scalar_t *r__data;
   int64_t r__stride_0;
   int64_t i;
+  auto& cpu_engine = _generator->getCPUEngine();
 
   THArgCheck(n > 0, 1, "must be strictly positive");
 
@@ -665,7 +666,7 @@ void THTensor_(randperm)(THTensor *r_, at::Generator *_generator, int64_t n)
 
   for(i = 0; i < n-1; i++)
   {
-    int64_t z = _generator->random64() % (n-i);
+    int64_t z = ((((uint64_t)cpu_engine()) << 32) | (uint64_t)cpu_engine()) % (n-i);
     scalar_t sav = r__data[i*r__stride_0];
     r__data[i*r__stride_0] = r__data[(z+i)*r__stride_0];
     r__data[(z+i)*r__stride_0] = sav;

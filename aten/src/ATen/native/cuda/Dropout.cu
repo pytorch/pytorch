@@ -3,7 +3,7 @@
 #include "ATen/cuda/CUDAApplyUtils.cuh"
 #include "ATen/cuda/detail/IndexUtils.cuh"
 #include "ATen/cuda/detail/TensorInfo.cuh"
-#include "ATen/cuda/PhiloxRNGEngine.h"
+#include "ATen/core/PhiloxRNGEngine.h"
 
 #include <THC/THCGeneral.h>
 
@@ -31,7 +31,7 @@ fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
 
   accscalar_t pinv = accscalar_t(1)/p;
   IndexType idx = blockIdx.x * blockDim.x + threadIdx.x;
-  at::cuda::Philox4_32_10 engine(seeds.first, idx, seeds.second);
+  at::Philox4_32_10 engine(seeds.first, idx, seeds.second);
   IndexType rounded_size = ((totalElements - 1)/(blockDim.x * gridDim.x * UNROLL)+1) * 
         blockDim.x * gridDim.x * UNROLL;
   for (IndexType linearIndex = idx;
@@ -50,7 +50,8 @@ fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
        for (int ii = 0; ii < UNROLL; ii++) {
            IndexType li = linearIndex + blockDim.x * gridDim.x * ii;
            if (li < totalElements) {
-               float randn = at::cuda::standard_uniform_distribution(engine);
+               at::uniform_real_distribution<scalar_t> standard_uniform(0, 1);
+               auto randn = standard_uniform(engine);
                randn = randn < p;
     // Convert `linearIndex` into an offset of `b`
                const IndexType bOffset =
@@ -100,7 +101,7 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen){
                 mask_info, 
                 nelem, 
                 pa, 
-                gen_->incrementPhiloxOffset(nelem, grid.x, block_size, 4)); /* Loop unrolling 4 and engine call 1*/
+                gen_->incrementPhiloxOffset(nelem, grid.x, block_size, 8)); /* Loop unrolling 4 and engine call 1*/
             break;
         default:
             fused_dropout_kernel<scalar_t, accscalar_t, unsigned int, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -109,7 +110,7 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen){
                 mask_info, 
                 nelem, 
                 pa, 
-                gen_->incrementPhiloxOffset(nelem, grid.x, block_size, 4));
+                gen_->incrementPhiloxOffset(nelem, grid.x, block_size, 8));
       }
    });
   } else {
@@ -130,7 +131,7 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen){
                 mask_info, 
                 nelem, 
                 pa, 
-                gen_->incrementPhiloxOffset(nelem, grid.x, block_size, 4));
+                gen_->incrementPhiloxOffset(nelem, grid.x, block_size, 8));
             break;
         default:
             fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -139,7 +140,7 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen){
                 mask_info, 
                 nelem, 
                 pa, 
-                gen_->incrementPhiloxOffset(nelem, grid.x, block_size, 4));
+                gen_->incrementPhiloxOffset(nelem, grid.x, block_size, 8));
       }
    });
   }

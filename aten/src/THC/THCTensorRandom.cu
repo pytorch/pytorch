@@ -19,78 +19,74 @@ __device__ inline at::Half half_uniform_scale_and_shift(float x, double a, doubl
   return THCNumerics<at::Half>::add(scaled, start);
 }
 
-#define GENERATE_KERNEL1(NAME, T, ARG1, RAND_T, RAND_FUNC, TRANSFORM)      \
-__global__ void NAME(std::pair<uint64_t, uint64_t> seeds, int size, T *result, ARG1)      \
-{                                                                              \
-  int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;                             \
-  at::cuda::Philox4_32_10 engine(seeds.first, idx, seeds.second);              \
-  int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;                \
-  for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {      \
-    RAND_T x = static_cast<RAND_T>(RAND_FUNC);                         \
-    if (i < size) {                                                            \
-      T y = TRANSFORM;                                                         \
-      result[i] = y;                                                           \
-    }                                                                          \
-  }                                                                            \
-}
-
-#define GENERATE_KERNEL2(NAME, T, ARG1, ARG2, RAND_T, RAND_FUNC, TRANSFORM)      \
-__global__ void NAME(std::pair<uint64_t, uint64_t> seeds, int size, T *result, ARG1, ARG2)      \
+#define GENERATE_KERNEL1(NAME, T, ARG1, RAND_T, RAND_FUNC)                                      \
+__global__ void NAME(std::pair<uint64_t, uint64_t> seeds, int size, T *result, ARG1)            \
 {                                                                                               \
-  int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;                                              \
-  at::cuda::Philox4_32_10 engine(seeds.first, idx, seeds.second);                               \
-  int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;                                 \
-  for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {                       \
-    RAND_T x = static_cast<RAND_T>(RAND_FUNC);                                          \
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;                                              \
+  at::Philox4_32_10 engine(seeds.first, idx, seeds.second);                                     \
+  int rounded_size = ((size - 1)/(blockDim.x * gridDim.x)+1) * blockDim.x * gridDim.x;          \
+  for (int i = idx; i < rounded_size; i += gridDim.x * blockDim.x) {                            \
+    RAND_T x = static_cast<RAND_T>(RAND_FUNC);                                                  \
     if (i < size) {                                                                             \
-      T y = TRANSFORM;                                                                          \
-      result[i] = y;                                                                            \
+      result[i] = x;                                                                            \
     }                                                                                           \
   }                                                                                             \
 }
 
-#define GENERATE_KERNEL3(NAME, T, ARG1, ARG2, RAND_T, RAND_FUNC, TRANSFORM)      \
+#define GENERATE_KERNEL2(NAME, T, ARG1, ARG2, RAND_T, RAND_FUNC)                                \
 __global__ void NAME(std::pair<uint64_t, uint64_t> seeds, int size, T *result, ARG1, ARG2)      \
 {                                                                                               \
-  int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;                                              \
-  at::cuda::Philox4_32_10 engine(seeds.first, idx, seeds.second);                               \
-  int cached_normal = 0;                                                                        \
-  RAND_T normal_vals = make_float2(0,0);                                                        \
-  int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;                                 \
-  for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {                       \
-    float x;                                                                                    \
-    if(cached_normal){                                                                          \
-      cached_normal = 0;                                                                        \
-      x = normal_vals.y;                                                                        \
-    }else{                                                                                      \
-      normal_vals = at::cuda::normal_distribution(engine);                                      \
-      cached_normal = 1;                                                                        \
-      x = normal_vals.x;                                                                        \
-    }                                                                                           \
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;                                              \
+  at::Philox4_32_10 engine(seeds.first, idx, seeds.second);                                     \
+  int rounded_size = ((size - 1)/(blockDim.x * gridDim.x)+1) * blockDim.x * gridDim.x;          \
+  for (int i = idx; i < rounded_size; i += gridDim.x * blockDim.x) {                            \
+    RAND_T x = static_cast<RAND_T>(RAND_FUNC);                                                  \
     if (i < size) {                                                                             \
-      T y = TRANSFORM;                                                                          \
-      result[i] = y;                                                                            \
+      result[i] = x;                                                                            \
     }                                                                                           \
   }                                                                                             \
 }
 
-GENERATE_KERNEL2(generate_uniform, float, float a, float b, float, at::cuda::standard_uniform_distribution(engine), x * (b-a) + a)
-GENERATE_KERNEL2(generate_uniform, float, double a, double b, float, at::cuda::standard_uniform_distribution(engine), x * (b-a) + a)
-GENERATE_KERNEL2(generate_uniform, double, double a, double b, float, at::cuda::standard_uniform_distribution(engine), x * (b-a) + a)
+#define GENERATE_KERNEL3(NAME, T, ARG1, ARG2, RAND_T, RAND_FUNC)                                \
+__global__ void NAME(std::pair<uint64_t, uint64_t> seeds, int size, T *result, ARG1, ARG2)      \
+{                                                                                               \
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;                                              \
+  at::Philox4_32_10 engine(seeds.first, idx, seeds.second);                                     \
+  int UNROLL = 2;                                                                               \
+  int rounded_size = ((size - 1)/(blockDim.x * gridDim.x * UNROLL)+1) *                         \
+        blockDim.x * gridDim.x * UNROLL;                                                        \
+  for (int i = idx; i < rounded_size; i += gridDim.x * blockDim.x*UNROLL) {                     \
+    RAND_T dist_vals = static_cast<RAND_T>(RAND_FUNC);                                          \
+    for (int ii = 0; ii < UNROLL; ii++) {                                                       \
+      int li = i + blockDim.x * gridDim.x * ii;                                                 \
+      if (li < size) {                                                                          \
+        if(ii == 0)                                                                             \
+          result[li] = dist_vals.x;                                                             \
+        else                                                                                    \
+          result[li] = dist_vals.y;                                                             \
+      }                                                                                         \
+    }                                                                                           \
+    __syncthreads();                                                                            \
+  }                                                                                             \
+}
 
-GENERATE_KERNEL3(generate_normal, float, double mean, double stdv, float2, at::cuda::normal_distribution(engine), (x * stdv) + mean)
-GENERATE_KERNEL3(generate_normal, double, double mean, double stdv, float2, at::cuda::normal_distribution(engine), (x * stdv) + mean)
+GENERATE_KERNEL2(generate_uniform, float, float a, float b, float, at::uniform_real_distribution<float>(a, b)(engine))
+GENERATE_KERNEL2(generate_uniform, float, double a, double b, float, at::uniform_real_distribution<float>(a, b)(engine))
+GENERATE_KERNEL2(generate_uniform, double, double a, double b, float, at::uniform_real_distribution<double>(a, b)(engine))
 
-GENERATE_KERNEL1(generate_exponential, float, double lambda, float, at::cuda::standard_uniform_distribution(engine), (float)(-1. / lambda * log(x)))
-GENERATE_KERNEL1(generate_exponential, double, double lambda, float, at::cuda::standard_uniform_distribution(engine), (double)(-1. / lambda * log(x)))
+GENERATE_KERNEL3(generate_normal, float, double mean, double stdv, float2, at::normal_distribution<float>(mean,stdv)(engine))
+GENERATE_KERNEL3(generate_normal, double, double mean, double stdv, double2, at::normal_distribution<double>(mean,stdv)(engine))
 
-GENERATE_KERNEL2(generate_cauchy, float, double median, double sigma, float, at::cuda::standard_uniform_distribution(engine), (float)(median + sigma * tan(M_PI*(x-0.5))))
-GENERATE_KERNEL2(generate_cauchy, double, double median, double sigma, float, at::cuda::standard_uniform_distribution(engine), (double)(median + sigma * tan(M_PI*(x-0.5))))
+GENERATE_KERNEL1(generate_exponential, float, double lambda, float, at::exponential_distribution<float>(lambda)(engine))
+GENERATE_KERNEL1(generate_exponential, double, double lambda, double, at::exponential_distribution<double>(lambda)(engine))
 
-GENERATE_KERNEL2(generate_uniform, at::Half, double a, double b, float, at::cuda::standard_uniform_distribution(engine), (half_uniform_scale_and_shift(x, a, b)))
-GENERATE_KERNEL3(generate_normal, at::Half, double mean, double stdv, float2, at::cuda::normal_distribution(engine), (ScalarConvert<float, at::Half>::to((x * stdv) + mean)))
-GENERATE_KERNEL1(generate_exponential, at::Half, double lambda, float, at::cuda::standard_uniform_distribution(engine), (ScalarConvert<float, at::Half>::to((float)(-1. / lambda * log(x)))))
-GENERATE_KERNEL2(generate_cauchy, at::Half, double median, double sigma, float, at::cuda::standard_uniform_distribution(engine), (ScalarConvert<float, at::Half>::to((float)(median + sigma * tan(M_PI*(x-0.5))))))
+GENERATE_KERNEL2(generate_cauchy, float, double median, double sigma, float, at::cauchy_distribution<float>(median, sigma)(engine))
+GENERATE_KERNEL2(generate_cauchy, double, double median, double sigma, double, at::cauchy_distribution<double>(median, sigma)(engine))
+
+GENERATE_KERNEL2(generate_uniform, at::Half, double a, double b, float, (half_uniform_scale_and_shift(at::uniform_real_distribution<float>(0,1)(engine), a, b)))
+GENERATE_KERNEL3(generate_normal, at::Half, double mean, double stdv, float2, at::normal_distribution<float>(mean,stdv)(engine))
+GENERATE_KERNEL1(generate_exponential, at::Half, double lambda, float, (ScalarConvert<float, at::Half>::to(at::exponential_distribution<float>(lambda)(engine))))
+GENERATE_KERNEL2(generate_cauchy, at::Half, double median, double sigma, float, (ScalarConvert<float, at::Half>::to(at::cauchy_distribution<float>(median, sigma)(engine))))
 
 #include "generic/THCTensorRandom.cu"
 #include "THCGenerateAllTypes.h"

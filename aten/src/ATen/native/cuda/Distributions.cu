@@ -6,7 +6,7 @@
 #include <curand.h>
 #include <curand_kernel.h>
 #include <curand_philox4x32_x.h>
-#include "ATen/cuda/PhiloxRNGEngine.h"
+#include "ATen/core/PhiloxRNGEngine.h"
 #include <utility>
 #include <functional>
 #include <nvfunctional>
@@ -55,25 +55,28 @@ void gamma_cuda_kernel(
       [seeds] __device__(
         int n, scalar_t& ret_val1, scalar_t& ret_val2, 
                const scalar_t& alpha1, const scalar_t& alpha2) {
-        at::cuda::Philox4_32_10 engine_x(
-                                  seeds.first,
-                                  blockIdx.x * blockDim.x + threadIdx.x,
-                                  seeds.second);
+        at::Philox4_32_10 engine_x(seeds.first,
+                                   blockIdx.x * blockDim.x + threadIdx.x,
+                                   seeds.second);
         // creating a copy of engine_x such that float2 of normal dist can be utilized
-        at::cuda::Philox4_32_10 engine_y = engine_x;
+        at::Philox4_32_10 engine_y = engine_x;
 
         BaseSampler<accscalar_t> standard_uniform_x([&engine_x] __device__ () {
-          return at::cuda::standard_uniform_distribution(engine_x);
+          at::uniform_real_distribution<accscalar_t> standard_uniform(0, 1);
+          return standard_uniform(engine_x);
         });
         BaseSampler<accscalar_t> standard_uniform_y([&engine_y] __device__ () {
-          return at::cuda::standard_uniform_distribution(engine_y);
+          at::uniform_real_distribution<accscalar_t> standard_uniform(0, 1);
+          return standard_uniform(engine_y);
         });
 
         BaseSampler<accscalar_t> standard_normal_x([&engine_x] __device__ () {
-          return at::cuda::normal_distribution(engine_x).x;
+          at::normal_distribution<accscalar_t> normal(0, 1);
+          return normal(engine_x).x;
         });
         BaseSampler<accscalar_t> standard_normal_y([&engine_y] __device__ () {
-          return at::cuda::normal_distribution(engine_y).y;
+          at::normal_distribution<accscalar_t> normal(0, 1);
+          return normal(engine_y).y;
         });
 
         switch (n) {
@@ -111,13 +114,11 @@ void bernoulli_tensor_cuda_kernel(
   at::cuda::CUDA_tensor_apply2<scalar_t, prob_t>(
       ret, p,
       [seeds] __device__(scalar_t& v1, const prob_t& p1) {
-      at::cuda::Philox4_32_10 engine(
-                                seeds.first,
-                                blockIdx.x * blockDim.x + threadIdx.x,
-                                seeds.second);
-      auto rand_num = at::cuda::standard_uniform_distribution(engine);
-      assert(0 <= p1 && p1 <= 1);
-      v1 = static_cast<scalar_t>(rand_num <= p1);
+      at::Philox4_32_10 engine(seeds.first,
+                               blockIdx.x * blockDim.x + threadIdx.x,
+                               seeds.second);
+      at::bernoulli_distribution<float> bernoulli(p1);
+      v1 = static_cast<scalar_t>(bernoulli(engine));
     }
   );
 }
@@ -130,12 +131,11 @@ void bernoulli_scalar_cuda_kernel(
   at::cuda::CUDA_tensor_apply1<scalar_t>(
       ret, 
       [seeds, p] __device__(scalar_t& v1) {
-      at::cuda::Philox4_32_10 engine(
-                                seeds.first,
-                                blockIdx.x * blockDim.x + threadIdx.x,
-                                seeds.second);
-      auto rand_num = at::cuda::standard_uniform_distribution(engine);
-      v1 = static_cast<scalar_t>(rand_num <= p);
+      at::Philox4_32_10 engine(seeds.first,
+                               blockIdx.x * blockDim.x + threadIdx.x,
+                               seeds.second);
+      at::bernoulli_distribution<float> bernoulli(p);
+      v1 = static_cast<scalar_t>(bernoulli(engine));
     }
   );
 }

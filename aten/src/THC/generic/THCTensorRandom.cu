@@ -17,7 +17,7 @@ void THCTensor_(uniform)(THCState* state, THCTensor *self_, at::Generator* _gene
   scalar_t *data = THCTensor_(data)(state, self);
 
   generate_uniform<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-    _generator->incrementPhiloxOffset(size, NUM_BLOCKS, BLOCK_SIZE, 1), 
+    _generator->incrementPhiloxOffset(size, NUM_BLOCKS, BLOCK_SIZE, 2), 
     size, data, a, b);
 
   THCTensor_(freeCopyTo)(state, self, self_);
@@ -32,7 +32,7 @@ void THCTensor_(normal)(THCState* state, THCTensor *self_, at::Generator* _gener
   scalar_t *data = THCTensor_(data)(state, self);
 
   generate_normal<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-    _generator->incrementPhiloxOffset(size, NUM_BLOCKS, BLOCK_SIZE, 2), 
+    _generator->incrementPhiloxOffset(size, NUM_BLOCKS, BLOCK_SIZE, 8), 
     size, data, mean, stdv);
 
   THCTensor_(freeCopyTo)(state, self, self_);
@@ -71,7 +71,7 @@ void THCTensor_(logNormal)(THCState* state, THCTensor *self_, at::Generator* _ge
   scalar_t *data = THCTensor_(data)(state, self);
 
   generateLogNormal<scalar_t><<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-    _generator->incrementPhiloxOffset(size, NUM_BLOCKS, BLOCK_SIZE, 2), 
+    _generator->incrementPhiloxOffset(size, NUM_BLOCKS, BLOCK_SIZE, 8), 
     size, data, mean, stdv);
 
   THCTensor_(freeCopyTo)(state, self, self_);
@@ -87,7 +87,7 @@ void THCTensor_(exponential)(THCState* state, THCTensor *self_, at::Generator* _
   scalar_t *data = THCTensor_(data)(state, self);
 
   generate_exponential<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-    _generator->incrementPhiloxOffset(size, NUM_BLOCKS, BLOCK_SIZE, 1), 
+    _generator->incrementPhiloxOffset(size, NUM_BLOCKS, BLOCK_SIZE, 2), 
     size, data, lambda);
 
   THCTensor_(freeCopyTo)(state, self, self_);
@@ -103,7 +103,7 @@ void THCTensor_(cauchy)(THCState* state, THCTensor *self_, at::Generator* _gener
   scalar_t *data = THCTensor_(data)(state, self);
 
   generate_cauchy<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-    _generator->incrementPhiloxOffset(size, NUM_BLOCKS, BLOCK_SIZE, 1), 
+    _generator->incrementPhiloxOffset(size, NUM_BLOCKS, BLOCK_SIZE, 2), 
     size, data, median, sigma);
 
   THCTensor_(freeCopyTo)(state, self, self_);
@@ -382,23 +382,23 @@ void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, a
 #endif
 
 #if defined(THC_REAL_IS_DOUBLE)
-GENERATE_KERNEL1(generate_geometric, double, double p, double, at::cuda::standard_uniform_distribution(engine), ceil(log(x) / log(1-p)))
+GENERATE_KERNEL1(generate_geometric, scalar_t, double p, int, at::geometric_distribution<double>(p)(engine))
 #else
-GENERATE_KERNEL1(generate_geometric, scalar_t, double p, float, at::cuda::standard_uniform_distribution(engine), (ScalarConvert<float, scalar_t>::to(ceilf(logf(x) / log(1-p)))))
+GENERATE_KERNEL1(generate_geometric, scalar_t, double p, int, at::geometric_distribution<float>(p)(engine))
 #endif
 
 #if defined(THC_REAL_IS_LONG) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_FLOAT)
 #define RAND64 (((uint64_t)engine()) << 32) | (uint64_t)engine()
-GENERATE_KERNEL2(generate_random, scalar_t, int32_t base, uint32_t range, uint32_t, engine(), \
-    static_cast<scalar_t>(static_cast<int32_t>((x % range) + base)))
-GENERATE_KERNEL2(generate_random_64, scalar_t, int64_t base, uint64_t range, uint64_t, RAND64, \
-    static_cast<scalar_t>(static_cast<int64_t>((x % range) + base)))
+GENERATE_KERNEL2(generate_random, scalar_t, int32_t base, uint32_t range, uint32_t, \
+    static_cast<scalar_t>(static_cast<int32_t>((engine() % range) + base)))
+GENERATE_KERNEL2(generate_random_64, scalar_t, int64_t base, uint64_t range, uint64_t, \
+    static_cast<scalar_t>(static_cast<int64_t>(((RAND64) % range) + base)))
 #elif defined(THC_REAL_IS_HALF)
-GENERATE_KERNEL2(generate_random, scalar_t, int32_t base, uint32_t range, uint32_t, engine(),
-    (ScalarConvert<int32_t, scalar_t>::to(static_cast<int32_t>(x % range + base))))
+GENERATE_KERNEL2(generate_random, scalar_t, int32_t base, uint32_t range, uint32_t, \
+    (ScalarConvert<int32_t, scalar_t>::to(static_cast<int32_t>(engine() % range + base))))
 #else
-GENERATE_KERNEL2(generate_random, scalar_t, int32_t base, uint32_t range, uint32_t, engine(),
-    static_cast<scalar_t>(static_cast<int32_t>(x % range + base)))
+GENERATE_KERNEL2(generate_random, scalar_t, int32_t base, uint32_t range, uint32_t, \
+    static_cast<scalar_t>(static_cast<int32_t>(engine() % range + base)))
 #endif
 
 void THCTensor_(geometric)(THCState* state, THCTensor *self_, at::Generator* _generator, double p)
@@ -411,7 +411,7 @@ void THCTensor_(geometric)(THCState* state, THCTensor *self_, at::Generator* _ge
   scalar_t *data = THCTensor_(data)(state, self);
 
   generate_geometric<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-    _generator->incrementPhiloxOffset(size, NUM_BLOCKS, BLOCK_SIZE, 1), 
+    _generator->incrementPhiloxOffset(size, NUM_BLOCKS, BLOCK_SIZE, 2), 
     size, data, p);
 
   THCTensor_(freeCopyTo)(state, self, self_);

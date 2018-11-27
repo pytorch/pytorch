@@ -3,7 +3,7 @@
 #include "THCHalfAutoNumerics.cuh"
 #include <THC/THCApply.cuh>
 #include "common.h"
-#include "ATen/cuda/PhiloxRNGEngine.h"
+#include "ATen/core/PhiloxRNGEngine.h"
 
 // copied from cutorch/lib/THC/THCTensorRandom.cu
 #define MAX_NUM_BLOCKS 64
@@ -18,11 +18,11 @@ __global__ void rreluUpdateOutputTrain(int n, std::pair<uint64_t, uint64_t> seed
   {
     if (input[i] <= 0)
     {
-      at::cuda::Philox4_32_10 engine(
-                                  seeds.first,
-                                  blockIdx.x * blockDim.x + threadIdx.x,
-                                  seeds.second);
-      T r = static_cast<T>(at::cuda::standard_uniform_distribution(engine));
+      at::Philox4_32_10 engine(seeds.first,
+                               blockIdx.x * blockDim.x + threadIdx.x,
+                               seeds.second);
+      at::uniform_real_distribution<float> standard_uniform(0,1);
+      T r = static_cast<T>(standard_uniform(engine));
       r = ScalarConvert<double, T>::to(r * (b-a) + a);
       output[i] = input[i] * r;
       noise[i] = r;

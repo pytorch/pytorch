@@ -18,23 +18,23 @@ TEST(CPUGenerator, TestDefaultGenerator) {
 
   // check setting of state for default generator
   auto new_gen = at::globalContext().createGenerator(at::kCPU);
-  new_gen.random64(); // advance new gen_state
-  new_gen.random64();
+  new_gen.getCPUEngine()(); // advance new gen_state
+  new_gen.getCPUEngine()();
   auto& default_gen = at::globalContext().getDefaultGenerator(at::kCPU);
   default_gen.setState(new_gen.getState());
-  ASSERT_EQ(new_gen.random64(), default_gen.random64());
+  ASSERT_EQ(new_gen.getCPUEngine()(), default_gen.getCPUEngine()());
   
 }
 
 TEST(CPUGenerator, TestCPUEngine) {
 
   auto new_gen = at::globalContext().createGenerator(at::kCPU);
-  new_gen.random64(); // advance new gen_state
-  new_gen.random64();
+  new_gen.getCPUEngine()(); // advance new gen_state
+  new_gen.getCPUEngine()();
   auto& default_gen = at::globalContext().getDefaultGenerator(at::kCPU);
-  ASSERT_NE(new_gen.random64(), default_gen.random64());
+  ASSERT_NE(new_gen.getCPUEngine()(), default_gen.getCPUEngine()());
   default_gen.setCPUEngine(new_gen.getCPUEngine());
-  ASSERT_EQ(new_gen.random64(), default_gen.random64());
+  ASSERT_EQ(new_gen.getCPUEngine()(), default_gen.getCPUEngine()());
   
 }
 
@@ -48,7 +48,7 @@ TEST(CPUGenerator, TestSeeding) {
 TEST(CPUGenerator, TestRNGForking) {
   auto& default_gen = at::globalContext().getDefaultGenerator(at::kCPU);
   auto current_gen = at::globalContext().createGenerator(at::kCPU);
-  default_gen.random64();
+  default_gen.getCPUEngine()();
   auto current_default_state = default_gen.getState();
   current_gen.setState(current_default_state);
   ASSERT_NE(current_gen.getState(), current_default_state);

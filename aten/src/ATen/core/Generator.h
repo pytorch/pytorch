@@ -3,7 +3,6 @@
 #include <stdint.h>
 #include <memory>
 #include <mutex>
-#include <random>
 #include <deque>
 #include <atomic>
 #include <typeinfo>
@@ -12,6 +11,7 @@
 #include "c10/util/Exception.h"
 #include <c10/util/C++17.h>
 #include "ATen/core/Backend.h"
+#include "ATen/core/PhiloxRNGEngine.h"
 
 #if !C10_MOBILE
 #include "ATen/detail/CUDAHooksInterface.h"
@@ -46,8 +46,8 @@ struct CAFFE2_API GeneratorState {
   int64_t device = -1;
   DeviceType device_type;
   uint64_t current_seed = 67280421310721;
-  uint64_t philox_offset_per_thread;
-  std::mt19937_64 cpu_engine;
+  uint64_t cuda_philox_offset_per_thread;
+  at::Philox4_32_10 cpu_engine;
 };
 
 namespace detail {
@@ -72,11 +72,10 @@ struct CAFFE2_API Generator {
   void setState(GeneratorState* state_in);
   uint64_t getCurrentSeed();
   void setCurrentSeed(uint64_t seed);
-  std::mt19937_64& getCPUEngine();
-  void setCPUEngine(std::mt19937_64 engine);
+  at::Philox4_32_10& getCPUEngine();
+  void setCPUEngine(at::Philox4_32_10 engine);
 
   // Methods
-  uint64_t random64();
   std::pair<uint64_t, uint64_t> incrementPhiloxOffset(uint64_t total_elements,
                                                 uint64_t grid_size,
                                                 uint64_t block_size,

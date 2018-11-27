@@ -153,14 +153,14 @@ void THVector_(normal_fill_DEFAULT)(scalar_t *data,
                                     const scalar_t stddev)
 {
   THAssert(size >= 16 && "Size must be >= 16 for normal fill");
-
+  auto& cpu_engine = generator->getCPUEngine();
   for (int64_t i = 0; i < size; ++i) {
 #ifdef TH_REAL_IS_FLOAT
-    std::uniform_real_distribution<float> uniform(0, 1);
-    data[i] = uniform(generator->getCPUEngine());
+    at::uniform_real_distribution<float> uniform(0, 1);
+    data[i] = uniform(cpu_engine);
 #else
-    std::uniform_real_distribution<double> uniform(0, 1);
-    data[i] = uniform(generator->getCPUEngine());
+    at::uniform_real_distribution<double> uniform(0, 1);
+    data[i] = uniform(cpu_engine);
 #endif
   }
 
@@ -173,11 +173,11 @@ void THVector_(normal_fill_DEFAULT)(scalar_t *data,
     data = data + size - 16;
     for (int64_t i = 0; i < 16; ++i) {
 #ifdef TH_REAL_IS_FLOAT
-    std::uniform_real_distribution<float> uniform(0, 1);
-    data[i] = uniform(generator->getCPUEngine());
+    at::uniform_real_distribution<float> uniform(0, 1);
+    data[i] = uniform(cpu_engine);
 #else
-    std::uniform_real_distribution<double> uniform(0, 1);
-    data[i] = uniform(generator->getCPUEngine());
+    at::uniform_real_distribution<double> uniform(0, 1);
+    data[i] = uniform(cpu_engine);
 #endif
     }
     THVector_(interleaved_normal_fill_16)(data, mean, stddev);

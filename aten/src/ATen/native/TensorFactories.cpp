@@ -437,6 +437,7 @@ Tensor randn_like(const Tensor& self, const TensorOptions& options) {
 namespace {
 template <typename scalar_t>
 void randperm_cpu(Tensor& result, int64_t n, Generator* generator) {
+  auto& cpu_engine = generator->getCPUEngine();
   scalar_t *r__data = result.data<scalar_t>();
 
   result.resize_({n});
@@ -448,7 +449,7 @@ void randperm_cpu(Tensor& result, int64_t n, Generator* generator) {
 
   for(int64_t i = 0; i < n - 1; i++)
   {
-    int64_t z = generator->random64() % (n-i);
+    int64_t z = ((((uint64_t)cpu_engine()) << 32) | (uint64_t)cpu_engine()) % (n-i);
     scalar_t sav = r__data[i*r__stride_0];
     r__data[i*r__stride_0] = r__data[(z+i)*r__stride_0];
     r__data[(z+i)*r__stride_0] = sav;
