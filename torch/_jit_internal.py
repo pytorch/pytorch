@@ -23,10 +23,6 @@ _weak_modules = weakref.WeakKeyDictionary()
 # Types that have been declared as weak modules
 _weak_types = weakref.WeakKeyDictionary()
 
-# Wrapper functions that can call either of 2 functions depending on a boolean
-# argument
-_boolean_dispatched = weakref.WeakKeyDictionary()
-
 COMPILATION_PENDING = object()
 COMPILED = object()
 
@@ -106,46 +102,5 @@ def weak_script_method(fn):
     _weak_script_methods[fn] = {
         "rcb": createResolutionCallback(frames_up=2),
         "original_method": fn
-    }
-    return fn
-
-
-def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
-    """
-    Dispatches to either of 2 weak script functions based on a boolean argument.
-    In Torch Script, the boolean argument must be constant so that the correct
-    function to use can be determined at compile time.
-    """
-    if _compiled_weak_fns.get(if_true) is None or _compiled_weak_fns.get(if_false) is None:
-        raise RuntimeError("both functions must be weak script")
-
-    def fn(*args, **kwargs):
-        dispatch_flag = False
-        if arg_name in kwargs:
-            dispatch_flag = kwargs[arg_name]
-        elif arg_index < len(args):
-            dispatch_flag = args[arg_index]
-
-        if dispatch_flag:
-            return if_true(*args, **kwargs)
-        else:
-            return if_false(*args, **kwargs)
-
-    if if_true.__doc__ is None and if_false.__doc__ is not None:
-        doc = if_false.__doc__
-        if_true.__doc__ = doc
-    elif if_false.__doc__ is None and if_true.__doc__ is not None:
-        doc = if_true.__doc__
-        if_false.__doc__ = doc
-    else:
-        raise RuntimeError("only one function can have a docstring")
-    fn.__doc__ = doc
-
-    _boolean_dispatched[fn] = {
-        "if_true": if_true,
-        "if_false": if_false,
-        "index": arg_index,
-        "default": default,
-        "arg_name": arg_name
     }
     return fn
