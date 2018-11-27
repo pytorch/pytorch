@@ -39,22 +39,37 @@ namespace torch {
 AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(TENSOR)
 #undef TENSOR
 
+/// A generic deleter function.
+using Deleter = std::function<void(void*)>;
+
+/// Exposes the given `data` as a `Tensor` without taking ownership of the
+/// original data. `sizes` should specify the shape of the tensor, `strides` the
+/// stride in each dimension. The `deleter` function (a
+/// `std::function<void(void*)>`) will be called on the `data` when the Tensor
+/// data would normally be deallocated. The `TensorOptions` specify additional
+/// configuration options for the returned tensor, such as what type to
+/// interpret the `data` as.
 inline at::Tensor from_blob(
     void* data,
     at::IntList sizes,
     at::IntList strides,
-    const std::function<void(void*)>& deleter,
-    const at::TensorOptions& options = {}) {
+    const Deleter& deleter,
+    const at::TensorOptions& options = at::TensorOptions()) {
   at::Tensor tensor =
       at::from_blob(data, sizes, strides, deleter, options.is_variable(false));
   return autograd::make_variable(tensor, options.requires_grad());
 }
 
+/// Exposes the given `data` as a `Tensor` without taking ownership of the
+/// original data. `sizes` should specify the shape of the tensor, `strides` the
+/// stride in each dimension. The `TensorOptions`
+/// specify additional configuration options for the returned tensor, such as
+/// what type to interpret the `data` as.
 inline at::Tensor from_blob(
     void* data,
     at::IntList sizes,
     at::IntList strides,
-    const at::TensorOptions& options = {}) {
+    const at::TensorOptions& options = at::TensorOptions()) {
   return torch::from_blob(
       data,
       sizes,
@@ -63,20 +78,30 @@ inline at::Tensor from_blob(
       options);
 }
 
+/// Exposes the given `data` as a `Tensor` without taking ownership of the
+/// original data. `sizes` should specify the shape of the tensor. The `deleter`
+/// (a `std::function<void(void*)>`) function will be called on the `data` when
+/// the Tensor data would normally be deallocated. The `TensorOptions` specify
+/// additional configuration options for the returned tensor, such as what type
+/// to interpret the `data` as.
 inline at::Tensor from_blob(
     void* data,
     at::IntList sizes,
-    const std::function<void(void*)>& deleter,
-    const at::TensorOptions& options = {}) {
+    const Deleter& deleter,
+    const at::TensorOptions& options = at::TensorOptions()) {
   at::Tensor tensor =
       at::from_blob(data, sizes, deleter, options.is_variable(false));
   return autograd::make_variable(tensor, options.requires_grad());
 }
 
+/// Exposes the given `data` as a `Tensor` without taking ownership of the
+/// original data. `sizes` should specify the shape of the tensor. The
+/// `TensorOptions` specify additional configuration options for the returned
+/// tensor, such as what type to interpret the `data` as.
 inline at::Tensor from_blob(
     void* data,
     at::IntList sizes,
-    const at::TensorOptions& options = {}) {
+    const at::TensorOptions& options = at::TensorOptions()) {
   return torch::from_blob(data, sizes, /*deleter=*/[](void*) {}, options);
 }
 
