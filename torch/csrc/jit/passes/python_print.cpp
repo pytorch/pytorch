@@ -837,7 +837,8 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
     prim::FusedConcat, // optimization pass adds it
     prim::FusionGroup, // optimization pass adds it
     prim::Load, // used in interpreter only
-    prim::MMTreeReduce, // used in batched execution only
+    prim::MMTreeReduce, // used as an optimization
+    prim::MMBatchSide, // used as an optimization
     prim::Store, // used in interpreter only
 
   };

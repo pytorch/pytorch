@@ -58,6 +58,7 @@ class AliasDb {
   void analyzeCreator(Node* node);
   void analyzeExtractor(Node* node);
   void analyzeChunk(Node* node);
+  void analyzeBroadcastingChunk(Node* node);
 
   Symbol getFreshAlias() const;
   void addAlias(const Value* value, AliasInfo alias);

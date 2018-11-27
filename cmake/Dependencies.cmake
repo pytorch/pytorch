@@ -1004,16 +1004,19 @@ if (NOT BUILD_ATEN_MOBILE)
   # see https://cmake.org/Wiki/CMake_RPATH_handling
   if (APPLE)
     set(CMAKE_MACOSX_RPATH ON)
-  endif()
+    set(_rpath_portable_origin "@loader_path")
+  else()
+    set(_rpath_portable_origin $ORIGIN)
+  endif(APPLE)
+  # Use separate rpaths during build and install phases
   set(CMAKE_SKIP_BUILD_RPATH  FALSE)
+  # Don't use the install-rpath during the build phase
   set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
-  set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
+  set(CMAKE_INSTALL_RPATH "${_rpath_portable_origin}")
+  # Automatically add all linked folders that are NOT in the build directory to
+  # the rpath (per library?)
   set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
   set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
-  list(FIND CMAKE_PLATFORM_IMPLICIT_LINK_DIRECTORIES "${CMAKE_INSTALL_PREFIX}/lib" isSystemDir)
-  if ("${isSystemDir}" STREQUAL "-1")
-    set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
-  endif()
 
   # Top-level build config
   ############################################

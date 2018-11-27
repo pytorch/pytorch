@@ -182,6 +182,8 @@ void AliasDb::analyze(Node* node) {
     case prim::TupleConstruct:
     case prim::Undefined:
     case prim::FusedConcat:
+    case prim::MMTreeReduce:
+    case prim::MMBatchSide:
       return analyzeCreator(node);
     case prim::TupleUnpack:
     case prim::TupleIndex:
@@ -191,6 +193,8 @@ void AliasDb::analyze(Node* node) {
       return analyzeExtractor(node);
     case prim::ConstantChunk:
       return analyzeChunk(node);
+    case prim::BroadcastingChunk:
+      return analyzeBroadcastingChunk(node);
     case aten::add:
     case aten::sub:
     case aten::mul:
@@ -354,7 +358,9 @@ void AliasDb::analyzeSubgraph(Node* node) {
 
 // For nodes that generate a fresh value from nothing
 void AliasDb::analyzeCreator(Node* node) {
-  giveFreshAlias(node->output());
+  for (Value * output : node->outputs()) {
+    giveFreshAlias(output);
+  }
 }
 
 // For nodes that extract values from a composite type. Right now, this just
@@ -370,6 +376,23 @@ void AliasDb::analyzeChunk(Node* node) {
   auto alias = valueToAlias_.at(node->input());
   for (auto output : node->outputs()) {
     addAlias(output, alias);
+  }
+}
+
+// BroadcastingChunk: all inputs are broadcasted, and then individually chunked.
+// This is an intermediate node used only in the graph fuser.
+void AliasDb::analyzeBroadcastingChunk(Node* node) {
+  auto inputs = node->inputs();
+  auto outputs = node->outputs();
+  auto nchunks = node->i(attr::chunks);
+  for (size_t index = 0; index < inputs.size(); ++index) {
+    // Each inputs[i] is aliased by exactly `nchunks` distinct output tensors:
+    // inputs[i] produces chunks outputs[i * nchunks + k] for k in [0..nchunks)
+    auto alias = valueToAlias_.at(inputs.at(index));
+    auto output_begin = outputs.begin() + index * nchunks;
+    for (auto it = output_begin; it != output_begin + nchunks; ++it) {
+      addAlias(*it, alias);
+    }
   }
 }
 
