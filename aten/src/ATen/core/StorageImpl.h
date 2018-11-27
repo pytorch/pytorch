@@ -2,7 +2,7 @@
 
 #include <ATen/core/Allocator.h>
 #include <c10/core/ScalarType.h>
-#include <ATen/core/ScalarTypeUtils.h>
+#include <c10/core/ScalarTypeUtils.h>
 
 #include <c10/util/intrusive_ptr.h>
 
@@ -72,7 +72,7 @@ struct CAFFE2_API StorageImpl : public c10::intrusive_ptr_target {
   inline T* data() const {
     // TODO: This is bad: it means storage.data<T>() calls only work on
     // T that are valid ScalarType.  FIXME!
-    auto data_type_T = at::scalarTypeToDataType(at::CTypeToScalarType<T>::to());
+    auto data_type_T = at::scalarTypeToDataType(c10::CTypeToScalarType<T>::to());
     if (dtype().id() != data_type_T) {
       AT_ERROR(
           "Attempt to access StorageImpl having data type ",
