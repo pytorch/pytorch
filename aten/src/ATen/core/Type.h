@@ -29,10 +29,13 @@
 #endif
 #endif
 
+namespace c10 {
+struct Allocator;
+}
+
 namespace at {
 
 class Context;
-struct Allocator;
 struct Generator;
 struct Storage;
 class Tensor;
