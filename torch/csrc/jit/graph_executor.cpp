@@ -293,7 +293,7 @@ struct GraphExecutorImpl {
 
   static std::shared_ptr<Graph> prepareGraph(std::shared_ptr<Graph>& graph) {
     auto copy = graph->copy();
-    EraseShapeInformation(*copy);
+    EraseShapeInformation(copy);
     return copy;
   }
 
@@ -332,7 +332,7 @@ struct GraphExecutorImpl {
       : graph(prepareGraph(graph)),
         // until we have correct alias analysis any use of mutable operators
         // disables all optimization
-        optimize(optimize && !hasMutableOperators(this->graph->block())),
+        optimize(optimize),
         num_inputs(this->graph->inputs().size()),
         num_flat_inputs(countFlatInputs(graph)),
         num_outputs(this->graph->outputs().size()) {}
@@ -427,7 +427,7 @@ private:
     //          constants, and constant propagation doesn't need shape information
     //          anyway, so it's better to run it first.
     ConstantPropagation(opt_graph);
-    PropagateInputShapes(*opt_graph);
+    PropagateInputShapes(opt_graph);
     PropagateRequiresGrad(opt_graph);
 
     // Phase 3. Run differentiable optimizations (i.e. simple graph rewrites that
@@ -456,13 +456,22 @@ private:
   }
 
   void runOptimization(std::shared_ptr<Graph>& graph, const ArgumentSpec& spec) {
+    // Basic graph preprocessing to eliminate noise.
     EliminateDeadCode(graph);
     EliminateCommonSubexpression(graph);
     ConstantPooling(graph);
-    UnrollLoops(graph);
+
     PeepholeOptimize(graph);
-    CheckInplace(graph);
+
+    // Unroll small loops, and eliminate expressions that are the same at every
+    // iteration.
+    UnrollLoops(graph);
+    EliminateCommonSubexpression(graph);
+
+    // Rewrite subgraphs with many MMs into expressions that batch them.
     BatchMM(graph);
+
+    CheckInplace(graph);
   }
 
   void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
@@ -513,7 +522,7 @@ private:
     // been set.
     auto local_graph = this->graph->copy();
     setInputTypes(*local_graph, spec);
-    PropagateInputShapes(*local_graph);
+    PropagateInputShapes(local_graph);
     auto output_values = script::inlineCallTo(*state->graph, *local_graph, input_values);
 
     auto outputs = last(stack, num_outputs);

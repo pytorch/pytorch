@@ -1,7 +1,7 @@
 #include "torch/csrc/jit/autodiff.h"
 
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/jit/passes/common_subexpression_elimination.h"
+#include "torch/csrc/jit/passes/constant_pooling.h"
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/utils/functional.h"
@@ -640,10 +640,6 @@ static void liftConstants(Gradient& grad_desc, ReverseDetails& rev_info) {
       }
     }
   }
-
-  // It's possible the we've cloned the same constants many times,
-  // so we use CSE to deduplicate them.
-  EliminateCommonSubexpression(reverse_block);
 }
 
 // Takes a grad_desc.f returned from `addReverseInline` and splits off the
@@ -791,6 +787,9 @@ Gradient differentiate(std::shared_ptr<Graph>& graph) {
   // Fills in f, df, f_real_outputs, df_input_captures,
   // modifies df_input_vjps (new vjps are added for temporaries)
   lambdaLiftReverse(grad_desc, rev_info);
+  // It's possible the we've cloned the same constants many times, so
+  // de-duplicate them
+  ConstantPooling(grad_desc.df);
   return grad_desc;
 }
 

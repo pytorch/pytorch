@@ -203,7 +203,7 @@ typedef ArrayRef<Tensor> TensorList;
 inline std::ostream& operator<<(
     std::ostream& stream,
     at::ScalarType scalar_type) {
-  return stream << at::toString(scalar_type);
+  return stream << toString(scalar_type);
 }
 
 } // namespace at

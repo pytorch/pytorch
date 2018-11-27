@@ -33,7 +33,7 @@ class UnaryElementwiseWithArgsDNNLowPOp : public Operator<CPUContext> {
         input.template data<T>(),
         output.template mutable_data<T>());
 
-    PropagateOutputTensorQuantizationParams(
+    dnnlowp::PropagateOutputTensorQuantizationParams(
         this, 0, functor_.GetOutputQuantizationParams());
     return true;
   }

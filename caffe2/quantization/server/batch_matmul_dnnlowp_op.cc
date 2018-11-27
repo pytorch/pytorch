@@ -317,7 +317,7 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
           // Adjust for the fact that B will actually use signed.
           B_qparams_[i].zero_point += signed_min;
 
-          Quantize<int8_t>(
+          fbgemm::Quantize<int8_t>(
               B.template data<float>() + i * B_quantized_temp.size(),
               B_quantized_temp.data(),
               B_quantized_temp.size(),
@@ -332,8 +332,7 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
             B_quantized_temp.data(),
             trans_b_ ? K : N,
             nullptr /*pmat*/,
-            1 /*groups*/,
-            B_qparams_[i].zero_point));
+            1)); /*groups*/
 
         // Pre-compute column_offset
         for (int j = 0; j < N; ++j) {
@@ -446,7 +445,6 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
               A_pack_buf_.data() +
                   tid * A_pack_buf_len_per_thread, // buffer for packed matrix
               1, // group
-              in_qparams_[0].zero_point,
               row_offsets_.data() + tid * row_offset_len_per_thread);
 
           int B_batch_idx = ndims_A >= ndims_B ? i : p * num_sub_batches + i;
@@ -560,7 +558,6 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
                 A_pack_buf_.data() +
                     tid * A_pack_buf_len_per_thread, // buffer for packed matrix
                 1, // group
-                in_qparams_[0].zero_point,
                 row_offsets_.data() + tid * row_offset_len_per_thread);
 
             int B_batch_idx = ndims_A >= ndims_B ? i : p * num_sub_batches + i;
@@ -694,7 +691,7 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
 
         // Requantization
         for (int j = 0; j < M * N; ++j) {
-          Y_quantized[p * Y_stride + i * M * N + j] = Requantize<T>(
+          Y_quantized[p * Y_stride + i * M * N + j] = fbgemm::Requantize<T>(
               Y_int32_[p * Y_stride + i * M * N + j],
               requantization_params_[0]);
         }

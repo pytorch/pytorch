@@ -161,7 +161,6 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
           K,
           X_pack_buf_.data(), // buffer for packed matrix
           1, // group
-          in_qparams_[0].zero_point,
           row_offsets_.data());
 
       DoNothing<> doNothingObj{};
@@ -240,7 +239,6 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
             K,
             X_pack_buf_.data(), // buffer for packed matrix
             1, // group
-            in_qparams_[0].zero_point,
             row_offsets_.data());
 
         DoNothing<float, float> doNothingObj{};
@@ -348,8 +346,8 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
               in_qparams_[0].zero_point * column_offsets_[j] + row_offset;
           Y_int32_[i * N + j] += b_quantized_data_[j];
 
-          Ydata[i * N + j] =
-              Requantize<T>(Y_int32_[i * N + j], requantization_params_);
+          Ydata[i * N + j] = fbgemm::Requantize<T>(
+              Y_int32_[i * N + j], requantization_params_);
         }
       }
     }
@@ -431,7 +429,7 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
         // Adjust for the fact that weight will actually use signed.
         in_qparams_[1].zero_point += signed_min;
 
-        Quantize<T_signed>(
+        fbgemm::Quantize<T_signed>(
             W.template data<float>(),
             W_quantized_.data(),
             W_quantized_.size(),
@@ -474,7 +472,7 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
     in_qparams_[1].zero_point += signed_min;
 
     W_quantized_.resize(W.size());
-    Quantize<T_signed>(
+    fbgemm::Quantize<T_signed>(
         W.template data<float>(),
         W_quantized_.data(),
         W_quantized_.size(),
@@ -529,7 +527,7 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
         b_dequantized_.resize(N);
         for (int j = 0; j < N; ++j) {
           b_dequantized_[j] =
-              Dequantize<int32_t>(b_quantized_data_[j], in_qparams_[2]);
+              fbgemm::Dequantize<int32_t>(b_quantized_data_[j], in_qparams_[2]);
         }
         b_dequantized_data_ = b_dequantized_.data();
       }
@@ -540,7 +538,7 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
       if (!dequantize_output_) {
         b_quantized_.resize(N);
         for (int j = 0; j < N; ++j) {
-          b_quantized_[j] = Quantize<int32_t>(
+          b_quantized_[j] = fbgemm::Quantize<int32_t>(
               b_dequantized_data_[j],
               in_qparams_[2].zero_point,
               in_qparams_[2].scale,

@@ -45,14 +45,14 @@ TEST(Requantization, BatchRequantizationUnitTest) {
         real_multiplier, target_qparams);
 
     for (int j = 0; j < LEN; ++j) {
-      expected[j] = clamp(
+      expected[j] = fbgemm::clamp(
           target_qparams.zero_point +
               std::nearbyint(static_cast<double>(src[j]) * real_multiplier),
           8);
     }
 
     unsigned long long cycle_begin = __rdtsc();
-    Requantize(src.data(), actual.data(), LEN, params);
+    fbgemm::Requantize(src.data(), actual.data(), LEN, params);
     unsigned long long cycle_end = __rdtsc();
     double elements_per_cycle = (double)LEN / (cycle_end - cycle_begin);
     LOG(INFO) << elements_per_cycle << " elements_per_cycle";
@@ -118,20 +118,21 @@ TEST(Requantization, RequantizationUnitTest) {
       vector<float> src(LEN);
       for (int j = 0; j < LEN; ++j) {
         float src_orig = value_dist(gen);
-        src_q[j] = Quantize<int32_t>(
+        src_q[j] = fbgemm::Quantize<int32_t>(
             src_orig, 0, src_qparams.scale, 32, true /* signed*/);
-        src[j] = Dequantize<int32_t>(src_q[j], src_qparams);
+        src[j] = fbgemm::Dequantize<int32_t>(src_q[j], src_qparams);
         // This number shouldn't have any quantization error
         EXPECT_EQ(
-            Quantize<int32_t>(src[j], 0, src_qparams.scale, 32, true),
+            fbgemm::Quantize<int32_t>(src[j], 0, src_qparams.scale, 32, true),
             src_q[j]);
       }
 
       vector<uint8_t> dst_q(LEN);
-      Requantize(src_q.data(), dst_q.data(), LEN, requantization_params);
+      fbgemm::Requantize(
+          src_q.data(), dst_q.data(), LEN, requantization_params);
 
       for (int j = 0; j < LEN; ++j) {
-        float dst = Dequantize<uint8_t>(dst_q[j], dst_qparams);
+        float dst = fbgemm::Dequantize<uint8_t>(dst_q[j], dst_qparams);
 
         float err = fabsf(dst - src[j]);
         sum_sq += err * err;

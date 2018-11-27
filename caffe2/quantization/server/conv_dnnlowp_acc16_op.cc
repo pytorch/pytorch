@@ -307,7 +307,7 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNCHWAndType_() {
               (uint8_t*)col_buffer_data + tid * col_buffer_size;
         } else {
           col_buffer_quantized.resize(kernel_dim * output_image_size);
-          Quantize<uint8_t>(
+          fbgemm::Quantize<uint8_t>(
               (const float*)col_buffer_data + tid * col_buffer_size,
               col_buffer_quantized.data(),
               col_buffer_quantized.size(),
@@ -605,7 +605,7 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNHWCAndType_() {
               col_buffer_quantized.size(),
               dnnlowp_get_num_threads(),
               dnnlowp_get_thread_num());
-          Quantize<uint8_t>(
+          fbgemm::Quantize<uint8_t>(
               (const float*)col_buffer_data + begin,
               col_buffer_quantized.data() + begin,
               end - begin,
@@ -679,7 +679,6 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNHWCAndType_() {
                     group_ * kernel_dim,
                     X_pack_buf_.data() + tid * x_pack_buf_size_per_thread,
                     1, // group
-                    in_qparams_[INPUT].zero_point,
                     row_offsets_.data() + tid * row_offset_size_per_thread);
 
                 DoNothing<> doNothingObj{};
@@ -743,8 +742,7 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNHWCAndType_() {
                         (i_begin * group_ + group_id) * kernel_dim,
                     group_ * kernel_dim,
                     X_pack_buf_.data() + tid * x_pack_buf_size_per_thread,
-                    1, // group
-                    in_qparams_[INPUT].zero_point);
+                    1); // group
 
                 DoNothing<int32_t, int32_t> doNothingObj{};
                 memCopy<> memCopyObj(doNothingObj);

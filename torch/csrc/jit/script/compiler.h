@@ -232,7 +232,6 @@ TORCH_API Value* emitBuiltinCall(
   // if true, emitBuiltinCall will throw an exception if this builtin does not exist,
   // otherwise it will return nullptr if the builtin is not found.
   bool required);
-
 } // namespace script
 } // namespace jit
 } // namespace torch

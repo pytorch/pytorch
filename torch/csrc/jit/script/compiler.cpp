@@ -435,7 +435,10 @@ static inline bool isIntOrFloatUsedAsList(
   auto v_type = value->type();
   if (v_type != FloatType::get() && v_type != IntType::get())
     return false;
-  auto list_type = arg.type()->cast<ListType>();
+  auto arg_type = arg.type();
+  if (arg_type->cast<OptionalType>())
+    arg_type = arg_type->cast<OptionalType>()->getElementType();
+  auto list_type = arg_type->cast<ListType>();
   return list_type && list_type->getElementType() == v_type && arg.N();
 }
 
@@ -1530,21 +1533,47 @@ private:
     const auto sliceable = emitExpr(lhs.value());
 
     if (sliceable->type()->isSubtypeOf(DynamicType::get())) {
-    // If it's a tensor, just fully evaluate the subscript operation and emit
-    // an in-place assignment
-      const auto lhsValue =
-          emitSubscript(lhs.range(), sliceable, lhs.subscript_exprs());
+      // If it's a tensor, just fully evaluate the subscript operation and emit
+      // an in-place assignment
+      std::vector<Value*> tensorIndices;
+      Value* sliced;
+      std::tie(sliced, tensorIndices) = emitIntAndSliceIndexing(
+          lhs.range(), sliceable, lhs.subscript_exprs());
 
+      const auto slicedArg = NamedValue(stmt.lhs().range(), "self", sliced);
       const auto rhs = NamedValue(stmt.rhs().range(), emitExpr(stmt.rhs()));
-      const auto self = NamedValue(stmt.lhs().range(), "self", lhsValue);
-      emitBuiltinCall(
-          stmt.range(),
-          *method.graph(),
-          getAugOp(stmt, /*isTensor=*/true),
-          self,
-          {rhs},
-          {},
-          /*required=*/true);
+      if (tensorIndices.size() == 0) {
+        // Common case: we only tried to index with int and slices. Emit the
+        // correct augmented assignment op to the sliced value
+        emitBuiltinCall(
+            stmt.range(),
+            *method.graph(),
+            getAugOp(stmt, /*isTensor=*/true),
+            slicedArg,
+            {rhs},
+            {},
+            /*required=*/true);
+      } else {
+        // Special case: we tried to do "advanced indexing". Lower this expr
+        // into `index` and `index_put_` ops
+        const auto indices = graph->insertNode(
+          graph->createList(DynamicType::get(), tensorIndices))->output();
+        const auto indexed =
+            graph->insert(aten::index, {slicedArg, indices}, {}, stmt.range());
+        const auto augmented = emitBuiltinCall(
+            stmt.range(),
+            *method.graph(),
+            getAugOp(stmt, /*isTensor=*/true),
+            indexed,
+            {rhs},
+            {},
+            /*required=*/true);
+        graph->insert(
+            aten::index_put_,
+            {slicedArg, indices, augmented},
+            {},
+            stmt.range());
+      }
     } else {
       // Otherwise, it should be a list.  Lower this expression into:
       //     list.set_item(get_item(idx).add_(value))
@@ -1570,32 +1599,12 @@ private:
       const auto valueArg =
           NamedValue(stmt.rhs().range(), "value", emitExpr(stmt.rhs()));
 
-      const auto getItem = emitBuiltinCall(
-          stmt.range(),
-          *method.graph(),
-          aten::select,
-          c10::nullopt,
-          {listArg, idxArg},
-          {},
-          /*required=*/true);
-
-      const auto augmentedItem = emitBuiltinCall(
-          stmt.range(),
-          *method.graph(),
-          getAugOp(stmt, isTensorList),
-          {},
-          {getItem, valueArg},
-          {},
-          /*required=*/true);
-
-      emitBuiltinCall(
-          stmt.range(),
-          *method.graph(),
-          aten::_set_item,
-          c10::nullopt,
-          {listArg, idxArg, augmentedItem},
-          {},
-          /*required=*/true);
+      const auto getItem =
+          graph->insert(aten::select, {listArg, idxArg}, {}, stmt.range());
+      const auto augmentedItem = graph->insert(
+          getAugOp(stmt, isTensorList), {getItem, valueArg}, {}, stmt.range());
+      graph->insert(
+          aten::_set_item, {listArg, idxArg, augmentedItem}, {}, stmt.range());
     }
   }
 
@@ -1617,20 +1626,30 @@ private:
 
     // If it's a tensor, copy the RHS data into it
     if (sliceable->type()->isSubtypeOf(DynamicType::get())) {
-      std::vector<NamedValue> args;
-      // Obtain the sliced value
-      auto lhsValue =
-          emitSubscript(lhs.range(), sliceable, lhs.subscript_exprs());
-      args.emplace_back(lhs.range(), "t", lhsValue);
-      args.emplace_back(rhs.loc(), "other", rhs.value(*graph));
-      emitBuiltinCall(
-          stmtRange,
-          *method.graph(),
-          aten::copy_,
-          c10::nullopt,
-          args,
-          {},
-          true);
+      std::vector<Value*> tensorIndices;
+      Value* sliced;
+      // Handle multi-dimensional slicing: first emit int/slice indexing
+      // TODO: the Python equivalent code has special-cased copy_to
+      // broadcasting to match NumPy semantics (see PR#4853). We can't
+      // replicate that without knowing the size of the Tensor; so really that
+      // code should be moved into the aten function
+      std::tie(sliced, tensorIndices) = emitIntAndSliceIndexing(
+          lhs.range(), sliceable, lhs.subscript_exprs());
+
+      const auto slicedArg = NamedValue(lhs.range(), sliced);
+      if (tensorIndices.size() == 0) {
+        // Common case: we only tried to index with int and slices. Copy the
+        // RHS into the resulting tensor.
+        graph->insert(aten::copy_, {slicedArg, rhs}, {}, stmtRange);
+      } else {
+        // Special case: we tried to do "advanced indexing" with a tensor.
+        // Dispatch to `aten::index_put_`.
+        const auto indices = graph->insertNode(
+          graph->createList(DynamicType::get(), tensorIndices))->output();
+
+        graph->insert(
+            aten::index_put_, {slicedArg, indices, rhs}, {}, stmtRange);
+      }
 
     // Otherwise, this is a list. Dispatch to aten::_set_item to both select and
     // assign
@@ -1648,14 +1667,8 @@ private:
       args.emplace_back(
           lhs.subscript_exprs().range(), "idx", emitExpr(subscript[0]));
       args.push_back(rhs);
-      emitBuiltinCall(
-          stmtRange,
-          *method.graph(),
-          aten::_set_item,
-          c10::nullopt,
-          args,
-          {},
-          true);
+
+      graph->insert(aten::_set_item, args, {}, stmtRange);
     }
   }
 
@@ -2197,6 +2210,13 @@ private:
         << "Unsupported operation: indexing tensor with unsupported index type "
         << index->type()->str() << ". Only ints, slices, and tensors are supported.";
     }
+    // at::index takes in a TensorList where some tensors can be undefined.
+    // Convert NULL tensorIndices to undefined tensors to pass to at::index.
+    for (auto& index : tensor_indices) {
+      if (index == nullptr) {
+        index = graph->insertNode(graph->createUndefined())->output();
+      }
+    }
     return std::make_pair(sliceable, tensor_indices);
   }
 
@@ -2237,13 +2257,6 @@ private:
       return sliceable;
     }
 
-    // at::index takes in a TensorList where some tensors can be undefined.
-    // Convert NULL tensor_indices to undefined tensors to pass to at::index.
-    for (auto& index : tensor_indices) {
-      if (index == nullptr) {
-        index = graph->insertNode(graph->createUndefined())->output();
-      }
-    }
     return emitIndex(loc, sliceable, tensor_indices);
   }
 
@@ -2508,7 +2521,7 @@ const std::unordered_map<std::string, std::function<TypePtr(Subscript)>> &subscr
   return map;
 }
 
-bool  isTorch(Expr expr) {
+bool isTorch(Expr expr) {
   return expr.kind() == TK_VAR && Var(expr).name().name() == "torch";
 }
 
@@ -2551,7 +2564,6 @@ TypePtr parseTypeFromExpr(Expr expr) {
                                   << " cannot be used in a type expression";
 }
 
-
 c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(Expr expr) {
   if (expr.kind() != TK_SUBSCRIPT)
     return c10::nullopt;
@@ -2559,16 +2571,26 @@ c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(Expr expr) {
   if (subscript.value().kind() != TK_VAR)
     return c10::nullopt;
   auto var = Var(subscript.value());
+  auto subscript_exprs = subscript.subscript_exprs();
 
-  if (var.name().name().find("BroadcastingList") != 0) {
+  // handle the case where the BroadcastingList is wrapped in a Optional type
+  if(var.name().name() == "Optional") {
+    auto broadcast_list = handleBroadcastList(subscript_exprs[0]);
+    if (broadcast_list) {
+      TypePtr opt_type = OptionalType::create(broadcast_list->first);
+      return std::pair<TypePtr, int32_t>(opt_type, broadcast_list->second);
+    } else {
+      return c10::nullopt;
+    }
+  } else if (var.name().name().find("BroadcastingList") != 0) {
     return c10::nullopt;
   }
 
-  if (subscript.subscript_exprs().size() != 1)
+  if (subscript_exprs.size() != 1)
     throw ErrorReport(subscript.subscript_exprs().range())
-      << "BroadcastingList must be subscripted with a type";
+      << "BroadcastingList/Optional[BroadcastingList] must be subscripted with a type";
 
-  auto typ = subscript.subscript_exprs()[0];
+  auto typ = subscript_exprs[0];
   auto len = var.name().name().substr(strlen("BroadcastingList"));
 
   if (typ.kind() != TK_VAR)

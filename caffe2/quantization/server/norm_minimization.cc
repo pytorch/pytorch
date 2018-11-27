@@ -223,7 +223,7 @@ TensorQuantizationParams NormMinimization::ChooseQuantizationParams(
       // go over each histogram bin and accumulate errors
       caffe2::CpuId cpuid = caffe2::GetCpuId();
       if (kind_ == NormMinimization::L2 && cpuid.avx2() && cpuid.fma()) {
-        norm = L2MinimizationKernelAVX2(
+        norm = internal::L2MinimizationKernelAVX2(
             precision,
             bins_f.data(),
             nbins,
