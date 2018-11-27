@@ -7,14 +7,14 @@
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <c10/core/Storage.h>
 #include <ATen/core/TensorOptions.h>
-#include <ATen/core/TensorTypeId.h>
-#include <ATen/core/TensorTypeIdRegistration.h>
+#include <c10/core/TensorTypeId.h>
+#include <c10/core/TensorTypeIdRegistration.h>
 #include <ATen/core/context_base.h>
 
 #include <c10/util/Exception.h>
-#include "c10/util/Optional.h"
+#include <c10/util/Optional.h>
 
-#include "c10/util/Flags.h"
+#include <c10/util/Flags.h>
 
 #include "caffe2/core/allocator.h"
 #include "caffe2/core/common.h"
