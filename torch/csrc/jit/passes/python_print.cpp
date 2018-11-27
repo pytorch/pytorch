@@ -758,7 +758,7 @@ struct PythonPrintPass {
         auto name = genMethodName("__forked_function");
         std::shared_ptr<Graph> graph = node->g(attr::Subgraph);
         worklist.emplace_back([graph, name, this] {
-          printOneFunction(*graph, name);
+          printFunctionDefinition(*graph, name);
         });
         // and we put a call to fork which invokes that function.
         stmt << "fork(self." << name;
@@ -814,7 +814,7 @@ struct PythonPrintPass {
     }
     printConstant(stmt, value);
   }
-  void printOneFunction(
+  void printFunctionDefinition(
       Graph& graph,
       const std::string& name,
       const std::vector<c10::optional<IValue>> defaults = {},
@@ -831,7 +831,7 @@ struct PythonPrintPass {
     scanBlock(graph.block());
 
     // last param_names.size() arguments to the graph are parameters and not
-    // actual inpputs, we will print these as, e.g. self.foo.bar
+    // actual inputs, we will print these as, e.g. self.foo.bar
     // while we print the true_inputs out as parameters
     auto true_inputs = graph.inputs().slice(0, graph.inputs().size() - param_names.size());
     auto param_names_it = param_names.begin();
@@ -892,7 +892,7 @@ struct PythonPrintPass {
       const std::string& name,
       const std::vector<c10::optional<IValue>>& defaults = {},
       const std::vector<std::string>& param_names = {}) {
-    printOneFunction(graph, name, defaults, param_names);
+    printFunctionDefinition(graph, name, defaults, param_names);
     while(!worklist.empty()) {
       out << "\n\n";
       auto work = worklist.back();
@@ -903,9 +903,9 @@ struct PythonPrintPass {
   void printMethod(script::Method& method) {
     std::unordered_map<at::Tensor*, QualifiedNamePtr> parameter_names;;
     createTensorToParameterNameMap(method.owner(), QualifiedName::create("self"),  parameter_names);
-    printOneMethod(method, parameter_names);
+    printMethod(method, parameter_names);
   }
-  void printOneMethod(
+  void printMethod(
       script::Method& method,
       const std::unordered_map<at::Tensor*, QualifiedNamePtr>&
           parameter_names) {
@@ -929,7 +929,7 @@ struct PythonPrintPass {
       if (name.find("__forked_function") == 0) {
         continue;
       }
-      printOneMethod(*method.value(), parameter_names);
+      printMethod(*method.value(), parameter_names);
     }
   }
 };

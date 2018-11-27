@@ -189,8 +189,7 @@ struct Method {
     return optimize;
   }
 
-  // lookup owning module, liftime is module is only valid for the lifetime
-  // of this method.
+  // the module that contains this method.
   Module& owner() const {
     return *owner_;
   }
