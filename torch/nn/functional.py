@@ -453,7 +453,7 @@ def max_unpool3d(input, indices, kernel_size, stride=None, padding=0,
 
 @torch._jit_internal.weak_script
 def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
-    # type: (Tensor, float, int, Optional[BroadcastingList1[int]], bool) -> Tensor
+    # type: (Tensor, float, BroadcastingList2[int], Optional[BroadcastingList2[int]], bool) -> Tensor
     r"""Applies a 2D power-average pooling over an input signal composed of
     several input planes. If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
@@ -472,7 +472,7 @@ def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
 
 @torch._jit_internal.weak_script
 def lp_pool1d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
-    # type: (Tensor, float, int, Optional[BroadcastingList1[int]], bool) -> Tensor
+    # type: (Tensor, float, BroadcastingList1[int], Optional[BroadcastingList1[int]], bool) -> Tensor
     r"""Applies a 1D power-average pooling over an input signal composed of
     several input planes. If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
