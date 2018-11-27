@@ -9,7 +9,7 @@
 #include "THCSleep.h"
 #include "THCStorage.h"
 #include "THCStorageCopy.h"
-#include "THCStream.h"
+
 #include "THCTensor.h"
 #include "THCTensorCopy.h"
 #include "THCTensorRandom.h"

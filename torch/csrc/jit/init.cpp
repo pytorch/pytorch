@@ -112,13 +112,13 @@ void initJITBindings(PyObject *module) {
      return Canonicalize(g);
    })
    .def("_jit_pass_lint", LintGraph)
-   .def("_jit_pass_shape_analysis", [](Graph& graph, std::vector<at::Tensor> inputs, bool with_grad) {
-     setInputTypes(graph, ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
+   .def("_jit_pass_shape_analysis", [](std::shared_ptr<Graph> graph, std::vector<at::Tensor> inputs, bool with_grad) {
+     setInputTypes(*graph, ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
      PropagateInputShapes(graph);
    })
-   .def("_jit_pass_complete_shape_analysis", [](Graph& graph, py::tuple inputs, bool with_grad) {
-     CompleteArgumentSpec spec(with_grad, evilDeprecatedBadCreateStackDoNotUse(inputs, graph.inputs()));
-     auto graph_inputs = graph.inputs();
+   .def("_jit_pass_complete_shape_analysis", [](std::shared_ptr<Graph> graph, py::tuple inputs, bool with_grad) {
+     CompleteArgumentSpec spec(with_grad, evilDeprecatedBadCreateStackDoNotUse(inputs, graph->inputs()));
+     auto graph_inputs = graph->inputs();
      JIT_ASSERT(spec.size() == graph_inputs.size());
      for (size_t i = 0; i < graph_inputs.size(); ++i) {
        graph_inputs[i]->setType(spec.at(i));
@@ -222,29 +222,34 @@ void initJITBindings(PyObject *module) {
           py::init([](py::function func,
                       py::tuple inputs,
                       py::function var_name_lookup_fn,
-                      bool optimize) {
-              auto graph = tracer::createGraphByTracing(func, toStack(inputs), var_name_lookup_fn);
-              return GraphExecutor(graph, optimize);
+                      bool optimize,
+                      bool _force_outplace) {
+            auto graph = tracer::createGraphByTracing(
+                func, toStack(inputs), var_name_lookup_fn, _force_outplace);
+            return GraphExecutor(graph, optimize);
           }),
           py::arg("func"),
           py::arg("inputs"),
           py::arg("var_name_lookup_fn"),
-          py::arg("optimize") = true)
+          py::arg("optimize") = true,
+          py::arg("_force_outplace") = false)
       .def(
           py::init([](std::shared_ptr<Graph> graph, bool optimize) {
             return GraphExecutor(std::move(graph), optimize);
           }),
           py::arg("graph"),
           py::arg("optimize") = true)
-      .def("graph_for", [](GraphExecutor& ge, py::args args) {
-        return ge.graphFor(evilDeprecatedBadCreateStackDoNotUse(args, ge.graph()->inputs()));
-      })
-      .def_property_readonly("graph", [](GraphExecutor& ge) {
-        return ge.graph();
-      })
-      .def("get_debug_state", [](GraphExecutor& ge) {
-        return ge.getDebugState();
-      })
+      .def(
+          "graph_for",
+          [](GraphExecutor& ge, py::args args) {
+            return ge.graphFor(evilDeprecatedBadCreateStackDoNotUse(
+                args, ge.graph()->inputs()));
+          })
+      .def_property_readonly(
+          "graph", [](GraphExecutor& ge) { return ge.graph(); })
+      .def(
+          "get_debug_state",
+          [](GraphExecutor& ge) { return ge.getDebugState(); })
       .def("__call__", [](GraphExecutor& ge, py::args args) -> py::object {
         const auto & graph = ge.graph();
         auto stack = evilDeprecatedBadCreateStackDoNotUse(args, graph->inputs());

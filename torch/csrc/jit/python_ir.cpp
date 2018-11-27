@@ -146,8 +146,8 @@ void initPythonIRBindings(PyObject * module_) {
       ss << g;
       return ss.str();
     })
-    .def("propagate_shapes", [](Graph& g, std::vector<at::Tensor> inputs, bool with_grad) {
-      setInputTypes(g, ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
+    .def("propagate_shapes", [](std::shared_ptr<Graph> g, std::vector<at::Tensor> inputs, bool with_grad) {
+      setInputTypes(*g, ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
       PropagateInputShapes(g);
     })
     .def("export", [](const std::shared_ptr<Graph> g, const std::vector<at::Tensor>& initializers,
@@ -222,11 +222,6 @@ void initPythonIRBindings(PyObject * module_) {
       std::ostringstream oss;
       g.prettyPrint(oss);
       return oss.str();
-    })
-    .def("python_print", [](Graph &g) {
-      std::ostringstream oss;
-      std::vector<at::Tensor> constants = PythonPrint(oss, g, true);
-      return std::make_pair(oss.str(), std::move(constants));
     })
     .GS(createFusionGroup)
     .def("createClone",[](Graph & g, Node * n, py::object fn) {

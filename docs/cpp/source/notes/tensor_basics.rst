@@ -107,6 +107,7 @@ to a single element in a larger ``Tensor``. They can be used anywhere a
 which reduce the dimensions of a ``Tensor``.
 
 .. code-block:: cpp
+
   torch::Tensor two = torch::rand({10, 20});
   two[1][2] = 4;
   // ^^^^^^ <- zero-dimensional Tensor
