@@ -14,9 +14,9 @@ at::Tensor linspace_from_neg_one(const Tensor& grid, int64_t num_steps) {
 Tensor make_base_grid_4D(const Tensor& theta, int64_t N, int64_t C, int64_t H, int64_t W) {
   auto base_grid = at::empty({N, H, W, 3}, theta.options());
 
-  base_grid.select(-1, 0) = linspace_from_neg_one(theta, W);
-  base_grid.select(-1, 1) = linspace_from_neg_one(theta, H).unsqueeze_(-1);
-  base_grid.select(-1, 2) = 1;
+  base_grid.select(-1, 0).copy_(linspace_from_neg_one(theta, W));
+  base_grid.select(-1, 1).copy_(linspace_from_neg_one(theta, H).unsqueeze_(-1));
+  base_grid.select(-1, 2).fill_(1);
 
   return base_grid;
 }
@@ -24,10 +24,10 @@ Tensor make_base_grid_4D(const Tensor& theta, int64_t N, int64_t C, int64_t H, i
 Tensor make_base_grid_5D(const Tensor& theta, int64_t N, int64_t C, int64_t D, int64_t H, int64_t W) {
   auto base_grid = at::empty({N, D, H, W, 4}, theta.options());
 
-  base_grid.select(-1, 0) = linspace_from_neg_one(theta, W);
-  base_grid.select(-1, 1) = linspace_from_neg_one(theta, H).unsqueeze_(-1);
-  base_grid.select(-1, 2) = linspace_from_neg_one(theta, D).unsqueeze_(-1).unsqueeze_(-1);
-  base_grid.select(-1, 3) = 1;
+  base_grid.select(-1, 0).copy_(linspace_from_neg_one(theta, W));
+  base_grid.select(-1, 1).copy_(linspace_from_neg_one(theta, H).unsqueeze_(-1));
+  base_grid.select(-1, 2).copy_(linspace_from_neg_one(theta, D).unsqueeze_(-1).unsqueeze_(-1));
+  base_grid.select(-1, 3).fill_(1);
 
   return base_grid;
 }
