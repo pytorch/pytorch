@@ -31,13 +31,13 @@
 
 namespace c10 {
 struct Allocator;
+struct Storage;
 }
 
 namespace at {
 
 class Context;
 struct Generator;
-struct Storage;
 class Tensor;
 
 static inline void noop_deleter(void*) {}
