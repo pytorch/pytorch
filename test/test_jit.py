@@ -9280,6 +9280,23 @@ class TestPytorchExportModes(JitTestCase):
             operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK)
         self.assertExpected(exported)
 
+    # torch.fmod is using to test ONNX_ATEN.
+    # If you plan to remove fmod from aten, or found this test failed.
+    # please contact @Rui.
+    @skipIfRocm
+    def test_onnx_aten(self):
+        class ModelWithAtenFmod(nn.Module):
+            def forward(self, x, y):
+                return torch.fmod(x, y)
+
+        f = io.BytesIO()
+        x = torch.randn(3, 4, dtype=torch.float32)
+        y = torch.randn(3, 4, dtype=torch.float32)
+        exported = torch.onnx.export_to_pretty_string(
+            ModelWithAtenFmod(), (x, y), f,
+            operator_export_type=OperatorExportTypes.ONNX_ATEN)
+        self.assertExpected(exported)
+
 
 # known to be failing in tracer
 EXCLUDE_TRACED = {
