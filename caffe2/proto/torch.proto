@@ -143,5 +143,5 @@ message ModelDef {
 
   // the table contains all the tensor information
   // the tensor id is defined as TensorProto.name
-  repeated caffe2.TensorProto tensors = 7;
+  repeated TensorDef tensors = 7;
 }

@@ -106,8 +106,8 @@ class ScriptModuleDeserializer final {
   std::vector<std::string> moduleStack_;
   // record_id => storage
   std::unordered_map<uint64_t, std::shared_ptr<at::Storage>> storageMap_;
-  // tensor_id => TensorProto
-  std::unordered_map<uint64_t, const caffe2::TensorProto*> metaMap_;
+  // tensor_id => TensorDef
+  std::unordered_map<uint64_t, const torch::TensorDef*> metaMap_;
   // parameter_name => at::Tensor
   std::unordered_map<std::string, at::Tensor*> paramMap_;
 };
@@ -402,9 +402,9 @@ void ScriptModuleDeserializer::deserialize(ModuleLookup module_lookup) {
 
   metaMap_.clear();
   for (int i = 0; i < model_def.tensors_size(); ++i) {
-    const auto& tensor_proto = model_def.tensors(i);
-    uint64_t tensor_id = caffe2::stoull(tensor_proto.name());
-    metaMap_[tensor_id] = &tensor_proto;
+    const auto& tensor_def = model_def.tensors(i);
+    uint64_t tensor_id = caffe2::stoull(tensor_def.tensor_id());
+    metaMap_[tensor_id] = &tensor_def;
   }
 
   const auto& module_def = model_def.main_module();
@@ -419,28 +419,25 @@ void ScriptModuleDeserializer::deserialize(ModuleLookup module_lookup) {
 at::Tensor ScriptModuleDeserializer::loadTensor(uint64_t tensor_id) {
   auto it = metaMap_.find(tensor_id);
   AT_ASSERT(it != metaMap_.end());
-  const caffe2::TensorProto& tensor_proto = *it->second;
+  const torch::TensorDef& tensor_def = *it->second;
   std::vector<int64_t> dims;
-  for (int i = 0; i < tensor_proto.dims_size(); ++i) {
-    dims.push_back(tensor_proto.dims(i));
+  for (int i = 0; i < tensor_def.dims_size(); ++i) {
+    dims.push_back(tensor_def.dims(i));
   }
-  AT_ASSERT(
-      tensor_proto.storage_type() == caffe2::TensorProto_StorageType_EXTERNAL);
-  const caffe2::ExternalDataProto& external_data = tensor_proto.external_data();
   std::vector<int64_t> strides;
-  for (int i = 0; i < external_data.strides_size(); ++i) {
-    strides.push_back(external_data.strides(i));
+  for (int i = 0; i < tensor_def.strides_size(); ++i) {
+    strides.push_back(tensor_def.strides(i));
   }
-  auto type = at::typeMetaToScalarType(
-      caffe2::DataTypeToTypeMeta(tensor_proto.data_type()));
-  uint64_t record_id = caffe2::stoull(external_data.record_id());
+  auto type = at::typeMetaToScalarType(caffe2::DataTypeToTypeMeta(
+        static_cast<caffe2::TensorProto::DataType>(tensor_def.data_type())));
+  uint64_t record_id = caffe2::stoull(tensor_def.record_id());
   AT_ASSERT(record_id != 0);
   auto storage_it = storageMap_.find(record_id);
   if (storage_it == storageMap_.end()) {
     at::DataPtr storage_ptr;
     uint64_t record_size;
     std::tie(storage_ptr, record_size) = reader_.getRecordWithKey(record_id);
-    AT_ASSERT(record_size == external_data.record_size());
+    AT_ASSERT(record_size == tensor_def.record_size());
     auto storage = std::make_shared<at::Storage>(
         at::CPU(type).typeMeta(),
         std::move(storage_ptr),
@@ -448,10 +445,10 @@ at::Tensor ScriptModuleDeserializer::loadTensor(uint64_t tensor_id) {
         nullptr); // NB: we didn't set any allocator for the tensor
     storageMap_.insert(std::make_pair(record_id, storage));
     return at::CPU(type)._th_tensor(
-        *storage, external_data.offset(), dims, strides);
+        *storage, tensor_def.offset(), dims, strides);
   }
   return at::CPU(type)._th_tensor(
-      *(storage_it->second.get()), external_data.offset(), dims, strides);
+      *(storage_it->second.get()), tensor_def.offset(), dims, strides);
 }
 
 at::Tensor* ScriptModuleDeserializer::lookupTensor(

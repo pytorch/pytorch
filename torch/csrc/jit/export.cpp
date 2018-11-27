@@ -509,7 +509,7 @@ class ScriptModuleSerializer final {
   // offset in the storageMap_
   void convertAndWriteTensor(
       const at::Tensor& tensor,
-      caffe2::TensorProto* tensor_proto);
+      torch::TensorDef* tensor_def);
 
   // dump all the tensors in the tensorTable_ to a ModelDef (metadata) and
   // the file/stream (the content), assuming all the information of the
@@ -846,25 +846,22 @@ void ScriptModuleSerializer::collectInfo(
 
 void ScriptModuleSerializer::convertAndWriteTensor(
     const at::Tensor& tensor,
-    caffe2::TensorProto* tensor_proto) {
+    torch::TensorDef* tensor_def) {
   auto tensor_it = tensorTable_.find(&tensor);
   AT_ASSERT(tensor_it != tensorTable_.end());
-  tensor_proto->set_name(c10::to_string(tensor_it->second));
+  tensor_def->set_tensor_id(c10::to_string(tensor_it->second));
   for (auto d : tensor.sizes()) {
-    tensor_proto->add_dims(d);
+    tensor_def->add_dims(d);
   }
-  tensor_proto->set_data_type(caffe2::TypeMetaToDataType(
+  tensor_def->set_data_type(caffe2::TypeMetaToDataType(
       at::scalarTypeToTypeMeta(tensor.type().scalarType())));
-  tensor_proto->set_storage_type(caffe2::TensorProto_StorageType_EXTERNAL);
-  caffe2::ExternalDataProto* external_data =
-      tensor_proto->mutable_external_data();
   for (auto s : tensor.strides()) {
-    external_data->add_strides(s);
+    tensor_def->add_strides(s);
   }
-  external_data->set_offset(tensor.storage_offset());
+  tensor_def->set_offset(tensor.storage_offset());
   uint64_t record_size =
       tensor.type().elementSizeInBytes() * tensor.storage().size();
-  external_data->set_record_size(record_size);
+  tensor_def->set_record_size(record_size);
   auto* key = tensor.storage().unsafeGetStorageImpl();
   auto storage_it = storageMap_.find(key);
   if (storage_it == storageMap_.end()) {
@@ -890,10 +887,10 @@ void ScriptModuleSerializer::convertAndWriteTensor(
     } else {
       record_id = writer_.writeRecord(tensor.storage().data(), record_size);
     }
-    external_data->set_record_id(c10::to_string(record_id));
+    tensor_def->set_record_id(c10::to_string(record_id));
     storageMap_[key] = record_id;
   } else {
-    external_data->set_record_id(c10::to_string(storage_it->second));
+    tensor_def->set_record_id(c10::to_string(storage_it->second));
   }
   // TODO handle device case, set the device_detail and load to CUDA device
 }
@@ -901,8 +898,8 @@ void ScriptModuleSerializer::convertAndWriteTensor(
 void ScriptModuleSerializer::writeTensorTable(torch::ModelDef* model_def) {
   // NB: we don't reserve any order for tensors in the tensorTable_
   for (const auto& kv : tensorTable_) {
-    auto* tensor_proto = model_def->add_tensors();
-    convertAndWriteTensor(*kv.first, tensor_proto);
+    auto* tensor_def = model_def->add_tensors();
+    convertAndWriteTensor(*kv.first, tensor_def);
   }
 }
 
