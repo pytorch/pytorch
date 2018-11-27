@@ -135,6 +135,12 @@ inline void check_no_requires_grad(const Tensor& tensor, const char* name) {
   }
 }
 
+inline void check_no_requires_grad(TensorList tensors, const char* name) {
+  for (auto& tensor : tensors) {
+    check_no_requires_grad(tensor, name);
+  }
+}
+
 // Assumed that saved tensor lists are never inplace outputs
 inline std::vector<SavedVariable> make_saved_variable_list(TensorList tensors) {
   return fmap(tensors, [](const Tensor& tensor) -> SavedVariable {

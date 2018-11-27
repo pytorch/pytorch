@@ -28,6 +28,7 @@ TESTS = [
     'distributions',
     'expecttest',
     'indexing',
+    'indexing_cuda',
     'jit',
     'multiprocessing',
     'multiprocessing_spawn',
