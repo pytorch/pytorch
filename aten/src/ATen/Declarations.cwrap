@@ -1849,6 +1849,7 @@
     - Double
   backends:
     - CPU
+    - CUDA
   variants:
     - function
   return: argument 0
