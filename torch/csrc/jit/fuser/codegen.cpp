@@ -98,8 +98,8 @@ static std::string variableType(const std::shared_ptr<c10::Type> t) {
     auto const tt = t->cast<TensorType>();
     return calcScalarTypeName(tt->scalarType());
   }
-  // TODO: we might also error out if we think the above should cover everything
-  return "auto";
+  // something went wrong with the type analysis during shape propagation
+  throw std::runtime_error("unknown scalar type during JIT fusion code generation");
 }
 
 static std::string typeCastedValueName(const std::shared_ptr<c10::Type> t, const at::ScalarType outtype, const std::string& vn) {
@@ -120,8 +120,8 @@ static std::string typeCastedValueName(const std::shared_ptr<c10::Type> t, const
     }
     return vn;
   }
-  // TODO: we might also error out if we think the above should cover everything
-  return vn;
+  // something went wrong with the type analysis during shape propagation
+  throw std::runtime_error("unknown scalar type during JIT fusion code generation");
 }
 
 // Writes "simple mappable" ops

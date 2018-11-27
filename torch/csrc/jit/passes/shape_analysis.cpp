@@ -679,17 +679,30 @@ class ShapePropagator {
             "aten::atan2(Tensor self, Tensor other) -> Tensor",
 
             // Non-binary ops
-            "aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor",
             "aten::addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value) -> Tensor",
             "aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value) -> Tensor",
         },
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types = gatherTensorTypes<TensorType>(node)) {
-            return {broadcast(*maybe_tensor_types, (node->kind() == aten::where ? 1 : 0))};
+            return {broadcast(*maybe_tensor_types, 0)};
           }
           return {};
         }};
 
+    // aten::where is special in that its return type is the second argument's (self)
+    // type rather than the that of condition
+    static const register_formula_for where_op{
+        {
+            "aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor",
+	},
+        [this](Node* node) -> type_vec_t {
+          if (auto maybe_tensor_types = gatherTensorTypes<TensorType>(node)) {
+            return {broadcast(*maybe_tensor_types, 1)};
+          }
+          return {};
+        }};
+
+ 
     static const auto any_tensor_type = [](Node* node) -> TensorTypePtr {
       for (Value* input : node->inputs()) {
         if (auto type = input->type()->cast<TensorType>()) {
