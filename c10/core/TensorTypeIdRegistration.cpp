@@ -1,4 +1,4 @@
-#include <c10/util/TensorTypeIdRegistration.h>
+#include <c10/core/TensorTypeIdRegistration.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 

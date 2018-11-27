@@ -261,62 +261,6 @@ struct ModuleValue : public SugaredValue {
   std::shared_ptr<Module> module;
 };
 
-struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
-  BooleanDispatchValue(py::dict dispatched_fn)
-      : dispatched_fn_(std::move(dispatched_fn)) {}
-
-  std::string kind() const override {
-    return "boolean dispatch";
-  }
-
-  std::vector<NamedValue> removeIndex(
-      at::ArrayRef<NamedValue> arr,
-      size_t index) {
-    auto sliced = arr.vec();
-    sliced.erase(sliced.begin() + index);
-    return sliced;
-  }
-
-  std::shared_ptr<SugaredValue> call(
-      SourceRange loc,
-      Method& caller,
-      at::ArrayRef<NamedValue> inputs,
-      at::ArrayRef<NamedValue> attributes,
-      size_t n_binders) override {
-    c10::optional<bool> result;
-    Graph& graph = *(caller.graph());
-
-    auto index = py::cast<size_t>(dispatched_fn_["index"]);
-    auto arg_name = py::str(dispatched_fn_["arg_name"]);
-
-    if (index < inputs.size()) {
-      // Dispatch flag is in arg list
-      result = constant_as<bool>(inputs.at(index).value(graph));
-    } else if (auto i = findInputWithName(arg_name, attributes)) {
-      // Dispatch flag is in kwargs
-      result = constant_as<bool>(attributes[*i].value(graph));
-    } else {
-      // Didn't find dispatch flag, so use default value
-      result = py::cast<bool>(dispatched_fn_["default"]);
-    }
-
-    if (!result) {
-      throw ErrorReport(loc) << "value for boolean dispatch was not constant";
-    }
-
-    std::shared_ptr<SugaredValue> value;
-    if (*result) {
-      value = toSugaredValue(dispatched_fn_["if_true"], caller, loc);
-    } else {
-      value = toSugaredValue(dispatched_fn_["if_false"], caller, loc);
-    }
-    return value->call(loc, caller, inputs, attributes, n_binders);
-  }
-
- private:
-  py::dict dispatched_fn_;
-};
-
 std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
     Method& m,
@@ -392,12 +336,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       auto mod = py::cast<std::shared_ptr<Module>>(compiled_fn);
       return std::make_shared<ModuleValue>(mod);
     }
-  }
-
-  py::object dispatched_fn =
-      py::module::import("torch.jit").attr("_try_get_dispatched_fn")(obj);
-  if (!dispatched_fn.is_none()) {
-    return std::make_shared<BooleanDispatchValue>(std::move(dispatched_fn));
   }
   return std::make_shared<PythonValue>(obj);
 }
@@ -594,7 +532,8 @@ void initJitScriptBindings(PyObject* module) {
         const std::string& name,
         py::function func,
         py::tuple input_tuple,
-        py::function var_lookup_fn) {
+        py::function var_lookup_fn,
+        bool force_outplace) {
           // prereq: Module's buffers and parameters are unique
           // this was ensured in python before calling this function
           std::vector<at::Tensor*> parameters;
@@ -603,7 +542,8 @@ void initJitScriptBindings(PyObject* module) {
           for(at::Tensor* param : parameters) {
             inputs.emplace_back(*param);
           }
-          auto graph = tracer::createGraphByTracing(func, inputs, var_lookup_fn, input_tuple.size());
+          auto graph = tracer::createGraphByTracing(
+              func, inputs, var_lookup_fn, force_outplace, input_tuple.size());
           self->create_method(name, std::move(graph), std::move(parameters));
           didFinishEmitModule(self);
       })

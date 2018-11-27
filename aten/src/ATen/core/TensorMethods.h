@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ATen/core/Tensor.h"
-#include "ATen/core/Scalar.h"
+#include <c10/core/Scalar.h>
 #include "ATen/core/SparseTensorRef.h"
 #include "ATen/core/Type.h"
 #include "ATen/core/TensorOptions.h"
@@ -1293,7 +1293,7 @@ inline bool is_sparse(Tensor self) {
         "expected scalar type ",                 \
         #name,                                   \
         " but found ",                           \
-        at::toString(type().scalarType()));      \
+        c10::toString(type().scalarType()));     \
     return static_cast<T*>(this->data_ptr());    \
   }
 
