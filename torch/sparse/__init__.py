@@ -9,7 +9,7 @@ __all__ = [
 
 def addmm(mat, mat1, mat2, beta=1, alpha=1):
     r"""
-    This function does exact same thing as :meth:`~Torch.addmm` in the forward,
+    This function does exact same thing as :func:`torch.addmm` in the forward,
     except that it supports backward for coalesced sparse matrix `mat1`.
 
     Args:
@@ -21,24 +21,23 @@ def addmm(mat, mat1, mat2, beta=1, alpha=1):
     """
     return torch._sparse_addmm(mat, mat1, mat2, beta=beta, alpha=alpha)
 
+
 def sum(input, dim=None, dtype=None):
     r"""
-    .. function:: torch.sparse.sum(input, dim=None, dtype=None) -> SparseTensor / Tensor
-
-    Returns the sum of each row of the :attr:`input` SparseTensor in the given
-    dimension :attr:`dim`. If :attr::`dim` is a list of dimensions,
+    Returns the sum of each row of SparseTensor :attr:`input` in the given
+    dimensions :attr:`dim`. If :attr::`dim` is a list of dimensions,
     reduce over all of them. When sum over all ``sparse_dim``, this method
     returns a Tensor instead of SparseTensor.
 
-    The summed :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in the output
-    tensor having :attr::`dim` fewer dimension than :attr:`input`.
+    All summed :attr:`dim` are squeezed (see :func:`torch.squeeze`), resulting an output
+    tensor having :attr::`dim` fewer dimensions than :attr:`input`.
 
-    During backward, only gradients at ``nnz`` locations of :attr:`input` SparseTensor
-    will propagate back.
+    During backward, only gradients at ``nnz`` locations of :attr:`input`
+    will propagate back. Note that the gradients of :attr:`input` is coalesced.
 
     Args:
         input (Tensor): the input SparseTensor
-        dim (int or tuple of ints): the dimension or list of dimensions to reduce. Default: reduce
+        dim (int or tuple of ints): a dimension or a list of dimensions to reduce. Default: reduce
             over all dims.
         dtype (:class:`torch.dtype`, optional): the desired data type of returned Tensor.
             Default: dtype of :attr:`input`.
@@ -48,13 +47,13 @@ def sum(input, dim=None, dtype=None):
         >>> nnz = 3
         >>> dims = [5, 5, 2, 3]
         >>> I = torch.cat([torch.randint(0, dims[0], size=(nnz,)),
-                       torch.randint(0, dims[1], size=(nnz,))], 0).reshape(2, nnz)
+                           torch.randint(0, dims[1], size=(nnz,))], 0).reshape(2, nnz)
         >>> V = torch.randn(nnz, dims[2], dims[3])
         >>> size = torch.Size(dims)
         >>> S = torch.sparse_coo_tensor(I, V, size)
         >>> S
         tensor(indices=tensor([[2, 0, 3],
-                       [2, 4, 1]]),
+                               [2, 4, 1]]),
                values=tensor([[[-0.6438, -1.6467,  1.4004],
                                [ 0.3411,  0.0918, -0.2312]],
 
@@ -65,7 +64,7 @@ def sum(input, dim=None, dtype=None):
                                [-1.9682, -0.5340,  0.7483]]]),
                size=(5, 5, 2, 3), nnz=3, layout=torch.sparse_coo)
 
-        # when sum over part of sparse_dims
+        # when sum over only part of sparse_dims, return a SparseTensor
         >>> torch.sparse.sum(S, [1, 3])
         tensor(indices=tensor([[0, 2, 3]]),
                values=tensor([[-1.4512,  0.4073],
@@ -73,7 +72,7 @@ def sum(input, dim=None, dtype=None):
                               [-0.3183, -1.7539]]),
                size=(5, 2), nnz=3, layout=torch.sparse_coo)
 
-        # when sum over all sparse dim, return a dense tensor
+        # when sum over all sparse dim, return a dense Tensor
         # with summed dims squeezed
         >>> torch.sparse.sum(S, [0, 1, 3])
         tensor([-2.6596, -1.1450])

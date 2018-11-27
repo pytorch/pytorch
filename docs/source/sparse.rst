@@ -141,3 +141,4 @@ Functions
 ----------------------------------
 
 .. autofunction:: torch.sparse.addmm
+.. autofunction:: torch.sparse.sum
