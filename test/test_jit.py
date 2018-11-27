@@ -9961,7 +9961,7 @@ nn_functional_tests = [
     ('binary_cross_entropy', torch.randn(3, 2).sigmoid(),
         (non_differentiable(torch.rand(3, 2)),
          non_differentiable(torch.randn(3, 2)), True), 'size_average'),
-    ('ctc_loss', torch.randn(S, S, S).log_softmax(2).detach().requires_grad_(), \
+    ('ctc_loss', torch.rand(S, S, S).log_softmax(2).detach().requires_grad_(), \
      (torch.randint(1, S, (S, S), dtype=torch.long), torch.full((S,), S, dtype=torch.long), \
       torch.randint(1, S, (S,), dtype=torch.long))),
 ]
