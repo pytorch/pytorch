@@ -888,10 +888,10 @@
 - func: index_copy_(Tensor self, int64_t dim, IndexTensor index, Tensor source) -> Tensor
   variants: method
 
-- func: index_put(Tensor self, TensorList indices, Tensor values) -> Tensor
+- func: index_put(Tensor self, TensorList indices, Tensor values, bool accumulate=false) -> Tensor
   variants: function, method
 
-- func: index_put_(Tensor self, TensorList indices, Tensor values) -> Tensor
+- func: index_put_(Tensor self, TensorList indices, Tensor values, bool accumulate=false) -> Tensor
   variants: function, method
 
 - func: instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, double momentum, double eps, bool cudnn_enabled) -> Tensor
