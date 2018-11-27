@@ -969,7 +969,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         if self.rank == 0:
             time.sleep(0.6)
 
-        # The barrier will now time output
+        # The barrier will now time out
         with self.assertRaisesRegex(RuntimeError, " (Timed out|closed) "):
             pg.barrier().wait()
 
