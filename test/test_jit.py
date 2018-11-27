@@ -14,7 +14,7 @@ from torch._six import inf, PY2
 from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
     freeze_rng_state
-from common_nn import module_tests, new_module_tests
+from test_nn import module_tests, new_module_tests
 from textwrap import dedent
 import os
 import io
@@ -10006,7 +10006,12 @@ def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=()
 
 
 def add_nn_module_test(*args, **kwargs):
-    name = kwargs.get('module_name', kwargs.get('fullname'))
+    if 'module_name' in kwargs:
+        name = kwargs['module_name']
+    elif 'fullname' in kwargs:
+        name = kwargs['fullname']
+    elif 'constructor' in kwargs:
+        name = kwargs['constructor'].__name__
 
     class_name = name.split("_")[0]
     module = getattr(torch.nn, class_name, None)
@@ -10016,10 +10021,9 @@ def add_nn_module_test(*args, **kwargs):
     def do_test(self):
         if 'constructor' in kwargs:
             nn_module = kwargs['constructor']
-            constructor_args = []
         else:
             nn_module = getattr(torch.nn, name)
-            constructor_args = kwargs.get('constructor_args', ())
+        constructor_args = kwargs.get('constructor_args', ())
 
         # Construct a script module that passes arguments through
         # to self.submodule
