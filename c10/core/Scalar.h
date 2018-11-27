@@ -12,7 +12,7 @@
 
 namespace at {
 class Tensor;
-class Type;
+struct Type;
 }
 
 namespace c10 {
