@@ -14,8 +14,11 @@
 struct THPDtype;
 struct THPLayout;
 
-namespace at {
+namespace c10 {
 struct Storage;
+}
+
+namespace at {
 struct Type;
 } // namespace at
 
