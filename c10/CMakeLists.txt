@@ -42,6 +42,8 @@ if (${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
 endif()
 
 # ---[ Dependency of c10
+target_link_libraries(c10 PUBLIC FP16:FP16)
+
 if (${USE_GFLAGS})
    target_link_libraries(c10 PUBLIC gflags)
 endif()
