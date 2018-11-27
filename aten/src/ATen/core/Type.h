@@ -10,7 +10,7 @@
 #include "ATen/core/SparseTensorRef.h"
 #include <c10/util/ArrayRef.h>
 #include <c10/Half.h>
-#include "ATen/core/TensorTypeIdRegistration.h"
+#include <c10/core/TensorTypeIdRegistration.h>
 #include "ATen/core/Reduction.h"
 #include "ATen/core/TensorOptions.h"
 
