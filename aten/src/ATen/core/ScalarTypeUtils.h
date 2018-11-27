@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ATen/core/ScalarType.h"
+#include <c10/core/ScalarType.h>
 
 namespace at {
 
