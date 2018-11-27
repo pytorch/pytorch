@@ -4,6 +4,46 @@ import "caffe2/proto/caffe2.proto";
 
 package torch;
 
+message TensorDef {
+  // the tensor id in ModelDef's tensor table
+  optional string tensor_id = 1;
+  repeated int64 dims = 2;
+  optional int64 offset = 3;
+  repeated int64 strides = 4;
+
+  // the same as caffe2.TensorProto.DataType
+  // 0: UNDEFINED
+  // 1: FLOAT
+  // 2: INT32
+  // 3: BYTE
+  // 4: STRING
+  // 5: BOOL
+  // 6: UINT8
+  // 7: INT8
+  // 8: UINT16
+  // 9: INT16
+  // 10: INT64
+  // 12: FLOAT16
+  // 13: DOUBLE
+  optional int32 data_type = 5;
+
+  // the same as caffe2.ExternalDataProto.SourceType
+  // 0: inline container
+  //   the container defined in torch/csrc/jit/serialization.h is used,
+  //   and record_id is the tag to help the runtime identify the data
+  //   this type of storage is set as DEFAULT and recommended for external
+  //   data storage
+  // 1: simple file(s)
+  //   use external file to store the data, and record_id is the POSIX relative path
+  //   to the file. this (simple) file is only for the data, and the data is stored
+  //   as little endian in the file
+  optional int32 source_type = 6;
+  optional string record_id = 7;
+  optional uint64 record_size = 8;
+
+  optional caffe2.DeviceOption device = 9;
+}
+
 message ParameterDef {
   // whether we compute the gradient for the parameter
   optional bool require_gradient = 1;
