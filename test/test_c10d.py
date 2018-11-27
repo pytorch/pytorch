@@ -970,6 +970,25 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         # The barrier will now time output
         self.assertFalse(pg.barrier().wait())
 
+    @unittest.skip("Implementation of this functionality pending; see #14373")
+    def test_barrier_implies_wait(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        # Kick off allreduce operations
+        size = (100, 100)
+        num = 16
+        tensors = [torch.full(size, float(i)) for i in range(num)]
+        for tensor in tensors:
+            # Note: leak the returned work handle
+            pg.allreduce(tensor)
+
+        # Barrier should ensure all previous work has completed
+        pg.barrier()
+
+        for i, tensor in enumerate(tensors):
+            self.assertEqual(torch.full(size, float(i * (i + 1) / 2)), tensor)
+
 
 class ProcessGroupNCCLTest(TestCase):
     MAIN_PROCESS_RANK = 0
