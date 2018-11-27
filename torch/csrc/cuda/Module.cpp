@@ -71,8 +71,7 @@ PyObject * THCPModule_getDeviceCount_wrap(PyObject *self)
 PyObject * THCPModule_getCurrentStream_wrap(PyObject *self)
 {
   HANDLE_TH_ERRORS
-  THCStream* stream = THCState_getStream(state);
-  return PyLong_FromVoidPtr(stream);
+  return PyLong_FromUnsignedLongLong(at::cuda::getCurrentCUDAStream().pack());
   END_HANDLE_TH_ERRORS
 }
 
@@ -80,8 +79,11 @@ PyObject * THCPModule_setStream_wrap(PyObject *self, PyObject *obj)
 {
   HANDLE_TH_ERRORS
   THPUtils_assert(PyLong_Check(obj), "invalid stream");
-  THCStream* stream = (THCStream *)PyLong_AsVoidPtr(obj);
-  THCState_setStream(state, stream);
+  uint64_t bits = PyLong_AsUnsignedLongLong(obj);
+  if (bits == static_cast<uint64_t>(-1) && PyErr_Occurred()) {
+    throw python_error();
+  }
+  at::cuda::setCurrentCUDAStream(at::cuda::CUDAStream::unpack(bits));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
