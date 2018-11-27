@@ -3,7 +3,7 @@
 
 #include <c10/macros/Macros.h>
 
-namespace at {
+namespace c10 {
 
 using DeleterFnPtr = void (*)(void*);
 
@@ -113,4 +113,4 @@ inline bool operator!=(std::nullptr_t, const UniqueVoidPtr& sp) noexcept {
 }
 
 } // namespace detail
-} // namespace at
+} // namespace c10
