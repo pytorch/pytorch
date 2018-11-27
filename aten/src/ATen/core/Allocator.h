@@ -4,7 +4,7 @@
 #include <memory>
 
 #include <c10/Device.h>
-#include <ATen/core/UniqueVoidPtr.h>
+#include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/Exception.h>
 
 namespace at {
@@ -18,7 +18,7 @@ namespace at {
 //
 class DataPtr {
  private:
-  detail::UniqueVoidPtr ptr_;
+  c10::detail::UniqueVoidPtr ptr_;
   Device device_;
 
  public:
