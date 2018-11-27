@@ -165,4 +165,4 @@ static inline const char* toString(Backend b) {
   }
 }
 
-} // namespace at
+} // namespace c10

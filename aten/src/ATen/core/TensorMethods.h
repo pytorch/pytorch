@@ -1293,7 +1293,7 @@ inline bool is_sparse(Tensor self) {
         "expected scalar type ",                 \
         #name,                                   \
         " but found ",                           \
-        at::toString(type().scalarType()));      \
+        c10::toString(type().scalarType()));     \
     return static_cast<T*>(this->data_ptr());    \
   }
 
