@@ -103,7 +103,7 @@ class SpawnContext:
         raise Exception(msg)
 
 
-def spawn(fn, args=(), nprocs=1, join=True):
+def spawn(fn, args=(), nprocs=1, join=True, daemon=False):
     r"""Spawns ``nprocs`` processes that run ``fn`` with ``args``.
 
     If one of the processes exits with a non-zero exit status, the
@@ -125,6 +125,8 @@ def spawn(fn, args=(), nprocs=1, join=True):
         args (tuple): Arguments passed to ``fn``.
         nprocs (int): Number of processes to spawn.
         join (bool): Perform a blocking join on all processes.
+        daemon (bool): The spawned processes' daemon flag. If set to True,
+                       daemonic processes will be created.
 
     Returns:
         None if ``join`` is ``True``,
@@ -140,7 +142,7 @@ def spawn(fn, args=(), nprocs=1, join=True):
         process = mp.Process(
             target=_wrap,
             args=(fn, i, args, error_queue),
-            daemon=False,
+            daemon=daemon,
         )
         process.start()
         error_queues.append(error_queue)
