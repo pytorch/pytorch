@@ -392,8 +392,11 @@ def max_pool2d_with_indices(input, kernel_size, stride=None, padding=0, dilation
 
     See :class:`~torch.nn.MaxPool2d` for details.
     """
-    ret = torch._C._nn.max_pool2d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
-    return ret if return_indices else ret[0]
+    if stride is None:
+        _stride = torch.jit.annotate(List[int], [])
+    else:
+        _stride = torch.jit._unwrap_optional(stride)
+    return torch._C._nn.max_pool2d_with_indices(input, kernel_size, _stride, padding, dilation, ceil_mode)
 
 
 @torch._jit_internal.weak_script
@@ -420,15 +423,19 @@ def max_pool3d_with_indices(input, kernel_size, stride=None, padding=0,
 
     See :class:`~torch.nn.MaxPool3d` for details.
     """
+    if stride is None:
+        _stride = torch.jit.annotate(List[int], [])
+    else:
+        _stride = torch.jit._unwrap_optional(stride)
     return torch._C._nn.max_pool3d_with_indices(
-        input, kernel_size, stride, padding, dilation, ceil_mode)
+        input, kernel_size, _stride, padding, dilation, ceil_mode)
 
 
 @torch._jit_internal.weak_script
 def _max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1,
                 ceil_mode=False, return_indices=False):
     # type: (Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], int, int, bool, bool) -> Tensor
-    return torch._C._nn.max_pool3d_with_indices(
+    return max_pool3d_with_indices(
         input, kernel_size, stride, padding, dilation, ceil_mode)[0]
 
 max_pool3d = torch._jit_internal.boolean_dispatch(
