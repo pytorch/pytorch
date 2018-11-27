@@ -178,7 +178,6 @@ void AliasDb::analyze(Node* node) {
     case prim::DifferentiableGraph:
       return analyzeSubgraph(node);
     case prim::Constant:
-    case prim::None:
     case prim::ListConstruct:
     case prim::TupleConstruct:
     case prim::Undefined:
