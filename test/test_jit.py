@@ -9288,8 +9288,6 @@ EXCLUDE_SCRIPT = {
     # argument has custom behavior
     'test_nn_fractional_max_pool2d',
     'test_nn_max_unpool3d',
-    # 'test_nn_embedding',
-    # 'test_nn_embedding_bag',
     'test_nn_batch_norm',
 
     # aten op has additional cudnn argument
@@ -9817,6 +9815,7 @@ S = 5
 #     constructor arguments,
 #     args (tuple represents shape of a tensor arg),
 #     use_as_constant (should the submodule be listed in __constants__?)
+#     test variant name(will be used at test name suffix),
 # )
 nn_module_tests = [
     ('AlphaDropout', (), ((S,),)),
@@ -9840,10 +9839,16 @@ nn_module_tests = [
     ('Tanhshrink', (), ((S,),)),
     ('Threshold', (2., 2.), ((S,),)),
     ('Embedding', (4, 3), (torch.empty(2, 3, dtype=torch.long).random_(4)),),
+    ('EmbeddingBag', (4, 3), (torch.empty(2, 3, dtype=torch.long).random_(4)),),
+    ('EmbeddingBag', (4, 3, None, 2., False, 'sum'), torch.empty(2, 3, dtype=torch.long).random_(4), False, 'sum'),
+    ('EmbeddingBag', (4, 3, None, 2., False, 'max'), torch.empty(2, 3, dtype=torch.long).random_(4), False, 'max'),
     ('Sequential', (torch.nn.Sigmoid(), torch.nn.Threshold(1., 2.)), ((S,),), True),
 ]
 
-
+# module cannot be exported /imported currently
+EXCLUDE_MODULE_EXPORT_IMPORT = {
+    'EmbeddingBag',
+}
 
 # NB: JIT script tests for all nn functional interfaces, script mode does
 # not support in_place operations yet, so no inplace operation tests added.
@@ -10117,7 +10122,7 @@ def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=()
 
 
 def add_nn_module_test(module_name, constructor_args, call_args,
-                       use_as_constant=False, skipTestIf=()):
+                       use_as_constant=False, variant=None, skipTestIf=()):
     def do_test(self):
         nn_module = getattr(torch.nn, module_name)
 
@@ -10142,14 +10147,20 @@ def add_nn_module_test(module_name, constructor_args, call_args,
                 def __init__(self):
                     super(TheModule, self).__init__()
                     self.submodule = nn_module(*constructor_args)
-
-            module = TheModule()
-            module.define(script)
-
-            # Check there are no Python ops by exporting
-            self.assertExportImportModule(module, tensors)
-            create_script_module.last_graph = module.graph
-            return module(*args)
+            # module cannot be imported / exported
+            if module_name in EXCLUDE_MODULE_EXPORT_IMPORT:
+                with self.disableModuleHook():
+                    module = TheModule()
+                    module.define(script)
+                    create_script_module.last_graph = module.graph
+                    mod = module(*args)
+            else:
+                module = TheModule()
+                module.define(script)
+                self.assertExportImportModule(module, tensors)
+                create_script_module.last_graph = module.graph
+                mod = module(*args)
+            return mod
 
         # Construct a normal nn module to stay consistent with create_script_module
         # and make use of a single global rng_state in module initialization
@@ -10164,6 +10175,8 @@ def add_nn_module_test(module_name, constructor_args, call_args,
         check_against_reference(self, create_script_module, create_nn_module, f_args_variable)
 
     test_name = 'test_nn_{}'.format(module_name)
+    if variant is not None:
+        test_name = test_name + "_" + variant
     post_add_test(test_name, skipTestIf, do_test)
 
 
