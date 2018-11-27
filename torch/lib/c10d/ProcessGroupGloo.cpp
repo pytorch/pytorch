@@ -2,12 +2,8 @@
 
 #include <gloo/allgather.h>
 #include <gloo/allreduce.h>
-#include <gloo/allreduce_halving_doubling.h>
-#include <gloo/allreduce_ring_chunked.h>
 #include <gloo/barrier.h>
-#include <gloo/barrier_all_to_one.h>
 #include <gloo/broadcast.h>
-#include <gloo/broadcast_one_to_all.h>
 #include <gloo/gather.h>
 #include <gloo/reduce.h>
 #include <gloo/scatter.h>
@@ -18,10 +14,6 @@
 #include <ATen/cuda/CUDAStream.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
-
-#include <gloo/cuda_allreduce_halving_doubling.h>
-#include <gloo/cuda_allreduce_ring_chunked.h>
-#include <gloo/cuda_broadcast_one_to_all.h>
 #endif
 
 #include <gloo/rendezvous/context.h>
@@ -56,9 +48,6 @@
 
 namespace c10d {
 
-using KeyType = AlgorithmKey;
-using EntryType = std::unique_ptr<AlgorithmEntry>;
-
 namespace {
 
 // Wrap c10d store as Gloo store
@@ -90,24 +79,6 @@ class GlooStore : public ::gloo::rendezvous::Store {
   std::shared_ptr<::c10d::Store> store_;
 };
 
-template <typename T>
-const ::gloo::ReductionFunction<T>* reductionFunction(const ReduceOp& r) {
-  switch (r) {
-    case ReduceOp::SUM:
-      return ::gloo::ReductionFunction<T>::sum;
-    case ReduceOp::PRODUCT:
-      return ::gloo::ReductionFunction<T>::product;
-    case ReduceOp::MIN:
-      return ::gloo::ReductionFunction<T>::min;
-    case ReduceOp::MAX:
-      return ::gloo::ReductionFunction<T>::max;
-    case ReduceOp::UNUSED:
-      break;
-  }
-
-  throw std::runtime_error("Unhandled ReduceOp");
-}
-
 typedef void (*ReduceFunc)(void*, const void*, const void*, size_t);
 
 template <typename T>
@@ -127,32 +98,6 @@ ReduceFunc toFunction(const ReduceOp& r) {
 
   throw std::runtime_error("Unhandled ReduceOp");
 }
-
-#ifdef USE_CUDA
-std::vector<cudaStream_t> getStreamVector(AlgorithmEntry& entry) {
-  std::vector<cudaStream_t> streams;
-  streams.reserve(entry.streams.size());
-  for (auto s : entry.streams) {
-    streams.push_back(s);
-  }
-  return streams;
-}
-
-// synchronizeStreams ensures that the private streams associated with
-// an algorithm entry wait for the public streams to complete.
-void synchronizeStreams(AlgorithmEntry* entry) {
-  const auto& key = entry->key;
-  for (size_t i = 0; i < key.devices.size(); i++) {
-    const auto& device = key.devices[i];
-    auto publicStream = at::cuda::getCurrentCUDAStream(device);
-    auto privateStream = entry->streams[i];
-    auto& event = entry->events[i];
-    // Synchronizes private stream with public stream
-    event.record(publicStream);
-    event.block(privateStream);
-  }
-}
-#endif
 
 template <typename T, typename O>
 void setInputs(O& opts, std::vector<at::Tensor>& tensors) {
@@ -245,86 +190,6 @@ void ProcessGroupGloo::AsyncWork::finish(std::exception_ptr eptr) {
   cv_.notify_all();
 }
 
-ProcessGroupGloo::WorkGloo::WorkGloo()
-    : completed_(false)
-#ifdef USE_CUDA
-      ,
-      cuda_(false)
-#endif
-{
-}
-
-ProcessGroupGloo::WorkGloo::~WorkGloo() {}
-
-bool ProcessGroupGloo::WorkGloo::isCompleted() {
-  return completed_;
-}
-
-bool ProcessGroupGloo::WorkGloo::isSuccess() const {
-  return !ex_;
-}
-
-void ProcessGroupGloo::WorkGloo::synchronize() {
-#ifdef USE_CUDA
-  if (cuda_) {
-    for (size_t i = 0; i < devices_.size(); i++) {
-      auto stream = at::cuda::getCurrentCUDAStream(devices_[i]);
-      events_[i].block(stream);
-    }
-  }
-#endif
-}
-
-bool ProcessGroupGloo::WorkGloo::wait() {
-  std::unique_lock<std::mutex> lock(m_);
-  while (!completed_) {
-    cv_.wait(lock);
-  }
-  auto success = isSuccess();
-  if (success) {
-    synchronize();
-  }
-  return success;
-}
-
-const std::exception& ProcessGroupGloo::WorkGloo::exception() const {
-  return *ex_;
-}
-
-void ProcessGroupGloo::WorkGloo::finish(const AlgorithmEntry& entry) {
-  {
-    std::unique_lock<std::mutex> lock(m_);
-    completed_ = true;
-    if (entry.key.type != nullptr) {
-#ifdef USE_CUDA
-      cuda_ = entry.key.type->is_cuda();
-
-      // Populate devices and events so that we can later synchronize
-      // with the operation associated with this work finishing.
-      if (cuda_) {
-        devices_ = entry.key.devices;
-        events_.resize(devices_.size());
-        for (size_t i = 0; i < devices_.size(); i++) {
-          const auto& stream = entry.streams[i];
-          events_[i].record(stream);
-        }
-      }
-#endif
-    }
-  }
-  cv_.notify_all();
-}
-
-void ProcessGroupGloo::WorkGloo::finishWithException(
-    const ::gloo::Exception& ex) {
-  {
-    std::unique_lock<std::mutex> lock(m_);
-    completed_ = true;
-    ex_ = std::unique_ptr<::gloo::Exception>(new ::gloo::Exception(ex));
-  }
-  cv_.notify_all();
-}
-
 ProcessGroupGloo::SendWork::SendWork(
     at::Tensor& tensor,
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer)
@@ -397,8 +262,7 @@ ProcessGroupGloo::ProcessGroupGloo(
     : ProcessGroup(rank, size),
       store_(new GlooStore(store)),
       stop_(false),
-      collectiveCounter_(0),
-      cacheNumAlgorithmEntries_(options.cacheNumAlgorithmEntries) {
+      collectiveCounter_(0) {
   auto& devices = options.devices;
   if (devices.empty()) {
     throw std::runtime_error("No device(s) specified");
@@ -449,256 +313,19 @@ void ProcessGroupGloo::runLoop(void) {
       continue;
     }
 
-    auto tuple = std::move(queue_.front());
+    auto fn = std::move(queue_.front());
     queue_.pop_front();
     queueConsumeCV_.notify_one();
 
-    // If we're dealing with only a function, execute it here.
-    // This is the case for operations that use the AsyncWork infrastructure
-    // and have the work object bound to the function we're calling here.
-    if (std::get<0>(tuple) == nullptr) {
-      auto& fn = std::get<2>(tuple);
-      lock.unlock();
-      fn();
-      lock.lock();
-      continue;
-    }
-
-    // Continue holding onto the lock; this ensures that we serialize
-    // creation of Gloo algorithm instances for the context associated
-    // with this process group.
-    auto& entry = std::get<0>(tuple);
-    if (!entry->algorithm) {
-      createAlgorithm(*entry);
-    }
-
     lock.unlock();
-    runSingle(std::move(tuple));
+    fn();
     lock.lock();
   }
 }
 
-void ProcessGroupGloo::runSingle(WorkType tuple) {
-  auto& entry = std::get<0>(tuple);
-  auto& work = std::get<1>(tuple);
-
-  try {
-    entry->run();
-    work->finish(*entry);
-  } catch (const ::gloo::Exception& ex) {
-    work->finishWithException(ex);
-  }
-
-  // Unblock anyone waiting for this algorithm entry
-  std::unique_lock<std::mutex> lock(entry->m);
-  entry->busy = false;
-  entry->cv.notify_one();
-}
-
-void ProcessGroupGloo::createAlgorithm(AlgorithmEntry& entry) {
-  const auto& key = entry.key;
-  switch (key.collectiveType) {
-    case CollectiveType::ALLREDUCE:
-      GENERATE_ALL_TYPES(key.type->scalarType(), createAllreduce, entry);
-      return;
-    case CollectiveType::BROADCAST:
-      GENERATE_ALL_TYPES(key.type->scalarType(), createBroadcast, entry);
-      return;
-    case CollectiveType::BARRIER:
-      entry.algorithm = std::unique_ptr<::gloo::Algorithm>(
-          new ::gloo::BarrierAllToOne(contexts_[0]));
-      return;
-    case CollectiveType::UNUSED:
-      break;
-  }
-
-  throw std::runtime_error("Unhandled collective type");
-}
-
-template <typename T>
-void ProcessGroupGloo::createAllreduce(AlgorithmEntry& entry) {
-  const auto& key = entry.key;
-  const auto& backend = key.type->backend();
-
-  // Create algorithm against first context
-  auto& context = contexts_[0];
-  at::OptionalDeviceGuard guard(at::device_of(entry.src[0]));
-
-  if (backend == at::Backend::CPU) {
-    if (getSize() < 16) {
-      entry.algorithm = std::unique_ptr<::gloo::Algorithm>(
-          new ::gloo::AllreduceRingChunked<T>(
-              context,
-              getDataPointers<T>(entry.src),
-              entry.src[0].numel(),
-              reductionFunction<T>(key.reduceOp)));
-    } else {
-      entry.algorithm = std::unique_ptr<::gloo::Algorithm>(
-          new ::gloo::AllreduceHalvingDoubling<T>(
-              context,
-              getDataPointers<T>(entry.src),
-              entry.src[0].numel(),
-              reductionFunction<T>(key.reduceOp)));
-    }
-    return;
-  }
-
-#ifdef USE_CUDA
-  if (backend == at::Backend::CUDA) {
-    if (getSize() < 16) {
-      entry.algorithm = std::unique_ptr<::gloo::Algorithm>(
-          new ::gloo::CudaAllreduceRingChunked<T>(
-              context,
-              getDataPointers<T>(entry.src),
-              entry.src[0].numel(),
-              getStreamVector(entry)));
-    } else {
-      entry.algorithm = std::unique_ptr<::gloo::Algorithm>(
-          new ::gloo::CudaAllreduceHalvingDoubling<T>(
-              context,
-              getDataPointers<T>(entry.src),
-              entry.src[0].numel(),
-              getStreamVector(entry)));
-    }
-    return;
-  }
-#endif
-
-  throw std::runtime_error(
-      "Unhandled backend: " + std::string(toString(backend)));
-}
-
-template <typename T>
-void ProcessGroupGloo::createBroadcast(AlgorithmEntry& entry) {
-  const auto& key = entry.key;
-  const auto& backend = key.type->backend();
-
-  // Create algorithm against first context
-  auto& context = contexts_[0];
-  at::OptionalDeviceGuard guard(device_of(entry.src[0]));
-
-  if (backend == at::Backend::CPU) {
-    entry.algorithm =
-        std::unique_ptr<::gloo::Algorithm>(new ::gloo::BroadcastOneToAll<T>(
-            context,
-            getDataPointers<T>(entry.src),
-            entry.src[0].numel(),
-            key.srcRank,
-            key.srcTensor));
-    return;
-  }
-
-#ifdef USE_CUDA
-  if (backend == at::Backend::CUDA) {
-    entry.algorithm =
-        std::unique_ptr<::gloo::Algorithm>(new ::gloo::CudaBroadcastOneToAll<T>(
-            context,
-            getDataPointers<T>(entry.src),
-            entry.src[0].numel(),
-            key.srcRank,
-            key.srcTensor,
-            getStreamVector(entry)));
-    return;
-  }
-#endif
-
-  throw std::runtime_error(
-      "Unhandled backend: " + std::string(toString(backend)));
-}
-
-// Constructs an AlgorithmEntry instance, except for the algorithm
-// itself. It allocates the temporary input/output tensors necessary
-// to have a fixed address to pass to the Gloo algorithms. The
-// AlgorithmEntry is lazily allocated and reused for collective calls
-// with the same signature.
-//
-// Construction of the Gloo algorithm itself it delayed until a thread
-// picks up the work, because it performs I/O and can fail. Any I/O
-// failure must be signaled through the Work future.
-//
-EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
-#ifdef USE_CUDA
-  at::cuda::OptionalCUDAGuard deviceGuard;
-#endif
-  auto entry = std::unique_ptr<AlgorithmEntry>(new AlgorithmEntry);
-  entry->key = key;
-
-  // Without type there is nothing else to construct
-  if (key.type == nullptr) {
-    return entry;
-  }
-
-  // Allocate source tensors for this entry
-  auto& srcSizes = key.srcSizes;
-  entry->src.resize(srcSizes.size());
-  for (size_t i = 0; i < srcSizes.size(); i++) {
-#ifdef USE_CUDA
-    deviceGuard.set_index(key.type->is_cuda() ? key.devices[i] : -1);
-#else
-    if (key.type->is_cuda()) {
-      throw std::runtime_error("ProcessGroupGloo is not built with CUDA");
-    }
-#endif
-    entry->src[i] = at::empty(srcSizes[i], key.type->options());
-  }
-
-#ifdef USE_CUDA
-  // If these are CUDA tensors, create streams and events
-  if (key.type->is_cuda()) {
-    entry->streams.reserve(key.devices.size());
-    entry->events.resize(key.devices.size());
-    for (size_t i = 0; i < key.devices.size(); i++) {
-      entry->streams.push_back(
-          at::cuda::getStreamFromPool(true, key.devices[i]));
-    }
-  }
-#endif
-
-  return entry;
-}
-
-AlgorithmEntry* ProcessGroupGloo::checkout(const AlgorithmKey& key) {
-  auto& vec = cache_[key];
-  const auto i = cacheCurrentEntry_[key];
-
-  // Ensure the cache vector is appropriately sized
-  if (vec.size() != static_cast<size_t>(cacheNumAlgorithmEntries_)) {
-    vec.resize(cacheNumAlgorithmEntries_);
-  }
-
-  // The next call must use the next entry
-  cacheCurrentEntry_[key] = (i + 1) % cacheNumAlgorithmEntries_;
-
-  // If there is no entry for this key, create a new one
-  if (!vec[i]) {
-    vec[i] = construct(key);
-  }
-
-  auto& entry = vec[i];
-
-  // Ensure entry is not in use
-  std::unique_lock<std::mutex> lock(entry->m);
-  while (entry->busy) {
-    entry->cv.wait(lock);
-  }
-
-  // Mark entry in use
-  entry->busy = true;
-  return entry.get();
-}
-
-std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::enqueue(
-    AlgorithmEntry* entry) {
-  auto work = std::make_shared<WorkGloo>();
-  std::unique_lock<std::mutex> lock(queueMutex_);
-  queue_.push_back(std::make_tuple(entry, work, nullptr));
-  queueProduceCV_.notify_one();
-  return work;
-}
-
 void ProcessGroupGloo::enqueue(std::function<void()> fn) {
   std::unique_lock<std::mutex> lock(queueMutex_);
-  queue_.push_back(std::make_tuple(nullptr, nullptr, fn));
+  queue_.push_back(fn);
   queueProduceCV_.notify_one();
 }
 
@@ -707,7 +334,7 @@ namespace {
 class AsyncBroadcastWork : public ProcessGroupGloo::AsyncWork {
  public:
   AsyncBroadcastWork(
-      std::shared_ptr<gloo::Context>& context,
+      const std::shared_ptr<gloo::Context>& context,
       std::vector<at::Tensor>& inputs,
       int rootRank,
       int rootTensor,
@@ -751,7 +378,7 @@ class AsyncBroadcastWork : public ProcessGroupGloo::AsyncWork {
 class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
  public:
   AsyncBroadcastCUDAWork(
-      std::shared_ptr<gloo::Context>& context,
+      const std::shared_ptr<gloo::Context>& context,
       std::vector<at::Tensor>& inputs,
       int rootRank,
       int rootTensor,
