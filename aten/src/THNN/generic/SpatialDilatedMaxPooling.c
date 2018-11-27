@@ -3,6 +3,7 @@
 #else
 
 #include "pooling_shape.h"
+#include <algorithm>
 
 static inline void THNN_(SpatialDilatedMaxPooling_shapeCheck)(
 	THTensor *input, THTensor *gradOutput, THIndexTensor *indices,
@@ -93,8 +94,8 @@ static void THNN_(SpatialDilatedMaxPooling_updateOutput_frame)(
       {
         int64_t hstart = i * dH - padH;
         int64_t wstart = j * dW - padW;
-        int64_t hend = fminf(hstart + (kH - 1) * dilationH + 1, iheight);
-        int64_t wend = fminf(wstart + (kW - 1) * dilationW + 1, iwidth);
+        int64_t hend = std::min(hstart + (kH - 1) * dilationH + 1, iheight);
+        int64_t wend = std::min(wstart + (kW - 1) * dilationW + 1, iwidth);
         while(hstart < 0)
           hstart += dilationH;
         while(wstart < 0)

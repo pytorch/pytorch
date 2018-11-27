@@ -3,6 +3,7 @@
 #else
 
 #include "pooling_shape.h"
+#include <algorithm>
 
 static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
                          THNNState *state,
@@ -129,16 +130,16 @@ static void THNN_(VolumetricAveragePooling_updateOutput_frame)(
           int64_t tstart = ti * dT - padT;
           int64_t hstart = i  * dH - padH;
           int64_t wstart = j  * dW - padW;
-          int64_t tend = fminf(tstart + kT, itime + padT);
-          int64_t hend = fminf(hstart + kH, iheight + padH);
-          int64_t wend = fminf(wstart + kW, iwidth + padW);
+          int64_t tend = std::min(tstart + kT, itime + padT);
+          int64_t hend = std::min(hstart + kH, iheight + padH);
+          int64_t wend = std::min(wstart + kW, iwidth + padW);
           int64_t pool_size = (tend - tstart) * (hend - hstart) * (wend - wstart);
-          tstart = fmaxf(tstart, 0);
-          hstart = fmaxf(hstart, 0);
-          wstart = fmaxf(wstart, 0);
-          tend = fmin(tend, itime);
-          hend = fmin(hend, iheight);
-          wend = fmin(wend, iwidth);
+          tstart = std::max(tstart, (int64_t) 0);
+          hstart = std::max(hstart, (int64_t) 0);
+          wstart = std::max(wstart, (int64_t) 0);
+          tend = std::min(tend, itime);
+          hend = std::min(hend, iheight);
+          wend = std::min(wend, iwidth);
 
           int divide_factor;
           if (count_include_pad)
@@ -318,16 +319,16 @@ static void THNN_(VolumetricAveragePooling_updateGradInput_frame)(
           int64_t tstart = ti * dT - padT;
           int64_t hstart = i  * dH - padH;
           int64_t wstart = j  * dW - padW;
-          int64_t tend = fminf(tstart + kT, itime + padT);
-          int64_t hend = fminf(hstart + kH, iheight + padH);
-          int64_t wend = fminf(wstart + kW, iwidth + padW);
+          int64_t tend = std::min(tstart + kT, itime + padT);
+          int64_t hend = std::min(hstart + kH, iheight + padH);
+          int64_t wend = std::min(wstart + kW, iwidth + padW);
           int64_t pool_size = (tend -tstart) * (hend - hstart) * (wend - wstart);
-          tstart = fmaxf(tstart, 0);
-          hstart = fmaxf(hstart, 0);
-          wstart = fmaxf(wstart, 0);
-          tend = fminf(tend, itime);
-          hend = fminf(hend, iheight);
-          wend = fminf(wend, iwidth);
+          tstart = std::max(tstart, (int64_t) 0);
+          hstart = std::max(hstart, (int64_t) 0);
+          wstart = std::max(wstart, (int64_t) 0);
+          tend = std::min(tend, itime);
+          hend = std::min(hend, iheight);
+          wend = std::min(wend, iwidth);
 
           int64_t divide_factor;
           if (count_include_pad)

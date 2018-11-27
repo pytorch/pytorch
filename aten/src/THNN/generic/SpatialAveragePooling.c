@@ -3,6 +3,7 @@
 #else
 
 #include "pooling_shape.h"
+#include <algorithm>
 
 static inline void THNN_(SpatialAveragePooling_shapeCheck)(
 	THTensor *input, THTensor *gradOutput,
@@ -130,13 +131,13 @@ void THNN_(SpatialAveragePooling_updateOutput)(
           /* Compute the mean of the input image... */
           int64_t hstart = yy * dH - padH;
           int64_t wstart = xx * dW - padW;
-          int64_t hend = fminf(hstart + kH, inputHeight + padH);
-          int64_t wend = fminf(wstart + kW, inputWidth + padW);
+          int64_t hend = std::min(hstart + kH, inputHeight + padH);
+          int64_t wend = std::min(wstart + kW, inputWidth + padW);
           int pool_size = (hend - hstart) * (wend - wstart);
-          hstart = fmaxf(hstart, 0);
-          wstart = fmaxf(wstart, 0);
-          hend = fminf(hend, inputHeight);
-          wend = fminf(wend, inputWidth);
+          hstart = std::max(hstart, (int64_t) 0);
+          wstart = std::max(wstart, (int64_t) 0);
+          hend = std::min(hend, inputHeight);
+          wend = std::min(wend, inputWidth);
 
           scalar_t sum = 0;
 
@@ -245,13 +246,13 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
         {
           int64_t hstart = yy * dH - padH;
           int64_t wstart = xx * dW - padW;
-          int64_t hend = fminf(hstart + kH, inputHeight + padH);
-          int64_t wend = fminf(wstart + kW, inputWidth + padW);
+          int64_t hend = std::min(hstart + kH, inputHeight + padH);
+          int64_t wend = std::min(wstart + kW, inputWidth + padW);
           int pool_size = (hend - hstart) * (wend - wstart);
-          hstart = fmaxf(hstart, 0);
-          wstart = fmaxf(wstart, 0);
-          hend = fminf(hend, inputHeight);
-          wend = fminf(wend, inputWidth);
+          hstart = std::max(hstart, (int64_t) 0);
+          wstart = std::max(wstart, (int64_t) 0);
+          hend = std::min(hend, inputHeight);
+          wend = std::min(wend, inputWidth);
 
           scalar_t z = *ptr_gradOutput++;
 

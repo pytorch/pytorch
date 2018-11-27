@@ -3,6 +3,7 @@
 #else
 
 #include "pooling_shape.h"
+#include <algorithm>
 
 static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
                          THNNState *state,
@@ -122,9 +123,9 @@ static void THNN_(VolumetricDilatedMaxPooling_updateOutput_frame)(
           int64_t start_h = i * dH - pH;
           int64_t start_w = j * dW - pW;
 
-          int64_t end_t = fminf(start_t + (kT - 1) * dilationT + 1, itime);
-          int64_t end_h = fminf(start_h + (kH - 1) * dilationH + 1, iheight);
-          int64_t end_w = fminf(start_w + (kW - 1) * dilationW + 1, iwidth);
+          int64_t end_t = std::min(start_t + (kT - 1) * dilationT + 1, itime);
+          int64_t end_h = std::min(start_h + (kH - 1) * dilationH + 1, iheight);
+          int64_t end_w = std::min(start_w + (kW - 1) * dilationW + 1, iwidth);
 
           while(start_t < 0)
             start_t += dilationT;
