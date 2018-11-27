@@ -105,7 +105,8 @@ C10_DECLARE_TENSOR_TYPE(MKLDNNTensorId); // Caffe2 only
 C10_DECLARE_TENSOR_TYPE(OpenGLTensorId); // Caffe2 only
 C10_DECLARE_TENSOR_TYPE(OpenCLTensorId); // Caffe2 only
 C10_DECLARE_TENSOR_TYPE(IDEEPTensorId); // Caffe2 only
-C10_DECLARE_TENSOR_TYPE(HIPTensorId); // Caffe2 only
+C10_DECLARE_TENSOR_TYPE(HIPTensorId); // PyTorch/Caffe2 supported
+C10_DECLARE_TENSOR_TYPE(SparseHIPTensorId); // PyTorch only
 
 } // namespace c10
 
