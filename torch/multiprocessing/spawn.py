@@ -140,7 +140,7 @@ def spawn(fn, args=(), nprocs=1, join=True):
         process = mp.Process(
             target=_wrap,
             args=(fn, i, args, error_queue),
-            daemon=True,
+            daemon=False,
         )
         process.start()
         error_queues.append(error_queue)
