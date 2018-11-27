@@ -34,15 +34,24 @@ class Tracer;
 struct ExecutionOptions {
   explicit ExecutionOptions(const std::shared_ptr<const NetDef>& net_def);
 
+  // number of gpu streams per gpu per cpu thread
   int streams_per_gpu_ = 1;
+  // ops synchronization options
   bool finish_chain_ = false;
   bool always_schedule_child_ = false;
+  // try to pick gpu stream that is not busy
   bool check_stream_status_ = false;
+  // use single thread pool for all devices
   bool use_single_pool_ = false;
+  // use per net instances thread pools instead of global ones
   bool use_per_net_pools_ = false;
+  // whether RunAsync is blocking
   bool is_blocking_ = false;
+  // prof_dag counters reporting
   bool report_stats_ = false;
+  // immediately run children tasks inline whenever possible
   bool use_dfs_scheduling_ = false;
+  // run net's root tasks in RunAsync thread instead of in thread pool
   bool run_root_tasks_inline_ = false;
 };
 

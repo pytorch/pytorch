@@ -684,15 +684,16 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNHWCAndType_() {
                 DoNothing<> doNothingObj{};
                 ReQuantizeOutput<ReluFused> reqObj(
                     doNothingObj,
-                    this->RequantizationParams(group_id).real_multiplier,
+                    &this->RequantizationParams(group_id).real_multiplier,
                     out_qparams_.zero_point,
                     in_qparams_[INPUT].zero_point,
-                    this->FilterQuantizationParams(group_id).zero_point,
+                    &this->FilterQuantizationParams(group_id).zero_point,
                     packA.getRowOffsetBuffer(),
                     this->column_offsets_.data() + group_id * (M / group_),
                     InputSize() == 3
                         ? this->b_quantized_data_ + group_id * (M / group_)
-                        : nullptr);
+                        : nullptr,
+                    M / group_);
 
                 if (nbits_in_non_outlier_ < 8) {
                   DoSpmdmOnInpBuffer<
