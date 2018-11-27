@@ -117,7 +117,8 @@ class ProcessGroupNCCL : public ProcessGroup {
 
   std::shared_ptr<ProcessGroup::Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
-      std::vector<at::Tensor>& inputTensors) override;
+      std::vector<at::Tensor>& inputTensors,
+      const AllgatherOptions& opts = AllgatherOptions()) override;
 
   // Unsupported Ops
   std::shared_ptr<ProcessGroup::Work> gather(
@@ -145,7 +146,8 @@ class ProcessGroupNCCL : public ProcessGroup {
       int* srcRank,
       int tag) override;
 
-  std::shared_ptr<ProcessGroup::Work> barrier() override;
+  std::shared_ptr<ProcessGroup::Work> barrier(
+      const BarrierOptions& opts = BarrierOptions()) override;
 
   std::unordered_map<int, int> getGroupRank() override;
 
