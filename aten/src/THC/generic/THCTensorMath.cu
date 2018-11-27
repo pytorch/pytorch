@@ -461,8 +461,8 @@ void THCTensor_(range)(THCState *state, THCTensor *r_, accreal xmin, accreal xma
 void THCTensor_(arange)(THCState* state, THCTensor *r_, accreal xmin, accreal xmax, accreal step) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, r_));
   THArgCheck(step > 0 || step < 0, 3, "step must be nonzero");
-  THArgCheck(std::isfinite(xmin) &&
-              std::isfinite(xmax)
+  THArgCheck(std::isfinite(static_cast<double>(xmin)) &&
+              std::isfinite(static_cast<double>(xmax))
               , 1, "unsupported range: ", xmin, " -> ", xmax);
   THArgCheck(((step > 0) && (xmax >= xmin)) || ((step < 0) && (xmax <= xmin))
               , 2, "upper bound and larger bound inconsistent with step sign");
