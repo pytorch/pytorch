@@ -174,48 +174,48 @@ class ProcessGroupGloo : public ProcessGroup {
 
   virtual ~ProcessGroupGloo();
 
-  std::shared_ptr<Work> broadcast(
+  std::shared_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& tensors,
       const BroadcastOptions& opts = BroadcastOptions()) override;
 
-  std::shared_ptr<Work> allreduce(
+  std::shared_ptr<ProcessGroup::Work> allreduce(
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
 
-  std::shared_ptr<Work> reduce(
+  std::shared_ptr<ProcessGroup::Work> reduce(
       std::vector<at::Tensor>& tensors,
       const ReduceOptions& opts = ReduceOptions()) override;
 
-  std::shared_ptr<Work> allgather(
+  std::shared_ptr<ProcessGroup::Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs) override;
 
-  std::shared_ptr<Work> gather(
+  std::shared_ptr<ProcessGroup::Work> gather(
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs,
       const GatherOptions& opts = GatherOptions()) override;
 
-  std::shared_ptr<Work> scatter(
+  std::shared_ptr<ProcessGroup::Work> scatter(
       std::vector<at::Tensor>& outputs,
       std::vector<std::vector<at::Tensor>>& inputs,
       const ScatterOptions& opts = ScatterOptions()) override;
 
-  std::shared_ptr<Work> send(
+  std::shared_ptr<ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,
       int dstRank,
       int tag) override;
 
-  std::shared_ptr<Work> recv(
+  std::shared_ptr<ProcessGroup::Work> recv(
       std::vector<at::Tensor>& tensors,
       int srcRank,
       int tag) override;
 
-  std::shared_ptr<Work> recvAnysource(
+  std::shared_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
       int* srcRank,
       int tag) override;
 
-  std::shared_ptr<Work> barrier() override;
+  std::shared_ptr<ProcessGroup::Work> barrier() override;
 
   std::unordered_map<int, int> getGroupRank() override;
 

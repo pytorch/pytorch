@@ -87,11 +87,11 @@ class ProcessGroup {
     return size_;
   }
 
-  virtual std::shared_ptr<Work> broadcast(
+  virtual std::shared_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& data,
       const BroadcastOptions& opts = BroadcastOptions()) = 0;
 
-  virtual std::shared_ptr<Work> allreduce(
+  virtual std::shared_ptr<ProcessGroup::Work> allreduce(
       std::vector<at::Tensor>& data,
       const AllreduceOptions& opts = AllreduceOptions()) = 0;
 
