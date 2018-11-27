@@ -204,15 +204,22 @@ class ProcessGroupGloo : public ProcessGroup {
   uint32_t nextTag();
 
   // Entrypoint for worker threads.
-  void runLoop(void);
+  void runLoop(int workerIndex);
 
-  // Queue std::function to run on worker thread.
-  void enqueue(std::function<void()> fn);
+  // Queue work to run on worker thread.
+  void enqueue(std::shared_ptr<AsyncWork> work);
 
-  std::deque<std::function<void()>> queue_;
-  std::mutex queueMutex_;
-  std::condition_variable queueProduceCV_;
-  std::condition_variable queueConsumeCV_;
+  // Keep both a queue of pending work, and a vector with in progress work.
+  // Both of these can only be mutated when holding the queue lock.
+  // We keep both around instead of just the queue, so we can grab a weak_ptr
+  // to all in progress and pending work when executing a barrier.
+  // When executing a barrier, we need to ensure that all prior work
+  // has completed before completing itself.
+  std::deque<std::shared_ptr<AsyncWork>> workQueue_;
+  std::vector<std::shared_ptr<AsyncWork>> workInProgress_;
+  std::mutex workMutex_;
+  std::condition_variable workProduceCV_;
+  std::condition_variable workConsumeCV_;
 };
 
 } // namespace c10d
