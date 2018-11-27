@@ -4,7 +4,7 @@
 #include <ATen/core/DefaultTensorOptions.h>
 #include <c10/Device.h>
 #include <ATen/core/Layout.h>
-#include <ATen/core/ScalarType.h>
+#include <c10/core/ScalarType.h>
 #include <ATen/core/ScalarTypeUtils.h>
 
 #include <c10/util/Optional.h>

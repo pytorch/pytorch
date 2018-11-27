@@ -7,7 +7,7 @@
 // Should work with THStorageClass
 #include <TH/THStorageFunctions.hpp>
 
-#include "ATen/ScalarType.h"
+#include <c10/core/ScalarType.h>
 
 #include <cuda.h>
 #include <cuda_runtime.h>

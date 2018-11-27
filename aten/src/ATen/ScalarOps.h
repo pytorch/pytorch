@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ATen/core/Scalar.h"
+#include <c10/core/Scalar.h>
 #include "ATen/Tensor.h"
 
 // This is in the c10 namespace because we use ADL to find the functions in it.

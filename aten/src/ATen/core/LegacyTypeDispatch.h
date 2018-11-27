@@ -24,7 +24,7 @@
 // pay for a hash table lookup every time we do an operation.
 
 #include <ATen/core/Backend.h>
-#include <ATen/core/ScalarType.h>
+#include <c10/core/ScalarType.h>
 #include <ATen/core/VariableHooksInterface.h>
 #include <c10/util/Exception.h>
 
