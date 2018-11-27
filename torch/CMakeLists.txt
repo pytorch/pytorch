@@ -29,9 +29,12 @@ endif()
 
 # RPATH stuff
 # see https://cmake.org/Wiki/CMake_RPATH_handling
-if(APPLE)
+if (APPLE)
   set(CMAKE_MACOSX_RPATH ON)
-endif()
+  set(_rpath_portable_origin "@loader_path")
+else()
+  set(_rpath_portable_origin $ORIGIN)
+endif(APPLE)
 # Use separate rpaths during build and install phases
 set(CMAKE_SKIP_BUILD_RPATH  FALSE)
 # Don't use the install-rpath during the build phase
@@ -40,11 +43,6 @@ set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 # Automatically add all linked folders that are NOT in the build directory to
 # the rpath (per library?)
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
-# Always ensure that CMAKE_INSTALL_PREFIX/lib is in the rpath
-list(FIND CMAKE_PLATFORM_IMPLICIT_LINK_DIRECTORIES "${CMAKE_INSTALL_PREFIX}/lib" isSystemDir)
-if("${isSystemDir}" STREQUAL "-1")
-  list(APPEND CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
-endif()
 
 # Get the correct Python executable
 if (DEFINED ENV{PYTORCH_PYTHON})
@@ -155,6 +153,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_1.cpp
   ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_2.cpp
   ${TORCH_SRC_DIR}/csrc/jit/graph_executor.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/import_method.cpp
   ${TORCH_SRC_DIR}/csrc/jit/import.cpp
   ${TORCH_SRC_DIR}/csrc/jit/interpreter.cpp
   ${TORCH_SRC_DIR}/csrc/jit/constants.cpp
@@ -162,6 +161,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/ir.cpp
   ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
   ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/alias_analysis.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/batch_mm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/constant_propagation.cpp
@@ -194,6 +194,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/script/lexer.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
   ${TORCH_SRC_DIR}/csrc/jit/tracer.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/hooks_for_testing.cpp
   ${TORCH_SRC_DIR}/csrc/torch.cpp
   ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
   ${TORCH_SRC_DIR}/csrc/utils/variadic.cpp
@@ -265,7 +266,7 @@ else()
   add_library(torch SHARED ${TORCH_SRCS})
 endif()
 
-target_compile_definitions(torch PRIVATE _THP_CORE)
+target_compile_definitions(torch PUBLIC _THP_CORE)
 
 # until they can be unified, keep these lists synced with setup.py
 if(MSVC)
@@ -275,7 +276,7 @@ if(MSVC)
     set (MSVC_RUNTIME_LIBRARY_FLAG "/MD")
   endif()
 
-  target_compile_options(torch PRIVATE
+  target_compile_options(torch PUBLIC
     ${MSVC_RUNTIME_LIBRARY_OPTION}
     /Z7
     /EHa
@@ -294,7 +295,7 @@ if(MSVC)
     /bigobj
     )
 else()
-  target_compile_options(torch PRIVATE
+  target_compile_options(torch PUBLIC
     -std=c++11
     -Wall
     -Wextra
@@ -481,8 +482,236 @@ if (USE_DISTRIBUTED)
   endif()
 endif()
 
-if (MSVC)
-  add_subdirectory(${TORCH_SRC_DIR}/lib/libshm_windows)
-else()
-  add_subdirectory(${TORCH_SRC_DIR}/lib/libshm)
+if (BUILD_PYTHON)
+  if (MSVC)
+    add_subdirectory(${TORCH_SRC_DIR}/lib/libshm_windows)
+  else()
+    add_subdirectory(${TORCH_SRC_DIR}/lib/libshm)
+  endif()
+
+  set(TORCH_PYTHON_SRCS
+    ${TORCH_SRC_DIR}/csrc/DataLoader.cpp
+    ${TORCH_SRC_DIR}/csrc/Device.cpp
+    ${TORCH_SRC_DIR}/csrc/Dtype.cpp
+    ${TORCH_SRC_DIR}/csrc/DynamicTypes.cpp
+    ${TORCH_SRC_DIR}/csrc/Exceptions.cpp
+    ${TORCH_SRC_DIR}/csrc/TypeInfo.cpp
+    ${TORCH_SRC_DIR}/csrc/Generator.cpp
+    ${TORCH_SRC_DIR}/csrc/Layout.cpp
+    ${TORCH_SRC_DIR}/csrc/Module.cpp
+    ${TORCH_SRC_DIR}/csrc/PtrWrapper.cpp
+    ${TORCH_SRC_DIR}/csrc/Size.cpp
+    ${TORCH_SRC_DIR}/csrc/Storage.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/functions/init.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/generated/python_variable_methods.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/init.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/python_anomaly_mode.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/python_cpp_function.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/python_engine.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/python_function.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/python_hook.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/python_legacy_variable.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/python_variable.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/python_variable_indexing.cpp
+    ${TORCH_SRC_DIR}/csrc/byte_order.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/batched/BatchTensor.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/init.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/onnx.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/fixup_onnx_loop.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/prepare_division_for_onnx.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/peephole.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/to_batch.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/python_arg_flatten.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/python_interpreter.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/python_ir.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/python_tracer.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/init.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/lexer.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/python_tree_views.cpp
+    ${TORCH_SRC_DIR}/csrc/nn/THNN.cpp
+    ${TORCH_SRC_DIR}/csrc/onnx/init.cpp
+    ${TORCH_SRC_DIR}/csrc/serialization.cpp
+    ${TORCH_SRC_DIR}/csrc/tensor/python_tensor.cpp
+    ${TORCH_SRC_DIR}/csrc/utils.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/cuda_lazy_init.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/invalid_arguments.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/object_ptr.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/python_arg_parser.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/tensor_apply.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/tensor_conversion_dispatch.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/tensor_dtypes.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/tensor_layouts.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/tensor_list.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/tensor_new.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/tensor_numpy.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/tensor_types.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/tuple_parser.cpp
+    )
+
+  set(TORCH_PYTHON_INCLUDE_DIRECTORIES
+    ${PYTHON_INCLUDE_DIR}
+
+    ${TORCH_ROOT}
+    ${TORCH_ROOT}/aten/src
+    ${TORCH_ROOT}/aten/src/TH
+
+    ${CMAKE_BINARY_DIR}
+    ${CMAKE_BINARY_DIR}/aten/src
+    ${CMAKE_BINARY_DIR}/caffe2/aten/src
+    ${CMAKE_BINARY_DIR}/caffe2/aten/src/TH
+    ${CMAKE_BINARY_DIR}/caffe2/aten/src/THC
+    ${CMAKE_BINARY_DIR}/third_party
+    ${CMAKE_BINARY_DIR}/third_party/onnx
+
+    ${TORCH_ROOT}/third_party/build/nccl/include
+    ${TORCH_ROOT}/third_party/gloo
+    ${TORCH_ROOT}/third_party/onnx
+    ${TORCH_ROOT}/third_party/protobuf/src
+    ${TORCH_ROOT}/third_party/pybind11/include
+
+    ${TORCH_SRC_DIR}/csrc
+    ${TORCH_SRC_DIR}/lib
+    )
+
+  if (MSVC)
+    list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES
+      ${TORCH_SRC_DIR}/lib/libshm_windows)
+  else()
+    list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES
+      ${TORCH_SRC_DIR}/lib/libshm)
+  endif()
+
+  set(TORCH_PYTHON_LINK_LIBRARIES
+    torch
+    shm)
+
+  set(TORCH_PYTHON_COMPILE_DEFINITIONS)
+
+  set(TORCH_PYTHON_COMPILE_OPTIONS)
+
+  set(TORCH_PYTHON_LINK_FLAGS)
+
+  if (MSVC)
+    list(APPEND TORCH_PYTHON_LINK_FLAGS " /NODEFAULTLIB:LIBCMT.LIB")
+    list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${PYTHON_LIBRARIES})
+  elseif (APPLE)
+    list(APPEND TORCH_PYTHON_LINK_FLAGS " -undefined dynamic_lookup")
+  else()
+    list(APPEND TORCH_PYTHON_COMPILE_OPTIONS
+      -fno-strict-aliasing
+      -Wno-write-strings
+      -Wno-strict-aliasing)
+  endif()
+
+  if (USE_CUDA)
+    list(APPEND TORCH_PYTHON_SRCS
+      ${TORCH_SRC_DIR}/csrc/cuda/Module.cpp
+      ${TORCH_SRC_DIR}/csrc/cuda/Storage.cpp
+      ${TORCH_SRC_DIR}/csrc/cuda/Stream.cpp
+      ${TORCH_SRC_DIR}/csrc/cuda/utils.cpp
+      ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
+      ${TORCH_SRC_DIR}/csrc/cuda/python_comm.cpp
+      ${TORCH_SRC_DIR}/csrc/cuda/serialization.cpp
+      ${TORCH_SRC_DIR}/csrc/nn/THCUNN.cpp
+      )
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUDA)
+
+    if(MSVC)
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib)
+      list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES "${NVTOOLEXT_HOME}/include")
+      list(APPEND TORCH_PYTHON_LINK_FLAGS " /FORCE:UNRESOLVED")
+    elseif(APPLE)
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${CUDA_TOOLKIT_ROOT_DIR}/lib/libnvToolsExt.dylib)
+    else()
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libnvToolsExt.so)
+    endif()
+  endif()
+
+  if (USE_CUDNN)
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUDNN)
+
+    # NOTE: these are at the front, in case there's another cuDNN in
+    # CUDA path.
+    # Basically, this is the case where $CUDA_HOME/lib64 has an old or
+    # incompatible libcudnn.so, which we can inadvertently link to if
+    # we're not careful.
+    list(INSERT 0 TORCH_PYTHON_LINK_LIBRARIES ${CUDNN_LIBRARY})
+    list(INSERT 0 TORCH_PYTHON_INCLUDE_DIRECTORIES ${CUDNN_INCLUDE_DIR})
+  endif()
+
+  if (USE_MIOPEN)
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_MIOPEN)
+    list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${MIOPEN_INCLUDE_DIR})
+    list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${MIOPEN_LIBRARY})
+  endif()
+
+  if (USE_NUMPY)
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NUMPY)
+  endif()
+
+  if (USE_ROCM)
+    list(APPEND TORCH_PYTHON_SRCS
+      ${TORCH_SRC_DIR}/csrc/cuda/Module.cpp
+      ${TORCH_SRC_DIR}/csrc/cuda/Storage.cpp
+      ${TORCH_SRC_DIR}/csrc/cuda/Stream.cpp
+      ${TORCH_SRC_DIR}/csrc/cuda/utils.cpp
+      ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
+      ${TORCH_SRC_DIR}/csrc/cuda/python_comm.cpp
+      ${TORCH_SRC_DIR}/csrc/cuda/serialization.cpp
+      ${TORCH_SRC_DIR}/csrc/nn/THCUNN.cpp
+      )
+    list(APPEND TORCH_PYTHON_LINK_LIBRARIES caffe2_hip_library)
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS
+      USE_ROCM
+      __HIP_PLATFORM_HCC__
+      )
+  endif()
+
+  if (USE_DISTRIBUTED)
+    list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/distributed/Module.cpp)
+    list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${TORCH_SRC_DIR}/lib/THD)
+    list(APPEND TORCH_PYTHON_LINK_LIBRARIES THD)
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_DISTRIBUTED)
+    if (NOT MSVC AND NOT APPLE)
+      list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp)
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
+      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
+      if (USE_CUDA)
+        list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/distributed/c10d/ddp.cpp)
+      endif()
+    endif()
+  endif()
+
+  if (USE_NCCL)
+    list(APPEND TORCH_PYTHON_SRCS
+      ${TORCH_SRC_DIR}/csrc/cuda/nccl.cpp
+      ${TORCH_SRC_DIR}/csrc/cuda/python_nccl.cpp)
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NCCL)
+    if (USE_SYSTEM_NCCL)
+    endif()
+  endif()
+
+  add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
+
+  target_link_libraries(torch_python ${TORCH_PYTHON_LINK_LIBRARIES})
+
+  target_compile_definitions(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_DEFINITIONS})
+
+  target_compile_options(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
+
+  target_include_directories(torch_python PUBLIC ${TORCH_PYTHON_INCLUDE_DIRECTORIES})
+
+  if (TORCH_PYTHON_LINK_FLAGS)
+    set_target_properties(torch_python PROPERTIES LINK_FLAGS "${TORCH_PYTHON_LINK_FLAGS}")
+  endif()
+
+  install(TARGETS torch_python
+    RUNTIME DESTINATION "${TORCH_INSTALL_BIN_DIR}"
+    LIBRARY DESTINATION "${TORCH_INSTALL_LIB_DIR}"
+    ARCHIVE DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 endif()

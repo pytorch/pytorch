@@ -171,11 +171,11 @@ def check_compiler_abi_compatibility(compiler):
         if sys.platform == 'linux':
             minimum_required_version = MINIMUM_GCC_VERSION
             version = subprocess.check_output([compiler, '-dumpfullversion', '-dumpversion'])
-            version = version.split('.')
+            version = version.decode().strip().split('.')
         else:
             minimum_required_version = MINIMUM_MSVC_VERSION
             compiler_info = subprocess.check_output(compiler, stderr=subprocess.STDOUT)
-            match = re.search(r'(\d+)\.(\d+)\.(\d+)', compiler_info)
+            match = re.search(r'(\d+)\.(\d+)\.(\d+)', compiler_info.decode().strip())
             version = (0, 0, 0) if match is None else match.groups()
     except Exception:
         _, error, _ = sys.exc_info()
@@ -399,6 +399,7 @@ def CppExtension(name, sources, *args, **kwargs):
         libraries.append('c10')
         libraries.append('caffe2')
         libraries.append('torch')
+        libraries.append('torch_python')
         libraries.append('_C')
         kwargs['libraries'] = libraries
 
@@ -444,6 +445,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
         libraries.append('c10')
         libraries.append('caffe2')
         libraries.append('torch')
+        libraries.append('torch_python')
         libraries.append('caffe2_gpu')
         libraries.append('_C')
     kwargs['libraries'] = libraries
@@ -521,7 +523,8 @@ def load(name,
          extra_include_paths=None,
          build_directory=None,
          verbose=False,
-         with_cuda=None):
+         with_cuda=None,
+         is_python_module=True):
     '''
     Loads a PyTorch C++ extension just-in-time (JIT).
 
@@ -574,9 +577,15 @@ def load(name,
             automatically determined based on the existence of ``.cu`` or
             ``.cuh`` in ``sources``. Set it to `True`` to force CUDA headers
             and libraries to be included.
+        is_python_module: If ``True`` (default), imports the produced shared
+            library as a Python module. If ``False``, loads it into the process
+            as a plain dynamic library.
 
     Returns:
-        The loaded PyTorch extension as a Python module.
+        If ``is_python_module`` is ``True``, returns the loaded PyTorch
+        extension as a Python module. If ``is_python_module`` is ``False``
+        returns nothing (the shared library is loaded into the process as a side
+        effect).
 
     Example:
         >>> from torch.utils.cpp_extension import load
@@ -595,7 +604,8 @@ def load(name,
         extra_include_paths,
         build_directory or _get_build_directory(name, verbose),
         verbose,
-        with_cuda)
+        with_cuda,
+        is_python_module)
 
 
 def load_inline(name,
@@ -608,7 +618,8 @@ def load_inline(name,
                 extra_include_paths=None,
                 build_directory=None,
                 verbose=False,
-                with_cuda=None):
+                with_cuda=None,
+                is_python_module=True):
     '''
     Loads a PyTorch C++ extension just-in-time (JIT) from string sources.
 
@@ -722,7 +733,8 @@ def load_inline(name,
         extra_include_paths,
         build_directory,
         verbose,
-        with_cuda)
+        with_cuda,
+        is_python_module)
 
 
 def _jit_compile(name,
@@ -733,7 +745,8 @@ def _jit_compile(name,
                  extra_include_paths,
                  build_directory,
                  verbose,
-                 with_cuda=None):
+                 with_cuda,
+                 is_python_module):
     old_version = JIT_EXTENSION_VERSIONER.get_version(name)
     version = JIT_EXTENSION_VERSIONER.bump_version_if_changed(
         name,
@@ -772,7 +785,7 @@ def _jit_compile(name,
 
     if verbose:
         print('Loading extension module {}...'.format(name))
-    return _import_module_from_library(name, build_directory)
+    return _import_module_from_library(name, build_directory, is_python_module)
 
 
 def _write_ninja_file_and_build(name,
@@ -839,6 +852,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
         extra_ldflags.append('c10.lib')
         extra_ldflags.append('caffe2.lib')
         extra_ldflags.append('torch.lib')
+        extra_ldflags.append('torch_python.lib')
         if with_cuda:
             extra_ldflags.append('caffe2_gpu.lib')
         extra_ldflags.append('_C.lib')
@@ -908,12 +922,15 @@ def _build_extension_module(name, build_directory, verbose):
         raise RuntimeError(message)
 
 
-def _import_module_from_library(module_name, path):
+def _import_module_from_library(module_name, path, is_python_module):
     # https://stackoverflow.com/questions/67631/how-to-import-a-module-given-the-full-path
     file, path, description = imp.find_module(module_name, [path])
     # Close the .so file after load.
     with file:
-        return imp.load_module(module_name, file, path, description)
+        if is_python_module:
+            return imp.load_module(module_name, file, path, description)
+        else:
+            return torch.ops.load_library(path)
 
 
 def _write_ninja_file(path,

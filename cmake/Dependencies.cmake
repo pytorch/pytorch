@@ -125,19 +125,37 @@ set(CONFU_DEPENDENCIES_BINARY_DIR ${PROJECT_BINARY_DIR}/confu-deps
 
 # ---[ QNNPACK
 if(USE_QNNPACK)
-  if (NOT IOS AND NOT (CMAKE_SYSTEM_NAME MATCHES "^(Android|Linux|Darwin)$"))
-    message(WARNING
-      "Target platform \"${CMAKE_SYSTEM_NAME}\" is not supported in QNNPACK. "
-      "Supported platforms are Android, iOS, Linux, and macOS. "
-      "Turn this warning off by USE_QNNPACK=OFF.")
-    set(USE_QNNPACK OFF)
-  endif()
-  if (NOT IOS AND NOT (CMAKE_SYSTEM_PROCESSOR MATCHES "^(i686|AMD64|x86_64|armv[0-9].*|arm64|aarch64)$"))
-    message(WARNING
-      "Target architecture \"${CMAKE_SYSTEM_PROCESSOR}\" is not supported in QNNPACK. "
-      "Supported platforms are x86, x86-64, ARM, and ARM64. "
-      "Turn this warning off by USE_QNNPACK=OFF.")
-    set(USE_QNNPACK OFF)
+  if (IOS)
+    list(LENGTH IOS_ARCH IOS_ARCH_COUNT)
+    if (IOS_ARCH_COUNT GREATER 1)
+      message(WARNING
+        "Multi-architecture (${IOS_ARCH}) builds are not supported in QNNPACK. "
+        "Specify a single architecture in IOS_ARCH and re-configure, or "
+        "turn this warning off by USE_QNNPACK=OFF.")
+      set(USE_QNNPACK OFF)
+    endif()
+    if (NOT IOS_ARCH MATCHES "^(i386|x86_64|armv7.*|arm64.*)$")
+      message(WARNING
+        "Target architecture \"${IOS_ARCH}\" is not supported in QNNPACK. "
+        "Supported architectures are x86, x86-64, ARM, and ARM64. "
+        "Turn this warning off by USE_QNNPACK=OFF.")
+      set(USE_QNNPACK OFF)
+    endif()
+  else()
+    if (NOT IOS AND NOT (CMAKE_SYSTEM_NAME MATCHES "^(Android|Linux|Darwin)$"))
+      message(WARNING
+        "Target platform \"${CMAKE_SYSTEM_NAME}\" is not supported in QNNPACK. "
+        "Supported platforms are Android, iOS, Linux, and macOS. "
+        "Turn this warning off by USE_QNNPACK=OFF.")
+      set(USE_QNNPACK OFF)
+    endif()
+    if (NOT IOS AND NOT (CMAKE_SYSTEM_PROCESSOR MATCHES "^(i686|AMD64|x86_64|armv[0-9].*|arm64|aarch64)$"))
+      message(WARNING
+        "Target architecture \"${CMAKE_SYSTEM_PROCESSOR}\" is not supported in QNNPACK. "
+        "Supported architectures are x86, x86-64, ARM, and ARM64. "
+        "Turn this warning off by USE_QNNPACK=OFF.")
+      set(USE_QNNPACK OFF)
+    endif()
   endif()
   if (USE_QNNPACK)
     set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
@@ -421,6 +439,9 @@ if(USE_OPENCV)
   if(OpenCV_FOUND)
     include_directories(SYSTEM ${OpenCV_INCLUDE_DIRS})
     list(APPEND Caffe2_DEPENDENCY_LIBS ${OpenCV_LIBS})
+    if (MSVC AND USE_CUDA)
+        list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${OpenCV_LIBS})
+    endif()
     message(STATUS "OpenCV found (${OpenCV_CONFIG_PATH})")
   else()
     message(WARNING "Not compiling with OpenCV. Suppress this warning with -DUSE_OPENCV=OFF")
@@ -534,7 +555,15 @@ if(BUILD_PYTHON)
   set(Python_ADDITIONAL_VERSIONS 3.7 3.6 3.5 2.8 2.7 2.6)
   find_package(PythonInterp 2.7)
   find_package(PythonLibs 2.7)
-  find_package(NumPy)
+
+  # When building pytorch, we pass this in directly from setup.py, and
+  # don't want to overwrite it because we trust python more than cmake
+  if (NUMPY_INCLUDE_DIR)
+    set(NUMPY_FOUND ON)
+  else()
+    find_package(NumPy)
+  endif()
+
   if(PYTHONINTERP_FOUND AND PYTHONLIBS_FOUND)
     include_directories(SYSTEM ${PYTHON_INCLUDE_DIR})
     caffe2_update_option(USE_NUMPY OFF)
@@ -925,12 +954,6 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     set(ONNX_CUSTOM_PROTOC_EXECUTABLE ${CAFFE2_CUSTOM_PROTOC_EXECUTABLE})
   endif()
   set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
-  # We will build onnx as static libs and embed it directly into the binary.
-  if (MSVC AND BUILD_SHARED_LIBS)
-    # That also means we want to export all symbols from the shared
-    # library we are building
-    set(ONNX_BUILD_MAIN_LIB ON)
-  endif()
   set(BUILD_SHARED_LIBS OFF)
   set(ONNX_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
   set(ONNX_USE_LITE_PROTO ${CAFFE2_USE_LITE_PROTO})
@@ -981,16 +1004,19 @@ if (NOT BUILD_ATEN_MOBILE)
   # see https://cmake.org/Wiki/CMake_RPATH_handling
   if (APPLE)
     set(CMAKE_MACOSX_RPATH ON)
-  endif()
+    set(_rpath_portable_origin "@loader_path")
+  else()
+    set(_rpath_portable_origin $ORIGIN)
+  endif(APPLE)
+  # Use separate rpaths during build and install phases
   set(CMAKE_SKIP_BUILD_RPATH  FALSE)
+  # Don't use the install-rpath during the build phase
   set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
-  set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
+  set(CMAKE_INSTALL_RPATH "${_rpath_portable_origin}")
+  # Automatically add all linked folders that are NOT in the build directory to
+  # the rpath (per library?)
   set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
   set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
-  list(FIND CMAKE_PLATFORM_IMPLICIT_LINK_DIRECTORIES "${CMAKE_INSTALL_PREFIX}/lib" isSystemDir)
-  if ("${isSystemDir}" STREQUAL "-1")
-    set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
-  endif()
 
   # Top-level build config
   ############################################

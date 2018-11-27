@@ -38,15 +38,22 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << v.toTensor();
     case IValue::Tag::Double: {
       double d = v.toDouble();
-      int64_t i = int64_t(d);
-      if (std::isnormal(d) && double(i) == d) {
-        return out << i << ".";
+      int c = std::fpclassify(d);
+      if (c == FP_NORMAL || c == FP_ZERO) {
+        int64_t i = int64_t(d);
+        if (double(i) == d) {
+          return out << i << ".";
+        }
       }
-      return out << v.toDouble();
+      auto orig_prec = out.precision();
+      return out
+        << std::setprecision(std::numeric_limits<double>::max_digits10)
+        << v.toDouble()
+        << std::setprecision(orig_prec);
     } case IValue::Tag::Int:
       return out << v.toInt();
     case IValue::Tag::Bool:
-      return out << v.toBool();
+      return out << (v.toBool() ? "True" : "False");
     case IValue::Tag::Tuple:
       return printList(out, v.toTuple(), "(", ")");
     case IValue::Tag::IntList:

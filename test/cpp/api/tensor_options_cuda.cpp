@@ -4,7 +4,7 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/Functions.h>
 #include <ATen/OptionsGuard.h>
-#include <ATen/core/ScalarType.h>
+#include <c10/core/ScalarType.h>
 #include <ATen/core/TensorOptions.h>
 
 // NB: This file is compiled even in CPU build (for some reason), so

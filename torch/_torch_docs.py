@@ -826,10 +826,10 @@ Example::
 """)
 
 add_docstr(torch.cholesky, r"""
-cholesky(a, upper=False, out=None) -> Tensor
+cholesky(A, upper=False, out=None) -> Tensor
 
 Computes the Cholesky decomposition of a symmetric positive-definite
-matrix :math:`A`.
+matrix :math:`A` or for batches of symmetric positive-definite matrices.
 
 If :attr:`upper` is ``True``, the returned matrix `U` is upper-triangular, and
 the decomposition has the form:
@@ -845,16 +845,23 @@ the decomposition has the form:
 
     A = LL^T
 
+If :attr:`upper` is ``True``, and :attr:`A` is a batch of symmetric positive-definite
+matrices, then the returned tensor will be composed of upper-triangular Cholesky factors
+of each of the individual matrices. Similarly, when :attr:`upper` is ``False``, the returned
+tensor will be composed of lower-triangular Cholesky factors of each of the individual
+matrices.
+
 Args:
-    a (Tensor): the input 2-D tensor, a symmetric positive-definite matrix
-    upper (bool, optional): flag that indicates whether to return the
+    a (Tensor): the input tensor of size (*, n, n) where `*` is zero or more
+                batch dimensions consisting of symmetric positive-definite matrices.
+    upper (bool, optional): flag that indicates whether to return a
                             upper or lower triangular matrix. Default: ``False``
     out (Tensor, optional): the output matrix
 
 Example::
 
     >>> a = torch.randn(3, 3)
-    >>> a = torch.mm(a, a.t()) # make symmetric positive definite
+    >>> a = torch.mm(a, a.t()) # make symmetric positive-definite
     >>> l = torch.cholesky(a)
     >>> a
     tensor([[ 2.4112, -0.7486,  1.4551],
@@ -868,6 +875,12 @@ Example::
     tensor([[ 2.4112, -0.7486,  1.4551],
             [-0.7486,  1.3544,  0.1294],
             [ 1.4551,  0.1294,  1.6724]])
+    >>> a = torch.randn(3, 2, 2)
+    >>> a = torch.matmul(a, a.transpose(-1, -2)) + 1e-03 # make symmetric positive-definite
+    >>> l = torch.cholesky(a)
+    >>> z = torch.matmul(l, l.transpose(-1, -2))
+    >>> torch.max(torch.abs(z - a)) # Max non-zero
+    tensor(2.3842e-07)
 """)
 
 add_docstr(torch.clamp,
@@ -3712,7 +3725,7 @@ The shape of the tensor is defined by the variable argument :attr:`size`.
 
 .. note:
     With the global dtype default (`torch.float32`), this function returns
-    a tensor with dtype `torch.float32`, NOT an integer dtype.
+    a tensor with dtype `torch.int64`.
 
 Args:
     low (int, optional): Lowest integer to be drawn from the distribution. Default: 0.
@@ -3727,17 +3740,17 @@ Args:
 Example::
 
     >>> torch.randint(3, 5, (3,))
-    tensor([ 4.,  3.,  4.])
+    tensor([4, 3, 4])
 
 
-    >>> torch.randint(10, (2,2))
-    tensor([[ 0.,  2.],
-            [ 5.,  5.]])
+    >>> torch.randint(10, (2, 2))
+    tensor([[0, 2],
+            [5, 5]])
 
 
-    >>> torch.randint(3, 10, (2,2))
-    tensor([[ 4.,  5.],
-            [ 6.,  7.]])
+    >>> torch.randint(3, 10, (2, 2))
+    tensor([[4, 5],
+            [6, 7]])
 
 
 """.format(**factory_common_args))
@@ -3752,7 +3765,7 @@ random integers generated uniformly between :attr:`low` (inclusive) and
 
 .. note:
     With the global dtype default (`torch.float32`), this function returns
-    a tensor with dtype `torch.float32`, NOT an integer dtype.
+    a tensor with dtype `torch.int64`.
 
 Args:
     {input}
@@ -3832,7 +3845,7 @@ Args:
 Example::
 
     >>> torch.randperm(4)
-    tensor([ 2,  1,  0,  3])
+    tensor([2, 1, 0, 3])
 """.format(**factory_common_args))
 
 add_docstr(torch.tensor,
@@ -4474,7 +4487,7 @@ Example::
 .. function:: sum(input, dim, keepdim=False, dtype=None) -> Tensor
 
 Returns the sum of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim`. If :attr::`dim` is a list of dimensions,
+dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
 reduce over all of them.
 
 If :attr:`keepdim` is ``True``, the output tensor is of the same size
