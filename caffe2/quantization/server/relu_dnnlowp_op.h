@@ -20,4 +20,11 @@ class ReluDNNLowPOp final : public Operator<CPUContext> {
   std::unique_ptr<dnnlowp::QuantizationFactory> qfactory_;
 };
 
+namespace internal {
+
+template <typename T>
+void ReluAVX2(const int N, const int zero_point, const T* X, T* Y);
+
+} // namespace internal
+
 } // namespace caffe2

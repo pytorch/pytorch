@@ -161,7 +161,6 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
           K,
           X_pack_buf_.data(), // buffer for packed matrix
           1, // group
-          in_qparams_[0].zero_point,
           row_offsets_.data());
 
       DoNothing<> doNothingObj{};
@@ -240,7 +239,6 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
             K,
             X_pack_buf_.data(), // buffer for packed matrix
             1, // group
-            in_qparams_[0].zero_point,
             row_offsets_.data());
 
         DoNothing<float, float> doNothingObj{};
