@@ -8300,7 +8300,7 @@ new_module_tests = [
     ),
     dict(
         module_name='LPPool2d',
-        constructor_args=(2, (2, 2), 2),
+        constructor_args=(2, 2, 2),
         input_size=(1, 3, 7, 7),
     ),
     dict(

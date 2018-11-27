@@ -10018,6 +10018,10 @@ def add_nn_module_test(*args, **kwargs):
     if module is None or torch._jit_internal._weak_types.get(module) is None:
         return
 
+    if 'desc' in kwargs and 'eval' in kwargs['desc']:
+        # eval() is not supported, so skip these tests
+        return
+
     def do_test(self):
         if 'constructor' in kwargs:
             nn_module = kwargs['constructor']
