@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <memory>
+#include <numeric>
 
 #include <ATen/core/Backend.h>
 #include <ATen/core/LegacyTypeDispatch.h>
@@ -13,12 +14,8 @@
 
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
-
 #include <c10/util/Flags.h>
-
-#include "caffe2/core/allocator.h"
-#include "caffe2/core/common.h"
-#include "caffe2/core/logging.h"
+#include <c10/util/Logging.h>
 
 // A global boolean variable to control whether we free memory when a Tensor
 // is shrinked to a smaller size. As a result, a Tensor is always going to
