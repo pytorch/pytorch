@@ -837,7 +837,12 @@ void ScriptModuleSerializer::collectInfo(
   for (const auto& elem : module.get_parameters()) {
     const script::NamedParameter& param = elem.value();
     paramMap_[param.slot()] = prefix + param.name;
-    addTensor(param.slot());
+    // If the module parameter is undefined tensor, we don't
+    // add it to the tensor table, and then don't set the
+    // tensor_id in ParameterDef in convertParameter
+    if (param.slot()->defined()) {
+      addTensor(param.slot());
+    }
   }
   for (const auto& elem : module.get_methods()) {
     findTensorInBlock(*elem.value()->graph()->block());
@@ -853,10 +858,6 @@ void ScriptModuleSerializer::convertAndWriteTensor(
   auto tensor_it = tensorTable_.find(&tensor);
   AT_ASSERT(tensor_it != tensorTable_.end());
   tensor_proto->set_name(c10::to_string(tensor_it->second));
-  if (!tensor.defined()) {
-    return;
-  }
-
   for (auto d : tensor.sizes()) {
     tensor_proto->add_dims(d);
   }
@@ -937,12 +938,14 @@ void ScriptModuleSerializer::convertParameter(
     torch::ParameterDef* param_def) {
   param_def->set_name(param.name);
   param_def->set_is_buffer(param.is_buffer);
-  if (param.slot()->defined()) {
-    param_def->set_require_gradient(param.slot()->requires_grad());
-  }
+  // If we could not find the tensor in tensorTable, it indicates an
+  // undefined tensor in the graph, we only set the tensor_id and
+  // requires_grad when the tensor is not an undefined tensor,
   auto it = tensorTable_.find(param.slot());
-  AT_ASSERT(it != tensorTable_.end());
-  param_def->set_tensor_id(c10::to_string(it->second));
+  if (it != tensorTable_.end()) {
+    param_def->set_require_gradient(param.slot()->requires_grad());
+    param_def->set_tensor_id(c10::to_string(it->second));
+  }
 }
 
 void ScriptModuleSerializer::convertMethod(

@@ -420,10 +420,6 @@ at::Tensor ScriptModuleDeserializer::loadTensor(uint64_t tensor_id) {
   auto it = metaMap_.find(tensor_id);
   AT_ASSERT(it != metaMap_.end());
   const caffe2::TensorProto& tensor_proto = *it->second;
-  if (!tensor_proto.has_storage_type()) {
-    return at::Tensor();
-  }
-
   std::vector<int64_t> dims;
   for (int i = 0; i < tensor_proto.dims_size(); ++i) {
     dims.push_back(tensor_proto.dims(i));
@@ -471,8 +467,13 @@ void ScriptModuleDeserializer::loadParams(
   std::shared_ptr<script::Module> module = moduleLookup_(moduleStack_);
   for (int i = 0; i < module_def.parameters_size(); ++i) {
     const torch::ParameterDef& param_def = module_def.parameters(i);
-    uint64_t tensor_id = caffe2::stoull(param_def.tensor_id());
-    at::Tensor tensor = loadTensor(tensor_id);
+    at::Tensor tensor = at::Tensor();
+    // If param_def does not have tensor_id field, it indicates an undefined
+    // tensor, otherwise we get the tensor_id and load the tensor
+    if (param_def.has_tensor_id()) {
+      uint64_t tensor_id = caffe2::stoull(param_def.tensor_id());
+      tensor = loadTensor(tensor_id);
+    }
     autograd::Variable variable =
         autograd::make_variable(tensor, param_def.require_gradient());
     module->register_parameter(
