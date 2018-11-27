@@ -10,6 +10,7 @@ from ..._jit_internal import weak_module, weak_script_method
 
 # TODO: check contiguous in THNN
 # TODO: use separate backend functions?
+@weak_module
 class _BatchNorm(Module):
     _version = 2
     __constants__ = ['training', 'track_running_stats', 'momentum', 'eps']
@@ -53,6 +54,7 @@ class _BatchNorm(Module):
     def _check_input_dim(self, input):
         raise NotImplementedError
 
+    @weak_script_method
     def forward(self, input):
         self._check_input_dim(input)
 
@@ -90,6 +92,7 @@ class _BatchNorm(Module):
             missing_keys, unexpected_keys, error_msgs)
 
 
+@weak_module
 class BatchNorm1d(_BatchNorm):
     r"""Applies Batch Normalization over a 2D or 3D input (a mini-batch of 1D
     inputs with optional additional channel dimension) as described in the paper
@@ -162,6 +165,7 @@ class BatchNorm1d(_BatchNorm):
                              .format(input.dim()))
 
 
+@weak_module
 class BatchNorm2d(_BatchNorm):
     r"""Applies Batch Normalization over a 4D input (a mini-batch of 2D inputs
     with additional channel dimension) as described in the paper
@@ -234,6 +238,7 @@ class BatchNorm2d(_BatchNorm):
                              .format(input.dim()))
 
 
+@weak_module
 class BatchNorm3d(_BatchNorm):
     r"""Applies Batch Normalization over a 5D input (a mini-batch of 3D inputs
     with additional channel dimension) as described in the paper
