@@ -4,7 +4,7 @@
 #include "THCTensor.h"
 #include "THCGeneral.h"
 #include "TH/THHalf.h"
-#include "THCStream.h"
+
 
 #include "generic/THCTensorCopy.h"
 #include "THCGenerateAllTypes.h"
