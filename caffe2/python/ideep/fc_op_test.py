@@ -16,7 +16,7 @@ import caffe2.python.ideep_test_util as mu
 class FcTest(hu.HypothesisTestCase):
     @given(n=st.integers(1, 5), m=st.integers(1, 5),
            k=st.integers(1, 5), **mu.gcs)
-    def test_fc(self,n, m, k, gc, dc):
+    def test_fc_2_dims(self,n, m, k, gc, dc):
         X = np.random.rand(m, k).astype(np.float32) - 0.5
         W = np.random.rand(n, k).astype(np.float32) - 0.5
         b = np.random.rand(n).astype(np.float32) - 0.5
@@ -221,6 +221,42 @@ class FcTest(hu.HypothesisTestCase):
             print(db0)
             print(np.max(np.abs(db1 - db0)))
             self.assertTrue(False)
+
+    @given(n=st.integers(1, 5), m=st.integers(1, 5),
+           k=st.integers(1, 5), **mu.gcs)
+    def test_fc_4_dims_src(self,n, m, k, gc, dc):
+        X = np.random.rand(m, k, m, m).astype(np.float32) - 0.5
+        W = np.random.rand(n, k*m*m).astype(np.float32) - 0.5
+        b = np.random.rand(n).astype(np.float32) - 0.5
+
+        op = core.CreateOperator(
+            'FC',
+            ['X', 'W', 'b'],
+            ["Y"]
+            )
+
+        self.assertDeviceChecks(dc, op, [X, W, b], [0])
+
+        for i in range(3):
+            self.assertGradientChecks(gc, op, [X, W, b], i, [0])
+
+    @given(n=st.integers(1, 5), m=st.integers(1, 5),
+           k=st.integers(1, 5), **mu.gcs)
+    def test_fc_4_dims(self,n, m, k, gc, dc):
+        X = np.random.rand(m, k, m, m).astype(np.float32) - 0.5
+        W = np.random.rand(n, k, m, m).astype(np.float32) - 0.5
+        b = np.random.rand(n).astype(np.float32) - 0.5
+
+        op = core.CreateOperator(
+            'FC',
+            ['X', 'W', 'b'],
+            ["Y"]
+            )
+
+        self.assertDeviceChecks(dc, op, [X, W, b], [0])
+
+        for i in range(3):
+            self.assertGradientChecks(gc, op, [X, W, b], i, [0])
 
 
 if __name__ == "__main__":
