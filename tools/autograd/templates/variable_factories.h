@@ -2,10 +2,10 @@
 
 // ${generated_comment}
 
-#include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/jit/tracer.h>
 #include <ATen/ATen.h>
 #include <c10/util/ArrayRef.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/tracer.h>
 
 #include <functional>
 #include <initializer_list>
@@ -13,27 +13,28 @@
 
 namespace torch {
 
-#define TENSOR(T, S, _1)                                                    \
-  inline at::Tensor tensor(                                                 \
-      at::ArrayRef<T> values, const at::TensorOptions& options) {           \
-    at::Tensor result = at::tensor(values, at::TensorOptions(options).is_variable(false)); \
-    return autograd::make_variable(result, options.requires_grad());        \
-  }                                                                         \
-  inline at::Tensor tensor(                                                 \
-      std::initializer_list<T> values, const at::TensorOptions& options) {  \
-    return torch::tensor(at::ArrayRef<T>(values), options);                 \
-  }                                                                         \
-  inline at::Tensor tensor(T value, const at::TensorOptions& options) {     \
-    return torch::tensor(at::ArrayRef<T>(value), options);                  \
-  }                                                                         \
-  inline at::Tensor tensor(at::ArrayRef<T> values) {                        \
-    return torch::tensor(std::move(values), at::dtype(at::k##S));           \
-  }                                                                         \
-  inline at::Tensor tensor(std::initializer_list<T> values) {               \
-    return torch::tensor(at::ArrayRef<T>(values));                          \
-  }                                                                         \
-  inline at::Tensor tensor(T value) {                                       \
-    return torch::tensor(at::ArrayRef<T>(value));                           \
+#define TENSOR(T, S, _1)                                                   \
+  inline at::Tensor tensor(                                                \
+      at::ArrayRef<T> values, const at::TensorOptions& options) {          \
+    at::Tensor result =                                                    \
+        at::tensor(values, at::TensorOptions(options).is_variable(false)); \
+    return autograd::make_variable(result, options.requires_grad());       \
+  }                                                                        \
+  inline at::Tensor tensor(                                                \
+      std::initializer_list<T> values, const at::TensorOptions& options) { \
+    return torch::tensor(at::ArrayRef<T>(values), options);                \
+  }                                                                        \
+  inline at::Tensor tensor(T value, const at::TensorOptions& options) {    \
+    return torch::tensor(at::ArrayRef<T>(value), options);                 \
+  }                                                                        \
+  inline at::Tensor tensor(at::ArrayRef<T> values) {                       \
+    return torch::tensor(std::move(values), at::dtype(at::k##S));          \
+  }                                                                        \
+  inline at::Tensor tensor(std::initializer_list<T> values) {              \
+    return torch::tensor(at::ArrayRef<T>(values));                         \
+  }                                                                        \
+  inline at::Tensor tensor(T value) {                                      \
+    return torch::tensor(at::ArrayRef<T>(value));                          \
   }
 AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(TENSOR)
 #undef TENSOR
@@ -41,12 +42,35 @@ AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(TENSOR)
 inline at::Tensor from_blob(
     void* data,
     at::IntList sizes,
+    at::IntList strides,
     const std::function<void(void*)>& deleter,
     const at::TensorOptions& options = {}) {
   at::Tensor tensor =
-      at::from_blob(data, sizes, deleter, at::TensorOptions(options).is_variable(false));
-  return autograd::make_variable(
-      tensor, /*requires_grad=*/options.requires_grad());
+      at::from_blob(data, sizes, strides, deleter, options.is_variable(false));
+  return autograd::make_variable(tensor, options.requires_grad());
+}
+
+inline at::Tensor from_blob(
+    void* data,
+    at::IntList sizes,
+    at::IntList strides,
+    const at::TensorOptions& options = {}) {
+  return torch::from_blob(
+      data,
+      sizes,
+      strides,
+      /*deleter=*/[](void*) {},
+      options);
+}
+
+inline at::Tensor from_blob(
+    void* data,
+    at::IntList sizes,
+    const std::function<void(void*)>& deleter,
+    const at::TensorOptions& options = {}) {
+  at::Tensor tensor =
+      at::from_blob(data, sizes, deleter, options.is_variable(false));
+  return autograd::make_variable(tensor, options.requires_grad());
 }
 
 inline at::Tensor from_blob(
