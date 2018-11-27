@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include <sstream>
-#include "ATen/core/TensorTypeId.h"
-#include "ATen/core/TensorTypeIdRegistration.h"
+#include <c10/core/TensorTypeId.h>
+#include <c10/core/TensorTypeIdRegistration.h>
 
 TEST(TensorTypeIdTest, Printing) {
   std::ostringstream ss;
