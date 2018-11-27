@@ -33,6 +33,8 @@ bool isDifferentiable(Node * n) {
     "aten::mul(Tensor self, Scalar other) -> Tensor",
     "aten::div(Tensor self, Tensor other) -> Tensor",
     "aten::div(Tensor self, Scalar other) -> Tensor",
+    "aten::max(Tensor self, Tensor other) -> Tensor",
+    "aten::min(Tensor self, Tensor other) -> Tensor",
     "aten::sigmoid(Tensor self) -> Tensor",
     "aten::tanh(Tensor self) -> Tensor",
     "aten::relu(Tensor self) -> Tensor",
@@ -41,6 +43,7 @@ bool isDifferentiable(Node * n) {
     "aten::t(Tensor self) -> Tensor",
     "aten::neg(Tensor self) -> Tensor",
     "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor",
+    "aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor",
     "aten::type_as(Tensor self, Tensor other) -> Tensor",
     "aten::unsqueeze(Tensor self, int dim) -> Tensor",
     "aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor",
@@ -164,6 +167,18 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
 
     } else if (node->matches("aten::div(Tensor self, Scalar other) -> Tensor")) {
       return {grads.at(0) / inputs.at(1), nullptr};
+
+    } else if (node->matches("aten::max(Tensor self, Tensor other) -> Tensor")) {
+      return {grads.at(0) * (inputs.at(0) > inputs.at(1)).type_as(grads.at(0)),
+              grads.at(0) * (inputs.at(1) > inputs.at(0)).type_as(grads.at(0))};
+
+    } else if (node->matches("aten::min(Tensor self, Tensor other) -> Tensor")) {
+      return {grads.at(0) * (inputs.at(0) < inputs.at(1)).type_as(grads.at(0)),
+              grads.at(0) * (inputs.at(1) < inputs.at(0)).type_as(grads.at(0))};
+
+    } else if (node->matches("aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor")) {
+      return {nullptr, grads.at(0) * inputs.at(0).type_as(grads.at(0)),
+                       grads.at(0) * (1 - inputs.at(0)).type_as(grads.at(0))};
 
     } else if (node->matches("aten::sigmoid(Tensor self) -> Tensor")) {
       // TODO: The order of operations matter in this case. This
