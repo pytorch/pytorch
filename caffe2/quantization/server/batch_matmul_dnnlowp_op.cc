@@ -332,8 +332,7 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
             B_quantized_temp.data(),
             trans_b_ ? K : N,
             nullptr /*pmat*/,
-            1 /*groups*/,
-            B_qparams_[i].zero_point));
+            1)); /*groups*/
 
         // Pre-compute column_offset
         for (int j = 0; j < N; ++j) {
@@ -446,7 +445,6 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
               A_pack_buf_.data() +
                   tid * A_pack_buf_len_per_thread, // buffer for packed matrix
               1, // group
-              in_qparams_[0].zero_point,
               row_offsets_.data() + tid * row_offset_len_per_thread);
 
           int B_batch_idx = ndims_A >= ndims_B ? i : p * num_sub_batches + i;
@@ -560,7 +558,6 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
                 A_pack_buf_.data() +
                     tid * A_pack_buf_len_per_thread, // buffer for packed matrix
                 1, // group
-                in_qparams_[0].zero_point,
                 row_offsets_.data() + tid * row_offset_len_per_thread);
 
             int B_batch_idx = ndims_A >= ndims_B ? i : p * num_sub_batches + i;
