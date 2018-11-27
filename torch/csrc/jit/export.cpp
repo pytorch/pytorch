@@ -634,7 +634,10 @@ void MethodEncoder::EncodeTypeInfo(
   // Use TypeProto fields to encode types.
   // denotation stores the type as a string
   auto kind = type->kind();
-  if (kind == TypeKind::DynamicType) {
+  if (kind == TypeKind::UndefinedTensorType) {
+    type_proto->set_denotation("UndefinedTensorType");
+    tensortype_proto->set_elem_type(onnx::TensorProto_DataType_UNDEFINED);
+  } else if (kind == TypeKind::DynamicType) {
     type_proto->set_denotation("DynamicType");
     tensortype_proto->set_elem_type(onnx::TensorProto_DataType_UNDEFINED);
   } else if (kind == TypeKind::TensorType) {
@@ -850,11 +853,14 @@ void ScriptModuleSerializer::convertAndWriteTensor(
   auto tensor_it = tensorTable_.find(&tensor);
   AT_ASSERT(tensor_it != tensorTable_.end());
   tensor_proto->set_name(c10::to_string(tensor_it->second));
+  if (!tensor.defined()) {
+    return;
+  }
+
   for (auto d : tensor.sizes()) {
     tensor_proto->add_dims(d);
   }
-  tensor_proto->set_data_type(caffe2::TypeMetaToDataType(
-      at::scalarTypeToTypeMeta(tensor.type().scalarType())));
+  tensor_proto->set_data_type(caffe2::TypeMetaToDataType(tensor.dtype()));
   tensor_proto->set_storage_type(caffe2::TensorProto_StorageType_EXTERNAL);
   caffe2::ExternalDataProto* external_data =
       tensor_proto->mutable_external_data();
@@ -931,7 +937,9 @@ void ScriptModuleSerializer::convertParameter(
     torch::ParameterDef* param_def) {
   param_def->set_name(param.name);
   param_def->set_is_buffer(param.is_buffer);
-  param_def->set_require_gradient(param.slot()->requires_grad());
+  if (param.slot()->defined()) {
+    param_def->set_require_gradient(param.slot()->requires_grad());
+  }
   auto it = tensorTable_.find(param.slot());
   AT_ASSERT(it != tensorTable_.end());
   param_def->set_tensor_id(c10::to_string(it->second));

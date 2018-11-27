@@ -420,6 +420,10 @@ at::Tensor ScriptModuleDeserializer::loadTensor(uint64_t tensor_id) {
   auto it = metaMap_.find(tensor_id);
   AT_ASSERT(it != metaMap_.end());
   const caffe2::TensorProto& tensor_proto = *it->second;
+  if (!tensor_proto.has_storage_type()) {
+    return at::Tensor();
+  }
+
   std::vector<int64_t> dims;
   for (int i = 0; i < tensor_proto.dims_size(); ++i) {
     dims.push_back(tensor_proto.dims(i));
