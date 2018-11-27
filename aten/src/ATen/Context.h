@@ -88,9 +88,6 @@ class CAFFE2_API Context {
     return thc_state.get();
   }
 
-  int getNumGPUs() const {
-    return detail::getCUDAHooks().getNumGPUs();
-  }
   size_t freshTypeID() {
     return next_id++;
   }
