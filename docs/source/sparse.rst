@@ -131,6 +131,6 @@ An empty sparse tensor can be constructed by specifying its size:
     .. method:: _nnz
 
 Functions
-=============
+----------------------------------
 
 .. autofunction:: torch.sparse.addmm
