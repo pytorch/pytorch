@@ -32,6 +32,12 @@ static auto cpu_compilation_unit_template = CodeTemplate(R"(
 #include <cstddef>
 #include <cstdint>
 #include <math.h>
+
+template <typename scalar_t>
+scalar_t rsqrtf(scalar_t x) {
+  return 1.0/sqrtf(x);
+}
+
 ${type_declarations}
 
 #define OMP_THRESHOLD 100000

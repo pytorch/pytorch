@@ -100,8 +100,7 @@ bool FullyConnectedRowWiseDNNLowPOp<T>::RunOnDevice() {
         reinterpret_cast<const uint8_t*>(Xdata),
         K,
         X_pack_buf_.data(),
-        1, // group
-        in_qparams_[0].zero_point);
+        1); // group
 
     fbgemmPacked(
         packA,
@@ -277,8 +276,7 @@ bool FullyConnectedRowWiseDNNLowPOp<T>::GetQuantizationParameters_() {
             reinterpret_cast<const int8_t*>(W_quantized_.data()),
             K, // ld
             nullptr, // pmat
-            1, // groups
-            in_qparams_[1].zero_point));
+            1)); // groups
       } else {
         LOG(WARNING)
             << "Falling back to slow path because fbgemm doesn't support "

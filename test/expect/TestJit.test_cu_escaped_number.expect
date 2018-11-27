@@ -1,3 +1,3 @@
-def script(self,
+def graph(self,
     a: Tensor) -> Tuple[]:
   print("hi\016")

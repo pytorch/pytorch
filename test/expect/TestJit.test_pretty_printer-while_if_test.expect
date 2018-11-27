@@ -1,4 +1,4 @@
-def script(self,
+def graph(self,
     a_1: Tensor,
     b_1: Tensor) -> Tensor:
   a, b, c = a_1, b_1, 0

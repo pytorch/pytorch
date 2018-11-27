@@ -1,6 +1,6 @@
-#include "ATen/core/Scalar.h"
+#include <c10/core/Scalar.h>
 
-namespace at {
+namespace c10 {
 
 Scalar Scalar::operator-() const {
   if (isFloatingPoint()) {
@@ -12,4 +12,4 @@ Scalar Scalar::operator-() const {
   }
 }
 
-}  // namespace at
+}  // namespace c10
