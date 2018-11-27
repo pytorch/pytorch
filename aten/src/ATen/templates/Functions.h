@@ -6,7 +6,7 @@
 #include "ATen/Type.h"
 #include "ATen/TypeExtendedInterface.h"
 #include "ATen/Tensor.h"
-#include "ATen/core/Storage.h"
+#include "c10/core/Storage.h"
 #include "ATen/core/Generator.h"
 #include "ATen/core/Deprecated.h"
 #include "ATen/NativeFunctions.h"

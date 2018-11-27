@@ -5,7 +5,7 @@
 
 #include <ATen/core/Backend.h>
 #include <ATen/core/LegacyTypeDispatch.h>
-#include <ATen/core/Storage.h>
+#include <c10/core/Storage.h>
 #include <ATen/core/TensorOptions.h>
 #include <ATen/core/TensorTypeId.h>
 #include <ATen/core/TensorTypeIdRegistration.h>
