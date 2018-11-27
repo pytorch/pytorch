@@ -1224,9 +1224,11 @@ IValue convert_scale_factor_to_double(IValue int_ivalue) {
     auto int_list = int_ivalue.toIntListRef();
     std::vector<double> double_vec(int_list.begin(), int_list.end());
     scale_factor_double = double_vec;
+  } else if (int_ivalue.isNone()) {
+    return IValue();
   } else {
     std::stringstream ss;
-    ss << "Expecting int or int list arg for scale factor, got" << int_ivalue;
+    ss << "Expecting optional int or int list arg for scale factor, got" << int_ivalue;
     throw std::runtime_error(ss.str());
   }
   return scale_factor_double;
