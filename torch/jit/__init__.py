@@ -7,7 +7,7 @@ import torch.jit.annotations
 from torch._six import raise_from, with_metaclass, get_function_from_type
 from .._jit_internal import createResolutionCallback, _compiled_weak_fns, \
     _weak_script_methods, _weak_modules, _weak_types, COMPILED, \
-    COMPILATION_PENDING, _boolean_dispatched
+    COMPILATION_PENDING
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
 import torch.testing
@@ -635,10 +635,6 @@ class CompilationUnit(object):
 
     def __getattr__(self, attr):
         return self.module._get_method(attr)
-
-
-def _try_get_dispatched_fn(fn):
-    return _boolean_dispatched.get(fn)
 
 
 def _try_compile_weak_script(fn):
@@ -1354,7 +1350,7 @@ def _should_skip(mod, name):
     func = getattr(torch.nn.functional, name)
     if func is None:
         return False
-    return func in _compiled_weak_fns or func in _boolean_dispatched
+    return func in _compiled_weak_fns
 
 
 def _unwrap_optional(x):
