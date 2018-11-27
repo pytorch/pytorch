@@ -42,13 +42,6 @@ inline Tensor from_blob(
   return at::getType(options).tensorFromBlob(data, sizes, strides, deleter);
 }
 
-inline Tensor from_blob(
-    void* data,
-    IntList sizes,
-    const TensorOptions& options = {}) {
-  return native::from_blob(data, sizes, /*deleter=*/[](void*) {}, options);
-}
-
 // These functions are defined in native/TensorFactories.cpp.
 #define TENSOR(T, S, _1)                                                      \
   CAFFE2_API Tensor tensor(ArrayRef<T> values, const TensorOptions& options); \
