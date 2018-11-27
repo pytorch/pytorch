@@ -66,9 +66,6 @@ class CAFFE2_API Context {
   bool hasCuDNN() const {
     return detail::getCUDAHooks().hasCuDNN();
   }
-  int64_t current_device() const {
-    return detail::getCUDAHooks().current_device();
-  }
   // defined in header so that getNonVariableType has ability to inline
   // call_once check. getNonVariableType is called fairly frequently
   THCState* lazyInitCUDA() {
