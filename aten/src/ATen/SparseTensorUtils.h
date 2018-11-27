@@ -22,18 +22,22 @@ inline SparseTensorImpl* get_sparse_impl(const SparseTensor& self) {
   return static_cast<SparseTensorImpl*>(self.unsafeGetTensorImpl());
 }
 
-// Port of the old THCSTensor_(checkGPU), but it doesn't really belong here
-// because it is more general
+// TODO: This function doesn't really belong here because it is generally
+// useful beyond sparse.
 // NB: I dropped kernelP2PEnabled support
-// NB: This only works if the tensors are KNOWN to be CUDA.
-// TODO: Generalize it so it works on CPU as well
+// NB: This function *used* to also check that the current device matches
+// the device of the tensor, but this can't be done conveniently in a mixed
+// device-universe (since you have to first look at the first tensor to
+// work out what device type you should even query the current device for)
+// So we just check that everything lines up, and rely on the author to
+// have set device guard appropriately.
 inline bool check_device(ArrayRef<Tensor> ts) {
   if (ts.empty()) {
     return true;
   }
-  int64_t curDevice = current_device();
+  Device d = ts.front().device();
   for (const Tensor& t : ts) {
-    if (t.get_device() != curDevice) return false;
+    if (t.device() != d) return false;
   }
   return true;
 }
