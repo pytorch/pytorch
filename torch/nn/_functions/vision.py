@@ -1,8 +1,4 @@
 import torch
-from torch.autograd import Function
-from torch.autograd.function import once_differentiable
-from torch._thnn import type2backend
-from .thnn.auto import function_by_name
 import torch.backends.cudnn as cudnn
 
 

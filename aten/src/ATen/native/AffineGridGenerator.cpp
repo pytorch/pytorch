@@ -7,7 +7,7 @@ at::Tensor linspace_from_neg_one(const Tensor& grid, int64_t num_steps) {
   if (num_steps > 1) {
     return at::linspace(-1, 1, num_steps, grid.options());
   } else {
-    return at::full(-1, {}, grid.options());
+    return at::empty({}, grid.options()).fill_(-1);
   }
 }
 
