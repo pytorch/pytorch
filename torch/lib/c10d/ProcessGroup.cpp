@@ -4,6 +4,41 @@ namespace c10d {
 
 ProcessGroup::Work::~Work() {}
 
+bool ProcessGroup::Work::isCompleted() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return completed_;
+}
+
+bool ProcessGroup::Work::isSuccess() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return !exception_;
+}
+
+std::exception_ptr ProcessGroup::Work::exception() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return exception_;
+}
+
+void ProcessGroup::Work::synchronize() {}
+
+void ProcessGroup::Work::wait() {
+  std::unique_lock<std::mutex> lock(mutex_);
+  while (!completed_) {
+    cv_.wait(lock);
+  }
+  if (exception_) {
+    std::rethrow_exception(exception_);
+  }
+  synchronize();
+}
+
+void ProcessGroup::Work::finish(std::exception_ptr exception) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  completed_ = true;
+  exception_ = exception;
+  cv_.notify_all();
+}
+
 ProcessGroup::ProcessGroup(int rank, int size) : rank_(rank), size_(size) {}
 
 ProcessGroup::~ProcessGroup() {}

@@ -941,10 +941,12 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         # Wait for sends to complete
         for work in send_work:
             work.wait()
+            self.assertTrue(work.is_completed())
 
         # Wait for recvs to complete
         for work in recv_work:
             work.wait()
+            self.assertTrue(work.is_completed())
 
         # Test that every output other than our own contains the respective rank
         for i in range(self.world_size):
@@ -961,14 +963,15 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             timeout=timedelta(seconds=0.5))
 
         # Wait on barrier
-        self.assertTrue(pg.barrier().wait())
+        pg.barrier().wait()
 
         # Sleep on one of the processes to trigger barrier timeout
         if self.rank == 0:
             time.sleep(0.6)
 
-        # The barrier will now time output
-        self.assertFalse(pg.barrier().wait())
+        # The barrier will now time out
+        with self.assertRaisesRegex(RuntimeError, " (Timed out|closed) "):
+            pg.barrier().wait()
 
     @unittest.skip("Implementation of this functionality pending; see #14373")
     def test_barrier_implies_wait(self):
