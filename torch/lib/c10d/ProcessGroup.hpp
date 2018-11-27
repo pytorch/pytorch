@@ -101,7 +101,8 @@ class ProcessGroup {
 
   virtual std::shared_ptr<ProcessGroup::Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
-      std::vector<at::Tensor>& inputTensors) = 0;
+      std::vector<at::Tensor>& inputTensors,
+      const AllgatherOptions& opts = AllgatherOptions()) = 0;
 
   virtual std::shared_ptr<ProcessGroup::Work> gather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
@@ -128,7 +129,8 @@ class ProcessGroup {
       int* srcRank,
       int tag) = 0;
 
-  virtual std::shared_ptr<ProcessGroup::Work> barrier() = 0;
+  virtual std::shared_ptr<ProcessGroup::Work> barrier(
+      const BarrierOptions& opts = BarrierOptions()) = 0;
 
   virtual std::unordered_map<int, int> getGroupRank() = 0;
 

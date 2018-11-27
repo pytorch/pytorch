@@ -188,7 +188,8 @@ class ProcessGroupGloo : public ProcessGroup {
 
   std::shared_ptr<ProcessGroup::Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputs,
-      std::vector<at::Tensor>& inputs) override;
+      std::vector<at::Tensor>& inputs,
+      const AllgatherOptions& opts = AllgatherOptions()) override;
 
   std::shared_ptr<ProcessGroup::Work> gather(
       std::vector<std::vector<at::Tensor>>& outputs,
@@ -215,7 +216,8 @@ class ProcessGroupGloo : public ProcessGroup {
       int* srcRank,
       int tag) override;
 
-  std::shared_ptr<ProcessGroup::Work> barrier() override;
+  std::shared_ptr<ProcessGroup::Work> barrier(
+      const BarrierOptions& opts = BarrierOptions()) override;
 
   std::unordered_map<int, int> getGroupRank() override;
 
