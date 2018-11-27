@@ -2,23 +2,20 @@
 
 #include <atomic>
 #include <memory>
+#include <numeric>
 
 #include <ATen/core/Backend.h>
 #include <ATen/core/LegacyTypeDispatch.h>
-#include <ATen/core/Storage.h>
+#include <c10/core/Storage.h>
 #include <ATen/core/TensorOptions.h>
-#include <ATen/core/TensorTypeId.h>
-#include <ATen/core/TensorTypeIdRegistration.h>
+#include <c10/core/TensorTypeId.h>
+#include <c10/core/TensorTypeIdRegistration.h>
 #include <ATen/core/context_base.h>
 
 #include <c10/util/Exception.h>
-#include "c10/util/Optional.h"
-
-#include "c10/util/Flags.h"
-
-#include "caffe2/core/allocator.h"
-#include "caffe2/core/common.h"
-#include "caffe2/core/logging.h"
+#include <c10/util/Optional.h>
+#include <c10/util/Flags.h>
+#include <c10/util/Logging.h>
 
 // A global boolean variable to control whether we free memory when a Tensor
 // is shrinked to a smaller size. As a result, a Tensor is always going to
@@ -42,10 +39,12 @@ class DeviceOption;
 
 }
 
-namespace at {
+namespace c10 {
 class Scalar;
-struct Type;
 struct Storage;
+}
+namespace at {
+struct Type;
 class Tensor;
 
 /**

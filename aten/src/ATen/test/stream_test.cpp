@@ -40,12 +40,10 @@ TEST(TestStream, CopyAndMoveTest) {
 
     copyStream = s;
 
-    ASSERT_EQ_CUDA(copyStream.internals(), s.internals());
     ASSERT_EQ_CUDA(copyStream.device_index(), device);
     ASSERT_EQ_CUDA(copyStream.stream(), cuda_stream);
   }
 
-  ASSERT_TRUE(copyStream.internals());
   ASSERT_EQ_CUDA(copyStream.device_index(), device);
   ASSERT_EQ_CUDA(copyStream.stream(), cuda_stream);
 
@@ -62,7 +60,6 @@ TEST(TestStream, CopyAndMoveTest) {
     ASSERT_EQ_CUDA(moveStream.stream(), cuda_stream);
   }
 
-  ASSERT_TRUE(moveStream.internals());
   ASSERT_EQ_CUDA(moveStream.device_index(), device);
   ASSERT_EQ_CUDA(moveStream.stream(), cuda_stream);
 }
@@ -176,7 +173,7 @@ TEST(TestStream, CUDAGuardTest) {
 TEST(TestStream, StreamPoolTest) {
   std::vector<at::cuda::CUDAStream> streams{};
   for (int i = 0; i < 200; ++i) {
-    streams.emplace_back(at::cuda::impl::CUDAStream_getStreamFromPool());
+    streams.emplace_back(at::cuda::getStreamFromPool());
   }
 
   std::unordered_set<cudaStream_t> stream_set{};

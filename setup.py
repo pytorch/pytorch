@@ -967,6 +967,7 @@ if __name__ == '__main__':
                 'lib/include/caffe2/utils/*.h',
                 'lib/include/c10/*.h',
                 'lib/include/c10/macros/*.h',
+                'lib/include/c10/core/*.h',
                 'lib/include/c10/util/*.h',
                 'lib/include/c10/impl/*.h',
                 'lib/include/c10/cuda/*.h',

@@ -77,7 +77,7 @@ class PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp
   bool RunOnDevice() {
     const auto& X = Input(0);
     const auto& mean = Input(1);
-    auto* Y = Output(0);
+
     auto* noiseBlob = ws_->CreateBlob("__CAFFE2_STYLIZER_NOISE__");
     auto defaultNoiseSize = OperatorBase::GetSingleArgument<int>(
         "noise_size", 491 /* prime to avoid artifacts */);
@@ -104,7 +104,7 @@ class PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp
     CAFFE_ENFORCE(mean.numel() == kOutputChannels);
 
     CAFFE_ENFORCE(C == kInputChannels);
-    Y->Resize(N, kOutputChannels, H, W);
+    auto* Y = Output(0, {N, kOutputChannels, H, W}, at::dtype<float>());
 
     runBatch(
         N,
@@ -413,14 +413,14 @@ class BRGNCHWCToPackedInt8BGRAStylizerDeprocessOp
   bool RunOnDevice() {
     const auto& X = Input(0);
     const auto& mean = Input(1);
-    auto* Y = Output(0);
+
     CAFFE_ENFORCE(X.dim() == 4);
     const int N = X.dim32(0), C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
     // Assume BGR or BGRA
     CAFFE_ENFORCE(mean.numel() == kInputChannels);
     CAFFE_ENFORCE(C == kInputChannels);
     // RGB
-    Y->Resize(N, H, W, kOutputChannels);
+    auto* Y = Output(0, {N, H, W, kOutputChannels}, at::dtype<uint8_t>());
 
     runBatch(
         N,
