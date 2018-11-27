@@ -2,7 +2,7 @@
 
 // ${generated_comment}
 
-#include "ATen/core/Scalar.h"
+#include <c10/core/Scalar.h>
 #include "ATen/Type.h"
 #include "ATen/TypeExtendedInterface.h"
 #include "ATen/Tensor.h"
