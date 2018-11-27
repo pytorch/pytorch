@@ -233,7 +233,7 @@ TORCH_API Value* emitBuiltinCall(
   // otherwise it will return nullptr if the builtin is not found.
   bool required);
 
-c10::optional<size_t> findInputWithName(
+TORCH_API c10::optional<size_t> findInputWithName(
   const std::string& name,
   at::ArrayRef<NamedValue> kwargs);
 
