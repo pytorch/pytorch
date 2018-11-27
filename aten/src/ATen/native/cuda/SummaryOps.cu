@@ -27,6 +27,7 @@ template <
     int PDims,
     int BDims,
     CUDAHistogramMemoryType MemoryType = CUDAHistogramMemoryType::MULTI_BLOCK,
+    typename scalar_t,
     typename Op>
 __global__ void kernelHistogram1D(
     detail::TensorInfo<output_t, IndexType> a, /* output */
@@ -122,7 +123,7 @@ __global__ void kernelHistogram1D(
 }
 
 #define HANDLE_CASE(MEMORY_TYPE, WEIGHTS_OP)                               \
-  kernelHistogram1D<output_t, input_t, IndexType, 1, 2, 1, MEMORY_TYPE>    \
+  kernelHistogram1D<output_t, input_t, IndexType, 1, 2, 1, scalar_t, MEMORY_TYPE>    \
       <<<grid,                                                             \
          block,                                                            \
          (MEMORY_TYPE == CUDAHistogramMemoryType::SHARED) ? sharedMem : 0, \
@@ -170,15 +171,14 @@ inline int64_t getFreeGlobalMemory() {
     case: THRESH_NUMBER_BINS_FOR_GLOBAL_MEM <= #bins
         GLOBAL: all threads atomically update to a single **global** hist copy.
  */
-template <typename output_t, typename input_t, bool HasWeights>
+template <typename output_t, typename input_t, typename scalar_t, bool HasWeights>
 bool CUDA_tensor_histogram(
     at::Tensor a, /* output */
     at::Tensor b, /* input */
     at::Tensor c, /* weights(optional) */
-    int64_t nbins,
-    scalar_t min,
-    scalar_t max,
-    int binsize,
+    scalar_t minvalue,
+    scalar_t maxvalue,
+    scalar_t binsize,
     TensorArgType aType = TensorArgType::ReadWrite,
     TensorArgType bType = TensorArgType::ReadOnly,
     TensorArgType cType = TensorArgType::ReadOnly) {
@@ -187,22 +187,6 @@ bool CUDA_tensor_histogram(
     checkBackend("CUDA_tensor_histogram", {c}, Backend::CUDA);
   }
   auto totalElements = b.size(0);
-  scalar_t minvalue;
-  scalar_t maxvalue;
-  if (binsize == 0) { // hist_cuda
-    if (min == max) {
-      minvalue = b.min().cpu().data<input_t>();
-      maxvalue = b.max().cpu().data<input_t>();
-    }
-    if (minvalue == maxvalue) {
-      minvalue = minvalue - 1;
-      maxvalue = maxvalue + 1;
-    }
-    binsize = (maxvalue - minvalue) / nbins;
-  } else { // bincount, binsize is always 1
-    minvalue = 0;
-    maxvalue = b.max().cpu().data<input_t>();
-  }
 
   const dim3 block = getApplyBlock();
   dim3 grid;
@@ -263,7 +247,7 @@ bool CUDA_tensor_histogram(
 
 namespace {
 ///////////////// bincount /////////////////
-template <typename input_t, typename weights_t>
+template <typename input_t, typename weights_t, typename scalar_t>
 Tensor _bincount_cuda_template(
     const Tensor& self,
     const Tensor& weights,
@@ -285,18 +269,19 @@ Tensor _bincount_cuda_template(
     AT_ERROR("input and weights should have the same length");
   }
 
-  auto nbins = self.max().item<int64_t>() + 1L;
-  nbins = std::max(nbins, minlength);
+  auto maxvalue = *self.max().cpu().data<input_t>();
+  int minvalue = 0;
+  int binsize = 1;
   // alloc output counter on GPU
   Tensor output;
   if (has_weights) {
     output = native::zeros({nbins}, weights.options());
-    auto ret = cuda::CUDA_tensor_histogram<weights_t, input_t, true>(
-        output, self, weights, nbins, 0, 0, 1);
+    auto ret = cuda::CUDA_tensor_histogram<weights_t, input_t, scalar_t, true>(
+        output, self, weights, minvalue, maxvalue, binsize);
   } else {
     output = native::zeros({nbins}, device(DeviceType::CUDA).dtype(kLong));
-    auto ret = cuda::CUDA_tensor_histogram<int64_t, input_t, false>(
-        output, self, weights, nbins, 0, 0, 1);
+    auto ret = cuda::CUDA_tensor_histogram<int64_t, input_t, scalar_t, false>(
+        output, self, weights, minvalue, maxvalue, binsize);
   }
   return output;
 }
@@ -310,20 +295,32 @@ Tensor _bincount_cuda(
   return AT_DISPATCH_INTEGRAL_TYPES(self.type(), "bincount", [&] {
     const auto scalar = weights.type().scalarType();
     if (scalar == ScalarType::Undefined || scalar == ScalarType::Float)
-      return _bincount_cuda_template<scalar_t, float>(self, weights, minlength);
-    return _bincount_cuda_template<scalar_t, double>(
+      return _bincount_cuda_template<scalar_t, float, scalar_t>(self, weights, minlength);
+    return _bincount_cuda_template<scalar_t, double, scalar_t>(
         self, weights.toType(CUDA(kDouble)), minlength);
   });
 }
 
-Tensor _hist_cuda(
+template <typename scalar_t>
+Tensor _histc_cuda(
     const Tensor& self,
     int64_t nbins,
     scalar_t min,
     scalar_t max) {
   Tensor output = native::zeros({nbins}, device(DeviceType::CUDA).dtype(kLong));
-  auto ret = cuda::CUDA_tensor_histogram<int64_t, input_t, false>(
-      output, self, torch.tensor([]), nbins, min, max, 0); // FIXME can weights be optional or null?
+  scalar_t minvalue;
+  scalar_t maxvalue;
+  if (min == max) {
+    minvalue = *self.min().cpu().data<scalar_t>();
+    maxvalue = *self.max().cpu().data<scalar_t>();
+  }
+  if (minvalue == maxvalue) {
+    minvalue = minvalue - 1;
+    maxvalue = maxvalue + 1;
+  }
+  auto binsize = (maxvalue - minvalue) / nbins;
+  auto ret = cuda::CUDA_tensor_histogram<int64_t, input_t, scalar_t, false>(
+      output, self, at::empty([]), minvalue, maxvalue, binsize);
   return output;
 }
 
