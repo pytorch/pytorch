@@ -134,7 +134,6 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
         K,
         X_pack_buf_.data(),
         1, // group
-        in_qparams_[0].zero_point,
         row_offsets_.data());
 
     if (!dequantize_output_) {

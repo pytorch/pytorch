@@ -359,8 +359,7 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeWeight_() {
                 group_id * (M / group_) * kernel_dim,
             kernel_dim, // ld
             nullptr, // pmat
-            1, // groups
-            FilterQuantizationParams(group_id).zero_point));
+            1)); // groups
       }
     } else {
       string reason;
@@ -1198,7 +1197,6 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
               // buffer for packed matrix
               X_pack_buf_.data() + tid * x_pack_buf_size_per_thread,
               1, // group
-              in_qparams_[INPUT].zero_point,
               row_offsets_.data() + tid * row_offset_size_per_thread);
 
           DoNothing<> doNothingObj{};
@@ -1273,7 +1271,6 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
                 // buffer for packed matrix
                 X_pack_buf_.data() + tid * x_pack_buf_size_per_thread,
                 1, // group
-                in_qparams_[INPUT].zero_point,
                 row_offsets_.data() + tid * row_offset_size_per_thread);
 
             DoNothing<float, float> doNothingObj{};

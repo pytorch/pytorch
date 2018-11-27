@@ -6,10 +6,16 @@ set PATH=%INSTALL_DIR%\bin;%PATH%
 : The following environment variables are used exclusively by cmake and should have forward slashes rather than backslashes
 set BASE_DIR=%cd:\=/%
 set TORCH_LIB_DIR=%cd:\=/%/torch/lib
-set INSTALL_DIR=%cd:\=/%/torch/lib/tmp_install
 set THIRD_PARTY_DIR=%cd:\=/%/third_party
 set BASIC_C_FLAGS=
 set BASIC_CUDA_FLAGS=
+
+IF NOT DEFINED INSTALL_DIR (
+  set "INSTALL_DIR=%cd:\=/%/torch/lib/tmp_install"
+) ELSE (
+  set "INSTALL_DIR=%INSTALL_DIR:\=/%"
+)
+
 set LDFLAGS=/LIBPATH:%INSTALL_DIR%/lib
 :: set TORCH_CUDA_ARCH_LIST=6.1
 
@@ -140,11 +146,11 @@ FOR %%a IN (%_BUILD_ARGS%) DO (
 : Copy Artifacts
 cd torch\lib
 
-copy /Y tmp_install\lib\* .
-IF EXIST ".\tmp_install\bin" (
-  copy /Y tmp_install\bin\* .
+copy /Y "%INSTALL_DIR%\lib\*" .
+IF EXIST "%INSTALL_DIR%\bin" (
+  copy /Y "%INSTALL_DIR%\bin\*" .
 )
-xcopy /Y /E tmp_install\include\*.* include\*.*
+xcopy /Y /E "%INSTALL_DIR%\include\*.*" include\*.*
 xcopy /Y ..\..\aten\src\THNN\generic\THNN.h  .
 xcopy /Y ..\..\aten\src\THCUNN\generic\THCUNN.h .
 
@@ -194,11 +200,12 @@ goto:eof
   : which is said to become an error in the future.
   : As an alternative, we should use forward slashes instead.
   : Here those paths should be escaped before passing to CMake.
-  set NVTOOLEXT_HOME=%NVTOOLEXT_HOME:\=/%
-  set CUDNN_INCLUDE_DIR=%CUDNN_INCLUDE_DIR:\=/%
-  set CUDNN_LIB_DIR=%CUDNN_LIB_DIR:\=/%
-  set CUDNN_LIBRARY=%CUDNN_LIBRARY:\=/%
-  set PYTORCH_PYTHON_LIBRARY=%PYTORCH_PYTHON_LIBRARY:\=/%
+  if not "%NVTOOLEXT_HOME%" == "" set NVTOOLEXT_HOME=%NVTOOLEXT_HOME:\=/%
+  if not "%CUDNN_INCLUDE_DIR%" == "" set CUDNN_INCLUDE_DIR=%CUDNN_INCLUDE_DIR:\=/%
+  if not "%CUDNN_LIB_DIR%" == "" set CUDNN_LIB_DIR=%CUDNN_LIB_DIR:\=/%
+  if not "%CUDNN_LIBRARY%" == "" set CUDNN_LIBRARY=%CUDNN_LIBRARY:\=/%
+  if not "%PYTORCH_PYTHON_LIBRARY%" == "" set PYTORCH_PYTHON_LIBRARY=%PYTORCH_PYTHON_LIBRARY:\=/%
+  if not "%NUMPY_INCLUDE_DIR%" == "" set NUMPY_INCLUDE_DIR=%NUMPY_INCLUDE_DIR:\=/%
 
   IF NOT "%PREBUILD_COMMAND%"=="" call "%PREBUILD_COMMAND%" %PREBUILD_COMMAND_ARGS%
   if not exist build mkdir build
@@ -220,7 +227,7 @@ goto:eof
                   -DUSE_DISTRIBUTED=%USE_DISTRIBUTED% ^
                   -DUSE_FBGEMM=%USE_FBGEMM% ^
                   -DUSE_NUMPY=%USE_NUMPY% ^
-                  -DNUMPY_INCLUDE_DIR=%NUMPY_INCLUDE_DIR% ^
+                  -DNUMPY_INCLUDE_DIR="%NUMPY_INCLUDE_DIR%" ^
                   -DUSE_NNPACK=%USE_NNPACK% ^
                   -DUSE_LEVELDB=%USE_LEVELDB% ^
                   -DUSE_LMDB=%USE_LMDB% ^

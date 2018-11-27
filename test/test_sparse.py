@@ -694,15 +694,17 @@ class TestSparse(TestCase):
 
         # mismatched sizes
         test_shapes([(3, 10, [2, 3, 4]), (3, 10, [2, 1, 4])], 0,
-                    "Concatenating tensor.*of sizes \\[2, 1, 4].*of sizes \\[2, 3, 4]")
+                    "All tensors must have the same shape: \\[2, 3, 4].*\\[2, 1, 4]")
         # hybrid sparse/dense
         test_shapes(
             [(2, 10, [2, 3, 4]), (2, 10, [2, 1, 4]), (2, 10, [2, 4, 4])], 1)
-        test_shapes([(2, 10, [2, 3, 4]), (2, 10, [2, 1, 4])], 2,
-                    "Concatenating.*along non-sparse dimension 2")
+        # cat along dense dim
+        test_shapes([(2, 10, [2, 3, 4]), (2, 10, [2, 3, 7])], 2)
+        test_shapes([(1, 10, [2, 3, 4]), (1, 10, [2, 3, 4])], 1)
+        test_shapes([(1, 10, [2, 3, 4]), (1, 10, [2, 3, 4])], 2)
         # mismatched dimensions
         test_shapes([(2, 10, [2, 3, 4]), (3, 10, [2, 3, 4])], 0,
-                    "has dimension: sparse 3, dense 0.*Concatenating with tensor of dimensions 2, 1")
+                    "All tensors must have the same.*2, 1, but tensor at position 1 has 3, 0.")
         # wrapped dimension
         test_shapes(
             [(3, 10, [2, 3, 4]), (3, 10, [2, 1, 4]), (3, 10, [2, 4, 4])], -2)
@@ -711,7 +713,7 @@ class TestSparse(TestCase):
         sp = self._gen_sparse(3, 10, [2, 3, 4])[0]
         dn = sp.to_dense()
         with self.assertRaisesRegex(RuntimeError,
-                                    "Concatenating dense tensor.*with sparse"):
+                                    "Concatenating sparse tensors, but a dense tensor was found at position 1."):
             torch.cat((sp, dn))
 
     @skipIfRocm
