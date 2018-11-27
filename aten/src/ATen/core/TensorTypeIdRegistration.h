@@ -1,2 +1,2 @@
 #pragma once
-#include "c10/util/TensorTypeIdRegistration.h"
+#include "c10/core/TensorTypeIdRegistration.h"
