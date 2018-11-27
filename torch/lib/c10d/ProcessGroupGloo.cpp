@@ -4,6 +4,7 @@
 #include <gloo/allreduce.h>
 #include <gloo/allreduce_halving_doubling.h>
 #include <gloo/allreduce_ring_chunked.h>
+#include <gloo/barrier.h>
 #include <gloo/barrier_all_to_one.h>
 #include <gloo/broadcast.h>
 #include <gloo/broadcast_one_to_all.h>
@@ -1403,13 +1404,29 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
   return std::make_shared<RecvWork>(tensor, std::move(buf), srcRank);
 }
 
-std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::barrier() {
-  AlgorithmKey key;
-  key.collectiveType = CollectiveType::BARRIER;
+namespace {
 
-  auto entry = checkout(key);
-  entry->run = [=]() mutable { entry->algorithm->run(); };
-  return enqueue(entry);
+class AsyncBarrierWork : public ProcessGroupGloo::AsyncWork {
+ public:
+  AsyncBarrierWork(const std::shared_ptr<gloo::Context>& context, uint32_t tag)
+      : context(context), tag(tag) {}
+
+  std::shared_ptr<gloo::Context> context;
+  const uint32_t tag;
+
+  void run() override {
+    gloo::BarrierOptions opts(context);
+    opts.setTag(tag);
+    gloo::barrier(opts);
+  }
+};
+
+} // namespace
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::barrier() {
+  auto work = std::make_shared<AsyncBarrierWork>(contexts_[0], nextTag());
+  enqueue(std::bind(AsyncWork::execute, work));
+  return work;
 }
 
 std::unordered_map<int, int> ProcessGroupGloo::getGroupRank() {
