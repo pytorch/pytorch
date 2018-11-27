@@ -91,7 +91,7 @@ Tensor new_with_type_conversion(const Type& type, Tensor other, optional<Device>
 
 Tensor new_with_tensor_copy(const Type& type, Tensor other, optional<Device> device) {
   AT_ASSERT(device.has_value() ? device.value().type() == type.device_type()
-                               : other.device_type() == type.device_type());
+                               : other.device().type() == type.device_type());
   maybe_initialize_cuda(type);
   AutoNoGIL no_gil;
   at::OptionalDeviceGuard device_guard(device);
@@ -224,8 +224,8 @@ Tensor internal_new_from_data(
   if (PyArray_Check(data)) {
     auto tensor = autograd::make_variable(tensor_from_numpy(data), /*requires_grad=*/false);
     const auto& type_to_use = type_inference ? type.toScalarType(tensor.type().scalarType()) : type;
-    return copy_numpy ? new_with_tensor_copy(type_to_use, tensor, device_index) :
-                        new_with_type_conversion(type_to_use, tensor, device_index);
+    return copy_numpy ? new_with_tensor_copy(type_to_use, tensor, device_opt) :
+                        new_with_type_conversion(type_to_use, tensor, device_opt);
   }
 #endif
 
@@ -236,7 +236,7 @@ Tensor internal_new_from_data(
       (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
       scalarType, tensor.type().elementSizeInBytes(), data);
   const auto& type_to_use = type_inference ? type.toScalarType(scalarType) : type;
-  return new_with_type_conversion(type_to_use, tensor, device_index);
+  return new_with_type_conversion(type_to_use, tensor, device_opt);
 }
 
 Tensor new_from_data_copy(
