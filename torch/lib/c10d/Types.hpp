@@ -4,13 +4,6 @@
 
 namespace c10d {
 
-enum class CollectiveType : std::uint8_t {
-  BROADCAST,
-  ALLREDUCE,
-  BARRIER,
-  UNUSED,
-};
-
 enum class ReduceOp : std::uint8_t {
   SUM = 0,
   PRODUCT,
