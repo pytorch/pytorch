@@ -64,8 +64,10 @@ static std::vector<std::array<CUDAStreamInternals, kStreamsPerPool>> high_priori
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
 // How do we assign stream IDs?
 //
-// -- 2 bits --  -- 5 bits -----
-// StreamIdType  stream id index
+// -- 25 bits -- -- 2 bits --  -- 5 bits -----
+// zeros         StreamIdType  stream id index
+//
+// Where StreamIdType:
 //  00 = default stream
 //  01 = low priority stream
 //  10 = high priority stream
@@ -75,6 +77,13 @@ static std::vector<std::array<CUDAStreamInternals, kStreamsPerPool>> high_priori
 //
 // This is entirely an internal implementation detail, we reserve the right to
 // renumber streams however we like.
+//
+// Note that it is really important that the MSB is zero; StreamId is a
+// *signed* integer, and unsigned to signed conversion outside of the
+// bounds of signed integer representation is undefined behavior.  You
+// could work around this with something like
+// https://stackoverflow.com/questions/13150449/efficient-unsigned-to-signed-cast-avoiding-implementation-defined-behavior
+// but it seems a bit overkill for this.
 
 enum class StreamIdType : uint8_t {
   DEFAULT = 0x0,
@@ -100,7 +109,9 @@ std::ostream& operator<<(std::ostream& stream, StreamIdType s) {
   return stream;
 }
 
-// Promotion makes me nervous...
+// StreamId is 32-bit, so we can just rely on regular promotion rules.
+// We rely on streamIdIndex and streamIdType being non-negative;
+// see Note [Hazard when concatenating signed integers]
 
 static inline StreamIdType streamIdType(StreamId s) {
   return static_cast<StreamIdType>(s >> kStreamsPerPoolBits);

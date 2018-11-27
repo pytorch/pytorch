@@ -128,3 +128,12 @@ CAFFE2_API void uncheckedSetCurrentCUDAStream(CUDAStream stream);
 
 } // namespace cuda
 } // namespace at
+
+namespace std {
+  template <>
+  struct hash<at::cuda::CUDAStream> {
+    size_t operator()(at::cuda::CUDAStream s) const noexcept {
+      return std::hash<c10::Stream>{}(s.unwrap());
+    }
+  };
+} // namespace std
