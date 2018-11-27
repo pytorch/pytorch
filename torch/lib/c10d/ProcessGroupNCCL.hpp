@@ -67,23 +67,22 @@ class ProcessGroupNCCL : public ProcessGroup {
     // Non-blocking operation.
     bool isCompleted() override;
 
-    // Let current stream wait on the completing of the NCCL work
-    // always return true and will throw if there are exceptions
-    // Non-blocking operation
-    bool wait() override;
+    // Same as calling synchronize() for NCCL work.
+    void wait() override;
 
     // Will always return true
     bool isSuccess() const override;
 
-    // Same as wait()
+    // Let current stream wait on the completing of the NCCL work
+    // Throws on exceptions. Non-blocking operation.
     void synchronize() override;
 
-    // Not supported by WorkNCCL
-    const std::exception& exception() const override;
+    // Will always throw because it should not be called (isSuccess() -> true).
+    std::exception_ptr exception() const override;
 
     // Helper function that checks if the NCCL kernels have finished
     // execution on the GPUs
-    bool finishedGPUExecution() const;
+    bool finishedGPUExecution();
 
    protected:
     // The cached list of CUDA devices to operate on

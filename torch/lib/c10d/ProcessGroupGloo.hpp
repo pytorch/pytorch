@@ -68,12 +68,6 @@ class ProcessGroupGloo : public ProcessGroup {
   //
   class AsyncWork : public ProcessGroup::Work {
    public:
-    bool isCompleted() override;
-    bool isSuccess() const override;
-    void synchronize() override;
-    bool wait() override;
-    const std::exception& exception() const override;
-
     static void execute(std::shared_ptr<AsyncWork> work) {
       std::exception_ptr eptr;
       try {
@@ -87,13 +81,6 @@ class ProcessGroupGloo : public ProcessGroup {
     virtual void run() = 0;
 
    protected:
-    std::mutex m_;
-    std::condition_variable cv_;
-    bool completed_ = false;
-    std::exception_ptr eptr_;
-
-    void finish(std::exception_ptr ptr);
-
     friend class ProcessGroupGloo;
   };
 
@@ -109,17 +96,7 @@ class ProcessGroupGloo : public ProcessGroup {
         at::Tensor& tensor,
         std::unique_ptr<::gloo::transport::UnboundBuffer> buffer);
 
-    virtual ~SendWork() = default;
-
-    bool isCompleted() override;
-
-    bool isSuccess() const override;
-
-    void synchronize() override;
-
-    bool wait() override;
-
-    const std::exception& exception() const override;
+    void wait() override;
 
    protected:
     at::Tensor tensor_;
@@ -133,17 +110,7 @@ class ProcessGroupGloo : public ProcessGroup {
         std::unique_ptr<::gloo::transport::UnboundBuffer> buffer,
         int* srcRank);
 
-    virtual ~RecvWork() = default;
-
-    bool isCompleted() override;
-
-    bool isSuccess() const override;
-
-    void synchronize() override;
-
-    bool wait() override;
-
-    const std::exception& exception() const override;
+    void wait() override;
 
    protected:
     at::Tensor tensor_;
