@@ -1,11 +1,11 @@
-#include "l2_minimization.h"
-
+#include <algorithm>
 #include <cmath>
-#include <array>
 
-#include <x86intrin.h>
+#include <immintrin.h>
 
 namespace dnnlowp {
+
+namespace internal {
 
 float L2MinimizationKernelAVX2(
     int precision,
@@ -26,7 +26,7 @@ float L2MinimizationKernelAVX2(
   __m256 norm_v = _mm256_setzero_ps();
 
   int src_bin = 0;
-  for ( ; src_bin < nbins / VLEN * VLEN; src_bin += VLEN) {
+  for (; src_bin < nbins / VLEN * VLEN; src_bin += VLEN) {
     // distances from the beginning of first dst_bin to the beginning and
     // end of src_bin
     __m256i src_bin_v =
@@ -64,8 +64,7 @@ float L2MinimizationKernelAVX2(
         _mm256_mul_ps(
             _mm256_mul_ps(delta_begin_v, delta_begin_v), delta_begin_v),
         _mm256_set1_ps(-1.0f / 3));
-    __m256i mask_v =
-        _mm256_cmpeq_epi32(dst_bin_of_begin_v, dst_bin_of_end_v);
+    __m256i mask_v = _mm256_cmpeq_epi32(dst_bin_of_begin_v, dst_bin_of_end_v);
 
     __m256 delta_end0_v =
         _mm256_sub_ps(src_bin_end_v, dst_bin_of_begin_center_v);
@@ -74,13 +73,11 @@ float L2MinimizationKernelAVX2(
         _mm256_cvtepi32_ps(dst_bin_of_end_v),
         dst_bin_width_v,
         _mm256_set1_ps(dst_bin_width / 2));
-    __m256 delta_end1_v =
-        _mm256_sub_ps(src_bin_end_v, dst_bin_of_end_center_v);
+    __m256 delta_end1_v = _mm256_sub_ps(src_bin_end_v, dst_bin_of_end_center_v);
     __m256 delta_end_v = _mm256_blendv_ps(
         delta_end1_v, delta_end0_v, _mm256_castsi256_ps(mask_v));
     norm_delta_v = _mm256_fmadd_ps(
-        _mm256_mul_ps(
-            _mm256_mul_ps(delta_end_v, delta_end_v), delta_end_v),
+        _mm256_mul_ps(_mm256_mul_ps(delta_end_v, delta_end_v), delta_end_v),
         _mm256_set1_ps(1.0f / 3),
         norm_delta_v);
 
@@ -92,13 +89,13 @@ float L2MinimizationKernelAVX2(
 
     norm_v = _mm256_fmadd_ps(density_v, norm_delta_v, norm_v);
   } // src_bin loop vectorized
-  std::array<float, VLEN> norm_buf;
-  _mm256_storeu_ps(norm_buf.data(), norm_v);
+  float norm_buf[VLEN];
+  _mm256_storeu_ps(norm_buf, norm_v);
   for (int i = 0; i < VLEN; ++i) {
     norm += norm_buf[i];
   }
 
-  for ( ; src_bin < nbins; ++src_bin) {
+  for (; src_bin < nbins; ++src_bin) {
     // distances from the beginning of first dst_bin to the beginning and
     // end of src_bin
     float src_bin_begin = (src_bin - start_bin) * bin_width;
@@ -113,7 +110,7 @@ float L2MinimizationKernelAVX2(
         std::max(0.0f, floorf(src_bin_end / dst_bin_width)));
 
     float dst_bin_of_begin_center =
-      dst_bin_of_begin * dst_bin_width + dst_bin_width / 2;
+        dst_bin_of_begin * dst_bin_width + dst_bin_width / 2;
     float density = bins[src_bin] / bin_width;
     float delta_begin = src_bin_begin - dst_bin_of_begin_center;
     float norm_delta = -(delta_begin * delta_begin * delta_begin) / 3;
@@ -122,11 +119,10 @@ float L2MinimizationKernelAVX2(
       float delta_end = src_bin_end - dst_bin_of_begin_center;
       norm_delta += (delta_end * delta_end * delta_end) / 3;
     } else {
-      norm_delta +=
-          (dst_bin_of_end - dst_bin_of_begin) * norm_delta_default;
+      norm_delta += (dst_bin_of_end - dst_bin_of_begin) * norm_delta_default;
 
       float dst_bin_of_end_center =
-        dst_bin_of_end * dst_bin_width + dst_bin_width / 2;
+          dst_bin_of_end * dst_bin_width + dst_bin_width / 2;
       float delta_end = src_bin_end - dst_bin_of_end_center;
       norm_delta += (delta_end * delta_end * delta_end) / 3;
     }
@@ -135,5 +131,7 @@ float L2MinimizationKernelAVX2(
 
   return norm;
 }
+
+} // namespace internal
 
 } // namespace dnnlowp

@@ -197,6 +197,34 @@ def _get_group_size(group):
     return len(_pg_group_ranks[group])
 
 
+def _check_single_tensor(param, param_name):
+    """
+    Helper that check the parameter: param_name is a single Tensor
+
+    """
+    if not isinstance(param, torch.Tensor):
+        raise RuntimeError("Invalid function argument. Expecting parameter: {} "
+                           "to be a torch.Tensor type".format(param_name))
+
+
+def _check_tensor_list(param, param_name):
+    """
+    Helper that check the parameter: param_name is a Tensor list
+
+    """
+    wrong_type = False
+    if isinstance(param, list):
+        for p in param:
+            if not isinstance(p, torch.Tensor):
+                wrong_type = True
+                break
+    else:
+        wrong_type = True
+    if wrong_type:
+        raise RuntimeError("Invalid function argument. Expecting parameter: {} "
+                           "to be a List[torch.Tensor] type".format(param_name))
+
+
 def is_mpi_available():
     """
     Checks if MPI is available
@@ -491,6 +519,7 @@ def isend(tensor,
         None, if not part of the group
 
     """
+    _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         return
 
@@ -520,6 +549,7 @@ def irecv(tensor,
         None, if not part of the group
 
     """
+    _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         return
 
@@ -545,6 +575,7 @@ def send(tensor,
         tag (int, optional): Tag to match send with remote recv
 
     """
+    _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         return
 
@@ -575,6 +606,7 @@ def recv(tensor,
         -1, if not part of the group
 
     """
+    _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         return -1
 
@@ -678,6 +710,7 @@ def broadcast(tensor,
         None, if not async_op or if not part of the group
 
     """
+    _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         return
 
@@ -773,6 +806,7 @@ def all_reduce(tensor,
         None, if not async_op or if not part of the group
 
     """
+    _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         return
 
@@ -872,6 +906,7 @@ def reduce(tensor,
         None, if not async_op or if not part of the group
 
     """
+    _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         return
 
@@ -968,6 +1003,8 @@ def all_gather(tensor_list,
         None, if not async_op or if not part of the group
 
     """
+    _check_tensor_list(tensor_list, "tensor_list")
+    _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         return
 
@@ -1005,6 +1042,8 @@ def gather(tensor,
         None, if not async_op or if not part of the group
 
     """
+    _check_single_tensor(tensor, "tensor")
+    _check_tensor_list(gather_list, "gather_list")
     if _rank_not_in_group(group):
         return
 
@@ -1060,6 +1099,8 @@ def scatter(tensor,
         None, if not async_op or if not part of the group
 
     """
+    _check_single_tensor(tensor, "tensor")
+    _check_tensor_list(scatter_list, "scatter_list")
     if _rank_not_in_group(group):
         return
 

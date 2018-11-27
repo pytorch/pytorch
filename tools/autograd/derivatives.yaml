@@ -117,6 +117,11 @@
   mat1: mm_mat1_backward(grad, mat2, mat1, alpha)
   mat2: mm_mat2_backward(grad, mat1, mat2.sizes(), mat2.strides(), alpha)
 
+- name: _sparse_addmm(Tensor self, Tensor sparse, Tensor dense, *, Scalar beta, Scalar alpha)
+  self: maybe_multiply(grad, beta)
+  sparse: _sparse_addmm_sparse_backward(grad, sparse, dense, alpha)
+  dense: mm_mat2_backward(grad, sparse, dense.sizes(), dense.strides(), alpha)
+
 - name: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta, Scalar alpha)
   self: maybe_multiply(grad, beta)
   mat: grad.ger(vec) * alpha
@@ -668,7 +673,7 @@
   self: select_backward(grad, self.sizes(), dim, index)
 
 - name: sigmoid(Tensor self)
-  self: _sigmoid_backward(grad, result)
+  self: sigmoid_backward(grad, result)
 
 - name: sign(Tensor self)
   self: zeros_like(grad)
@@ -769,7 +774,7 @@
   self: grad * (1 + result.pow(2))
 
 - name: tanh(Tensor self)
-  self: _tanh_backward(grad, result)
+  self: tanh_backward(grad, result)
 
 - name: topk(Tensor self, int64_t k, int64_t dim, bool largest, bool sorted)
   self: index_select_backward(grad, dim, result1, self.sizes(), true)
@@ -889,7 +894,7 @@
 - name: mse_loss(Tensor self, Tensor target, int64_t reduction)
   self: mse_loss_backward(grad, self, target, reduction)
 
-- name: multi_margin_loss_forward(Tensor self, Tensor target, Scalar p, Scalar margin, Tensor weight, int64_t reduction)
+- name: multi_margin_loss(Tensor self, Tensor target, Scalar p, Scalar margin, Tensor weight, int64_t reduction)
   self: multi_margin_loss_backward(grad, self, target, p, margin, weight, reduction)
 
 - name: multilabel_margin_loss_forward(Tensor self, Tensor target, int64_t reduction)
@@ -901,10 +906,10 @@
 - name: nll_loss2d_forward(Tensor self, Tensor target, Tensor weight, int64_t reduction, int64_t ignore_index)
   self: nll_loss2d_backward(grad, self, target, weight, reduction, ignore_index, total_weight)
 
-- name: smooth_l1_loss_forward(Tensor self, Tensor target, int64_t reduction)
+- name: smooth_l1_loss(Tensor self, Tensor target, int64_t reduction)
   self: smooth_l1_loss_backward(grad, self, target, reduction)
 
-- name: soft_margin_loss_forward(Tensor self, Tensor target, int64_t reduction)
+- name: soft_margin_loss(Tensor self, Tensor target, int64_t reduction)
   self: soft_margin_loss_backward(grad, self, target, reduction)
 
 - name: relu(Tensor self)
@@ -914,10 +919,10 @@
 - name: relu_(Tensor self)
   self: threshold_backward(grad, result, 0)
 
-- name: elu_forward(Tensor self, Scalar alpha, Scalar scale, Scalar input_scale)
-  self: elu_backward(grad, alpha, scale, input_scale, output)
+- name: elu(Tensor self, Scalar alpha, Scalar scale, Scalar input_scale)
+  self: elu_backward(grad, alpha, scale, input_scale, result)
 
-- name: glu_forward(Tensor self, int64_t dim)
+- name: glu(Tensor self, int64_t dim)
   self: glu_backward(grad, self, dim)
 
 - name: hardshrink(Tensor self, Scalar lambd)
@@ -927,16 +932,16 @@
   grad_out: hardshrink_backward(grad, self, lambd)
   self: zeros_like(grad)
 
-- name: hardtanh_forward(Tensor self, Scalar min_val, Scalar max_val)
+- name: hardtanh(Tensor self, Scalar min_val, Scalar max_val)
   self: hardtanh_backward(grad, self, min_val, max_val)
 
-- name: hardtanh_forward_(Tensor self, Scalar min_val, Scalar max_val)
+- name: hardtanh_(Tensor self, Scalar min_val, Scalar max_val)
   self: hardtanh_backward(grad, result, min_val, max_val)
 
-- name: leaky_relu_forward(Tensor self, Scalar negative_slope)
+- name: leaky_relu(Tensor self, Scalar negative_slope)
   self: leaky_relu_backward(grad, self, negative_slope)
 
-- name: leaky_relu_forward_(Tensor self, Scalar negative_slope)
+- name: leaky_relu_(Tensor self, Scalar negative_slope)
   self: leaky_relu_backward(grad, result, negative_slope)
 
 - name: log_sigmoid_forward(Tensor self)
@@ -951,19 +956,19 @@
 - name: prelu_backward(Tensor grad_output, Tensor self, Tensor weight)
   grad_output, self, weight: prelu_double_backward(grads[0], grads[1], grad_output, self, weight)
 
-- name: rrelu_with_noise_forward(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator generator)
+- name: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator generator)
   self: rrelu_with_noise_backward(grad, self, noise, lower, upper, training)
 
-- name: rrelu_with_noise_forward_(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator generator)
+- name: rrelu_with_noise_(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator generator)
   self: rrelu_with_noise_backward(grad, result, noise, lower, upper, training)
 
 - name: _softmax(Tensor self, int64_t dim, bool half_to_float)
   self: _softmax_backward_data(grad, result, dim, self)
 
-- name: softplus_forward(Tensor self, Scalar beta, Scalar threshold)
-  self: softplus_backward(grad, self, beta, threshold, output)
+- name: softplus(Tensor self, Scalar beta, Scalar threshold)
+  self: softplus_backward(grad, self, beta, threshold, result)
 
-- name: softshrink_forward(Tensor self, Scalar lambd)
+- name: softshrink(Tensor self, Scalar lambd)
   self: softshrink_backward(grad, self, lambd)
 
 - name: threshold(Tensor self, Scalar threshold, Scalar value)
@@ -972,70 +977,70 @@
 - name: threshold_(Tensor self, Scalar threshold, Scalar value)
   self: threshold_backward(grad, result, threshold)
 
-- name: reflection_pad1d_forward(Tensor self, IntList padding)
+- name: reflection_pad1d(Tensor self, IntList padding)
   self: reflection_pad1d_backward(grad, self, padding)
 
-- name: reflection_pad2d_forward(Tensor self, IntList padding)
+- name: reflection_pad2d(Tensor self, IntList padding)
   self: reflection_pad2d_backward(grad, self, padding)
 
-- name: replication_pad1d_forward(Tensor self, IntList padding)
+- name: replication_pad1d(Tensor self, IntList padding)
   self: replication_pad1d_backward(grad, self, padding)
 
-- name: replication_pad2d_forward(Tensor self, IntList padding)
+- name: replication_pad2d(Tensor self, IntList padding)
   self: replication_pad2d_backward(grad, self, padding)
 
-- name: replication_pad3d_forward(Tensor self, IntList padding)
+- name: replication_pad3d(Tensor self, IntList padding)
   self: replication_pad3d_backward(grad, self, padding)
 
-- name: upsample_linear1d_forward(Tensor self, IntList output_size, bool align_corners)
+- name: upsample_linear1d(Tensor self, IntList output_size, bool align_corners)
   self: upsample_linear1d_backward(grad, output_size, self.sizes(), align_corners)
 
-- name: upsample_bilinear2d_forward(Tensor self, IntList output_size, bool align_corners)
+- name: upsample_bilinear2d(Tensor self, IntList output_size, bool align_corners)
   self: upsample_bilinear2d_backward(grad, output_size, self.sizes(), align_corners)
 
-- name: upsample_trilinear3d_forward(Tensor self, IntList output_size, bool align_corners)
+- name: upsample_trilinear3d(Tensor self, IntList output_size, bool align_corners)
   self: upsample_trilinear3d_backward(grad, output_size, self.sizes(), align_corners)
 
-- name: upsample_nearest1d_forward(Tensor self, IntList output_size)
+- name: upsample_nearest1d(Tensor self, IntList output_size)
   self: upsample_nearest1d_backward(grad, output_size, self.sizes())
 
-- name: upsample_nearest2d_forward(Tensor self, IntList output_size)
+- name: upsample_nearest2d(Tensor self, IntList output_size)
   self: upsample_nearest2d_backward(grad, output_size, self.sizes())
 
-- name: upsample_nearest3d_forward(Tensor self, IntList output_size)
+- name: upsample_nearest3d(Tensor self, IntList output_size)
   self: upsample_nearest3d_backward(grad, output_size, self.sizes())
 
-- name: adaptive_avg_pool2d_forward(Tensor self, IntList output_size)
+- name: adaptive_avg_pool2d(Tensor self, IntList output_size)
   self: adaptive_avg_pool2d_backward(grad, self)
 
-- name: adaptive_avg_pool3d_forward(Tensor self, IntList output_size)
+- name: adaptive_avg_pool3d(Tensor self, IntList output_size)
   self: adaptive_avg_pool3d_backward(grad, self)
 
-- name: adaptive_max_pool2d_forward(Tensor self, IntList output_size)
+- name: adaptive_max_pool2d(Tensor self, IntList output_size)
   self: adaptive_max_pool2d_backward(grad, self, indices)
 
-- name: adaptive_max_pool3d_forward(Tensor self, IntList output_size)
+- name: adaptive_max_pool3d(Tensor self, IntList output_size)
   self: adaptive_max_pool3d_backward(grad, self, indices)
 
-- name: avg_pool2d_forward(Tensor self, IntList kernel_size, IntList stride, IntList padding, bool ceil_mode, bool count_include_pad)
+- name: avg_pool2d(Tensor self, IntList kernel_size, IntList stride, IntList padding, bool ceil_mode, bool count_include_pad)
   self: avg_pool2d_backward(grad, self, kernel_size, stride, padding, ceil_mode, count_include_pad)
 
-- name: avg_pool3d_forward(Tensor self, IntList kernel_size, IntList stride, IntList padding, bool ceil_mode, bool count_include_pad)
+- name: avg_pool3d(Tensor self, IntList kernel_size, IntList stride, IntList padding, bool ceil_mode, bool count_include_pad)
   self: avg_pool3d_backward(grad, self, kernel_size, stride, padding, ceil_mode, count_include_pad)
 
-- name: fractional_max_pool2d_forward(Tensor self, IntList kernel_size, IntList output_size, Tensor random_samples)
+- name: fractional_max_pool2d(Tensor self, IntList kernel_size, IntList output_size, Tensor random_samples)
   self: fractional_max_pool2d_backward(grad, self, kernel_size, output_size, indices)
 
-- name: max_pool2d_with_indices_forward(Tensor self, IntList kernel_size, IntList stride, IntList padding, IntList dilation, bool ceil_mode)
+- name: max_pool2d_with_indices(Tensor self, IntList kernel_size, IntList stride, IntList padding, IntList dilation, bool ceil_mode)
   self: max_pool2d_with_indices_backward(grad, self, kernel_size, stride, padding, dilation, ceil_mode, indices)
 
-- name: max_pool3d_with_indices_forward(Tensor self, IntList kernel_size, IntList stride, IntList padding, IntList dilation, bool ceil_mode)
+- name: max_pool3d_with_indices(Tensor self, IntList kernel_size, IntList stride, IntList padding, IntList dilation, bool ceil_mode)
   self: max_pool3d_with_indices_backward(grad, self, kernel_size, stride, padding, dilation, ceil_mode, indices)
 
-- name: max_unpool2d_forward(Tensor self, Tensor indices, IntList output_size)
+- name: max_unpool2d(Tensor self, Tensor indices, IntList output_size)
   self: max_unpool2d_backward(grad, self, indices, output_size)
 
-- name: max_unpool3d_forward(Tensor self, Tensor indices, IntList output_size, IntList stride, IntList padding)
+- name: max_unpool3d(Tensor self, Tensor indices, IntList output_size, IntList stride, IntList padding)
   self: max_unpool3d_backward(grad, self, indices, output_size, stride, padding)
 
 - name: thnn_conv_transpose2d_forward(Tensor self, Tensor weight, IntList kernel_size, Tensor bias, IntList stride, IntList padding, IntList output_padding, IntList dilation)
@@ -1234,12 +1239,12 @@
 - name: upsample_nearest3d_backward(Tensor grad_output, IntList output_size, IntList input_size)
   grad_output: upsample_nearest3d(grad, output_size)
 
-- name: _sigmoid_backward(Tensor grad_output, Tensor output)
-  grad_output: _sigmoid_backward(grad, output)
+- name: sigmoid_backward(Tensor grad_output, Tensor output)
+  grad_output: sigmoid_backward(grad, output)
   output: grad * grad_output * (-2 * output + 1)
 
-- name: _tanh_backward(Tensor grad_output, Tensor output)
-  grad_output: _tanh_backward(grad, output)
+- name: tanh_backward(Tensor grad_output, Tensor output)
+  grad_output: tanh_backward(grad, output)
   output: -2 * output * grad * grad_output
 
 # cudnn

@@ -157,6 +157,62 @@ class TestCheckpoint(TestCase):
         for name in grad_checkpointed:
             self.assertEqual(grad_checkpointed[name], grad_not_checkpointed[name])
 
+    def test_checkpoint_rng_cpu(self):
+        for i in range(5):
+            inp = torch.randn(20000, device='cpu').requires_grad_()
+            phase1 = torch.nn.Dropout()
+            phase2 = torch.nn.Dropout()
+
+            def run_fn(input):
+                return phase2(input)
+
+            state = torch.get_rng_state()
+
+            out = phase1(inp)
+            out = checkpoint(run_fn, out)
+            out.sum().backward()
+            grad_with_checkpointing = inp.grad
+
+            torch.set_rng_state(state)
+
+            inp.grad = None
+
+            out = phase1(inp)
+            out = run_fn(out)
+            out.sum().backward()
+            grad_no_checkpointing = inp.grad
+
+            self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
+
+    @unittest.skipIf(not HAS_CUDA, 'No CUDA')
+    @skipIfRocm
+    def test_checkpoint_rng_cuda(self):
+        for i in range(5):
+            inp = torch.randn(20000, device='cuda').requires_grad_()
+            phase1 = torch.nn.Dropout()
+            phase2 = torch.nn.Dropout()
+
+            def run_fn(input):
+                return phase2(input)
+
+            state = torch.cuda.get_rng_state()
+
+            out = phase1(inp)
+            out = checkpoint(run_fn, out)
+            out.sum().backward()
+            grad_with_checkpointing = inp.grad
+
+            torch.cuda.set_rng_state(state)
+
+            inp.grad = None
+
+            out = phase1(inp)
+            out = run_fn(out)
+            out.sum().backward()
+            grad_no_checkpointing = inp.grad
+
+            self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
+
 
 class TestDataLoader(TestCase):
     def setUp(self):

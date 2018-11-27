@@ -27,12 +27,6 @@
         }
       },
       {
-        "path": "aten/src/TH/generic/THTensorMath.cpp",
-        "constants": {
-          "_OPENMP": "_OPENMP_STUB"
-        }
-      },
-      {
         "path": "aten/src/ATen/native/cuda/Distributions.cu",
         "s_constants": {
           "#include <nvfunctional>": ""

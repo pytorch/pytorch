@@ -40,12 +40,10 @@ TEST(TestStream, CopyAndMoveTest) {
 
     copyStream = s;
 
-    ASSERT_EQ_CUDA(copyStream.internals(), s.internals());
     ASSERT_EQ_CUDA(copyStream.device_index(), device);
     ASSERT_EQ_CUDA(copyStream.stream(), cuda_stream);
   }
 
-  ASSERT_TRUE(copyStream.internals());
   ASSERT_EQ_CUDA(copyStream.device_index(), device);
   ASSERT_EQ_CUDA(copyStream.stream(), cuda_stream);
 
@@ -62,7 +60,6 @@ TEST(TestStream, CopyAndMoveTest) {
     ASSERT_EQ_CUDA(moveStream.stream(), cuda_stream);
   }
 
-  ASSERT_TRUE(moveStream.internals());
   ASSERT_EQ_CUDA(moveStream.device_index(), device);
   ASSERT_EQ_CUDA(moveStream.stream(), cuda_stream);
 }
@@ -176,7 +173,7 @@ TEST(TestStream, CUDAGuardTest) {
 TEST(TestStream, StreamPoolTest) {
   std::vector<at::cuda::CUDAStream> streams{};
   for (int i = 0; i < 200; ++i) {
-    streams.emplace_back(at::cuda::detail::CUDAStream_getStreamFromPool());
+    streams.emplace_back(at::cuda::getStreamFromPool());
   }
 
   std::unordered_set<cudaStream_t> stream_set{};
@@ -220,8 +217,8 @@ TEST(TestStream, CUDAEventSyncTest) {
   const auto wait_stream0 = at::cuda::getStreamFromPool();
   const auto wait_stream1 = at::cuda::getStreamFromPool();
 
-  wait_stream0.synchronize_with(event);
-  wait_stream1.synchronize_with(event);
+  event.block(wait_stream0);
+  event.block(wait_stream1);
 
   cudaStreamSynchronize(wait_stream0);
   ASSERT_TRUE(event.happened());
@@ -246,7 +243,7 @@ TEST(TestStream, CrossDeviceTest) {
 
   ASSERT_EQ_CUDA(event0.device(), 1);
 
-  stream0.synchronize_with(event0);
+  event0.block(stream0);
 
   cudaStreamSynchronize(stream0);
   ASSERT_TRUE(event0.happened());

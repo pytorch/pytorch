@@ -1,9 +1,7 @@
-#include "ATen/cuda/CUDAStream.h"
-#include "ATen/cuda/CUDAContext.h"
-#include "ATen/cuda/CUDAEvent.h"
-#include "ATen/cuda/CUDAGuard.h"
-#include "ATen/cuda/Exceptions.h"
-#include "c10/util/Exception.h"
+#include <ATen/cuda/CUDAStream.h>
+#include <ATen/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAFunctions.h>
+#include <c10/util/Exception.h>
 
 #include <mutex>
 #include <atomic>
@@ -12,8 +10,12 @@
 #include <vector>
 #include <array>
 
+namespace at {
+namespace cuda {
+
+namespace {
+
 // Internal implementation is entirely hidden
-// Note: CUDAStreamInternals doubles for a THCStream
 struct CUDAStreamInternals {
   CUDAStreamInternals() = default;
 
@@ -25,11 +27,6 @@ struct CUDAStreamInternals {
   int32_t stream_id = -1;
   cudaStream_t stream = nullptr;
 };
-
-namespace at {
-namespace cuda {
-
-namespace detail {
 
 // Global stream state and constants
 static int64_t num_gpus = -1;
@@ -66,8 +63,10 @@ static std::vector<std::array<CUDAStreamInternals, kStreamsPerPool>> high_priori
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
 // How do we assign stream IDs?
 //
-// -- 2 bits --  -- 5 bits -----
-// StreamIdType  stream id index
+// -- 25 bits -- -- 2 bits --  -- 5 bits -----
+// zeros         StreamIdType  stream id index
+//
+// Where StreamIdType:
 //  00 = default stream
 //  01 = low priority stream
 //  10 = high priority stream
@@ -77,6 +76,13 @@ static std::vector<std::array<CUDAStreamInternals, kStreamsPerPool>> high_priori
 //
 // This is entirely an internal implementation detail, we reserve the right to
 // renumber streams however we like.
+//
+// Note that it is really important that the MSB is zero; StreamId is a
+// *signed* integer, and unsigned to signed conversion outside of the
+// bounds of signed integer representation is undefined behavior.  You
+// could work around this with something like
+// https://stackoverflow.com/questions/13150449/efficient-unsigned-to-signed-cast-avoiding-implementation-defined-behavior
+// but it seems a bit overkill for this.
 
 enum class StreamIdType : uint8_t {
   DEFAULT = 0x0,
@@ -102,7 +108,9 @@ std::ostream& operator<<(std::ostream& stream, StreamIdType s) {
   return stream;
 }
 
-// Promotion makes me nervous...
+// StreamId is 32-bit, so we can just rely on regular promotion rules.
+// We rely on streamIdIndex and streamIdType being non-negative;
+// see Note [Hazard when concatenating signed integers]
 
 static inline StreamIdType streamIdType(StreamId s) {
   return static_cast<StreamIdType>(s >> kStreamsPerPoolBits);
@@ -116,8 +124,8 @@ StreamId makeStreamId(StreamIdType st, size_t si) {
   return (static_cast<StreamId>(st) << kStreamsPerPoolBits) | static_cast<StreamId>(si);
 }
 
-template <typename T>
-static bool pointer_within(const T* ptr, ArrayRef<T> arr) {
+template <typename T, typename A>
+static bool pointer_within(const T* ptr, const A& arr) {
   return std::greater_equal<const T*>()(ptr, arr.data()) && std::less<const T*>()(ptr, arr.data() + arr.size());
 }
 
@@ -162,7 +170,7 @@ static thread_local CUDAStreamInternals** current_streams = nullptr;
 // streams.
 // Warning: this function must only be called once!
 static void initGlobalStreamState() {
-  num_gpus = getNumGPUs();
+  num_gpus = device_count();
 
   // Resizes deques and vectors
   default_streams.resize(num_gpus);
@@ -195,19 +203,19 @@ static void initDeviceStreamState(const int64_t device) {
     hipri_stream.device = device;
 
     #ifndef __HIP_PLATFORM_HCC__
-      AT_CUDA_CHECK(cudaStreamCreateWithPriority(
+      C10_CUDA_CHECK(cudaStreamCreateWithPriority(
         &lowpri_stream.stream
       , kDefaultFlags
       , kLowPriority));
-      AT_CUDA_CHECK(cudaStreamCreateWithPriority(
+      C10_CUDA_CHECK(cudaStreamCreateWithPriority(
         &hipri_stream.stream
       , kDefaultFlags
       , kHighPriority));
     #else
-      AT_CUDA_CHECK(cudaStreamCreateWithFlags(
+      C10_CUDA_CHECK(cudaStreamCreateWithFlags(
         &lowpri_stream.stream
       , kDefaultFlags));
-      AT_CUDA_CHECK(cudaStreamCreateWithFlags(
+      C10_CUDA_CHECK(cudaStreamCreateWithFlags(
         &hipri_stream.stream
       , kDefaultFlags));
     #endif // __HIP_PLATFORM_HCC__
@@ -300,39 +308,58 @@ int64_t CUDAStream_device(const CUDAStreamInternals* ptr) {
   return ptr->device;
 }
 
-void CUDAStream_synchronize_with(const CUDAStreamInternals* ptr, const CUDAEvent& event) {
-    if (event.isCreated())
-      AT_CUDA_CHECK(cudaStreamWaitEvent(ptr->stream, event, 0));
-}
-
-} // namespace detail
-
-CUDAStream::CUDAStream(const CUDAStreamInternals* ptr)
-  : stream_(c10::Device(DeviceType::CUDA, detail::CUDAStream_device(ptr)), detail::CUDAStream_getStreamId(ptr)) {
-}
-
-void CUDAStream::synchronize_with(const CUDAEvent& event) const {
-    detail::CUDAStream_synchronize_with(internals(), event);
-}
-
 // See Note [StreamId assignment]
-CUDAStreamInternals* CUDAStream::internals() const {
-  c10::DeviceIndex device_index = stream_.device_index();
-  detail::StreamIdType st = detail::streamIdType(stream_.id());
-  size_t si = detail::streamIdIndex(stream_.id());
+CUDAStreamInternals* CUDAStream_internals(CUDAStream s) {
+  c10::DeviceIndex device_index = s.device_index();
+  StreamIdType st = streamIdType(s.unwrap().id());
+  size_t si = streamIdIndex(s.unwrap().id());
   switch (st) {
-    case detail::StreamIdType::DEFAULT:
-      AT_ASSERTM(si == 0, "Unrecognized stream ", stream_,
+    case StreamIdType::DEFAULT:
+      AT_ASSERTM(si == 0, "Unrecognized stream ", s.unwrap(),
                           " (I think this should be the default stream, but I got a non-zero index ", si, ")");
-      return &detail::default_streams[device_index];
-    case detail::StreamIdType::LOW:
-      return &detail::low_priority_streams[device_index][si];
-    case detail::StreamIdType::HIGH:
-      return &detail::high_priority_streams[device_index][si];
+      return &default_streams[device_index];
+    case StreamIdType::LOW:
+      return &low_priority_streams[device_index][si];
+    case StreamIdType::HIGH:
+      return &high_priority_streams[device_index][si];
     default:
-      AT_ASSERTM(0, "Unrecognized stream ", stream_, " (I didn't recognize the stream type, ", st, ")");
+      AT_ASSERTM(0, "Unrecognized stream ", s.unwrap(), " (I didn't recognize the stream type, ", st, ")");
   }
 }
+
+CUDAStream CUDAStream_fromInternals(const CUDAStreamInternals* ptr) {
+  return CUDAStream(CUDAStream::UNCHECKED,
+                    Stream(c10::Device(DeviceType::CUDA, CUDAStream_device(ptr)),
+                           CUDAStream_getStreamId(ptr)));
+}
+
+} // anonymous namespace
+
+cudaStream_t CUDAStream::stream() const {
+  return CUDAStream_stream(CUDAStream_internals(*this));
+}
+
+/* Streams */
+CUDAStream getStreamFromPool(
+  const bool isHighPriority
+, int64_t device) {
+  return CUDAStream_fromInternals(CUDAStream_getStreamFromPool(isHighPriority, device));
+}
+
+CUDAStream getDefaultCUDAStream(int64_t device) {
+  return CUDAStream_fromInternals(CUDAStream_getDefaultStream(device));
+}
+CUDAStream getCurrentCUDAStream(int64_t device) {
+  return CUDAStream_fromInternals(CUDAStream_getCurrentStream(device));
+}
+
+void setCurrentCUDAStream(CUDAStream stream) {
+  CUDAStream_setStream(CUDAStream_internals(stream));
+}
+void uncheckedSetCurrentCUDAStream(CUDAStream stream) {
+  CUDAStream_uncheckedSetStream(CUDAStream_internals(stream));
+}
+
 
 } // namespace cuda
 } // namespace at
