@@ -166,13 +166,14 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
       DoNothing<> doNothingObj{};
       ReQuantizeOutput<false /* FUSE_RELU */> outputProcObj(
           doNothingObj,
-          requantization_params_.real_multiplier,
+          &requantization_params_.real_multiplier,
           out_qparams_.zero_point,
           in_qparams_[0].zero_point,
-          in_qparams_[1].zero_point,
+          &in_qparams_[1].zero_point,
           packA.getRowOffsetBuffer(),
           column_offsets_.data(),
-          b_quantized_data_);
+          b_quantized_data_,
+          N); // ncols per quant group
 
       Y_int32_.resize(Y->size());
       fbgemmPacked(
@@ -211,12 +212,13 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
         ReQuantizeForFloat<false /* FUSE_RELU*/> outputProcObj(
             doNothingObj,
             in_qparams_[0].scale,
-            in_qparams_[1].scale,
+            &in_qparams_[1].scale,
             in_qparams_[0].zero_point,
-            in_qparams_[1].zero_point,
+            &in_qparams_[1].zero_point,
             packA.getRowOffsetBuffer(),
             column_offsets_.data(),
-            b_dequantized_data_); // bias
+            b_dequantized_data_, // bias
+            N); // ncols per quant group
 
         fbgemmPacked(
             packA,
@@ -245,12 +247,13 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
         ReQuantizeForFloat<false /* FUSE_RELU*/> outputProcObj(
             doNothingObj,
             in_qparams_[0].scale,
-            in_qparams_[1].scale,
+            &in_qparams_[1].scale,
             in_qparams_[0].zero_point,
-            in_qparams_[1].zero_point,
+            &in_qparams_[1].zero_point,
             packA.getRowOffsetBuffer(),
             column_offsets_.data(),
-            b_dequantized_data_); // bias
+            b_dequantized_data_, // bias
+            N); // ncols per quant group
 
         fbgemmPacked(
             packA,
