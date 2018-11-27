@@ -8299,6 +8299,10 @@ class _TestTorchMixin(object):
             obj = t(100, 100).fill_(1)
             obj.__repr__()
             str(obj)
+        # test half tensor
+        obj = torch.rand(100, 100, device='cpu').half()
+        obj.__repr__()
+        str(obj)
         for t in torch._storage_classes:
             if t.is_cuda and not torch.cuda.is_available():
                 continue
@@ -8352,6 +8356,13 @@ tensor([ 0.0000e+00, 9.8813e-324, 9.8813e-323, 1.0000e+307, 1.0000e+308,
         x = torch.zeros(10000)
         self.assertEqual(x.__repr__(), str(x))
         self.assertExpectedInline(str(x), '''tensor([0., 0., 0.,  ..., 0., 0., 0.])''')
+
+        # test internal summary function
+        x = torch.rand(1, 20, 5, 30)
+        summary = torch._tensor_str.get_summarized_data(x)
+        self.assertEqual(summary.shape, (1, 6, 5, 6))
+        first_and_last = [0, 1, 2, -3, -2, -1]
+        self.assertEqual(summary, x[:, first_and_last][..., first_and_last])
 
         # test device
         if torch.cuda.is_available():
