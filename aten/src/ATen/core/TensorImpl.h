@@ -42,8 +42,10 @@ class DeviceOption;
 
 }
 
-namespace at {
+namespace c10 {
 class Scalar;
+}
+namespace at {
 struct Type;
 struct Storage;
 class Tensor;
