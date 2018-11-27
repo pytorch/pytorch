@@ -9196,6 +9196,11 @@ EXCLUDE_SCRIPT = {
     'test_nn_poisson_nll_loss_full',
 }
 
+EXCLUDE_SCRIPT_MODULES = {
+    'test_nn_LPPool2d_norm',
+    'test_nn_LPPool1d_norm',
+}
+
 DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
     'test_nn_avg_pool2d',
     'test_nn_log_softmax',
@@ -10014,6 +10019,7 @@ def add_nn_module_test(*args, **kwargs):
         name = kwargs['constructor'].__name__
 
     class_name = name.split("_")[0]
+
     module = getattr(torch.nn, class_name, None)
     if module is None or torch._jit_internal._weak_types.get(module) is None:
         return
@@ -10022,7 +10028,14 @@ def add_nn_module_test(*args, **kwargs):
         # eval() is not supported, so skip these tests
         return
 
+    test_name = name
+    if 'desc' in kwargs:
+        test_name = "{}_{}".format(test_name, kwargs['desc'])
+    test_name = 'test_nn_{}'.format(test_name)
+
     def do_test(self):
+        if test_name in EXCLUDE_SCRIPT_MODULES:
+            return
         if 'constructor' in kwargs:
             nn_module = kwargs['constructor']
         else:
@@ -10075,10 +10088,6 @@ def add_nn_module_test(*args, **kwargs):
 
         check_against_reference(self, create_script_module, create_nn_module, f_args_variable)
 
-    test_name = name
-    if 'desc' in kwargs:
-        test_name = "{}_{}".format(test_name, kwargs['desc'])
-    test_name = 'test_nn_{}'.format(test_name)
     post_add_test(test_name, (), do_test)
 
 
