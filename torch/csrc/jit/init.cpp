@@ -29,6 +29,7 @@
 #include "torch/csrc/jit/passes/to_batch.h"
 #include "torch/csrc/jit/passes/lower_tuples.h"
 #include "torch/csrc/jit/passes/specialize_undef.h"
+#include "torch/csrc/jit/passes/utils/check_alias_annotation.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/script/init.h"
 #include "torch/csrc/jit/script/python_tree_views.h"
@@ -37,6 +38,7 @@
 #include "torch/csrc/jit/function_schema.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/fuser/interface.h"
+#include "torch/csrc/jit/script/jit_exception.h"
 #include "torch/csrc/jit/script/jit_exception.h"
 
 #include "caffe2/serialize/inline_container.h"
@@ -161,6 +163,13 @@ void initJITBindings(PyObject *module) {
        // jit::differentiate mutates the input Graph
        auto g_clone = g.copy();
        return differentiate(g_clone);
+   })
+   .def("_jit_check_alias_annotation", [](
+         std::shared_ptr<Graph> g,
+         py::tuple args,
+         const std::string& unqualified_op_name) {
+       auto stack = toStack(args);
+       checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
    });
 
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")
