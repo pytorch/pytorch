@@ -153,7 +153,8 @@ class ProcessGroupMPI : public ProcessGroup {
 
   std::shared_ptr<ProcessGroup::Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
-      std::vector<at::Tensor>& inputTensors) override;
+      std::vector<at::Tensor>& inputTensors,
+      const AllgatherOptions& opts = AllgatherOptions()) override;
 
   std::shared_ptr<ProcessGroup::Work> gather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
@@ -180,7 +181,8 @@ class ProcessGroupMPI : public ProcessGroup {
       int* srcRank,
       int tag);
 
-  std::shared_ptr<ProcessGroup::Work> barrier();
+  std::shared_ptr<ProcessGroup::Work> barrier(
+      const BarrierOptions& opts = BarrierOptions()) override;
 
   std::unordered_map<int, int> getGroupRank();
 

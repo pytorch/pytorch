@@ -487,7 +487,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::reduce(
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
-    std::vector<at::Tensor>& inputTensors) {
+    std::vector<at::Tensor>& inputTensors,
+    const AllgatherOptions& opts) {
   if (pgComm_ == MPI_COMM_NULL) {
     return nullptr;
   }
@@ -751,7 +752,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recvAnysource(
   return std::make_shared<AsyncWork>(tensor, request, srcRank);
 }
 
-std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::barrier() {
+std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::barrier(
+    const BarrierOptions& opts) {
   if (pgComm_ == MPI_COMM_NULL) {
     return nullptr;
   }
