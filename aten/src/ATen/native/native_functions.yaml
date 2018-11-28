@@ -628,6 +628,11 @@
     CPU: embedding_renorm_cpu_
     CUDA: embedding_renorm_cuda_
 
+- func: no_grad_embedding_renorm_(Tensor self, IndexTensor indices, double max_norm, double norm_type) -> Tensor
+  dispatch:
+    CPU: no_grad_embedding_renorm_cpu_
+    CUDA: no_grad_embedding_renorm_cuda_
+
 - func: embedding_sparse_backward(Tensor grad, IndexTensor indices, int64_t num_weights, int64_t padding_idx, bool scale_grad_by_freq) -> Tensor
 
 # NOTE [ embedding_bag Native Functions ]
@@ -1095,20 +1100,20 @@
 - func: mean(Tensor self) -> Tensor
   variants: function, method
 
-- func: mean(Tensor self, int64_t dim, bool keepdim, *, ScalarType dtype) -> Tensor
+- func: mean(Tensor self, IntList[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
   variants: function, method
 
-- func: mean(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+- func: mean(Tensor self, IntList[1] dim, bool keepdim=False) -> Tensor
   variants: function, method
 
-- func: mean(Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+- func: mean(Tensor self, IntList[1] dim, *, ScalarType dtype) -> Tensor
   variants: function, method
 
-- func: mean_out(Tensor result, Tensor self, int64_t dim, bool keepdim, *, ScalarType dtype) -> Tensor
+- func: mean_out(Tensor result, Tensor self, IntList[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
 
-- func: mean_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+- func: mean_out(Tensor result, Tensor self, IntList[1] dim, bool keepdim=False) -> Tensor
 
-- func: mean_out(Tensor result, Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+- func: mean_out(Tensor result, Tensor self, IntList[1] dim, *, ScalarType dtype) -> Tensor
 
 - func: median(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
   variants: function, method

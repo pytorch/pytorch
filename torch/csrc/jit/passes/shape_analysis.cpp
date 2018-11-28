@@ -899,7 +899,6 @@ class ShapePropagator {
             "aten::argmin(Tensor self, int dim, bool keepdim) -> Tensor",
             "aten::max_values(Tensor self, int dim, bool keepdim) -> Tensor",
             "aten::min_values(Tensor self, int dim, bool keepdim) -> Tensor",
-            "aten::mean(Tensor self, int dim, bool keepdim) -> Tensor",
             "aten::norm(Tensor self, Scalar p, int dim, bool keepdim) -> Tensor",
             "aten::std(Tensor self, int dim, bool unbiased, bool keepdim) -> Tensor",
             "aten::var(Tensor self, int dim, bool unbiased, bool keepdim) -> Tensor",
@@ -943,6 +942,27 @@ class ShapePropagator {
         [](Node* node) -> type_vec_t {
           return multidim_reduce_with_postprocess(
               node, /*num_reduce_dim=*/1, /*integer_upcast=*/true);
+        }};
+
+
+    // Requirements:
+    //   dims           : preserved if keepdim == false, dim->size() smaller otherwise
+    //   scalar type    : preserved
+    //   device         : preserved
+    //   tensor inputs  : 1
+    //   tensor outputs : 1
+    // Additionally:
+    //   - First input should be the only tensor input
+    //   - has a bool keepdim argument
+    static const register_formula_for multidim_reduce_ops {
+        {
+            "aten::mean(Tensor self, int[] dim, bool keepdim) -> Tensor",
+        },
+        [](Node * node) -> type_vec_t {
+          if (auto dim = node->get<std::vector<int64_t>>(attr::dim)) {
+            return multidim_reduce_with_postprocess(node, /*num_reduce_dim=*/dim->size(), /*integer_upcast=*/false);
+          }
+          return {};
         }};
 
     // Requirements:
