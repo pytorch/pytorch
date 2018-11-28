@@ -487,14 +487,6 @@ struct CAFFE2_API ListType : public SingleElementType<TypeKind::ListType, ListTy
   static ListTypePtr create( T&& ... all ) {
     return ListTypePtr(new ListType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
   }
-
-  bool isSubtypeOf(const TypePtr rhs) const override {
-    if(auto rhs_ = rhs->cast<OptionalType>()) {
-      return this->isSubtypeOf(rhs_->getElementType());
-    }
-    return *this == *rhs;
-  }
-
   DEFINE_IS_SUBCLASS(ListType);
   std::string str() const override {
     std::stringstream ss;
