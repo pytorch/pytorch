@@ -452,9 +452,10 @@ class ScriptModuleSerializer final {
   // write the content of the tensor to the file/stream, and save the
   // offset in the storageMap_
   void convertAndWriteTensor(
+      size_t tensor_id,
       const at::Tensor& tensor,
       torch::TensorDef* tensor_proto,
-      std::unordered_map<const void*, uint64_t>& storageMap);
+      std::unordered_map<const void*, std::string>& storageMap);
 
   // dump all the tensors in the tensorTable_ to a ModelDef (metadata) and
   // the file/stream (the content), assuming all the information of the
@@ -464,6 +465,7 @@ class ScriptModuleSerializer final {
 
   void convertModule(
       const script::Module& module,
+      const std::string& prefix,
       const std::string& name,
       torch::ModuleDef* module_def);
 
@@ -480,10 +482,7 @@ class ScriptModuleSerializer final {
 
 // ScriptModuleSerializer's methods
 ScriptModuleSerializer::ScriptModuleSerializer(const std::string& filename)
-    : ofs_(
-          filename,
-          std::ofstream::out | std::ofstream::trunc | std::ofstream::binary),
-      writer_(&ofs_) {
+    : writer_(filename.c_str()) {
   // TODO appropriate support for mmap, right now we still use stream writer
 }
 
@@ -511,8 +510,7 @@ void ScriptModuleSerializer::serialize(const script::Module& module) {
     ss << convert_result;
     AT_ERROR(ss.str());
   }
-  auto record_id = writer_.writeRecord(output.data(), output.size());
-  AT_ASSERT(record_id != 0);
+  writer_.writeRecord("model.json", output.data(), output.size());
   writer_.writeEndOfFile();
 }
 
@@ -523,8 +521,7 @@ void ScriptModuleSerializer::convertModel(
   model_def->set_producer_version("1.0"); // TODO: set the producer version
                                           // using appropriate function call
   model_def->set_proto_version(torch::ProtoVersion::PROTO_VERSION_NEWEST);
-  std::string main_module_name = "";
-  convertModule(module, main_module_name, model_def->mutable_main_module());
+  convertModule(module, "", writer_.archiveName(), model_def->mutable_main_module());
   writeTensorTable(model_def);
 }
 
@@ -534,9 +531,10 @@ size_t ScriptModuleSerializer::addTensor(const at::Tensor& tensor) {
 }
 
 void ScriptModuleSerializer::convertAndWriteTensor(
+    size_t tensor_id,
     const at::Tensor& tensor,
     torch::TensorDef* tensor_proto,
-    std::unordered_map<const void*, uint64_t>& storageMap) {
+    std::unordered_map<const void*, std::string>& storageMap) {
   for (auto d : tensor.sizes()) {
     tensor_proto->add_dims(d);
   }
@@ -573,27 +571,29 @@ void ScriptModuleSerializer::convertAndWriteTensor(
           storage_tensor.type().elementSizeInBytes() * storage_tensor.storage().size() ==
           record_size);
     }
-    uint64_t record_id = writer_.writeRecord(storage_tensor.storage().data(), record_size);
-    storage_it = storageMap.insert({key, record_id}).first;
+    std::string name = "tensors/" + std::to_string(tensor_id);
+    writer_.writeRecord(name, storage_tensor.storage().data(), record_size);
+    storage_it = storageMap.insert({key, name}).first;
   }
 
   auto* data = tensor_proto->mutable_data();
-  data->set_key(std::to_string(storage_it->second));
-  data->set_size(record_size);
+  data->set_key(storage_it->second);
 
   // TODO handle device case, set the device_detail and load to CUDA device
 }
 
 void ScriptModuleSerializer::writeTensorTable(torch::ModelDef* model_def) {
-  std::unordered_map<const void*, uint64_t> storageMap;
+  std::unordered_map<const void*, std::string> storageMap;
+  size_t tensor_id = 0;
   for (const at::Tensor& t : tensor_table_) {
     auto* tensor_proto = model_def->add_tensors();
-    convertAndWriteTensor(t, tensor_proto, storageMap);
+    convertAndWriteTensor(tensor_id++, t, tensor_proto, storageMap);
   }
 }
 
 void ScriptModuleSerializer::convertModule(
     const script::Module& module,
+    const std::string& prefix,
     const std::string& name,
     torch::ModuleDef* module_def) {
   module_def->set_name(name);
@@ -603,18 +603,27 @@ void ScriptModuleSerializer::convertModule(
     convertParameter(elem.value(), param_def);
   }
 
-  std::ostringstream ss;
-  ss << "op_version_set = 0\n";
-  PythonPrint(ss, module, tensor_table_, /*enforce_importable=*/true);
-  torch::RecordRef* record = module_def->mutable_torchscript_arena();
-  std::string str = ss.str();
-  auto key = writer_.writeRecord(str.c_str(), str.size());
-  record->set_key(std::to_string(key));
-  record->set_size(str.size());
+  std::stringstream module_name;
+  if (prefix != "")
+    module_name << prefix << "_";
+  module_name << name;
+
+  if (module.get_methods().size() > 0) {
+    std::ostringstream methods;
+    methods << "op_version_set = 0\n";
+    PythonPrint(methods, module, tensor_table_, /*enforce_importable=*/true);
+    torch::RecordRef* record = module_def->mutable_torchscript_arena();
+
+    std::stringstream filename;
+    filename << "code/" << module_name.str() << ".py";
+    std::string methods_str = methods.str();
+    writer_.writeRecord(filename.str(), methods_str.c_str(), methods_str.size());
+    record->set_key(filename.str());
+  }
 
   for (const auto& elem : module.get_modules()) {
     torch::ModuleDef* sub_def = module_def->add_submodules();
-    convertModule(*elem->module, elem.key(), sub_def);
+    convertModule(*elem->module, module_name.str(), elem.key(), sub_def);
   }
 }
 
