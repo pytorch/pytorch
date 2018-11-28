@@ -4022,6 +4022,19 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(ValueError, 'Expected.*batch_size'):
             F.nll_loss(x, t)
 
+    def test_KLDivLoss_expect_batch_average(self):
+        input_shape = (2, 5)
+        log_prob1 = F.log_softmax(torch.randn(input_shape), 1)
+        prob2 = F.softmax(torch.randn(input_shape), 1)
+
+        loss = nn.KLDivLoss(reduction='mean')
+        l = loss(log_prob1, prob2)
+
+        loss_none_reduce = nn.KLDivLoss(reduction='none')(log_prob1, prob2)
+        expected = loss_none_reduce.mean(0)
+
+        self.assertEqual(l, expected)
+
     @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 7000), "needs cudnn >= 7.0")
     def test_CTCLoss_cudnn(self):
         target_lengths = [30, 25, 20]
