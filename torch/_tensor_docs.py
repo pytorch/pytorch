@@ -1179,9 +1179,14 @@ the indices specified in :attr:`indices` (which is a tuple of Tensors). The
 expression ``tensor.index_put_(indices, value)`` is equivalent to
 ``tensor[indices] = value``. Returns :attr:`self`.
 
+If :attr:`accumulate` is ``True``, the elements in :attr:`tensor` are added to
+:attr:`self`. If accumulate is ``False``, the behavior is undefined if indices
+contain duplicate elements.
+
 Args:
     indices (tuple of LongTensor): tensors used to index into `self`.
     value (Tensor): tensor of same dtype as `self`.
+    accumulate (bool): whether to accumulate into self
 """)
 
 add_docstr_all('index_select',
