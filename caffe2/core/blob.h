@@ -28,6 +28,8 @@ inline Tensor* BlobSetTensor(Blob* blob, const Tensor& tensor) {
   return blob->Reset<Tensor>(new Tensor(tensor));
 }
 
+// need to keep both functions that returns Tensor* and the one
+// returns Tensor for clangr codemod
 inline Tensor*
 BlobGetMutableTensor(Blob* blob, at::IntList dims, at::TensorOptions options) {
   if (blob->IsType<Tensor>()) {
@@ -56,6 +58,11 @@ BlobGetMutableTensor(Blob* blob, at::IntList dims, at::TensorOptions options) {
           << " dims: " << dims;
   // << " options: " << options; (operator<< for Options is in at:: now)
   return BlobSetTensor(blob, caffe2::empty(dims, options));
+}
+
+inline Tensor
+XBlobGetMutableTensor(Blob* blob, at::IntList dims, at::TensorOptions options) {
+  return *BlobGetMutableTensor(blob, dims, options);
 }
 
 inline Tensor* BlobGetMutableTensor(Blob* blob, DeviceType device_type) {
