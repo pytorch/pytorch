@@ -917,9 +917,9 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * a tensor on CPU and then CopyFrom a CUDA tensor, that will to a
    * CUDA-to-CPU transfer).
    *
-   * If the function is invoked without `context` the copy would be synchronous
+   * 'async' parameter triggers async copy for CUDA tensors
    */
-  void CopyFrom(const TensorImpl& src, at::BaseContext* context = nullptr) {
+  void CopyFrom(const TensorImpl& src, bool async = false) {
     AT_ASSERT(!is_variable());
     AT_ASSERTM(
         src.is_contiguous(),
@@ -978,7 +978,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
             src.device(),
             new_data,
             device(),
-            context != nullptr);
+            async);
       }
     }
   }
@@ -991,8 +991,10 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * elements, in which case this tensors' capacity is grown at a factor of
    * growthPct. This ensures that Extend runs on an amortized O(1) time
    * complexity.
+   *
+   * This op is auto-asynchronous if the underlying device (CUDA) supports it.
    */
-  void Extend(int64_t num, float growthPct, at::BaseContext* context) {
+  void Extend(int64_t num, float growthPct) {
     AT_ASSERT(sizes_.size() >= 1u);
     AT_ASSERTM(num >= 0, "`num` must be non-negative for Extend");
     AT_ASSERTM(
@@ -1022,8 +1024,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     auto oldDims = sizes_;
     Resize(newCapacity);
     auto* newData = raw_mutable_data(data_type_);
-    AT_ASSERTM(
-        context != nullptr, "Context must be provided to Extend the tensor");
     if (data_type_.copy()) {
       AT_ASSERTM(
           device_type() == ::at::DeviceType::CPU,
