@@ -11,6 +11,8 @@ namespace {
       return unreduced.mean();
     } else if (reduction == Reduction::Sum) {
       return unreduced.sum();
+    } else if (reduction == Reduction::BatchMean && unreduced.ndimension() != 0) {
+      return unreduced.sum() / unreduced.size(/*dim=*/0);
     }
     return unreduced;
   }
@@ -66,9 +68,6 @@ Tensor kl_div(const Tensor& input, const Tensor& target, int64_t reduction) {
   auto output = at::where(target > 0, output_pos, zeros);
 
   // kl_div is special as it's default mean should be along batch dimension.
-  if (reduction == Reduction::Mean && output.ndimension() != 0) {
-    return output.sum() / output.size(/*dim=*/0);
-  }
   return apply_loss_reduction(output, reduction);
 }
 
@@ -86,8 +85,10 @@ Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor
           }
         });
   });
-  if (reduction == Reduction::Mean && input.ndimension() != 0) {
+  if (reduction == Reduction::BatchMean && input.ndimension() != 0) {
     return grad_input / input.size(/*dim=*/0);
+  } else if (reduction == Reduction::Mean) {
+    return grad_input / input.numel();
   }
   return grad_input;
 }

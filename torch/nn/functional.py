@@ -1700,7 +1700,7 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
 
 
 @torch._jit_internal.weak_script
-def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
+def kl_div(input, target, size_average=None, reduce=None, reduction='batchmean'):
     # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
     r"""The `Kullback-Leibler divergence`_ Loss.
 
@@ -1719,18 +1719,23 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
-            'mean': the sum of the output will be divided by the number of
+            'none' | 'batchmean' | 'sum'. 'none': no reduction will be applied,
+            'batchmean': the sum of the output will be divided by the number of
             batches in the output, 'sum': the output will be summed. Note that the default 'mean'
             is an average over batch dimension instead of all elements in this loss, which matches
             its math definition but different from the 'mean' behavior of other losses.
             Note: :attr:`size_average` and :attr:`reduce` are in the process of being deprecated,
             and in the meantime, specifying either of those two args will override :attr:`reduction`.
-            Default: 'mean'
+            `reduction='mean'` is deprecated in kl_div, please use `reduction='batchmean'` which
+            aligns with KL math definition.
+            Default: 'batchmean'
     """
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
+        if reduction == 'mean':
+            warnings.warn("reduction=mean is deprecated in kl_div. Please use reduction=batchmean"
+                          "which aligns with KL math definition.")
         reduction_enum = _Reduction.get_enum(reduction)
     return torch.kl_div(input, target, reduction_enum)
 

@@ -324,11 +324,13 @@ class KLDivLoss(_Loss):
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
-            'mean': the sum of the output will be divided by the number of
+            'none' | 'batchmean' | 'sum'. 'none': no reduction will be applied,
+            'batchmean': the sum of the output will be divided by the number of
             batches in the output, 'sum': the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
+            specifying either of those two args will override :attr:`reduction`.
+            `reduction='mean'` is deprecated in KLDivLoss. Please use `reduction='batchmean'`
+            which aligns with KL math definition. Default: 'batchmean'
 
     Shape:
         - input: :math:`(N, *)` where `*` means, any number of additional
@@ -338,7 +340,7 @@ class KLDivLoss(_Loss):
             the same shape as the input
 
     """
-    def __init__(self, size_average=None, reduce=None, reduction='mean'):
+    def __init__(self, size_average=None, reduce=None, reduction='batchmean'):
         super(KLDivLoss, self).__init__(size_average, reduce, reduction)
 
     def forward(self, input, target):

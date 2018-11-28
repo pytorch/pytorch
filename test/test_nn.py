@@ -4016,12 +4016,12 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(ValueError, 'Expected.*batch_size'):
             F.nll_loss(x, t)
 
-    def test_KLDivLoss_expect_batch_average(self):
+    def test_KLDivLoss_expect_batch_mean(self):
         input_shape = (2, 5)
         log_prob1 = F.log_softmax(torch.randn(input_shape), 1)
         prob2 = F.softmax(torch.randn(input_shape), 1)
 
-        loss = nn.KLDivLoss(reduction='mean')
+        loss = nn.KLDivLoss(reduction='batchmean')
         l = loss(log_prob1, prob2)
 
         loss_none_reduce = nn.KLDivLoss(reduction='sum')(log_prob1, prob2)

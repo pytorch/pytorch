@@ -9,6 +9,7 @@ enum Reduction {
   None,             // Do not reduce
   Mean,             // (Possibly weighted) mean of losses
   Sum,              // Sum losses
+  BatchMean,        // Mean over batches. = Sum / batchsize
   END
 };
 }

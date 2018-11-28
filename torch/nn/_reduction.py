@@ -17,6 +17,8 @@ def get_enum(reduction):
         ret = 1
     elif reduction == 'sum':
         ret = 2
+    elif reduction == 'batchmean':
+        ret = 3
     else:
         ret = -1  # TODO: remove once JIT exceptions support control flow
         raise ValueError(reduction + " is not a valid value for reduction")
