@@ -68,7 +68,7 @@ public:
   }
 
   bool defined() const {
-    return impl_ && impl_->defined();
+    return impl_;
   }
 
   void reset() {

@@ -24,7 +24,6 @@ struct CAFFE2_API UndefinedTensorImpl final : public TensorImpl {
   int64_t dim() const override;
   const Storage& storage() const override;
   int64_t storage_offset() const override;
-  bool defined() const override;
 private:
   UndefinedTensorImpl();
   static UndefinedTensorImpl _singleton;

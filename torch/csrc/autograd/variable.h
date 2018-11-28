@@ -418,9 +418,6 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
     return data_.unsafeGetTensorImpl()->allow_size_or_storage_change();
   }
 
-  bool defined() const override {
-    return data_.unsafeGetTensorImpl()->defined();
-  }
   at::Tensor data_;
  private:
   int64_t get_device_slow() const override;
@@ -620,7 +617,11 @@ inline void Variable::set_grad_accumulator(
 }
 
 inline std::shared_ptr<Function> Variable::try_get_grad_accumulator() const {
-  return get_autograd_meta()->grad_accumulator_.lock();
+  if (get_autograd_meta()) {
+    return get_autograd_meta()->grad_accumulator_.lock();
+  } else {
+    return nullptr;
+  }
 }
 
 inline std::shared_ptr<Function> Variable::grad_accumulator() const {
@@ -720,7 +721,9 @@ inline const std::string& Variable::name() const noexcept {
 }
 
 inline void Variable::set_pyobj(PyObject* pyobj) noexcept {
-  get_autograd_meta()->pyobj_ = pyobj;
+  if (get_autograd_meta()) {
+    get_autograd_meta()->pyobj_ = pyobj;
+  }
 }
 
 inline PyObject* Variable::pyobj() const noexcept {
