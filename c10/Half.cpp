@@ -1,4 +1,5 @@
 #include <c10/Half.h>
+#include <fp16/fp16.h>
 
 #include <iostream>
 
