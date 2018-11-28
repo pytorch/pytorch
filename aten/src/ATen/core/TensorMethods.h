@@ -318,11 +318,11 @@ inline Tensor Tensor::index(TensorList indices) const {
 inline Tensor & Tensor::index_copy_(int64_t dim, const Tensor & index, const Tensor & source) {
     return type().index_copy_(*this, dim, index, source);
 }
-inline Tensor Tensor::index_put(TensorList indices, const Tensor & values) const {
-    return type().index_put(*this, indices, values);
+inline Tensor Tensor::index_put(TensorList indices, const Tensor & values, bool accumulate) const {
+    return type().index_put(*this, indices, values, accumulate);
 }
-inline Tensor & Tensor::index_put_(TensorList indices, const Tensor & values) {
-    return type().index_put_(*this, indices, values);
+inline Tensor & Tensor::index_put_(TensorList indices, const Tensor & values, bool accumulate) {
+    return type().index_put_(*this, indices, values, accumulate);
 }
 inline Tensor Tensor::inverse() const {
     return type().inverse(*this);
@@ -405,13 +405,13 @@ inline Tensor Tensor::mean(ScalarType dtype) const {
 inline Tensor Tensor::mean() const {
     return type().mean(*this);
 }
-inline Tensor Tensor::mean(int64_t dim, bool keepdim, ScalarType dtype) const {
+inline Tensor Tensor::mean(IntList dim, bool keepdim, ScalarType dtype) const {
     return type().mean(*this, dim, keepdim, dtype);
 }
-inline Tensor Tensor::mean(int64_t dim, bool keepdim) const {
+inline Tensor Tensor::mean(IntList dim, bool keepdim) const {
     return type().mean(*this, dim, keepdim);
 }
-inline Tensor Tensor::mean(int64_t dim, ScalarType dtype) const {
+inline Tensor Tensor::mean(IntList dim, ScalarType dtype) const {
     return type().mean(*this, dim, dtype);
 }
 inline std::tuple<Tensor,Tensor> Tensor::median(int64_t dim, bool keepdim) const {

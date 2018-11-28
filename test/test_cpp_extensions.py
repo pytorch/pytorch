@@ -29,7 +29,7 @@ IS_WINDOWS = sys.platform == 'win32'
 
 class TestCppExtension(common.TestCase):
     def setUp(self):
-        if sys.platform != 'win32':
+        if not IS_WINDOWS:
             default_build_root = torch.utils.cpp_extension.get_default_build_root()
             if os.path.exists(default_build_root):
                 shutil.rmtree(default_build_root)
@@ -121,7 +121,7 @@ class TestCppExtension(common.TestCase):
     @unittest.skipIf(not TEST_CUDNN, "CuDNN not found")
     def test_jit_cudnn_extension(self):
         # implementation of CuDNN ReLU
-        if sys.platform == 'win32':
+        if IS_WINDOWS:
             extra_ldflags = ['cudnn.lib']
         else:
             extra_ldflags = ['-lcudnn']
@@ -381,7 +381,6 @@ class TestCppExtension(common.TestCase):
         self.assertEqual(len(net.parameters()), 4)
 
         p = net.named_parameters()
-        self.assertEqual(type(p), dict)
         self.assertEqual(len(p), 4)
         self.assertIn('fc.weight', p)
         self.assertIn('fc.bias', p)
@@ -401,6 +400,21 @@ class TestCppExtension(common.TestCase):
             verbose=True,
             is_python_module=False)
         self.assertEqual(torch.ops.test.func(torch.eye(5)), torch.eye(5))
+
+    @unittest.skipIf(IS_WINDOWS, "Not available on Windows")
+    def test_no_python_abi_suffix_sets_the_correct_library_name(self):
+        # For this test, run_test.py will call `python setup.py install` in the
+        # cpp_extensions/no_python_abi_suffix_test folder, where the
+        # `BuildExtension` class has a `no_python_abi_suffix` option set to
+        # `True`. This *should* mean that on Python 3, the produced shared
+        # library does not have an ABI suffix like
+        # "cpython-37m-x86_64-linux-gnu" before the library suffix, e.g. "so".
+        # On Python 2 there is no ABI suffix anyway.
+        root = os.path.join("cpp_extensions", "no_python_abi_suffix_test", "build")
+        print(list(os.walk(os.path.join("cpp_extensions", "no_python_abi_suffix_test"))))
+        matches = [f for _, _, fs in os.walk(root) for f in fs if f.endswith("so")]
+        self.assertEqual(len(matches), 1, str(matches))
+        self.assertEqual(matches[0], "no_python_abi_suffix_test.so", str(matches))
 
 
 if __name__ == '__main__':

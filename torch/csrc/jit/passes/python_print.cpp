@@ -3,6 +3,7 @@
 #include "torch/csrc/jit/generic_if.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/ir_views.h"
+#include "torch/csrc/jit/export.h"
 #include "torch/csrc/jit/resource_guard.h"
 #include "torch/csrc/jit/script/error_report.h"
 #include "torch/csrc/jit/script/module.h"
@@ -10,6 +11,132 @@
 
 namespace torch {
 namespace jit {
+
+// unix isprint but insensitive to locale
+static bool isPrint(char s) {
+  return s > 0x1f && s < 0x7f;
+}
+
+void printQuotedString(std::ostream& stmt, const std::string& str) {
+  stmt << "\"";
+  for(auto s : str) {
+    switch (s) {
+      case '\\':
+        stmt << "\\\\";
+        break;
+      case '\'':
+        stmt << "\\'";
+        break;
+      case '\"':
+        stmt << "\\\"";
+        break;
+      case '\a':
+        stmt << "\\a";
+        break;
+      case '\b':
+        stmt << "\\b";
+        break;
+      case '\f':
+        stmt << "\\f";
+        break;
+      case '\n':
+        stmt << "\\n";
+        break;
+      case '\r':
+        stmt << "\\r";
+        break;
+      case '\t':
+        stmt << "\\t";
+        break;
+      case '\v':
+        stmt << "\\v";
+        break;
+      default:
+        if (isPrint(s)) {
+          stmt << s;
+        } else {
+          // C++ io has stateful formatting settings. Messing with
+          // them is probably worse than doing this manually.
+          char buf[4] = "000";
+          buf[2] += s % 8; s /= 8;
+          buf[1] += s % 8; s /= 8;
+          buf[0] += s;
+          stmt << "\\" << buf;
+        }
+        break;
+    }
+  }
+  stmt << "\"";
+}
+
+static bool isValidIdentifierChar(char c, size_t pos) {
+  return islower(c) || isupper(c) || c == '_' ||  (pos > 0 && isdigit(c));
+}
+
+static bool isValidIdentifier(const std::string & name) {
+  if (name.size() == 0)
+    return false;
+  for (size_t i = 0; i < name.size(); ++i) {
+    if (!isValidIdentifierChar(name[i], i))
+      return false;
+  }
+  return true;
+}
+
+// handles names of the form, e.g., self.a.b
+// if a field is not a valid identifier, then it will print as, e.g.
+// getattr(self, "0").b
+struct QualifiedName;
+using QualifiedNamePtr = c10::intrusive_ptr<QualifiedName>;
+struct QualifiedName : c10::intrusive_ptr_target {
+  QualifiedName(QualifiedNamePtr prefix, std::string name)
+  : prefix_(std::move(prefix)), name_(std::move(name)) {}
+  QualifiedNamePtr prefix_;
+  std::string name_;
+  static QualifiedNamePtr create(QualifiedNamePtr prefix, std::string name) {
+    return c10::make_intrusive<QualifiedName>(std::move(prefix), std::move(name));
+  }
+  static QualifiedNamePtr create(std::string name) {
+    return c10::make_intrusive<QualifiedName>(QualifiedNamePtr(), std::move(name));
+  }
+  std::string str() const {
+    std::stringstream ss;
+    emit(ss);
+    return ss.str();
+  }
+private:
+  void emit(std::ostream& out) const {
+    if (isValidIdentifier(name_)) {
+      if (prefix_) {
+        prefix_->emit(out);
+        out << ".";
+      }
+      out << name_;
+    } else {
+      JIT_ASSERT(prefix_);
+      out << "getattr(";
+      prefix_->emit(out);
+      out << ", ";
+      printQuotedString(out, name_);
+      out << ")";
+    }
+  }
+};
+
+void createTensorToParameterNameMap(
+    const script::Module& module,
+    QualifiedNamePtr prefix,
+    std::unordered_map<at::Tensor*, QualifiedNamePtr>& result) {
+
+  for (const auto& elem : module.get_parameters()) {
+    const script::NamedParameter& param = elem.value();
+    result[param.slot()] = QualifiedName::create(prefix, param.name);
+  }
+  for (const auto& elem : module.get_modules()) {
+    createTensorToParameterNameMap(
+        *elem->module, QualifiedName::create(prefix, elem.key()), result);
+  }
+}
 
   // some names are valid identifiers but off limits because
   // they are keywords or namespaces used in the output
@@ -20,6 +147,7 @@ namespace jit {
     "CONSTANTS",
     "fork",
     "attribute",
+    "getattr",
     "_", // avoid the confusing unnamed _
     "inf",
     "nan",
@@ -495,63 +623,6 @@ struct PythonPrintPass {
     }
   }
 
-  // unix isprint but insensitive to locale
-  static bool isPrint(char s) {
-    return s > 0x1f && s < 0x7f;
-  }
-
-  void printQuotedString(std::ostream& stmt, const std::string& str) {
-    stmt << "\"";
-    for(auto s : str) {
-      switch (s) {
-        case '\\':
-          stmt << "\\\\";
-          break;
-        case '\'':
-          stmt << "\\'";
-          break;
-        case '\"':
-          stmt << "\\\"";
-          break;
-        case '\a':
-          stmt << "\\a";
-          break;
-        case '\b':
-          stmt << "\\b";
-          break;
-        case '\f':
-          stmt << "\\f";
-          break;
-        case '\n':
-          stmt << "\\n";
-          break;
-        case '\r':
-          stmt << "\\r";
-          break;
-        case '\t':
-          stmt << "\\t";
-          break;
-        case '\v':
-          stmt << "\\v";
-          break;
-        default:
-          if (isPrint(s)) {
-            stmt << s;
-          } else {
-            // C++ io has stateful formatting settings. Messing with
-            // them is probably worse than doing this manually.
-            char buf[4] = "000";
-            buf[2] += s % 8; s /= 8;
-            buf[1] += s % 8; s /= 8;
-            buf[0] += s;
-            stmt << "\\" << buf;
-          }
-          break;
-      }
-    }
-    stmt << "\"";
-  }
-
   void printConstant(std::ostream& stmt, IValue v) {
     if(v.isTensor()) {
       stmt << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
@@ -687,7 +758,7 @@ struct PythonPrintPass {
         auto name = genMethodName("__forked_function");
         std::shared_ptr<Graph> graph = node->g(attr::Subgraph);
         worklist.emplace_back([graph, name, this] {
-          printOneFunction(*graph, name);
+          printFunctionDefinition(*graph, name);
         });
         // and we put a call to fork which invokes that function.
         stmt << "fork(self." << name;
@@ -743,7 +814,12 @@ struct PythonPrintPass {
     }
     printConstant(stmt, value);
   }
-  void printOneFunction(Graph& graph, const std::string& name, const std::vector<c10::optional<IValue>> defaults = {}) {
+  void printFunctionDefinition(
+      Graph& graph,
+      const std::string& name,
+      const std::vector<c10::optional<IValue>> defaults = {},
+      const std::vector<std::string>& param_names = {}) {
+
     used_names_.clear(); // each graph can reuse local names
 
     // we always print constants at the top of the function, in the order
@@ -753,10 +829,19 @@ struct PythonPrintPass {
 
     // current graph is used to de-dup names within a single graph
     scanBlock(graph.block());
-    assignValuesToTheirUniqueNames(graph.inputs());
+
+    // last param_names.size() arguments to the graph are parameters and not
+    // actual inputs, we will print these as, e.g. self.foo.bar
+    // while we print the true_inputs out as parameters
+    auto true_inputs = graph.inputs().slice(0, graph.inputs().size() - param_names.size());
+    auto param_names_it = param_names.begin();
+    for(auto param : graph.inputs().slice(true_inputs.size())) {
+      assignValue(param, *param_names_it++);
+    }
+    assignValuesToTheirUniqueNames(true_inputs);
     out << "def " << name << "(self";
     auto defaults_offset = defaults.begin();
-    for (auto input : graph.inputs()) {
+    for (auto input : true_inputs) {
       out << ",\n    " << useOf(input) << ": " << input->type()->python_str();
       if (defaults_offset != defaults.end()) {
         const c10::optional<IValue>& def = *defaults_offset++;
@@ -766,6 +851,10 @@ struct PythonPrintPass {
         }
       }
     }
+
+    // have we use all the provided defaults?
+    JIT_ASSERT(defaults_offset == defaults.end());
+
     out << ") -> " << resultType(graph)->python_str() << ":\n";
     {
       auto guard = WithIndented();
@@ -798,8 +887,12 @@ struct PythonPrintPass {
     }
   }
 
-  void printFunction(Graph& graph, const std::string& name, const std::vector<c10::optional<IValue>>& defaults = {}) {
-    printOneFunction(graph, name, defaults);
+  void printFunction(
+      Graph& graph,
+      const std::string& name,
+      const std::vector<c10::optional<IValue>>& defaults = {},
+      const std::vector<std::string>& param_names = {}) {
+    printFunctionDefinition(graph, name, defaults, param_names);
     while(!worklist.empty()) {
       out << "\n\n";
       auto work = worklist.back();
@@ -808,12 +901,36 @@ struct PythonPrintPass {
     }
   }
   void printMethod(script::Method& method) {
+    std::unordered_map<at::Tensor*, QualifiedNamePtr> parameter_names;;
+    createTensorToParameterNameMap(method.owner(), QualifiedName::create("self"),  parameter_names);
+    printMethod(method, parameter_names);
+  }
+  void printMethod(
+      script::Method& method,
+      const std::unordered_map<at::Tensor*, QualifiedNamePtr>&
+          parameter_names) {
+    std::vector<std::string> param_names = fmap(
+        method.params(),
+        [&](at::Tensor* slot) { return parameter_names.at(slot)->str(); });
     const std::string& name = method.name();
     Graph& graph = *method.graph();
     auto defaults = fmap(method.getSchema().arguments(), [](const Argument& arg) {
       return arg.default_value();
     });
-    printFunction(graph, name, defaults);
+    printFunction(graph, name, defaults, param_names);
+  }
+  void printModule(script::Module& module) {
+    std::unordered_map<at::Tensor*, QualifiedNamePtr> parameter_names;;
+    createTensorToParameterNameMap(module, QualifiedName::create("self"),  parameter_names);
+    for(auto& method : module.get_methods()) {
+      const std::string& name = method.value()->name();
+      // we skip __forked_functions because they actually get inlined into their
+      // callers, exporting them again will lead to more code generated on each export
+      if (name.find("__forked_function") == 0) {
+        continue;
+      }
+      printMethod(*method.value(), parameter_names);
+    }
   }
 };
 
@@ -825,6 +942,12 @@ TORCH_API std::vector<at::Tensor> PythonPrint(std::ostream& out, Graph& graph, b
 TORCH_API std::vector<at::Tensor> PythonPrint(std::ostream& out, script::Method& method, bool enforce_importable) {
   PythonPrintPass pp(out, enforce_importable);
   pp.printMethod(method);
+  return pp.tensor_constants;
+}
+
+TORCH_API std::vector<at::Tensor> PythonPrint(std::ostream& out, script::Module& module, bool enforce_importable) {
+  PythonPrintPass pp(out, enforce_importable);
+  pp.printModule(module);
   return pp.tensor_constants;
 }
 
