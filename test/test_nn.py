@@ -8321,7 +8321,7 @@ new_module_tests = [
     ),
     dict(
         module_name='LPPool2d',
-        constructor_args=(2, (2, 2), 2),
+        constructor_args=(2, 2, 2),
         input_size=(1, 3, 7, 7),
     ),
     dict(
@@ -9005,7 +9005,7 @@ new_module_tests = [
     ),
     dict(
         module_name='Threshold',
-        constructor_args=(2, 1),
+        constructor_args=(2., 1.),
         input_size=(),
         check_inplace=True,
         desc='threshold_value_scalar'
