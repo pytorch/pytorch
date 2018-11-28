@@ -35,6 +35,13 @@ struct NoneValue : SugaredValue {
   }
 };
 
+// matched against for special handling of getattr expressions
+struct GetAttrValue : SugaredValue {
+  std::string kind() const override {
+    return "getattr";
+  }
+};
+
 struct PrintValue : public SugaredValue {
   std::string kind() const override {
     return "print";
@@ -348,6 +355,7 @@ struct Environment {
         {"float", std::make_shared<CastValue>(FloatType::get())},
         {"int", std::make_shared<CastValue>(IntType::get())},
         {"bool", std::make_shared<CastValue>(BoolType::get())},
+        {"getattr", std::make_shared<GetAttrValue>()},
         // todo(zach): remove when we can correctly export torch.full via ONNX
         // or we have implicit conversion that can convert numbers to tensors
         {"_to_tensor", std::make_shared<CastValue>(DynamicType::get()) },
@@ -2010,6 +2018,20 @@ private:
             << " but found " << expr->type()->python_str();
       }
       return std::make_shared<SimpleValue>(expr);
+    } else if(auto getattr = dynamic_cast<GetAttrValue*>(sv.get())) {
+      if (apply.attributes().size() > 0) {
+        throw ErrorReport(loc) << "getattr takes no keyword arguments";
+      }
+      if (apply.inputs().size() != 2) {
+        throw ErrorReport(loc) << "getattr expects 2 inputs";
+      }
+      auto obj = emitSugaredExpr(apply.inputs()[0], 1);
+      auto selector = apply.inputs()[1];
+      if (selector.kind() != TK_STRINGLITERAL) {
+        throw ErrorReport(loc) << "getattr's second argument must be a string literal";
+      }
+      const std::string& name = StringLiteral(selector).text();
+      return obj->attr(apply.range(), method, name);
     } else {
       auto inputs = getNamedValues(apply.inputs(), true);
       auto attributes = emitAttributes(apply.attributes());
