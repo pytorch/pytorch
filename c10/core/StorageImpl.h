@@ -8,7 +8,7 @@
 
 namespace c10 {
 
-struct C10_API StorageImpl : public c10::intrusive_ptr_target {
+struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
  public:
   StorageImpl(
       caffe2::TypeMeta data_type,
@@ -52,7 +52,6 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   StorageImpl& operator=(const StorageImpl&) = delete;
   StorageImpl() = delete;
   StorageImpl(StorageImpl&& other) = default;
-  StorageImpl(StorageImpl&) = delete;
   StorageImpl(const StorageImpl&) = delete;
   ~StorageImpl() = default;
 
