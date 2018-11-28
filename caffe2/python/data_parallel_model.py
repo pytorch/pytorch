@@ -971,7 +971,7 @@ def GetLearningRateBlobNames(model):
     if model._optimizer is not None:
         if model._device_type == caffe2_pb2.CPU:
             return [model._optimizer.get_cpu_blob_name('lr')]
-        elif model._device_type == workspace.GpuDeviceType:
+        elif core.IsGPUDeviceType(model._device_type):
             return [model._optimizer.get_gpu_blob_name('lr', gpu, '')
                     for gpu in model._devices]
         else:
@@ -1595,8 +1595,8 @@ def _IsGPUBlob(model, blob_name):
             model._device_prefix, model._devices[0], blob_name
         )
         if blob_name not in model._blob_to_device:
-            return model._device_type == workspace.GpuDeviceType
-        return model._blob_to_device[blob_name].device_type == workspace.GpuDeviceType
+            return core.IsGPUDeviceType(model._device_type)
+        return core.IsGPUDeviceType(model._blob_to_device[blob_name].device_type)
 
 
 def _GroupByDevice(model, devices, params, non_data_params):
