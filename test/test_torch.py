@@ -9410,7 +9410,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
     def test_is_created_from_data_or_detach(self):
         def do_test(t):
-            a = torch.tensor([[1], [2]])
             with self.assertRaisesRegex(
                     RuntimeError,
                     "set_sizes_contiguous is not allowed on Tensor created from .data or .detach()"):
