@@ -41,8 +41,8 @@ MPI supports cuda only if the implementation used to build PyTorch supports it.
 +------------+-----+-----+-----+-----+-----+-----+
 
 
-Backends that comes with PyTorch
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Backends that come with PyTorch
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 PyTorch distributed currently only supports Linux. By default, two backends: NCCL and Gloo
 will be built and included in PyTorch distributed, when CUDA is available. MPI is an
@@ -53,7 +53,7 @@ building PyTorch on a host that has MPI installed.)
 Which backends to use?
 ^^^^^^^^^^^^^^^^^^^^^^
 
-During the past, we were often being asked from many users on "which backend should I use?".
+In the past, we were often being asked from many users on "which backend should I use?".
 
 - Rule of thumb
 
@@ -405,7 +405,7 @@ Launch utility
 --------------
 
 The `torch.distributed` package also provides a launch utility in
-`torch.distributed.launch`. This helper utility is helpful to launch
+`torch.distributed.launch`. This helper utility can be used to launch
 multiple processes per node for distributed training. This utility also supports
 both python2 and python3.
 
@@ -417,11 +417,11 @@ Spawn utility
 -------------
 
 The :doc:`multiprocessing` package also provides a spawn utility in
-:func:`torch.multiprocessing.spawn`. This helper utility is helpful to spawn
+:func:`torch.multiprocessing.spawn`. This helper utility can be used to spawn
 multiple processes per node by passing in the function that needs to run from
 multiple processes, and can be used for multiprocess distributed training as well.
 
-For references on how to use it, please refer to `PyToch example - imagenet
+For references on how to use it, please refer to `PyToch example - ImageNet
 implementation <https://github.com/pytorch/examples/tree/master/imagenet>`_
 
 Note that this utility only supports python 3.4 or higher.
