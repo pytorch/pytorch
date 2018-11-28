@@ -67,7 +67,7 @@ Tensor kl_div(const Tensor& input, const Tensor& target, int64_t reduction) {
 
   // kl_div is special as it's default mean should be along batch dimension.
   if (reduction == Reduction::Mean && output.ndimension() != 0) {
-    return output.mean(/*dim=*/0, /*keepdim=*/false);
+    return output.sum() / output.size(/*dim=*/0);
   }
   return apply_loss_reduction(output, reduction);
 }

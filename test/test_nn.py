@@ -472,14 +472,8 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
             # dtype can be None, so set precision in this way instead of a precision map
             test_case.assertEqual(cpu_output, gpu_output, 1e-1 if dtype == torch.half else 4e-4)
 
-            cpu_gradOutput = torch.ones_like(cpu_output)
-            gpu_gradOutput = torch.ones_like(gpu_output)
-            cpu_gradInput = test_case._backward_criterion(cpu_module, cpu_input, cpu_target,
-                                                          gradOutput=cpu_gradOutput,
-                                                          extra_args=extra_args)
-            gpu_gradInput = test_case._backward_criterion(gpu_module, gpu_input, gpu_target,
-                                                          gradOutput=gpu_gradOutput,
-                                                          extra_args=extra_args)
+            cpu_gradInput = test_case._backward_criterion(cpu_module, cpu_input, cpu_target, extra_args=extra_args)
+            gpu_gradInput = test_case._backward_criterion(gpu_module, gpu_input, gpu_target, extra_args=extra_args)
             test_case.assertEqual(cpu_gradInput, gpu_gradInput, 1e-1 if dtype == torch.half else 4e-4)
         except NotImplementedError:
             pass
@@ -4030,8 +4024,8 @@ class TestNN(NNTestCase):
         loss = nn.KLDivLoss(reduction='mean')
         l = loss(log_prob1, prob2)
 
-        loss_none_reduce = nn.KLDivLoss(reduction='none')(log_prob1, prob2)
-        expected = loss_none_reduce.mean(0)
+        loss_none_reduce = nn.KLDivLoss(reduction='sum')(log_prob1, prob2)
+        expected = loss_none_reduce / input_shape[0]
 
         self.assertEqual(l, expected)
 
