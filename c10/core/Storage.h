@@ -1,10 +1,10 @@
 #pragma once
 
-#include <ATen/core/StorageImpl.h>
+#include <c10/core/StorageImpl.h>
 
-namespace at {
+namespace c10 {
 
-struct CAFFE2_API Storage {
+struct C10_API Storage {
  public:
   Storage() {}
   Storage(c10::intrusive_ptr<StorageImpl> ptr) : storage_impl_(std::move(ptr)) {}
@@ -180,4 +180,4 @@ struct CAFFE2_API Storage {
   c10::intrusive_ptr<StorageImpl> storage_impl_;
 };
 
-} // namespace at
+} // namespace c10

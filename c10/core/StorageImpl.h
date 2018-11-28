@@ -1,16 +1,18 @@
 #pragma once
 
-#include <ATen/core/Allocator.h>
-#include <ATen/core/ScalarType.h>
-#include <ATen/core/ScalarTypeUtils.h>
+#include <c10/core/Allocator.h>
+#include <c10/core/ScalarType.h>
+#include <c10/core/ScalarTypeUtils.h>
 
 #include <c10/util/intrusive_ptr.h>
 
 namespace at {
-
 struct Type;
+}
 
-struct CAFFE2_API StorageImpl : public c10::intrusive_ptr_target {
+namespace c10 {
+
+struct C10_API StorageImpl : public c10::intrusive_ptr_target {
  public:
   StorageImpl(
       caffe2::TypeMeta data_type,
@@ -72,7 +74,7 @@ struct CAFFE2_API StorageImpl : public c10::intrusive_ptr_target {
   inline T* data() const {
     // TODO: This is bad: it means storage.data<T>() calls only work on
     // T that are valid ScalarType.  FIXME!
-    auto data_type_T = at::scalarTypeToDataType(at::CTypeToScalarType<T>::to());
+    auto data_type_T = at::scalarTypeToDataType(c10::CTypeToScalarType<T>::to());
     if (dtype().id() != data_type_T) {
       AT_ERROR(
           "Attempt to access StorageImpl having data type ",
@@ -96,7 +98,7 @@ struct CAFFE2_API StorageImpl : public c10::intrusive_ptr_target {
     return data_type_.itemsize();
   }
 
-  Type& type();
+  at::Type& type();
 
   size_t capacity() const {
     return numel_ * itemsize();
@@ -217,9 +219,9 @@ struct CAFFE2_API StorageImpl : public c10::intrusive_ptr_target {
 
  private:
   caffe2::TypeMeta data_type_;
-  at::DataPtr data_ptr_;
+  DataPtr data_ptr_;
   int64_t numel_;
   bool resizable_;
-  at::Allocator* allocator_;
+  Allocator* allocator_;
 };
-} // namespace at
+} // namespace c10

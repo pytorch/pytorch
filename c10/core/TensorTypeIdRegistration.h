@@ -9,8 +9,8 @@
  * Both must be in the same namespace.
  */
 
-#include "c10/macros/Macros.h"
-#include "c10/util/TensorTypeId.h"
+#include <c10/macros/Macros.h>
+#include <c10/core/TensorTypeId.h>
 
 #include <atomic>
 #include <mutex>
@@ -105,7 +105,8 @@ C10_DECLARE_TENSOR_TYPE(MKLDNNTensorId); // Caffe2 only
 C10_DECLARE_TENSOR_TYPE(OpenGLTensorId); // Caffe2 only
 C10_DECLARE_TENSOR_TYPE(OpenCLTensorId); // Caffe2 only
 C10_DECLARE_TENSOR_TYPE(IDEEPTensorId); // Caffe2 only
-C10_DECLARE_TENSOR_TYPE(HIPTensorId); // Caffe2 only
+C10_DECLARE_TENSOR_TYPE(HIPTensorId); // PyTorch/Caffe2 supported
+C10_DECLARE_TENSOR_TYPE(SparseHIPTensorId); // PyTorch only
 
 } // namespace c10
 

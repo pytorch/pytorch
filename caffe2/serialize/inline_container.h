@@ -7,7 +7,7 @@
 #include <ostream>
 #include <fstream>
 
-#include <ATen/core/Allocator.h>
+#include <c10/core/Allocator.h>
 #include <ATen/core/Backend.h>
 
 #include "caffe2/core/logging.h"

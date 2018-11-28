@@ -4,10 +4,10 @@
 #include <memory>
 
 #include <c10/Device.h>
-#include <ATen/core/UniqueVoidPtr.h>
+#include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/Exception.h>
 
-namespace at {
+namespace c10 {
 
 // A DataPtr is a unique pointer (with an attached deleter and some
 // context for the deleter) to some memory, which also records what
@@ -18,7 +18,7 @@ namespace at {
 //
 class DataPtr {
  private:
-  detail::UniqueVoidPtr ptr_;
+  c10::detail::UniqueVoidPtr ptr_;
   Device device_;
 
  public:
@@ -122,7 +122,7 @@ struct Allocator {
 };
 
 // Question: is this still needed?
-struct CAFFE2_API InefficientStdFunctionContext {
+struct C10_API InefficientStdFunctionContext {
   std::unique_ptr<void, std::function<void(void*)>> ptr_;
   InefficientStdFunctionContext(
       std::unique_ptr<void, std::function<void(void*)>>&& ptr)
@@ -133,7 +133,7 @@ struct CAFFE2_API InefficientStdFunctionContext {
       Device device);
 };
 
-} // namespace at
+} // namespace c10
 
 namespace caffe2 {
 
@@ -146,8 +146,8 @@ namespace caffe2 {
  *  Also note that this is not thraed-safe, and we assume this function will
  *  only be called during initialization.
  */
-CAFFE2_API void SetAllocator(at::DeviceType t, at::Allocator* alloc);
-CAFFE2_API at::Allocator* GetAllocator(const at::DeviceType& t);
+C10_API void SetAllocator(at::DeviceType t, at::Allocator* alloc);
+C10_API at::Allocator* GetAllocator(const at::DeviceType& t);
 
 template <at::DeviceType t>
 struct AllocatorRegisterer {
