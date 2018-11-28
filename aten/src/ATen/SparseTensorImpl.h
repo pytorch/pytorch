@@ -189,6 +189,11 @@ public:
   // make it happen
   void set_indices_and_values_unsafe(const Tensor& indices, const Tensor& values);
 
+  // NOTE: `shallow_copy_and_detach()` does not copy the AutogradMeta pointer
+  // because it requires unique ownership.
+  // NOTE: We don't set `is_created_from_data_or_detach_` to true here, because there are call sites
+  // to this function that need to change the shallow copy's size or storage afterwards, and setting
+  // `is_created_from_data_or_detach_` to true would prevent that from happening.
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const override {
     auto impl = c10::make_intrusive<SparseTensorImpl>(type_id(), dtype());
     // TensorImpl general fields

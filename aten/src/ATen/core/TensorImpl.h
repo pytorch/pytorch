@@ -873,14 +873,14 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_variable() const { return is_variable_; };
 
   /**
-   * Set whether a tensor allows size or storage changes.
+   * Set whether a tensor is created from Python `tensor.data` or Python/C++ `tensor.detach()`.
    */
   virtual void set_is_created_from_data_or_detach(bool value) {
     is_created_from_data_or_detach_ = value;
   }
 
   /**
-   * True if a tensor allows size or storage changes.
+   * True if a tensor is created from Python `tensor.data` or Python/C++ `tensor.detach()`.
    */
   virtual bool is_created_from_data_or_detach() const {
     return is_created_from_data_or_detach_;
@@ -902,6 +902,9 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
 
   // NOTE: `shallow_copy_and_detach()` does not copy the AutogradMeta pointer
   // because it requires unique ownership.
+  // NOTE: We don't set `is_created_from_data_or_detach_` to true here, because there are call sites
+  // to this function that need to change the shallow copy's size or storage afterwards, and setting
+  // `is_created_from_data_or_detach_` to true would prevent that from happening.
   virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const {
     auto impl = c10::make_intrusive<TensorImpl>(Storage(storage()), type_id(), is_variable());
     impl->set_sizes_and_strides(sizes(), strides());
@@ -1508,7 +1511,12 @@ protected:
   bool is_contiguous_ = true;
   bool is_variable_ = false;
   bool is_wrapped_number_ = false;
-  bool is_created_from_data_or_detach_ = true;
+
+  // We need this field because we want to prevent users from changing size or storage
+  // of a derived tensor (i.e. tensors created from Python `tensor.data` or Python/C++ `tensor.detach()`),
+  // because those changes will not update the original tensor.
+  bool is_created_from_data_or_detach_ = false;
+
   // we decide to keep reserved_ and it will
   // live in Tensor after the split
   // The logic is that if Extend() or ReserveSpace() were ever called,

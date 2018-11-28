@@ -186,9 +186,9 @@ struct TORCH_API Variable : public at::Tensor {
   /// Returns a copy of this `Variable` that is detached from its autograd graph
   /// and has a blank version. This method is OK to call if the `Variable` is a
   /// view.
-  /// NOTE: This will set `is_created_from_data_or_detach_` to true, because changing
-  /// size or storage of a detached Variable will not update the original Variable
-  /// in the near future when VariableImpl and TensorImpl are merged.
+  /// NOTE: This will set `is_created_from_data_or_detach_` to true, to prevent users from
+  /// changing size or storage of a detached Variable, because those changes will not update
+  /// the original Variable.
   Variable detach() const;
 
   /// Like `detach()`, but removes this `Variable` in-place. This method may
@@ -418,7 +418,10 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
     return data_.unsafeGetTensorImpl()->is_created_from_data_or_detach();
   }
 
+  /// The underlying data tensor for this Variable.
+  /// This field will be removed once VariableImpl and TensorImpl are merged.
   at::Tensor data_;
+
  private:
   int64_t get_device_slow() const override;
 };
