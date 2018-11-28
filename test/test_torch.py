@@ -6822,6 +6822,7 @@ class _TestTorchMixin(object):
             self.assertEqual(x, x.roll(0, 1).roll(0, -1))
             self.assertEqual(x, x.roll(1, x.size(1)))
             self.assertEqual(x, x.roll(1))
+            self.assertEqual(x, x.roll((1, 1), (3, 1)))
 
             # unbind
             self.assertEqual((), x.unbind(0))
@@ -7404,6 +7405,10 @@ class _TestTorchMixin(object):
             expected = torch.tensor([8, 1, 2, 3, 4, 5, 6, 7], device=device)
             self.assertEqual(single_roll, expected, "{} did not equal expected result".format(single_roll))
 
+            roll_backwards = numbers.roll(-2, 0)
+            expected = torch.tensor([3, 4, 5, 6, 7, 8, 1, 2], device=device)
+            self.assertEqual(roll_backwards, expected, "{} did not equal expected result".format(roll_backwards))
+
             data = numbers.view(2, 2, 2)
             rolled = data.roll(1, 0)
             expected = torch.tensor([5, 6, 7, 8, 1, 2, 3, 4], device=device).view(2, 2, 2)
@@ -7430,6 +7435,18 @@ class _TestTorchMixin(object):
             expected = numbers.roll(1, 0).view(2, 4)
             self.assertEqual(expected, data.roll(1), "roll with no dims should flatten and roll.")
             self.assertEqual(expected, data.roll(1, dims=None), "roll with no dims should flatten and roll.")
+
+            # test roll over multiple dimensions
+            expected = torch.tensor([[7, 8, 5, 6], [3, 4, 1, 2]], device=device)
+            double_rolled = data.roll(shifts=(2, -1), dims=(1, 0))
+            self.assertEqual(double_rolled, expected,
+                             "should be able to roll over two dimensions, got {}".format(double_rolled))
+
+            self.assertRaisesRegex(RuntimeError, "required", lambda: data.roll(shifts=(), dims=()))
+            self.assertRaisesRegex(RuntimeError, "required", lambda: data.roll(shifts=(), dims=1))
+            # shifts/dims should align
+            self.assertRaisesRegex(RuntimeError, "align", lambda: data.roll(shifts=(1, 2), dims=(1,)))
+            self.assertRaisesRegex(RuntimeError, "align", lambda: data.roll(shifts=(1,), dims=(1, 2)))
 
     def test_reversed(self):
         val = torch.arange(0, 10)
