@@ -398,6 +398,16 @@ class Module(object):
             :class:`torch.utils.hooks.RemovableHandle`:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
+
+        .. warning ::
+
+            The current implementation will not have the presented behavior
+            for complex :class:`Module` that perform many operations.
+            In some failure cases, :attr:`grad_input` and :attr:`grad_output` will only
+            contain the gradients for a subset of the inputs and outputs.
+            For such :class:`Module`, you should use :func:`torch.Tensor.register_hook`
+            directly on a specific input or output to get the required gradients.
+
         """
         handle = hooks.RemovableHandle(self._backward_hooks)
         self._backward_hooks[handle.id] = hook
