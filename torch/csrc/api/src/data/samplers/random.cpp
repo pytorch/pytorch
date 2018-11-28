@@ -15,7 +15,7 @@ RandomSampler::RandomSampler(int64_t size, Dtype index_dtype)
 void RandomSampler::reset(optional<size_t> new_size) {
   // This allocates a new chunk of memory every time (just FYI). It should be
   // amortized over the entire epoch hopefully.
-  auto size = new_size.value_or(static_cast<size_t>(indices_.numel()));
+  const auto size = new_size.value_or(static_cast<size_t>(indices_.numel()));
   indices_ = torch::randperm(size, indices_.options());
   index_ = 0;
 }
