@@ -233,6 +233,7 @@ PyObject *THPModule_addDocStr(PyObject *_unused, PyObject *args)
     }
     // This field is not const for python < 3.7 yet the content is
     // never modified.
+    //NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
     m->d_getset->doc = const_cast<char *>(doc_str);
   } else {
     return PyErr_Format(PyExc_TypeError,
