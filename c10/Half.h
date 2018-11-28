@@ -11,7 +11,6 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/C++17.h>
-#include <fp16/fp16.h>
 
 #include <cmath>
 #include <complex>
