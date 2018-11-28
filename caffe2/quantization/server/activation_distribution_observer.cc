@@ -40,12 +40,12 @@ void FindMinMax(const T* data, float* min, float* max, int len) {
   for (int i = 0; i < len; ++i) {
     temp[i] = data[i];
   }
-  dnnlowp::FindMinMax(temp.data(), min, max, len);
+  fbgemm::FindMinMax(temp.data(), min, max, len);
 }
 
 template <>
 void FindMinMax<float>(const float* data, float* min, float* max, int len) {
-  dnnlowp::FindMinMax(data, min, max, len);
+  fbgemm::FindMinMax(data, min, max, len);
 }
 
 void OutputMinMaxObserver::Stop() {

@@ -5,7 +5,7 @@
 
 
 #ifdef __cplusplus
-#include <c10/cuda/CUDAStream.h>
+#include <ATen/cuda/CUDAStream.h>
 #endif
 
 //

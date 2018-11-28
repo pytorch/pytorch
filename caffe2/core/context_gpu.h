@@ -20,9 +20,6 @@
 #include "caffe2/core/common_cudnn.h"
 #endif // CAFFE2_USE_CUDNN
 
-#include <c10/Device.h>
-#include <c10/Stream.h>
-
 namespace caffe2 {
 
 enum class CudaMemoryPoolType {
@@ -52,7 +49,7 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
 
  private:
   ThreadLocalCUDAObjects() {
-    for (DeviceIndex i = 0; i < CAFFE2_COMPILE_TIME_MAX_GPUS; ++i) {
+    for (int i = 0; i < CAFFE2_COMPILE_TIME_MAX_GPUS; ++i) {
       cuda_streams_[i] = vector<cudaStream_t>();
       cublas_handles_[i] = vector<cublasHandle_t>();
 #ifdef CAFFE2_USE_CUDNN
@@ -66,7 +63,7 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
   // This is the new API we're trying to migrate use cases to and get rid of
   // explicit stream id passing. For now it's invoked in
   // CUDAContext::SwitchToDevice
-  void SetCurrentStreamId(DeviceIndex gpu, StreamId stream_id) {
+  void SetCurrentStreamId(int gpu, int stream_id) {
     // TODO: use current device id from thread local instead of passing gpu in
     current_stream_id_[gpu] = stream_id;
   }
@@ -74,13 +71,13 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
   // Uses the logical stream id from the thread local to pick the stream
   // We're going to migrate all usages to this case API instead of passing the
   // stream id directly
-  cudaStream_t GetStream(DeviceIndex gpu) {
+  cudaStream_t GetStream(int gpu) {
     return GetStream(gpu, current_stream_id_[gpu]);
   }
 
-  cudaStream_t GetStream(DeviceIndex gpu, StreamId stream_id) {
+  cudaStream_t GetStream(int gpu, int stream_id) {
     vector<cudaStream_t>& gpu_streams = cuda_streams_[gpu];
-    if (gpu_streams.size() <= static_cast<size_t>(stream_id)) {
+    if (gpu_streams.size() <= (unsigned)stream_id) {
       gpu_streams.resize(stream_id + 1, nullptr);
     }
     if (!gpu_streams[stream_id]) {
@@ -94,11 +91,11 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
   // Uses the logical stream id from the thread local to pick the stream
   // We're going to migrate all usages to this case API instead of passing the
   // stream id directly
-  cublasHandle_t GetHandle(DeviceIndex gpu) {
+  cublasHandle_t GetHandle(int gpu) {
     return GetHandle(gpu, current_stream_id_[gpu]);
   }
 
-  cublasHandle_t GetHandle(DeviceIndex gpu, StreamId stream_id) {
+  cublasHandle_t GetHandle(int gpu, int stream_id) {
     DeviceGuard guard(gpu);
     vector<cublasHandle_t>& gpu_handles = cublas_handles_[gpu];
     if (gpu_handles.size() <= (unsigned)stream_id) {
@@ -121,11 +118,11 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
   // Uses the logical stream id from the thread local to pick the stream
   // We're going to migrate all usages to this case API instead of passing the
   // stream id directly
-  cudnnHandle_t GetCudnnHandle(DeviceIndex gpu) {
+  cudnnHandle_t GetCudnnHandle(int gpu) {
     return GetCudnnHandle(gpu, current_stream_id_[gpu]);
   }
 
-  cudnnHandle_t GetCudnnHandle(DeviceIndex gpu, StreamId stream_id) {
+  cudnnHandle_t GetCudnnHandle(int gpu, int stream_id) {
     DeviceGuard guard(gpu);
     vector<cudnnHandle_t>& gpu_handles = cudnn_handles_[gpu];
     if (gpu_handles.size() <= (unsigned)stream_id) {
@@ -173,9 +170,9 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
 class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
  public:
   // The default cuda context constructor.
-  explicit CUDAContext(DeviceIndex gpu_id = -1);
+  explicit CUDAContext(const int gpu_id = -1);
   explicit CUDAContext(const DeviceOption& option);
-  explicit CUDAContext(Device device)
+  explicit CUDAContext(const at::Device& device)
       : CUDAContext(DeviceToOption(device)) {}
 
   ~CUDAContext() override {
@@ -191,7 +188,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
     FinishDeviceComputation();
   }
 
-  inline void SwitchToDevice(StreamId stream_id) override {
+  inline void SwitchToDevice(int stream_id) override {
     getCudaObjects().SetCurrentStreamId(gpu_id_, stream_id);
     CaffeCudaSetDevice(gpu_id_);
   }
@@ -226,7 +223,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
     return getCudaObjects().GetStream(gpu_id_);
   }
 
-  static cudaStream_t cuda_stream(DeviceIndex gpu_id, StreamId stream_id) {
+  static cudaStream_t cuda_stream(int gpu_id, int stream_id) {
     return getCudaObjects().GetStream(gpu_id, stream_id);
   }
 
@@ -312,7 +309,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
     return true;
   }
 
-  static bool IsStreamFree(const DeviceOption& option, StreamId stream_id) {
+  static bool IsStreamFree(const DeviceOption& option, int stream_id) {
     auto stream = CUDAContext::cuda_stream(option.device_id(), stream_id);
     return cudaStreamQuery(stream) == cudaSuccess;
   }

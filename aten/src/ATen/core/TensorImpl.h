@@ -2,23 +2,20 @@
 
 #include <atomic>
 #include <memory>
+#include <numeric>
 
 #include <ATen/core/Backend.h>
 #include <ATen/core/LegacyTypeDispatch.h>
-#include <ATen/core/Storage.h>
+#include <c10/core/Storage.h>
 #include <ATen/core/TensorOptions.h>
-#include <ATen/core/TensorTypeId.h>
-#include <ATen/core/TensorTypeIdRegistration.h>
+#include <c10/core/TensorTypeId.h>
+#include <c10/core/TensorTypeIdRegistration.h>
 #include <ATen/core/context_base.h>
 
 #include <c10/util/Exception.h>
-#include "c10/util/Optional.h"
-
-#include "c10/util/Flags.h"
-
-#include "caffe2/core/allocator.h"
-#include "caffe2/core/common.h"
-#include "caffe2/core/logging.h"
+#include <c10/util/Optional.h>
+#include <c10/util/Flags.h>
+#include <c10/util/Logging.h>
 
 // A global boolean variable to control whether we free memory when a Tensor
 // is shrinked to a smaller size. As a result, a Tensor is always going to
@@ -42,10 +39,12 @@ class DeviceOption;
 
 }
 
-namespace at {
+namespace c10 {
 class Scalar;
-struct Type;
 struct Storage;
+}
+namespace at {
+struct Type;
 class Tensor;
 
 /**
@@ -170,6 +169,8 @@ namespace detail {
             return SparseCPUTensorId();
           case DeviceType::CUDA:
             return SparseCUDATensorId();
+          case DeviceType::HIP:
+            return SparseHIPTensorId();
           default:
             AT_ERROR("Unsupported device type for sparse layout: ", options.device().type());
         }
@@ -183,6 +184,8 @@ namespace detail {
       return DeviceType::CPU;
     } else if (tid == CUDATensorId()) {
       return DeviceType::CUDA;
+    } else if (tid == HIPTensorId()) {
+      return DeviceType::HIP;
     } else if (tid == MKLDNNTensorId()) {
       return DeviceType::MKLDNN;
     } else if (tid == OpenGLTensorId()) {
@@ -197,6 +200,8 @@ namespace detail {
       return DeviceType::CPU;
     } else if (tid == SparseCUDATensorId()) {
       return DeviceType::CUDA;
+    } else if (tid == SparseHIPTensorId()) {
+      return DeviceType::HIP;
     } else {
       AT_ASSERTM(false, "Unknown TensorTypeId: ", tid);
     }
@@ -418,7 +423,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     auto tid = type_id();
     // NB: At the moment, variables have the same TensorTypeId as their
     // corresponding tensor, but if this ever changes, we need to modify this.
-    return tid == SparseCPUTensorId() || tid == SparseCUDATensorId();
+    return tid == SparseCPUTensorId() || tid == SparseCUDATensorId() || tid == SparseHIPTensorId();
   }
 
   bool is_cuda() const {
@@ -429,10 +434,18 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return tid == CUDATensorId() || tid == SparseCUDATensorId();
   }
 
+  bool is_hip() const {
+    // NB: This method is not virtual and avoid dispatches for performance reasons.
+    auto tid = type_id();
+    // NB: At the moment, variables have the same TensorTypeId as their
+    // corresponding tensor, but if this ever changes, we need to modify this.
+    return tid == HIPTensorId() || tid == SparseHIPTensorId();
+  }
+
   int64_t get_device() const {
     // NB: This method is not virtual and tries to avoid dispatches in the common case for perf.
     const auto tid = type_id();
-    if (tid == CUDATensorId()) {
+    if (tid == CUDATensorId() || tid == HIPTensorId()) {
       // TODO: #12934 investigate caching device on TensorImpl to avoid this vdispatch.
       return storage().device().index();
     }
@@ -444,7 +457,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     // TODO: This is a little convoluted so it would be good to investigate
     // caching device on TensorImpl (#12934) to speed up device() calls in all cases.
     const auto tid = type_id();
-    if (tid == CPUTensorId() || tid == CUDATensorId()) {
+    if (tid == CPUTensorId() || tid == CUDATensorId() || tid == HIPTensorId()) {
       // NB: storage(), not storage_, b/c of Variable.
       const auto& mystorage = storage();
       if (mystorage) {
@@ -452,8 +465,8 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       }
     }
     const auto device_type = detail::computeDeviceType(tid);
-    bool is_cuda = device_type == DeviceType::CUDA;
-    return Device(device_type, is_cuda ? get_device() : -1);
+    bool not_cpu = device_type != DeviceType::CPU;
+    return Device(device_type, not_cpu ? get_device() : -1);
   }
 
   Layout layout() const {
