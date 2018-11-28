@@ -1,20 +1,20 @@
 #pragma once
 
 #include "ATen/core/ATenGeneral.h"
-#include "ATen/core/Allocator.h"
+#include "c10/core/Allocator.h"
 #include "ATen/core/Deprecated.h"
 #include "ATen/core/Generator.h"
 #include "ATen/core/Layout.h"
-#include "ATen/core/Scalar.h"
-#include "ATen/core/ScalarType.h"
+#include <c10/core/Scalar.h>
+#include <c10/core/ScalarType.h>
 #include "ATen/core/SparseTensorRef.h"
 #include <c10/util/ArrayRef.h>
-#include "ATen/core/Half.h"
-#include "ATen/core/TensorTypeIdRegistration.h"
+#include <c10/Half.h>
+#include <c10/core/TensorTypeIdRegistration.h>
 #include "ATen/core/Reduction.h"
 #include "ATen/core/TensorOptions.h"
 
-#include "c10/util/Optional.h"
+#include <c10/util/Optional.h>
 
 #include <array>
 #include <cstddef>
@@ -29,12 +29,15 @@
 #endif
 #endif
 
+namespace c10 {
+struct Allocator;
+struct Storage;
+}
+
 namespace at {
 
 class Context;
-struct Allocator;
 struct Generator;
-struct Storage;
 class Tensor;
 
 static inline void noop_deleter(void*) {}
@@ -88,6 +91,7 @@ struct CAFFE2_API Type {
   virtual Backend backend() const = 0;
   Layout layout() const noexcept { return layout_from_backend(backend()); }
   virtual bool is_cuda() const = 0;
+  virtual bool is_hip() const = 0;
   virtual bool is_sparse() const = 0;
   virtual bool is_distributed() const = 0;
   bool is_variable() const noexcept { return is_variable_; }
@@ -116,6 +120,9 @@ struct CAFFE2_API Type {
   }
   Type & cuda() const {
     return this->toBackend(at::backendToCUDA(this->backend()));
+  }
+  Type & hip() const {
+    return this->toBackend(at::backendToHIP(this->backend()));
   }
   // contiguous IDs for all types in the system
   // for external dispatch
@@ -269,8 +276,8 @@ struct CAFFE2_API Type {
   virtual Tensor irfft(const Tensor & self, int64_t signal_ndim, bool normalized, bool onesided, IntList signal_sizes) const = 0;
   virtual Tensor index(const Tensor & self, TensorList indices) const = 0;
   virtual Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) const = 0;
-  virtual Tensor index_put(const Tensor & self, TensorList indices, const Tensor & values) const = 0;
-  virtual Tensor & index_put_(Tensor & self, TensorList indices, const Tensor & values) const = 0;
+  virtual Tensor index_put(const Tensor & self, TensorList indices, const Tensor & values, bool accumulate) const = 0;
+  virtual Tensor & index_put_(Tensor & self, TensorList indices, const Tensor & values, bool accumulate) const = 0;
   virtual Tensor inverse(const Tensor & self) const = 0;
   virtual Tensor isclose(const Tensor & self, const Tensor & other, double rtol, double atol, bool equal_nan) const = 0;
   virtual bool is_distributed(const Tensor & self) const = 0;

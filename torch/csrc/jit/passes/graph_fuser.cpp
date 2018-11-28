@@ -22,12 +22,16 @@ namespace {
 //    - Has a single tensor output
 //    - Output and all tensor inputs have the same shape
 //    - Output and all tensor inputs have the same scalar type
+//      or all tensor inputs have the same scalar type and
+//         output is identified in PropagateInputShapes
 //    - Output and all tensor inputs should be on the same device
 //    - Produces contiguous outputs
 // Some of these restrictions may be relaxable, but you should
 // carefully read the code first, as we rely on these assumptions.
 bool isSimpleMap(Node *node) {
   static OperatorSet simple_mappable {{
+    "aten::_cast_Float(Tensor self, bool non_blocking) -> Tensor",
+
     "aten::abs(Tensor self) -> Tensor",
     "aten::acos(Tensor self) -> Tensor",
     "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
@@ -54,6 +58,7 @@ bool isSimpleMap(Node *node) {
     "aten::mul(Tensor self, Tensor other) -> Tensor",
     "aten::neg(Tensor self) -> Tensor",
     "aten::pow(Tensor self, Tensor exponent) -> Tensor",
+    "aten::pow(Tensor self, Scalar exponent) -> Tensor",
     "aten::rand_like(Tensor self) -> Tensor",
     "aten::reciprocal(Tensor self) -> Tensor",
     "aten::relu(Tensor self) -> Tensor",
@@ -72,6 +77,23 @@ bool isSimpleMap(Node *node) {
     "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
     "aten::mul(Tensor self, Scalar other) -> Tensor",
     "aten::div(Tensor self, Scalar other) -> Tensor",
+
+    "aten::eq(Tensor self, Tensor other) -> Tensor",
+    "aten::eq(Tensor self, Scalar other) -> Tensor",
+    "aten::ne(Tensor self, Tensor other) -> Tensor",
+    "aten::ne(Tensor self, Scalar other) -> Tensor",
+    "aten::ge(Tensor self, Tensor other) -> Tensor",
+    "aten::ge(Tensor self, Scalar other) -> Tensor",
+    "aten::gt(Tensor self, Tensor other) -> Tensor",
+    "aten::gt(Tensor self, Scalar other) -> Tensor",
+    "aten::le(Tensor self, Tensor other) -> Tensor",
+    "aten::le(Tensor self, Scalar other) -> Tensor",
+    "aten::lt(Tensor self, Tensor other) -> Tensor",
+    "aten::lt(Tensor self, Scalar other) -> Tensor",
+
+    "aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor",
+
+    "aten::type_as(Tensor self, Tensor other) -> Tensor",
   }};
   if (!simple_mappable.find(node)) {
     return false;

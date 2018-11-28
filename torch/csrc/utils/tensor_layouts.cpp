@@ -6,7 +6,7 @@
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
 
-#include <ATen/ScalarType.h>
+#include <c10/core/ScalarType.h>
 #include <ATen/Layout.h>
 
 namespace torch { namespace utils {

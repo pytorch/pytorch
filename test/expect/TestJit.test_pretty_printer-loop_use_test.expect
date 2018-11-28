@@ -1,4 +1,4 @@
-def script(self,
+def graph(self,
     y_1: Tensor) -> Tuple[Tensor, Tensor]:
   x = aten.add(y_1, 1, 1)
   z_1 = aten.add(x, 5, 1)

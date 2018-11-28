@@ -128,6 +128,7 @@ _(aten, _sparse_div_zerodim) \
 _(aten, _sparse_mul) \
 _(aten, _sparse_mul_scalar) \
 _(aten, _sparse_mul_zerodim) \
+_(aten, _sparse_sum) \
 _(aten, _sqrt) \
 _(aten, _standard_gamma) \
 _(aten, _standard_gamma_grad) \
@@ -196,6 +197,8 @@ _(aten, addcmul) \
 _(aten, addmm) \
 _(aten, addmv) \
 _(aten, addr) \
+_(aten, affine_grid_generator) \
+_(aten, affine_grid_generator_backward) \
 _(aten, alias) \
 _(aten, all) \
 _(aten, allclose) \
