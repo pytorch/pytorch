@@ -478,7 +478,7 @@ void initJitScriptBindings(PyObject* module) {
         py::tuple result(modules.size());
         for(size_t i = 0; i < modules.size(); ++i) {
           auto & item = modules[i];
-          result[i] = std::make_pair(item.key(), item.value());
+          result[i] = std::make_pair(item.key(), item.value().module);
         }
         return result;
       })
@@ -584,6 +584,11 @@ void initJitScriptBindings(PyObject* module) {
         // see: [pybind11 varargs]
         Module& self = py::cast<Module&>(args[0]);
         return invokeScriptMethodFromPython(self.get_method("forward"), tuple_slice(std::move(args), 1), std::move(kwargs));
+      })
+      .def("_python_print", [](Module& self) {
+        std::ostringstream ss;
+        std::vector<at::Tensor> tensors = PythonPrint(ss, self, true);
+        return std::make_pair(ss.str(), tensors);
       });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
@@ -637,7 +642,7 @@ void initJitScriptBindings(PyObject* module) {
     std::istringstream in(buffer);
     import_ir_module(module_lookup, in);
   });
-  m.def("_jit_import_method", import_method);
+  m.def("_jit_import_methods", import_methods);
   m.def("_jit_set_emit_module_hook", setEmitModuleHook);
 }
 
