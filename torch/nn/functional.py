@@ -1328,10 +1328,8 @@ def bilinear(input1, input2, weight, bias=None):
     return torch.bilinear(input1, input2, weight, bias)
 
 
-@torch._jit_internal.weak_script
-def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2.,
+def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
               scale_grad_by_freq=False, sparse=False):
-    # type: (Tensor, Tensor, Optional[int], Optional[float], float, bool, bool) -> Tensor
     r"""A simple lookup table that looks up embeddings in a fixed dictionary and size.
 
     This module is often used to retrieve word embeddings using indices.
@@ -1390,32 +1388,25 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2.,
                  [ 0.6262,  0.2438,  0.7471]]])
     """
     if padding_idx is not None:
-        padding_idx = torch.jit._unwrap_optional(padding_idx)
         if padding_idx > 0:
             assert padding_idx < weight.size(0), 'Padding_idx must be within num_embeddings'
         elif padding_idx < 0:
             assert padding_idx >= -weight.size(0), 'Padding_idx must be within num_embeddings'
             padding_idx = weight.size(0) + padding_idx
-    else:
+    elif padding_idx is None:
         padding_idx = -1
     if max_norm is not None:
-        max_norm = torch.jit._unwrap_optional(max_norm)
         # `embedding_renorm_` will call .contiguous() on input anyways, so we
         # call it here and take advantage of the improved locality in the
         # `embedding` call below too.
         input = input.contiguous()
-        # XXX: equivalent to
-        # with torch.no_grad():
-        #   torch.nembedding_renorm_
-        # remove once script supports set_grad_enabled
-        torch.no_grad_embedding_renorm_(weight, input, max_norm, norm_type)
+        with torch.no_grad():
+            torch.embedding_renorm_(weight, input, max_norm, norm_type)
     return torch.embedding(weight, input, padding_idx, scale_grad_by_freq, sparse)
 
 
-@torch._jit_internal.weak_script
 def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
                   scale_grad_by_freq=False, mode='mean', sparse=False):
-    # type: (Tensor, Tensor, Optional[Tensor], Optional[float], float, bool, str, bool) -> Tensor
     r"""Computes sums, means or maxes of 'bags' of embeddings, without instantiating the
     intermediate embeddings.
 
@@ -1500,27 +1491,26 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
     elif input.dim() == 1:
         if offsets is None:
             raise ValueError("offsets has to be a 1D Tensor but got None")
-        offsets = torch.jit._unwrap_optional(offsets)
         if offsets.dim() != 1:
             raise ValueError("offsets has to be a 1D Tensor")
-        if int(offsets[0]) != 0:
+        if offsets[0].item() != 0:
             raise ValueError("offsets[0] has to be 0, i.e., the first sequence "
                              "in the mini-batch has to start from position 0. "
                              "However, got {}".format(offsets[0].item()))
-        if int(offsets[-1]) > input.size(0):
+        if offsets[-1].item() > input.size(0):
             raise ValueError("offsets[-1] can not be greater than input's length"
                              " ({}), but got offsets[-1] of {}"
                              .format(input.size(0), offsets[-1].item()))
     else:
         raise ValueError("input has to be 1D or 2D Tensor,"
                          " but got Tensor of dimension {}".format(input.dim()))
-    offsets = torch.jit._unwrap_optional(offsets)  # TODO remove when exception control flow logic
+
     if mode == 'sum':
-        mode_enum = 0
+        mode = 0
     elif mode == 'mean':
-        mode_enum = 1
+        mode = 1
     elif mode == 'max':
-        mode_enum = 2
+        mode = 2
 
         if scale_grad_by_freq:
             raise ValueError("max mode does not support scaling the gradient by the frequency")
@@ -1529,23 +1519,18 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
             raise ValueError("max mode does not support sparse weights")
 
     else:
-        mode_enum = -1  # TODO when exception control flow logic
         raise ValueError("mode has to be one of sum, mean or max")
 
     if max_norm is not None:
-        max_norm = torch.jit._unwrap_optional(max_norm)
-        # XXX: equivalent to
-        # with torch.no_grad():
-        #   torch.nembedding_renorm_
-        # remove once script supports set_grad_enabled
-        torch.no_grad_embedding_renorm_(weight, input, max_norm, norm_type)
+        with torch.no_grad():
+            torch.embedding_renorm_(weight, input, max_norm, norm_type)
 
     ret, _, _, _ = torch.embedding_bag(
         weight,
         input,
         offsets,
         scale_grad_by_freq,
-        mode_enum,
+        mode,
         sparse)
     return ret
 
