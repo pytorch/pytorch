@@ -195,6 +195,28 @@ to unconditionally dispatch to a native function whose name is different than
 the name in the public ATen API, but this is generally frowned upon (just name
 them the same thing!)
 
+### `device_guard`
+
+```
+device_guard: false
+```
+
+By default, ATen code generation will generate a DeviceGuard invocation,
+which will ensure that kernel code will run with the current device set
+to match the device of the first Tensor argument (or first tensor of
+the first TensorList argument, if the function takes a list of tensors).
+For the most part, this means kernel authors do not have to worry about
+setting devices.
+
+However, in some cases, setting the device is unnecessary, because,
+e.g., you call a function already manages device guard setting, or
+you're a function that simply does not interact with any devices.  In
+that case, code generation of the device guard can be disabled by adding
+`device_guard: false` to your function definition.
+
+**Note.** We are considering eliminating automatic generation of DeviceGuard,
+in which case this field would go away.  If you have an opinion on the
+matter, please write in at https://github.com/pytorch/pytorch/issues/14234
 
 ## Writing an implementation in C++
 

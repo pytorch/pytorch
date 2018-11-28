@@ -40,14 +40,14 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     cudaSetDevice(d.index());
   }
   Stream getStream(Device d) const noexcept override {
-    return CUDAStream(CUDAStream_getCurrentStream(d.index())).unwrap();
+    return at::cuda::getCurrentCUDAStream().unwrap();
   }
   // NB: These do NOT set the current device
   Stream exchangeStream(Stream s) const noexcept override {
     CUDAStream cs(s);
     // TODO: Don't go through internals if not necessary
-    CUDAStream old_stream(CUDAStream_getCurrentStream(s.device().index()));
-    CUDAStream_setStream(cs.internals());
+    auto old_stream = at::cuda::getCurrentCUDAStream(s.device().index());
+    at::cuda::setCurrentCUDAStream(cs);
     return old_stream.unwrap();
   }
 };

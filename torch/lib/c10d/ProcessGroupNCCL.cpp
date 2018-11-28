@@ -91,13 +91,23 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const std::vector<at::Device>& devices)
 
 ProcessGroupNCCL::WorkNCCL::~WorkNCCL() {}
 
-// Check if the NCCL kernels are queued on the GPUs
 bool ProcessGroupNCCL::WorkNCCL::isCompleted() {
+  return finishedGPUExecution();
+}
+
+bool ProcessGroupNCCL::WorkNCCL::isSuccess() const {
   return true;
 }
 
+std::exception_ptr ProcessGroupNCCL::WorkNCCL::exception() const {
+  throw std::runtime_error(
+      "exception() is not supported by NCCL process "
+      "group's work, since isSuccess() will always return true, and "
+      "isCompleted() and wait() will either succeed or throw");
+}
+
 // Helper that checks if the NCCL kernels are completed on the GPUs
-bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecution() const {
+bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecution() {
   for (size_t i = 0; i < devices_.size(); ++i) {
     // Checking the work's corresponding CUDA events' status
     auto ret = cudaEventQuery(cudaEvents_[i]);
@@ -111,12 +121,6 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecution() const {
   return true;
 }
 
-// Same as synchronize(), and will always return true
-bool ProcessGroupNCCL::WorkNCCL::wait() {
-  synchronize();
-  return true;
-}
-
 // Waiting on the work's corresponding CUDA events
 void ProcessGroupNCCL::WorkNCCL::synchronize() {
   for (size_t i = 0; i < devices_.size(); ++i) {
@@ -126,20 +130,14 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
     // If we use the work to do barrier, we should block here
     if (!barrierTensors_.empty()) {
       at::cuda::CUDAGuard gpuGuard(devices_[i]);
-      AT_CUDA_CHECK(cudaStreamSynchronize(currentStream.stream()));
+      AT_CUDA_CHECK(cudaDeviceSynchronize());
     }
   }
 }
 
-bool ProcessGroupNCCL::WorkNCCL::isSuccess() const {
-  return true;
-}
-
-const std::exception& ProcessGroupNCCL::WorkNCCL::exception() const {
-  throw std::runtime_error(
-      "exception() is not supported by NCCL process "
-      "group's work, since isSuccess() will always return true, and "
-      "isCompleted() and wait() will either succeed or throw");
+// Same as calling synchronize().
+void ProcessGroupNCCL::WorkNCCL::wait() {
+  synchronize();
 }
 
 std::unordered_map<ssize_t, ssize_t> ProcessGroupNCCL::pgUniqueNCCLIDCnt_;
@@ -209,7 +207,9 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
         "the GPU devices are not known");
   }
 
-  lastDevices_ = devices;
+  for (auto& device : devices) {
+    usedDeviceIdxs_.insert(device.index());
+  }
 
   if (devNCCLCommMap_.find(devicesKey) != devNCCLCommMap_.end()) {
     // Reuse the cached communicator if there is one.
@@ -491,7 +491,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
-    std::vector<at::Tensor>& inputTensors) {
+    std::vector<at::Tensor>& inputTensors,
+    const AllgatherOptions& opts) {
   if (outputTensors.size() != inputTensors.size()) {
     throw std::runtime_error("allgather: input and output size mismatch");
   }
@@ -562,9 +563,10 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
   return work;
 }
 
-std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier() {
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier(
+    const BarrierOptions& opts) {
   std::vector<at::Device> devices;
-  if (lastDevices_.empty()) {
+  if (usedDeviceIdxs_.empty()) {
     // This means there is not yet a NCCL collective being called
     // Here we have to use the best guesses and will use a single GPU to call
     // allreduce to achieve barrier.
@@ -574,7 +576,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier() {
     int16_t deviceIdx = static_cast<int16_t>(rank_ % numGPUs);
     devices.push_back(at::Device(at::DeviceType::CUDA, deviceIdx));
   } else {
-    devices = lastDevices_;
+    for (auto usedDeviceIdx : usedDeviceIdxs_) {
+      devices.push_back(at::Device(at::DeviceType::CUDA, usedDeviceIdx));
+    }
   }
 
   std::vector<at::Tensor> barrierTensors;
