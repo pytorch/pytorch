@@ -2981,6 +2981,25 @@ class _TestTorchMixin(object):
         self.assertEqual(r1, r2, 0)
         self.assertEqual(r2, r3[:-1], 0)
 
+        msg = "unsupported range"
+        self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(0, float('inf')))
+        self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('inf')))
+
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(-5, float('nan'), device=device))
+            # check with step size
+            self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(0, float('-inf'), -1, device=device))
+            self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(0, float('inf'), device=device))
+            self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('-inf'), 10, device=device))
+            self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('nan'), 10, device=device))
+            self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('inf'), device=device))
+            self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('nan'), device=device))
+
+            self.assertRaisesRegex(
+                RuntimeError, "overflow",
+                lambda: torch.arange(1.175494351e-38, 3.402823466e+38, device=device))
+
     def test_arange_inference(self):
         saved_dtype = torch.get_default_dtype()
         torch.set_default_dtype(torch.float32)
