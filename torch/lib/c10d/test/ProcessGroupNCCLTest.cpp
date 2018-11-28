@@ -6,6 +6,7 @@
 #include <c10d/test/TestUtils.hpp>
 
 #include <ATen/cuda/CUDAGuard.h>
+#include <ATen/cuda/CUDAMultiStreamGuard.h>
 #include <ATen/cuda/CUDAStream.h>
 
 using namespace c10d::test;

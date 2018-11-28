@@ -4,8 +4,7 @@ from __future__ import division
 import warnings
 import math
 import types
-from operator import mul
-from functools import reduce
+from typing import List
 
 import torch
 from torch._C import _infer_size, _add_docstr
@@ -306,6 +305,7 @@ Args:
 def fractional_max_pool2d(input, kernel_size, output_size=None,
                           output_ratio=None, return_indices=False,
                           _random_samples=None):
+    # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList1[int]], float, bool, Tensor) -> Tuple[Tensor, Tensor]  # noqa
     r"""Applies 2D fractional max pooling over an input signal composed of several input planes.
 
     Fractional MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
@@ -339,47 +339,111 @@ def fractional_max_pool2d(input, kernel_size, output_size=None,
         raise ValueError("fractional_max_pool2d requires specifying either "
                          "an output_size, or a output_ratio")
     if output_size is None:
-        output_ratio = _pair(output_ratio)
-        output_size = (int(input.size(2) * output_ratio[0]),
-                       int(input.size(3) * output_ratio[1]))
+        _output_ratio = _pair(output_ratio)
+        _output_size = (int(input.size(2) * _output_ratio[0]),
+                        int(input.size(3) * _output_ratio[1]))
+    else:
+        _output_size = torch.jit._unwrap_optional(output_size)
 
     if _random_samples is None:
         _random_samples = input.new(input.size(0), input.size(1), 2).uniform_()
-    ret = torch._C._nn.fractional_max_pool2d(input, kernel_size, output_size, _random_samples)
+    ret = torch._C._nn.fractional_max_pool2d(input, kernel_size, _output_size, _random_samples)
     return ret if return_indices else ret[0]
 
 
-def max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
-               ceil_mode=False, return_indices=False):
+@torch._jit_internal.weak_script
+def max_pool1d_with_indices(input, kernel_size, stride=None, padding=0,
+                            dilation=1, ceil_mode=False, return_indices=False):
+    # type: (Tensor, BroadcastingList1[int], Optional[BroadcastingList1[int]], int, int, bool, bool) -> Tuple[Tensor, Tensor]  # noqa
     r"""Applies a 1D max pooling over an input signal composed of several input
     planes.
 
     See :class:`~torch.nn.MaxPool1d` for details.
     """
-    ret = torch.max_pool1d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
-    return ret if return_indices else ret[0]
+    if stride is None:
+        _stride = torch.jit.annotate(List[int], [])
+    else:
+        _stride = torch.jit._unwrap_optional(stride)
+    return torch.max_pool1d_with_indices(
+        input, kernel_size, _stride, padding, dilation, ceil_mode)
 
 
-def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
-               ceil_mode=False, return_indices=False):
+@torch._jit_internal.weak_script
+def _max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
+                ceil_mode=False, return_indices=False):
+    # type: (Tensor, BroadcastingList1[int], Optional[BroadcastingList1[int]], int, int, bool, bool) -> Tensor
+    return max_pool1d_with_indices(
+        input, kernel_size, stride, padding, dilation, ceil_mode)[0]
+
+max_pool1d = torch._jit_internal.boolean_dispatch(
+    arg_name='return_indices',
+    arg_index=6,
+    default=False,
+    if_true=max_pool1d_with_indices,
+    if_false=_max_pool1d)
+
+
+@torch._jit_internal.weak_script
+def max_pool2d_with_indices(input, kernel_size, stride=None, padding=0, dilation=1,
+                            ceil_mode=False, return_indices=False):
+    # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], int, int, bool, bool) -> Tuple[Tensor, Tensor]  # noqa
     r"""Applies a 2D max pooling over an input signal composed of several input
     planes.
 
     See :class:`~torch.nn.MaxPool2d` for details.
     """
-    ret = torch._C._nn.max_pool2d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
-    return ret if return_indices else ret[0]
+    if stride is None:
+        _stride = torch.jit.annotate(List[int], [])
+    else:
+        _stride = torch.jit._unwrap_optional(stride)
+    return torch._C._nn.max_pool2d_with_indices(input, kernel_size, _stride, padding, dilation, ceil_mode)
 
 
-def max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1,
-               ceil_mode=False, return_indices=False):
+@torch._jit_internal.weak_script
+def _max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
+                ceil_mode=False, return_indices=False):
+    # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], int, int, bool, bool) -> Tensor
+    return max_pool2d_with_indices(
+        input, kernel_size, stride, padding, dilation, ceil_mode)[0]
+
+max_pool2d = torch._jit_internal.boolean_dispatch(
+    arg_name='return_indices',
+    arg_index=6,
+    default=False,
+    if_true=max_pool2d_with_indices,
+    if_false=_max_pool2d)
+
+
+@torch._jit_internal.weak_script
+def max_pool3d_with_indices(input, kernel_size, stride=None, padding=0,
+                            dilation=1, ceil_mode=False, return_indices=False):
+    # type: (Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], int, int, bool, bool) -> Tuple[Tensor, Tensor]  # noqa
     r"""Applies a 3D max pooling over an input signal composed of several input
     planes.
 
     See :class:`~torch.nn.MaxPool3d` for details.
     """
-    ret = torch._C._nn.max_pool3d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
-    return ret if return_indices else ret[0]
+    if stride is None:
+        _stride = torch.jit.annotate(List[int], [])
+    else:
+        _stride = torch.jit._unwrap_optional(stride)
+    return torch._C._nn.max_pool3d_with_indices(
+        input, kernel_size, _stride, padding, dilation, ceil_mode)
+
+
+@torch._jit_internal.weak_script
+def _max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1,
+                ceil_mode=False, return_indices=False):
+    # type: (Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], int, int, bool, bool) -> Tensor
+    return max_pool3d_with_indices(
+        input, kernel_size, stride, padding, dilation, ceil_mode)[0]
+
+max_pool3d = torch._jit_internal.boolean_dispatch(
+    arg_name='return_indices',
+    arg_index=6,
+    default=False,
+    if_true=max_pool3d_with_indices,
+    if_false=_max_pool3d)
 
 
 def _unpool_output_size(input, kernel_size, stride, padding, output_size):
@@ -453,7 +517,9 @@ def max_unpool3d(input, indices, kernel_size, stride=None, padding=0,
     return torch._C._nn.max_unpool3d(input, indices, output_size, stride, padding)
 
 
+@torch._jit_internal.weak_script
 def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
+    # type: (Tensor, float, int, Optional[BroadcastingList1[int]], bool) -> Tensor
     r"""Applies a 2D power-average pooling over an input signal composed of
     several input planes. If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
@@ -461,23 +527,36 @@ def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
     See :class:`~torch.nn.LPPool2d` for details.
     """
     kw, kh = utils._pair(kernel_size)
-    out = avg_pool2d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
+    if stride is not None:
+        stride = torch.jit._unwrap_optional(stride)
+        out = avg_pool2d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
+    else:
+        out = avg_pool2d(input.pow(norm_type), kernel_size, padding=0, ceil_mode=ceil_mode)
+
     return (torch.sign(out) * relu(torch.abs(out))).mul(kw * kh).pow(1. / norm_type)
 
 
+@torch._jit_internal.weak_script
 def lp_pool1d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
-    # type: (Tensor, int, int, Optional[List[int]], bool) -> Tensor
+    # type: (Tensor, float, int, Optional[BroadcastingList1[int]], bool) -> Tensor
     r"""Applies a 1D power-average pooling over an input signal composed of
     several input planes. If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
 
     See :class:`~torch.nn.LPPool1d` for details.
     """
-    out = avg_pool1d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
+    if stride is not None:
+        stride = torch.jit._unwrap_optional(stride)
+        out = avg_pool1d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
+    else:
+        out = avg_pool1d(input.pow(norm_type), kernel_size, padding=0, ceil_mode=ceil_mode)
+
     return (torch.sign(out) * relu(torch.abs(out))).mul(kernel_size).pow(1. / norm_type)
 
 
-def adaptive_max_pool1d(input, output_size, return_indices=False):
+@torch._jit_internal.weak_script
+def adaptive_max_pool1d_with_indices(input, output_size, return_indices=False):
+    # type: (Tensor, BroadcastingList1[int], bool) -> Tuple[Tensor, Tensor]
     r"""Applies a 1D adaptive max pooling over an input signal composed of
     several input planes.
 
@@ -487,11 +566,25 @@ def adaptive_max_pool1d(input, output_size, return_indices=False):
         output_size: the target output size (single integer)
         return_indices: whether to return pooling indices. Default: ``False``
     """
-    ret = torch.adaptive_max_pool1d(input, output_size)
-    return ret if return_indices else ret[0]
+    return torch.adaptive_max_pool1d(input, output_size)
 
 
-def adaptive_max_pool2d(input, output_size, return_indices=False):
+@torch._jit_internal.weak_script
+def _adaptive_max_pool1d(input, output_size, return_indices=False):
+    # type: (Tensor, BroadcastingList1[int], bool) -> Tensor
+    return adaptive_max_pool1d_with_indices(input, output_size)[0]
+
+adaptive_max_pool1d = torch._jit_internal.boolean_dispatch(
+    arg_name='return_indices',
+    arg_index=2,
+    default=False,
+    if_true=adaptive_max_pool1d_with_indices,
+    if_false=_adaptive_max_pool1d)
+
+
+@torch._jit_internal.weak_script
+def adaptive_max_pool2d_with_indices(input, output_size, return_indices=False):
+    # type: (Tensor, BroadcastingList1[int], bool) -> Tuple[Tensor, Tensor]
     r"""Applies a 2D adaptive max pooling over an input signal composed of
     several input planes.
 
@@ -503,11 +596,25 @@ def adaptive_max_pool2d(input, output_size, return_indices=False):
         return_indices: whether to return pooling indices. Default: ``False``
     """
     output_size = _list_with_default(output_size, input.size())
-    ret = torch._C._nn.adaptive_max_pool2d(input, output_size)
-    return ret if return_indices else ret[0]
+    return torch._C._nn.adaptive_max_pool2d(input, output_size)
 
 
-def adaptive_max_pool3d(input, output_size, return_indices=False):
+@torch._jit_internal.weak_script
+def _adaptive_max_pool2d(input, output_size, return_indices=False):
+    # type: (Tensor, BroadcastingList1[int], bool) -> Tensor
+    return adaptive_max_pool2d_with_indices(input, output_size)[0]
+
+adaptive_max_pool2d = torch._jit_internal.boolean_dispatch(
+    arg_name='return_indices',
+    arg_index=2,
+    default=False,
+    if_true=adaptive_max_pool2d_with_indices,
+    if_false=_adaptive_max_pool2d)
+
+
+@torch._jit_internal.weak_script
+def adaptive_max_pool3d_with_indices(input, output_size, return_indices=False):
+    # type: (Tensor, BroadcastingList1[int], bool) -> Tuple[Tensor, Tensor]
     r"""Applies a 3D adaptive max pooling over an input signal composed of
     several input planes.
 
@@ -519,8 +626,20 @@ def adaptive_max_pool3d(input, output_size, return_indices=False):
         return_indices: whether to return pooling indices. Default: ``False``
     """
     output_size = _list_with_default(output_size, input.size())
-    ret = torch._C._nn.adaptive_max_pool3d(input, output_size)
-    return ret if return_indices else ret[0]
+    return torch._C._nn.adaptive_max_pool3d(input, output_size)
+
+
+@torch._jit_internal.weak_script
+def _adaptive_max_pool3d(input, output_size, return_indices=False):
+    # type: (Tensor, BroadcastingList1[int], bool) -> Tensor
+    return adaptive_max_pool3d_with_indices(input, output_size)[0]
+
+adaptive_max_pool3d = torch._jit_internal.boolean_dispatch(
+    arg_name='return_indices',
+    arg_index=2,
+    default=False,
+    if_true=adaptive_max_pool3d_with_indices,
+    if_false=_adaptive_max_pool3d)
 
 
 adaptive_avg_pool1d = _add_docstr(torch.adaptive_avg_pool1d, r"""
@@ -1037,6 +1156,40 @@ def softmax(input, dim=None, _stacklevel=3, dtype=None):
     return ret
 
 
+@torch._jit_internal.weak_script
+def _sample_gumbel(shape, eps=1e-10, out=None):
+    # type: (List[int], float, Optional[Tensor]) -> Tensor
+    """
+    Sample from Gumbel(0, 1)
+
+    based on
+    https://github.com/ericjang/gumbel-softmax/blob/3c8584924603869e90ca74ac20a6a03d99a91ef9/Categorical%20VAE.ipynb ,
+    (MIT license)
+    """
+    if out is None:
+        U = torch.rand(shape)
+    else:
+        U = torch.jit._unwrap_optional(out).resize_(shape).uniform_()
+    return - torch.log(eps - torch.log(U + eps))
+
+
+@torch._jit_internal.weak_script
+def _gumbel_softmax_sample(logits, tau=1, eps=1e-10):
+    # type: (Tensor, float, float) -> Tensor
+    """
+    Draw a sample from the Gumbel-Softmax distribution
+
+    based on
+    https://github.com/ericjang/gumbel-softmax/blob/3c8584924603869e90ca74ac20a6a03d99a91ef9/Categorical%20VAE.ipynb
+    (MIT license)
+    """
+    dims = logits.dim()
+    gumbel_noise = _sample_gumbel(logits.size(), eps=eps, out=torch.empty_like(logits))
+    y = logits + gumbel_noise
+    return softmax(y / tau, dims - 1)
+
+
+@torch._jit_internal.weak_script
 def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
     # type: (Tensor, float, bool, float, int) -> Tensor
     r"""
@@ -1090,7 +1243,7 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
     if hard:
         # Straight through.
         index = y_soft.max(dim, keepdim=True)[1]
-        y_hard = logits.new_zeros(logits.shape).scatter_(dim, index, 1.0)
+        y_hard = torch.zeros(logits.shape, dtype=logits.dtype, device=logits.device).scatter_(dim, index, 1.0)
         return y_hard - y_soft.detach() + y_soft
     else:
         # Reparametrization trick.
@@ -1399,23 +1552,39 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
     return ret
 
 
+@torch._jit_internal.weak_script
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
                training=False, momentum=0.1, eps=1e-5):
+    # type: (Tensor, Tensor, Tensor, Optional[Tensor], Optional[Tensor], bool, float, float) -> Tensor
     r"""Applies Batch Normalization for each channel across a batch of data.
 
     See :class:`~torch.nn.BatchNorm1d`, :class:`~torch.nn.BatchNorm2d`,
     :class:`~torch.nn.BatchNorm3d` for details.
     """
     if training:
-        size = list(input.size())
-        if reduce(mul, size[2:], size[0]) == 1:
+        size = input.size()
+        # XXX: JIT script does not support the reduce from functools, and mul op is a
+        # builtin, which cannot be used as a value to a func yet, so rewrite this size
+        # check to a simple equivalent for loop
+        #
+        # TODO: make use of reduce like below when JIT is ready with the missing features:
+        # from operator import mul
+        # from functools import reduce
+        #
+        #   if reduce(mul, size[2:], size[0]) == 1
+        size_prods = size[0]
+        for i in range(len(size) - 2):
+            size_prods *= size[i + 2]
+        if size_prods == 1:
             raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
+
     return torch.batch_norm(
         input, weight, bias, running_mean, running_var,
         training, momentum, eps, torch.backends.cudnn.enabled
     )
 
 
+@torch._jit_internal.weak_script
 def instance_norm(input, running_mean=None, running_var=None, weight=None,
                   bias=None, use_input_stats=True, momentum=0.1, eps=1e-5):
     # type: (Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor], bool, float, float) -> Tensor  # noqa
@@ -1431,7 +1600,9 @@ def instance_norm(input, running_mean=None, running_var=None, weight=None,
     )
 
 
+@torch._jit_internal.weak_script
 def layer_norm(input, normalized_shape, weight=None, bias=None, eps=1e-5):
+    # type: (Tensor, List[int], Optional[Tensor], Optional[Tensor], float) -> Tensor
     r"""Applies Layer Normalization for last certain number of dimensions.
 
     See :class:`~torch.nn.LayerNorm` for details.
@@ -1440,7 +1611,9 @@ def layer_norm(input, normalized_shape, weight=None, bias=None, eps=1e-5):
                             torch.backends.cudnn.enabled)
 
 
+@torch._jit_internal.weak_script
 def group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
+    # type: (Tensor, int, Optional[Tensor], Optional[Tensor], float) -> Tensor
     r"""Applies Group Normalization for last certain number of dimensions.
 
     See :class:`~torch.nn.GroupNorm` for details.
@@ -1519,6 +1692,7 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
     return torch.ctc_loss(log_probs, targets, input_lengths, target_lengths, blank, _Reduction.get_enum(reduction))
 
 
+@torch._jit_internal.weak_script
 def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
              reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, Optional[Tensor], Optional[bool], int, Optional[bool], str) -> Tensor
@@ -1576,7 +1750,8 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
         ret = torch._C._nn.nll_loss(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
     elif dim == 4:
         ret = torch._C._nn.nll_loss2d(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
-    elif dim == 3 or dim > 4:
+    else:
+        # dim == 3 or dim > 4
         n = input.size(0)
         c = input.size(1)
         out_size = (n,) + input.size()[2:]
@@ -1596,6 +1771,7 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
     return ret
 
 
+@torch._jit_internal.weak_script
 def poisson_nll_loss(input, target, log_input=True, full=False, size_average=None, eps=1e-8,
                      reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, bool, bool, Optional[bool], float, Optional[bool], str) -> Tensor
@@ -1785,6 +1961,7 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
         input, target, weight, reduction_enum)
 
 
+@torch._jit_internal.weak_script
 def binary_cross_entropy_with_logits(input, target, weight=None, size_average=None,
                                      reduce=None, reduction='mean', pos_weight=None):
     # type: (Tensor, Tensor, Optional[Tensor], Optional[bool], Optional[bool], str, Optional[Tensor]) -> Tensor
@@ -1889,59 +2066,68 @@ def mse_loss(input, target, size_average=None, reduce=None, reduction='mean'):
     return _pointwise_loss(lambda a, b: (a - b) ** 2, torch._C._nn.mse_loss, input, target, reduction)
 
 
+@torch._jit_internal.weak_script
 def margin_ranking_loss(input1, input2, target, margin=0, size_average=None,
                         reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, Tensor, float, Optional[bool], Optional[bool], str) -> Tensor
     r"""margin_ranking_loss(input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MarginRankingLoss` for details.
     """  # noqa
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction = _Reduction.get_enum(reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
     if input1.dim() == 0 or input2.dim() == 0 or target.dim() == 0:
         raise RuntimeError(("margin_ranking_loss does not support scalars, got sizes: "
                             "input1: {}, input2: {}, target: {} ".format(input1.size(), input2.size(), target.size())))
-    return torch.margin_ranking_loss(input1, input2, target, margin, reduction)
+    return torch.margin_ranking_loss(input1, input2, target, margin, reduction_enum)
 
 
+@torch._jit_internal.weak_script
 def hinge_embedding_loss(input, target, margin=1.0, size_average=None,
                          reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, float, Optional[bool], Optional[bool], str) -> Tensor
     r"""hinge_embedding_loss(input, target, margin=1.0, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.HingeEmbeddingLoss` for details.
     """  # noqa
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction = _Reduction.get_enum(reduction)
-    return torch.hinge_embedding_loss(input, target, margin, reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
+    return torch.hinge_embedding_loss(input, target, margin, reduction_enum)
 
 
+@torch._jit_internal.weak_script
 def multilabel_margin_loss(input, target, size_average=None, reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
     r"""multilabel_margin_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MultiLabelMarginLoss` for details.
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction = _Reduction.get_enum(reduction)
-    return torch._C._nn.multilabel_margin_loss(input, target, reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
+    return torch._C._nn.multilabel_margin_loss(input, target, reduction_enum)
 
 
+@torch._jit_internal.weak_script
 def soft_margin_loss(input, target, size_average=None, reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
     r"""soft_margin_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.SoftMarginLoss` for details.
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction = _Reduction.get_enum(reduction)
-    return torch._C._nn.soft_margin_loss(input, target, reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
+    return torch._C._nn.soft_margin_loss(input, target, reduction_enum)
 
 
+@torch._jit_internal.weak_script
 def multilabel_soft_margin_loss(input, target, weight=None, size_average=None,
                                 reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, Optional[Tensor], Optional[bool], Optional[bool], str) -> Tensor
@@ -1971,17 +2157,19 @@ def multilabel_soft_margin_loss(input, target, weight=None, size_average=None,
     return ret
 
 
+@torch._jit_internal.weak_script
 def cosine_embedding_loss(input1, input2, target, margin=0, size_average=None,
                           reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, Tensor, float, Optional[bool], Optional[bool], str) -> Tensor
     r"""cosine_embedding_loss(input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.CosineEmbeddingLoss` for details.
     """  # noqa
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction = _Reduction.get_enum(reduction)
-    return torch.cosine_embedding_loss(input1, input2, target, margin, reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
+    return torch.cosine_embedding_loss(input1, input2, target, margin, reduction_enum)
 
 
 @torch._jit_internal.weak_script
@@ -2318,7 +2506,9 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
     return torch.grid_sampler(input, grid, mode_enum, padding_mode_enum)
 
 
+@torch._jit_internal.weak_script
 def affine_grid(theta, size):
+    # type: (Tensor, List[int]) -> Tensor
     r"""Generates a 2d flow field, given a batch of affine matrices :attr:`theta`
     Generally used in conjunction with :func:`grid_sample` to
     implement Spatial Transformer Networks.
@@ -2487,19 +2677,22 @@ Example::
 """)
 
 
+@torch._jit_internal.weak_script
 def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, swap=False, size_average=None,
                         reduce=None, reduction="mean"):
+    # type: (Tensor, Tensor, Tensor, float, float, float, bool, Optional[bool], Optional[bool], str) -> Tensor
     r"""
     See :class:`~torch.nn.TripletMarginLoss` for details
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_enum(size_average, reduce)
+        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction = _Reduction.get_enum(reduction)
+        reduction_enum = _Reduction.get_enum(reduction)
     return torch.triplet_margin_loss(anchor, positive, negative, margin, p, eps,
-                                     swap, reduction)
+                                     swap, reduction_enum)
 
 
+@torch._jit_internal.weak_script
 def normalize(input, p=2, dim=1, eps=1e-12, out=None):
     # type: (Tensor, float, int, float, Optional[Tensor]) -> Tensor
     r"""Performs :math:`L_p` normalization of inputs over specified dimension.

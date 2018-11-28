@@ -84,7 +84,6 @@ with compiling PyTorch from source.
 
                               !! WARNING !!
 '''
-ACCEPTED_COMPILERS_FOR_PLATFORM = {'darwin': ['clang++', 'clang'], 'linux': ['g++', 'gcc']}
 CUDA_HOME = _find_cuda_home()
 CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
 # PyTorch releases have the version pattern major.minor.patch, whereas when
@@ -104,6 +103,10 @@ JIT_EXTENSION_VERSIONER = ExtensionVersioner()
 
 def _is_binary_build():
     return not BUILT_FROM_SOURCE_VERSION_PATTERN.match(torch.version.__version__)
+
+
+def _accepted_compilers_for_platform():
+    return ['clang++', 'clang'] if sys.platform.startswith('darwin') else ['g++', 'gcc']
 
 
 def get_default_build_root():
@@ -135,8 +138,7 @@ def check_compiler_ok_for_platform(compiler):
     which = subprocess.check_output(['which', compiler], stderr=subprocess.STDOUT)
     # Use os.path.realpath to resolve any symlinks, in particular from 'c++' to e.g. 'g++'.
     compiler_path = os.path.realpath(which.decode().strip())
-    accepted_compilers = ACCEPTED_COMPILERS_FOR_PLATFORM[sys.platform]
-    return any(name in compiler_path for name in accepted_compilers)
+    return any(name in compiler_path for name in _accepted_compilers_for_platform())
 
 
 def check_compiler_abi_compatibility(compiler):
@@ -160,15 +162,15 @@ def check_compiler_abi_compatibility(compiler):
     if not check_compiler_ok_for_platform(compiler):
         warnings.warn(WRONG_COMPILER_WARNING.format(
             user_compiler=compiler,
-            pytorch_compiler=ACCEPTED_COMPILERS_FOR_PLATFORM[sys.platform][0],
+            pytorch_compiler=_accepted_compilers_for_platform()[0],
             platform=sys.platform))
         return False
 
-    if sys.platform == 'darwin':
+    if sys.platform.startswith('darwin'):
         # There is no particular minimum version we need for clang, so we're good here.
         return True
     try:
-        if sys.platform == 'linux':
+        if sys.platform.startswith('linux'):
             minimum_required_version = MINIMUM_GCC_VERSION
             version = subprocess.check_output([compiler, '-dumpfullversion', '-dumpversion'])
             version = version.decode().strip().split('.')
@@ -191,7 +193,11 @@ def check_compiler_abi_compatibility(compiler):
     return False
 
 
-class BuildExtension(build_ext):
+# See below for why we inherit BuildExtension from object.
+# https://stackoverflow.com/questions/1713038/super-fails-with-error-typeerror-argument-1-must-be-type-not-classobj-when
+
+
+class BuildExtension(build_ext, object):
     '''
     A custom :mod:`setuptools` build extension .
 
@@ -205,6 +211,22 @@ class BuildExtension(build_ext):
     supply to the compiler. This makes it possible to supply different flags to
     the C++ and CUDA compiler during mixed compilation.
     '''
+
+    @classmethod
+    def with_options(cls, **options):
+        '''
+        Returns an alternative constructor that extends any original keyword
+        arguments to the original constructor with the given options.
+        '''
+        def init_with_options(*args, **kwargs):
+            kwargs = kwargs.copy()
+            kwargs.update(options)
+            return cls(*args, **kwargs)
+        return init_with_options
+
+    def __init__(self, *args, **kwargs):
+        super(BuildExtension, self).__init__(*args, **kwargs)
+        self.no_python_abi_suffix = kwargs.get("no_python_abi_suffix", False)
 
     def build_extensions(self):
         self._check_abi()
@@ -261,9 +283,7 @@ class BuildExtension(build_ext):
             extra_postargs = None
 
             def spawn(cmd):
-                orig_cmd = cmd
                 # Using regex to match src, obj and include files
-
                 src_regex = re.compile('/T(p|c)(.*)')
                 src_list = [
                     m.group(2) for m in (src_regex.match(elem) for elem in cmd)
@@ -321,6 +341,23 @@ class BuildExtension(build_ext):
             self.compiler._compile = unix_wrap_compile
 
         build_ext.build_extensions(self)
+
+    def get_ext_filename(self, ext_name):
+        # Get the original shared library name. For Python 3, this name will be
+        # suffixed with "<SOABI>.so", where <SOABI> will be something like
+        # cpython-37m-x86_64-linux-gnu. On Python 2, there is no such ABI name.
+        # The final extension, .so, would be .lib/.dll on Windows of course.
+        ext_filename = super(BuildExtension, self).get_ext_filename(ext_name)
+        # If `no_python_abi_suffix` is `True`, we omit the Python 3 ABI
+        # component. This makes building shared libraries with setuptools that
+        # aren't Python modules nicer.
+        if self.no_python_abi_suffix and sys.version_info >= (3, 0):
+            # The parts will be e.g. ["my_extension", "cpython-37m-x86_64-linux-gnu", "so"].
+            ext_filename_parts = ext_filename.split('.')
+            # Omit the second to last element.
+            without_abi = ext_filename_parts[:-2] + ext_filename_parts[-1:]
+            ext_filename = '.'.join(without_abi)
+        return ext_filename
 
     def _check_abi(self):
         # On some platforms, like Windows, compiler_cxx is not available.
@@ -523,7 +560,8 @@ def load(name,
          extra_include_paths=None,
          build_directory=None,
          verbose=False,
-         with_cuda=None):
+         with_cuda=None,
+         is_python_module=True):
     '''
     Loads a PyTorch C++ extension just-in-time (JIT).
 
@@ -576,9 +614,15 @@ def load(name,
             automatically determined based on the existence of ``.cu`` or
             ``.cuh`` in ``sources``. Set it to `True`` to force CUDA headers
             and libraries to be included.
+        is_python_module: If ``True`` (default), imports the produced shared
+            library as a Python module. If ``False``, loads it into the process
+            as a plain dynamic library.
 
     Returns:
-        The loaded PyTorch extension as a Python module.
+        If ``is_python_module`` is ``True``, returns the loaded PyTorch
+        extension as a Python module. If ``is_python_module`` is ``False``
+        returns nothing (the shared library is loaded into the process as a side
+        effect).
 
     Example:
         >>> from torch.utils.cpp_extension import load
@@ -597,7 +641,8 @@ def load(name,
         extra_include_paths,
         build_directory or _get_build_directory(name, verbose),
         verbose,
-        with_cuda)
+        with_cuda,
+        is_python_module)
 
 
 def load_inline(name,
@@ -610,7 +655,8 @@ def load_inline(name,
                 extra_include_paths=None,
                 build_directory=None,
                 verbose=False,
-                with_cuda=None):
+                with_cuda=None,
+                is_python_module=True):
     '''
     Loads a PyTorch C++ extension just-in-time (JIT) from string sources.
 
@@ -724,7 +770,8 @@ def load_inline(name,
         extra_include_paths,
         build_directory,
         verbose,
-        with_cuda)
+        with_cuda,
+        is_python_module)
 
 
 def _jit_compile(name,
@@ -735,7 +782,8 @@ def _jit_compile(name,
                  extra_include_paths,
                  build_directory,
                  verbose,
-                 with_cuda=None):
+                 with_cuda,
+                 is_python_module):
     old_version = JIT_EXTENSION_VERSIONER.get_version(name)
     version = JIT_EXTENSION_VERSIONER.bump_version_if_changed(
         name,
@@ -774,7 +822,7 @@ def _jit_compile(name,
 
     if verbose:
         print('Loading extension module {}...'.format(name))
-    return _import_module_from_library(name, build_directory)
+    return _import_module_from_library(name, build_directory, is_python_module)
 
 
 def _write_ninja_file_and_build(name,
@@ -911,12 +959,15 @@ def _build_extension_module(name, build_directory, verbose):
         raise RuntimeError(message)
 
 
-def _import_module_from_library(module_name, path):
+def _import_module_from_library(module_name, path, is_python_module):
     # https://stackoverflow.com/questions/67631/how-to-import-a-module-given-the-full-path
     file, path, description = imp.find_module(module_name, [path])
     # Close the .so file after load.
     with file:
-        return imp.load_module(module_name, file, path, description)
+        if is_python_module:
+            return imp.load_module(module_name, file, path, description)
+        else:
+            return torch.ops.load_library(path)
 
 
 def _write_ninja_file(path,
@@ -984,7 +1035,7 @@ def _write_ninja_file(path,
     else:
         ldflags = ['-shared'] + extra_ldflags
     # The darwin linker needs explicit consent to ignore unresolved symbols.
-    if sys.platform == 'darwin':
+    if sys.platform.startswith('darwin'):
         ldflags.append('-undefined dynamic_lookup')
     elif IS_WINDOWS:
         ldflags = _nt_quote_args(ldflags)

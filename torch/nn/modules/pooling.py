@@ -3,6 +3,7 @@ import torch
 from .module import Module
 from .utils import _single, _pair, _triple
 from .. import functional as F
+from ..._jit_internal import weak_module, weak_script_method
 
 
 class _MaxPoolNd(Module):
@@ -682,7 +683,9 @@ class FractionalMaxPool2d(Module):
             _random_samples=samples)
 
 
+@weak_module
 class _LPPoolNd(Module):
+    __constants__ = ['norm_type', 'kernel_size', 'stride', 'ceil_mode']
 
     def __init__(self, norm_type, kernel_size, stride=None, ceil_mode=False):
         super(_LPPoolNd, self).__init__()
@@ -696,6 +699,7 @@ class _LPPoolNd(Module):
             'ceil_mode={ceil_mode}'.format(**self.__dict__)
 
 
+@weak_module
 class LPPool1d(_LPPoolNd):
     r"""Applies a 1D power-average pooling over an input signal composed of several input
     planes.
@@ -731,11 +735,13 @@ class LPPool1d(_LPPoolNd):
         >>> output = m(input)
     """
 
+    @weak_script_method
     def forward(self, input):
-        return F.lp_pool1d(input, self.norm_type, self.kernel_size,
+        return F.lp_pool1d(input, float(self.norm_type), self.kernel_size,
                            self.stride, self.ceil_mode)
 
 
+@weak_module
 class LPPool2d(_LPPoolNd):
     r"""Applies a 2D power-average pooling over an input signal composed of several input
     planes.
@@ -785,8 +791,9 @@ class LPPool2d(_LPPoolNd):
 
     """
 
+    @weak_script_method
     def forward(self, input):
-        return F.lp_pool2d(input, self.norm_type, self.kernel_size,
+        return F.lp_pool2d(input, float(self.norm_type), self.kernel_size,
                            self.stride, self.ceil_mode)
 
 

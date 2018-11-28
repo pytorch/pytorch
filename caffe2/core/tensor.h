@@ -5,7 +5,7 @@
 #include "caffe2/core/tensor_impl.h"
 
 #include <ATen/core/UndefinedTensorImpl.h>
-#include <ATen/core/intrusive_ptr.h>
+#include <c10/util/intrusive_ptr.h>
 #include "ATen/core/TensorOptions.h"
 
 namespace caffe2 {
@@ -61,6 +61,11 @@ class CAFFE2_API Tensor final {
     // and immediately discard it in Resize() since
     // reset_tensor will be true and FreeMemory will be called,
     // we might want to avoid creating Storage twice?
+    Resize(dims);
+  }
+
+  // we want to preserve index information
+  explicit Tensor(at::IntList dims, at::Device device): Tensor(device) {
     Resize(dims);
   }
 

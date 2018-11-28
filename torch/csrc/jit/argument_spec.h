@@ -14,6 +14,9 @@ namespace torch { namespace jit {
 // GraphExecutor creates specializations of Graphs for different dimensionalitities
 // and types of inputs.
 
+inline static at::Device ConvertIntToCPUOrCUDA(int device){
+  return device < 0 ? at::kCPU : at::Device(at::DeviceType::CUDA, device);
+}
 struct ArgumentInfo {
   friend struct ArgumentSpec;
   using plain_data_type = uint32_t;
@@ -40,7 +43,7 @@ struct ArgumentInfo {
   operator TypePtr() const {
     if (!defined())
       return DynamicType::get();
-    return TensorType::create(type(), device(), dim());
+    return TensorType::create(type(), ConvertIntToCPUOrCUDA(device()), dim());
   }
 
 private:
@@ -138,7 +141,7 @@ private:
       auto & arg = args.at(offset++);
       if (!arg.defined())
         return UndefinedTensorType::get();
-      return TensorType::create(arg.type(), arg.device(), arg.dim(), arg.requires_grad());
+      return TensorType::create(arg.type(), ConvertIntToCPUOrCUDA(arg.device()), arg.dim(), arg.requires_grad());
     } else if (auto tuple_type = original->cast<TupleType>()) {
       return TupleType::create(fmap(tuple_type->elements(), [&](const TypePtr& subtype) {
         return fillType(subtype, offset);
@@ -294,7 +297,7 @@ struct CompleteArgumentInfo {
   operator TypePtr() const {
     if(!defined())
       return DynamicType::get();
-    return CompleteTensorType::create(type(), device(), sizes(), strides());
+    return CompleteTensorType::create(type(), ConvertIntToCPUOrCUDA(device()), sizes(), strides());
   }
 private:
   // offsetinto sizes_strides() array where the sizes start for tensor j

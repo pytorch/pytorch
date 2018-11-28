@@ -26,13 +26,12 @@ includes = [
 ]
 
 ignores = [
-    "caffe2/operators/depthwise_3x3_conv_op.cu",
     "caffe2/operators/depthwise_3x3_conv_op_cudnn.cu",
     "caffe2/operators/pool_op_cudnn.cu",
     '**/hip/**',
 ]
 
-file_extensions = ['.cc', '.cu', '.h', '.cuh']
+file_extensions = ['.cc', '.cu', '.h', '.cuh', '.in']
 
 hipify_python.hipify(
     project_directory=proj_dir,

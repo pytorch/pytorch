@@ -5,6 +5,9 @@
 #   DEBUG
 #     build with -O0 and -g (debug symbols)
 #
+#   REL_WITH_DEB_INFO
+#     build with optimizations and -g (debug symbols)
+#
 #   MAX_JOBS
 #     maximum number of compile jobs we should use to compile your code
 #
@@ -189,6 +192,7 @@ from tools.setup_helpers.dist_check import USE_DISTRIBUTED, \
 ################################################################################
 
 DEBUG = check_env_flag('DEBUG')
+REL_WITH_DEB_INFO = check_env_flag('REL_WITH_DEB_INFO')
 IS_WINDOWS = (platform.system() == 'Windows')
 IS_DARWIN = (platform.system() == 'Darwin')
 IS_LINUX = (platform.system() == 'Linux')
@@ -835,6 +839,10 @@ if DEBUG:
         extra_compile_args += ['-O0', '-g']
         extra_link_args += ['-O0', '-g']
 
+if REL_WITH_DEB_INFO:
+    extra_compile_args += ['-g']
+    extra_link_args += ['-g']
+
 
 def make_relative_rpath(path):
     if IS_DARWIN:
@@ -959,8 +967,13 @@ if __name__ == '__main__':
                 'lib/include/caffe2/utils/*.h',
                 'lib/include/c10/*.h',
                 'lib/include/c10/macros/*.h',
+                'lib/include/c10/core/*.h',
                 'lib/include/c10/util/*.h',
                 'lib/include/c10/impl/*.h',
+                'lib/include/c10/cuda/*.h',
+                'lib/include/c10/cuda/impl/*.h',
+                'lib/include/c10/hip/*.h',
+                'lib/include/c10/hip/impl/*.h',
                 'lib/include/caffe2/core/*.h',
                 'lib/include/caffe2/proto/*.h',
                 'lib/include/torch/*.h',

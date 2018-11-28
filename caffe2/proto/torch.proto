@@ -10,8 +10,10 @@ message ParameterDef {
   // whether this parameter is registered as buffer or not
   optional bool is_buffer = 2;
 
-  // tensor type parameter
-  optional caffe2.TensorProto tensor = 3;
+  // do not store tensor in parameter anymore, and retire field 3
+  // optional caffe2.TensorProto tensor = 3;
+  // the id in the tensor table, defined in TensorProto.name
+  optional string tensor_id = 5;
   // objects other than tensors will be added here
 
   optional string name = 4;
@@ -56,6 +58,10 @@ message ModuleDef {
   // from the main method.
 
   optional string name = 6;
+
+  // whether apply the optimizations to this module, only applicable to
+  // script modules
+  optional bool optimize = 7;
 }
 
 enum ProtoVersion {
@@ -95,4 +101,7 @@ message ModelDef {
   //   - publish_time - string
   repeated caffe2.Argument annotations = 6;
 
+  // the table contains all the tensor information
+  // the tensor id is defined as TensorProto.name
+  repeated caffe2.TensorProto tensors = 7;
 }
