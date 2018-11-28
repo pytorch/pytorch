@@ -332,6 +332,8 @@ Tensor make_tensor(Args&&... args) {
 }
 } // namespace detail
 
+using TensorList = ArrayRef<at::Tensor>;
+
 } // namespace at
 
 #include "ATen/core/TensorMethods.h"
