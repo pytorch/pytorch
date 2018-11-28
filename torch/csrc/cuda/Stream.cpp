@@ -3,7 +3,7 @@
 #include "THP.h"
 #include "Module.h"
 
-#include <c10/cuda/CUDAStream.h>
+#include "ATen/cuda/CUDAStream.h"
 
 #include <structmember.h>
 #include <cuda_runtime_api.h>

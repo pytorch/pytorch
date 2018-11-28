@@ -798,9 +798,6 @@ def preprocessor(output_directory, filepath, stats, hipify_caffe2):
                 if constants.API_CAFFE2 in meta_data and not hipify_caffe2:
                     continue
 
-                if constants.API_PYTORCH in meta_data and hipify_caffe2:
-                    continue
-
                 if output_source.find(cuda_type) > -1:
                     # Check if supported
                     if constants.HIP_UNSUPPORTED in meta_data:

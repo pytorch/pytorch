@@ -1,7 +1,7 @@
 #pragma once
 
 #include <c10/util/ArrayRef.h>
-#include <c10/cuda/CUDAStream.h>
+#include <ATen/cuda/CUDAStream.h>
 #include <ATen/cuda/CUDAContext.h>
 
 #include <vector>
@@ -46,7 +46,7 @@ public:
   /// construction.
   ~CUDAMultiStreamGuard() {
     for (const auto& s : original_streams_) {
-      setCurrentCUDAStream(s);
+      uncheckedSetCurrentCUDAStream(s);
     }
   }
 

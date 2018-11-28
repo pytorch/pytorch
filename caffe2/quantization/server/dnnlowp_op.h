@@ -55,14 +55,15 @@ namespace caffe2 {
  *          this option is intended for debugging accuracy issues.
  *
  *        For the following quantization method related options, please refer
- *        to deeplearning/quantization/dnnlowp/dnnlowp.cc for more details.
+ *        to caffe2/quantization/server/dnnlowp.cc for more details.
  *
  *        - activation_quantization_precision (default=8)
  *        - weight_quantization_precision (default=8)
  *        - requantization_multiplier_precision (default=32)
  *        - eltwise_quantization_precision (default=16)
  *        - force_scale_power_of_two (default=0)
- *        - preserve_sparsity (default=0)
+ *        - preserve_activation_sparsity (default=0)
+ *        - preserve_weight_sparsity (default=0)
  *        - activation_quantization_kind (default=min_max)
  *        - weight_quantization_kind (default=min_max)
  */
@@ -151,7 +152,7 @@ class DNNLowPOp : public Operator<CPUContext> {
           OutputTensorCPU_(0)->numel(),
           out_qparams_);
     } else {
-      PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
+      dnnlowp::PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
     }
 
     MeasureQuantizationError_();

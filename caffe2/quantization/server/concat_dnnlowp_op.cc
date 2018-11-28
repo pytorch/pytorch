@@ -139,12 +139,12 @@ bool ConcatDNNLowPOp<T>::RunOnDevice() {
       if (InputTensorCPU_(i).template IsType<T>()) {
         const T* input_data = input.template data<T>();
         for (int j = j_begin; j < j_end; ++j) {
-          input_temp[j] = dnnlowp::Requantize<T>(
+          input_temp[j] = fbgemm::Requantize<T>(
               input_data[j] - in_qparams_[i].zero_point,
               requantization_params_[i]);
         }
       } else {
-        dnnlowp::Quantize<T>(
+        fbgemm::Quantize<T>(
             input.template data<float>() + j_begin,
             input_temp.data() + j_begin,
             j_end - j_begin,

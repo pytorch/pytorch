@@ -2,7 +2,7 @@
 #include "torch/csrc/autograd/function.h"
 
 #ifdef USE_CUDA
-#include <c10/cuda/CUDAGuard.h>
+#include "ATen/cuda/CUDAGuard.h"
 #endif
 
 #include <sstream>

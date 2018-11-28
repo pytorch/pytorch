@@ -1,13 +1,13 @@
 #pragma once
 
 #include "ATen/core/ATenGeneral.h"
-#include "ATen/StorageImpl.h"
+#include <c10/core/StorageImpl.h>
 #include "ATen/core/UndefinedTensorImpl.h"
 
-#include <ATen/core/ScalarType.h>
+#include <c10/core/ScalarType.h>
 #include "ATen/Formatting.h"
 #include <c10/util/ArrayRef.h>
-#include "c10/util/Exception.h"
+#include <c10/util/Exception.h>
 
 #include <algorithm>
 #include <sstream>
