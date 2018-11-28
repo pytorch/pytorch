@@ -186,7 +186,7 @@ struct TORCH_API Variable : public at::Tensor {
   /// Returns a copy of this `Variable` that is detached from its autograd graph
   /// and has a blank version. This method is OK to call if the `Variable` is a
   /// view.
-  /// NOTE: This will set `allow_size_or_storage_change_` to false, because changing
+  /// NOTE: This will set `is_created_from_data_or_detach_` to true, because changing
   /// size or storage of a detached Variable will not update the original Variable
   /// in the near future when VariableImpl and TensorImpl are merged.
   Variable detach() const;
@@ -410,12 +410,12 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
 
   int64_t storage_offset() const override;
 
-  void set_allow_size_or_storage_change(bool value) override {
-    data_.unsafeGetTensorImpl()->set_allow_size_or_storage_change(value);
+  void set_is_created_from_data_or_detach(bool value) override {
+    data_.unsafeGetTensorImpl()->set_is_created_from_data_or_detach(value);
   }
 
-  bool allow_size_or_storage_change() const override {
-    return data_.unsafeGetTensorImpl()->allow_size_or_storage_change();
+  bool is_created_from_data_or_detach() const override {
+    return data_.unsafeGetTensorImpl()->is_created_from_data_or_detach();
   }
 
   at::Tensor data_;
@@ -626,7 +626,7 @@ inline std::shared_ptr<Function> Variable::grad_accumulator() const {
 
 inline Variable Variable::detach() const {
   auto var = make_variable_view(*this, get()->data_, /*is_differentiable=*/false);
-  var.data().unsafeGetTensorImpl()->set_allow_size_or_storage_change(false);
+  var.data().unsafeGetTensorImpl()->set_is_created_from_data_or_detach(true);
   return var;
 }
 
