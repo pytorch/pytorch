@@ -9375,8 +9375,6 @@ EXCLUDE_SCRIPT = {
 
     # argument has custom behavior
     'test_nn_fractional_max_pool2d',
-    'test_nn_embedding',
-    'test_nn_embedding_bag',
     'test_nn_batch_norm',
 
     # aten op has additional cudnn argument
@@ -9391,8 +9389,6 @@ EXCLUDE_SCRIPT = {
     'test_nn_cross_entropy',
     'test_nn_interpolate',
     'test_nn_fold',
-    'test_nn_poisson_nll_loss',
-    'test_nn_poisson_nll_loss_full',
 }
 
 EXCLUDE_PYTHON_PRINT = {
