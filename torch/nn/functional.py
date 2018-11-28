@@ -1734,7 +1734,7 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
         if reduction == 'mean':
-            warnings.warn("reduction=mean is deprecated in kl_div. Please use reduction=batchmean"
+            warnings.warn("reduction=mean is deprecated in kl_div. Please use reduction=batchmean "
                           "which aligns with KL math definition.")
         reduction_enum = _Reduction.get_enum(reduction)
     return torch.kl_div(input, target, reduction_enum)

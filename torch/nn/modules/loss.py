@@ -303,15 +303,13 @@ class KLDivLoss(_Loss):
             \operatorname{sum}(L),  & \text{if}\; \text{size\_average} = \text{False}.
         \end{cases}
 
-    By default, the losses are averaged for each minibatch over observations
-    **as well as** over dimensions. . However, if the field
-    :attr:`size_average` is set to ``False``, the losses are instead summed.
+    In default reduction mode 'mean', the losses are averaged for each minibatch over observations
+    **as well as** over dimensions. 'batchmean' mode gives the correct KL divergence where losses
+    are averaged over batch dimension only. 'mean' mode is deprecated and the default reduction mode
+    will be changed to 'batchmean' in the next major release.
 
     .. _Kullback-Leibler divergence:
         https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
-
-    .. note:: In KLDiv loss function, the default reduction 'mean' is deprecated and
-        the default reduction mode will change to 'batchmean' in the next major release.
 
     Args:
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
