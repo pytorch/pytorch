@@ -263,8 +263,8 @@ struct CAFFE2_API Type {
   virtual Tensor irfft(const Tensor & self, int64_t signal_ndim, bool normalized, bool onesided, IntList signal_sizes) const = 0;
   virtual Tensor index(const Tensor & self, TensorList indices) const = 0;
   virtual Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) const = 0;
-  virtual Tensor index_put(const Tensor & self, TensorList indices, const Tensor & values) const = 0;
-  virtual Tensor & index_put_(Tensor & self, TensorList indices, const Tensor & values) const = 0;
+  virtual Tensor index_put(const Tensor & self, TensorList indices, const Tensor & values, bool accumulate) const = 0;
+  virtual Tensor & index_put_(Tensor & self, TensorList indices, const Tensor & values, bool accumulate) const = 0;
   virtual Tensor inverse(const Tensor & self) const = 0;
   virtual Tensor isclose(const Tensor & self, const Tensor & other, double rtol, double atol, bool equal_nan) const = 0;
   virtual bool is_distributed(const Tensor & self) const = 0;
@@ -292,9 +292,9 @@ struct CAFFE2_API Type {
   virtual Tensor max_values(const Tensor & self, int64_t dim, bool keepdim) const = 0;
   virtual Tensor mean(const Tensor & self, ScalarType dtype) const = 0;
   virtual Tensor mean(const Tensor & self) const = 0;
-  virtual Tensor mean(const Tensor & self, int64_t dim, bool keepdim, ScalarType dtype) const = 0;
-  virtual Tensor mean(const Tensor & self, int64_t dim, bool keepdim) const = 0;
-  virtual Tensor mean(const Tensor & self, int64_t dim, ScalarType dtype) const = 0;
+  virtual Tensor mean(const Tensor & self, IntList dim, bool keepdim, ScalarType dtype) const = 0;
+  virtual Tensor mean(const Tensor & self, IntList dim, bool keepdim) const = 0;
+  virtual Tensor mean(const Tensor & self, IntList dim, ScalarType dtype) const = 0;
   virtual std::tuple<Tensor,Tensor> median(const Tensor & self, int64_t dim, bool keepdim) const = 0;
   virtual std::tuple<Tensor,Tensor> min(const Tensor & self, int64_t dim, bool keepdim) const = 0;
   virtual Tensor min_values(const Tensor & self, int64_t dim, bool keepdim) const = 0;
