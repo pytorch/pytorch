@@ -207,9 +207,8 @@ def enable_cpu_fuser(fn):
         torch._C._jit_override_can_fuse_on_cpu(True)
         try:
             fn(*args, **kwargs)
-        except Exception:
+        finally:
             torch._C._jit_override_can_fuse_on_cpu(False)
-            raise
     return wrapper
 
 
