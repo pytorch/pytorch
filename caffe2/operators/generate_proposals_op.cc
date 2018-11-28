@@ -284,8 +284,8 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
   for (int i = 0; i < num_images; i++) {
     roi_counts += im_boxes[i].rows();
   }
-  out_rois->Extend(roi_counts, 50, &context_);
-  out_rois_probs->Extend(roi_counts, 50, &context_);
+  out_rois->Extend(roi_counts, 50);
+  out_rois_probs->Extend(roi_counts, 50);
   float* out_rois_ptr = out_rois->template mutable_data<float>();
   float* out_rois_probs_ptr = out_rois_probs->template mutable_data<float>();
   for (int i = 0; i < num_images; i++) {
