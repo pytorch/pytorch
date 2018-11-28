@@ -307,26 +307,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
 
           .def(
               "recv_anysource",
-              [](::c10d::ProcessGroup& pg,
-                 std::vector<at::Tensor>& input,
-                 at::Tensor& srcRankTensor,
-                 int tag) {
-                if (srcRankTensor.type().scalarType() != at::kInt) {
-                  throw std::runtime_error(
-                      "source rank tensor needs to be "
-                      "CPU int tensor");
-                }
-                if (srcRankTensor.numel() != 1) {
-                  throw std::runtime_error(
-                      "source rank tensor needs to "
-                      "contain only one element");
-                }
-                return pg.recvAnysource(
-                    input, static_cast<int*>(srcRankTensor.data_ptr()), tag);
-              },
-              py::arg("tensors"),
-              py::arg("src_rank"),
-              py::arg("tag"),
+              &::c10d::ProcessGroup::recvAnysource,
               py::call_guard<py::gil_scoped_release>())
 
           .def(
@@ -438,6 +419,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def("is_completed", &::c10d::ProcessGroup::Work::isCompleted)
       .def("is_success", &::c10d::ProcessGroup::Work::isSuccess)
       .def("exception", &::c10d::ProcessGroup::Work::exception)
+      .def("source_rank", &::c10d::ProcessGroup::Work::sourceRank)
       .def("synchronize", &::c10d::ProcessGroup::Work::synchronize)
       .def(
           "wait",
