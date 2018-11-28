@@ -207,9 +207,8 @@ def enable_cpu_fuser(fn):
         torch._C._jit_override_can_fuse_on_cpu(True)
         try:
             fn(*args, **kwargs)
-        except Exception:
+        finally:
             torch._C._jit_override_can_fuse_on_cpu(False)
-            raise
     return wrapper
 
 
@@ -238,29 +237,32 @@ class JitTestCase(TestCase):
         torch._C._jit_set_emit_module_hook(self.emitModuleHook)
 
     def emitModuleHook(self, module):
+
+        def copy_structure_and_params(m):
+            c = torch.jit.ScriptModule()
+            for name, v, buffer in m._get_parameters():
+                c._register_parameter(name, v, buffer)
+            for name, s in m._get_modules():
+                c._register_module(name, copy_structure_and_params(s))
+            return c
+
         # disable the hook while we parse code, otherwise we will re-enter the hook
         with self.disableModuleHook():
-            for name in module._method_names():
-                method = module._get_method(name)
-                try:
-                    pp, constant_table = method.python_print()
-                except RuntimeError as e:
-                    if "could not export python function" not in str(e):
-                        raise
-                    else:
-                        continue
+            try:
+                pp, constant_table = module._python_print()
+            except RuntimeError as e:
+                if "could not export python function" not in str(e):
+                    raise
+                else:
+                    return
 
-                ppv = "op_version_set = 0\n{}".format(pp)
-                sm = torch.jit.ScriptModule()
-                torch._C._jit_import_method(sm, ppv, constant_table)
-                method2 = sm._get_method(name)
-                pp2, _ = method2.python_print()
-                if pp != pp2:
-                    print(method.graph)
-                    print(pp)
-                    print(method2.graph)
-                    print(pp2)
-                    self.assertMultiLineEqual(pp, pp2)
+            ppv = "op_version_set = 0\n{}".format(pp)
+            sm = copy_structure_and_params(module)
+            torch._C._jit_import_methods(sm, ppv, constant_table)
+
+            pp2, _ = sm._python_print()
+            if pp != pp2:
+                self.assertMultiLineEqual(pp, pp2)
 
     def getExportImportCopy(self, m):
         # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
@@ -2185,10 +2187,10 @@ class TestJit(JitTestCase):
         def foo(x, y):
             return 2 * x + y
 
-        r = foo.graph.pretty_print()
+        r, _ = foo._python_print()
         mod = torch.jit.ScriptModule()
-        torch._C._jit_import_method(mod, "op_version_set = 0\n{}".format(r), [])
-        self.assertExpected(mod.graph.graph.pretty_print())
+        torch._C._jit_import_methods(mod, "op_version_set = 0\n{}".format(r), [])
+        self.assertExpected(mod.graph.pretty_print())
 
     def test_function_default_values(self):
         outer_var = torch.tensor(20)
@@ -2942,7 +2944,7 @@ class TestScript(JitTestCase):
             pp, table = foo._get_method('forward').python_print()
             ppv = "op_version_set = 0\n{}".format(pp)
             sm = torch.jit.ScriptModule()
-            torch._C._jit_import_method(sm, ppv, table)
+            torch._C._jit_import_methods(sm, ppv, table)
             r = foo()
             r2 = sm()
             # use precise assert, we are checking floating point details
@@ -8714,6 +8716,42 @@ a")
             return foo, a, bar
         self.checkScript(foo, (torch.rand(2, 3), torch.rand(3)))
 
+    def test_bool_dispatch(self):
+        def kwarg_false(x):
+            # type: (Tensor) -> Tensor
+            return F.max_pool1d(x, 1, 1, return_indices=False)
+        self.checkScript(kwarg_false, (torch.randn(3, 3, 3),))
+
+        def kwarg_true(x):
+            # type: (Tensor) -> Tuple[Tensor, Tensor]
+            return F.max_pool1d(x, 1, 1, return_indices=True)
+        self.checkScript(kwarg_true, (torch.randn(3, 3, 3),))
+
+        def full_kwarg_false(x):
+            # type: (Tensor) -> Tensor
+            return F.max_pool1d(x, 1, 1, ceil_mode=False, return_indices=False)
+        self.checkScript(full_kwarg_false, (torch.randn(3, 3, 3),))
+
+        def full_kwarg_true(x):
+            # type: (Tensor) -> Tuple[Tensor, Tensor]
+            return F.max_pool1d(x, 1, 1, ceil_mode=False, return_indices=True)
+        self.checkScript(full_kwarg_true, (torch.randn(3, 3, 3),))
+
+        def use_default(x):
+            # type: (Tensor) -> Tensor
+            return F.max_pool1d(x, 1, 1)
+        self.checkScript(use_default, (torch.randn(3, 3, 3),))
+
+        def arg_false(x):
+            # type: (Tensor) -> Tensor
+            return F.max_pool1d(x, 1, 1, 0, 1, False, False)
+        self.checkScript(arg_false, (torch.randn(3, 3, 3),))
+
+        def arg_true(x):
+            # type: (Tensor) -> Tuple[Tensor, Tensor]
+            return F.max_pool1d(x, 1, 1, 0, 1, False, True)
+        self.checkScript(arg_true, (torch.randn(3, 3, 3),))
+
 
 class MnistNet(nn.Module):
     def __init__(self):
@@ -9334,13 +9372,6 @@ EXCLUDE_SCRIPT = {
     'test_norm_fro',
     'test_norm_fro_default',
     'test_norm_nuc',
-    # skipped nn functional tests
-    # ops involves sampling which could not test
-
-    'test_nn_adaptive_max_pool1d',
-    'test_nn_adaptive_max_pool2d',
-    'test_nn_adaptive_max_pool3d',
-
 
     # argument has custom behavior
     'test_nn_fractional_max_pool2d',
@@ -9353,7 +9384,6 @@ EXCLUDE_SCRIPT = {
     'test_nn_unfold',
 
     # argument type not supported
-    'test_nn_affine_grid',
 
     # unknown builtin op
     'test_nn_binary_cross_entropy',
@@ -9877,6 +9907,7 @@ S = 5
 #     constructor arguments,
 #     args (tuple represents shape of a tensor arg),
 #     use_as_constant (should the submodule be listed in __constants__?)
+#     test variant name(will be used at test name suffix),
 # )
 nn_module_tests = [
     ('AlphaDropout', (), ((S,),)),
@@ -9899,8 +9930,17 @@ nn_module_tests = [
     ('Tanh', (), ((S,),)),
     ('Tanhshrink', (), ((S,),)),
     ('Threshold', (2., 2.), ((S,),)),
+    ('Embedding', (4, 3), (torch.empty(2, 3, dtype=torch.long).random_(4)),),
+    ('EmbeddingBag', (4, 3), (torch.empty(2, 3, dtype=torch.long).random_(4)),),
+    ('EmbeddingBag', (4, 3, None, 2., False, 'sum'), torch.empty(2, 3, dtype=torch.long).random_(4), False, 'sum'),
+    ('EmbeddingBag', (4, 3, None, 2., False, 'max'), torch.empty(2, 3, dtype=torch.long).random_(4), False, 'max'),
     ('Sequential', (torch.nn.Sigmoid(), torch.nn.Threshold(1., 2.)), ((S,),), True),
 ]
+
+# module cannot be exported /imported currently
+EXCLUDE_MODULE_EXPORT_IMPORT = {
+    'EmbeddingBag',
+}
 
 # NB: JIT script tests for all nn functional interfaces, script mode does
 # not support in_place operations yet, so no inplace operation tests added.
@@ -9931,6 +9971,7 @@ nn_functional_tests = [
     ('avg_pool3d', (S, S, S, S, S), (3,)),
     ('fractional_max_pool2d', (S, S, S, S), (3, [2, 3], None)),
     ('max_pool1d', (S, S, S), (2, 1)),
+    ('max_pool1d', (S, S, S), (2, 1, 1, 1, False, True), 'with_indices'),
     ('max_pool2d', (S, S, S, S), (2, 1)),
     ('max_pool3d', (S, S, S, S, S), (2, 1)),
     ('max_unpool1d', torch.tensor([[[2., 4]]]), (torch.tensor([[[1, 3]]]), 2, 2, 0)),
@@ -9988,8 +10029,8 @@ nn_functional_tests = [
     ('group_norm', (S, S, S), (1, torch.Tensor(5), None),),
     ('local_response_norm', (S, S, S), (2, ),),
     ('nll_loss', F.log_softmax(torch.randn(3, 5), dim=0), (torch.tensor([1, 0, 4]), None, None),),
-    ('poisson_nll_loss', (S, 2), ((S, 2),),),
-    ('poisson_nll_loss', (S, 2), ((S, 2), True, True), 'full'),
+    ('poisson_nll_loss', torch.rand(S, 2), (torch.rand(S, 2),),),
+    ('poisson_nll_loss', torch.rand(S, 2), (torch.rand(S, 2), True, True), 'full'),
     ('kl_div', F.log_softmax(torch.randn(S, 10), 1), (F.softmax(torch.randn(S, 10), 1),),),
     ('cross_entropy', (3, S), (torch.randint(S, (3,), dtype=torch.int64),),),
     ('binary_cross_entropy_with_logits', (3,), (torch.empty(3).random_(2), ),),
@@ -10023,7 +10064,7 @@ nn_functional_tests = [
     ('binary_cross_entropy', torch.randn(3, 2).sigmoid(),
         (non_differentiable(torch.rand(3, 2)),
          non_differentiable(torch.randn(3, 2)), True), 'size_average'),
-    ('ctc_loss', torch.randn(S, S, S).log_softmax(2).detach().requires_grad_(), \
+    ('ctc_loss', torch.rand(S, S, S).log_softmax(2).detach().requires_grad_(), \
      (torch.randint(1, S, (S, S), dtype=torch.long), torch.full((S,), S, dtype=torch.long), \
       torch.randint(1, S, (S,), dtype=torch.long))),
 ]
@@ -10181,7 +10222,7 @@ def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=()
 
 
 def add_nn_module_test(module_name, constructor_args, call_args,
-                       use_as_constant=False, skipTestIf=()):
+                       use_as_constant=False, variant=None, skipTestIf=()):
     def do_test(self):
         nn_module = getattr(torch.nn, module_name)
 
@@ -10206,14 +10247,20 @@ def add_nn_module_test(module_name, constructor_args, call_args,
                 def __init__(self):
                     super(TheModule, self).__init__()
                     self.submodule = nn_module(*constructor_args)
-
-            module = TheModule()
-            module.define(script)
-
-            # Check there are no Python ops by exporting
-            self.assertExportImportModule(module, tensors)
-            create_script_module.last_graph = module.graph
-            return module(*args)
+            # module cannot be imported / exported
+            if module_name in EXCLUDE_MODULE_EXPORT_IMPORT:
+                with self.disableModuleHook():
+                    module = TheModule()
+                    module.define(script)
+                    create_script_module.last_graph = module.graph
+                    mod = module(*args)
+            else:
+                module = TheModule()
+                module.define(script)
+                self.assertExportImportModule(module, tensors)
+                create_script_module.last_graph = module.graph
+                mod = module(*args)
+            return mod
 
         # Construct a normal nn module to stay consistent with create_script_module
         # and make use of a single global rng_state in module initialization
@@ -10228,6 +10275,8 @@ def add_nn_module_test(module_name, constructor_args, call_args,
         check_against_reference(self, create_script_module, create_nn_module, f_args_variable)
 
     test_name = 'test_nn_{}'.format(module_name)
+    if variant is not None:
+        test_name = test_name + "_" + variant
     post_add_test(test_name, skipTestIf, do_test)
 
 

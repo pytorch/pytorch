@@ -2,6 +2,7 @@ from common_utils import TestCase, run_tests
 import torch
 import warnings
 from torch import tensor
+import unittest
 
 
 class TestIndexing(TestCase):
@@ -448,9 +449,9 @@ class NumpyTests(TestCase):
         def f(a, v):
             a[a > -1] = tensor(v)
 
-        self.assertRaisesRegex(Exception, "expand", f, a, [])
-        self.assertRaisesRegex(Exception, 'expand', f, a, [1, 2, 3])
-        self.assertRaisesRegex(Exception, 'expand', f, a[:1], [1, 2, 3])
+        self.assertRaisesRegex(Exception, 'shape mismatch', f, a, [])
+        self.assertRaisesRegex(Exception, 'shape mismatch', f, a, [1, 2, 3])
+        self.assertRaisesRegex(Exception, 'shape mismatch', f, a[:1], [1, 2, 3])
 
     def test_boolean_indexing_twodim(self):
         # Indexing a 2-dimensional array with
@@ -503,12 +504,14 @@ class NumpyTests(TestCase):
 
     def test_broaderrors_indexing(self):
         a = torch.zeros(5, 5)
-        self.assertRaisesRegex(RuntimeError, 'match the size', a.__getitem__, ([0, 1], [0, 1, 2]))
-        self.assertRaisesRegex(RuntimeError, 'match the size', a.__setitem__, ([0, 1], [0, 1, 2]), 0)
+        self.assertRaisesRegex(RuntimeError, 'shape mismatch', a.__getitem__, ([0, 1], [0, 1, 2]))
+        self.assertRaisesRegex(RuntimeError, 'shape mismatch', a.__setitem__, ([0, 1], [0, 1, 2]), 0)
 
     def test_trivial_fancy_out_of_bounds(self):
         a = torch.zeros(5)
         ind = torch.ones(20, dtype=torch.int64)
+        if a.is_cuda:
+            raise unittest.SkipTest('CUDA asserts instead of raising an exception')
         ind[-1] = 10
         self.assertRaises(RuntimeError, a.__getitem__, ind)
         self.assertRaises(RuntimeError, a.__setitem__, ind, 0)

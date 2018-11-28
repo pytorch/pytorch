@@ -811,9 +811,9 @@ def index_select(g, self, dim, index):
     return g.op("Gather", self, index, axis_i=dim)
 
 
-def index_put(g, self, indices_list_value, values):
+def index_put(g, self, indices_list_value, values, accumulate):
     indices_list = _unpack_list(indices_list_value)
-    args = [self] + indices_list + [values]
+    args = [self] + indices_list + [values, accumulate]
     return g.op("ATen", *args, operator_s='index_put')
 
 
