@@ -372,7 +372,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   virtual const Storage& storage() const;
 
   void set_storage(const Storage& storage) {
-    AT_CHECK(allow_size_or_storage_change(), "set_storage is not allowed on Tensor created from .data or .detach()");
+    AT_CHECK(is_created_from_data_or_detach(), "set_storage is not allowed on Tensor created from .data or .detach()");
     storage_ = storage;
   }
 
@@ -734,7 +734,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * which is harder to misuse.
    */
   virtual void resize_dim(int64_t ndim) {
-    AT_CHECK(allow_size_or_storage_change(), "resize_dim is not allowed on Tensor created from .data or .detach()");
+    AT_CHECK(is_created_from_data_or_detach(), "resize_dim is not allowed on Tensor created from .data or .detach()");
     sizes_.resize(ndim, 0);
     strides_.resize(ndim, 0);
     refresh_numel();
@@ -750,7 +750,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * which is harder to misuse.
    */
   virtual void set_size(int64_t dim, int64_t new_size) {
-    AT_CHECK(allow_size_or_storage_change(), "set_size is not allowed on Tensor created from .data or .detach()");
+    AT_CHECK(is_created_from_data_or_detach(), "set_size is not allowed on Tensor created from .data or .detach()");
     sizes_.at(dim) = new_size;
     refresh_numel();
     refresh_contiguous();
@@ -763,7 +763,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * which is harder to misuse.
    */
   virtual void set_stride(int64_t dim, int64_t new_stride) {
-    AT_CHECK(allow_size_or_storage_change(), "set_stride is not allowed on Tensor created from .data or .detach()");
+    AT_CHECK(is_created_from_data_or_detach(), "set_stride is not allowed on Tensor created from .data or .detach()");
     strides_[dim] = new_stride;
     refresh_numel();
     refresh_contiguous();
@@ -777,7 +777,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * (and resizing if necessary.)
    */
   virtual void set_storage_offset(int64_t storage_offset) {
-    AT_CHECK(allow_size_or_storage_change(), "set_storage_offset is not allowed on Tensor created from .data or .detach()");
+    AT_CHECK(is_created_from_data_or_detach(), "set_storage_offset is not allowed on Tensor created from .data or .detach()");
     storage_offset_ = storage_offset;
   }
 
@@ -792,7 +792,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * See Note [We regret making Variable hold a Tensor]
    */
   void set_sizes_contiguous(at::IntList new_size) {
-    AT_CHECK(allow_size_or_storage_change(), "set_sizes_contiguous is not allowed on Tensor created from .data or .detach()");
+    AT_CHECK(is_created_from_data_or_detach(), "set_sizes_contiguous is not allowed on Tensor created from .data or .detach()");
     AT_ASSERT(!is_variable());
     auto old_dim = sizes_.size();
     auto new_dim = new_size.size();
@@ -817,7 +817,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * See Note [We regret making Variable hold a Tensor]
    */
   void set_sizes_and_strides(at::IntList new_size, at::IntList new_stride) {
-    AT_CHECK(allow_size_or_storage_change(), "set_sizes_and_strides is not allowed on Tensor created from .data or .detach()");
+    AT_CHECK(is_created_from_data_or_detach(), "set_sizes_and_strides is not allowed on Tensor created from .data or .detach()");
     AT_ASSERT(!is_variable());
     AT_CHECK(
         new_size.size() == new_stride.size(),
@@ -875,15 +875,15 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * Set whether a tensor allows size or storage changes.
    */
-  virtual void set_allow_size_or_storage_change(bool value) {
-    allow_size_or_storage_change_ = value;
+  virtual void set_is_created_from_data_or_detach(bool value) {
+    is_created_from_data_or_detach_ = value;
   }
 
   /**
    * True if a tensor allows size or storage changes.
    */
-  virtual bool allow_size_or_storage_change() const {
-    return allow_size_or_storage_change_;
+  virtual bool is_created_from_data_or_detach() const {
+    return is_created_from_data_or_detach_;
   }
 
   /**
@@ -1508,7 +1508,7 @@ protected:
   bool is_contiguous_ = true;
   bool is_variable_ = false;
   bool is_wrapped_number_ = false;
-  bool allow_size_or_storage_change_ = true;
+  bool is_created_from_data_or_detach_ = true;
   // we decide to keep reserved_ and it will
   // live in Tensor after the split
   // The logic is that if Extend() or ReserveSpace() were ever called,
