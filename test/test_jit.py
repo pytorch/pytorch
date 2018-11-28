@@ -238,29 +238,32 @@ class JitTestCase(TestCase):
         torch._C._jit_set_emit_module_hook(self.emitModuleHook)
 
     def emitModuleHook(self, module):
+
+        def copy_structure_and_params(m):
+            c = torch.jit.ScriptModule()
+            for name, v, buffer in m._get_parameters():
+                c._register_parameter(name, v, buffer)
+            for name, s in m._get_modules():
+                c._register_module(name, copy_structure_and_params(s))
+            return c
+
         # disable the hook while we parse code, otherwise we will re-enter the hook
         with self.disableModuleHook():
-            for name in module._method_names():
-                method = module._get_method(name)
-                try:
-                    pp, constant_table = method.python_print()
-                except RuntimeError as e:
-                    if "could not export python function" not in str(e):
-                        raise
-                    else:
-                        continue
+            try:
+                pp, constant_table = module._python_print()
+            except RuntimeError as e:
+                if "could not export python function" not in str(e):
+                    raise
+                else:
+                    return
 
-                ppv = "op_version_set = 0\n{}".format(pp)
-                sm = torch.jit.ScriptModule()
-                torch._C._jit_import_method(sm, ppv, constant_table)
-                method2 = sm._get_method(name)
-                pp2, _ = method2.python_print()
-                if pp != pp2:
-                    print(method.graph)
-                    print(pp)
-                    print(method2.graph)
-                    print(pp2)
-                    self.assertMultiLineEqual(pp, pp2)
+            ppv = "op_version_set = 0\n{}".format(pp)
+            sm = copy_structure_and_params(module)
+            torch._C._jit_import_methods(sm, ppv, constant_table)
+
+            pp2, _ = sm._python_print()
+            if pp != pp2:
+                self.assertMultiLineEqual(pp, pp2)
 
     def getExportImportCopy(self, m):
         # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
@@ -2185,10 +2188,10 @@ class TestJit(JitTestCase):
         def foo(x, y):
             return 2 * x + y
 
-        r = foo.graph.pretty_print()
+        r, _ = foo._python_print()
         mod = torch.jit.ScriptModule()
-        torch._C._jit_import_method(mod, "op_version_set = 0\n{}".format(r), [])
-        self.assertExpected(mod.graph.graph.pretty_print())
+        torch._C._jit_import_methods(mod, "op_version_set = 0\n{}".format(r), [])
+        self.assertExpected(mod.graph.pretty_print())
 
     def test_function_default_values(self):
         outer_var = torch.tensor(20)
@@ -2942,7 +2945,7 @@ class TestScript(JitTestCase):
             pp, table = foo._get_method('forward').python_print()
             ppv = "op_version_set = 0\n{}".format(pp)
             sm = torch.jit.ScriptModule()
-            torch._C._jit_import_method(sm, ppv, table)
+            torch._C._jit_import_methods(sm, ppv, table)
             r = foo()
             r2 = sm()
             # use precise assert, we are checking floating point details
@@ -9280,6 +9283,23 @@ class TestPytorchExportModes(JitTestCase):
             operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK)
         self.assertExpected(exported)
 
+    # torch.fmod is using to test ONNX_ATEN.
+    # If you plan to remove fmod from aten, or found this test failed.
+    # please contact @Rui.
+    @skipIfRocm
+    def test_onnx_aten(self):
+        class ModelWithAtenFmod(nn.Module):
+            def forward(self, x, y):
+                return torch.fmod(x, y)
+
+        f = io.BytesIO()
+        x = torch.randn(3, 4, dtype=torch.float32)
+        y = torch.randn(3, 4, dtype=torch.float32)
+        exported = torch.onnx.export_to_pretty_string(
+            ModelWithAtenFmod(), (x, y), f,
+            operator_export_type=OperatorExportTypes.ONNX_ATEN)
+        self.assertExpected(exported)
+
 
 # known to be failing in tracer
 EXCLUDE_TRACED = {
@@ -9338,7 +9358,6 @@ EXCLUDE_SCRIPT = {
     'test_nn_max_unpool2d',
 
     # argument type not supported
-    'test_nn_affine_grid',
 
     # unknown builtin op
     'test_nn_binary_cross_entropy',

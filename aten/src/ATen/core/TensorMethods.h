@@ -22,6 +22,10 @@ inline Tensor Tensor::cuda() const {
   return toType(type().cuda());
 }
 
+inline Tensor Tensor::hip() const {
+  return toType(type().hip());
+}
+
 inline Tensor & Tensor::copy_(const Tensor & src, bool non_blocking) {
   return type().copy_(*this, src, non_blocking);
 }
@@ -314,11 +318,11 @@ inline Tensor Tensor::index(TensorList indices) const {
 inline Tensor & Tensor::index_copy_(int64_t dim, const Tensor & index, const Tensor & source) {
     return type().index_copy_(*this, dim, index, source);
 }
-inline Tensor Tensor::index_put(TensorList indices, const Tensor & values) const {
-    return type().index_put(*this, indices, values);
+inline Tensor Tensor::index_put(TensorList indices, const Tensor & values, bool accumulate) const {
+    return type().index_put(*this, indices, values, accumulate);
 }
-inline Tensor & Tensor::index_put_(TensorList indices, const Tensor & values) {
-    return type().index_put_(*this, indices, values);
+inline Tensor & Tensor::index_put_(TensorList indices, const Tensor & values, bool accumulate) {
+    return type().index_put_(*this, indices, values, accumulate);
 }
 inline Tensor Tensor::inverse() const {
     return type().inverse(*this);
@@ -1274,6 +1278,15 @@ inline bool Tensor::is_cuda() const {
 
 inline bool is_cuda(Tensor self) {
   return self.is_cuda();
+}
+
+inline bool Tensor::is_hip() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->is_hip();
+}
+
+inline bool is_hip(Tensor self) {
+  return self.is_hip();
 }
 
 inline bool Tensor::is_sparse() const {
