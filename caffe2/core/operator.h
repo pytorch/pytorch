@@ -127,6 +127,14 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     return BlobGetMutableTensor(outputs_.at(idx), type);
   }
 
+  inline Tensor
+  XOutputTensor(int idx, at::IntList dims, at::TensorOptions options) {
+    CAFFE_ENFORCE_WITH_CALLER(
+        options.device_opt() != c10::nullopt,
+        "device must be provided in option.");
+    return XBlobGetMutableTensor(outputs_.at(idx), dims, options);
+  }
+
   inline Tensor*
   OutputTensor(int idx, at::IntList dims, at::TensorOptions options) {
     CAFFE_ENFORCE_WITH_CALLER(
@@ -495,7 +503,15 @@ class Operator : public OperatorBase {
     return OperatorBase::template Input<Tensor>(idx, type);
   }
 
-  inline Tensor* Output(int idx, at::IntList dims, at::TensorOptions options) {
+  Tensor XOutput(int idx, at::IntList dims, at::TensorOptions options) {
+    if (options.device_opt() == c10::nullopt) {
+      return OperatorBase::XOutputTensor(
+          idx, dims, options.device(context_.device()));
+    }
+    return OperatorBase::XOutputTensor(idx, dims, options);
+  }
+
+  Tensor* Output(int idx, at::IntList dims, at::TensorOptions options) {
     if (options.device_opt() == c10::nullopt) {
       return OperatorBase::OutputTensor(
           idx, dims, options.device(context_.device()));

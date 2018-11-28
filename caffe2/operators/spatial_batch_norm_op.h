@@ -90,35 +90,37 @@ class SpatialBNOp : public Operator<Context> {
           alpha_data,
           beta_data);
     } else {
-      auto* saved_mean = Output(SAVED_MEAN);
-      auto* saved_rstd = Output(SAVED_INV_STD);
-      if (num_batches_ == 1) {
-        saved_mean->Resize(C);
-        saved_rstd->Resize(C);
-      } else {
-        const auto& batch_mean_sum = Input(BATCH_MEAN_SUM);
-        const auto& batch_var_sum = Input(BATCH_VAR_SUM);
-        if (saved_mean != &batch_mean_sum) {
-          saved_mean->Resize(C);
-        }
-        if (saved_rstd != &batch_var_sum) {
-          saved_rstd->Resize(C);
-        }
-      }
+      auto* saved_mean = Output(SAVED_MEAN, {C}, at::dtype<T>());
+      auto* saved_rstd = Output(SAVED_INV_STD, {C}, at::dtype<T>());
       T* saved_mean_data = saved_mean->template mutable_data<T>();
       T* saved_rstd_data = saved_rstd->template mutable_data<T>();
-      auto* running_mean = Output(RUNNING_MEAN);
-      auto* running_var = Output(RUNNING_VAR);
-      if (running_mean->numel() != C) {
-        running_mean->Resize(C);
-        math::Set<T, Context>(
-            C, T(0), running_mean->template mutable_data<T>(), &context_);
+
+      // Enforce Alias
+      CAFFE_ENFORCE(
+          IsInputOutputAlias(3, 1), "Input 3 and Output 1 should be alias.");
+      CAFFE_ENFORCE(
+          IsInputOutputAlias(4, 2), "Input 4 and Output 2 should be alias.");
+
+      Tensor* running_mean, *running_var;
+      const auto& mean = Input(EST_MEAN);
+      const auto& var = Input(EST_VAR);
+      if (mean.numel() != C) {
+       running_mean = Output(RUNNING_MEAN, {C}, at::dtype<T>());
+       C10_LOG_EVERY_MS(WARNING, 1000) << "[Depreacated] Running mean is not initialized in SpatialBatchNorm Op";
+       math::Set<T, Context>(C, T(0), running_mean->template mutable_data<T>(), &context_);
+      } else {
+       running_mean = Output(RUNNING_MEAN, {C}, at::dtype<T>());
       }
-      if (running_var->numel() != C) {
-        running_var->Resize(C);
+      if (var.numel() != C) {
+        running_var = Output(RUNNING_VAR, {C}, at::dtype<T>());
         math::Set<T, Context>(
             C, T(0), running_var->template mutable_data<T>(), &context_);
+        C10_LOG_EVERY_MS(WARNING, 1000) << "[Deprecated] Running variance is not initialized in SpatialBatchNorm Op";
+      } else {
+        running_var = Output(RUNNING_VAR, {C}, at::dtype<T>());
       }
+
+
       T* running_mean_data = running_mean->template mutable_data<T>();
       T* running_var_data = running_var->template mutable_data<T>();
       if (N == 0) {

@@ -184,6 +184,7 @@ void AliasDb::analyze(Node* node) {
     case prim::FusedConcat:
     case prim::MMTreeReduce:
     case prim::MMBatchSide:
+    case prim::None:
       return analyzeCreator(node);
     case prim::TupleUnpack:
     case prim::TupleIndex:

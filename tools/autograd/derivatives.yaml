@@ -132,6 +132,9 @@
   vec1: grad.mv(vec2) * alpha
   vec2: grad.t().mv(vec1) * alpha
 
+- name: affine_grid_generator(Tensor theta, IntList size)
+  theta: affine_grid_generator_backward(grad, size)
+
 - name: alias(Tensor self)
   self: grad
 
@@ -360,6 +363,10 @@
 - name: histc(Tensor self, int64_t bins, Scalar min, Scalar max)
   self: not_implemented("histc")
 
+- name: index(Tensor self, TensorList indices)
+  self: zeros_like(self).index_put_(indices, grad, true)
+  indices: TensorList()
+
 - name: index_add_(Tensor self, int64_t dim, Tensor index, Tensor source)
   self: grad
   source: grad.index_select(dim, index)
@@ -374,6 +381,10 @@
 - name: index_fill_(Tensor self, int64_t dim, Tensor index, Tensor value)
   self: grad.clone().index_fill_(dim, index, 0)
   value: grad.index_select(dim, index).sum()
+
+- name: index_put_(Tensor self, TensorList indices, Tensor values, bool accumulate)
+  self: grad.clone().index_put_(indices, zeros_like(values), accumulate)
+  values: grad.index(indices)
 
 - name: index_select(Tensor self, int64_t dim, Tensor index)
   self: at::zeros(self.sizes(), grad.options()).index_add_(dim, index, grad)
@@ -459,7 +470,7 @@
   self: grad.clone().masked_fill_(self <= other, 0)
   other: grad.clone().masked_fill_(self > other, 0)
 
-- name: mean(Tensor self, int64_t dim, bool keepdim)
+- name: mean(Tensor self, IntList dim, bool keepdim)
   self: sum_backward(grad, self.sizes(), dim, keepdim) / _safe_size(self.sizes(), dim)
 
 - name: mean(Tensor self)
@@ -762,7 +773,7 @@
   self: grad.flip(dims)
 
 - name: roll(Tensor self, IntList shifts, IntList dims)
-  self: grad.roll( -shifts[0], dims)
+  self: grad.roll(fmap(reverse_list(shifts), [](int64_t i){return -i;}), reverse_list(dims))
 
 - name: rot90(Tensor self, int64_t k, IntList dims)
   self: grad.rot90(-k, dims)
@@ -846,6 +857,9 @@
 
 - name: _sparse_coo_tensor_with_dims_and_tensors(int64_t sparse_dim, int64_t dense_dim, IntList size, Tensor indices, Tensor values, TensorOptions options)
   values: sparse_constructor_values_backward(grad, indices, values.sizes())
+
+- name: _sparse_sum(Tensor self, IntList dim)
+  self: at::_sparse_sum_backward(grad, self, dim)
 
 - name: _standard_gamma(Tensor self, Generator generator)
   self: grad * _standard_gamma_grad(self, result)

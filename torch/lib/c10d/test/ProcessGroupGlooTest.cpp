@@ -56,7 +56,9 @@ class SignalTest {
     std::shared_ptr<::c10d::ProcessGroup::Work> work;
     while (true) {
       work = pg.allreduce(tensors);
-      if (!work->wait()) {
+      try {
+        work->wait();
+      } catch (const std::exception& e) {
         break;
       }
       sem_.post();
@@ -171,9 +173,7 @@ void testAllreduce(const std::string& path, const at::Backend b) {
 
   // Wait for work to complete
   for (auto i = 0; i < size; i++) {
-    if (!work[i]->wait()) {
-      throw work[i]->exception();
-    }
+    work[i]->wait();
   }
 
   // Verify outputs
@@ -225,9 +225,7 @@ void testBroadcast(const std::string& path, const at::Backend b) {
 
       // Wait for work to complete
       for (auto i = 0; i < size; i++) {
-        if (!work[i]->wait()) {
-          throw work[i]->exception();
-        }
+        work[i]->wait();
       }
 
       // Verify outputs
@@ -260,9 +258,7 @@ void testBarrier(const std::string& path) {
 
   // Wait for work to complete
   for (auto i = 0; i < size; i++) {
-    if (!work[i]->wait()) {
-      throw work[i]->exception();
-    }
+    work[i]->wait();
   }
 }
 
@@ -270,15 +266,21 @@ int main(int argc, char** argv) {
   {
     TemporaryFile file;
     auto work = testSignal(file.path, SIGSTOP);
-    auto& ex = work->exception();
-    std::cout << "SIGSTOP test got: " << ex.what() << std::endl;
+    try {
+      std::rethrow_exception(work->exception());
+    } catch (const std::exception& ex) {
+      std::cout << "SIGSTOP test got: " << ex.what() << std::endl;
+    }
   }
 
   {
     TemporaryFile file;
     auto work = testSignal(file.path, SIGKILL);
-    auto& ex = work->exception();
-    std::cout << "SIGKILL test got: " << ex.what() << std::endl;
+    try {
+      std::rethrow_exception(work->exception());
+    } catch (const std::exception& ex) {
+      std::cout << "SIGKILL test got: " << ex.what() << std::endl;
+    }
   }
 
   {

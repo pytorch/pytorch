@@ -451,13 +451,14 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
           DoNothing<> doNothingObj{};
           ReQuantizeOutput<false /* FUSE_RELU */> outputProcObj(
               doNothingObj,
-              requantization_params_[B_batch_idx].real_multiplier,
+              &requantization_params_[B_batch_idx].real_multiplier,
               out_qparams_.zero_point,
               in_qparams_[0].zero_point,
-              B_qparams_[B_batch_idx].zero_point,
+              &B_qparams_[B_batch_idx].zero_point,
               packA.getRowOffsetBuffer(),
               column_offsets_.data() + B_batch_idx * N,
-              nullptr);
+              nullptr, // bias
+              N); // ncols per quant group
 
           fbgemmPacked(
               packA,
@@ -512,12 +513,13 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
             ReQuantizeForFloat<false /* FUSE_RELU*/> outputProcObj(
                 doNothingObj,
                 in_qparams_[0].scale,
-                B_qparams_[B_batch_idx].scale,
+                &B_qparams_[B_batch_idx].scale,
                 in_qparams_[0].zero_point,
-                B_qparams_[B_batch_idx].zero_point,
+                &B_qparams_[B_batch_idx].zero_point,
                 packA.getRowOffsetBuffer(),
                 column_offsets_.data() + B_batch_idx * N,
-                nullptr); // bias
+                nullptr, // bias
+                N); // ncols per quant group
 
             fbgemmPacked(
                 packA,
@@ -565,12 +567,13 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
             ReQuantizeForFloat<false /* FUSE_RELU*/> outputProcObj(
                 doNothingObj,
                 in_qparams_[0].scale,
-                B_qparams_[B_batch_idx].scale,
+                &B_qparams_[B_batch_idx].scale,
                 in_qparams_[0].zero_point,
-                B_qparams_[B_batch_idx].zero_point,
+                &B_qparams_[B_batch_idx].zero_point,
                 packA.getRowOffsetBuffer(),
                 column_offsets_.data() + B_batch_idx * N,
-                nullptr); // bias
+                nullptr, // bias
+                N); // ncols per quant group
 
             fbgemmPacked(
                 packA,
