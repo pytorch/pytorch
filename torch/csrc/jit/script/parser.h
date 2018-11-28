@@ -31,7 +31,7 @@ inline Decl mergeTypesFromTypeComment(Decl decl, Decl type_annotation_decl, bool
     new_params.push_back(old[0]);
   }
   for (; i < decl.params().size(); ++i, ++j) {
-    new_params.push_back(Param::create(old[i].range(), old[i].ident(), _new[j].type()));
+    new_params.emplace_back(old[i].withType(_new[j].type()));
   }
   return Decl::create(decl.range(), List<Param>::create(decl.range(), new_params), type_annotation_decl.return_type());
 }
@@ -376,12 +376,18 @@ struct Parser {
     } else {
       type = Var::create(L.cur().range, Ident::create(L.cur().range, "Tensor"));
     }
-    return Param::create(type->range(), Ident(ident), Expr(type));
+    TreeRef def;
+    if (L.nextIf('=')) {
+      def = Maybe<Expr>::create(L.cur().range, parseExp());
+    } else {
+      def = Maybe<Expr>::create(L.cur().range);
+    }
+    return Param::create(type->range(), Ident(ident), Expr(type), Maybe<Expr>(def));
   }
 
   Param parseBareTypeAnnotation() {
     auto type = parseExp();
-    return Param::create(type.range(), Ident::create(type.range(), ""), type);
+    return Param::create(type.range(), Ident::create(type.range(), ""), type, Maybe<Expr>::create(type.range()));
   }
 
   TreeRef parseTypeComment(bool parse_full_line=false) {

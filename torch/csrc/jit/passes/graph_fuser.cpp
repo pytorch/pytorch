@@ -22,12 +22,16 @@ namespace {
 //    - Has a single tensor output
 //    - Output and all tensor inputs have the same shape
 //    - Output and all tensor inputs have the same scalar type
+//      or all tensor inputs have the same scalar type and
+//         output is identified in PropagateInputShapes
 //    - Output and all tensor inputs should be on the same device
 //    - Produces contiguous outputs
 // Some of these restrictions may be relaxable, but you should
 // carefully read the code first, as we rely on these assumptions.
 bool isSimpleMap(Node *node) {
   static OperatorSet simple_mappable {{
+    "aten::_cast_Float(Tensor self, bool non_blocking) -> Tensor",
+
     "aten::abs(Tensor self) -> Tensor",
     "aten::acos(Tensor self) -> Tensor",
     "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
@@ -54,6 +58,7 @@ bool isSimpleMap(Node *node) {
     "aten::mul(Tensor self, Tensor other) -> Tensor",
     "aten::neg(Tensor self) -> Tensor",
     "aten::pow(Tensor self, Tensor exponent) -> Tensor",
+    "aten::pow(Tensor self, Scalar exponent) -> Tensor",
     "aten::rand_like(Tensor self) -> Tensor",
     "aten::reciprocal(Tensor self) -> Tensor",
     "aten::relu(Tensor self) -> Tensor",
@@ -72,6 +77,23 @@ bool isSimpleMap(Node *node) {
     "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
     "aten::mul(Tensor self, Scalar other) -> Tensor",
     "aten::div(Tensor self, Scalar other) -> Tensor",
+
+    "aten::eq(Tensor self, Tensor other) -> Tensor",
+    "aten::eq(Tensor self, Scalar other) -> Tensor",
+    "aten::ne(Tensor self, Tensor other) -> Tensor",
+    "aten::ne(Tensor self, Scalar other) -> Tensor",
+    "aten::ge(Tensor self, Tensor other) -> Tensor",
+    "aten::ge(Tensor self, Scalar other) -> Tensor",
+    "aten::gt(Tensor self, Tensor other) -> Tensor",
+    "aten::gt(Tensor self, Scalar other) -> Tensor",
+    "aten::le(Tensor self, Tensor other) -> Tensor",
+    "aten::le(Tensor self, Scalar other) -> Tensor",
+    "aten::lt(Tensor self, Tensor other) -> Tensor",
+    "aten::lt(Tensor self, Scalar other) -> Tensor",
+
+    "aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor",
+
+    "aten::type_as(Tensor self, Tensor other) -> Tensor",
   }};
   if (!simple_mappable.find(node)) {
     return false;
@@ -490,15 +512,49 @@ struct GraphFuser {
     }
   }
 
+  Node * promoteChunkToBroadcastingChunk(Node * chunk) {
+    JIT_ASSERT(chunk->kind() == prim::ConstantChunk);
+
+    size_t nchunks = chunk->i(attr::chunks);
+    Node * bchunk = chunk->owningGraph()->create(prim::BroadcastingChunk, nchunks);
+    bchunk->addInput(chunk->input());
+    for (size_t i = 0; i < nchunks; ++i) {
+      auto * old_output = chunk->outputs().at(i);
+      auto * new_output = bchunk->outputs().at(i);
+      new_output->copyMetadata(old_output);
+      old_output->replaceAllUsesWith(new_output);
+    }
+    bchunk->copyAttributes(*chunk);
+    bchunk->insertAfter(chunk);
+    chunk->destroy();
+    return bchunk;
+  }
 
   // in places where op can be fused into a consumer but chunk is in the way
   // distribute chunk to op's operands:
   // replace a,b = chunk(op(x,y,z)) with:
-  // x0,x1 = chunk(x) (x0 has a's type, x1 has b's type)
-  // y0,y1 = chunk(y) (y0 has a's type, y1 has b's type)
-  // z0,z1 = chunk(z) (z0 has a's type, z1 has b's type)
+  // x', y', z' = broadcast_tensors([x, y, z])
+  // x0,x1 = chunk(x') (x0 has a's type, x1 has b's type)
+  // y0,y1 = chunk(y') (y0 has a's type, y1 has b's type)
+  // z0,z1 = chunk(z') (z0 has a's type, z1 has b's type)
   // a = op(x0,y0,z0) (a,b have their same size but are now contiguous)
   // b = op(x1,y1,x1)
+  //
+  // The graph fuser uses an intermediate prim::BroadcastingChunk node to
+  // represent this behavior concisely. BroadcastingChunk(x, y, z) broadcasts
+  // all of its inputs and then chunks each input, in order, the same way.
+  // The above graph is equivalent to:
+  // x0, x1, y0, y1, z0, z1 = BroadcastingChunk(x, y, z)
+  // a = op(x0,y0,z0)
+  // b = op(x1,y1,x1)
+  //
+  // NB: The explicit broadcast is important for correctness.
+  // Let's say we have:
+  // %z = aten::mul(%x, %y)
+  // %z.1, %z.2 = aten::chunk(%z, ...)
+  // ... = prim::FusionGroup(%z.1, %z.2, ...)
+  // It's possible that %x and %y do not have the same size as %z and
+  // need to be expanded first so that they can be chunked like %z
   //
   // NB: Chunk motion only occurs with fusable consumers, which implies
   // that there is always some other operation, e.g., a+b, that happens
@@ -507,18 +563,60 @@ struct GraphFuser {
   // of a and b, and so the results would be invalid, except that we know
   // that simple_mappable operations will restore contiguity before
   // we exit the fusion group.
+  //
+  // NB: The intermediate BroadcastingChunk is important for moving chunks past
+  // more than one operation: the graph fuser is not able to easily move operations
+  // around broadcast_tensors + chunk nodes. Let f, g, h be fusible ops
+  //   x = f(v, w)
+  //   z = g(x, y)
+  //   a, b = chunk(z)
+  //   c = h(a, b)
+  // becomes (with the broadcast_tensors + chunk approach):
+  //   x = f(v, w)
+  //   x', y' = broadcast_tensors([x, y])
+  //   ax, bx = chunk(x')
+  //   ay, by = chunk(y')
+  //   a = g(ax, ay)
+  //   b = g(bx, by)
+  //   c = h(a, b)
+  // The broadcast_tensors node makes it harder to move f into the resulting
+  // FusionGroup of g, g, and h. Keeping the broadcasting and chunk behavior
+  // together results in:
+  //   x = f(v, w)
+  //   ax, bx, ay, by = BroadcastingChunk(x, y)
+  //   a = g(ax, ay)
+  //   b = g(bx, by)
+  //   c = h(a, b)
+  // making it easier to move f after the BroadcastingChunk:
+  //   ay, by, av, bv, aw, bw = BroadcastingChunk(y, v, w)
+  //   ax = f(av, aw)
+  //   by = f(bv, bw)
+  //   a = g(ax, ay)
+  //   b = g(bx, by)
+  //   c = h(a, b)
 
   bool tryToMoveChunk(Node * consumer, Value * producer) {
-    // is the output from a chunk node?
+    // is the output from a chunk/bchunk node?
     auto * chunk = producer->node();
-    if (chunk->kind() != prim::ConstantChunk)
+    if (chunk->kind() != prim::ConstantChunk && chunk->kind() != prim::BroadcastingChunk)
       return false;
-    // and the thing being chunked is fusable into the consumer
-    Value * producer_for_chunk = chunk->input();
-    if (!isFusable(producer_for_chunk->node()) ||
-        !allUsersAreThisConsumer(chunk,producer_for_chunk))
+
+    // try to find a producer to move after the chunk/bchunk. The producer must be
+    // fusible into the consumer.
+    auto it = std::find_if(
+        chunk->inputs().begin(),
+        chunk->inputs().end(),
+        [&](Value * producer_for_chunk) {
+          return isFusable(producer_for_chunk->node()) &&
+              allUsersAreThisConsumer(chunk, producer_for_chunk);
+        });
+    if (it == chunk->inputs().end()) {
       return false;
-    // and all uses of the chunk are in this consumer
+    }
+    Value * producer_for_chunk = *it;
+    size_t producer_index = it - chunk->inputs().begin();
+
+    // all uses of the chunk must be in in this consumer
     for (auto s : chunk->outputs()) {
       for (auto u : s->uses()) {
         if (u.user != consumer)
@@ -529,51 +627,62 @@ struct GraphFuser {
     Node * producer_for_chunk_node = producer_for_chunk->node();
     JIT_ASSERT(producer_for_chunk_node->outputs().size() == 1);
 
-    // First, we'll add explicit broadcasts where necessary to make the chunk
-    // valid. Let's say we have:
-    // %z = aten::mul(%x, %y)
-    // %z.1, %z.2 = aten::chunk(%z, ...)
-    // ... = prim::FusionGroup(%z.1, %z.2, ...)
-    // It's possible that %x and %y do not have the same size as %z and
-    // need to be expanded first so that they can be chunked like %z
-    insertExplicitBroadcast(producer_for_chunk_node);
+    // Convert chunk to bchunk, if it isn't one already. The bchunk represents a
+    // broadcast and one or more chunk operations.
+    auto * bchunk = chunk;
+    if (chunk->kind() == prim::ConstantChunk) {
+      bchunk = promoteChunkToBroadcastingChunk(chunk);
+    }
+    size_t nchunks = bchunk->i(attr::chunks);
+    WithInsertPoint guard(bchunk->next());
 
-    // Make sure we lay out the nodes in the correct topological order.
-    // TODO: There should be some more enshrined way to do this
-    Node * insertion_point = chunk;
+    std::vector<Value*> producer_chunk_outputs;
+    for (size_t i = 0; i < nchunks; i++) {
+      producer_chunk_outputs.push_back(bchunk->output(nchunks * producer_index + i));
+    }
 
-    // apply chunk to each of op's operands
+    // Add each of op's operands to the bchunk node.
     // chunked_inputs[input_nr][chunk_output_idx]
     //  = Node* for chunk_output_idx'th output of the chunk(inputs[input_nr])
     std::vector<std::vector<Value*>> chunked_inputs;
+
     for (auto input : producer_for_chunk_node->inputs()) {
       // XXX: we only work with pointwise ops in here, so we know it is valid to push
       // the concat only through tensor arguments (and all other args can be safely ignored).
       if (!input->type()->isSubtypeOf(DynamicType::get()))
         continue;
+
+      // if 'input' is already an input to the bchunk, reuse it.
+      auto bchunk_inputs = bchunk->inputs();
+      auto it = std::find(bchunk_inputs.begin(), bchunk_inputs.end(), input);
+      if (it != bchunk_inputs.end()) {
+        chunked_inputs.emplace_back();
+        auto input_index = std::distance(bchunk_inputs.begin(), it);
+        for (size_t chunk = 0; chunk < nchunks; ++chunk) {
+          chunked_inputs.back().push_back(
+              bchunk->outputs().at(nchunks * input_index + chunk));
+        }
+        continue;
+      }
+
       // NB: I decided not to use cloneFrom here, because if we make cloneFrom
       // copy selects one day, it is definitely not what you want here (selects
       // have different types).
       // TODO: Perhaps we should use cloneFrom now, as it seems unlikely
       // to copy select nodes now that we have refactored to have a Value
       // distinct from Node.
-      Node * input_chunk = block_->owningGraph()->create(prim::ConstantChunk, 0);
-      input_chunk->addInput(input);
-      input_chunk->i_(attr::chunks, chunk->i(attr::chunks));
-      input_chunk->i_(attr::dim, chunk->i(attr::dim));
-      insertAt(&insertion_point, input_chunk);
-
+      bchunk->addInput(input);
       chunked_inputs.emplace_back(); // alas, to not be C++17
-      for (auto chunk_sel : chunk->outputs()) {
-          Value * input_chunk_sel = input_chunk->addOutput();
-          input_chunk_sel->setType(chunk_sel->type());
-          chunked_inputs.back().push_back(input_chunk_sel);
+      for (auto chunk_sel : producer_chunk_outputs) {
+        Value * input_chunk_sel = bchunk->addOutput();
+        input_chunk_sel->setType(chunk_sel->type());
+        chunked_inputs.back().push_back(input_chunk_sel);
       }
     }
 
     // apply the op to each chunk of the chunked operands,
     // and then rewrite the graph to use them!
-    for (auto chunk_sel : chunk->outputs()) {
+    for (auto chunk_sel : producer_chunk_outputs) {
       auto original_inputs = producer_for_chunk_node->inputs();
       Node * chunked_op = block_->owningGraph()->create(producer_for_chunk_node->kind());
       chunked_op->copyAttributes(*producer_for_chunk_node);
@@ -582,16 +691,20 @@ struct GraphFuser {
       for (Value* original_input : original_inputs) {
         if (original_input->type()->isSubtypeOf(DynamicType::get())) {
           JIT_ASSERT(chunked_inputs_it != chunked_inputs.end());
-          chunked_op->addInput(chunked_inputs_it->at(chunk_sel->offset()));
+          chunked_op->addInput(chunked_inputs_it->at(chunk_sel->offset() % nchunks));
           ++chunked_inputs_it;
         } else {
           chunked_op->addInput(original_input);
         }
       }
-      insertAt(&insertion_point, chunked_op);
+      bchunk->owningGraph()->insertNode(chunked_op);
       chunk_sel->replaceAllUsesWith(chunked_op->output());
     }
-    chunk->destroy();
+
+    bchunk->removeInput(producer_index);
+    for (size_t i = 0; i < nchunks; i++) {
+      bchunk->eraseOutput(nchunks * producer_index);
+    }
     producer_for_chunk_node->destroy();
     return true;
   }
@@ -627,6 +740,37 @@ struct GraphFuser {
     return std::make_pair(++consumer->reverseIterator(), false);
   }
 
+  void replaceIntermediateBroadcastingChunks() {
+    for (auto it = block_->nodes().rbegin(); it != block_->nodes().rend();) {
+      auto * node = *it;
+      ++it;  // We might delete node, so increment the iterator now.
+      if (node->kind() != prim::BroadcastingChunk) {
+        continue;
+      }
+      auto * bchunk = node;
+      insertExplicitBroadcast(bchunk);
+
+      auto * graph = block_->owningGraph();
+      size_t nchunks = bchunk->i(attr::chunks);
+      WithInsertPoint guard(bchunk->next());
+
+      // Split the bchunk into bchunks.inputs().size() number of chunk nodes.
+      for (size_t input_offset = 0; input_offset < bchunk->inputs().size(); input_offset++) {
+        auto* input = bchunk->inputs().at(input_offset);
+
+        Node * new_chunk = graph->insertNode(graph->create(prim::ConstantChunk, input, 0));
+        new_chunk->copyAttributes(*bchunk);
+        for (size_t output_offset = 0; output_offset < nchunks; output_offset++) {
+          auto new_output = new_chunk->addOutput();
+          auto old_output = bchunk->outputs().at(input_offset * nchunks + output_offset);
+          new_output->copyMetadata(old_output);
+          old_output->replaceAllUsesWith(new_output);
+        }
+      }
+      bchunk->destroy();
+    }
+  }
+
   void run() {
     // Run the pass until no changes are made.
     // This is neccessary, because the algorithm can miss out on certain fusion
@@ -654,6 +798,11 @@ struct GraphFuser {
         any_changed |= changed;
       }
     }
+
+    // The graph fuser can add intermediate prim::BroadcastingChunk nodes.
+    // Replace them with broadcasts + chunks.
+    replaceIntermediateBroadcastingChunks();
+
     // Fuse starting chunks into the group.
     for (auto it = block_->nodes().rbegin(); it != block_->nodes().rend();) {
       it = scanNodeForChunks(*it);

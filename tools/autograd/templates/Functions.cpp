@@ -171,6 +171,15 @@ Tensor sum_backward(const Tensor & grad, IntList sizes, IntList dims, bool keepd
   }
 }
 
+std::vector<int64_t> reverse_list(const IntList list) {
+  auto result = std::vector<int64_t>();
+  result.reserve(list.size());
+  for (auto iter = list.rbegin(); iter != list.rend(); iter++) {
+    result.push_back(*iter);
+  }
+  return result;
+}
+
 Tensor reverse_dim(const Tensor& t, int64_t dim) {
   Tensor index = at::arange(t.size(dim) - 1, -1, -1, t.options().dtype(at::kLong));
   return t.index_select(dim, index);
@@ -493,6 +502,12 @@ Tensor mm_mat2_backward(const Tensor & grad, const Tensor & mat1, IntList sizes,
   } else {
     return maybe_multiply(mat1.t().mm(grad), alpha);
   }
+}
+
+Tensor _sparse_addmm_sparse_backward(const Tensor& grad, const Tensor& sparse, const Tensor& dense, const Scalar& alpha) {
+  AT_ASSERT(sparse.is_sparse());
+  Tensor grad_sparse = maybe_multiply(grad.mm(dense.t()), alpha);
+  return grad_sparse.sparse_mask(at::SparseTensorRef(sparse));
 }
 
 Tensor renorm_backward(const Tensor & grad, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {

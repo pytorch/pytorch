@@ -91,13 +91,23 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const std::vector<at::Device>& devices)
 
 ProcessGroupNCCL::WorkNCCL::~WorkNCCL() {}
 
-// Check if the NCCL kernels are queued on the GPUs
 bool ProcessGroupNCCL::WorkNCCL::isCompleted() {
+  return finishedGPUExecution();
+}
+
+bool ProcessGroupNCCL::WorkNCCL::isSuccess() const {
   return true;
 }
 
+std::exception_ptr ProcessGroupNCCL::WorkNCCL::exception() const {
+  throw std::runtime_error(
+      "exception() is not supported by NCCL process "
+      "group's work, since isSuccess() will always return true, and "
+      "isCompleted() and wait() will either succeed or throw");
+}
+
 // Helper that checks if the NCCL kernels are completed on the GPUs
-bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecution() const {
+bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecution() {
   for (size_t i = 0; i < devices_.size(); ++i) {
     // Checking the work's corresponding CUDA events' status
     auto ret = cudaEventQuery(cudaEvents_[i]);
@@ -108,12 +118,6 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecution() const {
       return false;
     }
   }
-  return true;
-}
-
-// Same as synchronize(), and will always return true
-bool ProcessGroupNCCL::WorkNCCL::wait() {
-  synchronize();
   return true;
 }
 
@@ -131,15 +135,9 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
   }
 }
 
-bool ProcessGroupNCCL::WorkNCCL::isSuccess() const {
-  return true;
-}
-
-const std::exception& ProcessGroupNCCL::WorkNCCL::exception() const {
-  throw std::runtime_error(
-      "exception() is not supported by NCCL process "
-      "group's work, since isSuccess() will always return true, and "
-      "isCompleted() and wait() will either succeed or throw");
+// Same as calling synchronize().
+void ProcessGroupNCCL::WorkNCCL::wait() {
+  synchronize();
 }
 
 std::unordered_map<ssize_t, ssize_t> ProcessGroupNCCL::pgUniqueNCCLIDCnt_;
@@ -493,7 +491,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
-    std::vector<at::Tensor>& inputTensors) {
+    std::vector<at::Tensor>& inputTensors,
+    const AllgatherOptions& opts) {
   if (outputTensors.size() != inputTensors.size()) {
     throw std::runtime_error("allgather: input and output size mismatch");
   }
@@ -564,7 +563,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
   return work;
 }
 
-std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier() {
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier(
+    const BarrierOptions& opts) {
   std::vector<at::Device> devices;
   if (usedDeviceIdxs_.empty()) {
     // This means there is not yet a NCCL collective being called

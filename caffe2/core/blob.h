@@ -44,7 +44,10 @@ BlobGetMutableTensor(Blob* blob, at::IntList dims, at::TensorOptions options) {
           tensor->raw_mutable_data();
         } else {
           // create a new Tensor when the data_type doesn't match
-          return BlobSetTensor(blob, caffe2::empty(dims, options));
+          C10_LOG_EVERY_MS(WARNING, 1000)
+              << "data type mismatch in BlobGetMutableTensor:"
+              << tensor->dtype() << " and " << options.dtype();
+          tensor->raw_mutable_data(options.dtype());
         }
         return tensor;
       }

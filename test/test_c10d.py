@@ -30,7 +30,7 @@ if not c10d.is_available():
     sys.exit(0)
 
 
-TIMEOUT_DEFAULT = 15
+TIMEOUT_DEFAULT = 30
 TIMEOUT_OVERRIDE = {}
 
 TestSkip = namedtuple('TestSkip', 'exit_code, message')
@@ -941,10 +941,12 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         # Wait for sends to complete
         for work in send_work:
             work.wait()
+            self.assertTrue(work.is_completed())
 
         # Wait for recvs to complete
         for work in recv_work:
             work.wait()
+            self.assertTrue(work.is_completed())
 
         # Test that every output other than our own contains the respective rank
         for i in range(self.world_size):
@@ -961,14 +963,33 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             timeout=timedelta(seconds=0.5))
 
         # Wait on barrier
-        self.assertTrue(pg.barrier().wait())
+        pg.barrier().wait()
 
         # Sleep on one of the processes to trigger barrier timeout
         if self.rank == 0:
             time.sleep(0.6)
 
-        # The barrier will now time output
-        self.assertFalse(pg.barrier().wait())
+        # The barrier will now time out
+        with self.assertRaisesRegex(RuntimeError, " (Timed out|closed) "):
+            pg.barrier().wait()
+
+    def test_barrier_implies_wait(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        # Kick off allreduce operations
+        size = (100, 100)
+        num = 16
+        tensors = [torch.full(size, float(i)) for i in range(num)]
+        for tensor in tensors:
+            # Note: leak the returned work handle
+            pg.allreduce(tensor)
+
+        # Barrier should ensure all previous work has completed
+        pg.barrier().wait()
+
+        for i, tensor in enumerate(tensors):
+            self.assertEqual(torch.full(size, float(i * self.world_size)), tensor)
 
 
 class ProcessGroupNCCLTest(TestCase):
@@ -1135,7 +1156,7 @@ class ProcessGroupNCCLTest(TestCase):
             works.append(work)
 
         # Barrier will ensure that all previous work is completed
-        pg.barrier()
+        pg.barrier().wait()
 
         for i in range(2, self.num_gpus + 1):
             for j in range(i):
@@ -1325,7 +1346,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         # Use all available devices on every process here (data is small, so should be fine).
         devices = gpus_for_rank(self.world_size)[self.rank]
-        target = torch.arange(10, dtype=torch.float64, device='cuda:0').chunk(5)
+        target = torch.arange(10, dtype=torch.float64, device='cuda:{}'.format(devices[0])).chunk(5)
         parameter_data = [target]
         parameter_data += [torch.zeros(10, device=torch.device('cuda', d)).chunk(5) for d in devices[1:]]
         buffer_data = [[]] * len(parameter_data)
@@ -1350,7 +1371,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
 
         devices = gpus_for_rank(self.world_size)[self.rank]
-        target = torch.arange(10, dtype=torch.float64, device='cuda:0').chunk(5)
+        target = torch.arange(10, dtype=torch.float64, device='cuda:{}'.format(devices[0])).chunk(5)
         parameter_data = [target]
         parameter_data += [torch.zeros(10, device=torch.device('cuda', d)).chunk(5) for d in devices[1:]]
 
@@ -1435,7 +1456,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         # The expected result of the allreduce should be the average
         self.assertEqual(local_grad_sum,
-                         torch.ones(10) * (self.world_size + 1) / 2.0)
+                         torch.ones(10) * (self.world_size + 1) * len(devices) / 2.0)
 
     @skip_if_not_nccl
     def test_sync_reduction(self):
@@ -1453,7 +1474,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                                                      devices)
         c10d._sync_reduction(work, grads_batch[0], local_grad_sum)
         # The expected result of the allreduce should be the average
-        self.assertEqual(grads_batch[0], (torch.ones(10) * (self.world_size + 1) / 2.0).chunk(5))
+        self.assertEqual(grads_batch[0], (torch.ones(10) * (self.world_size + 1) * len(devices) / 2.0).chunk(5))
 
 
 if __name__ == '__main__':
