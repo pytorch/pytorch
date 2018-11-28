@@ -2559,6 +2559,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(SourceRange loc, Method & m, con
       "dtype",
       "device",
       "shape",
+      "is_cuda",
     };
     if (fields.count(field)) {
       auto r = m.graph()->insert(Symbol::fromQualString("prim::"+field), {value});
