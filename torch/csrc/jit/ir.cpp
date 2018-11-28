@@ -862,18 +862,18 @@ Value* Node::insertOutput(size_t i) {
   return outputs_.at(i);
 }
 
-bool Node::isBefore(const Node * n) const {
-  if (this == n) {
-    return false;
-  }
-  return !isAfter(n);
-}
-
-bool Node::isAfter(const Node * n) const {
-  JIT_ASSERT(this->owningGraph() == n->owningGraph());
-
+bool Node::isBeforeOrAfter(const Node* n, MoveSide moveSide) const {
   if (this->owningBlock() == n->owningBlock()) {
-    return this->topo_position_ > n->topo_position_;
+    if (moveSide == MoveSide::BEFORE) {
+      return this->topo_position_ < n->topo_position_;
+    }
+
+    if (moveSide == MoveSide::AFTER) {
+      return this->topo_position_ > n->topo_position_;
+    }
+
+    JIT_ASSERT(this == n);
+    return false;
   }
 
   // These nodes don't share a common block. Traverse the blockchains upward
@@ -887,7 +887,7 @@ bool Node::isAfter(const Node * n) const {
       JIT_ASSERT(rhs->owningBlock());
 
       if (lhs->owningBlock() == rhs->owningBlock()) {
-        return lhs->isAfter(rhs);
+        return lhs->isBeforeOrAfter(rhs, moveSide);
       }
       rhs = rhs->owningBlock()->owningNode();
     }
@@ -896,6 +896,15 @@ bool Node::isAfter(const Node * n) const {
   }
   // should never reach here, since both nodes are ultimately in the same graph
   JIT_ASSERT(false);
+
+}
+
+bool Node::isBefore(const Node * n) const {
+  return isBeforeOrAfter(n, MoveSide::BEFORE);
+}
+
+bool Node::isAfter(const Node * n) const {
+  return isBeforeOrAfter(n, MoveSide::AFTER);
 }
 
 Node* Node::insertBefore(Node * n) {
