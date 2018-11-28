@@ -152,7 +152,7 @@ class DataLoader {
   /// new jobs.
   void reset(bool prefetch = true) {
     shuttle_.drain();
-    sampler_.reset(nullopt);
+    sampler_.reset();
     sequence_number_ = 0;
     sequencer_ = new_sequencer();
     if (prefetch) {
