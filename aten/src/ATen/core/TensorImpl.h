@@ -302,8 +302,8 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::TypeMeta& data_type, bool is_variable);
 
  public:
-  TensorImpl(const TensorImpl&) = default;
-  TensorImpl& operator=(const TensorImpl&) = default;
+  TensorImpl(const TensorImpl&) = delete;
+  TensorImpl& operator=(const TensorImpl&) = delete;
   TensorImpl(TensorImpl&&) = default;
   TensorImpl& operator=(TensorImpl&&) = default;
 
