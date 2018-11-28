@@ -99,8 +99,10 @@ if "%REBUILD%"=="" (
 :: Install ninja
 if "%REBUILD%"=="" ( pip install ninja )
 
+set WORKING_DIR=%CD%
 call "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community\\VC\\Auxiliary\\Build\\vcvarsall.bat" x64
 call "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community\\VC\\Auxiliary\\Build\\vcvarsall.bat" x86_amd64
+cd %WORKING_DIR%
 
 git submodule update --init --recursive
 

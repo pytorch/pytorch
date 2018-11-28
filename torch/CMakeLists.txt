@@ -3,7 +3,7 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     return()
   endif()
 else()
-  cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
+  cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
   project(torch CXX C)
   find_package(Caffe2 REQUIRED)
   option(USE_CUDA "Use CUDA" ON)
@@ -29,9 +29,12 @@ endif()
 
 # RPATH stuff
 # see https://cmake.org/Wiki/CMake_RPATH_handling
-if(APPLE)
+if (APPLE)
   set(CMAKE_MACOSX_RPATH ON)
-endif()
+  set(_rpath_portable_origin "@loader_path")
+else()
+  set(_rpath_portable_origin $ORIGIN)
+endif(APPLE)
 # Use separate rpaths during build and install phases
 set(CMAKE_SKIP_BUILD_RPATH  FALSE)
 # Don't use the install-rpath during the build phase
@@ -40,11 +43,6 @@ set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 # Automatically add all linked folders that are NOT in the build directory to
 # the rpath (per library?)
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
-# Always ensure that CMAKE_INSTALL_PREFIX/lib is in the rpath
-list(FIND CMAKE_PLATFORM_IMPLICIT_LINK_DIRECTORIES "${CMAKE_INSTALL_PREFIX}/lib" isSystemDir)
-if("${isSystemDir}" STREQUAL "-1")
-  list(APPEND CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
-endif()
 
 # Get the correct Python executable
 if (DEFINED ENV{PYTORCH_PYTHON})
@@ -163,6 +161,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/ir.cpp
   ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
   ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/alias_analysis.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/batch_mm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/constant_propagation.cpp
@@ -334,8 +333,15 @@ if(OPENMP_FOUND)
   if (VERBOSE)
     message(STATUS "Compiling with OpenMP")
   endif()
-  target_compile_options(torch INTERFACE -fopenmp)
-  target_link_libraries(torch -fopenmp)
+  target_compile_options(torch INTERFACE ${OpenMP_CXX_FLAGS})
+  #cmake only check for separate OpenMP library on AppleClang 7+
+  #https://github.com/Kitware/CMake/blob/42212f7539040139ecec092547b7d58ef12a4d72/Modules/FindOpenMP.cmake#L252
+  if (CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
+    if (CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL "7.0" OR
+        CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "7.0")
+      target_link_libraries(torch ${OpenMP_libomp_LIBRARY})
+    endif()
+  endif()
 endif()
 
 if (NOT NO_API AND NOT USE_ROCM)
@@ -693,6 +699,7 @@ if (BUILD_PYTHON)
       ${TORCH_SRC_DIR}/csrc/cuda/nccl.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/python_nccl.cpp)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NCCL)
+    list(APPEND TORCH_PYTHON_LINK_LIBRARIES __caffe2_nccl)
     if (USE_SYSTEM_NCCL)
     endif()
   endif()

@@ -560,7 +560,7 @@ class AdagradOptimizer(Optimizer):
         )
 
         if self.rowWise:
-            assert self.engine == "SIMD", "Got {}".format(self.engine)
+            logger.info("Using engine {} for rowWise Adagrad".format(self.engine))
 
             shapes, types = workspace.InferShapesAndTypes([param_init_net])
             if str(param) not in shapes:
@@ -586,6 +586,8 @@ class AdagradOptimizer(Optimizer):
                     value=0.0
                 )
         else:
+            logger.info("Using engine {} for regular Adagrad".format(self.engine))
+
             if self.engine in FP16_ENGINES:
                 shapes, types = workspace.InferShapesAndTypes([param_init_net])
                 assert str(param) in shapes, shapes

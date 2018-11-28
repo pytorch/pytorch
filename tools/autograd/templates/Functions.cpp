@@ -76,9 +76,16 @@ Tensor maybe_multiply(const Tensor & t, const Scalar & s) {
   }
 }
 
-int64_t _safe_size(IntList sizes, int64_t dim) {
-  dim = at::maybe_wrap_dim(dim, sizes.size());
-  return sizes.size() != 0 ? sizes[dim] : 1;
+int64_t _safe_size(IntList sizes, IntList dim) {
+  int64_t size = 1;
+  if (sizes.size() == 0) {
+    return 1;
+  }
+  for (auto d : dim) {
+    d = at::maybe_wrap_dim(d, sizes.size());
+    size *= sizes[d];
+  }
+  return size;
 }
 
 Tensor norm_backward(const Tensor & grad, const Tensor & self, const Scalar & p_, const Tensor & norm) {
@@ -169,6 +176,15 @@ Tensor sum_backward(const Tensor & grad, IntList sizes, IntList dims, bool keepd
   } else {
     return grad.expand(sizes);
   }
+}
+
+std::vector<int64_t> reverse_list(const IntList list) {
+  auto result = std::vector<int64_t>();
+  result.reserve(list.size());
+  for (auto iter = list.rbegin(); iter != list.rend(); iter++) {
+    result.push_back(*iter);
+  }
+  return result;
 }
 
 Tensor reverse_dim(const Tensor& t, int64_t dim) {
@@ -493,6 +509,12 @@ Tensor mm_mat2_backward(const Tensor & grad, const Tensor & mat1, IntList sizes,
   } else {
     return maybe_multiply(mat1.t().mm(grad), alpha);
   }
+}
+
+Tensor _sparse_addmm_sparse_backward(const Tensor& grad, const Tensor& sparse, const Tensor& dense, const Scalar& alpha) {
+  AT_ASSERT(sparse.is_sparse());
+  Tensor grad_sparse = maybe_multiply(grad.mm(dense.t()), alpha);
+  return grad_sparse.sparse_mask(at::SparseTensorRef(sparse));
 }
 
 Tensor renorm_backward(const Tensor & grad, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
@@ -895,7 +917,7 @@ Tensor soft_margin_loss_double_backward_grad_output(const Tensor & grad, const T
 
 Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scalar beta, Scalar threshold) {
   auto x = (input * beta);
-  return _sigmoid_backward(grad, x.sigmoid()) * (x < threshold).toType(grad.type()) * beta;
+  return sigmoid_backward(grad, x.sigmoid()) * (x < threshold).toType(grad.type()) * beta;
 }
 
 

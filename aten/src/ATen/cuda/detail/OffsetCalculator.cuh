@@ -17,6 +17,9 @@ struct OffsetCalculator {
   using offset_type = at::cuda::Array<uint32_t, NARGS>;
 
   OffsetCalculator(int dims, const int64_t* sizes, const int64_t* const* strides) : dims(dims) {
+    if (dims > MAX_DIMS) {
+      throw std::runtime_error("tensor has too many (>25) dims");
+    }
     for (int i = 0; i < MAX_DIMS; ++i) {
       if (i < dims) {
         sizes_[i] = IntDivider<uint32_t>(sizes[i]);
