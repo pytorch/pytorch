@@ -1,6 +1,7 @@
 #include<vector>
 
 #include <c10/Half.h>
+#include <fp16/fp16.h>
 #include <gtest/gtest.h>
 
 namespace {
