@@ -282,7 +282,7 @@ class KLDivLoss(_Loss):
 
     As with :class:`~torch.nn.NLLLoss`, the `input` given is expected to contain
     *log-probabilities*. However, unlike :class:`~torch.nn.NLLLoss`, `input` is not
-    restricted to a 2D Tensor, because the criterion is applied element-wise.
+    restricted to a 2D Tensor.
     The targets are given as *probabilities* (i.e. without taking the logarithm).
 
     This criterion expects a `target` `Tensor` of the same size as the
@@ -303,30 +303,15 @@ class KLDivLoss(_Loss):
             \operatorname{sum}(L),  & \text{if}\; \text{size\_average} = \text{False}.
         \end{cases}
 
-    By default, the losses are averaged for each minibatch over observations
-    **as well as** over dimensions. However, if the field
+    By default, the losses are averaged over batch dimension. However, if the field
     :attr:`size_average` is set to ``False``, the losses are instead summed.
 
     .. _Kullback-Leibler divergence:
         https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
 
-    .. note:: The default averaging means that the loss is actually **not** the
-          KL Divergence because the terms are already probability weighted.
-          A future release of PyTorch may move the default loss closer to the
-          mathematical definition.
-
-          To get the real KL Divergence, use ``size_average=False``, and
-          then divide the output by the batch size.
-
-          Example::
-
-            >>> loss = nn.KLDivLoss(size_average=False)
-            >>> batch_size = 5
-            >>> log_probs1 = F.log_softmax(torch.randn(batch_size, 10), 1)
-            >>> probs2 = F.softmax(torch.randn(batch_size, 10), 1)
-            >>> loss(log_probs1, probs2) / batch_size
-            tensor(0.7142)
-
+    .. note:: In KLDiv loss function, the default reduction 'mean' is average over batch
+        dimension, according to its math definition. While in other loss functions,
+        'mean' is average over all elements.
 
     Args:
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
@@ -341,7 +326,7 @@ class KLDivLoss(_Loss):
         reduction (string, optional): Specifies the reduction to apply to the output:
             'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
             'mean': the sum of the output will be divided by the number of
-            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            batches in the output, 'sum': the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
             specifying either of those two args will override :attr:`reduction`. Default: 'mean'
 

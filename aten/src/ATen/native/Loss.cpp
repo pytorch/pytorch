@@ -64,6 +64,11 @@ Tensor kl_div(const Tensor& input, const Tensor& target, int64_t reduction) {
   auto zeros = at::zeros_like(target);
   auto output_pos = target * (at::log(target) - input);
   auto output = at::where(target > 0, output_pos, zeros);
+
+  // kl_div is special as it's default mean should be along batch dimension.
+  if (reduction == Reduction::Mean && output.ndimension() != 0) {
+    return output.mean(/*dim=*/0, /*keepdim=*/false);
+  }
   return apply_loss_reduction(output, reduction);
 }
 
@@ -81,8 +86,8 @@ Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor
           }
         });
   });
-  if (reduction == Reduction::Mean) {
-    return grad_input / input.numel();
+  if (reduction == Reduction::Mean && input.ndimension() != 0) {
+    return grad_input / input.size(/*dim=*/0);
   }
   return grad_input;
 }

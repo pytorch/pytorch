@@ -1721,9 +1721,12 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
         reduction (string, optional): Specifies the reduction to apply to the output:
             'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
             'mean': the sum of the output will be divided by the number of
-            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
-            and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
+            batches in the output, 'sum': the output will be summed. Note that the default 'mean'
+            is an average over batch dimension instead of all elements in this loss, which matches
+            its math definition but different from the 'mean' behavior of other losses.
+            Note: :attr:`size_average` and :attr:`reduce` are in the process of being deprecated,
+            and in the meantime, specifying either of those two args will override :attr:`reduction`.
+            Default: 'mean'
     """
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)

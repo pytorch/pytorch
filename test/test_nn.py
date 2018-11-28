@@ -472,8 +472,14 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
             # dtype can be None, so set precision in this way instead of a precision map
             test_case.assertEqual(cpu_output, gpu_output, 1e-1 if dtype == torch.half else 4e-4)
 
-            cpu_gradInput = test_case._backward_criterion(cpu_module, cpu_input, cpu_target, extra_args=extra_args)
-            gpu_gradInput = test_case._backward_criterion(gpu_module, gpu_input, gpu_target, extra_args=extra_args)
+            cpu_gradOutput = torch.ones_like(cpu_output)
+            gpu_gradOutput = torch.ones_like(gpu_output)
+            cpu_gradInput = test_case._backward_criterion(cpu_module, cpu_input, cpu_target,
+                                                          gradOutput=cpu_gradOutput,
+                                                          extra_args=extra_args)
+            gpu_gradInput = test_case._backward_criterion(gpu_module, gpu_input, gpu_target,
+                                                          gradOutput=gpu_gradOutput,
+                                                          extra_args=extra_args)
             test_case.assertEqual(cpu_gradInput, gpu_gradInput, 1e-1 if dtype == torch.half else 4e-4)
         except NotImplementedError:
             pass
