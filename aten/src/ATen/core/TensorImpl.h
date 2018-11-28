@@ -920,8 +920,8 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const {
     auto impl = c10::make_intrusive<TensorImpl>(Storage(storage()), type_id(), is_variable());
     impl->set_sizes_and_strides(sizes(), strides());
-    impl->storage_offset_ = storage_offset();
-    impl->is_wrapped_number_ = is_wrapped_number();
+    impl->storage_offset_ = storage_offset_;
+    impl->is_wrapped_number_ = is_wrapped_number_;
     impl->reserved_ = reserved_;
     impl->refresh_numel();
     impl->refresh_contiguous();

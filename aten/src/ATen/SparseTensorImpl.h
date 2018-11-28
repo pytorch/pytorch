@@ -191,6 +191,16 @@ public:
 
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const override {
     auto impl = c10::make_intrusive<SparseTensorImpl>(type_id(), dtype());
+    // TensorImpl general fields
+    // Note that these fields are not used in sparse tensor code, and we copy them here only for completeness.
+    impl->sizes_ = sizes_;
+    impl->strides_ = strides_;
+    impl->storage_offset_ = storage_offset_;
+    impl->is_contiguous_ = is_contiguous_;
+    impl->is_wrapped_number_ = is_wrapped_number_;
+    impl->reserved_ = reserved_;
+
+    // Sparse-specific fields
     impl->size_ = sizes().vec();
     impl->sparse_dim_ = sparse_dim();
     impl->dense_dim_ = dense_dim();
