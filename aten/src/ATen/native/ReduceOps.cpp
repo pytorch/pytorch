@@ -101,6 +101,14 @@ static std::unique_ptr<TensorIterator> make_reduction(
   return TensorIterator::reduce_op(viewed_result, self);
 }
 
+static inline int64_t n_dim_size(const Tensor& self, IntList dim) {
+  int64_t numel = 1;
+  for (auto d : dim) {
+    numel *= self.size(d);
+  }
+  return numel;
+}
+
 static inline Tensor cumsum(const Tensor& self, int64_t dim, optional<ScalarType> dtype) {
   return at::_th_cumsum(integer_upcast(self, dtype), dim);
 }
@@ -260,7 +268,7 @@ Tensor prod(const Tensor &self) {
 
 // DIM REDUCE #################################################################
 
-static inline Tensor &mean_out(Tensor &result, const Tensor &self, int64_t dim,
+static inline Tensor &mean_out(Tensor &result, const Tensor &self, IntList dim,
                  bool keepdim, optional<ScalarType> dtype) {
   ScalarType scalarType = result.type().scalarType();
   AT_CHECK(
@@ -271,7 +279,7 @@ static inline Tensor &mean_out(Tensor &result, const Tensor &self, int64_t dim,
   at::native::sum_out(
       result, self.toType(result.type().scalarType()), dim, keepdim);
   if (result.numel() > 0 && self.ndimension() > 0) {
-    int64_t numel = self.size(dim);
+    int64_t numel = n_dim_size(self, dim);
     if (numel > 0) {
       result.div_(numel);
     } else {
@@ -282,15 +290,15 @@ static inline Tensor &mean_out(Tensor &result, const Tensor &self, int64_t dim,
   return result;
 }
 
-Tensor& mean_out(Tensor& result, const Tensor& self, int64_t dim, bool keepdim, ScalarType dtype) {
+Tensor& mean_out(Tensor& result, const Tensor& self, IntList dim, bool keepdim, ScalarType dtype) {
   return at::native::mean_out(
       result, self, dim, keepdim, c10::optional<ScalarType>(dtype));
 }
-Tensor& mean_out(Tensor& result, const Tensor& self, int64_t dim, bool keepdim) {
+Tensor& mean_out(Tensor& result, const Tensor& self, IntList dim, bool keepdim) {
   return at::native::mean_out(result, self, dim, keepdim, c10::nullopt);
 }
 
-Tensor& mean_out(Tensor& result, const Tensor& self, int64_t dim, ScalarType dtype) {
+Tensor& mean_out(Tensor& result, const Tensor& self, IntList dim, ScalarType dtype) {
   return at::native::mean_out(result, self, dim, false, dtype);
 }
 
@@ -320,7 +328,7 @@ Tensor& prod_out(Tensor& result, const Tensor& self, int64_t dim, ScalarType dty
   return at::native::prod_out(result, self, dim, false, dtype);
 }
 
-static inline Tensor mean(const Tensor &self, int64_t dim, bool keepdim, optional<ScalarType> dtype) {
+static inline Tensor mean(const Tensor &self, IntList dim, bool keepdim, optional<ScalarType> dtype) {
   ScalarType scalarType = self.type().scalarType();
   AT_CHECK(
       at::isFloatingType(scalarType),
@@ -329,7 +337,7 @@ static inline Tensor mean(const Tensor &self, int64_t dim, bool keepdim, optiona
       " instead.");
   Tensor result = at::native::sum(self, dim, keepdim);
   if (result.numel() > 0 && self.ndimension() > 0) {
-    int64_t numel = self.size(dim);
+    int64_t numel = n_dim_size(self, dim);
     if (numel > 0) {
       result.div_(numel);
     } else {
@@ -340,15 +348,15 @@ static inline Tensor mean(const Tensor &self, int64_t dim, bool keepdim, optiona
   return result;
 }
 
-Tensor mean(const Tensor& self, int64_t dim, bool keepdim, ScalarType dtype) {
+Tensor mean(const Tensor& self, IntList dim, bool keepdim, ScalarType dtype) {
   return at::native::mean(self, dim, keepdim, c10::optional<ScalarType>(dtype));
 }
 
-Tensor mean(const Tensor& self, int64_t dim, bool keepdim) {
+Tensor mean(const Tensor& self, IntList dim, bool keepdim) {
   return at::native::mean(self, dim, keepdim, c10::nullopt);
 }
 
-Tensor mean(const Tensor& self, int64_t dim, ScalarType dtype) {
+Tensor mean(const Tensor& self, IntList dim, ScalarType dtype) {
   return at::native::mean(self, dim, false, dtype);
 }
 
