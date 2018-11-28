@@ -485,7 +485,8 @@ def lp_pool1d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
     else:
         out = avg_pool1d(input.pow(norm_type), kernel_size, padding=0, ceil_mode=ceil_mode)
 
-    return (torch.sign(out) * relu(torch.abs(out))).mul(kernel_size).pow(1. / norm_type)
+    return out.mul(kernel_size).pow(1. / norm_type)
+    #return (torch.sign(out) * relu(torch.abs(out))).mul(kernel_size).pow(1. / norm_type)
 
 
 def adaptive_max_pool1d(input, output_size, return_indices=False):
