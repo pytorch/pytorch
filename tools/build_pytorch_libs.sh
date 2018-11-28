@@ -28,8 +28,8 @@ if [[ -x "$(command -v cmake3)" ]]; then
         #   cmake3 version 3.11.0 CMake suite maintained and supported by Kitware (kitware.com/cmake).
         # Thus we extract the line that has 'version' in it and hope the actual
         # version number is gonna be the 3rd element
-        CMAKE_VERSION=$(cmake --version | grep 'version' | awk '{print $3}')
-        CMAKE3_VERSION=$(cmake3 --version | grep 'version' | awk '{print $3}')
+        CMAKE_VERSION=$(cmake --version | grep 'version' | awk '{print $3}' | awk -F. '{print $1"."$2"."$3}')
+        CMAKE3_VERSION=$(cmake3 --version | grep 'version' | awk '{print $3}' | awk -F. '{print $1"."$2"."$3}')
         CMAKE3_NEEDED=$($PYTORCH_PYTHON -c "from distutils.version import StrictVersion; print(1 if StrictVersion(\"${CMAKE_VERSION}\") < StrictVersion(\"3.5.0\") and StrictVersion(\"${CMAKE3_VERSION}\") > StrictVersion(\"${CMAKE_VERSION}\") else 0)")
     else
         # don't have cmake
