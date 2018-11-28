@@ -42,8 +42,8 @@ class TestLoadSaveBase(test_util.TestCase):
                   np.int16, np.int32, np.int64, np.uint8, np.uint16]
         arrays = [np.random.permutation(6).reshape(2, 3).astype(T)
                   for T in dtypes]
-        assume(src_device_type == workspace.GpuDeviceType or src_gpu_id == 0)
-        assume(dst_device_type == workspace.GpuDeviceType or dst_gpu_id == 0)
+        assume(core.IsGPUDeviceType(src_device_type) or src_gpu_id == 0)
+        assume(core.IsGPUDeviceType(dst_device_type) or dst_gpu_id == 0)
         src_device_option = core.DeviceOption(
             src_device_type, src_gpu_id)
         dst_device_option = core.DeviceOption(
@@ -90,7 +90,7 @@ class TestLoadSaveBase(test_util.TestCase):
                     self.assertTrue(proto.HasField('tensor'))
                     self.assertEqual(proto.tensor.device_detail.device_type,
                                      device_type)
-                    if device_type == workspace.GpuDeviceType:
+                    if core.IsGPUDeviceType(device_type):
                         self.assertEqual(proto.tensor.device_detail.device_id,
                                          gpu_id)
 

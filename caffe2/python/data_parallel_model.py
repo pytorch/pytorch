@@ -971,7 +971,7 @@ def GetLearningRateBlobNames(model):
     if model._optimizer is not None:
         if model._device_type == caffe2_pb2.CPU:
             return [model._optimizer.get_cpu_blob_name('lr')]
-        elif model._device_type == workspace.GpuDeviceType:
+        elif core.IsGPUDeviceType(model._device_type):
             return [model._optimizer.get_gpu_blob_name('lr', gpu, '')
                     for gpu in model._devices]
         else:
@@ -1546,7 +1546,7 @@ def _AnalyzeOperators(model):
         op_gpu = op_dev.device_id
 
         # This avoids failing on operators that are only for CPU
-        if op_dev.device_type != workspace.GpuDeviceType:
+        if not core.IsGPUDeviceType(op_dev.device_type):
             continue
 
         namescope = "{}_{}/".format(model._device_prefix, op_gpu)
