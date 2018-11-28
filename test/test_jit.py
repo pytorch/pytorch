@@ -9358,7 +9358,6 @@ EXCLUDE_SCRIPT = {
     'test_nn_max_unpool2d',
 
     # argument type not supported
-    'test_nn_affine_grid',
 
     # unknown builtin op
     'test_nn_binary_cross_entropy',
