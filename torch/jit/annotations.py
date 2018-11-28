@@ -3,12 +3,13 @@ import sys
 import ast
 import inspect
 import torch
-from .._jit_internal import List, Tuple, BroadcastingList1, BroadcastingList2, BroadcastingList3
+from .._jit_internal import List, Tuple, BroadcastingList1, BroadcastingList2, BroadcastingList3, is_tuple
 from torch._C import DynamicType, TupleType, FloatType, IntType
 from textwrap import dedent
 
 
 PY35 = sys.version_info >= (3, 5)
+
 
 class Module(object):
     def __init__(self, name, members):
