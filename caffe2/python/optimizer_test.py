@@ -137,6 +137,26 @@ class TestAdagrad(OptimizerTestBase, LRModificationTestBase, TestCase):
             workspace.FetchBlob(param)
 
 
+class TestRowWiseAdagrad(OptimizerTestBase, TestCase):
+    def build_optimizer(self, model, **kwargs):
+        self._skip_gpu = True
+        return build_adagrad(
+            model, base_learning_rate=1.0, lars=0.5, rowWise=True, **kwargs
+        )
+
+    def check_optimizer(self, optimizer):
+        self.assertFalse(optimizer.get_auxiliary_parameters().shared)
+        self.assertTrue(optimizer.get_auxiliary_parameters().local)
+        for param in optimizer.get_auxiliary_parameters().local:
+            workspace.FetchBlob(param)
+
+    def testDense(self):
+        raise unittest.SkipTest("no dense support")
+
+    def testGPUDense(self):
+        raise unittest.SkipTest("no dense support")
+
+
 class TestWngrad(OptimizerTestBase, LRModificationTestBase, TestCase):
     def build_optimizer(self, model, **kwargs):
         self._skip_gpu = True
