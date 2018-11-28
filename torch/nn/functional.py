@@ -1700,7 +1700,7 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
 
 
 @torch._jit_internal.weak_script
-def kl_div(input, target, size_average=None, reduce=None, reduction='batchmean'):
+def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
     r"""The `Kullback-Leibler divergence`_ Loss.
 
@@ -1719,16 +1719,16 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='batchmean')
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'batchmean' | 'sum'. 'none': no reduction will be applied,
+            'none' | 'batchmean' | 'sum' | 'mean'. 'none': no reduction will be applied,
             'batchmean': the sum of the output will be divided by the number of
-            batches in the output, 'sum': the output will be summed. Note that the default 'mean'
-            is an average over batch dimension instead of all elements in this loss, which matches
-            its math definition but different from the 'mean' behavior of other losses.
+            batches in the output, 'sum': the output will be summed, 'mean': the output will be
+            divided by the number of elements in the output.
             Note: :attr:`size_average` and :attr:`reduce` are in the process of being deprecated,
             and in the meantime, specifying either of those two args will override :attr:`reduction`.
-            `reduction='mean'` is deprecated in kl_div, please use `reduction='batchmean'` which
-            aligns with KL math definition.
-            Default: 'batchmean'
+            Note: `reduction='mean'` is deprecated in kl_div, please use `reduction='batchmean'` which
+            aligns with KL math definition. In the next major release, the default reduction method
+            for kl_div will be changed to 'batchmean'.
+            Default: 'mean'
     """
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)

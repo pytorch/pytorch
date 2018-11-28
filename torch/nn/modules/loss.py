@@ -303,15 +303,15 @@ class KLDivLoss(_Loss):
             \operatorname{sum}(L),  & \text{if}\; \text{size\_average} = \text{False}.
         \end{cases}
 
-    By default, the losses are averaged over batch dimension. However, if the field
+    By default, the losses are averaged for each minibatch over observations
+    **as well as** over dimensions. . However, if the field
     :attr:`size_average` is set to ``False``, the losses are instead summed.
 
     .. _Kullback-Leibler divergence:
         https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
 
-    .. note:: In KLDiv loss function, the default reduction 'mean' is average over batch
-        dimension, according to its math definition. While in other loss functions,
-        'mean' is average over all elements.
+    .. note:: In KLDiv loss function, the default reduction 'mean' is deprecated and
+        the default reduction mode will change to 'batchmean' in the next major release.
 
     Args:
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
@@ -324,13 +324,16 @@ class KLDivLoss(_Loss):
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'batchmean' | 'sum'. 'none': no reduction will be applied,
+            'none' | 'batchmean' | 'sum' | 'mean'. 'none': no reduction will be applied,
             'batchmean': the sum of the output will be divided by the number of
-            batches in the output, 'sum': the output will be summed. Note: :attr:`size_average`
-            and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`.
-            `reduction='mean'` is deprecated in KLDivLoss. Please use `reduction='batchmean'`
-            which aligns with KL math definition. Default: 'batchmean'
+            batches in the output, 'sum': the output will be summed, 'mean': the output will
+            be divided by the number of elements in the output.
+            Note: :attr:`size_average` and :attr:`reduce` are in the process of being deprecated,
+            and in the meantime, specifying either of those two args will override :attr:`reduction`.
+            Note: `reduction='mean'` is deprecated in KLDivLoss. Please use `reduction='batchmean'`
+            which aligns with KL math definition. In the next major release, the default reduction
+            mode will be set to 'batchmean'.
+            Default: 'mean'
 
     Shape:
         - input: :math:`(N, *)` where `*` means, any number of additional
@@ -340,7 +343,7 @@ class KLDivLoss(_Loss):
             the same shape as the input
 
     """
-    def __init__(self, size_average=None, reduce=None, reduction='batchmean'):
+    def __init__(self, size_average=None, reduce=None, reduction='mean'):
         super(KLDivLoss, self).__init__(size_average, reduce, reduction)
 
     def forward(self, input, target):
