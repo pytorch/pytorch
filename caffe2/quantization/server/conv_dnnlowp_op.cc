@@ -359,8 +359,7 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeWeight_() {
                 group_id * (M / group_) * kernel_dim,
             kernel_dim, // ld
             nullptr, // pmat
-            1, // groups
-            FilterQuantizationParams(group_id).zero_point));
+            1)); // groups
       }
     } else {
       string reason;
@@ -859,14 +858,15 @@ void ConvDNNLowPOp<T, ReluFused>::RunOnDeviceEpilogueNHWC_(
               Y_int32 + i * M + group_id * (M / group_),
               reinterpret_cast<uint8_t*>(
                   Ydata + i * M + group_id * (M / group_)),
-              C_multiplier,
+              &C_multiplier,
               C_zero_point,
               A_zero_point,
-              B_zero_point,
+              &B_zero_point,
               &row_offset,
               column_offsets_.data() + group_id * (M / group_),
               b_quantized_data_ ? b_quantized_data_ + group_id * (M / group_)
                                 : nullptr,
+              M / group_,
               ReluFused);
         } // for each group
       } // for each row i
@@ -1198,20 +1198,20 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
               // buffer for packed matrix
               X_pack_buf_.data() + tid * x_pack_buf_size_per_thread,
               1, // group
-              in_qparams_[INPUT].zero_point,
               row_offsets_.data() + tid * row_offset_size_per_thread);
 
           DoNothing<> doNothingObj{};
           ReQuantizeOutput<ReluFused> outputProcObj(
               doNothingObj,
-              RequantizationParams(group_id).real_multiplier,
+              &RequantizationParams(group_id).real_multiplier,
               out_qparams_.zero_point,
               in_qparams_[INPUT].zero_point,
-              FilterQuantizationParams(group_id).zero_point,
+              &FilterQuantizationParams(group_id).zero_point,
               packA.getRowOffsetBuffer(),
               column_offsets_.data() + group_id * (M / group_),
               InputSize() == 3 ? b_quantized_data_ + group_id * (M / group_)
-                               : nullptr);
+                               : nullptr,
+              M / group_);
 
           fbgemmPacked(
               packA,
@@ -1244,13 +1244,14 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
             ReQuantizeForFloat<ReluFused> outputProcObj(
                 doNothingObj,
                 in_qparams_[INPUT].scale,
-                FilterQuantizationParams(group_id).scale,
+                &FilterQuantizationParams(group_id).scale,
                 in_qparams_[INPUT].zero_point,
-                FilterQuantizationParams(group_id).zero_point,
+                &FilterQuantizationParams(group_id).zero_point,
                 packA.getRowOffsetBuffer(),
                 column_offsets_.data() + group_id * (M / group_),
                 InputSize() == 3 ? b_dequantized_data_ + group_id * (M / group_)
-                                 : nullptr);
+                                 : nullptr,
+                M / group_);
 
             fbgemmPacked(
                 packA,
@@ -1273,20 +1274,20 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
                 // buffer for packed matrix
                 X_pack_buf_.data() + tid * x_pack_buf_size_per_thread,
                 1, // group
-                in_qparams_[INPUT].zero_point,
                 row_offsets_.data() + tid * row_offset_size_per_thread);
 
             DoNothing<float, float> doNothingObj{};
             ReQuantizeForFloat<ReluFused> outputProcObj(
                 doNothingObj,
                 in_qparams_[INPUT].scale,
-                FilterQuantizationParams(group_id).scale,
+                &FilterQuantizationParams(group_id).scale,
                 in_qparams_[INPUT].zero_point,
-                FilterQuantizationParams(group_id).zero_point,
+                &FilterQuantizationParams(group_id).zero_point,
                 packA.getRowOffsetBuffer(),
                 column_offsets_.data() + group_id * (M / group_),
                 InputSize() == 3 ? b_dequantized_data_ + group_id * (M / group_)
-                                 : nullptr);
+                                 : nullptr,
+                M / group_);
 
             fbgemmPacked(
                 packA,

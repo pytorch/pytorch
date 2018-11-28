@@ -257,7 +257,7 @@ void launchFusion(
   for (size_t i = 0; i < fusion.outputDesc().size(); ++i) {
     const auto& c = fusion.concatDesc()[i];
     if (c.isNoop()) {
-      outputs.push_back(at::empty(map_size, ref_options));
+      outputs.push_back(at::empty(map_size, ref_options.dtype(fusion.outputDesc()[i].scalar_type)));
       addTensorInfo(fusion.outputDesc()[i], outputs[i]);
     } else {
       size_t small_size = map_size[c.dim()];
@@ -305,14 +305,7 @@ bool runFusion(
     if (t.device() != device) {
       return false;
     }
-    if (t.type().scalarType() != dtype) {
-      return false;
-    }
   }
-
-  // The codegen only supports float and half inputs at the moment, so bail out
-  // if we see anything else.
-  if (dtype != at::kFloat && dtype != at::kHalf) return false;
 
   // Attempts to run fallback if device fusion is disabled
   if (device.is_cuda() && !canFuseOnGPU()) return false;

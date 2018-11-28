@@ -215,7 +215,13 @@ void addInputs(Node *n, const char * name, std::array<bool, N> value) {
   throw std::runtime_error("Found an unsupported argument type in the JIT tracer. File a bug report.");
 }
 
-inline void ensureUnique(const char * name, const at::Tensor& tensor) {
+inline void ensureUniqueIfOutOfPlaced(const char * name, const at::Tensor& tensor) {
+  auto& state = getTracingState();
+  if (state && state->force_outplace == false) {
+    // If we're not converting in-place ops to out-of-place, this check is
+    // unnecessary
+    return;
+  }
   auto aliases = tensor.storage().use_count();
   if (isTracing() && aliases > 1) {
     std::stringstream ss;

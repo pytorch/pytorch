@@ -941,10 +941,12 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         # Wait for sends to complete
         for work in send_work:
             work.wait()
+            self.assertTrue(work.is_completed())
 
         # Wait for recvs to complete
         for work in recv_work:
             work.wait()
+            self.assertTrue(work.is_completed())
 
         # Test that every output other than our own contains the respective rank
         for i in range(self.world_size):
@@ -961,14 +963,33 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             timeout=timedelta(seconds=0.5))
 
         # Wait on barrier
-        self.assertTrue(pg.barrier().wait())
+        pg.barrier().wait()
 
         # Sleep on one of the processes to trigger barrier timeout
         if self.rank == 0:
             time.sleep(0.6)
 
-        # The barrier will now time output
-        self.assertFalse(pg.barrier().wait())
+        # The barrier will now time out
+        with self.assertRaisesRegex(RuntimeError, " (Timed out|closed) "):
+            pg.barrier().wait()
+
+    def test_barrier_implies_wait(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        # Kick off allreduce operations
+        size = (100, 100)
+        num = 16
+        tensors = [torch.full(size, float(i)) for i in range(num)]
+        for tensor in tensors:
+            # Note: leak the returned work handle
+            pg.allreduce(tensor)
+
+        # Barrier should ensure all previous work has completed
+        pg.barrier().wait()
+
+        for i, tensor in enumerate(tensors):
+            self.assertEqual(torch.full(size, float(i * self.world_size)), tensor)
 
 
 class ProcessGroupNCCLTest(TestCase):
@@ -1135,7 +1156,7 @@ class ProcessGroupNCCLTest(TestCase):
             works.append(work)
 
         # Barrier will ensure that all previous work is completed
-        pg.barrier()
+        pg.barrier().wait()
 
         for i in range(2, self.num_gpus + 1):
             for j in range(i):

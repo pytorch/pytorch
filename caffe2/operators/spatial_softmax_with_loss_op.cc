@@ -66,7 +66,7 @@ bool SpatialSoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0); // Logits
   auto& T = Input(1); // Labels / targets
   auto* P = Output(0); // Probabilities from softmax
-  auto* avg_loss = Output(1); // Average loss
+                       // Average loss
   int N, D;
   N = X.dim32(0);
   D = X.dim32(1);
@@ -119,7 +119,7 @@ bool SpatialSoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
   }
 
   // Compute the avg cross-entropy loss
-  avg_loss->Resize(vector<int64_t>());
+  auto* avg_loss = Output(1, vector<int64_t>(), at::dtype<float>());
   float* avg_loss_data = avg_loss->template mutable_data<float>();
   const int* label_data = T.data<int>();
 

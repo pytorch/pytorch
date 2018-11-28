@@ -4487,7 +4487,7 @@ Example::
 .. function:: sum(input, dim, keepdim=False, dtype=None) -> Tensor
 
 Returns the sum of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim`. If :attr::`dim` is a list of dimensions,
+dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
 reduce over all of them.
 
 If :attr:`keepdim` is ``True``, the output tensor is of the same size

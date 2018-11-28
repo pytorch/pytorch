@@ -332,8 +332,7 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
             B_quantized_temp.data(),
             trans_b_ ? K : N,
             nullptr /*pmat*/,
-            1 /*groups*/,
-            B_qparams_[i].zero_point));
+            1)); /*groups*/
 
         // Pre-compute column_offset
         for (int j = 0; j < N; ++j) {
@@ -446,20 +445,20 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
               A_pack_buf_.data() +
                   tid * A_pack_buf_len_per_thread, // buffer for packed matrix
               1, // group
-              in_qparams_[0].zero_point,
               row_offsets_.data() + tid * row_offset_len_per_thread);
 
           int B_batch_idx = ndims_A >= ndims_B ? i : p * num_sub_batches + i;
           DoNothing<> doNothingObj{};
           ReQuantizeOutput<false /* FUSE_RELU */> outputProcObj(
               doNothingObj,
-              requantization_params_[B_batch_idx].real_multiplier,
+              &requantization_params_[B_batch_idx].real_multiplier,
               out_qparams_.zero_point,
               in_qparams_[0].zero_point,
-              B_qparams_[B_batch_idx].zero_point,
+              &B_qparams_[B_batch_idx].zero_point,
               packA.getRowOffsetBuffer(),
               column_offsets_.data() + B_batch_idx * N,
-              nullptr);
+              nullptr, // bias
+              N); // ncols per quant group
 
           fbgemmPacked(
               packA,
@@ -514,12 +513,13 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
             ReQuantizeForFloat<false /* FUSE_RELU*/> outputProcObj(
                 doNothingObj,
                 in_qparams_[0].scale,
-                B_qparams_[B_batch_idx].scale,
+                &B_qparams_[B_batch_idx].scale,
                 in_qparams_[0].zero_point,
-                B_qparams_[B_batch_idx].zero_point,
+                &B_qparams_[B_batch_idx].zero_point,
                 packA.getRowOffsetBuffer(),
                 column_offsets_.data() + B_batch_idx * N,
-                nullptr); // bias
+                nullptr, // bias
+                N); // ncols per quant group
 
             fbgemmPacked(
                 packA,
@@ -560,7 +560,6 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
                 A_pack_buf_.data() +
                     tid * A_pack_buf_len_per_thread, // buffer for packed matrix
                 1, // group
-                in_qparams_[0].zero_point,
                 row_offsets_.data() + tid * row_offset_len_per_thread);
 
             int B_batch_idx = ndims_A >= ndims_B ? i : p * num_sub_batches + i;
@@ -568,12 +567,13 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
             ReQuantizeForFloat<false /* FUSE_RELU*/> outputProcObj(
                 doNothingObj,
                 in_qparams_[0].scale,
-                B_qparams_[B_batch_idx].scale,
+                &B_qparams_[B_batch_idx].scale,
                 in_qparams_[0].zero_point,
-                B_qparams_[B_batch_idx].zero_point,
+                &B_qparams_[B_batch_idx].zero_point,
                 packA.getRowOffsetBuffer(),
                 column_offsets_.data() + B_batch_idx * N,
-                nullptr); // bias
+                nullptr, // bias
+                N); // ncols per quant group
 
             fbgemmPacked(
                 packA,

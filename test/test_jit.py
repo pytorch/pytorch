@@ -18,6 +18,7 @@ from test_nn import module_tests, new_module_tests
 from textwrap import dedent
 import os
 import io
+import itertools
 import sys
 import unittest
 import inspect
@@ -130,8 +131,9 @@ def canonical(graph):
     return str(torch._C._jit_pass_canonicalize(graph))
 
 
-def get_lstm_inputs(device, training=False):
-    input = torch.randn(3, 10, dtype=torch.float, device=device, requires_grad=training)
+def get_lstm_inputs(device, training=False, seq_length=None):
+    input_shape = (3, 10) if seq_length is None else (seq_length, 3, 10)
+    input = torch.randn(*input_shape, dtype=torch.float, device=device, requires_grad=training)
     hx = torch.randn(3, 20, dtype=torch.float, device=device, requires_grad=training)
     cx = torch.randn(3, 20, dtype=torch.float, device=device, requires_grad=training)
     module = nn.LSTMCell(10, 20).to(device, torch.float)  # Just to allocate weights with correct sizes
@@ -177,19 +179,19 @@ def get_execution_plan(graph_executor_state):
     return execution_plans[0]
 
 
-def get_grad_executor(plan_state):
-    if len(list(plan_state.graph.nodes())) != 1:
+def get_grad_executor(plan_state, diff_graph_idx=None):
+    if diff_graph_idx is None and len(list(plan_state.graph.nodes())) != 1:
         raise RuntimeError("Can't get a grad_executor for a non-differentiable graph")
     grad_executors = list(plan_state.code.grad_executors())
-    return grad_executors[0]
+    return grad_executors[diff_graph_idx or 0]
 
 
-def backward_graph(script_module):
+def backward_graph(script_module, diff_graph_idx=None):
     if not isinstance(script_module, torch.jit.ScriptModule):
         raise RuntimeError('Expected ScriptModule')
     ge_state = script_module.get_debug_state()
     fwd_plan = get_execution_plan(ge_state)
-    grad_executor = get_grad_executor(fwd_plan)
+    grad_executor = get_grad_executor(fwd_plan, diff_graph_idx=diff_graph_idx)
     bwd_plan = get_execution_plan(grad_executor.get_debug_state())
     # Running JIT passes requires that we own the graph (with a shared_ptr).
     # The debug state struct does not own its graph so we make a copy of it.
@@ -239,29 +241,32 @@ class JitTestCase(TestCase):
         torch._C._jit_set_emit_module_hook(self.emitModuleHook)
 
     def emitModuleHook(self, module):
+
+        def copy_structure_and_params(m):
+            c = torch.jit.ScriptModule()
+            for name, v, buffer in m._get_parameters():
+                c._register_parameter(name, v, buffer)
+            for name, s in m._get_modules():
+                c._register_module(name, copy_structure_and_params(s))
+            return c
+
         # disable the hook while we parse code, otherwise we will re-enter the hook
         with self.disableModuleHook():
-            for name in module._method_names():
-                graph = module._get_method(name).graph
-                try:
-                    pp, constant_table = graph.python_print()
-                except RuntimeError as e:
-                    if "could not export python function" not in str(e):
-                        raise
-                    else:
-                        continue
+            try:
+                pp, constant_table = module._python_print()
+            except RuntimeError as e:
+                if "could not export python function" not in str(e):
+                    raise
+                else:
+                    return
 
-                ppv = "op_version_set = 0\n{}".format(pp)
-                sm = torch.jit.ScriptModule()
-                torch._C._jit_import_method(sm, ppv, constant_table)
+            ppv = "op_version_set = 0\n{}".format(pp)
+            sm = copy_structure_and_params(module)
+            torch._C._jit_import_methods(sm, ppv, constant_table)
 
-                pp2, _ = sm.script.graph.python_print()
-                if pp != pp2:
-                    print(graph)
-                    print(pp)
-                    print(sm.script.graph)
-                    print(pp2)
-                    self.assertMultiLineEqual(pp, pp2)
+            pp2, _ = sm._python_print()
+            if pp != pp2:
+                self.assertMultiLineEqual(pp, pp2)
 
     def getExportImportCopy(self, m):
         # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
@@ -282,6 +287,27 @@ class JitTestCase(TestCase):
 
     def assertGraphContains(self, graph, kind):
         self.assertTrue(any(n.kind() == kind for n in graph.nodes()))
+
+    def assertGraphContainsExactly(self, graph, kind, num_kind_nodes, consider_subgraphs=False):
+        def perform_assert(graph, kind, actual, expected, consider_subgraphs):
+            if actual == expected:
+                return
+            subgraph = 'including' if consider_subgraphs else 'excluding'
+            raise AssertionError(
+                '{}\nError: graph contains {} {} nodes ({} subgraphs) but expected {}'.format(
+                    graph, actual, kind, subgraph, expected))
+
+        if consider_subgraphs:
+            strgraph = str(graph)
+            count = strgraph.count(kind) - strgraph.count('with {}'.format(kind))
+            perform_assert(graph, kind, count, num_kind_nodes,
+                           consider_subgraphs)
+            return
+
+        nodes = [node for node in graph.nodes()
+                 if node.kind() == kind]
+        perform_assert(graph, kind, len(nodes), num_kind_nodes,
+                       consider_subgraphs)
 
     def assertExpectedONNXGraph(self, trace, *args, **kwargs):
         torch.onnx._optimize_trace(trace, operator_export_type=OperatorExportTypes.ONNX)
@@ -831,7 +857,6 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
-    @unittest.expectedFailure
     def test_comparison_gt_lt_cuda(self):
         x = torch.randn(4, 4, dtype=torch.float, device='cuda')
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
@@ -842,7 +867,6 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
-    @unittest.expectedFailure
     def test_comparison_ge_le_cuda(self):
         def f(x, y):
             mask = (x >= 0).type_as(x)
@@ -860,7 +884,6 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
-    @unittest.expectedFailure
     def test_comparison_eq_ne(self):
         def f(x, y):
             mask = (x == 0).type_as(x)
@@ -1149,7 +1172,7 @@ class TestJit(JitTestCase):
             y = RegularFn.apply(y)
             return y
 
-        trace, _ = torch.jit.get_trace_graph(fn, (x,))
+        trace, _ = torch.jit.get_trace_graph(fn, (x,), _force_outplace=True)
         self.run_pass('dce', trace)
         ops = [n for n in trace.graph().nodes()]
         for op in ops:
@@ -1174,7 +1197,7 @@ class TestJit(JitTestCase):
             return MyInplaceFn.apply(x)
 
         x = torch.randn(5, 5)
-        ge = torch._C.GraphExecutor(fn, (x,), lambda var: '')
+        ge = torch._C.GraphExecutor(fn, (x,), lambda var: '', _force_outplace=True)
         with self.assertRaisesRegex(RuntimeError, 'inplace MyInplaceFn'):
             ge(x)
 
@@ -1389,7 +1412,7 @@ class TestJit(JitTestCase):
 
     def test_batchnorm(self):
         x = torch.ones(2, 2, 2, 2)
-        trace, _ = torch.jit.get_trace_graph(nn.BatchNorm2d(2), x)
+        trace, _ = torch.jit.get_trace_graph(nn.BatchNorm2d(2), x, _force_outplace=True)
         self.assertExpectedGraph(trace)
 
     def test_dropout(self):
@@ -1459,7 +1482,8 @@ class TestJit(JitTestCase):
 
     def test_nested_inplace(self):
         x = torch.randn(2, 2)
-        trace, _ = torch.jit.get_trace_graph(lambda x: F.threshold(x, 0, 0, inplace=True), (x,))
+        trace, _ = torch.jit.get_trace_graph(
+            lambda x: F.threshold(x, 0, 0, inplace=True), (x, ))
         self.assertExpectedGraph(trace)
         self.assertExportImport(trace, (x,))
 
@@ -1525,6 +1549,25 @@ class TestJit(JitTestCase):
     @skipIfRocm
     def test_ge_cuda(self):
         self.run_ge_tests(True, True)
+
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @enable_cpu_fuser
+    def test_fused_where_and_typing(self):
+        def f(x, y):
+            mask = x > y
+            res = torch.where(mask, x, y)
+            return mask, res
+
+        script_f = torch.jit.script(f)
+
+        x = torch.randn(4, 4, dtype=torch.double)
+        y = torch.randn(4, 4, dtype=torch.double)
+
+        result1, result2 = script_f(x, y)
+        expected1, expected2 = f(x, y)
+        self.assertEqual(result1, expected1)
+        self.assertEqual(result2, expected2)
+        self.assertAllFused(script_f.graph_for(x, y))
 
     # more manual test of graph executor that can be used as a scratchpad
     def test_ge(self):
@@ -2147,10 +2190,10 @@ class TestJit(JitTestCase):
         def foo(x, y):
             return 2 * x + y
 
-        r = foo.graph.pretty_print()
+        r, _ = foo._python_print()
         mod = torch.jit.ScriptModule()
-        torch._C._jit_import_method(mod, "op_version_set = 0\n{}".format(r), [])
-        self.assertExpected(mod.script.graph.pretty_print())
+        torch._C._jit_import_methods(mod, "op_version_set = 0\n{}".format(r), [])
+        self.assertExpected(mod.graph.pretty_print())
 
     def test_function_default_values(self):
         outer_var = torch.tensor(20)
@@ -2901,12 +2944,12 @@ class TestScript(JitTestCase):
             def foo():
                 return math.pi, 0.1, mod.inf, mod.ninf, 2.225073858507201e-308, mod.nan
 
-            pp, table = foo.graph.python_print()
+            pp, table = foo._get_method('forward').python_print()
             ppv = "op_version_set = 0\n{}".format(pp)
             sm = torch.jit.ScriptModule()
-            torch._C._jit_import_method(sm, ppv, table)
+            torch._C._jit_import_methods(sm, ppv, table)
             r = foo()
-            r2 = sm.script()
+            r2 = sm()
             # use precise assert, we are checking floating point details
             self.assertTrue(r[:-1] == r2[:-1])
             self.assertTrue(math.isnan(r[-1]) and math.isnan(r2[-1]))
@@ -3122,8 +3165,7 @@ a")
             c = s(a, b)
             c.sum().backward()
             graph = backward_graph(s)
-            self.assertEqual(set([node.kind() for node in graph.nodes()]),
-                             set(['prim::Constant', 'aten::ge', 'aten::le', 'aten::type_as', 'prim::FusionGroup']))
+            self.assertAllFused(graph)
 
     def test_mul(self):
         def func(a, b):
@@ -4053,10 +4095,61 @@ a")
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
+    def test_fusion_chunk_motion_deduplicates_inputs(self):
+        def func1(x):
+            z = x * x
+            z0, z1 = z.chunk(2)
+            return z0 * z1
+
+        def func2(x):
+            z = x * x * x
+            z0, z1 = z.chunk(2)
+            return z0 * z1
+
+        inputs = [
+            torch.tensor([1.1, 1.2], device='cuda', dtype=torch.float),
+        ]
+        for func in [func1, func2]:
+            module = self.checkScript(func, inputs)
+            forward_graph = module.graph_for(*inputs)
+            self.assertGraphContainsExactly(forward_graph, 'prim::FusionGroup', 1)
+            fusion_group = list(forward_graph.nodes())[-1]
+            self.assertEqual(len(list(fusion_group.inputs())), 1)
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_lstm_gates_permutations_fusion_cuda(self):
+        # lstm has gates = x.mm(w_ih.t()) + hx.mm(w_hh.t()) + b_ih + b_hh.
+        # Test that any permutation of this will still result in one FusionGroup.
+        choices = ['x.mm(w_ih.t())', 'hx.mm(w_hh.t())', 'b_ih', 'b_hh']
+        template = dedent('''
+        def cell(x, hx, cx, w_ih, w_hh, b_ih, b_hh):
+            gates = {} + {} + {} + {}
+            ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
+            return ingate * forgetgate * cellgate * outgate
+        ''')
+        for permutation in itertools.permutations(choices, len(choices)):
+            code = template.format(*permutation)
+            scope = {}
+            exec(code, globals(), scope)
+            cu = torch.jit.CompilationUnit(code)
+
+            inputs = get_lstm_inputs('cuda', training=False)
+            self.assertEqual(cu.cell(*inputs), scope['cell'](*inputs))
+            forward_graph = cu.cell.graph_for(*inputs)
+            self.assertGraphContainsExactly(forward_graph, 'prim::FusionGroup', 1)
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
     def test_lstm_fusion_cuda(self):
         inputs = get_lstm_inputs('cuda', training=True)
         module = self.checkScript(LSTMCellS, inputs)
-        self.assertExpectedGraph(module.graph_for(*inputs), subname='forward')
+        forward_graph = module.graph_for(*inputs)
+        self.assertGraphContainsExactly(
+            forward_graph, 'prim::FusionGroup', 1, consider_subgraphs=True)
+        self.assertExpectedGraph(forward_graph, subname='forward')
 
         hy, cy = module(*inputs)
         (hy + cy).sum().backward()
@@ -4068,7 +4161,10 @@ a")
     def test_milstm_fusion_cuda(self):
         inputs = get_milstm_inputs('cuda', training=True)
         module = self.checkScript(MiLSTMCell, inputs)
-        self.assertExpectedGraph(module.graph_for(*inputs), subname='forward')
+        forward_graph = module.graph_for(*inputs)
+        self.assertGraphContainsExactly(
+            forward_graph, 'prim::FusionGroup', 1, consider_subgraphs=True)
+        self.assertExpectedGraph(forward_graph, subname='forward')
 
         hy, cy = module(*inputs)
         (hy + cy).sum().backward()
@@ -5326,7 +5422,8 @@ a")
                 super(M2, self).__init__(True)
                 self.g = torch.jit.trace(
                     TestScript.StarTestSumAndReturnThree(),
-                    (torch.ones(4, 3), torch.ones(4, 3), torch.ones(4, 3)))
+                    (torch.ones(4, 3), torch.ones(4, 3), torch.ones(4, 3)),
+                    _force_outplace=True)
                 self.define('''
             def forward(self, rep):
                 *head, tail = self.g(rep, rep, rep)
@@ -5335,6 +5432,26 @@ a")
 
         m = M2()
         self.assertEqual(m(torch.ones(4, 3)), 3 * torch.ones(4, 3))
+
+    def test_script_module_star_assign2_inplace(self):
+        class M2(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M2, self).__init__(True)
+                self.g = torch.jit.trace(
+                    TestScript.StarTestSumAndReturnThree(),
+                    (torch.ones(4, 3), torch.ones(4, 3), torch.ones(4, 3)),
+                    _force_outplace=False)
+                self.define('''
+            def forward(self, rep):
+                *head, tail = self.g(rep, rep, rep)
+                return tail
+                ''')
+
+        m = M2()
+        # since forward() makes three aliases to the input `rep` before passing
+        # it to StarTestSumAndReturnThree(), in-place behavior will be different
+        # than the above out of place.
+        self.assertEqual(m(torch.ones(4, 3)), 4 * torch.ones(4, 3))
 
     def test_script_module_star_assign_fail_pythonop(self):
 
@@ -6645,6 +6762,30 @@ a")
         self.run_pass('erase_number_types', graph)
         self.assertExpectedGraph(graph)
 
+    def test_mm_batching(self):
+        lstm_cell = torch.jit.script(LSTMCellS)
+
+        def lstm(x, hx, cx, w_ih, w_hh, b_ih, b_hh):
+            for i in range(x.size(0)):
+                hx, cx = lstm_cell(x[i], hx, cx, w_ih, w_hh, b_ih, b_hh)
+            return hx
+
+        slstm = torch.jit.script(lstm)
+
+        inputs = get_lstm_inputs('cpu', training=True, seq_length=10)
+        slstm(*inputs).sum().backward()
+
+        fw_graph = slstm.graph_for(*inputs)
+        bw_graph = backward_graph(slstm, diff_graph_idx=0)
+        self.assertTrue('prim::MMBatchSide' in str(fw_graph))
+        self.assertTrue('prim::MMTreeReduce' in str(bw_graph))
+
+        sout = slstm(*inputs)
+        out = lstm(*inputs)
+        self.assertEqual(slstm(*inputs), lstm(*inputs))
+        self.assertEqual(torch.autograd.grad(slstm(*inputs).sum(), inputs),
+                         torch.autograd.grad(lstm(*inputs).sum(), inputs))
+
     def test_loop_unrolling(self):
         def fn(x):
             y = 0
@@ -7893,7 +8034,10 @@ a")
             x.view(-1).add_(-x.view(-1))
             return x
 
-        self.assertWarnsRegex(lambda: torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[torch.rand(5, 6)]),
+        self.assertWarnsRegex(lambda: torch.jit.trace(foo,
+                                                      torch.rand(3, 4),
+                                                      check_inputs=[torch.rand(5, 6)],
+                                                      _force_outplace=True),
                               'Output nr 1. of the traced function does not match the '
                               'corresponding output of the Python function')
 
@@ -7901,7 +8045,7 @@ a")
         def foo(x):
             x[0, 1] = 4
             return x
-        self.checkTracerWarning(foo, torch.rand(3, 4))
+        self.checkTracerWarning(foo, torch.rand(3, 4), _force_outplace=True)
 
     def test_lhs_index_trivial(self):
         def foo(y, x):
@@ -7913,7 +8057,7 @@ a")
         def foo(x):
             x.view(-1).add_(-x.view(-1))
             return x
-        self.checkTracerWarning(foo, torch.rand(3, 4))
+        self.checkTracerWarning(foo, torch.rand(3, 4), _force_outplace=True)
 
     @suppress_warnings
     def test_trace_checker_dropout_train(self):
@@ -8524,6 +8668,22 @@ a")
             return a
         self.checkScript(foo, (torch.rand(2, 3), torch.rand(3)))
 
+    def test_lhs_advanced_indexing_assignment(self):
+        def foo(x, y):
+            a = torch.exp(x)
+            b = x == 1
+            a[b] = y[b]
+            return a
+        self.checkScript(foo, (torch.ones(4, 3), torch.ones(4, 3)))
+
+    def test_lhs_advanced_indexing_augmented_assignment(self):
+        def foo(x, y):
+            a = torch.exp(x)
+            b = x == 1
+            a[b] += y[b]
+            return a
+        self.checkScript(foo, (torch.ones(4, 3), torch.ones(4, 3)))
+
     def test_lhs_indexing_list(self):
         def foo(a, b):
             ls = [a]
@@ -9125,6 +9285,23 @@ class TestPytorchExportModes(JitTestCase):
             operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK)
         self.assertExpected(exported)
 
+    # torch.fmod is using to test ONNX_ATEN.
+    # If you plan to remove fmod from aten, or found this test failed.
+    # please contact @Rui.
+    @skipIfRocm
+    def test_onnx_aten(self):
+        class ModelWithAtenFmod(nn.Module):
+            def forward(self, x, y):
+                return torch.fmod(x, y)
+
+        f = io.BytesIO()
+        x = torch.randn(3, 4, dtype=torch.float32)
+        y = torch.randn(3, 4, dtype=torch.float32)
+        exported = torch.onnx.export_to_pretty_string(
+            ModelWithAtenFmod(), (x, y), f,
+            operator_export_type=OperatorExportTypes.ONNX_ATEN)
+        self.assertExpected(exported)
+
 
 # known to be failing in tracer
 EXCLUDE_TRACED = {
@@ -9183,7 +9360,6 @@ EXCLUDE_SCRIPT = {
     'test_nn_max_unpool2d',
 
     # argument type not supported
-    'test_nn_affine_grid',
 
     # unknown builtin op
     'test_nn_binary_cross_entropy',
@@ -9413,13 +9589,6 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         ge(*inputs)
         return ge.graph_for(*inputs)
 
-    def assertGraphContains(self, graph, kind, num_kind_nodes, consider_subgraphs=False):
-        if consider_subgraphs:
-            raise NotSupportedError("NYI: assertGraphHas consider_subgraphs=T")
-        nodes = [node for node in graph.nodes()
-                 if node.kind() == kind]
-        self.assertEqual(len(nodes), num_kind_nodes)
-
     def assertGraphSize(self, graph, size):
         self.assertEqual(len(list(graph.nodes())), size)
 
@@ -9433,7 +9602,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1)
 
         self.assertGraphSize(graph, 1)
-        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 1)
+        self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 1)
 
     def test_simple_no_merge(self):
         # o: autodiff supported. x: not autodiff supported.
@@ -9446,7 +9615,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1)
 
         self.assertGraphSize(graph, 2)
-        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 1)
+        self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 1)
 
     def test_does_not_merge_unrelated(self):
         # o  o
@@ -9458,7 +9627,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1, 1)
 
         self.assertGraphSize(graph, 2)
-        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 2)
+        self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 2)
 
     def test_merges_without_cycles(self):
         # o --> o --> o
@@ -9473,7 +9642,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1)
 
         self.assertGraphSize(graph, 1)
-        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 1)
+        self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 1)
 
     def test_merges_dense(self):
         #   o      o
@@ -9490,7 +9659,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         graph = self._perform_ad_subgraph_slicing(fn, 2, 2)
 
         self.assertGraphSize(graph, 1)
-        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 1)
+        self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 1)
 
     def test_does_not_create_cycles(self):
         # o --> x --> o
@@ -9505,7 +9674,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1)
 
         self.assertGraphSize(graph, 3)
-        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 2)
+        self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 2)
 
     def test_merges_up(self):
         # o --> x     o
@@ -9520,7 +9689,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1, 1)
 
         self.assertGraphSize(graph, 2)
-        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 1)
+        self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 1)
 
     def test_merges_down(self):
         # o     x --> o
@@ -9535,7 +9704,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1, 1)
 
         self.assertGraphSize(graph, 2)
-        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 1)
+        self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 1)
 
     def test_respects_lexical_scoping(self):
         def fn(x, k):
@@ -9549,7 +9718,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
 
         # We should not have combined the two multiplications into
         # the same group; they should each be a separate DiffGraph
-        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 2)
+        self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 2)
 
 
 class TestJitGenerated(JitTestCase):
