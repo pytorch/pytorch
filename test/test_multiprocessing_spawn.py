@@ -50,6 +50,26 @@ def test_success_first_then_exception_func(i, arg):
     raise ValueError("legitimate exception")
 
 
+def test_nested_child_body(i, ready_queue, nested_child_sleep):
+    ready_queue.put(None)
+    time.sleep(nested_child_sleep)
+
+
+def test_nested_spawn(i, pid_queue, nested_child_sleep):
+    context = mp.get_context("spawn")
+    nested_child_ready_queue = context.Queue()
+    spawn_context = mp.spawn(
+        fn=test_nested_child_body,
+        args=(nested_child_ready_queue, nested_child_sleep),
+        nprocs=1,
+        join=False,
+        daemon=False,
+    )
+    pid_queue.put(spawn_context.pids()[0])
+    nested_child_ready_queue.get()
+    os.kill(os.getpid(), signal.SIGTERM)
+
+
 @unittest.skipIf(
     NO_MULTIPROCESSING_SPAWN,
     "Disabled for environments that don't support the spawn start method")
@@ -117,6 +137,30 @@ class SpawnTest(TestCase):
             "ValueError: legitimate exception",
         ):
             mp.spawn(test_success_first_then_exception_func, args=(exitcode,), nprocs=2)
+
+    @unittest.skipIf(sys.platform != "linux", "Requires prctl(2)")
+    def test_nested_spawn(self):
+        context = mp.get_context("spawn")
+        pid_queue = context.Queue()
+        nested_child_sleep = 5.0
+        spawn_context = mp.spawn(
+            fn=test_nested_spawn,
+            args=(pid_queue, nested_child_sleep),
+            nprocs=1,
+            join=False,
+            daemon=False,
+        )
+
+        # Wait for nested child to terminate in time
+        pid = pid_queue.get()
+        start = time.time()
+        while True:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.1)
+        self.assertLess(time.time() - start, nested_child_sleep / 2)
 
 
 if __name__ == '__main__':
