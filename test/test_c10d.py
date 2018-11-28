@@ -30,7 +30,7 @@ if not c10d.is_available():
     sys.exit(0)
 
 
-TIMEOUT_DEFAULT = 15
+TIMEOUT_DEFAULT = 30
 TIMEOUT_OVERRIDE = {}
 
 TestSkip = namedtuple('TestSkip', 'exit_code, message')
@@ -1325,7 +1325,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         # Use all available devices on every process here (data is small, so should be fine).
         devices = gpus_for_rank(self.world_size)[self.rank]
-        target = torch.arange(10, dtype=torch.float64, device='cuda:0').chunk(5)
+        target = torch.arange(10, dtype=torch.float64, device='cuda:{}'.format(devices[0])).chunk(5)
         parameter_data = [target]
         parameter_data += [torch.zeros(10, device=torch.device('cuda', d)).chunk(5) for d in devices[1:]]
         buffer_data = [[]] * len(parameter_data)
@@ -1350,7 +1350,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
 
         devices = gpus_for_rank(self.world_size)[self.rank]
-        target = torch.arange(10, dtype=torch.float64, device='cuda:0').chunk(5)
+        target = torch.arange(10, dtype=torch.float64, device='cuda:{}'.format(devices[0])).chunk(5)
         parameter_data = [target]
         parameter_data += [torch.zeros(10, device=torch.device('cuda', d)).chunk(5) for d in devices[1:]]
 
@@ -1435,7 +1435,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         # The expected result of the allreduce should be the average
         self.assertEqual(local_grad_sum,
-                         torch.ones(10) * (self.world_size + 1) / 2.0)
+                         torch.ones(10) * (self.world_size + 1) * len(devices) / 2.0)
 
     @skip_if_not_nccl
     def test_sync_reduction(self):
@@ -1453,7 +1453,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                                                      devices)
         c10d._sync_reduction(work, grads_batch[0], local_grad_sum)
         # The expected result of the allreduce should be the average
-        self.assertEqual(grads_batch[0], (torch.ones(10) * (self.world_size + 1) / 2.0).chunk(5))
+        self.assertEqual(grads_batch[0], (torch.ones(10) * (self.world_size + 1) * len(devices) / 2.0).chunk(5))
 
 
 if __name__ == '__main__':
