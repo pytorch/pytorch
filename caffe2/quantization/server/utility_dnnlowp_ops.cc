@@ -4,9 +4,10 @@ namespace caffe2 {
 
 template <typename T>
 GatherDNNLowPOp<T>::GatherDNNLowPOp(
-    const OperatorDef& operator_def, Workspace *ws)
-  : GatherOp<CPUContext>(operator_def, ws),
-    qfactory_(dnnlowp::GetQuantizationFactoryOf(this)) {}
+    const OperatorDef& operator_def,
+    Workspace* ws)
+    : GatherOp<CPUContext>(operator_def, ws),
+      qfactory_(dnnlowp::GetQuantizationFactoryOf(this)) {}
 
 template <typename T>
 GatherDNNLowPOp<T>::~GatherDNNLowPOp() {
@@ -28,18 +29,19 @@ bool GatherDNNLowPOp<T>::RunOnDevice() {
   if (!InputIsType<int8::Int8TensorCPU>(DATA)) {
     if (dequantize_output_) {
       return GatherOp<CPUContext>::RunOnDevice();
-    }
-    else {
+    } else {
       // If input or output is float, delegate to fp32 op
       Fp32Op_()->DequantizeInput();
-        // dequantize input if it's not already float
-      if (!Fp32Op_()->Get()->RunOnDevice()) return false;
+      // dequantize input if it's not already float
+      if (!Fp32Op_()->Get()->RunOnDevice()) {
+        return false;
+      }
 
       int8::Int8TensorCPU* output =
-        Outputs()[0]->template GetMutable<int8::Int8TensorCPU>();
+          Outputs()[0]->template GetMutable<int8::Int8TensorCPU>();
 
       output->t.ResizeLike(*Fp32Op_()->Get()->Output(0));
-      T *out_data = output->t.template mutable_data<T>();
+      T* out_data = output->t.template mutable_data<T>();
 
       TensorQuantizationParams out_qparams;
       if (HasStaticQuantization(this)) {
@@ -48,7 +50,7 @@ bool GatherDNNLowPOp<T>::RunOnDevice() {
         out_qparams = Fp32Op_()->GetOutputQuantizationParams(qfactory_.get());
       }
 
-      Quantize<T>(
+      fbgemm::Quantize<T>(
           static_cast<const float*>(Fp32Op_()->Get()->Output(0)->raw_data()),
           out_data,
           output->t.numel(),
@@ -57,11 +59,10 @@ bool GatherDNNLowPOp<T>::RunOnDevice() {
       PropagateOutputTensorQuantizationParams(this, 0, out_qparams);
     }
   } else {
-    DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-        this, Input(INDICES));
+    DispatchHelper<TensorTypes<int32_t, int64_t>>::call(this, Input(INDICES));
 
     TensorQuantizationParams in_qparams =
-      GetInputTensorQuantizationParamsOf(this, 0, qfactory_.get());
+        GetInputTensorQuantizationParamsOf(this, 0, qfactory_.get());
 
     PropagateOutputTensorQuantizationParams(this, 0, in_qparams);
   }
@@ -69,9 +70,10 @@ bool GatherDNNLowPOp<T>::RunOnDevice() {
   return true;
 }
 
+REGISTER_CPU_OPERATOR_WITH_ENGINE(Gather, DNNLOWP, GatherDNNLowPOp<uint8_t>);
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-    Gather, DNNLOWP, GatherDNNLowPOp<uint8_t>);
-REGISTER_CPU_OPERATOR_WITH_ENGINE(
-    Int8Gather, DNNLOWP, GatherDNNLowPOp<uint8_t>);
+    Int8Gather,
+    DNNLOWP,
+    GatherDNNLowPOp<uint8_t>);
 
 } // namespace caffe2

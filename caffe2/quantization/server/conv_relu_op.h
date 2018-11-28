@@ -1,8 +1,7 @@
-#ifndef CAFFE2_OPERATORS_CONV_RELU_OP_H_
-#define CAFFE2_OPERATORS_CONV_RELU_OP_H_
+#pragma once
 
-#include "caffe2/operators/conv_pool_op_base.h"
 #include "caffe2/operators/conv_op.h"
+#include "caffe2/operators/conv_pool_op_base.h"
 
 namespace caffe2 {
 
@@ -11,7 +10,6 @@ class ConvReluOp final : public ConvPoolOpBase<Context> {
  public:
   ConvReluOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<Context>(operator_def, ws) {
-
     for (auto name : operator_def.input()) {
       local_input_blobs_.push_back(local_ws_.CreateBlob(name));
       CHECK_NOTNULL(local_input_blobs_.back());
@@ -35,5 +33,3 @@ class ConvReluOp final : public ConvPoolOpBase<Context> {
 }; // class ConvReluOp
 
 } // namespace caffe2
-
-#endif // CAFFE2_OPERATORS_CONV_RELU_OP_H_

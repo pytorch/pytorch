@@ -41,8 +41,9 @@ class DataLoader {
       // has its own copy of the dataset. This means the dataset must be
       // trivially copiable, or else we don't expect more than one worker to
       // be in use.
-      workers_.emplace_back(
-          [this, dataset] { this->worker_thread(std::move(dataset)); });
+      workers_.emplace_back([this, dataset]() mutable {
+        this->worker_thread(std::move(dataset));
+      });
     }
     if (options_.workers == 0) {
       main_thread_dataset_ = torch::make_unique<Dataset>(std::move(dataset));
@@ -281,8 +282,8 @@ std::unique_ptr<DataLoader<Dataset, Sampler>> make_data_loader(
 /// Creates a new `DataLoader`, inferring the necessary template types from
 /// the given arguments.
 template <
-    typename Dataset,
     typename Sampler = samplers::RandomSampler,
+    typename Dataset,
     typename =
         torch::enable_if_t<std::is_constructible<Sampler, size_t>::value>>
 std::unique_ptr<DataLoader<Dataset, Sampler>> make_data_loader(

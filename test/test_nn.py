@@ -143,6 +143,13 @@ class PackedSequenceTest(TestCase):
         unpacked, _ = rnn_utils.pad_packed_sequence(packed)
         self.assertEqual(unpacked.type(), cuda_type_str)
 
+    def test_wrong_order(self):
+        # https://github.com/pytorch/pytorch/issues/13324
+        a = torch.ones(25, 300)
+        b = torch.ones(22, 300)
+        b_a = rnn_utils.pad_sequence([b, a])
+        self.assertRaises(RuntimeError, lambda: rnn_utils.pack_padded_sequence(b_a, [22, 25]))
+
     def test_total_length(self):
         padded, lengths = self._padded_sequence(torch.FloatTensor)
         max_length = max(lengths)
@@ -504,7 +511,7 @@ class TestNN(NNTestCase):
             output = criterion(*args)
         else:
             output = criterion(input, target, *extra_args)
-        return output.item()
+        return output
 
     def _backward_criterion(self, criterion, input, target, gradOutput=None, extra_args=None):
         if extra_args is None:
@@ -1175,6 +1182,9 @@ class TestNN(NNTestCase):
         modules[2] = nn.Conv2d(5, 3, 2)
         module_list[2] = modules[2]
         check()
+        modules[-1] = nn.Conv2d(5, 2, 1)
+        module_list[-1] = modules[-1]
+        check()
         idx = torch.tensor(2, dtype=torch.int32)
         modules[2] = nn.Conv2d(5, 3, 2)
         module_list[idx] = modules[2]
@@ -1327,6 +1337,9 @@ class TestNN(NNTestCase):
         check()
         parameters[2] = make_param()
         param_list[2] = parameters[2]
+        check()
+        parameters[-1] = make_param()
+        param_list[-1] = parameters[-1]
         check()
         idx = torch.tensor(2, dtype=torch.int32)
         parameters[2] = make_param()
@@ -1840,6 +1853,11 @@ class TestNN(NNTestCase):
                 self.assertEqual(eval_out0, wrapped_m(input))
                 self.assertEqual(last_train_u, m.weight_u)
                 self.assertEqual(last_train_v, m.weight_v)
+
+                # FIXME: the code below is flaky when executed with DataParallel
+                # see https://github.com/pytorch/pytorch/issues/13818
+                if apply_dp:
+                    continue
 
                 # test backward works with multiple forwards in mixed training
                 # and eval modes
@@ -2696,6 +2714,52 @@ class TestNN(NNTestCase):
         self.assertRaises(AssertionError, lambda: F.pad(inputs, (1, 1)))
         self.assertRaises(AssertionError, lambda: F.pad(inputs, (1,)))
 
+    def test_nn_scalars(self):
+        # One off tests to ensure scalars from nn.yaml are properly applied
+        def verify_scalars(input, output):
+            if input.dim() == 0:
+                self.assertEqual((), output.shape)
+            else:
+                self.assertNotEqual((), output.shape)
+            output.sum().backward()
+            self.assertEqual(input.shape, input.grad.shape)
+
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            for input_shape in [(5, 6), ()]:
+                for module in [torch.nn.ELU, torch.nn.Hardtanh, torch.nn.LeakyReLU, torch.nn.LogSigmoid,
+                               torch.nn.RReLU, torch.nn.Softshrink, torch.nn.Softplus, torch.nn.Sigmoid,
+                               torch.nn.Tanh]:
+                    input = torch.randn(input_shape, device=device, requires_grad=True)
+                    m = module()
+                    output = m(input)
+                    verify_scalars(input, output)
+
+    def test_nn_scalars_reductions(self):
+        # One off tests to ensure scalars from nn.yaml are properly applied
+        def verify_reduction_scalars(input, reduction, output):
+            if reduction != 'none' or input.dim() == 0:
+                self.assertEqual((), output.shape)
+            else:
+                self.assertNotEqual((), output.shape)
+            output.sum().backward()
+            self.assertEqual(input.shape, input.grad.shape)
+
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            for input_shape in [(5, 6), ()]:
+                for reduction in ['none', 'mean', 'sum']:
+                    for module in [torch.nn.BCELoss, torch.nn.L1Loss, torch.nn.MSELoss,
+                                   torch.nn.SmoothL1Loss, torch.nn.SoftMarginLoss]:
+                        input = torch.randn(input_shape, device=device, requires_grad=True)
+                        target = torch.empty(input_shape, device=device).random_(2)
+                        sigmoid = nn.Sigmoid()
+
+                        input = torch.randn(input_shape, device=device, requires_grad=True)
+                        m = module(reduction=reduction)
+                        output = m(sigmoid(input), target)
+                        verify_reduction_scalars(input, reduction, output)
+
     def test_normalize(self):
         inputs = torch.randn(1, 3, 4, 4, requires_grad=True)
         self.assertTrue(gradcheck(lambda x: F.normalize(x, p=1, dim=-1), (inputs,)))
@@ -2890,6 +2954,27 @@ class TestNN(NNTestCase):
 
     def test_max_pool_nan(self, dtype=torch.float):
         self._test_max_pool_nan(self, device="cpu")
+
+    @staticmethod
+    def _test_pool_large_size(self, device, dtype=torch.float):
+        for op in ('max', 'avg'):
+            for num_dim in [1, 2, 3]:
+                fn_name = '{}_pool{}d'.format(op, num_dim)
+                fn = getattr(F, fn_name)
+                # 16777217 is the smallest integer not expressible in float32
+                x = torch.ones([1, 1, 16777217] + (num_dim - 1) * [1],
+                               device=device, dtype=dtype)
+                res = fn(x, 1, stride=1, padding=0)
+                # check if the output shape was still computed correctly
+                self.assertEqual(x.shape[2], res.shape[2])
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @repeat_test_for_types(ALL_TENSORTYPES)
+    def test_pool_large_size_cuda(self, dtype=torch.float):
+        self._test_pool_large_size(self, device="cuda", dtype=dtype)
+
+    def test_pool_large_size(self, dtype=torch.float):
+        self._test_pool_large_size(self, device="cpu")
 
     def _test_scatter(self, tensor):
         x = tensor.detach().requires_grad_()

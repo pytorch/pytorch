@@ -12,11 +12,6 @@ namespace torch {
 namespace jit {
 namespace script {
 
-struct CallsiteDescriptor {
-  size_t n_outputs;
-  bool allow_varargs;
-};
-
 static inline std::vector<Value*> toValues(Graph& g, at::ArrayRef<NamedValue> nvs) {
   return fmap(nvs, [&](const NamedValue& v) {
     return v.value(g);
@@ -175,21 +170,19 @@ inline std::shared_ptr<SugaredValue> nativeResolver(const std::string& name, Met
 }
 
 TORCH_API void defineMethodsInModule(
-  Module & m,
+  std::shared_ptr<Module> m,
   const std::vector<Def>& definitions,
   const std::vector<Resolver>& resolvers, /* determines how we handle free variables in each definition*/
   std::shared_ptr<SugaredValue> self /* if non-null, the first argument to each def, is bound to this value */
 );
 
 // same as above but parse the definitions from source
-TORCH_API void defineMethodsInModule(Module & m, const std::string& source, Resolver resolver, std::shared_ptr<SugaredValue> self);
+TORCH_API void defineMethodsInModule(std::shared_ptr<Module> m, const std::string& source, Resolver resolver, std::shared_ptr<SugaredValue> self);
 
 // pack outputs of a function following python rules. If there is a single value return
 // a SimpleValue, otherwise pack all the values into a Tuple.
 TORCH_API Value* packOutputs(Graph& g, at::ArrayRef<Value*> values);
 TORCH_API std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs);
-TORCH_API void ensureSizeMatches(SourceRange loc, size_t expected, size_t actual, const std::string& what);
-TORCH_API void ensureTensors(const SourceRange& range, at::ArrayRef<Value*> values);
 
 // defines how a method obtained from a module behaves in script
 struct MethodValue : public SugaredValue {
@@ -239,6 +232,10 @@ TORCH_API Value* emitBuiltinCall(
   // if true, emitBuiltinCall will throw an exception if this builtin does not exist,
   // otherwise it will return nullptr if the builtin is not found.
   bool required);
+
+TORCH_API c10::optional<size_t> findInputWithName(
+  const std::string& name,
+  at::ArrayRef<NamedValue> kwargs);
 
 } // namespace script
 } // namespace jit

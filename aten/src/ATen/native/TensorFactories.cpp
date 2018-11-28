@@ -9,10 +9,10 @@
 #include "ATen/CheckGenerator.h"
 #include "ATen/Dispatch.h"
 #include "ATen/NativeFunctions.h"
-#include "ATen/ScalarType.h"
+#include <c10/core/ScalarType.h>
 #include "ATen/core/Deprecated.h"
 #include "ATen/core/TensorOptions.h"
-#include "TH/THRandom.h"
+#include <TH/THRandom.h>
 #include "TH/THGenerator.hpp"
 #include "c10/util/Exception.h"
 
@@ -107,11 +107,22 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 Tensor empty_cpu(IntList size, const TensorOptions& options) {
   AT_ASSERT(options.backend() == Backend::CPU);
   AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'
+
+  auto* allocator = at::getCPUAllocator();
+  int64_t nelements = prod_intlist(size);
+  auto dtype = options.dtype();
   auto storage_impl = c10::make_intrusive<StorageImpl>(
-    options.dtype(), 0, at::getCPUAllocator(), true);
+    dtype,
+    nelements,
+    allocator->allocate(nelements * dtype.itemsize()),
+    allocator,
+    /*resizeable=*/true);
 
   auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::CPUTensorId(), false);
-  resize_cpu_(tensor, size);  // avoid dispatch overhead
+  // Default TensorImpl has size [0]
+  if (size.size() != 1 || size[0] != 0) {
+    tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
+  }
   return tensor;
 }
 

@@ -1,6 +1,5 @@
 #include <torch/csrc/python_headers.h>
 
-#include <c10d/Def.hpp>
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
@@ -29,6 +28,8 @@ namespace c10d {
 
 namespace {
 
+constexpr char* GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
+
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
@@ -39,15 +40,6 @@ PyObject* c10d_init(PyObject* _unused) {
   }
 
   auto module = py::handle(c10d_module).cast<py::module>();
-
-  py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
-      .def(py::init<>())
-      .def_readwrite("rootRank", &::c10d::BroadcastOptions::rootRank)
-      .def_readwrite("rootTensor", &::c10d::BroadcastOptions::rootTensor);
-
-  py::class_<::c10d::AllreduceOptions>(module, "AllreduceOptions")
-      .def(py::init<>())
-      .def_readwrite("reduceOp", &::c10d::AllreduceOptions::reduceOp);
 
   py::enum_<::c10d::ReduceOp>(module, "ReduceOp", R"(
 An enum-like class of available reduce operations: ``SUM``, ``PRODUCT``,
@@ -61,19 +53,41 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .value("MIN", ::c10d::ReduceOp::MIN)
       .value("MAX", ::c10d::ReduceOp::MAX);
 
+  py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
+      .def(py::init<>())
+      .def_readwrite("rootRank", &::c10d::BroadcastOptions::rootRank)
+      .def_readwrite("rootTensor", &::c10d::BroadcastOptions::rootTensor)
+      .def_readwrite("timeout", &::c10d::BroadcastOptions::timeout);
+
+  py::class_<::c10d::AllreduceOptions>(module, "AllreduceOptions")
+      .def(py::init<>())
+      .def_readwrite("reduceOp", &::c10d::AllreduceOptions::reduceOp)
+      .def_readwrite("timeout", &::c10d::AllreduceOptions::timeout);
+
   py::class_<::c10d::ReduceOptions>(module, "ReduceOptions")
       .def(py::init<>())
       .def_readwrite("reduceOp", &::c10d::ReduceOptions::reduceOp)
       .def_readwrite("rootRank", &::c10d::ReduceOptions::rootRank)
-      .def_readwrite("rootTensor", &::c10d::ReduceOptions::rootTensor);
+      .def_readwrite("rootTensor", &::c10d::ReduceOptions::rootTensor)
+      .def_readwrite("timeout", &::c10d::ReduceOptions::timeout);
 
-  py::class_<::c10d::ScatterOptions>(module, "ScatterOptions")
+  py::class_<::c10d::AllgatherOptions>(module, "AllgatherOptions")
       .def(py::init<>())
-      .def_readwrite("rootRank", &::c10d::ScatterOptions::rootRank);
+      .def_readwrite("timeout", &::c10d::AllgatherOptions::timeout);
 
   py::class_<::c10d::GatherOptions>(module, "GatherOptions")
       .def(py::init<>())
-      .def_readwrite("rootRank", &::c10d::GatherOptions::rootRank);
+      .def_readwrite("rootRank", &::c10d::GatherOptions::rootRank)
+      .def_readwrite("timeout", &::c10d::GatherOptions::timeout);
+
+  py::class_<::c10d::ScatterOptions>(module, "ScatterOptions")
+      .def(py::init<>())
+      .def_readwrite("rootRank", &::c10d::ScatterOptions::rootRank)
+      .def_readwrite("timeout", &::c10d::ScatterOptions::timeout);
+
+  py::class_<::c10d::BarrierOptions>(module, "BarrierOptions")
+      .def(py::init<>())
+      .def_readwrite("timeout", &::c10d::BarrierOptions::timeout);
 
   auto store =
       shared_ptr_class_<::c10d::Store>(module, "Store")
@@ -121,7 +135,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
               py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::FileStore>(module, "FileStore", store)
-      .def(py::init<const std::string&>());
+      .def(py::init<const std::string&, int>());
 
   shared_ptr_class_<::c10d::TCPStore>(module, "TCPStore", store)
       .def(py::init<const std::string&, int, bool>());
@@ -133,10 +147,14 @@ They are used in specifying strategies for reduction collectives, e.g.,
       shared_ptr_class_<::c10d::ProcessGroup>(module, "ProcessGroup")
           .def("rank", &::c10d::ProcessGroup::getRank)
           .def("size", &::c10d::ProcessGroup::getSize)
+
           .def(
               "broadcast",
               &::c10d::ProcessGroup::broadcast,
+              py::arg("tensors"),
+              py::arg("opts") = ::c10d::BroadcastOptions(),
               py::call_guard<py::gil_scoped_release>())
+
           .def(
               "broadcast",
               [](::c10d::ProcessGroup& pg, at::Tensor& x, int rootRank) {
@@ -148,10 +166,14 @@ They are used in specifying strategies for reduction collectives, e.g.,
               py::arg("tensor"),
               py::arg("root"),
               py::call_guard<py::gil_scoped_release>())
+
           .def(
               "allreduce",
               &::c10d::ProcessGroup::allreduce,
+              py::arg("tensors"),
+              py::arg("opts") = ::c10d::AllreduceOptions(),
               py::call_guard<py::gil_scoped_release>())
+
           .def(
               "allreduce",
               [](::c10d::ProcessGroup& pg,
@@ -164,6 +186,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
               py::arg("tensors"),
               py::arg("op") = ::c10d::ReduceOp::SUM,
               py::call_guard<py::gil_scoped_release>())
+
           .def(
               "allreduce",
               [](::c10d::ProcessGroup& pg, at::Tensor& x, ::c10d::ReduceOp op) {
@@ -179,6 +202,8 @@ They are used in specifying strategies for reduction collectives, e.g.,
           .def(
               "reduce",
               &::c10d::ProcessGroup::reduce,
+              py::arg("tensors"),
+              py::arg("opts") = ::c10d::ReduceOptions(),
               py::call_guard<py::gil_scoped_release>())
 
           .def(
@@ -201,6 +226,9 @@ They are used in specifying strategies for reduction collectives, e.g.,
           .def(
               "allgather",
               &::c10d::ProcessGroup::allgather,
+              py::arg("output_tensors"),
+              py::arg("input_tensors"),
+              py::arg("opts") = ::c10d::AllgatherOptions(),
               py::call_guard<py::gil_scoped_release>())
 
           .def(
@@ -210,15 +238,19 @@ They are used in specifying strategies for reduction collectives, e.g.,
                  at::Tensor& input) {
                 std::vector<std::vector<at::Tensor>> outputs = {output};
                 std::vector<at::Tensor> inputs = {input};
-                return pg.allgather(outputs, inputs);
+                return pg.allgather(
+                    outputs, inputs, ::c10d::AllgatherOptions());
               },
               py::arg("output_tensors"),
-              py::arg("tensor"),
+              py::arg("input_tensor"),
               py::call_guard<py::gil_scoped_release>())
 
           .def(
               "gather",
               &::c10d::ProcessGroup::gather,
+              py::arg("output_tensors"),
+              py::arg("input_tensors"),
+              py::arg("opts") = ::c10d::GatherOptions(),
               py::call_guard<py::gil_scoped_release>())
 
           .def(
@@ -234,13 +266,16 @@ They are used in specifying strategies for reduction collectives, e.g.,
                 return pg.gather(outputs, inputs, opts);
               },
               py::arg("output_tensors"),
-              py::arg("tensor"),
+              py::arg("input_tensor"),
               py::arg("root"),
               py::call_guard<py::gil_scoped_release>())
 
           .def(
               "scatter",
               &::c10d::ProcessGroup::scatter,
+              py::arg("output_tensors"),
+              py::arg("input_tensors"),
+              py::arg("opts") = ::c10d::ScatterOptions(),
               py::call_guard<py::gil_scoped_release>())
 
           .def(
@@ -256,7 +291,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
                 return pg.scatter(outputs, inputs, opts);
               },
               py::arg("output_tensor"),
-              py::arg("tensors"),
+              py::arg("input_tensors"),
               py::arg("root"),
               py::call_guard<py::gil_scoped_release>())
 
@@ -297,11 +332,13 @@ They are used in specifying strategies for reduction collectives, e.g.,
           .def(
               "abort",
               &::c10d::ProcessGroup::barrier,
+              py::arg("opts") = ::c10d::BarrierOptions(),
               py::call_guard<py::gil_scoped_release>())
 
           .def(
               "barrier",
               &::c10d::ProcessGroup::barrier,
+              py::arg("opts") = ::c10d::BarrierOptions(),
               py::call_guard<py::gil_scoped_release>())
 
           .def(
@@ -355,18 +392,23 @@ They are used in specifying strategies for reduction collectives, e.g.,
                       int size,
                       std::chrono::milliseconds timeout) {
             ::c10d::ProcessGroupGloo::Options options;
-
-            // By default, use the hostname to resolve the network address to
-            // use. Note: if the hostname does not resolve to an address (e.g.
-            // because of misconfigured /etc/hosts file), this will not work.
-            std::array<char, HOST_NAME_MAX> hostname;
-            auto rv = gethostname(hostname.data(), hostname.size());
-            if (rv != 0) {
-              throw std::system_error(errno, std::system_category());
-            }
-
             ::gloo::transport::tcp::attr attr;
-            attr.hostname = hostname.data();
+            // First step, check "GLOO_SOCKET_IFNAME" environmental variable
+            // that can be set by the user
+            char* ifnameEnv = getenv(GLOO_SOCKET_IFNAME_ENV);
+            if (ifnameEnv) {
+              attr.iface = std::string(ifnameEnv);
+            } else {
+              // Use the hostname to resolve the network address to
+              // use. Note: if the hostname does not resolve to an address (e.g.
+              // because of misconfigured /etc/hosts file), this will not work.
+              std::array<char, HOST_NAME_MAX> hostname;
+              auto rv = gethostname(hostname.data(), hostname.size());
+              if (rv != 0) {
+                throw std::system_error(errno, std::system_category());
+              }
+              attr.hostname = hostname.data();
+            }
             options.devices.push_back(
                 ::gloo::transport::tcp::CreateDevice(attr));
             options.timeout = timeout;

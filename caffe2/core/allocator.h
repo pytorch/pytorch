@@ -4,7 +4,7 @@
 #include <cstring>
 #include <unordered_map>
 
-#include <ATen/core/Allocator.h>
+#include <c10/core/Allocator.h>
 #include "caffe2/core/logging.h"
 #include "caffe2/core/numa.h"
 

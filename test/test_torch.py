@@ -2981,6 +2981,25 @@ class _TestTorchMixin(object):
         self.assertEqual(r1, r2, 0)
         self.assertEqual(r2, r3[:-1], 0)
 
+        msg = "unsupported range"
+        self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(0, float('inf')))
+        self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('inf')))
+
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(-5, float('nan'), device=device))
+            # check with step size
+            self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(0, float('-inf'), -1, device=device))
+            self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(0, float('inf'), device=device))
+            self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('-inf'), 10, device=device))
+            self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('nan'), 10, device=device))
+            self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('inf'), device=device))
+            self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('nan'), device=device))
+
+            self.assertRaisesRegex(
+                RuntimeError, "overflow",
+                lambda: torch.arange(1.175494351e-38, 3.402823466e+38, device=device))
+
     def test_arange_inference(self):
         saved_dtype = torch.get_default_dtype()
         torch.set_default_dtype(torch.float32)
@@ -5314,9 +5333,9 @@ class _TestTorchMixin(object):
         self.assertEqual(x, y)
         torch.set_rng_state(rng_state)
 
-    @skipIfNoLapack
-    def test_cholesky(self):
-        x = torch.rand(10, 10) + 1e-1
+    @staticmethod
+    def _test_cholesky(self, cast):
+        x = cast(torch.rand(10, 10) + 1e-1)
         A = torch.mm(x, x.t())
 
         # default Case
@@ -5333,6 +5352,27 @@ class _TestTorchMixin(object):
         L = torch.cholesky(A, False)
         B = torch.mm(L, L.t())
         self.assertEqual(A, B, 1e-14, 'cholesky (lower) did not allow rebuilding the original matrix')
+
+    @skipIfNoLapack
+    def test_cholesky(self):
+        self._test_cholesky(self, lambda t: t)
+
+    @staticmethod
+    def _test_cholesky_batched(self, cast):
+        from common_utils import random_symmetric_pd_matrix
+
+        def cholesky_test_helper(n, batch_dims, cast, upper):
+            A = cast(random_symmetric_pd_matrix(n, *batch_dims))
+            cholesky_exp = torch.stack([m.cholesky(upper=upper) for m in A.reshape(-1, n, n)])
+            cholesky_exp = cholesky_exp.reshape_as(A)
+            self.assertEqual(cholesky_exp, torch.cholesky(A, upper=upper))
+
+        for upper, batchsize in product([True, False], [(3,), (3, 4), (2, 3, 4)]):
+            cholesky_test_helper(3, batchsize, cast, upper)
+
+    @skipIfNoLapack
+    def test_cholesky_batched(self):
+        self._test_cholesky_batched(self, lambda t: t)
 
     @staticmethod
     def _test_potrs(self, cast):
@@ -5367,15 +5407,9 @@ class _TestTorchMixin(object):
     def _test_potrs_batched(self, cast):
         from common_utils import random_symmetric_pd_matrix
 
-        # TODO: This function should be replaced after batch potrf is ready
-        def get_cholesky(bmat, upper):
-            n = bmat.size(-1)
-            cholesky = torch.stack([m.cholesky(upper) for m in bmat.reshape(-1, n, n)])
-            return cholesky.reshape_as(bmat)
-
         def potrs_test_helper(A_dims, b_dims, cast, upper):
             A = cast(random_symmetric_pd_matrix(*A_dims))
-            L = get_cholesky(A, upper)
+            L = torch.cholesky(A, upper)
             b = cast(torch.randn(*b_dims))
             return A, L, b
 
@@ -5413,7 +5447,7 @@ class _TestTorchMixin(object):
             A = cast(A).permute(0, 2, 1)
             b = cast(b).permute(2, 1, 0)
             assert not A.is_contiguous() and not b.is_contiguous(), "contiguous inputs"
-            L = get_cholesky(A, upper)
+            L = torch.cholesky(A, upper)
             x = torch.potrs(b, L, upper=upper)
             self.assertEqual(x, cast(x_exp))
 
@@ -5429,18 +5463,12 @@ class _TestTorchMixin(object):
         from numpy.linalg import solve
         from common_utils import random_symmetric_pd_matrix
 
-        # TODO: This function should be replaced after batch potrf is ready
-        def get_cholesky(bmat, upper):
-            n = bmat.size(-1)
-            cholesky = torch.stack([m.cholesky(upper) for m in bmat.reshape(-1, n, n)])
-            return cholesky.reshape_as(bmat)
-
         def run_test(A_dims, b_dims, cast, upper):
             A = random_symmetric_pd_matrix(*A_dims)
             b = torch.randn(*b_dims)
             x_exp = torch.Tensor(solve(A.numpy(), b.numpy()))
             A, b = cast(A), cast(b)
-            L = get_cholesky(A, upper)
+            L = torch.cholesky(A, upper)
             x = torch.potrs(b, L, upper=upper)
             self.assertEqual(x, cast(x_exp))
 
@@ -6468,6 +6496,11 @@ class _TestTorchMixin(object):
             with self.assertRaises(RuntimeError):
                 getattr(base.clone(), method)(dim, idx, src)
 
+        # test for empty index, should be a no-op
+        idx = cast(torch.LongTensor())
+        actual = getattr(base.clone(), method)(dim, idx, src)
+        self.assertEqual(actual, base, 0)
+
     def test_scatter(self):
         self._test_scatter_base(self, lambda t: t, 'scatter_')
 
@@ -6808,6 +6841,7 @@ class _TestTorchMixin(object):
             self.assertEqual(x, x.roll(0, 1).roll(0, -1))
             self.assertEqual(x, x.roll(1, x.size(1)))
             self.assertEqual(x, x.roll(1))
+            self.assertEqual(x, x.roll((1, 1), (3, 1)))
 
             # unbind
             self.assertEqual((), x.unbind(0))
@@ -7390,6 +7424,10 @@ class _TestTorchMixin(object):
             expected = torch.tensor([8, 1, 2, 3, 4, 5, 6, 7], device=device)
             self.assertEqual(single_roll, expected, "{} did not equal expected result".format(single_roll))
 
+            roll_backwards = numbers.roll(-2, 0)
+            expected = torch.tensor([3, 4, 5, 6, 7, 8, 1, 2], device=device)
+            self.assertEqual(roll_backwards, expected, "{} did not equal expected result".format(roll_backwards))
+
             data = numbers.view(2, 2, 2)
             rolled = data.roll(1, 0)
             expected = torch.tensor([5, 6, 7, 8, 1, 2, 3, 4], device=device).view(2, 2, 2)
@@ -7416,6 +7454,18 @@ class _TestTorchMixin(object):
             expected = numbers.roll(1, 0).view(2, 4)
             self.assertEqual(expected, data.roll(1), "roll with no dims should flatten and roll.")
             self.assertEqual(expected, data.roll(1, dims=None), "roll with no dims should flatten and roll.")
+
+            # test roll over multiple dimensions
+            expected = torch.tensor([[7, 8, 5, 6], [3, 4, 1, 2]], device=device)
+            double_rolled = data.roll(shifts=(2, -1), dims=(1, 0))
+            self.assertEqual(double_rolled, expected,
+                             "should be able to roll over two dimensions, got {}".format(double_rolled))
+
+            self.assertRaisesRegex(RuntimeError, "required", lambda: data.roll(shifts=(), dims=()))
+            self.assertRaisesRegex(RuntimeError, "required", lambda: data.roll(shifts=(), dims=1))
+            # shifts/dims should align
+            self.assertRaisesRegex(RuntimeError, "align", lambda: data.roll(shifts=(1, 2), dims=(1,)))
+            self.assertRaisesRegex(RuntimeError, "align", lambda: data.roll(shifts=(1,), dims=(1, 2)))
 
     def test_reversed(self):
         val = torch.arange(0, 10)

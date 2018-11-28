@@ -1,4 +1,4 @@
-def script(
+def graph(self,
     a: Tensor,
     b: Tensor) -> Tensor:
   if bool(aten.lt(a, b)):

@@ -1,5 +1,4 @@
-#ifndef DEEPLEARNING_QUANTIZATION_CAFFE2_GROUP_NORM_DNNLOWP_OP_H_
-#define DEEPLEARNING_QUANTIZATION_CAFFE2_GROUP_NORM_DNNLOWP_OP_H_
+#pragma once
 
 #include <vector>
 
@@ -171,6 +170,44 @@ class GroupNormDNNLowPOp final : public DNNLowPOp<T, GroupNormFP32Op> {
   OUTPUT_TAGS(OUTPUT, MU, INV_SIGMA);
 };
 
-} // namespace caffe2
+namespace internal {
 
-#endif // DEEPLEARNING_QUANTIZATION_CAFFE2_GROUP_NORM_DNNLOWP_OP_H_
+template <typename T>
+void VectorMomentsAVX2(const int N, const T* src, int64_t* sum, int64_t* sumsq);
+
+void ComputeQuantizedFusedParamsAVX2(
+    const int N,
+    const int G,
+    const int K,
+    const int32_t X_zero_point,
+    const int32_t* mu,
+    const int32_t* rsig,
+    const int32_t* gamma,
+    int32_t* scale,
+    int32_t* bias);
+
+template <typename T>
+void AffineBatchChannelAndRequantizeNCHWAVX2(
+    const int N,
+    const int C,
+    const int HxW,
+    const dnnlowp::RequantizationParams& params,
+    const T* X,
+    const int32_t* scale,
+    const int32_t* bias,
+    T* Y);
+
+template <typename T>
+void AffineBatchChannelAndRequantizeNHWCAVX2(
+    const int N,
+    const int C,
+    const int HxW,
+    const dnnlowp::RequantizationParams& params,
+    const T* X,
+    const int32_t* scale,
+    const int32_t* bias,
+    T* Y);
+
+} // namespace internal
+
+} // namespace caffe2

@@ -53,15 +53,26 @@
 // Simply define the namespace, in case a dependent library want to refer to
 // the c10 namespace but not any nontrivial files.
 namespace c10 {} // namespace c10
-namespace c10 { namespace detail {} }
+namespace c10 { namespace cuda {} }
+namespace c10 { namespace hip {} }
 
 // Since C10 is the core library for caffe2 (and aten), we will simply reroute
 // all abstractions defined in c10 to be available in caffe2 as well.
 // This is only for backwards compatibility. Please use the symbols from the
 // c10 namespace where possible.
-namespace caffe2 {using namespace c10;}
-namespace at {using namespace c10;}
-namespace at { namespace detail { using namespace c10::detail; }}
+namespace caffe2 { using namespace c10; }
+namespace at { using namespace c10; }
+namespace at { namespace cuda { using namespace c10::cuda; }}
+
+// WARNING!!! THIS IS A GIANT HACK!!!
+// This line means you cannot simultaneously include c10/hip
+// and c10/cuda and then use them from the at::cuda namespace.
+// This is true in practice, because HIPIFY works inplace on
+// files in ATen/cuda, so it assumes that c10::hip is available
+// from at::cuda.  This namespace makes that happen.  When
+// HIPIFY is no longer out-of-place, we can switch the cuda
+// here to hip and everyone is happy.
+namespace at { namespace cuda { using namespace c10::hip; }}
 
 // C10_NORETURN
 #if defined(_MSC_VER)
@@ -124,5 +135,12 @@ namespace at { namespace detail { using namespace c10::detail; }}
 #else
 #define C10_MOBILE 0
 #endif // ANDROID / IOS / MACOS
+
+// Portably determine if a type T is trivially copyable or not.
+#if __GNUG__ && __GNUC__ < 5
+#define C10_IS_TRIVIALLY_COPYABLE(T) __has_trivial_copy(T)
+#else
+#define C10_IS_TRIVIALLY_COPYABLE(T) std::is_trivially_copyable<T>::value
+#endif
 
 #endif // C10_MACROS_MACROS_H_

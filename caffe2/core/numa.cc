@@ -26,7 +26,7 @@ void NUMABind(int numa_node_id) {
 
   CAFFE_ENFORCE(
       numa_node_id <= numa_max_node(),
-      "NUMA node id " + caffe2::to_string(numa_node_id) + " is unavailable");
+      "NUMA node id " + c10::to_string(numa_node_id) + " is unavailable");
 
   auto bm = numa_allocate_nodemask();
   numa_bitmask_clearall(bm);

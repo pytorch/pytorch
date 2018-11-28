@@ -10,7 +10,6 @@ from caffe2.quantization.server import utils as dnnlowp_utils
 from dnnlowp_test_utils import (
     check_quantized_results_close,
     generate_conv_inputs,
-    nchw2nhwc,
     nhwc2nchw,
 )
 from hypothesis import assume, given

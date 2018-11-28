@@ -1,8 +1,8 @@
 #pragma once
 
-#include "../ChannelUtils.hpp"
-#include "../Cuda.hpp"
-#include "../DataChannel.hpp"
+#include <THD/base/ChannelUtils.hpp>
+#include <THD/base/Cuda.hpp>
+#include <THD/base/DataChannel.hpp>
 
 #include "gloo/algorithm.h"
 #include "gloo/allgather_ring.h"

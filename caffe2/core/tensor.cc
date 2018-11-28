@@ -119,7 +119,7 @@ void TensorVectorResize(
 
 Tensor empty(at::IntList dims, at::TensorOptions options) {
   // TODO: merge this with at::empty after Tensor is merged
-  auto tensor = Tensor(dims, options.device().type());
+  auto tensor = Tensor(dims, options.device());
   tensor.raw_mutable_data(options.dtype());
   return tensor;
 }

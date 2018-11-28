@@ -91,55 +91,6 @@ void checkSameSizeAndType(
 
 } // namespace
 
-// ProcessGroupMPI::WorkMPI
-ProcessGroupMPI::WorkMPI::WorkMPI() : completed_(false) {}
-
-ProcessGroupMPI::WorkMPI::~WorkMPI() {}
-
-bool ProcessGroupMPI::WorkMPI::isCompleted() {
-  return completed_;
-}
-
-bool ProcessGroupMPI::WorkMPI::isSuccess() const {
-  return !exception_;
-}
-
-void ProcessGroupMPI::WorkMPI::synchronize() {}
-
-bool ProcessGroupMPI::WorkMPI::wait() {
-  std::unique_lock<std::mutex> lock(workMutex_);
-  while (!completed_) {
-    workCV_.wait(lock);
-  }
-  return isSuccess();
-}
-
-void ProcessGroupMPI::WorkMPI::finish() {
-  {
-    std::unique_lock<std::mutex> lock(workMutex_);
-    completed_ = true;
-  }
-  workCV_.notify_all();
-}
-
-void ProcessGroupMPI::WorkMPI::finishWithException(
-    std::exception_ptr caughtWorkException) {
-  {
-    std::unique_lock<std::mutex> lock(workMutex_);
-    completed_ = true;
-    exception_ = caughtWorkException;
-  }
-  workCV_.notify_all();
-}
-
-const std::exception& ProcessGroupMPI::WorkMPI::exception() const {
-  try {
-    std::rethrow_exception(exception_);
-  } catch (const std::exception& e) {
-    return e;
-  }
-}
-
 ProcessGroupMPI::AsyncWork::AsyncWork(
     at::Tensor tensor,
     MPI_Request request,
@@ -150,8 +101,10 @@ ProcessGroupMPI::AsyncWork::AsyncWork(
 
 ProcessGroupMPI::AsyncWork::~AsyncWork() {
   if (request_ != MPI_REQUEST_NULL) {
-    throw std::runtime_error(
-        "Attempted destruction of AsyncWork before work has completed");
+    std::cerr
+        << "Attempted destruction of AsyncWork before work has completed, "
+        << "terminating the program." << std::endl;
+    std::terminate();
   }
 }
 
@@ -189,11 +142,9 @@ bool ProcessGroupMPI::AsyncWork::isSuccess() const {
   return status_.MPI_ERROR == MPI_SUCCESS;
 }
 
-void ProcessGroupMPI::AsyncWork::synchronize() {}
-
-bool ProcessGroupMPI::AsyncWork::wait() {
+void ProcessGroupMPI::AsyncWork::wait() {
   if (request_ == MPI_REQUEST_NULL) {
-    return true;
+    return;
   }
 
   std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
@@ -203,20 +154,9 @@ bool ProcessGroupMPI::AsyncWork::wait() {
   }
 
   auto ok = (status_.MPI_ERROR == MPI_SUCCESS);
-
-  // Populate exception if request was not successful
   if (!ok) {
     populateException();
-  }
-
-  return ok;
-}
-
-const std::exception& ProcessGroupMPI::AsyncWork::exception() const {
-  try {
     std::rethrow_exception(exception_);
-  } catch (const std::exception& e) {
-    return e;
   }
 }
 
@@ -388,7 +328,7 @@ void ProcessGroupMPI::runLoop() {
       workEntry->run(workEntry);
       work->finish();
     } catch (...) {
-      work->finishWithException(std::current_exception());
+      work->finish(std::current_exception());
     }
 
     lock.lock();
@@ -484,7 +424,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::reduce(
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
-    std::vector<at::Tensor>& inputTensors) {
+    std::vector<at::Tensor>& inputTensors,
+    const AllgatherOptions& opts) {
   if (pgComm_ == MPI_COMM_NULL) {
     return nullptr;
   }
@@ -748,7 +689,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recvAnysource(
   return std::make_shared<AsyncWork>(tensor, request, srcRank);
 }
 
-std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::barrier() {
+std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::barrier(
+    const BarrierOptions& opts) {
   if (pgComm_ == MPI_COMM_NULL) {
     return nullptr;
   }
