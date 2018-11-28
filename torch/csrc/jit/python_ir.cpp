@@ -360,7 +360,7 @@ void initPythonIRBindings(PyObject * module_) {
 #undef CREATE_ACCESSOR
     // Tensor (t_) -- manually written to unwrap the variable into a tensor.
     .def("t_",[](Node & n, const char * name, torch::autograd::Variable v) {
-      return n.t_(Symbol::attr(name), std::move(v.data()));
+      return n.t_(Symbol::attr(name), v.data());
     })
     .def("t", [](Node & n, const char * name) {
       return torch::autograd::make_variable(n.t(Symbol::attr(name)), /*requires_grad=*/false);
@@ -370,9 +370,9 @@ void initPythonIRBindings(PyObject * module_) {
       std::vector<at::Tensor> tensors;
       tensors.reserve(vs.size());
       for (auto& variable : vs) {
-        tensors.push_back(std::move(variable.data()));
+        tensors.push_back(variable.data());
       }
-      return n.ts_(Symbol::attr(name), std::move(tensors));
+      return n.ts_(Symbol::attr(name), tensors);
     })
     .def("ts", [](Node & n, const char * name) {
       auto tensors = n.ts(Symbol::attr(name));
@@ -394,7 +394,7 @@ void initPythonIRBindings(PyObject * module_) {
         for (auto& i : v) {
           i = autograd::Variable(i.view({})).data();
         }
-        return n.ts_(Symbol::attr(name), std::move(v));
+        return n.ts_(Symbol::attr(name), v);
     })
     .def("zs",[](Node & n, const char * name) {
         return n.ts(Symbol::attr(name));
