@@ -272,9 +272,6 @@ Tensor _bincount_cuda_template(
 
   auto nbins = self.max().item<int64_t>() + 1L;
   nbins = std::max(nbins, minlength);
-  // input_t minvalue = 0;
-  // input_t maxvalue = *self.max().cpu().data<input_t>();
-  // input_t binsize = 1;
   input_t minvalue = 0;
   input_t maxvalue = *self.max().cpu().data<input_t>();
   input_t binsize = 1;
@@ -299,6 +296,10 @@ Tensor _histc_cuda_template(
     int64_t nbins,
     input_t min,
     input_t max) {
+  //FIXME histc_cpu has no boundary check, do they need to be consistent?
+  if (nbins < 0) {
+    AT_ERROR("nbins should be > 0");
+  }
   Tensor output = native::zeros({nbins}, device(DeviceType::CUDA).dtype(kLong));
   input_t minvalue;
   input_t maxvalue;
@@ -315,7 +316,7 @@ Tensor _histc_cuda_template(
     auto ret = cuda::CUDA_tensor_histogram<int64_t, input_t, int64_t, false>(
       output, self, at::empty({0}, self.options()), nbins, minvalue, maxvalue, binsize);
   } else {
-    //FIXME either int or double?
+    //FIXME is this okay? either int or double
     auto ret = cuda::CUDA_tensor_histogram<int64_t, input_t, double, false>(
       output, self, at::empty({0}, self.options()), nbins, minvalue, maxvalue, binsize);
   }
@@ -348,5 +349,11 @@ Tensor _histc_cuda(
   });
 }
 
+Tensor& _histc_out_cuda(Tensor& result, const Tensor& self, int64_t bins, Scalar min, Scalar max) {
+  auto ret = _histc_cuda(self, bins, min, max);
+  result.resize_as_(ret);
+  result.copy_(ret);
+  return result;
+}
 } // namespace native
 } // namespace at

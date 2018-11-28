@@ -2884,10 +2884,10 @@
 - func: lerp(Tensor self, Tensor end, Scalar weight) -> Tensor
   variants: method, function
 
-# - func: histc_out(Tensor result, Tensor self, int64_t bins=100, Scalar min=0, Scalar max=0) -> Tensor
-#   dispatch:
-#     CPU: _histc_out_cpu
-#     CUDA: _histc_out_cuda
+- func: histc_out(Tensor result, Tensor self, int64_t bins=100, Scalar min=0, Scalar max=0) -> Tensor
+  dispatch:
+    CPU: _histc_out_cpu
+    CUDA: _histc_out_cuda
 
 - func: histc(Tensor self, int64_t bins=100, Scalar min=0, Scalar max=0) -> Tensor
   variants: method, function
