@@ -68,44 +68,6 @@ if (@USE_CUDA@)
   list(APPEND TORCH_LIBRARIES ${TORCH_CUDA_LIBRARIES})
 endif()
 
-function(get_link_libraries OUTPUT_LIST TARGET)
-    get_target_property(IMPORTED ${TARGET} IMPORTED)
-    list(APPEND VISITED_TARGETS ${TARGET})
-    if (IMPORTED)
-        get_target_property(LIBS ${TARGET} INTERFACE_LINK_LIBRARIES)
-    else()
-        get_target_property(LIBS ${TARGET} LINK_LIBRARIES)
-    endif()
-    set(LIB_FILES "")
-    foreach(LIB ${LIBS})
-        if (TARGET ${LIB})
-            list(FIND VISITED_TARGETS ${LIB} VISITED)
-            if (${VISITED} EQUAL -1)
-                get_target_property(LIB_FILE ${LIB} LOCATION)
-                get_link_libraries(LINK_LIB_FILES ${LIB})
-                list(APPEND LIB_FILES ${LIB_FILE} ${LINK_LIB_FILES})
-            endif()
-        endif()
-    endforeach()
-    set(VISITED_TARGETS ${VISITED_TARGETS} PARENT_SCOPE)
-    set(${OUTPUT_LIST} ${LIB_FILES} PARENT_SCOPE)
-endfunction()
-
-set(L get_link_libraries(caffe2_library))
-message(L)
-
-set(CLING_PRAGMAS_OUTPUT_FILE "${TORCH_INSTALL_PREFIX}/cling_pragmas.h")
-add_custom_command(
-  OUTPUT ${CLING_PRAGMAS_OUTPUT_FILE}
-  COMMAND python ${TORCH_INSTALL_PREFIX}/tools/gen_cling_pragmas.py
-    --root ${TORCH_INSTALL_PREFIX}
-    --include-dirs ${TORCH_INCLUDE_DIRS}
-    --library-dirs ${TORCH_INSTALL_PREFIX}/lib
-    --libraries ${TORCH_LIBRARIES}
-    --output ${CLING_PRAGMAS_OUTPUT_FILE}
-  WORKING_DIRECTORY ${TORCH_INSTALL_PREFIX})
-add_custom_target(cling_pragmas DEPENDS ${CLING_PRAGMAS_OUTPUT_FILE})
-
 # When we build libtorch with the old GCC ABI, dependent libraries must too.
 if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
   set(TORCH_CXX_FLAGS "-D_GLIBCXX_USE_CXX11_ABI=@GLIBCXX_USE_CXX11_ABI@")
@@ -119,5 +81,9 @@ set_target_properties(torch PROPERTIES
 if (TORCH_CXX_FLAGS)
   set_property(TARGET torch PROPERTY INTERFACE_COMPILE_OPTIONS "${TORCH_CXX_FLAGS}")
 endif()
+
+# CMake code to create a target that generates a header with pragmas for cling
+# (the C++ interpreter).
+include(${CMAKE_CURRENT_LIST_DIR}/ClingPragmas.cmake)
 
 find_package_handle_standard_args(torch DEFAULT_MSG TORCH_LIBRARY TORCH_INCLUDE_DIRS)

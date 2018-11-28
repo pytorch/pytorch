@@ -482,6 +482,7 @@ configure_file(
 install(FILES
     ${PROJECT_BINARY_DIR}/TorchConfigVersion.cmake
     ${PROJECT_BINARY_DIR}/TorchConfig.cmake
+    ${TORCH_ROOT}/cmake/ClingPragmas.cmake
     DESTINATION share/cmake/Torch)
 
 if (USE_DISTRIBUTED)
