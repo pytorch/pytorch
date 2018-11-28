@@ -5,7 +5,8 @@ from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
 from torch.jit.frontend import get_jit_ast, get_default_args
 import torch.backends.cudnn as cudnn
 import torch.jit.annotations
-from torch._six import raise_from, with_metaclass, get_function_from_type
+from torch._six import raise_from, with_metaclass, get_function_from_type, \
+    string_classes
 from .._jit_internal import createResolutionCallback, _compiled_weak_fns, \
     _weak_script_methods, _weak_modules, _weak_types, COMPILED, \
     COMPILATION_PENDING, _boolean_dispatched
@@ -70,17 +71,28 @@ def scope(scope_name):
             tracing_state.pop_scope()
 
 
-def load(f):
+def load(f, map_location=None):
     r"""
         Load a ``ScriptModule`` previously saved with :func:`save <torch.jit.save>`
 
-        .. DANGER::
-           All previously saved modules, no matter their device, are always loaded onto the CPU.
-           This is different from :func:`torch.load`'s semantics and may change in the future.
+        All previously saved modules, no matter their device, are first loaded onto CPU,
+        and then are moved to the devices they were saved from. If this fails (e.g. because
+        the run time system doesn't have certain devices), an exception is raised.
+        However, storages can be dynamically remapped to an alternative set of devices
+        using the `map_location` argument. This is similar to the semantics in
+        :func:`torch.load`. But when `map_location` is a callable, the type of the return
+        value is slightly different. In :func:`torch.jit.load`, the device string is returned,
+        however in :func:`torch.load`, both target device string or the actual storage on the
+        target device can be the return value.
 
         Arguments:
             f: a file-like object (has to implement read, readline, tell, and seek),
                 or a string containing a file name
+            map_location: can a string (e.g., 'cpu', 'cuda:0'), a dict {'cuda:0':'cuda:1'},
+                a device (e.g., torch.device('cpu')), or a callable, which takes the
+                deserialized tensor on CPU and the saved device string as inputs and returns
+                the string representation of the target device (e.g., lambda tensor, location:
+                'cpu').
 
         Returns:
             A ``ScriptModule`` object.
@@ -90,7 +102,16 @@ def load(f):
             # Load ScriptModule from io.BytesIO object
             >>> with open('scriptmodule.pt', 'rb') as f:
                     buffer = io.BytesIO(f.read())
+            # Load all tensors to the original device
             >>> torch.jit.load(buffer)
+            # Load all tensors onto CPU, using a device
+            >>> torch.jit.load(buffer, map_location=torch.device('cpu'))
+            # Load all tensors onto CPU, using a string
+            >>> torch.jit.load(buffer, map_location='cpu')
+            # Load all tensors onto GPU 1, using a function
+            >>> torch.jit.load(buffer, map_location=lambda storage, loc: 'cuda:1')
+            # Map tensors from GPU 1 to GPU 0, using a dict
+            >>> torch.jit.load(buffer, map_location={'cuda:1', 'cuda:0'})
     """
     m = ScriptModule()
 
@@ -102,12 +123,31 @@ def load(f):
             curr = getattr(curr, name)
         return curr
 
+    if map_location is None:
+        def device_lookup(tensor, location):
+            return location
+    elif isinstance(map_location, dict):
+        def device_lookup(tensor, location):
+            return map_location.get(location, location)
+    elif isinstance(map_location, string_classes):
+        def device_lookup(tensor, location):
+            return map_location
+    elif isinstance(map_location, torch.device):
+        def device_lookup(tensor, location):
+            return str(map_location)
+    else:
+        def device_lookup(tensor, location):
+            result = map_location(tensor, location)
+            if result is None:
+                result = location
+            return result
+
     if isinstance(f, str) or \
             (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
             (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
-        torch._C.import_ir_module(module_lookup, f)
+        torch._C.import_ir_module(module_lookup, f, device_lookup)
     else:
-        torch._C.import_ir_module_from_buffer(module_lookup, f.read())
+        torch._C.import_ir_module_from_buffer(module_lookup, f.read(), device_lookup)
     return m
 
 

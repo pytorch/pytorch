@@ -37,7 +37,7 @@ class ScriptModuleDeserializer final {
 
   ScriptModuleDeserializer(std::istream* is);
 
-  void deserialize(ModuleLookup module_lookup);
+  void deserialize(ModuleLookup module_lookup, DeviceLookup device_lookup);
 
 private:
  at::Tensor loadTensor(
@@ -53,6 +53,7 @@ private:
  // this is a hack to make sure the script module created in C++ is the
  // same as created in Python
  ModuleLookup moduleLookup_;
+ DeviceLookup deviceLookup_;
  std::vector<std::string> moduleStack_;
 
  std::vector<at::Tensor> tensor_table_;
@@ -66,7 +67,8 @@ ScriptModuleDeserializer::ScriptModuleDeserializer(const std::string& filename)
 ScriptModuleDeserializer::ScriptModuleDeserializer(std::istream* is)
     : ifs_(), reader_(is) {}
 
-void ScriptModuleDeserializer::deserialize(ModuleLookup module_lookup) {
+void ScriptModuleDeserializer::deserialize(ModuleLookup module_lookup,
+    DeviceLookup device_lookup) {
   torch::ModelDef model_def;
   at::DataPtr data_ptr;
   size_t data_size;
@@ -95,6 +97,7 @@ void ScriptModuleDeserializer::deserialize(ModuleLookup module_lookup) {
       model_def.ParseFromString(binary_string),
       "JSON transcoder produced invalid protobuf output.");
   moduleLookup_ = module_lookup;
+  deviceLookup_ = device_lookup;
 
   const auto& module_def = model_def.main_module();
   loadTensorTable(&model_def);
@@ -123,6 +126,7 @@ at::Tensor ScriptModuleDeserializer::loadTensor(const torch::TensorDef& tensor_p
     at::DataPtr storage_ptr;
     uint64_t record_size;
     std::tie(storage_ptr, record_size) = reader_.getRecord(record_key);
+    AT_ASSERT(static_cast<int64_t>(record_size) == tensor_proto.data().size());
     auto storage = at::Storage(
         at::CPU(type).typeMeta(),
         std::move(storage_ptr),
@@ -132,7 +136,18 @@ at::Tensor ScriptModuleDeserializer::loadTensor(const torch::TensorDef& tensor_p
   }
   auto t = at::CPU(type)._th_tensor(
       storage_it->second, tensor_proto.offset(), dims, strides);
-  return autograd::make_variable(t, tensor_proto.requires_grad());
+
+  t = autograd::make_variable(t, tensor_proto.requires_grad());
+
+  // restore to the appropriate device
+  AT_ASSERT(tensor_proto.has_device() && !tensor_proto.device().empty());
+  const std::string mapped_device_str = deviceLookup_(t, tensor_proto.device());
+  at::Device mapped_device(mapped_device_str);
+  if (mapped_device != t.device()) {
+    t = t.to(mapped_device, t.scalar_type());
+    storage_it->second = t.storage();
+  }
+  return t;
 }
 
 void ScriptModuleDeserializer::convertModule(
@@ -164,16 +179,18 @@ void ScriptModuleDeserializer::convertModule(
 
 void import_ir_module(
     ModuleLookup module_lookup,
-    std::istream& in) {
+    std::istream& in,
+    DeviceLookup device_lookup) {
   ScriptModuleDeserializer deserializer(&in);
-  deserializer.deserialize(module_lookup);
+  deserializer.deserialize(module_lookup, device_lookup);
 }
 
 void import_ir_module(
     ModuleLookup module_lookup,
-    const std::string& filename) {
+    const std::string& filename,
+    DeviceLookup device_lookup) {
   ScriptModuleDeserializer deserializer(filename);
-  deserializer.deserialize(module_lookup);
+  deserializer.deserialize(module_lookup, device_lookup);
 }
 
 std::shared_ptr<script::Module> load(std::istream& in) {
@@ -190,8 +207,12 @@ std::shared_ptr<script::Module> load(std::istream& in) {
     return curr;
   };
 
+  auto device_lookup = [&](at::Tensor tensor, const std::string& location) {
+    return "cpu";
+  };
+
   ScriptModuleDeserializer deserializer(&in);
-  deserializer.deserialize(module_lookup);
+  deserializer.deserialize(module_lookup, device_lookup);
 
   return module;
 }

@@ -10,12 +10,17 @@ namespace jit {
 
 using ModuleLookup = std::function<std::shared_ptr<script::Module>(
     const std::vector<std::string>&)>;
+using DeviceLookup = std::function<std::string(at::Tensor&, const std::string&)>;
 
 TORCH_API void import_ir_module(
     ModuleLookup module_lookup,
-    const std::string& filename);
+    const std::string& filename,
+    DeviceLookup device_lookup);
 
-TORCH_API void import_ir_module(ModuleLookup module_lookup, std::istream& in);
+TORCH_API void import_ir_module(
+    ModuleLookup module_lookup,
+    std::istream& in,
+    DeviceLookup device_lookup);
 
 /// Loads a serialized `script::Module` from the given `istream`.
 ///

@@ -712,12 +712,14 @@ void initJitScriptBindings(PyObject* module) {
   });
 
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
-  m.def("import_ir_module", [](ModuleLookup module_lookup, const std::string& filename) {
-    import_ir_module(module_lookup, filename);
+  m.def("import_ir_module", [](ModuleLookup module_lookup, const std::string& filename,
+        DeviceLookup device_lookup) {
+    import_ir_module(module_lookup, filename, device_lookup);
   });
-  m.def("import_ir_module_from_buffer", [](ModuleLookup module_lookup, const std::string& buffer) {
+  m.def("import_ir_module_from_buffer", [](ModuleLookup module_lookup,
+        const std::string& buffer, DeviceLookup device_lookup) {
     std::istringstream in(buffer);
-    import_ir_module(module_lookup, in);
+    import_ir_module(module_lookup, in, device_lookup);
   });
   m.def("_jit_import_methods", import_methods);
   m.def("_jit_set_emit_module_hook", setEmitModuleHook);
