@@ -617,11 +617,7 @@ inline void Variable::set_grad_accumulator(
 }
 
 inline std::shared_ptr<Function> Variable::try_get_grad_accumulator() const {
-  if (get_autograd_meta()) {
-    return get_autograd_meta()->grad_accumulator_.lock();
-  } else {
-    return nullptr;
-  }
+  return get_autograd_meta()->grad_accumulator_.lock();
 }
 
 inline std::shared_ptr<Function> Variable::grad_accumulator() const {
@@ -721,9 +717,7 @@ inline const std::string& Variable::name() const noexcept {
 }
 
 inline void Variable::set_pyobj(PyObject* pyobj) noexcept {
-  if (get_autograd_meta()) {
-    get_autograd_meta()->pyobj_ = pyobj;
-  }
+  get_autograd_meta()->pyobj_ = pyobj;
 }
 
 inline PyObject* Variable::pyobj() const noexcept {
