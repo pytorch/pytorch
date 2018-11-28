@@ -308,7 +308,7 @@ static inline void
 mask_scatter_add(const scalar_t *src, scalar_t* base_addr,
                  const int_same_size_t<scalar_t> *offsets,
                  const int_same_size_t<scalar_t> *mask, int64_t len) {
-  #if (!defined _MSC_VER)  
+  #ifndef _MSC_VER  
   # pragma unroll  
   #endif
   for (int64_t i = 0; i < len; i++) {
@@ -431,7 +431,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear, padding>
     auto i_sw_offset = i_nw_offset + iVec(inp_sH);
     auto i_se_offset = i_sw_offset + iVec(inp_sW);
 
-    #if (!defined _MSC_VER)  
+    #ifndef _MSC_VER  
     # pragma unroll  
     #endif
     for (int64_t c = 0; c < C; ++c) {
@@ -505,7 +505,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear, padding>
     scalar_t gInp_corner_arr[Vec::size];
 
     auto gx = Vec(0), gy = Vec(0);
-    #if (!defined _MSC_VER)  
+    #ifndef _MSC_VER  
     # pragma unroll  
     #endif
     for (int64_t c = 0; c < C; ++c) {
@@ -598,7 +598,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Nearest, padding> 
     auto out_ptr = out_slice.data() + offset;
     auto out_sC = out_slice.stride(0);
     auto inp_slice_ptr = inp_slice.data();
-    #if (!defined _MSC_VER)  
+    #ifndef _MSC_VER  
     # pragma unroll  
     #endif
     for (int c = 0; c < C; ++c, out_ptr += out_sC, inp_slice_ptr += inp_sC) {
@@ -635,7 +635,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Nearest, padding> 
     integer_t gInp_offset_arr[iVec::size];
     i_gInp_offset.store(gInp_offset_arr);
 
-    #if (!defined _MSC_VER)  
+    #ifndef _MSC_VER  
     # pragma unroll  
     #endif
     for (int64_t c = 0; c < C; ++c) {
@@ -743,14 +743,14 @@ static inline void grid_sample_2d_grid_slice_iterator(
     auto spatial_offset = 0;
     auto i_offsets_delta = iVec(grid_sW * step);
 
-    #if (!defined _MSC_VER)  
+    #ifndef _MSC_VER  
     # pragma unroll  
     #endif
     for (int64_t h = 0; h < out_H; h++) {
       auto grid_ptr_x = grid_ptr + h * grid_sH;
       auto grid_ptr_y = grid_ptr_x + grid_sCoor;
       auto i_offsets = iVec::arange(0, grid_sW);
-      #if (!defined _MSC_VER)  
+      #ifndef _MSC_VER  
       # pragma unroll  
       #endif
       for (int64_t w = 0; w < out_W; w += step) {

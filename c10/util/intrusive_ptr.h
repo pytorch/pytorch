@@ -72,7 +72,7 @@ class C10_API intrusive_ptr_target {
 // We also have to disable -Wunknown-warning-option and -Wpragmas, because
 // some other compilers don't know about -Wterminate or -Wexceptions and
 // will show a warning about unknown warning options otherwise.
-#if (defined _MSC_VER)  
+#ifdef _MSC_VER
 #  pragma warning(push)  
 #  pragma warning(disable: 4297) // function assumed not to throw an exception but does  
 #else  
@@ -88,7 +88,7 @@ class C10_API intrusive_ptr_target {
     AT_ASSERTM(
         weakcount_.load() == 0,
         "Tried to destruct an intrusive_ptr_target that still has weak_intrusive_ptr to it");
-#if (defined _MSC_VER)  
+#ifdef _MSC_VER
 #  pragma warning(pop)  
 #else  
 #  pragma GCC diagnostic pop  

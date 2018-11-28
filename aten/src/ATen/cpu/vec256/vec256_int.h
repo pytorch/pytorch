@@ -212,7 +212,7 @@ template <>
 void convert(const int32_t *src, float *dst, int64_t n) {
   int64_t i;
   // int32_t and float have same size
-#if (!defined _MSC_VER)  
+#ifndef _MSC_VER  
 # pragma unroll  
 #endif
   for (i = 0; i <= (n - Vec256<int32_t>::size); i += Vec256<int32_t>::size) {
@@ -220,7 +220,7 @@ void convert(const int32_t *src, float *dst, int64_t n) {
     auto output_vec = _mm256_cvtepi32_ps(input_vec);
     _mm256_storeu_ps(reinterpret_cast<float*>(dst + i), output_vec);
   }
-#if (!defined _MSC_VER)  
+#ifndef _MSC_VER  
 # pragma unroll  
 #endif
   for (; i < n; i++) {
@@ -232,7 +232,7 @@ template <>
 void convert(const int32_t *src, double *dst, int64_t n) {
   int64_t i;
   // int32_t has half the size of double
-#if (!defined _MSC_VER)  
+#ifndef _MSC_VER  
 # pragma unroll  
 #endif
   for (i = 0; i <= (n - Vec256<double>::size); i += Vec256<double>::size) {
@@ -240,7 +240,7 @@ void convert(const int32_t *src, double *dst, int64_t n) {
     auto output_vec = _mm256_cvtepi32_pd(input_128_vec);
     _mm256_storeu_pd(reinterpret_cast<double*>(dst + i), output_vec);
   }
-#if (!defined _MSC_VER)  
+#ifndef _MSC_VER  
 # pragma unroll  
 #endif
   for (; i < n; i++) {

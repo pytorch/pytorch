@@ -17,7 +17,7 @@
 #include <utility>
 #include <type_traits>
 
-#if (!defined _MSC_VER)
+#ifndef _MSC_VER
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wshadow"
 #endif
@@ -1458,6 +1458,6 @@ namespace ska
 
 } // end namespace ska
 
-#if (!defined _MSC_VER)
+#ifndef _MSC_VER
 #pragma GCC diagnostic pop
 #endif

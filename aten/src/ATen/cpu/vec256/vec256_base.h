@@ -474,7 +474,7 @@ interleave2(const Vec256<T>& a, const Vec256<T>& b) {
 
 template <typename src_T, typename dst_T>
 void convert(const src_T *src, dst_T *dst, int64_t n) {
-#if (!defined _MSC_VER)  
+#ifndef _MSC_VER  
 # pragma unroll  
 #endif
   for (int64_t i = 0; i < n; i++) {

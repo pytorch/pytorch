@@ -13,7 +13,7 @@
 
 #ifdef _OPENMP
 
-#if (defined _WIN32)  
+#ifdef _WIN32  
 // MSVC doesing support loop pragmas, but does support others. Create a new macro to account for those differences.  
 #define PRAGMA_LOOP(P)    // Noop  
 #define PRAGMA(P)         __pragma(P)
