@@ -7680,6 +7680,25 @@ a")
                 # type: () -> int
                 return torch.jit._unwrap_optional(None)
 
+    def test_list_with_default_builtin(self):
+        from torch.nn.modules.utils import _list_with_default
+
+        def fun(a, b):
+            # type: (List[Optional[int]], List[int]) -> List[int]
+            l = _list_with_default(a, b)
+            return l
+
+        a = [1, None, 2]
+        b = [2, 2, 2, 2]
+        self.checkScript(fun, (a, b))
+
+        def foo():
+            a = 1
+            b = [2, 2]
+            return _list_with_default(a, b)
+
+        self.checkScript(foo, ())
+
     def test_indexing_error(self):
         with self.assertRaisesRegex(RuntimeError, "Indexing only supported on lists, tensors, and tuples"):
             @torch.jit.script

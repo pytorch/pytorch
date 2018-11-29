@@ -35,20 +35,35 @@ RegisterOperators reg({
           pack(stack, std::move(result));
           return 0;
         }),
+    // reference _list_with_default in utils.py
     Operator(
-        "aten::list_with_default(int[] list, int[] defaults) -> int[]",
+      "aten::list_with_default(int list, int[] defaults) -> int",
+      [](Stack& stack) {
+        IValue single_val;
+        IValue defaults;
+        pop(stack, single_val, defaults);
+        push(stack, single_val);
+        return 0;
+      }),
+    Operator(
+        "aten::list_with_default(int?[] list, int[] defaults) -> int[]",
         [](Stack& stack) {
           autograd::profiler::RecordFunction record("sizes");
-          auto list = peek(stack, 0, 2).toIntListRef();
-          auto defaults = peek(stack, 1, 2).toIntListRef();
-          drop(stack, 2);
+          std::vector<IValue> list;
+          std::vector<int64_t> defaults;
+          pop(stack, list, defaults);
 
-          JIT_ASSERT(defaults.size() > list.size());
+          JIT_ASSERT(defaults.size() >= list.size());
+          std::vector<int64_t> ret_list;
+          for (size_t i = 0; i < list.size(); ++i) {
+            if (!list[i].isNone()) {
+              ret_list.push_back(list[i].toInt());
+            } else {
+              ret_list.push_back(defaults[i]);
+            }
+          }
 
-          // TODO: allow list of optionals to be filled in with defaults
-          // i.e. list_with_default([1, 2, None], [1, 2, 3]) -> [1, 2, 3]
-
-          push(stack, list);
+          push(stack, ret_list);
           return 0;
         }),
     Operator(
