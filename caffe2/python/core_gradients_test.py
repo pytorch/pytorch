@@ -11,7 +11,6 @@ import unittest
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, test_util, workspace
 from caffe2.python.core import CreateOperator, GradientRegistry
-from caffe2.python import workspace
 
 import numpy as np
 
