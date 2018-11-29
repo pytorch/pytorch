@@ -1386,7 +1386,7 @@ def _recover_record_by_prefix(names, prefix=''):
 
 
 class Net(object):
-    _net_names_used = set()
+    _net_names_used = {}
     operator_registry_ = {}
 
     @staticmethod
@@ -1400,12 +1400,11 @@ class Net(object):
         name = basename = '/'.join(
             x for x in [Net.current_prefix(), basename] if x
         )
-        next_idx = 1
-        while name in Net._net_names_used:
-            name = basename + '_' + str(next_idx)
-            next_idx += 1
-        Net._net_names_used |= set([name])
-        return name
+        next_idx = Net._net_names_used.get(name, 0)
+        Net._net_names_used[name] = next_idx + 1
+        result = name if next_idx == 0 else name + '_' + str(next_idx)
+        Net._net_names_used[result] = 1
+        return result
 
     def __init__(self, name_or_proto):
         """
