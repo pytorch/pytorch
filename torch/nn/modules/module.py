@@ -145,7 +145,6 @@ class Module(object):
 
         if param is None:
             setattr(self, name, None)
-            # self._parameters[name] = None
         elif not isinstance(param, Parameter):
             raise TypeError("cannot assign '{}' object to parameter '{}' "
                             "(torch.nn.Parameter or None required)"
@@ -553,7 +552,8 @@ class Module(object):
                 raise TypeError("cannot assign '{}' as parameter '{}' "
                                 "(torch.nn.Parameter or None expected)"
                                 .format(torch.typename(value), name))
-            self.register_parameter(name, value)
+            remove_from(self._parameters)
+            object.__setattr__(self, name, value)
         else:
             modules = self.__dict__.get('_modules')
             if isinstance(value, Module):
