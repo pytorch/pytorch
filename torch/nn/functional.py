@@ -1157,39 +1157,6 @@ def softmax(input, dim=None, _stacklevel=3, dtype=None):
 
 
 @torch._jit_internal.weak_script
-def _sample_gumbel(shape, eps=1e-10, out=None):
-    # type: (List[int], float, Optional[Tensor]) -> Tensor
-    """
-    Sample from Gumbel(0, 1)
-
-    based on
-    https://github.com/ericjang/gumbel-softmax/blob/3c8584924603869e90ca74ac20a6a03d99a91ef9/Categorical%20VAE.ipynb ,
-    (MIT license)
-    """
-    if out is None:
-        U = torch.rand(shape)
-    else:
-        U = torch.jit._unwrap_optional(out).resize_(shape).uniform_()
-    return - torch.log(eps - torch.log(U + eps))
-
-
-@torch._jit_internal.weak_script
-def _gumbel_softmax_sample(logits, tau=1, eps=1e-10):
-    # type: (Tensor, float, float) -> Tensor
-    """
-    Draw a sample from the Gumbel-Softmax distribution
-
-    based on
-    https://github.com/ericjang/gumbel-softmax/blob/3c8584924603869e90ca74ac20a6a03d99a91ef9/Categorical%20VAE.ipynb
-    (MIT license)
-    """
-    dims = logits.dim()
-    gumbel_noise = _sample_gumbel(logits.size(), eps=eps, out=torch.empty_like(logits))
-    y = logits + gumbel_noise
-    return softmax(y / tau, dims - 1)
-
-
-@torch._jit_internal.weak_script
 def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
     # type: (Tensor, float, bool, float, int) -> Tensor
     r"""
