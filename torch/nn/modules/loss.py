@@ -322,10 +322,11 @@ class KLDivLoss(_Loss):
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'batchmean' | 'sum' | 'mean'. 'none': no reduction will be applied,
-            'batchmean': the sum of the output will be divided by the number of
-            batches in the output, 'sum': the output will be summed, 'mean': the output will
-            be divided by the number of elements in the output.
+            'none' | 'batchmean' | 'sum' | 'mean'.
+            'none': no reduction will be applied.
+            'batchmean': the sum of the output will be divided by batchsize.
+            'sum': the output will be summed.
+            'mean': the output will be divided by the number of elements in the output.
             Note: :attr:`size_average` and :attr:`reduce` are in the process of being deprecated,
             and in the meantime, specifying either of those two args will override :attr:`reduction`.
             Note: `reduction='mean'` is deprecated in KLDivLoss. Please use `reduction='batchmean'`
