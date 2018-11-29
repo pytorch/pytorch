@@ -19,3 +19,6 @@ at::DataPtr THCIpcDeleter::makeDataPtr(void* data, int device) {
   auto* context = new THCIpcDeleter(data, device);
   return {data, context, &deleteTHCIpcDeleter, at::Device(at::DeviceType::CUDA, cur_device)};
 }
+
+THCIpcDeleter::THCIpcDeleter(void* data, int device)
+    : data_(data), device_(device) {}

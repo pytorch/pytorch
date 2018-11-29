@@ -7,13 +7,13 @@
 // Should work with THStorageClass
 #include <TH/THStorageFunctions.hpp>
 
-#include "ATen/ScalarType.h"
+#include <c10/core/ScalarType.h>
 
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
 
-namespace at {
+namespace c10 {
 
 #if defined(__CUDACC__) || defined(__HIP_PLATFORM_HCC__)
 template <>

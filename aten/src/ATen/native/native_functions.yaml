@@ -144,6 +144,12 @@
 
 - func: addr_out(Tensor result, Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
 
+- func: affine_grid_generator(Tensor theta, IntList size) -> Tensor
+  variants: function
+
+- func: affine_grid_generator_backward(Tensor grad, IntList size) -> Tensor
+  variants: function
+
 - func: all(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
   variants: function, method
 
@@ -479,18 +485,12 @@
 
 - func: cosine_embedding_loss(Tensor input1, Tensor input2, Tensor target, double margin=0.0, int64_t reduction=Reduction::Mean) -> Tensor
 
-- func: cudnn_affine_grid_generator(Tensor theta, int64_t N, int64_t C, int64_t H, int64_t W) -> Tensor
-  return:
-    - type: Tensor
-      name: grid
+- func: cudnn_affine_grid_generator(Tensor theta, int64_t N, int64_t C, int64_t H, int64_t W) -> Tensor grid
   dispatch:
     CUDA: cudnn_affine_grid_generator_forward
 
 # TODO: Why do I have to call this grad?!
-- func: cudnn_affine_grid_generator_backward(Tensor grad, int64_t N, int64_t C, int64_t H, int64_t W)
-  return:
-    - type: Tensor
-      name: grad_theta
+- func: cudnn_affine_grid_generator_backward(Tensor grad, int64_t N, int64_t C, int64_t H, int64_t W) -> Tensor grad_theta
   dispatch:
     CUDA: cudnn_affine_grid_generator_backward
 
@@ -546,19 +546,11 @@
     CUDA: cudnn_convolution_transpose_backward_weight
 
 # NB: input is special cased in a way I don't quite understand
-- func: cudnn_grid_sampler(Tensor self, Tensor grid)
-  return:
-    - type: Tensor
-      name: output
+- func: cudnn_grid_sampler(Tensor self, Tensor grid) -> Tensor output
   dispatch:
     CUDA: cudnn_grid_sampler_forward
 
-- func: cudnn_grid_sampler_backward(Tensor self, Tensor grid, Tensor grad_output)
-  return:
-    - type: Tensor
-      name: grad_self
-    - type: Tensor
-      name: grad_grid
+- func: cudnn_grid_sampler_backward(Tensor self, Tensor grid, Tensor grad_output) -> (Tensor grad_self, Tensor grad_grid)
   dispatch:
     CUDA: cudnn_grid_sampler_backward
 
@@ -646,6 +638,11 @@
   dispatch:
     CPU: embedding_renorm_cpu_
     CUDA: embedding_renorm_cuda_
+
+- func: no_grad_embedding_renorm_(Tensor self, IndexTensor indices, double max_norm, double norm_type) -> Tensor
+  dispatch:
+    CPU: no_grad_embedding_renorm_cpu_
+    CUDA: no_grad_embedding_renorm_cuda_
 
 - func: embedding_sparse_backward(Tensor grad, IndexTensor indices, int64_t num_weights, int64_t padding_idx, bool scale_grad_by_freq) -> Tensor
 
@@ -900,10 +897,10 @@
 - func: _cufft_get_plan_cache_max_size() -> int64_t
   device_guard: false
 
-- func: _cufft_set_plan_cache_max_size(int64_t max_size)
+- func: _cufft_set_plan_cache_max_size(int64_t max_size) -> void
   device_guard: false
 
-- func: _cufft_clear_plan_cache()
+- func: _cufft_clear_plan_cache() -> void
   device_guard: false
 
 - func: index(Tensor self, TensorList indices) -> Tensor
@@ -913,10 +910,10 @@
 - func: index_copy_(Tensor self, int64_t dim, IndexTensor index, Tensor source) -> Tensor
   variants: method
 
-- func: index_put(Tensor self, TensorList indices, Tensor values) -> Tensor
+- func: index_put(Tensor self, TensorList indices, Tensor values, bool accumulate=false) -> Tensor
   variants: function, method
 
-- func: index_put_(Tensor self, TensorList indices, Tensor values) -> Tensor
+- func: index_put_(Tensor self, TensorList indices, Tensor values, bool accumulate=false) -> Tensor
   variants: function, method
 
 - func: instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, double momentum, double eps, bool cudnn_enabled) -> Tensor
@@ -1114,20 +1111,20 @@
 - func: mean(Tensor self) -> Tensor
   variants: function, method
 
-- func: mean(Tensor self, int64_t dim, bool keepdim, *, ScalarType dtype) -> Tensor
+- func: mean(Tensor self, IntList[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
   variants: function, method
 
-- func: mean(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+- func: mean(Tensor self, IntList[1] dim, bool keepdim=False) -> Tensor
   variants: function, method
 
-- func: mean(Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+- func: mean(Tensor self, IntList[1] dim, *, ScalarType dtype) -> Tensor
   variants: function, method
 
-- func: mean_out(Tensor result, Tensor self, int64_t dim, bool keepdim, *, ScalarType dtype) -> Tensor
+- func: mean_out(Tensor result, Tensor self, IntList[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
 
-- func: mean_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+- func: mean_out(Tensor result, Tensor self, IntList[1] dim, bool keepdim=False) -> Tensor
 
-- func: mean_out(Tensor result, Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+- func: mean_out(Tensor result, Tensor self, IntList[1] dim, *, ScalarType dtype) -> Tensor
 
 - func: median(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
   variants: function, method
@@ -1874,6 +1871,20 @@
     SparseCPU: norm_sparse
     SparseCUDA: norm_sparse
 
+# TODO: reduce signatures down to one when optional args is available
+- func: _sparse_sum(Tensor self) -> Tensor
+
+- func: _sparse_sum(Tensor self, *, ScalarType dtype) -> Tensor
+
+- func: _sparse_sum(Tensor self, IntList[1] dim) -> Tensor
+
+- func: _sparse_sum(Tensor self, IntList[1] dim, *, ScalarType dtype) -> Tensor
+
+- func: _sparse_sum_backward(Tensor grad, Tensor self, IntList dim) -> Tensor
+  dispatch:
+      SparseCPU: _sparse_sum_backward_cpu
+      SparseCUDA: _sparse_sum_backward_cuda
+
 - func: norm(Tensor self, Scalar p=2) -> Tensor
   variants: function, method
 
@@ -1977,6 +1988,8 @@
   dispatch:
     CPU: s_addmm_sparse_dense_cpu_
     CUDA: s_addmm_sparse_dense_cuda_
+
+- func: _sparse_addmm(Tensor self, Tensor sparse, Tensor dense, *, Scalar beta=1, Scalar alpha=1) -> Tensor
 
 - func: addmm_out(Tensor result, Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
 
@@ -2786,6 +2799,12 @@
 - func: cholesky(Tensor self, bool upper=false) -> Tensor
   variants: method, function
 
+- func: _cholesky_helper(Tensor self, bool upper) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _cholesky_helper_cpu
+    CUDA: _cholesky_helper_cuda
+
 - func: potrs_out(Tensor result, Tensor self, Tensor input2, bool upper=true) -> Tensor
 
 - func: potrs(Tensor self, Tensor input2, bool upper=true) -> Tensor
@@ -2999,3 +3018,647 @@
 - func: _dirichlet_grad_out(Tensor output, Tensor x, Tensor alpha, Tensor total) -> Tensor
 
 - func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total) -> Tensor
+
+## NN wrappers
+
+- func: binary_cross_entropy_out(Tensor output, Tensor self, Tensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean) -> Tensor
+  python_module: nn
+
+- func: binary_cross_entropy(Tensor self, Tensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean) -> Tensor
+  python_module: nn
+
+- func: binary_cross_entropy_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, Tensor target, Tensor weight, int64_t reduction) -> Tensor
+  python_module: nn
+
+- func: binary_cross_entropy_backward(Tensor grad_output, Tensor self, Tensor target, Tensor weight, int64_t reduction) -> Tensor
+  python_module: nn
+
+- func: mse_loss_out(Tensor output, Tensor self, Tensor target, int64_t reduction=Reduction::Mean) -> Tensor
+  python_module: nn
+
+- func: mse_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean) -> Tensor
+  python_module: nn
+
+- func: mse_loss_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, Tensor target, int64_t reduction) -> Tensor
+  python_module: nn
+
+- func: mse_loss_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction) -> Tensor
+  python_module: nn
+
+- func: l1_loss_out(Tensor output, Tensor self, Tensor target, int64_t reduction=Reduction::Mean) -> Tensor
+  python_module: nn
+
+- func: l1_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean) -> Tensor
+  python_module: nn
+
+- func: l1_loss_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, Tensor target, int64_t reduction) -> Tensor
+  python_module: nn
+
+- func: l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction) -> Tensor
+  python_module: nn
+
+- func: multi_margin_loss_out(Tensor output, Tensor self, Tensor target, Scalar p=1, Scalar margin=1, Tensor? weight={}, int64_t reduction=Reduction::Mean) -> Tensor
+  python_module: nn
+
+- func: multi_margin_loss(Tensor self, Tensor target, Scalar p=1, Scalar margin=1, Tensor? weight={}, int64_t reduction=Reduction::Mean) -> Tensor
+  python_module: nn
+
+- func: multi_margin_loss_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, Tensor target, Scalar p, Scalar margin, Tensor weight, int64_t reduction) -> Tensor
+  python_module: nn
+
+- func: multi_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, Scalar p, Scalar margin, Tensor weight, int64_t reduction) -> Tensor
+  python_module: nn
+
+- func: multilabel_margin_loss_out(Tensor output, Tensor self, Tensor target, int64_t reduction=Reduction::Mean) -> Tensor
+  python_module: nn
+
+- func: multilabel_margin_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean) -> Tensor
+  python_module: nn
+
+- func: multilabel_margin_loss_forward_out(Tensor output, Tensor is_target, Tensor self, Tensor target, int64_t reduction) -> (Tensor, Tensor)
+  python_module: nn
+
+- func: multilabel_margin_loss_forward(Tensor self, Tensor target, int64_t reduction) -> (Tensor output, Tensor is_target)
+  python_module: nn
+
+- func: multilabel_margin_loss_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, Tensor target, int64_t reduction, Tensor is_target) -> Tensor
+  python_module: nn
+
+- func: multilabel_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction, Tensor is_target) -> Tensor
+  python_module: nn
+
+- func: nll_loss_out(Tensor output, Tensor self, Tensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean, int64_t ignore_index=-100) -> Tensor
+  python_module: nn
+
+- func: nll_loss(Tensor self, Tensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean, int64_t ignore_index=-100) -> Tensor
+  python_module: nn
+
+- func: nll_loss_forward_out(Tensor output, Tensor total_weight, Tensor self, Tensor target, Tensor? weight, int64_t reduction, int64_t ignore_index) -> (Tensor, Tensor)
+  python_module: nn
+
+- func: nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int64_t reduction, int64_t ignore_index) -> (Tensor output, Tensor total_weight)
+  python_module: nn
+
+- func: nll_loss_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int64_t reduction, int64_t ignore_index, Tensor total_weight) -> Tensor
+  python_module: nn
+
+- func: nll_loss_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int64_t reduction, int64_t ignore_index, Tensor total_weight) -> Tensor
+  python_module: nn
+
+- func: nll_loss2d_out(Tensor output, Tensor self, Tensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean, int64_t ignore_index=-100) -> Tensor
+  python_module: nn
+
+- func: nll_loss2d(Tensor self, Tensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean, int64_t ignore_index=-100) -> Tensor
+  python_module: nn
+
+- func: nll_loss2d_forward_out(Tensor output, Tensor total_weight, Tensor self, Tensor target, Tensor? weight, int64_t reduction, int64_t ignore_index) -> (Tensor, Tensor)
+  python_module: nn
+
+- func: nll_loss2d_forward(Tensor self, Tensor target, Tensor? weight, int64_t reduction, int64_t ignore_index) -> (Tensor output, Tensor total_weight)
+  python_module: nn
+
+- func: nll_loss2d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int64_t reduction, int64_t ignore_index, Tensor total_weight) -> Tensor
+  python_module: nn
+
+- func: nll_loss2d_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int64_t reduction, int64_t ignore_index, Tensor total_weight) -> Tensor
+  python_module: nn
+
+- func: smooth_l1_loss_out(Tensor output, Tensor self, Tensor target, int64_t reduction=Reduction::Mean) -> Tensor
+  python_module: nn
+
+- func: smooth_l1_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean) -> Tensor
+  python_module: nn
+
+- func: smooth_l1_loss_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, Tensor target, int64_t reduction) -> Tensor
+  python_module: nn
+
+- func: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction) -> Tensor
+  python_module: nn
+
+- func: soft_margin_loss_out(Tensor output, Tensor self, Tensor target, int64_t reduction=Reduction::Mean) -> Tensor
+  python_module: nn
+
+- func: soft_margin_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean) -> Tensor
+  python_module: nn
+
+- func: soft_margin_loss_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, Tensor target, int64_t reduction) -> Tensor
+  python_module: nn
+
+- func: soft_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction) -> Tensor
+  python_module: nn
+
+- func: elu_out(Tensor output, Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor
+  python_module: nn
+
+- func: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor
+  python_module: nn
+
+- func: elu_backward_out(Tensor grad_input, Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, Tensor output) -> Tensor
+  python_module: nn
+
+- func: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, Tensor output) -> Tensor
+  python_module: nn
+
+- func: elu_(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor
+  python_module: nn
+
+- func: glu_out(Tensor output, Tensor self, int64_t dim=-1) -> Tensor
+  python_module: nn
+
+- func: glu(Tensor self, int64_t dim=-1) -> Tensor
+  python_module: nn
+
+- func: glu_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, int64_t dim) -> Tensor
+  python_module: nn
+
+- func: glu_backward(Tensor grad_output, Tensor self, int64_t dim) -> Tensor
+  python_module: nn
+
+- func: hardtanh_out(Tensor output, Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor
+  python_module: nn
+
+- func: hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor
+  python_module: nn
+
+- func: hardtanh_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, Scalar min_val, Scalar max_val) -> Tensor
+  python_module: nn
+
+- func: hardtanh_backward(Tensor grad_output, Tensor self, Scalar min_val, Scalar max_val) -> Tensor
+  python_module: nn
+
+- func: hardtanh_(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor
+  python_module: nn
+
+- func: leaky_relu_out(Tensor output, Tensor self, Scalar negative_slope=0.01) -> Tensor
+  python_module: nn
+
+- func: leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor
+  python_module: nn
+
+- func: leaky_relu_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, Scalar negative_slope) -> Tensor
+  python_module: nn
+
+- func: leaky_relu_backward(Tensor grad_output, Tensor self, Scalar negative_slope) -> Tensor
+  python_module: nn
+
+- func: leaky_relu_(Tensor self, Scalar negative_slope=0.01) -> Tensor
+  python_module: nn
+
+- func: log_sigmoid_out(Tensor output, Tensor self) -> Tensor
+  python_module: nn
+
+- func: log_sigmoid(Tensor self) -> Tensor
+  python_module: nn
+
+- func: log_sigmoid_forward_out(Tensor output, Tensor buffer, Tensor self) -> (Tensor, Tensor)
+  python_module: nn
+
+- func: log_sigmoid_forward(Tensor self) -> (Tensor output, Tensor buffer)
+  python_module: nn
+
+- func: log_sigmoid_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, Tensor buffer) -> Tensor
+  python_module: nn
+
+- func: log_sigmoid_backward(Tensor grad_output, Tensor self, Tensor buffer) -> Tensor
+  python_module: nn
+
+- func: rrelu_with_noise_out(Tensor output, Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=false, Generator* generator=nullptr) -> Tensor
+  python_module: nn
+
+- func: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=false, Generator* generator=nullptr) -> Tensor
+  python_module: nn
+
+- func: rrelu_with_noise_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training) -> Tensor
+  python_module: nn
+
+- func: rrelu_with_noise_backward(Tensor grad_output, Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training) -> Tensor
+  python_module: nn
+
+- func: rrelu_with_noise_(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=false, Generator* generator=nullptr) -> Tensor
+  python_module: nn
+
+- func: softplus_out(Tensor output, Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor
+  python_module: nn
+
+- func: softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor
+  python_module: nn
+
+- func: softplus_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, Scalar beta, Scalar threshold, Tensor output) -> Tensor
+  python_module: nn
+
+- func: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold, Tensor output) -> Tensor
+  python_module: nn
+
+- func: softshrink_out(Tensor output, Tensor self, Scalar lambd=0.5) -> Tensor
+  python_module: nn
+
+- func: softshrink(Tensor self, Scalar lambd=0.5) -> Tensor
+  python_module: nn
+
+- func: softshrink_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, Scalar lambd) -> Tensor
+  python_module: nn
+
+- func: softshrink_backward(Tensor grad_output, Tensor self, Scalar lambd) -> Tensor
+  python_module: nn
+
+- func: adaptive_avg_pool2d_out(Tensor output, Tensor self, IntList[2] output_size) -> Tensor
+  python_module: nn
+
+- func: adaptive_avg_pool2d(Tensor self, IntList[2] output_size) -> Tensor
+  python_module: nn
+
+- func: adaptive_avg_pool2d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self) -> Tensor
+  python_module: nn
+
+- func: adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self) -> Tensor
+  python_module: nn
+
+- func: adaptive_avg_pool3d_out(Tensor output, Tensor self, IntList[3] output_size) -> Tensor
+  python_module: nn
+
+- func: adaptive_avg_pool3d(Tensor self, IntList[3] output_size) -> Tensor
+  python_module: nn
+
+- func: adaptive_avg_pool3d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self) -> Tensor
+  python_module: nn
+
+- func: adaptive_avg_pool3d_backward(Tensor grad_output, Tensor self) -> Tensor
+  python_module: nn
+
+- func: adaptive_max_pool2d_out(Tensor output, Tensor indices, Tensor self, IntList[2] output_size) -> (Tensor output, Tensor indices)
+  python_module: nn
+
+- func: adaptive_max_pool2d(Tensor self, IntList[2] output_size) -> (Tensor output, Tensor indices)
+  python_module: nn
+
+- func: adaptive_max_pool2d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, Tensor indices) -> Tensor
+  python_module: nn
+
+- func: adaptive_max_pool2d_backward(Tensor grad_output, Tensor self, Tensor indices) -> Tensor
+  python_module: nn
+
+- func: adaptive_max_pool3d_out(Tensor output, Tensor indices, Tensor self, IntList[3] output_size) -> (Tensor output, Tensor indices)
+  python_module: nn
+
+- func: adaptive_max_pool3d(Tensor self, IntList[3] output_size) -> (Tensor output, Tensor indices)
+  python_module: nn
+
+- func: adaptive_max_pool3d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, Tensor indices) -> Tensor
+  python_module: nn
+
+- func: adaptive_max_pool3d_backward(Tensor grad_output, Tensor self, Tensor indices) -> Tensor
+  python_module: nn
+
+- func: avg_pool2d_out(Tensor output, Tensor self, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, bool ceil_mode=false, bool count_include_pad=true) -> Tensor
+  python_module: nn
+
+- func: avg_pool2d(Tensor self, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, bool ceil_mode=false, bool count_include_pad=true) -> Tensor
+  python_module: nn
+
+- func: avg_pool2d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, IntList[2] kernel_size, IntList[2] stride, IntList[2] padding, bool ceil_mode, bool count_include_pad) -> Tensor
+  python_module: nn
+
+- func: avg_pool2d_backward(Tensor grad_output, Tensor self, IntList[2] kernel_size, IntList[2] stride, IntList[2] padding, bool ceil_mode, bool count_include_pad) -> Tensor
+  python_module: nn
+
+- func: avg_pool3d_out(Tensor output, Tensor self, IntList[3] kernel_size, IntList[3] stride={}, IntList[3] padding=0, bool ceil_mode=false, bool count_include_pad=true) -> Tensor
+  python_module: nn
+
+- func: avg_pool3d(Tensor self, IntList[3] kernel_size, IntList[3] stride={}, IntList[3] padding=0, bool ceil_mode=false, bool count_include_pad=true) -> Tensor
+  python_module: nn
+
+- func: avg_pool3d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, IntList[3] kernel_size, IntList[3] stride, IntList[3] padding, bool ceil_mode, bool count_include_pad) -> Tensor
+  python_module: nn
+
+- func: avg_pool3d_backward(Tensor grad_output, Tensor self, IntList[3] kernel_size, IntList[3] stride, IntList[3] padding, bool ceil_mode, bool count_include_pad) -> Tensor
+  python_module: nn
+
+- func: fractional_max_pool2d_out(Tensor output, Tensor indices, Tensor self, IntList[2] kernel_size, IntList[2] output_size, Tensor random_samples) -> (Tensor output, Tensor indices)
+  python_module: nn
+
+- func: fractional_max_pool2d(Tensor self, IntList[2] kernel_size, IntList[2] output_size, Tensor random_samples) -> (Tensor output, Tensor indices)
+  python_module: nn
+
+- func: fractional_max_pool2d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, IntList[2] kernel_size, IntList[2] output_size, Tensor indices) -> Tensor
+  python_module: nn
+
+- func: fractional_max_pool2d_backward(Tensor grad_output, Tensor self, IntList[2] kernel_size, IntList[2] output_size, Tensor indices) -> Tensor
+  python_module: nn
+
+- func: max_pool2d_with_indices_out(Tensor output, Tensor indices, Tensor self, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, IntList[2] dilation=1, bool ceil_mode=false) -> (Tensor output, Tensor indices)
+  python_module: nn
+
+- func: max_pool2d_with_indices(Tensor self, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, IntList[2] dilation=1, bool ceil_mode=false) -> (Tensor output, Tensor indices)
+  python_module: nn
+
+- func: max_pool2d_with_indices_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, IntList[2] kernel_size, IntList[2] stride, IntList[2] padding, IntList[2] dilation, bool ceil_mode, Tensor indices) -> Tensor
+  python_module: nn
+
+- func: max_pool2d_with_indices_backward(Tensor grad_output, Tensor self, IntList[2] kernel_size, IntList[2] stride, IntList[2] padding, IntList[2] dilation, bool ceil_mode, Tensor indices) -> Tensor
+  python_module: nn
+
+- func: max_pool3d_with_indices_out(Tensor output, Tensor indices, Tensor self, IntList[3] kernel_size, IntList[3] stride={}, IntList[3] padding=0, IntList[3] dilation=1, bool ceil_mode=false) -> (Tensor output, Tensor indices)
+  python_module: nn
+
+- func: max_pool3d_with_indices(Tensor self, IntList[3] kernel_size, IntList[3] stride={}, IntList[3] padding=0, IntList[3] dilation=1, bool ceil_mode=false) -> (Tensor output, Tensor indices)
+  python_module: nn
+
+- func: max_pool3d_with_indices_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, IntList[3] kernel_size, IntList[3] stride, IntList[3] padding, IntList[3] dilation, bool ceil_mode, Tensor indices) -> Tensor
+  python_module: nn
+
+- func: max_pool3d_with_indices_backward(Tensor grad_output, Tensor self, IntList[3] kernel_size, IntList[3] stride, IntList[3] padding, IntList[3] dilation, bool ceil_mode, Tensor indices) -> Tensor
+  python_module: nn
+
+- func: max_unpool2d_out(Tensor output, Tensor self, Tensor indices, IntList[2] output_size) -> Tensor
+  python_module: nn
+
+- func: max_unpool2d(Tensor self, Tensor indices, IntList[2] output_size) -> Tensor
+  python_module: nn
+
+- func: max_unpool2d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, Tensor indices, IntList[2] output_size) -> Tensor
+  python_module: nn
+
+- func: max_unpool2d_backward(Tensor grad_output, Tensor self, Tensor indices, IntList[2] output_size) -> Tensor
+  python_module: nn
+
+- func: max_unpool3d_out(Tensor output, Tensor self, Tensor indices, IntList[3] output_size, IntList[3] stride, IntList[3] padding) -> Tensor
+  python_module: nn
+
+- func: max_unpool3d(Tensor self, Tensor indices, IntList[3] output_size, IntList[3] stride, IntList[3] padding) -> Tensor
+  python_module: nn
+
+- func: max_unpool3d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, Tensor indices, IntList[3] output_size, IntList[3] stride, IntList[3] padding) -> Tensor
+  python_module: nn
+
+- func: max_unpool3d_backward(Tensor grad_output, Tensor self, Tensor indices, IntList[3] output_size, IntList[3] stride, IntList[3] padding) -> Tensor
+  python_module: nn
+
+- func: reflection_pad1d_out(Tensor output, Tensor self, IntList[2] padding) -> Tensor
+  python_module: nn
+
+- func: reflection_pad1d(Tensor self, IntList[2] padding) -> Tensor
+  python_module: nn
+
+- func: reflection_pad1d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, IntList[2] padding) -> Tensor
+  python_module: nn
+
+- func: reflection_pad1d_backward(Tensor grad_output, Tensor self, IntList[2] padding) -> Tensor
+  python_module: nn
+
+- func: reflection_pad2d_out(Tensor output, Tensor self, IntList[4] padding) -> Tensor
+  python_module: nn
+
+- func: reflection_pad2d(Tensor self, IntList[4] padding) -> Tensor
+  python_module: nn
+
+- func: reflection_pad2d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, IntList[4] padding) -> Tensor
+  python_module: nn
+
+- func: reflection_pad2d_backward(Tensor grad_output, Tensor self, IntList[4] padding) -> Tensor
+  python_module: nn
+
+- func: replication_pad1d_out(Tensor output, Tensor self, IntList[2] padding) -> Tensor
+  python_module: nn
+
+- func: replication_pad1d(Tensor self, IntList[2] padding) -> Tensor
+  python_module: nn
+
+- func: replication_pad1d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, IntList[2] padding) -> Tensor
+  python_module: nn
+
+- func: replication_pad1d_backward(Tensor grad_output, Tensor self, IntList[2] padding) -> Tensor
+  python_module: nn
+
+- func: replication_pad2d_out(Tensor output, Tensor self, IntList[4] padding) -> Tensor
+  python_module: nn
+
+- func: replication_pad2d(Tensor self, IntList[4] padding) -> Tensor
+  python_module: nn
+
+- func: replication_pad2d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, IntList[4] padding) -> Tensor
+  python_module: nn
+
+- func: replication_pad2d_backward(Tensor grad_output, Tensor self, IntList[4] padding) -> Tensor
+  python_module: nn
+
+- func: replication_pad3d_out(Tensor output, Tensor self, IntList[6] padding) -> Tensor
+  python_module: nn
+
+- func: replication_pad3d(Tensor self, IntList[6] padding) -> Tensor
+  python_module: nn
+
+- func: replication_pad3d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, IntList[6] padding) -> Tensor
+  python_module: nn
+
+- func: replication_pad3d_backward(Tensor grad_output, Tensor self, IntList[6] padding) -> Tensor
+  python_module: nn
+
+- func: upsample_linear1d_out(Tensor output, Tensor self, IntList[1] output_size, bool align_corners) -> Tensor
+  python_module: nn
+
+- func: upsample_linear1d(Tensor self, IntList[1] output_size, bool align_corners) -> Tensor
+  python_module: nn
+
+- func: upsample_linear1d_backward_out(Tensor grad_input, Tensor grad_output, IntList[1] output_size, IntList[3] input_size, bool align_corners) -> Tensor
+  python_module: nn
+
+- func: upsample_linear1d_backward(Tensor grad_output, IntList[1] output_size, IntList[3] input_size, bool align_corners) -> Tensor
+  python_module: nn
+
+- func: upsample_bilinear2d_out(Tensor output, Tensor self, IntList[2] output_size, bool align_corners) -> Tensor
+  python_module: nn
+
+- func: upsample_bilinear2d(Tensor self, IntList[2] output_size, bool align_corners) -> Tensor
+  python_module: nn
+
+- func: upsample_bilinear2d_backward_out(Tensor grad_input, Tensor grad_output, IntList[2] output_size, IntList[4] input_size, bool align_corners) -> Tensor
+  python_module: nn
+
+- func: upsample_bilinear2d_backward(Tensor grad_output, IntList[2] output_size, IntList[4] input_size, bool align_corners) -> Tensor
+  python_module: nn
+
+- func: upsample_trilinear3d_out(Tensor output, Tensor self, IntList[3] output_size, bool align_corners) -> Tensor
+  python_module: nn
+
+- func: upsample_trilinear3d(Tensor self, IntList[3] output_size, bool align_corners) -> Tensor
+  python_module: nn
+
+- func: upsample_trilinear3d_backward_out(Tensor grad_input, Tensor grad_output, IntList[3] output_size, IntList[5] input_size, bool align_corners) -> Tensor
+  python_module: nn
+
+- func: upsample_trilinear3d_backward(Tensor grad_output, IntList[3] output_size, IntList[5] input_size, bool align_corners) -> Tensor
+  python_module: nn
+
+- func: upsample_nearest1d_out(Tensor output, Tensor self, IntList[1] output_size) -> Tensor
+  python_module: nn
+
+- func: upsample_nearest1d(Tensor self, IntList[1] output_size) -> Tensor
+  python_module: nn
+
+- func: upsample_nearest1d_backward_out(Tensor grad_input, Tensor grad_output, IntList[1] output_size, IntList[3] input_size) -> Tensor
+  python_module: nn
+
+- func: upsample_nearest1d_backward(Tensor grad_output, IntList[1] output_size, IntList[3] input_size) -> Tensor
+  python_module: nn
+
+- func: upsample_nearest2d_out(Tensor output, Tensor self, IntList[2] output_size) -> Tensor
+  python_module: nn
+
+- func: upsample_nearest2d(Tensor self, IntList[2] output_size) -> Tensor
+  python_module: nn
+
+- func: upsample_nearest2d_backward_out(Tensor grad_input, Tensor grad_output, IntList[2] output_size, IntList[4] input_size) -> Tensor
+  python_module: nn
+
+- func: upsample_nearest2d_backward(Tensor grad_output, IntList[2] output_size, IntList[4] input_size) -> Tensor
+  python_module: nn
+
+- func: upsample_nearest3d_out(Tensor output, Tensor self, IntList[3] output_size) -> Tensor
+  python_module: nn
+
+- func: upsample_nearest3d(Tensor self, IntList[3] output_size) -> Tensor
+  python_module: nn
+
+- func: upsample_nearest3d_backward_out(Tensor grad_input, Tensor grad_output, IntList[3] output_size, IntList[5] input_size) -> Tensor
+  python_module: nn
+
+- func: upsample_nearest3d_backward(Tensor grad_output, IntList[3] output_size, IntList[5] input_size) -> Tensor
+  python_module: nn
+
+- func: sigmoid_backward_out(Tensor grad_input, Tensor grad_output, Tensor output) -> Tensor
+  python_module: nn
+
+- func: sigmoid_backward(Tensor grad_output, Tensor output) -> Tensor
+  python_module: nn
+
+- func: tanh_backward_out(Tensor grad_input, Tensor grad_output, Tensor output) -> Tensor
+  python_module: nn
+
+- func: tanh_backward(Tensor grad_output, Tensor output) -> Tensor
+  python_module: nn
+
+- func: thnn_conv_transpose2d_out(Tensor output, Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] output_padding=0, IntList[2] dilation=1) -> Tensor
+  python_module: nn
+
+- func: thnn_conv_transpose2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] output_padding=0, IntList[2] dilation=1) -> Tensor
+  python_module: nn
+
+- func: thnn_conv_transpose2d_forward_out(Tensor output, Tensor columns, Tensor ones, Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias, IntList[2] stride, IntList[2] padding, IntList[2] output_padding, IntList[2] dilation) -> (Tensor, Tensor, Tensor)
+  python_module: nn
+
+- func: thnn_conv_transpose2d_forward(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias, IntList[2] stride, IntList[2] padding, IntList[2] output_padding, IntList[2] dilation) -> (Tensor output, Tensor columns, Tensor ones)
+  python_module: nn
+
+- func: thnn_conv_transpose2d_backward_out(Tensor? grad_input, Tensor? grad_weight, Tensor? grad_bias, Tensor grad_output, Tensor self, Tensor weight, IntList[2] kernel_size, IntList[2] stride, IntList[2] padding, IntList[2] output_padding, IntList[2] dilation, Tensor columns, Tensor ones) -> (Tensor, Tensor, Tensor)
+  python_module: nn
+
+- func: thnn_conv_transpose2d_backward(Tensor grad_output, Tensor self, Tensor weight, IntList[2] kernel_size, IntList[2] stride, IntList[2] padding, IntList[2] output_padding, IntList[2] dilation, Tensor columns, Tensor ones, std::array<bool,3> output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
+  python_module: nn
+
+- func: thnn_conv_transpose3d_out(Tensor output, Tensor self, Tensor weight, IntList[3] kernel_size, Tensor? bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, IntList[3] dilation=1) -> Tensor
+  python_module: nn
+
+- func: thnn_conv_transpose3d(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor? bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, IntList[3] dilation=1) -> Tensor
+  python_module: nn
+
+- func: thnn_conv_transpose3d_forward_out(Tensor output, Tensor finput, Tensor fgrad_input, Tensor self, Tensor weight, IntList[3] kernel_size, Tensor? bias, IntList[3] stride, IntList[3] padding, IntList[3] output_padding, IntList[3] dilation) -> (Tensor, Tensor, Tensor)
+  python_module: nn
+
+- func: thnn_conv_transpose3d_forward(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor? bias, IntList[3] stride, IntList[3] padding, IntList[3] output_padding, IntList[3] dilation) -> (Tensor output, Tensor finput, Tensor fgrad_input)
+  python_module: nn
+
+- func: thnn_conv_transpose3d_backward_out(Tensor? grad_input, Tensor? grad_weight, Tensor? grad_bias, Tensor grad_output, Tensor self, Tensor weight, IntList[3] kernel_size, IntList[3] stride, IntList[3] padding, IntList[3] output_padding, IntList[3] dilation, Tensor finput, Tensor fgrad_input) -> (Tensor, Tensor, Tensor)
+  python_module: nn
+
+- func: thnn_conv_transpose3d_backward(Tensor grad_output, Tensor self, Tensor weight, IntList[3] kernel_size, IntList[3] stride, IntList[3] padding, IntList[3] output_padding, IntList[3] dilation, Tensor finput, Tensor fgrad_input, std::array<bool,3> output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
+  python_module: nn
+
+- func: thnn_conv2d_out(Tensor output, Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias={}, IntList[2] stride=1, IntList[2] padding=0) -> Tensor
+  python_module: nn
+
+- func: thnn_conv2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias={}, IntList[2] stride=1, IntList[2] padding=0) -> Tensor
+  python_module: nn
+
+- func: thnn_conv2d_forward_out(Tensor output, Tensor finput, Tensor fgrad_input, Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias, IntList[2] stride, IntList[2] padding) -> (Tensor, Tensor, Tensor)
+  python_module: nn
+
+- func: thnn_conv2d_forward(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias, IntList[2] stride, IntList[2] padding) -> (Tensor output, Tensor finput, Tensor fgrad_input)
+  python_module: nn
+
+- func: thnn_conv2d_backward_out(Tensor? grad_input, Tensor? grad_weight, Tensor? grad_bias, Tensor grad_output, Tensor self, Tensor weight, IntList[2] kernel_size, IntList[2] stride, IntList[2] padding, Tensor finput, Tensor fgrad_input) -> (Tensor, Tensor, Tensor)
+  python_module: nn
+
+- func: thnn_conv2d_backward(Tensor grad_output, Tensor self, Tensor weight, IntList[2] kernel_size, IntList[2] stride, IntList[2] padding, Tensor finput, Tensor fgrad_input, std::array<bool,3> output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
+  python_module: nn
+
+- func: thnn_conv_depthwise2d_out(Tensor output, Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] dilation=1) -> Tensor
+  python_module: nn
+
+- func: thnn_conv_depthwise2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] dilation=1) -> Tensor
+  python_module: nn
+
+- func: thnn_conv_depthwise2d_forward_out(Tensor output, Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias, IntList[2] stride, IntList[2] padding, IntList[2] dilation) -> Tensor
+  python_module: nn
+
+- func: thnn_conv_depthwise2d_forward(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias, IntList[2] stride, IntList[2] padding, IntList[2] dilation) -> Tensor
+  python_module: nn
+
+- func: thnn_conv_depthwise2d_backward_out(Tensor? grad_input, Tensor? grad_weight, Tensor grad_output, Tensor self, Tensor weight, IntList[2] kernel_size, IntList[2] stride, IntList[2] padding, IntList[2] dilation) -> (Tensor, Tensor)
+  python_module: nn
+
+- func: thnn_conv_depthwise2d_backward(Tensor grad_output, Tensor self, Tensor weight, IntList[2] kernel_size, IntList[2] stride, IntList[2] padding, IntList[2] dilation, std::array<bool,2> output_mask) -> (Tensor grad_input, Tensor grad_weight)
+  python_module: nn
+
+- func: thnn_conv3d_out(Tensor output, Tensor self, Tensor weight, IntList[3] kernel_size, Tensor? bias={}, IntList[3] stride=1, IntList[3] padding=0) -> Tensor
+  python_module: nn
+
+- func: thnn_conv3d(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor? bias={}, IntList[3] stride=1, IntList[3] padding=0) -> Tensor
+  python_module: nn
+
+- func: thnn_conv3d_forward_out(Tensor output, Tensor finput, Tensor fgrad_input, Tensor self, Tensor weight, IntList[3] kernel_size, Tensor? bias, IntList[3] stride, IntList[3] padding) -> (Tensor, Tensor, Tensor)
+  python_module: nn
+
+- func: thnn_conv3d_forward(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor? bias, IntList[3] stride, IntList[3] padding) -> (Tensor output, Tensor finput, Tensor fgrad_input)
+  python_module: nn
+
+- func: thnn_conv3d_backward_out(Tensor? grad_input, Tensor? grad_weight, Tensor? grad_bias, Tensor grad_output, Tensor self, Tensor weight, IntList[3] kernel_size, IntList[3] stride, IntList[3] padding, Tensor finput, Tensor fgrad_input) -> (Tensor, Tensor, Tensor)
+  python_module: nn
+
+- func: thnn_conv3d_backward(Tensor grad_output, Tensor self, Tensor weight, IntList[3] kernel_size, IntList[3] stride, IntList[3] padding, Tensor finput, Tensor fgrad_input, std::array<bool,3> output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
+  python_module: nn
+
+- func: thnn_conv_dilated2d_out(Tensor output, Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] dilation=1) -> Tensor
+  python_module: nn
+
+- func: thnn_conv_dilated2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] dilation=1) -> Tensor
+  python_module: nn
+
+- func: thnn_conv_dilated2d_forward_out(Tensor output, Tensor columns, Tensor ones, Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias, IntList[2] stride, IntList[2] padding, IntList[2] dilation) -> (Tensor, Tensor, Tensor)
+  python_module: nn
+
+- func: thnn_conv_dilated2d_forward(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias, IntList[2] stride, IntList[2] padding, IntList[2] dilation) -> (Tensor output, Tensor columns, Tensor ones)
+  python_module: nn
+
+- func: thnn_conv_dilated2d_backward_out(Tensor? grad_input, Tensor? grad_weight, Tensor? grad_bias, Tensor grad_output, Tensor self, Tensor weight, IntList[2] kernel_size, IntList[2] stride, IntList[2] padding, IntList[2] dilation, Tensor columns, Tensor ones) -> (Tensor, Tensor, Tensor)
+  python_module: nn
+
+- func: thnn_conv_dilated2d_backward(Tensor grad_output, Tensor self, Tensor weight, IntList[2] kernel_size, IntList[2] stride, IntList[2] padding, IntList[2] dilation, Tensor columns, Tensor ones, std::array<bool,3> output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
+  python_module: nn
+
+- func: thnn_conv_dilated3d_out(Tensor output, Tensor self, Tensor weight, IntList[3] kernel_size, Tensor? bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] dilation=1) -> Tensor
+  python_module: nn
+
+- func: thnn_conv_dilated3d(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor? bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] dilation=1) -> Tensor
+  python_module: nn
+
+- func: thnn_conv_dilated3d_forward_out(Tensor output, Tensor columns, Tensor ones, Tensor self, Tensor weight, IntList[3] kernel_size, Tensor? bias, IntList[3] stride, IntList[3] padding, IntList[3] dilation) -> (Tensor, Tensor, Tensor)
+  python_module: nn
+
+- func: thnn_conv_dilated3d_forward(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor? bias, IntList[3] stride, IntList[3] padding, IntList[3] dilation) -> (Tensor output, Tensor columns, Tensor ones)
+  python_module: nn
+
+- func: thnn_conv_dilated3d_backward_out(Tensor? grad_input, Tensor? grad_weight, Tensor? grad_bias, Tensor grad_output, Tensor self, Tensor weight, IntList[3] kernel_size, IntList[3] stride, IntList[3] padding, IntList dilation, Tensor columns, Tensor ones) -> (Tensor, Tensor, Tensor)
+  python_module: nn
+
+- func: thnn_conv_dilated3d_backward(Tensor grad_output, Tensor self, Tensor weight, IntList[3] kernel_size, IntList[3] stride, IntList[3] padding, IntList[3] dilation, Tensor columns, Tensor ones, std::array<bool,3> output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
+  python_module: nn

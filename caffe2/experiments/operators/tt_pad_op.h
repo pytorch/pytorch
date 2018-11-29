@@ -52,7 +52,7 @@ class TTPadOp final : public Operator<Context> {
       int64_t padded_dim0 = (X_dim0 / scale_ + 1) * scale_;
       auto dim0_diff = padded_dim0 - X_dim0;
       // set growthPct to the upper bound percentage: (100 * scale_ / X_dim0)
-      X_pad->Extend(dim0_diff, 100 * scale_ / X_dim0, &context_);
+      X_pad->Extend(dim0_diff, 100 * scale_ / X_dim0);
 
       auto* X_pad_data = X_pad->template mutable_data<T>();
       int64_t X_size = X_dim0 * X_dim1;

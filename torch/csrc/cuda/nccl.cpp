@@ -8,7 +8,6 @@
 #include <c10/util/Exception.h>
 
 #include <THC/THC.h>
-#include <THC/THCStream.h>
 
 #include <limits>
 #include <sstream>
