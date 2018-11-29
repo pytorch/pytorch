@@ -791,7 +791,7 @@ bool VideoInputOp<Context>::Prefetch() {
     // read data
     reader_->Read(&key, &value);
 
-    thread_pool_->runTask(std::bind(
+    thread_pool_->run(std::bind(
         &VideoInputOp<Context>::DecodeAndTransform,
         this,
         std::string(value),

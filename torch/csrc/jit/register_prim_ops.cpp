@@ -549,7 +549,7 @@ RegisterOperators reg({
 
             push(stack, forked_interprester.getFuture());
 
-            c10::global_work_queue.schedule(std::move(continuation));
+            c10::global_work_queue().run(std::move(continuation));
             return 0;
           };
         }),
