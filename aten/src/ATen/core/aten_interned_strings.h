@@ -128,6 +128,7 @@ _(aten, _sparse_div_zerodim) \
 _(aten, _sparse_mul) \
 _(aten, _sparse_mul_scalar) \
 _(aten, _sparse_mul_zerodim) \
+_(aten, _sparse_sum) \
 _(aten, _sqrt) \
 _(aten, _standard_gamma) \
 _(aten, _standard_gamma_grad) \
@@ -308,6 +309,7 @@ _(aten, embedding_backward) \
 _(aten, embedding_bag) \
 _(aten, embedding_dense_backward) \
 _(aten, embedding_renorm) \
+_(aten, no_grad_embedding_renorm) \
 _(aten, embedding_sparse_backward) \
 _(aten, empty) \
 _(aten, empty_like) \

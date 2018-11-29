@@ -191,6 +191,7 @@ method_tests = [
     ('roll', (S, S, S), (-1, 0), 'neg_shift'),
     ('roll', (S, S, S), (10000, 1), 'loop_shift'),
     ('roll', (S, S, S), (2,), 'flattened'),
+    ('roll', (S, S, S), ([1, 2, -1], [0, 1, 2]), 'three_dims'),
     ('rot90', (S, S, S), (1, [0, 1],), 'k1_d01'),
     ('rot90', (S, S, S), (1, [1, 2],), 'k1_d12'),
     ('rot90', (S, S, S), (1, [1, -1],), 'k1_neg_d'),

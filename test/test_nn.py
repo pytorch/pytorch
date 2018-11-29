@@ -8543,7 +8543,7 @@ new_module_tests = [
     ),
     dict(
         module_name='EmbeddingBag',
-        constructor_args=(4, 3, None, 2, False, 'sum'),
+        constructor_args=(4, 3, None, 2., False, 'sum'),
         input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
         jacobian_input=False,
         check_gradgrad=False,
@@ -8553,7 +8553,7 @@ new_module_tests = [
     ),
     dict(
         module_name='EmbeddingBag',
-        constructor_args=(4, 3, None, 2, False, 'max'),
+        constructor_args=(4, 3, None, 2., False, 'max'),
         input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
         jacobian_input=False,
         check_gradgrad=False,

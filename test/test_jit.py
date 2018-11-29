@@ -210,9 +210,8 @@ def enable_cpu_fuser(fn):
         torch._C._jit_override_can_fuse_on_cpu(True)
         try:
             fn(*args, **kwargs)
-        except Exception:
+        finally:
             torch._C._jit_override_can_fuse_on_cpu(False)
-            raise
     return wrapper
 
 
@@ -3023,6 +3022,16 @@ class TestScript(JitTestCase):
             return x.shape
 
         self.checkScript(f, (x,))
+
+    def test_tensor_grad(self):
+        x = torch.tensor(1.0, requires_grad=True)
+        y = torch.tensor(1.0, requires_grad=False)
+
+        def f(x):
+            return x.requires_grad
+
+        self.checkScript(f, (x,))
+        self.checkScript(f, (y,))
 
     def test_tensor_dtype(self):
         x_byte = torch.empty(34, 56, 78, dtype=torch.uint8)
@@ -8719,6 +8728,42 @@ a")
             return foo, a, bar
         self.checkScript(foo, (torch.rand(2, 3), torch.rand(3)))
 
+    def test_bool_dispatch(self):
+        def kwarg_false(x):
+            # type: (Tensor) -> Tensor
+            return F.max_pool1d(x, 1, 1, return_indices=False)
+        self.checkScript(kwarg_false, (torch.randn(3, 3, 3),))
+
+        def kwarg_true(x):
+            # type: (Tensor) -> Tuple[Tensor, Tensor]
+            return F.max_pool1d(x, 1, 1, return_indices=True)
+        self.checkScript(kwarg_true, (torch.randn(3, 3, 3),))
+
+        def full_kwarg_false(x):
+            # type: (Tensor) -> Tensor
+            return F.max_pool1d(x, 1, 1, ceil_mode=False, return_indices=False)
+        self.checkScript(full_kwarg_false, (torch.randn(3, 3, 3),))
+
+        def full_kwarg_true(x):
+            # type: (Tensor) -> Tuple[Tensor, Tensor]
+            return F.max_pool1d(x, 1, 1, ceil_mode=False, return_indices=True)
+        self.checkScript(full_kwarg_true, (torch.randn(3, 3, 3),))
+
+        def use_default(x):
+            # type: (Tensor) -> Tensor
+            return F.max_pool1d(x, 1, 1)
+        self.checkScript(use_default, (torch.randn(3, 3, 3),))
+
+        def arg_false(x):
+            # type: (Tensor) -> Tensor
+            return F.max_pool1d(x, 1, 1, 0, 1, False, False)
+        self.checkScript(arg_false, (torch.randn(3, 3, 3),))
+
+        def arg_true(x):
+            # type: (Tensor) -> Tuple[Tensor, Tensor]
+            return F.max_pool1d(x, 1, 1, 0, 1, False, True)
+        self.checkScript(arg_true, (torch.randn(3, 3, 3),))
+
 
 class MnistNet(nn.Module):
     def __init__(self):
@@ -9339,19 +9384,10 @@ EXCLUDE_SCRIPT = {
     'test_norm_fro',
     'test_norm_fro_default',
     'test_norm_nuc',
-    # skipped nn functional tests
-    # ops involves sampling which could not test
-
-    'test_nn_adaptive_max_pool1d',
-    'test_nn_adaptive_max_pool2d',
-    'test_nn_adaptive_max_pool3d',
-
 
     # argument has custom behavior
     'test_nn_fractional_max_pool2d',
     'test_nn_max_unpool3d',
-    'test_nn_embedding',
-    'test_nn_embedding_bag',
     'test_nn_batch_norm',
 
     # aten op has additional cudnn argument
@@ -9359,7 +9395,8 @@ EXCLUDE_SCRIPT = {
     'test_nn_unfold',
     'test_nn_max_unpool2d',
 
-    # argument type not supported
+    # flakey test - TODO fix
+    'test_nn_ctc_loss',
 
     # unknown builtin op
     'test_nn_binary_cross_entropy',
@@ -9368,8 +9405,6 @@ EXCLUDE_SCRIPT = {
     'test_nn_interpolate',
     'test_nn_fold',
     'test_nn_max_unpool1d',
-    'test_nn_poisson_nll_loss',
-    'test_nn_poisson_nll_loss_full',
 }
 
 EXCLUDE_SCRIPT_MODULES = {
@@ -9878,35 +9913,10 @@ L = 20
 M = 10
 S = 5
 
-# (
-#     module name,
-#     constructor arguments,
-#     args (tuple represents shape of a tensor arg),
-#     use_as_constant (should the submodule be listed in __constants__?)
-# )
-nn_module_tests = [
-    ('AlphaDropout', (), ((S,),)),
-    ('BatchNorm1d', (10,), ((S, 10),)),
-    ('BatchNorm2d', (10,), ((S, 10, S, S),)),
-    ('BatchNorm3d', (10,), ((S, 10, S, S, S),)),
-    ('Dropout', (), ((S,),)),
-    ('Dropout2d', (), ((S, S),)),
-    ('Dropout3d', (), ((S, S, S),)),
-    ('FeatureAlphaDropout', (), ((S, S),)),
-    ('Hardshrink', (), ((S,),)),
-    ('LPPool1d', (2, 3, 2), ((S, S, S),)),
-    ('LPPool2d', (2, 3, 2), ((S, S, S, S),)),
-    ('PReLU', (), ((S,),)),
-    ('PairwiseDistance', (), ((S, S), (S, S))),
-    ('RReLU', (), ((S,),)),
-    ('Sigmoid', (), ((S,),)),
-    ('Softshrink', (), ((S,),)),
-    ('Softsign', (), ((S,),)),
-    ('Tanh', (), ((S,),)),
-    ('Tanhshrink', (), ((S,),)),
-    ('Threshold', (2., 2.), ((S,),)),
-    ('Sequential', (torch.nn.Sigmoid(), torch.nn.Threshold(1., 2.)), ((S,),), True),
-]
+# module cannot be exported /imported currently
+EXCLUDE_MODULE_EXPORT_IMPORT = {
+    'EmbeddingBag',
+}
 
 # NB: JIT script tests for all nn functional interfaces, script mode does
 # not support in_place operations yet, so no inplace operation tests added.
@@ -9937,6 +9947,7 @@ nn_functional_tests = [
     ('avg_pool3d', (S, S, S, S, S), (3,)),
     ('fractional_max_pool2d', (S, S, S, S), (3, [2, 3], None)),
     ('max_pool1d', (S, S, S), (2, 1)),
+    ('max_pool1d', (S, S, S), (2, 1, 1, 1, False, True), 'with_indices'),
     ('max_pool2d', (S, S, S, S), (2, 1)),
     ('max_pool3d', (S, S, S, S, S), (2, 1)),
     ('max_unpool1d', torch.tensor([[[2., 4]]]), (torch.tensor([[[1, 3]]]), 2, 2, 0)),
@@ -9994,14 +10005,17 @@ nn_functional_tests = [
     ('group_norm', (S, S, S), (1, torch.Tensor(5), None),),
     ('local_response_norm', (S, S, S), (2, ),),
     ('nll_loss', F.log_softmax(torch.randn(3, 5), dim=0), (torch.tensor([1, 0, 4]), None, None),),
-    ('poisson_nll_loss', (S, 2), ((S, 2),),),
-    ('poisson_nll_loss', (S, 2), ((S, 2), True, True), 'full'),
+    ('poisson_nll_loss', torch.rand(S, 2), (torch.rand(S, 2),),),
+    ('poisson_nll_loss', torch.rand(S, 2), (torch.rand(S, 2), True, True), 'full'),
     ('kl_div', F.log_softmax(torch.randn(S, 10), 1), (F.softmax(torch.randn(S, 10), 1),),),
     ('cross_entropy', (3, S), (torch.randint(S, (3,), dtype=torch.int64),),),
     ('binary_cross_entropy_with_logits', (3,), (torch.empty(3).random_(2), ),),
     ('smooth_l1_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('l1_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('mse_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
+    ('smooth_l1_loss', (3, S), ((torch.rand(3, S)),), 'with_grad'),
+    ('l1_loss', (3, S), ((torch.rand(3, S)),), 'with_grad'),
+    ('mse_loss', (3, S), ((torch.rand(3, S)),), 'with_grad'),
     ('margin_ranking_loss', (3, S), ((3, S), (S,)),),
     ('hinge_embedding_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('soft_margin_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
@@ -10029,7 +10043,7 @@ nn_functional_tests = [
     ('binary_cross_entropy', torch.randn(3, 2).sigmoid(),
         (non_differentiable(torch.rand(3, 2)),
          non_differentiable(torch.randn(3, 2)), True), 'size_average'),
-    ('ctc_loss', torch.randn(S, S, S).log_softmax(2).detach().requires_grad_(), \
+    ('ctc_loss', torch.rand(S, S, S).log_softmax(2).detach().requires_grad_(), \
      (torch.randint(1, S, (S, S), dtype=torch.long), torch.full((S,), S, dtype=torch.long), \
       torch.randint(1, S, (S,), dtype=torch.long))),
 ]
@@ -10187,9 +10201,9 @@ def add_nn_module_test(*args, **kwargs):
     elif 'constructor' in kwargs:
         name = kwargs['constructor'].__name__
 
-    class_name = name.split("_")[0]
+    module_name = name.split("_")[0]
 
-    module = getattr(torch.nn, class_name, None)
+    module = getattr(torch.nn, module_name, None)
     if module is None or torch._jit_internal._weak_types.get(module) is None:
         return
 
@@ -10232,14 +10246,20 @@ def add_nn_module_test(*args, **kwargs):
                 def __init__(self):
                     super(TheModule, self).__init__()
                     self.submodule = nn_module(*constructor_args)
-
-            module = TheModule()
-            module.define(script)
-
-            # Check there are no Python ops by exporting
-            self.assertExportImportModule(module, tensors)
-            create_script_module.last_graph = module.graph
-            return module(*args)
+            # module cannot be imported / exported
+            if module_name in EXCLUDE_MODULE_EXPORT_IMPORT:
+                with self.disableModuleHook():
+                    module = TheModule()
+                    module.define(script)
+                    create_script_module.last_graph = module.graph
+                    mod = module(*args)
+            else:
+                module = TheModule()
+                module.define(script)
+                self.assertExportImportModule(module, tensors)
+                create_script_module.last_graph = module.graph
+                mod = module(*args)
+            return mod
 
         # Construct a normal nn module to stay consistent with create_script_module
         # and make use of a single global rng_state in module initialization
@@ -10249,10 +10269,10 @@ def add_nn_module_test(*args, **kwargs):
 
         # Check against Python module as reference
         if 'input_fn' in kwargs:
-            input_size = tuple(kwargs['input_fn']().size())
+            input = kwargs['input_fn']()
         else:
-            input_size = kwargs['input_size']
-        args_variable, kwargs_variable = create_input((input_size,))
+            input = (kwargs['input_size'],)
+        args_variable, kwargs_variable = create_input(input)
         f_args_variable = deepcopy(unpack_variables(args_variable))
 
         check_against_reference(self, create_script_module, create_nn_module, f_args_variable)
