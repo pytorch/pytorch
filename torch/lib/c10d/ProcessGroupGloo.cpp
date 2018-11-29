@@ -178,14 +178,18 @@ void ProcessGroupGloo::SendWork::wait() {
 
 ProcessGroupGloo::RecvWork::RecvWork(
     at::Tensor& tensor,
-    std::unique_ptr<::gloo::transport::UnboundBuffer> buffer,
-    int* srcRank)
-    : tensor_(tensor), buffer_(std::move(buffer)), srcRank_(srcRank) {}
+    std::unique_ptr<::gloo::transport::UnboundBuffer> buffer)
+    : tensor_(tensor), buffer_(std::move(buffer)), srcRank_(-1) {}
+
+int ProcessGroupGloo::RecvWork::sourceRank() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return srcRank_;
+}
 
 void ProcessGroupGloo::RecvWork::wait() {
   std::unique_lock<std::mutex> lock(mutex_);
   try {
-    buffer_->waitRecv(srcRank_);
+    buffer_->waitRecv(&srcRank_);
   } catch (...) {
     exception_ = std::current_exception();
   }
@@ -955,12 +959,11 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recv(
 
   // The work captures the tensor to prevent it being deallocated and
   // the unbound buffer to synchronize on completion of the recv.
-  return std::make_shared<RecvWork>(tensor, std::move(buf), nullptr);
+  return std::make_shared<RecvWork>(tensor, std::move(buf));
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
     std::vector<at::Tensor>& tensors,
-    int* srcRank,
     int tag) {
   auto& tensor = checkSingleTensor(tensors);
   auto utag = checkTag(tag);
@@ -984,7 +987,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
 
   // The work captures the tensor to prevent it being deallocated and
   // the unbound buffer to synchronize on completion of the recv.
-  return std::make_shared<RecvWork>(tensor, std::move(buf), srcRank);
+  return std::make_shared<RecvWork>(tensor, std::move(buf));
 }
 
 namespace {

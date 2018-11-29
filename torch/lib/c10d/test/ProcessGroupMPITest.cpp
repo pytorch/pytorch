@@ -310,7 +310,7 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
         works.push_back(std::move(work));
       } else {
         std::shared_ptr<::c10d::ProcessGroup::Work> work =
-            pg->recvAnysource(tensors, &srcRanks[i], 0);
+            pg->recvAnysource(tensors, 0);
         works.push_back(std::move(work));
       }
       ++i;
