@@ -8392,17 +8392,17 @@ new_module_tests = [
     ),
     dict(
         module_name='ConstantPad1d',
-        constructor_args=((1, 2), 2),
+        constructor_args=((1, 2), 2.),
         input_size=(2, 3, 4)
     ),
     dict(
         module_name='ConstantPad2d',
-        constructor_args=((1, 2, 3, 4), 2),
+        constructor_args=((1, 2, 3, 4), 2.),
         input_size=(2, 3, 4, 4)
     ),
     dict(
         module_name='ConstantPad3d',
-        constructor_args=((1, 2, 3, 4, 1, 0), 2),
+        constructor_args=((1, 2, 3, 4, 1, 0), 2.),
         input_size=(2, 3, 4, 4, 5)
     ),
     dict(
