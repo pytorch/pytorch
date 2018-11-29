@@ -223,6 +223,18 @@ PyObject *THPModule_addDocStr(PyObject *_unused, PyObject *args)
           "method '%s' already has a docstring", m->d_method->ml_name);
     }
     m->d_method->ml_doc = doc_str;
+  } else if (strcmp(Py_TYPE(obj)->tp_name, "getset_descriptor") == 0) {
+    //NOLINTNEXTLINE(cppcoreguidelines-pro-type-cstyle-cast)
+    PyGetSetDescrObject* m = (PyGetSetDescrObject *)obj;
+    if (m->d_getset->doc) {
+      //NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
+      return PyErr_Format(PyExc_RuntimeError,
+          "attribute '%s' already has a docstring", m->d_getset->name);
+    }
+    // This field is not const for python < 3.7 yet the content is
+    // never modified.
+    //NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+    m->d_getset->doc = const_cast<char *>(doc_str);
   } else {
     return PyErr_Format(PyExc_TypeError,
         "don't know how to add docstring to type '%s'", Py_TYPE(obj)->tp_name);

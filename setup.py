@@ -345,6 +345,8 @@ def build_libs(libs):
             my_env['CMAKE_INSTALL'] = 'make install'
     if USE_SYSTEM_NCCL:
         my_env["NCCL_ROOT_DIR"] = NCCL_ROOT_DIR
+        my_env["NCCL_INCLUDE_DIR"] = NCCL_INCLUDE_DIR
+        my_env["NCCL_SYSTEM_LIB"] = NCCL_SYSTEM_LIB
     if USE_CUDA:
         my_env["CUDA_BIN_PATH"] = CUDA_HOME
         build_libs_cmd += ['--use-cuda']
@@ -388,6 +390,7 @@ def build_libs(libs):
     my_env["USE_OPENCV"] = "ON" if USE_OPENCV else "OFF"
     my_env["USE_FFMPEG"] = "ON" if USE_FFMPEG else "OFF"
     my_env["USE_DISTRIBUTED"] = "ON" if USE_DISTRIBUTED else "OFF"
+    my_env["USE_SYSTEM_NCCL"] = "ON" if USE_SYSTEM_NCCL else "OFF"
 
     try:
         os.mkdir('build')
