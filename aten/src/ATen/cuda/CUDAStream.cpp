@@ -23,13 +23,13 @@ struct CUDAStreamInternals {
     if (stream) cudaStreamDestroy(stream);
   }
 
-  int64_t device = -1;
+  DeviceIndex device_index = -1;
   int32_t stream_id = -1;
   cudaStream_t stream = nullptr;
 };
 
 // Global stream state and constants
-static int64_t num_gpus = -1;
+static DeviceIndex num_gpus = -1;
 static constexpr int kStreamsPerPoolBits = 5;
 static constexpr int kStreamsPerPool = 1 << kStreamsPerPoolBits;
 static constexpr unsigned int kDefaultFlags = cudaStreamNonBlocking;
@@ -136,7 +136,7 @@ static StreamId CUDAStream_getStreamId(const CUDAStreamInternals* ptr) {
   // to just compute it based on the metric that actually matters,
   // which is how we map IDs back into the vectors.
 
-  DeviceIndex device_index = ptr->device;
+  DeviceIndex device_index = ptr->device_index;
 
   // Check if it's the default stream
   if (ptr == &default_streams[device_index]) {
@@ -182,7 +182,7 @@ static void initGlobalStreamState() {
 
   // Initializes default streams
   for (auto i = decltype(num_gpus){0}; i < num_gpus; ++i) {
-    default_streams[i].device = i;
+    default_streams[i].device_index = i;
     low_priority_counters[i] = 0;
     high_priority_counters[i] = 0;
   }
@@ -190,17 +190,17 @@ static void initGlobalStreamState() {
 
 // Creates the low and high priority stream pools for the specified device
 // Warning: only call once per device!
-static void initDeviceStreamState(const int64_t device) {
+static void initDeviceStreamState(DeviceIndex device_index) {
   // Switches to the requested device so streams are properly associated
   // with it.
-  at::cuda::CUDAGuard device_guard{static_cast<int16_t>(device)};
+  at::cuda::CUDAGuard device_guard{device_index};
 
   for (auto i = decltype(kStreamsPerPool){0}; i < kStreamsPerPool; ++i) {
-    auto& lowpri_stream = low_priority_streams[device][i];
-    auto& hipri_stream = high_priority_streams[device][i];
+    auto& lowpri_stream = low_priority_streams[device_index][i];
+    auto& hipri_stream = high_priority_streams[device_index][i];
 
-    lowpri_stream.device = device;
-    hipri_stream.device = device;
+    lowpri_stream.device_index = device_index;
+    hipri_stream.device_index = device_index;
 
     #ifndef __HIP_PLATFORM_HCC__
       C10_CUDA_CHECK(cudaStreamCreateWithPriority(
@@ -236,20 +236,9 @@ static void initCUDAStreamsOnce() {
   }
 }
 
-/*
-* Pointer-based stream API
-*/
-
 // Helper to verify the GPU index is valid
-static inline void check_gpu(int64_t device) {
-  AT_ASSERT(device >= 0 && device < num_gpus);
-}
-
-CUDAStreamInternals* CUDAStream_getDefaultStream(int64_t device) {
-  initCUDAStreamsOnce();
-  if (device == -1) device = current_device();
-  check_gpu(device);
-  return &default_streams[device];
+static inline void check_gpu(DeviceIndex device_index) {
+  AT_ASSERT(device_index >= 0 && device_index < num_gpus);
 }
 
 // Helper to determine the index of the stream to return
@@ -257,55 +246,6 @@ CUDAStreamInternals* CUDAStream_getDefaultStream(int64_t device) {
 static uint32_t get_idx(std::atomic<uint32_t> &counter) {
   auto raw_idx = counter++;
   return raw_idx % kStreamsPerPool;
-}
-
-// Returns a stream from the requested pool
-// Note: when called the first time on a device, this will create the
-// stream pools for that device.
-CUDAStreamInternals* CUDAStream_getStreamFromPool(
-  const bool isHighPriority
-, int64_t device) {
-  initCUDAStreamsOnce();
-  if (device == -1) device = current_device();
-  check_gpu(device);
-
-  // Initializes the stream pools (once)
-  std::call_once(device_flags[device], initDeviceStreamState, device);
-
-  if (isHighPriority) {
-    const auto idx = get_idx(high_priority_counters[device]);
-    return &high_priority_streams[device][idx];
-  }
-
-  const auto idx = get_idx(low_priority_counters[device]);
-  return &low_priority_streams[device][idx];
-}
-
-CUDAStreamInternals* CUDAStream_getCurrentStream(int64_t device) {
-  initCUDAStreamsOnce();
-  if (device == -1) device = current_device();
-  check_gpu(device);
-  return current_streams[device];
-}
-
-void CUDAStream_setStream(CUDAStreamInternals* ptr) {
-  AT_ASSERT(ptr);
-  current_streams[ptr->device] = ptr;
-}
-
-void CUDAStream_uncheckedSetStream(CUDAStreamInternals* ptr) {
-  current_streams[ptr->device] = ptr;
-}
-
-// Getters
-cudaStream_t CUDAStream_stream(const CUDAStreamInternals* ptr) {
-  AT_ASSERT(ptr);
-  return ptr->stream;
-}
-
-int64_t CUDAStream_device(const CUDAStreamInternals* ptr) {
-  AT_ASSERT(ptr);
-  return ptr->device;
 }
 
 // See Note [StreamId assignment]
@@ -329,37 +269,63 @@ CUDAStreamInternals* CUDAStream_internals(CUDAStream s) {
 
 CUDAStream CUDAStream_fromInternals(const CUDAStreamInternals* ptr) {
   return CUDAStream(CUDAStream::UNCHECKED,
-                    Stream(c10::Device(DeviceType::CUDA, CUDAStream_device(ptr)),
+                    Stream(c10::Device(DeviceType::CUDA, ptr->device_index),
                            CUDAStream_getStreamId(ptr)));
 }
 
 } // anonymous namespace
 
 cudaStream_t CUDAStream::stream() const {
-  return CUDAStream_stream(CUDAStream_internals(*this));
+  auto ptr = CUDAStream_internals(*this);
+  AT_ASSERT(ptr);
+  return ptr->stream;
 }
 
-/* Streams */
+// Returns a stream from the requested pool
+// Note: when called the first time on a device, this will create the
+// stream pools for that device.
 CUDAStream getStreamFromPool(
   const bool isHighPriority
-, int64_t device) {
-  return CUDAStream_fromInternals(CUDAStream_getStreamFromPool(isHighPriority, device));
+, DeviceIndex device_index) {
+  initCUDAStreamsOnce();
+  if (device_index == -1) device_index = current_device();
+  check_gpu(device_index);
+
+  // Initializes the stream pools (once)
+  std::call_once(device_flags[device_index], initDeviceStreamState, device_index);
+
+  if (isHighPriority) {
+    const auto idx = get_idx(high_priority_counters[device_index]);
+    return CUDAStream_fromInternals(&high_priority_streams[device_index][idx]);
+  }
+
+  const auto idx = get_idx(low_priority_counters[device_index]);
+  return CUDAStream_fromInternals(&low_priority_streams[device_index][idx]);
 }
 
-CUDAStream getDefaultCUDAStream(int64_t device) {
-  return CUDAStream_fromInternals(CUDAStream_getDefaultStream(device));
+CUDAStream getDefaultCUDAStream(DeviceIndex device_index) {
+  initCUDAStreamsOnce();
+  if (device_index == -1) device_index = current_device();
+  check_gpu(device_index);
+  return CUDAStream_fromInternals(&default_streams[device_index]);
 }
-CUDAStream getCurrentCUDAStream(int64_t device) {
-  return CUDAStream_fromInternals(CUDAStream_getCurrentStream(device));
+CUDAStream getCurrentCUDAStream(DeviceIndex device_index) {
+  initCUDAStreamsOnce();
+  if (device_index == -1) device_index = current_device();
+  check_gpu(device_index);
+  return CUDAStream_fromInternals(current_streams[device_index]);
 }
 
 void setCurrentCUDAStream(CUDAStream stream) {
-  CUDAStream_setStream(CUDAStream_internals(stream));
-}
-void uncheckedSetCurrentCUDAStream(CUDAStream stream) {
-  CUDAStream_uncheckedSetStream(CUDAStream_internals(stream));
+  initCUDAStreamsOnce();
+  auto ptr = CUDAStream_internals(stream);
+  AT_ASSERT(ptr);
+  current_streams[ptr->device_index] = ptr;
 }
 
+std::ostream& operator<<(std::ostream& stream, const CUDAStream& s) {
+  return stream << s.unwrap();
+}
 
 } // namespace cuda
 } // namespace at

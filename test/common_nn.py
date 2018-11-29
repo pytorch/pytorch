@@ -51,14 +51,14 @@ module_tests = [
     ),
     dict(
         module_name='Threshold',
-        constructor_args=(2, 1),
+        constructor_args=(2., 1.),
         input_size=(2, 3, 4, 5),
         check_inplace=True,
         desc='threshold_value'
     ),
     dict(
         module_name='Threshold',
-        constructor_args=(2, 10),
+        constructor_args=(2., 10.),
         input_size=(2, 3, 4, 5),
         desc='large_value'
     ),
