@@ -633,7 +633,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::recv(
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::recvAnysource(
     std::vector<at::Tensor>& /* unused */,
-    int* /* unused */,
     int /* unused */) {
   throw std::runtime_error("ProcessGroupNCCL does not support recv");
 }

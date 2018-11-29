@@ -85,9 +85,9 @@ bool SliceImpl(
   }
   if (dim == -1) {
     if (!backward) {
-      output->CopyFrom(data, context);
+      output->CopyFrom(data, true /*async*/);
     } else {
-      gdata->CopyFrom(*go, context);
+      gdata->CopyFrom(*go, true /*async*/);
     }
     return true;
   }
