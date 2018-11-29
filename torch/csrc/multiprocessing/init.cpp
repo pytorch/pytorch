@@ -2,10 +2,9 @@
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
 
-#include <iostream>
 #include <stdexcept>
 
-#if __linux__
+#if defined(__linux__)
 #include <sys/prctl.h>
 #endif
 
@@ -29,7 +28,7 @@ PyObject* multiprocessing_init(PyObject* _unused) {
   auto module = py::handle(multiprocessing_module).cast<py::module>();
 
   module.def("_prctl_pr_set_pdeathsig", [](int signal) {
-#if __linux__
+#if defined(__linux__)
     auto rv = prctl(PR_SET_PDEATHSIG, signal);
     SYSASSERT(rv, "prctl");
 #endif

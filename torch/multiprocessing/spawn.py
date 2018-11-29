@@ -11,10 +11,8 @@ from . import _prctl_pr_set_pdeathsig
 def _wrap(fn, i, args, error_queue):
     # prctl(2) is a Linux specific system call.
     # On other systems the following function call has no effect.
-    #
     # This is set to ensure that non-daemonic child processes can
     # terminate if their parent terminates before they do.
-    #
     _prctl_pr_set_pdeathsig(signal.SIGINT)
 
     try:

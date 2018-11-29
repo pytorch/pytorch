@@ -55,18 +55,25 @@ def test_nested_child_body(i, ready_queue, nested_child_sleep):
     time.sleep(nested_child_sleep)
 
 
-def test_nested_spawn(i, pid_queue, nested_child_sleep):
+def test_nested_spawn(i, pids_queue, nested_child_sleep):
     context = mp.get_context("spawn")
     nested_child_ready_queue = context.Queue()
+    nprocs = 2
     spawn_context = mp.spawn(
         fn=test_nested_child_body,
         args=(nested_child_ready_queue, nested_child_sleep),
-        nprocs=1,
+        nprocs=nprocs,
         join=False,
         daemon=False,
     )
-    pid_queue.put(spawn_context.pids()[0])
-    nested_child_ready_queue.get()
+    pids_queue.put(spawn_context.pids())
+
+    # Wait for both children to have spawned, to ensure that they
+    # have called prctl(2) to register a parent death signal.
+    for _ in range(nprocs):
+        nested_child_ready_queue.get()
+
+    # Kill self. This should take down the child processes as well.
     os.kill(os.getpid(), signal.SIGTERM)
 
 
@@ -138,29 +145,39 @@ class SpawnTest(TestCase):
         ):
             mp.spawn(test_success_first_then_exception_func, args=(exitcode,), nprocs=2)
 
-    @unittest.skipIf(sys.platform != "linux", "Requires prctl(2)")
+    @unittest.skipIf(
+        sys.platform != "linux",
+        "Only runs on Linux; requires prctl(2)",
+    )
     def test_nested_spawn(self):
         context = mp.get_context("spawn")
-        pid_queue = context.Queue()
-        nested_child_sleep = 5.0
+        pids_queue = context.Queue()
+        nested_child_sleep = 20.0
         spawn_context = mp.spawn(
             fn=test_nested_spawn,
-            args=(pid_queue, nested_child_sleep),
+            args=(pids_queue, nested_child_sleep),
             nprocs=1,
             join=False,
             daemon=False,
         )
 
-        # Wait for nested child to terminate in time
-        pid = pid_queue.get()
+        # Wait for nested children to terminate in time
+        pids = pids_queue.get()
         start = time.time()
-        while True:
-            try:
-                os.kill(pid, 0)
-            except ProcessLookupError:
-                break
+        while len(pids) > 0:
+            for pid in pids:
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    pids.remove(pid)
+                    break
+
+            # This assert fails if any nested child process is still
+            # alive after (nested_child_sleep / 2) seconds. By
+            # extension, this test times out with an assertion error
+            # after (nested_child_sleep / 2) seconds.
+            self.assertLess(time.time() - start, nested_child_sleep / 2)
             time.sleep(0.1)
-        self.assertLess(time.time() - start, nested_child_sleep / 2)
 
 
 if __name__ == '__main__':
