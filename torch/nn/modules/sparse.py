@@ -230,7 +230,7 @@ class EmbeddingBag(Module):
                 [ 1.1306, -2.5798, -1.0044]])
     """
     __constants__ = ['num_embeddings, embedding_dim', 'max_norm', 'norm_type',
-                      'scale_grad_by_freq', 'mode', 'sparse']
+                     'scale_grad_by_freq', 'mode', 'sparse']
 
     def __init__(self, num_embeddings, embedding_dim,
                  max_norm=None, norm_type=2., scale_grad_by_freq=False,

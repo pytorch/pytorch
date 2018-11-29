@@ -265,6 +265,12 @@ void TestIndexingByZerodimTensor() {
   // Throw StartsWith("Can only index with tensors that are scalars (zero-dim)")
   ASSERT_ANY_THROW(tensor[ones({2, 3, 4}, kInt)].equal(one));
 }
+void TestIndexingMixedDevice(Type& type) {
+  Tensor tensor = randn({20, 20}, type);
+  Tensor index = arange(10, kLong).cpu();
+  Tensor result = tensor.index({index});
+  ASSERT_TRUE(result[0].equal(tensor[0]));
+}
 void TestDispatch() {
   Tensor tensor = randn({20, 20});
   Tensor other = randn({20, 20});
@@ -301,6 +307,7 @@ void test(Type& type) {
   TestToString();
   TestIndexingByScalar();
   TestIndexingByZerodimTensor();
+  TestIndexingMixedDevice(type);
   TestDispatch();
   TestCore();
 }
