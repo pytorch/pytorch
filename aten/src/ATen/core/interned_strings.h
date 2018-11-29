@@ -58,9 +58,10 @@ namespace c10 {
   _(prim, IntToFloat)              \
   _(prim, FloatToInt)              \
   _(prim, StringToFloat)           \
-  _(prim, device)            \
-  _(prim, dtype)             \
-  _(prim, shape)             \
+  _(prim, device)                  \
+  _(prim, dtype)                   \
+  _(prim, shape)                   \
+  _(prim, requires_grad)           \
   _(prim, AutogradAdd)             \
   _(prim, GradOf)                  \
   _(prim, AnyDefined)              \
