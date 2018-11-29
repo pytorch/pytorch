@@ -8355,7 +8355,7 @@ new_module_tests = [
     ),
     dict(
         module_name='LocalResponseNorm',
-        constructor_args=(1, 1, 0.5, 2),
+        constructor_args=(1, 1., 0.5, 2.),
         input_size=(1, 5, 7, 7, 7),
         desc='3d_custom_params',
     ),
