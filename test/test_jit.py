@@ -2929,6 +2929,22 @@ class TestScript(JitTestCase):
 
         return ge
 
+    def test_jitter_bug(self):
+        @torch.jit.script
+        def fn2(input, kernel_size):
+            # type: (Tensor, List[int]) -> Tensor
+            if kernel_size[0] > 1:
+                _stride = [2]
+            else:
+                _stride = kernel_size
+            print(_stride, kernel_size)
+            return input
+
+        @torch.jit.script
+        def fn(input):
+            # type: (Tensor) -> Tensor
+            return fn2(input, [1])
+
     def test_annoying_doubles(self):
         mod = types.ModuleType("temp")
         mod.inf = float("inf")
