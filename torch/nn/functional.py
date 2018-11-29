@@ -1201,7 +1201,7 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
     if eps != 1e-10:
         warnings.warn("`eps` parameter is deprecated and has no effect.")
 
-    uniforms = torch.rand(logits.shape, dtype=logits.dtype, device=logits.device)
+    uniforms = torch.rand_like(logits)
     uniforms = torch.distributions.utils.clamp_probs(uniforms)
     gumbels = -((-(uniforms.log())).log())  # -log(~Exp(1)) = ~Gumbel(0,1)
     gumbels = (logits + gumbels) / tau  # ~Gumbel(logits,tau)
@@ -1210,7 +1210,7 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
     if hard:
         # Straight through.
         index = y_soft.max(dim, keepdim=True)[1]
-        y_hard = torch.zeros(logits.shape, dtype=logits.dtype, device=logits.device).scatter_(dim, index, 1.0)
+        y_hard = torch.zeros_like(logits).scatter_(dim, index, 1.0)
         return y_hard - y_soft.detach() + y_soft
     else:
         # Reparametrization trick.
