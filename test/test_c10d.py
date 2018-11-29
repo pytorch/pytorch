@@ -902,7 +902,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             opts.rootTensor = 0
             pg.reduce([t1, t1], opts)
 
-    def test_reduce_basics(self):
+    def _test_reduce_basics(self, fn):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
         for (op, input, output) in simple_reduce_tests(self.rank, self.world_size):
@@ -910,11 +910,55 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 opts = c10d.ReduceOptions()
                 opts.reduceOp = op
                 opts.rootRank = root
-                tmp = input.clone()
+                tmp = fn(input)
                 work = pg.reduce([tmp], opts)
                 work.wait()
                 if root == self.rank:
                     self.assertEqual(output, tmp)
+
+    def test_reduce_basics(self):
+        self._test_reduce_basics(lambda t: t.clone())
+
+    @skip_if_not_multigpu
+    def test_reduce_basics_cuda(self):
+        self._test_reduce_basics(lambda t: t.clone().cuda())
+
+    def _test_reduce_stress(self, inputs):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts(threads=8))
+        work_handles = []
+        outputs = []
+        for i in range(len(inputs)):
+            for root in range(self.world_size):
+                opts = c10d.ReduceOptions()
+                opts.rootRank = root
+                tmp = inputs[i].clone()
+                outputs.append(tmp)
+                work = pg.reduce([tmp], opts)
+                work_handles.append(work)
+
+        for i, work_handle in enumerate(work_handles):
+            work_handle.wait()
+            iter = i // self.world_size
+            root = i % self.world_size
+            if root == self.rank:
+                self.assertEqual(
+                    torch.Tensor([
+                        (iter * self.world_size) +
+                        (self.world_size * (self.world_size - 1) / 2)
+                    ]),
+                    outputs[i],
+                    "Mismatch in iteration %d with root rank %d" % (iter, root),
+                )
+
+    def test_reduce_stress(self):
+        inputs = [torch.Tensor([i + self.rank]) for i in range(1000)]
+        self._test_reduce_stress(inputs)
+
+    @skip_if_not_multigpu
+    def test_reduce_stress_cuda(self):
+        inputs = [torch.Tensor([i + self.rank]).cuda() for i in range(1000)]
+        self._test_reduce_stress(inputs)
 
     def test_send_recv_all_to_all(self):
         store = c10d.FileStore(self.file.name, self.world_size)
