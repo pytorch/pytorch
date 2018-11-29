@@ -3021,6 +3021,16 @@ class TestScript(JitTestCase):
 
         self.checkScript(f, (x,))
 
+    def test_tensor_grad(self):
+        x = torch.tensor(1.0, requires_grad=True)
+        y = torch.tensor(1.0, requires_grad=False)
+
+        def f(x):
+            return x.requires_grad
+
+        self.checkScript(f, (x,))
+        self.checkScript(f, (y,))
+
     def test_tensor_dtype(self):
         x_byte = torch.empty(34, 56, 78, dtype=torch.uint8)
         x_long = torch.empty(34, 56, 78, dtype=torch.long)
@@ -10022,6 +10032,9 @@ nn_functional_tests = [
     ('smooth_l1_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('l1_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('mse_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
+    ('smooth_l1_loss', (3, S), ((torch.rand(3, S)),), 'with_grad'),
+    ('l1_loss', (3, S), ((torch.rand(3, S)),), 'with_grad'),
+    ('mse_loss', (3, S), ((torch.rand(3, S)),), 'with_grad'),
     ('margin_ranking_loss', (3, S), ((3, S), (S,)),),
     ('hinge_embedding_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('soft_margin_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),

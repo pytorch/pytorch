@@ -199,6 +199,16 @@ RegisterOperators reg({
           };
         }),
     Operator(
+        "prim::requires_grad(Tensor a) -> bool",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            at::Tensor a;
+            pop(stack, a);
+            push(stack, a.requires_grad());
+            return 0;
+          };
+        }),
+    Operator(
         "prim::shape(Tensor a) -> int[]",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
