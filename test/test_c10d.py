@@ -222,6 +222,7 @@ class RendezvousTest(TestCase):
 
 
 class RendezvousEnvTest(TestCase):
+    @skip_if_not_nccl
     def test_common_errors(self):
         vars = {
             "WORLD_SIZE": "2",
