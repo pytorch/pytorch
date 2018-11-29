@@ -843,6 +843,9 @@ class TestJit(JitTestCase):
         traced_f = torch.jit.trace(f, (x, y,))
         self.assertEqual(traced_f(x.t().contiguous(), y), traced_f(x.t(), y))
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
     def test_fusion_checks_cat_inputs(self):
         # We shouldn't treat cat nodes as broadcasting. All their inputs
         # need to be checked for having the same map size, before we can
