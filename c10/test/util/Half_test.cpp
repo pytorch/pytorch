@@ -1,4 +1,4 @@
-#include<vector>
+#include <vector>
 
 #include <c10/Half.h>
 #include <gtest/gtest.h>
@@ -96,12 +96,12 @@ TEST(HalfDoubleConversionTest, Half2Double) {
       0x7bff // 0111 1011 1111 1111
   };
   for (auto x : inputs) {
-    auto target = c10::detail::halfbits2float(x);
+    auto target = c10::detail::fp16_ieee_to_fp32_value(x);
     EXPECT_EQ(half_legacy_impl::halfbits2float(x), target)
         << "Test failed for uint16 to float " << x << "\n";
     EXPECT_EQ(
         half_legacy_impl::float2halfbits(target),
-        c10::detail::float2halfbits(target))
+        c10::detail::fp16_ieee_from_fp32_value(target))
         << "Test failed for float to uint16" << target << "\n";
   }
 }
