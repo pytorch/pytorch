@@ -3453,6 +3453,23 @@ class TestNN(NNTestCase):
         out = dp.data_parallel(l, i, device_ids=(cuda0, cuda1), output_device=cuda0)
         self.assertEqual(out, l(i))
 
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_data_parallel_with_embedding(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.lut_dummy = torch.nn.Embedding(1, 1, max_norm=1.0).to("cuda")
+                self.lut_a = torch.nn.Embedding(22, 256, max_norm=1.0).to("cuda")
+
+            def forward(self, src):
+                ebd = self.lut_a(src)
+                return ebd
+
+        model = Model()
+        model = torch.nn.DataParallel(model)
+        src = torch.randint(4,(2,)).to("cuda")
+        output = model(src)
+
     def test_state_dict(self):
         l = nn.Linear(5, 5)
         block = nn.Module()
