@@ -60,22 +60,22 @@ In the past, we were often being asked from many users on "which backend should 
   - In general, the rule of thumb is to use the NCCL backend if you plan to do distributed GPU
     training and to use the Gloo backend if you plan to do distributed CPU training.
 
-- GPU hosts with infiniband interconnect
+- GPU hosts with InfiniBand interconnect
 
-  - Use NCCL, since it's the only backend that currently supports infiniband and GPU-direct.
+  - Use NCCL, since it's the only backend that currently supports InfiniBand and GPU-direct.
 
-- GPU hosts with ethernet interconnect
+- GPU hosts with Ethernet interconnect
 
   - Use NCCL, since it currently provides the best distributed GPU training performance, especially
     for multiprocess single-node or multi-node distributed training. If you encounter any problem
     with NCCL, use Gloo as the fallback option. (Note that Gloo currently runs slower than NCCL for GPUs.)
 
-- CPU hosts with infiniband interconnect
+- CPU hosts with InfiniBand interconnect
 
-  - If your infiniband has enabled IP over IB, use Gloo, otherwise, use MPI instead.
-    We are planning on adding infiniband support for Gloo in the upcoming releases.
+  - If your InfiniBand has enabled IP over IB, use Gloo, otherwise, use MPI instead.
+    We are planning on adding InfiniBand support for Gloo in the upcoming releases.
 
-- CPU hosts with ethernet interconnect
+- CPU hosts with Ethernet interconnect
 
   - Use Gloo, unless you have specific reasons to use MPI.
 
