@@ -9408,7 +9408,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         with self.assertRaisesRegex(RuntimeError, "expected both inputs to be on same device"):
             torch.tensor(2).to("cuda:1") // torch.tensor(3).to("cuda:0")
 
-    def test_is_created_from_data_or_detach(self):
+    def test_allow_tensor_metadata_change(self):
         def do_test(t):
             with self.assertRaisesRegex(
                     RuntimeError,

@@ -1820,7 +1820,7 @@ class TestSparse(TestCase):
         with self.assertRaisesRegex(RuntimeError, "bool value of Tensor with no values is ambiguous"):
             torch.sparse_coo_tensor(([0, 1],), self.ValueTensor(2, 0), (4, 0)).is_nonzero()
 
-    def test_is_created_from_data_or_detach(self):
+    def test_allow_tensor_metadata_change(self):
         def do_test(t):
             with self.assertRaisesRegex(
                     RuntimeError,
