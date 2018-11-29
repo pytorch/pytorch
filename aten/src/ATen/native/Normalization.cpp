@@ -269,7 +269,6 @@ Tensor batch_norm(
                && weight.defined() && bias.defined()
                && ((running_mean.defined() && running_var.defined())
                  || (!running_mean.defined() && !running_var.defined() && training))
-               && detail::getCUDAHooks().compiledWithMIOpen()
                );
 
   if (use_miopen) {

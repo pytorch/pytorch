@@ -124,7 +124,6 @@ auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
 auto ConvParams::use_miopen(const at::Tensor& input) const -> bool {
 
   return ((input.type().scalarType() == at::kFloat) || (input.type().scalarType() == at::kHalf))
-         && detail::getCUDAHooks().compiledWithMIOpen()
          && input.is_cuda()
          && input.dim() <= MIOPEN_DIM_MAX
          && !(groups > 1 && is_dilated()) // MIOpen currently does not support dilation with groups of size > 1
