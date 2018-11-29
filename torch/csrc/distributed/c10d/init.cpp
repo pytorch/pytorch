@@ -423,7 +423,16 @@ They are used in specifying strategies for reduction collectives, e.g.,
 #ifdef USE_C10D_NCCL
   shared_ptr_class_<::c10d::ProcessGroupNCCL>(
       module, "ProcessGroupNCCL", processGroup)
-      .def(py::init<const std::shared_ptr<::c10d::Store>&, int, int>());
+      .def(
+          py::init<
+              const std::shared_ptr<::c10d::Store>&,
+              int,
+              int,
+              const std::string&>(),
+          py::arg("store"),
+          py::arg("rank"),
+          py::arg("size"),
+          py::arg("groupName") = "");
 #endif
 
 #ifdef USE_C10D_MPI

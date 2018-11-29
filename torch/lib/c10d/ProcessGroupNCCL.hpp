@@ -98,7 +98,11 @@ class ProcessGroupNCCL : public ProcessGroup {
   };
 
   // Constructor will also check the number of available GPUs in the system
-  ProcessGroupNCCL(const std::shared_ptr<Store>& store, int rank, int size);
+  ProcessGroupNCCL(
+      const std::shared_ptr<Store>& store,
+      int rank,
+      int size,
+      const std::string& groupName = "");
 
   virtual ~ProcessGroupNCCL();
 
@@ -169,6 +173,9 @@ class ProcessGroupNCCL : public ProcessGroup {
   // Store that is used to exchange each Ranks's NCCL unique ID
   std::shared_ptr<Store> store_;
 
+  // The process group name
+  std::string groupName_;
+
   // The NCCL communicator that the process group has cached.
   // The key is a list of GPU devices that an operation is operating on
   // The GPU devices are stored in a device sequence and the cache NCCL
@@ -201,13 +208,21 @@ class ProcessGroupNCCL : public ProcessGroup {
   // ID of this process group
   std::string processGroupID_;
 
+  // Group Prefix and ID of this process group
+  std::string groupPgId_;
+
   // Device Indexes used for all collectives in this group
   std::set<int> usedDeviceIdxs_;
 
   // processGroupID tracking
   static std::mutex pgTrackingLock_;
-  static std::unordered_map<ssize_t, ssize_t> pgUniqueNCCLIDCnt_;
-  static ssize_t processGroupCounter_;
+
+  // map from the key: "group name + pg counter (ID)" to the
+  // unique NCCL ID count. This needs to be group and pg specific
+  static std::unordered_map<std::string, ssize_t> pgUniqueNCCLIDCnt_;
+
+  // map from group name to the pg counter (ID) wtihin that group
+  static std::unordered_map<std::string, ssize_t> processGroupCounterMap_;
 };
 
 } // namespace c10d
