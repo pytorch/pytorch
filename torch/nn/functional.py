@@ -1199,7 +1199,7 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
     """
 
     if eps != 1e-10:
-        warnings.warn("`eps` parameter is deprecated.", DeprecationWarning)
+        warnings.warn("`eps` parameter is deprecated and has no effect.")
 
     uniforms = torch.rand(logits.shape, dtype=logits.dtype, device=logits.device)
     uniforms = torch.distributions.utils.clamp_probs(uniforms)
