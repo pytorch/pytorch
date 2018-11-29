@@ -12,7 +12,16 @@ ENDIF(NOT MSVC)
 IF(NOT AT_INSTALL_BIN_DIR OR NOT AT_INSTALL_LIB_DIR OR NOT AT_INSTALL_INCLUDE_DIR OR NOT AT_INSTALL_SHARE_DIR)
   SET(AT_INSTALL_BIN_DIR "bin" CACHE PATH "AT install binary subdirectory")
   SET(AT_INSTALL_LIB_DIR "lib" CACHE PATH "AT install library subdirectory")
-  SET(AT_INSTALL_INCLUDE_DIR "include" CACHE PATH "AT install include subdirectory")
+
+  # TODO: rather than set this to lib/include here, we could instead
+  # pass -DAT_INSTALL_INCLUDE_DIR to the cmake invocation when
+  # building pytorch. However doing so reliably produces a different
+  # result (ATen.h ends up in build/lib/include folder rather than
+  # torch/lib/include), so I'm leaving this as a minor unsolved
+  # mystery. Probably it has to do with some details of how CMake
+  # variables work.
+  SET(AT_INSTALL_INCLUDE_DIR "lib/include" CACHE PATH "AT install include subdirectory")
+
   SET(AT_INSTALL_SHARE_DIR "share" CACHE PATH "AT install include subdirectory")
 ENDIF()
 
