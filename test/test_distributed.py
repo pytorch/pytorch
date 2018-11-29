@@ -533,7 +533,6 @@ class _DistTestBase(object):
 
         self._barrier()
 
-    @unittest.skipIf(BACKEND == "gloo", "Gloo does not support reduce")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
     def test_reduce_sum(self):
         group, group_id, rank = self._init_global_test()
@@ -565,7 +564,6 @@ class _DistTestBase(object):
             rank_to_GPU,
         )
 
-    @unittest.skipIf(BACKEND == "gloo", "Gloo does not support reduce")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
     def test_reduce_product(self):
         group, group_id, rank = self._init_global_test()
@@ -579,19 +577,16 @@ class _DistTestBase(object):
             reduce((lambda x, y: x * y), [10] * (len(group) - 1), 2),
         )
 
-    @unittest.skipIf(BACKEND == "gloo", "Gloo does not support reduce")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
     def test_reduce_min(self):
         group, group_id, rank = self._init_global_test()
         self._test_reduce_helper(group, group_id, rank, dist.ReduceOp.MIN, 1010, 1, 1)
 
-    @unittest.skipIf(BACKEND == "gloo", "Gloo does not support reduce")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
     def test_reduce_max(self):
         group, group_id, rank = self._init_global_test()
         self._test_reduce_helper(group, group_id, rank, dist.ReduceOp.MAX, -1, 10, 10)
 
-    @unittest.skipIf(BACKEND == "gloo", "Gloo does not support reduce")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
     @skip_if_small_worldsize
     def test_reduce_group_sum(self):
@@ -606,7 +601,6 @@ class _DistTestBase(object):
             2 + (10 * (len(group) - 1)),
         )
 
-    @unittest.skipIf(BACKEND == "gloo", "Gloo does not support reduce")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
     @skip_if_small_worldsize
     def test_reduce_group_product(self):
@@ -621,21 +615,18 @@ class _DistTestBase(object):
             reduce((lambda x, y: x * y), [10] * (len(group) - 1), 2),
         )
 
-    @unittest.skipIf(BACKEND == "gloo", "Gloo does not support reduce")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
     @skip_if_small_worldsize
     def test_reduce_group_min(self):
         group, group_id, rank = self._init_group_test()
         self._test_reduce_helper(group, group_id, rank, dist.ReduceOp.MIN, 1010, 1, 1)
 
-    @unittest.skipIf(BACKEND == "gloo", "Gloo does not support reduce")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
     @skip_if_small_worldsize
     def test_reduce_group_max(self):
         group, group_id, rank = self._init_group_test()
         self._test_reduce_helper(group, group_id, rank, dist.ReduceOp.MAX, -1, 10, 10)
 
-    @unittest.skipIf(BACKEND == "gloo", "Gloo does not support reduce")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
     def test_reduce_full_group_sum(self):
         group, group_id, rank = self._init_full_group_test()
@@ -649,7 +640,6 @@ class _DistTestBase(object):
             2 + (10 * (len(group) - 1)),
         )
 
-    @unittest.skipIf(BACKEND == "gloo", "Gloo does not support reduce")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
     def test_reduce_full_group_product(self):
         group, group_id, rank = self._init_full_group_test()
@@ -663,13 +653,11 @@ class _DistTestBase(object):
             reduce((lambda x, y: x * y), [10] * (len(group) - 1), 2),
         )
 
-    @unittest.skipIf(BACKEND == "gloo", "Gloo does not support reduce")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
     def test_reduce_full_group_min(self):
         group, group_id, rank = self._init_full_group_test()
         self._test_reduce_helper(group, group_id, rank, dist.ReduceOp.MIN, 1010, 1, 1)
 
-    @unittest.skipIf(BACKEND == "gloo", "Gloo does not support reduce")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
     def test_reduce_full_group_max(self):
         group, group_id, rank = self._init_full_group_test()
@@ -862,20 +850,17 @@ class _DistTestBase(object):
 
         self._barrier()
 
-    @unittest.skipIf(BACKEND == "gloo", "Gloo does not support scatter")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support scatter")
     def test_scatter(self):
         group, group_id, rank = self._init_global_test()
         self._test_scatter_helper(group, group_id, rank)
 
-    @unittest.skipIf(BACKEND == "gloo", "Gloo does not support scatter")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support scatter")
     @skip_if_small_worldsize
     def test_scatter_group(self):
         group, group_id, rank = self._init_group_test()
         self._test_scatter_helper(group, group_id, rank)
 
-    @unittest.skipIf(BACKEND == "gloo", "Gloo does not support scatter")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support scatter")
     def test_scatter_full_group(self):
         group, group_id, rank = self._init_full_group_test()
@@ -896,20 +881,17 @@ class _DistTestBase(object):
 
         self._barrier()
 
-    @unittest.skipIf(BACKEND == "gloo", "Gloo does not support gather")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
     def test_gather(self):
         group, group_id, rank = self._init_global_test()
         self._test_gather_helper(group, group_id, rank)
 
-    @unittest.skipIf(BACKEND == "gloo", "Gloo does not support gather")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
     @skip_if_small_worldsize
     def test_gather_group(self):
         group, group_id, rank = self._init_group_test()
         self._test_gather_helper(group, group_id, rank)
 
-    @unittest.skipIf(BACKEND == "gloo", "Gloo does not support gather")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
     def test_gather_full_group(self):
         group, group_id, rank = self._init_full_group_test()
@@ -933,7 +915,7 @@ class _DistTestBase(object):
 
         self._barrier()
 
-    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports CPU all gather")
+    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
     def test_all_gather(self):
         group, group_id, rank = self._init_global_test()
         self._test_all_gather_helper(group, group_id, rank)
@@ -948,13 +930,11 @@ class _DistTestBase(object):
         self._test_all_gather_helper(group, group_id, rank, True, rank_to_GPU)
 
     @skip_if_small_worldsize
-    @unittest.skipIf(BACKEND == "gloo", "Gloo does not support gather")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
     def test_all_gather_group(self):
         group, group_id, rank = self._init_group_test()
         self._test_all_gather_helper(group, group_id, rank)
 
-    @unittest.skipIf(BACKEND == "gloo", "Gloo does not support gather")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
     def test_all_gather_full_group(self):
         group, group_id, rank = self._init_full_group_test()
