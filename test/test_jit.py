@@ -14,7 +14,7 @@ from torch._six import inf, PY2
 from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
     freeze_rng_state
-from test_nn import module_tests, new_module_tests
+from common_nn import module_tests, new_module_tests
 from textwrap import dedent
 import os
 import io
