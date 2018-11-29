@@ -207,6 +207,19 @@ TEST(DataTest, SequentialSamplerResetsWell) {
   ASSERT_FALSE(sampler.next(2).has_value());
 }
 
+TEST(DataTest, SequentialSamplerResetsWithNewSizeWell) {
+  samplers::SequentialSampler sampler(5);
+  ASSERT_EQ(sampler.next(5).value(), std::vector<size_t>({0, 1, 2, 3, 4}));
+  ASSERT_FALSE(sampler.next(2).has_value());
+  sampler.reset(7);
+  ASSERT_EQ(
+      sampler.next(7).value(), std::vector<size_t>({0, 1, 2, 3, 4, 5, 6}));
+  ASSERT_FALSE(sampler.next(2).has_value());
+  sampler.reset(3);
+  ASSERT_EQ(sampler.next(3).value(), std::vector<size_t>({0, 1, 2}));
+  ASSERT_FALSE(sampler.next(2).has_value());
+}
+
 TEST(DataTest, CanSaveAndLoadSequentialSampler) {
   {
     samplers::SequentialSampler a(10);
@@ -272,6 +285,18 @@ TEST(DataTest, RandomSamplerResetsWell) {
   ASSERT_FALSE(sampler.next(2).has_value());
 }
 
+TEST(DataTest, RandomSamplerResetsWithNewSizeWell) {
+  samplers::RandomSampler sampler(5);
+  ASSERT_EQ(sampler.next(5).value().size(), 5);
+  ASSERT_FALSE(sampler.next(2).has_value());
+  sampler.reset(7);
+  ASSERT_EQ(sampler.next(7).value().size(), 7);
+  ASSERT_FALSE(sampler.next(2).has_value());
+  sampler.reset(3);
+  ASSERT_EQ(sampler.next(3).value().size(), 3);
+  ASSERT_FALSE(sampler.next(2).has_value());
+}
+
 TEST(DataTest, SavingAndLoadingRandomSamplerYieldsSameSequence) {
   {
     samplers::RandomSampler a(10);
@@ -317,6 +342,18 @@ TEST(DataTest, StreamSamplerResetsWell) {
   ASSERT_FALSE(sampler.next(2).has_value());
   sampler.reset();
   ASSERT_EQ(sampler.next(5).value().size(), 5);
+  ASSERT_FALSE(sampler.next(2).has_value());
+}
+
+TEST(DataTest, StreamSamplerResetsWithNewSizeWell) {
+  samplers::StreamSampler sampler(/*epoch_size=*/5);
+  ASSERT_EQ(sampler.next(5).value().size(), 5);
+  ASSERT_FALSE(sampler.next(2).has_value());
+  sampler.reset(7);
+  ASSERT_EQ(sampler.next(7).value().size(), 7);
+  ASSERT_FALSE(sampler.next(2).has_value());
+  sampler.reset(3);
+  ASSERT_EQ(sampler.next(3).value().size(), 3);
   ASSERT_FALSE(sampler.next(2).has_value());
 }
 
@@ -618,7 +655,7 @@ struct TestIndexDataset
 
 struct TestIndexSampler : public samplers::Sampler<TestIndex> {
   explicit TestIndexSampler(size_t size) : size_(size) {}
-  void reset() override {}
+  void reset(torch::optional<size_t> new_size = torch::nullopt) override {}
   torch::optional<TestIndex> next(size_t batch_size) override {
     if (index_ >= size_) {
       return torch::nullopt;
