@@ -42,14 +42,25 @@ class ConvDNNLowPAcc16Op final : public ConvDNNLowPOp<std::uint8_t, ReluFused> {
   bool RunOnDeviceWithOrderNHWCAndType_();
 
   template <typename PackAMatrix, fbgemm::QuantizationGranularity Q_GRAN>
-  void DispatchFBGEMM(
+  void DispatchFBGEMM_(
       PackAMatrix& packA,
       const std::uint8_t* col_buffer_quantized_data,
       vector<std::int32_t>* Y_int32);
 
+  template <typename PackAMatrix, fbgemm::QuantizationGranularity Q_GRAN>
+  void DispatchSConv_(
+      PackAMatrix& packA,
+      const std::uint8_t* col_buffer_quantized_data,
+      vector<std::int32_t>* Y_int32,
+      const fbgemm::conv_param_t<>& conv_p);
+
   void ConvOutlier_(
       const std::uint8_t* col_buffer,
       vector<std::int32_t>* Y_int32);
+
+  virtual bool Acc16() const override {
+    return !fallback_to_32_bit_accumulation_;
+  }
 
   std::unique_ptr<fbgemm::PackBMatrix<std::int8_t, std::int16_t>>
       Wq_acc16_packed_;
@@ -65,7 +76,16 @@ class ConvDNNLowPAcc16Op final : public ConvDNNLowPOp<std::uint8_t, ReluFused> {
   int nbits_in_non_outlier_;
   int copy_to_32bit_frequency_;
 
-  bool first_invocation_ = true;
+  bool first_invocation_{true};
+  // If outlier matrix is not sparse enough, using 16-bit accumulation won't
+  // give speedup due to too much overhead of sparse matrix multiplication or
+  // sparse convolution anyway, so fallback to 32-bit accumulation
+  bool fallback_to_32_bit_accumulation_{false};
+  // If outlier matrix is sparse enough to not fall back to 32-bit accumulation
+  // but still not sparse enough so that sparse conv is slower (mostly because,
+  // unlike SpMDM, sparse conv is not optimized for somewhat more outliers yet),
+  // then we just give up im2col fusion and just use unfused im2col and SpMDM.
+  bool too_dense_to_fuse_im2col_{false};
 }; // class ConvDNNLowPAcc16Op
 
 } // namespace caffe2

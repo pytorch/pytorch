@@ -26,6 +26,11 @@ class ConvDNNLowPOp : public ConvPoolDNNLowPOpBase<T, ConvFp32Op> {
   bool RunOnDeviceWithOrderNCHW() override;
   bool RunOnDeviceWithOrderNHWC() override;
 
+  template <typename InType>
+  bool RunOnDeviceWithOrderNCHWAndType_();
+  template <typename InType>
+  bool RunOnDeviceWithOrderNHWCAndType_();
+
   virtual bool GetQuantizationParameters_();
 
   /**
@@ -51,6 +56,10 @@ class ConvDNNLowPOp : public ConvPoolDNNLowPOpBase<T, ConvFp32Op> {
       int m,
       int nthreads,
       int thread_id);
+
+  virtual bool Acc16() const {
+    return false;
+  }
 
   Tensor col_buffer_{CPU};
   Tensor img_shape_device_{CPU};
@@ -101,13 +110,8 @@ class ConvDNNLowPOp : public ConvPoolDNNLowPOpBase<T, ConvFp32Op> {
   bool TakeDepthWise3x3FastPath_();
   bool TakeDepthWise3x3x3FastPath_();
 
-  template <typename InType>
-  bool RunOnDeviceWithOrderNCHWAndType_();
-  template <typename InType>
-  bool RunOnDeviceWithOrderNHWCAndType_();
-
   template <typename PackAMatrix, fbgemm::QuantizationGranularity Q_GRAN>
-  void DispatchFBGEMM(PackAMatrix& packA, vector<std::int32_t>* Y_int32);
+  void DispatchFBGEMM_(PackAMatrix& packA, vector<std::int32_t>* Y_int32);
 
   template <typename InType>
   void ConvNHWCCore_(
