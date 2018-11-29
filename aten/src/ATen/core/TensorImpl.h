@@ -372,7 +372,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   virtual const Storage& storage() const;
 
   void set_storage(const Storage& storage) {
-    AT_CHECK(!is_created_from_data_or_detach(), "set_storage is not allowed on Tensor created from .data or .detach()");
+    AT_CHECK(allow_tensor_metadata_change(), "set_storage is not allowed on Tensor created from .data or .detach()");
     storage_ = storage;
   }
 
@@ -734,7 +734,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * which is harder to misuse.
    */
   virtual void resize_dim(int64_t ndim) {
-    AT_CHECK(!is_created_from_data_or_detach(), "resize_dim is not allowed on Tensor created from .data or .detach()");
+    AT_CHECK(allow_tensor_metadata_change(), "resize_dim is not allowed on Tensor created from .data or .detach()");
     sizes_.resize(ndim, 0);
     strides_.resize(ndim, 0);
     refresh_numel();
@@ -750,7 +750,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * which is harder to misuse.
    */
   virtual void set_size(int64_t dim, int64_t new_size) {
-    AT_CHECK(!is_created_from_data_or_detach(), "set_size is not allowed on Tensor created from .data or .detach()");
+    AT_CHECK(allow_tensor_metadata_change(), "set_size is not allowed on Tensor created from .data or .detach()");
     sizes_.at(dim) = new_size;
     refresh_numel();
     refresh_contiguous();
@@ -763,7 +763,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * which is harder to misuse.
    */
   virtual void set_stride(int64_t dim, int64_t new_stride) {
-    AT_CHECK(!is_created_from_data_or_detach(), "set_stride is not allowed on Tensor created from .data or .detach()");
+    AT_CHECK(allow_tensor_metadata_change(), "set_stride is not allowed on Tensor created from .data or .detach()");
     strides_[dim] = new_stride;
     refresh_numel();
     refresh_contiguous();
@@ -777,7 +777,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * (and resizing if necessary.)
    */
   virtual void set_storage_offset(int64_t storage_offset) {
-    AT_CHECK(!is_created_from_data_or_detach(), "set_storage_offset is not allowed on Tensor created from .data or .detach()");
+    AT_CHECK(allow_tensor_metadata_change(), "set_storage_offset is not allowed on Tensor created from .data or .detach()");
     storage_offset_ = storage_offset;
   }
 
@@ -792,7 +792,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * See Note [We regret making Variable hold a Tensor]
    */
   void set_sizes_contiguous(at::IntList new_size) {
-    AT_CHECK(!is_created_from_data_or_detach(), "set_sizes_contiguous is not allowed on Tensor created from .data or .detach()");
+    AT_CHECK(allow_tensor_metadata_change(), "set_sizes_contiguous is not allowed on Tensor created from .data or .detach()");
     AT_ASSERT(!is_variable());
     auto old_dim = sizes_.size();
     auto new_dim = new_size.size();
@@ -817,7 +817,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * See Note [We regret making Variable hold a Tensor]
    */
   void set_sizes_and_strides(at::IntList new_size, at::IntList new_stride) {
-    AT_CHECK(!is_created_from_data_or_detach(), "set_sizes_and_strides is not allowed on Tensor created from .data or .detach()");
+    AT_CHECK(allow_tensor_metadata_change(), "set_sizes_and_strides is not allowed on Tensor created from .data or .detach()");
     AT_ASSERT(!is_variable());
     AT_CHECK(
         new_size.size() == new_stride.size(),
@@ -873,17 +873,17 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_variable() const { return is_variable_; };
 
   /**
-   * Set whether a tensor is created from Python `tensor.data` or Python/C++ `tensor.detach()`.
+   * Set whether a tensor allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
    */
-  virtual void set_is_created_from_data_or_detach(bool value) {
-    is_created_from_data_or_detach_ = value;
+  virtual void set_allow_tensor_metadata_change(bool value) {
+    allow_tensor_metadata_change_ = value;
   }
 
   /**
-   * True if a tensor is created from Python `tensor.data` or Python/C++ `tensor.detach()`.
+   * True if a tensor allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
    */
-  virtual bool is_created_from_data_or_detach() const {
-    return is_created_from_data_or_detach_;
+  virtual bool allow_tensor_metadata_change() const {
+    return allow_tensor_metadata_change_;
   }
 
   /**
@@ -902,9 +902,9 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
 
   // NOTE: `shallow_copy_and_detach()` does not copy the AutogradMeta pointer
   // because it requires unique ownership.
-  // NOTE: We don't set `is_created_from_data_or_detach_` to true here, because there are call sites
+  // NOTE: We don't set `allow_tensor_metadata_change_` to false here, because there are call sites
   // to this function that need to change the shallow copy's size or storage afterwards, and setting
-  // `is_created_from_data_or_detach_` to true would prevent that from happening.
+  // `allow_tensor_metadata_change_` to false would prevent that from happening.
   virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const {
     auto impl = c10::make_intrusive<TensorImpl>(Storage(storage()), type_id(), is_variable());
     impl->set_sizes_and_strides(sizes(), strides());
@@ -1512,10 +1512,11 @@ protected:
   bool is_variable_ = false;
   bool is_wrapped_number_ = false;
 
-  // We need this field because we want to prevent users from changing size or storage
-  // of a derived tensor (i.e. tensors created from Python `tensor.data` or Python/C++ `tensor.detach()`),
-  // because those changes will not update the original tensor.
-  bool is_created_from_data_or_detach_ = false;
+  // We need this field because we want to prevent users from changing tensor metadata
+  // (e.g. sizes / strides / storage / storage_offset) of a derived tensor (i.e. tensors
+  // created from Python `tensor.data` or Python/C++ `tensor.detach()`), because those changes
+  // will not update the original tensor.
+  bool allow_tensor_metadata_change_ = true;
 
   // we decide to keep reserved_ and it will
   // live in Tensor after the split

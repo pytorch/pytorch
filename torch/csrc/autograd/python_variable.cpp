@@ -201,9 +201,9 @@ static PyObject * THPVariable_get_data(THPVariable *self)
 {
   HANDLE_TH_ERRORS
   auto var = make_variable(self->cdata.data(), false);
-  /// NOTE: we need to set `is_created_from_data_or_detach_` to true, to prevent users from
+  /// NOTE: we need to set `allow_tensor_metadata_change_` to false, to prevent users from
   /// changing size or storage of `tensor.data`, because those changes will not update `tensor`.
-  var.data().unsafeGetTensorImpl()->set_is_created_from_data_or_detach(true);
+  var.data().unsafeGetTensorImpl()->set_allow_tensor_metadata_change(false);
   return THPVariable_Wrap(var);
   END_HANDLE_TH_ERRORS
 }
