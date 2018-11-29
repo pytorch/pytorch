@@ -1073,6 +1073,7 @@ class SparseDataParallelModelTest(TestCase):
         self._test_equiv_sparse(False)
 
 
+@unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
 @unittest.skipIf(workspace.NumGpuDevices() < 2, "Need at least 2 GPUs.")
 class ParallelizeBMUFTest(TestCase):
 
@@ -1219,6 +1220,7 @@ class ParallelizeBMUFTest(TestCase):
         np.testing.assert_equal(b_0, b_g_ + v_b)
 
 
+@unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
 @unittest.skipIf(workspace.NumGpuDevices() < 2, "Need at least 2 GPUs.")
 class SparseDataParallelModelTestWithSharedIndices(TestCase):
 
