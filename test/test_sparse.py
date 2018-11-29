@@ -818,6 +818,7 @@ class TestSparse(TestCase):
             y1.backward()
             y2.backward()
             mask = (S_dense == 0)
+            self.assertTrue(S.grad.is_coalesced())
             self.assertEqual(S.grad.to_dense(), S_dense.grad.masked_fill_(mask, 0))
 
         test_shape(7, 8, 9, 20)
@@ -835,6 +836,7 @@ class TestSparse(TestCase):
             y1.backward()
             y2.backward()
             mask = (S_dense == 0)
+            self.assertTrue(S.grad.is_coalesced())
             self.assertEqual(S.grad.to_dense(), S_dense.grad.masked_fill_(mask, 0))
 
         test_shape(7, 8, 9, 20)
