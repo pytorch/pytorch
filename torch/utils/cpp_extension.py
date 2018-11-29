@@ -187,7 +187,7 @@ def check_compiler_abi_compatibility(compiler):
     if tuple(map(int, version)) >= minimum_required_version:
         return True
 
-    compiler = '{} {}'.format(compiler, version.group(0))
+    compiler = '{} {}'.format(compiler, ".".join(version))
     warnings.warn(ABI_INCOMPATIBILITY_WARNING.format(compiler))
 
     return False
