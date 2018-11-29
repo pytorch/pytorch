@@ -212,7 +212,6 @@ struct CAFFE2_API IValue final {
 
   // Future
   IValue(c10::intrusive_ptr<ivalue::Future> v);
-  IValue(ivalue::Future&& future);
   bool isFuture() const { return Tag::Future == tag; }
   c10::intrusive_ptr<ivalue::Future> toFuture() && {
     AT_ASSERT(isFuture());
@@ -459,13 +458,22 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     if (completed()) {
       return;
     }
-    c10::global_work_queue.workOnTasksUntilCompleted(intrusive_from_this());
+    c10::global_work_queue().workOnTasksUntilCompleted(intrusive_from_this());
     AT_ASSERT(completed());
   }
 
   void markCompleted(IValue value) {
-    value_ = std::move(value);
-    completed_ = true;
+    {
+      // This is not to protect completed_ but to create a barrier
+      // from possible addCallback() calls
+      std::unique_lock<std::mutex> lock(mutex_);
+      AT_ASSERT(!completed());
+      completed_ = true;
+      value_ = std::move(value);
+    }
+
+    // There is no need to protect callbacks anymore.
+    // Once completed_ is set to true, no one can add new callback to the list.
     for (auto& callback : callbacks) {
       callback();
     }
@@ -474,13 +482,17 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   // Get the result of the current future.
   IValue value() {
+    std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
     return value_;
   }
 
   void addCallback(std::function<void(void)> callback) {
+    std::unique_lock<std::mutex> lock(mutex_);
     if (completed()) {
+      lock.unlock();
       callback();
+      return;
     }
     callbacks.push_back(callback);
   }
@@ -490,13 +502,18 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     return completed_;
   }
 
+  std::mutex& get_mutex() {
+    return mutex_;
+  }
+
   CAFFE2_API friend std::ostream& operator<<(
       std::ostream& out,
       const Future& v);
 
  private:
+  std::mutex mutex_;
   IValue value_; // when finished the value
-  bool completed_ = false; // is this future complete
+  std::atomic_bool completed_ = {false}; // is this future complete
   std::vector<std::function<void(void)>> callbacks;
 };
 
@@ -614,9 +631,6 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)
 : tag(Tag::Future), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
-inline IValue::IValue(ivalue::Future&& future)
-: IValue(c10::make_intrusive<ivalue::Future>(std::move(future))) {}
-
 
 inline const std::vector<int64_t>& IValue::toIntListRef() const {
   return toIntList()->elements();
