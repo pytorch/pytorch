@@ -180,8 +180,11 @@ bool ConvDNNLowPOp<T, ReluFused>::NoIm2ColNHWC_() {
 
   const Tensor& X = InputTensorCPU_(INPUT);
   if (Wq_packed_ && X.template IsType<T>() &&
-      accumulate(dilation_.begin(), dilation_.end(), 1, multiplies<int>()) ==
-          1) {
+      accumulate(
+          this->dilation_.begin(),
+          this->dilation_.end(),
+          1,
+          multiplies<int>()) == 1) {
     return true;
   }
 
@@ -1261,19 +1264,21 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
 
     // fast path to use fbgemm
     if (fuse_im2col) {
-      if (kernel_.size() <= 2) {
+      if (this->kernel_.size() <= 2) {
         conv_param_t<> conv_p(
             N,
             C,
             M,
-            {X.dim32(1), kernel_.size() == 2 ? X.dim32(2) : 1},
+            {X.dim32(1), this->kernel_.size() == 2 ? X.dim32(2) : 1},
             group_,
-            {this->kernel_[0], kernel_.size() == 2 ? this->kernel_[1] : 1},
-            {this->stride_[0], kernel_.size() == 2 ? this->stride_[1] : 1},
+            {this->kernel_[0],
+             this->kernel_.size() == 2 ? this->kernel_[1] : 1},
+            {this->stride_[0],
+             this->kernel_.size() == 2 ? this->stride_[1] : 1},
             {this->pads_[0],
-             kernel_.size() == 2 ? this->pads_[1] : 0,
-             kernel_.size() == 2 ? this->pads_[2] : this->pads_[1],
-             kernel_.size() == 2 ? this->pads_[3] : 0});
+             this->kernel_.size() == 2 ? this->pads_[1] : 0,
+             this->kernel_.size() == 2 ? this->pads_[2] : this->pads_[1],
+             this->kernel_.size() == 2 ? this->pads_[3] : 0});
 
         PackAWithIm2Col<uint8_t> packA(
             conv_p,

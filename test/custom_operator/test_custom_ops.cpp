@@ -1,4 +1,5 @@
 #include <torch/script.h>
+#include <torch/cuda.h>
 
 #include "op.h"
 
