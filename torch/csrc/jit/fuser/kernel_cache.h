@@ -17,6 +17,9 @@ namespace torch { namespace jit { namespace fuser {
 // Stores the given graph, returning the key used to access it
 TORCH_API int64_t store(std::shared_ptr<Graph> graph);
 
+// Given a graph, find a KernelSpec based on it
+TORCH_API at::optional<KernelSpec*> lookupGraph(std::shared_ptr<Graph> graph);
+
 // Returns the graph corresponding to the given key (if it exists)
 TORCH_API at::optional<KernelSpec*> retrieve(const int64_t key);
 

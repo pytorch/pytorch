@@ -581,9 +581,9 @@ Value* Value::setUniqueName(const std::string & name) {
   return this;
 }
 
-Value* Value::copyMetadata(Value * from) {
+Value* Value::copyMetadata(Value * from, bool copy_unique_name) {
   setType(from->type());
-  if (from->hasUniqueName())
+  if (copy_unique_name && from->hasUniqueName())
     setUniqueName(from->uniqueName());
   return this;
 }
@@ -1412,11 +1412,15 @@ Node* Graph::createImplicitTensorToNum(const TypePtr& type, Value* value) {
   return result;
 }
 
-Node* Graph::createClone(Node * n, std::function<Value*(Value*)> value_map, bool copy_blocks) {
+Node* Graph::createClone(
+    Node * n,
+    std::function<Value*(Value*)> value_map,
+    bool copy_blocks,
+    bool copy_unique_names) {
   //n can be from a different graph
   Node * r = n->allocNewInstance(this);
   for(auto o : n->outputs()) {
-    r->addOutput()->copyMetadata(o);
+    r->addOutput()->copyMetadata(o, copy_unique_names);
   }
   r->cloneFrom(n);
   for(auto i : n->inputs()) {

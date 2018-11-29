@@ -188,7 +188,7 @@ public:
   //          %5 = h(%6, %6)
   TORCH_API void replaceAllUsesWith(Value * newValue);
 
-  TORCH_API Value* copyMetadata(Value * from);
+  TORCH_API Value* copyMetadata(Value * from, bool copy_unique_name=true);
 };
 
 
@@ -876,7 +876,9 @@ public:
   // use node_map to translate inputs of n to inputs of the cloned node
   // if copy_blocks is false, it will not recursively clone the nested blocks
   // this node contains.
-  TORCH_API Node * createClone(Node * n, std::function<Value*(Value*)> value_map, bool copy_blocks=true);
+  TORCH_API Node * createClone(
+      Node * n, std::function<Value*(Value*)> value_map,
+      bool copy_blocks=true, bool copy_unique_names=true);
 
   TORCH_API Value* insertConstant(
       IValue val,

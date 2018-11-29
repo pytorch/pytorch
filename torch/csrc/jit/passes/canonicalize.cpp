@@ -4,17 +4,21 @@ namespace torch { namespace jit {
 
 // Canonicalize a graph, renumbering it so that all structurally equivalent
 // graphs have same numbers.
-std::shared_ptr<Graph> Canonicalize(const std::shared_ptr<Graph>& graph) {
+// keep_unique_names: If false, removes unique names and renumbers those.
+//   Otherwise, ignores values with unique names.
+std::shared_ptr<Graph> Canonicalize(
+    const std::shared_ptr<Graph>& graph, bool keep_unique_names) {
   auto r = std::make_shared<Graph>(graph->current_scope());
   std::unordered_map<Value*, Value*> rn_env;
   auto rn_fn = [&](Value* v) { return rn_env.at(v); };
   for (auto* input : graph->inputs()) {
     auto* r_input = r->addInput();
-    r_input->copyMetadata(input);
+    r_input->copyMetadata(input, keep_unique_names);
     rn_env[input] = r_input;
   }
   for (auto* node : graph->nodes()) {
-    auto* r_node = r->createClone(node, rn_fn);
+    auto* r_node = r->createClone(
+        node, rn_fn, /*copy_blocks=*/true, keep_unique_names);
     r->appendNode(r_node);
     auto outputs = node->outputs();
     auto r_outputs = r_node->outputs();

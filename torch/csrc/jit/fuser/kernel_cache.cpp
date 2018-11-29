@@ -40,6 +40,20 @@ at::optional<KernelSpec*> retrieve(const int64_t key) {
   return &(it->second);
 }
 
+// XXX: This is O(n) where n = # of key-value pairs in the kernel cache.
+// Maybe we should make this average O(1) by adding a graph-to-key cache.
+at::optional<KernelSpec*> lookupGraph(std::shared_ptr<Graph> graph) {
+  auto& cache = getKernelCache();
+  std::lock_guard<std::mutex> guard{cache.mutex_};
+  std::string rep = graph->toString();
+  auto it = std::find_if(std::begin(cache.specMap_), std::end(cache.specMap_),
+      [&rep](const std::pair<const int64_t,KernelSpec>& kv) {
+        return kv.second.graph()->toString() == rep;
+      });
+  if (it == cache.specMap_.end()) return at::nullopt;
+  return &(it->second);
+}
+
 } // namespace fuser
 } // namespace jit
 } // namespace torch

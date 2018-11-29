@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/type.h>
 #include <torch/csrc/jit/code_template.h>
 #include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/fuser/kernel_cache.h>
@@ -132,11 +133,18 @@ static void upfrontCompilation(KernelSpec& spec) {
 }
 
 int64_t registerFusion(const Node* fusion_group) {
-  // Creates and stores the FusionSpec
-  auto graph = fusion_group->g(attr::Subgraph)->copy();
+  auto graph = Canonicalize(
+      fusion_group->g(attr::Subgraph), /*keep_unique_names=*/false);
   EraseShapeInformation(graph);
-  const auto key = store(graph);
 
+  // Don't re-register the fusion if we can use a pre-existing one
+  const auto maybe_spec = lookupGraph(graph);
+  if (maybe_spec) {
+    return (*maybe_spec)->key();
+  }
+
+  // Create and register the fusion
+  const auto key = store(graph);
   if (canFuseOnCPU() || canFuseOnGPU()) {
     const auto maybe_spec = retrieve(key);
     JIT_ASSERT(maybe_spec);
