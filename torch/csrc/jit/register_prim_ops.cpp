@@ -322,7 +322,7 @@ RegisterOperators reg({
             } else {
               int64_t num_splits = std::max<int64_t>((shape[dim] + split_size - 1) / split_size, 1);
               last_shape[dim] = split_size - (split_size * num_splits - shape[dim]);
-              JIT_ASERT(last_shape[dim] >= 0);
+              JIT_ASSERT(last_shape[dim] >= 0);
             }
             push(stack, std::move(regular_shape));
             push(stack, std::move(last_shape));
