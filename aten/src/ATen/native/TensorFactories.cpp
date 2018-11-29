@@ -9,7 +9,7 @@
 #include "ATen/CheckGenerator.h"
 #include "ATen/Dispatch.h"
 #include "ATen/NativeFunctions.h"
-#include "ATen/ScalarType.h"
+#include <c10/core/ScalarType.h>
 #include "ATen/core/Deprecated.h"
 #include "ATen/core/TensorOptions.h"
 #include <TH/THRandom.h>

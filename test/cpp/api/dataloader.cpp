@@ -15,9 +15,11 @@
 #include <iostream>
 #include <iterator>
 #include <limits>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 using namespace torch::data; // NOLINT
@@ -25,12 +27,16 @@ using namespace torch::data; // NOLINT
 const std::chrono::milliseconds kMillisecond(1);
 
 struct DummyDataset : datasets::Dataset<DummyDataset, int> {
+  explicit DummyDataset(size_t size = 100) : size_(size) {}
+
   int get(size_t index) override {
     return 1 + index;
   }
   torch::optional<size_t> size() const override {
-    return 100;
+    return size_;
   }
+
+  size_t size_;
 };
 
 TEST(DataTest, DatasetCallsGetCorrectly) {
@@ -201,6 +207,19 @@ TEST(DataTest, SequentialSamplerResetsWell) {
   ASSERT_FALSE(sampler.next(2).has_value());
 }
 
+TEST(DataTest, SequentialSamplerResetsWithNewSizeWell) {
+  samplers::SequentialSampler sampler(5);
+  ASSERT_EQ(sampler.next(5).value(), std::vector<size_t>({0, 1, 2, 3, 4}));
+  ASSERT_FALSE(sampler.next(2).has_value());
+  sampler.reset(7);
+  ASSERT_EQ(
+      sampler.next(7).value(), std::vector<size_t>({0, 1, 2, 3, 4, 5, 6}));
+  ASSERT_FALSE(sampler.next(2).has_value());
+  sampler.reset(3);
+  ASSERT_EQ(sampler.next(3).value(), std::vector<size_t>({0, 1, 2}));
+  ASSERT_FALSE(sampler.next(2).has_value());
+}
+
 TEST(DataTest, CanSaveAndLoadSequentialSampler) {
   {
     samplers::SequentialSampler a(10);
@@ -266,6 +285,18 @@ TEST(DataTest, RandomSamplerResetsWell) {
   ASSERT_FALSE(sampler.next(2).has_value());
 }
 
+TEST(DataTest, RandomSamplerResetsWithNewSizeWell) {
+  samplers::RandomSampler sampler(5);
+  ASSERT_EQ(sampler.next(5).value().size(), 5);
+  ASSERT_FALSE(sampler.next(2).has_value());
+  sampler.reset(7);
+  ASSERT_EQ(sampler.next(7).value().size(), 7);
+  ASSERT_FALSE(sampler.next(2).has_value());
+  sampler.reset(3);
+  ASSERT_EQ(sampler.next(3).value().size(), 3);
+  ASSERT_FALSE(sampler.next(2).has_value());
+}
+
 TEST(DataTest, SavingAndLoadingRandomSamplerYieldsSameSequence) {
   {
     samplers::RandomSampler a(10);
@@ -311,6 +342,18 @@ TEST(DataTest, StreamSamplerResetsWell) {
   ASSERT_FALSE(sampler.next(2).has_value());
   sampler.reset();
   ASSERT_EQ(sampler.next(5).value().size(), 5);
+  ASSERT_FALSE(sampler.next(2).has_value());
+}
+
+TEST(DataTest, StreamSamplerResetsWithNewSizeWell) {
+  samplers::StreamSampler sampler(/*epoch_size=*/5);
+  ASSERT_EQ(sampler.next(5).value().size(), 5);
+  ASSERT_FALSE(sampler.next(2).has_value());
+  sampler.reset(7);
+  ASSERT_EQ(sampler.next(7).value().size(), 7);
+  ASSERT_FALSE(sampler.next(2).has_value());
+  sampler.reset(3);
+  ASSERT_EQ(sampler.next(3).value().size(), 3);
   ASSERT_FALSE(sampler.next(2).has_value());
 }
 
@@ -539,6 +582,49 @@ TEST(DataTest, DataShuttlePopResultTimesOut) {
   ASSERT_THROWS_WITH(shuttle.pop_result(10 * kMillisecond), "Timeout");
 }
 
+struct UncopyableDataset : datasets::Dataset<UncopyableDataset, int> {
+  UncopyableDataset(const std::string& /* unused */) {}
+
+  UncopyableDataset(UncopyableDataset&&) = default;
+  UncopyableDataset& operator=(UncopyableDataset&&) = default;
+
+  UncopyableDataset(const UncopyableDataset&) = delete;
+  UncopyableDataset& operator=(const UncopyableDataset&) = delete;
+
+  int get(size_t index) override {
+    return 1 + index;
+  }
+  torch::optional<size_t> size() const override {
+    return 100;
+  }
+};
+
+TEST(DataTest, SharedBatchDatasetReallyIsShared) {
+  // This test will only compile if we really are not making any copies.
+  // There is otherwise no logic to test and because it is not deterministic
+  // how many and when worker threads access the shareddataset, we don't have
+  // any additional assertions here.
+
+  auto shared_dataset =
+      torch::data::datasets::make_shared_dataset<UncopyableDataset>(
+          "uncopyable");
+
+  auto data_loader = torch::data::make_data_loader(
+      shared_dataset, torch::data::DataLoaderOptions().workers(3));
+
+  for (auto batch : *data_loader) {
+    /* exhaust */
+  }
+}
+
+TEST(DataTest, SharedBatchDatasetDoesNotIncurCopyWhenPassedDatasetObject) {
+  // This will not compile if a copy is made.
+  auto shared_dataset =
+      torch::data::datasets::make_shared_dataset<UncopyableDataset>(
+          UncopyableDataset("uncopyable"));
+  ASSERT_EQ(shared_dataset.size().value(), 100);
+}
+
 struct TestIndex : public torch::data::samplers::CustomBatchRequest {
   explicit TestIndex(size_t offset, std::vector<size_t> index)
       : offset(offset), index(std::move(index)) {}
@@ -569,7 +655,7 @@ struct TestIndexDataset
 
 struct TestIndexSampler : public samplers::Sampler<TestIndex> {
   explicit TestIndexSampler(size_t size) : size_(size) {}
-  void reset() override {}
+  void reset(torch::optional<size_t> new_size = torch::nullopt) override {}
   torch::optional<TestIndex> next(size_t batch_size) override {
     if (index_ >= size_) {
       return torch::nullopt;
@@ -701,15 +787,43 @@ TEST(DataLoaderTest, IteratorsShareState) {
 TEST(DataLoaderTest, CanDereferenceIteratorMultipleTimes) {
   DummyDataset dataset;
   auto data_loader =
-      torch::data::make_data_loader(dataset, dataset.size().value());
-  auto i = data_loader->begin();
-  ASSERT_NE(i, data_loader->end());
-  ASSERT_EQ(i->size(), dataset.size().value());
-  ASSERT_NE(i, data_loader->end());
-  ASSERT_EQ(i->size(), dataset.size().value());
-  ASSERT_NE(i, data_loader->end());
-  ASSERT_EQ(i->size(), dataset.size().value());
-  ASSERT_EQ(++i, data_loader->end());
+      torch::data::make_data_loader<torch::data::samplers::SequentialSampler>(
+          dataset,
+          /*batch_size=*/1);
+  auto iterator = data_loader->begin();
+  std::vector<int> expected = {1};
+  ASSERT_EQ(*iterator, expected);
+  ASSERT_EQ(*iterator, expected);
+  ++iterator;
+  expected[0] = 2;
+  ASSERT_EQ(*iterator, expected);
+  ASSERT_EQ(*iterator, expected);
+  ++iterator;
+  expected[0] = 3;
+  ASSERT_EQ(*iterator, expected);
+  ASSERT_EQ(*iterator, expected);
+}
+
+TEST(DataLoaderTest, CanUseIteratorAlgorithms) {
+  struct D : datasets::BatchDataset<D, int> {
+    int get_batch(torch::ArrayRef<size_t> indices) override {
+      return 1 + indices.front();
+    }
+    torch::optional<size_t> size() const override {
+      return 10;
+    }
+  };
+
+  D dataset;
+  auto data_loader =
+      torch::data::make_data_loader<torch::data::samplers::SequentialSampler>(
+          dataset, 1);
+  std::vector<int> values;
+  std::copy(
+      data_loader->begin(), data_loader->end(), std::back_inserter(values));
+  std::vector<int> expected(dataset.size().value());
+  std::iota(expected.begin(), expected.end(), size_t(1));
+  ASSERT_EQ(values, expected);
 }
 
 TEST(DataLoaderTest, CallingBeginWhileOtherIteratorIsInFlightThrows) {

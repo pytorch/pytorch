@@ -7,7 +7,7 @@
 #include <ostream>
 #include <fstream>
 
-#include <ATen/core/Allocator.h>
+#include <c10/core/Allocator.h>
 #include <ATen/core/Backend.h>
 
 #include "caffe2/core/logging.h"
@@ -112,7 +112,7 @@ class PyTorchStreamReader final {
         file_size_ % kFieldAlignment == 0,
         "File length is not a multiple of the alignment"
         " size. Is this a valid PyTorch model file? File size: ",
-        caffe2::to_string(file_size_));
+        c10::to_string(file_size_));
     readAndValidateFileHeader();
   }
 
@@ -209,9 +209,9 @@ class PyTorchStreamReader final {
     AT_ASSERTM(
         file_format_version >= kMinSupportedFileFormatVersion,
         "Attempted to read a PyTorch file with version ",
-        caffe2::to_string(file_format_version),
+        c10::to_string(file_format_version),
         ", but the minimum supported version for reading is ",
-        caffe2::to_string(kMinSupportedFileFormatVersion),
+        c10::to_string(kMinSupportedFileFormatVersion),
         ". Your PyTorch script module file is too old. Please re-export it again.");
     AT_ASSERTM(
         file_format_version <= kMaxSupportedFileFormatVersion,

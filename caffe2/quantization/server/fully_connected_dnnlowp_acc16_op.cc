@@ -31,7 +31,7 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
 
   const auto& X = InputTensorCPU_(0);
   const auto& W = InputTensorCPU_(1);
-  auto *Y = OutputTensorCPU_(0);
+  auto* Y = OutputTensorCPU_(0);
   const auto canonical_axis = X.canonical_axis_index(axis_);
   const auto M = X.size_to_dim(canonical_axis);
   const auto K = X.size_from_dim(canonical_axis);
@@ -40,8 +40,8 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
 
   // Quantize X
   vector<uint8_t> X_temp;
-  const uint8_t* Xdata = QuantizeInputIfNeeded<uint8_t>(
-      this, 0, in_qparams_[0], X_temp, qfactory_.get());
+  const uint8_t* Xdata =
+      QuantizeInputIfNeeded<uint8_t>(this, 0, in_qparams_[0], X_temp);
 
   // Pack W if needed
   if (!Wq_acc16_packed_ || !is_weight_constant_) {
@@ -49,8 +49,7 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
       static int log_occurences = 0;
       if (log_occurences < 32) {
         ++log_occurences;
-        LOG(WARNING)
-            << "FC DNNLOWP_ACC16 using outlier-aware quantization";
+        LOG(WARNING) << "FC DNNLOWP_ACC16 using outlier-aware quantization";
       }
 
       // Separate out outliers
@@ -135,20 +134,20 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
         K,
         X_pack_buf_.data(),
         1, // group
-        in_qparams_[0].zero_point,
         row_offsets_.data());
 
     if (!dequantize_output_) {
       DoNothing<> doNothingObj{};
       ReQuantizeOutput<false /* fuse relu */> reqObj(
           doNothingObj,
-          requantization_params_.real_multiplier,
+          &requantization_params_.real_multiplier,
           out_qparams_.zero_point,
           in_qparams_[0].zero_point,
-          in_qparams_[1].zero_point,
+          &in_qparams_[1].zero_point,
           packA.getRowOffsetBuffer(),
           column_offsets_.data(),
-          this->b_quantized_data_);
+          this->b_quantized_data_,
+          N); // ncols per quant group
 
       if (nbits_in_non_outlier_ < 8) {
         DoSpmdmOnInpBuffer<
@@ -182,12 +181,13 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
       ReQuantizeForFloat<false /* FUSE_RELU*/> reqObj(
           doNothingObj,
           in_qparams_[0].scale,
-          in_qparams_[1].scale,
+          &in_qparams_[1].scale,
           in_qparams_[0].zero_point,
-          in_qparams_[1].zero_point,
+          &in_qparams_[1].zero_point,
           packA.getRowOffsetBuffer(),
           column_offsets_.data(),
-          this->b_dequantized_data_);
+          this->b_dequantized_data_,
+          N); // ncols per quant group
 
       if (nbits_in_non_outlier_ < 8) {
         DoSpmdmOnInpBuffer<
@@ -235,7 +235,7 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
 
         for (int j = 0; j < N; ++j) {
           Y_int32_[i * N + j] -=
-            in_qparams_[0].zero_point * column_offsets_[j] + row_offset;
+              in_qparams_[0].zero_point * column_offsets_[j] + row_offset;
           Ydata_float[i * N + j] = Y_int32_[i * N + j] * in_qparams_[0].scale *
                   in_qparams_[1].scale +
               b_dequantized_data_[j];
@@ -251,18 +251,19 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
         }
 
         requantize_u8acc32_ref(
-          1,
-          N,
-          N,
-          Y_int32_.data() + i * N,
-          Ydata + i * N,
-          requantization_params_.real_multiplier,
-          out_qparams_.zero_point,
-          in_qparams_[0].zero_point,
-          in_qparams_[1].zero_point,
-          &row_offset,
-          column_offsets_.data(),
-          b_quantized_.data());
+            1,
+            N,
+            N,
+            Y_int32_.data() + i * N,
+            Ydata + i * N,
+            &requantization_params_.real_multiplier,
+            out_qparams_.zero_point,
+            in_qparams_[0].zero_point,
+            &in_qparams_[1].zero_point,
+            &row_offset,
+            column_offsets_.data(),
+            b_quantized_.data(),
+            N); // ncols per quant group
       }
     }
   }
@@ -276,9 +277,13 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
 }
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-  FC, DNNLOWP_ACC16, FullyConnectedDNNLowPAcc16Op);
+    FC,
+    DNNLOWP_ACC16,
+    FullyConnectedDNNLowPAcc16Op);
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-  Int8FC, DNNLOWP_ACC16, FullyConnectedDNNLowPAcc16Op);
+    Int8FC,
+    DNNLOWP_ACC16,
+    FullyConnectedDNNLowPAcc16Op);
 
 } // namespace caffe2

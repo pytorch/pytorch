@@ -1,13 +1,12 @@
-#ifndef DNNLOWP_L2_MINIMIZATION_H
-#define DNNLOWP_L2_MINIMIZATION_H
+#pragma once
 
 #include "quantization_error_minimization.h"
 
 #include <algorithm>
-#include <limits>
 #include <cassert>
-#include <iostream>
 #include <cmath>
+#include <iostream>
+#include <limits>
 
 namespace dnnlowp {
 
@@ -16,8 +15,10 @@ namespace dnnlowp {
  */
 class L2ErrorMinimization : public NormMinimization {
  public:
-  L2ErrorMinimization() : NormMinimization(L2) { };
+  L2ErrorMinimization() : NormMinimization(L2){};
 };
+
+namespace internal {
 
 float L2MinimizationKernelAVX2(
     int precision,
@@ -27,6 +28,6 @@ float L2MinimizationKernelAVX2(
     float dst_bin_width,
     int start_bin);
 
-} // namespace dnnlowp
+} // namespace internal
 
-#endif // DNNLOWP_L2_MINIMIZATION_H
+} // namespace dnnlowp

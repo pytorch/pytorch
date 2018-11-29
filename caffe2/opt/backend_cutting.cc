@@ -44,8 +44,8 @@ void DumpGraph(NNGraph* g) {
     assert(node->data() && "Node doesn't have data, can't render it");
     if (isa<NeuralNetOperator>(node->data())) {
       auto* op = dyn_cast<NeuralNetOperator>(node->data().get());
-      labelMap["label"] = op->getName() + " (" +
-          caffe2::to_string((unsigned long long)node) + ")";
+      labelMap["label"] =
+          op->getName() + " (" + c10::to_string((unsigned long long)node) + ")";
       auto* annotation = op->getAnnotation();
       if (annotation && isa<Caffe2Annotation>(annotation)) {
         auto device_annotation = dyn_cast<Caffe2Annotation>(annotation);
@@ -60,8 +60,8 @@ void DumpGraph(NNGraph* g) {
     } else if (isa<Data>(node->data())) {
       auto tensor = dyn_cast<NeuralNetData>(node->data().get());
       labelMap["label"] = tensor->getName();
-      labelMap["label"] += "_" + caffe2::to_string(tensor->getVersion()) + " " +
-          caffe2::to_string((unsigned long long)node);
+      labelMap["label"] += "_" + c10::to_string(tensor->getVersion()) + " " +
+          c10::to_string((unsigned long long)node);
     }
     return labelMap;
   };
