@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ATen/core/ATenGeneral.h"
-#include "c10/core/Allocator.h"
+#include <c10/core/Allocator.h>
 #include "ATen/core/Deprecated.h"
 #include "ATen/core/Generator.h"
 #include "ATen/core/Layout.h"
@@ -30,7 +30,6 @@
 #endif
 
 namespace c10 {
-struct Allocator;
 struct Storage;
 }
 
