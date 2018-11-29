@@ -10061,6 +10061,18 @@ nn_functional_single_grad = frozenset('test_nn_' + name for name in [
 ])
 
 
+# additional modules test
+# TODO: delete this list once we make all nn_tests work
+additional_module_tests = [
+    dict(
+        module_name='BatchNorm1d',
+        constructor_args=(10, 1e-3, 0.3, False),
+        input_size=(4, 10),
+        desc='not_affine',
+    ),
+]
+
+
 def add_autograd_test(
         name,
         self_size,
@@ -10441,7 +10453,7 @@ for test in autograd_method_tests:
 for test in nn_functional_tests:
     add_nn_functional_test(*test)
 
-for test in module_tests + new_module_tests:
+for test in module_tests + new_module_tests + additional_module_tests:
     add_nn_module_test(**test)
 
 if __name__ == '__main__':

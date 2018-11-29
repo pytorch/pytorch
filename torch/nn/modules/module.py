@@ -144,7 +144,8 @@ class Module(object):
             raise KeyError("attribute '{}' already exists".format(name))
 
         if param is None:
-            self._parameters[name] = None
+            setattr(self, name, None)
+            # self._parameters[name] = None
         elif not isinstance(param, Parameter):
             raise TypeError("cannot assign '{}' object to parameter '{}' "
                             "(torch.nn.Parameter or None required)"
