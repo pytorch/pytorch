@@ -181,7 +181,7 @@ class LowRankMultivariateNormal(Distribution):
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        W_shape = shape[:-1] + self.loc.shape[-1:]
+        W_shape = shape[:-1] + self.cov_factor.shape[-1:]
         eps_W = _standard_normal(W_shape, dtype=self.loc.dtype, device=self.loc.device)
         eps_D = _standard_normal(shape, dtype=self.loc.dtype, device=self.loc.device)
         return (self.loc + _batch_mv(self._unbroadcasted_cov_factor, eps_W)
