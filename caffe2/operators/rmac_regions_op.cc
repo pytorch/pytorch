@@ -58,7 +58,7 @@ bool RMACRegionsOp<CPUContext>::RunOnDevice() {
         (l + Hd - 1 > 0) ? ((H - region_size) / (1.0 * (l + Hd - 1))) : 0;
 
     int cur_rows = output->dim32(0);
-    output->Extend((l + Wd) * (l + Hd), 50, &context_);
+    output->Extend((l + Wd) * (l + Hd), 50);
     auto* outputData = output->template mutable_data<float>() + cur_rows * 5;
 
     for (int i = 0; i < l + Wd; ++i) {
@@ -87,7 +87,7 @@ bool RMACRegionsOp<CPUContext>::RunOnDevice() {
 
   // Replicate regions for all items in batch
   int num_rois = output->dim32(0);
-  output->Extend((batch_size - 1) * num_rois, 50, &context_);
+  output->Extend((batch_size - 1) * num_rois, 50);
   auto* outputData = output->template mutable_data<float>();
   for (int b = 1; b < batch_size; ++b) {
     // Copy all rois
