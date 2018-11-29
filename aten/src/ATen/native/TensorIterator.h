@@ -206,6 +206,9 @@ struct CAFFE2_API TensorIterator {
   /// reductions.
   bool should_accumulate() const { return accumulate_; }
 
+  /// If the kernel should promote the output type.
+  bool should_promote_output() const { return promote_output_types_; }
+
 protected:
   void mark_outputs();
   void compute_shape();
@@ -228,6 +231,7 @@ protected:
   bool is_reduction_ = false;
   bool compute_common_dtype_ = true;
   bool allow_cpu_scalars_ = false;
+  bool promote_output_types_ = false;
 };
 
 struct TensorIterator::Builder {
@@ -246,6 +250,10 @@ struct TensorIterator::Builder {
 
   void dont_compute_common_dtype() {
     iter_->compute_common_dtype_ = false;
+  }
+
+  void promote_output_types() {
+    iter_->promote_output_types_ = true;
   }
 
   void dont_resize_outputs() {

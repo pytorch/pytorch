@@ -475,6 +475,7 @@ std::unique_ptr<TensorIterator> TensorIterator::reduce_op(Tensor& out, const Ten
   auto builder = TensorIterator::Builder();
   builder.add_output(out);
   builder.add_input(a);
+  builder.dont_compute_common_dtype();
   builder.iter_->resize_outputs_ = false;
   builder.iter_->is_reduction_ = true;
   return builder.build();
