@@ -106,7 +106,8 @@ DIM_TEST_SCENARIOS = [
     ((50, 50, 50), (1, -1)),
     ((50, 50, 50), (0, 2)),
     ((50, 50, 50), (0, 2, 1)),
-];
+]
+
 
 # This is intentionally prefixed by an underscore. Otherwise pytest will try to
 # run its methods as test cases.
@@ -1942,7 +1943,7 @@ class _TestTorchMixin(object):
         self.assertEqual(n.shape, t.shape)
         if t.dtype == torch.float:
             self.assertTrue(np.allclose(n, t.numpy(), rtol=1e-03, atol=1e-05,
-                equal_nan=True))
+                            equal_nan=True))
         else:
             self.assertTrue(np.allclose(n, t.numpy(), equal_nan=True))
 
@@ -1955,7 +1956,7 @@ class _TestTorchMixin(object):
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
                     expected = numpy_op(tensor.numpy(), dim)
-                actual = pytorch_op(tensor, dim);
+                actual = pytorch_op(tensor, dim)
                 self._assert_matches_numpy(actual, expected)
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
