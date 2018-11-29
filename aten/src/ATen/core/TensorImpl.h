@@ -588,7 +588,11 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * See Note [Tensor versus Variable in C++].
    */
   virtual void set_requires_grad(bool requires_grad) {
-    AT_ERROR("set_requires_grad is not implemented for Tensor");
+    if (autograd_meta()) {
+      autograd_meta()->set_requires_grad(requires_grad);
+    } else {
+      AT_ERROR("set_requires_grad is not implemented for Tensor");
+    }
   }
 
   /**
@@ -602,7 +606,11 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * See Note [Tensor versus Variable in C++].
    */
   virtual bool requires_grad() const {
-    AT_ERROR("requires_grad is not implemented for Tensor");
+    if (autograd_meta()) {
+      return autograd_meta()->requires_grad();
+    } else {
+      AT_ERROR("requires_grad is not implemented for Tensor");
+    }
   }
 
   /**
@@ -904,14 +912,14 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * Set the pointer to autograd metadata.
    */
-  void set_autograd_meta(void* autograd_meta) {
+  void set_autograd_meta(AutogradMetaInterface* autograd_meta) {
     autograd_meta_ = autograd_meta;
   }
 
   /**
    * Return the pointer to autograd metadata.
    */
-  void* autograd_meta() const {
+  AutogradMetaInterface* autograd_meta() const {
     return autograd_meta_;
   }
 
@@ -1493,7 +1501,7 @@ protected:
   // because we don't want to expose autograd types to libATen.
   // This pointer always has unique ownership (meaning only one TensorImpl can own it
   // at a time).
-  void* autograd_meta_ = nullptr;
+  at::AutogradMetaInterface* autograd_meta_ = nullptr;
 
   // We could save a word or two by combining the SmallVector structs,
   // since their size is redundant, and if we need to overflow the buffer space

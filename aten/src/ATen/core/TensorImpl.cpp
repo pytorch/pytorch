@@ -10,11 +10,19 @@
 namespace at {
 
 Tensor& TensorImpl::grad() {
-  AT_ERROR("grad is not implemented for Tensor");
+  if (autograd_meta()) {
+    return autograd_meta()->grad();
+  } else {
+    AT_ERROR("grad is not implemented for Tensor");
+  }
 }
 
 const Tensor& TensorImpl::grad() const {
-  AT_ERROR("grad is not implemented for Tensor");
+  if (autograd_meta()) {
+    return autograd_meta()->grad();
+  } else {
+    AT_ERROR("grad is not implemented for Tensor");
+  }
 }
 
 TensorImpl::TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, Allocator *allocator, bool is_variable)

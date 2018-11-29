@@ -293,7 +293,7 @@ struct TORCH_API Variable : public at::Tensor {
 //                            Variable::AutogradMeta
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-struct TORCH_API Variable::AutogradMeta {
+struct TORCH_API Variable::AutogradMeta : public at::AutogradMetaInterface {
   std::string name;
 
   Variable grad_;
@@ -319,8 +319,6 @@ struct TORCH_API Variable::AutogradMeta {
   // state are still thread-safe. Used by grad_fn and
   // grad_accumulator.
   std::mutex mutex_;
-
-  virtual ~AutogradMeta() {}
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

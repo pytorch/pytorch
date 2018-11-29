@@ -9,6 +9,16 @@ namespace at {
   struct Type;
 }
 
+namespace at {
+struct AutogradMetaInterface {
+  virtual void set_requires_grad(bool requires_grad) = 0;
+  virtual bool requires_grad() const = 0;
+  virtual Tensor& grad() = 0;
+  virtual const Tensor& grad() const = 0;
+  virtual ~AutogradMetaInterface() = 0;
+};
+}
+
 // NB: Registry class not actually in the namespace detail, due to limitations
 // of Registry.h
 namespace at {
