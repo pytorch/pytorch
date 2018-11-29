@@ -265,7 +265,6 @@ class DistributedDataParallel(Module):
         self._check_default_group()
         attrs = copy.copy(self.__dict__)
         del attrs['process_group'], \
-            attrs['allreduce_opts'], \
             attrs['default_streams'], \
             attrs['_grad_accs']
         return attrs
@@ -349,8 +348,6 @@ class DistributedDataParallel(Module):
         for dev_id in self.device_ids:
             with torch.cuda.device(dev_id):
                 self.default_streams.append(torch.cuda.current_stream())
-
-        self.allreduce_opts = dist.AllreduceOptions()
 
         for device_idx, module in enumerate(self._module_copies):
             for p in module.parameters():

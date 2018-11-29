@@ -272,22 +272,56 @@ template <class T> Vec256<T> inline operator/(const Vec256<T> &a, const Vec256<T
   return c;
 }
 
-
-template <class T> Vec256<T> inline max(const Vec256<T> &a, const Vec256<T> &b) {
+// Implements the IEEE 754 201X `maximum` operation, which propagates NaN if
+// either input is a NaN.
+template <class T> Vec256<T> inline maximum(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size; i++) {
-    c[i] = std::max(a[i], b[i]);
+    c[i] = (a[i] > b[i]) ? a[i] : b[i];
+    if (std::is_floating_point<T>::value && std::isnan(a[i])) {
+      // If either input is NaN, propagate a NaN.
+      // NOTE: The case where b[i] was NaN is handled correctly by the naive
+      // ternary operator above.
+      c[i] = a[i];
+    }
   }
   return c;
 }
 
-template <class T> Vec256<T> inline min(const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
-  for (int i = 0; i != Vec256<T>::size; i++) {
-    c[i] = std::min(a[i], b[i]);
+template <typename T>
+inline T maximum(const T& a, const T& b) {
+  T c = (a > b) ? a : b;
+  if (std::is_floating_point<T>::value && std::isnan(a)) {
+    c = a;
   }
   return c;
 }
+
+// Implements the IEEE 754 201X `minimum` operation, which propagates NaN if
+// either input is a NaN.
+template <class T> Vec256<T> inline minimum(const Vec256<T> &a, const Vec256<T> &b) {
+  Vec256<T> c = Vec256<T>();
+  for (int i = 0; i != Vec256<T>::size; i++) {
+    c[i] = (a[i] < b[i]) ? a[i] : b[i];
+    if (std::is_floating_point<T>::value && std::isnan(a[i])) {
+      // If either input is NaN, propagate a NaN.
+      // NOTE: The case where b[i] was NaN is handled correctly by the naive
+      // ternary operator above.
+      c[i] = a[i];
+    }
+  }
+  return c;
+}
+
+template <typename T>
+inline T minimum(const T& a, const T& b) {
+  T c = (a < b) ? a : b;
+  if (std::is_floating_point<T>::value && std::isnan(a)) {
+    c = a;
+  }
+  return c;
+}
+
 
 #define DEFINE_BITWISE_OP(op)                                               \
 template <class T>                                                          \

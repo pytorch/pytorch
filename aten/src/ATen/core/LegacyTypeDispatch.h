@@ -24,7 +24,7 @@
 // pay for a hash table lookup every time we do an operation.
 
 #include <ATen/core/Backend.h>
-#include <ATen/core/ScalarType.h>
+#include <c10/core/ScalarType.h>
 #include <ATen/core/VariableHooksInterface.h>
 #include <c10/util/Exception.h>
 
@@ -37,6 +37,9 @@ struct CAFFE2_API LegacyTypeInitInterface {
   }
   virtual void initCUDA() const {
     AT_ERROR("cannot use CUDA without ATen CUDA library");
+  }
+  virtual void initHIP() const {
+    AT_ERROR("cannot use HIP without ATen HIP library");
   }
   virtual void initComplex() const {
     AT_ERROR("cannot use complex without ATen Complex library");
@@ -134,6 +137,10 @@ private:
     } else if (p == DeviceType::CUDA) {
       std::call_once(cuda_once, [] {
         getLegacyTypeInit().initCUDA();
+      });
+    } else if (p == DeviceType::HIP) {
+      std::call_once(cuda_once, [] {
+        getLegacyTypeInit().initHIP();
       });
     }
   }

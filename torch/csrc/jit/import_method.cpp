@@ -20,11 +20,22 @@ struct ModuleAccessorValue : public script::SugaredValue {
       return std::make_shared<script::SimpleValue>(m.get_or_add_parameter(v->slot()));
     } else if(script::Method* m = module->find_method(field)) {
       return std::make_shared<script::MethodValue>(module, *m);
+    } else {
+      throw script::ErrorReport(loc) << "unknown attr: " << field;
     }
-    return script::SugaredValue::attr(loc, m, field);
   }
 private:
   std::shared_ptr<script::Module> module;
+};
+
+struct ConstantValue : public script::SugaredValue {
+  ConstantValue(IValue value)
+  : value_(std::move(value)) {}
+  IValue value_;
+  std::string kind() const override { return "constant"; }
+  Value * asValue(SourceRange loc, script::Method & m) override {
+    return m.graph()->insertConstant(value_);
+  }
 };
 
 // This value maps attributes CONSTANTS.c0 CONSTANTS.c1 to entries
@@ -70,33 +81,27 @@ static size_t parseVersionNumber(script::Lexer& L) {
    return size_t(version.asIntegral());
 }
 
-void import_method(const std::shared_ptr<script::Module>& mod, const std::string& src, const std::vector<at::Tensor>& constant_table) {
+void import_methods(const std::shared_ptr<script::Module>& mod, const std::string& src, const std::vector<at::Tensor>& constant_table) {
   script::Parser p(src);
 
   size_t version = parseVersionNumber(p.lexer());
-  auto aten = std::make_shared<script::BuiltinModule>("aten", version);
-  auto prim = std::make_shared<script::BuiltinModule>("prim", version);
-  auto constants = std::make_shared<ConstantTableValue>(constant_table);
-  auto fork = std::make_shared<script::ForkValue>();
-  auto annotate = std::make_shared<script::AnnotateValue>();
+
+  std::unordered_map<std::string, std::shared_ptr<script::SugaredValue>> env = {
+    {"aten", std::make_shared<script::BuiltinModule>("aten", version)},
+    {"prim", std::make_shared<script::BuiltinModule>("prim", version)},
+    {"CONSTANTS", std::make_shared<ConstantTableValue>(constant_table)},
+    {"fork", std::make_shared<script::ForkValue>()},
+    {"annotate", std::make_shared<script::AnnotateValue>()},
+    {"inf", std::make_shared<ConstantValue>(std::numeric_limits<double>::infinity())},
+    {"nan", std::make_shared<ConstantValue>(std::numeric_limits<double>::quiet_NaN())},
+  };
 
   auto resolver = [&](const std::string& name, script::Method& m, const SourceRange& loc)
   -> std::shared_ptr<script::SugaredValue> {
-    if(name == "aten")
-      return aten;
-    if (name == "prim")
-      return prim;
-    if (name == "CONSTANTS")
-      return constants;
-    if (name == "fork")
-      return fork;
-    if (name == "annotate")
-      return annotate;
-    if (name == "inf") {
-      return std::make_shared<script::SimpleValue>(
-          m.graph()->insertConstant(std::numeric_limits<float>::infinity()));
-    }
-    return nullptr;
+    auto it = env.find(name);
+    if (it == env.end())
+      return nullptr;
+    return it->second;
   };
 
   std::vector<script::Def> definitions;

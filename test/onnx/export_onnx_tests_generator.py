@@ -99,7 +99,8 @@ def convert_tests(testcases, sets=1):
         try:
             input = gen_input(t)
             f = io.BytesIO()
-            torch.onnx._export(module, input, f)
+            torch.onnx._export(module, input, f,
+                               operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
             onnx_model = onnx.load_from_string(f.getvalue())
             onnx.checker.check_model(onnx_model)
             onnx.helper.strip_doc_string(onnx_model)

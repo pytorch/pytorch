@@ -24,7 +24,7 @@ namespace caffe2 {
 
 template <typename T>
 class BatchMatMulDNNLowPOp final
-  : public DNNLowPOp<T, BatchMatMulOp<CPUContext>> {
+    : public DNNLowPOp<T, BatchMatMulOp<CPUContext>> {
  public:
   BatchMatMulDNNLowPOp(const OperatorDef& operator_def, Workspace* ws);
   bool RunOnDevice() override;
