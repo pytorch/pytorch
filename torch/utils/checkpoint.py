@@ -21,20 +21,18 @@ def check_backward_validity(inputs):
         warnings.warn("None of the inputs have requires_grad=True. Gradients will be None")
 
 
-# We can't know if the run_fn will internally move some args to a device
-# other than the current device, which would require logic to preserve
-# rng states for those devices as well.  We could paranoically stash and restore
-# ALL the rng states for all visible devices, but that seems very wasteful for
-# most cases.  Compromise:  Stash the RNG state for the current device as well as
+# We can't know if the run_fn will internally move some args to different devices,
+# which would require logic to preserve rng states for those devices as well.
+# We could paranoically stash and restore ALL the rng states for all visible devices,
+# but that seems very wasteful for most cases.  Compromise:  Stash the RNG state for
 # the device of all Tensor args.
 #
 # To consider:  maybe get_device_states and set_device_states should reside in torch/random.py?
 def get_device_states(*args):
     # This will not error out if "arg" is a CPU tensor or a non-tensor type because
-    # the if statements short-circuit.
-    arg_devices = list(arg.get_device() for arg in args
-                       if isinstance(arg, torch.Tensor) and arg.is_cuda)
-    fwd_gpu_devices = list(set([torch.cuda.current_device()] + arg_devices))
+    # the conditionals short-circuit.
+    fwd_gpu_devices = list(set(arg.get_device() for arg in args
+                               if isinstance(arg, torch.Tensor) and arg.is_cuda))
 
     fwd_gpu_states = []
     for device in fwd_gpu_devices:
