@@ -164,21 +164,9 @@ struct CAFFE2_API Type {
   /// Constructs the `TensorOptions` from a type and a `device_index`.
   TensorOptions options(int16_t device_index = -1) const {
     return TensorOptions().dtype(typeMeta())
-                          .device(device_type(), device_index)
+                          .device(backendToDeviceType(backend()), device_index)
                           .layout(layout())
                           .is_variable(is_variable());
-  }
-
-  /// Constructs the `TensorOptions` from a type and a Device.  Asserts that
-  /// the device type matches the device type of the type.
-  TensorOptions options(optional<Device> device_opt) const {
-    if (!device_opt.has_value()) {
-      return options(-1);
-    } else {
-      Device device = device_opt.value();
-      AT_ASSERT(device.type() == device_type());
-      return options(device.index());
-    }
   }
 
   operator TensorOptions() const {
@@ -305,9 +293,9 @@ struct CAFFE2_API Type {
   virtual Tensor max_values(const Tensor & self, int64_t dim, bool keepdim) const = 0;
   virtual Tensor mean(const Tensor & self, ScalarType dtype) const = 0;
   virtual Tensor mean(const Tensor & self) const = 0;
-  virtual Tensor mean(const Tensor & self, int64_t dim, bool keepdim, ScalarType dtype) const = 0;
-  virtual Tensor mean(const Tensor & self, int64_t dim, bool keepdim) const = 0;
-  virtual Tensor mean(const Tensor & self, int64_t dim, ScalarType dtype) const = 0;
+  virtual Tensor mean(const Tensor & self, IntList dim, bool keepdim, ScalarType dtype) const = 0;
+  virtual Tensor mean(const Tensor & self, IntList dim, bool keepdim) const = 0;
+  virtual Tensor mean(const Tensor & self, IntList dim, ScalarType dtype) const = 0;
   virtual std::tuple<Tensor,Tensor> median(const Tensor & self, int64_t dim, bool keepdim) const = 0;
   virtual std::tuple<Tensor,Tensor> min(const Tensor & self, int64_t dim, bool keepdim) const = 0;
   virtual Tensor min_values(const Tensor & self, int64_t dim, bool keepdim) const = 0;

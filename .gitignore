@@ -192,9 +192,6 @@ MANIFEST-*
 # generated version file
 caffe2/version.py
 
-# generated caffe2 docs
-docs/caffe2/
-
 # setup.py intermediates
 .eggs
 caffe2.egg-info
@@ -224,6 +221,3 @@ TAGS
 # Files generated when a patch is rejected
 *.orig
 *.rej
-
-# virtual environments
-venv/
