@@ -678,15 +678,20 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
 
           getOrCreateFuture();
 
-          InterpreterState state(intrusive_from_this());
-          e.future->addCallback([state](){
-            c10::global_work_queue.schedule(InterpreterContinuation(state, Stack()));
-          });
-
           if (get(inst.inputs.free_flags, 0)) {
             // make sure the register is not freed once we are waked up
             registers[get(inst.inputs.values, 0)] = e.future;
           }
+
+          // Make sure adding callback is the last step.
+          // Otherwise if e.future has completed,
+          // the current thread will continue running before it suspends.
+          InterpreterState state(intrusive_from_this());
+          e.future->addCallback([state]() {
+            c10::global_work_queue().run(
+                InterpreterContinuation(state, Stack()));
+          });
+
           return true;
         } catch(std::exception & e) {
           if (!instructions[pc].debug_location) {

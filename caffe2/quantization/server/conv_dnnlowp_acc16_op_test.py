@@ -11,7 +11,6 @@ from caffe2.quantization.server import utils as dnnlowp_utils
 from dnnlowp_test_utils import (
     check_quantized_results_close,
     generate_conv_inputs,
-    nchw2nhwc,
     nhwc2nchw,
 )
 from hypothesis import assume, given
@@ -62,8 +61,7 @@ class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         gc,
         dc,
     ):
-        if group > 1:
-            dilation = 1
+        assume(group == 1 or dilation == 1)
         assume(size >= dilation * (kernel - 1) + 1)
 
         input_channels = input_channels_per_group * group
@@ -244,8 +242,7 @@ class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         gc,
         dc,
     ):
-        if group > 1:
-            dilation = 1
+        assume(group == 1 or dilation == 1)
         assume(size >= dilation * (kernel - 1) + 1)
 
         input_channels = input_channels_per_group * group

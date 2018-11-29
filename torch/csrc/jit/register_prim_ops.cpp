@@ -199,12 +199,32 @@ RegisterOperators reg({
           };
         }),
     Operator(
+        "prim::requires_grad(Tensor a) -> bool",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            at::Tensor a;
+            pop(stack, a);
+            push(stack, a.requires_grad());
+            return 0;
+          };
+        }),
+    Operator(
         "prim::shape(Tensor a) -> int[]",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             at::Tensor a;
             pop(stack, a);
             push(stack, a.sizes());
+            return 0;
+          };
+        }),
+    Operator(
+        "prim::is_cuda(Tensor a) -> bool",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            at::Tensor a;
+            pop(stack, a);
+            push(stack, a.is_cuda());
             return 0;
           };
         }),
@@ -539,7 +559,7 @@ RegisterOperators reg({
 
             push(stack, forked_interprester.getFuture());
 
-            c10::global_work_queue.schedule(std::move(continuation));
+            c10::global_work_queue().run(std::move(continuation));
             return 0;
           };
         }),
@@ -699,6 +719,37 @@ Operation listEq(const Node* node) {
   };
 }
 
+template <typename T>
+Operation listNe(const Node* node) {
+  return [=](Stack& stack) {
+    T a;
+    T b;
+    pop(stack, a, b);
+    push(stack, !(a->elements() == b->elements()));
+    return 0;
+  };
+}
+
+inline bool tensor_list_equal(Shared<TensorList> a, Shared<TensorList> b) {
+  if (a->elements().size() != b->elements().size()) {
+    return false;
+  }
+
+  for (size_t i = 0; i < a->elements().size(); ++i) {
+    const auto& a_element = a->elements()[i];
+    const auto& b_element = b->elements()[i];
+    // This preserves Python's semantics, which uses eq() to compare two
+    // elements, then passes the result to bool().
+    // see: https://docs.python.org/3.4/reference/datamodel.html#object.__ge__
+    const auto cmp_result = a_element.eq(b_element);
+    if (!cmp_result.is_nonzero()) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 // Specialization for at::Tensor, since it doesn't define operator==
 template <>
 Operation listEq<Shared<TensorList>>(const Node* node) {
@@ -706,25 +757,19 @@ Operation listEq<Shared<TensorList>>(const Node* node) {
     Shared<TensorList> a;
     Shared<TensorList> b;
     pop(stack, a, b);
-    if (a->elements().size() != b->elements().size()) {
-      push(stack, false);
-      return 0;
-    }
+    push(stack, tensor_list_equal(a, b));
+    return 0;
+  };
+}
 
-    for (size_t i = 0; i < a->elements().size(); ++i) {
-      const auto& a_element = a->elements()[i];
-      const auto& b_element = b->elements()[i];
-      // This preserves Python's semantics, which uses eq() to compare two
-      // elements, then passes the result to bool().
-      // see: https://docs.python.org/3.4/reference/datamodel.html#object.__ge__
-      const auto cmp_result = a_element.eq(b_element);
-      if (!cmp_result.is_nonzero()) {
-        push(stack, false);
-        return 0;
-      }
-    }
-
-    push(stack, true);
+// Specialization for at::Tensor, since it doesn't define operator==
+template <>
+Operation listNe<Shared<TensorList>>(const Node* node) {
+  return [=](Stack& stack) {
+    Shared<TensorList> a;
+    Shared<TensorList> b;
+    pop(stack, a, b);
+    push(stack, !tensor_list_equal(a, b));
     return 0;
   };
 }
@@ -833,17 +878,30 @@ Operator(                                                                      \
         return 0;
       }
     ),
-#define CREATE_LIST_OPS(decl_type, c_type) \
+    Operator(
+        "aten::append(Tensor[](a!) self, Tensor(c) el) -> Tensor[](a!)",
+        listAppend<Shared<TensorList>, at::Tensor>),
+    Operator("aten::select(Tensor[](a) list, int idx) -> Tensor(*)", listSelect<Shared<TensorList>>),
+    Operator("aten::_set_item(Tensor[](a!) l, int idx, Tensor el) -> Tensor[](a!)", listSetItem<Shared<TensorList>, at::Tensor>),
+
+  // Mutable ops for lists containing immutable types.
+#define CREATE_IMMUTABLE_LIST_OPS(decl_type, c_type) \
     Operator("aten::select(" decl_type "[] a, int b) -> " decl_type, listSelect<Shared<c_type>>), \
+    Operator( \
+        "aten::append(" decl_type "[](a!) self, " decl_type " el) -> " decl_type "[](a!)", \
+        listAppend<Shared<c_type>, c_type::ElemType>), \
     Operator("aten::_set_item(" decl_type "[](a!) l, int idx, " decl_type " el) -> " decl_type"[](a!)", listSetItem<Shared<c_type>, c_type::ElemType>), \
+
+    CREATE_IMMUTABLE_LIST_OPS("int", IntList)
+    CREATE_IMMUTABLE_LIST_OPS("float", DoubleList)
+    CREATE_IMMUTABLE_LIST_OPS("t", GenericList)
+
+#define CREATE_LIST_OPS(decl_type, c_type) \
     Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>), \
     Operator("aten::add(" decl_type "[] a, " decl_type "[] b) -> " decl_type "[]", listAdd<Shared<c_type>, c_type::ElemType>), \
     Operator( \
         "aten::slice(" decl_type "[] l, int start, int end=9223372036854775807, int step=1) -> " decl_type "[]", \
         listSlice<Shared<c_type>, c_type::ElemType>), \
-    Operator( \
-        "aten::append(" decl_type "[](a!) self, " decl_type " el) -> " decl_type "[](a!)", \
-        listAppend<Shared<c_type>, c_type::ElemType>), \
 
 
     CREATE_LIST_OPS("int", IntList)
@@ -856,6 +914,10 @@ Operator(                                                                      \
     Operator("aten::eq(int[] a, int[] b) -> bool", listEq<Shared<IntList>>),
     Operator("aten::eq(float[] a, float[] b) -> bool", listEq<Shared<DoubleList>>),
     Operator("aten::eq(Tensor[] a, Tensor[] b) -> bool", listEq<Shared<TensorList>>),
+    Operator("aten::ne(int[] a, int[] b) -> bool", listNe<Shared<IntList>>),
+    Operator("aten::ne(float[] a, float[] b) -> bool", listNe<Shared<DoubleList>>),
+    Operator("aten::ne(Tensor[] a, Tensor[] b) -> bool", listNe<Shared<TensorList>>),
+
 
 #define CREATE_COPY_OP(other_type, c_type)                              \
   Operator(                                                             \

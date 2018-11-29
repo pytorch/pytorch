@@ -527,7 +527,7 @@ class BCEWithLogitsLoss(_Loss):
 
     For example, if a dataset contains 100 positive and 300 negative examples of a single class,
     then `pos_weight` for the class should be equal to :math:`\frac{300}{100}=3`.
-    The loss would act as if the dataset contains math:`3\times 100=300` positive examples.
+    The loss would act as if the dataset contains :math:`3\times 100=300` positive examples.
 
     Args:
         weight (Tensor, optional): a manual rescaling weight given to the loss

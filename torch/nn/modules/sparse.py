@@ -4,8 +4,10 @@ from torch.nn.parameter import Parameter
 from .module import Module
 from .. import functional as F
 from .. import init
+from torch._jit_internal import weak_module, weak_script, weak_script_method
 
 
+@weak_module
 class Embedding(Module):
     r"""A simple lookup table that stores embeddings of a fixed dictionary and size.
 
@@ -75,9 +77,11 @@ class Embedding(Module):
                  [ 0.0000,  0.0000,  0.0000],
                  [-0.1655,  0.9897,  0.0635]]])
     """
+    __constants__ = ['num_embeddings', 'embedding_dim', 'padding_idx', 'max_norm',
+                     'norm_type', 'scale_grad_by_freq', 'sparse', '_weight']
 
     def __init__(self, num_embeddings, embedding_dim, padding_idx=None,
-                 max_norm=None, norm_type=2, scale_grad_by_freq=False,
+                 max_norm=None, norm_type=2., scale_grad_by_freq=False,
                  sparse=False, _weight=None):
         super(Embedding, self).__init__()
         self.num_embeddings = num_embeddings
@@ -107,6 +111,7 @@ class Embedding(Module):
             with torch.no_grad():
                 self.weight[self.padding_idx].fill_(0)
 
+    @weak_script_method
     def forward(self, input):
         return F.embedding(
             input, self.weight, self.padding_idx, self.max_norm,
@@ -161,6 +166,7 @@ class Embedding(Module):
         return embedding
 
 
+@weak_module
 class EmbeddingBag(Module):
     r"""Computes sums or means of 'bags' of embeddings, without instantiating the
     intermediate embeddings.
@@ -223,9 +229,11 @@ class EmbeddingBag(Module):
         tensor([[-0.8861, -5.4350, -0.0523],
                 [ 1.1306, -2.5798, -1.0044]])
     """
+    __constants__ = ['num_embeddings, embedding_dim', 'max_norm', 'norm_type',
+                     'scale_grad_by_freq', 'mode', 'sparse']
 
     def __init__(self, num_embeddings, embedding_dim,
-                 max_norm=None, norm_type=2, scale_grad_by_freq=False,
+                 max_norm=None, norm_type=2., scale_grad_by_freq=False,
                  mode='mean', sparse=False):
         super(EmbeddingBag, self).__init__()
         self.num_embeddings = num_embeddings
@@ -242,7 +250,9 @@ class EmbeddingBag(Module):
     def reset_parameters(self):
         init.normal_(self.weight)
 
+    @weak_script_method
     def forward(self, input, offsets=None):
+        # type: (Tensor, Optional[Tensor]) -> Tensor
         return F.embedding_bag(input, self.weight, offsets,
                                self.max_norm, self.norm_type,
                                self.scale_grad_by_freq, self.mode, self.sparse)

@@ -31,8 +31,7 @@ bool SummarizeOp<float, CPUContext>::RunOnDevice() {
                  << standard_deviation << std::endl;
   }
   if (OutputSize()) {
-    auto* Y = Output(0);
-    Y->Resize(NUM_STATS);
+    auto* Y = Output(0, {NUM_STATS}, at::dtype<float>());
     float* Ydata = Y->template mutable_data<float>();
     Ydata[MIN_IDX] = min;
     Ydata[MAX_IDX] = max;
