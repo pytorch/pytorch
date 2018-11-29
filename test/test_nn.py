@@ -8321,7 +8321,7 @@ new_module_tests = [
     ),
     dict(
         module_name='LPPool2d',
-        constructor_args=(2, (2, 2), 2),
+        constructor_args=(2, 2, 2),
         input_size=(1, 3, 7, 7),
     ),
     dict(
@@ -8543,7 +8543,7 @@ new_module_tests = [
     ),
     dict(
         module_name='EmbeddingBag',
-        constructor_args=(4, 3, None, 2, False, 'sum'),
+        constructor_args=(4, 3, None, 2., False, 'sum'),
         input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
         jacobian_input=False,
         check_gradgrad=False,
@@ -8553,7 +8553,7 @@ new_module_tests = [
     ),
     dict(
         module_name='EmbeddingBag',
-        constructor_args=(4, 3, None, 2, False, 'max'),
+        constructor_args=(4, 3, None, 2., False, 'max'),
         input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
         jacobian_input=False,
         check_gradgrad=False,
@@ -9005,7 +9005,7 @@ new_module_tests = [
     ),
     dict(
         module_name='Threshold',
-        constructor_args=(2, 1),
+        constructor_args=(2., 1.),
         input_size=(),
         check_inplace=True,
         desc='threshold_value_scalar'

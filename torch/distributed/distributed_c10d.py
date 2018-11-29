@@ -630,9 +630,9 @@ def recv(tensor,
         pg = group
 
     if src is None:
-        rank_tensor = torch.IntTensor([-1])
-        pg.recv_anysource([tensor], rank_tensor, tag).wait()
-        src_rank = rank_tensor[0].item()
+        work = pg.recv_anysource([tensor], tag)
+        work.wait()
+        src_rank = work.source_rank()
         if group == GroupMember.WORLD:
             return src_rank
         else:
