@@ -80,16 +80,16 @@ In the past, we were often being asked from many users on "which backend should 
   - Use Gloo, unless you have specific reasons to use MPI.
 
 
-Common environmental variables
+Common environment variables
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Choosing the network interface to use
 """""""""""""""""""""""""""""""""""""
-This is a common environmental variable to set. By default, both NCCL and Gloo
+This is a common environment variable to set. By default, both NCCL and Gloo
 backends will try to find the network interface to use for communication. However, this
 is not always guaranteed to be successful from our experiences. Therefore, if you
 encounter any problem on either backend not being able to find the correct network
-interface. You can try to set the following two environmental variables for NCCL and Gloo,
+interface. You can try to set the following two environment variables for NCCL and Gloo,
 respectively.
 
 **NCCL_SOCKET_IFNAME**
@@ -100,16 +100,16 @@ respectively.
 
 - such as, `export GLOO_SOCKET_IFNAME=eth0`
 
-Other NCCL environmental variables
+Other NCCL environment variables
 """"""""""""""""""""""""""""""""""
-NCCL has also provided a number of environmental variables for fine-tuning purposes.
+NCCL has also provided a number of environment variables for fine-tuning purposes.
 
 Commonly used ones include the following for debugging purposes:
 
 - `export NCCL_DEBUG=INFO`
 - `export NCCL_DEBUG_SUBSYS=ALL`
 
-For the full list of NCCL environmental variables, please refer to
+For the full list of NCCL environment variables, please refer to
 `NVIDIA NCCL's official documentation <https://docs.nvidia.com/deeplearning/sdk/nccl-developer-guide/docs/env.html>`_
 
 
