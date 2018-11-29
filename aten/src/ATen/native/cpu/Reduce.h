@@ -60,9 +60,9 @@ template <typename rf_t,
 void binary_kernel_reduce(TensorIterator& iter, rf_t const &reduce, cf_t const &combine, pf_t const &project) {
   using r_traits = binary_function_traits<rf_t>;
   using c_traits = binary_function_traits<cf_t>;
-  using p_traits = binary_function_traits<pf_t>;
-  using acc_t = typename unary_function_traits<pf_t>::arg1_t;
-  using data_t = typename unary_function_traits<pf_t>::result_type;
+  using p_traits = unary_function_traits<pf_t>;
+  using acc_t = typename p_traits::arg1_t;
+  using data_t = typename p_traits::result_type;
   static_assert(
     all_same<
       acc_t,
