@@ -19,6 +19,12 @@ std::exception_ptr ProcessGroup::Work::exception() const {
   return exception_;
 }
 
+int ProcessGroup::Work::sourceRank() const {
+  throw std::runtime_error(
+      "sourceRank() may only be called on work objects "
+      "that correspond to a recv or recv-from-any call.");
+}
+
 void ProcessGroup::Work::synchronize() {}
 
 void ProcessGroup::Work::wait() {

@@ -103,7 +103,13 @@ static std::vector<int64_t> getInputDependencies(const Value* output) {
 static void setInputBroadcastGroups(KernelSpec& spec) {
   std::unordered_set<std::vector<int64_t>, torch::hash<std::vector<int64_t>>> broadcast_groups;
   for (const Value* output : (spec.graph())->outputs()) {
-    broadcast_groups.insert(getInputDependencies(output));
+    if (output->node()->kind() == prim::FusedConcat) {
+      for (const Value* concat_input : output->node()->inputs()) {
+        broadcast_groups.insert(getInputDependencies(concat_input));
+      }
+    } else {
+      broadcast_groups.insert(getInputDependencies(output));
+    }
   }
   std::copy(
     broadcast_groups.begin()

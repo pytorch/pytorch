@@ -721,7 +721,7 @@ if(USE_CUDA)
 endif()
 
 # ---[ HIP
-if(NOT BUILD_ATEN_MOBILE)
+if(USE_ROCM)
   include(${CMAKE_CURRENT_LIST_DIR}/public/LoadHIP.cmake)
   if(PYTORCH_FOUND_HIP)
     message(INFO "Compiling with HIP for AMD.")
