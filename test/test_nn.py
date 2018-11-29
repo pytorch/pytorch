@@ -3952,10 +3952,9 @@ class TestNN(NNTestCase):
             for w in range(3, 10):
                 if 4 <= h <= 6 and 4 <= w <= 6:
                     size = (h, w)
-                    if h == 5:
-                        size = torch.LongStorage(size)
-                    elif h == 6:
-                        size = torch.LongStorage((1, 1) + size)
+                    if h == 6:
+                        size = (1, 1) + size
+
                     mu(output_small, indices_small, output_size=size)
                 else:
                     self.assertRaises(ValueError, lambda: mu(output_small, indices_small, (h, w)))
