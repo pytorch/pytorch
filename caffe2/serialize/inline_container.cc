@@ -86,7 +86,7 @@ PyTorchStreamReader::PyTorchStreamReader(std::string file_name, std::istream* in
   // all lookups to getRecord will be prefixed by this folder
   int n = mz_zip_reader_get_num_files(ar_.get());
   if (n == 0) {
-    throw std::runtime_error("archive does not contain any files");
+    CAFFE_THROW("archive does not contain any files");
   }
   size_t name_size = mz_zip_reader_get_filename(ar_.get(), 0, nullptr, 0);
   valid("getting filename");
@@ -94,8 +94,9 @@ PyTorchStreamReader::PyTorchStreamReader(std::string file_name, std::istream* in
   mz_zip_reader_get_filename(ar_.get(), 0, &buf[0], name_size);
   valid("getting filename");
   auto pos = buf.find_first_of('/');
-  if (pos == std::string::npos)
-    throw std::runtime_error("file in archive is not in a subdirectory: " + buf);
+  if (pos == std::string::npos) {
+    CAFFE_THROW("file in archive is not in a subdirectory: ", buf);
+  }
   archive_name_ = buf.substr(0, pos);
 
   // version check
@@ -123,14 +124,10 @@ PyTorchStreamReader::PyTorchStreamReader(std::string file_name, std::istream* in
 void PyTorchStreamReader::valid(const char* what) {
   auto err = mz_zip_get_last_error(ar_.get());
   if (err != MZ_ZIP_NO_ERROR) {
-    std::ostringstream ss;
-    ss << "PytorchStreamReader failed " << what << ": " << mz_zip_get_error_string(err);
-    throw std::runtime_error(ss.str());
+    CAFFE_THROW("PytorchStreamReader failed ", what, ": ", mz_zip_get_error_string(err));
   }
   if (!*in_) {
-    std::ostringstream ss;
-    ss << "PytorchStreamReader failed " << what << ".";
-    throw std::runtime_error(ss.str());
+    CAFFE_THROW("PytorchStreamReader failed ", what, ".");
   }
 }
 
@@ -166,7 +163,7 @@ size_t PyTorchStreamReader::getFileID(const std::string& name) {
   ss << archive_name_ << "/" << name;
   size_t result = mz_zip_reader_locate_file(ar_.get(), ss.str().c_str(), nullptr, 0);
   if (ar_->m_last_error == MZ_ZIP_FILE_NOT_FOUND) {
-    throw std::runtime_error("file not found: " + ss.str());
+    CAFFE_THROW("file not found: ", ss.str());
   }
   valid("locating file");
   return result;
@@ -225,9 +222,9 @@ PyTorchStreamWriter::PyTorchStreamWriter(std::string file_name, std::ostream* ou
 : ar_(new mz_zip_archive), archive_name_(basename(file_name)), out_(out) {
   memset(ar_.get(), 0, sizeof(mz_zip_archive));
 
-  if (archive_name_.size() == 0)
-    throw std::runtime_error("invalid file name: " + file_name);
-
+  if (archive_name_.size() == 0) {
+    CAFFE_THROW("invalid file name: ", file_name);
+  }
   if (!out_) {
     file_stream_.open(file_name, std::ofstream::out | std::ofstream::trunc | std::ofstream::binary);
     out_ = &file_stream_;
@@ -284,14 +281,10 @@ void PyTorchStreamWriter::writeEndOfFile() {
 void PyTorchStreamWriter::valid(const char* what) {
   auto err = mz_zip_get_last_error(ar_.get());
   if (err != MZ_ZIP_NO_ERROR) {
-    std::ostringstream ss;
-    ss << "PytorchStreamWriter failed " << what << ": " << mz_zip_get_error_string(err);
-    throw std::runtime_error(ss.str());
+    CAFFE_THROW("PytorchStreamWriter failed ", what, ": ", mz_zip_get_error_string(err));
   }
   if (!*out_) {
-    std::ostringstream ss;
-    ss << "PytorchStreamWriter failed " << what << ".";
-    throw std::runtime_error(ss.str());
+    CAFFE_THROW("PytorchStreamWriter failed ", what, ".");
   }
 }
 

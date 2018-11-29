@@ -21,9 +21,9 @@ typedef struct mz_zip_archive mz_zip_archive;
 //    archive_name/
 //        version # a file with a single decimal number written in ascii,
 //                # used to establish the version of the archive format
-//        model.json # overall model descript, this is a json output of
+//        model.json # overall model description, this is a json output of
 //                   # ModelDef from torch.proto
-//        # the following names are by convension only, model.json will
+//        # the following names are by convention only, model.json will
 //        # refer to these files by full names
 //        tensors/
 //          0 # flat storage for tensor data, meta-data about shapes, etc. is
@@ -33,7 +33,7 @@ typedef struct mz_zip_archive mz_zip_archive;
 //        # code entries will only exist for modules that have methods attached
 //        code/
 //          archive_name.py # serialized torch script code (python syntax, using PythonPrint)
-//          archive_name_my_submodule.py # submodules have seperate files
+//          archive_name_my_submodule.py # submodules have separate files
 //
 // The PyTorchStreamWriter also ensures additional useful properties for these files
 // 1. All files are stored uncompressed.
@@ -44,8 +44,8 @@ typedef struct mz_zip_archive mz_zip_archive;
 
 // The PyTorchStreamReader also provides additional properties:
 // 1. It can read zip files that are created with common
-//    zip tools. This means that eventhough our writer doesn't compress files,
-//    the reader can still read files that were compressed
+//    zip tools. This means that even though our writer doesn't compress files,
+//    the reader can still read files that were compressed.
 // 2. It provides a getRecordOffset function which returns the offset into the
 //    raw file where file data lives. If the file was written with PyTorchStreamWriter
 //    it is guarenteed to be 64 byte aligned.
@@ -73,7 +73,7 @@ typedef struct mz_zip_archive mz_zip_archive;
 //         not put any indicies into the header to fulfill this constraint.
 
 // The model.json, which contains all the metadata information,
-// should be writable as the last file. One reason is that the size of tensor data is
+// should be written as the last file. One reason is that the size of tensor data is
 // usually stable. As long as the shape and type of the tensor do not change,
 // the size of the data won't change. On the other sied, the size of the
 // serialized model is likely to change, so we store it as the last record, and
