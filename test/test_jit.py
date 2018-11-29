@@ -11,8 +11,10 @@ from torch.autograd.function import traceable
 from torch.testing import assert_allclose
 from torch.onnx import OperatorExportTypes
 from torch._six import inf, PY2
-from common_utils import (TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN,
-                          skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE)
+from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
+    skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
+    freeze_rng_state
+from test_nn import module_tests, new_module_tests
 from textwrap import dedent
 import os
 import io
@@ -40,6 +42,7 @@ from torch.jit import BatchTensor
 # For testing truediv in python 2
 from test_module.future_div import div_int_future, div_float_future
 from test_module.no_future_div import div_int_nofuture, div_float_nofuture
+
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -446,9 +449,8 @@ class JitTestCase(TestCase):
 
     def runAndSaveRNG(self, func, inputs, kwargs=None):
         kwargs = kwargs if kwargs else {}
-        initial_rng_state = torch.get_rng_state()
-        results = func(*inputs, **kwargs)
-        torch.set_rng_state(initial_rng_state)
+        with freeze_rng_state():
+            results = func(*inputs, **kwargs)
         return results
 
 
@@ -9405,6 +9407,11 @@ EXCLUDE_SCRIPT = {
     'test_nn_max_unpool1d',
 }
 
+EXCLUDE_SCRIPT_MODULES = {
+    'test_nn_LPPool2d_norm',
+    'test_nn_LPPool1d_norm',
+}
+
 DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
     'test_nn_avg_pool2d',
     'test_nn_log_softmax',
@@ -9906,41 +9913,6 @@ L = 20
 M = 10
 S = 5
 
-# (
-#     module name,
-#     constructor arguments,
-#     args (tuple represents shape of a tensor arg),
-#     use_as_constant (should the submodule be listed in __constants__?)
-#     test variant name(will be used at test name suffix),
-# )
-nn_module_tests = [
-    ('AlphaDropout', (), ((S,),)),
-    ('BatchNorm1d', (10,), ((S, 10),)),
-    ('BatchNorm2d', (10,), ((S, 10, S, S),)),
-    ('BatchNorm3d', (10,), ((S, 10, S, S, S),)),
-    ('Dropout', (), ((S,),)),
-    ('Dropout2d', (), ((S, S),)),
-    ('Dropout3d', (), ((S, S, S),)),
-    ('FeatureAlphaDropout', (), ((S, S),)),
-    ('Hardshrink', (), ((S,),)),
-    ('LPPool1d', (2, 3, 2), ((S, S, S),)),
-    ('LPPool2d', (2, 3, 2), ((S, S, S, S),)),
-    ('PReLU', (), ((S,),)),
-    ('PairwiseDistance', (), ((S, S), (S, S))),
-    ('RReLU', (), ((S,),)),
-    ('Sigmoid', (), ((S,),)),
-    ('Softshrink', (), ((S,),)),
-    ('Softsign', (), ((S,),)),
-    ('Tanh', (), ((S,),)),
-    ('Tanhshrink', (), ((S,),)),
-    ('Threshold', (2., 2.), ((S,),)),
-    ('Embedding', (4, 3), (torch.empty(2, 3, dtype=torch.long).random_(4)),),
-    ('EmbeddingBag', (4, 3), (torch.empty(2, 3, dtype=torch.long).random_(4)),),
-    ('EmbeddingBag', (4, 3, None, 2., False, 'sum'), torch.empty(2, 3, dtype=torch.long).random_(4), False, 'sum'),
-    ('EmbeddingBag', (4, 3, None, 2., False, 'max'), torch.empty(2, 3, dtype=torch.long).random_(4), False, 'max'),
-    ('Sequential', (torch.nn.Sigmoid(), torch.nn.Threshold(1., 2.)), ((S,),), True),
-]
-
 # module cannot be exported /imported currently
 EXCLUDE_MODULE_EXPORT_IMPORT = {
     'EmbeddingBag',
@@ -10221,10 +10193,37 @@ def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=()
     post_add_test(test_name, skipTestIf, do_test)
 
 
-def add_nn_module_test(module_name, constructor_args, call_args,
-                       use_as_constant=False, variant=None, skipTestIf=()):
+def add_nn_module_test(*args, **kwargs):
+    if 'module_name' in kwargs:
+        name = kwargs['module_name']
+    elif 'fullname' in kwargs:
+        name = kwargs['fullname']
+    elif 'constructor' in kwargs:
+        name = kwargs['constructor'].__name__
+
+    module_name = name.split("_")[0]
+
+    module = getattr(torch.nn, module_name, None)
+    if module is None or torch._jit_internal._weak_types.get(module) is None:
+        return
+
+    if 'desc' in kwargs and 'eval' in kwargs['desc']:
+        # eval() is not supported, so skip these tests
+        return
+
+    test_name = name
+    if 'desc' in kwargs:
+        test_name = "{}_{}".format(test_name, kwargs['desc'])
+    test_name = 'test_nn_{}'.format(test_name)
+
     def do_test(self):
-        nn_module = getattr(torch.nn, module_name)
+        if test_name in EXCLUDE_SCRIPT_MODULES:
+            return
+        if 'constructor' in kwargs:
+            nn_module = kwargs['constructor']
+        else:
+            nn_module = getattr(torch.nn, name)
+        constructor_args = kwargs.get('constructor_args', ())
 
         # Construct a script module that passes arguments through
         # to self.submodule
@@ -10237,7 +10236,7 @@ def add_nn_module_test(module_name, constructor_args, call_args,
             script = script_method_template.format(method_args, call)
 
             submodule_constants = []
-            if use_as_constant:
+            if kwargs.get('is_constant'):
                 submodule_constants = ['submodule']
 
             # Create module to use the script method
@@ -10269,15 +10268,16 @@ def add_nn_module_test(module_name, constructor_args, call_args,
             return module(*args)
 
         # Check against Python module as reference
-        args_variable, kwargs_variable = create_input(call_args)
+        if 'input_fn' in kwargs:
+            input = kwargs['input_fn']()
+        else:
+            input = (kwargs['input_size'],)
+        args_variable, kwargs_variable = create_input(input)
         f_args_variable = deepcopy(unpack_variables(args_variable))
 
         check_against_reference(self, create_script_module, create_nn_module, f_args_variable)
 
-    test_name = 'test_nn_{}'.format(module_name)
-    if variant is not None:
-        test_name = test_name + "_" + variant
-    post_add_test(test_name, skipTestIf, do_test)
+    post_add_test(test_name, (), do_test)
 
 
 def post_add_test(test_name, skipTestIf, do_test):
@@ -10441,8 +10441,8 @@ for test in autograd_method_tests:
 for test in nn_functional_tests:
     add_nn_functional_test(*test)
 
-for test in nn_module_tests:
-    add_nn_module_test(*test)
+for test in module_tests + new_module_tests:
+    add_nn_module_test(**test)
 
 if __name__ == '__main__':
     run_tests()
