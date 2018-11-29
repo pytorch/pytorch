@@ -3,6 +3,9 @@ import tempfile
 import unittest
 from copy import deepcopy
 from itertools import product
+from functools import reduce
+from operator import mul
+
 
 import torch
 import torch.cuda
@@ -250,6 +253,14 @@ module_tests = [
         input_size=(2, 3, 4, 5),
     ),
 ]
+
+
+# Generates rand tensor with non-equal values. This ensures that duplicate
+# values won't be causing test failure for modules like MaxPooling.
+# size should be small, otherwise randperm fails / long overflows.
+def _rand_tensor_non_equal(*size):
+    total = reduce(mul, size, 1)
+    return torch.randperm(total).view(*size).double()
 
 
 def wrap_functional(fn, **kwargs):

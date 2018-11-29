@@ -6940,14 +6940,6 @@ class TestNNInit(TestCase):
         self.assertWarnsRegex(fn, 'deprecated', 'methods not suffixed with underscore should be deprecated')
 
 
-# Generates rand tensor with non-equal values. This ensures that duplicate
-# values won't be causing test failure for modules like MaxPooling.
-# size should be small, otherwise randperm fails / long overflows.
-def _rand_tensor_non_equal(*size):
-    total = reduce(mul, size, 1)
-    return torch.randperm(total).view(*size).double()
-
-
 def add_test(test, decorator=None):
     def add(test_name, fn):
         if hasattr(TestNN, test_name):
