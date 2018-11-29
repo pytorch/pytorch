@@ -1874,6 +1874,7 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
     return torch.kl_div(input, target, reduction_enum)
 
 
+@torch._jit_internal.weak_script
 def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-100,
                   reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, Optional[Tensor], Optional[bool], int, Optional[bool], str) -> Tensor
@@ -1922,6 +1923,7 @@ def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-1
     return nll_loss(log_softmax(input, 1), target, weight, None, ignore_index, None, reduction)
 
 
+@torch._jit_internal.weak_script
 def binary_cross_entropy(input, target, weight=None, size_average=None,
                          reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, Optional[Tensor], Optional[bool], Optional[bool], str) -> Tensor
@@ -1970,6 +1972,7 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
                          "!= input nelement ({})".format(target.nelement(), input.nelement()))
 
     if weight is not None:
+        weight = torch.jit._unwrap_optional(weight)
         new_size = _infer_size(target.size(), weight.size())
         weight = weight.expand(new_size)
 

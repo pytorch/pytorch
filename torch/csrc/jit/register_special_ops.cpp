@@ -1,6 +1,7 @@
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/jit/operator.h"
+#include "../ATen/ExpandUtils.h"
 
 #include <sstream>
 #include <regex>
@@ -38,7 +39,6 @@ RegisterOperators reg({
     Operator(
         "aten::list_with_default(int[] list, int[] defaults) -> int[]",
         [](Stack& stack) {
-          autograd::profiler::RecordFunction record("sizes");
           auto list = peek(stack, 0, 2).toIntListRef();
           auto defaults = peek(stack, 1, 2).toIntListRef();
           drop(stack, 2);
@@ -81,6 +81,36 @@ RegisterOperators reg({
 
             drop(stack, num_inputs);
             push(stack, ss.str());
+            return 0;
+          };
+        }),
+    Operator(
+        "aten::nelement(Tensor self) -> int",
+        [](const Node* node) {
+          return [](Stack& stack) {
+            auto t = pop(stack).toTensor();
+
+            if (t.sizes().size() == 0) {
+              push(stack, 0);
+              return 0;
+            }
+
+            int nelements = 1;
+            for (auto size : t.sizes()) {
+              nelements *= size;
+            }
+
+            push(stack, nelements);
+            return 0;
+          };
+        }),
+    Operator(
+        "aten::_infer_size(int[] a, int[] b) -> int[]",
+        [](const Node* node) {
+          return [](Stack& stack) {
+            auto a = pop(stack).toIntList()->elements();
+            auto b = pop(stack).toIntList()->elements();
+            push(stack, at::infer_size(a, b));
             return 0;
           };
         })
