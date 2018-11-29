@@ -728,7 +728,7 @@
 - name: std(Tensor self, bool unbiased)
   self: var_backward(grad / (result * 2), self, unbiased)
 
-- name: std(Tensor self, int64_t dim, bool unbiased, bool keepdim)
+- name: std(Tensor self, IntList dim, bool unbiased, bool keepdim)
   self: var_backward(grad / (result * 2), self, dim, unbiased, keepdim)
 
 - name: sub(Tensor self, Tensor other, *, Scalar alpha)

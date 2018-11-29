@@ -93,6 +93,20 @@ class BytesIOContext(io.BytesIO):
     def __exit__(self, *args):
         pass
 
+DIM_TEST_SCENARIOS = [
+    ((5, 400000), 1),
+    ((3, 5, 7), 0),
+    ((3, 5, 7), 1),
+    ((3, 5, 7), 2),
+    ((100000, ), -1),
+    ((50, 50, 50), 0),
+    ((50, 50, 50), 1),
+    ((50, 50, 50), 2),
+    ((50, 50, 50), (1, 2)),
+    ((50, 50, 50), (1, -1)),
+    ((50, 50, 50), (0, 2)),
+    ((50, 50, 50), (0, 2, 1)),
+];
 
 # This is intentionally prefixed by an underscore. Otherwise pytest will try to
 # run its methods as test cases.
@@ -1927,56 +1941,50 @@ class _TestTorchMixin(object):
     def _assert_matches_numpy(self, t, n):
         self.assertEqual(n.shape, t.shape)
         if t.dtype == torch.float:
-            self.assertTrue(np.allclose(n, t.numpy(), rtol=1e-03, atol=1e-05))
+            self.assertTrue(np.allclose(n, t.numpy(), rtol=1e-03, atol=1e-05,
+                equal_nan=True))
         else:
-            self.assertTrue(np.allclose(n, t.numpy()))
+            self.assertTrue(np.allclose(n, t.numpy(), equal_nan=True))
+
+    def _test_dim_op(self, tensors_dict, dim, pytorch_op, numpy_op):
+        for category, tensors in tensors_dict.items():
+            if category == "slice":
+                dim = 0
+            for tensor in tensors:
+                # we have no control over NumPy warnings...
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    expected = numpy_op(tensor.numpy(), dim)
+                actual = pytorch_op(tensor, dim);
+                self._assert_matches_numpy(actual, expected)
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_sum_dim(self):
-        def check_sum_dim(tensors_dict, dim):
-            for category, tensors in tensors_dict.items():
-                if category == "slice":
-                    dim = 0
-                for tensor in tensors:
-                    expected = tensor.numpy().sum(dim)
-                    actual = tensor.sum(dim)
-                    self._assert_matches_numpy(actual, expected)
-
-        float_types = [torch.double, torch.float]
-        int_types = [torch.int64, torch.int32, torch.int16]
-
-        check_sum_dim(self._make_tensors((5, 400000)), 1)
-        check_sum_dim(self._make_tensors((3, 5, 7)), 0)
-        check_sum_dim(self._make_tensors((3, 5, 7)), 1)
-        check_sum_dim(self._make_tensors((3, 5, 7)), 2)
-        check_sum_dim(self._make_tensors((100000, )), -1)
-        check_sum_dim(self._make_tensors((50, 50, 50)), 0)
-        check_sum_dim(self._make_tensors((50, 50, 50)), 1)
-        check_sum_dim(self._make_tensors((50, 50, 50)), 2)
-        check_sum_dim(self._make_tensors((50, 50, 50)), (1, 2))
-        check_sum_dim(self._make_tensors((50, 50, 50)), (1, -1))
+        for sizes, dim in DIM_TEST_SCENARIOS:
+            self._test_dim_op(
+                self._make_tensors(sizes),
+                dim,
+                lambda t, d: t.sum(d),
+                lambda n, d: n.sum(d))
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_mean_dim(self):
-        def check_mean_dim(tensors_dict, dim):
-            for category, tensors in tensors_dict.items():
-                if category == "slice":
-                    dim = 0
-                for tensor in tensors:
-                    expected = tensor.numpy().mean(dim)
-                    actual = tensor.mean(dim)
-                    self._assert_matches_numpy(actual, expected)
+        for sizes, dim in DIM_TEST_SCENARIOS:
+            self._test_dim_op(
+                self._make_tensors(sizes, use_integral=False),
+                dim,
+                lambda t, d: t.mean(d),
+                lambda n, d: n.mean(d))
 
-        check_mean_dim(self._make_tensors((5, 400000), use_integral=False), 1)
-        check_mean_dim(self._make_tensors((3, 5, 7), use_integral=False), 0)
-        check_mean_dim(self._make_tensors((3, 5, 7), use_integral=False), 1)
-        check_mean_dim(self._make_tensors((3, 5, 7), use_integral=False), 2)
-        check_mean_dim(self._make_tensors((100000, ), use_integral=False), -1)
-        check_mean_dim(self._make_tensors((50, 50, 50), use_integral=False), 0)
-        check_mean_dim(self._make_tensors((50, 50, 50), use_integral=False), 1)
-        check_mean_dim(self._make_tensors((50, 50, 50), use_integral=False), 2)
-        check_mean_dim(self._make_tensors((50, 50, 50), use_integral=False), (1, 2))
-        check_mean_dim(self._make_tensors((50, 50, 50), use_integral=False), (1, -1))
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    def test_std_dim(self):
+        for unbiased in [False, True]:
+            for sizes, dim in DIM_TEST_SCENARIOS:
+                self._test_dim_op(
+                    self._make_tensors(sizes, use_integral=False),
+                    dim,
+                    lambda t, d: t.std(d, unbiased=unbiased),
+                    lambda n, d: n.std(d, ddof=1 if unbiased else 0))
 
     def test_sum_out(self):
         x = torch.rand(100, 100)
