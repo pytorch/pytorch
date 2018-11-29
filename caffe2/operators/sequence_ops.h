@@ -120,9 +120,9 @@ class RemovePaddingOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     if (startPaddingWidth_ == 0 && endPaddingWidth_ == 0) {
-      Output(0)->CopyFrom(Input(0), &context_);
+      Output(0)->CopyFrom(Input(0), true /*async*/);
       if (OutputSize() == 2) {
-        Output(1)->CopyFrom(Input(1), &context_);
+        Output(1)->CopyFrom(Input(1), true /*async*/);
       }
       return true;
     }
@@ -160,9 +160,9 @@ class AddPaddingOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     if (startPaddingWidth_ == 0 && endPaddingWidth_ == 0) {
-      Output(0)->CopyFrom(Input(0), &context_);
+      Output(0)->CopyFrom(Input(0), true /*async*/);
       if (OutputSize() == 2) {
-        Output(1)->CopyFrom(Input(1), &context_);
+        Output(1)->CopyFrom(Input(1), true /*async*/);
       }
       return true;
     }

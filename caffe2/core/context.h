@@ -79,14 +79,7 @@ class CAFFE2_API CPUContext final : public BaseContext {
     return GetCPUAllocator()->allocate(nbytes);
   }
 
-  void CopyBytesSameDevice(size_t nbytes, const void* src, void* dst) override {
-    if (nbytes == 0) {
-      return;
-    }
-    CAFFE_ENFORCE(src);
-    CAFFE_ENFORCE(dst);
-    memcpy(dst, src, nbytes);
-  }
+  void CopyBytesSameDevice(size_t nbytes, const void* src, void* dst) override;
 
   void CopyBytesFromCPU(size_t nbytes, const void* src, void* dst) override {
     CopyBytesSameDevice(nbytes, src, dst);

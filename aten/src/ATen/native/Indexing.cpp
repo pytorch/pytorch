@@ -383,6 +383,12 @@ static AdvancedIndex make_info(Tensor self, TensorList orig) {
   if (!hasContiguousSubspace(indices)) {
     std::tie(self, indices) = transposeToFront(self, indices);
   }
+  // Ensure indices are on the same device as self
+  for (size_t i = 0; i < indices.size(); i++) {
+    if (indices[i].defined() && indices[i].device() != self.device()) {
+      indices[i] = indices[i].to(self.device());
+    }
+  }
   return AdvancedIndex(self, indices);
 }
 
