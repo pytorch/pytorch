@@ -11,8 +11,9 @@ __all__ = [
 def addmm(mat, mat1, mat2, beta=1, alpha=1):
     r"""
     This function does exact same thing as :func:`torch.addmm` in the forward,
-    except that it supports backward for sparse matrix :attr:`mat1`. Note that
-    the gradients of sparse matrix :attr:`mat1` is a coalesced sparse tensor.
+    except that it supports backward for sparse matrix :attr:`mat1`. :attr:`mat1`
+    need to have `sparse_dim = 2`. Note that the gradients of :attr:`mat1` is a
+    coalesced sparse tensor.
 
     Args:
         mat (Tensor): a dense matrix to be added
@@ -27,10 +28,11 @@ def addmm(mat, mat1, mat2, beta=1, alpha=1):
 def mm(mat1, mat2):
     r"""
     Performs a matrix multiplication of the sparse matrix :attr:`mat1`
-    and dense matrix :attr:`mat2`. Similar to :func:`torch.mm`, If mat1 is a
-    (n \times m)(n×m) tensor, mat2 is a (m \times p)(m×p) tensor, out will be a
-    (n \times p)(n×p) dense tensor. This function also supports backward for both matrices.
-    Note that the gradients of sparse matrix :attr:`mat1` is a coalesced sparse tensor.
+    and dense matrix :attr:`mat2`. Similar to :func:`torch.mm`, If :attr:`mat1` is a
+    (n \times m)(n×m) tensor, :attr:`mat2` is a (m \times p)(m×p) tensor, out will be a
+    (n \times p)(n×p) dense tensor. :attr:`mat1` need to have `sparse_dim = 2`.
+    This function also supports backward for both matrices. Note that the gradients of
+    :attr:`mat1` is a coalesced sparse tensor.
 
     Args:
         mat1 (SparseTensor): the first sparse matrix to be multiplied
