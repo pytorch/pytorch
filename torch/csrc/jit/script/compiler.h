@@ -41,6 +41,10 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
     throw ErrorReport(loc) << "attribute lookup is not defined on " << kind();
   }
 
+  virtual bool isNone() {
+    return false;
+  }
+
   // use it as a vector of values, e.g. a tuple of values as return value from
   // a method invocation
   virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(
@@ -89,6 +93,9 @@ struct TORCH_API SimpleValue : public SugaredValue {
   }
   Value * asValue(SourceRange range, Method & m) override {
     return value;
+  }
+  bool isNone() override {
+    return value->isNone();
   }
   std::vector<std::shared_ptr<SugaredValue>> asTuple(
       SourceRange loc,
