@@ -1,4 +1,6 @@
 #pragma once
+// This file is temporary until native_functions.yaml and derivatives.yaml are merged.
+// Ideally this should all go into native_functions.yaml
 
 namespace torch { namespace jit {
   const std::unordered_map<std::string, std::string> symbolic_scripts({
