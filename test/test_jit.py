@@ -9441,12 +9441,14 @@ EXCLUDE_SCRIPT = {
 
     # aten op has additional cudnn argument
     'test_nn_group_norm',
+    'test_nn_unfold',
 
     # flakey test - TODO fix
     'test_nn_ctc_loss',
 
     # unknown builtin op
     'test_nn_interpolate',
+    'test_nn_fold',
 }
 
 EXCLUDE_PYTHON_PRINT = {
