@@ -36,7 +36,9 @@ C10_DEFINE_string(
     "Options to specify the preprocess routines. The available options are "
     "subtract128, normalize, mean, std, bgrtorgb. If multiple steps are provided, they "
     "are separated by comma (,) in sequence.");
-C10_DEFINE_string(report_time, "",
+C10_DEFINE_string(
+    report_time,
+    "",
     "Report the conversion stage time to screen. "
     "The format of the string is <type>|<identifier>. "
     "The valid type is 'json'. "
@@ -47,8 +49,11 @@ C10_DEFINE_bool(warp, false, "If warp is set, warp the images to square.");
 
 namespace caffe2 {
 
-void reportTime(std::string type, double ts,
-                std::string metric, std::string unit) {
+void reportTime(
+    std::string type,
+    double ts,
+    std::string metric,
+    std::string unit) {
   if (FLAGS_report_time == "")
     return;
   vector<string> s = caffe2::split('|', FLAGS_report_time);
@@ -57,10 +62,9 @@ void reportTime(std::string type, double ts,
   if (s.size() > 1) {
     identifier = s[1];
   }
-  std::cout << identifier << "{\"type\": \"" << type
-    << "\", \"value\": " << ts
-    << ", \"metric\": \"" << metric
-    << "\", \"unit\": \"" << unit << "\"}"<< std::endl;
+  std::cout << identifier << "{\"type\": \"" << type << "\", \"value\": " << ts
+    << ", \"metric\": \"" << metric << "\", \"unit\": \"" << unit
+    << "\"}" << std::endl;
 }
 
 cv::Mat resizeImage(cv::Mat& img) {
@@ -185,7 +189,7 @@ std::vector<float> convertOneImage(std::string& filename) {
   assert(resized_img.rows == FLAGS_scale);
   std::vector<float> one_image_values = convertToVector(resized_img);
   double ts = timer.MicroSeconds();
-  reportTime("image_preprocess", ts,"convert", "us");
+  reportTime("image_preprocess", ts, "convert", "us");
   return one_image_values;
 }
 
@@ -236,7 +240,7 @@ void convertImages() {
     }
   }
   double ts = timer.MicroSeconds();
-  reportTime("image_preprocess", ts,"pack", "us");
+  reportTime("image_preprocess", ts, "pack", "us");
 
   if (FLAGS_text_output) {
     caffe2::WriteProtoToTextFile(protos, FLAGS_output_tensor);
