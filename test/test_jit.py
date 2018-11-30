@@ -8719,6 +8719,13 @@ a")
             return ls
         self.checkScript(foo, (torch.rand(2, 3), torch.rand(3)))
 
+    def test_inplace_copy_script(self):
+        def foo(x):
+            a = torch.rand(3, 4)
+            a.copy_(x)
+            return a
+        self.checkScript(foo, (torch.rand(3, 4),))
+
     def test_lhs_indexing_increment(self):
         def foo(a, b):
             a[0] += b
