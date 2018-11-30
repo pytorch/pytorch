@@ -28,7 +28,7 @@ endif()
 
 add_executable(test_api ${TORCH_API_TEST_SOURCES})
 target_include_directories(test_api PRIVATE ${ATen_CPU_INCLUDE})
-target_link_libraries(test_api PRIVATE torch gtest)
+target_link_libraries(test_api PRIVATE torch gtest gomp)
 
 if (USE_CUDA)
   target_link_libraries(test_api PRIVATE
