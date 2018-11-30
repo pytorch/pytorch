@@ -43,5 +43,7 @@ struct inter_copy_type<uint8_t> {
 template <typename T>
 using inter_copy_type_t = typename inter_copy_type<T>::type;
 
+void _copy_same_type_(Tensor& self, const Tensor& src);
+
 } // namespace native
 } // namespace at
