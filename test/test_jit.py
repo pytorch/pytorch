@@ -10259,7 +10259,6 @@ def add_interpolate_module_tests():
     size = 4
     scale_factor = None
     in_t = torch.ones(1, 1, 2, 2)
-    to_module_test_format(('Upsample', args, Variable(in_t), False, str(i)))
 
     args = (size, scale_factor)
     to_module_test_format(('UpsamplingNearest2d', args, Variable(in_t), False,))
