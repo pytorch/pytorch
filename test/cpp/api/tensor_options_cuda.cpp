@@ -5,7 +5,7 @@
 #include <ATen/Functions.h>
 #include <ATen/OptionsGuard.h>
 #include <c10/core/ScalarType.h>
-#include <ATen/core/TensorOptions.h>
+#include <c10/core/TensorOptions.h>
 
 // NB: This file is compiled even in CPU build (for some reason), so
 // make sure you don't include any CUDA only headers.
