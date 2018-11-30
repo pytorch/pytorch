@@ -10204,41 +10204,6 @@ L = 20
 M = 10
 S = 5
 
-# (
-#     module name,
-#     constructor arguments,
-#     args (tuple represents shape of a tensor arg),
-#     use_as_constant (should the submodule be listed in __constants__?)
-#     test variant name(will be used at test name suffix),
-# )
-nn_module_tests = [
-    ('AlphaDropout', (), ((S,),)),
-    ('BatchNorm1d', (10,), ((S, 10),)),
-    ('BatchNorm2d', (10,), ((S, 10, S, S),)),
-    ('BatchNorm3d', (10,), ((S, 10, S, S, S),)),
-    ('Dropout', (), ((S,),)),
-    ('Dropout2d', (), ((S, S),)),
-    ('Dropout3d', (), ((S, S, S),)),
-    ('FeatureAlphaDropout', (), ((S, S),)),
-    ('Hardshrink', (), ((S,),)),
-    ('LPPool1d', (2, 3, 2), ((S, S, S),)),
-    ('LPPool2d', (2, 3, 2), ((S, S, S, S),)),
-    ('PReLU', (), ((S,),)),
-    ('PairwiseDistance', (), ((S, S), (S, S))),
-    ('RReLU', (), ((S,),)),
-    ('Sigmoid', (), ((S,),)),
-    ('Softshrink', (), ((S,),)),
-    ('Softsign', (), ((S,),)),
-    ('Tanh', (), ((S,),)),
-    ('Tanhshrink', (), ((S,),)),
-    ('Threshold', (2., 2.), ((S,),)),
-    ('Embedding', (4, 3), (torch.empty(2, 3, dtype=torch.long).random_(4)),),
-    ('EmbeddingBag', (4, 3), (torch.empty(2, 3, dtype=torch.long).random_(4)),),
-    ('EmbeddingBag', (4, 3, None, 2., False, 'sum'), torch.empty(2, 3, dtype=torch.long).random_(4), False, 'sum'),
-    ('EmbeddingBag', (4, 3, None, 2., False, 'max'), torch.empty(2, 3, dtype=torch.long).random_(4), False, 'max'),
-    ('Sequential', (torch.nn.Sigmoid(), torch.nn.Threshold(1., 2.)), ((S,),), True),
-]
-
 #  module cannot be exported /imported currently
 EXCLUDE_MODULE_EXPORT_IMPORT = {
     'EmbeddingBag',
