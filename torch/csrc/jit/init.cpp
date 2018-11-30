@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/python_ir.h>
 #include <torch/csrc/jit/python_arg_flatten.h>
 #include <torch/csrc/jit/export.h>
+#include <torch/csrc/jit/fuser/kernel_cache.h>
 #include <torch/csrc/jit/import.h>
 #include <torch/csrc/jit/argument_spec.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
@@ -40,8 +41,6 @@
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 #include <torch/csrc/jit/script/jit_exception.h>
-
-#include <caffe2/serialize/inline_container.h>
 
 #include <pybind11/functional.h>
 
@@ -93,6 +92,8 @@ void initJITBindings(PyObject *module) {
   py::class_<python::IODescriptor>(m, "IODescriptor"); // NOLINT(bugprone-unused-raii)
 
   m.def("_jit_init", loadPythonClasses)
+   .def("_jit_debug_fuser_num_cached_kernel_specs",
+       fuser::debugNumCachedKernelSpecs)
    .def("_jit_pass_onnx", ToONNX)
    .def("_jit_pass_lower_all_tuples", LowerAllTuples)
    .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)

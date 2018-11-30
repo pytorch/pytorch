@@ -19,6 +19,12 @@ static KernelCacheImpl& getKernelCache() {
   return cache;
 }
 
+int64_t debugNumCachedKernelSpecs() {
+  auto& cache = getKernelCache();
+  std::lock_guard<std::mutex> guard{cache.mutex_};
+  return cache.specMap_.size();
+}
+
 // TODO: lookup by historic string key to start, then issue key
 // as appropriate for faster lookup in the future
 int64_t store(std::shared_ptr<Graph> graph) {
