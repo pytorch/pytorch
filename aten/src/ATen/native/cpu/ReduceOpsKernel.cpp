@@ -31,7 +31,7 @@ struct WelfordData {
 };
 
 static void std_kernel_impl(TensorIterator &iter, bool unbiased) {
-  AT_DISPATCH_ALL_TYPES(iter.type(), "std", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.type(), "std", [&] {
     binary_kernel_reduce(
       iter,
       [](WelfordData acc, scalar_t data) -> WelfordData {
