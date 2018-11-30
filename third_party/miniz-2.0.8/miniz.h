@@ -172,7 +172,8 @@
 
 #if MINIZ_X86_OR_X64_CPU
 /* Set MINIZ_USE_UNALIGNED_LOADS_AND_STORES to 1 on CPU's that permit efficient integer loads and stores from unaligned addresses. */
-#define MINIZ_USE_UNALIGNED_LOADS_AND_STORES 1
+/* zdevito: ASAN doesn't like unligned loads and stores, and -O3 optimizes the unoptimized code pattern away anyawy */
+#define MINIZ_USE_UNALIGNED_LOADS_AND_STORES 0
 #else
 #define MINIZ_USE_UNALIGNED_LOADS_AND_STORES 0
 #endif
