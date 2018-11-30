@@ -343,14 +343,15 @@ def init_process_group(backend,
         _pg_names[_default_pg] = group_name
     else:
         # backward compatible API
-        if init_method != "env://" and world_size != -1 and rank != -1:
-            url = "{}?rank={}&world_size={}".format(init_method,
-                                                    rank,
-                                                    world_size)
-            store, _, _ = next(rendezvous(url))
-        else:
-            store, rank, world_size = next(rendezvous(init_method))
+        url = init_method
+        if world_size != -1 and rank != -1:
+            url += "?rank={}&world_size={}".format(rank, world_size)
+        elif rank != -1:
+            url += "?rank={}".format(rank)
+        elif world_size != -1:
+            url += "?world_size={}".format(world_size)
 
+        store, rank, world_size = next(rendezvous(url))
         if backend == Backend.GLOO:
             _default_pg = ProcessGroupGloo(
                 store,
