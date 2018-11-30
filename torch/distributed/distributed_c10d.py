@@ -1066,21 +1066,25 @@ def gather(tensor,
         if gather_list is None:
             raise RuntimeError("gather_list is a required argument in gather "
                                "destination")
+        input_tensors = [tensor]
+        output_tensors = [gather_list]
     else:
         if gather_list:
             raise RuntimeError("non-empty gather_list can be given only "
                                "to gather destination")
+        input_tensors = [tensor]
+        output_tensors = []
 
     opts = GatherOptions()
     opts.rootRank = dst
 
     if group == GroupMember.WORLD:
         _check_default_pg()
-        work = _default_pg.gather([gather_list], [tensor], opts)
+        work = _default_pg.gather(output_tensors, input_tensors, opts)
     else:
         group_dst_rank = _get_group_rank(group, dst)
         opts.rootRank = group_dst_rank
-        work = group.gather([gather_list], [tensor], opts)
+        work = group.gather(output_tensors, input_tensors, opts)
 
     if async_op:
         return work
@@ -1123,21 +1127,25 @@ def scatter(tensor,
         if scatter_list is None:
             raise RuntimeError("scatter_list is a required argument in "
                                "scatter source")
+        input_tensors = [scatter_list]
+        output_tensors = [tensor]
     else:
         if scatter_list:
             raise RuntimeError("non-empty can be given only to scatter "
                                "source")
+        input_tensors = []
+        output_tensors = [tensor]
 
     opts = ScatterOptions()
     opts.rootRank = src
 
     if group == GroupMember.WORLD:
         _check_default_pg()
-        work = _default_pg.scatter([tensor], [scatter_list], opts)
+        work = _default_pg.scatter(output_tensors, input_tensors, opts)
     else:
         group_src_rank = _get_group_rank(group, src)
         opts.rootRank = group_src_rank
-        work = group.scatter([tensor], [scatter_list], opts)
+        work = group.scatter(output_tensors, input_tensors, opts)
 
     if async_op:
         return work
