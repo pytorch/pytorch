@@ -29,6 +29,7 @@
 #include "torch/csrc/autograd/generated/python_nn_functions.h"
 #include "torch/csrc/autograd/python_legacy_variable.h"
 #include "torch/csrc/autograd/python_variable.h"
+#include "torch/csrc/multiprocessing/init.h"
 #include "torch/csrc/tensor/python_tensor.h"
 #include "torch/csrc/utils/tensor_dtypes.h"
 #include "torch/csrc/utils/python_strings.h"
@@ -534,6 +535,7 @@ PyObject* initModule() {
   THPUtils_addPyMethodDefs(methods, TorchMethods);
   THPUtils_addPyMethodDefs(methods, DataLoaderMethods);
   THPUtils_addPyMethodDefs(methods, torch::autograd::python_functions());
+  THPUtils_addPyMethodDefs(methods, torch::multiprocessing::python_functions());
 #ifdef USE_CUDA
   THPUtils_addPyMethodDefs(methods, THCPModule_methods());
 #endif
