@@ -3,7 +3,6 @@
 #else
 
 #include <ATen/InferSize.h>
-#include <ATen/native/Copy.h>
 #include <new>
 
 /**** access methods ****/
@@ -158,7 +157,7 @@ THTensor *THTensor_(newClone)(THTensor *self)
   THTensor_(resizeAs)(tensor, self);
   at::Tensor tensor_wrap = THTensor_wrap(tensor);
   at::Tensor self_wrap = THTensor_wrap(self);
-  at::native::_copy_same_type_(tensor_wrap, self_wrap);
+  at::_copy_same_type_(tensor_wrap, self_wrap);
   return tensor;
 }
 
@@ -583,7 +582,7 @@ void THTensor_(freeCopyTo)(THTensor *self, THTensor *dst)
   if(self != dst) {
     at::Tensor dst_wrap = THTensor_wrap(dst);
     at::Tensor self_wrap = THTensor_wrap(self);
-    at::native::_copy_same_type_(dst_wrap, self_wrap);
+    at::_copy_same_type_(dst_wrap, self_wrap);
   }
 
   THTensor_(free)(self);
