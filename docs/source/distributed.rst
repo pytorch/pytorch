@@ -10,10 +10,10 @@ Distributed communication package - torch.distributed
 Backends
 --------
 
-Currently torch.distributed supports three backends, each with
+``torch.distributed`` supports three backends, each with
 different capabilities. The table below shows which functions are available
 for use with CPU / CUDA tensors.
-MPI supports cuda only if the implementation used to build PyTorch supports it.
+MPI supports CUDA only if the implementation used to build PyTorch supports it.
 
 
 +------------+-----------+-----------+-----------+
@@ -44,70 +44,71 @@ MPI supports cuda only if the implementation used to build PyTorch supports it.
 Backends that come with PyTorch
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-PyTorch distributed currently only supports Linux. By default, two backends: NCCL and Gloo
-will be built and included in PyTorch distributed, when CUDA is available. MPI is an
+PyTorch distributed currently only supports Linux. By default, the Gloo and NCCL backends
+are built and included in PyTorch distributed (NCCL only when building with CUDA).
+MPI is an
 optional backend that can only be included if you build PyTorch from source. (e.g.
 building PyTorch on a host that has MPI installed.)
 
 
-Which backends to use?
-^^^^^^^^^^^^^^^^^^^^^^
+Which backend to use?
+^^^^^^^^^^^^^^^^^^^^^
 
-In the past, we were often being asked from many users on "which backend should I use?".
+In the past, we were often asked: "which backend should I use?".
 
 - Rule of thumb
 
-  - In general, the rule of thumb is to use the NCCL backend if you plan to do distributed GPU
-    training and to use the Gloo backend if you plan to do distributed CPU training.
+  - Use the NCCL backend for distributed **GPU** training
+  - Use the Gloo backend for distributed **CPU** training.
 
 - GPU hosts with InfiniBand interconnect
 
-  - Use NCCL, since it's the only backend that currently supports InfiniBand and GPU-direct.
+  - Use NCCL, since it's the only backend that currently supports
+    InfiniBand and GPUDirect.
 
 - GPU hosts with Ethernet interconnect
 
-  - Use NCCL, since it currently provides the best distributed GPU training performance, especially
-    for multiprocess single-node or multi-node distributed training. If you encounter any problem
-    with NCCL, use Gloo as the fallback option. (Note that Gloo currently runs slower than NCCL for GPUs.)
+  - Use NCCL, since it currently provides the best distributed GPU
+    training performance, especially for multiprocess single-node or
+    multi-node distributed training. If you encounter any problem with
+    NCCL, use Gloo as the fallback option. (Note that Gloo currently
+    runs slower than NCCL for GPUs.)
 
 - CPU hosts with InfiniBand interconnect
 
-  - If your InfiniBand has enabled IP over IB, use Gloo, otherwise, use MPI instead.
-    We are planning on adding InfiniBand support for Gloo in the upcoming releases.
+  - If your InfiniBand has enabled IP over IB, use Gloo, otherwise,
+    use MPI instead. We are planning on adding InfiniBand support for
+    Gloo in the upcoming releases.
 
 - CPU hosts with Ethernet interconnect
 
   - Use Gloo, unless you have specific reasons to use MPI.
 
-
 Common environment variables
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Choosing the network interface to use
 """""""""""""""""""""""""""""""""""""
-This is a common environment variable to set. By default, both NCCL and Gloo
+
+By default, both NCCL and Gloo
 backends will try to find the network interface to use for communication. However, this
 is not always guaranteed to be successful from our experiences. Therefore, if you
 encounter any problem on either backend not being able to find the correct network
-interface. You can try to set the following two environment variables for NCCL and Gloo,
-respectively.
+interface. You can try to set the following environment variables (each one
+applicable to their backend):
 
-**NCCL_SOCKET_IFNAME**
-
-- such as, `export NCCL_SOCKET_IFNAME=eth0`
-
-**GLOO_SOCKET_IFNAME**
-
-- such as, `export GLOO_SOCKET_IFNAME=eth0`
+* **NCCL_SOCKET_IFNAME**, for example ``export NCCL_SOCKET_IFNAME=eth0``
+* **GLOO_SOCKET_IFNAME**, for example ``export GLOO_SOCKET_IFNAME=eth0``
 
 Other NCCL environment variables
-""""""""""""""""""""""""""""""""""
+""""""""""""""""""""""""""""""""
+
 NCCL has also provided a number of environment variables for fine-tuning purposes.
 
 Commonly used ones include the following for debugging purposes:
 
-- `export NCCL_DEBUG=INFO`
-- `export NCCL_DEBUG_SUBSYS=ALL`
+- ``export NCCL_DEBUG=INFO``
+- ``export NCCL_DEBUG_SUBSYS=ALL``
 
 For the full list of NCCL environment variables, please refer to
 `NVIDIA NCCL's official documentation <https://docs.nvidia.com/deeplearning/sdk/nccl-developer-guide/docs/env.html>`_
