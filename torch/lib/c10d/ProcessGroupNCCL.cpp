@@ -156,19 +156,19 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // for all processes
   std::unique_lock<std::mutex> lock(pgTrackingLock_);
   // Default group is an empty string
-  auto groupKey = groupName_ + "_";
+  const auto groupKey = groupName_ + "_";
   if (processGroupCounterMap_.count(groupKey) == 0) {
     processGroupCounterMap_[groupKey] = -1;
   }
   ++processGroupCounterMap_[groupKey];
-  processGroupID_ = std::to_string(processGroupCounterMap_[groupName_]);
-  groupPgId_ = groupName_ + "_" + processGroupID_;
-  pgUniqueNCCLIDCnt_[groupPgId_] = -1;
+  processGroupID_ = std::to_string(processGroupCounterMap_[groupKey]);
+  groupPgID_ = groupName_ + "_" + processGroupID_;
+  pgUniqueNCCLIDCnt_[groupPgID_] = -1;
 }
 
 ProcessGroupNCCL::~ProcessGroupNCCL() {
   std::unique_lock<std::mutex> lock(pgTrackingLock_);
-  pgUniqueNCCLIDCnt_.erase(groupPgId_);
+  pgUniqueNCCLIDCnt_.erase(groupPgID_);
 }
 
 void ProcessGroupNCCL::broadcastUniqueNCCLID(ncclUniqueId* ncclID) {
@@ -178,8 +178,7 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(ncclUniqueId* ncclID) {
   // NCCL unique ID created
   std::unique_lock<std::mutex> lock(pgTrackingLock_);
   auto groupPgId = groupName_ + "_" + processGroupID_;
-  auto uniqueNCCLIDCnt = pgUniqueNCCLIDCnt_[groupPgId_] + 1;
-  pgUniqueNCCLIDCnt_[groupPgId_] = uniqueNCCLIDCnt;
+  const auto uniqueNCCLIDCnt = ++pgUniqueNCCLIDCnt_[groupPgID_];
 
   lock.unlock();
 
