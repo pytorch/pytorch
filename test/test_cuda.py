@@ -1536,6 +1536,7 @@ class TestCuda(TestCase):
 
         x = torch.ones(65504, device='cuda', dtype=torch.float16)
         self.assertEqual(x.sum(), 65504)
+        self.assertEqual(x.sum(dtype=torch.float32), 65504)
 
         a = torch.zeros(1203611).bernoulli_(0.0005)
         x = a.to(device='cuda', dtype=torch.float16)

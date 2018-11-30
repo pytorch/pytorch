@@ -228,7 +228,7 @@ protected:
   bool is_reduction_ = false;
   bool compute_common_dtype_ = true;
   bool allow_cpu_scalars_ = false;
-  bool promote_output_types_ = false;
+  bool promote_gpu_output_dtypes_ = false;
 };
 
 struct TensorIterator::Builder {
@@ -247,10 +247,6 @@ struct TensorIterator::Builder {
 
   void dont_compute_common_dtype() {
     iter_->compute_common_dtype_ = false;
-  }
-
-  void promote_output_types() {
-    iter_->promote_output_types_ = true;
   }
 
   void dont_resize_outputs() {
