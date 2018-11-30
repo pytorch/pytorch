@@ -25,29 +25,6 @@
 namespace at {
 namespace cuda {
 namespace detail {
-namespace {
-
-void check_status(int32_t status) {
-  AT_CHECK(
-      static_cast<cudaError_t>(status) == cudaSuccess,
-      "CUDA error (",
-      static_cast<int32_t>(status),
-      "): ",
-      cudaGetErrorString(static_cast<cudaError_t>(status)));
-}
-
-void set_device(int32_t device) {
-  check_status(cudaSetDevice(device));
-}
-
-void get_device(int32_t* device) {
-  check_status(cudaGetDevice(device));
-}
-
-void unchecked_set_device(int32_t device) {
-  const auto return_code = cudaSetDevice(device);
-  (void)return_code;
-}
 
 // NB: deleter is dynamic, because we need it to live in a separate
 // compilation unit (alt is to have another method in hooks, but
