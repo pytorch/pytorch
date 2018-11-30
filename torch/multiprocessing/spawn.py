@@ -5,8 +5,16 @@ import multiprocessing.connection
 import signal
 import sys
 
+from . import _prctl_pr_set_pdeathsig
+
 
 def _wrap(fn, i, args, error_queue):
+    # prctl(2) is a Linux specific system call.
+    # On other systems the following function call has no effect.
+    # This is set to ensure that non-daemonic child processes can
+    # terminate if their parent terminates before they do.
+    _prctl_pr_set_pdeathsig(signal.SIGINT)
+
     try:
         fn(i, *args)
     except KeyboardInterrupt:
@@ -38,6 +46,9 @@ class SpawnContext:
             process.sentinel: index
             for index, process in enumerate(processes)
         }
+
+    def pids(self):
+        return [int(process.pid) for process in self.processes]
 
     def join(self, timeout=None):
         r"""
