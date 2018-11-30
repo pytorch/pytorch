@@ -811,6 +811,9 @@
 - name: trunc(Tensor self)
   self: zeros_like(grad)
 
+- name: to_dense(Tensor self)
+  self: to_dense_backward(grad, self)
+
 - name: unfold(Tensor self, int64_t dimension, int64_t size, int64_t step)
   self: unfold_backward(grad, self.sizes(), dimension, size, step)
 

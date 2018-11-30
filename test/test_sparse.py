@@ -8,6 +8,7 @@ import unittest
 from common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, do_test_empty_full, load_tests
 from common_cuda import TEST_CUDA
 from numbers import Number
+from torch.autograd.gradcheck import gradcheck
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -214,6 +215,11 @@ class TestSparse(TestCase):
             self.assertEqual(res, x.to_dense())
             self.assertEqual(res, self.safeToDense(x))
 
+            def fn(x):
+                return x.to_dense()
+            x.requires_grad_(True)
+            gradcheck(fn, (x,))
+
         i = self.IndexTensor([
             [0, 1, 2, 2],
             [0, 0, 0, 3],
@@ -289,6 +295,11 @@ class TestSparse(TestCase):
             x.to_dense()
             self.assertEqual(res, x.to_dense())
             self.assertEqual(res, self.safeToDense(x))
+
+            def fn(x):
+                return x.to_dense()
+            x.requires_grad_(True)
+            gradcheck(fn, (x,))
 
         i = self.IndexTensor([
             [0, 1, 2, 2],
@@ -963,21 +974,25 @@ class TestSparse(TestCase):
                 S_sum = torch.sparse.sum(S)
                 D_sum = D.sum()
                 self.assertEqual(S_sum, D_sum)
-                S_sum.backward()
-                D_sum.backward()
-                D_grad = D.grad.masked_fill_(mask, 0)
-                self.assertEqual(S.grad.to_dense(), D_grad)
+
+                def fn(S):
+                    res = torch.sparse.sum(S)
+                    if res.is_sparse:
+                        res = res.to_dense()
+                    return res
+                gradcheck(fn, (S,))
+
             else:
                 S_sum = torch.sparse.sum(S, td)
                 D_sum = D.sum(td)
                 self.assertEqual(S_sum.to_dense() if S_sum.is_sparse else S_sum, D_sum)
-                S_sum.backward(S_sum.detach())
-                S_grad = S.grad
-                data = S_sum.to_dense().detach() if S_sum.is_sparse else S_sum.detach()
-                D_sum.backward(data)
-                D_grad = D.grad.masked_fill_(mask, 0)
-                S_grad_dense = S_grad.coalesce().to_dense() if S_grad.is_sparse else S_grad
-                self.assertEqual(S_grad_dense, D_grad)
+
+                def fn(S):
+                    res = torch.sparse.sum(S, td)
+                    if res.is_sparse:
+                        res = res.to_dense()
+                    return res
+                gradcheck(fn, (S,))
 
         nnz = 10
         sparse_dims = 2
