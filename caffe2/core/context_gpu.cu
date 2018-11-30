@@ -213,7 +213,7 @@ static void Caffe2InitializeCuda() {
       CAFFE2_COMPILE_TIME_MAX_GPUS,
       "). Increase that and recompile the caffe binary.");
 
-  for (int i = 0; i < NumCudaDevices(); ++i) {
+  for (DeviceIndex i = 0; i < NumCudaDevices(); ++i) {
     DeviceGuard g(i);
     // Enable peer access.
     const int peer_group = i / CAFFE2_CUDA_MAX_PEER_SIZE;
@@ -328,11 +328,11 @@ struct Caffe2CudaInitializerHelper {
  * gpu id to be -1, it means that we will just use the current gpu id when
  * the function is being called.
  */
-static inline int RectifyGPUID(const int gpu_id) {
+static inline DeviceIndex RectifyGPUID(DeviceIndex gpu_id) {
   return gpu_id == -1 ? CaffeCudaGetDevice() : gpu_id;
 }
 
-CUDAContext::CUDAContext(const int gpu_id)
+CUDAContext::CUDAContext(DeviceIndex gpu_id)
     : gpu_id_(RectifyGPUID(gpu_id)), random_seed_(RandomNumberSeed()) {
   static Caffe2CudaInitializerHelper g_cuda_initializer_;
 }

@@ -223,6 +223,10 @@ class RendezvousTest(TestCase):
 
 class RendezvousEnvTest(TestCase):
     def test_common_errors(self):
+        # TODO remove this hack
+        if not hasattr(c10d, "ProcessGroupNCCL"):
+            raise unittest.SkipTest("C10D is not built with NCCL process group,"
+                                    " skipping test")
         vars = {
             "WORLD_SIZE": "2",
             "RANK": "0",
@@ -247,22 +251,67 @@ class RendezvousEnvTest(TestCase):
             d.pop(key)
             return d
 
+        def withouts(d, keys):
+            d = d.copy()
+            for key in keys:
+                d.pop(key)
+            return d
+
         with Env(without(vars, 'WORLD_SIZE')):
             with self.assertRaisesRegex(ValueError, 'WORLD_SIZE expected'):
                 gen = c10d.rendezvous('env://')
                 next(gen)
+            c10d.init_process_group(backend='nccl', world_size=2)
+            self.assertEqual(c10d.get_rank(), 0)
+            self.assertEqual(c10d.get_world_size(), 2)
+            c10d.destroy_process_group()
+
         with Env(without(vars, 'RANK')):
             with self.assertRaisesRegex(ValueError, 'RANK expected'):
                 gen = c10d.rendezvous('env://')
                 next(gen)
+            c10d.init_process_group(backend='nccl', rank=0)
+            self.assertEqual(c10d.get_rank(), 0)
+            self.assertEqual(c10d.get_world_size(), 2)
+            c10d.destroy_process_group()
+
+        with Env(withouts(vars, ['RANK', 'WORLD_SIZE'])):
+            c10d.init_process_group(backend='nccl', rank=0, world_size=2)
+            self.assertEqual(c10d.get_rank(), 0)
+            self.assertEqual(c10d.get_world_size(), 2)
+            c10d.destroy_process_group()
+
+        with Env(vars):
+            c10d.init_process_group(backend='nccl')
+            self.assertEqual(c10d.get_rank(), 0)
+            self.assertEqual(c10d.get_world_size(), 2)
+            c10d.destroy_process_group()
+
         with Env(without(vars, 'MASTER_ADDR')):
             with self.assertRaisesRegex(ValueError, 'MASTER_ADDR expected'):
                 gen = c10d.rendezvous('env://')
                 next(gen)
+
         with Env(without(vars, 'MASTER_PORT')):
             with self.assertRaisesRegex(ValueError, 'MASTER_PORT expected'):
                 gen = c10d.rendezvous('env://')
                 next(gen)
+
+        with Env(without(vars, 'WORLD_SIZE')):
+            gen = c10d.rendezvous('env://?world_size={}'.format(2))
+            _, _, size = next(gen)
+            self.assertEqual(size, 2)
+
+        with Env(without(vars, 'RANK')):
+            gen = c10d.rendezvous('env://?rank={}'.format(0))
+            _, rank, _ = next(gen)
+            self.assertEqual(rank, 0)
+
+        with Env(withouts(vars, ['RANK', 'WORLD_SIZE'])):
+            gen = c10d.rendezvous('env://?rank={}&world_size={}'.format(0, 2))
+            _, rank, size = next(gen)
+            self.assertEqual(rank, 0)
+            self.assertEqual(size, 2)
 
     @retry_on_address_already_in_use_error
     def test_nominal(self):
@@ -902,7 +951,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             opts.rootTensor = 0
             pg.reduce([t1, t1], opts)
 
-    def test_reduce_basics(self):
+    def _test_reduce_basics(self, fn):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
         for (op, input, output) in simple_reduce_tests(self.rank, self.world_size):
@@ -910,11 +959,55 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 opts = c10d.ReduceOptions()
                 opts.reduceOp = op
                 opts.rootRank = root
-                tmp = input.clone()
+                tmp = fn(input)
                 work = pg.reduce([tmp], opts)
                 work.wait()
                 if root == self.rank:
                     self.assertEqual(output, tmp)
+
+    def test_reduce_basics(self):
+        self._test_reduce_basics(lambda t: t.clone())
+
+    @skip_if_not_multigpu
+    def test_reduce_basics_cuda(self):
+        self._test_reduce_basics(lambda t: t.clone().cuda())
+
+    def _test_reduce_stress(self, inputs):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts(threads=8))
+        work_handles = []
+        outputs = []
+        for i in range(len(inputs)):
+            for root in range(self.world_size):
+                opts = c10d.ReduceOptions()
+                opts.rootRank = root
+                tmp = inputs[i].clone()
+                outputs.append(tmp)
+                work = pg.reduce([tmp], opts)
+                work_handles.append(work)
+
+        for i, work_handle in enumerate(work_handles):
+            work_handle.wait()
+            iter = i // self.world_size
+            root = i % self.world_size
+            if root == self.rank:
+                self.assertEqual(
+                    torch.Tensor([
+                        (iter * self.world_size) +
+                        (self.world_size * (self.world_size - 1) / 2)
+                    ]),
+                    outputs[i],
+                    "Mismatch in iteration %d with root rank %d" % (iter, root),
+                )
+
+    def test_reduce_stress(self):
+        inputs = [torch.Tensor([i + self.rank]) for i in range(1000)]
+        self._test_reduce_stress(inputs)
+
+    @skip_if_not_multigpu
+    def test_reduce_stress_cuda(self):
+        inputs = [torch.Tensor([i + self.rank]).cuda() for i in range(1000)]
+        self._test_reduce_stress(inputs)
 
     def test_send_recv_all_to_all(self):
         store = c10d.FileStore(self.file.name, self.world_size)

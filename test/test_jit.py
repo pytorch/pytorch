@@ -258,7 +258,6 @@ class JitTestCase(TestCase):
                     raise
                 else:
                     return
-
             ppv = "op_version_set = 0\n{}".format(pp)
             sm = copy_structure_and_params(module)
             torch._C._jit_import_methods(sm, ppv, constant_table)
@@ -2950,6 +2949,22 @@ class TestScript(JitTestCase):
             self.assertExpectedGraph(ge.graph)
 
         return ge
+
+    def test_jitter_bug(self):
+        @torch.jit.script
+        def fn2(input, kernel_size):
+            # type: (Tensor, List[int]) -> Tensor
+            if kernel_size[0] > 1:
+                _stride = [2]
+            else:
+                _stride = kernel_size
+            print(_stride, kernel_size)
+            return input
+
+        @torch.jit.script
+        def fn(input):
+            # type: (Tensor) -> Tensor
+            return fn2(input, [1])
 
     def test_annoying_doubles(self):
         mod = types.ModuleType("temp")
@@ -8719,6 +8734,13 @@ a")
             return ls
         self.checkScript(foo, (torch.rand(2, 3), torch.rand(3)))
 
+    def test_inplace_copy_script(self):
+        def foo(x):
+            a = torch.rand(3, 4)
+            a.copy_(x)
+            return a
+        self.checkScript(foo, (torch.rand(3, 4),))
+
     def test_lhs_indexing_increment(self):
         def foo(a, b):
             a[0] += b
@@ -8782,6 +8804,15 @@ a")
             # type: (Tensor) -> Tuple[Tensor, Tensor]
             return F.max_pool1d(x, 1, 1, 0, 1, False, True)
         self.checkScript(arg_true, (torch.randn(3, 3, 3),))
+
+    def test_infer_size(self):
+        from torch._C import _infer_size
+
+        def fn(x, y):
+            # type: (Tensor, Tensor) -> List[int]
+            return _infer_size(x.size(), y.size())
+
+        self.checkScript(fn, (torch.ones(2, 4, 2), torch.ones(2, 4, 2)))
 
 
 class MnistNet(nn.Module):
@@ -9416,9 +9447,6 @@ EXCLUDE_SCRIPT = {
     'test_nn_ctc_loss',
 
     # unknown builtin op
-    'test_nn_binary_cross_entropy',
-    'test_nn_binary_cross_entropy_size_average',
-    'test_nn_cross_entropy',
     'test_nn_interpolate',
     'test_nn_fold',
 }
@@ -9510,6 +9538,8 @@ def get_script_args(args):
             formals.append(name)
             actuals.append(name)
             tensors.append(arg)
+        elif isinstance(arg, str):
+            actuals.append("'{}'".format(arg))
         else:
             actuals.append(str(get_constant(arg)))
     return (formals, tensors, actuals)
@@ -10074,7 +10104,7 @@ nn_functional_tests = [
                                                            non_differentiable(torch.randn(3, 2))),),
     ('binary_cross_entropy', torch.randn(3, 2).sigmoid(),
         (non_differentiable(torch.rand(3, 2)),
-         non_differentiable(torch.randn(3, 2)), True), 'size_average'),
+         non_differentiable(torch.randn(3, 2)), None, None, 'mean'), 'size_average'),
     ('ctc_loss', torch.rand(S, S, S).log_softmax(2).detach().requires_grad_(), \
      (torch.randint(1, S, (S, S), dtype=torch.long), torch.full((S,), S, dtype=torch.long), \
       torch.randint(1, S, (S,), dtype=torch.long))),
@@ -10088,6 +10118,7 @@ nn_functional_single_grad = frozenset('test_nn_' + name for name in [
     'max_unpool3d',
     'multi_margin_loss',
     'binary_cross_entropy',
+    'binary_cross_entropy_size_average',
     'ctc_loss',
     'grid_sample',
 ])
