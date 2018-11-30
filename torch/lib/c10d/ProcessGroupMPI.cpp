@@ -477,10 +477,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
   }
   checkSingleTensor(inputTensors);
 
-  if (inputTensors.size() != 1) {
-    throw std::runtime_error("Gather: multi-GPU collective is not supported");
-  }
-
   if (groupRank_ != opts.rootRank) {
     if (outputTensors.size() > 0) {
       throw std::runtime_error(
@@ -549,10 +545,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
     return nullptr;
   }
   checkSingleTensor(outputTensors);
-
-  if (outputTensors.size() != 1) {
-    throw std::runtime_error("Scatter: multi-GPU collective is not supported");
-  }
 
   if (groupRank_ != opts.rootRank) {
     if (inputTensors.size() > 0) {
