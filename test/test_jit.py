@@ -8805,6 +8805,15 @@ a")
             return F.max_pool1d(x, 1, 1, 0, 1, False, True)
         self.checkScript(arg_true, (torch.randn(3, 3, 3),))
 
+    def test_infer_size(self):
+        from torch._C import _infer_size
+
+        def fn(x, y):
+            # type: (Tensor, Tensor) -> List[int]
+            return _infer_size(x.size(), y.size())
+
+        self.checkScript(fn, (torch.ones(2, 4, 2), torch.ones(2, 4, 2)))
+
 
 class MnistNet(nn.Module):
     def __init__(self):
@@ -9438,9 +9447,6 @@ EXCLUDE_SCRIPT = {
     'test_nn_ctc_loss',
 
     # unknown builtin op
-    'test_nn_binary_cross_entropy',
-    'test_nn_binary_cross_entropy_size_average',
-    'test_nn_cross_entropy',
     'test_nn_interpolate',
     'test_nn_fold',
 }
@@ -9522,6 +9528,8 @@ def get_script_args(args):
             formals.append(name)
             actuals.append(name)
             tensors.append(arg)
+        elif isinstance(arg, str):
+            actuals.append("'{}'".format(arg))
         else:
             actuals.append(str(get_constant(arg)))
     return (formals, tensors, actuals)
@@ -10086,7 +10094,7 @@ nn_functional_tests = [
                                                            non_differentiable(torch.randn(3, 2))),),
     ('binary_cross_entropy', torch.randn(3, 2).sigmoid(),
         (non_differentiable(torch.rand(3, 2)),
-         non_differentiable(torch.randn(3, 2)), True), 'size_average'),
+         non_differentiable(torch.randn(3, 2)), None, None, 'mean'), 'size_average'),
     ('ctc_loss', torch.rand(S, S, S).log_softmax(2).detach().requires_grad_(), \
      (torch.randint(1, S, (S, S), dtype=torch.long), torch.full((S,), S, dtype=torch.long), \
       torch.randint(1, S, (S,), dtype=torch.long))),
@@ -10100,6 +10108,7 @@ nn_functional_single_grad = frozenset('test_nn_' + name for name in [
     'max_unpool3d',
     'multi_margin_loss',
     'binary_cross_entropy',
+    'binary_cross_entropy_size_average',
     'ctc_loss',
     'grid_sample',
 ])

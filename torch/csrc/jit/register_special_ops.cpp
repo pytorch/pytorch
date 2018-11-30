@@ -1,6 +1,7 @@
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/jit/operator.h"
+#include "../ATen/ExpandUtils.h"
 
 #include <sstream>
 #include <regex>
@@ -81,6 +82,16 @@ RegisterOperators reg({
 
             drop(stack, num_inputs);
             push(stack, ss.str());
+            return 0;
+          };
+        }),
+    Operator(
+        "aten::_infer_size(int[] a, int[] b) -> int[]",
+        [](const Node* node) {
+          return [](Stack& stack) {
+            auto a = pop(stack).toIntList()->elements();
+            auto b = pop(stack).toIntList()->elements();
+            push(stack, at::infer_size(a, b));
             return 0;
           };
         })

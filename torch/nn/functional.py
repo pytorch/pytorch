@@ -1873,6 +1873,7 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
     return torch.kl_div(input, target, reduction_enum)
 
 
+@torch._jit_internal.weak_script
 def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-100,
                   reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, Optional[Tensor], Optional[bool], int, Optional[bool], str) -> Tensor
@@ -1921,6 +1922,7 @@ def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-1
     return nll_loss(log_softmax(input, 1), target, weight, None, ignore_index, None, reduction)
 
 
+@torch._jit_internal.weak_script
 def binary_cross_entropy(input, target, weight=None, size_average=None,
                          reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, Optional[Tensor], Optional[bool], Optional[bool], str) -> Tensor
@@ -1964,11 +1966,12 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
     if not (target.size() == input.size()):
         warnings.warn("Using a target size ({}) that is different to the input size ({}) is deprecated. "
                       "Please ensure they have the same size.".format(target.size(), input.size()))
-    if input.nelement() != target.nelement():
+    if input.numel() != target.numel():
         raise ValueError("Target and input must have the same number of elements. target nelement ({}) "
-                         "!= input nelement ({})".format(target.nelement(), input.nelement()))
+                         "!= input nelement ({})".format(target.numel(), input.numel()))
 
     if weight is not None:
+        weight = torch.jit._unwrap_optional(weight)
         new_size = _infer_size(target.size(), weight.size())
         weight = weight.expand(new_size)
 
