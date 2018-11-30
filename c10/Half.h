@@ -14,14 +14,19 @@
 #include <c10/util/C++17.h>
 
 #if defined(__cplusplus) && (__cplusplus >= 201103L)
-#include <cstdint>
 #include <cmath>
+#include <cstdint>
 #elif !defined(__OPENCL_VERSION__)
-#include <stdint.h>
 #include <math.h>
+#include <stdint.h>
+#endif
+
+#ifdef _MSC_VER
+#include <intrin.h>
 #endif
 
 #include <complex>
+#include <cstring>
 #include <iosfwd>
 #include <limits>
 #include <sstream>
@@ -83,16 +88,21 @@ namespace detail {
   	 * denormalized nonsign by renorm_shift, the unit bit of mantissa will shift into exponent, turning the
   	 * biased exponent into 1, and making mantissa normalized (i.e. without leading 1).
   	 */
-  	uint32_t renorm_shift = __builtin_clz(nonsign);
-  	renorm_shift = renorm_shift > 5 ? renorm_shift - 5 : 0;
-  	/*
-  	 * Iff half-precision number has exponent of 15, the addition overflows it into bit 31,
-  	 * and the subsequent shift turns the high 9 bits into 1. Thus
-  	 *   inf_nan_mask ==
-  	 *                   0x7F800000 if the half-precision number had exponent of 15 (i.e. was NaN or infinity)
-  	 *                   0x00000000 otherwise
-  	 */
-  	const int32_t inf_nan_mask = ((int32_t) (nonsign + 0x04000000) >> 8) & INT32_C(0x7F800000);
+#ifdef _MSC_VER
+        unsigned long nonsign_bsr;
+        _BitScanReverse(&nonsign_bsr, (unsigned long)nonsign);
+        uint32_t renorm_shift = (uint32_t)nonsign_bsr ^ 31;
+#else
+        uint32_t renorm_shift = __builtin_clz(nonsign);
+#endif
+        renorm_shift = renorm_shift > 5 ? renorm_shift - 5 : 0;
+        /*
+         * Iff half-precision number has exponent of 15, the addition overflows
+         * it into bit 31, and the subsequent shift turns the high 9 bits
+         * into 1. Thus inf_nan_mask == 0x7F800000 if the half-precision number
+         * had exponent of 15 (i.e. was NaN or infinity) 0x00000000 otherwise
+         */
+        const int32_t inf_nan_mask = ((int32_t) (nonsign + 0x04000000) >> 8) & INT32_C(0x7F800000);
   	/*
   	 * Iff nonsign is 0, it overflows into 0xFFFFFFFF, turning bit 31 into 1. Otherwise, bit 31 remains 0.
   	 * The signed shift right by 31 broadcasts bit 31 into all bits of the zero_mask. Thus
@@ -180,38 +190,47 @@ namespace detail {
   	 * operate on denormal inputs, and do not produce denormal results.
   	 */
   	const uint32_t exp_offset = UINT32_C(0xE0) << 23;
-  	const float exp_scale = 0x1.0p-112f;
-  	const float normalized_value = fp32_from_bits((two_w >> 4) + exp_offset) * exp_scale;
+        // const float exp_scale = 0x1.0p-112f;
+        uint32_t scale_bits = (uint32_t)15 << 23;
+        float exp_scale_val;
+        std::memcpy(&exp_scale_val, &scale_bits, sizeof(exp_scale_val));
+        const float exp_scale = exp_scale_val;
+        const float normalized_value =
+            fp32_from_bits((two_w >> 4) + exp_offset) * exp_scale;
 
-  	/*
-  	 * Convert denormalized half-precision inputs into single-precision results (always normalized).
-  	 * Zero inputs are also handled here.
-  	 *
-  	 * In a denormalized number the biased exponent is zero, and mantissa has on-zero bits.
-  	 * First, we shift mantissa into bits 0-9 of the 32-bit word.
-  	 *
-  	 *                  zeros           |  mantissa
-  	 *      +---------------------------+------------+
-  	 *      |0000 0000 0000 0000 0000 00|MM MMMM MMMM|
-  	 *      +---------------------------+------------+
-  	 * Bits             10-31                0-9
-  	 *
-  	 * Now, remember that denormalized half-precision numbers are represented as:
-  	 *    FP16 = mantissa * 2**(-24).
-  	 * The trick is to construct a normalized single-precision number with the same mantissa and thehalf-precision input
-  	 * and with an exponent which would scale the corresponding mantissa bits to 2**(-24).
-  	 * A normalized single-precision floating-point number is represented as:
-  	 *    FP32 = (1 + mantissa * 2**(-23)) * 2**(exponent - 127)
-  	 * Therefore, when the biased exponent is 126, a unit change in the mantissa of the input denormalized half-precision
-  	 * number causes a change of the constructud single-precision number by 2**(-24), i.e. the same ammount.
-  	 *
-  	 * The last step is to adjust the bias of the constructed single-precision number. When the input half-precision number
-  	 * is zero, the constructed single-precision number has the value of
-  	 *    FP32 = 1 * 2**(126 - 127) = 2**(-1) = 0.5
-  	 * Therefore, we need to subtract 0.5 from the constructed single-precision number to get the numerical equivalent of
-  	 * the input half-precision number.
-  	 */
-  	const uint32_t magic_mask = UINT32_C(126) << 23;
+        /*
+         * Convert denormalized half-precision inputs into single-precision
+         * results (always normalized). Zero inputs are also handled here.
+         *
+         * In a denormalized number the biased exponent is zero, and mantissa
+         * has on-zero bits. First, we shift mantissa into bits 0-9 of the
+         * 32-bit word.
+         *
+         *                  zeros           |  mantissa
+         *      +---------------------------+------------+
+         *      |0000 0000 0000 0000 0000 00|MM MMMM MMMM|
+         *      +---------------------------+------------+
+         * Bits             10-31                0-9
+         *
+         * Now, remember that denormalized half-precision numbers are
+         * represented as: FP16 = mantissa * 2**(-24). The trick is to construct
+         * a normalized single-precision number with the same mantissa and
+         * thehalf-precision input and with an exponent which would scale the
+         * corresponding mantissa bits to 2**(-24). A normalized
+         * single-precision floating-point number is represented as: FP32 = (1 +
+         * mantissa * 2**(-23)) * 2**(exponent - 127) Therefore, when the biased
+         * exponent is 126, a unit change in the mantissa of the input
+         * denormalized half-precision number causes a change of the constructud
+         * single-precision number by 2**(-24), i.e. the same ammount.
+         *
+         * The last step is to adjust the bias of the constructed
+         * single-precision number. When the input half-precision number is
+         * zero, the constructed single-precision number has the value of FP32 =
+         * 1 * 2**(126 - 127) = 2**(-1) = 0.5 Therefore, we need to subtract 0.5
+         * from the constructed single-precision number to get the numerical
+         * equivalent of the input half-precision number.
+         */
+        const uint32_t magic_mask = UINT32_C(126) << 23;
   	const float magic_bias = 0.5f;
   	const float denormalized_value = fp32_from_bits((two_w >> 17) | magic_mask) - magic_bias;
 
@@ -235,19 +254,29 @@ namespace detail {
    * floating-point operations and bitcasts between integer and floating-point variables.
    */
   static inline uint16_t fp16_ieee_from_fp32_value(float f) {
-  	const float scale_to_inf = 0x1.0p+112f;
-  	const float scale_to_zero = 0x1.0p-110f;
-  	float base = (fabsf(f) * scale_to_inf) * scale_to_zero;
+    // const float scale_to_inf = 0x1.0p+112f;
+    // const float scale_to_zero = 0x1.0p-110f;
+    uint32_t scale_to_inf_bits = (uint32_t)239 << 23;
+    uint32_t scale_to_zero_bits = (uint32_t)17 << 23;
+    float scale_to_inf_val, scale_to_zero_val;
+    std::memcpy(
+        &scale_to_inf_val, &scale_to_inf_bits, sizeof(scale_to_inf_val));
+    std::memcpy(
+        &scale_to_zero_val, &scale_to_zero_bits, sizeof(scale_to_zero_val));
+    const float scale_to_inf = scale_to_inf_val;
+    const float scale_to_zero = scale_to_zero_val;
 
-  	const uint32_t w = fp32_to_bits(f);
-  	const uint32_t shl1_w = w + w;
-  	const uint32_t sign = w & UINT32_C(0x80000000);
-  	uint32_t bias = shl1_w & UINT32_C(0xFF000000);
-  	if (bias < UINT32_C(0x71000000)) {
-  		bias = UINT32_C(0x71000000);
-  	}
+    float base = (fabsf(f) * scale_to_inf) * scale_to_zero;
 
-  	base = fp32_from_bits((bias >> 1) + UINT32_C(0x07800000)) + base;
+    const uint32_t w = fp32_to_bits(f);
+    const uint32_t shl1_w = w + w;
+    const uint32_t sign = w & UINT32_C(0x80000000);
+    uint32_t bias = shl1_w & UINT32_C(0xFF000000);
+    if (bias < UINT32_C(0x71000000)) {
+      bias = UINT32_C(0x71000000);
+    }
+
+        base = fp32_from_bits((bias >> 1) + UINT32_C(0x07800000)) + base;
   	const uint32_t bits = fp32_to_bits(base);
   	const uint32_t exp_bits = (bits >> 13) & UINT32_C(0x00007C00);
   	const uint32_t mantissa_bits = bits & UINT32_C(0x00000FFF);
