@@ -450,7 +450,7 @@
   dispatch:
     CUDA: _s_copy_from_cuda
 
-- func: _copy_same_type_(Tensor self, Tensor src)
+- func: _copy_same_type_(Tensor self, Tensor src) -> void
   cpu_half: True
   dispatch:
     CPU: _copy_same_type__cpu
