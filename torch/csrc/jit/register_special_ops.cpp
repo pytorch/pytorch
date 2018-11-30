@@ -39,6 +39,7 @@ RegisterOperators reg({
     Operator(
         "aten::list_with_default(int[] list, int[] defaults) -> int[]",
         [](Stack& stack) {
+          autograd::profiler::RecordFunction record("sizes");
           auto list = peek(stack, 0, 2).toIntListRef();
           auto defaults = peek(stack, 1, 2).toIntListRef();
           drop(stack, 2);
