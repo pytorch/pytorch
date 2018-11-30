@@ -455,13 +455,10 @@ static inline bool isIntOrFloatUsedAsList(
   auto v_type = value->type();
   if (v_type != FloatType::get() && v_type != IntType::get())
     return false;
-  auto arg_type = arg.type();
-  if (arg_type->cast<OptionalType>())
-    arg_type = arg_type->cast<OptionalType>()->getElementType();
+  auto arg_type = unwrapOptional(arg.type());
   auto list_type = arg_type->cast<ListType>();
   return list_type && list_type->getElementType() == v_type && arg.N();
 }
-
 
 inline bool convertibleToList(TypePtr type, TypePtr list_type_) {
   auto list_type = list_type_->cast<ListType>();
@@ -643,7 +640,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
         if (actual_type->kind() != TypeKind::ListType &&
             !convertibleToList(
                 actual_type,
-                arg.type())) { // and the actual should not be a list already
+                unwrapOptional(arg.type()))) { // and the actual should not be a list already
           auto elem_type = unwrapOptional(arg.type())->expect<ListType>()->getElementType();
           Value* list = tryCreateList(
               elem_type,

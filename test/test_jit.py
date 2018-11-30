@@ -8710,11 +8710,16 @@ a")
             return 2
 
         @torch.jit.script
+        def broadcast_opt_list(x):
+            # type: (Optional[BroadcastingList2[float]]) -> int
+            return 2
+
+        @torch.jit.script
         def opt_list_tuple_caller(x):
             # type: (Tuple[float, float]) -> int
-            return opt_list(x)
+            return opt_list(x) + broadcast_opt_list(x)
 
-        self.assertEqual(opt_list_tuple_caller((2., 3.)), 2)
+        self.assertEqual(opt_list_tuple_caller((2., 3.)), 4)
 
     def test_lhs_indexing(self):
         def foo(a, b):
