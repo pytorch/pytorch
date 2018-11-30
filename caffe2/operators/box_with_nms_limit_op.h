@@ -30,7 +30,8 @@ class BoxWithNMSLimitOp final : public Operator<Context> {
         soft_nms_min_score_thres_(this->template GetSingleArgument<float>(
             "soft_nms_min_score_thres",
             0.001)),
-        rotated_(this->template GetSingleArgument<bool>("rotated", false)) {
+        rotated_(this->template GetSingleArgument<bool>("rotated", false)),
+        share_location_(this->template GetSingleArgument<bool>("share_location", false)) {
     CAFFE_ENFORCE(
         soft_nms_method_str_ == "linear" || soft_nms_method_str_ == "gaussian",
         "Unexpected soft_nms_method");
@@ -60,6 +61,9 @@ class BoxWithNMSLimitOp final : public Operator<Context> {
   // Set for RRPN case to handle rotated boxes. Inputs should be in format
   // [ctr_x, ctr_y, width, height, angle (in degrees)].
   bool rotated_{false};
+  // If true, bounding box is shared among different classes.
+  // Usually it is false for Faster/Mask R-CNNs and true for SSDs
+  bool share_location_{ false };
 };
 
 } // namespace caffe2

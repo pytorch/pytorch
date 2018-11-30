@@ -28,6 +28,8 @@ const float PI = 3.14159265358979323846;
 //     transofmration
 // correct_transform_coords: Correct bounding box transform coordates. Set to
 //     true to match the detectron code, set to false for backward compatibility
+// match_detection_output: Match bounding box transformation to the one
+//    used in DetectionOutputLayer from Caffe/OpenVINO SSD
 // return: pixel coordinates of the bounding boxes
 //     size (M, 4), format [x1; y1; x2; y2]
 // see "Rich feature hierarchies for accurate object detection and semantic
@@ -40,7 +42,8 @@ EArrXXt<typename Derived1::Scalar> bbox_transform_upright(
     const std::vector<typename Derived2::Scalar>& weights =
         std::vector<typename Derived2::Scalar>{1.0, 1.0, 1.0, 1.0},
     const float bbox_xform_clip = BBOX_XFORM_CLIP_DEFAULT,
-    const bool correct_transform_coords = false) {
+    const bool correct_transform_coords = false,
+    const bool match_detection_output = false) {
   using T = typename Derived1::Scalar;
   using EArrXX = EArrXXt<T>;
   using EArrX = EArrXt<T>;
@@ -53,8 +56,8 @@ EArrXXt<typename Derived1::Scalar> bbox_transform_upright(
   CAFFE_ENFORCE_EQ(boxes.cols(), 4);
   CAFFE_ENFORCE_EQ(deltas.cols(), 4);
 
-  EArrX widths = boxes.col(2) - boxes.col(0) + T(1.0);
-  EArrX heights = boxes.col(3) - boxes.col(1) + T(1.0);
+  EArrX widths = boxes.col(2) - boxes.col(0) + (match_detection_output ? T(0.0) : T(1.0));
+  EArrX heights = boxes.col(3) - boxes.col(1) + (match_detection_output ? T(0.0) : T(1.0));
   auto ctr_x = boxes.col(0) + T(0.5) * widths;
   auto ctr_y = boxes.col(1) + T(0.5) * heights;
 
@@ -172,12 +175,13 @@ EArrXXt<typename Derived1::Scalar> bbox_transform(
     const bool correct_transform_coords = false,
     const bool angle_bound_on = true,
     const int angle_bound_lo = -90,
-    const int angle_bound_hi = 90) {
+    const int angle_bound_hi = 90,
+    const bool match_detetction_output = false) {
   CAFFE_ENFORCE(boxes.cols() == 4 || boxes.cols() == 5);
   if (boxes.cols() == 4) {
     // Upright boxes
     return bbox_transform_upright(
-        boxes, deltas, weights, bbox_xform_clip, correct_transform_coords);
+        boxes, deltas, weights, bbox_xform_clip, correct_transform_coords, match_detetction_output);
   } else {
     // Rotated boxes with angle info
     return bbox_transform_rotated(

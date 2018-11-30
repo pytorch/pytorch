@@ -49,6 +49,10 @@ Transform proposal bounding boxes to target bounding box using bounding box
         "float (default 1.0 degrees). For RRPN, clip almost horizontal boxes "
         "within this threshold of tolerance for backward compatibility. "
         "Set to negative value for no clipping.")
+    .Arg("clip_boxes",
+        "bool (deafault true)  Specifies, whether to clip the boxes to input image after transform")
+    .Arg("input_boxes_are_priors",
+         "bool (deafault false) Specifies, if input boxes are output of PriorBoxOp")
     .Input(
         0,
         "rois",
@@ -98,14 +102,14 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(roi_in.dim(), 2);
   CAFFE_ENFORCE(roi_in.dim32(1) == box_dim || roi_in.dim32(1) == box_dim + 1);
 
-  CAFFE_ENFORCE_EQ(delta_in.dim(), 2);
-  CAFFE_ENFORCE_EQ(delta_in.dim32(0), N);
-  CAFFE_ENFORCE_EQ(delta_in.dim32(1) % box_dim, 0);
-  const int num_classes = delta_in.dim32(1) / box_dim;
-
   CAFFE_ENFORCE_EQ(iminfo_in.dim(), 2);
   CAFFE_ENFORCE_EQ(iminfo_in.dim32(1), 3);
   const int batch_size = iminfo_in.dim32(0);
+
+  CAFFE_ENFORCE_EQ(delta_in.dim(), 2);
+  CAFFE_ENFORCE_EQ(delta_in.dim32(0), N * (input_boxes_are_priors_ ? batch_size : 1));
+  CAFFE_ENFORCE_EQ(delta_in.dim32(1) % box_dim, 0);
+  const int num_classes = delta_in.dim32(1) / box_dim;
 
   DCHECK_EQ(weights_.size(), 4);
 
@@ -117,8 +121,10 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
   // Count the number of RoIs per batch
   vector<int> num_rois_per_batch(batch_size, 0);
   if (roi_in.dim32(1) == box_dim) {
-    CAFFE_ENFORCE_EQ(batch_size, 1);
-    num_rois_per_batch[0] = N;
+    CAFFE_ENFORCE(batch_size == 1 || input_boxes_are_priors_);
+    for (int i = 0; i < batch_size; ++i) {
+        num_rois_per_batch[i] = N;
+    }
   } else {
     const auto& roi_batch_ids = boxes0.col(0);
     for (int i = 0; i < roi_batch_ids.size(); ++i) {
@@ -150,7 +156,17 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
     int img_w = int(cur_iminfo(1) / scale_before + 0.5);
 
     EArrXXf cur_boxes =
-        boxes0.rightCols(box_dim).block(offset, 0, num_rois, box_dim);
+        boxes0.rightCols(box_dim).block((input_boxes_are_priors_? 0 : offset), 0, num_rois, box_dim);
+
+    if (input_boxes_are_priors_) {
+        // priors are in [0, 1] scale,
+        // we need to rescale them
+        cur_boxes.col(0) *= img_w;
+        cur_boxes.col(1) *= img_h;
+        cur_boxes.col(2) *= img_w;
+        cur_boxes.col(3) *= img_h;
+    }
+
     // Do not apply scale for angle in rotated boxes
     cur_boxes.leftCols(4) /= scale_before;
     for (int k = 0; k < num_classes; k++) {
@@ -164,9 +180,10 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
           correct_transform_coords_,
           angle_bound_on_,
           angle_bound_lo_,
-          angle_bound_hi_);
-      EArrXXf clip_boxes =
-          utils::clip_boxes(trans_boxes, img_h, img_w, clip_angle_thresh_);
+          angle_bound_hi_,
+          input_boxes_are_priors_);
+      EArrXXf clip_boxes = (clip_boxes_ ?
+          utils::clip_boxes(trans_boxes, img_h, img_w, clip_angle_thresh_) : trans_boxes);
       // Do not apply scale for angle in rotated boxes
       clip_boxes.leftCols(4) *= scale_after;
       new_boxes.block(offset, k * box_dim, num_rois, box_dim) = clip_boxes;

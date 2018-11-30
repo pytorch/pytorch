@@ -32,7 +32,7 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
   int num_classes = tscores.size(1);
 
   CAFFE_ENFORCE_EQ(N, tboxes.size(0));
-  CAFFE_ENFORCE_EQ(num_classes * box_dim, tboxes.size(1));
+  CAFFE_ENFORCE_EQ((share_location_ ? 1 : num_classes) * box_dim, tboxes.size(1));
 
   int batch_size = 1;
   vector<float> batch_splits_default(1, tscores.size(0));
@@ -84,7 +84,7 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
     for (int j = 1; j < num_classes; j++) {
       auto cur_scores = scores.col(j);
       auto inds = utils::GetArrayIndices(cur_scores > score_thres_);
-      auto cur_boxes = boxes.block(0, j * box_dim, boxes.rows(), box_dim);
+      auto cur_boxes = boxes.block(0, (share_location_ ? 0 : j) * box_dim, boxes.rows(), box_dim);
 
       if (soft_nms_enabled_) {
         auto cur_soft_nms_scores = soft_nms_scores.col(j);
@@ -174,7 +174,7 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
     int cur_out_idx = 0;
     for (int j = 1; j < num_classes; j++) {
       auto cur_scores = scores.col(j);
-      auto cur_boxes = boxes.block(0, j * box_dim, boxes.rows(), box_dim);
+      auto cur_boxes = boxes.block(0, (share_location_ ? 0 : j) * box_dim, boxes.rows(), box_dim);
       auto& cur_keep = keeps[j];
       Eigen::Map<EArrXf> cur_out_scores(
           out_scores->template mutable_data<float>() + cur_start_idx +
@@ -260,6 +260,11 @@ returned boxes.
         "bool (default false). If true, then boxes (rois and deltas) include "
         "angle info to handle rotation. The format will be "
         "[ctr_x, ctr_y, width, height, angle (in degrees)].")
+    .Arg(
+        "share_location",
+        "bool (default false). If true, bounding box is shared among different classes. "
+        "Usually it is false for Faster/Mask R-CNNs and true for SSDs."
+    )
     .Input(0, "scores", "Scores, size (count, num_classes)")
     .Input(
         1,

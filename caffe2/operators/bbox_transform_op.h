@@ -31,7 +31,11 @@ class BBoxTransformOp final : public Operator<Context> {
         angle_bound_hi_(
             this->template GetSingleArgument<int>("angle_bound_hi", 90)),
         clip_angle_thresh_(
-            this->template GetSingleArgument<float>("clip_angle_thresh", 1.0)) {
+            this->template GetSingleArgument<float>("clip_angle_thresh", 1.0)),
+        clip_boxes_(
+            this->template GetSingleArgument<bool>("clip_boxes", true)),
+        input_boxes_are_priors_(
+            this->template GetSingleArgument<bool>("input_boxes_are_priors", false)) {
     CAFFE_ENFORCE_EQ(
         weights_.size(),
         4,
@@ -65,6 +69,10 @@ class BBoxTransformOp final : public Operator<Context> {
   // tolerance for backward compatibility. Set to negative value for
   // no clipping.
   float clip_angle_thresh_{1.0};
+  // Specifies, if we want to clip boxes after transform
+  bool clip_boxes_{ true };
+  // Set to true, if input boxes are output of PriorBoxOp 
+  bool input_boxes_are_priors_{ false };
 };
 
 } // namespace caffe2
