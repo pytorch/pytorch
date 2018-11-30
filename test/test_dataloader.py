@@ -232,27 +232,37 @@ class SeedDataset(Dataset):
 
 
 # Inspired by https://stackoverflow.com/a/26703365
-# This will ensure that each worker at least processes one data
-class SynchronizedSeedDataset(Dataset):
+# If all workers will call `sync_once`, they will be blocked until all workers
+# reach the call (i.e., acting like a barrier).
+# This can be used to ensure that each worker at least processes one data.
+class SynchronizedDataset(Dataset):
 
-    def __init__(self, size, num_workers):
-        assert size >= num_workers
+    def __init__(self, size, batch_size, num_workers):
+        assert size >= num_workers * batch_size
         self.count = mp.Value('i', 0, lock=True)
         self.barrier = mp.Semaphore(0)
         self.num_workers = num_workers
         self.size = size
 
-    def __getitem__(self, idx):
+    def sync_once(self):
         with self.count.get_lock():
             self.count.value += 1
             if self.count.value == self.num_workers:
                 self.barrier.release()
         self.barrier.acquire()
         self.barrier.release()
-        return torch.initial_seed()
+
+    def __getitem__(self, idx):
+        raise NotImplementedError
 
     def __len__(self):
         return self.size
+
+
+class SynchronizedSeedDataset(SynchronizedDataset):
+    def __getitem__(self, idx):
+        self.sync_once()
+        return torch.initial_seed()
 
 
 def _test_timeout():
@@ -347,6 +357,53 @@ def _test_proper_exit(use_workers, pin_memory, exit_method, hold_iter_reference,
         # triggered, but I don't want to rely on the implementation detail of
         # Python gc.
         gc.collect()
+
+
+class TestWorkerInfoDataset(SynchronizedDataset):
+    def __getitem__(self, idx):
+        self.sync_once()
+        return torch.tensor(self.value)
+
+
+# Should be used as worker_init_fn with TestWorkerInfoDataset.
+# See _test_get_worker_info below for usage.
+def test_worker_info_init_fn(worker_id):
+    worker_info = torch.utils.data.get_worker_info()
+    assert worker_id == worker_info.id
+    assert worker_info.seed == torch.initial_seed()
+    dataset = worker_info.dataset
+    assert isinstance(dataset, TestWorkerInfoDataset)
+    assert not hasattr(dataset, 'value')
+    dataset.value = [worker_id, os.getpid()]
+
+
+def _test_get_worker_info():
+    # get_worker_info returns None in main proc
+    assert torch.utils.data.get_worker_info() is None
+    num_workers = 2
+    batch_size = 2
+    dataset = TestWorkerInfoDataset(6, batch_size, num_workers)
+    dataloader = DataLoader(dataset, batch_size=batch_size,
+                            num_workers=num_workers,
+                            worker_init_fn=test_worker_info_init_fn)
+    it = iter(dataloader)
+    data = []
+    for d in it:
+        data.append(d)
+    worker_pids = [w.pid for w in it.workers]
+    data = torch.cat(data, 0)
+    for d in data:
+        # each `d` is a [worker_id, worker_pid] set in test_worker_info_init_fn
+        assert d[1] == worker_pids[d[0]]
+    # get_worker_info returns None in main proc after data loading
+    assert torch.utils.data.get_worker_info() is None
+    # main proc dataset was never assigned this attribute
+    assert not hasattr(dataset, 'value')
+    try:
+        _ = dataset[0]
+    except AttributeError:
+        return
+    raise RuntimeError('Expected AttributeError')
 
 
 # test custom init function
@@ -476,8 +533,9 @@ class TestDataLoader(TestCase):
 
     def test_worker_seed(self):
         num_workers = 6
-        dataset = SynchronizedSeedDataset(num_workers, num_workers)
-        dataloader = DataLoader(dataset, batch_size=1, num_workers=num_workers)
+        batch_size = 1
+        dataset = SynchronizedSeedDataset(num_workers, batch_size, num_workers)
+        dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers)
         seeds = set()
         for batch in dataloader:
             seeds.add(batch[0])
@@ -490,6 +548,16 @@ class TestDataLoader(TestCase):
         for batch in dataloader:
             self.assertEqual(12345, batch[0])
             self.assertEqual(12345, batch[1])
+
+    def test_get_worker_info(self):
+        p = ErrorTrackingProcess(target=_test_get_worker_info)
+        p.start()
+        p.join(JOIN_TIMEOUT)
+        try:
+            self.assertFalse(p.is_alive())
+            self.assertEqual(p.exitcode, 0)
+        finally:
+            p.terminate()
 
     def test_shuffle(self):
         self._test_shuffle(DataLoader(self.dataset, shuffle=True))

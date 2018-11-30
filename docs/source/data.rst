@@ -7,6 +7,7 @@ torch.utils.data
 .. autoclass:: ConcatDataset
 .. autoclass:: Subset
 .. autoclass:: DataLoader
+.. autofunction:: torch.utils.data.get_worker_info
 .. autofunction:: torch.utils.data.random_split
 .. autoclass:: torch.utils.data.Sampler
 .. autoclass:: torch.utils.data.SequentialSampler
