@@ -883,8 +883,16 @@ Tensor thnn_col2im(const Tensor & self, IntList output_size, IntList kernel_size
   return at::_thnn_col2im(self, output_size, kernel_size, dilation, padding, stride);
 }
 
+Tensor thnn_col2im_backward(const Tensor & grad_output, IntList kernel_size, IntList dilation, IntList padding, IntList stride) {
+  return at::_thnn_col2im_backward(grad_output, kernel_size, dilation, padding, stride);
+}
+
 Tensor thnn_im2col(const Tensor & self, IntList kernel_size, IntList dilation, IntList padding, IntList stride) {
   return at::_thnn_im2col(self, kernel_size, dilation, padding, stride);
+}
+
+Tensor thnn_im2col_backward(const Tensor & grad_output, IntList input_size, IntList kernel_size, IntList dilation, IntList padding, IntList stride) {
+  return at::_thnn_im2col_backward(grad_output, input_size, kernel_size, dilation, padding, stride);
 }
 
 }} // namespace at::native
