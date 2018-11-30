@@ -209,12 +209,20 @@ PyTorchStreamReader::~PyTorchStreamReader() {
 
 size_t ostream_write_func(void *pOpaque, mz_uint64 file_ofs, const void *pBuf, size_t n) {
   auto self = static_cast<PyTorchStreamWriter*>(pOpaque);
-  self->out_->seekp(file_ofs);
-  if(!*self->out_)
-    return 0;
+  if (self->current_pos_ != file_ofs) {
+    // xxx - windows ostringstream refuses to seek to the end of an empty string
+    // so we workaround this by not calling seek unless necessary
+    // in the case of the first write (to the empty string) file_ofs and
+    // current_pos_ will be 0 and the seek won't occur.
+    self->out_->seekp(file_ofs);
+    if(!*self->out_)
+      return 0;
+  }
+
   self->out_->write(static_cast<const char*>(pBuf), n);
   if(!*self->out_)
     return 0;
+  self->current_pos_ = file_ofs + n;
   return n;
 }
 
