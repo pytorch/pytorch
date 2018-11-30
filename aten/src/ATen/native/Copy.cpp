@@ -37,9 +37,9 @@ bool copy_transpose_valid(const at::Tensor& self, const at::Tensor& src) {
 namespace at {
 namespace native {
 
-Tensor& _copy__cpu(Tensor& self, const Tensor& src) {
+Tensor& _copy__cpu(Tensor& self, const Tensor& src, bool non_blocking) {
   if (src.is_cuda()) {
-    _copy_from(src, self);
+    _copy_from(src, self, non_blocking);
     return self;
   }
   AT_DISPATCH_ALL_TYPES_AND_HALF(
