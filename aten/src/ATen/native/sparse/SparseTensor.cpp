@@ -290,7 +290,7 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim){
   AT_CHECK(sparse_dim > 0, "sparse_dim must be >0");
   AT_CHECK(sparse_dim <= dims, 
     "sparse_dim must be less than or equal to self.dim()");
-  at::TensorOptions sparse_options = self.type().toSparse().options();
+  at::TensorOptions sparse_options = self.options().layout(kSparse);
   std::vector<int64_t> sizes = self.sizes().vec();
 
   Tensor nz = self.nonzero().transpose(0, 1);
