@@ -149,3 +149,53 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
         "arg_name": arg_name
     }
     return fn
+
+
+try:
+    import typing
+    from typing import Tuple, List
+
+    def is_tuple(ann):
+        # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
+        return ann.__module__ == 'typing' and \
+            (getattr(ann, '__origin__', None) is typing.Tuple or
+             getattr(ann, '__origin__', None) is tuple)
+except ImportError:
+    # A minimal polyfill for versions of Python that don't have typing.
+    # Note that this means that they also don't support the fancy annotation syntax, so
+    # those instances will only be used in our tiny `type: ` comment interpreter.
+
+    # The __getitem__ in typing is implemented using metaclasses, but I'm too lazy for that.
+    class TupleCls(object):
+        def __getitem__(self, types):
+            return TupleInstance(types)
+
+    class TupleInstance(object):
+        def __init__(self, types):
+            setattr(self, '__args__', types)
+
+    class ListInstance(object):
+        def __init__(self, types):
+            setattr(self, '__args__', types)
+
+    class ListCls(object):
+        def __getitem__(self, types):
+            return TupleInstance(types)
+
+    Tuple = TupleCls()
+    List = ListCls()
+
+    def is_tuple(ann):
+        return isinstance(ann, TupleInstance)
+
+
+# allows BroadcastingList instance to be subscriptable
+class BroadcastingListCls(object):
+    def __getitem__(self, types):
+        return
+
+# mypy doesn't support parameters on types, so we have to explicitly type each
+# list size
+BroadcastingList1 = BroadcastingListCls()
+for i in range(2, 7):
+    globals()["BroadcastingList{}".format(i)] = BroadcastingList1
