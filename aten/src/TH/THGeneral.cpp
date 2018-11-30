@@ -267,6 +267,12 @@ void THSetNumThreads(int num_threads)
 #endif
 #ifdef TH_BLAS_MKL
   mkl_set_num_threads(num_threads);
+
+  // because PyTorch uses OpenMP outside of MKL invocations
+  // as well, we want this flag to be false, so that
+  // threads aren't destroyed and recreated across every
+  // MKL / non-MKL boundary of OpenMP usage
+  // See https://github.com/pytorch/pytorch/issues/13757
   mkl_set_dynamic(false);
 #endif
 
