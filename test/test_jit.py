@@ -3512,6 +3512,16 @@ a")
             for i in range(len(script_funs)):
                 self.assertEqual(test_func(script_funs[i], x, tensor), test_func(funs[i], x, tensor))
 
+    def test_tuple_to_opt_list(self):
+        @torch.jit.script
+        def foo(x):
+            # type: (Optional[List[int]]) -> int
+            return 1
+
+        @torch.jit.script
+        def tuple_call():
+            return foo((1, 2))
+
     def test_advancedindex(self):
         def consec(size, start=0):
             numel = torch.tensor(size).prod().item()
@@ -10275,9 +10285,9 @@ def add_interpolate_module_tests():
     # testing where size is not none test_upsamplingNearest2d
     size = 4
     scale_factor = None
-    nn_module_tests.append(('Upsample', args, Variable(torch.ones(1, 1, 2, 2, 2)), False, str(i)))
-
     in_t = torch.ones(1, 1, 2, 2)
+    nn_module_tests.append(('Upsample', args, Variable(in_t), False, str(i)))
+
     args = (size, scale_factor)
     nn_module_tests.append(('UpsamplingNearest2d', args, Variable(in_t), False,))
     nn_module_tests.append(('UpsamplingBilinear2d', args, Variable(in_t), False,))
