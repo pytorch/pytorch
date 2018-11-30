@@ -198,15 +198,65 @@ void copy_to_cpu(Tensor& dst, const Tensor& src) {
   _copy_same_type_(dst, dst_contig);
 }
 
+void copy_from_cpu_async_(Tensor& dst, const Tensor& src) {
+  AT_CHECK(dst.is_contiguous(), "Target tensor must be contiguous.");
+  AT_CHECK(src.is_contiguous(), "Source tensor must be contiguous.");
+
+  if (dst.numel() == 0) {
+    return;
+  }
+
+  CUDAGuard device_guard(dst.device());
+  CUDAStream stream = getCurrentCUDAStream();
+
+  AT_DISPATCH_ALL_TYPES_AND_HALF(src.type(), "copy_from_cpu_async", [&]() {
+    AT_CUDA_CHECK(cudaMemcpyAsync(
+        dst.data<scalar_t>(),
+        src.data<scalar_t>(),
+        src.numel() * sizeof(scalar_t),
+        cudaMemcpyHostToDevice,
+        stream));
+    AT_CUDA_CHECK(THCCachingHostAllocator_recordEvent(
+        src.storage().data<scalar_t>(), stream));
+  });
+}
+
+void copy_to_cpu_async_(Tensor& dst, const Tensor& src) {
+  AT_CHECK(dst.is_contiguous(), "Target tensor must be contiguous.");
+  AT_CHECK(src.is_contiguous(), "Source tensor must be contiguous.");
+
+  if (dst.numel() == 0) {
+    return;
+  }
+
+  CUDAGuard device_guard(src.device());
+  CUDAStream stream = getCurrentCUDAStream();
+
+  AT_DISPATCH_ALL_TYPES_AND_HALF(src.type(), "copy_to_cpu_async", [&]() {
+    AT_CUDA_CHECK(cudaMemcpyAsync(
+        dst.data<scalar_t>(),
+        src.data<scalar_t>(),
+        src.numel() * sizeof(scalar_t),
+        cudaMemcpyDeviceToHost,
+        stream));
+    AT_CUDA_CHECK(THCCachingHostAllocator_recordEvent(
+        src.storage().data<scalar_t>(), stream));
+  });
+}
+
 template <typename dst_T>
-void _copy__cuda(Tensor& dst, const Tensor& src) {
+void _copy__cuda(Tensor& dst, const Tensor& src, bool non_blocking) {
   AT_CHECK(dst.numel() == src.numel(), "sizes do not match");
   AT_DISPATCH_ALL_TYPES_AND_HALF(src.type(), "_copy__cuda", [&]() {
     if (dst.is_cuda() && src.is_cuda()) {
       copy_device_to_device<dst_T, scalar_t>(dst, src);
     } else if (dst.is_cuda()) {
       if (std::is_same<dst_T, scalar_t>::value) {
-        copy_from_cpu(dst, src);
+        if (non_blocking) {
+          copy_from_cpu_async_(dst, src);
+        } else {
+          copy_from_cpu(dst, src);
+        }
       } else {
         // Do a dtype converting copy on the CPU, then copy to device
         Tensor srcf = at::empty_like(src, src.options().dtype(dst.dtype()));
@@ -215,7 +265,11 @@ void _copy__cuda(Tensor& dst, const Tensor& src) {
       }
     } else {
       if (std::is_same<dst_T, scalar_t>::value) {
-        copy_to_cpu(dst, src);
+        if (non_blocking) {
+          copy_to_cpu_async_(dst, src);
+        } else {
+          copy_to_cpu(dst, src);
+        }
       } else {
         // Copy to CPU as the same dtype, then do a dtype converting copy
         Tensor srcf = at::empty_like(src, dst.options().dtype(src.dtype()));
@@ -231,14 +285,17 @@ void _copy__cuda(Tensor& dst, const Tensor& src) {
 namespace at {
 namespace native {
 
-Tensor& _copy__cuda(Tensor& self, const Tensor& src) {
+Tensor& _copy__cuda(Tensor& self, const Tensor& src, bool non_blocking) {
   AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "_copy__cuda", [&]() {
-    ::_copy__cuda<scalar_t>(self, src);
+    ::_copy__cuda<scalar_t>(self, src, non_blocking);
   });
   return self;
 }
 
-Tensor _copy_from_cuda(const Tensor& self, const Tensor& dst) {
+Tensor _copy_from_cuda(
+    const Tensor& self,
+    const Tensor& dst,
+    bool non_blocking) {
   Tensor dst_ = dst;
   _copy__cuda(dst_, self);
   return dst;
