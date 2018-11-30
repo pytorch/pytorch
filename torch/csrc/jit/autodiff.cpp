@@ -185,16 +185,17 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       return {grads.at(0) / inputs.at(1), nullptr};
 
     } else if (node->matches("aten::max(Tensor self, Tensor other) -> Tensor")) {
-      return {grads.at(0) * (inputs.at(0) > inputs.at(1)).type_as(grads.at(0)),
-              grads.at(0) * (inputs.at(1) > inputs.at(0)).type_as(grads.at(0))};
+      return {sumToSizeOf(grads.at(0) * (inputs.at(0) > inputs.at(1)).type_as(grads.at(0)), attr::self),
+              sumToSizeOf(grads.at(0) * (inputs.at(1) > inputs.at(0)).type_as(grads.at(0)), attr::other)};
 
     } else if (node->matches("aten::min(Tensor self, Tensor other) -> Tensor")) {
-      return {grads.at(0) * (inputs.at(0) < inputs.at(1)).type_as(grads.at(0)),
-              grads.at(0) * (inputs.at(1) < inputs.at(0)).type_as(grads.at(0))};
+      return {sumToSizeOf(grads.at(0) * (inputs.at(0) < inputs.at(1)).type_as(grads.at(0)), attr::self),
+              sumToSizeOf(grads.at(0) * (inputs.at(1) < inputs.at(0)).type_as(grads.at(0)), attr::other)};
 
     } else if (node->matches("aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor")) {
-      return {nullptr, grads.at(0) * inputs.at(0).type_as(grads.at(0)),
-                       grads.at(0) * (1 - inputs.at(0)).type_as(grads.at(0))};
+      return {nullptr,
+              sumToSizeOf(grads.at(0) * inputs.at(0).type_as(grads.at(0)), attr::self),
+              sumToSizeOf(grads.at(0) * (1 - inputs.at(0)).type_as(grads.at(0)), attr::other)};
 
     } else if (node->matches("aten::sigmoid(Tensor self) -> Tensor")) {
       // TODO: The order of operations matter in this case. This
