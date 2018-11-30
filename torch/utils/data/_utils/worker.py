@@ -8,6 +8,7 @@ import torch
 import random
 import sys
 import os
+from collections import namedtuple
 from torch._six import queue
 from . import collate, signal_handling, MP_STATUS_CHECK_INTERVAL, \
     ExceptionWrapper, IS_WINDOWS
@@ -55,6 +56,38 @@ else:
             return not self.manager_dead
 
 
+WorkerInfo = namedtuple('WorkerInfo', ['id', 'seed', 'dataset'])
+
+_worker_info = None
+
+
+def get_worker_info():
+    r"""Returns the information about the current
+    :class:`~torch.utils.data.DataLoader` iterator worker process.
+
+    When called in a worker, this returns an object guaranteed to have the
+    following attributes:
+
+    * :attr:`id`: the current worker id.
+    * :attr:`seed`: the random seed set for the current worker. This value is
+      determined by main process RNG and the worker id. See
+      :class:`torch.utils.data.DataLoader`'s documentation for more details.
+    * :attr:`dataset`: the copy of the dataset object in **this** process. Note
+      that this will be a different object in a different process than the one
+      in the main process.
+
+    When called in the main process, this returns ``None``.
+
+    .. note::
+       When used in a :attr:`worker_init_fn` passed over to
+       :class:`~torch.utils.data.DataLoader`, this method can be useful to
+       set up each worker process differently. E.g., the :attr:`worker_init_fn`
+       can use the worker ``id`` to configure the ``dataset`` object to only
+       read a specific fraction of a sharded dataset.
+    """
+    return _worker_info
+
+
 def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed, init_fn, worker_id):
     # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
     # logic of this function.
@@ -74,6 +107,9 @@ def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed,
         torch.manual_seed(seed)
 
         data_queue.cancel_join_thread()
+
+        global _worker_info
+        _worker_info = WorkerInfo(worker_id, seed, dataset)
 
         if init_fn is not None:
             init_fn(worker_id)

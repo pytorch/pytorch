@@ -13,6 +13,8 @@ import threading
 from torch._six import queue
 
 
+get_worker_info = _utils.worker.get_worker_info
+
 # This function used to be defined in this file. However, it was moved to
 # _utils/collate.py. Although it is rather hard to access this from user land
 # (one has to explicitly directly `import torch.utils.data.dataloader`), there
