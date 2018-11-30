@@ -375,8 +375,8 @@ def init_process_group(backend,
 def _new_process_group_helper(world_size,
                               rank,
                               group_ranks,
-                              in_group=True,
-                              group_name="",
+                              in_group,
+                              group_name,
                               timeout=_default_pg_timeout):
     """
     Create a new distributed process group. And the new process group can be
@@ -423,7 +423,7 @@ def _new_process_group_helper(world_size,
             if not is_nccl_available():
                 raise RuntimeError("Distributed package doesn't have NCCL "
                                    "built in")
-            pg = ProcessGroupNCCL(store, rank, world_size)
+            pg = ProcessGroupNCCL(store, rank, world_size, group_name)
             _pg_map[pg] = (Backend.NCCL, store)
             _pg_names[pg] = group_name
         else:
@@ -1198,6 +1198,15 @@ def new_group(ranks=None, timeout=_default_pg_timeout):
     _check_default_pg()
 
     global _pg_group_ranks
+    global _group_count
+    global _pg_names
+
+    group_name = str(_group_count)
+    _group_count += 1
+
+    if group_name in _pg_names.values():
+        raise RuntimeError("The specified group name has already been "
+                           "created, please use a different group name")
 
     default_backend, _ = _pg_map[_default_pg]
     global_rank = _default_pg.rank()
@@ -1232,6 +1241,7 @@ def new_group(ranks=None, timeout=_default_pg_timeout):
                                        group_rank,
                                        input_ranks,
                                        in_group,
+                                       group_name,
                                        timeout=timeout)
     else:
         # Release ranks not in the group
@@ -1242,6 +1252,8 @@ def new_group(ranks=None, timeout=_default_pg_timeout):
             pg = _new_process_group_helper(group_world_size,
                                            group_rank,
                                            input_ranks,
+                                           True,
+                                           group_name,
                                            timeout=timeout)
 
     # Create the global rank to group rank mapping
