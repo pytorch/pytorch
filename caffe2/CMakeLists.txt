@@ -219,15 +219,17 @@ if(NOT BUILD_ATEN_ONLY)
   else()
     target_link_libraries(caffe2 PUBLIC protobuf::libprotobuf)
   endif()
-
+  #if (WITH_OPENMP)
+  #  target_link_libraries(caffe2 -fopenmp)
+  #endif()
   #cmake only check for separate OpenMP library on AppleClang 7+
   #https://github.com/Kitware/CMake/blob/42212f7539040139ecec092547b7d58ef12a4d72/Modules/FindOpenMP.cmake#L252
-  if (WITH_OPENMP AND CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
-    if (CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL "7.0" OR
-        CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "7.0")
-      target_link_libraries(caffe2 PRIVATE ${OpenMP_libomp_LIBRARY})
-    endif()
-  endif()
+  #if (WITH_OPENMP AND CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
+  #  if (CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL "7.0" OR
+  #      CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "7.0")
+  #    target_link_libraries(caffe2 PRIVATE ${OpenMP_libomp_LIBRARY})
+  #  endif()
+  #endif()
 endif()
 target_link_libraries(caffe2 PUBLIC c10)
 target_link_libraries(caffe2 PUBLIC ${Caffe2_PUBLIC_DEPENDENCY_LIBS})
