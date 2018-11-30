@@ -85,26 +85,6 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        "aten::nelement(Tensor self) -> int",
-        [](const Node* node) {
-          return [](Stack& stack) {
-            auto t = pop(stack).toTensor();
-
-            if (t.sizes().size() == 0) {
-              push(stack, 0);
-              return 0;
-            }
-
-            int nelements = 1;
-            for (auto size : t.sizes()) {
-              nelements *= size;
-            }
-
-            push(stack, nelements);
-            return 0;
-          };
-        }),
-    Operator(
         "aten::_infer_size(int[] a, int[] b) -> int[]",
         [](const Node* node) {
           return [](Stack& stack) {

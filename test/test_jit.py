@@ -8783,6 +8783,15 @@ a")
             return F.max_pool1d(x, 1, 1, 0, 1, False, True)
         self.checkScript(arg_true, (torch.randn(3, 3, 3),))
 
+    def test_infer_size(self):
+        from torch._C import _infer_size
+
+        def fn(x, y):
+            # type: (Tensor, Tensor) -> List[int]
+            return _infer_size(x.size(), y.size())
+
+        self.checkScript(fn, (torch.ones(2, 4, 2), torch.ones(2, 4, 2)))
+
 
 class MnistNet(nn.Module):
     def __init__(self):
