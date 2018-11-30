@@ -97,7 +97,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-      "aten::no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) -> Tensor",
+      "aten::_no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) -> Tensor",
       [](const Node* node) {
         return [](Stack& stack) {
           at::Tensor weight;
