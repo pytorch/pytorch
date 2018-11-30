@@ -413,14 +413,13 @@ both python2 and python3.
 Spawn utility
 -------------
 
-The :doc:`multiprocessing` package also provides a spawn utility in
-:func:`torch.multiprocessing.spawn`. This helper utility can be used to spawn
-multiple processes per node by passing in the function that needs to run from
-multiple processes, and can be used for multiprocess distributed training as well.
+The :doc:`torch.multiprocessing` package also provides a ``spawn``
+function in :func:`torch.multiprocessing.spawn`. This helper function
+can be used to spawn multiple processes. It works by passing in the
+function that you want to run and spawns N processes to run it. This
+can be used for multiprocess distributed training as well.
 
 For references on how to use it, please refer to `PyToch example - ImageNet
 implementation <https://github.com/pytorch/examples/tree/master/imagenet>`_
 
-Note that this utility only supports python 3.4 or higher.
-
-.. autofunction:: torch.multiprocessing.spawn.spawn
+Note that this function requires Python 3.4 or higher.
