@@ -154,6 +154,9 @@ def run_test(executable, test_module, test_directory, options):
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
     argv = [test_module + '.py'] + unittest_args
 
+    # Forking after HIP is initialized could trigger random
+    # ihipException issue, see
+    # https://github.com/pytorch/pytorch/issues/14497
     if TEST_WITH_ROCM:
         with cd(test_directory):
             res = unittest.main(argv=argv, module=test_module, exit=False).result
