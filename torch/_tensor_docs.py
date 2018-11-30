@@ -1172,7 +1172,7 @@ Example::
 
 add_docstr_all('index_put_',
                r"""
-index_put_(indices, value) -> Tensor
+index_put_(indices, value, accumulate=False) -> Tensor
 
 Puts values from the tensor :attr:`value` into the tensor :attr:`self` using
 the indices specified in :attr:`indices` (which is a tuple of Tensors). The
