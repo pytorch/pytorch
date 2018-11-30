@@ -28,7 +28,7 @@ using value_list = std::vector<Value*>;
 //
 //   f_real_outputs = 2       // Only first two outputs were present in f originally
 //   df_input_vjps = {0, 2}   // i.e. connect grad_fn of y and t variables produced by f,
-//                    y  t    // with y's output_nr = 0 and t's output_nr = 1
+//                    y  t    // with y's output_nr = 0 and t's output_nr = 2
 //   df_input_captures = {I0, O2, O0} // Order matches the prefix of inputs to df
 //                        x   t   y
 //   df_output_vjps = {0}     // i.e. connect next_edge[0] of grad_fn to x's (grad_fn, output_nr).

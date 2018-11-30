@@ -4,7 +4,7 @@
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/lower_tuples.h"
 #include "torch/csrc/jit/symbolic_variable.h"
-#include "torch/csrc/jit/symbolic_gradient.h"
+#include "torch/csrc/jit/symbolic_script.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/utils/functional.h"
 #include "torch/csrc/jit/script/module.h"
@@ -98,6 +98,8 @@ bool isDifferentiable(Node * n) {
       n->kind() == prim::None)
     return true;
   if (differentiable_ops.find(n))
+    return true;
+  if (check_symbolic_scripts(n))
     return true;
 
   if (n->matches("aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor")) {
@@ -462,39 +464,63 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     }
     throw std::runtime_error(std::string("failed to differentiate `") + node->kind().toDisplayString() + "`");
   };
+  // Write gradient in Python and compile it to JIT graphs.
+  // For example, aten::mul() should be defined as follows
+  // def forward(x, y):
+  //     return x*y, (x, y)
+  // def backward(ctx, grad_output):
+  //     x, y = ctx
+  //     return y * grad_output, x * grad_output
+  // Note that ctx is a tuple that carries all input/intermediate results needed
+  // in backward from forward pass.
+  // grad_values(a.k.a gradOutputs) propagated through node->owningGraph() in reversed order.
+  // The forward graph should be inserted **after** the node being replaced,
+  // so that we don't traverse it infinite times.
+  // The output of compiled forward graph is [real_outputs, ctx]
+  // The input of compiled backward graph is [ctx, grad_values]
+  // We run LowerSimpleTuples afterwards to elmininate all tuples generated in this process.
+  // The original node will be cleaned up later in EliminateDeadCode
+  const auto build_script_grad = [node](const ArrayRef<Value*>& grads, const std::string& source) -> std::vector<Value*> {
+    // Compile the python code to a script module
+    auto cu = std::make_shared<script::Module>();
+    script::defineMethodsInModule(cu, source, script::nativeResolver, nullptr);
+    auto graph = node->owningGraph();
+
+    // Use forward graph to replace node in grad_desc.f
+    value_list new_outputs;
+    {
+      WithInsertPoint guard(node->next());
+      auto fw_graph = cu->find_method("forward")->graph();
+      new_outputs = script::inlineCallTo(*graph, *fw_graph, node->inputs());
+      for (size_t i = 0; i < node->outputs().size(); ++i) {
+        new_outputs.at(i)->setType(node->outputs()[i]->type());
+        new_outputs.at(i)->replaceAllUsesWith(node->outputs()[i]);
+      }
+    }
+
+    // Use backward graph to construct reverse_block
+    auto bwgraph = cu->find_method("backward")->graph();
+    auto grad_vec = grads.vec();
+    auto it = grad_vec.begin();
+    grad_vec.insert(it, new_outputs.back());
+    ArrayRef<Value*> grad(grad_vec);
+    auto grad_inputs = script::inlineCallTo(*graph, *bwgraph, grad);
+    return grad_inputs;
+  };
+
   if (!isDifferentiable(node)) {
     throw std::runtime_error(std::string("differentiation of ") + node->kind().toDisplayString() + " "
                              "is not supported, or it is missing necessary type information");
   }
-  // If define using Torchscript, use it instead of symbolic
-  for (auto& it : symbolic_grads) {
+  // If defined using Torchscript, use it instead of symbolic
+  // symbolic_script is a map<schema, python_code_str> defined in symbolic_script.h
+  for (auto& it : symbolic_scripts) {
     if (node->matches(it.first.c_str())) {
-      auto graph = node->owningGraph();
-      auto cu = std::make_shared<script::Module>();
-      script::defineMethodsInModule(cu, it.second, script::nativeResolver, nullptr);
-      // Use fw_graph to replace node in grad_desc.f
-      value_list new_outputs;
-      {
-        WithInsertPoint guard(node->next());
-        auto fw_graph = cu->find_method("forward")->graph();
-        new_outputs = script::inlineCallTo(*graph, *fw_graph, node->inputs());
-        for (size_t i = 0; i < node->outputs().size(); ++i) {
-          new_outputs.at(i)->setType(node->outputs()[i]->type());
-          new_outputs.at(i)->replaceAllUsesWith(node->outputs()[i]);
-        }
-      }
-
-      // Use bw_graph to replace symbolic grads in grad_desc.df
-      auto bgraph = cu->find_method("backward")->graph();
-      auto grad_vec = grad_values.vec();
-      auto it = grad_vec.begin();
-      grad_vec.insert(it, new_outputs.back());
-      ArrayRef<Value*> grad(grad_vec);
-      auto grad_inputs = script::inlineCallTo(*graph, *bgraph, grad);
-
-      return grad_inputs;
+      return build_script_grad(grad_values, it.second);
     }
   }
+  // Definition not found in torchscript, look up in the build_sym_grad
+  // TODO: migrate all to using torchscript
   auto sym_grads = build_sym_grad(fmap<SymbolicVariable>(grad_values));
   return fmap(sym_grads, [](const SymbolicVariable &v) { return v.value(); });
 }
@@ -610,12 +636,8 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
       set_grad(inputs[i], grad_inputs[i]);
     }
   }
+  // Clean up old nodes which has been replaced by forward graphs in torchscript
   EliminateDeadCode(graph.block());
-
-  std::cout << "cleaned graph" << std::endl;
-  graph.dump();
-  std::cout << "reverse node" << std::endl;
-  reverse_node->dump();
 
   auto inputs = graph.inputs();
   for (size_t i = 0, num_inputs = inputs.size(); i < num_inputs; ++i) {
@@ -631,7 +653,9 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
     grad_desc.df_output_vjps.push_back(i);
   }
 
-    EliminateDeadCode(reverse_block);
+  // reverse_block must be cleaned after registerOutput, otherwise the whole block
+  // is deleted.
+  EliminateDeadCode(reverse_block);
   return ReverseDetails(std::move(grad_map), reverse_block);
 }
 
@@ -802,8 +826,6 @@ Gradient differentiate(std::shared_ptr<Graph>& graph) {
   std::swap(graph, grad_desc.f);
   // XXX: Take care when handling outputs - they can be duplicated!
 
-  std::cout << "original graph" << std::endl;
-  grad_desc.f->dump();
   WithInsertPoint guard(grad_desc.f->block());
   // Fills in df_input_vjps and df_output_vjps
   auto rev_info = addReverseInline(grad_desc);
@@ -816,9 +838,6 @@ Gradient differentiate(std::shared_ptr<Graph>& graph) {
   // Fills in f, df, f_real_outputs, df_input_captures,
   // modifies df_input_vjps (new vjps are added for temporaries)
   lambdaLiftReverse(grad_desc, rev_info);
-  std::cout << "grad_desc" << std::endl;
-  grad_desc.f->dump();
-  grad_desc.df->dump();
   return grad_desc;
 }
 
