@@ -1522,6 +1522,16 @@ class TestCuda(TestCase):
         self.assertEqual(gpu_tensor0[0], 2)
 
     @skipIfRocm
+    def test_sum_cpu_gpu_mismatch(self):
+        x = torch.randn(20, device='cuda')
+        y = torch.randn(1)
+        try:
+          torch.sum(x, dim=[0], dtype=torch.float32, out=y)
+          self.assertEqual(y, 20)
+        except RuntimeError as e:
+          pass
+
+    @skipIfRocm
     def test_sum_noncontig(self):
         x = torch.randn(1, 75, 57, 20, device='cuda').permute(0, 3, 1, 2)
         y = x.cpu()
