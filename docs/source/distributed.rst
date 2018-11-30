@@ -79,14 +79,6 @@ In the past, we were often being asked from many users on "which backend should 
 
   - Use Gloo, unless you have specific reasons to use MPI.
 
-- What if I have both CPU and GPU tensors that need to get communicated?
-
-  - This can be achieved by creating two groups. One group with the NCCL backend for GPU tensors, and one
-    group with the Gloo backend for CPU tensors. For instance: use :func:`torch.distributed.init_process_group`
-    with the NCCL backend (which will create the default group for collective calls on GPU tensors), and
-    use :func:`torch.distributed.new_group` with the Gloo backend to create a new group for collective calls
-    on CPU tensors.
-
 
 Common environmental variables
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -267,6 +259,10 @@ into play. :func:`~torch.distributed.new_group` function can be
 used to create new groups, with arbitrary subsets of all processes. It returns
 an opaque group handle that can be given as a ``group`` argument to all collectives
 (collectives are distributed functions to exchange information in certain well-known programming patterns).
+
+Currently `torch.distributed` does not support creating groups with different backends.
+In other words, each group being created will use the same backend as you specified in
+:func:`~torch.distributed.init_process_group`.
 
 .. autofunction:: new_group
 
