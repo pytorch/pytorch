@@ -53,7 +53,7 @@ void copy_device_to_device(Tensor& dst, const Tensor& src) {
   Device src_device = src.device();
   Device dst_device = dst.device();
 
-  cuda::CUDAGuard device_guard(src_device);
+  CUDAGuard device_guard(src_device);
 
   // Try to enable p2p access. This also handles the case src_device ==
   // dst_device.
@@ -185,7 +185,7 @@ void copy_to_cpu(Tensor& dst, const Tensor& src) {
   Tensor dst_contig = dst.contiguous();
   Tensor src_contig = src.contiguous();
 
-  cuda::CUDAGuard device_guard(src.device());
+  CUDAGuard device_guard(src.device());
   CUDAStream stream = getCurrentCUDAStream();
 
   AT_CUDA_CHECK(cudaMemcpyAsync(
@@ -206,7 +206,7 @@ void copy_from_cpu_async_(Tensor& dst, const Tensor& src) {
     return;
   }
 
-  cuda::CUDAGuard device_guard(dst.device());
+  CUDAGuard device_guard(dst.device());
   CUDAStream stream = getCurrentCUDAStream();
 
   AT_DISPATCH_ALL_TYPES_AND_HALF(src.type(), "copy_from_cpu_async", [&]() {
@@ -217,7 +217,7 @@ void copy_from_cpu_async_(Tensor& dst, const Tensor& src) {
         cudaMemcpyHostToDevice,
         stream));
     AT_CUDA_CHECK(THCCachingHostAllocator_recordEvent(
-        src.storage().data<scalar_t>(), stream.internals()));
+        src.storage().data<scalar_t>(), stream));
   });
 }
 
@@ -229,7 +229,7 @@ void copy_to_cpu_async_(Tensor& dst, const Tensor& src) {
     return;
   }
 
-  cuda::CUDAGuard device_guard(src.device());
+  CUDAGuard device_guard(src.device());
   CUDAStream stream = getCurrentCUDAStream();
 
   AT_DISPATCH_ALL_TYPES_AND_HALF(src.type(), "copy_to_cpu_async", [&]() {
@@ -240,7 +240,7 @@ void copy_to_cpu_async_(Tensor& dst, const Tensor& src) {
         cudaMemcpyDeviceToHost,
         stream));
     AT_CUDA_CHECK(THCCachingHostAllocator_recordEvent(
-        src.storage().data<scalar_t>(), stream.internals()));
+        src.storage().data<scalar_t>(), stream));
   });
 }
 
