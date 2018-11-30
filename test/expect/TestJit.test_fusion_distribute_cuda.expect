@@ -1,6 +1,6 @@
-graph(%0 : Float(*, *)
-      %1 : Float(*, *)) {
-  %2 : Dynamic[] = prim::ListConstruct(%0, %1)
+graph(%x : Float(*, *)
+      %y : Float(*, *)) {
+  %2 : Dynamic[] = prim::ListConstruct(%x, %y)
   %3 : Dynamic[] = aten::broadcast_tensors(%2)
   %4 : Dynamic, %5 : Dynamic = prim::ListUnpack(%3)
   %6 : Float(*, *) = prim::FusionGroup_0(%5, %4)

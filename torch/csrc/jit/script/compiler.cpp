@@ -296,7 +296,12 @@ struct Environment {
 
   void setSugaredVar(const SourceRange& loc, const std::string& name, SugaredValuePtr value) {
     Value* as_simple_value = asSimple(value);
-    if (as_simple_value && !as_simple_value->hasUniqueName() && meaningfulName(name)) {
+    if (as_simple_value && !as_simple_value->hasUniqueName() &&
+        meaningfulName(name) &&
+        // note: if the value wasn't defined in this block, we might be giving a name
+        // only used inside this block to a value outside of this. this is not
+        // normally helpful for debugging and causes import/export jitter.
+        as_simple_value->node()->owningBlock() == block()) {
       as_simple_value->setUniqueName(name);
     }
     // prevent re-assignment involving any sugared values
