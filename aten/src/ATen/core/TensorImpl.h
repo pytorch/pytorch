@@ -5,7 +5,6 @@
 #include <numeric>
 
 #include <c10/core/Backend.h>
-#include <ATen/core/LegacyTypeDispatch.h>
 #include <c10/core/Storage.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/TensorTypeId.h>
@@ -331,20 +330,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   //
   // TODO: type() is a very attractive name for a method, but we don't
   // actually want people to use it.  Rename this to something else.
-
-  /**
-   * Return the Type object corresponding to this Tensor, which we can
-   * use to do dynamic dispatch to operators from.  This method is NOT
-   * intended to be used by end-users; it is purely an implementation
-   * detail.
-   */
-  Type & type() const {
-    // NB: It's valid to use getTypeRaw here, because the TensorImpl
-    // could not have been created without initializing the Type first.
-    // TODO: This is not actually true via the Caffe2 codepath!  Make
-    // it so.
-    return *globalLegacyTypeDispatch().getTypeRaw(tensorTypeIdToBackend(type_id()), typeMetaToScalarType(dtype()), is_variable());
-  }
 
   /**
    * Return the TensorTypeId corresponding to this Tensor.  In the future,
