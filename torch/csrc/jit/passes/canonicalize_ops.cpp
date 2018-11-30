@@ -58,6 +58,9 @@ static void CanonicalizeOps(Block* block) {
       SymbolicVariable mat2(it->inputs()[2]);
 
       auto mm_result = mat1.mm(mat2);
+      // Set this intermediate aten::mm node to have the same output type as the original aten::addmm
+      // otherwise the canonicalized graph will have DynamicType as the output of this node which is incorrect
+      (static_cast<Value*>(mm_result))->setType(it->output()->type());
       auto result = mat + mm_result;
       (static_cast<Value*>(result))->setType(it->output()->type());
 
