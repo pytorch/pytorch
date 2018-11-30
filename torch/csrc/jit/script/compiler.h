@@ -26,6 +26,12 @@ static inline std::vector<Value*> toValues(Graph& g, at::ArrayRef<NamedValue> nv
 // that separates their behavior from the AST -> IR converter itself.
 // This allows us to keep dependencies on python minimal.
 
+enum NoneStatus {
+ ALWAYS,
+ MAYBE,
+ NEVER
+};
+
 struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
   // what is this node? for error reporting (e.g. Module, python function)
   virtual std::string kind() const = 0;
@@ -40,9 +46,8 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
   virtual std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) {
     throw ErrorReport(loc) << "attribute lookup is not defined on " << kind();
   }
-
-  virtual bool isNone() {
-    return false;
+  virtual NoneStatus isNone() {
+    return NEVER;
   }
 
   // use it as a vector of values, e.g. a tuple of values as return value from
@@ -94,8 +99,13 @@ struct TORCH_API SimpleValue : public SugaredValue {
   Value * asValue(SourceRange range, Method & m) override {
     return value;
   }
-  bool isNone() override {
-    return value->isNone();
+  NoneStatus isNone() override {
+    if (value->mustBeNone())
+      return ALWAYS;
+    else if (value->type()->cast<OptionalType>())
+      return MAYBE;
+    else
+      return NEVER;
   }
   std::vector<std::shared_ptr<SugaredValue>> asTuple(
       SourceRange loc,

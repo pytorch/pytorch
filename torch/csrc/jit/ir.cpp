@@ -522,7 +522,7 @@ std::shared_ptr<Graph> Graph::copy() {
   return new_g;
 }
 
-bool Value::isNone() const {
+bool Value::mustBeNone() const {
   return node_->kind() == prim::None;
 }
 
