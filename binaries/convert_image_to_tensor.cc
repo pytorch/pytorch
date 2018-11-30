@@ -54,8 +54,9 @@ void reportTime(
     double ts,
     std::string metric,
     std::string unit) {
-  if (FLAGS_report_time == "")
+  if (FLAGS_report_time == "") {
     return;
+  }
   vector<string> s = caffe2::split('|', FLAGS_report_time);
   assert(s[0] == "json");
   std::string identifier = "";
@@ -63,8 +64,8 @@ void reportTime(
     identifier = s[1];
   }
   std::cout << identifier << "{\"type\": \"" << type << "\", \"value\": " << ts
-    << ", \"metric\": \"" << metric << "\", \"unit\": \"" << unit
-    << "\"}" << std::endl;
+            << ", \"metric\": \"" << metric << "\", \"unit\": \"" << unit
+            << "\"}" << std::endl;
 }
 
 cv::Mat resizeImage(cv::Mat& img) {
