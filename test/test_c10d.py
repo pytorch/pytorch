@@ -222,8 +222,11 @@ class RendezvousTest(TestCase):
 
 
 class RendezvousEnvTest(TestCase):
-    @skip_if_not_nccl
     def test_common_errors(self):
+        # TODO remove this hack
+        if not hasattr(c10d, "ProcessGroupNCCL"):
+            raise unittest.SkipTest("C10D is not built with NCCL process group,"
+                                    " skipping test")
         vars = {
             "WORLD_SIZE": "2",
             "RANK": "0",
