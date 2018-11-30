@@ -19,6 +19,7 @@ void _copy__cpu(at::Tensor& self, const at::Tensor& src) {
 
 template <typename self_T>
 void _copy__cpu(at::Tensor& self, const at::Tensor& src) {
+  AT_CHECK(self.numel() == src.numel(), "sizes do not match");
   AT_DISPATCH_ALL_TYPES_AND_HALF(src.type(), "_copy__cpu", [&]() {
     _copy__cpu<self_T, scalar_t>(self, src);
   });
@@ -37,6 +38,10 @@ namespace at {
 namespace native {
 
 Tensor& _copy__cpu(Tensor& self, const Tensor& src) {
+  if (src.is_cuda()) {
+    _copy_from(src, self);
+    return self;
+  }
   AT_DISPATCH_ALL_TYPES_AND_HALF(
       self.type(), "_copy__cpu", [&]() { ::_copy__cpu<scalar_t>(self, src); });
   return self;
@@ -95,7 +100,7 @@ void _copy_same_type_transpose_(Tensor& self, const Tensor& src) {
       });
 }
 
-void _copy_same_type_(Tensor& self, const Tensor& src) {
+void _copy_same_type__cpu(Tensor& self, const Tensor& src) {
   if (self.is_same(src)) {
     return;
   }
