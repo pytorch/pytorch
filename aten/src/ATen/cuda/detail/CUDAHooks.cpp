@@ -49,21 +49,6 @@ void unchecked_set_device(int32_t device) {
   (void)return_code;
 }
 
-struct DynamicCUDAInterfaceSetter {
-  DynamicCUDAInterfaceSetter() {
-    using at::detail::DynamicCUDAInterface;
-    DynamicCUDAInterface::set_device = set_device;
-    DynamicCUDAInterface::get_device = get_device;
-    DynamicCUDAInterface::unchecked_set_device = unchecked_set_device;
-  }
-};
-
-// Single, global, static (because of the anonymous namespace) instance, whose
-// constructor will set the static members of `DynamicCUDAInterface` to CUDA
-// functions when the ATen CUDA library is loaded.
-DynamicCUDAInterfaceSetter _;
-} // namespace
-
 // NB: deleter is dynamic, because we need it to live in a separate
 // compilation unit (alt is to have another method in hooks, but
 // let's not if we don't need to!)
