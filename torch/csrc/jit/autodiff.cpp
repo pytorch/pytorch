@@ -1,8 +1,8 @@
 #include "torch/csrc/jit/autodiff.h"
 
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/lower_tuples.h"
+#include "torch/csrc/jit/passes/constant_pooling.h"
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/symbolic_script.h"
 #include "torch/csrc/jit/operator.h"
@@ -37,6 +37,8 @@ bool isDifferentiable(Node * n) {
     "aten::mul(Tensor self, Scalar other) -> Tensor",
     "aten::div(Tensor self, Tensor other) -> Tensor",
     "aten::div(Tensor self, Scalar other) -> Tensor",
+    "aten::max(Tensor self, Tensor other) -> Tensor",
+    "aten::min(Tensor self, Tensor other) -> Tensor",
     "aten::sigmoid(Tensor self) -> Tensor",
     "aten::tanh(Tensor self) -> Tensor",
     "aten::relu(Tensor self) -> Tensor",
@@ -45,6 +47,7 @@ bool isDifferentiable(Node * n) {
     "aten::t(Tensor self) -> Tensor",
     "aten::neg(Tensor self) -> Tensor",
     "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor",
+    "aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor",
     "aten::type_as(Tensor self, Tensor other) -> Tensor",
     "aten::unsqueeze(Tensor self, int dim) -> Tensor",
     "aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor",
@@ -170,6 +173,18 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
 
     } else if (node->matches("aten::div(Tensor self, Scalar other) -> Tensor")) {
       return {grads.at(0) / inputs.at(1), nullptr};
+
+    } else if (node->matches("aten::max(Tensor self, Tensor other) -> Tensor")) {
+      return {grads.at(0) * (inputs.at(0) > inputs.at(1)).type_as(grads.at(0)),
+              grads.at(0) * (inputs.at(1) > inputs.at(0)).type_as(grads.at(0))};
+
+    } else if (node->matches("aten::min(Tensor self, Tensor other) -> Tensor")) {
+      return {grads.at(0) * (inputs.at(0) < inputs.at(1)).type_as(grads.at(0)),
+              grads.at(0) * (inputs.at(1) < inputs.at(0)).type_as(grads.at(0))};
+
+    } else if (node->matches("aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor")) {
+      return {nullptr, grads.at(0) * inputs.at(0).type_as(grads.at(0)),
+                       grads.at(0) * (1 - inputs.at(0)).type_as(grads.at(0))};
 
     } else if (node->matches("aten::sigmoid(Tensor self) -> Tensor")) {
       // TODO: The order of operations matter in this case. This
@@ -687,10 +702,6 @@ static void liftConstants(Gradient& grad_desc, ReverseDetails& rev_info) {
       }
     }
   }
-
-  // It's possible the we've cloned the same constants many times,
-  // so we use CSE to deduplicate them.
-  EliminateCommonSubexpression(reverse_block);
 }
 
 // Takes a grad_desc.f returned from `addReverseInline` and splits off the
@@ -838,6 +849,9 @@ Gradient differentiate(std::shared_ptr<Graph>& graph) {
   // Fills in f, df, f_real_outputs, df_input_captures,
   // modifies df_input_vjps (new vjps are added for temporaries)
   lambdaLiftReverse(grad_desc, rev_info);
+  // It's possible the we've cloned the same constants many times, so
+  // de-duplicate them
+  ConstantPooling(grad_desc.df);
   return grad_desc;
 }
 

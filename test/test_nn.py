@@ -2955,6 +2955,27 @@ class TestNN(NNTestCase):
     def test_max_pool_nan(self, dtype=torch.float):
         self._test_max_pool_nan(self, device="cpu")
 
+    @staticmethod
+    def _test_pool_large_size(self, device, dtype=torch.float):
+        for op in ('max', 'avg'):
+            for num_dim in [1, 2, 3]:
+                fn_name = '{}_pool{}d'.format(op, num_dim)
+                fn = getattr(F, fn_name)
+                # 16777217 is the smallest integer not expressible in float32
+                x = torch.ones([1, 1, 16777217] + (num_dim - 1) * [1],
+                               device=device, dtype=dtype)
+                res = fn(x, 1, stride=1, padding=0)
+                # check if the output shape was still computed correctly
+                self.assertEqual(x.shape[2], res.shape[2])
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @repeat_test_for_types(ALL_TENSORTYPES)
+    def test_pool_large_size_cuda(self, dtype=torch.float):
+        self._test_pool_large_size(self, device="cuda", dtype=dtype)
+
+    def test_pool_large_size(self, dtype=torch.float):
+        self._test_pool_large_size(self, device="cpu")
+
     def _test_scatter(self, tensor):
         x = tensor.detach().requires_grad_()
         result = dp.scatter(x, (0, 1))
@@ -3931,10 +3952,9 @@ class TestNN(NNTestCase):
             for w in range(3, 10):
                 if 4 <= h <= 6 and 4 <= w <= 6:
                     size = (h, w)
-                    if h == 5:
-                        size = torch.LongStorage(size)
-                    elif h == 6:
-                        size = torch.LongStorage((1, 1) + size)
+                    if h == 6:
+                        size = (1, 1) + size
+
                     mu(output_small, indices_small, output_size=size)
                 else:
                     self.assertRaises(ValueError, lambda: mu(output_small, indices_small, (h, w)))
@@ -8300,7 +8320,7 @@ new_module_tests = [
     ),
     dict(
         module_name='LPPool2d',
-        constructor_args=(2, (2, 2), 2),
+        constructor_args=(2, 2, 2),
         input_size=(1, 3, 7, 7),
     ),
     dict(
@@ -8522,7 +8542,7 @@ new_module_tests = [
     ),
     dict(
         module_name='EmbeddingBag',
-        constructor_args=(4, 3, None, 2, False, 'sum'),
+        constructor_args=(4, 3, None, 2., False, 'sum'),
         input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
         jacobian_input=False,
         check_gradgrad=False,
@@ -8532,7 +8552,7 @@ new_module_tests = [
     ),
     dict(
         module_name='EmbeddingBag',
-        constructor_args=(4, 3, None, 2, False, 'max'),
+        constructor_args=(4, 3, None, 2., False, 'max'),
         input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
         jacobian_input=False,
         check_gradgrad=False,
@@ -8984,7 +9004,7 @@ new_module_tests = [
     ),
     dict(
         module_name='Threshold',
-        constructor_args=(2, 1),
+        constructor_args=(2., 1.),
         input_size=(),
         check_inplace=True,
         desc='threshold_value_scalar'

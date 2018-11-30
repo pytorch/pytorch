@@ -8,6 +8,7 @@ import time
 import tempfile
 import unittest
 from contextlib import contextmanager
+from datetime import timedelta
 from functools import reduce, wraps
 
 import torch
@@ -162,7 +163,9 @@ class Barrier(object):
             os.unlink(os.path.join(barrier_dir, f_name))
 
     @classmethod
-    def sync(cls, timeout=5):
+    def sync(cls, wait_for=None, timeout=5):
+        if wait_for is None:
+            wait_for = dist.get_world_size()
         cls.barrier_id += 1
         barrier_dir = os.path.join(TEMP_DIR, "barrier")
         pid = str(os.getpid())
@@ -180,7 +183,7 @@ class Barrier(object):
                         data = f.read()
                         if int(data) >= cls.barrier_id:
                             arrived += 1
-            if arrived == dist.get_world_size():
+            if arrived == wait_for:
                 break
 
             if time.time() - start_time > timeout:
@@ -192,18 +195,18 @@ class _DistTestBase(object):
     def _barrier(self, *args, **kwargs):
         Barrier.sync(*args, **kwargs)
 
-    def _init_group_test(self):
+    def _init_group_test(self, **kwargs):
         group = [1, 2]
-        group_id = dist.new_group(group)
+        group_id = dist.new_group(group, **kwargs)
         rank = dist.get_rank()
         if rank not in group:
             return ([], None, rank)
 
         return (group, group_id, rank)
 
-    def _init_full_group_test(self):
+    def _init_full_group_test(self, **kwargs):
         group = [i for i in range(0, dist.get_world_size())]
-        group_id = dist.new_group()
+        group_id = dist.new_group(**kwargs)
         rank = dist.get_rank()
         return (group, group_id, rank)
 
@@ -330,6 +333,58 @@ class _DistTestBase(object):
         _, group_id, _ = self._init_full_group_test()
         self.assertEqual(dist.get_world_size(group_id), dist.get_world_size())
         self.assertEqual(dist.get_rank(group_id), dist.get_rank())
+
+    def _test_barrier_timeout(self, group_id, timeout):
+        local_rank = dist.get_rank(group_id)
+
+        # Only execute barrier on rank == 0, causing it to timeout
+        if local_rank == 0:
+            expected_time = time.time() + timeout.total_seconds()
+            with self.assertRaisesRegex(RuntimeError, " (Timed out|closed) "):
+                dist.barrier(group_id)
+            self.assertGreaterEqual(time.time(), expected_time)
+        else:
+            time.sleep(timeout.total_seconds())
+
+    @unittest.skipIf(BACKEND != "gloo", "Only gloo backend supports timeouts")
+    @unittest.skipIf(
+        not INIT_METHOD.startswith("file://"),
+        "Requires file:// initialization method. " +
+        "Both tcp:// and env:// rely on the TCP store for which "
+        "reinitialization has proven racy."
+    )
+    def test_barrier_timeout_global(self):
+        dist.destroy_process_group()
+
+        # Explicitly pass world size to the barrier because we've
+        # just destroyed any state in torch.distributed.
+        self._barrier(wait_for=int(WORLD_SIZE))
+
+        # Reinitialize global process group
+        timeout = timedelta(seconds=0.2)
+        dist.init_process_group(
+            init_method=INIT_METHOD,
+            backend=BACKEND,
+            world_size=int(WORLD_SIZE),
+            rank=self.rank,
+            timeout=timeout,
+        )
+        self._test_barrier_timeout(dist.group.WORLD, timeout)
+
+    @skip_if_small_worldsize
+    @unittest.skipIf(BACKEND != "gloo", "Only gloo backend supports timeouts")
+    def test_barrier_timeout_group(self):
+        timeout = timedelta(seconds=0.2)
+        _, group_id, _ = self._init_group_test(timeout=timeout)
+        if group_id is not None:
+            self._test_barrier_timeout(group_id, timeout)
+
+    @unittest.skipIf(BACKEND != "gloo", "Only gloo backend supports timeouts")
+    def test_barrier_timeout_full_group(self):
+        timeout = timedelta(seconds=0.2)
+        _, group_id, _ = self._init_full_group_test(timeout=timeout)
+        if group_id is not None:
+            self._test_barrier_timeout(group_id, timeout)
 
     # SEND RECV
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support send/recv")
@@ -961,11 +1016,14 @@ class _DistTestBase(object):
         self._test_all_gather_helper(group, group_id, rank)
 
     # BARRIER
-    def _test_barrier_helper(self, group, group_id, rank):
+    def _test_barrier_helper(
+            self, group, group_id, rank, cuda=False, rank_to_GPU=None):
         WAIT_TIME = 0.3  # seconds
 
         for dest in group:
             expected_time = torch.DoubleTensor(1).fill_(0.0)
+            if cuda:
+                expected_time = expected_time.cuda(rank_to_GPU[rank][0])
             if dest == rank:
                 expected_time.fill_(time.time() + WAIT_TIME)
                 dist.broadcast(expected_time, dest, group_id)
@@ -978,18 +1036,41 @@ class _DistTestBase(object):
 
         self._barrier()
 
-    @unittest.skipIf(BACKEND == "nccl", "NCCL does not support barrier")
+    @skip_if_no_gpu
+    @unittest.skipIf(BACKEND == "mpi", "MPI doesn't supports GPU barrier")
+    def test_barrier_cuda(self):
+        group, group_id, rank = self._init_global_test()
+        rank_to_GPU = self._init_multigpu_helper()
+        self._test_barrier_helper(group, group_id, rank, True, rank_to_GPU)
+
+    @skip_if_small_worldsize
+    @skip_if_no_gpu
+    @unittest.skipIf(BACKEND == "mpi", "MPI doesn't supports GPU barrier")
+    def test_barrier_group_cuda(self):
+        group, group_id, rank = self._init_group_test()
+        rank_to_GPU = self._init_multigpu_helper()
+        self._test_barrier_helper(group, group_id, rank, True, rank_to_GPU)
+
+    @skip_if_small_worldsize
+    @skip_if_no_gpu
+    @unittest.skipIf(BACKEND == "mpi", "MPI doesn't supports GPU barrier")
+    def test_barrier_full_group_cuda(self):
+        group, group_id, rank = self._init_full_group_test()
+        rank_to_GPU = self._init_multigpu_helper()
+        self._test_barrier_helper(group, group_id, rank, True, rank_to_GPU)
+
+    @unittest.skipIf(BACKEND == "nccl", "NCCL does not support CPU barrier")
     def test_barrier(self):
         group, group_id, rank = self._init_global_test()
         self._test_barrier_helper(group, group_id, rank)
 
     @skip_if_small_worldsize
-    @unittest.skipIf(BACKEND == "nccl", "NCCL does not support barrier")
+    @unittest.skipIf(BACKEND == "nccl", "NCCL does not support CPU barrier")
     def test_barrier_group(self):
         group, group_id, rank = self._init_group_test()
         self._test_barrier_helper(group, group_id, rank)
 
-    @unittest.skipIf(BACKEND == "nccl", "NCCL does not support barrier")
+    @unittest.skipIf(BACKEND == "nccl", "NCCL does not support CPU barrier")
     def test_barrier_full_group(self):
         group, group_id, rank = self._init_full_group_test()
         self._test_barrier_helper(group, group_id, rank)

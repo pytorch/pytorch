@@ -197,6 +197,34 @@ def _get_group_size(group):
     return len(_pg_group_ranks[group])
 
 
+def _check_single_tensor(param, param_name):
+    """
+    Helper that check the parameter: param_name is a single Tensor
+
+    """
+    if not isinstance(param, torch.Tensor):
+        raise RuntimeError("Invalid function argument. Expecting parameter: {} "
+                           "to be a torch.Tensor type".format(param_name))
+
+
+def _check_tensor_list(param, param_name):
+    """
+    Helper that check the parameter: param_name is a Tensor list
+
+    """
+    wrong_type = False
+    if isinstance(param, list):
+        for p in param:
+            if not isinstance(p, torch.Tensor):
+                wrong_type = True
+                break
+    else:
+        wrong_type = True
+    if wrong_type:
+        raise RuntimeError("Invalid function argument. Expecting parameter: {} "
+                           "to be a List[torch.Tensor] type".format(param_name))
+
+
 def is_mpi_available():
     """
     Checks if MPI is available
@@ -258,6 +286,7 @@ def get_backend(group=group.WORLD):
 
 def init_process_group(backend,
                        init_method="env://",
+                       timeout=_default_pg_timeout,
                        **kwargs):
     """
     Initializes the default distributed process group, and this will also
@@ -274,6 +303,9 @@ def init_process_group(backend,
         world_size (int, optional): Number of processes participating in
                                     the job.
         rank (int, optional): Rank of the current process.
+        timeout (timedelta, optional): Timeout for operations executed against
+            the process group. Default value equals 30 minutes.
+            This is only applicable for the ``gloo`` backend.
         group_name (str, optional, deprecated): Group name.
 
     To enable ``backend == Backend.MPI``, PyTorch needs to built from source
@@ -285,6 +317,10 @@ def init_process_group(backend,
     global _backend
     global _default_pg
     global _default_pg_init_method
+
+    if not isinstance(timeout, timedelta):
+        raise RuntimeError("Expected timeout argument to be of type"
+                           "datetime.timedelta")
 
     if _default_pg is not None:
         raise RuntimeError("trying to initialize the default process group "
@@ -307,20 +343,21 @@ def init_process_group(backend,
         _pg_names[_default_pg] = group_name
     else:
         # backward compatible API
-        if init_method != "env://" and world_size != -1 and rank != -1:
-            url = "{}?rank={}&world_size={}".format(init_method,
-                                                    rank,
-                                                    world_size)
-            store, _, _ = next(rendezvous(url))
-        else:
-            store, rank, world_size = next(rendezvous(init_method))
+        url = init_method
+        if world_size != -1 and rank != -1:
+            url += "?rank={}&world_size={}".format(rank, world_size)
+        elif rank != -1:
+            url += "?rank={}".format(rank)
+        elif world_size != -1:
+            url += "?world_size={}".format(world_size)
 
+        store, rank, world_size = next(rendezvous(url))
         if backend == Backend.GLOO:
             _default_pg = ProcessGroupGloo(
                 store,
                 rank,
                 world_size,
-                timeout=_default_pg_timeout)
+                timeout=timeout)
             _pg_map[_default_pg] = (Backend.GLOO, store)
             _pg_names[_default_pg] = group_name
         elif backend == Backend.NCCL:
@@ -339,7 +376,8 @@ def _new_process_group_helper(world_size,
                               rank,
                               group_ranks,
                               in_group=True,
-                              group_name=""):
+                              group_name="",
+                              timeout=_default_pg_timeout):
     """
     Create a new distributed process group. And the new process group can be
     used to perform collective operations.
@@ -356,6 +394,10 @@ def _new_process_group_helper(world_size,
     if group_name in _pg_names.values():
         raise RuntimeError("The specified group name has already been "
                            "created, please use a different group name")
+
+    if not isinstance(timeout, timedelta):
+        raise RuntimeError("Expected timeout argument to be of type"
+                           "datetime.timedelta")
 
     default_backend, default_store = _pg_map[_default_pg]
 
@@ -374,7 +416,7 @@ def _new_process_group_helper(world_size,
                 store,
                 rank,
                 world_size,
-                timeout=_default_pg_timeout)
+                timeout=timeout)
             _pg_map[pg] = (Backend.GLOO, store)
             _pg_names[pg] = group_name
         elif default_backend == Backend.NCCL:
@@ -491,6 +533,7 @@ def isend(tensor,
         None, if not part of the group
 
     """
+    _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         return
 
@@ -520,6 +563,7 @@ def irecv(tensor,
         None, if not part of the group
 
     """
+    _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         return
 
@@ -545,6 +589,7 @@ def send(tensor,
         tag (int, optional): Tag to match send with remote recv
 
     """
+    _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         return
 
@@ -575,6 +620,7 @@ def recv(tensor,
         -1, if not part of the group
 
     """
+    _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         return -1
 
@@ -585,9 +631,9 @@ def recv(tensor,
         pg = group
 
     if src is None:
-        rank_tensor = torch.IntTensor([-1])
-        pg.recv_anysource([tensor], rank_tensor, tag).wait()
-        src_rank = rank_tensor[0].item()
+        work = pg.recv_anysource([tensor], tag)
+        work.wait()
+        src_rank = work.source_rank()
         if group == GroupMember.WORLD:
             return src_rank
         else:
@@ -678,6 +724,7 @@ def broadcast(tensor,
         None, if not async_op or if not part of the group
 
     """
+    _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         return
 
@@ -773,6 +820,7 @@ def all_reduce(tensor,
         None, if not async_op or if not part of the group
 
     """
+    _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         return
 
@@ -872,6 +920,7 @@ def reduce(tensor,
         None, if not async_op or if not part of the group
 
     """
+    _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         return
 
@@ -968,6 +1017,8 @@ def all_gather(tensor_list,
         None, if not async_op or if not part of the group
 
     """
+    _check_tensor_list(tensor_list, "tensor_list")
+    _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         return
 
@@ -1005,6 +1056,8 @@ def gather(tensor,
         None, if not async_op or if not part of the group
 
     """
+    _check_single_tensor(tensor, "tensor")
+    _check_tensor_list(gather_list, "gather_list")
     if _rank_not_in_group(group):
         return
 
@@ -1060,6 +1113,8 @@ def scatter(tensor,
         None, if not async_op or if not part of the group
 
     """
+    _check_single_tensor(tensor, "tensor")
+    _check_tensor_list(scatter_list, "scatter_list")
     if _rank_not_in_group(group):
         return
 
@@ -1121,7 +1176,7 @@ def barrier(group=group.WORLD,
         work.wait()
 
 
-def new_group(ranks=None):
+def new_group(ranks=None, timeout=_default_pg_timeout):
     """
     Creates a new distributed group.
 
@@ -1132,6 +1187,9 @@ def new_group(ranks=None):
 
     Arguments:
         ranks (list[int]): List of ranks of group members.
+        timeout (timedelta, optional): Timeout for operations executed against
+            the process group. Default value equals 30 minutes.
+            This is only applicable for the ``gloo`` backend.
 
     Returns:
         A handle of distributed group that can be given to collective calls.
@@ -1173,7 +1231,8 @@ def new_group(ranks=None):
         pg = _new_process_group_helper(group_world_size,
                                        group_rank,
                                        input_ranks,
-                                       in_group)
+                                       in_group,
+                                       timeout=timeout)
     else:
         # Release ranks not in the group
         if global_rank not in ranks:
@@ -1182,7 +1241,8 @@ def new_group(ranks=None):
         if default_backend != Backend.MPI:
             pg = _new_process_group_helper(group_world_size,
                                            group_rank,
-                                           input_ranks)
+                                           input_ranks,
+                                           timeout=timeout)
 
     # Create the global rank to group rank mapping
     _pg_group_ranks[pg] = {}

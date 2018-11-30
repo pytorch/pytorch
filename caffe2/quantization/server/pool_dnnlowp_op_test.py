@@ -150,7 +150,7 @@ class DNNLowPOpPoolTest(hu.HypothesisTestCase):
             X = np.round(np.random.rand(*((N,) + sizes + (C,))) * (max_ - min_) + min_)
             X = X.astype(np.float32)
             X[(0,) * (ndim + 2)] = min_
-            X[(0, 1,) + (0,) * ndim] = max_
+            X[(0, 1) + (0,) * ndim] = max_
 
         Output = collections.namedtuple("Output", ["Y", "op_type", "engine"])
         outputs = []

@@ -103,9 +103,9 @@ class ReservoirSamplingOp final : public Operator<Context> {
     auto output_num =
         std::min<size_t>(numToCollect_, output_batch_size + num_to_copy);
     // output_num is >= output_batch_size
-    output->ExtendTo(output_num, 50, &context_);
+    output->ExtendTo(output_num, 50);
     if (pos_to_object) {
-      pos_to_object->ExtendTo(output_num, 50, &context_);
+      pos_to_object->ExtendTo(output_num, 50);
     }
 
     auto* output_data =
