@@ -662,7 +662,8 @@ void initJitScriptBindings(PyObject* module) {
       })
       .def("_python_print", [](Module& self) {
         std::ostringstream ss;
-        std::vector<at::Tensor> tensors = PythonPrint(ss, self, true);
+        std::vector<at::Tensor> tensors;
+        PythonPrint(ss, self, tensors, true);
         return std::make_pair(ss.str(), tensors);
       });
 
@@ -690,7 +691,8 @@ void initJitScriptBindings(PyObject* module) {
     .def("pretty_print_schema", &Method::pretty_print_schema)
     .def("python_print", [](Method &m) {
       std::ostringstream oss;
-      std::vector<at::Tensor> constants = PythonPrint(oss, m, true);
+      std::vector<at::Tensor> constants;
+      PythonPrint(oss, m, constants, true);
       return std::make_pair(oss.str(), std::move(constants));
     });
 

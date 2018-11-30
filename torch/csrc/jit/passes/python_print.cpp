@@ -143,7 +143,7 @@ void createTensorToParameterNameMap(
   const static std::unordered_set<std::string> reserved_names = {
     // identifiers in the environment while parsing
     "aten",
-    "prim",
+    "ops",
     "CONSTANTS",
     "fork",
     "attribute",
@@ -193,7 +193,7 @@ struct PythonPrintPass {
   // constants are written to this table, and given then named CONSTANTS.cN
   // where N is the index into this table.
 
-  std::vector<at::Tensor> tensor_constants;
+  std::vector<at::Tensor>& tensor_table_;
   // When printing this node, is it safe to write it inline (i.e. without
   // assigning a temporary variable
   std::unordered_set<Node*> output_inline_;
@@ -319,14 +319,14 @@ struct PythonPrintPass {
     // ConstantPool, which is also N^2 in the size of the constants,
     // because it doesn't hash any information about the tensors.
     // We will probably need to optimize this at some point using hashing.
-    for(size_t i = 0; i < tensor_constants.size(); ++i) {
-      if (t.type() == tensor_constants[i].type() && t.equal(tensor_constants[i])) {
+    for(size_t i = 0; i < tensor_table_.size(); ++i) {
+      if (t.type() == tensor_table_[i].type() && t.equal(tensor_table_[i])) {
         return i;
       }
     }
     JIT_ASSERT(t.is_variable());
-    tensor_constants.emplace_back(std::move(t));
-    return tensor_constants.size() - 1;
+    tensor_table_.emplace_back(std::move(t));
+    return tensor_table_.size() - 1;
   }
 
   std::unordered_set<Node*> seen_constants;
@@ -769,16 +769,29 @@ struct PythonPrintPass {
       } break;
       default: {
         Symbol kind = node->kind();
-        stmt << kind.ns().toUnqualString() << "." << kind.toUnqualString() << "(";
+        if (kind.is_aten()) {
+          // special case aten -> torch because we want to rename
+          // the aten namespace, but this change will take more time
+          // doing it here ensures we do not have fix up archives later
+          stmt << "torch." << kind.toUnqualString() << "(";
+        } else {
+          stmt << "ops." << kind.ns().toUnqualString() << "." << kind.toUnqualString() << "(";
+        }
         const FunctionSchema& schema = node->schema();
-        for (size_t i = 0; i < schema.arguments().size(); ++i) {
-            auto v = useOf(node->inputs().at(i));
-            auto arg = schema.arguments().at(i);
+        for (size_t i = 0; i < node->inputs().size(); ++i) {
             if (i > 0) {
               stmt << ", ";
             }
-            if (arg.kwarg_only()) {
-              stmt << arg.name() << "=";
+            auto v = useOf(node->inputs().at(i));
+            // print the kwarg name if it is a kwarg only argument.
+            if (i < schema.arguments().size()) {
+              auto arg = schema.arguments().at(i);
+              if (arg.kwarg_only()) {
+                stmt << arg.name() << "=";
+              }
+            } else {
+              // vararg functions like format can have extra arguments
+              JIT_ASSERT(schema.is_vararg());
             }
             stmt << v;
         }
@@ -873,8 +886,9 @@ struct PythonPrintPass {
  public:
   PythonPrintPass(
       std::ostream& out_,
+      std::vector<at::Tensor>& tensor_table,
       bool enforce_importable)
-      : out(out_), enforce_importable_(enforce_importable) {}
+      : out(out_), tensor_table_(tensor_table), enforce_importable_(enforce_importable) {}
 
   // TODO: we should consider forcing functions to return a single value
   // instead of handling this tuple logic both in the compiler and the printer
@@ -934,21 +948,22 @@ struct PythonPrintPass {
   }
 };
 
-TORCH_API std::vector<at::Tensor> PythonPrint(std::ostream& out, Graph& graph, bool enforce_importable) {
-  PythonPrintPass pp(out, enforce_importable);
-  pp.printFunction(graph, "graph");
-  return pp.tensor_constants;
-}
-TORCH_API std::vector<at::Tensor> PythonPrint(std::ostream& out, script::Method& method, bool enforce_importable) {
-  PythonPrintPass pp(out, enforce_importable);
-  pp.printMethod(method);
-  return pp.tensor_constants;
+TORCH_API void PythonPrint(std::ostream& out, const Graph& graph, std::vector<at::Tensor>& tensor_table, bool enforce_importable) {
+  PythonPrintPass pp(out, tensor_table, enforce_importable);
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  pp.printFunction(const_cast<Graph&>(graph), "graph");
 }
 
-TORCH_API std::vector<at::Tensor> PythonPrint(std::ostream& out, script::Module& module, bool enforce_importable) {
-  PythonPrintPass pp(out, enforce_importable);
-  pp.printModule(module);
-  return pp.tensor_constants;
+TORCH_API void PythonPrint(std::ostream& out, const script::Method& method, std::vector<at::Tensor>& tensor_table, bool enforce_importable) {
+  PythonPrintPass pp(out, tensor_table, enforce_importable);
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  pp.printMethod(const_cast<script::Method&>(method));
+}
+
+TORCH_API void PythonPrint(std::ostream& out, const script::Module& module, std::vector<at::Tensor>& tensor_table, bool enforce_importable) {
+  PythonPrintPass pp(out, tensor_table, enforce_importable);
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  pp.printModule(const_cast<script::Module&>(module));
 }
 
 TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
