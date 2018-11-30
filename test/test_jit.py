@@ -258,7 +258,6 @@ class JitTestCase(TestCase):
                     raise
                 else:
                     return
-
             ppv = "op_version_set = 0\n{}".format(pp)
             sm = copy_structure_and_params(module)
             torch._C._jit_import_methods(sm, ppv, constant_table)
@@ -2950,6 +2949,22 @@ class TestScript(JitTestCase):
             self.assertExpectedGraph(ge.graph)
 
         return ge
+
+    def test_jitter_bug(self):
+        @torch.jit.script
+        def fn2(input, kernel_size):
+            # type: (Tensor, List[int]) -> Tensor
+            if kernel_size[0] > 1:
+                _stride = [2]
+            else:
+                _stride = kernel_size
+            print(_stride, kernel_size)
+            return input
+
+        @torch.jit.script
+        def fn(input):
+            # type: (Tensor) -> Tensor
+            return fn2(input, [1])
 
     def test_annoying_doubles(self):
         mod = types.ModuleType("temp")
