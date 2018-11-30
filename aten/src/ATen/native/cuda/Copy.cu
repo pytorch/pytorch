@@ -260,7 +260,7 @@ void _copy__cuda(Tensor& dst, const Tensor& src, bool non_blocking) {
       } else {
         // Do a dtype converting copy on the CPU, then copy to device
         Tensor srcf = at::empty_like(src, src.options().dtype(dst.dtype()));
-        _copy_(srcf, src);
+        s_copy_(srcf, src);
         copy_from_cpu(dst, srcf);
       }
     } else {
@@ -274,7 +274,7 @@ void _copy__cuda(Tensor& dst, const Tensor& src, bool non_blocking) {
         // Copy to CPU as the same dtype, then do a dtype converting copy
         Tensor srcf = at::empty_like(src, dst.options().dtype(src.dtype()));
         copy_to_cpu(srcf, src);
-        _copy_(dst, srcf);
+        s_copy_(dst, srcf);
       }
     }
   });
@@ -285,19 +285,19 @@ void _copy__cuda(Tensor& dst, const Tensor& src, bool non_blocking) {
 namespace at {
 namespace native {
 
-Tensor& _copy__cuda(Tensor& self, const Tensor& src, bool non_blocking) {
+Tensor& _s_copy__cuda(Tensor& self, const Tensor& src, bool non_blocking) {
   AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "_copy__cuda", [&]() {
     ::_copy__cuda<scalar_t>(self, src, non_blocking);
   });
   return self;
 }
 
-Tensor _copy_from_cuda(
+Tensor _s_copy_from_cuda(
     const Tensor& self,
     const Tensor& dst,
     bool non_blocking) {
   Tensor dst_ = dst;
-  _copy__cuda(dst_, self);
+  _s_copy__cuda(dst_, self);
   return dst;
 }
 
