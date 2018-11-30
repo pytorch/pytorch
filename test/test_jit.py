@@ -9405,11 +9405,8 @@ EXCLUDE_SCRIPT = {
     'test_norm_nuc',
 
     # argument has custom behavior
-    'test_nn_fractional_max_pool2d',
-    'test_nn_batch_norm',
 
     # aten op has additional cudnn argument
-    'test_nn_group_norm',
     'test_nn_unfold',
 
     # flakey test - TODO fix
