@@ -10209,6 +10209,14 @@ EXCLUDE_MODULE_EXPORT_IMPORT = {
     'EmbeddingBag',
 }
 
+local_module_tests = []
+
+def to_module_test_format(tup):
+    dic = dict(module_name=tup[0], constructor_args=tup[1], input_fn=lambda: tup[2])
+    if len(tup) >= 5:
+        dic['desc'] = tup[4]
+    local_module_tests.append(dic)
+
 
 def add_interpolate_module_tests():
     # logic from test_interpolate in test_nn.py
@@ -10223,20 +10231,20 @@ def add_interpolate_module_tests():
         for mode in ['nearest', 'area']:
             args = (size, scale_factor, mode)
             for input in [_make_input(1), _make_input(2), _make_input(3)]:
-                nn_module_tests.append(('Upsample', args, input, False, str(i)))
+                to_module_test_format(('Upsample', args, input, False, str(i)))
                 i = i + 1
 
         for align_corners in [True, False]:
             args = (size, scale_factor, 'linear', align_corners)
-            nn_module_tests.append(('Upsample', args, _make_input(1), False, str(i)))
+            to_module_test_format(('Upsample', args, _make_input(1), False, str(i)))
             i = i + 1
 
             args = (size, scale_factor, 'bilinear', align_corners)
-            nn_module_tests.append(('Upsample', args, _make_input(2), False, str(i)))
+            to_module_test_format(('Upsample', args, _make_input(2), False, str(i)))
             i = i + 1
 
             args = (size, scale_factor, 'trilinear', align_corners)
-            nn_module_tests.append(('Upsample', args, _make_input(3), False, str(i)))
+            to_module_test_format(('Upsample', args, _make_input(3), False, str(i)))
             i = i + 1
 
     # test_upsamplingTrilinear3d_spatial_invariance
@@ -10244,18 +10252,18 @@ def add_interpolate_module_tests():
     args = (size, scale_factor, 'trilinear', False)
     in_t_9 = torch.zeros(1, 1, 9, 9, 9)
     in_t_9[:, :, :4, :4, :4].normal_()
-    nn_module_tests.append(('Upsample', args, in_t_9, False, str(i)))
+    to_module_test_format(('Upsample', args, in_t_9, False, str(i)))
     i = i + 1
 
     # testing where size is not none test_upsamplingNearest2d
     size = 4
     scale_factor = None
     in_t = torch.ones(1, 1, 2, 2)
-    nn_module_tests.append(('Upsample', args, Variable(in_t), False, str(i)))
+    to_module_test_format(('Upsample', args, Variable(in_t), False, str(i)))
 
     args = (size, scale_factor)
-    nn_module_tests.append(('UpsamplingNearest2d', args, Variable(in_t), False,))
-    nn_module_tests.append(('UpsamplingBilinear2d', args, Variable(in_t), False,))
+    to_module_test_format(('UpsamplingNearest2d', args, Variable(in_t), False,))
+    to_module_test_format(('UpsamplingBilinear2d', args, Variable(in_t), False,))
 
 
 add_interpolate_module_tests()
@@ -10810,7 +10818,7 @@ for test in autograd_method_tests:
 for test in nn_functional_tests:
     add_nn_functional_test(*test)
 
-for test in module_tests + new_module_tests + additional_module_tests:
+for test in module_tests + new_module_tests + additional_module_tests + local_module_tests:
     add_nn_module_test(**test)
 
 if __name__ == '__main__':
