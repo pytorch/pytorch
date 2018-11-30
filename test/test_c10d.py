@@ -223,6 +223,10 @@ class RendezvousTest(TestCase):
 
 class RendezvousEnvTest(TestCase):
     def test_common_errors(self):
+        # TODO remove this hack
+        if not hasattr(c10d, "ProcessGroupNCCL"):
+            raise unittest.SkipTest("C10D is not built with NCCL process group,"
+                                    " skipping test")
         vars = {
             "WORLD_SIZE": "2",
             "RANK": "0",
@@ -247,22 +251,67 @@ class RendezvousEnvTest(TestCase):
             d.pop(key)
             return d
 
+        def withouts(d, keys):
+            d = d.copy()
+            for key in keys:
+                d.pop(key)
+            return d
+
         with Env(without(vars, 'WORLD_SIZE')):
             with self.assertRaisesRegex(ValueError, 'WORLD_SIZE expected'):
                 gen = c10d.rendezvous('env://')
                 next(gen)
+            c10d.init_process_group(backend='nccl', world_size=2)
+            self.assertEqual(c10d.get_rank(), 0)
+            self.assertEqual(c10d.get_world_size(), 2)
+            c10d.destroy_process_group()
+
         with Env(without(vars, 'RANK')):
             with self.assertRaisesRegex(ValueError, 'RANK expected'):
                 gen = c10d.rendezvous('env://')
                 next(gen)
+            c10d.init_process_group(backend='nccl', rank=0)
+            self.assertEqual(c10d.get_rank(), 0)
+            self.assertEqual(c10d.get_world_size(), 2)
+            c10d.destroy_process_group()
+
+        with Env(withouts(vars, ['RANK', 'WORLD_SIZE'])):
+            c10d.init_process_group(backend='nccl', rank=0, world_size=2)
+            self.assertEqual(c10d.get_rank(), 0)
+            self.assertEqual(c10d.get_world_size(), 2)
+            c10d.destroy_process_group()
+
+        with Env(vars):
+            c10d.init_process_group(backend='nccl')
+            self.assertEqual(c10d.get_rank(), 0)
+            self.assertEqual(c10d.get_world_size(), 2)
+            c10d.destroy_process_group()
+
         with Env(without(vars, 'MASTER_ADDR')):
             with self.assertRaisesRegex(ValueError, 'MASTER_ADDR expected'):
                 gen = c10d.rendezvous('env://')
                 next(gen)
+
         with Env(without(vars, 'MASTER_PORT')):
             with self.assertRaisesRegex(ValueError, 'MASTER_PORT expected'):
                 gen = c10d.rendezvous('env://')
                 next(gen)
+
+        with Env(without(vars, 'WORLD_SIZE')):
+            gen = c10d.rendezvous('env://?world_size={}'.format(2))
+            _, _, size = next(gen)
+            self.assertEqual(size, 2)
+
+        with Env(without(vars, 'RANK')):
+            gen = c10d.rendezvous('env://?rank={}'.format(0))
+            _, rank, _ = next(gen)
+            self.assertEqual(rank, 0)
+
+        with Env(withouts(vars, ['RANK', 'WORLD_SIZE'])):
+            gen = c10d.rendezvous('env://?rank={}&world_size={}'.format(0, 2))
+            _, rank, size = next(gen)
+            self.assertEqual(rank, 0)
+            self.assertEqual(size, 2)
 
     @retry_on_address_already_in_use_error
     def test_nominal(self):
