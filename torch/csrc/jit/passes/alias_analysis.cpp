@@ -37,9 +37,35 @@ bool AliasDb::hasWildcard(const Node* n) const {
   return false;
 }
 
-bool AliasDb::hasWrites(const Node* n) const {
+bool AliasDb::writesTo(Node* n, const Value* v) const {
+  if (valueToAlias_.count(v) == 0) {
+    // This is a primitive type
+    return false;
+  }
+
+  const auto& aliasInfo = valueToAlias_.at(v);
+  JIT_ASSERT(aliasInfo.sets().size() > 0);
+  // We only need to check one alias set, since if this value belongs to
+  // multiple alias sets they are all written to
+  const auto& aliasSet = *aliasInfo.sets().begin();
+
+  if (aliasToWrites_.count(aliasSet) == 0) {
+    // no writes to this alias set
+    return false;
+  }
+
+  const auto& writers = aliasToWrites_.at(aliasSet);
+  return writers.count(n) != 0;
+}
+
+bool AliasDb::hasWrites(Node* n) const {
   for (const auto input : n->inputs()) {
-    if (valueToAlias_.count(input) != 0 && valueToAlias_.at(input).isWrite()) {
+    if (writesTo(n, input)) {
+      return true;
+    }
+  }
+  for (const auto output : n->outputs()) {
+    if (writesTo(n, output)) {
       return true;
     }
   }
@@ -339,7 +365,7 @@ void AliasDb::analyzeLoop(Node* node) {
       // Check whether or not this would change anything
       if (valueToAlias_.count(input) != 0) {
         JIT_ASSERT(valueToAlias_.count(output) != 0)
-        if (!valueToAlias_[output].isSubsetOf(valueToAlias_[output])) {
+        if (!valueToAlias_[output].isSubsetOf(valueToAlias_[input])) {
           notConverged = true;
         }
       }
@@ -359,7 +385,7 @@ void AliasDb::analyzeSubgraph(Node* node) {
 
 // For nodes that generate a fresh value from nothing
 void AliasDb::analyzeCreator(Node* node) {
-  for (Value * output : node->outputs()) {
+  for (Value* output : node->outputs()) {
     giveFreshAlias(output);
   }
 }

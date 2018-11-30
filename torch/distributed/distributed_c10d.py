@@ -343,14 +343,15 @@ def init_process_group(backend,
         _pg_names[_default_pg] = group_name
     else:
         # backward compatible API
-        if init_method != "env://" and world_size != -1 and rank != -1:
-            url = "{}?rank={}&world_size={}".format(init_method,
-                                                    rank,
-                                                    world_size)
-            store, _, _ = next(rendezvous(url))
-        else:
-            store, rank, world_size = next(rendezvous(init_method))
+        url = init_method
+        if world_size != -1 and rank != -1:
+            url += "?rank={}&world_size={}".format(rank, world_size)
+        elif rank != -1:
+            url += "?rank={}".format(rank)
+        elif world_size != -1:
+            url += "?world_size={}".format(world_size)
 
+        store, rank, world_size = next(rendezvous(url))
         if backend == Backend.GLOO:
             _default_pg = ProcessGroupGloo(
                 store,
@@ -630,9 +631,9 @@ def recv(tensor,
         pg = group
 
     if src is None:
-        rank_tensor = torch.IntTensor([-1])
-        pg.recv_anysource([tensor], rank_tensor, tag).wait()
-        src_rank = rank_tensor[0].item()
+        work = pg.recv_anysource([tensor], tag)
+        work.wait()
+        src_rank = work.source_rank()
         if group == GroupMember.WORLD:
             return src_rank
         else:

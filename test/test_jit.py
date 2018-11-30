@@ -258,7 +258,6 @@ class JitTestCase(TestCase):
                     raise
                 else:
                     return
-
             ppv = "op_version_set = 0\n{}".format(pp)
             sm = copy_structure_and_params(module)
             torch._C._jit_import_methods(sm, ppv, constant_table)
@@ -844,6 +843,25 @@ class TestJit(JitTestCase):
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
         traced_f = torch.jit.trace(f, (x, y,))
         self.assertEqual(traced_f(x.t().contiguous(), y), traced_f(x.t(), y))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_fusion_checks_cat_inputs(self):
+        # We shouldn't treat cat nodes as broadcasting. All their inputs
+        # need to be checked for having the same map size, before we can
+        # run the kernel.
+        @torch.jit.script
+        def f(x, y):
+            return torch.cat([x + 2 * x + x ** 2, y + 4 * y + y ** 3], dim=0)
+
+        # NOTE: y is broadcastable to x, but output of f(x, y) should have
+        # shape 3x4, and not 4x4.
+        x = torch.randn(2, 4, dtype=torch.float, device='cuda')
+        y = torch.randn(1, 4, dtype=torch.float, device='cuda')
+
+        self.assertEqual(f(x, y).shape, (3, 4))
+        self.assertAllFused(f.graph_for(x, y))
 
     @staticmethod
     def fn_test_comparison_gt_lt(x, y):
@@ -2931,6 +2949,22 @@ class TestScript(JitTestCase):
             self.assertExpectedGraph(ge.graph)
 
         return ge
+
+    def test_jitter_bug(self):
+        @torch.jit.script
+        def fn2(input, kernel_size):
+            # type: (Tensor, List[int]) -> Tensor
+            if kernel_size[0] > 1:
+                _stride = [2]
+            else:
+                _stride = kernel_size
+            print(_stride, kernel_size)
+            return input
+
+        @torch.jit.script
+        def fn(input):
+            # type: (Tensor) -> Tensor
+            return fn2(input, [1])
 
     def test_annoying_doubles(self):
         mod = types.ModuleType("temp")
@@ -9387,13 +9421,11 @@ EXCLUDE_SCRIPT = {
 
     # argument has custom behavior
     'test_nn_fractional_max_pool2d',
-    'test_nn_max_unpool3d',
     'test_nn_batch_norm',
 
     # aten op has additional cudnn argument
     'test_nn_group_norm',
     'test_nn_unfold',
-    'test_nn_max_unpool2d',
 
     # flakey test - TODO fix
     'test_nn_ctc_loss',
@@ -9404,7 +9436,12 @@ EXCLUDE_SCRIPT = {
     'test_nn_cross_entropy',
     'test_nn_interpolate',
     'test_nn_fold',
+}
+
+EXCLUDE_PYTHON_PRINT = {
     'test_nn_max_unpool1d',
+    'test_nn_max_unpool2d',
+    'test_nn_max_unpool3d',
 }
 
 EXCLUDE_SCRIPT_MODULES = {
@@ -10185,10 +10222,17 @@ def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=()
 
         if test_name not in EXCLUDE_SCRIPT:
             disable_ad_subgraph_inlining = test_name in DISABLE_AUTODIFF_SUBGRAPH_INLINING
-            check_against_reference(self,
-                                    create_script_fn(self, name, 'nn_functional', output_process_fn,
-                                                     disable_autodiff_subgraph_inlining=disable_ad_subgraph_inlining),
-                                    fn, f_args_variable, kwargs_variable, no_grad=no_grad)
+
+            def run_test():
+                script_fn = create_script_fn(self, name, 'nn_functional', output_process_fn,
+                                             disable_autodiff_subgraph_inlining=disable_ad_subgraph_inlining)
+                check_against_reference(self, script_fn, fn, f_args_variable, kwargs_variable, no_grad=no_grad)
+
+            if test_name in EXCLUDE_PYTHON_PRINT:
+                with self.disableModuleHook():
+                    run_test()
+            else:
+                run_test()
 
     post_add_test(test_name, skipTestIf, do_test)
 

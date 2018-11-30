@@ -3952,10 +3952,9 @@ class TestNN(NNTestCase):
             for w in range(3, 10):
                 if 4 <= h <= 6 and 4 <= w <= 6:
                     size = (h, w)
-                    if h == 5:
-                        size = torch.LongStorage(size)
-                    elif h == 6:
-                        size = torch.LongStorage((1, 1) + size)
+                    if h == 6:
+                        size = (1, 1) + size
+
                     mu(output_small, indices_small, output_size=size)
                 else:
                     self.assertRaises(ValueError, lambda: mu(output_small, indices_small, (h, w)))
@@ -8355,7 +8354,7 @@ new_module_tests = [
     ),
     dict(
         module_name='LocalResponseNorm',
-        constructor_args=(1, 1, 0.5, 2),
+        constructor_args=(1, 1., 0.5, 2.),
         input_size=(1, 5, 7, 7, 7),
         desc='3d_custom_params',
     ),
@@ -8392,17 +8391,17 @@ new_module_tests = [
     ),
     dict(
         module_name='ConstantPad1d',
-        constructor_args=((1, 2), 2),
+        constructor_args=((1, 2), 2.),
         input_size=(2, 3, 4)
     ),
     dict(
         module_name='ConstantPad2d',
-        constructor_args=((1, 2, 3, 4), 2),
+        constructor_args=((1, 2, 3, 4), 2.),
         input_size=(2, 3, 4, 4)
     ),
     dict(
         module_name='ConstantPad3d',
-        constructor_args=((1, 2, 3, 4, 1, 0), 2),
+        constructor_args=((1, 2, 3, 4, 1, 0), 2.),
         input_size=(2, 3, 4, 4, 5)
     ),
     dict(

@@ -459,7 +459,15 @@ FunctionSchema getSchemaWithNameAndDefaults(
     auto it = default_args.find(arg.name());
     if (it != default_args.end()) {
       try {
-        IValue value = toIValue(it->second, arg.type());
+        IValue value;
+        auto n = arg.N();
+        auto list_type = arg.type()->cast<ListType>();
+        if (n && *n > 0 && list_type) {
+          // BroadcastingList, allow default values T for arg types List[T]
+          value = toIValue(it->second, list_type->getElementType());
+        } else {
+          value = toIValue(it->second, arg.type());
+        }
         new_args.emplace_back(
             Argument(arg.name(), arg.type(), arg.N(), value, arg.kwarg_only()));
       } catch (py::cast_error& e) {
@@ -654,7 +662,8 @@ void initJitScriptBindings(PyObject* module) {
       })
       .def("_python_print", [](Module& self) {
         std::ostringstream ss;
-        std::vector<at::Tensor> tensors = PythonPrint(ss, self, true);
+        std::vector<at::Tensor> tensors;
+        PythonPrint(ss, self, tensors, true);
         return std::make_pair(ss.str(), tensors);
       });
 
@@ -682,7 +691,8 @@ void initJitScriptBindings(PyObject* module) {
     .def("pretty_print_schema", &Method::pretty_print_schema)
     .def("python_print", [](Method &m) {
       std::ostringstream oss;
-      std::vector<at::Tensor> constants = PythonPrint(oss, m, true);
+      std::vector<at::Tensor> constants;
+      PythonPrint(oss, m, constants, true);
       return std::make_pair(oss.str(), std::move(constants));
     });
 
