@@ -375,12 +375,12 @@ static variable_list call_function(FunctionTask& task) {
     // In functions/accumulate_grad.cpp, there is some logic to check the conditions under which
     // the incoming gradient can be stolen directly (which elides a deep copy) instead of cloned.
     // One of these conditions is that the incoming gradient's refcount must be 1 (nothing else
-    // is referencing the same data).  Stashing inputs_copy here bumps the refcount, so if post hooks 
-    // are employed, it's actually still ok for accumulate_grad.cpp to steal the gradient if the 
+    // is referencing the same data).  Stashing inputs_copy here bumps the refcount, so if post hooks
+    // are employed, it's actually still ok for accumulate_grad.cpp to steal the gradient if the
     // refcount is 2.
     //
     // "new_grad.use_count() <= 1 + !post_hooks().empty()" in accumulate_grad.cpp accounts for this,
-    // but also creates a silent dependency between engine.cpp (ie, this particular engine 
+    // but also creates a silent dependency between engine.cpp (ie, this particular engine
     // implementation) and accumulate_grad.cpp.
     //
     // If you change the logic here, make sure it's compatible with accumulate_grad.cpp.
