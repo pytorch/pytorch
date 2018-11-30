@@ -14,7 +14,7 @@ from torch._six import inf, PY2
 from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
     freeze_rng_state
-from test_nn import module_tests, new_module_tests
+from common_nn import module_tests, new_module_tests
 from textwrap import dedent
 import os
 import io
@@ -9460,6 +9460,20 @@ EXCLUDE_PYTHON_PRINT = {
 EXCLUDE_SCRIPT_MODULES = {
     'test_nn_LPPool2d_norm',
     'test_nn_LPPool1d_norm',
+    'test_nn_BatchNorm1d_3d_input_not_affine',
+    'test_nn_BatchNorm1d_affine_simple_average',
+    'test_nn_BatchNorm1d_not_affine',
+    'test_nn_BatchNorm1d_not_tracking_stats',
+    'test_nn_BatchNorm2d_2d_simple_average',
+    'test_nn_BatchNorm2d_not_affine',
+    'test_nn_BatchNorm2d_not_tracking_stats',
+    'test_nn_BatchNorm3d_3d_simple_average',
+    'test_nn_BatchNorm3d_not_affine',
+    'test_nn_BatchNorm3d_not_tracking_stats',
+    'test_nn_LayerNorm_1d_elementwise_affine',
+    'test_nn_LayerNorm_1d_no_elementwise_affine',
+    'test_nn_LayerNorm_3d_elementwise_affine',
+    'test_nn_LayerNorm_3d_no_elementwise_affine'
 }
 
 DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
