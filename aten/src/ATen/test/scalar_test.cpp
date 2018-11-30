@@ -87,7 +87,7 @@ TEST(TestScalar, TestScalar) {
   Tensor next_h = i2h.add(h2h);
   next_h = next_h.tanh();
 
-  ASSERT_ANY_THROW(at::_local_scalar(Tensor{}));
+  ASSERT_ANY_THROW(Tensor{}.item());
 
   test_overflow();
 
@@ -100,8 +100,7 @@ TEST(TestScalar, TestScalar) {
   // check Scalar.toTensor on Scalars backed by different data types
   ASSERT_EQ(scalar_to_tensor(bar).scalar_type(), kDouble);
   ASSERT_EQ(scalar_to_tensor(what).scalar_type(), kLong);
-  ASSERT_EQ(
-      scalar_to_tensor(ones({})._local_scalar()).scalar_type(), kDouble);
+  ASSERT_EQ(scalar_to_tensor(ones({}).item()).scalar_type(), kDouble);
 
   if (x.scalar_type() != ScalarType::Half) {
     AT_DISPATCH_ALL_TYPES(x.type(), "foo", [&] {
