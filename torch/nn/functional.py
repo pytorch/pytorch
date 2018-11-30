@@ -4,7 +4,6 @@ from __future__ import division
 import warnings
 import math
 import types
-from typing import List
 
 import torch
 from torch._C import _infer_size, _add_docstr
@@ -16,7 +15,7 @@ from ._functions.thnn.fold import Col2Im, Im2Col
 from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad
 from . import _VF
-from .._jit_internal import weak_script
+from .._jit_internal import weak_script, List
 
 
 conv1d = _add_docstr(torch.conv1d, r"""
