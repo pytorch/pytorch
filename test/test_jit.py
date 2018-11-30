@@ -9411,7 +9411,6 @@ EXCLUDE_SCRIPT = {
 
     # aten op has additional cudnn argument
     'test_nn_group_norm',
-    'test_nn_unfold',
     'test_nn_max_unpool2d',
 
     # flakey test - TODO fix
@@ -9422,7 +9421,6 @@ EXCLUDE_SCRIPT = {
     'test_nn_binary_cross_entropy_size_average',
     'test_nn_cross_entropy',
     'test_nn_interpolate',
-    'test_nn_fold',
     'test_nn_max_unpool1d',
 }
 

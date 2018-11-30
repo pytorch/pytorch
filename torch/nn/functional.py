@@ -12,7 +12,6 @@ from . import _reduction as _Reduction
 from . import _functions
 from .modules import utils
 from ._functions import vision
-from ._functions.thnn.fold import Col2Im, Im2Col
 from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad
 from . import _VF
@@ -2766,7 +2765,7 @@ def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
         assert_int_or_pair(padding, 'padding', msg)
         assert_int_or_pair(stride, 'stride', msg)
 
-        return Im2Col.apply(input, _pair(kernel_size),
+        return torch._C._nn.thnn_im2col(input, _pair(kernel_size),
                             _pair(dilation), _pair(padding), _pair(stride))
     else:
         raise NotImplementedError("Input Error: Only 4D input Tensors are supported (got {}D)".format(input.dim()))
@@ -2790,7 +2789,7 @@ def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
         assert_int_or_pair(padding, 'padding', msg)
         assert_int_or_pair(stride, 'stride', msg)
 
-        return Col2Im.apply(input, _pair(output_size), _pair(kernel_size),
+        return torch._C._nn.thnn_col2im(input, _pair(output_size), _pair(kernel_size),
                             _pair(dilation), _pair(padding), _pair(stride))
     else:
         raise NotImplementedError("Input Error: Only 3D input Tensors are supported (got {}D)".format(input.dim()))

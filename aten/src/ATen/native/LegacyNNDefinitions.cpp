@@ -879,4 +879,12 @@ std::tuple<Tensor,Tensor,Tensor> thnn_conv_dilated3d_backward(const Tensor & gra
   return at::_thnn_conv_dilated3d_backward(grad_output, self, weight, kernel_size, stride, padding, dilation, columns, ones, output_mask);
 }
 
+Tensor thnn_col2im(const Tensor & self, IntList output_size, IntList kernel_size, IntList dilation, IntList padding, IntList stride) {
+  return at::_thnn_col2im(self, output_size, kernel_size, dilation, padding, stride);
+}
+
+Tensor thnn_im2im(const Tensor & self, IntList kernel_size, IntList dilation, IntList padding, IntList stride) {
+  return at::_thnn_im2col(self, kernel_size, dilation, padding, stride);
+}
+
 }} // namespace at::native
