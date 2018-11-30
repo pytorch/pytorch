@@ -189,12 +189,14 @@ std::ostream& operator<<(std::ostream & out, const Graph & g) {
 }
 
 std::ostream& Graph::prettyPrint(std::ostream & out) {
-  PythonPrint(out, *this);
+  std::vector<at::Tensor> tensor_table;
+  PythonPrint(out, *this, tensor_table);
   return out;
 }
 
 void Graph::dumpPretty() {
-  PythonPrint(std::cout, *this);
+  std::vector<at::Tensor> tensor_table;
+  PythonPrint(std::cout, *this, tensor_table);
 }
 
 static void checkSameDevice(const Node* node) {
