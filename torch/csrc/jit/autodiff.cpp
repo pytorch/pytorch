@@ -2,9 +2,13 @@
 
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
+#include "torch/csrc/jit/passes/lower_tuples.h"
 #include "torch/csrc/jit/symbolic_variable.h"
+#include "torch/csrc/jit/symbolic_gradient.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/utils/functional.h"
+#include "torch/csrc/jit/script/module.h"
+#include "torch/csrc/jit/script/compiler.h"
 
 #include <torch/csrc/jit/assertions.h>
 
@@ -462,6 +466,35 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     throw std::runtime_error(std::string("differentiation of ") + node->kind().toDisplayString() + " "
                              "is not supported, or it is missing necessary type information");
   }
+  // If define using Torchscript, use it instead of symbolic
+  for (auto& it : symbolic_grads) {
+    if (node->matches(it.first.c_str())) {
+      auto graph = node->owningGraph();
+      auto cu = std::make_shared<script::Module>();
+      script::defineMethodsInModule(cu, it.second, script::nativeResolver, nullptr);
+      // Use fw_graph to replace node in grad_desc.f
+      value_list new_outputs;
+      {
+        WithInsertPoint guard(node->next());
+        auto fw_graph = cu->find_method("forward")->graph();
+        new_outputs = script::inlineCallTo(*graph, *fw_graph, node->inputs());
+        for (size_t i = 0; i < node->outputs().size(); ++i) {
+          new_outputs.at(i)->setType(node->outputs()[i]->type());
+          new_outputs.at(i)->replaceAllUsesWith(node->outputs()[i]);
+        }
+      }
+
+      // Use bw_graph to replace symbolic grads in grad_desc.df
+      auto bgraph = cu->find_method("backward")->graph();
+      auto grad_vec = grad_values.vec();
+      auto it = grad_vec.begin();
+      grad_vec.insert(it, new_outputs.back());
+      ArrayRef<Value*> grad(grad_vec);
+      auto grad_inputs = script::inlineCallTo(*graph, *bgraph, grad);
+
+      return grad_inputs;
+    }
+  }
   auto sym_grads = build_sym_grad(fmap<SymbolicVariable>(grad_values));
   return fmap(sym_grads, [](const SymbolicVariable &v) { return v.value(); });
 }
@@ -566,6 +599,8 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
     }
 
     value_list grad_inputs = linearGradientForNode(node, fmap(node->outputs(), get_grad));
+    LowerSimpleTuples(reverse_block);
+
     JIT_ASSERT(grad_inputs.size() == node->inputs().size());
     for (size_t i = 0, num_inputs = grad_inputs.size(); i < num_inputs; ++i) {
       if (!inputs[i]->requires_grad()) continue;
@@ -575,6 +610,12 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
       set_grad(inputs[i], grad_inputs[i]);
     }
   }
+  EliminateDeadCode(graph.block());
+
+  std::cout << "cleaned graph" << std::endl;
+  graph.dump();
+  std::cout << "reverse node" << std::endl;
+  reverse_node->dump();
 
   auto inputs = graph.inputs();
   for (size_t i = 0, num_inputs = inputs.size(); i < num_inputs; ++i) {
@@ -589,6 +630,8 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
     reverse_block->registerOutput(get_grad(input));
     grad_desc.df_output_vjps.push_back(i);
   }
+
+    EliminateDeadCode(reverse_block);
   return ReverseDetails(std::move(grad_map), reverse_block);
 }
 
@@ -759,6 +802,8 @@ Gradient differentiate(std::shared_ptr<Graph>& graph) {
   std::swap(graph, grad_desc.f);
   // XXX: Take care when handling outputs - they can be duplicated!
 
+  std::cout << "original graph" << std::endl;
+  grad_desc.f->dump();
   WithInsertPoint guard(grad_desc.f->block());
   // Fills in df_input_vjps and df_output_vjps
   auto rev_info = addReverseInline(grad_desc);
@@ -771,6 +816,9 @@ Gradient differentiate(std::shared_ptr<Graph>& graph) {
   // Fills in f, df, f_real_outputs, df_input_captures,
   // modifies df_input_vjps (new vjps are added for temporaries)
   lambdaLiftReverse(grad_desc, rev_info);
+  std::cout << "grad_desc" << std::endl;
+  grad_desc.f->dump();
+  grad_desc.df->dump();
   return grad_desc;
 }
 
