@@ -1,8 +1,8 @@
-#include <ATen/core/OptionsGuard.h>
+#include <c10/core/OptionsGuard.h>
 #include <c10/core/Layout.h>
 #include <c10/util/Optional.h>
 
-namespace at {
+namespace c10 {
 
 // In the CAFFE2_FB_LIMITED_MOBILE_CAPABILITY build setting,
 // thread_local is not supported.  In that case, we don't provide
@@ -35,4 +35,4 @@ const DefaultTensorOptions& getDefaultTensorOptions() {
 
 #endif
 
-} // namespace at
+} // namespace c10
