@@ -95,7 +95,7 @@ backends will try to find the network interface to use for communication. Howeve
 is not always guaranteed to be successful from our experiences. Therefore, if you
 encounter any problem on either backend not being able to find the correct network
 interface. You can try to set the following environment variables (each one
-applicable to their respective backend):
+applicable to its respective backend):
 
 * **NCCL_SOCKET_IFNAME**, for example ``export NCCL_SOCKET_IFNAME=eth0``
 * **GLOO_SOCKET_IFNAME**, for example ``export GLOO_SOCKET_IFNAME=eth0``
