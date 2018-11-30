@@ -31,14 +31,8 @@ CUDA_INCLUDES = """\
 # in both cases, we unconditionally cast both tensors (and rely
 # on the surrounding code to establish the necessary invariants.)
 
-COPY_CPU = CodeTemplate("""\
-_copy_(dst, src);
-""")
-
 COPY = CodeTemplate("""\
-${THTensor}_copy${cuda}${src_scalar_name}(${state,}\
-dst.unsafeGetTensorImpl(), \
-src.unsafeGetTensorImpl());
+_copy_(dst, src);
 """)
 
 COPY_ASYNC_CPU = CodeTemplate("""\
@@ -142,10 +136,7 @@ def create_one_copy(dst_type, all_types):
         if dst_type['ScalarType'] == src_type['ScalarType']:
             if dst_type['Backend'] == 'CUDA' and src_type['Backend'] == 'CPU':
                 copies.append(COPY_ASYNC_CPU.substitute(body_env))
-        if dst_type['Backend'] == 'CPU' and src_type['Backend'] == 'CPU':
-            copies.append(COPY_CPU.substitute())
-        else:
-            copies.append(COPY.substitute(body_env))
+        copies.append(COPY.substitute())
 
         copy_body.append(CASE.substitute(body_env, copies=copies))
 
@@ -211,10 +202,7 @@ def create_one_copy_from(src_type, all_types):
             # function
             if dst_type['Backend'] == 'CPU' and src_type['Backend'] == 'CUDA':
                 copies.append(COPY_ASYNC_CUDA.substitute(body_env))
-        if dst_type['Backend'] == 'CPU' and src_type['Backend'] == 'CPU':
-            copies.append(COPY_CPU.substitute())
-        else:
-            copies.append(COPY.substitute(body_env))
+        copies.append(COPY.substitute())
 
         copy_body.append(CASE.substitute(body_env, copies=copies))
 
