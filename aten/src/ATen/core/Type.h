@@ -184,9 +184,6 @@ struct CAFFE2_API Type {
 
   // example
   // virtual Tensor * add(Tensor & a, Tensor & b) = 0;
-  virtual Tensor & _th_triu_(Tensor & self, int64_t diagonal) const = 0;
-  virtual Tensor & s__th_addcmul_(Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) const = 0;
-  virtual Tensor & _th_addcmul_(Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) const = 0;
   virtual Tensor abs(const Tensor & self) const = 0;
   virtual Tensor & abs_(Tensor & self) const = 0;
   virtual Tensor acos(const Tensor & self) const = 0;
