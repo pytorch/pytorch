@@ -62,8 +62,7 @@ static void std_kernel_impl(TensorIterator &iter, bool unbiased) {
       },
       [unbiased](WelfordData acc) -> scalar_t {
         int64_t divisor = unbiased ? (acc.n - 1) : acc.n;
-        // This yields NaN when n == 0, which is intentional.
-        return std::sqrt(acc.m2 / std::max(static_cast<int64_t>(0), divisor));
+        return (divisor > 0) ? std::sqrt(acc.m2 / divisor) : NAN;
       }
     );
   });
