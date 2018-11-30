@@ -206,9 +206,6 @@ struct CAFFE2_API TensorIterator {
   /// reductions.
   bool should_accumulate() const { return accumulate_; }
 
-  /// If the kernel should promote the output type.
-  bool should_promote_output() const { return promote_output_types_; }
-
 protected:
   void mark_outputs();
   void compute_shape();
