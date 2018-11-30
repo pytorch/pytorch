@@ -603,7 +603,6 @@ class TestAutograd(TestCase):
 
         gradcheck(fn, [sparse, dense])
 
-
     @skipIfRocm
     def test_sparse_ctor_getter_backward(self):
         # See NOTE [ Sparse: autograd and API ] on the expected behavior of this test
