@@ -1198,6 +1198,8 @@
 
 - func: mm_out(Tensor result, Tensor self, Tensor mat2) -> Tensor
 
+- func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
+
 - func: mode(Tensor self, int64_t dim=-1, bool keepdim=false) -> (Tensor, Tensor)
   variants: function, method
 
