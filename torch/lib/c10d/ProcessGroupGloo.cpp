@@ -601,14 +601,18 @@ class AsyncReduceWork : public ProcessGroupGloo::AsyncWork {
   const ReduceOp reduceOp;
   const uint32_t tag;
 
-  void run() override {
-    const auto& scalarType = inputs[0].scalar_type();
+  void reduce(std::vector<at::Tensor>& tensors) {
+    const auto& scalarType = tensors[0].scalar_type();
     gloo::ReduceOptions opts(context);
     opts.setRoot(rootRank);
     opts.setTag(tag);
     opts.setReduceFunction(getFunction(scalarType, reduceOp));
-    GENERATE_ALL_TYPES(scalarType, setOutput, opts, inputs[0]);
+    GENERATE_ALL_TYPES(scalarType, setOutput, opts, tensors[0]);
     gloo::reduce(opts);
+  }
+
+  void run() override {
+    reduce(inputs);
   }
 
  protected:
@@ -626,6 +630,65 @@ class AsyncReduceWork : public ProcessGroupGloo::AsyncWork {
   }
 };
 
+#ifdef USE_CUDA
+
+class AsyncReduceCUDAWork : public AsyncReduceWork {
+ public:
+  AsyncReduceCUDAWork(
+      const std::shared_ptr<gloo::Context>& context,
+      std::vector<at::Tensor>& inputs,
+      int rootRank,
+      int rootTensor,
+      ReduceOp reduceOp,
+      uint32_t tag)
+      : AsyncReduceWork(context, inputs, rootRank, rootTensor, reduceOp, tag) {
+    initializeStreamsEvents(inputs, streams, events);
+
+    // Kick off copy from CUDA tensors to pinned CPU tensors.
+    tmp.reserve(inputs.size());
+    at::cuda::OptionalCUDAStreamGuard guard;
+    for (size_t i = 0; i < inputs.size(); i++) {
+      guard.reset_stream(streams[i]);
+      tmp.push_back(pinnedLike(inputs[i]).copy_(inputs[i], true));
+    }
+  }
+
+  void run() override {
+    // Synchronize with copy operations.
+    at::cuda::OptionalCUDAGuard device_guard;
+    for (size_t i = 0; i < inputs.size(); i++) {
+      device_guard.set_index(inputs[i].get_device());
+      AT_CUDA_CHECK(cudaStreamSynchronize(streams[i]));
+    }
+
+    // Run reduce on host side tensors.
+    reduce(tmp);
+
+    // Kick off copy back to the CUDA tensors.
+    at::cuda::OptionalCUDAStreamGuard stream_guard;
+    for (size_t i = 0; i < inputs.size(); i++) {
+      stream_guard.reset_stream(streams[i]);
+      inputs[i].copy_(tmp[i], /* non_blocking */ true);
+      events[i].record(streams[i]);
+    }
+  }
+
+  void synchronize() override {
+    // Synchronize with the copy back to CUDA tensors.
+    at::cuda::OptionalCUDAGuard guard;
+    for (size_t i = 0; i < inputs.size(); i++) {
+      guard.set_index(static_cast<at::DeviceIndex>(inputs[i].get_device()));
+      events[i].block(at::cuda::getCurrentCUDAStream());
+    }
+  }
+
+  std::vector<at::Tensor> tmp;
+  std::vector<at::cuda::CUDAStream> streams;
+  std::vector<at::cuda::CUDAEvent> events;
+};
+
+#endif
+
 } // namespace
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce(
@@ -639,15 +702,41 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce(
   assertRootTensor(invalidArgument, opts.rootTensor, inputs.size());
   assertSingleElement(invalidArgument, inputs);
   assertDense(invalidArgument, inputs);
-  assertCPU(invalidArgument, inputs);
 
-  auto work = std::make_shared<AsyncReduceWork>(
-      contexts_[0],
-      inputs,
-      opts.rootRank,
-      opts.rootTensor,
-      opts.reduceOp,
-      nextTag());
+  const auto& device = inputs[0].device();
+  switch (device.type()) {
+    case at::kCPU:
+#ifdef USE_CUDA
+    case at::kCUDA:
+#endif
+      break;
+    default:
+      invalidArgument("unsupported device type");
+  }
+
+  std::shared_ptr<AsyncReduceWork> work;
+  auto& context = contexts_[0];
+  if (device.type() == at::kCPU) {
+    work = std::make_shared<AsyncReduceWork>(
+        context,
+        inputs,
+        opts.rootRank,
+        opts.rootTensor,
+        opts.reduceOp,
+        nextTag());
+#ifdef USE_CUDA
+  } else if (device.type() == at::kCUDA) {
+    work = std::make_shared<AsyncReduceCUDAWork>(
+        context,
+        inputs,
+        opts.rootRank,
+        opts.rootTensor,
+        opts.reduceOp,
+        nextTag());
+#endif
+  } else {
+    throw std::runtime_error("Invalid backend");
+  }
   enqueue(work);
   return work;
 }
