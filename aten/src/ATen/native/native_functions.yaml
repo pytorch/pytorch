@@ -639,11 +639,6 @@
     CPU: embedding_renorm_cpu_
     CUDA: embedding_renorm_cuda_
 
-- func: no_grad_embedding_renorm_(Tensor self, IndexTensor indices, double max_norm, double norm_type) -> Tensor
-  dispatch:
-    CPU: no_grad_embedding_renorm_cpu_
-    CUDA: no_grad_embedding_renorm_cuda_
-
 - func: embedding_sparse_backward(Tensor grad, IndexTensor indices, int64_t num_weights, int64_t padding_idx, bool scale_grad_by_freq) -> Tensor
 
 # NOTE [ embedding_bag Native Functions ]
