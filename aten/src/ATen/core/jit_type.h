@@ -507,7 +507,10 @@ struct CAFFE2_API ListType : public SingleElementType<TypeKind::ListType, ListTy
     if(auto rhs_ = rhs->cast<OptionalType>()) {
       return this->isSubtypeOf(rhs_->getElementType());
     }
-    return Type::isSubtypeOf(rhs);
+    if (auto rhs_list = rhs->cast<ListType>()) {
+      return this->getElementType()->isSubtypeOf(rhs_list->getElementType());
+    }
+    return false;
   }
   TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
     return create(contained_types.at(0));

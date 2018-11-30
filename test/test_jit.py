@@ -7680,6 +7680,18 @@ a")
                 # type: () -> int
                 return torch.jit._unwrap_optional(None)
 
+    def test_list_of_optionals(self):
+        @torch.jit.script
+        def test(a):
+            # type: (List[Optional[int]]) -> List[Optional[int]]
+            return a
+
+        # testing that it compiles
+        @torch.jit.script
+        def test_2(b):
+            # type: (List[int]) -> List[Optional[int]]
+            return test(b)
+
     def test_list_with_default_builtin(self):
         from torch.nn.modules.utils import _list_with_default
 
