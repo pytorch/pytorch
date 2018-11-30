@@ -2162,6 +2162,8 @@
 [[
   name: _th_triu_
   cname: triu
+  variants:
+    - function
   return: self
   arguments:
     - THTensor* self
@@ -2473,6 +2475,7 @@
         - THTensor* tensor1
         - THTensor* tensor2
     - cname: spaddcmul
+      variants: function
       return: argument 0
       arguments:
         - THTensor* self
