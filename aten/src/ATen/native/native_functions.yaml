@@ -439,16 +439,16 @@
 
 - func: conv_transpose3d(Tensor input, Tensor weight, Tensor? bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, int64_t groups=1, IntList[3] dilation=1) -> Tensor
 
-- func: _copy_(Tensor self, Tensor src, bool non_blocking=false) -> Tensor
+- func: s_copy_(Tensor self, Tensor src, bool non_blocking=false) -> Tensor
   cpu_half: True
   dispatch:
-    CPU: _copy__cpu
-    CUDA: _copy__cuda
+    CPU: _s_copy__cpu
+    CUDA: _s_copy__cuda
 
-- func: _copy_from(Tensor self, Tensor dst, bool non_blocking=false) -> Tensor
+- func: _s_copy_from(Tensor self, Tensor dst, bool non_blocking=false) -> Tensor
   cpu_half: True
   dispatch:
-    CUDA: _copy_from_cuda
+    CUDA: _s_copy_from_cuda
 
 - func: _copy_same_type_(Tensor self, Tensor src) -> void
   cpu_half: True

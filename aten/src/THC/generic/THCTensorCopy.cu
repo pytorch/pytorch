@@ -6,7 +6,7 @@ void THCTensor_(copy)(THCState* state, THCTensor* dst, THCTensor* src) {
   if (dst == src) return;
   at::Tensor dst_wrap = THTensor_wrap(dst);
   at::Tensor src_wrap = THTensor_wrap(src);
-  at::_copy_(dst_wrap, src_wrap);
+  at::s_copy_(dst_wrap, src_wrap);
 }
 
 template <>
@@ -16,7 +16,7 @@ THCTensor *THCTensor_newClone<scalar_t>(THCState *state, THCTensor *self) {
   THCTensor_resizeAs(state, tensor, self);
   at::Tensor tensor_wrap = THTensor_wrap(tensor);
   at::Tensor self_wrap = THTensor_wrap(self);
-  at::_copy_(tensor_wrap, self_wrap);
+  at::s_copy_(tensor_wrap, self_wrap);
   return tensor;
 }
 
@@ -37,7 +37,7 @@ void THCTensor_freeCopyTo<scalar_t>(THCState *state, THCTensor *self, THCTensor 
   if(self != dst) {
     at::Tensor dst_wrap = THTensor_wrap(dst);
     at::Tensor self_wrap = THTensor_wrap(self);
-    at::_copy_(dst_wrap, self_wrap);
+    at::s_copy_(dst_wrap, self_wrap);
   }
 
   THCTensor_free(state, self);
