@@ -64,7 +64,7 @@ class CheckpointFunction(torch.autograd.Function):
             ctx.had_cuda_in_fwd = False
             if torch.cuda._initialized:
                 ctx.had_cuda_in_fwd = True
-                ctx.fwd_gpu_devices, ctx.fwd_gpu_states = get_device_states(args)
+                ctx.fwd_gpu_devices, ctx.fwd_gpu_states = get_device_states(*args)
         ctx.save_for_backward(*args)
         with torch.no_grad():
             outputs = run_function(*args)
