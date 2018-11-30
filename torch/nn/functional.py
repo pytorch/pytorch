@@ -4,7 +4,6 @@ from __future__ import division
 import warnings
 import math
 import types
-from typing import List
 
 import torch
 from torch._C import _infer_size, _add_docstr
@@ -15,7 +14,7 @@ from ._functions import vision
 from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad
 from . import _VF
-from .._jit_internal import weak_script
+from .._jit_internal import weak_script, List
 
 
 conv1d = _add_docstr(torch.conv1d, r"""
@@ -445,75 +444,93 @@ max_pool3d = torch._jit_internal.boolean_dispatch(
     if_false=_max_pool3d)
 
 
+@torch._jit_internal.weak_script
 def _unpool_output_size(input, kernel_size, stride, padding, output_size):
+    # type: (Tensor, List[int], List[int], List[int], Optional[List[int]]) -> List[int]
     input_size = input.size()
-    default_size = []
+    default_size = torch.jit.annotate(List[int], [])
     for d in range(len(kernel_size)):
         default_size.append((input_size[d + 2] - 1) * stride[d] +
                             kernel_size[d] - 2 * padding[d])
     if output_size is None:
-        return default_size
+        ret = default_size
+    else:
+        output_size = torch.jit._unwrap_optional(output_size)
+        if len(output_size) == len(kernel_size) + 2:
+            output_size = output_size[2:]
+        if len(output_size) != len(kernel_size):
+            raise ValueError("output_size should be a sequence containing "
+                             "{} or {} elements, but it has a length of '{}'"
+                             .format(len(kernel_size), len(kernel_size) + 2,
+                                     len(output_size)))
+        for d in range(len(kernel_size)):
+            min_size = default_size[d] - stride[d]
+            max_size = default_size[d] + stride[d]
+            if not (min_size < output_size[d] < max_size):
+                raise ValueError(
+                    'invalid output_size "{}" (dim {} must be between {} and {})'
+                    .format(output_size, d, min_size, max_size))
 
-    output_size = list(output_size)
-    if len(output_size) == len(kernel_size) + 2:
-        output_size = output_size[2:]
-    if len(output_size) != len(kernel_size):
-        raise ValueError("output_size should be a sequence containing "
-                         "{} or {} elements, but it has a length of '{}'"
-                         .format(len(kernel_size), len(kernel_size) + 2,
-                                 len(output_size)))
-    for d in range(len(kernel_size)):
-        min_size = default_size[d] - stride[d]
-        max_size = default_size[d] + stride[d]
-        if not (min_size < output_size[d] < max_size):
-            raise ValueError(
-                'invalid output_size "{}" (dim {} must be between {} and {})'
-                .format(output_size, d, min_size, max_size))
-
-    return output_size
+        ret = output_size
+    return ret
 
 
 @torch._jit_internal.weak_script
 def max_unpool1d(input, indices, kernel_size, stride=None, padding=0,
                  output_size=None):
+    # type: (Tensor, Tensor, BroadcastingList1[int], Optional[BroadcastingList1[int]], BroadcastingList1[int], Optional[BroadcastingList1[int]]) -> Tensor  # noqa
     r"""Computes a partial inverse of :class:`MaxPool1d`.
 
     See :class:`~torch.nn.MaxUnpool1d` for details.
     """
     kernel_size = _single(kernel_size)
-    stride = _single(stride or kernel_size)
+    if stride is not None:
+        _stride = _single(torch.jit._unwrap_optional(stride))
+    else:
+        _stride = kernel_size
     padding = _single(padding)
-    output_size = _unpool_output_size(input, kernel_size, stride, padding,
+    output_size = _unpool_output_size(input, kernel_size, _stride, padding,
                                       output_size)
     return torch._C._nn.max_unpool2d(input.unsqueeze(3), indices.unsqueeze(3), output_size + [1]).squeeze(3)
 
 
+@torch._jit_internal.weak_script
 def max_unpool2d(input, indices, kernel_size, stride=None, padding=0,
                  output_size=None):
+    # type: (Tensor, Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], BroadcastingList2[int], Optional[BroadcastingList2[int]]) -> Tensor  # noqa
     r"""Computes a partial inverse of :class:`MaxPool2d`.
 
     See :class:`~torch.nn.MaxUnpool2d` for details.
     """
     kernel_size = _pair(kernel_size)
-    stride = _pair(stride or kernel_size)
+    if stride is not None:
+        _stride = _pair(torch.jit._unwrap_optional(stride))
+    else:
+        _stride = kernel_size
     padding = _pair(padding)
-    output_size = _unpool_output_size(input, kernel_size, stride, padding,
+    output_size = _unpool_output_size(input, kernel_size, _stride, padding,
                                       output_size)
     return torch._C._nn.max_unpool2d(input, indices, output_size)
 
 
+@torch._jit_internal.weak_script
 def max_unpool3d(input, indices, kernel_size, stride=None, padding=0,
                  output_size=None):
+    # type: (Tensor, Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], BroadcastingList3[int], Optional[BroadcastingList3[int]]) -> Tensor  # noqa
     r"""Computes a partial inverse of :class:`MaxPool3d`.
 
     See :class:`~torch.nn.MaxUnpool3d` for details.
     """
     kernel_size = _triple(kernel_size)
-    stride = _triple(stride or kernel_size)
+    if stride is not None:
+        _stride = _triple(torch.jit._unwrap_optional(stride))
+    else:
+        _stride = kernel_size
     padding = _triple(padding)
-    output_size = _unpool_output_size(input, kernel_size, stride, padding,
+    output_size = _unpool_output_size(input, kernel_size, _stride, padding,
                                       output_size)
-    return torch._C._nn.max_unpool3d(input, indices, output_size, stride, padding)
+    return torch._C._nn.max_unpool3d(
+        input, indices, output_size, _stride, padding)
 
 
 @torch._jit_internal.weak_script
@@ -1855,6 +1872,7 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
     return torch.kl_div(input, target, reduction_enum)
 
 
+@torch._jit_internal.weak_script
 def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-100,
                   reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, Optional[Tensor], Optional[bool], int, Optional[bool], str) -> Tensor
@@ -1903,6 +1921,7 @@ def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-1
     return nll_loss(log_softmax(input, 1), target, weight, None, ignore_index, None, reduction)
 
 
+@torch._jit_internal.weak_script
 def binary_cross_entropy(input, target, weight=None, size_average=None,
                          reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, Optional[Tensor], Optional[bool], Optional[bool], str) -> Tensor
@@ -1946,11 +1965,12 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
     if not (target.size() == input.size()):
         warnings.warn("Using a target size ({}) that is different to the input size ({}) is deprecated. "
                       "Please ensure they have the same size.".format(target.size(), input.size()))
-    if input.nelement() != target.nelement():
+    if input.numel() != target.numel():
         raise ValueError("Target and input must have the same number of elements. target nelement ({}) "
-                         "!= input nelement ({})".format(target.nelement(), input.nelement()))
+                         "!= input nelement ({})".format(target.numel(), input.numel()))
 
     if weight is not None:
+        weight = torch.jit._unwrap_optional(weight)
         new_size = _infer_size(target.size(), weight.size())
         weight = weight.expand(new_size)
 

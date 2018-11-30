@@ -258,7 +258,6 @@ class JitTestCase(TestCase):
                     raise
                 else:
                     return
-
             ppv = "op_version_set = 0\n{}".format(pp)
             sm = copy_structure_and_params(module)
             torch._C._jit_import_methods(sm, ppv, constant_table)
@@ -2950,6 +2949,22 @@ class TestScript(JitTestCase):
             self.assertExpectedGraph(ge.graph)
 
         return ge
+
+    def test_jitter_bug(self):
+        @torch.jit.script
+        def fn2(input, kernel_size):
+            # type: (Tensor, List[int]) -> Tensor
+            if kernel_size[0] > 1:
+                _stride = [2]
+            else:
+                _stride = kernel_size
+            print(_stride, kernel_size)
+            return input
+
+        @torch.jit.script
+        def fn(input):
+            # type: (Tensor) -> Tensor
+            return fn2(input, [1])
 
     def test_annoying_doubles(self):
         mod = types.ModuleType("temp")
@@ -8719,6 +8734,13 @@ a")
             return ls
         self.checkScript(foo, (torch.rand(2, 3), torch.rand(3)))
 
+    def test_inplace_copy_script(self):
+        def foo(x):
+            a = torch.rand(3, 4)
+            a.copy_(x)
+            return a
+        self.checkScript(foo, (torch.rand(3, 4),))
+
     def test_lhs_indexing_increment(self):
         def foo(a, b):
             a[0] += b
@@ -8782,6 +8804,15 @@ a")
             # type: (Tensor) -> Tuple[Tensor, Tensor]
             return F.max_pool1d(x, 1, 1, 0, 1, False, True)
         self.checkScript(arg_true, (torch.randn(3, 3, 3),))
+
+    def test_infer_size(self):
+        from torch._C import _infer_size
+
+        def fn(x, y):
+            # type: (Tensor, Tensor) -> List[int]
+            return _infer_size(x.size(), y.size())
+
+        self.checkScript(fn, (torch.ones(2, 4, 2), torch.ones(2, 4, 2)))
 
 
 class MnistNet(nn.Module):
@@ -9406,22 +9437,22 @@ EXCLUDE_SCRIPT = {
 
     # argument has custom behavior
     'test_nn_fractional_max_pool2d',
-    'test_nn_max_unpool3d',
     'test_nn_batch_norm',
 
     # aten op has additional cudnn argument
     'test_nn_group_norm',
-    'test_nn_max_unpool2d',
 
     # flakey test - TODO fix
     'test_nn_ctc_loss',
 
     # unknown builtin op
-    'test_nn_binary_cross_entropy',
-    'test_nn_binary_cross_entropy_size_average',
-    'test_nn_cross_entropy',
     'test_nn_interpolate',
+}
+
+EXCLUDE_PYTHON_PRINT = {
     'test_nn_max_unpool1d',
+    'test_nn_max_unpool2d',
+    'test_nn_max_unpool3d',
 }
 
 EXCLUDE_SCRIPT_MODULES = {
@@ -9495,6 +9526,8 @@ def get_script_args(args):
             formals.append(name)
             actuals.append(name)
             tensors.append(arg)
+        elif isinstance(arg, str):
+            actuals.append("'{}'".format(arg))
         else:
             actuals.append(str(get_constant(arg)))
     return (formals, tensors, actuals)
@@ -10059,7 +10092,7 @@ nn_functional_tests = [
                                                            non_differentiable(torch.randn(3, 2))),),
     ('binary_cross_entropy', torch.randn(3, 2).sigmoid(),
         (non_differentiable(torch.rand(3, 2)),
-         non_differentiable(torch.randn(3, 2)), True), 'size_average'),
+         non_differentiable(torch.randn(3, 2)), None, None, 'mean'), 'size_average'),
     ('ctc_loss', torch.rand(S, S, S).log_softmax(2).detach().requires_grad_(), \
      (torch.randint(1, S, (S, S), dtype=torch.long), torch.full((S,), S, dtype=torch.long), \
       torch.randint(1, S, (S,), dtype=torch.long))),
@@ -10073,6 +10106,7 @@ nn_functional_single_grad = frozenset('test_nn_' + name for name in [
     'max_unpool3d',
     'multi_margin_loss',
     'binary_cross_entropy',
+    'binary_cross_entropy_size_average',
     'ctc_loss',
     'grid_sample',
 ])
@@ -10202,10 +10236,17 @@ def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=()
 
         if test_name not in EXCLUDE_SCRIPT:
             disable_ad_subgraph_inlining = test_name in DISABLE_AUTODIFF_SUBGRAPH_INLINING
-            check_against_reference(self,
-                                    create_script_fn(self, name, 'nn_functional', output_process_fn,
-                                                     disable_autodiff_subgraph_inlining=disable_ad_subgraph_inlining),
-                                    fn, f_args_variable, kwargs_variable, no_grad=no_grad)
+
+            def run_test():
+                script_fn = create_script_fn(self, name, 'nn_functional', output_process_fn,
+                                             disable_autodiff_subgraph_inlining=disable_ad_subgraph_inlining)
+                check_against_reference(self, script_fn, fn, f_args_variable, kwargs_variable, no_grad=no_grad)
+
+            if test_name in EXCLUDE_PYTHON_PRINT:
+                with self.disableModuleHook():
+                    run_test()
+            else:
+                run_test()
 
     post_add_test(test_name, skipTestIf, do_test)
 

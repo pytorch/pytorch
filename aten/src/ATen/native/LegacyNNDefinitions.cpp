@@ -883,7 +883,7 @@ Tensor thnn_col2im(const Tensor & self, IntList output_size, IntList kernel_size
   return at::_thnn_col2im(self, output_size, kernel_size, dilation, padding, stride);
 }
 
-Tensor thnn_im2im(const Tensor & self, IntList kernel_size, IntList dilation, IntList padding, IntList stride) {
+Tensor thnn_im2col(const Tensor & self, IntList kernel_size, IntList dilation, IntList padding, IntList stride) {
   return at::_thnn_im2col(self, kernel_size, dilation, padding, stride);
 }
 
