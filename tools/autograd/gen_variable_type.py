@@ -385,11 +385,14 @@ def emit_body(declaration):
     base_name = name[:-1] if inplace else name[:-4] if is_out_fn else name
     view_info = VIEW_FUNCTIONS.get(base_name, None)
 
+    def is_tensor(arg):
+        return 'Tensor' in arg['type']
+
     # These exclude things like BoolTensor, int64_t, and Scalar
     def is_differentiable(arg):
         if 'TensorOptions' in arg['type']:
             return False
-        if 'Tensor' not in arg['type']:
+        if not is_tensor(arg):
             return False
         if arg['dynamic_type'] in {'IndexTensor', 'BoolTensor'}:
             return False
@@ -647,7 +650,8 @@ def emit_body(declaration):
     def emit_increment_version():
         if not modifies_arguments:
             return []
-        return ['increment_version({});'.format(arg['name']) for arg in differentiable_outputs]
+        tensor_outputs = list(filter(is_tensor, returns))
+        return ['increment_version({});'.format(arg['name']) for arg in tensor_outputs]
 
     env = {}
     combined = nested_dict(env, declaration)
@@ -666,10 +670,12 @@ def emit_body(declaration):
 
     body.append(pre_record_trace)
     body.append(emit_call(env))
+    # Unconditionally increment modified-inplace-inputs for correctness: the
+    # input may be involved in another operation that saves it for backwards.
+    body.extend(emit_increment_version())
     if requires_derivative:
         # set_flags has to appear after version_counter, because rebase_history
         # requires that the counter is incremented before it is called
-        body.extend(emit_increment_version())
         body.append(emit_history())
     # post_record_trace must appear before save_outputs so that saved outputs
     # have their tracing state saved (that is setup by recordTrace)
