@@ -1,10 +1,10 @@
-graph(%x : Dynamic
-      %1 : Dynamic
-      %2 : Dynamic
-      %3 : Dynamic
-      %4 : Dynamic
-      %5 : Dynamic
-      %6 : Dynamic) {
+graph(%x : Tensor
+      %1 : Tensor
+      %2 : Tensor
+      %3 : Tensor
+      %4 : Tensor
+      %5 : Tensor
+      %6 : Tensor) {
   %7 : int = prim::Constant[value=1]()
   %8 : int = prim::Constant[value=2]()
   %9 : int = aten::dim(%x)
@@ -18,22 +18,22 @@ graph(%x : Dynamic
     block1() {
       -> (%10)
     }
-  %ret.2 : Dynamic = prim::If(%11)
+  %ret.2 : Tensor = prim::If(%11)
     block0() {
-      %15 : Dynamic = aten::_unwrap_optional(%2)
-      %16 : Dynamic = aten::t(%1)
-      %ret.3 : Dynamic = aten::addmm(%15, %x, %16, %7, %7)
+      %15 : Tensor = aten::_unwrap_optional(%2)
+      %16 : Tensor = aten::t(%1)
+      %ret.3 : Tensor = aten::addmm(%15, %x, %16, %7, %7)
       -> (%ret.3)
     }
     block1() {
-      %18 : Dynamic = aten::t(%1)
-      %output.3 : Dynamic = aten::matmul(%x, %18)
+      %18 : Tensor = aten::t(%1)
+      %output.3 : Tensor = aten::matmul(%x, %18)
       %20 : None = prim::None()
       %21 : bool = aten::__isnot__(%2, %20)
-      %output.4 : Dynamic = prim::If(%21)
+      %output.4 : Tensor = prim::If(%21)
         block0() {
-          %23 : Dynamic = aten::_unwrap_optional(%2)
-          %output.5 : Dynamic = aten::add_(%output.3, %23, %7)
+          %23 : Tensor = aten::_unwrap_optional(%2)
+          %output.5 : Tensor = aten::add_(%output.3, %23, %7)
           -> (%output.5)
         }
         block1() {
@@ -41,8 +41,8 @@ graph(%x : Dynamic
         }
       -> (%output.4)
     }
-  %25 : Dynamic = aten::add(%ret.2, %3, %7)
-  %26 : Dynamic = aten::add(%x, %25, %7)
+  %25 : Tensor = aten::add(%ret.2, %3, %7)
+  %26 : Tensor = aten::add(%x, %25, %7)
   %27 : int = aten::dim(%x)
   %28 : bool = aten::eq(%27, %8)
   %29 : bool = prim::If(%28)
@@ -54,22 +54,22 @@ graph(%x : Dynamic
     block1() {
       -> (%28)
     }
-  %ret.4 : Dynamic = prim::If(%29)
+  %ret.4 : Tensor = prim::If(%29)
     block0() {
-      %33 : Dynamic = aten::_unwrap_optional(%2)
-      %34 : Dynamic = aten::t(%1)
-      %ret.5 : Dynamic = aten::addmm(%33, %x, %34, %7, %7)
+      %33 : Tensor = aten::_unwrap_optional(%2)
+      %34 : Tensor = aten::t(%1)
+      %ret.5 : Tensor = aten::addmm(%33, %x, %34, %7, %7)
       -> (%ret.5)
     }
     block1() {
-      %36 : Dynamic = aten::t(%1)
-      %output.6 : Dynamic = aten::matmul(%x, %36)
+      %36 : Tensor = aten::t(%1)
+      %output.6 : Tensor = aten::matmul(%x, %36)
       %38 : None = prim::None()
       %39 : bool = aten::__isnot__(%2, %38)
-      %output.7 : Dynamic = prim::If(%39)
+      %output.7 : Tensor = prim::If(%39)
         block0() {
-          %41 : Dynamic = aten::_unwrap_optional(%2)
-          %output.8 : Dynamic = aten::add_(%output.6, %41, %7)
+          %41 : Tensor = aten::_unwrap_optional(%2)
+          %output.8 : Tensor = aten::add_(%output.6, %41, %7)
           -> (%output.8)
         }
         block1() {
@@ -77,8 +77,8 @@ graph(%x : Dynamic
         }
       -> (%output.7)
     }
-  %43 : Dynamic = aten::add(%ret.4, %3, %7)
-  %44 : Dynamic = aten::add(%26, %43, %7)
+  %43 : Tensor = aten::add(%ret.4, %3, %7)
+  %44 : Tensor = aten::add(%26, %43, %7)
   %45 : int = aten::dim(%x)
   %46 : bool = aten::eq(%45, %8)
   %47 : bool = prim::If(%46)
@@ -90,22 +90,22 @@ graph(%x : Dynamic
     block1() {
       -> (%46)
     }
-  %ret : Dynamic = prim::If(%47)
+  %ret : Tensor = prim::If(%47)
     block0() {
-      %51 : Dynamic = aten::_unwrap_optional(%5)
-      %52 : Dynamic = aten::t(%4)
-      %ret.1 : Dynamic = aten::addmm(%51, %x, %52, %7, %7)
+      %51 : Tensor = aten::_unwrap_optional(%5)
+      %52 : Tensor = aten::t(%4)
+      %ret.1 : Tensor = aten::addmm(%51, %x, %52, %7, %7)
       -> (%ret.1)
     }
     block1() {
-      %54 : Dynamic = aten::t(%4)
-      %output.1 : Dynamic = aten::matmul(%x, %54)
+      %54 : Tensor = aten::t(%4)
+      %output.1 : Tensor = aten::matmul(%x, %54)
       %56 : None = prim::None()
       %57 : bool = aten::__isnot__(%5, %56)
-      %output : Dynamic = prim::If(%57)
+      %output : Tensor = prim::If(%57)
         block0() {
-          %59 : Dynamic = aten::_unwrap_optional(%5)
-          %output.2 : Dynamic = aten::add_(%output.1, %59, %7)
+          %59 : Tensor = aten::_unwrap_optional(%5)
+          %output.2 : Tensor = aten::add_(%output.1, %59, %7)
           -> (%output.2)
         }
         block1() {
@@ -113,7 +113,7 @@ graph(%x : Dynamic
         }
       -> (%output)
     }
-  %61 : Dynamic = aten::add(%ret, %6, %7)
-  %62 : Dynamic = aten::add(%44, %61, %7)
+  %61 : Tensor = aten::add(%ret, %6, %7)
+  %62 : Tensor = aten::add(%44, %61, %7)
   return (%62);
 }
