@@ -16,7 +16,7 @@
 
 include(FindPackageHandleStandardArgs)
 
-if ($ENV{TORCH_INSTALL_PREFIX})
+if (DEFINED ENV{TORCH_INSTALL_PREFIX})
   set(TORCH_INSTALL_PREFIX $ENV{TORCH_INSTALL_PREFIX})
 else()
   # Assume we are in <install-prefix>/share/cmake/Torch/TorchConfig.cmake
@@ -36,9 +36,11 @@ else()
 endif()
 
 # Library dependencies.
-find_package(Caffe2 REQUIRED)
+if (NOT ANDROID OR NOT USE_ONLY_TORCH_LIB)
+  find_package(Caffe2 REQUIRED)
+endif()
 
-find_library(TORCH_LIBRARY torch PATHS "${TORCH_INSTALL_PREFIX}/lib")
+find_library(TORCH_LIBRARY NO_CMAKE_FIND_ROOT_PATH torch PATHS "${TORCH_INSTALL_PREFIX}/lib")
 add_library(torch UNKNOWN IMPORTED)
 set(TORCH_LIBRARIES torch ${Caffe2_MAIN_LIBS})
 

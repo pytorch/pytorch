@@ -208,7 +208,7 @@ function build() {
 		       -DANDROID_TOOLCHAIN=clang \
 		       -DUSE_OPENMP=OFF \
 		       -DANDROID_NDK=$ANDROID_NDK \
-		       -DANDROID_ABI=armeabi-v7a \
+		       -DANDROID_ABI=x86 \
 		       -DANDROID_NATIVE_API_LEVEL=21 \
 		       -DANDROID_CPP_FEATURES="rtti exceptions" \
 		       -DTH_SO_VERSION=1 \
@@ -340,7 +340,7 @@ function build_caffe2() {
 		       -DANDROID_TOOLCHAIN=clang \
 		       -DUSE_OPENMP=OFF \
 		       -DANDROID_NDK=$ANDROID_NDK \
-		       -DANDROID_ABI=armeabi-v7a \
+		       -DANDROID_ABI=x86 \
 		       -DANDROID_NATIVE_API_LEVEL=21 \
 		       -DANDROID_CPP_FEATURES="rtti exceptions" \
 		       -DUSE_MOBILE_OPENGL=OFF \
