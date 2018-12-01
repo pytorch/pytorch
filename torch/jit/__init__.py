@@ -639,6 +639,8 @@ class CompilationUnit(object):
 
 
 def _try_get_dispatched_fn(fn):
+    if not callable(fn):
+        return None
     return _boolean_dispatched.get(fn)
 
 
