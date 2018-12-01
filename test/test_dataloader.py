@@ -706,6 +706,13 @@ class TestDataLoader(TestCase):
 
             for exit_method in exit_methods:
 
+                test_desc = []
+                test_desc.append('use_workers: {}'.format(use_workers))
+                test_desc.append('pin_memory: {}'.format(pin_memory))
+                test_desc.append('hold_iter_reference: {}'.format(hold_iter_reference))
+                test_desc.append('exit_method: {}'.format(exit_method))
+                test_desc = ', '.join(test_desc)
+
                 # clear pids array first
                 for i in range(len(worker_pids)):
                     worker_pids[i] = -1
@@ -723,21 +730,21 @@ class TestDataLoader(TestCase):
                 # Wait for loader process to set everything up, i.e., filling
                 # worker pids in `worker_pids`.
                 setup_event.wait(timeout=JOIN_TIMEOUT)
-                self.assertTrue(setup_event.is_set(), 'loader process setup timed out')
+                self.assertTrue(setup_event.is_set(), test_desc + ': loader process setup timed out')
 
                 pids = [pid for pid in worker_pids if pid > 0]
 
                 try:
                     exit_status = wait_pids(pids, timeout=(MP_STATUS_CHECK_INTERVAL + JOIN_TIMEOUT))
                     if not all(exit_status):
-                        self.fail('subprocess (pid(s) {}) not terminated'.format(
+                        self.fail(test_desc + ': subprocess (pid(s) {}) not terminated'.format(
                             ', '.join(p for p, exited in zip(pids, exit_status) if not exited)))
                     p.join(JOIN_TIMEOUT + MP_STATUS_CHECK_INTERVAL)
-                    self.assertFalse(p.is_alive(), 'loader process not terminated')
+                    self.assertFalse(p.is_alive(), test_desc + ': loader process not terminated')
                     if exit_method is None:
-                        self.assertEqual(p.exitcode, 0)
+                        self.assertEqual(p.exitcode, 0, test_desc + ': expected nonzero exitcode')
                     else:
-                        self.assertNotEqual(p.exitcode, 0)
+                        self.assertNotEqual(p.exitcode, 0, test_desc + ': expected zero exitcode')
                 finally:
                     p.terminate()
 

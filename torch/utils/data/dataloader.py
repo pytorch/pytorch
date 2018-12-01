@@ -461,6 +461,7 @@ class _DataLoaderIter(object):
             assert (not self.shutdown and self.batches_outstanding > 0)
             idx, batch = self._get_batch()
             self.batches_outstanding -= 1
+            self._put_indices()
             if idx != self.rcvd_idx:
                 # store out-of-order samples
                 self.reorder_dict[idx] = batch
@@ -484,7 +485,6 @@ class _DataLoaderIter(object):
 
     def _process_next_batch(self, batch):
         self.rcvd_idx += 1
-        self._put_indices()
         if isinstance(batch, _utils.ExceptionWrapper):
             raise batch.exc_type(batch.exc_msg)
         return batch
