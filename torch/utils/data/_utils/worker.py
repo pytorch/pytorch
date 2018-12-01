@@ -9,7 +9,8 @@ import random
 import sys
 import os
 from torch._six import queue
-from . import collate, signal, MP_STATUS_CHECK_INTERVAL, ExceptionWrapper, IS_WINDOWS
+from . import collate, signal_handling, MP_STATUS_CHECK_INTERVAL, \
+    ExceptionWrapper, IS_WINDOWS
 
 if IS_WINDOWS:
     import ctypes
@@ -65,7 +66,7 @@ def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed,
         # module's handlers are executed after Python returns from C low-level
         # handlers, likely when the same fatal signal happened again already.
         # https://docs.python.org/3/library/signal.html Sec. 18.8.1.1
-        signal._set_worker_signal_handlers()
+        signal_handling._set_worker_signal_handlers()
 
         torch.set_num_threads(1)
         random.seed(seed)
