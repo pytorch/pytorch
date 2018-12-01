@@ -5827,6 +5827,33 @@ a")
         self.checkScript(test_ints, ())
         self.checkScript(test_floats, ())
 
+    def test_embedding_renorm_grad_error(self):
+        # Testing that the builtin call to embedding_renorm_ correctly throws
+        # Error when .backward() is called on its input
+
+        def embedding_norm(input, embedding_matrix, max_norm):
+            F.embedding(input, embedding_matrix, max_norm=0.01)
+
+        @torch.jit.script
+        def embedding_norm_script(input, embedding_matrix, max_norm):
+            # type: (Tensor, Tensor, float)
+            F.embedding(input, embedding_matrix, max_norm=0.01)
+
+        for fun in [embedding_norm, embedding_norm_script]:
+            input = torch.tensor([[1, 2, 4, 5], [4, 3, 2, 9]])
+            embedding_matrix = torch.randn(10, 3)
+
+            var1 = torch.randn(10, 3, requires_grad=True)
+            var2 = var1.detach().requires_grad_()
+            output1 = var1 * embedding_matrix
+            output2 = var2 * embedding_matrix
+
+            output1.sum().backward()
+
+            ignore = F.embedding(input, embedding_matrix, max_norm=0.01)
+            with self.assertRaisesRegex(RuntimeError, "modified"):
+                output2.sum().backward()
+
     def test_type_annotations(self):
         def fn(x, y):
             # type: (Tensor, Tensor) -> Tuple[Tensor, Tensor, Tensor]
