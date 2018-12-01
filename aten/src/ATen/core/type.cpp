@@ -91,6 +91,10 @@ StringTypePtr StringType::get() {
   static auto value = StringType::create();
   return value;
 }
+DeviceObjTypePtr DeviceObjType::get() {
+  static auto value = DeviceObjType::create();
+  return value;
+}
 OptionalTypePtr OptionalType::ofTensor() {
   static auto value = OptionalType::create(DynamicType::get());
   return value;
@@ -133,6 +137,8 @@ TypePtr inferTypeFrom(const IValue& value) {
     return ListType::ofFloats();
   } else if (value.isTuple()) {
     return TupleType::create(fmap(value.toTuple()->elements(), inferTypeFrom));
+  } else if (value.isDevice()) {
+    return DeviceObjType::get();
   }
   AT_ASSERTM(false, "Unhandled IValue kind in inferTypeFrom");
 }
@@ -317,6 +323,13 @@ const char * typeKindToString(TypeKind kind) {
   }
 #undef CASE_TYPE
   return "";
+}
+
+bool Type::isSubtypeOf(const TypePtr rhs) const {
+  if(auto rhs_ = rhs->cast<OptionalType>()) {
+    return this->isSubtypeOf(rhs_->getElementType());
+  }
+  return *this == *rhs;
 }
 
 } // namespace c10

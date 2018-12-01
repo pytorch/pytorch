@@ -78,12 +78,12 @@ def jit_type_of(arg):
 # map from aten 'simple_type' to the function that will turn a tensor into
 # that type
 FROM_IVALUE = {
-    'Device': '{}.to<at::Device>()',
+    'Device': '{}.toDevice()',
     'IntList': '{}.toIntList()->elements()',
-    'Layout': '{}.to<at::Layout>()',
+    'Layout': '{}.toLayout()',
     'Scalar': '{}.toScalar()',
     'Scalar?': '{}.toOptional<Scalar>()',
-    'ScalarType': '{}.to<at::ScalarType>()',
+    'ScalarType': '{}.toScalarType()',
     'Tensor': '{}.toTensor()',
     'TensorList': '{}.toTensorList()->elements()',
     'bool': '{}.toBool()',
@@ -332,7 +332,7 @@ def gen_jit_dispatch(declarations, out, template_path):
             {'name': 'layout', 'simple_type': 'Layout', 'default': 'strided', 'kwarg_only': True},
             # device is specified as an IntList of { at::Device::Type, device_id }
             {'name': 'device', 'simple_type': 'Device', 'kwarg_only': True,
-                'default': '[cpu, -1]'},
+                'default': '\\"cpu\\"'},
         ]
 
     for decl in jit_decls:

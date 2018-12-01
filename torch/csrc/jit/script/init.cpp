@@ -343,9 +343,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       return toSimple(g.insertConstant(IValue(), loc));
     } else if (THPDevice_Check(obj.ptr())) {
       auto device = reinterpret_cast<THPDevice*>(obj.ptr());
-      std::vector<int64_t> v = {static_cast<int64_t>(device->device.type()),
-                                device->device.index()};
-      return toSimple(g.insertConstant(std::move(v)));
+      return toSimple(g.insertConstant(device->device));
     } else if (THPLayout_Check(obj.ptr())) {
       auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
       const auto v = static_cast<int64_t>(layout->layout);

@@ -628,6 +628,12 @@ struct PythonPrintPass {
       stmt << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
     } else if(v.isString()) {
       printQuotedString(stmt, v.toStringRef());
+    } else if(v.isDevice()) {
+      std::stringstream ss;
+      ss << v.toDevice();
+      stmt << "torch.device(";
+      printQuotedString(stmt, ss.str());
+      stmt << ")";
     } else if(v.isTensorList()) {
       stmt << "[";
       const char* delim = "";
