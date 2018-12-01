@@ -42,7 +42,7 @@ class ScriptModuleDeserializer final {
 private:
  at::Tensor loadTensor(
      const torch::TensorDef& tensor_proto,
-     std::unordered_map<uint64_t, at::Storage>& storageMap);
+     std::unordered_map<std::string, at::Storage>& storageMap);
 
  void convertModule(const torch::ModuleDef& module_def);
 
@@ -59,8 +59,7 @@ private:
 };
 
 ScriptModuleDeserializer::ScriptModuleDeserializer(const std::string& filename)
-    : ifs_(filename, std::ifstream::in | std::ifstream::binary),
-      reader_(&ifs_) {
+    : reader_(filename.c_str()) {
   // TODO appropriate support for mmap, right now still use stream reader
 }
 
@@ -71,7 +70,7 @@ void ScriptModuleDeserializer::deserialize(ModuleLookup module_lookup) {
   torch::ModelDef model_def;
   at::DataPtr data_ptr;
   size_t data_size;
-  std::tie(data_ptr, data_size) = reader_.getLastRecord();
+  std::tie(data_ptr, data_size) = reader_.getRecord("model.json");
   // NB: cannot use JsonStringToMessage, since fbcode's protobuf is too old
   // be consistent with JsonStringToMessage
   std::string url_prefix = "type.googleapis.com";
@@ -105,32 +104,31 @@ void ScriptModuleDeserializer::deserialize(ModuleLookup module_lookup) {
 }
 
 void ScriptModuleDeserializer::loadTensorTable(torch::ModelDef* model_def) {
-  std::unordered_map<uint64_t, at::Storage> storageMap;
+  std::unordered_map<std::string, at::Storage> storageMap;
   for(const torch::TensorDef& tensor : model_def->tensors()) {
     tensor_table_.emplace_back(loadTensor(tensor, storageMap));
   }
 }
 
 at::Tensor ScriptModuleDeserializer::loadTensor(const torch::TensorDef& tensor_proto,
-                std::unordered_map<uint64_t, at::Storage>& storageMap) {
+                std::unordered_map<std::string, at::Storage>& storageMap) {
   std::vector<int64_t> dims(tensor_proto.dims().begin(), tensor_proto.dims().end());
   std::vector<int64_t> strides(tensor_proto.strides().begin(), tensor_proto.strides().end());
   auto type = at::typeMetaToScalarType(
       caffe2::DataTypeToTypeMeta(tensor_proto.data_type()));
 
-  uint64_t record_id = caffe2::stoull(tensor_proto.data().key());
-  auto storage_it = storageMap.find(record_id);
+  const std::string& record_key = tensor_proto.data().key();
+  auto storage_it = storageMap.find(record_key);
   if (storage_it == storageMap.end()) {
     at::DataPtr storage_ptr;
     uint64_t record_size;
-    std::tie(storage_ptr, record_size) = reader_.getRecordWithKey(record_id);
-    AT_ASSERT(record_size == tensor_proto.data().size());
+    std::tie(storage_ptr, record_size) = reader_.getRecord(record_key);
     auto storage = at::Storage(
         at::CPU(type).typeMeta(),
         std::move(storage_ptr),
         record_size / at::CPU(type).typeMeta().itemsize(),
         nullptr); // NB: we didn't set any allocator for the tensor
-    storage_it = storageMap.insert(std::make_pair(record_id, storage)).first;
+    storage_it = storageMap.insert(std::make_pair(record_key, storage)).first;
   }
   auto t = at::CPU(type)._th_tensor(
       storage_it->second, tensor_proto.offset(), dims, strides);
@@ -153,12 +151,13 @@ void ScriptModuleDeserializer::convertModule(
     module->register_parameter(
         param_def.name(), tensor, param_def.is_buffer());
   }
-  at::DataPtr data;
-  size_t size;
-  std::tie(data, size) = reader_.getRecordWithKey(caffe2::stoull(module_def.torchscript_arena().key()));
-  JIT_ASSERT(size == module_def.torchscript_arena().size());
-  std::string data_str(static_cast<const char*>(data.get()), size);
-  import_methods(module, data_str, tensor_table_);
+  if (module_def.has_torchscript_arena()) {
+    at::DataPtr data;
+    size_t size;
+    std::tie(data, size) = reader_.getRecord(module_def.torchscript_arena().key());
+    std::string data_str(static_cast<const char*>(data.get()), size);
+    import_methods(module, data_str, tensor_table_);
+  }
 }
 
 }  // namespace
