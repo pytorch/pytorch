@@ -1,18 +1,18 @@
-graph(%x : Dynamic) {
+graph(%x : Tensor) {
   %1 : int = prim::Constant[value=357]()
   %2 : int = prim::Constant[value=55]()
   %3 : int = prim::Constant[value=199]()
   %4 : int = prim::Constant[value=2]()
   %5 : int = prim::Constant[value=1]()
-  %y : Dynamic = aten::mul(%x, %4)
-  %7 : Dynamic = aten::add(%y, %5, %5)
+  %y : Tensor = aten::mul(%x, %4)
+  %7 : Tensor = aten::add(%y, %5, %5)
   %8 : int = aten::add(%2, %3)
-  %9 : Dynamic = ^python_op_in_weak_module()(%y)
-  %10 : Dynamic = aten::add(%9, %8, %5)
-  %11 : Dynamic = aten::add(%7, %10, %5)
-  %12 : Dynamic = aten::add(%y, %1, %5)
-  %13 : Dynamic = ^python_op_in_strong_module()(%y)
-  %14 : Dynamic = aten::add(%12, %13, %5)
-  %15 : Dynamic = aten::add(%11, %14, %5)
+  %9 : Tensor = ^python_op_in_weak_module()(%y)
+  %10 : Tensor = aten::add(%9, %8, %5)
+  %11 : Tensor = aten::add(%7, %10, %5)
+  %12 : Tensor = aten::add(%y, %1, %5)
+  %13 : Tensor = ^python_op_in_strong_module()(%y)
+  %14 : Tensor = aten::add(%12, %13, %5)
+  %15 : Tensor = aten::add(%11, %14, %5)
   return (%15);
 }

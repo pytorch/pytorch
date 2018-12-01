@@ -1,92 +1,92 @@
 testBlocks
-graph(%a : Dynamic
-      %b : Dynamic
-      %c : Dynamic) {
+graph(%a : Tensor
+      %b : Tensor
+      %c : Tensor) {
   %2 : int = prim::Constant[value=1]()
-  %3 : Dynamic = aten::add(%a, %b, %2)
-  %5 : Dynamic = prim::If(%c)
+  %3 : Tensor = aten::add(%a, %b, %2)
+  %5 : Tensor = prim::If(%c)
     block0() {
       %6 : int = prim::Constant[value=1]()
-      %7 : Dynamic = aten::add(%3, %3, %6)
+      %7 : Tensor = aten::add(%3, %3, %6)
       -> (%7)
     }
     block1() {
       %8 : int = prim::Constant[value=1]()
-      %9 : Dynamic = aten::add(%b, %3, %8)
+      %9 : Tensor = aten::add(%b, %3, %8)
       %10 : int = prim::Constant[value=1]()
-      %11 : Dynamic = aten::add(%9, %3, %10)
+      %11 : Tensor = aten::add(%9, %3, %10)
       -> (%11)
     }
   %12 : int = prim::Constant[value=1]()
-  %13 : Dynamic = aten::add(%5, %3, %12)
+  %13 : Tensor = aten::add(%5, %3, %12)
   return (%13);
 }
 
-graph(%a : Dynamic
-      %b : Dynamic
-      %c : Dynamic) {
+graph(%a : Tensor
+      %b : Tensor
+      %c : Tensor) {
   %2 : int = prim::Constant[value=1]()
-  %3 : Dynamic = aten::add(%a, %b, %2)
-  %5 : Dynamic = prim::If(%c)
+  %3 : Tensor = aten::add(%a, %b, %2)
+  %5 : Tensor = prim::If(%c)
     block0() {
       %8 : int = prim::Constant[value=1]()
-      %9 : Dynamic = aten::add(%b, %3, %8)
+      %9 : Tensor = aten::add(%b, %3, %8)
       %10 : int = prim::Constant[value=1]()
-      %11 : Dynamic = aten::add(%9, %3, %10)
+      %11 : Tensor = aten::add(%9, %3, %10)
       -> (%11)
     }
   %12 : int = prim::Constant[value=1]()
-  %13 : Dynamic = aten::add(%5, %3, %12)
+  %13 : Tensor = aten::add(%5, %3, %12)
   return (%13);
 }
 
-graph(%a : Dynamic
-      %b : Dynamic
-      %c : Dynamic) {
+graph(%a : Tensor
+      %b : Tensor
+      %c : Tensor) {
   %3 : int = prim::Constant[value=1]()
-  %4 : Dynamic = aten::add(%a, %b, %3)
-  %5 : Dynamic = prim::If(%c)
+  %4 : Tensor = aten::add(%a, %b, %3)
+  %5 : Tensor = prim::If(%c)
     block0() {
       %6 : int = prim::Constant[value=1]()
-      %7 : Dynamic = aten::add(%b, %4, %6)
+      %7 : Tensor = aten::add(%b, %4, %6)
       %8 : int = prim::Constant[value=1]()
-      %9 : Dynamic = aten::add(%7, %4, %8)
+      %9 : Tensor = aten::add(%7, %4, %8)
       -> (%9)
     }
   %10 : int = prim::Constant[value=1]()
-  %11 : Dynamic = aten::add(%5, %4, %10)
+  %11 : Tensor = aten::add(%5, %4, %10)
   return (%11);
 }
 
 testCreateAutodiffSubgraphs
-graph(%0 : Dynamic
-      %1 : Dynamic
-      %2 : Dynamic
-      %3 : Dynamic
-      %4 : Dynamic) {
+graph(%0 : Tensor
+      %1 : Tensor
+      %2 : Tensor
+      %3 : Tensor
+      %4 : Tensor) {
   %7 : int = prim::Constant[value=1]()
-  %23 : Dynamic, %24 : Dynamic = prim::DifferentiableGraph_0(%2, %1, %4, %0, %3)
+  %23 : Tensor, %24 : Tensor = prim::DifferentiableGraph_0(%2, %1, %4, %0, %3)
   return (%23, %24);
 }
-with prim::DifferentiableGraph_0 = graph(%13 : Dynamic
-      %32 : Dynamic
-      %33 : Dynamic
-      %35 : Dynamic
-      %36 : Dynamic) {
-  %37 : Dynamic = aten::mm(%35, %36)
-  %34 : Dynamic = aten::mm(%32, %33)
+with prim::DifferentiableGraph_0 = graph(%13 : Tensor
+      %32 : Tensor
+      %33 : Tensor
+      %35 : Tensor
+      %36 : Tensor) {
+  %37 : Tensor = aten::mm(%35, %36)
+  %34 : Tensor = aten::mm(%32, %33)
   %30 : int = prim::Constant[value=1]()
-  %31 : Dynamic = aten::add(%37, %34, %30)
-  %24 : Dynamic, %25 : Dynamic, %26 : Dynamic, %27 : Dynamic = prim::ConstantChunk[chunks=4, dim=1](%31)
-  %22 : Dynamic = aten::sigmoid(%24)
-  %20 : Dynamic = aten::sigmoid(%27)
-  %18 : Dynamic = aten::tanh(%26)
-  %16 : Dynamic = aten::sigmoid(%25)
-  %14 : Dynamic = aten::mul(%16, %13)
-  %11 : Dynamic = aten::mul(%22, %18)
-  %8 : Dynamic = aten::add(%14, %11, %30)
-  %4 : Dynamic = aten::tanh(%8)
-  %2 : Dynamic = aten::mul(%20, %4)
+  %31 : Tensor = aten::add(%37, %34, %30)
+  %24 : Tensor, %25 : Tensor, %26 : Tensor, %27 : Tensor = prim::ConstantChunk[chunks=4, dim=1](%31)
+  %22 : Tensor = aten::sigmoid(%24)
+  %20 : Tensor = aten::sigmoid(%27)
+  %18 : Tensor = aten::tanh(%26)
+  %16 : Tensor = aten::sigmoid(%25)
+  %14 : Tensor = aten::mul(%16, %13)
+  %11 : Tensor = aten::mul(%22, %18)
+  %8 : Tensor = aten::add(%14, %11, %30)
+  %4 : Tensor = aten::tanh(%8)
+  %2 : Tensor = aten::mul(%20, %4)
   return (%2, %8);
 }
 
@@ -116,15 +116,15 @@ graph(%0 : Float(2, 3, 4)
       %12 : Float(2, 3, 4) = aten::mul(%6, %4)
       -> (%11, %12)
     }
-  %13 : Dynamic = prim::AutogradAdd(%1, %9)
+  %13 : Tensor = prim::AutogradAdd(%1, %9)
   %14 : Float(2, 3, 4), %15 : Float(2, 3, 4) = prim::GradOf[name="aten::mul"](%13)
     block0() {
       %16 : Float(2, 3, 4) = aten::mul(%13, %3)
       %17 : Float(2, 3, 4) = aten::mul(%13, %2)
       -> (%16, %17)
     }
-  %18 : Dynamic = prim::AutogradAdd(%10, %14)
-  %19 : Dynamic = prim::AutogradAdd(%7, %15)
+  %18 : Tensor = prim::AutogradAdd(%10, %14)
+  %19 : Tensor = prim::AutogradAdd(%7, %15)
   return (%18, %19);
 }
 
@@ -146,24 +146,24 @@ graph(%0 : Float(*)
       %2 : Float(*)
       %3 : Float(*)) {
   %4 : int = prim::Constant[value=1]()
-  %6 : Float(*), %7 : Dynamic = prim::GradOf[name="aten::add"](%0)
+  %6 : Float(*), %7 : Tensor = prim::GradOf[name="aten::add"](%0)
     block0() {
-      %8 : Dynamic = aten::mul(%0, %4)
+      %8 : Tensor = aten::mul(%0, %4)
       -> (%0, %8)
     }
-  %9 : Dynamic, %10 : Dynamic = prim::GradOf[name="aten::mul"](%6)
+  %9 : Tensor, %10 : Tensor = prim::GradOf[name="aten::mul"](%6)
     block0() {
-      %11 : Dynamic = aten::mul(%6, %2)
-      %12 : Dynamic = aten::mul(%6, %3)
+      %11 : Tensor = aten::mul(%6, %2)
+      %12 : Tensor = aten::mul(%6, %3)
       -> (%11, %12)
     }
-  %13 : Dynamic = prim::AutogradAdd(%1, %9)
-  %14 : Dynamic, %15 : Dynamic = prim::GradOf[name="aten::add"](%13)
+  %13 : Tensor = prim::AutogradAdd(%1, %9)
+  %14 : Tensor, %15 : Tensor = prim::GradOf[name="aten::add"](%13)
     block0() {
-      %16 : Dynamic = aten::mul(%13, %4)
+      %16 : Tensor = aten::mul(%13, %4)
       -> (%13, %16)
     }
-  %17 : Dynamic = prim::AutogradAdd(%10, %15)
+  %17 : Tensor = prim::AutogradAdd(%10, %15)
   return (%17);
 }
 

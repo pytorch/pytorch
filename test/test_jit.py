@@ -9980,8 +9980,8 @@ graph(%0 : Double(5, 5)) {
         def func(x):
             return torch.ops.aten.relu(x)
         self.assertExpectedInline(canonical(func.graph), '''\
-graph(%x : Dynamic) {
-  %1 : Dynamic = aten::relu(%x)
+graph(%x : Tensor) {
+  %1 : Tensor = aten::relu(%x)
   return (%1);
 }
 ''')
