@@ -29,8 +29,8 @@ def mm(mat1, mat2):
     r"""
     Performs a matrix multiplication of the sparse matrix :attr:`mat1`
     and dense matrix :attr:`mat2`. Similar to :func:`torch.mm`, If :attr:`mat1` is a
-    (n \times m)(n×m) tensor, :attr:`mat2` is a (m \times p)(m×p) tensor, out will be a
-    (n \times p)(n×p) dense tensor. :attr:`mat1` need to have `sparse_dim = 2`.
+    :math:`(n \times m)` tensor, :attr:`mat2` is a :math:`(m \times p)` tensor, out will be a
+    :math:`(n \times p)` dense tensor. :attr:`mat1` need to have `sparse_dim = 2`.
     This function also supports backward for both matrices. Note that the gradients of
     :attr:`mat1` is a coalesced sparse tensor.
 
