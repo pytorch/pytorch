@@ -100,8 +100,8 @@ MNIST::MNIST(const std::string& root, Mode mode)
     : images_(read_images(root, mode == Mode::kTrain)),
       targets_(read_targets(root, mode == Mode::kTrain)) {}
 
-Example<> MNIST::get(size_t index) {
-  return {images_[index], targets_[index]};
+optional<Example<>> MNIST::get(size_t index) {
+  return Example<>(images_[index], targets_[index]);
 }
 
 optional<size_t> MNIST::size() const {

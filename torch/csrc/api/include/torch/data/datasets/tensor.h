@@ -21,7 +21,7 @@ struct TensorDataset : public Dataset<TensorDataset, TensorExample> {
   explicit TensorDataset(torch::Tensor tensor) : tensor(std::move(tensor)) {}
 
   /// Returns a single `TensorExample`.
-  TensorExample get(size_t index) override {
+  optional<TensorExample> get(size_t index) override {
     return tensor[index];
   }
 

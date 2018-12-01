@@ -6,6 +6,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 
+#include <atomic>
 #include <chrono>
 #include <utility>
 
@@ -25,6 +26,12 @@ namespace detail {
 template <typename Job, typename Result>
 class DataShuttle {
  public:
+  DataShuttle() : in_flight_jobs_(0) { }
+  DataShuttle(DataShuttle&&) = default;
+  DataShuttle& operator=(DataShuttle&&) = default;
+  DataShuttle(const DataShuttle&) = delete;
+  DataShuttle& operator=(const DataShuttle&) = delete;
+
   /// Pushes a new job. Called by the main thread.
   void push_job(Job job) {
     new_jobs_.push(std::move(job));
@@ -33,6 +40,7 @@ class DataShuttle {
 
   /// Pushes the result of a job. Called by worker threads.
   void push_result(Result result) {
+    AT_ASSERT(in_flight_jobs_ > 0);
     results_.push(std::move(result));
   }
 
@@ -48,6 +56,7 @@ class DataShuttle {
       optional<std::chrono::milliseconds> timeout = nullopt) {
     if (in_flight_jobs_ > 0) {
       auto result = results_.pop(timeout);
+      AT_ASSERT(in_flight_jobs_ > 0);
       --in_flight_jobs_;
       return result;
     }
@@ -57,8 +66,10 @@ class DataShuttle {
   /// Discards any jobs that are not yet in flight, and waits for all in-flight
   /// jobs to finish, discarding their result.
   void drain() {
+    // AT_ASSERT(in_flight_jobs_ == new_jobs_.size() + results_.size());
     // Clear all inputs so that no further jobs are scheduled.
-    auto number_cleared = new_jobs_.clear();
+    const auto number_cleared = new_jobs_.clear();
+    AT_ASSERT(in_flight_jobs_ >= number_cleared);
     in_flight_jobs_ -= number_cleared;
     // Remove any outstanding results.
     while (in_flight_jobs_ > 0) {
@@ -76,8 +87,7 @@ class DataShuttle {
   /// The queue for jobs that are not yet in flight.
   Queue<Job> new_jobs_;
   /// The number of in-flight jobs.
-  /// NOTE: Not atomic because only manipulated by the main thread.
-  size_t in_flight_jobs_ = 0;
+  std::atomic<size_t> in_flight_jobs_;
   /// The queue for results of finished jobs.
   Queue<Result> results_;
 };

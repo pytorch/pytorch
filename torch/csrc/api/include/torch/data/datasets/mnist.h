@@ -25,7 +25,7 @@ class TORCH_API MNIST : public Dataset<MNIST> {
   explicit MNIST(const std::string& root, Mode mode = Mode::kTrain);
 
   /// Returns the `Example` at the given `index`.
-  Example<> get(size_t index) override;
+  optional<Example<>> get(size_t index) override;
 
   /// Returns the size of the dataset.
   optional<size_t> size() const override;

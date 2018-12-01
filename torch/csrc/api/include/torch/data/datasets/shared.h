@@ -33,7 +33,7 @@ class SharedBatchDataset : public BatchDataset<
       : dataset_(std::move(shared_dataset)) {}
 
   /// Calls `get_batch` on the underlying dataset.
-  BatchType get_batch(BatchRequestType request) override {
+  optional<BatchType> get_batch(BatchRequestType request) override {
     return dataset_->get_batch(std::move(request));
   }
 

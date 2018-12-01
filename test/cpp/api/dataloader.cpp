@@ -29,7 +29,7 @@ const std::chrono::milliseconds kMillisecond(1);
 struct DummyDataset : datasets::Dataset<DummyDataset, int> {
   explicit DummyDataset(size_t size = 100) : size_(size) {}
 
-  int get(size_t index) override {
+  torch::optional<int> get(size_t index) override {
     return 1 + index;
   }
   torch::optional<size_t> size() const override {
@@ -41,7 +41,7 @@ struct DummyDataset : datasets::Dataset<DummyDataset, int> {
 
 TEST(DataTest, DatasetCallsGetCorrectly) {
   DummyDataset d;
-  std::vector<int> batch = d.get_batch({0, 1, 2, 3, 4});
+  std::vector<int> batch = d.get_batch({0, 1, 2, 3, 4}).value();
   std::vector<int> expected = {1, 2, 3, 4, 5};
   ASSERT_EQ(batch, expected);
 }
@@ -54,14 +54,14 @@ TEST(DataTest, TransformCallsGetApplyCorrectly) {
   };
 
   auto d = DummyDataset{}.map(T{});
-  std::vector<std::string> batch = d.get_batch({0, 1, 2, 3, 4});
+  std::vector<std::string> batch = d.get_batch({0, 1, 2, 3, 4}).value();
   std::vector<std::string> expected = {"1", "2", "3", "4", "5"};
   ASSERT_EQ(batch, expected);
 }
 
 struct InfiniteStreamDataset
     : datasets::StreamDataset<InfiniteStreamDataset, std::vector<int>> {
-  std::vector<int> get_batch(size_t batch_size) override {
+  torch::optional<std::vector<int>> get_batch(size_t batch_size) override {
     std::vector<int> batch(batch_size);
     for (auto& i : batch) {
       i = counter++;
@@ -98,6 +98,7 @@ TEST(DataTest, InfiniteStreamDataset) {
   }
   ASSERT_EQ(batch_index, 3);
 }
+
 TEST(DataTest, NoSequencerIsIdentity) {
   using namespace torch::data::detail::sequencers; // NOLINT
   NoSequencer<int> no_sequencer;
@@ -108,7 +109,11 @@ TEST(DataTest, NoSequencerIsIdentity) {
 TEST(DataTest, OrderedSequencerIsSetUpWell) {
   using namespace torch::data::detail::sequencers; // NOLINT
   struct S {
+    bool has_result() {
+      return true;
+    }
     size_t sequence_number;
+    bool quit;
   };
   const size_t kMaxJobs = 5;
   OrderedSequencer<S> sequencer(kMaxJobs);
@@ -119,14 +124,18 @@ TEST(DataTest, OrderedSequencerIsSetUpWell) {
 TEST(DataTest, OrderedSequencerReOrdersValues) {
   using namespace torch::data::detail::sequencers; // NOLINT
   struct S {
+    bool has_result() {
+      return true;
+    }
     size_t sequence_number;
+    bool quit;
   };
   const size_t kMaxJobs = 5;
   OrderedSequencer<S> sequencer(kMaxJobs);
 
   std::vector<size_t> v = {0, 2, 4, 3, 1};
   size_t index = 0;
-  auto getter = [&v, &index]() { return S{v.at(index++)}; };
+  auto getter = [&v, &index]() { return S{v.at(index++), false}; };
 
   // Let's say the sequence number matches for the first one, then it should
   // return immediately.
@@ -359,21 +368,21 @@ TEST(DataTest, StreamSamplerResetsWithNewSizeWell) {
 
 TEST(DataTest, TensorDatasetConstructsFromSingleTensor) {
   datasets::TensorDataset dataset(torch::eye(5));
-  ASSERT_TRUE(
-      torch::tensor({0, 0, 1, 0, 0}, torch::kFloat32).allclose(dataset.get(2)));
+  ASSERT_TRUE(torch::tensor({0, 0, 1, 0, 0}, torch::kFloat32)
+                  .allclose(dataset.get(2).value()));
 }
 
 TEST(DataTest, TensorDatasetConstructsFromInitializerListOfTensors) {
   std::vector<torch::Tensor> vector = torch::eye(5).chunk(5);
   datasets::TensorDataset dataset(vector);
-  ASSERT_TRUE(
-      torch::tensor({0, 0, 1, 0, 0}, torch::kFloat32).allclose(dataset.get(2)));
+  ASSERT_TRUE(torch::tensor({0, 0, 1, 0, 0}, torch::kFloat32)
+                  .allclose(dataset.get(2).value()));
 }
 
 TEST(DataTest, StackTransformWorksForExample) {
   struct D : public datasets::Dataset<D> {
-    Example<> get(size_t index) override {
-      return {tensor[index], 1 + tensor[index]};
+    torch::optional<Example<>> get(size_t index) override {
+      return Example<>(tensor[index], 1 + tensor[index]);
     }
 
     torch::optional<size_t> size() const override {
@@ -385,11 +394,11 @@ TEST(DataTest, StackTransformWorksForExample) {
 
   auto d = D().map(transforms::Stack<Example<>>());
 
-  Example<> first = d.get_batch({0, 1});
+  Example<> first = d.get_batch({0, 1}).value();
   ASSERT_TRUE(first.data.allclose(torch::eye(4).slice(/*dim=*/0, 0, 2)));
   ASSERT_TRUE(first.target.allclose(1 + torch::eye(4).slice(/*dim=*/0, 0, 2)));
 
-  Example<> second = d.get_batch({2, 3});
+  Example<> second = d.get_batch({2, 3}).value();
   ASSERT_TRUE(second.data.allclose(torch::eye(4).slice(/*dim=*/0, 2, 4)));
   ASSERT_TRUE(second.target.allclose(1 + torch::eye(4).slice(/*dim=*/0, 2, 4)));
 }
@@ -398,10 +407,10 @@ TEST(DataTest, StackTransformWorksForTensorExample) {
   auto d = datasets::TensorDataset(torch::eye(4))
                .map(transforms::Stack<TensorExample>());
 
-  TensorExample first = d.get_batch({0, 1});
+  TensorExample first = d.get_batch({0, 1}).value();
   ASSERT_TRUE(first.data.allclose(torch::eye(4).slice(/*dim=*/0, 0, 2)));
 
-  TensorExample second = d.get_batch({2, 3});
+  TensorExample second = d.get_batch({2, 3}).value();
   ASSERT_TRUE(second.data.allclose(torch::eye(4).slice(/*dim=*/0, 2, 4)));
 }
 
@@ -416,8 +425,10 @@ struct T : transforms::TensorTransform<Target> {
 struct TensorStringDataset
     : datasets::
           Dataset<TensorStringDataset, Example<torch::Tensor, std::string>> {
-  Example<torch::Tensor, std::string> get(size_t index) override {
-    return {torch::tensor(static_cast<double>(index)), std::to_string(index)};
+  torch::optional<Example<torch::Tensor, std::string>> get(
+      size_t index) override {
+    return Example<torch::Tensor, std::string>(
+        torch::tensor(static_cast<double>(index)), std::to_string(index));
   }
 
   torch::optional<size_t> size() const override {
@@ -427,7 +438,8 @@ struct TensorStringDataset
 
 TEST(DataTest, TensorTransformWorksForAnyTargetType) {
   auto d = TensorStringDataset().map(T<std::string>{});
-  std::vector<Example<torch::Tensor, std::string>> batch = d.get_batch({1, 2});
+  std::vector<Example<torch::Tensor, std::string>> batch =
+      d.get_batch({1, 2}).value();
 
   ASSERT_EQ(batch.size(), 2);
   ASSERT_TRUE(batch[0].data.allclose(torch::tensor(2.0)));
@@ -440,7 +452,8 @@ TEST(DataTest, TensorTransformWorksForAnyTargetType) {
 TEST(DataTest, TensorLambdaWorksforAnyTargetType) {
   auto d = TensorStringDataset().map(transforms::TensorLambda<std::string>(
       [](torch::Tensor input) { return input * 2; }));
-  std::vector<Example<torch::Tensor, std::string>> batch = d.get_batch({1, 2});
+  std::vector<Example<torch::Tensor, std::string>> batch =
+      d.get_batch({1, 2}).value();
 
   ASSERT_EQ(batch.size(), 2);
   ASSERT_TRUE(batch[0].data.allclose(torch::tensor(2.0)));
@@ -461,9 +474,10 @@ struct UnCopyableDataset : public datasets::Dataset<UnCopyableDataset> {
 
   ~UnCopyableDataset() = default;
 
-  Example<> get(size_t index) override {
-    return {torch::tensor(static_cast<int64_t>(index)),
-            torch::tensor(static_cast<int64_t>(index))};
+  torch::optional<Example<>> get(size_t index) override {
+    return Example<>(
+        torch::tensor(static_cast<int64_t>(index)),
+        torch::tensor(static_cast<int64_t>(index)));
   }
 
   torch::optional<size_t> size() const override {
@@ -480,7 +494,7 @@ TEST(DataTest, MapDoesNotCopy) {
                      .map(transforms::TensorLambda<>(
                          [](torch::Tensor tensor) { return tensor + 3; }));
 
-  auto data = dataset.get_batch(1).at(0).data;
+  auto data = dataset.get_batch(1).value().at(0).data;
   ASSERT_EQ(data.numel(), 1);
   ASSERT_EQ(data[0].item<float>(), 7);
 }
@@ -591,7 +605,7 @@ struct UncopyableDataset : datasets::Dataset<UncopyableDataset, int> {
   UncopyableDataset(const UncopyableDataset&) = delete;
   UncopyableDataset& operator=(const UncopyableDataset&) = delete;
 
-  int get(size_t index) override {
+  torch::optional<int> get(size_t index) override {
     return 1 + index;
   }
   torch::optional<size_t> size() const override {
@@ -640,7 +654,7 @@ struct TestIndexDataset
   explicit TestIndexDataset(size_t size) : data(size) {
     std::iota(data.begin(), data.end(), size_t(0));
   }
-  std::vector<int> get_batch(TestIndex index) override {
+  torch::optional<std::vector<int>> get_batch(TestIndex index) override {
     std::vector<int> batch;
     for (auto i : index.index) {
       batch.push_back(index.offset + data.at(i));
@@ -678,7 +692,7 @@ TEST(DataTest, CanUseCustomTypeAsIndexType) {
 
   size_t i = 0;
   for (auto batch : *data_loader) {
-    for (int j = 0; j < kBatchSize; ++j) {
+    for (size_t j = 0; j < kBatchSize; ++j) {
       ASSERT_EQ(batch.at(j), 10 + j);
     }
     i += 1;
@@ -710,8 +724,8 @@ TEST(DataLoaderTest, MakeDataLoaderDefaultsAsExpected) {
 }
 
 struct UnsizedDataset : public datasets::Dataset<UnsizedDataset> {
-  torch::data::Example<> get(size_t i) {
-    return {torch::ones(i), torch::ones(i)};
+  torch::optional<torch::data::Example<>> get(size_t i) {
+    return torch::data::Example<>(torch::ones(i), torch::ones(i));
   }
   torch::optional<size_t> size() const noexcept {
     return torch::nullopt;
@@ -806,7 +820,7 @@ TEST(DataLoaderTest, CanDereferenceIteratorMultipleTimes) {
 
 TEST(DataLoaderTest, CanUseIteratorAlgorithms) {
   struct D : datasets::BatchDataset<D, int> {
-    int get_batch(torch::ArrayRef<size_t> indices) override {
+    torch::optional<int> get_batch(torch::ArrayRef<size_t> indices) override {
       return 1 + indices.front();
     }
     torch::optional<size_t> size() const override {
@@ -920,9 +934,9 @@ TEST(DataLoaderTest, RespectsTimeout) {
     std::mutex mutex;
   };
 
-  struct D : datasets::Dataset<DummyDataset, int> {
+  struct D : datasets::Dataset<D, int> {
     D(std::shared_ptr<Baton> b) : baton(std::move(b)) {}
-    int get(size_t index) override {
+    torch::optional<int> get(size_t index) override {
       std::unique_lock<std::mutex> lock(baton->mutex);
       baton->cv.wait_for(lock, 1000 * kMillisecond);
       return 0;
@@ -1027,7 +1041,7 @@ struct Dataset : datasets::BatchDataset<Dataset, size_t> {
   Dataset& operator=(const Dataset& other) = delete;
   Dataset& operator=(Dataset&& other) noexcept = delete;
 
-  size_t get_batch(torch::ArrayRef<size_t> indices) override {
+  torch::optional<size_t> get_batch(torch::ArrayRef<size_t> indices) override {
     static Barrier barrier(kNumberOfWorkers);
     static auto order_iterator = kOrderInWhichWorkersReturnTheirBatch.begin();
     static std::condition_variable cv;
@@ -1095,8 +1109,8 @@ TEST(DataLoaderTest, Reset) {
 }
 
 TEST(DataLoaderTest, TestExceptionsArePropagatedFromWorkers) {
-  struct D : datasets::Dataset<DummyDataset, int> {
-    int get(size_t index) override {
+  struct D : datasets::Dataset<D, int> {
+    torch::optional<int> get(size_t index) override {
       throw std::invalid_argument("badness");
     }
     torch::optional<size_t> size() const override {
@@ -1118,4 +1132,110 @@ TEST(DataLoaderTest, TestExceptionsArePropagatedFromWorkers) {
     ASSERT_THROW(
         std::rethrow_exception(e.original_exception), std::invalid_argument);
   }
+}
+
+TEST(DataLoaderTest, StopsIteratingForExhaustibleBatchDatasetOnMainThread) {
+  const int kNumberOfExamplesAfterWhichTheDatasetExhausts = 10;
+
+  struct D : datasets::BatchDataset<D, int> {
+    torch::optional<int> get_batch(
+        torch::ArrayRef<size_t> /* unused */) override {
+      if (counter++ < kNumberOfExamplesAfterWhichTheDatasetExhausts) {
+        return counter;
+      }
+      return torch::nullopt;
+    }
+    torch::optional<size_t> size() const override {
+      return 100;
+    }
+    int counter = 0;
+  };
+
+  auto data_loader = torch::data::make_data_loader(D{});
+  const auto number_of_iterations =
+      std::distance(data_loader->begin(), data_loader->end());
+  ASSERT_EQ(
+      number_of_iterations, kNumberOfExamplesAfterWhichTheDatasetExhausts);
+}
+
+TEST(
+    DataLoaderTest,
+    StopsIteratingForExhaustibleBatchDatasetWithMultipleWorkers) {
+  const int kNumberOfExamplesAfterWhichTheDatasetExhausts = 10;
+  const int kNumberOfWorkers = 8;
+
+  struct D : datasets::BatchDataset<D, int> {
+    torch::optional<int> get_batch(
+        torch::ArrayRef<size_t> /* unused */) override {
+      if (counter++ < kNumberOfExamplesAfterWhichTheDatasetExhausts) {
+        return counter;
+      }
+      return torch::nullopt;
+    }
+    torch::optional<size_t> size() const override {
+      return 100;
+    }
+    int counter = 0;
+  };
+
+  auto data_loader = torch::data::make_data_loader(
+      D{}, DataLoaderOptions().workers(kNumberOfWorkers));
+
+  const auto number_of_iterations =
+      std::distance(data_loader->begin(), data_loader->end());
+  ASSERT_EQ(
+      number_of_iterations,
+      kNumberOfWorkers * kNumberOfExamplesAfterWhichTheDatasetExhausts);
+}
+
+TEST(DataLoaderTest, StopsIteratingForExhaustibleDatasetWithMultipleWorkers) {
+  const int kNumberOfExamplesAfterWhichTheDatasetExhausts = 10;
+  const int kNumberOfWorkers = 8;
+
+  struct D : datasets::Dataset<D, int> {
+    torch::optional<int> get(size_t /* unused */) override {
+      if (counter++ < kNumberOfExamplesAfterWhichTheDatasetExhausts) {
+        return counter;
+      }
+      return torch::nullopt;
+    }
+    torch::optional<size_t> size() const override {
+      return 100;
+    }
+    int counter = 0;
+  };
+
+  auto data_loader = torch::data::make_data_loader(
+      D{}, DataLoaderOptions().workers(kNumberOfWorkers));
+
+  const auto number_of_iterations =
+      std::distance(data_loader->begin(), data_loader->end());
+  ASSERT_EQ(
+      number_of_iterations,
+      kNumberOfWorkers * kNumberOfExamplesAfterWhichTheDatasetExhausts);
+}
+
+TEST(DataTest, MapSupportsExhaustibleBatchDatasets) {
+  const int kNumberOfExamplesAfterWhichTheDatasetExhausts = 3;
+
+  struct D : datasets::BatchDataset<D, int> {
+    torch::optional<int> get_batch(
+        torch::ArrayRef<size_t> /* unused */) override {
+      if (counter++ < kNumberOfExamplesAfterWhichTheDatasetExhausts) {
+        return counter;
+      }
+      return torch::nullopt;
+    }
+    torch::optional<size_t> size() const override {
+      return 100;
+    }
+    int counter = 0;
+  };
+
+  auto d = D{}.map(transforms::BatchLambda<int>([](int x) { return x + 1; }));
+
+  ASSERT_EQ(d.get_batch(1).value(), 2);
+  ASSERT_EQ(d.get_batch(1).value(), 3);
+  ASSERT_EQ(d.get_batch(1).value(), 4);
+  ASSERT_FALSE(d.get_batch(1).has_value());
 }

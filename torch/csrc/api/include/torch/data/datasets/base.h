@@ -40,10 +40,13 @@ class BatchDataset {
   virtual ~BatchDataset() = default;
 
   /// Returns a batch of data given an index.
-  virtual Batch get_batch(BatchRequest request) = 0;
+  virtual optional<BatchType> get_batch(BatchRequest request) = 0;
 
   /// Returns the size of the dataset, or an empty optional if it is unsized.
   virtual optional<size_t> size() const = 0;
+
+  /// Resets any internal state of the dataset (at the end of an epoch).
+  virtual void reset() {}
 
   /// Creates a `MapDataset` that applies the given `transform` to this dataset.
   template <typename TransformType>
@@ -71,16 +74,24 @@ class Dataset : public BatchDataset<Self, std::vector<SingleExample>> {
   using ExampleType = SingleExample;
 
   /// Returns the example at the given index.
-  virtual ExampleType get(size_t index) = 0;
+  virtual optional<ExampleType> get(size_t index) = 0;
 
   /// Returns a batch of data.
   /// The default implementation calls `get()` for every requested index
   /// in the batch.
-  std::vector<ExampleType> get_batch(ArrayRef<size_t> indices) override {
+  optional<std::vector<ExampleType>> get_batch(
+      ArrayRef<size_t> indices) override {
     std::vector<ExampleType> batch;
     batch.reserve(indices.size());
     for (const auto i : indices) {
-      batch.push_back(get(i));
+      if (auto example = get(i)) {
+        batch.push_back(std::move(*example));
+      } else {
+        break;
+      }
+    }
+    if (batch.empty()) {
+      return nullopt;
     }
     return batch;
   }

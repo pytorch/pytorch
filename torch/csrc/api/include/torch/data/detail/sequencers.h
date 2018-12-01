@@ -11,7 +11,7 @@ namespace data {
 namespace detail {
 namespace sequencers {
 namespace detail {
-template<typename Result>
+template <typename Result>
 bool buffer_contains_result(const std::vector<optional<Result>>& buffer) {
   return std::any_of(
       buffer.begin(), buffer.end(), [](const optional<Result>& result) {
@@ -73,12 +73,14 @@ struct OrderedSequencer : public Sequencer<Result> {
     if (auto& maybe_result = buffer(next_sequence_number_)) {
       auto result = std::move(*maybe_result);
       buffer(next_sequence_number_++).reset();
-      return result;
+      if (result.has_result()) {
+        return result;
+      }
     }
     // Otherwise wait for the next result.
     while (true) {
       auto result = next_result();
-      if (!result) {
+      if (!result.has_value() || result->quit) {
         AT_ASSERT(!detail::buffer_contains_result(buffer_));
         break;
       }
@@ -86,11 +88,14 @@ struct OrderedSequencer : public Sequencer<Result> {
       // directly and bump the sequence number.
       if (result->sequence_number == next_sequence_number_) {
         ++next_sequence_number_;
-        return result;
+        if (result->has_result()) {
+          return result;
+        }
+      } else {
+        // Stash the result for later.
+        AT_ASSERT(!buffer(result->sequence_number).has_value());
+        buffer(result->sequence_number) = std::move(result);
       }
-      // Stash the result for later.
-      AT_ASSERT(!buffer(result->sequence_number).has_value());
-      buffer(result->sequence_number) = std::move(result);
     }
     // The result was an empty optional, so we are done with this epoch.
     return nullopt;

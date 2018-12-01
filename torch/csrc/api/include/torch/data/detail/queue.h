@@ -66,7 +66,7 @@ class Queue {
   /// is assumed to be used to drain the queue during shutdown of a
   /// `DataLoader`.
   size_t clear() {
-    std::lock_guard<std::mutex> lock(this->mutex_);
+    std::lock_guard<std::mutex> lock(mutex_);
     const auto size = queue_.size();
     while (!queue_.empty()) {
       queue_.pop();
@@ -74,9 +74,14 @@ class Queue {
     return size;
   }
 
+  size_t size() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return queue_.size();
+  }
+
  private:
   std::queue<T> queue_;
-  std::mutex mutex_;
+  mutable std::mutex mutex_;
   std::condition_variable cv_;
 };
 } // namespace detail

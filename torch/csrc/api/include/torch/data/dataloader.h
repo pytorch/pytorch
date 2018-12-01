@@ -8,6 +8,8 @@
 #include <torch/data/worker_exception.h>
 #include <torch/types.h>
 
+#include <torch/data/datasets/base.h>
+
 #include <torch/csrc/utils/memory.h>
 #include <torch/csrc/utils/variadic.h>
 
@@ -35,7 +37,8 @@ class DataLoader {
   DataLoader(Dataset dataset, DataLoaderOptions options, Sampler sampler)
       : options_(std::move(options)),
         sampler_(std::move(sampler)),
-        sequencer_(new_sequencer()) {
+        sequencer_(new_sequencer()),
+        live_worker_count_(options_.workers) {
     for (size_t w = 0; w < options_.workers; ++w) {
       // Here we copy the dataset into the worker thread closure. Each worker
       // has its own copy of the dataset. This means the dataset must be
@@ -91,10 +94,10 @@ class DataLoader {
     }
     shuttle_.drain();
     // Send one 'quit' message per worker. Since a worker dies (exits its
-    // thread) after receiving this message, each `QuitWorker()` message will be
+    // thread) after receiving this message, each `Quit()` message will be
     // read by exactly one worker.
     for (size_t w = 0; w < options_.workers; ++w) {
-      push_job(QuitWorker());
+      push_job(Quit());
     }
     for (auto& worker : workers_) {
       worker.join();
@@ -122,29 +125,37 @@ class DataLoader {
   struct Sequenced {
     Sequenced() = default;
     Sequenced(size_t sqn) : sequence_number(sqn) {}
-    size_t sequence_number;
+    size_t sequence_number = 0;
   };
 
-  struct QuitWorker {};
+  struct Quit {};
 
   /// A `Job` is either a `BatchRequest` (new indices to fetch data at) or a
-  /// `QuitWorker` object, to indicate the worker should shut down.
+  /// `Quit` object, to indicate the worker should shut down.
   struct Job : Sequenced {
     Job() = default;
-    Job(QuitWorker q, size_t sqn) : Sequenced(sqn), quit(q) {}
+    Job(Quit q, size_t sqn) : Sequenced(sqn), quit(q) {}
     Job(BatchRequest&& i, size_t sqn)
         : Sequenced(sqn), batch_request(std::move(i)) {}
-    optional<QuitWorker> quit;
+    optional<Quit> quit;
     optional<BatchRequest> batch_request;
   };
 
   /// The finished result of a job.
   struct Result : Sequenced {
     Result() = default;
-    Result(Batch&& b, size_t sqn) : Sequenced(sqn), batch(std::move(b)) {}
+    Result(Quit q, size_t sqn) : Sequenced(sqn), quit(q) {}
+    Result(optional<Batch> b, size_t sqn)
+        : Sequenced(sqn), batch(std::move(b)) {}
     Result(std::exception_ptr exception, size_t sqn)
         : Sequenced(sqn), exception(std::move(exception)) {}
+
+    bool has_result() {
+      return batch.has_value() || exception != nullptr;
+    }
+
     optional<Batch> batch;
+    optional<Quit> quit;
     std::exception_ptr exception;
   };
 
@@ -155,6 +166,13 @@ class DataLoader {
     sampler_.reset();
     sequence_number_ = 0;
     sequencer_ = new_sequencer();
+    if (main_thread_dataset_) {
+      main_thread_dataset_->reset();
+    } else {
+      for (size_t w = 0; w < workers_.size(); ++w) {
+          // How to communicate with a particular worker?
+      }
+    }
     if (prefetch) {
       this->prefetch();
     }
@@ -208,8 +226,14 @@ class DataLoader {
         break;
       }
       try {
-        auto batch = dataset.get_batch(std::move(*job.batch_request));
+        optional<Batch> batch =
+            dataset.get_batch(std::move(*job.batch_request));
+        const bool is_exhausted = !batch.has_value();
         shuttle_.push_result({std::move(batch), job.sequence_number});
+        if (is_exhausted) {
+          indicate_worker_dataset_is_exhausted();
+          break;
+        }
       } catch (...) {
         shuttle_.push_result({std::current_exception(), job.sequence_number});
       }
@@ -239,6 +263,20 @@ class DataLoader {
     return torch::make_unique<detail::sequencers::NoSequencer<Result>>();
   }
 
+  /// Called by a worker thread when its dataset indicates exhaustion (for
+  /// ExhaustibleDataset).
+  void indicate_worker_dataset_is_exhausted() {
+    // If this is the last worker thread alive, we need to indicate to the main
+    // thread that it should now die. We do this by pushing a `Quit` result into
+    // the result queue. The `push_job` and `pop_job` are required by the
+    // contract of the datashuttle.
+    if (--live_worker_count_ == 0) {
+      push_job(Quit{});
+      auto job = shuttle_.pop_job();
+      shuttle_.push_result({Quit{}, job.sequence_number});
+    }
+  }
+
   /// The options the `DataLoader` was configured with.
   const FullDataLoaderOptions options_;
 
@@ -263,6 +301,8 @@ class DataLoader {
 
   /// The `Sequencer`, which handles optional ordering of batches.
   std::unique_ptr<detail::sequencers::Sequencer<Result>> sequencer_;
+
+  std::atomic<size_t> live_worker_count_;
 
   /// True if the `DataLoader` has joined its worker threads.
   bool joined_ = false;

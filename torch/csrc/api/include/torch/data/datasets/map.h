@@ -28,8 +28,12 @@ struct MapDataset : BatchDataset<
 
   /// Gets a batch from the source dataset and applies the transform to it,
   /// returning the result.
-  OutputBatchType get_batch(BatchRequestType indices) override {
-    return transform.apply_batch(dataset.get_batch(indices));
+  optional<OutputBatchType> get_batch(BatchRequestType indices) override {
+    if (auto batch = dataset.get_batch(indices)) {
+      return transform.apply_batch(std::move(*batch));
+    } else {
+      return nullopt;
+    }
   }
 
   /// Returns the size of the source dataset.
