@@ -1,15 +1,15 @@
-import random
+r"""Definition of the DataLoader and it's iterator _DataLoaderIter classes.
+
+To support these two classes, in `./_utils` we define many utility methods and
+functions to be run in multiprocessing. E.g., the data loading worker loop is
+in `./_utils/worker.py`.
+"""
+
 import torch
 import torch.multiprocessing as multiprocessing
 from . import SequentialSampler, RandomSampler, BatchSampler
 from . import _utils
-import functools
-import re
-import sys
 import threading
-import traceback
-import os
-import time
 from torch._six import queue
 
 
