@@ -10469,11 +10469,11 @@ class TestAsync(JitTestCase):
         self.assertEqual(y2, foo2(x1, x2))
         self.assertEqual(y3, foo3(x1, x2, x3))
 
-# for test in autograd_method_tests:
-#     add_autograd_test(*test)
-#
-# for test in nn_functional_tests:
-#     add_nn_functional_test(*test)
+for test in autograd_method_tests:
+    add_autograd_test(*test)
+
+for test in nn_functional_tests:
+    add_nn_functional_test(*test)
 
 for test in module_tests + new_module_tests:
     add_nn_module_test(**test)
