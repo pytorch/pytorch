@@ -27,6 +27,12 @@ struct WelfordData {
   int count_; // do we need int64_t?
 
   __host__ __device__ WelfordData() {
+  }
+
+  // stripping initialization from default constructor to avoid dynamic
+  // initialization warning thrown from using this data structure in CUDA kernel
+  // as static shared memory.
+  __host__ __device__ void reset() {
     mean_ = T(0);
     m_2_n_ = T(0);
     count_ = 0;
@@ -292,9 +298,21 @@ struct ThrustTensorDistOp {
   __host__ __device__ AccT operator()(T _x, T _y) const {
     const AccT x = scalar_cast<AccT>(_x);
     const AccT y = scalar_cast<AccT>(_y);
-    return THCNumerics<AccT>::pow(
-      THCNumerics<AccT>::abs(THCNumerics<AccT>::sub(x, y)),
-      exponent);
+    if (THCNumerics<AccT>::eq(exponent, scalar_cast<AccT, float>(0))) {
+      const AccT zero = scalar_cast<AccT>(0);
+      if (THCNumerics<AccT>::eq(THCNumerics<AccT>::sub(x, y), zero))return zero;
+      return scalar_cast<AccT>(1);
+    }
+    if (THCNumerics<AccT>::eq(exponent, scalar_cast<AccT, float>(1))) {
+      return THCNumerics<AccT>::abs(THCNumerics<AccT>::sub(x, y));
+    } else if (THCNumerics<AccT>::eq(exponent, scalar_cast<AccT, float>(2))) {
+      return THCNumerics<AccT>::pow(
+        THCNumerics<AccT>::sub(x, y), exponent);
+    } else {
+      return THCNumerics<AccT>::pow(
+        THCNumerics<AccT>::abs(THCNumerics<AccT>::sub(x, y)),
+        exponent);
+    }
   }
 
   const AccT exponent;

@@ -105,7 +105,7 @@ SET(all_h THD.h ${base_h} ${process_group_h})
 
 EXCLUDE_DIR(all_cpp ".*/generic/.*\\.cpp$")
 
-INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
+INCLUDE_DIRECTORIES("${CMAKE_CURRENT_SOURCE_DIR}/..")
 
 ADD_LIBRARY(THD STATIC ${all_cpp})
 

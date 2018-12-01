@@ -241,7 +241,10 @@ CUDA_TYPE_NAME_MAP = collections.OrderedDict([
 ])
 
 CUDA_INCLUDE_MAP = collections.OrderedDict([
-    ("cuda.h", ("hip/hip_runtime.h", CONV_INCLUDE_CUDA_MAIN_H, API_DRIVER)),
+    # since pytorch uses "\b{pattern}\b" as the actual re pattern,
+    # patterns listed here have to begin and end with alnum chars
+    ("include <cuda.h", ("include <hip/hip_runtime.h", CONV_INCLUDE_CUDA_MAIN_H, API_DRIVER)),
+    ('include "cuda.h', ('include "hip/hip_runtime.h', CONV_INCLUDE_CUDA_MAIN_H, API_DRIVER)),
     ("cuda_runtime.h", ("hip/hip_runtime.h", CONV_INCLUDE_CUDA_MAIN_H, API_RUNTIME)),
     ("cuda_runtime_api.h", ("hip/hip_runtime_api.h", CONV_INCLUDE, API_RUNTIME)),
     ("channel_descriptor.h", ("hip/channel_descriptor.h", CONV_INCLUDE, API_RUNTIME)),
@@ -2213,14 +2216,19 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict([
 
 CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("cuda_stream" , ("hip_stream", API_CAFFE2)),
-    ("context_gpu" , ("hip/context_hip", API_CAFFE2)),
-    ("common_gpu"  , ("hip/common_hip", API_CAFFE2)),
-    ("mixed_utils" , ("hip/mixed_utils_hip", API_CAFFE2)),
-    ("operator_fallback_gpu" , ("hip/operator_fallback_hip", API_CAFFE2)),
-    ("spatial_batch_norm_op_gpu_impl" , ("hip/spatial_batch_norm_op_hip_impl", API_CAFFE2)),
-    ("recurrent_network_executor_gpu" , ("hip/recurrent_network_executor_hip", API_CAFFE2)),
-    ("max_pool_with_index_gpu", ("hip/max_pool_with_index_hip", API_CAFFE2)),
-    ("THCCachingAllocator_gpu", ("hip/THCCachingAllocator_hip", API_CAFFE2)),
+    ("/context_gpu" , ("/hip/context_gpu", API_CAFFE2)),
+    ("/common_gpu"  , ("/hip/common_gpu", API_CAFFE2)),
+    ("/mixed_utils" , ("/hip/mixed_utils", API_CAFFE2)),
+    ("/operator_fallback_gpu" , ("/hip/operator_fallback_gpu", API_CAFFE2)),
+    ("/spatial_batch_norm_op_gpu_impl" , ("/hip/spatial_batch_norm_op_gpu_impl", API_CAFFE2)),
+    ("/recurrent_network_executor_gpu" , ("/hip/recurrent_network_executor_gpu", API_CAFFE2)),
+    ("/max_pool_with_index_gpu", ("/hip/max_pool_with_index_gpu", API_CAFFE2)),
+    ("/THCCachingAllocator_gpu", ("/hip/THCCachingAllocator_gpu", API_CAFFE2)),
+    ("/top_k_heap_selection", ("/hip/top_k_heap_selection", API_CAFFE2)),
+    ("/top_k_radix_selection", ("/hip/top_k_radix_selection", API_CAFFE2)),
+    ("/GpuDefs", ("/hip/GpuDefs", API_CAFFE2)),
+    ("/GpuScanUtils", ("/hip/GpuScanUtils", API_CAFFE2)),
+    ("/GpuBitonicSort", ("/hip/GpuBitonicSort", API_CAFFE2)),
     ("caffe2/core/common_cudnn.h", ("caffe2/core/hip/common_miopen.h", API_CAFFE2)),
     ("REGISTER_CUDA_OPERATOR" , ("REGISTER_HIP_OPERATOR", API_CAFFE2)),
     ("CUDA_1D_KERNEL_LOOP" , ("HIP_1D_KERNEL_LOOP", API_CAFFE2)),
@@ -2242,7 +2250,35 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("CUDNN" ,("MIOPEN", API_CAFFE2)),
     ("CuDNN" ,("MIOPEN", API_CAFFE2)),
     ("cudnn" ,("miopen", API_CAFFE2)),
+    ("namespace cuda", ("namespace hip", API_CAFFE2)),
 ])
 
+# We must tread very carefully here.  Blanket conversions like are done
+# in CAFFE2_SPECIFIC_MAPPINGS are not presently supported on PyTorch,
+# because a regex for CUDA will also match a filename like CUDAGuard.h,
+# but the HIPIFY script doesn't presently move the file and so the substitution
+# will be invalid.  Instead, we specifically list out every identifier
+# and file from c10/cuda which may be used externally, and do substitutions this
+# way.
+#
+# NB: if you want a transformation to ONLY apply to the c10/ directory,
+# put it as API_CAFFE2
+C10_MAPPINGS = collections.OrderedDict([
+    ("cuda::compat::", ("hip::compat::", API_C10)),
+    ("c10/cuda/CUDAException.h", ("c10/hip/HIPException.h", API_C10)),
+    ("c10/cuda/CUDAMacros.h", ("c10/hip/HIPMacros.h", API_C10)),
+    ("c10/cuda/CUDAMathCompat.h", ("c10/hip/HIPMathCompat.h", API_C10)),
+    ("c10/cuda/CUDAFunctions.h", ("c10/hip/HIPFunctions.h", API_C10)),
+    ("C10_CUDA_CHECK", ("C10_HIP_CHECK", API_C10)),
+    ("c10::cuda", ("c10::hip", API_C10)),
+    # This substitution is not permissible, because there's another copy of this
+    # function in torch/cuda.h
+    # ("cuda::device_count", ("hip::device_count", API_C10)),
+    ("cuda::current_device", ("hip::current_device", API_C10)),
+    ("cuda::set_device", ("hip::set_device", API_C10)),
+])
+
+# NB: C10 mappings are more specific than Caffe2 mappings, so run them
+# first
 CUDA_TO_HIP_MAPPINGS = [CUDA_IDENTIFIER_MAP, CUDA_TYPE_NAME_MAP,
-                        CUDA_INCLUDE_MAP, CUDA_SPARSE_MAP, PYTORCH_SPECIFIC_MAPPINGS, CAFFE2_SPECIFIC_MAPPINGS]
+                        CUDA_INCLUDE_MAP, CUDA_SPARSE_MAP, C10_MAPPINGS, PYTORCH_SPECIFIC_MAPPINGS, CAFFE2_SPECIFIC_MAPPINGS]

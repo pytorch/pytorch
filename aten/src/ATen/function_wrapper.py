@@ -494,6 +494,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'method_formals': List[str],
     'method_prefix_derived': str,
     'mode': str,
+    'python_module': str,
     'name': str,
     'native_actuals': List[str],
     'native_type_method_dispatch': str,
@@ -524,6 +525,7 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('arguments', List[AtFormal]),
     ('method_of', List[str]),
     ('mode', str),
+    ('python_module', str),
     ('buffers', Optional[List[str]]),
     ('returns', List[ReturnType]),
     ('inplace', bool),
@@ -545,7 +547,7 @@ def device_guard(option, formals, is_factory_method, dispatch_options):
             tensor_arguments = [f for f in formals if f['dynamic_type'] in {'Tensor', 'TensorList'}]
             if tensor_arguments:
                 tensor_argument = tensor_arguments[0]['name']
-                return 'const DeviceGuard device_guard({});'.format(tensor_argument)
+                return 'const OptionalDeviceGuard device_guard(device_of({}));'.format(tensor_argument)
     return '// DeviceGuard omitted'
 
 
@@ -831,6 +833,8 @@ def create_generic(top_env, declarations):
         broadcast_arg = get_broadcast_argument(option)
         # "s_" for "same size".
         option['method_prefix_derived'] = '' if broadcast_arg is None else 's_'
+        if option['mode'] == 'TH':
+            option['device_guard'] = False
         option['device_guard_declaration'] = device_guard(option, formals, False, False)
 
         env = nested_dict(option, top_env)
@@ -922,6 +926,7 @@ def create_generic(top_env, declarations):
             arguments=formals,
             method_of=method_of,
             mode=mode,
+            python_module=option.get('python_module', ''),
             buffers=buffer_names,
             returns=option['returns'],
             inplace=option['inplace'],
@@ -1024,8 +1029,9 @@ def create_generic(top_env, declarations):
 
     def process_native(option, output_options):
         # type: (FunctionOption, List[OutputDeclaration]) -> None
-        option['inplace'] = re.search(
-            '(^__i|[^_]_$)', option['api_name']) is not None
+        assert option['python_module'] == '' or option['python_module'] == 'nn', \
+            "Found python_module of {} for decl {}, but only \'\' string or \'nn\' are supported".format(
+                option['python_module'], option['name'])
 
         formals = native_get_formals(option)
         option['formals_list'] = formals
@@ -1171,6 +1177,7 @@ def create_generic(top_env, declarations):
             arguments=formals,
             method_of=method_of,
             mode=option['mode'],
+            python_module=option['python_module'],
             buffers=None,
             returns=option['returns'],
             inplace=option['inplace'],

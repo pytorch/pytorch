@@ -1,11 +1,11 @@
 #!/bin/bash
 
-COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}-test"
-source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
-
 # Required environment variable: $BUILD_ENVIRONMENT
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
+
+COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}-test"
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch"
 
@@ -145,7 +145,7 @@ test_libtorch() {
      else
        "$CPP_BUILD"/caffe2/bin/test_jit "[cpu]"
      fi
-     python tools/download_mnist.py --quiet -d test/cpp/api/mnist
+     python tools/download_mnist.py --quiet -d mnist
      OMP_NUM_THREADS=2 "$CPP_BUILD"/caffe2/bin/test_api
   fi
 }

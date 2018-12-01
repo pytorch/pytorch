@@ -26,6 +26,6 @@ namespace torch { namespace utils {
 at::Tensor dispatch_type_conversion(
     const at::Tensor& self,
     const at::Type& type,
-    c10::optional<int32_t> device_index = c10::nullopt,
+    c10::optional<c10::Device> device = c10::nullopt,
     bool non_blocking = false);
 }} // namespace torch::utils

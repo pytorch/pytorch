@@ -8,7 +8,6 @@
 #include <c10/util/Exception.h>
 
 #include <THC/THC.h>
-#include <THC/THCStream.h>
 
 #include <limits>
 #include <sstream>
@@ -242,7 +241,7 @@ void broadcast(
   const auto comms = user_comms.empty() ? _get_communicators(tensors)
                                         : ArrayRef<ncclComm_t>(user_comms);
 
-  at::cuda::CUDAGuard device_guard;
+  at::cuda::OptionalCUDAGuard device_guard;
   AutoNcclGroup nccl_group_guard;
   for (size_t i = 0, num_tensors = tensors.size(); i < num_tensors; i++) {
     int device = tensors[i].get_device();
@@ -289,7 +288,7 @@ void reduce(
   auto comms_ref = user_comms.empty() ? _get_communicators(inputs)
                                       : ArrayRef<ncclComm_t>(user_comms);
 
-  at::cuda::CUDAGuard device_guard;
+  at::cuda::OptionalCUDAGuard device_guard;
   AutoNcclGroup nccl_group_guard;
   for (size_t i = 0; i < len; i++) {
     int device = inputs[i].device().index();

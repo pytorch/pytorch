@@ -3,6 +3,7 @@
 #else
 
 #include <TH/generic/THTensorApply.hpp>
+#include <TH/THGenerator.hpp>
 
 void THTensor_(baddbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *batch1, THTensor *batch2)
 {
@@ -28,7 +29,9 @@ void THTensor_(baddbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t a
   if (t != result) {
     THTensor_(resizeAs)(result, t);
     if (beta != 0.0) {
-      THTensor_(copy)(result, t);
+      at::Tensor result_wrap = THTensor_wrap(result);
+      at::Tensor t_wrap = THTensor_wrap(t);
+      at::_copy_same_type_(result_wrap, t_wrap);
     }
   }
 
@@ -111,7 +114,9 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
   } else {
     if (THTensor_(nDimensionLegacyAll)(t) > 1) {
       THTensor *t0 = THTensor_(newSelect)(t, dimension, 0);
-      THTensor_(copy)(values_, t0);
+      at::Tensor values__wrap = THTensor_wrap(values_);
+      at::Tensor t0_wrap = THTensor_wrap(t0);
+      at::_copy_same_type_(values__wrap, t0_wrap);
       c10::raw::intrusive_ptr::decref(t0);
     } else {
       THTensor_(fill)(values_, THTensor_(get1d)(t, 0));
@@ -192,7 +197,9 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
   } else {
     if (THTensor_(nDimensionLegacyAll)(t) > 1) {
       THTensor *t0 = THTensor_(newSelect)(t, dimension, 0);
-      THTensor_(copy)(values_, t0);
+      at::Tensor values__wrap = THTensor_wrap(values_);
+      at::Tensor t0_wrap = THTensor_wrap(t0);
+      at::_copy_same_type_(values__wrap, t0_wrap);
       c10::raw::intrusive_ptr::decref(t0);
     } else {
       THTensor_(fill)(values_, THTensor_(get1d)(t, 0));
@@ -636,10 +643,16 @@ void THTensor_(arange)(THTensor *r_, accreal xmin, accreal xmax, accreal step) {
   scalar_t i = 0;
 
   THArgCheck(step > 0 || step < 0, 3, "step must be nonzero");
+  THArgCheck(std::isfinite(static_cast<double>(xmin)) &&
+              std::isfinite(static_cast<double>(xmax))
+              , 1, "unsupported range: ", xmin, " -> ", xmax);
   THArgCheck(((step > 0) && (xmax >= xmin)) || ((step < 0) && (xmax <= xmin))
               , 2, "upper bound and larger bound inconsistent with step sign");
 
-  size = (ptrdiff_t) ceil((double)(xmax - xmin) / step);
+  double size_d = ceil(static_cast<double>(xmax - xmin) / step);
+  THArgCheck(size_d >= 0 && size_d <= static_cast<double>(PTRDIFF_MAX)
+             , 1, "invalid size, possible overflow?");
+  size = static_cast<ptrdiff_t>(size_d);
 
   if (THTensor_(nElement)(r_) != size) {
     THTensor_(resize1d)(r_, size);
@@ -650,6 +663,7 @@ void THTensor_(arange)(THTensor *r_, accreal xmin, accreal xmax, accreal step) {
 
 void THTensor_(randperm)(THTensor *r_, THGenerator *_generator, int64_t n)
 {
+  std::lock_guard<std::mutex> lock(_generator->mutex);
   scalar_t *r__data;
   int64_t r__stride_0;
   int64_t i;
@@ -889,7 +903,9 @@ void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimensio
       dimension + TH_INDEX_BASE);
 
   THTensor_(resizeAs)(rt_, t);
-  THTensor_(copy)(rt_, t);
+  at::Tensor rt__wrap = THTensor_wrap(rt_);
+  at::Tensor t_wrap = THTensor_wrap(t);
+  at::_copy_same_type_(rt__wrap, t_wrap);
   THLongTensor_resize(ri_, t->sizes(), {});
 
   if(descendingOrder)
@@ -1403,7 +1419,9 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
         int64_t dimSize = inputs[j]->size(dimension);
         THTensor *nt = THTensor_(newWithTensor)(result);
         THTensor_(narrow)(nt, NULL, dimension, offset, dimSize);
-        THTensor_(copy)(nt, inputs[j]);
+        at::Tensor nt__wrap = THTensor_wrap(nt);
+        at::Tensor inputs_wrap = THTensor_wrap(inputs[j]);
+        at::_copy_same_type_(nt__wrap, inputs_wrap);
         c10::raw::intrusive_ptr::decref(nt);
         offset += dimSize;
       }
@@ -2056,7 +2074,11 @@ void THTensor_(renorm)(THTensor *res, THTensor *src, scalar_t value, int dimensi
       )
     }
     else
-      THTensor_(copy)(rowR, rowS);
+    {
+      at::Tensor rowR_wrap = THTensor_wrap(rowR);
+      at::Tensor rowS_wrap = THTensor_wrap(rowS);
+      at::_copy_same_type_(rowR_wrap, rowS_wrap);
+    }
   }
 
   c10::raw::intrusive_ptr::decref(rowR);
@@ -2065,11 +2087,29 @@ void THTensor_(renorm)(THTensor *res, THTensor *src, scalar_t value, int dimensi
 
 accreal THTensor_(dist)(THTensor *tensor, THTensor *src, scalar_t value)
 {
-  scalar_t sum = 0;
-  TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
-                   sum += TH_MATH_NAME(pow)(
-                     TH_MATH_NAME(fabs)(*tensor_data - *src_data), value););
-  return TH_MATH_NAME(pow)(sum, 1.0/value);
+  scalar_t sum;
+  if (value == INFINITY) {
+    sum = -1.0;
+    TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
+                     sum = THMax(sum, TH_MATH_NAME(fabs)(*tensor_data - *src_data)););
+    return sum;
+  } else if (value == -INFINITY) {
+    sum = INFINITY;
+    TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
+                     sum = THMin(sum, TH_MATH_NAME(fabs)(*tensor_data - *src_data)););
+    return sum;
+  } else if (value == 0.0) {
+    sum = 0.0;
+    TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
+                     sum += (*tensor_data - *src_data != 0.0););
+    return sum;
+  } else {
+    sum = 0.0;
+    TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
+                     sum += TH_MATH_NAME(pow)(
+                       TH_MATH_NAME(fabs)(*tensor_data - *src_data), value););
+    return TH_MATH_NAME(pow)(sum, 1.0/value);
+  }
 }
 
 accreal THTensor_(meanall)(THTensor *tensor)

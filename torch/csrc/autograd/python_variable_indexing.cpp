@@ -43,9 +43,9 @@ Py_ssize_t THPVariable_length(PyObject* self) {
 static int64_t count_specified_dimensions(PyObject* index) {
   // Count the number of indexed dimensions (everything but ellipsis and None)
   int64_t count = 0;
-  auto size = PyTuple_GET_SIZE(index);
+  auto size = PyTuple_GET_SIZE(index); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
   for (Py_ssize_t i = 0; i < size; i++) {
-    PyObject* obj = PyTuple_GET_ITEM(index, i);
+    PyObject* obj = PyTuple_GET_ITEM(index, i); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
     if (THPVariable_Check(obj)) {
       auto& var = reinterpret_cast<THPVariable*>(obj)->cdata;
       if (var.type().scalarType() == kByte) {
@@ -53,7 +53,7 @@ static int64_t count_specified_dimensions(PyObject* index) {
       } else {
         count++;
       }
-    } else if (obj != Py_None && obj != Py_Ellipsis && obj != Py_True && obj != Py_False) {
+    } else if (obj != Py_None && obj != Py_Ellipsis && obj != Py_True && obj != Py_False) { // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
       count++;
     }
   }
@@ -134,7 +134,7 @@ static Variable boolToIndexingTensor(const Variable& self, bool value) {
 }
 
 static Variable applySlicing(const Variable& self, PyObject* index, variable_list& outIndices) {
-  int64_t size = PyTuple_GET_SIZE(index);
+  int64_t size = PyTuple_GET_SIZE(index); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
   int64_t dim = 0;
   int64_t specified_dims = count_specified_dimensions(index);
 
@@ -151,7 +151,7 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
 
   Variable result = self;
   for (int64_t i = 0; i < size; i++) {
-    PyObject* obj = PyTuple_GET_ITEM(index, i);
+    PyObject* obj = PyTuple_GET_ITEM(index, i); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
     if (THPUtils_checkLong(obj)) {
       result = applySelect(result, dim, THPUtils_unpackLong(obj));
     } else if (PySlice_Check(obj)) {
@@ -164,7 +164,7 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
       dim++;
     } else if (PyBool_Check(obj)) {
       result = result.unsqueeze(dim);
-      handle_var(boolToIndexingTensor(result, obj == Py_True));
+      handle_var(boolToIndexingTensor(result, obj == Py_True)); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
     } else if (THPVariable_Check(obj)) {
       auto& var = THPVariable_Unpack(obj);
       auto scalar_type = var.type().scalarType();
@@ -194,7 +194,7 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
 
 static std::vector<Tensor> typeConvertIndices(const Variable& self, const variable_list& indices) {
   std::vector<Tensor> converted_inds(indices.size());
-  int32_t device = self.is_cuda() ? self.get_device() : -1;
+  c10::Device device = self.device();
   for (size_t i = 0; i < indices.size(); ++i) {
     const auto &ind = indices[i];
     if (ind.defined()) {
@@ -210,14 +210,14 @@ static std::vector<Tensor> typeConvertIndices(const Variable& self, const variab
 static Variable dispatch_index(const Variable& self, const variable_list& indices) {
   std::vector<Tensor> converted_indices = typeConvertIndices(self, indices);
   AutoNoGIL no_gil;
-  DeviceGuard device_guard(self);
+  OptionalDeviceGuard device_guard(device_of(self));
   return self.index(converted_indices);
 }
 
 static Variable dispatch_index_put_(Variable& self, const variable_list& indices, const Variable& value) {
   std::vector<Tensor> converted_indices = typeConvertIndices(self, indices);
   AutoNoGIL no_gil;
-  DeviceGuard device_guard(self);
+  OptionalDeviceGuard device_guard(device_of(self));
   return self.index_put_(converted_indices, value);
 }
 
@@ -266,7 +266,7 @@ static THPObjectPtr wrapTuple(PyObject* index) {
   if (treatSequenceAsTuple(index)) {
     res = PySequence_Tuple(index);
   } else {
-    res = PyTuple_Pack(1, index);
+    res = PyTuple_Pack(1, index); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
   }
   if (!res) throw python_error();
   return res;
@@ -275,7 +275,7 @@ static THPObjectPtr wrapTuple(PyObject* index) {
 PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  DeviceGuard device_guard(self_);
+  OptionalDeviceGuard device_guard(device_of(self_));
 
   // handle simple types: integers, slices, ellipsis
   if (index == Py_None) {
@@ -336,18 +336,18 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   }
 
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  DeviceGuard device_guard(self_);
+  OptionalDeviceGuard device_guard(device_of(self_));
   auto value = valueToTensor(self_.type(), py_value);
 
   // handle simple types: integers, slices, ellipsis, bool
-  if (index == Py_False) {
+  if (index == Py_False) { // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
     // do nothing for false (technically we should check the size, but we don't have
     // real 0-sized shapes.
     return 0;
   } else if (index == Py_Ellipsis) {
     copy_to(self_, value);
     return 0;
-  } else if (index == Py_None || index == Py_True) {
+  } else if (index == Py_None || index == Py_True) { // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
     copy_to(self_.unsqueeze(0), value);
     return 0;
   } else if (THPUtils_checkLong(index)) {

@@ -16,13 +16,13 @@ graph {
   }
   node {
     input: "1"
-    input: "0"
+    input: "x"
     output: "2"
     op_type: "Sub"
   }
   name: "torch-jit-export"
   input {
-    name: "0"
+    name: "x"
     type {
       tensor_type {
         elem_type: DOUBLE

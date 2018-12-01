@@ -207,7 +207,15 @@ Engine::~Engine() = default;
 auto Engine::thread_init(int device) -> void {
   THInferNumThreads();
 #ifdef USE_CUDA
-  at::cuda::CUDAGuard guard(device);
+  // NB: We MUST NOT construct the guard for device -1,
+  // as in some settings we compile with USE_CUDA, but
+  // have lazy stubs for CUDA functionality (so actually
+  // attempting to setup a guard(-1) will cause an
+  // error, because it will still query cudaGetDevice).
+  at::cuda::OptionalCUDAGuard guard;
+  if (device != -1) {
+    guard.set_index(device);
+  }
 #endif
   worker_device = device;
   thread_main(nullptr);
@@ -364,6 +372,18 @@ static variable_list call_function(FunctionTask& task) {
   variable_list outputs;
 
   if(has_post_hooks){
+    // In functions/accumulate_grad.cpp, there is some logic to check the conditions under which
+    // the incoming gradient can be stolen directly (which elides a deep copy) instead of cloned.
+    // One of these conditions is that the incoming gradient's refcount must be 1 (nothing else
+    // is referencing the same data).  Stashing inputs_copy here bumps the refcount, so if post hooks
+    // are employed, it's actually still ok for accumulate_grad.cpp to steal the gradient if the
+    // refcount is 2.
+    //
+    // "new_grad.use_count() <= 1 + !post_hooks().empty()" in accumulate_grad.cpp accounts for this,
+    // but also creates a silent dependency between engine.cpp (ie, this particular engine
+    // implementation) and accumulate_grad.cpp.
+    //
+    // If you change the logic here, make sure it's compatible with accumulate_grad.cpp.
     auto inputs_copy = inputs;
     outputs = fn(std::move(inputs_copy));
   }else{
@@ -412,7 +432,7 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
     AutoGradMode grad_mode(false);
     for (int i = 0; i < num_outputs; ++i) {
       auto& output = outputs[i];
-      at::DeviceGuard guard(output);
+      at::OptionalDeviceGuard guard(device_of(output));
       if (output.defined() && output.ne(output).any().item<uint8_t>()) {
         std::stringstream ss;
         ss << "Function '" << fn.name() << "' returned nan values in its " << i << "th output.";

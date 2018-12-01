@@ -7,9 +7,9 @@
 #include "ATen/ExpandUtils.h"
 #include "ATen/Functions.h"
 #include "ATen/NativeFunctions.h"
-#include "ATen/core/Scalar.h"
+#include <c10/core/Scalar.h>
 #include "ATen/core/SparseTensorRef.h"
-#include "ATen/core/Storage.h"
+#include "c10/core/Storage.h"
 #include "ATen/Tensor.h"
 #include "ATen/core/TensorOptions.h"
 #include "ATen/DeviceGuard.h"
@@ -28,7 +28,7 @@ Tensor & TypeDefault::copy_(Tensor & self, const Tensor & src, bool non_blocking
 }
 
 Tensor TypeDefault::copy(const Tensor & src, bool non_blocking, optional<Device> to_device) const {
-  DeviceGuard device_guard(to_device);
+  OptionalDeviceGuard device_guard(to_device);
   AT_CHECK(src.defined(), "attempt to copy an undefined tensor");
   Tensor r;
   if (is_sparse()) {

@@ -62,6 +62,14 @@ const std::string& Module::name() const noexcept {
   // destroyed even if it is not the most-derived class.
   if (!name_.has_value()) {
     name_ = c10::demangle(typeid(*this).name());
+#if defined(_WIN32)
+    // Windows adds "struct" or "class" as a prefix.
+    if (name_->find("struct ") == 0) {
+      name_->erase(name_->begin(), name_->begin() + 7);
+    } else if (name_->find("class ") == 0) {
+      name_->erase(name_->begin(), name_->begin() + 6);
+    }
+#endif // defined(_WIN32)
   }
   return *name_;
 }
@@ -335,7 +343,7 @@ std::shared_ptr<Module> Module::shared_from_this_checked() const {
   std::shared_ptr<const Module> ptr;
   try {
     ptr = shared_from_this();
-  } catch (std::bad_weak_ptr) {
+  } catch (const std::bad_weak_ptr& e) {
     AT_ERROR(
         "It looks like you attempted to retrieve your top-level module "
         "as a shared_ptr, but it is not stored in a shared_ptr. "

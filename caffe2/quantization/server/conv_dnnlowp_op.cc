@@ -15,8 +15,8 @@
 
 #include <fbgemm/src/RefImplementations.h>
 
-#include "im2col_dnnlowp.h"
 #include "dnnlowp_partition.h"
+#include "im2col_dnnlowp.h"
 #include "mmio.h"
 
 C10_DEFINE_bool(
@@ -30,14 +30,17 @@ C10_DEFINE_bool(
     "Dump quantized input and weight tensors used in Conv and FC operators "
     "during the first iteration");
 
+C10_DECLARE_bool(caffe2_dnnlowp_force_slow_path);
+
 namespace caffe2 {
 
 using namespace std;
 
 template <typename T, bool ReluFused>
 ConvDNNLowPOp<T, ReluFused>::ConvDNNLowPOp(
-    const OperatorDef& operator_def, Workspace *ws)
-  : BaseType(operator_def, ws) {
+    const OperatorDef& operator_def,
+    Workspace* ws)
+    : BaseType(operator_def, ws) {
   in_qparams_.resize(1);
 
   // Create shared buffer mutex in the constructor
@@ -47,7 +50,7 @@ ConvDNNLowPOp<T, ReluFused>::ConvDNNLowPOp(
   }
 
   if (FLAGS_caffe2_dnnlowp_shared_int32_buffer) {
-    BaseType::CreateSharedInt32Buffer_();
+    this->CreateSharedInt32Buffer_();
   }
 
   quantize_groupwise_ =
@@ -98,10 +101,11 @@ bool ConvDNNLowPOp<T, ReluFused>::TakeDepthWise3x3FastPath_() {
       is_same<T, uint8_t>::value && X.template IsType<T>() &&
       OperatorBase::debug_def().engine() != "DNNLOWP_ACC16" &&
       group_ == X.dim32(X.dim() - 1) && group_ % 8 == 0 &&
-      BaseType::kernel_.size() == 2 && kernel_h() == 3 && kernel_w() == 3 &&
+      this->kernel_.size() == 2 && kernel_h() == 3 && kernel_w() == 3 &&
       stride_h() == stride_w() && (stride_h() == 1 || stride_h() == 2) &&
-      pad_t() == 1 && pad_b() == 1 && pad_l() == 1 && pad_r() == 1 &&
-      !dequantize_output_ && GetCpuId().avx2() && !quantize_groupwise_;
+      dilation_h() == 1 && dilation_w() == 1 && pad_t() == 1 && pad_b() == 1 &&
+      pad_l() == 1 && pad_r() == 1 && !dequantize_output_ &&
+      GetCpuId().avx2() && !quantize_groupwise_;
 }
 
 template <typename T, bool ReluFused>
@@ -111,14 +115,15 @@ bool ConvDNNLowPOp<T, ReluFused>::TakeDepthWise3x3x3FastPath_() {
       is_same<T, uint8_t>::value && X.template IsType<T>() &&
       OperatorBase::debug_def().engine() != "DNNLOWP_ACC16" &&
       group_ == X.dim32(X.dim() - 1) && group_ % 8 == 0 &&
-      BaseType::kernel_.size() == 3 && BaseType::kernel_[0] == 3 &&
-      BaseType::kernel_[1] == 3 && BaseType::kernel_[2] == 3 &&
-      BaseType::stride_[0] == BaseType::stride_[1] &&
-      BaseType::stride_[0] == BaseType::stride_[2] &&
-      (BaseType::stride_[0] == 1 || BaseType::stride_[0] == 2) &&
-      BaseType::pads_[0] == 1 && BaseType::pads_[1] == 1 &&
-      BaseType::pads_[2] == 1 && BaseType::pads_[3] == 1 &&
-      BaseType::pads_[4] == 1 && BaseType::pads_[5] == 1 &&
+      this->kernel_.size() == 3 && this->kernel_[0] == 3 &&
+      this->kernel_[1] == 3 && this->kernel_[2] == 3 &&
+      this->stride_[0] == this->stride_[1] &&
+      this->stride_[0] == this->stride_[2] &&
+      (this->stride_[0] == 1 || this->stride_[0] == 2) &&
+      this->dilation_[0] == 1 && this->dilation_[1] == 1 &&
+      this->dilation_[2] == 1 &&
+      accumulate(
+          this->pads_.begin(), this->pads_.end(), 1, multiplies<int>()) == 1 &&
       !dequantize_output_ && GetCpuId().avx2() && !quantize_groupwise_;
   return ret;
 }
@@ -140,7 +145,7 @@ int ConvDNNLowPOp<T, ReluFused>::KernelDim_() {
   }
 
   int kernel_dims_size = 1;
-  for (int i = 0; i < BaseType::kernel_.size(); ++i) {
+  for (int i = 0; i < this->kernel_.size(); ++i) {
     CAFFE_ENFORCE_EQ(filter.dim32(i + filter_offset), kernel_[i]);
     kernel_dims_size *= kernel_[i];
   }
@@ -150,26 +155,40 @@ int ConvDNNLowPOp<T, ReluFused>::KernelDim_() {
 }
 
 template <typename T, bool ReluFused>
+bool ConvDNNLowPOp<T, ReluFused>::IsConvGEMM_() const {
+  return accumulate(
+             this->kernel_.begin(),
+             this->kernel_.end(),
+             1,
+             multiplies<int>()) == 1 &&
+      accumulate(
+          this->stride_.begin(), this->stride_.end(), 1, multiplies<int>()) ==
+      1 &&
+      accumulate(
+          this->dilation_.begin(),
+          this->dilation_.end(),
+          1,
+          multiplies<int>()) == 1 &&
+      accumulate(this->pads_.begin(), this->pads_.end(), 0) == 0;
+}
+
+template <typename T, bool ReluFused>
 bool ConvDNNLowPOp<T, ReluFused>::NoIm2ColNHWC_() {
   if (TakeDepthWise3x3FastPath_() || TakeDepthWise3x3x3FastPath_()) {
     return true;
   }
 
   const Tensor& X = InputTensorCPU_(INPUT);
-  Tensor* Y = OutputTensorCPU_(0);
-  const int C = X.dim32(X.dim() - 1);
-  int kernel_dim = KernelDim_();
-  if (kernel_dim != (C / group_)) {
-    return false;
+  if (Wq_packed_ && X.template IsType<T>() &&
+      accumulate(
+          this->dilation_.begin(),
+          this->dilation_.end(),
+          1,
+          multiplies<int>()) == 1) {
+    return true;
   }
 
-  for (auto i = 0; i < BaseType::kernel_.size(); ++i) {
-    if (Y->dim32(i + 1) != X.dim32(i + 1) || BaseType::stride_[i] != 1 ||
-        pads_[2 * i] != 0 || pads_[2 * i + 1] != 0) {
-      return false;
-    }
-  }
-  return true;
+  return IsConvGEMM_();
 }
 
 template <typename T, bool ReluFused>
@@ -231,7 +250,7 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeBias_() {
 #endif
         for (int i = 0; i < b_dequantized_.size(); ++i) {
           b_dequantized_[i] =
-              Dequantize<int32_t>(b_quantized_data_[i], bias_qparams);
+              fbgemm::Dequantize<int32_t>(b_quantized_data_[i], bias_qparams);
         }
         b_dequantized_data_ = b_dequantized_.data();
       }
@@ -243,7 +262,7 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeBias_() {
           int i_begin = g * (M / filter_qparams_.size());
           int i_end = i_begin + (M / filter_qparams_.size());
           for (int i = i_begin; i < i_end; ++i) {
-            b_quantized_[i] = Quantize<int32_t>(
+            b_quantized_[i] = fbgemm::Quantize<int32_t>(
                 b_dequantized_data_[i],
                 0,
                 in_qparams_[INPUT].scale * FilterQuantizationParams(g).scale,
@@ -271,10 +290,10 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeWeight_() {
   const auto& filter = InputTensorCPU_(FILTER);
   int M = filter.dim32(0);
 
-  bool packW =
-    ConvPoolOpBase<CPUContext>::order_ == StorageOrder::NHWC &&
-    OperatorBase::debug_def().engine() != "DNNLOWP_ACC16" &&
-    is_same<T, uint8_t>::value && GetCpuId().avx2();
+  bool packW = ConvPoolOpBase<CPUContext>::order_ == StorageOrder::NHWC &&
+      OperatorBase::debug_def().engine() != "DNNLOWP_ACC16" &&
+      is_same<T, uint8_t>::value && GetCpuId().avx2() &&
+      !FLAGS_caffe2_dnnlowp_force_slow_path;
 
   bool depthwise_3x3_fast_path = false, depthwise_3x3x3_fast_path = false;
   if (TakeDepthWise3x3FastPath_()) {
@@ -287,14 +306,20 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeWeight_() {
 
   if ((depthwise_3x3_fast_path && !Wq_depthwise_3x3_packed_) ||
       (depthwise_3x3x3_fast_path && !Wq_depthwise_3x3x3_packed_) ||
-      (packW && Wq_packed_.empty()) || (!packW && W_quantized_.empty())) {
+      (packW && !Wq_packed_) || (!packW && W_quantized_.empty())) {
     W_quantized_.resize(filter.numel());
     if (quantize_groupwise_) {
       filter_qparams_.resize(group_);
+      filter_scales_.resize(group_);
+      filter_zero_points_.resize(group_);
       requantization_params_.resize(group_);
+      requantization_multipliers_.resize(group_);
     } else {
       filter_qparams_.resize(1);
+      filter_scales_.resize(1);
+      filter_zero_points_.resize(1);
       requantization_params_.resize(1);
+      requantization_multipliers_.resize(1);
     }
 
     int signed_min = 1 << (qfactory_->GetWeightPrecision() - 1);
@@ -323,15 +348,15 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeWeight_() {
       for (int g = 0; g < filter_qparams_.size(); ++g) {
         size_t offset = g * (M / filter_qparams_.size()) * kernel_dim;
         filter_qparams_[g] = qfactory_->ChooseQuantizationParams(
-          filter.template data<float>() + offset,
-          (M / filter_qparams_.size()) * kernel_dim,
-          true /*weight*/);
+            filter.template data<float>() + offset,
+            (M / filter_qparams_.size()) * kernel_dim,
+            true /*weight*/);
 
         // filter_qparams_[g] is computed for unsigned type.
         // Adjust for the fact that weight will actually use signed.
         FilterQuantizationParams(g).zero_point -= signed_min;
 
-        Quantize<T_signed>(
+        fbgemm::Quantize<T_signed>(
             filter.template data<float>() + offset,
             W_quantized_.data() + offset,
             (M / filter_qparams_.size()) * kernel_dim,
@@ -339,27 +364,27 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeWeight_() {
       }
     }
 
+    for (int i = 0; i < filter_qparams_.size(); ++i) {
+      filter_scales_[i] = filter_qparams_[i].scale;
+      filter_zero_points_[i] = filter_qparams_[i].zero_point;
+    }
+
     if (depthwise_3x3_fast_path) {
-      Wq_depthwise_3x3_packed_.reset(new fbgemm2::Packed3x3ConvMatrix(
-          group_, reinterpret_cast<const int8_t *>(W_quantized_.data())));
+      Wq_depthwise_3x3_packed_.reset(new fbgemm::Packed3x3ConvMatrix(
+          group_, reinterpret_cast<const int8_t*>(W_quantized_.data())));
     } else if (depthwise_3x3x3_fast_path) {
-      Wq_depthwise_3x3x3_packed_.reset(new fbgemm2::Packed3x3x3ConvMatrix(
-          group_, reinterpret_cast<const int8_t *>(W_quantized_.data())));
+      Wq_depthwise_3x3x3_packed_.reset(new fbgemm::Packed3x3x3ConvMatrix(
+          group_, reinterpret_cast<const int8_t*>(W_quantized_.data())));
     } else if (packW) {
       // fast path using fbgemm
-      Wq_packed_.resize(group_);
-      for (int group_id = 0; group_id < group_; ++group_id) {
-        Wq_packed_[group_id].reset(new fbgemm2::PackBMatrix<int8_t>(
-            fbgemm2::matrix_op_t::Transpose,
-            kernel_dim,
-            M / group_,
-            reinterpret_cast<const int8_t*>(W_quantized_.data()) +
-                group_id * (M / group_) * kernel_dim,
-            kernel_dim, // ld
-            nullptr, // pmat
-            1, // groups
-            FilterQuantizationParams(group_id).zero_point));
-      }
+      Wq_packed_.reset(new fbgemm::PackBMatrix<int8_t>(
+          fbgemm::matrix_op_t::Transpose,
+          group_ * kernel_dim,
+          M / group_,
+          reinterpret_cast<const int8_t*>(W_quantized_.data()),
+          kernel_dim, // ld
+          nullptr, // pmat
+          group_));
     } else {
       string reason;
       if (ConvPoolOpBase<CPUContext>::order_ != StorageOrder::NHWC) {
@@ -368,9 +393,12 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeWeight_() {
         reason = "fbgemm only supports 8-bit integers";
       } else if (!GetCpuId().avx2()) {
         reason = "fbgemm only supports AVX2+";
-      } else if (OperatorBase::debug_def().engine() == "DNNLOWP_ACC16" ||
+      } else if (
+          OperatorBase::debug_def().engine() == "DNNLOWP_ACC16" ||
           depthwise_3x3_fast_path) {
         reason = "";
+      } else if (FLAGS_caffe2_dnnlowp_force_slow_path) {
+        reason = "slow path enforced";
       } else {
         assert(false);
       }
@@ -394,31 +422,27 @@ template <typename T, bool ReluFused>
 bool ConvDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
   using namespace dnnlowp;
 
-  if (!BaseType::arguments_parsed_) {
+  if (!this->arguments_parsed_) {
     ParseDNNLowPOperatorArguments(
-        this,
-        &dequantize_output_,
-        &measure_quantization_error_,
-        &followed_by_);
+        this, &dequantize_output_, &measure_quantization_error_, &followed_by_);
 
     if (ReluFused) {
       // It's actually fused with Relu not followed by but setting this to make
       // sure quantization error is correctly measured in
-      // BaseType::MeasureQuantizationError_
+      // this->MeasureQuantizationError_
       followed_by_ = "Relu";
-      AdjustOutputTensorQuantizationParamsWithFollowedBy(
-          this, followed_by_);
+      AdjustOutputTensorQuantizationParamsWithFollowedBy(this, followed_by_);
     }
-    BaseType::arguments_parsed_ = true;
+    this->arguments_parsed_ = true;
   }
 
   // Choose quantization for X
   in_qparams_[INPUT] =
-    GetInputTensorQuantizationParamsOf(this, INPUT, qfactory_.get());
+      GetInputTensorQuantizationParamsOf(this, INPUT, qfactory_.get());
 
   QuantizeWeight_();
   PreComputeRowColumnOffsets_();
-  if (!Wq_packed_.empty() && !FLAGS_caffe2_dnnlowp_dump_tensors) {
+  if (Wq_packed_ && !FLAGS_caffe2_dnnlowp_dump_tensors) {
     // From here, W_quantized_ is not used anymore when we have Wq_packed_
     vector<T_signed>().swap(W_quantized_);
   }
@@ -443,6 +467,8 @@ bool ConvDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
           FilterQuantizationParams(g).scale / out_qparams_.scale;
       requantization_params_[g] = qfactory_->ChooseRequantizationMultiplier(
           real_multiplier, out_qparams_);
+      requantization_multipliers_[g] =
+          requantization_params_[g].real_multiplier;
     }
   }
 
@@ -458,8 +484,9 @@ bool ConvDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
 template <typename T, bool ReluFused>
 template <typename OutType>
 void ConvDNNLowPOp<T, ReluFused>::RunOnDeviceEpilogueNCHW_(
-    const T *col_buffer_quantized_data,
-    int32_t *Y_int32, OutType *Y_data,
+    const T* col_buffer_quantized_data,
+    int32_t* Y_int32,
+    OutType* Y_data,
     size_t i_offset,
     int group_id) {
   auto& filter = InputTensorCPU_(FILTER);
@@ -472,10 +499,10 @@ void ConvDNNLowPOp<T, ReluFused>::RunOnDeviceEpilogueNCHW_(
   // See batch_matmul_dnnlowp_op.cc to why we compute column_offsets,
   // row_offset, and const_offset in this way.
   int tid = dnnlowp_get_thread_num();
-  int32_t *column_offsets = column_offsets_.data() + tid * Y_HxW;
+  int32_t* column_offsets = column_offsets_.data() + tid * Y_HxW;
 
-  const dnnlowp::TensorQuantizationParams&
-      filter_qparams = FilterQuantizationParams(group_id);
+  const dnnlowp::TensorQuantizationParams& filter_qparams =
+      FilterQuantizationParams(group_id);
   for (int j = 0; j < Y_HxW; ++j) {
     int sum = 0;
     for (int k = 0; k < kernel_dim; ++k) {
@@ -491,7 +518,7 @@ void ConvDNNLowPOp<T, ReluFused>::RunOnDeviceEpilogueNCHW_(
       for (int j = 0; j < Y_HxW; ++j) {
         int32_t raw = Y_int32[i * Y_HxW + j] + row_offset - column_offsets[j];
         float dequantized =
-          raw * in_qparams_[INPUT].scale * filter_qparams.scale;
+            raw * in_qparams_[INPUT].scale * filter_qparams.scale;
         if (InputSize() == 3) {
           dequantized += b_dequantized_data_[i_offset + i];
         }
@@ -515,7 +542,7 @@ void ConvDNNLowPOp<T, ReluFused>::RunOnDeviceEpilogueNCHW_(
           raw = std::max(0, raw);
         }
         Y_data[i * Y_HxW + j] =
-          dnnlowp::Requantize<T>(raw, RequantizationParams(group_id));
+            fbgemm::Requantize<T>(raw, RequantizationParams(group_id));
       }
     }
   } // !dequantize_output_
@@ -572,7 +599,7 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNCHWAndType_() {
       buffer_shape.end(), output_dims.begin(), output_dims.end());
   buffer_shape.insert(buffer_shape.begin(), dnnlowp_get_max_threads());
 
-  if (BaseType::kernel_.size() != 2) {
+  if (this->kernel_.size() != 2) {
     SetDeviceTensor(img_shape, &img_shape_device_);
     SetDeviceTensor(buffer_shape, &col_buffer_shape_device_);
   }
@@ -588,12 +615,11 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNCHWAndType_() {
   const InType* Xdata = X.template data<InType>();
 
   // We must not call mutable_data inside omp region
-  float *Y_data_float = nullptr;
-  T *Y_data_T = nullptr;
+  float* Y_data_float = nullptr;
+  T* Y_data_T = nullptr;
   if (dequantize_output_) {
     Y_data_float = Y->template mutable_data<float>();
-  }
-  else {
+  } else {
     Y_data_T = Y->template mutable_data<T>();
   }
   column_offsets_.resize(Y_HxW * dnnlowp_get_max_threads());
@@ -602,19 +628,19 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNCHWAndType_() {
     col_buffer->Resize(buffer_shape);
     vector<int> buffer_shape_per_thread(
         buffer_shape.begin() + 1, buffer_shape.end());
-    InType *col_buffer_data = col_buffer->template mutable_data<InType>();
+    InType* col_buffer_data = col_buffer->template mutable_data<InType>();
 
     auto f2 = [&](vector<int32_t>* Y_int32) {
       Y_int32->resize(M * Y_HxW * dnnlowp_get_max_threads());
 
-    // Im2Col, followed by gemm.
+      // Im2Col, followed by gemm.
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
       for (int image_id = 0; image_id < N; ++image_id) {
         int tid = dnnlowp_get_thread_num();
         for (int group_id = 0; group_id < group_; ++group_id) {
-          if (BaseType::kernel_.size() == 2) {
+          if (this->kernel_.size() == 2) {
             math::Im2ColNCHW<InType>(
                 C / group_,
                 input_dims[0],
@@ -635,7 +661,7 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNCHWAndType_() {
                 X.IsType<T>() ? in_qparams_[INPUT].zero_point : 0);
           } else {
             math::Im2ColNdNCHW<InType>(
-                BaseType::kernel_.size(),
+                this->kernel_.size(),
                 C * X_HxW,
                 col_buffer_size,
                 img_shape.data(),
@@ -655,10 +681,10 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNCHWAndType_() {
           vector<T> col_buffer_quantized;
           if (X.template IsType<T>()) {
             col_buffer_quantized_data =
-                (T*)col_buffer_data + tid * col_buffer_size;
+                reinterpret_cast<T*>(col_buffer_data) + tid * col_buffer_size;
           } else {
             col_buffer_quantized.resize(kernel_dim * Y_HxW);
-            Quantize<T>(
+            fbgemm::Quantize<T>(
                 (const float*)col_buffer_data + tid * col_buffer_size,
                 col_buffer_quantized.data(),
                 col_buffer_quantized.size(),
@@ -666,8 +692,8 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNCHWAndType_() {
             col_buffer_quantized_data = col_buffer_quantized.data();
           }
 
-          int32_t* Y_int32_temp = Y_int32->data() +
-              ((M / group_) * group_id + M * tid) * Y_HxW;
+          int32_t* Y_int32_temp =
+              Y_int32->data() + ((M / group_) * group_id + M * tid) * Y_HxW;
           T_signed* W_quantized_group =
               W_quantized_.data() + (M / group_) * group_id * kernel_dim;
 
@@ -708,16 +734,15 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNCHWAndType_() {
     }; // f2
 
     if (FLAGS_caffe2_dnnlowp_shared_int32_buffer) {
-      BaseType::RunWithSharedInt32Buffer_(f2);
+      this->RunWithSharedInt32Buffer_(f2);
     } else {
       f2(&Y_int32_);
     }
   }; // f
 
-  if (FLAGS_caffe2_force_shared_col_buffer || BaseType::shared_buffer_) {
-    runWithSharedBuffer<CPUContext>(BaseType::ws_, f);
-  }
-  else {
+  if (FLAGS_caffe2_force_shared_col_buffer || this->shared_buffer_) {
+    runWithSharedBuffer<CPUContext>(this->ws_, f);
+  } else {
     f(&col_buffer_);
   }
 
@@ -754,8 +779,7 @@ void ConvDNNLowPOp<T, ReluFused>::RunOnDeviceEpilogueNHWC_(
         }
         row_offset *= FilterQuantizationParams(group_id).zero_point;
 
-        for (int j = group_id * (M / group_);
-             j < (group_id + 1) * (M / group_);
+        for (int j = group_id * (M / group_); j < (group_id + 1) * (M / group_);
              ++j) {
           Y_int32[i * M + j] -=
               in_qparams_[INPUT].zero_point * column_offsets_[j] + row_offset;
@@ -786,7 +810,10 @@ void ConvDNNLowPOp<T, ReluFused>::RunOnDeviceEpilogueNHWC_(
       int32_t Y_int32_max = numeric_limits<int32_t>::min();
 
 #ifdef _OPENMP
-#pragma omp parallel for reduction(min:Y_int32_min), reduction(max:Y_int32_max)
+#pragma omp parallel for reduction(min             \
+                                   : Y_int32_min), \
+    reduction(max                                  \
+              : Y_int32_max)
 #endif
       for (int i = 0; i < N * Y_HxW; ++i) {
         for (int group_id = 0; group_id < group_; ++group_id) {
@@ -817,21 +844,22 @@ void ConvDNNLowPOp<T, ReluFused>::RunOnDeviceEpilogueNHWC_(
       }
 
       float Y_int32_scale =
-        in_qparams_[INPUT].scale * FilterQuantizationParams(0).scale;
+          in_qparams_[INPUT].scale * FilterQuantizationParams(0).scale;
       out_qparams_ = qfactory_->ChooseQuantizationParams(
           Y_int32_scale * Y_int32_min, Y_int32_scale * Y_int32_max);
 
       float real_multiplier = Y_int32_scale / out_qparams_.scale;
       requantization_params_[0] = qfactory_->ChooseRequantizationMultiplier(
           real_multiplier, out_qparams_);
+      requantization_multipliers_[0] =
+          requantization_params_[0].real_multiplier;
     }
 
     int32_t C_zero_point = out_qparams_.zero_point;
 
-    T *Ydata = Y->template mutable_data<T>();
+    T* Ydata = Y->template mutable_data<T>();
 
-    using namespace fbgemm2;
-#ifdef __AVX2__
+    using namespace fbgemm;
     if (is_same<T, uint8_t>::value && GetCpuId().avx2()) {
 #ifdef _OPENMP
 #pragma omp parallel for
@@ -851,31 +879,26 @@ void ConvDNNLowPOp<T, ReluFused>::RunOnDeviceEpilogueNHWC_(
           int32_t B_zero_point = FilterQuantizationParams(group_id).zero_point;
           float C_multiplier = RequantizationParams(group_id).real_multiplier;
 
-          DoNothing<> doNothingObj{};
-          ReQuantizeOutput<ReluFused> requantizationObj(
-              doNothingObj,
-              C_multiplier,
+          requantize_u8acc32_ref(
+              1,
+              M / group_,
+              M,
+              Y_int32 + i * M + group_id * (M / group_),
+              reinterpret_cast<uint8_t*>(
+                  Ydata + i * M + group_id * (M / group_)),
+              &C_multiplier,
               C_zero_point,
               A_zero_point,
-              B_zero_point,
+              &B_zero_point,
               &row_offset,
               column_offsets_.data() + group_id * (M / group_),
               b_quantized_data_ ? b_quantized_data_ + group_id * (M / group_)
-                                : nullptr);
-
-          block_type_t block{0, 1, 0, M / group_};
-          requantizationObj.template f<inst_set_t::avx2>(
-              reinterpret_cast<uint8_t*>(
-                  Ydata + i * M + group_id * (M / group_)),
-              Y_int32 + i * M + group_id * (M / group_),
-              block,
-              M,
-              M);
+                                : nullptr,
+              M / group_,
+              ReluFused);
         } // for each group
       } // for each row i
-    } else
-#endif // __AVX2__
-    {
+    } else {
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
@@ -899,17 +922,17 @@ void ConvDNNLowPOp<T, ReluFused>::RunOnDeviceEpilogueNHWC_(
             }
 
             Ydata[i * M + j] =
-                dnnlowp::Requantize<T>(raw, RequantizationParams(group_id));
+                fbgemm::Requantize<T>(raw, RequantizationParams(group_id));
             if (ReluFused) { // static if
               Ydata[i * M + j] =
-                std::max<int32_t>(C_zero_point, Ydata[i * M + j]);
+                  std::max<int32_t>(C_zero_point, Ydata[i * M + j]);
             }
           }
         } // for each group
       } // for each row i
     } // !__AVX2__
 
-    PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
+    dnnlowp::PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
   }
 }
 
@@ -922,8 +945,7 @@ void ConvDNNLowPOp<T, ReluFused>::PartitionGroupedNHWCConv_(
     int num_groups,
     int m,
     int nthreads,
-    int thread_id)
-{
+    int thread_id) {
   // Make sure i_per_thread is a multiple of 32 because
   // cblas_gemm_compute_u8s8s32_acc16 performs the best when M is a multiple
   // of 32.
@@ -941,8 +963,7 @@ void ConvDNNLowPOp<T, ReluFused>::PartitionGroupedNHWCConv_(
 
 template <typename T, bool ReluFused>
 template <typename InType>
-const InType* ConvDNNLowPOp<T, ReluFused>::Im2ColNHWC_(
-    Tensor* col_buffer) {
+const InType* ConvDNNLowPOp<T, ReluFused>::Im2ColNHWC_(Tensor* col_buffer) {
   const Tensor& X = InputTensorCPU_(INPUT);
   Tensor* Y = OutputTensorCPU_(0);
   int ndim = X.dim();
@@ -965,27 +986,27 @@ const InType* ConvDNNLowPOp<T, ReluFused>::Im2ColNHWC_(
 
   col_buffer->Resize(buffer_shape);
 
-  InType *col_buffer_data = col_buffer->template mutable_data<InType>();
+  InType* col_buffer_data = col_buffer->template mutable_data<InType>();
 
 #ifdef _OPENMP
 #pragma omp parallel for if (N > 1)
 #endif
   for (int image_id = 0; image_id < N; ++image_id) {
-    if (BaseType::kernel_.size() <= 2) {
+    if (this->kernel_.size() <= 2) {
       math::Im2ColNHWC<InType>(
           C,
           X.dim32(1),
-          BaseType::kernel_.size() == 2 ? X.dim32(2) : 1,
+          this->kernel_.size() == 2 ? X.dim32(2) : 1,
           kernel_h(),
-          BaseType::kernel_.size() == 2 ? kernel_w() : 1,
+          this->kernel_.size() == 2 ? kernel_w() : 1,
           dilation_h(),
-          BaseType::kernel_.size() == 2 ? dilation_w() : 1,
+          this->kernel_.size() == 2 ? dilation_w() : 1,
           pad_t(),
-          BaseType::kernel_.size() == 2 ? pad_l() : 1,
-          pad_b(),
-          BaseType::kernel_.size() == 2 ? pad_r() : 1,
+          this->kernel_.size() == 2 ? pad_l() : 0,
+          this->kernel_.size() == 2 ? pad_b() : pad_l(),
+          this->kernel_.size() == 2 ? pad_r() : 0,
           stride_h(),
-          BaseType::kernel_.size() == 2 ? stride_w() : 1,
+          this->kernel_.size() == 2 ? stride_w() : 1,
           Xdata + image_id * input_offset,
           col_buffer_data + image_id * group_ * kernel_dim * Y_HxW,
           &context_,
@@ -997,21 +1018,21 @@ const InType* ConvDNNLowPOp<T, ReluFused>::Im2ColNHWC_(
           X.dim32(1), // num_frames
           X.dim32(2), // H
           X.dim32(3), // W
-          BaseType::kernel_[0],
-          BaseType::kernel_[1],
-          BaseType::kernel_[2],
-          BaseType::dilation_[0],
-          BaseType::dilation_[1],
-          BaseType::dilation_[2],
-          BaseType::pads_[0],
-          BaseType::pads_[1],
-          BaseType::pads_[2],
-          BaseType::pads_[3],
-          BaseType::pads_[4],
-          BaseType::pads_[5],
-          BaseType::stride_[0],
-          BaseType::stride_[1],
-          BaseType::stride_[2],
+          this->kernel_[0],
+          this->kernel_[1],
+          this->kernel_[2],
+          this->dilation_[0],
+          this->dilation_[1],
+          this->dilation_[2],
+          this->pads_[0],
+          this->pads_[1],
+          this->pads_[2],
+          this->pads_[3],
+          this->pads_[4],
+          this->pads_[5],
+          this->stride_[0],
+          this->stride_[1],
+          this->stride_[2],
           Xdata + image_id * input_offset,
           col_buffer_data + image_id * group_ * kernel_dim * Y_HxW,
           &context_,
@@ -1050,6 +1071,78 @@ static void conv_nhwc_ref_(
 }
 
 template <typename T, bool ReluFused>
+template <typename PackAMatrix, fbgemm::QuantizationGranularity Q_GRAN>
+void ConvDNNLowPOp<T, ReluFused>::DispatchFBGEMM(
+    PackAMatrix& packA,
+    vector<int32_t>* Y_int32) {
+  auto& filter = InputTensorCPU_(FILTER);
+  Tensor* Y = OutputTensorCPU_(0);
+  const int M = filter.dim32(0);
+
+  uint8_t* Y_uint8_data = nullptr;
+  float* Y_float_data = nullptr;
+  if (dequantize_output_) {
+    // Output is float
+    Y_float_data = Y->template mutable_data<float>();
+  } else {
+    // Output is uint8_t
+    Y_uint8_data = Y->template mutable_data<uint8_t>();
+  }
+
+  int nthreads = dnnlowp_get_num_threads();
+  int tid = dnnlowp_get_thread_num();
+
+  using namespace fbgemm;
+  if (Y_uint8_data) {
+    DoNothing<> doNothingObj{};
+    ReQuantizeOutput<ReluFused, Q_GRAN> outputProcObj(
+        doNothingObj,
+        requantization_multipliers_.data(),
+        out_qparams_.zero_point,
+        in_qparams_[INPUT].zero_point,
+        filter_zero_points_.data(),
+        packA.getRowOffsetBuffer(),
+        column_offsets_.data(),
+        InputSize() == 3 ? b_quantized_data_ : nullptr,
+        M,
+        group_);
+
+    fbgemmPacked(
+        packA,
+        *Wq_packed_,
+        Y_uint8_data,
+        Y_int32->data(),
+        M,
+        outputProcObj,
+        tid,
+        nthreads);
+  } else {
+    DoNothing<float, float> doNothingObj{};
+    ReQuantizeForFloat<ReluFused, Q_GRAN> outputProcObj(
+        doNothingObj,
+        in_qparams_[INPUT].scale,
+        filter_scales_.data(),
+        in_qparams_[INPUT].zero_point,
+        filter_zero_points_.data(),
+        packA.getRowOffsetBuffer(),
+        column_offsets_.data(),
+        InputSize() == 3 ? b_dequantized_data_ : nullptr,
+        M,
+        group_);
+
+    fbgemmPacked(
+        packA,
+        *Wq_packed_,
+        Y_float_data,
+        reinterpret_cast<int32_t*>(Y_float_data),
+        M,
+        outputProcObj,
+        tid,
+        nthreads);
+  }
+}
+
+template <typename T, bool ReluFused>
 template <typename InType>
 void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
     const InType* col_buffer_data,
@@ -1079,35 +1172,23 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
         OperatorBase::debug_def().input(FILTER));
   }
 
-  uint8_t* Y_uint8_data = nullptr;
-  float* Y_float_data = nullptr;
-  if (!Wq_packed_.empty()) {
-    // fast path to use fbgemm
-    if (dequantize_output_) {
-      // Output is float
-      Y_float_data = Y->template mutable_data<float>();
-    } else {
-      // Output is uint8_t
-      Y_uint8_data = Y->template mutable_data<uint8_t>();
-    }
-  }
-
   if (TakeDepthWise3x3x3FastPath_()) {
     const InType* Xdata = X.template data<InType>();
-    Y_uint8_data = OutputTensorCPU_(0)->template mutable_data<uint8_t>();
+    uint8_t* Y_uint8_data =
+        OutputTensorCPU_(0)->template mutable_data<uint8_t>();
 
 #ifdef _OPENMP
 #pragma omp parallel
 #endif
-    fbgemm2::depthwise_3x3x3_pad_1(
+    fbgemm::depthwise_3x3x3_pad_1(
         N,
         X.dim32(1),
         X.dim32(2),
         X.dim32(3),
         C,
-        BaseType::stride_[0],
-        BaseType::stride_[1],
-        BaseType::stride_[2],
+        this->stride_[0],
+        this->stride_[1],
+        this->stride_[2],
         in_qparams_[INPUT].zero_point,
         reinterpret_cast<const uint8_t*>(Xdata),
         FilterQuantizationParams(0).zero_point,
@@ -1125,12 +1206,13 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
   } else if (TakeDepthWise3x3FastPath_()) {
     const int H = X.dim32(1), W = X.dim32(2);
     const InType* Xdata = X.template data<InType>();
-    Y_uint8_data = OutputTensorCPU_(0)->template mutable_data<uint8_t>();
+    uint8_t* Y_uint8_data =
+        OutputTensorCPU_(0)->template mutable_data<uint8_t>();
 
 #ifdef _OPENMP
 #pragma omp parallel
 #endif
-    fbgemm2::depthwise_3x3_pad_1(
+    fbgemm::depthwise_3x3_pad_1(
         N,
         H,
         W,
@@ -1153,15 +1235,16 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
     return;
   }
 
-  using namespace fbgemm2;
+  using namespace fbgemm;
   int row_offset_size_per_thread = -1;
   int x_pack_buf_size_per_thread = -1;
-  if (!Wq_packed_.empty()) {
-    if (!Y_uint8_data && !X.template IsType<T>()) {
+  bool fuse_im2col = Wq_packed_ && X.template IsType<T>() &&
+      X.template data<T>() == col_buffer_quantized_data && !IsConvGEMM_();
+  if (Wq_packed_) {
+    if (fuse_im2col) {
       row_offset_size_per_thread =
-          PackAWithQuantRowOffset<uint8_t>::rowOffsetBufferSize();
-      x_pack_buf_size_per_thread =
-          PackAWithQuantRowOffset<uint8_t>::packedBufferSize();
+          PackAWithIm2Col<uint8_t>::rowOffsetBufferSize();
+      x_pack_buf_size_per_thread = PackAWithIm2Col<uint8_t>::packedBufferSize();
     } else {
       row_offset_size_per_thread =
           PackAWithRowOffset<uint8_t>::rowOffsetBufferSize();
@@ -1172,165 +1255,130 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
     X_pack_buf_.resize(dnnlowp_get_max_threads() * x_pack_buf_size_per_thread);
   }
 
+  if (Wq_packed_)
 #ifdef _OPENMP
 #pragma omp parallel
 #endif
   {
     int tid = dnnlowp_get_thread_num();
-    int group_begin, group_end;
-    int i_begin, i_end;
 
-    PartitionGroupedNHWCConv_(
-        &group_begin,
-        &group_end,
-        &i_begin,
-        &i_end,
-        group_,
-        N * Y_HxW,
-        dnnlowp_get_num_threads(),
-        tid);
+    // fast path to use fbgemm
+    if (fuse_im2col) {
+      if (this->kernel_.size() <= 2) {
+        conv_param_t<> conv_p(
+            N,
+            C,
+            M,
+            {X.dim32(1), this->kernel_.size() == 2 ? X.dim32(2) : 1},
+            group_,
+            {this->kernel_[0],
+             this->kernel_.size() == 2 ? this->kernel_[1] : 1},
+            {this->stride_[0],
+             this->kernel_.size() == 2 ? this->stride_[1] : 1},
+            {this->pads_[0],
+             this->kernel_.size() == 2 ? this->pads_[1] : 0,
+             this->kernel_.size() == 2 ? this->pads_[2] : this->pads_[1],
+             this->kernel_.size() == 2 ? this->pads_[3] : 0});
 
-    for (int group_id = group_begin; group_id < group_end; ++group_id) {
-      if (!Wq_packed_.empty()) {
-        // fast path to use fbgemm
-        if (Y_uint8_data) {
-          // Output is uint8_t
-          PackAWithRowOffset<uint8_t> packA(
-              matrix_op_t::NoTranspose,
-              i_end - i_begin,
-              kernel_dim,
-              reinterpret_cast<const uint8_t*>(col_buffer_quantized_data) +
-                  (i_begin * group_ + group_id) * kernel_dim,
-              group_ * kernel_dim,
-              // buffer for packed matrix
-              X_pack_buf_.data() + tid * x_pack_buf_size_per_thread,
-              1, // group
-              in_qparams_[INPUT].zero_point,
-              row_offsets_.data() + tid * row_offset_size_per_thread);
+        PackAWithIm2Col<uint8_t> packA(
+            conv_p,
+            reinterpret_cast<const uint8_t*>(col_buffer_quantized_data),
+            // buffer for packed matrix
+            X_pack_buf_.data() + tid * x_pack_buf_size_per_thread,
+            in_qparams_[INPUT].zero_point,
+            row_offsets_.data() + tid * row_offset_size_per_thread);
 
-          DoNothing<> doNothingObj{};
-          ReQuantizeOutput<ReluFused> outputProcObj(
-              doNothingObj,
-              RequantizationParams(group_id).real_multiplier,
-              out_qparams_.zero_point,
-              in_qparams_[INPUT].zero_point,
-              FilterQuantizationParams(group_id).zero_point,
-              packA.getRowOffsetBuffer(),
-              column_offsets_.data() + group_id * (M / group_),
-              InputSize() == 3 ? b_quantized_data_ + group_id * (M / group_)
-                               : nullptr);
-
-          fbgemmPacked(
-              packA,
-              *Wq_packed_[group_id],
-              Y_uint8_data + i_begin * M + group_id * (M / group_),
-              // Y_int32 is a temporal storage so it's OK to reuse group_begin
-              Y_int32->data() + i_begin * M + group_begin * (M / group_),
-              M,
-              outputProcObj,
-              0, // thread_id
-              1); // num_threads
+        if (quantize_groupwise_) {
+          DispatchFBGEMM<
+              PackAWithIm2Col<uint8_t>,
+              QuantizationGranularity::GROUP>(packA, Y_int32);
         } else {
-          if (!X.template IsType<T>()) {
-            // Both input and output are float
-            PackAWithQuantRowOffset<uint8_t> packA(
-                matrix_op_t::NoTranspose,
-                i_end - i_begin,
-                kernel_dim,
-                reinterpret_cast<const float*>(col_buffer_data) +
-                    (i_begin * group_ + group_id) * kernel_dim,
-                group_ * kernel_dim,
-                // buffer for packed matrix
-                X_pack_buf_.data() + tid * x_pack_buf_size_per_thread,
-                in_qparams_[INPUT].scale,
-                in_qparams_[INPUT].zero_point,
-                1, // groups
-                row_offsets_.data() + tid * row_offset_size_per_thread);
-
-            DoNothing<float, float> doNothingObj{};
-            ReQuantizeForFloat<ReluFused> outputProcObj(
-                doNothingObj,
-                in_qparams_[INPUT].scale,
-                FilterQuantizationParams(group_id).scale,
-                in_qparams_[INPUT].zero_point,
-                FilterQuantizationParams(group_id).zero_point,
-                packA.getRowOffsetBuffer(),
-                column_offsets_.data() + group_id * (M / group_),
-                InputSize() == 3 ? b_dequantized_data_ + group_id * (M / group_)
-                                 : nullptr);
-
-            fbgemmPacked(
-                packA,
-                *Wq_packed_[group_id],
-                Y_float_data + i_begin * M + group_id * (M / group_),
-                reinterpret_cast<int32_t*>(Y_float_data) + i_begin * M +
-                    group_id * (M / group_),
-                M,
-                outputProcObj,
-                0, // thread_id
-                1); // num_threads
-          } else {
-            PackAWithRowOffset<uint8_t> packA(
-                matrix_op_t::NoTranspose,
-                i_end - i_begin,
-                kernel_dim,
-                reinterpret_cast<const uint8_t*>(col_buffer_quantized_data) +
-                    (i_begin * group_ + group_id) * kernel_dim,
-                group_ * kernel_dim,
-                // buffer for packed matrix
-                X_pack_buf_.data() + tid * x_pack_buf_size_per_thread,
-                1, // group
-                in_qparams_[INPUT].zero_point,
-                row_offsets_.data() + tid * row_offset_size_per_thread);
-
-            DoNothing<float, float> doNothingObj{};
-            ReQuantizeForFloat<ReluFused> outputProcObj(
-                doNothingObj,
-                in_qparams_[INPUT].scale,
-                FilterQuantizationParams(group_id).scale,
-                in_qparams_[INPUT].zero_point,
-                FilterQuantizationParams(group_id).zero_point,
-                packA.getRowOffsetBuffer(),
-                column_offsets_.data() + group_id * (M / group_),
-                InputSize() == 3 ? b_dequantized_data_ + group_id * (M / group_)
-                                 : nullptr);
-
-            fbgemmPacked(
-                packA,
-                *Wq_packed_[group_id],
-                Y_float_data + i_begin * M + group_id * (M / group_),
-                reinterpret_cast<int32_t*>(Y_float_data) + i_begin * M +
-                    group_id * (M / group_),
-                M,
-                outputProcObj,
-                0, // thread_id
-                1); // num_threads
-          }
+          DispatchFBGEMM<
+              PackAWithIm2Col<uint8_t>,
+              QuantizationGranularity::TENSOR>(packA, Y_int32);
         }
       } else {
-        // Wq_packed_.empty()
-        conv_nhwc_ref_(
-            group_id,
-            group_,
-            i_begin,
-            i_end,
+        // 3D
+        conv_param_t<3> conv_p(
+            N,
+            C,
             M,
-            kernel_dim,
-            col_buffer_quantized_data,
-            W_quantized_.data(),
-            Y_int32->data());
+            {X.dim32(1), X.dim32(2), X.dim32(3)},
+            group_,
+            {this->kernel_[0], this->kernel_[1], this->kernel_[2]},
+            {this->stride_[0], this->stride_[1], this->stride_[2]},
+            {this->pads_[0],
+             this->pads_[1],
+             this->pads_[2],
+             this->pads_[3],
+             this->pads_[4],
+             this->pads_[5]});
+
+        PackAWithIm2Col<uint8_t, int32_t, 3> packA(
+            conv_p,
+            reinterpret_cast<const uint8_t*>(col_buffer_quantized_data),
+            // buffer for packed matrix
+            X_pack_buf_.data() + tid * x_pack_buf_size_per_thread,
+            in_qparams_[INPUT].zero_point,
+            row_offsets_.data() + tid * row_offset_size_per_thread);
+
+        if (quantize_groupwise_) {
+          DispatchFBGEMM<
+              PackAWithIm2Col<uint8_t, int32_t, 3>,
+              QuantizationGranularity::GROUP>(packA, Y_int32);
+        } else {
+          DispatchFBGEMM<
+              PackAWithIm2Col<uint8_t, int32_t, 3>,
+              QuantizationGranularity::TENSOR>(packA, Y_int32);
+        }
+      } // 3D
+    } else {
+      // no im2col fusion
+      PackAWithRowOffset<uint8_t> packA(
+          matrix_op_t::NoTranspose,
+          N * Y_HxW,
+          group_ * kernel_dim,
+          reinterpret_cast<const uint8_t*>(col_buffer_quantized_data),
+          group_ * kernel_dim,
+          // buffer for packed matrix
+          X_pack_buf_.data() + tid * x_pack_buf_size_per_thread,
+          group_,
+          row_offsets_.data() + tid * row_offset_size_per_thread);
+
+      if (quantize_groupwise_) {
+        DispatchFBGEMM<
+            PackAWithRowOffset<uint8_t>,
+            QuantizationGranularity::GROUP>(packA, Y_int32);
+      } else {
+        DispatchFBGEMM<
+            PackAWithRowOffset<uint8_t>,
+            QuantizationGranularity::TENSOR>(packA, Y_int32);
       }
-    } // for each group
-  } // omp parallel
+    } // no im2col fusion
+  } else {
+    for (int group_id = 0; group_id < group_; ++group_id) {
+      // Wq_packed_.empty()
+      conv_nhwc_ref_(
+          group_id,
+          group_,
+          0,
+          N * Y_HxW,
+          M,
+          kernel_dim,
+          col_buffer_quantized_data,
+          W_quantized_.data(),
+          Y_int32->data());
+    }
+  }
 }
 
 template <typename T, bool ReluFused>
 template <typename InType>
 bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNHWCAndType_() {
   CAFFE_ENFORCE_LE(
-    BaseType::kernel_.size(),
-    3,
-    "Only 1-3d convolutions are supported for NHWC storage type");
+      this->kernel_.size(),
+      3,
+      "Only 1-3d convolutions are supported for NHWC storage type");
 
   using namespace dnnlowp;
 
@@ -1383,9 +1431,7 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNHWCAndType_() {
   // and width.
 
 #ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
-  /*if (VLOG_IS_ON(3)) */{
-    t_begin = chrono::system_clock::now();
-  }
+  /*if (VLOG_IS_ON(3)) */ { t_begin = chrono::system_clock::now(); }
 #endif
 
   bool no_im2col = NoIm2ColNHWC_();
@@ -1412,19 +1458,16 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNHWCAndType_() {
       // quantize col_buffer
       const T* col_buffer_quantized_data = nullptr;
       vector<T> col_buffer_quantized;
-      if (Wq_packed_.empty() || X.template IsType<T>() || !dequantize_output_) {
-        if (X.template IsType<T>()) {
-          col_buffer_quantized_data =
-              reinterpret_cast<const T*>(col_buffer_data);
-        } else {
-          col_buffer_quantized.resize(G * kernel_dim * Y_HxW * N);
-          Quantize<T>(
-              reinterpret_cast<const float*>(col_buffer_data),
-              col_buffer_quantized.data(),
-              col_buffer_quantized.size(),
-              in_qparams_[INPUT]);
-          col_buffer_quantized_data = col_buffer_quantized.data();
-        }
+      if (X.template IsType<T>()) {
+        col_buffer_quantized_data = reinterpret_cast<const T*>(col_buffer_data);
+      } else {
+        col_buffer_quantized.resize(G * kernel_dim * Y_HxW * N);
+        fbgemm::Quantize<T>(
+            reinterpret_cast<const float*>(col_buffer_data),
+            col_buffer_quantized.data(),
+            col_buffer_quantized.size(),
+            in_qparams_[INPUT]);
+        col_buffer_quantized_data = col_buffer_quantized.data();
       }
 
 #ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
@@ -1448,7 +1491,7 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNHWCAndType_() {
       }
 #endif
 
-      if (!Wq_packed_.empty() || Wq_depthwise_3x3_packed_ ||
+      if (Wq_packed_ || Wq_depthwise_3x3_packed_ ||
           Wq_depthwise_3x3x3_packed_) {
         // In fast path with fbgemm except when
         // rescaling quantized numbers should've been already done.
@@ -1460,21 +1503,21 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNHWCAndType_() {
       }
     }; // f2
 
-    if (FLAGS_caffe2_force_shared_col_buffer || BaseType::shared_buffer_) {
-      runWithSharedBuffer<CPUContext>(BaseType::ws_, f2);
+    if (FLAGS_caffe2_force_shared_col_buffer || this->shared_buffer_) {
+      runWithSharedBuffer<CPUContext>(this->ws_, f2);
     } else {
       f2(&col_buffer_);
     }
   }; // f
 
   if (FLAGS_caffe2_dnnlowp_shared_int32_buffer) {
-    BaseType::RunWithSharedInt32Buffer_(f);
+    this->RunWithSharedInt32Buffer_(f);
   } else {
     f(&Y_int32_);
   }
 
 #ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
-  /*if (VLOG_IS_ON(3)) */{
+  /*if (VLOG_IS_ON(3)) */ {
     t_end = chrono::system_clock::now();
     double dt = chrono::duration<double>(t_end - t_begin).count();
     LOG(INFO) << "this=" << this << " prologue: " << dt * 1e3 << " ms";
@@ -1487,11 +1530,10 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNHWCAndType_() {
     double gops = ops / dt / 1e9;
     LOG(INFO) << "this=" << this << " " << OperatorBase::debug_def().type()
               << " output=" << OperatorBase::debug_def().output(0) << " "
-              << N * Y_HxW << "x" << M << "x" << kernel_dim
-              << " G=" << group_ << " C/G=" << C / group_
-              << " K/G=" << M / group_
-              << " R=" << kernel_h() << " S=" << kernel_w() << " : "
-              << dt * 1e3 << " ms " << gops << " gops";
+              << N * Y_HxW << "x" << M << "x" << kernel_dim << " G=" << group_
+              << " C/G=" << C / group_ << " K/G=" << M / group_
+              << " R=" << kernel_h() << " S=" << kernel_w() << " : " << dt * 1e3
+              << " ms " << gops << " gops";
   }
 #endif
 
@@ -1506,25 +1548,31 @@ template class ConvDNNLowPOp<uint8_t, true>;
 template class ConvDNNLowPOp<uint16_t, false>;
 template class ConvDNNLowPOp<uint16_t, true>;
 
-OPERATOR_SCHEMA(ConvRelu)
-    .NumInputs(2, 3)
-    .NumOutputs(1)
-    .TensorInferenceFunction(
-      ConvPoolOpBase<CPUContext>::TensorInferenceForConv);
+OPERATOR_SCHEMA(ConvRelu).NumInputs(2, 3).NumOutputs(1).TensorInferenceFunction(
+    ConvPoolOpBase<CPUContext>::TensorInferenceForConv);
+
+REGISTER_CPU_OPERATOR_WITH_ENGINE(Conv, DNNLOWP, ConvDNNLowPOp<uint8_t, false>);
+REGISTER_CPU_OPERATOR_WITH_ENGINE(
+    ConvRelu,
+    DNNLOWP,
+    ConvDNNLowPOp<uint8_t, true>);
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-  Conv, DNNLOWP, ConvDNNLowPOp<uint8_t, false>);
+    Int8Conv,
+    DNNLOWP,
+    ConvDNNLowPOp<uint8_t, false>);
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-  ConvRelu, DNNLOWP, ConvDNNLowPOp<uint8_t, true>);
+    Int8ConvRelu,
+    DNNLOWP,
+    ConvDNNLowPOp<uint8_t, true>);
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-  Int8Conv, DNNLOWP, ConvDNNLowPOp<uint8_t, false>);
+    Conv,
+    DNNLOWP_16,
+    ConvDNNLowPOp<uint16_t, false>);
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-  Int8ConvRelu, DNNLOWP, ConvDNNLowPOp<uint8_t, true>);
-
-REGISTER_CPU_OPERATOR_WITH_ENGINE(
-  Conv, DNNLOWP_16, ConvDNNLowPOp<uint16_t, false>);
-REGISTER_CPU_OPERATOR_WITH_ENGINE(
-  ConvRelu, DNNLOWP_16, ConvDNNLowPOp<uint16_t, true>);
+    ConvRelu,
+    DNNLOWP_16,
+    ConvDNNLowPOp<uint16_t, true>);
 
 } // namespace caffe2

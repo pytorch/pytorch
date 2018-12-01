@@ -99,8 +99,10 @@ if "%REBUILD%"=="" (
 :: Install ninja
 if "%REBUILD%"=="" ( pip install ninja )
 
+set WORKING_DIR=%CD%
 call "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community\\VC\\Auxiliary\\Build\\vcvarsall.bat" x64
 call "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community\\VC\\Auxiliary\\Build\\vcvarsall.bat" x86_amd64
+cd %WORKING_DIR%
 
 git submodule update --init --recursive
 
@@ -150,6 +152,7 @@ if not "%USE_CUDA%"=="0" (
     if "%BUILD_ENVIRONMENT%"=="" (
       echo NOTE: To run \`import torch\`, please make sure to activate the conda environment by running \`call %CONDA_PARENT_DIR%\\Miniconda3\\Scripts\\activate.bat %CONDA_PARENT_DIR%\\Miniconda3\` in Command Prompt before running Git Bash.
     ) else (
+      mv %CD%\\build\\bin\\test_api.exe %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\torch\\lib
       7z a %IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\torch && python ci_scripts\\upload_image.py %IMAGE_COMMIT_TAG%.7z
     )
   )

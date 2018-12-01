@@ -6,7 +6,8 @@
 #include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/script/compiler.h"
-#include "torch/csrc/jit/passes/pretty_print.h"
+#include "torch/csrc/jit/passes/python_print.h"
+#include "torch/csrc/jit/passes/alias_analysis.h"
 
 #include <iostream>
 #include <unordered_map>
@@ -188,17 +189,19 @@ std::ostream& operator<<(std::ostream & out, const Graph & g) {
 }
 
 std::ostream& Graph::prettyPrint(std::ostream & out) {
-  PrettyPrint(out, *this);
+  std::vector<at::Tensor> tensor_table;
+  PythonPrint(out, *this, tensor_table);
   return out;
 }
 
 void Graph::dumpPretty() {
-  PrettyPrint(std::cout, *this);
+  std::vector<at::Tensor> tensor_table;
+  PythonPrint(std::cout, *this, tensor_table);
 }
 
 static void checkSameDevice(const Node* node) {
   bool has_device = false;
-  int device;
+  c10::optional<at::Device> device = c10::nullopt;
   auto checkValue = [&](const Value* v) {
     if(CompleteTensorTypePtr type = v->type()->cast<CompleteTensorType>()) {
       if(!has_device) {
@@ -517,6 +520,18 @@ std::shared_ptr<Graph> Graph::copy() {
   };
   new_g->block()->cloneFrom(this->block(), env);
   return new_g;
+}
+
+std::string Value::uniqueNameBase() const {
+  std::string name = uniqueName();
+  std::string name_base = name;
+  auto last_dot_pos = name.find_last_of('.');
+  if (last_dot_pos != std::string::npos && last_dot_pos + 1 != name.size()) {
+    if (name.find_first_not_of("0123456789", last_dot_pos + 1) == std::string::npos) {
+      name_base = name.substr(0, last_dot_pos);
+    }
+  }
+  return name_base;
 }
 
 Value* Value::setUniqueName(const std::string & name) {
@@ -855,9 +870,32 @@ bool Node::isBefore(const Node * n) const {
 }
 
 bool Node::isAfter(const Node * n) const {
-  JIT_ASSERT(this->owningBlock() == n->owningBlock());
+  JIT_ASSERT(this->owningGraph() == n->owningGraph());
 
-  return this->topo_position_ > n->topo_position_;
+  if (this->owningBlock() == n->owningBlock()) {
+    return this->topo_position_ > n->topo_position_;
+  }
+
+  // These nodes don't share a common block. Traverse the blockchains upward
+  // until we find the first common block.
+  auto lhs = this;
+  while (lhs) {
+    JIT_ASSERT(lhs->owningBlock());
+
+    auto rhs = n;
+    while (rhs) {
+      JIT_ASSERT(rhs->owningBlock());
+
+      if (lhs->owningBlock() == rhs->owningBlock()) {
+        return lhs->isAfter(rhs);
+      }
+      rhs = rhs->owningBlock()->owningNode();
+    }
+
+    lhs = lhs->owningBlock()->owningNode();
+  }
+  // should never reach here, since both nodes are ultimately in the same graph
+  JIT_ASSERT(false);
 }
 
 Node* Node::insertBefore(Node * n) {
@@ -879,23 +917,32 @@ Node* Node::insertAfter(Node * n) {
   return this;
 }
 
-bool Node::moveAfterTopologicallyValid(Node* n) {
-  return tryMove(n, MoveSide::AFTER);
+bool Node::moveAfterTopologicallyValid(Node* n, const AliasDb& aliasDb) {
+  return tryMove(n, MoveSide::AFTER, aliasDb, /*dryRun=*/false);
 }
 
-bool Node::moveBeforeTopologicallyValid(Node* n) {
+bool Node::couldMoveAfterTopologically(Node* n, const AliasDb& aliasDb) {
+  return tryMove(n, MoveSide::AFTER, aliasDb, /*dryRun=*/true);
+}
+
+bool Node::moveBeforeTopologicallyValid(Node* n, const AliasDb& aliasDb) {
   // We have to distinguish the move side (instead of just moving after
   // n->prev()). Consider the following example:
   //   If the dependency graph looks like this -> n -> o then moveBefore(o) will
   //   end up with [this, o, n], but moveAfter(n) will return false.
-  return tryMove(n, MoveSide::BEFORE);
+  return tryMove(n, MoveSide::BEFORE, aliasDb, /*dryRun=*/false);
+}
+
+bool Node::couldMoveBeforeTopologically(Node* n, const AliasDb& aliasDb) {
+  return tryMove(n, MoveSide::BEFORE, aliasDb, /*dryRun=*/true);
 }
 
 // Helper for topologically-safe node moves. See `tryMove()` for details.
 namespace {
 struct WorkingSet {
  public:
-  explicit WorkingSet(Node* mover) {
+  explicit WorkingSet(Node* mover, const AliasDb& aliasDb)
+      : aliasDb_(aliasDb) {
     add(mover);
   }
 
@@ -904,6 +951,16 @@ struct WorkingSet {
     nodes_.push_back(n);
     for (const auto user : getUsersSameBlock(n)) {
       users_[user]++;
+    }
+
+    for (const auto& writer : getWritersSameBlock(n)) {
+      writers_[writer]++;
+    }
+    if (aliasDb_.hasWildcard(n)) {
+      numWildcards_++;
+    }
+    if (aliasDb_.hasWrites(n)) {
+      numWriterNodes_++;
     }
   }
 
@@ -914,6 +971,18 @@ struct WorkingSet {
       if (users_[user] == 1) {
         users_.erase(user);
       }
+    }
+
+    for (const auto& writer : getWritersSameBlock(mover)) {
+      if (writers_[writer] == 1) {
+        writers_.erase(writer);
+      }
+    }
+    if (aliasDb_.hasWildcard(mover)) {
+      numWildcards_--;
+    }
+    if (aliasDb_.hasWrites(mover)) {
+      numWriterNodes_--;
     }
     nodes_.pop_front();
   }
@@ -928,11 +997,41 @@ struct WorkingSet {
       return false;
     }
 
+    return hasDataDependency(n) || hasMutabilityDependency(n);
+  }
+
+ private:
+  bool hasDataDependency(Node* n) const {
     if (n->isAfter(nodes_.front())) {
       return producesFor(n);
     } else {
       return consumesFrom(n);
     }
+  }
+
+  bool hasMutabilityDependency(Node* n) const {
+    // 1. Handle wildcard dependencies:
+    // If the working set has a wildcard, `n` can't write to anything.
+    if (numWildcards_ > 0 && aliasDb_.hasWrites(n)) {
+      return true;
+    }
+
+    // If `n` has a wildcard, the working set can't write to anything.
+    if (aliasDb_.hasWildcard(n) && numWriterNodes_ > 0) {
+      return true;
+    }
+
+    // 2. Handle regular mutable dependencies
+    // Check that this node does not write to anything used by the working set
+    if (writers_.count(n) != 0) {
+      return true;
+    }
+
+    // Check that the working set does not write to anything used by this node
+    const auto writersToNode = getWritersSameBlock(n);
+    return std::any_of(nodes_.begin(), nodes_.end(), [&](Node* node) {
+      return writersToNode.count(node) != 0;
+    });
   }
 
   // Does the working set produce any values consumed by `n`?
@@ -950,7 +1049,6 @@ struct WorkingSet {
     });
   }
 
- private:
   // Get all users of outputs of `n`, in the same block as `n`.
   // This means if there is an `if` node that uses an output of `n` in some
   // inner sub-block, we will consider the whole `if` node a user of `n`.
@@ -958,27 +1056,54 @@ struct WorkingSet {
     std::unordered_set<Node*> users;
     for (const auto output : n->outputs()) {
       for (const auto& use : output->uses()) {
-        if (use.user->owningBlock() == n->owningBlock()) {
-          users.insert(use.user);
-        } else {
-          // This user is in a sub-block. Traverse the blockchain upward until
-          // we arrive at a node that shares a block with `this`
-          auto curNode = use.user;
-          while (curNode->owningBlock() != n->owningBlock()) {
-            curNode = curNode->owningBlock()->owningNode();
-            JIT_ASSERT(curNode);
-          }
-          users.insert(curNode);
+        if (auto sameBlock = findSameBlock(use.user, n)) {
+          users.insert(sameBlock);
         }
       }
     }
-
     return users;
   }
 
+  std::unordered_set<Node*> getWritersSameBlock(Node* n) const {
+    std::unordered_set<Node*> writers;
+    for (const auto writer : aliasDb_.getWritersForNode(n)) {
+      if (auto sameBlock = findSameBlock(writer, n)) {
+        writers.insert(sameBlock);
+      }
+    }
+    return writers;
+  }
+
+  // Traverse `target`'s blockchain upward until we find a node that shares a
+  // block with `n`.
+  //
+  // If one can't be found (say, because `n` is an inner block and target is
+  // outside), then return nullptr. Since we can only reorder nodes within a
+  // block, `target` would be irrelevant.
+  static Node* findSameBlock(Node* target, Node* n) {
+    if (target->owningBlock() == n->owningBlock()) {
+      return target;
+    } else {
+      // This user is in a sub-block. Traverse the blockchain upward until
+      // we arrive at a node that shares a block with `this`
+      auto curNode = target;
+      while (curNode->owningBlock() != n->owningBlock()) {
+        curNode = curNode->owningBlock()->owningNode();
+        if (curNode == nullptr) {
+          return curNode;
+        }
+      }
+      return curNode;
+    }
+  }
+
+  const AliasDb& aliasDb_;
   std::list<Node*> nodes_;
   // users => # of working set nodes it uses
   std::unordered_map<Node*, size_t> users_;
+  std::unordered_map<Node*, size_t> writers_;
+  size_t numWildcards_ = 0;
+  size_t numWriterNodes_ = 0;
 };
 } // namespace
 
@@ -989,7 +1114,7 @@ struct WorkingSet {
 // node at a time. When we can't move past a node (because it depends on the
 // working set), then add it to the working set and keep moving until we hit
 // `moveAfter`.
-bool Node::tryMove(Node* movePoint, MoveSide moveSide) {
+bool Node::tryMove(Node* movePoint, MoveSide moveSide, const AliasDb& aliasDb, bool dryRun) {
   JIT_ASSERT(this->inBlockList() && movePoint->inBlockList());
   JIT_ASSERT(this->owningBlock() == movePoint->owningBlock());
   if (this == movePoint) {
@@ -998,7 +1123,7 @@ bool Node::tryMove(Node* movePoint, MoveSide moveSide) {
 
   // 1. Move from `this` toward movePoint, building up the working set of
   // dependencies
-  WorkingSet workingSet(this);
+  WorkingSet workingSet(this, aliasDb);
 
   int direction;
   if (this->isAfter(movePoint)) {
@@ -1048,6 +1173,10 @@ bool Node::tryMove(Node* movePoint, MoveSide moveSide) {
     // if we can't, then there are intermediate dependencies between the
     // `this` and `movePoint`, so we can't do the move
     return false;
+  }
+
+  if (dryRun) {
+    return true;
   }
 
   // 3. Execute the move
@@ -1148,8 +1277,19 @@ inline const SourceRange& fakeRange() {
   return range;
 }
 
-Value* Graph::insert(Symbol opname, at::ArrayRef<NamedValue> args, at::ArrayRef<NamedValue> kwargs) {
-  return script::emitBuiltinCall(fakeRange(), *this, opname, c10::nullopt, args, kwargs, /*required=*/true);
+Value* Graph::insert(
+    Symbol opname,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
+    c10::optional<SourceRange> range) {
+  return script::emitBuiltinCall(
+      range.value_or(fakeRange()),
+      *this,
+      opname,
+      c10::nullopt,
+      args,
+      kwargs,
+      /*required=*/true);
 }
 
 Node* Graph::create(NodeKind kind, size_t num_outputs) {
@@ -1169,6 +1309,12 @@ Node* Graph::create(NodeKind kind, ArrayRef<Value*> inputs, size_t num_outputs) 
 
 Node* Graph::createUndefined() {
   return create(prim::Undefined);
+}
+
+Node* Graph::createNone(TypePtr typ) {
+  Node * n = create(prim::None);
+  n->output()->setType(OptionalType::create(typ));
+  return n;
 }
 
 Node * Graph::createNoneGenerator() {

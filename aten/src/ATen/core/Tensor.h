@@ -1,16 +1,16 @@
 #pragma once
 
-#include "c10/Device.h"
+#include <c10/Device.h>
 #include "ATen/core/Layout.h"
-#include "ATen/core/Scalar.h"
-#include "ATen/core/ScalarType.h"
+#include <c10/core/Scalar.h>
+#include <c10/core/ScalarType.h>
 #include "ATen/core/SparseTensorRef.h"
-#include "ATen/core/Storage.h"
+#include "c10/core/Storage.h"
 #include "ATen/core/TensorAccessor.h"
 #include "ATen/core/TensorImpl.h"
 #include "ATen/core/UndefinedTensorImpl.h"
-#include "c10/util/Exception.h"
-#include "c10/util/Optional.h"
+#include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 
 namespace at {
 struct Generator;
@@ -139,6 +139,9 @@ public:
   int64_t ndimension() const {
     return dim();
   }
+  bool is_contiguous() const {
+    return impl_->is_contiguous();
+  }
   Type & type() const {
     return impl_->type();
   }
@@ -174,6 +177,9 @@ public:
 
   /// Returns if a `Tensor` has CUDA backend.
   bool is_cuda() const;
+
+  /// Returns if a `Tensor` has HIP backend.
+  bool is_hip() const;
 
   /// Returns if a `Tensor` has sparse backend.
   bool is_sparse() const;
@@ -231,6 +237,7 @@ public:
 
   Tensor cpu() const;
   Tensor cuda() const;
+  Tensor hip() const;
 
   // ~~~~~ Autograd API ~~~~~
 
@@ -262,159 +269,6 @@ public:
 
   //example
   //Tensor * add(Tensor & b);
-  int64_t _th_ndimension() const;
-  Tensor & _th_set_(Storage source);
-  Tensor & _th_set_(Storage source, int64_t storage_offset, IntList size, IntList stride={});
-  Tensor & _th_set_(const Tensor & source);
-  Tensor & _th_set_();
-  bool _th_is_contiguous() const;
-  bool _th_is_set_to(const Tensor & tensor) const;
-  Tensor & _th_masked_fill_(const Tensor & mask, Scalar value);
-  Tensor & _th_masked_fill_(const Tensor & mask, const Tensor & value);
-  Tensor & _th_masked_scatter_(const Tensor & mask, const Tensor & source);
-  Tensor _th_masked_select(const Tensor & mask) const;
-  Tensor _th_nonzero() const;
-  Tensor _th_view(IntList size) const;
-  Tensor _th_index_select(int64_t dim, const Tensor & index) const;
-  Tensor _th_take(const Tensor & index) const;
-  Tensor & _th_put_(const Tensor & index, const Tensor & source, bool accumulate=false);
-  Tensor & _th_index_add_(int64_t dim, const Tensor & index, const Tensor & source);
-  Tensor & _th_index_fill_(int64_t dim, const Tensor & index, Scalar value);
-  Tensor & _th_index_fill_(int64_t dim, const Tensor & index, const Tensor & value);
-  Tensor _th_unfold(int64_t dimension, int64_t size, int64_t step) const;
-  Tensor & _th_scatter_(int64_t dim, const Tensor & index, const Tensor & src);
-  Tensor & _th_scatter_(int64_t dim, const Tensor & index, Scalar value);
-  Tensor & _th_scatter_add_(int64_t dim, const Tensor & index, const Tensor & src);
-  Tensor _th_gather(int64_t dim, const Tensor & index) const;
-  bool _th_equal(const Tensor & other) const;
-  Tensor _th_and(Scalar other) const;
-  Tensor _th_and(const Tensor & other) const;
-  Tensor & _th_iand_(Scalar other);
-  Tensor & _th_iand_(const Tensor & other);
-  Tensor _th_or(Scalar other) const;
-  Tensor _th_or(const Tensor & other) const;
-  Tensor & _th_ior_(Scalar other);
-  Tensor & _th_ior_(const Tensor & other);
-  Tensor _th_xor(Scalar other) const;
-  Tensor _th_xor(const Tensor & other) const;
-  Tensor & _th_ixor_(Scalar other);
-  Tensor & _th_ixor_(const Tensor & other);
-  Tensor _th_lshift(Scalar other) const;
-  Tensor _th_lshift(const Tensor & other) const;
-  Tensor & _th_ilshift_(Scalar other);
-  Tensor & _th_ilshift_(const Tensor & other);
-  Tensor _th_rshift(Scalar other) const;
-  Tensor _th_rshift(const Tensor & other) const;
-  Tensor & _th_irshift_(Scalar other);
-  Tensor & _th_irshift_(const Tensor & other);
-  Tensor _th_lt(Scalar other) const;
-  Tensor _th_lt(const Tensor & other) const;
-  Tensor & _th_lt_(Scalar other);
-  Tensor & _th_lt_(const Tensor & other);
-  Tensor _th_gt(Scalar other) const;
-  Tensor _th_gt(const Tensor & other) const;
-  Tensor & _th_gt_(Scalar other);
-  Tensor & _th_gt_(const Tensor & other);
-  Tensor _th_le(Scalar other) const;
-  Tensor _th_le(const Tensor & other) const;
-  Tensor & _th_le_(Scalar other);
-  Tensor & _th_le_(const Tensor & other);
-  Tensor _th_ge(Scalar other) const;
-  Tensor _th_ge(const Tensor & other) const;
-  Tensor & _th_ge_(Scalar other);
-  Tensor & _th_ge_(const Tensor & other);
-  Tensor _th_eq(Scalar other) const;
-  Tensor _th_eq(const Tensor & other) const;
-  Tensor & _th_eq_(Scalar other);
-  Tensor & _th_eq_(const Tensor & other);
-  Tensor _th_ne(Scalar other) const;
-  Tensor _th_ne(const Tensor & other) const;
-  Tensor & _th_ne_(Scalar other);
-  Tensor & _th_ne_(const Tensor & other);
-  Tensor _th_min(const Tensor & other) const;
-  Tensor _th_min() const;
-  Tensor _th_max(const Tensor & other) const;
-  Tensor _th_max() const;
-  Tensor _th_median() const;
-  std::tuple<Tensor,Tensor> _th_sort(int64_t dim=-1, bool descending=false) const;
-  std::tuple<Tensor,Tensor> _th_topk(int64_t k, int64_t dim=-1, bool largest=true, bool sorted=true) const;
-  Tensor _th_all() const;
-  Tensor _th_any() const;
-  Tensor _th_lgamma() const;
-  Tensor & _th_lgamma_();
-  Tensor _th_digamma() const;
-  Tensor & _th_digamma_();
-  Tensor _th_polygamma(int64_t n) const;
-  Tensor & _th_polygamma_(int64_t n);
-  Tensor & _th_erfinv_();
-  Tensor _th_erfinv() const;
-  Tensor & _th_frac_();
-  Tensor _th_frac() const;
-  Tensor _th_renorm(Scalar p, int64_t dim, Scalar maxnorm) const;
-  Tensor & _th_renorm_(Scalar p, int64_t dim, Scalar maxnorm);
-  Tensor _th_dist(const Tensor & other, Scalar p=2) const;
-  Tensor _th_reciprocal() const;
-  Tensor & _th_reciprocal_();
-  Tensor _th_neg() const;
-  Tensor & _th_neg_();
-  Tensor _th_atan2(const Tensor & other) const;
-  Tensor & _th_atan2_(const Tensor & other);
-  Tensor _th_pow(const Tensor & exponent) const;
-  Tensor & _th_pow_(Scalar exponent);
-  Tensor & _th_pow_(const Tensor & exponent);
-  Tensor _th_lerp(const Tensor & end, Scalar weight) const;
-  Tensor & _th_lerp_(const Tensor & end, Scalar weight);
-  Tensor _th_histc(int64_t bins=100, Scalar min=0, Scalar max=0) const;
-  Tensor _th_sign() const;
-  Tensor & _th_sign_();
-  Tensor _th_trace() const;
-  Tensor _th_fmod(Scalar other) const;
-  Tensor _th_fmod(const Tensor & other) const;
-  Tensor & _th_fmod_(Scalar other);
-  Tensor & _th_fmod_(const Tensor & other);
-  Tensor _th_remainder(Scalar other) const;
-  Tensor _th_remainder(const Tensor & other) const;
-  Tensor & _th_remainder_(Scalar other);
-  Tensor & _th_remainder_(const Tensor & other);
-  Tensor _th_tril(int64_t diagonal=0) const;
-  Tensor & _th_tril_(int64_t diagonal=0);
-  Tensor _th_triu(int64_t diagonal=0) const;
-  Tensor & _th_triu_(int64_t diagonal=0);
-  Tensor _th_cross(const Tensor & other, int64_t dim=-1) const;
-  Tensor _th_diag(int64_t diagonal=0) const;
-  Tensor _th_addbmm(const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1) const;
-  Tensor & _th_addbmm_(const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1);
-  Tensor _th_addcmul(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1) const;
-  Tensor & _th_addcmul_(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1);
-  Tensor _th_addcdiv(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1) const;
-  Tensor & _th_addcdiv_(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1);
-  std::tuple<Tensor,Tensor> _th_gels(const Tensor & A) const;
-  std::tuple<Tensor,Tensor> _th_trtrs(const Tensor & A, bool upper=true, bool transpose=false, bool unitriangular=false) const;
-  std::tuple<Tensor,Tensor> _th_symeig(bool eigenvectors=false, bool upper=true) const;
-  std::tuple<Tensor,Tensor> _th_eig(bool eigenvectors=false) const;
-  std::tuple<Tensor,Tensor,Tensor> _th_svd(bool some=true, bool compute_uv=true) const;
-  Tensor _th_potrf(bool upper=true) const;
-  Tensor _th_potrs(const Tensor & input2, bool upper=true) const;
-  Tensor _th_potri(bool upper=true) const;
-  std::tuple<Tensor,Tensor> _th_pstrf(bool upper=true, Scalar tol=-1) const;
-  std::tuple<Tensor,Tensor> _th_qr() const;
-  std::tuple<Tensor,Tensor> _th_geqrf() const;
-  Tensor _th_orgqr(const Tensor & input2) const;
-  Tensor _th_ormqr(const Tensor & input2, const Tensor & input3, bool left=true, bool transpose=false) const;
-  std::tuple<Tensor,Tensor> _th_btrifact(bool pivot=true) const;
-  std::tuple<Tensor,Tensor,Tensor> _th_btrifact_with_info(bool pivot=true) const;
-  Tensor _th_btrisolve(const Tensor & LU_data, const Tensor & LU_pivots) const;
-  Tensor & _th_random_(int64_t from, int64_t to, Generator * generator=nullptr);
-  Tensor & _th_random_(int64_t to, Generator * generator=nullptr);
-  Tensor & _th_random_(Generator * generator=nullptr);
-  Tensor _th_multinomial(int64_t num_samples, bool replacement=false, Generator * generator=nullptr) const;
-  Tensor & _th_uniform_(double from=0, double to=1, Generator * generator=nullptr);
-  Tensor & _th_normal_(double mean=0, double std=1, Generator * generator=nullptr);
-  Tensor & _th_cauchy_(double median=0, double sigma=1, Generator * generator=nullptr);
-  Tensor & _th_log_normal_(double mean=1, double std=2, Generator * generator=nullptr);
-  Tensor & _th_exponential_(double lambd=1, Generator * generator=nullptr);
-  Tensor & _th_geometric_(double p, Generator * generator=nullptr);
-  Tensor _th_alias() const;
   Tensor abs() const;
   Tensor & abs_();
   Tensor acos() const;
@@ -501,8 +355,8 @@ public:
   Tensor irfft(int64_t signal_ndim, bool normalized=false, bool onesided=true, IntList signal_sizes={}) const;
   Tensor index(TensorList indices) const;
   Tensor & index_copy_(int64_t dim, const Tensor & index, const Tensor & source);
-  Tensor index_put(TensorList indices, const Tensor & values) const;
-  Tensor & index_put_(TensorList indices, const Tensor & values);
+  Tensor index_put(TensorList indices, const Tensor & values, bool accumulate=false) const;
+  Tensor & index_put_(TensorList indices, const Tensor & values, bool accumulate=false);
   Tensor inverse() const;
   Tensor isclose(const Tensor & other, double rtol=1e-05, double atol=1e-08, bool equal_nan=false) const;
   bool is_distributed() const;
@@ -530,9 +384,9 @@ public:
   Tensor max_values(int64_t dim, bool keepdim=false) const;
   Tensor mean(ScalarType dtype) const;
   Tensor mean() const;
-  Tensor mean(int64_t dim, bool keepdim, ScalarType dtype) const;
-  Tensor mean(int64_t dim, bool keepdim=false) const;
-  Tensor mean(int64_t dim, ScalarType dtype) const;
+  Tensor mean(IntList dim, bool keepdim, ScalarType dtype) const;
+  Tensor mean(IntList dim, bool keepdim=false) const;
+  Tensor mean(IntList dim, ScalarType dtype) const;
   std::tuple<Tensor,Tensor> median(int64_t dim, bool keepdim=false) const;
   std::tuple<Tensor,Tensor> min(int64_t dim, bool keepdim=false) const;
   Tensor min_values(int64_t dim, bool keepdim=false) const;
@@ -610,7 +464,7 @@ public:
   Tensor transpose(int64_t dim0, int64_t dim1) const;
   Tensor & transpose_(int64_t dim0, int64_t dim1);
   Tensor flip(IntList dims) const;
-  Tensor roll(IntList shifts, IntList dims) const;
+  Tensor roll(IntList shifts, IntList dims={}) const;
   Tensor rot90(int64_t k=1, IntList dims={0,1}) const;
   Tensor trunc() const;
   Tensor & trunc_();
@@ -663,7 +517,6 @@ public:
   Tensor & set_(Storage source, int64_t storage_offset, IntList size, IntList stride={});
   Tensor & set_(const Tensor & source);
   Tensor & set_();
-  bool is_contiguous() const;
   bool is_set_to(const Tensor & tensor) const;
   Tensor & masked_fill_(const Tensor & mask, Scalar value);
   Tensor & masked_fill_(const Tensor & mask, const Tensor & value);

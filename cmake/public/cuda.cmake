@@ -1,5 +1,10 @@
 # ---[ cuda
 
+# Poor man's include guard
+if(TARGET caffe2::cudart)
+  return()
+endif()
+
 # sccache is only supported in CMake master and not in the newest official
 # release (3.11.3) yet. Hence we need our own Modules_CUDA_fix to enable sccache.
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/../Modules_CUDA_fix)
@@ -42,11 +47,11 @@ if(CUDA_FOUND)
     message(FATAL_ERROR "Caffe2: Couldn't determine version from header: " ${output_var})
   endif()
   message(STATUS "Caffe2: Header version is: " ${cuda_version_from_header})
-  if(NOT ${cuda_version_from_header} STREQUAL ${CUDA_VERSION})
+  if(NOT ${cuda_version_from_header} STREQUAL ${CUDA_VERSION_STRING})
     # Force CUDA to be processed for again next time
     # TODO: I'm not sure if this counts as an implementation detail of
     # FindCUDA
-    set(${cuda_version_from_findcuda} ${CUDA_VERSION})
+    set(${cuda_version_from_findcuda} ${CUDA_VERSION_STRING})
     unset(CUDA_TOOLKIT_ROOT_DIR_INTERNAL CACHE)
     # Not strictly necessary, but for good luck.
     unset(CUDA_VERSION CACHE)
@@ -342,7 +347,7 @@ endforeach()
 set(CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST "-Werror")
 if (NOT MSVC)
   list(APPEND CUDA_NVCC_FLAGS "-std=c++11")
-  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler -fPIC")
+  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-fPIC")
 endif()
 
 # Debug and Release symbol support

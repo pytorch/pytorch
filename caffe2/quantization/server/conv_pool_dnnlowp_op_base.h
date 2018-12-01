@@ -6,7 +6,6 @@
 
 #include "caffe2/core/tensor_int8.h"
 #include "caffe2/operators/conv_pool_op_base.h"
-#include "caffe2/quantization/server/caffe2_dnnlowp_utils.h"
 #include "caffe2/quantization/server/op_wrapper.h"
 
 #ifdef _OPENMP
@@ -22,10 +21,10 @@ class ConvPoolDNNLowPOpBase : public ConvPoolOpBase<CPUContext> {
 
  public:
   USE_CONV_POOL_BASE_FUNCTIONS(CPUContext);
-  ConvPoolDNNLowPOpBase(const OperatorDef& operator_def, Workspace *ws)
-    : ConvPoolOpBase<CPUContext>(operator_def, ws),
-      in_qparams_(InputSize()),
-      qfactory_(dnnlowp::GetQuantizationFactoryOf(this)) {
+  ConvPoolDNNLowPOpBase(const OperatorDef& operator_def, Workspace* ws)
+      : ConvPoolOpBase<CPUContext>(operator_def, ws),
+        in_qparams_(InputSize()),
+        qfactory_(dnnlowp::GetQuantizationFactoryOf(this)) {
 #ifdef _OPENMP
     if (FLAGS_caffe2_omp_num_threads > 0) {
       omp_set_num_threads(FLAGS_caffe2_omp_num_threads);
@@ -72,12 +71,11 @@ class ConvPoolDNNLowPOpBase : public ConvPoolOpBase<CPUContext> {
       return;
     }
 
-    const float *actual = nullptr;
+    const float* actual = nullptr;
     vector<float> actual_temp;
     if (OutputTensorCPU_(0)->template IsType<float>()) {
       actual = OutputTensorCPU_(0)->template data<float>();
-    }
-    else {
+    } else {
       actual_temp.resize(OutputTensorCPU_(0)->numel());
       Dequantize(
           OutputTensorCPU_(0)->template data<T>(),
@@ -88,37 +86,12 @@ class ConvPoolDNNLowPOpBase : public ConvPoolOpBase<CPUContext> {
     }
 
     TensorCPU* float_tensor = Fp32Op_()->Get()->Output(0);
-    float *ref = float_tensor->template mutable_data<float>();
+    float* ref = float_tensor->template mutable_data<float>();
     if (followed_by_ == "Relu" || debug_def().type() == "ConvRelu" ||
         debug_def().type() == "Int8ConvRelu") {
       for (int i = 0; i < OutputTensorCPU_(0)->numel(); ++i) {
         ref[i] = std::max(0.f, ref[i]);
       }
-    }
-
-    bool fp32_fallback_to_nchw = ShouldFp32FallbackToNCHW(debug_def());
-    std::vector<float> temp;
-    if (fp32_fallback_to_nchw) {
-      temp.resize(OutputTensorCPU_(0)->numel());
-      int ndim = float_tensor->dim();
-      CAFFE_ENFORCE_GE(ndim, 3);
-      const int N = float_tensor->dim32(0), C = float_tensor->dim32(1);
-      int image_size = 1;
-      for (auto i = 2; i < ndim; ++i) {
-        image_size *= float_tensor->dim32(i);
-      }
-      std::array<int, 2> dims = {C, image_size};
-      std::array<int, 2> axes = {1, 0};
-      for (int n = 0; n < N; ++n) {
-        math::Transpose(
-            2,
-            dims.data(),
-            axes.data(),
-            ref + n * image_size * C,
-            temp.data() + n * image_size * C,
-            &context_);
-      }
-      ref = temp.data();
     }
 
     dnnlowp::MeasureQuantizationError(
@@ -128,10 +101,12 @@ class ConvPoolDNNLowPOpBase : public ConvPoolOpBase<CPUContext> {
   void RunOnDeviceEpilogue_() {
     if (dequantize_output_) {
       Dequantize(
-        out_temp_.data(), OutputTensorCPU_(0)->template mutable_data<float>(),
-        OutputTensorCPU_(0)->size(), out_qparams_);
+          out_temp_.data(),
+          OutputTensorCPU_(0)->template mutable_data<float>(),
+          OutputTensorCPU_(0)->size(),
+          out_qparams_);
     } else {
-      PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
+      dnnlowp::PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
     }
 
     MeasureQuantizationError_();
@@ -213,8 +188,8 @@ class ConvPoolDNNLowPOpBase : public ConvPoolOpBase<CPUContext> {
   std::unique_ptr<dnnlowp::QuantizationFactory> qfactory_;
 
   std::vector<T> out_temp_;
-    // Buffer to store quantized output temporarily
-    // when we output dequantized values.
+  // Buffer to store quantized output temporarily
+  // when we output dequantized values.
 
   dnnlowp::QuantizationErrorStats quantization_error_stats_;
 

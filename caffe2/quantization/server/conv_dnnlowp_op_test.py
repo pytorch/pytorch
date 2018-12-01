@@ -14,7 +14,7 @@ from dnnlowp_test_utils import (
     nchw2nhwc,
     nhwc2nchw,
 )
-from hypothesis import given
+from hypothesis import assume, given
 
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
@@ -62,8 +62,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
         gc,
         dc,
     ):
-        if group > 1:
-            dilation = 1
+        assume(group == 1 or dilation == 1)
 
         X, W, b = generate_conv_inputs(
             stride,
@@ -206,8 +205,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
         gc,
         dc,
     ):
-        if group > 1:
-            dilation = 1
+        assume(group == 1 or dilation == 1)
 
         X, W, b = generate_conv_inputs(
             stride,
@@ -292,27 +290,11 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
 
         check_quantized_results_close(outputs)
 
-    # correctness test with no quantization error in inputs
-    @given(
-        stride=st.integers(1, 2),
-        pad=st.integers(0, 2),
-        temporal_kernels=st.sampled_from([1, 5]),
-        spatial_kernels=st.sampled_from([1, 3]),
-        dilation=st.integers(1, 1),
-        size=st.sampled_from([5, 8]),
-        group=st.integers(1, 2),
-        input_channels_per_group=st.sampled_from([2, 3]),
-        output_channels_per_group=st.sampled_from([2, 3]),
-        batch_size=st.integers(1, 2),
-        order=st.sampled_from(["NCHW", "NHWC"]),
-        **hu.gcs_cpu_only
-    )
-    def test_dnnlowp_conv3d_int(
+    def _test_dnnlowp_nd_int(
         self,
         stride,
         pad,
-        temporal_kernels,
-        spatial_kernels,
+        kernels,
         dilation,
         size,
         group,
@@ -323,9 +305,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
         gc,
         dc,
     ):
-        if group > 1:
-            dilation = 1
-        kernels = (temporal_kernels,) + (spatial_kernels,) * 2
+        assume(group == 1 or dilation == 1)
         ndim = len(kernels)
 
         X, W, b = generate_convnd_inputs(
@@ -430,3 +410,91 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
             outputs.append(Output(Y=Y, op_type=op_type, engine=engine, order=order))
 
         check_quantized_results_close(outputs)
+
+    @given(
+        stride=st.integers(1, 2),
+        pad=st.integers(0, 2),
+        temporal_kernels=st.sampled_from([1, 5]),
+        spatial_kernels=st.sampled_from([1, 3]),
+        dilation=st.integers(1, 1),
+        size=st.sampled_from([5, 8]),
+        group=st.integers(1, 2),
+        input_channels_per_group=st.sampled_from([2, 3]),
+        output_channels_per_group=st.sampled_from([2, 3]),
+        batch_size=st.integers(1, 2),
+        order=st.sampled_from(["NCHW", "NHWC"]),
+        **hu.gcs_cpu_only
+    )
+    def test_dnnlowp_conv3d_int(
+        self,
+        stride,
+        pad,
+        temporal_kernels,
+        spatial_kernels,
+        dilation,
+        size,
+        group,
+        input_channels_per_group,
+        output_channels_per_group,
+        batch_size,
+        order,
+        gc,
+        dc,
+    ):
+        self._test_dnnlowp_nd_int(
+            stride,
+            pad,
+            (temporal_kernels,) + (spatial_kernels,) * 2,
+            dilation,
+            size,
+            group,
+            input_channels_per_group,
+            output_channels_per_group,
+            batch_size,
+            order,
+            gc,
+            dc,
+        )
+
+    @given(
+        stride=st.integers(1, 2),
+        pad=st.integers(0, 2),
+        kernels=st.sampled_from([1, 3]),
+        dilation=st.integers(1, 1),
+        size=st.sampled_from([5, 8]),
+        group=st.integers(1, 2),
+        input_channels_per_group=st.sampled_from([2, 3]),
+        output_channels_per_group=st.sampled_from([2, 3]),
+        batch_size=st.integers(1, 2),
+        order=st.sampled_from(["NCHW", "NHWC"]),
+        **hu.gcs_cpu_only
+    )
+    def test_dnnlowp_conv1d_int(
+        self,
+        stride,
+        pad,
+        kernels,
+        dilation,
+        size,
+        group,
+        input_channels_per_group,
+        output_channels_per_group,
+        batch_size,
+        order,
+        gc,
+        dc,
+    ):
+        self._test_dnnlowp_nd_int(
+            stride,
+            pad,
+            (kernels,),
+            dilation,
+            size,
+            group,
+            input_channels_per_group,
+            output_channels_per_group,
+            batch_size,
+            order,
+            gc,
+            dc,
+        )

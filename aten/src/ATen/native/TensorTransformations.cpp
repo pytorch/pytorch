@@ -47,7 +47,7 @@ void inline flip_cpu_kernel(
 Tensor flip_cpu(const Tensor& self, IntList dims) {
   auto in_tensor = self;
   const int64_t total_dims = in_tensor.dim();
-  auto flip_dims_b = dim_list_to_bitset(dims, total_dims);
+  auto flip_dims_b = at::dim_list_to_bitset(dims, total_dims);
   Tensor out_tensor = at::empty_like(in_tensor);
 
   // create contiguous strides for input tensor
@@ -74,11 +74,11 @@ Tensor flip_cpu(const Tensor& self, IntList dims) {
 }
 
 Tensor roll_cpu(const Tensor& self, IntList shifts, IntList dims) {
-  // todo: support rolling along no or multiple dimensions as in numpy.roll.
-  AT_CHECK(dims.size() == 1, "only single dimension roll currently supported");
-  AT_CHECK(shifts.size() == dims.size(), "shifts and dimensions must align");
+  if (dims.size() != 1 || shifts.size() != 1) {
+    return roll_common(self, shifts, dims);
+  }
   // avoid a div zero error below.
-  if( self.numel() == 0 ) {
+  if (self.numel() == 0) {
     return self.clone();
   }
   int64_t dim = dims[0];
@@ -86,8 +86,9 @@ Tensor roll_cpu(const Tensor& self, IntList shifts, IntList dims) {
   int64_t start = (size - shifts[0]) % size;
   // Behavior of % is different in C++ vs Python for negative numbers. This
   // corrects the difference.
-  if( start < 0 ) start = start + size;
-
+  if (start < 0) {
+    start = start + size;
+  }
   auto tensors = self.unbind(dim);
   std::vector<Tensor> vec = std::vector<Tensor>(size);
   int64_t index = 0;

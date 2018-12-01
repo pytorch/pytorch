@@ -9,8 +9,8 @@ using namespace std;
 namespace caffe2 {
 
 template <typename ACC_T>
-shared_ptr<fbgemm2::PackBMatrix<int8_t, ACC_T>> GetOrCreateFbgemmPackBMatrix(
-    fbgemm2::matrix_op_t trans,
+shared_ptr<fbgemm::PackBMatrix<int8_t, ACC_T>> GetOrCreateFbgemmPackBMatrix(
+    fbgemm::matrix_op_t trans,
     int32_t m,
     int32_t n,
     const void* orig_data,
@@ -19,7 +19,7 @@ shared_ptr<fbgemm2::PackBMatrix<int8_t, ACC_T>> GetOrCreateFbgemmPackBMatrix(
     int32_t zero_point) {
   static std::map<
       std::tuple<int, int, const void*>,
-      weak_ptr<fbgemm2::PackBMatrix<int8_t, ACC_T>>>
+      weak_ptr<fbgemm::PackBMatrix<int8_t, ACC_T>>>
       cache;
   static mutex cache_mutex;
 
@@ -27,15 +27,14 @@ shared_ptr<fbgemm2::PackBMatrix<int8_t, ACC_T>> GetOrCreateFbgemmPackBMatrix(
 
   // Create a new packed matrix and compare with cached one if there's any.
   // TODO: make this cheaper by computing hash of fdata.
-  auto new_packed = make_shared<fbgemm2::PackBMatrix<int8_t, ACC_T>>(
+  auto new_packed = make_shared<fbgemm::PackBMatrix<int8_t, ACC_T>>(
       trans,
       m,
       n,
       quantized_data,
       ld,
       nullptr, // pmat
-      1, // groups
-      zero_point);
+      1); // groups
 
   std::tuple<int, int, const void*> key(m, n, orig_data);
   auto itr = cache.find(key);
@@ -59,9 +58,9 @@ shared_ptr<fbgemm2::PackBMatrix<int8_t, ACC_T>> GetOrCreateFbgemmPackBMatrix(
   }
 }
 
-template shared_ptr<fbgemm2::PackBMatrix<int8_t, int16_t>>
+template shared_ptr<fbgemm::PackBMatrix<int8_t, int16_t>>
 GetOrCreateFbgemmPackBMatrix<int16_t>(
-    fbgemm2::matrix_op_t trans,
+    fbgemm::matrix_op_t trans,
     int32_t m,
     int32_t n,
     const void* orig_data,
@@ -69,9 +68,9 @@ GetOrCreateFbgemmPackBMatrix<int16_t>(
     int32_t ld,
     int32_t zero_point);
 
-template shared_ptr<fbgemm2::PackBMatrix<int8_t, int32_t>>
+template shared_ptr<fbgemm::PackBMatrix<int8_t, int32_t>>
 GetOrCreateFbgemmPackBMatrix<int32_t>(
-    fbgemm2::matrix_op_t trans,
+    fbgemm::matrix_op_t trans,
     int32_t m,
     int32_t n,
     const void* orig_data,

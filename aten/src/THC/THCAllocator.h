@@ -8,7 +8,7 @@
 #ifdef __cplusplus
 class CAFFE2_API THCIpcDeleter {
  public:
-  THCIpcDeleter(void* data, int device) : data_(data), device_(device) {};
+  THCIpcDeleter(void* data, int device);
   ~THCIpcDeleter();
   static at::DataPtr makeDataPtr(void* data, int device);
 private:

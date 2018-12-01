@@ -15,7 +15,7 @@ struct ChunkOutput {
 static c10::optional<std::vector<ChunkOutput>> getChunkOutputs(Node* chunk) {
   std::vector<ChunkOutput> outputs;
   for (auto list_use : chunk->output()->uses()) {
-    if (list_use.user->matches("aten::select(Tensor[] a, int b) -> Tensor", attr::b)) {
+    if (list_use.user->matches("aten::select(Tensor[] list, int idx) -> Tensor", attr::b)) {
       outputs.emplace_back(list_use.user->output(),
                             list_use.user->get<int64_t>(attr::b).value());
     } else if (list_use.user->kind() == prim::ListUnpack) {
@@ -58,7 +58,11 @@ static void CanonicalizeOps(Block* block) {
       SymbolicVariable mat2(it->inputs()[2]);
 
       auto mm_result = mat1.mm(mat2);
+      // Set this intermediate aten::mm node to have the same output type as the original aten::addmm
+      // otherwise the canonicalized graph will have DynamicType as the output of this node which is incorrect
+      (static_cast<Value*>(mm_result))->setType(it->output()->type());
       auto result = mat + mm_result;
+      (static_cast<Value*>(result))->setType(it->output()->type());
 
       it->output()->replaceAllUsesWith(result);
       it.destroyCurrent();

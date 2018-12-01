@@ -1,7 +1,7 @@
 #include "torch/csrc/jit/autodiff.h"
 
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/jit/passes/common_subexpression_elimination.h"
+#include "torch/csrc/jit/passes/constant_pooling.h"
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/utils/functional.h"
@@ -33,6 +33,8 @@ bool isDifferentiable(Node * n) {
     "aten::mul(Tensor self, Scalar other) -> Tensor",
     "aten::div(Tensor self, Tensor other) -> Tensor",
     "aten::div(Tensor self, Scalar other) -> Tensor",
+    "aten::max(Tensor self, Tensor other) -> Tensor",
+    "aten::min(Tensor self, Tensor other) -> Tensor",
     "aten::sigmoid(Tensor self) -> Tensor",
     "aten::tanh(Tensor self) -> Tensor",
     "aten::relu(Tensor self) -> Tensor",
@@ -41,6 +43,7 @@ bool isDifferentiable(Node * n) {
     "aten::t(Tensor self) -> Tensor",
     "aten::neg(Tensor self) -> Tensor",
     "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor",
+    "aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor",
     "aten::type_as(Tensor self, Tensor other) -> Tensor",
     "aten::unsqueeze(Tensor self, int dim) -> Tensor",
     "aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor",
@@ -77,7 +80,9 @@ bool isDifferentiable(Node * n) {
     "aten::trunc(Tensor self) -> Tensor",
     "aten::log_softmax(Tensor self, int dim) -> Tensor",
     "aten::avg_pool2d(Tensor self, int[] kernel_size, int[] stride, int[] padding, bool ceil_mode, bool count_include_pad) -> Tensor",
-    "aten::max_pool2d_with_indices(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> (Tensor, Tensor)"
+    "aten::max_pool2d_with_indices(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> (Tensor, Tensor)",
+    "aten::thnn_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor? bias, int[] stride, int[] padding) -> (Tensor, Tensor, Tensor)",
+    "aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)",
   };
 
   // TODO: add support for the following fusible operators.
@@ -88,7 +93,8 @@ bool isDifferentiable(Node * n) {
 
   if (n->kind() == prim::Constant ||
       n->kind() == prim::AutogradAdd ||
-      n->kind() == prim::ConstantChunk)
+      n->kind() == prim::ConstantChunk ||
+      n->kind() == prim::None)
     return true;
   if (differentiable_ops.find(n))
     return true;
@@ -162,6 +168,18 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     } else if (node->matches("aten::div(Tensor self, Scalar other) -> Tensor")) {
       return {grads.at(0) / inputs.at(1), nullptr};
 
+    } else if (node->matches("aten::max(Tensor self, Tensor other) -> Tensor")) {
+      return {grads.at(0) * (inputs.at(0) > inputs.at(1)).type_as(grads.at(0)),
+              grads.at(0) * (inputs.at(1) > inputs.at(0)).type_as(grads.at(0))};
+
+    } else if (node->matches("aten::min(Tensor self, Tensor other) -> Tensor")) {
+      return {grads.at(0) * (inputs.at(0) < inputs.at(1)).type_as(grads.at(0)),
+              grads.at(0) * (inputs.at(1) < inputs.at(0)).type_as(grads.at(0))};
+
+    } else if (node->matches("aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor")) {
+      return {nullptr, grads.at(0) * inputs.at(0).type_as(grads.at(0)),
+                       grads.at(0) * (1 - inputs.at(0)).type_as(grads.at(0))};
+
     } else if (node->matches("aten::sigmoid(Tensor self) -> Tensor")) {
       // TODO: The order of operations matter in this case. This
       // works for ppc64le and x86_64. Need to look at why the
@@ -177,15 +195,20 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     } else if (node->matches("aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor")) {
       // handle the case that min/max is None
       Value* min = inputs.at(1);
+      bool min_must_be_none = min->node()->kind() == prim::None;
       Value* max = inputs.at(2);
-      if (!min->isNone() && !max->isNone()) {
+      bool max_must_be_none = max->node()->kind() == prim::None;
+      // XXX - this formula is wrong when min or max are not stricly prim::None
+      // but may be None dynamically. In this case an internal compiler error will
+      // get thrown when trying to generate expressions involving the values of min/max
+      if (!min_must_be_none && !max_must_be_none) {
         return {grads.at(0)
           * (1-(inputs.at(0) <= inputs.at(1)).type_as(inputs.at(0)))
           * (1-(inputs.at(0) >= inputs.at(2)).type_as(inputs.at(0))), nullptr, nullptr};
-      } else if (max->isNone()) {
+      } else if (max_must_be_none) {
         return {grads.at(0)
           * (1-(inputs.at(0) <= inputs.at(1)).type_as(inputs.at(0))), nullptr, nullptr};
-      } else if (min->isNone()) {
+      } else if (min_must_be_none) {
         return {grads.at(0)
           * (1-(inputs.at(0) >= inputs.at(2)).type_as(inputs.at(0))), nullptr, nullptr};
       } else {
@@ -395,6 +418,45 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       });
       return {backward_value->node()->output(0), nullptr, nullptr, nullptr, nullptr, nullptr};
 
+    } else if (node->matches("aten::thnn_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor? bias, int[] stride, int[] padding) -> (Tensor, Tensor, Tensor)")) {
+      auto graph = node->owningGraph();
+      auto backward_value = graph->insert(aten::thnn_conv2d_backward, {
+	grads.at(0).value(),
+	inputs.at(0).value(),
+	inputs.at(1).value(),
+	node->namedInput(attr::kernel_size),
+	node->namedInput(attr::stride),
+	node->namedInput(attr::padding),
+	outputs.at(1).value(),
+	outputs.at(2).value(),
+	graph->insertConstant(std::vector<bool>{true, true, true})
+      });
+      // graph->insert returns a tuple automatically if multiple outputs are returned. So unpack them again.
+      Node* tuple_unpack_node = graph->insertNode(graph->createTupleUnpack(backward_value));
+      auto tuple_outputs = tuple_unpack_node->outputs();
+      JIT_ASSERT(tuple_outputs.size() == size_t(3));
+      return {tuple_outputs[0], tuple_outputs[1], nullptr, tuple_outputs[2], nullptr, nullptr};
+
+    } else if (node->matches("aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)")) {
+      auto graph = node->owningGraph();
+      auto backward_value = graph->insert(aten::native_batch_norm_backward, {
+	grads.at(0).value(),
+	inputs.at(0).value(),
+	inputs.at(1).value(),
+	inputs.at(3).value(),
+	inputs.at(4).value(),
+	outputs.at(1).value(),
+	outputs.at(2).value(),
+	inputs.at(5).value(),
+	inputs.at(7).value(),
+	graph->insertConstant(std::vector<bool>{true, true, true})
+      });
+      // graph->insert returns a tuple automatically if multiple outputs are returned. So unpack them again.
+      Node* tuple_unpack_node = graph->insertNode(graph->createTupleUnpack(backward_value));
+      auto tuple_outputs = tuple_unpack_node->outputs();
+      JIT_ASSERT(tuple_outputs.size() == size_t(3));
+      return {tuple_outputs[0], tuple_outputs[1], tuple_outputs[2], nullptr, nullptr, nullptr, nullptr, nullptr};
+
     } else if (node->matches("aten::log_softmax(Tensor self, int dim) -> Tensor")) {
       JIT_ASSERT(grads.size() == 1);
       auto graph = node->owningGraph();
@@ -406,7 +468,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       });
       return {backward_value->node()->output(0), nullptr};
 
-    } else if (node->kind() == prim::Constant) {
+    } else if (node->kind() == prim::Constant || node->kind() == prim::None) {
       return {};
     }
     throw std::runtime_error(std::string("failed to differentiate `") + node->kind().toDisplayString() + "`");
@@ -573,10 +635,6 @@ static void liftConstants(Gradient& grad_desc, ReverseDetails& rev_info) {
       }
     }
   }
-
-  // It's possible the we've cloned the same constants many times,
-  // so we use CSE to deduplicate them.
-  EliminateCommonSubexpression(reverse_block);
 }
 
 // Takes a grad_desc.f returned from `addReverseInline` and splits off the
@@ -724,6 +782,9 @@ Gradient differentiate(std::shared_ptr<Graph>& graph) {
   // Fills in f, df, f_real_outputs, df_input_captures,
   // modifies df_input_vjps (new vjps are added for temporaries)
   lambdaLiftReverse(grad_desc, rev_info);
+  // It's possible the we've cloned the same constants many times, so
+  // de-duplicate them
+  ConstantPooling(grad_desc.df);
   return grad_desc;
 }
 

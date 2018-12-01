@@ -583,6 +583,22 @@ class TestAutograd(TestCase):
         self.assertEqual(x.grad, sparse_grad1 + sparse_grad2)
 
     @skipIfRocm
+    def test_sparse_mm_backward(self):
+        size = (3, 3)
+        sparse = torch.sparse_coo_tensor(size, requires_grad=True)
+        dense = torch.randn(size, requires_grad=True)
+
+        z = sparse.mm(dense)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "calculating the gradient of a sparse Tensor argument to mm is not supported."):
+            z.sum().backward()
+
+        z = dense.addmm(sparse, dense)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "calculating the gradient of a sparse Tensor argument to mm is not supported."):
+            z.sum().backward()
+
+    @skipIfRocm
     def test_sparse_ctor_getter_backward(self):
         # See NOTE [ Sparse: autograd and API ] on the expected behavior of this test
         def test(size, sparse_dim, nnz, device):
@@ -2026,18 +2042,23 @@ class TestAutograd(TestCase):
 
     @skipIfNoLapack
     def test_cholesky(self):
-        root = torch.tril(torch.rand(S, S)).requires_grad_()
+        def func(root):
+            x = torch.matmul(root, root.transpose(-1, -2)) + 1e-05
+            return torch.cholesky(x, upper)
 
-        def run_test(upper):
-            def func(root):
-                x = torch.mm(root, root.t())
-                return torch.cholesky(x, upper)
+        def run_test(upper, dims):
+            root = torch.rand(*dims)
+            indices = torch.ones(dims[-1], dims[-1], dtype=torch.uint8).tril()
+            indices = indices.expand_as(root)
+            root[indices] = 0
+            root.requires_grad_()
 
             gradcheck(func, [root])
             gradgradcheck(func, [root])
 
-        run_test(upper=True)
-        run_test(upper=False)
+        for upper, dims in product([True, False], [(3, 3), (4, 3, 2, 2)]):
+            run_test(upper, dims)
+            run_test(upper, dims)
 
     @skipIfNoLapack
     def test_trtrs(self):

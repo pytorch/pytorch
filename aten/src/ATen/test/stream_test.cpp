@@ -2,6 +2,7 @@
 
 #include "ATen/cuda/CUDAContext.h"
 #include "ATen/cuda/CUDAGuard.h"
+#include "ATen/cuda/CUDAMultiStreamGuard.h"
 #include "ATen/cuda/CUDAEvent.h"
 
 #include "cuda_runtime.h"
@@ -39,12 +40,10 @@ TEST(TestStream, CopyAndMoveTest) {
 
     copyStream = s;
 
-    ASSERT_EQ_CUDA(copyStream.internals(), s.internals());
     ASSERT_EQ_CUDA(copyStream.device_index(), device);
     ASSERT_EQ_CUDA(copyStream.stream(), cuda_stream);
   }
 
-  ASSERT_TRUE(copyStream.internals());
   ASSERT_EQ_CUDA(copyStream.device_index(), device);
   ASSERT_EQ_CUDA(copyStream.stream(), cuda_stream);
 
@@ -61,7 +60,6 @@ TEST(TestStream, CopyAndMoveTest) {
     ASSERT_EQ_CUDA(moveStream.stream(), cuda_stream);
   }
 
-  ASSERT_TRUE(moveStream.internals());
   ASSERT_EQ_CUDA(moveStream.device_index(), device);
   ASSERT_EQ_CUDA(moveStream.stream(), cuda_stream);
 }
@@ -141,9 +139,7 @@ TEST(TestStream, CUDAGuardTest) {
 
   // Test that all original streams are recorded.
   {
-    at::cuda::CUDAGuard guard;
-    ASSERT_TRUE(guard.original_streams().empty());
-    guard.set_stream(streams0[0]);
+    at::cuda::CUDAMultiStreamGuard guard;
     ASSERT_EQ_CUDA(guard.original_streams().size(), at::cuda::getNumGPUs());
     ASSERT_EQ_CUDA(guard.original_streams()[0], streams0[0]);
     ASSERT_EQ_CUDA(guard.original_streams()[1], streams1[0]);
@@ -151,8 +147,8 @@ TEST(TestStream, CUDAGuardTest) {
 
   // Setting a stream changes the current device and the stream on that device
   {
-    at::cuda::CUDAGuard guard(streams1[1]);
-    ASSERT_EQ_CUDA(guard.last_device(), at::Device(at::kCUDA, 1));
+    at::cuda::CUDAStreamGuard guard(streams1[1]);
+    ASSERT_EQ_CUDA(guard.current_device(), at::Device(at::kCUDA, 1));
     ASSERT_EQ_CUDA(at::cuda::current_device(), 1);
     ASSERT_EQ_CUDA(at::cuda::getCurrentCUDAStream(1), streams1[1]);
   }
@@ -164,52 +160,20 @@ TEST(TestStream, CUDAGuardTest) {
   // Setting only the device changes only the current device and not the stream
   {
     at::cuda::CUDAGuard guard(/*device=*/1);
-    ASSERT_EQ_CUDA(guard.last_device(), at::Device(at::kCUDA, 1));
+    ASSERT_EQ_CUDA(guard.current_device(), at::Device(at::kCUDA, 1));
     ASSERT_EQ_CUDA(at::cuda::current_device(), 1);
     ASSERT_EQ_CUDA(at::cuda::getCurrentCUDAStream(1), streams1[0]);
   }
 
   ASSERT_EQ_CUDA(at::cuda::current_device(), 0);
   ASSERT_EQ_CUDA(at::cuda::getCurrentCUDAStream(0), streams0[0]);
-
-  // Setting the stream first, and then the device, first changes the devices
-  // back, and then resets the stream on the initial device.
-
-  {
-    at::cuda::CUDAGuard guard(streams0[1]);
-    guard.set_device(1);
-  }
-
-  ASSERT_EQ_CUDA(at::cuda::current_device(), 0);
-  ASSERT_EQ_CUDA(at::cuda::getCurrentCUDAStream(0), streams0[0]);
-  ASSERT_EQ_CUDA(at::cuda::getCurrentCUDAStream(1), streams1[0]);
-}
-
-// CUDAGuardIsMovable
-TEST(TestStream, CUDAGuardMovableTest) {
-  if (at::cuda::getNumGPUs() < 2) {
-    return;
-  }
-  const auto stream = at::cuda::getStreamFromPool();
-  const auto device_count = at::cuda::getNumGPUs();
-  at::cuda::CUDAGuard first(stream);
-  first.set_device(1);
-  at::cuda::CUDAGuard second(std::move(first));
-  ASSERT_EQ_CUDA(second.original_streams().size(), device_count);
-  ASSERT_EQ_CUDA(second.original_device(), at::Device(at::kCUDA, 0));
-  ASSERT_EQ_CUDA(second.last_device(), at::Device(at::kCUDA, 1));
-  at::cuda::CUDAGuard third;
-  third = std::move(second);
-  ASSERT_EQ_CUDA(third.original_streams().size(), device_count);
-  ASSERT_EQ_CUDA(third.original_device(), at::Device(at::kCUDA, 0));
-  ASSERT_EQ_CUDA(third.last_device(), at::Device(at::kCUDA, 1));
 }
 
 // Streampool Round Robin
 TEST(TestStream, StreamPoolTest) {
   std::vector<at::cuda::CUDAStream> streams{};
   for (int i = 0; i < 200; ++i) {
-    streams.emplace_back(at::cuda::detail::CUDAStream_getStreamFromPool());
+    streams.emplace_back(at::cuda::getStreamFromPool());
   }
 
   std::unordered_set<cudaStream_t> stream_set{};
@@ -253,8 +217,8 @@ TEST(TestStream, CUDAEventSyncTest) {
   const auto wait_stream0 = at::cuda::getStreamFromPool();
   const auto wait_stream1 = at::cuda::getStreamFromPool();
 
-  wait_stream0.synchronize_with(event);
-  wait_stream1.synchronize_with(event);
+  event.block(wait_stream0);
+  event.block(wait_stream1);
 
   cudaStreamSynchronize(wait_stream0);
   ASSERT_TRUE(event.happened());
@@ -279,7 +243,7 @@ TEST(TestStream, CrossDeviceTest) {
 
   ASSERT_EQ_CUDA(event0.device(), 1);
 
-  stream0.synchronize_with(event0);
+  event0.block(stream0);
 
   cudaStreamSynchronize(stream0);
   ASSERT_TRUE(event0.happened());

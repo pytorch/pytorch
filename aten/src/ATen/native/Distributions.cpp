@@ -18,7 +18,7 @@
 #include <assert.h>
 #include <cpuinfo.h>
 
-#include "TH/THRandom.h"
+#include <TH/THRandom.h>
 #include "TH/THGenerator.hpp"
 #include "TH/THMath.h"
 
@@ -130,7 +130,7 @@ Tensor& bernoulli_tensor_cpu_(Tensor& self, const Tensor& p_, Generator* gen) {
     THGenerator* generator = get_generator(gen);
     std::lock_guard<std::mutex> lock(generator->mutex);
     using self_t = scalar_t;
-    if (p_.type().scalarType() == kDouble) {
+    if (p_.scalar_type() == kDouble) {
       auto p = std::get<0>(expand_inplace(self, p_.to(kCPU)));
       CPU_tensor_apply2<self_t, double>(
         self, p, [generator](self_t& ret_val, double& p_val) {
@@ -189,7 +189,7 @@ Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
  */
 
 Tensor _s_poisson_cpu(const Tensor& lambda, Generator *gen) {
-  Tensor ret = at::zeros(lambda.sizes(), lambda.type());
+  Tensor ret = at::zeros(lambda.sizes(), lambda.options());
   AT_DISPATCH_FLOATING_TYPES(ret.type(), "poisson", [&] {
     THGenerator* generator = get_generator(gen);
     std::lock_guard<std::mutex> lock(generator->mutex);
@@ -203,7 +203,7 @@ Tensor _s_poisson_cpu(const Tensor& lambda, Generator *gen) {
 }
 
 Tensor _s_gamma_cpu(const Tensor& alpha, Generator *gen) {
-  Tensor ret = at::zeros(alpha.sizes(), alpha.type());
+  Tensor ret = at::zeros(alpha.sizes(), alpha.options());
   AT_DISPATCH_FLOATING_TYPES(ret.type(), "gamma", [&] {
     THGenerator* generator = get_generator(gen);
     std::lock_guard<std::mutex> lock(generator->mutex);

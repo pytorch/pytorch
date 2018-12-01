@@ -3,12 +3,14 @@ from torch import Tensor
 from torch.autograd import Variable, function
 from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
 from torch.jit.frontend import get_jit_ast, get_default_args
+import torch.backends.cudnn as cudnn
 import torch.jit.annotations
 from torch._six import raise_from, with_metaclass, get_function_from_type
 from .._jit_internal import createResolutionCallback, _compiled_weak_fns, \
     _weak_script_methods, _weak_modules, _weak_types, COMPILED, \
-    COMPILATION_PENDING
-from ..nn.modules.utils import _single, _pair, _triple, _quadruple
+    COMPILATION_PENDING, _boolean_dispatched
+from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
+    _list_with_default
 import torch.testing
 from collections import defaultdict, OrderedDict, namedtuple
 import sys
@@ -23,6 +25,7 @@ import copy
 import numbers
 import collections
 import re
+import inspect
 if sys.version_info[0] > 2:
     import pathlib
 
@@ -141,7 +144,7 @@ def save(m, f):
         f.write(ret)
 
 
-def get_trace_graph(f, args=(), kwargs=None):
+def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False):
     """
     Trace a function or model, returning a tuple consisting of the both the
     *trace* of an execution, as well as the original return value.
@@ -167,7 +170,7 @@ def get_trace_graph(f, args=(), kwargs=None):
         kwargs = {}
     if not isinstance(args, tuple):
         args = (args,)
-    return LegacyTracedModule(f)(*args, **kwargs)
+    return LegacyTracedModule(f, _force_outplace)(*args, **kwargs)
 
 
 def _unique_state_dict(module, keep_vars=False):
@@ -182,13 +185,35 @@ def _unique_state_dict(module, keep_vars=False):
     return filtered_dict
 
 
+def _create_interpreter_name_lookup_fn(frames_up=1):
+    def _get_interpreter_name_for_var(var):
+        frame = inspect.currentframe()
+        i = 0
+        while i < frames_up + 1:
+            frame = frame.f_back
+            i += 1
+
+        f_locals = frame.f_locals
+        f_globals = frame.f_globals
+
+        for k, v in f_locals.items():
+            if isinstance(v, torch.Tensor) and var is v:
+                return k
+        for k, v in f_globals.items():
+            if isinstance(v, torch.Tensor) and var is v:
+                return k
+        return ''
+    return _get_interpreter_name_for_var
+
+
 class LegacyTracedModule(Module):
-    def __init__(self, inner):
+    def __init__(self, inner, force_outplace=False):
         super(LegacyTracedModule, self).__init__()
         # inner may be a Module, or it may be an arbitrary callable
         # If it's a Module, we get its parameters automatically, which lets
         # us avoid a special casing functions versus modules.
         self.inner = inner
+        self._force_outplace = force_outplace
 
     def forward(self, *args):
         in_vars, in_desc = _flatten(args)
@@ -196,6 +221,8 @@ class LegacyTracedModule(Module):
         # This differs from the compiler path, which doesn't support it at the moment.
         module_state = list(_unique_state_dict(self, keep_vars=True).values())
         trace, all_trace_inputs = torch._C._tracer_enter(*(in_vars + module_state))
+        torch._C._tracer_set_force_outplace(self._force_outplace)
+        torch._C._tracer_set_get_unique_name_fn(_create_interpreter_name_lookup_fn())
         try:
             trace_inputs = _unflatten(all_trace_inputs[:len(in_vars)], in_desc)
             out = self.inner(*trace_inputs)
@@ -371,13 +398,18 @@ class TracingCheckError(Exception):
 
 # Check the traced module against a set of user-provided validation inputs
 @torch.no_grad()
-def _check_trace(check_inputs, func, executor_options, module, check_tolerance):
+def _check_trace(check_inputs, func, executor_options, module, check_tolerance, force_outplace):
     # Note: tracing is independent of optimizations, which consume the trace
     executor_options['optimize'] = False
     for inputs in check_inputs:
         if isinstance(inputs, torch.Tensor):
             inputs = (inputs,)
-        check_mod = torch.jit.trace(func, _clone_inputs(inputs), check_trace=False, **executor_options)
+        check_mod = torch.jit.trace(
+            func,
+            _clone_inputs(inputs),
+            check_trace=False,
+            _force_outplace=force_outplace,
+            **executor_options)
 
         def graph_diagnostic_info():
             mod_canonicalized = torch._C._jit_pass_canonicalize(module.graph)
@@ -502,7 +534,13 @@ TracerWarning.ignore_lib_warnings()
 torch._C._tracer_warn_use_python()
 
 
-def trace(func, example_inputs, optimize=True, check_trace=True, check_inputs=None, check_tolerance=1e-5):
+def trace(func,
+          example_inputs,
+          optimize=True,
+          check_trace=True,
+          check_inputs=None,
+          check_tolerance=1e-5,
+          _force_outplace=False):
     """
     Trace a function and return an executable trace that will be optimized
     using just-in-time compilation.
@@ -569,14 +607,16 @@ def trace(func, example_inputs, optimize=True, check_trace=True, check_inputs=No
     elif not isinstance(example_inputs, tuple):
         example_inputs = tuple(example_inputs)
     module = TopLevelTracedModule(func, **executor_options)
-    module._create_method_from_trace('forward', func, example_inputs)
+    var_lookup_fn = _create_interpreter_name_lookup_fn(0)
+    module._create_method_from_trace('forward', func, example_inputs,
+                                     var_lookup_fn, _force_outplace)
 
     # Check the trace against new traces created from user-specified inputs
     if check_trace:
         if check_inputs is not None:
-            _check_trace(check_inputs, func, executor_options, module, check_tolerance)
+            _check_trace(check_inputs, func, executor_options, module, check_tolerance, _force_outplace)
         else:
-            _check_trace([example_inputs], func, executor_options, module, check_tolerance)
+            _check_trace([example_inputs], func, executor_options, module, check_tolerance, _force_outplace)
 
     return module
 
@@ -596,6 +636,10 @@ class CompilationUnit(object):
 
     def __getattr__(self, attr):
         return self.module._get_method(attr)
+
+
+def _try_get_dispatched_fn(fn):
+    return _boolean_dispatched.get(fn)
 
 
 def _try_compile_weak_script(fn):
@@ -818,7 +862,7 @@ class OrderedBufferDict(OrderedDictWrapper):
 # in addition, tuples and lists of these base types are also considered constants
 # If you edit this list, then you also need to edit the handlers in
 # ConstantValue in jit/script/init.cpp
-_constant_types = (bool, float, int, types.FunctionType, torch.device, torch.layout, torch.dtype)
+_constant_types = (bool, float, int, str, type(None), types.FunctionType, torch.device, torch.layout, torch.dtype)
 
 
 def _get_valid_constant(attr, v):
@@ -1249,6 +1293,8 @@ class _ConstModuleList(ScriptModule):
     def __init__(self, modules):
         super(_ConstModuleList, self).__init__()
         for i, module in enumerate(modules):
+            if _is_weak_type(type(module)):
+                module = _make_strong(module)
             self.add_module(str(i), module)
 
     def __getitem__(self, idx):
@@ -1300,39 +1346,16 @@ _modules_containing_builtins = (torch, torch.nn.functional, torch._C._nn)
 # builtin aten ops. Instead, they will be compiled from the code in
 # torch.nn.functional when used.
 
-# TODO: delete this list, _should_skip(), and remove torch.nn.functional from
-# builtins list once everything in it has been converted to weak script
-_builtin_blacklist = {
-    'tanhshrink',
-    'softsign',
-    'pairwise_distance',
-    'prelu',
-    'hardshrink',
-    'ctc_loss',
-    'threshold',
 
-    # ops with inplace option
-    'relu',
-    'hardtanh',
-    'relu6',
-    'elu',
-    'selu',
-    'celu',
-    'leaky_relu',
-    'rrelu',
-    'tanh',
-    'sigmoid',
-
-    'dropout',
-    'alpha_dropout',
-    'dropout2d',
-    'dropout3d',
-    'feature_alpha_dropout',
-}
-
-
+# TODO: delete _should_skip() and remove torch.nn.functional from builtins list
+# once everything in it has been converted to weak script
 def _should_skip(mod, name):
-    return mod is torch.nn.functional and name in _builtin_blacklist
+    if mod is not torch.nn.functional:
+        return False
+    func = getattr(torch.nn.functional, name)
+    if func is None:
+        return False
+    return func in _compiled_weak_fns or func in _boolean_dispatched
 
 
 def _unwrap_optional(x):
@@ -1360,7 +1383,11 @@ def _get_builtin_table():
     _builtin_table[id(_pair)] = "aten::_pair"
     _builtin_table[id(_triple)] = "aten::_triple"
     _builtin_table[id(_quadruple)] = "aten::_quadruple"
+    _builtin_table[id(_list_with_default)] = "aten::list_with_default"
     _builtin_table[id(_unwrap_optional)] = "aten::_unwrap_optional"
+    _builtin_table[id(cudnn.is_acceptable)] = "aten::cudnn_is_acceptable"
+    _builtin_table[id(torch._C._infer_size)] = "aten::_infer_size"
+    _builtin_table[id(torch.nn.functional._no_grad_embedding_renorm_)] = "aten::_no_grad_embedding_renorm_"
 
     return _builtin_table
 
@@ -1373,32 +1400,7 @@ def _find_builtin(fn):
     return _get_builtin_table().get(id(fn))
 
 
-# Python equivalents for the empty list construction builtins. We need
-# these otherwise the tests won't execute in regular Python mode.
-def _construct_empty_int_list():
-    return []
-
-
-_register_builtin(_construct_empty_int_list, 'aten::_construct_empty_int_list')
-
-
-def _construct_empty_float_list():
-    return []
-
-
-_register_builtin(_construct_empty_float_list, 'aten::_construct_empty_float_list')
-
-
-def _construct_empty_tensor_list():
-    return []
-
-
-_register_builtin(_construct_empty_tensor_list, 'aten::_construct_empty_tensor_list')
-
-
 _register_builtin(len, 'aten::len')
-
-
 _register_builtin(_wait, 'aten::wait')
 
 # torch.jit.Error
@@ -1414,6 +1416,11 @@ class _disable_tracing(object):
         torch._C._set_tracing_state(self.state)
         self.state = None
 
+
+# for use in python if using annotate
+def annotate(the_type, the_value):
+    # noop in python
+    return the_value
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")

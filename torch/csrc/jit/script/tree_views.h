@@ -262,6 +262,10 @@ struct Expr : public TreeView {
       case TK_TUPLE_LITERAL:
       case '@':
       case TK_POW:
+      case TK_FLOOR_DIV:
+      case '&':
+      case '^':
+      case '|':
         return;
       default:
         throw ErrorReport(tree) << kindToString(tree->kind()) << " is not a valid Expr";
@@ -293,8 +297,8 @@ struct Param : public TreeView {
   explicit Param(const TreeRef& tree) : TreeView(tree) {
     tree_->match(TK_PARAM);
   }
-  static Param create(const SourceRange& range, const Ident& ident, const Expr& type) {
-    return Param(Compound::create(TK_PARAM, range, {ident, type}));
+  static Param create(const SourceRange& range, const Ident& ident, const Expr& type, Maybe<Expr> def) {
+    return Param(Compound::create(TK_PARAM, range, {ident, type, def}));
   }
   Ident ident() const {
     return Ident(subtree(0));
@@ -302,9 +306,11 @@ struct Param : public TreeView {
   Expr type() const {
     return Expr(subtree(1));
   }
-  template<typename T>
-  T typeExpect() const {
-    return T(type());
+  Maybe<Expr> defaultValue() const {
+    return Maybe<Expr>(subtree(2));
+  }
+  Param withType(Expr typ) const {
+    return Param::create(range(), ident(), typ, defaultValue());
   }
 };
 
@@ -577,6 +583,10 @@ struct BinOp : public Expr {
       case '@':
       case TK_POW:
       case '%':
+      case '&':
+      case '^':
+      case '|':
+      case TK_FLOOR_DIV:
         if (tree->trees().size() != 2)
           throw ErrorReport(tree) << "BinOp expected 2 subtrees, found " << tree->trees().size();
         return;
@@ -626,7 +636,7 @@ struct Const : public Expr {
     return std::stoll(subtree(0)->stringValue());
   }
   double asFloatingPoint() const {
-    return std::stod(subtree(0)->stringValue());
+    return SharedParserData::strtod_c(subtree(0)->stringValue().c_str(), nullptr);
   }
   const std::string& text() const {
     return subtree(0)->stringValue();

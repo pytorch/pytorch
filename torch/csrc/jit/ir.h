@@ -22,7 +22,7 @@
 #include "torch/csrc/WindowsTorchApiMacro.h"
 
 #include <ATen/ATen.h>
-#include "ATen/core/ArrayRef.h"
+#include <c10/util/ArrayRef.h>
 
 #include <algorithm>
 #include <atomic>
@@ -74,6 +74,8 @@ struct Use {
     return user == b.user && offset == b.offset;
   }
 };
+
+class AliasDb;
 
 // Note [User node does not uniquely identify use]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -138,7 +140,6 @@ public:
   }
   bool isNone() const {
     return type()->kind() == TypeKind::NoneType;
-
   }
   size_t unique() const {
     return unique_;
@@ -152,6 +153,7 @@ public:
       return unique_name_;
     return std::to_string(unique());
   }
+  TORCH_API std::string uniqueNameBase() const;
   Node* node() {
     return node_;
   }
@@ -169,6 +171,10 @@ public:
   // TODO: make this more const correct
   const use_list & uses() const {
     return uses_;
+  }
+
+  bool hasUses() const {
+    return !uses().empty();
   }
 
   TORCH_API void replaceFirstUseWith(Value * newValue);
@@ -478,7 +484,11 @@ public:
   //
   // Returns `false` if it's impossible to move `this` after `n` without
   // violating dependencies, otherwise executes the move and returns `true`
-  TORCH_API bool moveAfterTopologicallyValid(Node* n);
+  TORCH_API bool moveAfterTopologicallyValid(Node* n, const AliasDb& aliasDb);
+
+  // Like moveAfterTopologicallyValid, but only returns if the move is
+  // possible, without actually performing it.
+  TORCH_API bool couldMoveAfterTopologically(Node* n, const AliasDb& aliasdb);
 
   // Move a node 'n' (already in the graph) before 'this' in the topological
   // order.
@@ -502,7 +512,11 @@ public:
   //
   // Returns `false` if it's impossible to move `this` after `n` without
   // violating dependencies, otherwise executes the move and returns `true`
-  TORCH_API bool moveBeforeTopologicallyValid(Node* n);
+  TORCH_API bool moveBeforeTopologicallyValid(Node* n, const AliasDb& aliasDb);
+
+  // Like moveBeforeTopologicallyValid, but only returns if the move is
+  // possible, without actually performing it.
+  TORCH_API bool couldMoveBeforeTopologically(Node* n, const AliasDb& aliasDb);
 
   // Remove the input at 'i' from this node.
   //
@@ -583,7 +597,7 @@ public:
 
  private:
   enum class MoveSide { BEFORE, AFTER };
-  bool tryMove(Node* movePoint, MoveSide moveSide);
+  bool tryMove(Node* movePoint, MoveSide moveSide, const AliasDb& aliasDb, bool dryRun);
   void move(Node* movePoint, MoveSide moveSide);
 
   std::pair<Value*, const Argument&> findInput(Symbol name);
@@ -699,7 +713,13 @@ struct Block {
   Graph * owningGraph() {
     return graph_;
   }
+  const Graph * owningGraph() const {
+    return graph_;
+  }
   Node * owningNode() {
+    return owning_node_;
+  }
+  const Node * owningNode() const {
     return owning_node_;
   }
   // clone all inputs, nodes, and outputs from src and append them
@@ -829,9 +849,12 @@ public:
   TORCH_API Node * create(NodeKind kind, size_t num_outputs=1);
   TORCH_API Node * create(NodeKind kind, ArrayRef<Value*> inputs, size_t num_outputs=1);
 
+
+  TORCH_API Node* createNone(TypePtr typ); // value of None with type Optional[typ]
   TORCH_API Node* createUndefined();
   TORCH_API Node* createNoneGenerator();
   TORCH_API Node* createFusionGroup();
+  TORCH_API Node* createDifferentiableSubgraph();
   TORCH_API Node* createTuple(at::ArrayRef<Value*> values);
   TORCH_API Node* createTupleUnpack(Value * v);
   TORCH_API Node* createTupleIndex(Value * tup, int64_t index);
@@ -867,7 +890,11 @@ public:
   // argument matching rules, and checks that the op matches a known schema
   // if this node successfully completes, it guarentees the node is a correctly-formed invocation
   // of opname
-  Value* insert(Symbol opname, at::ArrayRef<NamedValue> args, at::ArrayRef<NamedValue> kwargs = {});
+  Value* insert(
+      Symbol opname,
+      at::ArrayRef<NamedValue> args,
+      at::ArrayRef<NamedValue> kwargs = {},
+      c10::optional<SourceRange> range = {});
 
   Node * appendNode(Node * n) {
     return block_->appendNode(n);

@@ -15,14 +15,6 @@ fi
 # The prefix must mirror the setting from build.sh
 INSTALL_PREFIX="/usr/local/caffe2"
 
-# Anaconda builds have a special install prefix and python
-if [[ "$BUILD_ENVIRONMENT" == conda* ]]; then
-  # This path comes from install_anaconda.sh which installs Anaconda into the
-  # docker image
-  PYTHON="/opt/conda/bin/python"
-  INSTALL_PREFIX="/opt/conda/"
-fi
-
 # Add the site-packages in the caffe2 install prefix to the PYTHONPATH
 SITE_DIR=$($PYTHON -c "from distutils import sysconfig; print(sysconfig.get_python_lib(prefix=''))")
 INSTALL_SITE_DIR="${INSTALL_PREFIX}/${SITE_DIR}"
@@ -34,11 +26,9 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
 fi
 
 # Set PYTHONPATH and LD_LIBRARY_PATH so that python can find the installed
-# Caffe2. This shouldn't be done on Anaconda, as Anaconda should handle this.
-if [[ "$BUILD_ENVIRONMENT" != conda* ]]; then
-  export PYTHONPATH="${PYTHONPATH}:$INSTALL_SITE_DIR"
-  export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${INSTALL_PREFIX}/lib"
-fi
+# Caffe2.
+export PYTHONPATH="${PYTHONPATH}:$INSTALL_SITE_DIR"
+export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${INSTALL_PREFIX}/lib"
 
 cd "$ROOT_DIR"
 
@@ -48,20 +38,6 @@ if [ -d $TEST_DIR ]; then
 fi
 
 mkdir -p $TEST_DIR/{cpp,python}
-
-if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
-  export LANG=C.UTF-8
-  export LC_ALL=C.UTF-8
-
-  # Pin individual runs to specific gpu so that we can schedule
-  # multiple jobs on machines that have multi-gpu.
-  NUM_AMD_GPUS=$(/opt/rocm/bin/rocminfo | grep 'Device Type.*GPU' | wc -l)
-  if (( $NUM_AMD_GPUS == 0 )); then
-      echo >&2 "No AMD GPU detected!"
-      exit 1
-  fi
-  export HIP_VISIBLE_DEVICES=$(($BUILD_NUMBER % $NUM_AMD_GPUS))
-fi
 
 cd "${WORKSPACE}"
 
@@ -111,13 +87,6 @@ if [[ "$BUILD_ENVIRONMENT" == *-cuda* ]]; then
   EXTRA_TESTS+=("$CAFFE2_PYPATH/contrib/nccl")
 fi
 
-conda_ignore_test=()
-if [[ $BUILD_ENVIRONMENT == conda* ]]; then
-  # These tests both assume Caffe2 was built with leveldb, which is not the case
-  conda_ignore_test+=("--ignore $CAFFE2_PYPATH/python/dataio_test.py")
-  conda_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/checkpoint_test.py")
-fi
-
 rocm_ignore_test=()
 if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
   # Currently these tests are failing on ROCM platform:
@@ -127,10 +96,6 @@ if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/piecewise_linear_transform_test.py")
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/softmax_ops_test.py")
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/unique_ops_test.py")
-
-  # Our cuda top_k op has some asm code, the hipified version doesn't
-  # compile yet, so we don't have top_k operator for now
-  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/top_k_test.py")
 fi
 
 # Python tests
@@ -148,7 +113,6 @@ pip install --user pytest-sugar
   --ignore "$CAFFE2_PYPATH/python/operator_test/matmul_op_test.py" \
   --ignore "$CAFFE2_PYPATH/python/operator_test/pack_ops_test.py" \
   --ignore "$CAFFE2_PYPATH/python/mkl/mkl_sbn_speed_test.py" \
-  ${conda_ignore_test[@]} \
   ${rocm_ignore_test[@]} \
   "$CAFFE2_PYPATH/python" \
   "${EXTRA_TESTS[@]}"

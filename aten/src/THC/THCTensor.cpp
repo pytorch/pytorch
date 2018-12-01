@@ -62,7 +62,7 @@ THCTensor *THCTensor_new(THCState *state, caffe2::TypeMeta type_meta) {
     case at::ScalarType::Double:
       return THCudaDoubleTensor_new(state);
     default:
-      AT_ERROR("unexpected ScalarType: ", at::toString(scalar_type));
+      AT_ERROR("unexpected ScalarType: ", toString(scalar_type));
   }
 }
 

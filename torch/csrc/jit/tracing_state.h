@@ -47,6 +47,9 @@ struct TORCH_API TracingState : public std::enable_shared_from_this<TracingState
   std::unordered_map<WeakTensor, Value*, WeakTensorHasher, WeakTensorEq> value_map;
   std::shared_ptr<Graph> graph;
   bool warn = true;
+  bool force_outplace = false;
+  std::function<std::string(const Variable& var)> lookup_var_name_fn =
+    [](const Variable& var) {return "";};
 };
 
 

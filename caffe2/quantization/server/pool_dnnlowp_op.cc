@@ -68,15 +68,15 @@ class AveragePoolDnnLowPOp final
 
   AveragePoolDnnLowPOp(const OperatorDef& operator_def, Workspace* ws)
       : BaseType(operator_def, ws) {
-    for (int i = 0; i < BaseType::kernel_.size(); ++i) {
+    for (int i = 0; i < this->kernel_.size(); ++i) {
       CAFFE_ENFORCE(
           dilation_[i] == 1, "Pooling op does not support dilation right now.");
     }
     if (!global_pooling_) {
-      for (int i = 0; i < BaseType::kernel_.size(); ++i) {
+      for (int i = 0; i < this->kernel_.size(); ++i) {
         CAFFE_ENFORCE(
             pads_[i] < kernel_[i] &&
-                pads_[i + BaseType::kernel_.size()] < kernel_[i],
+                pads_[i + this->kernel_.size()] < kernel_[i],
             "Pad should be smaller than kernel.");
       }
     }
@@ -85,15 +85,14 @@ class AveragePoolDnnLowPOp final
   bool RunOnDeviceWithOrderNCHW() override {
     using namespace dnnlowp;
 
-    BaseType::ParseDNNLowPOperatorArguments_();
+    this->ParseDNNLowPOperatorArguments_();
 
     in_qparams_[0] =
-      GetInputTensorQuantizationParamsOf(this, 0, qfactory_.get());
+        GetInputTensorQuantizationParamsOf(this, 0, qfactory_.get());
 
     // Quantize input if needed
     vector<T> X_temp;
-    const T* Xdata = QuantizeInputIfNeeded(
-      this, 0, in_qparams_[0], X_temp, qfactory_.get());
+    const T* Xdata = QuantizeInputIfNeeded(this, 0, in_qparams_[0], X_temp);
 
     GetOutputQuantizationParams_();
 
@@ -106,11 +105,11 @@ class AveragePoolDnnLowPOp final
     // The main loop
     int channels = X.dim32(1);
     int height = X.dim32(2);
-    int width = BaseType::kernel_.size() > 1 ? X.dim32(3) : 1;
-    int depth = BaseType::kernel_.size() > 2 ? X.dim32(4) : 1;
+    int width = this->kernel_.size() > 1 ? X.dim32(3) : 1;
+    int depth = this->kernel_.size() > 2 ? X.dim32(4) : 1;
     int pooled_height = Y->dim32(2);
-    int pooled_width = BaseType::kernel_.size() > 1 ? Y->dim32(3) : 1;
-    int pooled_depth = BaseType::kernel_.size() > 2 ? Y->dim32(4) : 1;
+    int pooled_width = this->kernel_.size() > 1 ? Y->dim32(3) : 1;
+    int pooled_depth = this->kernel_.size() > 2 ? Y->dim32(4) : 1;
 
     bool is_signed = std::is_signed<T>::value;
     int precision = out_qparams_.precision;
@@ -118,17 +117,16 @@ class AveragePoolDnnLowPOp final
     int32_t maximum =
         is_signed ? ((1 << (precision - 1)) - 1) : (1 << precision) - 1;
 
-    switch (BaseType::kernel_.size()) {
+    switch (this->kernel_.size()) {
       case 2:
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
         for (int n = 0; n < X.dim32(0); ++n) {
           for (int c = 0; c < channels; ++c) {
-            const T *Xdata_temp =
-              Xdata + height * width * (c + channels * n);
-            T *Ydata_temp =
-              Ydata + pooled_height * pooled_width * (c + channels * n);
+            const T* Xdata_temp = Xdata + height * width * (c + channels * n);
+            T* Ydata_temp =
+                Ydata + pooled_height * pooled_width * (c + channels * n);
             for (int ph = 0; ph < pooled_height; ++ph) {
               int hstart = ph * stride_h() - pad_t();
               int hend = min(hstart + kernel_h(), height);
@@ -166,8 +164,8 @@ class AveragePoolDnnLowPOp final
 #endif
         for (int n = 0; n < X.dim32(0); ++n) {
           for (int c = 0; c < channels; ++c) {
-            const T *Xdata_temp =
-              Xdata + height * width * depth * (c + channels * n);
+            const T* Xdata_temp =
+                Xdata + height * width * depth * (c + channels * n);
             T* Ydata_temp = Ydata +
                 pooled_height * pooled_width * pooled_depth *
                     (c + channels * n);
@@ -213,7 +211,7 @@ class AveragePoolDnnLowPOp final
         } // for each image
         break;
       default:
-        CAFFE_THROW("Unsupported pooling size : ", BaseType::kernel_.size());
+        CAFFE_THROW("Unsupported pooling size : ", this->kernel_.size());
         return false;
     }
 
@@ -225,15 +223,14 @@ class AveragePoolDnnLowPOp final
     // average pooling
     using namespace dnnlowp;
 
-    BaseType::ParseDNNLowPOperatorArguments_();
+    this->ParseDNNLowPOperatorArguments_();
 
     in_qparams_[0] =
-      GetInputTensorQuantizationParamsOf(this, 0, qfactory_.get());
+        GetInputTensorQuantizationParamsOf(this, 0, qfactory_.get());
 
     // Quantize input if needed
     vector<T> X_temp;
-    const T* Xdata = QuantizeInputIfNeeded(
-      this, 0, in_qparams_[0], X_temp, qfactory_.get());
+    const T* Xdata = QuantizeInputIfNeeded(this, 0, in_qparams_[0], X_temp);
 
     GetOutputQuantizationParams_();
 
@@ -245,11 +242,11 @@ class AveragePoolDnnLowPOp final
     T* Ydata = GetQuantizedOutputData_();
 
     int height = X.dim32(1);
-    int width = BaseType::kernel_.size() > 1 ? X.dim32(2) : 1;
-    int depth = BaseType::kernel_.size() > 2 ? X.dim32(3) : 1;
+    int width = this->kernel_.size() > 1 ? X.dim32(2) : 1;
+    int depth = this->kernel_.size() > 2 ? X.dim32(3) : 1;
     int pooled_height = Y->dim32(1);
-    int pooled_width = BaseType::kernel_.size() > 1 ? Y->dim32(2) : 1;
-    int pooled_depth = BaseType::kernel_.size() > 2 ? Y->dim32(3) : 1;
+    int pooled_width = this->kernel_.size() > 1 ? Y->dim32(2) : 1;
+    int pooled_depth = this->kernel_.size() > 2 ? Y->dim32(3) : 1;
 
     bool is_signed = std::is_signed<T>::value;
     int precision = out_qparams_.precision;
@@ -257,15 +254,14 @@ class AveragePoolDnnLowPOp final
     int32_t maximum =
         is_signed ? ((1 << (precision - 1)) - 1) : (1 << precision) - 1;
 
-    switch (BaseType::kernel_.size()) {
+    switch (this->kernel_.size()) {
       case 2:
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
         for (int n = 0; n < X.dim32(0); ++n) {
           const T* Xdata_temp = Xdata + n * height * width * channels;
-          T* Ydata_temp =
-              Ydata + n * pooled_height * pooled_width * channels;
+          T* Ydata_temp = Ydata + n * pooled_height * pooled_width * channels;
           for (int ph = 0; ph < pooled_height; ++ph) {
             int hstart = ph * stride_h() - pad_t();
             int hend = min(hstart + kernel_h(), height);
@@ -337,10 +333,10 @@ class AveragePoolDnnLowPOp final
                     }
                   }
                   Ydata_temp[pool_idx] = std::min<int32_t>(
-                    std::max<int32_t>(
-                        nearbyint(Yh * multiplier + out_qparams_.zero_point),
-                        minimum),
-                    maximum);
+                      std::max<int32_t>(
+                          nearbyint(Yh * multiplier + out_qparams_.zero_point),
+                          minimum),
+                      maximum);
                 } // channel
               } // depth
             } // width
@@ -348,7 +344,7 @@ class AveragePoolDnnLowPOp final
         } // for each image
         break;
       default:
-        CAFFE_THROW("Unsupported pooling size : ", BaseType::kernel_.size());
+        CAFFE_THROW("Unsupported pooling size : ", this->kernel_.size());
         return false;
     }
 
@@ -367,15 +363,15 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
 
   MaxPoolDnnLowPOp(const OperatorDef& operator_def, Workspace* ws)
       : BaseType(operator_def, ws) {
-    for (int i = 0; i < BaseType::kernel_.size(); ++i) {
+    for (int i = 0; i < this->kernel_.size(); ++i) {
       CAFFE_ENFORCE(
           dilation_[i] == 1, "Pooling op does not support dilation right now.");
     }
     if (!global_pooling_) {
-      for (int i = 0; i < BaseType::kernel_.size(); ++i) {
+      for (int i = 0; i < this->kernel_.size(); ++i) {
         CAFFE_ENFORCE(
             pads_[i] < kernel_[i] &&
-                pads_[i + BaseType::kernel_.size()] < kernel_[i],
+                pads_[i + this->kernel_.size()] < kernel_[i],
             "Pad should be smaller than kernel.");
       }
     }
@@ -384,10 +380,10 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
   bool RunOnDeviceWithOrderNCHW() override {
     using namespace dnnlowp;
 
-    BaseType::ParseDNNLowPOperatorArguments_();
+    this->ParseDNNLowPOperatorArguments_();
 
     in_qparams_[0] =
-      GetInputTensorQuantizationParamsOf(this, 0, qfactory_.get());
+        GetInputTensorQuantizationParamsOf(this, 0, qfactory_.get());
     // Even if there is a pre-chosen quantization parameters for the output,
     // it is ignored because maxpool output quantization should be same as the
     // input.
@@ -395,8 +391,7 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
 
     // Quantize input if needed
     vector<T> X_temp;
-    const T* Xdata = QuantizeInputIfNeeded(
-      this, 0, in_qparams_[0], X_temp, qfactory_.get());
+    const T* Xdata = QuantizeInputIfNeeded(this, 0, in_qparams_[0], X_temp);
 
     auto& X = InputTensorCPU_(0);
     auto* Y = OutputTensorCPU_(0);
@@ -407,13 +402,13 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
     // The main loop
     int channels = X.dim32(1);
     int height = X.dim32(2);
-    int width = BaseType::kernel_.size() > 1 ? X.dim32(3) : 1;
-    int depth = BaseType::kernel_.size() > 2 ? X.dim32(4) : 1;
+    int width = this->kernel_.size() > 1 ? X.dim32(3) : 1;
+    int depth = this->kernel_.size() > 2 ? X.dim32(4) : 1;
     int pooled_height = Y->dim32(2);
-    int pooled_width = BaseType::kernel_.size() > 1 ? Y->dim32(3) : 1;
-    int pooled_depth = BaseType::kernel_.size() > 2 ? Y->dim32(4) : 1;
+    int pooled_width = this->kernel_.size() > 1 ? Y->dim32(3) : 1;
+    int pooled_depth = this->kernel_.size() > 2 ? Y->dim32(4) : 1;
 
-    switch (BaseType::kernel_.size()) {
+    switch (this->kernel_.size()) {
       case 1:
         for (int n = 0; n < X.dim32(0); ++n) {
           for (int c = 0; c < channels; ++c) {
@@ -441,10 +436,9 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
         for (int n = 0; n < X.dim32(0); ++n) {
           for (int c = 0; c < channels; ++c) {
             // Do offset.
-            const T *Xdata_temp =
-              Xdata + height * width * (c + channels * n);
-            T *Ydata_temp =
-              Ydata + pooled_height * pooled_width * (c + channels * n);
+            const T* Xdata_temp = Xdata + height * width * (c + channels * n);
+            T* Ydata_temp =
+                Ydata + pooled_height * pooled_width * (c + channels * n);
             for (int ph = 0; ph < pooled_height; ++ph) {
               int hstart = ph * stride_h() - pad_t();
               int hend = min(hstart + kernel_h(), height);
@@ -461,8 +455,7 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
                     MaxPool<T>::process(Xdata_temp[input_index], Yh);
                   }
                 }
-                MaxPool<T>::finalize(
-                    (hend - hstart) * (wend - wstart), Yh);
+                MaxPool<T>::finalize((hend - hstart) * (wend - wstart), Yh);
                 Ydata_temp[pool_index] = Yh;
               }
             }
@@ -476,11 +469,11 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
         for (int n = 0; n < X.dim32(0); ++n) {
           for (int c = 0; c < channels; ++c) {
             // Do offset.
-            const T *Xdata_temp =
-              Xdata + height * width * depth * (c + channels * n);
-            T *Ydata_temp =
-              Ydata +
-              pooled_height * pooled_width * pooled_depth * (c + channels * n);
+            const T* Xdata_temp =
+                Xdata + height * width * depth * (c + channels * n);
+            T* Ydata_temp = Ydata +
+                pooled_height * pooled_width * pooled_depth *
+                    (c + channels * n);
             for (int ph = 0; ph < pooled_height; ++ph) {
               int hstart = ph * stride_h() - pad_t();
               int hend = min(hstart + kernel_h(), height);
@@ -500,7 +493,7 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
                     for (int w = wstart; w < wend; ++w) {
                       for (int d = dstart; d < dend; ++d) {
                         const int input_index =
-                          h * width * depth + w * depth + d;
+                            h * width * depth + w * depth + d;
                         MaxPool<T>::process(Xdata_temp[input_index], Yh);
                       }
                     }
@@ -515,7 +508,7 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
         }
         break;
       default:
-        CAFFE_THROW("Unsupported pooling size : ", BaseType::kernel_.size());
+        CAFFE_THROW("Unsupported pooling size : ", this->kernel_.size());
         return false;
     }
 
@@ -530,13 +523,13 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
   }
 
   bool RunOnDeviceWithOrderNHWC() override {
-    //max pooling
+    // max pooling
     using namespace dnnlowp;
 
-    BaseType::ParseDNNLowPOperatorArguments_();
+    this->ParseDNNLowPOperatorArguments_();
 
     in_qparams_[0] =
-      GetInputTensorQuantizationParamsOf(this, 0, qfactory_.get());
+        GetInputTensorQuantizationParamsOf(this, 0, qfactory_.get());
     // Even if there is a pre-chosen quantization parameters for the output,
     // it is ignored because maxpool output quantization should be same as the
     // input.
@@ -544,8 +537,7 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
 
     // Quantize input if needed
     vector<T> X_temp;
-    const T* Xdata = QuantizeInputIfNeeded(
-      this, 0, in_qparams_[0], X_temp, qfactory_.get());
+    const T* Xdata = QuantizeInputIfNeeded(this, 0, in_qparams_[0], X_temp);
 
     auto& X = InputTensorCPU_(0);
     auto* Y = OutputTensorCPU_(0);
@@ -555,13 +547,13 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
     T* Ydata = GetQuantizedOutputData_();
 
     int height = X.dim32(1);
-    int width = BaseType::kernel_.size() > 1 ? X.dim32(2) : 1;
-    int depth = BaseType::kernel_.size() > 2 ? X.dim32(3) : 1;
+    int width = this->kernel_.size() > 1 ? X.dim32(2) : 1;
+    int depth = this->kernel_.size() > 2 ? X.dim32(3) : 1;
     int pooled_height = Y->dim32(1);
-    int pooled_width = BaseType::kernel_.size() > 1 ? Y->dim32(2) : 1;
-    int pooled_depth = BaseType::kernel_.size() > 2 ? Y->dim32(3) : 1;
+    int pooled_width = this->kernel_.size() > 1 ? Y->dim32(2) : 1;
+    int pooled_depth = this->kernel_.size() > 2 ? Y->dim32(3) : 1;
 
-    switch (BaseType::kernel_.size()) {
+    switch (this->kernel_.size()) {
       case 1:
 #ifdef _OPENMP
 #pragma omp parallel for
@@ -642,16 +634,14 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
                 for (int c = 0; c < channels; ++c) {
                   T Yh = MaxPool<T>::initialize();
                   const int pool_idx =
-                      ((ph * pooled_width + pw)
-                      * pooled_depth + pd)
-                      * channels + c;
+                      ((ph * pooled_width + pw) * pooled_depth + pd) *
+                          channels +
+                      c;
                   for (int h = hstart; h < hend; ++h) {
                     for (int w = wstart; w < wend; ++w) {
                       for (int d = dstart; d < dend; ++d) {
                         const int input_idx =
-                            ((h * width + w)
-                            * depth + d)
-                            * channels + c;
+                            ((h * width + w) * depth + d) * channels + c;
                         MaxPool<T>::process(Xdata_temp[input_idx], Yh);
                       }
                     }
@@ -665,7 +655,7 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
         }
         break;
       default:
-        CAFFE_THROW("Unsupported pooling size : ", BaseType::kernel_.size());
+        CAFFE_THROW("Unsupported pooling size : ", this->kernel_.size());
         return false;
     }
 
@@ -681,20 +671,29 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
 }; // class MaxPoolDnnLowPOp
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-    AveragePool, DNNLOWP, AveragePoolDnnLowPOp<uint8_t>);
-REGISTER_CPU_OPERATOR_WITH_ENGINE(
-    MaxPool, DNNLOWP, MaxPoolDnnLowPOp<uint8_t>);
+    AveragePool,
+    DNNLOWP,
+    AveragePoolDnnLowPOp<uint8_t>);
+REGISTER_CPU_OPERATOR_WITH_ENGINE(MaxPool, DNNLOWP, MaxPoolDnnLowPOp<uint8_t>);
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-    AveragePool, DNNLOWP_16, AveragePoolDnnLowPOp<uint16_t>);
+    AveragePool,
+    DNNLOWP_16,
+    AveragePoolDnnLowPOp<uint16_t>);
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-    MaxPool, DNNLOWP_16, MaxPoolDnnLowPOp<uint16_t>);
+    MaxPool,
+    DNNLOWP_16,
+    MaxPoolDnnLowPOp<uint16_t>);
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-    Int8AveragePool, DNNLOWP, AveragePoolDnnLowPOp<uint8_t>);
+    Int8AveragePool,
+    DNNLOWP,
+    AveragePoolDnnLowPOp<uint8_t>);
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-    Int8MaxPool, DNNLOWP, MaxPoolDnnLowPOp<uint8_t>);
+    Int8MaxPool,
+    DNNLOWP,
+    MaxPoolDnnLowPOp<uint8_t>);
 
-}
+} // namespace
 
 } // namespace caffe2

@@ -21,14 +21,22 @@ enum class DeviceType : int16_t {
   IDEEP = 5, // IDEEP.
   HIP = 6, // AMD HIP
   FPGA = 7, // FPGA
-  // Change the following number if you add more devices in the code.
+  // NB: If you add more devices:
+  //  - Change the implementations of DeviceTypeName and isValidDeviceType
+  //    in DeviceType.cpp
+  //  - Change the number below
   COMPILE_TIME_MAX_DEVICE_TYPES = 8,
   ONLY_FOR_TEST = 20901, // This device type is only for test.
 };
 
+// define explicit int constant
+constexpr int COMPILE_TIME_MAX_DEVICE_TYPES =
+    static_cast<int>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES);
 C10_API std::string DeviceTypeName(
     DeviceType d,
     bool lower_case = false);
+
+C10_API bool isValidDeviceType(DeviceType d);
 
 C10_API std::ostream& operator<<(std::ostream& stream, DeviceType type);
 
@@ -41,9 +49,3 @@ template <> struct hash<c10::DeviceType> {
   }
 };
 } // namespace std
-
-// TODO: Remove me when we get a global c10 namespace using in at
-namespace at {
-using c10::DeviceType;
-using c10::DeviceTypeName;
-}

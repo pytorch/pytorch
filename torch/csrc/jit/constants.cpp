@@ -15,7 +15,7 @@ Value* insertConstant(
   if(val.isTensor()) {
     at::Tensor ref = std::move(val).toTensor();
     if(!ref.defined()) {
-      throw constant_not_supported_error("undefined tensors cannot become constants");
+      return insertConstant(g, val, loc, scope);
     }
     if (ref.is_variable()) {
       ref = autograd::Variable(ref).data();
@@ -63,13 +63,13 @@ Value* insertConstant(
 RegisterOperators reg({
   // Implementation of constant node, computes and IValue
   Operator(
-      prim::Constant,
+      FunctionSchema(prim::Constant, {}, {}, /*vararg=*/false, /*varret=*/true),
       [](const Node* node) -> Operation {
         TypePtr type = node->output()->type();
         if(type->isSubtypeOf(DynamicType::get())) {
           auto t = autograd::make_variable(node->t(attr::value));
           return [t](Stack& stack) {
-            stack.push_back(t);
+            push(stack, t);
             return 0;
           };
         } else if (type->isSubtypeOf(BoolType::get())) {
