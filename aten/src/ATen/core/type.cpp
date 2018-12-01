@@ -309,4 +309,14 @@ CAFFE2_API TypePtr evalTypeVariables(TypePtr type, std::unordered_map<std::strin
   }
 }
 
+
+const char * typeKindToString(TypeKind kind) {
+#define CASE_TYPE(T) case TypeKind::T: return #T;
+  switch(kind) {
+    C10_FORALL_TYPES(CASE_TYPE)
+  }
+#undef CASE_TYPE
+  return "";
+}
+
 } // namespace c10

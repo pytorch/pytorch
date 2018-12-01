@@ -38,6 +38,8 @@ enum class TypeKind {
 #undef DEFINE_TYPE
 };
 
+const char * typeKindToString(TypeKind kind);
+
 #define DEFINE_IS_SUBCLASS(_kind) \
   bool isSubclass(const TypeKind kind) const override { \
     return kind == TypeKind::_kind; \
