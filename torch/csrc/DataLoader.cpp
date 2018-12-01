@@ -1,8 +1,8 @@
 #include <torch/csrc/DataLoader.h>
 
-// Together with `torch/utils/data/_utils/signal.py`, the following methods is
-// an effort to do our best to provide some error message to users when a worker
-// dies due to error / critical signals.
+// Together with `torch/utils/data/_utils/signal_handling.py`, the following
+// is an effort to do our best to provide some error message to users when a
+// worker dies due to error / critical signals.
 //
 // See NOTE [ Signal handling in multiprocessing data loading ] for more details.
 

@@ -406,8 +406,8 @@ class _DataLoaderIter(object):
             else:
                 self.data_queue = self.worker_result_queue
 
-            _utils.signal._update_worker_pids(id(self), tuple(w.pid for w in self.workers))
-            _utils.signal._set_SIGCHLD_handler()
+            _utils.signal_handling._update_worker_pids(id(self), tuple(w.pid for w in self.workers))
+            _utils.signal_handling._set_SIGCHLD_handler()
             self.worker_pids_set = True
 
             # prime the prefetch loop
@@ -511,7 +511,7 @@ class _DataLoaderIter(object):
             # Removes pids from the C side data structure first so worker
             # termination afterwards won't trigger false positive error report.
             if self.worker_pids_set:
-                _utils.signal._remove_worker_pids(id(self))
+                _utils.signal_handling._remove_worker_pids(id(self))
                 self.worker_pids_set = False
 
             self.done_event.set()
