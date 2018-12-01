@@ -593,16 +593,10 @@ Tensor _sparse_addmm(
   Scalar beta,
   Scalar alpha
 ) {
+  AT_CHECK(sparse.is_coalesced(), "_sparse_addmm doesn't support uncoalesced SparseTensor");
   return at::s_native_addmm(t, sparse, dense, beta, alpha);
 }
 
-Tensor _sparse_mm(
-  const SparseTensor& sparse,
-  const Tensor& dense
-) {
-  Tensor t = at::empty({sparse.size(0), dense.size(1)}, dense.options());
-  return at::_sparse_addmm(t, sparse, dense, 0, 1);
-}
 
 // --------------------------------------------------------------------
 // hspmm(SparseTensor mat1, Tensor mat2)
