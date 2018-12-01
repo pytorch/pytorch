@@ -266,22 +266,27 @@ class JitTestCase(TestCase):
             if pp != pp2:
                 self.assertMultiLineEqual(pp, pp2)
 
-    def getExportImportCopy(self, m):
+    def getExportImportCopy(self, m, also_test_file=True):
+        buffer = io.BytesIO()
+        torch.jit.save(m, buffer)
+        buffer.seek(0)
+        imported = torch.jit.load(buffer)
+
+        if not also_test_file:
+            return imported
+
         # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
         # opens the file, and it cannot be opened multiple times in Windows. To support Windows,
         # close the file after creation and try to remove it manually
         f = tempfile.NamedTemporaryFile(delete=False)
         try:
             f.close()
-            m.save(f.name)
-            imported = torch.jit.load(f.name)
+            imported.save(f.name)
+            result = torch.jit.load(f.name)
         finally:
             os.unlink(f.name)
-        buffer = io.BytesIO()
-        torch.jit.save(imported, buffer)
-        buffer.seek(0)
 
-        return torch.jit.load(buffer)
+        return result
 
     def assertGraphContains(self, graph, kind):
         self.assertTrue(any(n.kind() == kind for n in graph.nodes()))
@@ -454,6 +459,23 @@ class JitTestCase(TestCase):
 
 
 class TestJit(JitTestCase):
+
+    @unittest.skip("Requires a lot of RAM")
+    def test_big(self):
+        m = torch.jit.ScriptModule()
+        gig = int(1024 * 1024 * 1024 / 4)
+        # a small tensor in the first 4GB
+        m.v0 = nn.Parameter(torch.full((2,), 1, dtype=torch.float))
+        # a large tensor in the first 4GB that ends outside of it
+        m.v1 = nn.Parameter(torch.full((5, gig), 2, dtype=torch.float))
+        # a small tensor in >4GB space
+        m.v2 = nn.Parameter(torch.full((2,), 3, dtype=torch.float))
+        # s large tensor in the > 4GB space
+        m.v3 = nn.Parameter(torch.full((5, gig), 4, dtype=torch.float))
+
+        m2 = self.getExportImportCopy(m)
+
+        self.assertEqual(tuple(m.parameters()), tuple(m2.parameters()))
 
     def test_simple(self):
         x = torch.tensor([0.4], requires_grad=True)
@@ -7828,19 +7850,20 @@ a")
         import random
         buffers = [os.urandom(size) for size in [random.randint(1, 100) for i in range(20)]]
         offsets = []
-        for buf in buffers:
-            offsets.append(writer.write_record(buf, len(buf)))
+        for i, buf in enumerate(buffers):
+            writer.write_record(str(i), buf, len(buf))
+            offsets.append(i)
         import pickle
         serialized_offsets = pickle.dumps(offsets)
-        writer.write_record(serialized_offsets, len(serialized_offsets))
+        writer.write_record("meta", serialized_offsets, len(serialized_offsets))
         writer.write_end_of_file()
 
         reader = torch._C.PyTorchFileReader(filename)
-        serialized_offsets_read = reader.get_last_record()
+        serialized_offsets_read = reader.get_record("meta")
         parsed_serialized_offsets = pickle.loads(serialized_offsets)
 
         for i, offset in enumerate(parsed_serialized_offsets):
-            data = reader.get_record_with_key(offset)
+            data = reader.get_record(str(offset))
             assert(data == buffers[i])
 
     # for each type, the input type annotation and corresponding return type annotation

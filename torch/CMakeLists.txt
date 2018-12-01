@@ -422,6 +422,9 @@ target_include_directories(torch PUBLIC ${ATen_CPU_INCLUDE})
 target_include_directories(torch PUBLIC
   ${TORCH_SRC_DIR}/csrc)
 
+target_include_directories(torch PUBLIC
+  ${TORCH_ROOT}/third_party/miniz-2.0.8)
+
 set_target_properties(torch PROPERTIES VERSION 1 SOVERSION 1)
 
 if(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
