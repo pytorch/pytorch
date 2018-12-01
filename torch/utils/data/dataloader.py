@@ -445,7 +445,7 @@ class _DataLoaderIter(object):
             indices = next(self.sample_iter)  # may raise StopIteration
             batch = self.collate_fn([self.dataset[i] for i in indices])
             if self.pin_memory:
-                batch = pin_memory_batch(batch)
+                batch = _utils.pin_memory.pin_memory_batch(batch)
             return batch
 
         # check if the next sample has already been generated
