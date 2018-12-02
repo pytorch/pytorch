@@ -223,6 +223,7 @@ function build() {
 		       -DNCCL_EXTERNAL=1 \
 		       -DCMAKE_DEBUG_POSTFIX="" \
 		       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
+		       -DBUILD_PYTHON=off \
 		       ${@:2} \
 		       ${CMAKE_ARGS[@]}
   fi
@@ -359,7 +360,7 @@ function build_caffe2() {
   #fi
 
   PATH=$PATH:$(pwd)/../build_host_protoc/build/:$(pwd)/../build_host_protoc/bin/
-  cmake  --build . -- -j"$MAX_JOBS"
+  cmake  --build . -- install -j"$MAX_JOBS"
 
   # Install Python proto files
   if [[ "$BUILD_PYTHON" == 'ON' ]]; then

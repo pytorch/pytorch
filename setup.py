@@ -576,7 +576,6 @@ class build_ext(build_ext_parent):
             print('-- Building NCCL library')
         else:
             print('-- Not using NCCL')
-        print ("HEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEELLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLOOOOOOOOOOOOOOOOOOOOOOOOOO###################################")
         if USE_DISTRIBUTED:
             print('-- Building with THD distributed package ')
             if IS_LINUX:
