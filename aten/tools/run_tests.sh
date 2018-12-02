@@ -14,6 +14,7 @@ VALGRIND=${VALGRIND:=ON}
 ./apply_utils_test
 ./dlconvertor_test
 ./native_test
+./result_type_test
 ./scalar_tensor_test
 ./undefined_tensor_test
 if [[ -x ./cudnn_test ]]; then

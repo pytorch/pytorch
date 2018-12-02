@@ -3,6 +3,7 @@
 #include <array>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
+#include <ATen/native/ResultType.h>
 
 namespace at {
 
@@ -78,25 +79,6 @@ void TensorIterator::reorder_dimensions() {
   permute_dimensions(perm_);
 }
 
-template <typename F>
-static std::tuple<ScalarType, Backend>
-compute_result_type(at::ArrayRef<OperandInfo> operands, const F& predicate) {
-  auto result_type = ScalarType::Undefined;
-  auto backend = Backend::Undefined;
-  for (auto& op : operands) {
-    if (!op.tensor.defined()) continue;
-    if (!predicate(op.tensor)) continue;
-    auto dtype = op.tensor.type().scalarType();;
-    result_type = (result_type == ScalarType::Undefined
-        ? dtype
-        : promoteTypes(result_type, dtype));
-    backend = (backend == Backend::Undefined
-        ? op.tensor.type().backend()
-        : backend);
-  }
-  return std::make_tuple(result_type, backend);
-}
-
 void TensorIterator::compute_types() {
   bool missing_dtypes = false;
   for (auto& op : operands_) {
@@ -138,27 +120,13 @@ void TensorIterator::compute_types() {
 }
 
 Type& TensorIterator::compute_common_type() {
-  // See [Result type computation] in TensorIterator.h
-  auto result_type = ScalarType::Undefined;
-  auto backend = Backend::Undefined;
-  std::tie(result_type, backend) = compute_result_type(operands_, [](const Tensor& t) {
-    return t.dim() > 0;
-  });
-  if (result_type == ScalarType::Undefined) {
-    std::tie(result_type, backend) = compute_result_type(operands_, [](const Tensor& t) {
-      return !t.unsafeGetTensorImpl()->is_wrapped_number();
-    });
-  }
-  if (result_type == ScalarType::Undefined) {
-    std::tie(result_type, backend) = compute_result_type(operands_, [](const Tensor& t) {
-      return true;
-    });
-  }
-
-  AT_ASSERT(result_type != ScalarType::Undefined);
-  AT_ASSERT(backend != Backend::Undefined);
-
-  return at::globalContext().getNonVariableType(backend, result_type);
+  SmallVector<Tensor, 4> tensors;
+  std::transform(
+      operands_.begin(),
+      operands_.end(),
+      std::back_inserter(tensors),
+      [](const OperandInfo& op) { return op.tensor; });
+  return resultType(tensors);
 }
 
 DimVector TensorIterator::compatible_stride(int element_size) const {
