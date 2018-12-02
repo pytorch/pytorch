@@ -216,7 +216,7 @@ Tensor nnpack_spatial_convolution(
   auto bias_ = bias.defined() ? bias : at::zeros({weight.size(0)}, input.options());
 
   // Note: we assume that the output is shaped correctly, probably should add an assert
-
+  auto input_ = input.contiguous();
   auto batched = [&]() -> nnp_status {
     return nnp_convolution_output(
         algorithm,
@@ -226,7 +226,7 @@ Tensor nnpack_spatial_convolution(
         input_size,
         input_padding,
         kernel_size,
-        (float*)input.data_ptr(),
+        (float*)input_.data_ptr(),
         (float*)weight.data_ptr(),
         (float*)bias_.data_ptr(),
         (float*)output.data_ptr(),
@@ -244,6 +244,7 @@ Tensor nnpack_spatial_convolution(
         .width = 1,
         .height = 1
     };
+    auto input_ = input.contiguous();
     return nnp_convolution_inference(
         algorithm,
         nnp_convolution_transform_strategy_compute,
@@ -253,7 +254,7 @@ Tensor nnpack_spatial_convolution(
         input_padding,
         kernel_size,
         output_subsample,
-        (float*)input.data_ptr(),
+        (float*)input_.data_ptr(),
         (float*)weight.data_ptr(),
         (float*)bias_.data_ptr(),
         (float*)output.data_ptr(),
@@ -496,6 +497,7 @@ Tensor nnpack_spatial_convolution_backward_weight(
     .height = (size_t)kH
   };
 
+  auto input_ = input.contiguous();
   auto run= [&]() -> nnp_status {
     return nnp_convolution_kernel_gradient(
         algorithm,
@@ -505,7 +507,7 @@ Tensor nnpack_spatial_convolution_backward_weight(
         input_size,
         input_padding,
         kernel_size,
-        (float*)input.data_ptr(),
+        (float*)input_.data_ptr(),
         (float*)gradOutput.data_ptr(),
         (float*)gradWeight.data_ptr(),
         workspace, // workspace_buffer

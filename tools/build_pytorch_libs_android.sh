@@ -211,6 +211,7 @@ function build() {
 		       -DANDROID_ABI=x86 \
 		       -DANDROID_NATIVE_API_LEVEL=21 \
 		       -DANDROID_CPP_FEATURES="rtti exceptions" \
+		       -DBUILD_CAFFE2_OPS="OFF" \
 		       -DTH_SO_VERSION=1 \
 		       -DTHC_SO_VERSION=1 \
 		       -DTHNN_SO_VERSION=1 \
@@ -345,6 +346,7 @@ function build_caffe2() {
 		       -DANDROID_NATIVE_API_LEVEL=21 \
 		       -DANDROID_CPP_FEATURES="rtti exceptions" \
 		       -DUSE_MOBILE_OPENGL=OFF \
+		       -DBUILD_CAFFE2_OPS="OFF" \
 		       $GLOO_FLAGS \
 		       ${EXTRA_CAFFE2_CMAKE_FLAGS[@]}
 		       # #"armeabi-v7a" \
