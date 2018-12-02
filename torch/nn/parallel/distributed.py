@@ -154,6 +154,15 @@ class DistributedDataParallel(Module):
                        bucket can potentially overlap with backward computation.
                        bucket_cap_mb controls the bucket size in MegaBytes (MB)
                        (default: 25)
+        check_reduction: when setting to True, it enables DistributedDataParallel
+                         to automatically check if the previous iteration's
+                         backward reductions were successfully issued at the
+                         beginning of every iteration's forward function.
+                         You normally don't need this option enabled unless you
+                         are observing weird behaviors such as different ranks
+                         are getting different gradients, which should not
+                         happen if DistributedDataParallel is corrected used.
+                         (default: False)
 
     Attributes:
         module (Module): the module to be parallelized
@@ -164,7 +173,8 @@ class DistributedDataParallel(Module):
     """
     def __init__(self, module, device_ids=None,
                  output_device=None, dim=0, broadcast_buffers=True,
-                 process_group=None, bucket_cap_mb=25):
+                 process_group=None, bucket_cap_mb=25,
+                 check_reduction=False):
 
         super(DistributedDataParallel, self).__init__()
 
@@ -185,6 +195,7 @@ class DistributedDataParallel(Module):
         self.device_ids = list(map(lambda x: _get_device_index(x, True), device_ids))
         self.output_device = _get_device_index(output_device, True)
         self.broadcast_buffers = broadcast_buffers
+        self.check_reduction = check_reduction
 
         MB = 1024 * 1024
 
@@ -308,11 +319,13 @@ class DistributedDataParallel(Module):
     def _check_previous_reduction(self):
         if not self.training:
             return
+        # self.check_previous_reduction will be False in the first iteration
+        # and is then toggled to True for all future iterations.
         if self.check_previous_reduction is False:
             self.check_previous_reduction = True
         else:
             if not self.all_buckets_reduced:
-                raise RuntimeError("Not all gradients are all-reduced from "
+                raise RuntimeError("Not all gradients have been reduced from "
                                    "the backward of the previous iteration. "
                                    "This is unexpected and fatal error. Please "
                                    "check and ensure that the model's "
@@ -321,7 +334,8 @@ class DistributedDataParallel(Module):
         self.all_buckets_reduced = False
 
     def forward(self, *inputs, **kwargs):
-        self._check_previous_reduction()
+        if self.check_reduction:
+            self._check_previous_reduction()
         inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
         self._sync_params()
         if len(self.device_ids) == 1:
