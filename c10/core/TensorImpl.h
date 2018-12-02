@@ -411,7 +411,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * in Python represent).
    *
    * Otherwise, they behave like their non-wrapped equivalents.
-   * See [Result type computation] in TensorIterator.h.
+   * See ResultType.h.
    *
    * Why did we opt for wrapped numbers, as opposed to just having
    * an extra function add(Tensor, Scalar)?  This helps greatly reduce
