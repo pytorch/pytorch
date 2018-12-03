@@ -7,6 +7,28 @@ namespace torch {
 namespace nn {
 namespace init {
 
+enum Nonlinearity {
+    linear,
+    conv1d,
+    conv2d,
+    conv3d,
+    conv_transpose1d,
+    conv_transpose2d,
+    conv_transpose3d,
+    sigmoid,
+    tanh,
+    relu,
+    leaky_relu
+};
+
+enum FanMode {
+    fan_in,
+    fan_out
+};
+
+// Return the recommended gain value for the given nonlinearity function.
+TORCH_API double calculate_gain(Nonlinearity nonlinearity, double param = 0.01);
+
 /// Fills the given `tensor` with the provided `value` in-place, and returns it.
 /// No gradient will be recorded for this operation.
 TORCH_API Tensor constant_(Tensor tensor, Scalar value);
@@ -49,6 +71,20 @@ TORCH_API Tensor sparse_(Tensor tensor, double sparsity, double std = 0.01);
 /// distribution parameterized by `low` and `high`.
 /// No gradient will be recorded for this operation.
 TORCH_API Tensor uniform_(Tensor tensor, double low = 0, double high = 1);
+
+/// Fills the input `Tensor` with values according to the method
+/// described in "Delving deep into rectifiers: Surpassing human-level
+/// performance on ImageNet classification" - He, K. et al. (2015), using a
+/// normal distribution. Also known as He initialization.
+/// No gradient will be recorded for this operation.
+TORCH_API Tensor kaiming_normal_(Tensor tensor, double a = 0, FanMode mode = FanMode::fan_in, Nonlinearity nonlinearity = Nonlinearity::leaky_relu);
+
+/// Fills the input `Tensor` with values according to the method
+/// described in "Delving deep into rectifiers: Surpassing human-level
+/// performance on ImageNet classification" - He, K. et al. (2015), using a
+/// uniform distribution. Also known as He initialization.
+/// No gradient will be recorded for this operation.
+TORCH_API Tensor kaiming_uniform_(Tensor tensor, double a = 0, FanMode mode = FanMode::fan_out, Nonlinearity nonlinearity = Nonlinearity::leaky_relu);
 
 /// Fills the input `Tensor` with values according to the method
 /// described in "Understanding the difficulty of training deep feedforward
