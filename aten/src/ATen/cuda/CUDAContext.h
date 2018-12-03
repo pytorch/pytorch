@@ -46,7 +46,12 @@ inline int64_t getNumGPUs() {
  * device is actually available.  Test for this case using is_available().
  */
 inline bool is_available() {
-    return getNumGPUs() > 0;
+    int count;
+    cudaError_t err = cudaGetDeviceCount(&count);
+    if (err == cudaErrorInsufficientDriver) {
+      return false;
+    }
+    return count > 0;
 }
 
 CAFFE2_API cudaDeviceProp* getCurrentDeviceProperties();
