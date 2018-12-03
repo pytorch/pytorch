@@ -9,15 +9,9 @@
 namespace at {
 namespace detail {
 
+// See getCUDAHooks for some more commentary
 const HIPHooksInterface& getHIPHooks() {
   static std::unique_ptr<HIPHooksInterface> hip_hooks;
-  // NB: The once_flag here implies that if you try to call any HIP
-  // functionality before libATen_cuda.so is loaded, HIP is permanently
-  // disabled for that copy of ATen.  In principle, we can relax this
-  // restriction, but you might have to fix some code.  See getVariableHooks()
-  // for an example where we relax this restriction (but if you try to avoid
-  // needing a lock, be careful; it doesn't look like Registry.h is thread
-  // safe...)
   static std::once_flag once;
   std::call_once(once, [] {
     hip_hooks = HIPHooksRegistry()->Create("HIPHooks", HIPHooksArgs{});

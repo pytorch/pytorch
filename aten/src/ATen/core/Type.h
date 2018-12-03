@@ -135,10 +135,8 @@ struct CAFFE2_API Type {
     return backendToDeviceType(backend());
   }
 
-  virtual Tensor copy(const Tensor & src, bool non_blocking=false, optional<Device> to_device={}) const = 0;
+  virtual Tensor copy(const Tensor & src, bool non_blocking=false, c10::optional<Device> to_device={}) const = 0;
   virtual Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking=false) const = 0;
-  virtual Tensor & s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const = 0;
-  virtual Tensor & _s_copy_from(const Tensor & self, Tensor & dst, bool non_blocking) const = 0;
 
   virtual void backward(
       Tensor& self,
@@ -186,9 +184,6 @@ struct CAFFE2_API Type {
 
   // example
   // virtual Tensor * add(Tensor & a, Tensor & b) = 0;
-  virtual Tensor & _th_triu_(Tensor & self, int64_t diagonal) const = 0;
-  virtual Tensor & s__th_addcmul_(Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) const = 0;
-  virtual Tensor & _th_addcmul_(Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) const = 0;
   virtual Tensor abs(const Tensor & self) const = 0;
   virtual Tensor & abs_(Tensor & self) const = 0;
   virtual Tensor acos(const Tensor & self) const = 0;

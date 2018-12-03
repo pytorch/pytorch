@@ -921,7 +921,8 @@ Operator(                                                                      \
 
 #define CREATE_COPY_OP(other_type, c_type)                              \
   Operator(                                                             \
-      "aten::copy_(Tensor(a!) t, " #other_type " other) -> Tensor(a!)", \
+      "aten::copy_(Tensor(a!) self, " #other_type                       \
+      " other) -> Tensor(a!)",                                          \
       [](const Node* node) {                                            \
         return [=](Stack& stack) {                                      \
           at::Tensor t;                                                 \

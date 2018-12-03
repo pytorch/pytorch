@@ -13,6 +13,7 @@ memory.
 Because of the similarity of APIs we do not document most of this package
 contents, and we recommend referring to very good docs of the original module.
 """
+import torch
 import sys
 from .reductions import init_reductions
 import multiprocessing
@@ -25,6 +26,11 @@ from multiprocessing import *
 
 
 __all__ += multiprocessing.__all__
+
+
+# This call adds a Linux specific prctl(2) wrapper function to this module.
+# See https://github.com/pytorch/pytorch/pull/14391 for more information.
+torch._C._multiprocessing_init()
 
 
 if sys.version_info < (3, 3):

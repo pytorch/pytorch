@@ -9093,7 +9093,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertRaises(RuntimeError, lambda: torch.randn(2, 3, 4).t())
         self.assertRaises(RuntimeError, lambda: torch.randn(2, 3, 4).t_())
 
-    # unit test for THTensor_(copyTranspose)
+    # unit test for special case transposed copy (see ATen/native/Copy.cpp for details)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_big_transpose(self):
         t = torch.rand(456, 789)

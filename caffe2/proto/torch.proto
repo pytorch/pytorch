@@ -6,11 +6,6 @@ package torch;
 
 message RecordRef {
   optional string key = 1;
-  // size here refers to the uncompressed size, in bytes of the record
-  // this information also exists in the PyTorch container format data
-  // but is repeated here to make it possible to know size information without
-  // seeking to another record in the file.
-  optional int64 size = 2;
 }
 
 message TensorDef {
