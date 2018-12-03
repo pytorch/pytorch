@@ -528,7 +528,7 @@ class TestJit(JitTestCase):
 
         # restore all to first gpu using device
         m4 = self.getExportImportCopy(
-          m3, map_location=torch.device('cuda:0'))
+            m3, map_location=torch.device('cuda:0'))
         self.assertEqual(str(m4.p0.device), 'cuda:0')
         self.assertEqual(str(m4.b0.device), 'cuda:0')
 
