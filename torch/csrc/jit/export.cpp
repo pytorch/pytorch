@@ -579,7 +579,10 @@ void ScriptModuleSerializer::convertAndWriteTensor(
   auto* data = tensor_proto->mutable_data();
   data->set_key(storage_it->second);
 
-  // TODO handle device case, set the device_detail and load to CUDA device
+  // handle device case, set the device_detail and load to CUDA device
+  std::stringstream ss;
+  ss << tensor.device();
+  tensor_proto->set_device(ss.str());
 }
 
 void ScriptModuleSerializer::writeTensorTable(torch::ModelDef* model_def) {

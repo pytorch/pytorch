@@ -712,12 +712,24 @@ void initJitScriptBindings(PyObject* module) {
   });
 
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
-  m.def("import_ir_module", [](ModuleLookup module_lookup, const std::string& filename) {
-    import_ir_module(module_lookup, filename);
+  m.def("import_ir_module", [](ModuleLookup module_lookup, const std::string& filename,
+        py::object map_location) {
+    c10::optional<at::Device> optional_device;
+    if (!map_location.is(py::none())) {
+      AT_ASSERT(THPDevice_Check(map_location.ptr()));
+      optional_device = reinterpret_cast<THPDevice*>(map_location.ptr())->device;
+    }
+    import_ir_module(module_lookup, filename, optional_device);
   });
-  m.def("import_ir_module_from_buffer", [](ModuleLookup module_lookup, const std::string& buffer) {
+  m.def("import_ir_module_from_buffer", [](ModuleLookup module_lookup,
+        const std::string& buffer, py::object map_location) {
     std::istringstream in(buffer);
-    import_ir_module(module_lookup, in);
+    c10::optional<at::Device> optional_device;
+    if (!map_location.is(py::none())) {
+      AT_ASSERT(THPDevice_Check(map_location.ptr()));
+      optional_device = reinterpret_cast<THPDevice*>(map_location.ptr())->device;
+    }
+    import_ir_module(module_lookup, in, optional_device);
   });
   m.def("_jit_import_methods", import_methods);
   m.def("_jit_set_emit_module_hook", setEmitModuleHook);
