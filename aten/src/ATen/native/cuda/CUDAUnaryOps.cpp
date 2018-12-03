@@ -10,7 +10,7 @@ Tensor& _clamp__cuda(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
   } else if (min) {
     return _th_clamp_min_out(self, self, *min);
   } else {
-    return self;
+    AT_ERROR("At least one of 'min' or 'max' must not be None");
   }
 }
 
