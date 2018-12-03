@@ -6,6 +6,8 @@
 #include <c10/core/ScalarType.h>
 #include <ATen/core/TensorOptions.h>
 
+#include <torch/cuda.h>
+
 // NB: This file is compiled even in CPU build (for some reason), so
 // make sure you don't include any CUDA only headers.
 
@@ -61,7 +63,7 @@ TEST(TensorOptionsTest, ConstructsWellFromCUDATensors_MultiCUDA) {
   options = empty(5, getNonVariableType(Backend::SparseCUDA, kByte)).options();
   REQUIRE_OPTIONS(kCUDA, 0, kByte, kSparse);
 
-  if (at::globalContext().getNumGPUs() > 1) {
+  if (torch::cuda::device_count() > 1) {
     Tensor tensor;
     {
       DeviceGuard guard(CUDADevice(1));
