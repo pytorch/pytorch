@@ -278,11 +278,6 @@ void TestDispatch() {
   ASSERT_TRUE(result.allclose(mse_loss(relu(tensor), other)));
 }
 
-void TestCore() {
-  int i = CoreTest();
-  ASSERT_EQ_RESOLVED(i + 1, CoreTest());
-}
-
 void test(Type& type) {
   TestResize(type);
   TestOnesAndDot(type);
@@ -309,7 +304,6 @@ void test(Type& type) {
   TestIndexingByZerodimTensor();
   TestIndexingMixedDevice(type);
   TestDispatch();
-  TestCore();
 }
 
 TEST(BasicTest, BasicTestCPU) {

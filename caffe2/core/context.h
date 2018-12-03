@@ -13,7 +13,6 @@
 #include <c10/util/typeid.h>
 #include "caffe2/proto/caffe2_pb.h"
 
-#include <ATen/core/ATenCoreTest.h>
 #include <c10/util/ArrayRef.h>
 
 C10_DECLARE_bool(caffe2_report_cpu_memory_usage);
