@@ -827,16 +827,14 @@ def create_generic(top_env, declarations):
 
         mode = option['mode']
         abstract = True
+        assert option['extended_method'], 'Expected legacy operator to be an extended method'
+
         if mode == 'NN' and option.get('cimpls') is None:
             # NN function with no _forward/_backward suffix don't have cimpls.
             # They call the _forward function and discard any buffer returns
             abstract = False
-            if option['extended_method']:
-                top_env['pure_virtual_extended_type_method_declarations'].append(
-                    PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
-            else:
-                top_env['pure_virtual_type_method_declarations'].append(
-                    PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
+            top_env['pure_virtual_extended_type_method_declarations'].append(
+                PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
             top_env['type_method_declarations'].append(
                 TYPE_METHOD_DECLARATION_CONCRETE.substitute(env))
             body = emit_nn_body(option)
@@ -844,27 +842,17 @@ def create_generic(top_env, declarations):
                 TYPE_METHOD_DEFINITION_CONCRETE.substitute(
                     env, type_definition_body=body))
         elif broadcast_arg is None:
-            if option['extended_method']:
-                top_env['pure_virtual_extended_type_method_declarations'].append(
-                    PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
-            else:
-                top_env['pure_virtual_type_method_declarations'].append(
-                    PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
+            top_env['pure_virtual_extended_type_method_declarations'].append(
+                PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
             top_env['type_method_declarations'].append(
                 TYPE_METHOD_DECLARATION_ABSTRACT.substitute(env))
             top_env['type_method_definitions'].append(
                 TYPE_METHOD_DEFINITION_ABSTRACT.substitute(env))
         else:
-            if option['extended_method']:
-                top_env['pure_virtual_extended_type_method_declarations'].append(
-                    PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
-                top_env['pure_virtual_extended_type_method_declarations'].append(
-                    PURE_VIRTUAL_TYPE_METHOD_DECLARATION_BROADCAST.substitute(env))
-            else:
-                top_env['pure_virtual_type_method_declarations'].append(
-                    PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
-                top_env['pure_virtual_type_method_declarations'].append(
-                    PURE_VIRTUAL_TYPE_METHOD_DECLARATION_BROADCAST.substitute(env))
+            top_env['pure_virtual_extended_type_method_declarations'].append(
+                PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
+            top_env['pure_virtual_extended_type_method_declarations'].append(
+                PURE_VIRTUAL_TYPE_METHOD_DECLARATION_BROADCAST.substitute(env))
             top_env['type_method_declarations'].append(
                 TYPE_METHOD_DECLARATION_BROADCAST.substitute(env))
             top_env['type_method_declarations'].append(
