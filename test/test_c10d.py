@@ -116,6 +116,31 @@ def simple_reduce_tests(rank, world_size):
     ]
 
 
+def simple_multi_input_reduce_tests(rank, world_size):
+    return [
+        (
+            c10d.ReduceOp.SUM,
+            [torch.Tensor([2 * rank + 0.0]), torch.Tensor([2 * rank + 1.0])],
+            torch.Tensor([float(world_size * (2 * world_size - 1))]),
+        ),
+        (
+            c10d.ReduceOp.PRODUCT,
+            [torch.Tensor([2 * rank + 1.0]), torch.Tensor([2 * rank + 2.0])],
+            torch.Tensor([float(math.factorial(2 * world_size))]),
+        ),
+        (
+            c10d.ReduceOp.MIN,
+            [torch.Tensor([2 * rank + 1.0]), torch.Tensor([2 * rank + 2.0])],
+            torch.Tensor([1.0]),
+        ),
+        (
+            c10d.ReduceOp.MAX,
+            [torch.Tensor([2 * rank + 1.0]), torch.Tensor([2 * rank + 2.0])],
+            torch.Tensor([2 * world_size]),
+        ),
+    ]
+
+
 class StoreTestBase(object):
     def _create_store(self, i):
         raise RuntimeError("not implemented")
@@ -639,13 +664,27 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     def _test_allreduce_basics(self, fn):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
-        for (op, input, output) in simple_reduce_tests(self.rank, self.world_size):
+
+        # Single input tests
+        tests = simple_reduce_tests(self.rank, self.world_size)
+        for (op, input, output) in tests:
             opts = c10d.AllreduceOptions()
             opts.reduceOp = op
-            tmp = fn(input)
-            work = pg.allreduce([tmp], opts)
+            tensor = fn(input)
+            work = pg.allreduce([tensor], opts)
             work.wait()
-            self.assertEqual(output, tmp)
+            self.assertEqual(output, tensor)
+
+        # Multi input tests
+        tests = simple_multi_input_reduce_tests(self.rank, self.world_size)
+        for (op, inputs, output) in tests:
+            opts = c10d.AllreduceOptions()
+            opts.reduceOp = op
+            tensors = [fn(input) for input in inputs]
+            work = pg.allreduce(tensors, opts)
+            work.wait()
+            for tensor in tensors:
+                self.assertEqual(output, tensor)
 
         # Test overloaded convenience function (defaults to using sum)
         x = fn(torch.Tensor([self.rank + 1.0]))
