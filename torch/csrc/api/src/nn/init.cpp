@@ -36,6 +36,25 @@ struct Fan {
 };
 } // namespace
 
+TORCH_API double calculate_gain(Nonlinearity nonlinearity, double param) {
+  if (nonlinearity == Nonlinearity::linear ||
+     nonlinearity == Nonlinearity::conv1d ||
+     nonlinearity == Nonlinearity::conv2d ||
+     nonlinearity == Nonlinearity::conv3d ||
+     nonlinearity == Nonlinearity::conv_transpose1d ||
+     nonlinearity == Nonlinearity::conv_transpose2d ||
+     nonlinearity == Nonlinearity::conv_transpose3d ||
+     nonlinearity == Nonlinearity::sigmoid) {
+       return 1.0;
+  } else if (nonlinearity == Nonlinearity::tanh) {
+    return 5.0 / 3.0;
+  } else if (nonlinearity == Nonlinearity::relu) {
+    return sqrt(2.0);
+  } else if (nonlinearity == Nonlinearity::leaky_relu) {
+    return sqrt(2.0 / (1 + pow(param, 2)));
+  }
+}
+
 Tensor constant_(Tensor tensor, Scalar value) {
   NoGradGuard guard;
   return tensor.fill_(value);
@@ -144,6 +163,33 @@ Tensor sparse_(Tensor tensor, double sparsity, double std) {
 Tensor uniform_(Tensor tensor, double low, double high) {
   NoGradGuard guard;
   return tensor.uniform_(low, high);
+}
+
+Tensor kaiming_uniform_(Tensor tensor, double a, FanMode mode, Nonlinearity nonlinearity) {
+  Fan fan(tensor);
+  const auto gain = calculate_gain(nonlinearity, a);
+  double std = 0.0;
+  if(mode == FanMode::fan_in) {
+    std = gain / sqrt(fan.in);
+  } else {
+    std = gain / sqrt(fan.out);
+  }
+  // Calculate uniform bounds from standard deviation
+  const auto bound = sqrt(3.0) * std;
+  return tensor.uniform_(-bound, bound);
+}
+
+Tensor kaiming_normal_(Tensor tensor, double a, FanMode mode, Nonlinearity nonlinearity) {
+  Fan fan(tensor);
+  const auto gain = calculate_gain(nonlinearity, a);
+  double std = 0.0;
+  if(mode == FanMode::fan_in) {
+    std = gain / sqrt(fan.in);
+  } else {
+    std = gain / sqrt(fan.out);
+  }
+
+  return tensor.normal_(0, std);
 }
 
 Tensor xavier_normal_(Tensor tensor, double gain) {
