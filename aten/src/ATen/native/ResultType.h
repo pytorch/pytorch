@@ -14,11 +14,16 @@
 // affect the result type. This behavior was chosen to preserve backwards
 // compatibility and is *likely to change* in the near future.
 // (See https://github.com/pytorch/pytorch/issues/9515)
+//
+// If an operation needs to produce an output of a specific type, this will
+// raise an error if the operation arguments yield a different type.
 
 namespace at {
 
 struct Type;
 
 CAFFE2_API Type& resultType(TensorList tensors);
+
+CAFFE2_API Type& resultTypeForOutput(Tensor output, TensorList inputs);
 
 }  // namespace at

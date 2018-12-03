@@ -56,4 +56,18 @@ Type& resultType(TensorList tensors) {
   return at::globalContext().getNonVariableType(backend, result_type);
 }
 
+Type& resultTypeForOutput(Tensor output, TensorList inputs) {
+  SmallVector<Tensor, 4> tensors(inputs.begin(), inputs.end());
+  tensors.emplace_back(output);
+  Type& result_type = resultType(tensors);
+  if (output.defined() && result_type != output.type()) {
+    AT_ERROR(
+        "Cannot store result of type ",
+        result_type.toString(),
+        " to an output of type ",
+        output.type().toString());
+  }
+  return result_type;
+}
+
 }  // namespace at

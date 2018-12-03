@@ -52,6 +52,14 @@ void testResultType(Type& weakType, Type& strongType, Type& promotedType) {
   EXPECT_EQ(weakType, resultType({weakWrapped, weakTensor, strongScalar}));
   EXPECT_EQ(strongType, resultType({weakTensor, strongScalar, strongTensor}));
   EXPECT_EQ(strongType, resultType({strongTensor, weakTensor, strongScalar}));
+
+  // Output type enforcement
+  EXPECT_EQ(strongType, resultTypeForOutput(strongTensor, weakWrapped));
+  EXPECT_EQ(strongType, resultTypeForOutput(strongTensor, weakScalar));
+  EXPECT_EQ(strongType, resultTypeForOutput(strongTensor, weakTensor));
+  EXPECT_EQ(weakType, resultTypeForOutput(weakTensor, strongWrapped));
+  EXPECT_EQ(weakType, resultTypeForOutput(weakTensor, strongScalar));
+  EXPECT_THROW(resultTypeForOutput(weakTensor, strongTensor), c10::Error);
 }
 
 TEST(TestResultType, ResultTypeTestCPU) {
