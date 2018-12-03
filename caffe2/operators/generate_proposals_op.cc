@@ -221,8 +221,6 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
   const auto& bbox_deltas = Input(1);
   const auto& im_info_tensor = Input(2);
   const auto& anchors = Input(3);
-  auto* out_rois = Output(0);
-  auto* out_rois_probs = Output(1);
 
   CAFFE_ENFORCE_EQ(scores.dim(), 4, scores.dim());
   CAFFE_ENFORCE(scores.template IsType<float>(), scores.dtype().name());
@@ -259,8 +257,8 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
       im_info_tensor.size(1));
 
   const int roi_col_count = box_dim + 1;
-  out_rois->Resize(0, roi_col_count);
-  out_rois_probs->Resize(0);
+  auto* out_rois = Output(0, {0, roi_col_count}, at::dtype<float>());
+  auto* out_rois_probs = Output(1, {0}, at::dtype<float>());
 
   std::vector<ERArrXXf> im_boxes(num_images);
   std::vector<EArrXf> im_probs(num_images);
