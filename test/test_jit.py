@@ -10645,6 +10645,10 @@ def add_nn_module_test(*args, **kwargs):
             nn_module = kwargs['constructor']
         else:
             nn_module = getattr(torch.nn, name)
+
+        if "FunctionalModule" in str(nn_module):
+            return
+
         constructor_args = kwargs.get('constructor_args', ())
 
         # Construct a script module that passes arguments through
