@@ -121,6 +121,8 @@ def load(f, map_location=None):
               isinstance(map_location, torch.device)):
         raise ValueError("map_location should be either None, string or torch.device, "
                          "but got type: " + str(type(map_location)))
+    if (str(map_location).startswith('cuda')):
+        validate_cuda_device(map_location)
 
     if isinstance(f, str) or \
             (sys.version_info[0] == 2 and isinstance(f, unicode)) or \

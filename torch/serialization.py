@@ -86,11 +86,12 @@ def validate_cuda_device(location):
                            'torch.load with map_location to map your storages '
                            'to an existing device.'.format(
                                device, torch.cuda.device_count()))
+    return device
 
 
 def _cuda_deserialize(obj, location):
     if location.startswith('cuda'):
-        validate_cuda_device(location)
+        device = validate_cuda_device(location)
         return obj.cuda(device)
 
 
