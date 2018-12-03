@@ -17,8 +17,8 @@
 //
 // To ensure correct behavior, THCCachingHostAllocator_recordEvent must be
 // called anytime a pointer from this allocator is used in a cudaMemcpyAsync
-// call between host and device. The THC library implements this for storages
-// and tensors in THCTensor_(copyAsyncCPU) and THCTensor_(copyAsyncCuda).
+// call between host and device. We implement this for storages and tensors in
+// copy_from_cpu_async_ and copy_to_cpu_async_.
 //
 // Note that this allocator does not split larger allocations into smaller
 // blocks, unlike the caching device allocator.

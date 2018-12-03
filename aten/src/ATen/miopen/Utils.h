@@ -8,7 +8,9 @@
 namespace at { namespace native {
 
 inline void setMIOpenStreamToCurrent() {
-  MIOPEN_CHECK(miopenSetStream(getMiopenHandle(), THCState_getCurrentStream(globalContext().getTHCState())));
+  // NB: Due to in-place HIPify, getCurrentCUDAStream actually means
+  // getCurrentHIPStream
+  MIOPEN_CHECK(miopenSetStream(getMiopenHandle(), at::cuda::getCurrentCUDAStream()));
 }
 
 // This function makes tensors which have zero stride contiguous, by

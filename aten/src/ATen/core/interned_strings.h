@@ -183,7 +183,7 @@ namespace c10 {
 
 using unique_t = uint32_t;
 
-static const std::string domain_prefix = "org.pytorch.";
+const std::string& domain_prefix();
 
 // A Symbol is like an interned string, but with a little extra
 // structure; it is namespaced via SymbolNamespace and the resulting

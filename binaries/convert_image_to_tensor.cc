@@ -21,6 +21,7 @@
 #include "caffe2/core/db.h"
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
+#include "caffe2/core/timer.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
@@ -29,17 +30,43 @@ C10_DEFINE_bool(color, true, "If set, load images in color.");
 C10_DEFINE_string(input_images, "", "Comma separated images");
 C10_DEFINE_string(input_image_file, "", "The file containing imput images");
 C10_DEFINE_string(output_tensor, "", "The output tensor file in NCHW");
-C10_DEFINE_int(scale, 256, "Scale the shorter edge to the given value.");
-C10_DEFINE_bool(text_output, false, "Write the output in text format.");
-C10_DEFINE_bool(warp, false, "If warp is set, warp the images to square.");
 C10_DEFINE_string(
     preprocess,
     "",
     "Options to specify the preprocess routines. The available options are "
     "subtract128, normalize, mean, std, bgrtorgb. If multiple steps are provided, they "
     "are separated by comma (,) in sequence.");
+C10_DEFINE_string(
+    report_time,
+    "",
+    "Report the conversion stage time to screen. "
+    "The format of the string is <type>|<identifier>. "
+    "The valid type is 'json'. "
+    "The valid identifier is nothing or an identifer that prefix every line");
+C10_DEFINE_int(scale, 256, "Scale the shorter edge to the given value.");
+C10_DEFINE_bool(text_output, false, "Write the output in text format.");
+C10_DEFINE_bool(warp, false, "If warp is set, warp the images to square.");
 
 namespace caffe2 {
+
+void reportTime(
+    std::string type,
+    double ts,
+    std::string metric,
+    std::string unit) {
+  if (FLAGS_report_time == "") {
+    return;
+  }
+  vector<string> s = caffe2::split('|', FLAGS_report_time);
+  assert(s[0] == "json");
+  std::string identifier = "";
+  if (s.size() > 1) {
+    identifier = s[1];
+  }
+  std::cout << identifier << "{\"type\": \"" << type << "\", \"value\": " << ts
+            << ", \"metric\": \"" << metric << "\", \"unit\": \"" << unit
+            << "\"}" << std::endl;
+}
 
 cv::Mat resizeImage(cv::Mat& img) {
   cv::Mat resized_img;
@@ -151,7 +178,8 @@ std::vector<float> convertOneImage(std::string& filename) {
 #else
       filename, FLAGS_color ? cv::IMREAD_COLOR : cv::IMREAD_GRAYSCALE);
 #endif
-
+  caffe2::Timer timer;
+  timer.Start();
   cv::Mat crop = cropToSquare(img);
 
   // Resize image
@@ -161,6 +189,8 @@ std::vector<float> convertOneImage(std::string& filename) {
   assert(resized_img.rows == resized_img.cols);
   assert(resized_img.rows == FLAGS_scale);
   std::vector<float> one_image_values = convertToVector(resized_img);
+  double ts = timer.MicroSeconds();
+  reportTime("image_preprocess", ts, "convert", "us");
   return one_image_values;
 }
 
@@ -191,6 +221,9 @@ void convertImages() {
     values.push_back(one_image_values);
   }
 
+  caffe2::Timer timer;
+  timer.Start();
+
   TensorProtos protos;
   TensorProto* data;
   data = protos.add_protos();
@@ -200,12 +233,16 @@ void convertImages() {
   data->add_dims(FLAGS_scale);
   data->add_dims(FLAGS_scale);
 
+  // Not optimized
   for (int i = 0; i < values.size(); i++) {
     assert(values[i].size() == C * FLAGS_scale * FLAGS_scale);
     for (int j = 0; j < values[i].size(); j++) {
       data->add_float_data(values[i][j]);
     }
   }
+  double ts = timer.MicroSeconds();
+  reportTime("image_preprocess", ts, "pack", "us");
+
   if (FLAGS_text_output) {
     caffe2::WriteProtoToTextFile(protos, FLAGS_output_tensor);
   } else {

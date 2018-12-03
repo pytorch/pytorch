@@ -1,44 +1,44 @@
-graph(%a.1_data : Dynamic
-      %a.1_mask : Dynamic
-      %a.1_dims : Dynamic
-      %b_data : Dynamic
-      %b_mask : Dynamic
-      %b_dims : Dynamic) {
+graph(%a.1_data : Tensor
+      %a.1_mask : Tensor
+      %a.1_dims : Tensor
+      %b_data : Tensor
+      %b_mask : Tensor
+      %b_dims : Tensor) {
   %6 : int = prim::Constant[value=1]()
-  %7 : Dynamic = aten::gt(%a.1_data, %b_data)
-  %8 : Dynamic = aten::mul(%a.1_mask, %b_mask)
-  %9 : Dynamic = aten::__or__(%a.1_dims, %b_dims)
+  %7 : Tensor = aten::gt(%a.1_data, %b_data)
+  %8 : Tensor = aten::mul(%a.1_mask, %b_mask)
+  %9 : Tensor = aten::__or__(%a.1_dims, %b_dims)
   %10 : bool = prim::TensorToBool(%7)
   %11 : Long() = prim::NumToTensor(%6)
   %alpha : float = prim::TensorToNum(%11)
-  %data : Dynamic = aten::add(%a.1_data, %b_data, %alpha)
-  %mask : Dynamic = aten::mul(%a.1_mask, %b_mask)
-  %dims : Dynamic = aten::__or__(%a.1_dims, %b_dims)
+  %data : Tensor = aten::add(%a.1_data, %b_data, %alpha)
+  %mask : Tensor = aten::mul(%a.1_mask, %b_mask)
+  %dims : Tensor = aten::__or__(%a.1_dims, %b_dims)
   %16 : bool = prim::Constant[value=1]()
   %17 : int = prim::Constant[value=1]()
-  %18 : Dynamic = aten::type_as(%8, %7)
-  %data.2 : Dynamic = aten::mul(%7, %18)
+  %18 : Tensor = aten::type_as(%8, %7)
+  %data.2 : Tensor = aten::mul(%7, %18)
   %20 : int = aten::dim(%data.2)
   %21 : bool = aten::eq(%20, %17)
-  %cond_data : Dynamic, %cond_mask : Dynamic = prim::If(%21)
+  %cond_data : Tensor, %cond_mask : Tensor = prim::If(%21)
     block0() {
       %24 : int = aten::dim(%data)
       %25 : int = aten::sub(%24, %17)
-      %data.4 : Dynamic = prim::Loop(%25, %16, %data.2)
-        block0(%27 : int, %28 : Dynamic) {
+      %data.4 : Tensor = prim::Loop(%25, %16, %data.2)
+        block0(%27 : int, %28 : Tensor) {
           %29 : int = aten::dim(%28)
-          %data.3 : Dynamic = aten::unsqueeze(%28, %29)
+          %data.3 : Tensor = aten::unsqueeze(%28, %29)
           -> (%16, %data.3)
         }
-      %cond_data.1 : Dynamic = aten::expand_as(%data.4, %data)
-      %cond_mask.1 : Dynamic = aten::expand_as(%data.4, %mask)
+      %cond_data.1 : Tensor = aten::expand_as(%data.4, %data)
+      %cond_mask.1 : Tensor = aten::expand_as(%data.4, %mask)
       -> (%cond_data.1, %cond_mask.1)
     }
     block1() {
       -> (%data.2, %data.2)
     }
-  %res_data : Dynamic = aten::where(%cond_data, %data, %a.1_data)
-  %res_mask : Dynamic = aten::where(%cond_mask, %mask, %a.1_mask)
-  %res_dims : Dynamic = aten::__or__(%dims, %a.1_dims)
+  %res_data : Tensor = aten::where(%cond_data, %data, %a.1_data)
+  %res_mask : Tensor = aten::where(%cond_mask, %mask, %a.1_mask)
+  %res_dims : Tensor = aten::__or__(%dims, %a.1_dims)
   return (%res_data, %res_mask, %res_dims);
 }
