@@ -22,7 +22,7 @@ void test(int given_num_threads) {
 }
 
 int main() {
-  manual_seed(123);
+  at::manual_seed(123);
 
   test(-1);
   std::thread t1(test, -1);
