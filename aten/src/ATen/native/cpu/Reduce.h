@@ -83,7 +83,8 @@ void binary_kernel_reduce(TensorIterator& iter, rf_t const &reduce, cf_t const &
     auto numel = sub_iter.numel();
     bool serial = numel < at::internal::GRAIN_SIZE || at::get_max_threads() == 1 || at::in_parallel_region();
     int max_threads = serial ? 1 : at::get_max_threads();
-    std::vector<optional<acc_t>> buffer{max_threads, optional<acc_t> {}};
+    AT_ASSERT(max_threads > 0);
+    std::vector<optional<acc_t>> buffer{(unsigned)max_threads, optional<acc_t> {}};
     at::parallel_for(0, numel, serial ? (1 + numel) : internal::GRAIN_SIZE,
     [&](int64_t begin, int64_t end) {
       auto &acc = buffer[at::get_thread_num()];
