@@ -66,9 +66,6 @@ class CAFFE2_API Context {
   bool hasCuDNN() const {
     return detail::getCUDAHooks().hasCuDNN();
   }
-  int64_t current_device() const {
-    return detail::getCUDAHooks().current_device();
-  }
   // defined in header so that getNonVariableType has ability to inline
   // call_once check. getNonVariableType is called fairly frequently
   THCState* lazyInitCUDA() {
@@ -91,9 +88,6 @@ class CAFFE2_API Context {
     return thc_state.get();
   }
 
-  int getNumGPUs() const {
-    return detail::getCUDAHooks().getNumGPUs();
-  }
   size_t freshTypeID() {
     return next_id++;
   }
@@ -184,10 +178,6 @@ static inline bool hasLAPACK() {
 
 static inline bool hasMAGMA() {
   return globalContext().hasMAGMA();
-}
-
-static inline int64_t current_device() {
-  return globalContext().current_device();
 }
 
 } // namespace at
