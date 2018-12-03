@@ -9605,7 +9605,8 @@ EXCLUDE_SCRIPT_MODULES = {
     'test_nn_LayerNorm_1d_elementwise_affine',
     'test_nn_LayerNorm_1d_no_elementwise_affine',
     'test_nn_LayerNorm_3d_elementwise_affine',
-    'test_nn_LayerNorm_3d_no_elementwise_affine'
+    'test_nn_LayerNorm_3d_no_elementwise_affine',
+    'test_nn_Linear_no_bias',
 }
 
 DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
@@ -10259,6 +10260,17 @@ nn_functional_single_grad = frozenset('test_nn_' + name for name in [
     'grid_sample',
 ])
 
+# additional modules test
+# TODO: delete this list once we make all nn_tests work
+additional_module_tests = [
+    dict(
+        module_name='Bilinear',
+        constructor_args=(S, S, M),
+        input_size=(S, S),
+        extra_args=((S, S),)
+    ),
+]
+
 
 def add_autograd_test(
         name,
@@ -10478,6 +10490,10 @@ def add_nn_module_test(*args, **kwargs):
             input = kwargs['input_fn']()
         else:
             input = (kwargs['input_size'],)
+
+        if 'extra_args' in kwargs:
+            input = input + kwargs['extra_args']
+
         args_variable, kwargs_variable = create_input(input)
         f_args_variable = deepcopy(unpack_variables(args_variable))
 
@@ -10647,7 +10663,7 @@ for test in autograd_method_tests:
 for test in nn_functional_tests:
     add_nn_functional_test(*test)
 
-for test in module_tests + new_module_tests:
+for test in module_tests + new_module_tests + additional_module_tests:
     add_nn_module_test(**test)
 
 if __name__ == '__main__':
