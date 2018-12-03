@@ -12,7 +12,7 @@ import numpy as np
 
 
 # Reference implementation from detectron/lib/utils/boxes.py
-def bbox_transform(boxes, deltas, weights=(1.0, 1.0, 1.0, 1.0)):
+def bbox_transform(boxes, deltas, weights=(1.0, 1.0, 1.0, 1.0), input_boxes_are_priors=False):
     """Forward transform that maps proposal boxes to predicted ground-truth
     boxes using bounding-box regression deltas. See bbox_transform_inv for a
     description of the weights argument.
@@ -22,8 +22,9 @@ def bbox_transform(boxes, deltas, weights=(1.0, 1.0, 1.0, 1.0)):
 
     boxes = boxes.astype(deltas.dtype, copy=False)
 
-    widths = boxes[:, 2] - boxes[:, 0] + 1.0
-    heights = boxes[:, 3] - boxes[:, 1] + 1.0
+    offset = 0.0 if input_boxes_are_priors else 1.0
+    widths = boxes[:, 2] - boxes[:, 0] + offset
+    heights = boxes[:, 3] - boxes[:, 1] + offset
     ctr_x = boxes[:, 0] + 0.5 * widths
     ctr_y = boxes[:, 1] + 0.5 * heights
 
@@ -212,6 +213,7 @@ class TestBBoxTransformOp(serial.SerializedTestCase):
         rotated=st.booleans(),
         angle_bound_on=st.booleans(),
         clip_angle_thresh=st.sampled_from([-1.0, 1.0]),
+        clip_boxes=st.booleans(),
         **hu.gcs_cpu_only
     )
     def test_bbox_transform(
@@ -223,6 +225,7 @@ class TestBBoxTransformOp(serial.SerializedTestCase):
         rotated,
         angle_bound_on,
         clip_angle_thresh,
+        clip_boxes,
         gc,
         dc,
     ):
@@ -247,12 +250,14 @@ class TestBBoxTransformOp(serial.SerializedTestCase):
                 box_out = bbox_transform_rotated(
                     boxes, deltas, angle_bound_on=angle_bound_on
                 )
-                box_out = clip_tiled_boxes_rotated(
-                    box_out, im_shape, angle_thresh=clip_angle_thresh
-                )
+                if clip_boxes:
+                    box_out = clip_tiled_boxes_rotated(
+                        box_out, im_shape, angle_thresh=clip_angle_thresh
+                    )
             else:
                 box_out = bbox_transform(boxes, deltas)
-                box_out = clip_tiled_boxes(box_out, im_shape)
+                if clip_boxes:
+                    box_out = clip_tiled_boxes(box_out, im_shape)
             return [box_out]
 
         op = core.CreateOperator(
@@ -264,6 +269,64 @@ class TestBBoxTransformOp(serial.SerializedTestCase):
             rotated=rotated,
             angle_bound_on=angle_bound_on,
             clip_angle_thresh=clip_angle_thresh,
+            clip_boxes=clip_boxes
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[rois, deltas, im_info],
+            reference=bbox_transform_ref,
+        )
+
+    @serial.given(
+        num_rois=st.integers(1, 10),
+        num_classes=st.integers(1, 10),
+        im_dim=st.integers(100, 600),
+        skip_batch_id=st.booleans(),
+        clip_boxes=st.booleans(),
+        **hu.gcs_cpu_only
+    )
+    def test_priors_bbox_transform(
+        self,
+        num_rois,
+        num_classes,
+        im_dim,
+        skip_batch_id,
+        clip_boxes,
+        gc,
+        dc,
+    ):
+        """
+        Test with all rois belonging to a single image per run.
+        """
+        rois = (generate_rois([num_rois], [im_dim]))
+        box_dim = 4
+        if skip_batch_id:
+            rois = rois[:, 1:]
+        deltas = np.random.randn(num_rois, box_dim * num_classes).astype(np.float32)
+        im_info = np.array([im_dim, im_dim, 1.0]).astype(np.float32).reshape(1, 3)
+
+        def bbox_transform_ref(rois, deltas, im_info):
+            boxes = rois if rois.shape[1] == box_dim else rois[:, 1:]
+            im_shape = im_info[0, 0:2]
+            boxes[:,0] *= im_shape[1]
+            boxes[:,1] *= im_shape[0]
+            boxes[:,2] *= im_shape[1]
+            boxes[:,3] *= im_shape[0]
+            box_out = bbox_transform(boxes, deltas, input_boxes_are_priors=True)
+            if clip_boxes:
+                box_out = clip_tiled_boxes(box_out, im_shape)
+            return [box_out]
+
+        op = core.CreateOperator(
+            "BBoxTransform",
+            ["rois", "deltas", "im_info"],
+            ["box_out"],
+            apply_scale=False,
+            correct_transform_coords=True,
+            input_boxes_are_priors=True,
+            clip_boxes=clip_boxes
         )
 
         self.assertReferenceChecks(
@@ -279,6 +342,7 @@ class TestBBoxTransformOp(serial.SerializedTestCase):
         rotated=st.booleans(),
         angle_bound_on=st.booleans(),
         clip_angle_thresh=st.sampled_from([-1.0, 1.0]),
+        clip_boxes=st.booleans(),
         **hu.gcs_cpu_only
     )
     def test_bbox_transform_batch(
@@ -288,6 +352,7 @@ class TestBBoxTransformOp(serial.SerializedTestCase):
         rotated,
         angle_bound_on,
         clip_angle_thresh,
+        clip_boxes,
         gc,
         dc,
     ):
@@ -322,12 +387,14 @@ class TestBBoxTransformOp(serial.SerializedTestCase):
                     cur_box_out = bbox_transform_rotated(
                         cur_boxes, cur_deltas, angle_bound_on=angle_bound_on
                     )
-                    cur_box_out = clip_tiled_boxes_rotated(
-                        cur_box_out, im_shape, angle_thresh=clip_angle_thresh
-                    )
+                    if clip_boxes:
+                        cur_box_out = clip_tiled_boxes_rotated(
+                            cur_box_out, im_shape, angle_thresh=clip_angle_thresh
+                        )
                 else:
                     cur_box_out = bbox_transform(cur_boxes, cur_deltas)
-                    cur_box_out = clip_tiled_boxes(cur_box_out, im_shape)
+                    if clip_boxes:
+                        cur_box_out = clip_tiled_boxes(cur_box_out, im_shape)
                 box_out.append(cur_box_out)
                 offset += num_rois
 
@@ -346,6 +413,7 @@ class TestBBoxTransformOp(serial.SerializedTestCase):
             rotated=rotated,
             angle_bound_on=angle_bound_on,
             clip_angle_thresh=clip_angle_thresh,
+            clip_boxes=clip_boxes
         )
 
         self.assertReferenceChecks(

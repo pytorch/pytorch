@@ -209,6 +209,34 @@ class TestBoxWithNMSLimitOp(serial.SerializedTestCase):
 
         self.assertValidationChecks(gc, op, [scores, boxes], verify, as_kwargs=False)
 
+    @given(num_classes=st.integers(2, 10), **HU_CONFIG)
+    def test_multiclass_share_location(self, num_classes, gc):
+        in_centers = [(0, 0), (20, 20), (50, 50)]
+        in_scores = [0.7, 0.85, 0.6]
+        boxes, scores = gen_multiple_boxes(in_centers, in_scores, 10, num_classes)
+        boxes = boxes[:, :4]
+
+        gt_centers = [(20, 20), (0, 0), (50, 50)]
+        gt_scores = [0.85, 0.7, 0.6]
+        gt_boxes, gt_scores = gen_multiple_boxes(gt_centers, gt_scores, 1, 1)
+
+        # [1, 1, 1, 2, 2, 2, 3, 3, 3, ...]
+        gt_classes = np.tile(
+            np.array(range(1, num_classes), dtype=np.float32),
+            (gt_boxes.shape[0], 1)).T.flatten()
+        gt_boxes = np.tile(gt_boxes, (num_classes - 1, 1))
+        gt_scores = np.tile(gt_scores, (num_classes - 1, 1)).flatten()
+
+        op = get_op(
+            2, 3,
+            {"score_thresh": 0.5, "nms": 0.9, "detections_per_im": 100, "share_location": 1}
+        )
+
+        def ref(*args, **kwargs):
+            return (gt_scores, gt_boxes, gt_classes)
+
+        self.assertReferenceChecks(gc, op, [scores, boxes], ref)
+
 
 if __name__ == "__main__":
     unittest.main()
