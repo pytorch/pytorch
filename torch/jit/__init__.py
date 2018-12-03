@@ -1115,8 +1115,6 @@ if _enabled:
                 super(ScriptModule, self).__setattr__(attr, _ConstModuleList(value))
             elif isinstance(value, Sequential):
                 super(ScriptModule, self).__setattr__(attr, _ConstSequential(value))
-            elif isinstance(value, Parameter):
-                super(ScriptModule, self).__setattr__(attr, value)
             else:
                 super(ScriptModule, self).__setattr__(attr, _get_valid_constant(attr, value))
 
@@ -1142,9 +1140,7 @@ if _enabled:
             self.__dict__['_initialized'] = False
             super(WeakScriptModuleProxy, self).__init__()
 
-            # Copy constants
             self.__dict__["_original"] = weakref.ref(original)
-            self.__dict__["_constants_set"] = set(getattr(original, "__constants__", []))
 
             # Copy Parameters / Modules / Buffers
             for name in dir(original):
@@ -1157,6 +1153,9 @@ if _enabled:
                     ScriptModule.__setattr__(self, name, item)
             for name in original._buffers:
                 self.register_buffer(name, original._buffers[name])
+
+            # Copy constants
+            self.__dict__["_constants_set"] = set(getattr(original, "__constants__", []))
 
             self.__dict__["_initialized"] = True
             _create_methods_from_stubs(self, stubs)
