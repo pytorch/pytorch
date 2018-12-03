@@ -303,7 +303,7 @@ static Tensor restride_src(const Tensor& src, int64_t dims_before, int64_t dims_
                            IntList replacement_shape) {
   auto shape = DimVector(src.sizes());
   auto strides = DimVector(src.strides());
-  int end = dims_before + dims_indexed;
+  int64_t end = dims_before + dims_indexed;
   shape.erase(shape.begin() + dims_before, shape.begin() + end);
   strides.erase(strides.begin() + dims_before, strides.begin() + end);
   shape.insert(shape.begin() + dims_before, replacement_shape.begin(), replacement_shape.end());
@@ -311,7 +311,7 @@ static Tensor restride_src(const Tensor& src, int64_t dims_before, int64_t dims_
   return src.as_strided(shape, strides);
 }
 
-// Add dimensions of size 1 to an index tensor so that it's can be broadcast to the result
+// Add dimensions of size 1 to an index tensor so that it can be broadcast to the result
 // shape and iterated over element-wise like the result tensor and the restrided src.
 static Tensor reshape_indexer(const Tensor& index, int64_t dims_before, int64_t dims_after) {
   auto orig_shape = index.sizes();
@@ -340,6 +340,16 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
       indexed_sizes.push_back(src.size(dim));
       indexed_strides.push_back(src.stride(dim) * element_size_bytes);
     }
+  }
+
+  // Check if the indexed subspace contains a dim of size 0, but the replacement
+  // shape does not. This implies that an index is out of bounds, because there
+  // is no number that's a valid index for an empty tensor. Normally, out of
+  // bounds is handled in the indexing kernel, but this case fails earlier in
+  // restride_src with an unhelpful error message.
+  if (std::find(indexed_sizes.begin(), indexed_sizes.end(), 0) != indexed_sizes.end() &&
+      std::find(replacement_shape.begin(), replacement_shape.end(), 0) == replacement_shape.end()) {
+    AT_ERROR("index is out of bounds for dim with size 0");
   }
 
   this->dims_before = dims_before;

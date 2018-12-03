@@ -4,7 +4,6 @@ from __future__ import division
 import warnings
 import math
 import types
-from typing import List
 
 import torch
 from torch._C import _infer_size, _add_docstr
@@ -16,7 +15,7 @@ from ._functions.thnn.fold import Col2Im, Im2Col
 from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad
 from . import _VF
-from .._jit_internal import weak_script
+from .._jit_internal import weak_script, List
 
 
 conv1d = _add_docstr(torch.conv1d, r"""
@@ -1346,6 +1345,12 @@ def bilinear(input1, input2, weight, bias=None):
     return torch.bilinear(input1, input2, weight, bias)
 
 
+def _no_grad_embedding_renorm_(weight, input, max_norm, norm_type):
+    # type: (Tensor, Tensor, float, float) -> Tensor
+    with torch.no_grad():
+        return torch.embedding_renorm_(weight, input, max_norm, norm_type)
+
+
 @torch._jit_internal.weak_script
 def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2.,
               scale_grad_by_freq=False, sparse=False):
@@ -1426,7 +1431,7 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2.,
         # with torch.no_grad():
         #   torch.nembedding_renorm_
         # remove once script supports set_grad_enabled
-        torch.no_grad_embedding_renorm_(weight, input, max_norm, norm_type)
+        _no_grad_embedding_renorm_(weight, input, max_norm, norm_type)
     return torch.embedding(weight, input, padding_idx, scale_grad_by_freq, sparse)
 
 
@@ -1556,7 +1561,7 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
         # with torch.no_grad():
         #   torch.nembedding_renorm_
         # remove once script supports set_grad_enabled
-        torch.no_grad_embedding_renorm_(weight, input, max_norm, norm_type)
+        _no_grad_embedding_renorm_(weight, input, max_norm, norm_type)
 
     ret, _, _, _ = torch.embedding_bag(
         weight,
@@ -1874,6 +1879,7 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
     return torch.kl_div(input, target, reduction_enum)
 
 
+@torch._jit_internal.weak_script
 def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-100,
                   reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, Optional[Tensor], Optional[bool], int, Optional[bool], str) -> Tensor
@@ -1922,6 +1928,7 @@ def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-1
     return nll_loss(log_softmax(input, 1), target, weight, None, ignore_index, None, reduction)
 
 
+@torch._jit_internal.weak_script
 def binary_cross_entropy(input, target, weight=None, size_average=None,
                          reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, Optional[Tensor], Optional[bool], Optional[bool], str) -> Tensor
@@ -1965,11 +1972,12 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
     if not (target.size() == input.size()):
         warnings.warn("Using a target size ({}) that is different to the input size ({}) is deprecated. "
                       "Please ensure they have the same size.".format(target.size(), input.size()))
-    if input.nelement() != target.nelement():
+    if input.numel() != target.numel():
         raise ValueError("Target and input must have the same number of elements. target nelement ({}) "
-                         "!= input nelement ({})".format(target.nelement(), input.nelement()))
+                         "!= input nelement ({})".format(target.numel(), input.numel()))
 
     if weight is not None:
+        weight = torch.jit._unwrap_optional(weight)
         new_size = _infer_size(target.size(), weight.size())
         weight = weight.expand(new_size)
 

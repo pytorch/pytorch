@@ -64,6 +64,7 @@ namespace c10 {
   _(prim, requires_grad)           \
   _(prim, AutogradAdd)             \
   _(prim, GradOf)                  \
+  _(prim, SumToSize)               \
   _(prim, AnyDefined)              \
   _(prim, FusedConcat)             \
   _(prim, ConstantChunk)           \
@@ -183,7 +184,7 @@ namespace c10 {
 
 using unique_t = uint32_t;
 
-static const std::string domain_prefix = "org.pytorch.";
+const std::string& domain_prefix();
 
 // A Symbol is like an interned string, but with a little extra
 // structure; it is namespaced via SymbolNamespace and the resulting
