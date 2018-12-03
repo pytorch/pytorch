@@ -4,6 +4,8 @@
 #include "ATen/Type.h"
 #include "ATen/TypeExtendedInterface.h"
 #include "ATen/Utils.h"
+#include "ATen/LegacyTHDispatch.h"
+#include "ATen/LegacyTHDispatcher.h"
 #include "ATen/core/ATenGeneral.h"
 #include "ATen/core/Generator.h"
 #include "ATen/core/LegacyTypeDispatch.h"
@@ -39,11 +41,19 @@ class CAFFE2_API Context {
   TypeExtendedInterface & getType(Backend p, ScalarType s, bool is_variable) {
     return static_cast<TypeExtendedInterface&>(globalLegacyTypeDispatch().getType(p, s, is_variable));
   }
+  LegacyTHDispatcher& getLegacyTHDispatcher(Backend p, ScalarType s) {
+    return globalLegacyTHDispatch().getLegacyTHDispatcher(p, s);
+  }
   // The passed in Type must be delete'able
   // TODO: Just make it take a unique_ptr
   void registerType(Backend b, ScalarType s, Type* t) {
     globalLegacyTypeDispatch().registerType(b, s,
       LegacyTypeDispatch::TypeUniquePtr{t, LegacyTypeDeleter([](Type* p) { delete p; }) });
+  }
+
+  void registerLegacyTHDispatcher(Backend b, ScalarType s, LegacyTHDispatcher* t) {
+    globalLegacyTHDispatch().registerDispatcher(b, s,
+      LegacyTHDispatch::LegacyTHDispatcherUniquePtr{t, LegacyTHDispatcherDeleter([](LegacyTHDispatcher* p) { delete p; }) });
   }
 
   Generator & defaultGenerator(DeviceType device_type) {
@@ -181,6 +191,9 @@ static inline TypeExtendedInterface& CUDA(ScalarType s) {
 static inline TypeExtendedInterface& HIP(ScalarType s) {
   return getNonVariableType(Backend::HIP, s);
 }
+
+CAFFE2_API LegacyTHDispatcher& getLegacyTHDispatcher(TensorOptions options);
+CAFFE2_API LegacyTHDispatcher& getLegacyTHDispatcher(const Tensor&);
 
 static inline bool hasCUDA() {
   return globalContext().hasCUDA();
