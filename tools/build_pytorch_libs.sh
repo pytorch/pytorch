@@ -59,6 +59,9 @@ while [[ $# -gt 0 ]]; do
       --use-cuda)
           USE_CUDA=1
           ;;
+      --use-distributed)
+          USE_DISTRIBUTED=1
+          ;;
       --use-fbgemm)
           USE_FBGEMM=1
           ;;
@@ -216,6 +219,7 @@ function build_caffe2() {
 		       -DNUMPY_INCLUDE_DIR=$NUMPY_INCLUDE_DIR \
 		       -DUSE_SYSTEM_NCCL=$USE_SYSTEM_NCCL \
 		       -DNCCL_INCLUDE_DIR=$NCCL_INCLUDE_DIR \
+		       -DNCCL_ROOT_DIR=$NCCL_ROOT_DIR \
 		       -DNCCL_SYSTEM_LIB=$NCCL_SYSTEM_LIB \
 		       -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
 		       -DUSE_ROCM=$USE_ROCM \

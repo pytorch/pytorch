@@ -336,7 +336,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     } else if (py::isinstance<py::int_>(obj)) {
       return toSimple(g.insertConstant(py::cast<int64_t>(obj), loc));
     } else if (py::isinstance<py::float_>(obj)) {
-      return toSimple(g.insertConstant(py::cast<float>(obj), loc));
+      return toSimple(g.insertConstant(py::cast<double>(obj), loc));
     } else if (py::isinstance<py::str>(obj)) {
       return toSimple(g.insertConstant(py::cast<std::string>(obj), loc));
     } else if (obj.is(py::none())) {
@@ -662,7 +662,8 @@ void initJitScriptBindings(PyObject* module) {
       })
       .def("_python_print", [](Module& self) {
         std::ostringstream ss;
-        std::vector<at::Tensor> tensors = PythonPrint(ss, self, true);
+        std::vector<at::Tensor> tensors;
+        PythonPrint(ss, self, tensors, true);
         return std::make_pair(ss.str(), tensors);
       });
 
@@ -690,7 +691,8 @@ void initJitScriptBindings(PyObject* module) {
     .def("pretty_print_schema", &Method::pretty_print_schema)
     .def("python_print", [](Method &m) {
       std::ostringstream oss;
-      std::vector<at::Tensor> constants = PythonPrint(oss, m, true);
+      std::vector<at::Tensor> constants;
+      PythonPrint(oss, m, constants, true);
       return std::make_pair(oss.str(), std::move(constants));
     });
 
@@ -710,12 +712,24 @@ void initJitScriptBindings(PyObject* module) {
   });
 
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
-  m.def("import_ir_module", [](ModuleLookup module_lookup, const std::string& filename) {
-    import_ir_module(module_lookup, filename);
+  m.def("import_ir_module", [](ModuleLookup module_lookup, const std::string& filename,
+        py::object map_location) {
+    c10::optional<at::Device> optional_device;
+    if (!map_location.is(py::none())) {
+      AT_ASSERT(THPDevice_Check(map_location.ptr()));
+      optional_device = reinterpret_cast<THPDevice*>(map_location.ptr())->device;
+    }
+    import_ir_module(module_lookup, filename, optional_device);
   });
-  m.def("import_ir_module_from_buffer", [](ModuleLookup module_lookup, const std::string& buffer) {
+  m.def("import_ir_module_from_buffer", [](ModuleLookup module_lookup,
+        const std::string& buffer, py::object map_location) {
     std::istringstream in(buffer);
-    import_ir_module(module_lookup, in);
+    c10::optional<at::Device> optional_device;
+    if (!map_location.is(py::none())) {
+      AT_ASSERT(THPDevice_Check(map_location.ptr()));
+      optional_device = reinterpret_cast<THPDevice*>(map_location.ptr())->device;
+    }
+    import_ir_module(module_lookup, in, optional_device);
   });
   m.def("_jit_import_methods", import_methods);
   m.def("_jit_set_emit_module_hook", setEmitModuleHook);
