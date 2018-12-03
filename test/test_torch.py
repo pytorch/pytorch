@@ -1722,6 +1722,10 @@ class _TestTorchMixin(object):
         torch.clamp(m1, max=max_val, out=out)
         self.assertEqual(out, res1)
 
+        with self.assertRaisesRegex(
+                RuntimeError, 'At least one of \'min\' or \'max\' must not be None'):
+            m1.clamp()  # Must specify min or max
+
     def test_pow(self):
         # [res] torch.pow([res,] x)
 

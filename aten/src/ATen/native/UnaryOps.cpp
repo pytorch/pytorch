@@ -68,6 +68,8 @@ Tensor& _clamp_out_cpu(
     _th_clamp_max_out(result, self, *max);
   } else if (min) {
     _th_clamp_min_out(result, self, *min);
+  } else {
+    AT_ERROR("At least one of 'min' or 'max' must not be None");
   }
   return result;
 }
