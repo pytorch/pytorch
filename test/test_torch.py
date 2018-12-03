@@ -97,15 +97,6 @@ class BytesIOContext(io.BytesIO):
 # This is intentionally prefixed by an underscore. Otherwise pytest will try to
 # run its methods as test cases.
 class _TestTorchMixin(object):
-    def _check_sum_dim(tensors, dim):
-        for tensor in tensors:
-            expected = tensor.numpy().sum(dim)
-            actual = tensor.sum(dim)
-            self.assertEqual(expected.shape, actual.shape)
-            if actual.dtype == torch.float:
-                self.assertTrue(np.allclose(expected, actual.numpy(), rtol=1e-03, atol=1e-05))
-            else:
-                self.assertTrue(np.allclose(expected, actual.numpy()))
 
     def _make_tensors(self, shape, val_range=(-100, 100), use_floating=True, use_integral=True):
         float_types = [torch.double,
@@ -3483,7 +3474,7 @@ class _TestTorchMixin(object):
             def check_order(a, b):
                 return a <= b
         else:
-            error('unknown order "{}", must be "ascending" or "descending"'.format(order))
+            raise AssertionError('unknown order "{}", must be "ascending" or "descending"'.format(order))
 
         are_ordered = True
         for j, k in product(range(SIZE), range(1, SIZE)):

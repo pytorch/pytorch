@@ -7,6 +7,8 @@ import sys
 import time
 import unittest
 
+from os import ProcessLookupError
+
 from common_utils import (TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN)
 import torch.multiprocessing as mp
 

@@ -4986,7 +4986,7 @@ a")
 
             @torch.jit.script
             def foo(a):
-                return pyfunc2(a) + pyfunc(a)
+                return pyfunc2(a) + pyfunc(a) # noqa F821
 
             inputs = self._make_scalar_vars([1], torch.float)
             outputs = self._make_scalar_vars([6], torch.float)
@@ -8254,9 +8254,9 @@ a")
         def foo(cond):
             a = 3
             if bool(cond):
-                raise ArbitraryError(a, "hi")
+                raise ArbitraryError(a, "hi") # noqa F821
                 if False:
-                    raise ArbitraryError
+                    raise ArbitraryError # noqa F821
             return a
 
         foo(torch.tensor(0))
@@ -9717,7 +9717,7 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
     self.assertEqual(outputs, outputs_test)
     self.assertEqual(grads, grads_test)
     for g2, g2_test in zip(grads2, grads2_test):
-        if g2 is None and g2_ge is None:
+        if g2 is None and g2_test is None:
             continue
         self.assertTrue(torch.allclose(g2, g2_test, atol=5e-4, rtol=1e-4))
 

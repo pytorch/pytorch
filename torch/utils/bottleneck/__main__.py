@@ -125,9 +125,9 @@ def print_autograd_prof_summary(prof, mode, sortby='cpu_time', topk=15):
     valid_sortby = ['cpu_time', 'cuda_time', 'cpu_time_total', 'cuda_time_total', 'count']
     if sortby not in valid_sortby:
         warn = ('WARNING: invalid sorting option for autograd profiler results: {}\n'
-                'Expected `cpu_time`, `cpu_time_total`, or `count`. '
+                'Expected one of {}. '
                 'Defaulting to `cpu_time`.')
-        print(warn.format(autograd_prof_sortby))
+        print(warn.format(sortby, valid_sortby))
         sortby = 'cpu_time'
 
     if mode is 'CUDA':

@@ -752,6 +752,8 @@ def do_test_empty_full(self, dtypes, layout, device):
         module = '.'.join(str(dtype).split('.')[1:-1])
         if not module:
             return torch.int64
+        mod = __import__(module)
+        from mod import operator
         return operator.attrgetter(module)(torch).int64
 
     default_dtype = torch.get_default_dtype()

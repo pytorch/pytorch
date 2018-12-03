@@ -4646,14 +4646,14 @@ class TestNN(NNTestCase):
                     input_val = torch.randn(seq_length, batch, input_size)
                     grad_output = torch.randn(seq_length, batch, hidden_size * num_directions)
 
+                hx_val = torch.randn(num_layers * num_directions, batch, hidden_size)
+                grad_hy = torch.randn(num_layers * num_directions, batch, hidden_size)
+
                 if not contig:
                     grad_output = make_noncontig(grad_output)
                     grad_hy = make_noncontig(grad_hy)
                     input_var = make_noncontig(input_val)
                     hx_val = make_noncontig(hx_val)
-
-                hx_val = torch.randn(num_layers * num_directions, batch, hidden_size)
-                grad_hy = torch.randn(num_layers * num_directions, batch, hidden_size)
 
                 if variable_len:
                     lengths = [7, 5, 5, 2, 1, 1]

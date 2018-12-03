@@ -267,13 +267,13 @@ from .functional import *
 # Remove unnecessary members
 ################################################################################
 
-del DoubleStorageBase
-del FloatStorageBase
-del LongStorageBase
-del IntStorageBase
-del ShortStorageBase
-del CharStorageBase
-del ByteStorageBase
+del _C.DoubleStorageBase
+del _C.FloatStorageBase
+del _C.LongStorageBase
+del _C.IntStorageBase
+del _C.ShortStorageBase
+del _C.CharStorageBase
+del _C.ByteStorageBase
 
 ################################################################################
 # Import most common subpackages
