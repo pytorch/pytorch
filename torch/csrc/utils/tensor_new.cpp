@@ -47,28 +47,28 @@ void maybe_initialize_cuda(const Type &type) {
   }
 }
 
-Tensor dispatch_zeros(const Type& type, int32_t device_index, IntList sizes) {
+Tensor dispatch_zeros(const Type& type, optional<Device> device, IntList sizes) {
   maybe_initialize_cuda(type);
   AutoNoGIL no_gil;
-  return torch::zeros(sizes, type.options(device_index));
+  return torch::zeros(sizes, type.options(device));
 }
 
-Tensor dispatch_ones(const Type& type, int32_t device_index, IntList sizes) {
+Tensor dispatch_ones(const Type& type, optional<Device> device, IntList sizes) {
   maybe_initialize_cuda(type);
   AutoNoGIL no_gil;
-  return torch::ones(sizes, type.options(device_index));
+  return torch::ones(sizes, type.options(device));
 }
 
-Tensor dispatch_full(const Type& type, Scalar fill_value, int32_t device_index, IntList sizes) {
+Tensor dispatch_full(const Type& type, Scalar fill_value, optional<Device> device, IntList sizes) {
   maybe_initialize_cuda(type);
   AutoNoGIL no_gil;
-  return torch::full(sizes, fill_value, type.options(device_index));
+  return torch::full(sizes, fill_value, type.options(device));
 }
 
-Tensor new_with_sizes(const Type& type, int32_t device_index, IntList sizes) {
+Tensor new_with_sizes(const Type& type, optional<Device> device, IntList sizes) {
   maybe_initialize_cuda(type);
   AutoNoGIL no_gil;
-  return torch::empty(sizes, type.options(device_index));
+  return torch::empty(sizes, type.options(device));
 }
 
 Tensor new_with_storage(const Type& type, Storage storage) {
@@ -195,7 +195,7 @@ Tensor internal_new_from_data(
   if (THPVariable_Check(data)) {
     auto var = reinterpret_cast<THPVariable*>(data)->cdata;
     if (copy_variables) {
-      var = autograd::make_variable(var.data(), /*requires_grad=*/false);
+      var = var.detach();
     }
     // infer the scalar type and device type; it's not expected to infer the layout since these constructors
     // are defined per-layout-type (e.g. tensor vs sparse_coo_tensor).
@@ -265,7 +265,7 @@ Tensor legacy_sparse_tensor_ctor(const Type& type, PyObject* args, PyObject* kwa
   if (r.idx == 0) {
     auto deviceOptional = r.deviceOptional(0);
     check_legacy_ctor_device(type, deviceOptional);
-    return at::empty({0}, type.options(r.device(0).index()));
+    return at::empty({0}, type.options(r.deviceOptional(0)));
   } else if (r.idx == 1) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return type.unsafeTensorFromTH(cdata, true);
@@ -288,7 +288,7 @@ Tensor legacy_sparse_tensor_ctor(const Type& type, PyObject* args, PyObject* kwa
       // unless the sequences is a torch.Size
       return legacy_new_from_sequence(type, deviceOptional, r.pyobject(0));
     }
-    return new_with_sizes(type, r.device(1).index(), r.intlist(0));
+    return new_with_sizes(type, r.deviceOptional(1), r.intlist(0));
   }
   throw std::runtime_error("new(): invalid arguments");
 }
@@ -334,11 +334,12 @@ Tensor legacy_sparse_tensor_new(const Type& type, PyObject* args, PyObject* kwar
       // unless the sequences is a torch.Size
       return legacy_new_from_sequence(type, deviceOptional, r.pyobject(0));
     }
-    return new_with_sizes(type, r.device(1).index(), r.intlist(0));
+    return new_with_sizes(type, r.deviceOptional(1), r.intlist(0));
   }
   throw std::runtime_error("new(): invalid arguments");
 }
 
+// NB: device_idx here is NOT a DeviceIndex, but index into PythonArgs
 const Type& typeWithDefault(PythonArgs& r, int64_t dtype_idx, int64_t device_idx, const Type& type) {
   const auto scalartype = r.scalartypeWithDefault(dtype_idx, type.scalarType());
   const Device types_device_type(type.device_type());
@@ -384,7 +385,7 @@ Tensor legacy_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
       // unless the sequences is a torch.Size
       return legacy_new_from_sequence(type, deviceOptional, r.pyobject(0));
     }
-    return new_with_sizes(type, r.device(1).index(), r.intlist(0));
+    return new_with_sizes(type, r.deviceOptional(1), r.intlist(0));
   } else if (r.idx == 5) {
     auto deviceOptional = r.deviceOptional(1);
     check_legacy_ctor_device(type, deviceOptional);
@@ -430,7 +431,7 @@ Tensor legacy_tensor_new(const Type& type, PyObject* args, PyObject* kwargs) {
       // unless the sequences is a torch.Size
       return legacy_new_from_sequence(type, deviceOptional, r.pyobject(0));
     }
-    return new_with_sizes(type, r.device(1).index(), r.intlist(0));
+    return new_with_sizes(type, r.deviceOptional(1), r.intlist(0));
   } else if (r.idx == 5) {
     auto deviceOptional = r.deviceOptional(1);
     check_legacy_ctor_device(type, deviceOptional);
@@ -459,7 +460,7 @@ Tensor sparse_coo_tensor_ctor(const Type& default_type, PyObject* args, PyObject
     bool type_inference = r.isNone(2);
     const auto& type = typeWithDefault(r, 2, 3, default_type);
     const auto& values_type = type.toDense();
-    at::DeviceGuard device_guard(r.device(3));
+    at::OptionalDeviceGuard device_guard(r.deviceOptional(3));
     // if no dtype provided, infer type based on value type.
     Tensor values = internal_new_from_data(values_type, r.deviceOptional(3), r.pyobject(1), false, true, type_inference);
     const auto& indices_type = values.type().toScalarType(kLong);
@@ -469,14 +470,14 @@ Tensor sparse_coo_tensor_ctor(const Type& default_type, PyObject* args, PyObject
     bool type_inference = r.isNone(3);
     const auto& type = typeWithDefault(r, 3, 4, default_type);
     const auto& values_type = type.toDense();
-    at::DeviceGuard device_guard(r.device(4));
+    at::OptionalDeviceGuard device_guard(r.deviceOptional(4));
     Tensor values = internal_new_from_data(values_type, r.deviceOptional(4), r.pyobject(1), false, true, type_inference);
     const auto& indices_type = values.type().toScalarType(kLong);
     Tensor indices = internal_new_from_data(indices_type, r.deviceOptional(4), r.pyobject(0), false, true, false);
     return at::sparse_coo_tensor(indices, values, r.intlist(2), values.options().layout(at::kSparse)).set_requires_grad(r.toBool(5));
   } else if (r.idx == 2) {
     const auto& type = typeWithDefault(r, 1, 2, default_type);
-    at::DeviceGuard device_guard(r.device(2));
+    at::OptionalDeviceGuard device_guard(r.deviceOptional(2));
     return at::sparse_coo_tensor(r.intlist(0), type.options().layout(at::kSparse)).set_requires_grad(r.toBool(3));
   }
   throw std::runtime_error("sparse_coo_tensor(): invalid arguments");
@@ -565,7 +566,7 @@ Tensor new_empty(const Type& type, PyObject* args, PyObject* kwargs) {
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     const auto& actual_type = typeWithDefault(r, 1, 2, type);
-    return new_with_sizes(actual_type, r.device(2).index(), r.intlist(0)).set_requires_grad(r.toBool(3));
+    return new_with_sizes(actual_type, r.deviceOptional(2), r.intlist(0)).set_requires_grad(r.toBool(3));
   }
   throw std::runtime_error("new_empty(): invalid arguments");
 }
@@ -579,7 +580,7 @@ Tensor new_full(const Type& type, PyObject* args, PyObject* kwargs) {
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     const auto& actual_type = typeWithDefault(r, 2, 3, type);
-    return dispatch_full(actual_type, r.scalar(1), r.device(3).index(), r.intlist(0)).set_requires_grad(r.toBool(4));
+    return dispatch_full(actual_type, r.scalar(1), r.deviceOptional(3), r.intlist(0)).set_requires_grad(r.toBool(4));
   }
   throw std::runtime_error("new_full(): invalid arguments");
 }
@@ -593,7 +594,7 @@ Tensor new_ones(const Type& type, PyObject* args, PyObject* kwargs) {
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     const auto& actual_type = typeWithDefault(r, 1, 2, type);
-    return dispatch_ones(actual_type, r.device(2).index(), r.intlist(0)).set_requires_grad(r.toBool(3));
+    return dispatch_ones(actual_type, r.deviceOptional(2), r.intlist(0)).set_requires_grad(r.toBool(3));
   }
   throw std::runtime_error("new_ones(): invalid arguments");
 }
@@ -607,7 +608,7 @@ Tensor new_zeros(const Type& type, PyObject* args, PyObject* kwargs) {
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     const auto& actual_type = typeWithDefault(r, 1, 2, type);
-    return dispatch_zeros(actual_type, r.device(2).index(), r.intlist(0)).set_requires_grad(r.toBool(3));
+    return dispatch_zeros(actual_type, r.deviceOptional(2), r.intlist(0)).set_requires_grad(r.toBool(3));
   }
   throw std::runtime_error("new_zeros(): invalid arguments");
 }

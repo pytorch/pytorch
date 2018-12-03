@@ -37,9 +37,35 @@ bool AliasDb::hasWildcard(const Node* n) const {
   return false;
 }
 
-bool AliasDb::hasWrites(const Node* n) const {
+bool AliasDb::writesTo(Node* n, const Value* v) const {
+  if (valueToAlias_.count(v) == 0) {
+    // This is a primitive type
+    return false;
+  }
+
+  const auto& aliasInfo = valueToAlias_.at(v);
+  JIT_ASSERT(aliasInfo.sets().size() > 0);
+  // We only need to check one alias set, since if this value belongs to
+  // multiple alias sets they are all written to
+  const auto& aliasSet = *aliasInfo.sets().begin();
+
+  if (aliasToWrites_.count(aliasSet) == 0) {
+    // no writes to this alias set
+    return false;
+  }
+
+  const auto& writers = aliasToWrites_.at(aliasSet);
+  return writers.count(n) != 0;
+}
+
+bool AliasDb::hasWrites(Node* n) const {
   for (const auto input : n->inputs()) {
-    if (valueToAlias_.count(input) != 0 && valueToAlias_.at(input).isWrite()) {
+    if (writesTo(n, input)) {
+      return true;
+    }
+  }
+  for (const auto output : n->outputs()) {
+    if (writesTo(n, output)) {
       return true;
     }
   }
@@ -182,6 +208,9 @@ void AliasDb::analyze(Node* node) {
     case prim::TupleConstruct:
     case prim::Undefined:
     case prim::FusedConcat:
+    case prim::MMTreeReduce:
+    case prim::MMBatchSide:
+    case prim::None:
       return analyzeCreator(node);
     case prim::TupleUnpack:
     case prim::TupleIndex:
@@ -191,6 +220,8 @@ void AliasDb::analyze(Node* node) {
       return analyzeExtractor(node);
     case prim::ConstantChunk:
       return analyzeChunk(node);
+    case prim::BroadcastingChunk:
+      return analyzeBroadcastingChunk(node);
     case aten::add:
     case aten::sub:
     case aten::mul:
@@ -334,7 +365,7 @@ void AliasDb::analyzeLoop(Node* node) {
       // Check whether or not this would change anything
       if (valueToAlias_.count(input) != 0) {
         JIT_ASSERT(valueToAlias_.count(output) != 0)
-        if (!valueToAlias_[output].isSubsetOf(valueToAlias_[output])) {
+        if (!valueToAlias_[output].isSubsetOf(valueToAlias_[input])) {
           notConverged = true;
         }
       }
@@ -354,7 +385,9 @@ void AliasDb::analyzeSubgraph(Node* node) {
 
 // For nodes that generate a fresh value from nothing
 void AliasDb::analyzeCreator(Node* node) {
-  giveFreshAlias(node->output());
+  for (Value* output : node->outputs()) {
+    giveFreshAlias(output);
+  }
 }
 
 // For nodes that extract values from a composite type. Right now, this just
@@ -370,6 +403,23 @@ void AliasDb::analyzeChunk(Node* node) {
   auto alias = valueToAlias_.at(node->input());
   for (auto output : node->outputs()) {
     addAlias(output, alias);
+  }
+}
+
+// BroadcastingChunk: all inputs are broadcasted, and then individually chunked.
+// This is an intermediate node used only in the graph fuser.
+void AliasDb::analyzeBroadcastingChunk(Node* node) {
+  auto inputs = node->inputs();
+  auto outputs = node->outputs();
+  auto nchunks = node->i(attr::chunks);
+  for (size_t index = 0; index < inputs.size(); ++index) {
+    // Each inputs[i] is aliased by exactly `nchunks` distinct output tensors:
+    // inputs[i] produces chunks outputs[i * nchunks + k] for k in [0..nchunks)
+    auto alias = valueToAlias_.at(inputs.at(index));
+    auto output_begin = outputs.begin() + index * nchunks;
+    for (auto it = output_begin; it != output_begin + nchunks; ++it) {
+      addAlias(*it, alias);
+    }
   }
 }
 

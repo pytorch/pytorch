@@ -199,12 +199,32 @@ RegisterOperators reg({
           };
         }),
     Operator(
+        "prim::requires_grad(Tensor a) -> bool",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            at::Tensor a;
+            pop(stack, a);
+            push(stack, a.requires_grad());
+            return 0;
+          };
+        }),
+    Operator(
         "prim::shape(Tensor a) -> int[]",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             at::Tensor a;
             pop(stack, a);
             push(stack, a.sizes());
+            return 0;
+          };
+        }),
+    Operator(
+        "prim::is_cuda(Tensor a) -> bool",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            at::Tensor a;
+            pop(stack, a);
+            push(stack, a.is_cuda());
             return 0;
           };
         }),
@@ -539,7 +559,7 @@ RegisterOperators reg({
 
             push(stack, forked_interprester.getFuture());
 
-            c10::global_work_queue.schedule(std::move(continuation));
+            c10::global_work_queue().run(std::move(continuation));
             return 0;
           };
         }),
@@ -901,7 +921,8 @@ Operator(                                                                      \
 
 #define CREATE_COPY_OP(other_type, c_type)                              \
   Operator(                                                             \
-      "aten::copy_(Tensor(a!) t, " #other_type " other) -> Tensor(a!)", \
+      "aten::copy_(Tensor(a!) self, " #other_type                       \
+      " other) -> Tensor(a!)",                                          \
       [](const Node* node) {                                            \
         return [=](Stack& stack) {                                      \
           at::Tensor t;                                                 \

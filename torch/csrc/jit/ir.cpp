@@ -189,12 +189,14 @@ std::ostream& operator<<(std::ostream & out, const Graph & g) {
 }
 
 std::ostream& Graph::prettyPrint(std::ostream & out) {
-  PythonPrint(out, *this);
+  std::vector<at::Tensor> tensor_table;
+  PythonPrint(out, *this, tensor_table);
   return out;
 }
 
 void Graph::dumpPretty() {
-  PythonPrint(std::cout, *this);
+  std::vector<at::Tensor> tensor_table;
+  PythonPrint(std::cout, *this, tensor_table);
 }
 
 static void checkSameDevice(const Node* node) {
@@ -916,7 +918,11 @@ Node* Node::insertAfter(Node * n) {
 }
 
 bool Node::moveAfterTopologicallyValid(Node* n, const AliasDb& aliasDb) {
-  return tryMove(n, MoveSide::AFTER, aliasDb);
+  return tryMove(n, MoveSide::AFTER, aliasDb, /*dryRun=*/false);
+}
+
+bool Node::couldMoveAfterTopologically(Node* n, const AliasDb& aliasDb) {
+  return tryMove(n, MoveSide::AFTER, aliasDb, /*dryRun=*/true);
 }
 
 bool Node::moveBeforeTopologicallyValid(Node* n, const AliasDb& aliasDb) {
@@ -924,7 +930,11 @@ bool Node::moveBeforeTopologicallyValid(Node* n, const AliasDb& aliasDb) {
   // n->prev()). Consider the following example:
   //   If the dependency graph looks like this -> n -> o then moveBefore(o) will
   //   end up with [this, o, n], but moveAfter(n) will return false.
-  return tryMove(n, MoveSide::BEFORE, aliasDb);
+  return tryMove(n, MoveSide::BEFORE, aliasDb, /*dryRun=*/false);
+}
+
+bool Node::couldMoveBeforeTopologically(Node* n, const AliasDb& aliasDb) {
+  return tryMove(n, MoveSide::BEFORE, aliasDb, /*dryRun=*/true);
 }
 
 // Helper for topologically-safe node moves. See `tryMove()` for details.
@@ -1104,7 +1114,7 @@ struct WorkingSet {
 // node at a time. When we can't move past a node (because it depends on the
 // working set), then add it to the working set and keep moving until we hit
 // `moveAfter`.
-bool Node::tryMove(Node* movePoint, MoveSide moveSide, const AliasDb& aliasDb) {
+bool Node::tryMove(Node* movePoint, MoveSide moveSide, const AliasDb& aliasDb, bool dryRun) {
   JIT_ASSERT(this->inBlockList() && movePoint->inBlockList());
   JIT_ASSERT(this->owningBlock() == movePoint->owningBlock());
   if (this == movePoint) {
@@ -1163,6 +1173,10 @@ bool Node::tryMove(Node* movePoint, MoveSide moveSide, const AliasDb& aliasDb) {
     // if we can't, then there are intermediate dependencies between the
     // `this` and `movePoint`, so we can't do the move
     return false;
+  }
+
+  if (dryRun) {
+    return true;
   }
 
   // 3. Execute the move

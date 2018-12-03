@@ -1,7 +1,7 @@
 #pragma once
 
-#include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/alias_info.h>
+#include <torch/csrc/jit/ir.h>
 
 namespace torch {
 namespace jit {
@@ -34,7 +34,7 @@ class AliasDb {
   bool hasWildcard(const Node* n) const;
 
   // Does `n` write to any alias sets?
-  bool hasWrites(const Node* n) const;
+  bool hasWrites(Node* n) const;
 
   // Get all nodes that write to any alias set inputed/outputed by `n`
   std::unordered_set<Node*> getWritersForNode(const Node* n) const;
@@ -58,6 +58,7 @@ class AliasDb {
   void analyzeCreator(Node* node);
   void analyzeExtractor(Node* node);
   void analyzeChunk(Node* node);
+  void analyzeBroadcastingChunk(Node* node);
 
   Symbol getFreshAlias() const;
   void addAlias(const Value* value, AliasInfo alias);
@@ -65,6 +66,8 @@ class AliasDb {
   void addAlias(const Value* value, const Value* from);
   void mapAliases(at::ArrayRef<Value*> to, at::ArrayRef<Value*> from);
   void giveFreshAlias(const Value* value);
+
+  bool writesTo(Node* n, const Value* v) const;
 
   std::shared_ptr<Graph> graph_;
   mutable Symbol latestSymbol_ = Symbol::fromQualString("alias::0");
