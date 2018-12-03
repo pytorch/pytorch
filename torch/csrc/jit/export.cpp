@@ -96,7 +96,7 @@ void validateBlock(Block *b, onnx_torch::OperatorExportTypes operator_export_typ
 
 void validateGraph(const std::shared_ptr<Graph>& graph, onnx_torch::OperatorExportTypes operator_export_type) {
   validateBlock(graph->block(), operator_export_type);
-  EliminateDeadCode(graph);
+  EliminateDeadCode(graph->block());
 }
 
 class EncoderBase {

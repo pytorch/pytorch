@@ -1,0 +1,25 @@
+graph(%a : Tensor) {
+  %1 : int[] = prim::Constant[value=[0, -1]]()
+  %2 : int = prim::Constant[value=6]()
+  %i.1 : int = prim::Constant[value=0]()
+  %4 : int = prim::Constant[value=2]()
+  %5 : int = prim::Constant[value=3]()
+  %6 : int = prim::Constant[value=9223372036854775807]()
+  %7 : int = prim::Constant[value=1]()
+  %l : Tensor[] = prim::ListConstruct()
+  %9 : Tensor[] = aten::append(%l, %a)
+  %10 : int[] = prim::ListConstruct(%4, %5)
+  %b : Tensor = aten::rand(%10, %2, %i.1, %1)
+  %12 : bool = aten::lt(%i.1, %7)
+  %i : int = prim::Loop(%6, %12, %i.1)
+    block0(%14 : int, %15 : int) {
+      %c.1 : Tensor = aten::select(%l, %i.1)
+      %17 : int[] = prim::ListConstruct(%4, %5)
+      %18 : Tensor = aten::rand(%17, %2, %i.1, %1)
+      %c : Tensor = aten::add_(%c.1, %18, %7)
+      %i.2 : int = aten::add(%15, %7)
+      %21 : bool = aten::lt(%i.2, %7)
+      -> (%21, %i.2)
+    }
+  return (%b);
+}
