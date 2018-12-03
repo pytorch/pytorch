@@ -9,10 +9,8 @@
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/jit/script/jit_exception.h"
-#include "torch/csrc/variable_tensor_functions.h"
 
-#include <ATen/ExpandUtils.h>
-#include <c10/util/SmallVector.h>
+#include "torch/csrc/variable_tensor_functions.h"
 
 #include <exception>
 #include <iostream>
@@ -359,17 +357,6 @@ RegisterOperators reg({
               stack.emplace_back(a);
             else
               stack.emplace_back(a + b);
-            return 0;
-          };
-        }),
-    Operator(
-        "prim::SumToSize(Tensor(a) self, int[] size) -> Tensor(a)",
-        [](const Node* node) {
-          return [=](Stack& stack) {
-            at::Tensor self;
-            Shared<IntList> desired_sizes;
-            pop(stack, self, desired_sizes);
-            push(stack, at::sum_to(std::move(self), desired_sizes->elements()));
             return 0;
           };
         }),

@@ -340,7 +340,7 @@ static void validate_outputs(const edge_list& edges, variable_list& grads, const
         ss << metadata.shape();
         AT_ERROR(format_error(ss.str()));
       }
-      grads[i] = at::sum_to(std::move(grads[i]), metadata.shape());
+      grads[i] = at::sum_to(grads[i], metadata.shape());
     }
     if (!is_compatible_type(metadata.type(), grads[i].type())) {
       std::stringstream ss;

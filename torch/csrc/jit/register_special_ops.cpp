@@ -33,8 +33,8 @@ RegisterOperators reg({
         "aten::size(Tensor self) -> int[]",
         [](Stack& stack) {
           autograd::profiler::RecordFunction record("sizes");
-          auto t = std::move(pop(stack)).toTensor();
-          pack(stack, t.sizes().vec());
+          auto result = (std::move(pop(stack))).toTensor().sizes();
+          pack(stack, std::move(result));
           return 0;
         }),
     Operator(
