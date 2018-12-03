@@ -1145,7 +1145,7 @@ if _enabled:
             # Copy Parameters / Modules / Buffers
             for name in dir(original):
                 item = getattr(original, name)
-                if item is None:
+                if item is None and name in original._parameters:
                     # XXX: treat None value simply as module attributes instead of adding them to the parameter list
                     # TODO: need to handle this more generally when non-tensor attributes added to module
                     object.__setattr__(self, name, item)
