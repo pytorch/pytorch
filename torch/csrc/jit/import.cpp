@@ -128,7 +128,6 @@ at::Tensor ScriptModuleDeserializer::loadTensor(const torch::TensorDef& tensor_p
     device = device_.value();
   }
 
-  at::Tensor result;
   auto storage_it = storageMap.find(record_key);
   if (storage_it == storageMap.end()) {
     at::DataPtr storage_ptr;
@@ -154,7 +153,9 @@ at::Tensor ScriptModuleDeserializer::loadTensor(const torch::TensorDef& tensor_p
           at::DeviceTypeName(device.type(), false));
     }
   }
+  AT_ASSERT(storage_it->second.device() == device);
 
+  at::Tensor result;
   if (device.type() == at::DeviceType::CPU) {
     result = at::CPU(type)._th_tensor(
         storage_it->second, tensor_proto.offset(), dims, strides);
