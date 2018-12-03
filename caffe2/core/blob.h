@@ -9,7 +9,7 @@
 #include "caffe2/core/common.h"
 
 #include <ATen/core/blob.h>
-#include <ATen/core/typeid.h>
+#include <c10/util/typeid.h>
 #include "caffe2/core/logging.h"
 #include "caffe2/core/tensor.h"
 
@@ -28,12 +28,16 @@ inline Tensor* BlobSetTensor(Blob* blob, const Tensor& tensor) {
   return blob->Reset<Tensor>(new Tensor(tensor));
 }
 
+// need to keep both functions that returns Tensor* and the one
+// returns Tensor for clangr codemod
 inline Tensor*
 BlobGetMutableTensor(Blob* blob, at::IntList dims, at::TensorOptions options) {
   if (blob->IsType<Tensor>()) {
     Tensor* tensor = blob->GetMutable<Tensor>();
     if (*tensor) {
-      if (tensor->GetDevice() == options.device()) {
+      // We only compare device_type if the index is not set since there are Tensors
+      // TODO: remove the extra check when all the Tensors are properly initialized
+      if (tensor->GetDevice() == options.device() || (!tensor->GetDevice().has_index() && tensor->GetDeviceType() == options.device().type())) {
         if (tensor->sizes() != dims) {
           // Resize when the dims doesn't match
           tensor->Resize(dims);
@@ -41,8 +45,7 @@ BlobGetMutableTensor(Blob* blob, at::IntList dims, at::TensorOptions options) {
         if (tensor->dtype() == options.dtype()) {
           tensor->raw_mutable_data();
         } else {
-          // create a new Tensor when the data_type doesn't match
-          return BlobSetTensor(blob, caffe2::empty(dims, options));
+          tensor->raw_mutable_data(options.dtype());
         }
         return tensor;
       }
@@ -54,6 +57,11 @@ BlobGetMutableTensor(Blob* blob, at::IntList dims, at::TensorOptions options) {
           << " dims: " << dims;
   // << " options: " << options; (operator<< for Options is in at:: now)
   return BlobSetTensor(blob, caffe2::empty(dims, options));
+}
+
+inline Tensor
+XBlobGetMutableTensor(Blob* blob, at::IntList dims, at::TensorOptions options) {
+  return *BlobGetMutableTensor(blob, dims, options);
 }
 
 inline Tensor* BlobGetMutableTensor(Blob* blob, DeviceType device_type) {

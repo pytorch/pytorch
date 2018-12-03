@@ -869,6 +869,17 @@ class TestCuda(TestCase):
             self.assertEqual(z.get_device(), 0)
             self.assertIs(z.cuda(0), z)
 
+    def test_copy_non_blocking(self):
+        x = torch.randn(5, 5).cuda()
+        y = torch.zeros(5, 5)
+        y.copy_(x, non_blocking=True)
+        self.assertEqual(x, y)
+
+        x = torch.randn(5, 5)
+        y = torch.zeros(5, 5).cuda()
+        y.copy_(x, non_blocking=True)
+        self.assertEqual(x, y)
+
     def test_serialization_array_with_storage(self):
         x = torch.randn(5, 5).cuda()
         y = torch.IntTensor(2, 5).fill_(0).cuda()
@@ -909,7 +920,7 @@ class TestCuda(TestCase):
 
             self.assertEqual(x * y, 4.5)
             self.assertEqual(y * x, 4.5)
-            with self.assertRaisesRegex(RuntimeError, 'expected type'):
+            with self.assertRaisesRegex(RuntimeError, "doesn't match the desired type"):
                 y *= x
             x *= y
             self.assertEqual(x, 4.5)
@@ -1576,6 +1587,14 @@ class TestCuda(TestCase):
     def test_potrs_batched_dims(self):
         _TestTorchMixin._test_potrs_batched_dims(self, lambda t: t.cuda())
 
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_cholesky(self):
+        _TestTorchMixin._test_cholesky(self, lambda t: t.cuda())
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_cholesky_batched(self):
+        _TestTorchMixin._test_cholesky_batched(self, lambda t: t.cuda())
+
     def test_view(self):
         _TestTorchMixin._test_view(self, lambda t: t.cuda())
 
@@ -2042,6 +2061,7 @@ class TestCuda(TestCase):
         b = a.half()
         self.assertGreater(b.norm().item(), 0)
 
+    @skipIfRocm
     # Test that wrap_with_cuda_memory_check successfully detects leak
     def test_cuda_memory_leak_detection(self):
         l = []

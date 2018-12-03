@@ -2,53 +2,51 @@
 
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/csrc/jit/passes/utils/subgraph_utils.h"
 
-namespace torch { namespace jit {
+namespace torch {
+namespace jit {
 
 namespace {
 
-bool canRunWithAutograd(Node *node) {
+bool canRunWithAutograd(Node* node) {
   return node->kind() != prim::FusionGroup;
 }
 
-void inlineNode(Node *node) {
-  WithInsertPoint insert_guard { node };
-  Graph * graph = node->owningGraph();
+void InlineAutodiffSubgraphs(Block* block, size_t threshold);
+
+graph_node_list::iterator scanNode(Node* node, size_t threshold) {
+  auto next_node = ++node->iterator();
+
+  for (Block* block : node->blocks()) {
+    InlineAutodiffSubgraphs(block, threshold);
+  }
+
+  if (node->kind() != prim::DifferentiableGraph) {
+    return next_node;
+  }
+
   auto subgraph = node->g(attr::Subgraph);
-  std::unordered_map<Value*, Value*> input_map;
-
-  size_t num_inputs = node->inputs().size();
-  JIT_ASSERT(num_inputs == subgraph->inputs().size());
-  for (size_t i = 0; i < num_inputs; ++i) {
-    input_map[subgraph->inputs()[i]] = node->inputs()[i];
+  int64_t subgraph_size =
+      std::distance(subgraph->nodes().begin(), subgraph->nodes().end());
+  if (subgraph_size >= static_cast<int64_t>(threshold)) {
+    return next_node;
   }
 
-  for (Node * subnode : subgraph->nodes()) {
-    Node * new_node = graph->insertNode(graph->createClone(subnode, [&](Value * v) { return input_map.at(v); }));
-    for (size_t i = 0; i < subnode->outputs().size(); ++i) {
-      input_map[subnode->output(i)] = new_node->output(i);
-    }
+  if (!std::all_of(
+          subgraph->nodes().begin(),
+          subgraph->nodes().end(),
+          canRunWithAutograd)) {
+    return next_node;
   }
 
-  size_t num_outputs = node->outputs().size();
-  JIT_ASSERT(num_outputs <= subgraph->outputs().size() &&
-             num_outputs == static_cast<size_t>(node->i(attr::f_real_outputs)));
-  for (size_t i = 0; i < num_outputs; ++i) {
-    node->output(i)->replaceAllUsesWith(input_map.at(subgraph->outputs()[i]));
-  }
+  SubgraphUtils::unmergeSubgraph(node);
+  return next_node;
 }
 
-void InlineAutodiffSubgraphs(Block *block, size_t threshold) {
-  for (Node * node : block->nodes()) {
-    for (Block * block : node->blocks()) {
-      InlineAutodiffSubgraphs(block, threshold);
-    }
-    if (node->kind() != prim::DifferentiableGraph) continue;
-    auto subgraph = node->g(attr::Subgraph);
-    int64_t subgraph_size = std::distance(subgraph->nodes().begin(), subgraph->nodes().end());
-    if (subgraph_size >= static_cast<int64_t>(threshold)) continue;
-    if (!std::all_of(subgraph->nodes().begin(), subgraph->nodes().end(), canRunWithAutograd)) continue;
-    inlineNode(node);
+void InlineAutodiffSubgraphs(Block* block, size_t threshold) {
+  for (auto it = block->nodes().begin(); it != block->nodes().end();) {
+    it = scanNode(*it, threshold);
   }
 }
 
@@ -59,4 +57,5 @@ void InlineAutodiffSubgraphs(std::shared_ptr<Graph>& graph, size_t threshold) {
   EliminateDeadCode(graph);
 }
 
-}} // namespace torch::jit
+} // namespace jit
+} // namespace torch

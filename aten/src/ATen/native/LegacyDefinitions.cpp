@@ -134,7 +134,7 @@ Tensor & tril_(Tensor& self, int64_t diagonal) {
 }
 
 Tensor & triu_(Tensor& self, int64_t diagonal) {
-  return self._th_triu_(diagonal);
+  return at::_th_triu_(self, diagonal);
 }
 
 Tensor & digamma_(Tensor& self) {
@@ -481,14 +481,6 @@ std::tuple<Tensor &,Tensor &,Tensor &> svd_out(Tensor & U, Tensor & S, Tensor & 
 
 std::tuple<Tensor,Tensor,Tensor> svd(const Tensor & self, bool some, bool compute_uv) {
   return at::_th_svd(self, some, compute_uv);
-}
-
-Tensor & cholesky_out(Tensor & result, const Tensor & self, bool upper) {
-  return at::_th_potrf_out(result, self, upper);
-}
-
-Tensor cholesky(const Tensor & self, bool upper) {
-  return at::_th_potrf(self, upper);
 }
 
 Tensor & potri_out(Tensor & result, const Tensor & self, bool upper) {

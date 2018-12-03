@@ -5,7 +5,7 @@
 #include "caffe2/core/tensor_impl.h"
 
 #include <ATen/core/UndefinedTensorImpl.h>
-#include <ATen/core/intrusive_ptr.h>
+#include <c10/util/intrusive_ptr.h>
 #include "ATen/core/TensorOptions.h"
 
 namespace caffe2 {
@@ -64,6 +64,11 @@ class CAFFE2_API Tensor final {
     Resize(dims);
   }
 
+  // we want to preserve index information
+  explicit Tensor(at::IntList dims, at::Device device): Tensor(device) {
+    Resize(dims);
+  }
+
   explicit Tensor(const vector<int>& dims, DeviceType type)
       : Tensor(type) {
     Resize(dims);
@@ -92,23 +97,22 @@ class CAFFE2_API Tensor final {
     return impl_.get()->GetDevice();
   }
 
-  void CopyFrom(const Tensor& src, BaseContext* context = nullptr) const {
-    impl_.get()->CopyFrom(*src.impl_.get(), context);
+  void CopyFrom(const Tensor& src, bool async = false) const {
+    impl_.get()->CopyFrom(*src.impl_.get(), async);
   }
 
   /**
    * @brief Extend the outer-most dimension of this tensor
    *        to dimension of `num`.
    */
-  void ExtendTo(int64_t num, float growthPct, BaseContext* context) const {
+  void ExtendTo(int64_t num, float growthPct) const {
     CAFFE_ENFORCE_GE_WITH_CALLER(impl_->dim(), 1);
     CAFFE_ENFORCE_GE_WITH_CALLER(growthPct, 0);
-    CAFFE_ENFORCE(context != nullptr, "Context must be provided.");
-    Extend(num - impl_->size(0), growthPct, context);
+    Extend(num - impl_->size(0), growthPct);
   }
 
-  void Extend(int64_t num, float growthPct, BaseContext* context) const {
-    impl_.get()->Extend(num, growthPct, context);
+  void Extend(int64_t num, float growthPct) const {
+    impl_.get()->Extend(num, growthPct);
   }
 
   /**
@@ -446,7 +450,7 @@ CAFFE2_API void ReinitializeAndCopyFrom(
     Tensor* t,
     at::TensorOptions options,
     const Tensor& src,
-    BaseContext* context = nullptr);
+    bool async = false);
 
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(12, Tensor)
 
@@ -523,12 +527,16 @@ void TensorPrinter::Print(const Tensor& tensor) {
   // One most likely doesn't want to print int64-number of items for visual
   // inspection, so we cast down to int here.
   int total_count = static_cast<int>(std::min(tensor.numel(), int64_t(limit_)));
+
   const T* tensor_data = tensor.template data<T>();
   for (int i = 0; i < total_count - 1; ++i) {
     values_stream << tensor_data[i] << ",";
   }
-  // We do not add a comma after the last item.
-  values_stream << tensor_data[total_count - 1];
+  if (total_count) {
+    // We do not add a comma after the last item.
+    values_stream << tensor_data[total_count - 1];
+  }
+
   if (to_file_) {
     (*log_file_) << MetaStr(tensor) << values_stream.str() << std::endl;
   } else {

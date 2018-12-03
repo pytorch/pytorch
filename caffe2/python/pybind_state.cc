@@ -355,7 +355,6 @@ void addObjectMethods(py::module& m) {
               auto feeder = CreateFeeder(option.device_type());
               CAFFE_ENFORCE(
                   feeder, "Unknown device type encountered in FeedBlob.");
-              // TODO: Blob store Tensor directly?
               feeder->Feed(option, array, blob);
               return true;
             }

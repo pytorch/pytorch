@@ -53,12 +53,11 @@ class ReduceTailSumOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& mat = Input(0);
-    auto* output = Output(0);
 
     int N = mat.dim32(0);
     int block_size = mat.size_from_dim(1);
 
-    output->Resize(N);
+    auto* output = Output(0, {N}, at::dtype<T>());
     T* output_data = output->template mutable_data<T>();
     const T* mat_data = mat.template data<T>();
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "caffe2/core/dispatch/DeviceId.h"
+#include <c10/core/dispatch/DeviceId.h>
 #include "caffe2/core/tensor.h"
 #include <c10/util/Array.h>
 #include <c10/util/ArrayRef.h>

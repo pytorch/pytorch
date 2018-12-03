@@ -7,9 +7,9 @@
 #include "ATen/ExpandUtils.h"
 #include "ATen/Functions.h"
 #include "ATen/NativeFunctions.h"
-#include "ATen/core/Scalar.h"
+#include <c10/core/Scalar.h>
 #include "ATen/core/SparseTensorRef.h"
-#include "ATen/core/Storage.h"
+#include "c10/core/Storage.h"
 #include "ATen/Tensor.h"
 #include "ATen/core/TensorOptions.h"
 #include "ATen/DeviceGuard.h"

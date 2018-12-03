@@ -28,8 +28,8 @@ if [[ -x "$(command -v cmake3)" ]]; then
         #   cmake3 version 3.11.0 CMake suite maintained and supported by Kitware (kitware.com/cmake).
         # Thus we extract the line that has 'version' in it and hope the actual
         # version number is gonna be the 3rd element
-        CMAKE_VERSION=$(cmake --version | grep 'version' | awk '{print $3}')
-        CMAKE3_VERSION=$(cmake3 --version | grep 'version' | awk '{print $3}')
+        CMAKE_VERSION=$(cmake --version | grep 'version' | awk '{print $3}' | awk -F. '{print $1"."$2"."$3}')
+        CMAKE3_VERSION=$(cmake3 --version | grep 'version' | awk '{print $3}' | awk -F. '{print $1"."$2"."$3}')
         CMAKE3_NEEDED=$($PYTORCH_PYTHON -c "from distutils.version import StrictVersion; print(1 if StrictVersion(\"${CMAKE_VERSION}\") < StrictVersion(\"3.5.0\") and StrictVersion(\"${CMAKE3_VERSION}\") > StrictVersion(\"${CMAKE_VERSION}\") else 0)")
     else
         # don't have cmake
@@ -58,6 +58,9 @@ while [[ $# -gt 0 ]]; do
           ;;
       --use-cuda)
           USE_CUDA=1
+          ;;
+      --use-distributed)
+          USE_DISTRIBUTED=1
           ;;
       --use-fbgemm)
           USE_FBGEMM=1
@@ -213,6 +216,11 @@ function build_caffe2() {
 		       -DUSE_DISTRIBUTED=$USE_DISTRIBUTED \
 		       -DUSE_FBGEMM=$USE_FBGEMM \
 		       -DUSE_NUMPY=$USE_NUMPY \
+		       -DNUMPY_INCLUDE_DIR=$NUMPY_INCLUDE_DIR \
+		       -DUSE_SYSTEM_NCCL=$USE_SYSTEM_NCCL \
+		       -DNCCL_INCLUDE_DIR=$NCCL_INCLUDE_DIR \
+		       -DNCCL_ROOT_DIR=$NCCL_ROOT_DIR \
+		       -DNCCL_SYSTEM_LIB=$NCCL_SYSTEM_LIB \
 		       -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
 		       -DUSE_ROCM=$USE_ROCM \
 		       -DUSE_NNPACK=$USE_NNPACK \

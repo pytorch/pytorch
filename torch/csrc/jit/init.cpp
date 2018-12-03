@@ -96,7 +96,7 @@ void initJITBindings(PyObject *module) {
    .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
    .def("_jit_pass_fuse", FuseGraph)
    .def("_jit_pass_dce", [](std::shared_ptr<Graph>& g) {
-     return EliminateDeadCode(g); // overload resolution
+     return EliminateDeadCode(g->block()); // overload resolution
    })
    .def("_jit_pass_cse", [](std::shared_ptr<Graph>& g) {
      return EliminateCommonSubexpression(g); // overload resolution
@@ -112,13 +112,13 @@ void initJITBindings(PyObject *module) {
      return Canonicalize(g);
    })
    .def("_jit_pass_lint", LintGraph)
-   .def("_jit_pass_shape_analysis", [](Graph& graph, std::vector<at::Tensor> inputs, bool with_grad) {
-     setInputTypes(graph, ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
+   .def("_jit_pass_shape_analysis", [](std::shared_ptr<Graph> graph, std::vector<at::Tensor> inputs, bool with_grad) {
+     setInputTypes(*graph, ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
      PropagateInputShapes(graph);
    })
-   .def("_jit_pass_complete_shape_analysis", [](Graph& graph, py::tuple inputs, bool with_grad) {
-     CompleteArgumentSpec spec(with_grad, evilDeprecatedBadCreateStackDoNotUse(inputs, graph.inputs()));
-     auto graph_inputs = graph.inputs();
+   .def("_jit_pass_complete_shape_analysis", [](std::shared_ptr<Graph> graph, py::tuple inputs, bool with_grad) {
+     CompleteArgumentSpec spec(with_grad, evilDeprecatedBadCreateStackDoNotUse(inputs, graph->inputs()));
+     auto graph_inputs = graph->inputs();
      JIT_ASSERT(spec.size() == graph_inputs.size());
      for (size_t i = 0; i < graph_inputs.size(); ++i) {
        graph_inputs[i]->setType(spec.at(i));
@@ -133,7 +133,7 @@ void initJITBindings(PyObject *module) {
      return ConstantPropagation(g);
    })
    .def("_jit_pass_erase_shape_information", EraseShapeInformation)
-   .def("_jit_pass_create_autodiff_subgraphs", [](Graph& graph) {
+   .def("_jit_pass_create_autodiff_subgraphs", [](std::shared_ptr<Graph> graph) {
      CreateAutodiffSubgraphs(graph);
    })
    .def("_jit_run_cpp_tests", [] {
@@ -222,29 +222,34 @@ void initJITBindings(PyObject *module) {
           py::init([](py::function func,
                       py::tuple inputs,
                       py::function var_name_lookup_fn,
-                      bool optimize) {
-              auto graph = tracer::createGraphByTracing(func, toStack(inputs), var_name_lookup_fn);
-              return GraphExecutor(graph, optimize);
+                      bool optimize,
+                      bool _force_outplace) {
+            auto graph = tracer::createGraphByTracing(
+                func, toStack(inputs), var_name_lookup_fn, _force_outplace);
+            return GraphExecutor(graph, optimize);
           }),
           py::arg("func"),
           py::arg("inputs"),
           py::arg("var_name_lookup_fn"),
-          py::arg("optimize") = true)
+          py::arg("optimize") = true,
+          py::arg("_force_outplace") = false)
       .def(
           py::init([](std::shared_ptr<Graph> graph, bool optimize) {
             return GraphExecutor(std::move(graph), optimize);
           }),
           py::arg("graph"),
           py::arg("optimize") = true)
-      .def("graph_for", [](GraphExecutor& ge, py::args args) {
-        return ge.graphFor(evilDeprecatedBadCreateStackDoNotUse(args, ge.graph()->inputs()));
-      })
-      .def_property_readonly("graph", [](GraphExecutor& ge) {
-        return ge.graph();
-      })
-      .def("get_debug_state", [](GraphExecutor& ge) {
-        return ge.getDebugState();
-      })
+      .def(
+          "graph_for",
+          [](GraphExecutor& ge, py::args args) {
+            return ge.graphFor(evilDeprecatedBadCreateStackDoNotUse(
+                args, ge.graph()->inputs()));
+          })
+      .def_property_readonly(
+          "graph", [](GraphExecutor& ge) { return ge.graph(); })
+      .def(
+          "get_debug_state",
+          [](GraphExecutor& ge) { return ge.getDebugState(); })
       .def("__call__", [](GraphExecutor& ge, py::args args) -> py::object {
         const auto & graph = ge.graph();
         auto stack = evilDeprecatedBadCreateStackDoNotUse(args, graph->inputs());
@@ -255,31 +260,26 @@ void initJITBindings(PyObject *module) {
         return createPyObjectForStack(std::move(stack));
       });
 
-  py::class_<PyTorchFileWriter>(m, "PyTorchFileWriter")
+  py::class_<PyTorchStreamWriter>(m, "PyTorchFileWriter")
       .def(py::init<std::string>())
       .def(
           "write_record",
-          [](PyTorchFileWriter& self, const char* data, size_t size) {
-            return self.writeRecord(data, size);
+          [](PyTorchStreamWriter& self, const std::string& name, const char* data, size_t size) {
+            return self.writeRecord(name, data, size);
           })
-      .def("write_end_of_file", &PyTorchFileWriter::writeEndOfFile);
+      .def("write_end_of_file", &PyTorchStreamWriter::writeEndOfFile);
 
-  py::class_<PyTorchFileReader>(m, "PyTorchFileReader")
+  py::class_<PyTorchStreamReader>(m, "PyTorchFileReader")
       .def(py::init<std::string>())
       .def(
-          "get_record_with_key",
-          [](PyTorchFileReader& self, uint64_t key) {
+          "get_record",
+          [](PyTorchStreamReader& self, const std::string& key) {
             at::DataPtr data;
             size_t size;
-            std::tie(data, size) = self.getRecordWithKey(key);
+            std::tie(data, size) = self.getRecord(key);
             return py::bytes(reinterpret_cast<const char*>(data.get()), size);
-          })
-      .def("get_last_record", [](PyTorchFileReader& self) {
-        at::DataPtr data;
-        size_t size;
-        std::tie(data, size) = self.getLastRecord();
-        return py::bytes(reinterpret_cast<const char*>(data.get()), size);
-      });
+          });
+
 
   m.def("_jit_get_operation", [](const std::string& qualified_name) {
     try {
