@@ -124,9 +124,6 @@ struct ArgumentSpec {
   size_t size() const {
     return args.size();
   }
-  const ArgumentInfo& at(size_t i) const {
-    return args[i];
-  }
   size_t hashCode() const {
     return hash_code;
   }
@@ -150,7 +147,6 @@ private:
         return fillType(subtype, offset);
       }));
     } else {
-      offset++;
       return original;
     }
   }
@@ -317,28 +313,6 @@ private:
   const CompleteArgumentSpec & spec;
   const int i;
 };
-
-inline std::ostream & operator<<(std::ostream & out, const ArgumentInfo & info) {
-  if(!info.defined()) {
-    return out << "<undefined>";
-  }
-  out << "Tensor(device=" << info.device()
-    << ", type=" << toString(info.type())
-    << ", requires_grad=" << info.requires_grad()
-    << ", dims=" << info.dim() << ")";
-  return out;
-}
-
-inline std::ostream& operator<<(std::ostream & out, const ArgumentSpec & spec) {
-  out << "{";
-  for(size_t i = 0; i < spec.size(); ++i) {
-    if (i > 0)
-      out << ", ";
-    out << spec.at(i);
-  }
-  out << "}";
-  return out;
-}
 
 inline std::ostream & operator<<(std::ostream & out, const CompleteArgumentInfo & info) {
   if(!info.defined()) {
