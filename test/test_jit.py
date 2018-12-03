@@ -10479,6 +10479,141 @@ additional_module_tests = [
         input_size=(S, S),
         extra_args=((S, S),)
     ),
+    dict(  # noqa: C408
+        module_name='L1Loss',
+        input_fn=lambda: ((2, 3, 4), (2, 3, 4)),
+    ),
+    dict(  # noqa: C408
+        module_name='NLLLoss',
+        input_fn=lambda: (torch.rand(15, 10).log(), torch.Tensor(15).uniform_().mul(10).floor().long()),
+        check_sum_reduction=True
+    ),
+    dict(  # noqa: C408
+        module_name='NLLLoss',
+        constructor_args=(None, None, 2),
+        input_fn=lambda: (torch.rand(15, 10).log(), torch.Tensor(15).uniform_().mul(10).floor().long()),
+        desc='ignore_index'
+    ),
+    dict(  # noqa: C408
+        module_name='NLLLoss',
+        constructor_args_fn=lambda: (torch.rand(10),),
+        input_fn=lambda: (torch.rand(15, 10).add(1e-2).log(), torch.Tensor(15).uniform_().mul(10).floor().long()),
+        desc='weights',
+    ),
+    dict(  # noqa: C408
+        module_name='NLLLoss',
+        constructor_args_fn=lambda: (torch.rand(10), None, 2),
+        input_fn=lambda: (torch.rand(15, 10).add(1e-2).log(), torch.Tensor(15).uniform_().mul(10).floor().long()),
+        desc='weights_ignore_index'
+    ),
+    dict(  # noqa: C408
+        module_name='NLLLoss',
+        constructor_args_fn=lambda: (torch.rand(10), None, -1),
+        input_fn=lambda:
+            (torch.rand(15, 10).add(1e-2).log(),
+            torch.Tensor(15).uniform_().mul(10 + 1).floor().long() - 1),
+        desc='weights_ignore_index_neg'
+    ),
+    dict(  # noqa: C408
+        module_name='KLDivLoss',
+        input_fn=lambda: (torch.rand(10, 10).log(), torch.rand(10, 10)),
+    ),
+    dict(  # noqa: C408
+        module_name='MSELoss',
+        input_fn=lambda: ((2, 3, 4, 5), (2, 3, 4, 5)),
+    ),
+    dict(  # noqa: C408
+        module_name='BCELoss',
+        input_fn=lambda: (torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2), torch.randn(15, 10).gt(0).double()),
+        no_grad=True,
+    ),
+    dict(  # noqa: C408
+        module_name='BCELoss',
+        constructor_args_fn=lambda: (torch.rand(10),),
+        input_fn=lambda: (torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2), torch.randn(15, 10).gt(0).double()),
+        desc='weights',
+        no_grad=True,
+    ),
+    dict(  # noqa: C408
+        module_name='BCEWithLogitsLoss',
+        constructor_args=(torch.rand(10), False, None, 'mean', torch.rand(10)),
+        input_fn=lambda: (torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2), torch.randn(15, 10).gt(0).double()),
+        no_grad=True,
+    ),
+    dict(  # noqa: C408
+        module_name='BCEWithLogitsLoss',
+        constructor_args=(torch.rand(15, 10), False),
+        input_fn=lambda: (torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2), torch.randn(15, 10).gt(0).double()),
+        desc='weights',
+    ),
+    dict(  # noqa: C408
+        module_name='HingeEmbeddingLoss',
+        input_fn=lambda: (torch.randn(10), torch.randn(10).gt(0).double().mul_(2).sub(1)),
+        no_grad=True,
+    ),
+    dict(  # noqa: C408
+        module_name='HingeEmbeddingLoss',
+        constructor_args=(0.5,),
+        input_fn=lambda: (torch.randn(10), torch.randn(10).gt(0).double().mul_(2).sub(1)),
+        desc='margin',
+        no_grad=True,
+    ),
+    dict(  # noqa: C408
+        module_name='MultiLabelMarginLoss',
+        input_fn=lambda: (torch.rand(10,), torch.rand(10).mul(10).floor().long()),
+        no_grad=True,
+    ),
+    dict(  # noqa: C408
+        module_name='SmoothL1Loss',
+        input_fn=lambda: ((5, 10), (5, 10)),
+    ),
+    dict(  # noqa: C408
+        module_name='SoftMarginLoss',
+        input_fn=lambda: (torch.randn(5, 5).sign(), torch.randn(5, 5).sign()),
+        no_grad=True,
+    ),
+    dict(  # noqa: C408
+        module_name='CrossEntropyLoss',
+        input_fn=lambda: (torch.randn(15, 10), torch.Tensor(15).uniform_().mul(10).floor().long()),
+    ),
+    dict(  # noqa: C408
+        module_name='MultiLabelSoftMarginLoss',
+        constructor_args=(torch.rand(10),),
+        input_fn=lambda: (torch.randn(5, 10), torch.rand(5, 10).mul(2).floor()),
+        no_grad=True,
+    ),
+    dict(  # noqa: C408
+        module_name='CosineEmbeddingLoss',
+        input_fn=lambda: (torch.rand(15, 10), torch.rand(15, 10), torch.randn(15).sign()),
+        no_grad=True,
+    ),
+    dict(  # noqa: C408
+        module_name='MarginRankingLoss',
+        input_fn=lambda: (torch.randn(50).mul(10), torch.randn(50).mul(10), torch.randn(50).sign()),
+    ),
+    dict(  # noqa: C408
+        module_name='TripletMarginLoss',
+        input_fn=lambda: (torch.randn(5, 10, requires_grad=True), torch.randn(5, 10, requires_grad=True),
+            torch.randn(5, 10, requires_grad=True)),
+    ),
+    dict(  # noqa: C408
+        module_name='MultiMarginLoss',
+        input_fn=lambda: (torch.randn(5, 10), torch.rand(5).mul(8).floor().long()),
+        no_grad=True,
+    ),
+    dict(  # noqa: C408
+        module_name='PoissonNLLLoss',
+        input_fn=lambda:(torch.randn(2, 3, 4, 5), torch.randn(2, 3, 4, 5).floor_().abs_()),
+    ),
+    dict(
+        module_name='CTCLoss',
+        constructor_args=(14,),
+        input_fn=lambda: (torch.randn(50, 16, 20).log_softmax(2),
+            torch.randint(1, 20, (16, 30), dtype=torch.long),
+            torch.full((16,), 50, dtype=torch.long),
+            torch.randint(10, 30, (16,), dtype=torch.long)),
+        no_grad=True,
+    ),
 ]
 
 
@@ -10878,144 +11013,6 @@ class TestAsync(JitTestCase):
         self.assertEqual(y3, foo3(x1, x2, x3))
 
 
-loss_tests = [  # noqa: C408
-    dict(  # noqa: C408
-        module_name='L1Loss',
-        input_fn=lambda: ((2, 3, 4), (2, 3, 4)),
-    ),
-    dict(  # noqa: C408
-        module_name='NLLLoss',
-        input_fn=lambda: (torch.rand(15, 10).log(), torch.Tensor(15).uniform_().mul(10).floor().long()),
-        check_sum_reduction=True
-    ),
-    dict(  # noqa: C408
-        module_name='NLLLoss',
-        constructor_args=(None, None, 2),
-        input_fn=lambda: (torch.rand(15, 10).log(), torch.Tensor(15).uniform_().mul(10).floor().long()),
-        desc='ignore_index'
-    ),
-    dict(  # noqa: C408
-        module_name='NLLLoss',
-        constructor_args_fn=lambda: (torch.rand(10),),
-        input_fn=lambda: (torch.rand(15, 10).add(1e-2).log(), torch.Tensor(15).uniform_().mul(10).floor().long()),
-        desc='weights',
-    ),
-    dict(  # noqa: C408
-        module_name='NLLLoss',
-        constructor_args_fn=lambda: (torch.rand(10), None, 2),
-        input_fn=lambda: (torch.rand(15, 10).add(1e-2).log(), torch.Tensor(15).uniform_().mul(10).floor().long()),
-        desc='weights_ignore_index'
-    ),
-    dict(  # noqa: C408
-        module_name='NLLLoss',
-        constructor_args_fn=lambda: (torch.rand(10), None, -1),
-        input_fn=lambda:
-            (torch.rand(15, 10).add(1e-2).log(),
-            torch.Tensor(15).uniform_().mul(10 + 1).floor().long() - 1),
-        desc='weights_ignore_index_neg'
-    ),
-    dict(  # noqa: C408
-        module_name='KLDivLoss',
-        input_fn=lambda: (torch.rand(10, 10).log(), torch.rand(10, 10)),
-    ),
-    dict(  # noqa: C408
-        module_name='MSELoss',
-        input_fn=lambda: ((2, 3, 4, 5), (2, 3, 4, 5)),
-    ),
-    dict(  # noqa: C408
-        module_name='BCELoss',
-        input_fn=lambda: (torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2), torch.randn(15, 10).gt(0).double()),
-        no_grad=True,
-    ),
-    dict(  # noqa: C408
-        module_name='BCELoss',
-        constructor_args_fn=lambda: (torch.rand(10),),
-        input_fn=lambda: (torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2), torch.randn(15, 10).gt(0).double()),
-        desc='weights',
-        no_grad=True,
-    ),
-    dict(  # noqa: C408
-        module_name='BCEWithLogitsLoss',
-        constructor_args=(torch.rand(10), False, None, 'mean', torch.rand(10)),
-        input_fn=lambda: (torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2), torch.randn(15, 10).gt(0).double()),
-        no_grad=True,
-    ),
-    dict(  # noqa: C408
-        module_name='BCEWithLogitsLoss',
-        constructor_args=(torch.rand(15, 10), False),
-        input_fn=lambda: (torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2), torch.randn(15, 10).gt(0).double()),
-        desc='weights',
-    ),
-    dict(  # noqa: C408
-        module_name='HingeEmbeddingLoss',
-        input_fn=lambda: (torch.randn(10), torch.randn(10).gt(0).double().mul_(2).sub(1)),
-        no_grad=True,
-    ),
-    dict(  # noqa: C408
-        module_name='HingeEmbeddingLoss',
-        constructor_args=(0.5,),
-        input_fn=lambda: (torch.randn(10), torch.randn(10).gt(0).double().mul_(2).sub(1)),
-        desc='margin',
-        no_grad=True,
-    ),
-    dict(  # noqa: C408
-        module_name='MultiLabelMarginLoss',
-        input_fn=lambda: (torch.rand(10,), torch.rand(10).mul(10).floor().long()),
-        no_grad=True,
-    ),
-    dict(  # noqa: C408
-        module_name='SmoothL1Loss',
-        input_fn=lambda: ((5, 10), (5, 10)),
-    ),
-    dict(  # noqa: C408
-        module_name='SoftMarginLoss',
-        input_fn=lambda: (torch.randn(5, 5).sign(), torch.randn(5, 5).sign()),
-        no_grad=True,
-    ),
-    dict(  # noqa: C408
-        module_name='CrossEntropyLoss',
-        input_fn=lambda: (torch.randn(15, 10), torch.Tensor(15).uniform_().mul(10).floor().long()),
-    ),
-    dict(  # noqa: C408
-        module_name='MultiLabelSoftMarginLoss',
-        constructor_args=(torch.rand(10),),
-        input_fn=lambda: (torch.randn(5, 10), torch.rand(5, 10).mul(2).floor()),
-        no_grad=True,
-    ),
-    dict(  # noqa: C408
-        module_name='CosineEmbeddingLoss',
-        input_fn=lambda: (torch.rand(15, 10), torch.rand(15, 10), torch.randn(15).sign()),
-        no_grad=True,
-    ),
-    dict(  # noqa: C408
-        module_name='MarginRankingLoss',
-        input_fn=lambda: (torch.randn(50).mul(10), torch.randn(50).mul(10), torch.randn(50).sign()),
-    ),
-    dict(  # noqa: C408
-        module_name='TripletMarginLoss',
-        input_fn=lambda: (torch.randn(5, 10, requires_grad=True), torch.randn(5, 10, requires_grad=True),
-            torch.randn(5, 10, requires_grad=True)),
-    ),
-    dict(  # noqa: C408
-        module_name='MultiMarginLoss',
-        input_fn=lambda: (torch.randn(5, 10), torch.rand(5).mul(8).floor().long()),
-        no_grad=True,
-    ),
-    dict(  # noqa: C408
-        module_name='PoissonNLLLoss',
-        input_fn=lambda:(torch.randn(2, 3, 4, 5), torch.randn(2, 3, 4, 5).floor_().abs_()),
-    ),
-    dict(  # noqa: C408
-        module_name='CTCLoss',
-        constructor_args=(14,),
-        input_fn=lambda: (torch.randn(50, 16, 20).log_softmax(2),
-            torch.randint(1, 20, (16, 30), dtype=torch.long),
-            torch.full((16,), 50, dtype=torch.long),
-            torch.randint(10, 30, (16,), dtype=torch.long)),
-        no_grad=True,
-    ),
-]
-
 for test in autograd_method_tests:
     add_autograd_test(*test)
 
@@ -11023,9 +11020,6 @@ for test in nn_functional_tests:
     add_nn_functional_test(*test)
 
 for test in module_tests + new_module_tests + additional_module_tests + local_module_tests:
-    add_nn_module_test(**test)
-
-for test in loss_tests:
     add_nn_module_test(**test)
 
 if __name__ == '__main__':
