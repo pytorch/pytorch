@@ -1525,26 +1525,16 @@ class TestCuda(TestCase):
     def test_sum_cpu_gpu_mismatch(self):
         x = torch.randn(20, dtype=torch.float32, device='cuda')
         y = torch.randn(1, dtype=torch.float32)
-        try:
+        with self.assertRaisesRegex(RuntimeError, 'expected type'
+                                    ' torch.FloatTensor but got'
+                                    ' torch.cuda.FloatTensor'):
             torch.sum(x, dim=[0], dtype=torch.float32, out=y)
-            self.assertEqual(y, 20)
-        except RuntimeError as e:
-            reason = e.args[0]
-            if 'torch.FloatTensor' in reason and 'torch.cuda.FloatTensor' in reason:
-                pass
-            else:
-                raise(e)
         # makeing sure half to float promotion is also properly working.
         x = x.half()
-        try:
+        with self.assertRaisesRegex(RuntimeError, 'expected type'
+                                    ' torch.FloatTensor but got'
+                                    ' torch.cuda.HalfTensor'):
             torch.sum(x, dim=[0], dtype=torch.float32, out=y)
-            self.assertEqual(y, 20)
-        except RuntimeError as e:
-            reason = e.args[0]
-            if 'torch.FloatTensor' in reason and 'torch.cuda.HalfTensor' in reason:
-                pass
-            else:
-                raise(e)
 
     @skipIfRocm
     def test_sum_noncontig(self):
