@@ -123,15 +123,6 @@ struct SymbolicVariable {
   SymbolicVariable operator%(at::Scalar rhs) const {
     return create(aten::remainder, {*this, insertConstant(rhs)})[0].typeLike(*this);
   }
-  Value* size() const {
-    return v->owningGraph()->insert(aten::size, {v});
-  }
-  SymbolicVariable sumToSize(Value * size) const {
-    return create(prim::SumToSize, {*this, size})[0];
-  }
-  SymbolicVariable expand(Value * size) const {
-    return v->owningGraph()->insert(aten::expand, {v, size});
-  }
   SymbolicVariable isnan() const {
     return create(aten::ne, {*this, *this})[0].typeLikeWithScalarType(*this, at::kByte);
   }
