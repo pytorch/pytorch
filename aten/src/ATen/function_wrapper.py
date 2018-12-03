@@ -377,7 +377,6 @@ TopEnvironment = TypedDict('TopEnvironment', {
     'pure_virtual_extended_type_method_declarations': List[str],
     'type_method_declarations': List[str],
     'type_method_definitions': List[str],
-    'type_method_inline_definitions': List[str],
     'tensor_method_declarations': List[str],
     'tensor_method_definitions': List[str],
     'function_declarations': List[str],
