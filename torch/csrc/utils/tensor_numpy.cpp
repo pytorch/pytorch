@@ -180,7 +180,7 @@ ScalarType numpy_dtype_to_aten(int dtype) {
   if (!pytype) throw python_error();
   throw TypeError(
       "can't convert np.ndarray of type %s. The only supported types are: "
-      "float64, float32, float16, int64, int32, and uint8.",
+      "float64, float32, float16, int64, int32, int16, int8, and uint8.",
       ((PyTypeObject*)pytype.get())->tp_name);
 }
 
