@@ -594,8 +594,8 @@ class BCEWithLogitsLoss(_Loss):
 
     def __init__(self, weight=None, size_average=None, reduce=None, reduction='mean', pos_weight=None):
         super(BCEWithLogitsLoss, self).__init__(size_average, reduce, reduction)
-        self.weight = weight
-        self.pos_weight = pos_weight
+        self.register_buffer('weight', weight)
+        self.register_buffer('pos_weight', pos_weight)
 
     @weak_script_method
     def forward(self, input, target):
