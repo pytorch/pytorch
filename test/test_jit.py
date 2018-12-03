@@ -8786,6 +8786,23 @@ a")
         self.assertEqual(unify_to_optional(True), None)
         self.assertEqual(unify_to_optional(False), 2)
 
+        @torch.jit.script
+        def opt_list(x):
+            # type: (Optional[List[float]]) -> int
+            return 2
+
+        @torch.jit.script
+        def broadcast_opt_list(x):
+            # type: (Optional[BroadcastingList2[float]]) -> int
+            return 2
+
+        @torch.jit.script
+        def opt_list_tuple_caller(x):
+            # type: (Tuple[float, float]) -> int
+            return opt_list(x) + broadcast_opt_list(x)
+
+        self.assertEqual(opt_list_tuple_caller((2., 3.)), 4)
+
     def test_lhs_indexing(self):
         def foo(a, b):
             a = a.clone()
