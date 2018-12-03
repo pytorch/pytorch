@@ -488,6 +488,20 @@ class TestJit(JitTestCase):
         self.assertExpectedGraph(trace)
         self.assertExportImport(trace, (x, y))
 
+    def test_restore_device(self):
+        # main purpose is checking map_location works
+        m = torch.jit.ScriptModule()
+        cpu_device_str = 'cpu'
+        m.p0 = nn.Parameter(torch.tensor([0.3], dtype=torch.float,
+                                         device=cpu_device_str))
+        m.register_buffer('b0', torch.tensor([0.9], dtype=torch.float,
+                                             device=cpu_device_str))
+        m2 = self.getExportImportCopy(m)
+        self.assertEqual(tuple(m.parameters()), tuple(m2.parameters()))
+        self.assertEqual(tuple(m.buffers()), tuple(m2.buffers()))
+        self.assertFalse(m2.p0.is_cuda)
+        self.assertFalse(m2.b0.is_cuda)
+
     @unittest.skipIf(not RUN_CUDA, "restore device requires CUDA")
     def test_restore_device_cuda(self):
         m = torch.jit.ScriptModule()
@@ -512,20 +526,11 @@ class TestJit(JitTestCase):
         self.assertEqual(str(m3.p0.device), cpu_device_str)
         self.assertEqual(str(m3.b0.device), cpu_device_str)
 
-        # restore all to cpu using device
-        m4 = self.getExportImportCopy(m, map_location=torch.device(cpu_device_str))
-        self.assertEqual(str(m4.p0.device), cpu_device_str)
-        self.assertEqual(str(m4.b0.device), cpu_device_str)
-
-        # restore all to cuda0 using dict
-        m5 = self.getExportImportCopy(m, map_location={cuda_device_str: 'cuda:0'})
-        self.assertEqual(str(m5.p0.device), 'cuda:0')
-        self.assertEqual(str(m5.b0.device), 'cuda:0')
-
-        # restore all to cpu using function
-        m6 = self.getExportImportCopy(m, map_location=lambda tensor, loc: 'cpu')
-        self.assertEqual(str(m6.p0.device), cpu_device_str)
-        self.assertEqual(str(m6.b0.device), cpu_device_str)
+        # restore all to first gpu using device
+        m4 = self.getExportImportCopy(
+          m3, map_location=torch.device('cuda:0'))
+        self.assertEqual(str(m4.p0.device), 'cuda:0')
+        self.assertEqual(str(m4.b0.device), 'cuda:0')
 
     def test_typeas_trace_check(self):
         a = torch.tensor([0.4], requires_grad=True)
