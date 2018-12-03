@@ -52,10 +52,8 @@ class GroupNormOp final : public Operator<Context> {
     T* mu_data = nullptr;
     T* rsig_data = nullptr;
     if (OutputSize() == 3) {
-      auto* mu = Output(MU);
-      auto* rsig = Output(INV_SIGMA);
-      mu->Resize(N, G);
-      rsig->Resize(N, G);
+      auto* mu = Output(MU, {N, G}, at::dtype<T>());
+      auto* rsig = Output(INV_SIGMA, {N, G}, at::dtype<T>());
       mu_data = mu->template mutable_data<T>();
       rsig_data = rsig->template mutable_data<T>();
     } else {

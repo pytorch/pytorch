@@ -1,4 +1,4 @@
-graph(%x : Dynamic) {
+graph(%x : Tensor) {
   %1 : bool = prim::Constant[value=1]()
   %y.1 : int = prim::Constant[value=0]()
   %3 : int = prim::TensorToNum(%x)
