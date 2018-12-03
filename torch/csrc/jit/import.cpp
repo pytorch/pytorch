@@ -213,7 +213,8 @@ void import_ir_module(
   deserializer.deserialize(module_lookup, device);
 }
 
-std::shared_ptr<script::Module> load(std::istream& in) {
+std::shared_ptr<script::Module> load(std::istream& in,
+    c10::optional<at::Device> device) {
   auto module = std::make_shared<script::Module>();
 
   auto module_lookup = [&](const std::vector<std::string>& qualified_name) {
@@ -228,18 +229,18 @@ std::shared_ptr<script::Module> load(std::istream& in) {
   };
 
   ScriptModuleDeserializer deserializer(&in);
-  // TODO: add device support in C++ API
-  deserializer.deserialize(module_lookup, c10::optional<at::Device>(at::Device("cpu")));
+  deserializer.deserialize(module_lookup, device);
 
   return module;
 }
 
-std::shared_ptr<script::Module> load(const std::string& filename) {
+std::shared_ptr<script::Module> load(const std::string& filename,
+    c10::optional<at::Device> device) {
   std::ifstream in(filename, std::ios_base::binary);
 
   AT_CHECK(! in.fail(), "load: could not open file ", filename);
 
-  auto module = load(in);
+  auto module = load(in, device);
 
   return module;
 }
