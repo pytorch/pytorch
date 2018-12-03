@@ -138,9 +138,7 @@ public:
   bool isTensor() const {
     return type()->kind() == TypeKind::CompleteTensorType;
   }
-  bool isNone() const {
-    return type()->kind() == TypeKind::NoneType;
-  }
+  TORCH_API bool mustBeNone() const;
   size_t unique() const {
     return unique_;
   }

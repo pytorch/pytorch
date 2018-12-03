@@ -131,6 +131,12 @@ private:
   TypePtr type;
 };
 
+static Value* asSimple(SugaredValuePtr value) {
+  if(SimpleValue* sv = dynamic_cast<SimpleValue*>(value.get())) {
+    return sv->getValue();
+  }
+  return nullptr;
+}
 // we consider _N where N is a number, to be a non-meaningful name
 // and do not record it as a unique name. This allows python printing to
 // be able to export and import more consistently named graphs
@@ -286,12 +292,6 @@ struct Environment {
 
   void setVar(const SourceRange& loc, const std::string& name, Value* value) {
     setSugaredVar(loc, name, std::make_shared<SimpleValue>(value));
-  }
-  static Value* asSimple(SugaredValuePtr value) {
-    if(SimpleValue* sv = dynamic_cast<SimpleValue*>(value.get())) {
-      return sv->getValue();
-    }
-    return nullptr;
   }
 
   void setSugaredVar(const SourceRange& loc, const std::string& name, SugaredValuePtr value) {
@@ -1251,9 +1251,7 @@ private:
     return v;
   }
 
-  void emitIf(const If& stmt) {
-    Value* cond_value = emitCond(stmt.cond());
-
+  void emitIfElseBlocks(Value* cond_value, const If& stmt) {
     Node* n = graph->insertNode(create(prim::If, stmt.range(), 0));
     n->addInput(cond_value);
     auto* true_block = n->addBlock();
@@ -1336,6 +1334,62 @@ private:
       false_block->registerOutput(fv);
       environment_stack->setVar(stmt.range(), x, n->addOutput()->setType(*unified));
     }
+  }
+
+  void emitIf(const If& stmt) {
+    // NOTE: emitIf checks on If stmt condition to see if the cond AST kind == is/is not,
+    // for such cases we do meta programming and disable emitting the corresponding branches
+    Expr cond = stmt.cond();
+
+    if (cond.kind() != TK_IS && cond.kind() != TK_ISNOT) {
+      // emit normal IF stmt for cases except TK_IS and TK_ISNOT
+      Value* cond_value = emitCond(cond);
+      emitIfElseBlocks(cond_value, stmt);
+      return;
+    }
+    // meta programming on AST for is/is not cases and emit branches base on the possible output of cond
+    auto cond_op = BinOp(cond);
+    SugaredValuePtr lhs_val = emitSugaredExpr(cond_op.lhs(), 1);
+    SugaredValuePtr rhs_val = emitSugaredExpr(cond_op.rhs(), 1);
+
+    List<Stmt> always_none_branch = cond.kind() == TK_IS? stmt.trueBranch(): stmt.falseBranch();
+    List<Stmt> never_none_branch = cond.kind() == TK_IS? stmt.falseBranch(): stmt.trueBranch();
+
+    auto lhs_none= lhs_val->isNone();
+    auto rhs_none= rhs_val->isNone();
+
+    // Dispatch logic (A: ALWAYS, N: NEVER, M: MAYBE):
+    //
+    // AA, -> emit always_none_branch
+    // AN , NA-> emit never_none_branch
+    // MA, MM, MN, NM, NN, AM -> emit both conditional branches
+
+    if (lhs_none == ALWAYS && rhs_none == ALWAYS) {
+      // None is/is not None: only emit the always_none_branch
+      emitStatements(always_none_branch);
+    } else if ((lhs_none == ALWAYS && rhs_none == NEVER) ||
+        (lhs_none == NEVER && rhs_none == ALWAYS)){
+      // lhs_val/rhs_val with A/M: only emit never_none_branch
+      emitStatements(never_none_branch);
+    }
+    else {
+      // all other cases for lhs_val and rhs_val
+      // emit the whole If stmt as usual, finish emitCond first
+      auto lhs_range = cond_op.lhs().get()->range();
+      auto rhs_range = cond_op.rhs().get()->range();
+      auto kind = getNodeKind(cond.kind(), cond.get()->trees().size());
+      Value* cond_value = emitBuiltinCall(
+          cond.get()->range(),
+          *method.graph(),
+          kind,
+          c10::nullopt,
+          {lhs_val->asValue(lhs_range, method), rhs_val->asValue(rhs_range, method)},
+          {},
+          /*required=*/true);
+      emitIfElseBlocks(cond_value, stmt);
+
+    }
+
   }
 
   // *********************** Loop Operators ************************************
