@@ -8628,6 +8628,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
     def test_toNumpy(self):
         types = [
             'torch.ByteTensor',
+            'torch.CharTensor',
+            'torch.ShortTensor',
             'torch.IntTensor',
             'torch.HalfTensor',
             'torch.FloatTensor',
