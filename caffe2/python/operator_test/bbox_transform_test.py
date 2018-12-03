@@ -279,7 +279,7 @@ class TestBBoxTransformOp(serial.SerializedTestCase):
             reference=bbox_transform_ref,
         )
 
-    @serial.given(
+    @given(
         num_rois=st.integers(1, 10),
         num_classes=st.integers(1, 10),
         im_dim=st.integers(100, 600),
@@ -300,7 +300,7 @@ class TestBBoxTransformOp(serial.SerializedTestCase):
         """
         Test with all rois belonging to a single image per run.
         """
-        rois = (generate_rois([num_rois], [im_dim]))
+        rois = (generate_rois([num_rois], [1.0]))
         box_dim = 4
         if skip_batch_id:
             rois = rois[:, 1:]
