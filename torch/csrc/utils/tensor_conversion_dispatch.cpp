@@ -14,18 +14,16 @@ namespace torch { namespace utils {
 at::Tensor dispatch_type_conversion(
     const at::Tensor& self,
     const at::Type& type,
-    c10::optional<int32_t> device_index,
+    c10::optional<c10::Device> device_opt,
     bool non_blocking) {
+
   if (type.is_cuda()) {
     torch::utils::cuda_lazy_init();
   }
   AutoNoGIL no_gil;
 
   // TODO: Make this less CUDA specific
-  at::Device device = self.device();
-  if (device_index && *device_index != -1) {
-    device = at::Device(at::kCUDA, *device_index);
-  }
+  at::Device device = device_opt.value_or(self.device());
   at::DeviceGuard device_guard(device);
 
   if (self.device().type() == type.device_type()) {
@@ -34,19 +32,12 @@ at::Tensor dispatch_type_conversion(
         // Do nothing, there is only one CPU "device"
         // TODO: Maybe this wouldn't be true with NUMA
         break;
-      case at::DeviceType::CUDA:
-        if (self.device().index() != at::current_device()) {
+      default:
+        if (self.device() != device_guard.current_device()) {
           // copy if the devices are different even if the types are the same
           return type.copy(self, non_blocking);
         }
         break;
-      default:
-        // This assert failed because you tried to use copy() on a non-CUDA
-        // device.  We couldn't figure out if this would have resulted in
-        // a cross-device copy, because at::current_device() only knows about
-        // the current CUDA device.  Fix current_device to take a DeviceType
-        // and provide information for things that are not CUDA too!
-        AT_ASSERT(0);
     }
   }
 

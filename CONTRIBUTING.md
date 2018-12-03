@@ -412,7 +412,7 @@ Here are a few well known pitfalls and workarounds:
   * The idiom `static_assert(f() == f())` to test if `f` is constexpr
     does not work; you'll get "error C2131: expression did not evaluate
     to a constant".  Don't use these asserts on Windows.
-    (Example: `aten/src/ATen/core/intrusive_ptr.h`)
+    (Example: `c10/util/intrusive_ptr.h`)
 
 * (NVCC) Code you access inside a `static_assert` will eagerly be
   evaluated as if it were device code, and so you might get an error

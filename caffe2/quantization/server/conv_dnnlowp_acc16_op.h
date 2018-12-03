@@ -41,16 +41,27 @@ class ConvDNNLowPAcc16Op final : public ConvDNNLowPOp<std::uint8_t, ReluFused> {
   template <typename InType>
   bool RunOnDeviceWithOrderNHWCAndType_();
 
+  template <typename PackAMatrix, fbgemm::QuantizationGranularity Q_GRAN>
+  void DispatchFBGEMM(
+      PackAMatrix& packA,
+      const std::uint8_t* col_buffer_quantized_data,
+      vector<std::int32_t>* Y_int32);
+
   void ConvOutlier_(
       const std::uint8_t* col_buffer,
       vector<std::int32_t>* Y_int32);
 
-  std::vector<std::unique_ptr<fbgemm::PackBMatrix<std::int8_t, std::int16_t>>>
+  std::unique_ptr<fbgemm::PackBMatrix<std::int8_t, std::int16_t>>
       Wq_acc16_packed_;
 
   // Wq outlier in CSC format
-  std::vector<fbgemm::CompressedSparseColumn> Wq_outlier_;
+  std::unique_ptr<fbgemm::CompressedSparseColumn> Wq_outlier_;
 
+  // Threshold to decide whether a weight is outlier.
+  // For example, if nbits_in_non_outlier_ == 7, w is an outlier if w < -64 or
+  // w >= 64.
+  // nbits_in_non_outlier_ == 0 means everything is outlier.
+  // nbits_in_non_outlier_ == 8 means nothing is outlier.
   int nbits_in_non_outlier_;
   int copy_to_32bit_frequency_;
 

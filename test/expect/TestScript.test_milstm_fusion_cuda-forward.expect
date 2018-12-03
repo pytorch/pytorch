@@ -23,13 +23,33 @@ with prim::DifferentiableGraph_0 = graph(%0 : Float(*, *)
   %Wx.1 : Float(*, *) = aten::mm(%7, %9)
   %11 : Float(*, *) = aten::t(%6)
   %Uz.1 : Float(*, *) = aten::mm(%5, %11)
-  %13 : int = prim::Constant[value=1]()
-  %14 : Float(*, *), %15 : Float(*, *) = prim::FusionGroup_0(%2, %Uz.1, %3, %Wx.1, %4)
-  %16 : Dynamic[] = prim::ListConstruct(%14, %1)
-  %17 : Dynamic[] = aten::broadcast_tensors(%16)
-  %18 : Dynamic, %19 : Dynamic = prim::ListUnpack(%17)
-  %hy : Float(*, *), %21 : Float(*, *), %cy : Float(*, *), %outgate.1 : Float(*, *), %cellgate.1 : Float(*, *), %forgetgate.1 : Float(*, *), %ingate.1 : Float(*, *) = prim::FusionGroup_1(%0, %19, %18)
-  return (%hy, %cy, %9, %Wx.1, %11, %Uz.1, %15, %ingate.1, %forgetgate.1, %cellgate.1, %outgate.1, %21);
+  %13 : int[] = aten::size(%4)
+  %14 : int[] = aten::size(%Wx.1)
+  %15 : int[] = aten::size(%Uz.1)
+  %16 : int[] = aten::size(%3)
+  %17 : int = prim::Constant[value=1]()
+  %18 : int[] = aten::size(%2)
+  %19 : Float(*, *), %20 : Float(*, *), %21 : Float(*, *), %22 : Float(*, *), %23 : Float(*, *), %24 : Float(*, *) = prim::FusionGroup_0(%2, %Uz.1, %3, %Wx.1, %4)
+  %25 : int[] = aten::size(%24)
+  %26 : int[] = aten::size(%23)
+  %27 : int[] = aten::size(%22)
+  %28 : int[] = aten::size(%21)
+  %29 : int[] = aten::size(%20)
+  %30 : int[] = aten::size(%19)
+  %31 : int[] = aten::size(%1)
+  %32 : Tensor[] = prim::ListConstruct(%19, %1)
+  %33 : Tensor[] = aten::broadcast_tensors(%32)
+  %34 : Tensor, %35 : Tensor = prim::ListUnpack(%33)
+  %36 : int[] = aten::size(%0)
+  %hy : Float(*, *), %38 : Float(*, *), %cy : Float(*, *), %40 : Float(*, *), %41 : Float(*, *), %outgate.1 : Float(*, *), %cellgate.1 : Float(*, *), %forgetgate.1 : Float(*, *), %ingate.1 : Float(*, *) = prim::FusionGroup_1(%0, %35, %34)
+  %46 : int[] = aten::size(%ingate.1)
+  %47 : int[] = aten::size(%forgetgate.1)
+  %48 : int[] = aten::size(%cellgate.1)
+  %49 : int[] = aten::size(%outgate.1)
+  %50 : int[] = aten::size(%41)
+  %51 : int[] = aten::size(%40)
+  %52 : int[] = aten::size(%38)
+  return (%hy, %cy, %9, %Wx.1, %11, %Uz.1, %13, %14, %24, %25, %15, %16, %14, %26, %27, %18, %15, %28, %29, %30, %31, %ingate.1, %forgetgate.1, %cellgate.1, %outgate.1, %47, %36, %46, %48, %50, %51, %38, %49, %52);
 }
 with prim::FusionGroup_0 = graph(%0 : Float(*)
       %1 : Float(*, *)
@@ -44,11 +64,11 @@ with prim::FusionGroup_0 = graph(%0 : Float(*)
   %10 : Float(*, *) = aten::mul(%0, %1)
   %11 : int = prim::Constant[value=1]()
   %12 : Float(*, *) = aten::add(%9, %10, %11)
-  return (%12, %5);
+  return (%12, %10, %9, %7, %6, %5);
 }
 with prim::FusionGroup_1 = graph(%0 : Float(*, *)
-      %1 : Dynamic
-      %2 : Dynamic) {
+      %1 : Tensor
+      %2 : Tensor) {
   %3 : Float(*, *), %4 : Float(*, *), %5 : Float(*, *), %6 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%2)
   %7 : Float(*, *), %8 : Float(*, *), %9 : Float(*, *), %10 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%1)
   %11 : int = prim::Constant[value=1]()
@@ -69,5 +89,5 @@ with prim::FusionGroup_1 = graph(%0 : Float(*, *)
   %cy : Float(*, *) = aten::add(%23, %24, %25)
   %27 : Float(*, *) = aten::tanh(%cy)
   %hy : Float(*, *) = aten::mul(%outgate.1, %27)
-  return (%hy, %27, %cy, %outgate.1, %cellgate.1, %forgetgate.1, %ingate.1);
+  return (%hy, %27, %cy, %24, %23, %outgate.1, %cellgate.1, %forgetgate.1, %ingate.1);
 }

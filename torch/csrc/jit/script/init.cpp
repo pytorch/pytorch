@@ -14,6 +14,7 @@
 #include "torch/csrc/jit/script/parser.h"
 #include "torch/csrc/jit/import_method.h"
 #include "torch/csrc/jit/hooks_for_testing.h"
+#include "torch/csrc/jit/passes/python_print.h"
 
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 
@@ -104,7 +105,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   }
 
   // call it like a function, e.g. `outputs = this(inputs)`
-  virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & m, at::ArrayRef<NamedValue> inputs_, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
+  std::shared_ptr<SugaredValue> call(SourceRange loc, Method & m, at::ArrayRef<NamedValue> inputs_, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
     auto inputs = toValues(*m.graph(), inputs_);
     auto schema = getSchema(inputs.size(), n_binders);
 
@@ -130,7 +131,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     return std::make_shared<SimpleValue>(packOutputs(*m.graph(), outputs));
   }
 
-  virtual std::string kind() const override {
+  std::string kind() const override {
     std::stringstream ss;
     ss << "python value of type '" << typeString(self) << "'";
     return ss.str();
@@ -173,8 +174,9 @@ struct VISIBILITY_HIDDEN ConstantPythonTupleValue : public PythonValue {
     py::tuple tup = self;
     std::vector<std::shared_ptr<SugaredValue>> result;
     result.reserve(tup.size());
-    for (size_t i = 0; i < tup.size(); ++i) {
-      result.push_back(toSugaredValue(tup[i], m, loc, true));
+    for (py::handle t : tup) {
+      py::object obj = py::reinterpret_borrow<py::object>(t);
+      result.push_back(toSugaredValue(obj, m, loc, true));
     }
     return result;
   }
@@ -203,12 +205,12 @@ struct ModuleValue : public SugaredValue {
   ModuleValue(std::shared_ptr<Module> module)
   : module(std::move(module)) {}
 
-  virtual std::string kind() const override {
+  std::string kind() const override {
     return "module";
   }
 
   // select an attribute on it, e.g. `this.field`
-  virtual std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override {
+  std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override {
     if(NamedModule* v = module->find_module(field)) {
       return std::make_shared<ModuleValue>(v->module);
     } else if(Method* v = module->find_method(field)) {
@@ -232,11 +234,11 @@ struct ModuleValue : public SugaredValue {
   }
 
   // call module.forward
-  virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<NamedValue> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
+  std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<NamedValue> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
     return attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, n_binders);
   }
 
-  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(
+  std::vector<std::shared_ptr<SugaredValue>> asTuple(
       SourceRange loc,
       Method& m,
       c10::optional<size_t> size_hint = {}) override {
@@ -260,6 +262,62 @@ struct ModuleValue : public SugaredValue {
   std::shared_ptr<Module> module;
 };
 
+struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
+  BooleanDispatchValue(py::dict dispatched_fn)
+      : dispatched_fn_(std::move(dispatched_fn)) {}
+
+  std::string kind() const override {
+    return "boolean dispatch";
+  }
+
+  std::vector<NamedValue> removeIndex(
+      at::ArrayRef<NamedValue> arr,
+      size_t index) {
+    auto sliced = arr.vec();
+    sliced.erase(sliced.begin() + index);
+    return sliced;
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      SourceRange loc,
+      Method& caller,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override {
+    c10::optional<bool> result;
+    Graph& graph = *(caller.graph());
+
+    auto index = py::cast<size_t>(dispatched_fn_["index"]);
+    auto arg_name = py::str(dispatched_fn_["arg_name"]);
+
+    if (index < inputs.size()) {
+      // Dispatch flag is in arg list
+      result = constant_as<bool>(inputs.at(index).value(graph));
+    } else if (auto i = findInputWithName(arg_name, attributes)) {
+      // Dispatch flag is in kwargs
+      result = constant_as<bool>(attributes[*i].value(graph));
+    } else {
+      // Didn't find dispatch flag, so use default value
+      result = py::cast<bool>(dispatched_fn_["default"]);
+    }
+
+    if (!result) {
+      throw ErrorReport(loc) << "value for boolean dispatch was not constant";
+    }
+
+    std::shared_ptr<SugaredValue> value;
+    if (*result) {
+      value = toSugaredValue(dispatched_fn_["if_true"], caller, loc);
+    } else {
+      value = toSugaredValue(dispatched_fn_["if_false"], caller, loc);
+    }
+    return value->call(loc, caller, inputs, attributes, n_binders);
+  }
+
+ private:
+  py::dict dispatched_fn_;
+};
+
 std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
     Method& m,
@@ -278,18 +336,22 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     } else if (py::isinstance<py::int_>(obj)) {
       return toSimple(g.insertConstant(py::cast<int64_t>(obj), loc));
     } else if (py::isinstance<py::float_>(obj)) {
-      return toSimple(g.insertConstant(py::cast<float>(obj), loc));
+      return toSimple(g.insertConstant(py::cast<double>(obj), loc));
+    } else if (py::isinstance<py::str>(obj)) {
+      return toSimple(g.insertConstant(py::cast<std::string>(obj), loc));
+    } else if (obj.is(py::none())) {
+      return toSimple(g.insertConstant(IValue(), loc));
     } else if (THPDevice_Check(obj.ptr())) {
-      auto device = (THPDevice*)obj.ptr();
+      auto device = reinterpret_cast<THPDevice*>(obj.ptr());
       std::vector<int64_t> v = {static_cast<int64_t>(device->device.type()),
                                 device->device.index()};
       return toSimple(g.insertConstant(std::move(v)));
     } else if (THPLayout_Check(obj.ptr())) {
-      auto layout = (THPLayout*)obj.ptr();
+      auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
       const auto v = static_cast<int64_t>(layout->layout);
       return toSimple(g.insertConstant(v, loc));
     } else if (THPDtype_Check(obj.ptr())) {
-      auto dtype = (THPDtype*)(obj.ptr());
+      auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
       const auto v = static_cast<int64_t>(dtype->scalar_type);
       return toSimple(g.insertConstant(v, loc));
     } else if (py::isinstance<py::tuple>(obj)) {
@@ -335,6 +397,12 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       auto mod = py::cast<std::shared_ptr<Module>>(compiled_fn);
       return std::make_shared<ModuleValue>(mod);
     }
+  }
+
+  py::object dispatched_fn =
+      py::module::import("torch.jit").attr("_try_get_dispatched_fn")(obj);
+  if (!dispatched_fn.is_none()) {
+    return std::make_shared<BooleanDispatchValue>(std::move(dispatched_fn));
   }
   return std::make_shared<PythonValue>(obj);
 }
@@ -391,8 +459,16 @@ FunctionSchema getSchemaWithNameAndDefaults(
     auto it = default_args.find(arg.name());
     if (it != default_args.end()) {
       try {
-        IValue value = toIValue(it->second, arg.type());
-        new_args.push_back(
+        IValue value;
+        auto n = arg.N();
+        auto list_type = arg.type()->cast<ListType>();
+        if (n && *n > 0 && list_type) {
+          // BroadcastingList, allow default values T for arg types List[T]
+          value = toIValue(it->second, list_type->getElementType());
+        } else {
+          value = toIValue(it->second, arg.type());
+        }
+        new_args.emplace_back(
             Argument(arg.name(), arg.type(), arg.N(), value, arg.kwarg_only()));
       } catch (py::cast_error& e) {
         throw ErrorReport(range)
@@ -461,6 +537,7 @@ void initJitScriptBindings(PyObject* module) {
           ++defs_it;
           ++defaults_it;
         }
+        didFinishEmitModule(m);
       })
       .def("_get_method",
       [](Module& self, const std::string& name) -> const Method& {
@@ -476,7 +553,7 @@ void initJitScriptBindings(PyObject* module) {
         py::tuple result(modules.size());
         for(size_t i = 0; i < modules.size(); ++i) {
           auto & item = modules[i];
-          result[i] = std::make_pair(item.key(), item.value());
+          result[i] = std::make_pair(item.key(), item.value().module);
         }
         return result;
       })
@@ -530,7 +607,8 @@ void initJitScriptBindings(PyObject* module) {
         const std::string& name,
         py::function func,
         py::tuple input_tuple,
-        py::function var_lookup_fn) {
+        py::function var_lookup_fn,
+        bool force_outplace) {
           // prereq: Module's buffers and parameters are unique
           // this was ensured in python before calling this function
           std::vector<at::Tensor*> parameters;
@@ -539,7 +617,8 @@ void initJitScriptBindings(PyObject* module) {
           for(at::Tensor* param : parameters) {
             inputs.emplace_back(*param);
           }
-          auto graph = tracer::createGraphByTracing(func, inputs, var_lookup_fn, input_tuple.size());
+          auto graph = tracer::createGraphByTracing(
+              func, inputs, var_lookup_fn, force_outplace, input_tuple.size());
           self->create_method(name, std::move(graph), std::move(parameters));
           didFinishEmitModule(self);
       })
@@ -580,6 +659,12 @@ void initJitScriptBindings(PyObject* module) {
         // see: [pybind11 varargs]
         Module& self = py::cast<Module&>(args[0]);
         return invokeScriptMethodFromPython(self.get_method("forward"), tuple_slice(std::move(args), 1), std::move(kwargs));
+      })
+      .def("_python_print", [](Module& self) {
+        std::ostringstream ss;
+        std::vector<at::Tensor> tensors;
+        PythonPrint(ss, self, tensors, true);
+        return std::make_pair(ss.str(), tensors);
       });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
@@ -603,7 +688,13 @@ void initJitScriptBindings(PyObject* module) {
       return self.graph_for(createStackForSchema(self.getSchema(), tuple_slice(std::move(args), 1), std::move(kwargs)));
     })
     .def("debug_disable_autodiff_subgraph_inlining", &Method::debugDisableAutodiffSubgraphInlining)
-    .def("pretty_print_schema", &Method::pretty_print_schema);
+    .def("pretty_print_schema", &Method::pretty_print_schema)
+    .def("python_print", [](Method &m) {
+      std::ostringstream oss;
+      std::vector<at::Tensor> constants;
+      PythonPrint(oss, m, constants, true);
+      return std::make_pair(oss.str(), std::move(constants));
+    });
 
   m.def("_jit_script_compile", [](std::shared_ptr<Module> mod, const Def &def, ResolutionCallback rcb, FunctionDefaults defaults) {
     auto def_f = def.withName("forward");
@@ -611,6 +702,7 @@ void initJitScriptBindings(PyObject* module) {
     auto& method = mod->get_method("forward");
     method.setSchema(getSchemaWithNameAndDefaults(
         def.range(), method.getSchema(), def.name().name(), defaults));
+    didFinishEmitModule(mod);
     return mod;
   });
 
@@ -627,7 +719,7 @@ void initJitScriptBindings(PyObject* module) {
     std::istringstream in(buffer);
     import_ir_module(module_lookup, in);
   });
-  m.def("_jit_import_method", import_method);
+  m.def("_jit_import_methods", import_methods);
   m.def("_jit_set_emit_module_hook", setEmitModuleHook);
 }
 

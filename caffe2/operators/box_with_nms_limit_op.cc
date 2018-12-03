@@ -167,9 +167,9 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
 
     // Write results
     int cur_start_idx = out_scores->size(0);
-    out_scores->Extend(total_keep_count, 50, &context_);
-    out_boxes->Extend(total_keep_count, 50, &context_);
-    out_classes->Extend(total_keep_count, 50, &context_);
+    out_scores->Extend(total_keep_count, 50);
+    out_boxes->Extend(total_keep_count, 50);
+    out_classes->Extend(total_keep_count, 50);
 
     int cur_out_idx = 0;
     for (int j = 1; j < num_classes; j++) {
@@ -202,7 +202,7 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
     }
 
     if (out_keeps) {
-      out_keeps->Extend(total_keep_count, 50, &context_);
+      out_keeps->Extend(total_keep_count, 50);
 
       Eigen::Map<EArrXi> out_keeps_arr(
           out_keeps->template mutable_data<int>() + cur_start_idx,

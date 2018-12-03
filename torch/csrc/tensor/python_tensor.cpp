@@ -181,7 +181,7 @@ static const char* get_module(Backend backend) {
 
 static std::string get_name(Backend backend, ScalarType scalarType) {
   std::ostringstream ss;
-  ss << get_module(backend) << "." << at::toString(scalarType) << "Tensor";
+  ss << get_module(backend) << "." << toString(scalarType) << "Tensor";
   return ss.str();
 }
 
@@ -190,7 +190,7 @@ static THPObjectPtr get_storage_obj(const Type& type) {
   auto module_obj = THPObjectPtr(PyImport_ImportModule(module_name));
   if (!module_obj) throw python_error();
 
-  auto storage_name = std::string(at::toString(type.scalarType())) + "Storage";
+  auto storage_name = std::string(toString(type.scalarType())) + "Storage";
   THPObjectPtr storage(PyObject_GetAttrString(module_obj.get(), storage_name.c_str()));
   if (!storage.get()) {
     throw TypeError("couldn't find storage object %s", storage_name.c_str());

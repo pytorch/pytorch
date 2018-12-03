@@ -7,8 +7,7 @@
 namespace torch {
 namespace jit {
 
-TORCH_API void import_method(const std::shared_ptr<script::Module>& mod, const std::string& src, const std::vector<at::Tensor>& constant_table);
-
+TORCH_API void import_methods(const std::shared_ptr<script::Module>& mod, const std::string& src, const std::vector<at::Tensor>& constant_table);
 
 } // namespace jit
 } // namespace torch

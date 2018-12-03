@@ -10,7 +10,7 @@ namespace at { namespace native {
 
 inline void setCuDNNStreamToCurrent() {
   // TODO: Should getCurrentStream be a method on Context?
-  AT_CUDNN_CHECK(cudnnSetStream(getCudnnHandle(), THCState_getCurrentStream(globalContext().getTHCState())));
+  AT_CUDNN_CHECK(cudnnSetStream(getCudnnHandle(), at::cuda::getCurrentCUDAStream()));
 }
 
 // cuDNN has a buggy check for tensor being contiguous (that is, it does

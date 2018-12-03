@@ -25,21 +25,28 @@ if [ "$(which gcc)" != "/root/sccache/gcc" ]; then
     fi
 
     # Setup wrapper scripts
-    for compiler in cc c++ gcc g++ x86_64-linux-gnu-gcc; do
+    wrapped="cc c++ gcc g++ x86_64-linux-gnu-gcc"
+    if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]]; then
+        wrapped="$wrapped nvcc"
+    fi
+    for compiler in $wrapped; do
       (
         echo "#!/bin/sh"
+
+        # TODO: if/when sccache gains native support for an
+        # SCCACHE_DISABLE flag analogous to ccache's CCACHE_DISABLE,
+        # this can be removed. Alternatively, this can be removed when
+        # https://github.com/pytorch/pytorch/issues/13362 is fixed.
+        #
+        # NOTE: carefully quoted - we want `which compiler` to be
+        # resolved as we execute the script, but SCCACHE_DISABLE and
+        # $@ to be evaluated when we execute the script
+        echo 'test $SCCACHE_DISABLE && exec '"$(which $compiler)"' "$@"'
+
         echo "exec $SCCACHE $(which $compiler) \"\$@\""
       ) > "./sccache/$compiler"
       chmod +x "./sccache/$compiler"
     done
-
-    if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]]; then
-      (
-        echo "#!/bin/sh"
-        echo "exec $SCCACHE $(which nvcc) \"\$@\""
-      ) > "./sccache/nvcc"
-      chmod +x "./sccache/nvcc"
-    fi
 
     export CACHE_WRAPPER_DIR="$PWD/sccache"
 
@@ -92,7 +99,7 @@ fi
 
 
 ###############################################################################
-# Use special scripts for Android, conda, and setup builds
+# Use special scripts for Android and setup builds
 ###############################################################################
 if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   export ANDROID_NDK=/opt/ndk
@@ -101,19 +108,6 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   CMAKE_ARGS+=("-DUSE_OBSERVERS=ON")
   CMAKE_ARGS+=("-DUSE_ZSTD=ON")
   "${ROOT_DIR}/scripts/build_android.sh" ${CMAKE_ARGS[*]} "$@"
-  exit 0
-elif [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
-  "${ROOT_DIR}/scripts/build_anaconda.sh" --skip-tests --install-locally "$@"
-  report_compile_cache_stats
-
-  # This build will be tested against onnx tests, which needs onnx installed.
-  # At this point the visible protbuf installation will be in conda, since one
-  # of Caffe2's dependencies uses conda, so the correct protobuf include
-  # headers are those in conda as well
-  # This path comes from install_anaconda.sh which installs Anaconda into the
-  # docker image
-  PROTOBUF_INCDIR=/opt/conda/include pip install -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
-  report_compile_cache_stats
   exit 0
 fi
 
@@ -156,6 +150,12 @@ if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
   ########## HIPIFY Caffe2 operators
   ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_pytorch_amd.py"
   ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_caffe2_amd.py"
+fi
+
+# building bundled nccl in this config triggers a bug in nvlink. For
+# more, see https://github.com/pytorch/pytorch/issues/14486
+if [[ "${BUILD_ENVIRONMENT}" == *-cuda8*-cudnn7* ]]; then
+    CMAKE_ARGS+=("-DUSE_SYSTEM_NCCL=ON")
 fi
 
 # Try to include Redis support for Linux builds

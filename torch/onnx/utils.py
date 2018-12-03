@@ -170,7 +170,7 @@ def _trace(func, args, operator_export_type, return_outs=False):
     if isinstance(args, torch.Tensor):
         args = (args, )
 
-    trace, torch_out = torch.jit.get_trace_graph(func, args)
+    trace, torch_out = torch.jit.get_trace_graph(func, args, _force_outplace=True)
     trace.set_graph(_optimize_graph(trace.graph(), operator_export_type))
     if return_outs:
         return trace, torch_out
@@ -189,7 +189,7 @@ def _trace_and_get_graph_from_model(model, args, training):
     # can turn training=True (or None, to preserve whatever the original
     # training mode was.)
     with set_training(model, training):
-        trace, torch_out = torch.jit.get_trace_graph(model, args)
+        trace, torch_out = torch.jit.get_trace_graph(model, args, _force_outplace=True)
 
     if orig_state_dict_keys != _unique_state_dict(model).keys():
         raise RuntimeError("state_dict changed after running the tracer; "
@@ -265,7 +265,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                                                example_outputs, propagate)
 
     from torch.onnx.symbolic import _onnx_opset_version
-    return graph.prettyPrintExport(params, _onnx_opset_version, False, operator_export_type, google_printer)
+    return graph._pretty_print_onnx(params, _onnx_opset_version, False, operator_export_type, google_printer)
 
 
 # NOTE: the output `torch_out` will contain the output tensors resulting from
@@ -284,9 +284,9 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
     from torch.onnx.symbolic import _onnx_opset_version
     defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE
     if export_params:
-        proto, export_map = graph.export(params, _onnx_opset_version, defer_weight_export, operator_export_type)
+        proto, export_map = graph._export_onnx(params, _onnx_opset_version, defer_weight_export, operator_export_type)
     else:
-        proto, export_map = graph.export([], _onnx_opset_version, False, operator_export_type)
+        proto, export_map = graph._export_onnx([], _onnx_opset_version, False, operator_export_type)
 
     if export_type == ExportTypes.PROTOBUF_FILE:
         assert(len(export_map) == 0)

@@ -161,19 +161,19 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
           K,
           X_pack_buf_.data(), // buffer for packed matrix
           1, // group
-          in_qparams_[0].zero_point,
           row_offsets_.data());
 
       DoNothing<> doNothingObj{};
       ReQuantizeOutput<false /* FUSE_RELU */> outputProcObj(
           doNothingObj,
-          requantization_params_.real_multiplier,
+          &requantization_params_.real_multiplier,
           out_qparams_.zero_point,
           in_qparams_[0].zero_point,
-          in_qparams_[1].zero_point,
+          &in_qparams_[1].zero_point,
           packA.getRowOffsetBuffer(),
           column_offsets_.data(),
-          b_quantized_data_);
+          b_quantized_data_,
+          N); // ncols per quant group
 
       Y_int32_.resize(Y->size());
       fbgemmPacked(
@@ -212,12 +212,13 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
         ReQuantizeForFloat<false /* FUSE_RELU*/> outputProcObj(
             doNothingObj,
             in_qparams_[0].scale,
-            in_qparams_[1].scale,
+            &in_qparams_[1].scale,
             in_qparams_[0].zero_point,
-            in_qparams_[1].zero_point,
+            &in_qparams_[1].zero_point,
             packA.getRowOffsetBuffer(),
             column_offsets_.data(),
-            b_dequantized_data_); // bias
+            b_dequantized_data_, // bias
+            N); // ncols per quant group
 
         fbgemmPacked(
             packA,
@@ -240,19 +241,19 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
             K,
             X_pack_buf_.data(), // buffer for packed matrix
             1, // group
-            in_qparams_[0].zero_point,
             row_offsets_.data());
 
         DoNothing<float, float> doNothingObj{};
         ReQuantizeForFloat<false /* FUSE_RELU*/> outputProcObj(
             doNothingObj,
             in_qparams_[0].scale,
-            in_qparams_[1].scale,
+            &in_qparams_[1].scale,
             in_qparams_[0].zero_point,
-            in_qparams_[1].zero_point,
+            &in_qparams_[1].zero_point,
             packA.getRowOffsetBuffer(),
             column_offsets_.data(),
-            b_dequantized_data_); // bias
+            b_dequantized_data_, // bias
+            N); // ncols per quant group
 
         fbgemmPacked(
             packA,
@@ -348,8 +349,8 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
               in_qparams_[0].zero_point * column_offsets_[j] + row_offset;
           Y_int32_[i * N + j] += b_quantized_data_[j];
 
-          Ydata[i * N + j] =
-              Requantize<T>(Y_int32_[i * N + j], requantization_params_);
+          Ydata[i * N + j] = fbgemm::Requantize<T>(
+              Y_int32_[i * N + j], requantization_params_);
         }
       }
     }
@@ -431,7 +432,7 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
         // Adjust for the fact that weight will actually use signed.
         in_qparams_[1].zero_point += signed_min;
 
-        Quantize<T_signed>(
+        fbgemm::Quantize<T_signed>(
             W.template data<float>(),
             W_quantized_.data(),
             W_quantized_.size(),
@@ -474,7 +475,7 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
     in_qparams_[1].zero_point += signed_min;
 
     W_quantized_.resize(W.size());
-    Quantize<T_signed>(
+    fbgemm::Quantize<T_signed>(
         W.template data<float>(),
         W_quantized_.data(),
         W_quantized_.size(),
@@ -529,7 +530,7 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
         b_dequantized_.resize(N);
         for (int j = 0; j < N; ++j) {
           b_dequantized_[j] =
-              Dequantize<int32_t>(b_quantized_data_[j], in_qparams_[2]);
+              fbgemm::Dequantize<int32_t>(b_quantized_data_[j], in_qparams_[2]);
         }
         b_dequantized_data_ = b_dequantized_.data();
       }
@@ -540,7 +541,7 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
       if (!dequantize_output_) {
         b_quantized_.resize(N);
         for (int j = 0; j < N; ++j) {
-          b_quantized_[j] = Quantize<int32_t>(
+          b_quantized_[j] = fbgemm::Quantize<int32_t>(
               b_dequantized_data_[j],
               in_qparams_[2].zero_point,
               in_qparams_[2].scale,

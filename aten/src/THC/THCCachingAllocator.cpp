@@ -41,8 +41,7 @@
 
 namespace {
 
-typedef std::shared_ptr<THCStream> THCStreamPtr;
-typedef std::set<THCStreamPtr> stream_set;
+using stream_set = std::unordered_set<at::cuda::CUDAStream>;
 
 const size_t kRoundSmall = 512;     // round up small allocs to 512 bytes
 const size_t kRoundLarge = 131072;  // round up large allocs to 128 KiB
@@ -336,20 +335,19 @@ struct THCCachingAllocator
     cacheInfoAux(small_blocks, dev_id, total, largest);
   }
 
-  void recordStream(void* ptr, THCStream* stream)
+  void recordStream(void* ptr, at::cuda::CUDAStream stream)
   {
     std::lock_guard<std::mutex> lock(mutex);
     Block* block = find_allocated_block(ptr);
     if (!block) {
       THError("invalid device pointer: %p", ptr);
     }
-    if (THCStream_stream(stream) == block->stream) {
+    if (stream.stream() == block->stream) {
       // ignore uses on the allocation stream, since those don't require any
       // special synchronization
       return;
     }
-    THCStream_retain(stream);
-    block->stream_uses.insert(THCStreamPtr(stream, &THCStream_free));
+    block->stream_uses.insert(stream);
   }
 
   /** moves a block into the free block list */
@@ -462,15 +460,14 @@ struct THCCachingAllocator
     int prev_device;
     AT_CUDA_CHECK(cudaGetDevice(&prev_device));
 
-    std::set<THCStreamPtr> streams(std::move(block->stream_uses));
+    stream_set streams(std::move(block->stream_uses));
     THAssert(block->stream_uses.empty());
     for (auto it = streams.begin(); it != streams.end(); ++it) {
-      auto& stream = *it;
-      AT_CUDA_CHECK(cudaSetDevice(THCStream_device(stream.get())));
+      AT_CUDA_CHECK(cudaSetDevice(it->device_index()));
 
       cudaEvent_t event;
       AT_CUDA_CHECK(cudaEventCreateWithFlags(&event, cudaEventDisableTiming));
-      AT_CUDA_CHECK(cudaEventRecord(event, THCStream_stream(stream.get())));
+      AT_CUDA_CHECK(cudaEventRecord(event, it->stream()));
 
       block->event_count++;
       cuda_events.emplace_back(event, block);
@@ -553,7 +550,7 @@ THC_API void* THCCachingAllocator_getBaseAllocation(void *ptr, size_t *size)
   return caching_allocator.getBaseAllocation(ptr, size);
 }
 
-THC_API void THCCachingAllocator_recordStream(void *ptr, THCStream* stream)
+THC_API void THCCachingAllocator_recordStream(void *ptr, at::cuda::CUDAStream stream)
 {
   caching_allocator.recordStream(ptr, stream);
 }

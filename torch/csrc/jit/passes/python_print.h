@@ -6,6 +6,15 @@
 
 
 namespace torch { namespace jit {
-TORCH_API std::vector<at::Tensor> PythonPrint(std::ostream& out, const Graph& graph, bool enforce_importable=false);
+
+namespace script {
+  struct Method;
+  struct Module;
+}
+
+TORCH_API void PythonPrint(std::ostream& out, const Graph& graph, std::vector<at::Tensor>& tensor_table, bool enforce_importable=false);
+TORCH_API void PythonPrint(std::ostream& out, const script::Method& graph, std::vector<at::Tensor>& tensor_table, bool enforce_importable=false);
+TORCH_API void PythonPrint(std::ostream& out, const script::Module& module, std::vector<at::Tensor>& tensor_table, bool enforce_importable=false);
+
 TORCH_API bool printerHasSpecialCaseFor(c10::Symbol sym);
 }}
