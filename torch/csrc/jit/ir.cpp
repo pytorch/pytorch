@@ -522,6 +522,10 @@ std::shared_ptr<Graph> Graph::copy() {
   return new_g;
 }
 
+bool Value::mustBeNone() const {
+  return node_->kind() == prim::None;
+}
+
 std::string Value::uniqueNameBase() const {
   std::string name = uniqueName();
   std::string name_base = name;
