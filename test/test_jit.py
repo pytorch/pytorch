@@ -9666,11 +9666,6 @@ EXCLUDE_SCRIPT_MODULES = {
     'test_nn_BatchNorm1d_not_tracking_stats',
     'test_nn_BatchNorm2d_not_tracking_stats',
     'test_nn_BatchNorm3d_not_tracking_stats',
-    'test_nn_LayerNorm_1d_elementwise_affine',
-    'test_nn_LayerNorm_1d_no_elementwise_affine',
-    'test_nn_LayerNorm_3d_elementwise_affine',
-    'test_nn_LayerNorm_3d_no_elementwise_affine',
-    'test_nn_Linear_no_bias',
 }
 
 DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
