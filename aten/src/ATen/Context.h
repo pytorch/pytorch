@@ -9,6 +9,7 @@
 #include "ATen/core/LegacyTypeDispatch.h"
 #include "ATen/core/VariableHooksInterface.h"
 #include "ATen/detail/CUDAHooksInterface.h"
+#include "ATen/detail/HIPHooksInterface.h"
 #include "ATen/detail/ComplexHooksInterface.h"
 #include "c10/util/Exception.h"
 
@@ -50,6 +51,7 @@ class CAFFE2_API Context {
 
   Generator & defaultGenerator(DeviceType device_type) {
     initCUDAIfNeeded(device_type);
+    initHIPIfNeeded(device_type);
     auto & generator = generator_registry[static_cast<int>(device_type)];
     if(!generator)
       AT_ERROR(DeviceTypeName(device_type), " backend type not enabled.");
@@ -63,6 +65,9 @@ class CAFFE2_API Context {
   bool hasCUDA() const {
     return detail::getCUDAHooks().hasCUDA();
   }
+  bool hasHIP() const {
+    return detail::getHIPHooks().hasHIP();
+  }
   // defined in header so that getNonVariableType has ability to inline
   // call_once check. getNonVariableType is called fairly frequently
   THCState* lazyInitCUDA() {
@@ -74,6 +79,15 @@ class CAFFE2_API Context {
     });
     return thc_state.get();
   }
+  THHState* lazyInitHIP() {
+    std::call_once(thh_init,[&] {
+      thh_state = detail::getHIPHooks().initHIP();
+      generator_registry[static_cast<int>(DeviceType::HIP)] =
+        detail::getHIPHooks().initHIPGenerator(this);
+      detail::getHIPHooks().registerHIPTypes(this);
+    });
+    return thh_state.get();
+  }
   void lazyInitComplex() {
     std::call_once(complex_init_, [&] {
       detail::getComplexHooks().registerComplexTypes(this);
@@ -83,6 +97,9 @@ class CAFFE2_API Context {
   THCState* getTHCState() {
     // AT_ASSERT(thc_state);
     return thc_state.get();
+  }
+  THHState* getTHHState() {
+    return thh_state.get();
   }
 
   size_t freshTypeID() {
@@ -108,18 +125,25 @@ private:
       lazyInitCUDA();
     }
   }
+  void initHIPIfNeeded(DeviceType p) {
+    if (p == DeviceType::HIP) {
+      lazyInitHIP();
+    }
+  }
   void initComplexIfNeeded(ScalarType s) {
     if (isComplexType(s)) {
       lazyInitComplex();
     }
   }
   std::once_flag thc_init;
+  std::once_flag thh_init;
   std::once_flag complex_init_;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
   bool benchmark_cudnn = false;
   std::atomic<size_t> next_id;
   std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
+  std::unique_ptr<THHState, void(*)(THHState*)> thh_state;
   friend struct Type;
 };
 
@@ -157,8 +181,16 @@ static inline TypeExtendedInterface& CUDA(ScalarType s) {
   return getNonVariableType(Backend::CUDA, s);
 }
 
+static inline TypeExtendedInterface& HIP(ScalarType s) {
+  return getNonVariableType(Backend::HIP, s);
+}
+
 static inline bool hasCUDA() {
   return globalContext().hasCUDA();
+}
+
+static inline bool hasHIP() {
+  return globalContext().hasHIP();
 }
 
 static inline bool hasMKL() {
