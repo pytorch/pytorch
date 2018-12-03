@@ -136,25 +136,20 @@ inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
 
 // Sums `tensor` repeatedly to produce a tensor of shape `shape`.
 // Precondition: is_expandable_to(shape, tensor.sizes()) must be true
-static inline Tensor sum_to(Tensor tensor, const IntList shape) {
+static inline Tensor sum_to(Tensor tensor, IntList shape) {
   if (shape.size() == 0) {
     return tensor.sum();
   }
-  c10::SmallVector<int64_t, 8> reduce_dims;
-  const at::IntList sizes = tensor.sizes();
-  const int64_t leading_dims = sizes.size() - shape.size();
-  for (int64_t i = 0; i < leading_dims; ++i) {
-    reduce_dims.push_back(i);
+  Tensor result = tensor;
+  while (result.dim() > (int64_t)shape.size()) {
+    result = result.sum(0, false);
   }
-  for (int64_t i = leading_dims; i < static_cast<int64_t>(sizes.size()); ++i) {
-    if (shape[i - leading_dims] == 1 && sizes[i] > 1) {
-      reduce_dims.push_back(i);
+  for (int64_t i = 0; i < result.dim(); ++i) {
+    if (shape[i] == 1 && result.sizes()[i] > 1) {
+      result = result.sum(i, true);
     }
   }
-  if (!reduce_dims.empty()) {
-    tensor = tensor.sum(reduce_dims, /*keepdim=*/true);
-  }
-  return leading_dims > 0 ? tensor.view(shape) : tensor;
+  return result;
 }
 
 // True if `shape` can be broadcasted to `desired`
