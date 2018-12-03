@@ -13,9 +13,6 @@
 #include "ATen/detail/ComplexHooksInterface.h"
 #include "c10/util/Exception.h"
 
-// This is temporary
-#include "ATen/core/ATenCoreTest.h"
-
 #include <memory>
 #include <mutex>
 #include <cstdint>
