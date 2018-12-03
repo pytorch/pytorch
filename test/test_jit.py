@@ -8884,40 +8884,41 @@ a")
         self.checkScript(foo, (torch.rand(2, 3), torch.rand(3)))
 
     def test_bool_dispatch(self):
-        def kwarg_false(x):
-            # type: (Tensor) -> Tensor
-            return F.max_pool1d(x, 1, 1, return_indices=False)
-        self.checkScript(kwarg_false, (torch.randn(3, 3, 3),))
+        with self.disableModuleHook():  # TODO: Python print broadcasting list
+            def kwarg_false(x):
+                # type: (Tensor) -> Tensor
+                return F.max_pool1d(x, 1, 1, return_indices=False)
+            self.checkScript(kwarg_false, (torch.randn(3, 3, 3),))
 
-        def kwarg_true(x):
-            # type: (Tensor) -> Tuple[Tensor, Tensor]
-            return F.max_pool1d(x, 1, 1, return_indices=True)
-        self.checkScript(kwarg_true, (torch.randn(3, 3, 3),))
+            def kwarg_true(x):
+                # type: (Tensor) -> Tuple[Tensor, Tensor]
+                return F.max_pool1d(x, 1, 1, return_indices=True)
+            self.checkScript(kwarg_true, (torch.randn(3, 3, 3),))
 
-        def full_kwarg_false(x):
-            # type: (Tensor) -> Tensor
-            return F.max_pool1d(x, 1, 1, ceil_mode=False, return_indices=False)
-        self.checkScript(full_kwarg_false, (torch.randn(3, 3, 3),))
+            def full_kwarg_false(x):
+                # type: (Tensor) -> Tensor
+                return F.max_pool1d(x, 1, 1, ceil_mode=False, return_indices=False)
+            self.checkScript(full_kwarg_false, (torch.randn(3, 3, 3),))
 
-        def full_kwarg_true(x):
-            # type: (Tensor) -> Tuple[Tensor, Tensor]
-            return F.max_pool1d(x, 1, 1, ceil_mode=False, return_indices=True)
-        self.checkScript(full_kwarg_true, (torch.randn(3, 3, 3),))
+            def full_kwarg_true(x):
+                # type: (Tensor) -> Tuple[Tensor, Tensor]
+                return F.max_pool1d(x, 1, 1, ceil_mode=False, return_indices=True)
+            self.checkScript(full_kwarg_true, (torch.randn(3, 3, 3),))
 
-        def use_default(x):
-            # type: (Tensor) -> Tensor
-            return F.max_pool1d(x, 1, 1)
-        self.checkScript(use_default, (torch.randn(3, 3, 3),))
+            def use_default(x):
+                # type: (Tensor) -> Tensor
+                return F.max_pool1d(x, 1, 1)
+            self.checkScript(use_default, (torch.randn(3, 3, 3),))
 
-        def arg_false(x):
-            # type: (Tensor) -> Tensor
-            return F.max_pool1d(x, 1, 1, 0, 1, False, False)
-        self.checkScript(arg_false, (torch.randn(3, 3, 3),))
+            def arg_false(x):
+                # type: (Tensor) -> Tensor
+                return F.max_pool1d(x, 1, 1, 0, 1, False, False)
+            self.checkScript(arg_false, (torch.randn(3, 3, 3),))
 
-        def arg_true(x):
-            # type: (Tensor) -> Tuple[Tensor, Tensor]
-            return F.max_pool1d(x, 1, 1, 0, 1, False, True)
-        self.checkScript(arg_true, (torch.randn(3, 3, 3),))
+            def arg_true(x):
+                # type: (Tensor) -> Tuple[Tensor, Tensor]
+                return F.max_pool1d(x, 1, 1, 0, 1, False, True)
+            self.checkScript(arg_true, (torch.randn(3, 3, 3),))
 
     def test_infer_size(self):
         from torch._C import _infer_size
