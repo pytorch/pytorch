@@ -11,6 +11,7 @@
 #include "ATen/CPUApplyUtils.h"
 #include "ATen/native/DispatchStub.h"
 #include "ATen/native/Distributions.h"
+#include "ATen/native/ResultType.h"
 #ifdef __AVX2__
 #include "ATen/native/cpu/avx_mathfun.h"
 #endif
@@ -174,42 +175,49 @@ void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
 }
 #endif
 
-#define IMPLEMENT_FLOAT_KERNEL(dispatchtypes, op)                          \
-  static void op##_kernel(Tensor& result, const Tensor& self) {            \
-    checkBackend(#op, {result}, Backend::CPU);                             \
-    AT_DISPATCH_##dispatchtypes##_TYPES(self.type(), #op, [&] {            \
-      if (self.is_contiguous() && result.is_contiguous()) {                \
-        vml::v##op(                                                        \
-            result.data<scalar_t>(), self.data<scalar_t>(), self.numel()); \
-                                                                           \
-      } else {                                                             \
-        static constexpr int64_t WIDTH = 131072 / sizeof(scalar_t);        \
-        CPU_tensor_parallel_kernel_apply2<scalar_t, scalar_t>(             \
-            result,                                                        \
-            self,                                                          \
-            [](int64_t size,                                               \
-               scalar_t* x,                                                \
-               scalar_t* y,                                                \
-               int64_t stridex,                                            \
-               int64_t stridey) {                                          \
-              if (stridex == 1 && stridey == 1) {                          \
-                vml::v##op(x, y, size);                                    \
-              } else {                                                     \
-                for (int64_t i = 0; i < size; i += WIDTH) {                \
-                  scalar_t buffer[WIDTH];                                  \
-                  int64_t width = WIDTH;                                   \
-                  width = std::min(width, size - i);                       \
-                  for (int64_t j = 0; j < width; j++)                      \
-                    buffer[j] = y[stridey * (i + j)];                      \
-                  vml::v##op(buffer, buffer, width);                       \
-                  for (int64_t j = 0; j < width; j++)                      \
-                    x[stridex * (i + j)] = buffer[j];                      \
-                }                                                          \
-              }                                                            \
-            });                                                            \
-      }                                                                    \
-    });                                                                    \
-  }                                                                        \
+// TODO: implement casting with MKL conversions
+#define IMPLEMENT_FLOAT_KERNEL(dispatchtypes, op)                              \
+  static void op##_kernel(Tensor& result, const Tensor& self) {                \
+    checkBackend(#op, {result}, Backend::CPU);                                 \
+    Type& resultType = resultTypeForOutput(result, self);                      \
+    const bool needs_cast = (resultType != self.type());                       \
+    AT_DISPATCH_##dispatchtypes##_TYPES(resultType, #op, [&] {                 \
+      if (self.is_contiguous() && result.is_contiguous() && !needs_cast) {     \
+        vml::v##op(                                                            \
+            result.data<scalar_t>(), self.data<scalar_t>(), self.numel());     \
+                                                                               \
+      } else {                                                                 \
+        using result_t = scalar_t;                                             \
+        AT_DISPATCH_ALL_TYPES(self.type(), #op, [&] {                          \
+          using input_t = scalar_t;                                            \
+          static constexpr int64_t WIDTH = 131072 / sizeof(result_t);          \
+          CPU_tensor_parallel_kernel_apply2<result_t, input_t>(                \
+              result,                                                          \
+              self,                                                            \
+              [needs_cast](int64_t size,                                       \
+                 result_t* x,                                                  \
+                 input_t* y,                                                   \
+                 int64_t stridex,                                              \
+                 int64_t stridey) {                                            \
+                if (stridex == 1 && stridey == 1 && !needs_cast) {             \
+                  vml::v##op(x, reinterpret_cast<result_t*>(y), size);         \
+                } else {                                                       \
+                  for (int64_t i = 0; i < size; i += WIDTH) {                  \
+                    result_t buffer[WIDTH];                                    \
+                    int64_t width = WIDTH;                                     \
+                    width = std::min(width, size - i);                         \
+                    for (int64_t j = 0; j < width; j++)                        \
+                      buffer[j] = static_cast<result_t>(y[stridey * (i + j)]); \
+                    vml::v##op(buffer, buffer, width);                         \
+                    for (int64_t j = 0; j < width; j++)                        \
+                      x[stridex * (i + j)] = buffer[j];                        \
+                  }                                                            \
+                }                                                              \
+              });                                                              \
+        });                                                                    \
+      }                                                                        \
+    });                                                                        \
+  }                                                                            \
   REGISTER_DISPATCH(op##Impl, &op##_kernel)
 
 } // anonymous namespace
