@@ -1115,6 +1115,8 @@ if _enabled:
                 super(ScriptModule, self).__setattr__(attr, _ConstModuleList(value))
             elif isinstance(value, Sequential):
                 super(ScriptModule, self).__setattr__(attr, _ConstSequential(value))
+            elif isinstance(value, Parameter):
+                super(ScriptModule, self).__setattr__(attr, value)
             else:
                 super(ScriptModule, self).__setattr__(attr, _get_valid_constant(attr, value))
 
@@ -1147,7 +1149,11 @@ if _enabled:
             # Copy Parameters / Modules / Buffers
             for name in dir(original):
                 item = getattr(original, name)
-                if isinstance(item, Parameter) or (isinstance(item, Module) and item is not self):
+                if item is None:
+                    # XXX: treat None value simply as module attributes instead of adding them to the parameter list
+                    # TODO: need to handle this more generally when non-tensor attributes added to module
+                    object.__setattr__(self, name, item)
+                elif isinstance(item, Parameter) or (isinstance(item, Module) and item is not self):
                     ScriptModule.__setattr__(self, name, item)
             for name in original._buffers:
                 self.register_buffer(name, original._buffers[name])
