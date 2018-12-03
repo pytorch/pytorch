@@ -37,7 +37,8 @@ class ScriptModuleDeserializer final {
 
   ScriptModuleDeserializer(std::istream* is);
 
-  void deserialize(ModuleLookup module_lookup);
+  void deserialize(ModuleLookup module_lookup,
+      c10::optional<at::Device> device);
 
 private:
  at::Tensor loadTensor(
@@ -53,6 +54,7 @@ private:
  // this is a hack to make sure the script module created in C++ is the
  // same as created in Python
  ModuleLookup moduleLookup_;
+ c10::optional<at::Device> device_;
  std::vector<std::string> moduleStack_;
 
  std::vector<at::Tensor> tensor_table_;
@@ -66,7 +68,8 @@ ScriptModuleDeserializer::ScriptModuleDeserializer(const std::string& filename)
 ScriptModuleDeserializer::ScriptModuleDeserializer(std::istream* is)
     : ifs_(), reader_(is) {}
 
-void ScriptModuleDeserializer::deserialize(ModuleLookup module_lookup) {
+void ScriptModuleDeserializer::deserialize(ModuleLookup module_lookup,
+    c10::optional<at::Device> device) {
   torch::ModelDef model_def;
   at::DataPtr data_ptr;
   size_t data_size;
@@ -95,6 +98,7 @@ void ScriptModuleDeserializer::deserialize(ModuleLookup module_lookup) {
       model_def.ParseFromString(binary_string),
       "JSON transcoder produced invalid protobuf output.");
   moduleLookup_ = module_lookup;
+  device_ = device;
 
   const auto& module_def = model_def.main_module();
   loadTensorTable(&model_def);
@@ -116,23 +120,54 @@ at::Tensor ScriptModuleDeserializer::loadTensor(const torch::TensorDef& tensor_p
   std::vector<int64_t> strides(tensor_proto.strides().begin(), tensor_proto.strides().end());
   auto type = at::typeMetaToScalarType(
       caffe2::DataTypeToTypeMeta(tensor_proto.data_type()));
-
   const std::string& record_key = tensor_proto.data().key();
+  AT_ASSERT(tensor_proto.has_device() && !tensor_proto.device().empty());
+  at::Device device(tensor_proto.device());
+  if (device_.has_value()) {
+    // override the device, if user provides map_location
+    device = device_.value();
+  }
+
   auto storage_it = storageMap.find(record_key);
   if (storage_it == storageMap.end()) {
     at::DataPtr storage_ptr;
     uint64_t record_size;
     std::tie(storage_ptr, record_size) = reader_.getRecord(record_key);
-    auto storage = at::Storage(
+    auto cpu_storage = at::Storage(
         at::CPU(type).typeMeta(),
         std::move(storage_ptr),
         record_size / at::CPU(type).typeMeta().itemsize(),
         nullptr); // NB: we didn't set any allocator for the tensor
-    storage_it = storageMap.insert(std::make_pair(record_key, storage)).first;
+    if (device.type() == at::DeviceType::CPU) {
+      storage_it = storageMap.insert(std::make_pair(
+            record_key, cpu_storage)).first;
+    } else if (device.type() == at::DeviceType::CUDA) {
+      at::Tensor cpu_tensor = at::CPU(type)._th_tensor(
+          cpu_storage, tensor_proto.offset(), dims, strides);
+      at::Storage cuda_storage = cpu_tensor.to(device,
+          cpu_tensor.scalar_type()).storage();
+      storage_it = storageMap.insert(std::make_pair(
+            record_key, cuda_storage)).first;
+    } else {
+      AT_ERROR("supported devices include CPU and CUDA, however got ",
+          at::DeviceTypeName(device.type(), false));
+    }
   }
-  auto t = at::CPU(type)._th_tensor(
-      storage_it->second, tensor_proto.offset(), dims, strides);
-  return autograd::make_variable(t, tensor_proto.requires_grad());
+  AT_ASSERT(storage_it->second.device() == device);
+
+  at::Tensor result;
+  if (device.type() == at::DeviceType::CPU) {
+    result = at::CPU(type)._th_tensor(
+        storage_it->second, tensor_proto.offset(), dims, strides);
+  } else if (device.type() == at::DeviceType::CUDA) {
+    result = at::CUDA(type)._th_tensor(
+        storage_it->second, tensor_proto.offset(), dims, strides);
+  }
+  AT_ASSERT(result.defined());
+
+  result = autograd::make_variable(result, tensor_proto.requires_grad());
+
+  return result;
 }
 
 void ScriptModuleDeserializer::convertModule(
@@ -164,16 +199,18 @@ void ScriptModuleDeserializer::convertModule(
 
 void import_ir_module(
     ModuleLookup module_lookup,
-    std::istream& in) {
+    std::istream& in,
+    c10::optional<at::Device> device) {
   ScriptModuleDeserializer deserializer(&in);
-  deserializer.deserialize(module_lookup);
+  deserializer.deserialize(module_lookup, device);
 }
 
 void import_ir_module(
     ModuleLookup module_lookup,
-    const std::string& filename) {
+    const std::string& filename,
+    c10::optional<at::Device> device) {
   ScriptModuleDeserializer deserializer(filename);
-  deserializer.deserialize(module_lookup);
+  deserializer.deserialize(module_lookup, device);
 }
 
 std::shared_ptr<script::Module> load(std::istream& in) {
@@ -191,7 +228,8 @@ std::shared_ptr<script::Module> load(std::istream& in) {
   };
 
   ScriptModuleDeserializer deserializer(&in);
-  deserializer.deserialize(module_lookup);
+  // TODO: add device support in C++ API
+  deserializer.deserialize(module_lookup, c10::optional<at::Device>(at::Device("cpu")));
 
   return module;
 }

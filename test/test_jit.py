@@ -266,11 +266,11 @@ class JitTestCase(TestCase):
             if pp != pp2:
                 self.assertMultiLineEqual(pp, pp2)
 
-    def getExportImportCopy(self, m, also_test_file=True):
+    def getExportImportCopy(self, m, also_test_file=True, map_location=None):
         buffer = io.BytesIO()
         torch.jit.save(m, buffer)
         buffer.seek(0)
-        imported = torch.jit.load(buffer)
+        imported = torch.jit.load(buffer, map_location=map_location)
 
         if not also_test_file:
             return imported
@@ -282,7 +282,7 @@ class JitTestCase(TestCase):
         try:
             f.close()
             imported.save(f.name)
-            result = torch.jit.load(f.name)
+            result = torch.jit.load(f.name, map_location=map_location)
         finally:
             os.unlink(f.name)
 
@@ -488,6 +488,50 @@ class TestJit(JitTestCase):
         trace, z = torch.jit.get_trace_graph(f, (x, y))
         self.assertExpectedGraph(trace)
         self.assertExportImport(trace, (x, y))
+
+    def test_restore_device(self):
+        # main purpose is checking map_location works
+        m = torch.jit.ScriptModule()
+        cpu_device_str = 'cpu'
+        m.p0 = nn.Parameter(torch.tensor([0.3], dtype=torch.float,
+                                         device=cpu_device_str))
+        m.register_buffer('b0', torch.tensor([0.9], dtype=torch.float,
+                                             device=cpu_device_str))
+        m2 = self.getExportImportCopy(m)
+        self.assertEqual(tuple(m.parameters()), tuple(m2.parameters()))
+        self.assertEqual(tuple(m.buffers()), tuple(m2.buffers()))
+        self.assertFalse(m2.p0.is_cuda)
+        self.assertFalse(m2.b0.is_cuda)
+
+    @unittest.skipIf(not RUN_CUDA, "restore device requires CUDA")
+    def test_restore_device_cuda(self):
+        m = torch.jit.ScriptModule()
+        cuda_device_str = 'cuda:' + str(torch.cuda.device_count() - 1)
+        m.p0 = nn.Parameter(torch.tensor([0.3], dtype=torch.float,
+                                         device=cuda_device_str))
+        m.register_buffer('b0', torch.tensor([0.9], dtype=torch.float,
+                                             device=cuda_device_str))
+        self.assertTrue(m.p0.is_cuda)
+        self.assertTrue(m.b0.is_cuda)
+
+        # restore to the saved devices
+        m2 = self.getExportImportCopy(m)
+        self.assertEqual(tuple(m.parameters()), tuple(m2.parameters()))
+        self.assertEqual(tuple(m.buffers()), tuple(m2.buffers()))
+        self.assertEqual(str(m2.p0.device), cuda_device_str)
+        self.assertEqual(str(m2.b0.device), cuda_device_str)
+
+        # restore all to cpu using string
+        cpu_device_str = 'cpu'
+        m3 = self.getExportImportCopy(m, map_location=cpu_device_str)
+        self.assertEqual(str(m3.p0.device), cpu_device_str)
+        self.assertEqual(str(m3.b0.device), cpu_device_str)
+
+        # restore all to first gpu using device
+        m4 = self.getExportImportCopy(
+            m3, map_location=torch.device('cuda:0'))
+        self.assertEqual(str(m4.p0.device), 'cuda:0')
+        self.assertEqual(str(m4.b0.device), 'cuda:0')
 
     def test_typeas_trace_check(self):
         a = torch.tensor([0.4], requires_grad=True)
@@ -6214,7 +6258,7 @@ a")
 
             def __init__(self):
                 super(M, self).__init__(False)
-                self.param = torch.nn.Parameter(torch.zeros((5, 5), device='cuda').random_())
+                self.param = torch.nn.Parameter(torch.zeros((5, 5), device='cuda:0').random_())
 
             @torch.jit.script_method
             def foo(self):
@@ -6224,7 +6268,7 @@ a")
         m_import = self.getExportImportCopy(m_orig)
         # check to make sure the storage wasn't resized
         self.assertTrue(m_orig.param.storage().size() == 25)
-        self.assertTrue(m_import.foo().device == torch.device('cpu'))
+        self.assertTrue(m_import.foo().device == torch.device('cuda:0'))
         self.assertEqual(m_orig.foo(), m_import.foo())
         self.assertTrue(m_orig.foo().dtype == m_import.foo().dtype)
 
