@@ -52,6 +52,8 @@ class Net(nn.Module):
         self.fc2 = _FC2()
         self.fc3 = nn.Linear(50, 4, bias=False)
         self.relu = nn.ReLU()
+        self.no_grad_param = nn.Parameter(torch.Tensor([2, 2]).long(),
+                                          requires_grad=False)
 
     def forward(self, x):
         x = self.relu(self.fc1(x))
@@ -1227,10 +1229,10 @@ class _DistTestBase(object):
         for p_gpu, p_DDP in zip(param_gpu, param_DDP):
             self.assertEqual(p_gpu, p_DDP)
 
-    def _test_DDP_2iter(
+    def _test_DDP_5iter(
         self, model_base, model_DDP, input, target, loss, local_bs, rank, batch_size
     ):
-        for _ in range(2):
+        for _ in range(5):
             # single cpu/gpu training
             self._test_DDP_helper(model_base, input, target, loss)
 
@@ -1292,8 +1294,8 @@ class _DistTestBase(object):
         local_bs = len(gpu_subset)
         global_bs, input_cpu, target, loss = self._prepare_dummy_data(local_bs)
 
-        # check two model parameters over 2 iterations
-        self._test_DDP_2iter(
+        # check two model parameters over 5 iterations
+        self._test_DDP_5iter(
             model_gpu,
             model_DDP,
             input_cpu.cuda(gpu_subset[0]),
@@ -1324,8 +1326,8 @@ class _DistTestBase(object):
         local_bs = 2
         global_bs, input_cpu, target, loss = self._prepare_dummy_data(local_bs)
 
-        # check two model parameters over 2 iterations
-        self._test_DDP_2iter(
+        # check two model parameters over 5 iterations
+        self._test_DDP_5iter(
             model_base, model_DDP, input_cpu, target, loss, local_bs, rank, global_bs
         )
         self._barrier()
