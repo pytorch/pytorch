@@ -8,6 +8,7 @@
 #include <memory>
 #include <vector>
 
+#include "ATen/cuda/CUDAContext.h"
 #include "THC/THCIntegerDivider.cuh"
 
 using std::vector;
@@ -198,6 +199,7 @@ static void testUint64Divider()
 }
 
 TEST(TestCUDAIntegerDivider, IntegerDivider) {
+  if (!at::cuda::is_available()) return;
   testUint64Divider();
   testUint32Divider();
 

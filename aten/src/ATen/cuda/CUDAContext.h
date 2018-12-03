@@ -41,6 +41,14 @@ inline int64_t getNumGPUs() {
     return c10::cuda::device_count();
 }
 
+/**
+ * In some situations, you may have compiled with CUDA, but no CUDA
+ * device is actually available.  Test for this case using is_available().
+ */
+inline bool is_available() {
+    return getNumGPUs() > 0;
+}
+
 CAFFE2_API cudaDeviceProp* getCurrentDeviceProperties();
 
 CAFFE2_API int warp_size();
