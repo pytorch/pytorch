@@ -202,13 +202,27 @@ class DistributedDataParallel(Module):
         # used for intra-node param sync and inter-node sync as well
         self.broadcast_bucket_size = 250 * MB
 
+        # reduction bucket size
+        self.bucket_bytes_cap = bucket_cap_mb * MB
+
         # Sync params and buffers
         module_states = list(self.module.state_dict().values())
         if len(module_states) > 0:
             self._dist_broadcast_coalesced(module_states,
                                            self.broadcast_bucket_size)
 
-        if len(device_ids) > 1:
+        self._ddp_init_helper()
+
+    def _ddp_init_helper(self):
+        """
+        Initialization helper function that does the following:
+
+        (1) replicating the module from device[0] to the other devices
+        (2) bucketing the parameters for reductions
+        (3) resetting the bucketing states
+        (4) registering the grad hooks
+        """
+        if len(self.device_ids) > 1:
             # TODO: we don't need to replicate params in here. they're always going to
             # be broadcasted using larger blocks in broadcast_coalesced, so it might be
             # better to not pollute the caches with these small blocks
@@ -229,8 +243,6 @@ class DistributedDataParallel(Module):
             self.modules_params_data[dev_idx] = [p.data for p in module.parameters()]
             self.modules_buffers_data[dev_idx] = [b.data for b in module.buffers()]
 
-        bucket_bytes_cap = bucket_cap_mb * MB
-
         # This is a triply-nested list where the "dimensions" are: devices, buckets, bucket_elems
         param_buckets = []
 
@@ -246,7 +258,7 @@ class DistributedDataParallel(Module):
                     params_to_bucket[dev_idx].append(p)
 
         param_buckets = [dist._dist_bucket_tensors(dev_params_to_bucket,
-                                                   int(bucket_bytes_cap),
+                                                   int(self.bucket_bytes_cap),
                                                    fine_grained=False)
                          for dev_params_to_bucket in params_to_bucket]
 
@@ -297,9 +309,8 @@ class DistributedDataParallel(Module):
     def __setstate__(self, state):
         # If serializable, then the process group should be the default one
         self.process_group = dist.get_default_group()
-        self.check_previous_reduction = False
         super(DistributedDataParallel, self).__setstate__(state)
-        self._register_grad_hooks()
+        self._ddp_init_helper()
 
     def _check_default_group(self):
         pickle_not_supported = False
