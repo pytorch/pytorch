@@ -206,7 +206,7 @@ class ShapePropagator {
         std::any_of(writers.cbegin(), writers.cend(), [&](const Node* writer) {
           return writer->isBefore(node);
         });
-    if (hasWritersBefore) {
+    if (hasWritersBefore || aliasDb_.hasWildcard(node)) {
       // If something could have written to a value used by this node, we can't
       // guarantee the result is the same when running it in isolation.
       dependsOnMutationMemo_[node] = true;
@@ -702,7 +702,6 @@ class ShapePropagator {
           return {};
         }};
 
- 
     static const auto any_tensor_type = [](Node* node) -> TensorTypePtr {
       for (Value* input : node->inputs()) {
         if (auto type = input->type()->cast<TensorType>()) {

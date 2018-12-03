@@ -269,7 +269,6 @@ public:
 
   //example
   //Tensor * add(Tensor & b);
-  Tensor & _th_triu_(int64_t diagonal=0);
   Tensor abs() const;
   Tensor & abs_();
   Tensor acos() const;

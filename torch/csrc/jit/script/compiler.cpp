@@ -441,6 +441,13 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   return g.insertNode(g.createTupleUnpack(v))->outputs();
 }
 
+inline TypePtr unwrapOptional(TypePtr opt_type) {
+  if (auto unwrap_list_type = opt_type->cast<OptionalType>()) {
+    return unwrap_list_type->getElementType();
+  }
+  return opt_type;
+}
+
 static inline bool isIntOrFloatUsedAsList(
     const Value* value,
     const Argument& arg) {
@@ -448,9 +455,7 @@ static inline bool isIntOrFloatUsedAsList(
   auto v_type = value->type();
   if (v_type != FloatType::get() && v_type != IntType::get())
     return false;
-  auto arg_type = arg.type();
-  if (arg_type->cast<OptionalType>())
-    arg_type = arg_type->cast<OptionalType>()->getElementType();
+  auto arg_type = unwrapOptional(arg.type());
   auto list_type = arg_type->cast<ListType>();
   return list_type && list_type->getElementType() == v_type && arg.N();
 }
@@ -484,10 +489,10 @@ Value* tryConvertToType(
     bool convert_tensors_to_nums) {
   // Allow homogeneous tuples to be casted implicitly to lists of appropriate
   // types
-  if (convertibleToList(value->type(), concrete_type) &&
+  if (convertibleToList(value->type(), unwrapOptional(concrete_type)) &&
       value->type()->kind() == TypeKind::TupleType) {
     auto unpacked = createTupleUnpack(value);
-    auto elem_type = concrete_type->expect<ListType>()->getElementType();
+    auto elem_type = unwrapOptional(concrete_type)->expect<ListType>()->getElementType();
     value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
   }
 
@@ -635,8 +640,8 @@ c10::optional<MatchedSchema> tryMatchSchema(
         if (actual_type->kind() != TypeKind::ListType &&
             !convertibleToList(
                 actual_type,
-                arg.type())) { // and the actual should not be a list already
-          auto elem_type = arg.type()->expect<ListType>()->getElementType();
+                unwrapOptional(arg.type()))) { // and the actual should not be a list already
+          auto elem_type = unwrapOptional(arg.type())->expect<ListType>()->getElementType();
           Value* list = tryCreateList(
               elem_type,
               graph,

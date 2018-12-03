@@ -2,20 +2,21 @@
 #include "ATen/NativeFunctions.h"
 #include "c10/util/Optional.h"
 
+#include <c10/impl/DeviceGuardImplInterface.h>
+
 namespace at {
 namespace native {
 
-// Since the given Device may not have device_index set (i.e., having it as -1
-// representing the current device), we need to set the device_index before
-// comparing against the current device object in Tensor.
-// This always **copies** but this is intended because (1) we shouldn't modify
-// input argument, and (2) Device is small anyways.
-// NB: This ONLY works for CUDA device
-static inline Device ensure_has_index(const Device &device) {
-  if (!device.is_cuda() || device.has_index()) {
+// Take a Device that may not have device_index set (i.e., having it as -1
+// representing the current device) and return the corresponding Device
+// according to the actual device at the time of this function call.  No-op
+// if the device_index is set.
+static inline Device ensure_has_index(Device device) {
+  if (device.is_cpu() || device.has_index()) {
     return device;
   }
-  return Device(device.type(), at::current_device());
+  const c10::impl::DeviceGuardImplInterface* impl = c10::impl::getDeviceGuardImpl(device.type());
+  return impl->getDevice();
 }
 
 static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, bool non_blocking) {
