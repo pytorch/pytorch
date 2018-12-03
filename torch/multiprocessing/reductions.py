@@ -85,13 +85,18 @@ def rebuild_tensor(cls, storage, metadata):
 
 
 def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
-                        storage_cls, storage_device, storage_handle, storage_size, requires_grad):
+                        storage_cls, storage_device, storage_handle, storage_size, storage_offset,
+                        requires_grad):
 
-    storage = storage_from_cache(storage_cls, storage_handle)
+    print("Looking for ", storage_offset, storage_cls, tensor_cls)
+    storage = storage_from_cache(storage_cls, (storage_handle, storage_offset))
     if storage is None:
+        print("No cache found")
         torch.cuda._lazy_init()
-        storage = storage_cls._new_shared_cuda(storage_device, storage_handle, storage_size)
-        shared_cache[storage_handle] = StorageWeakRef(storage)
+        storage = storage_cls._new_shared_cuda(storage_device, storage_handle, storage_size, storage_offset)
+        shared_cache[(storage_handle, storage_offset)] = StorageWeakRef(storage)
+    else:
+        print("cache found")
 
     t = torch._utils._rebuild_tensor(storage, tensor_offset, tensor_size, tensor_stride)
     if tensor_cls == torch.nn.parameter.Parameter:
@@ -170,11 +175,12 @@ def reduce_tensor(tensor):
                 (type(tensor),
                  tensor.size(),
                  tensor.stride(),
-                 tensor_offset + storage_offset,
+                 tensor_offset,
                  type(storage),
                  device,
                  handle,
                  storage_size,
+                 storage_offset,
                  tensor.requires_grad))
 
     # _backward_hooks purposely omitted here, see Note [Don't serialize hooks]

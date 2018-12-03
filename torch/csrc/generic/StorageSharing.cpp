@@ -2,6 +2,7 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <ATen/cuda/CUDAGuard.h>
+#include <torch/csrc/cuda/ipc_memhandle.h>
 #endif
 
 #include <random>
@@ -233,8 +234,12 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
 
     _handle = PyBytes_FromStringAndSize((char *)&handle, CUDA_IPC_HANDLE_SIZE);
     _offset = PyLong_FromSsize_t((Py_ssize_t)offset / sizeof(scalar_t));
-    size = PyLong_FromSize_t(base_size / sizeof(scalar_t));
+    //std::cout << "caching block of size " << base_size / sizeof(scalar_t) << std::endl;
+    //std::cout << "storage offset " << offset / sizeof(scalar_t) << std::endl;
+    //size = PyLong_FromSize_t(base_size / sizeof(scalar_t));
   }
+
+  //std::cout << "sharing storage of size " << storage->numel() << std::endl;
   if (!tuple || !device || !_handle || !size || !_offset) {
     return nullptr;
   }
@@ -249,18 +254,22 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
 static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
-  THPUtils_assert(PyTuple_GET_SIZE(args) == 3, "tuple of 3 items expected");
+  THPUtils_assert(PyTuple_GET_SIZE(args) == 4, "tuple of 4 items expected");
   PyObject *_device = PyTuple_GET_ITEM(args, 0);
   PyObject *_handle = PyTuple_GET_ITEM(args, 1);
   PyObject *_size = PyTuple_GET_ITEM(args, 2);
+  PyObject *_offset = PyTuple_GET_ITEM(args, 3);
   if (!(THPUtils_checkLong(_device) && THPUtils_checkLong(_size)
-      && (_handle == Py_None || PyBytes_Check(_handle)))) {
+      && (_handle == Py_None || PyBytes_Check(_handle))
+      && THPUtils_checkLong(_offset))) {
     THPUtils_invalidArguments(args, nullptr, "_new_shared in CUDA mode", 1,
-        "(int device, bytes handle, int storage_size)");
+        "(int device, bytes handle, int storage_size, int storage_offset)");
     return nullptr;
   }
 
   size_t storage_size = (size_t)THPUtils_unpackLong(_size);
+  size_t storage_offset = (size_t)THPUtils_unpackLong(_offset);
+  ptrdiff_t storage_bytes_offset = storage_offset * sizeof(scalar_t);
 
   int64_t device = THPUtils_unpackLong(_device);
   at::cuda::CUDAGuard device_guard(device);
@@ -271,10 +280,14 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
     return nullptr;
   }
   THPUtils_assert(handle_size == CUDA_IPC_HANDLE_SIZE, "incorrect handle size");
-  cudaIpcMemHandle_t handle = *(cudaIpcMemHandle_t*)buffer;
+  std::string handle_str = std::string(buffer, handle_size);
 
-  void *devPtr = nullptr;
-  THCudaCheck(cudaIpcOpenMemHandle(&devPtr, handle, cudaIpcMemLazyEnablePeerAccess));
+  void* devPtr = torch::getCachedCUDAIpcDevptr(handle_str);
+  std::cout << "caching block ptr: " << devPtr << std::endl;
+  std::cout << "moving bytes: " << storage_bytes_offset << std::endl;
+  devPtr = (char*)devPtr + storage_bytes_offset;
+  std::cout << "storage ptr: " << devPtr << std::endl;
+  std::cout << "reconstructing storage of size " << storage_size << std::endl;
 
   THWStoragePtr base(THWStorage_(newWithDataAndAllocator)(
       LIBRARY_STATE

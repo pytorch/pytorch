@@ -4,7 +4,7 @@ THCIpcDeleter::~THCIpcDeleter() {
   int prev_device;
   THCudaCheck(cudaGetDevice(&prev_device));
   THCudaCheck(cudaSetDevice(device_));
-  THCudaCheck(cudaIpcCloseMemHandle(data_));
+  //THCudaCheck(cudaIpcCloseMemHandle(data_));
   THCudaCheck(cudaSetDevice(prev_device));
 }
 
