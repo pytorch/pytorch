@@ -126,7 +126,6 @@ class InstanceNorm1d(_InstanceNorm):
 
     @weak_script_method
     def _check_input_dim(self, input):
-        print("hi")
         if input.dim() != 2 and input.dim() != 3:
             raise ValueError('expected 2D or 3D input (got {}D input)'
                              .format(input.dim()))

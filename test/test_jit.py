@@ -14,7 +14,7 @@ from torch._six import inf, PY2
 from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
     freeze_rng_state
-from test_nn import module_tests, new_module_tests
+from common_nn import module_tests, new_module_tests
 from textwrap import dedent
 import os
 import io
@@ -266,22 +266,27 @@ class JitTestCase(TestCase):
             if pp != pp2:
                 self.assertMultiLineEqual(pp, pp2)
 
-    def getExportImportCopy(self, m):
+    def getExportImportCopy(self, m, also_test_file=True):
+        buffer = io.BytesIO()
+        torch.jit.save(m, buffer)
+        buffer.seek(0)
+        imported = torch.jit.load(buffer)
+
+        if not also_test_file:
+            return imported
+
         # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
         # opens the file, and it cannot be opened multiple times in Windows. To support Windows,
         # close the file after creation and try to remove it manually
         f = tempfile.NamedTemporaryFile(delete=False)
         try:
             f.close()
-            m.save(f.name)
-            imported = torch.jit.load(f.name)
+            imported.save(f.name)
+            result = torch.jit.load(f.name)
         finally:
             os.unlink(f.name)
-        buffer = io.BytesIO()
-        torch.jit.save(imported, buffer)
-        buffer.seek(0)
 
-        return torch.jit.load(buffer)
+        return result
 
     def assertGraphContains(self, graph, kind):
         self.assertTrue(any(n.kind() == kind for n in graph.nodes()))
@@ -454,6 +459,23 @@ class JitTestCase(TestCase):
 
 
 class TestJit(JitTestCase):
+
+    @unittest.skip("Requires a lot of RAM")
+    def test_big(self):
+        m = torch.jit.ScriptModule()
+        gig = int(1024 * 1024 * 1024 / 4)
+        # a small tensor in the first 4GB
+        m.v0 = nn.Parameter(torch.full((2,), 1, dtype=torch.float))
+        # a large tensor in the first 4GB that ends outside of it
+        m.v1 = nn.Parameter(torch.full((5, gig), 2, dtype=torch.float))
+        # a small tensor in >4GB space
+        m.v2 = nn.Parameter(torch.full((2,), 3, dtype=torch.float))
+        # s large tensor in the > 4GB space
+        m.v3 = nn.Parameter(torch.full((5, gig), 4, dtype=torch.float))
+
+        m2 = self.getExportImportCopy(m)
+
+        self.assertEqual(tuple(m.parameters()), tuple(m2.parameters()))
 
     def test_simple(self):
         x = torch.tensor([0.4], requires_grad=True)
@@ -5827,6 +5849,33 @@ a")
         self.checkScript(test_ints, ())
         self.checkScript(test_floats, ())
 
+    def test_embedding_renorm_grad_error(self):
+        # Testing that the builtin call to embedding_renorm_ correctly throws
+        # Error when .backward() is called on its input
+
+        def embedding_norm(input, embedding_matrix, max_norm):
+            F.embedding(input, embedding_matrix, max_norm=0.01)
+
+        @torch.jit.script
+        def embedding_norm_script(input, embedding_matrix, max_norm):
+            # type: (Tensor, Tensor, float)
+            F.embedding(input, embedding_matrix, max_norm=0.01)
+
+        for fun in [embedding_norm, embedding_norm_script]:
+            input = torch.tensor([[1, 2, 4, 5], [4, 3, 2, 9]])
+            embedding_matrix = torch.randn(10, 3)
+
+            var1 = torch.randn(10, 3, requires_grad=True)
+            var2 = var1.detach().requires_grad_()
+            output1 = var1 * embedding_matrix
+            output2 = var2 * embedding_matrix
+
+            output1.sum().backward()
+
+            ignore = F.embedding(input, embedding_matrix, max_norm=0.01)
+            with self.assertRaisesRegex(RuntimeError, "modified"):
+                output2.sum().backward()
+
     def test_type_annotations(self):
         def fn(x, y):
             # type: (Tensor, Tensor) -> Tuple[Tensor, Tensor, Tensor]
@@ -7801,19 +7850,20 @@ a")
         import random
         buffers = [os.urandom(size) for size in [random.randint(1, 100) for i in range(20)]]
         offsets = []
-        for buf in buffers:
-            offsets.append(writer.write_record(buf, len(buf)))
+        for i, buf in enumerate(buffers):
+            writer.write_record(str(i), buf, len(buf))
+            offsets.append(i)
         import pickle
         serialized_offsets = pickle.dumps(offsets)
-        writer.write_record(serialized_offsets, len(serialized_offsets))
+        writer.write_record("meta", serialized_offsets, len(serialized_offsets))
         writer.write_end_of_file()
 
         reader = torch._C.PyTorchFileReader(filename)
-        serialized_offsets_read = reader.get_last_record()
+        serialized_offsets_read = reader.get_record("meta")
         parsed_serialized_offsets = pickle.loads(serialized_offsets)
 
         for i, offset in enumerate(parsed_serialized_offsets):
-            data = reader.get_record_with_key(offset)
+            data = reader.get_record(str(offset))
             assert(data == buffers[i])
 
     # for each type, the input type annotation and corresponding return type annotation
@@ -8734,6 +8784,13 @@ a")
             return ls
         self.checkScript(foo, (torch.rand(2, 3), torch.rand(3)))
 
+    def test_inplace_copy_script(self):
+        def foo(x):
+            a = torch.rand(3, 4)
+            a.copy_(x)
+            return a
+        self.checkScript(foo, (torch.rand(3, 4),))
+
     def test_lhs_indexing_increment(self):
         def foo(a, b):
             a[0] += b
@@ -8797,6 +8854,15 @@ a")
             # type: (Tensor) -> Tuple[Tensor, Tensor]
             return F.max_pool1d(x, 1, 1, 0, 1, False, True)
         self.checkScript(arg_true, (torch.randn(3, 3, 3),))
+
+    def test_infer_size(self):
+        from torch._C import _infer_size
+
+        def fn(x, y):
+            # type: (Tensor, Tensor) -> List[int]
+            return _infer_size(x.size(), y.size())
+
+        self.checkScript(fn, (torch.ones(2, 4, 2), torch.ones(2, 4, 2)))
 
 
 class MnistNet(nn.Module):
@@ -9431,9 +9497,6 @@ EXCLUDE_SCRIPT = {
     'test_nn_ctc_loss',
 
     # unknown builtin op
-    'test_nn_binary_cross_entropy',
-    'test_nn_binary_cross_entropy_size_average',
-    'test_nn_cross_entropy',
     'test_nn_interpolate',
     'test_nn_fold',
 }
@@ -9447,6 +9510,20 @@ EXCLUDE_PYTHON_PRINT = {
 EXCLUDE_SCRIPT_MODULES = {
     'test_nn_LPPool2d_norm',
     'test_nn_LPPool1d_norm',
+    'test_nn_BatchNorm1d_3d_input_not_affine',
+    'test_nn_BatchNorm1d_affine_simple_average',
+    'test_nn_BatchNorm1d_not_affine',
+    'test_nn_BatchNorm1d_not_tracking_stats',
+    'test_nn_BatchNorm2d_2d_simple_average',
+    'test_nn_BatchNorm2d_not_affine',
+    'test_nn_BatchNorm2d_not_tracking_stats',
+    'test_nn_BatchNorm3d_3d_simple_average',
+    'test_nn_BatchNorm3d_not_affine',
+    'test_nn_BatchNorm3d_not_tracking_stats',
+    'test_nn_LayerNorm_1d_elementwise_affine',
+    'test_nn_LayerNorm_1d_no_elementwise_affine',
+    'test_nn_LayerNorm_3d_elementwise_affine',
+    'test_nn_LayerNorm_3d_no_elementwise_affine'
 }
 
 DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
@@ -9515,6 +9592,8 @@ def get_script_args(args):
             formals.append(name)
             actuals.append(name)
             tensors.append(arg)
+        elif isinstance(arg, str):
+            actuals.append("'{}'".format(arg))
         else:
             actuals.append(str(get_constant(arg)))
     return (formals, tensors, actuals)
@@ -9901,8 +9980,8 @@ graph(%0 : Double(5, 5)) {
         def func(x):
             return torch.ops.aten.relu(x)
         self.assertExpectedInline(canonical(func.graph), '''\
-graph(%x : Dynamic) {
-  %1 : Dynamic = aten::relu(%x)
+graph(%x : Tensor) {
+  %1 : Tensor = aten::relu(%x)
   return (%1);
 }
 ''')
@@ -10079,7 +10158,7 @@ nn_functional_tests = [
                                                            non_differentiable(torch.randn(3, 2))),),
     ('binary_cross_entropy', torch.randn(3, 2).sigmoid(),
         (non_differentiable(torch.rand(3, 2)),
-         non_differentiable(torch.randn(3, 2)), True), 'size_average'),
+         non_differentiable(torch.randn(3, 2)), None, None, 'mean'), 'size_average'),
     ('ctc_loss', torch.rand(S, S, S).log_softmax(2).detach().requires_grad_(), \
      (torch.randint(1, S, (S, S), dtype=torch.long), torch.full((S,), S, dtype=torch.long), \
       torch.randint(1, S, (S,), dtype=torch.long))),
@@ -10093,6 +10172,7 @@ nn_functional_single_grad = frozenset('test_nn_' + name for name in [
     'max_unpool3d',
     'multi_margin_loss',
     'binary_cross_entropy',
+    'binary_cross_entropy_size_average',
     'ctc_loss',
     'grid_sample',
 ])

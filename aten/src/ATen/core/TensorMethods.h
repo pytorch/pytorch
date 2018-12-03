@@ -57,9 +57,6 @@ inline void Tensor::set_data(Tensor new_data) {
 }
 
 // all static inline to allow for inlining of the non-dynamic part of dispatch
-inline Tensor & Tensor::_th_triu_(int64_t diagonal) {
-    return type()._th_triu_(*this, diagonal);
-}
 inline Tensor Tensor::abs() const {
     return type().abs(*this);
 }

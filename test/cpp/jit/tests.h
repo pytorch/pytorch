@@ -1320,7 +1320,7 @@ void testCustomOperators() {
             "foo::bar_with_bad_schema(Tensor a) -> Tensor",
             [](double a) { return a; }),
         "Inferred type for argument #0 was float, "
-        "but the provided schema specified type Dynamic "
+        "but the provided schema specified type Tensor "
         "for the argument in that position");
     ASSERT_THROWS_WITH(
         createOperator(
@@ -1333,7 +1333,7 @@ void testCustomOperators() {
             "foo::bar_with_bad_schema(float a) -> Tensor",
             [](double a) { return a; }),
         "Inferred type for return value #0 was float, "
-        "but the provided schema specified type Dynamic "
+        "but the provided schema specified type Tensor "
         "for the return value in that position");
   }
   {
