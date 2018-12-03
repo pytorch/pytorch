@@ -3603,6 +3603,7 @@ class TestLazyLogitsInitialization(TestCase):
 @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
 class TestAgainstScipy(TestCase):
     def setUp(self):
+        set_rng_seed(0)
         positive_var = torch.randn(20).exp()
         positive_var2 = torch.randn(20).exp()
         random_var = torch.randn(20)
