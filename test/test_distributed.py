@@ -1016,7 +1016,12 @@ class _DistTestBase(object):
                 dist.barrier(group_id)
                 self.assertGreaterEqual(time.time(), expected_time[0])
 
-        self._barrier()
+        # Use higher timeout for the instance where the test runs
+        # against a subgroup and uses a CUDA tensor for expected time.
+        # The CUDA initialization for the participating processes can
+        # take long enough for the barrier timeout to trigger on the
+        # process that doesn't participate in the group.
+        self._barrier(timeout=20)
 
     @skip_if_no_gpu
     @unittest.skipIf(BACKEND == "mpi", "MPI doesn't supports GPU barrier")
