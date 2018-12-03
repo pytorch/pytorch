@@ -63,9 +63,6 @@ class CAFFE2_API Context {
   bool hasCUDA() const {
     return detail::getCUDAHooks().hasCUDA();
   }
-  bool hasCuDNN() const {
-    return detail::getCUDAHooks().hasCuDNN();
-  }
   // defined in header so that getNonVariableType has ability to inline
   // call_once check. getNonVariableType is called fairly frequently
   THCState* lazyInitCUDA() {
@@ -162,10 +159,6 @@ static inline TypeExtendedInterface& CUDA(ScalarType s) {
 
 static inline bool hasCUDA() {
   return globalContext().hasCUDA();
-}
-
-static inline bool hasCuDNN() {
-  return globalContext().hasCuDNN();
 }
 
 static inline bool hasMKL() {
