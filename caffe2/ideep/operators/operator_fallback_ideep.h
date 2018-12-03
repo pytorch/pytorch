@@ -153,10 +153,15 @@ class C10_EXPORT IDEEPFallbackOp final : public IDEEPOperator {
       } else {
         VLOG(2) << "Output " << base_def_.output(i) << " as CPUTensor";
         Blob* dst = OperatorBase::OutputBlob(i);
-        dst->Reset(new Tensor(CPU));
-        auto dtensor = BlobGetMutableTensor(dst, CPU);
-        dtensor->Resize(src_dims);
-        dtensor->ShareData(src);
+        if (output_inplace_[i]) {
+          auto dtensor = BlobGetMutableTensor(dst, CPU);
+          dtensor->CopyFrom(src);
+        } else {
+          dst->Reset(new Tensor(CPU));
+          auto dtensor = BlobGetMutableTensor(dst, CPU);
+          dtensor->Resize(src_dims);
+          dtensor->ShareData(src);
+        }
       }
     }
     return true;
