@@ -31,7 +31,6 @@ class Cloneable : public virtual Module {
   /// Performs a recursive "deep copy" of the `Module`, such that all parameters
   /// and submodules in the cloned module are different from those in the
   /// original module.
-  #if !AT_MOBILE && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY) || true
   std::shared_ptr<Module> clone(
       optional<Device> device = nullopt) const override {
     NoGradGuard no_grad;
@@ -74,12 +73,7 @@ class Cloneable : public virtual Module {
     }
     return copy;
   }
-  #else
-  std::shared_ptr<Module> clone(
-      c10::optional<Device> device = c10::nullopt) const override {
-    assert("OptionsGuard is not supported on mobile, bad luck!");
-  }
-  #endif
+
  private:
   void clone_(Module& other, optional<Device> device) final {
     // Here we are *pretty* certain that `other's` type is `Derived` (because it
