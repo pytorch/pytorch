@@ -44,11 +44,14 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
     if (!GradMode::is_enabled()
         && !new_grad.is_sparse()
         && new_grad.is_contiguous()
-        && new_grad.use_count() == 1) {
+        && new_grad.use_count() <= 1 + !post_hooks().empty()) {
       // first check it is in first-order grad only mode
       // then check not sparse before is_contiguous
       // then check contiguous, otherwise later in place accumulation may fail
-      // and lastly, check it is the last reference before we grab it
+      // and lastly, check it is the last reference before we grab it.
+      // If the function has post hooks (for example, a DDP allreduce hook),
+      // call_function in Engine.cpp will temporarily bump the refcount by one, hence the
+      // addition of !post_hooks().empty().
       variable.grad() = new_grad.detach();
     } else {
       variable.grad() = new_grad.clone();

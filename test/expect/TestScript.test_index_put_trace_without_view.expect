@@ -3,7 +3,7 @@ graph(%target : Double(100)
       %rhs : Double(4)) {
   %3 : bool = prim::Constant[value=0]()
   %indices : Long(4) = aten::_cast_Long(%indices.1, %3)
-  %5 : Dynamic[] = prim::ListConstruct(%indices)
+  %5 : Tensor[] = prim::ListConstruct(%indices)
   %6 : bool = prim::Constant[value=0]()
   %7 : Double(100) = aten::index_put_(%target, %5, %rhs, %6)
   return (%7);

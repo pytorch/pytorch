@@ -32,39 +32,25 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       out << "*";
     }
     out << ")";
-  } else if(t.kind() == TypeKind::DynamicType) {
-    out << "Dynamic";
-  } else if(t.kind() == TypeKind::UndefinedTensorType) {
-    out << "Undefined";
-  } else if(t.kind() == TypeKind::TupleType) {
-    out << "Tuple";
-  } else if(t.kind() == TypeKind::NumberType) {
-    out << "Number";
-  } else if(t.kind() == TypeKind::FloatType) {
-    out << "float";
-  } else if(t.kind() == TypeKind::IntType) {
-    out << "int";
-  } else if(t.kind() == TypeKind::BoolType) {
-    out << "bool";
   } else if(t.kind() == TypeKind::ListType) {
     auto prim = t.cast<ListType>()->getElementType();
     out << *prim << "[]";
   } else if (t.kind() == TypeKind::OptionalType) {
     auto prim = t.cast<OptionalType>()->getElementType();
     out << *prim << "?";
-  } else if(t.kind() == TypeKind::NoneType) {
-    out << "None";
-  } else if(t.kind() == TypeKind::StringType) {
-    out << "string";
-  } else if(t.kind() == TypeKind::GeneratorType) {
-    out << "Generator";
-  } else if(t.kind() == TypeKind::VarType) {
-    out << t.expect<VarType>()->name();
   } else if(t.kind() == TypeKind::FutureType) {
     auto elem = t.cast<FutureType>()->getElementType();
     out << "Future[" << *elem << "]";
+  } else if(auto tup = t.cast<TupleType>()) {
+    out << "(";
+    for(size_t i = 0; i < tup->elements().size(); ++i) {
+      if(i > 0)
+        out << ", ";
+      out << *(tup->elements()[i]);
+    }
+    out << ")";
   } else {
-    AT_ERROR("unknown type kind");
+    out << t.str();
   }
   return out;
 }

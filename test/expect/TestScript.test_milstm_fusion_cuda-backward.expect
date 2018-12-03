@@ -1,15 +1,15 @@
 graph(%0 : Float(*, *)
       %1 : Float(*, *)
-      %2 : Undefined
-      %3 : Undefined
-      %4 : Undefined
-      %5 : Undefined
-      %6 : Undefined
-      %7 : Undefined
-      %8 : Undefined
-      %9 : Undefined
-      %10 : Undefined
-      %11 : Undefined
+      %2 : UndefinedTensor
+      %3 : UndefinedTensor
+      %4 : UndefinedTensor
+      %5 : UndefinedTensor
+      %6 : UndefinedTensor
+      %7 : UndefinedTensor
+      %8 : UndefinedTensor
+      %9 : UndefinedTensor
+      %10 : UndefinedTensor
+      %11 : UndefinedTensor
       %12 : Float(*, *)
       %13 : Float(*)
       %14 : Float(*)

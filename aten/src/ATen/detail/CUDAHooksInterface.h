@@ -138,17 +138,5 @@ C10_DECLARE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs);
 
 namespace detail {
 CAFFE2_API const CUDAHooksInterface& getCUDAHooks();
-
-/// This class exists to let us access `cudaSetDevice`, `cudaGetDevice` and CUDA
-/// error handling functions, when CUDA is available. These functions will first
-/// default to no-ops. When the `ATen` GPU library is loaded, they will be set to
-/// the `cudaSetDevice`/`cudaGetDevice` functions. This allows us to access them
-/// with only a single pointer indirection, while virtual dispatch would require
-/// two (one for the virtual call, one for `cudaSetDevice`/`cudaGetDevice`).
-struct CAFFE2_API DynamicCUDAInterface {
-  static void (*set_device)(int32_t);
-  static void (*get_device)(int32_t*);
-  static void (*unchecked_set_device)(int32_t);
-};
 } // namespace detail
 } // namespace at

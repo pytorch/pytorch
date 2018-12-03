@@ -10,7 +10,9 @@ Checks: '
   ,-cppcoreguidelines-pro-type-static-cast-downcast
   ,-cppcoreguidelines-pro-bounds-pointer-arithmetic
   ,-cppcoreguidelines-pro-bounds-constant-array-index
+  ,-cppcoreguidelines-pro-type-cstyle-cast
   ,-cppcoreguidelines-pro-type-reinterpret-cast
+  ,-cppcoreguidelines-pro-type-vararg
   ,-cppcoreguidelines-special-member-functions
   ,-cppcoreguidelines-interfaces-global-init
   ,-cppcoreguidelines-owning-memory
