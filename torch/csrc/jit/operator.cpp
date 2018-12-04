@@ -225,6 +225,10 @@ struct SchemaParser {
       case TK_NONE:
         L.next();
         return IValue();
+      case TK_STRINGLITERAL: {
+        auto token = L.next();
+        return parseStringLiteral(token.range, token.text());
+      }
       case TK_IDENT: {
         auto tok = L.next();
         auto text = tok.text();
@@ -293,6 +297,7 @@ struct SchemaParser {
       case TypeKind::GeneratorType: {
         return parseTensorDefault(range);
       }  break;
+      case TypeKind::StringType:
       case TypeKind::OptionalType:
       case TypeKind::NumberType:
       case TypeKind::IntType:

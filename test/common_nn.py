@@ -1683,7 +1683,7 @@ new_module_tests = [
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, 4, 'nearest'),
+        constructor_args=(None, 4., 'nearest'),
         input_size=(1, 2, 4),
         desc='nearest_scale_1d',
     ),
@@ -1701,7 +1701,7 @@ new_module_tests = [
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, 4, 'linear', False),
+        constructor_args=(None, 4., 'linear', False),
         input_size=(1, 2, 4),
         desc='linear_scale_1d',
     ),
@@ -1713,7 +1713,7 @@ new_module_tests = [
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, 4, 'linear', True),
+        constructor_args=(None, 4., 'linear', True),
         input_size=(1, 2, 4),
         desc='linear_scale_1d_align_corners',
     ),
@@ -1731,7 +1731,7 @@ new_module_tests = [
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, 4, 'nearest'),
+        constructor_args=(None, 4., 'nearest'),
         input_size=(1, 2, 4, 4),
         desc='nearest_scale_2d',
     ),
@@ -1749,19 +1749,19 @@ new_module_tests = [
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, 4, 'bilinear', False),
+        constructor_args=(None, 4., 'bilinear', False),
         input_size=(1, 2, 4, 4),
         desc='bilinear_scale_2d',
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, (2, 2), 'bilinear', False),
+        constructor_args=(None, (2., 2.), 'bilinear', False),
         input_size=(1, 2, 4, 4),
         desc='bilinear_scale_tuple_shared_2d',
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, (2, 1), 'bilinear', False),
+        constructor_args=(None, (2., 1.), 'bilinear', False),
         input_size=(1, 2, 4, 4),
         desc='bilinear_scale_tuple_skewed_2d',
     ),
@@ -1773,7 +1773,7 @@ new_module_tests = [
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, (2, 1), 'bilinear', True),
+        constructor_args=(None, (2., 1.), 'bilinear', True),
         input_size=(1, 2, 4, 4),
         desc='bilinear_scale_tuple_skewed_2d_align_corners',
     ),
@@ -1791,7 +1791,7 @@ new_module_tests = [
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, 4, 'nearest'),
+        constructor_args=(None, 4., 'nearest'),
         input_size=(1, 2, 4, 4, 4),
         desc='nearest_scale_3d',
     ),
@@ -1809,7 +1809,7 @@ new_module_tests = [
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, 3, 'trilinear', False),
+        constructor_args=(None, 3., 'trilinear', False),
         input_size=(1, 2, 3, 4, 4),
         desc='trilinear_scale_3d',
         # See https://github.com/pytorch/pytorch/issues/5006
@@ -1823,7 +1823,7 @@ new_module_tests = [
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, 3, 'trilinear', True),
+        constructor_args=(None, 3., 'trilinear', True),
         input_size=(1, 2, 3, 4, 4),
         desc='trilinear_scale_3d_align_corners',
         # See https://github.com/pytorch/pytorch/issues/5006
