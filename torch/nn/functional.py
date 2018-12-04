@@ -1885,17 +1885,40 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
-            'mean': the sum of the output will be divided by the number of
-            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
-            and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
+            'none' | 'batchmean' | 'sum' | 'mean'.
+            'none': no reduction will be applied
+            'batchmean': the sum of the output will be divided by the batchsize
+            'sum': the output will be summed
+            'mean': the output will be divided by the number of elements in the output
+            Default: 'mean'
+
+        .. note:: :attr:`size_average` and :attr:`reduce` are in the process of being deprecated,
+            and in the meantime, specifying either of those two args will override :attr:`reduction`.
+
+        .. note:: `reduction='mean'` doesn't return the true kl divergence value, please use
+            `reduction='batchmean'` which aligns with KL math definition.
+            In the next major release, 'mean' will be changed to be the same as 'batchmean'.
     """
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction_enum = _Reduction.get_enum(reduction)
-    return torch.kl_div(input, target, reduction_enum)
+        if reduction == 'mean':
+            warnings.warn("reduction: 'mean' divides the total loss by both the batch size and the support size."
+                          "'batchmean' divides only by the batch size, and aligns with the KL div math definition."
+                          "'mean' will be changed to behave the same as 'batchmean' in the next major release.")
+
+        # special case for batchmean
+        if reduction == 'batchmean':
+            reduction_enum = _Reduction.get_enum('sum')
+        else:
+            reduction_enum = _Reduction.get_enum(reduction)
+
+    reduced = torch.kl_div(input, target, reduction_enum)
+
+    if reduction == 'batchmean' and input.dim() != 0:
+        reduced = reduced / input.size()[0]
+
+    return reduced
 
 
 @torch._jit_internal.weak_script
