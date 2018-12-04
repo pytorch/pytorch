@@ -709,7 +709,6 @@ class FractionalMaxPool2d(Module):
             _random_samples=samples)
 
 
-
 @weak_module
 class _LPPoolNd(Module):
     __constants__ = ['norm_type', 'kernel_size', 'stride', 'ceil_mode']
@@ -724,7 +723,6 @@ class _LPPoolNd(Module):
     def extra_repr(self):
         return 'norm_type={norm_type}, kernel_size={kernel_size}, stride={stride}, ' \
             'ceil_mode={ceil_mode}'.format(**self.__dict__)
-
 
 
 @weak_module
@@ -768,7 +766,6 @@ class LPPool1d(_LPPoolNd):
     def forward(self, input):
         return F.lp_pool1d(input, float(self.norm_type), self.kernel_size,
                            self.stride, self.ceil_mode)
-
 
 
 @weak_module
