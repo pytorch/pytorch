@@ -6,7 +6,7 @@ from .. import functional as F
 from .. import init
 from .module import Module
 from .utils import _single, _pair, _triple
-from ..._jit_internal import weak_module, weak_script_method
+from ..._jit_internal import weak_module, weak_script_method, List
 
 
 @weak_module
