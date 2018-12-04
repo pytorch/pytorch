@@ -3,7 +3,7 @@
 #include <TH/THGeneral.h>
 
 #ifdef __cplusplus
-#include <ATen/Allocator.h>
+#include <c10/core/CPUAllocator.h>
 #endif
 
 #define TH_ALLOCATOR_MAPPED_SHARED 1
@@ -16,6 +16,7 @@
 
 #ifdef __cplusplus
 using THAllocator = at::Allocator;
+using DefaultCPUAllocator = at::DefaultCPUAllocator;
 #else
 // struct at_THAllocator doesn't and will never exist, but we cannot name
 // the actual struct because it's a namespaced C++ thing

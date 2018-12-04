@@ -1,7 +1,6 @@
-#include <c10/core/Allocator.h>
-#include "caffe2/core/context.h"
-#include "caffe2/core/logging.h"
+#include <c10/core/CPUAllocator.h>
 #include <c10/util/typeid.h>
+#include <c10/DeviceType.h>
 
 C10_DEFINE_bool(
     caffe2_report_cpu_memory_usage,
@@ -18,10 +17,10 @@ C10_DEFINE_bool(
     false,
     "If set, fill memory with deterministic junk when allocating on CPU");
 
-namespace caffe2 {
+namespace c10 {
 
 void memset_junk(void* data, size_t num) {
-  // This garbage pattern is NaN when interpretted as floating point values,
+  // This garbage pattern is NaN when interpreted as floating point values,
   // or as very large integer values.
   static constexpr int32_t kJunkPattern = 0x7fedbeef;
   static constexpr int64_t kJunkPattern64 =
@@ -40,19 +39,22 @@ void memset_junk(void* data, size_t num) {
 void NoDelete(void*) {}
 
 at::Allocator* GetCPUAllocator() {
-  return GetAllocator(CPU);
+  return GetAllocator(DeviceType::CPU);
 }
 
 void SetCPUAllocator(at::Allocator* alloc) {
-  SetAllocator(CPU, alloc);
+  SetAllocator(DeviceType::CPU, alloc);
 }
 
 // Global default CPU Allocator
 static DefaultCPUAllocator g_cpu_alloc;
 
-REGISTER_ALLOCATOR(CPU, &g_cpu_alloc);
+REGISTER_ALLOCATOR(DeviceType::CPU, &g_cpu_alloc);
 
-MemoryAllocationReporter DefaultCPUAllocator::reporter_;
+MemoryAllocationReporter& DefaultCPUAllocator::getMemoryAllocationReporter() {
+  static MemoryAllocationReporter reporter_;
+  return reporter_;
+}
 
 void MemoryAllocationReporter::New(void* ptr, size_t nbytes) {
   std::lock_guard<std::mutex> guard(mutex_);
@@ -72,4 +74,4 @@ void MemoryAllocationReporter::Delete(void* ptr) {
   size_table_.erase(it);
 }
 
-} // namespace caffe2
+} // namespace c10

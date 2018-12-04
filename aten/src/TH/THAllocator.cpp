@@ -19,19 +19,8 @@
 #endif
 /* end of stuff for mapped files */
 
-struct THDefaultAllocator final : public at::Allocator {
-  at::DataPtr allocate(size_t size) const override {
-    auto* ptr = THAlloc(size);
-    return {ptr, ptr, &THFree, at::DeviceType::CPU};
-  }
-  at::DeleterFnPtr raw_deleter() const override {
-    return &THFree;
-  }
-};
-
-static THDefaultAllocator th_default_allocator;
 at::Allocator* getTHDefaultAllocator() {
-  return &th_default_allocator;
+  return c10::GetCPUAllocator();
 }
 
 #if defined(_WIN32) || defined(HAVE_MMAP)

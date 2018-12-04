@@ -99,7 +99,7 @@ inline bool operator!=(std::nullptr_t, const DataPtr& dp) noexcept {
 // when it is actually possible.
 
 struct Allocator {
-  virtual ~Allocator() {}
+  virtual ~Allocator();
   virtual DataPtr allocate(size_t n) const = 0;
 
   // If this returns a non nullptr, it means that allocate()
@@ -133,10 +133,6 @@ struct C10_API InefficientStdFunctionContext {
       Device device);
 };
 
-} // namespace c10
-
-namespace caffe2 {
-
 /** Set the allocator for DeviceType `t`. The passed in allocator pointer is
  *  expected to have static lifetime; this function does NOT take ownership
  *  of the raw pointer. (The reason for this is to prevent existing pointers
@@ -161,4 +157,4 @@ struct AllocatorRegisterer {
   static AllocatorRegisterer<t> g_allocator_##d(f); \
   }
 
-} // namespace caffe2
+} // namespace c10

@@ -1257,7 +1257,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       const at::Allocator* allocator = storage_.allocator();
       // TODO: Get rid of StaticContext
       if (allocator == nullptr) {
-        allocator = caffe2::GetAllocator(storage_.device_type());
+        allocator = c10::GetAllocator(storage_.device_type());
       }
       if (meta.placementNew()) {
         // For types that need placement new, we will call it, as well as

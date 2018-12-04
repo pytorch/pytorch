@@ -2,6 +2,11 @@
 
 namespace c10 {
 
+// When all the methods are defined in .h file, c10::Allocator will
+// be weak symbolsand it will confuse ASAN
+// Putting destructor in cpp file to avoid this situation
+Allocator::~Allocator() {}
+
 static void deleteInefficientStdFunctionContext(void* ptr) {
   delete static_cast<InefficientStdFunctionContext*>(ptr);
 }
@@ -16,12 +21,7 @@ at::DataPtr InefficientStdFunctionContext::makeDataPtr(
           device};
 }
 
-} // namespace c10
-
-namespace caffe2 {
-
-C10_API at::Allocator* allocator_array[static_cast<int>(
-    at::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
+C10_API at::Allocator* allocator_array[at::COMPILE_TIME_MAX_DEVICE_TYPES];
 
 void SetAllocator(at::DeviceType t, at::Allocator* alloc) {
   allocator_array[static_cast<int>(t)] = alloc;
@@ -33,4 +33,4 @@ at::Allocator* GetAllocator(const at::DeviceType& t) {
   return alloc;
 }
 
-} // namespace caffe2
+} // namespace c10
