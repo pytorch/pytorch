@@ -308,6 +308,13 @@ class _DistTestBase(object):
         self._barrier()
         dist.destroy_process_group(group_id)
 
+    # Test get rank and size of default group (passing it as argument)
+    def test_get_rank_size(self):
+        world_size = dist.get_world_size()
+        group_id = dist.get_default_group()
+        self.assertEqual(dist.get_world_size(group_id), world_size)
+        self.assertTrue(dist.get_rank(group_id) in list(range(world_size)))
+
     # Test get rank and size of group
     def test_get_rank_size_group(self):
         if dist.get_world_size() > 2:

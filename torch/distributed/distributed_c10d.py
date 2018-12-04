@@ -314,6 +314,7 @@ def init_process_group(backend,
     """
     global _pg_map
     global _pg_names
+    global _pg_group_ranks
     global _backend
     global _default_pg
     global _default_pg_init_method
@@ -368,6 +369,7 @@ def init_process_group(backend,
             _pg_map[_default_pg] = (Backend.NCCL, store)
             _pg_names[_default_pg] = group_name
 
+    _pg_group_ranks[_default_pg] = {i: i for i in range(_default_pg.size())}
     _backend = _pg_map[_default_pg][0]
     _default_pg_init_method = init_method
 
