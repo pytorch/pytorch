@@ -266,11 +266,11 @@ class JitTestCase(TestCase):
             if pp != pp2:
                 self.assertMultiLineEqual(pp, pp2)
 
-    def getExportImportCopy(self, m, also_test_file=True):
+    def getExportImportCopy(self, m, also_test_file=True, map_location=None):
         buffer = io.BytesIO()
         torch.jit.save(m, buffer)
         buffer.seek(0)
-        imported = torch.jit.load(buffer)
+        imported = torch.jit.load(buffer, map_location=map_location)
 
         if not also_test_file:
             return imported
@@ -282,7 +282,7 @@ class JitTestCase(TestCase):
         try:
             f.close()
             imported.save(f.name)
-            result = torch.jit.load(f.name)
+            result = torch.jit.load(f.name, map_location=map_location)
         finally:
             os.unlink(f.name)
 
@@ -358,7 +358,7 @@ class JitTestCase(TestCase):
                 vs = vs[:-drop]
             # we don't want all the grad for all the outputs to be the same
             # so we multiply each by a constant
-            return sum([(i + 1) * v.sum() for i, v in enumerate(vs) if v is not None])
+            return sum([math.log(i + 2) * v.sum() for i, v in enumerate(vs) if v is not None])
         if input_tensors is None:
             input_tensors = reference_tensors
 
@@ -433,10 +433,11 @@ class JitTestCase(TestCase):
 
         return ge
 
-    def assertAllFused(self, graph):
+    def assertAllFused(self, graph, except_for=()):
         if [n.kind() for n in graph.nodes()] == ['prim::DifferentiableGraph']:
             graph = next(graph.nodes()).g('Subgraph')
-        self.assertTrue(all(node.kind() in {'prim::Constant', 'prim::FusionGroup'} for node in graph.nodes()),
+        allowed_nodes = {'prim::Constant', 'prim::FusionGroup'} | set(except_for)
+        self.assertTrue(all(node.kind() in allowed_nodes for node in graph.nodes()),
                         'got {}'.format(graph))
         self.assertTrue([node.kind() for node in graph.nodes()].count('prim::FusionGroup') == 1)
 
@@ -487,6 +488,65 @@ class TestJit(JitTestCase):
         trace, z = torch.jit.get_trace_graph(f, (x, y))
         self.assertExpectedGraph(trace)
         self.assertExportImport(trace, (x, y))
+
+    def test_restore_device(self):
+        # main purpose is checking map_location works
+        m = torch.jit.ScriptModule()
+        cpu_device_str = 'cpu'
+        m.p0 = nn.Parameter(torch.tensor([0.3], dtype=torch.float,
+                                         device=cpu_device_str))
+        m.register_buffer('b0', torch.tensor([0.9], dtype=torch.float,
+                                             device=cpu_device_str))
+        m2 = self.getExportImportCopy(m)
+        self.assertEqual(tuple(m.parameters()), tuple(m2.parameters()))
+        self.assertEqual(tuple(m.buffers()), tuple(m2.buffers()))
+        self.assertFalse(m2.p0.is_cuda)
+        self.assertFalse(m2.b0.is_cuda)
+
+    @unittest.skipIf(not RUN_CUDA, "restore device requires CUDA")
+    def test_restore_device_cuda(self):
+        class MyModule(torch.jit.ScriptModule):
+            def __init__(self):
+                super(MyModule, self).__init__(False)
+                self.register_buffer('b0', torch.randn(1, 3))
+                self.p0 = nn.Parameter(torch.randn(2, 3))
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return x + self.b0 + self.p0
+
+        m = MyModule()
+        m.cuda(torch.cuda.device_count() - 1)
+        cuda_device_str = 'cuda:' + str(torch.cuda.device_count() - 1)
+
+        self.assertTrue(m.p0.is_cuda)
+        self.assertTrue(m.b0.is_cuda)
+
+        # restore to the saved devices
+        m2 = self.getExportImportCopy(m)
+        self.assertEqual(tuple(m.parameters()), tuple(m2.parameters()))
+        self.assertEqual(tuple(m.buffers()), tuple(m2.buffers()))
+        self.assertEqual(str(m2.p0.device), cuda_device_str)
+        self.assertEqual(str(m2.b0.device), cuda_device_str)
+
+        # restore all to cpu using string
+        cpu_device_str = 'cpu'
+        m3 = self.getExportImportCopy(m, map_location=cpu_device_str)
+        self.assertEqual(str(m3.p0.device), cpu_device_str)
+        self.assertEqual(str(m3.b0.device), cpu_device_str)
+
+        # restore all to first gpu using device
+        m4 = self.getExportImportCopy(
+            m3, map_location=torch.device('cuda:0'))
+        self.assertEqual(str(m4.p0.device), 'cuda:0')
+        self.assertEqual(str(m4.b0.device), 'cuda:0')
+
+        # compute and compare the results
+        input = torch.rand(2, 3).cuda(torch.cuda.device_count() - 1)
+        origin_result = m(input)
+        self.assertEqual(origin_result, m2(input))
+        self.assertEqual(origin_result, m3(input.cpu()))
+        self.assertEqual(origin_result, m4(input.cuda(0)))
 
     def test_typeas_trace_check(self):
         a = torch.tensor([0.4], requires_grad=True)
@@ -2972,6 +3032,25 @@ class TestScript(JitTestCase):
 
         return ge
 
+    def test_training_param(self):
+        class What(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                # type: (int) -> int
+                if self.training:
+                    r = x
+                else:
+                    r = x + 4
+                # check double use of training
+                if self.training:
+                    r = r + 1
+                return r
+
+        w = What()
+        self.assertEqual(4, w(3))
+        w.train(False)
+        self.assertEqual(7, w(3))
+
     def test_jitter_bug(self):
         @torch.jit.script
         def fn2(input, kernel_size):
@@ -3129,6 +3208,13 @@ class TestScript(JitTestCase):
         self.assertTrue(same_device(gpu, gpu))
         self.assertFalse(same_device(cpu, gpu))
 
+    @unittest.skipIf(not RUN_CUDA, "device tests require CUDA")
+    def test_tensor_to_device(self):
+        def to_device(x):
+            return x.to(device="cuda").to(device=torch.device("cpu"))
+
+        self.checkScript(to_device, (torch.ones(3, 4),))
+
     def test_generic_list_errors(self):
         with self.assertRaisesRegex(RuntimeError, "previously matched to type"):
             @torch.jit.script
@@ -3225,12 +3311,12 @@ a")
         funcs = (func2, funcInf)
         for f in funcs:
             s = self.checkScript(f, (a, b))
-            self.assertAllFused(s.graph_for(a, b))
+            self.assertAllFused(s.graph_for(a, b), except_for={'aten::size'})
 
             c = s(a, b)
             c.sum().backward()
             graph = backward_graph(s)
-            self.assertAllFused(graph)
+            self.assertAllFused(graph, except_for={'prim::SumToSize'})
 
     def test_mul(self):
         def func(a, b):
@@ -3460,6 +3546,16 @@ a")
         for tensor in tensors:
             for i in range(len(script_funs)):
                 self.assertEqual(test_func(script_funs[i], x, tensor), test_func(funs[i], x, tensor))
+
+    def test_tuple_to_opt_list(self):
+        @torch.jit.script
+        def foo(x):
+            # type: (Optional[List[int]]) -> int
+            return 1
+
+        @torch.jit.script
+        def tuple_call():
+            return foo((1, 2))
 
     def test_advancedindex(self):
         def consec(size, start=0):
@@ -4212,8 +4308,9 @@ a")
         inputs = get_lstm_inputs('cuda', training=True)
         module = self.checkScript(LSTMCellS, inputs)
         forward_graph = module.graph_for(*inputs)
-        self.assertGraphContainsExactly(
-            forward_graph, 'prim::FusionGroup', 1, consider_subgraphs=True)
+        with self.assertRaises(AssertionError):
+            self.assertGraphContainsExactly(
+                forward_graph, 'prim::FusionGroup', 1, consider_subgraphs=True)
         self.assertExpectedGraph(forward_graph, subname='forward')
 
         hy, cy = module(*inputs)
@@ -4227,8 +4324,9 @@ a")
         inputs = get_milstm_inputs('cuda', training=True)
         module = self.checkScript(MiLSTMCell, inputs)
         forward_graph = module.graph_for(*inputs)
-        self.assertGraphContainsExactly(
-            forward_graph, 'prim::FusionGroup', 1, consider_subgraphs=True)
+        with self.assertRaises(AssertionError):
+            self.assertGraphContainsExactly(
+                forward_graph, 'prim::FusionGroup', 1, consider_subgraphs=True)
         self.assertExpectedGraph(forward_graph, subname='forward')
 
         hy, cy = module(*inputs)
@@ -4379,6 +4477,38 @@ a")
         inputs = self._make_scalar_vars([-1, 1], torch.int64)
         self.checkScript(func, inputs, optimize=True)
 
+    def test_if_is_none_dispatch(self):
+        class Test(torch.jit.ScriptModule):
+            __constants__ = ['b']
+
+            def __init__(self, b=None):
+                super(Test, self).__init__()
+                self.b = b
+
+            @torch.jit.script_method
+            def forward(self, input, opt=None):
+                # type: (Tensor, Optional[Tensor]) -> Tensor
+                x = input
+                if self.b is not None:
+                    x = self.b(input)
+
+                if self.b is None:
+                    x = input + 2
+
+                if opt is not None:
+                    opt = torch.jit._unwrap_optional(opt)
+                    x = opt + x
+
+                if opt is None:
+                    x = x + 4
+
+                return x
+
+        inputs = torch.zeros(1, 2)
+        self.assertExpectedGraph(Test().graph)
+        out = Test()(inputs)
+        self.assertEqual(out, inputs + 6)
+
     def test_explicit_bool_cast(self):
         with self.assertRaisesRegex(RuntimeError, "expected a boolean"):
             @torch.jit.script
@@ -4464,6 +4594,13 @@ a")
         self.assertExpectedGraph(graph1, subname="int")
         graph2 = torch.jit.script(fn2).graph
         self.assertExpectedGraph(graph2, subname="float")
+
+    def test_math_ops(self):
+
+        def test_floor():
+            return math.floor(1.5)
+
+        self.checkScript(test_floor, ())
 
     def test_if_nest_while(self):
         def func(a, b):
@@ -6211,7 +6348,7 @@ a")
 
             def __init__(self):
                 super(M, self).__init__(False)
-                self.param = torch.nn.Parameter(torch.zeros((5, 5), device='cuda').random_())
+                self.param = torch.nn.Parameter(torch.zeros((5, 5), device='cuda:0').random_())
 
             @torch.jit.script_method
             def foo(self):
@@ -6221,7 +6358,7 @@ a")
         m_import = self.getExportImportCopy(m_orig)
         # check to make sure the storage wasn't resized
         self.assertTrue(m_orig.param.storage().size() == 25)
-        self.assertTrue(m_import.foo().device == torch.device('cpu'))
+        self.assertTrue(m_import.foo().device == torch.device('cuda:0'))
         self.assertEqual(m_orig.foo(), m_import.foo())
         self.assertTrue(m_orig.foo().dtype == m_import.foo().dtype)
 
@@ -8469,7 +8606,6 @@ a")
         self.assertExpectedGraph(strong_mod.graph, "scope_test")
 
     def test_weak_module_parameters_and_buffers(self):
-        import math
         weights = torch.randn(10, 10)
         bias = torch.randn(10)
         weights2 = torch.randn(10, 10)
@@ -8754,6 +8890,23 @@ a")
         self.assertEqual(unify_to_optional(True), None)
         self.assertEqual(unify_to_optional(False), 2)
 
+        @torch.jit.script
+        def opt_list(x):
+            # type: (Optional[List[float]]) -> int
+            return 2
+
+        @torch.jit.script
+        def broadcast_opt_list(x):
+            # type: (Optional[BroadcastingList2[float]]) -> int
+            return 2
+
+        @torch.jit.script
+        def opt_list_tuple_caller(x):
+            # type: (Tuple[float, float]) -> int
+            return opt_list(x) + broadcast_opt_list(x)
+
+        self.assertEqual(opt_list_tuple_caller((2., 3.)), 4)
+
     def test_lhs_indexing(self):
         def foo(a, b):
             a = a.clone()
@@ -8820,40 +8973,41 @@ a")
         self.checkScript(foo, (torch.rand(2, 3), torch.rand(3)))
 
     def test_bool_dispatch(self):
-        def kwarg_false(x):
-            # type: (Tensor) -> Tensor
-            return F.max_pool1d(x, 1, 1, return_indices=False)
-        self.checkScript(kwarg_false, (torch.randn(3, 3, 3),))
+        with self.disableModuleHook():  # TODO: Python print broadcasting list
+            def kwarg_false(x):
+                # type: (Tensor) -> Tensor
+                return F.max_pool1d(x, 1, 1, return_indices=False)
+            self.checkScript(kwarg_false, (torch.randn(3, 3, 3),))
 
-        def kwarg_true(x):
-            # type: (Tensor) -> Tuple[Tensor, Tensor]
-            return F.max_pool1d(x, 1, 1, return_indices=True)
-        self.checkScript(kwarg_true, (torch.randn(3, 3, 3),))
+            def kwarg_true(x):
+                # type: (Tensor) -> Tuple[Tensor, Tensor]
+                return F.max_pool1d(x, 1, 1, return_indices=True)
+            self.checkScript(kwarg_true, (torch.randn(3, 3, 3),))
 
-        def full_kwarg_false(x):
-            # type: (Tensor) -> Tensor
-            return F.max_pool1d(x, 1, 1, ceil_mode=False, return_indices=False)
-        self.checkScript(full_kwarg_false, (torch.randn(3, 3, 3),))
+            def full_kwarg_false(x):
+                # type: (Tensor) -> Tensor
+                return F.max_pool1d(x, 1, 1, ceil_mode=False, return_indices=False)
+            self.checkScript(full_kwarg_false, (torch.randn(3, 3, 3),))
 
-        def full_kwarg_true(x):
-            # type: (Tensor) -> Tuple[Tensor, Tensor]
-            return F.max_pool1d(x, 1, 1, ceil_mode=False, return_indices=True)
-        self.checkScript(full_kwarg_true, (torch.randn(3, 3, 3),))
+            def full_kwarg_true(x):
+                # type: (Tensor) -> Tuple[Tensor, Tensor]
+                return F.max_pool1d(x, 1, 1, ceil_mode=False, return_indices=True)
+            self.checkScript(full_kwarg_true, (torch.randn(3, 3, 3),))
 
-        def use_default(x):
-            # type: (Tensor) -> Tensor
-            return F.max_pool1d(x, 1, 1)
-        self.checkScript(use_default, (torch.randn(3, 3, 3),))
+            def use_default(x):
+                # type: (Tensor) -> Tensor
+                return F.max_pool1d(x, 1, 1)
+            self.checkScript(use_default, (torch.randn(3, 3, 3),))
 
-        def arg_false(x):
-            # type: (Tensor) -> Tensor
-            return F.max_pool1d(x, 1, 1, 0, 1, False, False)
-        self.checkScript(arg_false, (torch.randn(3, 3, 3),))
+            def arg_false(x):
+                # type: (Tensor) -> Tensor
+                return F.max_pool1d(x, 1, 1, 0, 1, False, False)
+            self.checkScript(arg_false, (torch.randn(3, 3, 3),))
 
-        def arg_true(x):
-            # type: (Tensor) -> Tuple[Tensor, Tensor]
-            return F.max_pool1d(x, 1, 1, 0, 1, False, True)
-        self.checkScript(arg_true, (torch.randn(3, 3, 3),))
+            def arg_true(x):
+                # type: (Tensor) -> Tuple[Tensor, Tensor]
+                return F.max_pool1d(x, 1, 1, 0, 1, False, True)
+            self.checkScript(arg_true, (torch.randn(3, 3, 3),))
 
     def test_infer_size(self):
         from torch._C import _infer_size
@@ -8863,6 +9017,68 @@ a")
             return _infer_size(x.size(), y.size())
 
         self.checkScript(fn, (torch.ones(2, 4, 2), torch.ones(2, 4, 2)))
+
+    def test_mutable_dce(self):
+        @torch.jit.script
+        def foo():
+            a = torch.rand(2, 3)
+            a += torch.rand(2, 3)
+            b = torch.rand(2, 3)
+            b += torch.rand(2, 3)
+            # b should be cleaned up but not a
+            return a
+
+        self.assertExpectedGraph(foo.graph)
+
+    def test_mutable_dce_block(self):
+        @torch.jit.script
+        def foo():
+            a = torch.rand(2, 3)
+            a += torch.rand(2, 3)
+            b = torch.rand(2, 3)
+            if bool(a > torch.zeros(2, 3)):
+                b += torch.rand(2, 3)
+                a += torch.rand(2, 3)
+            # a should be cleaned up but not b
+            return b
+
+        self.assertExpectedGraph(foo.graph)
+
+    def test_mutable_dce_graph_input(self):
+        @torch.jit.script
+        def foo(a):
+            a += torch.rand(2, 3)
+            # shouldn't clean up `a` even though it's not used in the output
+
+        self.assertExpectedGraph(foo.graph)
+
+    def test_mutable_dce_list(self):
+        @torch.jit.script
+        def foo(a):
+            l = []
+            l.append(a)
+            c = l[0]
+            b = torch.rand(2, 3)
+            c += torch.rand(2, 3)
+            return b
+
+        self.assertExpectedGraph(foo.graph)
+
+    def test_mutable_dce_loop(self):
+        @torch.jit.script
+        def foo(a):
+            l = []
+            l.append(a)
+            i = 0
+            b = torch.rand(2, 3)
+            while i < 1:
+                dead = torch.rand(2, 3)
+                c = l[0]
+                c += torch.rand(2, 3)
+                i += 1
+            return b
+
+        self.assertExpectedGraph(foo.graph)
 
 
 class MnistNet(nn.Module):
@@ -9485,45 +9701,34 @@ EXCLUDE_SCRIPT = {
     'test_norm_fro_default',
     'test_norm_nuc',
 
-    # argument has custom behavior
-    'test_nn_fractional_max_pool2d',
-    'test_nn_batch_norm',
-
     # aten op has additional cudnn argument
-    'test_nn_group_norm',
     'test_nn_unfold',
 
-    # flakey test - TODO fix
+    # flaky test - TODO fix
     'test_nn_ctc_loss',
 
     # unknown builtin op
-    'test_nn_interpolate',
     'test_nn_fold',
 }
 
 EXCLUDE_PYTHON_PRINT = {
+    # no support for BroadcastingList in python printer
     'test_nn_max_unpool1d',
     'test_nn_max_unpool2d',
     'test_nn_max_unpool3d',
+    'test_nn_max_pool3d',
+    'test_nn_max_pool2d',
+    'test_nn_max_pool3d'
 }
 
 EXCLUDE_SCRIPT_MODULES = {
-    'test_nn_LPPool2d_norm',
-    'test_nn_LPPool1d_norm',
-    'test_nn_BatchNorm1d_3d_input_not_affine',
-    'test_nn_BatchNorm1d_affine_simple_average',
-    'test_nn_BatchNorm1d_not_affine',
     'test_nn_BatchNorm1d_not_tracking_stats',
-    'test_nn_BatchNorm2d_2d_simple_average',
-    'test_nn_BatchNorm2d_not_affine',
     'test_nn_BatchNorm2d_not_tracking_stats',
-    'test_nn_BatchNorm3d_3d_simple_average',
-    'test_nn_BatchNorm3d_not_affine',
     'test_nn_BatchNorm3d_not_tracking_stats',
-    'test_nn_LayerNorm_1d_elementwise_affine',
-    'test_nn_LayerNorm_1d_no_elementwise_affine',
-    'test_nn_LayerNorm_3d_elementwise_affine',
-    'test_nn_LayerNorm_3d_no_elementwise_affine'
+    'test_nn_AdaptiveAvgPool2d_tuple_none',
+    'test_nn_AdaptiveAvgPool3d_tuple_none',
+    'test_nn_AdaptiveMaxPool2d_tuple_none',
+    'test_nn_AdaptiveMaxPool3d_tuple_none',
 }
 
 DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
@@ -9620,9 +9825,6 @@ def create_script_fn(self, method_name, func_type, output_process_fn,
 
         script = script_template.format(', '.join(formals), call)
 
-        # for math.inf
-        import math
-
         CU = torch.jit.CompilationUnit(script)
         if disable_autodiff_subgraph_inlining:
             CU.the_method.debug_disable_autodiff_subgraph_inlining()
@@ -9631,6 +9833,17 @@ def create_script_fn(self, method_name, func_type, output_process_fn,
         script_fn.last_graph = CU.the_method.graph_for(*tensors)
         return output
     return script_fn
+
+
+def check_alias_annotation(method_name, args, kwargs):
+    formals, tensors, actuals = get_script_args(args)
+    kwargs_str = ''
+    for k, v in kwargs.items():
+        kwargs_str += ', ' + k + '=' + str(v)
+    call = '{}.{}({}{})'.format(actuals[0], method_name, ', '.join(actuals[1:]), kwargs_str)
+    script = script_template.format(', '.join(formals), call)
+    CU = torch.jit.CompilationUnit(script)
+    torch._C._jit_check_alias_annotation(CU.the_method.graph, tuple(tensors), method_name)
 
 
 def check_output_types(self, func, ref_outputs, args, kwargs):
@@ -10029,10 +10242,74 @@ L = 20
 M = 10
 S = 5
 
-# module cannot be exported /imported currently
+#  module cannot be exported /imported currently
 EXCLUDE_MODULE_EXPORT_IMPORT = {
     'EmbeddingBag',
+    'MaxPool1d',
+    'MaxPool2d',
+    'MaxPool3d',
+    'AdaptiveAvgPool2d',
+    'AdaptiveAvgPool3d',
 }
+
+local_module_tests = []
+
+
+def to_module_test_format(tup):
+    dic = dict(module_name=tup[0], constructor_args=tup[1], input_fn=lambda: tup[2])
+    if len(tup) >= 5:
+        dic['desc'] = tup[4]
+    local_module_tests.append(dic)
+
+
+def add_interpolate_module_tests():
+    # logic from test_interpolate in test_nn.py
+    def _make_input(dim):
+        size = [1, 1]
+        size += [2] * dim
+        return torch.ones(size, requires_grad=True)
+
+    i = 0
+    size = None
+    for scale_factor in [0.5, 1.5, 2.0]:
+        for mode in ['nearest', 'area']:
+            args = (size, scale_factor, mode)
+            for input in [_make_input(1), _make_input(2), _make_input(3)]:
+                to_module_test_format(('Upsample', args, input, False, str(i)))
+                i = i + 1
+
+        for align_corners in [True, False]:
+            args = (size, scale_factor, 'linear', align_corners)
+            to_module_test_format(('Upsample', args, _make_input(1), False, str(i)))
+            i = i + 1
+
+            args = (size, scale_factor, 'bilinear', align_corners)
+            to_module_test_format(('Upsample', args, _make_input(2), False, str(i)))
+            i = i + 1
+
+            args = (size, scale_factor, 'trilinear', align_corners)
+            to_module_test_format(('Upsample', args, _make_input(3), False, str(i)))
+            i = i + 1
+
+    # test_upsamplingTrilinear3d_spatial_invariance
+    scale_factor = 3.
+    args = (size, scale_factor, 'trilinear', False)
+    in_t_9 = torch.zeros(1, 1, 9, 9, 9)
+    in_t_9[:, :, :4, :4, :4].normal_()
+    to_module_test_format(('Upsample', args, in_t_9, False, str(i)))
+    i = i + 1
+
+    # testing where size is not none test_upsamplingNearest2d
+    size = 4
+    scale_factor = None
+    in_t = torch.ones(1, 1, 2, 2)
+
+    args = (size, scale_factor)
+    to_module_test_format(('UpsamplingNearest2d', args, Variable(in_t), False,))
+    to_module_test_format(('UpsamplingBilinear2d', args, Variable(in_t), False,))
+
+
+add_interpolate_module_tests()
 
 # NB: JIT script tests for all nn functional interfaces, script mode does
 # not support in_place operations yet, so no inplace operation tests added.
@@ -10118,7 +10395,7 @@ nn_functional_tests = [
     ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)), ),),
     ('instance_norm', (S, S, S), (non_differentiable(torch.zeros(S)), non_differentiable(torch.ones(S))),),
     ('layer_norm', (S, S, S, S), ([5], None, None),),
-    ('group_norm', (S, S, S), (1, torch.Tensor(5), None),),
+    ('group_norm', (S, S, S), (1, torch.rand(5), None),),
     ('local_response_norm', (S, S, S), (2, ),),
     ('nll_loss', F.log_softmax(torch.randn(3, 5), dim=0), (torch.tensor([1, 0, 4]), None, None),),
     ('poisson_nll_loss', torch.rand(S, 2), (torch.rand(S, 2),),),
@@ -10162,6 +10439,10 @@ nn_functional_tests = [
     ('ctc_loss', torch.rand(S, S, S).log_softmax(2).detach().requires_grad_(), \
      (torch.randint(1, S, (S, S), dtype=torch.long), torch.full((S,), S, dtype=torch.long), \
       torch.randint(1, S, (S,), dtype=torch.long))),
+    ('upsample', torch.randn(S, S, M, M), (None, 2), 'with_scale'),
+    ('upsample', torch.randn(S, S, M, M), (4, None), 'with_size'),
+    ('interpolate', torch.randn(S, S, M, M), (None, 2.), 'with_scale'),
+    ('interpolate', torch.randn(S, S, M, M), (4, None), 'with_size'),
 ]
 
 
@@ -10176,6 +10457,17 @@ nn_functional_single_grad = frozenset('test_nn_' + name for name in [
     'ctc_loss',
     'grid_sample',
 ])
+
+# additional modules test
+# TODO: delete this list once we make all nn_tests work
+additional_module_tests = [
+    dict(
+        module_name='Bilinear',
+        constructor_args=(S, S, M),
+        input_size=(S, S),
+        extra_args=((S, S),)
+    ),
+]
 
 
 def add_autograd_test(
@@ -10259,6 +10551,10 @@ def add_autograd_test(
                                                                  disable_autodiff_subgraph_inlining=True),
                                                 fn, f_args_variable, kwargs_variable,
                                                 check_types=check_types)
+
+                # alias annotation testing
+                if is_inplace and test_name not in EXCLUDE_SCRIPT:
+                    check_alias_annotation(name, (self_variable,) + args_variable, kwargs_variable)
 
             check(name)
             inplace_name = name + '_'
@@ -10396,6 +10692,10 @@ def add_nn_module_test(*args, **kwargs):
             input = kwargs['input_fn']()
         else:
             input = (kwargs['input_size'],)
+
+        if 'extra_args' in kwargs:
+            input = input + kwargs['extra_args']
+
         args_variable, kwargs_variable = create_input(input)
         f_args_variable = deepcopy(unpack_variables(args_variable))
 
@@ -10565,7 +10865,7 @@ for test in autograd_method_tests:
 for test in nn_functional_tests:
     add_nn_functional_test(*test)
 
-for test in module_tests + new_module_tests:
+for test in module_tests + new_module_tests + additional_module_tests + local_module_tests:
     add_nn_module_test(**test)
 
 if __name__ == '__main__':

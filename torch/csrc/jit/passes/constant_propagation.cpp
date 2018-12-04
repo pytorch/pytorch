@@ -125,7 +125,7 @@ void ConstantPropagation(Node* n, const AliasDb& aliasDb, bool recurse) {
       });
   bool supported_node = !n->kind().is_onnx() &&
       skip_list.count(n->kind()) == 0 && !n->isNondeterministic() &&
-      !aliasDb.hasWriters(n);
+      !aliasDb.hasWriters(n) && !aliasDb.hasWildcard(n);
   auto run_blocks = [&]() {
     if (recurse) {
       for (Block * block : n->blocks()) {

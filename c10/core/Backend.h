@@ -7,7 +7,7 @@
 
 #include <stdexcept>
 
-namespace at {
+namespace c10 {
 
 /**
  * This legacy enum class defines the set of backends supported by

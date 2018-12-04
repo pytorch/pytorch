@@ -2,7 +2,7 @@
 #include "ATen/ATen.h"
 #include "ATen/Device.h"
 #include "ATen/NativeFunctions.h"
-#include "ATen/core/Layout.h"
+#include <c10/core/Layout.h>
 #include "ATen/cpu/vml.h"
 #include "ATen/native/cpu/GridSamplerKernel.h"
 #include "c10/util/Exception.h"

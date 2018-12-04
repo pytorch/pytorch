@@ -2,7 +2,7 @@
 
 #include "Context.h"
 
-#include <ATen/core/TensorOptions.h>
+#include <c10/core/TensorOptions.h>
 
 #include <thread>
 #include <mutex>
@@ -30,7 +30,9 @@ static inline void argErrorHandler(int arg, const char * msg, void * data) {
 
 Context::Context()
 : next_id(static_cast<size_t>(TypeID::NumOptions))
-, thc_state(nullptr, [](THCState* p){ /* no-op */ } ) {
+, thc_state(nullptr, [](THCState* p){ /* no-op */ } )
+, thh_state(nullptr, [](THHState* p){ /* no-op */ } )
+{
 
   THSetDefaultErrorHandler(errorHandler,nullptr);
   THSetDefaultArgErrorHandler(argErrorHandler,nullptr);
@@ -109,6 +111,17 @@ TypeExtendedInterface& getType(const Tensor& t) {
   return getType(t.unsafeGetTensorImpl());
 }
 
+LegacyTHDispatcher& getLegacyTHDispatcher(TensorOptions options) {
+  return globalContext().getLegacyTHDispatcher(
+            options.backend(), typeMetaToScalarType(options.dtype()));
+}
+
+LegacyTHDispatcher& getLegacyTHDispatcher(const TensorImpl* impl) {
+  Backend backend = tensorTypeIdToBackend(impl->type_id());
+  return globalContext().getLegacyTHDispatcher(
+            backend, typeMetaToScalarType(impl->dtype()));
+}
+
 Allocator* getCPUAllocator() {
   return getTHDefaultAllocator();
 }
@@ -120,6 +133,9 @@ struct LegacyTypeInit : public LegacyTypeInitInterface {
   }
   void initCUDA() const override {
     globalContext().lazyInitCUDA();
+  }
+  void initHIP() const override {
+    globalContext().lazyInitHIP();
   }
   void initComplex() const override {
     globalContext().lazyInitComplex();

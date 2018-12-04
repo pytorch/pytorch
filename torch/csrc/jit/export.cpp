@@ -96,7 +96,7 @@ void validateBlock(Block *b, onnx_torch::OperatorExportTypes operator_export_typ
 
 void validateGraph(const std::shared_ptr<Graph>& graph, onnx_torch::OperatorExportTypes operator_export_type) {
   validateBlock(graph->block(), operator_export_type);
-  EliminateDeadCode(graph);
+  EliminateDeadCode(graph->block());
 }
 
 class EncoderBase {
@@ -579,7 +579,10 @@ void ScriptModuleSerializer::convertAndWriteTensor(
   auto* data = tensor_proto->mutable_data();
   data->set_key(storage_it->second);
 
-  // TODO handle device case, set the device_detail and load to CUDA device
+  // handle device case, set the device_detail and load to CUDA device
+  std::stringstream ss;
+  ss << tensor.device();
+  tensor_proto->set_device(ss.str());
 }
 
 void ScriptModuleSerializer::writeTensorTable(torch::ModelDef* model_def) {

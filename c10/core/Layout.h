@@ -1,11 +1,11 @@
 #pragma once
 
-#include <ATen/core/Backend.h>
+#include <c10/core/Backend.h>
 #include <c10/util/Exception.h>
 
 #include <iostream>
 
-namespace at {
+namespace c10 {
 enum class Layout : int8_t { Strided, Sparse };
 
 constexpr auto kStrided = Layout::Strided;
@@ -33,4 +33,4 @@ inline std::ostream& operator<<(std::ostream& stream, at::Layout layout) {
   }
 }
 
-} // namespace at
+} // namespace c10
