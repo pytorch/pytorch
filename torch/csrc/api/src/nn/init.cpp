@@ -173,7 +173,7 @@ Tensor kaiming_uniform_(
     std = gain / std::sqrt(fan.out);
   }
   // Calculate uniform bounds from standard deviation
-  const auto bound = sqrt(3.0) * std;
+  const auto bound = std::sqrt(3.0) * std;
   return tensor.uniform_(-bound, bound);
 }
 
