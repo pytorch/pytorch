@@ -91,6 +91,10 @@ StringTypePtr StringType::get() {
   static auto value = StringType::create();
   return value;
 }
+DeviceObjTypePtr DeviceObjType::get() {
+  static auto value = DeviceObjType::create();
+  return value;
+}
 OptionalTypePtr OptionalType::ofTensor() {
   static auto value = OptionalType::create(DynamicType::get());
   return value;
@@ -133,6 +137,8 @@ TypePtr inferTypeFrom(const IValue& value) {
     return ListType::ofFloats();
   } else if (value.isTuple()) {
     return TupleType::create(fmap(value.toTuple()->elements(), inferTypeFrom));
+  } else if (value.isDevice()) {
+    return DeviceObjType::get();
   }
   AT_ASSERTM(false, "Unhandled IValue kind in inferTypeFrom");
 }
@@ -307,6 +313,23 @@ CAFFE2_API TypePtr evalTypeVariables(TypePtr type, std::unordered_map<std::strin
     });
     return type->withContained(std::move(new_contained));
   }
+}
+
+
+const char * typeKindToString(TypeKind kind) {
+#define CASE_TYPE(T) case TypeKind::T: return #T;
+  switch(kind) {
+    C10_FORALL_TYPES(CASE_TYPE)
+  }
+#undef CASE_TYPE
+  return "";
+}
+
+bool Type::isSubtypeOf(const TypePtr rhs) const {
+  if(auto rhs_ = rhs->cast<OptionalType>()) {
+    return this->isSubtypeOf(rhs_->getElementType());
+  }
+  return *this == *rhs;
 }
 
 } // namespace c10

@@ -88,7 +88,6 @@ add_custom_command(
   "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_0.cpp"
   "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_1.cpp"
   "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_2.cpp"
-  "${TORCH_SRC_DIR}/csrc/jit/generated/aten_interned_strings.h"
   COMMAND
   ${PYCMD} tools/setup_helpers/generate_code.py
     --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
@@ -122,7 +121,6 @@ add_custom_command(
   "${TOOLS_PATH}/autograd/utils.py"
   "${TOOLS_PATH}/jit/gen_jit_dispatch.py"
   "${TOOLS_PATH}/jit/templates/register_aten_ops.cpp"
-  "${TOOLS_PATH}/jit/templates/aten_interned_strings.h"
   WORKING_DIRECTORY "${TORCH_ROOT}")
 
 set(TORCH_SRCS
