@@ -114,4 +114,6 @@ at::DataPtr PlacementDeleteContext::makeDataPtr(
           device};
 }
 
+AutogradMetaInterface::~AutogradMetaInterface() {}
+
 } // namespace at

@@ -268,7 +268,7 @@ struct TORCH_API Variable : public at::Tensor {
   void set_pyobj(PyObject* pyobj) noexcept;
 
   struct AutogradMeta;
-  Variable::AutogradMeta* get_autograd_meta() const noexcept;
+  Variable::AutogradMeta& get_autograd_meta() const noexcept;
 
  private:
   /// Private implementation struct of the `Variable`. This struct declaration
@@ -289,7 +289,7 @@ struct TORCH_API Variable : public at::Tensor {
 //                            Variable::AutogradMeta
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-struct TORCH_API Variable::AutogradMeta {
+struct TORCH_API Variable::AutogradMeta : public at::AutogradMetaInterface {
   std::string name;
 
   Variable grad_;
@@ -315,8 +315,6 @@ struct TORCH_API Variable::AutogradMeta {
   // state are still thread-safe. Used by get_grad_fn and
   // get_grad_accumulator.
   std::mutex mutex_;
-
-  virtual ~AutogradMeta() {}
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -341,8 +339,7 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   explicit Impl(
       at::Tensor data,
       bool requires_grad = false,
-      Edge gradient_edge = Edge(),
-      Variable::AutogradMeta* autograd_meta = new Variable::AutogradMeta());
+      Edge gradient_edge = Edge());
 
   ~Impl() override;
 
@@ -363,7 +360,7 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
 
   std::shared_ptr<Function> get_grad_accumulator();
   virtual std::shared_ptr<Function>& get_grad_fn() {
-    return get_autograd_meta()->grad_fn_;
+    return get_autograd_meta().grad_fn_;
   }
 
   virtual const Variable& base() const {
@@ -377,19 +374,19 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
     AT_CHECK(
         !requires_grad || at::isFloatingType(at::typeMetaToScalarType(dtype())),
         "Only Tensors of floating point dtype can require gradients");
-    get_autograd_meta()->requires_grad_ = requires_grad;
+    get_autograd_meta().requires_grad_ = requires_grad;
   }
 
   bool requires_grad() const override {
-    return get_autograd_meta()->requires_grad_ || get_autograd_meta()->grad_fn_ || (get_autograd_meta()->is_view_ && base().requires_grad());
+    return get_autograd_meta().requires_grad_ || get_autograd_meta().grad_fn_ || (get_autograd_meta().is_view_ && base().requires_grad());
   }
 
   /// Accesses the gradient `Variable` of this `Variable`.
   Variable& grad() override {
-    return get_autograd_meta()->grad_;
+    return get_autograd_meta().grad_;
   }
   const Variable& grad() const override {
-    return get_autograd_meta()->grad_;
+    return get_autograd_meta().grad_;
   }
 
   void detach_();
@@ -404,8 +401,8 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   /// Reset all expensive fields to free up resources
   void release_resources() override;
 
-  Variable::AutogradMeta* get_autograd_meta() const {
-    return static_cast<Variable::AutogradMeta*>(data_.unsafeGetTensorImpl()->autograd_meta());
+  Variable::AutogradMeta& get_autograd_meta() const {
+    return static_cast<Variable::AutogradMeta&>(data_.unsafeGetTensorImpl()->autograd_meta());
   }
 
   int64_t storage_offset() const override;
@@ -503,8 +500,7 @@ struct TORCH_API Variable::DifferentiableViewImpl : public Variable::Impl {
   DifferentiableViewImpl(
     Variable base,
     at::Tensor data,
-    Edge gradient_edge,
-    Variable::DifferentiableViewMeta* autograd_meta = new Variable::DifferentiableViewMeta());
+    Edge gradient_edge);
 
   /// Gets the up-to-date grad_fn. If the shared data or base was modified, we
   /// re-create the grad_fn to express the up-to-date view relationship between
@@ -512,7 +508,7 @@ struct TORCH_API Variable::DifferentiableViewImpl : public Variable::Impl {
   std::shared_ptr<Function>& get_grad_fn() override;
 
   const Variable& base() const override {
-    return static_cast<Variable::DifferentiableViewMeta*>(get_autograd_meta())->base_;
+    return static_cast<Variable::DifferentiableViewMeta&>(get_autograd_meta()).base_;
   }
 
   /// Called after in-place modifications. Modifies the grad_fn of the base
@@ -537,11 +533,15 @@ inline Variable make_variable_view(
     if (is_differentiable) {
       /// Differentiable view. Track history with DifferentiableViewImpl.
       auto data_copy = at::Tensor(data.getIntrusivePtr()->shallow_copy_and_detach());
+      data_copy.unsafeGetTensorImpl()->set_autograd_meta(
+        c10::guts::make_unique<Variable::DifferentiableViewMeta>());
       return Variable(c10::make_intrusive<Variable::DifferentiableViewImpl>(
               std::move(base), std::move(data_copy), std::move(gradient_edge)));
     } else {
       /// Non-differentiable view. Just share version counter.
       auto data_copy = at::Tensor(data.getIntrusivePtr()->shallow_copy_and_detach());
+      data_copy.unsafeGetTensorImpl()->set_autograd_meta(
+        c10::guts::make_unique<Variable::AutogradMeta>());
       auto var = Variable(c10::make_intrusive<Variable::Impl>(
               std::move(data_copy), false, std::move(gradient_edge)));
       var.set_version_counter(base.version_counter());
@@ -557,6 +557,8 @@ inline Variable make_variable(at::Tensor data, bool requires_grad = false) {
       "Must not create a new variable from a variable, use its .data()");
   if (data.defined()) {
     auto data_copy = at::Tensor(data.getIntrusivePtr()->shallow_copy_and_detach());
+    data_copy.unsafeGetTensorImpl()->set_autograd_meta(
+      c10::guts::make_unique<Variable::AutogradMeta>());
     return Variable(c10::make_intrusive<Variable::Impl>(data_copy, requires_grad));
   }
   return Variable();
@@ -568,6 +570,8 @@ inline Variable make_variable(at::Tensor data, Edge gradient_edge) {
       "Must not create a new variable from a variable, use its .data()");
   if (data.defined()) {
     auto data_copy = at::Tensor(data.getIntrusivePtr()->shallow_copy_and_detach());
+    data_copy.unsafeGetTensorImpl()->set_autograd_meta(
+      c10::guts::make_unique<Variable::AutogradMeta>());
     return Variable(c10::make_intrusive<Variable::Impl>(data_copy, false, std::move(gradient_edge)));
   }
   return Variable();
@@ -611,16 +615,16 @@ inline const std::shared_ptr<Function>& Variable::grad_fn() const {
 }
 
 inline Function* Variable::grad_fn_unsafe() const {
-  return get_autograd_meta()->grad_fn_.get();
+  return get_autograd_meta().grad_fn_.get();
 }
 
 inline void Variable::set_grad_accumulator(
     std::weak_ptr<Function> grad_accumulator) {
-  get_autograd_meta()->grad_accumulator_ = std::move(grad_accumulator);
+  get_autograd_meta().grad_accumulator_ = std::move(grad_accumulator);
 }
 
 inline std::shared_ptr<Function> Variable::try_get_grad_accumulator() const {
-  return get_autograd_meta()->grad_accumulator_.lock();
+  return get_autograd_meta().grad_accumulator_.lock();
 }
 
 inline std::shared_ptr<Function> Variable::grad_accumulator() const {
@@ -649,16 +653,16 @@ inline void Variable::set_data(Tensor new_data) const {
 }
 
 inline void Variable::set_gradient_edge(Edge edge) noexcept {
-  get_autograd_meta()->grad_fn_ = std::move(edge.function);
-  get_autograd_meta()->output_nr_ = edge.input_nr;
+  get_autograd_meta().grad_fn_ = std::move(edge.function);
+  get_autograd_meta().output_nr_ = edge.input_nr;
 }
 
 inline uint32_t Variable::output_nr() const noexcept {
-  return get_autograd_meta()->output_nr_;
+  return get_autograd_meta().output_nr_;
 }
 
 inline bool Variable::is_leaf() const noexcept {
-  return get_autograd_meta()->grad_fn_ == nullptr;
+  return get_autograd_meta().grad_fn_ == nullptr;
 }
 
 // Versions
@@ -666,42 +670,42 @@ inline bool Variable::is_leaf() const noexcept {
 
 inline void Variable::set_version_counter(
     const VariableVersion& version_counter) noexcept {
-  get_autograd_meta()->version_counter_ = version_counter;
+  get_autograd_meta().version_counter_ = version_counter;
 }
 
 inline void Variable::bump_version() noexcept {
-  get_autograd_meta()->version_counter_.bump();
+  get_autograd_meta().version_counter_.bump();
 }
 
 inline uint32_t Variable::current_version() const noexcept {
-  return get_autograd_meta()->version_counter_.current_version();
+  return get_autograd_meta().version_counter_.current_version();
 }
 
 inline const VariableVersion& Variable::version_counter() const noexcept {
-  return get_autograd_meta()->version_counter_;
+  return get_autograd_meta().version_counter_;
 }
 
 // Hooks
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 inline void Variable::add_hook(std::shared_ptr<FunctionPreHook> hook) {
-  get_autograd_meta()->hooks_.push_back(std::move(hook));
+  get_autograd_meta().hooks_.push_back(std::move(hook));
 }
 
 inline const std::vector<std::shared_ptr<FunctionPreHook>>& Variable::hooks()
     const noexcept {
-  return get_autograd_meta()->hooks_;
+  return get_autograd_meta().hooks_;
 }
 
 inline void Variable::clear_hooks() {
-  get_autograd_meta()->hooks_.clear();
+  get_autograd_meta().hooks_.clear();
 }
 
 // View Variables
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 inline bool Variable::is_view() const noexcept {
-  return get_autograd_meta()->is_view_;
+  return get_autograd_meta().is_view_;
 }
 
 inline const Variable& Variable::base() const {
@@ -712,22 +716,22 @@ inline const Variable& Variable::base() const {
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 inline void Variable::set_name(const std::string& name) {
-  get_autograd_meta()->name = name;
+  get_autograd_meta().name = name;
 }
 
 inline const std::string& Variable::name() const noexcept {
-  return get_autograd_meta()->name;
+  return get_autograd_meta().name;
 }
 
 inline void Variable::set_pyobj(PyObject* pyobj) noexcept {
-  get_autograd_meta()->pyobj_ = pyobj;
+  get_autograd_meta().pyobj_ = pyobj;
 }
 
 inline PyObject* Variable::pyobj() const noexcept {
-  return get_autograd_meta()->pyobj_;
+  return get_autograd_meta().pyobj_;
 }
 
-inline Variable::AutogradMeta* Variable::get_autograd_meta() const noexcept {
+inline Variable::AutogradMeta& Variable::get_autograd_meta() const noexcept {
   return get()->get_autograd_meta();
 }
 

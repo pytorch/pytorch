@@ -207,6 +207,10 @@ namespace detail {
   }
 } // namespace detail
 
+struct CAFFE2_API AutogradMetaInterface {
+  virtual ~AutogradMetaInterface();
+};
+
 /**
  * The low-level representation of a tensor, which contains a pointer
  * to a storage (which contains the actual data) and metadata (e.g., sizes and
@@ -889,15 +893,19 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * Set the pointer to autograd metadata.
    */
-  void set_autograd_meta(void* autograd_meta) {
-    autograd_meta_ = autograd_meta;
+  void set_autograd_meta(std::unique_ptr<at::AutogradMetaInterface> autograd_meta) {
+    autograd_meta_ = std::move(autograd_meta);
   }
 
   /**
    * Return the pointer to autograd metadata.
    */
-  void* autograd_meta() const {
-    return autograd_meta_;
+  at::AutogradMetaInterface& autograd_meta() {
+    return *autograd_meta_;
+  }
+
+  std::unique_ptr<at::AutogradMetaInterface> detach_autograd_meta() {
+    return std::move(autograd_meta_);
   }
 
   // NOTE: `shallow_copy_and_detach()` does not copy the AutogradMeta pointer
@@ -1481,11 +1489,10 @@ protected:
 protected:
   at::Storage storage_;
   // This pointer points to an AutogradMeta struct that stores autograd-specific fields
-  // (such as grad_ / grad_fn_ / grad_accumulator_). It is declared as a void* pointer
-  // because we don't want to expose autograd types to libATen.
+  // (such as grad_ / grad_fn_ / grad_accumulator_).
   // This pointer always has unique ownership (meaning only one TensorImpl can own it
   // at a time).
-  void* autograd_meta_ = nullptr;
+  std::unique_ptr<at::AutogradMetaInterface> autograd_meta_ = nullptr;
 
   // We could save a word or two by combining the SmallVector structs,
   // since their size is redundant, and if we need to overflow the buffer space
