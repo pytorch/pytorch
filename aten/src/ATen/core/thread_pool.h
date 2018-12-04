@@ -7,6 +7,7 @@
 #include <thread>
 #include <utility>
 
+#include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
 
 namespace c10 {

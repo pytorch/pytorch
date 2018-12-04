@@ -15,9 +15,6 @@ bool IsNUMAEnabled() {
 }
 
 void NUMABind(int numa_node_id) {
-  if (numa_node_id < 0) {
-    return;
-  }
   if (!IsNUMAEnabled()) {
     VLOG(1) << "NUMA is not enabled";
     return;
@@ -33,10 +30,10 @@ void NUMABind(int numa_node_id) {
   numa_bitmask_free(bm);
 }
 
-int GetNUMANode(const void* ptr) {
+c10::optional<int> GetNUMANode(const void* ptr) {
   if (!IsNUMAEnabled()) {
     VLOG(1) << "NUMA is not enabled";
-    return -1;
+    return c10::nullopt;
   }
   AT_ASSERT(ptr);
 
@@ -45,22 +42,29 @@ int GetNUMANode(const void* ptr) {
       get_mempolicy(
           &numa_node, NULL, 0, const_cast<void*>(ptr), MPOL_F_NODE | MPOL_F_ADDR) == 0,
       "Unable to get memory policy, errno:", errno);
+  if (numa_node == -1) {
+    return c10::nullopt;
+  }
   return numa_node;
 }
 
-int GetNumNUMANodes() {
+c10::optional<int> GetNumNUMANodes() {
   if (!IsNUMAEnabled()) {
     VLOG(1) << "NUMA is not enabled";
-    return -1;
+    return c10::nullopt;
   }
 
   return numa_num_configured_nodes();
 }
 
-void NUMAMove(void* ptr, size_t size, int numa_node_id) {
-  if (numa_node_id < 0) {
-    return;
+void NUMAMoveToCurrent(void* ptr, size_t size) {
+  auto numa_node_id_opt = GetCurrentNUMANode();
+  if (numa_node_id_opt) {
+    NUMAMove(ptr, size, *numa_node_id_opt);
   }
+}
+
+void NUMAMove(void* ptr, size_t size, int numa_node_id) {
   if (!IsNUMAEnabled()) {
     VLOG(1) << "NUMA is not enabled";
     return;
@@ -83,13 +87,16 @@ void NUMAMove(void* ptr, size_t size, int numa_node_id) {
       "Could not move memory to a NUMA node");
 }
 
-int GetCurrentNUMANode() {
+c10::optional<int> GetCurrentNUMANode() {
   if (!IsNUMAEnabled()) {
     VLOG(1) << "NUMA is not enabled";
-    return -1;
+    return c10::nullopt;
   }
 
   auto n = numa_node_of_cpu(sched_getcpu());
+  if (n == -1) {
+    return c10::nullopt;
+  }
   return n;
 }
 
@@ -100,30 +107,30 @@ bool IsNUMAEnabled() {
 }
 
 void NUMABind(int numa_node_id) {
-  if (numa_node_id >= 0) {
-    VLOG(1) << "NUMA is not enabled";
-  }
+  VLOG(1) << "NUMA is not enabled";
 }
 
-int GetNUMANode(const void* ptr) {
+c10::optional<int> GetNUMANode(const void* ptr) {
   VLOG(1) << "NUMA is not enabled";
-  return -1;
+  return c10::nullopt;
 }
 
-int GetNumNUMANodes() {
+c10::optional<int> GetNumNUMANodes() {
   VLOG(1) << "NUMA is not enabled";
-  return -1;
+  return c10::nullopt;
+}
+
+void NUMAMoveToCurrent(void* ptr, size_t size) {
+  VLOG(1) << "NUMA is not enabled";
 }
 
 void NUMAMove(void* ptr, size_t size, int numa_node_id) {
-  if (numa_node_id >= 0) {
-    VLOG(1) << "NUMA is not enabled";
-  }
+  VLOG(1) << "NUMA is not enabled";
 }
 
-int GetCurrentNUMANode() {
+c10::optional<int> GetCurrentNUMANode() {
   VLOG(1) << "NUMA is not enabled";
-  return -1;
+  return c10::nullopt;
 }
 
 #endif // C10_NUMA_ENABLED

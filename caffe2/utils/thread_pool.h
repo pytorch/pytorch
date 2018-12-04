@@ -12,10 +12,11 @@ class CAFFE2_API TaskThreadPool : public c10::ThreadPool {
   explicit TaskThreadPool(std::size_t pool_size, int numa_node_id = -1)
       : ThreadPool(pool_size, numa_node_id) {}
 
-  // TODO move this to ATen/core/thread_pool.h
   void init_thread() override {
     setThreadName("CaffeTaskThread");
-    NUMABind(numa_node_id_);
+    if (numa_node_id_ >= 0) {
+      NUMABind(numa_node_id_);
+    }
   }
 };
 

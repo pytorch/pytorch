@@ -69,7 +69,7 @@ void* alloc(size_t nbytes) {
       "DefaultCPUAllocator: not enough memory: you tried to allocate %dGB. Buy new RAM!",
       nbytes / 1073741824);
   // move data to a thread's NUMA node
-  NUMAMove(data, nbytes, GetCurrentNUMANode());
+  NUMAMoveToCurrent(data, nbytes);
   CHECK(
       !FLAGS_caffe2_cpu_allocator_do_zero_fill ||
       !FLAGS_caffe2_cpu_allocator_do_junk_fill)

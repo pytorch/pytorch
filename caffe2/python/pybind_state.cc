@@ -1541,7 +1541,7 @@ void addGlobalMethods(py::module& m) {
     return stats_map;
   });
   m.def("is_numa_enabled", []() { return IsNUMAEnabled(); });
-  m.def("get_num_numa_nodes", []() { return GetNumNUMANodes(); });
+  m.def("get_num_numa_nodes", []() { return GetNumNUMANodes().value_or(-1); });
   m.def("get_blob_numa_node", [](const std::string& blob_name) {
     CAFFE_ENFORCE(gWorkspace);
     auto* blob = gWorkspace->GetBlob(blob_name);
@@ -1549,7 +1549,7 @@ void addGlobalMethods(py::module& m) {
     const TensorCPU& tensor = blob->Get<TensorCPU>();
     const void* raw_data = tensor.raw_data();
     CAFFE_ENFORCE(raw_data);
-    return GetNUMANode(raw_data);
+    return GetNUMANode(raw_data).value_or(-1);
   });
   m.def("get_blob_size_bytes", [](const std::string& blob_name) {
     CAFFE_ENFORCE(gWorkspace);
