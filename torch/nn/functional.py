@@ -1726,17 +1726,26 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
             'mean': the output will be divided by the number of elements in the output
             Note: :attr:`size_average` and :attr:`reduce` are in the process of being deprecated,
             and in the meantime, specifying either of those two args will override :attr:`reduction`.
-            Note: `reduction='mean'` is deprecated in kl_div, please use `reduction='batchmean'` which
-            aligns with KL math definition. In the next major release, the default reduction method
-            for kl_div will be changed to 'batchmean'.
+            Note: `reduction='mean'` doesn't return the true kl divergence value, please use
+            `reduction='batchmean'` which aligns with KL math definition.
+            In the next major release, 'mean' will be changed to be the same as 'batchmean'.
             Default: 'mean'
     """
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
         if reduction == 'mean':
-            warnings.warn("reduction=mean is deprecated in kl_div. Please use reduction=batchmean "
-                          "which aligns with KL math definition.")
+            warnings.warn("reduction=mean doesn't give the true kl divergence value. "
+                          "Please use reduction=batchmean which aligns with KL math definition.")
+
+        # special case for batchmean
+        if reduction == 'batchmean':
+            batchsize = 1
+            if input.dim() != 0:
+                batchsize = input.size()[0]
+            reduction_sum = _Reduction.get_enum('sum')
+            return torch.kl_div(input, target, reduction_sum) / batchsize
+
         reduction_enum = _Reduction.get_enum(reduction)
     return torch.kl_div(input, target, reduction_enum)
 

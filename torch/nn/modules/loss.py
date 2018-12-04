@@ -305,8 +305,8 @@ class KLDivLoss(_Loss):
 
     In default reduction mode 'mean', the losses are averaged for each minibatch over observations
     **as well as** over dimensions. 'batchmean' mode gives the correct KL divergence where losses
-    are averaged over batch dimension only. 'mean' mode is deprecated and the default reduction mode
-    will be changed to 'batchmean' in the next major release.
+    are averaged over batch dimension only. 'mean' mode's behavior will be changed to the same as
+    'batchmean' in the next major release.
 
     .. _Kullback-Leibler divergence:
         https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
@@ -329,10 +329,11 @@ class KLDivLoss(_Loss):
             'mean': the output will be divided by the number of elements in the output.
             Note: :attr:`size_average` and :attr:`reduce` are in the process of being deprecated,
             and in the meantime, specifying either of those two args will override :attr:`reduction`.
-            Note: `reduction='mean'` is deprecated in KLDivLoss. Please use `reduction='batchmean'`
-            which aligns with KL math definition. In the next major release, the default reduction
-            mode will be set to 'batchmean'.
+            Note: `reduction='mean'` doesn't return the true kl divergence value, please use
+            `reduction='batchmean'` which aligns with KL math definition.
+            In the next major release, 'mean' will be changed to be the same as 'batchmean'.
             Default: 'mean'
+
 
     Shape:
         - input: :math:`(N, *)` where `*` means, any number of additional
