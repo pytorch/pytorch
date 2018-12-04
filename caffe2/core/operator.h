@@ -664,6 +664,9 @@ class Operator : public OperatorBase {
   const Context* getContext() const {
     return &context_;
   }
+  Context* getContext() {
+    return &context_;
+  }
 
  protected:
   void RecordEvent(const char* err_msg = nullptr) final {
