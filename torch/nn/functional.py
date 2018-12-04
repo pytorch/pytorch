@@ -1871,19 +1871,22 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
             'batchmean': the sum of the output will be divided by the batchsize
             'sum': the output will be summed
             'mean': the output will be divided by the number of elements in the output
-            Note: :attr:`size_average` and :attr:`reduce` are in the process of being deprecated,
+            Default: 'mean'
+
+        .. note:: :attr:`size_average` and :attr:`reduce` are in the process of being deprecated,
             and in the meantime, specifying either of those two args will override :attr:`reduction`.
-            Note: `reduction='mean'` doesn't return the true kl divergence value, please use
+
+        .. note:: `reduction='mean'` doesn't return the true kl divergence value, please use
             `reduction='batchmean'` which aligns with KL math definition.
             In the next major release, 'mean' will be changed to be the same as 'batchmean'.
-            Default: 'mean'
     """
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
         if reduction == 'mean':
-            warnings.warn("reduction=mean doesn't give the true kl divergence value. "
-                          "Please use reduction=batchmean which aligns with KL math definition.")
+            warnings.warn("reduction: 'mean' divides the total loss by both the batch size and the support size."
+                    "'batchmean' divides only by the batch size, and aligns with the KL divergence math definition."
+                    "'mean' will be changed to behave the same as 'batchmean' in the next major release.")
 
         # special case for batchmean
         if reduction == 'batchmean':

@@ -4016,7 +4016,7 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(ValueError, 'Expected.*batch_size'):
             F.nll_loss(x, t)
 
-    def test_KLDivLoss_expect_batch_mean(self):
+    def test_KLDivLoss_batch_mean(self):
         input_shape = (2, 5)
         log_prob1 = F.log_softmax(torch.randn(input_shape), 1)
         prob2 = F.softmax(torch.randn(input_shape), 1)
