@@ -626,6 +626,7 @@ class AvgPool3d(_AvgPoolNd):
         self.__dict__.setdefault('count_include_pad', True)
 
 
+@weak_module
 class FractionalMaxPool2d(Module):
     r"""Applies a 2D fractional max pooling over an input signal composed of several input planes.
 
@@ -656,6 +657,8 @@ class FractionalMaxPool2d(Module):
     .. _Fractional MaxPooling:
         http://arxiv.org/abs/1412.6071
     """
+    __constants__ = ['kernel_size', 'return_indices', 'output_size',
+                     'output_ratio']
 
     def __init__(self, kernel_size, output_size=None, output_ratio=None,
                  return_indices=False, _random_samples=None):
@@ -675,12 +678,12 @@ class FractionalMaxPool2d(Module):
                 raise ValueError("output_ratio must be between 0 and 1 (got {})"
                                  .format(output_ratio))
 
+    @weak_script_method
     def forward(self, input):
-        samples = None if self._random_samples is None else self._random_samples
         return F.fractional_max_pool2d(
             input, self.kernel_size, self.output_size, self.output_ratio,
             self.return_indices,
-            _random_samples=samples)
+            _random_samples=self._random_samples)
 
 
 @weak_module
