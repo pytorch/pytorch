@@ -44,7 +44,6 @@ INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../aten/src/ATen/DeviceGuard.h \
                          ../../../aten/src/ATen/Layout.h \
                          ../../../aten/src/ATen/mkl/Descriptors.h \
-                         ../../../aten/src/ATen/OptionsGuard.h \
                          ../../../aten/src/ATen/Scalar.h \
                          ../../../aten/src/ATen/TensorOptions.h \
                          ../../../build/aten/src/ATen/Functions.h \
