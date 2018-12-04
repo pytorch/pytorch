@@ -603,15 +603,15 @@ namespace {
 
 THC_API std::shared_ptr<void> THCCaching_CUDAIpcDevptr(std::string handle) {
   std::lock_guard<std::mutex> guard(IpcMemMutex);
-  std::shared_ptr<void> sp;
   if (ipcMemHandle_to_devptr.find(handle) == ipcMemHandle_to_devptr.end()
       || ipcMemHandle_to_devptr[handle].expired()) {
     void *devPtr = nullptr;
     cudaIpcMemHandle_t ipc_handle = *(cudaIpcMemHandle_t*)handle.c_str();
     THCudaCheck(cudaIpcOpenMemHandle(&devPtr, ipc_handle, cudaIpcMemLazyEnablePeerAccess));
-    sp = std::shared_ptr<void>(devPtr, [](void *ptr) {THCudaCheck(cudaIpcCloseMemHandle(ptr));});
+    auto sp = std::shared_ptr<void>(devPtr, [](void *ptr) {THCudaCheck(cudaIpcCloseMemHandle(ptr));});
     std::weak_ptr<void> wp = sp;
     ipcMemHandle_to_devptr[handle] = wp;
+    return sp;
   }
   return ipcMemHandle_to_devptr[handle].lock();
 }

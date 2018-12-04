@@ -221,7 +221,7 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
   THPObjectPtr device(PyLong_FromLong(storage->device().index()));
   THPObjectPtr _handle(Py_None);
   Py_INCREF(Py_None);
-  THPObjectPtr size(PyLong_FromLong(storage->numel()));
+  THPObjectPtr size(PyLong_FromLong(storage->numel() * sizeof(scalar_t)));
   THPObjectPtr _offset(PyLong_FromLong(0));
   if (THWStorage_(data)(LIBRARY_STATE storage)) {
     size_t base_size;
@@ -232,9 +232,11 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
     THCudaCheck(cudaIpcGetMemHandle(&handle, base_ptr));
 
     _handle = PyBytes_FromStringAndSize((char *)&handle, CUDA_IPC_HANDLE_SIZE);
-    _offset = PyLong_FromSsize_t((Py_ssize_t)offset / sizeof(scalar_t));
-    std::cout << "caching block of size " << base_size << std::endl;
+    _offset = PyLong_FromSsize_t((Py_ssize_t)offset);
+    std::cout << "caching block of size " << base_size << " bytes, scalar_t size " << sizeof(scalar_t) << std::endl;
+  std::cout << "storage offset " << offset << " bytes" << std::endl;
   }
+  std::cout << "storage size " << storage->numel() * sizeof(scalar_t) << " bytes" << std::endl;
 
   if (!tuple || !device || !_handle || !size || !_offset) {
     return nullptr;
@@ -263,9 +265,9 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
     return nullptr;
   }
 
-  size_t storage_size = (size_t)THPUtils_unpackLong(_size);
+  size_t storage_size = (size_t)THPUtils_unpackLong(_size) / sizeof(scalar_t);
   size_t storage_offset = (size_t)THPUtils_unpackLong(_offset);
-  ptrdiff_t storage_bytes_offset = storage_offset * sizeof(scalar_t);
+  ptrdiff_t storage_bytes_offset = storage_offset;
 
   int64_t device = THPUtils_unpackLong(_device);
   at::cuda::CUDAGuard device_guard(device);
@@ -281,7 +283,7 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
   std::shared_ptr<void> basePtr = THCCaching_CUDAIpcDevptr(handle_str);
   void* devPtr = basePtr.get();
   std::cout << "caching block ptr: " << devPtr << std::endl;
-  std::cout << "moving bytes: " << storage_bytes_offset << std::endl;
+  std::cout << "offsets from caching block: " << storage_bytes_offset << std::endl;
   devPtr = (char*)devPtr + storage_bytes_offset;
   std::cout << "storage ptr: " << devPtr << std::endl;
   std::cout << "reconstructing storage of size " << storage_size << std::endl;

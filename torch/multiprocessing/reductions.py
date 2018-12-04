@@ -82,21 +82,23 @@ def rebuild_tensor(cls, storage, metadata):
         t = torch.nn.parameter.Parameter(t)
     t.requires_grad = requires_grad
     return t
-
+memhandle_map = {}
 
 def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
                         storage_cls, storage_device, storage_handle, storage_size, storage_offset,
                         requires_grad):
 
-    print("Looking for ", storage_offset, storage_cls, tensor_cls)
+    if storage_handle not in memhandle_map:
+        memhandle_map[storage_handle] = len(memhandle_map)
+    print("Looking for key {}, storage size: {} , storage_offset: {}, storage_cls: {}".format(memhandle_map[storage_handle], storage_size, storage_offset, storage_cls))
     storage = storage_from_cache(storage_cls, (storage_handle, storage_offset))
     if storage is None:
-        print("No cache found")
+        print("No cached storage found")
         torch.cuda._lazy_init()
         storage = storage_cls._new_shared_cuda(storage_device, storage_handle, storage_size, storage_offset)
         shared_cache[(storage_handle, storage_offset)] = StorageWeakRef(storage)
     else:
-        print("cache found")
+        print("cached storage found")
 
     t = torch._utils._rebuild_tensor(storage, tensor_offset, tensor_size, tensor_stride)
     if tensor_cls == torch.nn.parameter.Parameter:
