@@ -153,7 +153,16 @@ at::Tensor ScriptModuleDeserializer::loadTensor(const torch::TensorDef& tensor_p
           at::DeviceTypeName(device.type(), false));
     }
   }
-  AT_ASSERT(storage_it->second.device() == device);
+  if (storage_it->second.device().type() != device.type() ||
+      (device.has_index() &&
+       storage_it->second.device().index() != device.index())) {
+    std::stringstream oss;
+    oss << "storage previously was specified with device "
+      << storage_it->second.device()
+      << "but now is specified with device "
+      << device << std::endl;
+    AT_ERROR(oss.str());
+  }
 
   at::Tensor result;
   if (device.type() == at::DeviceType::CPU) {
