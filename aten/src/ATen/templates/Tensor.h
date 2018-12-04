@@ -11,6 +11,7 @@
 #include "ATen/core/UndefinedTensorImpl.h"
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
+#include <ATen/core/LegacyTypeDispatch.h>
 
 namespace c10{
 struct TensorOptions;
@@ -145,7 +146,7 @@ public:
     return impl_->is_contiguous();
   }
   Type & type() const {
-    return impl_->type();
+    return legacyTensorType(*impl_);
   }
   TensorTypeId type_id() const {
     return impl_->type_id();
