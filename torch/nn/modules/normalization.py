@@ -130,6 +130,8 @@ class LayerNorm(Module):
 
     .. _`Layer Normalization`: https://arxiv.org/abs/1607.06450
     """
+    __constants__ = ['normalized_shape', 'weight', 'bias', 'eps']
+
     def __init__(self, normalized_shape, eps=1e-5, elementwise_affine=True):
         super(LayerNorm, self).__init__()
         if isinstance(normalized_shape, numbers.Integral):
@@ -203,7 +205,8 @@ class GroupNorm(Module):
 
     .. _`Group Normalization`: https://arxiv.org/abs/1803.08494
     """
-    __constants__ = ['num_groups', 'num_channels', 'eps', 'affine']
+    __constants__ = ['num_groups', 'num_channels', 'eps', 'affine', 'weight',
+                     'bias']
 
     def __init__(self, num_groups, num_channels, eps=1e-5, affine=True):
         super(GroupNorm, self).__init__()
