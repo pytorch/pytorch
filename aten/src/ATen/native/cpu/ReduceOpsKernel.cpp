@@ -22,6 +22,15 @@ static void sum_kernel_impl(TensorIterator& iter) {
   });
 }
 
+static void mean_kernel_impl(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES(iter.type(), "sum", [&] {
+    binary_kernel_reduce_vec(
+      iter,
+      [=](scalar_t a, scalar_t b) -> scalar_t { return a + b; },
+      [=](Vec256<scalar_t> a, Vec256<scalar_t> b) { return a + b; });
+  });
+}
+
 static void prod_kernel_impl(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES(iter.type(), "prod", [&] {
     binary_kernel_reduce_vec(
@@ -206,5 +215,6 @@ static void norm_kernel_impl(
 REGISTER_DISPATCH(sum_stub, &sum_kernel_impl);
 REGISTER_DISPATCH(prod_stub, &prod_kernel_impl);
 REGISTER_DISPATCH(norm_kernel, &norm_kernel_impl);
+REGISTER_DISPATCH(mean_stub, &mean_kernel_impl);
 
 }}  // namespace at::native
