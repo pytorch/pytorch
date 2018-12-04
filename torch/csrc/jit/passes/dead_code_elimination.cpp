@@ -119,7 +119,7 @@ class DeadCodeEliminator {
       // TODO(suo): We shouldn't really have to check whether a node has uses,
       // since the mark algorithm should do that. But currently, the marking
       // doesn't reach loop counters in certain cases (see TestScript.test_pass)
-      if (!marked_.count(node) && !node->hasUses()) {
+      if (!marked_.count(node) && !hasUsesOutsideDeadNodes(node)) {
         if (collect_only_) {
           dead_nodes_.insert(node);
         } else {
@@ -127,6 +127,20 @@ class DeadCodeEliminator {
         }
       }
     }
+  }
+
+  bool hasUsesOutsideDeadNodes(Node * n) {
+    if (!collect_only_) {
+      return n->hasUses();
+    }
+    for (Value * output : n->outputs()) {
+      for (const Use & u : output->uses()) {
+        if (dead_nodes_.count(u.user) == 0) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   void markAndEnqueue(Node* n) {

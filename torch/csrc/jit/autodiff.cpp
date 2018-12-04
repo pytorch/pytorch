@@ -721,6 +721,9 @@ static void eliminateDeadCode(ReverseDetails& rev_info) {
   // Of course, we need to filter out corresponding entries of grad_map, because
   // we don't want to accidentally access freed pointers later.
   auto dead_nodes = FindDeadNodes(rev_info.reverse_block);
+  if (dead_nodes.empty()) {
+    return;
+  }
   std::vector<Value*> to_erase;
   for (auto & entry : rev_info.grad_map) {
     if (dead_nodes.count(entry.second->node()) > 0) {
@@ -730,7 +733,9 @@ static void eliminateDeadCode(ReverseDetails& rev_info) {
   for (Value * v : to_erase) {
     rev_info.grad_map.erase(v);
   }
-  for (Node * n : dead_nodes) {
+  std::vector<Node*> sorted_dead_nodes(dead_nodes.begin(), dead_nodes.end());
+  std::sort(sorted_dead_nodes.begin(), sorted_dead_nodes.end(), [](Node* a, Node* b) { return a->isAfter(b); });
+  for (Node * n : sorted_dead_nodes) {
     n->destroy();
   }
 }
