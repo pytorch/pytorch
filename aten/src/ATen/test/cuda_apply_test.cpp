@@ -4,6 +4,7 @@
 #include "cuda_runtime.h"
 
 #include "ATen/cuda/detail/TensorInfo.cuh"
+#include "ATen/cuda/CUDAContext.h"
 #define ASSERT_EQ_CUDA(X, Y) \
   {                          \
     bool _isEQ = X == Y;     \
@@ -17,6 +18,7 @@
 // CATCH_TEST_CASE("2D Contiguous", "Collapses a 2D contiguous tensor to 1D
 // contiguous") {
 TEST(ApplyTest, Contiguous2D) {
+  if (!at::cuda::is_available()) return;
   int sizes[] = {4, 4};
   int strides[] = {4, 1};
   ::at::cuda::detail::TensorInfo<void, int> ti{nullptr, 2, sizes, strides};
@@ -28,6 +30,7 @@ TEST(ApplyTest, Contiguous2D) {
 // CATCH_TEST_CASE("3D Contiguous", "Collapses a 3D contiguous tensor to a 1D
 // contiguous") {
 TEST(ApplyTest, Contiguous3D) {
+  if (!at::cuda::is_available()) return;
   int sizes[] = {6, 3, 7};
   int strides[] = {3 * 7, 7, 1};
   ::at::cuda::detail::TensorInfo<void, int> ti{nullptr, 3, sizes, strides};
@@ -38,6 +41,7 @@ TEST(ApplyTest, Contiguous3D) {
 // CATCH_TEST_CASE("3D Partial Collapse", "Collapses a 3D noncontiguous tensor
 // to a 2D tensor") {
 TEST(ApplyTest, PartialCollapse3D) {
+  if (!at::cuda::is_available()) return;
   int sizes[] = {4, 3, 2};
   int strides[] = {3 * 3, 3, 1};
   ::at::cuda::detail::TensorInfo<void, int> ti{nullptr, 3, sizes, strides};
@@ -49,6 +53,7 @@ TEST(ApplyTest, PartialCollapse3D) {
 
 // Collapses a 2D skip contiguous tensor to a 1D skip contiguous tensor
 TEST(ApplyTest, StridedCollapse2D) {
+  if (!at::cuda::is_available()) return;
   int sizes[] = {3, 2};
   int strides[] = {2 * 2, 2};
   ::at::cuda::detail::TensorInfo<void, int> ti{nullptr, 2, sizes, strides};
@@ -60,6 +65,7 @@ TEST(ApplyTest, StridedCollapse2D) {
 
 // Collapses a 4D tensor to a 2D tensor
 TEST(ApplyTest, PartialStridedCollapse4D) {
+  if (!at::cuda::is_available()) return;
   int sizes[] = {3, 6, 5, 2};
   int strides[] = {6 * 22, 22, 2 * 2, 2};
   ::at::cuda::detail::TensorInfo<void, int> ti{nullptr, 4, sizes, strides};
@@ -73,6 +79,7 @@ TEST(ApplyTest, PartialStridedCollapse4D) {
 
 // Collapses a 5D tensor to a 1D tensor
 TEST(ApplyTest, CollapsesZerosAndOnes) {
+  if (!at::cuda::is_available()) return;
   int sizes[] = {1, 10, 1, 5, 4};
   int strides[] = {4, 0, 16, 0, 1};
   ::at::cuda::detail::TensorInfo<void, int> ti{nullptr, 5, sizes, strides};
@@ -86,6 +93,7 @@ TEST(ApplyTest, CollapsesZerosAndOnes) {
 
 // Collapses a 3D tensor to a point tensor
 TEST(ApplyTest, CollapseToPointTensor) {
+  if (!at::cuda::is_available()) return;
   int sizes[] = {1, 1, 1};
   int strides[] = {17, 12, 3};
   ::at::cuda::detail::TensorInfo<void, int> ti{nullptr, 3, sizes, strides};
@@ -97,6 +105,7 @@ TEST(ApplyTest, CollapseToPointTensor) {
 
 // Collapses a 4D tensor to a 3D tensor
 TEST(ApplyTest, ExcludingInContiguous4D) {
+  if (!at::cuda::is_available()) return;
   int sizes[] = {3, 6, 5, 2};
   int strides[] = {6 * 22, 22, 2 * 2, 2};
   ::at::cuda::detail::TensorInfo<void, int> ti{nullptr, 4, sizes, strides};
@@ -112,6 +121,7 @@ TEST(ApplyTest, ExcludingInContiguous4D) {
 
 // Collapses a 4D tensor to a 3D tensor
 TEST(ApplyTest, RovingExclusion) {
+  if (!at::cuda::is_available()) return;
   int sizes[] = {3, 6, 5, 2};
   int strides[] = {6 * 22, 22, 2 * 2, 2};
   ::at::cuda::detail::TensorInfo<void, int> ti{nullptr, 4, sizes, strides};
@@ -127,6 +137,7 @@ TEST(ApplyTest, RovingExclusion) {
 
 // Attempts to exclude a nonexisting dimension
 TEST(ApplyTest, InvalidExclusion) {
+  if (!at::cuda::is_available()) return;
   int sizes[] = {1, 1, 1};
   int strides[] = {17, 12, 3};
   ::at::cuda::detail::TensorInfo<void, int> ti{nullptr, 3, sizes, strides};

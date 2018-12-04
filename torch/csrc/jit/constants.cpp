@@ -2,6 +2,7 @@
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/utils/functional.h"
 
 namespace torch { namespace jit {
 
@@ -46,6 +47,11 @@ Value* insertConstant(
   } else if(val.isString()) {
     n->s_(attr::value, val.toString()->string());
     n->output()->setType(StringType::get());
+  } else if(val.isDevice()) {
+    std::stringstream ss;
+    ss << val.toDevice();
+    n->s_(attr::value, ss.str());
+    n->output()->setType(DeviceObjType::get());
   } else if(val.isNone()) {
     n->destroy();
     n = g.create(prim::None);
@@ -120,6 +126,12 @@ RegisterOperators reg({
             push(stack, s);
             return 0;
           };
+        } else if (type == DeviceObjType::get()) {
+          auto d = c10::Device(node->s(attr::value));
+          return [d](Stack& stack) {
+            push(stack, d);
+            return 0;
+          };
         } else {
           std::stringstream ss;
           ss << "constant literal not supported for: " << type->str();
@@ -129,8 +141,9 @@ RegisterOperators reg({
 });
 
 c10::optional<IValue> toIValue(const Value* v) {
-  if(v->node()->kind() != prim::Constant)
+  if (v->node()->kind() != prim::Constant) {
     return c10::nullopt;
+  }
   // use implemenation of prim::Constant to compute the output IValue
   auto op = getOperation(v->node());
   Stack stack;

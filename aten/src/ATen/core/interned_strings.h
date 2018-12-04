@@ -64,6 +64,7 @@ namespace c10 {
   _(prim, requires_grad)           \
   _(prim, AutogradAdd)             \
   _(prim, GradOf)                  \
+  _(prim, SumToSize)               \
   _(prim, AnyDefined)              \
   _(prim, FusedConcat)             \
   _(prim, ConstantChunk)           \
@@ -82,6 +83,7 @@ namespace c10 {
   _(aten, copy_)                   \
   _(aten, _set_item)               \
   _(aten, index_put_)              \
+  _(aten, device)                  \
   FORALL_ATEN_BASE_SYMBOLS(_)      \
   _(onnx, Add)                     \
   _(onnx, Concat)                  \

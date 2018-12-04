@@ -237,7 +237,7 @@ TORCH_API c10::optional<MatchedSchema> tryMatchSchema(
   at::ArrayRef<NamedValue> inputs,
   at::ArrayRef<NamedValue> attributes,
   std::ostream& failure_messages,
-  bool convert_tensors_to_nums);
+  bool allow_conversions);
 
 TORCH_API Value* emitBuiltinCall(
   const SourceRange& loc,

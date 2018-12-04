@@ -486,7 +486,7 @@ Value* tryConvertToType(
     Graph& graph,
     TypePtr concrete_type,
     Value* value,
-    bool convert_tensors_to_nums) {
+    bool allow_conversions) {
   // Allow homogeneous tuples to be casted implicitly to lists of appropriate
   // types
   if (convertibleToList(value->type(), unwrapOptional(concrete_type)) &&
@@ -507,14 +507,21 @@ Value* tryConvertToType(
     }
   }
 
-  //implicit conversion of tensors to scalars
-  if(convert_tensors_to_nums && concrete_type->isSubtypeOf(NumberType::get())
+  //implicit conversions
+  if(allow_conversions) {
+     if(concrete_type->isSubtypeOf(NumberType::get())
       && value->type()->isSubtypeOf(DynamicType::get())) {
       auto n = graph.createImplicitTensorToNum(concrete_type, value);
       value = graph.insertNode(n)
         ->setSourceLocation(std::make_shared<SourceRange>(loc))
         ->output();
+    }
+    if (value->type()->isSubtypeOf(StringType::get()) &&
+        DeviceObjType::get()->isSubtypeOf(concrete_type))  {
+      return graph.insert(aten::device, { value }, {}, loc);
+    }
   }
+
   return value;
 }
 
@@ -524,7 +531,7 @@ Value* tryMatchArgument(
     const SourceRange& loc,
     const NamedValue& named_value,
     std::function<std::ostream&()> err,
-    bool convert_tensors_to_nums,
+    bool allow_conversions,
     TypeEnv & type_env) {
   Value* value = named_value.value(graph);
 
@@ -547,7 +554,7 @@ Value* tryMatchArgument(
   }
   const auto concrete_type = *matched_type.type;
 
-  value = tryConvertToType(loc, graph, concrete_type, value, convert_tensors_to_nums);
+  value = tryConvertToType(loc, graph, concrete_type, value, allow_conversions);
 
   if(!value->type()->isSubtypeOf(concrete_type)) {
     err() << "expected a value of type " << concrete_type->str() << " for argument '" << arg.name() << "' but found "
@@ -610,7 +617,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
     std::ostream& failure_messages,
-    bool convert_tensors_to_nums) {
+    bool allow_conversions) {
   auto err = [&]() -> std::ostream& {
     failure_messages << "\nfor operator " << schema << ":\n";
     return failure_messages;
@@ -648,7 +655,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
               loc,
               at::ArrayRef<NamedValue>(args).slice(used_args),
               err,
-              convert_tensors_to_nums,
+              allow_conversions,
               type_env);
           if (!list)
             return c10::nullopt;
@@ -679,7 +686,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
       return c10::nullopt;
     }
     Value* positional = tryMatchArgument(
-        arg, graph, loc, *v, err, convert_tensors_to_nums, type_env);
+        arg, graph, loc, *v, err, allow_conversions, type_env);
     if (!positional)
       return c10::nullopt;
     positional_inputs.push_back(positional);
@@ -773,7 +780,7 @@ Value* emitBuiltinCall(
   std::stringstream failure_messages;
   //first we try to match the schema without any conversion
   //if no schema matches then insert ImplicitTensorToNum
-  for (bool convert_tensors_to_nums : {false, true}) {
+  for (bool allow_conversions : {false, true}) {
     // clear previous error messages
     failure_messages.str("");
     for (const std::shared_ptr<Operator>& op : variants) {
@@ -785,7 +792,7 @@ Value* emitBuiltinCall(
           inputs,
           attributes,
           failure_messages,
-          convert_tensors_to_nums);
+          allow_conversions);
       if (matched_schema) {
         return emitBuiltinNode(*matched_schema, loc, graph, name);
       }
@@ -800,7 +807,7 @@ Value* emitBuiltinCall(
               attributes,
               failure_messages,
               nullptr,
-              convert_tensors_to_nums)) {
+              allow_conversions)) {
         return packOutputs(graph, *result);
       }
     }
@@ -1086,7 +1093,7 @@ private:
         TypePtr type = DynamicType::get();
         if (!schema.is_varret()) {
           type = schema.returns().at(return_type_idx).type();
-          r = tryConvertToType(range, *graph, type, r, /*convert_tensors_to_nums=*/false);
+          r = tryConvertToType(range, *graph, type, r, /*allow_conversions=*/false);
           if (!r->type()->isSubtypeOf(type)) {
             throw ErrorReport(return_stmt.range()) << "Return value at position "
               << return_type_idx << " was annotated as having type " << type->str()
@@ -2075,7 +2082,7 @@ private:
           *graph,
           type,
           emitExpr(apply.inputs()[1], type),
-          /*convert_tensors_to_nums=*/true);
+          /*allow_conversions=*/true);
       if (!expr->type()->isSubtypeOf(type)) {
         throw ErrorReport(apply.inputs())
             << "expected an expression of type " << type->python_str()
@@ -2705,6 +2712,7 @@ const std::unordered_map<std::string, TypePtr> &ident_to_type_lut() {
     {"float", FloatType::get()},
     {"bool", BoolType::get()},
     {"str", StringType::get()},
+    {"Device", DeviceObjType::get()},
     // technically this is not a python type but we need it when
     // parsing serialized methods that use implicit converions to Scalar
     {"number", NumberType::get()},

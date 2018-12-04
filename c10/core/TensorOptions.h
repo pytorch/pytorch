@@ -1,9 +1,9 @@
 #pragma once
 
-#include <ATen/core/Backend.h>
-#include <ATen/core/DefaultTensorOptions.h>
+#include <c10/core/Backend.h>
+#include <c10/core/DefaultTensorOptions.h>
 #include <c10/Device.h>
-#include <ATen/core/Layout.h>
+#include <c10/core/Layout.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/ScalarTypeUtils.h>
 
@@ -15,7 +15,8 @@
 #include <iosfwd>
 #include <utility>
 
-namespace at {
+namespace c10 {
+
 /// A class to encapsulate construction axes of an Tensor.  TensorOptions was
 /// designed to support the Python style API for specifying construction options
 /// on factory functions, e.g.,
@@ -502,4 +503,4 @@ inline TensorOptions dtype() {
   return dtype(caffe2::TypeMeta::Make<T>());
 }
 
-} // namespace at
+} // namespace c10

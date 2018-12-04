@@ -6,7 +6,7 @@
 #include <fstream>
 
 #include <c10/core/Allocator.h>
-#include <ATen/core/Backend.h>
+#include <c10/core/Backend.h>
 
 #include "caffe2/core/logging.h"
 #include "caffe2/serialize/inline_container.h"

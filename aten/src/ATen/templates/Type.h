@@ -4,7 +4,7 @@
 #include <c10/core/Allocator.h>
 #include "ATen/core/Deprecated.h"
 #include "ATen/core/Generator.h"
-#include "ATen/core/Layout.h"
+#include <c10/core/Layout.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
 #include "ATen/core/SparseTensorRef.h"
@@ -12,7 +12,7 @@
 #include <c10/Half.h>
 #include <c10/core/TensorTypeIdRegistration.h>
 #include "ATen/core/Reduction.h"
-#include "ATen/core/TensorOptions.h"
+#include "c10/core/TensorOptions.h"
 
 #include <c10/util/Optional.h>
 
