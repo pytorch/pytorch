@@ -316,6 +316,13 @@ if(NOT APPLE AND UNIX)
   list(APPEND Caffe2_DEPENDENCY_LIBS dl)
 endif()
 
+# On Linux and Windows machines, exclude protobbuf symbols from shared libraries
+if(NOT APPLE)
+  set(VERSION_SCRIPT_OPTION "-Wl,--version-script=${CMAKE_CURRENT_LIST_DIR}/tools/pytorch.version")
+else(NOT APPLE)
+  set(VERSION_SCRIPT_OPTION "")
+endif(NOT APPLE)
+
 # Prefix path to Caffe2 headers.
 # If a directory containing installed Caffe2 headers was inadvertently
 # added to the list of include directories, prefixing

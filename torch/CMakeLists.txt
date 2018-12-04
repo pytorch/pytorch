@@ -324,7 +324,13 @@ if (MSVC)
   target_link_libraries(torch onnx onnx_library)
 endif()
 
-target_link_libraries(torch caffe2_library)
+if (NOT APPLE)
+  # On Linux and Windows machines hide protobuf symbols with a version-script
+  target_link_libraries(torch caffe2_library "-Wl,--version-script=${CMAKE_CURRENT_LIST_DIR}/../tools/pytorch.version")
+else (NOT APPLE)
+  target_link_libraries(torch caffe2_library)
+endif(NOT APPLE)
+
 
 find_package(OpenMP)
 if(OPENMP_FOUND)

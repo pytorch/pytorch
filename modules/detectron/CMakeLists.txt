@@ -19,11 +19,11 @@ if (BUILD_CAFFE2_OPS)
         ${Detectron_CPU_SRCS}
         ${Detectron_GPU_SRCS})
 
-    target_link_libraries(caffe2_detectron_ops_gpu caffe2_gpu ${OpenMP_link})
+target_link_libraries(caffe2_detectron_ops_gpu caffe2_gpu ${OpenMP_link} "${VERSION_SCRIPT_OPTION}")
     install(TARGETS caffe2_detectron_ops_gpu DESTINATION lib)
   elseif(NOT IOS_PLATFORM)
     add_library(caffe2_detectron_ops SHARED ${Detectron_CPU_SRCS})
-    target_link_libraries(caffe2_detectron_ops caffe2 ${OpenMP_link})
+    target_link_libraries(caffe2_detectron_ops caffe2 ${OpenMP_link} "${VERSION_SCRIPT_OPTION}")
     install(TARGETS caffe2_detectron_ops DESTINATION lib)
   endif()
 endif()

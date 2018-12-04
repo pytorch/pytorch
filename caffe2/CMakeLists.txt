@@ -213,7 +213,7 @@ endif()
 
 if(NOT BUILD_ATEN_ONLY)
   caffe2_interface_library(caffe2_protos caffe2_protos_whole)
-  target_link_libraries(caffe2 PRIVATE caffe2_protos_whole)
+  target_link_libraries(caffe2 PRIVATE caffe2_protos_whole "${VERSION_SCRIPT_OPTION}")
   if (${CAFFE2_LINK_LOCAL_PROTOBUF})
     target_link_libraries(caffe2 INTERFACE protobuf::libprotobuf)
   else()
@@ -345,7 +345,7 @@ if(USE_CUDA)
   # order of the libraries in the linker call matters here when statically
   # linking; libculibos and cublas must be last.
   target_link_libraries(
-      caffe2_gpu PUBLIC caffe2 ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+      caffe2_gpu PUBLIC caffe2 ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS} "${VERSION_SCRIPT_OPTION}")
 
   # See Note [Supporting both static and dynamic libraries on Window]
   # TODO: I'm actually not sure why this is necessary, because caffe2_gpu
