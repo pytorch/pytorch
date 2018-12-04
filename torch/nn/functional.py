@@ -346,7 +346,7 @@ def fractional_max_pool2d_with_indices(input, kernel_size, output_size=None,
         _output_size = torch.jit._unwrap_optional(output_size)
 
     if _random_samples is None:
-        _random_samples = torch.rand(input.size(0), input.size(1), 2, dtype=input.dtype)
+        _random_samples = torch.rand(input.size(0), input.size(1), 2, dtype=input.dtype, device=input.device)
     else:
         _random_samples = torch.jit._unwrap_optional(_random_samples)
     return torch._C._nn.fractional_max_pool2d(input, kernel_size, _output_size, _random_samples)
