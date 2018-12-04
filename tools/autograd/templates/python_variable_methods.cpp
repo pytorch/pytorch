@@ -616,6 +616,9 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
       device = at::Device(device_type);
     }
   }
+  if (device.is_cuda()) {
+    torch::utils::cuda_lazy_init();
+  }
   return THPVariable_Wrap(dispatch_to(self_, device, scalar_type, /*non_blocking=*/ r.toBool(1), /*copy=*/ false));
   END_HANDLE_TH_ERRORS
 }

@@ -47,6 +47,12 @@ void maybe_initialize_cuda(const Type &type) {
   }
 }
 
+void maybe_initialize_cuda(const Device device) {
+  if (device.is_cuda()) {
+    torch::utils::cuda_lazy_init();
+  }
+}
+
 Tensor dispatch_zeros(const Type& type, optional<Device> device, IntList sizes) {
   maybe_initialize_cuda(type);
   AutoNoGIL no_gil;
@@ -202,6 +208,7 @@ Tensor internal_new_from_data(
     const auto& scalar_type = type_inference ? var.type().scalarType() : type.scalarType();
     auto device = device_opt.has_value() ? *device_opt : (type_inference ? var.device() : at::Device(torch::getDeviceType(type)));
     AutoNoGIL no_gil;
+    maybe_initialize_cuda(device);
     return var.to(device, scalar_type, /*blocking=*/false, /*copy=*/copy_variables);
   }
 
@@ -211,6 +218,7 @@ Tensor internal_new_from_data(
     const auto& scalar_type = type_inference ? tensor.type().scalarType() : type.scalarType();
     auto device = device_opt.has_value() ? *device_opt : at::Device(type.device_type());
     AutoNoGIL no_gil;
+    maybe_initialize_cuda(device);
     return tensor.to(device, scalar_type, /*blocking=*/false, /*copy=*/copy_numpy);
   }
 #endif
@@ -223,6 +231,7 @@ Tensor internal_new_from_data(
       scalar_type, tensor.type().elementSizeInBytes(), data);
   auto device = device_opt.has_value() ? *device_opt : at::Device(torch::getDeviceType(type));
   AutoNoGIL no_gil;
+  maybe_initialize_cuda(device);
   return tensor.to(device, scalar_type, /*blocking=*/false, /*copy=*/false);
 }
 
