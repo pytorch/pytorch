@@ -2229,6 +2229,7 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("/GpuDefs", ("/hip/GpuDefs", API_CAFFE2)),
     ("/GpuScanUtils", ("/hip/GpuScanUtils", API_CAFFE2)),
     ("/GpuBitonicSort", ("/hip/GpuBitonicSort", API_CAFFE2)),
+    ("/gather_op.cuh", ("/hip/gather_op.cuh", API_CAFFE2)),
     ("caffe2/core/common_cudnn.h", ("caffe2/core/hip/common_miopen.h", API_CAFFE2)),
     ("REGISTER_CUDA_OPERATOR" , ("REGISTER_HIP_OPERATOR", API_CAFFE2)),
     ("CUDA_1D_KERNEL_LOOP" , ("HIP_1D_KERNEL_LOOP", API_CAFFE2)),
