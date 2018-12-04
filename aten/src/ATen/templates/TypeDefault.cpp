@@ -11,7 +11,7 @@
 #include "ATen/core/SparseTensorRef.h"
 #include "c10/core/Storage.h"
 #include "ATen/Tensor.h"
-#include "ATen/core/TensorOptions.h"
+#include "c10/core/TensorOptions.h"
 #include "ATen/DeviceGuard.h"
 #include "ATen/SparseTensorUtils.h"
 
