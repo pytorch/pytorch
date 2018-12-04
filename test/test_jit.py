@@ -10211,6 +10211,7 @@ EXCLUDE_MODULE_EXPORT_IMPORT = {
 
 local_module_tests = []
 
+
 def to_module_test_format(tup):
     dic = dict(module_name=tup[0], constructor_args=tup[1], input_fn=lambda: tup[2])
     if len(tup) >= 5:
