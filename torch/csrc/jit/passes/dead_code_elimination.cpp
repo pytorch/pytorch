@@ -157,6 +157,7 @@ class DeadCodeEliminator {
     if (it != memo_.end())
       return it->second;
     bool has_side_effects = node->kind() == prim::Print ||
+        node->kind() == aten::warn ||
         node->kind() == prim::RaiseException ||
         std::any_of(node->blocks().begin(),
                     node->blocks().end(),
