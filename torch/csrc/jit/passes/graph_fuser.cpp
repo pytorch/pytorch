@@ -59,7 +59,9 @@ bool isSimpleMap(Node *node) {
     "aten::neg(Tensor self) -> Tensor",
     "aten::pow(Tensor self, Tensor exponent) -> Tensor",
     "aten::pow(Tensor self, Scalar exponent) -> Tensor",
-    "aten::rand_like(Tensor self) -> Tensor",
+    // See https://github.com/pytorch/pytorch/issues/14674 and make sure you
+    // won't make the same mistake before you reenable this.
+    //"aten::rand_like(Tensor self) -> Tensor",
     "aten::reciprocal(Tensor self) -> Tensor",
     "aten::relu(Tensor self) -> Tensor",
     "aten::remainder(Tensor self, Tensor other) -> Tensor",
