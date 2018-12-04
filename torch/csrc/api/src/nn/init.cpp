@@ -158,12 +158,16 @@ Tensor uniform_(Tensor tensor, double low, double high) {
   return tensor.uniform_(low, high);
 }
 
-Tensor kaiming_uniform_(Tensor tensor, double a, FanMode mode, Nonlinearity nonlinearity) {
+Tensor kaiming_uniform_(
+    Tensor tensor,
+    double a,
+    FanMode mode,
+    Nonlinearity nonlinearity) {
   NoGradGuard guard;
   Fan fan(tensor);
   const auto gain = calculate_gain(nonlinearity, a);
   double std = 0.0;
-  if(mode == FanMode::FanIn) {
+  if (mode == FanMode::FanIn) {
     std = gain / std::sqrt(fan.in);
   } else {
     std = gain / std::sqrt(fan.out);
@@ -173,12 +177,16 @@ Tensor kaiming_uniform_(Tensor tensor, double a, FanMode mode, Nonlinearity nonl
   return tensor.uniform_(-bound, bound);
 }
 
-Tensor kaiming_normal_(Tensor tensor, double a, FanMode mode, Nonlinearity nonlinearity) {
+Tensor kaiming_normal_(
+    Tensor tensor,
+    double a,
+    FanMode mode,
+    Nonlinearity nonlinearity) {
   NoGradGuard guard;
   Fan fan(tensor);
   const auto gain = calculate_gain(nonlinearity, a);
   double std = 0.0;
-  if(mode == FanMode::FanIn) {
+  if (mode == FanMode::FanIn) {
     std = gain / std::sqrt(fan.in);
   } else {
     std = gain / std::sqrt(fan.out);
