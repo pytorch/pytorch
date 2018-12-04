@@ -5,6 +5,7 @@ import subprocess
 import sys
 
 from setup_helpers.cuda import USE_CUDA
+from setup_helpers.dist_check import USE_DISTRIBUTED, USE_GLOO_IBVERBS, IS_LINUX
 from setup_helpers.env import check_env_flag
 
 if __name__ == '__main__':
@@ -31,6 +32,11 @@ if __name__ == '__main__':
         command.append('--use-cuda')
         if os.environ.get('USE_CUDA_STATIC_LINK', False):
             command.append('--cuda-static-link')
+    if USE_DISTRIBUTED and IS_LINUX:
+        if USE_GLOO_IBVERBS:
+            command.append('--use-gloo-ibverbs')
+        command.append('--use-distributed')
+
     command.append('caffe2')
 
     sys.stdout.flush()
