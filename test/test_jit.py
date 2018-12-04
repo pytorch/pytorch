@@ -4308,9 +4308,8 @@ a")
         inputs = get_lstm_inputs('cuda', training=True)
         module = self.checkScript(LSTMCellS, inputs)
         forward_graph = module.graph_for(*inputs)
-        with self.assertRaises(AssertionError):
-            self.assertGraphContainsExactly(
-                forward_graph, 'prim::FusionGroup', 1, consider_subgraphs=True)
+        self.assertGraphContainsExactly(
+            forward_graph, 'prim::FusionGroup', 1, consider_subgraphs=True)
         self.assertExpectedGraph(forward_graph, subname='forward')
 
         hy, cy = module(*inputs)
@@ -4324,9 +4323,8 @@ a")
         inputs = get_milstm_inputs('cuda', training=True)
         module = self.checkScript(MiLSTMCell, inputs)
         forward_graph = module.graph_for(*inputs)
-        with self.assertRaises(AssertionError):
-            self.assertGraphContainsExactly(
-                forward_graph, 'prim::FusionGroup', 1, consider_subgraphs=True)
+        self.assertGraphContainsExactly(
+            forward_graph, 'prim::FusionGroup', 1, consider_subgraphs=True)
         self.assertExpectedGraph(forward_graph, subname='forward')
 
         hy, cy = module(*inputs)
