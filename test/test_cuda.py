@@ -1380,6 +1380,8 @@ class TestCuda(TestCase):
         x = torch.randn(4, 4, device='cuda:1').storage()
         y = x.clone()
         self.assertEqual(x.get_device(), y.get_device())
+        for t in ['byte', 'char', 'short', 'int', 'long', 'half', 'double']:
+            self.assertEqual(getattr(x, t)().get_device(), x.get_device())
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_cuda_set_device(self):
