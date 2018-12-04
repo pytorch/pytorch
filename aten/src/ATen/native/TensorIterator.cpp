@@ -128,7 +128,7 @@ void TensorIterator::compute_types() {
         AT_ERROR("output with type ", op.tensor.type().toString(),
                  " doesn't match the desired type ", type().toString());
       } else if (op.tensor.dim() == 0) {
-        op.tensor = op.tensor.toType(*op.type);
+        op.tensor = op.tensor.to(*op.type);
       } else {
         AT_ERROR("expected type ", type().toString(), " but got ",
             op.tensor.type().toString());

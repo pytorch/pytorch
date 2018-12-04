@@ -1,6 +1,7 @@
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/jit/operator.h"
+#include "torch/csrc/api/include/torch/utils.h"
 #include "../ATen/ExpandUtils.h"
 
 #include <sstream>
@@ -94,7 +95,27 @@ RegisterOperators reg({
             push(stack, at::infer_size(a, b));
             return 0;
           };
-        })
+        }),
+    Operator(
+      "aten::_no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) -> Tensor",
+      [](const Node* node) {
+        return [](Stack& stack) {
+          at::Tensor weight;
+          at::Tensor input;
+          double max_norm;
+          double norm_type;
+          pop(stack, weight, input, max_norm, norm_type);
+
+          // TODO: remove when script supports setting grad mode
+          torch::NoGradGuard no_grad;
+
+          at::Tensor result = at::embedding_renorm_(weight, input, max_norm, norm_type);
+          push(stack, result);
+
+          return 0;
+        };
+      }),
+
 });
 }
 } // namespace jit

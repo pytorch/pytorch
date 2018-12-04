@@ -256,6 +256,19 @@ Vec256<float> inline operator^(const Vec256<float>& a, const Vec256<float>& b) {
   return _mm256_xor_ps(a, b);
 }
 
+template <>
+void convert(const float* src, float* dst, int64_t n) {
+  int64_t i;
+#pragma unroll
+  for (i = 0; i <= (n - Vec256<float>::size); i += Vec256<float>::size) {
+    _mm256_storeu_ps(dst + i, _mm256_loadu_ps(src + i));
+  }
+#pragma unroll
+  for (; i < n; i++) {
+    dst[i] = src[i];
+  }
+}
+
 #ifdef __AVX2__
 template <>
 Vec256<float> inline fmadd(const Vec256<float>& a, const Vec256<float>& b, const Vec256<float>& c) {

@@ -2,7 +2,7 @@ graph(%x.1 : Float(*, *)
       %y.1 : Long(*, *)
       %z.1 : Float(*, *)) {
   %3 : bool = prim::Constant[value=1]()
-  %x : Float(*, *), %y : Dynamic, %z : Dynamic = prim::If(%3)
+  %x : Float(*, *), %y : Tensor, %z : Tensor = prim::If(%3)
     block0() {
       -> (%x.1, %y.1, %z.1)
     }

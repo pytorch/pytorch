@@ -336,7 +336,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     } else if (py::isinstance<py::int_>(obj)) {
       return toSimple(g.insertConstant(py::cast<int64_t>(obj), loc));
     } else if (py::isinstance<py::float_>(obj)) {
-      return toSimple(g.insertConstant(py::cast<float>(obj), loc));
+      return toSimple(g.insertConstant(py::cast<double>(obj), loc));
     } else if (py::isinstance<py::str>(obj)) {
       return toSimple(g.insertConstant(py::cast<std::string>(obj), loc));
     } else if (obj.is(py::none())) {
