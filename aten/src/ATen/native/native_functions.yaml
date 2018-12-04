@@ -439,10 +439,21 @@
 
 - func: conv_transpose3d(Tensor input, Tensor weight, Tensor? bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, int64_t groups=1, IntList[3] dilation=1) -> Tensor
 
-- func: _copy_(Tensor self, Tensor src) -> Tensor
+- func: s_copy_(Tensor self, Tensor src, bool non_blocking=false) -> Tensor
   cpu_half: True
   dispatch:
-    CPU: _copy__cpu
+    CPU: _s_copy__cpu
+    CUDA: _s_copy__cuda
+
+- func: _s_copy_from(Tensor self, Tensor dst, bool non_blocking=false) -> Tensor
+  cpu_half: True
+  dispatch:
+    CUDA: _s_copy_from_cuda
+
+- func: _copy_same_type_(Tensor self, Tensor src) -> void
+  cpu_half: True
+  dispatch:
+    CPU: _copy_same_type__cpu
 
 - func: cos(Tensor self) -> Tensor
   variants: function, method
@@ -627,11 +638,6 @@
   dispatch:
     CPU: embedding_renorm_cpu_
     CUDA: embedding_renorm_cuda_
-
-- func: no_grad_embedding_renorm_(Tensor self, IndexTensor indices, double max_norm, double norm_type) -> Tensor
-  dispatch:
-    CPU: no_grad_embedding_renorm_cpu_
-    CUDA: no_grad_embedding_renorm_cuda_
 
 - func: embedding_sparse_backward(Tensor grad, IndexTensor indices, int64_t num_weights, int64_t padding_idx, bool scale_grad_by_freq) -> Tensor
 
