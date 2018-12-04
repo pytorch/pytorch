@@ -1047,7 +1047,7 @@ class MarginRankingLoss(_Loss):
     """
     __constants__ = ['margin', 'reduction']
 
-    def __init__(self, margin=0, size_average=None, reduce=None, reduction='mean'):
+    def __init__(self, margin=0., size_average=None, reduce=None, reduction='mean'):
         super(MarginRankingLoss, self).__init__(size_average, reduce, reduction)
         self.margin = margin
 

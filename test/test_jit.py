@@ -9738,9 +9738,14 @@ EXCLUDE_SCRIPT_MODULES = {
     # unsupported None parameter
     'test_nn_BCELoss_weights',
     'test_nn_CrossEntropyLoss',
+    'test_nn_NLLLoss_weights',
+    'test_nn_NLLLoss_ignore_index',
+    'test_nn_NLLLoss',
+    'test_nn_MultiMarginLoss',
     'test_nn_NLLLoss_weights_ignore_index',
     'test_nn_NLLLoss_weights_ignore_index_neg',
     'test_nn_BCEWithLogitsLoss_weights',
+    'test_nn_BCELoss',
 }
 
 DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
