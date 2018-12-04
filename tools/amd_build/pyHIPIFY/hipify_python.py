@@ -241,8 +241,7 @@ def preprocess(
         output_directory,
         all_files,
         show_detailed=False,
-        show_progress=True,
-        hipify_caffe2=False):
+        show_progress=True):
     """
     Call preprocessor on selected files.
 
@@ -258,14 +257,12 @@ def preprocess(
     stats = {"unsupported_calls": [], "kernel_launches": []}
 
     for filepath in all_files:
-        preprocessor(output_directory, filepath, stats, hipify_caffe2)
+        preprocessor(output_directory, filepath, stats)
         # Show what happened
         if show_progress:
             print(
                 filepath, "->",
-                get_hip_file_path(
-                    filepath,
-                    hipify_caffe2=hipify_caffe2))
+                get_hip_file_path(filepath))
             finished_count += 1
 
     print(bcolors.OKGREEN + "Successfully preprocessed all matching files." + bcolors.ENDC, file=sys.stderr)
@@ -708,7 +705,7 @@ def disable_function(input_string, function, replace_style):
     return output_string
 
 
-def get_hip_file_path(filepath, hipify_caffe2):
+def get_hip_file_path(filepath):
     """
     Returns the new name of the hipified file
     """
@@ -716,7 +713,7 @@ def get_hip_file_path(filepath, hipify_caffe2):
     # to not be the case, but we can't conveniently do this until we
     # also fix up PyTorch's build system to know how to handle things
     # out-of-place.
-    if not hipify_caffe2:
+    if is_pytorch_file(filepath):
         return filepath
 
     dirpath, filename = os.path.split(filepath)
@@ -769,6 +766,17 @@ def get_hip_file_path(filepath, hipify_caffe2):
     return os.path.join(dirpath, root + ext)
 
 
+# Keep this synchronized with includes/ignores in build_pytorch_amd.py
+def is_pytorch_file(filepath):
+    if filepath.startswith("aten/"):
+        if filepath.startswith("aten/src/ATen/core/"):
+            return False
+        return True
+    if filepath.startswith("torch/"):
+        return True
+    return False
+
+
 def is_caffe2_gpu_file(filepath):
     if filepath.startswith("c10/cuda"):
         return True
@@ -777,13 +785,13 @@ def is_caffe2_gpu_file(filepath):
     return ('gpu' in filename or ext in ['.cu', '.cuh']) and ('cudnn' not in filename)
 
 
-def preprocessor(output_directory, filepath, stats, hipify_caffe2):
+def preprocessor(output_directory, filepath, stats):
     """ Executes the CUDA -> HIP conversion on the specified file. """
     fin_path = os.path.join(output_directory, filepath)
     with open(fin_path, 'r') as fin:
         output_source = fin.read()
 
-    fout_path = os.path.join(output_directory, get_hip_file_path(filepath, hipify_caffe2))
+    fout_path = os.path.join(output_directory, get_hip_file_path(filepath))
     if not os.path.exists(os.path.dirname(fout_path)):
         os.makedirs(os.path.dirname(fout_path))
 
@@ -795,7 +803,7 @@ def preprocessor(output_directory, filepath, stats, hipify_caffe2):
                 hip_type = value[0]
                 meta_data = value[1:]
 
-                if constants.API_CAFFE2 in meta_data and not hipify_caffe2:
+                if constants.API_CAFFE2 in meta_data and is_pytorch_file(filepath):
                     continue
 
                 if output_source.find(cuda_type) > -1:
@@ -804,10 +812,10 @@ def preprocessor(output_directory, filepath, stats, hipify_caffe2):
                         stats["unsupported_calls"].append((cuda_type, filepath))
 
                 if cuda_type in output_source:
-                    if hipify_caffe2:
-                        pattern = r'({0})'.format(re.escape(cuda_type))
-                    else:
+                    if is_pytorch_file(filepath):
                         pattern = r'(\b{0}\b)'.format(re.escape(cuda_type))
+                    else:
+                        pattern = r'({0})'.format(re.escape(cuda_type))
                     output_source = re.sub(pattern, hip_type, output_source)
 
         # Perform Kernel Launch Replacements
@@ -1377,8 +1385,7 @@ def hipify(
         output_directory,
         all_files,
         show_detailed=show_detailed,
-        show_progress=show_progress,
-        hipify_caffe2=hipify_caffe2)
+        show_progress=show_progress)
 
     # Extract all of the kernel parameter and template type information.
     if add_static_casts_option:
@@ -1388,16 +1395,14 @@ def hipify(
                 output_directory,
                 filepath,
                 KernelTemplateParams,
-                CAFFE2_TEMPLATE_MAP if hipify_caffe2 else PYTORCH_TEMPLATE_MAP)
+                CAFFE2_TEMPLATE_MAP if not is_pytorch_file(filepath) else PYTORCH_TEMPLATE_MAP)
 
         # Execute the Clang Tool to Automatically add static casts
         for filepath in all_files:
             add_static_casts(
                 os.path.join(
                     output_directory,
-                    get_hip_file_path(
-                        filepath,
-                        hipify_caffe2=hipify_caffe2)),
+                    get_hip_file_path(filepath)),
                 KernelTemplateParams)
 
 
