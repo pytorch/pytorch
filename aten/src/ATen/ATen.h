@@ -16,9 +16,9 @@
 #include "ATen/Type.h"
 #include "ATen/core/ATenGeneral.h"
 #include "ATen/core/Generator.h"
-#include "ATen/core/Layout.h"
+#include <c10/core/Layout.h>
 #include "ATen/core/Scalar.h"
-#include "c10/core/Storage.h"
+#include <c10/core/Storage.h>
 #include "ATen/core/TensorMethods.h"
 #include "ATen/core/TensorOptions.h"
-#include "c10/util/Exception.h"
+#include <c10/util/Exception.h>

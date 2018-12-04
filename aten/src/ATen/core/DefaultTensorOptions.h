@@ -2,7 +2,7 @@
 
 #include <c10/core/Backend.h>
 #include <c10/Device.h>
-#include <ATen/core/Layout.h>
+#include <c10/core/Layout.h>
 #include <c10/core/ScalarType.h>
 
 namespace at {
