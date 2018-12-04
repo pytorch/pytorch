@@ -9,7 +9,7 @@ graph(%cond : Tensor) {
   %d : string = prim::Constant[value="abc"]()
   %e : string = prim::Constant[value="bcd"]()
   %10 : int = prim::Constant[value=6]()
-  %11 : int[] = prim::Constant[value=[0, -1]]()
+  %11 : Device = prim::Constant[value="cpu"]()
   %12 : bool = prim::TensorToBool(%cond)
   %c : int, %y : Tensor = prim::If(%12)
     block0() {

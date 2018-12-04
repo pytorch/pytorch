@@ -430,44 +430,8 @@ void initPythonIRBindings(PyObject * module_) {
       s << t;
       return s.str();
     })
-    .def("kind",[](Type& t_) {
-      Type * t = &t_;
-      switch(t->kind()) {
-        case TypeKind::DynamicType:
-          return "DynamicType";
-        case TypeKind::TensorType:
-          return "TensorType";
-        case TypeKind::OptionalType:
-          return "OptionalType";
-        case TypeKind::NumberType:
-          return "NumberType";
-        case TypeKind::NoneType:
-          return "NoneType";
-        case TypeKind::UndefinedTensorType:
-          return "UndefinedTensorType";
-        case TypeKind::CompleteTensorType:
-          return "CompleteTensorType";
-        case TypeKind::TupleType:
-          return "TupleType";
-        case TypeKind::ListType:
-          return "ListType";
-        case TypeKind::IntType:
-          return "IntType";
-        case TypeKind::FloatType:
-          return "FloatType";
-        case TypeKind::StringType:
-          return "StringType";
-        case TypeKind::GeneratorType:
-          return "GeneratorType";
-        case TypeKind::BoolType:
-          return "BoolType";
-        case TypeKind::VarType:
-          return "VarType";
-        case TypeKind::FutureType:
-          return "FutureType";
-        }
-        // not reachable, but some compilers complain
-        AT_ERROR("Unknown Type Kind");
+    .def("kind",[](const Type& t) {
+      return typeKindToString(t.kind());
     })
     .def("sizes",[](Type& t) {
       return t.expect<CompleteTensorType>()->sizes();
