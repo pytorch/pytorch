@@ -4,7 +4,6 @@
 
 #include <ATen/Context.h>
 #include <ATen/Functions.h>
-#include <ATen/OptionsGuard.h>
 #include <ATen/core/TensorOptions.h>
 
 #include <string>
@@ -90,34 +89,6 @@ TEST(TensorOptionsTest, ConstructsWellFromVariables) {
   options = torch::empty(5, at::requires_grad()).options();
   REQUIRE_OPTIONS(kCPU, -1, kFloat, kStrided);
   ASSERT_FALSE(options.requires_grad());
-}
-
-TEST(TensorOptionsTest, OptionsGuard) {
-  Tensor tensor;
-  {
-    OptionsGuard guard(TensorOptions{});
-    tensor = at::empty({10});
-  }
-  REQUIRE_TENSOR_OPTIONS(kCPU, -1, kFloat, kStrided);
-
-  {
-    OptionsGuard guard(TensorOptions().dtype(kInt));
-    tensor = at::empty({10});
-  }
-  REQUIRE_TENSOR_OPTIONS(kCPU, -1, kInt, kStrided);
-
-  {
-    OptionsGuard guard(TensorOptions().dtype(kInt).layout(kSparse));
-    tensor = at::empty({10});
-  }
-  REQUIRE_TENSOR_OPTIONS(kCPU, -1, kInt, kSparse);
-
-  {
-    OptionsGuard guard(requires_grad(true));
-    tensor = torch::empty({10});
-  }
-  REQUIRE_TENSOR_OPTIONS(kCPU, -1, kFloat, kStrided);
-  ASSERT_TRUE(tensor.requires_grad());
 }
 
 TEST(DeviceTest, ParsesCorrectlyFromString) {

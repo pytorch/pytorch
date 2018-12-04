@@ -59,6 +59,9 @@ while [[ $# -gt 0 ]]; do
       --use-cuda)
           USE_CUDA=1
           ;;
+      --use-distributed)
+          USE_DISTRIBUTED=1
+          ;;
       --use-fbgemm)
           USE_FBGEMM=1
           ;;

@@ -38,10 +38,6 @@ struct CPUComplexFloatType : public at::CPUTypeDefault {
   const char* toString() const override;
   size_t elementSizeInBytes() const override;
   TypeID ID() const override;
-  Tensor& s_copy_(Tensor& self, const Tensor& src, bool non_blocking)
-      const override;
-  Tensor& _s_copy_from(const Tensor& self, Tensor& dst, bool non_blocking)
-      const override;
 
   Tensor empty(IntList size, const TensorOptions & options) const override {
     // TODO: Upstream this
@@ -92,20 +88,6 @@ TypeID CPUComplexFloatType::ID() const {
 
 size_t CPUComplexFloatType::elementSizeInBytes() const {
   return sizeof(float);
-}
-
-Tensor& CPUComplexFloatType::s_copy_(
-    Tensor& dst,
-    const Tensor& src,
-    bool non_blocking) const {
-  AT_ERROR("not yet supported");
-}
-
-Tensor& CPUComplexFloatType::_s_copy_from(
-    const Tensor& src,
-    Tensor& dst,
-    bool non_blocking) const {
-  AT_ERROR("not yet supported");
 }
 
 REGISTER_COMPLEX_HOOKS(ComplexHooks);
