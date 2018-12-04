@@ -854,6 +854,7 @@ class TestDataLoader(TestCase):
             for exit_method in exit_methods:
 
                 desc = []
+                desc.append('is_iterable_dataset={}'.format(is_iterable_dataset))
                 desc.append('use_workers={}'.format(use_workers))
                 desc.append('pin_memory={}'.format(pin_memory))
                 desc.append('hold_iter_reference={}'.format(hold_iter_reference))
