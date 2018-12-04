@@ -97,6 +97,10 @@ int64_t Variable::Impl::storage_offset() const {
   return data_.storage_offset();
 }
 
+Device Variable::Impl::device_slow() const {
+  return data_.device();
+}
+
 std::shared_ptr<Function> Variable::Impl::get_grad_accumulator() {
   if (grad_fn_) {
     throw std::logic_error(

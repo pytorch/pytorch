@@ -454,8 +454,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         return mystorage.device();
       }
     }
-    const auto device_type = detail::computeDeviceType(tid);
-    return Device(device_type, device().index());
+    return device_slow();
   }
 
   Layout layout() const {
@@ -864,6 +863,18 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * True if a tensor is a variable.  See Note [Tensor versus Variable in C++]
    */
   bool is_variable() const { return is_variable_; };
+
+ private:
+  // As an optimization, device handles the typical CPU/CUDA Tensor case and
+  // calls device_slow if the tensor stores its device somewhere else
+  // (VariableImpl, SparseTensorImpl). This methods does a virtual dispatch
+  // that makes it 10-20ns slower than the special case.
+  virtual Device device_slow() const {
+    AT_ERROR(
+        "device is not implemented for tensors with ",
+        toString(tensorTypeIdToBackend(type_id())),
+        " backend");
+  }
 
  public:
 
