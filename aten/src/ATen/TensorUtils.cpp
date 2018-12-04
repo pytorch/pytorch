@@ -122,9 +122,9 @@ void checkSameGPU(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
     AT_ERROR(oss.str());
   }
   AT_CHECK(
-    t1->get_device() == t2->get_device(),
+    t1->device() == t2->device(),
     "Expected tensor for ", t1, " to have the same device as tensor for ", t2,
-    "; but device ", t1->get_device(), " does not equal ", t2->get_device(),
+    "; but device ", t1->device(), " does not equal ", t2->device(),
     " (while checking arguments for ", c, ")");
 }
 

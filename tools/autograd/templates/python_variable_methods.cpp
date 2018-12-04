@@ -109,7 +109,7 @@ static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args)
 {
   HANDLE_TH_ERRORS
   auto& self = reinterpret_cast<THPVariable*>(self_)->cdata;
-  return wrap(self.get_device());
+  return wrap(static_cast<int64_t>(self.device().index()));
   END_HANDLE_TH_ERRORS
 }
 

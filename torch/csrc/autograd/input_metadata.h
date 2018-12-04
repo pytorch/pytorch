@@ -16,7 +16,7 @@ struct InputMetadata {
   : type_{&type} , shape_{shape}, device_{device} { }
 
   InputMetadata(const at::Tensor& t)
-  : InputMetadata(t.type(), t.sizes(), t.is_cuda() ? t.get_device() : - 1) { }
+  : InputMetadata(t.type(), t.sizes(), t.device().index()) { }
 
   bool is_valid() const {
     return type_ != nullptr;

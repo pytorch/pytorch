@@ -337,14 +337,14 @@ void ProcessGroupNCCL::tensorCheckHelper(
     }
 
     bool inserted;
-    std::tie(std::ignore, inserted) = usedDevices.insert(input[i].get_device());
+    std::tie(std::ignore, inserted) = usedDevices.insert(input[i].device().index());
     // Device verification, if the insertion didn't take place
     if (!inserted) {
       throw std::runtime_error("Expecting inputs on different GPU devices");
     }
 
     // Now check the output device
-    if (input[i].get_device() != output[i].get_device()) {
+    if (input[i].device() != output[i].device()) {
       throw std::runtime_error(
           "Expecting input and output tensors to be on "
           "the same device");

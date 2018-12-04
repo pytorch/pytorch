@@ -239,7 +239,7 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad)
   auto& grad = ((THPVariable*)py_grad)->cdata;
   bool gradIsSparse = false;
   auto backend = var.is_cuda() ? Backend::SparseCUDA : Backend::SparseCPU;
-  auto typeOpt = at::globalContext().getNonVariableTypeOpt(backend, var.type().scalarType());  
+  auto typeOpt = at::globalContext().getNonVariableTypeOpt(backend, var.type().scalarType());
   if (typeOpt) {
        auto& sparseType = at::globalContext().getNonVariableType(backend, var.type().scalarType());
        gradIsSparse = grad.type() == sparseType;
@@ -248,7 +248,7 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad)
   THPUtils_assertRet(-1, grad.type() == var.type() || gradIsSparse,
       "assigned grad has data of a different type");
   if (var.is_cuda()) {
-    THPUtils_assertRet(-1, grad.get_device() == var.get_device(),
+    THPUtils_assertRet(-1, grad.device() == var.device(),
         "assigned grad has data located on a different device");
   }
   THPUtils_assertRet(-1, grad.sizes().equals(var.sizes()),

@@ -15,8 +15,8 @@ SparseTensor& sparse_mask_out_cuda(SparseTensor& r, const Tensor& t, const Spars
   AT_CHECK(mask.is_cuda(), "sparse_mask: expected 'mask' to be CUDA, but got CPU");
   AT_CHECK(r.is_cuda(), "sparse_mask: expected 'out' to be CUDA, but got CPU");
   AT_CHECK(check_device({r, t, mask}),
-      "sparse_mask: arguments are located on different devices; self is on device ", t.get_device(),
-      ", mask is on device ", mask.get_device(), ", out is on device ", r.get_device());
+      "sparse_mask: arguments are located on different devices; self is on device ", t.device(),
+      ", mask is on device ", mask.device(), ", out is on device ", r.device());
   resize_as_sparse_(r, mask);
   if (mask._nnz() == 0) {
     return r.zero_();

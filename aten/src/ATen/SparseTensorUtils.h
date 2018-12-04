@@ -33,7 +33,7 @@ inline bool check_device(ArrayRef<Tensor> ts) {
   }
   int64_t curDevice = current_device();
   for (const Tensor& t : ts) {
-    if (t.get_device() != curDevice) return false;
+    if (t.device().index() != curDevice) return false;
   }
   return true;
 }

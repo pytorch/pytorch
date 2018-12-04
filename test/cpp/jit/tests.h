@@ -925,7 +925,7 @@ autograd::Variable undef() {
 }
 
 int device(const autograd::Variable& v) {
-  return v.type().is_cuda() ? v.get_device() : -1;
+  return v.device().index();
 }
 
 bool isEqual(at::IntList lhs, at::IntList rhs) {

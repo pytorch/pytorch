@@ -238,9 +238,9 @@ NcclResourcePair DataChannelNccl::_getNcclResourcePair(
   std::string deviceList;
   for (auto tensor : input) {
     if (deviceList.empty()) {
-      deviceList = std::to_string(tensor.get_device());
+      deviceList = std::to_string(tensor.device().index());
     } else {
-      deviceList += "," + std::to_string(tensor.get_device());
+      deviceList += "," + std::to_string(tensor.device().index());
     }
   }
 
@@ -288,14 +288,14 @@ NcclResourcePair DataChannelNccl::_getNcclResourcePair(
 
   // Now creating the CUDA events
   for (size_t i = 0; i < input.size(); ++i) {
-    gpuGuard.set_index(input[i].get_device());
+    gpuGuard.set_index(input[i].device().index());
     THCudaCheck(cudaEventCreate(&((*events)[i])));
   }
   // Create the communicator on each device of the input
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < input.size(); ++i) {
     int nRanks = int(_numProcesses) * input.size();
-    gpuGuard.set_index(input[i].get_device());
+    gpuGuard.set_index(input[i].device().index());
     NCCL_CHECK(ncclCommInitRank(
         &((*comms)[i]), nRanks, ncclId, _rank * input.size() + i));
   }
@@ -377,14 +377,15 @@ bool DataChannelNccl::_tensorCheckHelper(
     }
 
     bool inserted;
-    std::tie(std::ignore, inserted) = usedDevices.insert(input[i].get_device());
+    std::tie(std::ignore, inserted) =
+        usedDevices.insert(input[i].device().index());
     // Device verification, if the insertion didn't take place
     if (!inserted) {
       throw std::runtime_error("Expecting inputs on different GPU devices");
     }
 
     // Now check the output device
-    if (input[i].get_device() != output[i].get_device()) {
+    if (input[i].device() != output[i].device()) {
       throw std::runtime_error(
           "Expecting input and output tensors to be on "
           "the same device");
@@ -416,7 +417,7 @@ void DataChannelNccl::allReduce(
 
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < data.size(); ++i) {
-    gpuGuard.set_index(data[i].get_device());
+    gpuGuard.set_index(data[i].device().index());
     auto stream = THCState_getCurrentStream(THDGetCudaState());
 
     NCCL_CHECK(ncclAllReduce(
@@ -465,7 +466,7 @@ void DataChannelNccl::allGather(
 
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < input.size(); ++i) {
-    gpuGuard.set_index(input[i].get_device());
+    gpuGuard.set_index(input[i].device().index());
     auto stream = THCState_getCurrentStream(THDGetCudaState());
 
     NCCL_CHECK(ncclAllGather(
@@ -515,7 +516,7 @@ void DataChannelNccl::reduce(
 
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < data.size(); ++i) {
-    gpuGuard.set_index(data[i].get_device());
+    gpuGuard.set_index(data[i].device().index());
     auto stream = THCState_getCurrentStream(THDGetCudaState());
 
     NCCL_CHECK(ncclReduce(
@@ -567,7 +568,7 @@ void DataChannelNccl::broadcast(
 
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < data.size(); ++i) {
-    gpuGuard.set_index(data[i].get_device());
+    gpuGuard.set_index(data[i].device().index());
     auto stream = THCState_getCurrentStream(THDGetCudaState());
 
     NCCL_CHECK(ncclBcast(

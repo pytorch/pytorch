@@ -182,11 +182,6 @@ public:
   // make it happen
   void set_indices_and_values_unsafe(const Tensor& indices, const Tensor& values);
 
- private:
-  int64_t get_device_slow() const override {
-    return values_.get_device();
-  }
-
 };
 
 } // namespace at

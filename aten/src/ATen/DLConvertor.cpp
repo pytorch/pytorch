@@ -153,7 +153,7 @@ DLManagedTensor* toDLPack(const Tensor& src) {
   atDLMTensor->tensor.dl_tensor.data = src.data_ptr();
   int64_t device_id = 0;
   if (src.is_cuda()) {
-    device_id = src.get_device();
+    device_id = src.device().index();
   }
   atDLMTensor->tensor.dl_tensor.ctx = getDLContext(src.type(), device_id);
   atDLMTensor->tensor.dl_tensor.ndim = src.dim();

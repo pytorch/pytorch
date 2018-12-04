@@ -174,7 +174,7 @@ AT_ERROR("gesv: MAGMA library not found in "
     ipiv_array[i] = &ipiv_data[i * n];
   }
 
-  MAGMAQueue magma_queue(b.get_device());
+  MAGMAQueue magma_queue(b.device().index());
   magmaGesvBatched<scalar_t>(
       n, nrhs, A_array, n, ipiv_array, b_array, n,
       info_array, batch_size, magma_queue);
@@ -232,7 +232,7 @@ AT_ERROR("inverse: MAGMA library not found in "
     ipiv_array[i] = &ipiv_data[i * n];
   }
 
-  MAGMAQueue magma_queue(self.get_device());
+  MAGMAQueue magma_queue(self.device().index());
   magmaGetrfBatched<scalar_t>(
     n, n, self_array, n, ipiv_array, info_array,
     batch_size, magma_queue);
@@ -298,7 +298,7 @@ AT_ERROR("potrs: MAGMA library not found in "
     ipiv_array[i] = &ipiv_data[i * n];
   }
 
-  MAGMAQueue magma_queue(b.get_device());
+  MAGMAQueue magma_queue(b.device().index());
   magmaPotrsBatched<scalar_t>(
       uplo, n, nrhs, A_array, n, b_array, n,
       info_tmp, batch_size, magma_queue);
@@ -345,7 +345,7 @@ AT_ERROR("cholesky: MAGMA library not found in "
     self_array[i] = &self_data[i * self_mat_stride];
   }
 
-  MAGMAQueue magma_queue(self.get_device());
+  MAGMAQueue magma_queue(self.device().index());
   magmaCholeskyBatched<scalar_t>(
     uplo, n, self_array, n, info_array,
     batch_size, magma_queue);

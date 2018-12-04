@@ -378,7 +378,7 @@ static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args, PyObje
   ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    return wrap(r.tensor(0).get_device());
+    return wrap(static_cast<int64_t>(r.tensor(0).device().index()));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

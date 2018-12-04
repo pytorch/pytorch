@@ -1262,15 +1262,6 @@ inline Device Tensor::device() const {
   return impl_->device();
 }
 
-inline int64_t Tensor::get_device() const {
-  // NB: this is not a native function to avoid dispatching overhead.
-  return impl_->get_device();
-}
-
-inline int64_t get_device(Tensor self) {
-  return self.get_device();
-}
-
 inline bool Tensor::is_cuda() const {
   // NB: this is not a native function to avoid dispatching overhead.
   return impl_->is_cuda();

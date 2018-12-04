@@ -38,7 +38,7 @@ struct unique_type_checker {
 
 std::vector<Tensor> broadcast(const Tensor& tensor, IntList devices) {
   auto & type = tensor.type();
-  if (type.is_cuda() && tensor.get_device() != devices[0])
+  if (type.is_cuda() && tensor.device().index() != devices[0])
     throw std::runtime_error("device of broadcasted tensor must appear as the "
                              "first on devices list");
   std::vector<Tensor> tensors;
@@ -101,7 +101,7 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntList devices) {
 // Variables.
 tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, size_t buffer_size) {
   if (!std::all_of(tensors.begin(), tensors.end(),
-                   [&](const at::Tensor& t) { return t.get_device() == devices[0]; })) {
+                   [&](const at::Tensor& t) { return t.device().index() == devices[0]; })) {
     throw std::runtime_error("all tensors must be on devices[0]");
   }
 #ifdef USE_NCCL

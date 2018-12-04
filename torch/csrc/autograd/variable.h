@@ -376,8 +376,6 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   std::mutex mutex_;
 
   int64_t storage_offset() const override;
- private:
-  int64_t get_device_slow() const override;
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -72,7 +72,7 @@ static std::unordered_map<device_list, NcclCommList, torch::hash<device_list>>
 
 ArrayRef<ncclComm_t> _get_communicators(TensorList inputs) {
   static auto get_device = [](const at::Tensor& t) -> int {
-    return t.get_device();
+    return t.device().index();
   };
   device_list devices = fmap(inputs, get_device);
   auto it = _communicators.find(devices);
@@ -147,7 +147,7 @@ void _check_inputs(
       throw std::runtime_error("all inputs and outputs have to be contiguous");
     }
 
-    auto input_device = input.get_device();
+    auto input_device = input.device().index();
     // inputs must be on unique devices
     if (devices.test(input_device)) {
       throw std::runtime_error("inputs must be on unique devices");
@@ -155,7 +155,7 @@ void _check_inputs(
     devices.set(input_device);
 
     // inputs and outputs must be on same device respectively
-    if (input_device != output.get_device()) {
+    if (input_device != output.device().index()) {
       throw std::runtime_error("input and output must be on the same device");
     }
 
@@ -183,7 +183,7 @@ bool is_available(TensorList tensors) {
       return false;
     if (!tensor.is_contiguous())
       return false;
-    auto device = tensor.get_device();
+    auto device = tensor.device().index();
     if (devices[device])
       return false;
     devices[device] = true;
@@ -244,7 +244,7 @@ void broadcast(
   at::cuda::OptionalCUDAGuard device_guard;
   AutoNcclGroup nccl_group_guard;
   for (size_t i = 0, num_tensors = tensors.size(); i < num_tensors; i++) {
-    int device = tensors[i].get_device();
+    int device = tensors[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
     const auto stream = (streams.empty() || !streams[i])

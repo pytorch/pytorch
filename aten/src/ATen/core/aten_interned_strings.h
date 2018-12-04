@@ -146,7 +146,6 @@ _(aten, _th_bmm) \
 _(aten, _th_clamp) \
 _(aten, _th_clamp_max) \
 _(aten, _th_clamp_min) \
-_(aten, _th_get_device) \
 _(aten, _th_kthvalue) \
 _(aten, _th_max) \
 _(aten, _th_median) \
@@ -347,7 +346,6 @@ _(aten, geometric) \
 _(aten, geqrf) \
 _(aten, ger) \
 _(aten, gesv) \
-_(aten, get_device) \
 _(aten, glu) \
 _(aten, glu_backward) \
 _(aten, glu_forward) \
@@ -491,7 +489,6 @@ _(aten, narrow_copy) \
 _(aten, native_batch_norm) \
 _(aten, native_batch_norm_backward) \
 _(aten, native_clone) \
-_(aten, native_get_device) \
 _(aten, native_norm) \
 _(aten, native_pow) \
 _(aten, native_resize_as) \

@@ -97,10 +97,6 @@ int64_t Variable::Impl::storage_offset() const {
   return data_.storage_offset();
 }
 
-int64_t Variable::Impl::get_device_slow() const {
-  return data_.get_device();
-}
-
 std::shared_ptr<Function> Variable::Impl::get_grad_accumulator() {
   if (grad_fn_) {
     throw std::logic_error(
@@ -153,7 +149,7 @@ void Variable::Impl::set_data(Tensor new_data) {
   auto prior_accumulator = grad_accumulator_.lock();
   if (prior_accumulator) {
     const auto prior_device = prior_accumulator->input_metadata(0).device();
-    const auto new_device = new_data.is_cuda() ? new_data.get_device() : -1;
+    const auto new_device = new_data.device().index();
 
     if (new_data.type() != data_.type() || prior_device != new_device) {
       grad_accumulator_.reset();
@@ -203,7 +199,7 @@ std::shared_ptr<Function>& Variable::DifferentiableViewImpl::get_grad_fn() {
     fn->add_input_metadata(
       base_.type()
     , sizes() // Note: sizes(), not base_.sizes(), is intentional
-    , base_.is_cuda() ? base_.get_device() : -1);
+    , base_.device().index());
     grad_fn_ = std::move(fn);
     attr_version = current_version;
   }
