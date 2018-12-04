@@ -9843,9 +9843,6 @@ EXCLUDE_PYTHON_PRINT = {
 }
 
 EXCLUDE_SCRIPT_MODULES = {
-    'test_nn_BatchNorm1d_not_tracking_stats',
-    'test_nn_BatchNorm2d_not_tracking_stats',
-    'test_nn_BatchNorm3d_not_tracking_stats',
     'test_nn_AdaptiveAvgPool2d_tuple_none',
     'test_nn_AdaptiveAvgPool3d_tuple_none',
     'test_nn_AdaptiveMaxPool2d_tuple_none',
