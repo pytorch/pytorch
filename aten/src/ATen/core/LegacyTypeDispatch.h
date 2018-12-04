@@ -27,6 +27,7 @@
 #include <c10/core/ScalarType.h>
 #include <ATen/core/VariableHooksInterface.h>
 #include <c10/util/Exception.h>
+#include <ATen/core/TensorImpl.h>
 
 namespace at {
 
@@ -162,5 +163,19 @@ private:
 };
 
 CAFFE2_API LegacyTypeDispatch& globalLegacyTypeDispatch();
+
+/**
+ * Return the Type object corresponding to this Tensor, which we can
+ * use to do dynamic dispatch to operators from.  This method is NOT
+ * intended to be used by end-users; it is purely an implementation
+ * detail.
+ */
+inline Type& legacyTensorType(const TensorImpl& tensor) {
+  // NB: It's valid to use getTypeRaw here, because the TensorImpl
+  // could not have been created without initializing the Type first.
+  // TODO: This is not actually true via the Caffe2 codepath!  Make
+  // it so.
+  return *globalLegacyTypeDispatch().getTypeRaw(tensorTypeIdToBackend(tensor.type_id()), typeMetaToScalarType(tensor.dtype()), tensor.is_variable());
+}
 
 } // namespace at
