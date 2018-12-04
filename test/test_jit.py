@@ -10883,6 +10883,15 @@ def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=()
     post_add_test(test_name, skipTestIf, do_test)
 
 
+def gen_eval_constructor(constructor):
+    def eval_constructor(*args, **kwargs):
+        cons = constructor(*args, **kwargs)
+        cons.training = False
+        return cons
+    eval_constructor.__name__ = constructor.__name__
+    return eval_constructor
+
+
 def add_nn_module_test(*args, **kwargs):
     if 'module_name' in kwargs:
         name = kwargs['module_name']
@@ -10892,6 +10901,7 @@ def add_nn_module_test(*args, **kwargs):
         name = kwargs['constructor'].__name__
 
     no_grad = False if 'no_grad' not in kwargs else kwargs['no_grad']
+    check_eval = kwargs.get('check_eval', False)
 
     module_name = name.split("_")[0]
 
@@ -10899,14 +10909,13 @@ def add_nn_module_test(*args, **kwargs):
     if module is None or torch._jit_internal._weak_types.get(module) is None:
         return
 
-    if 'desc' in kwargs and 'eval' in kwargs['desc']:
-        # eval() is not supported, so skip these tests
-        return
-
     test_name = name
     if 'desc' in kwargs:
         test_name = "{}_{}".format(test_name, kwargs['desc'])
     test_name = 'test_nn_{}'.format(test_name)
+
+    if check_eval:
+        test_name = "{}_eval".format(test_name)
 
     def do_test(self):
         if test_name in EXCLUDE_SCRIPT_MODULES:
@@ -10915,6 +10924,11 @@ def add_nn_module_test(*args, **kwargs):
             nn_module = kwargs['constructor']
         else:
             nn_module = getattr(torch.nn, name)
+
+        if check_eval:
+            # TODO: enable eval() checking
+            nn_module = gen_eval_constructor(nn_module)
+            pass
 
         if "FunctionalModule" in str(nn_module):
             return
