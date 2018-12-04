@@ -5,7 +5,7 @@
 #include <c10/core/Layout.h>
 #include <c10/core/ScalarType.h>
 
-namespace c10 {
+namespace at {
 
 struct TensorOptions;
 
@@ -34,5 +34,4 @@ inline const DefaultTensorOptions& getDefaultTensorOptions() {
   static const auto options = DefaultTensorOptions();
   return options;
 }
-
-} // namespace c10
+} // namespace at
