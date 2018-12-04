@@ -465,18 +465,12 @@ class _ConvTransposeMixin(object):
             return func(input, self.weight, self.bias)
 
     @weak_script_method
-    def to_list(self, elem):
-        # type: (BroadcastingList1[int]) -> List[int]
-        return elem
-
-    @weak_script_method
     def _output_padding(self, input, output_size, stride, padding, kernel_size):
         # type: (Tensor, Optional[List[int]], List[int], List[int], List[int]) -> List[int]
         if output_size is None:
-            ret = self.to_list(self.output_padding)
+            ret = _single(self.output_padding)  # converting to list if was not already
         else:
             output_size = torch.jit._unwrap_optional(output_size)
-            # output_size = list(output_size)
             k = input.dim() - 2
             if len(output_size) == k + 2:
                 output_size = output_size[2:]
