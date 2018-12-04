@@ -2,7 +2,7 @@
 
 #include "Context.h"
 
-#include <c10/core/TensorOptions.h>
+#include <ATen/core/TensorOptions.h>
 
 #include <thread>
 #include <mutex>
@@ -109,17 +109,6 @@ TypeExtendedInterface& getType(const TensorImpl* impl) {
 
 TypeExtendedInterface& getType(const Tensor& t) {
   return getType(t.unsafeGetTensorImpl());
-}
-
-LegacyTHDispatcher& getLegacyTHDispatcher(TensorOptions options) {
-  return globalContext().getLegacyTHDispatcher(
-            options.backend(), typeMetaToScalarType(options.dtype()));
-}
-
-LegacyTHDispatcher& getLegacyTHDispatcher(const TensorImpl* impl) {
-  Backend backend = tensorTypeIdToBackend(impl->type_id());
-  return globalContext().getLegacyTHDispatcher(
-            backend, typeMetaToScalarType(impl->dtype()));
 }
 
 Allocator* getCPUAllocator() {
