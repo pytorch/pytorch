@@ -6,9 +6,13 @@ from .. import functional as F
 from .. import init
 from .module import Module
 from .utils import _single, _pair, _triple
+from ..._jit_internal import weak_module, weak_script_method
 
 
+@weak_module
 class _ConvNd(Module):
+
+    __constants__ = ['stride', 'padding', 'dilation', 'groups', 'bias']
 
     def __init__(self, in_channels, out_channels, kernel_size, stride,
                  padding, dilation, transposed, output_padding, groups, bias):
@@ -62,6 +66,7 @@ class _ConvNd(Module):
         return s.format(**self.__dict__)
 
 
+@weak_module
 class Conv1d(_ConvNd):
     r"""Applies a 1D convolution over an input signal composed of several input
     planes.
@@ -176,11 +181,13 @@ class Conv1d(_ConvNd):
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _single(0), groups, bias)
 
+    @weak_script_method
     def forward(self, input):
         return F.conv1d(input, self.weight, self.bias, self.stride,
                         self.padding, self.dilation, self.groups)
 
 
+@weak_module
 class Conv2d(_ConvNd):
     r"""Applies a 2D convolution over an input signal composed of several input
     planes.
@@ -297,7 +304,6 @@ class Conv2d(_ConvNd):
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
-
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True):
         kernel_size = _pair(kernel_size)
@@ -308,11 +314,13 @@ class Conv2d(_ConvNd):
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _pair(0), groups, bias)
 
+    @weak_script_method
     def forward(self, input):
         return F.conv2d(input, self.weight, self.bias, self.stride,
                         self.padding, self.dilation, self.groups)
 
 
+@weak_module
 class Conv3d(_ConvNd):
     r"""Applies a 3D convolution over an input signal composed of several input
     planes.
@@ -424,7 +432,6 @@ class Conv3d(_ConvNd):
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
-
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True):
         kernel_size = _triple(kernel_size)
@@ -435,6 +442,7 @@ class Conv3d(_ConvNd):
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _triple(0), groups, bias)
 
+    @weak_script_method
     def forward(self, input):
         return F.conv3d(input, self.weight, self.bias, self.stride,
                         self.padding, self.dilation, self.groups)
