@@ -26,11 +26,24 @@ class ModuleMeta(type):
     A metaclass for torch.nn.Module to enable isinstance(m, torch.nn.Module) to
     return true when ``m`` is a C++ module bound into Python.
     '''
-    def __instancecheck__(self, instance):
-        # See https://docs.python.org/3/reference/datamodel.html#customizing-instance-and-subclass-checks
+    def __instancecheck__(cls, instance):
+        # See https://docs.python.org/3/reference/
+        # datamodel.html#customizing-instance-and-subclass-checks
         if isinstance(instance, torch.cpp.nn.Module):
             return True
-        return super(ModuleMeta, self).__instancecheck__(instance)
+        return super(ModuleMeta, cls).__instancecheck__(instance)
+
+
+def with_metaclass(metaclass, *bases):
+    '''
+    Creates a base class with a metaclass, but first creates an intermediary
+    metaclass derived from both the given ``metaclass``, and ``ModuleMeta``.
+    This is required anytime you subclass ``torch.nn.Module`` and give it a
+    different metaclass.
+    '''
+    class IntermediateMeta(ModuleMeta, metaclass):
+        pass
+    return torch._six.with_metaclass(IntermediateMeta, *bases)
 
 
 class Module(torch._six.with_metaclass(ModuleMeta)):
@@ -197,7 +210,7 @@ class Module(torch._six.with_metaclass(ModuleMeta)):
 
     def _apply(self, fn):
         for module in self.children():
-            module._apply(fn)
+            fn(module)
 
         for param in self._parameters.values():
             if param is not None:
