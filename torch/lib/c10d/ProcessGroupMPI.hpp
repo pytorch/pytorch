@@ -181,13 +181,9 @@ class ProcessGroupMPI : public ProcessGroup {
   static std::once_flag onceFlagInitMPI;
 
   static std::mutex pgGlobalMutex_;
-  static int numProcessGroups_;
   static int mpiThreadSupport_;
 
   MPI_Comm pgComm_;
-  int groupRank_;
-  int groupSize_;
-  std::unordered_map<int, int> groupRankMap_;
 };
 
 } // namespace c10d
