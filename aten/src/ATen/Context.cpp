@@ -115,8 +115,8 @@ Allocator* getCPUAllocator() {
   return getTHDefaultAllocator();
 }
 
-struct LegacyTypeInit : public LegacyTypeInitInterface {
-  LegacyTypeInit(LegacyTypeInitArgs) {}
+struct LegacyDeviceTypeInit : public LegacyDeviceTypeInitInterface {
+  LegacyDeviceTypeInit(LegacyDeviceTypeInitArgs) {}
   void initCPU() const override {
     globalContext();
   }
@@ -130,6 +130,6 @@ struct LegacyTypeInit : public LegacyTypeInitInterface {
     globalContext().lazyInitComplex();
   }
 };
-REGISTER_LEGACY_TYPE_INIT(LegacyTypeInit);
+REGISTER_LEGACY_TYPE_INIT(LegacyDeviceTypeInit);
 
 }
