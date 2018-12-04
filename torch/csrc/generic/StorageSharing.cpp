@@ -282,7 +282,8 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
   THPUtils_assert(handle_size == CUDA_IPC_HANDLE_SIZE, "incorrect handle size");
   std::string handle_str = std::string(buffer, handle_size);
 
-  void* devPtr = torch::getCachedCUDAIpcDevptr(handle_str);
+  std::shared_ptr<void> basePtr = torch::getCachedCUDAIpcDevptr(handle_str);
+  void* devPtr = basePtr.get();
   std::cout << "caching block ptr: " << devPtr << std::endl;
   std::cout << "moving bytes: " << storage_bytes_offset << std::endl;
   devPtr = (char*)devPtr + storage_bytes_offset;
@@ -291,7 +292,7 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
 
   THWStoragePtr base(THWStorage_(newWithDataAndAllocator)(
       LIBRARY_STATE
-      THCIpcDeleter::makeDataPtr(devPtr, device),
+      THCIpcDeleter::makeDataPtr(basePtr, devPtr, device),
       storage_size, /* allocator */ nullptr));
   base->set_resizable(false);
 

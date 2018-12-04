@@ -4,10 +4,10 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <string>
-#include <THC/THC.h>
+#include <memory>
 
 
 namespace torch {
-  void* getCachedCUDAIpcDevptr(std::string handle);
+    std::shared_ptr<void> getCachedCUDAIpcDevptr(std::string handle);
 } // namespace torch
 #endif

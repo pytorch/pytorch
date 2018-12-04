@@ -8,11 +8,11 @@
 #ifdef __cplusplus
 class CAFFE2_API THCIpcDeleter {
  public:
-  THCIpcDeleter(void* data, int device);
+  THCIpcDeleter(std::shared_ptr<void> basePtr, int device);
   ~THCIpcDeleter();
-  static at::DataPtr makeDataPtr(void* data, int device);
+  static at::DataPtr makeDataPtr(std::shared_ptr<void> basePtr, void* data, int device);
 private:
-  void* data_;
+  std::shared_ptr<void> basePtr_;
   int device_;
 };
 #endif
