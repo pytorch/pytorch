@@ -1,6 +1,6 @@
 graph(%a.1 : Tensor) {
   %1 : int = prim::Constant[value=1]()
-  %2 : int[] = prim::Constant[value=[0, -1]]()
+  %2 : Device = prim::Constant[value="cpu"]()
   %3 : int = prim::Constant[value=0]()
   %4 : int = prim::Constant[value=6]()
   %5 : int = prim::Constant[value=2]()
