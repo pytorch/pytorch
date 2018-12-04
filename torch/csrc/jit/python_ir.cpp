@@ -372,7 +372,7 @@ void initPythonIRBindings(PyObject * module_) {
       for (auto& variable : vs) {
         tensors.push_back(variable.data());
       }
-      return n.ts_(Symbol::attr(name), tensors);
+      return n.ts_(Symbol::attr(name), std::move(tensors));
     })
     .def("ts", [](Node & n, const char * name) {
       auto tensors = n.ts(Symbol::attr(name));
@@ -394,7 +394,7 @@ void initPythonIRBindings(PyObject * module_) {
         for (auto& i : v) {
           i = autograd::Variable(i.view({})).data();
         }
-        return n.ts_(Symbol::attr(name), v);
+        return n.ts_(Symbol::attr(name), std::move(v));
     })
     .def("zs",[](Node & n, const char * name) {
         return n.ts(Symbol::attr(name));
