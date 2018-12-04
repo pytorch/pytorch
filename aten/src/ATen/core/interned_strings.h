@@ -20,7 +20,9 @@ namespace c10 {
   _(namespaces, namespaces)        \
   _(prim, Assign)                  \
   _(prim, BroadcastingChunk)       \
+  _(prim, BroadcastSizes)          \
   _(prim, Constant)                \
+  _(prim, ChunkSizes)              \
   _(prim, None)                    \
   _(prim, Drop)                    \
   _(prim, Eval)                    \
