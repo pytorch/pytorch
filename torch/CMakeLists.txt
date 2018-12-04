@@ -625,7 +625,6 @@ if (BUILD_PYTHON)
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/python_comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/serialization.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/ipc_memhandle.cpp
       ${TORCH_SRC_DIR}/csrc/nn/THCUNN.cpp
       )
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUDA)

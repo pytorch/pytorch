@@ -2,7 +2,6 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <ATen/cuda/CUDAGuard.h>
-#include <torch/csrc/cuda/ipc_memhandle.h>
 #endif
 
 #include <random>
@@ -282,7 +281,7 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
   THPUtils_assert(handle_size == CUDA_IPC_HANDLE_SIZE, "incorrect handle size");
   std::string handle_str = std::string(buffer, handle_size);
 
-  std::shared_ptr<void> basePtr = torch::getCachedCUDAIpcDevptr(handle_str);
+  std::shared_ptr<void> basePtr = THCCaching_CUDAIpcDevptr(handle_str);
   void* devPtr = basePtr.get();
   std::cout << "caching block ptr: " << devPtr << std::endl;
   std::cout << "moving bytes: " << storage_bytes_offset << std::endl;

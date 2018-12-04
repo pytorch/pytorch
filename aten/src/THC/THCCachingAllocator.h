@@ -27,4 +27,5 @@ THC_API uint64_t THCCachingAllocator_maxMemoryCached(int device);
 THC_API std::mutex* THCCachingAllocator_getCudaFreeMutex();
 #endif
 
+THC_API std::shared_ptr<void> THCCaching_CUDAIpcDevptr(std::string handle);
 #endif
