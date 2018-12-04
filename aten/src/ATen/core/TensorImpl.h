@@ -1189,6 +1189,13 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     // It is possible that the source tensor hasn't called mutable_data() yet,
     // in which case ShareData() doesn't make much sense since we don't really
     // know what to share yet.
+    // TODO: Add the assert after all uninitialized states are eliminated
+    // AT_ASSERTM(src.dtype_initialized(),
+    //            "Source tensor don't have a data type (did you call mutable_data<T> on the tensor?)");
+    if (!src.dtype_initialized()) {
+      C10_LOG_EVERY_MS(WARNING, 1000) <<
+                   "Source tensor don't have a data type (did you call mutable_data<T> on the tensor?)";
+    }
     AT_ASSERTM(
         src.storage_initialized(),
         "Source tensor has no content and has size > 0");

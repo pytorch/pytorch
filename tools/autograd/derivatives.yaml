@@ -898,9 +898,6 @@
 - name: embedding_renorm_(Tensor self, Tensor indices, double max_norm, double norm_type)
   self: not_implemented("embedding_renorm")
 
-- name: no_grad_embedding_renorm_(Tensor self, Tensor indices, double max_norm, double norm_type)
-  output_differentiability: [False, False, False, False]
-
 - name: kl_div(Tensor self, Tensor target, int64_t reduction)
   self: kl_div_backward(grad, self, target, reduction)
   target: kl_div_target_backward(grad, self, target, reduction)

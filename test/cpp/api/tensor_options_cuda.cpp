@@ -3,7 +3,6 @@
 #include <ATen/Context.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/Functions.h>
-#include <ATen/OptionsGuard.h>
 #include <c10/core/ScalarType.h>
 #include <ATen/core/TensorOptions.h>
 
@@ -77,51 +76,5 @@ TEST(TensorOptionsTest, ConstructsWellFromCUDATensors_MultiCUDA) {
     }
     options = tensor.options();
     REQUIRE_OPTIONS(kCUDA, 1, kFloat, kSparse);
-  }
-}
-
-TEST(OptionsGuardTest, TestFunctionality_MultiCUDA) {
-  Tensor tensor;
-  {
-    OptionsGuard guard(device(kCUDA));
-    tensor = at::empty({10});
-  }
-  REQUIRE_TENSOR_OPTIONS(kCUDA, 0, kFloat, kStrided);
-
-  {
-    OptionsGuard guard(device({kCUDA, 1}));
-    tensor = at::empty({10});
-  }
-  REQUIRE_TENSOR_OPTIONS(kCUDA, 1, kFloat, kStrided);
-
-  {
-    OptionsGuard guard(device(kCUDA).dtype(kInt));
-    tensor = at::empty({10});
-  }
-  REQUIRE_TENSOR_OPTIONS(kCUDA, 0, kInt, kStrided);
-}
-
-TEST(OptionsGuardTest, DeviceGuardOptionsGuardInteraction_MultiCUDA) {
-  Tensor tensor;
-  {
-    // Check that OptionsGuard respects any active device before construction.
-    DeviceGuard guard(CUDADevice(1));
-    {
-      OptionsGuard guard(device(kCUDA));
-      tensor = at::empty({10});
-      REQUIRE_TENSOR_OPTIONS(kCUDA, 1, kFloat, kStrided);
-      {
-        // Check that OptionsGuard respects any active device after
-        // construction.
-        DeviceGuard guard(CUDADevice(0));
-        tensor = at::empty({10});
-        REQUIRE_TENSOR_OPTIONS(kCUDA, 0, kFloat, kStrided);
-        {
-          OptionsGuard guard(device({kCUDA, 1}));
-          tensor = at::empty({10});
-          REQUIRE_TENSOR_OPTIONS(kCUDA, 1, kFloat, kStrided);
-        }
-      }
-    }
   }
 }
