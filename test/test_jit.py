@@ -505,12 +505,20 @@ class TestJit(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "restore device requires CUDA")
     def test_restore_device_cuda(self):
-        m = torch.jit.ScriptModule()
+        class MyModule(torch.jit.ScriptModule):
+            def __init__(self):
+                super(MyModule, self).__init__(False)
+                self.register_buffer('b0', torch.randn(1, 3))
+                self.p0 = nn.Parameter(torch.randn(2, 3))
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return x + self.b0 + self.p0
+
+        m = MyModule()
+        m.cuda(torch.cuda.device_count() - 1)
         cuda_device_str = 'cuda:' + str(torch.cuda.device_count() - 1)
-        m.p0 = nn.Parameter(torch.tensor([0.3], dtype=torch.float,
-                                         device=cuda_device_str))
-        m.register_buffer('b0', torch.tensor([0.9], dtype=torch.float,
-                                             device=cuda_device_str))
+
         self.assertTrue(m.p0.is_cuda)
         self.assertTrue(m.b0.is_cuda)
 
@@ -532,6 +540,13 @@ class TestJit(JitTestCase):
             m3, map_location=torch.device('cuda:0'))
         self.assertEqual(str(m4.p0.device), 'cuda:0')
         self.assertEqual(str(m4.b0.device), 'cuda:0')
+
+        # compute and compare the results
+        input = torch.rand(2, 3).cuda(torch.cuda.device_count() - 1)
+        origin_result = m(input)
+        self.assertEqual(origin_result, m2(input))
+        self.assertEqual(origin_result, m3(input.cpu()))
+        self.assertEqual(origin_result, m4(input.cuda(0)))
 
     def test_typeas_trace_check(self):
         a = torch.tensor([0.4], requires_grad=True)
