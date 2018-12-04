@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 import sys
 import io
 import os
@@ -7919,8 +7917,9 @@ class _TestTorchMixin(object):
             self._test_serialization_assert(b, c)
         # test non-ascii encoding of bytes arrays/strings
         # The following bytes are produced by serializing
-        #   [u'żąąóżąż'.encode('utf-8'), torch.zeros(1, dtype=torch.float), 2]
-        # in Python 2.7.12 and PyTorch 0.4.1
+        #   [b'\xc5\xbc\xc4\x85\xc4\x85\xc3\xb3\xc5\xbc\xc4\x85\xc5\xbc', torch.zeros(1, dtype=torch.float), 2]
+        # in Python 2.7.12 and PyTorch 0.4.1, where the first element contains
+        # bytes of some utf-8 characters (i.e., `utf8_str.encode('utf-8')`).
         serialized = (
             b'\x80\x02\x8a\nl\xfc\x9cF\xf9 j\xa8P\x19.\x80\x02M\xe9\x03.'
             b'\x80\x02}q\x01(U\x10protocol_versionq\x02M\xe9\x03U\n'
@@ -7934,17 +7933,19 @@ class _TestTorchMixin(object):
             b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
         )
         buf = io.BytesIO(serialized)
+        utf8_bytes = b'\xc5\xbc\xc4\x85\xc4\x85\xc3\xb3\xc5\xbc\xc4\x85\xc5\xbc'
+        utf8_str = utf8_bytes.decode('utf-8')
         if PY3:
             with self.assertRaisesRegex(UnicodeDecodeError, "'ascii' codec can't decode byte"):
                 loaded = torch.load(buf)
             buf.seek(0)
             loaded_utf8 = torch.load(buf, encoding='utf-8')
-            self.assertEqual(loaded_utf8, [u'żąąóżąż', torch.zeros(1, dtype=torch.float), 2])
+            self.assertEqual(loaded_utf8, [utf8_str, torch.zeros(1, dtype=torch.float), 2])
             buf.seek(0)
             loaded_bytes = torch.load(buf, encoding='bytes')
         else:
             loaded_bytes = torch.load(buf)
-        self.assertEqual(loaded_bytes, [u'żąąóżąż'.encode('utf-8'), torch.zeros(1, dtype=torch.float), 2])
+        self.assertEqual(loaded_bytes, [utf8_bytes, torch.zeros(1, dtype=torch.float), 2])
 
     def test_serialization_filelike(self):
         # Test serialization (load and save) with a filelike object

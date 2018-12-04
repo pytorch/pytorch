@@ -338,7 +338,7 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
 
     .. note::
         In Python 3, when loading files saved by Python 2, you may encounter
-        ``UnicodeDecodeError: ‘ascii’ codec can’t decode byte 0x...``. This is
+        ``UnicodeDecodeError: 'ascii' codec can't decode byte 0x...``. This is
         caused by the difference of handling in byte strings in Python2 and
         Python 3. You may use extra ``encoding`` keyword argument to specify how
         these objects should be loaded, e.g., ``encoding='latin1'`` decodes them
