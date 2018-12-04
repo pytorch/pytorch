@@ -46,6 +46,18 @@ def with_metaclass(metaclass, *bases):
     return torch._six.with_metaclass(IntermediateMeta, *bases)
 
 
+def _if_float_tensor(fn):
+    '''
+    Calls `fn` on a value `t` only if `t` is a float tensor, or not a tensor (in
+    which case it's a module, as part of a recursive call to apply()).
+    '''
+    def apply(t):
+        if not isinstance(t, torch.Tensor) or t.is_floating_point():
+            return fn(t)
+        return t
+    return apply
+
+
 class Module(torch._six.with_metaclass(ModuleMeta)):
     r"""Base class for all neural network modules.
 
@@ -292,7 +304,6 @@ class Module(torch._six.with_metaclass(ModuleMeta)):
             Module: self
         """
         return self._apply(lambda t: t.cpu())
-
     def type(self, dst_type):
         r"""Casts all parameters and buffers to :attr:`dst_type`.
 
@@ -310,7 +321,7 @@ class Module(torch._six.with_metaclass(ModuleMeta)):
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.float() if t.is_floating_point() else t)
+        return self._apply(_if_float_tensor(lambda t: t.float()))
 
     def double(self):
         r"""Casts all floating point parameters and buffers to ``double`` datatype.
@@ -318,7 +329,7 @@ class Module(torch._six.with_metaclass(ModuleMeta)):
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.double() if t.is_floating_point() else t)
+        return self._apply(_if_float_tensor(lambda t: t.double()))
 
     def half(self):
         r"""Casts all floating point parameters and buffers to ``half`` datatype.
@@ -326,7 +337,7 @@ class Module(torch._six.with_metaclass(ModuleMeta)):
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.half() if t.is_floating_point() else t)
+        return self._apply(_if_float_tensor(lambda t: t.half()))
 
     def to(self, *args, **kwargs):
         r"""Moves and/or casts the parameters and buffers.
@@ -402,7 +413,9 @@ class Module(torch._six.with_metaclass(ModuleMeta)):
                                 'dtypes, but got desired dtype={}'.format(dtype))
 
         def convert(t):
-            return t.to(device, dtype if t.is_floating_point() else None, non_blocking)
+            if isinstance(t, torch.Tensor):
+                return t.to(device, dtype if t.is_floating_point() else None, non_blocking)
+            return t.to(device, dtype, non_blocking)
 
         return self._apply(convert)
 
