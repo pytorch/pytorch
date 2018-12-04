@@ -157,6 +157,9 @@ public:
   const Storage& storage() const {
     return impl_->storage();
   }
+  bool is_alias_of(const at::Tensor& other) const{
+    return impl_->storage().is_alias_of(other.storage());
+  }
   Tensor toType(const Type & t, bool non_blocking=false) const;
   Tensor & copy_(const Tensor & src, bool non_blocking=false);
   Tensor toType(ScalarType t) const;
