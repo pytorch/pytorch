@@ -178,13 +178,28 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        "prim::device(Tensor a) -> int[]",
+        "aten::device(str a) -> Device",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
-            at::Tensor a;
-            pop(stack, a);
-            push(stack, std::vector<int64_t>({static_cast<int64_t>(a.device().type()),
-                                              a.device().index()}));
+            push(stack, c10::Device(pop(stack).toStringRef()));
+            return 0;
+          };
+        }),
+    Operator(
+        "aten::eq(Device a, Device b) -> bool",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            auto a = pop(stack).toDevice();
+            auto b = pop(stack).toDevice();
+            push(stack, a == b);
+            return 0;
+          };
+        }),
+    Operator(
+        "prim::device(Tensor a) -> Device",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            push(stack, pop(stack).toTensor().device());
             return 0;
           };
         }),

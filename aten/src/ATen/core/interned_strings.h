@@ -82,6 +82,7 @@ namespace c10 {
   _(aten, copy_)                   \
   _(aten, _set_item)               \
   _(aten, index_put_)              \
+  _(aten, device)                  \
   FORALL_ATEN_BASE_SYMBOLS(_)      \
   _(onnx, Add)                     \
   _(onnx, Concat)                  \

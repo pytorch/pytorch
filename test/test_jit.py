@@ -3173,6 +3173,13 @@ class TestScript(JitTestCase):
         self.assertTrue(same_device(gpu, gpu))
         self.assertFalse(same_device(cpu, gpu))
 
+    @unittest.skipIf(not RUN_CUDA, "device tests require CUDA")
+    def test_tensor_to_device(self):
+        def to_device(x):
+            return x.to(device="cuda").to(device=torch.device("cpu"))
+
+        self.checkScript(to_device, (torch.ones(3, 4),))
+
     def test_generic_list_errors(self):
         with self.assertRaisesRegex(RuntimeError, "previously matched to type"):
             @torch.jit.script
@@ -4422,6 +4429,38 @@ a")
 
         inputs = self._make_scalar_vars([-1, 1], torch.int64)
         self.checkScript(func, inputs, optimize=True)
+
+    def test_if_is_none_dispatch(self):
+        class Test(torch.jit.ScriptModule):
+            __constants__ = ['b']
+
+            def __init__(self, b=None):
+                super(Test, self).__init__()
+                self.b = b
+
+            @torch.jit.script_method
+            def forward(self, input, opt=None):
+                # type: (Tensor, Optional[Tensor]) -> Tensor
+                x = input
+                if self.b is not None:
+                    x = self.b(input)
+
+                if self.b is None:
+                    x = input + 2
+
+                if opt is not None:
+                    opt = torch.jit._unwrap_optional(opt)
+                    x = opt + x
+
+                if opt is None:
+                    x = x + 4
+
+                return x
+
+        inputs = torch.zeros(1, 2)
+        self.assertExpectedGraph(Test().graph)
+        out = Test()(inputs)
+        self.assertEqual(out, inputs + 6)
 
     def test_explicit_bool_cast(self):
         with self.assertRaisesRegex(RuntimeError, "expected a boolean"):
