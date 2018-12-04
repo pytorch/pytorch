@@ -301,10 +301,11 @@ Args:
 """)
 
 
-def fractional_max_pool2d(input, kernel_size, output_size=None,
-                          output_ratio=None, return_indices=False,
-                          _random_samples=None):
-    # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList1[int]], float, bool, Tensor) -> Tuple[Tensor, Tensor]  # noqa
+@torch._jit_internal.weak_script
+def fractional_max_pool2d_with_indices(input, kernel_size, output_size=None,
+                                       output_ratio=None, return_indices=False,
+                                       _random_samples=None):
+    # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], Optional[BroadcastingList2[float]], bool, Optional[Tensor]) -> Tuple[Tensor, Tensor]  # noqa
     r"""Applies 2D fractional max pooling over an input signal composed of several input planes.
 
     Fractional MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
@@ -336,18 +337,36 @@ def fractional_max_pool2d(input, kernel_size, output_size=None,
     """
     if output_size is None and output_ratio is None:
         raise ValueError("fractional_max_pool2d requires specifying either "
-                         "an output_size, or a output_ratio")
+                         "an output_size or an output_ratio")
     if output_size is None:
-        _output_ratio = _pair(output_ratio)
-        _output_size = (int(input.size(2) * _output_ratio[0]),
-                        int(input.size(3) * _output_ratio[1]))
+        _output_ratio = _pair(torch.jit._unwrap_optional(output_ratio))
+        _output_size = [int(input.size(2) * _output_ratio[0]),
+                        int(input.size(3) * _output_ratio[1])]
     else:
         _output_size = torch.jit._unwrap_optional(output_size)
 
     if _random_samples is None:
-        _random_samples = input.new(input.size(0), input.size(1), 2).uniform_()
-    ret = torch._C._nn.fractional_max_pool2d(input, kernel_size, _output_size, _random_samples)
-    return ret if return_indices else ret[0]
+        _random_samples = torch.rand(input.size(0), input.size(1), 2, dtype=input.dtype, device=input.device)
+    else:
+        _random_samples = torch.jit._unwrap_optional(_random_samples)
+    return torch._C._nn.fractional_max_pool2d(input, kernel_size, _output_size, _random_samples)
+
+
+@torch._jit_internal.weak_script
+def _fractional_max_pool2d(input, kernel_size, output_size=None,
+                           output_ratio=None, return_indices=False,
+                           _random_samples=None):
+    # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], Optional[BroadcastingList2[float]], bool, Optional[Tensor]) -> Tensor  # noqa
+    return fractional_max_pool2d_with_indices(input, kernel_size, output_size,
+                                              output_ratio, return_indices,
+                                              _random_samples)[0]
+
+fractional_max_pool2d = torch._jit_internal.boolean_dispatch(
+    arg_name='return_indices',
+    arg_index=4,
+    default=False,
+    if_true=fractional_max_pool2d_with_indices,
+    if_false=_fractional_max_pool2d)
 
 
 @torch._jit_internal.weak_script
