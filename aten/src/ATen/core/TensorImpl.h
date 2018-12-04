@@ -4,7 +4,7 @@
 #include <memory>
 #include <numeric>
 
-#include <ATen/core/Backend.h>
+#include <c10/core/Backend.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <c10/core/Storage.h>
 #include <ATen/core/TensorOptions.h>
