@@ -8939,40 +8939,41 @@ a")
         self.checkScript(foo, (torch.rand(2, 3), torch.rand(3)))
 
     def test_bool_dispatch(self):
-        def kwarg_false(x):
-            # type: (Tensor) -> Tensor
-            return F.max_pool1d(x, 1, 1, return_indices=False)
-        self.checkScript(kwarg_false, (torch.randn(3, 3, 3),))
+        with self.disableModuleHook():  # TODO: Python print broadcasting list
+            def kwarg_false(x):
+                # type: (Tensor) -> Tensor
+                return F.max_pool1d(x, 1, 1, return_indices=False)
+            self.checkScript(kwarg_false, (torch.randn(3, 3, 3),))
 
-        def kwarg_true(x):
-            # type: (Tensor) -> Tuple[Tensor, Tensor]
-            return F.max_pool1d(x, 1, 1, return_indices=True)
-        self.checkScript(kwarg_true, (torch.randn(3, 3, 3),))
+            def kwarg_true(x):
+                # type: (Tensor) -> Tuple[Tensor, Tensor]
+                return F.max_pool1d(x, 1, 1, return_indices=True)
+            self.checkScript(kwarg_true, (torch.randn(3, 3, 3),))
 
-        def full_kwarg_false(x):
-            # type: (Tensor) -> Tensor
-            return F.max_pool1d(x, 1, 1, ceil_mode=False, return_indices=False)
-        self.checkScript(full_kwarg_false, (torch.randn(3, 3, 3),))
+            def full_kwarg_false(x):
+                # type: (Tensor) -> Tensor
+                return F.max_pool1d(x, 1, 1, ceil_mode=False, return_indices=False)
+            self.checkScript(full_kwarg_false, (torch.randn(3, 3, 3),))
 
-        def full_kwarg_true(x):
-            # type: (Tensor) -> Tuple[Tensor, Tensor]
-            return F.max_pool1d(x, 1, 1, ceil_mode=False, return_indices=True)
-        self.checkScript(full_kwarg_true, (torch.randn(3, 3, 3),))
+            def full_kwarg_true(x):
+                # type: (Tensor) -> Tuple[Tensor, Tensor]
+                return F.max_pool1d(x, 1, 1, ceil_mode=False, return_indices=True)
+            self.checkScript(full_kwarg_true, (torch.randn(3, 3, 3),))
 
-        def use_default(x):
-            # type: (Tensor) -> Tensor
-            return F.max_pool1d(x, 1, 1)
-        self.checkScript(use_default, (torch.randn(3, 3, 3),))
+            def use_default(x):
+                # type: (Tensor) -> Tensor
+                return F.max_pool1d(x, 1, 1)
+            self.checkScript(use_default, (torch.randn(3, 3, 3),))
 
-        def arg_false(x):
-            # type: (Tensor) -> Tensor
-            return F.max_pool1d(x, 1, 1, 0, 1, False, False)
-        self.checkScript(arg_false, (torch.randn(3, 3, 3),))
+            def arg_false(x):
+                # type: (Tensor) -> Tensor
+                return F.max_pool1d(x, 1, 1, 0, 1, False, False)
+            self.checkScript(arg_false, (torch.randn(3, 3, 3),))
 
-        def arg_true(x):
-            # type: (Tensor) -> Tuple[Tensor, Tensor]
-            return F.max_pool1d(x, 1, 1, 0, 1, False, True)
-        self.checkScript(arg_true, (torch.randn(3, 3, 3),))
+            def arg_true(x):
+                # type: (Tensor) -> Tuple[Tensor, Tensor]
+                return F.max_pool1d(x, 1, 1, 0, 1, False, True)
+            self.checkScript(arg_true, (torch.randn(3, 3, 3),))
 
     def test_infer_size(self):
         from torch._C import _infer_size
@@ -9678,15 +9679,23 @@ EXCLUDE_SCRIPT = {
 }
 
 EXCLUDE_PYTHON_PRINT = {
+    # no support for BroadcastingList in python printer
     'test_nn_max_unpool1d',
     'test_nn_max_unpool2d',
     'test_nn_max_unpool3d',
+    'test_nn_max_pool3d',
+    'test_nn_max_pool2d',
+    'test_nn_max_pool3d'
 }
 
 EXCLUDE_SCRIPT_MODULES = {
     'test_nn_BatchNorm1d_not_tracking_stats',
     'test_nn_BatchNorm2d_not_tracking_stats',
     'test_nn_BatchNorm3d_not_tracking_stats',
+    'test_nn_AdaptiveAvgPool2d_tuple_none',
+    'test_nn_AdaptiveAvgPool3d_tuple_none',
+    'test_nn_AdaptiveMaxPool2d_tuple_none',
+    'test_nn_AdaptiveMaxPool3d_tuple_none',
 }
 
 DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
@@ -10206,6 +10215,11 @@ S = 5
 # module cannot be exported /imported currently
 EXCLUDE_MODULE_EXPORT_IMPORT = {
     'EmbeddingBag',
+    'MaxPool1d',
+    'MaxPool2d',
+    'MaxPool3d',
+    'AdaptiveAvgPool2d',
+    'AdaptiveAvgPool3d',
 }
 
 # NB: JIT script tests for all nn functional interfaces, script mode does
