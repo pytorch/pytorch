@@ -139,6 +139,9 @@ view of a storage and defines numeric operations on it.
    .. automethod:: new_ones
    .. automethod:: new_zeros
 
+   .. autoattribute:: is_cuda
+   .. autoattribute:: device
+
    .. automethod:: abs
    .. automethod:: abs_
    .. automethod:: acos
@@ -198,8 +201,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cumsum
    .. automethod:: data_ptr
    .. automethod:: det
-   .. autoattribute:: device
-      :annotation:
    .. automethod:: diag
    .. automethod:: diag_embed
    .. automethod:: dim
@@ -257,8 +258,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: int
    .. automethod:: inverse
    .. automethod:: is_contiguous
-   .. autoattribute:: is_cuda
-      :annotation:
    .. automethod:: is_pinned
    .. automethod:: is_set_to
    .. automethod:: is_signed

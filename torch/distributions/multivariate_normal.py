@@ -136,7 +136,7 @@ class MultivariateNormal(Distribution):
         loc_shape = batch_shape + self.event_shape
         cov_shape = batch_shape + self.event_shape + self.event_shape
         new.loc = self.loc.expand(loc_shape)
-        new._unbroadcasted_scale_tril = self._unbroadcasted_scale_tril.expand(cov_shape)
+        new._unbroadcasted_scale_tril = self._unbroadcasted_scale_tril
         if 'covariance_matrix' in self.__dict__:
             new.covariance_matrix = self.covariance_matrix.expand(cov_shape)
         if 'scale_tril' in self.__dict__:

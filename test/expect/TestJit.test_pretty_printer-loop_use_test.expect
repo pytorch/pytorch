@@ -1,10 +1,10 @@
-def script(self,
+def graph(self,
     y_1: Tensor) -> Tuple[Tensor, Tensor]:
-  x = aten.add(y_1, 1, 1)
-  z_1 = aten.add(x, 5, 1)
+  x = torch.add(y_1, 1, 1)
+  z_1 = torch.add(x, 5, 1)
   y, z = y_1, z_1
-  _0 = bool(aten.lt(y_1, 8))
+  _0 = bool(torch.lt(y_1, 8))
   while _0:
-    y_2 = aten.add_(y, 1, 1)
-    _0, y, z = bool(aten.lt(y_2, 8)), y_2, x
+    y_2 = torch.add_(y, 1, 1)
+    _0, y, z = bool(torch.lt(y_2, 8)), y_2, x
   return x, z

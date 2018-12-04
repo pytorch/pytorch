@@ -97,23 +97,22 @@ class CAFFE2_API Tensor final {
     return impl_.get()->GetDevice();
   }
 
-  void CopyFrom(const Tensor& src, BaseContext* context = nullptr) const {
-    impl_.get()->CopyFrom(*src.impl_.get(), context);
+  void CopyFrom(const Tensor& src, bool async = false) const {
+    impl_.get()->CopyFrom(*src.impl_.get(), async);
   }
 
   /**
    * @brief Extend the outer-most dimension of this tensor
    *        to dimension of `num`.
    */
-  void ExtendTo(int64_t num, float growthPct, BaseContext* context) const {
+  void ExtendTo(int64_t num, float growthPct) const {
     CAFFE_ENFORCE_GE_WITH_CALLER(impl_->dim(), 1);
     CAFFE_ENFORCE_GE_WITH_CALLER(growthPct, 0);
-    CAFFE_ENFORCE(context != nullptr, "Context must be provided.");
-    Extend(num - impl_->size(0), growthPct, context);
+    Extend(num - impl_->size(0), growthPct);
   }
 
-  void Extend(int64_t num, float growthPct, BaseContext* context) const {
-    impl_.get()->Extend(num, growthPct, context);
+  void Extend(int64_t num, float growthPct) const {
+    impl_.get()->Extend(num, growthPct);
   }
 
   /**
@@ -451,7 +450,7 @@ CAFFE2_API void ReinitializeAndCopyFrom(
     Tensor* t,
     at::TensorOptions options,
     const Tensor& src,
-    BaseContext* context = nullptr);
+    bool async = false);
 
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(12, Tensor)
 

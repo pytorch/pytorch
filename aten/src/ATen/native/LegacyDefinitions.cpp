@@ -134,7 +134,7 @@ Tensor & tril_(Tensor& self, int64_t diagonal) {
 }
 
 Tensor & triu_(Tensor& self, int64_t diagonal) {
-  return self._th_triu_(diagonal);
+  return at::_th_triu_(self, diagonal);
 }
 
 Tensor & digamma_(Tensor& self) {

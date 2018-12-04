@@ -14,7 +14,7 @@ from dnnlowp_test_utils import (
     nchw2nhwc,
     nhwc2nchw,
 )
-from hypothesis import given
+from hypothesis import assume, given
 
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
@@ -62,8 +62,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
         gc,
         dc,
     ):
-        if group > 1:
-            dilation = 1
+        assume(group == 1 or dilation == 1)
 
         X, W, b = generate_conv_inputs(
             stride,
@@ -206,8 +205,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
         gc,
         dc,
     ):
-        if group > 1:
-            dilation = 1
+        assume(group == 1 or dilation == 1)
 
         X, W, b = generate_conv_inputs(
             stride,
@@ -307,8 +305,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
         gc,
         dc,
     ):
-        if group > 1:
-            dilation = 1
+        assume(group == 1 or dilation == 1)
         ndim = len(kernels)
 
         X, W, b = generate_convnd_inputs(

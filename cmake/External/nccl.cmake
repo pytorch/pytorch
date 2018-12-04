@@ -1,13 +1,24 @@
 if (NOT __NCCL_INCLUDED)
   set(__NCCL_INCLUDED TRUE)
 
-  # try the system-wide nccl first
-  find_package(NCCL)
-  if (NCCL_FOUND)
+  if (USE_SYSTEM_NCCL)
+    # if we have explicit paths passed from setup.py, use those
+    if (NCCL_INCLUDE_DIR)
+      # used by gloo cmake among others
+      SET(NCCL_INCLUDE_DIRS ${NCCL_INCLUDE_DIR})
+      SET(NCCL_LIBRARIES ${NCCL_SYSTEM_LIB})
+      set(NCCL_FOUND TRUE)
       add_library(__caffe2_nccl INTERFACE)
       target_link_libraries(__caffe2_nccl INTERFACE ${NCCL_LIBRARIES})
       target_include_directories(__caffe2_nccl INTERFACE ${NCCL_INCLUDE_DIRS})
-      set(NCCL_EXTERNAL FALSE)
+    else()
+      find_package(NCCL)
+      if (NCCL_FOUND)
+        add_library(__caffe2_nccl INTERFACE)
+        target_link_libraries(__caffe2_nccl INTERFACE ${NCCL_LIBRARIES})
+        target_include_directories(__caffe2_nccl INTERFACE ${NCCL_INCLUDE_DIRS})
+      endif()
+    endif()
   else()
     if (TORCH_CUDA_ARCH_LIST)
       torch_cuda_get_nvcc_gencode_flag(NVCC_GENCODE)
@@ -22,7 +33,10 @@ if (NOT __NCCL_INCLUDED)
       CONFIGURE_COMMAND ""
       BUILD_COMMAND
         env
+        # TODO: remove these flags when
+        # https://github.com/pytorch/pytorch/issues/13362 is fixed
         "CCACHE_DISABLE=1"
+        "SCCACHE_DISABLE=1"
         make
         "CXX=${CMAKE_CXX_COMPILER}"
         "CUDA_HOME=${CUDA_TOOLKIT_ROOT_DIR}"

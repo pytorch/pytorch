@@ -4,7 +4,7 @@
 
 #ifdef __cplusplus
 #include <ATen/Allocator.h>
-#include <ATen/core/StorageImpl.h>
+#include <c10/core/StorageImpl.h>
 #endif
 
 /* on pourrait avoir un liste chainee

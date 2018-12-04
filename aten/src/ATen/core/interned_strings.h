@@ -19,6 +19,7 @@ namespace c10 {
   _(namespaces, scope)             \
   _(namespaces, namespaces)        \
   _(prim, Assign)                  \
+  _(prim, BroadcastingChunk)       \
   _(prim, Constant)                \
   _(prim, None)                    \
   _(prim, Drop)                    \
@@ -57,9 +58,10 @@ namespace c10 {
   _(prim, IntToFloat)              \
   _(prim, FloatToInt)              \
   _(prim, StringToFloat)           \
-  _(prim, device)            \
-  _(prim, dtype)             \
-  _(prim, shape)             \
+  _(prim, device)                  \
+  _(prim, dtype)                   \
+  _(prim, shape)                   \
+  _(prim, requires_grad)           \
   _(prim, AutogradAdd)             \
   _(prim, GradOf)                  \
   _(prim, AnyDefined)              \
@@ -79,6 +81,8 @@ namespace c10 {
   _(aten, __isnot__)               \
   _(aten, copy_)                   \
   _(aten, _set_item)               \
+  _(aten, index_put_)              \
+  _(aten, device)                  \
   FORALL_ATEN_BASE_SYMBOLS(_)      \
   _(onnx, Add)                     \
   _(onnx, Concat)                  \
@@ -180,7 +184,7 @@ namespace c10 {
 
 using unique_t = uint32_t;
 
-static const std::string domain_prefix = "org.pytorch.";
+const std::string& domain_prefix();
 
 // A Symbol is like an interned string, but with a little extra
 // structure; it is namespaced via SymbolNamespace and the resulting

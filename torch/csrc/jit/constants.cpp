@@ -46,6 +46,11 @@ Value* insertConstant(
   } else if(val.isString()) {
     n->s_(attr::value, val.toString()->string());
     n->output()->setType(StringType::get());
+  } else if(val.isDevice()) {
+    std::stringstream ss;
+    ss << val.toDevice();
+    n->s_(attr::value, ss.str());
+    n->output()->setType(DeviceObjType::get());
   } else if(val.isNone()) {
     n->destroy();
     n = g.create(prim::None);
@@ -118,6 +123,12 @@ RegisterOperators reg({
           auto s = node->s(attr::value);
           return [s](Stack& stack) {
             push(stack, s);
+            return 0;
+          };
+        } else if (type == DeviceObjType::get()) {
+          auto d = c10::Device(node->s(attr::value));
+          return [d](Stack& stack) {
+            push(stack, d);
             return 0;
           };
         } else {
