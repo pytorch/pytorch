@@ -9843,7 +9843,7 @@ EXCLUDE_PYTHON_PRINT = {
 }
 
 EXCLUDE_SCRIPT_MODULES = {
-    'test_nn_NLLLoss_weights_ignore_index_neg'
+    'test_nn_NLLLoss_weights_ignore_index_neg',
     'test_nn_BatchNorm1d_not_tracking_stats',
     'test_nn_BatchNorm2d_not_tracking_stats',
     'test_nn_BatchNorm3d_not_tracking_stats',
@@ -9851,10 +9851,6 @@ EXCLUDE_SCRIPT_MODULES = {
     'test_nn_AdaptiveAvgPool3d_tuple_none',
     'test_nn_AdaptiveMaxPool2d_tuple_none',
     'test_nn_AdaptiveMaxPool3d_tuple_none',
-    'test_nn_LayerNorm_1d_elementwise_affine',
-    'test_nn_LayerNorm_1d_no_elementwise_affine',
-    'test_nn_LayerNorm_3d_elementwise_affine',
-    'test_nn_LayerNorm_3d_no_elementwise_affine',
 }
 
 DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
@@ -10497,7 +10493,7 @@ nn_functional_tests = [
     ('gumbel_softmax', (S, S), (2., True,), 'hard'),
     ('multilabel_margin_loss', torch.tensor([[0.2, -0.2, 0.07]]), (torch.tensor([[0, 0, 1]]),),),
     ('multi_margin_loss', (S, S), (non_differentiable(torch.randint(S, (S, ), dtype=torch.int64)), \
-                                   1, 1, non_differentiable(torch.randn(S))),),
+                                   1, 1., non_differentiable(torch.randn(S))),),
     ('binary_cross_entropy', torch.randn(3, 2).sigmoid(), (non_differentiable(torch.rand(3, 2)), \
                                                            non_differentiable(torch.randn(3, 2))),),
     ('binary_cross_entropy', torch.randn(3, 2).sigmoid(),
