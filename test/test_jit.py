@@ -3016,6 +3016,25 @@ class TestScript(JitTestCase):
 
         return ge
 
+    def test_training_param(self):
+        class What(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                # type: (int) -> int
+                if self.training:
+                    r = x
+                else:
+                    r = x + 4
+                # check double use of training
+                if self.training:
+                    r = r + 1
+                return r
+
+        w = What()
+        self.assertEqual(4, w(3))
+        w.train(False)
+        self.assertEqual(7, w(3))
+
     def test_jitter_bug(self):
         @torch.jit.script
         def fn2(input, kernel_size):
@@ -9675,27 +9694,9 @@ EXCLUDE_PYTHON_PRINT = {
 }
 
 EXCLUDE_SCRIPT_MODULES = {
-    'test_nn_LPPool2d_norm',
-    'test_nn_LPPool1d_norm',
-    'test_nn_BatchNorm1d_3d_input_not_affine',
-    'test_nn_BatchNorm1d_affine_simple_average',
-    'test_nn_BatchNorm1d_not_affine',
     'test_nn_BatchNorm1d_not_tracking_stats',
-    'test_nn_BatchNorm2d_2d_simple_average',
-    'test_nn_BatchNorm2d_not_affine',
     'test_nn_BatchNorm2d_not_tracking_stats',
-    'test_nn_BatchNorm3d_3d_simple_average',
-    'test_nn_BatchNorm3d_not_affine',
     'test_nn_BatchNorm3d_not_tracking_stats',
-    'test_nn_LayerNorm_1d_elementwise_affine',
-    'test_nn_LayerNorm_1d_no_elementwise_affine',
-    'test_nn_LayerNorm_3d_elementwise_affine',
-    'test_nn_LayerNorm_3d_no_elementwise_affine',
-    'test_nn_Linear_no_bias',
-    'test_nn_AdaptiveAvgPool2d_tuple_none',
-    'test_nn_AdaptiveAvgPool3d_tuple_none',
-    'test_nn_AdaptiveMaxPool2d_tuple_none',
-    'test_nn_AdaptiveMaxPool3d_tuple_none',
 }
 
 DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
