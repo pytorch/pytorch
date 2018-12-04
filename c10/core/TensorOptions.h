@@ -98,7 +98,7 @@ namespace c10 {
 /// resolution is done before template resolution, our problem is solved.
 
 
-struct CAFFE2_API TensorOptions {
+struct C10_API TensorOptions {
   TensorOptions()
     : requires_grad_(false)
     , is_variable_(false)

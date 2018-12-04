@@ -127,8 +127,6 @@ def load(github, model, force_reload=False, *args, **kwargs):
     extracted_repo = os.path.join(hub_dir, repo_name + '-' + branch)
     repo_dir = os.path.join(hub_dir, repo_name + '_' + branch)
 
-    sys.path.insert(0, repo_dir)  # Make Python interpreter aware of the repo
-
     use_cache = (not force_reload) and os.path.exists(repo_dir)
 
     # Github uses '{repo_name}-{branch_name}' as folder name which is not importable
@@ -146,6 +144,8 @@ def load(github, model, force_reload=False, *args, **kwargs):
 
         _remove_if_exists(cached_file)
         shutil.move(extracted_repo, repo_dir)  # rename the repo
+
+    sys.path.insert(0, repo_dir)  # Make Python interpreter aware of the repo
 
     dependencies = _load_attr_from_module('hubconf', 'dependencies')
 
