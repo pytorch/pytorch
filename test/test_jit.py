@@ -9683,7 +9683,7 @@ EXCLUDE_SCRIPT_MODULES = {
     'test_nn_GroupNorm_1d_no_affine_IN',
     'test_nn_GroupNorm_1d_no_affine_LN',
     'test_nn_GroupNorm_2d_no_affine_IN',
-    'test_nn_GroupNorm_2d_no_affine_L',
+    'test_nn_GroupNorm_2d_no_affine_LN',
 }
 
 DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
