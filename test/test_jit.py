@@ -9716,9 +9716,10 @@ EXCLUDE_PYTHON_PRINT = {
     'test_nn_max_unpool1d',
     'test_nn_max_unpool2d',
     'test_nn_max_unpool3d',
-    'test_nn_max_pool3d',
+    'test_nn_max_pool1d',
     'test_nn_max_pool2d',
-    'test_nn_max_pool3d'
+    'test_nn_max_pool3d',
+    'test_nn_max_pool1d_with_indices',
 }
 
 EXCLUDE_SCRIPT_MODULES = {
