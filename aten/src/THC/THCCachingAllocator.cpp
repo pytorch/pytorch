@@ -588,6 +588,14 @@ THC_API uint64_t THCCachingAllocator_maxMemoryCached(int device) {
   return caching_allocator.get_stats_for_device(device).max_amount_cached;
 }
 
+//
+// CUDA IPC only allows sharing a big memory block associated with a IpcMemHandle,
+// and it can be opened only once per context per process. There are multiple
+// types of storage in the same IPC mem block, so we must cache the device ptr
+// to construct typed storage as it comes.
+// ipcMemHandle_to_devptr only saves a weak_ptr, and the shared_ptr will call
+// cudaIpcCloseMemHandle when ref_count is 0.
+//
 namespace {
   std::mutex IpcMemMutex;
   std::unordered_map<std::string, std::weak_ptr<void>> ipcMemHandle_to_devptr;
@@ -601,14 +609,10 @@ THC_API std::shared_ptr<void> THCCaching_CUDAIpcDevptr(std::string handle) {
     void *devPtr = nullptr;
     cudaIpcMemHandle_t ipc_handle = *(cudaIpcMemHandle_t*)handle.c_str();
     THCudaCheck(cudaIpcOpenMemHandle(&devPtr, ipc_handle, cudaIpcMemLazyEnablePeerAccess));
-    std::cout << "opened devPtr " << devPtr << std::endl;
     sp = std::shared_ptr<void>(devPtr, [](void *ptr) {THCudaCheck(cudaIpcCloseMemHandle(ptr));});
-    std::cout << "get from shared_ptr " << sp.get() << std::endl;
     std::weak_ptr<void> wp = sp;
     ipcMemHandle_to_devptr[handle] = wp;
   }
-  auto res = ipcMemHandle_to_devptr[handle].lock();
-  std::cout << "from map: " << res.get() << std::endl;
-  return res;
+  return ipcMemHandle_to_devptr[handle].lock();
 }
 

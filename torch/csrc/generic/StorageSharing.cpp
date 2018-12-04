@@ -233,12 +233,9 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
 
     _handle = PyBytes_FromStringAndSize((char *)&handle, CUDA_IPC_HANDLE_SIZE);
     _offset = PyLong_FromSsize_t((Py_ssize_t)offset / sizeof(scalar_t));
-    //std::cout << "caching block of size " << base_size / sizeof(scalar_t) << std::endl;
-    //std::cout << "storage offset " << offset / sizeof(scalar_t) << std::endl;
-    //size = PyLong_FromSize_t(base_size / sizeof(scalar_t));
+    std::cout << "caching block of size " << base_size << std::endl;
   }
 
-  //std::cout << "sharing storage of size " << storage->numel() << std::endl;
   if (!tuple || !device || !_handle || !size || !_offset) {
     return nullptr;
   }
