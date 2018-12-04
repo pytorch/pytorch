@@ -162,7 +162,7 @@ def _differentiable_outputs(x):
     return tuple(o for o in _as_tuple(x) if o.requires_grad)
 
 
-def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True):
+def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True, check_sparse_nnz=False):
     r"""Check gradients computed via small finite differences against analytical
     gradients w.r.t. tensors in :attr:`inputs` that are of floating point type
     and with ``requires_grad=True``.
@@ -191,11 +191,21 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
         raise_exception (bool, optional): indicating whether to raise an exception if
             the check fails. The exception gives more information about the
             exact nature of the failure. This is helpful when debugging gradchecks.
+        check_sparse_nnz (bool, optional): if True, gradcheck allows for SparesTensor input,
+            and for any SparseTensor at input, gradcheck will perform check at nnz positions only.
 
     Returns:
         True if all differences satisfy allclose condition
     """
+    def fail_test(msg):
+        if raise_exception:
+            raise RuntimeError(msg)
+        return False
+
     tupled_inputs = _as_tuple(inputs)
+    if any(t.is_sparse for t in tupled_inputs if isinstance(t, torch.Tensor)) and not check_sparse_nnz:
+        fail_test('gradcheck expects all tensor inputs '
+                  'are dense when check_sparse_nnz is set to False.')
 
     # Make sure that gradients are saved for all inputs
     any_input_requiring_grad = False
@@ -216,11 +226,6 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
             'but none of the them have requires_grad=True.')
 
     output = _differentiable_outputs(func(*tupled_inputs))
-
-    def fail_test(msg):
-        if raise_exception:
-            raise RuntimeError(msg)
-        return False
 
     for i, o in enumerate(output):
         if not o.requires_grad:

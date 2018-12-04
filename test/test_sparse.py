@@ -218,7 +218,7 @@ class TestSparse(TestCase):
             def fn(x):
                 return x.to_dense()
             x.requires_grad_(True)
-            gradcheck(fn, (x,))
+            gradcheck(fn, (x,), check_sparse_nnz=True)
 
         i = self.IndexTensor([
             [0, 1, 2, 2],
@@ -299,7 +299,7 @@ class TestSparse(TestCase):
             def fn(x):
                 return x.to_dense()
             x.requires_grad_(True)
-            gradcheck(fn, (x,))
+            gradcheck(fn, (x,), check_sparse_nnz=True)
 
         i = self.IndexTensor([
             [0, 1, 2, 2],
@@ -824,13 +824,10 @@ class TestSparse(TestCase):
             S_dense = S.to_dense().requires_grad_(True)
             S.requires_grad_(True)
             self.assertEqual(torch.sparse.addmm(D1, S, D2), torch.addmm(D1, S_dense, D2))
-            y1 = torch.sparse.addmm(D1, S, D2).sum()
-            y2 = torch.addmm(D1, S_dense, D2).sum()
-            y1.backward()
-            y2.backward()
-            mask = (S_dense == 0)
-            self.assertTrue(S.grad.is_coalesced())
-            self.assertEqual(S.grad.to_dense(), S_dense.grad.masked_fill_(mask, 0))
+
+            def fn(S, D1, D2):
+                return torch.sparse.addmm(D1, S, D2)
+            gradcheck(fn, (S, D1, D2), check_sparse_nnz=True)
 
         test_shape(7, 8, 9, 20)
 
@@ -842,13 +839,10 @@ class TestSparse(TestCase):
             S_dense = S.to_dense().requires_grad_(True)
             S.requires_grad_(True)
             self.assertEqual(torch.sparse.mm(S, D), torch.mm(S_dense, D))
-            y1 = torch.sparse.mm(S, D).sum()
-            y2 = torch.mm(S_dense, D).sum()
-            y1.backward()
-            y2.backward()
-            mask = (S_dense == 0)
-            self.assertTrue(S.grad.is_coalesced())
-            self.assertEqual(S.grad.to_dense(), S_dense.grad.masked_fill_(mask, 0))
+
+            def fn(S, D):
+                return torch.sparse.mm(S, D)
+            gradcheck(fn, (S, D), check_sparse_nnz=True)
 
         test_shape(7, 8, 9, 20)
 
@@ -980,7 +974,7 @@ class TestSparse(TestCase):
                     if res.is_sparse:
                         res = res.to_dense()
                     return res
-                gradcheck(fn, (S,))
+                gradcheck(fn, (S,), check_sparse_nnz=True)
 
             else:
                 S_sum = torch.sparse.sum(S, td)
@@ -992,7 +986,7 @@ class TestSparse(TestCase):
                     if res.is_sparse:
                         res = res.to_dense()
                     return res
-                gradcheck(fn, (S,))
+                gradcheck(fn, (S,), check_sparse_nnz=True)
 
         nnz = 10
         sparse_dims = 2
