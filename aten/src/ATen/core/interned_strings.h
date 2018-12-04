@@ -82,6 +82,7 @@ namespace c10 {
   _(aten, copy_)                   \
   _(aten, _set_item)               \
   _(aten, index_put_)              \
+  _(aten, device)                  \
   FORALL_ATEN_BASE_SYMBOLS(_)      \
   _(onnx, Add)                     \
   _(onnx, Concat)                  \
@@ -183,7 +184,7 @@ namespace c10 {
 
 using unique_t = uint32_t;
 
-static const std::string domain_prefix = "org.pytorch.";
+const std::string& domain_prefix();
 
 // A Symbol is like an interned string, but with a little extra
 // structure; it is namespaced via SymbolNamespace and the resulting

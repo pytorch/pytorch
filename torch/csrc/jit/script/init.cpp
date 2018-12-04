@@ -336,16 +336,14 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     } else if (py::isinstance<py::int_>(obj)) {
       return toSimple(g.insertConstant(py::cast<int64_t>(obj), loc));
     } else if (py::isinstance<py::float_>(obj)) {
-      return toSimple(g.insertConstant(py::cast<float>(obj), loc));
+      return toSimple(g.insertConstant(py::cast<double>(obj), loc));
     } else if (py::isinstance<py::str>(obj)) {
       return toSimple(g.insertConstant(py::cast<std::string>(obj), loc));
     } else if (obj.is(py::none())) {
       return toSimple(g.insertConstant(IValue(), loc));
     } else if (THPDevice_Check(obj.ptr())) {
       auto device = reinterpret_cast<THPDevice*>(obj.ptr());
-      std::vector<int64_t> v = {static_cast<int64_t>(device->device.type()),
-                                device->device.index()};
-      return toSimple(g.insertConstant(std::move(v)));
+      return toSimple(g.insertConstant(device->device));
     } else if (THPLayout_Check(obj.ptr())) {
       auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
       const auto v = static_cast<int64_t>(layout->layout);
@@ -712,12 +710,24 @@ void initJitScriptBindings(PyObject* module) {
   });
 
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
-  m.def("import_ir_module", [](ModuleLookup module_lookup, const std::string& filename) {
-    import_ir_module(module_lookup, filename);
+  m.def("import_ir_module", [](ModuleLookup module_lookup, const std::string& filename,
+        py::object map_location) {
+    c10::optional<at::Device> optional_device;
+    if (!map_location.is(py::none())) {
+      AT_ASSERT(THPDevice_Check(map_location.ptr()));
+      optional_device = reinterpret_cast<THPDevice*>(map_location.ptr())->device;
+    }
+    import_ir_module(module_lookup, filename, optional_device);
   });
-  m.def("import_ir_module_from_buffer", [](ModuleLookup module_lookup, const std::string& buffer) {
+  m.def("import_ir_module_from_buffer", [](ModuleLookup module_lookup,
+        const std::string& buffer, py::object map_location) {
     std::istringstream in(buffer);
-    import_ir_module(module_lookup, in);
+    c10::optional<at::Device> optional_device;
+    if (!map_location.is(py::none())) {
+      AT_ASSERT(THPDevice_Check(map_location.ptr()));
+      optional_device = reinterpret_cast<THPDevice*>(map_location.ptr())->device;
+    }
+    import_ir_module(module_lookup, in, optional_device);
   });
   m.def("_jit_import_methods", import_methods);
   m.def("_jit_set_emit_module_hook", setEmitModuleHook);

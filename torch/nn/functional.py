@@ -1345,6 +1345,12 @@ def bilinear(input1, input2, weight, bias=None):
     return torch.bilinear(input1, input2, weight, bias)
 
 
+def _no_grad_embedding_renorm_(weight, input, max_norm, norm_type):
+    # type: (Tensor, Tensor, float, float) -> Tensor
+    with torch.no_grad():
+        return torch.embedding_renorm_(weight, input, max_norm, norm_type)
+
+
 @torch._jit_internal.weak_script
 def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2.,
               scale_grad_by_freq=False, sparse=False):
@@ -1425,7 +1431,7 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2.,
         # with torch.no_grad():
         #   torch.nembedding_renorm_
         # remove once script supports set_grad_enabled
-        torch.no_grad_embedding_renorm_(weight, input, max_norm, norm_type)
+        _no_grad_embedding_renorm_(weight, input, max_norm, norm_type)
     return torch.embedding(weight, input, padding_idx, scale_grad_by_freq, sparse)
 
 
@@ -1555,7 +1561,7 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
         # with torch.no_grad():
         #   torch.nembedding_renorm_
         # remove once script supports set_grad_enabled
-        torch.no_grad_embedding_renorm_(weight, input, max_norm, norm_type)
+        _no_grad_embedding_renorm_(weight, input, max_norm, norm_type)
 
     ret, _, _, _ = torch.embedding_bag(
         weight,

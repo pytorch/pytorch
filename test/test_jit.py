@@ -14,7 +14,7 @@ from torch._six import inf, PY2
 from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
     freeze_rng_state
-from test_nn import module_tests, new_module_tests
+from common_nn import module_tests, new_module_tests
 from textwrap import dedent
 import os
 import io
@@ -266,22 +266,27 @@ class JitTestCase(TestCase):
             if pp != pp2:
                 self.assertMultiLineEqual(pp, pp2)
 
-    def getExportImportCopy(self, m):
+    def getExportImportCopy(self, m, also_test_file=True, map_location=None):
+        buffer = io.BytesIO()
+        torch.jit.save(m, buffer)
+        buffer.seek(0)
+        imported = torch.jit.load(buffer, map_location=map_location)
+
+        if not also_test_file:
+            return imported
+
         # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
         # opens the file, and it cannot be opened multiple times in Windows. To support Windows,
         # close the file after creation and try to remove it manually
         f = tempfile.NamedTemporaryFile(delete=False)
         try:
             f.close()
-            m.save(f.name)
-            imported = torch.jit.load(f.name)
+            imported.save(f.name)
+            result = torch.jit.load(f.name, map_location=map_location)
         finally:
             os.unlink(f.name)
-        buffer = io.BytesIO()
-        torch.jit.save(imported, buffer)
-        buffer.seek(0)
 
-        return torch.jit.load(buffer)
+        return result
 
     def assertGraphContains(self, graph, kind):
         self.assertTrue(any(n.kind() == kind for n in graph.nodes()))
@@ -455,6 +460,23 @@ class JitTestCase(TestCase):
 
 class TestJit(JitTestCase):
 
+    @unittest.skip("Requires a lot of RAM")
+    def test_big(self):
+        m = torch.jit.ScriptModule()
+        gig = int(1024 * 1024 * 1024 / 4)
+        # a small tensor in the first 4GB
+        m.v0 = nn.Parameter(torch.full((2,), 1, dtype=torch.float))
+        # a large tensor in the first 4GB that ends outside of it
+        m.v1 = nn.Parameter(torch.full((5, gig), 2, dtype=torch.float))
+        # a small tensor in >4GB space
+        m.v2 = nn.Parameter(torch.full((2,), 3, dtype=torch.float))
+        # s large tensor in the > 4GB space
+        m.v3 = nn.Parameter(torch.full((5, gig), 4, dtype=torch.float))
+
+        m2 = self.getExportImportCopy(m)
+
+        self.assertEqual(tuple(m.parameters()), tuple(m2.parameters()))
+
     def test_simple(self):
         x = torch.tensor([0.4], requires_grad=True)
         y = torch.tensor([0.7], requires_grad=True)
@@ -465,6 +487,50 @@ class TestJit(JitTestCase):
         trace, z = torch.jit.get_trace_graph(f, (x, y))
         self.assertExpectedGraph(trace)
         self.assertExportImport(trace, (x, y))
+
+    def test_restore_device(self):
+        # main purpose is checking map_location works
+        m = torch.jit.ScriptModule()
+        cpu_device_str = 'cpu'
+        m.p0 = nn.Parameter(torch.tensor([0.3], dtype=torch.float,
+                                         device=cpu_device_str))
+        m.register_buffer('b0', torch.tensor([0.9], dtype=torch.float,
+                                             device=cpu_device_str))
+        m2 = self.getExportImportCopy(m)
+        self.assertEqual(tuple(m.parameters()), tuple(m2.parameters()))
+        self.assertEqual(tuple(m.buffers()), tuple(m2.buffers()))
+        self.assertFalse(m2.p0.is_cuda)
+        self.assertFalse(m2.b0.is_cuda)
+
+    @unittest.skipIf(not RUN_CUDA, "restore device requires CUDA")
+    def test_restore_device_cuda(self):
+        m = torch.jit.ScriptModule()
+        cuda_device_str = 'cuda:' + str(torch.cuda.device_count() - 1)
+        m.p0 = nn.Parameter(torch.tensor([0.3], dtype=torch.float,
+                                         device=cuda_device_str))
+        m.register_buffer('b0', torch.tensor([0.9], dtype=torch.float,
+                                             device=cuda_device_str))
+        self.assertTrue(m.p0.is_cuda)
+        self.assertTrue(m.b0.is_cuda)
+
+        # restore to the saved devices
+        m2 = self.getExportImportCopy(m)
+        self.assertEqual(tuple(m.parameters()), tuple(m2.parameters()))
+        self.assertEqual(tuple(m.buffers()), tuple(m2.buffers()))
+        self.assertEqual(str(m2.p0.device), cuda_device_str)
+        self.assertEqual(str(m2.b0.device), cuda_device_str)
+
+        # restore all to cpu using string
+        cpu_device_str = 'cpu'
+        m3 = self.getExportImportCopy(m, map_location=cpu_device_str)
+        self.assertEqual(str(m3.p0.device), cpu_device_str)
+        self.assertEqual(str(m3.b0.device), cpu_device_str)
+
+        # restore all to first gpu using device
+        m4 = self.getExportImportCopy(
+            m3, map_location=torch.device('cuda:0'))
+        self.assertEqual(str(m4.p0.device), 'cuda:0')
+        self.assertEqual(str(m4.b0.device), 'cuda:0')
 
     def test_typeas_trace_check(self):
         a = torch.tensor([0.4], requires_grad=True)
@@ -3107,6 +3173,13 @@ class TestScript(JitTestCase):
         self.assertTrue(same_device(gpu, gpu))
         self.assertFalse(same_device(cpu, gpu))
 
+    @unittest.skipIf(not RUN_CUDA, "device tests require CUDA")
+    def test_tensor_to_device(self):
+        def to_device(x):
+            return x.to(device="cuda").to(device=torch.device("cpu"))
+
+        self.checkScript(to_device, (torch.ones(3, 4),))
+
     def test_generic_list_errors(self):
         with self.assertRaisesRegex(RuntimeError, "previously matched to type"):
             @torch.jit.script
@@ -4356,6 +4429,38 @@ a")
 
         inputs = self._make_scalar_vars([-1, 1], torch.int64)
         self.checkScript(func, inputs, optimize=True)
+
+    def test_if_is_none_dispatch(self):
+        class Test(torch.jit.ScriptModule):
+            __constants__ = ['b']
+
+            def __init__(self, b=None):
+                super(Test, self).__init__()
+                self.b = b
+
+            @torch.jit.script_method
+            def forward(self, input, opt=None):
+                # type: (Tensor, Optional[Tensor]) -> Tensor
+                x = input
+                if self.b is not None:
+                    x = self.b(input)
+
+                if self.b is None:
+                    x = input + 2
+
+                if opt is not None:
+                    opt = torch.jit._unwrap_optional(opt)
+                    x = opt + x
+
+                if opt is None:
+                    x = x + 4
+
+                return x
+
+        inputs = torch.zeros(1, 2)
+        self.assertExpectedGraph(Test().graph)
+        out = Test()(inputs)
+        self.assertEqual(out, inputs + 6)
 
     def test_explicit_bool_cast(self):
         with self.assertRaisesRegex(RuntimeError, "expected a boolean"):
@@ -5827,6 +5932,33 @@ a")
         self.checkScript(test_ints, ())
         self.checkScript(test_floats, ())
 
+    def test_embedding_renorm_grad_error(self):
+        # Testing that the builtin call to embedding_renorm_ correctly throws
+        # Error when .backward() is called on its input
+
+        def embedding_norm(input, embedding_matrix, max_norm):
+            F.embedding(input, embedding_matrix, max_norm=0.01)
+
+        @torch.jit.script
+        def embedding_norm_script(input, embedding_matrix, max_norm):
+            # type: (Tensor, Tensor, float)
+            F.embedding(input, embedding_matrix, max_norm=0.01)
+
+        for fun in [embedding_norm, embedding_norm_script]:
+            input = torch.tensor([[1, 2, 4, 5], [4, 3, 2, 9]])
+            embedding_matrix = torch.randn(10, 3)
+
+            var1 = torch.randn(10, 3, requires_grad=True)
+            var2 = var1.detach().requires_grad_()
+            output1 = var1 * embedding_matrix
+            output2 = var2 * embedding_matrix
+
+            output1.sum().backward()
+
+            ignore = F.embedding(input, embedding_matrix, max_norm=0.01)
+            with self.assertRaisesRegex(RuntimeError, "modified"):
+                output2.sum().backward()
+
     def test_type_annotations(self):
         def fn(x, y):
             # type: (Tensor, Tensor) -> Tuple[Tensor, Tensor, Tensor]
@@ -6162,7 +6294,7 @@ a")
 
             def __init__(self):
                 super(M, self).__init__(False)
-                self.param = torch.nn.Parameter(torch.zeros((5, 5), device='cuda').random_())
+                self.param = torch.nn.Parameter(torch.zeros((5, 5), device='cuda:0').random_())
 
             @torch.jit.script_method
             def foo(self):
@@ -6172,7 +6304,7 @@ a")
         m_import = self.getExportImportCopy(m_orig)
         # check to make sure the storage wasn't resized
         self.assertTrue(m_orig.param.storage().size() == 25)
-        self.assertTrue(m_import.foo().device == torch.device('cpu'))
+        self.assertTrue(m_import.foo().device == torch.device('cuda:0'))
         self.assertEqual(m_orig.foo(), m_import.foo())
         self.assertTrue(m_orig.foo().dtype == m_import.foo().dtype)
 
@@ -7801,19 +7933,20 @@ a")
         import random
         buffers = [os.urandom(size) for size in [random.randint(1, 100) for i in range(20)]]
         offsets = []
-        for buf in buffers:
-            offsets.append(writer.write_record(buf, len(buf)))
+        for i, buf in enumerate(buffers):
+            writer.write_record(str(i), buf, len(buf))
+            offsets.append(i)
         import pickle
         serialized_offsets = pickle.dumps(offsets)
-        writer.write_record(serialized_offsets, len(serialized_offsets))
+        writer.write_record("meta", serialized_offsets, len(serialized_offsets))
         writer.write_end_of_file()
 
         reader = torch._C.PyTorchFileReader(filename)
-        serialized_offsets_read = reader.get_last_record()
+        serialized_offsets_read = reader.get_record("meta")
         parsed_serialized_offsets = pickle.loads(serialized_offsets)
 
         for i, offset in enumerate(parsed_serialized_offsets):
-            data = reader.get_record_with_key(offset)
+            data = reader.get_record(str(offset))
             assert(data == buffers[i])
 
     # for each type, the input type annotation and corresponding return type annotation
@@ -8704,6 +8837,23 @@ a")
         self.assertEqual(unify_to_optional(True), None)
         self.assertEqual(unify_to_optional(False), 2)
 
+        @torch.jit.script
+        def opt_list(x):
+            # type: (Optional[List[float]]) -> int
+            return 2
+
+        @torch.jit.script
+        def broadcast_opt_list(x):
+            # type: (Optional[BroadcastingList2[float]]) -> int
+            return 2
+
+        @torch.jit.script
+        def opt_list_tuple_caller(x):
+            # type: (Tuple[float, float]) -> int
+            return opt_list(x) + broadcast_opt_list(x)
+
+        self.assertEqual(opt_list_tuple_caller((2., 3.)), 4)
+
     def test_lhs_indexing(self):
         def foo(a, b):
             a = a.clone()
@@ -8813,6 +8963,68 @@ a")
             return _infer_size(x.size(), y.size())
 
         self.checkScript(fn, (torch.ones(2, 4, 2), torch.ones(2, 4, 2)))
+
+    def test_mutable_dce(self):
+        @torch.jit.script
+        def foo():
+            a = torch.rand(2, 3)
+            a += torch.rand(2, 3)
+            b = torch.rand(2, 3)
+            b += torch.rand(2, 3)
+            # b should be cleaned up but not a
+            return a
+
+        self.assertExpectedGraph(foo.graph)
+
+    def test_mutable_dce_block(self):
+        @torch.jit.script
+        def foo():
+            a = torch.rand(2, 3)
+            a += torch.rand(2, 3)
+            b = torch.rand(2, 3)
+            if bool(a > torch.zeros(2, 3)):
+                b += torch.rand(2, 3)
+                a += torch.rand(2, 3)
+            # a should be cleaned up but not b
+            return b
+
+        self.assertExpectedGraph(foo.graph)
+
+    def test_mutable_dce_graph_input(self):
+        @torch.jit.script
+        def foo(a):
+            a += torch.rand(2, 3)
+            # shouldn't clean up `a` even though it's not used in the output
+
+        self.assertExpectedGraph(foo.graph)
+
+    def test_mutable_dce_list(self):
+        @torch.jit.script
+        def foo(a):
+            l = []
+            l.append(a)
+            c = l[0]
+            b = torch.rand(2, 3)
+            c += torch.rand(2, 3)
+            return b
+
+        self.assertExpectedGraph(foo.graph)
+
+    def test_mutable_dce_loop(self):
+        @torch.jit.script
+        def foo(a):
+            l = []
+            l.append(a)
+            i = 0
+            b = torch.rand(2, 3)
+            while i < 1:
+                dead = torch.rand(2, 3)
+                c = l[0]
+                c += torch.rand(2, 3)
+                i += 1
+            return b
+
+        self.assertExpectedGraph(foo.graph)
 
 
 class MnistNet(nn.Module):
@@ -9460,6 +9672,21 @@ EXCLUDE_PYTHON_PRINT = {
 EXCLUDE_SCRIPT_MODULES = {
     'test_nn_LPPool2d_norm',
     'test_nn_LPPool1d_norm',
+    'test_nn_BatchNorm1d_3d_input_not_affine',
+    'test_nn_BatchNorm1d_affine_simple_average',
+    'test_nn_BatchNorm1d_not_affine',
+    'test_nn_BatchNorm1d_not_tracking_stats',
+    'test_nn_BatchNorm2d_2d_simple_average',
+    'test_nn_BatchNorm2d_not_affine',
+    'test_nn_BatchNorm2d_not_tracking_stats',
+    'test_nn_BatchNorm3d_3d_simple_average',
+    'test_nn_BatchNorm3d_not_affine',
+    'test_nn_BatchNorm3d_not_tracking_stats',
+    'test_nn_LayerNorm_1d_elementwise_affine',
+    'test_nn_LayerNorm_1d_no_elementwise_affine',
+    'test_nn_LayerNorm_3d_elementwise_affine',
+    'test_nn_LayerNorm_3d_no_elementwise_affine',
+    'test_nn_Linear_no_bias',
 }
 
 DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
@@ -9916,8 +10143,8 @@ graph(%0 : Double(5, 5)) {
         def func(x):
             return torch.ops.aten.relu(x)
         self.assertExpectedInline(canonical(func.graph), '''\
-graph(%x : Dynamic) {
-  %1 : Dynamic = aten::relu(%x)
+graph(%x : Tensor) {
+  %1 : Tensor = aten::relu(%x)
   return (%1);
 }
 ''')
@@ -10112,6 +10339,17 @@ nn_functional_single_grad = frozenset('test_nn_' + name for name in [
     'ctc_loss',
     'grid_sample',
 ])
+
+# additional modules test
+# TODO: delete this list once we make all nn_tests work
+additional_module_tests = [
+    dict(
+        module_name='Bilinear',
+        constructor_args=(S, S, M),
+        input_size=(S, S),
+        extra_args=((S, S),)
+    ),
+]
 
 
 def add_autograd_test(
@@ -10332,6 +10570,10 @@ def add_nn_module_test(*args, **kwargs):
             input = kwargs['input_fn']()
         else:
             input = (kwargs['input_size'],)
+
+        if 'extra_args' in kwargs:
+            input = input + kwargs['extra_args']
+
         args_variable, kwargs_variable = create_input(input)
         f_args_variable = deepcopy(unpack_variables(args_variable))
 
@@ -10501,7 +10743,7 @@ for test in autograd_method_tests:
 for test in nn_functional_tests:
     add_nn_functional_test(*test)
 
-for test in module_tests + new_module_tests:
+for test in module_tests + new_module_tests + additional_module_tests:
     add_nn_module_test(**test)
 
 if __name__ == '__main__':

@@ -461,6 +461,14 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
   void run() override {
     allreduce(inputs);
+
+    // Only the first output in the tensor list contains the results.
+    // See https://github.com/facebookincubator/gloo/issues/152.
+    // The contents is the same for every entry in the tensor list, so
+    // we can use the first entry as the source of the copy below.
+    for (size_t i = 1; i < inputs.size(); i++) {
+      inputs[i].copy_(inputs[0]);
+    }
   }
 
   template <typename T>
@@ -510,10 +518,14 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
     allreduce(tmp);
 
     // Kick off copy back to the CUDA tensors.
+    // Only the first output in the tensor list contains the results.
+    // See https://github.com/facebookincubator/gloo/issues/152.
+    // The contents is the same for every entry in the tensor list, so
+    // we can use the first entry as the source of the copy below.
     at::cuda::OptionalCUDAStreamGuard stream_guard;
     for (size_t i = 0; i < inputs.size(); i++) {
       stream_guard.reset_stream(streams[i]);
-      inputs[i].copy_(tmp[i], /* non_blocking */ true);
+      inputs[i].copy_(tmp[0], /* non_blocking */ true);
       events[i].record(streams[i]);
     }
   }

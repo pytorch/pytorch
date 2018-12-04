@@ -14,7 +14,6 @@ import nn_parse
 import native_parse
 import preprocess_declarations
 import function_wrapper
-import copy_wrapper
 
 from code_template import CodeTemplate
 
@@ -179,7 +178,6 @@ top_env = {
     'pure_virtual_extended_type_method_declarations': [],
     'type_method_declarations': [],
     'type_method_definitions': [],
-    'type_method_inline_definitions': [],
     'tensor_method_declarations': [],
     'tensor_method_definitions': [],
     'function_declarations': [],
@@ -346,11 +344,10 @@ def declare_outputs():
     for f in core_files:
         core_file_manager.will_write(f)
     files = ['Declarations.yaml', 'TypeExtendedInterface.h', 'TypeDefault.cpp', 'TypeDefault.h',
-             'Functions.h', 'CPUCopy.cpp', 'NativeFunctions.h',
-             'RegisterCPU.cpp', 'RegisterCPU.h']
+             'Functions.h', 'NativeFunctions.h', 'RegisterCPU.cpp', 'RegisterCPU.h']
     for f in files:
         file_manager.will_write(f)
-    cuda_files = ['CUDACopy.cpp', 'RegisterCUDA.cpp', 'RegisterCUDA.h']
+    cuda_files = ['RegisterCUDA.cpp', 'RegisterCUDA.h']
     for f in cuda_files:
         cuda_file_manager.will_write(f)
     for fname in sorted(generators.keys()):
@@ -434,8 +431,6 @@ def generate_outputs():
 
     file_manager.write('Functions.h', FUNCTIONS_H, top_env)
 
-    file_manager.write('CPUCopy.cpp', copy_wrapper.create(all_types, 'CPU'))
-    cuda_file_manager.write('CUDACopy.cpp', copy_wrapper.create(all_types, 'CUDA'))
     file_manager.write('NativeFunctions.h', NATIVE_FUNCTIONS_H, top_env)
 
     file_manager.check_all_files_written()
