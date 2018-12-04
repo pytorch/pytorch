@@ -102,6 +102,7 @@ using GenericList = List<IValue>;
   _(Blob) \
   _(GenericList) \
   _(Future) \
+  _(Device)
 
 struct CAFFE2_API IValue final {
   IValue()
@@ -212,7 +213,6 @@ struct CAFFE2_API IValue final {
 
   // Future
   IValue(c10::intrusive_ptr<ivalue::Future> v);
-  IValue(ivalue::Future&& future);
   bool isFuture() const { return Tag::Future == tag; }
   c10::intrusive_ptr<ivalue::Future> toFuture() && {
     AT_ASSERT(isFuture());
@@ -368,6 +368,28 @@ struct CAFFE2_API IValue final {
     throw std::runtime_error("IValue is not a Scalar");
   }
 
+  // Device
+  IValue(c10::Device d)
+  : tag(Tag::Device), is_intrusive_ptr(false) {
+    payload.as_device.type = d.type();
+    payload.as_device.index = d.index();
+  }
+  bool isDevice() const { return Tag::Device == tag; }
+  c10::Device toDevice() const {
+    AT_ASSERT(isDevice());
+    return c10::Device(payload.as_device.type, payload.as_device.index);
+  }
+
+  // ScalarType
+  at::ScalarType toScalarType() const {
+    return static_cast<at::ScalarType>(toInt());
+  }
+
+  // Layout
+  at::Layout toLayout() const {
+    return static_cast<at::Layout>(toInt());
+  }
+
   // for debugging
   std::string tagKind() const {
     switch(tag) {
@@ -438,6 +460,10 @@ struct CAFFE2_API IValue final {
     double as_double;
     bool as_bool;
     c10::intrusive_ptr_target* as_intrusive_ptr;
+    struct {
+      DeviceType type;
+      DeviceIndex index;
+    } as_device;
   } payload;
   Tag tag;
   bool is_intrusive_ptr;
@@ -459,13 +485,22 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     if (completed()) {
       return;
     }
-    c10::global_work_queue.workOnTasksUntilCompleted(intrusive_from_this());
+    c10::global_work_queue().workOnTasksUntilCompleted(intrusive_from_this());
     AT_ASSERT(completed());
   }
 
   void markCompleted(IValue value) {
-    value_ = std::move(value);
-    completed_ = true;
+    {
+      // This is not to protect completed_ but to create a barrier
+      // from possible addCallback() calls
+      std::unique_lock<std::mutex> lock(mutex_);
+      AT_ASSERT(!completed());
+      completed_ = true;
+      value_ = std::move(value);
+    }
+
+    // There is no need to protect callbacks anymore.
+    // Once completed_ is set to true, no one can add new callback to the list.
     for (auto& callback : callbacks) {
       callback();
     }
@@ -474,13 +509,17 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   // Get the result of the current future.
   IValue value() {
+    std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
     return value_;
   }
 
   void addCallback(std::function<void(void)> callback) {
+    std::unique_lock<std::mutex> lock(mutex_);
     if (completed()) {
+      lock.unlock();
       callback();
+      return;
     }
     callbacks.push_back(callback);
   }
@@ -490,13 +529,18 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     return completed_;
   }
 
+  std::mutex& get_mutex() {
+    return mutex_;
+  }
+
   CAFFE2_API friend std::ostream& operator<<(
       std::ostream& out,
       const Future& v);
 
  private:
+  std::mutex mutex_;
   IValue value_; // when finished the value
-  bool completed_ = false; // is this future complete
+  std::atomic_bool completed_ = {false}; // is this future complete
   std::vector<std::function<void(void)>> callbacks;
 };
 
@@ -531,37 +575,13 @@ DEFINE_TO(std::vector<IValue>, toGenericListRef)
 DEFINE_TO(std::string, toStringRef)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Future>, toFuture)
 DEFINE_TO(IValue, toIValue)
+DEFINE_TO(c10::Device, toDevice)
+DEFINE_TO(at::ScalarType, toScalarType)
+DEFINE_TO(at::Layout, toLayout)
 
-#undef DEFINE_TO
-
-#define DEFINE_TO_WITH_BODY(type, body) \
-template<> \
-inline type IValue::to<type>() && { \
-  body(std::move(*this)); \
-} \
-template<> \
-inline type IValue::to<type>() const & { \
-  body((*this)); \
-}
-
-#define SCALAR_TYPE_BODY(this) return static_cast<at::ScalarType>(this.toInt());
-#define LAYOUT_BODY(this) return static_cast<at::Layout>(this.toInt());
-#define DEVICE_BODY(this)                                           \
-  /* NB: const_list might be a move of the vector, so we need to */ \
-  /*     assign it to prevent its deallocation.                  */ \
-  auto&& const_list = this.toIntList();                             \
-  const auto& elems = const_list->elements();                       \
-  AT_ASSERT(elems.size() == 2);                                     \
-  return at::Device(static_cast<at::Device::Type>(elems[0]), elems[1]);
-
-DEFINE_TO_WITH_BODY(at::ScalarType, SCALAR_TYPE_BODY)
-DEFINE_TO_WITH_BODY(at::Layout, LAYOUT_BODY)
-DEFINE_TO_WITH_BODY(at::Device, DEVICE_BODY)
-
-#undef DEFINE_TO_WITH_BODY
-#undef SCALAR_TYPE_BODY
-#undef LAYOUT_BODY
-#undef DEVICE_BODY
+// note: when adding a DEFINE_TO case here you should also add a
+// toX method to IValue. These named methods are much more discoverable
+// than the to templated function.
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Tuple> v)
 : tag(Tag::Tuple), is_intrusive_ptr(true) {
@@ -614,9 +634,6 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)
 : tag(Tag::Future), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
-inline IValue::IValue(ivalue::Future&& future)
-: IValue(c10::make_intrusive<ivalue::Future>(std::move(future))) {}
-
 
 inline const std::vector<int64_t>& IValue::toIntListRef() const {
   return toIntList()->elements();

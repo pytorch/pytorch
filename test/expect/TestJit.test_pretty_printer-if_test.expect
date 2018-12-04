@@ -1,7 +1,7 @@
-def script(self,
+def graph(self,
     a: Tensor,
     b: Tensor) -> Tensor:
-  if bool(aten.lt(a, b)):
+  if bool(torch.lt(a, b)):
     c = b
   else:
     c = a

@@ -88,10 +88,12 @@ class C10_API intrusive_ptr_target {
 
   constexpr intrusive_ptr_target() noexcept : refcount_(0), weakcount_(0) {}
 
-  // intrusive_ptr_target supports move: but refcount and weakcount don't
+  // intrusive_ptr_target supports copy and move: but refcount and weakcount don't
   // participate (since they are intrinsic properties of the memory location)
   intrusive_ptr_target(intrusive_ptr_target&& other) noexcept : intrusive_ptr_target() {}
   intrusive_ptr_target& operator=(intrusive_ptr_target&& other) noexcept { return *this; }
+  intrusive_ptr_target(const intrusive_ptr_target& other) noexcept : intrusive_ptr_target() {}
+  intrusive_ptr_target& operator=(const intrusive_ptr_target& other) noexcept { return *this; }
 
  private:
   /**

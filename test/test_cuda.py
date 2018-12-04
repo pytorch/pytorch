@@ -886,6 +886,17 @@ class TestCuda(TestCase):
             self.assertEqual(z.get_device(), 0)
             self.assertIs(z.cuda(0), z)
 
+    def test_copy_non_blocking(self):
+        x = torch.randn(5, 5).cuda()
+        y = torch.zeros(5, 5)
+        y.copy_(x, non_blocking=True)
+        self.assertEqual(x, y)
+
+        x = torch.randn(5, 5)
+        y = torch.zeros(5, 5).cuda()
+        y.copy_(x, non_blocking=True)
+        self.assertEqual(x, y)
+
     def test_serialization_array_with_storage(self):
         x = torch.randn(5, 5).cuda()
         y = torch.IntTensor(2, 5).fill_(0).cuda()
@@ -926,7 +937,7 @@ class TestCuda(TestCase):
 
             self.assertEqual(x * y, 4.5)
             self.assertEqual(y * x, 4.5)
-            with self.assertRaisesRegex(RuntimeError, 'expected type'):
+            with self.assertRaisesRegex(RuntimeError, "doesn't match the desired type"):
                 y *= x
             x *= y
             self.assertEqual(x, 4.5)

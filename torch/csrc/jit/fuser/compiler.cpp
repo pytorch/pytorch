@@ -103,7 +103,13 @@ static std::vector<int64_t> getInputDependencies(const Value* output) {
 static void setInputBroadcastGroups(KernelSpec& spec) {
   std::unordered_set<std::vector<int64_t>, torch::hash<std::vector<int64_t>>> broadcast_groups;
   for (const Value* output : (spec.graph())->outputs()) {
-    broadcast_groups.insert(getInputDependencies(output));
+    if (output->node()->kind() == prim::FusedConcat) {
+      for (const Value* concat_input : output->node()->inputs()) {
+        broadcast_groups.insert(getInputDependencies(concat_input));
+      }
+    } else {
+      broadcast_groups.insert(getInputDependencies(output));
+    }
   }
   std::copy(
     broadcast_groups.begin()
@@ -147,24 +153,25 @@ std::shared_ptr<FusedKernel> compileKernel(
 , const at::Device device) {
   const std::vector<TensorDesc>& input_desc = arg_spec.descs();
 
-  // Note: this assumes fused kernels only operate on floating point values
+  auto graph = spec.graph()->copy();
+
   c10::optional<at::ScalarType> scalar_type;
-  for (const auto& desc : input_desc) {
-    if (isFloatingType(desc.scalar_type)) {
-      scalar_type = desc.scalar_type;
-      break;
-    }
+  for (size_t i = 0; i < input_desc.size(); i++) {
+    const auto& desc = input_desc[i];
+    graph->inputs()[i]->setType(TensorType::create(desc.scalar_type, device, desc.nDim())); // TODO: nDim is bad, as it is collapsed
   }
-  JIT_ASSERT(scalar_type);
+
+  PropagateInputShapes(graph);
 
   // Creates output descriptions
   std::vector<TensorDesc> output_desc;
-  for (const Value* output : (spec.graph())->outputs()) {
+  for (const Value* output : graph->outputs()) {
     std::vector<int64_t> sizes = map_size;
     if (output->node()->kind() == prim::FusedConcat) {
       sizes.at(output->node()->i(attr::dim)) *= output->node()->inputs().size();
     }
-    auto type = CompleteTensorType::create(*scalar_type, device, sizes);
+    auto scalar_type = output->type()->expect<c10::TensorType const>()->scalarType();
+    auto type = CompleteTensorType::create(scalar_type, device, sizes);
     output_desc.emplace_back(std::move(type));
   }
 
@@ -177,7 +184,7 @@ std::shared_ptr<FusedKernel> compileKernel(
   std::tie(code, chunk_desc, concat_desc, has_random)
     = generateKernel(
         name
-      , *(spec.graph())
+      , *graph
       , input_desc
       , output_desc
       , use_cuda);

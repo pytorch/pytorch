@@ -3,7 +3,7 @@
 // ${generated_comment}
 
 #include <ATen/Context.h>
-#include <ATen/ScalarType.h>
+#include <c10/core/ScalarType.h>
 #include <ATen/core/TensorMethods.h>
 #include <ATen/core/TensorOptions.h>
 
@@ -13,9 +13,11 @@
 #include <tuple>
 #include <vector>
 
+namespace c10 {
+class Scalar;
+}
 namespace at {
 struct Generator;
-class Scalar;
 class Tensor;
 struct Type;
 } // namespace at

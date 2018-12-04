@@ -7,6 +7,7 @@
 #include <bitset>
 
 #include "ATen/Utils.h"
+#include "ATen/native/Copy.h"
 #include <c10/util/C++17.h>
 
 #if defined(__GNUC__)
@@ -476,7 +477,8 @@ template <typename src_T, typename dst_T>
 void convert(const src_T *src, dst_T *dst, int64_t n) {
 #pragma unroll
   for (int64_t i = 0; i < n; i++) {
-    *dst = static_cast<dst_T>(*src);
+    *dst = static_cast<dst_T>(
+        static_cast<at::native::inter_copy_type_t<dst_T>>(*src));
     src++;
     dst++;
   }

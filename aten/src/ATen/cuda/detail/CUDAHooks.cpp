@@ -25,44 +25,6 @@
 namespace at {
 namespace cuda {
 namespace detail {
-namespace {
-
-void check_status(int32_t status) {
-  AT_CHECK(
-      static_cast<cudaError_t>(status) == cudaSuccess,
-      "CUDA error (",
-      static_cast<int32_t>(status),
-      "): ",
-      cudaGetErrorString(static_cast<cudaError_t>(status)));
-}
-
-void set_device(int32_t device) {
-  check_status(cudaSetDevice(device));
-}
-
-void get_device(int32_t* device) {
-  check_status(cudaGetDevice(device));
-}
-
-void unchecked_set_device(int32_t device) {
-  const auto return_code = cudaSetDevice(device);
-  (void)return_code;
-}
-
-struct DynamicCUDAInterfaceSetter {
-  DynamicCUDAInterfaceSetter() {
-    using at::detail::DynamicCUDAInterface;
-    DynamicCUDAInterface::set_device = set_device;
-    DynamicCUDAInterface::get_device = get_device;
-    DynamicCUDAInterface::unchecked_set_device = unchecked_set_device;
-  }
-};
-
-// Single, global, static (because of the anonymous namespace) instance, whose
-// constructor will set the static members of `DynamicCUDAInterface` to CUDA
-// functions when the ATen CUDA library is loaded.
-DynamicCUDAInterfaceSetter _;
-} // namespace
 
 // NB: deleter is dynamic, because we need it to live in a separate
 // compilation unit (alt is to have another method in hooks, but

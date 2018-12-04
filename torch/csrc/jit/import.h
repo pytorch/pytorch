@@ -13,9 +13,13 @@ using ModuleLookup = std::function<std::shared_ptr<script::Module>(
 
 TORCH_API void import_ir_module(
     ModuleLookup module_lookup,
-    const std::string& filename);
+    const std::string& filename,
+    c10::optional<c10::Device> device);
 
-TORCH_API void import_ir_module(ModuleLookup module_lookup, std::istream& in);
+TORCH_API void import_ir_module(
+    ModuleLookup module_lookup,
+    std::istream& in,
+    c10::optional<c10::Device> device);
 
 /// Loads a serialized `script::Module` from the given `istream`.
 ///
