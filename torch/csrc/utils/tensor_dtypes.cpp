@@ -43,7 +43,7 @@ static std::pair<std::string, std::string> getDtypeNames(at::ScalarType scalarTy
 
 void initializeDtypes() {
   auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
-  if (!torch_module) python_error();
+  if (!torch_module) throw python_error();
 
 #define DEFINE_SCALAR_TYPE(_1,n,_2) at::ScalarType::n,
 

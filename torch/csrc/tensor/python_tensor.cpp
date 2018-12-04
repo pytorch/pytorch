@@ -371,6 +371,7 @@ void set_default_tensor_type(const at::Type& type) {
 
   // get the storage first, so if it doesn't exist we don't change the default tensor type
   THPObjectPtr storage = get_storage_obj(type);
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   default_tensor_type = const_cast<Type*>(&type);
   at::set_default_dtype(default_tensor_type->typeMeta());
 

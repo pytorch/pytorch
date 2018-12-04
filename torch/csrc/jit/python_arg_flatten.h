@@ -58,7 +58,7 @@ struct IODescriptor {
   // different than the number of 'v's in structure.
   std::string structure;
   std::vector<VariableMetadata> metadata;
-  bool grad_enabled;
+  bool grad_enabled = false;
 };
 
 static inline std::ostream& operator<<(std::ostream& out, const IODescriptor::VariableMetadata& meta) {

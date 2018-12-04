@@ -709,7 +709,7 @@ RegisterOperators reg({
     return [=](Stack& stack) {                                \
       int64_t a, b;                                           \
       pop(stack, a, b);                                       \
-      push(stack, op);                                        \
+      push(stack, op); /* NOLINT(hicpp-signed-bitwise) */     \
       return 0;                                               \
     };                                                        \
   }),
@@ -1009,8 +1009,8 @@ Operator(                                                                      \
           at::Tensor t;                                                 \
           c_type other;                                                 \
           pop(stack, t, other);                                         \
-          std::move(t) = other;                                         \
-          push(stack, std::move(t));                                    \
+          std::move(t) = other; /* NOLINT(bugprone-use-after-move) */   \
+          push(stack, std::move(t)); /* NOLINT(bugprone-use-after-move) */ \
           return 0;                                                     \
         };                                                              \
       }),

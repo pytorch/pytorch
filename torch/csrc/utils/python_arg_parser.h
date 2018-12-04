@@ -80,6 +80,7 @@ struct PythonArgs;
 // Contains bound Python arguments in declaration order
 template<int N>
 struct ParsedArgs {
+  ParsedArgs() : args() { }
   PyObject* args[N];
 };
 

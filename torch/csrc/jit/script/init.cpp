@@ -486,8 +486,7 @@ FunctionSchema getSchemaWithNameAndDefaults(
         } else {
           value = toIValue(it->second, arg.type());
         }
-        new_args.emplace_back(
-            Argument(arg.name(), arg.type(), arg.N(), value, arg.kwarg_only()));
+        new_args.emplace_back(arg.name(), arg.type(), arg.N(), value, arg.kwarg_only());
       } catch (py::cast_error& e) {
         throw ErrorReport(range)
             << "Expected a default value of type " << arg.type()->str()

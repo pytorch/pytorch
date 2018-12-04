@@ -705,7 +705,7 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
 PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
 {
   HANDLE_TH_ERRORS
-  torch::autograd::profiler::RecordFunction record(((PyTypeObject*)cls)->tp_name, 
+  torch::autograd::profiler::RecordFunction record(((PyTypeObject*)cls)->tp_name,
                                                    Function::peek_at_next_sequence_nr());
 
   THPObjectPtr backward_cls(PyObject_GetAttrString(cls, "_backward_cls"));
@@ -1030,38 +1030,38 @@ PyTypeObject THPFunctionType = {
   sizeof(THPFunction),                   /* tp_basicsize */
   0,                                     /* tp_itemsize */
   (destructor)THPFunction_dealloc,       /* tp_dealloc */
-  0,                                     /* tp_print */
-  0,                                     /* tp_getattr */
-  0,                                     /* tp_setattr */
-  0,                                     /* tp_reserved */
-  0,                                     /* tp_repr */
-  0,                                     /* tp_as_number */
-  0,                                     /* tp_as_sequence */
-  0,                                     /* tp_as_mapping */
-  0,                                     /* tp_hash  */
-  0,                                     /* tp_call */
-  0,                                     /* tp_str */
-  0,                                     /* tp_getattro */
-  0,                                     /* tp_setattro */
-  0,                                     /* tp_as_buffer */
+  nullptr,                                     /* tp_print */
+  nullptr,                                     /* tp_getattr */
+  nullptr,                                     /* tp_setattr */
+  nullptr,                                     /* tp_reserved */
+  nullptr,                                     /* tp_repr */
+  nullptr,                                     /* tp_as_number */
+  nullptr,                                     /* tp_as_sequence */
+  nullptr,                                     /* tp_as_mapping */
+  nullptr,                                     /* tp_hash  */
+  nullptr,                                     /* tp_call */
+  nullptr,                                     /* tp_str */
+  nullptr,                                     /* tp_getattro */
+  nullptr,                                     /* tp_setattro */
+  nullptr,                                     /* tp_as_buffer */
   Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_HAVE_GC, /* tp_flags */
   nullptr,                               /* tp_doc */
   (traverseproc)THPFunction_traverse,    /* tp_traverse */
   (inquiry)THPFunction_clear,            /* tp_clear */
-  0,                                     /* tp_richcompare */
+  nullptr,                                     /* tp_richcompare */
   0,                                     /* tp_weaklistoffset */
-  0,                                     /* tp_iter */
-  0,                                     /* tp_iternext */
+  nullptr,                                     /* tp_iter */
+  nullptr,                                     /* tp_iternext */
   THPFunction_methods,                   /* tp_methods */
-  0,                                     /* tp_members */
+  nullptr,                                     /* tp_members */
   THPFunction_properties,                /* tp_getset */
-  0,                                     /* tp_base */
-  0,                                     /* tp_dict */
-  0,                                     /* tp_descr_get */
-  0,                                     /* tp_descr_set */
+  nullptr,                                     /* tp_base */
+  nullptr,                                     /* tp_dict */
+  nullptr,                                     /* tp_descr_get */
+  nullptr,                                     /* tp_descr_set */
   0,                                     /* tp_dictoffset */
-  0,                                     /* tp_init */
-  0,                                     /* tp_alloc */
+  nullptr,                                     /* tp_init */
+  nullptr,                                     /* tp_alloc */
   THPFunction_new                        /* tp_new */
 };
 
