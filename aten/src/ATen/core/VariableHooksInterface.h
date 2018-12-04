@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/core/Backend.h>
+#include <c10/core/Backend.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Registry.h>
 

@@ -2,6 +2,7 @@
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/utils/functional.h"
 
 namespace torch { namespace jit {
 
@@ -140,8 +141,9 @@ RegisterOperators reg({
 });
 
 c10::optional<IValue> toIValue(const Value* v) {
-  if(v->node()->kind() != prim::Constant)
+  if (v->node()->kind() != prim::Constant) {
     return c10::nullopt;
+  }
   // use implemenation of prim::Constant to compute the output IValue
   auto op = getOperation(v->node());
   Stack stack;

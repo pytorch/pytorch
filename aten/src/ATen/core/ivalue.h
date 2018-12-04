@@ -133,11 +133,36 @@ struct CAFFE2_API IValue final {
     IValue(rhs).swap(*this);
     return *this;
   }
+
+  bool isAliasOf(const IValue& rhs) const {
+    if (this->tag != rhs.tag) {
+      // Trivially don't alias if the type is different
+      return false;
+    }
+
+    if (!this->is_intrusive_ptr) {
+      // Primitive types don't alias anything
+      return false;
+    }
+
+    AT_ASSERT(rhs.is_intrusive_ptr);
+
+    // Tensors should be compared based on internal storage
+    if (this->isTensor()) {
+      const auto thisTensor = this->toTensor();
+      const auto rhsTensor = rhs.toTensor();
+      return thisTensor.is_alias_of(rhsTensor);
+    }
+
+    // Other types can be compared by their ptr value
+    return this->payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
+  }
   void swap(IValue & rhs) noexcept {
     std::swap(payload, rhs.payload);
     std::swap(is_intrusive_ptr, rhs.is_intrusive_ptr);
     std::swap(tag, rhs.tag);
   }
+
   // Accessors for subtypes are arranged together below
   // While some of these accessors could be generated through templates,
   // we prefer to write them manually for clarity
@@ -423,6 +448,10 @@ struct CAFFE2_API IValue final {
   CAFFE2_API friend std::ostream& operator<<(
       std::ostream& out,
       const IValue& v);
+
+  bool isPtrType() const {
+    return is_intrusive_ptr;
+  }
 
  private:
   // NOTE: IValue tags are intentionally private. In the future we may encode

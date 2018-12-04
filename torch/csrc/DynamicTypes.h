@@ -6,7 +6,7 @@
 
 #include <ATen/Device.h>
 #include <c10/core/ScalarType.h>
-#include <ATen/core/Backend.h>
+#include <c10/core/Backend.h>
 
 #include <memory>
 #include <string>
