@@ -10,6 +10,7 @@ from pyHIPIFY import hipify_python
 amd_build_dir = os.path.dirname(os.path.realpath(__file__))
 proj_dir = os.path.dirname(os.path.dirname(amd_build_dir))
 
+# Keep this synchronized with is_pytorch_file in hipify_python.py
 includes = [
     "aten/*",
     "torch/*",
