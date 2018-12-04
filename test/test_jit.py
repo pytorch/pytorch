@@ -9626,9 +9626,13 @@ EXCLUDE_SCRIPT = {
 }
 
 EXCLUDE_PYTHON_PRINT = {
+    # no support for BroadcastingList in python printer
     'test_nn_max_unpool1d',
     'test_nn_max_unpool2d',
     'test_nn_max_unpool3d',
+    'test_nn_max_pool3d',
+    'test_nn_max_pool2d',
+    'test_nn_max_pool3d'
 }
 
 EXCLUDE_SCRIPT_MODULES = {
@@ -9649,11 +9653,10 @@ EXCLUDE_SCRIPT_MODULES = {
     'test_nn_LayerNorm_3d_elementwise_affine',
     'test_nn_LayerNorm_3d_no_elementwise_affine',
     'test_nn_Linear_no_bias',
-}
-
-EXCLUDE_SCRIPT_MODULES = {
-    'test_nn_LPPool2d_norm',
-    'test_nn_LPPool1d_norm',
+    'test_nn_AdaptiveAvgPool2d_tuple_none',
+    'test_nn_AdaptiveAvgPool3d_tuple_none',
+    'test_nn_AdaptiveMaxPool2d_tuple_none',
+    'test_nn_AdaptiveMaxPool3d_tuple_none',
 }
 
 DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
@@ -10162,6 +10165,11 @@ S = 5
 # module cannot be exported /imported currently
 EXCLUDE_MODULE_EXPORT_IMPORT = {
     'EmbeddingBag',
+    'MaxPool1d',
+    'MaxPool2d',
+    'MaxPool3d',
+    'AdaptiveAvgPool2d',
+    'AdaptiveAvgPool3d',
 }
 
 # NB: JIT script tests for all nn functional interfaces, script mode does
