@@ -1000,6 +1000,16 @@ Operator(                                                                      \
           };
         }),
 
+    Operator("aten::floor(float a) -> int",
+        [](const Node* node) {
+          return [=](Stack& stack) {
+            double a;
+            pop(stack, a);
+            push(stack, static_cast<int64_t>(std::floor(a)));
+            return 0;
+          };
+        }),
+
     DEFINE_COMPARISON_OP(aten::ne, a != b)
     DEFINE_COMPARISON_OP(aten::eq, a == b)
     DEFINE_COMPARISON_OP(aten::lt, a < b)
@@ -1087,6 +1097,230 @@ Operator(                                                                      \
 });
 
 
+// checking one of size & scale_factor is set
+// if scale_factor is a double list check that it's len == dim
+// reference: _check_size_scale_factor in torch/nn/functional.py
+void _check_size_factor(size_t dim, const IValue& size, IValue scale_factor) {
+  if (size.isNone() && scale_factor.isNone()) {
+    throw std::runtime_error("either size or scale_factor should be defined");
+  }
+  if (!size.isNone() && !scale_factor.isNone()) {
+    throw std::runtime_error("only one of size or scale_factor should be defined");
+  }
+  if (scale_factor.isDoubleList()) {
+    auto scale_len = scale_factor.toDoubleListRef().size();
+    if (scale_len != dim) {
+      std::stringstream str;
+      str << "scale_factor shape must match input shape. Input is " << dim
+        << "D, scale_factor size is " << scale_len;
+      throw std::runtime_error("only one of size or scale_factor should be defined");
+    }
+  }
+}
+
+// reference: _output_size in torch/nn/functional.py
+// size can be none, int or intlist
+// scale_factors can be none, float, or floatlist
+std::vector<int64_t> _output_size(at::Tensor input, size_t dim, IValue size, IValue scale_factors) {
+  if (!size.isNone()) {
+    if (size.isInt()) {
+      std::vector<int64_t> repeated(dim, size.toInt());
+      return repeated;
+    } else {
+      return size.toIntListRef();
+    }
+  }
+  std::vector<double> scale_repeated;
+  if (scale_factors.isDouble()) {
+    scale_repeated = std::vector<double>(dim, scale_factors.toDouble());
+  } else {
+    scale_repeated = scale_factors.toDoubleListRef();
+  }
+  std::vector<int64_t> ret;
+  for (size_t i = 0; i < dim; ++i) {
+    ret.push_back(std::floor(input.size(i + 2) * scale_repeated[i]));
+  }
+  return ret;
+}
+
+// reference: interpolate in torch/nn/functional.py
+// size can be none, int or intlist
+// scale_factors can be none, float, or floatlist
+at::Tensor interpolate(at::Tensor input, IValue size, IValue scale_factors,
+    std::string mode, c10::optional<bool> align_corners) {
+  if ((mode == "nearest" || mode == "area")) {
+    if (align_corners != c10::nullopt) {
+      throw std::runtime_error("align_corners option can only be set with the "
+                             "interpolating modes: linear | bilinear | trilinear");
+    }
+  } else {
+    if (align_corners == c10::nullopt) {
+      AT_WARN("Default upsampling behavior when mode=", mode, " is changed "
+        "to align_corners=False since 0.4.0. Please specify align_corners=True "
+        "if the old behavior is desired. See the documentation of nn.Upsample for details");
+      align_corners = false;
+    }
+  }
+
+  auto input_dim = input.dim();
+  if (input_dim == 3 && mode == "nearest")
+    return at::upsample_nearest1d(input, _output_size(input, 1, size, scale_factors));
+  if (input_dim == 4 && mode == "nearest")
+    return at::upsample_nearest2d(input, _output_size(input, 2, size, scale_factors));
+  if (input_dim == 5 && mode == "nearest")
+    return at::upsample_nearest3d(input, _output_size(input, 3, size, scale_factors));
+  if (input_dim == 3 && mode == "area")
+    return at::adaptive_avg_pool1d(input, _output_size(input, 1, size, scale_factors));
+  if (input_dim == 4 && mode == "area")
+    return at::adaptive_avg_pool2d(input, _output_size(input, 2, size, scale_factors));
+  if (input_dim == 5 && mode == "area")
+    return at::adaptive_avg_pool3d(input, _output_size(input, 3, size, scale_factors));
+  if (input_dim == 3 && mode == "linear")
+    return at::upsample_linear1d(input, _output_size(input, 1, size, scale_factors), *align_corners);
+  if (input_dim == 3 && mode == "bilinear")
+    throw std::runtime_error("Got 3D input, but bilinear mode needs 4D input");
+  if (input_dim == 3 && mode == "trilinear")
+    throw std::runtime_error("Got 3D input, but trilinear mode needs 5D input");
+  if (input_dim == 4 && mode == "linear")
+    throw std::runtime_error("Got 4D input, but linear mode needs 3D input");
+  if (input_dim == 4 && mode == "bilinear")
+    return at::upsample_bilinear2d(input, _output_size(input, 2, size, scale_factors), *align_corners);
+  if (input_dim == 4 && mode == "trilinear")
+    throw std::runtime_error("Got 4D input, but trilinear mode needs 5D input");
+  if (input_dim == 5 && mode == "linear")
+    throw std::runtime_error("Got 5D input, but linear mode needs 3D input");
+  if (input_dim == 5 && mode == "bilinear")
+    throw std::runtime_error("Got 5D input, but bilinear mode needs 4D input");
+  if (input_dim == 5 && mode == "trilinear")
+    return at::upsample_trilinear3d(input, _output_size(input, 3, size, scale_factors), *align_corners);
+
+  AT_ERROR("Input Error: Only 3D, 4D and 5D input Tensors supported",
+    " (got ", input_dim, "D) for the modes: nearest | linear | bilinear | trilinear",
+    " (got ", mode, ") ");
+}
+
+Operation interpolate_op(const Node* n) {
+  return [](Stack& stack) {
+    at::Tensor input;
+    IValue size;
+    IValue scale_factors;
+    std::string mode;
+    IValue align_corners;
+    pop(stack, input, size, scale_factors, mode, align_corners);
+    at::Tensor res = interpolate(input, size, scale_factors, mode, align_corners.toOptional<bool>());
+    push(stack, res);
+    return 0;
+  };
+}
+
+// interpolate takes in float & float[] for scale factor
+// upsample takes in int & int[], so convert the ints to floats before
+// passing on to the interpolate op
+IValue convert_scale_factor_to_double(IValue int_ivalue) {
+  IValue scale_factor_double;
+  if (int_ivalue.isInt()) {
+    scale_factor_double = static_cast<double>(int_ivalue.toInt());
+  } else if (int_ivalue.isIntList()) {
+    auto int_list = int_ivalue.toIntListRef();
+    std::vector<double> double_vec(int_list.begin(), int_list.end());
+    scale_factor_double = double_vec;
+  } else if (int_ivalue.isNone()) {
+    return IValue();
+  } else {
+    std::stringstream ss;
+    ss << "Expecting optional int or int list arg for scale factor, got" << int_ivalue;
+    throw std::runtime_error(ss.str());
+  }
+  return scale_factor_double;
+}
+
+Operation upsample_nearest_op(const Node* n) {
+  return [](Stack& stack) {
+    at::Tensor input;
+    IValue size;
+    IValue scale_factor_int;
+    pop(stack, input, size, scale_factor_int);
+    IValue scale_factor_double = convert_scale_factor_to_double(scale_factor_int);
+    at::Tensor res = interpolate(input, size, scale_factor_double, "nearest", c10::nullopt);
+    push(stack, res);
+    return 0;
+  };
+}
+
+Operation upsample_op(const Node* n) {
+  return [](Stack& stack) {
+    at::Tensor input;
+    IValue size;
+    IValue scale_factor_int;
+    std::string mode;
+    IValue align_corners;
+    pop(stack, input, size, scale_factor_int, mode, align_corners);
+    IValue scale_factor_double = convert_scale_factor_to_double(scale_factor_int);
+    at::Tensor res = interpolate(input, size, scale_factor_double, mode, align_corners.toOptional<bool>());
+    push(stack, res);
+    return 0;
+  };
+}
+
+Operation upsample_bilinear_op(const Node* n) {
+  return [](Stack& stack) {
+    at::Tensor input;
+    IValue size;
+    IValue scale_factor_int;
+    pop(stack, input, size, scale_factor_int);
+    IValue scale_factor_double = convert_scale_factor_to_double(scale_factor_int);
+    at::Tensor res = interpolate(input, size, scale_factor_double, "bilinear", true);
+    push(stack, res);
+    return 0;
+  };
+}
+
+
+RegisterOperators reg3({
+  Operator(
+      "aten::__interpolate(Tensor input, int? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None) -> Tensor",
+      interpolate_op),
+  Operator(
+      "aten::__interpolate(Tensor input, int[]? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None) -> Tensor",
+      interpolate_op),
+  Operator(
+      "aten::__interpolate(Tensor input, int? size = None, float? scale_factor = None, str mode = 'nearest', bool? align_corners = None) -> Tensor",
+      interpolate_op),
+  Operator(
+      "aten::__interpolate(Tensor input, int[]? size = None, float? scale_factor = None, str mode = 'nearest', bool? align_corners = None) -> Tensor",
+      interpolate_op),
+
+  Operator(
+      "aten::__upsample_nearest(Tensor input, int? size = None, int? scale_factor = None) -> Tensor",
+      upsample_nearest_op),
+  Operator(
+      "aten::__upsample_nearest(Tensor input, int[]? size = None, int? scale_factor = None) -> Tensor",
+      upsample_nearest_op),
+
+  Operator(
+      "aten::__upsample(Tensor input, int? size = None, int? scale_factor = None, str mode = 'nearest', bool? align_corners = None) -> Tensor",
+      upsample_op),
+  Operator(
+      "aten::__upsample(Tensor input, int[]? size = None, int? scale_factor = None, str mode = 'nearest', bool? align_corners = None) -> Tensor",
+      upsample_op),
+
+
+  Operator(
+      "aten::__upsample_bilinear(Tensor input, int? size = None, int? scale_factor = None) -> Tensor",
+      upsample_bilinear_op),
+  Operator(
+      "aten::__upsample_bilinear(Tensor input, int[]? size = None, int? scale_factor = None) -> Tensor",
+      upsample_bilinear_op),
+  Operator(
+      "aten::__upsample_bilinear(Tensor input, int? size = None, int[]? scale_factor = None) -> Tensor",
+      upsample_bilinear_op),
+  Operator(
+      "aten::__upsample_bilinear(Tensor input, int[]? size = None, int[]? scale_factor = None) -> Tensor",
+      upsample_bilinear_op),
+
+});
+
+
 at::Tensor leaky_relu(at::Tensor tensor, double scalar) {
   return at::leaky_relu(tensor, scalar);
 }
@@ -1094,7 +1328,7 @@ at::Tensor cat(std::vector<at::Tensor> tensors) {
   return at::cat(tensors);
 }
 
-static auto reg3 =
+static auto reg4 =
     torch::jit::RegisterOperators()
         .op("_test::leaky_relu(Tensor self, float v=0.01) -> Tensor", &leaky_relu)
         .op("_test::cat(Tensor[] inputs) -> Tensor", &cat);
