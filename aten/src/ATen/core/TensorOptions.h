@@ -1,9 +1,9 @@
 #pragma once
 
-#include <ATen/core/Backend.h>
+#include <c10/core/Backend.h>
 #include <ATen/core/DefaultTensorOptions.h>
 #include <c10/Device.h>
-#include <ATen/core/Layout.h>
+#include <c10/core/Layout.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/ScalarTypeUtils.h>
 
