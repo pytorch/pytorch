@@ -9608,12 +9608,10 @@ EXCLUDE_SCRIPT = {
     'test_norm_fro_default',
     'test_norm_nuc',
 
-    # argument has custom behavior
-
     # aten op has additional cudnn argument
     'test_nn_unfold',
 
-    # flakey test - TODO fix
+    # flaky test - TODO fix
     'test_nn_ctc_loss',
 
     # unknown builtin op
