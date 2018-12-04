@@ -9080,6 +9080,23 @@ a")
 
         self.assertExpectedGraph(foo.graph)
 
+    def test_mutable_mm_batching(self):
+        def foo(a1, a2, a3, a4, a5, a6, a7, a8, in_place):
+            firstmm = torch.mm(a1, a2)
+            firstmmView = firstmm
+            firstmmView += in_place
+            firstmm = firstmm.t()
+            add1 = firstmm + torch.mm(a3, a4)
+            add2 = torch.mm(a5, a6) + torch.mm(a7, a8)
+            add3 = torch.mm(a1, a4) + torch.mm(a2, a3)
+            add4 = torch.mm(a5, a8) + torch.mm(a6, a7)
+
+            foo = add1 + add2
+            bar = add3 + add4
+            return foo + bar
+
+        self.checkScript(foo, [torch.rand(5, 5) for _i in range(9)])
+
 
 class MnistNet(nn.Module):
     def __init__(self):

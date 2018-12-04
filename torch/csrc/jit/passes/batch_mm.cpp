@@ -201,6 +201,61 @@ struct TreeToken {
     }
     return matmuls;
   }
+
+  // Checks whether a tree merge is safe by trying to relocate all nodes in the
+  // tree together.
+  bool canMergeTree(const AliasDb& db) {
+    std::vector<Node*> queue{node};
+    while (!queue.empty()) {
+      auto n = queue.back();
+      queue.pop_back();
+      if (n->matches("aten::t(Tensor self) -> Tensor")) {
+        Node* input_node = n->input()->node();
+        JIT_ASSERT(input_node->matches(
+            "aten::mm(Tensor self, Tensor mat2) -> Tensor"));
+        if (!n->moveAfterTopologicallyValid(input_node, db)) {
+          return false;
+        }
+      } else if (
+          n->matches(
+              "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
+        auto a = n->inputs()[0]->node();
+        auto b = n->inputs()[1]->node();
+        bool couldMove = true;
+        if (a->isAfter(b)) {
+          couldMove &= a->moveAfterTopologicallyValid(b, db);
+          couldMove &= n->moveAfterTopologicallyValid(a, db);
+
+          // TODO(suo) this extra check is overly restrictive, but catches the
+          // following case:
+          //   b
+          //   a
+          //   <node that writes to b>
+          //   n
+          //
+          // GraphFuser and CreateAutodiffSubgraphs solve this problem by
+          // putting their merged nodes into a subgraph; we could do the same
+          // thing for this pass.
+          couldMove &= b->next() == a;
+        } else {
+          couldMove &= a->moveBeforeTopologicallyValid(b, db);
+          couldMove &= n->moveAfterTopologicallyValid(b, db);
+          couldMove &= a->next() == b;
+        }
+
+        if (!couldMove) {
+          return false;
+        }
+        queue.push_back(a);
+        queue.push_back(b);
+      } else {
+        AT_ASSERTM(
+            n->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor"),
+            "Unsupported node found in a BatchMM tree!");
+      }
+    }
+    return true;
+  }
 };
 
 enum class Side { LHS, RHS };
@@ -245,8 +300,16 @@ void BatchMMTreeReduce(Block* block) {
   // Merge trees we've found
   for (auto & item : tokens) {
     auto & root = item.second;
-    if (!root || root.tree_size < min_fusion_size)
+    if (!root || root.tree_size < min_fusion_size) {
       continue;
+    }
+    // TODO(suo), we put this after the tree size check to avoid
+    // rebuilding the alias DB too much. Once we support mutating the
+    // graph through the alias db, we can avoid doing any rebuilds at all
+    AliasDb db = AliasAnalysis(graph);
+    if (!root.canMergeTree(db)) {
+      continue;
+    }
     auto matmuls = root.removeTransposesAndGatherMatmuls();
     WithInsertPoint insert_guard {root.node};
     Node * tree_reduce = graph->insertNode(graph->create(Symbol::prim("MMTreeReduce")));

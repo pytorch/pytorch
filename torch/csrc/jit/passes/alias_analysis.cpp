@@ -20,7 +20,7 @@ bool shouldAnnotate(const Value* v) {
 }
 } // namespace
 
-AliasDb::AliasDb(std::shared_ptr<Graph> graph) : graph_(graph) {
+AliasDb::AliasDb(Graph* graph) : graph_(graph) {
   analyze(graph_);
 
   // Build helper indices
@@ -202,7 +202,7 @@ void AliasDb::dump() const {
   }
 }
 
-void AliasDb::analyze(std::shared_ptr<Graph> graph) {
+void AliasDb::analyze(Graph* graph) {
   // Assign aliases to the graph's inputs, assuming that all inputs of a given
   // type may alias to each other.
   const auto tensorAlias = getFreshAlias(/*isGraphInput=*/true);

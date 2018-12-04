@@ -26,7 +26,7 @@ namespace jit {
  */
 class AliasDb {
  public:
-  explicit AliasDb(std::shared_ptr<Graph> graph);
+  explicit AliasDb(Graph* graph);
 
   // Does `n` use or write to any wildcard aliases?
   bool hasWildcard(const Node* n) const;
@@ -53,7 +53,7 @@ class AliasDb {
   void dump() const;
 
  private:
-  void analyze(std::shared_ptr<Graph> graph);
+  void analyze(Graph* graph);
   void analyze(Block* block);
   void analyze(Node* node);
 
@@ -77,7 +77,7 @@ class AliasDb {
   bool hasWildcardImpl(const Node* n) const;
   bool writesTo(Node* n, const Value* v) const;
 
-  std::shared_ptr<Graph> graph_;
+  Graph* graph_;
   Symbol latestSymbol_ = Symbol::fromQualString("alias::0");
   std::unordered_map<const Value*, AliasInfo> valueToAlias_;
   std::unordered_map<Symbol, std::unordered_set<const Value*>> aliasToValue_;
@@ -87,6 +87,9 @@ class AliasDb {
 };
 
 inline TORCH_API AliasDb AliasAnalysis(std::shared_ptr<Graph> graph) {
+  return AliasDb(graph.get());
+}
+inline TORCH_API AliasDb AliasAnalysis(Graph* graph) {
   return AliasDb(graph);
 }
 } // namespace jit
