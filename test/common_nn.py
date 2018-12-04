@@ -2208,6 +2208,8 @@ def kldivloss_reference(input, target, reduction='mean'):
         return result.mean()
     elif reduction == 'sum':
         return result.sum()
+    elif reduction == 'batchmean' and results.dim() != 0:
+        return result.sum() / result.size(0)
     return result
 
 
