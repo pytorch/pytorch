@@ -3531,6 +3531,16 @@ a")
             for i in range(len(script_funs)):
                 self.assertEqual(test_func(script_funs[i], x, tensor), test_func(funs[i], x, tensor))
 
+    def test_tuple_to_opt_list(self):
+        @torch.jit.script
+        def foo(x):
+            # type: (Optional[List[int]]) -> int
+            return 1
+
+        @torch.jit.script
+        def tuple_call():
+            return foo((1, 2))
+
     def test_advancedindex(self):
         def consec(size, start=0):
             numel = torch.tensor(size).prod().item()
@@ -4566,6 +4576,13 @@ a")
         self.assertExpectedGraph(graph1, subname="int")
         graph2 = torch.jit.script(fn2).graph
         self.assertExpectedGraph(graph2, subname="float")
+
+    def test_math_ops(self):
+
+        def test_floor():
+            return math.floor(1.5)
+
+        self.checkScript(test_floor, ())
 
     def test_if_nest_while(self):
         def func(a, b):
@@ -8571,7 +8588,6 @@ a")
         self.assertExpectedGraph(strong_mod.graph, "scope_test")
 
     def test_weak_module_parameters_and_buffers(self):
-        import math
         weights = torch.randn(10, 10)
         bias = torch.randn(10)
         weights2 = torch.randn(10, 10)
@@ -9674,7 +9690,6 @@ EXCLUDE_SCRIPT = {
     'test_nn_ctc_loss',
 
     # unknown builtin op
-    'test_nn_interpolate',
     'test_nn_fold',
 }
 
@@ -9791,9 +9806,6 @@ def create_script_fn(self, method_name, func_type, output_process_fn,
             raise 'Unsupported function type'
 
         script = script_template.format(', '.join(formals), call)
-
-        # for math.inf
-        import math
 
         CU = torch.jit.CompilationUnit(script)
         if disable_autodiff_subgraph_inlining:
@@ -10212,7 +10224,7 @@ L = 20
 M = 10
 S = 5
 
-# module cannot be exported /imported currently
+#  module cannot be exported /imported currently
 EXCLUDE_MODULE_EXPORT_IMPORT = {
     'EmbeddingBag',
     'MaxPool1d',
@@ -10221,6 +10233,65 @@ EXCLUDE_MODULE_EXPORT_IMPORT = {
     'AdaptiveAvgPool2d',
     'AdaptiveAvgPool3d',
 }
+
+local_module_tests = []
+
+
+def to_module_test_format(tup):
+    dic = dict(module_name=tup[0], constructor_args=tup[1], input_fn=lambda: tup[2])
+    if len(tup) >= 5:
+        dic['desc'] = tup[4]
+    local_module_tests.append(dic)
+
+
+def add_interpolate_module_tests():
+    # logic from test_interpolate in test_nn.py
+    def _make_input(dim):
+        size = [1, 1]
+        size += [2] * dim
+        return torch.ones(size, requires_grad=True)
+
+    i = 0
+    size = None
+    for scale_factor in [0.5, 1.5, 2.0]:
+        for mode in ['nearest', 'area']:
+            args = (size, scale_factor, mode)
+            for input in [_make_input(1), _make_input(2), _make_input(3)]:
+                to_module_test_format(('Upsample', args, input, False, str(i)))
+                i = i + 1
+
+        for align_corners in [True, False]:
+            args = (size, scale_factor, 'linear', align_corners)
+            to_module_test_format(('Upsample', args, _make_input(1), False, str(i)))
+            i = i + 1
+
+            args = (size, scale_factor, 'bilinear', align_corners)
+            to_module_test_format(('Upsample', args, _make_input(2), False, str(i)))
+            i = i + 1
+
+            args = (size, scale_factor, 'trilinear', align_corners)
+            to_module_test_format(('Upsample', args, _make_input(3), False, str(i)))
+            i = i + 1
+
+    # test_upsamplingTrilinear3d_spatial_invariance
+    scale_factor = 3.
+    args = (size, scale_factor, 'trilinear', False)
+    in_t_9 = torch.zeros(1, 1, 9, 9, 9)
+    in_t_9[:, :, :4, :4, :4].normal_()
+    to_module_test_format(('Upsample', args, in_t_9, False, str(i)))
+    i = i + 1
+
+    # testing where size is not none test_upsamplingNearest2d
+    size = 4
+    scale_factor = None
+    in_t = torch.ones(1, 1, 2, 2)
+
+    args = (size, scale_factor)
+    to_module_test_format(('UpsamplingNearest2d', args, Variable(in_t), False,))
+    to_module_test_format(('UpsamplingBilinear2d', args, Variable(in_t), False,))
+
+
+add_interpolate_module_tests()
 
 # NB: JIT script tests for all nn functional interfaces, script mode does
 # not support in_place operations yet, so no inplace operation tests added.
@@ -10350,6 +10421,10 @@ nn_functional_tests = [
     ('ctc_loss', torch.rand(S, S, S).log_softmax(2).detach().requires_grad_(), \
      (torch.randint(1, S, (S, S), dtype=torch.long), torch.full((S,), S, dtype=torch.long), \
       torch.randint(1, S, (S,), dtype=torch.long))),
+    ('upsample', torch.randn(S, S, M, M), (None, 2), 'with_scale'),
+    ('upsample', torch.randn(S, S, M, M), (4, None), 'with_size'),
+    ('interpolate', torch.randn(S, S, M, M), (None, 2.), 'with_scale'),
+    ('interpolate', torch.randn(S, S, M, M), (4, None), 'with_size'),
 ]
 
 
@@ -10772,7 +10847,7 @@ for test in autograd_method_tests:
 for test in nn_functional_tests:
     add_nn_functional_test(*test)
 
-for test in module_tests + new_module_tests + additional_module_tests:
+for test in module_tests + new_module_tests + additional_module_tests + local_module_tests:
     add_nn_module_test(**test)
 
 if __name__ == '__main__':
