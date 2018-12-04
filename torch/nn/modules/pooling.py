@@ -483,9 +483,6 @@ class AvgPool1d(_AvgPoolNd):
         >>> m(torch.tensor([[[1.,2,3,4,5,6,7]]]))
         tensor([[[ 2.,  4.,  6.]]])
     """
-    __constants__ = ['kernel_size', 'stride', 'padding', 'ceil_mode',
-                     'count_include_pad']
-
     def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
                  count_include_pad=True):
         super(AvgPool1d, self).__init__()
@@ -553,9 +550,6 @@ class AvgPool2d(_AvgPoolNd):
         >>> input = torch.randn(20, 16, 50, 32)
         >>> output = m(input)
     """
-    __constants__ = ['kernel_size', 'stride', 'padding', 'ceil_mode',
-                     'count_include_pad']
-
     def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
                  count_include_pad=True):
         super(AvgPool2d, self).__init__()
@@ -629,9 +623,6 @@ class AvgPool3d(_AvgPoolNd):
         >>> input = torch.randn(20, 16, 50,44, 31)
         >>> output = m(input)
     """
-    __constants__ = ['kernel_size', 'stride', 'padding', 'ceil_mode',
-                     'count_include_pad']
-
     def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
                  count_include_pad=True):
         super(AvgPool3d, self).__init__()
