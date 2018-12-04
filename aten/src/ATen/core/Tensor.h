@@ -1,11 +1,11 @@
 #pragma once
 
 #include <c10/Device.h>
-#include "ATen/core/Layout.h"
+#include <c10/core/Layout.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
 #include "ATen/core/SparseTensorRef.h"
-#include "c10/core/Storage.h"
+#include <c10/core/Storage.h>
 #include "ATen/core/TensorAccessor.h"
 #include "ATen/core/TensorImpl.h"
 #include "ATen/core/UndefinedTensorImpl.h"
