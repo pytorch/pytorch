@@ -1,6 +1,7 @@
 #include "ATen/ATen.h"
 #include "torch/csrc/jit/alias_info.h"
 #include "torch/csrc/jit/script/lexer.h"
+#include "torch/csrc/jit/script/parse_string_literal.h"
 #include "torch/csrc/jit/script/tree.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/passes/python_print.h"
@@ -68,7 +69,7 @@ struct SchemaParser {
       {"Generator", GeneratorType::get() },
       {"ScalarType", IntType::get() },
       {"Layout", IntType::get() },
-      {"Device", ListType::ofInts() },
+      {"Device", DeviceObjType::get() },
       {"Scalar", NumberType::get() },
       {"str", StringType::get() },
       {"float", FloatType::get() },
@@ -229,8 +230,6 @@ struct SchemaParser {
         auto text = tok.text();
         if("float" == text) {
           return static_cast<int64_t>(at::kFloat);
-        } else if("cpu" == text) {
-          return static_cast<int64_t>(at::Device::Type::CPU);
         } else if("strided" == text) {
           return static_cast<int64_t>(at::kStrided);
         } else if("Mean" == text) {
@@ -301,6 +300,11 @@ struct SchemaParser {
       case TypeKind::FloatType:
         return parseSingleConstant(arg_type->kind());
         break;
+      case TypeKind::DeviceObjType: {
+        auto device_text = parseStringLiteral(range, L.expect(TK_STRINGLITERAL).text());
+        return c10::Device(device_text);
+        break;
+      }
       case TypeKind::ListType: {
         auto elem_kind = arg_type->cast<ListType>()->getElementType();
         if(L.cur().kind == TK_IDENT) {

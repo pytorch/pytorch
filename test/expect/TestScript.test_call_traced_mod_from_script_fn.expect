@@ -1,5 +1,5 @@
 graph(%x : Tensor) {
-  %6 : int[] = prim::Constant[value=[0, -1]](), scope: TracedModule
+  %6 : Device = prim::Constant[value="cpu"](), scope: TracedModule
   %5 : int = prim::Constant[value=0](), scope: TracedModule
   %4 : int = prim::Constant[value=7](), scope: TracedModule
   %2 : int = prim::Constant[value=3](), scope: TracedModule
