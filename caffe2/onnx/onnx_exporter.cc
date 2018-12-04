@@ -933,8 +933,6 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
     axis = it->second->i();
   }
   if (x_shape.dims().size() > 2) {
-    std::vector<AttributeProto> xattrs = {MakeAttribute("shape",
-        std::vector<int64_t>(x_shape.dims().cbegin(), x_shape.dims().cend()))};
     // we need to reshape only when dimension is higher than 2
     auto outer = DimProd(x_shape, 0, axis);
     auto inner = DimProd(x_shape, axis, x_shape.dims().size());
@@ -942,8 +940,7 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
     auto reshaped_x = dummy_->NewDummyName();
     const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_, dims));
     nodes.emplace_back(
-        MakeNode("Reshape", {x, const_tensors.back().name()}, {reshaped_x},
-            xattrs));
+        MakeNode("Reshape", {x, const_tensors.back().name()}, {reshaped_x}));
     x = reshaped_x;
   }
 
@@ -965,8 +962,7 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
   }
 
   auto gemm_y_output = (has_axis) ? dummy_->NewDummyName() : y;
-  std::vector<AttributeProto> attrs = {MakeAttribute("transB", 1L),
-                                       MakeAttribute("broadcast", 1L)};
+  std::vector<AttributeProto> attrs = {MakeAttribute("transB", 1L)};
   nodes.emplace_back(MakeNode(
       "Gemm",
       {x, w, b},

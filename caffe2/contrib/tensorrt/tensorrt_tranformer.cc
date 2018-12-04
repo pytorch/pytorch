@@ -140,7 +140,7 @@ void FillModelInfo(::ONNX_NAMESPACE::ModelProto* model) {
   model->set_producer_name("caffe2");
   auto* opset_id = model->add_opset_import();
   opset_id->set_domain("");
-  opset_id->set_version(3);
+  opset_id->set_version(7);
 }
 } // namespace
 
@@ -298,17 +298,25 @@ NetDef TensorRTTransformer::SubnetToTrtOp(
       ::ONNX_NAMESPACE::TensorProto tf;
       tf.set_name(t.name());
       tf.mutable_dims()->CopyFrom(t.dims());
-      tf.set_data_type(::ONNX_NAMESPACE::TensorProto::FLOAT);
-      std::vector<int64_t> v;
-      v.resize(t.raw_data().size() / sizeof(int64_t));
-      memcpy(v.data(), t.raw_data().data(), t.raw_data().size());
-      std::vector<float> vf;
-      for (auto i : v) {
-        vf.push_back(static_cast<float>(i));
-      }
-      tf.mutable_raw_data()->assign(
-          reinterpret_cast<const char*>(vf.data()), sizeof(float) * vf.size());
 
+      if (t.data_type() == ::ONNX_NAMESPACE::TensorProto::FLOAT) {
+        tf.set_data_type(::ONNX_NAMESPACE::TensorProto::FLOAT);
+        std::vector<int64_t> v;
+        v.resize(t.raw_data().size() / sizeof(int64_t));
+        memcpy(v.data(), t.raw_data().data(), t.raw_data().size());
+        std::vector<float> vf;
+        for (auto i : v) {
+          vf.push_back(static_cast<float>(i));
+        }
+        tf.mutable_raw_data()->assign(
+            reinterpret_cast<const char *>(vf.data()), sizeof(float) * vf.size());
+      } else if (t.data_type() == ::ONNX_NAMESPACE::TensorProto::INT64) {
+        tf.set_data_type(::ONNX_NAMESPACE::TensorProto::INT64);
+        tf.mutable_raw_data()->assign(t.raw_data().data(), t.raw_data().size());
+      } else {
+        CAFFE_THROW("Unsupported tensor data type for conversion: ",
+            t.data_type());
+      }
       onnx_model.mutable_graph()->add_initializer()->CopyFrom(tf);
     }
   }
