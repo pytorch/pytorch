@@ -3016,6 +3016,25 @@ class TestScript(JitTestCase):
 
         return ge
 
+    def test_training_param(self):
+        class What(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                # type: (int) -> int
+                if self.training:
+                    r = x
+                else:
+                    r = x + 4
+                # check double use of training
+                if self.training:
+                    r = r + 1
+                return r
+
+        w = What()
+        self.assertEqual(4, w(3))
+        w.train(False)
+        self.assertEqual(7, w(3))
+
     def test_jitter_bug(self):
         @torch.jit.script
         def fn2(input, kernel_size):

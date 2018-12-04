@@ -211,6 +211,26 @@ struct ModuleValue : public SugaredValue {
 
   // select an attribute on it, e.g. `this.field`
   std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override {
+    // workaround to make self.training work
+    // it adds a buffer 'training' to the model if one doesn't exist
+    // and then loads that parameter, casting it to bool
+    if (field == "training") {
+      NamedParameter* v = module->find_parameter(field);
+      if (!v) {
+        py::object py_module = py::cast(module);
+        bool training = py::cast<bool>(py::getattr(py_module, "training"));
+        auto t = autograd::make_variable(at::full({}, training ? 1 : 0, at::kLong));
+        module->register_parameter("training", std::move(t), true);
+        v = module->find_parameter(field);
+      }
+      Value* the_tensor = m.get_or_add_parameter(v->slot());
+      Value* the_bool =
+          m.graph()
+              ->insertNode(m.graph()->createTensorToBool(the_tensor))
+              ->output();
+      return std::make_shared<SimpleValue>(the_bool);
+    }
+
     if(NamedModule* v = module->find_module(field)) {
       return std::make_shared<ModuleValue>(v->module);
     } else if(Method* v = module->find_method(field)) {
