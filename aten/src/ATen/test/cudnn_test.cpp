@@ -3,13 +3,12 @@
 #include "ATen/ATen.h"
 #include "ATen/cudnn/Descriptors.h"
 #include "ATen/cudnn/Handle.h"
-#include "test_seed.h"
 
 using namespace at;
 using namespace at::native;
 
 TEST(CUDNNTest, CUDNNTestCUDA) {
-  manual_seed(123, at::kCUDA);
+  manual_seed(123);
 
 #if CUDNN_VERSION < 7000
   auto handle = getCudnnHandle();

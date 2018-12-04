@@ -12,7 +12,6 @@ extern "C" void THFloatTensor_fill(THFloatTensor *, float v);
 #include <chrono>
 #include <string.h>
 #include <sstream>
-#include "test_seed.h"
 
 #define ASSERT_EQ_RESOLVED(X, Y) \
   {                              \
@@ -307,13 +306,13 @@ void test(Type& type) {
 }
 
 TEST(BasicTest, BasicTestCPU) {
-  manual_seed(123, at::kCPU);
+  manual_seed(123);
 
   test(CPU(kFloat));
 }
 
 TEST(BasicTest, BasicTestCUDA) {
-  manual_seed(123, at::kCUDA);
+  manual_seed(123);
 
   if (at::hasCUDA()) {
     test(CUDA(kFloat));

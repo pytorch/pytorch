@@ -8,7 +8,6 @@
 #endif
 #include "ATen/ATen.h"
 #include "ATen/Dispatch.h"
-#include "test_seed.h"
 
 using std::cout;
 using namespace at;
@@ -51,8 +50,7 @@ void test_overflow() {
 }
 
 TEST(TestScalar, TestScalar) {
-  manual_seed(123, at::kCPU);
-  manual_seed(123, at::kCUDA);
+  manual_seed(123);
 
   Scalar what = 257;
   Scalar bar = 3.0;
