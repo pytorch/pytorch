@@ -433,6 +433,7 @@ class MaxUnpool3d(_MaxUnpoolNd):
 
 @weak_module
 class _AvgPoolNd(Module):
+    __constants__ = ['kernel_size', 'stride', 'padding', 'ceil_mode', 'count_include_pad']
 
     def extra_repr(self):
         return 'kernel_size={}, stride={}, padding={}'.format(
