@@ -1885,8 +1885,8 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
     else:
         if reduction == 'mean':
             warnings.warn("reduction: 'mean' divides the total loss by both the batch size and the support size."
-                    "'batchmean' divides only by the batch size, and aligns with the KL divergence math definition."
-                    "'mean' will be changed to behave the same as 'batchmean' in the next major release.")
+                          "'batchmean' divides only by the batch size, and aligns with the KL div math definition."
+                          "'mean' will be changed to behave the same as 'batchmean' in the next major release.")
 
         # special case for batchmean
         if reduction == 'batchmean':
