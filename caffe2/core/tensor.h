@@ -6,7 +6,7 @@
 
 #include <ATen/core/UndefinedTensorImpl.h>
 #include <c10/util/intrusive_ptr.h>
-#include "c10/core/TensorOptions.h"
+#include "ATen/core/TensorOptions.h"
 
 namespace caffe2 {
 

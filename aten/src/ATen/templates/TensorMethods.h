@@ -5,7 +5,7 @@
 #include <c10/macros/Macros.h>
 #include "ATen/core/SparseTensorRef.h"
 #include "ATen/core/Type.h"
-#include "c10/core/TensorOptions.h"
+#include "ATen/core/TensorOptions.h"
 
 namespace at {
 
