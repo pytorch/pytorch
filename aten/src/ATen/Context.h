@@ -202,4 +202,13 @@ static inline bool hasMAGMA() {
   return globalContext().hasMAGMA();
 }
 
+static inline void manual_seed(uint64_t seed) {
+  globalContext().defaultGenerator(DeviceType::CPU).manualSeed(seed);
+  // NB: Sometimes we build with CUDA, but we don't have any GPUs
+  // available. In that case, we must not seed CUDA; it will fail!
+  if (hasCUDA() && detail::getCUDAHooks().getNumGPUs() > 0) {
+    globalContext().defaultGenerator(DeviceType::CUDA).manualSeedAll(seed);
+  }
+}
+
 } // namespace at
