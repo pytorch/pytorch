@@ -54,6 +54,12 @@ bool isDifferentiable(Node * n) {
     "aten::ge(Tensor self, Tensor other) -> Tensor",
     "aten::eq(Tensor self, Tensor other) -> Tensor",
     "aten::ne(Tensor self, Tensor other) -> Tensor",
+    "aten::lt(Tensor self, Scalar other) -> Tensor",
+    "aten::le(Tensor self, Scalar other) -> Tensor",
+    "aten::gt(Tensor self, Scalar other) -> Tensor",
+    "aten::ge(Tensor self, Scalar other) -> Tensor",
+    "aten::eq(Tensor self, Scalar other) -> Tensor",
+    "aten::ne(Tensor self, Scalar other) -> Tensor",
     "aten::abs(Tensor self) -> Tensor",
     "aten::acos(Tensor self) -> Tensor",
     "aten::asin(Tensor self) -> Tensor",
@@ -70,6 +76,7 @@ bool isDifferentiable(Node * n) {
     "aten::log10(Tensor self) -> Tensor",
     "aten::log1p(Tensor self) -> Tensor",
     "aten::log2(Tensor self) -> Tensor",
+    "aten::rand_like(Tensor self) -> Tensor",
     "aten::reciprocal(Tensor self) -> Tensor",
     "aten::remainder(Tensor self, Scalar other) -> Tensor",
     "aten::round(Tensor self) -> Tensor",
@@ -135,7 +142,13 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     "aten::gt(Tensor self, Tensor other) -> Tensor",
     "aten::ge(Tensor self, Tensor other) -> Tensor",
     "aten::eq(Tensor self, Tensor other) -> Tensor",
-    "aten::ne(Tensor self, Tensor other) -> Tensor"
+    "aten::ne(Tensor self, Tensor other) -> Tensor",
+    "aten::lt(Tensor self, Scalar other) -> Tensor",
+    "aten::le(Tensor self, Scalar other) -> Tensor",
+    "aten::gt(Tensor self, Scalar other) -> Tensor",
+    "aten::ge(Tensor self, Scalar other) -> Tensor",
+    "aten::eq(Tensor self, Scalar other) -> Tensor",
+    "aten::ne(Tensor self, Scalar other) -> Tensor"
   };
   const auto build_sym_grad = [node](const std::vector<SymbolicVariable>& grads) -> std::vector<SymbolicVariable> {
     auto inputs = fmap<SymbolicVariable>(node->inputs());
@@ -389,7 +402,10 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       }
     } else if (comparison_ops.find(node)) {
       return {nullptr, nullptr};
-
+    
+    } else if (node->matches("aten::rand_like(Tensor self) -> Tensor")) {
+      return {nullptr};
+    
     } else if (node->matches("aten::avg_pool2d(Tensor self, int[] kernel_size, int[] stride, int[] padding, bool ceil_mode, bool count_include_pad) -> Tensor")) {
       JIT_ASSERT(grads.size() == 1);
       auto graph = node->owningGraph();

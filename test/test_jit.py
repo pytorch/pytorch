@@ -946,6 +946,9 @@ class TestJit(JitTestCase):
 
         ge = self.checkTrace(self.fn_test_comparison_gt_lt, (x, y))
         self.assertAllFused(ge.graph_for(x, y))
+        x.requires_grad_(True)
+        y.requires_grad_(True)
+        self.assertAllFused(ge.graph_for(x, y))
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -980,6 +983,21 @@ class TestJit(JitTestCase):
 
         ge = self.checkTrace(f, (x, y))
         self.assertAllFused(ge.graph_for(x, y))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_rand_fusion_cuda(self):
+        def f(x):
+            r = torch.rand_like(x)
+            mask = (r > 0.5).type_as(x)
+            return x * mask
+
+        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        x.requires_grad_(True)
+        fn = torch.jit.script(f, (x,))
+        out = fn(x)
+        self.assertAllFused(fn.graph_for(x))
 
     @staticmethod
     def fn_test_relu(x, y):
