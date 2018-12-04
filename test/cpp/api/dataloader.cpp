@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <torch/data.h>
+#include <torch/data/dataloader2.h>
 #include <torch/data/detail/sequencers.h>
 #include <torch/serialize.h>
 #include <torch/types.h>
@@ -1117,5 +1118,36 @@ TEST(DataLoaderTest, TestExceptionsArePropagatedFromWorkers) {
                     "Original message: badness"));
     ASSERT_THROW(
         std::rethrow_exception(e.original_exception), std::invalid_argument);
+  }
+}
+
+TEST(DataLoaderTest, TestStatefulDataset) {
+  const int kNumberOfExamplesAfterWhichTheDatasetExhausts = 10;
+  const int kNumberOfWorkers = 8;
+
+  struct D : datasets::BatchDataset<D, torch::optional<int>, size_t> {
+    torch::optional<int> get_batch(size_t) override {
+      std::lock_guard<std::mutex> lock(mutex);
+      if (counter++ < kNumberOfExamplesAfterWhichTheDatasetExhausts) {
+        return counter;
+      }
+      return torch::nullopt;
+    }
+    torch::optional<size_t> size() const override {
+      return 100;
+    }
+    int counter = 0;
+    std::mutex mutex;
+  };
+
+  auto data_loader = torch::data::make_data_loader2(
+      torch::data::datasets::make_shared_dataset<D>(),
+      DataLoaderOptions().workers(kNumberOfWorkers));
+
+  for (size_t i = 0; i < 3; ++i) {
+    const auto number_of_iterations =
+        std::distance(data_loader->begin(), data_loader->end());
+    ASSERT_EQ(
+        number_of_iterations, kNumberOfExamplesAfterWhichTheDatasetExhausts);
   }
 }
