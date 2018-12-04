@@ -3,8 +3,10 @@ import warnings
 
 from .module import Module
 from .. import functional as F
+from ..._jit_internal import weak_module, weak_script_method
 
 
+@weak_module
 class Upsample(Module):
     r"""Upsamples a given multi-channel 1D (temporal), 2D (spatial) or 3D (volumetric) data.
 
@@ -112,15 +114,19 @@ class Upsample(Module):
                   [ 1.2000,  1.3600,  1.5200,  1.2800,  0.6400,  0.0000],
                   [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000]]]])
     """
+    __constants__ = ['size', 'scale_factor', 'mode', 'align_corners', 'name']
 
     def __init__(self, size=None, scale_factor=None, mode='nearest', align_corners=None):
         super(Upsample, self).__init__()
+        self.name = type(self).__name__
         self.size = size
         self.scale_factor = scale_factor
         self.mode = mode
         self.align_corners = align_corners
 
+    @weak_script_method
     def forward(self, input):
+        warnings.warn("nn.{} is deprecated. Use nn.functional.interpolate instead.".format(self.name))
         return F.interpolate(input, self.size, self.scale_factor, self.mode, self.align_corners)
 
     def extra_repr(self):
@@ -132,6 +138,7 @@ class Upsample(Module):
         return info
 
 
+@weak_module
 class UpsamplingNearest2d(Upsample):
     r"""Applies a 2D nearest neighbor upsampling to an input signal composed of several input
     channels.
@@ -175,11 +182,8 @@ class UpsamplingNearest2d(Upsample):
     def __init__(self, size=None, scale_factor=None):
         super(UpsamplingNearest2d, self).__init__(size, scale_factor, mode='nearest')
 
-    def forward(self, input):
-        warnings.warn("nn.UpsamplingNearest2d is deprecated. Use nn.functional.interpolate instead.")
-        return super(UpsamplingNearest2d, self).forward(input)
 
-
+@weak_module
 class UpsamplingBilinear2d(Upsample):
     r"""Applies a 2D bilinear upsampling to an input signal composed of several input
     channels.
@@ -223,7 +227,3 @@ class UpsamplingBilinear2d(Upsample):
     """
     def __init__(self, size=None, scale_factor=None):
         super(UpsamplingBilinear2d, self).__init__(size, scale_factor, mode='bilinear', align_corners=True)
-
-    def forward(self, input):
-        warnings.warn("nn.UpsamplingBilinear2d is deprecated. Use nn.functional.interpolate instead.")
-        return super(UpsamplingBilinear2d, self).forward(input)

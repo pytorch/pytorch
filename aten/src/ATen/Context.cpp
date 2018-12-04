@@ -30,7 +30,9 @@ static inline void argErrorHandler(int arg, const char * msg, void * data) {
 
 Context::Context()
 : next_id(static_cast<size_t>(TypeID::NumOptions))
-, thc_state(nullptr, [](THCState* p){ /* no-op */ } ) {
+, thc_state(nullptr, [](THCState* p){ /* no-op */ } )
+, thh_state(nullptr, [](THHState* p){ /* no-op */ } )
+{
 
   THSetDefaultErrorHandler(errorHandler,nullptr);
   THSetDefaultArgErrorHandler(argErrorHandler,nullptr);
@@ -120,6 +122,9 @@ struct LegacyTypeInit : public LegacyTypeInitInterface {
   }
   void initCUDA() const override {
     globalContext().lazyInitCUDA();
+  }
+  void initHIP() const override {
+    globalContext().lazyInitHIP();
   }
   void initComplex() const override {
     globalContext().lazyInitComplex();

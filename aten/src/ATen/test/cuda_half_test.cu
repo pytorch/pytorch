@@ -1,6 +1,7 @@
 #include "gtest/gtest.h"
 
 #include "ATen/ATen.h"
+#include "ATen/cuda/CUDAContext.h"
 #include "ATen/cuda/NumericLimits.cuh"
 #include "cuda.h"
 #include "cuda_fp16.h"
@@ -83,6 +84,7 @@ void launch_function(){
 
 // half common math functions tests in device
 TEST(HalfCuda, HalfCuda) {
+  if (!at::cuda::is_available()) return;
   launch_function();
   cudaError_t err = cudaDeviceSynchronize();
   bool isEQ = err == cudaSuccess;

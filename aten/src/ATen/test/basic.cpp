@@ -12,7 +12,6 @@ extern "C" void THFloatTensor_fill(THFloatTensor *, float v);
 #include <chrono>
 #include <string.h>
 #include <sstream>
-#include "test_seed.h"
 
 #define ASSERT_EQ_RESOLVED(X, Y) \
   {                              \
@@ -278,11 +277,6 @@ void TestDispatch() {
   ASSERT_TRUE(result.allclose(mse_loss(relu(tensor), other)));
 }
 
-void TestCore() {
-  int i = CoreTest();
-  ASSERT_EQ_RESOLVED(i + 1, CoreTest());
-}
-
 void test(Type& type) {
   TestResize(type);
   TestOnesAndDot(type);
@@ -309,17 +303,16 @@ void test(Type& type) {
   TestIndexingByZerodimTensor();
   TestIndexingMixedDevice(type);
   TestDispatch();
-  TestCore();
 }
 
 TEST(BasicTest, BasicTestCPU) {
-  manual_seed(123, at::kCPU);
+  manual_seed(123);
 
   test(CPU(kFloat));
 }
 
 TEST(BasicTest, BasicTestCUDA) {
-  manual_seed(123, at::kCUDA);
+  manual_seed(123);
 
   if (at::hasCUDA()) {
     test(CUDA(kFloat));

@@ -511,8 +511,9 @@ Tensor mm_mat2_backward(const Tensor & grad, const Tensor & mat1, IntList sizes,
   }
 }
 
-Tensor _sparse_addmm_sparse_backward(const Tensor& grad, const Tensor& sparse, const Tensor& dense, const Scalar& alpha) {
-  AT_ASSERT(sparse.is_sparse());
+Tensor _sparse_addmm_sparse_backward(const Tensor& grad, const Tensor& sparse_, const Tensor& dense, const Scalar& alpha) {
+  AT_ASSERT(sparse_.is_sparse());
+  auto sparse = sparse_.coalesce();
   Tensor grad_sparse = maybe_multiply(grad.mm(dense.t()), alpha);
   return grad_sparse.sparse_mask(at::SparseTensorRef(sparse));
 }
