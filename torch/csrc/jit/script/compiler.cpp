@@ -2510,7 +2510,7 @@ private:
       index = ivalue->to<int64_t>();
     } else {
       throw ErrorReport(loc)
-        << "tuple indices must be integer constants";
+        << "tuple indices must be integer constants, but get " << idx_val->type()->str();
     }
      // set index to be positive to simplify logic in runtime
     int64_t adj_index = index;

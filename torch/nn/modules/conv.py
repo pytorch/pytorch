@@ -440,8 +440,10 @@ class Conv3d(_ConvNd):
                         self.padding, self.dilation, self.groups)
 
 
+@weak_module
 class _ConvTransposeMixin(object):
 
+    @weak_script_method
     def forward(self, input, output_size=None):
         output_padding = self._output_padding(input, output_size)
         func = self._backend.ConvNd(
@@ -452,6 +454,7 @@ class _ConvTransposeMixin(object):
         else:
             return func(input, self.weight, self.bias)
 
+    @weak_script_method
     def _output_padding(self, input, output_size):
         if output_size is None:
             return self.output_padding
@@ -465,12 +468,14 @@ class _ConvTransposeMixin(object):
                 "output_size must have {} or {} elements (got {})"
                 .format(k, k + 2, len(output_size)))
 
-        def dim_size(d):
-            return ((input.size(d + 2) - 1) * self.stride[d] -
-                    2 * self.padding[d] + self.kernel_size[d])
+        min_sizes = []
+        max_sizes = []
+        for d in range(k):
+            dim_size = ((input.size(d + 2) - 1) * self.stride[d] -
+                        2 * self.padding[d] + self.kernel_size[d])
+            min_sizes.append(self.dim_size(d))
+            max_sizes.append(min_sizes[d] + self.stride[d] - 1)
 
-        min_sizes = [dim_size(d) for d in range(k)]
-        max_sizes = [min_sizes[d] + self.stride[d] - 1 for d in range(k)]
         for size, min_size, max_size in zip(output_size, min_sizes, max_sizes):
             if size < min_size or size > max_size:
                 raise ValueError((
@@ -478,9 +483,14 @@ class _ConvTransposeMixin(object):
                     "from {} to {} (for an input of {})").format(
                         output_size, min_sizes, max_sizes, input.size()[2:]))
 
-        return tuple([output_size[d] - min_sizes[d] for d in range(k)])
+        res = []
+        for d in range(k):
+            res.append(output_size[d] - min_sizes[d])
+
+        return tuple(res)
 
 
+@weak_module
 class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
     r"""Applies a 1D transposed convolution operator over an input image
     composed of several input planes.
@@ -579,6 +589,7 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             True, output_padding, groups, bias)
 
+    @weak_script_method
     def forward(self, input, output_size=None):
         output_padding = self._output_padding(input, output_size)
         return F.conv_transpose1d(
@@ -586,6 +597,7 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
             output_padding, self.groups, self.dilation)
 
 
+@weak_module
 class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
     r"""Applies a 2D transposed convolution operator over an input image
     composed of several input planes.
@@ -719,6 +731,7 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             True, output_padding, groups, bias)
 
+    @weak_script_method
     def forward(self, input, output_size=None):
         output_padding = self._output_padding(input, output_size)
         return F.conv_transpose2d(
@@ -726,6 +739,7 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
             output_padding, self.groups, self.dilation)
 
 
+@weak_module
 class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
     r"""Applies a 3D transposed convolution operator over an input image composed of several input
     planes.
@@ -854,6 +868,7 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             True, output_padding, groups, bias)
 
+    @weak_script_method
     def forward(self, input, output_size=None):
         output_padding = self._output_padding(input, output_size)
         return F.conv_transpose3d(
