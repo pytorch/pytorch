@@ -334,6 +334,7 @@ if(OPENMP_FOUND)
     message(STATUS "Compiling with OpenMP")
   endif()
   target_compile_options(torch INTERFACE ${OpenMP_CXX_FLAGS})
+  target_link_libraries(torch -fopenmp)
   #cmake only check for separate OpenMP library on AppleClang 7+
   #https://github.com/Kitware/CMake/blob/42212f7539040139ecec092547b7d58ef12a4d72/Modules/FindOpenMP.cmake#L252
   if (CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
@@ -420,6 +421,9 @@ target_include_directories(torch PUBLIC ${ATen_CPU_INCLUDE})
 
 target_include_directories(torch PUBLIC
   ${TORCH_SRC_DIR}/csrc)
+
+target_include_directories(torch PUBLIC
+  ${TORCH_ROOT}/third_party/miniz-2.0.8)
 
 set_target_properties(torch PROPERTIES VERSION 1 SOVERSION 1)
 
