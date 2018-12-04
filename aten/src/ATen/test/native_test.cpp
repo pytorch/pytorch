@@ -1,7 +1,6 @@
 #include "gtest/gtest.h"
 
 #include "ATen/ATen.h"
-#include "test_seed.h"
 
 using namespace at;
 
@@ -211,13 +210,13 @@ void test(Type& T, Type& AccT) {
 }
 
 TEST(TestNative, NativeTestCPU) {
-  manual_seed(123, at::kCPU);
+  manual_seed(123);
 
   test(CPU(kFloat), CPU(kDouble));
 }
 
 TEST(TestNative, NativeTestGPU) {
-  manual_seed(123, at::kCUDA);
+  manual_seed(123);
 
   if (at::hasCUDA()) {
     test(CUDA(kFloat), CUDA(kDouble));
