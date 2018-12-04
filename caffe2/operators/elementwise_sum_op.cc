@@ -11,6 +11,34 @@ OpSchema::Cost CostInferenceForSum(
   cost.params_bytes = 0;
   return cost;
 }
+
+std::vector<TensorShape> SumOpShapeInference(
+    const OperatorDef& def,
+    const std::vector<TensorShape>& in) {
+  std::vector<TensorShape> out(1);
+  out[0].set_data_type(in[0].data_type());
+  ArgumentHelper helper(def);
+  const bool broadcast = helper.GetSingleArgument<bool>("broadcast", false);
+  if (broadcast) {
+    out[0].mutable_dims()->CopyFrom(in[0].dims());
+  } else {
+    const std::vector<int> in0_dims(in[0].dims().begin(), in[0].dims().end());
+    const std::vector<int> in1_dims(in[1].dims().begin(), in[1].dims().end());
+    std::vector<int> out_dims =
+        elementwise_ops_utils::ComputeBinaryBroadcastForwardDims(
+            in0_dims, in1_dims);
+    for (auto i = 2; i < in.size(); i++) {
+      const std::vector<int> ini_dims(in[i].dims().begin(), in[0].dims().end());
+      out_dims = elementwise_ops_utils::ComputeBinaryBroadcastForwardDims(
+          out_dims, ini_dims);
+    }
+    for (const int dim : out_dims) {
+      out[0].add_dims(dim);
+    }
+  }
+  return out;
+}
+
 } // namespace
 
 REGISTER_CPU_OPERATOR(Sum, SumOp<CPUContext>);
@@ -20,13 +48,28 @@ OPERATOR_SCHEMA(Sum)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
     .CostInferenceFunction(CostInferenceForSum)
+    .TensorInferenceFunction(SumOpShapeInference)
     .InputsCanCrossDevices()
-    .IdenticalTypeAndShapeOfInput(0)
     .SetDoc(R"DOC(
 Element-wise sum of each of the input tensors. The first input tensor can be used
 in-place as the output tensor, in which case the sum will be done in place and
-results will be accumulated the first input tensor. All inputs and outputs must
-have the same shape and data type.
+results will be accumulated the first input tensor.
+If necessary the inputs arguments will be broadcasted to match the
+shape of the first argument. When broadcasting is specified, the input
+tensors can either be of size 1 (a scalar value), or having theirs shapes as a
+contiguous subset of the first tensor's shape. The starting of the mutually
+equal shape is specified by the argument "axis", and if it is not set, suffix
+matching is assumed. 1-dim expansion doesn't work yet.
+
+For example, the following tensor shapes are supported (with broadcast=1):
+```
+  shape(A) = (2, 3, 4, 5), shape(B) = (,), i.e. B is a scalar
+  shape(A) = (2, 3, 4, 5), shape(B) = (5,)
+  shape(A) = (2, 3, 4, 5), shape(B) = (4, 5)
+  shape(A) = (2, 3, 4, 5), shape(B) = (3, 4), with axis=1
+  shape(A) = (2, 3, 4, 5), shape(B) = (2), with axis=0
+```
+Argument `broadcast=1` needs to be passed to enable broadcasting.
 
 Github Links:
 
@@ -114,6 +157,8 @@ A after Sum: [[10.  7. 11.]
 </details>
 
 )DOC")
+    .Arg("broadcast", "*(type: int; default: 0)* Pass 1 to enable broadcasting")
+    .Arg("axis", "*(type: int; default: -1)* Axis to concatenate on.")
     .Input(
         0,
         "A",
@@ -124,4 +169,4 @@ A after Sum: [[10.  7. 11.]
         "*(type: Tensor`<float>`)* Second tensor to be added element-wise.")
     .Output(0, "C", "*(type: Tensor`<float>`)* Sum of A and B.")
     .InheritOnnxSchema();
-}
+} // namespace caffe2

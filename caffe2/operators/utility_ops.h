@@ -10,6 +10,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/types.h"
+#include "caffe2/operators/elementwise_ops.h"
 #include "caffe2/operators/gather_op.h"
 #include "caffe2/utils/conversions.h"
 #include "caffe2/utils/math.h"
@@ -250,7 +251,12 @@ template <class Context>
 class SumOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  USE_SIMPLE_CTOR_DTOR(SumOp);
+  SumOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
+        OP_SINGLE_ARG(bool, "broadcast", legacy_broadcast_, false),
+        OP_SINGLE_ARG(int, "axis", axis_, -1) {}
+
+  virtual ~SumOp() noexcept {}
 
   template <typename T, typename M>
   bool DoRunWithType() {
@@ -260,37 +266,13 @@ class SumOp : public Operator<Context> {
       output->CopyFrom(input0, true /*async*/);
       return true;
     }
-    output->ResizeLike(input0);
-    T* output_data = output->template mutable_data<T>();
-    // Dimension checking
-    for (int i = 1; i < InputSize(); ++i) {
-      if (output->sizes() != Input(i).sizes()) {
-        CAFFE_THROW(
-            "Check failed: output->dims() == Input(i).dims().",
-            "Description: Input #",
-            i,
-            ", input dimension:",
-            Input(i).sizes(),
-            " should match output dimension: ",
-            output->sizes());
-      }
-    }
 
     // Add the first two - works if in-place or not.
-    math::Add(
-        output->numel(),
-        input0.template data<T>(),
-        Input(1).template data<T>(),
-        output_data,
-        &context_);
+    AddWithBroadcasting<T>(input0, Input(1), output);
+
     // Add remaining.
     for (int i = 2; i < InputSize(); ++i) {
-      math::Add(
-          output->numel(),
-          output_data,
-          Input(i).template data<T>(),
-          output_data,
-          &context_);
+      AddWithBroadcasting<T>(*output, Input(i), output);
     }
     return true;
   }
@@ -306,6 +288,64 @@ class SumOp : public Operator<Context> {
           " input was of type ",
           Input(0).dtype().name());
     }
+  }
+
+ private:
+  const bool legacy_broadcast_;
+  int axis_;
+
+  template <class T>
+  void AddWithBroadcasting(const Tensor& A, const Tensor& B, Tensor* C) {
+    const T* A_data = A.template data<T>();
+    const T* B_data = B.template data<T>();
+    std::vector<int> A_dims;
+    std::vector<int> B_dims;
+
+    if (legacy_broadcast_) {
+      CAFFE_ENFORCE_NE(
+          C,
+          &B,
+          "In-place is allowed only with the first tensor when "
+          "legacy-broadcasting");
+      C->ResizeLike(A);
+      if (B.numel() == 1) {
+        A_dims = {static_cast<int>(A.numel())};
+        B_dims = {1};
+      } else {
+        size_t pre, n, post;
+        std::tie(pre, n, post) =
+            caffe2::elementwise_ops_utils::ComputeLegacyBroadcastSizes(
+                A, B, axis_);
+        A_dims = {
+            static_cast<int>(pre), static_cast<int>(n), static_cast<int>(post)};
+        B_dims = {static_cast<int>(n), 1};
+      }
+    } else {
+      std::copy(
+          A.sizes().cbegin(), A.sizes().cend(), std::back_inserter(A_dims));
+      std::copy(
+          B.sizes().cbegin(), B.sizes().cend(), std::back_inserter(B_dims));
+      const std::vector<int> C_dims =
+          caffe2::elementwise_ops_utils::ComputeBinaryBroadcastForwardDims(
+              A_dims, B_dims);
+      if (C == &A) {
+        CAFFE_ENFORCE_EQ(C_dims, A_dims);
+      } else if (C == &B) {
+        CAFFE_ENFORCE_EQ(C_dims, B_dims);
+      } else {
+        C->Resize(C_dims);
+      }
+    }
+    auto* C_data = C->template mutable_data<T>();
+    math::Add(
+        A_dims.size(),
+        A_dims.data(),
+        B_dims.size(),
+        B_dims.data(),
+        A_data,
+        B_data,
+        C_data,
+        &context_);
   }
 };
 

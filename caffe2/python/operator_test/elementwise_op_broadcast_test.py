@@ -68,6 +68,96 @@ class TestElementwiseBroadcast(serial.SerializedTestCase):
         self.assertGradientChecks(gc, op, [X, Y], 1, [0])
 
     @given(**hu.gcs)
+    def test_broadcast_Sum(self, gc, dc):
+        # Set broadcast and no axis, i.e. broadcasting last dimensions.
+        X = np.random.rand(2, 3, 4, 5).astype(np.float32)
+        Y = np.random.rand(4, 5).astype(np.float32)
+        op = core.CreateOperator("Sum", ["X", "Y"], "out", broadcast=1)
+        workspace.FeedBlob("X", X)
+        workspace.FeedBlob("Y", Y)
+        workspace.RunOperatorOnce(op)
+        out = workspace.FetchBlob("out")
+        np.testing.assert_array_almost_equal(out, X + Y)
+        self.assertDeviceChecks(dc, op, [X, Y], [0])
+        self.assertGradientChecks(gc, op, [X, Y], 0, [0])
+        # self.assertGradientChecks(gc, op, [X, Y], 1, [0])
+
+        # broadcasting intermediate dimensions
+        X = np.random.rand(2, 3, 4, 5).astype(np.float32)
+        Y = np.random.rand(3, 4).astype(np.float32)
+        op = core.CreateOperator("Sum", ["X", "Y"], "out", broadcast=1, axis=1)
+        workspace.FeedBlob("X", X)
+        workspace.FeedBlob("Y", Y)
+        workspace.RunOperatorOnce(op)
+        out = workspace.FetchBlob("out")
+        np.testing.assert_array_almost_equal(out, X + Y[:, :, np.newaxis])
+        self.assertDeviceChecks(dc, op, [X, Y], [0])
+        self.assertGradientChecks(gc, op, [X, Y], 0, [0])
+        # self.assertGradientChecks(gc, op, [X, Y], 1, [0])
+
+        # broadcasting the first dimension
+        X = np.random.rand(2, 3, 4, 5).astype(np.float32)
+        Y = np.random.rand(2).astype(np.float32)
+        op = core.CreateOperator("Sum", ["X", "Y"], "out", broadcast=1, axis=0)
+        workspace.FeedBlob("X", X)
+        workspace.FeedBlob("Y", Y)
+        workspace.RunOperatorOnce(op)
+        out = workspace.FetchBlob("out")
+        np.testing.assert_array_almost_equal(
+            out, X + Y[:, np.newaxis, np.newaxis, np.newaxis])
+        self.assertDeviceChecks(dc, op, [X, Y], [0])
+        self.assertGradientChecks(gc, op, [X, Y], 0, [0])
+        # self.assertGradientChecks(gc, op, [X, Y], 1, [0])
+
+        # broadcasting with single elem dimensions at both ends
+        X = np.random.rand(2, 3, 4, 5).astype(np.float32)
+        Y = np.random.rand(1, 4, 1).astype(np.float32)
+        op = core.CreateOperator("Sum", ["X", "Y"], "out", broadcast=1, axis=1)
+        workspace.FeedBlob("X", X)
+        workspace.FeedBlob("Y", Y)
+        workspace.RunOperatorOnce(op)
+        out = workspace.FetchBlob("out")
+        np.testing.assert_array_almost_equal(out, X + Y)
+        self.assertDeviceChecks(dc, op, [X, Y], [0])
+        self.assertGradientChecks(gc, op, [X, Y], 0, [0])
+        # self.assertGradientChecks(gc, op, [X, Y], 1, [0])
+
+        # More than 2 inputs, different broadcast on last dimensions
+        X = np.random.rand(2, 3, 4, 5).astype(np.float32)
+        Y = np.random.rand(5).astype(np.float32)
+        Z = np.random.rand(4, 5).astype(np.float32)
+        op = core.CreateOperator("Sum", ["X", "Y", "Z"], "out", broadcast=1)
+        workspace.FeedBlob("X", X)
+        workspace.FeedBlob("Y", Y)
+        workspace.FeedBlob("Z", Z)
+        workspace.RunOperatorOnce(op)
+        out = workspace.FetchBlob("out")
+        np.testing.assert_array_almost_equal(out, X + Y + Z)
+        self.assertDeviceChecks(dc, op, [X, Y, Z], [0])
+        self.assertGradientChecks(gc, op, [X, Y, Z], 0, [0])
+        # self.assertGradientChecks(gc, op, [X, Y, Z], 1, [0])
+        # self.assertGradientChecks(gc, op, [X, Y, Z], 2, [0])
+
+        # More than 2 inputs, broadcasting intermediate dimensions
+        X = np.random.rand(2, 3, 4, 5).astype(np.float32)
+        Y = np.random.rand(3, 4).astype(np.float32)
+        Z = np.random.rand(3).astype(np.float32)
+        op = core.CreateOperator("Sum", ["X", "Y", "Z"], "out", broadcast=1, axis=1)
+        workspace.FeedBlob("X", X)
+        workspace.FeedBlob("Y", Y)
+        workspace.FeedBlob("Z", Z)
+        workspace.RunOperatorOnce(op)
+        out = workspace.FetchBlob("out")
+        np.testing.assert_array_almost_equal(
+            out,
+            X + Y[:, :, np.newaxis] + Z[:, np.newaxis, np.newaxis]
+        )
+        self.assertDeviceChecks(dc, op, [X, Y, Z], [0])
+        self.assertGradientChecks(gc, op, [X, Y, Z], 0, [0])
+        # self.assertGradientChecks(gc, op, [X, Y, Z], 1, [0])
+        # self.assertGradientChecks(gc, op, [X, Y, Z], 2, [0])
+
+    @given(**hu.gcs)
     def test_broadcast_Mul(self, gc, dc):
         # Set broadcast and no axis, i.e. broadcasting last dimensions.
         X = np.random.rand(2, 3, 4, 5).astype(np.float32)
