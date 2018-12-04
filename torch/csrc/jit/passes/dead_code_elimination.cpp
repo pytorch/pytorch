@@ -11,7 +11,8 @@ class DeadCodeEliminator {
  public:
   explicit DeadCodeEliminator(std::shared_ptr<Graph> graph)
       : aliasDb_(AliasAnalysis(graph)) {}
-  DeadCodeEliminator(){};
+  DeadCodeEliminator(bool collect_only = false)
+      : collect_only_(collect_only) {}
 
   // The algorithm is an inverse mark-and-sweep. Starting from the return node,
   // we mark "live" nodes that are necessary for the output. Nodes that have
@@ -26,6 +27,12 @@ class DeadCodeEliminator {
 
     mark(block);
     sweep(block, recurse);
+  }
+
+  // *_once, because it should be called only once per run() call.
+  std::unordered_set<Node*> get_dead_once() {
+    JIT_ASSERT(collect_only_);
+    return std::move(dead_nodes_);
   }
 
  private:
@@ -100,8 +107,10 @@ class DeadCodeEliminator {
       auto node = *it;
       // note these occur before the recursion because we want to uncover
       // dead code in the blocks used to calculate the output
-      removeDeadIfOutputs(node);
-      removeDeadLoopOutputs(node);
+      if (!collect_only_) {
+        removeDeadIfOutputs(node);
+        removeDeadLoopOutputs(node);
+      }
       if (recurse) {
         for (Block* block : node->blocks()) {
           sweep(block, true);
@@ -111,7 +120,11 @@ class DeadCodeEliminator {
       // since the mark algorithm should do that. But currently, the marking
       // doesn't reach loop counters in certain cases (see TestScript.test_pass)
       if (!marked_.count(node) && !node->hasUses()) {
-        it.destroyCurrent();
+        if (collect_only_) {
+          dead_nodes_.insert(node);
+        } else {
+          it.destroyCurrent();
+        }
       }
     }
   }
@@ -213,14 +226,22 @@ class DeadCodeEliminator {
   std::list<Node*> workQueue_;
   c10::optional<const Node*> lastWildcard_;
 
+  bool collect_only_ = false;
+  std::unordered_set<Node*> dead_nodes_; // Will be filled iff collect_only_ is true
 };
 
 void EliminateDeadCode(const std::shared_ptr<Graph>& graph) {
-  DeadCodeEliminator(graph).run(graph->block(), true);
+  DeadCodeEliminator(graph).run(graph->block(), /*recurse=*/true);
 }
 
 void EliminateDeadCode(Block* block, bool recurse) {
   DeadCodeEliminator().run(block, recurse);
+}
+
+std::unordered_set<Node*> FindDeadNodes(Block* block, bool recurse) {
+  DeadCodeEliminator eliminator(/*collect_only=*/true);
+  eliminator.run(block, recurse);
+  return eliminator.get_dead_once();
 }
 
 } // namespace jit
