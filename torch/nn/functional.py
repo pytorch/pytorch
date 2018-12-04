@@ -1890,14 +1890,16 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
 
         # special case for batchmean
         if reduction == 'batchmean':
-            batchsize = 1
-            if input.dim() != 0:
-                batchsize = input.size()[0]
-            reduction_sum = _Reduction.get_enum('sum')
-            return torch.kl_div(input, target, reduction_sum) / batchsize
+            reduction_enum = _Reduction.get_enum('sum')
+        else:
+            reduction_enum = _Reduction.get_enum(reduction)
 
-        reduction_enum = _Reduction.get_enum(reduction)
-    return torch.kl_div(input, target, reduction_enum)
+    reduced = torch.kl_div(input, target, reduction_enum)
+
+    if reduction == 'batchmean' and input.dim() != 0:
+        reduced = reduced / input.size()[0]
+
+    return reduced
 
 
 @torch._jit_internal.weak_script
