@@ -7,6 +7,7 @@
 #include <ATen/core/UndefinedTensorImpl.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/core/TensorOptions.h>
+#include <c10/core/Tensor.h>
 
 namespace caffe2 {
 
@@ -81,6 +82,17 @@ class C10_API Tensor final {
   Tensor(const Tensor& src, DeviceType type)
       : Tensor(type) {
     CopyFrom(src);
+  }
+
+  /* implicit */ Tensor(C10Tensor tensor)
+      : impl_(std::move(tensor).impl()) {}
+
+  /* implicit */ operator C10Tensor() const & {
+    return C10Tensor(impl_);
+  }
+
+  /* implicit */ operator C10Tensor() && {
+    return C10Tensor(std::move(impl_));
   }
 
   Tensor Clone() const {
