@@ -31,15 +31,8 @@ C10_DECLARE_bool(caffe2_keep_on_shrink);
 // respect caffe2_keep_on_shrink.
 C10_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
 
-namespace caffe2 {
-
-// Defined by protobuf
-class DeviceOption;
-
-}
 
 namespace at {
-struct Type;
 class Tensor;
 }
 
