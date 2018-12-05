@@ -401,7 +401,7 @@ bool RecurrentParamAccessOp<T, mode>::RunOnDevice() {
         Input(1).template data<T>(),
         param_id, 
         biasDesc,
-        &bias));
+        bias));
     std::array<int,3> biasDims {1,1,1};
     std::array<int,3> strideDims {1,1,1};
     miopenDataType_t dt;
