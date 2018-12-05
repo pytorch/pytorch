@@ -168,6 +168,14 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
           cmake_args+=("-DBUILD_ATEN=ON")
         fi
 
+        if [[ $BUILD_ENVIRONMENT == py2-cuda9.0-cudnn7-centos7 ]]; then
+          wget 'https://developer.nvidia.com/compute/machine-learning/tensorrt/5.0/GA_5.0.2.6/local_repos/nv-tensorrt-repo-rhel7-cuda9.0-trt5.0.2.6-ga-20181010-1-1.x86_64.rpm'
+          sudo rpm -ivh nv-tensorrt-repo-rhel7-cuda9.0-trt5.0.2.6-ga-20181010-1-1.x86_64.rpm
+          sudo yum clean expire-cache
+          sudo yum install tensorrt
+          cmake_args+=("-DUSE_TENSORRT=ON")
+        fi
+
         # conda must be added to the path for Anaconda builds (this location must be
         # the same as that in install_anaconda.sh used to build the docker image)
         if [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
