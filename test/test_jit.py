@@ -8513,15 +8513,6 @@ a")
             foo(torch.tensor(1))
 
         @torch.jit.script
-        def foo():
-            a = Exception()
-            raise a
-
-        # a gets DCEd because the expression following raise is ignored
-        with self.assertRaisesRegex(torch.jit.Error, "failed in interpreter"):
-            foo()
-
-        @torch.jit.script
         def foo_except_used():
             a = Exception()
             print(a)

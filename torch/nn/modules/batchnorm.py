@@ -162,6 +162,7 @@ class BatchNorm1d(_BatchNorm):
         https://arxiv.org/abs/1502.03167
     """
 
+    @weak_script_method
     def _check_input_dim(self, input):
         if input.dim() != 2 and input.dim() != 3:
             raise ValueError('expected 2D or 3D input (got {}D input)'
@@ -235,6 +236,7 @@ class BatchNorm2d(_BatchNorm):
         https://arxiv.org/abs/1502.03167
     """
 
+    @weak_script_method
     def _check_input_dim(self, input):
         if input.dim() != 4:
             raise ValueError('expected 4D input (got {}D input)'
@@ -309,6 +311,7 @@ class BatchNorm3d(_BatchNorm):
         https://arxiv.org/abs/1502.03167
     """
 
+    @weak_script_method
     def _check_input_dim(self, input):
         if input.dim() != 5:
             raise ValueError('expected 5D input (got {}D input)'
