@@ -169,7 +169,7 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
         fi
 
         if [[ $BUILD_ENVIRONMENT == py2-cuda9.0-cudnn7-centos7 ]]; then
-          sudo yum install wget
+          sudo yum -y install wget
           wget 'https://developer.nvidia.com/compute/machine-learning/tensorrt/5.0/GA_5.0.2.6/local_repos/nv-tensorrt-repo-rhel7-cuda9.0-trt5.0.2.6-ga-20181010-1-1.x86_64.rpm'
           sudo rpm -ivh nv-tensorrt-repo-rhel7-cuda9.0-trt5.0.2.6-ga-20181010-1-1.x86_64.rpm
           sudo yum clean expire-cache
