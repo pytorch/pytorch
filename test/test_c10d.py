@@ -247,6 +247,7 @@ class RendezvousTest(TestCase):
 
 
 class RendezvousEnvTest(TestCase):
+    @retry_on_address_already_in_use_error
     def test_common_errors(self):
         # TODO remove this hack
         if not hasattr(c10d, "ProcessGroupNCCL"):
