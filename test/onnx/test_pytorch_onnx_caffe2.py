@@ -199,6 +199,7 @@ class TestCaffe2Backend(unittest.TestCase):
                     nn.ReLU(inplace=True),
                     nn.Linear(6, 7, bias=True),
                 )
+
             def forward(self, input):
                 return self.many_fc(input)
 
