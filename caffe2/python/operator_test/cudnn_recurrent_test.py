@@ -151,4 +151,3 @@ class TestLSTMs(unittest.TestCase):
             self.assertTrue(np.allclose(own_output_data, cudnn_output_data))
             self.assertTrue(np.allclose(own_last_hidden, cudnn_last_hidden))
             self.assertTrue(np.allclose(own_loss, cudnn_loss))
-
