@@ -1094,7 +1094,7 @@ class MultiMarginLoss(_WeightedLoss):
     """
     __constants__ = ['p', 'margin', 'weight', 'reduction']
 
-    def __init__(self, p=1, margin=1, weight=None, size_average=None,
+    def __init__(self, p=1, margin=1., weight=None, size_average=None,
                  reduce=None, reduction='mean'):
         super(MultiMarginLoss, self).__init__(weight, size_average, reduce, reduction)
         if p != 1 and p != 2:
