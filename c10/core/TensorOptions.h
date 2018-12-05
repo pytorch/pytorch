@@ -503,4 +503,76 @@ inline TensorOptions dtype() {
   return dtype(caffe2::TypeMeta::Make<T>());
 }
 
+// This is intended to be a centralized location by which we can determine
+// what an appropriate TensorTypeId for a tensor is.
+//
+// This takes a TensorOptions, rather than just a DeviceType and Layout, because
+// we reserve the right to change dispatch based on *any* aspect of
+// TensorOptions.  WARNING: If you do this, you need to fix the calls
+// to computeTensorTypeId in caffe2/tensor.h
+inline TensorTypeId computeTensorTypeId(TensorOptions options) {
+  switch (options.layout()) {
+    case Layout::Strided:
+      switch (options.device().type()) {
+        case DeviceType::CPU:
+          return CPUTensorId();
+        case DeviceType::CUDA:
+          return CUDATensorId();
+        case DeviceType::MKLDNN:
+          return MKLDNNTensorId();
+        case DeviceType::OPENGL:
+          return OpenGLTensorId();
+        case DeviceType::OPENCL:
+          return OpenCLTensorId();
+        case DeviceType::IDEEP:
+          return IDEEPTensorId();
+        case DeviceType::HIP:
+          return HIPTensorId();
+        default:
+          AT_ERROR("Unsupported device type for dense layout: ", options.device().type());
+      }
+    case Layout::Sparse:
+      switch (options.device().type()) {
+        case DeviceType::CPU:
+          return SparseCPUTensorId();
+        case DeviceType::CUDA:
+          return SparseCUDATensorId();
+        case DeviceType::HIP:
+          return SparseHIPTensorId();
+        default:
+          AT_ERROR("Unsupported device type for sparse layout: ", options.device().type());
+      }
+    default:
+      AT_ERROR("Unsupported layout: ", options.layout());
+  }
+}
+
+inline DeviceType computeDeviceType(TensorTypeId tid) {
+  if (tid == CPUTensorId()) {
+    return DeviceType::CPU;
+  } else if (tid == CUDATensorId()) {
+    return DeviceType::CUDA;
+  } else if (tid == HIPTensorId()) {
+    return DeviceType::HIP;
+  } else if (tid == MKLDNNTensorId()) {
+    return DeviceType::MKLDNN;
+  } else if (tid == OpenGLTensorId()) {
+    return DeviceType::IDEEP;
+  } else if (tid == OpenCLTensorId()) {
+    return DeviceType::OPENCL;
+  } else if (tid == IDEEPTensorId()) {
+    return DeviceType::IDEEP;
+  } else if (tid == HIPTensorId()) {
+    return DeviceType::HIP;
+  } else if (tid == SparseCPUTensorId()) {
+    return DeviceType::CPU;
+  } else if (tid == SparseCUDATensorId()) {
+    return DeviceType::CUDA;
+  } else if (tid == SparseHIPTensorId()) {
+    return DeviceType::HIP;
+  } else {
+    AT_ASSERTM(false, "Unknown TensorTypeId: ", tid);
+  }
+}
+
 } // namespace c10
