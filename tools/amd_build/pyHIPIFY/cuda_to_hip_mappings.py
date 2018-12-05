@@ -1905,6 +1905,8 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("cublasCgemm3mEx", ("rocblas_cgemm_3mex", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
     ("cublasZgemm_v2", ("rocblas_zgemm", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
     ("cublasZgemm3m", ("rocblas_zgemm_3m", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
+    # NB: The function rocblas_sgemmex doesn't actually exist in
+    # rocblas, as of 2018-12-05
     ("cublasSgemmEx", ("rocblas_sgemmex", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
     ("cublasGemmEx", ("rocblas_gemmex", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
     ("cublasCgemmEx", ("rocblas_cgemmex", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
