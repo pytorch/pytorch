@@ -15,8 +15,7 @@ import unittest
 class TestLSTMs(unittest.TestCase):
 
     def testEqualToCudnn(self):
-        device_option = workspace.GpuDeviceType
-        with core.DeviceScope(core.DeviceOption(device_option)):
+        with core.DeviceScope(core.DeviceOption(workspace.GpuDeviceType)):
             T = 8
             batch_size = 4
             input_dim = 8
@@ -152,3 +151,4 @@ class TestLSTMs(unittest.TestCase):
             self.assertTrue(np.allclose(own_output_data, cudnn_output_data))
             self.assertTrue(np.allclose(own_last_hidden, cudnn_last_hidden))
             self.assertTrue(np.allclose(own_loss, cudnn_loss))
+
