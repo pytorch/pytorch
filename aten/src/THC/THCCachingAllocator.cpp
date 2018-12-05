@@ -610,7 +610,7 @@ namespace {
   std::unordered_map<std::string, std::weak_ptr<void>> ipcMemHandle_to_devptr;
 }
 
-THC_API std::shared_ptr<void> THCCaching_CUDAIpcDevptr(std::string handle) {
+AT_CUDA_API std::shared_ptr<void> THCCaching_CUDAIpcDevptr(std::string handle) {
   std::lock_guard<std::mutex> lock(IpcMutex);
 
   auto iter = ipcMemHandle_to_devptr.find(handle);
@@ -634,12 +634,11 @@ THC_API std::shared_ptr<void> THCCaching_CUDAIpcDevptr(std::string handle) {
         THCudaCheck(cudaIpcCloseMemHandle(ptr));
         ipcMemHandle_to_devptr.erase(handle);});
   std::weak_ptr<void> wp = sp;
-  ipcMemHandle_to_devptr[handle] = wp;
   // To eliminate an additional search, we can use insert().
   // It doesn't overwrite when key already exists(ptr expired).
   // But in the deleter for sp we erased the entry,
   // this should be safe to do now.
-  // ipcMemHandle_to_devptr.insert(iter, {handle, wp});
+  ipcMemHandle_to_devptr.insert(iter, {handle, wp});
 
   return sp;
 }

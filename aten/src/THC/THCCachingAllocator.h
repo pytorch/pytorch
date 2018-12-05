@@ -17,7 +17,6 @@ THC_API void THCCachingAllocator_cacheInfo(int dev_id, size_t* cachedAndFree, si
 THC_API void* THCCachingAllocator_getBaseAllocation(void *ptr, size_t *size);
 #ifdef __cplusplus
 THC_API void THCCachingAllocator_recordStream(void *ptr, at::cuda::CUDAStream stream);
-THC_API std::shared_ptr<void> THCCaching_CUDAIpcDevptr(std::string handle);
 #endif
 THC_API uint64_t THCCachingAllocator_currentMemoryAllocated(int device);
 THC_API uint64_t THCCachingAllocator_maxMemoryAllocated(int device);
@@ -27,4 +26,6 @@ THC_API uint64_t THCCachingAllocator_maxMemoryCached(int device);
 #if (__cplusplus >= 201103L) || (defined(_MSC_VER) && defined(__cplusplus))
 THC_API std::mutex* THCCachingAllocator_getCudaFreeMutex();
 #endif
+
+AT_CUDA_API std::shared_ptr<void> THCCaching_CUDAIpcDevptr(std::string handle);
 #endif
