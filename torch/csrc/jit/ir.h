@@ -138,9 +138,7 @@ public:
   bool isTensor() const {
     return type()->kind() == TypeKind::CompleteTensorType;
   }
-  bool isNone() const {
-    return type()->kind() == TypeKind::NoneType;
-  }
+  TORCH_API bool mustBeNone() const;
   size_t unique() const {
     return unique_;
   }
@@ -599,6 +597,7 @@ public:
   enum class MoveSide { BEFORE, AFTER };
   bool tryMove(Node* movePoint, MoveSide moveSide, const AliasDb& aliasDb, bool dryRun);
   void move(Node* movePoint, MoveSide moveSide);
+  bool isBeforeOrAfter(const Node* n, MoveSide moveSide) const;
 
   std::pair<Value*, const Argument&> findInput(Symbol name);
   void findSchema() const;
@@ -807,6 +806,12 @@ public:
   const_graph_node_list nodes() const {
     const auto & block = *block_;
     return block.nodes();
+  }
+  Node * param_node() {
+    return block_->param_node();
+  }
+  const Node * param_node() const {
+    return block_->param_node();
   }
   Node * return_node() {
     return block_->return_node();

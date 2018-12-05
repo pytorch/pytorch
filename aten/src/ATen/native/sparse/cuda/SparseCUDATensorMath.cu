@@ -5,6 +5,7 @@
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
 #include <ATen/native/sparse/cuda/SparseCUDABlas.cuh>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/CUDAUtils.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include "ATen/WrapDimUtilsMulti.h"
 
@@ -55,7 +56,7 @@ Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseT
   AT_CHECK(sparse_.is_cuda(), "addmm: expected 'mat1' to be CUDA, but got CPU");
   AT_CHECK(dense.is_cuda(), "addmm: expected 'mat2' to be CUDA, but got CPU");
 
-  AT_CHECK(check_device({sparse_, r_, t, dense}));
+  AT_CHECK(cuda::check_device({sparse_, r_, t, dense}));
 
   AT_CHECK(dense.dim() == 2, "addmm: 2D tensor expected, got ", dense.dim(), "D tensor");
   AT_CHECK(sparse_.sparse_dim() == 2, "addmm: expected first two dims to be sparse (indices has size 2 at first dim), but got ", sparse_.sparse_dim(), " spase dims");
@@ -183,7 +184,7 @@ SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse
   AT_CHECK(r_.is_cuda(), "hspmm: expected 'out' to be CUDA, but got CPU");
   AT_CHECK(dense.is_cuda(), "hspmm: expected 'mat2' to be CUDA, but got CPU");
 
-  AT_CHECK(check_device({r_, sparse_, dense}));
+  AT_CHECK(cuda::check_device({r_, sparse_, dense}));
 
   AT_CHECK(sparse_.sparse_dim() == 2,
       "hspmm: Argument #2: 2D tensor expected, got ", sparse_.sparse_dim(), "D tensor");
@@ -254,7 +255,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
   AT_CHECK(sparse.is_cuda(), "add: expected 'other' to be CUDA, but got CPU");
   AT_CHECK(r_.is_cuda(), "add: expected 'out' to be CUDA, but got CPU");
 
-  AT_CHECK(check_device({sparse, r_, dense}));
+  AT_CHECK(cuda::check_device({sparse, r_, dense}));
 
   AT_CHECK(dense.sizes().equals(sparse.sizes()), "add: expected 'self' and 'other' to have same size, but self has size ",
     dense.sizes(), " while other has size ", sparse.sizes(), " (FYI: dense-sparse addition does not currently support broadcasting)");
@@ -356,7 +357,7 @@ SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const
   AT_CHECK(src.is_cuda(), "add: expected 'other' to be CUDA, but got CPU");
   AT_CHECK(r_.is_cuda(), "add: expected 'out' to be CUDA, but got CPU");
 
-  AT_CHECK(check_device({r_, t, src}));
+  AT_CHECK(cuda::check_device({r_, t, src}));
   AT_CHECK(t.sizes().equals(src.sizes()), "add: expected 'self' and 'other' to have same size, but ", t.sizes(), " != ", src.sizes());
 
   if (src._nnz() == 0) {
@@ -414,7 +415,7 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
   AT_ASSERT(t_.is_cuda()); // dispatch argument
   AT_CHECK(src_.is_cuda(), "mul: expected 'other' to be CUDA, but got CPU");
   AT_CHECK(r_.is_cuda(), "mul: expected 'out' to be CUDA, but got CPU");
-  AT_CHECK(check_device({r_, t_, src_}));
+  AT_CHECK(cuda::check_device({r_, t_, src_}));
   AT_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same size, but ", t_.sizes(), " != ", src_.sizes());
 
   SparseTensor t = t_.coalesce();

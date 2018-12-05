@@ -206,7 +206,7 @@ class ShapePropagator {
         std::any_of(writers.cbegin(), writers.cend(), [&](const Node* writer) {
           return writer->isBefore(node);
         });
-    if (hasWritersBefore) {
+    if (hasWritersBefore || aliasDb_.hasWildcard(node)) {
       // If something could have written to a value used by this node, we can't
       // guarantee the result is the same when running it in isolation.
       dependsOnMutationMemo_[node] = true;
@@ -702,7 +702,6 @@ class ShapePropagator {
           return {};
         }};
 
- 
     static const auto any_tensor_type = [](Node* node) -> TensorTypePtr {
       for (Value* input : node->inputs()) {
         if (auto type = input->type()->cast<TensorType>()) {
@@ -1010,14 +1009,14 @@ class ShapePropagator {
     //   - has ScalarType dtype, Layeout layout and Device device arguments
     static const register_formula_for like_factories_with_options{
         {
-            "aten::empty_like(Tensor self, *, int dtype, int layout, int[] device) -> Tensor",
-            "aten::full_like(Tensor self, Scalar fill_value, *, int dtype, int layout, int[] device) -> Tensor",
-            "aten::ones_like(Tensor self, *, int dtype, int layout, int[] device) -> Tensor",
-            "aten::rand_like(Tensor self, *, int dtype, int layout, int[] device) -> Tensor",
-            "aten::randint_like(Tensor self, int high, *, int dtype, int layout, int[] device) -> Tensor",
-            "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, int[] device) -> Tensor",
-            "aten::randn_like(Tensor self, *, int dtype, int layout, int[] device) -> Tensor",
-            "aten::zeros_like(Tensor self, *, int dtype, int layout, int[] device) -> Tensor",
+            "aten::empty_like(Tensor self, *, int dtype, int layout, Device device) -> Tensor",
+            "aten::full_like(Tensor self, Scalar fill_value, *, int dtype, int layout, Device device) -> Tensor",
+            "aten::ones_like(Tensor self, *, int dtype, int layout, Device device) -> Tensor",
+            "aten::rand_like(Tensor self, *, int dtype, int layout, Device device) -> Tensor",
+            "aten::randint_like(Tensor self, int high, *, int dtype, int layout, Device device) -> Tensor",
+            "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, Device device) -> Tensor",
+            "aten::randn_like(Tensor self, *, int dtype, int layout, Device device) -> Tensor",
+            "aten::zeros_like(Tensor self, *, int dtype, int layout, Device device) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
           if (auto type =
@@ -1038,14 +1037,14 @@ class ShapePropagator {
     //   arguments
     static const register_formula_for size_factories_with_options{
         {
-            "aten::empty(int[] size, *, int dtype, int layout, int[] device) -> Tensor",
-            "aten::full(int[] size, Scalar fill_value, *, int dtype, int layout, int[] device) -> Tensor",
-            "aten::ones(int[] size, *, int dtype, int layout, int[] device) -> Tensor",
-            "aten::rand(int[] size, *, int dtype, int layout, int[] device) -> Tensor",
-            "aten::randn(int[] size, *, int dtype, int layout, int[] device) -> Tensor",
-            "aten::zeros(int[] size, *, int dtype, int layout, int[] device) -> Tensor",
-            "aten::randint(int high, int[] size, *, int dtype, int layout, int[] device) -> Tensor",
-            "aten::randint(int low, int high, int[] size, *, int dtype, int layout, int[] device) -> Tensor",
+            "aten::empty(int[] size, *, int dtype, int layout, Device device) -> Tensor",
+            "aten::full(int[] size, Scalar fill_value, *, int dtype, int layout, Device device) -> Tensor",
+            "aten::ones(int[] size, *, int dtype, int layout, Device device) -> Tensor",
+            "aten::rand(int[] size, *, int dtype, int layout, Device device) -> Tensor",
+            "aten::randn(int[] size, *, int dtype, int layout, Device device) -> Tensor",
+            "aten::zeros(int[] size, *, int dtype, int layout, Device device) -> Tensor",
+            "aten::randint(int high, int[] size, *, int dtype, int layout, Device device) -> Tensor",
+            "aten::randint(int low, int high, int[] size, *, int dtype, int layout, Device device) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
           if (auto maybe_size = node->get<std::vector<int64_t>>(attr::size)) {

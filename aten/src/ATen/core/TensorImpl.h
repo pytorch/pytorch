@@ -4,8 +4,7 @@
 #include <memory>
 #include <numeric>
 
-#include <ATen/core/Backend.h>
-#include <ATen/core/LegacyTypeDispatch.h>
+#include <c10/core/Backend.h>
 #include <c10/core/Storage.h>
 #include <ATen/core/TensorOptions.h>
 #include <c10/core/TensorTypeId.h>
@@ -331,20 +330,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   //
   // TODO: type() is a very attractive name for a method, but we don't
   // actually want people to use it.  Rename this to something else.
-
-  /**
-   * Return the Type object corresponding to this Tensor, which we can
-   * use to do dynamic dispatch to operators from.  This method is NOT
-   * intended to be used by end-users; it is purely an implementation
-   * detail.
-   */
-  Type & type() const {
-    // NB: It's valid to use getTypeRaw here, because the TensorImpl
-    // could not have been created without initializing the Type first.
-    // TODO: This is not actually true via the Caffe2 codepath!  Make
-    // it so.
-    return *globalLegacyTypeDispatch().getTypeRaw(tensorTypeIdToBackend(type_id()), typeMetaToScalarType(dtype()), is_variable());
-  }
 
   /**
    * Return the TensorTypeId corresponding to this Tensor.  In the future,
@@ -1189,6 +1174,13 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     // It is possible that the source tensor hasn't called mutable_data() yet,
     // in which case ShareData() doesn't make much sense since we don't really
     // know what to share yet.
+    // TODO: Add the assert after all uninitialized states are eliminated
+    // AT_ASSERTM(src.dtype_initialized(),
+    //            "Source tensor don't have a data type (did you call mutable_data<T> on the tensor?)");
+    if (!src.dtype_initialized()) {
+      C10_LOG_EVERY_MS(WARNING, 1000) <<
+                   "Source tensor don't have a data type (did you call mutable_data<T> on the tensor?)";
+    }
     AT_ASSERTM(
         src.storage_initialized(),
         "Source tensor has no content and has size > 0");

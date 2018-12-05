@@ -2,7 +2,6 @@
 #include "gtest/gtest.h"
 
 #include "ATen/ATen.h"
-#include "test_seed.h"
 
 using namespace at;
 
@@ -163,7 +162,7 @@ void TestExplicitDimWithMismatchedSizes(Type& T) {
 }
 
 TEST(BroadcastTest, Broadcast) {
-  manual_seed(123, at::kCPU);
+  manual_seed(123);
   Type& T = CPU(kFloat);
 
   TestEmptyTensor(T);

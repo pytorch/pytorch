@@ -57,9 +57,6 @@ inline void Tensor::set_data(Tensor new_data) {
 }
 
 // all static inline to allow for inlining of the non-dynamic part of dispatch
-inline Tensor & Tensor::_th_triu_(int64_t diagonal) {
-    return type()._th_triu_(*this, diagonal);
-}
 inline Tensor Tensor::abs() const {
     return type().abs(*this);
 }
@@ -786,8 +783,8 @@ inline Tensor Tensor::to(ScalarType dtype, bool non_blocking, bool copy) const {
 inline Tensor Tensor::to(const Tensor & other, bool non_blocking, bool copy) const {
     return type().to(*this, other, non_blocking, copy);
 }
-inline Scalar Tensor::_local_scalar() const {
-    return type()._local_scalar(*this);
+inline Scalar Tensor::item() const {
+    return type().item(*this);
 }
 inline void* Tensor::data_ptr() const {
     return type().data_ptr(*this);
@@ -1313,13 +1310,13 @@ inline bool is_sparse(Tensor self) {
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)
 #undef DEFINE_CAST
 
-#define DEFINE_TO_C_TYPE(T, name, _)   \
-  template <>                          \
-  inline T Tensor::item() const {      \
-    return _local_scalar().to##name(); \
+#define DEFINE_ITEM(T, name, _)   \
+  template <>                     \
+  inline T Tensor::item() const { \
+    return item().to##name();     \
   }
 
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_TO_C_TYPE)
-#undef DEFINE_TO_C_TYPE
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_ITEM)
+#undef DEFINE_ITEM
 
 } //namespace at

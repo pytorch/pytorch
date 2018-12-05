@@ -10,7 +10,7 @@ graph(%0 : Double(4, 4)) {
   %9 : int[] = prim::ListConstruct(%4, %8)
   %10 : int = prim::Constant[value=7]()
   %11 : int = prim::Constant[value=0]()
-  %12 : int[] = prim::Constant[value=[0, -1]]()
+  %12 : Device = prim::Constant[value="cpu"]()
   %13 : Double(4, 4) = aten::zeros(%9, %10, %11, %12)
   %14 : Double(4, 4) = aten::expand_as(%0, %13)
   return (%14);
