@@ -168,6 +168,15 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
           cmake_args+=("-DBUILD_ATEN=ON")
         fi
 
+        if [[ $BUILD_ENVIRONMENT == py2-cuda9.0-cudnn7-ubuntu16.04 ]]; then
+          sudo apt-get -qq update
+          sudo apt-get -qq install nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0
+          sudo apt-key add /var/nvinfer-runtime-trt-repo-5.0.2-ga-cuda9.0/7fa2af80.pub
+          sudo apt-get -qq update
+          sudo apt-get -qq install tensorrt
+          cmake_args+=("-DUSE_TENSORRT=ON")
+        fi
+
         # conda must be added to the path for Anaconda builds (this location must be
         # the same as that in install_anaconda.sh used to build the docker image)
         if [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
