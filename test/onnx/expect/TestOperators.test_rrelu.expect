@@ -8,12 +8,12 @@ graph {
     op_type: "RandomUniformLike"
     attribute {
       name: "high"
-      f: 0.125
+      f: 0.333333343
       type: FLOAT
     }
     attribute {
       name: "low"
-      f: 0.333333343
+      f: 0.125
       type: FLOAT
     }
   }
