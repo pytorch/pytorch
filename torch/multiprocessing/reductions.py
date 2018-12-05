@@ -94,7 +94,11 @@ def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
         storage = storage_from_cache(storage_cls, (storage_handle, storage_offset_bytes))
         if storage is None:
             torch.cuda._lazy_init()
-            storage = storage_cls._new_shared_cuda(storage_device, storage_handle, storage_size_bytes, storage_offset_bytes)
+            storage = storage_cls._new_shared_cuda(
+                storage_device,
+                storage_handle,
+                storage_size_bytes,
+                storage_offset_bytes)
             shared_cache[(storage_handle, storage_offset_bytes)] = StorageWeakRef(storage)
 
     t = torch._utils._rebuild_tensor(storage, tensor_offset, tensor_size, tensor_stride)
