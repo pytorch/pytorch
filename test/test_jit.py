@@ -10735,6 +10735,21 @@ additional_module_tests = [
             torch.randint(10, 30, (16,), dtype=torch.long)),
         no_grad=True,
     ),
+    dict(
+        module_name='RNNCell',
+        constructor_args=(S, S),
+        input_size=(S, S),
+    ),
+    dict(
+        module_name='LSTMCell',
+        constructor_args=(S, S),
+        input_size=(S, S),
+    ),
+    dict(
+        module_name='GRUCell',
+        constructor_args=(S, S),
+        input_size=(S, S),
+    ),
 ]
 
 
