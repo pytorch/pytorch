@@ -57,7 +57,12 @@ IF(USE_CUDA OR USE_ROCM)
   set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} ${cuda_cu} ${native_cuda_cu} ${native_sparse_cuda_cu})
   set(all_cuda_cpp ${native_sparse_cuda_cpp} ${cuda_cpp} ${native_cuda_cpp} ${cuda_generated_cpp} ${ATen_CUDA_SRCS})
   IF(USE_CUDA)
-    SET(all_cuda_cpp ${native_cudnn_cpp} ${native_miopen_cpp} ${all_cuda_cpp})
+    # NB: native_cudnn_cpp is required, even if CUDNN_FOUND is false,
+    # because we need to get stub versions of these functions when
+    # we build without CuDNN.  This reasoning doesn't apply to, e.g.,
+    # miopen, because we just won't have any Type registered to dispatch
+    # to for HIP.
+    SET(all_cuda_cpp ${native_cudnn_cpp} ${all_cuda_cpp})
     IF(CUDNN_FOUND)
       SET(all_cuda_cpp ${all_cuda_cpp} ${cudnn_cpp})
     ENDIF()

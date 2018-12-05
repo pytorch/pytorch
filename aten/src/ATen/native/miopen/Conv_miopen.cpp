@@ -3,77 +3,6 @@
 #include <ATen/Config.h>
 #include <ATen/cuda/CUDAConfig.h>
 
-#if !AT_ROCM_ENABLED()
-
-namespace at { namespace native {
-
-// See Note [ATen preprocessor philosophy]
-
-at::Tensor miopen_convolution(
-    const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias /* optional */,
-    IntList padding, IntList stride, IntList dilation,
-    int64_t groups, bool benchmark, bool deterministic) {
-  AT_ERROR("miopen_convolution: ATen not compiled with MIOpen support");
-}
-
-at::Tensor miopen_convolution_backward_input(
-    IntList input_size, const at::Tensor& grad_output, const at::Tensor& weight,
-    IntList padding, IntList stride, IntList dilation, int64_t groups,
-    bool benchmark, bool deterministic) {
-  AT_ERROR("miopen_convolution_backward_input: ATen not compiled with MIOpen support");
-}
-
-at::Tensor miopen_convolution_backward_weight(
-    IntList weight_size, const at::Tensor& grad_output, const at::Tensor& input,
-    IntList padding, IntList stride, IntList dilation, int64_t groups,
-    bool benchmark, bool deterministic) {
-  AT_ERROR("miopen_convolution_backward_weight: ATen not compiled with MIOpen support");
-}
-
-at::Tensor miopen_convolution_backward_bias(
-    const at::Tensor& grad_output) {
-  AT_ERROR("miopen_convolution_backward_bias: ATen not compiled with MIOpen support");
-}
-
-std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_backward(
-    const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
-    IntList padding, IntList stride, IntList dilation, int64_t groups,
-    bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
-  AT_ERROR("miopen_convolution_backward: ATen not compiled with MIOpen support");
-}
-
-at::Tensor miopen_convolution_transpose(
-    const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias /* optional */,
-    IntList padding, IntList output_padding, IntList stride, IntList dilation,
-    int64_t groups, bool benchmark, bool deterministic) {
-  AT_ERROR("miopen_convolution_transpose: ATen not compiled with MIOpen support");
-}
-
-at::Tensor miopen_convolution_transpose_backward_input(
-    const at::Tensor& grad_output, const at::Tensor& weight,
-    IntList padding, IntList stride, IntList dilation,
-    int64_t groups, bool benchmark, bool deterministic) {
-  AT_ERROR("miopen_convolution_transpose_backward: ATen not compiled with MIOpen support");
-}
-
-at::Tensor miopen_convolution_transpose_backward_weight(
-    IntList weight_size, const at::Tensor& grad_output, const at::Tensor& input,
-    IntList padding, IntList stride, IntList dilation, int64_t groups,
-    bool benchmark, bool deterministic) {
-  AT_ERROR("miopen_convolution_transpose_backward_weight: ATen not compiled with MIOpen support");
-}
-
-std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_transpose_backward(
-    const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
-    IntList padding, IntList output_padding, IntList stride, IntList dilation, int64_t groups,
-    bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
-  AT_ERROR("miopen_convolution_transpose_backward: ATen not compiled with MIOpen support");
-}
-
-}}
-
-#else  // AT_ROCM_ENABLED
-
 #include "THC/THC.h"
 
 #include <ATen/miopen/miopen-wrapper.h>
@@ -939,5 +868,3 @@ Tensor miopen_convolution_backward_bias(
 
 
 }}  // namespace
-
-#endif

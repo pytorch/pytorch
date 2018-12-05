@@ -4,31 +4,6 @@
 
 #include <ATen/cuda/CUDAConfig.h>
 
-#if !AT_ROCM_ENABLED()
-
-namespace at { namespace native {
-
-// See Note [ATen preprocessor philosophy]
-
-std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
-    const Tensor& input, const Tensor& weight,
-    const Tensor& bias, const Tensor& running_mean, const Tensor& running_var,
-    bool training, double exponential_average_factor, double epsilon) {
-  AT_ERROR("miopen_batch_norm: ATen not compiled with MIOpen support");
-}
-
-std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
-    const Tensor& input, const Tensor& grad_output, const Tensor& weight,
-    const Tensor& running_mean, const Tensor& running_var,
-    const Tensor& save_mean, const Tensor& save_var,
-    double epsilon) {
-  AT_ERROR("miopen_batch_norm_backward: ATen not compiled with MIOpen support");
-}
-
-}}  // namespace at::native
-
-#else // AT_ROCM_ENABLED
-
 #include <ATen/miopen/Descriptors.h>
 #include <ATen/miopen/Types.h>
 #include <ATen/miopen/Utils.h>
@@ -204,5 +179,3 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
 }
 
 }}  // namespace native
-
-#endif
