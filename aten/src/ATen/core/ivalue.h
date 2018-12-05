@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/Casting.h>
 #include <ATen/core/Scalar.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/TensorImpl.h>
@@ -102,6 +103,7 @@ using GenericList = List<IValue>;
   _(Blob) \
   _(GenericList) \
   _(Future) \
+  _(Casting) \
   _(Device)
 
 struct CAFFE2_API IValue final {
@@ -410,6 +412,18 @@ struct CAFFE2_API IValue final {
     return static_cast<at::ScalarType>(toInt());
   }
 
+  // Casting
+  IValue(c10::Casting c) : tag(Tag::Casting), is_intrusive_ptr(false) {
+    payload.as_casting = c;
+  }
+  bool isCasting() const {
+    return Tag::Casting == tag;
+  }
+  c10::Casting toCasting() const {
+    AT_ASSERT(isCasting());
+    return payload.as_casting;
+  }
+
   // Layout
   at::Layout toLayout() const {
     return static_cast<at::Layout>(toInt());
@@ -489,6 +503,7 @@ struct CAFFE2_API IValue final {
     double as_double;
     bool as_bool;
     c10::intrusive_ptr_target* as_intrusive_ptr;
+    c10::Casting as_casting;
     struct {
       DeviceType type;
       DeviceIndex index;
@@ -627,6 +642,7 @@ DEFINE_TO(c10::intrusive_ptr<ivalue::Future>, toFuture)
 DEFINE_TO(IValue, toIValue)
 DEFINE_TO(c10::Device, toDevice)
 DEFINE_TO(at::ScalarType, toScalarType)
+DEFINE_TO(c10::Casting, toCasting)
 DEFINE_TO(at::Layout, toLayout)
 
 // note: when adding a DEFINE_TO case here you should also add a

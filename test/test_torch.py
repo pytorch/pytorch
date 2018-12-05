@@ -9458,6 +9458,73 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         with self.assertRaisesRegex(RuntimeError, "expected both inputs to be on same device"):
             torch.tensor(2).to("cuda:1") // torch.tensor(3).to("cuda:0")
 
+    def test_can_cast_promote(self):
+        self.assertTrue(torch._can_cast(torch.int8, torch.int16, casting='promote'))
+        self.assertTrue(torch._can_cast(torch.int8, torch.int64, casting='promote'))
+        self.assertTrue(torch._can_cast(torch.int32, torch.int32, casting='promote'))
+        self.assertTrue(torch._can_cast(torch.int32, torch.int64, casting='promote'))
+
+        self.assertFalse(torch._can_cast(torch.int16, torch.int8, casting='promote'))
+        self.assertFalse(torch._can_cast(torch.int64, torch.int8, casting='promote'))
+        self.assertFalse(torch._can_cast(torch.int64, torch.int32, casting='promote'))
+
+        self.assertFalse(torch._can_cast(torch.uint8, torch.int8, casting='promote'))
+        self.assertTrue(torch._can_cast(torch.uint8, torch.int16, casting='promote'))
+
+        self.assertTrue(torch._can_cast(torch.float16, torch.float32, casting='promote'))
+        self.assertTrue(torch._can_cast(torch.float16, torch.float32, casting='promote'))
+        self.assertTrue(torch._can_cast(torch.float32, torch.float32, casting='promote'))
+        self.assertTrue(torch._can_cast(torch.float32, torch.float64, casting='promote'))
+
+        self.assertFalse(torch._can_cast(torch.float32, torch.float16, casting='promote'))
+        self.assertFalse(torch._can_cast(torch.float64, torch.float16, casting='promote'))
+        self.assertFalse(torch._can_cast(torch.float64, torch.float32, casting='promote'))
+
+        self.assertTrue(torch._can_cast(torch.int8, torch.float16, casting='promote'))
+        self.assertTrue(torch._can_cast(torch.int16, torch.float16, casting='promote'))
+        self.assertTrue(torch._can_cast(torch.int16, torch.float32, casting='promote'))
+        self.assertTrue(torch._can_cast(torch.int32, torch.float16, casting='promote'))
+        self.assertTrue(torch._can_cast(torch.int32, torch.float32, casting='promote'))
+        self.assertTrue(torch._can_cast(torch.int32, torch.float64, casting='promote'))
+        self.assertTrue(torch._can_cast(torch.int64, torch.float16, casting='promote'))
+
+        self.assertFalse(torch._can_cast(torch.float32, torch.int32, casting='promote'))
+        self.assertFalse(torch._can_cast(torch.float16, torch.int64, casting='promote'))
+
+        # Default is promote
+        self.assertFalse(torch._can_cast(torch.float16, torch.int64))
+        self.assertTrue(torch._can_cast(torch.int64, torch.float16))
+
+    def test_can_cast_unsafe(self):
+        self.assertTrue(torch._can_cast(torch.int32, torch.int16, casting='unsafe'))
+        self.assertTrue(torch._can_cast(torch.int32, torch.int32, casting='unsafe'))
+        self.assertTrue(torch._can_cast(torch.int32, torch.int64, casting='unsafe'))
+
+        self.assertTrue(torch._can_cast(torch.uint8, torch.int8, casting='unsafe'))
+
+        self.assertTrue(torch._can_cast(torch.float32, torch.float16, casting='unsafe'))
+        self.assertTrue(torch._can_cast(torch.float32, torch.float32, casting='unsafe'))
+        self.assertTrue(torch._can_cast(torch.float32, torch.float64, casting='unsafe'))
+
+        self.assertTrue(torch._can_cast(torch.float32, torch.int16, casting='unsafe'))
+        self.assertTrue(torch._can_cast(torch.float32, torch.int32, casting='unsafe'))
+        self.assertTrue(torch._can_cast(torch.float32, torch.int64, casting='unsafe'))
+
+    def test_can_cast_no_cast(self):
+        self.assertFalse(torch._can_cast(torch.int32, torch.int16, casting='no'))
+        self.assertTrue(torch._can_cast(torch.int32, torch.int32, casting='no'))
+        self.assertFalse(torch._can_cast(torch.int32, torch.int64, casting='no'))
+
+        self.assertFalse(torch._can_cast(torch.uint8, torch.int64, casting='no'))
+
+        self.assertFalse(torch._can_cast(torch.float32, torch.float16, casting='no'))
+        self.assertTrue(torch._can_cast(torch.float32, torch.float32, casting='no'))
+        self.assertFalse(torch._can_cast(torch.float32, torch.float64, casting='no'))
+
+        self.assertFalse(torch._can_cast(torch.float32, torch.int16, casting='no'))
+        self.assertFalse(torch._can_cast(torch.float32, torch.int32, casting='no'))
+        self.assertFalse(torch._can_cast(torch.float32, torch.int64, casting='no'))
+
 # Functions to test negative dimension wrapping
 METHOD = 1
 INPLACE_METHOD = 2

@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/auto_gil.h>
+#include <torch/csrc/Casting.h>
 #include <torch/csrc/Device.h>
 
 #include <c10/util/Exception.h>
@@ -148,6 +149,10 @@ inline IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_
       }
       case TypeKind::StringType:
         return ConstantString::create(py::cast<std::string>(obj));
+      case TypeKind::CastingType: {
+        auto casting = reinterpret_cast<THPCasting*>(obj.ptr());
+        return casting->casting;
+      }
       case TypeKind::DeviceObjType: {
         auto device = reinterpret_cast<THPDevice*>(obj.ptr());
         return device->device;

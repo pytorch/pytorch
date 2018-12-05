@@ -17,6 +17,7 @@
 namespace torch { namespace autograd {
 
 struct Variable;
+using at::Casting;
 using at::Context;
 using at::Device;
 using at::Generator;

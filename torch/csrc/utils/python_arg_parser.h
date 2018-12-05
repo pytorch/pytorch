@@ -42,6 +42,7 @@
 
 #include <torch/csrc/python_headers.h>
 
+#include <torch/csrc/Casting.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
@@ -70,7 +71,7 @@ namespace torch {
 
 enum class ParameterType {
   TENSOR, SCALAR, INT64, DOUBLE, TENSOR_LIST, INT_LIST, GENERATOR,
-  BOOL, STORAGE, PYOBJECT, SCALARTYPE, LAYOUT, DEVICE, STRING
+  BOOL, STORAGE, PYOBJECT, SCALARTYPE, LAYOUT, DEVICE, CASTING, STRING
 };
 
 struct FunctionParameter;
@@ -132,6 +133,8 @@ struct PythonArgs {
   inline at::Device device(int i);
   inline at::Device deviceWithDefault(int i, const at::Device& default_device);
   inline c10::optional<at::Device> deviceOptional(int i);
+  inline c10::Casting casting(int i);
+  inline c10::Casting castingWithDefault(int i, c10::Casting default_casting);
   inline std::string string(int i);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
@@ -183,6 +186,7 @@ struct FunctionParameter {
     double default_double;
     at::ScalarType default_scalartype;
     THPLayout* default_layout;
+    c10::Casting default_casting;
   };
 };
 
@@ -383,6 +387,25 @@ inline c10::optional<at::Device> PythonArgs::deviceOptional(int i) {
   if (!args[i])
     return c10::nullopt;
   return device(i);
+}
+
+inline c10::Casting PythonArgs::casting(int i) {
+  if (!args[i]) return signature.params[i].default_casting;
+  if (THPCasting_Check(args[i])) {
+    const auto casting = reinterpret_cast<THPCasting*>(args[i]);
+    return casting->casting;
+  }
+  std::string val = string(i);
+  c10::optional<c10::Casting> casting = c10::parsePyCastingValue(val);
+  if (!casting) {
+    throw torch::ValueError("Invalid casting value '%s'", val.c_str());
+  }
+  return casting.value();
+}
+
+inline c10::Casting PythonArgs::castingWithDefault(int i, c10::Casting default_casting) {
+  if (!args[i]) return default_casting;
+  return casting(i);
 }
 
 inline std::string PythonArgs::string(int i) {

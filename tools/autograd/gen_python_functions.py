@@ -250,6 +250,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'const THPLayout &': 'layout',
         'const Device &': 'device',
         'optional<ScalarType>': 'scalartypeOptional',
+        'Casting': 'casting',
         'int64_t': 'toInt64',
         'bool': 'toBool',
         'double': 'toDouble',
@@ -266,6 +267,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'const THPLayout &': 'layoutWithDefault',
         'const Device &': 'deviceWithDefault',
         'ScalarType': 'scalartypeWithDefault',
+        'Casting': 'castingWithDefault',
     }
 
     def emit_single_dispatch(declaration, out_idx, base_env):

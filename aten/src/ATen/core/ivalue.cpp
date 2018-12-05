@@ -72,6 +72,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return printList(out, v.toGenericList(), "[", "]");
     case IValue::Tag::Future:
       return out << "Future";
+    case IValue::Tag::Casting:
+      return out << v.toCasting();
     case IValue::Tag::Device:
       return out << v.toDevice();
   }

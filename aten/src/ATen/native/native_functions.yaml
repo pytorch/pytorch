@@ -338,6 +338,9 @@
 - func: broadcast_tensors(TensorList tensors) -> TensorList
   device_guard: false
 
+- func: _can_cast(ScalarType from, ScalarType to, Casting casting=Casting::Promote) -> bool
+  variants: function
+
 - func: cat(TensorList tensors, int64_t dim=0) -> Tensor
 
 - func: cat_out(Tensor result, TensorList tensors, int64_t dim=0) -> Tensor

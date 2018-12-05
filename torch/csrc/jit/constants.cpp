@@ -48,6 +48,11 @@ Value* insertConstant(
   } else if(val.isString()) {
     n->s_(attr::value, val.toString()->string());
     n->output()->setType(StringType::get());
+  } else if(val.isCasting()) {
+    std::stringstream ss;
+    ss << val.toCasting();
+    n->s_(attr::value, ss.str());
+    n->output()->setType(CastingType::get());
   } else if(val.isDevice()) {
     std::stringstream ss;
     ss << val.toDevice();
@@ -125,6 +130,12 @@ RegisterOperators reg({
           auto s = node->s(attr::value);
           return [s](Stack& stack) {
             push(stack, s);
+            return 0;
+          };
+        } else if (type == CastingType::get()) {
+          auto c = c10::parsePyCastingValue(node->s(attr::value)).value();
+          return [c](Stack& stack) {
+            push(stack, c);
             return 0;
           };
         } else if (type == DeviceObjType::get()) {

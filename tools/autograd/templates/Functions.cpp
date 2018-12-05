@@ -7,6 +7,7 @@
 
 #include "Functions.h"
 #include <ATen/Utils.h>
+#include <c10/core/Casting.h>
 #include <c10/core/TensorOptions.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
@@ -21,6 +22,7 @@
 
 // ${generated_comment}
 
+using at::Casting;
 using at::Tensor;
 using at::Scalar;
 using at::IntList;

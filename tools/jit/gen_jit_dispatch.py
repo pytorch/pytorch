@@ -29,7 +29,7 @@ from ..autograd.gen_autograd import RETURNS_VIEWS_OF_INPUT
 #      | Type[] # a dynamically sized list[ of a type
 #      | Scalar[N] # a homogenous fixed size scalar list, single scalars can expand to this list
 #      | (Type1, Type2, ...) # a heterogenous tuple
-#      | Layout | ScalarType | Device | Generator # special singleton types for built-in concepts in tensor lib
+#      | Layout | ScalarType | Casting | Device | Generator # special singleton types for built-in concepts in tensor lib
 
 # clean up the variety of C++ types in the ATen declarations
 # to be in the restricted set of types that the IR represents
@@ -54,6 +54,7 @@ TYPE_MAP = {
     'Layout': 'Layout',
     'Device': 'Device',
     'ScalarType': 'ScalarType',
+    'Casting': 'Casting',
     'int64_t': 'int',
     'double': 'float',
     'bool': 'bool',
@@ -91,6 +92,7 @@ FROM_IVALUE = {
     'int64_t': '{}.toInt()',
     'std::string': '{}.toString()->string()',
     'Generator': 'nullptr',
+    'Casting': '{}.toCasting()',
     'std::array<bool,2>': 'as_bool_array<2>({}.toIntList()->elements())',
     'std::array<bool,3>': 'as_bool_array<3>({}.toIntList()->elements())',
     'std::array<bool,4>': 'as_bool_array<4>({}.toIntList()->elements())',

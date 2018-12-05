@@ -18,6 +18,7 @@
 #include <pybind11/stl.h>
 
 #include <torch/csrc/THP.h>
+#include <torch/csrc/Casting.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
@@ -567,6 +568,7 @@ PyObject* initModule() {
   THPSize_init(module);
   THPDtype_init(module);
   THPDTypeInfo_init(module);
+  THPCasting_init(module);
   THPLayout_init(module);
   THPDevice_init(module);
   ASSERT_TRUE(THPVariable_initModule(module));

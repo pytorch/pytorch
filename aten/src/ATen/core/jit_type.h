@@ -27,6 +27,7 @@ _(FutureType) \
 _(IntType) \
 _(NoneType) \
 _(StringType) \
+_(CastingType) \
 _(GeneratorType) \
 _(BoolType) \
 _(OptionalType) \
@@ -781,6 +782,28 @@ struct CAFFE2_API NoneType : public Type {
 private:
   NoneType()
   : Type(TypeKind::NoneType) {}
+};
+
+struct CastingType;
+using CastingTypePtr = std::shared_ptr<CastingType>;
+// This type represents a Casting
+struct CAFFE2_API CastingType : public Type {
+  static CastingTypePtr create() {
+    return CastingTypePtr(new CastingType()); // NOLINT(modernize-make-shared)
+  }
+  DEFINE_IS_SUBCLASS(CastingType);
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "Casting";
+  }
+  static const TypeKind Kind = TypeKind::CastingType;
+  // global singleton
+  static CastingTypePtr get();
+private:
+  CastingType()
+  : Type(TypeKind::CastingType) {}
 };
 
 struct GeneratorType;

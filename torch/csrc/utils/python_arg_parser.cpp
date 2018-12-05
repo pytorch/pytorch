@@ -28,6 +28,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"PyObject*", ParameterType::PYOBJECT},
   {"ScalarType", ParameterType::SCALARTYPE},
   {"optional<ScalarType>", ParameterType::SCALARTYPE},
+  {"Casting", ParameterType::CASTING},
   {"Layout", ParameterType::LAYOUT},
   {"Device", ParameterType::DEVICE},
   {"std::string", ParameterType::STRING},
@@ -141,6 +142,8 @@ bool FunctionParameter::check(PyObject* obj) {
     case ParameterType::STORAGE: return isStorage(obj);
     case ParameterType::PYOBJECT: return true;
     case ParameterType::SCALARTYPE: return THPDtype_Check(obj);
+    case ParameterType::CASTING:
+      return THPUtils_checkString(obj)  || THPCasting_Check(obj);
     case ParameterType::LAYOUT: return THPLayout_Check(obj);
     case ParameterType::DEVICE:
       return THPUtils_checkLong(obj) || THPUtils_checkString(obj) || THPDevice_Check(obj);
@@ -162,6 +165,7 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::STORAGE: return "torch.Storage";
     case ParameterType::PYOBJECT: return "object";
     case ParameterType::SCALARTYPE: return "torch.dtype";
+    case ParameterType::CASTING: return "torch.casting";
     case ParameterType::LAYOUT: return "torch.layout";
     case ParameterType::DEVICE: return "torch.device";
     case ParameterType::STRING: return "str";
@@ -243,6 +247,12 @@ void FunctionParameter::set_default_str(const std::string& str) {
     } else {
       throw std::runtime_error("invalid default value for ScalarType: " + str);
     }
+  } else if (type_ == ParameterType::CASTING) {
+    c10::optional<c10::Casting> casting = c10::parseCastingValue(str);
+    if (!casting) {
+      throw std::runtime_error("invalid default casting string: " + str);
+    }
+    default_casting = casting.value();
   } else if (type_ == ParameterType::LAYOUT) {
     if (str == "None") {
       default_layout = nullptr;

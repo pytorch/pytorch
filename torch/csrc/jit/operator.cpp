@@ -68,6 +68,7 @@ struct SchemaParser {
     static std::unordered_map<std::string, TypePtr> type_map = {
       {"Generator", GeneratorType::get() },
       {"ScalarType", IntType::get() },
+      {"Casting", CastingType::get() },
       {"Layout", IntType::get() },
       {"Device", DeviceObjType::get() },
       {"Scalar", NumberType::get() },
@@ -290,6 +291,18 @@ struct SchemaParser {
     L.expect(TK_NONE);
     return IValue();
   }
+  IValue parseCastingDefault(const SourceRange& range) {
+    auto text = L.expect(TK_IDENT).text();
+    if(text == "Casting" && L.nextIf(':')) {
+      L.expect(':');
+      text = L.expect(TK_IDENT).text();
+    }
+    auto casting = c10::parseCastingValue(text);
+    if (casting) {
+      return casting.value();
+    }
+    throw ErrorReport(range) << "unexpected casting value";
+  }
   IValue parseDefaultValue(TypePtr arg_type, c10::optional<int32_t> arg_N) {
     auto range = L.cur().range;
     switch(arg_type->kind()) {
@@ -305,6 +318,10 @@ struct SchemaParser {
       case TypeKind::FloatType:
         return parseSingleConstant(arg_type->kind());
         break;
+      case TypeKind::CastingType: {
+        return parseCastingDefault(range);
+        break;
+      }
       case TypeKind::DeviceObjType: {
         auto device_text = parseStringLiteral(range, L.expect(TK_STRINGLITERAL).text());
         return c10::Device(device_text);
