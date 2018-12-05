@@ -234,7 +234,7 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
     _handle = PyBytes_FromStringAndSize((char *)&handle, CUDA_IPC_HANDLE_SIZE);
     _offset = PyLong_FromSsize_t((Py_ssize_t)offset);
     std::cout << "caching block of size " << base_size << " bytes, scalar_t size " << sizeof(scalar_t) << std::endl;
-  std::cout << "storage offset " << offset << " bytes" << std::endl;
+    std::cout << "storage offset " << offset << " bytes" << std::endl;
   }
   std::cout << "storage size " << storage->numel() * sizeof(scalar_t) << " bytes" << std::endl;
 
@@ -242,8 +242,14 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
     return nullptr;
   }
   PyTuple_SET_ITEM(tuple.get(), 0, device.release());
+  // MemHandle(of basePtr)
   PyTuple_SET_ITEM(tuple.get(), 1, _handle.release());
+  // Size(in bytes) of the real storage, note this is not the size of basePtr memory block.
   PyTuple_SET_ITEM(tuple.get(), 2, size.release());
+  // Offset(in bytes) of the real storage in the basePtr memory block.
+  // NB: this offset MUST be in bytes instead of numel, since we use (storage_handle, offset)
+  //     as key in shared_cache(multiprocessing/reduction.py).
+  //     Offset in numel cannot uniquely represent a storage.
   PyTuple_SET_ITEM(tuple.get(), 3, _offset.release());
   return tuple.release();
   END_HANDLE_TH_ERRORS
@@ -258,16 +264,17 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
   PyObject *_size = PyTuple_GET_ITEM(args, 2);
   PyObject *_offset = PyTuple_GET_ITEM(args, 3);
   if (!(THPUtils_checkLong(_device) && THPUtils_checkLong(_size)
-      && (_handle == Py_None || PyBytes_Check(_handle))
+      && (_handle != Py_None && PyBytes_Check(_handle))
       && THPUtils_checkLong(_offset))) {
     THPUtils_invalidArguments(args, nullptr, "_new_shared in CUDA mode", 1,
         "(int device, bytes handle, int storage_size, int storage_offset)");
     return nullptr;
   }
 
+  // Storage constructor requires size in numel.
   size_t storage_size = (size_t)THPUtils_unpackLong(_size) / sizeof(scalar_t);
-  size_t storage_offset = (size_t)THPUtils_unpackLong(_offset);
-  ptrdiff_t storage_bytes_offset = storage_offset;
+  ptrdiff_t storage_offset = (ptrdiff_t)THPUtils_unpackLong(_offset);
+  //ptrdiff_t storage_bytes_offset = storage_offset;
 
   int64_t device = THPUtils_unpackLong(_device);
   at::cuda::CUDAGuard device_guard(device);
@@ -278,13 +285,15 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
     return nullptr;
   }
   THPUtils_assert(handle_size == CUDA_IPC_HANDLE_SIZE, "incorrect handle size");
-  std::string handle_str = std::string(buffer, handle_size);
+  std::string s_handle = std::string(buffer, handle_size);
+  std::shared_ptr<void> basePtr = THCCaching_CUDAIpcDevptr(s_handle);
 
-  std::shared_ptr<void> basePtr = THCCaching_CUDAIpcDevptr(handle_str);
+  // Offset the basePtr to reconstruct the real storage
+  // devPtr = basePtr + storage_offset
   void* devPtr = basePtr.get();
   std::cout << "caching block ptr: " << devPtr << std::endl;
-  std::cout << "offsets from caching block: " << storage_bytes_offset << std::endl;
-  devPtr = (char*)devPtr + storage_bytes_offset;
+  std::cout << "offsets from caching block: " << storage_offset << std::endl;
+  devPtr = (char*)devPtr + storage_offset;
   std::cout << "storage ptr: " << devPtr << std::endl;
   std::cout << "reconstructing storage of size " << storage_size << std::endl;
 

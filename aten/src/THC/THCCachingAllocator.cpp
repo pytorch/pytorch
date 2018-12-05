@@ -589,26 +589,39 @@ THC_API uint64_t THCCachingAllocator_maxMemoryCached(int device) {
 }
 
 //
+// In CUDA IPC, sender sends a tensor to receiver, THCCaching_CUDAIpcDevptr
+// is called by receiver process to get access to the memory where the tensor
+// was built on sender process.
+//
 // CUDA IPC only allows sharing a big memory block associated with a IpcMemHandle,
-// and it can be opened only once per context per process. There are multiple
-// types of storage in the same IPC mem block, so we must cache the device ptr
-// to construct typed storage as it comes.
-// ipcMemHandle_to_devptr only saves a weak_ptr, and the shared_ptr will call
+// and it can be opened only **once** per context per process. There can be
+// multiple types of storage in the same IPC mem block, so we must cache the
+// device ptr to construct typed storage as it comes.
+//
+// ipcMemHandle_to_devptr maps ipcMemHandle to a device pointer in the process
+// that can be used to access the memory block in the sender process.
+// It only saves a weak_ptr of the device pointer in the map, the shared_ptr
+// will be used to reconstruct all storages in this memory region. And it will deleted in
 // cudaIpcCloseMemHandle when ref_count is 0.
 //
 namespace {
-  std::mutex IpcMemMutex;
+  std::mutex IpcMutex;
   std::unordered_map<std::string, std::weak_ptr<void>> ipcMemHandle_to_devptr;
 }
 
 THC_API std::shared_ptr<void> THCCaching_CUDAIpcDevptr(std::string handle) {
-  std::lock_guard<std::mutex> guard(IpcMemMutex);
+  std::lock_guard<std::mutex> guard(IpcMutex);
+
+  // If this ipcMemHandle hasn't been opened, or already expired, open it to
+  // enable IPC access to that mem block.
   if (ipcMemHandle_to_devptr.find(handle) == ipcMemHandle_to_devptr.end()
       || ipcMemHandle_to_devptr[handle].expired()) {
     void *devPtr = nullptr;
     cudaIpcMemHandle_t ipc_handle = *(cudaIpcMemHandle_t*)handle.c_str();
     THCudaCheck(cudaIpcOpenMemHandle(&devPtr, ipc_handle, cudaIpcMemLazyEnablePeerAccess));
-    auto sp = std::shared_ptr<void>(devPtr, [](void *ptr) {THCudaCheck(cudaIpcCloseMemHandle(ptr));});
+    auto sp = std::shared_ptr<void>(
+        devPtr,
+        [](void *ptr) {THCudaCheck(cudaIpcCloseMemHandle(ptr));});
     std::weak_ptr<void> wp = sp;
     ipcMemHandle_to_devptr[handle] = wp;
     return sp;
