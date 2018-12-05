@@ -1159,7 +1159,10 @@ if _enabled:
                 elif isinstance(item, Parameter) or (isinstance(item, Module) and item is not self):
                     ScriptModule.__setattr__(self, name, item)
             for name in original._buffers:
-                self.register_buffer(name, original._buffers[name])
+                if original._buffers[name] is None:
+                    object.__setattr__(self, name, None)
+                else:
+                    self.register_buffer(name, original._buffers[name])
 
             # Copy constants
             self.__dict__["_constants_set"] = set(getattr(original, "__constants__", []))
