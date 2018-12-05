@@ -2195,7 +2195,9 @@ class _TestTorchMixin(object):
         self.assertEqual('cuda', cuda1.type)
         self.assertEqual(1, cuda1.index)
 
+        self.assertRaises(RuntimeError, lambda: torch.device('cpu:-1'))
         self.assertRaises(RuntimeError, lambda: torch.device('cpu:1'))
+        self.assertRaises(RuntimeError, lambda: torch.device('cpu', -1))
         self.assertRaises(RuntimeError, lambda: torch.device('cpu', 1))
         self.assertRaises(RuntimeError, lambda: torch.device('cuda:-1'))
         self.assertRaises(RuntimeError, lambda: torch.device('cuda', -1))

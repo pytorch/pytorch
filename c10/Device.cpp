@@ -84,8 +84,8 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
       AT_ERROR("Could not parse device index '", device_index,
                "' in device string '", device_string, "'");
     }
-    AT_CHECK(is_cpu() || index_ >= 0,
-             "Non-CPU device index must be -1 or non-negative, got ", index_);
+    AT_CHECK(index_ >= 0,
+             "Device index must be non-negative, got ", index_);
   }
   validate();
 }
