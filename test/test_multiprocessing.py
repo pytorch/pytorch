@@ -329,7 +329,6 @@ class TestMultiprocessing(TestCase):
                      don't support multiprocessing with spawn start method")
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
     @unittest.skipIf(not TEST_MULTIGPU, 'found only 1 GPU')
-    @unittest.skipIf(True, 'fsd')
     def test_cuda_small_tensors(self):
         # Check multiple small tensors which will likely use the same
         # underlying cached allocation

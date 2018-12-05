@@ -233,10 +233,7 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
 
     _handle = PyBytes_FromStringAndSize((char *)&handle, CUDA_IPC_HANDLE_SIZE);
     _offset = PyLong_FromSsize_t((Py_ssize_t)offset);
-    std::cout << "caching block of size " << base_size << " bytes, scalar_t size " << sizeof(scalar_t) << std::endl;
-    std::cout << "storage offset " << offset << " bytes" << std::endl;
   }
-  std::cout << "storage size " << storage->numel() * sizeof(scalar_t) << " bytes" << std::endl;
 
   if (!tuple || !device || !_handle || !size || !_offset) {
     return nullptr;
@@ -291,15 +288,11 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
   // Offset the basePtr to reconstruct the real storage
   // devPtr = basePtr + storage_offset
   void* devPtr = basePtr.get();
-  std::cout << "caching block ptr: " << devPtr << std::endl;
-  std::cout << "offsets from caching block: " << storage_offset << std::endl;
   devPtr = (char*)devPtr + storage_offset;
-  std::cout << "storage ptr: " << devPtr << std::endl;
-  std::cout << "reconstructing storage of size " << storage_size << std::endl;
 
   THWStoragePtr base(THWStorage_(newWithDataAndAllocator)(
       LIBRARY_STATE
-      THCIpcDeleter::makeDataPtr(basePtr, devPtr, device),
+      THCIpcDeleter::makeDataPtr(std::move(basePtr), devPtr, device),
       storage_size, /* allocator */ nullptr));
   base->set_resizable(false);
 

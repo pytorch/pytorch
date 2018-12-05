@@ -619,9 +619,14 @@ THC_API std::shared_ptr<void> THCCaching_CUDAIpcDevptr(std::string handle) {
     void *devPtr = nullptr;
     cudaIpcMemHandle_t ipc_handle = *(cudaIpcMemHandle_t*)handle.c_str();
     THCudaCheck(cudaIpcOpenMemHandle(&devPtr, ipc_handle, cudaIpcMemLazyEnablePeerAccess));
+    // devPtr has to be deleted in same device when created.
+    int curr_device;
+    THCudaCheck(cudaGetDevice(&curr_device));
     auto sp = std::shared_ptr<void>(
         devPtr,
-        [](void *ptr) {THCudaCheck(cudaIpcCloseMemHandle(ptr));});
+        [curr_device](void *ptr) {
+          THCudaCheck(cudaSetDevice(curr_device));
+          THCudaCheck(cudaIpcCloseMemHandle(ptr));});
     std::weak_ptr<void> wp = sp;
     ipcMemHandle_to_devptr[handle] = wp;
     return sp;
