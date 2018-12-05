@@ -463,6 +463,11 @@ class TestOperators(TestCase):
         x = torch.randn(1, 2, 3, 4)
         self.assertONNX(lambda x: torch.randn(1, 2, 3, 4) + x, x)
 
+    def test_rrelu(self):
+        x = torch.randn(1, 2, 3, 4)
+        self.assertONNX(torch.nn.RReLU(), x)
+
+
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'
     _onnx_dep = no_onnx_dep_flag not in common.UNITTEST_ARGS
