@@ -179,6 +179,7 @@ void Variable::Impl::set_data(Tensor new_data) {
 }
 
 void Variable::Impl::release_resources() {
+  data_.unsafeGetTensorImpl()->detach_autograd_meta();
   data_.reset();
 }
 
