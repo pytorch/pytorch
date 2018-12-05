@@ -62,7 +62,7 @@ IF(USE_CUDA OR USE_ROCM)
       SET(all_cuda_cpp ${all_cuda_cpp} ${cudnn_cpp})
     ENDIF()
   ELSEIF(USE_ROCM)
-    SET(all_cuda_cpp ${native_cudnn_cpp} ${native_miopen_cpp} ${miopen_cpp} ${all_cuda_cpp})
+    SET(all_cuda_cpp ${native_miopen_cpp} ${miopen_cpp} ${all_cuda_cpp})
   ENDIF()
 endif()
 
