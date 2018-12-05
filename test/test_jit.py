@@ -9843,7 +9843,6 @@ EXCLUDE_PYTHON_PRINT = {
 }
 
 EXCLUDE_SCRIPT_MODULES = {
-    'test_nn_NLLLoss_weights_ignore_index_neg',
     'test_nn_AdaptiveAvgPool2d_tuple_none',
     'test_nn_AdaptiveAvgPool3d_tuple_none',
     'test_nn_AdaptiveMaxPool2d_tuple_none',
@@ -10709,7 +10708,10 @@ def add_nn_module_test(*args, **kwargs):
         if "FunctionalModule" in str(nn_module):
             return
 
-        constructor_args = kwargs.get('constructor_args', ())
+        if 'constructor_args_fn' in kwargs:
+            constructor_args = kwargs['constructor_args_fn']()
+        else:
+            constructor_args = kwargs.get('constructor_args', ())
 
         # Construct a script module that passes arguments through
         # to self.submodule
