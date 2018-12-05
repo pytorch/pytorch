@@ -304,6 +304,7 @@ class Module(torch._six.with_metaclass(ModuleMeta)):
             Module: self
         """
         return self._apply(lambda t: t.cpu())
+
     def type(self, dst_type):
         r"""Casts all parameters and buffers to :attr:`dst_type`.
 

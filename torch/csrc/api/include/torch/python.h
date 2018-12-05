@@ -36,6 +36,10 @@ inline Dtype py_object_to_dtype(py::object object) {
   throw TypeError("Expected dtype");
 }
 
+template <typename ModuleType>
+using PyModuleClass =
+    py::class_<ModuleType, torch::nn::Module, std::shared_ptr<ModuleType>>;
+
 } // namespace detail
 
 /// Adds method bindings for a pybind11 `class_` that binds an `nn::Module`
@@ -153,11 +157,9 @@ py::class_<ModuleType, Extra...> add_module_bindings(
 template <typename ModuleType>
 torch::disable_if_t<
     torch::detail::has_forward<ModuleType>::value,
-    py::class_<ModuleType, std::shared_ptr<ModuleType>>>
+    detail::PyModuleClass<ModuleType>>
 bind_module(py::module module, const char* name) {
-  return add_module_bindings(
-      py::class_<ModuleType, std::shared_ptr<ModuleType>>(
-          module, name, py::base<torch::nn::Module>()));
+  return add_module_bindings(detail::PyModuleClass<ModuleType>(module, name));
 }
 
 /// Creates a pybind11 class object for an `nn::Module` subclass type and adds
@@ -188,12 +190,10 @@ template <
     typename ModuleType,
     typename =
         torch::enable_if_t<torch::detail::has_forward<ModuleType>::value>>
-py::class_<ModuleType, std::shared_ptr<ModuleType>> bind_module(
+detail::PyModuleClass<ModuleType> bind_module(
     py::module module,
     const char* name) {
-  return add_module_bindings(
-             py::class_<ModuleType, std::shared_ptr<ModuleType>>(
-                 module, name, py::base<torch::nn::Module>()))
+  return add_module_bindings(detail::PyModuleClass<ModuleType>(module, name))
       .def("forward", &ModuleType::forward)
       .def("__call__", &ModuleType::forward);
 }
