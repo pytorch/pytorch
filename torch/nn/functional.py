@@ -2264,9 +2264,9 @@ def cosine_embedding_loss(input1, input2, target, margin=0, size_average=None,
 
 
 @torch._jit_internal.weak_script
-def multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None,
+def multi_margin_loss(input, target, p=1, margin=1., weight=None, size_average=None,
                       reduce=None, reduction='mean'):
-    # type: (Tensor, Tensor, int, int, Optional[Tensor], Optional[bool], Optional[bool], str) -> Tensor
+    # type: (Tensor, Tensor, int, float, Optional[Tensor], Optional[bool], Optional[bool], str) -> Tensor
     r"""multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None,
                           reduce=None, reduction='mean') -> Tensor
 
