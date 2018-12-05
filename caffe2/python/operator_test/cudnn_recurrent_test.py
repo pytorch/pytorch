@@ -15,7 +15,7 @@ import unittest
 class TestLSTMs(unittest.TestCase):
 
     def testEqualToCudnn(self):
-        device_option = caffe2_pb2.HIP if workspace.has_hip_support else caffe2_pb2.CUDA
+        device_option = workspace.GpuDeviceType
         with core.DeviceScope(core.DeviceOption(device_option)):
             T = 8
             batch_size = 4
