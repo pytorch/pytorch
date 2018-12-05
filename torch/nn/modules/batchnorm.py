@@ -13,8 +13,8 @@ from ..._jit_internal import weak_module, weak_script_method
 @weak_module
 class _BatchNorm(Module):
     _version = 2
-    __constants__ = ['training', 'track_running_stats', 'momentum', 'eps',
-                     'weight', 'bias', 'running_mean', 'running_var', 'num_batches_tracked']
+    __constants__ = ['track_running_stats', 'momentum', 'eps', 'weight', 'bias',
+                     'running_mean', 'running_var', 'num_batches_tracked']
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
                  track_running_stats=True):
