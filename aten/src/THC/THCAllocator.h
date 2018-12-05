@@ -9,6 +9,7 @@
 class CAFFE2_API THCIpcDeleter {
  public:
   THCIpcDeleter(std::shared_ptr<void> basePtr);
+  ~THCIpcDeleter();
   static at::DataPtr makeDataPtr(std::shared_ptr<void> basePtr, void* data);
 private:
   std::shared_ptr<void> basePtr_;

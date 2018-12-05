@@ -1,5 +1,7 @@
 #include "THCAllocator.h"
 
+THCIpcDeleter::~THCIpcDeleter() {}
+
 void deleteTHCIpcDeleter(void* ptr) {
   delete static_cast<THCIpcDeleter*>(ptr);
 }
