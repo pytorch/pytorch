@@ -10886,7 +10886,7 @@ def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=()
 def gen_eval_constructor(constructor):
     def eval_constructor(*args, **kwargs):
         cons = constructor(*args, **kwargs)
-        cons.training = False
+        cons.eval()
         return cons
     eval_constructor.__name__ = constructor.__name__
     return eval_constructor
@@ -10965,6 +10965,8 @@ def add_nn_module_test(*args, **kwargs):
                     mod = module(*args)
             else:
                 module = TheModule()
+                if check_eval:
+                    module.eval()
                 module.define(script)
                 self.assertExportImportModule(module, tensors)
                 create_script_module.last_graph = module.graph
