@@ -30,6 +30,7 @@ setup_ci_environment: &setup_ci_environment
     echo "deb https://nvidia.github.io/libnvidia-container/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
     echo "deb https://nvidia.github.io/nvidia-container-runtime/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
     echo "deb https://nvidia.github.io/nvidia-docker/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
+    echo "deb https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1604/x86_64/ /" | sudo tee /etc/apt/sources.list.d/nvidia-trt.list
 
     sudo apt-get -qq update
     sudo apt-get -qq remove linux-image-generic linux-headers-generic linux-generic
