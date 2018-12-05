@@ -205,7 +205,7 @@ class disablefuncmode(Enum):
     EMPTYBODY = 6
 
 
-def matched_files_iter(root_path, includes=('*',), ignores=(), extensions=(), hipify_caffe2=False):
+def matched_files_iter(root_path, includes=('*',), ignores=(), extensions=(), out_of_place_only=False):
     def _fnmatch(filepath, patterns):
         return any(fnmatch.fnmatch(filepath, pattern) for pattern in patterns)
 
@@ -231,9 +231,10 @@ def matched_files_iter(root_path, includes=('*',), ignores=(), extensions=(), hi
         for filename in filenames:
             filepath = os.path.join(rel_dirpath, filename)
             if _fnmatch(filepath, includes) and (not _fnmatch(filepath, ignores)) and match_extensions(filepath):
-                if hipify_caffe2 and not is_caffe2_gpu_file(filepath):
+                if not is_pytorch_file(filepath) and not is_caffe2_gpu_file(filepath):
                     continue
-
+                if out_of_place_only and not is_out_of_place(filepath):
+                    continue
                 yield filepath
 
 
@@ -766,7 +767,11 @@ def get_hip_file_path(filepath):
     return os.path.join(dirpath, root + ext)
 
 
-# Keep this synchronized with includes/ignores in build_pytorch_amd.py
+def is_out_of_place(filepath):
+    return not is_pytorch_file(filepath)
+
+
+# Keep this synchronized with includes/ignores in build_amd.py
 def is_pytorch_file(filepath):
     if filepath.startswith("aten/"):
         if filepath.startswith("aten/src/ATen/core/"):
@@ -870,7 +875,26 @@ def fix_static_global_kernels(in_txt):
     return in_txt
 
 
-def get_kernel_template_params(output_directory, the_file, KernelDictionary, template_param_to_value):
+# Note [PyTorch and Caffe2 kernel name clobber]
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# For some reason, the static_cast logic in pyHIPIFY assumes all kernels
+# have unique names.  This may be true internally within PyTorch and
+# Caffe2, but it is not true across PyTorch and Caffe2.  The metadata
+# in these cases clobbers each other.
+#
+# To prevent this happening, KernelTemplateParams is distinguished
+# by a boolean saying if it is a PyTorch kernel or a Caffe2 kernel.
+# We can't do a more fine-grained distinction, e.g., the filename,
+# because we need to work on the kernel from files distinct from
+# the one they were originally defined in (that's why this is done
+# in two passes).
+#
+# We can soon kill static_cast handling entirely, as hcc will support
+# this properly.  So don't bother refactoring this code; it will
+# get deleted soon.
+
+
+def get_kernel_template_params(output_directory, the_file, KernelTemplateParams, template_param_to_value):
     """Scan for __global__ kernel definitions then extract its argument types, and static cast as necessary"""
     # Read the kernel file.
     with openf(os.path.join(output_directory, the_file), "r") as f:
@@ -938,7 +962,8 @@ def get_kernel_template_params(output_directory, the_file, KernelDictionary, tem
             for idx, arg_type in enumerate(argument_types):
                 formatted_args[idx] = arg_type
 
-            KernelDictionary[kernel_name] = {"kernel_with_template": kernel_with_template, "arg_types": formatted_args}
+            # See Note [PyTorch and Caffe2 kernel name clobber]
+            KernelTemplateParams[(is_pytorch_file(the_file), kernel_name)] = {"kernel_with_template": kernel_with_template, "arg_types": formatted_args}
 
         # Extract generated kernels
         # curandStateMtgp32 *state, int size, T *result, ARG1
@@ -954,7 +979,8 @@ def get_kernel_template_params(output_directory, the_file, KernelDictionary, tem
                 kernel_args = {1: "int", 2: "{0} *".format(kernel_params[0]), 3: kernel_params[1], 4: kernel_params[2]}
 
             # Argument at position 1 should be int
-            KernelDictionary[kernel_name] = {"kernel_with_template": kernel_name, "arg_types": kernel_args}
+            # See Note [PyTorch and Caffe2 kernel name clobber]
+            KernelTemplateParams[(is_pytorch_file(the_file), kernel_name)] = {"kernel_with_template": kernel_name, "arg_types": kernel_args}
 
 
 def disable_unsupported_function_call(function, input_string, replacement):
@@ -1055,7 +1081,7 @@ def extract_arguments(start, string):
 
 
 # Add static_cast to ensure that the type of kernel arguments matches that in the corresponding kernel definition
-def add_static_casts(filepath, KernelTemplateParams):
+def add_static_casts(orig_filepath, filepath, KernelTemplateParams):
     """Add static casts to kernel launches in order to keep launch argument types and kernel definition types matching.
 
        Example:
@@ -1083,11 +1109,13 @@ def add_static_casts(filepath, KernelTemplateParams):
             original_kernel_name_with_template = argument_strings[0].strip()
             kernel_name = original_kernel_name_with_template.split("<")[0].strip()
             ignore = ["upscale"]
-            if kernel_name in KernelTemplateParams and kernel_name not in ignore:
+            if (is_pytorch_file(orig_filepath), kernel_name) in KernelTemplateParams and kernel_name not in ignore:
                 # Add template to the kernel
                 # Add static_casts to relevant arguments
-                kernel_name_with_template = KernelTemplateParams[kernel_name]["kernel_with_template"]
-                argument_types = KernelTemplateParams[kernel_name]["arg_types"]
+                # See Note [PyTorch and Caffe2 kernel name clobber]
+                params = KernelTemplateParams[(is_pytorch_file(orig_filepath), kernel_name)]
+                kernel_name_with_template = params["kernel_with_template"]
+                argument_types = params["arg_types"]
 
                 # The first 5 arguments are simply (function, number blocks, dimension blocks, shared memory, stream)
                 # old_kernel_launch_parameters - will contain the actual arguments to the function itself.
@@ -1210,11 +1238,11 @@ def main():
         required=False)
 
     parser.add_argument(
-        '--hipify_caffe2',
+        '--out-of-place-only',
         type=str2bool,
         default=False,
-        help="Whether to hipify caffe2 source",
-        required=False)
+        help="Whether to only run hipify out-of-place on source files",
+        required=False),
 
     parser.add_argument(
         '--ignores',
@@ -1254,7 +1282,7 @@ def main():
         includes=args.includes,
         json_settings=args.json_settings,
         add_static_casts_option=args.add_static_casts,
-        hipify_caffe2=args.hipify_caffe2,
+        out_of_place_only=args.out_of_place_only,
         ignores=args.ignores,
         show_progress=args.show_progress)
 
@@ -1262,12 +1290,12 @@ def main():
 def hipify(
     project_directory,
     show_detailed=False,
-    extensions=(".cu", ".cuh", ".c", ".cpp", ".h", ".in", ".hpp"),
+    extensions=(".cu", ".cuh", ".c", ".cc", ".cpp", ".h", ".in", ".hpp"),
     output_directory="",
     includes=(),
     json_settings="",
     add_static_casts_option=False,
-    hipify_caffe2=False,
+    out_of_place_only=False,
     ignores=(),
     show_progress=True,
 ):
@@ -1378,7 +1406,7 @@ def hipify(
 
     all_files = list(matched_files_iter(output_directory, includes=includes,
                                         ignores=ignores, extensions=extensions,
-                                        hipify_caffe2=hipify_caffe2))
+                                        out_of_place_only=out_of_place_only))
 
     # Start Preprocessor
     preprocess(
@@ -1400,6 +1428,7 @@ def hipify(
         # Execute the Clang Tool to Automatically add static casts
         for filepath in all_files:
             add_static_casts(
+                filepath,
                 os.path.join(
                     output_directory,
                     get_hip_file_path(filepath)),
