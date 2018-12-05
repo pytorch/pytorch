@@ -173,6 +173,7 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
           wget 'http://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1604/x86_64/nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb'
           sudo dpkg -i nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
           sudo apt-key add /var/nvinfer-runtime-trt-repo-5.0.2-ga-cuda9.0/7fa2af80.pub
+          sudo apt-get -qq clean
           sudo apt-get -qq update
           sudo apt-get -qq install tensorrt
           cmake_args+=("-DUSE_TENSORRT=ON")
