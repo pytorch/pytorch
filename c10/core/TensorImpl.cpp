@@ -1,16 +1,16 @@
-#include <ATen/core/TensorImpl.h>
+#include <c10/core/TensorImpl.h>
 
 #include <c10/core/Backend.h>
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/util/Optional.h>
 
-namespace at {
+namespace c10 {
 
-Tensor& TensorImpl::grad() {
+at::Tensor& TensorImpl::grad() {
   AT_ERROR("grad is not implemented for Tensor");
 }
 
-const Tensor& TensorImpl::grad() const {
+const at::Tensor& TensorImpl::grad() const {
   AT_ERROR("grad is not implemented for Tensor");
 }
 
@@ -111,4 +111,4 @@ at::DataPtr PlacementDeleteContext::makeDataPtr(
           device};
 }
 
-} // namespace at
+} // namespace c10
