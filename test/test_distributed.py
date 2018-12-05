@@ -265,11 +265,6 @@ class _DistTestBase(object):
 
         self._barrier()
 
-    # GET default group
-    def test_get_default_group(self):
-        default_grp = dist.get_default_group()
-        self.assertNotEqual(default_grp, None)
-
     def test_get_backend(self):
         if dist.get_world_size() > 2:
             group = [1, 2]
