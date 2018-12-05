@@ -453,7 +453,6 @@ class TestMultiprocessing(TestCase):
         self.assertFalse(p.is_alive())
 
     def _test_mixed_types_cuda_sharing(self, ctx=mp):
-        # ctx.set_start_method('spawn')
         all_ones = torch.ones(2, 2)
         all_zeros = torch.zeros(2, 2)
         queue = ctx.Queue()

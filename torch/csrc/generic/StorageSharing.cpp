@@ -271,7 +271,6 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
   // Storage constructor requires size in numel.
   size_t storage_size = (size_t)THPUtils_unpackLong(_size) / sizeof(scalar_t);
   ptrdiff_t storage_offset = (ptrdiff_t)THPUtils_unpackLong(_offset);
-  //ptrdiff_t storage_bytes_offset = storage_offset;
 
   int64_t device = THPUtils_unpackLong(_device);
   at::cuda::CUDAGuard device_guard(device);
