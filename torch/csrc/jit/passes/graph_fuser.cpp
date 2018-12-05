@@ -808,6 +808,9 @@ struct GraphFuser {
                        [](const Use& u) { return u.user->matches("aten::size(Tensor self) -> int[]"); });
   }
 
+  // Builds up expressions that compute shapes of all intermediates (and outputs)
+  // of the fusion group, based on the sizes of inputs. You should run DCE to remove
+  // those that you end up not using.
   std::unordered_map<Value*, Value*> buildShapeExpressions(Node * fusion_group) {
     WithInsertPoint insert_guard { fusion_group->next() };
     std::unordered_map<Value*, Value*> shape_of;
@@ -852,6 +855,8 @@ struct GraphFuser {
         sizes_node->i_(attr::chunks, n->i(attr::chunks));
         Value * regular_size = sizes_node->outputs().at(0);
         Value * last_size = sizes_node->outputs().at(1);
+        regular_size->setType(ListType::ofInts());
+        last_size->setType(ListType::ofInts());
         auto outputs = n->outputs();
         for (Value * o : outputs.slice(0, outputs.size() - 1)) {
           shape_of.emplace(o, regular_size);
