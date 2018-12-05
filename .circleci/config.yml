@@ -168,12 +168,14 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
           cmake_args+=("-DBUILD_ATEN=ON")
         fi
 
-        if [[ $BUILD_ENVIRONMENT == py2-cuda9.0-cudnn7-centos7 ]]; then
-          sudo yum -y install wget
-          wget 'https://developer.nvidia.com/compute/machine-learning/tensorrt/5.0/GA_5.0.2.6/local_repos/nv-tensorrt-repo-rhel7-cuda9.0-trt5.0.2.6-ga-20181010-1-1.x86_64.rpm'
-          sudo rpm -ivh nv-tensorrt-repo-rhel7-cuda9.0-trt5.0.2.6-ga-20181010-1-1.x86_64.rpm
-          sudo yum clean expire-cache
-          sudo yum install tensorrt
+        if [[ $BUILD_ENVIRONMENT == py2-cuda9.0-cudnn7-ubuntu16.04 ]]; then
+          sudo apt-get update
+          sudo apt-get -y install wget
+          wget 'http://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1604/x86_64/nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb'
+          sudo dpkg -i nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
+          sudo apt-key add /var/nvinfer-runtime-trt-repo-5.0.2-ga-cuda9.0/7fa2af80.pub
+          sudo apt-get update
+          sudo apt-get -y install tensorrt
           cmake_args+=("-DUSE_TENSORRT=ON")
         fi
 
