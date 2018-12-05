@@ -23,9 +23,9 @@ void EliminateCommonSubexpression(
   std::unordered_set<Node*, HashNode, EqualNode> subexprs;
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++ it) {
     auto node = *it;
-    if (node->isNondeterministic() || node->kind() == prim::PythonOp ||
-        node->kind() == prim::Print || aliasDb.hasWriters(node) ||
-        aliasDb.hasWildcard(node)) {
+    if (node->kind() == prim::PythonOp || node->kind() == prim::Print ||
+        node->kind() == aten::warn || node->isNondeterministic() ||
+        aliasDb.hasWriters(node) || aliasDb.hasWildcard(node)) {
       // Do NOT have enough information to do CSE on these nodes.
       continue;
     }

@@ -330,6 +330,16 @@ RegisterOperators reg({
           };
         }),
     Operator(
+        FunctionSchema("aten::warn", {Argument("message", StringType::get()), Argument("stacklevel", IntType::get(), c10::nullopt, 2, true)}, {}),
+        [](const Node* node) {
+          return [](Stack& stack) {
+            drop(stack, 1);
+            AT_WARN(pop(stack).toStringRef());
+            return 0;
+          };
+        }),
+
+    Operator(
         "prim::RaiseException(str msg) -> ()",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
