@@ -43,10 +43,11 @@ In foo.cc, do:
 // During build time:
 //    The build system should provide flags CAFFE2_PERF_WITH_AVX512,
 //    CAFFE2_PERF_WITH_AVX2, and CAFFE2_PERF_WITH_AVX that corresponds to the
-//    __AVX512F__, __AVX512DQ__, __AVX__, and __AVX2__ flags the compiler
-//    provides. Note that we do not use the compiler flags but rely on the build
-//    system flags, because the common files (like foo.cc above) will always be
-//    built without __AVX512F__, __AVX512DQ__, __AVX__ and __AVX2__.
+//    __AVX512F__, __AVX512DQ__, __AVX512VL__, __AVX__, and __AVX2__ flags the
+//    compiler provides. Note that we do not use the compiler flags but rely on
+//    the build system flags, because the common files (like foo.cc above) will
+//    always be built without __AVX512F__, __AVX512DQ__, __AVX512VL__, __AVX__
+//    and __AVX2__.
 // During run time:
 //    we use cpuid to identify cpu support and run the proper functions.
 
@@ -62,7 +63,8 @@ In foo.cc, do:
 #ifdef CAFFE2_PERF_WITH_AVX512
 #define AVX512_DO(funcname, ...)                       \
   decltype(funcname##__base) funcname##__avx512;       \
-  if (GetCpuId().avx512f() && GetCpuId().avx512dq()) { \
+  if (GetCpuId().avx512f() && GetCpuId().avx512dq() && \
+      GetCpuId().avx512vl()) {                         \
     return funcname##__avx512(__VA_ARGS__);            \
   }
 #else // CAFFE2_PERF_WITH_AVX512
