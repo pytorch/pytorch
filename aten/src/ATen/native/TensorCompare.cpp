@@ -65,7 +65,7 @@ bool is_nonzero(const Tensor& self) {
   if (n > 1) {
     AT_ERROR("bool value of Tensor with more than one value is ambiguous");
   }
-  Scalar localScalar = at::_local_scalar(self);
+  Scalar localScalar = self.item();
   if (localScalar.isFloatingPoint()) {
     return localScalar.to<double>() != 0;
   } else if (localScalar.isIntegral()){
@@ -101,7 +101,7 @@ std::tuple<Tensor, Tensor> kthvalue(const Tensor& self, int64_t k, int64_t dim, 
 std::tuple<Tensor &,Tensor &> kthvalue_out(Tensor& values, Tensor& indices,
                                            const Tensor& self, int64_t k, int64_t dim, bool keepdim) {
   AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "kthvalue only supports CPU AND CUDA backend, got: ", at::toString(self.type().backend()));
+           "kthvalue only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial_no_ident(values, self, dim, keepdim, "kthvalue")) {
     AT_ASSERT(values.dim() == 0);
@@ -121,7 +121,7 @@ std::tuple<Tensor, Tensor> median(const Tensor& self, int64_t dim, bool keepdim)
 std::tuple<Tensor &,Tensor &> median_out(Tensor& values, Tensor& indices,
                                          const Tensor& self, int64_t dim, bool keepdim) {
   AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "median only supports CPU AND CUDA backend, got: ", at::toString(self.type().backend()));
+           "median only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial_no_ident(values, self, dim, keepdim, "median")) {
     AT_ASSERT(values.dim() == 0);
@@ -141,7 +141,7 @@ std::tuple<Tensor, Tensor> mode(const Tensor& self, int64_t dim, bool keepdim) {
 std::tuple<Tensor &,Tensor &> mode_out(Tensor& values, Tensor& indices,
                                        const Tensor& self, int64_t dim, bool keepdim) {
   AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "mode only supports CPU AND CUDA backend, got: ", at::toString(self.type().backend()));
+           "mode only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial_no_ident(values, self, dim, keepdim, "mode")) {
     AT_ASSERT(values.dim() == 0);
@@ -176,7 +176,7 @@ std::tuple<Tensor, Tensor> max(const Tensor& self, int64_t dim, bool keepdim) {
 std::tuple<Tensor &,Tensor &> max_out(Tensor& max, Tensor& max_indices,
                                       const Tensor& self, int64_t dim, bool keepdim) {
   AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "max only supports CPU AND CUDA backend, got: ", at::toString(self.type().backend()));
+           "max only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial_no_ident(max, self, dim, keepdim, "max")) {
     AT_ASSERT(max.dim() == 0);
@@ -219,7 +219,7 @@ std::tuple<Tensor, Tensor> min(const Tensor& self, int64_t dim, bool keepdim) {
 std::tuple<Tensor &,Tensor &> min_out(Tensor& min, Tensor& min_indices,
                                       const Tensor& self, int64_t dim, bool keepdim) {
   AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "min only supports CPU AND CUDA backend, got: ", at::toString(self.type().backend()));
+           "min only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial_no_ident(min, self, dim, keepdim, "min")) {
     AT_ASSERT(min.dim() == 0);

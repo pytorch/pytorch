@@ -4,7 +4,6 @@
 #include "c10/util/Registry.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/net.h"
-#include "caffe2/core/net_async_base.h"
 #include "caffe2/core/net_dag_utils.h"
 #include "caffe2/core/prof_dag_counters.h"
 #include "caffe2/core/stats.h"
@@ -35,15 +34,24 @@ class Tracer;
 struct ExecutionOptions {
   explicit ExecutionOptions(const std::shared_ptr<const NetDef>& net_def);
 
+  // number of gpu streams per gpu per cpu thread
   int streams_per_gpu_ = 1;
+  // ops synchronization options
   bool finish_chain_ = false;
   bool always_schedule_child_ = false;
+  // try to pick gpu stream that is not busy
   bool check_stream_status_ = false;
+  // use single thread pool for all devices
   bool use_single_pool_ = false;
+  // use per net instances thread pools instead of global ones
   bool use_per_net_pools_ = false;
+  // whether RunAsync is blocking
   bool is_blocking_ = false;
+  // prof_dag counters reporting
   bool report_stats_ = false;
+  // immediately run children tasks inline whenever possible
   bool use_dfs_scheduling_ = false;
+  // run net's root tasks in RunAsync thread instead of in thread pool
   bool run_root_tasks_inline_ = false;
 };
 
@@ -100,6 +108,7 @@ class CAFFE2_API AsyncNetBase : public NetBase {
   bool run(int task_id, int stream_id);
   int stream(int task_id);
   TaskThreadPoolBase* pool(const DeviceOption& device_option);
+  TaskThreadPoolBase* pool();
 
   void finishTasks(const std::unordered_set<int>& task_ids);
   void finalizeEvents();

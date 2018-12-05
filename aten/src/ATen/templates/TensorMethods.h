@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ATen/core/Tensor.h"
-#include "ATen/core/Scalar.h"
+#include <c10/core/Scalar.h>
 #include "ATen/core/SparseTensorRef.h"
 #include "ATen/core/Type.h"
 #include "ATen/core/TensorOptions.h"
@@ -20,6 +20,10 @@ inline Tensor Tensor::cpu() const {
 
 inline Tensor Tensor::cuda() const {
   return toType(type().cuda());
+}
+
+inline Tensor Tensor::hip() const {
+  return toType(type().hip());
 }
 
 inline Tensor & Tensor::copy_(const Tensor & src, bool non_blocking) {
@@ -89,6 +93,15 @@ inline bool is_cuda(Tensor self) {
   return self.is_cuda();
 }
 
+inline bool Tensor::is_hip() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->is_hip();
+}
+
+inline bool is_hip(Tensor self) {
+  return self.is_hip();
+}
+
 inline bool Tensor::is_sparse() const {
   // NB: this is not a native function to avoid dispatching overhead.
   return impl_->is_sparse();
@@ -106,20 +119,20 @@ inline bool is_sparse(Tensor self) {
         "expected scalar type ",                 \
         #name,                                   \
         " but found ",                           \
-        at::toString(type().scalarType()));      \
+        c10::toString(type().scalarType()));     \
     return static_cast<T*>(this->data_ptr());    \
   }
 
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)
 #undef DEFINE_CAST
 
-#define DEFINE_TO_C_TYPE(T, name, _)   \
-  template <>                          \
-  inline T Tensor::item() const {      \
-    return _local_scalar().to##name(); \
+#define DEFINE_ITEM(T, name, _)   \
+  template <>                     \
+  inline T Tensor::item() const { \
+    return item().to##name();     \
   }
 
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_TO_C_TYPE)
-#undef DEFINE_TO_C_TYPE
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_ITEM)
+#undef DEFINE_ITEM
 
 } //namespace at

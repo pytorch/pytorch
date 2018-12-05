@@ -2,6 +2,7 @@
 
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/peephole.h"
+#include "torch/csrc/jit/passes/alias_analysis.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/symbolic_variable.h"
@@ -80,7 +81,7 @@ bool have_same_shape(at::TensorList inputs) {
                      });
 }
 
-bool shape_is_fast(const at::Tensor& lhs, const at::Tensor& rhs) {
+bool shape_is_fast_for_reduce(const at::Tensor& lhs, const at::Tensor& rhs) {
   size_t l = lhs.size(0);
   size_t m = lhs.size(1);
   size_t r = rhs.size(1);
@@ -107,8 +108,7 @@ RegisterOperators mm_tree_reduction_reg({
         auto lhs_inputs = at::TensorList(inputs).slice(0, side_num_elems);
         auto rhs_inputs = at::TensorList(inputs).slice(side_num_elems);
         // TODO: checking this is not free, so we should stop if this keeps failing
-        // TODO: benchmark to find when is this really a win, and add size constraints
-        if (have_same_shape(lhs_inputs) && have_same_shape(rhs_inputs) && shape_is_fast(lhs_inputs[0], rhs_inputs[0])) {
+        if (have_same_shape(lhs_inputs) && have_same_shape(rhs_inputs) && shape_is_fast_for_reduce(lhs_inputs[0], rhs_inputs[0])) {
           auto lhs = at::cat(lhs_inputs, /*dim=*/1);
           auto rhs = at::cat(rhs_inputs, /*dim=*/0);
           push(stack, at::mm(lhs, rhs));
@@ -203,8 +203,9 @@ struct TreeToken {
   }
 };
 
-void BatchMMBlock(Block* block) {
-  enum class Side { LHS, RHS };
+enum class Side { LHS, RHS };
+
+void BatchMMTreeReduce(Block* block) {
   auto graph = block->owningGraph();
 
   // Look for trees in the block
@@ -236,7 +237,7 @@ void BatchMMBlock(Block* block) {
       }
     } else {
       for (auto block : node->blocks()) {
-        BatchMMBlock(block);
+        BatchMMTreeReduce(block);
       }
     }
   }
@@ -260,8 +261,156 @@ void BatchMMBlock(Block* block) {
   }
 }
 
+bool shape_is_fast_for_side(const at::Tensor& other_side_input) {
+  // Cutoff chosed by benchmarking on a TITAN V
+  return other_side_input.numel() <= 1024 * 2048;
+}
+
+RegisterOperators mm_batch_side_reg({
+  Operator(
+    prim::MMBatchSide,
+    [](const Node* node) {
+      size_t num_other_side_inputs = node->inputs().size() - 1;
+      Side single_side = static_cast<Side>(node->i(Symbol::attr("side")));
+      return [num_other_side_inputs, single_side](Stack& stack) {
+        at::Tensor side_input;
+        std::vector<at::Tensor> other_side_inputs;
+        other_side_inputs.reserve(num_other_side_inputs);
+        for (auto it = stack.end() - num_other_side_inputs; it != stack.end(); ++it) {
+          other_side_inputs.push_back(std::move(*it).toTensor());
+        }
+        drop(stack, num_other_side_inputs);
+        pop(stack, side_input);
+
+        auto any_other_input = other_side_inputs[0];
+        if (have_same_shape(other_side_inputs) && shape_is_fast_for_side(other_side_inputs[0])) {
+          auto other_side_input = at::cat(other_side_inputs, single_side == Side::LHS ? 1 : 0);
+          auto mm_out = single_side == Side::LHS ? side_input.mm(other_side_input) : other_side_input.mm(side_input);
+          auto outputs = at::chunk(mm_out, num_other_side_inputs, /*dim=*/single_side == Side::LHS ? 1 : 0);
+          stack.insert(stack.end(), std::make_move_iterator(outputs.begin()),
+                                    std::make_move_iterator(outputs.end()));
+        } else {
+          if (single_side == Side::LHS) {
+            for (at::Tensor& other : other_side_inputs) {
+              stack.emplace_back(side_input.mm(other));
+            }
+          } else {
+            for (at::Tensor& other : other_side_inputs) {
+              stack.emplace_back(other.mm(side_input));
+            }
+          }
+        }
+
+        return 0;
+      };
+    })
+});
+
+std::pair<std::vector<Node*>, std::vector<Node*>>
+gatherIndependentMMUses(Value *value, const AliasDb& alias_db) {
+  const auto postprocess = [&](std::vector<Node*> mms) {
+    if (mms.size() == 0) {
+      return mms;
+    }
+    std::sort(mms.begin(), mms.end(), [](Node* n, Node* m) { return n->isBefore(m); });
+    // Filter out dependent MMs. This algorithm might do very badly if e.g. you have
+    // a lot of independent MMs, that depend on the first one, but I doubt this will
+    // be a common scenario.
+    for (size_t i = 0; i < mms.size(); ++i) {
+      if (mms[i] == nullptr) continue;
+      for (size_t j = i + 1; j < mms.size(); ++j) {
+        if (mms[j] == nullptr) continue;
+        if (!mms[j]->couldMoveBeforeTopologically(mms[i], alias_db)) {
+          mms[j] = nullptr;
+        }
+      }
+    }
+    return filter(mms, [](Node *n) { return n != nullptr; });
+  };
+
+  Block * block = value->node()->owningBlock();
+  std::vector<Node*> lhses; // Will contain nodes where value is used as an lhs
+  std::vector<Node*> rhses; // Like above, but rhs
+  for (Use u : value->uses()) {
+    if (u.user->owningBlock() == block &&
+        u.user->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
+      if (u.offset == 0 && u.user->inputs()[1] != value) {
+        lhses.push_back(u.user);
+      } else if (u.offset == 1 && u.user->inputs()[0] != value) {
+        rhses.push_back(u.user);
+      }
+    }
+  }
+  return std::make_pair(postprocess(lhses), postprocess(rhses));
+}
+
+void BatchMMSide(Block * block, const AliasDb& alias_db) {
+  // NB: 8 is the current loop unrolling factor
+  static constexpr size_t how_many_is_many = 8;
+  const auto batch_side = [&](std::vector<Node*>& mms, Side side) {
+    JIT_ASSERT(!mms.empty());
+    for (int64_t i = static_cast<int64_t>(mms.size()) - 2; i >= 0; --i) {
+      bool move_ok = mms[i]->moveBeforeTopologicallyValid(mms[i + 1], alias_db);
+      JIT_ASSERT(move_ok);
+    }
+    WithInsertPoint insert_guard { mms[0] };
+    Graph* graph = mms[0]->owningGraph();
+    Node* batch_mm = graph->create(prim::MMBatchSide,
+                                   /*inputs=*/{}, /*num_outputs=*/mms.size());
+    graph->insertNode(batch_mm);
+    batch_mm->i_(Symbol::attr("side"), static_cast<int>(side));
+    Value* const_side = mms[0]->inputs().at(side == Side::LHS ? 0 : 1);
+    batch_mm->addInput(const_side);
+    for (size_t i = 0; i < mms.size(); ++i) {
+      batch_mm->addInput(mms[i]->inputs().at(side == Side::LHS ? 1 : 0));
+      mms[i]->output()->replaceAllUsesWith(batch_mm->outputs().at(i));
+    }
+  };
+
+  std::unordered_set<Value*> considered_values;
+  for (Node * node : block->nodes()) {
+    if (node->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
+      for (Value * input : node->inputs()) {
+        if (/*bool not_inserted = */!considered_values.emplace(input).second) {
+          continue;
+        }
+        auto uses_with_many = gatherIndependentMMUses(input, alias_db);
+        if (uses_with_many.first.size() >= how_many_is_many) {
+          batch_side(uses_with_many.first, Side::LHS);
+        }
+        if (uses_with_many.second.size() >= how_many_is_many) {
+          batch_side(uses_with_many.second, Side::RHS);
+        }
+      }
+    } else {
+      for (Block* subblock : node->blocks()) {
+        BatchMMSide(subblock, alias_db);
+      }
+    }
+  }
+
+}
+
+bool hasMutableOperators(Block* block) {
+  for (auto n : block->nodes()) {
+    if (n->kind().is_aten() && n->schema().is_mutable())
+      return true;
+    for (auto b : n->blocks()) {
+      if (hasMutableOperators(b))
+        return true;
+    }
+  }
+  return false;
+}
+
 void BatchMM(std::shared_ptr<Graph>& graph) {
-  BatchMMBlock(graph->block());
+  if (hasMutableOperators(graph->block())) {
+    // TODO(suo): make BatchMM mutability-safe
+    return;
+  }
+  const auto alias_db = AliasAnalysis(graph);
+  BatchMMTreeReduce(graph->block());
+  BatchMMSide(graph->block(), alias_db);
   EliminateDeadCode(graph);
   // It's possible that transpose rearrangements have created sequences of consecutive
   // transposes that didn't exist before.

@@ -47,7 +47,7 @@ class DNNLowPBatchMatMulOpTest(hu.HypothesisTestCase):
 
         for i in range(batch_size):
             avoid_vpmaddubsw_overflow_fc(
-                m, k, n, A[i, ], A_min, A_max, B[i, ], B_min, B_max
+                m, k, n, A[i,], A_min, A_max, B[i,], B_min, B_max
             )
 
         for trans_a, trans_b in product([0, 1], [0, 1]):

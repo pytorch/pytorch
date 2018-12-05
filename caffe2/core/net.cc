@@ -105,6 +105,8 @@ std::vector<NetObserverCreator>* GetNetObserverCreators() {
 }
 
 const std::unordered_map<std::string, std::string>& defaultOverrides() {
+  // redirecting legacy net types to async_scheduling (except for 'simple');
+  // async_scheduling checks net type for backward compatibility
   static const std::unordered_map<std::string, std::string> overrides = {
       {"dag", "async_scheduling"},
       {"prof_dag", "async_scheduling"},

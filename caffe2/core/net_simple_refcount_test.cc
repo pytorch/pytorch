@@ -2,7 +2,6 @@
 #include "c10/util/StringUtil.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/net_async_scheduling.h"
-#include "caffe2/core/net_dag.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/scope_guard.h"
 

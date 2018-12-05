@@ -37,9 +37,10 @@ _sum = sum
 
 
 def _parse_arg(value, desc):
+    if desc == 'none':
+        return value
     if desc == 'v' or not _is_value(value):
         return value
-
     if value.node().kind() != 'onnx::Constant':
         raise RuntimeError("ONNX symbolic expected a constant value in the trace")
     tval = value.node()['value']
@@ -811,9 +812,9 @@ def index_select(g, self, dim, index):
     return g.op("Gather", self, index, axis_i=dim)
 
 
-def index_put(g, self, indices_list_value, values):
+def index_put(g, self, indices_list_value, values, accumulate):
     indices_list = _unpack_list(indices_list_value)
-    args = [self] + indices_list + [values]
+    args = [self] + indices_list + [values, accumulate]
     return g.op("ATen", *args, operator_s='index_put')
 
 
@@ -1348,3 +1349,9 @@ def randn(g, *shapes):
     shapes_list = list(shapes)
     shape = _maybe_get_const(shapes_list[0], "is")
     return g.op('RandomNormal', shape_i=shape)
+
+
+@parse_args('v', 'f', 'f', 'i', 'none')
+def rrelu(g, input, lower, upper, training, generator):
+    p = g.op('RandomUniformLike', input, high_f=upper, low_f=lower)
+    return g.op('PRelu', input, p)

@@ -142,6 +142,14 @@ OnnxifiTransformer::OnnxifiTransformer(bool infer_shapes, bool debug)
       ONNXIFI_STATUS_SUCCESS);
 }
 
+OnnxifiTransformer::~OnnxifiTransformer() {
+  for (unsigned i = 0; i < num_backends_; ++i) {
+    if (lib_->onnxReleaseBackendID(backend_ids_[i]) != ONNXIFI_STATUS_SUCCESS) {
+      LOG(ERROR) << "Error when calling onnxReleaseBackendID";
+    }
+  }
+}
+
 OperatorDef OnnxifiTransformer::BuildOnnxifiOp(
     const std::string& onnx_model_str,
     const std::unordered_map<std::string, TensorShape>& output_shape_hints,
@@ -163,13 +171,19 @@ OperatorDef OnnxifiTransformer::BuildOnnxifiOp(
   }
 
   // Add the input/output
+  auto* input_names = op.add_arg();
+  input_names->set_name("input_names");
   for (const auto& input : net.external_input()) {
     if (!initialization_list.count(input)) {
       op.add_input(input);
+      input_names->add_strings(input);
     }
   }
+  auto* output_names = op.add_arg();
+  output_names->set_name("output_names");
   for (const auto& output : net.external_output()) {
     op.add_output(output);
+    output_names->add_strings(output);
   }
 
   // Add output size hints
@@ -405,14 +419,22 @@ void OnnxifiTransformer::Transform(
         onnx_model.mutable_graph()->add_node()->CopyFrom(n);
       }
 
-      // Add input shape info
-      std::vector<std::string> input_tmp;
+      // Add input/output shape info
+      std::vector<std::string> io_tmp;
       for (const auto& op_input : op.input()) {
-        input_tmp.emplace_back(op_input);
+        io_tmp.emplace_back(op_input);
       }
-      auto io_vec = ConvertToValueInfo(input_tmp, shape_hints);
+      auto io_vec = ConvertToValueInfo(io_tmp, shape_hints);
       for (const auto& i : io_vec) {
         onnx_model.mutable_graph()->add_input()->CopyFrom(i);
+      }
+      io_tmp.clear();
+      for (const auto& op_output : op.output()) {
+        io_tmp.emplace_back(op_output);
+      }
+      io_vec = ConvertToValueInfo(io_tmp, shape_hints);
+      for (const auto& i : io_vec) {
+        onnx_model.mutable_graph()->add_output()->CopyFrom(i);
       }
 
       std::string onnx_model_str;
