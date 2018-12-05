@@ -83,6 +83,7 @@ def rebuild_tensor(cls, storage, metadata):
     t.requires_grad = requires_grad
     return t
 
+
 def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
                         storage_cls, storage_device, storage_handle, storage_size, storage_offset,
                         requires_grad):
@@ -211,12 +212,12 @@ def reduce_tensor(tensor):
                 (type(tensor),
                  tensor.size(),
                  tensor.stride(),
-                 tensor_offset, # tensor offset in its storage
+                 tensor_offset,  # tensor offset in its storage
                  type(storage),
                  device,
-                 handle, # identifier which CUDA allocation is the storage in.
-                 storage_size, # size of the storage
-                 storage_offset, # offset of the storage in the CUDA allocation
+                 handle,  # identifier which CUDA allocation is the storage in.
+                 storage_size,  # size of the storage
+                 storage_offset,  # offset of the storage in the CUDA allocation
                  tensor.requires_grad))
 
     # _backward_hooks purposely omitted here, see Note [Don't serialize hooks]

@@ -117,7 +117,8 @@ def autograd_sharing(queue, ready, master_modified, device, is_parameter):
 
     queue.put(is_ok)
 
-def producer(queue, event):
+
+def mixed_type_producer(queue, event):
     for _ in range(10):
         float_tensor = torch.ones(2, 2).float().cuda()
         byte_tensor = torch.zeros(2, 2).byte().cuda()
@@ -451,7 +452,6 @@ class TestMultiprocessing(TestCase):
         p.join(1)
         self.assertFalse(p.is_alive())
 
-
     def _test_mixed_types_cuda_sharing(self, ctx=mp):
         # ctx.set_start_method('spawn')
         all_ones = torch.ones(2, 2)
@@ -459,7 +459,7 @@ class TestMultiprocessing(TestCase):
         queue = ctx.Queue()
         event = ctx.Event()
 
-        p = ctx.Process(target=producer, args=(queue, event))
+        p = ctx.Process(target=mixed_type_producer, args=(queue, event))
 
         p.start()
 
@@ -473,7 +473,6 @@ class TestMultiprocessing(TestCase):
 
         time.sleep(5)
         p.join()
-
 
     def test_variable_sharing(self):
         for requires_grad in [True, False]:
