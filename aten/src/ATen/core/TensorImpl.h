@@ -900,16 +900,19 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * Return the pointer to autograd metadata.
    */
-  at::AutogradMetaInterface& autograd_meta() {
-    return *autograd_meta_;
+  at::AutogradMetaInterface* autograd_meta() const {
+    return autograd_meta_.get();
   }
 
+  /**
+   * Detach the autograd metadata unique_ptr from this tensor, and return it.
+   */
   std::unique_ptr<at::AutogradMetaInterface> detach_autograd_meta() {
     return std::move(autograd_meta_);
   }
 
   // NOTE: `shallow_copy_and_detach()` does not copy the AutogradMeta pointer
-  // because it requires unique ownership.
+  // because it is meant to be unique for each Variable.
   // NOTE: We don't set `allow_tensor_metadata_change_` to false here, because there are call sites
   // to this function that need to change the shallow copy's size or storage afterwards, and setting
   // `allow_tensor_metadata_change_` to false would prevent that from happening.

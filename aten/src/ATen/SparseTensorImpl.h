@@ -190,7 +190,7 @@ public:
   void set_indices_and_values_unsafe(const Tensor& indices, const Tensor& values);
 
   // NOTE: `shallow_copy_and_detach()` does not copy the AutogradMeta pointer
-  // because it requires unique ownership.
+  // because it is meant to be unique for each Variable.
   // NOTE: We don't set `allow_tensor_metadata_change_` to false here, because there are call sites
   // to this function that need to change the shallow copy's size or storage afterwards, and setting
   // `allow_tensor_metadata_change_` to false would prevent that from happening.

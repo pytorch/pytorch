@@ -175,11 +175,13 @@ class Tensor(torch._C._TensorBase):
 
     .. note::
 
-      Returned Tensor uses the same data tensor as the original one.
+      Returned Tensor shares the same storage with the original one.
       In-place modifications on either of them will be seen, and may trigger
       errors in correctness checks.
-      In-place size / stride / storage changes (such as `resize_` / `resize_as_` / `set_` / `transpose_`)
-      on the returned tensor are not allowed, to ensure consistency with the original tensor.
+      IMPORTANT NOTE: Previously, in-place size / stride / storage changes
+      (such as `resize_` / `resize_as_` / `set_` / `transpose_`) to the returned tensor
+      also update the original tensor. Now, these in-place changes will not update the
+      original tensor anymore, and will instead trigger an error.
     """)
 
     detach_ = _add_docstr(_C._TensorBase.detach_, r"""
