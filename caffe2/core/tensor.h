@@ -4,9 +4,9 @@
 #include "caffe2/core/storage.h"
 #include "caffe2/core/tensor_impl.h"
 
-#include <ATen/core/UndefinedTensorImpl.h>
+#include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/intrusive_ptr.h>
-#include "c10/core/TensorOptions.h"
+#include <c10/core/TensorOptions.h>
 
 namespace caffe2 {
 
