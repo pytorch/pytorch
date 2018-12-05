@@ -1009,7 +1009,11 @@ class _DistTestBase(object):
             else:
                 dist.broadcast(expected_time, dest, group_id)
                 dist.barrier(group_id)
-                self.assertGreaterEqual(time.time(), expected_time[0])
+                self.assertGreaterEqual(
+                    float(time.time()),
+                    float(expected_time[0]),
+                    "destination rank: %d, my rank: %d" % (dest, rank) +
+                    " (if you see this failure, please report in #14554)")
 
         # Use higher timeout for the instance where the test runs
         # against a subgroup and uses a CUDA tensor for expected time.
