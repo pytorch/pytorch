@@ -452,9 +452,11 @@ class TestMultiprocessing(TestCase):
         p.join(1)
         self.assertFalse(p.is_alive())
 
+    # Check sharing a cudaMalloc allocation with different types of storage.
+    # (Issue #11422)
     def _test_mixed_types_cuda_sharing(self, ctx=mp):
-        all_ones = torch.ones(2, 2)
-        all_zeros = torch.zeros(2, 2)
+        all_ones = torch.ones(2, 2).float()
+        all_zeros = torch.zeros(2, 2).byte()
         queue = ctx.Queue()
         event = ctx.Event()
 
