@@ -1,10 +1,11 @@
 #include "DataLoader.h"
 
-// Together with `torch/utils/data/_utils/signal_handling.py`, the following
-// is an effort to do our best to provide some error message to users when a
-// worker dies due to error / critical signals.
-//
-// See NOTE [ Signal handling in multiprocessing data loading ] for more details.
+// In cases like DataLoader, if a worker process dies due to bus error/segfault
+// or just hang, the main process will hang waiting for data. This is difficult
+// to avoid on PyTorch side as it can be caused by limited shm, or other
+// libraries users call in the workers. The following methods is an effort to do
+// our best to provide some error message to users when such unfortunate events
+// happen.
 
 // TODO: The following don't work on Windows. Specifically, sigaction, waitid
 // calls, and SIGCHLD handler. Currently, dummy implementations are provided
@@ -127,7 +128,7 @@ static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module) {
         // workers, and trigger this again.
         pid_set->clear();
         throw std::runtime_error(oss.str());
-      } else if (infop.si_code == CLD_KILLED || infop.si_code == CLD_DUMPED) {  // killed by signal
+      }  else if (infop.si_code == CLD_KILLED || infop.si_code == CLD_DUMPED) {  // killed by signal
         std::ostringstream oss;
         oss << "DataLoader worker (pid " << worker_pid << ") is killed "
             << "by signal: " << strsignal(infop.si_status) << ". ";

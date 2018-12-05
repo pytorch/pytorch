@@ -12,9 +12,9 @@ import unittest
 import subprocess
 import itertools
 from torch import multiprocessing as mp
-from torch.utils.data import _utils, Dataset, TensorDataset, DataLoader, ConcatDataset
-from torch.utils.data._utils import ExceptionWrapper, MP_STATUS_CHECK_INTERVAL
+from torch.utils.data import Dataset, TensorDataset, DataLoader, ConcatDataset
 from torch.utils.data.dataset import random_split
+from torch.utils.data.dataloader import default_collate, ExceptionWrapper, MP_STATUS_CHECK_INTERVAL
 from common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, IS_PPC, NO_MULTIPROCESSING_SPAWN,
                           skipIfRocm, load_tests)
 
@@ -788,16 +788,16 @@ class TestDataLoader(TestCase):
 
         # Should be a no-op
         arr = np.array(['a', 'b', 'c'])
-        _utils.collate.default_collate(arr)
+        default_collate(arr)
 
         arr = np.array([[['a', 'b', 'c']]])
-        self.assertRaises(TypeError, lambda: _utils.collate.default_collate(arr))
+        self.assertRaises(TypeError, lambda: default_collate(arr))
 
         arr = np.array([object(), object(), object()])
-        self.assertRaises(TypeError, lambda: _utils.collate.default_collate(arr))
+        self.assertRaises(TypeError, lambda: default_collate(arr))
 
         arr = np.array([[[object(), object(), object()]]])
-        self.assertRaises(TypeError, lambda: _utils.collate.default_collate(arr))
+        self.assertRaises(TypeError, lambda: default_collate(arr))
 
 
 class StringDataset(Dataset):

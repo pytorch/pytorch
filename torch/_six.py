@@ -51,12 +51,6 @@ else:
     FileNotFoundError = FileNotFoundError
 
 
-if PY2:
-    import Queue as queue
-else:
-    import queue
-
-
 def with_metaclass(meta, *bases):
     """Create a base class with a metaclass."""
     # This requires a bit of explanation: the basic idea is to make a dummy
