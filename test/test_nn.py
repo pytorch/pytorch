@@ -3359,7 +3359,7 @@ class TestNN(NNTestCase):
         net = nn.DataParallel(l)
         out = net(i)
         self.assertEqual(out.get_device(), 0)
-        self.assertEqual(out.data, expected_out)
+        self.assertEqual(out.data, expected_out, dtype2prec[dtype])
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
@@ -3378,7 +3378,7 @@ class TestNN(NNTestCase):
         n = nn.DataParallel(Net())
         out = n(input=i)
         self.assertEqual(out.get_device(), 0)
-        self.assertEqual(out.data, expected_out)
+        self.assertEqual(out.data, expected_out, dtype2prec[dtype])
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
@@ -3397,7 +3397,7 @@ class TestNN(NNTestCase):
         n = nn.DataParallel(Net())
         out = n(input={'data': i, 'unused': []})
         self.assertEqual(out.get_device(), 0)
-        self.assertEqual(out.data, expected_out)
+        self.assertEqual(out.data, expected_out, dtype2prec[dtype])
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
@@ -3416,7 +3416,7 @@ class TestNN(NNTestCase):
         n = nn.DataParallel(Net())
         out = n(input={'data': i, 'unused': {}})
         self.assertEqual(out.get_device(), 0)
-        self.assertEqual(out.data, expected_out)
+        self.assertEqual(out.data, expected_out, dtype2prec[dtype])
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
@@ -3435,7 +3435,7 @@ class TestNN(NNTestCase):
         n = nn.DataParallel(Net())
         out = n(input={'data': i, 'unused': ()})
         self.assertEqual(out.get_device(), 0)
-        self.assertEqual(out.data, expected_out)
+        self.assertEqual(out.data, expected_out, dtype2prec[dtype])
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_device_args(self):
