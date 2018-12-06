@@ -395,8 +395,7 @@ accreal THCTensor_(trace)(THCState *state, THCTensor *src_) {
 
 void THCTensor_(linspace)(THCState *state, THCTensor *r_, scalar_t a, scalar_t b, int64_t n) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, r_));
-  // NumPy allows you to pass different points even if n <= 1 -- should we?
-  THArgCheck(n > 1 || ((n == 0 || n == 1) && (a == b)), 3, "invalid number of points");
+  THArgCheck((n >= 0), 3, "number of points must be non-negative");
   if (THCTensor_(nElement)(state, r_) != n) THCTensor_(resize1d)(state, r_, n);
   if (n == 0) {
     // skip
@@ -419,8 +418,7 @@ void THCTensor_(linspace)(THCState *state, THCTensor *r_, scalar_t a, scalar_t b
 
 void THCTensor_(logspace)(THCState *state, THCTensor *r_, scalar_t a, scalar_t b, int64_t n) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, r_));
-  // NumPy allows you to pass different points even if n <= 1 -- should we?
-  THArgCheck(n > 1 || ((n == 0 || n == 1) && (a == b)), 3, "invalid number of points");
+  THArgCheck((n >= 0), 3, "number of points must be non-negative");
   if (THCTensor_(nElement)(state, r_) != n) THCTensor_(resize1d)(state, r_, n);
   if (n == 0) {
     // skip

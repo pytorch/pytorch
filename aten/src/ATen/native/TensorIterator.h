@@ -228,6 +228,7 @@ protected:
   bool is_reduction_ = false;
   bool compute_common_dtype_ = true;
   bool allow_cpu_scalars_ = false;
+  bool promote_gpu_output_dtypes_ = false;
 };
 
 struct TensorIterator::Builder {
