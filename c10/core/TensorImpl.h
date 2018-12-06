@@ -105,7 +105,7 @@ using PlacementDtor = void (*)(void*, size_t);
  * data pointer before the DataPtr is destructed.
  * `data_ptr_` owns the memory.
  */
-struct CAFFE2_API PlacementDeleteContext {
+struct C10_API PlacementDeleteContext {
   DataPtr data_ptr_;
   PlacementDtor placement_dtor_;
   size_t size_;
