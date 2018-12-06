@@ -346,7 +346,6 @@ Caffe2Backend::get_special_operators() const {
               {"GlobalMaxPool", &Caffe2Backend::CreateConvPoolOpBase},
               {"MaxPool", &Caffe2Backend::CreateConvPoolOpBase},
               {"Reshape", &Caffe2Backend::CreateReshape},
-              {"Gather", &Caffe2Backend::CreateGather},
               {"Gemm", &Caffe2Backend::CreateGemm},
               {"Pad", &Caffe2Backend::CreatePad},
               {"Concat", &Caffe2Backend::CreateConcat},
@@ -629,38 +628,6 @@ Caffe2Ops Caffe2Backend::CreateReciprocal(
   exponent.set_name("exponent");
   exponent.set_f(-1.0);
   BuildOperator(c2_op, "Pow", {node.input(0)}, {node.output(0)}, {exponent});
-  return ret;
-}
-
-Caffe2Ops Caffe2Backend::CreateGather(
-    OnnxNode* onnx_node,
-    const ConversionContext& ctx) {
-  const auto& node = onnx_node->node;
-  if (node.input_size() < 2 || node.output_size() < 1) {
-    CAFFE_THROW("Caffe2 Gather should have 2 inputs and 1 output");
-  }
-
-  Caffe2Ops ret;
-  auto* c2_op = ret.ops.Add();
-
-  std::vector<std::string> inputs;
-  inputs.emplace_back(node.input(0));
-  inputs.emplace_back(node.input(1));
-  std::vector<std::string> outputs;
-  outputs.emplace_back(node.output(0));
-
-  auto axis = onnx_node->attributes.get<int64_t>("axis", 0L);
-  if (axis == 0) {
-    BuildOperator(c2_op, "Gather", inputs, outputs);
-  } else if (axis == 1) {
-    BuildOperator(c2_op, "BatchGather", inputs, outputs);
-  } else {
-    CAFFE_THROW(
-        "Caffe2 only supports Gather with axis being 0 or 1, ",
-        "whereas axis is ",
-        axis);
-  }
-
   return ret;
 }
 
