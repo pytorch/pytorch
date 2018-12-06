@@ -112,7 +112,7 @@ class CAFFE2_API Tensor final {
    * After CopyFrom, this function guarantees that the destination tensor will
    * have the same initialization state and dtype as src.  This function
    * preserves the DeviceType of the source tensor (so, e.g., if you allocate
-   * a tensor on CPU and then CopyToDevice a CUDA tensor, that will to a
+   * a tensor on CPU and then CopyFrom a CUDA tensor, that will to a
    * CUDA-to-CPU transfer).
    *
    * 'async' parameter triggers async copy for CUDA tensors
@@ -145,12 +145,12 @@ class CAFFE2_API Tensor final {
       if (impl_->dtype().copy()) {
         AT_ASSERTM(
             impl_->device_type() == ::at::DeviceType::CPU,
-            "In CopyToDevice source and dest tensors must both be CPU for "
+            "In CopyFrom source and dest tensors must both be CPU for "
             "non-POD copy, but dest tensor was ",
             impl_->device_type());
         AT_ASSERTM(
             src.impl_->device_type() == ::at::DeviceType::CPU,
-            "In CopyToDevice source and dest tensors must both be CPU for "
+            "In CopyFrom source and dest tensors must both be CPU for "
             "non-POD copy, but src tensor was ",
             src.impl_->device_type());
         impl_->dtype().copy()(src.impl_->data(), impl_->raw_mutable_data(impl_->dtype()), impl_->numel());
