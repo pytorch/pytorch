@@ -41,7 +41,7 @@ std::shared_ptr<Graph> normalizeGraphForCache(const std::shared_ptr<Graph>& grap
 
 // TODO: lookup by historic string key to start, then issue key
 // as appropriate for faster lookup in the future
-// precondition: graph is from prepareGraphForCache
+// precondition: graph has been normalized via normalizeGraphForCache
 int64_t store(std::shared_ptr<Graph> graph) {
   auto& cache = getKernelCache();
   std::lock_guard<std::mutex> guard{cache.mutex_};
@@ -68,7 +68,7 @@ at::optional<KernelSpec*> retrieve(const int64_t key) {
   return nolock_retrieve(cache, key);
 }
 
-// precondition: graph is from prepareGraphForCache
+// precondition: graph has been normalized via normalizeGraphForCache
 at::optional<KernelSpec*> lookupGraph(std::shared_ptr<Graph> graph) {
   auto& cache = getKernelCache();
   std::lock_guard<std::mutex> guard{cache.mutex_};
