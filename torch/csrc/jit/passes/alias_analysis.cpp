@@ -279,6 +279,8 @@ void AliasDb::analyze(Node* node) {
     case prim::MMTreeReduce:
     case prim::MMBatchSide:
     case prim::None:
+    case prim::BroadcastSizes:
+    case prim::ChunkSizes:
       return analyzeCreator(node);
     case prim::TupleUnpack:
     case prim::TupleIndex:
