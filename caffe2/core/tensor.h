@@ -6,6 +6,7 @@
 
 #include <ATen/core/UndefinedTensorImpl.h>
 #include <c10/util/intrusive_ptr.h>
+#include "ATen/core/Tensor.h"
 #include "ATen/core/TensorOptions.h"
 
 namespace caffe2 {
@@ -49,6 +50,12 @@ class CAFFE2_API Tensor final {
         /*is_variable=*/ false
       )) {
   }
+
+  /**
+   * @brief Creates a caffe2 tensor from an ATen tensor
+   */
+  explicit Tensor(const at::Tensor& tensor)
+      : impl_(std::move(tensor.getIntrusivePtr())) {}
 
   /**
    * @brief Creates a tensor of the given dimension.
@@ -243,6 +250,11 @@ class CAFFE2_API Tensor final {
       const TypeMeta& data_type,
       size_t capacity) {
     impl_.get()->ShareExternalPointer(std::move(data_ptr), data_type, capacity);
+  }
+
+  const c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>& getIntrusivePtr()
+      const {
+    return impl_;
   }
 
   /**
