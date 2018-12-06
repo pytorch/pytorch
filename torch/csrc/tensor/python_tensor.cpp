@@ -372,6 +372,7 @@ void set_default_tensor_type(const at::Type& type) {
   // get the storage first, so if it doesn't exist we don't change the default tensor type
   THPObjectPtr storage = get_storage_obj(type);
   default_tensor_type = const_cast<Type*>(&type);
+  at::set_default_dtype(default_tensor_type->typeMeta());
 
   auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
   if (!torch_module) throw python_error();

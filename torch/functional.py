@@ -388,10 +388,10 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
 
     Arguments:
         input (Tensor): the input tensor
-        n_fft (int, optional): size of Fourier transform
-        hop_length (int): the distance between neighboring sliding window
+        n_fft (int): size of Fourier transform
+        hop_length (int, optional): the distance between neighboring sliding window
             frames. Default: ``None`` (treated as equal to ``floor(n_fft / 4)``)
-        win_length (int): the size of window frame and STFT filter.
+        win_length (int, optional): the size of window frame and STFT filter.
             Default: ``None``  (treated as equal to :attr:`n_fft`)
         window (Tensor, optional): the optional window function.
             Default: ``None`` (treated as window of all :math:`1` s)

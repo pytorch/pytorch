@@ -161,6 +161,13 @@ TaskThreadPoolBase* AsyncNetBase::poolGetter(
   return pool.get();
 }
 
+TaskThreadPoolBase* AsyncNetBase::pool() {
+  // By default using a non-pinned CPU option
+  DeviceOption dev;
+  dev.set_device_type(PROTO_CPU);
+  return pool(dev);
+}
+
 TaskThreadPoolBase* AsyncNetBase::pool(const DeviceOption& device_option) {
   if (options_.use_single_pool_) {
     return poolGetter(cpu_pools_, PROTO_CPU, -1, num_workers_);

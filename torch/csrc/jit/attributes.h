@@ -254,7 +254,7 @@ struct Attributes {
           at::Tensor tensor = t(name);
           // 1-elem tensors are usually boxed scalars, so print them like it
           if (tensor.numel() == 1) {
-            auto scalar_tensor = at::_local_scalar(tensor.view({}));
+            auto scalar_tensor = tensor.view({}).item();
             out << "{";
             if (scalar_tensor.isFloatingPoint()) {
               out << scalar_tensor.toDouble();
