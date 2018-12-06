@@ -191,7 +191,7 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
         raise_exception (bool, optional): indicating whether to raise an exception if
             the check fails. The exception gives more information about the
             exact nature of the failure. This is helpful when debugging gradchecks.
-        check_sparse_nnz (bool, optional): if True, gradcheck allows for SparesTensor input,
+        check_sparse_nnz (bool, optional): if True, gradcheck allows for SparseTensor input,
             and for any SparseTensor at input, gradcheck will perform check at nnz positions only.
 
     Returns:
