@@ -21,8 +21,8 @@ bool InstanceNormOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   const int C = X.dim32(3);
   const size_t offset = H * W * C;
 
-  CAFFE_ENFORCE_EQ(Input(SCALE).size(), C);
-  CAFFE_ENFORCE_EQ(Input(BIAS).size(), C);
+  CAFFE_ENFORCE_EQ(Input(SCALE).numel(), C);
+  CAFFE_ENFORCE_EQ(Input(BIAS).numel(), C);
 
   Y->ResizeLike(X);
   mean->Resize(N, C);
@@ -71,8 +71,8 @@ bool InstanceNormOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const int H = X.dim32(2);
   const int W = X.dim32(3);
 
-  CAFFE_ENFORCE_EQ(scale.size(), C);
-  CAFFE_ENFORCE_EQ(bias.size(), C);
+  CAFFE_ENFORCE_EQ(scale.numel(), C);
+  CAFFE_ENFORCE_EQ(bias.numel(), C);
 
   Y->ResizeLike(X);
   mean->Resize(N, C);

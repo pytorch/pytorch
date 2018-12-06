@@ -35,13 +35,13 @@ look as follows:
 
 .. code-block:: cpp
 
-  #include <ATen/Aten.h>
+  #include <ATen/ATen.h>
 
   at::Tensor a = at::ones({2, 2}, at::kInt);
   at::Tensor b = at::randn({2, 2});
   auto c = a + b.to(at::kInt);
 
-This ``Tensor`` class and all other symbols in ATen are found in the `at::`
+This ``Tensor`` class and all other symbols in ATen are found in the ``at::``
 namespace, documented
 `here <https://pytorch.org/cppdocs/api/namespace_at.html#namespace-at>`_.
 
@@ -61,15 +61,15 @@ a taste of this interface:
   #include <torch/csrc/autograd/variable.h>
   #include <torch/csrc/autograd/function.h>
 
-  at::Tensor a = torch::ones({2, 2}, at::requires_grad());
-  at::Tensor b = torch::randn({2, 2});
+  torch::Tensor a = torch::ones({2, 2}, torch::requires_grad());
+  torch::Tensor b = torch::randn({2, 2});
   auto c = a + b;
   c.backward(); // a.grad() will now hold the gradient of c w.r.t. a.
 
 The ``at::Tensor`` class in ATen is not differentiable by default. To add the
 differentiability of tensors the autograd API provides, you must use tensor
 factory functions from the `torch::` namespace instead of the `at` namespace.
-For example, while a tensor created with `at::ones` will not be differentiable,
+For example, while a tensor created with `torch::ones` will not be differentiable,
 a tensor created with `torch::ones` will be.
 
 C++ Frontend
@@ -90,20 +90,20 @@ frontend includes the following:
 - Entry points to the TorchScript JIT compiler;
 - Helpful utilities to facilitate interfacing with the ATen and Autograd APIs.
 
-See `this <https://pytorch.org/cppdocs/frontend.html>`_ document for a more
+See `this document <https://pytorch.org/cppdocs/frontend.html>`_ for a more
 detailed description of the C++ frontend. Relevant sections of the `torch::`
 namespace related to the C++ Frontend include `torch::nn
-<https://pytorch.org/cppdocs/api/namespace_torch**nn.html#namespace-torch-nn>`_,
+<https://pytorch.org/cppdocs/api/namespace_torch__nn.html#namespace-torch-nn>`_,
 `torch::optim
-<https://pytorch.org/cppdocs/api/namespace_torch**optim.html#namespace-torch-optim>`_,
+<https://pytorch.org/cppdocs/api/namespace_torch__optim.html#namespace-torch-optim>`_,
 `torch::data
-<https://pytorch.org/cppdocs/api/namespace_torch**data.html#namespace-torch-data>`_,
+<https://pytorch.org/cppdocs/api/namespace_torch__data.html#namespace-torch-data>`_,
 `torch::serialize
-<https://pytorch.org/cppdocs/api/namespace_torch**serialize.html#namespace-torch-serialize>`_,
+<https://pytorch.org/cppdocs/api/namespace_torch__serialize.html#namespace-torch-serialize>`_,
 `torch::jit
-<https://pytorch.org/cppdocs/api/namespace_torch**jit.html#namespace-torch-jit>`_
+<https://pytorch.org/cppdocs/api/namespace_torch__jit.html#namespace-torch-jit>`_
 and `torch::python
-<https://pytorch.org/cppdocs/api/namespace_torch**python.html#namespace-torch-python>`_.
+<https://pytorch.org/cppdocs/api/namespace_torch__python.html#namespace-torch-python>`_.
 Examples of the C++ frontend can be found in `this repository
 <https://github.com/goldsborough/examples/tree/cpp/cpp>`_ which is being
 expanded on a continuous and active basis.
@@ -151,7 +151,7 @@ does not add any new functionality to the PyTorch C++ API. Instead, it
 provides integration with Python setuptools as well as JIT compilation
 mechanisms that allow access to ATen, the autograd and other C++ APIs from
 Python. To learn more about the C++ extension API, see
-`this <https://pytorch.org/tutorials/advanced/cpp_extension.html>`_ tutorial.
+`this tutorial <https://pytorch.org/tutorials/advanced/cpp_extension.html>`_.
 
 Contents
 --------
@@ -159,11 +159,17 @@ Contents
 .. toctree::
    :maxdepth: 2
 
-   frontend
    installing
+   frontend
    contributing
    api/library_root
 
+.. toctree::
+  :glob:
+  :maxdepth: 1
+  :caption: Notes
+
+  notes/*
 
 Indices and tables
 ==================
@@ -171,3 +177,11 @@ Indices and tables
 * :ref:`genindex`
 * :ref:`modindex`
 * :ref:`search`
+
+Acknowledgements
+----------------
+
+This documentation website for the PyTorch C++ universe has been enabled by the
+`Exhale <https://github.com/svenevs/exhale/>`_ project and generous investment
+of time and effort by its maintainer, `svenevs <https://github.com/svenevs/>`_.
+We thank Stephen for his work and his help with the PyTorch C++ documentation.

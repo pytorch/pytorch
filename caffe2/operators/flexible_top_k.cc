@@ -23,20 +23,18 @@ template <typename T, class Context>
 bool FlexibleTopKOp<T, Context>::RunOnDevice() {
   auto& input = Input(0);
   auto& k = Input(1);
-  auto* values = Output(0);
-  auto* indices = Output(1);
 
   const T* input_data = input.template data<T>();
   const int64_t* k_data = k.template data<int64_t>();
 
   // get flatten shape of input
-  CAFFE_ENFORCE_GT(input.ndim(), 0);
-  vector<int64_t> input_dims = input.dims().vec();
+  CAFFE_ENFORCE_GT(input.dim(), 0);
+  vector<int64_t> input_dims = input.sizes().vec();
   vector<int64_t> linear_shape = {
       size_to_dim_(input_dims.size() - 1, input_dims), input_dims.back()};
   CAFFE_ENFORCE_EQ(
       linear_shape[0],
-      k.size(),
+      k.numel(),
       "first n-1 dims of input data and K does not match.");
 
   int64_t output_size = 0;
@@ -55,8 +53,8 @@ bool FlexibleTopKOp<T, Context>::RunOnDevice() {
         k_data[i]);
     output_size += k_data[i];
   }
-  values->Resize(output_size);
-  indices->Resize(output_size);
+  auto* values = Output(0, {output_size}, at::dtype<T>());
+  auto* indices = Output(1, {output_size}, at::dtype<int64_t>());
   T* values_data = values->template mutable_data<T>();
   int64_t* indices_data = indices->template mutable_data<int64_t>();
 
@@ -99,22 +97,21 @@ bool FlexibleTopKGradientOp<T, Context>::RunOnDevice() {
   auto& k = Input(1);
   auto& values = Input(2);
   auto& indices = Input(3);
-  auto* output = Output(0);
 
   const int64_t* k_data = k.template data<int64_t>();
   const T* values_data = values.template data<T>();
   const int64_t* indices_data = indices.template data<int64_t>();
 
   // Resize output tensors to be as orignial_input size and initialized with 0
-  CAFFE_ENFORCE_GT(original_input.ndim(), 0);
-  vector<int64_t> original_dims = original_input.dims().vec();
-  output->Resize(original_dims);
+  CAFFE_ENFORCE_GT(original_input.dim(), 0);
+  vector<int64_t> original_dims = original_input.sizes().vec();
+  auto* output = Output(0, original_dims, at::dtype<T>());
   T* output_data = output->template mutable_data<T>();
   math::Set<T, Context>(
-      output->size(), static_cast<T>(0), output_data, &context_);
+      output->numel(), static_cast<T>(0), output_data, &context_);
 
   int64_t index_offset = 0;
-  for (int64_t i = 0; i < k.size(); ++i) {
+  for (int64_t i = 0; i < k.numel(); ++i) {
     // offset of output_data
     int64_t output_offset = i * original_dims.back();
     for (int64_t j = 0; j < k_data[i]; ++j) {

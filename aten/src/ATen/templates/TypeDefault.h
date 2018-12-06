@@ -15,8 +15,11 @@ struct CAFFE2_API TypeDefault : public TypeExtendedInterface {
   bool is_cuda() const override {
     return backend() == Backend::CUDA || backend() == Backend::SparseCUDA;
   }
+  bool is_hip() const override {
+    return backend() == Backend::HIP || backend() == Backend::SparseHIP;
+  }
   bool is_sparse() const override {
-    return backend() == Backend::SparseCPU || backend() == Backend::SparseCUDA;
+    return backend() == Backend::SparseCPU || backend() == Backend::SparseCUDA || backend() == Backend::SparseHIP;
   }
   bool is_distributed() const override {
     return false;
@@ -28,7 +31,11 @@ struct CAFFE2_API TypeDefault : public TypeExtendedInterface {
   Tensor copy(const Tensor & src, bool non_blocking=false, optional<Device> to_device={}) const override;
   Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking=false) const override;
 
-  void backward(Tensor & self, at::optional<Tensor> gradient, bool keep_graph, bool create_graph) const override;
+  void backward(
+      Tensor& self,
+      c10::optional<Tensor> gradient,
+      bool keep_graph,
+      bool create_graph) const override;
   void set_data(Tensor & self, Tensor new_data) const override;
 
   Tensor tensorFromBlob(void * data, IntList sizes, const std::function<void(void*)> & deleter=noop_deleter) const override;

@@ -11,10 +11,10 @@ bool BatchOneHotOp<CPUContext>::DoRunWithType() {
   auto& input = Input(X);
   auto& lens = Input(LENS);
   auto& vals = Input(VALS);
-  CAFFE_ENFORCE_GE(input.ndim(), 1);
-  auto N = input.dim(0);
+  CAFFE_ENFORCE_GE(input.dim(), 1);
+  auto N = input.size(0);
   auto D = input.size_from_dim(1);
-  CAFFE_ENFORCE_EQ(lens.size(), D);
+  CAFFE_ENFORCE_EQ(lens.numel(), D);
 
   const auto* lens_data = lens.template data<int32_t>();
   int64_t output_dim = 0;
@@ -26,9 +26,9 @@ bool BatchOneHotOp<CPUContext>::DoRunWithType() {
   }
   valsOffsets_[D] = output_dim;
 
-  CAFFE_ENFORCE_EQ(vals.size(), output_dim);
-  auto* output = Output(ONE_HOT);
-  output->Resize(N, output_dim);
+  CAFFE_ENFORCE_EQ(vals.numel(), output_dim);
+
+  auto* output = Output(ONE_HOT, {N, output_dim}, at::dtype<T>());
 
   const auto* input_data = input.template data<T>();
   const auto* vals_data = vals.template data<T>();
@@ -110,16 +110,16 @@ bool BatchBucketOneHotOp<CPUContext>::RunOnDevice() {
   auto& input = Input(X);
   auto& lens = Input(LENS);
   auto& boundaries = Input(BOUNDARIES);
-  CAFFE_ENFORCE_GE(input.ndim(), 1);
-  auto N = input.dim(0);
+  CAFFE_ENFORCE_GE(input.dim(), 1);
+  auto N = input.size(0);
   auto D = input.size_from_dim(1);
-  CAFFE_ENFORCE_EQ(lens.size(), D);
+  CAFFE_ENFORCE_EQ(lens.numel(), D);
 
   const auto* lens_data = lens.template data<int32_t>();
 
   CAFFE_ENFORCE_EQ(
-      std::accumulate(lens_data, lens_data + lens.size(), 0),
-      boundaries.size(),
+      std::accumulate(lens_data, lens_data + lens.numel(), 0),
+      boundaries.numel(),
       "The sum of length should be equal to the length of boundaries");
 
   int64_t output_dim = 0;
@@ -128,14 +128,14 @@ bool BatchBucketOneHotOp<CPUContext>::RunOnDevice() {
     // Number of buckets is number of bucket edges + 1
     output_dim += (lens_data[i] + 1);
   }
-  auto* output = Output(ONE_HOT);
-  output->Resize(N, output_dim);
+
+  auto* output = Output(ONE_HOT, {N, output_dim}, at::dtype<float>());
 
   const auto* input_data = input.template data<float>();
   const auto* boundaries_data = boundaries.template data<float>();
   auto* output_data = output->template mutable_data<float>();
 
-  math::Set<float, CPUContext>(output->size(), 0.f, output_data, &context_);
+  math::Set<float, CPUContext>(output->numel(), 0.f, output_data, &context_);
 
   int64_t pos = 0;
   for (int64_t i = 0; i < N; i++) {
@@ -176,26 +176,26 @@ class SegmentOneHotOp : public Operator<CPUContext> {
     auto& lengths = Input(0);
     auto& indices = Input(1);
     auto& index_size_tensor = Input(2);
-    CAFFE_ENFORCE(lengths.ndim() == 1);
-    CAFFE_ENFORCE(indices.ndim() == 1);
-    CAFFE_ENFORCE(index_size_tensor.size() == 1);
-    auto batch_size = lengths.size();
+    CAFFE_ENFORCE(lengths.dim() == 1);
+    CAFFE_ENFORCE(indices.dim() == 1);
+    CAFFE_ENFORCE(index_size_tensor.numel() == 1);
+    auto batch_size = lengths.numel();
     auto index_size = *index_size_tensor.data<int64_t>();
     CAFFE_ENFORCE(index_size > 0);
 
     auto* lengths_ptr = lengths.data<int32_t>();
     auto* indices_ptr = indices.data<int64_t>();
-    auto* one_hots = Output(0);
-    one_hots->Resize(batch_size, index_size);
+
+    auto* one_hots = Output(0, {batch_size, index_size}, at::dtype<float>());
     auto* one_hots_ptr = one_hots->template mutable_data<float>();
-    if (one_hots->size() == 0) {
+    if (one_hots->numel() == 0) {
       return true;
     }
     memset(one_hots_ptr, 0, one_hots->nbytes());
     int el_idx = 0;
     for (int i = 0; i < batch_size; ++i) {
       for (int j = 0; j < lengths_ptr[i]; ++j) {
-        DCHECK(el_idx < indices.size());
+        DCHECK(el_idx < indices.numel());
         auto label_idx = indices_ptr[el_idx++];
         DCHECK((0 <= label_idx) && (label_idx < index_size));
         one_hots_ptr[label_idx] = 1.0;

@@ -121,17 +121,10 @@ function(caffe2_hip_binary_target target_name_or_src)
     prepend(__srcs "${CMAKE_CURRENT_SOURCE_DIR}/" "${target_name_or_src}")
   endif()
 
-  # These two lines are the only differences between
-  # caffe2_hip_binary_target and caffe2_binary_target
-  set_source_files_properties(${__srcs} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-  hip_add_executable(${__target} ${__srcs})
+  caffe2_binary_target(${target_name_or_src})
 
-  target_link_libraries(${__target} ${Caffe2_MAIN_LIBS})
-  # If we have Caffe2_MODULES defined, we will also link with the modules.
-  if (DEFINED Caffe2_MODULES)
-    target_link_libraries(${__target} ${Caffe2_MODULES})
-  endif()
-  install(TARGETS ${__target} DESTINATION bin)
+  target_compile_options(${__target} PRIVATE ${HIP_CXX_FLAGS})
+  target_include_directories(${__target} PRIVATE ${Caffe2_HIP_INCLUDES})
 endfunction()
 
 ##############################################################################
@@ -194,10 +187,10 @@ endmacro()
 
 
 ##############################################################################
-# Add ATen compile options.
+# Add standard compile options.
 # Usage:
-#   aten_compile_options(lib_name)
-function(aten_compile_options libname)
+#   torch_compile_options(lib_name)
+function(torch_compile_options libname)
   target_compile_options(${libname}
     PRIVATE
     -Wall
@@ -216,10 +209,10 @@ endfunction()
 
 
 ##############################################################################
-# Set ATen target properties.
+# Set standard target properties.
 # Usage:
-#   aten_set_target_props(lib_name)
-function(aten_set_target_props libname)
+#   torch_set_target_props(lib_name)
+function(torch_set_target_props libname)
   if(MSVC AND AT_MKL_MT)
     set_target_properties(${libname} PROPERTIES LINK_FLAGS_RELEASE "/NODEFAULTLIB:${VCOMP_LIB}")
     set_target_properties(${libname} PROPERTIES LINK_FLAGS_DEBUG "/NODEFAULTLIB:${VCOMP_LIB}")

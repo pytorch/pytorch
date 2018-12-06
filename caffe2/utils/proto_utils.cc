@@ -1,10 +1,11 @@
 #include "caffe2/utils/proto_utils.h"
 
-#include <ATen/core/DeviceType.h>
+#include <c10/DeviceType.h>
 
 #include <fcntl.h>
 #include <cerrno>
 #include <fstream>
+#include <unordered_set>
 
 #include <google/protobuf/io/coded_stream.h>
 
@@ -30,11 +31,10 @@ C10_EXPORT int DeviceId(const DeviceOption& option) {
     case PROTO_CPU:
       return option.numa_node_id();
     case PROTO_CUDA:
-      return option.cuda_gpu_id();
+    case PROTO_HIP:
+      return option.device_id();
     case PROTO_MKLDNN:
       return option.numa_node_id();
-    case PROTO_HIP:
-      return option.hip_gpu_id();
     default:
       CAFFE_THROW("Unknown device id for device type: ", option.device_type());
   }
@@ -43,10 +43,27 @@ C10_EXPORT int DeviceId(const DeviceOption& option) {
 C10_EXPORT bool IsSameDevice(const DeviceOption& lhs, const DeviceOption& rhs) {
   return (
       lhs.device_type() == rhs.device_type() &&
-      lhs.cuda_gpu_id() == rhs.cuda_gpu_id() &&
-      lhs.hip_gpu_id() == rhs.hip_gpu_id() &&
+      lhs.device_id() == rhs.device_id() &&
       lhs.node_name() == rhs.node_name() &&
       lhs.numa_node_id() == rhs.numa_node_id());
+}
+
+C10_EXPORT bool IsCPUDeviceType(int device_type) {
+  static const std::unordered_set<int> cpu_types{
+      PROTO_CPU,
+      PROTO_MKLDNN,
+      PROTO_IDEEP,
+      PROTO_ONLY_FOR_TEST,
+  };
+  return cpu_types.count(device_type);
+}
+
+C10_EXPORT bool IsGPUDeviceType(int device_type) {
+  static const std::unordered_set<int> gpu_types{
+      PROTO_CUDA,
+      PROTO_HIP,
+  };
+  return gpu_types.count(device_type);
 }
 
 C10_EXPORT bool ReadStringFromFile(const char* filename, string* str) {
@@ -149,7 +166,22 @@ using ::google::protobuf::Message;
 
 namespace TextFormat {
 C10_EXPORT bool ParseFromString(const string& spec, Message* proto) {
-  return ::google::protobuf::TextFormat::ParseFromString(spec, proto);
+  string bc_spec = spec;
+
+  {
+    auto num_replaced = c10::ReplaceAll(bc_spec, "cuda_gpu_id", "device_id");
+    if (num_replaced) {
+      LOG(ERROR) << "Your model was serialized in Protobuf TextFormat and "
+                 << "it has "
+                 << num_replaced
+                 << " places using the deprecated field name 'cuda_gpu_id'!\n"
+                 << spec
+                 << "\nPlease re-export your model in Protobuf binary format "
+                 << "to make it backward compatible for field renaming.";
+    }
+  }
+
+  return ::google::protobuf::TextFormat::ParseFromString(std::move(bc_spec), proto);
 }
 } // namespace TextFormat
 

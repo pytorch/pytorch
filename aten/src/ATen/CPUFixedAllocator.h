@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ATen/core/Error.h"
 #include "TH/TH.h"
+#include "c10/util/Exception.h"
 
 // This file creates a fake allocator that just throws exceptions if
 // it is actually used.

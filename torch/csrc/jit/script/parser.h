@@ -2,13 +2,15 @@
 #include "lexer.h"
 #include "tree.h"
 #include "tree_views.h"
+#include "c10/util/Optional.h"
+#include "torch/csrc/jit/script/parse_string_literal.h"
 
 namespace torch {
 namespace jit {
 namespace script {
 
 
-Decl mergeTypesFromTypeComment(Decl decl, Decl type_annotation_decl, bool is_method) {
+inline Decl mergeTypesFromTypeComment(Decl decl, Decl type_annotation_decl, bool is_method) {
   auto expected_num_annotations = decl.params().size();
   if (is_method) {
     // `self` argument
@@ -30,7 +32,7 @@ Decl mergeTypesFromTypeComment(Decl decl, Decl type_annotation_decl, bool is_met
     new_params.push_back(old[0]);
   }
   for (; i < decl.params().size(); ++i, ++j) {
-    new_params.push_back(Param::create(old[i].range(), old[i].ident(), _new[j].type()));
+    new_params.emplace_back(old[i].withType(_new[j].type()));
   }
   return Decl::create(decl.range(), List<Param>::create(decl.range(), new_params), type_annotation_decl.return_type());
 }
@@ -57,14 +59,29 @@ struct Parser {
         List<Expr>(makeList(range, std::move(inputs))),
         List<Attribute>(makeList(range, std::move(attributes))));
   }
+
+  static bool followsTuple(int kind) {
+    switch(kind) {
+      case TK_PLUS_EQ:
+      case TK_MINUS_EQ:
+      case TK_TIMES_EQ:
+      case TK_DIV_EQ:
+      case TK_NEWLINE:
+      case '=':
+      case ')':
+        return true;
+      default:
+        return false;
+    }
+  }
+
   // exp | expr, | expr, expr, ...
-  TreeRef parseExpOrExpTuple(int end) {
+  Expr parseExpOrExpTuple() {
     auto prefix = parseExp();
     if(L.cur().kind == ',') {
       std::vector<Expr> exprs = { prefix };
-      while(L.cur().kind != end) {
-        L.expect(',');
-        if (L.cur().kind == end)
+      while(L.nextIf(',')) {
+        if (followsTuple(L.cur().kind))
           break;
         exprs.push_back(parseExp());
       }
@@ -98,7 +115,7 @@ struct Parser {
           prefix = TupleLiteral::create(L.cur().range, listExpr);
           break;
         }
-        prefix = parseExpOrExpTuple(')');
+        prefix = parseExpOrExpTuple();
         L.expect(')');
       } break;
       case '[': {
@@ -106,7 +123,7 @@ struct Parser {
         prefix = ListLiteral::create(list.range(), List<Expr>(list));
       } break;
       case TK_STRINGLITERAL: {
-        prefix = parseStringLiteral();
+        prefix = parseConcatenatedStringLiterals();
       } break;
       default: {
         Ident name = parseIdent();
@@ -127,7 +144,7 @@ struct Parser {
     }
     return prefix;
   }
-  TreeRef parseOptionalReduction() {
+  TreeRef parseAssignmentOp() {
     auto r = L.cur().range;
     switch (L.cur().kind) {
       case TK_PLUS_EQ:
@@ -220,54 +237,12 @@ struct Parser {
     return Const::create(t.range, t.text());
   }
 
-  bool isCharCount(char c, const std::string& str, size_t start, int len) {
-    //count checks from [start, start + len)
-    return start + len <= str.size() && std::count(str.begin() + start, str.begin() + start + len, c) == len;
-  }
-
-  std::string parseString(const SourceRange& range, const std::string &str) {
-    int quote_len = isCharCount(str[0], str, 0, 3) ? 3 : 1;
-    auto ret_str = str.substr(quote_len, str.size() - quote_len * 2);
-    size_t pos = ret_str.find('\\');
-    while(pos != std::string::npos) {
-      //invariant: pos has to escape a character because it is a valid string
-      char c = ret_str[pos + 1];
-      switch (ret_str[pos + 1]) {
-        case '\\':
-        case '\'':
-        case '\"':
-        case '\n':
-          break;
-        case 'a':
-          c = '\a';
-          break;
-        case 'b':
-          c = '\b';
-          break;
-        case 'f':
-          c = '\f';
-          break;
-        case 'n':
-          c = '\n';
-          break;
-        case 'v':
-          c = '\v';
-          break;
-        default:
-          throw ErrorReport(range) << " octal and hex escaped sequences are not supported";
-      }
-      ret_str.replace(pos, /* num to erase */ 2, /* num copies */ 1, c);
-      pos = ret_str.find('\\', pos + 1);
-    }
-    return ret_str;
-  }
-
-  StringLiteral parseStringLiteral() {
+  StringLiteral parseConcatenatedStringLiterals() {
     auto range = L.cur().range;
     std::stringstream ss;
     while(L.cur().kind == TK_STRINGLITERAL) {
       auto literal_range = L.cur().range;
-      ss << parseString(literal_range, L.next().text());
+      ss << parseStringLiteral(literal_range, L.next().text());
     }
     return StringLiteral::create(range, ss.str());
   }
@@ -327,12 +302,18 @@ struct Parser {
     } else {
       type = Var::create(L.cur().range, Ident::create(L.cur().range, "Tensor"));
     }
-    return Param::create(type->range(), Ident(ident), Expr(type));
+    TreeRef def;
+    if (L.nextIf('=')) {
+      def = Maybe<Expr>::create(L.cur().range, parseExp());
+    } else {
+      def = Maybe<Expr>::create(L.cur().range);
+    }
+    return Param::create(type->range(), Ident(ident), Expr(type), Maybe<Expr>(def));
   }
 
   Param parseBareTypeAnnotation() {
     auto type = parseExp();
-    return Param::create(type.range(), Ident::create(type.range(), ""), type);
+    return Param::create(type.range(), Ident::create(type.range(), ""), type, Maybe<Expr>::create(type.range()));
   }
 
   TreeRef parseTypeComment(bool parse_full_line=false) {
@@ -356,12 +337,23 @@ struct Parser {
   // 'first' has already been parsed since expressions can exist
   // alone on a line:
   // first[,other,lhs] = rhs
-  Assign parseAssign(List<Expr> list) {
-    auto red = parseOptionalReduction();
-    auto rhs = parseExpOrExpTuple(TK_NEWLINE);
+  TreeRef parseAssign(Expr lhs) {
+    auto op = parseAssignmentOp();
+    auto rhs = parseExpOrExpTuple();
     L.expect(TK_NEWLINE);
-    return Assign::create(list.range(), list, AssignKind(red), Expr(rhs));
+    if (op->kind() == '=') {
+      return Assign::create(lhs.range(), lhs, Expr(rhs));
+    } else {
+      // this is an augmented assignment
+      if (lhs.kind() == TK_TUPLE_LITERAL) {
+        throw ErrorReport(lhs.range())
+            << " augmented assignment can only have one LHS expression";
+      }
+      return AugAssign::create(
+          lhs.range(), lhs, AugAssignKind(op), Expr(rhs));
+    }
   }
+
   TreeRef parseStmt() {
     switch (L.cur().kind) {
       case TK_IF:
@@ -382,13 +374,35 @@ struct Parser {
         auto values = parseList(TK_NOTHING, ',', TK_NEWLINE, &Parser::parseExp);
         return Return::create(range, values);
       }
+      case TK_RAISE: {
+        auto range = L.next().range;
+        auto expr = parseExp();
+        L.expect(TK_NEWLINE);
+        return Raise::create(range, expr);
+      }
+      case TK_ASSERT: {
+        auto range = L.next().range;
+        auto cond = parseExp();
+        Maybe<Expr> maybe_first = Maybe<Expr>::create(range);
+        if (L.nextIf(','))  {
+          auto msg = parseExp();
+          maybe_first = Maybe<Expr>::create(range, Expr(msg));
+        }
+        L.expect(TK_NEWLINE);
+        return Assert::create(range, cond, maybe_first);
+      }
+      case TK_PASS: {
+        auto range = L.next().range;
+        L.expect(TK_NEWLINE);
+        return Pass::create(range);
+      }
       default: {
-        List<Expr> exprs = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseExp);
+        auto lhs = parseExpOrExpTuple();
         if (L.cur().kind != TK_NEWLINE) {
-          return parseAssign(exprs);
+          return parseAssign(lhs);
         } else {
           L.expect(TK_NEWLINE);
-          return ExprStmt::create(exprs[0].range(), exprs);
+          return ExprStmt::create(lhs.range(), lhs);
         }
       }
     }
@@ -443,15 +457,13 @@ struct Parser {
 
   TreeRef parseStatements(bool expect_indent=true) {
     auto r = L.cur().range;
-    if (expect_indent)
+    if (expect_indent) {
       L.expect(TK_INDENT);
-    TreeList stmts;
-    for (size_t i=0; ; ++i) {
-      auto stmt = parseStmt();
-      stmts.push_back(stmt);
-      if (L.nextIf(TK_DEDENT))
-        break;
     }
+    TreeList stmts;
+    do {
+      stmts.push_back(parseStmt());
+    } while(!L.nextIf(TK_DEDENT));
     return c(TK_LIST, r, std::move(stmts));
   }
   Decl parseDecl() {

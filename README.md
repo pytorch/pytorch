@@ -22,11 +22,13 @@ We are in an early-release beta. Expect some adventures and rough edges.
 - [Releases and Contributing](#releases-and-contributing)
 - [The Team](#the-team)
 
-| System | 2.7 | 3.5 |
-| --- | --- | --- |
-| Linux CPU | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) |
-| Linux GPU | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) |
-| Windows GPU | <center>—</center> | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-win-ws2016-cuda9-cudnn7-py3-trigger/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-win-ws2016-cuda9-cudnn7-py3-trigger/)
+| System | 2.7 | 3.5 | 3.6 |
+| :---: | :---: | :---: | :--: |
+| Linux CPU | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | <center>—</center> |
+| Linux GPU | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | <center>—</center> |
+| Windows GPU | <center>—</center> | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-win-ws2016-cuda9-cudnn7-py3-trigger/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-win-ws2016-cuda9-cudnn7-py3-trigger/) |  <center>—</center> |
+| Linux (ppc64le) CPU | [![Build Status](https://powerci.osuosl.org/job/pytorch-master-nightly-py2-linux-ppc64le/badge/icon)](https://powerci.osuosl.org/job/pytorch-master-nightly-py2-linux-ppc64le/) | — | [![Build Status](https://powerci.osuosl.org/job/pytorch-master-nightly-py3-linux-ppc64le/badge/icon)](https://powerci.osuosl.org/job/pytorch-master-nightly-py3-linux-ppc64le/) |
+| Linux (ppc64le) GPU | [![Build Status](https://powerci.osuosl.org/job/pytorch-linux-cuda9-cudnn7-py2-mpi-build-test-gpu/badge/icon)](https://powerci.osuosl.org/job/pytorch-linux-cuda9-cudnn7-py2-mpi-build-test-gpu/) | — | [![Build Status](https://powerci.osuosl.org/job/pytorch-linux-cuda92-cudnn7-py3-mpi-build-test-gpu/badge/icon)](https://powerci.osuosl.org/job/pytorch-linux-cuda92-cudnn7-py3-mpi-build-test-gpu/) |
 
 See also the [ci.pytorch.org HUD](https://ezyang.github.io/pytorch-ci-hud/build/pytorch-master).
 
@@ -88,7 +90,7 @@ You get the best of speed and flexibility for your crazy research.
 
 PyTorch is not a Python binding into a monolithic C++ framework.
 It is built to be deeply integrated into Python.
-You can use it naturally like you would use NumPy / SciPy / scikit-learn etc.
+You can use it naturally like you would use [NumPy](http://www.numpy.org/) / [SciPy](https://www.scipy.org/) / [scikit-learn](http://scikit-learn.org) etc.
 You can write your new neural network layers in Python itself, using your favorite libraries
 and use packages such as Cython and Numba.
 Our goal is to not reinvent the wheel where appropriate.
@@ -104,7 +106,7 @@ We hope you never spend hours debugging your code because of bad stack traces or
 ### Fast and Lean
 
 PyTorch has minimal framework overhead. We integrate acceleration libraries
-such as Intel MKL and NVIDIA (cuDNN, NCCL) to maximize speed.
+such as [Intel MKL](https://software.intel.com/mkl) and NVIDIA (cuDNN, NCCL) to maximize speed.
 At the core, its CPU and GPU Tensor and neural network backends
 (TH, THC, THNN, THCUNN) are mature and have been tested for years.
 
@@ -210,7 +212,7 @@ python setup.py install
 
 ### Docker image
 
-Dockerfile is supplied to build images with cuda support and cudnn v7. You can pass -e PYTHON_VERSION=x.y flag to specificy which python to be used by Miniconda, or leave it unset to use the default. Build as usual
+Dockerfile is supplied to build images with cuda support and cudnn v7. You can pass `-e PYTHON_VERSION=x.y` flag to specify which python version is to be used by Miniconda, or leave it unset to use the default. Build as usual
 ```
 docker build -t pytorch -f docker/pytorch/Dockerfile .
 ```
@@ -226,7 +228,7 @@ should increase shared memory size either with `--ipc=host` or `--shm-size` comm
 
 ### Building the Documentation
 
-To build documentation in various formats, you will need Sphinx and the
+To build documentation in various formats, you will need [Sphinx](http://www.sphinx-doc.org) and the
 readthedocs theme.
 
 ```
@@ -273,3 +275,7 @@ PyTorch is currently maintained by [Adam Paszke](https://apaszke.github.io/), [S
 A non-exhaustive but growing list needs to mention: Trevor Killeen, Sasank Chilamkurthy, Sergey Zagoruyko, Adam Lerer, Francisco Massa, Alykhan Tejani, Luca Antiga, Alban Desmaison, Andreas Kopf, James Bradbury, Zeming Lin, Yuandong Tian, Guillaume Lample, Marat Dukhan, Natalia Gimelshein, Christian Sarofeen, Martin Raison, Edward Yang, Zachary Devito.
 
 Note: this project is unrelated to [hughperkins/pytorch](https://github.com/hughperkins/pytorch) with the same name. Hugh is a valuable contributor in the Torch community and has helped with many things Torch and PyTorch.
+
+## License
+
+PyTorch is BSD-style licensed, as found in the LICENSE file.

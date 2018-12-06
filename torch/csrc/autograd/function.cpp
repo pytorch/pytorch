@@ -30,7 +30,7 @@ uint64_t& Function::get_next_sequence_nr() {
 }
 
 auto Function::name() const -> std::string {
-  return at::demangle(typeid(*this).name());
+  return c10::demangle(typeid(*this).name());
 }
 
 AnomalyMetadata* Function::metadata() noexcept {

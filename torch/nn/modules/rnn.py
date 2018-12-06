@@ -304,6 +304,8 @@ class RNN(RNNBase):
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
         where :math:`k = \frac{1}{\text{hidden\_size}}`
 
+    .. include:: cudnn_persistent_rnn.rst
+
     Examples::
 
         >>> rnn = nn.RNN(10, 20, 2)
@@ -421,6 +423,8 @@ class LSTM(RNNBase):
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
         where :math:`k = \frac{1}{\text{hidden\_size}}`
 
+    .. include:: cudnn_persistent_rnn.rst
+
     Examples::
 
         >>> rnn = nn.LSTM(10, 20, 2)
@@ -515,6 +519,8 @@ class GRU(RNNBase):
     .. note::
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
         where :math:`k = \frac{1}{\text{hidden\_size}}`
+
+    .. include:: cudnn_persistent_rnn.rst
 
     Examples::
 

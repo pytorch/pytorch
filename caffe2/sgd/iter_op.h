@@ -13,7 +13,7 @@ namespace caffe2 {
 
 inline void IncrementIter(TensorCPU* output) {
   CAFFE_ENFORCE_EQ(
-      output->size(),
+      output->numel(),
       1,
       "The output of IterOp exists, but not of the right size.");
   int64_t* iter = output->template mutable_data<int64_t>();
@@ -88,7 +88,8 @@ class MutexSerializer : public BlobSerializerBase {
    * fatal error.
    */
   void Serialize(
-      const Blob& blob,
+      const void* pointer,
+      TypeMeta typeMeta,
       const string& name,
       BlobSerializerBase::SerializationAcceptor acceptor) override;
 };

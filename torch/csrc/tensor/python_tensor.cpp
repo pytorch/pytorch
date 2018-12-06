@@ -181,7 +181,7 @@ static const char* get_module(Backend backend) {
 
 static std::string get_name(Backend backend, ScalarType scalarType) {
   std::ostringstream ss;
-  ss << get_module(backend) << "." << at::toString(scalarType) << "Tensor";
+  ss << get_module(backend) << "." << toString(scalarType) << "Tensor";
   return ss.str();
 }
 
@@ -190,7 +190,7 @@ static THPObjectPtr get_storage_obj(const Type& type) {
   auto module_obj = THPObjectPtr(PyImport_ImportModule(module_name));
   if (!module_obj) throw python_error();
 
-  auto storage_name = std::string(at::toString(type.scalarType())) + "Storage";
+  auto storage_name = std::string(toString(type.scalarType())) + "Storage";
   THPObjectPtr storage(PyObject_GetAttrString(module_obj.get(), storage_name.c_str()));
   if (!storage.get()) {
     throw TypeError("couldn't find storage object %s", storage_name.c_str());
@@ -372,6 +372,7 @@ void set_default_tensor_type(const at::Type& type) {
   // get the storage first, so if it doesn't exist we don't change the default tensor type
   THPObjectPtr storage = get_storage_obj(type);
   default_tensor_type = const_cast<Type*>(&type);
+  at::set_default_dtype(default_tensor_type->typeMeta());
 
   auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
   if (!torch_module) throw python_error();
@@ -388,7 +389,7 @@ at::Type& get_default_tensor_type() {
 }
 
 Device getDevice(const at::Tensor& tensor) {
-  if (tensor.type().is_cuda()) {
+  if (tensor.is_cuda()) {
     return at::Device(at::DeviceType::CUDA, tensor.get_device());
   }
   return at::Device(at::DeviceType::CPU);

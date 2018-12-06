@@ -19,17 +19,19 @@ except ImportError:
 SKIP_PYTHON_BINDINGS = [
     'alias', 'contiguous', 'is_cuda', 'is_sparse', 'size', 'stride',
     '.*_backward', '.*_backward_(out|input|weight|bias)', '.*_forward',
-    '.*_forward_out', '_unsafe_view', 'tensor',
-    'sparse_coo_tensor', 'th_sparse_coo_tensor', 'native_sparse_coo_tensor',
+    '.*_forward_out', '_unsafe_view', 'tensor', '_?sparse_coo_tensor.*',
     '_arange.*', '_range.*', '_linspace.*', '_logspace.*',
-    '_sparse_add.*', '_sparse_div.*', '_sparse_mul.*', '_sparse_sub.*',
+    '_sparse_add_out', '_sparse_div.*', '_sparse_mul.*', '_sparse_sub.*',
     'index',
     '_indexCopy_', 'max_values', 'min_values', 'argmax', 'argmin',
-    '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*', '_th_.*',
-    'arange.*', 'range.*', '_gesv.*', '_getri.*', 'slice', 'randint(_out)?',
-    '_local_scalar', '_local_scalar_dense',
+    '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*',
+    '_th_.*', '_thnn_.*',
+    'arange.*', 'range.*', '_gesv.*', '_getri.*', '_inverse.*',
+    '_potrs.*', '_cholesky.*',
+    'slice', 'randint(_out)?',
+    'item', '_local_scalar_dense',
     'max_pool1d', 'max_pool2d', 'max_pool3d', 'linear', 'to',
-    'copy_sparse_to_sparse_'
+    'copy_sparse_to_sparse_',
 ]
 
 # These function signatures are not exposed to Python. Note that this signature
@@ -168,6 +170,7 @@ def gen_py_variable_methods(out, declarations, template_path):
     def should_bind(declaration):
         return (should_generate_python_binding(declaration) and
                 declaration['mode'] != 'NN' and
+                declaration.get('python_module') != 'nn' and
                 'Tensor' in declaration['method_of'])
 
     py_variable_methods = group_declarations_by_name(declarations, should_bind)
@@ -184,7 +187,7 @@ def gen_py_nn_functions(out, declarations, template_path):
 
     def should_bind(declaration):
         return (should_generate_python_binding(declaration) and
-                declaration['mode'] == 'NN')
+                (declaration['mode'] == 'NN' or declaration.get('python_module') == 'nn'))
 
     py_nn_functions = group_declarations_by_name(declarations, should_bind)
 
@@ -201,6 +204,7 @@ def gen_py_torch_functions(out, declarations, template_path):
     def should_bind(declaration):
         return (should_generate_python_binding(declaration) and
                 declaration['mode'] != 'NN' and
+                declaration.get('python_module') != 'nn' and
                 'namespace' in declaration['method_of'])
 
     py_torch_functions = group_declarations_by_name(declarations, should_bind)
@@ -315,7 +319,11 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                     default_expr += '.scalarType()'
                 expr = 'r.{}({}, {})'.format(unpack_with_default, arg_index, default_expr)
             else:
-                unpack = unpack_methods.get(typename, typename.lower())
+                opt_match = re.match(r'c10::optional<(.+)>', typename)
+                if (opt_match):
+                    unpack = opt_match.group(1).lower() + 'Optional'
+                else:
+                    unpack = unpack_methods.get(typename, typename.lower())
                 expr = 'r.{}({})'.format(unpack, arg_index)
 
             if unpack_args:
@@ -331,7 +339,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             elif dispatch_type == 'Tensor &':
                 dispatch_type = 'Tensor'
             elif dispatch_type == 'const Device &':
-                dispatch_type = 'at::optional<int32_t>'
+                dispatch_type = 'c10::optional<int32_t>'
             formal = '{} {}'.format(dispatch_type, name)
             return expr, formal
 
@@ -541,7 +549,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'name': 'dtype',
                 'type': 'const Type &',
                 'simple_type': 'Type',
-                'is_type_dispatched': True,
                 'python_default_init': py_default_dtype,
             }
             python_binding_arguments.append(dtype_arg)
@@ -747,12 +754,13 @@ def get_python_signature(declaration, include_out):
 
     def get_py_formal_arg(arg):
         typename = arg['simple_type']
-        opt_match = re.match(r'optional<(.+)>', typename)
-        if opt_match:
-            typename = opt_match.group(1)
         typename = typename if typename != 'Type' else 'ScalarType'
-        if arg.get('is_nullable') or opt_match:
+
+        # TODO: remove this and make optional types in simple_type to be consistent across
+        # tensor and other types after make Tensor? be optional instead of undefined
+        if arg.get('is_nullable') and '?' not in typename:
             typename = '{}?'.format(typename)
+
         if arg.get('size') is not None:
             typename = '{}[{}]'.format(typename, arg['size'])
         param = typename + ' ' + arg['name']
@@ -763,11 +771,6 @@ def get_python_signature(declaration, include_out):
                 default = 'None'
         if arg.get('python_default_init') is not None:
             default = 'None'
-        if default is None and arg.get('is_type_dispatched', False):
-            # this is necessary because ATen does not have default_types; in this case,
-            # the type exists in the public API (at:: namespace), but not in the type interface;
-            # to match the PyTorch default_type API, we set the default to None.
-            default = get_type_default(declaration)
         if default is not None:
             param += '=' + str(default)
         return param

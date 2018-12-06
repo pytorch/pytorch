@@ -1,13 +1,14 @@
 #include <torch/serialize/input-archive.h>
 
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <torch/csrc/jit/import.h>
 #include <torch/csrc/jit/script/module.h>
 
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 
+#include <istream>
 #include <memory>
 #include <string>
 #include <utility>
@@ -32,7 +33,11 @@ void InputArchive::read(
   // clang-format on
   if (tensor.defined()) {
     torch::NoGradGuard guard;
-    tensor.set_(*read_tensor->slot());
+    if (tensor.device() != read_tensor->slot()->device()) {
+      tensor.set_data(autograd::Variable(*read_tensor->slot()).data());
+    } else {
+      tensor.set_(*read_tensor->slot());
+    }
   } else {
     tensor = std::move(*read_tensor->slot());
   }
@@ -47,11 +52,14 @@ void InputArchive::read(const std::string& key, InputArchive& archive) {
   }
 }
 
-InputArchive::InputArchive(std::shared_ptr<jit::script::Module> module)
-    : module_(std::move(module)) {}
+void InputArchive::load_from(const std::string& filename,
+    c10::optional<torch::Device> device /*= c10::nullopt*/) {
+  module_ = torch::jit::load(filename, device);
+}
 
-InputArchive load_from_file(const std::string& filename) {
-  return InputArchive(torch::jit::load(filename));
+void InputArchive::load_from(std::istream& stream,
+    c10::optional<torch::Device> device /*= c10::nullopt*/) {
+  module_ = torch::jit::load(stream, device);
 }
 } // namespace serialize
 } // namespace torch

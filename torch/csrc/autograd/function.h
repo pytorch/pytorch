@@ -11,7 +11,7 @@
 #include "torch/csrc/utils/variadic.h"
 
 #include <ATen/ATen.h>
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 
 #include <algorithm>
 #include <cstdint>

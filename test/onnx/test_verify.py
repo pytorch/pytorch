@@ -1,5 +1,5 @@
 import torch
-from torch.autograd import Variable, Function
+from torch.autograd import Function
 from torch.nn import Module, Parameter
 import caffe2.python.onnx.backend as backend
 from verify import verify
@@ -40,8 +40,8 @@ class TestVerify(TestCase):
             def forward(self, x, y):
                 return BrokenAdd().apply(x, y)
 
-        x = Variable(torch.Tensor([1, 2]))
-        y = Variable(torch.Tensor([3, 4]))
+        x = torch.tensor([1, 2])
+        y = torch.tensor([3, 4])
         self.assertVerifyExpectFail(MyModel(), (x, y), backend)
 
     def test_jumbled_params(self):
@@ -51,10 +51,10 @@ class TestVerify(TestCase):
 
             def forward(self, x):
                 y = x * x
-                self.param = Parameter(torch.Tensor([2]))
+                self.param = Parameter(torch.tensor([2.0]))
                 return y
 
-        x = Variable(torch.Tensor([1, 2]))
+        x = torch.tensor([1, 2])
         with self.assertRaisesRegex(RuntimeError, "state_dict changed"):
             verify(MyModel(), x, backend)
 
@@ -62,14 +62,14 @@ class TestVerify(TestCase):
         class MyModel(Module):
             def __init__(self):
                 super(MyModel, self).__init__()
-                self.param = Parameter(torch.Tensor([2]))
+                self.param = Parameter(torch.tensor([2.0]))
 
             def forward(self, x):
                 y = x * x
                 self.param.data.add_(1.0)
                 return y
 
-        x = Variable(torch.Tensor([1, 2]))
+        x = torch.tensor([1, 2])
         self.assertVerifyExpectFail(MyModel(), x, backend)
 
     def test_dynamic_model_structure(self):
@@ -86,7 +86,7 @@ class TestVerify(TestCase):
                 self.iters += 1
                 return r
 
-        x = Variable(torch.Tensor([1, 2]))
+        x = torch.tensor([1, 2])
         self.assertVerifyExpectFail(MyModel(), x, backend)
 
     @unittest.skip("Indexing is broken by #3725")
@@ -101,7 +101,7 @@ class TestVerify(TestCase):
                 self.iters += 1
                 return r
 
-        x = Variable(torch.Tensor([[1, 2], [3, 4]]))
+        x = torch.tensor([[1, 2], [3, 4]])
         self.assertVerifyExpectFail(MyModel(), x, backend)
 
     def test_explicit_test_args(self):
@@ -112,8 +112,8 @@ class TestVerify(TestCase):
                 else:
                     return x * x
 
-        x = Variable(torch.Tensor([[6, 2]]))
-        y = Variable(torch.Tensor([[2, -1]]))
+        x = torch.tensor([[6, 2]])
+        y = torch.tensor([[2, -1]])
         self.assertVerifyExpectFail(MyModel(), x, backend, test_args=[(y,)])
 
 

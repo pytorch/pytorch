@@ -5,10 +5,11 @@
 #include "torch/csrc/autograd/grad_mode.h"
 #include "torch/csrc/autograd/anomaly_mode.h"
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/utils/memory.h"
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 
 #include <atomic>
 #include <condition_variable>
@@ -29,6 +30,7 @@
 #ifdef USE_CUDA
 #include <cuda.h>
 #include <THC/THC.h>
+#include <ATen/cuda/CUDAGuard.h>
 #endif
 
 namespace torch { namespace autograd {
@@ -200,9 +202,21 @@ Engine::Engine() = default;
 // This Engine's ReadyQueues and their corresponding threads are leaked here
 Engine::~Engine() = default;
 
+// TODO: Engine is not written in a way that it can deal with anything that's
+// not CUDA.
 auto Engine::thread_init(int device) -> void {
   THInferNumThreads();
-  at::DeviceGuard guard(device);
+#ifdef USE_CUDA
+  // NB: We MUST NOT construct the guard for device -1,
+  // as in some settings we compile with USE_CUDA, but
+  // have lazy stubs for CUDA functionality (so actually
+  // attempting to setup a guard(-1) will cause an
+  // error, because it will still query cudaGetDevice).
+  at::cuda::OptionalCUDAGuard guard;
+  if (device != -1) {
+    guard.set_index(device);
+  }
+#endif
   worker_device = device;
   thread_main(nullptr);
 }
@@ -326,7 +340,7 @@ static void validate_outputs(const edge_list& edges, variable_list& grads, const
         ss << metadata.shape();
         AT_ERROR(format_error(ss.str()));
       }
-      grads[i] = at::sum_to(grads[i], metadata.shape());
+      grads[i] = at::sum_to(std::move(grads[i]), metadata.shape());
     }
     if (!is_compatible_type(metadata.type(), grads[i].type())) {
       std::stringstream ss;
@@ -358,6 +372,18 @@ static variable_list call_function(FunctionTask& task) {
   variable_list outputs;
 
   if(has_post_hooks){
+    // In functions/accumulate_grad.cpp, there is some logic to check the conditions under which
+    // the incoming gradient can be stolen directly (which elides a deep copy) instead of cloned.
+    // One of these conditions is that the incoming gradient's refcount must be 1 (nothing else
+    // is referencing the same data).  Stashing inputs_copy here bumps the refcount, so if post hooks
+    // are employed, it's actually still ok for accumulate_grad.cpp to steal the gradient if the
+    // refcount is 2.
+    //
+    // "new_grad.use_count() <= 1 + !post_hooks().empty()" in accumulate_grad.cpp accounts for this,
+    // but also creates a silent dependency between engine.cpp (ie, this particular engine
+    // implementation) and accumulate_grad.cpp.
+    //
+    // If you change the logic here, make sure it's compatible with accumulate_grad.cpp.
     auto inputs_copy = inputs;
     outputs = fn(std::move(inputs_copy));
   }else{
@@ -406,7 +432,7 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
     AutoGradMode grad_mode(false);
     for (int i = 0; i < num_outputs; ++i) {
       auto& output = outputs[i];
-      at::DeviceGuard guard(output);
+      at::OptionalDeviceGuard guard(device_of(output));
       if (output.defined() && output.ne(output).any().item<uint8_t>()) {
         std::stringstream ss;
         ss << "Function '" << fn.name() << "' returned nan values in its " << i << "th output.";
@@ -629,7 +655,7 @@ void GraphTask::init_to_execute(Function& graph_root, const edge_list& outputs) 
     Function *output = output_edge.function.get();
     auto & info = exec_info[output];
     if (!info.captures)
-      info.captures.reset(new std::vector<ExecInfo::Capture>());
+      info.captures = make_unique<std::vector<ExecInfo::Capture>>();
     info.captures->emplace_back(output_edge.input_nr, output_idx++);
   }
   captured_vars.resize(output_idx);

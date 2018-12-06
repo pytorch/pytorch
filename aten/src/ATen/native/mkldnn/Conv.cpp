@@ -50,7 +50,7 @@ constexpr int weight_input_channels_dim = 1;
 // Often written as 2 + max_dim (extra dims for batch size and channels)
 constexpr int max_dim = 3;
 
-std::vector<int64_t> conv_output_size(
+static std::vector<int64_t> conv_output_size(
     IntList input_size, IntList weight_size,
     IntList padding, IntList stride, IntList dilation, int64_t groups)
 {
@@ -76,7 +76,7 @@ at::Tensor mkldnn_convolution(
   auto cpu_engine = CpuEngine::Instance().get_engine();
 
   int32_t g = groups;
-  
+
   int32_t n = input.size(0);
   int32_t ic = input.size(1);
   int32_t ih = input.size(2);

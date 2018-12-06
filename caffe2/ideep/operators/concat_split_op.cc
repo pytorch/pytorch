@@ -37,9 +37,9 @@ class IDEEPConcatOp final : public IDEEPOperator {
             BlobIsTensorType(OperatorBase::InputBlob(i), CPU),
             "Expect cpu tensor if not itensor");
         auto& tensor_cpu = OperatorBase::Input<Tensor>(i, CPU);
-        CAFFE_ENFORCE(tensor_cpu.dims().size() == 0 ||
-                      tensor_cpu.size_from_dim(0) == 0,
-                      "Expect zero dim tensor");
+        CAFFE_ENFORCE(
+            tensor_cpu.sizes().size() == 0 || tensor_cpu.numel() == 0,
+            "Expect zero dim tensor");
       }
     }
 
@@ -98,7 +98,7 @@ class IDEEPSplitOp final : public IDEEPOperator {
           "If you set split with an input blob, do not pass in "
           "split in the argument.");
       auto& axis_info = OperatorBase::Input<Tensor>(AXIS_INFO, CPU);
-      CAFFE_ENFORCE_EQ(axis_info.size(), OutputSize());
+      CAFFE_ENFORCE_EQ(axis_info.numel(), OutputSize());
       auto* axis_data = axis_info.template data<int>();
       axis_vdata.assign(axis_data, axis_data + OutputSize());
     } else if (axis_offset_.size() == 0) {

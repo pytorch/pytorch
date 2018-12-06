@@ -35,7 +35,7 @@ def _check_balance(device_ids):
 class DataParallel(Module):
     r"""Implements data parallelism at the module level.
 
-    This container parallelizes the application of the given module by
+    This container parallelizes the application of the given :attr:`module` by
     splitting the input across the specified devices by chunking in the batch
     dimension (other objects will be copied once per device). In the forward
     pass, the module is replicated on each device, and each replica handles a
@@ -51,6 +51,23 @@ class DataParallel(Module):
     specified (default 0). Primitive types will be broadcasted, but all
     other types will be a shallow copy and can be corrupted if written to in
     the model's forward pass.
+
+    The parallelized :attr:`module` must have its parameters and buffers on
+    ``device_ids[0]`` before running this :class:`~torch.nn.DataParallel`
+    module.
+
+    .. warning::
+        In each forward, :attr:`module` is **replicated** on each device, so any
+        updates to the runing module in ``forward`` will be lost. For example,
+        if :attr:`module` has a counter attribute that is incremented in each
+        ``forward``, it will always stay at the initial value becasue the update
+        is done on the replicas which are destroyed after ``forward``. However,
+        :class:`~torch.nn.DataParallel` guarantees that the replica on
+        ``device[0]`` will have its parameters and buffers sharing storage with
+        the base parallelized :attr:`module`. So **in-place** updates to the
+        parameters or buffers on ``device[0]`` will be recorded. E.g.,
+        :class:`~torch.nn.BatchNorm2d` and :func:`~torch.nn.utils.spectral_norm`
+        rely on this behavior to update the buffers.
 
     .. warning::
         Forward and backward hooks defined on :attr:`module` and its submodules

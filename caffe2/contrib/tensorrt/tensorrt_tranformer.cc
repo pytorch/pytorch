@@ -4,8 +4,9 @@
 #include <unordered_set>
 
 #include <NvInfer.h>
-#include <google/protobuf/text_format.h>
 #include <onnx2trt.hpp>
+
+#include "onnx/proto_utils.h"
 
 #include "caffe2/contrib/tensorrt/trt_utils.h"
 #include "caffe2/core/context_gpu.h"
@@ -42,9 +43,7 @@ std::unordered_map<std::string, TensorShape> InferShapes(
 
 void DumpModel(const ::ONNX_NAMESPACE::ModelProto& model, const std::string& fname) {
   std::ofstream ff(fname);
-  std::string body;
-  ::google::protobuf::TextFormat::PrintToString(model.graph(), &body);
-  ff << body << std::endl;
+  ff << ::ONNX_NAMESPACE::ProtoDebugString(model) << std::endl;
   ff.close();
 }
 
@@ -188,7 +187,7 @@ void TensorRTTransformer::AddTrtOptions(
     if (it != output_size_hints.end()) {
       const auto& dims = it->second;
       auto* output_size_hint_arg = op->add_arg();
-      output_size_hint_arg->set_name(MakeString("output_size_hint_", i));
+      output_size_hint_arg->set_name(c10::str("output_size_hint_", i));
       for (const auto& d : dims) {
         output_size_hint_arg->add_ints(d);
       }

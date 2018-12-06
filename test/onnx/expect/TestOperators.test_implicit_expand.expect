@@ -1,0 +1,59 @@
+ir_version: 3
+producer_name: "pytorch"
+producer_version: "0.4"
+graph {
+  node {
+    output: "1"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        data_type: FLOAT
+        raw_data: "\000\000\200?"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "0"
+    input: "1"
+    output: "2"
+    op_type: "Add"
+  }
+  name: "torch-jit-export"
+  input {
+    name: "0"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 4
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "2"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 4
+          }
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 9
+}

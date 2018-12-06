@@ -42,7 +42,7 @@ inline int64_t getTime() {
   return duration_cast<nanoseconds>(clock::now().time_since_epoch()).count();
 #else
   // clock_gettime is *much* faster than std::chrono implementation on Linux
-  struct timespec t;
+  struct timespec t{};
   clock_gettime(CLOCK_MONOTONIC, &t);
   return static_cast<int64_t>(t.tv_sec) * 1000000000 + static_cast<int64_t>(t.tv_nsec);
 #endif
@@ -123,7 +123,7 @@ struct Event final {
     return device_;
   }
 private:
-  int64_t cpu_ns_; // signed to allow for negative intervals
+  int64_t cpu_ns_ = 0; // signed to allow for negative intervals, initialized for safety.
   // std::string is a very large object (usually around 32B),
   // and this field is used only for user-created ranges, so
   // it's better to save on size of Events.

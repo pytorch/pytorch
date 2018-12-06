@@ -41,7 +41,7 @@ void writeTextOutput(
   caffe2::BlobProto blob_proto;
 
   ser.Serialize(
-      *tensor, output_name, blob_proto.mutable_tensor(), 0, tensor->size());
+      *tensor, output_name, blob_proto.mutable_tensor(), 0, tensor->numel());
   blob_proto.set_name(output_name);
   blob_proto.set_type("Tensor");
   CAFFE_ENFORCE(blob_proto.has_tensor());
@@ -112,6 +112,8 @@ void runNetwork(
     const bool,
     const int,
     const int,
+    const int,
+    const int,
     const int);
 int benchmark(
     int argc,
@@ -128,6 +130,8 @@ int benchmark(
     const string& FLAGS_output_folder,
     bool FLAGS_run_individual,
     int FLAGS_sleep_before_run,
+    int FLAGS_sleep_between_iteration,
+    int FLAGS_sleep_between_net_and_operator,
     bool FLAGS_text_output,
     int FLAGS_warmup,
     bool FLAGS_wipe_cache);

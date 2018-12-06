@@ -20,7 +20,7 @@ struct ExecutionPlanState {
 };
 
 struct GraphExecutorState {
-  const Graph* graph;
+  const Graph* graph = nullptr;
   ExecutionPlanState fallback; // XXX: members of this field are optional
   std::unordered_map<ArgumentSpec, ExecutionPlanState> execution_plans;
 };

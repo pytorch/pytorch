@@ -105,7 +105,7 @@ class CAFFE2_API Workspace {
   }
 
   ~Workspace() {
-    if (c10::FLAGS_caffe2_print_blob_sizes_at_exit) {
+    if (FLAGS_caffe2_print_blob_sizes_at_exit) {
       PrintBlobSizes();
     }
     // This is why we have a bookkeeper_ shared_ptr instead of a naked static! A

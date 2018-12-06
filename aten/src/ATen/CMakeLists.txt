@@ -285,7 +285,7 @@ else()
   target_link_libraries(ATen_cpu PRIVATE ATEN_CPU_FILES_GEN_LIB)
   caffe2_interface_library(ATen_cpu ATen_cpu_library)
   # Set standard properties on the target
-  aten_set_target_props(ATen_cpu)
+  torch_set_target_props(ATen_cpu)
 
   # Make sure these don't get built by parent
   set(ATen_CPU_SRCS)
@@ -326,7 +326,7 @@ if(USE_CUDA OR USE_ROCM)
         ATen_cuda PUBLIC ATen_cpu ${ATen_PUBLIC_CUDA_DEPENDENCY_LIBS})
 
     # Set standard properties on the target
-    aten_set_target_props(ATen_cuda)
+    torch_set_target_props(ATen_cuda)
 
     caffe2_interface_library(ATen_cuda ATen_cuda_library)
 
@@ -344,9 +344,9 @@ if(NOT AT_LINK_STYLE STREQUAL "INTERFACE")
   endif()
 
   if(NOT MSVC)
-    aten_compile_options(ATen_cpu)
+    torch_compile_options(ATen_cpu)
     if(USE_CUDA OR USE_ROCM)
-      aten_compile_options(ATen_cuda)
+      torch_compile_options(ATen_cuda)
     endif()
   endif()
 

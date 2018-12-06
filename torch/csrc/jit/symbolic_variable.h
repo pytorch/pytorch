@@ -32,7 +32,18 @@ struct SymbolicVariable {
       if(g == nullptr) {
         g = inputs.at(0).value()->owningGraph();
       }
-      Node * n = g->insertNode(g->create(kind, num_outputs));
+      Node* n = g->insertNode(g->create(kind, num_outputs));
+      size_t max_depth = 0;
+      ScopePtr s;
+      for(auto n : inputs) {
+        size_t d = n.value()->node()->scope()->getDepth();
+        if(d > max_depth) {
+          max_depth = d;
+          s = n.value()->node()->scope();
+        }
+      }
+      n->setScope(s);
+
       for(auto i : inputs) {
         n->addInput(i.value());
       }
@@ -111,6 +122,15 @@ struct SymbolicVariable {
   }
   SymbolicVariable operator%(at::Scalar rhs) const {
     return create(aten::remainder, {*this, insertConstant(rhs)})[0].typeLike(*this);
+  }
+  Value* size() const {
+    return v->owningGraph()->insert(aten::size, {v});
+  }
+  SymbolicVariable sumToSize(Value * size) const {
+    return create(prim::SumToSize, {*this, size})[0];
+  }
+  SymbolicVariable expand(Value * size) const {
+    return v->owningGraph()->insert(aten::expand, {v, size});
   }
   SymbolicVariable isnan() const {
     return create(aten::ne, {*this, *this})[0].typeLikeWithScalarType(*this, at::kByte);
@@ -273,7 +293,7 @@ private:
 
 // shorter method so that toVar(v) + toVar(c) is short.
 static inline SymbolicVariable toVar(Value * v) {
-  return SymbolicVariable(v);
+  return {v};
 }
 
 template<typename T, typename = typename std::enable_if<std::is_arithmetic<T>::value>::type>

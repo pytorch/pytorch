@@ -1,6 +1,6 @@
 import ctypes
 import torch
-from common import TestCase, run_tests, skipIfRocm
+from common_utils import TestCase, run_tests, skipIfRocm
 import unittest
 
 # NOTE: this needs to be run in a brand new process

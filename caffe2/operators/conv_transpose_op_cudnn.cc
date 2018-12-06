@@ -180,18 +180,18 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
 
   if (InputSize() == 3) {
     auto& bias = Input(BIAS);
-    CAFFE_ENFORCE_EQ(bias.ndim(), 1);
+    CAFFE_ENFORCE_EQ(bias.dim(), 1);
     CAFFE_ENFORCE_EQ(bias.dim32(0), C);
   }
 
   // Set up the cudnn algorithms & workspace if necessary
-  bool input_changed = (X.dims() != cudnn_input_dims_);
-  bool filter_changed = (filter.dims() != cudnn_filter_dims_);
+  bool input_changed = (X.sizes() != cudnn_input_dims_);
+  bool filter_changed = (filter.sizes() != cudnn_filter_dims_);
 
   if (input_changed || filter_changed) {
     VLOG(1) << "Changing the cudnn descriptor configurations.";
     if (input_changed) {
-      cudnn_input_dims_ = X.dims().vec();
+      cudnn_input_dims_ = X.sizes().vec();
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           bottom_desc_,
           GetCudnnTensorFormat(order_),
@@ -202,7 +202,7 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
           W));
     }
     if (filter_changed) {
-      cudnn_filter_dims_ = filter.dims().vec();
+      cudnn_filter_dims_ = filter.sizes().vec();
       CUDNN_ENFORCE(cudnnSetFilter4dDescriptor(
           filter_desc_,
           cudnnTypeWrapper<T>::type,
@@ -279,7 +279,7 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
       bwd_data_algo_ = CUDNN_CONVOLUTION_BWD_DATA_ALGO_1;
     } else if (exhaustive_search_) {
       bwd_data_algo_ =
-          data_algo_cache_.getAlgorithm(X.dims(), filter.dims(), 0, [&]() {
+          data_algo_cache_.getAlgorithm(X.sizes(), filter.sizes(), 0, [&]() {
             int returned_algo_count;
             std::array<
                 cudnnConvolutionBwdDataAlgoPerf_t,
@@ -369,8 +369,8 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
   auto& filter = Input(FILTER);
   auto& dY = Input(OUTPUT_GRAD);
   auto* dfilter = Output(FILTER_GRAD);
-  CAFFE_ENFORCE_EQ(X.ndim(), 4);
-  CAFFE_ENFORCE_EQ(filter.ndim(), 4);
+  CAFFE_ENFORCE_EQ(X.dim(), 4);
+  CAFFE_ENFORCE_EQ(filter.dim(), 4);
   int C = 0;
   switch (order_) {
     case StorageOrder::NHWC:
@@ -416,12 +416,12 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
   dfilter->ResizeLike(filter);
 
   // Set up the cudnn algorithms & workspace if necessary
-  bool input_changed = (X.dims() != cudnn_input_dims_);
-  bool filter_changed = (filter.dims() != cudnn_filter_dims_);
+  bool input_changed = (X.sizes() != cudnn_input_dims_);
+  bool filter_changed = (filter.sizes() != cudnn_filter_dims_);
   if (input_changed || filter_changed) {
     VLOG(1) << "Changing the cudnn descriptor configurations.";
     if (input_changed) {
-      cudnn_input_dims_ = X.dims().vec();
+      cudnn_input_dims_ = X.sizes().vec();
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           bottom_desc_,
           GetCudnnTensorFormat(order_),
@@ -432,7 +432,7 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
           W));
     }
     if (filter_changed) {
-      cudnn_filter_dims_ = filter.dims().vec();
+      cudnn_filter_dims_ = filter.sizes().vec();
       CUDNN_ENFORCE(cudnnSetFilter4dDescriptor(
           filter_desc_,
           cudnnTypeWrapper<T>::type,
@@ -510,7 +510,7 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
       bwd_filter_algo_ = CUDNN_CONVOLUTION_BWD_FILTER_ALGO_1;
     } else if (exhaustive_search_) {
       bwd_filter_algo_ =
-          filter_algo_cache_.getAlgorithm(X.dims(), filter.dims(), 0, [&]() {
+          filter_algo_cache_.getAlgorithm(X.sizes(), filter.sizes(), 0, [&]() {
             LOG(INFO) << "CUDNN Convolution bwd: doing exhaustive search.";
             // When we do an exhaustive search, we will ignore the workspace
             // size
@@ -545,7 +545,7 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
           });
 
       algo_ =
-          forward_algo_cache_.getAlgorithm(X.dims(), filter.dims(), 0, [&]() {
+          forward_algo_cache_.getAlgorithm(X.sizes(), filter.sizes(), 0, [&]() {
             int returned_algo_count;
             std::array<cudnnConvolutionFwdAlgoPerf_t, kNUM_CUDNN_FWD_ALGS>
                 fwd_perf_stat;

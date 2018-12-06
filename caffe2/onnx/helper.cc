@@ -7,7 +7,7 @@ namespace caffe2 { namespace onnx  {
 
 std::string DummyName::NewDummyName() {
   while (true) {
-    const std::string name = caffe2::MakeString("OC2_DUMMY_", counter_++);
+    const std::string name = c10::str("OC2_DUMMY_", counter_++);
     auto ret = used_names_.insert(name);
     if (ret.second) {
       return name;

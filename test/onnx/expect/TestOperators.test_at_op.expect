@@ -3,8 +3,8 @@ producer_name: "pytorch"
 producer_version: "0.4"
 graph {
   node {
-    input: "0"
-    input: "0"
+    input: "x"
+    input: "x"
     output: "1"
     op_type: "ATen"
     attribute {
@@ -15,7 +15,7 @@ graph {
   }
   name: "torch-jit-export"
   input {
-    name: "0"
+    name: "x"
     type {
       tensor_type {
         elem_type: FLOAT

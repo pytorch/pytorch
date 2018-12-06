@@ -33,9 +33,9 @@ class SquareRootDivideOp final : public Operator<Context> {
     auto& scale = Input(SCALE);
     auto* Y = Output(0);
     Y->ResizeLike(data);
-    size_t batchSize = data.dim(0);
+    size_t batchSize = data.size(0);
     size_t exampleSize = data.size_from_dim(1);
-    CAFFE_ENFORCE(batchSize == scale.dim(0), batchSize, " != ", scale.dim(0));
+    CAFFE_ENFORCE(batchSize == scale.size(0), batchSize, " != ", scale.size(0));
     auto* scalePtr = scale.template data<TScale>();
     auto* dataPtr = data.template data<TData>();
     auto* yPtr = Y->template mutable_data<TData>();

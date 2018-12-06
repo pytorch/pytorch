@@ -15,7 +15,12 @@ constexpr RPCType type_traits<uint32_t>::type;
 constexpr RPCType type_traits<uint16_t>::type;
 constexpr RPCType type_traits<int64_t>::type;
 constexpr RPCType type_traits<uint64_t>::type;
-constexpr RPCType type_traits<std::conditional<std::is_same<int64_t, long>::value, long long, long>::type>::type;
-constexpr RPCType type_traits<std::conditional<std::is_same<uint64_t, unsigned long>::value, unsigned long long, unsigned long>::type>::type;
+constexpr RPCType type_traits<
+    std::conditional<std::is_same<int64_t, long>::value, long long, long>::
+        type>::type;
+constexpr RPCType type_traits<std::conditional<
+    std::is_same<uint64_t, unsigned long>::value,
+    unsigned long long,
+    unsigned long>::type>::type;
 
-} // thd
+} // namespace thd

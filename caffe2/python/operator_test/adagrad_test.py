@@ -162,7 +162,6 @@ class TestAdagrad(serial.SerializedTestCase):
                 gc, op, [param_i, momentum_i, indices, grad, lr], ref_sparse
             )
 
-    @unittest.skipIf("IN_CIRCLECI" in os.environ, "FIXME: flaky test in CircleCI")
     # Suppress filter_too_much health check.
     # Likely caused by `assume` call falling through too often.
     @settings(suppress_health_check=[HealthCheck.filter_too_much])

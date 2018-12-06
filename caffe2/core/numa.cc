@@ -12,7 +12,7 @@ namespace caffe2 {
 
 #ifdef CAFFE2_NUMA_ENABLED
 bool IsNUMAEnabled() {
-  return c10::FLAGS_caffe2_cpu_numa_enabled && numa_available() >= 0;
+  return FLAGS_caffe2_cpu_numa_enabled && numa_available() >= 0;
 }
 
 void NUMABind(int numa_node_id) {
@@ -26,7 +26,7 @@ void NUMABind(int numa_node_id) {
 
   CAFFE_ENFORCE(
       numa_node_id <= numa_max_node(),
-      "NUMA node id " + caffe2::to_string(numa_node_id) + " is unavailable");
+      "NUMA node id " + c10::to_string(numa_node_id) + " is unavailable");
 
   auto bm = numa_allocate_nodemask();
   numa_bitmask_clearall(bm);

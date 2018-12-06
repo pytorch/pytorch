@@ -9,7 +9,7 @@ template <>
 template <typename T>
 bool ModOp<CPUContext>::DoRunWithType() {
   auto& data = Input(DATA);
-  auto N = data.size();
+  auto N = data.numel();
   const auto* data_ptr = data.template data<T>();
 
   auto* output = Output(0);

@@ -2,7 +2,7 @@ r"""This file is allowed to initialize CUDA context when imported."""
 
 import torch
 import torch.cuda
-from common import TEST_WITH_ROCM
+from common_utils import TEST_WITH_ROCM, TEST_NUMBA
 
 
 TEST_CUDA = torch.cuda.is_available()
@@ -12,6 +12,11 @@ CUDA_DEVICE = TEST_CUDA and torch.device("cuda:0")
 TEST_CUDNN = TEST_CUDA and (TEST_WITH_ROCM or torch.backends.cudnn.is_acceptable(torch.tensor(1., device=CUDA_DEVICE)))
 TEST_CUDNN_VERSION = TEST_CUDNN and torch.backends.cudnn.version()
 
+if TEST_NUMBA:
+    import numba.cuda
+    TEST_NUMBA_CUDA = numba.cuda.is_available()
+else:
+    TEST_NUMBA_CUDA = False
 
 # Used below in `initialize_cuda_context_rng` to ensure that CUDA context and
 # RNG have been initialized.

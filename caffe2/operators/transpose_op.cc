@@ -1,18 +1,8 @@
 #include "caffe2/operators/transpose_op.h"
 
-#ifdef CAFFE2_USE_MKL
-#include "caffe2/mkl/operators/operator_fallback_mkl.h"
-#endif // CAFFE2_USE_MKL
-
 namespace caffe2 {
 
 REGISTER_CPU_OPERATOR(Transpose, TransposeOp<CPUContext>);
-
-#ifdef CAFFE2_HAS_MKL_DNN
-// Registering in operator_fallback_mkl.cc results in a linker error in
-// in opt build related to DoRunWithType().
-REGISTER_MKL_OPERATOR(Transpose, mkl::MKLFallbackOp<TransposeOp<CPUContext>>);
-#endif // CAFFE2_HAS_MKL_DNN
 
 OPERATOR_SCHEMA(Transpose)
     .NumInputs(1)
@@ -100,7 +90,7 @@ Y.shape (NCHW order): (1, 3, 32, 32)
         "the dimensions by default.")
     .Input(0, "X", "*(type: Tensor)* Input tensor.")
     .Output(0, "Y", "*(type: Tensor)* Transposed output.")
-    .InheritOnnxSchema("Transpose");
+    .InheritOnnxSchema();
 
 class GetTransposeGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

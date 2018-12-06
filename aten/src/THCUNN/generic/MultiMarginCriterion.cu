@@ -31,7 +31,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
         THCIndexTensor_(data)(state, target),
         weights ? THCTensor_(data)(state, weights) : NULL,
         1, THTensor_sizeLegacyNoScalars(input, 0),
-        reduction == Reduction::ElementwiseMean,
+        reduction == Reduction::Mean,
         margin
       );
     }
@@ -43,7 +43,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
         THCIndexTensor_(data)(state, target),
         weights ? THCTensor_(data)(state, weights) : NULL,
         1, THTensor_sizeLegacyNoScalars(input, 0),
-        reduction == Reduction::ElementwiseMean,
+        reduction == Reduction::Mean,
         margin
       );
     }
@@ -98,7 +98,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
           THCIndexTensor_(data)(state, target),
           weights ? THCTensor_(data)(state, weights) : NULL,
           nframe, input->size(1),
-          reduction == Reduction::ElementwiseMean,
+          reduction == Reduction::Mean,
           margin
         );
       }
@@ -110,7 +110,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
           THCIndexTensor_(data)(state, target),
           weights ? THCTensor_(data)(state, weights) : NULL,
           input->size(0), input->size(1),
-          reduction == Reduction::ElementwiseMean,
+          reduction == Reduction::Mean,
           margin
         );
       }
@@ -163,7 +163,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
         THCIndexTensor_(data)(state, target),
         weights ? THCTensor_(data)(state, weights) : NULL,
         1, THTensor_sizeLegacyNoScalars(gradInput, 0),
-        reduction == Reduction::ElementwiseMean,
+        reduction == Reduction::Mean,
         margin,
         reduction != Reduction::None
       );
@@ -177,7 +177,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
         THCIndexTensor_(data)(state, target),
         weights ? THCTensor_(data)(state, weights) : NULL,
         1, THTensor_sizeLegacyNoScalars(gradInput, 0),
-        reduction == Reduction::ElementwiseMean,
+        reduction == Reduction::Mean,
         margin,
         reduction != Reduction::None
       );
@@ -201,7 +201,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
         THCIndexTensor_(data)(state, target),
         weights ? THCTensor_(data)(state, weights) : NULL,
         nframe, gradInput->size(1),
-        reduction == Reduction::ElementwiseMean,
+        reduction == Reduction::Mean,
         margin,
         reduction != Reduction::None
       );
@@ -215,7 +215,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
         THCIndexTensor_(data)(state, target),
         weights ? THCTensor_(data)(state, weights) : NULL,
         nframe, gradInput->size(1),
-        reduction == Reduction::ElementwiseMean,
+        reduction == Reduction::Mean,
         margin,
         reduction != Reduction::None
       );

@@ -8,8 +8,8 @@ bool ClipOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
   Y->ResizeLike(X);
-  EigenVectorMap<float>(Y->template mutable_data<float>(), Y->size()) =
-      ConstEigenVectorMap<float>(X.data<float>(), X.size())
+  EigenVectorMap<float>(Y->template mutable_data<float>(), Y->numel()) =
+      ConstEigenVectorMap<float>(X.data<float>(), X.numel())
           .cwiseMax(min_)
           .cwiseMin(max_);
   return true;
@@ -20,20 +20,20 @@ bool ClipGradientOp<float, CPUContext>::RunOnDevice() {
   auto& Y = Input(0);
   auto& dY = Input(1);
   auto* dX = Output(0);
-  CAFFE_ENFORCE_GT(Y.size(), 0);
-  CAFFE_ENFORCE_EQ(dY.size(), Y.size());
+  CAFFE_ENFORCE_GT(Y.numel(), 0);
+  CAFFE_ENFORCE_EQ(dY.numel(), Y.numel());
   dX->ResizeLike(Y);
   const float* Ydata = Y.data<float>();
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->template mutable_data<float>();
-  for (int i = 0; i < Y.size(); ++i) {
+  for (int i = 0; i < Y.numel(); ++i) {
     dXdata[i] = dYdata[i] * (Ydata[i] > min_ && Ydata[i] < max_);
   }
   return true;
 }
 
 REGISTER_CPU_OPERATOR(Clip, ClipOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(ClipGradient, ClipGradientOp<float, CPUContext>);
+REGISTER_CPU_GRADIENT_OPERATOR(ClipGradient, ClipGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(Clip)
     .NumInputs(1)
@@ -94,10 +94,14 @@ Y: [[45. 20. 59. 60. 48.]
 </details>
 
 )DOC")
-    .Arg("min", "*(type: float)* Minimum value, under which element is "
-    "replaced by min (default=*numeric_limits::lowest()*).")
-    .Arg("max", "*(type: float)* Maximum value, under which element is "
-    "replaced by max (default=*numeric_limits::max()*).")
+    .Arg(
+        "min",
+        "*(type: float)* Minimum value, under which element is "
+        "replaced by min (default=*numeric_limits::lowest()*).")
+    .Arg(
+        "max",
+        "*(type: float)* Maximum value, under which element is "
+        "replaced by max (default=*numeric_limits::max()*).")
     .Input(
         0,
         "X",
@@ -107,9 +111,12 @@ Y: [[45. 20. 59. 60. 48.]
         0,
         "Y",
         "*(Tensor`<float>`)* Output tensor clipped within range [`min`, `max`].")
-    .InheritOnnxSchema("Clip");
+    .InheritOnnxSchema();
 
-OPERATOR_SCHEMA(ClipGradient).NumInputs(2).NumOutputs(1).AllowInplace({{1, 0}});
+GRADIENT_OPERATOR_SCHEMA(ClipGradient)
+    .NumInputs(2)
+    .NumOutputs(1)
+    .AllowInplace({{1, 0}});
 
 class GetClipGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

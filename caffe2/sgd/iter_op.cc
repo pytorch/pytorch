@@ -1,6 +1,6 @@
 #include "caffe2/sgd/iter_op.h"
 
-#ifdef CAFFE2_USE_IDEEP
+#ifdef CAFFE2_USE_MKLDNN
 #include <caffe2/ideep/operators/operator_fallback_ideep.h>
 #include <caffe2/ideep/utils/ideep_operator.h>
 #endif
@@ -8,15 +8,16 @@
 namespace caffe2 {
 
 void MutexSerializer::Serialize(
-    const Blob& blob,
+    const void* pointer,
+    TypeMeta typeMeta,
     const string& name,
     BlobSerializerBase::SerializationAcceptor acceptor) {
-  CAFFE_ENFORCE(blob.IsType<std::unique_ptr<std::mutex>>());
+  CAFFE_ENFORCE(typeMeta.Match<std::unique_ptr<std::mutex>>());
   BlobProto blob_proto;
   blob_proto.set_name(name);
   blob_proto.set_type("std::unique_ptr<std::mutex>");
   blob_proto.set_content("");
-  acceptor(name, blob_proto.SerializeAsString());
+  acceptor(name, SerializeBlobProtoAsString_EnforceCheck(blob_proto));
 }
 
 void MutexDeserializer::Deserialize(const BlobProto& /* unused */, Blob* blob) {
@@ -27,7 +28,7 @@ void MutexDeserializer::Deserialize(const BlobProto& /* unused */, Blob* blob) {
 REGISTER_CPU_OPERATOR(Iter, IterOp<CPUContext>);
 REGISTER_CPU_OPERATOR(AtomicIter, AtomicIterOp<CPUContext>);
 
-#ifdef CAFFE2_USE_IDEEP
+#ifdef CAFFE2_USE_MKLDNN
 REGISTER_IDEEP_OPERATOR(AtomicIter, IDEEPFallbackOp<AtomicIterOp<CPUContext>>);
 #endif
 

@@ -285,6 +285,7 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
     /* Get normalized cumulative distribution from prob distribution */
     double sum = 0;
     double val;
+    int n_zeros = 0;
     for (j=0; j<n_categories; j++)
     {
       val = THStorage_(get)( \
@@ -300,6 +301,9 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
                             2,
                             "invalid multinomial distribution (encountering probability entry = infinity or NaN)");
       sum += val;
+      if (val == 0) {
+        n_zeros += 1;
+      }
       THDoubleStorage_set(
         THTensor_getStoragePtr(cum_dist), \
         cum_dist->storage_offset()+j*cum_dist->stride(0), \
@@ -310,6 +314,10 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
                           THCleanup(THDoubleTensor_free(cum_dist); if (start_dim == 1) THTensor_(squeeze1d)(prob_dist, prob_dist, 0);),
                           2,
                           "invalid multinomial distribution (sum of probabilities <= 0)");
+    THArgCheckWithCleanup((with_replacement || (n_categories - n_zeros >= n_sample)),
+                          THCleanup(THDoubleTensor_free(cum_dist); if (start_dim == 1) THTensor_(squeeze1d)(prob_dist, prob_dist, 0);),
+                          2,
+                          "invalid multinomial distribution (with replacement=False, not enough non-negative category to sample)");
     /* normalize cumulative probability distribution so that last val is 1
     i.e. doesn't assume original prob_dist row sums to one */
     if ( (sum > 0) || ( ( sum < 1.00001) && (sum > 0.99999) ) )

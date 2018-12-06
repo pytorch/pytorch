@@ -1,3 +1,16 @@
+"""
+To run this file by hand from the root of the PyTorch
+repository, run:
+
+python -m tools.autograd.gen_autograd \
+       build/aten/src/ATen/Declarations.yaml \
+       $OUTPUT_DIR
+
+Where $OUTPUT_DIR is where you would like the files to be
+generated.  In the full build system, OUTPUT_DIR is
+torch/csrc/autograd/generated/
+"""
+
 # gen_autograd.py generates C++ autograd functions and Python bindings.
 #
 # It delegates to the following scripts:
@@ -11,33 +24,46 @@ import argparse
 import copy
 import os
 import yaml
+import re
 from collections import defaultdict
 from .utils import YamlLoader, split_name_params
 
+# See NOTE [ Autograd View Variables ] in variable.h for details.
+# A map: function name => two options:
+#      1. name of the argument that all outputs are view of
+#      2. map: output idx => name of the argument that this result is view of
 VIEW_FUNCTIONS = {
-    'alias', 'as_strided', 'diagonal', 'expand', 'narrow', 'permute', 'select', 'slice',
-    'squeeze', 't', 'transpose', 'unfold', 'unsqueeze', 'view', 'unbind',
+    'alias': 'self',
+    'as_strided': 'self',
+    'diagonal': 'self',
+    'expand': 'self',
+    'narrow': 'self',
+    'permute': 'self',
+    'select': 'self',
+    'slice': 'self',
+    'squeeze': 'self',
+    't': 'self',
+    'transpose': 'self',
+    'unfold': 'self',
+    'unsqueeze': 'self',
+    'view': 'self',
+    'unbind': 'self',
+    '_indices': 'self',
+    '_values': 'self',
+    'indices': 'self',
+    'values': 'self',
+    # sparse_coo ctor output should really be views of both indices and values,
+    # but we only supports making as view of a single varible, and indices is
+    # discrete anyways.
+    # FIXME: clone indices on construction.
+    'sparse_coo_tensor_with_dims_and_tensors': 'values',
 }
 
-# In principle this should live in derivatives.yaml, but I could not
-# think of a good syntax for it
-HARDCODED_DIFFERENTIABLE_OUTPUTS = {
-    # Suppose that 'foo' is a function for which outputs 0 and 1 are
-    # differentiable, and 2 is not.  Then you would write:
-    # 'foo': (0, 1),
-    '_cudnn_rnn': (0, 1, 2),
-    # _cudnn_rnn outputs:
-    #   0 => output
-    #   1 => hy
-    #   2 => cy
-    #   3 => reserve
-    #   4 => weight_buf
-    '_thnn_fused_lstm_cell': (0, 1),
-    # _thnn_fused_lstm_cell outputs:
-    #   0 => hy
-    #   1 => cy
-    #   2 => workspace
-}
+# note: some VIEW_FUNCTIONS are just compositions of the view functions above
+# this list contains both the root view functions and any that are purely composed
+# of viewing functions, and is used by the JIT to determine when an operator
+# returns a view of its inputs
+RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({'chunk', 'split'})
 
 
 def format_return_type(returns):
@@ -54,6 +80,10 @@ def get_simple_type(arg):
     simple_type = arg['type']
     simple_type = simple_type.replace(' &', '').replace('const ', '')
     simple_type = simple_type.replace('Generator *', 'Generator')
+
+    opt_match = re.match(r'c10::optional<(.+)>', simple_type)
+    if opt_match:
+        simple_type = '{}?'.format(opt_match.group(1))
     return simple_type
 
 
@@ -76,10 +106,8 @@ def load_aten_declarations(path):
                                   for arg in declaration['arguments']]
         declaration['args'] = [arg['name'] for arg in declaration['arguments']]
         declaration['type_method_formals'] = [arg['type'] + ' ' + arg['name']
-                                              for arg in declaration['arguments']
-                                              if not arg.get('is_type_dispatched')]
-        declaration['type_method_args'] = [arg['name'] for arg in declaration['arguments']
-                                           if not arg.get('is_type_dispatched')]
+                                              for arg in declaration['arguments']]
+        declaration['type_method_args'] = [arg['name'] for arg in declaration['arguments']]
         declaration['api_name'] = declaration['name']
         declaration['return_type'] = format_return_type(declaration['returns'])
 

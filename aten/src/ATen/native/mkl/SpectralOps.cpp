@@ -218,7 +218,7 @@ Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
   } else {
     std::ostringstream ss;
     ss << "MKL FFT doesn't support tensor of type: "
-       << at::toString(input.type().scalarType());
+       << toString(input.type().scalarType());
     AT_ERROR(ss.str());
   }
   // signal type

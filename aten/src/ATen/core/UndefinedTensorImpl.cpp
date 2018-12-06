@@ -1,5 +1,5 @@
 #include "ATen/core/UndefinedTensorImpl.h"
-#include "ATen/core/Error.h"
+#include "c10/util/Exception.h"
 
 namespace at {
 

@@ -421,7 +421,7 @@ bool printStackTracesOnFatalSignal() {
 
 namespace internal {
 bool Caffe2InitFatalSignalHandler(int*, char***) {
-  if (c10::FLAGS_caffe2_print_stacktraces) {
+  if (FLAGS_caffe2_print_stacktraces) {
     setPrintStackTracesOnFatalSignal(true);
   }
   return true;

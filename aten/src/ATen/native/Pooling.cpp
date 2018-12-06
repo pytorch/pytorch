@@ -2,7 +2,7 @@
 
 #include "ATen/NativeFunctions.h"
 #include "ATen/TensorUtils.h"
-#include "ATen/core/Error.h"
+#include "c10/util/Exception.h"
 
 #include <tuple>
 

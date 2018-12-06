@@ -81,7 +81,9 @@ inline int64_t THPUtils_unpackIndex(PyObject* obj) {
     if (index == nullptr) {
       throw python_error();
     }
-    obj = index.get();
+    // NB: This needs to be called before `index` goes out of scope and the
+    // underlying object's refcount is decremented
+    return THPUtils_unpackLong(index.get());
   }
   return THPUtils_unpackLong(obj);
 }

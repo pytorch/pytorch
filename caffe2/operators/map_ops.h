@@ -121,14 +121,14 @@ class KeyValueToMapOp final : public Operator<Context> {
     const auto& key_input = Input(KEYS);
     const auto& value_input = Input(VALUES);
 
-    CAFFE_ENFORCE_EQ(key_input.size(), value_input.size());
+    CAFFE_ENFORCE_EQ(key_input.numel(), value_input.numel());
 
     auto* key_data = key_input.template data<KEY_T>();
     auto* value_data = value_input.template data<VALUE_T>();
 
     auto* map_data = this->template Output<MapType>(MAP);
 
-    for (int i = 0; i < key_input.size(); ++i) {
+    for (int i = 0; i < key_input.numel(); ++i) {
       map_data->emplace(key_data[i], value_data[i]);
     }
 
@@ -139,7 +139,7 @@ class KeyValueToMapOp final : public Operator<Context> {
   bool DoRunWithOtherType2() {
     CAFFE_THROW(
         "KeyValueToMap is not implemented on value tensor of type ",
-        Input(VALUES).meta().name(),
+        Input(VALUES).dtype().name(),
         "Consider adding it a type in the list DispatchHelper");
   }
 
@@ -168,10 +168,10 @@ class MapToKeyValueOp final : public Operator<Context> {
     using key_type = typename MAP_T::key_type;
     using mapped_type = typename MAP_T::mapped_type;
     auto& map_data = this->template Input<MAP_T>(MAP);
-    auto* key_output = Output(KEYS);
-    auto* value_output = Output(VALUES);
-    key_output->Resize(map_data.size());
-    value_output->Resize(map_data.size());
+
+    auto* key_output = Output(KEYS, {static_cast<int64_t>(map_data.size())}, at::dtype<key_type>());
+    auto* value_output =
+      Output(VALUES, {static_cast<int64_t>(map_data.size())}, at::dtype<mapped_type>());
     auto* key_data = key_output->template mutable_data<key_type>();
     auto* value_data = value_output->template mutable_data<mapped_type>();
 
@@ -195,11 +195,12 @@ class MapSerializer : public BlobSerializerBase {
   using MapType = typename MapTypeTraits<KEY_T, VALUE_T>::MapType;
 
   void Serialize(
-      const Blob& blob,
+      const void* pointer,
+      TypeMeta typeMeta,
       const string& name,
       BlobSerializerBase::SerializationAcceptor acceptor) override {
-    CAFFE_ENFORCE(blob.IsType<MapType>());
-    const MapType& map_data = blob.template Get<MapType>();
+    CAFFE_ENFORCE(typeMeta.Match<MapType>());
+    const MapType& map_data = *static_cast<const MapType*>(pointer);
     int64_t sz = map_data.size();
     Tensor key_tensor(CPU);
     key_tensor.Resize(sz);
@@ -217,15 +218,19 @@ class MapSerializer : public BlobSerializerBase {
     TensorProtos tensor_protos;
     TensorSerializer ser;
     ser.Serialize(
-        key_tensor, name, tensor_protos.add_protos(), 0, key_tensor.size());
+        key_tensor, name, tensor_protos.add_protos(), 0, key_tensor.numel());
     ser.Serialize(
-        value_tensor, name, tensor_protos.add_protos(), 0, value_tensor.size());
+        value_tensor,
+        name,
+        tensor_protos.add_protos(),
+        0,
+        value_tensor.numel());
 
     BlobProto blob_proto;
     blob_proto.set_name(name);
     blob_proto.set_type(MapTypeTraits<KEY_T, VALUE_T>::MapTypeName());
-    blob_proto.set_content(tensor_protos.SerializeAsString());
-    acceptor(name, blob_proto.SerializeAsString());
+    blob_proto.set_content(SerializeAsString_EnforceCheck(tensor_protos));
+    acceptor(name, SerializeBlobProtoAsString_EnforceCheck(blob_proto));
   }
 };
 
@@ -247,7 +252,7 @@ class MapDeserializer : public BlobDeserializerBase {
     auto* value_data = value_tensor.data<VALUE_T>();
 
     auto* map_ptr = blob->template GetMutable<MapType>();
-    for (int i = 0; i < key_tensor.size(); ++i) {
+    for (int i = 0; i < key_tensor.numel(); ++i) {
       map_ptr->emplace(key_data[i], value_data[i]);
     }
   }

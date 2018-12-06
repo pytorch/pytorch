@@ -81,9 +81,9 @@ class Optimizer(object):
         if current_scope is None:
             return self.get_cpu_blob_name(base_str)
 
-        if current_scope.device_type == caffe2_pb2.CUDA:
+        if core.IsGPUDeviceType(current_scope.device_type):
             return self.get_gpu_blob_name(
-                base_str, current_scope.cuda_gpu_id, current_scope.node_name
+                base_str, current_scope.device_id, current_scope.node_name
             )
         else:
             return self.get_cpu_blob_name(base_str, current_scope.node_name)
@@ -127,7 +127,7 @@ class Optimizer(object):
         if self._local_lr_multiplier is not None:
             current_scope = scope.CurrentDeviceScope()
             if (current_scope is not None
-                    and current_scope.device_type == caffe2_pb2.CUDA
+                    and core.IsGPUDeviceType(current_scope.device_type)
                     and not self._local_lr_multiplier_on_gpu):
                 local_lr_multiplier = net.CopyFromCPUInput(
                     self._local_lr_multiplier,
@@ -258,7 +258,7 @@ class SgdOptimizer(Optimizer):
             self._add_local_lr_multiplier(
                 lr_lars_multiplier,
                 is_gpu_blob=(current_scope is not None
-                    and current_scope.device_type == caffe2_pb2.CUDA),
+                    and core.IsGPUDeviceType(current_scope.device_type)),
             )
 
         # We need negative sign for LR when used directly with WeightedSum
@@ -279,7 +279,7 @@ class SgdOptimizer(Optimizer):
         # to include device information.
         ONE = param_init_net.ConstantFill(
             [],
-            "ONE_{}_{}{}".format(dev.device_type, dev.cuda_gpu_id, dev.node_name),
+            "ONE_{}_{}{}".format(dev.device_type, dev.device_id, dev.node_name),
             shape=[1],
             value=1.0
         )
@@ -488,12 +488,12 @@ class WeightDecayBuilder(Optimizer):
 
         ONE = param_init_net.ConstantFill(
             [],
-            "ONE_{}_{}".format(dev.device_type, dev.cuda_gpu_id),
+            "ONE_{}_{}".format(dev.device_type, dev.device_id),
             shape=[1],
             value=1.0
         )
         WD = param_init_net.ConstantFill(
-            [], "wd_{}_{}".format(dev.device_type, dev.cuda_gpu_id),
+            [], "wd_{}_{}".format(dev.device_type, dev.device_id),
             shape=[1], value=self.weight_decay
         )
 
@@ -549,7 +549,7 @@ class AdagradOptimizer(Optimizer):
             self._add_local_lr_multiplier(
                 lr_lars_multiplier,
                 is_gpu_blob=(current_scope is not None
-                    and current_scope.device_type == caffe2_pb2.CUDA),
+                    and core.IsGPUDeviceType(current_scope.device_type)),
             )
 
         lr, _ = self.build_lr(
@@ -560,7 +560,7 @@ class AdagradOptimizer(Optimizer):
         )
 
         if self.rowWise:
-            assert self.engine == "SIMD", "Got {}".format(self.engine)
+            logger.info("Using engine {} for rowWise Adagrad".format(self.engine))
 
             shapes, types = workspace.InferShapesAndTypes([param_init_net])
             if str(param) not in shapes:
@@ -586,6 +586,8 @@ class AdagradOptimizer(Optimizer):
                     value=0.0
                 )
         else:
+            logger.info("Using engine {} for regular Adagrad".format(self.engine))
+
             if self.engine in FP16_ENGINES:
                 shapes, types = workspace.InferShapesAndTypes([param_init_net])
                 assert str(param) in shapes, shapes
@@ -686,7 +688,7 @@ class WngradOptimizer(Optimizer):
             self._add_local_lr_multiplier(
                 lr_lars_multiplier,
                 is_gpu_blob=(current_scope is not None
-                    and current_scope.device_type == caffe2_pb2.CUDA),
+                    and core.IsGPUDeviceType(current_scope.device_type)),
             )
 
         lr, _ = self.build_lr(
@@ -1160,7 +1162,7 @@ class RmsPropOptimizer(Optimizer):
 
         ONE = param_init_net.ConstantFill(
             [],
-            "ONE_{}_{}".format(dev.device_type, dev.cuda_gpu_id),
+            "ONE_{}_{}".format(dev.device_type, dev.device_id),
             shape=[1],
             value=1.0
         )

@@ -1,8 +1,8 @@
-The PyTorch C++ Frontend
-========================
+The C++ Frontend
+================
 
 The PyTorch C++ frontend is a C++11 library for CPU and GPU
-tensor computation, with automatic differentation and high level building
+tensor computation, with automatic differentiation and high level building
 blocks for state of the art machine learning applications.
 
 Description
@@ -143,4 +143,4 @@ Installation
 
 Instructions on how to install the C++ frontend library distribution, including
 an example for how to build a minimal application depending on LibTorch, may be
-found by following `this <https://pytorch.org/cppdocs/installation.html>`_ link.
+found by following `this <https://pytorch.org/cppdocs/installing.html>`_ link.

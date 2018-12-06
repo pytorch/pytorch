@@ -10,7 +10,7 @@ bool CastOp<CPUContext>::DoRunWithType() {
   output->ResizeLike(input);
   const auto* data = input.template data<SrcType>();
   auto* out = output->template mutable_data<DstType>();
-  auto N = input.size();
+  auto N = input.numel();
   for (int64_t i = 0; i < N; ++i) {
     out[i] = static_cast<DstType>(data[i]);
   }
@@ -178,7 +178,7 @@ Y: [[9 5 0]
         "Y",
         "*(type: Tensor`<'to' type>`)* Output tensor with the same shape as "
         "input with type specified by the `to` argument.")
-    .InheritOnnxSchema("Cast");
+    .InheritOnnxSchema();
 
 // Some Casts are compatible with gradients, but for now we don't support it
 // GRADIENT_NOT_IMPLEMENTED_YET(Cast);

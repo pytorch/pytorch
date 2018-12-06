@@ -1,13 +1,13 @@
 #pragma once
 
 #include "ATen/core/ATenGeneral.h"
-#include "ATen/StorageImpl.h"
+#include <c10/core/StorageImpl.h>
 #include "ATen/core/UndefinedTensorImpl.h"
 
-#include <ATen/core/ScalarType.h>
+#include <c10/core/ScalarType.h>
 #include "ATen/Formatting.h"
-#include "ATen/core/ArrayRef.h"
-#include "ATen/core/Error.h"
+#include <c10/util/ArrayRef.h>
+#include <c10/util/Exception.h>
 
 #include <algorithm>
 #include <sstream>
@@ -113,11 +113,11 @@ std::array<int64_t, N> check_intlist(ArrayRef<int64_t> list, const char * name, 
 }
 
 inline int64_t sum_intlist(ArrayRef<int64_t> list) {
-  return std::accumulate(list.begin(), list.end(), 0);
+  return std::accumulate(list.begin(), list.end(), 0ll);
 }
 
 inline int64_t prod_intlist(ArrayRef<int64_t> list) {
-  return std::accumulate(list.begin(), list.end(), 1, std::multiplies<int64_t>());
+  return std::accumulate(list.begin(), list.end(), 1ll, std::multiplies<int64_t>());
 }
 
 } // at

@@ -156,12 +156,14 @@ struct strided_tensor_iter_fixed {
   strided_tensor_iter_fixed(Tensor& tensor, bool sort_strides = false)
       : data_(tensor.data<T>()) {
     std::memset(counter_, 0, sizeof(int64_t) * N);
-    std::memcpy(
-        sizes_, tensor.sizes().data(), tensor.ndimension() * sizeof(int64_t));
-    std::memcpy(
-        strides_,
-        tensor.strides().data(),
-        tensor.ndimension() * sizeof(int64_t));
+    if (tensor.dim() > 0) {
+      std::memcpy(
+          sizes_, tensor.sizes().data(), tensor.dim() * sizeof(int64_t));
+      std::memcpy(
+          strides_,
+          tensor.strides().data(),
+          tensor.dim() * sizeof(int64_t));
+    }
     dim_ = std::get<1>(collapse_dims(sizes_, strides_, tensor.ndimension()));
   }
 };

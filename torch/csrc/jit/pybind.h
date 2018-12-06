@@ -33,7 +33,7 @@ public:
   }
 
   static handle cast(torch::jit::IValue src, return_value_policy /* policy */, handle /* parent */) {
-    return toPyObject(std::move(src)).release();
+    return torch::jit::toPyObject(std::move(src)).release();
   }
 };
 

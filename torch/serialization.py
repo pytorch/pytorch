@@ -64,25 +64,34 @@ def _cpu_deserialize(obj, location):
         return obj
 
 
+def validate_cuda_device(location):
+    if isinstance(location, torch.device):
+        location = str(location)
+    if not isinstance(location, _string_classes):
+        raise ValueError("location should be a string or torch.device")
+    if location[5:] == '':
+        device = 0
+    else:
+        device = max(int(location[5:]), 0)
+
+    if not torch.cuda.is_available():
+        raise RuntimeError('Attempting to deserialize object on a CUDA '
+                           'device but torch.cuda.is_available() is False. '
+                           'If you are running on a CPU-only machine, '
+                           'please use torch.load with map_location=\'cpu\' '
+                           'to map your storages to the CPU.')
+    if device >= torch.cuda.device_count():
+        raise RuntimeError('Attempting to deserialize object on CUDA device '
+                           '{} but torch.cuda.device_count() is {}. Please use '
+                           'torch.load with map_location to map your storages '
+                           'to an existing device.'.format(
+                               device, torch.cuda.device_count()))
+    return device
+
+
 def _cuda_deserialize(obj, location):
     if location.startswith('cuda'):
-        if location[5:] == '':
-            device = 0
-        else:
-            device = max(int(location[5:]), 0)
-
-        if not torch.cuda.is_available():
-            raise RuntimeError('Attempting to deserialize object on a CUDA '
-                               'device but torch.cuda.is_available() is False. '
-                               'If you are running on a CPU-only machine, '
-                               'please use torch.load with map_location=\'cpu\' '
-                               'to map your storages to the CPU.')
-        if device >= torch.cuda.device_count():
-            raise RuntimeError('Attempting to deserialize object on CUDA device '
-                               '{} but torch.cuda.device_count() is {}. Please use '
-                               'torch.load with map_location to map your storages '
-                               'to an existing device.'.format(
-                                   device, torch.cuda.device_count()))
+        device = validate_cuda_device(location)
         return obj.cuda(device)
 
 

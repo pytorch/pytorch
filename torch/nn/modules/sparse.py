@@ -4,8 +4,10 @@ from torch.nn.parameter import Parameter
 from .module import Module
 from .. import functional as F
 from .. import init
+from torch._jit_internal import weak_module, weak_script, weak_script_method
 
 
+@weak_module
 class Embedding(Module):
     r"""A simple lookup table that stores embeddings of a fixed dictionary and size.
 
@@ -18,12 +20,12 @@ class Embedding(Module):
         embedding_dim (int): the size of each embedding vector
         padding_idx (int, optional): If given, pads the output with the embedding vector at :attr:`padding_idx`
                                          (initialized to zeros) whenever it encounters the index.
-        max_norm (float, optional): If given, will renormalize the embedding vectors to have a norm lesser than
-                                    this before extracting.
-        norm_type (float, optional): The p of the p-norm to compute for the max_norm option. Default ``2``.
-        scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the inverse of frequency of
+        max_norm (float, optional): If given, each embedding vector with norm larger than :attr:`max_norm`
+                                    is renormalized to have norm :attr:`max_norm`.
+        norm_type (float, optional): The p of the p-norm to compute for the :attr:`max_norm` option. Default ``2``.
+        scale_grad_by_freq (boolean, optional): If given, this will scale gradients by the inverse of frequency of
                                                 the words in the mini-batch. Default ``False``.
-        sparse (bool, optional): if ``True``, gradient w.r.t. :attr:`weight` matrix will be a sparse tensor.
+        sparse (bool, optional): If ``True``, gradient w.r.t. :attr:`weight` matrix will be a sparse tensor.
                                  See Notes for more details regarding sparse gradients.
 
     Attributes:
@@ -75,9 +77,11 @@ class Embedding(Module):
                  [ 0.0000,  0.0000,  0.0000],
                  [-0.1655,  0.9897,  0.0635]]])
     """
+    __constants__ = ['num_embeddings', 'embedding_dim', 'padding_idx', 'max_norm',
+                     'norm_type', 'scale_grad_by_freq', 'sparse', '_weight']
 
     def __init__(self, num_embeddings, embedding_dim, padding_idx=None,
-                 max_norm=None, norm_type=2, scale_grad_by_freq=False,
+                 max_norm=None, norm_type=2., scale_grad_by_freq=False,
                  sparse=False, _weight=None):
         super(Embedding, self).__init__()
         self.num_embeddings = num_embeddings
@@ -107,6 +111,7 @@ class Embedding(Module):
             with torch.no_grad():
                 self.weight[self.padding_idx].fill_(0)
 
+    @weak_script_method
     def forward(self, input):
         return F.embedding(
             input, self.weight, self.padding_idx, self.max_norm,
@@ -161,6 +166,7 @@ class Embedding(Module):
         return embedding
 
 
+@weak_module
 class EmbeddingBag(Module):
     r"""Computes sums or means of 'bags' of embeddings, without instantiating the
     intermediate embeddings.
@@ -177,9 +183,9 @@ class EmbeddingBag(Module):
     Args:
         num_embeddings (int): size of the dictionary of embeddings
         embedding_dim (int): the size of each embedding vector
-        max_norm (float, optional): If given, will renormalize the embedding vectors to have a norm lesser than
-                                    this before extracting.
-        norm_type (float, optional): The p of the p-norm to compute for the max_norm option. Default ``2``.
+        max_norm (float, optional): If given, each embedding vector with norm larger than :attr:`max_norm`
+                                    is renormalized to have norm :attr:`max_norm`.
+        norm_type (float, optional): The p of the p-norm to compute for the :attr:`max_norm` option. Default ``2``.
         scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the inverse of frequency of
                                                 the words in the mini-batch. Default ``False``.
                                                 Note: this option is not supported when ``mode="max"``.
@@ -223,9 +229,11 @@ class EmbeddingBag(Module):
         tensor([[-0.8861, -5.4350, -0.0523],
                 [ 1.1306, -2.5798, -1.0044]])
     """
+    __constants__ = ['num_embeddings, embedding_dim', 'max_norm', 'norm_type',
+                     'scale_grad_by_freq', 'mode', 'sparse']
 
     def __init__(self, num_embeddings, embedding_dim,
-                 max_norm=None, norm_type=2, scale_grad_by_freq=False,
+                 max_norm=None, norm_type=2., scale_grad_by_freq=False,
                  mode='mean', sparse=False):
         super(EmbeddingBag, self).__init__()
         self.num_embeddings = num_embeddings
@@ -242,7 +250,9 @@ class EmbeddingBag(Module):
     def reset_parameters(self):
         init.normal_(self.weight)
 
+    @weak_script_method
     def forward(self, input, offsets=None):
+        # type: (Tensor, Optional[Tensor]) -> Tensor
         return F.embedding_bag(input, self.weight, offsets,
                                self.max_norm, self.norm_type,
                                self.scale_grad_by_freq, self.mode, self.sparse)

@@ -10,8 +10,8 @@ bool LeakyReluOp<float, CPUContext>::RunOnDevice() {
   const auto& X = Input(0);
   auto* Y = Output(0);
   Y->ResizeLike(X);
-  ConstEigenVectorMap<float> Xvec(X.template data<float>(), X.size());
-  EigenVectorMap<float> Yvec(Y->template mutable_data<float>(), Y->size());
+  ConstEigenVectorMap<float> Xvec(X.template data<float>(), X.numel());
+  EigenVectorMap<float> Yvec(Y->template mutable_data<float>(), Y->numel());
   Yvec = Xvec.cwiseMax(0.f) + Xvec.cwiseMin(0.f) * alpha_;
   return true;
 }
@@ -22,10 +22,10 @@ bool LeakyReluGradientOp<float, CPUContext>::RunOnDevice() {
   const auto& dY = Input(1);
   auto* dX = Output(0);
   dX->ResizeLike(Y);
-  CAFFE_ENFORCE_EQ(Y.size(), dY.size());
-  ConstEigenVectorMap<float> Yvec(Y.template data<float>(), Y.size());
-  ConstEigenVectorMap<float> dYvec(dY.template data<float>(), dY.size());
-  EigenVectorMap<float> dXvec(dX->template mutable_data<float>(), dX->size());
+  CAFFE_ENFORCE_EQ(Y.numel(), dY.numel());
+  ConstEigenVectorMap<float> Yvec(Y.template data<float>(), Y.numel());
+  ConstEigenVectorMap<float> dYvec(dY.template data<float>(), dY.numel());
+  EigenVectorMap<float> dXvec(dX->template mutable_data<float>(), dX->numel());
   Eigen::VectorXf gtZero = (Yvec.array() >= 0.0f).cast<float>();
   dXvec = dYvec.array() * gtZero.array() -
       dYvec.array() * (gtZero.array() - 1.0f) * alpha_;
@@ -110,7 +110,7 @@ OPERATOR_SCHEMA(LeakyReluGradient)
     .NumOutputs(1)
     .AllowInplace({{1, 0}})
     .Arg("alpha", "Coefficient of leakage")
-    .InheritOnnxSchema("LeakyRelu");
+    .InheritOnnxSchema();
 
 class GetLeakyReluGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

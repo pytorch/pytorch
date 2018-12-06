@@ -74,7 +74,7 @@ static void inline THNN_(VolumetricConvolutionMM_shapeCheck)(
 
   if (exactInputDepth < kT || exactInputHeight < kH || exactInputWidth < kW) {
     THError("Calculated padded input size per channel: (%ld x %ld x %ld). "
-      "Kernel size: (%ld x %ld x %ld). Kernel size can't be greater than actual input size",
+      "Kernel size: (%d x %d x %d). Kernel size can't be greater than actual input size",
       exactInputDepth, exactInputHeight, exactInputWidth, kT, kH, kW);
   }
 
