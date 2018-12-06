@@ -35,9 +35,11 @@ struct Storage;
 
 namespace at {
 
+class Tensor;
+using TensorList = ArrayRef<Tensor>;
+
 class Context;
 struct Generator;
-class Tensor;
 
 static inline void noop_deleter(void*) {}
 
