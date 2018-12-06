@@ -932,12 +932,12 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       if (dtype().copy()) {
         AT_ASSERTM(
             device_type() == ::at::DeviceType::CPU,
-            "In CopyToDevice source and dest tensors must both be CPU for "
+            "In CopyFrom source and dest tensors must both be CPU for "
             "non-POD copy, but dest tensor was ",
             device_type());
         AT_ASSERTM(
             src.device_type() == ::at::DeviceType::CPU,
-            "In CopyToDevice source and dest tensors must both be CPU for "
+            "In CopyFrom source and dest tensors must both be CPU for "
             "non-POD copy, but src tensor was ",
             src.device_type());
         dtype().copy()(src.data(), raw_mutable_data(dtype()), numel());
