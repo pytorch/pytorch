@@ -279,7 +279,7 @@ namespace detail {
  *    tensor is fully initialized in all fields.  Please do not write new code
  *    that depends on these uninitialized states.
  */
-struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
+struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl() = delete;
 
   /**

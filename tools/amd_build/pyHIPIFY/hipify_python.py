@@ -205,7 +205,7 @@ class disablefuncmode(Enum):
     EMPTYBODY = 6
 
 
-def matched_files_iter(root_path, includes=('*',), ignores=(), extensions=(), hipify_caffe2=False):
+def matched_files_iter(root_path, includes=('*',), ignores=(), extensions=(), out_of_place_only=False):
     def _fnmatch(filepath, patterns):
         return any(fnmatch.fnmatch(filepath, pattern) for pattern in patterns)
 
@@ -231,9 +231,10 @@ def matched_files_iter(root_path, includes=('*',), ignores=(), extensions=(), hi
         for filename in filenames:
             filepath = os.path.join(rel_dirpath, filename)
             if _fnmatch(filepath, includes) and (not _fnmatch(filepath, ignores)) and match_extensions(filepath):
-                if hipify_caffe2 and not is_caffe2_gpu_file(filepath):
+                if not is_pytorch_file(filepath) and not is_caffe2_gpu_file(filepath):
                     continue
-
+                if out_of_place_only and not is_out_of_place(filepath):
+                    continue
                 yield filepath
 
 
@@ -241,8 +242,7 @@ def preprocess(
         output_directory,
         all_files,
         show_detailed=False,
-        show_progress=True,
-        hipify_caffe2=False):
+        show_progress=True):
     """
     Call preprocessor on selected files.
 
@@ -258,14 +258,12 @@ def preprocess(
     stats = {"unsupported_calls": [], "kernel_launches": []}
 
     for filepath in all_files:
-        preprocessor(output_directory, filepath, stats, hipify_caffe2)
+        preprocessor(output_directory, filepath, stats)
         # Show what happened
         if show_progress:
             print(
                 filepath, "->",
-                get_hip_file_path(
-                    filepath,
-                    hipify_caffe2=hipify_caffe2))
+                get_hip_file_path(filepath))
             finished_count += 1
 
     print(bcolors.OKGREEN + "Successfully preprocessed all matching files." + bcolors.ENDC, file=sys.stderr)
@@ -323,10 +321,13 @@ def add_dim3(kernel_string, cuda_kernel):
     return cuda_kernel
 
 
+RE_KERNEL_LAUNCH = re.compile(r'([ ]+)(detail?)::[ ]+\\\n[ ]+')
+
+
 def processKernelLaunches(string, stats):
     """ Replace the CUDA style Kernel launches with the HIP style kernel launches."""
     # Concat the namespace with the kernel names. (Find cleaner way of doing this later).
-    string = re.sub(r'([ ]+)(detail?)::[ ]+\\\n[ ]+', lambda inp: "{0}{1}::".format(inp.group(1), inp.group(2)), string)
+    string = RE_KERNEL_LAUNCH.sub(lambda inp: "{0}{1}::".format(inp.group(1), inp.group(2)), string)
 
     def grab_method_and_template(in_kernel):
         # The positions for relevant kernel components.
@@ -489,12 +490,15 @@ def find_parentheses_group(input_string, start):
     return find_closure_group(input_string, start, group=["(", ")"])
 
 
+RE_ASSERT = re.compile(r"\bassert[ ]*\(")
+
+
 def disable_asserts(input_string):
     """ Disables regular assert statements
     e.g. "assert(....)" -> "/*assert(....)*/"
     """
     output_string = input_string
-    asserts = list(re.finditer(r"\bassert[ ]*\(", input_string))
+    asserts = list(RE_ASSERT.finditer(input_string))
     for assert_item in asserts:
         p_start, p_end = find_parentheses_group(input_string, assert_item.end() - 1)
         start = assert_item.start()
@@ -508,9 +512,7 @@ def replace_forceinline(input_string):
     replacing '__forceinline__' with 'inline' as a workaround
     https://github.com/ROCm-Developer-Tools/HIP/blob/master/docs/markdown/hip_faq.md#what-if-hip-generates-error-of-symbol-multiply-defined-only-on-amd-machine
     """
-    output_string = input_string
-    output_string = re.sub("__forceinline__", "inline", output_string)
-    return output_string
+    return input_string.replace("__forceinline__", "inline")
 
 
 def replace_math_functions(input_string):
@@ -523,6 +525,9 @@ def replace_math_functions(input_string):
       output_string = output_string.replace(r'{}('.format(func), '{}('.format(MATH_TRANSPILATIONS[func]))
 
     return output_string
+
+
+RE_SYNCTHREADS = re.compile(r"[:]?[:]?\b(__syncthreads)\b(\w*\()")
 
 
 def hip_header_magic(input_string):
@@ -544,13 +549,16 @@ def hip_header_magic(input_string):
     hasDeviceLogic = "hipLaunchKernelGGL" in output_string
     hasDeviceLogic += "__global__" in output_string
     hasDeviceLogic += "__shared__" in output_string
-    hasDeviceLogic += re.search(r"[:]?[:]?\b(__syncthreads)\b(\w*\()", output_string) is not None
+    hasDeviceLogic += RE_SYNCTHREADS.search(output_string) is not None
 
     # If device logic found, provide the necessary header.
     if hasDeviceLogic:
         output_string = '#include "hip/hip_runtime.h"\n' + input_string
 
     return output_string
+
+
+RE_EXTERN_SHARED = re.compile(r"extern\s+([\w\(\)]+)?\s*__shared__\s+([\w:<>\s]+)\s+(\w+)\s*\[\s*\]\s*;")
 
 
 def replace_extern_shared(input_string):
@@ -561,8 +569,7 @@ def replace_extern_shared(input_string):
         "extern __shared__ unsigned char smem[];" => "HIP_DYNAMIC_SHARED( unsigned char, my_smem)"
     """
     output_string = input_string
-    output_string = re.sub(
-        r"extern\s+([\w\(\)]+)?\s*__shared__\s+([\w:<>\s]+)\s+(\w+)\s*\[\s*\]\s*;",
+    output_string = RE_EXTERN_SHARED.sub(
         lambda inp: "HIP_DYNAMIC_SHARED({0} {1}, {2})".format(
             inp.group(1) or "", inp.group(2), inp.group(3)), output_string)
 
@@ -708,7 +715,7 @@ def disable_function(input_string, function, replace_style):
     return output_string
 
 
-def get_hip_file_path(filepath, hipify_caffe2):
+def get_hip_file_path(filepath):
     """
     Returns the new name of the hipified file
     """
@@ -716,7 +723,7 @@ def get_hip_file_path(filepath, hipify_caffe2):
     # to not be the case, but we can't conveniently do this until we
     # also fix up PyTorch's build system to know how to handle things
     # out-of-place.
-    if not hipify_caffe2:
+    if is_pytorch_file(filepath):
         return filepath
 
     dirpath, filename = os.path.split(filepath)
@@ -769,6 +776,21 @@ def get_hip_file_path(filepath, hipify_caffe2):
     return os.path.join(dirpath, root + ext)
 
 
+def is_out_of_place(filepath):
+    return not is_pytorch_file(filepath)
+
+
+# Keep this synchronized with includes/ignores in build_amd.py
+def is_pytorch_file(filepath):
+    if filepath.startswith("aten/"):
+        if filepath.startswith("aten/src/ATen/core/"):
+            return False
+        return True
+    if filepath.startswith("torch/"):
+        return True
+    return False
+
+
 def is_caffe2_gpu_file(filepath):
     if filepath.startswith("c10/cuda"):
         return True
@@ -777,38 +799,104 @@ def is_caffe2_gpu_file(filepath):
     return ('gpu' in filename or ext in ['.cu', '.cuh']) and ('cudnn' not in filename)
 
 
-def preprocessor(output_directory, filepath, stats, hipify_caffe2):
+# Cribbed from https://stackoverflow.com/questions/42742810/speed-up-millions-of-regex-replacements-in-python-3/42789508#42789508
+class Trie():
+    """Regex::Trie in Python. Creates a Trie out of a list of words. The trie can be exported to a Regex pattern.
+    The corresponding Regex should match much faster than a simple Regex union."""
+
+    def __init__(self):
+        self.data = {}
+
+    def add(self, word):
+        ref = self.data
+        for char in word:
+            ref[char] = char in ref and ref[char] or {}
+            ref = ref[char]
+        ref[''] = 1
+
+    def dump(self):
+        return self.data
+
+    def quote(self, char):
+        return re.escape(char)
+
+    def _pattern(self, pData):
+        data = pData
+        if "" in data and len(data.keys()) == 1:
+            return None
+
+        alt = []
+        cc = []
+        q = 0
+        for char in sorted(data.keys()):
+            if isinstance(data[char], dict):
+                try:
+                    recurse = self._pattern(data[char])
+                    alt.append(self.quote(char) + recurse)
+                except:
+                    cc.append(self.quote(char))
+            else:
+                q = 1
+        cconly = not len(alt) > 0
+
+        if len(cc) > 0:
+            if len(cc) == 1:
+                alt.append(cc[0])
+            else:
+                alt.append('[' + ''.join(cc) + ']')
+
+        if len(alt) == 1:
+            result = alt[0]
+        else:
+            result = "(?:" + "|".join(alt) + ")"
+
+        if q:
+            if cconly:
+                result += "?"
+            else:
+                result = "(?:%s)?" % result
+        return result
+
+    def pattern(self):
+        return self._pattern(self.dump())
+
+
+CAFFE2_TRIE = Trie()
+CAFFE2_MAP = {}
+PYTORCH_TRIE = Trie()
+PYTORCH_MAP = {}
+for mapping in CUDA_TO_HIP_MAPPINGS:
+    for src, value in mapping.items():
+        dst = value[0]
+        meta_data = value[1:]
+        if constants.API_CAFFE2 not in meta_data:
+            PYTORCH_TRIE.add(src)
+            PYTORCH_MAP[src] = dst
+        CAFFE2_TRIE.add(src)
+        CAFFE2_MAP[src] = dst
+RE_CAFFE2_PREPROCESSOR = re.compile(CAFFE2_TRIE.pattern())
+RE_PYTORCH_PREPROCESSOR = re.compile(r'\b{0}\b'.format(PYTORCH_TRIE.pattern()))
+
+def preprocessor(output_directory, filepath, stats):
     """ Executes the CUDA -> HIP conversion on the specified file. """
     fin_path = os.path.join(output_directory, filepath)
     with open(fin_path, 'r') as fin:
         output_source = fin.read()
 
-    fout_path = os.path.join(output_directory, get_hip_file_path(filepath, hipify_caffe2))
+    fout_path = os.path.join(output_directory, get_hip_file_path(filepath))
     if not os.path.exists(os.path.dirname(fout_path)):
         os.makedirs(os.path.dirname(fout_path))
 
     with open(fout_path, 'w') as fout:
-        # Perform type, method, constant replacements
-        for mapping in CUDA_TO_HIP_MAPPINGS:
-            for cuda_type, value in mapping.items():
-                # Extract relevant information
-                hip_type = value[0]
-                meta_data = value[1:]
-
-                if constants.API_CAFFE2 in meta_data and not hipify_caffe2:
-                    continue
-
-                if output_source.find(cuda_type) > -1:
-                    # Check if supported
-                    if constants.HIP_UNSUPPORTED in meta_data:
-                        stats["unsupported_calls"].append((cuda_type, filepath))
-
-                if cuda_type in output_source:
-                    if hipify_caffe2:
-                        pattern = r'({0})'.format(re.escape(cuda_type))
-                    else:
-                        pattern = r'(\b{0}\b)'.format(re.escape(cuda_type))
-                    output_source = re.sub(pattern, hip_type, output_source)
+        # unsupported_calls statistics reporting is broken atm
+        if is_pytorch_file(filepath):
+            def pt_repl(m):
+                return PYTORCH_MAP[m.group(0)]
+            output_source = RE_PYTORCH_PREPROCESSOR.sub(pt_repl, output_source)
+        else:
+            def c2_repl(m):
+                return CAFFE2_MAP[m.group(0)]
+            output_source = RE_CAFFE2_PREPROCESSOR.sub(c2_repl, output_source)
 
         # Perform Kernel Launch Replacements
         output_source = processKernelLaunches(output_source, stats)
@@ -818,7 +906,7 @@ def preprocessor(output_directory, filepath, stats, hipify_caffe2):
         #    output_source = disable_asserts(output_source)
 
         # Replace std:: with non-std:: versions
-        if re.search(r"\.cu$", filepath) or re.search(r"\.cuh$", filepath):
+        if filepath.endswith(".cu") or filepath.endswith(".cuh"):
           output_source = replace_math_functions(output_source)
 
         # Replace __forceinline__ with inline
@@ -862,15 +950,37 @@ def fix_static_global_kernels(in_txt):
     return in_txt
 
 
-def get_kernel_template_params(output_directory, the_file, KernelDictionary, template_param_to_value):
+# Note [PyTorch and Caffe2 kernel name clobber]
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# For some reason, the static_cast logic in pyHIPIFY assumes all kernels
+# have unique names.  This may be true internally within PyTorch and
+# Caffe2, but it is not true across PyTorch and Caffe2.  The metadata
+# in these cases clobbers each other.
+#
+# To prevent this happening, KernelTemplateParams is distinguished
+# by a boolean saying if it is a PyTorch kernel or a Caffe2 kernel.
+# We can't do a more fine-grained distinction, e.g., the filename,
+# because we need to work on the kernel from files distinct from
+# the one they were originally defined in (that's why this is done
+# in two passes).
+#
+# We can soon kill static_cast handling entirely, as hcc will support
+# this properly.  So don't bother refactoring this code; it will
+# get deleted soon.
+
+
+RE_KERNEL_TEMPLATE = re.compile(r"(template[ ]*<(.*)>\n.*\n?)?__global__ void[\n| ](\w+(\(.*\))?)\(")
+RE_GENERATE_KERNEL = re.compile(r"GENERATE_KERNEL([1-9])\((.*)\)")
+
+
+def get_kernel_template_params(output_directory, the_file, KernelTemplateParams, template_param_to_value):
     """Scan for __global__ kernel definitions then extract its argument types, and static cast as necessary"""
     # Read the kernel file.
     with openf(os.path.join(output_directory, the_file), "r") as f:
         # Extract all kernels with their templates inside of the file
         string = f.read()
 
-        get_kernel_definitions = [k for k in re.finditer(
-            r"(template[ ]*<(.*)>\n.*\n?)?__global__ void[\n| ](\w+(\(.*\))?)\(", string)]
+        get_kernel_definitions = [k for k in RE_KERNEL_TEMPLATE.finditer(string)]
 
         # Create new launch syntax
         for kernel in get_kernel_definitions:
@@ -930,11 +1040,12 @@ def get_kernel_template_params(output_directory, the_file, KernelDictionary, tem
             for idx, arg_type in enumerate(argument_types):
                 formatted_args[idx] = arg_type
 
-            KernelDictionary[kernel_name] = {"kernel_with_template": kernel_with_template, "arg_types": formatted_args}
+            # See Note [PyTorch and Caffe2 kernel name clobber]
+            KernelTemplateParams[(is_pytorch_file(the_file), kernel_name)] = {"kernel_with_template": kernel_with_template, "arg_types": formatted_args}
 
         # Extract generated kernels
         # curandStateMtgp32 *state, int size, T *result, ARG1
-        for kernel in re.finditer(r"GENERATE_KERNEL([1-9])\((.*)\)", string):
+        for kernel in RE_GENERATE_KERNEL.finditer(string):
             kernel_gen_type = int(kernel.group(1))
             kernel_name = kernel.group(2).split(",")[0]
             kernel_params = kernel.group(2).split(",")[1:]
@@ -946,7 +1057,8 @@ def get_kernel_template_params(output_directory, the_file, KernelDictionary, tem
                 kernel_args = {1: "int", 2: "{0} *".format(kernel_params[0]), 3: kernel_params[1], 4: kernel_params[2]}
 
             # Argument at position 1 should be int
-            KernelDictionary[kernel_name] = {"kernel_with_template": kernel_name, "arg_types": kernel_args}
+            # See Note [PyTorch and Caffe2 kernel name clobber]
+            KernelTemplateParams[(is_pytorch_file(the_file), kernel_name)] = {"kernel_with_template": kernel_name, "arg_types": kernel_args}
 
 
 def disable_unsupported_function_call(function, input_string, replacement):
@@ -986,11 +1098,14 @@ def disable_unsupported_function_call(function, input_string, replacement):
     return output_string
 
 
+RE_INCLUDE = re.compile(r"#include .*\n")
+
+
 def disable_module(input_file):
     """Disable a module entirely except for header includes."""
     with openf(input_file, "r+") as f:
         txt = f.read()
-        last = list(re.finditer(r"#include .*\n", txt))[-1]
+        last = list(RE_INCLUDE.finditer(txt))[-1]
         end = last.end()
 
         disabled = "{0}#if !defined(__HIP_PLATFORM_HCC__)\n{1}\n#endif".format(txt[0:end], txt[end:])
@@ -1046,8 +1161,11 @@ def extract_arguments(start, string):
     return arguments
 
 
+RE_HIP_LAUNCH_KERNEL_GGL = re.compile("hipLaunchKernelGGL\(")
+
+
 # Add static_cast to ensure that the type of kernel arguments matches that in the corresponding kernel definition
-def add_static_casts(filepath, KernelTemplateParams):
+def add_static_casts(orig_filepath, filepath, KernelTemplateParams):
     """Add static casts to kernel launches in order to keep launch argument types and kernel definition types matching.
 
        Example:
@@ -1067,7 +1185,7 @@ def add_static_casts(filepath, KernelTemplateParams):
     with openf(filepath, "r+") as fileobj:
         input_source = fileobj.read()
         new_output_source = input_source
-        for kernel in re.finditer("hipLaunchKernelGGL\(", input_source):
+        for kernel in RE_HIP_LAUNCH_KERNEL_GGL.finditer(input_source):
             arguments = extract_arguments(kernel.end() - 1, input_source)
 
             # Check if we have templating + static_cast information
@@ -1075,11 +1193,13 @@ def add_static_casts(filepath, KernelTemplateParams):
             original_kernel_name_with_template = argument_strings[0].strip()
             kernel_name = original_kernel_name_with_template.split("<")[0].strip()
             ignore = ["upscale"]
-            if kernel_name in KernelTemplateParams and kernel_name not in ignore:
+            if (is_pytorch_file(orig_filepath), kernel_name) in KernelTemplateParams and kernel_name not in ignore:
                 # Add template to the kernel
                 # Add static_casts to relevant arguments
-                kernel_name_with_template = KernelTemplateParams[kernel_name]["kernel_with_template"]
-                argument_types = KernelTemplateParams[kernel_name]["arg_types"]
+                # See Note [PyTorch and Caffe2 kernel name clobber]
+                params = KernelTemplateParams[(is_pytorch_file(orig_filepath), kernel_name)]
+                kernel_name_with_template = params["kernel_with_template"]
+                argument_types = params["arg_types"]
 
                 # The first 5 arguments are simply (function, number blocks, dimension blocks, shared memory, stream)
                 # old_kernel_launch_parameters - will contain the actual arguments to the function itself.
@@ -1202,11 +1322,11 @@ def main():
         required=False)
 
     parser.add_argument(
-        '--hipify_caffe2',
+        '--out-of-place-only',
         type=str2bool,
         default=False,
-        help="Whether to hipify caffe2 source",
-        required=False)
+        help="Whether to only run hipify out-of-place on source files",
+        required=False),
 
     parser.add_argument(
         '--ignores',
@@ -1246,7 +1366,7 @@ def main():
         includes=args.includes,
         json_settings=args.json_settings,
         add_static_casts_option=args.add_static_casts,
-        hipify_caffe2=args.hipify_caffe2,
+        out_of_place_only=args.out_of_place_only,
         ignores=args.ignores,
         show_progress=args.show_progress)
 
@@ -1254,12 +1374,12 @@ def main():
 def hipify(
     project_directory,
     show_detailed=False,
-    extensions=(".cu", ".cuh", ".c", ".cpp", ".h", ".in", ".hpp"),
+    extensions=(".cu", ".cuh", ".c", ".cc", ".cpp", ".h", ".in", ".hpp"),
     output_directory="",
     includes=(),
     json_settings="",
     add_static_casts_option=False,
-    hipify_caffe2=False,
+    out_of_place_only=False,
     ignores=(),
     show_progress=True,
 ):
@@ -1370,15 +1490,14 @@ def hipify(
 
     all_files = list(matched_files_iter(output_directory, includes=includes,
                                         ignores=ignores, extensions=extensions,
-                                        hipify_caffe2=hipify_caffe2))
+                                        out_of_place_only=out_of_place_only))
 
     # Start Preprocessor
     preprocess(
         output_directory,
         all_files,
         show_detailed=show_detailed,
-        show_progress=show_progress,
-        hipify_caffe2=hipify_caffe2)
+        show_progress=show_progress)
 
     # Extract all of the kernel parameter and template type information.
     if add_static_casts_option:
@@ -1388,16 +1507,15 @@ def hipify(
                 output_directory,
                 filepath,
                 KernelTemplateParams,
-                CAFFE2_TEMPLATE_MAP if hipify_caffe2 else PYTORCH_TEMPLATE_MAP)
+                CAFFE2_TEMPLATE_MAP if not is_pytorch_file(filepath) else PYTORCH_TEMPLATE_MAP)
 
         # Execute the Clang Tool to Automatically add static casts
         for filepath in all_files:
             add_static_casts(
+                filepath,
                 os.path.join(
                     output_directory,
-                    get_hip_file_path(
-                        filepath,
-                        hipify_caffe2=hipify_caffe2)),
+                    get_hip_file_path(filepath)),
                 KernelTemplateParams)
 
 

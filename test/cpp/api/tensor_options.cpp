@@ -12,14 +12,14 @@
 using namespace at;
 
 // A macro so we don't lose location information when an assertion fails.
-#define REQUIRE_OPTIONS(device_, index_, type_, layout_)                      \
+#define REQUIRE_OPTIONS(device_, index_, type_, layout_)                  \
   ASSERT_EQ(options.device().type(), Device((device_), (index_)).type()); \
-  ASSERT_TRUE(                                                                \
-      options.device().index() == Device((device_), (index_)).index());       \
+  ASSERT_TRUE(                                                            \
+      options.device().index() == Device((device_), (index_)).index());   \
   ASSERT_EQ(options.dtype(), (type_));                                    \
   ASSERT_TRUE(options.layout() == (layout_))
 
-#define REQUIRE_TENSOR_OPTIONS(device_, index_, type_, layout_)                \
+#define REQUIRE_TENSOR_OPTIONS(device_, index_, type_, layout_)            \
   ASSERT_EQ(tensor.device().type(), Device((device_), (index_)).type());   \
   ASSERT_EQ(tensor.device().index(), Device((device_), (index_)).index()); \
   ASSERT_EQ(tensor.type().scalarType(), (type_));                          \
@@ -126,5 +126,44 @@ TEST(DeviceTest, ParsesCorrectlyFromString) {
       "", "cud:1", "cuda:", "cpu::1", ":1", "3", "tpu:4", "??"};
   for (const auto& badness : badnesses) {
     ASSERT_ANY_THROW({ Device d(badness); });
+  }
+}
+
+struct DefaultDtypeTest : ::testing::Test {
+  DefaultDtypeTest() {
+    set_default_dtype(caffe2::TypeMeta::Make<float>());
+  }
+  ~DefaultDtypeTest() {
+    set_default_dtype(caffe2::TypeMeta::Make<float>());
+  }
+};
+
+TEST_F(DefaultDtypeTest, CanSetAndGetDefaultDtype) {
+  ASSERT_EQ(at::get_default_dtype(), kFloat);
+  set_default_dtype(caffe2::TypeMeta::Make<int>());
+  ASSERT_EQ(at::get_default_dtype(), kInt);
+}
+
+TEST_F(DefaultDtypeTest, NewTensorOptionsHasCorrectDefault) {
+  set_default_dtype(caffe2::TypeMeta::Make<int>());
+  ASSERT_EQ(at::get_default_dtype(), kInt);
+  TensorOptions options;
+  ASSERT_EQ(options.dtype(), kInt);
+}
+
+TEST_F(DefaultDtypeTest, NewTensorsHaveCorrectDefaultDtype) {
+  set_default_dtype(caffe2::TypeMeta::Make<int>());
+  {
+    auto tensor = torch::ones(5);
+    ASSERT_EQ(tensor.dtype(), kInt);
+  }
+  set_default_dtype(caffe2::TypeMeta::Make<double>());
+  {
+    auto tensor = torch::ones(5);
+    ASSERT_EQ(tensor.dtype(), kDouble);
+  }
+  {
+    auto tensor = torch::ones(5, kFloat);
+    ASSERT_EQ(tensor.dtype(), kFloat);
   }
 }
