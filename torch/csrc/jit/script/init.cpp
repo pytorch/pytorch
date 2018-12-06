@@ -683,6 +683,12 @@ void initJitScriptBindings(PyObject* module) {
         std::vector<at::Tensor> tensors;
         PythonPrint(ss, self, tensors, true);
         return std::make_pair(ss.str(), tensors);
+      })
+      .def_property_readonly("code", [](Module& self) {
+        std::ostringstream ss;
+        std::vector<at::Tensor> tensors;
+        PythonPrint(ss, self, tensors, false);
+        return ss.str();
       });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())

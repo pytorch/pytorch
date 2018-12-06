@@ -6,6 +6,9 @@ from torch.cuda.comm import broadcast_coalesced
 from torch.cuda import nccl
 import torch.distributed as dist
 
+if dist.is_available():
+    from torch.distributed.distributed_c10d import _get_default_group
+
 from ..modules import Module
 from .replicate import replicate
 from .scatter_gather import scatter_kwargs, gather
@@ -186,7 +189,7 @@ class DistributedDataParallel(Module):
             output_device = device_ids[0]
 
         if process_group is None:
-            self.process_group = dist.get_default_group()
+            self.process_group = _get_default_group()
         else:
             self.process_group = process_group
 
@@ -308,14 +311,15 @@ class DistributedDataParallel(Module):
 
     def __setstate__(self, state):
         # If serializable, then the process group should be the default one
-        self.process_group = dist.get_default_group()
+        self.process_group = _get_default_group()
+        self.check_previous_reduction = False
         super(DistributedDataParallel, self).__setstate__(state)
         self._ddp_init_helper()
 
     def _check_default_group(self):
         pickle_not_supported = False
         try:
-            if self.process_group != dist.get_default_group():
+            if self.process_group != _get_default_group():
                 pickle_not_supported = True
         except RuntimeError:
             pickle_not_supported = True
