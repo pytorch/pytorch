@@ -22,6 +22,9 @@
 
 namespace at {
 namespace native {
+
+namespace {
+
   // 4d tensor B x D x H x W
   // All kernels view batch dim B and feature dim D as collapsed.
 
@@ -201,8 +204,7 @@ namespace native {
 
   // 4d tensor B x D x H x W
 
-  template <typename scalar_t>
-  Tensor& AdaptiveAveragePooling2d_forward_out_cuda_template(
+  void AdaptiveAveragePooling2d_forward_out_cuda_template(
     Tensor& output,
     const Tensor& input,
     IntList output_size
@@ -211,8 +213,12 @@ namespace native {
               output_arg{ output, "output", 2 };
     checkAllSameGPU("cudnn_adaptive_avg_pooling2d", {input_arg, output_arg});
 
-    scalar_t *output_data;
-    scalar_t *input_data;
+    for (int64_t i = 0; i < input.ndimension(); i++) {
+      AT_CHECK(input.size(i) > 0,
+        "adaptive_avg_pooling2d(): expected input to have non-empty spatial dimensions, "
+        "but input has sizes ", input.sizes(), " with dimension ", i, " being "
+        "empty");
+    }
 
     AT_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
       "non-empty 3D or 4D (batch mode) tensor expected for input");
@@ -228,23 +234,26 @@ namespace native {
 
       int64_t osizeH = output_size[0];
       int64_t osizeW = output_size[1];
+      AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+        input.type(), "adaptive_avg_pool2d", [&] {
+          scalar_t *input_data = input.data<scalar_t>();
 
-      input_data = input.data<scalar_t>();
+          output.resize_({sizeD, osizeH, osizeW});
 
-      output.resize_({sizeD, osizeH, osizeW});
+          scalar_t *output_data = output.data<scalar_t>();
 
-      output_data = output.data<scalar_t>();
+          // cuda blocks & threads:
+          int blocksH = std::max<int64_t>((int)(16L / sizeD), 1);
+          dim3 blocks(sizeD, blocksH);
+          dim3 threads(32, 8);
 
-      // cuda blocks & threads:
-      int blocksH = std::max<int64_t>((int)(16L / sizeD), 1);
-      dim3 blocks(sizeD, blocksH);
-      dim3 threads(32, 8);
-
-      // run averagepool kernel
-      adaptiveaveragepool <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
-        input_data, output_data,
-        isizeH, isizeW, osizeH, osizeW,
-        istrideD, istrideH, istrideW);
+          // run averagepool kernel
+          adaptiveaveragepool <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
+            input_data, output_data,
+            isizeH, isizeW, osizeH, osizeW,
+            istrideD, istrideH, istrideW);
+          }
+      );
     } else {
       Tensor input_ = input.contiguous();
       int64_t sizeB  = input_.size(0);
@@ -258,160 +267,140 @@ namespace native {
 
       int64_t osizeH = output_size[0];
       int64_t osizeW = output_size[1];
+      AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+        input.type(), "adaptive_avg_pool2d", [&] {
+          scalar_t *input_data = input_.data<scalar_t>();
 
-      input_data = input_.data<scalar_t>();
+          output.resize_({sizeB, sizeD, osizeH, osizeW});
 
-      output.resize_({sizeB, sizeD, osizeH, osizeW});
+          scalar_t *output_data = output.data<scalar_t>();
 
-      output_data = output.data<scalar_t>();
+          // cuda blocks & threads:
+          int blocksH = std::max<int64_t>((int)(16L / sizeD), 1);
+          dim3 blocks(sizeB * sizeD, blocksH);
+          dim3 threads(32, 8);
 
-      // cuda blocks & threads:
-      int blocksH = std::max<int64_t>((int)(16L / sizeD), 1);
-      dim3 blocks(sizeB * sizeD, blocksH);
-      dim3 threads(32, 8);
-
-      // run averagepool kernel
-      adaptiveaveragepool <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
-        input_data, output_data,
-        isizeH, isizeW, osizeH, osizeW,
-        istrideD, istrideH, istrideW);
+          // run averagepool kernel
+          adaptiveaveragepool <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
+            input_data, output_data,
+            isizeH, isizeW, osizeH, osizeW,
+            istrideD, istrideH, istrideW);
+        }
+      );
     }
     THCudaCheck(cudaGetLastError());
-    return output;
   }
 
-  template <typename scalar_t>
-  Tensor& AdaptiveAveragePooling2d_backward_out_cuda_template(
+  void AdaptiveAveragePooling2d_backward_out_cuda_template(
     Tensor& gradInput,
-    const Tensor& gradOutput,
+    const Tensor& gradOutput_,
     const Tensor& input
   ) {
     TensorArg grad_input_arg{ gradInput, "gradInput", 1 },
-              grad_output_arg{ gradOutput, "gradOutput", 2 },
+              grad_output_arg{ gradOutput_, "gradOutput_", 2 },
               input_arg{ input, "input", 3 };
     checkAllSameGPU("cudnn_adaptive_avg_pooling2d_out",
                     {grad_input_arg, grad_output_arg, input_arg});
 
     bool atomic = true; // suboptimal, but without atomic it doesn't pass the tests
 
-    scalar_t *gradInput_data;
-    scalar_t *gradOutput_data;
-
-    Tensor gradOutput_ = gradOutput.contiguous();
+    Tensor gradOutput = gradOutput_.contiguous();
 
     if (input.ndimension() == 3) {
       int64_t sizeD  = input.size(0);
       int64_t isizeH = input.size(1);
       int64_t isizeW = input.size(2);
 
-      int64_t osizeH = gradOutput_.size(1);
-      int64_t osizeW = gradOutput_.size(2);
+      int64_t osizeH = gradOutput.size(1);
+      int64_t osizeW = gradOutput.size(2);
 
       //bool atomic = (isizeW%osizeW != 0) || (isizeH%osizeH != 0);
+      AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+        input.type(), "adaptive_avg_pool2d_backward", [&] {
+          scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
+          scalar_t *gradInput_data = gradInput.data<scalar_t>();
 
-      gradOutput_data = gradOutput_.data<scalar_t>();
-      gradInput_data = gradInput.data<scalar_t>();
+          // cuda blocks & threads:
+          int blocksH = std::max((int)(16L / sizeD), 1);
+          dim3 blocks(sizeD, blocksH);
+          dim3 threads(32, 8);
 
-      // cuda blocks & threads:
-      int blocksH = std::max((int)(16L / sizeD), 1);
-      dim3 blocks(sizeD, blocksH);
-      dim3 threads(32, 8);
-
-      if(atomic)
-      {
-        // run updateGradInput kernel, accumulate gradients atomically
-        atomicadaptiveaveragegradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
-          gradInput_data, gradOutput_data,
-          isizeH, isizeW, osizeH, osizeW);
-      }
-      else
-      {
-        // run updateGradInput kernel
-        adaptiveaveragegradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
-          gradInput_data, gradOutput_data,
-          isizeH, isizeW, osizeH, osizeW);
-      }
+          if(atomic)
+          {
+            // run updateGradInput kernel, accumulate gradients atomically
+            atomicadaptiveaveragegradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
+              gradInput_data, gradOutput_data,
+              isizeH, isizeW, osizeH, osizeW);
+          }
+          else
+          {
+            // run updateGradInput kernel
+            adaptiveaveragegradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
+              gradInput_data, gradOutput_data,
+              isizeH, isizeW, osizeH, osizeW);
+          }
+        }
+      );
     } else {
       int64_t sizeB  = input.size(0);
       int64_t sizeD  = input.size(1);
       int64_t isizeH = input.size(2);
       int64_t isizeW = input.size(3);
 
-      int64_t osizeH = gradOutput_.size(2);
-      int64_t osizeW = gradOutput_.size(3);
+      int64_t osizeH = gradOutput.size(2);
+      int64_t osizeW = gradOutput.size(3);
 
       //bool atomic = //(isizeW%osizeW != 0) || (isizeH%osizeH != 0);
+      AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+        input.type(), "adaptive_avg_pool2d_backward", [&] {
+          scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
+          scalar_t *gradInput_data = gradInput.data<scalar_t>();
 
-      gradOutput_data = gradOutput_.data<scalar_t>(); // THCTensor_(data)(state, gradOutput);
-      gradInput_data = gradInput.data<scalar_t>(); // THCTensor_(data)(state, gradInput);
+          // cuda blocks & threads:
+          int blocksH = std::max((int)(16L / sizeD), 1);
+          dim3 blocks(sizeB * sizeD, blocksH);
+          dim3 threads(32, 8);
 
-      // cuda blocks & threads:
-      int blocksH = std::max((int)(16L / sizeD), 1);
-      dim3 blocks(sizeB * sizeD, blocksH);
-      dim3 threads(32, 8);
-
-      if(atomic)
-      {
-        // run updateGradInput kernel, accumulate gradients atomically
-        atomicadaptiveaveragegradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
-          gradInput_data, gradOutput_data,
-          isizeH, isizeW, osizeH, osizeW);
-      }
-      else
-      {
-        // run updateGradInput kernel, accumulate gradients atomically
-        adaptiveaveragegradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
-          gradInput_data, gradOutput_data,
-          isizeH, isizeW, osizeH, osizeW);
-      }
+          if(atomic)
+          {
+            // run updateGradInput kernel, accumulate gradients atomically
+            atomicadaptiveaveragegradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
+              gradInput_data, gradOutput_data,
+              isizeH, isizeW, osizeH, osizeW);
+          }
+          else
+          {
+            // run updateGradInput kernel, accumulate gradients atomically
+            adaptiveaveragegradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
+              gradInput_data, gradOutput_data,
+              isizeH, isizeW, osizeH, osizeW);
+          }
+        }
+      );
     }
     THCudaCheck(cudaGetLastError());
-    return gradInput;
   }
 
-  template <typename scalar_t>
-  Tensor AdaptiveAveragePooling2d_forward_cuda_template(
-    at::Tensor const& input,
-    IntList output_size
-  ) {
-    auto output = at::empty({0}, input.options());
-    AdaptiveAveragePooling2d_forward_out_cuda_template<scalar_t>(
-      output, input, output_size);
-    return output;
-  }
+} // namespace
 
   Tensor& AdaptiveAveragePooling2d_forward_out_cuda(
     Tensor& output,
     const Tensor& input,
     IntList output_size
   ) {
-      AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "adaptive_avg_pool2d_out", [&] {
-          return AdaptiveAveragePooling2d_forward_out_cuda_template<scalar_t>(
-            output, input, output_size);
-        }
-      );
-      return output;
+    AdaptiveAveragePooling2d_forward_out_cuda_template(
+      output, input, output_size);
+    return output;
   }
 
   Tensor AdaptiveAveragePooling2d_forward_cuda(
-    const Tensor& input,
+    at::Tensor const& input,
     IntList output_size
   ) {
-    return AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "adaptive_avg_pool2d", [&] {
-        return AdaptiveAveragePooling2d_forward_cuda_template<scalar_t>(
-          input, output_size);
-      });
-  }
-
-  template <typename scalar_t>
-  Tensor AdaptiveAveragePooling2d_backward_cuda_template(
-    const Tensor& gradOutput,
-    const Tensor& input
-  ) {
-    auto gradInput = at::zeros_like(input);
-    AdaptiveAveragePooling2d_backward_out_cuda_template<scalar_t>(
-      gradInput, gradOutput, input);
-    return gradInput;
+    auto output = at::empty({0}, input.options());
+    AdaptiveAveragePooling2d_forward_out_cuda_template(
+      output, input, output_size);
+    return output;
   }
 
   Tensor& AdaptiveAveragePooling2d_backward_out_cuda(
@@ -419,12 +408,9 @@ namespace native {
     const Tensor& gradOutput,
     const Tensor& input
   ) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      input.type(), "adaptive_avg_pool2d_backward", [&] {
-        return AdaptiveAveragePooling2d_backward_out_cuda_template<scalar_t>(
-          gradInput, gradOutput, input);
-      }
-    );
+    gradInput.resize_as_(input);
+    AdaptiveAveragePooling2d_backward_out_cuda_template(
+      gradInput, gradOutput, input);
     return gradInput;
   }
 
@@ -432,11 +418,10 @@ namespace native {
     const Tensor& gradOutput,
     const Tensor& input
   ) {
-    return AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      input.type(), "adaptive_avg_pool2d_backward", [&] {
-       return AdaptiveAveragePooling2d_backward_cuda_template<scalar_t>(
-         gradOutput, input);
-     });
+    auto gradInput = at::zeros_like(input);
+    AdaptiveAveragePooling2d_backward_out_cuda_template(
+      gradInput, gradOutput, input);
+    return gradInput;
   }
 
 } // at::native

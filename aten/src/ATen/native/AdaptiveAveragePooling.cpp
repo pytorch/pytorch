@@ -2,12 +2,19 @@
 #include "ATen/NativeFunctions.h"
 #include <tuple>
 
-#define START_IND(a,b,c) (int)std::floor((float)(a * c) / b)
-#define END_IND(a,b,c) (int)std::ceil((float)((a + 1) * c) / b)
-
 
 namespace at {
 namespace native {
+
+namespace {
+
+  inline int start_index(int a, int b, int c) {
+    return (int)std::floor((float)(a * c) / b);
+  }
+
+  inline int end_index(int a, int b, int c) {
+    return (int)std::ceil((float)((a + 1) * c) / b);
+  }
 
   template <typename scalar_t>
   static void __AdaptiveAveragePooling2d_forward_out_frame(
@@ -30,14 +37,14 @@ namespace native {
       int64_t oh, ow;
       for(oh = 0; oh < osizeH; oh++)
       {
-        int istartH = START_IND(oh, osizeH, isizeH);
-        int iendH   = END_IND(oh, osizeH, isizeH);
+        int istartH = start_index(oh, osizeH, isizeH);
+        int iendH   = end_index(oh, osizeH, isizeH);
         int kH = iendH - istartH;
 
         for(ow = 0; ow < osizeW; ow++)
         {
-          int istartW = START_IND(ow, osizeW, isizeW);
-          int iendW   = END_IND(ow, osizeW, isizeW);
+          int istartW = start_index(ow, osizeW, isizeW);
+          int iendW   = end_index(ow, osizeW, isizeW);
           int kW = iendW - istartW;
 
           /* local pointers */
@@ -63,8 +70,7 @@ namespace native {
     }
   }
 
-  template <typename scalar_t>
-  Tensor AdaptiveAveragePooling2d_forward_out_cpu_template(
+  void AdaptiveAveragePooling2d_forward_out_cpu_template(
     at::Tensor& output,
     at::Tensor const& input,
     IntList output_size
@@ -81,6 +87,13 @@ namespace native {
     int64_t istrideD = 0;
     int64_t istrideH = 0;
     int64_t istrideW = 0;
+
+    for (int64_t i = 0; i < input.ndimension(); i++) {
+      AT_CHECK(input.size(i) > 0,
+        "adaptive_avg_pooling2d(): expected input to have non-empty spatial dimensions, "
+        "but input has sizes ", input.sizes(), " with dimension ", i, " being "
+        "empty");
+    }
 
     AT_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
       "non-empty 3D or 4D (batch mode) tensor expected for input");
@@ -111,73 +124,40 @@ namespace native {
     {
       output.resize_({sizeD, osizeH, osizeW});
 
-      auto input_data = input.data<scalar_t>();
-      auto output_data = output.data<scalar_t>();
-
-      __AdaptiveAveragePooling2d_forward_out_frame<scalar_t>(input_data, output_data,
-                                                        sizeD,
-                                                        isizeH, isizeW,
-                                                        osizeH, osizeW,
-                                                        istrideD,
-                                                        istrideH, istrideW);
-
-      return output;
+      AT_DISPATCH_FLOATING_TYPES(input.type(), "adaptive_avg_pool2d", [&] {
+          auto input_data = input.data<scalar_t>();
+          auto output_data = output.data<scalar_t>();
+          __AdaptiveAveragePooling2d_forward_out_frame<scalar_t>(input_data, output_data,
+                                                            sizeD,
+                                                            isizeH, isizeW,
+                                                            osizeH, osizeW,
+                                                            istrideD,
+                                                            istrideH, istrideW);
+        }
+      );
     }
     else
     {
       output.resize_({sizeB, sizeD, osizeH, osizeW});
 
-      auto input_data = input.data<scalar_t>();
-      auto output_data = output.data<scalar_t>();
+      AT_DISPATCH_FLOATING_TYPES(input.type(), "adaptive_avg_pool2d", [&] {
+          auto input_data = input.data<scalar_t>();
+          auto output_data = output.data<scalar_t>();
 
-      int64_t b;
-    #pragma omp parallel for private(b)
-      for (b = 0; b < sizeB; b++)
-      {
-        __AdaptiveAveragePooling2d_forward_out_frame<scalar_t>(input_data+b*istrideB, output_data+b*sizeD*osizeH*osizeW,
-                                                        sizeD,
-                                                        isizeH, isizeW,
-                                                        osizeH, osizeW,
-                                                        istrideD,
-                                                        istrideH, istrideW);
-      }
-
-      return output;
+          int64_t b;
+        #pragma omp parallel for private(b)
+          for (b = 0; b < sizeB; b++)
+          {
+            __AdaptiveAveragePooling2d_forward_out_frame<scalar_t>(input_data+b*istrideB, output_data+b*sizeD*osizeH*osizeW,
+                                                            sizeD,
+                                                            isizeH, isizeW,
+                                                            osizeH, osizeW,
+                                                            istrideD,
+                                                            istrideH, istrideW);
+          }
+        }
+      );
     }
-  }
-
-  Tensor& AdaptiveAveragePooling2d_forward_out_cpu(
-    Tensor& output,
-    const Tensor& input,
-    IntList output_size
-  ) {
-    AT_DISPATCH_FLOATING_TYPES(input.type(), "adaptive_avg_pool2d_out", [&] {
-        return AdaptiveAveragePooling2d_forward_out_cpu_template<scalar_t>(
-          output, input, output_size);
-      }
-    );
-    return output;
-  }
-
-  template <typename scalar_t>
-  Tensor AdaptiveAveragePooling2d_forward_cpu_template(
-    at::Tensor const& input,
-    IntList output_size
-  ) {
-    auto output = at::empty({0}, input.options());
-    AdaptiveAveragePooling2d_forward_out_cpu_template<scalar_t>(
-      output, input, output_size);
-    return output;
-  }
-
-  Tensor AdaptiveAveragePooling2d_forward_cpu(
-    at::Tensor const& input,
-    IntList output_size
-  ) {
-    return AT_DISPATCH_FLOATING_TYPES(input.type(), "adaptive_avg_pool2d", [&] {
-        return AdaptiveAveragePooling2d_forward_cpu_template<scalar_t>(
-          input, output_size);
-      });
   }
 
   template <typename scalar_t>
@@ -201,15 +181,15 @@ namespace native {
       int64_t oh, ow;
       for(oh = 0; oh < osizeH; oh++)
       {
-        int istartH = START_IND(oh, osizeH, isizeH);
-        int iendH   = END_IND(oh, osizeH, isizeH);
+        int istartH = start_index(oh, osizeH, isizeH);
+        int iendH   = end_index(oh, osizeH, isizeH);
         int kH = iendH - istartH;
 
         for(ow = 0; ow < osizeW; ow++)
         {
 
-          int istartW = START_IND(ow, osizeW, isizeW);
-          int iendW   = END_IND(ow, osizeW, isizeW);
+          int istartW = start_index(ow, osizeW, isizeW);
+          int iendW   = end_index(ow, osizeW, isizeW);
           int kW = iendW - istartW;
 
           scalar_t grad_delta = gradOutput_p_d[oh*osizeW +ow] / kH / kW;
@@ -228,10 +208,9 @@ namespace native {
     }
   }
 
-  template <typename scalar_t>
   Tensor& AdaptiveAveragePooling2d_backward_out_cpu_template(
     Tensor& gradInput,
-    const Tensor& gradOutput,
+    const Tensor& gradOutput_,
     const Tensor& input
   ) {
     int dimD = 0;
@@ -243,8 +222,6 @@ namespace native {
     int isizeW;
     int osizeH;
     int osizeW;
-    scalar_t *gradInput_data;
-    scalar_t *gradOutput_data;
 
     if (input.ndimension() == 4) {
       sizeB = input.size(0);
@@ -257,38 +234,72 @@ namespace native {
     sizeD  = input.size(dimD);
     isizeH = input.size(dimH);
     isizeW = input.size(dimW);
-    osizeH = gradOutput.size(dimH);
-    osizeW = gradOutput.size(dimW);
+    osizeH = gradOutput_.size(dimH);
+    osizeW = gradOutput_.size(dimW);
 
     /* get contiguous gradOutput */
-    auto gradOutput_ = gradOutput.contiguous();
-
-    /* get raw pointers */
-    gradInput_data = gradInput.data<scalar_t>();
-    gradOutput_data = gradOutput_.data<scalar_t>();
+    auto gradOutput = gradOutput_.contiguous();
 
     /* backprop */
     if (input.ndimension() == 3)
     {
-      __AdaptiveAveragePooling2d_backward_out_frame(gradInput_data, gradOutput_data,
-                                                           sizeD,
-                                                           isizeH, isizeW,
-                                                           osizeH, osizeW);
+      AT_DISPATCH_FLOATING_TYPES(
+        input.type(), "adaptive_avg_pool2d_backward", [&] {
+          /* get raw pointers */
+          scalar_t *gradInput_data = gradInput.data<scalar_t>();
+          scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
+
+          __AdaptiveAveragePooling2d_backward_out_frame<scalar_t>(
+            gradInput_data, gradOutput_data,
+            sizeD,
+            isizeH, isizeW,
+            osizeH, osizeW);
+        }
+      );
     }
     else
     {
-      int64_t b;
-    #pragma omp parallel for private(b)
-      for (b = 0; b < sizeB; b++)
-      {
-        __AdaptiveAveragePooling2d_backward_out_frame(gradInput_data+b*sizeD*isizeH*isizeW, gradOutput_data+b*sizeD*osizeH*osizeW,
-                                                             sizeD,
-                                                             isizeH, isizeW,
-                                                             osizeH, osizeW);
-      }
+      AT_DISPATCH_FLOATING_TYPES(
+        input.type(), "adaptive_avg_pool2d_backward", [&] {
+          /* get raw pointers */
+          scalar_t *gradInput_data = gradInput.data<scalar_t>();
+          scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
+          int64_t b;
+        #pragma omp parallel for private(b)
+          for (b = 0; b < sizeB; b++)
+          {
+            __AdaptiveAveragePooling2d_backward_out_frame<scalar_t>(
+              gradInput_data+b*sizeD*isizeH*isizeW, gradOutput_data+b*sizeD*osizeH*osizeW,
+              sizeD,
+              isizeH, isizeW,
+              osizeH, osizeW);
+          }
+        }
+      );
     }
-
     return gradInput;
+  }
+
+} // namespace
+
+  Tensor& AdaptiveAveragePooling2d_forward_out_cpu(
+    Tensor& output,
+    const Tensor& input,
+    IntList output_size
+  ) {
+    AdaptiveAveragePooling2d_forward_out_cpu_template(
+      output, input, output_size);
+    return output;
+  }
+
+  Tensor AdaptiveAveragePooling2d_forward_cpu(
+    at::Tensor const& input,
+    IntList output_size
+  ) {
+    auto output = at::empty({0}, input.options());
+    AdaptiveAveragePooling2d_forward_out_cpu_template(
+      output, input, output_size);
+    return output;
   }
 
   Tensor& AdaptiveAveragePooling2d_backward_out_cpu(
@@ -296,22 +307,8 @@ namespace native {
     const Tensor& gradOutput,
     const Tensor& input
   ) {
-    AT_DISPATCH_FLOATING_TYPES(
-      input.type(), "adaptive_avg_pool2d_backward", [&] {
-        return AdaptiveAveragePooling2d_backward_out_cpu_template<scalar_t>(
-          gradInput, gradOutput, input);
-      }
-    );
-    return gradInput;
-  }
-
-  template <typename scalar_t>
-  Tensor AdaptiveAveragePooling2d_backward_cpu_template(
-    const Tensor& gradOutput,
-    const Tensor& input
-  ) {
-    auto gradInput = at::zeros_like(input);
-    AdaptiveAveragePooling2d_backward_out_cpu_template<scalar_t>(
+    gradInput.resize_as_(input);
+    AdaptiveAveragePooling2d_backward_out_cpu_template(
       gradInput, gradOutput, input);
     return gradInput;
   }
@@ -320,11 +317,11 @@ namespace native {
     const Tensor& gradOutput,
     const Tensor& input
   ) {
-    return AT_DISPATCH_FLOATING_TYPES(
-      input.type(), "adaptive_avg_pool2d_backward", [&] {
-       return AdaptiveAveragePooling2d_backward_cpu_template<scalar_t>(
-         gradOutput, input);
-     });
+    auto gradInput = at::zeros_like(input);
+    AdaptiveAveragePooling2d_backward_out_cpu_template(
+      gradInput, gradOutput, input);
+    return gradInput;
   }
-}
-}
+
+} // at::native
+} // at
