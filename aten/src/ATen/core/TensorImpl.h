@@ -1522,10 +1522,15 @@ protected:
   bool is_variable_ = false;
   bool is_wrapped_number_ = false;
 
-  // We need this field because we want to prevent users from changing tensor metadata
-  // (e.g. sizes / strides / storage / storage_offset) of a derived tensor (i.e. tensors
-  // created from Python `tensor.data` or Python/C++ `tensor.detach()`), because those changes
-  // will not update the original tensor.
+  // Previously, if we change the tensor metadata (e.g. sizes / strides / storage / storage_offset)
+  // of a derived tensor (i.e. tensors created from Python `tensor.data` or Python/C++ `tensor.detach()`),
+  // those metadata in the original tensor will also be updated. However, the new behavior is that
+  // those metadata changes to a derived tensor will not update the original tensor anymore, and we
+  // need this flag to make such changes explicitly illegal, to prevent users from changing metadata of
+  // the derived tensor and expecting the original tensor to also be updated.
+  //
+  // NOTE: For a full list of tensor metadata fields, please see `shallow_copy_and_detach()` in TensorImpl
+  // and its subclasses to find which fields are copied by value.
   bool allow_tensor_metadata_change_ = true;
 
   // we decide to keep reserved_ and it will
