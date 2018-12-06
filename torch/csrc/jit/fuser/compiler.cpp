@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/fuser/kernel_cache.h>
 #include <torch/csrc/jit/fuser/codegen.h>
 #include <torch/csrc/jit/fuser/tensor_desc.h>
+#include "torch/csrc/jit/fuser/interface.h"
 
 #if USE_CUDA_FUSER
   #include <torch/csrc/jit/fuser/cuda/fused_kernel.h>
@@ -133,9 +134,7 @@ static void upfrontCompilation(KernelSpec& spec) {
 }
 
 int64_t registerFusion(const Node* fusion_group) {
-  auto graph = Canonicalize(
-      fusion_group->g(attr::Subgraph), /*keep_unique_names=*/false);
-  EraseShapeInformation(graph);
+  auto graph = normalizeGraphForCache(fusion_group->g(attr::Subgraph));
 
   // Don't re-register the fusion if we can use a pre-existing one
   const auto maybe_spec = lookupGraph(graph);

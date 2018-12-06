@@ -15,13 +15,15 @@ std::shared_ptr<Graph> Canonicalize(
   for (auto* input : graph->inputs()) {
     auto* r_input = r->addInput();
     r_input->copyMetadata(input);
-    r_input->setUniqueName("");
+    if (!keep_unique_names) r_input->setUniqueName("");
     rn_env[input] = r_input;
   }
   for (auto* node : graph->nodes()) {
     auto* r_node = r->createClone(node, rn_fn);
-    for (auto* output : r_node->outputs()) {
-      output->setUniqueName("");
+    if (!keep_unique_names) {
+      for (auto* output : r_node->outputs()) {
+        output->setUniqueName("");
+      }
     }
     r->appendNode(r_node);
     auto outputs = node->outputs();
@@ -30,7 +32,7 @@ std::shared_ptr<Graph> Canonicalize(
       rn_env[outputs.at(i)] = r_outputs.at(i);
     }
     if (node->hasAttribute(attr::Subgraph)) {
-      r_node->g_(attr::Subgraph, Canonicalize(node->g(attr::Subgraph)));
+      r_node->g_(attr::Subgraph, Canonicalize(node->g(attr::Subgraph), keep_unique_names));
     }
   }
   for (auto* output : graph->outputs()) {
