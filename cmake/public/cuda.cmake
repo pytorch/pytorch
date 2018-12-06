@@ -109,10 +109,10 @@ endif()
 if(CAFFE2_USE_TENSORRT)
   find_path(TENSORRT_INCLUDE_DIR NvInfer.h
     HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR}
-    PATH_SUFFIXES include x86_64-linux-gnu include/x86_64-linux-gnu)
+    PATH_SUFFIXES include)
   find_library(TENSORRT_LIBRARY nvinfer
     HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR}
-    PATH_SUFFIXES lib lib64 lib/x86_64-linux-gnu)
+    PATH_SUFFIXES lib lib64 lib/x64)
   find_package_handle_standard_args(
     TENSORRT DEFAULT_MSG TENSORRT_INCLUDE_DIR TENSORRT_LIBRARY)
   if(NOT TENSORRT_FOUND)
