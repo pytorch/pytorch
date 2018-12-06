@@ -9,30 +9,6 @@
 namespace at {
 namespace detail {
 
-void default_set_device(int32_t) {
-  AT_ERROR(
-      "DynamicCUDAInterface::set_device called "
-      "before CUDA library was loaded");
-}
-
-void default_get_device(int32_t*) {
-  AT_ERROR(
-      "DynamicCUDAInterface::get_device called "
-      "before CUDA library was loaded");
-}
-
-void default_unchecked_set_device(int32_t) {
-  AT_ERROR(
-      "DynamicCUDAInterface::unchecked_set_device called "
-      "before CUDA library was loaded");
-}
-
-// Default the static members of DynamicCUDAInterface.
-void (*DynamicCUDAInterface::set_device)(int32_t) = default_set_device;
-void (*DynamicCUDAInterface::get_device)(int32_t*) = default_get_device;
-void (*DynamicCUDAInterface::unchecked_set_device)(int32_t) =
-    default_unchecked_set_device;
-
 const CUDAHooksInterface& getCUDAHooks() {
   static std::unique_ptr<CUDAHooksInterface> cuda_hooks;
   // NB: The once_flag here implies that if you try to call any CUDA

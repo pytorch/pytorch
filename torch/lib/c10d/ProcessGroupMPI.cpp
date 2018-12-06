@@ -91,11 +91,8 @@ void checkSameSizeAndType(
 
 } // namespace
 
-ProcessGroupMPI::AsyncWork::AsyncWork(
-    at::Tensor tensor,
-    MPI_Request request,
-    int* srcRank)
-    : tensor_(std::move(tensor)), request_(request), srcRank_(srcRank) {
+ProcessGroupMPI::AsyncWork::AsyncWork(at::Tensor tensor, MPI_Request request)
+    : tensor_(std::move(tensor)), request_(request) {
   memset(&status_, 0, sizeof(status_));
 }
 
@@ -121,10 +118,6 @@ bool ProcessGroupMPI::AsyncWork::isCompleted() {
   }
 
   // request_ == MPI_REQUEST_NULL; the work has completed
-  if (srcRank_ != nullptr) {
-    *srcRank_ = status_.MPI_SOURCE;
-  }
-
   // Populate exception if request was not successful
   if (status_.MPI_ERROR != MPI_SUCCESS) {
     populateException();
@@ -142,6 +135,10 @@ bool ProcessGroupMPI::AsyncWork::isSuccess() const {
   return status_.MPI_ERROR == MPI_SUCCESS;
 }
 
+int ProcessGroupMPI::AsyncWork::sourceRank() const {
+  return status_.MPI_SOURCE;
+}
+
 void ProcessGroupMPI::AsyncWork::wait() {
   if (request_ == MPI_REQUEST_NULL) {
     return;
@@ -149,10 +146,6 @@ void ProcessGroupMPI::AsyncWork::wait() {
 
   std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
   MPI_CHECK(MPI_Wait(&request_, &status_));
-  if (srcRank_ != nullptr && status_.MPI_ERROR == MPI_SUCCESS) {
-    *srcRank_ = status_.MPI_SOURCE;
-  }
-
   auto ok = (status_.MPI_ERROR == MPI_SUCCESS);
   if (!ok) {
     populateException();
@@ -477,17 +470,16 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
   }
   checkSingleTensor(inputTensors);
 
-  if (outputTensors.size() != 1) {
-    throw std::runtime_error("Gather: multi-GPU collective is not supported");
-  }
-
   if (groupRank_ != opts.rootRank) {
-    if (outputTensors[0].size() > 0) {
+    if (outputTensors.size() > 0) {
       throw std::runtime_error(
           "Gather: number of output tensors should be 0 "
           "for non-root");
     }
   } else {
+    if (outputTensors.size() != 1) {
+      throw std::runtime_error("Gather: multi-GPU collective is not supported");
+    }
     if (static_cast<size_t>(groupSize_) != outputTensors[0].size()) {
       throw std::runtime_error(
           "Gather: number of output tensors should equal "
@@ -546,17 +538,17 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
     return nullptr;
   }
   checkSingleTensor(outputTensors);
-  if (inputTensors.size() != 1) {
-    throw std::runtime_error("Scatter: multi-GPU collective is not supported");
-  }
 
   if (groupRank_ != opts.rootRank) {
-    if (inputTensors[0].size() > 0) {
+    if (inputTensors.size() > 0) {
       throw std::runtime_error(
           "Scatter: number of input tensors should be 0 "
           "for non-root");
     }
   } else {
+    if (inputTensors.size() != 1) {
+      throw std::runtime_error("Scatter: multi-GPU collective is not supported");
+    }
     if (static_cast<size_t>(groupSize_) != inputTensors[0].size()) {
       throw std::runtime_error(
           "Scatter: number of input tensors should equal "
@@ -663,7 +655,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recv(
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recvAnysource(
     std::vector<at::Tensor>& tensors,
-    int* srcRank,
     int tag) {
   if (pgComm_ == MPI_COMM_NULL) {
     return nullptr;
@@ -686,7 +677,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recvAnysource(
         &request));
   }
 
-  return std::make_shared<AsyncWork>(tensor, request, srcRank);
+  return std::make_shared<AsyncWork>(tensor, request);
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::barrier(

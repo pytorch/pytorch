@@ -104,6 +104,12 @@ class TestIndexing(TestCase):
             self.assertEqual(torch.empty(2, 0, 6, 4, 5, device=device),
                              x[:, torch.empty(0, 6, dtype=torch.int64, device=device)])
 
+        x = torch.empty(10, 0)
+        self.assertEqual(x[[1, 2]].shape, (2, 0))
+        self.assertEqual(x[[], []].shape, (0,))
+        with self.assertRaisesRegex(RuntimeError, 'for dim with size 0'):
+            x[:, [0, 1]]
+
     def test_empty_ndim_index_bool(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:

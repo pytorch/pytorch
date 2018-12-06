@@ -49,6 +49,9 @@ class ProcessGroup {
     // Returns exception if isSuccess() returned false.
     virtual std::exception_ptr exception() const;
 
+    // Returns source rank if this objects represents a recv-from-any.
+    virtual int sourceRank() const;
+
     // Ensures that operations on the output tensors that are invoked
     // after this function returns are correctly sequenced after the
     // asynchronous completion of this work.
@@ -136,7 +139,6 @@ class ProcessGroup {
 
   virtual std::shared_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
-      int* srcRank,
       int tag) = 0;
 
   virtual std::shared_ptr<ProcessGroup::Work> barrier(

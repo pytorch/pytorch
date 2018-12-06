@@ -79,12 +79,14 @@ class ProcessGroupMPI : public ProcessGroup {
 
   class AsyncWork : public ProcessGroup::Work {
    public:
-    AsyncWork(at::Tensor tensor, MPI_Request request, int* srcRank = nullptr);
+    AsyncWork(at::Tensor tensor, MPI_Request request);
     virtual ~AsyncWork();
 
     bool isCompleted() override;
 
     bool isSuccess() const override;
+
+    int sourceRank() const override;
 
     void wait() override;
 
@@ -93,7 +95,6 @@ class ProcessGroupMPI : public ProcessGroup {
 
     at::Tensor tensor_;
     MPI_Request request_;
-    int* const srcRank_;
     MPI_Status status_;
   };
 
@@ -144,7 +145,6 @@ class ProcessGroupMPI : public ProcessGroup {
 
   std::shared_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensor,
-      int* srcRank,
       int tag);
 
   std::shared_ptr<ProcessGroup::Work> barrier(

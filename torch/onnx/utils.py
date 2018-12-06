@@ -265,7 +265,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                                                example_outputs, propagate)
 
     from torch.onnx.symbolic import _onnx_opset_version
-    return graph.prettyPrintExport(params, _onnx_opset_version, False, operator_export_type, google_printer)
+    return graph._pretty_print_onnx(params, _onnx_opset_version, False, operator_export_type, google_printer)
 
 
 # NOTE: the output `torch_out` will contain the output tensors resulting from
@@ -284,9 +284,9 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
     from torch.onnx.symbolic import _onnx_opset_version
     defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE
     if export_params:
-        proto, export_map = graph.export(params, _onnx_opset_version, defer_weight_export, operator_export_type)
+        proto, export_map = graph._export_onnx(params, _onnx_opset_version, defer_weight_export, operator_export_type)
     else:
-        proto, export_map = graph.export([], _onnx_opset_version, False, operator_export_type)
+        proto, export_map = graph._export_onnx([], _onnx_opset_version, False, operator_export_type)
 
     if export_type == ExportTypes.PROTOBUF_FILE:
         assert(len(export_map) == 0)
@@ -510,6 +510,8 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 elif n.kindOf("value") == "is":
                     value = torch.stack([torch.tensor(v) for v in n["value"]]) if n["value"] else []
                     return g.op("Constant", value_t=value)
+                elif n.output().type().kind() == "DeviceObjType":
+                    return None
                 else:
                     raise RuntimeError("Unsupported prim::Constant kind: `{}`. Send a bug report.".format(
                         n.kindOf("value")))

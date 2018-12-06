@@ -34,7 +34,7 @@ class FullyConnectedOp final : public Operator<Context> {
     const auto& X = Input(0);
     const auto& W = Input(1);
     const auto& b = Input(2);
-    auto* Y = Output(0);
+
     CAFFE_ENFORCE(b.dim() == 1, b.dim());
     // batch size
     const auto canonical_axis = X.canonical_axis_index(axis_);
@@ -74,7 +74,7 @@ class FullyConnectedOp final : public Operator<Context> {
     DCHECK_LE(canonical_axis + 1, Y_shape_cache_.size());
     Y_shape_cache_.resize(canonical_axis + 1);
     Y_shape_cache_[canonical_axis] = N;
-    Y->Resize(Y_shape_cache_);
+    auto* Y = Output(0, Y_shape_cache_, at::dtype<T_Y>());
     CAFFE_ENFORCE(M * N == Y->numel(), dimErrorString());
 
     if (X.numel() == 0) {

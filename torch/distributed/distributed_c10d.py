@@ -129,7 +129,7 @@ def _rank_not_in_group(group):
     Helper that checks if the current process's rank is not in a given group
 
     """
-    default_backend, _ = _pg_map[get_default_group()]
+    default_backend, _ = _pg_map[_get_default_group()]
     if default_backend != Backend.MPI:
         return group == GroupMember.NON_GROUP_MEMBER
     else:
@@ -249,7 +249,7 @@ def is_initialized():
     return _default_pg is not None
 
 
-def get_default_group():
+def _get_default_group():
     """
     Getting the default process group created by init_process_group
 
@@ -286,6 +286,7 @@ def get_backend(group=group.WORLD):
 
 def init_process_group(backend,
                        init_method="env://",
+                       timeout=_default_pg_timeout,
                        **kwargs):
     """
     Initializes the default distributed process group, and this will also
@@ -302,6 +303,9 @@ def init_process_group(backend,
         world_size (int, optional): Number of processes participating in
                                     the job.
         rank (int, optional): Rank of the current process.
+        timeout (timedelta, optional): Timeout for operations executed against
+            the process group. Default value equals 30 minutes.
+            This is only applicable for the ``gloo`` backend.
         group_name (str, optional, deprecated): Group name.
 
     To enable ``backend == Backend.MPI``, PyTorch needs to built from source
@@ -313,6 +317,10 @@ def init_process_group(backend,
     global _backend
     global _default_pg
     global _default_pg_init_method
+
+    if not isinstance(timeout, timedelta):
+        raise RuntimeError("Expected timeout argument to be of type"
+                           "datetime.timedelta")
 
     if _default_pg is not None:
         raise RuntimeError("trying to initialize the default process group "
@@ -335,20 +343,21 @@ def init_process_group(backend,
         _pg_names[_default_pg] = group_name
     else:
         # backward compatible API
-        if init_method != "env://" and world_size != -1 and rank != -1:
-            url = "{}?rank={}&world_size={}".format(init_method,
-                                                    rank,
-                                                    world_size)
-            store, _, _ = next(rendezvous(url))
-        else:
-            store, rank, world_size = next(rendezvous(init_method))
+        url = init_method
+        if world_size != -1 and rank != -1:
+            url += "?rank={}&world_size={}".format(rank, world_size)
+        elif rank != -1:
+            url += "?rank={}".format(rank)
+        elif world_size != -1:
+            url += "?world_size={}".format(world_size)
 
+        store, rank, world_size = next(rendezvous(url))
         if backend == Backend.GLOO:
             _default_pg = ProcessGroupGloo(
                 store,
                 rank,
                 world_size,
-                timeout=_default_pg_timeout)
+                timeout=timeout)
             _pg_map[_default_pg] = (Backend.GLOO, store)
             _pg_names[_default_pg] = group_name
         elif backend == Backend.NCCL:
@@ -366,8 +375,9 @@ def init_process_group(backend,
 def _new_process_group_helper(world_size,
                               rank,
                               group_ranks,
-                              in_group=True,
-                              group_name=""):
+                              in_group,
+                              group_name,
+                              timeout=_default_pg_timeout):
     """
     Create a new distributed process group. And the new process group can be
     used to perform collective operations.
@@ -384,6 +394,10 @@ def _new_process_group_helper(world_size,
     if group_name in _pg_names.values():
         raise RuntimeError("The specified group name has already been "
                            "created, please use a different group name")
+
+    if not isinstance(timeout, timedelta):
+        raise RuntimeError("Expected timeout argument to be of type"
+                           "datetime.timedelta")
 
     default_backend, default_store = _pg_map[_default_pg]
 
@@ -402,14 +416,14 @@ def _new_process_group_helper(world_size,
                 store,
                 rank,
                 world_size,
-                timeout=_default_pg_timeout)
+                timeout=timeout)
             _pg_map[pg] = (Backend.GLOO, store)
             _pg_names[pg] = group_name
         elif default_backend == Backend.NCCL:
             if not is_nccl_available():
                 raise RuntimeError("Distributed package doesn't have NCCL "
                                    "built in")
-            pg = ProcessGroupNCCL(store, rank, world_size)
+            pg = ProcessGroupNCCL(store, rank, world_size, group_name)
             _pg_map[pg] = (Backend.NCCL, store)
             _pg_names[pg] = group_name
         else:
@@ -433,7 +447,7 @@ def destroy_process_group(group=group.WORLD):
     global _default_pg
     global _default_pg_init_method
 
-    default_backend, _ = _pg_map[get_default_group()]
+    default_backend, _ = _pg_map[_get_default_group()]
     if (default_backend != Backend.MPI and
             group == GroupMember.NON_GROUP_MEMBER):
         return
@@ -617,9 +631,9 @@ def recv(tensor,
         pg = group
 
     if src is None:
-        rank_tensor = torch.IntTensor([-1])
-        pg.recv_anysource([tensor], rank_tensor, tag).wait()
-        src_rank = rank_tensor[0].item()
+        work = pg.recv_anysource([tensor], tag)
+        work.wait()
+        src_rank = work.source_rank()
         if group == GroupMember.WORLD:
             return src_rank
         else:
@@ -1052,21 +1066,25 @@ def gather(tensor,
         if gather_list is None:
             raise RuntimeError("gather_list is a required argument in gather "
                                "destination")
+        input_tensors = [tensor]
+        output_tensors = [gather_list]
     else:
         if gather_list:
             raise RuntimeError("non-empty gather_list can be given only "
                                "to gather destination")
+        input_tensors = [tensor]
+        output_tensors = []
 
     opts = GatherOptions()
     opts.rootRank = dst
 
     if group == GroupMember.WORLD:
         _check_default_pg()
-        work = _default_pg.gather([gather_list], [tensor], opts)
+        work = _default_pg.gather(output_tensors, input_tensors, opts)
     else:
         group_dst_rank = _get_group_rank(group, dst)
         opts.rootRank = group_dst_rank
-        work = group.gather([gather_list], [tensor], opts)
+        work = group.gather(output_tensors, input_tensors, opts)
 
     if async_op:
         return work
@@ -1109,21 +1127,25 @@ def scatter(tensor,
         if scatter_list is None:
             raise RuntimeError("scatter_list is a required argument in "
                                "scatter source")
+        input_tensors = [scatter_list]
+        output_tensors = [tensor]
     else:
         if scatter_list:
             raise RuntimeError("non-empty can be given only to scatter "
                                "source")
+        input_tensors = []
+        output_tensors = [tensor]
 
     opts = ScatterOptions()
     opts.rootRank = src
 
     if group == GroupMember.WORLD:
         _check_default_pg()
-        work = _default_pg.scatter([tensor], [scatter_list], opts)
+        work = _default_pg.scatter(output_tensors, input_tensors, opts)
     else:
         group_src_rank = _get_group_rank(group, src)
         opts.rootRank = group_src_rank
-        work = group.scatter([tensor], [scatter_list], opts)
+        work = group.scatter(output_tensors, input_tensors, opts)
 
     if async_op:
         return work
@@ -1162,7 +1184,7 @@ def barrier(group=group.WORLD,
         work.wait()
 
 
-def new_group(ranks=None):
+def new_group(ranks=None, timeout=_default_pg_timeout):
     """
     Creates a new distributed group.
 
@@ -1173,6 +1195,9 @@ def new_group(ranks=None):
 
     Arguments:
         ranks (list[int]): List of ranks of group members.
+        timeout (timedelta, optional): Timeout for operations executed against
+            the process group. Default value equals 30 minutes.
+            This is only applicable for the ``gloo`` backend.
 
     Returns:
         A handle of distributed group that can be given to collective calls.
@@ -1181,6 +1206,15 @@ def new_group(ranks=None):
     _check_default_pg()
 
     global _pg_group_ranks
+    global _group_count
+    global _pg_names
+
+    group_name = str(_group_count)
+    _group_count += 1
+
+    if group_name in _pg_names.values():
+        raise RuntimeError("The specified group name has already been "
+                           "created, please use a different group name")
 
     default_backend, _ = _pg_map[_default_pg]
     global_rank = _default_pg.rank()
@@ -1214,7 +1248,9 @@ def new_group(ranks=None):
         pg = _new_process_group_helper(group_world_size,
                                        group_rank,
                                        input_ranks,
-                                       in_group)
+                                       in_group,
+                                       group_name,
+                                       timeout=timeout)
     else:
         # Release ranks not in the group
         if global_rank not in ranks:
@@ -1223,7 +1259,10 @@ def new_group(ranks=None):
         if default_backend != Backend.MPI:
             pg = _new_process_group_helper(group_world_size,
                                            group_rank,
-                                           input_ranks)
+                                           input_ranks,
+                                           True,
+                                           group_name,
+                                           timeout=timeout)
 
     # Create the global rank to group rank mapping
     _pg_group_ranks[pg] = {}
