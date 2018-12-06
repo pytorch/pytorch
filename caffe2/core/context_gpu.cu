@@ -384,14 +384,14 @@ void TrackMemoryAlloc(size_t nbytes) {
       long max_t = g_max_by_gpu_map[gpu];
       if (max_t > 0) {
         if (max_t != t) {
-          LOG(INFO) << "GPU " << gpu << ": " << t / 1024 / 1024 << " MB"
-                    << " (max: " << max_t / 1024 / 1024 << " MB)";
+          VLOG(1) << "GPU " << gpu << ": " << t / 1024 / 1024 << " MB"
+                  << " (max: " << max_t / 1024 / 1024 << " MB)";
         } else {
-          LOG(INFO) << "GPU " << gpu << ": " << t / 1024 / 1024 << " MB";
+          VLOG(1) << "GPU " << gpu << ": " << t / 1024 / 1024 << " MB";
         }
       }
     }
-    LOG(INFO) << "Total: " << g_total_mem / 1024 / 1024 << " MB";
+    VLOG(1) << "Total: " << g_total_mem / 1024 / 1024 << " MB";
     g_last_rep = g_total_mem;
   }
 }
