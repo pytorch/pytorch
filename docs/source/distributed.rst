@@ -10,10 +10,10 @@ Distributed communication package - torch.distributed
 Backends
 --------
 
-Currently torch.distributed supports three backends, each with
+``torch.distributed`` supports three backends, each with
 different capabilities. The table below shows which functions are available
 for use with CPU / CUDA tensors.
-MPI supports cuda only if the implementation used to build PyTorch supports it.
+MPI supports CUDA only if the implementation used to build PyTorch supports it.
 
 
 +------------+-----------+-----------+-----------+
@@ -44,80 +44,73 @@ MPI supports cuda only if the implementation used to build PyTorch supports it.
 Backends that come with PyTorch
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-PyTorch distributed currently only supports Linux. By default, two backends: NCCL and Gloo
-will be built and included in PyTorch distributed, when CUDA is available. MPI is an
+PyTorch distributed currently only supports Linux. By default, the Gloo and NCCL backends
+are built and included in PyTorch distributed (NCCL only when building with CUDA).
+MPI is an
 optional backend that can only be included if you build PyTorch from source. (e.g.
 building PyTorch on a host that has MPI installed.)
 
 
-Which backends to use?
-^^^^^^^^^^^^^^^^^^^^^^
+Which backend to use?
+^^^^^^^^^^^^^^^^^^^^^
 
-In the past, we were often being asked from many users on "which backend should I use?".
+In the past, we were often asked: "which backend should I use?".
 
 - Rule of thumb
 
-  - In general, the rule of thumb is to use the NCCL backend if you plan to do distributed GPU
-    training and to use the Gloo backend if you plan to do distributed CPU training.
+  - Use the NCCL backend for distributed **GPU** training
+  - Use the Gloo backend for distributed **CPU** training.
 
-- GPU hosts with infiniband interconnect
+- GPU hosts with InfiniBand interconnect
 
-  - Use NCCL, since it's the only backend that currently supports infiniband and GPU-direct.
+  - Use NCCL, since it's the only backend that currently supports
+    InfiniBand and GPUDirect.
 
-- GPU hosts with ethernet interconnect
+- GPU hosts with Ethernet interconnect
 
-  - Use NCCL, since it currently provides the best distributed GPU training performance, especially
-    for multiprocess single-node or multi-node distributed training. If you encounter any problem
-    with NCCL, use Gloo as the fallback option. (Note that Gloo currently runs slower than NCCL for GPUs.)
+  - Use NCCL, since it currently provides the best distributed GPU
+    training performance, especially for multiprocess single-node or
+    multi-node distributed training. If you encounter any problem with
+    NCCL, use Gloo as the fallback option. (Note that Gloo currently
+    runs slower than NCCL for GPUs.)
 
-- CPU hosts with infiniband interconnect
+- CPU hosts with InfiniBand interconnect
 
-  - If your infiniband has enabled IP over IB, use Gloo, otherwise, use MPI instead.
-    We are planning on adding infiniband support for Gloo in the upcoming releases.
+  - If your InfiniBand has enabled IP over IB, use Gloo, otherwise,
+    use MPI instead. We are planning on adding InfiniBand support for
+    Gloo in the upcoming releases.
 
-- CPU hosts with ethernet interconnect
+- CPU hosts with Ethernet interconnect
 
   - Use Gloo, unless you have specific reasons to use MPI.
 
-- What if I have both CPU and GPU tensors that need to get communicated?
-
-  - This can be achieved by creating two groups. One group with the NCCL backend for GPU tensors, and one
-    group with the Gloo backend for CPU tensors. For instance: use :func:`torch.distributed.init_process_group`
-    with the NCCL backend (which will create the default group for collective calls on GPU tensors), and
-    use :func:`torch.distributed.new_group` with the Gloo backend to create a new group for collective calls
-    on CPU tensors.
-
-
-Common environmental variables
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Common environment variables
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Choosing the network interface to use
 """""""""""""""""""""""""""""""""""""
-This is a common environmental variable to set. By default, both NCCL and Gloo
+
+By default, both NCCL and Gloo
 backends will try to find the network interface to use for communication. However, this
 is not always guaranteed to be successful from our experiences. Therefore, if you
 encounter any problem on either backend not being able to find the correct network
-interface. You can try to set the following two environmental variables for NCCL and Gloo,
-respectively.
+interface. You can try to set the following environment variables (each one
+applicable to its respective backend):
 
-**NCCL_SOCKET_IFNAME**
+* **NCCL_SOCKET_IFNAME**, for example ``export NCCL_SOCKET_IFNAME=eth0``
+* **GLOO_SOCKET_IFNAME**, for example ``export GLOO_SOCKET_IFNAME=eth0``
 
-- such as, `export NCCL_SOCKET_IFNAME=eth0`
+Other NCCL environment variables
+""""""""""""""""""""""""""""""""
 
-**GLOO_SOCKET_IFNAME**
-
-- such as, `export GLOO_SOCKET_IFNAME=eth0`
-
-Other NCCL environmental variables
-""""""""""""""""""""""""""""""""""
-NCCL has also provided a number of environmental variables for fine-tuning purposes.
+NCCL has also provided a number of environment variables for fine-tuning purposes.
 
 Commonly used ones include the following for debugging purposes:
 
-- `export NCCL_DEBUG=INFO`
-- `export NCCL_DEBUG_SUBSYS=ALL`
+- ``export NCCL_DEBUG=INFO``
+- ``export NCCL_DEBUG_SUBSYS=ALL``
 
-For the full list of NCCL environmental variables, please refer to
+For the full list of NCCL environment variables, please refer to
 `NVIDIA NCCL's official documentation <https://docs.nvidia.com/deeplearning/sdk/nccl-developer-guide/docs/env.html>`_
 
 
@@ -168,8 +161,6 @@ joined.
 .. autofunction:: get_world_size
 
 .. autofunction:: is_initialized
-
-.. autofunction:: get_default_group
 
 .. autofunction:: is_mpi_available
 
@@ -267,6 +258,10 @@ into play. :func:`~torch.distributed.new_group` function can be
 used to create new groups, with arbitrary subsets of all processes. It returns
 an opaque group handle that can be given as a ``group`` argument to all collectives
 (collectives are distributed functions to exchange information in certain well-known programming patterns).
+
+Currently `torch.distributed` does not support creating groups with different backends.
+In other words, each group being created will use the same backend as you specified in
+:func:`~torch.distributed.init_process_group`.
 
 .. autofunction:: new_group
 
@@ -416,14 +411,13 @@ both python2 and python3.
 Spawn utility
 -------------
 
-The :doc:`multiprocessing` package also provides a spawn utility in
-:func:`torch.multiprocessing.spawn`. This helper utility can be used to spawn
-multiple processes per node by passing in the function that needs to run from
-multiple processes, and can be used for multiprocess distributed training as well.
+The :doc:`torch.multiprocessing` package also provides a ``spawn``
+function in :func:`torch.multiprocessing.spawn`. This helper function
+can be used to spawn multiple processes. It works by passing in the
+function that you want to run and spawns N processes to run it. This
+can be used for multiprocess distributed training as well.
 
 For references on how to use it, please refer to `PyToch example - ImageNet
 implementation <https://github.com/pytorch/examples/tree/master/imagenet>`_
 
-Note that this utility only supports python 3.4 or higher.
-
-.. autofunction:: torch.multiprocessing.spawn.spawn
+Note that this function requires Python 3.4 or higher.

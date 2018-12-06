@@ -4,8 +4,7 @@
 #include <memory>
 #include <numeric>
 
-#include <ATen/core/Backend.h>
-#include <ATen/core/LegacyTypeDispatch.h>
+#include <c10/core/Backend.h>
 #include <c10/core/Storage.h>
 #include <ATen/core/TensorOptions.h>
 #include <c10/core/TensorTypeId.h>
@@ -331,20 +330,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   //
   // TODO: type() is a very attractive name for a method, but we don't
   // actually want people to use it.  Rename this to something else.
-
-  /**
-   * Return the Type object corresponding to this Tensor, which we can
-   * use to do dynamic dispatch to operators from.  This method is NOT
-   * intended to be used by end-users; it is purely an implementation
-   * detail.
-   */
-  Type & type() const {
-    // NB: It's valid to use getTypeRaw here, because the TensorImpl
-    // could not have been created without initializing the Type first.
-    // TODO: This is not actually true via the Caffe2 codepath!  Make
-    // it so.
-    return *globalLegacyTypeDispatch().getTypeRaw(tensorTypeIdToBackend(type_id()), typeMetaToScalarType(dtype()), is_variable());
-  }
 
   /**
    * Return the TensorTypeId corresponding to this Tensor.  In the future,
@@ -917,9 +902,9 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * a tensor on CPU and then CopyFrom a CUDA tensor, that will to a
    * CUDA-to-CPU transfer).
    *
-   * If the function is invoked without `context` the copy would be synchronous
+   * 'async' parameter triggers async copy for CUDA tensors
    */
-  void CopyFrom(const TensorImpl& src, at::BaseContext* context = nullptr) {
+  void CopyFrom(const TensorImpl& src, bool async = false) {
     AT_ASSERT(!is_variable());
     AT_ASSERTM(
         src.is_contiguous(),
@@ -950,48 +935,35 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       if (data_type_.copy()) {
         AT_ASSERTM(
             device_type() == ::at::DeviceType::CPU,
-            "In CopyFrom source and dest tensors must both be CPU for meta copy, "
-            "but dest tensor was ", device_type());
+            "In CopyFrom source and dest tensors must both be CPU for "
+            "non-POD copy, but dest tensor was ",
+            device_type());
         AT_ASSERTM(
             src.device_type() == ::at::DeviceType::CPU,
-            "In CopyFrom source and dest tensors must both be CPU for meta copy, "
-            "but src tensor was ", src.device_type());
+            "In CopyFrom source and dest tensors must both be CPU for "
+            "non-POD copy, but src tensor was ",
+            src.device_type());
         data_type_.copy()(src.data(), raw_mutable_data(data_type_), numel());
       } else {
         // The following copy uses the current (thread local) stream for copying
-        // and also takes the current GPU id previously set through CUDA API
-        // as we don't invoke SwitchToDevice anywhere
-        // TODO: this logic is overly complex and can be replaced with simple
-        // dispatch based on two device types
+        // and also takes the GPU id from the device() field passed in.
         //
-        // We'll need to use a non-CPU context to perform the copy if
-        // one of the context is not CPU since only non-CPU context
-        // knows how to copy between CPU and that context
-        if (src.device_type() != ::at::DeviceType::CPU || device_type() == ::at::DeviceType::CPU) {
-          if (!context) {
-            CreateContext(src.GetDevice())
-                ->CopyBytesToDevice(
-                    numel() * itemsize(),
-                    src.data(),
-                    raw_mutable_data(data_type_),
-                    device_type());
-          } else {
-            AT_ASSERTM(
-                context->device_type() == src.device_type(),
-                "Type for provided context does not match the type of source");
-            context->CopyBytesToDevice(
-                numel() * itemsize(), src.data(), raw_mutable_data(data_type_), device_type());
-          }
-        } else {
-          // In case source context is CPU, and target context is non-CPU
-          // We'll have to create a Context from target and perform the
-          // copy using that context
-          CreateContext(GetDevice())
-              ->CopyBytesFromCPU(
-                  numel() * itemsize(),
-                  src.data(),
-                  raw_mutable_data(data_type_));
-        }
+        // TODO: Potentially more enforcements are necessary to avoid accidental
+        // switch to sync copy if the currently set device is wrong.
+        //
+        // Specifically, we might need to switch to a different context device
+        // here explicitly to avoid relying on user synchronizing things
+        // properly.
+        //
+        // note: raw_mutable_data initializes device here
+        void* new_data = raw_mutable_data(data_type_);
+        at::CopyBytes(
+            numel() * itemsize(),
+            src.data(),
+            src.device(),
+            new_data,
+            device(),
+            async);
       }
     }
   }
@@ -1004,8 +976,10 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * elements, in which case this tensors' capacity is grown at a factor of
    * growthPct. This ensures that Extend runs on an amortized O(1) time
    * complexity.
+   *
+   * This op is auto-asynchronous if the underlying device (CUDA) supports it.
    */
-  void Extend(int64_t num, float growthPct, at::BaseContext* context) {
+  void Extend(int64_t num, float growthPct) {
     AT_ASSERT(sizes_.size() >= 1u);
     AT_ASSERTM(num >= 0, "`num` must be non-negative for Extend");
     AT_ASSERTM(
@@ -1035,10 +1009,29 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     auto oldDims = sizes_;
     Resize(newCapacity);
     auto* newData = raw_mutable_data(data_type_);
-    AT_ASSERTM(
-        context != nullptr, "Context must be provided to Extend the tensor");
-    context->CopyItemsSameDevice(
-        data_type_, oldSize, oldData.get(), newData);
+    if (data_type_.copy()) {
+      AT_ASSERTM(
+          device_type() == ::at::DeviceType::CPU,
+          "non-POD types work only on CPU");
+      data_type_.copy()(oldData.get(), newData, oldSize);
+    } else {
+      // The following copy uses the current (thread local) stream for copying
+      // and also takes the GPU id from the device() field passed in.
+      //
+      // TODO: Potentially more enforcements are necessary to avoid accidental
+      // switch to sync copy if the currently set device is wrong.
+      //
+      // Specifically, we might need to switch to a different context device
+      // here explicitly to avoid relying on user synchronizing things
+      // properly.
+      at::CopyBytes(
+          oldSize * itemsize(),
+          oldData.get(),
+          device(),
+          newData,
+          device(),
+          true); // non-blocking
+    }
     reserved_ = true;
     sizes_ = newDims;
     numel_ = newNumel;
@@ -1181,6 +1174,13 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     // It is possible that the source tensor hasn't called mutable_data() yet,
     // in which case ShareData() doesn't make much sense since we don't really
     // know what to share yet.
+    // TODO: Add the assert after all uninitialized states are eliminated
+    // AT_ASSERTM(src.dtype_initialized(),
+    //            "Source tensor don't have a data type (did you call mutable_data<T> on the tensor?)");
+    if (!src.dtype_initialized()) {
+      C10_LOG_EVERY_MS(WARNING, 1000) <<
+                   "Source tensor don't have a data type (did you call mutable_data<T> on the tensor?)";
+    }
     AT_ASSERTM(
         src.storage_initialized(),
         "Source tensor has no content and has size > 0");

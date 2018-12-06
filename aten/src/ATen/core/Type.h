@@ -1,10 +1,10 @@
 #pragma once
 
 #include "ATen/core/ATenGeneral.h"
-#include "c10/core/Allocator.h"
+#include <c10/core/Allocator.h>
 #include "ATen/core/Deprecated.h"
 #include "ATen/core/Generator.h"
-#include "ATen/core/Layout.h"
+#include <c10/core/Layout.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
 #include "ATen/core/SparseTensorRef.h"
@@ -30,7 +30,6 @@
 #endif
 
 namespace c10 {
-struct Allocator;
 struct Storage;
 }
 
@@ -136,10 +135,11 @@ struct CAFFE2_API Type {
     return backendToDeviceType(backend());
   }
 
-  virtual Tensor copy(const Tensor & src, bool non_blocking=false, optional<Device> to_device={}) const = 0;
+  virtual Tensor copy(
+      const Tensor& src,
+      bool non_blocking = false,
+      c10::optional<Device> to_device = {}) const = 0;
   virtual Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking=false) const = 0;
-  virtual Tensor & s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const = 0;
-  virtual Tensor & _s_copy_from(const Tensor & self, Tensor & dst, bool non_blocking) const = 0;
 
   virtual void backward(
       Tensor& self,
@@ -164,9 +164,21 @@ struct CAFFE2_API Type {
   /// Constructs the `TensorOptions` from a type and a `device_index`.
   TensorOptions options(int16_t device_index = -1) const {
     return TensorOptions().dtype(typeMeta())
-                          .device(backendToDeviceType(backend()), device_index)
+                          .device(device_type(), device_index)
                           .layout(layout())
                           .is_variable(is_variable());
+  }
+
+  /// Constructs the `TensorOptions` from a type and a Device.  Asserts that
+  /// the device type matches the device type of the type.
+  TensorOptions options(c10::optional<Device> device_opt) const {
+    if (!device_opt.has_value()) {
+      return options(-1);
+    } else {
+      Device device = device_opt.value();
+      AT_ASSERT(device.type() == device_type());
+      return options(device.index());
+    }
   }
 
   operator TensorOptions() const {
@@ -175,9 +187,6 @@ struct CAFFE2_API Type {
 
   // example
   // virtual Tensor * add(Tensor & a, Tensor & b) = 0;
-  virtual Tensor & _th_triu_(Tensor & self, int64_t diagonal) const = 0;
-  virtual Tensor & s__th_addcmul_(Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) const = 0;
-  virtual Tensor & _th_addcmul_(Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) const = 0;
   virtual Tensor abs(const Tensor & self) const = 0;
   virtual Tensor & abs_(Tensor & self) const = 0;
   virtual Tensor acos(const Tensor & self) const = 0;
@@ -420,7 +429,7 @@ struct CAFFE2_API Type {
   virtual Tensor to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, const Tensor & other, bool non_blocking, bool copy) const = 0;
-  virtual Scalar _local_scalar(const Tensor & self) const = 0;
+  virtual Scalar item(const Tensor & self) const = 0;
   virtual void* data_ptr(const Tensor & self) const = 0;
   virtual Tensor & set_(Tensor & self, Storage source) const = 0;
   virtual Tensor & set_(Tensor & self, Storage source, int64_t storage_offset, IntList size, IntList stride) const = 0;

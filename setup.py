@@ -345,6 +345,8 @@ def build_libs(libs):
             my_env['CMAKE_INSTALL'] = 'make install'
     if USE_SYSTEM_NCCL:
         my_env["NCCL_ROOT_DIR"] = NCCL_ROOT_DIR
+        my_env["NCCL_INCLUDE_DIR"] = NCCL_INCLUDE_DIR
+        my_env["NCCL_SYSTEM_LIB"] = NCCL_SYSTEM_LIB
     if USE_CUDA:
         my_env["CUDA_BIN_PATH"] = CUDA_HOME
         build_libs_cmd += ['--use-cuda']
@@ -388,6 +390,7 @@ def build_libs(libs):
     my_env["USE_OPENCV"] = "ON" if USE_OPENCV else "OFF"
     my_env["USE_FFMPEG"] = "ON" if USE_FFMPEG else "OFF"
     my_env["USE_DISTRIBUTED"] = "ON" if USE_DISTRIBUTED else "OFF"
+    my_env["USE_SYSTEM_NCCL"] = "ON" if USE_SYSTEM_NCCL else "OFF"
 
     try:
         os.mkdir('build')
@@ -789,14 +792,8 @@ if IS_WINDOWS:
         CAFFE2_LIBS.append(os.path.join(lib_path, 'caffe2_hip.lib'))
 
 main_compile_args = ['-D_THP_CORE', '-DONNX_NAMESPACE=' + ONNX_NAMESPACE]
-main_libraries = ['shm']
+main_libraries = ['shm', 'torch_python']
 main_link_args = []
-if IS_WINDOWS:
-    main_link_args.append(os.path.join(lib_path, 'torch_python.lib'))
-elif IS_DARWIN:
-    main_link_args.append(os.path.join(lib_path, 'libtorch_python.dylib'))
-else:
-    main_link_args.append(os.path.join(lib_path, 'libtorch_python.so'))
 main_sources = ["torch/csrc/stub.cpp"]
 
 # Before the introduction of stub.cpp, _C.so and libcaffe2.so defined

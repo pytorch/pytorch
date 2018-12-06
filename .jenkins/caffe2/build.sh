@@ -25,21 +25,28 @@ if [ "$(which gcc)" != "/root/sccache/gcc" ]; then
     fi
 
     # Setup wrapper scripts
-    for compiler in cc c++ gcc g++ x86_64-linux-gnu-gcc; do
+    wrapped="cc c++ gcc g++ x86_64-linux-gnu-gcc"
+    if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]]; then
+        wrapped="$wrapped nvcc"
+    fi
+    for compiler in $wrapped; do
       (
         echo "#!/bin/sh"
+
+        # TODO: if/when sccache gains native support for an
+        # SCCACHE_DISABLE flag analogous to ccache's CCACHE_DISABLE,
+        # this can be removed. Alternatively, this can be removed when
+        # https://github.com/pytorch/pytorch/issues/13362 is fixed.
+        #
+        # NOTE: carefully quoted - we want `which compiler` to be
+        # resolved as we execute the script, but SCCACHE_DISABLE and
+        # $@ to be evaluated when we execute the script
+        echo 'test $SCCACHE_DISABLE && exec '"$(which $compiler)"' "$@"'
+
         echo "exec $SCCACHE $(which $compiler) \"\$@\""
       ) > "./sccache/$compiler"
       chmod +x "./sccache/$compiler"
     done
-
-    if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]]; then
-      (
-        echo "#!/bin/sh"
-        echo "exec $SCCACHE $(which nvcc) \"\$@\""
-      ) > "./sccache/nvcc"
-      chmod +x "./sccache/nvcc"
-    fi
 
     export CACHE_WRAPPER_DIR="$PWD/sccache"
 
@@ -141,8 +148,13 @@ if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
   CMAKE_ARGS+=("-USE_LMDB=ON")
 
   ########## HIPIFY Caffe2 operators
-  ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_pytorch_amd.py"
-  ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_caffe2_amd.py"
+  ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_amd.py"
+fi
+
+# building bundled nccl in this config triggers a bug in nvlink. For
+# more, see https://github.com/pytorch/pytorch/issues/14486
+if [[ "${BUILD_ENVIRONMENT}" == *-cuda8*-cudnn7* ]]; then
+    CMAKE_ARGS+=("-DUSE_SYSTEM_NCCL=ON")
 fi
 
 # Try to include Redis support for Linux builds

@@ -50,7 +50,8 @@ class AliasInfo {
   }
 
   // TODO this doesn't check any contained types yet
-  bool isSubsetOf(const AliasInfo& other) {
+  // non-strict: returns true if self.sets() == other.sets()
+  bool isSubsetOf(const AliasInfo& other) const {
     for (const auto& alias : this->sets()) {
       if (other.sets().count(alias) == 0) {
         return false;

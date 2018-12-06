@@ -2,6 +2,7 @@
 #include <ATen/NativeFunctions.h>
 
 #include <ATen/SparseTensorUtils.h>
+#include <ATen/cuda/CUDAUtils.h>
 
 namespace at { namespace native {
 
@@ -14,7 +15,7 @@ SparseTensor& sparse_mask_out_cuda(SparseTensor& r, const Tensor& t, const Spars
   AT_ASSERT(t.is_cuda());  // dispatch argument
   AT_CHECK(mask.is_cuda(), "sparse_mask: expected 'mask' to be CUDA, but got CPU");
   AT_CHECK(r.is_cuda(), "sparse_mask: expected 'out' to be CUDA, but got CPU");
-  AT_CHECK(check_device({r, t, mask}),
+  AT_CHECK(cuda::check_device({r, t, mask}),
       "sparse_mask: arguments are located on different devices; self is on device ", t.get_device(),
       ", mask is on device ", mask.get_device(), ", out is on device ", r.get_device());
   resize_as_sparse_(r, mask);
