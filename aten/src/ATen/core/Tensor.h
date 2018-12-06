@@ -21,6 +21,10 @@ struct TensorOptions;
 } // namespace at
 
 namespace at {
+
+class Tensor;
+using TensorList = ArrayRef<Tensor>;
+
 // Tensor is a "generic" object holding a pointer to the underlying TensorImpl object, which
 // has an embedded reference count. In this way, Tensor is similar to boost::intrusive_ptr.
 //
@@ -729,8 +733,6 @@ Tensor make_tensor(Args&&... args) {
   return Tensor(c10::make_intrusive<T>(std::forward<Args>(args)...));
 }
 } // namespace detail
-
-using TensorList = ArrayRef<at::Tensor>;
 
 } // namespace at
 
