@@ -14,6 +14,10 @@ parser.add_argument(
     '--out-of-place-only',
     action='store_true',
     help="Whether to only run hipify out-of-place on source files")
+parser.add_argument(
+    '--add-static-casts',
+    action='store_true',
+    help="Whether to automatically add static_casts to kernel arguments.")
 args = parser.parse_args()
 
 amd_build_dir = os.path.dirname(os.path.realpath(__file__))
@@ -51,11 +55,9 @@ ignores = [
     "aten/src/ATen/core/*",
 ]
 
-json_file = ""  # Yeah, don't ask me why the default is ""...
-if not args.out_of_place_only:
-    # List of operators currently disabled (PyTorch only)
-    json_file = os.path.join(amd_build_dir, "disabled_features.json")
+json_settings = os.path.join(amd_build_dir, "disabled_features.json")
 
+if not args.out_of_place_only:
     # Apply patch files in place (PyTorch only)
     patch_folder = os.path.join(amd_build_dir, "patches")
     for filename in os.listdir(os.path.join(amd_build_dir, "patches")):
@@ -88,5 +90,5 @@ hipify_python.hipify(
     includes=includes,
     ignores=ignores,
     out_of_place_only=args.out_of_place_only,
-    json_settings=json_file,
-    add_static_casts_option=True)
+    json_settings=json_settings,
+    add_static_casts_option=args.add_static_casts)
