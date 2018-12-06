@@ -1,16 +1,17 @@
 #pragma once
 
-#include "c10/Device.h"
-#include "ATen/core/Layout.h"
-#include "ATen/core/Scalar.h"
-#include "ATen/core/ScalarType.h"
+#include <c10/Device.h>
+#include <c10/core/Layout.h>
+#include <c10/core/Scalar.h>
+#include <c10/core/ScalarType.h>
 #include "ATen/core/SparseTensorRef.h"
-#include "ATen/core/Storage.h"
+#include <c10/core/Storage.h>
 #include "ATen/core/TensorAccessor.h"
 #include "ATen/core/TensorImpl.h"
 #include "ATen/core/UndefinedTensorImpl.h"
-#include "c10/util/Exception.h"
-#include "c10/util/Optional.h"
+#include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
+#include <ATen/core/LegacyTypeDispatch.h>
 
 namespace at {
 struct Generator;
@@ -143,7 +144,7 @@ public:
     return impl_->is_contiguous();
   }
   Type & type() const {
-    return impl_->type();
+    return legacyTensorType(*impl_);
   }
   TensorTypeId type_id() const {
     return impl_->type_id();
@@ -153,6 +154,9 @@ public:
   }
   const Storage& storage() const {
     return impl_->storage();
+  }
+  bool is_alias_of(const at::Tensor& other) const{
+    return impl_->storage().is_alias_of(other.storage());
   }
   Tensor toType(const Type & t, bool non_blocking=false) const;
   Tensor & copy_(const Tensor & src, bool non_blocking=false);
@@ -177,6 +181,9 @@ public:
 
   /// Returns if a `Tensor` has CUDA backend.
   bool is_cuda() const;
+
+  /// Returns if a `Tensor` has HIP backend.
+  bool is_hip() const;
 
   /// Returns if a `Tensor` has sparse backend.
   bool is_sparse() const;
@@ -234,6 +241,7 @@ public:
 
   Tensor cpu() const;
   Tensor cuda() const;
+  Tensor hip() const;
 
   // ~~~~~ Autograd API ~~~~~
 

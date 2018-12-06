@@ -13,7 +13,7 @@ cudnnDataType_t getCudnnDataType(const at::Tensor& tensor) {
     return CUDNN_DATA_HALF;
   }
   std::string msg("getCudnnDataType() not supported for ");
-  msg += at::toString(tensor.type().scalarType());
+  msg += toString(tensor.type().scalarType());
   throw std::runtime_error(msg);
 }
 

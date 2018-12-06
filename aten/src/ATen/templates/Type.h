@@ -1,20 +1,20 @@
 #pragma once
 
 #include "ATen/core/ATenGeneral.h"
-#include "ATen/core/Allocator.h"
+#include <c10/core/Allocator.h>
 #include "ATen/core/Deprecated.h"
 #include "ATen/core/Generator.h"
-#include "ATen/core/Layout.h"
-#include "ATen/core/Scalar.h"
-#include "ATen/core/ScalarType.h"
+#include <c10/core/Layout.h>
+#include <c10/core/Scalar.h>
+#include <c10/core/ScalarType.h>
 #include "ATen/core/SparseTensorRef.h"
 #include <c10/util/ArrayRef.h>
-#include "ATen/core/Half.h"
-#include "ATen/core/TensorTypeIdRegistration.h"
+#include <c10/Half.h>
+#include <c10/core/TensorTypeIdRegistration.h>
 #include "ATen/core/Reduction.h"
 #include "ATen/core/TensorOptions.h"
 
-#include "c10/util/Optional.h"
+#include <c10/util/Optional.h>
 
 #include <array>
 #include <cstddef>
@@ -29,12 +29,14 @@
 #endif
 #endif
 
+namespace c10 {
+struct Storage;
+}
+
 namespace at {
 
 class Context;
-struct Allocator;
 struct Generator;
-struct Storage;
 class Tensor;
 
 static inline void noop_deleter(void*) {}
@@ -59,6 +61,7 @@ struct CAFFE2_API Type {
   virtual Backend backend() const = 0;
   Layout layout() const noexcept { return layout_from_backend(backend()); }
   virtual bool is_cuda() const = 0;
+  virtual bool is_hip() const = 0;
   virtual bool is_sparse() const = 0;
   virtual bool is_distributed() const = 0;
   bool is_variable() const noexcept { return is_variable_; }
@@ -88,6 +91,9 @@ struct CAFFE2_API Type {
   Type & cuda() const {
     return this->toBackend(at::backendToCUDA(this->backend()));
   }
+  Type & hip() const {
+    return this->toBackend(at::backendToHIP(this->backend()));
+  }
   // contiguous IDs for all types in the system
   // for external dispatch
   virtual TypeID ID() const = 0;
@@ -100,10 +106,11 @@ struct CAFFE2_API Type {
     return backendToDeviceType(backend());
   }
 
-  virtual Tensor copy(const Tensor & src, bool non_blocking=false, optional<Device> to_device={}) const = 0;
+  virtual Tensor copy(
+      const Tensor& src,
+      bool non_blocking = false,
+      c10::optional<Device> to_device = {}) const = 0;
   virtual Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking=false) const = 0;
-  virtual Tensor & s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const = 0;
-  virtual Tensor & _s_copy_from(const Tensor & self, Tensor & dst, bool non_blocking) const = 0;
 
   virtual void backward(
       Tensor& self,
@@ -128,9 +135,21 @@ struct CAFFE2_API Type {
   /// Constructs the `TensorOptions` from a type and a `device_index`.
   TensorOptions options(int16_t device_index = -1) const {
     return TensorOptions().dtype(typeMeta())
-                          .device(backendToDeviceType(backend()), device_index)
+                          .device(device_type(), device_index)
                           .layout(layout())
                           .is_variable(is_variable());
+  }
+
+  /// Constructs the `TensorOptions` from a type and a Device.  Asserts that
+  /// the device type matches the device type of the type.
+  TensorOptions options(c10::optional<Device> device_opt) const {
+    if (!device_opt.has_value()) {
+      return options(-1);
+    } else {
+      Device device = device_opt.value();
+      AT_ASSERT(device.type() == device_type());
+      return options(device.index());
+    }
   }
 
   operator TensorOptions() const {

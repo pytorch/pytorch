@@ -73,10 +73,7 @@ void addInputs(Node *n, const char * name, at::Generator * value)            {
   n->addInput(undef_gen);
 }
 void addInputs(Node *n, const char * name, at::Device value) {
-  std::vector<int64_t> device = {
-      static_cast<int64_t>(value.type()),
-      static_cast<int64_t>(value.index())};
-  detail::genericAddInput(n, std::move(device));
+  detail::genericAddInput(n, value);
 }
 void addInputs(Node *n, const char * name, at::Layout value) {
   detail::genericAddInput(n, static_cast<int64_t>(value));

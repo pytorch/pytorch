@@ -155,7 +155,9 @@ THTensor *THTensor_(newClone)(THTensor *self)
 {
   THTensor *tensor = THTensor_(new)();
   THTensor_(resizeAs)(tensor, self);
-  THTensor_(copy)(tensor, self);
+  at::Tensor tensor_wrap = THTensor_wrap(tensor);
+  at::Tensor self_wrap = THTensor_wrap(self);
+  at::_copy_same_type_(tensor_wrap, self_wrap);
   return tensor;
 }
 
@@ -577,8 +579,11 @@ void THTensor_(free)(THTensor *self)
 
 void THTensor_(freeCopyTo)(THTensor *self, THTensor *dst)
 {
-  if(self != dst)
-    THTensor_(copy)(dst, self);
+  if(self != dst) {
+    at::Tensor dst_wrap = THTensor_wrap(dst);
+    at::Tensor self_wrap = THTensor_wrap(self);
+    at::_copy_same_type_(dst_wrap, self_wrap);
+  }
 
   THTensor_(free)(self);
 }

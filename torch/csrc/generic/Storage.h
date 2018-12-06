@@ -2,10 +2,7 @@
 #define TH_GENERIC_FILE "generic/Storage.h"
 #else
 
-struct THPStorage {
-  PyObject_HEAD
-  THWStorage *cdata;
-};
+#include "torch/csrc/StorageDefs.h"
 
 THP_API PyObject * THPStorage_(New)(THWStorage *ptr);
 extern PyObject *THPStorageClass;

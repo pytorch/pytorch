@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/ScalarType.h>
+#include <c10/core/ScalarType.h>
 #include <c10/util/Optional.h>
 #include <sstream>
 #include <vector>
