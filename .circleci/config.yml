@@ -173,11 +173,6 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
           cmake_args+=("-DBUILD_ATEN=ON")
         fi
 
-        if [[ $BUILD_ENVIRONMENT == py2-cuda9.0-cudnn7-ubuntu16.04 ]]; then
-          cmake_args+=("-DUSE_TENSORRT=ON")
-          export USE_TENSORRT=1
-        fi
-
         # conda must be added to the path for Anaconda builds (this location must be
         # the same as that in install_anaconda.sh used to build the docker image)
         if [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
