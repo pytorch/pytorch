@@ -36,7 +36,7 @@ AliasDb::AliasDb(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {
     }
   }
   // - Set of all nodes with a wildcard
-  buildWildcardIndex(graph->block());
+  buildWildcardIndex(graph_->block());
 }
 
 void AliasDb::buildWildcardIndex(const Block* b) {
