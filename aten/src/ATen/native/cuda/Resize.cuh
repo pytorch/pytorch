@@ -47,6 +47,10 @@ inline TensorImpl* resize_impl_cuda_(
     for (size_t dim = 0; dim < size.size(); ++dim) {
       // FIXME: Don't rely on storage_size being negative because this
       // may not be true for some edge cases.
+      if (size[dim] == 0) {
+        storage_size = 0;
+        break;
+      }
       storage_size += (size[dim] - 1) * stride.value()[dim];
     }
   } else {
