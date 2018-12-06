@@ -467,6 +467,10 @@ class TestOperators(TestCase):
         x = torch.randn(1, 2, 3, 4)
         self.assertONNX(torch.nn.RReLU(), x)
 
+    def test_log_sigmoid(self):
+        x = torch.randn(1, 2, 3, 4)
+        self.assertONNX(torch.nn.LogSigmoid(), x)
+
     def test_linear(self):
         x = torch.randn(3, 4)
         self.assertONNX(torch.nn.Linear(4, 5, bias=True), x)
