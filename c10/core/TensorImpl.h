@@ -127,7 +127,13 @@ struct C10_API PlacementDeleteContext {
   }
 };
 
+struct TensorImpl;
+
 struct C10_API AutogradMetaInterface {
+  virtual void set_requires_grad(bool requires_grad, at::TensorImpl* self_impl) = 0;
+  virtual bool requires_grad() const = 0;
+  virtual at::Tensor& grad() = 0;
+  virtual const at::Tensor& grad() const = 0;
   virtual ~AutogradMetaInterface();
 };
 
@@ -488,8 +494,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * It is only valid to call this method on a Variable.
    * See Note [Tensor versus Variable in C++].
    */
-  virtual void set_requires_grad(bool requires_grad) {
-    AT_ERROR("set_requires_grad is not implemented for Tensor");
+  void set_requires_grad(bool requires_grad) {
+    if (autograd_meta()) {
+      autograd_meta()->set_requires_grad(requires_grad, this);
+    } else {
+      AT_ERROR("set_requires_grad is not implemented for Tensor");
+    }
   }
 
   /**
@@ -502,8 +512,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * It is only valid to call this method on a Variable.
    * See Note [Tensor versus Variable in C++].
    */
-  virtual bool requires_grad() const {
-    AT_ERROR("requires_grad is not implemented for Tensor");
+  bool requires_grad() const {
+    if (autograd_meta()) {
+      return autograd_meta()->requires_grad();
+    } else {
+      AT_ERROR("requires_grad is not implemented for Tensor");
+    }
   }
 
   /**
@@ -513,7 +527,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * It is only valid to call this method on a Variable.
    * See Note [Tensor versus Variable in C++].
    */
-  virtual at::Tensor& grad();
+  at::Tensor& grad();
 
   /**
    * Return the accumulated gradient of a tensor.  This gradient is written
@@ -522,7 +536,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * It is only valid to call this method on a Variable.
    * See Note [Tensor versus Variable in C++].
    */
-  virtual const at::Tensor& grad() const;
+  const at::Tensor& grad() const;
 
   /**
    * Return a typed data pointer to the actual data which this tensor refers to.
