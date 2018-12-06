@@ -3945,8 +3945,8 @@ class _TestTorchMixin(object):
         res2 = torch.Tensor()
         torch.linspace(_from, to, 137, out=res2)
         self.assertEqual(res1, res2, 0)
-        self.assertRaises(RuntimeError, lambda: torch.linspace(0, 1, 1))
-        self.assertEqual(torch.linspace(0, 0, 1), torch.zeros(1), 0)
+        self.assertRaises(RuntimeError, lambda: torch.linspace(0, 1, -1))
+        self.assertEqual(torch.linspace(0, 1, 1), torch.zeros(1), 0)
 
         # Check linspace for generating with start > end.
         self.assertEqual(torch.linspace(2, 0, 3), torch.Tensor((2, 1, 0)), 0)
@@ -3963,8 +3963,8 @@ class _TestTorchMixin(object):
         res2 = torch.Tensor()
         torch.logspace(_from, to, 137, out=res2)
         self.assertEqual(res1, res2, 0)
-        self.assertRaises(RuntimeError, lambda: torch.logspace(0, 1, 1))
-        self.assertEqual(torch.logspace(0, 0, 1), torch.ones(1), 0)
+        self.assertRaises(RuntimeError, lambda: torch.logspace(0, 1, -1))
+        self.assertEqual(torch.logspace(0, 1, 1), torch.ones(1), 0)
 
         # Check logspace_ for generating with start > end.
         self.assertEqual(torch.logspace(1, 0, 2), torch.Tensor((10, 1)), 0)
