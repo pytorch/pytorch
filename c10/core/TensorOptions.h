@@ -97,7 +97,7 @@ namespace c10 {
 /// resolution is done before template resolution, our problem is solved.
 
 
-struct CAFFE2_API TensorOptions {
+struct C10_API TensorOptions {
   TensorOptions()
     : requires_grad_(false)
     , is_variable_(false)
@@ -473,7 +473,7 @@ inline TensorOptions requires_grad(bool requires_grad = true) {
   return TensorOptions().requires_grad(requires_grad);
 }
 
-CAFFE2_API std::ostream& operator<<(
+C10_API std::ostream& operator<<(
     std::ostream& stream,
     const TensorOptions& options);
 
