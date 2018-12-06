@@ -137,7 +137,7 @@ void TensorIterator::foreach_reduced_elt(const loop_subiter_t &loop) {
     DimCounter dims {non_reduced_shape, {0, non_reduced_numel}};
     while (!dims.is_done()) {
       TensorIterator reduced = *this;
-      reduced.narrow_all(reduce_dims, dims.values);
+      reduced.select_all_keeping_dim(reduce_dims, dims.values);
       loop(reduced);
       dims.increment({1, 1});
     }

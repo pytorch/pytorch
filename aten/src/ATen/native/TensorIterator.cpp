@@ -443,11 +443,11 @@ void TensorIterator::narrow(int dim, int64_t start, int64_t size) {
   }
 }
 
-void TensorIterator::narrow_all(int start_dim, IntList starts) {
+void TensorIterator::select_all_keeping_dim(int start_dim, IntList indices) {
   AT_ASSERT(start_dim <= ndim());
   for (int i = start_dim; i < ndim(); ++i) {
     for (auto& op : operands_) {
-      op.data = ((char*)op.data) + op.stride_bytes[i] * starts[i - start_dim];
+      op.data = ((char*)op.data) + op.stride_bytes[i] * indices[i - start_dim];
     }
     shape_[i] = 1;
   }

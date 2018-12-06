@@ -171,7 +171,8 @@ struct CAFFE2_API TensorIterator {
   void remove_dimension(int dim);
   /// Shrinks an iterated dimension
   void narrow(int dim, int64_t start, int64_t size);
-  void narrow_all(int start_dim, IntList starts);
+  /// Narrows every dim after and including `start_dim` to size one.
+  void select_all_keeping_dim(int start_dim, IntList starts);
   /// Replaces the data pointer and strides for the operand at index `arg`
   void replace_operand(int arg, void* data, IntList stride);
 

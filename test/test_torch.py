@@ -94,18 +94,6 @@ class BytesIOContext(io.BytesIO):
         pass
 
 DIM_TEST_SCENARIOS = [
-    ((5, 400000), 1),
-    ((3, 5, 7), 0),
-    ((3, 5, 7), 1),
-    ((3, 5, 7), 2),
-    ((100000, ), -1),
-    ((50, 50, 50), 0),
-    ((50, 50, 50), 1),
-    ((50, 50, 50), 2),
-    ((50, 50, 50), (1, 2)),
-    ((50, 50, 50), (1, -1)),
-    ((50, 50, 50), (0, 2)),
-    ((50, 50, 50), (0, 2, 1)),
 ]
 
 
@@ -1947,45 +1935,68 @@ class _TestTorchMixin(object):
         else:
             self.assertTrue(np.allclose(n, t.numpy(), equal_nan=True))
 
-    def _test_dim_op(self, tensors_dict, dim, pytorch_op, numpy_op):
-        for category, tensors in tensors_dict.items():
-            if category == "slice":
-                dim = 0
-            for tensor in tensors:
-                # we have no control over NumPy warnings...
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")
-                    expected = numpy_op(tensor.numpy(), dim)
-                actual = pytorch_op(tensor, dim)
-                self._assert_matches_numpy(actual, expected)
+    def _test_dim_ops(self, pytorch_op, numpy_op,
+            use_floating=True, use_integral=True):
+        def do_one(tensors_dict, dim):
+            for category, tensors in tensors_dict.items():
+                if category == "slice":
+                    dim = 0
+                for tensor in tensors:
+                    # we have no control over NumPy warnings...
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        expected = numpy_op(tensor.numpy(), dim)
+                    actual = pytorch_op(tensor, dim)
+                    self._assert_matches_numpy(actual, expected)
+        do_one(self._make_tensors((5, 400000), use_floating=use_floating,
+            use_integral=use_integral), 1)
+        do_one(self._make_tensors((3, 5, 7), use_floating=use_floating,
+            use_integral=use_integral), 0)
+        do_one(self._make_tensors((3, 5, 7), use_floating=use_floating,
+            use_integral=use_integral), 1)
+        do_one(self._make_tensors((3, 5, 7), use_floating=use_floating,
+            use_integral=use_integral), 2)
+        do_one(self._make_tensors((100000, ), use_floating=use_floating,
+            use_integral=use_integral), -1)
+        do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
+            use_integral=use_integral), 0)
+        do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
+            use_integral=use_integral), 1)
+        do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
+            use_integral=use_integral), 2)
+        do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
+            use_integral=use_integral), (1, 2))
+        do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
+            use_integral=use_integral), (1, -1))
+        do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
+            use_integral=use_integral), (0, 2))
+        do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
+            use_integral=use_integral), (0, 2, 1))
+
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_sum_dim(self):
         for sizes, dim in DIM_TEST_SCENARIOS:
-            self._test_dim_op(
-                self._make_tensors(sizes),
-                dim,
+            self._test_dim_ops(
                 lambda t, d: t.sum(d),
                 lambda n, d: n.sum(d))
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_mean_dim(self):
         for sizes, dim in DIM_TEST_SCENARIOS:
-            self._test_dim_op(
-                self._make_tensors(sizes, use_integral=False),
-                dim,
+            self._test_dim_ops(
                 lambda t, d: t.mean(d),
-                lambda n, d: n.mean(d))
+                lambda n, d: n.mean(d),
+                use_integral=False)
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_std_dim(self):
         for unbiased in [False, True]:
             for sizes, dim in DIM_TEST_SCENARIOS:
-                self._test_dim_op(
-                    self._make_tensors(sizes, use_integral=False),
-                    dim,
+                self._test_dim_ops(
                     lambda t, d: t.std(d, unbiased=unbiased),
-                    lambda n, d: n.std(d, ddof=1 if unbiased else 0))
+                    lambda n, d: n.std(d, ddof=1 if unbiased else 0),
+                    use_integral=False)
 
     def test_sum_out(self):
         x = torch.rand(100, 100)
