@@ -10,17 +10,18 @@ namespace at { namespace cuda {
 
 namespace {
 
-static DeviceIndex num_gpus = -1;
-static std::once_flag init_flag;
-static std::deque<std::once_flag> device_flags;
-static std::vector<cudaDeviceProp> device_properties;
+DeviceIndex num_gpus = -1;
+std::once_flag init_flag;
+std::deque<std::once_flag> device_flags;
+std::vector<cudaDeviceProp> device_properties;
 
-static void initDevicePropertiesVector() {
+void initDevicePropertiesVector() {
   num_gpus = c10::cuda::device_count();
   device_flags.resize(num_gpus);
+  device_properties.resize(num_gpus);
 }
 
-static void initDeviceProperty(DeviceIndex device_index) {
+void initDeviceProperty(DeviceIndex device_index) {
   cudaDeviceProp device_prop;
   AT_CUDA_CHECK(cudaGetDeviceProperties(&device_prop, device_index));
   device_properties[device_index] = device_prop;
