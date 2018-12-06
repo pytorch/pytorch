@@ -901,13 +901,13 @@ if USE_CUDA:
 # These extensions are built by cmake and copied manually in build_extensions()
 # inside the build_ext implementaiton
 extensions.append(
-    setuptools.Extension(
+    Extension(
         name=str('caffe2.python.caffe2_pybind11_state'),
         sources=[]),
 )
 if USE_CUDA:
     extensions.append(
-        setuptools.Extension(
+        Extension(
             name=str('caffe2.python.caffe2_pybind11_state_gpu'),
             sources=[]),
     )
