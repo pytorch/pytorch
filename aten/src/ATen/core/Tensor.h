@@ -668,6 +668,7 @@ public:
   bool equal(const Tensor & other) const;
   Tensor pow(const Tensor & exponent) const;
   Tensor alias() const;
+  Tensor max_unpool2d(const Tensor & indices, IntList output_size) const;
 
   // We changed .dtype() to return a TypeMeta in #12766. Ideally, we want the
   // at::kDouble and its friends to be TypeMeta's, but that hasn't happened yet.

@@ -10,6 +10,8 @@
 
 #if !C10_MOBILE
 #define FORALL_ATEN_BASE_SYMBOLS(_) \
+_(aten, MaxUnpooling2d_backward) \
+_(aten, MaxUnpooling2d_forward) \
 _(aten, RoiPooling2d_backward) \
 _(aten, RoiPooling2d_forward) \
 _(aten, __and__) \

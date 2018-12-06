@@ -564,6 +564,22 @@ class TestNN(NNTestCase):
 
         return l, n, s
 
+    def test_maxunpool2d(self):
+        pool = nn.MaxPool2d(2, stride=2, return_indices=True)
+        unpool = nn.MaxUnpool2d(2, stride=2)
+        input = torch.tensor([[[[ 1.,  2,  3,  4],
+                            [ 5,  6,  7,  8],
+                            [ 9, 10, 11, 12],
+                            [13, 14, 15, 16]]]])
+        output, indices = pool(input)
+        unpool_out = unpool(output, indices)
+        expected_unpool_out = torch.tensor([[[[  0.,   0.,   0.,   0.],
+          [  0.,   6.,   0.,   8.],
+          [  0.,   0.,   0.,   0.],
+          [  0.,  14.,   0.,  16.]]]])
+        print(unpool_out, expected_unpool_out)
+        self.assertEqual(unpool_out, expected_unpool_out)
+
     def test_module_backcompat(self):
         from torch.serialization import SourceChangeWarning
         path = download_file('https://download.pytorch.org/test_data/linear.pt')
