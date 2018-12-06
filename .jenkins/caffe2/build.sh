@@ -125,6 +125,9 @@ CMAKE_ARGS+=("-DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}")
 if [[ $BUILD_ENVIRONMENT == *mkl* ]]; then
   CMAKE_ARGS+=("-DBLAS=MKL")
 fi
+if [[ $BUILD_ENVIRONMENT == py2-cuda9.0-cudnn7-ubuntu16.04 ]]; then
+  CMAKE_ARGS+=("-DUSE_TENSORRT=ON")
+fi
 if [[ $BUILD_ENVIRONMENT == *cuda* ]]; then
   CMAKE_ARGS+=("-DUSE_CUDA=ON")
   CMAKE_ARGS+=("-DCUDA_ARCH_NAME=Maxwell")
