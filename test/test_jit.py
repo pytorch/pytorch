@@ -14,7 +14,7 @@ from torch._six import inf, PY2
 from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
     freeze_rng_state
-from common_nn import module_tests, new_module_tests
+from common_nn import module_tests, new_module_tests, criterion_tests
 from textwrap import dedent
 import os
 import io
@@ -641,42 +641,35 @@ class TestJit(JitTestCase):
                     return -input
 
         class MyModule(torch.jit.ScriptModule):
-            def __init__(self):
+            def __init__(self, module):
                 super(MyModule, self).__init__()
-                self.sub = Sub()
+                self.module = module
 
             @torch.jit.script_method
             def forward(self, input):
-                return self.sub(input) + 1
+                return self.module(input) + 1
 
-        m = MyModule()
+        m = MyModule(Sub())
         input = torch.rand(3, 4)
         self.assertEqual(input + 1, m(input))
         m.eval()
         self.assertEqual(-input + 1, m(input))
 
-    def test_train_eval_const(self):
-        class MyModule(torch.jit.ScriptModule):
-            __constants__ = ['training']
+        # test batchnorm and dropout train/eval
+        input = torch.randn(6, 10)
+        batchnorm = nn.BatchNorm1d(10)
+        dropout = nn.Dropout(p=0.2)
 
-            def __init__(self):
-                super(MyModule, self).__init__()
-                # TODO: it is illegal to try to call
-                # eval/train because training has already
-                # been set. Consider allowing
-                # constants to be mutable until the end of __init__
+        m_batchnorm = MyModule(batchnorm)
+        self.assertEqual(batchnorm(input) + 1, m_batchnorm(input))
+        batchnorm.eval()
+        m_batchnorm.eval()
+        self.assertEqual(batchnorm(input) + 1, m_batchnorm(input))
 
-            @torch.jit.script_method
-            def forward(self, input):
-                if self.training:
-                    x = 2 * input
-                else:
-                    x = -input
-                return x + 1
-
-        m = MyModule()
-        input = torch.rand(3, 4)
-        self.assertEqual(2 * input + 1, m(input))
+        m_dropout = MyModule(dropout)
+        dropout.eval()
+        m_dropout.eval()
+        self.assertEqual(dropout(input) + 1, m_dropout(input))
 
     def test_diff_subgraph_clones_constants(self):
         @torch.jit.script
@@ -4308,9 +4301,8 @@ a")
         inputs = get_lstm_inputs('cuda', training=True)
         module = self.checkScript(LSTMCellS, inputs)
         forward_graph = module.graph_for(*inputs)
-        with self.assertRaises(AssertionError):
-            self.assertGraphContainsExactly(
-                forward_graph, 'prim::FusionGroup', 1, consider_subgraphs=True)
+        self.assertGraphContainsExactly(
+            forward_graph, 'prim::FusionGroup', 1, consider_subgraphs=True)
         self.assertExpectedGraph(forward_graph, subname='forward')
 
         hy, cy = module(*inputs)
@@ -4324,9 +4316,8 @@ a")
         inputs = get_milstm_inputs('cuda', training=True)
         module = self.checkScript(MiLSTMCell, inputs)
         forward_graph = module.graph_for(*inputs)
-        with self.assertRaises(AssertionError):
-            self.assertGraphContainsExactly(
-                forward_graph, 'prim::FusionGroup', 1, consider_subgraphs=True)
+        self.assertGraphContainsExactly(
+            forward_graph, 'prim::FusionGroup', 1, consider_subgraphs=True)
         self.assertExpectedGraph(forward_graph, subname='forward')
 
         hy, cy = module(*inputs)
@@ -5349,8 +5340,6 @@ a")
     def test_script_module_param_buffer_mutation(self):
         # TODO: add param mutation test case after JIT support it
         class ModuleBufferMutate(torch.jit.ScriptModule):
-            __constants__ = ['training']
-
             def __init__(self):
                 super(ModuleBufferMutate, self).__init__(False)
                 self.register_buffer('running_var', torch.tensor(0, dtype=torch.long))
@@ -5362,6 +5351,8 @@ a")
                 return self.running_var
 
         m = ModuleBufferMutate()
+        self.assertEqual(m(), 1)
+        m.eval()
         self.assertEqual(m(), 1)
 
     def test_script_module_for(self):
@@ -6305,7 +6296,7 @@ a")
         self.assertEqual(m_orig.forward(input), m_import.forward(input))
 
     @skipIfNoTorchVision
-    def test_script_module_export_resnet18(self):
+    def test_script_module_trace_resnet18(self):
         x = torch.ones(1, 3, 224, 224)
         m_orig = torch.jit.trace(torchvision.models.resnet18(), torch.ones(1, 3, 224, 224))
         m_import = self.getExportImportCopy(m_orig)
@@ -6317,6 +6308,126 @@ a")
         input.grad.zero_()
 
         output_import = m_import(input)
+        output_import.sum().backward()
+        grad_import = input.grad.clone()
+
+        self.assertEqual(output_orig, output_import)
+        self.assertEqual(grad_orig, grad_import)
+
+    @skipIfNoTorchVision
+    def test_script_module_script_resnet(self):
+        def conv1x1(in_planes, out_planes, stride=1):
+            """1x1 convolution"""
+            return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=False)
+
+        def conv3x3(in_planes, out_planes, stride=1):
+            """3x3 convolution with padding"""
+            return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
+                             padding=1, bias=False)
+
+        class BasicBlock(torch.jit.ScriptModule):
+            expansion = 1
+            __constants__ = ['downsample']
+
+            def __init__(self, inplanes, planes, stride=1, downsample=None):
+                super(BasicBlock, self).__init__()
+                self.conv1 = conv3x3(inplanes, planes, stride)
+                self.bn1 = nn.BatchNorm2d(planes)
+                self.relu = nn.ReLU(inplace=True)
+                self.conv2 = conv3x3(planes, planes)
+                self.bn2 = nn.BatchNorm2d(planes)
+                self.downsample = downsample
+                self.stride = stride
+
+            @torch.jit.script_method
+            def forward(self, x):
+                residual = x
+
+                out = self.conv1(x)
+                out = self.bn1(out)
+                out = self.relu(out)
+
+                out = self.conv2(out)
+                out = self.bn2(out)
+
+                if self.downsample is not None:
+                    residual = self.downsample(x)
+
+                out += residual
+                out = self.relu(out)
+
+                return out
+
+        class ResNet(torch.jit.ScriptModule):
+            __constants__ = ['layer1', 'layer2', 'layer3', 'layer4']
+
+            def __init__(self, block, layers, num_classes=1000):
+                super(ResNet, self).__init__()
+                self.inplanes = 64
+                self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3,
+                                       bias=False)
+                self.bn1 = nn.BatchNorm2d(64)
+                self.relu = nn.ReLU(inplace=True)
+                self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+                self.layer1 = self._make_layer(block, 64, layers[0])
+                self.layer2 = self._make_layer(block, 128, layers[1], stride=2)
+                self.layer3 = self._make_layer(block, 256, layers[2], stride=2)
+                self.layer4 = self._make_layer(block, 512, layers[3], stride=2)
+                self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+                self.fc = nn.Linear(512 * block.expansion, num_classes)
+
+                for m in self.modules():
+                    if isinstance(m, nn.Conv2d):
+                        nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                    elif isinstance(m, nn.BatchNorm2d):
+                        nn.init.constant_(m.weight, 1)
+                        nn.init.constant_(m.bias, 0)
+
+            def _make_layer(self, block, planes, blocks, stride=1):
+                downsample = None
+                if stride != 1 or self.inplanes != planes * block.expansion:
+                    downsample = nn.Sequential(
+                        conv1x1(self.inplanes, planes * block.expansion, stride),
+                        nn.BatchNorm2d(planes * block.expansion),
+                    )
+
+                layers = []
+                layers.append(block(self.inplanes, planes, stride, downsample))
+                self.inplanes = planes * block.expansion
+                for _ in range(1, blocks):
+                    layers.append(block(self.inplanes, planes))
+
+                return nn.Sequential(*layers)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.bn1(x)
+                x = self.relu(x)
+                x = self.maxpool(x)
+
+                x = self.layer1(x)
+                x = self.layer2(x)
+                x = self.layer3(x)
+                x = self.layer4(x)
+
+                x = self.avgpool(x)
+                x = x.view(x.size(0), -1)
+                x = self.fc(x)
+
+                return x
+
+        resnet18 = ResNet(BasicBlock, [2, 2, 2, 2])
+
+        resnet18_imported = self.getExportImportCopy(resnet18)
+
+        input = torch.randn(1, 3, 224, 224, requires_grad=True)
+        output_orig = resnet18(input)
+        output_orig.sum().backward()
+        grad_orig = input.grad.clone()
+        input.grad.zero_()
+
+        output_import = resnet18_imported(input)
         output_import.sum().backward()
         grad_import = input.grad.clone()
 
@@ -8402,15 +8513,6 @@ a")
             foo(torch.tensor(1))
 
         @torch.jit.script
-        def foo():
-            a = Exception()
-            raise a
-
-        # a gets DCEd because the expression following raise is ignored
-        with self.assertRaisesRegex(torch.jit.Error, "failed in interpreter"):
-            foo()
-
-        @torch.jit.script
         def foo_except_used():
             a = Exception()
             print(a)
@@ -9716,15 +9818,13 @@ EXCLUDE_PYTHON_PRINT = {
     'test_nn_max_unpool1d',
     'test_nn_max_unpool2d',
     'test_nn_max_unpool3d',
-    'test_nn_max_pool3d',
+    'test_nn_max_pool1d',
     'test_nn_max_pool2d',
-    'test_nn_max_pool3d'
+    'test_nn_max_pool3d',
+    'test_nn_max_pool1d_with_indices',
 }
 
 EXCLUDE_SCRIPT_MODULES = {
-    'test_nn_BatchNorm1d_not_tracking_stats',
-    'test_nn_BatchNorm2d_not_tracking_stats',
-    'test_nn_BatchNorm3d_not_tracking_stats',
     'test_nn_AdaptiveAvgPool2d_tuple_none',
     'test_nn_AdaptiveAvgPool3d_tuple_none',
     'test_nn_AdaptiveMaxPool2d_tuple_none',
@@ -9930,7 +10030,7 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
     self.assertEqual(outputs, outputs_test)
     self.assertEqual(grads, grads_test)
     for g2, g2_test in zip(grads2, grads2_test):
-        if g2 is None and g2_ge is None:
+        if g2 is None and g2_test is None:
             continue
         self.assertTrue(torch.allclose(g2, g2_test, atol=5e-4, rtol=1e-4))
 
@@ -10252,65 +10352,6 @@ EXCLUDE_MODULE_EXPORT_IMPORT = {
     'AdaptiveAvgPool3d',
 }
 
-local_module_tests = []
-
-
-def to_module_test_format(tup):
-    dic = dict(module_name=tup[0], constructor_args=tup[1], input_fn=lambda: tup[2])
-    if len(tup) >= 5:
-        dic['desc'] = tup[4]
-    local_module_tests.append(dic)
-
-
-def add_interpolate_module_tests():
-    # logic from test_interpolate in test_nn.py
-    def _make_input(dim):
-        size = [1, 1]
-        size += [2] * dim
-        return torch.ones(size, requires_grad=True)
-
-    i = 0
-    size = None
-    for scale_factor in [0.5, 1.5, 2.0]:
-        for mode in ['nearest', 'area']:
-            args = (size, scale_factor, mode)
-            for input in [_make_input(1), _make_input(2), _make_input(3)]:
-                to_module_test_format(('Upsample', args, input, False, str(i)))
-                i = i + 1
-
-        for align_corners in [True, False]:
-            args = (size, scale_factor, 'linear', align_corners)
-            to_module_test_format(('Upsample', args, _make_input(1), False, str(i)))
-            i = i + 1
-
-            args = (size, scale_factor, 'bilinear', align_corners)
-            to_module_test_format(('Upsample', args, _make_input(2), False, str(i)))
-            i = i + 1
-
-            args = (size, scale_factor, 'trilinear', align_corners)
-            to_module_test_format(('Upsample', args, _make_input(3), False, str(i)))
-            i = i + 1
-
-    # test_upsamplingTrilinear3d_spatial_invariance
-    scale_factor = 3.
-    args = (size, scale_factor, 'trilinear', False)
-    in_t_9 = torch.zeros(1, 1, 9, 9, 9)
-    in_t_9[:, :, :4, :4, :4].normal_()
-    to_module_test_format(('Upsample', args, in_t_9, False, str(i)))
-    i = i + 1
-
-    # testing where size is not none test_upsamplingNearest2d
-    size = 4
-    scale_factor = None
-    in_t = torch.ones(1, 1, 2, 2)
-
-    args = (size, scale_factor)
-    to_module_test_format(('UpsamplingNearest2d', args, Variable(in_t), False,))
-    to_module_test_format(('UpsamplingBilinear2d', args, Variable(in_t), False,))
-
-
-add_interpolate_module_tests()
-
 # NB: JIT script tests for all nn functional interfaces, script mode does
 # not support in_place operations yet, so no inplace operation tests added.
 # removed all the deprecated functions
@@ -10430,7 +10471,7 @@ nn_functional_tests = [
     ('gumbel_softmax', (S, S), (2., True,), 'hard'),
     ('multilabel_margin_loss', torch.tensor([[0.2, -0.2, 0.07]]), (torch.tensor([[0, 0, 1]]),),),
     ('multi_margin_loss', (S, S), (non_differentiable(torch.randint(S, (S, ), dtype=torch.int64)), \
-                                   1, 1, non_differentiable(torch.randn(S))),),
+                                   1, 1., non_differentiable(torch.randn(S))),),
     ('binary_cross_entropy', torch.randn(3, 2).sigmoid(), (non_differentiable(torch.rand(3, 2)), \
                                                            non_differentiable(torch.randn(3, 2))),),
     ('binary_cross_entropy', torch.randn(3, 2).sigmoid(),
@@ -10621,6 +10662,8 @@ def add_nn_module_test(*args, **kwargs):
     elif 'constructor' in kwargs:
         name = kwargs['constructor'].__name__
 
+    no_grad = False if 'no_grad' not in kwargs else kwargs['no_grad']
+
     module_name = name.split("_")[0]
 
     module = getattr(torch.nn, module_name, None)
@@ -10643,7 +10686,14 @@ def add_nn_module_test(*args, **kwargs):
             nn_module = kwargs['constructor']
         else:
             nn_module = getattr(torch.nn, name)
-        constructor_args = kwargs.get('constructor_args', ())
+
+        if "FunctionalModule" in str(nn_module):
+            return
+
+        if 'constructor_args_fn' in kwargs:
+            constructor_args = kwargs['constructor_args_fn']()
+        else:
+            constructor_args = kwargs.get('constructor_args', ())
 
         # Construct a script module that passes arguments through
         # to self.submodule
@@ -10687,19 +10737,28 @@ def add_nn_module_test(*args, **kwargs):
             module = nn_module(*constructor_args)
             return module(*args)
 
-        # Check against Python module as reference
+        # Set up inputs from tuple of sizes or constructor fn
         if 'input_fn' in kwargs:
             input = kwargs['input_fn']()
         else:
             input = (kwargs['input_size'],)
 
+        # Extra parameters to forward()
         if 'extra_args' in kwargs:
             input = input + kwargs['extra_args']
+
+        if 'target_size' in kwargs:
+            input = input + (kwargs['target_size'],)
+        elif 'target_fn' in kwargs:
+            if torch.is_tensor(input):
+                input = (input,)
+            input = input + (kwargs['target_fn'](),)
 
         args_variable, kwargs_variable = create_input(input)
         f_args_variable = deepcopy(unpack_variables(args_variable))
 
-        check_against_reference(self, create_script_module, create_nn_module, f_args_variable)
+        # Check against Python module as reference
+        check_against_reference(self, create_script_module, create_nn_module, f_args_variable, no_grad=no_grad)
 
     post_add_test(test_name, (), do_test)
 
@@ -10859,13 +10918,18 @@ class TestAsync(JitTestCase):
         self.assertEqual(y2, foo2(x1, x2))
         self.assertEqual(y3, foo3(x1, x2, x3))
 
+
 for test in autograd_method_tests:
     add_autograd_test(*test)
 
 for test in nn_functional_tests:
     add_nn_functional_test(*test)
 
-for test in module_tests + new_module_tests + additional_module_tests + local_module_tests:
+for test in module_tests + new_module_tests + additional_module_tests:
+    add_nn_module_test(**test)
+
+for test in criterion_tests:
+    test['no_grad'] = True
     add_nn_module_test(**test)
 
 if __name__ == '__main__':

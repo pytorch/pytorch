@@ -28,16 +28,13 @@ static c10::optional<std::vector<int64_t>> getMapSize(
 , at::TensorList args
 , at::IntList arg_subset) {
 
-  int64_t dim_after_broadcast = 0;
-  for (const auto arg_idx : arg_subset) {
-    dim_after_broadcast = std::max(dim_after_broadcast, args[arg_idx].dim());
-  }
   // TODO: this keeps reallocating map_size at every iteration, but we know
   // exactly how much storage do we need, so this could be fixed in-place at
   // every step. We're just missing a few functions for ATen, but the fix
   // should be straightforward.
   // Note: left unitialized since empty shape is broadcastable to any shape
   std::vector<int64_t> map_size;
+  map_size.reserve(8);
   for (const auto arg_idx : arg_subset) {
     auto& arg = args.at(arg_idx);
     auto& chunk_desc = spec.inputChunks().at(arg_idx);

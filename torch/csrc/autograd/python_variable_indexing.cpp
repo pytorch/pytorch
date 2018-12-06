@@ -10,7 +10,6 @@
 #include "torch/csrc/utils/python_compat.h"
 #include "torch/csrc/utils/python_numbers.h"
 #include "torch/csrc/utils/tensor_new.h"
-#include "torch/csrc/utils/tensor_conversion_dispatch.h"
 #include "torch/csrc/jit/tracer.h"
 
 #include <ATen/DeviceGuard.h>
@@ -194,12 +193,10 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
 
 static std::vector<Tensor> typeConvertIndices(const Variable& self, const variable_list& indices) {
   std::vector<Tensor> converted_inds(indices.size());
-  c10::Device device = self.device();
   for (size_t i = 0; i < indices.size(); ++i) {
     const auto &ind = indices[i];
     if (ind.defined()) {
-      auto& new_type = ind.type().toBackend(self.type().backend());
-      converted_inds[i] = torch::utils::dispatch_type_conversion(ind, new_type, device, false);
+      converted_inds[i] = ind.to(ind.options().device(self.device()));
     } else {
       converted_inds[i] = indices[i];
     }
@@ -208,15 +205,15 @@ static std::vector<Tensor> typeConvertIndices(const Variable& self, const variab
 }
 
 static Variable dispatch_index(const Variable& self, const variable_list& indices) {
-  std::vector<Tensor> converted_indices = typeConvertIndices(self, indices);
   AutoNoGIL no_gil;
+  std::vector<Tensor> converted_indices = typeConvertIndices(self, indices);
   OptionalDeviceGuard device_guard(device_of(self));
   return self.index(converted_indices);
 }
 
 static Variable dispatch_index_put_(Variable& self, const variable_list& indices, const Variable& value) {
-  std::vector<Tensor> converted_indices = typeConvertIndices(self, indices);
   AutoNoGIL no_gil;
+  std::vector<Tensor> converted_indices = typeConvertIndices(self, indices);
   OptionalDeviceGuard device_guard(device_of(self));
   return self.index_put_(converted_indices, value);
 }
