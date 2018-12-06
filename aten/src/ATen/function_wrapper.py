@@ -550,8 +550,7 @@ def is_mutable_formal_argument(argument, option):
 
 
 def check_methods_do_not_start_with_underscore(name, is_method):
-    if name in {'_local_scalar', '_values', '_indices', '_nnz', '_dimI',
-                '_dimV', '_coalesced_'}:
+    if name in {'_values', '_indices', '_nnz', '_dimI', '_dimV', '_coalesced_'}:
         return
     if is_method and name.startswith('_') and not name.startswith('__') and not name.startswith('_th_'):
         message = "Function '{}' starts with a single underscore and is ".format(name)
@@ -1266,7 +1265,7 @@ def create_derived(backend_type_env, declarations):
         if broadcasts_arg:
             return []
         zero_dim_actuals = [arg['name']
-                            if arg['name'] != zero_dim_dispatch else "at::_local_scalar({})".format(arg['name'])
+                            if arg['name'] != zero_dim_dispatch else "{}.item()".format(arg['name'])
                             for arg in option['formals_list']]
         return [ZERO_DIM_CHECK.substitute(env, check_name=zero_dim_dispatch, zero_dim_actuals=zero_dim_actuals)]
 

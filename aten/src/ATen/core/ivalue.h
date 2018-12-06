@@ -575,6 +575,18 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
 #undef TORCH_FORALL_TAGS
 
+namespace detail {
+
+struct _guarded_unsigned_long_unique_dummy final {
+  _guarded_unsigned_long_unique_dummy(int64_t){};
+};
+using _guarded_unsigned_long = c10::guts::conditional_t<
+    std::is_same<unsigned long, uint32_t>::value ||
+        std::is_same<unsigned long, uint64_t>::value,
+    _guarded_unsigned_long_unique_dummy,
+    unsigned long>;
+
+} // namespace detail
 
 #define DEFINE_TO(type, method_name) \
 template<> \
@@ -587,7 +599,16 @@ inline type IValue::to<type>() const & { \
 }
 DEFINE_TO(at::Tensor, toTensor)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Tuple>, toTuple)
+DEFINE_TO(float, toDouble)
 DEFINE_TO(double, toDouble)
+DEFINE_TO(unsigned char, toInt)
+DEFINE_TO(signed char, toInt)
+DEFINE_TO(unsigned short, toInt)
+DEFINE_TO(short, toInt)
+DEFINE_TO(int, toInt)
+DEFINE_TO(uint32_t, toInt)
+DEFINE_TO(uint64_t, toInt)
+DEFINE_TO(detail::_guarded_unsigned_long, toInt)
 DEFINE_TO(int64_t, toInt)
 DEFINE_TO(bool, toBool)
 DEFINE_TO(c10::intrusive_ptr<ivalue::DoubleList>, toDoubleList)

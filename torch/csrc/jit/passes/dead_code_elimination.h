@@ -13,4 +13,6 @@ namespace torch { namespace jit {
 TORCH_API void EliminateDeadCode(const std::shared_ptr<Graph>& graph);
 TORCH_API void EliminateDeadCode(Block *block, bool recurse=true);
 
+TORCH_API std::unordered_set<Node*> FindDeadNodes(Block *block, bool recurse=true);
+
 }}

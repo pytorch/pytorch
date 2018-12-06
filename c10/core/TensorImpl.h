@@ -198,7 +198,7 @@ struct CAFFE2_API PlacementDeleteContext {
  *    tensor is fully initialized in all fields.  Please do not write new code
  *    that depends on these uninitialized states.
  */
-struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
+struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl() = delete;
 
   /**
@@ -369,7 +369,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         return mystorage.device();
       }
     }
-    const auto device_type = detail::computeDeviceType(tid);
+    const auto device_type = computeDeviceType(tid);
     bool not_cpu = device_type != DeviceType::CPU;
     return Device(device_type, not_cpu ? get_device() : -1);
   }
@@ -512,7 +512,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * It is only valid to call this method on a Variable.
    * See Note [Tensor versus Variable in C++].
    */
-  virtual C10Tensor& grad();
+  virtual at::Tensor& grad();
 
   /**
    * Return the accumulated gradient of a tensor.  This gradient is written
@@ -521,7 +521,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * It is only valid to call this method on a Variable.
    * See Note [Tensor versus Variable in C++].
    */
-  virtual const C10Tensor& grad() const;
+  virtual const at::Tensor& grad() const;
 
   /**
    * Return a typed data pointer to the actual data which this tensor refers to.

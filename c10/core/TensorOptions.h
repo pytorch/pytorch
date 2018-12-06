@@ -1,11 +1,11 @@
 #pragma once
 
+#include <c10/core/DefaultDtype.h>
 #include <c10/core/Backend.h>
-#include <c10/core/DefaultTensorOptions.h>
-#include <c10/Device.h>
 #include <c10/core/Layout.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/ScalarTypeUtils.h>
+#include <c10/Device.h>
 
 #include <c10/util/Optional.h>
 #include <c10/util/C++17.h>
@@ -16,7 +16,6 @@
 #include <utility>
 
 namespace c10 {
-
 /// A class to encapsulate construction axes of an Tensor.  TensorOptions was
 /// designed to support the Python style API for specifying construction options
 /// on factory functions, e.g.,
@@ -98,7 +97,7 @@ namespace c10 {
 /// resolution is done before template resolution, our problem is solved.
 
 
-struct C10_API TensorOptions {
+struct CAFFE2_API TensorOptions {
   TensorOptions()
     : requires_grad_(false)
     , is_variable_(false)
@@ -241,7 +240,7 @@ struct C10_API TensorOptions {
 
   /// Returns the device of the `TensorOptions`.
   Device device() const noexcept {
-    return has_device_ ? device_ : getDefaultTensorOptions().device();
+    return has_device_ ? device_ : Device(kCPU);
   }
 
   /// Returns whether the device is specified.
@@ -262,7 +261,7 @@ struct C10_API TensorOptions {
 
   /// Returns the dtype of the `TensorOptions`.
   caffe2::TypeMeta dtype() const noexcept {
-    return has_dtype_ ? dtype_ : getDefaultTensorOptions().dtype();
+    return has_dtype_ ? dtype_ : get_default_dtype();
   }
 
   /// Returns whether the dtype is specified.
@@ -278,7 +277,7 @@ struct C10_API TensorOptions {
 
   /// Returns the layout of the `TensorOptions`.
   Layout layout() const noexcept {
-    return has_layout_ ? layout_ : getDefaultTensorOptions().layout();
+    return has_layout_ ? layout_ : kStrided;
   }
 
   /// Returns whether the layout is specified.
@@ -294,7 +293,7 @@ struct C10_API TensorOptions {
 
   /// Returns the `requires_grad` property of the `TensorOptions`.
   bool requires_grad() const noexcept {
-    return has_requires_grad_ ? requires_grad_ : getDefaultTensorOptions().requires_grad();
+    return has_requires_grad_ ? requires_grad_ : false;
   }
 
   /// Returns whether the `requires_grad` is specified.
@@ -311,7 +310,7 @@ struct C10_API TensorOptions {
 
   /// Returns the `is_variable` property of the `TensorOptions`.
   bool is_variable() const noexcept {
-    return has_is_variable_ ? is_variable_ : getDefaultTensorOptions().is_variable();
+    return has_is_variable_ ? is_variable_ : false;
   }
 
   /// Returns whether the `is_variable` is specified.
@@ -477,26 +476,6 @@ inline TensorOptions requires_grad(bool requires_grad = true) {
 CAFFE2_API std::ostream& operator<<(
     std::ostream& stream,
     const TensorOptions& options);
-
-
-DefaultTensorOptions& DefaultTensorOptions::merge(const TensorOptions& options) {
-  if (options.dtype_opt().has_value()) {
-    dtype_ = options.dtype();
-  }
-  if (options.device_opt().has_value()) {
-    device_ = options.device();
-  }
-  if (options.layout_opt().has_value()) {
-    layout_ = options.layout();
-  }
-  if (options.requires_grad_opt().has_value()) {
-    requires_grad_ = options.requires_grad();
-  }
-  if (options.is_variable_opt().has_value()) {
-    is_variable_ = options.is_variable();
-  }
-  return *this;
-}
 
 template <typename T>
 inline TensorOptions dtype() {

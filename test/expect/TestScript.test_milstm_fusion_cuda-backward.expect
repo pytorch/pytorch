@@ -20,80 +20,75 @@ graph(%0 : Float(*, *)
       %Wx : Float(*, *)
       %20 : Float(*, *)
       %Uz : Float(*, *)
-      %22 : int[]
+      %22 : Float(*, *)
       %23 : int[]
-      %24 : Float(*, *)
+      %24 : int[]
       %25 : int[]
       %26 : int[]
       %27 : int[]
       %28 : int[]
-      %29 : int[]
-      %30 : int[]
-      %31 : int[]
-      %32 : int[]
-      %33 : int[]
-      %34 : int[]
-      %35 : int[]
-      %36 : int[]
       %ingate : Float(*, *)
       %forgetgate : Float(*, *)
       %cellgate : Float(*, *)
       %outgate : Float(*, *)
-      %41 : int[]
-      %42 : int[]
-      %43 : int[]
-      %44 : int[]
-      %45 : int[]
-      %46 : int[]
-      %47 : Float(*, *)
-      %48 : int[]
-      %49 : int[]) {
-  %50 : int = prim::Constant[value=1]()
-  %51 : Float(*, *) = aten::mul(%0, %47)
-  %52 : Tensor = prim::SumToSize(%51, %48)
-  %53 : Float(*, *) = aten::mul(%0, %outgate)
-  %54 : Tensor = prim::SumToSize(%53, %49)
-  %55 : Tensor = prim::FusionGroup_0(%1, %54, %47)
-  %56 : Tensor = prim::SumToSize(%55, %45)
-  %57 : Tensor = prim::SumToSize(%55, %46)
-  %58 : Tensor = aten::mul(%57, %cellgate)
-  %59 : Tensor = prim::SumToSize(%58, %43)
-  %60 : Tensor = aten::mul(%57, %ingate)
-  %61 : Tensor = prim::SumToSize(%60, %44)
-  %62 : Tensor = aten::mul(%56, %12)
-  %63 : Tensor = prim::SumToSize(%62, %41)
-  %64 : Tensor = prim::FusionGroup_1(%59, %ingate, %63, %forgetgate, %61, %cellgate, %52, %outgate)
-  %65 : Tensor = prim::SumToSize(%64, %35)
-  %66 : Tensor = prim::SumToSize(%64, %36)
-  %67 : Tensor = prim::SumToSize(%65, %33)
-  %68 : Tensor = prim::SumToSize(%65, %34)
-  %69 : Tensor = aten::mul(%68, %Uz)
-  %70 : Tensor = prim::SumToSize(%69, %31)
-  %71 : Tensor = aten::mul(%68, %13)
-  %72 : Tensor = prim::SumToSize(%71, %32)
-  %73 : Tensor = prim::SumToSize(%67, %29)
-  %74 : Tensor = prim::SumToSize(%67, %30)
-  %75 : Tensor = aten::mul(%74, %Wx)
-  %76 : Tensor = prim::SumToSize(%75, %27)
-  %77 : Tensor = aten::mul(%74, %14)
-  %78 : Tensor = prim::SumToSize(%77, %28)
-  %79 : Tensor = aten::mul(%73, %Uz)
-  %80 : Tensor = prim::SumToSize(%79, %25)
-  %81 : Tensor = aten::mul(%73, %24)
-  %82 : Tensor = prim::SumToSize(%81, %26)
-  %83 : Tensor = aten::add(%72, %82, %50)
-  %84 : Tensor = aten::mul(%80, %Wx)
-  %85 : Tensor = prim::SumToSize(%84, %22)
-  %86 : Tensor = aten::mul(%80, %15)
-  %87 : Tensor = prim::SumToSize(%86, %23)
-  %88 : Tensor = aten::add(%78, %87, %50)
-  %89 : Float(*, *) = aten::t(%16)
-  %90 : Float(*, *) = aten::mm(%89, %83)
-  %91 : Float(*, *) = aten::t(%90)
-  %92 : Float(*, *) = aten::t(%17)
-  %93 : Float(*, *) = aten::mm(%92, %88)
-  %94 : Float(*, *) = aten::t(%93)
-  return (%66, %70, %76, %85, %91, %94);
+      %33 : int[]
+      %34 : int[]
+      %35 : Float(*, *)) {
+  %36 : int = prim::Constant[value=1]()
+  %37 : int[] = aten::size(%35)
+  %38 : int[] = aten::size(%outgate)
+  %39 : int[] = aten::size(%cellgate)
+  %40 : int[] = aten::size(%ingate)
+  %41 : int[] = aten::size(%forgetgate)
+  %42 : int[] = aten::size(%13)
+  %43 : int[] = aten::size(%14)
+  %44 : int[] = aten::size(%Uz)
+  %45 : int[] = aten::size(%22)
+  %46 : int[] = aten::size(%Wx)
+  %47 : int[] = aten::size(%15)
+  %48 : Float(*, *) = aten::mul(%0, %35)
+  %49 : Tensor = prim::SumToSize(%48, %38)
+  %50 : Float(*, *) = aten::mul(%0, %outgate)
+  %51 : Tensor = prim::SumToSize(%50, %37)
+  %52 : Tensor = prim::FusionGroup_0(%1, %51, %35)
+  %53 : Tensor = prim::SumToSize(%52, %33)
+  %54 : Tensor = prim::SumToSize(%52, %34)
+  %55 : Tensor = aten::mul(%54, %cellgate)
+  %56 : Tensor = prim::SumToSize(%55, %40)
+  %57 : Tensor = aten::mul(%54, %ingate)
+  %58 : Tensor = prim::SumToSize(%57, %39)
+  %59 : Tensor = aten::mul(%53, %12)
+  %60 : Tensor = prim::SumToSize(%59, %41)
+  %61 : Tensor = prim::FusionGroup_1(%56, %ingate, %60, %forgetgate, %58, %cellgate, %49, %outgate)
+  %62 : Tensor = prim::SumToSize(%61, %28)
+  %63 : Tensor = prim::SumToSize(%61, %26)
+  %64 : Tensor = aten::mul(%63, %Uz)
+  %65 : Tensor = prim::SumToSize(%64, %42)
+  %66 : Tensor = aten::mul(%63, %13)
+  %67 : Tensor = prim::SumToSize(%66, %44)
+  %68 : Tensor = prim::SumToSize(%61, %23)
+  %69 : Tensor = prim::SumToSize(%61, %24)
+  %70 : Tensor = aten::mul(%69, %Wx)
+  %71 : Tensor = prim::SumToSize(%70, %43)
+  %72 : Tensor = aten::mul(%69, %14)
+  %73 : Tensor = prim::SumToSize(%72, %46)
+  %74 : Tensor = aten::mul(%68, %Uz)
+  %75 : Tensor = prim::SumToSize(%74, %45)
+  %76 : Tensor = aten::mul(%68, %22)
+  %77 : Tensor = prim::SumToSize(%76, %44)
+  %78 : Tensor = aten::add(%67, %77, %36)
+  %79 : Tensor = aten::mul(%75, %Wx)
+  %80 : Tensor = prim::SumToSize(%79, %47)
+  %81 : Tensor = aten::mul(%75, %15)
+  %82 : Tensor = prim::SumToSize(%81, %46)
+  %83 : Tensor = aten::add(%73, %82, %36)
+  %84 : Float(*, *) = aten::t(%16)
+  %85 : Float(*, *) = aten::mm(%84, %78)
+  %86 : Float(*, *) = aten::t(%85)
+  %87 : Float(*, *) = aten::t(%17)
+  %88 : Float(*, *) = aten::mm(%87, %83)
+  %89 : Float(*, *) = aten::t(%88)
+  return (%62, %65, %71, %80, %86, %89);
 }
 with prim::FusionGroup_0 = graph(%0 : Float(*, *)
       %1 : Tensor
