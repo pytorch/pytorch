@@ -6,6 +6,7 @@
 #include <THC/THCGeneral.hpp>
 
 #include <c10/cuda/CUDAStream.h>
+#include <ATen/cuda/CUDAContext.h>
 
 #include <THC/THCCachingAllocator.h>
 #include <stdlib.h>
