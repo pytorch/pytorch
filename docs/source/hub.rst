@@ -18,8 +18,9 @@ the following signature.
 
 How to implement an entrypoint?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Here is a real example in pytorch/vision repository, which specifies an entrypoint
-for ``resnet18`` model.
+Here is a code snipet from pytorch/vision repository, which specifies an entrypoint
+for ``resnet18`` model. You can see a full script in
+`pytorch/vision repo <https://github.com/pytorch/vision/blob/master/hubconf.py>`_
 
 ::
 
