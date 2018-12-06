@@ -2329,9 +2329,8 @@
 
 - func: meshgrid(TensorList tensors) -> TensorList
 
-# This has a method dispatch to work around circular include problems
-- func: _local_scalar(Tensor self) -> Scalar
-  variants: function, method
+- func: item(Tensor self) -> Scalar
+  variants: method
 
 # NB: Does NOT check precondition that numel == 1
 # WARNING: Use of cpu_half here is generally not supported; please
