@@ -68,6 +68,14 @@ class ParallelNetExecutorHelper : public ExecutorHelper {
     return net_->Pool(option);
   }
 
+  std::vector<OperatorBase*> GetOperators() const override {
+    return net_->GetOperators();
+  }
+
+  int GetNumWorkers() const override {
+    return net_->num_workers_;
+  }
+
  private:
   ParallelNet* net_;
 };

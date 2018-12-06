@@ -6,7 +6,7 @@
 
 C10_DEFINE_string(
     caffe2_task_graph_engine,
-    "futures",
+    "tbb",
     "Task graph engine type used by net executor");
 
 namespace caffe2 {
