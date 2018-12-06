@@ -4707,13 +4707,13 @@ class TestNN(NNTestCase):
     def test_RNN_cpu_vs_cudnn_no_dropout(self):
         self._test_RNN_cpu_vs_cudnn(0)
 
-    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1") 
     @default_tensor_type(torch.FloatTensor)  # FIXME: just until torch.cuda.DoubleTensor.sum() implemented
     def test_RNN_cpu_vs_cudnn_with_dropout(self):
         # Because of dropout randomness, can only compare dropout=0 and dropout=1
         self._test_RNN_cpu_vs_cudnn(1)
 
-    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1") 
     def test_RNN_dropout(self):
         # checking the assumption that cuDNN sticks dropout in between
         # RNN layers
@@ -4756,7 +4756,7 @@ class TestNN(NNTestCase):
                     self.assertEqual(hy.data[0][0][0], 10)
                     self.assertEqual(hy.data[1][0][0], output_val)
 
-    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1") 
     def test_RNN_dropout_state(self):
         import sys
         if sys.version_info[0] == 2:
@@ -4799,7 +4799,7 @@ class TestNN(NNTestCase):
                         self.assertNotEqual(hy1, hy2)
                         self.assertNotEqual(hy1, hy3)
 
-    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1") 
     def test_RNN_change_dropout(self):
         for train, cuda in product((True, False), repeat=2):
             rnn = nn.RNN(100, 100, 2, dropout=0, nonlinearity='relu')
