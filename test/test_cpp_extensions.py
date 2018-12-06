@@ -365,7 +365,7 @@ class TestCppExtension(common.TestCase):
         self.assertTrue(net.training)
         net.eval()
 
-        input = torch.randn(2, 3, dtype=torch.float32)
+        input = torch.randn(2, 3)
         output = net.forward(input)
         self.assertEqual(output, net.forward(input))
         self.assertEqual(list(output.shape), [2, 5])
@@ -415,6 +415,25 @@ class TestCppExtension(common.TestCase):
         matches = [f for _, _, fs in os.walk(root) for f in fs if f.endswith("so")]
         self.assertEqual(len(matches), 1, str(matches))
         self.assertEqual(matches[0], "no_python_abi_suffix_test.so", str(matches))
+
+    def test_set_default_type_also_changes_aten_default_type(self):
+        module = torch.utils.cpp_extension.load_inline(
+            name="test_set_default_type",
+            cpp_sources="torch::Tensor get() { return torch::empty({}); }",
+            functions="get",
+            verbose=True)
+
+        initial_default = torch.get_default_dtype()
+        try:
+            self.assertEqual(module.get().dtype, initial_default)
+            torch.set_default_dtype(torch.float64)
+            self.assertEqual(module.get().dtype, torch.float64)
+            torch.set_default_dtype(torch.float32)
+            self.assertEqual(module.get().dtype, torch.float32)
+            torch.set_default_dtype(torch.float16)
+            self.assertEqual(module.get().dtype, torch.float16)
+        finally:
+            torch.set_default_dtype(initial_default)
 
 
 if __name__ == '__main__':

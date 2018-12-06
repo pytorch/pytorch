@@ -135,7 +135,10 @@ struct CAFFE2_API Type {
     return backendToDeviceType(backend());
   }
 
-  virtual Tensor copy(const Tensor & src, bool non_blocking=false, c10::optional<Device> to_device={}) const = 0;
+  virtual Tensor copy(
+      const Tensor& src,
+      bool non_blocking = false,
+      c10::optional<Device> to_device = {}) const = 0;
   virtual Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking=false) const = 0;
 
   virtual void backward(
@@ -168,7 +171,7 @@ struct CAFFE2_API Type {
 
   /// Constructs the `TensorOptions` from a type and a Device.  Asserts that
   /// the device type matches the device type of the type.
-  TensorOptions options(optional<Device> device_opt) const {
+  TensorOptions options(c10::optional<Device> device_opt) const {
     if (!device_opt.has_value()) {
       return options(-1);
     } else {
@@ -426,7 +429,7 @@ struct CAFFE2_API Type {
   virtual Tensor to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, const Tensor & other, bool non_blocking, bool copy) const = 0;
-  virtual Scalar _local_scalar(const Tensor & self) const = 0;
+  virtual Scalar item(const Tensor & self) const = 0;
   virtual void* data_ptr(const Tensor & self) const = 0;
   virtual Tensor & set_(Tensor & self, Storage source) const = 0;
   virtual Tensor & set_(Tensor & self, Storage source, int64_t storage_offset, IntList size, IntList stride) const = 0;
