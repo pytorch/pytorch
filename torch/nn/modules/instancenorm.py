@@ -5,7 +5,7 @@ from ..._jit_internal import weak_module, weak_script_method
 
 class _InstanceNorm(_BatchNorm):
     __constants__ = ['running_mean', 'running_var', 'weight', 'bias',
-                     'training', 'track_running_stats', 'momentum', 'eps']
+                     'track_running_stats', 'momentum', 'eps']
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=False,
                  track_running_stats=False):

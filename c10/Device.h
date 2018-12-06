@@ -46,9 +46,9 @@ struct C10_API Device final {
 
   /// Constructs a `Device` from a string description, for convenience.
   /// The string supplied must follow the following schema:
-  /// `(cpu|cuda):[<device-index>]`
-  /// where `cpu:` or `cuda:` specifies the device type, and
-  /// `<device-index>` optionally specifies a device index.
+  /// `(cpu|cuda)[:<device-index>]`
+  /// where `cpu` or `cuda` specifies the device type, and
+  /// `:<device-index>` optionally specifies a device index.
   /* implicit */ Device(const std::string& device_string);
 
   /// Returns true if the type and index of this `Device` matches that of
