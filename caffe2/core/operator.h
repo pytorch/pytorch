@@ -23,6 +23,10 @@
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 
+#include <ATen/core/Tensor.h>
+#include <ATen/core/function_schema.h>
+#include <ATen/core/ivalue.h>
+
 namespace caffe2 {
 
 class CAFFE2_API OperatorBase;
@@ -31,23 +35,50 @@ typedef ObserverBase<OperatorBase> OperatorObserver;
 class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
  public:
   explicit OperatorBase(const OperatorDef& operator_def, Workspace* ws);
+  explicit OperatorBase(
+      const c10::FunctionSchema&,
+      const std::vector<c10::IValue>&,
+      const std::vector<c10::IValue*>&);
+
   virtual ~OperatorBase() noexcept {}
+
+  /** @brief Return true if the operator was instantiated with OperatorDef
+   * New operators should be instantiated with FunctionSchema
+   */
+  bool isLegacyOperator() const {
+    return !fn_schema_;
+  }
+
+  const c10::FunctionSchema& getFunctionSchema() const {
+    CAFFE_ENFORCE(!isLegacyOperator());
+    return *fn_schema_.get();
+  }
 
   /** @brief Checks if the operator has an argument of the given name.
    */
   inline bool HasArgument(const string& name) const {
-    CAFFE_ENFORCE(operator_def_, "operator_def was null!");
-    return ArgumentHelper::HasArgument(*operator_def_, name);
+    if (isLegacyOperator()) {
+      CAFFE_ENFORCE(operator_def_, "operator_def was null!");
+      return ArgumentHelper::HasArgument(*operator_def_, name);
+    }
+    return getFunctionSchema().argumentIndexWithName(name).has_value();
   }
 
   // Functions that deal with arguments. Basically, this allows us to map an
   // argument name to a specific type of argument that we are trying to access.
   template <typename T>
   inline T GetSingleArgument(const string& name, const T& default_value) const {
-    CAFFE_ENFORCE(operator_def_, "operator_def was null!");
-    return ArgumentHelper::GetSingleArgument<OperatorDef, T>(
-        *operator_def_, name, default_value);
+    if (isLegacyOperator()) {
+      CAFFE_ENFORCE(operator_def_, "operator_def was null!");
+      return ArgumentHelper::GetSingleArgument<OperatorDef, T>(
+          *operator_def_, name, default_value);
+    }
+    auto index = getFunctionSchema().argumentIndexWithName(name);
+    CAFFE_ENFORCE(index.has_value(), "Couldn't get index for argument!", name);
+    const auto& value = ivalue_inputs_[index.value()];
+    return value.template to<T>();
   }
+
   template <typename T>
   inline bool HasSingleArgumentOfType(const string& name) const {
     CAFFE_ENFORCE(operator_def_, "operator_def was null!");
@@ -120,11 +151,26 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   // TODO(jerryzh): Remove this template
   template <typename T>
   inline T* Output(int idx, DeviceType type) {
-    static_assert(
-        std::is_same<T, Tensor>::value,
-        "Output(int, DeviceType) is only available for Tensor");
-    // When you get a Tensor here it is not fully initialized
-    return BlobGetMutableTensor(outputs_.at(idx), type);
+    if (isLegacyOperator()) {
+      static_assert(
+          std::is_same<T, Tensor>::value,
+          "Output(int, DeviceType) is only available for Tensor");
+      // When you get a Tensor here it is not fully initialized
+      return BlobGetMutableTensor(outputs_.at(idx), type);
+    }
+    auto* ival = ivalue_outputs_[idx];
+    CAFFE_ENFORCE(
+        ival->isTensor(),
+        "Output(int, DeviceType) is only available for IValues that store Tensors");
+    Tensor tensor = caffe2::Tensor(ival->toTensor());
+    if (tensor.GetDeviceType() != type) {
+      // Fix tensor type
+      tensor = Tensor(type);
+      auto at_tensor = at::Tensor(std::move(tensor.getIntrusivePtr()));
+      *ival = IValue(at_tensor);
+    }
+    output_tensors_[idx] = caffe2::Tensor(ival->toTensor());
+    return &output_tensors_[idx];
   }
 
   inline Tensor
@@ -137,10 +183,23 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
 
   inline Tensor*
   OutputTensor(int idx, at::IntList dims, at::TensorOptions options) {
-    CAFFE_ENFORCE_WITH_CALLER(
-        options.device_opt() != c10::nullopt,
-        "device must be provided in option.");
-    return BlobGetMutableTensor(outputs_.at(idx), dims, options);
+    if (isLegacyOperator()) {
+      CAFFE_ENFORCE_WITH_CALLER(
+          options.device_opt() != c10::nullopt,
+          "device must be provided in option.");
+      return BlobGetMutableTensor(outputs_.at(idx), dims, options);
+    }
+    auto* ival = ivalue_outputs_[idx];
+    CAFFE_ENFORCE(
+        ival->isTensor(),
+        "Output(int, DeviceType) is only available for IValues that store Tensors");
+    Tensor tensor = caffe2::Tensor(ival->toTensor());
+    tensor = GetSizedTensorWithOptions(tensor, dims, options);
+    auto at_tensor = at::Tensor(std::move(tensor.getIntrusivePtr()));
+    *ival = IValue(at_tensor);
+
+    output_tensors_[idx] = caffe2::Tensor(ival->toTensor());
+    return &output_tensors_[idx];
   }
 
   // Get output Tensor of the operator and CopyFrom the given Tensor
@@ -414,6 +473,15 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   std::string type_;
   vector<const Blob*> inputs_;
   vector<Blob*> outputs_;
+  // Preferrably use c10::optional, but nvcc doesn't work
+  std::unique_ptr<const c10::FunctionSchema> fn_schema_ = nullptr;
+  vector<c10::IValue> ivalue_inputs_;
+  vector<c10::IValue*> ivalue_outputs_;
+  // HACK
+  // We preserve the fact that Output() returns Tensor*
+  // by storing Tensor in a vector owned by the
+  // operator.
+  vector<caffe2::Tensor> output_tensors_;
 
   int net_position_{kNoNetPositionSet};
 
@@ -449,6 +517,19 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
 
   C10_DISABLE_COPY_AND_ASSIGN(OperatorBase);
 };
+
+template <>
+inline NetDef OperatorBase::GetSingleArgument<NetDef>(
+    const std::string& name,
+    const NetDef& default_value) const {
+  if (isLegacyOperator()) {
+    CAFFE_ENFORCE(operator_def_, "operator_def was null!");
+    return ArgumentHelper::GetSingleArgument<OperatorDef, NetDef>(
+        *operator_def_, name, default_value);
+  }
+  CAFFE_THROW("Cannot get NetDefs from IValue");
+  return NetDef();
+}
 
 // If your operator does not need any specialized contructor or destructor,
 // you can simply use this to save two lines of code.
@@ -491,6 +572,15 @@ class Operator : public OperatorBase {
  public:
   explicit Operator(const OperatorDef& operator_def, Workspace* ws)
       : OperatorBase(operator_def, ws), context_(operator_def.device_option()) {
+    // In the constructor, we switch to the device so that the child class
+    // constructors will run on that device.
+    context_.SwitchToDevice(0);
+  }
+  explicit Operator(
+      const c10::FunctionSchema& fn_schema,
+      const std::vector<c10::IValue>& inputs,
+      const std::vector<c10::IValue*>& outputs)
+      : OperatorBase(fn_schema, inputs, outputs) {
     // In the constructor, we switch to the device so that the child class
     // constructors will run on that device.
     context_.SwitchToDevice(0);
@@ -964,6 +1054,34 @@ C10_DECLARE_REGISTRY(
 #define REGISTER_MIOPEN_OPERATOR(name, ...) \
   REGISTER_HIP_OPERATOR_WITH_ENGINE(name, MIOPEN, __VA_ARGS__) \
   REGISTER_HIP_OPERATOR_WITH_ENGINE(name, CUDNN, __VA_ARGS__) // Make CUDNN an alias of MIOPEN for HIP ops
+
+C10_DECLARE_REGISTRY(
+    FunctionSchemaOperatorRegistry,
+    OperatorBase,
+    const c10::FunctionSchema,
+    const std::vector<c10::IValue>&,
+    const std::vector<c10::IValue*>&);
+
+struct FunctionSchemaStorageBase {
+  FunctionSchemaStorageBase() {}
+  virtual c10::FunctionSchema getSchema() = 0;
+  virtual ~FunctionSchemaStorageBase() {}
+};
+
+C10_DECLARE_REGISTRY(FunctionSchemaRegistry, FunctionSchemaStorageBase);
+
+#define REGISTER_FUNCTION_SCHEMA_OPERATOR(name, inputs, outputs, impl)        \
+  C10_REGISTER_CLASS(FunctionSchemaOperatorRegistry, name, impl)              \
+  struct FunctionSchemaStorageBase##name : public FunctionSchemaStorageBase { \
+    c10::FunctionSchema getSchema() override {                                \
+      return c10::FunctionSchema(#name, inputs, outputs);                     \
+    }                                                                         \
+  };                                                                          \
+  C10_REGISTER_CLASS(                                                         \
+      FunctionSchemaRegistry, name, FunctionSchemaStorageBase##name)
+
+#define GET_FUNCTION_SCHEMA(name) \
+  FunctionSchemaRegistry()->Create(name)->getSchema()
 
 // StaticLinkingProtector is a helper class that ensures that the Caffe2
 // library is linked correctly with whole archives (in the case of static
