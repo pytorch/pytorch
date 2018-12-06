@@ -28,16 +28,6 @@ def div(a : ${Scalar}, b : Tensor) -> Tensor:
   return torch.reciprocal(b) * a
 )SCRIPT");
 
-auto python_builtins_source = R"SCRIPT(
-def warn(string: str):
-  print(string)
-)SCRIPT";
-
-auto python_builtins_source_overloads = R"SCRIPT(
-def warn(string: str, stacklevel: int):
-  print(string)
-)SCRIPT";
-
 auto _ntuple_ops = CodeTemplate(
 R"SCRIPT(
 def _${name}(x: BroadcastingList${Length}[${Scalar}]) -> List[${Scalar}]:
@@ -84,8 +74,6 @@ private:
       env.s("Scalar", scalar);
       loadSource(scalar_operators_source.format(env));
     }
-    loadSource(python_builtins_source);
-    loadSource(python_builtins_source_overloads);
 
     using str_pair = std::pair<std::string, std::string>;
     const std::vector<str_pair> name_len = {

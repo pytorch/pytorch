@@ -148,8 +148,7 @@ if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
   CMAKE_ARGS+=("-USE_LMDB=ON")
 
   ########## HIPIFY Caffe2 operators
-  ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_pytorch_amd.py"
-  ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_caffe2_amd.py"
+  ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_amd.py"
 fi
 
 # building bundled nccl in this config triggers a bug in nvlink. For
