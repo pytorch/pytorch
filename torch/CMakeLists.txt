@@ -332,7 +332,6 @@ if(OPENMP_FOUND)
     message(STATUS "Compiling with OpenMP")
   endif()
   target_compile_options(torch INTERFACE ${OpenMP_CXX_FLAGS})
-  target_link_libraries(torch -fopenmp)
   #cmake only check for separate OpenMP library on AppleClang 7+
   #https://github.com/Kitware/CMake/blob/42212f7539040139ecec092547b7d58ef12a4d72/Modules/FindOpenMP.cmake#L252
   if (CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
@@ -340,6 +339,8 @@ if(OPENMP_FOUND)
         CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "7.0")
       target_link_libraries(torch ${OpenMP_libomp_LIBRARY})
     endif()
+  else()
+    target_link_libraries(torch -fopenmp)
   endif()
 endif()
 
