@@ -165,10 +165,12 @@ def checkpoint_sequential(functions, segments, *inputs):
 
     def run_function(start, end, functions):
         def forward(*inputs):
-            input = inputs[0]
             for j in range(start, end + 1):
-                input = functions[j](input)
-            return input
+                if isinstance(inputs, tuple):
+                    inputs = functions[j](*inputs)
+                else:
+                    inputs = functions[j](inputs)
+            return inputs
         return forward
 
     if isinstance(functions, torch.nn.Sequential):

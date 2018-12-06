@@ -13,6 +13,11 @@
 
 namespace c10 {
 
+const std::string& domain_prefix() {
+  static const std::string _domain_prefix = "org.pytorch.";
+  return _domain_prefix;
+}
+
 Symbol InternedStrings::symbol(const std::string& s) {
   std::lock_guard<std::mutex> guard(mutex_);
   return _symbol(s);
@@ -103,17 +108,17 @@ Symbol Symbol::ns() const {
 }
 
 std::string Symbol::domainString() const {
-  return domain_prefix + ns().toUnqualString();
+  return domain_prefix() + ns().toUnqualString();
 }
 
 Symbol Symbol::fromDomainAndUnqualString(const std::string & d, const std::string & s) {
-  if (d.compare(0, domain_prefix.size(), domain_prefix) != 0) {
+  if (d.compare(0, domain_prefix().size(), domain_prefix()) != 0) {
     std::ostringstream ss;
     ss << "Symbol: domain string is expected to be prefixed with '"
-       << domain_prefix << "', e.g. 'org.pytorch.aten'";
+       << domain_prefix() << "', e.g. 'org.pytorch.aten'";
     throw std::runtime_error(ss.str());
   }
-  std::string qualString = d.substr(domain_prefix.size()) + "::" + s;
+  std::string qualString = d.substr(domain_prefix().size()) + "::" + s;
   return fromQualString(qualString);
 }
 

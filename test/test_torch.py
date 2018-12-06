@@ -1722,6 +1722,12 @@ class _TestTorchMixin(object):
         torch.clamp(m1, max=max_val, out=out)
         self.assertEqual(out, res1)
 
+        error_msg = 'At least one of \'min\' or \'max\' must not be None'
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            m1.clamp()
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            m1.clamp_()
+
     def test_pow(self):
         # [res] torch.pow([res,] x)
 
@@ -2197,8 +2203,8 @@ class _TestTorchMixin(object):
         self.assertRaises(RuntimeError, lambda: torch.device('cuda', -1))
         self.assertRaises(RuntimeError, lambda: torch.device(-1))
 
-        self.assertRaises(TypeError, lambda: torch.device('other'))
-        self.assertRaises(TypeError, lambda: torch.device('other:0'))
+        self.assertRaises(RuntimeError, lambda: torch.device('other'))
+        self.assertRaises(RuntimeError, lambda: torch.device('other:0'))
 
         device_set = {'cpu', 'cpu:0', 'cuda', 'cuda:0', 'cuda:1', 'cuda:10', 'cuda:100'}
         device_hash_set = set()
@@ -9093,7 +9099,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertRaises(RuntimeError, lambda: torch.randn(2, 3, 4).t())
         self.assertRaises(RuntimeError, lambda: torch.randn(2, 3, 4).t_())
 
-    # unit test for THTensor_(copyTranspose)
+    # unit test for special case transposed copy (see ATen/native/Copy.cpp for details)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_big_transpose(self):
         t = torch.rand(456, 789)

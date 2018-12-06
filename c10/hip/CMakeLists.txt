@@ -28,8 +28,8 @@ set_source_files_properties(${__c10_hip_srcs_cpp} PROPERTIES HIP_SOURCE_PROPERTY
 file(GLOB_RECURSE C10_HIP_HEADERS *.h)
 hip_add_library(c10_hip ${C10_HIP_SRCS} ${C10_HIP_HEADERS})
 
-# Propagate HIP_HCC_FLAGS that were set from Dependencies.cmake
-target_compile_options(c10_hip PRIVATE ${HIP_HCC_FLAGS})
+# Propagate HIP_CXX_FLAGS that were set from Dependencies.cmake
+target_compile_options(c10_hip PRIVATE ${HIP_CXX_FLAGS})
 
 # caffe2_hip adds a bunch of dependencies like rocsparse, but c10/hip is supposed to be
 # minimal.  I'm not sure if we need hip_hcc or not; for now leave it out

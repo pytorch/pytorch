@@ -160,7 +160,7 @@ class SafeDequeueBlobsOp final : public Operator<Context> {
               size,
               " total columns");
 
-          out->Extend(in.sizes()[0], kTensorGrowthPct, &context_);
+          out->Extend(in.sizes()[0], kTensorGrowthPct);
           auto* dst =
               (char*)out->raw_mutable_data() + oldSize * in.dtype().itemsize();
           context_.template CopyItems<Context, Context>(

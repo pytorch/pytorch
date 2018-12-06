@@ -23,7 +23,7 @@ class MeanOp final : public Operator<Context> {
     auto* output = Output(0);
 
     output->ResizeLike(input0);
-    output->CopyFrom(input0, &context_);
+    output->CopyFrom(input0, true /*async*/);
 
     if (InputSize() == 1) {
       return true;
@@ -102,7 +102,7 @@ class MeanGradientOp : public Operator<Context> {
     for (int i = 1; i < num_inputs; i++) {
       auto* cur_dX = Output(i);
       cur_dX->ResizeLike(dY);
-      cur_dX->CopyFrom(*dX0, &context_);
+      cur_dX->CopyFrom(*dX0, true /*async*/);
     }
 
     return true;

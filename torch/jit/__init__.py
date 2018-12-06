@@ -1,17 +1,20 @@
 import torch._C
 from torch import Tensor
 from torch.autograd import Variable, function
+from torch.serialization import validate_cuda_device
 from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
 from torch.jit.frontend import get_jit_ast, get_default_args
 import torch.backends.cudnn as cudnn
 import torch.jit.annotations
-from torch._six import raise_from, with_metaclass, get_function_from_type
+from torch._six import raise_from, with_metaclass, get_function_from_type, \
+    string_classes
 from .._jit_internal import createResolutionCallback, _compiled_weak_fns, \
     _weak_script_methods, _weak_modules, _weak_types, COMPILED, \
     COMPILATION_PENDING, _boolean_dispatched
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
 import torch.testing
+import math
 from collections import defaultdict, OrderedDict, namedtuple
 import sys
 import warnings
@@ -70,17 +73,23 @@ def scope(scope_name):
             tracing_state.pop_scope()
 
 
-def load(f):
+def load(f, map_location=None):
     r"""
         Load a ``ScriptModule`` previously saved with :func:`save <torch.jit.save>`
 
-        .. DANGER::
-           All previously saved modules, no matter their device, are always loaded onto the CPU.
-           This is different from :func:`torch.load`'s semantics and may change in the future.
+        All previously saved modules, no matter their device, are first loaded onto CPU,
+        and then are moved to the devices they were saved from. If this fails (e.g. because
+        the run time system doesn't have certain devices), an exception is raised.
+        However, storages can be dynamically remapped to an alternative set of devices
+        using the `map_location` argument. Comparing to :func:`torch.load`, `map_location`
+        in this function is simplified, which only accepts a string (e.g., 'cpu', 'cuda:0'),
+        or torch.device (e.g., torch.device('cpu'))
 
         Arguments:
             f: a file-like object (has to implement read, readline, tell, and seek),
                 or a string containing a file name
+            map_location: can a string (e.g., 'cpu', 'cuda:0'), a device (e.g.,
+                torch.device('cpu'))
 
         Returns:
             A ``ScriptModule`` object.
@@ -90,7 +99,12 @@ def load(f):
             # Load ScriptModule from io.BytesIO object
             >>> with open('scriptmodule.pt', 'rb') as f:
                     buffer = io.BytesIO(f.read())
+            # Load all tensors to the original device
             >>> torch.jit.load(buffer)
+            # Load all tensors onto CPU, using a device
+            >>> torch.jit.load(buffer, map_location=torch.device('cpu'))
+            # Load all tensors onto CPU, using a string
+            >>> torch.jit.load(buffer, map_location='cpu')
     """
     m = ScriptModule()
 
@@ -102,12 +116,21 @@ def load(f):
             curr = getattr(curr, name)
         return curr
 
+    if isinstance(map_location, string_classes):
+        map_location = torch.device(map_location)
+    elif not (map_location is None or
+              isinstance(map_location, torch.device)):
+        raise ValueError("map_location should be either None, string or torch.device, "
+                         "but got type: " + str(type(map_location)))
+    if (str(map_location).startswith('cuda')):
+        validate_cuda_device(map_location)
+
     if isinstance(f, str) or \
             (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
             (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
-        torch._C.import_ir_module(module_lookup, f)
+        torch._C.import_ir_module(module_lookup, f, map_location)
     else:
-        torch._C.import_ir_module_from_buffer(module_lookup, f.read())
+        torch._C.import_ir_module_from_buffer(module_lookup, f.read(), map_location)
     return m
 
 
@@ -639,6 +662,8 @@ class CompilationUnit(object):
 
 
 def _try_get_dispatched_fn(fn):
+    if not callable(fn):
+        return None
     return _boolean_dispatched.get(fn)
 
 
@@ -862,7 +887,7 @@ class OrderedBufferDict(OrderedDictWrapper):
 # in addition, tuples and lists of these base types are also considered constants
 # If you edit this list, then you also need to edit the handlers in
 # ConstantValue in jit/script/init.cpp
-_constant_types = (bool, float, int, types.FunctionType, torch.device, torch.layout, torch.dtype)
+_constant_types = (bool, float, int, str, type(None), types.FunctionType, torch.device, torch.layout, torch.dtype)
 
 
 def _get_valid_constant(attr, v):
@@ -1080,7 +1105,13 @@ if _enabled:
                 if isinstance(value, Module) and _is_weak_type(type(value)):
                     # Compile weak script module
                     value = _make_strong(value)
+                if attr == 'training':
+                    if self._has_buffer('training'):
+                        self.__dict__['training'] = value
+                        self._get_parameter('training').fill_(int(value))
+                        return
                 return super(ScriptModule, self).__setattr__(attr, value)
+
             if hasattr(self, attr):
                 raise RuntimeError("attempting to re-assign constant '{}'".format(attr))
             if isinstance(value, ModuleList):
@@ -1116,17 +1147,25 @@ if _enabled:
             self.__dict__['_initialized'] = False
             super(WeakScriptModuleProxy, self).__init__()
 
-            # Copy constants
             self.__dict__["_original"] = weakref.ref(original)
-            self.__dict__["_constants_set"] = set(getattr(original, "__constants__", []))
 
             # Copy Parameters / Modules / Buffers
             for name in dir(original):
                 item = getattr(original, name)
-                if isinstance(item, Parameter) or (isinstance(item, Module) and item is not self):
+                if item is None and name in original._parameters:
+                    # XXX: treat None value simply as module attributes instead of adding them to the parameter list
+                    # TODO: need to handle this more generally when non-tensor attributes added to module
+                    object.__setattr__(self, name, item)
+                elif isinstance(item, Parameter) or (isinstance(item, Module) and item is not self):
                     ScriptModule.__setattr__(self, name, item)
             for name in original._buffers:
-                self.register_buffer(name, original._buffers[name])
+                if original._buffers[name] is None:
+                    object.__setattr__(self, name, None)
+                else:
+                    self.register_buffer(name, original._buffers[name])
+
+            # Copy constants
+            self.__dict__["_constants_set"] = set(getattr(original, "__constants__", []))
 
             self.__dict__["_initialized"] = True
             _create_methods_from_stubs(self, stubs)
@@ -1386,6 +1425,14 @@ def _get_builtin_table():
     _builtin_table[id(_list_with_default)] = "aten::list_with_default"
     _builtin_table[id(_unwrap_optional)] = "aten::_unwrap_optional"
     _builtin_table[id(cudnn.is_acceptable)] = "aten::cudnn_is_acceptable"
+    _builtin_table[id(torch._C._infer_size)] = "aten::_infer_size"
+    _builtin_table[id(torch.nn.functional._no_grad_embedding_renorm_)] = "aten::_no_grad_embedding_renorm_"
+
+    _builtin_table[id(math.floor)] = "aten::floor"
+    _builtin_table[id(torch.nn.functional.interpolate)] = "aten::__interpolate"
+    _builtin_table[id(torch.nn.functional.upsample_nearest)] = "aten::__upsample_nearest"
+    _builtin_table[id(torch.nn.functional.upsample)] = "aten::__upsample"
+    _builtin_table[id(torch.nn.functional.upsample_bilinear)] = "aten::__upsample_bilinear"
 
     return _builtin_table
 

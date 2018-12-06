@@ -15,7 +15,9 @@ namespace impl {
 struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   static constexpr DeviceType static_type = DeviceType::CUDA;
   CUDAGuardImpl() {}
-  CUDAGuardImpl(DeviceType) {}
+  CUDAGuardImpl(DeviceType t) {
+    AT_ASSERT(t == DeviceType::CUDA);
+  }
   DeviceType type() const override {
     return DeviceType::CUDA;
   }
@@ -45,7 +47,6 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   // NB: These do NOT set the current device
   Stream exchangeStream(Stream s) const noexcept override {
     CUDAStream cs(s);
-    // TODO: Don't go through internals if not necessary
     auto old_stream = at::cuda::getCurrentCUDAStream(s.device().index());
     at::cuda::setCurrentCUDAStream(cs);
     return old_stream.unwrap();

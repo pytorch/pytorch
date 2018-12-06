@@ -1,16 +1,17 @@
 #pragma once
 
 #include <c10/Device.h>
-#include "ATen/core/Layout.h"
+#include <c10/core/Layout.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
 #include "ATen/core/SparseTensorRef.h"
-#include "c10/core/Storage.h"
+#include <c10/core/Storage.h>
 #include "ATen/core/TensorAccessor.h"
 #include "ATen/core/TensorImpl.h"
 #include "ATen/core/UndefinedTensorImpl.h"
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
+#include <ATen/core/LegacyTypeDispatch.h>
 
 namespace at {
 struct Generator;
@@ -143,7 +144,7 @@ public:
     return impl_->is_contiguous();
   }
   Type & type() const {
-    return impl_->type();
+    return legacyTensorType(*impl_);
   }
   TensorTypeId type_id() const {
     return impl_->type_id();
@@ -153,6 +154,9 @@ public:
   }
   const Storage& storage() const {
     return impl_->storage();
+  }
+  bool is_alias_of(const at::Tensor& other) const{
+    return impl_->storage().is_alias_of(other.storage());
   }
   Tensor toType(const Type & t, bool non_blocking=false) const;
   Tensor & copy_(const Tensor & src, bool non_blocking=false);
@@ -269,7 +273,6 @@ public:
 
   //example
   //Tensor * add(Tensor & b);
-  Tensor & _th_triu_(int64_t diagonal=0);
   Tensor abs() const;
   Tensor & abs_();
   Tensor acos() const;
@@ -512,7 +515,7 @@ public:
   Tensor to(Device device, ScalarType dtype, bool non_blocking=false, bool copy=false) const;
   Tensor to(ScalarType dtype, bool non_blocking=false, bool copy=false) const;
   Tensor to(const Tensor & other, bool non_blocking=false, bool copy=false) const;
-  Scalar _local_scalar() const;
+  Scalar item() const;
   void* data_ptr() const;
   Tensor & set_(Storage source);
   Tensor & set_(Storage source, int64_t storage_offset, IntList size, IntList stride={});

@@ -47,6 +47,11 @@ cmake --version
 pip install -q -r requirements.txt || true
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  # When hcc runs out of memory, it silently exits without stopping
+  # the build process, leaving undefined symbols in the shared lib
+  # which will cause undefined symbol errors when later running
+  # tests. Setting MAX_JOBS to smaller number to make CI less flaky.
+  export MAX_JOBS=4
 
   # ROCm CI is using Caffe2 docker images, which needs these wrapper
   # scripts to correctly use sccache.
@@ -74,8 +79,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     export PATH="$CACHE_WRAPPER_DIR:$PATH"
   fi
 
-  python tools/amd_build/build_pytorch_amd.py
-  python tools/amd_build/build_caffe2_amd.py
+  python tools/amd_build/build_amd.py
   # OPENCV is needed to enable ImageInput operator in caffe2 resnet5_trainer
   # LMDB is needed to read datasets from https://download.caffe2.ai/databases/resnet_trainer.zip
   USE_ROCM=1 USE_LMDB=1 USE_OPENCV=1 python setup.py install --user

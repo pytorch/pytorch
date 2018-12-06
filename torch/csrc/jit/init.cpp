@@ -29,6 +29,7 @@
 #include "torch/csrc/jit/passes/to_batch.h"
 #include "torch/csrc/jit/passes/lower_tuples.h"
 #include "torch/csrc/jit/passes/specialize_undef.h"
+#include "torch/csrc/jit/passes/utils/check_alias_annotation.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/script/init.h"
 #include "torch/csrc/jit/script/python_tree_views.h"
@@ -37,6 +38,7 @@
 #include "torch/csrc/jit/function_schema.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/fuser/interface.h"
+#include "torch/csrc/jit/script/jit_exception.h"
 #include "torch/csrc/jit/script/jit_exception.h"
 
 #include "caffe2/serialize/inline_container.h"
@@ -96,7 +98,7 @@ void initJITBindings(PyObject *module) {
    .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
    .def("_jit_pass_fuse", FuseGraph)
    .def("_jit_pass_dce", [](std::shared_ptr<Graph>& g) {
-     return EliminateDeadCode(g); // overload resolution
+     return EliminateDeadCode(g->block()); // overload resolution
    })
    .def("_jit_pass_cse", [](std::shared_ptr<Graph>& g) {
      return EliminateCommonSubexpression(g); // overload resolution
@@ -161,6 +163,13 @@ void initJITBindings(PyObject *module) {
        // jit::differentiate mutates the input Graph
        auto g_clone = g.copy();
        return differentiate(g_clone);
+   })
+   .def("_jit_check_alias_annotation", [](
+         std::shared_ptr<Graph> g,
+         py::tuple args,
+         const std::string& unqualified_op_name) {
+       auto stack = toStack(args);
+       checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
    });
 
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")
@@ -260,31 +269,26 @@ void initJITBindings(PyObject *module) {
         return createPyObjectForStack(std::move(stack));
       });
 
-  py::class_<PyTorchFileWriter>(m, "PyTorchFileWriter")
+  py::class_<PyTorchStreamWriter>(m, "PyTorchFileWriter")
       .def(py::init<std::string>())
       .def(
           "write_record",
-          [](PyTorchFileWriter& self, const char* data, size_t size) {
-            return self.writeRecord(data, size);
+          [](PyTorchStreamWriter& self, const std::string& name, const char* data, size_t size) {
+            return self.writeRecord(name, data, size);
           })
-      .def("write_end_of_file", &PyTorchFileWriter::writeEndOfFile);
+      .def("write_end_of_file", &PyTorchStreamWriter::writeEndOfFile);
 
-  py::class_<PyTorchFileReader>(m, "PyTorchFileReader")
+  py::class_<PyTorchStreamReader>(m, "PyTorchFileReader")
       .def(py::init<std::string>())
       .def(
-          "get_record_with_key",
-          [](PyTorchFileReader& self, uint64_t key) {
+          "get_record",
+          [](PyTorchStreamReader& self, const std::string& key) {
             at::DataPtr data;
             size_t size;
-            std::tie(data, size) = self.getRecordWithKey(key);
+            std::tie(data, size) = self.getRecord(key);
             return py::bytes(reinterpret_cast<const char*>(data.get()), size);
-          })
-      .def("get_last_record", [](PyTorchFileReader& self) {
-        at::DataPtr data;
-        size_t size;
-        std::tie(data, size) = self.getLastRecord();
-        return py::bytes(reinterpret_cast<const char*>(data.get()), size);
-      });
+          });
+
 
   m.def("_jit_get_operation", [](const std::string& qualified_name) {
     try {

@@ -7,6 +7,11 @@
 #include <sstream>
 #include <tuple>
 
+namespace c10 {
+std::ostream& operator<<(std::ostream & out, Backend b) {
+  return out << toString(b);
+}
+}
 namespace at {
 
 //not all C++ compilers have default float so we define our own here
@@ -27,10 +32,6 @@ private:
   std::ostream & out;
   std::ios saved;
 };
-
-std::ostream& operator<<(std::ostream & out, Backend b) {
-  return out << toString(b);
-}
 
 std::ostream& operator<<(std::ostream & out, const Type& t) {
   return out << t.toString();
