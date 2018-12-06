@@ -1100,7 +1100,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
         # Sleep on one of the processes to trigger barrier timeout
         if self.rank == 0:
-            time.sleep(0.6)
+            time.sleep(1.0)
 
         # The barrier will now time out
         with self.assertRaisesRegex(RuntimeError, " (Timed out|closed) "):
