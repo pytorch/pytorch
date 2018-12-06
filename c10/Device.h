@@ -34,14 +34,7 @@ struct C10_API Device final {
   /// index.
   /* implicit */ Device(DeviceType type, DeviceIndex index = -1)
       : type_(type), index_(index) {
-    AT_CHECK(
-        index == -1 || index >= 0,
-        "Device index must be -1 or non-negative, got ",
-        index);
-    AT_CHECK(
-        !is_cpu() || index <= 0,
-        "CPU device index must be -1 or zero, got ",
-        index);
+    validate();
   }
 
   /// Constructs a `Device` from a string description, for convenience.
@@ -96,6 +89,7 @@ struct C10_API Device final {
  private:
   DeviceType type_;
   DeviceIndex index_ = -1;
+  void validate();
 };
 
 C10_API std::ostream& operator<<(
