@@ -140,14 +140,13 @@ namespace {
     {
       output.resize_({sizeB, sizeD, osizeH, osizeW});
 
-      AT_DISPATCH_FLOATING_TYPES(input.type(), "adaptive_avg_pool2d", [&] {
-          auto input_data = input.data<scalar_t>();
-          auto output_data = output.data<scalar_t>();
-
-          int64_t b;
-        #pragma omp parallel for private(b)
-          for (b = 0; b < sizeB; b++)
-          {
+      int64_t b;
+    #pragma omp parallel for private(b)
+      for (b = 0; b < sizeB; b++)
+      {
+        AT_DISPATCH_FLOATING_TYPES(input.type(), "adaptive_avg_pool2d", [&] {
+            auto input_data = input.data<scalar_t>();
+            auto output_data = output.data<scalar_t>();
             __AdaptiveAveragePooling2d_forward_out_frame<scalar_t>(input_data+b*istrideB, output_data+b*sizeD*osizeH*osizeW,
                                                             sizeD,
                                                             isizeH, isizeW,
@@ -155,8 +154,8 @@ namespace {
                                                             istrideD,
                                                             istrideH, istrideW);
           }
-        }
-      );
+        );
+      }
     }
   }
 
@@ -259,23 +258,24 @@ namespace {
     }
     else
     {
-      AT_DISPATCH_FLOATING_TYPES(
-        input.type(), "adaptive_avg_pool2d_backward", [&] {
-          /* get raw pointers */
-          scalar_t *gradInput_data = gradInput.data<scalar_t>();
-          scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
-          int64_t b;
-        #pragma omp parallel for private(b)
-          for (b = 0; b < sizeB; b++)
-          {
+      int64_t b;
+    #pragma omp parallel for private(b)
+      for (b = 0; b < sizeB; b++)
+      {
+        AT_DISPATCH_FLOATING_TYPES(
+          input.type(), "adaptive_avg_pool2d_backward", [&] {
+            /* get raw pointers */
+            scalar_t *gradInput_data = gradInput.data<scalar_t>();
+            scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
+
             __AdaptiveAveragePooling2d_backward_out_frame<scalar_t>(
               gradInput_data+b*sizeD*isizeH*isizeW, gradOutput_data+b*sizeD*osizeH*osizeW,
               sizeD,
               isizeH, isizeW,
               osizeH, osizeW);
           }
-        }
-      );
+        );
+      }
     }
     return gradInput;
   }
