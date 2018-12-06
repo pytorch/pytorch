@@ -250,10 +250,6 @@ def preprocess(
         show_detailed - Show a detailed summary of the transpilation process.
     """
 
-    # Compute the total number of files to be traversed.
-    total_count = len(all_files)
-    finished_count = 0
-
     # Preprocessing statistics.
     stats = {"unsupported_calls": [], "kernel_launches": []}
 
@@ -264,7 +260,6 @@ def preprocess(
             print(
                 filepath, "->",
                 get_hip_file_path(filepath))
-            finished_count += 1
 
     print(bcolors.OKGREEN + "Successfully preprocessed all matching files." + bcolors.ENDC, file=sys.stderr)
 
@@ -833,7 +828,7 @@ class Trie():
                 try:
                     recurse = self._pattern(data[char])
                     alt.append(self.quote(char) + recurse)
-                except:
+                except Exception:
                     cc.append(self.quote(char))
             else:
                 q = 1
