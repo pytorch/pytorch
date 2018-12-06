@@ -419,14 +419,22 @@ void OnnxifiTransformer::Transform(
         onnx_model.mutable_graph()->add_node()->CopyFrom(n);
       }
 
-      // Add input shape info
-      std::vector<std::string> input_tmp;
+      // Add input/output shape info
+      std::vector<std::string> io_tmp;
       for (const auto& op_input : op.input()) {
-        input_tmp.emplace_back(op_input);
+        io_tmp.emplace_back(op_input);
       }
-      auto io_vec = ConvertToValueInfo(input_tmp, shape_hints);
+      auto io_vec = ConvertToValueInfo(io_tmp, shape_hints);
       for (const auto& i : io_vec) {
         onnx_model.mutable_graph()->add_input()->CopyFrom(i);
+      }
+      io_tmp.clear();
+      for (const auto& op_output : op.output()) {
+        io_tmp.emplace_back(op_output);
+      }
+      io_vec = ConvertToValueInfo(io_tmp, shape_hints);
+      for (const auto& i : io_vec) {
+        onnx_model.mutable_graph()->add_output()->CopyFrom(i);
       }
 
       std::string onnx_model_str;
