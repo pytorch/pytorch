@@ -40,13 +40,6 @@ setup_ci_environment: &setup_ci_environment
       nvidia-docker2 \
       expect-dev
 
-    curl -o ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1604/x86_64/nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
-    sudo dpkg -i ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
-    sudo apt-key add /var/nvinfer-runtime-trt-repo-5.0.2-ga-cuda9.0/7fa2af80.pub
-    sudo apt-get -qq update
-    sudo apt-get install libnvinfer5 libnvinfer-dev
-    rm ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
-
     sudo pkill -SIGHUP dockerd
 
     sudo pip -q install awscli==1.16.35
