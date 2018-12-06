@@ -4,7 +4,7 @@
 namespace at {
 namespace native {
 
-Scalar _local_scalar(const Tensor& self) {
+Scalar item(const Tensor& self) {
   int64_t numel = self.numel();
   AT_CHECK(numel == 1, "a Tensor with ", numel, " elements cannot be converted to Scalar");
   if (self.is_sparse()) {

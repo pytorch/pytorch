@@ -1012,6 +1012,8 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
     prim::AutogradAdd, // temporarily inserted by autograd
     prim::ConstantChunk, // optimization pass adds it
     prim::DifferentiableGraph, // optimization pass adds it
+    prim::BroadcastSizes, // optimization pass (fuser) adds it
+    prim::ChunkSizes, // optimization pass (fuser) adds it
     prim::Drop, // used in interpreter only
     prim::FusedConcat, // optimization pass adds it
     prim::FusionGroup, // optimization pass adds it

@@ -108,6 +108,7 @@ class CAFFE2_API AsyncNetBase : public NetBase {
   bool run(int task_id, int stream_id);
   int stream(int task_id);
   TaskThreadPoolBase* pool(const DeviceOption& device_option);
+  TaskThreadPoolBase* pool();
 
   void finishTasks(const std::unordered_set<int>& task_ids);
   void finalizeEvents();
