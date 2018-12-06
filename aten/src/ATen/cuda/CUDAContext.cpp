@@ -2,6 +2,9 @@
 #include <THC/THCGeneral.hpp>
 
 #include <ATen/cuda/CUDAConfig.h>
+#include <mutex>
+#include <deque>
+#include <vector>
 
 namespace at { namespace cuda {
 
