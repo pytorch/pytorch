@@ -1541,6 +1541,21 @@ class TestCuda(TestCase):
         self.assertEqual(gpu_tensor0[0], 2)
 
     @skipIfRocm
+    def test_sum_cpu_gpu_mismatch(self):
+        x = torch.randn(20, dtype=torch.float32, device='cuda')
+        y = torch.randn(1, dtype=torch.float32)
+        with self.assertRaisesRegex(RuntimeError, 'expected type'
+                                    ' torch.FloatTensor but got'
+                                    ' torch.cuda.FloatTensor'):
+            torch.sum(x, dim=[0], dtype=torch.float32, out=y)
+        # makeing sure half to float promotion is also properly working.
+        x = x.half()
+        with self.assertRaisesRegex(RuntimeError, 'expected type'
+                                    ' torch.FloatTensor but got'
+                                    ' torch.cuda.HalfTensor'):
+            torch.sum(x, dim=[0], dtype=torch.float32, out=y)
+
+    @skipIfRocm
     def test_sum_noncontig(self):
         x = torch.randn(1, 75, 57, 20, device='cuda').permute(0, 3, 1, 2)
         y = x.cpu()
@@ -1555,6 +1570,7 @@ class TestCuda(TestCase):
 
         x = torch.ones(65504, device='cuda', dtype=torch.float16)
         self.assertEqual(x.sum(), 65504)
+        self.assertEqual(x.sum(dtype=torch.float32), 65504)
 
         a = torch.zeros(1203611).bernoulli_(0.0005)
         x = a.to(device='cuda', dtype=torch.float16)
