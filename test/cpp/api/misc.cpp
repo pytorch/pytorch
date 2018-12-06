@@ -53,6 +53,21 @@ TEST(NNInitTest, CanInitializeTensorThatRequiresGrad) {
   ASSERT_EQ(torch::nn::init::ones_(tensor).sum().item<int32_t>(), 12);
 }
 
+TEST(NNInitTest, CalculateGainWithTanh) {
+  double gain = torch::nn::init::calculate_gain(torch::nn::init::Nonlinearity::Tanh);
+  ASSERT_EQ(gain, 5.0/3.0);
+}
+
+TEST(NNInitTest, CalculateGainWithRelu) {
+  double gain = torch::nn::init::calculate_gain(torch::nn::init::Nonlinearity::Relu);
+  ASSERT_EQ(gain, std::sqrt(2.0));
+}
+
+TEST(NNInitTest, CalculateGainWithLeakyRelu) {
+  double gain = torch::nn::init::calculate_gain(torch::nn::init::Nonlinearity::LeakyRelu);
+  ASSERT_EQ(gain, std::sqrt(2.0 / (1 + pow(0.01, 2))));
+}
+
 #if !defined(_WIN32)
 TEST(TempFileTest, MatchesExpectedPattern) {
   torch::utils::TempFile pattern = torch::utils::make_tempfile("test-pattern-");
