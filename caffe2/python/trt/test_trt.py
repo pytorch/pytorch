@@ -144,7 +144,7 @@ class TensorRTOpTest(TestCase):
     def test_bvlc_alexnet(self):
         self._test_onnx_importer('bvlc_alexnet', 0)
 
-    @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
+    @unittest.skip("Until fixing Unsqueeze op")
     def test_densenet121(self):
         self._test_onnx_importer('densenet121', -1, 3)
 
