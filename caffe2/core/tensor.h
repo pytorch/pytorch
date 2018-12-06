@@ -46,7 +46,7 @@ class C10_API Tensor final {
   explicit Tensor(at::Device device)
     : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
         Storage(device),
-        c10::detail::computeTensorTypeId(at::device(device).layout(at::kStrided)),
+        c10::computeTensorTypeId(at::device(device).layout(at::kStrided)),
         /*is_variable=*/ false
       )) {
   }
