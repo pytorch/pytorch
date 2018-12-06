@@ -5,7 +5,7 @@ graph(%x : Tensor) {
   %4 : bool = prim::TensorToBool(%3)
    = prim::If(%4)
     block0() {
-       = prim::Print(%1)
+       = aten::warn(%1, %2)
       -> ()
     }
     block1() {

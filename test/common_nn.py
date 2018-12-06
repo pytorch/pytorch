@@ -2208,6 +2208,8 @@ def kldivloss_reference(input, target, reduction='mean'):
         return result.mean()
     elif reduction == 'sum':
         return result.sum()
+    elif reduction == 'batchmean' and results.dim() != 0:
+        return result.sum() / result.size(0)
     return result
 
 
@@ -2637,7 +2639,7 @@ criterion_tests = [
     ),
     dict(
         module_name='MultiMarginLoss',
-        constructor_args=(1, 1, torch.rand(10)),
+        constructor_args=(1, 1., torch.rand(10)),
         legacy_constructor_args=(1, torch.rand(10)),
         input_size=(5, 10),
         target_fn=lambda: torch.rand(5).mul(8).floor().long(),
