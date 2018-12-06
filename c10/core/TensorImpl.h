@@ -31,15 +31,8 @@ C10_DECLARE_bool(caffe2_keep_on_shrink);
 // respect caffe2_keep_on_shrink.
 C10_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
 
-namespace caffe2 {
-
-// Defined by protobuf
-class DeviceOption;
-
-}
 
 namespace at {
-struct Type;
 class Tensor;
 }
 
@@ -112,7 +105,7 @@ using PlacementDtor = void (*)(void*, size_t);
  * data pointer before the DataPtr is destructed.
  * `data_ptr_` owns the memory.
  */
-struct CAFFE2_API PlacementDeleteContext {
+struct C10_API PlacementDeleteContext {
   DataPtr data_ptr_;
   PlacementDtor placement_dtor_;
   size_t size_;
@@ -133,80 +126,6 @@ struct CAFFE2_API PlacementDeleteContext {
     // original memory will be freed when data_ptr_ is destructed
   }
 };
-
-namespace detail {
-  // This is intended to be a centralized location by which we can determine
-  // what an appropriate TensorTypeId for a tensor is.
-  //
-  // This takes a TensorOptions, rather than just a DeviceType and Layout, because
-  // we reserve the right to change dispatch based on *any* aspect of
-  // TensorOptions.  WARNING: If you do this, you need to fix the calls
-  // to computeTensorTypeId in caffe2/tensor.h
-  inline TensorTypeId computeTensorTypeId(TensorOptions options) {
-    switch (options.layout()) {
-      case Layout::Strided:
-        switch (options.device().type()) {
-          case DeviceType::CPU:
-            return CPUTensorId();
-          case DeviceType::CUDA:
-            return CUDATensorId();
-          case DeviceType::MKLDNN:
-            return MKLDNNTensorId();
-          case DeviceType::OPENGL:
-            return OpenGLTensorId();
-          case DeviceType::OPENCL:
-            return OpenCLTensorId();
-          case DeviceType::IDEEP:
-            return IDEEPTensorId();
-          case DeviceType::HIP:
-            return HIPTensorId();
-          default:
-            AT_ERROR("Unsupported device type for dense layout: ", options.device().type());
-        }
-      case Layout::Sparse:
-        switch (options.device().type()) {
-          case DeviceType::CPU:
-            return SparseCPUTensorId();
-          case DeviceType::CUDA:
-            return SparseCUDATensorId();
-          case DeviceType::HIP:
-            return SparseHIPTensorId();
-          default:
-            AT_ERROR("Unsupported device type for sparse layout: ", options.device().type());
-        }
-      default:
-        AT_ERROR("Unsupported layout: ", options.layout());
-    }
-  }
-
-  inline DeviceType computeDeviceType(TensorTypeId tid) {
-    if (tid == CPUTensorId()) {
-      return DeviceType::CPU;
-    } else if (tid == CUDATensorId()) {
-      return DeviceType::CUDA;
-    } else if (tid == HIPTensorId()) {
-      return DeviceType::HIP;
-    } else if (tid == MKLDNNTensorId()) {
-      return DeviceType::MKLDNN;
-    } else if (tid == OpenGLTensorId()) {
-      return DeviceType::IDEEP;
-    } else if (tid == OpenCLTensorId()) {
-      return DeviceType::OPENCL;
-    } else if (tid == IDEEPTensorId()) {
-      return DeviceType::IDEEP;
-    } else if (tid == HIPTensorId()) {
-      return DeviceType::HIP;
-    } else if (tid == SparseCPUTensorId()) {
-      return DeviceType::CPU;
-    } else if (tid == SparseCUDATensorId()) {
-      return DeviceType::CUDA;
-    } else if (tid == SparseHIPTensorId()) {
-      return DeviceType::HIP;
-    } else {
-      AT_ASSERTM(false, "Unknown TensorTypeId: ", tid);
-    }
-  }
-} // namespace detail
 
 /**
  * The low-level representation of a tensor, which contains a pointer
@@ -279,7 +198,7 @@ namespace detail {
  *    tensor is fully initialized in all fields.  Please do not write new code
  *    that depends on these uninitialized states.
  */
-struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
+struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl() = delete;
 
   /**
@@ -450,7 +369,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         return mystorage.device();
       }
     }
-    const auto device_type = detail::computeDeviceType(tid);
+    const auto device_type = computeDeviceType(tid);
     bool not_cpu = device_type != DeviceType::CPU;
     return Device(device_type, not_cpu ? get_device() : -1);
   }
