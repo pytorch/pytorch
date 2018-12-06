@@ -13,11 +13,13 @@
 #include <c10/util/Optional.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 
+namespace c10{
+struct TensorOptions;
+}
 namespace at {
 struct Generator;
 struct Type;
 class Tensor;
-struct TensorOptions;
 } // namespace at
 
 namespace at {
