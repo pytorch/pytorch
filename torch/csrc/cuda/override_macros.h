@@ -11,7 +11,6 @@
 #define THWTensor_(NAME) THCTensor_(NAME)
 
 #define THPStorage_(NAME) TH_CONCAT_4(THCP,Real,Storage_,NAME)
-#define THPStorage THCPStorage
 #define THPStorageBaseStr THCPStorageBaseStr
 #define THPStorageStr THCPStorageStr
 #define THPStorageClass THCPStorageClass

@@ -118,6 +118,17 @@ def autograd_sharing(queue, ready, master_modified, device, is_parameter):
     queue.put(is_ok)
 
 
+def mixed_type_producer(queue, event):
+    for _ in range(10):
+        float_tensor = torch.ones(2, 2).float().cuda()
+        byte_tensor = torch.zeros(2, 2).byte().cuda()
+
+        queue.put(float_tensor)
+        queue.put(byte_tensor)
+        event.wait()
+        event.clear()
+
+
 @contextlib.contextmanager
 def fs_sharing():
     prev_strategy = mp.get_sharing_strategy()
@@ -441,6 +452,29 @@ class TestMultiprocessing(TestCase):
         p.join(1)
         self.assertFalse(p.is_alive())
 
+    # Check sharing a cudaMalloc allocation with different types of storage.
+    # (Issue #11422)
+    def _test_mixed_types_cuda_sharing(self, ctx=mp):
+        all_ones = torch.ones(2, 2).float()
+        all_zeros = torch.zeros(2, 2).byte()
+        queue = ctx.Queue()
+        event = ctx.Event()
+
+        p = ctx.Process(target=mixed_type_producer, args=(queue, event))
+
+        p.start()
+
+        for _ in range(10):
+            float_tensor = queue.get()
+            byte_tensor = queue.get()
+            self.assertEqual(float_tensor, all_ones)
+            self.assertEqual(byte_tensor, all_zeros)
+            del float_tensor, byte_tensor
+            event.set()
+
+        time.sleep(5)
+        p.join()
+
     def test_variable_sharing(self):
         for requires_grad in [True, False]:
             var = torch.arange(1., 26).view(5, 5).requires_grad_(requires_grad)
@@ -482,6 +516,12 @@ class TestMultiprocessing(TestCase):
         for requires_grad in [True, False]:
             var = torch.arange(1., 26, device='cuda').view(5, 5).requires_grad_(requires_grad)
             self._test_autograd_sharing(var, mp.get_context('spawn'))
+
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
+                     don't support multiprocessing with spawn start method")
+    @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
+    def test_mixed_types_cuda_sharing(self):
+        self._test_mixed_types_cuda_sharing(mp.get_context('spawn'))
 
     def test_parameter_sharing(self):
         param = Parameter(torch.arange(1., 26).view(5, 5))
