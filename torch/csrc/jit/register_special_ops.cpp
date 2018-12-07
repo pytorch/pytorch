@@ -16,7 +16,7 @@ namespace jit {
 namespace {
 
 
-void checkTensorListInput(const c10::TypePtr& elem_type, const Node* node) {
+void checkListInputType(const c10::TypePtr& elem_type, const Node* node) {
   if (!elem_type->isSubtypeOf(NumberType::get()) && elem_type != BoolType::get()) {
     auto error = script::ErrorReport(node->getSourceLocation());
     error << "Input list to torch.tensor must be of ints, floats, or bools, " <<
@@ -242,15 +242,14 @@ RegisterOperators reg({
 #define DEFINE_TORCH_TENSOR_OP(operator_type, c_type, tensor_creation_op)             \
 Operator(                                                                             \
   "aten::tensor(" #operator_type " t, *, ScalarType? dtype=None, Device? device=None,"\
-      " bool requires_grad=False) -> Tensor",                                         \
+      ") -> Tensor",                                                                  \
   [](const Node* node) {                                                              \
     auto initial_scalar_type = scalarTypeFromJitType(node->inputs().at(0)->type());   \
     return [initial_scalar_type](Stack& stack) {                                      \
       c_type scalar_val;                                                              \
       IValue dtype;                                                                   \
       IValue device;                                                                  \
-      bool requires_grad;                                                             \
-      pop(stack, scalar_val, dtype, device, requires_grad);                           \
+      pop(stack, scalar_val, dtype, device);                                          \
       auto tensor = autograd::make_variable(tensor_creation_op);                      \
       at::ScalarType scalar_type = dtype.isNone() ?                                   \
         tensor.scalar_type() : dtype.toScalarType();                                  \
@@ -270,24 +269,23 @@ DEFINE_TORCH_TENSOR_OP(bool, bool, at::empty({}, at::CPU(at::kByte).options()).f
 
     // reference python implementation: internal_new_from_data in tensor_new.cpp
     Operator(
-      "aten::tensor(t[] data, *, ScalarType? dtype=None, Device? device=None, bool requires_grad=False) -> Tensor",
+      "aten::tensor(t[] data, *, ScalarType? dtype=None, Device? device=None) -> Tensor",
       [](const Node* node) {
         auto input = node->inputs().at(0);
         auto elem_type = input->type();
         while (auto list_type = elem_type->cast<ListType>()) {
           elem_type = list_type->getElementType();
         }
-        checkTensorListInput(elem_type, node);
+        checkListInputType(elem_type, node);
         at::ScalarType initial_scalar_type = scalarTypeFromJitType(elem_type);
         return [initial_scalar_type](Stack& stack) {
           IValue data;
           IValue dtype;
           IValue device;
-          bool requires_grad;
-          pop(stack, data, dtype, device, requires_grad);
+          pop(stack, data, dtype, device);
           auto sizes = compute_sizes(data);
           auto tensor = autograd::make_variable(
-            at::empty(sizes, at::initialTensorOptions().dtype(initial_scalar_type)), requires_grad);
+            at::empty(sizes, at::initialTensorOptions().dtype(initial_scalar_type)));
 
           recursiveStore((char*)tensor.data_ptr(), sizes, tensor.strides(), 0,
               tensor.type().elementSizeInBytes(), data);

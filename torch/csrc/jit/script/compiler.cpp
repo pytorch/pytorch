@@ -2275,6 +2275,7 @@ private:
           elem_type = values.at(0)->type();
         }
         for (auto v : values) {
+          // TODO: checking equality on list type errored with int[]
           if (!v->type()->isSubtypeOf(elem_type) || !elem_type->isSubtypeOf(v->type()))  {
             throw ErrorReport(tree)
                 << "Lists must contain only a single type, expected: "
