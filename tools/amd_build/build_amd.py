@@ -52,7 +52,9 @@ ignores = [
     "caffe2/operators/depthwise_3x3_conv_op_cudnn.cu",
     "caffe2/operators/pool_op_cudnn.cu",
     '**/hip/**',
+    # These files are compatible with both cuda and hip
     "aten/src/ATen/core/*",
+    "torch/csrc/autograd/engine.cpp"
 ]
 
 json_settings = os.path.join(amd_build_dir, "disabled_features.json")
@@ -64,8 +66,14 @@ if not args.out_of_place_only:
         subprocess.Popen(["git", "apply", os.path.join(patch_folder, filename)], cwd=proj_dir)
 
     # Make various replacements inside AMD_BUILD/torch directory
-    ignore_files = ["csrc/autograd/profiler.h", "csrc/autograd/profiler.cpp",
-                    "csrc/cuda/cuda_check.h"]
+    ignore_files = [
+        # These files use nvrtc, hip doesn't have equivalent
+        "csrc/autograd/profiler.h",
+        "csrc/autograd/profiler.cpp",
+        "csrc/cuda/cuda_check.h",
+        # These files are compatible with both cuda and hip
+        "csrc/autograd/engine.cpp"
+    ]
     for root, _directories, files in os.walk(os.path.join(proj_dir, "torch")):
         for filename in files:
             if filename.endswith(".cpp") or filename.endswith(".h"):
