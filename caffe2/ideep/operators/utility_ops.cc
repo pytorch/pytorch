@@ -67,9 +67,45 @@ class CopyIDEEPToCPUOp final : public IDEEPOperator {
   }
 };
 
+class IDEEPWeightedSumOp : public IDEEPOperator {
+ public:
+  USE_IDEEP_DEF_ALIASES();
+  USE_IDEEP_OPERATOR_FUNCTIONS();
+
+  IDEEPWeightedSumOp(const OperatorDef& operator_def, Workspace* ws)
+      : IDEEPOperator(operator_def, ws) {}
+  bool RunOnDevice() override {
+    CAFFE_ENFORCE_EQ(InputSize() % 2, 0);
+    auto ndims = Input(0).ndims();
+    auto nelems = Input(0).get_nelems();
+    auto w_nelems = Input(1).get_nelems();
+    CAFFE_ENFORCE_GT(nelems, 0);
+    CAFFE_ENFORCE_EQ(w_nelems, 1);
+    auto* output = Output(0);
+    std::vector<float> scales;
+    scales.reserve(InputSize() / 2);
+    std::vector<itensor> inputs;
+    inputs.reserve(InputSize() / 2);
+    for (int i = 0; i < InputSize(); i += 2) {
+      auto& X = Input(i);
+      CAFFE_ENFORCE(X.ndims() == ndims);
+      CAFFE_ENFORCE(X.get_nelems() == nelems);
+      CAFFE_ENFORCE(Input(i + 1).get_nelems() == w_nelems);
+      inputs.push_back(X);
+      auto scale = static_cast<float *>(Input(i + 1).get_data_handle());
+      scales.push_back(scale[0]);
+    }
+
+    ideep::sum::compute(scales, inputs, *output);
+
+    return true;
+  }
+};
+
 REGISTER_IDEEP_OPERATOR(CopyCPUToIDEEP, CopyCPUToIDEEPOp);
 REGISTER_IDEEP_OPERATOR(CopyIDEEPToCPU, CopyIDEEPToCPUOp);
 REGISTER_IDEEP_OPERATOR(Copy, IDEEPCopyOp);
+REGISTER_IDEEP_OPERATOR(WeightedSum, IDEEPWeightedSumOp);
 
 OPERATOR_SCHEMA(CopyCPUToIDEEP)
     .NumInputs(1)
