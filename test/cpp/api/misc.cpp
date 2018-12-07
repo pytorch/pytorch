@@ -61,13 +61,13 @@ TEST(NNInitTest, CalculateGainWithTanh) {
 
 TEST(NNInitTest, CalculateGainWithRelu) {
   double gain =
-      torch::nn::init::calculate_gain(torch::nn::init::Nonlinearity::Relu);
+      torch::nn::init::calculate_gain(torch::nn::init::Nonlinearity::ReLU);
   ASSERT_EQ(gain, std::sqrt(2.0));
 }
 
 TEST(NNInitTest, CalculateGainWithLeakyRelu) {
   double gain =
-      torch::nn::init::calculate_gain(torch::nn::init::Nonlinearity::LeakyRelu);
+      torch::nn::init::calculate_gain(torch::nn::init::Nonlinearity::LeakyReLU);
   ASSERT_EQ(gain, std::sqrt(2.0 / (1 + pow(0.01, 2))));
 }
 

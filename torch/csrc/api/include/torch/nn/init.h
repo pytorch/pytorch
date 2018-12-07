@@ -17,13 +17,13 @@ enum class Nonlinearity {
   ConvTranspose3D,
   Sigmoid,
   Tanh,
-  Relu,
-  LeakyRelu
+  ReLU,
+  LeakyReLU
 };
 
 enum class FanMode { FanIn, FanOut };
 
-// Return the recommended gain value for the given nonlinearity function.
+/// Return the recommended gain value for the given nonlinearity function.
 TORCH_API double calculate_gain(Nonlinearity nonlinearity, double param = 0.01);
 
 /// Fills the given `tensor` with the provided `value` in-place, and returns it.
@@ -78,7 +78,7 @@ TORCH_API Tensor kaiming_normal_(
     Tensor tensor,
     double a = 0,
     FanMode mode = FanMode::FanIn,
-    Nonlinearity nonlinearity = Nonlinearity::LeakyRelu);
+    Nonlinearity nonlinearity = Nonlinearity::LeakyReLU);
 
 /// Fills the input `Tensor` with values according to the method
 /// described in "Delving deep into rectifiers: Surpassing human-level
@@ -89,7 +89,7 @@ TORCH_API Tensor kaiming_uniform_(
     Tensor tensor,
     double a = 0,
     FanMode mode = FanMode::FanIn,
-    Nonlinearity nonlinearity = Nonlinearity::LeakyRelu);
+    Nonlinearity nonlinearity = Nonlinearity::LeakyReLU);
 
 /// Fills the input `Tensor` with values according to the method
 /// described in "Understanding the difficulty of training deep feedforward

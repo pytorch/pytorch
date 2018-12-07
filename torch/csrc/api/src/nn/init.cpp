@@ -34,14 +34,31 @@ struct Fan {
   int64_t in;
   int64_t out;
 };
+
+double calculate_kaiming_std(
+    Tensor tensor,
+    double a,
+    FanMode mode,
+    Nonlinearity nonlinearity) {
+  NoGradGuard guard;
+  Fan fan(tensor);
+  const auto gain = calculate_gain(nonlinearity, a);
+  double std = 0.0;
+  if (mode == FanMode::FanIn) {
+    std = gain / std::sqrt(fan.in);
+  } else {
+    std = gain / std::sqrt(fan.out);
+  }
+  return std;
+}
 } // namespace
 
-TORCH_API double calculate_gain(Nonlinearity nonlinearity, double param) {
+double calculate_gain(Nonlinearity nonlinearity, double param) {
   if (nonlinearity == Nonlinearity::Tanh) {
     return 5.0 / 3.0;
-  } else if (nonlinearity == Nonlinearity::Relu) {
+  } else if (nonlinearity == Nonlinearity::ReLU) {
     return std::sqrt(2.0);
-  } else if (nonlinearity == Nonlinearity::LeakyRelu) {
+  } else if (nonlinearity == Nonlinearity::LeakyReLU) {
     return std::sqrt(2.0 / (1 + pow(param, 2)));
   }
 
@@ -163,15 +180,7 @@ Tensor kaiming_uniform_(
     double a,
     FanMode mode,
     Nonlinearity nonlinearity) {
-  NoGradGuard guard;
-  Fan fan(tensor);
-  const auto gain = calculate_gain(nonlinearity, a);
-  double std = 0.0;
-  if (mode == FanMode::FanIn) {
-    std = gain / std::sqrt(fan.in);
-  } else {
-    std = gain / std::sqrt(fan.out);
-  }
+  auto std = calculate_kaiming_std(tensor, a, mode, nonlinearity);
   // Calculate uniform bounds from standard deviation
   const auto bound = std::sqrt(3.0) * std;
   return tensor.uniform_(-bound, bound);
@@ -182,16 +191,7 @@ Tensor kaiming_normal_(
     double a,
     FanMode mode,
     Nonlinearity nonlinearity) {
-  NoGradGuard guard;
-  Fan fan(tensor);
-  const auto gain = calculate_gain(nonlinearity, a);
-  double std = 0.0;
-  if (mode == FanMode::FanIn) {
-    std = gain / std::sqrt(fan.in);
-  } else {
-    std = gain / std::sqrt(fan.out);
-  }
-
+  auto std = calculate_kaiming_std(tensor, a, mode, nonlinearity);
   return tensor.normal_(0, std);
 }
 
