@@ -11,7 +11,8 @@ at::Tensor MaxUnpooling2d_forward_cpu_out_(
     const Tensor& output,
     const Tensor& input,
     const Tensor& indices,
-    IntList output_size) {
+    int outputHeight,
+    int outputWidth) {
   // TODO: replicate is_empty() cbeck in SpatialMaxUnpooling.c
   AT_CHECK(
       input.ndimension() == 4,
@@ -19,16 +20,11 @@ at::Tensor MaxUnpooling2d_forward_cpu_out_(
   AT_CHECK(
       input.sizes() == indices.sizes(),
       "Shape of indices should match shape of input");
-  AT_CHECK(
-      output_size.size() == 2,
-      "There should be exactly two elements (height, width) in output_size");
   AT_CHECK(input.is_contiguous(), "input must be contiguous");
   AT_CHECK(indices.is_contiguous(), "indices must be contiguous");
 
   auto numBatch = input.size(0);
   auto numChannels = input.size(1);
-  auto outputHeight = output_size[0];
-  auto outputWidth = output_size[1];
   AT_CHECK(output.sizes() == IntList({numBatch, numChannels, outputHeight, outputWidth}),
       "The first two dimensions of output should match those of input, and last two dimensions should match output height and width");
   AT_CHECK(output.is_contiguous(), "output must be contiguous");
@@ -37,7 +33,7 @@ at::Tensor MaxUnpooling2d_forward_cpu_out_(
   auto inputWidth = input.size(3);
 
   auto* rawInput = input.data<scalar_t>();
-  auto* rawIndices = indices.data<long>();
+  auto* rawIndices = indices.data<int>();
   auto* rawOutput = output.data<scalar_t>();
 
   int maxp;
@@ -69,10 +65,13 @@ at::Tensor MaxUnpooling2d_forward_cpu_out(const Tensor& output,
   const Tensor& self,
   const Tensor& indices,
   IntList output_size) {
+  AT_CHECK(
+      output_size.size() == 2,
+      "There should be exactly two elements (height, width) in output_size");
   AT_DISPATCH_FLOATING_TYPES(self.type(),
     "MaxUnpooling2d_forward_cpu_out_",
   ([&] {
-    MaxUnpooling2d_forward_cpu_out_<scalar_t>(output, self, indices, output_size);
+    MaxUnpooling2d_forward_cpu_out_<scalar_t>(output, self, indices, output_size[0], output_size[1]);
   }));
   return output;
 };
