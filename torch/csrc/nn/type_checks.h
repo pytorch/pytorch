@@ -7,6 +7,10 @@
 
 #include "torch/csrc/autograd/python_variable.h"
 
+#ifdef USE_CUDA
+#include <THC/THC.h>
+#endif
+
 namespace torch { namespace nn {
 
 inline bool check_type(PyObject* obj, at::TypeID typeID) {
