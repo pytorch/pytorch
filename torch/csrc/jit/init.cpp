@@ -90,7 +90,7 @@ void initJITBindings(PyObject *module) {
 
   py::register_exception<JITException>(m, "JITException");
 
-  py::class_<python::IODescriptor>(m, "IODescriptor");
+  py::class_<python::IODescriptor>(m, "IODescriptor"); // NOLINT(bugprone-unused-raii)
 
   m.def("_jit_init", loadPythonClasses)
    .def("_jit_pass_onnx", ToONNX)
@@ -172,12 +172,14 @@ void initJITBindings(PyObject *module) {
        checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
    });
 
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")
       .def("__repr__", [](CompleteArgumentSpec& self) {
         std::ostringstream s;
         s << self;
         return s.str();
       });
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<ArgumentSpec>(m, "ArgumentSpec");
   py::class_<Code>(m, "Code")
       .def("grad_executors", [](Code& c) {
@@ -337,6 +339,7 @@ void initJITBindings(PyObject *module) {
       });
   });
 
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<detail::Future>(m, "Future");
 
   m.def("fork", [](script::Module &sm, py::args args) {

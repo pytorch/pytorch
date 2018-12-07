@@ -80,7 +80,7 @@ struct ConcretePythonOp : public PythonOp {
      return getPythonName(pyobj.get());
    }
  }
- virtual void cloneFrom(Node * other_) override {
+ void cloneFrom(Node * other_) override {
    Node::cloneFrom(other_);
    auto other = other_->cast<PythonOp>();
    this->cconv = other->cconv;
@@ -391,9 +391,8 @@ void initPythonIRBindings(PyObject * module_) {
         return n.t(Symbol::attr(name));
     })
     .def("zs_",[](Node & n, const char * name, TensorsAttr::ValueType v) {
-        // NOLINTNEXTLINE(modernize-loop-convert)
-        for (size_t i = 0; i < v.size(); ++ i) {
-            v[i] = autograd::Variable(v[i].view({})).data();
+        for (auto& i : v) {
+          i = autograd::Variable(i.view({})).data();
         }
         return n.ts_(Symbol::attr(name), std::move(v));
     })

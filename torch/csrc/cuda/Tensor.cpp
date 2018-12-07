@@ -4,7 +4,6 @@
 #include <structmember.h>
 
 #include <TH/THMath.h>
-#include <stdbool.h>
 #include <vector>
 #include <stack>
 #include <tuple>

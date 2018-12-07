@@ -8,7 +8,6 @@
 
 #define THP_HOST_HALF
 
-#include <stdbool.h>
 #include <TH/TH.h>
 // See Note [TH abstraction violation]
 //  - Used to get at the allocator associated with a storage

@@ -13,12 +13,12 @@ struct PyAnomalyMetadata : public AnomalyMetadata {
     AutoGIL gil;
     dict_ = PyDict_New();
   }
-  ~PyAnomalyMetadata() {
+  ~PyAnomalyMetadata() override {
     AutoGIL gil;
     Py_DECREF(dict_);
   }
-  virtual void store_stack() override;
-  virtual void print_stack() override;
+  void store_stack() override;
+  void print_stack() override;
 
   PyObject* dict() {
     return dict_;

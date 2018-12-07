@@ -36,9 +36,9 @@ std::vector<int64_t> composeTransposes(const std::vector<int64_t> & t1,
   JIT_ASSERT(t1.size() == t2.size());
   std::vector<int64_t> ret;
   ret.reserve(t1.size());
-  for (size_t i = 0; i < t2.size(); i++) {
-    JIT_ASSERT(t2[i] < int64_t(t1.size()));
-    ret.push_back(t1[t2[i]]);
+  for (const auto& i : t2) {
+    JIT_ASSERT(i < int64_t(t1.size()));
+    ret.push_back(t1[i]);
   }
   return ret;
 }
@@ -515,18 +515,15 @@ static void eraseListConstruct(Block* block) {
           concat_node->insertBefore(lc_node);
 
           // make concat node output as new input, then ListConstruct should become dead
-          replacements.push_back(std::make_tuple(
-                i,
-                std::vector<Value*>({concat_node->output()})
-                ));
+          replacements.emplace_back(i, std::vector<Value*>({concat_node->output()}));
 
         } else {
           // Tensor lists are used mostly for inputs to cat/stack. They are already handled
           // in those symbolics, and should become dead afterwards.
-          replacements.push_back(std::make_tuple(
+          replacements.emplace_back(
               i,
               std::vector<Value*>(
-                  lc_node->inputs().begin(), lc_node->inputs().end())));
+                  lc_node->inputs().begin(), lc_node->inputs().end()));
         }
 
       }
