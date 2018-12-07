@@ -374,6 +374,7 @@ class TestCppExtension(common.TestCase):
         self.assertEqual(module.f(), 789)
 
     @dont_wipe_extensions_build_folder
+    @common.skipIfRocm
     def test_cpp_frontend_module_has_same_output_as_python(self):
         extension = torch.utils.cpp_extension.load(
             name="cpp_frontend_extension",
@@ -406,6 +407,7 @@ class TestCppExtension(common.TestCase):
         self.assertEqual(cpp_parameters["fc.bias"].grad, python_linear.bias.grad)
 
     @dont_wipe_extensions_build_folder
+    @common.skipIfRocm
     def test_cpp_frontend_module_python_inter_op(self):
         extension = torch.utils.cpp_extension.load(
             name="cpp_frontend_extension",
@@ -486,6 +488,7 @@ class TestCppExtension(common.TestCase):
 
     @dont_wipe_extensions_build_folder
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @common.skipIfRocm
     def test_cpp_frontend_module_python_inter_op_with_cuda(self):
         extension = torch.utils.cpp_extension.load(
             name="cpp_frontend_extension",
