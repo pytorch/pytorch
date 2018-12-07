@@ -200,7 +200,7 @@ struct VISIBILITY_HIDDEN ParameterListValues : public SugaredValue {
   : module_(std::move(module)) {}
 
   std::string kind() const override {
-    return "parameter list";
+    return "parameter list values";
   }
 
   // self._parameters.values()
@@ -227,7 +227,7 @@ struct VISIBILITY_HIDDEN ParameterList : public SugaredValue {
   : module_(std::move(module)) {}
 
   std::string kind() const override {
-    return "parameters";
+    return "parameter list";
   }
 
   std::shared_ptr<SugaredValue> attr(
