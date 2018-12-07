@@ -219,8 +219,8 @@ unique_ptr<OperatorBase> _CreateOperator(
       "'. Verify that implementation for the corresponding device exist. It "
       "might also happen if the binary is not linked with the operator "
       "implementation code. If Python frontend is used it might happen if "
-      "dyndep.InitOpsLibrary call is missing. Operator def: ",
-      ProtoDebugString(operator_def));
+      "dyndep.InitOpsLibrary call is missing. Operator def prefix: ",
+      ProtoDebugString(operator_def).substr(0, 128));
   return op;
 }
 
