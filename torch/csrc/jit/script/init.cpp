@@ -206,14 +206,11 @@ struct VISIBILITY_HIDDEN ParameterListValues : public SugaredValue {
   // self._parameters.values()
   std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<NamedValue> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
     std::vector<Value*> params;
-    const auto& param_list = module_->get_parameters();
-    auto list_it = param_list.end() - 1;
-    while (true) {
-      params.push_back(caller.get_or_add_parameter((*list_it)->slot()));
-      if (list_it == param_list.begin()) {
-        break;
+    const auto& param_list = module_->get_parameters().items();
+    for (auto it = param_list.rbegin(); it != param_list.rend(); ++it) {
+      if (!(*it)->is_buffer) {
+        params.push_back(caller.get_or_add_parameter((*it)->slot()));
       }
-      list_it--;
     }
     auto list = caller.graph()->createList(DynamicType::get(), params);
     caller.graph()->insertNode(list);
