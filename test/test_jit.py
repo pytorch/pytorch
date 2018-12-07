@@ -5462,9 +5462,10 @@ a")
         imported = self.getExportImportCopy(sm)
         torch._C._recursively_call_method(sm, '_unpack')
         torch._C._recursively_call_method(imported, '_unpack')
-        self.assertTrue(sm.pack_called.item()) # pack was called before serialization
-        self.assertTrue(sm.unpack_called.item()) # Unpack was called after serialization
-                                                 # so as to leave the module in an initialized state
+        # ensure pack was called before serialization
+        self.assertTrue(sm.pack_called.item())
+        # ensure unpack was called after serialization so as to leave the module in an initialized state
+        self.assertTrue(sm.unpack_called.item())
 
         torch.testing.assert_allclose(sm.derived, torch.neg(sm.param))
 
