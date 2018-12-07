@@ -12,6 +12,7 @@
 #include "torch/csrc/variable_tensor_functions.h"
 
 #include <ATen/ExpandUtils.h>
+#include <ATen/WrapDimUtils.h>
 #include <c10/util/SmallVector.h>
 
 #include <exception>
@@ -287,6 +288,58 @@ RegisterOperators reg({
           };
         }),
     Operator(
+        prim::BroadcastSizes,
+        [](const Node* node) -> Operation {
+          size_t num_inputs = node->inputs().size();
+          return [num_inputs](Stack& stack) {
+            std::vector<int64_t> size;
+            size.reserve(8);
+            for (size_t i = 0; i < num_inputs; ++i) {
+              size = at::infer_size(size, peek(stack, i, num_inputs).toIntList()->elements());
+            }
+            drop(stack, num_inputs);
+            push(stack, std::move(size));
+            return 0;
+          };
+        }),
+    Operator(
+        prim::ChunkSizes,
+        [](const Node* node) -> Operation {
+          int64_t raw_dim = node->i(attr::dim);
+          int64_t chunks = node->i(attr::chunks);
+          return [raw_dim, chunks](Stack& stack) {
+            Shared<IntList> sizes_l;
+            pop(stack, sizes_l);
+            const auto & shape = sizes_l->elements();
+            std::vector<int64_t> regular_shape = shape;
+            std::vector<int64_t> last_shape = shape;
+            int64_t dim = at::maybe_wrap_dim(raw_dim, shape.size());
+            AT_CHECK(dim < regular_shape.size(), "Dimension out of range for chunk");
+            int64_t split_size = (regular_shape[dim] + chunks - 1) / chunks;
+            regular_shape[dim] = split_size;
+            if (shape[dim] % chunks == 0) {
+              last_shape[dim] = split_size;
+            } else {
+              int64_t num_splits = std::max<int64_t>((shape[dim] + split_size - 1) / split_size, 1);
+              last_shape[dim] = split_size - (split_size * num_splits - shape[dim]);
+              JIT_ASSERT(last_shape[dim] >= 0);
+            }
+            push(stack, std::move(regular_shape));
+            push(stack, std::move(last_shape));
+            return 0;
+          };
+        }),
+    Operator(
+        FunctionSchema("aten::warn", {Argument("message", StringType::get()), Argument("stacklevel", IntType::get(), c10::nullopt, 2, true)}, {}),
+        [](const Node* node) {
+          return [](Stack& stack) {
+            drop(stack, 1);
+            AT_WARN(pop(stack).toStringRef());
+            return 0;
+          };
+        }),
+
+    Operator(
         "prim::RaiseException(str msg) -> ()",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
@@ -378,7 +431,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        "prim::SumToSize(Tensor(a) self, int[] size) -> Tensor(a)",
+        "prim::AutodiffGradSumToSize(Tensor(a) self, int[] size) -> Tensor(a)",
         [](const Node* node) {
           return [=](Stack& stack) {
             at::Tensor self;
@@ -656,7 +709,7 @@ RegisterOperators reg({
     return [=](Stack& stack) {                                \
       int64_t a, b;                                           \
       pop(stack, a, b);                                       \
-      push(stack, op);                                        \
+      push(stack, op); /* NOLINT(hicpp-signed-bitwise) */     \
       return 0;                                               \
     };                                                        \
   }),
@@ -956,8 +1009,8 @@ Operator(                                                                      \
           at::Tensor t;                                                 \
           c_type other;                                                 \
           pop(stack, t, other);                                         \
-          std::move(t) = other;                                         \
-          push(stack, std::move(t));                                    \
+          std::move(t) = other; /* NOLINT(bugprone-use-after-move) */   \
+          push(stack, std::move(t)); /* NOLINT(bugprone-use-after-move) */ \
           return 0;                                                     \
         };                                                              \
       }),

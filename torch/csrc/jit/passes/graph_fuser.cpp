@@ -2,6 +2,7 @@
 
 #include "torch/csrc/jit/passes/alias_analysis.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
+#include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/fuser/interface.h"
 #include "torch/csrc/jit/operator.h"
@@ -59,7 +60,9 @@ bool isSimpleMap(Node *node) {
     "aten::neg(Tensor self) -> Tensor",
     "aten::pow(Tensor self, Tensor exponent) -> Tensor",
     "aten::pow(Tensor self, Scalar exponent) -> Tensor",
-    "aten::rand_like(Tensor self) -> Tensor",
+    // See https://github.com/pytorch/pytorch/issues/14674 and make sure you
+    // won't make the same mistake before you reenable this.
+    //"aten::rand_like(Tensor self) -> Tensor",
     "aten::reciprocal(Tensor self) -> Tensor",
     "aten::relu(Tensor self) -> Tensor",
     "aten::remainder(Tensor self, Tensor other) -> Tensor",
@@ -110,6 +113,14 @@ bool isSimpleMap(Node *node) {
   return true;
 }
 
+Value * broadcastSizes(at::ArrayRef<Value*> sizes) {
+  JIT_ASSERT(!sizes.empty());
+  Graph * graph = sizes[0]->owningGraph();
+  Node * broadcast_n = graph->insertNode(graph->create(prim::BroadcastSizes, sizes));
+  broadcast_n->output()->setType(ListType::ofInts());
+  return broadcast_n->output();
+}
+
 struct GraphFuser {
   Block * block_;
   std::shared_ptr<Graph> graph_;
@@ -127,7 +138,9 @@ struct GraphFuser {
     // We don't want to bother with cross-block node movements, as they
     // are not necessarily correct.
     if (node->owningBlock() != block_) return false;
-    return node->kind() == prim::FusionGroup || isSimpleMap(node);
+    return node->kind() == prim::FusionGroup
+      || node->kind() == prim::AutodiffGradSumToSize
+      || isSimpleMap(node);
   }
 
   bool isFusableCatNode(Node * node) {
@@ -157,11 +170,15 @@ struct GraphFuser {
     return isFusableCatNode(node) || node->kind() == prim::FusedConcat;
   }
 
-  bool allUsersAreThisConsumer(Node * consumer, Value * producer) {
+  bool calculatesSize(Node * node) {
+    return node->matches("aten::size(Tensor self) -> int[]");
+  }
+
+  bool allUsersAreThisConsumerOrCalcSizes(Node * consumer, Value * producer) {
     auto defining_node = producer->node();
     for(auto o : defining_node->outputs()) {
       for(auto u : o->uses()) {
-        if(u.user != consumer)
+        if(u.user != consumer && !calculatesSize(u.user))
           return false;
       }
     }
@@ -255,7 +272,8 @@ struct GraphFuser {
     WithInsertPoint guard(*subgraph.nodes().begin());
     for (auto input : n->inputs()) {
       if (inputs_map.count(input) == 0) {
-        if (input->type()->isSubtypeOf(DynamicType::get())) {
+        // We allow (any and in particular) shape arguments to AutodiffGradSumToSize or tensor arguments
+        if (input->type()->isSubtypeOf(DynamicType::get()) || n->kind() == prim::AutodiffGradSumToSize) {
           auto in_group = subgraph.addInput();
           in_group->setType(input->type());
           inputs_map[input] = in_group;
@@ -608,7 +626,7 @@ struct GraphFuser {
         chunk->inputs().end(),
         [&](Value * producer_for_chunk) {
           return isFusable(producer_for_chunk->node()) &&
-              allUsersAreThisConsumer(chunk, producer_for_chunk);
+              allUsersAreThisConsumerOrCalcSizes(chunk, producer_for_chunk);
         });
     if (it == chunk->inputs().end()) {
       return false;
@@ -705,6 +723,22 @@ struct GraphFuser {
     for (size_t i = 0; i < nchunks; i++) {
       bchunk->eraseOutput(nchunks * producer_index);
     }
+
+    // The output of producer_for_chunk_node could have been used in some aten::size
+    // operators, so we need to clean those up as well (we simply broadcast all its tensor inputs).
+    auto size_calc_uses = producer_for_chunk_node->output()->uses();
+    if (!size_calc_uses.empty()) {
+      auto tensor_inputs = filter(producer_for_chunk_node->inputs(),
+                                  [](Value * v) { return v->type()->isSubtypeOf(DynamicType::get()); });
+      auto tensor_sizes = fmap(tensor_inputs,
+                               [](Value * v) { return v->owningGraph()->insert(aten::size, {v}); });
+      JIT_ASSERT(!tensor_sizes.empty());
+      Value * output_size = tensor_sizes.size() == 1 ? tensor_sizes[0] : broadcastSizes(tensor_sizes);
+      for (Use u : size_calc_uses) {
+        u.user->output()->replaceAllUsesWith(output_size);
+        u.user->destroy();
+      }
+    }
     producer_for_chunk_node->destroy();
     return true;
   }
@@ -771,6 +805,198 @@ struct GraphFuser {
     }
   }
 
+  bool usedOnlyInSize(Value * v) {
+    const auto & uses = v->uses();
+    return std::all_of(uses.begin(), uses.end(),
+                       [](const Use& u) { return u.user->matches("aten::size(Tensor self) -> int[]"); });
+  }
+
+  // Builds up expressions that compute shapes of all intermediates (and outputs)
+  // of the fusion group, based on the sizes of inputs. You should run DCE to remove
+  // those that you end up not using.
+  std::unordered_map<Value*, Value*> buildShapeExpressions(Node * fusion_group) {
+    WithInsertPoint insert_guard { fusion_group->next() };
+    std::unordered_map<Value*, Value*> shape_of;
+
+    Graph * graph = fusion_group->owningGraph();
+    auto subgraph = fusion_group->g(attr::Subgraph);
+
+    auto inputs = fusion_group->inputs();
+    auto sinputs = subgraph->inputs();
+    JIT_ASSERT(inputs.size() == sinputs.size());
+    for (size_t i = 0; i < inputs.size(); ++i) {
+      if (inputs[i]->type()->isSubtypeOf(DynamicType::get())) {
+        shape_of[sinputs[i]] = graph->insert(aten::size, {inputs[i]});
+      }
+    }
+
+    // When we have a guarantee that an output won't be removed, because it's
+    // used in expressions that don't involve size checks, we can use its size
+    // instead of computing a long chain of broadcasts, starting from the beginning
+    // of the kernel.
+    auto outputs = fusion_group->outputs();
+    auto soutputs = subgraph->outputs();
+    JIT_ASSERT(outputs.size() == soutputs.size());
+    for (size_t i = 0; i < outputs.size(); ++i) {
+      if (usedOnlyInSize(outputs[i])) continue;
+      shape_of[soutputs[i]] = graph->insert(aten::size, {outputs[i]});
+    }
+
+    for (Node * n : subgraph->nodes()) {
+      // XXX: Use of shape_of.emplace is crucial to the output shape optimization!
+      if (n->kind() == prim::FusedConcat) {
+        // This is a bit more involved, because we have to account for the case
+        // when inputs have different shapes, but fortunately those tensors are
+        // always outputs, and so we can simply avoid replacing their queries,
+        // because it won't help us.
+        continue;
+      }
+      if (n->kind() == prim::Constant) {
+        continue;
+      }
+      if (n->kind() == prim::ConstantChunk) {
+        Node * sizes_node = graph->insertNode(graph->create(prim::ChunkSizes, shape_of.at(n->input()), 2));
+        sizes_node->i_(attr::dim, n->i(attr::dim));
+        sizes_node->i_(attr::chunks, n->i(attr::chunks));
+        Value * regular_size = sizes_node->outputs().at(0);
+        Value * last_size = sizes_node->outputs().at(1);
+        regular_size->setType(ListType::ofInts());
+        last_size->setType(ListType::ofInts());
+        auto outputs = n->outputs();
+        for (Value * o : outputs.slice(0, outputs.size() - 1)) {
+          shape_of.emplace(o, regular_size);
+        }
+        shape_of.emplace(outputs.at(outputs.size() - 1), last_size);
+        continue;
+      }
+      auto tensor_inputs = filter(n->inputs(),
+                                  [](Value * v) { return v->type()->isSubtypeOf(DynamicType::get()); });
+      auto shapes = fmap(tensor_inputs, [&](Value * v) { return shape_of.at(v); });
+      JIT_ASSERT(!shapes.empty());
+      shape_of.emplace(n->output(), shapes.size() == 1 ? shapes[0] : broadcastSizes(shapes));
+    }
+    return shape_of;
+  }
+
+  // This function moves AutodiffGradSumToSize nodes from a fusion group to just after the fusion
+  // group. This allows the fuser to work on the fusion group without having to deal with
+  // AutodiffGradSumToSize.
+  // Note that correctness relies on the invariant that AutodiffGradSumToSize is only applied
+  // to gradient nodes created by autodiff. This is important because it ensures that
+  // in the mul and div nodes only one argument (in the case of diff the numerator)
+  // has a summed value. If two arguments to mul had one, we would be in trouble,
+  // but thanks to the chain rule, we're OK.
+  void moveAutodiffGradSumToSize(Node * fusion_group) {
+    if (fusion_group->kind() != prim::FusionGroup) return;
+    auto subgraph = fusion_group->g(attr::Subgraph);
+
+    // map from input nodes on the fusion group's subgraph to the corresponding
+    // nodes in the the surrounding graph
+    // We need it to get the AutodiffGradSumToSize's size inputs outside the fusion group
+    std::unordered_map<Value*,Value*> inputs_map;
+    size_t i = 0;
+    JIT_ASSERT(fusion_group->inputs().size() == subgraph->inputs().size());
+    for(auto input : fusion_group->inputs()) {
+      inputs_map[subgraph->inputs()[i++]] = input;
+    }
+
+    // keep track of one sumToSize hitting each output
+    std::vector<Value*> sumToSize_per_output(fusion_group->outputs().size(), nullptr);
+
+    // Scan the graph. As we will delete nodes, we use the backward ordering.
+    for (auto it = subgraph->nodes().rbegin(); it != subgraph->nodes().rend();) {
+      auto * node = *it;
+      ++it;  // We delete the AutodiffGradSumToSize nodes, so increment the iterator now.
+      if (node->kind() == prim::AutodiffGradSumToSize) {
+        use_list uses_to_process(node->output()->uses());
+        while (! uses_to_process.empty()) {
+          auto user = uses_to_process[0].user;
+          auto offset = uses_to_process[0].offset;
+          uses_to_process.erase(uses_to_process.begin());
+          if (user->matches("aten::type_as(Tensor self, Tensor other) -> Tensor")) {
+            // sometimes, a mask or similar is cast to the same
+            // type as the gradient. But we only want to allow that as offset==1 (i.e. the type)
+            JIT_ASSERT(offset==1);
+            uses_to_process.insert(uses_to_process.end(), user->output()->uses().begin(), user->output()->uses().end());
+
+          } else if (user->matches("aten::mul(Tensor self, Tensor other) -> Tensor")
+                     || user->matches("aten:div(Tensor self, Tensor other) -> Tensor") // for div we might check whether we're the first argument
+                     || user->matches("aten::neg(Tensor self) -> Tensor")
+                     || user->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor") // this used to be prim::AutogradAdd
+                     ) {
+            // these are expressions that might occur during autotdiff operating on the gradient (matmul would likely be, too but we don't fuse it)
+            // note that for mul, we know (from the chain rule) that only one factor will be stemming from a calculation involving gradients
+            // so we know that we can move SumToSize across it
+            uses_to_process.insert(uses_to_process.end(), user->output()->uses().begin(), user->output()->uses().end());
+          } else if (user->kind() == prim::AutodiffGradSumToSize) {
+            // we can just keep the last, so we're done here (this case might not happen due to how we organize the search and remove nodes...)
+          } else if (user->kind() == prim::Return) {
+            // only if we don't already have a sumToSize for this
+            if (! sumToSize_per_output[offset]) {
+              // note: we make the assumption that the sizes are inputs to the fusion group (rather than something
+              // calculated).
+              sumToSize_per_output[offset] = inputs_map.at(node->inputs()[1]);
+            }
+          } else {
+            JIT_ASSERTM(false, "unknown node type for fusion SumToSize processing");
+          }
+
+        }
+        // remove the AutodiffGradSumToSize node, a new node outside the fusion subgraph will be inserted below
+        node->output()->replaceAllUsesWith(node->inputs()[0]);
+        node->destroy();
+      }
+    }
+    // insert the AutodiffGradSumToSize nodes for the outputs
+    auto* graph = fusion_group->owningGraph();
+    WithInsertPoint insert_guard { fusion_group->next() };
+    for (size_t i = 0; i < sumToSize_per_output.size(); i++) {
+      if (sumToSize_per_output[i]) {
+        Node * sumToSize_node = graph->insertNode(graph->create(prim::AutodiffGradSumToSize, {fusion_group->outputs()[i], sumToSize_per_output[i]}));
+         // replace all downstream uses of the fusion group output with that of AutodiffGradSumToSize, but not the one we just created
+        for (auto u : fusion_group->outputs()[i]->uses()) {
+          if (u.user != sumToSize_node) {
+            u.user->replaceInput(u.offset, sumToSize_node->output());
+          }
+        }
+      }
+    }
+
+    // Remove empty inputs (those are the size args used for the deleted AutodiffGradSumToSize nodes). They're bloat and the fuser can't handle them.
+    for (int64_t i = static_cast<int64_t>(fusion_group->inputs().size()) - 1; i >= 0; --i) {
+      if (subgraph->inputs()[i]->uses().empty()) {
+        subgraph->eraseInput(i);
+        fusion_group->removeInput(i);
+      }
+    }
+  }
+
+  void removeOutputsUsedOnlyInSize(Node * fusion_group) {
+    if (fusion_group->kind() != prim::FusionGroup) return;
+    auto subgraph = fusion_group->g(attr::Subgraph);
+
+    auto shape_of = buildShapeExpressions(fusion_group);
+    auto outputs = fusion_group->outputs().vec();
+    auto soutputs = subgraph->outputs().vec();
+    // XXX: Iterating in this order is not only good for performance reasons!
+    // It is also crucial for correctness (i has to reflect the current true
+    // index of outputs[i])!
+    for (int64_t i = static_cast<int64_t>(outputs.size()) - 1; i >= 0; --i) {
+      auto output = outputs[i];
+      auto soutput = soutputs[i];
+      if (usedOnlyInSize(output) && shape_of.count(soutput) > 0) {
+        auto uses = output->uses();
+        for (Use u : uses) {
+          JIT_ASSERT(u.user->matches("aten::size(Tensor self) -> int[]"));
+          u.user->output()->replaceAllUsesWith(shape_of.at(soutput));
+          u.user->destroy();
+        }
+        fusion_group->eraseOutput(i);
+        subgraph->eraseOutput(i);
+      }
+    }
+  }
+
   void run() {
     // Run the pass until no changes are made.
     // This is neccessary, because the algorithm can miss out on certain fusion
@@ -807,6 +1033,17 @@ struct GraphFuser {
     for (auto it = block_->nodes().rbegin(); it != block_->nodes().rend();) {
       it = scanNodeForChunks(*it);
     }
+
+    // Push AutodiffGradSumToSize out of fusion groups
+    for (Node * n : block_->nodes()) {
+      moveAutodiffGradSumToSize(n);
+    }
+
+    // Remove outputs that have been added only because we need their size
+    for (Node * n : block_->nodes()) {
+      removeOutputsUsedOnlyInSize(n);
+    }
+
     for (Node * node : block_->nodes()) {
       for (Block * sub_block : node->blocks()) {
         GraphFuser(sub_block, graph_).run();
@@ -814,6 +1051,56 @@ struct GraphFuser {
     }
   }
 };
+
+void PeepholeOptimizeShapeExpressions(Block * block) {
+  auto nodes = block->nodes();
+  for (auto it = nodes.begin(); it != nodes.end(); ++it) {
+    Node * node = *it;
+    for (Block * subblock : node->blocks()) {
+      PeepholeOptimizeShapeExpressions(subblock);
+    }
+    if (node->kind() == prim::BroadcastSizes) {
+      // Remove no-op broadcasts.
+      if (node->inputs().size() == 1) {
+        node->output()->replaceAllUsesWith(node->input());
+        it.destroyCurrent();
+        continue;
+      }
+      // Deduplicate inputs, but use their unique() values to ensure
+      // this process only depends on the graph.
+      std::map<size_t, Value*> unique_to_value;
+      for (Value * input : node->inputs()) {
+        unique_to_value.emplace(input->unique(), input);
+      }
+      if (unique_to_value.size() != node->inputs().size()) {
+        std::vector<Value*> inputs;
+        for (auto & entry : unique_to_value) {
+          inputs.push_back(entry.second);
+        }
+        if (inputs.size() == 1) {
+          node->output()->replaceAllUsesWith(inputs[0]);
+        } else {
+          WithInsertPoint insert_guard { node };
+          node->output()->replaceAllUsesWith(broadcastSizes(inputs));
+        }
+        it.destroyCurrent();
+        --it; // Revisit the node with deduplicated inputs
+        continue;
+      }
+      // Remove compose simple chains of broadcasts into a single node.
+      const auto & uses = node->output()->uses();
+      if (uses.size() == 1 && uses[0].user->kind() == prim::BroadcastSizes) {
+        Node * user = uses[0].user;
+        user->removeInput(uses[0].offset);
+        // NB: we don't care about deduplication in here, as we will visit user later.
+        for (Value * i : node->inputs()) {
+          user->addInput(i);
+        }
+        it.destroyCurrent();
+      }
+    }
+  }
+}
 
 } // anonymous namespace
 
@@ -824,6 +1111,11 @@ void FuseGraph(std::shared_ptr<Graph>& graph) {
   GraphFuser(graph->block(), graph).run();
   // After FuseGraph some common subexpressions may come back
   EliminateCommonSubexpression(graph);
+  // We might have emitted a fair amount of useless shape propagating code, so
+  // remove it
+  EliminateDeadCode(graph);
+  // Improve the quality of shape propagation code that was left
+  PeepholeOptimizeShapeExpressions(graph->block());
 
   #endif
 }
