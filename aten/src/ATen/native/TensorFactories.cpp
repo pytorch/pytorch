@@ -514,6 +514,12 @@ Tensor& range_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
   return at::_th_range_out(result, start, end, step);
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangle ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Tensor tril_indices(int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
+  return native::ones({row, col}, options).tril(offset).nonzero();
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ zeros ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor zeros(IntList size, const TensorOptions& options) {
