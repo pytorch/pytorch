@@ -16,9 +16,9 @@ import unittest
 class TestFcOperator(serial.SerializedTestCase):
     def _run_test(self, n, m, k, transposed, multi_dim, dtype, engine, gc, dc):
         if dtype == np.float16:
-            # fp16 only supported with CUDA
-            assume(gc.device_type == caffe2_pb2.CUDA)
-            dc = [d for d in dc if d.device_type == caffe2_pb2.CUDA]
+            # fp16 only supported with CUDA/HIP
+            assume(core.IsGPUDeviceType(gc.device_type))
+            dc = [d for d in dc if core.IsGPUDeviceType(d.device_type)]
 
         if engine == 'TENSORCORE':
             # TensorCore only makes sense with CUDA
@@ -54,7 +54,7 @@ class TestFcOperator(serial.SerializedTestCase):
             engine=engine,
         )
 
-        if dtype == np.float16 and gc.device_type == caffe2_pb2.CUDA:
+        if dtype == np.float16 and core.IsGPUDeviceType(gc.device_type):
             a = caffe2_pb2.Argument()
             a.i = 1
             a.name = "float16_compute"
