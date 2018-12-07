@@ -1,11 +1,11 @@
 torch.hub
 ===================================
-Pytorch HUB is a pre-trained model repository designed to facilitate research reproducibility.
+Pytorch Hub is a pre-trained model repository designed to facilitate research reproducibility.
 
 Publishing models
 -----------------
 
-Pytorch HUB supports publishing pre-trained models(model definitions and pre-trained weights)
+Pytorch Hub supports publishing pre-trained models(model definitions and pre-trained weights)
 to a github repository by adding a simple ``hubconf.py`` file;
 
 ``hubconf.py`` can have multiple entrypoints. Each entrypoint is defined as a python function with
@@ -60,7 +60,7 @@ Important Notice
 
 - The published models should be at least in a branch/tag. It can't be a random commit.
 
-Loading models from HUB
+Loading models from Hub
 -----------------------
 
 Users can load the pre-trained models using ``torch.hub.load()`` API.
@@ -94,7 +94,7 @@ The locations are used in the order of
 Caching logic
 ^^^^^^^^^^^^^
 
-By default, we don't clean up files after loading it. HUB uses the cache by default if it already exists in ``hub_dir``.
+By default, we don't clean up files after loading it. Hub uses the cache by default if it already exists in ``hub_dir``.
 
 Users can force a reload by calling ``hub.load(..., force_reload=True)``. This will delete
 the existing github folder and downloaded weights, reinitialize a fresh download. This is useful
