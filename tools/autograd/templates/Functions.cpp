@@ -2055,6 +2055,12 @@ Tensor sparse_constructor_values_backward(const Tensor& sparse_grad_out, const T
   return flattened_dense_grad.index_select(0, flattened_indices);
 }
 
+Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
+  AT_ASSERT(input_.is_sparse());
+  auto input = input_.coalesce();
+  return grad.sparse_mask(at::SparseTensorRef(input));
+}
+
 // Because the backward of pad(input, pads) is just pad(grad_output, [-p for p in pads])
 Tensor constant_pad_nd_backward(const Tensor& grad, IntList pad) {
   auto negated_pad = pad.vec();
