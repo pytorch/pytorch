@@ -9,8 +9,7 @@ from ..parameter import Parameter
 from ..utils.rnn import PackedSequence, is_packed_sequence, get_packed_sequence
 from .. import init
 from .. import _VF
-from ..._jit_internal import weak_module, weak_script_method
-from typing import Optional
+from ..._jit_internal import weak_module, weak_script_method, Optional
 
 _rnn_impls = {
     'LSTM': _VF.lstm,

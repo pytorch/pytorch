@@ -6,10 +6,9 @@ circular dependency problems
 
 import weakref
 import inspect
-try:
-    import builtins  # PY3
-except Exception:
-    import __builtin__ as builtins  # PY2
+
+from torch._six import builtins
+
 
 # Tracks standalone weak script functions
 _compiled_weak_fns = weakref.WeakKeyDictionary()
@@ -32,7 +31,7 @@ COMPILED = object()
 
 
 def createResolutionCallback(frames_up=0):
-    """
+    r"""
     Creates a function which, given a string variable name,
     returns the value of the variable in the scope of the caller of
     the function which called createResolutionCallback (by default).
@@ -81,7 +80,7 @@ def createResolutionCallback(frames_up=0):
 
 
 def weak_script(fn, _frames_up=0):
-    """
+    r"""
     Marks a function as a weak script function. When used in a script function
     or ScriptModule, the weak script function will be lazily compiled and
     inlined in the graph. When not used in a script function, the weak script
@@ -111,7 +110,7 @@ def weak_script_method(fn):
 
 
 def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
-    """
+    r"""
     Dispatches to either of 2 weak script functions based on a boolean argument.
     In Torch Script, the boolean argument must be constant so that the correct
     function to use can be determined at compile time.
@@ -153,7 +152,7 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
 
 try:
     import typing
-    from typing import Tuple, List
+    from typing import Tuple, List, Optional
 
     def is_tuple(ann):
         # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
@@ -180,10 +179,19 @@ except ImportError:
 
     class ListCls(object):
         def __getitem__(self, types):
-            return TupleInstance(types)
+            return ListInstance(types)
+
+    class OptionalInstance(object):
+        def __init__(self, types):
+            setattr(self, '__args__', types)
+
+    class OptionalCls(object):
+        def __getitem__(self, types):
+            return OptionalInstance(types)
 
     Tuple = TupleCls()
     List = ListCls()
+    Optional = OptionalCls()
 
     def is_tuple(ann):
         return isinstance(ann, TupleInstance)

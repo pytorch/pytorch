@@ -7,7 +7,7 @@ from torch.jit.frontend import get_jit_ast, get_default_args
 import torch.backends.cudnn as cudnn
 import torch.jit.annotations
 from torch._six import raise_from, with_metaclass, get_function_from_type, \
-    string_classes
+    string_classes, builtins
 from .._jit_internal import createResolutionCallback, _compiled_weak_fns, \
     _weak_script_methods, _weak_modules, _weak_types, COMPILED, \
     COMPILATION_PENDING, _boolean_dispatched
