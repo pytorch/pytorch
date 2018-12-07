@@ -10,7 +10,6 @@
 #include "torch/csrc/utils/python_compat.h"
 
 #ifdef USE_CUDA
-#include <THC/THC.h>
 #include <ATen/cuda/CUDAStream.h>
 #endif
 

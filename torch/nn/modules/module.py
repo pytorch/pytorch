@@ -3,7 +3,6 @@ import functools
 import itertools
 
 import torch
-from ..backends.thnn import backend as thnn_backend
 from ..parameter import Parameter
 import torch.utils.hooks as hooks
 
@@ -60,7 +59,6 @@ class Module(object):
     _version = 1
 
     def __init__(self):
-        self._backend = thnn_backend
         self._parameters = OrderedDict()
         self._buffers = OrderedDict()
         self._backward_hooks = OrderedDict()
