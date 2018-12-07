@@ -287,6 +287,8 @@ inline py::object toPyObject(IValue&& ivalue) {
       t[i] = toPyObject(IValue{elements[i]});
     }
     return t;
+  } else if (ivalue.isDevice()) {
+    return py::cast(c10::DeviceTypeName(ivalue.toDevice().type()));
   } else {
     AT_ERROR("Missing cases in 'toPyObject'! File a bug report.");
   }
