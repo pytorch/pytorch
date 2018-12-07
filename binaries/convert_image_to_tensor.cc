@@ -31,7 +31,7 @@ C10_DEFINE_string(
     crop,
     "-1,-1",
     "The center cropped hight and width. If the value is less than zero, "
-    "it is not cropped.")
+    "it is not cropped.");
 C10_DEFINE_string(input_images, "", "Comma separated images");
 C10_DEFINE_string(input_image_file, "", "The file containing imput images");
 C10_DEFINE_string(output_tensor, "", "The output tensor file in NCHW");
@@ -110,12 +110,9 @@ cv::Mat cropToRec(cv::Mat& img, int& height, int& width) {
     height = height > img.rows ? img.rows : height;
     roi.width = width;
     roi.height = height;
-    assert(0 <= roi.x &&
-           0 <= roi.width &&
-           roi.x + roi.width <= img.cols &&
-           0 <= roi.y &&
-           0 <= roi.height &&
-           roi.y + roi.height <= img.rows);
+    assert(
+        0 <= roi.x && 0 <= roi.width && roi.x + roi.width <= img.cols &&
+        0 <= roi.y && 0 <= roi.height && roi.y + roi.height <= img.rows);
     cropped_img = img(roi);
     // Make the image in continuous space in memory
     cimg = cropped_img.clone();
@@ -182,7 +179,9 @@ std::vector<float> convertToVector(cv::Mat& img) {
 }
 
 std::vector<float> convertOneImage(
-    std::string& filename, int& height, int& width) {
+    std::string& filename,
+    int& height,
+    int& width) {
   assert(filename[0] != '~');
 
   std::cout << "Converting " << filename << std::endl;
@@ -243,9 +242,8 @@ void convertImages() {
   int width = -1;
   for (int i = 0; i < file_names.size(); i++) {
     int one_height, one_width;
-    std::vector<float> one_image_values = convertOneImage(file_names[i],
-                                                          one_height,
-                                                          one_width);
+    std::vector<float> one_image_values =
+        convertOneImage(file_names[i], one_height, one_width);
     if (height < 0 && width < 0) {
       height = one_height;
       width = one_width;
