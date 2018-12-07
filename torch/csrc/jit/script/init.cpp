@@ -240,7 +240,7 @@ struct VISIBILITY_HIDDEN ParameterList : public SugaredValue {
       return std::make_shared<ParameterListValues>(module_);
     }
 
-    throw ErrorReport(loc) << "attribute '" << field << "' is not usable in a script method";
+    return SugaredValue::attr(loc, m, field);
   }
 
  private:
