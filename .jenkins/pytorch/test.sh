@@ -76,8 +76,6 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   export PYTORCH_TEST_WITH_ROCM=1
-  export LANG=C.UTF-8
-  export LC_ALL=C.UTF-8
 fi
 
 if [[ "${JOB_BASE_NAME}" == *-NO_AVX-* ]]; then
@@ -96,9 +94,7 @@ test_python_all_except_nn() {
 
 test_aten() {
   # Test ATen
-  # The following test(s) of ATen have already been skipped by caffe2 in rocm environment:
-  # scalar_tensor_test, basic, native_test
-  if ([[ "$BUILD_ENVIRONMENT" != *asan* ]] && [[ "$BUILD_ENVIRONMENT" != *rocm* ]]); then
+  if [[ "$BUILD_ENVIRONMENT" != *asan* ]] then
     echo "Running ATen tests with pytorch lib"
     TORCH_LIB_PATH=$(python -c "import site; print(site.getsitepackages()[0])")/torch/lib
     # NB: the ATen test binaries don't have RPATH set, so it's necessary to

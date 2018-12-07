@@ -52,14 +52,7 @@ for test in $(find "${INSTALL_PREFIX}/test" -executable -type f); do
     */mkl_utils_test|*/aten/integer_divider_test)
       continue
       ;;
-    */scalar_tensor_test|*/basic|*/native_test)
-	  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-		continue
-	  else
-	    "$test"
-	  fi
-	  ;;
-	*)
+    *)
       # Currently, we use a mixture of gtest (caffe2) and Catch2 (ATen). While
       # planning to migrate to gtest as the common PyTorch c++ test suite, we
       # currently do NOT use the xml test reporter, because Catch doesn't
