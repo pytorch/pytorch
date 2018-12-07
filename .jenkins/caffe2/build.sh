@@ -133,6 +133,22 @@ CMAKE_ARGS+=("-DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}")
 if [[ $BUILD_ENVIRONMENT == *mkl* ]]; then
   CMAKE_ARGS+=("-DBLAS=MKL")
 fi
+
+if [[ $BUILD_ENVIRONMENT == py2-cuda9.0-cudnn7-ubuntu16.04 ]]; then
+
+  # removing http:// duplicate in favor of nvidia-ml.list
+  # which is https:// version of the same repo
+  sudo rm -f /etc/apt/sources.list.d/nvidia-machine-learning.list
+  curl -o ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1604/x86_64/nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
+  sudo dpkg -i ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
+  sudo apt-key add /var/nvinfer-runtime-trt-repo-5.0.2-ga-cuda9.0/7fa2af80.pub
+  sudo apt-get -qq update
+  sudo apt-get install libnvinfer5 libnvinfer-dev
+  rm ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
+
+  CMAKE_ARGS+=("-DUSE_TENSORRT=ON")
+fi
+
 if [[ $BUILD_ENVIRONMENT == *cuda* ]]; then
   CMAKE_ARGS+=("-DUSE_CUDA=ON")
   CMAKE_ARGS+=("-DCUDA_ARCH_NAME=Maxwell")
