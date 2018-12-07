@@ -43,7 +43,7 @@ fi
 
 # Options for building only a subset of the libraries
 USE_CUDA=0
-USE_FBGEMM=0
+USE_FBGEMM=1
 USE_ROCM=0
 USE_NNPACK=0
 USE_MKLDNN=0
