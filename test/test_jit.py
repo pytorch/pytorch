@@ -5000,6 +5000,87 @@ a")
     def test_tensor_number_math(self):
         self._test_tensor_number_math()
 
+    def test_torch_tensor_bad_input(self):
+        with self.assertRaisesRegex(RuntimeError, "Input list to torch.tensor must be of ints, floats, "
+                                    "or bools, got None"):
+            @torch.jit.script
+            def test():
+                return torch.tensor([None])
+
+        with self.assertRaisesRegex(RuntimeError, "Note: empty lists are constructed as Tensor\[\]"):
+            @torch.jit.script
+            def foo():
+                return torch.tensor([])
+
+        @torch.jit.script
+        def foo():
+            return torch.tensor([[2, 2], [1]])
+        with self.assertRaisesRegex(RuntimeError, "Expected sequence of length"):
+            foo()
+
+    def test_torch_tensor_empty_list(self):
+        code = dedent('''
+        def func():
+            return torch.tensor(torch.jit.annotate(List[int], []))
+        ''')
+        scope = {}
+        exec(code, globals(), scope)
+        cu = torch.jit.CompilationUnit(code)
+        t1 = cu.func()
+        t2 = scope['func']()
+
+        # torchscript returns int tensor, python returns float tensor
+        self.assertNotEqual(t1.dtype, t2.dtype)
+
+        def func():
+            li = torch.jit.annotate(List[int], [])
+            return torch.tensor([li, li])
+
+        self.checkScript(func, ())
+
+        def func():
+            li = torch.jit.annotate(List[int], [])
+            return torch.tensor([[[li]]])
+
+        self.checkScript(func, ())
+
+    def test_torch_tensor(self):
+        template = dedent('''
+        def func():
+            li = {list_create}
+            return torch.tensor(li {options})
+        ''')
+
+        lists = ["2.5", "4", "True", "False", "[2]", "[-.5]", "[False, True, False]", "[2, 2]",
+                 "torch.jit.annotate(List[int], [])", "[2.5, 2.5]", "[[2], [2]]", "[[-.5], [2.2]]", "[[False], [True]]"]
+
+        dtypes = ["", ", dtype=torch.float", ", dtype=torch.double", ", dtype=torch.half",
+                  ", dtype=torch.uint8", ", dtype=torch.int8", ", dtype=torch.short",
+                  ", dtype=torch.int", ", dtype=torch.long"]
+
+        devices = ['', ", device='cpu'"]
+        if RUN_CUDA:
+            devices.append(", device='cuda'")
+
+        option_pairs = [dtype + device for dtype in dtypes for device in devices]
+        for li in lists:
+            for option in option_pairs:
+                # tensor from empty list is type float in python and annotated type in torchscript
+                if "annotate" in li and "dtype" not in option:
+                    continue
+                code = template.format(list_create=li, options=option)
+                scope = {}
+                exec(code, globals(), scope)
+                cu = torch.jit.CompilationUnit(code)
+                t1 = cu.func()
+                t2 = scope['func']()
+                if t1.dtype == torch.float16:  # equality NYI for half tensor
+                    self.assertTrue(str(t1) == str(t2))
+                else:
+                    self.assertEqual(t1, t2)
+                self.assertEqual(t1.dtype, t2.dtype)
+                self.assertEqual(t1.device, t2.device)
+
     @unittest.skipIf(not RUN_CUDA, "No CUDA")
     @skipIfRocm
     def test_tensor_number_math_cuda(self):
