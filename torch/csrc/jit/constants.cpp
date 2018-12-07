@@ -16,8 +16,8 @@ Value* insertConstant(
   if(val.isTensor()) {
     at::Tensor ref = val.toTensor();
     if(!ref.defined()) {
-      n->destroy();
-      return g.insertNode(g.createUndefined())->output();
+      //return insertConstant(g, val, loc, scope);
+      throw constant_not_supported_error("undefined tensors cannot become constants");
     }
     if (ref.is_variable()) {
       ref = autograd::Variable(ref).data();

@@ -463,6 +463,7 @@ Value* tryConvertToType(
     value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
   }
 
+  std::cout<<"value type: " << value->type()->str() << " concrete_type: " << concrete_type->str() << std::endl;
   if (value->type()->isSubtypeOf(NoneType::get()) && !concrete_type->isSubtypeOf(NoneType::get())){
     if (concrete_type->isSubtypeOf(GeneratorType::get())) {
       value = graph.insertNode(graph.createNoneGenerator())->output();
