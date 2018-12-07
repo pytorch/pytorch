@@ -622,6 +622,8 @@ Interpreting Graphs
 		}
 	      -> (%9, %rv.4)
 	    }
+	  return (%rv);
+	}
 
 
     Take the instruction ``%rv.1 : Dynamic = aten::zeros(%3, %4, %5, %6)`` for
