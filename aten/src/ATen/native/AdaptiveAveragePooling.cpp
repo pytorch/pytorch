@@ -17,7 +17,7 @@ namespace {
   }
 
   template <typename scalar_t>
-  static void __AdaptiveAveragePooling2d_out_frame(
+  static void adaptive_avg_pool2d_out_frame(
             scalar_t *input_p,
             scalar_t *output_p,
             int64_t sizeD,
@@ -70,7 +70,7 @@ namespace {
     }
   }
 
-  void AdaptiveAveragePooling2d_out_cpu_template(
+  void adaptive_avg_pool2d_out_cpu_template(
     at::Tensor& output,
     at::Tensor const& input,
     IntList output_size)
@@ -127,12 +127,12 @@ namespace {
       AT_DISPATCH_FLOATING_TYPES(input.type(), "adaptive_avg_pool2d", [&] {
           auto input_data = input.data<scalar_t>();
           auto output_data = output.data<scalar_t>();
-          __AdaptiveAveragePooling2d_out_frame<scalar_t>(input_data, output_data,
-                                                         sizeD,
-                                                         isizeH, isizeW,
-                                                         osizeH, osizeW,
-                                                         istrideD,
-                                                         istrideH, istrideW);
+          adaptive_avg_pool2d_out_frame<scalar_t>(input_data, output_data,
+                                                  sizeD,
+                                                  isizeH, isizeW,
+                                                  osizeH, osizeW,
+                                                  istrideD,
+                                                  istrideH, istrideW);
         }
       );
     }
@@ -147,12 +147,12 @@ namespace {
         AT_DISPATCH_FLOATING_TYPES(input.type(), "adaptive_avg_pool2d", [&] {
             auto input_data = input.data<scalar_t>();
             auto output_data = output.data<scalar_t>();
-            __AdaptiveAveragePooling2d_out_frame<scalar_t>(input_data+b*istrideB, output_data+b*sizeD*osizeH*osizeW,
-                                                           sizeD,
-                                                           isizeH, isizeW,
-                                                           osizeH, osizeW,
-                                                           istrideD,
-                                                           istrideH, istrideW);
+            adaptive_avg_pool2d_out_frame<scalar_t>(input_data+b*istrideB, output_data+b*sizeD*osizeH*osizeW,
+                                                    sizeD,
+                                                    isizeH, isizeW,
+                                                    osizeH, osizeW,
+                                                    istrideD,
+                                                    istrideH, istrideW);
           }
         );
       }
@@ -160,7 +160,7 @@ namespace {
   }
 
   template <typename scalar_t>
-  static void __AdaptiveAveragePooling2d_backward_out_frame(
+  static void adaptive_avg_pool2d_backward_out_frame(
     scalar_t *gradInput_p,
     scalar_t *gradOutput_p,
     int64_t sizeD,
@@ -207,7 +207,7 @@ namespace {
     }
   }
 
-  Tensor& AdaptiveAveragePooling2d_backward_out_cpu_template(
+  Tensor& adaptive_avg_pool2d_backward_out_cpu_template(
     Tensor& gradInput,
     const Tensor& gradOutput_,
     const Tensor& input)
@@ -248,7 +248,7 @@ namespace {
           scalar_t *gradInput_data = gradInput.data<scalar_t>();
           scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
 
-          __AdaptiveAveragePooling2d_backward_out_frame<scalar_t>(
+          adaptive_avg_pool2d_backward_out_frame<scalar_t>(
             gradInput_data, gradOutput_data,
             sizeD,
             isizeH, isizeW,
@@ -268,7 +268,7 @@ namespace {
             scalar_t *gradInput_data = gradInput.data<scalar_t>();
             scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
 
-            __AdaptiveAveragePooling2d_backward_out_frame<scalar_t>(
+            adaptive_avg_pool2d_backward_out_frame<scalar_t>(
               gradInput_data+b*sizeD*isizeH*isizeW, gradOutput_data+b*sizeD*osizeH*osizeW,
               sizeD,
               isizeH, isizeW,
@@ -282,43 +282,43 @@ namespace {
 
 } // namespace
 
-  Tensor& AdaptiveAveragePooling2d_out_cpu(
+  Tensor& adaptive_avg_pool2d_out_cpu(
     Tensor& output,
     const Tensor& input,
     IntList output_size)
   {
-    AdaptiveAveragePooling2d_out_cpu_template(
+    adaptive_avg_pool2d_out_cpu_template(
       output, input, output_size);
     return output;
   }
 
-  Tensor AdaptiveAveragePooling2d_cpu(
+  Tensor adaptive_avg_pool2d_cpu(
     at::Tensor const& input,
     IntList output_size)
   {
     auto output = at::empty({0}, input.options());
-    AdaptiveAveragePooling2d_out_cpu_template(
+    adaptive_avg_pool2d_out_cpu_template(
       output, input, output_size);
     return output;
   }
 
-  Tensor& AdaptiveAveragePooling2d_backward_out_cpu(
+  Tensor& adaptive_avg_pool2d_backward_out_cpu(
     Tensor& gradInput,
     const Tensor& gradOutput,
     const Tensor& input)
   {
     gradInput.resize_as_(input);
-    AdaptiveAveragePooling2d_backward_out_cpu_template(
+    adaptive_avg_pool2d_backward_out_cpu_template(
       gradInput, gradOutput, input);
     return gradInput;
   }
 
-  Tensor AdaptiveAveragePooling2d_backward_cpu(
+  Tensor adaptive_avg_pool2d_backward_cpu(
     const Tensor& gradOutput,
     const Tensor& input)
   {
     auto gradInput = at::zeros_like(input);
-    AdaptiveAveragePooling2d_backward_out_cpu_template(
+    adaptive_avg_pool2d_backward_out_cpu_template(
       gradInput, gradOutput, input);
     return gradInput;
   }

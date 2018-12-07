@@ -204,7 +204,7 @@ namespace {
 
   // 4d tensor B x D x H x W
 
-  void AdaptiveAveragePooling2d_out_cuda_template(
+  void adaptive_avg_pool2d_out_cuda_template(
     Tensor& output,
     const Tensor& input,
     IntList output_size)
@@ -291,7 +291,7 @@ namespace {
     THCudaCheck(cudaGetLastError());
   }
 
-  void AdaptiveAveragePooling2d_backward_out_cuda_template(
+  void adaptive_avg_pool2d_backward_out_cuda_template(
     Tensor& gradInput,
     const Tensor& gradOutput_,
     const Tensor& input)
@@ -383,43 +383,43 @@ namespace {
 
 } // namespace
 
-  Tensor& AdaptiveAveragePooling2d_out_cuda(
+  Tensor& adaptive_avg_pool2d_out_cuda(
     Tensor& output,
     const Tensor& input,
     IntList output_size)
   {
-    AdaptiveAveragePooling2d_out_cuda_template(
+    adaptive_avg_pool2d_out_cuda_template(
       output, input, output_size);
     return output;
   }
 
-  Tensor AdaptiveAveragePooling2d_cuda(
+  Tensor adaptive_avg_pool2d_cuda(
     at::Tensor const& input,
     IntList output_size)
   {
     auto output = at::empty({0}, input.options());
-    AdaptiveAveragePooling2d_out_cuda_template(
+    adaptive_avg_pool2d_out_cuda_template(
       output, input, output_size);
     return output;
   }
 
-  Tensor& AdaptiveAveragePooling2d_backward_out_cuda(
+  Tensor& adaptive_avg_pool2d_backward_out_cuda(
     Tensor& gradInput,
     const Tensor& gradOutput,
     const Tensor& input)
   {
     gradInput.resize_as_(input);
-    AdaptiveAveragePooling2d_backward_out_cuda_template(
+    adaptive_avg_pool2d_backward_out_cuda_template(
       gradInput, gradOutput, input);
     return gradInput;
   }
 
-  Tensor AdaptiveAveragePooling2d_backward_cuda(
+  Tensor adaptive_avg_pool2d_backward_cuda(
     const Tensor& gradOutput,
     const Tensor& input)
   {
     auto gradInput = at::zeros_like(input);
-    AdaptiveAveragePooling2d_backward_out_cuda_template(
+    adaptive_avg_pool2d_backward_out_cuda_template(
       gradInput, gradOutput, input);
     return gradInput;
   }
