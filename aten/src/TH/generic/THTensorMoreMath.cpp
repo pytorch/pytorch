@@ -2157,6 +2157,9 @@ void THTensor_(logspace)(THTensor *r_, scalar_t a, scalar_t b, int64_t n)
 
 void THTensor_(histc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t minvalue, scalar_t maxvalue)
 {
+  if (nbins <= 0) {
+      THError("nbins must be > 0");
+  }
   scalar_t minval;
   scalar_t maxval;
   scalar_t *h_data;

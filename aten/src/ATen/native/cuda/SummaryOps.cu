@@ -296,9 +296,8 @@ Tensor _histc_cuda_template(
     int64_t nbins,
     input_t min,
     input_t max) {
-  //FIXME histc_cpu has no boundary check, do they need to be consistent?
-  if (nbins < 0) {
-    AT_ERROR("nbins should be > 0");
+  if (nbins <= 0) {
+    AT_ERROR("nbins must be > 0");
   }
   Tensor output = native::zeros({nbins}, device(DeviceType::CUDA).dtype(kLong));
   input_t minvalue;
@@ -312,12 +311,11 @@ Tensor _histc_cuda_template(
     maxvalue = maxvalue + 1;
   }
   auto binsize = (maxvalue - minvalue) / nbins;
-  if (binsize == ::floor(binsize)) {
-    auto ret = cuda::CUDA_tensor_histogram<int64_t, input_t, int64_t, false>(
+  if (binsize.scalarType() == ScalarType::Double) {
+    auto ret = cuda::CUDA_tensor_histogram<int64_t, input_t, double, false>(
       output, self, at::empty({0}, self.options()), nbins, minvalue, maxvalue, binsize);
   } else {
-    //FIXME is this okay? either int or double
-    auto ret = cuda::CUDA_tensor_histogram<int64_t, input_t, double, false>(
+    auto ret = cuda::CUDA_tensor_histogram<int64_t, input_t, float, false>(
       output, self, at::empty({0}, self.options()), nbins, minvalue, maxvalue, binsize);
   }
   return output;
