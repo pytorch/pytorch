@@ -241,7 +241,7 @@ RegisterOperators reg({
 
 #define DEFINE_TORCH_TENSOR_OP(operator_type, c_type, tensor_creation_op)             \
 Operator(                                                                             \
-  "aten::tensor(" #operator_type " t, *, ScalarType? dtype=None, Device? device=None,"\
+  "aten::tensor(" #operator_type " t, *, ScalarType? dtype=None, Device? device=None"\
       ") -> Tensor",                                                                  \
   [](const Node* node) {                                                              \
     auto initial_scalar_type = scalarTypeFromJitType(node->inputs().at(0)->type());   \
