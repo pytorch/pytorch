@@ -228,6 +228,7 @@ function build_caffe2() {
 		       -DUSE_LMDB=$USE_LMDB \
 		       -DUSE_OPENCV=$USE_OPENCV \
 		       -DUSE_QNNPACK=$USE_QNNPACK \
+		       -DUSE_TENSORRT=$USE_TENSORRT \
 		       -DUSE_FFMPEG=$USE_FFMPEG \
 		       -DUSE_GLOG=OFF \
 		       -DUSE_GFLAGS=OFF \
