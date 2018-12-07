@@ -198,7 +198,7 @@ void fp16_momentum_sgd_update<CUDAContext>(
     at::Half* param,
     CUDAContext* context) {
   const cudaDeviceProp& prop = GetDeviceProperty(0);
-  if (prop.major >= 6) {
+  if (prop.major >= kFp16CUDADevicePropMajor) {
     if (!fp32_update) {
       FP16MomentumSGDKernel<<<
           CAFFE_GET_BLOCKS(N / 2),
