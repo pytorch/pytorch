@@ -441,8 +441,29 @@ struct CAFFE2_API IValue final {
   template<typename T>
   T to() const &;
 
+  // ToOptional: convert a IValue to the Optional obj that accepts both T and None
+  //
+  // special case overload for tensor type to allow undefined tensor returned instead
+  // of optional<Tensor> type in the case of None. this is done with overloads not
+  // template specialization because the return type is different with the template
   template<typename T>
-  optional<T> toOptional();
+  typename std::enable_if<!std::is_same<T, at::Tensor>::value, optional<T>>::type
+  toOptional() {
+    if (this->isNone()) {
+      return nullopt;
+    }
+    return this->to<T>();
+  }
+
+  template<typename T>
+  typename std::enable_if<std::is_same<T, at::Tensor>::value, T>::type
+  toOptional() {
+    if (this->isNone()) {
+      // return undefined tensor for optional[Tensor] type when ivalue is None
+      return at::Tensor();
+    }
+    return this->to<at::Tensor>();
+  }
 
   // this is a shallow comparison of two IValues to test the object identity
   bool isSameIdentity(IValue& rhs);
@@ -733,14 +754,6 @@ inline const std::vector<IValue>& IValue::toGenericListRef() const {
 
 inline const std::string& IValue::toStringRef() const {
   return toString()->string();
-}
-
-template<typename T>
-inline optional<T> IValue::toOptional() {
-  if (this->isNone()) {
-    return nullopt;
-  }
-  return this->to<T>();
 }
 
 inline bool IValue::isSameIdentity(IValue& rhs) {

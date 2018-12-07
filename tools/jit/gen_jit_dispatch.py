@@ -85,6 +85,7 @@ FROM_IVALUE = {
     'Scalar?': '{}.toOptional<Scalar>()',
     'ScalarType': '{}.toScalarType()',
     'Tensor': '{}.toTensor()',
+    'Tensor?': '{}.toOptional<Tensor>()',
     'TensorList': '{}.toTensorList()->elements()',
     'bool': '{}.toBool()',
     'double': '{}.toDouble()',
@@ -99,6 +100,9 @@ FROM_IVALUE = {
 
 def from_ivalue(arg, value):
     simple_type = arg['simple_type']
+
+    if arg.get('is_nullable') and '?' not in simple_type:
+        simple_type = '{}?'.format(simple_type)
     return FROM_IVALUE[simple_type].format(value)
 
 
