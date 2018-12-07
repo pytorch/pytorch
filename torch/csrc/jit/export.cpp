@@ -559,8 +559,8 @@ void ScriptModuleSerializer::convertAndWriteTensor(
       // NB: This new tensor is created to support cuda tensors.
       // Storages can be mutated when converting tensors from cuda to cpu,
       // and we need a cpu tensor to copy data from.
-      storage_tensor = at::getType(tensor)
-                           ._th_tensor(
+      storage_tensor = at::empty({0}, tensor.options())
+                           .set_(
                                tensor.storage(),
                                /* storageOffset = */ 0,
                                /* size = */
