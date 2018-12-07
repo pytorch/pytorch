@@ -201,8 +201,14 @@ static PyObject * THPVariable_get_data(THPVariable *self)
 {
   HANDLE_TH_ERRORS
   auto var = make_variable(self->cdata.data(), false);
-  /// NOTE: we need to set `allow_tensor_metadata_change_` to false, to prevent users from
-  /// changing size or storage of `tensor.data`, because those changes will not update `tensor`.
+  /// NOTE: Previously, if we change the tensor metadata (e.g. sizes / strides /
+  /// storage / storage_offset) of a tensor created from `.data`, those metadata
+  /// in the original tensor will also be updated. However, the new behavior is that
+  /// those metadata changes to the `.data` tensor will not update the original tensor
+  /// anymore, and here we need to set `allow_tensor_metadata_change_` to false to
+  /// make such changes explicitly illegal, in order to prevent users from changing
+  /// metadata of the `.data` tensor and expecting the original tensor to also
+  /// be updated.
   var.data().unsafeGetTensorImpl()->set_allow_tensor_metadata_change(false);
   return THPVariable_Wrap(var);
   END_HANDLE_TH_ERRORS

@@ -186,9 +186,14 @@ struct TORCH_API Variable : public at::Tensor {
   /// Returns a copy of this `Variable` that is detached from its autograd graph
   /// and has a blank version. This method is OK to call if the `Variable` is a
   /// view.
-  /// NOTE: This will set `allow_tensor_metadata_change_` to false, to prevent users from
-  /// changing size or storage of a detached Variable, because those changes will not update
-  /// the original Variable.
+  /// NOTE: Previously, if we change the tensor metadata (e.g. sizes / strides /
+  /// storage / storage_offset) of a tensor created from `detach()`, those metadata
+  /// in the original tensor will also be updated. However, the new behavior is that
+  /// those metadata changes to the detached tensor will not update the original tensor
+  /// anymore, and in the `detach()` function we need to set `allow_tensor_metadata_change_`
+  /// to false to make such changes explicitly illegal, in order to prevent users from
+  /// changing metadata of the detached tensor and expecting the original tensor to also
+  /// be updated.
   Variable detach() const;
 
   /// Like `detach()`, but removes this `Variable` in-place. This method may
@@ -530,6 +535,13 @@ struct TORCH_API Variable::DifferentiableViewImpl : public Variable::Impl {
 
 // Factory Functions
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// There are a lot of call sites to these factory functions that need to change
+/// the variable's size or storage afterwards, and they don't expect the original
+/// tensor (where the variable is created from) to be updated. Setting
+/// `allow_tensor_metadata_change_` to false in these factory functions would
+/// unnecessarily prevent those tensor metadata changes on the variable from
+/// happening and is undesirable.
 
 // See NOTE [ Autograd View Variables ] for details.
 inline Variable make_variable_view(

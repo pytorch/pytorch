@@ -912,10 +912,11 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   // NOTE: `shallow_copy_and_detach()` does not copy the AutogradMeta pointer
-  // because it is meant to be unique for each Variable.
+  // because it is unique for each Variable.
   // NOTE: We don't set `allow_tensor_metadata_change_` to false here, because there are call sites
   // to this function that need to change the shallow copy's size or storage afterwards, and setting
-  // `allow_tensor_metadata_change_` to false would prevent that from happening.
+  // `allow_tensor_metadata_change_` to false would prevent those changes from happening and is
+  // undesirable.
   virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const {
     auto impl = c10::make_intrusive<TensorImpl>(Storage(storage()), type_id(), is_variable());
     impl->set_sizes_and_strides(sizes(), strides());
