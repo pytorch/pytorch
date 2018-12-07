@@ -73,9 +73,13 @@ def _load_attr_from_module(module_name, func_name):
 
 def set_dir(d):
     r"""
-    Optionally set hub_dir to a local dir to save the intermediate model & checkpoint files.
-        If this argument is not set, env variable `TORCH_HUB_DIR` will be searched first,
-        `~/.torch/hub` will be created and used as fallback.
+    Optionally set hub_dir to a local dir to save downloaded models & weights.
+
+    If this argument is not set, env variable `TORCH_HUB_DIR` will be searched first,
+    `~/.torch/hub` will be created and used as fallback.
+
+    Args:
+        d: path to a local folder to save downloaded models & weights.
     """
     global hub_dir
     hub_dir = d
@@ -89,7 +93,7 @@ def load(github, model, force_reload=False, *args, **kwargs):
         github: Required, a string with format "repo_owner/repo_name[:tag_name]" with an optional
             tag/branch. The default branch is `master` if not specified.
             Example: 'pytorch/vision[:hub]'
-        model: Required, a string of callable name defined in repo's hubconf.py
+        model: Required, a string of entrypoint name defined in repo's hubconf.py
         force_reload: Optional, whether to discard the existing cache and force a fresh download.
             Default is `False`.
         *args: Optional, the corresponding args for callable `model`.
