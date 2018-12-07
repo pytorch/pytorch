@@ -35,16 +35,15 @@ void ToBatch::visitAten(Node* n, Block* block, Block* res_block){
   }
 
   // transform scalar to tensor before pass to batch operator script
-  for(size_t i = 0; i < new_inputs.size(); i++){
-    auto input = new_inputs[i];
+    for (auto& input : new_inputs) {
     if(input->type() == IntType::get() || input->type() == FloatType::get()){
       auto to_tensor_node = res_graph->createNumToTensor(input);
       res_graph->insertNode(to_tensor_node);
-      new_inputs[i] = to_tensor_node->output();
+      input = to_tensor_node->output();
     } else if(input->type() == BoolType::get()) {
       auto to_tensor_node = res_graph->createBoolToTensor(input);
       res_graph->insertNode(to_tensor_node);
-      new_inputs[i] = to_tensor_node->output();
+      input = to_tensor_node->output();
     }
   }
 

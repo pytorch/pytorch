@@ -57,7 +57,7 @@ struct python_error : public std::exception {
     other.traceback = nullptr;
   }
 
-  ~python_error() {
+  ~python_error() override {
     if (type || value || traceback) {
       AutoGIL gil;
       Py_XDECREF(type);
@@ -105,7 +105,7 @@ THP_CLASS std::string processErrorMsg(std::string str);
 // Abstract base class for exceptions which translate to specific Python types
 struct PyTorchError : public std::exception {
   virtual PyObject* python_type() = 0;
-  virtual const char* what() const noexcept override {
+  const char* what() const noexcept override {
     return msg.c_str();
   }
   std::string msg;
@@ -114,7 +114,7 @@ struct PyTorchError : public std::exception {
 // Translates to Python IndexError
 struct IndexError : public PyTorchError {
   IndexError(const char *format, ...);
-  virtual PyObject* python_type() override {
+  PyObject* python_type() override {
     return PyExc_IndexError;
   }
 };
@@ -122,7 +122,7 @@ struct IndexError : public PyTorchError {
 // Translates to Python TypeError
 struct TypeError : public PyTorchError {
   TypeError(const char *format, ...);
-  virtual PyObject* python_type() override {
+  PyObject* python_type() override {
     return PyExc_TypeError;
   }
 };
@@ -130,7 +130,7 @@ struct TypeError : public PyTorchError {
 // Translates to Python ValueError
 struct ValueError : public PyTorchError {
   ValueError(const char *format, ...);
-  virtual PyObject* python_type() override {
+  PyObject* python_type() override {
     return PyExc_ValueError;
   }
 };

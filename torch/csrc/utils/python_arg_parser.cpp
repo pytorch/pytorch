@@ -47,6 +47,7 @@ static bool should_allow_numbers_as_tensors(const std::string& name) {
   return allowed.find(name) != allowed.end();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
   : optional(false)
   , allow_none(false)
@@ -519,7 +520,7 @@ PythonArgParser::PythonArgParser(std::vector<std::string> fmts, bool traceable)
  , traceable(traceable)
 {
   for (auto& fmt : fmts) {
-    signatures_.push_back(FunctionSignature(fmt));
+    signatures_.emplace_back(fmt);
   }
   for (auto& signature : signatures_) {
     if (signature.max_args > max_args) {

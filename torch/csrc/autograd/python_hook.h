@@ -8,7 +8,7 @@ namespace torch { namespace autograd {
 
 struct PyFunctionPreHook : public FunctionPreHook {
   PyFunctionPreHook(PyObject* dict, int value_idx);
-  ~PyFunctionPreHook();
+  ~PyFunctionPreHook() override;
   variable_list operator()(const variable_list& values) override;
   PyObject* dict;
   int value_idx;
@@ -16,7 +16,7 @@ struct PyFunctionPreHook : public FunctionPreHook {
 
 struct PyFunctionPostHook : public FunctionPostHook {
   PyFunctionPostHook(PyObject* dict);
-  ~PyFunctionPostHook();
+  ~PyFunctionPostHook() override;
   variable_list operator()(const variable_list& outputs, const variable_list& inputs) override;
   PyObject* dict;
 };
