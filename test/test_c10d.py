@@ -792,13 +792,13 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             opts.rootRank = (self.rank + 1) % self.world_size
             pg.scatter([t1], [[t1] * self.world_size], opts)
 
-    def test_scatter_basics(self):
+    def _test_scatter_basics(self, fn):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
 
         # Preallocate tensors for input/output
-        input = [torch.Tensor([self.rank]) for _ in range(self.world_size)]
-        outputs = [torch.Tensor([-1]) for _ in range(self.world_size)]
+        input = [fn(torch.Tensor([self.rank])) for _ in range(self.world_size)]
+        outputs = [fn(torch.Tensor([-1])) for _ in range(self.world_size)]
 
         # Take turns being the scatter root and accumulate work items
         work = []
@@ -814,6 +814,57 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         for i in range(self.world_size):
             work[i].wait()
             self.assertEqual(torch.Tensor([i]), outputs[i])
+
+    def test_scatter_basics(self):
+        self._test_scatter_basics(lambda t: t.clone())
+
+    @skip_if_not_multigpu
+    def test_scatter_basics_cuda(self):
+        self._test_scatter_basics(lambda t: t.clone().cuda())
+
+    def _test_scatter_stress(self, inputs, fn):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts(threads=8))
+        outputs = [
+            [fn(torch.Tensor([-1])) for _ in range(self.world_size)]
+            for _ in range(len(inputs))
+        ]
+        work_handles = []
+        for i in range(len(inputs)):
+            for root in range(self.world_size):
+                opts = c10d.ScatterOptions()
+                opts.rootRank = root
+                if root == self.rank:
+                    work = pg.scatter([outputs[i][root]], [[fn(e) for e in inputs[i]]], opts)
+                else:
+                    work = pg.scatter([outputs[i][root]], [], opts)
+                work_handles.append(work)
+
+        for i, work_handle in enumerate(work_handles):
+            work_handle.wait()
+            iter = i // self.world_size
+            root = i % self.world_size
+
+            self.assertEqual(
+                torch.Tensor([iter + root]),
+                outputs[iter][root],
+                "Mismatch in iteration %d for rank %d" % (iter, root)
+            )
+
+    def test_scatter_stress(self):
+        inputs = [
+            [torch.Tensor([i + self.rank]) for _ in range(self.world_size)]
+            for i in range(1000)
+        ]
+        self._test_scatter_stress(inputs, lambda t: t.clone())
+
+    @skip_if_not_multigpu
+    def test_scatter_stress_cuda(self):
+        inputs = [
+            [torch.Tensor([i + self.rank]) for _ in range(self.world_size)]
+            for i in range(1000)
+        ]
+        self._test_scatter_stress(inputs, lambda t: t.clone().cuda())
 
     def test_gather_checks(self):
         store = c10d.FileStore(self.file.name, self.world_size)
