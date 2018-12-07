@@ -6,6 +6,7 @@ import unittest
 import torch
 import torch.utils.cpp_extension
 import torch.backends.cudnn
+
 try:
     import torch_test_cpp_extension.cpp as cpp_extension
 except ImportError:
@@ -28,7 +29,7 @@ IS_WINDOWS = sys.platform == 'win32'
 
 class TestCppExtension(common.TestCase):
     def setUp(self):
-        if sys.platform != 'win32':
+        if not IS_WINDOWS:
             default_build_root = torch.utils.cpp_extension.get_default_build_root()
             if os.path.exists(default_build_root):
                 shutil.rmtree(default_build_root)
@@ -120,7 +121,7 @@ class TestCppExtension(common.TestCase):
     @unittest.skipIf(not TEST_CUDNN, "CuDNN not found")
     def test_jit_cudnn_extension(self):
         # implementation of CuDNN ReLU
-        if sys.platform == 'win32':
+        if IS_WINDOWS:
             extra_ldflags = ['cudnn.lib']
         else:
             extra_ldflags = ['-lcudnn']
@@ -364,7 +365,7 @@ class TestCppExtension(common.TestCase):
         self.assertTrue(net.training)
         net.eval()
 
-        input = torch.randn(2, 3, dtype=torch.float32)
+        input = torch.randn(2, 3)
         output = net.forward(input)
         self.assertEqual(output, net.forward(input))
         self.assertEqual(list(output.shape), [2, 5])
@@ -380,12 +381,59 @@ class TestCppExtension(common.TestCase):
         self.assertEqual(len(net.parameters()), 4)
 
         p = net.named_parameters()
-        self.assertEqual(type(p), dict)
         self.assertEqual(len(p), 4)
         self.assertIn('fc.weight', p)
         self.assertIn('fc.bias', p)
         self.assertIn('bn.weight', p)
         self.assertIn('bn.bias', p)
+
+    def test_returns_shared_library_path_when_is_python_module_is_true(self):
+        source = '''
+        #include <torch/script.h>
+        torch::Tensor func(torch::Tensor x) { return x; }
+        static torch::jit::RegisterOperators r("test::func", &func);
+        '''
+        torch.utils.cpp_extension.load_inline(
+            name="is_python_module",
+            cpp_sources=source,
+            functions="func",
+            verbose=True,
+            is_python_module=False)
+        self.assertEqual(torch.ops.test.func(torch.eye(5)), torch.eye(5))
+
+    @unittest.skipIf(IS_WINDOWS, "Not available on Windows")
+    def test_no_python_abi_suffix_sets_the_correct_library_name(self):
+        # For this test, run_test.py will call `python setup.py install` in the
+        # cpp_extensions/no_python_abi_suffix_test folder, where the
+        # `BuildExtension` class has a `no_python_abi_suffix` option set to
+        # `True`. This *should* mean that on Python 3, the produced shared
+        # library does not have an ABI suffix like
+        # "cpython-37m-x86_64-linux-gnu" before the library suffix, e.g. "so".
+        # On Python 2 there is no ABI suffix anyway.
+        root = os.path.join("cpp_extensions", "no_python_abi_suffix_test", "build")
+        print(list(os.walk(os.path.join("cpp_extensions", "no_python_abi_suffix_test"))))
+        matches = [f for _, _, fs in os.walk(root) for f in fs if f.endswith("so")]
+        self.assertEqual(len(matches), 1, str(matches))
+        self.assertEqual(matches[0], "no_python_abi_suffix_test.so", str(matches))
+
+    def test_set_default_type_also_changes_aten_default_type(self):
+        module = torch.utils.cpp_extension.load_inline(
+            name="test_set_default_type",
+            cpp_sources="torch::Tensor get() { return torch::empty({}); }",
+            functions="get",
+            verbose=True)
+
+        initial_default = torch.get_default_dtype()
+        try:
+            self.assertEqual(module.get().dtype, initial_default)
+            torch.set_default_dtype(torch.float64)
+            self.assertEqual(module.get().dtype, torch.float64)
+            torch.set_default_dtype(torch.float32)
+            self.assertEqual(module.get().dtype, torch.float32)
+            torch.set_default_dtype(torch.float16)
+            self.assertEqual(module.get().dtype, torch.float16)
+        finally:
+            torch.set_default_dtype(initial_default)
 
 
 if __name__ == '__main__':

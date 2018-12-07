@@ -28,16 +28,13 @@ static c10::optional<std::vector<int64_t>> getMapSize(
 , at::TensorList args
 , at::IntList arg_subset) {
 
-  int64_t dim_after_broadcast = 0;
-  for (const auto arg_idx : arg_subset) {
-    dim_after_broadcast = std::max(dim_after_broadcast, args[arg_idx].dim());
-  }
   // TODO: this keeps reallocating map_size at every iteration, but we know
   // exactly how much storage do we need, so this could be fixed in-place at
   // every step. We're just missing a few functions for ATen, but the fix
   // should be straightforward.
   // Note: left unitialized since empty shape is broadcastable to any shape
   std::vector<int64_t> map_size;
+  map_size.reserve(8);
   for (const auto arg_idx : arg_subset) {
     auto& arg = args.at(arg_idx);
     auto& chunk_desc = spec.inputChunks().at(arg_idx);
@@ -257,7 +254,7 @@ void launchFusion(
   for (size_t i = 0; i < fusion.outputDesc().size(); ++i) {
     const auto& c = fusion.concatDesc()[i];
     if (c.isNoop()) {
-      outputs.push_back(at::empty(map_size, ref_options));
+      outputs.push_back(at::empty(map_size, ref_options.dtype(fusion.outputDesc()[i].scalar_type)));
       addTensorInfo(fusion.outputDesc()[i], outputs[i]);
     } else {
       size_t small_size = map_size[c.dim()];
@@ -305,14 +302,7 @@ bool runFusion(
     if (t.device() != device) {
       return false;
     }
-    if (t.type().scalarType() != dtype) {
-      return false;
-    }
   }
-
-  // The codegen only supports float and half inputs at the moment, so bail out
-  // if we see anything else.
-  if (dtype != at::kFloat && dtype != at::kHalf) return false;
 
   // Attempts to run fallback if device fusion is disabled
   if (device.is_cuda() && !canFuseOnGPU()) return false;

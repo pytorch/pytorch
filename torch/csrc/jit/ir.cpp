@@ -189,12 +189,14 @@ std::ostream& operator<<(std::ostream & out, const Graph & g) {
 }
 
 std::ostream& Graph::prettyPrint(std::ostream & out) {
-  PythonPrint(out, *this);
+  std::vector<at::Tensor> tensor_table;
+  PythonPrint(out, *this, tensor_table);
   return out;
 }
 
 void Graph::dumpPretty() {
-  PythonPrint(std::cout, *this);
+  std::vector<at::Tensor> tensor_table;
+  PythonPrint(std::cout, *this, tensor_table);
 }
 
 static void checkSameDevice(const Node* node) {
@@ -520,6 +522,10 @@ std::shared_ptr<Graph> Graph::copy() {
   return new_g;
 }
 
+bool Value::mustBeNone() const {
+  return node_->kind() == prim::None;
+}
+
 std::string Value::uniqueNameBase() const {
   std::string name = uniqueName();
   std::string name_base = name;
@@ -654,19 +660,19 @@ bool Node::isNondeterministic() const {
     "aten::poisson(Tensor self, Generator generator) -> Tensor",
     "aten::rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator generator) -> Tensor",
     "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator generator) -> Tensor",
-    "aten::rand(int[] size, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::rand(int[] size, *, int dtype, int layout, Device device) -> Tensor",
     "aten::rand_like(Tensor self) -> Tensor",
-    "aten::rand_like(Tensor self, *, int dtype, int layout, int[] device) -> Tensor",
-    "aten::randint(int high, int[] size, *, int dtype, int layout, int[] device) -> Tensor",
-    "aten::randint(int low, int high, int[] size, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::rand_like(Tensor self, *, int dtype, int layout, Device device) -> Tensor",
+    "aten::randint(int high, int[] size, *, int dtype, int layout, Device device) -> Tensor",
+    "aten::randint(int low, int high, int[] size, *, int dtype, int layout, Device device) -> Tensor",
     "aten::randint_like(Tensor self, int high) -> Tensor",
     "aten::randint_like(Tensor self, int low, int high) -> Tensor",
-    "aten::randint_like(Tensor self, int high, *, int dtype, int layout, int[] device) -> Tensor",
-    "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, int[] device) -> Tensor",
-    "aten::randn(int[] size, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::randint_like(Tensor self, int high, *, int dtype, int layout, Device device) -> Tensor",
+    "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, Device device) -> Tensor",
+    "aten::randn(int[] size, *, int dtype, int layout, Device device) -> Tensor",
     "aten::randn_like(Tensor self) -> Tensor",
-    "aten::randn_like(Tensor self, *, int dtype, int layout, int[] device) -> Tensor",
-    "aten::randperm(int n, *, int dtype, int layout, int[] device) -> Tensor"
+    "aten::randn_like(Tensor self, *, int dtype, int layout, Device device) -> Tensor",
+    "aten::randperm(int n, *, int dtype, int layout, Device device) -> Tensor"
   };
 
   if (nondeterministic_ops.find(this) == nullptr) {
@@ -860,18 +866,18 @@ Value* Node::insertOutput(size_t i) {
   return outputs_.at(i);
 }
 
-bool Node::isBefore(const Node * n) const {
-  if (this == n) {
-    return false;
-  }
-  return !isAfter(n);
-}
-
-bool Node::isAfter(const Node * n) const {
-  JIT_ASSERT(this->owningGraph() == n->owningGraph());
-
+bool Node::isBeforeOrAfter(const Node* n, MoveSide moveSide) const {
   if (this->owningBlock() == n->owningBlock()) {
-    return this->topo_position_ > n->topo_position_;
+    if (moveSide == MoveSide::BEFORE) {
+      return this->topo_position_ < n->topo_position_;
+    }
+
+    if (moveSide == MoveSide::AFTER) {
+      return this->topo_position_ > n->topo_position_;
+    }
+
+    JIT_ASSERT(this == n);
+    return false;
   }
 
   // These nodes don't share a common block. Traverse the blockchains upward
@@ -885,7 +891,7 @@ bool Node::isAfter(const Node * n) const {
       JIT_ASSERT(rhs->owningBlock());
 
       if (lhs->owningBlock() == rhs->owningBlock()) {
-        return lhs->isAfter(rhs);
+        return lhs->isBeforeOrAfter(rhs, moveSide);
       }
       rhs = rhs->owningBlock()->owningNode();
     }
@@ -894,6 +900,15 @@ bool Node::isAfter(const Node * n) const {
   }
   // should never reach here, since both nodes are ultimately in the same graph
   JIT_ASSERT(false);
+
+}
+
+bool Node::isBefore(const Node * n) const {
+  return isBeforeOrAfter(n, MoveSide::BEFORE);
+}
+
+bool Node::isAfter(const Node * n) const {
+  return isBeforeOrAfter(n, MoveSide::AFTER);
 }
 
 Node* Node::insertBefore(Node * n) {
@@ -916,7 +931,11 @@ Node* Node::insertAfter(Node * n) {
 }
 
 bool Node::moveAfterTopologicallyValid(Node* n, const AliasDb& aliasDb) {
-  return tryMove(n, MoveSide::AFTER, aliasDb);
+  return tryMove(n, MoveSide::AFTER, aliasDb, /*dryRun=*/false);
+}
+
+bool Node::couldMoveAfterTopologically(Node* n, const AliasDb& aliasDb) {
+  return tryMove(n, MoveSide::AFTER, aliasDb, /*dryRun=*/true);
 }
 
 bool Node::moveBeforeTopologicallyValid(Node* n, const AliasDb& aliasDb) {
@@ -924,7 +943,11 @@ bool Node::moveBeforeTopologicallyValid(Node* n, const AliasDb& aliasDb) {
   // n->prev()). Consider the following example:
   //   If the dependency graph looks like this -> n -> o then moveBefore(o) will
   //   end up with [this, o, n], but moveAfter(n) will return false.
-  return tryMove(n, MoveSide::BEFORE, aliasDb);
+  return tryMove(n, MoveSide::BEFORE, aliasDb, /*dryRun=*/false);
+}
+
+bool Node::couldMoveBeforeTopologically(Node* n, const AliasDb& aliasDb) {
+  return tryMove(n, MoveSide::BEFORE, aliasDb, /*dryRun=*/true);
 }
 
 // Helper for topologically-safe node moves. See `tryMove()` for details.
@@ -1104,7 +1127,7 @@ struct WorkingSet {
 // node at a time. When we can't move past a node (because it depends on the
 // working set), then add it to the working set and keep moving until we hit
 // `moveAfter`.
-bool Node::tryMove(Node* movePoint, MoveSide moveSide, const AliasDb& aliasDb) {
+bool Node::tryMove(Node* movePoint, MoveSide moveSide, const AliasDb& aliasDb, bool dryRun) {
   JIT_ASSERT(this->inBlockList() && movePoint->inBlockList());
   JIT_ASSERT(this->owningBlock() == movePoint->owningBlock());
   if (this == movePoint) {
@@ -1163,6 +1186,10 @@ bool Node::tryMove(Node* movePoint, MoveSide moveSide, const AliasDb& aliasDb) {
     // if we can't, then there are intermediate dependencies between the
     // `this` and `movePoint`, so we can't do the move
     return false;
+  }
+
+  if (dryRun) {
+    return true;
   }
 
   // 3. Execute the move

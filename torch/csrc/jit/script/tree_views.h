@@ -297,8 +297,8 @@ struct Param : public TreeView {
   explicit Param(const TreeRef& tree) : TreeView(tree) {
     tree_->match(TK_PARAM);
   }
-  static Param create(const SourceRange& range, const Ident& ident, const Expr& type) {
-    return Param(Compound::create(TK_PARAM, range, {ident, type}));
+  static Param create(const SourceRange& range, const Ident& ident, const Expr& type, Maybe<Expr> def) {
+    return Param(Compound::create(TK_PARAM, range, {ident, type, def}));
   }
   Ident ident() const {
     return Ident(subtree(0));
@@ -306,9 +306,11 @@ struct Param : public TreeView {
   Expr type() const {
     return Expr(subtree(1));
   }
-  template<typename T>
-  T typeExpect() const {
-    return T(type());
+  Maybe<Expr> defaultValue() const {
+    return Maybe<Expr>(subtree(2));
+  }
+  Param withType(Expr typ) const {
+    return Param::create(range(), ident(), typ, defaultValue());
   }
 };
 

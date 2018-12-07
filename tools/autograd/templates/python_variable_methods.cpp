@@ -20,7 +20,6 @@
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/utils/python_tuples.h"
 #include "torch/csrc/utils/tensor_apply.h"
-#include "torch/csrc/utils/tensor_conversion_dispatch.h"
 #include "torch/csrc/utils/tensor_list.h"
 #include "torch/csrc/utils/tensor_new.h"
 #include "torch/csrc/utils/tensor_numpy.h"
@@ -375,7 +374,7 @@ static PyObject * THPVariable_record_stream(PyObject* self, PyObject* arg)
     return PyErr_Format(PyExc_TypeError, "expected Stream object");
   }
   void* data = self_.data_ptr();
-  THCCachingAllocator_recordStream(data, ((THCPStream*)arg)->cdata);
+  THCCachingAllocator_recordStream(data, at::cuda::CUDAStream::unpack(((THCPStream*)arg)->cdata));
   Py_RETURN_NONE;
 #else
   throw std::runtime_error("PyTorch compiled without CUDA support");
@@ -605,11 +604,22 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   } else {
     throw TypeError("dtype must be a type, str, or dtype object");
   }
-  auto self_device_type = torch::getDeviceType(self_.type());
-  auto& type = is_dtype ? torch::getVariableType(r.scalartype(0), *torch::getLayout(self_.type().backend()), self_device_type) :
-                          torch::utils::type_from_string(type_name);
-  return THPVariable_Wrap(torch::utils::dispatch_type_conversion(
-      self_, type, c10::nullopt, r.toBool(1)));
+  ScalarType scalar_type;
+  Device device = self_.device();
+  if (is_dtype) {
+    scalar_type = r.scalartype(0);
+  } else {
+    auto& type = torch::utils::type_from_string(type_name);
+    scalar_type = type.scalarType();
+    auto device_type = backendToDeviceType(type.backend());
+    if (device_type != device.type()) {
+      device = at::Device(device_type);
+    }
+  }
+  if (device.is_cuda()) {
+    torch::utils::cuda_lazy_init();
+  }
+  return THPVariable_Wrap(dispatch_to(self_, device, scalar_type, /*non_blocking=*/ r.toBool(1), /*copy=*/ false));
   END_HANDLE_TH_ERRORS
 }
 

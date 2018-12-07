@@ -1,7 +1,8 @@
 #pragma once
 
 #include "ATen/core/Tensor.h"
-#include "ATen/core/Scalar.h"
+#include <c10/core/Scalar.h>
+#include <c10/macros/Macros.h>
 #include "ATen/core/SparseTensorRef.h"
 #include "ATen/core/Type.h"
 #include "ATen/core/TensorOptions.h"
@@ -20,6 +21,10 @@ inline Tensor Tensor::cpu() const {
 
 inline Tensor Tensor::cuda() const {
   return toType(type().cuda());
+}
+
+inline Tensor Tensor::hip() const {
+  return toType(type().hip());
 }
 
 inline Tensor & Tensor::copy_(const Tensor & src, bool non_blocking) {
@@ -53,9 +58,6 @@ inline void Tensor::set_data(Tensor new_data) {
 }
 
 // all static inline to allow for inlining of the non-dynamic part of dispatch
-inline Tensor & Tensor::_th_triu_(int64_t diagonal) {
-    return type()._th_triu_(*this, diagonal);
-}
 inline Tensor Tensor::abs() const {
     return type().abs(*this);
 }
@@ -314,11 +316,11 @@ inline Tensor Tensor::index(TensorList indices) const {
 inline Tensor & Tensor::index_copy_(int64_t dim, const Tensor & index, const Tensor & source) {
     return type().index_copy_(*this, dim, index, source);
 }
-inline Tensor Tensor::index_put(TensorList indices, const Tensor & values) const {
-    return type().index_put(*this, indices, values);
+inline Tensor Tensor::index_put(TensorList indices, const Tensor & values, bool accumulate) const {
+    return type().index_put(*this, indices, values, accumulate);
 }
-inline Tensor & Tensor::index_put_(TensorList indices, const Tensor & values) {
-    return type().index_put_(*this, indices, values);
+inline Tensor & Tensor::index_put_(TensorList indices, const Tensor & values, bool accumulate) {
+    return type().index_put_(*this, indices, values, accumulate);
 }
 inline Tensor Tensor::inverse() const {
     return type().inverse(*this);
@@ -401,13 +403,13 @@ inline Tensor Tensor::mean(ScalarType dtype) const {
 inline Tensor Tensor::mean() const {
     return type().mean(*this);
 }
-inline Tensor Tensor::mean(int64_t dim, bool keepdim, ScalarType dtype) const {
+inline Tensor Tensor::mean(IntList dim, bool keepdim, ScalarType dtype) const {
     return type().mean(*this, dim, keepdim, dtype);
 }
-inline Tensor Tensor::mean(int64_t dim, bool keepdim) const {
+inline Tensor Tensor::mean(IntList dim, bool keepdim) const {
     return type().mean(*this, dim, keepdim);
 }
-inline Tensor Tensor::mean(int64_t dim, ScalarType dtype) const {
+inline Tensor Tensor::mean(IntList dim, ScalarType dtype) const {
     return type().mean(*this, dim, dtype);
 }
 inline std::tuple<Tensor,Tensor> Tensor::median(int64_t dim, bool keepdim) const {
@@ -782,8 +784,8 @@ inline Tensor Tensor::to(ScalarType dtype, bool non_blocking, bool copy) const {
 inline Tensor Tensor::to(const Tensor & other, bool non_blocking, bool copy) const {
     return type().to(*this, other, non_blocking, copy);
 }
-inline Scalar Tensor::_local_scalar() const {
-    return type()._local_scalar(*this);
+inline Scalar Tensor::item() const {
+    return type().item(*this);
 }
 inline void* Tensor::data_ptr() const {
     return type().data_ptr(*this);
@@ -1276,6 +1278,15 @@ inline bool is_cuda(Tensor self) {
   return self.is_cuda();
 }
 
+inline bool Tensor::is_hip() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->is_hip();
+}
+
+inline bool is_hip(Tensor self) {
+  return self.is_hip();
+}
+
 inline bool Tensor::is_sparse() const {
   // NB: this is not a native function to avoid dispatching overhead.
   return impl_->is_sparse();
@@ -1293,20 +1304,20 @@ inline bool is_sparse(Tensor self) {
         "expected scalar type ",                 \
         #name,                                   \
         " but found ",                           \
-        at::toString(type().scalarType()));      \
+        c10::toString(type().scalarType()));     \
     return static_cast<T*>(this->data_ptr());    \
   }
 
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)
 #undef DEFINE_CAST
 
-#define DEFINE_TO_C_TYPE(T, name, _)   \
-  template <>                          \
-  inline T Tensor::item() const {      \
-    return _local_scalar().to##name(); \
+#define DEFINE_ITEM(T, name, _)   \
+  template <>                     \
+  inline T Tensor::item() const { \
+    return item().to##name();     \
   }
 
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_TO_C_TYPE)
-#undef DEFINE_TO_C_TYPE
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_ITEM)
+#undef DEFINE_ITEM
 
 } //namespace at
