@@ -247,6 +247,7 @@ class RendezvousTest(TestCase):
 
 
 class RendezvousEnvTest(TestCase):
+    @retry_on_address_already_in_use_error
     def test_common_errors(self):
         # TODO remove this hack
         if not hasattr(c10d, "ProcessGroupNCCL"):
@@ -1099,7 +1100,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
         # Sleep on one of the processes to trigger barrier timeout
         if self.rank == 0:
-            time.sleep(0.6)
+            time.sleep(1.0)
 
         # The barrier will now time out
         with self.assertRaisesRegex(RuntimeError, " (Timed out|closed) "):
@@ -1564,6 +1565,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         )
 
     @skip_if_not_nccl
+    @skip_if_not_multigpu
     def test_queue_reduction(self):
         # Set up process group.
         store = c10d.FileStore(self.file.name, self.world_size)
@@ -1591,6 +1593,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                          torch.ones(10) * (self.world_size + 1) * len(devices) / 2.0)
 
     @skip_if_not_nccl
+    @skip_if_not_multigpu
     def test_sync_reduction(self):
         # Set up process group.
         store = c10d.FileStore(self.file.name, self.world_size)

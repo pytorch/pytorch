@@ -13,8 +13,8 @@ from ..._jit_internal import weak_module, weak_script_method
 @weak_module
 class _BatchNorm(Module):
     _version = 2
-    __constants__ = ['training', 'track_running_stats', 'momentum', 'eps',
-                     'weight', 'bias', 'running_mean', 'running_var', 'num_batches_tracked']
+    __constants__ = ['track_running_stats', 'momentum', 'eps', 'weight', 'bias',
+                     'running_mean', 'running_var', 'num_batches_tracked']
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
                  track_running_stats=True):
@@ -62,11 +62,13 @@ class _BatchNorm(Module):
         exponential_average_factor = 0.0
 
         if self.training and self.track_running_stats:
-            self.num_batches_tracked += 1
-            if self.momentum is None:  # use cumulative moving average
-                exponential_average_factor = 1.0 / float(self.num_batches_tracked)
-            else:  # use exponential moving average
-                exponential_average_factor = self.momentum
+            # TODO: if statement only here to tell the jit to skip emitting this when it is None
+            if self.num_batches_tracked is not None:
+                self.num_batches_tracked += 1
+                if self.momentum is None:  # use cumulative moving average
+                    exponential_average_factor = 1.0 / float(self.num_batches_tracked)
+                else:  # use exponential moving average
+                    exponential_average_factor = self.momentum
 
         return F.batch_norm(
             input, self.running_mean, self.running_var, self.weight, self.bias,
@@ -160,6 +162,7 @@ class BatchNorm1d(_BatchNorm):
         https://arxiv.org/abs/1502.03167
     """
 
+    @weak_script_method
     def _check_input_dim(self, input):
         if input.dim() != 2 and input.dim() != 3:
             raise ValueError('expected 2D or 3D input (got {}D input)'
@@ -233,6 +236,7 @@ class BatchNorm2d(_BatchNorm):
         https://arxiv.org/abs/1502.03167
     """
 
+    @weak_script_method
     def _check_input_dim(self, input):
         if input.dim() != 4:
             raise ValueError('expected 4D input (got {}D input)'
@@ -307,6 +311,7 @@ class BatchNorm3d(_BatchNorm):
         https://arxiv.org/abs/1502.03167
     """
 
+    @weak_script_method
     def _check_input_dim(self, input):
         if input.dim() != 5:
             raise ValueError('expected 5D input (got {}D input)'

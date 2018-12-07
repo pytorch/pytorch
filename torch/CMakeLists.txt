@@ -552,7 +552,6 @@ if (BUILD_PYTHON)
     ${TORCH_SRC_DIR}/csrc/utils/object_ptr.cpp
     ${TORCH_SRC_DIR}/csrc/utils/python_arg_parser.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_apply.cpp
-    ${TORCH_SRC_DIR}/csrc/utils/tensor_conversion_dispatch.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_dtypes.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_layouts.cpp
@@ -581,7 +580,6 @@ if (BUILD_PYTHON)
     ${TORCH_ROOT}/third_party/build/nccl/include
     ${TORCH_ROOT}/third_party/gloo
     ${TORCH_ROOT}/third_party/onnx
-    ${TORCH_ROOT}/third_party/protobuf/src
     ${TORCH_ROOT}/third_party/pybind11/include
 
     ${TORCH_SRC_DIR}/csrc

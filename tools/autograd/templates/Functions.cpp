@@ -1605,8 +1605,8 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   }
 
   auto ut = u.t();
-  auto im = eye(m, self.options());
-  auto in = eye(n, self.options());
+  auto im = at::eye(m, self.options());
+  auto in = at::eye(n, self.options());
   auto sigma_mat = sigma.diag();
   auto sigma_mat_inv = sigma.pow(-1).diag();
   auto sigma_expanded_sq = sigma.pow(2).expand_as(sigma_mat);
@@ -2053,6 +2053,12 @@ Tensor sparse_constructor_values_backward(const Tensor& sparse_grad_out, const T
   auto flattened_dense_grad = dense_grad.view(flattened_grad_shape);
   auto flattened_indices = at::sparse::flatten_indices(indices, full_size);
   return flattened_dense_grad.index_select(0, flattened_indices);
+}
+
+Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
+  AT_ASSERT(input_.is_sparse());
+  auto input = input_.coalesce();
+  return grad.sparse_mask(at::SparseTensorRef(input));
 }
 
 // Because the backward of pad(input, pads) is just pad(grad_output, [-p for p in pads])
