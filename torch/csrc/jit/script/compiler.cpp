@@ -817,8 +817,16 @@ Value* emitBuiltinCall(
   if (!required) {
     return nullptr;
   }
-  if(variants.size() == 0) {
-    throw ErrorReport(loc) << "unknown builtin op";
+  if (variants.size() == 0) {
+    auto report = ErrorReport(loc);
+    std::stringstream types;
+    report << "unknown builtin op for call " << name.toQualString() << ": ";
+    auto delimiter = "";
+    for (auto arg : inputs) {
+      report << delimiter <<  arg.value(graph)->type()->str();
+      delimiter = ", ";
+    }
+    throw report;
   }
   throw ErrorReport(loc) << "arguments for call are not valid:\n"
                          << prefixLine(failure_messages.str(), "  ")
@@ -2647,7 +2655,11 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(SourceRange loc, Method & m, con
 
 std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs) {
   std::unordered_map<Value*, Value*> value_map;
-  auto value_map_func = [&](Value* v) { return value_map.at(v); };
+  auto value_map_func = [&](Value* v) {
+    auto callee_value = value_map.find(v);
+    JIT_ASSERT(callee_value != value_map.end());
+    return callee_value->second;
+  };
   JIT_ASSERT(callee.inputs().size() == inputs.size());
   for (size_t i = 0; i < inputs.size(); ++i) {
     value_map[callee.inputs()[i]] = inputs[i];

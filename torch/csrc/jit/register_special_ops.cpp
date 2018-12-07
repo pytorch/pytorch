@@ -38,6 +38,16 @@ RegisterOperators reg({
           return 0;
         }),
     Operator(
+        "aten::size(Tensor self, int dim) -> int[]",
+        [](Stack& stack) {
+          autograd::profiler::RecordFunction record("sizes");
+          auto sizes = (std::move(pop(stack))).toTensor().sizes();
+          auto dim = pop(stack).toInt();
+          JIT_ASSERT(dim >= 0 && dim < int(sizes.size()));
+          pack(stack, std::move(sizes[dim]));
+          return 0;
+        }),
+    Operator(
         "aten::list_with_default(int[] list, int[] defaults) -> int[]",
         [](Stack& stack) {
           autograd::profiler::RecordFunction record("sizes");
@@ -97,6 +107,49 @@ RegisterOperators reg({
           };
         }),
     Operator(
+      "aten::_is_packed_sequence((Tensor, Tensor?) tuple) -> bool",
+        [](const Node* node) {
+          return [](Stack& stack) {
+            auto tuple = pop(stack).toTuple()->elements();
+            JIT_ASSERT(tuple.size() == 2);
+            push(stack, true);
+            return 0;
+          };
+        }),
+    Operator(
+      // "aten::_get_packed_sequence(Tensor a, Tensor b) -> (Tensor, Tensor?)", // TODO: using this causes a segfault
+      FunctionSchema(
+          "aten::_get_packed_sequence",
+          {Argument("output", DynamicType::get()),
+            Argument("batch_size", DynamicType::get())},
+          {Argument("a", TupleType::create(
+              {DynamicType::get(), OptionalType::create(DynamicType::get())}))}),
+          [](const Node* node) {
+            return [](Stack& stack) {
+              std::vector<IValue> values;
+               values.emplace_back(pop(stack).toTensor());
+               values.emplace_back(pop(stack).toTensor());
+               push(stack, values);
+               return 0;
+            };
+          }),
+    Operator(
+      "aten::_unwrap_tuple((Tensor, Tensor?) tuple) -> Tensor",
+      [](const Node* node) {
+        return [](Stack& stack) {
+          AT_ERROR("Cannot unwrap tuple");
+          return 0;
+        };
+      }),
+    Operator(
+      "aten::_wrap_tuple(Tensor item) -> (Tensor, Tensor?)",
+      [](const Node* node) {
+        return [](Stack& stack) {
+          AT_ERROR("Cannot wrap tuple");
+          return 0;
+        };
+      }),
+    Operator(
       "aten::_no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) -> Tensor",
       [](const Node* node) {
         return [](Stack& stack) {
@@ -115,7 +168,6 @@ RegisterOperators reg({
           return 0;
         };
       }),
-
 });
 }
 } // namespace jit

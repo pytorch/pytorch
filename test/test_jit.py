@@ -9182,6 +9182,24 @@ a")
 
         self.assertExpectedGraph(foo.graph)
 
+    def test_nn_LSTM(self):
+        input = torch.nn.utils.rnn.pack_sequence([torch.randn(5, 5)])
+
+        class S(torch.jit.ScriptModule):
+            def __init__(self):
+                super(S, self).__init__()
+                self.x = torch.nn.LSTM(5, 5)
+
+            @torch.jit.script_method
+            def forward(self, input):
+                # type: (Tuple[Tensor, Tensor]) -> Tuple[Tuple[Tensor, Optional[Tensor]], Tuple[Tensor, Tensor]]
+                return self.x(input)
+
+        eager_out = self.runAndSaveRNG(lambda input: torch.nn.LSTM(5, 5)(input)[0], (input,))
+        script_out = self.runAndSaveRNG(lambda input: S()(input)[0], (input,))
+
+        self.assertEqual(eager_out.data, script_out[1])
+
 
 class MnistNet(nn.Module):
     def __init__(self):

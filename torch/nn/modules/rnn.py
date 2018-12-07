@@ -6,10 +6,12 @@ import numbers
 
 from .module import Module
 from ..parameter import Parameter
-from ..utils.rnn import PackedSequence
+from ..utils.rnn import PackedSequence, is_packed_sequence, get_packed_sequence
 from .. import init
+from .. import _VF
+from ..._jit_internal import weak_module, weak_script_method
+from typing import Optional
 
-_VF = torch._C._VariableFunctions
 _rnn_impls = {
     'LSTM': _VF.lstm,
     'GRU': _VF.gru,
@@ -18,11 +20,14 @@ _rnn_impls = {
 }
 
 
+@weak_module
 class RNNBase(Module):
+    __constants__ = ['mode', 'input_size', 'hidden_size', 'num_layers', 'bias',
+                     'batch_first', 'dropout', 'bidirectional']
 
     def __init__(self, mode, input_size, hidden_size,
                  num_layers=1, bias=True, batch_first=False,
-                 dropout=0, bidirectional=False):
+                 dropout=0., bidirectional=False):
         super(RNNBase, self).__init__()
         self.mode = mode
         self.input_size = input_size
@@ -122,7 +127,13 @@ class RNNBase(Module):
         for weight in self.parameters():
             init.uniform_(weight, -stdv, stdv)
 
+    def check_hidden_size(self, hx, expected_hidden_size, msg='Expected hidden size {}, got {}'):
+        # type: (Tensor, Tuple[int, int], str)
+        if tuple(hx.size()) != expected_hidden_size:
+            raise RuntimeError(msg.format(expected_hidden_size, tuple(hx.size())))
+
     def check_forward_args(self, input, hidden, batch_sizes):
+        # type: (Tensor, Tuple[Tensor, Tensor], Optional[Tensor])
         is_input_packed = batch_sizes is not None
         expected_input_dim = 2 if is_input_packed else 3
         if input.dim() != expected_input_dim:
@@ -135,6 +146,7 @@ class RNNBase(Module):
                     self.input_size, input.size(-1)))
 
         if is_input_packed:
+            batch_sizes = torch.jit._unwrap_optional(batch_sizes)
             mini_batch = int(batch_sizes[0])
         else:
             mini_batch = input.size(0) if self.batch_first else input.size(1)
@@ -143,17 +155,7 @@ class RNNBase(Module):
         expected_hidden_size = (self.num_layers * num_directions,
                                 mini_batch, self.hidden_size)
 
-        def check_hidden_size(hx, expected_hidden_size, msg='Expected hidden size {}, got {}'):
-            if tuple(hx.size()) != expected_hidden_size:
-                raise RuntimeError(msg.format(expected_hidden_size, tuple(hx.size())))
-
-        if self.mode == 'LSTM':
-            check_hidden_size(hidden[0], expected_hidden_size,
-                              'Expected hidden[0] size {}, got {}')
-            check_hidden_size(hidden[1], expected_hidden_size,
-                              'Expected hidden[1] size {}, got {}')
-        else:
-            check_hidden_size(hidden, expected_hidden_size)
+        self.check_hidden_size(hidden, expected_hidden_size)
 
     def forward(self, input, hx=None):
         is_packed = isinstance(input, PackedSequence)
@@ -330,6 +332,7 @@ class RNN(RNNBase):
         super(RNN, self).__init__(mode, *args, **kwargs)
 
 
+@weak_module
 class LSTM(RNNBase):
     r"""Applies a multi-layer long short-term memory (LSTM) RNN to an input
     sequence.
@@ -436,6 +439,81 @@ class LSTM(RNNBase):
 
     def __init__(self, *args, **kwargs):
         super(LSTM, self).__init__('LSTM', *args, **kwargs)
+
+    @weak_script_method
+    def check_hidden_size(self, hx, expected_hidden_size, msg='Expected hidden size {}, got {}'):
+        # type: (Tensor, List[int], str)
+        size = hx.size()
+        if size != expected_hidden_size:
+            raise RuntimeError(msg.format(expected_hidden_size, tuple(hx.size())))
+
+    @weak_script_method
+    def check_forward_args(self, input, hidden, batch_sizes):
+        # type: (Tensor, Tuple[Tensor, Tensor], Optional[Tensor])
+        is_input_packed = batch_sizes is not None
+        expected_input_dim = 2 if is_input_packed else 3
+        if input.dim() != expected_input_dim:
+            raise RuntimeError(
+                'input must have {} dimensions, got {}'.format(
+                    expected_input_dim, input.dim()))
+        if self.input_size != input.size(-1):
+            raise RuntimeError(
+                'input.size(-1) must be equal to input_size. Expected {}, got {}'.format(
+                    self.input_size, input.size(-1)))
+
+        if is_input_packed:
+            batch_sizes = torch.jit._unwrap_optional(batch_sizes)
+            mini_batch = int(batch_sizes[0])
+        else:
+            mini_batch = input.size(0) if self.batch_first else input.size(1)
+
+        num_directions = 2 if self.bidirectional else 1
+        expected_hidden_size = (self.num_layers * num_directions,
+                                mini_batch, self.hidden_size)
+
+        self.check_hidden_size(hidden[0], expected_hidden_size,
+                               'Expected hidden[0] size {}, got {}')
+        self.check_hidden_size(hidden[1], expected_hidden_size,
+                               'Expected hidden[1] size {}, got {}')
+
+    @weak_script_method
+    def forward(self, input, hx=None):
+        # type: (Tuple[Tensor, Optional[Tensor]], Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tuple[Tensor, Optional[Tensor]], Tuple[Tensor, Tensor]]  # noqa
+        is_packed = is_packed_sequence(input)
+        if is_packed:
+            input_tensor, batch_sizes = input
+            batch_sizes = torch.jit._unwrap_optional(batch_sizes)
+            max_batch_size = int(batch_sizes[0])
+        else:
+            input_tensor = torch.jit._unwrap_tuple(input)
+            batch_sizes = torch.jit.annotate(Optional[torch.Tensor], None)
+            max_batch_size = input_tensor.size(0) if self.batch_first else input_tensor.size(1)
+
+        if hx is None:
+            num_directions = 2 if self.bidirectional else 1
+            zeros = torch.zeros(self.num_layers * num_directions,
+                                max_batch_size, self.hidden_size,
+                                dtype=input_tensor.dtype, device=input_tensor.device)
+            _hx = (zeros, zeros)
+        else:
+            _hx = torch.jit._unwrap_optional(hx)
+
+        self.check_forward_args(input_tensor, _hx, batch_sizes)
+        if batch_sizes is None:
+            result = _VF.lstm(input_tensor, _hx, list(self._parameters.values()), self.bias, self.num_layers,
+                              self.dropout, self.training, self.bidirectional, self.batch_first)
+        else:
+            batch_sizes = torch.jit._unwrap_optional(batch_sizes)
+            result = _VF.lstm(input_tensor, batch_sizes, _hx, list(self._parameters.values()), self.bias,
+                              self.num_layers, self.dropout, self.training, self.bidirectional)
+        output = result[0]
+        hidden = result[1:]
+
+        if is_packed:
+            _output = get_packed_sequence(output, batch_sizes)
+        else:
+            _output = torch.jit._wrap_tuple(output)
+        return _output, hidden
 
 
 class GRU(RNNBase):

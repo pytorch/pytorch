@@ -790,6 +790,14 @@ Operation listLen(const Node* node) {
 }
 
 template <typename T>
+Operation listList(const Node* node) {
+  return [=](Stack& stack) {
+    // Noop
+    return 0;
+  };
+}
+
+template <typename T>
 Operation listEq(const Node* node) {
   return [=](Stack& stack) {
     T a;
@@ -979,6 +987,7 @@ Operator(                                                                      \
 
 #define CREATE_LIST_OPS(decl_type, c_type) \
     Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>), \
+    Operator("aten::list(" decl_type "[] a) -> " decl_type "[]", listList<Shared<c_type>>), \
     Operator("aten::add(" decl_type "[] a, " decl_type "[] b) -> " decl_type "[]", listAdd<Shared<c_type>, c_type::ElemType>), \
     Operator( \
         "aten::slice(" decl_type "[] l, int start, int end=9223372036854775807, int step=1) -> " decl_type "[]", \

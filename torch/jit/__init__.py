@@ -13,6 +13,7 @@ from .._jit_internal import createResolutionCallback, _compiled_weak_fns, \
     COMPILATION_PENDING, _boolean_dispatched
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
+from ..nn.utils.rnn import is_packed_sequence, get_packed_sequence
 import torch.testing
 import math
 from collections import defaultdict, OrderedDict, namedtuple
@@ -1402,6 +1403,14 @@ def _unwrap_optional(x):
     return x
 
 
+def _unwrap_tuple(x):
+    return x
+
+
+def _wrap_tuple(x):
+    return x
+
+
 # lazily built to ensure the correct initialization order
 def _get_builtin_table():
     global _builtin_table
@@ -1426,8 +1435,11 @@ def _get_builtin_table():
     _builtin_table[id(_unwrap_optional)] = "aten::_unwrap_optional"
     _builtin_table[id(cudnn.is_acceptable)] = "aten::cudnn_is_acceptable"
     _builtin_table[id(torch._C._infer_size)] = "aten::_infer_size"
+    _builtin_table[id(is_packed_sequence)] = "aten::_is_packed_sequence"
+    _builtin_table[id(get_packed_sequence)] = "aten::_get_packed_sequence"
+    _builtin_table[id(_unwrap_tuple)] = "aten::_unwrap_tuple"
+    _builtin_table[id(_wrap_tuple)] = "aten::_wrap_tuple"
     _builtin_table[id(torch.nn.functional._no_grad_embedding_renorm_)] = "aten::_no_grad_embedding_renorm_"
-
     _builtin_table[id(math.floor)] = "aten::floor"
     _builtin_table[id(torch.nn.functional.interpolate)] = "aten::__interpolate"
     _builtin_table[id(torch.nn.functional.upsample_nearest)] = "aten::__upsample_nearest"
@@ -1445,6 +1457,7 @@ def _find_builtin(fn):
     return _get_builtin_table().get(id(fn))
 
 
+_register_builtin(list, 'aten::list')
 _register_builtin(len, 'aten::len')
 _register_builtin(_wait, 'aten::wait')
 

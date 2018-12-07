@@ -151,16 +151,17 @@ protected:
 };
 
 struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {
-  explicit PythonModuleValue(py::object mod) : PythonValue(mod) {}
+  explicit PythonModuleValue(py::object self) : PythonValue(self) {}
 
   std::shared_ptr<SugaredValue> attr(
       SourceRange loc,
       Method& m,
       const std::string& field) override {
     py::object member = getattr(loc, field);
+
     // note: is_constant = true because we consider that global properties
     // on modules like math.pi or torch.float to be constants
-    // eventhough it is possible, though rare, for someone to mutate them
+    // even though it is possible, though rare, for someone to mutate them
     return toSugaredValue(member, m, loc, /*is_constant=*/true);
   }
 };
@@ -193,13 +194,69 @@ struct VISIBILITY_HIDDEN ConstantPythonTupleValue : public PythonValue {
   }
 };
 
+
+struct VISIBILITY_HIDDEN ParameterListValues : public SugaredValue {
+  ParameterListValues(std::shared_ptr<Module> module)
+  : module_(std::move(module)) {}
+
+  std::string kind() const override {
+    return "parameter list";
+  }
+
+  // self._parameters.values()
+  std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<NamedValue> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
+    std::vector<Value*> params;
+    const auto& param_list = module_->get_parameters();
+    auto list_it = param_list.end() - 1;
+    while (true) {
+      params.push_back(caller.get_or_add_parameter((*list_it)->slot()));
+      if (list_it == param_list.begin()) {
+        break;
+      }
+      list_it--;
+    }
+    auto list = caller.graph()->createList(DynamicType::get(), params);
+    caller.graph()->insertNode(list);
+    return toSimple(list->output());
+  }
+
+ private:
+  std::shared_ptr<Module> module_;
+};
+
+
+struct VISIBILITY_HIDDEN ParameterList : public SugaredValue {
+  ParameterList(std::shared_ptr<Module> module)
+  : module_(std::move(module)) {}
+
+  std::string kind() const override {
+    return "parameters";
+  }
+
+  std::shared_ptr<SugaredValue> attr(
+      SourceRange loc,
+      Method& m,
+      const std::string& field) override {
+
+    if (field == "values") {
+      // only allow self._parameters.values() to be resolved
+      return std::make_shared<ParameterListValues>(module_);
+    }
+
+    throw ErrorReport(loc) << "attribute '" << field << "' is not usable in a script method";
+  }
+
+ private:
+  std::shared_ptr<Module> module_;
+};
+
+
 // defines how modules/methods behave inside the script subset.
 // for now this does not have any interaction with python.
 // in the future, we will add the ability to resolve `self.foo` to python
 // {functions, modules, contants} so this SugaredValue is defined here
 // anticipating we will eventually need to replace Module with a py::object
 // holding the actual nn.Module class.
-
 
 struct ModuleValue : public SugaredValue {
   ModuleValue(std::shared_ptr<Module> module)
@@ -246,6 +303,8 @@ struct ModuleValue : public SugaredValue {
           py::isinstance(attr, py::module::import("torch.nn").attr("Module")) ||
           py_module.attr("_constants_set").contains(field.c_str())) {
         return toSugaredValue(attr, m, loc, true);
+      } else if (py::isinstance(attr, py::module::import("torch.jit").attr("OrderedParameterDict"))) {
+        return std::make_shared<ParameterList>(module);
       } else {
         throw ErrorReport(loc) << "attribute '" << field << "' of type '" << typeString(attr) << "' is not usable in a script method (did you forget to add it __constants__?)";
       }
