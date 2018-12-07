@@ -5,14 +5,13 @@
 namespace at {
 namespace native {
 
-
 template <typename scalar_t>
-at::Tensor MaxUnpooling2d_forward_cpu_out_(
-    const Tensor& output,
+at::Tensor MaxUnpooling2d_forward_out_cpu_(
+    Tensor& output,
     const Tensor& input,
     const Tensor& indices,
-    int outputHeight,
-    int outputWidth) {
+    int64_t outputHeight,
+    int64_t outputWidth) {
   // TODO: replicate is_empty() cbeck in SpatialMaxUnpooling.c
   AT_CHECK(
       input.ndimension() == 4,
@@ -25,7 +24,9 @@ at::Tensor MaxUnpooling2d_forward_cpu_out_(
 
   auto numBatch = input.size(0);
   auto numChannels = input.size(1);
-  AT_CHECK(output.sizes() == IntList({numBatch, numChannels, outputHeight, outputWidth}),
+  AT_CHECK(
+      output.sizes() ==
+          IntList({numBatch, numChannels, outputHeight, outputWidth}),
       "The first two dimensions of output should match those of input, and last two dimensions should match output height and width");
   AT_CHECK(output.is_contiguous(), "output must be contiguous");
 
@@ -33,7 +34,7 @@ at::Tensor MaxUnpooling2d_forward_cpu_out_(
   auto inputWidth = input.size(3);
 
   auto* rawInput = input.data<scalar_t>();
-  auto* rawIndices = indices.data<int>();
+  auto* rawIndices = indices.data<long>();
   auto* rawOutput = output.data<scalar_t>();
 
   int maxp;
@@ -60,25 +61,27 @@ at::Tensor MaxUnpooling2d_forward_cpu_out_(
   return output;
 }
 
-
-at::Tensor MaxUnpooling2d_forward_cpu_out(const Tensor& output,
-  const Tensor& self,
-  const Tensor& indices,
-  IntList output_size) {
+at::Tensor MaxUnpooling2d_forward_out_cpu(
+    Tensor& output,
+    const Tensor& self,
+    const Tensor& indices,
+    IntList output_size) {
   AT_CHECK(
       output_size.size() == 2,
       "There should be exactly two elements (height, width) in output_size");
-  AT_DISPATCH_FLOATING_TYPES(self.type(),
-    "MaxUnpooling2d_forward_cpu_out_",
-  ([&] {
-    MaxUnpooling2d_forward_cpu_out_<scalar_t>(output, self, indices, output_size[0], output_size[1]);
-  }));
+  AT_DISPATCH_FLOATING_TYPES(
+      self.type(), "MaxUnpooling2d_forward_out_cpu_", ([&] {
+        MaxUnpooling2d_forward_out_cpu_<scalar_t>(
+            output, self, indices, output_size[0], output_size[1]);
+      }));
   return output;
 };
 
-at::Tensor MaxUnpooling2d_forward_cpu(const Tensor& self,
-  const Tensor& indices,
-  IntList output_size) {
+at::Tensor MaxUnpooling2d_forward_cpu(
+    const Tensor& self,
+    const Tensor& indices,
+    IntList output_size) {
+  std::cout << "MaxUnpooling2d_forward_cpu called" << "\n";
   AT_CHECK(
       self.ndimension() == 4,
       "Input to MaxUnpooling2d should be a NCHW Tensor",
@@ -86,8 +89,10 @@ at::Tensor MaxUnpooling2d_forward_cpu(const Tensor& self,
   AT_CHECK(
       output_size.size() == 2,
       "There should be exactly two elements (height, width) in output_size");
-  auto output = at::zeros({self.size(0), self.size(1), output_size[0], output_size[1]}, self.options());
-  MaxUnpooling2d_forward_cpu_out(output, self, indices, output_size);
+  auto output = at::zeros(
+      {self.size(0), self.size(1), output_size[0], output_size[1]},
+      self.options());
+  MaxUnpooling2d_forward_out_cpu(output, self, indices, output_size);
   return output;
 };
 
@@ -98,12 +103,22 @@ Tensor MaxUnpooling2d_backward_cpu(
   AT_ERROR("not implemented");
 }
 
+at::Tensor MaxUnpooling2d_forward_out_gpu(
+    Tensor& output,
+    const Tensor& self,
+    const Tensor& indices,
+    IntList output_size) {
+  std::cout << "MaxUnpooling2d_forward_out_gpu called" << "\n";
+  return at::_thnn_max_unpool2d_out(output, self, indices, output_size);
+}
+
 // stopgap until GPU version is implemented
-at::Tensor MaxUnpooling2d_forward_gpu(const Tensor& self,
-  const Tensor& indices,
-  IntList output_size) {
-    return at::max_unpool2d(self, indices, output_size);
-};
+at::Tensor MaxUnpooling2d_forward_gpu(
+    const Tensor& self,
+    const Tensor& indices,
+    IntList output_size) {
+  return at::_thnn_max_unpool2d(self, indices, output_size);
+}
 
 } // namespace native
 } // namespace at

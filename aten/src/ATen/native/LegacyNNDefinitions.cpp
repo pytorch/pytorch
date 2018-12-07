@@ -478,10 +478,10 @@ Tensor max_pool3d_with_indices_backward(const Tensor & grad_output, const Tensor
 Tensor & max_unpool2d_out(Tensor & output, const Tensor & self, const Tensor & indices, IntList output_size) {
   return at::_thnn_max_unpool2d_out(output, self, indices, output_size);
 }
-//
-// Tensor max_unpool2d(const Tensor & self, const Tensor & indices, IntList output_size) {
-//   return at::_thnn_max_unpool2d(self, indices, output_size);
-// }
+
+Tensor max_unpool2d(const Tensor & self, const Tensor & indices, IntList output_size) {
+  return at::_thnn_max_unpool2d(self, indices, output_size);
+}
 
 Tensor & max_unpool2d_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, const Tensor & indices, IntList output_size) {
   return at::_thnn_max_unpool2d_backward_out(grad_input, grad_output, self, indices, output_size);
