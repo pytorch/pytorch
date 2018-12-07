@@ -204,11 +204,11 @@ namespace {
 
   // 4d tensor B x D x H x W
 
-  void AdaptiveAveragePooling2d_forward_out_cuda_template(
+  void AdaptiveAveragePooling2d_out_cuda_template(
     Tensor& output,
     const Tensor& input,
-    IntList output_size
-  ) {
+    IntList output_size)
+  {
     TensorArg input_arg{ input, "input", 1 },
               output_arg{ output, "output", 2 };
     checkAllSameGPU("cudnn_adaptive_avg_pooling2d", {input_arg, output_arg});
@@ -294,8 +294,8 @@ namespace {
   void AdaptiveAveragePooling2d_backward_out_cuda_template(
     Tensor& gradInput,
     const Tensor& gradOutput_,
-    const Tensor& input
-  ) {
+    const Tensor& input)
+  {
     TensorArg grad_input_arg{ gradInput, "gradInput", 1 },
               grad_output_arg{ gradOutput_, "gradOutput_", 2 },
               input_arg{ input, "input", 3 };
@@ -383,22 +383,22 @@ namespace {
 
 } // namespace
 
-  Tensor& AdaptiveAveragePooling2d_forward_out_cuda(
+  Tensor& AdaptiveAveragePooling2d_out_cuda(
     Tensor& output,
     const Tensor& input,
-    IntList output_size
-  ) {
-    AdaptiveAveragePooling2d_forward_out_cuda_template(
+    IntList output_size)
+  {
+    AdaptiveAveragePooling2d_out_cuda_template(
       output, input, output_size);
     return output;
   }
 
-  Tensor AdaptiveAveragePooling2d_forward_cuda(
+  Tensor AdaptiveAveragePooling2d_cuda(
     at::Tensor const& input,
-    IntList output_size
-  ) {
+    IntList output_size)
+  {
     auto output = at::empty({0}, input.options());
-    AdaptiveAveragePooling2d_forward_out_cuda_template(
+    AdaptiveAveragePooling2d_out_cuda_template(
       output, input, output_size);
     return output;
   }
@@ -406,8 +406,8 @@ namespace {
   Tensor& AdaptiveAveragePooling2d_backward_out_cuda(
     Tensor& gradInput,
     const Tensor& gradOutput,
-    const Tensor& input
-  ) {
+    const Tensor& input)
+  {
     gradInput.resize_as_(input);
     AdaptiveAveragePooling2d_backward_out_cuda_template(
       gradInput, gradOutput, input);
@@ -416,8 +416,8 @@ namespace {
 
   Tensor AdaptiveAveragePooling2d_backward_cuda(
     const Tensor& gradOutput,
-    const Tensor& input
-  ) {
+    const Tensor& input)
+  {
     auto gradInput = at::zeros_like(input);
     AdaptiveAveragePooling2d_backward_out_cuda_template(
       gradInput, gradOutput, input);

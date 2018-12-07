@@ -705,7 +705,7 @@ def adaptive_avg_pool2d(input, output_size):
             double-integer tuple)
     """
     _output_size = _list_with_default(output_size, input.size())
-    return torch.adaptive_avg_pool2d(input, _output_size)
+    return torch._C._nn.adaptive_avg_pool2d(input, _output_size)
 
 
 @torch._jit_internal.weak_script
