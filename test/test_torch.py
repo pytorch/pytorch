@@ -3824,6 +3824,16 @@ class _TestTorchMixin(object):
         ti = torch.tril_indices(0, 0, -10)
         self.assertEqual(torch.empty(0, 2), ti)
 
+        # test 3 X 3 matrix with type float64, offset = 0
+        ti = torch.tril_indices(3, 3, dtype=torch.float64)
+        self.assertEqual(
+            torch.tensor([
+                [0, 0],
+                [1, 0], [1, 1],
+                [2, 0], [2, 1], [2, 2]],
+                dtype=torch.float64),
+            ti)
+
     def test_triu(self):
         x = torch.rand(SIZE, SIZE)
         res1 = torch.triu(x)

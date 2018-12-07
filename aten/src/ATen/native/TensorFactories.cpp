@@ -564,7 +564,7 @@ Tensor tril_indices(
   }
 
   // create an empty Tensor with correct soize
-  auto result = at::empty({n_indices, 2}, at::kLong);
+  auto result = at::empty({n_indices, 2}, options.device(DeviceType::CPU));
 
   AT_DISPATCH_ALL_TYPES(result.type(), "tril_indices", [&]() -> void {
     // fill the Tensor with correct values
@@ -587,7 +587,7 @@ Tensor tril_indices(
     }
   });
 
-  return result;
+  return result.to(options.device());
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ zeros ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
