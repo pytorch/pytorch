@@ -65,5 +65,4 @@ def main():
 
 
 if __name__ == '__main__':
-    core.GlobalInit(["caffe2", "--caffe2_cpu_numa_enabled=1"])
     main()

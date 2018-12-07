@@ -94,6 +94,7 @@ bool isDifferentiable(Node * n) {
   // "aten::min(Tensor self) -> Tensor"
 
   if (n->kind() == prim::Constant ||
+      n->kind() == prim::Undefined ||
       n->kind() == prim::AutogradAdd ||
       n->kind() == prim::ConstantChunk ||
       n->kind() == prim::None)
@@ -108,6 +109,10 @@ bool isDifferentiable(Node * n) {
   if (n->matches("aten::view(Tensor self, int[] size) -> Tensor")) {
     return n->get<std::vector<int64_t>>(attr::size) &&
       n->namedInput(attr::self)->type()->cast<CompleteTensorType>();
+  }
+  if (n->matches("aten::nll_loss(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> Tensor")) {
+    // TODO(asuhan): support weight
+    return n->namedInput(attr::weight)->node()->kind() == prim::Undefined;
   }
 
   // linear blocks may appear as inputs to graph executors, but they are removed
@@ -483,6 +488,21 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       JIT_ASSERT(tuple_outputs.size() == size_t(3));
       return {tuple_outputs[0], tuple_outputs[1], tuple_outputs[2], nullptr, nullptr, nullptr, nullptr, nullptr};
 
+    } else if (node->matches("aten::nll_loss(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> Tensor")) {
+      auto graph = node->owningGraph();
+      auto total_weight = graph->insertNode(graph->createUndefined());
+      auto weight = graph->insertNode(graph->createUndefined());
+      auto backward_value = graph->insert(aten::nll_loss_backward, {
+        grads.at(0).value(),
+        inputs.at(0).value(),
+        inputs.at(1).value(),
+        weight->output(),
+        inputs.at(3).value(),
+        inputs.at(4).value(),
+        total_weight->output()
+      });
+      return {backward_value->node()->output(0), nullptr, nullptr, nullptr, nullptr};
+
     } else if (node->matches("aten::log_softmax(Tensor self, int dim) -> Tensor")) {
       JIT_ASSERT(grads.size() == 1);
       auto graph = node->owningGraph();
@@ -494,7 +514,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       });
       return {backward_value->node()->output(0), nullptr};
 
-    } else if (node->kind() == prim::Constant || node->kind() == prim::None) {
+    } else if (node->kind() == prim::Constant || node->kind() == prim::Undefined || node->kind() == prim::None) {
       return {};
     }
     throw std::runtime_error(std::string("failed to differentiate `") + node->kind().toDisplayString() + "`");
