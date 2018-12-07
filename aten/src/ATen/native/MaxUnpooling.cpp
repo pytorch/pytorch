@@ -34,7 +34,7 @@ at::Tensor MaxUnpooling2d_forward_out_cpu_(
   auto inputWidth = input.size(3);
 
   auto* rawInput = input.data<scalar_t>();
-  auto* rawIndices = indices.data<long>();
+  auto* rawIndices = indices.data<int64_t>();
   auto* rawOutput = output.data<scalar_t>();
 
   int maxp;
