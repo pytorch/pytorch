@@ -1247,10 +1247,11 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
         # Straight through.
         index = y_soft.max(dim, keepdim=True)[1]
         y_hard = torch.zeros_like(logits).scatter_(dim, index, 1.0)
-        return y_hard - y_soft.detach() + y_soft
+        ret = y_hard - y_soft.detach() + y_soft
     else:
         # Reparametrization trick.
-        return y_soft
+        ret = y_soft
+    return ret
 
 
 @torch._jit_internal.weak_script
