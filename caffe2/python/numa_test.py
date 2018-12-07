@@ -7,6 +7,9 @@ from caffe2.proto import caffe2_pb2
 from caffe2.python.test_util import TestCase
 import unittest
 
+core.GlobalInit(["caffe2", "--caffe2_cpu_numa_enabled=1"])
+
+
 def build_test_net(net_name):
     net = core.Net(net_name)
     net.Proto().type = "async_scheduling"
