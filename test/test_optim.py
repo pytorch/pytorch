@@ -1,4 +1,5 @@
 import math
+import os
 import unittest
 import functools
 from copy import deepcopy
@@ -235,6 +236,19 @@ class TestOptim(TestCase):
 
     def _build_params_dict_single(self, weight, bias, **kwargs):
         return [dict(params=bias, **kwargs)]
+
+    def test_save_optim_defaults(self):
+        weight = torch.randn(2, 2)
+        default = torch.randn(2)
+        opt = optim.Optimizer([weight], {'test_default': default})
+        filename = 'test_save_optim.pth'
+        torch.save(opt, filename)
+
+        if os.path.exists(filename):
+            loaded_opt = torch.load(filename)
+            self.assertEqual(loaded_opt.param_groups[0]['params'][0], weight)
+            self.assertEqual(loaded_opt.defaults['test_default'], default)
+            os.remove(filename)
 
     def test_sgd(self):
         self._test_rosenbrock(
