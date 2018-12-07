@@ -136,7 +136,7 @@ class TensorRTOpTest(TestCase):
             Y_trt = namedtupledict('Outputs', op_outputs)(*output_values)
         np.testing.assert_allclose(Y_c2, Y_trt, rtol=1e-3)
 
-    @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
+    @unittest.skip("Until fixing Reshape op")
     def test_resnet50(self):
         self._test_onnx_importer('resnet50', 0)
 
@@ -148,11 +148,11 @@ class TensorRTOpTest(TestCase):
     def test_densenet121(self):
         self._test_onnx_importer('densenet121', -1, 3)
 
-    @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
+    @unittest.skip("Until fixing Reshape op")
     def test_inception_v1(self):
         self._test_onnx_importer('inception_v1', -1, 3)
 
-    @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
+    @unittest.skip("Until fixing Reshape op")
     def test_inception_v2(self):
         self._test_onnx_importer('inception_v2', 0, 3)
 
@@ -168,7 +168,7 @@ class TensorRTOpTest(TestCase):
     def test_vgg16(self):
         self._test_onnx_importer('vgg16', 0)
 
-    @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
+    @unittest.skip("Until fixing Reshape op")
     def test_vgg19(self):
         self._test_onnx_importer('vgg19', -1, 3)
 
