@@ -3784,6 +3784,10 @@ class _TestTorchMixin(object):
         ti = torch.tril_indices(3, 3, 2)
         self.assertEqual(torch.ones(3, 3).nonzero(), ti)
 
+        # test 3 X 3 matrix, offset = 200
+        ti = torch.tril_indices(3, 3, 200)
+        self.assertEqual(torch.ones(3, 3).nonzero(), ti)
+
         # test 3 X 3 matrix, offset = -1
         ti = torch.tril_indices(3, 3, -1)
         self.assertEqual(
@@ -3795,6 +3799,30 @@ class _TestTorchMixin(object):
         # test 3 X 3 matrix, offset = -2
         ti = torch.tril_indices(3, 3, -2)
         self.assertEqual(torch.tensor([[2, 0]]), ti)
+
+        # test 3 X 3 matrix, offset = -200
+        ti = torch.tril_indices(3, 3, -200)
+        self.assertEqual(torch.empty(0, 2), ti)
+
+        # test 0 X 3 matrix, offset = 0
+        ti = torch.tril_indices(0, 3, 0)
+        self.assertEqual(torch.empty(0, 2), ti)
+
+        # test 3 X 0 matrix, offset = 0
+        ti = torch.tril_indices(3, 0, 0)
+        self.assertEqual(torch.empty(0, 2), ti)
+
+        # test 0 X 0 matrix, offset = 0
+        ti = torch.tril_indices(0, 0, 0)
+        self.assertEqual(torch.empty(0, 2), ti)
+
+        # test 0 X 0 matrix, offset = 10
+        ti = torch.tril_indices(0, 0, 10)
+        self.assertEqual(torch.empty(0, 2), ti)
+
+        # test 0 X 0 matrix, offset = -10
+        ti = torch.tril_indices(0, 0, -10)
+        self.assertEqual(torch.empty(0, 2), ti)
 
     def test_triu(self):
         x = torch.rand(SIZE, SIZE)

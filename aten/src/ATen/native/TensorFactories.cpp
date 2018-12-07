@@ -516,8 +516,78 @@ Tensor& range_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangle ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor tril_indices(int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
-  return native::ones({row, col}, options).tril(offset).nonzero();
+Tensor tril_indices(
+    int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
+  AT_CHECK(row >= 0, "row must be non-negative, got", row);
+  AT_CHECK(col >= 0, "col must be non-negative, got", col);
+
+  // Different combinations of row, col, and offset can lead to two cases:
+  //
+  // Case 1 - Trapezoid (Triangle as a special case): row + offset <= col
+  //    Example A: offset > 0
+  //      1 1 0 0 0
+  //      1 1 1 0 0
+  //      1 1 1 1 0
+  //    Example B: offset <= 0
+  //      0 0 0
+  //      1 0 0
+  //      1 1 0
+  //    In this case, we calculate the number of elements in the first row and
+  //    last row of the tril respectively, and then compute the tril size.
+  //
+  // Case 2 - Trapezoid + Rectangle: row + offset > col
+  //    Example:
+  //      1 1 0
+  //      1 1 1
+  //      1 1 1
+  //    In this case, we first calculate the size of top trapezoid, and then
+  //    calculate the size of the bottom rectangle.
+
+  // number of elements in the first row of the tril
+  auto m_first_row = offset > 0 ?
+    std::min<int64_t>(col, 1 + offset) : // upper bounded by col
+    row + offset > 0; // either 0 or 1
+  // number of elements in the last row of the tril, bounded by [0, col]
+  auto m_last_row = std::max<int64_t>(0, std::min<int64_t>(col, row + offset));
+  // number of rows, bounded by [0, row]
+  auto n_row_all = std::max<int64_t>(0, std::min<int64_t>(row, row + offset));
+  auto n_row_trapezoid = (m_last_row - m_first_row + 1);
+
+  // calculate # of elements in the top trapezoid
+  auto n_indices =
+    (m_first_row + m_last_row) * n_row_trapezoid >> 1;
+
+  // calculate # of elements in the bottom Rectangle if there is any
+  auto diff_row = n_row_all - n_row_trapezoid;
+  if (diff_row > 0) {
+    n_indices += diff_row * col;
+  }
+
+  // create an empty Tensor with correct soize
+  auto result = at::empty({n_indices, 2}, at::kLong);
+
+  AT_DISPATCH_ALL_TYPES(result.type(), "tril_indices", [&]() -> void {
+    // fill the Tensor with correct values
+    scalar_t* result_data = result.data<scalar_t>();
+    int64_t i = 0;
+    scalar_t r = std::max<scalar_t>(0, -offset), c = 0;
+    n_indices = n_indices << 1;
+    while (i < n_indices) {
+      result_data[i++] = r;
+      result_data[i++] = c;
+
+      // move to the next column and check if (r, c) is still in bound
+      c += 1;
+      if (c > r + offset || c >= col) {
+        r += 1;
+        c = 0;
+        // NOTE: not necessary to check if r is less than row here, because i and
+        // n_indices provide the guarantee
+      }
+    }
+  });
+
+  return result;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ zeros ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
