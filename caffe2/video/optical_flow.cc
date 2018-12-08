@@ -7,7 +7,11 @@ void OpticalFlowExtractor(
     const cv::Mat& curr_gray,
     const int flow_alg_type,
     cv::Mat& flow) {
+#if CV_MAJOR_VERSION >= 4
+  cv::Ptr<cv::DISOpticalFlow> tvl1 = cv::DISOpticalFlow::create();
+#else
   cv::Ptr<cv::DualTVL1OpticalFlow> tvl1 = cv::DualTVL1OpticalFlow::create();
+#endif
   switch (flow_alg_type) {
     case FLowAlgType::FarnebackOpticalFlow:
       cv::calcOpticalFlowFarneback(
