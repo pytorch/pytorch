@@ -6,7 +6,7 @@
 
 #include <c10/core/Backend.h>
 #include <c10/core/Storage.h>
-#include <ATen/core/TensorOptions.h>
+#include <c10/core/TensorOptions.h>
 #include <c10/core/TensorTypeId.h>
 #include <c10/core/TensorTypeIdRegistration.h>
 #include <ATen/core/context_base.h>
