@@ -59,7 +59,7 @@ inline Tensor Tensor::operator[](Tensor index) const {
       index.dim() == 0,
       "Can only index with tensors that are scalars (zero-dim)");
   // The Scalar(Tensor) constructor is explicit, so we need to call it.
-  return this->operator[](index._local_scalar());
+  return this->operator[](index.item());
 }
 inline Tensor Tensor::operator[](int64_t index) const {
   return select(0, index);

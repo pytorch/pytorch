@@ -486,8 +486,7 @@ FunctionSchema getSchemaWithNameAndDefaults(
         } else {
           value = toIValue(it->second, arg.type());
         }
-        new_args.emplace_back(
-            Argument(arg.name(), arg.type(), arg.N(), value, arg.kwarg_only()));
+        new_args.emplace_back(arg.name(), arg.type(), arg.N(), value, arg.kwarg_only());
       } catch (py::cast_error& e) {
         throw ErrorReport(range)
             << "Expected a default value of type " << arg.type()->str()
@@ -683,6 +682,12 @@ void initJitScriptBindings(PyObject* module) {
         std::vector<at::Tensor> tensors;
         PythonPrint(ss, self, tensors, true);
         return std::make_pair(ss.str(), tensors);
+      })
+      .def_property_readonly("code", [](Module& self) {
+        std::ostringstream ss;
+        std::vector<at::Tensor> tensors;
+        PythonPrint(ss, self, tensors, false);
+        return ss.str();
       });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())

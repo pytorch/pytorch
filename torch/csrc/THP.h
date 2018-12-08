@@ -2,7 +2,6 @@
 #define THP_H
 
 #include "torch/csrc/python_headers.h"
-#include <stdbool.h>
 #include <TH/TH.h>
 #include <TH/THTensor.hpp>
 

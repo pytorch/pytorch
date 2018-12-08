@@ -101,8 +101,8 @@ void initTreeViewBindings(PyObject *module) {
     return Expr(Compound::create(TK_NONE, range, {}));
   });
 
-  py::class_<Stmt, TreeView>(m, "Stmt");
-  py::class_<Expr, TreeView>(m, "Expr");
+  py::class_<Stmt, TreeView>(m, "Stmt"); // NOLINT(bugprone-unused-raii)
+  py::class_<Expr, TreeView>(m, "Expr"); // NOLINT(bugprone-unused-raii)
   py::class_<Def, TreeView>(m, "Def")
     .def(py::init([](const Ident& name,
                      Decl decl,

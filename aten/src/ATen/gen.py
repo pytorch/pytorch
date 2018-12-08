@@ -1,6 +1,5 @@
 import argparse
 import os
-import filecmp
 
 import yaml
 from collections import OrderedDict
@@ -118,6 +117,8 @@ TYPE_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Type.h")
 TYPE_EXTENDED_INTERFACE_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeExtendedInterface.h")
 TYPE_DEFAULT_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.h")
 TYPE_DEFAULT_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.cpp")
+
+LEGACY_TH_DISPATCHER_H = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHDispatcher.h")
 
 REGISTER_CPU_H = CodeTemplate.from_file(TEMPLATE_PATH + "/RegisterCPU.h")
 REGISTER_CPU_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/RegisterCPU.cpp")
@@ -344,6 +345,7 @@ def declare_outputs():
     for f in core_files:
         core_file_manager.will_write(f)
     files = ['Declarations.yaml', 'TypeExtendedInterface.h', 'TypeDefault.cpp', 'TypeDefault.h',
+             'LegacyTHDispatcher.h',
              'Functions.h', 'NativeFunctions.h', 'RegisterCPU.cpp', 'RegisterCPU.h']
     for f in files:
         file_manager.will_write(f)
@@ -376,6 +378,23 @@ def filter_by_extension(files, *extensions):
             if file.endswith(extension):
                 filtered_files.append(file)
     return filtered_files
+
+
+# because EOL may not be LF(\n) on some environment (e.g. Windows),
+# normalize EOL from CRLF/CR to LF and compare both files.
+def cmpfiles_with_eol_normalization(a, b, names):
+    results = ([], [], [])    # match, mismatch, error
+    for x in names:
+        try:
+            ax = open(os.path.join(a, x), 'r').read().replace('\r\n', '\n').replace('\r', '\n')
+            bx = open(os.path.join(b, x), 'r').read().replace('\r\n', '\n').replace('\r', '\n')
+            if ax == bx:
+                results[0].append(x)
+            else:
+                results[1].append(x)
+        except OSError:
+            results[2].append(x)
+    return results
 
 
 def generate_outputs():
@@ -423,6 +442,8 @@ def generate_outputs():
     file_manager.write('TypeDefault.h', TYPE_DEFAULT_H, top_env)
     file_manager.write('TypeDefault.cpp', TYPE_DEFAULT_CPP, top_env)
 
+    file_manager.write('LegacyTHDispatcher.h', LEGACY_TH_DISPATCHER_H, top_env)
+
     file_manager.write('RegisterCPU.h', REGISTER_CPU_H, top_env)
     file_manager.write('RegisterCPU.cpp', REGISTER_CPU_CPP, top_env)
 
@@ -438,7 +459,7 @@ def generate_outputs():
 
     # check that generated files match source files
     core_source_path = os.path.join(options.source_path, 'core')
-    match, mismatch, errors = filecmp.cmpfiles(core_install_dir, core_source_path, core_files.keys(), shallow=False)
+    match, mismatch, errors = cmpfiles_with_eol_normalization(core_install_dir, core_source_path, core_files.keys())
     if errors:
         raise RuntimeError("Error while trying to compare source and generated files for {}. "
                            "Source directory: {}.  Generated directory: {}."

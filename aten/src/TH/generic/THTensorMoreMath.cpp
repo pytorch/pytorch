@@ -2135,8 +2135,7 @@ void THTensor_(linspace)(THTensor *r_, scalar_t a, scalar_t b, int64_t n)
 {
   scalar_t i = 0;
 
-  // NumPy allows you to pass different points even if n <= 1 -- should we?
-  THArgCheck(n > 1 || ((n == 0 || n == 1) && (a == b)), 3, "invalid number of points");
+  THArgCheck((n >= 0), 3, "number of points must be non-negative");
 
   if (THTensor_(nElement)(r_) != n) {
     THTensor_(resize1d)(r_, n);
@@ -2157,8 +2156,7 @@ void THTensor_(logspace)(THTensor *r_, scalar_t a, scalar_t b, int64_t n)
 {
   scalar_t i = 0;
 
-  // NumPy allows you to pass different points even if n <= 1 -- should we?
-  THArgCheck(n > 1 || ((n == 0 || n == 1) && (a == b)), 3, "invalid number of points");
+  THArgCheck((n >= 0), 3, "number of points must be non-negative");
 
   if (THTensor_(nElement)(r_) != n) {
     THTensor_(resize1d)(r_, n);

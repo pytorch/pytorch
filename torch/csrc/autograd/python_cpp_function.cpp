@@ -2,7 +2,7 @@
 
 #include "torch/csrc/python_headers.h"
 #include <memory>
-#include <stdio.h>
+#include <cstdio>
 #include <typeindex>
 #include <unordered_map>
 
@@ -190,7 +190,7 @@ PyTypeObject* _initFunctionPyTypeObject(PyTypeObject& type, const char* name,
 static std::unordered_map<std::type_index, THPObjectPtr> cpp_function_types;
 
 struct DefaultFunctionType {
-  DefaultFunctionType() {
+  DefaultFunctionType() : type() {
     _initFunctionPyTypeObject(type, "CppFunction", nullptr, nullptr);
     Py_INCREF(&type);
   }

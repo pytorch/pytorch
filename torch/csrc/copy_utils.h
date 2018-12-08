@@ -15,9 +15,9 @@ typedef std::vector<THPCopyInfo> THPCopyList;
 
 inline bool tryTHPCopy(const THPCopyList& v, PyObject* dst, PyObject* src, bool non_blocking, bool broadcast)
 {
-  for (auto it = v.begin(); it != v.end(); ++it) {
-    if (it->non_blocking == non_blocking && PyType_IsSubtype(Py_TYPE(src), it->srcType)) {
-      (it->copy)(dst, src, broadcast);
+  for (auto& i : v) {
+    if (i.non_blocking == non_blocking && PyType_IsSubtype(Py_TYPE(src), i.srcType)) {
+      (i.copy)(dst, src, broadcast);
       return true;
     }
   }
