@@ -3,17 +3,17 @@
 // ${generated_comment}
 
 #include <c10/core/Scalar.h>
-#include "ATen/Type.h"
-#include "ATen/TypeExtendedInterface.h"
-#include "ATen/Tensor.h"
-#include "c10/core/Storage.h"
-#include "ATen/core/Generator.h"
-#include "ATen/core/Deprecated.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/DeviceGuard.h"
-#include "c10/core/TensorOptions.h"
-#include "ATen/core/Reduction.h"
-#include "c10/util/Optional.h"
+#include <ATen/Type.h>
+#include <ATen/TypeExtendedInterface.h>
+#include <ATen/Tensor.h>
+#include <c10/core/Storage.h>
+#include <ATen/core/Generator.h>
+#include <ATen/core/Deprecated.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/DeviceGuard.h>
+#include <c10/core/TensorOptions.h>
+#include <ATen/core/Reduction.h>
+#include <c10/util/Optional.h>
 
 namespace at {
 

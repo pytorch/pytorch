@@ -1,13 +1,13 @@
-#include "torch/csrc/jit/passes/shape_analysis.h"
+#include <torch/csrc/jit/passes/shape_analysis.h>
 
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/constants.h"
-#include "torch/csrc/jit/argument_spec.h"
-#include "torch/csrc/jit/operator.h"
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/passes/alias_analysis.h"
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/argument_spec.h>
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/passes/alias_analysis.h>
 
-#include "torch/csrc/autograd/variable.h"
+#include <torch/csrc/autograd/variable.h>
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>

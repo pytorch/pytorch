@@ -1,15 +1,15 @@
-#include "THCGeneral.h"
-#include "THCTensor.hpp"
-#include "THCTensorCopy.h"
+#include <THC/THCGeneral.h>
+#include <THC/THCTensor.hpp>
+#include <THC/THCTensorCopy.h>
 
 #include <new>
 
-#include "generic/THCTensor.cpp"
-#include "THCGenerateAllTypes.h"
+#include <THC/generic/THCTensor.cpp>
+#include <THC/THCGenerateAllTypes.h>
 
-#include "THCTensorInfo.cuh"
+#include <THC/THCTensorInfo.cuh>
 
-#include "ATen/native/cuda/Resize.cuh"
+#include <ATen/native/cuda/Resize.cuh>
 
 int THCTensor_nDimension(THCState *state, const THCTensor *self) {
   return THTensor_nDimension(self);

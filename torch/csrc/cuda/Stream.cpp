@@ -1,9 +1,9 @@
-#include "Stream.h"
+#include <torch/csrc/cuda/Stream.h>
 
-#include "THP.h"
-#include "Module.h"
+#include <torch/csrc/THP.h>
+#include <torch/csrc/cuda/Module.h>
 
-#include "ATen/cuda/CUDAStream.h"
+#include <ATen/cuda/CUDAStream.h>
 
 #include <structmember.h>
 #include <cuda_runtime_api.h>

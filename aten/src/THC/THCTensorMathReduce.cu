@@ -1,5 +1,5 @@
-#include "THCTensorMathReduce.cuh"
-#include "THCTensor.hpp"
+#include <THC/THCTensorMathReduce.cuh>
+#include <THC/THCTensor.hpp>
 
 THC_API int
 THCudaByteTensor_logicalAndAll(THCState *state, THCudaByteTensor *self) {

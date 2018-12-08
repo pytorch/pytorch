@@ -1,18 +1,18 @@
 #include <google/protobuf/util/json_util.h>
 #include <google/protobuf/util/type_resolver_util.h>
 
-#include "torch/csrc/jit/import.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/utils/functional.h"
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/operator.h"
-#include "torch/csrc/jit/import_method.h"
+#include <torch/csrc/jit/import.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/utils/functional.h>
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/import_method.h>
 
 
-#include "caffe2/core/types.h"
-#include "caffe2/proto/caffe2_pb.h"
-#include "caffe2/proto/torch_pb.h"
-#include "caffe2/serialize/inline_container.h"
+#include <caffe2/core/types.h>
+#include <caffe2/proto/caffe2_pb.h>
+#include <caffe2/proto/torch_pb.h>
+#include <caffe2/serialize/inline_container.h>
 
 #include <ATen/ATen.h>
 

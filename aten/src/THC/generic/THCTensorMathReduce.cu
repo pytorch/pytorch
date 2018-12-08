@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorMathReduce.cu"
+#define THC_GENERIC_FILE "THC/generic/THCTensorMathReduce.cu"
 #else
 
 void THCTensor_(sum)(THCState* state, THCTensor *self, THCTensor *src, int dimension, int keepdim) {

@@ -7,7 +7,7 @@
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAUtils.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
-#include "ATen/WrapDimUtilsMulti.h"
+#include <ATen/WrapDimUtilsMulti.h>
 
 #include <THC/THCTensorMathPointwise.cuh>
 #include <THC/THCThrustAllocator.cuh>

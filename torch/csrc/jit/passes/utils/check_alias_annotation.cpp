@@ -1,4 +1,4 @@
-#include "check_alias_annotation.h"
+#include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
 
 namespace torch {
 namespace jit {

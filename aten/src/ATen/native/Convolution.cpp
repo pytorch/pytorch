@@ -1,7 +1,7 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
 
-#include "ATen/Config.h"
+#include <ATen/Config.h>
 
 static const int MIOPEN_DIM_MAX = 4;
 

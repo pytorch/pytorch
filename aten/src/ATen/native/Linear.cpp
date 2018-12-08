@@ -1,6 +1,6 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/WrapDimUtilsMulti.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/WrapDimUtilsMulti.h>
 
 #include <array>
 #include <cctype>

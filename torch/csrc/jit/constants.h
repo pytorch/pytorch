@@ -1,8 +1,8 @@
 #pragma once
-#include "torch/csrc/jit/ivalue.h"
-#include "torch/csrc/jit/scope.h"
-#include "torch/csrc/jit/source_range.h"
-#include "torch/csrc/WindowsTorchApiMacro.h"
+#include <torch/csrc/jit/ivalue.h>
+#include <torch/csrc/jit/scope.h>
+#include <torch/csrc/jit/source_range.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 // helpers for handling constants in the IR
 // - create constant nodes from ints, floats, intlist, Tensors, and other types

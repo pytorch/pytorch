@@ -1,4 +1,4 @@
-#include "THCAllocator.h"
+#include <THC/THCAllocator.h>
 
 THCIpcDeleter::~THCIpcDeleter() {}
 

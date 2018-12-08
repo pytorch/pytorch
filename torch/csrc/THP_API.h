@@ -7,10 +7,10 @@
 #endif
 
 #ifdef USE_CUDA
-#include "cuda/THCP.h"
-#include "cuda/undef_macros.h"
+#include <torch/csrc/cuda/THCP.h>
+#include <torch/csrc/cuda/undef_macros.h>
 #endif
 
-#include "THP.h"
+#include <torch/csrc/THP.h>
 
 #endif

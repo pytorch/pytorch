@@ -1,6 +1,6 @@
-#include "invalid_arguments.h"
+#include <torch/csrc/utils/invalid_arguments.h>
 
-#include "python_strings.h"
+#include <torch/csrc/utils/python_strings.h>
 
 #include <torch/csrc/utils/memory.h>
 

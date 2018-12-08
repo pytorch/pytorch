@@ -1,13 +1,13 @@
 #ifndef THC_TENSORMATH_REDUCE_CUH
 #define THC_TENSORMATH_REDUCE_CUH
 
-#include "THCTensorMath.h"
-#include "THCGeneral.h"
-#include "THCNumerics.cuh"
-#include "THCReduce.cuh"
-#include "THCReduceAll.cuh"
-#include "THCTensorCopy.hpp"
-#include "THCThrustAllocator.cuh"
+#include <THC/THCTensorMath.h>
+#include <THC/THCGeneral.h>
+#include <THC/THCNumerics.cuh>
+#include <THC/THCReduce.cuh>
+#include <THC/THCReduceAll.cuh>
+#include <THC/THCTensorCopy.hpp>
+#include <THC/THCThrustAllocator.cuh>
 #include <thrust/functional.h>
 #include <thrust/device_ptr.h>
 #include <thrust/transform_reduce.h>
