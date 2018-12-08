@@ -61,7 +61,7 @@ at::Tensor MaxUnpooling2d_forward_out_cpu_(
   return output;
 }
 
-at::Tensor MaxUnpooling2d_forward_out_cpu(
+at::Tensor& MaxUnpooling2d_forward_out_cpu(
     Tensor& output,
     const Tensor& self,
     const Tensor& indices,
@@ -81,7 +81,7 @@ at::Tensor MaxUnpooling2d_forward_cpu(
     const Tensor& self,
     const Tensor& indices,
     IntList output_size) {
-  std::cout << "MaxUnpooling2d_forward_cpu called" << "\n";
+  // std::cout << "MaxUnpooling2d_forward_cpu called" << "\n";
   AT_CHECK(
       self.ndimension() == 4,
       "Input to MaxUnpooling2d should be a NCHW Tensor",
@@ -103,22 +103,28 @@ Tensor MaxUnpooling2d_backward_cpu(
   AT_ERROR("not implemented");
 }
 
-at::Tensor MaxUnpooling2d_forward_out_gpu(
+// stopgap until GPU version is implemented
+at::Tensor& MaxUnpooling2d_forward_out_cuda(
     Tensor& output,
     const Tensor& self,
     const Tensor& indices,
     IntList output_size) {
-  std::cout << "MaxUnpooling2d_forward_out_gpu called" << "\n";
+  // std::cout << "MaxUnpooling2d_forward_out_gpu called" << "\n";
   return at::_thnn_max_unpool2d_out(output, self, indices, output_size);
 }
 
 // stopgap until GPU version is implemented
-at::Tensor MaxUnpooling2d_forward_gpu(
+at::Tensor MaxUnpooling2d_forward_cuda(
     const Tensor& self,
     const Tensor& indices,
     IntList output_size) {
   return at::_thnn_max_unpool2d(self, indices, output_size);
 }
+
+at::Tensor& MaxUnpooling3d_forward_out_cpu(Tensor& output, const Tensor& self, const Tensor& indices, IntList output_size, IntList padding) {
+  AT_ERROR("not implemented");
+}
+
 
 } // namespace native
 } // namespace at
