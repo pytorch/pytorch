@@ -1,6 +1,4 @@
-#include "caffe2/operators/utility_ops.h"
-#include "caffe2/core/operator.h"
-#include "caffe2/ideep/ideep_utils.h"
+#include <caffe2/ideep/ideep_utils.h>
 
 namespace caffe2 {
 
