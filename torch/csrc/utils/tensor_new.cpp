@@ -456,6 +456,19 @@ Tensor legacy_new_from_data(
   return internal_new_from_data(type, device, data, false, false, false);
 }
 
+Tensor legacy_infer_new_from_data(
+    const Type& type,
+    c10::optional<Device> device,
+    PyObject* data){
+  ScalarType scalar_type = infer_scalar_type(data);
+  if (scalar_type == ScalarType::Byte){
+      auto& idx_type = type.toScalarType(scalar_type);
+      return internal_new_from_data(idx_type, device, data, false, false, false);
+  }else{
+      return internal_new_from_data(type, device, data, false, false, false);
+  }
+}
+
 Tensor sparse_coo_tensor_ctor(const Type& default_type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "sparse_coo_tensor(PyObject* indices, PyObject* values, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
