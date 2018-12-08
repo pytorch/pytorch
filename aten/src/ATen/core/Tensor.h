@@ -455,7 +455,7 @@ public:
   Tensor sqrt() const;
   Tensor & sqrt_();
   Tensor std(bool unbiased=true) const;
-  Tensor std(int64_t dim, bool unbiased=true, bool keepdim=false) const;
+  Tensor std(IntList dim, bool unbiased=true, bool keepdim=false) const;
   Tensor prod(ScalarType dtype) const;
   Tensor prod() const;
   Tensor prod(int64_t dim, bool keepdim, ScalarType dtype) const;
