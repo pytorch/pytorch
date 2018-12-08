@@ -52,6 +52,18 @@
 
 namespace at {
 
+struct DimCounter {
+  DimCounter(IntList shape, Range range);
+
+  void increment(const std::array<int64_t, 2>& step);
+  bool is_done() const;
+  std::array<int64_t, 2> max_2d_step() const;
+
+  IntList shape;
+  Range range;
+  DimVector values;
+  int64_t offset;
+};
 struct CAFFE2_API OperandInfo {
   OperandInfo() {}
   OperandInfo(const Tensor& t, const Type* type=nullptr)
@@ -109,6 +121,10 @@ struct CAFFE2_API TensorIterator {
   using loop_t = std::function<void(int ntensors, char** data, const int64_t* strides, int64_t size)>;
   using loop2d_t = std::function<void(int ntensors, char** data, const int64_t* strides, int64_t size0, int64_t size1)>;
 
+  using loop_subiter_t = std::function<void(TensorIterator& subiter)>;
+
+  void foreach_reduced_elt(const loop_subiter_t& loop);
+
   static std::unique_ptr<TensorIterator> binary_op(Tensor& out, const Tensor& a, const Tensor& b);
   static std::unique_ptr<TensorIterator> reduce_op(Tensor& out, const Tensor& a);
 
@@ -155,6 +171,8 @@ struct CAFFE2_API TensorIterator {
   void remove_dimension(int dim);
   /// Shrinks an iterated dimension
   void narrow(int dim, int64_t start, int64_t size);
+  /// Narrows every dim after and including `start_dim` to size one.
+  void select_all_keeping_dim(int start_dim, IntList starts);
   /// Replaces the data pointer and strides for the operand at index `arg`
   void replace_operand(int arg, void* data, IntList stride);
 
