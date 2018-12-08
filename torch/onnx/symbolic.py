@@ -1355,3 +1355,9 @@ def randn(g, *shapes):
 def rrelu(g, input, lower, upper, training, generator):
     p = g.op('RandomUniformLike', input, high_f=upper, low_f=lower)
     return g.op('PRelu', input, p)
+
+
+@parse_args('v')
+def log_sigmoid(g, input):
+    p = g.op('Sigmoid', input)
+    return g.op('Log', p)

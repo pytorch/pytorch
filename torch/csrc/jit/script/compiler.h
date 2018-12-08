@@ -144,7 +144,7 @@ struct TORCH_API BuiltinModule : public SugaredValue {
   BuiltinModule(std::string name,
                 c10::optional<int64_t> version = at::nullopt)
     : name(std::move(name))
-    , version(version) {}
+    , version(std::move(version)) {}
 
   std::string kind() const override {
     return "builtin module";

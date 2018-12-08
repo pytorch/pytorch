@@ -16,7 +16,7 @@
 #include <atomic>
 #include <map>
 #include <set>
-#include <signal.h>
+#include <csignal>
 #include <sstream>
 #include <sys/wait.h>
 
@@ -35,7 +35,7 @@ static void HANDLER_NAME(int sig, siginfo_t *info, void *ctx)                 \
 {                                                                             \
   auto _w = write(STDERR_FILENO, ERROR_MSG, sizeof(ERROR_MSG) / sizeof(char));\
   (void)_w;                                                                   \
-  struct sigaction sa;                                                        \
+  struct sigaction sa{};                                                        \
   sa.sa_handler = SIG_DFL;                                                    \
   sa.sa_flags = 0;                                                            \
   if (sigemptyset(&sa.sa_mask) != 0 || sigaction(SIGNAL, &sa, nullptr) != 0) {   \
@@ -49,7 +49,7 @@ static void HANDLER_NAME(int sig, siginfo_t *info, void *ctx)                 \
 // http://man7.org/linux/man-pages/man2/signal.2.html
 static inline void setSignalHandler(int signal, void(*handler)(int, siginfo_t *, void *), struct sigaction *old_sa_ptr)
 {
-  struct sigaction sa;
+  struct sigaction sa{};
   sa.sa_sigaction = handler;
   sa.sa_flags = SA_RESTART|SA_SIGINFO|SA_NOCLDSTOP|SA_NODEFER;
   if (sigemptyset(&sa.sa_mask) != 0 || sigaction(signal, &sa, old_sa_ptr) != 0) {
@@ -77,7 +77,7 @@ static void handler_SIGTERM(int sig, siginfo_t *info, void *ctx)
   if (info->si_pid == getppid()) {
     _exit(EXIT_SUCCESS);
   }
-  struct sigaction sa;
+  struct sigaction sa{};
   sa.sa_handler = SIG_DFL;
   sa.sa_flags = 0;
   if (sigemptyset(&sa.sa_mask) != 0 || sigaction(SIGTERM, &sa, nullptr) != 0) {
@@ -107,8 +107,8 @@ static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module) {
   siginfo_t infop;
 
   // Only check the pids we care about
-  for (auto it = worker_pids.begin(); it != worker_pids.end(); ++it) {
-    pid_set = &(it->second);
+  for (auto& w : worker_pids) {
+    pid_set = &(w.second);
     for (auto pid_it = pid_set->begin(); pid_it != pid_set->end(); ++pid_it) {
       worker_pid = *pid_it;
       // Use waitid rather than waitpid so that we can set NOWAIT, and that Python

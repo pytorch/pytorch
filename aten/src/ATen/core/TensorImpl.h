@@ -9,6 +9,7 @@
 #include <c10/core/TensorOptions.h>
 #include <c10/core/TensorTypeId.h>
 #include <c10/core/TensorTypeIdRegistration.h>
+#include <c10/core/CopyBytes.h>
 
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>

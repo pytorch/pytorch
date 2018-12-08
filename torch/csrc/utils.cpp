@@ -1,5 +1,5 @@
 #include "torch/csrc/python_headers.h"
-#include <stdarg.h>
+#include <cstdarg>
 #include <string>
 #include <vector>
 #include <sstream>
@@ -140,7 +140,7 @@ void THPUtils_addPyMethodDefs(std::vector<PyMethodDef>& vector, PyMethodDef* met
     // remove nullptr terminator
     vector.pop_back();
   }
-  while (1) {
+  while (true) {
     vector.push_back(*methods);
     if (!methods->ml_name) {
       break;
@@ -183,7 +183,7 @@ void THPUtils_invalidArguments(PyObject *given_args, PyObject *given_kwargs,
   va_list option_list;
   va_start(option_list, num_options);
   for (size_t i = 0; i < num_options; i++)
-    option_strings.push_back(va_arg(option_list, const char*));
+    option_strings.emplace_back(va_arg(option_list, const char*));
   va_end(option_list);
 
   PyErr_SetString(PyExc_TypeError, torch::format_invalid_args(

@@ -8,13 +8,14 @@
 #include "torch/csrc/THP_export.h"
 
 // Python object that backs torch.autograd.Variable
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct THPVariable {
     PyObject_HEAD
     // Payload
     torch::autograd::Variable cdata;
     // Hooks to be run on backwards pass (corresponds to Python attr
     // '_backwards_hooks', set by 'register_hook')
-    PyObject* backward_hooks;
+    PyObject* backward_hooks = nullptr;
 };
 
 THP_API PyObject *THPVariableClass;

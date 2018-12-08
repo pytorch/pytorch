@@ -1,6 +1,5 @@
 #include "torch/csrc/python_headers.h"
 
-#include <stdbool.h>
 #include <unordered_map>
 #include <thread>
 #include <chrono>

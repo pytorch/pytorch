@@ -580,7 +580,6 @@ if (BUILD_PYTHON)
     ${TORCH_ROOT}/third_party/build/nccl/include
     ${TORCH_ROOT}/third_party/gloo
     ${TORCH_ROOT}/third_party/onnx
-    ${TORCH_ROOT}/third_party/protobuf/src
     ${TORCH_ROOT}/third_party/pybind11/include
 
     ${TORCH_SRC_DIR}/csrc

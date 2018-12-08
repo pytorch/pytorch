@@ -34,13 +34,13 @@ struct VariableInfo {
 struct PyFunction : public Function {
   PyFunction(PyObject* obj) : obj(obj) {}
 
-  virtual variable_list apply(variable_list&& inputs) override;
+  variable_list apply(variable_list&& inputs) override;
   variable_list legacy_apply(const variable_list& inputs);
 
-  virtual void release_variables() override;
-  virtual std::string name() const override;
-  virtual std::shared_ptr<Function> get_shared_ptr() override;
-  virtual bool is_traceable() override;
+  void release_variables() override;
+  std::string name() const override;
+  std::shared_ptr<Function> get_shared_ptr() override;
+  bool is_traceable() override;
 
   // THPFunction this Function is wrapping.
   PyObject* obj;
