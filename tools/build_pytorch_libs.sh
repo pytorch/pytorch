@@ -43,7 +43,7 @@ fi
 
 # Options for building only a subset of the libraries
 USE_CUDA=0
-USE_FBGEMM=0
+USE_FBGEMM=1
 USE_ROCM=0
 USE_NNPACK=0
 USE_MKLDNN=0
@@ -228,6 +228,7 @@ function build_caffe2() {
 		       -DUSE_LMDB=$USE_LMDB \
 		       -DUSE_OPENCV=$USE_OPENCV \
 		       -DUSE_QNNPACK=$USE_QNNPACK \
+		       -DUSE_TENSORRT=$USE_TENSORRT \
 		       -DUSE_FFMPEG=$USE_FFMPEG \
 		       -DUSE_GLOG=OFF \
 		       -DUSE_GFLAGS=OFF \

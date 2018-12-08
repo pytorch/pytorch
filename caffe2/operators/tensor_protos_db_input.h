@@ -102,7 +102,7 @@ bool TensorProtosDBInput<Context>::CopyPrefetched() {
   for (int i = 0; i < OutputSize(); ++i) {
     OperatorBase::template Output<Tensor>(i, Context::GetDeviceType())
         ->CopyFrom(
-            prefetched_blobs_[i].template Get<TensorCPU>(), &this->context_);
+            prefetched_blobs_[i].template Get<TensorCPU>(), /* async */ true);
   }
   return true;
 }

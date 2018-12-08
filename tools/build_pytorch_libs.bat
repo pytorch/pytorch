@@ -27,7 +27,7 @@ if not exist torch\lib\tmp_install mkdir torch\lib\tmp_install
 
 : Variable defaults
 set /a USE_CUDA=0
-set /a USE_FBGEMM=0
+set /a USE_FBGEMM=1
 set /a USE_ROCM=0
 set /a USE_NNPACK=0
 set /a USE_QNNPACK=0

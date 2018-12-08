@@ -12,7 +12,6 @@ public:
   // expand a tensor to a batchtensor given batch_size
   BatchTensor(at::Tensor data, int64_t batch_size);
   BatchTensor(const std::vector<at::Tensor> datalist, at::Tensor dims);
-  ~BatchTensor(){};
   const char * toString() const {
     return "BatchTensor";
   }

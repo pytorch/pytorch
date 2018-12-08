@@ -45,7 +45,7 @@ static inline bool isUnsupportedOperation() {
   THPObjectPtr io(PyImport_ImportModule("io"));
   if (!io) throw python_error();
   THPObjectPtr exception(PyObject_GetAttrString(io, "UnsupportedOperation"));
-  if (!exception) python_error();
+  if (!exception) throw python_error();
   return PyErr_ExceptionMatches(exception.get());
 }
 

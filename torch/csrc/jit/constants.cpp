@@ -14,9 +14,10 @@ Value* insertConstant(
     c10::optional<ScopePtr> scope) {
   Node * n = g.create(prim::Constant);
   if(val.isTensor()) {
-    at::Tensor ref = std::move(val).toTensor();
+    at::Tensor ref = val.toTensor();
     if(!ref.defined()) {
-      return insertConstant(g, val, loc, scope);
+      n->destroy();
+      return g.insertNode(g.createUndefined())->output();
     }
     if (ref.is_variable()) {
       ref = autograd::Variable(ref).data();
@@ -69,7 +70,7 @@ Value* insertConstant(
 RegisterOperators reg({
   // Implementation of constant node, computes and IValue
   Operator(
-      FunctionSchema(prim::Constant, {}, {}, /*vararg=*/false, /*varret=*/true),
+      FunctionSchema(prim::Constant, {}, {}, /*is_vararg=*/false, /*is_varret=*/true),
       [](const Node* node) -> Operation {
         TypePtr type = node->output()->type();
         if(type->isSubtypeOf(DynamicType::get())) {

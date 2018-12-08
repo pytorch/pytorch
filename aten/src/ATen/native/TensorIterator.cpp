@@ -115,6 +115,13 @@ void TensorIterator::compute_types() {
             type.device_type() == kCUDA && op.tensor.type().device_type() == kCPU) {
           // don't cast CPU scalars in CUDA ops that directly support them
           op.type = &op.tensor.type();
+        } else if (promote_gpu_output_dtypes_ && op.tensor.defined() &&
+            !op.is_output && op.tensor.type().scalarType() == kHalf &&
+            type.scalarType() == kFloat && type.device_type() == kCUDA &&
+            op.tensor.type().device_type() == kCUDA) {
+          // allow input tensor type upcasting for fp16 to fp32 in fused kernel
+          // on GPU
+          op.type = &op.tensor.type();
         } else {
           op.type = &type;
         }
@@ -475,6 +482,7 @@ std::unique_ptr<TensorIterator> TensorIterator::reduce_op(Tensor& out, const Ten
   auto builder = TensorIterator::Builder();
   builder.add_output(out);
   builder.add_input(a);
+  builder.iter_->promote_gpu_output_dtypes_ = true;
   builder.iter_->resize_outputs_ = false;
   builder.iter_->is_reduction_ = true;
   return builder.build();

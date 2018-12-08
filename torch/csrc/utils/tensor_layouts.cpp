@@ -13,7 +13,7 @@ namespace torch { namespace utils {
 
 void initializeLayouts() {
   auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
-  if (!torch_module) python_error();
+  if (!torch_module) throw python_error();
 
   PyObject *strided_layout = THPLayout_New(at::Layout::Strided, "torch.strided");
   Py_INCREF(strided_layout);
