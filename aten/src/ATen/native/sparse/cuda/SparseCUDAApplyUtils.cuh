@@ -278,11 +278,17 @@ __global__ void indexSparseIntersectionKernel(
 //   }
 // }
 
-template <typename Dtype, typename Acctype>
+template <typename Dtype, typename func_t>
 __global__ void coalesceValuesKernel(
-  int64_t *segment_offsets, int64_t *value_indices,
-  Dtype *values, Dtype *newValues,
-  int64_t nnz, int64_t newNnz, int64_t stride) {
+  int64_t *segment_offsets,
+  int64_t *value_indices,
+  Dtype *values,
+  Dtype *newValues,
+  int64_t nnz,
+  int64_t newNnz,
+  int64_t stride,
+  const func_t& op
+) {
 
   int seg = blockIdx.x * 4 + threadIdx.y;
 
@@ -294,7 +300,7 @@ __global__ void coalesceValuesKernel(
     const int begin = segment_offsets[seg];
     const int end = (seg < newNnz - 1) ? segment_offsets[seg + 1] : nnz;
     const int startFeature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
-    Acctype tmp[SZ];
+    Dtype tmp[SZ];
     #pragma unroll
     for (int ii = 0; ii < SZ; ii++) {
       tmp[ii] = 0;
@@ -302,14 +308,14 @@ __global__ void coalesceValuesKernel(
     for (int row = begin; row < end; row++) {
       const int valueRow = ((int) value_indices[row]) * stride;
 
-
       #pragma unroll
       for (int ii = 0; ii < SZ; ii++)
       {
         int featureDim = startFeature + ii * WARP_SIZE;
         if (featureDim < stride)
         {
-          tmp[ii] += static_cast<Acctype>(values[valueRow + featureDim]);
+          // tmp[ii] += static_cast<Dtype>(values[valueRow + featureDim]);
+          tmp[ii] = op(tmp[ii], static_cast<Dtype>(values[valueRow + featureDim]));
         }
       }
     }

@@ -5,6 +5,7 @@
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/native/cuda/Loops.cuh>
 
 #include <THC/THCThrustAllocator.cuh>
 #include <THC/THCTensorSort.cuh>
@@ -26,35 +27,32 @@ namespace at { namespace native {
 
 using namespace at::sparse;
 
-SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
+template <typename scalar_t, typename func_t>
+static void sparse_reduction_kernel_cuda(const SparseTensor& self, SparseTensor& out, const func_t& op) {
   int64_t nnz = self._nnz();
-  if (self.is_coalesced()) {
-    return self;
-  }
+
   // NOTE: Since `coalesce` is not an in-place operation when `is_coalesced` is false,
   // we should keep the original tensor intact and do coalesce on a copy of the tensor
   if (nnz < 2) {
-    SparseTensor dst = self.clone();
-    dst._coalesced_(true);
-    return dst;
+    out._coalesced_(true);
+    return;
   }
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
   auto policy = thrust::cuda::par(allocator).on(stream);
-  // Replace instances with
 
   // For indices, a simple sort + unique suffices
   // For values, we use a custom kernel for segmented reduction (can't use Thrust due to indirection).
 
   Tensor values = self._values();
-
+  IntList sizes = self.sizes();
   int64_t sparse_dim = self.sparse_dim();
+  int64_t dense_dim = self.dense_dim();
 
   // indices will be modified by Thrust, so we have to clone or use new storage
   // here.
   LongTensor indices1D = flatten_indices(self._indices(), self.sizes(), true);
-
   LongTensor origIndices = at::empty({nnz}, self._indices().options());
   LongTensor uniqueOffsets = at::empty({nnz}, self._indices().options());
 
@@ -62,7 +60,6 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   thrust_ptr indicesIter(indices1D.data<int64_t>());
   thrust_ptr origIndicesIter(origIndices.data<int64_t>());
   thrust_ptr uniqueOffsetsIter(uniqueOffsets.data<int64_t>());
-
 
   // Fill sortedOrigIndices with sequential indices
   thrust::counting_iterator<int64_t> countIterI(TH_INDEX_BASE);
@@ -94,37 +91,22 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
     int64_t stride = at::prod_intlist(values.sizes().slice(1));
     dim3 grid(THCCeilDiv(newNnz, (int64_t) 4), THCCeilDiv(stride, (int64_t) 128));
     dim3 block(32, 4);
-    AT_DISPATCH_ALL_TYPES_AND_HALF(
-        values.type(), "coalesce_sparse_cuda", [&] {
-          using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;
-          apply::coalesceValuesKernel<scalar_t, cuda_accscalar_t><<<grid, block, 0, stream>>>(
+    // AT_DISPATCH_ALL_TYPES_AND_HALF(
+        // values.type(), "coalesce_sparse_cuda", [&] {
+          // using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;
+          apply::coalesceValuesKernel<scalar_t, func_t><<<grid, block, 0, stream>>>(
             uniqueOffsets.data<int64_t>(),
             origIndices.data<int64_t>(),
             values.data<scalar_t>(),
             newValues.data<scalar_t>(),
             nnz,
             newNnz,
-            stride
+            stride,
+            op
           );
-        });
+        // });
   }
 
-// this grid-strided version is slower but probably more flexible
-  // to different sizes
-  // int64_t blockX = min(stride, (int64_t) 512);
-  // dim3 block(blockX, 512 / blockX);
-  // int64_t grid = min((int64_t) 1024, THCCeilDiv((int64_t) newNnz * stride, (int64_t) block.x * block.y));
-  // THCSTensor_coalesceValuesKernel_gridStrided<real, accreal><<<grid, block, 0, stream>>>(
-  //   THCIndexTensor_(data)(state, uniqueOffsets),
-  //   THCIndexTensor_(data)(state, origIndices),
-  //   THCTensor_(data)(state, values),
-  //   THCTensor_(data)(state, newValues),
-  //   nnz,
-  //   newNnz,
-  //   stride
-  // );
-
-  ////////////////////////////////////////////////////////////
   // unflatten indices if necessary
   LongTensor newIndices;
   if (sparse_dim == 1) {
@@ -148,12 +130,36 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
       indices1D.add_(1); // "lol"
     }
   }
-  ////////////////////////////////////////////////////////////
 
-  SparseTensor dst = ::at::native::sparse_coo_tensor(newIndices, newValues, self.sizes())._coalesced_(true);
+  get_sparse_impl(out)->resize_and_clear_(sparse_dim, dense_dim, sizes);
+  get_sparse_impl(out)->set_indices_and_values_unsafe(newIndices, newValues);
+  out._coalesced_(true);
+  // SparseTensor dst = at::native::sparse_coo_tensor(newIndices, newValues, self.sizes())._coalesced_(true);
 
   THCudaCheck(cudaGetLastError());
-  return dst;
+}
+
+template <typename scalar_t>
+void sparse_sum_kernel_impl(const SparseTensor& self, SparseTensor& out) {
+  sparse_reduction_kernel_cuda<scalar_t>(self, out, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+    return a + b;
+  });
+}
+
+SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
+  if (self.is_coalesced()) {
+    return self;
+  }
+
+  SparseTensor out = at::empty_like(self);
+  AT_DISPATCH_ALL_TYPES_AND_HALF(self._values().type(), "coalesce_sparse_cuda", [&] {
+    // using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;
+    sparse_sum_kernel_impl<scalar_t>(self, out);
+    // sparse_reduction_kernel_cuda<scalar_t>(self, out, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+    //   return a + b;
+    // });
+  });
+  return out;
 }
 
 }} // namespace at::native
