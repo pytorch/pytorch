@@ -1570,18 +1570,12 @@ class _TestTorchMixin(object):
                                ((-1.6181, 0.7148),
                                 (1.3728, 0.1319))))
         a = cast(a)
-        a_LU, pivots = a.btrifact()  # test default info
-
-        # test deprecated info argument
-        info = cast(torch.IntTensor())
-        with warnings.catch_warnings(record=True):
-            a_LU, pivots = a.btrifact(info=info)
-        self.assertEqual(info.abs().sum(), 0)
+        a_LU, pivots = a.btrifact()
 
         a_LU_, pivots_, info_ = a.btrifact_with_info()
         self.assertEqual(a_LU, a_LU_)
         self.assertEqual(pivots, pivots_)
-        self.assertEqual(info, info_)
+        self.assertEqual(info_.abs().sum(), 0)
         P, a_L, a_U = torch.btriunpack(a_LU, pivots)
         a_ = torch.bmm(P, torch.bmm(a_L, a_U))
         self.assertEqual(a_, a)
