@@ -920,7 +920,7 @@ struct GraphFuser {
             uses_to_process.insert(uses_to_process.end(), user->output()->uses().begin(), user->output()->uses().end());
 
           } else if (user->matches("aten::mul(Tensor self, Tensor other) -> Tensor")
-                     || user->matches("aten:div(Tensor self, Tensor other) -> Tensor") // for div we might check whether we're the first argument
+                     || user->matches("aten::div(Tensor self, Tensor other) -> Tensor") // for div we might check whether we're the first argument
                      || user->matches("aten::neg(Tensor self) -> Tensor")
                      || user->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor") // this used to be prim::AutogradAdd
                      ) {
