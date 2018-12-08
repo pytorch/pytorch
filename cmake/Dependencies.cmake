@@ -977,22 +977,6 @@ if (USE_ZSTD)
   set_property(TARGET libzstd_static PROPERTY POSITION_INDEPENDENT_CODE ON)
 endif()
 
-# --[ TensorRT integration with onnx-trt
-if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
-  if (USE_TENSORRT)
-    set(ALLOW_DUPLICATE_CUSTOM_TARGETS TRUE)
-    set(CMAKE_CUDA_COMPILER ${CUDA_NVCC_EXECUTABLE})
-    set(__tmp_ONNX_NAMESPACE ${ONNX_NAMESPACE})
-    set(ONNX_NAMESPACE "${ONNX_NAMESPACE}_trt")
-    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx-tensorrt EXCLUDE_FROM_ALL)
-    set(ONNX_NAMESPACE ${__tmp_ONNX_NAMESPACE})
-    include_directories("${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx-tensorrt")
-    caffe2_interface_library(nvonnxparser_static onnx_trt_library)
-    list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_trt_library)
-    set(CAFFE2_USE_TRT 1)
-  endif()
-endif()
-
 # ---[ Onnx
 if(NOT BUILD_ATEN_ONLY)
 if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
@@ -1027,6 +1011,18 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   # Recover the build shared libs option.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
 endif()
+endif()
+
+# --[ TensorRT integration with onnx-trt
+if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
+  if (USE_TENSORRT)
+    set(CMAKE_CUDA_COMPILER ${CUDA_NVCC_EXECUTABLE})
+    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx-tensorrt EXCLUDE_FROM_ALL)
+    include_directories("${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx-tensorrt")
+    caffe2_interface_library(nvonnxparser_static onnx_trt_library)
+    list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_trt_library)
+    set(CAFFE2_USE_TRT 1)
+  endif()
 endif()
 
 # --[ ATen checks

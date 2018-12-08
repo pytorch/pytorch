@@ -133,9 +133,7 @@ cmake_dependent_option(
 # Used when building Caffe2 through setup.py
 option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside torch libs" OFF)
 
-if (NOT ONNX_NAMESPACE)
-  set(ONNX_NAMESPACE "onnx_c2")
-endif()
+SET(ONNX_NAMESPACE "onnx_c2" CACHE STRING "onnx namespace")
 
 if (ANDROID OR IOS)
   set(BUILD_ATEN_MOBILE ON)
