@@ -7,7 +7,7 @@
 namespace at { namespace cuda {
 
 template <typename T, int size>
-struct alignas(size*sizeof(T)) Array {
+struct alignas(16) Array {
   T data[size];
 
   C10_HOST_DEVICE T operator[](int i) const {
