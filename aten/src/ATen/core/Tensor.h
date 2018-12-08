@@ -669,6 +669,7 @@ public:
   Tensor pow(const Tensor & exponent) const;
   Tensor alias() const;
   Tensor max_unpool2d(const Tensor & indices, IntList output_size) const;
+  Tensor max_unpool3d(const Tensor & indices, IntList output_size, IntList stride, IntList padding) const;
 
   // We changed .dtype() to return a TypeMeta in #12766. Ideally, we want the
   // at::kDouble and its friends to be TypeMeta's, but that hasn't happened yet.

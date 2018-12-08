@@ -13,23 +13,10 @@ at::Tensor MaxUnpooling2d_forward_out_cpu_(
     int64_t outputHeight,
     int64_t outputWidth) {
   // TODO: replicate is_empty() cbeck in SpatialMaxUnpooling.c
-  AT_CHECK(
-      input.ndimension() == 4,
-      "Input to MaxUnpooling2d should be a NCHW Tensor");
-  AT_CHECK(
-      input.sizes() == indices.sizes(),
-      "Shape of indices should match shape of input");
-  AT_CHECK(input.is_contiguous(), "input must be contiguous");
-  AT_CHECK(indices.is_contiguous(), "indices must be contiguous");
+  // TODO: zero out output inplace
 
   auto numBatch = input.size(0);
   auto numChannels = input.size(1);
-  AT_CHECK(
-      output.sizes() ==
-          IntList({numBatch, numChannels, outputHeight, outputWidth}),
-      "The first two dimensions of output should match those of input, and last two dimensions should match output height and width");
-  AT_CHECK(output.is_contiguous(), "output must be contiguous");
-
   auto inputHeight = input.size(2);
   auto inputWidth = input.size(3);
 
@@ -69,6 +56,24 @@ at::Tensor& MaxUnpooling2d_forward_out_cpu(
   AT_CHECK(
       output_size.size() == 2,
       "There should be exactly two elements (height, width) in output_size");
+  AT_CHECK(
+      self.ndimension() == 4,
+      "Input to MaxUnpooling2d should be a NCHW Tensor");
+  AT_CHECK(
+      self.sizes() == indices.sizes(),
+      "Shape of indices should match shape of input");
+  AT_CHECK(self.is_contiguous(), "input must be contiguous");
+  AT_CHECK(indices.is_contiguous(), "indices must be contiguous");
+
+  auto numBatch = self.size(0);
+  auto numChannels = self.size(1);
+  auto outputHeight = output_size[0];
+  auto outputWidth = output_size[1];
+  AT_CHECK(
+      output.sizes() ==
+          IntList({numBatch, numChannels, outputHeight, outputWidth}),
+      "The first two dimensions of output should match those of input, and last two dimensions should match output_size");
+  AT_CHECK(output.is_contiguous(), "output must be contiguous");
   AT_DISPATCH_FLOATING_TYPES(
       self.type(), "MaxUnpooling2d_forward_out_cpu_", ([&] {
         MaxUnpooling2d_forward_out_cpu_<scalar_t>(
@@ -121,10 +126,163 @@ at::Tensor MaxUnpooling2d_forward_cuda(
   return at::_thnn_max_unpool2d(self, indices, output_size);
 }
 
-at::Tensor& MaxUnpooling3d_forward_out_cpu(Tensor& output, const Tensor& self, const Tensor& indices, IntList output_size, IntList padding) {
-  AT_ERROR("not implemented");
+template <typename scalar_t>
+at::Tensor MaxUnpooling3d_forward_out_cpu_(
+    Tensor& output,
+    const Tensor& input,
+    const Tensor& indices,
+    int64_t oT,
+    int64_t oW,
+    int64_t oH,
+    int64_t dT,
+    int64_t dW,
+    int64_t dH,
+    int64_t pT,
+    int64_t pW,
+    int64_t pH) {
+  auto nBatch = input.size(0);
+  auto nSlices = input.size(1);
+
+  auto dimw = 4;
+  auto dimh = 3;
+  auto dimt = 2;
+
+  auto iT = input.size(dimt);
+  auto iH = input.size(dimh);
+  auto iW = input.size(dimw);
+
+  // TODO: zero out output inplace
+  auto* input_data = input.data<scalar_t>();
+  auto* output_data = output.data<scalar_t>();
+  auto* indices_data = indices.data<int64_t>();
+
+  for (auto p = 0; p < nBatch; p++) {
+    auto inputOffset = p * nSlices * iT * iW * iH;
+    auto outputOffset = p * nSlices * oT * oW * oH;
+
+    for (auto k = 0; k < nSlices; k++) {
+      auto finalInputOffset = inputOffset + k * iT * iW * iH;
+      auto finalOutputOffset = outputOffset + k * oT * oW * oH;
+
+      auto* output_p_k = output_data + finalOutputOffset;
+      auto* input_p_k = input_data + finalInputOffset;
+      auto* ind_p_k = indices_data + finalInputOffset;
+      int maxp;
+      for (auto t = 0; t < iT; t++) {
+        for (auto i = 0; i < iH; i++) {
+          for (auto j = 0; j < iW; j++) {
+            auto index = t * iH * iW + i * iW + j;
+            maxp = ind_p_k[index];
+            if (maxp < 0 || maxp >= oT * oW * oH) {
+              AT_ERROR("Invalid index");
+            } else {
+              output_p_k[maxp] = input_p_k[index];
+            }
+          }
+        }
+      }
+    }
+  }
+  return output;
 }
 
+at::Tensor& MaxUnpooling3d_forward_out_cpu(
+    Tensor& output,
+    const Tensor& self,
+    const Tensor& indices,
+    IntList output_size,
+    IntList stride,
+    IntList padding) {
+  // _thnn_max_unpool3d(Tensor self, LongTensor indices, IntList[3] output_size,
+  // IntList[3] stride, IntList[3] padding)
+  AT_CHECK(
+      output.ndimension() == 5,
+      "Output to MaxUnpooling2d should be a NCDHW Tensor",
+      output.sizes());
+  AT_CHECK(
+      self.ndimension() == 5,
+      "Output to MaxUnpooling2d should be a NCDHW Tensor",
+      self.sizes());
+  AT_CHECK(
+      output_size.size() == 3,
+      "There should be exactly three elements (depth, height, width) in output_size");
+  AT_CHECK(
+      stride.size() == 3,
+      "There should be exactly three elements (depth, height, width) in stide");
+  AT_CHECK(
+      padding.size() == 3,
+      "There should be exactly three elements (depth, height, width) in padding");
+  AT_CHECK(
+      self.sizes() == indices.sizes(),
+      "Shape of indices should match shape of input");
+  AT_CHECK(self.is_contiguous(), "input must be contiguous");
+  AT_CHECK(indices.is_contiguous(), "indices must be contiguous");
+  AT_CHECK(output.is_contiguous(), "output must be contiguous");
+  AT_DISPATCH_FLOATING_TYPES(
+      self.type(), "MaxUnpooling3d_forward_out_cpu_", ([&] {
+        MaxUnpooling3d_forward_out_cpu_<scalar_t>(
+            output,
+            self,
+            indices,
+            output_size[0],
+            output_size[1],
+            output_size[2],
+            stride[0],
+            stride[1],
+            stride[2],
+            padding[0],
+            padding[1],
+            padding[2]);
+      }));
+  return output;
+}
+
+at::Tensor MaxUnpooling3d_forward_cpu(
+    const Tensor& self,
+    const Tensor& indices,
+    IntList output_size,
+    IntList stride,
+    IntList padding) {
+  AT_CHECK(
+      self.ndimension() == 5,
+      "Input to MaxUnpooling2d should be a NCDHW Tensor",
+      self.sizes());
+  AT_CHECK(
+      output_size.size() == 3,
+      "There should be exactly three elements (depth, height, width) in output_size");
+  auto output = at::zeros(
+      {self.size(0),
+       self.size(1),
+       output_size[0],
+       output_size[1],
+       output_size[2]},
+      self.options());
+  MaxUnpooling3d_forward_out_cpu(
+      output, self, indices, output_size, stride, padding);
+  return output;
+}
+
+// stopgap until GPU version is implemented
+at::Tensor& MaxUnpooling3d_forward_out_cuda(
+    Tensor& output,
+    const Tensor& self,
+    const Tensor& indices,
+    IntList output_size,
+    IntList stride,
+    IntList padding) {
+  // std::cout << "MaxUnpooling2d_forward_out_gpu called" << "\n";
+  return at::_thnn_max_unpool3d_out(output, self, indices, output_size, stride, padding);
+}
+
+// stopgap until GPU version is implemented
+at::Tensor MaxUnpooling3d_forward_cuda(
+    const Tensor& self,
+    const Tensor& indices,
+    IntList output_size,
+    IntList stride,
+    IntList padding) {
+  return at::_thnn_max_unpool3d(self, indices, output_size, stride, padding);
+}
 
 } // namespace native
 } // namespace at

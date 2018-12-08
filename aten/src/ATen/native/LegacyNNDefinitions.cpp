@@ -491,13 +491,13 @@ Tensor max_unpool2d_backward(const Tensor & grad_output, const Tensor & self, co
   return at::_thnn_max_unpool2d_backward(grad_output, self, indices, output_size);
 }
 
-Tensor & max_unpool3d_out(Tensor & output, const Tensor & self, const Tensor & indices, IntList output_size, IntList stride, IntList padding) {
-  return at::_thnn_max_unpool3d_out(output, self, indices, output_size, stride, padding);
-}
-
-Tensor max_unpool3d(const Tensor & self, const Tensor & indices, IntList output_size, IntList stride, IntList padding) {
-  return at::_thnn_max_unpool3d(self, indices, output_size, stride, padding);
-}
+// Tensor & max_unpool3d_out(Tensor & output, const Tensor & self, const Tensor & indices, IntList output_size, IntList stride, IntList padding) {
+//   return at::_thnn_max_unpool3d_out(output, self, indices, output_size, stride, padding);
+// }
+//
+// Tensor max_unpool3d(const Tensor & self, const Tensor & indices, IntList output_size, IntList stride, IntList padding) {
+//   return at::_thnn_max_unpool3d(self, indices, output_size, stride, padding);
+// }
 
 Tensor & max_unpool3d_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, const Tensor & indices, IntList output_size, IntList stride, IntList padding) {
   return at::_thnn_max_unpool3d_backward_out(grad_input, grad_output, self, indices, output_size, stride, padding);
