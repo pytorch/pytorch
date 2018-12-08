@@ -1074,20 +1074,11 @@ template <typename T, bool ReluFused>
 template <typename PackAMatrix, fbgemm::QuantizationGranularity Q_GRAN>
 void ConvDNNLowPOp<T, ReluFused>::DispatchFBGEMM(
     PackAMatrix& packA,
-    vector<int32_t>* Y_int32) {
+    vector<int32_t>* Y_int32,
+    uint8_t* Y_uint8_data,
+    float* Y_float_data) {
   auto& filter = InputTensorCPU_(FILTER);
-  Tensor* Y = OutputTensorCPU_(0);
   const int M = filter.dim32(0);
-
-  uint8_t* Y_uint8_data = nullptr;
-  float* Y_float_data = nullptr;
-  if (dequantize_output_) {
-    // Output is float
-    Y_float_data = Y->template mutable_data<float>();
-  } else {
-    // Output is uint8_t
-    Y_uint8_data = Y->template mutable_data<uint8_t>();
-  }
 
   int nthreads = dnnlowp_get_num_threads();
   int tid = dnnlowp_get_thread_num();
@@ -1255,6 +1246,16 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
     X_pack_buf_.resize(dnnlowp_get_max_threads() * x_pack_buf_size_per_thread);
   }
 
+  uint8_t* Y_uint8_data = nullptr;
+  float* Y_float_data = nullptr;
+  if (dequantize_output_) {
+    // Output is float
+    Y_float_data = Y->template mutable_data<float>();
+  } else {
+    // Output is uint8_t
+    Y_uint8_data = Y->template mutable_data<uint8_t>();
+  }
+
   if (Wq_packed_)
 #ifdef _OPENMP
 #pragma omp parallel
@@ -1291,11 +1292,13 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
         if (quantize_groupwise_) {
           DispatchFBGEMM<
               PackAWithIm2Col<uint8_t>,
-              QuantizationGranularity::GROUP>(packA, Y_int32);
+              QuantizationGranularity::GROUP>(
+              packA, Y_int32, Y_uint8_data, Y_float_data);
         } else {
           DispatchFBGEMM<
               PackAWithIm2Col<uint8_t>,
-              QuantizationGranularity::TENSOR>(packA, Y_int32);
+              QuantizationGranularity::TENSOR>(
+              packA, Y_int32, Y_uint8_data, Y_float_data);
         }
       } else {
         // 3D
@@ -1325,11 +1328,13 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
         if (quantize_groupwise_) {
           DispatchFBGEMM<
               PackAWithIm2Col<uint8_t, int32_t, 3>,
-              QuantizationGranularity::GROUP>(packA, Y_int32);
+              QuantizationGranularity::GROUP>(
+              packA, Y_int32, Y_uint8_data, Y_float_data);
         } else {
           DispatchFBGEMM<
               PackAWithIm2Col<uint8_t, int32_t, 3>,
-              QuantizationGranularity::TENSOR>(packA, Y_int32);
+              QuantizationGranularity::TENSOR>(
+              packA, Y_int32, Y_uint8_data, Y_float_data);
         }
       } // 3D
     } else {
@@ -1348,11 +1353,13 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
       if (quantize_groupwise_) {
         DispatchFBGEMM<
             PackAWithRowOffset<uint8_t>,
-            QuantizationGranularity::GROUP>(packA, Y_int32);
+            QuantizationGranularity::GROUP>(
+            packA, Y_int32, Y_uint8_data, Y_float_data);
       } else {
         DispatchFBGEMM<
             PackAWithRowOffset<uint8_t>,
-            QuantizationGranularity::TENSOR>(packA, Y_int32);
+            QuantizationGranularity::TENSOR>(
+            packA, Y_int32, Y_uint8_data, Y_float_data);
       }
     } // no im2col fusion
   } else {

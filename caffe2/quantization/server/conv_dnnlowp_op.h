@@ -107,7 +107,11 @@ class ConvDNNLowPOp : public ConvPoolDNNLowPOpBase<T, ConvFp32Op> {
   bool RunOnDeviceWithOrderNHWCAndType_();
 
   template <typename PackAMatrix, fbgemm::QuantizationGranularity Q_GRAN>
-  void DispatchFBGEMM(PackAMatrix& packA, vector<std::int32_t>* Y_int32);
+  void DispatchFBGEMM(
+      PackAMatrix& packA,
+      vector<std::int32_t>* Y_int32,
+      uint8_t* Y_uint8_data,
+      float* Y_float_data);
 
   template <typename InType>
   void ConvNHWCCore_(

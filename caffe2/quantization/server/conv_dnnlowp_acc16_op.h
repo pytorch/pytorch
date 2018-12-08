@@ -45,7 +45,8 @@ class ConvDNNLowPAcc16Op final : public ConvDNNLowPOp<std::uint8_t, ReluFused> {
   void DispatchFBGEMM(
       PackAMatrix& packA,
       const std::uint8_t* col_buffer_quantized_data,
-      vector<std::int32_t>* Y_int32);
+      vector<std::int32_t>* Y_int32,
+      uint8_t* Y_uint8_data);
 
   void ConvOutlier_(
       const std::uint8_t* col_buffer,
