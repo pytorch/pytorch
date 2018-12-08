@@ -46,6 +46,7 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_atanh.*'  # Needs implementation
                      '|test_onehot.*'  # Needs implementation
                      '|test_scan.*'  # Needs implementation
+                     '|test_erf.*'  # Needs implementation
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.
