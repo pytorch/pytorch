@@ -598,7 +598,7 @@ inline Tensor & Tensor::sqrt_() {
 inline Tensor Tensor::std(bool unbiased) const {
     return type().std(*this, unbiased);
 }
-inline Tensor Tensor::std(int64_t dim, bool unbiased, bool keepdim) const {
+inline Tensor Tensor::std(IntList dim, bool unbiased, bool keepdim) const {
     return type().std(*this, dim, unbiased, keepdim);
 }
 inline Tensor Tensor::prod(ScalarType dtype) const {

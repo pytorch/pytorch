@@ -367,7 +367,7 @@ struct CAFFE2_API Type {
   virtual Tensor sqrt(const Tensor & self) const = 0;
   virtual Tensor & sqrt_(Tensor & self) const = 0;
   virtual Tensor std(const Tensor & self, bool unbiased) const = 0;
-  virtual Tensor std(const Tensor & self, int64_t dim, bool unbiased, bool keepdim) const = 0;
+  virtual Tensor std(const Tensor & self, IntList dim, bool unbiased, bool keepdim) const = 0;
   virtual Tensor prod(const Tensor & self, ScalarType dtype) const = 0;
   virtual Tensor prod(const Tensor & self) const = 0;
   virtual Tensor prod(const Tensor & self, int64_t dim, bool keepdim, ScalarType dtype) const = 0;

@@ -159,18 +159,23 @@ Tensor permute_backwards(const Tensor & grad, IntList fwd_dims) {
   return grad.permute(dims);
 }
 
+Tensor unsqueeze_multiple(const Tensor & t, IntList dim, size_t n_dims) {
+    auto dims_to_unsqueeze = at::dim_list_to_bitset(dim, n_dims);
+    Tensor res = t;
+    for (size_t i = 0; i < n_dims; i++){
+      if (dims_to_unsqueeze[i]) {
+        res = res.unsqueeze(i);
+      }
+    }
+    return res;
+}
+
 Tensor sum_backward(const Tensor & grad, IntList sizes, IntList dims, bool keepdim) {
   if (!keepdim && sizes.size() > 0) {
     if (dims.size()==1) {
       return grad.unsqueeze(dims[0]).expand(sizes);
     } else {
-      auto dims_to_unsqueeze = at::dim_list_to_bitset(dims, sizes.size());
-      Tensor res = grad;
-      for (size_t i = 0; i < sizes.size(); i++){
-        if (dims_to_unsqueeze[i]) {
-          res = res.unsqueeze(i);
-        }
-      }
+      Tensor res = unsqueeze_multiple(grad, dims, sizes.size());
       return res.expand(sizes);
     }
   } else {
@@ -636,14 +641,14 @@ Tensor var_backward(const Tensor & grad, const Tensor & self, bool unbiased) {
   return (2.0 / (self.numel() - unbiased)) * grad * (self - self.mean());
 }
 
-Tensor var_backward(Tensor grad, const Tensor & self, int64_t dim, bool unbiased, bool keepdim) {
+Tensor var_backward(Tensor grad, const Tensor & self, IntList dim, bool unbiased, bool keepdim) {
   if (self.dim() == 0) {
     return var_backward(grad, self, unbiased);
   }
   if (!keepdim && self.dim() > 1) {
-    grad = grad.unsqueeze(dim);
+    grad = unsqueeze_multiple(grad, dim, self.sizes().size());
   }
-  return (2.0 / (self.size(dim) - unbiased)) * grad * (self - self.mean(dim, true));
+  return (2.0 / (_safe_size(self.sizes(), dim) - unbiased)) * grad * (self - self.mean(dim, true));
 }
 
 Tensor masked_scatter_backward(const Tensor & grad, const Tensor & mask, IntList sizes) {
