@@ -106,14 +106,26 @@ def parse_type_line(type_line):
 def get_type_line(source):
     """Tries to find the line containing a comment with the type annotation."""
     lines = source.split('\n')
+    type_comment = '# type:'
+    type_lines = list(filter(lambda line: type_comment in line, lines))
 
-    type_line = None
-    for line in lines:
-        if '# type:' in line:
-            type_line = line.strip()
-            break
+    if len(type_lines) == 1:
+        return type_lines[0]
 
-    return type_line
+    # parse multiline type line according to PEP 484
+    types = []
+    for type_line in type_lines[:-1]:
+        item_type = type_line[type_line.find(type_comment) + len(type_comment):]
+        types.append(item_type.strip())
+
+    parameter_types = ", ".join(types)
+
+    # replace (...) with (parameter_types)
+    line_parts = type_lines[-1].split("...")
+    if len(line_parts) != 2:
+        raise RuntimeError("Incorrect return type line on multiline type annotation")
+
+    return line_parts[0] + parameter_types + line_parts[1]
 
 
 def split_type_line(type_line):

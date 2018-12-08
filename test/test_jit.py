@@ -8228,6 +8228,26 @@ a")
             test_str.append(fn.__getattr__('forward').pretty_print_schema())
         self.assertExpected("\n".join(test_str))
 
+    @unittest.skipIf(not PY35, "Python 3.5 needed")
+    def test_multiline_annot_ast_py3_fn(self):
+        code = dedent('''
+            from typing import Tuple, List, Optional
+            from torch import Tensor
+            from torch.jit.annotations import BroadcastingList2, BroadcastingList3
+            import torch
+            @torch.jit.script
+            def foo(x,  # type: {input}
+                    y   # type: Tuple[Tensor, Tensor]
+                    ):
+                # type: (...) -> Tuple[{output}, {output}]
+                return x, x
+        ''')
+        test_str = []
+        for pair in self.type_input_return_pairs():
+            fn = self._get_py3_code(self.format_code(code, pair), 'foo')
+            test_str.append(fn.__getattr__('forward').pretty_print_schema())
+        self.assertExpected("\n".join(test_str))
+
     #  Python AST Frontend , Python 3-style type annotations , Script method
     @unittest.skipIf(not PY35, "Python 3.5 needed")
     def test_annot_ast_py3_method(self):
