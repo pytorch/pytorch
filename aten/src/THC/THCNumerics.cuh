@@ -205,7 +205,7 @@ struct THCNumerics<at::Half> {
   static inline __host__ __device__ at::Half erf(at::Half a) { return ::erf(a); }
   static inline __host__ __device__ at::Half erfc(at::Half a) { return ::erfc(a); }
   static inline __host__ __device__ at::Half erfinv(at::Half a) { return ::erfinv(a); }
-  static inline __host__ __device__ at::Half abs(at::Half a) { return ::abs(a); }
+  static inline __host__ __device__ at::Half abs(at::Half a) { return std::abs(a); }
   static inline __host__ __device__ at::Half round(at::Half a) { return ::round(a); }
 
   static inline __host__ __device__ at::Half frac(at::Half a) {
