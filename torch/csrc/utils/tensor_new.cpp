@@ -249,7 +249,7 @@ Tensor legacy_new_from_sequence(
   if (!PySequence_Check(data)) {
     throw TypeError("new(): data must be a sequence (got %s)", Py_TYPE(data)->tp_name);
   }
-  return legacy_new_from_data(type, device, data);
+  return internal_new_from_data(type, device, data, false, false, false);
 }
 
 void check_legacy_ctor_device(const Type& type, c10::optional<Device> device) {
@@ -453,13 +453,6 @@ Tensor legacy_new_from_data(
     const Type& type,
     c10::optional<Device> device,
     PyObject* data) {
-  return internal_new_from_data(type, device, data, false, false, false);
-}
-
-Tensor legacy_infer_new_from_data(
-    const Type& type,
-    c10::optional<Device> device,
-    PyObject* data){
   ScalarType scalar_type = infer_scalar_type(data);
   if (scalar_type == ScalarType::Byte){
       auto& idx_type = type.toScalarType(scalar_type);
