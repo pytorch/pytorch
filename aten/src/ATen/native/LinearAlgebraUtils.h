@@ -88,6 +88,22 @@ static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* nam
   }
 }
 
+/*
+ * This is an overloaded case of the previous function for a tensor of infos.
+ */
+static inline void batchCheckErrors(const Tensor& infos, const char* name) {
+  auto batch_size = infos.numel();
+  auto infos_data = infos.data<int>();
+  for (size_t i = 0; i < infos.numel(); i++) {
+    auto info = infos_data[i];
+    if (info < 0) {
+      AT_ERROR(name, ": For batch ", i, ": Argument ", -info, " has illegal value");
+    } else if (info > 0) {
+      AT_ERROR(name, ": For batch ", i, ": U(", info, ",", info, ") is zero, singular U.");
+    }
+  }
+}
+
 // Checks if all the Tensors in a TensorList are of the same dimensions
 static inline void checkAllSameDim(TensorList tensors, int64_t dim) {
   for (auto &t : tensors) {

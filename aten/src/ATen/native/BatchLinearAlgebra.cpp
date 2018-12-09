@@ -416,8 +416,9 @@ std::tuple<Tensor, Tensor, Tensor> _btrifact_helper_cpu(const Tensor& self, bool
 }
 
 std::tuple<Tensor, Tensor> btrifact(const Tensor& self, bool pivot) {
-  Tensor LU_fact, pivots;
-  std::tie(LU_fact, pivots, std::ignore) = at::_btrifact_helper(self, pivot);
+  Tensor LU_fact, pivots, infos;
+  std::tie(LU_fact, pivots, infos) = at::_btrifact_helper(self, pivot);
+  batchCheckErrors(infos, "btrifact");
   return std::make_tuple(LU_fact, pivots);
 }
 
@@ -426,7 +427,9 @@ std::tuple<Tensor&, Tensor&> btrifact_out(
     Tensor& pivots,
     const Tensor& self,
     bool pivot) {
-  std::tie(A_LU, pivots, std::ignore) = at::_btrifact_helper(self, pivot);
+  Tensor infos;
+  std::tie(A_LU, pivots, infos) = at::_btrifact_helper(self, pivot);
+  batchCheckErrors(infos, "btrifact");
   return std::tuple<Tensor&, Tensor&>(A_LU, pivots);
 }
 
