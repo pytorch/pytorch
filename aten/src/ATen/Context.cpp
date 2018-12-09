@@ -1,6 +1,6 @@
-#include "ATen/Config.h"
+#include <ATen/Config.h>
 
-#include "Context.h"
+#include <ATen/Context.h>
 
 #include <c10/core/TensorOptions.h>
 
@@ -10,12 +10,12 @@
 #include <string>
 #include <stdexcept>
 
-#include "ATen/CPUGenerator.h"
-#include "ATen/RegisterCPU.h"
-#include "ATen/Tensor.h"
+#include <ATen/CPUGenerator.h>
+#include <ATen/RegisterCPU.h>
+#include <ATen/Tensor.h>
 #include <ATen/cpu/FlushDenormal.h>
 
-#include "TH/TH.h"  // for USE_LAPACK
+#include <TH/TH.h>  // for USE_LAPACK
 
 namespace at {
 

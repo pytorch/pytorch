@@ -1,12 +1,12 @@
-#include "Dtype.h"
+#include <torch/csrc/Dtype.h>
 
 #include <cstring>
 #include <structmember.h>
-#include "torch/csrc/Exceptions.h"
-#include "torch/csrc/utils/object_ptr.h"
-#include "torch/csrc/utils/python_strings.h"
-#include "torch/csrc/utils/tensor_dtypes.h"
-#include "torch/csrc/utils/tensor_types.h"
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/tensor_dtypes.h>
+#include <torch/csrc/utils/tensor_types.h>
 
 PyObject * THPDtype_New(at::ScalarType scalar_type, const std::string& name)
 {

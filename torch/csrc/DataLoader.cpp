@@ -1,4 +1,4 @@
-#include "DataLoader.h"
+#include <torch/csrc/DataLoader.h>
 
 // In cases like DataLoader, if a worker process dies due to bus error/segfault
 // or just hang, the main process will hang waiting for data. This is difficult
@@ -20,8 +20,8 @@
 #include <sstream>
 #include <sys/wait.h>
 
-#include "torch/csrc/Exceptions.h"
-#include "torch/csrc/utils/python_numbers.h"
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/utils/python_numbers.h>
 
 using namespace torch;
 

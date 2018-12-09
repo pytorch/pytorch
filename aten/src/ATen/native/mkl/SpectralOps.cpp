@@ -1,7 +1,7 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/native/SpectralOpsUtils.h"
-#include "ATen/Config.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/native/SpectralOpsUtils.h>
+#include <ATen/Config.h>
 
 #if !AT_MKL_ENABLED()
 
@@ -19,11 +19,11 @@ Tensor _fft_mkl(const Tensor& input, int64_t signal_ndim,
 
 #else // AT_MKL_ENABLED
 
-#include "ATen/ATen.h"
-#include "ATen/Config.h"
-#include "ATen/Dispatch.h"
-#include "ATen/Utils.h"
-#include "ATen/NativeFunctions.h"
+#include <ATen/ATen.h>
+#include <ATen/Config.h>
+#include <ATen/Dispatch.h>
+#include <ATen/Utils.h>
+#include <ATen/NativeFunctions.h>
 
 #include <algorithm>
 #include <vector>

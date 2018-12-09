@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/SpatialUpSamplingBilinear.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/SpatialUpSamplingBilinear.cu"
 #else
 
 #include <THCUNN/linear_upsampling.h>
