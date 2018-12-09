@@ -477,16 +477,10 @@ template <typename PackAMatrix, fbgemm::QuantizationGranularity Q_GRAN>
 void ConvDNNLowPAcc16Op<ReluFused>::DispatchFBGEMM(
     PackAMatrix& packA,
     const uint8_t* col_buffer_quantized_data,
-    vector<int32_t>* Y_int32) {
+    vector<int32_t>* Y_int32,
+    uint8_t* Y_uint8_data) {
   auto& filter = InputTensorCPU_(FILTER);
-  Tensor* Y = OutputTensorCPU_(0);
   const int M = filter.dim32(0);
-
-  uint8_t* Y_uint8_data = nullptr;
-  if (!dequantize_output_) {
-    // Output is uint8_t
-    Y_uint8_data = Y->template mutable_data<uint8_t>();
-  }
 
   int kernel_dim = this->KernelDim_();
 
@@ -714,6 +708,12 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNHWCAndType_() {
             dnnlowp_get_max_threads() * x_pack_buf_size_per_thread);
       }
 
+      uint8_t* Y_uint8_data = nullptr;
+      if (!dequantize_output_) {
+        // Output is uint8_t
+        Y_uint8_data = Y->template mutable_data<uint8_t>();
+      }
+
       if (nbits_in_non_outlier_ > 0) {
         // Main GEMM for non-outlier
         if (Wq_acc16_packed_) {
@@ -740,12 +740,12 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNHWCAndType_() {
                 DispatchFBGEMM<
                     PackAWithRowOffset<uint8_t, int16_t>,
                     QuantizationGranularity::GROUP>(
-                    packA, col_buffer_quantized_data, Y_int32);
+                    packA, col_buffer_quantized_data, Y_int32, Y_uint8_data);
               } else {
                 DispatchFBGEMM<
                     PackAWithRowOffset<uint8_t, int16_t>,
                     QuantizationGranularity::TENSOR>(
-                    packA, col_buffer_quantized_data, Y_int32);
+                    packA, col_buffer_quantized_data, Y_int32, Y_uint8_data);
               }
             } else {
               // !fuse_output_pipeline
