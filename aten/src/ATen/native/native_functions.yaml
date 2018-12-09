@@ -2852,6 +2852,12 @@
 - func: btrifact_with_info(Tensor self, *, bool pivot=true) -> (Tensor, Tensor, Tensor)
   variants: method, function
 
+- func: _btrifact_helper(Tensor self, bool pivot) -> (Tensor, Tensor, Tensor)
+  variants: function
+  dispatch:
+    CPU: _btrifact_helper_cpu
+    CUDA: _btrifact_helper_cuda
+
 - func: btrisolve_out(Tensor result, Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
 
 - func: btrisolve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
