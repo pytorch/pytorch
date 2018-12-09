@@ -15,7 +15,7 @@ graph() {
   %13 : int[] = prim::ListConstruct(%4, %5)
   %14 : Tensor = aten::zeros(%13, %3, %2, %1)
   %15 : Tensor = aten::gt(%a.2, %14)
-  %16 : bool = prim::TensorToBool(%15)
+  %16 : bool = prim::Bool(%15)
   %b : Tensor = prim::If(%16)
     block0() {
       %18 : int[] = prim::ListConstruct(%4, %5)

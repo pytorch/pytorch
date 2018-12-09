@@ -867,13 +867,7 @@ public:
   TORCH_API Node* createList(const TypePtr& elem_type, at::ArrayRef<Value*> values);
   TORCH_API Node* createListUnpack(Value *v, size_t size);
   TORCH_API Node* createNumToTensor(Value* value);
-  TORCH_API Node* createBoolToTensor(Value* value);
-  TORCH_API Node* createTensorToNum(const TypePtr& type, Value* value);
   TORCH_API Node* createImplicitTensorToNum(const TypePtr& type, Value* value);
-  TORCH_API Node* createTensorToBool(Value* value);
-  TORCH_API Node* createIntToFloat(Value* value);
-  TORCH_API Node* createFloatToInt(Value* value);
-  TORCH_API Node* createStringToFloat(Value* value);
   Node* createPythonOp(
       THPObjectPtr&& pyobj,
       const std::string& cconv,
