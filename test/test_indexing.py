@@ -509,10 +509,10 @@ class NumpyTests(TestCase):
         b = [True, False, False]
         c = [True, True, False]
         self.assertEqual(a[b], tensor([[1, 2, 3]]))
-        self.assertEqual(a[b,b], tensor([1]))
+        self.assertEqual(a[b, b], tensor([1]))
         self.assertEqual(a[c], tensor([[1, 2, 3], [4, 5, 6]]))
-        self.assertEqual(a[c,c], tensor([1, 5]))
-        
+        self.assertEqual(a[c, c], tensor([1, 5]))
+
     def test_everything_returns_views(self):
         # Before `...` would return a itself.
         a = tensor([5])
