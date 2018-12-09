@@ -402,6 +402,7 @@ static void apply_btrifact(Tensor& self, Tensor& pivots, Tensor& infos) {
 
 std::tuple<Tensor, Tensor, Tensor> _btrifact_helper_cpu(const Tensor& self, bool pivot) {
   AT_CHECK(pivot, "btrifact without pivoting is not implemented on the CPU");
+  squareCheckInputs(self);
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto req_size = self.sizes().vec();
   req_size.pop_back();
