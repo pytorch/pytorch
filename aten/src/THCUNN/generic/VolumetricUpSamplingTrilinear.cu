@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/VolumetricUpSamplingTrilinear.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/VolumetricUpSamplingTrilinear.cu"
 #else
 
 #include <THCUNN/linear_upsampling.h>

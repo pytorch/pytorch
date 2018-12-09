@@ -1,4 +1,4 @@
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
 #include <iostream>
 // define constants like M_PI and C keywords for MSVC
@@ -6,8 +6,8 @@
 #define _USE_MATH_DEFINES
 #include <math.h>
 #endif
-#include "ATen/ATen.h"
-#include "ATen/Dispatch.h"
+#include <ATen/ATen.h>
+#include <ATen/Dispatch.h>
 
 using std::cout;
 using namespace at;

@@ -2,7 +2,7 @@
 
 #include <functional>
 #include <vector>
-#include "Types.h"
+#include <torch/csrc/Types.h>
 
 typedef std::function<void(PyObject*, PyObject*, bool)> THPCopyFunction;
 struct THPCopyInfo {

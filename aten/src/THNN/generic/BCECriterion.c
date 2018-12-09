@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/BCECriterion.c"
+#define TH_GENERIC_FILE "THNN/generic/BCECriterion.c"
 #else
 
 #define EPS 1e-12

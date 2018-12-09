@@ -3,10 +3,10 @@
 #include <memory>
 #include <string>
 
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/script/error_report.h"
-#include "torch/csrc/jit/script/tree_views.h"
-#include "torch/csrc/jit/script/module.h"
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/script/error_report.h>
+#include <torch/csrc/jit/script/tree_views.h>
+#include <torch/csrc/jit/script/module.h>
 
 namespace torch {
 namespace jit {

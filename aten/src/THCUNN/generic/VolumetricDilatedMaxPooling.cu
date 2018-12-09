@@ -1,8 +1,8 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/VolumetricDilatedMaxPooling.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/VolumetricDilatedMaxPooling.cu"
 #else
 
-#include "pooling_shape.h"
+#include <THCUNN/generic/pooling_shape.h>
 
 #define UPDATE_OUTPUT_KERNEL_WIDTH(KW) case KW:                         \
   cuda_VolumetricDilatedMaxPooling_updateOutput<KW>                     \

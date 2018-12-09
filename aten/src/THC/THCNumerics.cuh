@@ -5,9 +5,9 @@
 #include <limits>
 #include <cuda.h>
 #include <assert.h>
-#include "TH/THHalf.h"
-#include "ATen/ATen.h"
-#include "ATen/cuda/NumericLimits.cuh"
+#include <TH/THHalf.h>
+#include <ATen/ATen.h>
+#include <ATen/cuda/NumericLimits.cuh>
 
 // WARNING: THCNumerics is being deprecated. Please follow the comments
 // in this file to learn about new usages.

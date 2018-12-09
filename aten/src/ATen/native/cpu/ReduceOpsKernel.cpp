@@ -7,7 +7,7 @@
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Reduce.h>
-#include "c10/util/Optional.h"
+#include <c10/util/Optional.h>
 
 namespace at { namespace native { namespace {
 

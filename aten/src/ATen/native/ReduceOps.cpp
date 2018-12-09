@@ -1,13 +1,13 @@
-#include "ATen/native/ReduceOps.h"
+#include <ATen/native/ReduceOps.h>
 
-#include "ATen/ATen.h"
-#include "ATen/Dispatch.h"
-#include "ATen/ExpandUtils.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/WrapDimUtils.h"
-#include "ATen/WrapDimUtilsMulti.h"
-#include "ReduceOpsUtils.h"
-#include "TensorIterator.h"
+#include <ATen/ATen.h>
+#include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/WrapDimUtils.h>
+#include <ATen/WrapDimUtilsMulti.h>
+#include <ATen/native/ReduceOpsUtils.h>
+#include <ATen/native/TensorIterator.h>
 
 #include <algorithm>
 #include <functional>

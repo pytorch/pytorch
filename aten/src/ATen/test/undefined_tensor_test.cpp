@@ -1,7 +1,7 @@
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
-#include "ATen/ATen.h"
-#include "ATen/core/UndefinedTensorImpl.h"
+#include <ATen/ATen.h>
+#include <ATen/core/UndefinedTensorImpl.h>
 #include <string>
 
 using namespace at;

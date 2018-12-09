@@ -1,5 +1,5 @@
 #include <THD/base/data_channels/DataChannelTCP.hpp>
-#include "TestUtils.hpp"
+#include <THD/test/TestUtils.hpp>
 
 #include <cassert>
 #include <iostream>
