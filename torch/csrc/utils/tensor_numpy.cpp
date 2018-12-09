@@ -1,6 +1,6 @@
-#include "tensor_numpy.h"
+#include <torch/csrc/utils/tensor_numpy.h>
 
-#include "torch/csrc/utils/numpy_stub.h"
+#include <torch/csrc/utils/numpy_stub.h>
 
 #ifndef USE_NUMPY
 namespace torch { namespace utils {
@@ -16,9 +16,9 @@ bool is_numpy_scalar(PyObject* obj) {
 }}
 #else
 
-#include "torch/csrc/DynamicTypes.h"
-#include "torch/csrc/Exceptions.h"
-#include "torch/csrc/autograd/python_variable.h"
+#include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/autograd/python_variable.h>
 
 #include <ATen/ATen.h>
 #include <memory>

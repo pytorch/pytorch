@@ -1,9 +1,9 @@
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
-#include "ATen/ATen.h"
-#include "ATen/cuda/CUDAContext.h"
-#include "cuda.h"
-#include "cuda_runtime.h"
+#include <ATen/ATen.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <cuda.h>
+#include <cuda_runtime.h>
 #include <thread>
 
 void makeRandomNumber() {

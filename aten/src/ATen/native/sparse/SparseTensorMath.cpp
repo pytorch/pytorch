@@ -4,7 +4,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/SparseTensorUtils.h>
-#include "ATen/WrapDimUtilsMulti.h"
+#include <ATen/WrapDimUtilsMulti.h>
 
 #include <TH/THBlasUtils.h>
 

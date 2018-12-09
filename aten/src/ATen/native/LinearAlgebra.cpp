@@ -1,10 +1,10 @@
-#include "ATen/ATen.h"
-#include "ATen/ExpandUtils.h"
-#include "ATen/Dispatch.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/native/LinearAlgebraUtils.h"
-#include "ATen/TensorUtils.h"
-#include "ATen/Parallel.h"
+#include <ATen/ATen.h>
+#include <ATen/ExpandUtils.h>
+#include <ATen/Dispatch.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/Parallel.h>
 #include <functional>
 #include <numeric>
 #include <vector>

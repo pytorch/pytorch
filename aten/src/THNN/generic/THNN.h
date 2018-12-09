@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THNN.h"
+#define TH_GENERIC_FILE "THNN/generic/THNN.h"
 #else
 
 #include <ATen/core/Reduction.h>
