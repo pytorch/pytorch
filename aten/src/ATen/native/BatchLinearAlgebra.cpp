@@ -389,7 +389,6 @@ static void apply_btrifact(Tensor& self, Tensor& pivots, Tensor& infos) {
   auto pivots_matrix_stride = pivots.size(-1);
   auto infos_data = infos.data<int>();
 
-  auto m = self.size(-2);
   auto n = self.size(-1);
 
   for (int64_t i = 0; i < batch_size; i++) {
@@ -402,14 +401,13 @@ static void apply_btrifact(Tensor& self, Tensor& pivots, Tensor& infos) {
 }
 
 std::tuple<Tensor, Tensor, Tensor> _btrifact_helper_cpu(const Tensor& self, bool pivot) {
-  AT_CHECK(pivots, "btrifact without pivoting is not implemented on the CPU");
+  AT_CHECK(pivot, "btrifact without pivoting is not implemented on the CPU");
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto req_size = self.sizes().vec();
   req_size.pop_back();
+  auto pivots_tensor = at::zeros(req_size, self.options().dtype(kInt));
   req_size.pop_back();
   auto infos_tensor = at::zeros(req_size, self.options().dtype(kInt));
-  req_size.push_back(std::min(self.size(-1), self.size(-2)));
-  auto pivots_tensor = at::zeros(req_size, self.options().dtype(kInt));
   AT_DISPATCH_FLOATING_TYPES(self.type(), "btrifact", [&]{
     apply_btrifact<scalar_t>(self_working_copy, pivots_tensor, infos_tensor);
   });
@@ -428,7 +426,7 @@ std::tuple<Tensor&, Tensor&> btrifact_out(
     const Tensor& self,
     bool pivot) {
   std::tie(A_LU, pivots, std::ignore) = at::_btrifact_helper(self, pivot);
-  return std::make_tuple(A_LU, pivots);
+  return std::tuple<Tensor&, Tensor&>(A_LU, pivots);
 }
 
 std::tuple<Tensor, Tensor, Tensor> btrifact_with_info(
@@ -436,7 +434,7 @@ std::tuple<Tensor, Tensor, Tensor> btrifact_with_info(
     bool pivot) {
   Tensor LU_fact, pivots, infos;
   std::tie(LU_fact, pivots, infos) = at::_btrifact_helper(self, pivot);
-  return std:make_tuple(LU_fact, pivots, infos);
+  return std::make_tuple(LU_fact, pivots, infos);
 }
 
 std::tuple<Tensor&, Tensor&, Tensor&> btrifact_with_info_out(
@@ -446,7 +444,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> btrifact_with_info_out(
     const Tensor& self,
     bool pivot) {
   std::tie(A_LU, pivots, info) = at::_btrifact_helper(self, pivot);
-  return std::make_tuple(A_LU, pivots, info);
+  return std::tuple<Tensor&, Tensor&, Tensor&>(A_LU, pivots, info);
 }
 
 }}  // namespace at::native
