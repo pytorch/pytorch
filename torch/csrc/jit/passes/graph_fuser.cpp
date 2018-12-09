@@ -903,6 +903,14 @@ struct GraphFuser {
     // keep track of one sumToSize hitting each output
     std::vector<Value*> sumToSize_per_output(fusion_group->outputs().size(), nullptr);
 
+    static OperatorSet commutes_with_SumToSize {{
+	"aten::mul(Tensor self, Tensor other) -> Tensor",
+	"aten::div(Tensor self, Tensor other) -> Tensor", // for div we might check whether we're the first argument
+	"aten::mul(Tensor self, Scalar other) -> Tensor",
+	"aten::div(Tensor self, Scalar other) -> Tensor",
+	"aten::neg(Tensor self) -> Tensor",
+	"aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor", // this used to be prim::AutogradAdd
+      }};
     // Scan the graph. As we will delete nodes, we use the backward ordering.
     for (auto it = subgraph->nodes().rbegin(); it != subgraph->nodes().rend();) {
       auto * node = *it;
@@ -918,12 +926,7 @@ struct GraphFuser {
             // type as the gradient. But we only want to allow that as offset==1 (i.e. the type)
             JIT_ASSERT(offset==1);
             uses_to_process.insert(uses_to_process.end(), user->output()->uses().begin(), user->output()->uses().end());
-
-          } else if (user->matches("aten::mul(Tensor self, Tensor other) -> Tensor")
-                     || user->matches("aten::div(Tensor self, Tensor other) -> Tensor") // for div we might check whether we're the first argument
-                     || user->matches("aten::neg(Tensor self) -> Tensor")
-                     || user->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor") // this used to be prim::AutogradAdd
-                     ) {
+          } else if (commutes_with_SumToSize.find(user)) {
             // these are expressions that might occur during autotdiff operating on the gradient (matmul would likely be, too but we don't fuse it)
             // note that for mul, we know (from the chain rule) that only one factor will be stemming from a calculation involving gradients
             // so we know that we can move SumToSize across it
@@ -937,8 +940,10 @@ struct GraphFuser {
               // calculated).
               sumToSize_per_output[offset] = inputs_map.at(node->inputs()[1]);
             }
+	  } else if (user->kind() == prim::FusedConcat) {
+            throw std::runtime_error("don't know how to do fused concat yet");
           } else {
-            JIT_ASSERTM(false, "unknown node type for fusion SumToSize processing");
+	    throw std::runtime_error("unknown node type for fusion SumToSize processing");
           }
 
         }
