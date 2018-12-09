@@ -557,7 +557,7 @@ Tensor tril_indices(
   auto n_indices =
     (m_first_row + m_last_row) * n_row_trapezoid >> 1;
 
-  // calculate # of elements in the bottom Rectangle if there is any
+  // calculate # of elements in the bottom rectangle if there is any
   auto diff_row = n_row_all - n_row_trapezoid;
   if (diff_row > 0) {
     n_indices += diff_row * col;
@@ -582,6 +582,61 @@ Tensor tril_indices(
         r += 1;
         c = 0;
         // NOTE: not necessary to check if r is less than row here, because i and
+        // n_indices provide the guarantee
+      }
+    }
+  });
+
+  return result.to(options.device());
+}
+
+
+Tensor triu_indices(
+    int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
+  AT_CHECK(row >= 0, "row must be non-negative, got", row);
+  AT_CHECK(col >= 0, "col must be non-negative, got", col);
+
+  // Refer to tril_indices for algorithm design details
+
+  // number of elements in the first column of the triu
+  auto n_first_col = offset < 0 ?
+    std::min<int64_t>(row, 1 - offset) : // upper bounded by row
+    offset < col; // either 0 or 1
+  // number of elements in the last column of the triu, bounded by [0, row]
+  auto n_last_col = std::max<int64_t>(0, std::min<int64_t>(row, col - offset));
+  // number of columns, bounded by [0, col]
+  auto m_col_all = std::max<int64_t>(0, std::min<int64_t>(col, col - offset));
+  auto m_col_trapezoid = (n_last_col - n_first_col + 1);
+
+  // calculate # of elements in the left trapezoid
+  auto n_indices =
+    (n_first_col + n_last_col) * m_col_trapezoid >> 1;
+
+  // calculate # of elements in the right rectangle if there is any
+  auto diff_col = m_col_all - m_col_trapezoid;
+  if (diff_col > 0) {
+    n_indices += diff_col * row;
+  }
+
+  // create an empty Tensor with correct soize
+  auto result = at::empty({n_indices, 2}, options.device(DeviceType::CPU));
+
+  AT_DISPATCH_ALL_TYPES(result.type(), "triu_indices", [&]() -> void {
+    // fill the Tensor with correct values
+    scalar_t* result_data = result.data<scalar_t>();
+    int64_t i = 0;
+    scalar_t c = std::max<scalar_t>(0, offset), r = 0;
+    n_indices = n_indices << 1;
+    while (i < n_indices) {
+      result_data[i++] = r;
+      result_data[i++] = c;
+
+      // move to the next column and check if (r, c) is still in bound
+      c += 1;
+      if (c >= col) {
+        r += 1;
+        c = std::max<scalar_t>(0, r + offset);
+        // NOTE: not necessary to check if c is less than col here, because i and
         // n_indices provide the guarantee
       }
     }

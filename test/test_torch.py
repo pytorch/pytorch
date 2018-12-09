@@ -3824,6 +3824,57 @@ class _TestTorchMixin(object):
         ti = torch.tril_indices(0, 0, -10)
         self.assertEqual(torch.empty(0, 2), ti)
 
+        # test 3 X 6 matrix, offset = 0
+        ti = torch.tril_indices(3, 6, 0)
+        self.assertEqual(
+            torch.tensor([
+                [0, 0],
+                [1, 0], [1, 1],
+                [2, 0], [2, 1], [2, 2]]),
+            ti)
+
+        # test 3 X 6 matrix, offset = 1
+        ti = torch.tril_indices(3, 6, 1)
+        self.assertEqual(
+            torch.tensor([
+                [0, 0], [0, 1],
+                [1, 0], [1, 1], [1, 2],
+                [2, 0], [2, 1], [2, 2], [2, 3]]),
+            ti)
+
+        # test 3 X 6 matrix, offset = -2
+        ti = torch.tril_indices(3, 6, -2)
+        self.assertEqual(torch.tensor([[2, 0]]), ti)
+
+        # test 4 X 3 matrix, offset = 0
+        ti = torch.tril_indices(4, 3, 0)
+        self.assertEqual(
+            torch.tensor([
+                [0, 0],
+                [1, 0], [1, 1],
+                [2, 0], [2, 1], [2, 2],
+                [3, 0], [3, 1], [3, 2]]),
+            ti)
+
+        # test 4 X 3 matrix, offset = 1
+        ti = torch.tril_indices(4, 3, 1)
+        self.assertEqual(
+            torch.tensor([
+                [0, 0], [0, 1],
+                [1, 0], [1, 1], [1, 2],
+                [2, 0], [2, 1], [2, 2],
+                [3, 0], [3, 1], [3, 2]]),
+            ti)
+
+        # test 4 X 3 matrix, offset = -1
+        ti = torch.tril_indices(4, 3, -1)
+        self.assertEqual(
+            torch.tensor([
+                [1, 0],
+                [2, 0], [2, 1],
+                [3, 0], [3, 1], [3, 2]]),
+            ti)
+
         # test 3 X 3 matrix with type float64, offset = 0
         ti = torch.tril_indices(3, 3, dtype=torch.float64)
         self.assertEqual(
@@ -3831,6 +3882,133 @@ class _TestTorchMixin(object):
                 [0, 0],
                 [1, 0], [1, 1],
                 [2, 0], [2, 1], [2, 2]],
+                dtype=torch.float64),
+            ti)
+
+    def test_triu_indices(self):
+        # test 1 X 1 matrix
+        ti = torch.triu_indices(1, 1)
+        self.assertEqual(torch.tensor([[0, 0]]), ti)
+
+        # test 3 X 3 matrix, offset = 0
+        ti = torch.triu_indices(3, 3)
+        self.assertEqual(
+            torch.tensor([
+                [0, 0], [0, 1], [0, 2],
+                        [1, 1], [1, 2],
+                                [2, 2]]),
+            ti)
+
+        # test 3 X 3 matrix, offset = -1
+        ti = torch.triu_indices(3, 3, -1)
+        self.assertEqual(
+            torch.tensor([
+                [0, 0], [0, 1], [0, 2],
+                [1, 0], [1, 1], [1, 2],
+                        [2, 1], [2, 2]]),
+            ti)
+
+        # test 3 X 3 matrix, offset = 2
+        ti = torch.triu_indices(3, 3, -2)
+        self.assertEqual(torch.ones(3, 3).nonzero(), ti)
+
+        # test 3 X 3 matrix, offset = -200
+        ti = torch.triu_indices(3, 3, -200)
+        self.assertEqual(torch.ones(3, 3).nonzero(), ti)
+
+        # test 3 X 3 matrix, offset = 1
+        ti = torch.triu_indices(3, 3, 1)
+        self.assertEqual(
+            torch.tensor([
+                [0, 1], [0, 2],
+                        [1, 2]]),
+            ti)
+
+        # test 3 X 3 matrix, offset = 2
+        ti = torch.triu_indices(3, 3, 2)
+        self.assertEqual(torch.tensor([[0, 2]]), ti)
+
+        # test 3 X 3 matrix, offset = 200
+        ti = torch.triu_indices(3, 3, 200)
+        self.assertEqual(torch.empty(0, 2), ti)
+
+        # test 0 X 3 matrix, offset = 0
+        ti = torch.triu_indices(0, 3, 0)
+        self.assertEqual(torch.empty(0, 2), ti)
+
+        # test 3 X 0 matrix, offset = 0
+        ti = torch.triu_indices(3, 0, 0)
+        self.assertEqual(torch.empty(0, 2), ti)
+
+        # test 0 X 0 matrix, offset = 0
+        ti = torch.triu_indices(0, 0, 0)
+        self.assertEqual(torch.empty(0, 2), ti)
+
+        # test 0 X 0 matrix, offset = 10
+        ti = torch.triu_indices(0, 0, 10)
+        self.assertEqual(torch.empty(0, 2), ti)
+
+        # test 0 X 0 matrix, offset = -10
+        ti = torch.triu_indices(0, 0, -10)
+        self.assertEqual(torch.empty(0, 2), ti)
+
+        # test 6 X 3 matrix, offset = 0
+        ti = torch.triu_indices(6, 3, 0)
+        self.assertEqual(
+            torch.tensor([
+                [0, 0], [0, 1], [0, 2],
+                        [1, 1], [1, 2],
+                                [2, 2]]),
+            ti)
+
+        # test 6 X 3 matrix, offset = 2
+        ti = torch.triu_indices(6, 3, 2)
+        self.assertEqual(torch.tensor([[0, 2]]), ti)
+
+        # test 6 X 3 matrix, offset = -1
+        ti = torch.triu_indices(6, 3, -1)
+        self.assertEqual(
+            torch.tensor([
+                [0, 0], [0, 1], [0, 2],
+                [1, 0], [1, 1], [1, 2],
+                        [2, 1], [2, 2],
+                                [3, 2]]),
+            ti)
+
+        # test 3 X 4 matrix, offset = 0
+        ti = torch.triu_indices(3, 4, 0)
+        self.assertEqual(
+            torch.tensor([
+                [0, 0], [0, 1], [0, 2], [0, 3],
+                        [1, 1], [1, 2], [1, 3],
+                                [2, 2], [2, 3]]),
+            ti)
+
+        # test 3 X 4 matrix, offset = 1
+        ti = torch.triu_indices(3, 4, 1)
+        self.assertEqual(
+            torch.tensor([
+                [0, 1], [0, 2], [0, 3],
+                        [1, 2], [1, 3],
+                                [2, 3]]),
+            ti)
+
+        # test 3 X 4 matrix, offset = -1
+        ti = torch.triu_indices(3, 4, -1)
+        self.assertEqual(
+            torch.tensor([
+                [0, 0], [0, 1], [0, 2], [0, 3],
+                [1, 0], [1, 1], [1, 2], [1, 3],
+                        [2, 1], [2, 2], [2, 3]]),
+            ti)
+
+        # test 3 X 3 matrix with type float64, offset = 0
+        ti = torch.triu_indices(3, 3, dtype=torch.float64)
+        self.assertEqual(
+            torch.tensor([
+                [0, 0], [0, 1], [0, 2],
+                        [1, 1], [1, 2],
+                                [2, 2]],
                 dtype=torch.float64),
             ti)
 

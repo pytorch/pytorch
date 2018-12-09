@@ -2669,6 +2669,8 @@
 
 - func: tril_indices(int64_t row, int64_t col, int64_t offset=0, TensorOptions options={}) -> Tensor
 
+- func: triu_indices(int64_t row, int64_t col, int64_t offset=0, TensorOptions options={}) -> Tensor
+
 - func: trace(Tensor self) -> Tensor
   variants: method, function
 
