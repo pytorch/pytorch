@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/VolumetricReplicationPadding.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/VolumetricReplicationPadding.cu"
 #else
 
 static inline void THNN_(VolumetricReplicationPadding_shapeCheck)(

@@ -402,14 +402,6 @@ set(TH_CPU_INCLUDE
   ${CMAKE_BINARY_DIR}/aten/src)
 target_include_directories(torch PRIVATE ${TH_CPU_INCLUDE})
 
-if(USE_CUDA OR USE_ROCM)
-  set(TH_CUDA_INCLUDE
-    # dense
-    ${TORCH_ROOT}/aten/src/THC
-    ${CMAKE_CURRENT_BINARY_DIR}/../aten/src/THC)
-  target_include_directories(torch PRIVATE ${TH_CUDA_INCLUDE})
-endif()
-
 set(ATen_CPU_INCLUDE
   ${TORCH_ROOT}/aten/src
   ${CMAKE_CURRENT_BINARY_DIR}/../aten/src
@@ -572,8 +564,6 @@ if (BUILD_PYTHON)
     ${CMAKE_BINARY_DIR}
     ${CMAKE_BINARY_DIR}/aten/src
     ${CMAKE_BINARY_DIR}/caffe2/aten/src
-    ${CMAKE_BINARY_DIR}/caffe2/aten/src/TH
-    ${CMAKE_BINARY_DIR}/caffe2/aten/src/THC
     ${CMAKE_BINARY_DIR}/third_party
     ${CMAKE_BINARY_DIR}/third_party/onnx
 

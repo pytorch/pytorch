@@ -6,7 +6,6 @@ import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
 from caffe2.python import core, dyndep
-from caffe2.python.fb import hardcode_scale_zp
 from caffe2.quantization.server import utils as dnnlowp_utils
 from dnnlowp_test_utils import (
     check_quantized_results_close,
@@ -146,8 +145,8 @@ class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
                 net.Proto().op.extend([int8_given_tensor_fill])
 
                 # Bias
-                x_q_param = hardcode_scale_zp.choose_quantization_params(
-                    X.min(), X.max()
+                x_q_param = dnnlowp_utils.choose_quantization_params(
+                    X.min(), X.max(), preserve_activation_sparsity
                 )
                 int8_bias_tensor_fill = dnnlowp_utils.create_int8_bias_tensor_fill(
                     b, "b_q", x_q_param, w_q_param
@@ -214,7 +213,8 @@ class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         in_quantized=st.booleans(),
         out_quantized=st.booleans(),
         weight_quantized=st.booleans(),
-        nbits_in_non_outlier=st.sampled_from((0, 6)),
+        prepack_weight=st.booleans(),
+        nbits_in_non_outlier=st.sampled_from((6, 8)),
         share_col_buffer=st.booleans(),
         preserve_activation_sparsity=st.booleans(),
         preserve_weight_sparsity=st.booleans(),
@@ -235,6 +235,7 @@ class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         in_quantized,
         out_quantized,
         weight_quantized,
+        prepack_weight,
         nbits_in_non_outlier,
         share_col_buffer,
         preserve_activation_sparsity,
@@ -291,10 +292,6 @@ class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
             W[1, 0, 0, 0] = W_max
             W[..., 1] = W_min + 128
 
-            if order == "NCHW":
-                X = nhwc2nchw(X)
-                W = nhwc2nchw(W)
-
             # No input quantization error in bias
             b = np.round(np.random.randn(output_channels)).astype(np.float32)
 
@@ -308,11 +305,13 @@ class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         ]
 
         for op_type, engine in op_engine_list:
+            init_net = core.Net("test_init_net")
             net = core.Net("test_net")
 
             do_quantize = "DNNLOWP" in engine and in_quantized
             do_dequantize = "DNNLOWP" in engine and out_quantized
             do_quantize_weight = "DNNLOWP" in engine and weight_quantized
+            do_prepack_weight = "DNNLOWP" in engine and prepack_weight
 
             if do_quantize:
                 quantize = core.CreateOperator(
@@ -325,26 +324,44 @@ class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([quantize])
 
+            x_q_param = dnnlowp_utils.choose_quantization_params(
+                X.min(), X.max(), preserve_activation_sparsity
+            )
             if do_quantize_weight:
                 int8_given_tensor_fill, w_q_param = dnnlowp_utils.create_int8_given_tensor_fill(
                     W, "W_q", preserve_weight_sparsity
                 )
-                net.Proto().op.extend([int8_given_tensor_fill])
+                init_net.Proto().op.extend([int8_given_tensor_fill])
 
                 # Bias
-                x_q_param = hardcode_scale_zp.choose_quantization_params(
-                    X.min(), X.max()
-                )
                 int8_bias_tensor_fill = dnnlowp_utils.create_int8_bias_tensor_fill(
                     b, "b_q", x_q_param, w_q_param
                 )
-                net.Proto().op.extend([int8_bias_tensor_fill])
+                init_net.Proto().op.extend([int8_bias_tensor_fill])
+
+            if do_prepack_weight:
+                inputs = ["W_q" if do_quantize_weight else "W"]
+                if do_dequantize:
+                    inputs += ["b_q" if do_quantize_weight else "b"]
+                pack = core.CreateOperator(
+                    "Int8ConvPackWeight",
+                    inputs,
+                    ["W_packed"],
+                    group=group,
+                    nbits_in_non_outlier=nbits_in_non_outlier,
+                    preserve_weight_sparsity=preserve_weight_sparsity,
+                    in_scale=x_q_param.scale,
+                    engine=engine,
+                )
+                init_net.Proto().op.extend([pack])
 
             conv = core.CreateOperator(
                 op_type,
                 [
                     "X_q" if do_quantize else "X",
-                    "W_q" if do_quantize_weight else "W",
+                    "W_packed"
+                    if do_prepack_weight
+                    else ("W_q" if do_quantize_weight else "W"),
                     "b_q" if do_quantize_weight else "b",
                 ],
                 ["Y_q" if do_dequantize else "Y"],
@@ -362,7 +379,7 @@ class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
                 group=group,
                 device_option=gc,
             )
-            if do_dequantize or do_quantize_weight:
+            if do_dequantize or do_quantize_weight or do_prepack_weight:
                 # When quantized weight is provided, we can't rescale the
                 # output dynamically by looking at the range of output of each
                 # batch, so here we provide the range of output observed from
@@ -381,6 +398,7 @@ class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
             self.ws.create_blob("X").feed(X, device_option=gc)
             self.ws.create_blob("W").feed(W, device_option=gc)
             self.ws.create_blob("b").feed(b, device_option=gc)
+            self.ws.run(init_net)
             self.ws.run(net)
             Y = self.ws.blobs["Y"].fetch()
             outputs.append(Output(Y=Y, op_type=op_type, engine=engine, order=order))

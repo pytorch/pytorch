@@ -579,8 +579,8 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
         - Output: :math:`(N, C_{out}, L_{out})` where
 
           .. math::
-              L_{out} = (L_{in} - 1) \times \text{stride} - 2 \times \text{padding}
-                    + \text{kernel\_size} + \text{output\_padding}
+              L_{out} = (L_{in} - 1) \times \text{stride} - 2 \times \text{padding} + \text{dilation}
+                        \times (\text{kernel\_size} - 1) + \text{output\_padding} + 1
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
@@ -694,11 +694,11 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
         - Output: :math:`(N, C_{out}, H_{out}, W_{out})` where
 
         .. math::
-              H_{out} = (H_{in} - 1) \times \text{stride}[0] - 2 \times \text{padding}[0]
-                    + \text{kernel\_size}[0] + \text{output\_padding}[0]
+              H_{out} = (H_{in} - 1) \times \text{stride}[0] - 2 \times \text{padding}[0] + \text{dilation}[0]
+                        \times (\text{kernel\_size}[0] - 1) + \text{output\_padding}[0] + 1
         .. math::
-              W_{out} = (W_{in} - 1) \times \text{stride}[1] - 2 \times \text{padding}[1]
-                    + \text{kernel\_size}[1] + \text{output\_padding}[1]
+              W_{out} = (W_{in} - 1) \times \text{stride}[1] - 2 \times \text{padding}[1] + \text{dilation}[1]
+                        \times (\text{kernel\_size}[1] - 1) + \text{output\_padding}[1] + 1
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
@@ -839,14 +839,15 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
         - Output: :math:`(N, C_{out}, D_{out}, H_{out}, W_{out})` where
 
         .. math::
-              D_{out} = (D_{in} - 1) \times \text{stride}[0] - 2 \times \text{padding}[0]
-                    + \text{kernel\_size}[0] + \text{output\_padding}[0]
+              D_{out} = (D_{in} - 1) \times \text{stride}[0] - 2 \times \text{padding}[0] + \text{dilation}[0]
+                        \times (\text{kernel\_size}[0] - 1) + \text{output\_padding}[0] + 1
         .. math::
-              H_{out} = (H_{in} - 1) \times \text{stride}[1] - 2 \times \text{padding}[1]
-                    + \text{kernel\_size}[1] + \text{output\_padding}[1]
+              H_{out} = (H_{in} - 1) \times \text{stride}[1] - 2 \times \text{padding}[1] + \text{dilation}[1]
+                        \times (\text{kernel\_size}[1] - 1) + \text{output\_padding}[1] + 1
         .. math::
-              W_{out} = (W_{in} - 1) \times \text{stride}[2] - 2 \times \text{padding}[2]
-                    + \text{kernel\_size}[2] + \text{output\_padding}[2]
+              W_{out} = (W_{in} - 1) \times \text{stride}[2] - 2 \times \text{padding}[2] + \text{dilation}[2]
+                        \times (\text{kernel\_size}[2] - 1) + \text{output\_padding}[2] + 1
+
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape

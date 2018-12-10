@@ -4783,20 +4783,20 @@ a")
             throwsAnd(t)
 
     def test_type_cast(self):
-        @torch.jit.script
         def test_int_to_float():
             b = float(2)
             return b + 1.0
+        self.checkScript(test_int_to_float, ())
 
         with self.assertRaisesRegex(RuntimeError, "Cannot cast type"):
             @torch.jit.script
             def test_int_to_bool():
                 return bool(5)
 
-        @torch.jit.script
         def test_float_to_int():
             b = int(5.0)
             return b + 1
+        self.checkScript(test_float_to_int, ())
 
         with self.assertRaisesRegex(RuntimeError, "Cannot cast type"):
             @torch.jit.script
@@ -4812,9 +4812,6 @@ a")
             @torch.jit.script
             def test_bool_to_int():
                 return int(True)
-
-        self.assertExpectedGraph(test_int_to_float.graph, "test_int_to_float")
-        self.assertExpectedGraph(test_float_to_int.graph, "test_float_to_int")
 
     def test_multiple_assignment(self):
         def outer_func(x):
@@ -8591,11 +8588,8 @@ a")
             x = strong_script_fn(x)
             return weak_script_fn(x)
 
-        scripted = torch.jit.script(fn)
-
         input = torch.randn(3, 4, 5)
-        self.assertExpectedGraph(scripted.graph)
-        self.assertEqual(scripted(input), fn(input))
+        self.checkScript(fn, (input,))
 
     def test_python_op_exception(self):
         def python_op(x):
@@ -8682,9 +8676,9 @@ a")
         python_result = weak_mod(x)
         strong_mod = Passthrough()
         script_result = strong_mod(x)
+
         self.assertEqual(python_result, expected_result)
         self.assertEqual(script_result, expected_result)
-        self.assertExpectedGraph(strong_mod.graph, "basic")
 
         class Strong(torch.jit.ScriptModule):
             def __init__(self):
@@ -8705,7 +8699,6 @@ a")
         script_result2 = strong_mod2(x)
         self.assertEqual(script_result, expected_result)
         self.assertEqual(script_result, script_result2)
-        self.assertExpectedGraph(strong_mod.graph, "scope_test")
 
     def test_weak_module_parameters_and_buffers(self):
         weights = torch.randn(10, 10)
@@ -8751,7 +8744,6 @@ a")
                 return x + self.fc1(x) + self.fc1(x) + self.fc2(x)
 
         strong_mod = Strong()
-        self.assertExpectedGraph(strong_mod.graph)
 
         # Run same calculation as module
         inp = torch.ones(10)
@@ -8764,6 +8756,7 @@ a")
         expected_result = inp + (lin(inp) + torch.ones(10)) * 2 + lin2(inp) + torch.ones(10)
 
         self.assertEqual(strong_mod(inp), expected_result)
+        self.assertExportImportModule(strong_mod, (inp,))
 
     def test_weak_module_nested(self):
         @torch._jit_internal.weak_module
@@ -8819,7 +8812,6 @@ a")
                 return x + self.weak(x)
 
         strong_mod = Strong()
-        self.assertExpectedGraph(strong_mod.graph)
         inp = torch.randn(10)
         result = strong_mod(inp)
         expected_result = inp + (inp + inp * inp + inp + 27) + 3 \
