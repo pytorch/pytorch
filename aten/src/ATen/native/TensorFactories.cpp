@@ -561,7 +561,7 @@ int64_t get_tril_size(int64_t row, int64_t col, int64_t offset) {
 
   return n_indices;
 }
-}
+} // namespace
 
 Tensor tril_indices(
     int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
@@ -573,13 +573,23 @@ Tensor tril_indices(
   // create an empty Tensor with correct soize
   auto result = at::empty({n_indices, 2}, options.device(DeviceType::CPU));
 
+  // The following three design options result in very little performance
+  // differences. Hence, the 3rd option is taken for simpler code. Refer to
+  // #14904 for more details.
+  //
+  // 1. sequential RAM access: fill row coordinates first, then columns. This
+  //    results in two for-loop and more arithmetic operations.
+  //
+  // 2. interleaved RAM access: fill in index coordinates one by one, which
+  //    jumps between the two output Tensor rows in every iteration.
+  //
+  // 3. sequential RAM + transpose: create a n X 2 Tensor, fill the Tensor
+  //    sequentially, and then tranpose it.
   AT_DISPATCH_ALL_TYPES(result.type(), "tril_indices", [&]() -> void {
     // fill the Tensor with correct values
     scalar_t* result_data = result.data<scalar_t>();
     int64_t i = 0;
-    // not typing std::max with scalar_t as it could be an unsigned type
-    // NOTE: no need to check if the returned value of std::max overflows
-    // scalar_t, as i and n_indices act as a guard.
+
     scalar_t r = std::max<int64_t>(0, -offset), c = 0;
     n_indices = n_indices << 1;
     while (i < n_indices) {
@@ -597,7 +607,7 @@ Tensor tril_indices(
     }
   });
 
-  return result.to(options.device());
+  return result.transpose(0, 1).to(options.device());
 }
 
 
@@ -636,7 +646,7 @@ Tensor triu_indices(
     }
   });
 
-  return result.to(options.device());
+  return result.transpose(0, 1).to(options.device());
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ zeros ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

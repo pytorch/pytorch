@@ -3762,22 +3762,22 @@ class _TestTorchMixin(object):
             # have to handle this separately as tril and triu does not take
             # empty matrix as input
             self.assertEqual(
-                torch.empty(0, 2, dtype=dtype),
+                torch.empty(0, 2, dtype=dtype).transpose(0, 1),
                 torch.tril_indices(row, col, offset, dtype=dtype))
 
             self.assertEqual(
-                torch.empty(0, 2, dtype=dtype),
+                torch.empty(0, 2, dtype=dtype).transpose(0, 1),
                 torch.triu_indices(row, col, offset, dtype=dtype))
 
         else:
             self.assertEqual(
                 torch.ones(row, col, dtype=dtype)
-                     .tril(offset).nonzero(),
+                     .tril(offset).nonzero().transpose(0, 1),
                 torch.tril_indices(row, col, offset, dtype=dtype))
 
             self.assertEqual(
                 torch.ones(row, col, dtype=dtype)
-                     .triu(offset).nonzero(),
+                     .triu(offset).nonzero().transpose(0, 1),
                 torch.triu_indices(row, col, offset, dtype=dtype))
 
     def test_tril_and_triu_indices(self):

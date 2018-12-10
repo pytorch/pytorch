@@ -4989,8 +4989,10 @@ add_docstr(torch.tril_indices,
            r"""
 tril_indices(row, column, offset=0, dtype=None, device=None) -> Tensor
 
-Returns the indices of the lower triangular part of a :attr:`row` by
-:attr:`column` matrix. Indices are ordered based on rows and then columns.
+Returns the indices of the lower triangular part of a :attr:`row`-by-
+:attr:`column` matrix in a 2-by-N Tensor, where the first row contains row
+coordinates of all indices and the second row contains column coordinates.
+Indices are ordered based on rows and then columns.
 
 The lower triangular part of the matrix is defined as the elements on and
 below the diagonal.
@@ -5013,22 +5015,18 @@ Args:
 Example::
     >>> a = torch.tril_indices(3, 3)
     >>> a
-    tensor([[0, 0],
-            [1, 0], [1, 1],
-            [2, 0], [2, 1], [2, 2]])
+    tensor([[0., 1., 1., 2., 2., 2.],
+            [0., 0., 1., 0., 1., 2.]])
 
     >>> a = torch.tril_indices(4, 3, -1)
     >>> a
-    tensor([[1, 0],
-            [2, 0], [2, 1],
-            [3, 0], [3, 1], [3, 2]])
+    tensor([[1., 2., 2., 3., 3., 3.],
+            [0., 0., 1., 0., 1., 2.]])
 
     >>> a = torch.tril_indices(4, 3, 1)
     >>> a
-    tensor([[0, 0], [0, 1],
-            [1, 0], [1, 1], [1, 2],
-            [2, 0], [2, 1], [2, 2],
-            [3, 0], [3, 1], [3, 2]])
+    tensor([[0., 0., 1., 1., 1., 2., 2., 2., 3., 3., 3.],
+            [0., 1., 0., 1., 2., 0., 1., 2., 0., 1., 2.]])
 """.format(**factory_common_args))
 
 add_docstr(torch.triu,
@@ -5099,7 +5097,9 @@ add_docstr(torch.triu_indices,
 triu_indices(row, column, offset=0, dtype=None, device=None) -> Tensor
 
 Returns the indices of the upper triangular part of a :attr:`row` by
-:attr:`column` matrix. Indices are ordered based on rows and then columns.
+:attr:`column` matrix in a 2-by-N Tensor, where the first row contains row
+coordinates of all indices and the second row contains column coordinates.
+Indices are ordered based on rows and then columns.
 
 The upper triangular part of the matrix is defined as the elements on and
 above the diagonal.
@@ -5122,21 +5122,18 @@ Args:
 Example::
     >>> a = torch.triu_indices(3, 3)
     >>> a
-    tensor([[0, 0], [0, 1], [0, 2],
-                    [1, 1], [1, 2],
-                            [2, 2]])
+    tensor([[0., 0., 0., 1., 1., 2.],
+            [0., 1., 2., 1., 2., 2.]])
 
     >>> a = torch.triu_indices(4, 3, -1)
     >>> a
-    tensor([[0, 0], [0, 1], [0, 2],
-            [1, 0], [1, 1], [1, 2],
-                    [2, 1], [2, 2],
-                            [3, 2]])
+    tensor([[0., 0., 0., 1., 1., 1., 2., 2., 3.],
+            [0., 1., 2., 0., 1., 2., 1., 2., 2.]])
 
     >>> a = torch.triu_indices(4, 3, 1)
     >>> a
-    tensor([[0, 1], [0, 2],
-                    [1, 2]])
+    tensor([[0., 0., 1.],
+            [1., 2., 2.]])
 """.format(**factory_common_args))
 
 add_docstr(torch.trtrs,

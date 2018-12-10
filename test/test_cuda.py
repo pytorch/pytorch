@@ -2122,14 +2122,14 @@ class TestCuda(TestCase):
     def test_tril_and_triu_indices(self):
         device = torch.device('cuda:0')
         self.assertEqual(
-            torch.ones(
-                253, 257, dtype=torch.long, device=device).tril(61).nonzero(),
+            torch.ones(253, 257, dtype=torch.long, device=device)
+                 .tril(61).nonzero().transpose(0, 1),
             torch.tril_indices(
                 253, 257, 61, dtype=torch.long, device=device))
 
         self.assertEqual(
-            torch.ones(
-                257, 3, dtype=torch.float32, device=device).triu(36).nonzero(),
+            torch.ones(257, 3, dtype=torch.float32, device=device)
+                 .triu(36).nonzero().transpose(0, 1),
             torch.triu_indices(
                 257, 3, 36, dtype=torch.float32, device=device))
 
