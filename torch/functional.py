@@ -10,7 +10,6 @@ __all__ = [
     'argmax',
     'argmin',
     'argsort',
-    'btrifact',
     'btriunpack',
     'chain_matmul',
     'einsum',
@@ -73,53 +72,6 @@ def split(tensor, split_size_or_sections, dim=0):
     # split_size_or_sections. The branching code is in tensor.py, which we
     # call here.
     return tensor.split(split_size_or_sections, dim)
-
-
-def btrifact(A, info=None, pivot=True):
-    r"""Batch LU factorization.
-
-    Returns a tuple containing the LU factorization and pivots. Pivoting is done if
-    :attr:`pivot` is set.
-
-    The optional argument :attr:`info` stores information if the factorization
-    succeeded for each minibatch example. The :attr:`info` is provided as an
-    `IntTensor`, its values will be filled from dgetrf and a non-zero value
-    indicates an error occurred. Specifically, the values are from cublas if cuda is
-    being used, otherwise LAPACK.
-
-    .. warning::
-        The :attr:`info` argument is deprecated in favor of :meth:`torch.btrifact_with_info`.
-
-    Arguments:
-        A (Tensor): the tensor to factor
-        info (IntTensor, optional): (deprecated) an `IntTensor` to store values
-            indicating whether factorization succeeds
-        pivot (bool, optional): controls whether pivoting is done
-
-    Returns:
-        A tuple containing factorization and pivots.
-
-    Example::
-
-        >>> A = torch.randn(2, 3, 3)
-        >>> A_LU, pivots = torch.btrifact(A)
-        >>> A_LU
-        tensor([[[ 1.3506,  2.5558, -0.0816],
-                 [ 0.1684,  1.1551,  0.1940],
-                 [ 0.1193,  0.6189, -0.5497]],
-
-                [[ 0.4526,  1.2526, -0.3285],
-                 [-0.7988,  0.7175, -0.9701],
-                 [ 0.2634, -0.9255, -0.3459]]])
-
-        >>> pivots
-        tensor([[ 3,  3,  3],
-                [ 3,  3,  3]], dtype=torch.int32)
-    """
-    # Overwriting reason:
-    # `info` is being deprecated in favor of `btrifact_with_info`. This warning
-    # is in tensor.py, which we call here.
-    return A.btrifact(info, pivot)
 
 
 def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
