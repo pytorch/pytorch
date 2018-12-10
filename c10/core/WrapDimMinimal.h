@@ -2,7 +2,7 @@
 
 #include <c10/util/Exception.h>
 
-namespace at {
+namespace c10 {
 
 static inline int64_t maybe_wrap_dim(int64_t dim, int64_t dim_post_expr, bool wrap_scalar=true) {
   if (dim_post_expr <= 0) {
