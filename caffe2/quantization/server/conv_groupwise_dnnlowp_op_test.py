@@ -5,11 +5,9 @@ import collections
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 from caffe2.python import core, dyndep
+from caffe2.python.fb import hardcode_scale_zp
 from caffe2.quantization.server import utils as dnnlowp_utils
-from dnnlowp_test_utils import (
-    check_quantized_results_close,
-    generate_conv_inputs,
-)
+from dnnlowp_test_utils import check_quantized_results_close, generate_conv_inputs
 from hypothesis import assume, given
 
 
@@ -31,6 +29,7 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
         order=st.sampled_from(["NCHW", "NHWC"]),
         in_quantized=st.booleans(),
         out_quantized=st.booleans(),
+        prepack_weight=st.booleans(),
         preserve_activation_sparsity=st.booleans(),
         preserve_weight_sparsity=st.booleans(),
         **hu.gcs_cpu_only
@@ -49,12 +48,14 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
         order,
         in_quantized,
         out_quantized,
+        prepack_weight,
         preserve_activation_sparsity,
         preserve_weight_sparsity,
         gc,
         dc,
     ):
         assume(group == 1 or dilation == 1)
+        assume((not prepack_weight) or order == "NHWC")
 
         X, W, b = generate_conv_inputs(
             stride,
@@ -83,10 +84,12 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
         ]
 
         for op_type, engine in op_engine_list:
+            init_net = core.Net("test_init_net")
             net = core.Net("test_net")
 
             do_quantize = "DNNLOWP" in engine and in_quantized
             do_dequantize = "DNNLOWP" in engine and out_quantized
+            do_prepack_weight = engine == "DNNLOWP" and prepack_weight
 
             if do_quantize:
                 quantize = core.CreateOperator(
@@ -98,6 +101,25 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
                     device_option=gc,
                 )
                 net.Proto().op.extend([quantize])
+
+            if do_prepack_weight:
+                x_q_param = hardcode_scale_zp.choose_quantization_params(
+                    X.min(), X.max()
+                )
+                inputs = ["W"]
+                if do_dequantize:
+                    inputs += ["b"]
+                pack = core.CreateOperator(
+                    "Int8ConvPackWeight",
+                    inputs,
+                    ["W_packed"],
+                    group=group,
+                    quantize_groupwise=1,
+                    preserve_weight_sparsity=preserve_weight_sparsity,
+                    in_scale=x_q_param.scale,
+                    engine=engine,
+                )
+                init_net.Proto().op.extend([pack])
 
             conv = core.CreateOperator(
                 op_type,
@@ -116,7 +138,7 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
                 quantize_groupwise=1,
                 device_option=gc,
             )
-            if do_dequantize:
+            if do_dequantize or do_prepack_weight:
                 # groupwise quantization only works with static quantization
                 # so we need to set quantization parameters
                 dnnlowp_utils.add_quantization_param_args(
@@ -138,6 +160,7 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
             self.ws.create_blob("X").feed(X, device_option=gc)
             self.ws.create_blob("W").feed(W, device_option=gc)
             self.ws.create_blob("b").feed(b, device_option=gc)
+            self.ws.run(init_net)
             self.ws.run(net)
             Y = self.ws.blobs["Y"].fetch()
             outputs.append(Output(Y=Y, op_type=op_type, engine=engine, order=order))

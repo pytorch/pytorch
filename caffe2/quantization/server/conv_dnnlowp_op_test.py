@@ -5,7 +5,6 @@ import collections
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 from caffe2.python import core, dyndep
-from caffe2.python.fb import hardcode_scale_zp
 from caffe2.quantization.server import utils as dnnlowp_utils
 from dnnlowp_test_utils import (
     check_quantized_results_close,
@@ -36,6 +35,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
         in_quantized=st.booleans(),
         out_quantized=st.booleans(),
         weight_quantized=st.booleans(),
+        prepack_weight=st.booleans(),
         share_col_buffer=st.booleans(),
         preserve_activation_sparsity=st.booleans(),
         preserve_weight_sparsity=st.booleans(),
@@ -56,6 +56,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
         in_quantized,
         out_quantized,
         weight_quantized,
+        prepack_weight,
         share_col_buffer,
         preserve_activation_sparsity,
         preserve_weight_sparsity,
@@ -63,6 +64,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
         dc,
     ):
         assume(group == 1 or dilation == 1)
+        assume((not prepack_weight) or order == "NHWC")
 
         X, W, b = generate_conv_inputs(
             stride,
@@ -90,6 +92,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
         ]
 
         for op_type, engine in op_engine_list:
+            init_net = core.Net("test_init_net")
             net = core.Net("test_net")
 
             do_quantize = "DNNLOWP" in engine and in_quantized
@@ -101,6 +104,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
             do_quantize_weight = (
                 engine == "DNNLOWP" and weight_quantized and len(outputs) > 0
             )
+            do_prepack_weight = engine == "DNNLOWP" and prepack_weight
 
             if do_quantize:
                 quantize = core.CreateOperator(
@@ -113,26 +117,41 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([quantize])
 
+            x_q_param = dnnlowp_utils.choose_quantization_params(X.min(), X.max(), preserve_activation_sparsity)  # noqa
             if do_quantize_weight:
                 int8_given_tensor_fill, w_q_param = dnnlowp_utils.create_int8_given_tensor_fill(
                     W, "W_q", preserve_weight_sparsity
                 )
-                net.Proto().op.extend([int8_given_tensor_fill])
+                init_net.Proto().op.extend([int8_given_tensor_fill])
 
                 # Bias
-                x_q_param = hardcode_scale_zp.choose_quantization_params(
-                    X.min(), X.max()
-                )
                 int8_bias_tensor_fill = dnnlowp_utils.create_int8_bias_tensor_fill(
                     b, "b_q", x_q_param, w_q_param
                 )
-                net.Proto().op.extend([int8_bias_tensor_fill])
+                init_net.Proto().op.extend([int8_bias_tensor_fill])
+
+            if do_prepack_weight:
+                inputs = ["W_q" if do_quantize_weight else "W"]
+                if do_dequantize:
+                    inputs += ["b_q" if do_quantize_weight else "b"]
+                pack = core.CreateOperator(
+                    "Int8ConvPackWeight",
+                    inputs,
+                    ["W_packed"],
+                    group=group,
+                    preserve_weight_sparsity=preserve_weight_sparsity,
+                    in_scale=x_q_param.scale,
+                    engine=engine,
+                )
+                init_net.Proto().op.extend([pack])
 
             conv = core.CreateOperator(
                 op_type,
                 [
                     "X_q" if do_quantize else "X",
-                    "W_q" if do_quantize_weight else "W",
+                    "W_packed"
+                    if do_prepack_weight
+                    else ("W_q" if do_quantize_weight else "W"),
                     "b_q" if do_quantize_weight else "b",
                 ],
                 ["Y_q" if do_dequantize else "Y"],
@@ -149,7 +168,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
                 group=group,
                 device_option=gc,
             )
-            if do_quantize_weight:
+            if do_quantize_weight or do_prepack_weight:
                 # When quantized weight is provided, we can't rescale the
                 # output dynamically by looking at the range of output of each
                 # batch, so here we provide the range of output observed from
@@ -168,6 +187,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
             self.ws.create_blob("X").feed(X, device_option=gc)
             self.ws.create_blob("W").feed(W, device_option=gc)
             self.ws.create_blob("b").feed(b, device_option=gc)
+            self.ws.run(init_net)
             self.ws.run(net)
             Y = self.ws.blobs["Y"].fetch()
             outputs.append(Output(Y=Y, op_type=op_type, engine=engine, order=order))
@@ -302,10 +322,12 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
         output_channels_per_group,
         batch_size,
         order,
+        prepack_weight,
         gc,
         dc,
     ):
         assume(group == 1 or dilation == 1)
+        assume((not prepack_weight) or order == "NHWC")
         ndim = len(kernels)
 
         X, W, b = generate_convnd_inputs(
@@ -327,6 +349,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
         op_engine_list = [("Conv", ""), ("Conv", "DNNLOWP_16"), ("Int8Conv", "DNNLOWP")]
 
         for op_type, engine in op_engine_list:
+            init_net = core.Net("test_init_net")
             net = core.Net("test_net")
 
             fall_back_to_NCHW = "DNNLOWP" not in engine and order == "NHWC"
@@ -342,6 +365,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
             # Make sure atleast one output is collected to compute output
             # scale/zp.
             do_quantize_weight = engine == "DNNLOWP" and len(outputs) > 0
+            do_prepack_weight = engine == "DNNLOWP" and prepack_weight
 
             if do_quantize:
                 quantize = core.CreateOperator(
@@ -349,26 +373,40 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([quantize])
 
+            x_q_param = dnnlowp_utils.choose_quantization_params(X.min(), X.max())
             if do_quantize_weight:
                 int8_given_tensor_fill, w_q_param = dnnlowp_utils.create_int8_given_tensor_fill(
                     W, "W_q"
                 )
-                net.Proto().op.extend([int8_given_tensor_fill])
+                init_net.Proto().op.extend([int8_given_tensor_fill])
 
                 # Bias
-                x_q_param = hardcode_scale_zp.choose_quantization_params(
-                    X.min(), X.max()
-                )
                 int8_bias_tensor_fill = dnnlowp_utils.create_int8_bias_tensor_fill(
                     b, "b_q", x_q_param, w_q_param
                 )
-                net.Proto().op.extend([int8_bias_tensor_fill])
+                init_net.Proto().op.extend([int8_bias_tensor_fill])
+
+            if do_prepack_weight:
+                inputs = ["W_q" if do_quantize_weight else "W"]
+                if do_dequantize:
+                    inputs += ["b_q" if do_quantize_weight else "b"]
+                pack = core.CreateOperator(
+                    "Int8ConvPackWeight",
+                    inputs,
+                    ["W_packed"],
+                    group=group,
+                    in_scale=x_q_param.scale,
+                    engine=engine,
+                )
+                init_net.Proto().op.extend([pack])
 
             conv = core.CreateOperator(
                 op_type,
                 [
                     "X_q" if do_quantize else "X",
-                    "W_q" if do_quantize_weight else "W",
+                    "W_packed"
+                    if do_prepack_weight
+                    else ("W_q" if do_quantize_weight else "W"),
                     "b_q" if do_quantize_weight else "b",
                 ],
                 ["Y_q" if do_dequantize else "Y"],
@@ -382,7 +420,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
                 group=group,
                 device_option=gc,
             )
-            if do_quantize_weight:
+            if do_quantize_weight or do_prepack_weight:
                 # When quantized weight is provided, we can't rescale the
                 # output dynamically by looking at the range of output of each
                 # batch, so here we provide the range of output observed from
@@ -403,6 +441,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
                 W_nchw if fall_back_to_NCHW else W, device_option=gc
             )
             self.ws.create_blob("b").feed(b, device_option=gc)
+            self.ws.run(init_net)
             self.ws.run(net)
             Y = self.ws.blobs["Y"].fetch()
             if fall_back_to_NCHW:
@@ -423,6 +462,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
         output_channels_per_group=st.sampled_from([2, 3]),
         batch_size=st.integers(1, 2),
         order=st.sampled_from(["NCHW", "NHWC"]),
+        prepack_weight=st.booleans(),
         **hu.gcs_cpu_only
     )
     def test_dnnlowp_conv3d_int(
@@ -438,6 +478,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
         output_channels_per_group,
         batch_size,
         order,
+        prepack_weight,
         gc,
         dc,
     ):
@@ -452,6 +493,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
             output_channels_per_group,
             batch_size,
             order,
+            prepack_weight,
             gc,
             dc,
         )
@@ -467,6 +509,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
         output_channels_per_group=st.sampled_from([2, 3]),
         batch_size=st.integers(1, 2),
         order=st.sampled_from(["NCHW", "NHWC"]),
+        prepack_weight=st.booleans(),
         **hu.gcs_cpu_only
     )
     def test_dnnlowp_conv1d_int(
@@ -481,6 +524,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
         output_channels_per_group,
         batch_size,
         order,
+        prepack_weight,
         gc,
         dc,
     ):
@@ -495,6 +539,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
             output_channels_per_group,
             batch_size,
             order,
+            prepack_weight,
             gc,
             dc,
         )
