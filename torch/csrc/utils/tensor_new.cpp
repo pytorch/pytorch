@@ -449,10 +449,12 @@ Tensor legacy_tensor_new(const Type& type, PyObject* args, PyObject* kwargs) {
   throw std::runtime_error("new(): invalid arguments");
 }
 
-Tensor legacy_new_from_data(
+Tensor index_tensor_from_data(
     const Type& type,
     c10::optional<Device> device,
     PyObject* data) {
+  // Specific to tensor indexing, converts an indexing list to an 
+  // indexing tensor (type Byte or Long)
   ScalarType scalar_type = infer_scalar_type(data);
   if (scalar_type == ScalarType::Byte){
       auto& idx_type = type.toScalarType(scalar_type);
