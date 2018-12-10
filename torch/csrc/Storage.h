@@ -36,10 +36,10 @@
 #define THPStorageBaseStr TH_CONCAT_STRING_2(Real,StorageBase)
 #endif
 
-#include "generic/Storage.h"
+#include <torch/csrc/generic/Storage.h>
 #include <TH/THGenerateAllTypes.h>
 
-#include "generic/Storage.h"
+#include <torch/csrc/generic/Storage.h>
 #include <TH/THGenerateHalfType.h>
 
 #endif

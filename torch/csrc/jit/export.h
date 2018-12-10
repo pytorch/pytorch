@@ -1,8 +1,8 @@
 #pragma once
 
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/script/module.h"
-#include "torch/csrc/onnx/onnx.h"
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/onnx/onnx.h>
 
 #include <ostream>
 

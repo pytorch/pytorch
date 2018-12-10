@@ -1,18 +1,18 @@
 #pragma once
 
-#include "ATen/core/ATenGeneral.h"
+#include <ATen/core/ATenGeneral.h>
 #include <c10/core/Allocator.h>
-#include "ATen/core/Deprecated.h"
-#include "ATen/core/Generator.h"
+#include <ATen/core/Deprecated.h>
+#include <ATen/core/Generator.h>
 #include <c10/core/Layout.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
-#include "ATen/core/SparseTensorRef.h"
+#include <ATen/core/SparseTensorRef.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/Half.h>
 #include <c10/core/TensorTypeIdRegistration.h>
-#include "ATen/core/Reduction.h"
-#include "ATen/core/TensorOptions.h"
+#include <ATen/core/Reduction.h>
+#include <c10/core/TensorOptions.h>
 
 #include <c10/util/Optional.h>
 
@@ -35,9 +35,11 @@ struct Storage;
 
 namespace at {
 
+class Tensor;
+using TensorList = ArrayRef<Tensor>;
+
 class Context;
 struct Generator;
-class Tensor;
 
 static inline void noop_deleter(void*) {}
 
@@ -167,4 +169,4 @@ protected:
 
 } // namespace at
 
-#include "ATen/core/Tensor.h"
+#include <ATen/core/Tensor.h>

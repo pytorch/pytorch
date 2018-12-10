@@ -1,10 +1,10 @@
 #pragma once
 #include <memory>
 #include <vector>
-#include "c10/util/Optional.h"
+#include <c10/util/Optional.h>
 
-#include "torch/csrc/jit/ivalue.h"
-#include "torch/csrc/WindowsTorchApiMacro.h"
+#include <torch/csrc/jit/ivalue.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace at {
   class Tensor;
@@ -61,11 +61,12 @@ private:
 
 // Created by wait()
 struct Suspend : public std::exception {
-  virtual const char* what() const noexcept override {
+  const char* what() const noexcept override {
     return "Suspend";
   }
 
-  explicit Suspend(c10::intrusive_ptr<Future> future_) : future(future_) {}
+  explicit Suspend(c10::intrusive_ptr<Future> future_)
+      : future(std::move(future_)) {}
 
   c10::intrusive_ptr<Future> future;
 };
@@ -74,7 +75,7 @@ struct InterpreterContinuation {
   InterpreterContinuation(InterpreterState state_, Stack stack_)
       : state(std::move(state_)), stack(std::move(stack_)) {}
 
-  void operator()(void) {
+  void operator()() {
     state.runAsync(stack);
   }
 

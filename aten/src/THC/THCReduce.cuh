@@ -8,9 +8,9 @@
 // arguments without copying or temporary storage.
 //
 
-#include "THCTensorTypeUtils.cuh"
-#include "THCReduceApplyUtils.cuh"
-#include "THCNumerics.cuh"
+#include <THC/THCTensorTypeUtils.cuh>
+#include <THC/THCReduceApplyUtils.cuh>
+#include <THC/THCNumerics.cuh>
 
 // Threads per thread block
 #define THC_NONCONTIG_REDUCE_BLOCK_SIZE 32 * 16

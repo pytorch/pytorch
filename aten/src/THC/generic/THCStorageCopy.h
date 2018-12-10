@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCStorageCopy.h"
+#define THC_GENERIC_FILE "THC/generic/THCStorageCopy.h"
 #else
 
 /* Support for copy between different Storage types */

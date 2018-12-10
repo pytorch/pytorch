@@ -1,14 +1,14 @@
-#include "ATen/Context.h"
-#include "ATen/cuda/CUDAContext.h"
-#include "ATen/Dispatch.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/cuda/PinnedMemoryAllocator.h"
-#include "ATen/cuda/CUDAApplyUtils.cuh"
+#include <ATen/Context.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/Dispatch.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/cuda/PinnedMemoryAllocator.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
 
-#include "ATen/native/LinearAlgebraUtils.h"
-#include "ATen/native/cuda/MiscUtils.h"
+#include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/cuda/MiscUtils.h>
 
-#include "THC.h" // for USE_MAGMA
+#include <THC/THC.h> // for USE_MAGMA
 
 #ifdef USE_MAGMA
 #include <magma.h>

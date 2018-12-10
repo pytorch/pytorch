@@ -3,7 +3,7 @@
 // STOP!!! Thinking of including this header directly?  Please
 // read Note [TH abstraction violation]
 
-#include "THCStorage.h"
+#include <THC/THCStorage.h>
 // Should work with THStorageClass
 #include <TH/THStorageFunctions.hpp>
 

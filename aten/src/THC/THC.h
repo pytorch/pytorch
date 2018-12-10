@@ -1,18 +1,18 @@
 #ifndef THC_INC
 #define THC_INC
 
-#include "THCGeneral.h"
-#include "THCAllocator.h"
-#include "THCBlas.h"
-#include "THCCachingAllocator.h"
-#include "THCCachingHostAllocator.h"
-#include "THCSleep.h"
-#include "THCStorage.h"
-#include "THCStorageCopy.h"
+#include <THC/THCGeneral.h>
+#include <THC/THCAllocator.h>
+#include <THC/THCBlas.h>
+#include <THC/THCCachingAllocator.h>
+#include <THC/THCCachingHostAllocator.h>
+#include <THC/THCSleep.h>
+#include <THC/THCStorage.h>
+#include <THC/THCStorageCopy.h>
 
-#include "THCTensor.h"
-#include "THCTensorCopy.h"
-#include "THCTensorRandom.h"
-#include "THCTensorMath.h"
+#include <THC/THCTensor.h>
+#include <THC/THCTensorCopy.h>
+#include <THC/THCTensorRandom.h>
+#include <THC/THCTensorMath.h>
 
 #endif

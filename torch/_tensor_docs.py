@@ -486,6 +486,13 @@ bmm(batch2) -> Tensor
 See :func:`torch.bmm`
 """)
 
+add_docstr_all('btrifact',
+               r"""
+btrifact(pivot=True) -> (Tensor, Tensor)
+
+See :func:`torch.btrifact`
+""")
+
 add_docstr_all('btrifact_with_info',
                r"""
 btrifact_with_info(pivot=True) -> (Tensor, Tensor, Tensor)

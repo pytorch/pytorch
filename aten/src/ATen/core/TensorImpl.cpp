@@ -1,11 +1,8 @@
 #include <ATen/core/TensorImpl.h>
 
 #include <c10/core/Backend.h>
-#include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/WrapDimMinimal.h>
-#include "c10/util/Optional.h"
-
-#include <ATen/core/VariableHooksInterface.h>
+#include <c10/util/Optional.h>
 
 namespace at {
 
