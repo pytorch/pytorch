@@ -688,7 +688,8 @@ void initJitScriptBindings(PyObject* module) {
         std::vector<at::Tensor> tensors;
         PythonPrint(ss, self, tensors, false);
         return ss.str();
-      });
+      })
+      .def("apply", &Module::apply);
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
     .def("graph", [&](Method& self) {
@@ -756,7 +757,6 @@ void initJitScriptBindings(PyObject* module) {
   });
   m.def("_jit_import_methods", import_methods);
   m.def("_jit_set_emit_module_hook", setEmitModuleHook);
-  m.def("_recursively_call_method", recursivelyCallMethod);
 }
 
 } // namespace script

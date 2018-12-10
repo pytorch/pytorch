@@ -404,6 +404,12 @@ struct Module {
     }
     return nullptr;
   }
+  void apply(std::function<void(Module&)> fn) {
+    for (auto &submod : get_modules()) {
+      submod.value().module->apply(fn);
+    }
+    fn(*this);
+  }
 
   /// Recursively casts all parameters to the given `dtype` and `device`.
   ///
@@ -469,20 +475,6 @@ struct Module {
   torch::OrderedDict<std::string, std::unique_ptr<Method>> methods;
   bool optimize;
 };
-
-static inline void recursivelyCallMethod(std::shared_ptr<Module> mod, const std::string& method_name) {
-  for (auto &submodule : mod->get_modules()) {
-    recursivelyCallMethod(submodule.value().module, method_name);
-    if (auto *method = submodule.value().module->find_method(method_name)) {
-      Stack inputs;
-      method->run(inputs);
-    }
-  }
-  if (auto *method = mod->find_method(method_name)) {
-    Stack inputs;
-    method->run(inputs);
-  }
-}
 
 // returns c10::nullopt and fills in failure_messages if the callee does not
 // match the functions schema

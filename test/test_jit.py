@@ -5458,10 +5458,10 @@ a")
         # Test save path
         self.assertFalse(sm.pack_called.item())
         self.assertFalse(sm.unpack_called.item())
-        torch._C._recursively_call_method(sm, '_pack')
+        sm.apply(lambda s: s._pack())
         imported = self.getExportImportCopy(sm)
-        torch._C._recursively_call_method(sm, '_unpack')
-        torch._C._recursively_call_method(imported, '_unpack')
+        sm.apply(lambda s: s._unpack())
+        imported.apply(lambda s: s._unpack())
         # ensure pack was called before serialization
         self.assertTrue(sm.pack_called.item())
         # ensure unpack was called after serialization so as to leave the module in an initialized state
@@ -5529,9 +5529,9 @@ a")
 
         m = Mod()
         torch.testing.assert_allclose(m(torch.zeros(3, 4)), torch.ones(3, 4) * 6)
-        torch._C._recursively_call_method(m, '_pack')
+        m.apply(lambda s: s._pack())
         torch.testing.assert_allclose(m(torch.zeros(3, 4)), torch.zeros(3, 4))
-        torch._C._recursively_call_method(m, '_unpack')
+        m.apply(lambda s: s._unpack())
         torch.testing.assert_allclose(m(torch.zeros(3, 4)), torch.ones(3, 4) * 6)
 
     def test_script_module_not_tuple(self):
