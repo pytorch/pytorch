@@ -8,7 +8,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/object_ptr.h>
-#include <torch/csrc/WindowsApiMacro.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #define HANDLE_TH_ERRORS                                                       \
   try {

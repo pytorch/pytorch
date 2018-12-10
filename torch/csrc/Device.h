@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/csrc/python_headers.h>
-#include <torch/csrc/WindowsApiMacro.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <ATen/Device.h>
 
