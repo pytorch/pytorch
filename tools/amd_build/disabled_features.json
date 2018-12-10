@@ -101,12 +101,6 @@
       ]
     },
     {
-      "path": "aten/src/ATen/cuda/detail/IndexUtils.cu",
-      "non_device_functions": [
-        "maybeOverlappingIndices"
-      ]
-    },
-    {
       "path": "aten/src/THCUNN/LookupTable.cu",
       "functions": [
         "warpHasCollision"
