@@ -35,6 +35,12 @@
 #define FIXED_DIVISOR_DIV_MOD(d, n, q, r) (d.DivMod(n, q, r))
 #endif // __HIP_PLATFORM_HCC__
 
+#ifdef __HIP_PLATFORM_HCC__
+using CUBLAS_HALF_TYPE = rocblas_half;
+#else // __HIP_PLATFORM_HCC
+using CUBLAS_HALF_TYPE = __half;
+#endif // __HIP_PLATFORM_HCC
+
 #include "caffe2/utils/math_utils.h"
 
 #if THRUST_VERSION >= 100800
@@ -813,7 +819,6 @@ CAFFE2_CUDA_EXPORT void Gemm<at::Half, CUDAContext>(
     // call cublasHgemm
     CUBLAS_ENFORCE(cublasSetPointerMode(
         context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
-  #ifdef __HIP_PLATFORM_HCC__
     CUBLAS_ENFORCE(cublasHgemm(
         context->cublas_handle(),
         cu_trans_B,
@@ -821,31 +826,14 @@ CAFFE2_CUDA_EXPORT void Gemm<at::Half, CUDAContext>(
         N,
         M,
         K,
-        reinterpret_cast<const rocblas_half*>(&alpha_fp16),
-        reinterpret_cast<const rocblas_half*>(B),
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(&alpha_fp16),
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(B),
         ldb,
-        reinterpret_cast<const rocblas_half*>(A),
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(A),
         lda,
-        reinterpret_cast<const rocblas_half*>(&beta_fp16),
-        reinterpret_cast<rocblas_half*>(C),
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(&beta_fp16),
+        reinterpret_cast<CUBLAS_HALF_TYPE*>(C),
         N));
-  #else
-    CUBLAS_ENFORCE(cublasHgemm(
-        context->cublas_handle(),
-        cu_trans_B,
-        cu_trans_A,
-        N,
-        M,
-        K,
-        &alpha_fp16,
-        (const __half*)B,
-        ldb,
-        (const __half*)A,
-        lda,
-        &beta_fp16,
-        (__half*)C,
-        N));
-  #endif // __HIP_PLATFORM_HCC__
   } else {
     // fail
     CAFFE_THROW("Unsupported math type");
@@ -1248,27 +1236,6 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
     const __half beta_fp16 = at::Half(beta);
     CUBLAS_ENFORCE(cublasSetPointerMode(
         context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
-  #ifdef __HIP_PLATFORM_HCC__
-    ROCBLAS_ENFORCE(rocblas_hgemm_strided_batched(
-        context->rocblashandle(),
-        cu_trans_B,
-        cu_trans_A,
-        N,
-        M,
-        K,
-        reinterpret_cast<const rocblas_half*>(&alpha_fp16),
-        reinterpret_cast<const rocblas_half*>(B),
-        ldb,
-        B_stride,
-        reinterpret_cast<const rocblas_half*>(A),
-        lda,
-        A_stride,
-        reinterpret_cast<const rocblas_half*>(&beta_fp16),
-        reinterpret_cast<rocblas_half*>(C),
-        ldc,
-        C_stride,
-        batch_size));
-  #else
     CUBLAS_ENFORCE(cublasHgemmStridedBatched(
         context->cublas_handle(),
         cu_trans_B,
@@ -1276,19 +1243,18 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
         N,
         M,
         K,
-        &alpha_fp16,
-        (const __half*)B,
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(&alpha_fp16),
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(B),
         ldb,
         B_stride,
-        (const __half*)A,
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(A),
         lda,
         A_stride,
-        &beta_fp16,
-        (__half*)C,
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(&beta_fp16),
+        reinterpret_cast<CUBLAS_HALF_TYPE*>(C),
         ldc,
         C_stride,
         batch_size));
-  #endif // __HIP_PLATFORM_HCC
   } else {
     CAFFE_THROW("Unsupported math type");
   }
@@ -1647,7 +1613,6 @@ CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext>(
     const __half beta_fp16 = at::Half(beta);
     CUBLAS_ENFORCE(cublasSetPointerMode(
         context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
-  #ifdef __HIP_PLATFORM_HCC__
     CUBLAS_ENFORCE(cublasHgemm(
         context->cublas_handle(),
         cu_trans_A,
@@ -1655,31 +1620,14 @@ CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext>(
         m,
         1,
         k,
-        reinterpret_cast<const rocblas_half*>(&alpha_fp16),
-        reinterpret_cast<const rocblas_half*>(A),
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(&alpha_fp16),
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(A),
         lda,
-        reinterpret_cast<const rocblas_half*>(x),
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(x),
         k,
-        reinterpret_cast<const rocblas_half*>(&beta_fp16),
-        reinterpret_cast<rocblas_half*>(y),
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(&beta_fp16),
+        reinterpret_cast<CUBLAS_HALF_TYPE*>(y),
         ldc));
-  #else
-    CUBLAS_ENFORCE(cublasHgemm(
-        context->cublas_handle(),
-        cu_trans_A,
-        CUBLAS_OP_N,
-        m,
-        1,
-        k,
-        &alpha_fp16,
-        (const __half*)A,
-        lda,
-        (const __half*)x,
-        k,
-        &beta_fp16,
-        (__half*)y,
-        ldc));
-  #endif // __HIP_PLATFORM_HCC__
   } else {
     // fail
     CAFFE_THROW("Unsupported math type");
