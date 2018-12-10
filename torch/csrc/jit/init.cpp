@@ -95,7 +95,7 @@ void initJITBindings(PyObject *module) {
 
   m.def("_jit_init", loadPythonClasses)
    .def("_jit_debug_fuser_num_cached_kernel_specs",
-       fuser::debugNumCachedKernelSpecs)
+       torch::jit::fuser::debugNumCachedKernelSpecs)
    .def("_jit_pass_onnx", ToONNX)
    .def("_jit_pass_lower_all_tuples", LowerAllTuples)
    .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
