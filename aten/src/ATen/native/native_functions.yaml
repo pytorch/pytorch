@@ -3374,7 +3374,7 @@
 
 - func: max_unpool2d(Tensor self, Tensor indices, IntList[2] output_size) -> Tensor
   python_module: nn
-  variants: function, method
+  variants: function
   dispatch:
     CPU: MaxUnpooling2d_forward_cpu
     CUDA: MaxUnpooling2d_forward_cuda

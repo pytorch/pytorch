@@ -583,7 +583,6 @@ struct CAFFE2_API Type {
   virtual Tensor pow(const Tensor & self, const Tensor & exponent) const = 0;
   virtual Tensor pow(Scalar self, const Tensor & exponent) const = 0;
   virtual Tensor alias(const Tensor & self) const = 0;
-  virtual Tensor max_unpool2d(const Tensor & self, const Tensor & indices, IntList output_size) const = 0;
   virtual Tensor max_unpool3d(const Tensor & self, const Tensor & indices, IntList output_size, IntList stride, IntList padding) const = 0;
 protected:
   TensorTypeId type_id_;

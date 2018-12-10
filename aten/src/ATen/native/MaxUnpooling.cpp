@@ -24,26 +24,37 @@ at::Tensor MaxUnpooling2d_forward_out_cpu_(
   auto* rawIndices = indices.data<int64_t>();
   auto* rawOutput = output.data<scalar_t>();
 
+  int has_error = 0;
+  int error_index = 0;
   int maxp;
   for (auto n = 0; n < numBatch; n++) {
-    auto nOffset = n * numChannels * outputWidth * outputHeight;
+    auto nOutputOffset = n * numChannels * outputWidth * outputHeight;
+    auto nInputOffset = n * numChannels * inputWidth * inputHeight;
+    #pragma omp parallel for private(k)
     for (auto k = 0; k < numChannels; k++) {
-      auto finalOffset = nOffset + k * outputWidth * outputHeight;
-      auto* output_p_k = rawOutput + finalOffset;
-      auto* input_p_k = rawInput + finalOffset;
-      auto* ind_p_k = rawIndices + finalOffset;
+      auto finalOutputOffset = nOutputOffset + k * outputWidth * outputHeight;
+      auto finalInputOffset = nInputOffset + k * inputWidth * inputHeight;
+      auto* output_p_k = rawOutput + finalOutputOffset;
+      auto* input_p_k = rawInput + finalInputOffset;
+      auto* ind_p_k = rawIndices + finalInputOffset;
 
       for (auto i = 0; i < inputHeight; i++) {
         for (auto j = 0; j < inputWidth; j++) {
           maxp = ind_p_k[i * inputWidth + j];
           if (maxp < 0 || maxp >= outputWidth * outputHeight) {
-            AT_ERROR("Invalid index");
+    #pragma omp critical
+            has_error = 1;
+            error_index = maxp;
           } else {
             output_p_k[maxp] = input_p_k[i * inputWidth + j];
           }
         }
       }
     }
+  }
+  if (has_error) {
+    AT_ERROR("Found an invalid max index %ld (output volumes are of size %dx%d)",
+      error_index, outputHeight, outputWidth);
   }
   return output;
 }

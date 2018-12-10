@@ -1242,9 +1242,6 @@ inline Tensor Tensor::pow(const Tensor & exponent) const {
 inline Tensor Tensor::alias() const {
     return type().alias(*this);
 }
-inline Tensor Tensor::max_unpool2d(const Tensor & indices, IntList output_size) const {
-    return type().max_unpool2d(*this, indices, output_size);
-}
 inline Tensor Tensor::max_unpool3d(const Tensor & indices, IntList output_size, IntList stride, IntList padding) const {
     return type().max_unpool3d(*this, indices, output_size, stride, padding);
 }
