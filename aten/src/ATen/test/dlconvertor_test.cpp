@@ -1,7 +1,7 @@
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
-#include "ATen/ATen.h"
-#include "ATen/DLConvertor.h"
+#include <ATen/ATen.h>
+#include <ATen/DLConvertor.h>
 
 #include <iostream>
 #include <string.h>

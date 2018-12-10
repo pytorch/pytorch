@@ -1,9 +1,9 @@
 #pragma once
 
-#include "ATen/Config.h"
-#include "ATen/Parallel.h"
-#include "ATen/cpu/vec256/functional.h"
-#include "ATen/cpu/vec256/vec256.h"
+#include <ATen/Config.h>
+#include <ATen/Parallel.h>
+#include <ATen/cpu/vec256/functional.h>
+#include <ATen/cpu/vec256/vec256.h>
 
 // This header implements various unary operations using a MKL VML style
 // interface.

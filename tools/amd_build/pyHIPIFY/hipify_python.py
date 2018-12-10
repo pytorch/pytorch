@@ -250,10 +250,6 @@ def preprocess(
         show_detailed - Show a detailed summary of the transpilation process.
     """
 
-    # Compute the total number of files to be traversed.
-    total_count = len(all_files)
-    finished_count = 0
-
     # Preprocessing statistics.
     stats = {"unsupported_calls": [], "kernel_launches": []}
 
@@ -264,7 +260,6 @@ def preprocess(
             print(
                 filepath, "->",
                 get_hip_file_path(filepath))
-            finished_count += 1
 
     print(bcolors.OKGREEN + "Successfully preprocessed all matching files." + bcolors.ENDC, file=sys.stderr)
 
@@ -833,7 +828,7 @@ class Trie():
                 try:
                     recurse = self._pattern(data[char])
                     alt.append(self.quote(char) + recurse)
-                except:
+                except Exception:
                     cc.append(self.quote(char))
             else:
                 q = 1
@@ -1261,115 +1256,6 @@ def str2bool(v):
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
 
-def main():
-    """Example invocation
-
-    python hipify.py --project-directory /home/myproject/ --extensions cu cuh h cpp --output-directory /home/gains/
-    """
-
-    parser = argparse.ArgumentParser(
-        description="The Python Hipify Script.")
-
-    # required argument: user has to specify it before proceed
-    # this is to avoid accidentally hipify files that are not intended
-    parser.add_argument(
-        '--project-directory',
-        type=str,
-        default=os.getcwd(),
-        help="The root of the project.",
-        required=True)
-
-    parser.add_argument(
-        '--show-detailed',
-        type=str2bool,
-        default=False,
-        help="Show detailed summary of the hipification process.",
-        required=False)
-
-    parser.add_argument(
-        '--extensions',
-        nargs='+',
-        default=[".cu", ".cuh", ".c", ".cpp", ".h", ".in", ".hpp"],
-        help="The extensions for files to run the Hipify script over.",
-        required=False)
-
-    parser.add_argument(
-        '--output-directory',
-        type=str,
-        default="",
-        help="The directory to store the hipified project.",
-        required=False)
-
-    parser.add_argument(
-        '--includes',
-        nargs='+',
-        default=[],
-        help="The patterns of files that should be included.",
-        required=False)
-
-    parser.add_argument(
-        '--json-settings',
-        type=str,
-        default="",
-        help="The json file storing information for disabled functions and modules.",
-        required=False)
-
-    parser.add_argument(
-        '--add-static-casts',
-        type=str2bool,
-        default=False,
-        help="Whether to automatically add static_casts to kernel arguments.",
-        required=False)
-
-    parser.add_argument(
-        '--out-of-place-only',
-        type=str2bool,
-        default=False,
-        help="Whether to only run hipify out-of-place on source files",
-        required=False),
-
-    parser.add_argument(
-        '--ignores',
-        nargs='+',
-        default=[],
-        help="list of patterns to ignore for hipifying")
-
-    parser.add_argument(
-        '--show-progress',
-        type=str2bool,
-        default=True,
-        help="Whether to show the progress bar during the transpilation proecss.",
-        required=False)
-
-    parser.add_argument(
-        '--hip-suffix',
-        type=str,
-        default='cc',
-        help="The suffix for the hipified files",
-        required=False)
-
-    parser.add_argument(
-        '--extensions-to-hip-suffix',
-        type=str,
-        default=('cc', 'cu'),
-        help="Specify the file extensions whose suffix will be changed "
-        + "to the new hip suffix",
-        required=False)
-
-    args = parser.parse_args()
-
-    hipify(
-        project_directory=args.project_directory,
-        show_detailed=args.show_detailed,
-        extensions=args.extensions,
-        output_directory=args.output_directory,
-        includes=args.includes,
-        json_settings=args.json_settings,
-        add_static_casts_option=args.add_static_casts,
-        out_of_place_only=args.out_of_place_only,
-        ignores=args.ignores,
-        show_progress=args.show_progress)
-
 
 def hipify(
     project_directory,
@@ -1517,7 +1403,3 @@ def hipify(
                     output_directory,
                     get_hip_file_path(filepath)),
                 KernelTemplateParams)
-
-
-if __name__ == '__main__':
-    main()

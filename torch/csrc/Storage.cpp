@@ -1,6 +1,6 @@
 #define __STDC_FORMAT_MACROS
 
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 #ifdef _MSC_VER
 #include <Windows.h>
 #endif
@@ -8,24 +8,23 @@
 
 #define THP_HOST_HALF
 
-#include <stdbool.h>
 #include <TH/TH.h>
 // See Note [TH abstraction violation]
 //  - Used to get at the allocator associated with a storage
 #include <TH/THStorageFunctions.hpp>
 #include <libshm.h>
-#include "THP.h"
-#include "copy_utils.h"
-#include "DynamicTypes.h"
+#include <torch/csrc/THP.h>
+#include <torch/csrc/copy_utils.h>
+#include <torch/csrc/DynamicTypes.h>
 
 #ifdef USE_CUDA
 #include <THC/THCStorage.hpp>
 #endif
 
-#include "generic/Storage.cpp"
+#include <torch/csrc/generic/Storage.cpp>
 #include <TH/THGenerateAllTypes.h>
 
-#include "generic/Storage.cpp"
+#include <torch/csrc/generic/Storage.cpp>
 #include <TH/THGenerateHalfType.h>
 
 // NB: If you ever divest libtorch of USE_CUDA, you'll have to virtualize

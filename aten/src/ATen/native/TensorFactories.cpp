@@ -4,17 +4,17 @@
 #include <math.h>
 #endif
 
-#include "ATen/ATen.h"
-#include "ATen/CPUGenerator.h"
-#include "ATen/CheckGenerator.h"
-#include "ATen/Dispatch.h"
-#include "ATen/NativeFunctions.h"
+#include <ATen/ATen.h>
+#include <ATen/CPUGenerator.h>
+#include <ATen/CheckGenerator.h>
+#include <ATen/Dispatch.h>
+#include <ATen/NativeFunctions.h>
 #include <c10/core/ScalarType.h>
-#include "ATen/core/Deprecated.h"
-#include "c10/core/TensorOptions.h"
+#include <ATen/core/Deprecated.h>
+#include <c10/core/TensorOptions.h>
 #include <TH/THRandom.h>
-#include "TH/THGenerator.hpp"
-#include "c10/util/Exception.h"
+#include <TH/THGenerator.hpp>
+#include <c10/util/Exception.h>
 
 #include <algorithm>
 #include <cmath>

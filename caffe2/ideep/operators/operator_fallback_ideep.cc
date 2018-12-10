@@ -31,7 +31,6 @@
 #include <caffe2/operators/softmax_op.h>
 #include <caffe2/operators/tanh_op.h>
 #include <caffe2/operators/transpose_op.h>
-#include <caffe2/operators/utility_ops.h>
 #include <caffe2/operators/affine_channel_op.h>
 #include <caffe2/operators/stop_gradient.h>
 #include <caffe2/sgd/adam_op.h>
@@ -138,10 +137,6 @@ REGISTER_IDEEP_OPERATOR(
 REGISTER_IDEEP_OPERATOR(
     LearningRate,
     IDEEPFallbackOp<LearningRateOp<float, CPUContext>>);
-REGISTER_IDEEP_OPERATOR(
-    WeightedSum,
-    IDEEPFallbackOp<WeightedSumOp<CPUContext>>);
-
 REGISTER_IDEEP_OPERATOR(
     LeakyRelu,
     IDEEPFallbackOp<LeakyReluOp<float, CPUContext>>);

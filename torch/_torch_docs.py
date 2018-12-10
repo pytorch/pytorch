@@ -2267,6 +2267,8 @@ Example::
     tensor([-10.,  -5.,   0.,   5.,  10.])
     >>> torch.linspace(start=-10, end=10, steps=5)
     tensor([-10.,  -5.,   0.,   5.,  10.])
+    >>> torch.linspace(start=-10, end=10, steps=1)
+    tensor([-10.])
 """.format(**factory_common_args))
 
 add_docstr(torch.log,
@@ -2395,6 +2397,8 @@ Example::
     tensor([ 1.0000e-10,  1.0000e-05,  1.0000e+00,  1.0000e+05,  1.0000e+10])
     >>> torch.logspace(start=0.1, end=1.0, steps=5)
     tensor([  1.2589,   2.1135,   3.5481,   5.9566,  10.0000])
+    >>> torch.logspace(start=0.1, end=1.0, steps=1)
+    tensor([1.2589])
 """.format(**factory_common_args))
 
 add_docstr(torch.logsumexp,
@@ -5250,6 +5254,40 @@ Example::
     tensor([[ 0.,  0.,  0.],
             [ 0.,  0.,  0.]])
 """.format(**factory_like_common_args))
+
+add_docstr(torch.btrifact,
+           r"""
+btrifact(A, pivot=True) -> (Tensor, IntTensor)
+
+Batch LU factorization.
+
+Returns a tuple containing the LU factorization and pivots. Pivoting is done if
+:attr:`pivot` is set.
+
+Arguments:
+    A (Tensor): the tensor to factor
+    pivot (bool, optional): controls whether pivoting is done
+
+Returns:
+    A tuple containing factorization and pivots.
+
+Example::
+
+    >>> A = torch.randn(2, 3, 3)
+    >>> A_LU, pivots = torch.btrifact(A)
+    >>> A_LU
+    tensor([[[ 1.3506,  2.5558, -0.0816],
+             [ 0.1684,  1.1551,  0.1940],
+             [ 0.1193,  0.6189, -0.5497]],
+
+            [[ 0.4526,  1.2526, -0.3285],
+             [-0.7988,  0.7175, -0.9701],
+             [ 0.2634, -0.9255, -0.3459]]])
+
+    >>> pivots
+    tensor([[ 3,  3,  3],
+            [ 3,  3,  3]], dtype=torch.int32)
+""")
 
 add_docstr(torch.btrifact_with_info,
            r"""

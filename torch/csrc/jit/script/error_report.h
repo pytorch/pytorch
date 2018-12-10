@@ -1,6 +1,6 @@
 #pragma once
 
-#include "torch/csrc/jit/script/tree.h"
+#include <torch/csrc/jit/script/tree.h>
 
 namespace torch {
 namespace jit {

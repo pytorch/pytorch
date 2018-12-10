@@ -1,16 +1,16 @@
 #pragma once
-#include "torch/csrc/jit/fuser/config.h"
+#include <torch/csrc/jit/fuser/config.h>
 #if USE_CUDA_FUSER || USE_CPU_FUSER
 
-#include "ATen/ATen.h"
-#include "torch/csrc/WindowsTorchApiMacro.h"
-#include "c10/util/Optional.h"
-#include "torch/csrc/jit/stack.h"
-#include "torch/csrc/jit/interpreter.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/fuser/interface.h"
-#include "torch/csrc/jit/fuser/arg_spec.h"
-#include "torch/csrc/jit/fuser/fused_kernel.h"
+#include <ATen/ATen.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/util/Optional.h>
+#include <torch/csrc/jit/stack.h>
+#include <torch/csrc/jit/interpreter.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/fuser/interface.h>
+#include <torch/csrc/jit/fuser/arg_spec.h>
+#include <torch/csrc/jit/fuser/fused_kernel.h>
 
 #include <memory>
 #include <cstdint>
