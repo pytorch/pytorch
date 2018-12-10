@@ -3,8 +3,30 @@
 
 #include "test_utils.h"
 
+#include <gtest/gtest.h>
+
 namespace caffe2 {
 namespace testing {
+
+void assertTensorListEquals(
+    const std::vector<std::string>& tensorNames,
+    const Workspace& workspace1,
+    const Workspace& workspace2) {
+  for (const string& tensorName : tensorNames) {
+    EXPECT_TRUE(workspace1.HasBlob(tensorName));
+    EXPECT_TRUE(workspace2.HasBlob(tensorName));
+    auto& tensor1 = getTensor(workspace1, tensorName);
+    auto& tensor2 = getTensor(workspace2, tensorName);
+    if (tensor1.IsType<float>()) {
+      EXPECT_TRUE(tensor2.IsType<float>());
+      assertsTensorEquals<float>(tensor1, tensor2);
+    } else if (tensor1.IsType<int>()) {
+      EXPECT_TRUE(tensor2.IsType<int>());
+      assertsTensorEquals<int>(tensor1, tensor2);
+    }
+    // Add more types if needed.
+  }
+}
 
 const caffe2::Tensor& getTensor(
     const caffe2::Workspace& workspace,

@@ -19,6 +19,12 @@ void assertsTensorEquals(const TensorCPU& tensor1, const TensorCPU& tensor2) {
   }
 }
 
+// Asserts a list of tensors presented in two workspaces are equal.
+void assertTensorListEquals(
+    const std::vector<std::string>& tensorNames,
+    const Workspace& workspace1,
+    const Workspace& workspace2);
+
 // Read a tensor from the workspace.
 const caffe2::Tensor& getTensor(
     const caffe2::Workspace& workspace,
