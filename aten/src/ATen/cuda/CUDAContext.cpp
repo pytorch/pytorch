@@ -15,7 +15,7 @@ std::once_flag init_flag;
 std::deque<std::once_flag> device_flags;
 std::vector<cudaDeviceProp> device_properties;
 
-void initDevicePropertiesVector() {
+void initCUDAContextVectors() {
   num_gpus = c10::cuda::device_count();
   device_flags.resize(num_gpus);
   device_properties.resize(num_gpus);
@@ -40,7 +40,7 @@ cudaDeviceProp* getCurrentDeviceProperties() {
 }
 
 cudaDeviceProp* getDeviceProperties(int64_t device) {
-  std::call_once(init_flag, initDevicePropertiesVector);
+  std::call_once(init_flag, initCUDAContextVectors);
   if (device == -1) device = c10::cuda::current_device();
   AT_ASSERT(device >= 0 && device < num_gpus);
   std::call_once(device_flags[device], initDeviceProperty, device);
