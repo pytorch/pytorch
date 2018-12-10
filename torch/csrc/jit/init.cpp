@@ -6,9 +6,9 @@
 #include <torch/csrc/jit/python_ir.h>
 #include <torch/csrc/jit/python_arg_flatten.h>
 #include <torch/csrc/jit/export.h>
-#include <torch/csrc/jit/fuser/kernel_cache.h>
 #include <torch/csrc/jit/import.h>
 #include <torch/csrc/jit/argument_spec.h>
+#include <torch/csrc/jit/fuser/kernel_cache.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/onnx.h>
@@ -41,6 +41,8 @@
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 #include <torch/csrc/jit/script/jit_exception.h>
+
+#include <caffe2/serialize/inline_container.h>
 
 #include <pybind11/functional.h>
 
