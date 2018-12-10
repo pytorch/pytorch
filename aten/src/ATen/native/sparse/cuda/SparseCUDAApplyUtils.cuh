@@ -278,13 +278,8 @@ __global__ void indexSparseIntersectionKernel(
 //   }
 // }
 
-template <typename scalar_t>
-__device__ scalar_t coalesce_sum_op(scalar_t a, scalar_t b) {
-  return a + b;
-}
-
 template <typename scalar_t, typename func_t>
-__device__ void coalesceValuesKernel(
+__device__ void coalesce_values_kernel(
   int64_t *segment_offsets,
   int64_t *value_indices,
   scalar_t *values,
@@ -314,26 +309,26 @@ __device__ void coalesceValuesKernel(
       const int valueRow = ((int) value_indices[row]) * stride;
 
       #pragma unroll
-      for (int ii = 0; ii < SZ; ii++)
-      {
+      for (int ii = 0; ii < SZ; ii++){
         int featureDim = startFeature + ii * WARP_SIZE;
-        if (featureDim < stride)
-        {
-          // tmp[ii] += static_cast<cuda_accscalar_t>(values[valueRow + featureDim]);
+        if (featureDim < stride){
           tmp[ii] = op(tmp[ii], static_cast<scalar_t>(values[valueRow + featureDim]));
         }
       }
     }
     #pragma unroll
-    for (int ii = 0; ii < SZ; ii++)
-    {
+    for (int ii = 0; ii < SZ; ii++){
       int featureDim = startFeature + ii * WARP_SIZE;
-      if (featureDim < stride)
-      {
+      if (featureDim < stride){
         newValues[newValueRow + featureDim] = static_cast<scalar_t>(tmp[ii]);
       }
     }
   }
+}
+
+template <typename scalar_t>
+__device__ scalar_t coalesce_sum_op(scalar_t a, scalar_t b) {
+  return a + b;
 }
 
 template <typename scalar_t>
@@ -346,7 +341,7 @@ __global__ void coalesce_sum_kernel(
   int64_t newNnz,
   int64_t stride
 ) {
-  coalesceValuesKernel(
+  coalesce_values_kernel(
     segment_offsets,
     value_indices,
     values,
@@ -355,6 +350,60 @@ __global__ void coalesce_sum_kernel(
     newNnz,
     stride,
     coalesce_sum_op<scalar_t>
+  );
+}
+
+template <typename scalar_t>
+__device__ scalar_t coalesce_max_op(scalar_t a, scalar_t b) {
+  return a > b ? a : b;
+}
+
+template <typename scalar_t>
+__global__ void coalesce_max_kernel(
+  int64_t *segment_offsets,
+  int64_t *value_indices,
+  scalar_t *values,
+  scalar_t *newValues,
+  int64_t nnz,
+  int64_t newNnz,
+  int64_t stride
+) {
+  coalesce_values_kernel(
+    segment_offsets,
+    value_indices,
+    values,
+    newValues,
+    nnz,
+    newNnz,
+    stride,
+    coalesce_max_op<scalar_t>
+  );
+}
+
+template <typename scalar_t>
+__device__ scalar_t coalesce_min_op(scalar_t a, scalar_t b) {
+  return a < b ? a : b;
+}
+
+template <typename scalar_t>
+__global__ void coalesce_min_kernel(
+  int64_t *segment_offsets,
+  int64_t *value_indices,
+  scalar_t *values,
+  scalar_t *newValues,
+  int64_t nnz,
+  int64_t newNnz,
+  int64_t stride
+) {
+  coalesce_values_kernel(
+    segment_offsets,
+    value_indices,
+    values,
+    newValues,
+    nnz,
+    newNnz,
+    stride,
+    coalesce_min_op<scalar_t>
   );
 }
 
