@@ -446,7 +446,10 @@ AT_ERROR("btrifact: MAGMA library not found in "
 }
 
 std::tuple<Tensor, Tensor, Tensor> _btrifact_helper_cuda(const Tensor& self, bool pivot) {
-  auto self_working_copy = cloneBatchedColumnMajor(self);
+  AT_CHECK(self.dim() > 2,
+           "expected tensor with more than 2 dimensions, got size: ", self.sizes(),
+           " instead");
+  squareCheckInputs(self);
   auto req_size = self.sizes().vec();
   req_size.pop_back();
   Tensor pivots_tensor;
@@ -455,9 +458,16 @@ std::tuple<Tensor, Tensor, Tensor> _btrifact_helper_cuda(const Tensor& self, boo
   }
   req_size.pop_back();
   auto infos_tensor = at::zeros(req_size, self.options().dtype(kInt));
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "btrifact", [&]{
-    apply_btrifact<scalar_t>(self_working_copy, pivots_tensor, infos_tensor);
-  });
+
+  Tensor self_working_copy;
+  if (self.size(-1) == 0) {
+    self_working_copy = at::empty_like(self);
+  } else {
+    self_working_copy = cloneBatchedColumnMajor(self);
+    AT_DISPATCH_FLOATING_TYPES(self.type(), "btrifact", [&]{
+      apply_btrifact<scalar_t>(self_working_copy, pivots_tensor, infos_tensor);
+    });
+  }
   return std::make_tuple(self_working_copy, pivots_tensor, infos_tensor);
 }
 

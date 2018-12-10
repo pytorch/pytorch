@@ -93,8 +93,9 @@ static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* nam
  */
 static inline void batchCheckErrors(const Tensor& infos, const char* name) {
   auto batch_size = infos.numel();
-  auto infos_data = infos.data<int>();
-  for (size_t i = 0; i < infos.numel(); i++) {
+  auto infos_cpu = infos.to(at::kCPU);
+  auto infos_data = infos_cpu.data<int>();
+  for (size_t i = 0; i < batch_size; i++) {
     auto info = infos_data[i];
     if (info < 0) {
       AT_ERROR(name, ": For batch ", i, ": Argument ", -info, " has illegal value");

@@ -402,16 +402,25 @@ static void apply_btrifact(Tensor& self, Tensor& pivots, Tensor& infos) {
 
 std::tuple<Tensor, Tensor, Tensor> _btrifact_helper_cpu(const Tensor& self, bool pivot) {
   AT_CHECK(pivot, "btrifact without pivoting is not implemented on the CPU");
+  AT_CHECK(self.dim() > 2,
+           "expected tensor with more than 2 dimensions, got size: ", self.sizes(),
+           " instead");
   squareCheckInputs(self);
-  auto self_working_copy = cloneBatchedColumnMajor(self);
   auto req_size = self.sizes().vec();
   req_size.pop_back();
   auto pivots_tensor = at::zeros(req_size, self.options().dtype(kInt));
   req_size.pop_back();
   auto infos_tensor = at::zeros(req_size, self.options().dtype(kInt));
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "btrifact", [&]{
-    apply_btrifact<scalar_t>(self_working_copy, pivots_tensor, infos_tensor);
-  });
+
+  Tensor self_working_copy;
+  if (self.size(-1) == 0) {
+    self_working_copy = at::empty_like(self);
+  } else {
+    self_working_copy = cloneBatchedColumnMajor(self);
+    AT_DISPATCH_FLOATING_TYPES(self.type(), "btrifact", [&]{
+      apply_btrifact<scalar_t>(self_working_copy, pivots_tensor, infos_tensor);
+    });
+  }
   return std::make_tuple(self_working_copy, pivots_tensor, infos_tensor);
 }
 
