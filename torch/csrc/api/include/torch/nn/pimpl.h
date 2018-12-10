@@ -13,7 +13,7 @@
 namespace torch {
 namespace detail {
 // Dump all the template metaprogramming in this file.
-#include "pimpl-inl.h"
+#include <torch/csrc/api/include/torch/nn/pimpl-inl.h>
 } // namespace detail
 
 namespace nn {

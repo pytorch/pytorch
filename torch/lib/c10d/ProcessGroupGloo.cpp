@@ -1,4 +1,4 @@
-#include "ProcessGroupGloo.hpp"
+#include <c10d/ProcessGroupGloo.hpp>
 
 #include <gloo/allgather.h>
 #include <gloo/allreduce.h>

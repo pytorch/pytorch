@@ -1,9 +1,9 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include "THC/THC.h"
-#include "miopen-wrapper.h"
-#include "ATen/miopen/Handle.h"
+#include <THC/THC.h>
+#include <ATen/miopen/miopen-wrapper.h>
+#include <ATen/miopen/Handle.h>
 
 namespace at { namespace native {
 

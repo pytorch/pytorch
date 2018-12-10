@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/SpatialDilatedConvolution.c"
+#define TH_GENERIC_FILE "THNN/generic/SpatialDilatedConvolution.c"
 #else
 
 #include <ATen/div_rtn.h>

@@ -2,12 +2,12 @@
 
 #include <iostream>
 #include <vector>
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/utils/hash.h"
-#include "torch/csrc/jit/stack.h"
-#include "torch/csrc/jit/type.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/variable_tensor_list.h"
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/utils/hash.h>
+#include <torch/csrc/jit/stack.h>
+#include <torch/csrc/jit/type.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/variable_tensor_list.h>
 
 namespace torch { namespace jit {
 
