@@ -145,29 +145,11 @@ import json
 import glob
 import importlib
 
-from tools.setup_helpers.env import check_env_flag, check_negative_env_flag
+from tools.setup_helpers.env import (check_env_flag, check_negative_env_flag,
+                                     hotpatch_build_env_vars)
 
 
-def hotpatch_var(var, prefix='USE_'):
-    if check_env_flag('NO_' + var):
-        os.environ[prefix + var] = '0'
-    elif check_negative_env_flag('NO_' + var):
-        os.environ[prefix + var] = '1'
-    elif check_env_flag('WITH_' + var):
-        os.environ[prefix + var] = '1'
-    elif check_negative_env_flag('WITH_' + var):
-        os.environ[prefix + var] = '0'
-
-# Before we run the setup_helpers, let's look for NO_* and WITH_*
-# variables and hotpatch environment with the USE_* equivalent
-use_env_vars = ['CUDA', 'CUDNN', 'FBGEMM', 'MIOPEN', 'MKLDNN', 'NNPACK', 'DISTRIBUTED',
-                'OPENCV', 'TENSORRT', 'QNNPACK', 'FFMPEG', 'SYSTEM_NCCL',
-                'GLOO_IBVERBS']
-list(map(hotpatch_var, use_env_vars))
-
-# Also hotpatch a few with BUILD_* equivalent
-build_env_vars = ['BINARY', 'TEST', 'CAFFE2_OPS']
-[hotpatch_var(v, 'BUILD_') for v in build_env_vars]
+hotpatch_build_env_vars()
 
 from tools.setup_helpers.cuda import USE_CUDA, CUDA_HOME, CUDA_VERSION
 from tools.setup_helpers.build import (BUILD_BINARY, BUILD_TEST,
