@@ -19,7 +19,7 @@ import hypothesis.strategies as st
 import unittest
 
 
-EXECUTORS = ["parallel", "async_scheduling"]
+EXECUTORS = ["async_scheduling", "dag", "async_dag"]
 ITERATIONS = 1
 
 
