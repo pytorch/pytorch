@@ -3,26 +3,27 @@
 Checks: '
   -*
   ,bugprone-*
-  ,-bugprone-macro-parentheses
   ,-bugprone-forward-declaration-namespace
+  ,-bugprone-macro-parentheses
   ,cppcoreguidelines-*
-  ,-cppcoreguidelines-pro-bounds-array-to-pointer-decay
-  ,-cppcoreguidelines-pro-type-static-cast-downcast
-  ,-cppcoreguidelines-pro-bounds-pointer-arithmetic
-  ,-cppcoreguidelines-pro-bounds-constant-array-index
-  ,-cppcoreguidelines-pro-type-cstyle-cast
-  ,-cppcoreguidelines-pro-type-reinterpret-cast
-  ,-cppcoreguidelines-pro-type-vararg
-  ,-cppcoreguidelines-special-member-functions
   ,-cppcoreguidelines-interfaces-global-init
   ,-cppcoreguidelines-owning-memory
-  ,hicpp-signed-bitwise
+  ,-cppcoreguidelines-pro-bounds-array-to-pointer-decay
+  ,-cppcoreguidelines-pro-bounds-constant-array-index
+  ,-cppcoreguidelines-pro-bounds-pointer-arithmetic
+  ,-cppcoreguidelines-pro-type-cstyle-cast
+  ,-cppcoreguidelines-pro-type-reinterpret-cast
+  ,-cppcoreguidelines-pro-type-static-cast-downcast
+  ,-cppcoreguidelines-pro-type-union-access
+  ,-cppcoreguidelines-pro-type-vararg
+  ,-cppcoreguidelines-special-member-functions
   ,hicpp-exception-baseclass
   ,hicpp-avoid-goto
   ,modernize-*
-  ,-modernize-use-default-member-init
   ,-modernize-return-braced-init-list
   ,-modernize-use-auto
+  ,-modernize-use-default-member-init
+  ,-modernize-use-using
   '
 WarningsAsErrors: '*'
 HeaderFilterRegex: 'torch/csrc/.*'

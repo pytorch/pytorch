@@ -135,7 +135,7 @@ namespace caffe2 {
           const auto& W = Input(1);
           const auto& Mask = Input(2);
           const auto& b = Input(3);
-          auto* Y = Output(0);
+
           CAFFE_ENFORCE_GE(X.dim(), 1);
           CAFFE_ENFORCE_GE(W.dim(), 2);
           if (X.dim() > 2 || W.dim() > 2) {
@@ -151,11 +151,13 @@ namespace caffe2 {
           int N = W.dim32(0);
           CAFFE_ENFORCE_EQ(K, W.numel() / W.dim32(0));
           CAFFE_ENFORCE_EQ(N, b.dim32(0));
+          std::vector<int64_t> dims;
           if (X.dim() > 1) {
-            Y->Resize(M, N);
+            dims = {M, N};
           } else {
-            Y->Resize(N);
+            dims = {N};
           }
+          auto* Y = Output(0, dims, at::dtype<T>());
           // W * x
           math::Gemm<T, Context, Engine>(
               CblasNoTrans, CblasTrans, M, N, K, 1, X.template data<T>(),
@@ -176,8 +178,7 @@ namespace caffe2 {
               bias_multiplier_.template data<T>(), b.template data<T>(), 1,
               Y->template mutable_data<T>(), &context_);
           if (OutputSize() == 2){
-            auto* Comp_rate = Output(1);
-            Comp_rate->Resize(vector<int64_t>());
+            auto* Comp_rate = Output(1, vector<int64_t>(), at::dtype<T>());
             T* comp_data = Comp_rate->template mutable_data<T>();
             math::Sum<T, Context>(
                 Mask.numel(), Mask.template data<T>(), comp_data, &context_);
@@ -251,9 +252,9 @@ namespace caffe2 {
             DCHECK_EQ(N, dY.numel());
           }
           auto* dW = Output(0);
-          auto* db = Output(1);
+
           dW->ResizeLike(W);
-          db->Resize(N);
+          auto* db = Output(1, {N}, at::dtype<T>());
 
           // Compute dW
           math::Gemm<T, Context, Engine>(

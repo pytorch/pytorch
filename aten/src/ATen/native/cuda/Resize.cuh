@@ -1,9 +1,9 @@
 #pragma once
 
-#include "ATen/ATen.h"
-#include "THC/THCTensor.hpp"
+#include <ATen/ATen.h>
+#include <THC/THCTensor.hpp>
 
-#include "ATen/cuda/CUDAGuard.h"
+#include <ATen/cuda/CUDAGuard.h>
 
 namespace at { namespace native {
 

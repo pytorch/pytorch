@@ -6,7 +6,6 @@ import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
 from caffe2.python import core, dyndep
-from caffe2.python.fb import hardcode_scale_zp
 from caffe2.quantization.server import utils as dnnlowp_utils
 from dnnlowp_test_utils import check_quantized_results_close
 from hypothesis import given
@@ -80,9 +79,7 @@ class DNNLowPOpGroupNormTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([int8_given_tensor_fill])
 
-                X_q_param = hardcode_scale_zp.choose_quantization_params(
-                    X.min(), X.max()
-                )
+                X_q_param = dnnlowp_utils.choose_quantization_params(X.min(), X.max())
                 int8_bias_tensor_fill = dnnlowp_utils.create_int8_bias_tensor_fill(
                     beta, "beta_q", X_q_param, gamma_q_param
                 )

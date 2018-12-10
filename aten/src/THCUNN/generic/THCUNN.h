@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCUNN.h"
+#define THC_GENERIC_FILE "THCUNN/generic/THCUNN.h"
 #else
 
 #include <ATen/core/Reduction.h>

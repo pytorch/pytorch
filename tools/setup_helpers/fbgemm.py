@@ -1,6 +1,6 @@
 from .env import check_env_flag
 
-USE_FBGEMM = False
+USE_FBGEMM = True
 
 if check_env_flag('NO_FBGEMM'):
     USE_FBGEMM = False

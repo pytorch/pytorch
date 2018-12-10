@@ -1,13 +1,13 @@
-#include "THCGeneral.h"
-#include "TH.h"
-#include "THCAllocator.h"
-#include "THCCachingHostAllocator.h"
-#include "THCTensorRandom.h"
-#include "THCGeneral.hpp"
+#include <THC/THCGeneral.h>
+#include <TH/TH.h>
+#include <THC/THCAllocator.h>
+#include <THC/THCCachingHostAllocator.h>
+#include <THC/THCTensorRandom.h>
+#include <THC/THCGeneral.hpp>
 
-#include "ATen/cuda/CUDAStream.h"
+#include <ATen/cuda/CUDAStream.h>
 
-#include "THCCachingAllocator.h"
+#include <THC/THCCachingAllocator.h>
 #include <stdlib.h>
 #include <stdint.h>
 
@@ -455,5 +455,5 @@ cudaError_t THCudaMemGetInfo(THCState *state,  size_t* freeBytes, size_t* totalB
 #undef MIN_GLOBAL_SCRATCH_SPACE_PER_SM_STREAM
 #undef MIN_GLOBAL_SCRATCH_SPACE_PER_DEVICE
 
-#include "THCStorage.cpp"
-#include "THCAllocator.cpp"
+#include <THC/THCStorage.cpp>
+#include <THC/THCAllocator.cpp>

@@ -1645,10 +1645,10 @@
 - func: std(Tensor self, bool unbiased=true) -> Tensor
   variants: function, method
 
-- func: std(Tensor self, int64_t dim, bool unbiased=true, bool keepdim=false) -> Tensor
+- func: std(Tensor self, IntList[1] dim, bool unbiased=true, bool keepdim=false) -> Tensor
   variants: function, method
 
-- func: std_out(Tensor result, Tensor self, int64_t dim, bool unbiased=true, bool keepdim=false) -> Tensor
+- func: std_out(Tensor result, Tensor self, IntList[1] dim, bool unbiased=true, bool keepdim=false) -> Tensor
 
 # FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
 - func: prod(Tensor self, *, ScalarType dtype) -> Tensor

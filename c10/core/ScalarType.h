@@ -8,10 +8,6 @@
 #include <iostream>
 #include <complex>
 
-namespace at {
-class Tensor;
-}
-
 namespace c10 {
 
 // NB: Order matters for this macro; it is relied upon in
@@ -200,8 +196,6 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   };
   return _promoteTypesLookup[static_cast<int>(a)][static_cast<int>(b)];
 }
-
-typedef ArrayRef<at::Tensor> TensorList;
 
 inline std::ostream& operator<<(
     std::ostream& stream,
