@@ -404,6 +404,12 @@ struct Module {
     }
     return nullptr;
   }
+  void apply(std::function<void(Module&)> fn) {
+    for (auto &submod : get_modules()) {
+      submod.value().module->apply(fn);
+    }
+    fn(*this);
+  }
 
   /// Recursively casts all parameters to the given `dtype` and `device`.
   ///
