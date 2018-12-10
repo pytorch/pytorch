@@ -1004,7 +1004,7 @@ struct SquaredL2NormFunctor {
 
 #define DELEGATE_ROWWISE_REDUCE_FUNCTION(Func, EigenOp)                    \
   template <typename T>                                                    \
-  C10_EXPORT void Rowwise##Func(                                           \
+  void Rowwise##Func(                                           \
       const int rows, const int cols, const T alpha, const T* X, T* Y) {   \
     EigenVectorMap<T>(Y, rows) =                                           \
         ConstEigenMatrixMap<T>(X, cols, rows).colwise().EigenOp() * alpha; \
@@ -1019,7 +1019,7 @@ DELEGATE_ROWWISE_REDUCE_FUNCTION(ReduceL2, norm)
 
 #define DELEGATE_COLWISE_REDUCE_FUNCTION(Func, EigenOp)                    \
   template <typename T>                                                    \
-  C10_EXPORT void Colwise##Func(                                           \
+  void Colwise##Func(                                           \
       const int rows, const int cols, const T alpha, const T* X, T* Y) {   \
     EigenVectorMap<T>(Y, cols) =                                           \
         ConstEigenMatrixMap<T>(X, cols, rows).rowwise().EigenOp() * alpha; \
@@ -3953,7 +3953,7 @@ void Transpose2D(const int rows, const int cols, const T* X, T* Y);
 
 #define DELEGATE_TRANSPOSE_2D_FUNCTION(T, Func)                           \
   template <>                                                             \
-  C10_EXPORT void Transpose2D<T>(const int rows, const int cols, const T* X, T* Y) { \
+  void Transpose2D<T>(const int rows, const int cols, const T* X, T* Y) { \
     Func('R', 'T', rows, cols, T(1), X, cols, Y, rows);                   \
   }
 DELEGATE_TRANSPOSE_2D_FUNCTION(float, mkl_somatcopy);
@@ -3964,7 +3964,7 @@ DELEGATE_TRANSPOSE_2D_FUNCTION(double, mkl_domatcopy);
 
 #define CAFFE2_SPECIALIZED_TRANSPOSE_2D(T)                                \
   template <>                                                             \
-  C10_EXPORT void Transpose2D<T>(const int rows, const int cols, const T* X, T* Y) { \
+  void Transpose2D<T>(const int rows, const int cols, const T* X, T* Y) { \
     EigenMatrixMap<T>(Y, rows, cols) =                                    \
         ConstEigenMatrixMap<T>(X, cols, rows).transpose();                \
   }
