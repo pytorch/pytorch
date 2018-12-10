@@ -1,5 +1,4 @@
 #include "conv_dnnlowp_acc16_op.h"
-#include "dnnlowp_op.h"
 
 // #define DNNLOWP_ACC16_IN_SLOW_PATH
 // #define DNNLOWP_MEASURE_TIME_BREAKDOWN
@@ -10,7 +9,9 @@
 #include <omp.h>
 #endif
 
+#include "dnnlowp_op.h"
 #include "dnnlowp_partition.h"
+#include "fbgemm_pack_op.h"
 #include "im2col_dnnlowp.h"
 
 C10_DECLARE_int32(dnnlowp_nbits_in_non_outlier);
@@ -61,6 +62,30 @@ bool ConvDNNLowPAcc16Op<ReluFused>::GetQuantizationParameters_() {
     return false;
   }
 
+  if (!Wq_acc16_packed_ &&
+      this->template InputIsType<Int8ConvDNNLowPPackedWeightBlob>(FILTER)) {
+    CAFFE_ENFORCE_EQ(
+        ConvPoolOpBase<CPUContext>::order_,
+        StorageOrder::NHWC,
+        "Pre-packed weight only works with NHWC layout");
+    // If the input is already packed
+    const auto& packed_filter =
+        this->template Input<Int8ConvDNNLowPPackedWeightBlob>(FILTER);
+    Wq_outlier_ = packed_filter.W_outlier;
+    Wq_acc16_packed_ = packed_filter.W_acc16;
+
+    if (nbits_in_non_outlier_ != packed_filter.nbits_in_non_outlier) {
+      LOG(WARNING)
+          << "nbits_in_non_outlier in packed weight "
+          << packed_filter.nbits_in_non_outlier
+          << " doesn't match with nbits_in_non_outlier specified in operator "
+          << nbits_in_non_outlier_;
+    }
+
+    first_invocation_ = false;
+    return true;
+  }
+
   int kernel_dim = this->KernelDim_();
   const auto& filter = InputTensorCPU_(FILTER);
   int M = filter.dim32(0);
@@ -71,46 +96,9 @@ bool ConvDNNLowPAcc16Op<ReluFused>::GetQuantizationParameters_() {
       nbits_in_non_outlier_ < 8) {
     CAFFE_ENFORCE(!W_quantized_.empty());
 
-    int outlier_cnt = 0;
-    for (int group_id = 0; group_id < group_; ++group_id) {
-      for (int i = 0; i < (M / group_) * kernel_dim; ++i) {
-        int8_t w = W_quantized_[group_id * (M / group_) * kernel_dim + i];
-        bool is_outlier = nbits_in_non_outlier_ == 0 ||
-            w < -(1 << (nbits_in_non_outlier_ - 1)) ||
-            w >= (1 << (nbits_in_non_outlier_ - 1));
-        if (is_outlier) {
-          ++outlier_cnt;
-        }
-      }
-    }
-
-    Wq_outlier_.reset(new fbgemm::CompressedSparseColumn(kernel_dim, M));
-    Wq_outlier_->RowIdx().resize(outlier_cnt);
-    Wq_outlier_->Values().resize(outlier_cnt);
-
-    outlier_cnt = 0;
-    for (int group_id = 0; group_id < group_; ++group_id) {
-      for (int j = 0; j < M / group_; ++j) {
-        Wq_outlier_->ColPtr()[group_id * (M / group_) + j] = outlier_cnt;
-
-        for (int k = 0; k < kernel_dim; ++k) {
-          int8_t w =
-              W_quantized_[(group_id * (M / group_) + j) * kernel_dim + k];
-          bool is_outlier = nbits_in_non_outlier_ == 0 ||
-              w < -(1 << (nbits_in_non_outlier_ - 1)) ||
-              w >= (1 << (nbits_in_non_outlier_ - 1));
-          if (is_outlier) {
-            CAFFE_ENFORCE_LE(k, numeric_limits<int16_t>::max());
-            Wq_outlier_->RowIdx()[outlier_cnt] = k;
-            Wq_outlier_->Values()[outlier_cnt] = w;
-            ++outlier_cnt;
-
-            W_quantized_[(group_id * (M / group_) + j) * kernel_dim + k] = 0;
-          }
-        }
-      }
-    } // for each group
-    Wq_outlier_->ColPtr()[M] = outlier_cnt;
+    Wq_outlier_.reset(ExtractOutlierMatrix(
+        group_, kernel_dim, M, nbits_in_non_outlier_, W_quantized_));
+    int outlier_cnt = Wq_outlier_->ColPtr()[M];
 
     LOG(INFO) << "Proportion of outlier for Conv layer with weight blob "
               << OperatorBase::debug_def().input(1) << " is "
@@ -255,7 +243,8 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNCHWAndType_() {
     } else {
       Y_data = Y->template mutable_data<uint8_t>();
     }
-    this->column_offsets_.resize(output_image_size * dnnlowp_get_max_threads());
+    this->column_offsets_->resize(
+        output_image_size * dnnlowp_get_max_threads());
 
 #ifdef _OPENMP
 #pragma omp parallel for
@@ -496,7 +485,7 @@ void ConvDNNLowPAcc16Op<ReluFused>::DispatchFBGEMM(
       in_qparams_[INPUT].zero_point,
       this->filter_zero_points_.data(),
       packA.getRowOffsetBuffer(),
-      this->column_offsets_.data(),
+      this->column_offsets_->data(),
       InputSize() == 3 ? this->b_quantized_data_ : nullptr,
       M,
       group_);
@@ -569,7 +558,7 @@ void ConvDNNLowPAcc16Op<ReluFused>::ConvOutlier_(
           dnnlowp_get_thread_num());
 
       for (int group_id = group_begin; group_id < group_end; ++group_id) {
-        assert(Wq_outlier_->NumOfRows() == kernel_dim);
+        CAFFE_ENFORCE_EQ(Wq_outlier_->NumOfRows(), kernel_dim);
         // Dense-matrix times sparse-matrix multiplication for outlier
         fbgemm::block_type_t block = {
             0, i_end - i_begin, group_id * (M / group_), M / group_};
