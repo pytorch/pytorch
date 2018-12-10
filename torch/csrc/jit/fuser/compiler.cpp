@@ -142,13 +142,15 @@ int64_t registerFusion(const Node* fusion_group) {
     return (*maybe_spec)->key();
   }
 
-  // Create and register the fusion
+  // Unconditionally create and register the fusion
+  // This is necessary to support our global disable fusions flag: if someone
+  // runs some code under no-fusions mode and then runs some code with fusions
+  // enabled, the second time around the returned spec from the cache should
+  // be a valid spec (must have had upfrontCompilation run on it).
   const auto key = store(graph);
-  if (canFuseOnCPU() || canFuseOnGPU()) {
-    const auto maybe_spec = retrieve(key);
-    JIT_ASSERT(maybe_spec);
-    upfrontCompilation(**maybe_spec);
-  }
+  const auto maybe_retrieved_spec = retrieve(key);
+  JIT_ASSERT(maybe_retrieved_spec);
+  upfrontCompilation(**maybe_retrieved_spec);
 
   return key;
 }
