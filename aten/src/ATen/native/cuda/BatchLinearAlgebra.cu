@@ -413,8 +413,6 @@ AT_ERROR("btrifact: MAGMA library not found in "
   scalar_t** self_array;
   ALLOCATE_ARRAY(self_array, scalar_t*, batch_size, self);
 
-  auto infos_data = infos.data<int>();
-
   // Set up the created arrays
   for (int64_t i = 0; i < batch_size; i++) {
     self_array[i] = &self_data[i * self_matrix_stride];
@@ -436,10 +434,10 @@ AT_ERROR("btrifact: MAGMA library not found in "
 
     magmaGetrfBatched<scalar_t>(
       n, n, self_array, n, pivots_array,
-      infos_data, batch_size, magma_queue);
+      infos.data<magma_int_t>(), batch_size, magma_queue);
   } else {
     magmaGetrfNoPivBatched<scalar_t>(
-      n, n, self_array, n, infos_data,
+      n, n, self_array, n, infos.data<magma_int_t>(),
       batch_size, magma_queue);
   }
 #endif
