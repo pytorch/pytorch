@@ -84,7 +84,7 @@ void checkSequenceSize(int64_t n, int64_t dim, int64_t seq_size) {
 }
 
 template <typename DTYPE>
-void storeLastDimension(char* data, const std::vector<int64_t>& sizes, const c10::ArrayRef<long>& strides, int64_t dim,
+void storeLastDimension(char* data, const std::vector<int64_t>& sizes, const c10::ArrayRef<int64_t>& strides, int64_t dim,
     int elementSize, std::vector<DTYPE> obj) {
   auto n = sizes[dim];
   auto seq_size = obj.size();
@@ -97,7 +97,7 @@ void storeLastDimension(char* data, const std::vector<int64_t>& sizes, const c10
 
 // bool vector needs to be cast to uint8_t
 template<>
-void storeLastDimension<bool>(char* data, const std::vector<int64_t>& sizes, const c10::ArrayRef<long>& strides, int64_t dim,
+void storeLastDimension<bool>(char* data, const std::vector<int64_t>& sizes, const c10::ArrayRef<int64_t>& strides, int64_t dim,
     int elementSize, std::vector<bool> obj) {
   auto n = sizes[dim];
   auto seq_size = obj.size();
@@ -110,7 +110,7 @@ void storeLastDimension<bool>(char* data, const std::vector<int64_t>& sizes, con
 
 // refernce python implementation recursive_store in tensor_new.cpp
 
-void recursiveStore(char* data, const std::vector<int64_t>& sizes, const c10::ArrayRef<long>& strides, int64_t dim,
+void recursiveStore(char* data, const std::vector<int64_t>& sizes, const c10::ArrayRef<int64_t>& strides, int64_t dim,
    int elementSize, IValue obj) {
 
   auto ndim = sizes.size();
