@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/core/WrapDimMinimal.h>
+#include <c10/core/WrapDimMinimal.h>
 #include <ATen/core/TensorImpl.h>
 
 namespace at {
