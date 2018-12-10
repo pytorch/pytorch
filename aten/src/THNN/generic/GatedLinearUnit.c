@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/GatedLinearUnit.c"
+#define TH_GENERIC_FILE "THNN/generic/GatedLinearUnit.c"
 #else
 
 void THNN_(GatedLinear_updateOutput)(

@@ -1,9 +1,9 @@
 #pragma once
-#include "lexer.h"
-#include "tree.h"
-#include "tree_views.h"
-#include "c10/util/Optional.h"
-#include "torch/csrc/jit/script/parse_string_literal.h"
+#include <torch/csrc/jit/script/lexer.h>
+#include <torch/csrc/jit/script/tree.h>
+#include <torch/csrc/jit/script/tree_views.h>
+#include <c10/util/Optional.h>
+#include <torch/csrc/jit/script/parse_string_literal.h>
 
 namespace torch {
 namespace jit {

@@ -6,19 +6,6 @@
 
 namespace at {
 
-struct DimCounter {
-  DimCounter(IntList shape, Range range);
-
-  void increment(const std::array<int64_t, 2>& step);
-  bool is_done() const;
-  std::array<int64_t, 2> max_step() const;
-
-  IntList shape;
-  Range range;
-  DimVector values;
-  int64_t offset;
-};
-
 using DimMask = TensorIterator::DimMask;
 using PtrVector = TensorIterator::PtrVector;
 using loop_t = TensorIterator::loop_t;
@@ -405,7 +392,7 @@ void TensorIterator::serial_for_each(const loop2d_t& loop, Range range) const {
     auto counter = DimCounter(shape_, range);
     while (!counter.is_done()) {
       auto ptrs = get_data_ptrs(base_ptrs, counter.values);
-      auto step = counter.max_step();
+      auto step = counter.max_2d_step();
       loop(ntensors(), ptrs.data(), strides.data(), step[0], step[1]);
       counter.increment(step);
     }
@@ -460,6 +447,16 @@ void TensorIterator::narrow(int dim, int64_t start, int64_t size) {
   }
   if (size == 1) {
     coalesce_dimensions();
+  }
+}
+
+void TensorIterator::select_all_keeping_dim(int start_dim, IntList indices) {
+  AT_ASSERT(start_dim <= ndim());
+  for (int i = start_dim; i < ndim(); ++i) {
+    for (auto& op : operands_) {
+      op.data = ((char*)op.data) + op.stride_bytes[i] * indices[i - start_dim];
+    }
+    shape_[i] = 1;
   }
 }
 
@@ -721,7 +718,7 @@ void DimCounter::increment(const std::array<int64_t, 2>& step) {
   AT_ASSERT(overflow == 0 || overflow == 1);
 }
 
-std::array<int64_t, 2> DimCounter::max_step() const {
+std::array<int64_t, 2> DimCounter::max_2d_step() const {
   int64_t step0 = std::min(shape[0] - values[0], range.end - offset);
   int64_t step1 = 1;
   if (step0 == shape[0] && shape.size() >= 1) {

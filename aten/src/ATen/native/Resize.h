@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ATen/ATen.h"
-#include "TH/THTensor.hpp"
+#include <ATen/ATen.h>
+#include <TH/THTensor.hpp>
 
 namespace at { namespace native {
 

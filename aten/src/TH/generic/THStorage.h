@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THStorage.h"
+#define TH_GENERIC_FILE "TH/generic/THStorage.h"
 #else
 
 #ifdef __cplusplus

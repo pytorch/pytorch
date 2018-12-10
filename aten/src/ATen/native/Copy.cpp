@@ -1,10 +1,10 @@
-#include "ATen/native/Copy.h"
+#include <ATen/native/Copy.h>
 
-#include "ATen/ATen.h"
-#include "ATen/CPUApplyUtils.h"
-#include "ATen/Dispatch.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/native/cpu/CopyKernel.h"
+#include <ATen/ATen.h>
+#include <ATen/CPUApplyUtils.h>
+#include <ATen/Dispatch.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/native/cpu/CopyKernel.h>
 
 namespace {
 

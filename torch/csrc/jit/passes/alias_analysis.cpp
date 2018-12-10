@@ -1,6 +1,6 @@
-#include "alias_analysis.h"
+#include <torch/csrc/jit/passes/alias_analysis.h>
 
-#include "torch/csrc/jit/script/error_report.h"
+#include <torch/csrc/jit/script/error_report.h>
 
 namespace torch {
 namespace jit {
@@ -20,7 +20,7 @@ bool shouldAnnotate(const Value* v) {
 }
 } // namespace
 
-AliasDb::AliasDb(std::shared_ptr<Graph> graph) : graph_(graph) {
+AliasDb::AliasDb(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {
   analyze(graph_);
 
   // Build helper indices
@@ -36,7 +36,7 @@ AliasDb::AliasDb(std::shared_ptr<Graph> graph) : graph_(graph) {
     }
   }
   // - Set of all nodes with a wildcard
-  buildWildcardIndex(graph->block());
+  buildWildcardIndex(graph_->block());
 }
 
 void AliasDb::buildWildcardIndex(const Block* b) {

@@ -1,17 +1,17 @@
-#include "ATen/ATen.h"
-#include "ATen/CPUApplyUtils.h"
-#include "ATen/Config.h"
-#include "ATen/Dispatch.h"
-#include "ATen/ExpandUtils.h"
-#include "ATen/NativeFunctions.h"
-#include "c10/util/Exception.h"
+#include <ATen/ATen.h>
+#include <ATen/CPUApplyUtils.h>
+#include <ATen/Config.h>
+#include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
+#include <ATen/NativeFunctions.h>
+#include <c10/util/Exception.h>
 
-#include "ATen/CPUGenerator.h"
-#include "ATen/CheckGenerator.h"
-#include "ATen/core/Generator.h"
-#include "ATen/native/Distributions.h"
-#include "ATen/native/DispatchStub.h"
-#include "ATen/native/cpu/UnaryOpsKernel.h"
+#include <ATen/CPUGenerator.h>
+#include <ATen/CheckGenerator.h>
+#include <ATen/core/Generator.h>
+#include <ATen/native/Distributions.h>
+#include <ATen/native/DispatchStub.h>
+#include <ATen/native/cpu/UnaryOpsKernel.h>
 
 #include <type_traits>
 #include <functional>
@@ -19,8 +19,8 @@
 #include <cpuinfo.h>
 
 #include <TH/THRandom.h>
-#include "TH/THGenerator.hpp"
-#include "TH/THMath.h"
+#include <TH/THGenerator.hpp>
+#include <TH/THMath.h>
 
 namespace {
 /*

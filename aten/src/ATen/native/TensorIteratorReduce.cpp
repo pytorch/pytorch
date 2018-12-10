@@ -115,4 +115,47 @@ static void parallel_dim_reduction(TensorIterator& iter, const loop2d_t& loop) {
   });
 }
 
+void TensorIterator::foreach_reduced_elt(const loop_subiter_t &loop) {
+  AT_ASSERT(ntensors() == 2 && num_outputs_ == 1);
+
+  auto shape = this->shape();
+  if (tensor(0).numel() == 0) {
+    return;
+  }
+  if (tensor(0).numel() == 1) {
+    loop(*this);
+  }
+  else if (numel() < at::internal::GRAIN_SIZE || at::get_max_threads() == 1 || at::in_parallel_region()) {
+    auto reduce_dims = num_reduce_dims();
+
+    auto non_reduced_shape = shape.slice(reduce_dims, shape.size() - reduce_dims);
+
+    int64_t non_reduced_numel = 1;
+    for (int i = 0; i < non_reduced_shape.size(); ++i) {
+      non_reduced_numel *= non_reduced_shape[i];
+    }
+    DimCounter dims {non_reduced_shape, {0, non_reduced_numel}};
+    while (!dims.is_done()) {
+      TensorIterator reduced = *this;
+      reduced.select_all_keeping_dim(reduce_dims, dims.values);
+      loop(reduced);
+      dims.increment({1, 1});
+    }
+  }
+  else {
+    int dim = find_split_dim(*this);
+    int64_t cols = shape[dim];
+    at::parallel_for(0, cols, 1, [&](int64_t begin, int64_t end) {
+      if (begin == end) {
+        return;
+      }
+
+      auto sub_iter = *this;
+
+      sub_iter.narrow(dim, begin, end - begin);
+      sub_iter.foreach_reduced_elt(loop);
+    });
+  }
+}
+
 }  // namespace at
