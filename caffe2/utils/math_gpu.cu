@@ -1148,7 +1148,7 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
     const int C_stride,
     CUDAContext* context,
     TensorProto::DataType math_type) {
-#if __CUDACC_VER_MAJOR__ < 8
+#if __CUDACC_VER_MAJOR__ < 8 && !defined(__HIP_PLATFORM_HCC__)
   // loop over matrices in the batch
   for (int i = 0; i < batch_size; ++i) {
     Gemm<at::Half, CUDAContext>(
@@ -1168,7 +1168,7 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
   const cublasOperation_t cu_trans_B =
       (trans_B == CblasNoTrans) ? CUBLAS_OP_N : CUBLAS_OP_T;
   if (math_type == TensorProto_DataType_FLOAT) {
-#if CUDA_VERSION < 9010
+#if CUDA_VERSION < 9010 && !defined(__HIP_PLATFORM_HCC__)
     // loop over matrices in the batch
     for (int i = 0; i < batch_size; ++i) {
       Gemm<at::Half, CUDAContext>(
@@ -1180,6 +1180,42 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
 #else
     CUBLAS_ENFORCE(cublasSetPointerMode(
         context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
+#ifdef __HIP_PLATFORM_HCC__
+    // D[i*stride_d] = alpha*op(A[i*stride_a])*op(B[i*stride_b]) + beta*C[i*stride_c],
+    // for i in [0,batch_count-1]
+    ROCBLAS_ENFORCE(rocblas_gemm_strided_batched_ex(
+        context->rocblashandle(),
+        cu_trans_B,
+        cu_trans_A,
+        N,
+        M,
+        K,
+        &alpha,
+        B,
+        rocblas_datatype_f16_r,
+        ldb,
+        B_stride,
+        A,
+        rocblas_datatype_f16_r,
+        lda,
+        A_stride,
+        &beta,
+        C,
+        rocblas_datatype_f16_r,
+        ldc,
+        C_stride,
+        C, // D
+        rocblas_datatype_f16_r, // D type
+        ldc, // ldd
+        C_stride, // D stride
+        batch_size,
+        rocblas_datatype_f32_r, // compute type
+        rocblas_gemm_algo_standard, // rocblas_gemm_algo
+        0, // solution index, reserved for future use
+        0, // flags, reserved for future use
+        NULL, // size of workspace
+        NULL)); // workspace
+#else
     CUBLAS_ENFORCE(cublasGemmStridedBatchedEx(
         context->cublas_handle(),
         cu_trans_B,
@@ -1204,6 +1240,7 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
         batch_size,
         CUDA_R_32F,
         CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+#endif // __HIP_PLATFORM_HCC__
 #endif
   } else if (math_type == TensorProto_DataType_FLOAT16) {
     // Convert alpha, beta from float -> __half
@@ -1211,6 +1248,27 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
     const __half beta_fp16 = at::Half(beta);
     CUBLAS_ENFORCE(cublasSetPointerMode(
         context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
+  #ifdef __HIP_PLATFORM_HCC__
+    ROCBLAS_ENFORCE(rocblas_hgemm_strided_batched(
+        context->rocblashandle(),
+        cu_trans_B,
+        cu_trans_A,
+        N,
+        M,
+        K,
+        reinterpret_cast<const rocblas_half*>(&alpha_fp16),
+        reinterpret_cast<const rocblas_half*>(B),
+        ldb,
+        B_stride,
+        reinterpret_cast<const rocblas_half*>(A),
+        lda,
+        A_stride,
+        reinterpret_cast<const rocblas_half*>(&beta_fp16),
+        reinterpret_cast<rocblas_half*>(C),
+        ldc,
+        C_stride,
+        batch_size));
+  #else
     CUBLAS_ENFORCE(cublasHgemmStridedBatched(
         context->cublas_handle(),
         cu_trans_B,
@@ -1230,6 +1288,7 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
         ldc,
         C_stride,
         batch_size));
+  #endif // __HIP_PLATFORM_HCC
   } else {
     CAFFE_THROW("Unsupported math type");
   }
