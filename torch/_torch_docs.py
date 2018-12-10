@@ -4983,6 +4983,54 @@ Example::
             [-0.0614, -0.7344, -1.3164,  0.0000,  0.0000,  0.0000]])
 """)
 
+# docstr is split in two parts to avoid format mis-captureing :math: braces '{}'
+# as common args.
+add_docstr(torch.tril_indices,
+           r"""
+tril_indices(row, column, offset=0, dtype=None, device=None) -> Tensor
+
+Returns the indices of the lower triangular part of a :attr:`row` by
+:attr:`column` matrix. Indices are ordered based on rows and then columns.
+
+The lower triangular part of the matrix is defined as the elements on and
+below the diagonal.
+
+The argument :attr:`offset` controls which diagonal to consider. If
+:attr:`offset` = 0, all elements on and below the main diagonal are
+retained. A positive value includes just as many diagonals above the main
+diagonal, and similarly a negative value excludes just as many diagonals below
+the main diagonal. The main diagonal are the set of indices
+:math:`\lbrace (i, i) \rbrace` for :math:`i \in [0, \min\{d_{1}, d_{2}\} - 1]`
+where :math:`d_{1}, d_{2}` are the dimensions of the matrix.
+""" + r"""
+Args:
+    row int64_t: number of rows in the 2-D matrix.
+    column int64_t: number of columns in the 2-D matrix.
+    offset int64_t: diagonal offset from the main diagonal.
+    {dtype}
+    {device}
+
+Example::
+    >>> a = torch.tril_indices(3, 3)
+    >>> a
+    tensor([[0, 0],
+            [1, 0], [1, 1],
+            [2, 0], [2, 1], [2, 2]])
+
+    >>> a = torch.tril_indices(4, 3, -1)
+    >>> a
+    tensor([[1, 0],
+            [2, 0], [2, 1],
+            [3, 0], [3, 1], [3, 2]])
+
+    >>> a = torch.tril_indices(4, 3, 1)
+    >>> a
+    tensor([[0, 0], [0, 1],
+            [1, 0], [1, 1], [1, 2],
+            [2, 0], [2, 1], [2, 2],
+            [3, 0], [3, 1], [3, 2]])
+""".format(**factory_common_args))
+
 add_docstr(torch.triu,
            r"""
 triu(input, diagonal=0, out=None) -> Tensor
@@ -5043,6 +5091,53 @@ Example::
             [ 0.4333,  0.3146,  0.0000,  0.0000,  0.0000,  0.0000],
             [-0.9888,  1.0679, -1.3337,  0.0000,  0.0000,  0.0000]])
 """)
+
+# docstr is split in two parts to avoid format mis-captureing :math: braces '{}'
+# as common args.
+add_docstr(torch.triu_indices,
+           r"""
+triu_indices(row, column, offset=0, dtype=None, device=None) -> Tensor
+
+Returns the indices of the upper triangular part of a :attr:`row` by
+:attr:`column` matrix. Indices are ordered based on rows and then columns.
+
+The upper triangular part of the matrix is defined as the elements on and
+above the diagonal.
+
+The argument :attr:`offset` controls which diagonal to consider. If
+:attr:`offset` = 0, all elements on and above the main diagonal are
+retained. A positive value excludes just as many diagonals above the main
+diagonal, and similarly a negative value includes just as many diagonals below
+the main diagonal. The main diagonal are the set of indices
+:math:`\lbrace (i, i) \rbrace` for :math:`i \in [0, \min\{d_{1}, d_{2}\} - 1]`
+where :math:`d_{1}, d_{2}` are the dimensions of the matrix.
+""" + r"""
+Args:
+    row int64_t: number of rows in the 2-D matrix
+    column int64_t: number of columns in the 2-D matrix
+    offset int64_t: diagonal offset from the main diagonal
+    {dtype}
+    {device}
+
+Example::
+    >>> a = torch.triu_indices(3, 3)
+    >>> a
+    tensor([[0, 0], [0, 1], [0, 2],
+                    [1, 1], [1, 2],
+                            [2, 2]])
+
+    >>> a = torch.triu_indices(4, 3, -1)
+    >>> a
+    tensor([[0, 0], [0, 1], [0, 2],
+            [1, 0], [1, 1], [1, 2],
+                    [2, 1], [2, 2],
+                            [3, 2]])
+
+    >>> a = torch.triu_indices(4, 3, 1)
+    >>> a
+    tensor([[0, 1], [0, 2],
+                    [1, 2]])
+""".format(**factory_common_args))
 
 add_docstr(torch.trtrs,
            r"""
