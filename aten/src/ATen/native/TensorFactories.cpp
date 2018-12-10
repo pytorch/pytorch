@@ -516,33 +516,29 @@ Tensor& range_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangle ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor tril_indices(
-    int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
-  AT_CHECK(row >= 0, "row must be non-negative, got", row);
-  AT_CHECK(col >= 0, "col must be non-negative, got", col);
-
-  // Different combinations of row, col, and offset can lead to two cases:
-  //
-  // Case 1 - Trapezoid (Triangle as a special case): row + offset <= col
-  //    Example A: offset > 0
-  //      1 1 0 0 0
-  //      1 1 1 0 0
-  //      1 1 1 1 0
-  //    Example B: offset <= 0
-  //      0 0 0
-  //      1 0 0
-  //      1 1 0
-  //    In this case, we calculate the number of elements in the first row and
-  //    last row of the tril respectively, and then compute the tril size.
-  //
-  // Case 2 - Trapezoid + Rectangle: row + offset > col
-  //    Example:
-  //      1 1 0
-  //      1 1 1
-  //      1 1 1
-  //    In this case, we first calculate the size of top trapezoid, and then
-  //    calculate the size of the bottom rectangle.
-
+namespace {
+// Different combinations of row, col, and offset can lead to two cases:
+//
+// Case 1 - Trapezoid (Triangle as a special case): row + offset <= col
+//    Example A: offset > 0
+//      1 1 0 0 0
+//      1 1 1 0 0
+//      1 1 1 1 0
+//    Example B: offset <= 0
+//      0 0 0
+//      1 0 0
+//      1 1 0
+//    In this case, we calculate the number of elements in the first row and
+//    last row of the tril respectively, and then compute the tril size.
+//
+// Case 2 - Trapezoid + Rectangle: row + offset > col
+//    Example:
+//      1 1 0
+//      1 1 1
+//      1 1 1
+//    In this case, we first calculate the size of top trapezoid, and then
+//    calculate the size of the bottom rectangle.
+int64_t get_tril_size(int64_t row, int64_t col, int64_t offset) {
   // number of elements in the first row of the tril
   auto m_first_row = offset > 0 ?
     std::min<int64_t>(col, 1 + offset) : // upper bounded by col
@@ -563,6 +559,17 @@ Tensor tril_indices(
     n_indices += diff_row * col;
   }
 
+  return n_indices;
+}
+}
+
+Tensor tril_indices(
+    int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
+  AT_CHECK(row >= 0, "row must be non-negative, got", row);
+  AT_CHECK(col >= 0, "col must be non-negative, got", col);
+
+  auto n_indices = get_tril_size(row, col, offset);
+
   // create an empty Tensor with correct soize
   auto result = at::empty({n_indices, 2}, options.device(DeviceType::CPU));
 
@@ -570,7 +577,10 @@ Tensor tril_indices(
     // fill the Tensor with correct values
     scalar_t* result_data = result.data<scalar_t>();
     int64_t i = 0;
-    scalar_t r = std::max<scalar_t>(0, -offset), c = 0;
+    // not typing std::max with scalar_t as it could be an unsigned type
+    // NOTE: no need to check if the returned value of std::max overflows
+    // scalar_t, as i and n_indices act as a guard.
+    scalar_t r = std::max<int64_t>(0, -offset), c = 0;
     n_indices = n_indices << 1;
     while (i < n_indices) {
       result_data[i++] = r;
@@ -581,8 +591,8 @@ Tensor tril_indices(
       if (c > r + offset || c >= col) {
         r += 1;
         c = 0;
-        // NOTE: not necessary to check if r is less than row here, because i and
-        // n_indices provide the guarantee
+        // NOTE: not necessary to check if r is less than row here, because i
+        // and n_indices provide the guarantee
       }
     }
   });
@@ -596,27 +606,7 @@ Tensor triu_indices(
   AT_CHECK(row >= 0, "row must be non-negative, got", row);
   AT_CHECK(col >= 0, "col must be non-negative, got", col);
 
-  // Refer to tril_indices for algorithm design details
-
-  // number of elements in the first column of the triu
-  auto n_first_col = offset < 0 ?
-    std::min<int64_t>(row, 1 - offset) : // upper bounded by row
-    offset < col; // either 0 or 1
-  // number of elements in the last column of the triu, bounded by [0, row]
-  auto n_last_col = std::max<int64_t>(0, std::min<int64_t>(row, col - offset));
-  // number of columns, bounded by [0, col]
-  auto m_col_all = std::max<int64_t>(0, std::min<int64_t>(col, col - offset));
-  auto m_col_trapezoid = (n_last_col - n_first_col + 1);
-
-  // calculate # of elements in the left trapezoid
-  auto n_indices =
-    (n_first_col + n_last_col) * m_col_trapezoid >> 1;
-
-  // calculate # of elements in the right rectangle if there is any
-  auto diff_col = m_col_all - m_col_trapezoid;
-  if (diff_col > 0) {
-    n_indices += diff_col * row;
-  }
+  auto n_indices = row * col - get_tril_size(row, col, offset - 1);
 
   // create an empty Tensor with correct soize
   auto result = at::empty({n_indices, 2}, options.device(DeviceType::CPU));
@@ -625,7 +615,10 @@ Tensor triu_indices(
     // fill the Tensor with correct values
     scalar_t* result_data = result.data<scalar_t>();
     int64_t i = 0;
-    scalar_t c = std::max<scalar_t>(0, offset), r = 0;
+    // not typing std::max with scalar_t as it could be an unsigned type
+    // NOTE: no need to check if the returned value of std::max overflows
+    // scalar_t, as i and n_indices act as a guard.
+    scalar_t c = std::max<int64_t>(0, offset), r = 0;
     n_indices = n_indices << 1;
     while (i < n_indices) {
       result_data[i++] = r;
@@ -635,9 +628,10 @@ Tensor triu_indices(
       c += 1;
       if (c >= col) {
         r += 1;
-        c = std::max<scalar_t>(0, r + offset);
-        // NOTE: not necessary to check if c is less than col here, because i and
-        // n_indices provide the guarantee
+        // not typing std::max with scalar_t as it could be an unsigned type
+        // NOTE: not necessary to check if c is less than col or overflows here,
+        // because i and n_indices act as a guard.
+        c = std::max<int64_t>(0, r + offset);
       }
     }
   });
