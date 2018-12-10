@@ -72,7 +72,6 @@ RegisterOperators reg({
           return [](Stack& stack) {
             at::Tensor a;
             pop(stack, a);
-            at::OptionalDeviceGuard guard(device_of(a));
             push(stack, a.item<int64_t>() != 0);
             return 0;
           };
@@ -83,7 +82,6 @@ RegisterOperators reg({
           return [](Stack& stack) {
             at::Tensor a;
             pop(stack, a);
-            at::OptionalDeviceGuard guard(device_of(a));
             push(stack, a.item<int64_t>());
             return 0;
           };
@@ -94,7 +92,6 @@ RegisterOperators reg({
             return [](Stack& stack) {
               at::Tensor a;
               pop(stack, a);
-              at::OptionalDeviceGuard guard(device_of(a));
               push(stack, a.item<double>());
               return 0;
             };
@@ -107,7 +104,6 @@ RegisterOperators reg({
               at::Tensor a;
               pop(stack, a);
               checkImplicitTensorToNum(a, /*to int*/true);
-              at::OptionalDeviceGuard guard(device_of(a));
               push(stack, a.item<int64_t>());
               return 0;
             };
@@ -116,7 +112,6 @@ RegisterOperators reg({
               at::Tensor a;
               pop(stack, a);
               checkImplicitTensorToNum(a, /*to int*/false);
-              at::OptionalDeviceGuard guard(device_of(a));
               push(stack, a.item<double>());
               return 0;
             };
