@@ -192,7 +192,8 @@ class GroupWiseDNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         order=st.sampled_from(["NHWC"]),
         in_quantized=st.booleans(),
         out_quantized=st.booleans(),
-        nbits_in_non_outlier=st.sampled_from((0, 6)),
+        prepack_weight=st.booleans(),
+        nbits_in_non_outlier=st.sampled_from((6, 8)),
         share_col_buffer=st.booleans(),
         **hu.gcs_cpu_only
     )
@@ -210,6 +211,7 @@ class GroupWiseDNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         order,
         in_quantized,
         out_quantized,
+        prepack_weight,
         nbits_in_non_outlier,
         share_col_buffer,
         gc,
@@ -280,10 +282,12 @@ class GroupWiseDNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         ]
 
         for op_type, engine in op_engine_list:
+            init_net = core.Net("test_init_net")
             net = core.Net("test_net")
 
             do_quantize = "DNNLOWP" in engine and in_quantized
             do_dequantize = "DNNLOWP" in engine and out_quantized
+            do_prepack_weight = "DNNLOWP" in engine and prepack_weight
 
             if do_quantize:
                 quantize = core.CreateOperator(
@@ -291,9 +295,30 @@ class GroupWiseDNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([quantize])
 
+            if do_prepack_weight:
+                x_q_param = dnnlowp_utils.choose_quantization_params(X.min(), X.max())
+                inputs = ["W"]
+                if do_dequantize:
+                    inputs += ["b"]
+                pack = core.CreateOperator(
+                    "Int8ConvPackWeight",
+                    inputs,
+                    ["W_packed"],
+                    group=group,
+                    quantize_groupwise=1,
+                    nbits_in_non_outlier=nbits_in_non_outlier,
+                    in_scale=x_q_param.scale,
+                    engine=engine,
+                )
+                init_net.Proto().op.extend([pack])
+
             conv = core.CreateOperator(
                 op_type,
-                ["X_q" if do_quantize else "X", "W", "b"],
+                [
+                    "X_q" if do_quantize else "X",
+                    "W_packed" if do_prepack_weight else "W",
+                    "b",
+                ],
                 ["Y_q" if do_dequantize else "Y"],
                 stride=stride,
                 kernel=kernel,
@@ -308,7 +333,7 @@ class GroupWiseDNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
                 quantize_groupwise=1,
                 device_option=gc,
             )
-            if do_dequantize:
+            if do_dequantize or do_prepack_weight:
                 # groupwise quantization only works with static quantization
                 # so we need to set quantization parameters
                 dnnlowp_utils.add_quantization_param_args(conv, outputs[0][0])
@@ -323,6 +348,7 @@ class GroupWiseDNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
             self.ws.create_blob("X").feed(X, device_option=gc)
             self.ws.create_blob("W").feed(W, device_option=gc)
             self.ws.create_blob("b").feed(b, device_option=gc)
+            self.ws.run(init_net)
             self.ws.run(net)
             Y = self.ws.blobs["Y"].fetch()
             outputs.append(Output(Y=Y, op_type=op_type, engine=engine, order=order))

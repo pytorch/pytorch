@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ATen/Parallel.h"
-#include "ATen/TensorUtils.h"
+#include <ATen/Parallel.h>
+#include <ATen/TensorUtils.h>
 #include <limits>
 #include <utility>
 #include <cstring>

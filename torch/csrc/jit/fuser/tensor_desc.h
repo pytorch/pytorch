@@ -1,12 +1,12 @@
 #pragma once
-#include "torch/csrc/jit/fuser/config.h"
+#include <torch/csrc/jit/fuser/config.h>
 #if USE_CUDA_FUSER || USE_CPU_FUSER
 
-#include "ATen/ATen.h"
-#include "torch/csrc/WindowsTorchApiMacro.h"
-#include "torch/csrc/utils/hash.h"
-#include "torch/csrc/jit/type.h"
-#include "torch/csrc/jit/assertions.h"
+#include <ATen/ATen.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/utils/hash.h>
+#include <torch/csrc/jit/type.h>
+#include <torch/csrc/jit/assertions.h>
 
 #include <vector>
 #include <iostream>
