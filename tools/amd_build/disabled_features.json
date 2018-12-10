@@ -79,12 +79,6 @@
         }
       },
       {
-        "path": "aten/src/ATen/Context.h",
-        "s_constants": {
-            "detail::getCUDAHooks().getNumGPUs()": "1"
-        }
-      },
-      {
         "path": "aten/src/ATen/native/cuda/Unique.cu",
         "s_constants": {
             "inverse_indices_kernel<<<": "inverse_indices_kernel<scalar_t><<<"
