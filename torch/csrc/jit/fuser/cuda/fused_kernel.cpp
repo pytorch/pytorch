@@ -1,19 +1,19 @@
-#include "torch/csrc/jit/fuser/cuda/fused_kernel.h"
+#include <torch/csrc/jit/fuser/cuda/fused_kernel.h>
 
-#include "ATen/cuda/CUDAContext.h"
-#include "ATen/cuda/CUDAGuard.h"
-#include "THC/THC.h"
-#include "torch/csrc/cuda/cuda_check.h"
-#include "torch/csrc/jit/resource_guard.h"
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAGuard.h>
+#include <THC/THC.h>
+#include <torch/csrc/cuda/cuda_check.h>
+#include <torch/csrc/jit/resource_guard.h>
 
 // Note: unclear why this forward declaration is necessary
-#include "THC/THCTensorRandom.h"
-#include "THC/THCGenerator.hpp"
+#include <THC/THCTensorRandom.h>
+#include <THC/THCGenerator.hpp>
 THCGenerator* THCRandom_getGenerator(THCState* state);
 
-#include "nvrtc.h"
-#include "cuda.h"
-#include "cuda_runtime.h"
+#include <nvrtc.h>
+#include <cuda.h>
+#include <cuda_runtime.h>
 
 #include <stdexcept>
 #include <sstream>

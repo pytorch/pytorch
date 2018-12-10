@@ -45,17 +45,18 @@ class ConvDNNLowPAcc16Op final : public ConvDNNLowPOp<std::uint8_t, ReluFused> {
   void DispatchFBGEMM(
       PackAMatrix& packA,
       const std::uint8_t* col_buffer_quantized_data,
-      vector<std::int32_t>* Y_int32);
+      vector<std::int32_t>* Y_int32,
+      uint8_t* Y_uint8_data);
 
   void ConvOutlier_(
       const std::uint8_t* col_buffer,
       vector<std::int32_t>* Y_int32);
 
-  std::unique_ptr<fbgemm::PackBMatrix<std::int8_t, std::int16_t>>
+  std::shared_ptr<fbgemm::PackBMatrix<std::int8_t, std::int16_t>>
       Wq_acc16_packed_;
 
   // Wq outlier in CSC format
-  std::unique_ptr<fbgemm::CompressedSparseColumn> Wq_outlier_;
+  std::shared_ptr<fbgemm::CompressedSparseColumn> Wq_outlier_;
 
   // Threshold to decide whether a weight is outlier.
   // For example, if nbits_in_non_outlier_ == 7, w is an outlier if w < -64 or

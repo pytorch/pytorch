@@ -1,15 +1,15 @@
 #pragma once
 
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 
 #include <ATen/ATen.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "torch/csrc/DynamicTypes.h"
-#include "torch/csrc/autograd/python_variable.h"
-#include "torch/csrc/utils/python_tuples.h"
-#include "torch/csrc/utils/python_numbers.h"
+#include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/utils/python_tuples.h>
+#include <torch/csrc/utils/python_numbers.h>
 
 #include <stdexcept>
 

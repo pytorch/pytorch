@@ -1,6 +1,6 @@
-#include "THCUNN.h"
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
+#include <THCUNN/THCUNN.h>
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
 #include <THC/THCApply.cuh>
 
 template <typename T>
@@ -55,5 +55,5 @@ struct hardtanhupdateGradInput_functor
   }
 };
 
-#include "generic/HardTanh.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/HardTanh.cu>
+#include <THC/THCGenerateFloatTypes.h>

@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THTensor.cpp"
+#define TH_GENERIC_FILE "TH/generic/THTensor.cpp"
 #else
 
 #include <ATen/InferSize.h>

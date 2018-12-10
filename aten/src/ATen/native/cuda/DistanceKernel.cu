@@ -1,8 +1,8 @@
-#include "ATen/ATen.h"
+#include <ATen/ATen.h>
 #include <THC/THCTensorMathReduce.cuh>
 #include <math.h>
 
-#include "ATen/native/Distance.h"
+#include <ATen/native/Distance.h>
 
 
 namespace at { namespace native {

@@ -1,5 +1,5 @@
-#include "ATen/cuda/CUDAContext.h"
-#include "THC/THCGeneral.hpp"
+#include <ATen/cuda/CUDAContext.h>
+#include <THC/THCGeneral.hpp>
 
 namespace at { namespace cuda {
 

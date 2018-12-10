@@ -1,7 +1,7 @@
 #pragma once
 
 #include <memory>
-#include "General.h"
+#include <THD/process_group/General.h>
 #include <THD/base/DataChannel.hpp>
 
 namespace thd {

@@ -1,10 +1,10 @@
 #ifndef TH_CUDA_TENSOR_RANDOM_INC
 #define TH_CUDA_TENSOR_RANDOM_INC
 
-#include "THCTensor.h"
+#include <THC/THCTensor.h>
 
-#include "generic/THCTensorRandom.h"
-#include "THCGenerateAllTypes.h"
+#include <THC/generic/THCTensorRandom.h>
+#include <THC/THCGenerateAllTypes.h>
 #ifdef __HIP_PLATFORM_HCC__
 #include <hiprand_kernel.h>
 #endif

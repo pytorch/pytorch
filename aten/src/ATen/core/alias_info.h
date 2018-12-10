@@ -2,7 +2,7 @@
 #include <unordered_set>
 #include <vector>
 #include <ATen/core/interned_strings.h>
-#include "c10/util/Exception.h"
+#include <c10/util/Exception.h>
 
 namespace c10 {
 class AliasInfo {

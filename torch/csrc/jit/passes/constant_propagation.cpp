@@ -1,13 +1,13 @@
-#include "torch/csrc/jit/passes/constant_propagation.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/constants.h"
-#include "torch/csrc/jit/interpreter.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/ivalue.h"
-#include "torch/csrc/jit/operator.h"
-#include "torch/csrc/jit/passes/alias_analysis.h"
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/utils/functional.h"
+#include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/interpreter.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ivalue.h>
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/passes/alias_analysis.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/utils/functional.h>
 
 namespace torch { namespace jit {
 

@@ -1,11 +1,11 @@
-#include "THCUNN.h"
-#include "common.h"
-#include "THCDeviceTensor.cuh"
-#include "THCDeviceTensorUtils.cuh"
-#include "THCDeviceUtils.cuh"
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
-#include "THCAtomics.cuh"
+#include <THCUNN/THCUNN.h>
+#include <THCUNN/common.h>
+#include <THC/THCDeviceTensor.cuh>
+#include <THC/THCDeviceTensorUtils.cuh>
+#include <THC/THCDeviceUtils.cuh>
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCAtomics.cuh>
 
 #include <cfloat>
 
@@ -116,5 +116,5 @@ __global__ void VolumetricFractionalMaxPooling_updateGradInput(
   }
 }
 
-#include "generic/VolumetricFractionalMaxPooling.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/VolumetricFractionalMaxPooling.cu>
+#include <THC/THCGenerateFloatTypes.h>
