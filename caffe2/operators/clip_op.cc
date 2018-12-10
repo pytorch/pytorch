@@ -20,7 +20,7 @@ bool ClipGradientOp<float, CPUContext>::RunOnDevice() {
   auto& Y = Input(0);
   auto& dY = Input(1);
   auto* dX = Output(0);
-  CAFFE_ENFORCE_GT(Y.numel(), 0);
+  CAFFE_ENFORCE_GE(Y.numel(), 0);
   CAFFE_ENFORCE_EQ(dY.numel(), Y.numel());
   dX->ResizeLike(Y);
   const float* Ydata = Y.data<float>();

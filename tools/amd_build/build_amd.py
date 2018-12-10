@@ -14,6 +14,10 @@ parser.add_argument(
     '--out-of-place-only',
     action='store_true',
     help="Whether to only run hipify out-of-place on source files")
+parser.add_argument(
+    '--add-static-casts',
+    action='store_true',
+    help="Whether to automatically add static_casts to kernel arguments.")
 args = parser.parse_args()
 
 amd_build_dir = os.path.dirname(os.path.realpath(__file__))
@@ -35,7 +39,12 @@ includes = [
     "c10/cuda/*",
     # PyTorch paths
     # Keep this synchronized with is_pytorch_file in hipify_python.py
-    "aten/*",
+    "aten/src/ATen/cuda/*",
+    "aten/src/ATen/native/cuda/*",
+    "aten/src/ATen/native/sparse/cuda/*",
+    "aten/src/THC/*",
+    "aten/src/THCUNN/*",
+    "aten/src/ATen/test/*",
     "torch/*",
 ]
 
@@ -43,22 +52,28 @@ ignores = [
     "caffe2/operators/depthwise_3x3_conv_op_cudnn.cu",
     "caffe2/operators/pool_op_cudnn.cu",
     '**/hip/**',
+    # These files are compatible with both cuda and hip
     "aten/src/ATen/core/*",
+    "torch/csrc/autograd/engine.cpp"
 ]
 
-json_file = ""  # Yeah, don't ask me why the default is ""...
-if not args.out_of_place_only:
-    # List of operators currently disabled (PyTorch only)
-    json_file = os.path.join(amd_build_dir, "disabled_features.json")
+json_settings = os.path.join(amd_build_dir, "disabled_features.json")
 
+if not args.out_of_place_only:
     # Apply patch files in place (PyTorch only)
     patch_folder = os.path.join(amd_build_dir, "patches")
     for filename in os.listdir(os.path.join(amd_build_dir, "patches")):
         subprocess.Popen(["git", "apply", os.path.join(patch_folder, filename)], cwd=proj_dir)
 
     # Make various replacements inside AMD_BUILD/torch directory
-    ignore_files = ["csrc/autograd/profiler.h", "csrc/autograd/profiler.cpp",
-                    "csrc/cuda/cuda_check.h"]
+    ignore_files = [
+        # These files use nvrtc, hip doesn't have equivalent
+        "csrc/autograd/profiler.h",
+        "csrc/autograd/profiler.cpp",
+        "csrc/cuda/cuda_check.h",
+        # These files are compatible with both cuda and hip
+        "csrc/autograd/engine.cpp"
+    ]
     for root, _directories, files in os.walk(os.path.join(proj_dir, "torch")):
         for filename in files:
             if filename.endswith(".cpp") or filename.endswith(".h"):
@@ -83,5 +98,5 @@ hipify_python.hipify(
     includes=includes,
     ignores=ignores,
     out_of_place_only=args.out_of_place_only,
-    json_settings=json_file,
-    add_static_casts_option=True)
+    json_settings=json_settings,
+    add_static_casts_option=args.add_static_casts)

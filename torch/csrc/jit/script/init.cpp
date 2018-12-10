@@ -1,20 +1,20 @@
-#include "torch/csrc/jit/script/init.h"
+#include <torch/csrc/jit/script/init.h>
 
-#include "torch/csrc/Device.h"
-#include "torch/csrc/Dtype.h"
-#include "torch/csrc/Layout.h"
-#include "torch/csrc/jit/import.h"
-#include "torch/csrc/jit/script/compiler.h"
+#include <torch/csrc/Device.h>
+#include <torch/csrc/Dtype.h>
+#include <torch/csrc/Layout.h>
+#include <torch/csrc/jit/import.h>
+#include <torch/csrc/jit/script/compiler.h>
 
-#include "torch/csrc/jit/python_tracer.h"
-#include "torch/csrc/jit/pybind_utils.h"
-#include "torch/csrc/jit/constants.h"
-#include "torch/csrc/jit/passes/to_batch.h"
-#include "torch/csrc/jit/function_schema.h"
-#include "torch/csrc/jit/script/parser.h"
-#include "torch/csrc/jit/import_method.h"
-#include "torch/csrc/jit/hooks_for_testing.h"
-#include "torch/csrc/jit/passes/python_print.h"
+#include <torch/csrc/jit/python_tracer.h>
+#include <torch/csrc/jit/pybind_utils.h>
+#include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/passes/to_batch.h>
+#include <torch/csrc/jit/function_schema.h>
+#include <torch/csrc/jit/script/parser.h>
+#include <torch/csrc/jit/import_method.h>
+#include <torch/csrc/jit/hooks_for_testing.h>
+#include <torch/csrc/jit/passes/python_print.h>
 
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 
@@ -486,8 +486,7 @@ FunctionSchema getSchemaWithNameAndDefaults(
         } else {
           value = toIValue(it->second, arg.type());
         }
-        new_args.emplace_back(
-            Argument(arg.name(), arg.type(), arg.N(), value, arg.kwarg_only()));
+        new_args.emplace_back(arg.name(), arg.type(), arg.N(), value, arg.kwarg_only());
       } catch (py::cast_error& e) {
         throw ErrorReport(range)
             << "Expected a default value of type " << arg.type()->str()

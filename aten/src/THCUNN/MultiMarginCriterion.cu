@@ -1,9 +1,9 @@
-#include "THCUNN.h"
-#include "common.h"
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
-#include "THCTensor.hpp"
-#include "THCStorage.hpp"
+#include <THCUNN/THCUNN.h>
+#include <THCUNN/common.h>
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCTensor.hpp>
+#include <THC/THCStorage.hpp>
 
 #define MULTIMARGIN_THREADS 128
 
@@ -116,7 +116,7 @@ __global__ void cunn_MultiMarginCriterion_updateGradInput_kernel(Dtype *gradInpu
   }
 }
 
-#include "generic/MultiMarginCriterion.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/MultiMarginCriterion.cu>
+#include <THC/THCGenerateFloatTypes.h>
 
 #undef MULTIMARGIN_THREADS

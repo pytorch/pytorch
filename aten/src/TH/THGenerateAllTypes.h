@@ -7,8 +7,8 @@
 #define THGenerateManyTypes
 #endif
 
-#include "THGenerateFloatTypes.h"
-#include "THGenerateIntTypes.h"
+#include <TH/THGenerateFloatTypes.h>
+#include <TH/THGenerateIntTypes.h>
 
 #ifdef THAllLocalGenerateManyTypes
 #undef THAllLocalGenerateManyTypes

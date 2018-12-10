@@ -1,13 +1,13 @@
-#include "torch/csrc/jit/passes/shape_analysis.h"
+#include <torch/csrc/jit/passes/shape_analysis.h>
 
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/constants.h"
-#include "torch/csrc/jit/argument_spec.h"
-#include "torch/csrc/jit/operator.h"
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/passes/alias_analysis.h"
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/argument_spec.h>
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/passes/alias_analysis.h>
 
-#include "torch/csrc/autograd/variable.h"
+#include <torch/csrc/autograd/variable.h>
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
@@ -899,7 +899,6 @@ class ShapePropagator {
             "aten::max_values(Tensor self, int dim, bool keepdim) -> Tensor",
             "aten::min_values(Tensor self, int dim, bool keepdim) -> Tensor",
             "aten::norm(Tensor self, Scalar p, int dim, bool keepdim) -> Tensor",
-            "aten::std(Tensor self, int dim, bool unbiased, bool keepdim) -> Tensor",
             "aten::var(Tensor self, int dim, bool unbiased, bool keepdim) -> Tensor",
             "aten::logsumexp(Tensor self, int dim, bool keepdim) -> Tensor",
             "aten::all(Tensor self, int dim, bool keepdim) -> Tensor",
@@ -956,6 +955,7 @@ class ShapePropagator {
     static const register_formula_for multidim_reduce_ops {
         {
             "aten::mean(Tensor self, int[] dim, bool keepdim) -> Tensor",
+            "aten::std(Tensor self, int[] dim, bool unbiased, bool keepdim) -> Tensor",
         },
         [](Node * node) -> type_vec_t {
           if (auto dim = node->get<std::vector<int64_t>>(attr::dim)) {

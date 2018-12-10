@@ -4,7 +4,7 @@
 #include <vector>
 #include <functional>
 
-#include "torch/csrc/jit/script/lexer.h"
+#include <torch/csrc/jit/script/lexer.h>
 
 namespace torch {
 namespace jit {

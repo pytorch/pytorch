@@ -74,7 +74,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_transpose_backwa
 
 #else  // AT_ROCM_ENABLED
 
-#include "THC/THC.h"
+#include <THC/THC.h>
 
 #include <ATen/miopen/miopen-wrapper.h>
 #include <ATen/miopen/Descriptors.h>

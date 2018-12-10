@@ -1,7 +1,7 @@
 #ifndef THC_CACHING_HOST_ALLOCATOR_INC
 #define THC_CACHING_HOST_ALLOCATOR_INC
 
-#include "THCGeneral.h"
+#include <THC/THCGeneral.h>
 
 
 #ifdef __cplusplus

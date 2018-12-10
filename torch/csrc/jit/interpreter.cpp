@@ -1,18 +1,18 @@
-#include "interpreter.h"
+#include <torch/csrc/jit/interpreter.h>
 
-#include "torch/csrc/autograd/edge.h"
-#include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/generated/variable_factories.h"
-#include "torch/csrc/autograd/profiler.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/graph_executor.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/ivalue.h"
-#include "torch/csrc/jit/constants.h"
-#include "torch/csrc/jit/operator.h"
-#include "torch/csrc/variable_tensor_functions.h"
-#include "torch/csrc/jit/script/jit_exception.h"
+#include <torch/csrc/autograd/edge.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/graph_executor.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ivalue.h>
+#include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/variable_tensor_functions.h>
+#include <torch/csrc/jit/script/jit_exception.h>
 
 #include <exception>
 #include <iostream>

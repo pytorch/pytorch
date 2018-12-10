@@ -1,11 +1,11 @@
-#include "torch/csrc/jit/fuser/cpu/fused_kernel.h"
+#include <torch/csrc/jit/fuser/cpu/fused_kernel.h>
 
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/code_template.h"
-#include "torch/csrc/jit/fuser/compiler.h"
-#include "torch/csrc/jit/fuser/cpu/temp_file.h"
-#include "torch/csrc/jit/fuser/cpu/dynamic_library.h"
-#include "torch/csrc/utils/memory.h"
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/code_template.h>
+#include <torch/csrc/jit/fuser/compiler.h>
+#include <torch/csrc/jit/fuser/cpu/temp_file.h>
+#include <torch/csrc/jit/fuser/cpu/dynamic_library.h>
+#include <torch/csrc/utils/memory.h>
 
 #include <sstream>
 #include <cstdlib>
