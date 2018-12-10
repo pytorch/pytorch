@@ -109,7 +109,7 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   ///   easier-to-use polymorphic interface.
   /// \endrst
   virtual std::shared_ptr<Module> clone(
-      optional<Device> device = nullopt) const;
+      const optional<Device>& device = nullopt) const;
 
   /// Applies the `function` to the `Module` and recursively to every submodule.
   /// The function must accept a `Module&`.
@@ -121,7 +121,7 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   ///     std::cout << module.name() << std::endl;
   ///   });
   /// \endrst
-  void apply(ModuleApplyFunction function);
+  void apply(const ModuleApplyFunction& function);
 
   /// Applies the `function` to the `Module` and recursively to every submodule.
   /// The function must accept a `const Module&`.
@@ -133,7 +133,7 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   ///     std::cout << module.name() << std::endl;
   ///   });
   /// \endrst
-  void apply(ConstModuleApplyFunction function) const;
+  void apply(const ConstModuleApplyFunction& function) const;
 
   /// Applies the `function` to the `Module` and recursively to every submodule.
   /// The function must accept a `const std::string&` for the key of the module,
@@ -149,7 +149,7 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   ///   });
   /// \endrst
   void apply(
-      NamedModuleApplyFunction function,
+      const NamedModuleApplyFunction& function,
       std::string name_prefix = std::string());
 
   /// Applies the `function` to the `Module` and recursively to every submodule.
@@ -166,7 +166,7 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   ///   });
   /// \endrst
   void apply(
-      ConstNamedModuleApplyFunction function,
+      const ConstNamedModuleApplyFunction& function,
       std::string name_prefix = std::string()) const;
 
   /// Applies the `function` to the `Module` and recursively to every submodule.
@@ -179,7 +179,7 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   ///     std::cout << module->name() << std::endl;
   ///   });
   /// \endrst
-  void apply(ModulePointerApplyFunction function) const;
+  void apply(const ModulePointerApplyFunction& function) const;
 
   /// Applies the `function` to the `Module` and recursively to every submodule.
   /// The function must accept a `const std::string&` for the key of the module,
@@ -197,7 +197,7 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   ///   });
   /// \endrst
   void apply(
-      NamedModulePointerApplyFunction function,
+      const NamedModulePointerApplyFunction& function,
       std::string name_prefix = std::string()) const;
 
   /// Returns the parameters of this `Module` and if `recurse` is true, also
@@ -465,7 +465,7 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   // Private methods.
 
   /// Used in the implementation of `Cloneable`.
-  virtual void clone_(Module& other, optional<Device> device);
+  virtual void clone_(Module& other, const optional<Device>& device);
 
   /// The implementation of the various `to()` methods.
   template <typename... Ts>
@@ -475,7 +475,7 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   /// `Module`'s children (thus not including the module itself).
   void apply_to_submodules(
       const NamedModulePointerApplyFunction& function,
-      std::string name_name_prefix = std::string()) const;
+      const std::string& name_prefix = std::string()) const;
 
   /// Returns a shared_ptr to `this` in a safe (checked) way.
   std::shared_ptr<Module> shared_from_this_checked() const;

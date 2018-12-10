@@ -185,7 +185,7 @@ c10::optional<IValue> toIValueProp(const Value* v) {
 } // namespace
 
 void checkAliasAnnotation(
-    std::shared_ptr<Graph> graph,
+    const std::shared_ptr<Graph>& graph,
     std::vector<IValue> pythonInputs,
     const std::string& unqualifiedOpName) {
   // Find the node that corresponds to our op name

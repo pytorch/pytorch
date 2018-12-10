@@ -5,7 +5,7 @@
 namespace torch {
 namespace jit {
 namespace {
-bool shouldAnnotate(TypePtr type) {
+bool shouldAnnotate(const TypePtr& type) {
   return type->isSubtypeOf(DynamicType::get()) ||
       type->kind() == TypeKind::ListType ||
       type->kind() == TypeKind::TupleType ||
@@ -202,7 +202,7 @@ void AliasDb::dump() const {
   }
 }
 
-void AliasDb::analyze(std::shared_ptr<Graph> graph) {
+void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
   // Assign aliases to the graph's inputs, assuming that all inputs of a given
   // type may alias to each other.
   const auto tensorAlias = getFreshAlias(/*isGraphInput=*/true);

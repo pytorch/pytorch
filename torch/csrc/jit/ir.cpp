@@ -9,14 +9,15 @@
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
 
+#include <algorithm>
 #include <iostream>
+#include <set>
+#include <sstream>
+#include <stack>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
-#include <set>
-#include <stack>
-#include <sstream>
-#include <algorithm>
-#include <string>
+#include <utility>
 
 namespace torch { namespace jit {
 // Constants relating to maintaining the topological index of nodes.
@@ -1294,7 +1295,7 @@ Value* Graph::insert(
     Symbol opname,
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
-    c10::optional<SourceRange> range) {
+    const c10::optional<SourceRange>& range) {
   return script::emitBuiltinCall(
       range.value_or(fakeRange()),
       *this,
@@ -1326,7 +1327,7 @@ Node* Graph::createUndefined() {
 
 Node* Graph::createNone(TypePtr typ) {
   Node * n = create(prim::None);
-  n->output()->setType(OptionalType::create(typ));
+  n->output()->setType(OptionalType::create(std::move(typ)));
   return n;
 }
 
@@ -1402,7 +1403,7 @@ Node* Graph::createListUnpack(Value *v, size_t size) {
 Node* Graph::createNumToTensor(Value* value) {
   auto typ = value->type();
   Node * result = create(prim::NumToTensor, {value});
-  result->output()->setType(CompleteTensorType::fromNumberType(typ));
+  result->output()->setType(CompleteTensorType::fromNumberType(std::move(typ)));
   return result;
 }
 
@@ -1412,7 +1413,7 @@ Node* Graph::createImplicitTensorToNum(const TypePtr& type, Value* value) {
   return result;
 }
 
-Node* Graph::createClone(Node * n, std::function<Value*(Value*)> value_map, bool copy_blocks) {
+Node* Graph::createClone(Node * n, const std::function<Value*(Value*)>& value_map, bool copy_blocks) {
   //n can be from a different graph
   Node * r = n->allocNewInstance(this);
   for(auto o : n->outputs()) {
@@ -1434,7 +1435,7 @@ Value* Graph::insertConstant(
     IValue val,
     c10::optional<SourceRange> loc,
     c10::optional<ScopePtr> scope) {
-  return jit::insertConstant(*this, std::move(val), loc, scope);
+  return jit::insertConstant(*this, std::move(val), std::move(loc), std::move(scope));
 }
 
 std::string Graph::toString() const {

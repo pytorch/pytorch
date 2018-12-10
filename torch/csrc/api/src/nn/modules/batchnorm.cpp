@@ -33,7 +33,7 @@ void BatchNormImpl::reset() {
   }
 }
 
-Tensor BatchNormImpl::forward(Tensor input) {
+Tensor BatchNormImpl::forward(const Tensor& input) {
   AT_CHECK(
       options.stateful_,
       "Calling BatchNorm::forward is only permitted when "
@@ -42,7 +42,10 @@ Tensor BatchNormImpl::forward(Tensor input) {
   return pure_forward(input, running_mean, running_variance);
 }
 
-Tensor BatchNormImpl::pure_forward(Tensor input, Tensor mean, Tensor variance) {
+Tensor BatchNormImpl::pure_forward(
+    const Tensor& input,
+    const Tensor& mean,
+    const Tensor& variance) {
   if (is_training()) {
     const auto num_channels = input.dim() > 1 ? input.size(1) : 1;
     AT_CHECK(
