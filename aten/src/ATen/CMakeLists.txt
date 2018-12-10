@@ -305,39 +305,7 @@ if(USE_CUDA OR USE_ROCM)
     add_library(ATen_cuda INTERFACE)
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS ATEN_CUDA_FILES_GEN_LIB)
   else()
-    # A hack to deal with cuda library dependencies and modern CMake: the
-    # CUDA_ADD_LIBRARY includes a target_link_libraries, and as a result,
-    # one cannot use PUBLIC/PRIVATE/INTERFACE for the target anymore. This
-    # hack adds the PRIVATE keywords to CUDA_LIBRARIES so we can deal with
-    # it. We will then manually add the cudart library as interface libs.
-    set(__tmp ${CUDA_LIBRARIES})
-    set(CUDA_LIBRARIES PRIVATE ${CUDA_LIBRARIES})
-    torch_cuda_based_add_library(ATen_cuda ${AT_LINK_STYLE} ${ATen_CUDA_SRCS})
-    set(CUDA_LIBRARIES ${__tmp})
-    target_link_libraries(ATen_cuda INTERFACE caffe2::cudart)
-
-    target_include_directories(
-        ATen_cuda INTERFACE $<INSTALL_INTERFACE:include>)
-    target_include_directories(
-        ATen_cuda PRIVATE ${ATen_THIRD_PARTY_INCLUDE})
-    target_include_directories(
-        ATen_cuda PRIVATE ${ATen_CUDA_INCLUDE})
-    target_link_libraries(
-        ATen_cuda PRIVATE ${ATen_CUDA_DEPENDENCY_LIBS} ATEN_CUDA_FILES_GEN_LIB)
-
-    # These public dependencies must go after the previous dependencies, as the
-    # order of the libraries in the linker call matters here when statically
-    # linking; libculibos and cublas must be last.
-    target_link_libraries(
-        ATen_cuda PUBLIC ATen_cpu ${ATen_PUBLIC_CUDA_DEPENDENCY_LIBS})
-
-    # Set standard properties on the target
-    torch_set_target_props(ATen_cuda)
-
-    caffe2_interface_library(ATen_cuda ATen_cuda_library)
-
-    # Make sure these don't get built by parent
-    set(ATen_CUDA_SRCS)
+    message(FATAL_ERROR "Non-INTERFACE AT_LINK_STYLE no longer supported")
   endif()
 endif()
 
