@@ -1532,10 +1532,6 @@ protected:
   //
   // NOTE: For a full list of tensor metadata fields, please see `shallow_copy_and_detach()` in TensorImpl
   // and its subclasses to find which fields are copied by value.
-  //
-  // IMPORTANT NOTE: We should ONLY set this flag to false if we are in a *user-facing API* that returns a tensor
-  // whose TensorImpl is a shallow copy of another tensor's TensorImpl (currently only Python `tensor.data` and
-  // Python/C++ `tensor.detach()` exhibit this behavior).
   bool allow_tensor_metadata_change_ = true;
 
   // we decide to keep reserved_ and it will
