@@ -1,4 +1,4 @@
-Torch Script
+TorchScript
 ============
 
 .. contents:: :local:
@@ -6,17 +6,17 @@ Torch Script
 .. automodule:: torch.jit
 .. currentmodule:: torch.jit
 
-Torch Script is a way to create serializable and optimizable models from PyTorch code.
-Any code written in Torch Script can be saved from your Python
+TorchScript is a way to create serializable and optimizable models from PyTorch code.
+Any code written in TorchScript can be saved from your Python
 process and loaded in a process where there is no Python dependency.
 
 We provide tools to incrementally transition a model from being a pure Python program
-to a Torch Script program that can be run independently from Python, for instance, in a standalone C++ program.
+to a TorchScript program that can be run independently from Python, for instance, in a standalone C++ program.
 This makes it possible to train models in PyTorch using familiar tools and then export
 the model to a production environment where it is not a good idea to run models as Python programs
 for performance and multi-threading reasons.
 
-Creating Torch Script Code
+Creating TorchScript Code
 --------------------------
 
 
@@ -117,26 +117,26 @@ Example:
             return self.resnet(input - self.means)
 
 
-Torch Script Language Reference
+TorchScript Language Reference
 -------------------------------
 
-Torch Script is a subset of Python that can either be written directly (using
+TorchScript is a subset of Python that can either be written directly (using
 the @script annotations) or generated automatically from Python code via
 tracing. When using tracing, code is automatically converted into this subset of
 Python by recording only the actual operators on tensors and simply executing and
 discarding the other surrounding Python code.
 
-When writing Torch Script directly using @script annotations, the programmer must
-only use the subset of Python supported in Torch Script. This section documents
-what is supported in Torch Script as if it were a language reference for a stand
+When writing TorchScript directly using @script annotations, the programmer must
+only use the subset of Python supported in TorchScript. This section documents
+what is supported in TorchScript as if it were a language reference for a stand
 alone language. Any features of Python not mentioned in this reference are not
-part of Torch Script.
+part of TorchScript.
 
-As a subset of Python any valid Torch Script function is also a valid Python
+As a subset of Python any valid TorchScript function is also a valid Python
 function. This makes it possible to remove the @script annotations and debug the
 function using standard Python tools like pdb. The reverse is not true: there
-are many valid python programs that are not valid Torch Script programs.
-Instead, Torch Script focuses specifically on the features of Python that are
+are many valid python programs that are not valid TorchScript programs.
+Instead, TorchScript focuses specifically on the features of Python that are
 needed to represent neural network models in Torch.
 
 .. envvar:: PYTORCH_JIT=1
@@ -150,9 +150,9 @@ needed to represent neural network models in Torch.
 Types
 ~~~~~
 
-The largest difference between Torch Script and the full Python language is that
-Torch Script only support a small set of types that are needed to express neural
-net models. In particular Torch Script supports:
+The largest difference between TorchScript and the full Python language is that
+TorchScript only support a small set of types that are needed to express neural
+net models. In particular TorchScript supports:
 
 ``Tensor``
     A PyTorch tensor of any dtype, dimension, or backend.
@@ -169,8 +169,8 @@ net models. In particular Torch Script supports:
 ``List[T]``
     A list of which all members are type ``T``
 
-Unlike Python, each variable in Torch Script function must have a single static type.
-This makes it easier to optimize Torch Script functions.
+Unlike Python, each variable in TorchScript function must have a single static type.
+This makes it easier to optimize TorchScript functions.
 
 Example::
 
@@ -183,9 +183,9 @@ Example::
         return r # Type mismatch: r is set to type Tensor in the true branch
                  # and type int in the false branch
 
-By default, all parameters to a Torch Script function are assumed to be Tensor
+By default, all parameters to a TorchScript function are assumed to be Tensor
 because this is the most common type used in modules. To specify that an
-argument to a Torch Script function is another type, it is possible to use
+argument to a TorchScript function is another type, it is possible to use
 MyPy-style type annotations using the types listed above:
 
 Example::
@@ -264,7 +264,7 @@ Subscripts
   ``t[i:j, i]``
 
   .. note::
-    Torch Script currently does not support mutating tensors in place, so any
+    TorchScript currently does not support mutating tensors in place, so any
     tensor indexing can only appear on the right-hand size of an expression.
 
 Function calls
@@ -328,7 +328,7 @@ Accessing Module Parameters
 Statements
 ~~~~~~~~~~
 
-Torch Script supports the following types of statements:
+TorchScript supports the following types of statements:
 
 Simple Assignments
 
@@ -438,7 +438,7 @@ Return
 Variable Resolution
 ~~~~~~~~~~~~~~~~~~~
 
-Torch Script supports a subset of Python's variable resolution (i.e. scoping)
+TorchScript supports a subset of Python's variable resolution (i.e. scoping)
 rules. Local variables behave the same as in Python, except for the restriction
 that a variable must have the same type along all paths through a function.
 If a variable has a different type on different sides of an if statement, it
@@ -456,23 +456,23 @@ Example::
         print(y) # Error: undefined value y
 
 Non-local variables are resolved to Python values at compile time when the
-function is defined. These values are then converted into Torch Script values using
+function is defined. These values are then converted into TorchScript values using
 the rules described in `Use of Python Values`_.
 
 Use of Python Values
 ~~~~~~~~~~~~~~~~~~~~
 
-To make writing Torch Script more convenient, we allow script code to refer
+To make writing TorchScript more convenient, we allow script code to refer
 to Python values in the surrounding scope. For instance, any time there is a
-reference to ``torch``, the Torch Script compiler is actually resolving it to the
+reference to ``torch``, the TorchScript compiler is actually resolving it to the
 ``torch`` Python module when the function is declared.  These Python values are
-not a first class part of Torch Script. Instead they are desugared at compile-time
-into the primitive types that Torch Script supports. This section describes the
-rules that are used when accessing Python values in Torch Script. They depend
+not a first class part of TorchScript. Instead they are desugared at compile-time
+into the primitive types that TorchScript supports. This section describes the
+rules that are used when accessing Python values in TorchScript. They depend
 on the dynamic type of the python valued referenced.
 
 Functions
-  Torch Script can call python functions. This functionality is very useful when
+  TorchScript can call python functions. This functionality is very useful when
   incrementally converting a model into script. The model can be moved function-by-function
   to script, leaving calls to Python functions in place. This way you can incrementally
   check the correctness of the model as you go.
@@ -495,12 +495,12 @@ Functions
 
 
 Attribute Lookup On Python Modules
-    Torch Script can lookup attributes on modules. Builtin functions like ``torch.add``
-    are accessed this way. This allows Torch Script to call functions defined in
+    TorchScript can lookup attributes on modules. Builtin functions like ``torch.add``
+    are accessed this way. This allows TorchScript to call functions defined in
     other modules.
 
 Python-defined Constants
-    Torch Script also provides a way to use constants that are defined in Python.
+    TorchScript also provides a way to use constants that are defined in Python.
     These can be used to hard-code hyper-parameters into the function, or to
     define universal constants. There are two ways of specifying that a Python
     value should be treated as a constant.
@@ -787,7 +787,7 @@ Tracer Warnings
 Builtin Functions
 ~~~~~~~~~~~~~~~~~
 
-Torch Script supports a subset of the builtin tensor and neural network functions that
+TorchScript supports a subset of the builtin tensor and neural network functions that
 PyTorch provides. Most methods on Tensor as well as functions in the ``torch``
 namespace are available. Many functions in ``torch.nn.functional`` are also availiable.
 
