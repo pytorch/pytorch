@@ -26,8 +26,28 @@ const caffe2::Tensor& getTensor(
 
 // Create a new tensor in the workspace.
 caffe2::Tensor* createTensor(
-    caffe2::Workspace& workspace,
-    const std::string& name);
+    const std::string& name,
+    caffe2::Workspace* workspace);
+
+// Create a new operator in the net.
+caffe2::OperatorDef* createOperator(
+    const std::string& type,
+    const std::vector<string>& inputs,
+    const std::vector<string>& outputs,
+    caffe2::NetDef* net);
+
+// Coincise util class to mutate a net in a chaining fashion.
+struct NetMutator {
+  explicit NetMutator(caffe2::NetDef* net) : net_(net) {}
+
+  NetMutator& newOp(
+      const std::string& type,
+      const std::vector<string>& inputs,
+      const std::vector<string>& outputs);
+
+ private:
+  caffe2::NetDef* net_;
+};
 
 } // namespace testing
 } // namespace caffe2
