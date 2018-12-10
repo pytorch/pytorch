@@ -3394,7 +3394,7 @@
 
 - func: max_unpool3d(Tensor self, Tensor indices, IntList[3] output_size, IntList[3] stride, IntList[3] padding) -> Tensor
   python_module: nn
-  variants: function, method
+  variants: function
   dispatch:
     CPU: MaxUnpooling3d_forward_cpu
     CUDA: MaxUnpooling3d_forward_cuda
