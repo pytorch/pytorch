@@ -63,7 +63,7 @@
 	url = https://github.com/bddppq/onnx-tensorrt
 [submodule "third_party/sleef"]
 	path = third_party/sleef
-	url = https://github.com/shibatch/sleef
+	url = https://github.com/zdevito/sleef
 [submodule "third_party/ideep"]
 	path = third_party/ideep
 	url = https://github.com/intel/ideep
