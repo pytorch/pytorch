@@ -124,6 +124,7 @@
 #   LD_LIBRARY_PATH
 #     we will search for libraries in these paths
 
+from __future__ import print_function
 from setuptools import setup, Extension, distutils, Command, find_packages
 import setuptools.command.build_ext
 import setuptools.command.install
@@ -194,6 +195,23 @@ from tools.setup_helpers.dist_check import USE_DISTRIBUTED, \
 
 DEBUG = check_env_flag('DEBUG')
 REL_WITH_DEB_INFO = check_env_flag('REL_WITH_DEB_INFO')
+
+VERBOSE_SCRIPT = True
+# see if the user passed a quiet flag to setup.py arguments and respect
+# that in our parts of the build
+for arg in sys.argv:
+    if arg == "--":
+        break
+    if arg == '-q' or arg == '--quiet':
+        VERBOSE_SCRIPT = False
+
+if VERBOSE_SCRIPT:
+    def report(*args):
+        print(*args)
+else:
+    def report(*args):
+        pass
+
 IS_WINDOWS = (platform.system() == 'Windows')
 IS_DARWIN = (platform.system() == 'Darwin')
 IS_LINUX = (platform.system() == 'Linux')
@@ -279,13 +297,13 @@ else:
         version += '+' + sha[:7]
     except Exception:
         pass
-print("Building wheel {}-{}".format(package_name, version))
+report("Building wheel {}-{}".format(package_name, version))
 
 
 class create_version_file(PytorchCommand):
     def run(self):
         global version, cwd
-        print('-- Building version ' + version)
+        report('-- Building version ' + version)
         version_path = os.path.join(cwd, 'torch', 'version.py')
         with open(version_path, 'w') as f:
             f.write("__version__ = '{}'\n".format(version))
@@ -393,7 +411,8 @@ def build_libs(libs):
     my_env["USE_FFMPEG"] = "ON" if USE_FFMPEG else "OFF"
     my_env["USE_DISTRIBUTED"] = "ON" if USE_DISTRIBUTED else "OFF"
     my_env["USE_SYSTEM_NCCL"] = "ON" if USE_SYSTEM_NCCL else "OFF"
-
+    if VERBOSE_SCRIPT:
+        my_env['VERBOSE_SCRIPT'] = '1'
     try:
         os.mkdir('build')
     except OSError:
@@ -402,7 +421,7 @@ def build_libs(libs):
     kwargs = {'cwd': 'build'} if not IS_WINDOWS else {}
 
     if subprocess.call(build_libs_cmd + libs, env=my_env, **kwargs) != 0:
-        print("Failed to run '{}'".format(' '.join(build_libs_cmd + libs)))
+        report("Failed to run '{}'".format(' '.join(build_libs_cmd + libs)))
         sys.exit(1)
 
 
@@ -410,7 +429,7 @@ def build_libs(libs):
 # protobuf python compiler) from the build folder to the root folder
 # cp root/build/caffe2/proto/proto.py root/caffe2/proto/proto.py
 def copy_protos():
-    print('setup.py::copy_protos()')
+    report('setup.py::copy_protos()')
     for src in glob.glob(
             os.path.join(caffe2_build_dir, 'caffe2', 'proto', '*.py')):
         dst = os.path.join(
@@ -421,13 +440,13 @@ def copy_protos():
 # Build all dependent libraries
 class build_deps(PytorchCommand):
     def run(self):
-        print('setup.py::build_deps::run()')
+        report('setup.py::build_deps::run()')
         # Check if you remembered to check out submodules
 
         def check_file(f):
             if not os.path.exists(f):
-                print("Could not find {}".format(f))
-                print("Did you run 'git submodule update --init --recursive'?")
+                report("Could not find {}".format(f))
+                report("Did you run 'git submodule update --init --recursive'?")
                 sys.exit(1)
 
         check_file(os.path.join(third_party_path, "gloo", "CMakeLists.txt"))
@@ -489,7 +508,7 @@ for lib in dep_libs:
 
 class build_module(PytorchCommand):
     def run(self):
-        print('setup.py::build_module::run()')
+        report('setup.py::build_module::run()')
         self.run_command('build_py')
         self.run_command('build_ext')
 
@@ -497,7 +516,7 @@ class build_module(PytorchCommand):
 class build_py(setuptools.command.build_py.build_py):
 
     def run(self):
-        print('setup.py::build_py::run()')
+        report('setup.py::build_py::run()')
         self.run_command('create_version_file')
         setuptools.command.build_py.build_py.run(self)
 
@@ -505,7 +524,7 @@ class build_py(setuptools.command.build_py.build_py):
 class develop(setuptools.command.develop.develop):
 
     def run(self):
-        print('setup.py::develop::run()')
+        report('setup.py::develop::run()')
         self.run_command('create_version_file')
         setuptools.command.develop.develop.run(self)
         self.create_compile_commands()
@@ -539,9 +558,9 @@ class develop(setuptools.command.develop.develop):
                 f.write(new_contents)
 
         if not USE_NINJA:
-            print("WARNING: 'develop' is not building C++ code incrementally")
-            print("because ninja is not installed. Run this to enable it:")
-            print(" > pip install ninja")
+            report("WARNING: 'develop' is not building C++ code incrementally")
+            report("because ninja is not installed. Run this to enable it:")
+            report(" > pip install ninja")
 
 
 build_ext_parent = ninja_build_ext if USE_NINJA \
@@ -551,52 +570,41 @@ build_ext_parent = ninja_build_ext if USE_NINJA \
 class build_ext(build_ext_parent):
 
     def run(self):
-        # Print build options
+        # report build options
         if USE_NUMPY:
-            print('-- Building with NumPy bindings')
+            report('-- Building with NumPy bindings')
         else:
-            print('-- NumPy not found')
+            report('-- NumPy not found')
         if USE_CUDNN:
-            print('-- Detected cuDNN at ' + CUDNN_LIBRARY + ', ' + CUDNN_INCLUDE_DIR)
+            report('-- Detected cuDNN at ' + CUDNN_LIBRARY + ', ' + CUDNN_INCLUDE_DIR)
         else:
-            print('-- Not using cuDNN')
+            report('-- Not using cuDNN')
         if USE_MIOPEN:
-            print('-- Detected MIOpen at ' + MIOPEN_LIBRARY + ', ' + MIOPEN_INCLUDE_DIR)
+            report('-- Detected MIOpen at ' + MIOPEN_LIBRARY + ', ' + MIOPEN_INCLUDE_DIR)
         else:
-            print('-- Not using MIOpen')
+            report('-- Not using MIOpen')
         if USE_CUDA:
-            print('-- Detected CUDA at ' + CUDA_HOME)
+            report('-- Detected CUDA at ' + CUDA_HOME)
         else:
-            print('-- Not using CUDA')
+            report('-- Not using CUDA')
         if USE_MKLDNN:
-            print('-- Using MKLDNN')
+            report('-- Using MKLDNN')
         else:
-            print('-- Not using MKLDNN')
+            report('-- Not using MKLDNN')
         if USE_NCCL and USE_SYSTEM_NCCL:
-            print('-- Using system provided NCCL library at ' + NCCL_SYSTEM_LIB + ', ' + NCCL_INCLUDE_DIR)
+            report('-- Using system provided NCCL library at ' + NCCL_SYSTEM_LIB + ', ' + NCCL_INCLUDE_DIR)
         elif USE_NCCL:
-            print('-- Building NCCL library')
+            report('-- Building NCCL library')
         else:
-            print('-- Not using NCCL')
+            report('-- Not using NCCL')
         if USE_DISTRIBUTED:
-            print('-- Building with THD distributed package ')
+            report('-- Building with THD distributed package ')
             if IS_LINUX:
-                print('-- Building with c10d distributed package ')
+                report('-- Building with c10d distributed package ')
             else:
-                print('-- Building without c10d distributed package')
+                report('-- Building without c10d distributed package')
         else:
-            print('-- Building without distributed package')
-
-        if USE_NINJA:
-            ninja_builder = NinjaBuilder('global')
-
-            generate_code(ninja_builder)
-
-            # before we start the normal build make sure all generated code
-            # gets built
-            ninja_builder.run()
-        else:
-            generate_code(None)
+            report('-- Building without distributed package')
 
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
@@ -639,15 +647,15 @@ class build_ext(build_ext_parent):
                 continue
             fullname = self.get_ext_fullname(ext.name)
             filename = self.get_ext_filename(fullname)
-            print("\nCopying extension {}".format(ext.name))
+            report("\nCopying extension {}".format(ext.name))
 
             src = os.path.join(tmp_install_path, rel_site_packages, filename)
             if not os.path.exists(src):
-                print("{} does not exist".format(src))
+                report("{} does not exist".format(src))
                 del self.extensions[i]
             else:
                 dst = os.path.join(os.path.realpath(self.build_lib), filename)
-                print("Copying {} from {} to {}".format(ext.name, src, dst))
+                report("Copying {} from {} to {}".format(ext.name, src, dst))
                 dst_dir = os.path.dirname(dst)
                 if not os.path.exists(dst_dir):
                     os.makedirs(dst_dir)
@@ -658,7 +666,7 @@ class build_ext(build_ext_parent):
     def get_outputs(self):
         outputs = distutils.command.build_ext.build_ext.get_outputs(self)
         outputs.append(os.path.join(self.build_lib, "caffe2"))
-        print("setup.py::get_outputs returning {}".format(outputs))
+        report("setup.py::get_outputs returning {}".format(outputs))
         return outputs
 
 
@@ -682,7 +690,7 @@ class rebuild(distutils.command.build.build):
 class install(setuptools.command.install.install):
 
     def run(self):
-        print('setup.py::run()')
+        report('setup.py::run()')
         if not self.skip_build:
             self.run_command('build_deps')
 
@@ -738,8 +746,8 @@ if IS_WINDOWS:
                           '/wd4275']
     if sys.version_info[0] == 2:
         if not check_env_flag('FORCE_PY27_BUILD'):
-            print('The support for PyTorch with Python 2.7 on Windows is very experimental.')
-            print('Please set the flag `FORCE_PY27_BUILD` to 1 to continue build.')
+            report('The support for PyTorch with Python 2.7 on Windows is very experimental.')
+            report('Please set the flag `FORCE_PY27_BUILD` to 1 to continue build.')
             sys.exit(1)
         # /bigobj increases number of sections in .obj file, which is needed to link
         # against libaries in Python 2.7 under Windows
