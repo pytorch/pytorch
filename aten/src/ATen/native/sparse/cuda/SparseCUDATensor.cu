@@ -27,17 +27,7 @@ namespace at { namespace native {
 
 using namespace at::sparse;
 
-template <typename scalar_t, typename func_t>
-static void sparse_reduction_kernel_cuda(const SparseTensor& self, SparseTensor& out, const func_t& op) {
-  int64_t nnz = self._nnz();
-
-  // NOTE: Since `coalesce` is not an in-place operation when `is_coalesced` is false,
-  // we should keep the original tensor intact and do coalesce on a copy of the tensor
-  if (nnz < 2) {
-    out._coalesced_(true);
-    return;
-  }
-
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, int64_t> sparse_coalesce_common_cuda(const SparseTensor& self) {
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
   auto policy = thrust::cuda::par(allocator).on(stream);
@@ -45,6 +35,7 @@ static void sparse_reduction_kernel_cuda(const SparseTensor& self, SparseTensor&
   // For indices, a simple sort + unique suffices
   // For values, we use a custom kernel for segmented reduction (can't use Thrust due to indirection).
 
+  int64_t nnz = self._nnz();
   Tensor values = self._values();
   IntList sizes = self.sizes();
   int64_t sparse_dim = self.sparse_dim();
@@ -85,28 +76,6 @@ static void sparse_reduction_kernel_cuda(const SparseTensor& self, SparseTensor&
   newValues_size[0] = newNnz;
   Tensor newValues = at::empty(newValues_size, values.options());
 
-  // If there is no values to copy, save running the kernel.
-  if (newValues.numel() > 0) {
-    values = values.contiguous();
-    int64_t stride = at::prod_intlist(values.sizes().slice(1));
-    dim3 grid(THCCeilDiv(newNnz, (int64_t) 4), THCCeilDiv(stride, (int64_t) 128));
-    dim3 block(32, 4);
-    // AT_DISPATCH_ALL_TYPES_AND_HALF(
-        // values.type(), "coalesce_sparse_cuda", [&] {
-          // using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;
-          apply::coalesceValuesKernel<scalar_t, func_t><<<grid, block, 0, stream>>>(
-            uniqueOffsets.data<int64_t>(),
-            origIndices.data<int64_t>(),
-            values.data<scalar_t>(),
-            newValues.data<scalar_t>(),
-            nnz,
-            newNnz,
-            stride,
-            op
-          );
-        // });
-  }
-
   // unflatten indices if necessary
   LongTensor newIndices;
   if (sparse_dim == 1) {
@@ -131,35 +100,67 @@ static void sparse_reduction_kernel_cuda(const SparseTensor& self, SparseTensor&
     }
   }
 
-  get_sparse_impl(out)->resize_and_clear_(sparse_dim, dense_dim, sizes);
-  get_sparse_impl(out)->set_indices_and_values_unsafe(newIndices, newValues);
-  out._coalesced_(true);
-  // SparseTensor dst = at::native::sparse_coo_tensor(newIndices, newValues, self.sizes())._coalesced_(true);
-
-  THCudaCheck(cudaGetLastError());
+  return std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, int64_t>(uniqueOffsets, origIndices, newValues, newIndices, indices1D, newNnz);
 }
 
-template <typename scalar_t>
-void sparse_sum_kernel_impl(const SparseTensor& self, SparseTensor& out) {
-  sparse_reduction_kernel_cuda<scalar_t>(self, out, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-    return a + b;
-  });
-}
+SparseTensor sparse_coalesce_sum_cuda(const SparseTensor& self) {
+  int64_t nnz = self._nnz();
 
-SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   if (self.is_coalesced()) {
     return self;
   }
 
-  SparseTensor out = at::empty_like(self);
-  AT_DISPATCH_ALL_TYPES_AND_HALF(self._values().type(), "coalesce_sparse_cuda", [&] {
-    // using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;
-    sparse_sum_kernel_impl<scalar_t>(self, out);
-    // sparse_reduction_kernel_cuda<scalar_t>(self, out, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-    //   return a + b;
-    // });
-  });
+  // NOTE: Since `coalesce` is not an in-place operation when `is_coalesced` is false,
+  // we should keep the original tensor intact and do coalesce on a copy of the tensor
+  if (nnz < 2) {
+    SparseTensor out = self.clone();
+    out._coalesced_(true);
+    return out;
+  }
+
+  Tensor uniqueOffsets, origIndices, newValues, newIndices, indices1D;
+  int64_t newNnz = 0;
+
+  std::tie(uniqueOffsets, origIndices, newValues, newIndices, indices1D, newNnz) = sparse_coalesce_common_cuda(self);
+  AT_ASSERT(uniqueOffsets.defined());
+  AT_ASSERT(origIndices.defined());
+  AT_ASSERT(newValues.defined());
+  AT_ASSERT(newIndices.defined());
+  AT_ASSERT(indices1D.defined());
+  AT_ASSERT(newNnz > 0);
+
+  Tensor values = self._values().contiguous();
+  int64_t stride = at::prod_intlist(values.sizes().slice(1));  // is the prod_intlist of values.size() the same when non-contiguous?
+
+  // If there is no values to copy, save running the kernel.
+  if (newValues.numel() > 0) {
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+    auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+    auto policy = thrust::cuda::par(allocator).on(stream);
+
+    dim3 grid(THCCeilDiv(newNnz, (int64_t) 4), THCCeilDiv(stride, (int64_t) 128));
+    dim3 block(32, 4);
+    AT_DISPATCH_ALL_TYPES_AND_HALF(values.type(), "sparse_sum_kernel_cuda", [&] {
+      apply::coalesce_sum_kernel<scalar_t><<<grid, block, 0, stream>>>(
+        uniqueOffsets.data<int64_t>(),
+        origIndices.data<int64_t>(),
+        values.data<scalar_t>(),
+        newValues.data<scalar_t>(),
+        nnz,
+        newNnz,
+        stride
+      );
+    });
+  }
+
+  SparseTensor out = at::native::sparse_coo_tensor(newIndices, newValues, self.sizes())._coalesced_(true);
+
+  THCudaCheck(cudaGetLastError());
   return out;
+}
+
+SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
+  return sparse_coalesce_sum_cuda(self);
 }
 
 }} // namespace at::native

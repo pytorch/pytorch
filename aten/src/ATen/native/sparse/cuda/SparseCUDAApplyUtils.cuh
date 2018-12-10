@@ -278,12 +278,17 @@ __global__ void indexSparseIntersectionKernel(
 //   }
 // }
 
-template <typename Dtype, typename func_t>
-__global__ void coalesceValuesKernel(
+template <typename scalar_t>
+__device__ scalar_t coalesce_sum_op(scalar_t a, scalar_t b) {
+  return a + b;
+}
+
+template <typename scalar_t, typename func_t>
+__device__ void coalesceValuesKernel(
   int64_t *segment_offsets,
   int64_t *value_indices,
-  Dtype *values,
-  Dtype *newValues,
+  scalar_t *values,
+  scalar_t *newValues,
   int64_t nnz,
   int64_t newNnz,
   int64_t stride,
@@ -300,7 +305,7 @@ __global__ void coalesceValuesKernel(
     const int begin = segment_offsets[seg];
     const int end = (seg < newNnz - 1) ? segment_offsets[seg + 1] : nnz;
     const int startFeature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
-    Dtype tmp[SZ];
+    scalar_t tmp[SZ];
     #pragma unroll
     for (int ii = 0; ii < SZ; ii++) {
       tmp[ii] = 0;
@@ -314,8 +319,8 @@ __global__ void coalesceValuesKernel(
         int featureDim = startFeature + ii * WARP_SIZE;
         if (featureDim < stride)
         {
-          // tmp[ii] += static_cast<Dtype>(values[valueRow + featureDim]);
-          tmp[ii] = op(tmp[ii], static_cast<Dtype>(values[valueRow + featureDim]));
+          // tmp[ii] += static_cast<cuda_accscalar_t>(values[valueRow + featureDim]);
+          tmp[ii] = op(tmp[ii], static_cast<scalar_t>(values[valueRow + featureDim]));
         }
       }
     }
@@ -325,10 +330,32 @@ __global__ void coalesceValuesKernel(
       int featureDim = startFeature + ii * WARP_SIZE;
       if (featureDim < stride)
       {
-        newValues[newValueRow + featureDim] = static_cast<Dtype>(tmp[ii]);
+        newValues[newValueRow + featureDim] = static_cast<scalar_t>(tmp[ii]);
       }
     }
   }
+}
+
+template <typename scalar_t>
+__global__ void coalesce_sum_kernel(
+  int64_t *segment_offsets,
+  int64_t *value_indices,
+  scalar_t *values,
+  scalar_t *newValues,
+  int64_t nnz,
+  int64_t newNnz,
+  int64_t stride
+) {
+  coalesceValuesKernel(
+    segment_offsets,
+    value_indices,
+    values,
+    newValues,
+    nnz,
+    newNnz,
+    stride,
+    coalesce_sum_op<scalar_t>
+  );
 }
 
 } // namespace apply
