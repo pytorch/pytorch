@@ -24,37 +24,40 @@ at::Tensor MaxUnpooling2d_forward_out_cpu_(
   auto* rawIndices = indices.data<int64_t>();
   auto* rawOutput = output.data<scalar_t>();
 
-  int has_error = 0;
-  int error_index = 0;
-  int maxp;
   for (auto n = 0; n < numBatch; n++) {
     auto nOutputOffset = n * numChannels * outputWidth * outputHeight;
     auto nInputOffset = n * numChannels * inputWidth * inputHeight;
+    int k;
+    int has_error = 0;
+    int error_index = 0;
     #pragma omp parallel for private(k)
-    for (auto k = 0; k < numChannels; k++) {
+    for (k = 0; k < numChannels; k++) {
       auto finalOutputOffset = nOutputOffset + k * outputWidth * outputHeight;
       auto finalInputOffset = nInputOffset + k * inputWidth * inputHeight;
       auto* output_p_k = rawOutput + finalOutputOffset;
       auto* input_p_k = rawInput + finalInputOffset;
       auto* ind_p_k = rawIndices + finalInputOffset;
 
+      int maxp;
       for (auto i = 0; i < inputHeight; i++) {
         for (auto j = 0; j < inputWidth; j++) {
           maxp = ind_p_k[i * inputWidth + j];
           if (maxp < 0 || maxp >= outputWidth * outputHeight) {
     #pragma omp critical
+          {
             has_error = 1;
             error_index = maxp;
+          }
           } else {
             output_p_k[maxp] = input_p_k[i * inputWidth + j];
           }
         }
       }
     }
-  }
-  if (has_error) {
-    AT_ERROR("Found an invalid max index %ld (output volumes are of size %dx%d)",
-      error_index, outputHeight, outputWidth);
+    if (has_error) {
+      AT_ERROR("Found an invalid max index %ld (output volumes are of size %dx%d)",
+        error_index, outputHeight, outputWidth);
+    }
   }
   return output;
 }
@@ -97,7 +100,6 @@ at::Tensor MaxUnpooling2d_forward_cpu(
     const Tensor& self,
     const Tensor& indices,
     IntList output_size) {
-  // std::cout << "MaxUnpooling2d_forward_cpu called" << "\n";
   AT_CHECK(
       self.ndimension() == 4,
       "Input to MaxUnpooling2d should be a NCHW Tensor",
@@ -125,7 +127,6 @@ at::Tensor& MaxUnpooling2d_forward_out_cuda(
     const Tensor& self,
     const Tensor& indices,
     IntList output_size) {
-  // std::cout << "MaxUnpooling2d_forward_out_gpu called" << "\n";
   return at::_thnn_max_unpool2d_out(output, self, indices, output_size);
 }
 
@@ -170,8 +171,11 @@ at::Tensor MaxUnpooling3d_forward_out_cpu_(
   for (auto p = 0; p < nBatch; p++) {
     auto inputOffset = p * nSlices * iT * iW * iH;
     auto outputOffset = p * nSlices * oT * oW * oH;
-
-    for (auto k = 0; k < nSlices; k++) {
+    int k;
+    int has_error = 0;
+    int error_index = 0;
+  #pragma omp parallel for private(k)
+    for (k = 0; k < nSlices; k++) {
       auto finalInputOffset = inputOffset + k * iT * iW * iH;
       auto finalOutputOffset = outputOffset + k * oT * oW * oH;
 
@@ -185,12 +189,20 @@ at::Tensor MaxUnpooling3d_forward_out_cpu_(
             auto index = t * iH * iW + i * iW + j;
             maxp = ind_p_k[index];
             if (maxp < 0 || maxp >= oT * oW * oH) {
-              AT_ERROR("Invalid index");
+              #pragma omp critical
+              {
+                has_error = 1;
+                error_index = maxp;
+              }
             } else {
               output_p_k[maxp] = input_p_k[index];
             }
           }
         }
+      }
+      if (has_error) {
+        AT_ERROR("found an invalid max index %ld (output volumes are of size %dx%dx%d)",
+          error_index, oT, oH, oW);
       }
     }
   }
@@ -281,7 +293,6 @@ at::Tensor& MaxUnpooling3d_forward_out_cuda(
     IntList output_size,
     IntList stride,
     IntList padding) {
-  // std::cout << "MaxUnpooling2d_forward_out_gpu called" << "\n";
   return at::_thnn_max_unpool3d_out(output, self, indices, output_size, stride, padding);
 }
 
