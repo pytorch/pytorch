@@ -64,9 +64,6 @@
 [submodule "third_party/sleef"]
 	path = third_party/sleef
 	url = https://github.com/zdevito/sleef
-[submodule "third_party/ideep"]
-	path = third_party/ideep
-	url = https://github.com/intel/ideep
 [submodule "third_party/nccl/nccl"]
 	path = third_party/nccl/nccl
 	url = https://github.com/NVIDIA/nccl
@@ -82,3 +79,6 @@
 [submodule "third_party/fbgemm"]
 	path = third_party/fbgemm
 	url = https://github.com/pytorch/fbgemm
+[submodule "third_party/mkl-dnn"]
+	path = third_party/mkl-dnn
+	url = https://github.com/intel/mkl-dnn.git

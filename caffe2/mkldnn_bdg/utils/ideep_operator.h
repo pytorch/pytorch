@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ideep.hpp>
+#include <caffe2/mkldnn_bdg/include/ideep.hpp>
 #include <caffe2/core/operator.h>
 #include <caffe2/proto/caffe2_pb.h>
 

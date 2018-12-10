@@ -3,7 +3,7 @@
 #include "caffe2/opt/fusion.h"
 
 #ifdef CAFFE2_USE_MKLDNN
-#include "caffe2/ideep/ideep_utils.h"
+#include "caffe2/mkldnn_bdg/ideep_utils.h"
 #endif
 
 namespace caffe2 {

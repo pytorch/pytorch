@@ -1,4 +1,4 @@
-#include <caffe2/ideep/ideep_utils.h>
+#include <caffe2/mkldnn_bdg/ideep_utils.h>
 #include "caffe2/operators/expand_squeeze_dims_op.h"
 
 namespace caffe2 {

@@ -1,5 +1,5 @@
-#include <caffe2/ideep/operators/operator_fallback_ideep.h>
-#include <caffe2/ideep/utils/ideep_operator.h>
+#include <caffe2/mkldnn_bdg/operators/operator_fallback_ideep.h>
+#include <caffe2/mkldnn_bdg/utils/ideep_operator.h>
 
 #include <caffe2/operators/accuracy_op.h>
 #include <caffe2/operators/bbox_transform_op.h>

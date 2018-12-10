@@ -3,7 +3,7 @@
 #include <caffe2/core/common.h>
 #include <caffe2/core/context.h>
 #include <caffe2/core/operator.h>
-#include <caffe2/ideep/ideep_utils.h>
+#include <caffe2/mkldnn_bdg/ideep_utils.h>
 #include <caffe2/proto/caffe2_pb.h>
 
 namespace caffe2 {

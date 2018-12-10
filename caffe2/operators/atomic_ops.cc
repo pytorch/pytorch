@@ -4,8 +4,8 @@
 #include "caffe2/core/operator.h"
 
 #ifdef CAFFE2_USE_MKLDNN
-#include <caffe2/ideep/operators/operator_fallback_ideep.h>
-#include <caffe2/ideep/utils/ideep_operator.h>
+#include <caffe2/mkldnn_bdg/operators/operator_fallback_ideep.h>
+#include <caffe2/mkldnn_bdg/utils/ideep_operator.h>
 #endif
 
 namespace caffe2 {

@@ -1,4 +1,4 @@
-#include <caffe2/ideep/operators/conv_pool_base_op.h>
+#include "conv_pool_base_op.h"
 
 namespace caffe2 {
 

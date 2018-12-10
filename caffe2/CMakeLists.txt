@@ -80,7 +80,7 @@ if(NOT BUILD_ATEN_ONLY)
   add_subdirectory(db)
   add_subdirectory(distributed)
   # add_subdirectory(experiments) # note, we may remove this folder at some point
-  add_subdirectory(ideep)
+  add_subdirectory(mkldnn_bdg)
   add_subdirectory(image)
   add_subdirectory(video)
   add_subdirectory(mobile)
