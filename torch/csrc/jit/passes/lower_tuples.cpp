@@ -1,7 +1,7 @@
-#include "torch/csrc/jit/passes/lower_tuples.h"
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/utils/functional.h"
-#include "torch/csrc/jit/assertions.h"
+#include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/utils/functional.h>
+#include <torch/csrc/jit/assertions.h>
 
 namespace torch { namespace jit {
 

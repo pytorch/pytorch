@@ -9,7 +9,7 @@
 #include <mutex>
 #endif
 
-#include "THCGeneral.h"
+#include <THC/THCGeneral.h>
 
 THC_API THCDeviceAllocator* THCCachingAllocator_get(void);
 THC_API void THCCachingAllocator_emptyCache(void);

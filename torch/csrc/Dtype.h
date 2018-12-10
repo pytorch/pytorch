@@ -1,7 +1,7 @@
 #pragma once
 
-#include "torch/csrc/python_headers.h"
-#include "ATen/ATen.h"
+#include <torch/csrc/python_headers.h>
+#include <ATen/ATen.h>
 
 const int DTYPE_NAME_LEN = 64;
 

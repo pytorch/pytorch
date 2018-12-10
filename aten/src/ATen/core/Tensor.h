@@ -4,9 +4,9 @@
 #include <c10/core/Layout.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
-#include "ATen/core/SparseTensorRef.h"
+#include <ATen/core/SparseTensorRef.h>
 #include <c10/core/Storage.h>
-#include "ATen/core/TensorAccessor.h"
+#include <ATen/core/TensorAccessor.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Exception.h>
@@ -24,6 +24,10 @@ class Tensor;
 } // namespace at
 
 namespace at {
+
+class Tensor;
+using TensorList = ArrayRef<Tensor>;
+
 // Tensor is a "generic" object holding a pointer to the underlying TensorImpl object, which
 // has an embedded reference count. In this way, Tensor is similar to boost::intrusive_ptr.
 //
@@ -467,7 +471,7 @@ public:
   Tensor sqrt() const;
   Tensor & sqrt_();
   Tensor std(bool unbiased=true) const;
-  Tensor std(int64_t dim, bool unbiased=true, bool keepdim=false) const;
+  Tensor std(IntList dim, bool unbiased=true, bool keepdim=false) const;
   Tensor prod(ScalarType dtype) const;
   Tensor prod() const;
   Tensor prod(int64_t dim, bool keepdim, ScalarType dtype) const;
@@ -746,4 +750,4 @@ Tensor make_tensor(Args&&... args) {
 
 } // namespace at
 
-#include "ATen/core/TensorMethods.h"
+#include <ATen/core/TensorMethods.h>

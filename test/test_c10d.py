@@ -1565,6 +1565,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         )
 
     @skip_if_not_nccl
+    @skip_if_not_multigpu
     def test_queue_reduction(self):
         # Set up process group.
         store = c10d.FileStore(self.file.name, self.world_size)
@@ -1592,6 +1593,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                          torch.ones(10) * (self.world_size + 1) * len(devices) / 2.0)
 
     @skip_if_not_nccl
+    @skip_if_not_multigpu
     def test_sync_reduction(self):
         # Set up process group.
         store = c10d.FileStore(self.file.name, self.world_size)
