@@ -1,13 +1,13 @@
-#include "ATen/native/ReduceOps.h"
+#include <ATen/native/ReduceOps.h>
 
-#include "ATen/ATen.h"
-#include "ATen/Dispatch.h"
-#include "ATen/ExpandUtils.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/WrapDimUtils.h"
-#include "ATen/WrapDimUtilsMulti.h"
-#include "ReduceOpsUtils.h"
-#include "TensorIterator.h"
+#include <ATen/ATen.h>
+#include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/WrapDimUtils.h>
+#include <ATen/WrapDimUtilsMulti.h>
+#include <ATen/native/ReduceOpsUtils.h>
+#include <ATen/native/TensorIterator.h>
 
 #include <algorithm>
 #include <functional>
@@ -20,6 +20,7 @@ namespace at {
 namespace native {
 
 DEFINE_DISPATCH(sum_stub);
+DEFINE_DISPATCH(std_stub);
 DEFINE_DISPATCH(prod_stub);
 DEFINE_DISPATCH(norm_kernel);
 
@@ -95,10 +96,16 @@ static std::unique_ptr<TensorIterator> make_reduction(
   auto mask = make_dim_mask(dim, ndim);
   allocate_reduction_result(result, self, mask, keepdim, dtype);
   auto viewed_result = review_reduce_result(result, ndim, mask, keepdim);
-  if (self.type().scalarType() != dtype) {
-    return TensorIterator::reduce_op(viewed_result, self.to(dtype));
+
+  // special case for type promotion in mixed precision, improves computational
+  // efficiency.
+  // not generalize this to common mismatched input/output types to avoid cross
+  // product of templated kernel launches.
+  if (self.type().scalarType() == dtype || 
+      (self.is_cuda() && self.type().scalarType() == kHalf && dtype == kFloat)) {
+    return TensorIterator::reduce_op(viewed_result, self);
   }
-  return TensorIterator::reduce_op(viewed_result, self);
+  return TensorIterator::reduce_op(viewed_result, self.to(dtype));
 }
 
 static inline int64_t n_dim_size(const Tensor& self, IntList dim) {
@@ -535,21 +542,29 @@ Tensor std(const Tensor& self, bool unbiased) {
   return trivial_return.has_value() ? trivial_return.value() : at::_th_std(self, unbiased);
 }
 
-Tensor std(const Tensor& self, int64_t dim, bool unbiased, bool keepdim) {
+Tensor std(const Tensor& self, IntList dim, bool unbiased, bool keepdim) {
   Tensor result = at::empty({0}, self.options());
   return at::native::std_out(result, self, dim, unbiased, keepdim);
 }
 
-Tensor &std_out(Tensor &result, const Tensor &self, int64_t dim, bool unbiased, bool keepdim) {
+Tensor &std_out(Tensor &result, const Tensor &self, IntList dim, bool unbiased, bool keepdim) {
   AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
            "std only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   AT_CHECK(at::isFloatingType(self.type().scalarType()), "std only supports floating-point dtypes");
-  dim = maybe_wrap_dim(dim, self.dim());
-  if (_dimreduce_return_trivial(result, self, std::numeric_limits<double>::quiet_NaN(), dim, keepdim)) {
-    return result;
-  } else {
-    return at::_th_std_out(result, self, dim, unbiased, keepdim);
+  if (self.type().backend() != Backend::CPU) {
+    // TODO(btv): implement multi-dim `std` and `var` on CUDA.
+    AT_CHECK(dim.size() == 1, "`std` across arbitrarily many dimensions is not yet supported for CUDA.")
+    int64_t one_dim = maybe_wrap_dim(dim[0], self.dim());
+    if (_dimreduce_return_trivial(result, self, std::numeric_limits<double>::quiet_NaN(), one_dim, keepdim)) {
+      return result;
+    } else {
+      return at::_th_std_out(result, self, one_dim, unbiased, keepdim);
+    }
   }
+  ScalarType dtype = get_dtype(result, self, {}, true);
+  auto iter = make_reduction("std", result, self, dim, keepdim, dtype);
+  std_stub(iter->device_type(), *iter, unbiased);
+  return result;
 }
 
 }} // namespace at::native

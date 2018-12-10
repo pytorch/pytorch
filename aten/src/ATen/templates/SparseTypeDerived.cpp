@@ -3,17 +3,17 @@
 // for context
 #define __STDC_FORMAT_MACROS
 
-#include "ATen/${Type}.h"
+#include <ATen/${Type}.h>
 
 // ${generated_comment}
 
-#include "ATen/${Generator}.h"
-#include "ATen/Allocator.h"
-#include "ATen/DeviceGuard.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/Utils.h"
-#include "ATen/WrapDimUtils.h"
-#include "ATen/core/Half.h"
+#include <ATen/${Generator}.h>
+#include <ATen/Allocator.h>
+#include <ATen/DeviceGuard.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Utils.h>
+#include <ATen/WrapDimUtils.h>
+#include <ATen/core/Half.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Optional.h>
 
@@ -22,7 +22,7 @@
 #include <memory>
 #include <utility>
 
-#include "ATen/Config.h"
+#include <ATen/Config.h>
 $extra_cuda_headers
 
 namespace at {

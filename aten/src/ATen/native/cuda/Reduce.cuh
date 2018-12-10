@@ -197,7 +197,7 @@ __device__ Array<type_t, vt> load_memory(const type_t* in, int begin, int end, i
   return load_memory<vt>(in, begin, end, stride, [](int idx) { return idx; });
 }
 
-template <typename scalar_t, typename func_t>
+template <typename scalar_t, typename func_t, typename out_scalar_t=scalar_t>
 struct ReduceOp {
   using traits = binary_function_traits<func_t>;
   using arg_t = typename traits::arg2_t;
@@ -248,7 +248,7 @@ struct ReduceOp {
       value = warp_reduce(value);
     }
 
-    auto out = (scalar_t*)((char*)dst + base_offsets[0]);
+    auto out = (out_scalar_t*)((char*)dst + base_offsets[0]);
     if (config.should_global_reduce()) {
       value = global_reduce(value, out);
     } else if (config.should_store(output_idx)) {
@@ -335,7 +335,7 @@ struct ReduceOp {
     return is_last_block_done;
   }
 
-  C10_DEVICE arg_t global_reduce(arg_t value, scalar_t* out) const {
+  C10_DEVICE arg_t global_reduce(arg_t value, out_scalar_t* out) const {
     arg_t* reduce_buffer = (arg_t*)buffer;
 
     bool should_store = config.should_store(config.output_idx());
@@ -393,14 +393,14 @@ static void launch_reduce_kernel(const ReduceConfig& config, const R& reduction)
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
-template <typename scalar_t, typename func_t, typename ident_t=double>
+template <typename scalar_t, typename out_scalar_t, typename func_t, typename ident_t=double>
 inline void gpu_reduce_kernel(TensorIterator& iter, const func_t& op, ident_t ident=0) {
   ASSERT_HOST_DEVICE_LAMBDA(func_t);
   AT_ASSERT(iter.numel() > 0 && iter.ntensors() == 2);
 
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      gpu_reduce_kernel<scalar_t>(sub_iter, op);
+      gpu_reduce_kernel<scalar_t, out_scalar_t>(sub_iter, op);
     }
     return;
   }
@@ -465,7 +465,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const func_t& op, ident_t id
     auto stream = at::cuda::getCurrentCUDAStream();
     AT_CUDA_CHECK(cudaMemsetAsync(semaphores.get(), 0, config.semaphore_size(), stream));
   }
-  auto reduce = ReduceOp<scalar_t, func_t>(
+  auto reduce = ReduceOp<scalar_t, func_t, out_scalar_t>(
       op,
       config,
       input_calc,

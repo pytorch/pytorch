@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensor.h"
+#define THC_GENERIC_FILE "THC/generic/THCTensor.h"
 #else
 
 #define THCTensor THTensor

@@ -1,11 +1,11 @@
-#include "ATen/ATen.h"
-#include "ATen/CPUApplyUtils.h"
-#include "ATen/Dispatch.h"
-#include "ATen/NativeFunctions.h"
+#include <ATen/ATen.h>
+#include <ATen/CPUApplyUtils.h>
+#include <ATen/Dispatch.h>
+#include <ATen/NativeFunctions.h>
 
-#include "ATen/native/LinearAlgebraUtils.h"
+#include <ATen/native/LinearAlgebraUtils.h>
 
-#include "TH.h"  // for USE_LAPACK
+#include <TH/TH.h>  // for USE_LAPACK
 
 #include <vector>
 

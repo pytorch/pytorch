@@ -1,7 +1,7 @@
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
-#include "ATen/ATen.h"
-#include "ATen/core/Reduction.h"
+#include <ATen/ATen.h>
+#include <ATen/core/Reduction.h>
 
 // for TH compat test only...
 struct THFloatTensor;

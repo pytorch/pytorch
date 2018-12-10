@@ -35,7 +35,7 @@
 #define THCPStorageBaseStr TH_CONCAT_STRING_3(Cuda,Real,StorageBase)
 #endif
 
-#include "override_macros.h"
+#include <torch/csrc/cuda/override_macros.h>
 
 #define THC_GENERIC_FILE "torch/csrc/generic/Storage.h"
 #include <THC/THCGenerateAllTypes.h>

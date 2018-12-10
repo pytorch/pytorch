@@ -87,7 +87,7 @@ class AliasDb {
 };
 
 inline TORCH_API AliasDb AliasAnalysis(std::shared_ptr<Graph> graph) {
-  return AliasDb(graph);
+  return AliasDb(std::move(graph));
 }
 } // namespace jit
 } // namespace torch
