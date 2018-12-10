@@ -5007,9 +5007,9 @@ a")
             def test():
                 return torch.tensor([None])
 
-        with self.assertRaisesRegex(RuntimeError, "Note: empty lists are constructed as Tensor\[\]"):
+        with self.assertRaisesRegex(RuntimeError, "Note: empty lists are constructed as Tensor"):
             @torch.jit.script
-            def foo():
+            def tmp():
                 return torch.tensor([])
 
         @torch.jit.script
