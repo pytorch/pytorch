@@ -2428,11 +2428,12 @@ class _TestTorchMixin(object):
 
         # test copy with numpy
         if TEST_NUMPY:
-            a = np.array([5.])
-            res1 = torch.tensor(a)
-            self.assertEqual(5., res1[0].item())
-            a[0] = 7.
-            self.assertEqual(5., res1[0].item())
+            for dtype in [np.float64, np.int64, np.int8, np.uint8]:
+                a = np.array([5.]).astype(dtype)
+                res1 = torch.tensor(a)
+                self.assertEqual(5., res1[0].item())
+                a[0] = 7.
+                self.assertEqual(5., res1[0].item())
 
     def test_tensor_factory_copy_var(self):
 
@@ -2638,11 +2639,12 @@ class _TestTorchMixin(object):
 
         if TEST_NUMPY:
             # doesn't copy
-            n = np.random.rand(5, 6)
-            n_astensor = torch.as_tensor(n)
-            self.assertEqual(torch.tensor(n), n_astensor)
-            n_astensor[0][0] = 250.7
-            self.assertEqual(torch.tensor(n), n_astensor)
+            for dtype in [np.float64, np.int64, np.int8, np.uint8]:
+                n = np.random.rand(5, 6).astype(dtype)
+                n_astensor = torch.as_tensor(n)
+                self.assertEqual(torch.tensor(n), n_astensor)
+                n_astensor[0][0] = 25.7
+                self.assertEqual(torch.tensor(n), n_astensor)
 
             # changing dtype causes copy
             n = np.random.rand(5, 6).astype(np.float32)
@@ -8745,6 +8747,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             np.int64,
             np.int32,
             np.int16,
+            np.int8,
             np.uint8,
             np.longlong,
         ]
@@ -8794,7 +8797,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             np.int64,
             np.int32,
             np.int16,
-            np.uint8
+            np.int8,
+            np.uint8,
         ]
 
         incorrect_byteorder = '>' if sys.byteorder == 'little' else '<'
