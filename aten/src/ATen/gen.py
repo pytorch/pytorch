@@ -117,6 +117,8 @@ TYPE_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Type.h")
 TYPE_EXTENDED_INTERFACE_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeExtendedInterface.h")
 TYPE_DEFAULT_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.h")
 TYPE_DEFAULT_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.cpp")
+TYPE_EXTENSION_BACKEND_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeExtensionBackend.h")
+TYPE_EXTENSION_BACKEND_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeExtensionBackend.cpp")
 
 LEGACY_TH_DISPATCHER_H = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHDispatcher.h")
 
@@ -156,6 +158,7 @@ generators = {
 
 backends = ['CPU', 'CUDA']
 densities = ['Dense', 'Sparse']
+extension_backends = ['FPGA']
 
 # scalar_name, c_type, accreal, th_scalar_type, is_floating_type
 scalar_types = [
@@ -326,6 +329,25 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     return env
 
 
+def generate_type_extension_backend(backend, declarations):
+    env = {}
+    env['Type'] = "{}Type".format(backend)
+    env['Backend'] = backend
+    env['DeviceType'] = backend
+    env['is_extension_backend'] = True
+
+    declarations, definitions = function_wrapper.create_extension_backend(
+        env, declarations)
+    env['type_derived_method_declarations'] = declarations
+    env['type_derived_method_definitions'] = definitions
+
+    fm = file_manager
+    fm.write(env['Type'] + ".cpp", TYPE_EXTENSION_BACKEND_CPP, env)
+    fm.write(env['Type'] + ".h", TYPE_EXTENSION_BACKEND_H, env)
+
+    return env
+
+
 def iterate_types():
     for backend in backends:
         for density in densities:
@@ -369,6 +391,9 @@ def declare_outputs():
                 fm = cuda_file_manager
             fm.will_write("{}{}{}.h".format(full_backend, scalar_name, kind))
             fm.will_write("{}{}{}.cpp".format(full_backend, scalar_name, kind))
+    for backend in extension_backends:
+        file_manager.will_write("{}Type.h".format(backend))
+        file_manager.will_write("{}Type.cpp".format(backend))
 
 
 def filter_by_extension(files, *extensions):
@@ -428,6 +453,8 @@ def generate_outputs():
     for backend, density, scalar_type in iterate_types():
         all_types.append(generate_storage_type_and_tensor(
             backend, density, scalar_type, declarations))
+    for backend in extension_backends:
+        all_types.append(generate_type_extension_backend(backend, declarations))
 
     core_files = {
         'Type.h': TYPE_H,

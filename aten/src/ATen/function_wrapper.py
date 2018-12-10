@@ -116,6 +116,13 @@ TYPE_DEFINITION_BODY_NATIVE = CodeTemplate("""\
 ${return_call} at::native::${native_type_method_dispatch}(/* native_actuals */ ${native_actuals});
 """)
 
+# Overrideable stubs to be used in user-extendable backends
+TYPE_DEFINITION_EXTENSION_BACKEND = CodeTemplate("""\
+${return_type} ${Type}::${method_prefix_derived}${api_name}(${type_method_formals}) const {
+    return ${Type}Dispatch<${return_type} (*)(${formals_types})>::get_function("${schema}")(${native_actuals});
+}
+""")
+
 # add non-virtual declaration to Tensor.h
 TENSOR_METHOD_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${method_formals_with_defaults})${const_mark};
@@ -470,6 +477,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'formals_list': List[AtFormal],
     'formals_with_defaults': List[str],
     'formals': List[str],
+    'formals_types': List[str],
     'inferred_type': str,
     'inplace': bool,
     # This controls whether or not we generate the interface in Type or
@@ -492,6 +500,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'return': ReturnDecl,
     'returns': List[ReturnType],
     'scalar_check': str,
+    'schema': str,
     'sparse': bool,
     'type_definition_body': List[str],
     'type_method_actuals': List[str],
@@ -1574,6 +1583,40 @@ def create_derived(backend_type_env, declarations):
                         process_option(option)
                     else:
                         process_native(option)
+                except NYIError:
+                    pass
+    return type_object_declarations, type_object_definitions
+
+
+def create_extension_backend(backend_type_env, declarations):
+    # type: (Environment, List[FunctionOption]) -> Tuple[List[str], List[str]]
+    type_object_declarations = []
+    type_object_definitions = []
+
+    # Temporarily filter out factory methods, will move them to Type
+    factory_methods = [
+        "arange", "bartlett_window", "blackman_window", "empty_like",
+        "empty_strided", "eye", "full", "full_like", "hann_window",
+        "hamming_window", "linspace", "logspace", "ones", "ones_like",
+        "rand", "rand_like", "randint", "randint_like", "randn", "randn_like",
+        "randperm", "range", "zeros", "zeros_like", "sparse_coo_tensor",
+        "_sparse_coo_tensor_unsafe"
+    ]
+
+    for declaration in declarations:
+        for option in declaration['options']:
+            if not option.get('skip', False) and option['name'] not in factory_methods:
+                try:
+                    option['formals_types'] = [f['type'] for f in option['formals_list']]
+                    option['native_actuals'] = [f['name'] for f in option['formals_list']]
+                    schema_args = ", ".join(["{} {}".format(f['dynamic_type'], f['name']) for f in option['formals_list']])
+                    return_type = NATIVE_DYNAMIC_TYPE.get(option['return_type'], option['return_type'])
+                    option['schema'] = "{}({}) -> {}".format(option['api_name'], schema_args, return_type)
+                    env = nested_dict(option, backend_type_env)
+                    type_object_declarations.append(
+                        TYPE_DERIVED_DECLARATION.substitute(env))
+                    type_object_definitions.append(
+                        TYPE_DEFINITION_EXTENSION_BACKEND.substitute(env))
                 except NYIError:
                     pass
     return type_object_declarations, type_object_definitions

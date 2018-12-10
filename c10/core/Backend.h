@@ -20,7 +20,7 @@ namespace c10 {
  * would make sense in your use case.  If it doesn't make sense, maybe
  * you want DeviceType.
  */
-enum class Backend { CPU, CUDA, HIP, SparseCPU, SparseCUDA, SparseHIP, Undefined, NumOptions };
+enum class Backend { CPU, CUDA, HIP, SparseCPU, SparseCUDA, SparseHIP, FPGA, Undefined, NumOptions };
 
 static inline Backend toSparse(Backend b) {
   switch (b) {
