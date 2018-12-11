@@ -29,6 +29,9 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   return THCState_getCurrentBlasHandle(at::globalContext().getTHCState());
 }
 
+// THIS IS A MASSIVE HACK
+C10_REGISTER_GUARD_IMPL(CUDA, CUDAGuardImpl);
+
 } // namespace cuda
 
 } // namespace at
