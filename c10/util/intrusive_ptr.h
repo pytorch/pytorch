@@ -339,7 +339,7 @@ class intrusive_ptr final {
 
   /**
    * Takes an owning pointer to TTarget* and creates an intrusive_ptr that takes
-   * over ownership. Thas means the refcount is not increased.
+   * over ownership. That means the refcount is not increased.
    * This is the counter-part to intrusive_ptr::release() and the pointer
    * passed in *must* have been created using intrusive_ptr::release().
    */
