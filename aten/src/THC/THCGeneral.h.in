@@ -2,7 +2,7 @@
 #define THC_GENERAL_INC
 
 #include <TH/THGeneral.h>
-#include "THAllocator.h"
+#include <TH/THAllocator.h>
 #undef log10
 #undef log1p
 #undef log2
@@ -12,11 +12,11 @@
 #include <ATen/cuda/CUDAStream.h>
 #endif
 
-#include "cuda.h"
-#include "cuda_runtime.h"
-#include "cublas_v2.h"
+#include <cuda.h>
+#include <cuda_runtime.h>
+#include <cublas_v2.h>
 
-#include "cusparse.h"
+#include <cusparse.h>
 
 #cmakedefine USE_MAGMA
 

@@ -1,11 +1,11 @@
 #pragma once
-#include "torch/csrc/jit/fuser/config.h"
+#include <torch/csrc/jit/fuser/config.h>
 #if USE_CUDA_FUSER || USE_CPU_FUSER
 
-#include "c10/util/Optional.h"
-#include "torch/csrc/WindowsTorchApiMacro.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/fuser/kernel_spec.h"
+#include <c10/util/Optional.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/fuser/kernel_spec.h>
 
 #include <cstdint> 
 #include <functional>

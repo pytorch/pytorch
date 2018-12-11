@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <utility>
 
-#include "cuda_runtime_api.h"
+#include <cuda_runtime_api.h>
 
 #include <ATen/cuda/ATenCUDAGeneral.h>
 #include <c10/util/Exception.h>

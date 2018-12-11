@@ -12,8 +12,8 @@
 #include <torch/csrc/utils/tempfile.h>
 #include <c10/util/Optional.h>
 
-#include "err.h"
-#include "socket.h"
+#include <libshm/err.h>
+#include <libshm/socket.h>
 
 const int SHUTDOWN_TIMEOUT = 2000; // 2s
 

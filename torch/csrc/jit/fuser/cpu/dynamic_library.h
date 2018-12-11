@@ -1,10 +1,10 @@
 #pragma once
-#include "torch/csrc/jit/fuser/config.h"
+#include <torch/csrc/jit/fuser/config.h>
 #if USE_CPU_FUSER
 
-#include "torch/csrc/jit/assertions.h"
+#include <torch/csrc/jit/assertions.h>
 
-#include "dlfcn.h"
+#include <dlfcn.h>
 
 namespace torch { namespace jit { namespace fuser { namespace cpu {
 

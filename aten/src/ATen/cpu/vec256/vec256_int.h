@@ -1,7 +1,7 @@
 #pragma once
 
-#include "intrinsics.h"
-#include "vec256_base.h"
+#include <ATen/cpu/vec256/intrinsics.h>
+#include <ATen/cpu/vec256/vec256_base.h>
 
 namespace at {
 namespace vec256 {
