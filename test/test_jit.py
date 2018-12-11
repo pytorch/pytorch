@@ -5425,6 +5425,115 @@ a")
         with self.assertRaisesRegex(RuntimeError, "did you forget to add it __constants__"):
             M()
 
+    class DerivedStateModule(torch.jit.ScriptModule):
+        def __init__(self):
+            super(TestScript.DerivedStateModule, self).__init__()
+            self.param = torch.nn.Parameter(torch.ones(3, 4, dtype=torch.float))
+            self.register_buffer('derived', torch.neg(self.param).detach())
+
+            # This is a flag so we can test that the pack method was called
+            self.register_buffer('pack_called', torch.zeros(1, dtype=torch.long))
+            # This is a flag so we can test that the unpack method was called
+            self.register_buffer('unpack_called', torch.zeros(1, dtype=torch.long))
+
+        @torch.jit.script_method
+        def _pack(self):
+            self.pack_called.set_(torch.ones(1, dtype=torch.long))
+            self.derived.set_(torch.rand(1, dtype=torch.float).detach())
+
+        @torch.jit.script_method
+        def _unpack(self):
+            self.unpack_called.set_(torch.ones(1, dtype=torch.long))
+            self.derived.set_(torch.neg(self.param).detach())
+
+        @torch.jit.script_method
+        def forward(self, x):
+            return x + self.derived
+
+    def test_pack_unpack_state(self):
+        sm = TestScript.DerivedStateModule()
+        x = torch.rand(3, 4, dtype=torch.float)
+        torch.testing.assert_allclose(sm(x), x + torch.neg(torch.ones(3, 4, dtype=torch.float)))
+
+        # Test save path
+        self.assertFalse(sm.pack_called.item())
+        self.assertFalse(sm.unpack_called.item())
+        sm.apply(lambda s: s._pack())
+        imported = self.getExportImportCopy(sm)
+        sm.apply(lambda s: s._unpack())
+        imported.apply(lambda s: s._unpack())
+        # ensure pack was called before serialization
+        self.assertTrue(sm.pack_called.item())
+        # ensure unpack was called after serialization so as to leave the module in an initialized state
+        self.assertTrue(sm.unpack_called.item())
+
+        torch.testing.assert_allclose(sm.derived, torch.neg(sm.param))
+
+        # Test load paths
+        self.assertTrue(imported.unpack_called.item())
+        torch.testing.assert_allclose(imported(x), x + torch.neg(torch.ones(3, 4, dtype=torch.float)))
+
+    def test_pack_unpack_nested(self):
+        class SubSubMod(torch.jit.ScriptModule):
+            def __init__(self):
+                super(SubSubMod, self).__init__()
+                self.register_buffer('buf', torch.ones(3, 4) * 3)
+
+            @torch.jit.script_method
+            def _pack(self):
+                self.buf.set_(torch.zeros(1, dtype=torch.double))
+
+            @torch.jit.script_method
+            def _unpack(self):
+                self.buf.set_(torch.ones(3, 4, dtype=torch.double) * 3)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return x + self.buf
+
+        class SubMod(torch.jit.ScriptModule):
+            def __init__(self):
+                super(SubMod, self).__init__()
+                self.register_buffer('buf', torch.ones(3, 4) * 2)
+                self.ssm = SubSubMod()
+
+            @torch.jit.script_method
+            def _pack(self):
+                self.buf.set_(torch.zeros(1, dtype=torch.double))
+
+            @torch.jit.script_method
+            def _unpack(self):
+                self.buf.set_(torch.ones(3, 4, dtype=torch.double) * 2)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return self.ssm(x + self.buf)
+
+        class Mod(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Mod, self).__init__()
+                self.submod = SubMod()
+                self.register_buffer('buf', torch.ones(3, 4) * 1)
+
+            @torch.jit.script_method
+            def _pack(self):
+                self.buf.set_(torch.zeros(1, dtype=torch.double))
+
+            @torch.jit.script_method
+            def _unpack(self):
+                self.buf.set_(torch.ones(3, 4, dtype=torch.double))
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return self.submod(x + self.buf)
+
+        m = Mod()
+        torch.testing.assert_allclose(m(torch.zeros(3, 4)), torch.ones(3, 4) * 6)
+        m.apply(lambda s: s._pack())
+        torch.testing.assert_allclose(m(torch.zeros(3, 4)), torch.zeros(3, 4))
+        m.apply(lambda s: s._unpack())
+        torch.testing.assert_allclose(m(torch.zeros(3, 4)), torch.ones(3, 4) * 6)
+
     def test_script_module_not_tuple(self):
         class M(torch.jit.ScriptModule):
             __constants__ = ['mods']
