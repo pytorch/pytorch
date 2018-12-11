@@ -510,11 +510,8 @@ class CAFFE2_API Tensor {
   Tensor & sqrt_();
   Tensor std(bool unbiased=true) const;
   Tensor std(IntArrayRef dim, bool unbiased=true, bool keepdim=false) const;
-  Tensor prod(ScalarType dtype) const;
-  Tensor prod() const;
-  Tensor prod(int64_t dim, bool keepdim, ScalarType dtype) const;
-  Tensor prod(int64_t dim, bool keepdim=false) const;
-  Tensor prod(int64_t dim, ScalarType dtype) const;
+  Tensor prod(c10::optional<ScalarType> dtype=c10::nullopt) const;
+  Tensor prod(int64_t dim, bool keepdim=false, c10::optional<ScalarType> dtype=c10::nullopt) const;
   Tensor t() const;
   Tensor & t_();
   Tensor tan() const;

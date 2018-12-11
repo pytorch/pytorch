@@ -2207,35 +2207,13 @@
 - func: std(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
 
-# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
-- func: prod(Tensor self, *, ScalarType dtype) -> Tensor
-  matches_jit_signature: True
+- func: prod(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
-- func: prod(Tensor self) -> Tensor
-  matches_jit_signature: True
+- func: prod(Tensor self, int64_t dim, bool keepdim=false, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
-- func: prod(Tensor self, int dim, bool keepdim, *, ScalarType dtype) -> Tensor
-  matches_jit_signature: True
-  variants: function, method
-
-- func: prod(Tensor self, int dim, bool keepdim=False) -> Tensor
-  matches_jit_signature: True
-  variants: function, method
-
-- func: prod(Tensor self, int dim, *, ScalarType dtype) -> Tensor
-  matches_jit_signature: True
-  variants: function, method
-
-- func: prod(Tensor self, int dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
-
-- func: prod(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
-
-- func: prod(Tensor self, int dim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
+- func: prod(Tensor self, int64_t dim, bool keepdim=false, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
 
 - func: t(Tensor(a) self) -> Tensor(a)
   matches_jit_signature: True

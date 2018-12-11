@@ -7615,11 +7615,54 @@ a")
                     x = torch.neg(x)
                 return x
 
+    def test_onnx_export_script_module_overload(self):
+        class ModuleToExport(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ModuleToExport, self).__init__()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return (torch.prod(x) +
+                        torch.prod(x, 0) +
+                        torch.prod(x, 0, False))
+
         mte = ModuleToExport()
-        outputs = mte(torch.zeros(1, 2, 3, dtype=torch.long))
+        outputs = mte(torch.zeros(1, 2, 3))
         self.assertExpected(torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs))
+
+    def test_onnx_export_script_module_overload_fail(self):
+        class ModuleToExport(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ModuleToExport, self).__init__()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return torch.prod(x, dtype=torch.double)
+
+        mte = ModuleToExport()
+        outputs = mte(torch.zeros(1, 2, 3))
+        with self.assertRaisesRegex(RuntimeError, "Couldn't export operator"):
+            torch.onnx.export_to_pretty_string(
+                mte, (torch.zeros(1, 2, 3),), None, verbose=False,
+                example_outputs=outputs)
+
+    def test_onnx_export_script_module_unsupported_optional(self):
+        class ModuleToExport(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ModuleToExport, self).__init__()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return torch.prod(x, dtype=torch.double)
+
+        mte = ModuleToExport()
+        outputs = mte(torch.zeros(1, 2, 3))
+        with self.assertRaisesRegex(RuntimeError, "Couldn't export operator"):
+            torch.onnx.export_to_pretty_string(
+                mte, (torch.zeros(1, 2, 3),), None, verbose=False,
+                example_outputs=outputs)
 
     def test_onnx_export_script_inline_params(self):
         class ModuleToInline(torch.jit.ScriptModule):

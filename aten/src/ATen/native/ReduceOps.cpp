@@ -242,10 +242,11 @@ static Tensor& prod_out(Tensor& result, const Tensor& self, IntArrayRef dim,
 
 static Tensor prod(const Tensor& self, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
   Tensor result;
-  native::prod_out(result, self, dim, keepdim, dtype);
+  return at::native::prod_impl(result, self, {}, false, dtype);
   return result;
 }
 
+<<<<<<< HEAD
 Tensor prod(const Tensor &self, ScalarType dtype) {
   return at::native::prod(self, {}, false, optional<ScalarType>(dtype));
 }
@@ -335,17 +336,8 @@ Tensor& sum_out(Tensor& result, const Tensor& self, IntArrayRef dim, ScalarType 
   return at::native::sum_out(result, self, dim, false, dtype);
 }
 
-Tensor& prod_out(Tensor& result, const Tensor& self, int64_t dim, bool keepdim, ScalarType dtype) {
-  return at::native::prod_out(
-      result, self, dim, keepdim, c10::optional<ScalarType>(dtype));
-}
-
-Tensor& prod_out(Tensor& result, const Tensor& self, int64_t dim, bool keepdim) {
-  return at::native::prod_out(result, self, dim, keepdim, c10::nullopt);
-}
-
-Tensor& prod_out(Tensor& result, const Tensor& self, int64_t dim, ScalarType dtype) {
-  return at::native::prod_out(result, self, dim, false, dtype);
+Tensor& prod_out(Tensor& result, const Tensor& self, int64_t dim, bool keepdim, c10::optional<ScalarType> dtype) {
+  return at::native::prod_impl(result, self, dim, keepdim, dtype);
 }
 
 Tensor mean(const Tensor& self, IntArrayRef dim, bool keepdim, ScalarType dtype) {
@@ -372,16 +364,10 @@ Tensor sum(const Tensor& self, IntArrayRef dim, ScalarType dtype) {
   return at::native::sum(self, dim, false, dtype);
 }
 
-Tensor prod(const Tensor& self, int64_t dim, bool keepdim, ScalarType dtype) {
-  return at::native::prod(self, dim, keepdim, c10::optional<ScalarType>(dtype));
-}
-
-Tensor prod(const Tensor& self, int64_t dim, bool keepdim) {
-  return at::native::prod(self, dim, keepdim, c10::nullopt);
-}
-
-Tensor prod(const Tensor& self, int64_t dim, ScalarType dtype) {
-  return at::native::prod(self, dim, false, dtype);
+Tensor prod(const Tensor& self, int64_t dim, bool keepdim, optional<ScalarType> dtype) {
+  Tensor result;
+  return at::native::prod_impl(result, self, dim, keepdim, dtype);
+  return result;
 }
 
 static Tensor squeeze_multiple(const Tensor& self, IntArrayRef dims) {

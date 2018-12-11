@@ -601,20 +601,11 @@ inline Tensor Tensor::std(bool unbiased) const {
 inline Tensor Tensor::std(IntArrayRef dim, bool unbiased, bool keepdim) const {
     return type().std(*this, dim, unbiased, keepdim);
 }
-inline Tensor Tensor::prod(ScalarType dtype) const {
+inline Tensor Tensor::prod(c10::optional<ScalarType> dtype) const {
     return type().prod(*this, dtype);
 }
-inline Tensor Tensor::prod() const {
-    return type().prod(*this);
-}
-inline Tensor Tensor::prod(int64_t dim, bool keepdim, ScalarType dtype) const {
+inline Tensor Tensor::prod(int64_t dim, bool keepdim, c10::optional<ScalarType> dtype) const {
     return type().prod(*this, dim, keepdim, dtype);
-}
-inline Tensor Tensor::prod(int64_t dim, bool keepdim) const {
-    return type().prod(*this, dim, keepdim);
-}
-inline Tensor Tensor::prod(int64_t dim, ScalarType dtype) const {
-    return type().prod(*this, dim, dtype);
 }
 inline Tensor Tensor::t() const {
     return type().t(*this);

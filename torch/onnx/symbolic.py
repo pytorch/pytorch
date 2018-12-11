@@ -116,6 +116,8 @@ def _unpack_list(list_value):
 
 def parse_args(*arg_descriptors):
     def decorator(fn):
+        fn._arg_descriptors = arg_descriptors
+
         def wrapper(g, *args):
             # some args may be optional, so the length may be smaller
             assert len(arg_descriptors) >= len(args)
@@ -128,6 +130,19 @@ def parse_args(*arg_descriptors):
             pass
         return wrapper
     return decorator
+
+
+def overload_by_arg_count(fn):
+    @wraps(fn)
+    def wrapper(g, *args):
+        overloads = fn(g, *args)
+        last_exception = None
+        for overload in overloads:
+            arg_descriptors = overload._arg_descriptors
+            if len(arg_descriptors) == len(args):
+                return overload(g, *args)
+        raise NotImplementedError("Unknown aten::{} signature".format(fn.__name__))
+    return wrapper
 
 
 def _scalar(x):
@@ -400,7 +415,23 @@ def _reduce_op_symbolic(onnx_op_name):
 
 mean = _reduce_op_symbolic('ReduceMean')
 sum = _reduce_op_symbolic('ReduceSum')
-prod = _reduce_op_symbolic('ReduceProd')
+
+
+@overload_by_arg_count
+def prod(g, *args, **kwargs):
+    @parse_args('v', 'none')
+    def prod_nodim(g, self, dtype):
+        if dtype.node().kind() != 'prim::none':
+            return _unimplemented("scale", "dtype")
+        return g.op('ReduceProd', self, keepdims_i=0)
+
+    @parse_args('v', 'i', 'i', 'none')
+    def prod_dim(g, self, dim, keepdim, dtype):
+        if dtype.node().kind() != 'prim::none':
+            return _unimplemented("scale", "dtype")
+        return g.op('ReduceProd', self, axes_i=[dim], keepdims_i=keepdim)
+
+    return prod_nodim, prod_dim
 
 
 @parse_args('v', 'i')

@@ -938,7 +938,7 @@ class ShapePropagator {
     static const register_formula_for all_reduce_ops_with_integer_upcast{
         {
             "aten::sum(Tensor self) -> Tensor",
-            "aten::prod(Tensor self) -> Tensor",
+            "aten::prod(Tensor self, *, ScalarType? dtype) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
           if (auto type =
@@ -1016,7 +1016,7 @@ class ShapePropagator {
     //   - has a bool keepdim argument
     static const register_formula_for dim_reduce_ops_with_integer_upcast{
         {
-            "aten::prod(Tensor self, int dim, bool keepdim) -> Tensor",
+            "aten::prod(Tensor self, int dim, bool keepdim, *, ScalarType? dtype) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
           return multidim_reduce_with_postprocess(
