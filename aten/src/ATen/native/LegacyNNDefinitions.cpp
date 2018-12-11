@@ -4,10 +4,10 @@
 namespace at { namespace native {
 
 Tensor & binary_cross_entropy_out(Tensor & output, const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction) {
-  return at::_thnn_binary_cross_entropy_out(output, self, target, weight, reduction);
+  return at::_thnn_binary_cross_entropy_forward_out(output, self, target, weight, reduction);
 }
 Tensor binary_cross_entropy(const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction) {
-  return at::_thnn_binary_cross_entropy(self, target, weight, reduction);
+  return at::_thnn_binary_cross_entropy_forward(self, target, weight, reduction);
 }
 Tensor & binary_cross_entropy_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction) {
   return at::_thnn_binary_cross_entropy_backward_out(grad_input, grad_output, self, target, weight, reduction);
@@ -18,11 +18,11 @@ Tensor binary_cross_entropy_backward(const Tensor & grad_output, const Tensor & 
 }
 
 Tensor & mse_loss_out(Tensor & output, const Tensor & self, const Tensor & target, int64_t reduction) {
-  return at::_thnn_mse_loss_out(output, self, target, reduction);
+  return at::_thnn_mse_loss_forward_out(output, self, target, reduction);
 }
 
 Tensor mse_loss(const Tensor & self, const Tensor & target, int64_t reduction) {
-  return at::_thnn_mse_loss(self, target, reduction);
+  return at::_thnn_mse_loss_forward(self, target, reduction);
 }
 
 Tensor & mse_loss_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, const Tensor & target, int64_t reduction) {
@@ -34,11 +34,11 @@ Tensor mse_loss_backward(const Tensor & grad_output, const Tensor & self, const 
 }
 
 Tensor & l1_loss_out(Tensor & output, const Tensor & self, const Tensor & target, int64_t reduction) {
-  return at::_thnn_l1_loss_out(output, self, target, reduction);
+  return at::_thnn_l1_loss_forward_out(output, self, target, reduction);
 }
 
 Tensor l1_loss(const Tensor & self, const Tensor & target, int64_t reduction) {
-  return at::_thnn_l1_loss(self, target, reduction);
+  return at::_thnn_l1_loss_forward(self, target, reduction);
 }
 
 Tensor & l1_loss_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, const Tensor & target, int64_t reduction) {
@@ -51,12 +51,12 @@ Tensor l1_loss_backward(const Tensor & grad_output, const Tensor & self, const T
 
 Tensor & multi_margin_loss_out(Tensor & output, const Tensor & self, const Tensor & target,
                                      Scalar p, Scalar margin, const Tensor & weight, int64_t reduction) {
-  return at::_thnn_multi_margin_loss_out(output, self, target, p, margin, weight, reduction);
+  return at::_thnn_multi_margin_loss_forward_out(output, self, target, p, margin, weight, reduction);
 }
 
 Tensor multi_margin_loss(const Tensor & self, const Tensor & target,
                                Scalar p, Scalar margin, const Tensor & weight, int64_t reduction) {
-  return at::_thnn_multi_margin_loss(self, target, p, margin, weight, reduction);
+  return at::_thnn_multi_margin_loss_forward(self, target, p, margin, weight, reduction);
 }
 
 Tensor & multi_margin_loss_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, const Tensor & target,
@@ -145,11 +145,11 @@ Tensor nll_loss2d_backward(const Tensor & grad_output, const Tensor & self, cons
 }
 
 Tensor & smooth_l1_loss_out(Tensor & output, const Tensor & self, const Tensor & target, int64_t reduction) {
-  return at::_thnn_smooth_l1_loss_out(output, self, target, reduction);
+  return at::_thnn_smooth_l1_loss_forward_out(output, self, target, reduction);
 }
 
 Tensor smooth_l1_loss(const Tensor & self, const Tensor & target, int64_t reduction) {
-  return at::_thnn_smooth_l1_loss(self, target, reduction);
+  return at::_thnn_smooth_l1_loss_forward(self, target, reduction);
 }
 
 Tensor & smooth_l1_loss_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self,
@@ -162,11 +162,11 @@ Tensor smooth_l1_loss_backward(const Tensor & grad_output, const Tensor & self, 
 }
 
 Tensor & soft_margin_loss_out(Tensor & output, const Tensor & self, const Tensor & target, int64_t reduction) {
-  return at::_thnn_soft_margin_loss_out(output, self, target, reduction);
+  return at::_thnn_soft_margin_loss_forward_out(output, self, target, reduction);
 }
 
 Tensor soft_margin_loss(const Tensor & self, const Tensor & target, int64_t reduction) {
-  return at::_thnn_soft_margin_loss(self, target, reduction);
+  return at::_thnn_soft_margin_loss_forward(self, target, reduction);
 }
 
 Tensor & soft_margin_loss_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self,
@@ -179,11 +179,11 @@ Tensor soft_margin_loss_backward(const Tensor & grad_output, const Tensor & self
 }
 
 Tensor & elu_out(Tensor & output, const Tensor & self, Scalar alpha, Scalar scale, Scalar input_scale) {
-  return at::_thnn_elu_out(output, self, alpha, scale, input_scale);
+  return at::_thnn_elu_forward_out(output, self, alpha, scale, input_scale);
 }
 
 Tensor elu(const Tensor & self, Scalar alpha, Scalar scale, Scalar input_scale) {
-  return at::_thnn_elu(self, alpha, scale, input_scale);
+  return at::_thnn_elu_forward(self, alpha, scale, input_scale);
 }
 
 Tensor & elu_backward_out(Tensor & grad_input, const Tensor & grad_output, Scalar alpha, Scalar scale, Scalar input_scale, const Tensor & output) {
@@ -195,15 +195,15 @@ Tensor elu_backward(const Tensor & grad_output, Scalar alpha, Scalar scale, Scal
 }
 
 Tensor & elu_(Tensor & self, Scalar alpha, Scalar scale, Scalar input_scale) {
-  return at::_thnn_elu_(self, alpha, scale, input_scale);
+  return at::_thnn_elu_forward_(self, alpha, scale, input_scale);
 }
 
 Tensor & glu_out(Tensor & output, const Tensor & self, int64_t dim) {
-  return at::_thnn_glu_out(output, self, dim);
+  return at::_thnn_glu_forward_out(output, self, dim);
 }
 
 Tensor glu(const Tensor & self, int64_t dim) {
-  return at::_thnn_glu(self, dim);
+  return at::_thnn_glu_forward(self, dim);
 }
 
 Tensor & glu_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, int64_t dim) {
@@ -215,11 +215,11 @@ Tensor glu_backward(const Tensor & grad_output, const Tensor & self, int64_t dim
 }
 
 Tensor & hardtanh_out(Tensor & output, const Tensor & self, Scalar min_val, Scalar max_val) {
-  return at::_thnn_hardtanh_out(output, self, min_val, max_val);
+  return at::_thnn_hardtanh_forward_out(output, self, min_val, max_val);
 }
 
 Tensor hardtanh(const Tensor & self, Scalar min_val, Scalar max_val) {
-  return at::_thnn_hardtanh(self, min_val, max_val);
+  return at::_thnn_hardtanh_forward(self, min_val, max_val);
 }
 
 Tensor & hardtanh_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, Scalar min_val, Scalar max_val) {
@@ -231,15 +231,15 @@ Tensor hardtanh_backward(const Tensor & grad_output, const Tensor & self, Scalar
 }
 
 Tensor & hardtanh_(Tensor & self, Scalar min_val, Scalar max_val) {
-  return at::_thnn_hardtanh_(self, min_val, max_val);
+  return at::_thnn_hardtanh_forward_(self, min_val, max_val);
 }
 
 Tensor & leaky_relu_out(Tensor & output, const Tensor & self, Scalar negative_slope) {
-  return at::_thnn_leaky_relu_out(output, self, negative_slope);
+  return at::_thnn_leaky_relu_forward_out(output, self, negative_slope);
 }
 
 Tensor leaky_relu(const Tensor & self, Scalar negative_slope) {
-  return at::_thnn_leaky_relu(self, negative_slope);
+  return at::_thnn_leaky_relu_forward(self, negative_slope);
 }
 
 Tensor & leaky_relu_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, Scalar negative_slope) {
@@ -251,7 +251,7 @@ Tensor leaky_relu_backward(const Tensor & grad_output, const Tensor & self, Scal
 }
 
 Tensor & leaky_relu_(Tensor & self, Scalar negative_slope) {
-  return at::_thnn_leaky_relu_(self, negative_slope);
+  return at::_thnn_leaky_relu_forward_(self, negative_slope);
 }
 
 Tensor & log_sigmoid_out(Tensor & output, const Tensor & self) {
@@ -280,11 +280,11 @@ Tensor log_sigmoid_backward(const Tensor & grad_output, const Tensor & self, con
 }
 
 Tensor & rrelu_with_noise_out(Tensor & output, const Tensor & self, const Tensor & noise, Scalar lower, Scalar upper, bool training, Generator * generator) {
-  return at::_thnn_rrelu_with_noise_out(output, self, noise, lower, upper, training, generator);
+  return at::_thnn_rrelu_with_noise_forward_out(output, self, noise, lower, upper, training, generator);
 }
 
 Tensor rrelu_with_noise(const Tensor & self, const Tensor & noise, Scalar lower, Scalar upper, bool training, Generator * generator) {
-  return at::_thnn_rrelu_with_noise(self, noise, lower, upper, training, generator);
+  return at::_thnn_rrelu_with_noise_forward(self, noise, lower, upper, training, generator);
 }
 
 Tensor & rrelu_with_noise_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, const Tensor & noise, Scalar lower, Scalar upper, bool training) {
@@ -296,15 +296,15 @@ Tensor rrelu_with_noise_backward(const Tensor & grad_output, const Tensor & self
 }
 
 Tensor & rrelu_with_noise_(Tensor & self, const Tensor & noise, Scalar lower, Scalar upper, bool training, Generator * generator) {
-  return at::_thnn_rrelu_with_noise_(self, noise, lower, upper, training, generator);
+  return at::_thnn_rrelu_with_noise_forward_(self, noise, lower, upper, training, generator);
 }
 
 Tensor & softplus_out(Tensor & output, const Tensor & self, Scalar beta, Scalar threshold) {
-  return at::_thnn_softplus_out(output, self, beta, threshold);
+  return at::_thnn_softplus_forward_out(output, self, beta, threshold);
 }
 
 Tensor softplus(const Tensor & self, Scalar beta, Scalar threshold) {
-  return at::_thnn_softplus(self, beta, threshold);
+  return at::_thnn_softplus_forward(self, beta, threshold);
 }
 
 Tensor & softplus_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, Scalar beta, Scalar threshold, const Tensor & output) {
@@ -316,11 +316,11 @@ Tensor softplus_backward(const Tensor & grad_output, const Tensor & self, Scalar
 }
 
 Tensor & softshrink_out(Tensor & output, const Tensor & self, Scalar lambd) {
-  return at::_thnn_softshrink_out(output, self, lambd);
+  return at::_thnn_softshrink_forward_out(output, self, lambd);
 }
 
 Tensor softshrink(const Tensor & self, Scalar lambd) {
-  return at::_thnn_softshrink(self, lambd);
+  return at::_thnn_softshrink_forward(self, lambd);
 }
 
 Tensor & softshrink_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, Scalar lambd) {
