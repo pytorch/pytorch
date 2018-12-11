@@ -628,11 +628,6 @@ if (BUILD_PYTHON)
   endif()
 
   # Finally, Copy all python files to build directory
-  # Generate and create all needed __init__.py files, if they aren't already
-  # present in the current source tree.
-  message(STATUS "Automatically generating missing __init__.py files.")
-  caffe_autogen_init_py_files()
-
   # Create a custom target that copies all python files.
   file(GLOB_RECURSE PYTHON_SRCS RELATIVE ${PROJECT_SOURCE_DIR}
        "${PROJECT_SOURCE_DIR}/caffe2/*.py")
