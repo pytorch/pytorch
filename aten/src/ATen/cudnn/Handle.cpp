@@ -3,7 +3,7 @@
 #include <ATen/cuda/Exceptions.h>
 
 #include <unordered_map>
-#include <stack>
+#include <vector>
 #include <mutex>
 
 namespace at { namespace native {
