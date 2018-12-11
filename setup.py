@@ -172,11 +172,11 @@ build_env_vars = ['BINARY', 'TEST', 'CAFFE2_OPS']
 from tools.setup_helpers.cuda import USE_CUDA, CUDA_HOME, CUDA_VERSION
 from tools.setup_helpers.build import (BUILD_BINARY, BUILD_TEST,
                                        BUILD_CAFFE2_OPS, USE_LEVELDB,
-                                       USE_LMDB, USE_OPENCV, USE_TENSORRT, USE_FFMPEG)
+                                       USE_LMDB, USE_OPENCV, USE_TENSORRT,
+                                       USE_FFMPEG, USE_FBGEMM)
 from tools.setup_helpers.rocm import USE_ROCM, ROCM_HOME, ROCM_VERSION
 from tools.setup_helpers.cudnn import (USE_CUDNN, CUDNN_LIBRARY,
                                        CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR)
-from tools.setup_helpers.fbgemm import USE_FBGEMM
 from tools.setup_helpers.miopen import (USE_MIOPEN, MIOPEN_LIBRARY,
                                         MIOPEN_LIB_DIR, MIOPEN_INCLUDE_DIR)
 from tools.setup_helpers.nccl import USE_NCCL, USE_SYSTEM_NCCL, NCCL_LIB_DIR, \

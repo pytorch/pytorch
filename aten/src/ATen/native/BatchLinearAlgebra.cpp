@@ -2,6 +2,7 @@
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/LegacyTHFunctions.h>
 
 #include <ATen/native/LinearAlgebraUtils.h>
 
@@ -156,7 +157,7 @@ std::tuple<Tensor,Tensor> gesv(const Tensor& self, const Tensor& A) {
     // TODO: #7102: It's not necessary to have gesv (single) bindings for both
     // TH and ATen. We should remove the TH gesv bindings, especially
     // since the lapackGesv function is already in ATen.
-    return at::_th_gesv_single(self, A);
+    return at::legacy::th::_th_gesv_single(self, A);
   }
 
   Tensor self_broadcasted, A_broadcasted;
@@ -168,7 +169,7 @@ std::tuple<Tensor&,Tensor&> gesv_out(Tensor& solution, Tensor& lu, const Tensor&
   AT_CHECK(self.dim() == 2 && A.dim() == 2, 
            "torch.gesv() with the `out` keyword does not support batching. "
            "b.dim() (", self.dim(), ") and A.dim() (", A.dim(), ") must both be 2.");
-  return at::_th_gesv_single_out(solution, lu, self, A);
+  return at::legacy::th::_th_gesv_single_out(solution, lu, self, A);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -230,7 +231,7 @@ Tensor inverse(const Tensor &self) {
     return at::empty_like(self);
   }
   if (self.dim() == 2) {
-    return at::_th_getri_single(self);
+    return at::legacy::th::_th_getri_single(self);
   }
   squareCheckInputs(self);
   return at::_inverse_helper(self);
@@ -289,7 +290,7 @@ Tensor _potrs_helper_cpu(const Tensor& self, const Tensor& A, bool upper) {
 // Supports arbitrary batch dimensions for self and A
 Tensor potrs(const Tensor& self, const Tensor& A, bool upper) {
   if (self.dim() <= 2 && A.dim() <= 2) {
-    return at::_th_potrs_single(self, A, upper);
+    return at::legacy::th::_th_potrs_single(self, A, upper);
   }
 
   Tensor self_broadcasted, A_broadcasted;
@@ -301,7 +302,7 @@ Tensor& potrs_out(Tensor& result, const Tensor& self, const Tensor& A, bool uppe
   AT_CHECK(self.dim() == 2 && A.dim() == 2,
            "torch.potrs() with the `out` keyword does not support batching. "
            "b.dim() (", self.dim(), ") and A.dim() (", A.dim(), ") must both be 2.");
-  return at::_th_potrs_single_out(result, self, A, upper);
+  return at::legacy::th::_th_potrs_single_out(result, self, A, upper);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -346,7 +347,7 @@ Tensor cholesky(const Tensor &self, bool upper) {
     return at::empty_like(self);
   }
   if (self.dim() == 2) {
-    return at::_th_potrf_single(self, upper);
+    return at::legacy::th::_th_potrf_single(self, upper);
   }
   squareCheckInputs(self);
 

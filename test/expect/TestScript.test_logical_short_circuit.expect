@@ -6,7 +6,7 @@ graph(%t : Tensor) {
   %5 : bool = prim::If(%2)
     block0() {
       %6 : Tensor = aten::select(%t, %4, %c1.1)
-      %7 : bool = prim::TensorToBool(%6)
+      %7 : bool = prim::Bool(%6)
       -> (%7)
     }
     block1() {
@@ -23,7 +23,7 @@ graph(%t : Tensor) {
         }
         block1() {
           %10 : Tensor = aten::select(%t, %4, %c1.1)
-          %11 : bool = prim::TensorToBool(%10)
+          %11 : bool = prim::Bool(%10)
           -> (%11)
         }
       -> (%9)
