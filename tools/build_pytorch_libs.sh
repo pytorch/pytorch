@@ -342,4 +342,23 @@ $SYNC_COMMAND -r "$INSTALL_DIR/include" .
 if [ -d "$INSTALL_DIR/bin/" ]; then
     $SYNC_COMMAND -r "$INSTALL_DIR/bin/"/* .
 fi
+
+# Copy the test files to pytorch/caffe2 manually
+# They were built in pytorch/torch/lib/tmp_install/test
+# Why do we do this? So, setup.py has this section called 'package_data' which
+# you need to specify to include non-default files (usually .py files).
+# package_data takes a map from 'python package' to 'globs of files to
+# include'. By 'python package', it means a folder with an __init__.py file
+# that's not excluded in the find_packages call earlier in setup.py. So to
+# include our cpp_test into the site-packages folder in
+# site-packages/caffe2/cpp_test, we have to copy the cpp_test folder into the
+# root caffe2 folder and then tell setup.py to include them. Having another
+# folder like site-packages/caffe2_cpp_test would also be possible by adding a
+# caffe2_cpp_test folder to pytorch with an __init__.py in it.
+if [[ "$INSTALL_TEST" == "ON" ]]; then
+    echo "Copying $INSTALL_DIR/test to $BASE_DIR/caffe2/cpp_test"
+    mkdir -p "$BASE_DIR/caffe2/cpp_test/"
+    $SYNC_COMMAND -r "$INSTALL_DIR/test/"/* "$BASE_DIR/caffe2/cpp_test/"
+fi
+
 popd > /dev/null
