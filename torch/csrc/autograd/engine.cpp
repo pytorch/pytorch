@@ -30,12 +30,13 @@
 #if defined(USE_CUDA) || defined(USE_ROCM)
 #ifdef USE_CUDA
 #include <cuda.h>
+#include <c10/cuda/CUDAGuard.h>
 #endif  // USE_CUDA
 #ifdef USE_ROCM
 #include <hip/hip_runtime.h>
+#include <c10/hip/HIPGuard.h>
 #endif  // USE_ROCM
 #include <THC/THC.h>
-#include <c10/cuda/CUDAGuard.h>
 #endif  // defined(USE_CUDA) || defined(USE_ROCM)
 
 namespace torch { namespace autograd {
@@ -211,13 +212,18 @@ Engine::~Engine() = default;
 // not CUDA.
 auto Engine::thread_init(int device) -> void {
   THInferNumThreads();
-#if defined(USE_CUDA) || defined(USE_ROCM)
+#if defined(USE_CUDA)
   // NB: We MUST NOT construct the guard for device -1,
   // as in some settings we compile with USE_CUDA, but
   // have lazy stubs for CUDA functionality (so actually
   // attempting to setup a guard(-1) will cause an
   // error, because it will still query cudaGetDevice).
   at::cuda::OptionalCUDAGuard guard;
+  if (device != -1) {
+    guard.set_index(device);
+  }
+#elif defined(USE_ROCM)
+  at::cuda::OptionalHIPGuard guard;
   if (device != -1) {
     guard.set_index(device);
   }
