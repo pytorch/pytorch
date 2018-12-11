@@ -615,8 +615,7 @@ bool CudnnConvTransposeGradientOp<T>::RunOnDevice() {
 
   // Now, actually run the computation.
   if (!no_bias_) {
-    auto* dbias = Output(BIAS_OR_INPUT_GRAD);
-    dbias->Resize(C);
+    auto* dbias = Output(BIAS_OR_INPUT_GRAD, {C}, at::dtype<T>());
     CUDNN_ENFORCE(cudnnConvolutionBackwardBias(
         cudnn_wrapper_.inline_cudnn_handle(),
         cudnnTypeWrapper<T>::kOne(),
