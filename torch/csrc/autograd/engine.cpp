@@ -223,7 +223,7 @@ auto Engine::thread_init(int device) -> void {
     guard.set_index(device);
   }
 #elif defined(USE_ROCM)
-  at::cuda::OptionalHIPGuard guard;
+  at::cuda::OptionalHIPGuardMasqueradingAsCUDA guard;
   if (device != -1) {
     guard.set_index(device);
   }

@@ -2,8 +2,12 @@
 
 #include <ATen/cuda/CUDAConfig.h>
 
-// Here just to make sure any transitive includes also show up
-#include <c10/cuda/CUDAGuard.h>
+// The includes of CUDAGuard.h
+#include <c10/cuda/impl/CUDAGuardImpl.h>
+#include <c10/cuda/CUDAMacros.h>
+#include <c10/DeviceType.h>
+#include <c10/impl/InlineDeviceGuard.h>
+#include <c10/impl/InlineStreamGuard.h>
 
 #if AT_ROCM_ENABLED()
 #include <c10/hip/impl/HIPGuardImpl.h>
