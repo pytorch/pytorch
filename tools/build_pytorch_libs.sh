@@ -287,7 +287,11 @@ function build_caffe2() {
       fi
 
       for proto_file in $(pwd)/caffe2/proto/*.py; do
-          cp $proto_file "$(pwd)/../caffe2/proto/"
+          # __init__.py is not auto-generated, copying it breaks
+          # mod-times for rebuild logic
+          if [[ "$proto_file" != "$(pwd)/caffe2/proto/__init__.py" ]]; then
+            cp $proto_file "$(pwd)/../caffe2/proto/"
+          fi
       done
   fi
 
