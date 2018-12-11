@@ -17,9 +17,11 @@ IF(NOT AT_INSTALL_BIN_DIR OR NOT AT_INSTALL_LIB_DIR OR NOT AT_INSTALL_INCLUDE_DI
 ENDIF()
 
 CONFIGURE_FILE(Config.h.in "${CMAKE_CURRENT_SOURCE_DIR}/Config.h")
-if(USE_CUDA)
-  configure_file(cuda/CUDAConfig.h.in "${CMAKE_CURRENT_SOURCE_DIR}/cuda/CUDAConfig.h")
-endif()
+# TODO: Don't unconditionally generate CUDAConfig.h.in.  Unfortuantely,
+# this file generates AT_ROCM_ENABLED() which is required by the miopen
+# files, which are compiled even if we are doing a vanilla CUDA build.
+# Once we properly split CUDA and HIP in ATen, we can remove this code.
+configure_file(cuda/CUDAConfig.h.in "${CMAKE_CURRENT_SOURCE_DIR}/cuda/CUDAConfig.h")
 if(USE_ROCM)
   configure_file(hip/HIPConfig.h.in "${CMAKE_CURRENT_SOURCE_DIR}/hip/HIPConfig.h")
 endif()
