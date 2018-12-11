@@ -533,8 +533,9 @@ class TestNN(NNTestCase):
     def _zero_grad_parameters(self, module):
         for p in module.parameters():
             if p.grad is not None:
+                with torch.no_grad():
+                    p.grad.zero_()
                 p.grad.detach_()
-                p.grad.zero_()
 
     def _get_parameters(self, module):
         params = []
