@@ -296,10 +296,13 @@ DEFINE_TORCH_TENSOR_OP(bool, bool, at::empty({}, at::CPU(at::kByte).options()).f
             tensor = tensor.to(dev, scalar_type);
           }
 
-          if (tensor.scalar_type() != scalarTypeFromJitType(FloatType::get()) &&
-            tensor.numel() == 0) {
+          auto default_type = at::typeMetaToScalarType(at::get_default_dtype());
+
+          if (dtype.isNone() && tensor.scalar_type() != default_type &&
+              tensor.numel() == 0) {
             AT_WARN("Creating a tensor from an empty ", elem_type->str(),
-              "list will create a float tensor in python and a tensor of type ", elem_type->str(), " in torchscript.\n",
+              "list will create a tensor of default floating point type  (currently ", default_type,
+              ") in python but a tensor of type ", elem_type->str(), " in torchscript.\n",
               "Pass in a dtype argument to ensure consistent behavior");
           }
 
