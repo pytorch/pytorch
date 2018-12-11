@@ -1,8 +1,8 @@
 #pragma once
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/data/samplers/base.h>
 #include <torch/types.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <cstddef>
 #include <vector>
@@ -26,10 +26,12 @@ class RandomSampler : public Sampler<> {
   /// The constructor will eagerly allocate all required indices, which is the
   /// sequence `0 ... size - 1`. `index_dtype` is the data type of the stored
   /// indices. You can change it to influence memory usage.
-  TORCH_API explicit RandomSampler(int64_t size, Dtype index_dtype = torch::kInt64);
+  TORCH_API explicit RandomSampler(
+      int64_t size,
+      Dtype index_dtype = torch::kInt64);
 
   /// Resets the `RandomSampler` to a new set of indices.
-  TORCH_API void reset() override;
+  TORCH_API void reset(optional<size_t> new_size = nullopt) override;
 
   /// Returns the next batch of indices.
   TORCH_API optional<std::vector<size_t>> next(size_t batch_size) override;

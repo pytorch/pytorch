@@ -219,8 +219,16 @@ if(NOT BUILD_ATEN_ONLY)
   else()
     target_link_libraries(caffe2 PUBLIC protobuf::libprotobuf)
   endif()
-endif()
 
+  #cmake only check for separate OpenMP library on AppleClang 7+
+  #https://github.com/Kitware/CMake/blob/42212f7539040139ecec092547b7d58ef12a4d72/Modules/FindOpenMP.cmake#L252
+  if (WITH_OPENMP AND CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
+    if (CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL "7.0" OR
+        CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "7.0")
+      target_link_libraries(caffe2 PRIVATE ${OpenMP_libomp_LIBRARY})
+    endif()
+  endif()
+endif()
 target_link_libraries(caffe2 PUBLIC c10)
 target_link_libraries(caffe2 PUBLIC ${Caffe2_PUBLIC_DEPENDENCY_LIBS})
 target_link_libraries(caffe2 PRIVATE ${Caffe2_DEPENDENCY_LIBS})
@@ -231,10 +239,8 @@ target_include_directories(caffe2 SYSTEM PRIVATE "${Caffe2_DEPENDENCY_INCLUDE}")
 # Set standard properties on the target
 torch_set_target_props(caffe2)
 
-if (MSVC)
-target_compile_options(caffe2 INTERFACE "-std=c++11")
-else()
-target_compile_options(caffe2 INTERFACE "$<$<COMPILE_LANGUAGE:CXX>:-std=c++11>")
+if (NOT MSVC)
+  target_compile_options(caffe2 INTERFACE "$<$<COMPILE_LANGUAGE:CXX>:-std=c++11>")
 endif()
 
 target_compile_options(caffe2 PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
@@ -459,7 +465,13 @@ if (BUILD_TEST)
   endif()
 endif()
 
-if (BUILD_PYTHON)
+# Note: we only install the caffe2 python files if BUILD_CAFFE2_OPS is ON
+# This is because the build rules here written in such a way that they always
+# appear to need to be re-run generating >600 pieces of work during the pytorch
+# rebuild step. The long-term fix should be to clean up these rules so they
+# only rerun when needed.
+
+if (BUILD_PYTHON AND BUILD_CAFFE2_OPS)
   # Python site-packages
   # Get canonical directory for python site packages (relative to install
   # location).  It varies from system to system.

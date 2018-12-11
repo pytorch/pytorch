@@ -9,7 +9,7 @@
 #include <mutex>
 #endif
 
-#include "THCGeneral.h"
+#include <THC/THCGeneral.h>
 
 THC_API THCDeviceAllocator* THCCachingAllocator_get(void);
 THC_API void THCCachingAllocator_emptyCache(void);
@@ -27,4 +27,5 @@ THC_API uint64_t THCCachingAllocator_maxMemoryCached(int device);
 THC_API std::mutex* THCCachingAllocator_getCudaFreeMutex();
 #endif
 
+AT_CUDA_API std::shared_ptr<void> THCCaching_CUDAIpcDevptr(std::string handle);
 #endif

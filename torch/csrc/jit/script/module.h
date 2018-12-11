@@ -1,20 +1,20 @@
 #pragma once
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/graph_executor.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/passes/shape_analysis.h"
-#include "torch/csrc/jit/argument_spec.h"
-#include "torch/csrc/jit/function_schema.h"
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/named_value.h"
-#include "torch/csrc/jit/source_range.h"
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/graph_executor.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/argument_spec.h>
+#include <torch/csrc/jit/function_schema.h>
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/named_value.h>
+#include <torch/csrc/jit/source_range.h>
 
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 #include <torch/csrc/utils/memory.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <c10/util/ArrayRef.h>
-#include "c10/util/Optional.h"
+#include <c10/util/Optional.h>
 
 #include <functional>
 #include <memory>
@@ -39,12 +39,15 @@ namespace torch { namespace jit { namespace script {
 // Note: because Method/Module are exposed to python these
 // classes use python method naming conventions
 
+struct Module;
+
 struct Method {
-  Method(std::string name, bool optimize,
+  Method(Module* owner, std::string name, bool optimize,
          std::shared_ptr<Graph> graph,
          std::vector<at::Tensor*> initial_members,
          std::function<void(Method&)> method_creator)
-  : name_(std::move(name))
+  : owner_(owner)
+  , name_(std::move(name))
   , graph_(std::move(graph))
   , optimize(optimize)
   , member_inputs(std::move(initial_members))
@@ -121,7 +124,7 @@ struct Method {
     }
     const auto size = stack.size();
     setInputTypes(*retval, ArgumentSpec(with_grad, std::move(stack), size));
-    PropagateInputShapes(*retval);
+    PropagateInputShapes(retval);
     return retval;
   }
 
@@ -132,7 +135,7 @@ struct Method {
     }
     if (propagate) {
       setInputTypes(*retval, ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
-      PropagateInputShapes(*retval);
+      PropagateInputShapes(retval);
     }
     JIT_ASSERT(retval->inputs().size() == inputs.size());
     for (size_t i=0; i < retval->inputs().size(); ++i) {
@@ -186,6 +189,11 @@ struct Method {
     return optimize;
   }
 
+  // the module that contains this method.
+  Module& owner() const {
+    return *owner_;
+  }
+
 private:
 
   static FunctionSchema defaultSchemaFor(const Method& method) {
@@ -203,10 +211,6 @@ private:
     }
     return { method.name(), std::move(args), std::move(returns) };
   }
-
-  std::string name_;
-  std::shared_ptr<Graph> graph_; // for debugging and for inlining
-  bool optimize;
 
   GraphExecutor& get_executor() {
     std::call_once(executor_init, [&]{
@@ -242,6 +246,15 @@ private:
       }
     }
   }
+
+
+  // Methods are uniqued onwed by a single module. This raw pointer allows
+  // looking up the module.
+  Module* owner_;
+
+  std::string name_;
+  std::shared_ptr<Graph> graph_; // for debugging and for inlining
+  bool optimize;
 
   GraphExecutor executor; // for execution
   // member_inputs are a list of additional arguments appended to graph that are
@@ -317,7 +330,7 @@ struct Module {
   }
 
   bool is_optimized() const {
-    return optimize; 
+    return optimize;
   }
 
   IValue forward(std::vector<IValue> inputs) {
@@ -338,12 +351,12 @@ struct Module {
 
   Method& create_method(const std::string & name, std::shared_ptr<Graph> graph, std::vector<at::Tensor*> member_inputs) {
     JIT_ASSERT(graph);
-    std::unique_ptr<Method> method(new Method(name, optimize, std::move(graph), std::move(member_inputs), nullptr));
+    std::unique_ptr<Method> method(new Method(this, name, optimize, std::move(graph), std::move(member_inputs), nullptr));
     return *methods.insert(name, std::move(method));
   }
 
   Method& create_method(const std::string & name, std::function<void(Method&)> creator) {
-    std::unique_ptr<Method> method(new Method(name, optimize, std::make_shared<Graph>(), {}, creator));
+    std::unique_ptr<Method> method(new Method(this, name, optimize, std::make_shared<Graph>(), {}, creator));
     return *methods.insert(name, std::move(method));
   }
 
@@ -390,6 +403,12 @@ struct Module {
       return pm->get();
     }
     return nullptr;
+  }
+  void apply(std::function<void(Module&)> fn) {
+    for (auto &submod : get_modules()) {
+      submod.value().module->apply(fn);
+    }
+    fn(*this);
   }
 
   /// Recursively casts all parameters to the given `dtype` and `device`.

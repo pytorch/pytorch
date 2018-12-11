@@ -105,6 +105,8 @@ std::vector<NetObserverCreator>* GetNetObserverCreators() {
 }
 
 const std::unordered_map<std::string, std::string>& defaultOverrides() {
+  // redirecting legacy net types to async_scheduling (except for 'simple');
+  // async_scheduling checks net type for backward compatibility
   static const std::unordered_map<std::string, std::string> overrides = {
       {"dag", "async_scheduling"},
       {"prof_dag", "async_scheduling"},
@@ -177,6 +179,14 @@ unique_ptr<NetBase> CreateNet(
 
 TaskThreadPoolBase* ExecutorHelper::GetPool(
     const DeviceOption& /* unused */) const {
+  CAFFE_THROW("Not implemented");
+}
+
+std::vector<OperatorBase*> ExecutorHelper::GetOperators() const {
+  CAFFE_THROW("Not implemented");
+}
+
+int ExecutorHelper::GetNumWorkers() const {
   CAFFE_THROW("Not implemented");
 }
 

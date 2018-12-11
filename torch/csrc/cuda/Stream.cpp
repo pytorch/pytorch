@@ -1,7 +1,7 @@
-#include "Stream.h"
+#include <torch/csrc/cuda/Stream.h>
 
-#include "THP.h"
-#include "Module.h"
+#include <torch/csrc/THP.h>
+#include <torch/csrc/cuda/Module.h>
 
 #include <c10/cuda/CUDAStream.h>
 

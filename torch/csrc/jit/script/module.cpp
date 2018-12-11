@@ -1,9 +1,9 @@
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/script/module.h"
-#include "torch/csrc/jit/script/compiler.h"
-#include "torch/csrc/jit/script/error_report.h"
-#include "torch/csrc/jit/export.h"
-#include "torch/csrc/jit/operator.h"
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/script/error_report.h>
+#include <torch/csrc/jit/export.h>
+#include <torch/csrc/jit/operator.h>
 
 namespace torch { namespace jit { namespace script {
 

@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/SpatialClassNLLCriterion.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/SpatialClassNLLCriterion.cu"
 #else
 
 void THNN_(SpatialClassNLLCriterion_shapeCheck)(

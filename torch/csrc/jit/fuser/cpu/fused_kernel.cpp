@@ -1,10 +1,11 @@
-#include "torch/csrc/jit/fuser/cpu/fused_kernel.h"
+#include <torch/csrc/jit/fuser/cpu/fused_kernel.h>
 
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/code_template.h"
-#include "torch/csrc/jit/fuser/cpu/temp_file.h"
-#include "torch/csrc/jit/fuser/cpu/dynamic_library.h"
-#include "torch/csrc/utils/memory.h"
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/code_template.h>
+#include <torch/csrc/jit/fuser/compiler.h>
+#include <torch/csrc/jit/fuser/cpu/temp_file.h>
+#include <torch/csrc/jit/fuser/cpu/dynamic_library.h>
+#include <torch/csrc/utils/memory.h>
 
 #include <sstream>
 #include <cstdlib>
@@ -38,15 +39,11 @@ struct CompilerConfig {
     if (!programExists(cxx)) {
       cxx = "";
     }
-
-    const char* debug_env = getenv("PYTORCH_FUSION_DEBUG");
-    debug = debug_env && atoi(debug_env) != 0;
   }
 
   ~CompilerConfig() = default;
 
   std::string cxx = "g++"; // compiler location
-  bool debug = false; // emit debugging information about fusions
   bool openmp = true;
 };
 
@@ -123,7 +120,7 @@ FusedKernelCPU::FusedKernelCPU(
   cpp_file.write(code_);
   cpp_file.sync();
   runCompiler(cpp_file.name(), so_file.name());
-  if (config.debug) disas(so_file.name());
+  if (debugFuser() >= 2) disas(so_file.name());
   so_lib = make_unique<DynamicLibrary>(so_file.name().c_str());
   #pragma GCC diagnostic ignored "-Wpedantic"
     kernel = reinterpret_cast<void(*)(uint32_t, void**)>(so_lib->sym(name_.c_str()));

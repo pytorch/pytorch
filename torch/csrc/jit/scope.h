@@ -1,8 +1,8 @@
 #pragma once
-#include "torch/csrc/jit/interned_strings.h"
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/WindowsTorchApiMacro.h"
-#include "c10/macros/Macros.h"
+#include <torch/csrc/jit/interned_strings.h>
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/macros/Macros.h>
 
 #include <memory>
 

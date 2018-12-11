@@ -1,12 +1,13 @@
-#include "torch/csrc/jit/passes/constant_propagation.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/constants.h"
-#include "torch/csrc/jit/interpreter.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/ivalue.h"
-#include "torch/csrc/jit/operator.h"
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/utils/functional.h"
+#include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/interpreter.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ivalue.h>
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/passes/alias_analysis.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/utils/functional.h>
 
 namespace torch { namespace jit {
 
@@ -115,19 +116,20 @@ bool removeExtraNodeOutputs(Node *n) {
   return initial_outputs != true_block->outputs().size();
 }
 
-} // anonymous namespace
+void ConstantPropagation(Block* block, const AliasDb& aliasDb, bool recurse);
 
-void ConstantPropagation(Node* n, bool recurse) {
+void ConstantPropagation(Node* n, const AliasDb& aliasDb, bool recurse) {
   bool constant_inputs =
       std::all_of(n->inputs().begin(), n->inputs().end(), [&](Value* v) {
         return v->node()->kind() == prim::Constant;
       });
-  bool supported_node = !n->kind().is_onnx() && skip_list.count(n->kind()) == 0
-    && !n->isNondeterministic();
+  bool supported_node = !n->kind().is_onnx() &&
+      skip_list.count(n->kind()) == 0 && !n->isNondeterministic() &&
+      !aliasDb.hasWriters(n) && !aliasDb.hasWildcard(n);
   auto run_blocks = [&]() {
     if (recurse) {
       for (Block * block : n->blocks()) {
-        ConstantPropagation(block, recurse);
+        ConstantPropagation(block, aliasDb, recurse);
       }
     }
   };
@@ -149,16 +151,19 @@ void ConstantPropagation(Node* n, bool recurse) {
   run_blocks();
 }
 
-void ConstantPropagation(Block* block, bool recurse) {
+void ConstantPropagation(Block* block, const AliasDb& aliasDb, bool recurse) {
   for(auto it = block->nodes().begin(); it != block->nodes().end();) {
     Node *n = *it;
     it++; //advance iterator bc the current node may be destroyed
-    ConstantPropagation(n, recurse);
+    ConstantPropagation(n, aliasDb, recurse);
   }
 }
+} // anonymous namespace
+
 
 void ConstantPropagation(std::shared_ptr<Graph>& graph) {
-  ConstantPropagation(graph->block(), true);
+  const auto aliasDb = AliasAnalysis(graph);
+  ConstantPropagation(graph->block(), aliasDb, true);
   EliminateDeadCode(graph);
 }
 

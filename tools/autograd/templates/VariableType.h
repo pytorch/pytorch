@@ -56,9 +56,6 @@ struct TORCH_API VariableType final : public at::TypeDefault {
   static std::vector<at::Type*> allCUDATypes();
   static std::vector<at::Type*> allCPUTypes();
 
-  Tensor & s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const override;
-  Tensor & _s_copy_from(const Tensor & self, Tensor & dst, bool non_blocking) const override;
-
   void backward(
       Tensor& self,
       c10::optional<Tensor> gradient,

@@ -4,7 +4,7 @@ from ..._jit_internal import weak_module, weak_script_method
 
 
 class _DropoutNd(Module):
-    __constants__ = ['p', 'inplace', 'training']
+    __constants__ = ['p', 'inplace']
 
     def __init__(self, p=0.5, inplace=False):
         super(_DropoutNd, self).__init__()

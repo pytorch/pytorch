@@ -7,7 +7,7 @@
 
 #include "Functions.h"
 #include <ATen/Utils.h>
-#include <ATen/core/TensorOptions.h>
+#include <c10/core/TensorOptions.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/SparseTensorUtils.h>
@@ -76,9 +76,16 @@ Tensor maybe_multiply(const Tensor & t, const Scalar & s) {
   }
 }
 
-int64_t _safe_size(IntList sizes, int64_t dim) {
-  dim = at::maybe_wrap_dim(dim, sizes.size());
-  return sizes.size() != 0 ? sizes[dim] : 1;
+int64_t _safe_size(IntList sizes, IntList dim) {
+  int64_t size = 1;
+  if (sizes.size() == 0) {
+    return 1;
+  }
+  for (auto d : dim) {
+    d = at::maybe_wrap_dim(d, sizes.size());
+    size *= sizes[d];
+  }
+  return size;
 }
 
 Tensor norm_backward(const Tensor & grad, const Tensor & self, const Scalar & p_, const Tensor & norm) {
@@ -152,23 +159,37 @@ Tensor permute_backwards(const Tensor & grad, IntList fwd_dims) {
   return grad.permute(dims);
 }
 
+Tensor unsqueeze_multiple(const Tensor & t, IntList dim, size_t n_dims) {
+    auto dims_to_unsqueeze = at::dim_list_to_bitset(dim, n_dims);
+    Tensor res = t;
+    for (size_t i = 0; i < n_dims; i++){
+      if (dims_to_unsqueeze[i]) {
+        res = res.unsqueeze(i);
+      }
+    }
+    return res;
+}
+
 Tensor sum_backward(const Tensor & grad, IntList sizes, IntList dims, bool keepdim) {
   if (!keepdim && sizes.size() > 0) {
     if (dims.size()==1) {
       return grad.unsqueeze(dims[0]).expand(sizes);
     } else {
-      auto dims_to_unsqueeze = at::dim_list_to_bitset(dims, sizes.size());
-      Tensor res = grad;
-      for (size_t i = 0; i < sizes.size(); i++){
-        if (dims_to_unsqueeze[i]) {
-          res = res.unsqueeze(i);
-        }
-      }
+      Tensor res = unsqueeze_multiple(grad, dims, sizes.size());
       return res.expand(sizes);
     }
   } else {
     return grad.expand(sizes);
   }
+}
+
+std::vector<int64_t> reverse_list(const IntList list) {
+  auto result = std::vector<int64_t>();
+  result.reserve(list.size());
+  for (auto iter = list.rbegin(); iter != list.rend(); iter++) {
+    result.push_back(*iter);
+  }
+  return result;
 }
 
 Tensor reverse_dim(const Tensor& t, int64_t dim) {
@@ -495,6 +516,13 @@ Tensor mm_mat2_backward(const Tensor & grad, const Tensor & mat1, IntList sizes,
   }
 }
 
+Tensor _sparse_addmm_sparse_backward(const Tensor& grad, const Tensor& sparse_, const Tensor& dense, const Scalar& alpha) {
+  AT_ASSERT(sparse_.is_sparse());
+  auto sparse = sparse_.coalesce();
+  Tensor grad_sparse = maybe_multiply(grad.mm(dense.t()), alpha);
+  return grad_sparse.sparse_mask(at::SparseTensorRef(sparse));
+}
+
 Tensor renorm_backward(const Tensor & grad, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
   auto transposed_sizes = self.transpose(dim, 0).sizes().vec();
   auto flatten = [&](const Tensor & t) {
@@ -613,14 +641,14 @@ Tensor var_backward(const Tensor & grad, const Tensor & self, bool unbiased) {
   return (2.0 / (self.numel() - unbiased)) * grad * (self - self.mean());
 }
 
-Tensor var_backward(Tensor grad, const Tensor & self, int64_t dim, bool unbiased, bool keepdim) {
+Tensor var_backward(Tensor grad, const Tensor & self, IntList dim, bool unbiased, bool keepdim) {
   if (self.dim() == 0) {
     return var_backward(grad, self, unbiased);
   }
   if (!keepdim && self.dim() > 1) {
-    grad = grad.unsqueeze(dim);
+    grad = unsqueeze_multiple(grad, dim, self.sizes().size());
   }
-  return (2.0 / (self.size(dim) - unbiased)) * grad * (self - self.mean(dim, true));
+  return (2.0 / (_safe_size(self.sizes(), dim) - unbiased)) * grad * (self - self.mean(dim, true));
 }
 
 Tensor masked_scatter_backward(const Tensor & grad, const Tensor & mask, IntList sizes) {
@@ -895,7 +923,7 @@ Tensor soft_margin_loss_double_backward_grad_output(const Tensor & grad, const T
 
 Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scalar beta, Scalar threshold) {
   auto x = (input * beta);
-  return _sigmoid_backward(grad, x.sigmoid()) * (x < threshold).toType(grad.type()) * beta;
+  return sigmoid_backward(grad, x.sigmoid()) * (x < threshold).toType(grad.type()) * beta;
 }
 
 
@@ -1582,8 +1610,8 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   }
 
   auto ut = u.t();
-  auto im = eye(m, self.options());
-  auto in = eye(n, self.options());
+  auto im = at::eye(m, self.options());
+  auto in = at::eye(n, self.options());
   auto sigma_mat = sigma.diag();
   auto sigma_mat_inv = sigma.pow(-1).diag();
   auto sigma_expanded_sq = sigma.pow(2).expand_as(sigma_mat);
@@ -2030,6 +2058,12 @@ Tensor sparse_constructor_values_backward(const Tensor& sparse_grad_out, const T
   auto flattened_dense_grad = dense_grad.view(flattened_grad_shape);
   auto flattened_indices = at::sparse::flatten_indices(indices, full_size);
   return flattened_dense_grad.index_select(0, flattened_indices);
+}
+
+Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
+  AT_ASSERT(input_.is_sparse());
+  auto input = input_.coalesce();
+  return grad.sparse_mask(at::SparseTensorRef(input));
 }
 
 // Because the backward of pad(input, pads) is just pad(grad_output, [-p for p in pads])

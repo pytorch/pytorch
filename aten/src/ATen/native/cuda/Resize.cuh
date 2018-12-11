@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ATen/ATen.h"
-#include "THC/THCTensor.hpp"
+#include <ATen/ATen.h>
+#include <THC/THCTensor.hpp>
 
 #include <c10/cuda/CUDAGuard.h>
 

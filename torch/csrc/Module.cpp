@@ -1,11 +1,10 @@
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 #include <sys/types.h>
 
 #ifndef _MSC_VER
 #include <sys/socket.h>
 #endif
 
-#include <stdbool.h>
 #include <unordered_map>
 #include <cstdlib>
 #include <libshm.h>
@@ -18,39 +17,40 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "THP.h"
-#include "torch/csrc/DynamicTypes.h"
-#include "torch/csrc/Device.h"
-#include "torch/csrc/Dtype.h"
-#include "torch/csrc/DataLoader.h"
-#include "torch/csrc/Generator.h"
-#include "torch/csrc/Layout.h"
-#include "torch/csrc/TypeInfo.h"
-#include "torch/csrc/autograd/generated/python_nn_functions.h"
-#include "torch/csrc/autograd/python_legacy_variable.h"
-#include "torch/csrc/autograd/python_variable.h"
-#include "torch/csrc/tensor/python_tensor.h"
-#include "torch/csrc/utils/tensor_dtypes.h"
-#include "torch/csrc/utils/python_strings.h"
-#include "torch/csrc/utils/tensor_layouts.h"
-#include "torch/csrc/utils/tensor_numpy.h"
-#include "torch/csrc/jit/python_tracer.h"
-#include "torch/csrc/jit/init.h"
-#include "torch/csrc/jit/python_ir.h"
-#include "torch/csrc/onnx/init.h"
+#include <torch/csrc/THP.h>
+#include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/Device.h>
+#include <torch/csrc/Dtype.h>
+#include <torch/csrc/DataLoader.h>
+#include <torch/csrc/Generator.h>
+#include <torch/csrc/Layout.h>
+#include <torch/csrc/TypeInfo.h>
+#include <torch/csrc/autograd/generated/python_nn_functions.h>
+#include <torch/csrc/autograd/python_legacy_variable.h>
+#include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/multiprocessing/init.h>
+#include <torch/csrc/tensor/python_tensor.h>
+#include <torch/csrc/utils/tensor_dtypes.h>
+#include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/tensor_layouts.h>
+#include <torch/csrc/utils/tensor_numpy.h>
+#include <torch/csrc/jit/python_tracer.h>
+#include <torch/csrc/jit/init.h>
+#include <torch/csrc/jit/python_ir.h>
+#include <torch/csrc/onnx/init.h>
 
 #ifdef USE_CUDNN
-#include "cudnn.h"
+#include <cudnn.h>
 #endif
 
 #ifdef USE_DISTRIBUTED
 #ifdef USE_C10D
-#include "torch/csrc/distributed/c10d/c10d.h"
+#include <torch/csrc/distributed/c10d/c10d.h>
 #endif
 #endif
 
 #define WITH_NUMPY_IMPORT_ARRAY
-#include "torch/csrc/utils/numpy_stub.h"
+#include <torch/csrc/utils/numpy_stub.h>
 
 namespace py = pybind11;
 
@@ -223,6 +223,18 @@ PyObject *THPModule_addDocStr(PyObject *_unused, PyObject *args)
           "method '%s' already has a docstring", m->d_method->ml_name);
     }
     m->d_method->ml_doc = doc_str;
+  } else if (strcmp(Py_TYPE(obj)->tp_name, "getset_descriptor") == 0) {
+    //NOLINTNEXTLINE(cppcoreguidelines-pro-type-cstyle-cast)
+    PyGetSetDescrObject* m = (PyGetSetDescrObject *)obj;
+    if (m->d_getset->doc) {
+      //NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
+      return PyErr_Format(PyExc_RuntimeError,
+          "attribute '%s' already has a docstring", m->d_getset->name);
+    }
+    // This field is not const for python < 3.7 yet the content is
+    // never modified.
+    //NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+    m->d_getset->doc = const_cast<char *>(doc_str);
   } else {
     return PyErr_Format(PyExc_TypeError,
         "don't know how to add docstring to type '%s'", Py_TYPE(obj)->tp_name);
@@ -290,6 +302,7 @@ void DLPack_Capsule_Destructor(PyObject* data) {
   DLManagedTensor * dlMTensor = (DLManagedTensor *)PyCapsule_GetPointer(data, "dltensor");
   if (dlMTensor) {
     // the dlMTensor has not been consumed, call deleter ourselves
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
     dlMTensor->deleter(const_cast<DLManagedTensor*>(dlMTensor));
   } else {
     // the dlMTensor has been consumed
@@ -522,6 +535,7 @@ PyObject* initModule() {
   THPUtils_addPyMethodDefs(methods, TorchMethods);
   THPUtils_addPyMethodDefs(methods, DataLoaderMethods);
   THPUtils_addPyMethodDefs(methods, torch::autograd::python_functions());
+  THPUtils_addPyMethodDefs(methods, torch::multiprocessing::python_functions());
 #ifdef USE_CUDA
   THPUtils_addPyMethodDefs(methods, THCPModule_methods());
 #endif
