@@ -151,7 +151,7 @@ class MaxPool2d(_MaxPoolNd):
 @weak_module
 class MaxPool3d(_MaxPoolNd):
     r"""Applies a 3D max pooling over an input signal composed of several input
-    planes. This is not a test
+    planes.
 
     In the simplest case, the output value of the layer with input size :math:`(N, C, D, H, W)`,
     output :math:`(N, C, D_{out}, H_{out}, W_{out})` and :attr:`kernel_size` :math:`(kD, kH, kW)`
