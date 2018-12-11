@@ -1406,51 +1406,9 @@ Node* Graph::createNumToTensor(Value* value) {
   return result;
 }
 
-Node* Graph::createBoolToTensor(Value* value) {
-  auto typ = value->type();
-  Node * result = create(prim::BoolToTensor, {value});
-  if (!typ->isSubtypeOf(BoolType::get())) {
-    AT_ERROR("Cannot create bool type from ", typ->str());
-  }
-  result->output()->setType(CompleteTensorType::fromBoolType());
-  return result;
-}
-Node* Graph::createTensorToNum(const TypePtr& type, Value* value) {
-  auto* result = create(prim::TensorToNum, {value});
-  result->output()->setType(type);
-  return result;
-}
-
 Node* Graph::createImplicitTensorToNum(const TypePtr& type, Value* value) {
   auto* result = create(prim::ImplicitTensorToNum, {value});
   result->output()->setType(type);
-  return result;
-}
-
-Node* Graph::createTensorToBool(Value* value) {
-  auto* result = create(prim::TensorToBool, {value});
-  result->output()->setType(BoolType::get());
-  return result;
-}
-
-Node* Graph::createIntToFloat(Value* value) {
-  JIT_ASSERT(*value->type() == *IntType::get());
-  auto* result = create(prim::IntToFloat, {value});
-  result->output()->setType(FloatType::get());
-  return result;
-}
-
-Node* Graph::createFloatToInt(Value* value) {
-  JIT_ASSERT(*value->type() == *FloatType::get());
-  auto* result = create(prim::FloatToInt, {value});
-  result->output()->setType(IntType::get());
-  return result;
-}
-
-Node* Graph::createStringToFloat(Value* value) {
-  JIT_ASSERT(*value->type() == *StringType::get());
-  auto* result = create(prim::StringToFloat, {value});
-  result->output()->setType(FloatType::get());
   return result;
 }
 

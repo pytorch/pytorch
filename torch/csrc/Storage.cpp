@@ -17,30 +17,15 @@
 #include <torch/csrc/copy_utils.h>
 #include <torch/csrc/DynamicTypes.h>
 
-#ifdef USE_CUDA
-#include <THC/THCStorage.hpp>
-#endif
-
 #include <torch/csrc/generic/Storage.cpp>
 #include <TH/THGenerateAllTypes.h>
 
 #include <torch/csrc/generic/Storage.cpp>
 #include <TH/THGenerateHalfType.h>
 
-// NB: If you ever divest libtorch of USE_CUDA, you'll have to virtualize
-// the CUDA call.
 template<>
 void THPPointer<THStorage>::free() {
   if (ptr) {
-    if (ptr->data_ptr().device().is_cpu()) {
-      THStorage_free(ptr);
-    } else {
-      AT_ASSERT(ptr->data_ptr().device().is_cuda());
-#ifdef USE_CUDA
-      THStorage_free(ptr);
-#else
-      AT_ERROR("Cannot free THCStorage when not built with CUDA");
-#endif
-    }
+    THStorage_free(ptr);
   }
 }
