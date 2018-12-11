@@ -113,7 +113,7 @@ def weak_script_method(fn):
 def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
     """
     Dispatches to either of 2 weak script functions based on a boolean argument.
-    In Torch Script, the boolean argument must be constant so that the correct
+    In TorchScript, the boolean argument must be constant so that the correct
     function to use can be determined at compile time.
     """
     if _compiled_weak_fns.get(if_true) is None or _compiled_weak_fns.get(if_false) is None:

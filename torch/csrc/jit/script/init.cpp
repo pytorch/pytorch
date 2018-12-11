@@ -688,7 +688,8 @@ void initJitScriptBindings(PyObject* module) {
         std::vector<at::Tensor> tensors;
         PythonPrint(ss, self, tensors, false);
         return ss.str();
-      });
+      })
+      .def("apply", &Module::apply);
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
     .def("graph", [&](Method& self) {
