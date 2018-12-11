@@ -2272,7 +2272,8 @@ C10_MAPPINGS = collections.OrderedDict([
     ("c10/cuda/CUDAMacros.h", ("c10/hip/HIPMacros.h", API_C10)),
     ("c10/cuda/CUDAMathCompat.h", ("c10/hip/HIPMathCompat.h", API_C10)),
     ("c10/cuda/CUDAFunctions.h", ("c10/hip/HIPFunctions.h", API_C10)),
-    ("c10/cuda/CUDAGuard.h", ("c10/hip/HIPGuard.h", API_C10)),
+    # TODO: Undo this special-case
+    ("c10/cuda/CUDAGuard.h", ("ATen/cuda/detail/CUDAHIPCompat.h", API_C10)),
     ("c10/cuda/CUDAStream.h", ("c10/hip/HIPStream.h", API_C10)),
     ("c10/cuda/impl/CUDATest.h", ("c10/hip/impl/HIPTest.h", API_C10)),
     ("c10/cuda/impl/CUDAGuardImpl.h", ("c10/hip/impl/HIPGuardImpl.h", API_C10)),
@@ -2284,14 +2285,23 @@ C10_MAPPINGS = collections.OrderedDict([
     # ("cuda::device_count", ("hip::device_count", API_C10)),
     ("cuda::current_device", ("hip::current_device", API_C10)),
     ("cuda::set_device", ("hip::set_device", API_C10)),
-    ("cuda::CUDAGuard", ("hip::HIPGuard", API_C10)),
-    ("CUDAGuard", ("HIPGuard", API_C10)),
-    ("cuda::OptionalCUDAGuard", ("hip::OptionalHIPGuard", API_C10)),
-    ("OptionalCUDAGuard", ("OptionalHIPGuard", API_C10)),
-    ("cuda::CUDAStreamGuard", ("hip::HIPStreamGuard", API_C10)),
-    ("CUDAStreamGuard", ("HIPStreamGuard", API_C10)),
-    ("cuda::OptionalCUDAStreamGuard", ("hip::OptionalHIPStreamGuard", API_C10)),
-    ("OptionalCUDAStreamGuard", ("OptionalHIPStreamGuard", API_C10)),
+
+    ("c10::cuda::CUDAGuard", ("::at::cuda::detail::HIPGuardMasqueradingAsCUDA", API_C10)),
+    ("cuda::CUDAGuard", ("::at::cuda::detail::HIPGuardMasqueradingAsCUDA", API_C10)),
+    ("CUDAGuard", ("::at::cuda::detail::HIPGuardMasqueradingAsCUDA", API_C10)),
+
+    ("c10::cuda::OptionalCUDAGuard", ("::at::cuda::detail::OptionalHIPGuardMasqueradingAsCUDA", API_C10)),
+    ("cuda::OptionalCUDAGuard", ("::at::cuda::detail::OptionalHIPGuardMasqueradingAsCUDA", API_C10)),
+    ("OptionalCUDAGuard", ("::at::cuda::detail::OptionalHIPGuardMasqueradingAsCUDA", API_C10)),
+
+    ("c10::cuda::CUDAStreamGuard", ("::at::cuda::detail::HIPStreamGuardMasqueradingAsCUDA", API_C10)),
+    ("cuda::CUDAStreamGuard", ("::at::cuda::detail::HIPStreamGuardMasqueradingAsCUDA", API_C10)),
+    ("CUDAStreamGuard", ("::at::cuda::detail::HIPStreamGuardMasqueradingAsCUDA", API_C10)),
+
+    ("c10::cuda::OptionalCUDAStreamGuard", ("::at::cuda::detail::OptionalHIPStreamGuardMasqueradingAsCUDA", API_C10)),
+    ("cuda::OptionalCUDAStreamGuard", ("::at::cuda::detail::OptionalHIPStreamGuardMasqueradingAsCUDA", API_C10)),
+    ("OptionalCUDAStreamGuard", ("::at::cuda::detail::OptionalHIPStreamGuardMasqueradingAsCUDA", API_C10)),
+
     ("cuda::CUDAStream", ("hip::HIPStream", API_C10)),
     ("CUDAStream", ("HIPStream", API_C10)),
     ("cuda::getStreamFromPool", ("hip::getStreamFromPool", API_C10)),
@@ -2302,7 +2312,6 @@ C10_MAPPINGS = collections.OrderedDict([
     ("getCurrentCUDAStream", ("getCurrentHIPStream", API_C10)),
     ("cuda::setCurrentCUDAStream", ("hip::setCurrentHIPStream", API_C10)),
     ("setCurrentCUDAStream", ("setCurrentHIPStream", API_C10)),
-    ("c10::cuda::impl::CUDAGuardImpl", ("c10::hip::impl::HIPGuardImpl", API_C10)),
 ])
 
 # NB: C10 mappings are more specific than Caffe2 mappings, so run them
