@@ -2051,6 +2051,14 @@ class _TestTorchMixin(object):
                 lambda n, d: n.std(d, ddof=1 if unbiased else 0),
                 use_integral=False)
 
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    def test_var_dim(self):
+        for unbiased in [False, True]:
+            self._test_dim_ops(
+                lambda t, d: t.var(d, unbiased=unbiased),
+                lambda n, d: n.var(d, ddof=1 if unbiased else 0),
+                use_integral=False)
+
     def test_sum_out(self):
         x = torch.rand(100, 100)
         res1 = torch.sum(x, 1)
