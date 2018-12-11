@@ -819,6 +819,20 @@ class TestDataLoader(TestCase):
         arr = np.array([[[object(), object(), object()]]])
         self.assertRaises(TypeError, lambda: _utils.collate.default_collate(arr))
 
+    @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
+    def test_default_collate_shared_tensor(self):
+        import unittest.mock
+        import numpy as np
+        t_in = torch.zeros(1)
+        n_in = np.zeros(1)
+
+        self.assertEqual(t_in.is_shared(), False)
+
+        self.assertEqual(default_collate([t_in]).is_shared(), False)
+        self.assertEqual(default_collate([n_in]).is_shared(), False)
+        with unittest.mock.patch('torch.utils.data.dataloader._use_shared_memory', True):
+            self.assertEqual(default_collate([t_in]).is_shared(), True)
+            self.assertEqual(default_collate([n_in]).is_shared(), True)
 
 class StringDataset(Dataset):
     def __init__(self):
