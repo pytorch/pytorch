@@ -34,7 +34,6 @@ def get_test_name(testcase):
 def gen_input(testcase):
     if "input_size" in testcase:
         if testcase["input_size"] == () and "desc" in testcase and testcase["desc"][-6:] == "scalar":
-            print()
             testcase["input_size"] = (1,);
         return Variable(torch.randn(*testcase["input_size"]))
     elif "input_fn" in testcase:
