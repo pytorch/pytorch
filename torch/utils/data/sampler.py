@@ -31,7 +31,7 @@ class SequentialSampler(Sampler):
         self.data_source = data_source
 
     def __iter__(self):
-        return iter(range(len(self.data_source)))
+        return iter(self.data_source)
 
     def __len__(self):
         return len(self.data_source)
