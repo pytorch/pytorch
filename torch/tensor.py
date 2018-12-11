@@ -183,7 +183,7 @@ class Tensor(torch._C._TensorBase):
       also update the original tensor. Now, these in-place changes will not update the
       original tensor anymore, and will instead trigger an error.
       For sparse tensors:
-      in-place indices / values changes (such as `zero_` / `copy_` / `add_`) to the
+      In-place indices / values changes (such as `zero_` / `copy_` / `add_`) to the
       returned tensor will not update the original tensor either, and will instead
       trigger an error.
     """)
