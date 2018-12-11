@@ -127,7 +127,7 @@ struct SymbolicVariable {
     return v->owningGraph()->insert(aten::size, {v});
   }
   SymbolicVariable gradSumToSize(Value * size) const {
-    return create(prim::AutodiffGradSumToSize, {*this, size})[0];
+    return create(prim::GradSumToSize, {*this, size})[0];
   }
   SymbolicVariable expand(Value * size) const {
     return v->owningGraph()->insert(aten::expand, {v, size});

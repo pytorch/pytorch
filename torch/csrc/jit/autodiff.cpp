@@ -79,7 +79,7 @@ bool isDifferentiable(Node * n) {
     "aten::sinh(Tensor self) -> Tensor",
     "aten::tan(Tensor self) -> Tensor",
     "aten::trunc(Tensor self) -> Tensor",
-    "prim::AutodiffGradSumToSize(Tensor(a) self, int[] size) -> Tensor(a)",
+    "prim::GradSumToSize(Tensor(a) self, int[] size) -> Tensor(a)",
     "aten::log_softmax(Tensor self, int dim) -> Tensor",
     "aten::avg_pool2d(Tensor self, int[] kernel_size, int[] stride, int[] padding, bool ceil_mode, bool count_include_pad) -> Tensor",
     "aten::max_pool2d_with_indices(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> (Tensor, Tensor)",
@@ -262,7 +262,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     } else if (node->matches("aten::atan(Tensor self) -> Tensor")) {
       return {grads.at(0) / (inputs.at(0) * inputs.at(0) + at::Scalar(1))};
 
-    } else if (node->matches("prim::AutodiffGradSumToSize(Tensor(a) self, int[] size) -> Tensor(a)")) {
+    } else if (node->matches("prim::GradSumToSize(Tensor(a) self, int[] size) -> Tensor(a)")) {
       Value * self_size;
       {
         WithInsertPoint insert_guard { node };

@@ -125,10 +125,10 @@ void PeepholeOptimizeImpl(Block * block, bool addmm_fusion_enabled) {
       if (input_node->kind() == prim::NumToTensor) {
         node->output()->replaceAllUsesWith(input_node->input());
       }
-    } else if (node->matches("prim::AutodiffGradSumToSize(Tensor(a) self, int[] size) -> Tensor(a)")) {
+    } else if (node->matches("prim::GradSumToSize(Tensor(a) self, int[] size) -> Tensor(a)")) {
       auto uses = node->output()->uses();
       for (Use u : uses) {
-        if (u.user->matches("prim::AutodiffGradSumToSize(Tensor(a) self, int[] size) -> Tensor(a)")) {
+        if (u.user->matches("prim::GradSumToSize(Tensor(a) self, int[] size) -> Tensor(a)")) {
           u.user->replaceInput(0, node->inputs().at(0));
         }
       }

@@ -139,7 +139,7 @@ struct GraphFuser {
     // are not necessarily correct.
     if (node->owningBlock() != block_) return false;
     return node->kind() == prim::FusionGroup
-      || node->kind() == prim::AutodiffGradSumToSize
+      || node->kind() == prim::GradSumToSize
       || isSimpleMap(node);
   }
 
@@ -272,8 +272,8 @@ struct GraphFuser {
     WithInsertPoint guard(*subgraph.nodes().begin());
     for (auto input : n->inputs()) {
       if (inputs_map.count(input) == 0) {
-        // We allow (any and in particular) shape arguments to AutodiffGradSumToSize or tensor arguments
-        if (input->type()->isSubtypeOf(DynamicType::get()) || n->kind() == prim::AutodiffGradSumToSize) {
+        // We allow (any and in particular) shape arguments to GradSumToSize or tensor arguments
+        if (input->type()->isSubtypeOf(DynamicType::get()) || n->kind() == prim::GradSumToSize) {
           auto in_group = subgraph.addInput();
           in_group->setType(input->type());
           inputs_map[input] = in_group;
@@ -878,21 +878,21 @@ struct GraphFuser {
     return shape_of;
   }
 
-  // This function moves AutodiffGradSumToSize nodes from a fusion group to just after the fusion
+  // This function moves GradSumToSize nodes from a fusion group to just after the fusion
   // group. This allows the fuser to work on the fusion group without having to deal with
-  // AutodiffGradSumToSize.
-  // Note that correctness relies on the invariant that AutodiffGradSumToSize is only applied
+  // GradSumToSize.
+  // Note that correctness relies on the invariant that GradSumToSize is only applied
   // to gradient nodes created by autodiff. This is important because it ensures that
   // in the mul and div nodes only one argument (in the case of diff the numerator)
   // has a summed value. If two arguments to mul had one, we would be in trouble,
   // but thanks to the chain rule, we're OK.
-  void moveAutodiffGradSumToSize(Node * fusion_group) {
+  void moveGradSumToSize(Node * fusion_group) {
     if (fusion_group->kind() != prim::FusionGroup) return;
     auto subgraph = fusion_group->g(attr::Subgraph);
 
     // map from input nodes on the fusion group's subgraph to the corresponding
     // nodes in the the surrounding graph
-    // We need it to get the AutodiffGradSumToSize's size inputs outside the fusion group
+    // We need it to get the GradSumToSize's size inputs outside the fusion group
     std::unordered_map<Value*,Value*> inputs_map;
     size_t i = 0;
     JIT_ASSERT(fusion_group->inputs().size() == subgraph->inputs().size());
@@ -914,8 +914,8 @@ struct GraphFuser {
     // Scan the graph. As we will delete nodes, we use the backward ordering.
     for (auto it = subgraph->nodes().rbegin(); it != subgraph->nodes().rend();) {
       auto * node = *it;
-      ++it;  // We delete the AutodiffGradSumToSize nodes, so increment the iterator now.
-      if (node->kind() == prim::AutodiffGradSumToSize) {
+      ++it;  // We delete the GradSumToSize nodes, so increment the iterator now.
+      if (node->kind() == prim::GradSumToSize) {
         use_list uses_to_process(node->output()->uses());
         while (! uses_to_process.empty()) {
           auto user = uses_to_process[0].user;
@@ -931,7 +931,7 @@ struct GraphFuser {
             // note that for mul, we know (from the chain rule) that only one factor will be stemming from a calculation involving gradients
             // so we know that we can move SumToSize across it
             uses_to_process.insert(uses_to_process.end(), user->output()->uses().begin(), user->output()->uses().end());
-          } else if (user->kind() == prim::AutodiffGradSumToSize) {
+          } else if (user->kind() == prim::GradSumToSize) {
             // we can just keep the last, so we're done here (this case might not happen due to how we organize the search and remove nodes...)
           } else if (user->kind() == prim::Return) {
             // only if we don't already have a sumToSize for this
@@ -947,18 +947,18 @@ struct GraphFuser {
           }
 
         }
-        // remove the AutodiffGradSumToSize node, a new node outside the fusion subgraph will be inserted below
+        // remove the GradSumToSize node, a new node outside the fusion subgraph will be inserted below
         node->output()->replaceAllUsesWith(node->inputs()[0]);
         node->destroy();
       }
     }
-    // insert the AutodiffGradSumToSize nodes for the outputs
+    // insert the GradSumToSize nodes for the outputs
     auto* graph = fusion_group->owningGraph();
     WithInsertPoint insert_guard { fusion_group->next() };
     for (size_t i = 0; i < sumToSize_per_output.size(); i++) {
       if (sumToSize_per_output[i]) {
-        Node * sumToSize_node = graph->insertNode(graph->create(prim::AutodiffGradSumToSize, {fusion_group->outputs()[i], sumToSize_per_output[i]}));
-         // replace all downstream uses of the fusion group output with that of AutodiffGradSumToSize, but not the one we just created
+        Node * sumToSize_node = graph->insertNode(graph->create(prim::GradSumToSize, {fusion_group->outputs()[i], sumToSize_per_output[i]}));
+         // replace all downstream uses of the fusion group output with that of GradSumToSize, but not the one we just created
         for (auto u : fusion_group->outputs()[i]->uses()) {
           if (u.user != sumToSize_node) {
             u.user->replaceInput(u.offset, sumToSize_node->output());
@@ -967,7 +967,7 @@ struct GraphFuser {
       }
     }
 
-    // Remove empty inputs (those are the size args used for the deleted AutodiffGradSumToSize nodes). They're bloat and the fuser can't handle them.
+    // Remove empty inputs (those are the size args used for the deleted GradSumToSize nodes). They're bloat and the fuser can't handle them.
     for (int64_t i = static_cast<int64_t>(fusion_group->inputs().size()) - 1; i >= 0; --i) {
       if (subgraph->inputs()[i]->uses().empty()) {
         subgraph->eraseInput(i);
@@ -1039,9 +1039,9 @@ struct GraphFuser {
       it = scanNodeForChunks(*it);
     }
 
-    // Push AutodiffGradSumToSize out of fusion groups
+    // Push GradSumToSize out of fusion groups
     for (Node * n : block_->nodes()) {
-      moveAutodiffGradSumToSize(n);
+      moveGradSumToSize(n);
     }
 
     // Remove outputs that have been added only because we need their size

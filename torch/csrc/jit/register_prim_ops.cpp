@@ -431,7 +431,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        "prim::AutodiffGradSumToSize(Tensor(a) self, int[] size) -> Tensor(a)",
+        "prim::GradSumToSize(Tensor(a) self, int[] size) -> Tensor(a)",
         [](const Node* node) {
           return [=](Stack& stack) {
             at::Tensor self;
