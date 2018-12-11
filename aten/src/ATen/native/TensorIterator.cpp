@@ -379,7 +379,7 @@ void TensorIterator::serial_for_each(const loop_t& loop, Range range) const {
 }
 
 void TensorIterator::serial_for_each(const loop2d_t& loop, Range range) const {
-  if(range.end == 0) {
+  if (range.size() == 0) {
     return;
   }
   auto strides = get_strides();
