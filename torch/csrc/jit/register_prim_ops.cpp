@@ -748,7 +748,8 @@ typename TList::element_type::ElemType& getItem(TList& list, int64_t idx) {
   return list->elements()[normalized_idx];
 }
 
-bool getItem(const std::vector<bool>& list, int64_t idx) {
+// cannot return a reference to an element in a bool vector
+bool getBoolItem(const std::vector<bool>& list, int64_t idx) {
   const int64_t list_size = list.size();
   const int64_t normalized_idx = normalizeIndex(idx, list_size);
   if (normalized_idx < 0 || normalized_idx >= list_size) {
@@ -792,7 +793,7 @@ Operation listSelect<Shared<BoolList>>(const Node* node) {
     int64_t idx;
     pop(stack, list, idx);
 
-    auto element = getItem(list->elements(), idx);
+    auto element = getBoolItem(list->elements(), idx);
     push(stack, std::move(element));
     return 0;
   };

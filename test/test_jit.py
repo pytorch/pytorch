@@ -3130,6 +3130,17 @@ class TestScript(JitTestCase):
             return torch.ones(x), x
         self.checkScript(stuff3, ([3, 2],))
 
+    def bool_list_io(self):
+        @torch.jit.script
+        def stuff4(x):
+            # type: (List[bool]) -> Tuple[List[bool], List[bool], List[List[bool]]]
+            return x, [True, False], [[True]]
+
+        li_1, li_2, li_3 = stuff4([True])
+        li_3 = li_3[0]
+        for li in [li_1, li_2, li_3]:
+            self.assertTrue(type(li[0]) == type(True))
+
     def test_nested_list(self):
         def foo(z):
             # type: (Tuple[int, List[List[int]]]) -> int
@@ -5019,15 +5030,11 @@ a")
             foo()
 
     def test_torch_tensor_empty_list(self):
-        code = dedent('''
         def func():
             return torch.tensor(torch.jit.annotate(List[int], []))
-        ''')
-        scope = {}
-        exec(code, globals(), scope)
-        cu = torch.jit.CompilationUnit(code)
-        t1 = cu.func()
-        t2 = scope['func']()
+        cu = torch.jit.script(func)
+        t1 = cu()
+        t2 = func()
 
         # torchscript returns int tensor, python returns float tensor
         self.assertNotEqual(t1.dtype, t2.dtype)
