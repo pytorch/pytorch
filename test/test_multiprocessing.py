@@ -568,7 +568,7 @@ class TestMultiprocessing(TestCase):
 
     def test_queue_noctx(self):
         """ Pool should not crash when instantiated without a context """
-        q = mp.pools.Pool()
+        q = mp.pool.Pool()
 
 
 if __name__ == '__main__':
