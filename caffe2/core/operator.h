@@ -207,7 +207,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       int idx,
       at::TensorOptions options,
       const Tensor& src,
-      BaseContext* context = nullptr) {
+      bool async = false) {
     Tensor* t = Output<Tensor>(idx, options.device().type());
     // TODO:
     // We plan to use the following:
@@ -216,7 +216,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     CAFFE_ENFORCE(
         !t->dtype_initialized() || t->dtype() == src.dtype(),
         "We don't allow a change of data type in OutputTensor");
-    t->CopyFrom(src, context);
+    t->CopyFrom(src, async);
     return t;
   }
 

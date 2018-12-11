@@ -2428,11 +2428,12 @@ class _TestTorchMixin(object):
 
         # test copy with numpy
         if TEST_NUMPY:
-            a = np.array([5.])
-            res1 = torch.tensor(a)
-            self.assertEqual(5., res1[0].item())
-            a[0] = 7.
-            self.assertEqual(5., res1[0].item())
+            for dtype in [np.float64, np.int64, np.int8, np.uint8]:
+                a = np.array([5.]).astype(dtype)
+                res1 = torch.tensor(a)
+                self.assertEqual(5., res1[0].item())
+                a[0] = 7.
+                self.assertEqual(5., res1[0].item())
 
     def test_tensor_factory_copy_var(self):
 
@@ -2638,11 +2639,12 @@ class _TestTorchMixin(object):
 
         if TEST_NUMPY:
             # doesn't copy
-            n = np.random.rand(5, 6)
-            n_astensor = torch.as_tensor(n)
-            self.assertEqual(torch.tensor(n), n_astensor)
-            n_astensor[0][0] = 250.7
-            self.assertEqual(torch.tensor(n), n_astensor)
+            for dtype in [np.float64, np.int64, np.int8, np.uint8]:
+                n = np.random.rand(5, 6).astype(dtype)
+                n_astensor = torch.as_tensor(n)
+                self.assertEqual(torch.tensor(n), n_astensor)
+                n_astensor[0][0] = 25.7
+                self.assertEqual(torch.tensor(n), n_astensor)
 
             # changing dtype causes copy
             n = np.random.rand(5, 6).astype(np.float32)
@@ -7930,6 +7932,37 @@ class _TestTorchMixin(object):
                 f.seek(0)
                 c = torch.load(handle)
             self._test_serialization_assert(b, c)
+        # test non-ascii encoding of bytes arrays/strings
+        # The following bytes are produced by serializing
+        #   [b'\xc5\xbc\xc4\x85\xc4\x85\xc3\xb3\xc5\xbc\xc4\x85\xc5\xbc', torch.zeros(1, dtype=torch.float), 2]
+        # in Python 2.7.12 and PyTorch 0.4.1, where the first element contains
+        # bytes of some utf-8 characters (i.e., `utf8_str.encode('utf-8')`).
+        serialized = (
+            b'\x80\x02\x8a\nl\xfc\x9cF\xf9 j\xa8P\x19.\x80\x02M\xe9\x03.'
+            b'\x80\x02}q\x01(U\x10protocol_versionq\x02M\xe9\x03U\n'
+            b'type_sizesq\x03}q\x04(U\x03intq\x05K\x04U\x05shortq\x06K\x02U'
+            b'\x04longq\x07K\x04uU\rlittle_endianq\x08\x88u.\x80\x02]q'
+            b'\x01(U\x0e\xc5\xbc\xc4\x85\xc4\x85\xc3\xb3\xc5\xbc\xc4\x85'
+            b'\xc5\xbcq\x02ctorch._utils\n_rebuild_tensor_v2\nq\x03((U'
+            b'\x07storageq\x04ctorch\nFloatStorage\nq\x05U\x0845640624q'
+            b'\x06U\x03cpuq\x07\x8a\x01\x01NtQK\x00K\x01\x85K\x01\x85'
+            b'\x89NtRq\x08K\x02e.\x80\x02]q\x01U\x0845640624q\x02a.\x01\x00'
+            b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
+        )
+        buf = io.BytesIO(serialized)
+        utf8_bytes = b'\xc5\xbc\xc4\x85\xc4\x85\xc3\xb3\xc5\xbc\xc4\x85\xc5\xbc'
+        utf8_str = utf8_bytes.decode('utf-8')
+        if PY3:
+            with self.assertRaisesRegex(UnicodeDecodeError, "'ascii' codec can't decode byte"):
+                loaded = torch.load(buf)
+            buf.seek(0)
+            loaded_utf8 = torch.load(buf, encoding='utf-8')
+            self.assertEqual(loaded_utf8, [utf8_str, torch.zeros(1, dtype=torch.float), 2])
+            buf.seek(0)
+            loaded_bytes = torch.load(buf, encoding='bytes')
+        else:
+            loaded_bytes = torch.load(buf)
+        self.assertEqual(loaded_bytes, [utf8_bytes, torch.zeros(1, dtype=torch.float), 2])
 
     def test_serialization_filelike(self):
         # Test serialization (load and save) with a filelike object
@@ -8743,6 +8776,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             np.int64,
             np.int32,
             np.int16,
+            np.int8,
             np.uint8,
             np.longlong,
         ]
@@ -8792,7 +8826,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             np.int64,
             np.int32,
             np.int16,
-            np.uint8
+            np.int8,
+            np.uint8,
         ]
 
         incorrect_byteorder = '>' if sys.byteorder == 'little' else '<'

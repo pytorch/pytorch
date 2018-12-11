@@ -1,7 +1,7 @@
 #include <ATen/core/TensorImpl.h>
 
 #include <c10/core/Backend.h>
-#include <ATen/core/WrapDimMinimal.h>
+#include <c10/core/WrapDimMinimal.h>
 #include <c10/util/Optional.h>
 
 namespace at {

@@ -140,9 +140,9 @@ class TestBatchMatMul(serial.SerializedTestCase):
     )
     def test_batch_matmul(self, C, M, K, N, trans_a, trans_b, dtype, gc, dc):
         if dtype == np.float16:
-            # fp16 is only supported with CUDA
-            assume(gc.device_type == caffe2_pb2.CUDA)
-            dc = [d for d in dc if d.device_type == caffe2_pb2.CUDA]
+            # fp16 is only supported with CUDA/HIP
+            assume(core.IsGPUDeviceType(gc.device_type))
+            dc = [d for d in dc if core.IsGPUDeviceType(d.device_type)]
 
         batch_dims = np.random.randint(
             low=1,
