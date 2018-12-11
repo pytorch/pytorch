@@ -566,6 +566,10 @@ class TestMultiprocessing(TestCase):
         p.join(1)
         self.assertFalse(p.is_alive())
 
+    def test_queue_noctx(self):
+        """ Pool should not crash when instantiated without a context """
+        q = mp.pools.Pool()
+
 
 if __name__ == '__main__':
     run_tests()
