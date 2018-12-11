@@ -99,7 +99,8 @@ inline bool operator!=(std::nullptr_t, const DataPtr& dp) noexcept {
 // when it is actually possible.
 
 struct Allocator {
-  virtual ~Allocator() {}
+  virtual ~Allocator();
+
   virtual DataPtr allocate(size_t n) const = 0;
 
   // If this returns a non nullptr, it means that allocate()
