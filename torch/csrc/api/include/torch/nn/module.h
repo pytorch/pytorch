@@ -496,12 +496,12 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
 };
 
 /// Serialize a `Module` pointer into an `OutputArchive`.
-serialize::OutputArchive& operator<<(
+TORCH_API serialize::OutputArchive& operator<<(
     serialize::OutputArchive& archive,
     const std::shared_ptr<nn::Module>& module);
 
 /// Deserializes a `Module` from an `InputArchive`.
-serialize::InputArchive& operator>>(
+TORCH_API serialize::InputArchive& operator>>(
     serialize::InputArchive& archive,
     const std::shared_ptr<nn::Module>& module);
 
