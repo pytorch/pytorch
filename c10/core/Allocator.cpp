@@ -2,8 +2,6 @@
 
 namespace c10 {
 
-Allocator::~Allocator() {}
-
 static void deleteInefficientStdFunctionContext(void* ptr) {
   delete static_cast<InefficientStdFunctionContext*>(ptr);
 }
