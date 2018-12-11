@@ -187,9 +187,8 @@ void ArgumentStash::stashIntListElem(const std::string& arg_name, size_t size, s
 
   Value* ten = getValueTrace(var);
   auto& g = *ten->owningGraph();
-  auto prim = g.createTensorToNum(jit::IntType::get(), ten)
-                   ->insertAfter(ten->node())
-                   ->output();
+  WithInsertPoint guard(ten->node()->next());
+  auto prim = g.insert(prim::Int, {ten});
   list_trace[idx] = prim;
 }
 
@@ -197,12 +196,15 @@ void ArgumentStash::stashValue(const std::string& arg_name, size_t idx, const Va
   if (!isTracing()) return;
 
   Value* ten = getValueTrace(var);
-  if (type) {
-    auto& g = *ten->owningGraph();
-    ten = g.createTensorToNum(type, ten)
-                     ->insertAfter(ten->node())
-                     ->output();
+  WithInsertPoint guard(ten->node()->next());
+  auto& g = *ten->owningGraph();
+
+  if (type == IntType::get()) {
+    ten = g.insert(prim::Int, { ten });
+  } else if (type == FloatType::get()) {
+    ten = g.insert(prim::Float, { ten });
   }
+
   stash.values.emplace(arg_name, ten);
 }
 
