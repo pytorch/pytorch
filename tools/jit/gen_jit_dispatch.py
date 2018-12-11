@@ -25,11 +25,11 @@ from ..autograd.gen_autograd import RETURNS_VIEWS_OF_INPUT
 # Scalar = int | float | bool # int is the largest int (int64_t),
 # float is the largest float (double) we don't have the others because they are never held in tensors
 # Type = Scalar # primitive numbers
-#      | Tensor # any tensor, as defined by at::Tensor
-#      | Type[] # a dynamically sized list[ of a type
-#      | Scalar[N] # a homogenous fixed size scalar list, single scalars can expand to this list
-#      | (Type1, Type2, ...) # a heterogenous tuple
-#      | Layout | ScalarType | Casting | Device | Generator # special singleton types for built-in concepts in tensor lib
+#     | Tensor # any tensor, as defined by at::Tensor
+#     | Type[] # a dynamically sized list[ of a type
+#     | Scalar[N] # a homogenous fixed size scalar list, single scalars can expand to this list
+#     | (Type1, Type2, ...) # a heterogenous tuple
+#     | Layout | ScalarType | Casting | Device | Generator # special singleton types for built-in concepts in tensor lib
 
 # clean up the variety of C++ types in the ATen declarations
 # to be in the restricted set of types that the IR represents
