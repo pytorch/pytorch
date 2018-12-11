@@ -292,6 +292,10 @@ class TestOperators(TestCase):
         x = torch.randn(3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.full(x.shape, 2), x)
 
+    def test_full_like(self):
+        x = torch.randn(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: torch.full_like(x, 2), x)
+
     def test_max(self):
         x = torch.randn(3, 4, requires_grad=True)
         y = torch.randn(3, 4, requires_grad=True)
@@ -475,6 +479,13 @@ class TestOperators(TestCase):
         x = torch.randn(3, 4)
         self.assertONNX(torch.nn.Linear(4, 5, bias=True), x)
 
+    def test_zeros_like(self):
+        x = torch.randn(5, 8, requires_grad=True)
+        self.assertONNX(lambda x: torch.zeros_like(x), x)
+
+    def test_ones_like(self):
+        x = torch.randn(6, 10, requires_grad=True)
+        self.assertONNX(lambda x: torch.ones_like(x), x)
 
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'

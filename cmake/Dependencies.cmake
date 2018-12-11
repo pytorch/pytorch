@@ -431,11 +431,15 @@ endif()
 
 # ---[ OpenCV
 if(USE_OPENCV)
-  # OpenCV 3
-  find_package(OpenCV 3 QUIET COMPONENTS core highgui imgproc imgcodecs videoio video)
+  # OpenCV 4
+  find_package(OpenCV 4 QUIET COMPONENTS core highgui imgproc imgcodecs optflow videoio video)
   if(NOT OpenCV_FOUND)
-    # OpenCV 2
-    find_package(OpenCV QUIET COMPONENTS core highgui imgproc)
+    # OpenCV 3
+    find_package(OpenCV 3 QUIET COMPONENTS core highgui imgproc imgcodecs videoio video)
+    if(NOT OpenCV_FOUND)
+      # OpenCV 2
+      find_package(OpenCV QUIET COMPONENTS core highgui imgproc)
+    endif()
   endif()
   if(OpenCV_FOUND)
     include_directories(SYSTEM ${OpenCV_INCLUDE_DIRS})
@@ -742,7 +746,6 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -Wno-unused-command-line-argument)
     list(APPEND HIP_CXX_FLAGS -Wno-duplicate-decl-specifier)
     list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
-    list(APPEND HIP_CXX_FLAGS -DROCBLAS_FP16=0)
 
     set(HIP_HCC_FLAGS ${HIP_CXX_FLAGS})
     # Ask hcc to generate device code during compilation so we can use

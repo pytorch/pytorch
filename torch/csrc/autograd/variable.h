@@ -1,11 +1,11 @@
 #pragma once
 
-#include "torch/csrc/utils/python_stub.h"
+#include <torch/csrc/utils/python_stub.h>
 
-#include "torch/csrc/WindowsTorchApiMacro.h"
-#include "torch/csrc/autograd/edge.h"
-#include "torch/csrc/autograd/function_hook.h"
-#include "torch/csrc/autograd/variable_version.h"
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/autograd/edge.h>
+#include <torch/csrc/autograd/function_hook.h>
+#include <torch/csrc/autograd/variable_version.h>
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>

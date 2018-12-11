@@ -2,7 +2,7 @@
 
 // ${generated_comment}
 
-#include "ATen/TypeExtendedInterface.h"
+#include <ATen/TypeExtendedInterface.h>
 
 namespace at {
 

@@ -1,12 +1,12 @@
-#include "THTensor.hpp"
+#include <TH/THTensor.hpp>
 
-#include "generic/THTensor.cpp"
-#include "THGenerateAllTypes.h"
+#include <TH/generic/THTensor.cpp>
+#include <TH/THGenerateAllTypes.h>
 
-#include "generic/THTensor.cpp"
-#include "THGenerateHalfType.h"
+#include <TH/generic/THTensor.cpp>
+#include <TH/THGenerateHalfType.h>
 
-#include "ATen/native/Resize.h"
+#include <ATen/native/Resize.h>
 
 #include <numeric>
 

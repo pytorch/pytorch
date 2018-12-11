@@ -1,20 +1,20 @@
 #pragma once
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/graph_executor.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/passes/shape_analysis.h"
-#include "torch/csrc/jit/argument_spec.h"
-#include "torch/csrc/jit/function_schema.h"
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/named_value.h"
-#include "torch/csrc/jit/source_range.h"
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/graph_executor.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/argument_spec.h>
+#include <torch/csrc/jit/function_schema.h>
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/named_value.h>
+#include <torch/csrc/jit/source_range.h>
 
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 #include <torch/csrc/utils/memory.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <c10/util/ArrayRef.h>
-#include "c10/util/Optional.h"
+#include <c10/util/Optional.h>
 
 #include <functional>
 #include <memory>
@@ -403,6 +403,12 @@ struct Module {
       return pm->get();
     }
     return nullptr;
+  }
+  void apply(std::function<void(Module&)> fn) {
+    for (auto &submod : get_modules()) {
+      submod.value().module->apply(fn);
+    }
+    fn(*this);
   }
 
   /// Recursively casts all parameters to the given `dtype` and `device`.

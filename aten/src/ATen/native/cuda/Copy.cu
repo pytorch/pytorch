@@ -1,12 +1,12 @@
-#include "ATen/ATen.h"
-#include "ATen/Context.h"
-#include "ATen/Dispatch.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/cuda/CUDAApplyUtils.cuh"
-#include "ATen/cuda/CUDAContext.h"
-#include "ATen/cuda/CUDAEvent.h"
-#include "ATen/cuda/CUDAStream.h"
-#include "ATen/native/Copy.h"
+#include <ATen/ATen.h>
+#include <ATen/Context.h>
+#include <ATen/Dispatch.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAEvent.h>
+#include <ATen/cuda/CUDAStream.h>
+#include <ATen/native/Copy.h>
 
 namespace {
 

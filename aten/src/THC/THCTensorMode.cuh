@@ -1,9 +1,9 @@
 #ifndef THC_TENSOR_MODE_CUH
 #define THC_TENSOR_MODE_CUH
 
-#include "THCNumerics.cuh"
-#include "THCSortUtils.cuh"
-#include "THCScanUtils.cuh"
+#include <THC/THCNumerics.cuh>
+#include <THC/THCSortUtils.cuh>
+#include <THC/THCScanUtils.cuh>
 
 struct ThrustHalfLess
 {

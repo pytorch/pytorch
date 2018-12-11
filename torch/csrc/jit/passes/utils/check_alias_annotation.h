@@ -1,8 +1,8 @@
 #pragma once
 
-#include "torch/csrc/jit/graph_executor.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/operator.h"
+#include <torch/csrc/jit/graph_executor.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/operator.h>
 
 namespace torch {
 namespace jit {

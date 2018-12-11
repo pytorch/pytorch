@@ -1,6 +1,6 @@
-#include "ATen/ATen.h"
-#include "ATen/Parallel.h"
-#include "test_assert.h"
+#include <ATen/ATen.h>
+#include <ATen/Parallel.h>
+#include <ATen/test/test_assert.h>
 #include <thread>
 
 

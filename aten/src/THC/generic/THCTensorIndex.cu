@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorIndex.cu"
+#define THC_GENERIC_FILE "THC/generic/THCTensorIndex.cu"
 #else
 
 // Check tensor dimensions for index operations, and return the slice size.

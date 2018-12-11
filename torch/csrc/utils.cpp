@@ -1,20 +1,20 @@
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 #include <cstdarg>
 #include <string>
 #include <vector>
 #include <sstream>
 #include <algorithm>
 #include <unordered_map>
-#include "THP.h"
-#include "torch/csrc/utils/python_strings.h"
-#include "torch/csrc/utils/invalid_arguments.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/DynamicTypes.h"
+#include <torch/csrc/THP.h>
+#include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/invalid_arguments.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/DynamicTypes.h>
 
-#include "generic/utils.cpp"
+#include <torch/csrc/generic/utils.cpp>
 #include <TH/THGenerateAllTypes.h>
 
-#include "generic/utils.cpp"
+#include <torch/csrc/generic/utils.cpp>
 #include <TH/THGenerateHalfType.h>
 
 int THPUtils_getCallable(PyObject *arg, PyObject **result) {
