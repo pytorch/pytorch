@@ -52,14 +52,11 @@ namespace c10 {
   _(prim, TupleSlice)              \
   _(prim, ListConstruct)           \
   _(prim, ListUnpack)              \
-  _(prim, BoolToTensor)            \
   _(prim, NumToTensor)             \
-  _(prim, TensorToNum)             \
   _(prim, ImplicitTensorToNum)     \
-  _(prim, TensorToBool)            \
-  _(prim, IntToFloat)              \
-  _(prim, FloatToInt)              \
-  _(prim, StringToFloat)           \
+  _(prim, Bool)                    \
+  _(prim, Int)                     \
+  _(prim, Float)                   \
   _(prim, device)                  \
   _(prim, dtype)                   \
   _(prim, shape)                   \

@@ -224,10 +224,7 @@ struct ModuleValue : public SugaredValue {
         v = module->find_parameter(field);
       }
       Value* the_tensor = m.get_or_add_parameter(v->slot());
-      Value* the_bool =
-          m.graph()
-              ->insertNode(m.graph()->createTensorToBool(the_tensor))
-              ->output();
+      Value* the_bool = m.graph()->insert(prim::Bool, {the_tensor});
       return std::make_shared<SimpleValue>(the_bool);
     }
 
