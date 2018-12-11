@@ -1,12 +1,12 @@
 #ifndef TH_CUDA_TENSOR_COPY_INC
 #define TH_CUDA_TENSOR_COPY_INC
 
-#include "THCTensor.h"
-#include "THCGeneral.h"
-#include "TH/THHalf.h"
+#include <THC/THCTensor.h>
+#include <THC/THCGeneral.h>
+#include <TH/THHalf.h>
 
 
-#include "generic/THCTensorCopy.h"
-#include "THCGenerateAllTypes.h"
+#include <THC/generic/THCTensorCopy.h>
+#include <THC/THCGenerateAllTypes.h>
 
 #endif

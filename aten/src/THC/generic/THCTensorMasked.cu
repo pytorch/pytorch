@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorMasked.cu"
+#define THC_GENERIC_FILE "THC/generic/THCTensorMasked.cu"
 #else
 
 

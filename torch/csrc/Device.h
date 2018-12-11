@@ -1,9 +1,10 @@
 #pragma once
 
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 
 #include <ATen/Device.h>
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct THPDevice {
   PyObject_HEAD
   at::Device device;

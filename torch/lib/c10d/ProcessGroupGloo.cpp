@@ -1,4 +1,4 @@
-#include "ProcessGroupGloo.hpp"
+#include <c10d/ProcessGroupGloo.hpp>
 
 #include <gloo/allgather.h>
 #include <gloo/allreduce.h>
@@ -168,7 +168,7 @@ void initializeStreamsEvents(
     for (size_t j = 1; j < tensors[i].size(); j++) {
       if (tensors[i][j].device().index() != device_id) {
         throw std::runtime_error(
-            "tesnors in the nested tensor vectors need to be on the same device");
+            "tensors in the nested tensor vectors need to be on the same device");
       }
     }
   }
@@ -571,7 +571,7 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
     // Synchronize with the copy back to CUDA tensors.
     at::cuda::OptionalCUDAGuard guard;
     for (size_t i = 0; i < inputs.size(); i++) {
-      guard.set_index(static_cast<at::DeviceIndex>(inputs[i].device().index()));
+      guard.set_index(inputs[i].device().index());
       events[i].block(at::cuda::getCurrentCUDAStream());
     }
   }
@@ -726,7 +726,7 @@ class AsyncReduceCUDAWork : public AsyncReduceWork {
     // Synchronize with the copy back to CUDA tensors.
     at::cuda::OptionalCUDAGuard guard;
     for (size_t i = 0; i < inputs.size(); i++) {
-      guard.set_index(static_cast<at::DeviceIndex>(inputs[i].device().index()));
+      guard.set_index(inputs[i].device().index());
       events[i].block(at::cuda::getCurrentCUDAStream());
     }
   }
@@ -900,8 +900,7 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
     // Synchronize with the copy back to CUDA tensors.
     at::cuda::OptionalCUDAGuard guard;
     for (size_t i = 0; i < outputs.size(); i++) {
-      guard.set_index(
-          static_cast<at::DeviceIndex>(outputs[i][0].device().index()));
+      guard.set_index(outputs[i][0].device().index());
       outputEvents[i].block(at::cuda::getCurrentCUDAStream());
     }
   }

@@ -1,13 +1,13 @@
-#include "python_nccl.h"
+#include <torch/csrc/cuda/python_nccl.h>
 
-#include "nccl.h"
-#include "torch/csrc/DynamicTypes.h"
-#include "torch/csrc/Exceptions.h"
-#include "torch/csrc/THP.h"
-#include "torch/csrc/Types.h"
-#include "torch/csrc/cuda/THCP.h"
-#include "torch/csrc/cuda/nccl.h"
-#include "torch/csrc/utils/functional.h"
+#include <torch/csrc/cuda/nccl.h>
+#include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/THP.h>
+#include <torch/csrc/Types.h>
+#include <torch/csrc/cuda/THCP.h>
+#include <torch/csrc/cuda/nccl.h>
+#include <torch/csrc/utils/functional.h>
 
 #include <ATen/cuda/CUDAGuard.h>
 

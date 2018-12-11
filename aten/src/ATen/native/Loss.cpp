@@ -1,7 +1,7 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/Dispatch.h"
-#include "ATen/CPUApplyUtils.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Dispatch.h>
+#include <ATen/CPUApplyUtils.h>
 
 #define EPSILON 1e-12
 

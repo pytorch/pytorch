@@ -1,8 +1,8 @@
-#include "THCUNN.h"
-#include "THCTensor.hpp"
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
-#include "THCAtomics.cuh"
+#include <THCUNN/THCUNN.h>
+#include <THC/THCTensor.hpp>
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCAtomics.cuh>
 
 #define START_IND(a,b,c) (int)floor((float)(a * c) / b)
 #define END_IND(a,b,c) (int)ceil((float)((a + 1) * c) / b)
@@ -189,8 +189,8 @@ __global__ void atomicadaptiveaveragegradinput(
   }
 }
 
-#include "generic/SpatialAdaptiveAveragePooling.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/SpatialAdaptiveAveragePooling.cu>
+#include <THC/THCGenerateFloatTypes.h>
 
 #undef CUDA_MAX_THREADS
 #undef START_IND

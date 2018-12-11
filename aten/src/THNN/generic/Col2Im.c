@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/Col2Im.c"
+#define TH_GENERIC_FILE "THNN/generic/Col2Im.c"
 #else
 
 #include <ATen/div_rtn.h>

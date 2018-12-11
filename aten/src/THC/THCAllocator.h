@@ -1,7 +1,7 @@
 #ifndef THC_ALLOCATOR_INC
 #define THC_ALLOCATOR_INC
 
-#include "THCGeneral.h"
+#include <THC/THCGeneral.h>
 
 // IPC doesn't support (re)allocation
 

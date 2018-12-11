@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorMathBlas.cu"
+#define THC_GENERIC_FILE "THC/generic/THCTensorMathBlas.cu"
 #else
 
 #define ERROR_ONLY_FP_TYPES(func) \

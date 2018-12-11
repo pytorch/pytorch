@@ -6,8 +6,8 @@
 #include <type_traits>
 #include <bitset>
 
-#include "ATen/Utils.h"
-#include "ATen/native/Copy.h"
+#include <ATen/Utils.h>
+#include <ATen/native/Copy.h>
 #include <c10/util/C++17.h>
 
 #if defined(__GNUC__)
