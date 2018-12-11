@@ -2,6 +2,14 @@
 
 set -ex
 
+# TODO: Migrate all centos jobs to use proper devtoolset
+if [[ "$BUILD_ENVIRONMENT" == "py2-cuda9.0-cudnn7-centos7" ]]; then
+  # There is a bug in pango packge on Centos7 that causes undefined
+  # symbols, upgrading glib2 to >=2.56.1 solves the issue. See
+  # https://bugs.centos.org/view.php?id=15495
+  sudo yum install -y -q glib2-2.56.1
+fi
+
 pip install --user --no-cache-dir hypothesis==3.59.0
 
 # The INSTALL_PREFIX here must match up with test.sh
@@ -25,21 +33,28 @@ if [ "$(which gcc)" != "/root/sccache/gcc" ]; then
     fi
 
     # Setup wrapper scripts
-    for compiler in cc c++ gcc g++ x86_64-linux-gnu-gcc; do
+    wrapped="cc c++ gcc g++ x86_64-linux-gnu-gcc"
+    if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]]; then
+        wrapped="$wrapped nvcc"
+    fi
+    for compiler in $wrapped; do
       (
         echo "#!/bin/sh"
+
+        # TODO: if/when sccache gains native support for an
+        # SCCACHE_DISABLE flag analogous to ccache's CCACHE_DISABLE,
+        # this can be removed. Alternatively, this can be removed when
+        # https://github.com/pytorch/pytorch/issues/13362 is fixed.
+        #
+        # NOTE: carefully quoted - we want `which compiler` to be
+        # resolved as we execute the script, but SCCACHE_DISABLE and
+        # $@ to be evaluated when we execute the script
+        echo 'test $SCCACHE_DISABLE && exec '"$(which $compiler)"' "$@"'
+
         echo "exec $SCCACHE $(which $compiler) \"\$@\""
       ) > "./sccache/$compiler"
       chmod +x "./sccache/$compiler"
     done
-
-    if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]]; then
-      (
-        echo "#!/bin/sh"
-        echo "exec $SCCACHE $(which nvcc) \"\$@\""
-      ) > "./sccache/nvcc"
-      chmod +x "./sccache/nvcc"
-    fi
 
     export CACHE_WRAPPER_DIR="$PWD/sccache"
 
@@ -92,7 +107,7 @@ fi
 
 
 ###############################################################################
-# Use special scripts for Android, conda, and setup builds
+# Use special scripts for Android and setup builds
 ###############################################################################
 if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   export ANDROID_NDK=/opt/ndk
@@ -101,19 +116,6 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   CMAKE_ARGS+=("-DUSE_OBSERVERS=ON")
   CMAKE_ARGS+=("-DUSE_ZSTD=ON")
   "${ROOT_DIR}/scripts/build_android.sh" ${CMAKE_ARGS[*]} "$@"
-  exit 0
-elif [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
-  "${ROOT_DIR}/scripts/build_anaconda.sh" --skip-tests --install-locally "$@"
-  report_compile_cache_stats
-
-  # This build will be tested against onnx tests, which needs onnx installed.
-  # At this point the visible protbuf installation will be in conda, since one
-  # of Caffe2's dependencies uses conda, so the correct protobuf include
-  # headers are those in conda as well
-  # This path comes from install_anaconda.sh which installs Anaconda into the
-  # docker image
-  PROTOBUF_INCDIR=/opt/conda/include pip install -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
-  report_compile_cache_stats
   exit 0
 fi
 
@@ -130,7 +132,24 @@ CMAKE_ARGS+=("-DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}")
 
 if [[ $BUILD_ENVIRONMENT == *mkl* ]]; then
   CMAKE_ARGS+=("-DBLAS=MKL")
+  CMAKE_ARGS+=("-DUSE_MKLDNN=ON")
 fi
+
+if [[ $BUILD_ENVIRONMENT == py2-cuda9.0-cudnn7-ubuntu16.04 ]]; then
+
+  # removing http:// duplicate in favor of nvidia-ml.list
+  # which is https:// version of the same repo
+  sudo rm -f /etc/apt/sources.list.d/nvidia-machine-learning.list
+  curl -o ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1604/x86_64/nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
+  sudo dpkg -i ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
+  sudo apt-key add /var/nvinfer-runtime-trt-repo-5.0.2-ga-cuda9.0/7fa2af80.pub
+  sudo apt-get -qq update
+  sudo apt-get install libnvinfer5 libnvinfer-dev
+  rm ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
+
+  CMAKE_ARGS+=("-DUSE_TENSORRT=ON")
+fi
+
 if [[ $BUILD_ENVIRONMENT == *cuda* ]]; then
   CMAKE_ARGS+=("-DUSE_CUDA=ON")
   CMAKE_ARGS+=("-DCUDA_ARCH_NAME=Maxwell")
@@ -154,8 +173,13 @@ if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
   CMAKE_ARGS+=("-USE_LMDB=ON")
 
   ########## HIPIFY Caffe2 operators
-  ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_pytorch_amd.py"
-  ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_caffe2_amd.py"
+  ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_amd.py"
+fi
+
+# building bundled nccl in this config triggers a bug in nvlink. For
+# more, see https://github.com/pytorch/pytorch/issues/14486
+if [[ "${BUILD_ENVIRONMENT}" == *-cuda8*-cudnn7* ]]; then
+    CMAKE_ARGS+=("-DUSE_SYSTEM_NCCL=ON")
 fi
 
 # Try to include Redis support for Linux builds

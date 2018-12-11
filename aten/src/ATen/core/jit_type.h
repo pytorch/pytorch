@@ -31,12 +31,15 @@ _(GeneratorType) \
 _(BoolType) \
 _(OptionalType) \
 _(VarType) \
+_(DeviceObjType) \
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
   C10_FORALL_TYPES(DEFINE_TYPE)
 #undef DEFINE_TYPE
 };
+
+CAFFE2_API const char * typeKindToString(TypeKind kind);
 
 #define DEFINE_IS_SUBCLASS(_kind) \
   bool isSubclass(const TypeKind kind) const override { \
@@ -67,10 +70,8 @@ public:
   virtual bool operator==(const Type& rhs) const = 0;
 
   // subtyping relation. By default, we return true for the case
-  // when the type is exactly equal
-  virtual bool isSubtypeOf(const TypePtr rhs) const {
-    return *this == *rhs;
-  }
+  // when the type is exactly equal or if this <: T where rhs = Optional[T]
+  virtual bool isSubtypeOf(const TypePtr rhs) const;
 
   // If this class can be cast to the kind passed in
   // This removes the need for RTTI
@@ -163,6 +164,40 @@ inline bool operator!=(const Type & lhs, const Type & rhs) {
   return !(lhs == rhs);
 }
 
+// common base for all types that have a single sub element
+// e.g. Future[T], Option[T], List[T]
+template<TypeKind K, typename T>
+struct SingleElementType : public Type {
+  static const TypeKind Kind = K;
+  TypePtr getElementType() const {
+    return elem;
+  }
+  bool hasFreeVariables() const override {
+    return has_free_variables_;
+  }
+  at::ArrayRef<TypePtr> containedTypes() const override {
+    return elem;
+  }
+  bool requires_grad() const override {
+    return elem->requires_grad();
+  }
+  bool operator==(const Type& rhs) const override {
+    if(auto rhs_ = rhs.cast<T>()) {
+      return *getElementType() == *rhs_->getElementType();
+    }
+    return false;
+  }
+protected:
+  SingleElementType(TypePtr elem)
+  : Type(Kind)
+  , elem(std::move(elem))
+  , has_free_variables_(getElementType()->hasFreeVariables()) {}
+private:
+  TypePtr elem;
+  bool has_free_variables_;
+};
+
+
 struct OptionalType;
 using OptionalTypePtr = std::shared_ptr<OptionalType>;
 // This type represents an optional type, for each element type.
@@ -175,21 +210,11 @@ using OptionalTypePtr = std::shared_ptr<OptionalType>;
 // it is handled this way because it is not possible to match None to Optional[T]
 // and extract T. Intead, we always create an instance of the prim::None instruction
 // with a particular type: v: Optional[int] = prim::None()
-struct CAFFE2_API OptionalType: public Type {
+struct CAFFE2_API OptionalType: public SingleElementType<TypeKind::OptionalType, OptionalType> {
   static OptionalTypePtr create(TypePtr element) {
     return OptionalTypePtr(new OptionalType(std::move(element))); // NOLINT(modernize-make-shared)
   }
   DEFINE_IS_SUBCLASS(OptionalType);
-  bool operator==(const Type& rhs) const override {
-    if(auto rhs_ = rhs.cast<OptionalType>()) {
-      return *getElementType() == *rhs_->getElementType();
-    }
-    return false;
-  }
-  bool requires_grad() const override {
-    return elem->requires_grad();
-  }
-
   bool isSubtypeOf(const TypePtr rhs) const override {
     if(auto rhs_ = rhs->cast<OptionalType>()) {
       return getElementType()->isSubtypeOf(rhs_->getElementType());
@@ -207,28 +232,18 @@ struct CAFFE2_API OptionalType: public Type {
     ss << "Optional[" << getElementType()->python_str() << "]";
     return ss.str();
   }
-  TypePtr getElementType() const {
-    return elem;
-  }
-  bool hasFreeVariables() const override {
-    return has_free_variables_;
-  }
-  static const TypeKind Kind = TypeKind::OptionalType;
   // common cast Optional[Tensor] for undefined tensor type
   static OptionalTypePtr ofTensor();
 private:
-  OptionalType(TypePtr elem)
-  : Type(TypeKind::OptionalType)
-  , elem(std::move(elem))
-  , has_free_variables_(getElementType()->hasFreeVariables()) {}
-  TypePtr elem;
-  bool has_free_variables_;
-
+  OptionalType(TypePtr elem) : SingleElementType(elem) {}
 };
 
 struct DynamicType;
 using DynamicTypePtr = std::shared_ptr<DynamicType>;
 // This type represents a single Tensor, with an unknown shape.
+// Subtype hierarchy for Tensor Types (DynamicType as the base type):
+// CompleteTensorType <: TensorType <: DynamicType
+// UndefinedTensorType <: DynamicType
 struct CAFFE2_API DynamicType : public Type {
   static DynamicTypePtr create() {
     return DynamicTypePtr(new DynamicType()); // NOLINT(modernize-make-shared)
@@ -239,12 +254,6 @@ struct CAFFE2_API DynamicType : public Type {
 
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
-  }
-  bool isSubtypeOf(const TypePtr rhs) const override {
-    if(auto rhs_ = rhs->cast<OptionalType>()) {
-      return this->isSubtypeOf(rhs_->getElementType());
-    }
-    return Type::isSubtypeOf(rhs);
   }
   std::string str() const override {
     return "Tensor";
@@ -468,39 +477,6 @@ private:
   std::vector<int64_t> strides_;
 };
 
-// common base for all types that have a single sub element
-// e.g. Future[T], Option[T], List[T]
-template<TypeKind K, typename T>
-struct SingleElementType : public Type {
-  static const TypeKind Kind = K;
-  TypePtr getElementType() const {
-    return elem;
-  }
-  bool hasFreeVariables() const override {
-    return has_free_variables_;
-  }
-  at::ArrayRef<TypePtr> containedTypes() const override {
-    return elem;
-  }
-  bool requires_grad() const override {
-    return elem->requires_grad();
-  }
-  bool operator==(const Type& rhs) const override {
-    if(auto rhs_ = rhs.cast<T>()) {
-      return *getElementType() == *rhs_->getElementType();
-    }
-    return false;
-  }
-protected:
-  SingleElementType(TypePtr elem)
-  : Type(Kind)
-  , elem(std::move(elem))
-  , has_free_variables_(getElementType()->hasFreeVariables()) {}
-private:
-  TypePtr elem;
-  bool has_free_variables_;
-};
-
 struct ListType;
 using ListTypePtr = std::shared_ptr<ListType>;
 struct CAFFE2_API ListType : public SingleElementType<TypeKind::ListType, ListType> {
@@ -537,7 +513,7 @@ private:
 struct FutureType;
 using FutureTypePtr = std::shared_ptr<FutureType>;
 
-struct CAFFE2_API FutureType : public Type {
+struct CAFFE2_API FutureType : public SingleElementType<TypeKind::FutureType, FutureType> {
   friend struct Type;
   template<typename ... T>
   static FutureTypePtr create(TypePtr elem) {
@@ -546,15 +522,6 @@ struct CAFFE2_API FutureType : public Type {
 
   DEFINE_IS_SUBCLASS(FutureType);
 
-  bool operator==(const Type& rhs) const override {
-    if (auto rhs_ = rhs.cast<FutureType>()) {
-      return *getElementType() == *rhs_->getElementType();
-    }
-    return false;
-  }
-  bool requires_grad() const override {
-    return elem->requires_grad();
-  }
   std::string str() const override {
     std::stringstream ss;
     ss << "Future(" << getElementType()->str() << ")";
@@ -565,21 +532,8 @@ struct CAFFE2_API FutureType : public Type {
     ss << "Future[" << getElementType()->python_str() << "]";
     return ss.str();
   }
-  TypePtr getElementType() const {
-    return elem;
-  }
-  bool hasFreeVariables() const override {
-    return has_free_variables_;
-  }
-
-  static const TypeKind Kind = TypeKind::FutureType;
 private:
-  FutureType(TypePtr elem)
-  : Type(TypeKind::FutureType)
-  , elem(std::move(elem))
-  , has_free_variables_(getElementType()->hasFreeVariables()) {}
-  TypePtr elem;
-  bool has_free_variables_;
+  FutureType(TypePtr elem) : SingleElementType(elem) {}
 };
 
 struct TupleType;
@@ -602,7 +556,7 @@ struct CAFFE2_API TupleType : public Type {
     // co-variant rules for tuples
     return compare(*rhs, [](const TypePtr a, const TypePtr b) {
       return a->isSubtypeOf(b);
-    });
+    }) || Type::isSubtypeOf(rhs);
   }
   bool requires_grad() const override {
     return std::any_of(elements_.begin(), elements_.end(),
@@ -672,6 +626,9 @@ private:
 struct NumberType;
 using NumberTypePtr = std::shared_ptr<NumberType>;
 // This type represents a Python number
+// Subtype hierarchy for Number Types (NumberType as the base type):
+// IntType <: NumberType
+// FloatType <: NumberType
 struct CAFFE2_API NumberType : public Type {
   static NumberTypePtr create() {
     return NumberTypePtr(new NumberType()); // NOLINT(modernize-make-shared)
@@ -691,15 +648,15 @@ struct CAFFE2_API NumberType : public Type {
   static const TypeKind Kind = TypeKind::NumberType;
   // global singleton
   static NumberTypePtr get();
-private:
-  NumberType()
-  : Type(TypeKind::NumberType) {}
+protected:
+  NumberType(TypeKind kind=TypeKind::NumberType)
+  : Type(kind) {}
 };
 
 struct FloatType;
 using FloatTypePtr = std::shared_ptr<FloatType>;
 // This type represents a Python float number
-struct CAFFE2_API FloatType : public Type {
+struct CAFFE2_API FloatType : public NumberType {
   static FloatTypePtr create() {
     return FloatTypePtr(new FloatType()); // NOLINT(modernize-make-shared)
   }
@@ -710,24 +667,25 @@ struct CAFFE2_API FloatType : public Type {
   std::string str() const override {
     return "float";
   }
+  std::string python_str() const override {
+    return "float";
+  }
   bool isSubtypeOf(const TypePtr rhs) const override {
-    if(auto rhs_ = rhs->cast<OptionalType>()) {
-      return this->isSubtypeOf(rhs_->getElementType());
-    }
-    return *this == *rhs || rhs->kind() == TypeKind::NumberType;
+    return rhs->kind() == TypeKind::NumberType ||
+           NumberType::isSubtypeOf(rhs);
   }
   static const TypeKind Kind = TypeKind::FloatType;
   // global singleton
   static FloatTypePtr get();
 private:
   FloatType()
-  : Type(TypeKind::FloatType) {}
+  : NumberType(TypeKind::FloatType) {}
 };
 
 struct IntType;
 using IntTypePtr = std::shared_ptr<IntType>;
 // This type represents a Python int number
-struct CAFFE2_API IntType : public Type {
+struct CAFFE2_API IntType : public NumberType {
   static IntTypePtr create() {
     return IntTypePtr(new IntType()); // NOLINT(modernize-make-shared)
   }
@@ -738,18 +696,19 @@ struct CAFFE2_API IntType : public Type {
   std::string str() const override {
     return "int";
   }
+  std::string python_str() const override {
+    return "int";
+  }
   bool isSubtypeOf(const TypePtr rhs) const override {
-    if(auto rhs_ = rhs->cast<OptionalType>()) {
-      return this->isSubtypeOf(rhs_->getElementType());
-    }
-    return *this == *rhs || rhs->kind() == TypeKind::NumberType;
+    return rhs->kind() == TypeKind::NumberType ||
+           NumberType::isSubtypeOf(rhs);
   }
   static const TypeKind Kind = TypeKind::IntType;
   // global singleton
   static IntTypePtr get();
 private:
   IntType()
-  : Type(TypeKind::IntType) {}
+  : NumberType(TypeKind::IntType) {}
 };
 
 struct BoolType;
@@ -765,12 +724,6 @@ struct CAFFE2_API BoolType : public Type {
   }
   std::string str() const override {
     return "bool";
-  }
-  bool isSubtypeOf(const TypePtr rhs) const override {
-    if(auto rhs_ = rhs->cast<OptionalType>()) {
-      return this->isSubtypeOf(rhs_->getElementType());
-    }
-    return *this == *rhs || rhs->kind() == TypeKind::BoolType;
   }
   static const TypeKind Kind = TypeKind::BoolType;
   // global singleton
@@ -797,12 +750,6 @@ struct CAFFE2_API StringType : public Type {
   std::string python_str() const override {
     return "str";
   }
-  bool isSubtypeOf(const TypePtr rhs) const override {
-    if(auto rhs_ = rhs->cast<OptionalType>()) {
-      return this->isSubtypeOf(rhs_->getElementType());
-    }
-    return *this == *rhs;
-  }
   static const TypeKind Kind = TypeKind::StringType;
   // global singleton
   static StringTypePtr get();
@@ -822,11 +769,9 @@ struct CAFFE2_API NoneType : public Type {
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
-
   bool isSubtypeOf(const TypePtr rhs) const override {
     return rhs->kind() == TypeKind::NoneType;
   }
-
   std::string str() const override {
     return "None";
   }
@@ -858,6 +803,28 @@ struct CAFFE2_API GeneratorType : public Type {
 private:
   GeneratorType()
   : Type(TypeKind::GeneratorType) {}
+};
+
+struct DeviceObjType;
+using DeviceObjTypePtr = std::shared_ptr<DeviceObjType>;
+// This type represents a Generator
+struct CAFFE2_API DeviceObjType : public Type {
+  static DeviceObjTypePtr create() {
+    return DeviceObjTypePtr(new DeviceObjType()); // NOLINT(modernize-make-shared)
+  }
+  DEFINE_IS_SUBCLASS(DeviceObjType);
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "Device";
+  }
+  static const TypeKind Kind = TypeKind::DeviceObjType;
+  // global singleton
+  static DeviceObjTypePtr get();
+private:
+  DeviceObjType()
+  : Type(TypeKind::DeviceObjType) {}
 };
 
 
@@ -901,7 +868,6 @@ inline TypePtr unshapedType(const TypePtr& type) {
 }
 
 inline TypePtr CompleteTensorType::fromNumberType(TypePtr typ) {
-  AT_ASSERT(typ->isSubtypeOf(NumberType::get()));
   if (typ->isSubtypeOf(IntType::get())) {
     return CompleteTensorType::create(at::kLong, at::kCPU, {});
   } else if (typ->isSubtypeOf(FloatType::get())) {

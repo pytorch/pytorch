@@ -1,4 +1,4 @@
-#include "Descriptors.h"
+#include <ATen/cudnn/Descriptors.h>
 
 #include <ATen/ATen.h>
 

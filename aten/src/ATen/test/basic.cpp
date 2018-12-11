@@ -1,7 +1,7 @@
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
-#include "ATen/ATen.h"
-#include "ATen/core/Reduction.h"
+#include <ATen/ATen.h>
+#include <ATen/core/Reduction.h>
 
 // for TH compat test only...
 struct THFloatTensor;
@@ -12,7 +12,6 @@ extern "C" void THFloatTensor_fill(THFloatTensor *, float v);
 #include <chrono>
 #include <string.h>
 #include <sstream>
-#include "test_seed.h"
 
 #define ASSERT_EQ_RESOLVED(X, Y) \
   {                              \
@@ -265,16 +264,17 @@ void TestIndexingByZerodimTensor() {
   // Throw StartsWith("Can only index with tensors that are scalars (zero-dim)")
   ASSERT_ANY_THROW(tensor[ones({2, 3, 4}, kInt)].equal(one));
 }
+void TestIndexingMixedDevice(Type& type) {
+  Tensor tensor = randn({20, 20}, type);
+  Tensor index = arange(10, kLong).cpu();
+  Tensor result = tensor.index({index});
+  ASSERT_TRUE(result[0].equal(tensor[0]));
+}
 void TestDispatch() {
   Tensor tensor = randn({20, 20});
   Tensor other = randn({20, 20});
   auto result = tensor.m(relu).m(mse_loss, other, Reduction::Mean);
   ASSERT_TRUE(result.allclose(mse_loss(relu(tensor), other)));
-}
-
-void TestCore() {
-  int i = CoreTest();
-  ASSERT_EQ_RESOLVED(i + 1, CoreTest());
 }
 
 void test(Type& type) {
@@ -301,18 +301,18 @@ void test(Type& type) {
   TestToString();
   TestIndexingByScalar();
   TestIndexingByZerodimTensor();
+  TestIndexingMixedDevice(type);
   TestDispatch();
-  TestCore();
 }
 
 TEST(BasicTest, BasicTestCPU) {
-  manual_seed(123, at::kCPU);
+  manual_seed(123);
 
   test(CPU(kFloat));
 }
 
 TEST(BasicTest, BasicTestCUDA) {
-  manual_seed(123, at::kCUDA);
+  manual_seed(123);
 
   if (at::hasCUDA()) {
     test(CUDA(kFloat));

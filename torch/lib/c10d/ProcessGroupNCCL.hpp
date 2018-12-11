@@ -67,23 +67,22 @@ class ProcessGroupNCCL : public ProcessGroup {
     // Non-blocking operation.
     bool isCompleted() override;
 
-    // Let current stream wait on the completing of the NCCL work
-    // always return true and will throw if there are exceptions
-    // Non-blocking operation
-    bool wait() override;
+    // Same as calling synchronize() for NCCL work.
+    void wait() override;
 
     // Will always return true
     bool isSuccess() const override;
 
-    // Same as wait()
+    // Let current stream wait on the completing of the NCCL work
+    // Throws on exceptions. Non-blocking operation.
     void synchronize() override;
 
-    // Not supported by WorkNCCL
-    const std::exception& exception() const override;
+    // Will always throw because it should not be called (isSuccess() -> true).
+    std::exception_ptr exception() const override;
 
     // Helper function that checks if the NCCL kernels have finished
     // execution on the GPUs
-    bool finishedGPUExecution() const;
+    bool finishedGPUExecution();
 
    protected:
     // The cached list of CUDA devices to operate on
@@ -92,11 +91,31 @@ class ProcessGroupNCCL : public ProcessGroup {
     // The CUDA events tracking this work item on multiple CUDA devices
     std::vector<at::cuda::CUDAEvent> cudaEvents_;
 
+    // Tensors used for barrier op
+    std::vector<at::Tensor> barrierTensors_;
+
     friend class ProcessGroupNCCL;
   };
 
   // Constructor will also check the number of available GPUs in the system
-  ProcessGroupNCCL(const std::shared_ptr<Store>& store, int rank, int size);
+  //
+  // Group support:
+  //
+  // In order to support multiple NCCL process groups, each of which has
+  // different group ranks, we need to use groupName to identify each group
+  // to ensure the correct behavior. In other words, each process group that
+  // has different group ranks needs to have a different and unique groupName
+  // to avoid clashing into undefined behaviors.
+  //
+  // In Python frontend API of torch.distributed, it guarantees that each group
+  // will have a unique name to be passed into the ProcessGroupNCCL constructor.
+  // If you would like to use ProcessGroupNCCL constructor directly, it is
+  // your reponsibility to do so as well.
+  ProcessGroupNCCL(
+      const std::shared_ptr<Store>& store,
+      int rank,
+      int size,
+      const std::string& groupName = "");
 
   virtual ~ProcessGroupNCCL();
 
@@ -114,7 +133,8 @@ class ProcessGroupNCCL : public ProcessGroup {
 
   std::shared_ptr<ProcessGroup::Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
-      std::vector<at::Tensor>& inputTensors) override;
+      std::vector<at::Tensor>& inputTensors,
+      const AllgatherOptions& opts = AllgatherOptions()) override;
 
   // Unsupported Ops
   std::shared_ptr<ProcessGroup::Work> gather(
@@ -139,10 +159,10 @@ class ProcessGroupNCCL : public ProcessGroup {
 
   std::shared_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
-      int* srcRank,
       int tag) override;
 
-  std::shared_ptr<ProcessGroup::Work> barrier() override;
+  std::shared_ptr<ProcessGroup::Work> barrier(
+      const BarrierOptions& opts = BarrierOptions()) override;
 
   std::unordered_map<int, int> getGroupRank() override;
 
@@ -164,6 +184,9 @@ class ProcessGroupNCCL : public ProcessGroup {
 
   // Store that is used to exchange each Ranks's NCCL unique ID
   std::shared_ptr<Store> store_;
+
+  // The process group name
+  std::string groupName_;
 
   // The NCCL communicator that the process group has cached.
   // The key is a list of GPU devices that an operation is operating on
@@ -197,10 +220,34 @@ class ProcessGroupNCCL : public ProcessGroup {
   // ID of this process group
   std::string processGroupID_;
 
+  // Group Prefix and ID of this process group
+  std::string groupPgID_;
+
+  // Device Indexes used for all collectives in this group
+  std::set<int> usedDeviceIdxs_;
+
   // processGroupID tracking
   static std::mutex pgTrackingLock_;
-  static std::unordered_map<ssize_t, ssize_t> pgUniqueNCCLIDCnt_;
-  static ssize_t processGroupCounter_;
+
+  // map from the key: "group name + pg counter (ID)" to the
+  // unique NCCL ID count. This needs to be group and pg specific
+  //
+  // For each process group, we need a uniform unique NCCL ID counter to ensure
+  // that NCCL operation in this process group can be completed successfully.
+  // Since each process group ID belongs to a group name, the key to this map
+  // is a combination of group name and ProcessGroupNCCL ID.
+  static std::unordered_map<std::string, ssize_t> pgUniqueNCCLIDCnt_;
+
+  // map from group name to the pg counter (ID) within that group
+  //
+  // For each group with the "group name" (which is the key), we need to
+  // keep track of a unique process group ID when creating a new
+  // ProcessGroupNCCL for this "group name". Therefore, the value of this
+  // map keeps the unique ProcessGroupNCCL's ID for a specific group with
+  // the "group name". The reason we need a per-group process group ID counter
+  // is that different group can have different ranks and we need ensure that
+  // each group has its own uniform process group ID for all its ranks.
+  static std::unordered_map<std::string, ssize_t> processGroupCounterMap_;
 };
 
 } // namespace c10d

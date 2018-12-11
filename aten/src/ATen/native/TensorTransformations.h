@@ -1,4 +1,4 @@
-#include "ATen/ATen.h"
+#include <ATen/ATen.h>
 
 #include <ATen/WrapDimUtils.h>
 #include <c10/util/Exception.h>
@@ -31,6 +31,23 @@ static inline void flip_check_errors(int64_t total_dims, int64_t flip_dims_size,
   AT_CHECK((int64_t)flip_dims_v.size() == flip_dims_size,
     "dims has duplicates, original flip dims size=", flip_dims_size,
     ", but unique flip dims size=", flip_dims_v.size());
+}
+
+static inline Tensor roll_common(const Tensor& self, IntList shifts, IntList dims) {
+  AT_CHECK(shifts.size() > 0, "`shifts` required");
+  if (dims.size() == 0 && shifts.size() == 1) {
+    auto flattened = self.contiguous().view(self.numel());
+    return roll(flattened, shifts[0], 0).view(self.sizes());
+  }
+  AT_CHECK(
+    shifts.size() == dims.size(),
+    "shifts and dimensions must align. shifts: ", shifts.size(), ", dims:", dims.size()
+  );
+  AT_ASSERT(dims.size() > 1);
+  auto tail_shifts = shifts.slice(1);
+  auto tail_dims = dims.slice(1);
+  auto first_dim_rolled = roll(self, shifts[0], dims[0]);
+  return at::roll(first_dim_rolled, tail_shifts, tail_dims);
 }
 
 }}  // namespace at::native

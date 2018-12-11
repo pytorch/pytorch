@@ -93,6 +93,9 @@ class BytesIOContext(io.BytesIO):
     def __exit__(self, *args):
         pass
 
+DIM_TEST_SCENARIOS = [
+]
+
 
 # This is intentionally prefixed by an underscore. Otherwise pytest will try to
 # run its methods as test cases.
@@ -927,6 +930,7 @@ class _TestTorchMixin(object):
             self.assertEqual(x.mean().item(), 16.0 / 6)
             self.assertEqual(x.mean(0), torch.FloatTensor([2.0, 2.5, 7.0 / 2]))
             self.assertEqual(x.mean(1), torch.FloatTensor([2.0 / 3, 14.0 / 3]))
+            self.assertEqual(x.mean(), x.mean((0, 1)))
 
         for dtype in types:
             x = cast(torch.tensor(example, dtype=dtype))
@@ -1108,7 +1112,6 @@ class _TestTorchMixin(object):
             self.assertEqual(torch.zeros(0, device=device), torch.pairwise_distance(x, y))
             self.assertEqual(torch.zeros((0, 1), device=device), torch.pairwise_distance(x, y, keepdim=True))
 
-    @skipIfRocm
     def test_pdist_empty(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
@@ -1124,7 +1127,6 @@ class _TestTorchMixin(object):
             x = torch.randn(shape, device=device)
             self.assertEqual(torch.zeros(3, device=device), torch.pdist(x))
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_pdist_scipy(self):
         from scipy.spatial.distance import pdist
@@ -1568,18 +1570,12 @@ class _TestTorchMixin(object):
                                ((-1.6181, 0.7148),
                                 (1.3728, 0.1319))))
         a = cast(a)
-        a_LU, pivots = a.btrifact()  # test default info
-
-        # test deprecated info argument
-        info = cast(torch.IntTensor())
-        with warnings.catch_warnings(record=True):
-            a_LU, pivots = a.btrifact(info=info)
-        self.assertEqual(info.abs().sum(), 0)
+        a_LU, pivots = a.btrifact()
 
         a_LU_, pivots_, info_ = a.btrifact_with_info()
         self.assertEqual(a_LU, a_LU_)
         self.assertEqual(pivots, pivots_)
-        self.assertEqual(info, info_)
+        self.assertEqual(info_.abs().sum(), 0)
         P, a_L, a_U = torch.btriunpack(a_LU, pivots)
         a_ = torch.bmm(P, torch.bmm(a_L, a_U))
         self.assertEqual(a_, a)
@@ -1720,6 +1716,12 @@ class _TestTorchMixin(object):
 
         torch.clamp(m1, max=max_val, out=out)
         self.assertEqual(out, res1)
+
+        error_msg = 'At least one of \'min\' or \'max\' must not be None'
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            m1.clamp()
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            m1.clamp_()
 
     def test_pow(self):
         # [res] torch.pow([res,] x)
@@ -1923,34 +1925,75 @@ class _TestTorchMixin(object):
         check_sum_all(torch.randn(200000))
         check_sum_all(torch.randn(2000, 2)[:, 0])
 
-    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
-    def test_sum_dim(self):
-        def check_sum_dim(tensors_dict, dim):
+    def _assert_matches_numpy(self, t, n):
+        self.assertEqual(n.shape, t.shape)
+        if t.dtype == torch.float:
+            self.assertTrue(np.allclose(n, t.numpy(), rtol=1e-03, atol=1e-05,
+                            equal_nan=True))
+        else:
+            self.assertTrue(np.allclose(n, t.numpy(), equal_nan=True))
+
+    def _test_dim_ops(self, pytorch_op, numpy_op,
+                      use_floating=True, use_integral=True):
+        def do_one(tensors_dict, dim):
             for category, tensors in tensors_dict.items():
                 if category == "slice":
                     dim = 0
                 for tensor in tensors:
-                    expected = tensor.numpy().sum(dim)
-                    actual = tensor.sum(dim)
-                    self.assertEqual(expected.shape, actual.shape)
-                    if actual.dtype == torch.float:
-                        self.assertTrue(np.allclose(expected, actual.numpy(), rtol=1e-03, atol=1e-05))
-                    else:
-                        self.assertTrue(np.allclose(expected, actual.numpy()))
+                    # we have no control over NumPy warnings...
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        expected = numpy_op(tensor.numpy(), dim)
+                    actual = pytorch_op(tensor, dim)
+                    self._assert_matches_numpy(actual, expected)
+        do_one(self._make_tensors((5, 400000), use_floating=use_floating,
+               use_integral=use_integral), 1)
+        do_one(self._make_tensors((3, 5, 7), use_floating=use_floating,
+               use_integral=use_integral), 0)
+        do_one(self._make_tensors((3, 5, 7), use_floating=use_floating,
+               use_integral=use_integral), 1)
+        do_one(self._make_tensors((3, 5, 7), use_floating=use_floating,
+               use_integral=use_integral), 2)
+        do_one(self._make_tensors((100000, ), use_floating=use_floating,
+               use_integral=use_integral), -1)
+        do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
+               use_integral=use_integral), 0)
+        do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
+               use_integral=use_integral), 1)
+        do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
+               use_integral=use_integral), 2)
+        do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
+               use_integral=use_integral), (1, 2))
+        do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
+               use_integral=use_integral), (1, -1))
+        do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
+               use_integral=use_integral), (0, 2))
+        do_one(self._make_tensors((50, 50, 50), use_floating=use_floating,
+               use_integral=use_integral), (0, 2, 1))
 
-        float_types = [torch.double, torch.float]
-        int_types = [torch.int64, torch.int32, torch.int16]
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    def test_sum_dim(self):
+        for sizes, dim in DIM_TEST_SCENARIOS:
+            self._test_dim_ops(
+                lambda t, d: t.sum(d),
+                lambda n, d: n.sum(d))
 
-        check_sum_dim(self._make_tensors((5, 400000)), 1)
-        check_sum_dim(self._make_tensors((3, 5, 7)), 0)
-        check_sum_dim(self._make_tensors((3, 5, 7)), 1)
-        check_sum_dim(self._make_tensors((3, 5, 7)), 2)
-        check_sum_dim(self._make_tensors((100000, )), -1)
-        check_sum_dim(self._make_tensors((50, 50, 50)), 0)
-        check_sum_dim(self._make_tensors((50, 50, 50)), 1)
-        check_sum_dim(self._make_tensors((50, 50, 50)), 2)
-        check_sum_dim(self._make_tensors((50, 50, 50)), (1, 2))
-        check_sum_dim(self._make_tensors((50, 50, 50)), (1, -1))
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    def test_mean_dim(self):
+        for sizes, dim in DIM_TEST_SCENARIOS:
+            self._test_dim_ops(
+                lambda t, d: t.mean(d),
+                lambda n, d: n.mean(d),
+                use_integral=False)
+
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    def test_std_dim(self):
+        for unbiased in [False, True]:
+            for sizes, dim in DIM_TEST_SCENARIOS:
+                self._test_dim_ops(
+                    lambda t, d: t.std(d, unbiased=unbiased),
+                    lambda n, d: n.std(d, ddof=1 if unbiased else 0),
+                    use_integral=False)
 
     def test_sum_out(self):
         x = torch.rand(100, 100)
@@ -2171,8 +2214,8 @@ class _TestTorchMixin(object):
         self.assertRaises(RuntimeError, lambda: torch.device('cuda', -1))
         self.assertRaises(RuntimeError, lambda: torch.device(-1))
 
-        self.assertRaises(TypeError, lambda: torch.device('other'))
-        self.assertRaises(TypeError, lambda: torch.device('other:0'))
+        self.assertRaises(RuntimeError, lambda: torch.device('other'))
+        self.assertRaises(RuntimeError, lambda: torch.device('other:0'))
 
         device_set = {'cpu', 'cpu:0', 'cuda', 'cuda:0', 'cuda:1', 'cuda:10', 'cuda:100'}
         device_hash_set = set()
@@ -2385,11 +2428,12 @@ class _TestTorchMixin(object):
 
         # test copy with numpy
         if TEST_NUMPY:
-            a = np.array([5.])
-            res1 = torch.tensor(a)
-            self.assertEqual(5., res1[0].item())
-            a[0] = 7.
-            self.assertEqual(5., res1[0].item())
+            for dtype in [np.float64, np.int64, np.int8, np.uint8]:
+                a = np.array([5.]).astype(dtype)
+                res1 = torch.tensor(a)
+                self.assertEqual(5., res1[0].item())
+                a[0] = 7.
+                self.assertEqual(5., res1[0].item())
 
     def test_tensor_factory_copy_var(self):
 
@@ -2595,11 +2639,12 @@ class _TestTorchMixin(object):
 
         if TEST_NUMPY:
             # doesn't copy
-            n = np.random.rand(5, 6)
-            n_astensor = torch.as_tensor(n)
-            self.assertEqual(torch.tensor(n), n_astensor)
-            n_astensor[0][0] = 250.7
-            self.assertEqual(torch.tensor(n), n_astensor)
+            for dtype in [np.float64, np.int64, np.int8, np.uint8]:
+                n = np.random.rand(5, 6).astype(dtype)
+                n_astensor = torch.as_tensor(n)
+                self.assertEqual(torch.tensor(n), n_astensor)
+                n_astensor[0][0] = 25.7
+                self.assertEqual(torch.tensor(n), n_astensor)
 
             # changing dtype causes copy
             n = np.random.rand(5, 6).astype(np.float32)
@@ -2980,6 +3025,25 @@ class _TestTorchMixin(object):
         r3 = torch.arange(10, -1 - 1e-6, -1)
         self.assertEqual(r1, r2, 0)
         self.assertEqual(r2, r3[:-1], 0)
+
+        msg = "unsupported range"
+        self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(0, float('inf')))
+        self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('inf')))
+
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(-5, float('nan'), device=device))
+            # check with step size
+            self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(0, float('-inf'), -1, device=device))
+            self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(0, float('inf'), device=device))
+            self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('-inf'), 10, device=device))
+            self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('nan'), 10, device=device))
+            self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('inf'), device=device))
+            self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('nan'), device=device))
+
+            self.assertRaisesRegex(
+                RuntimeError, "overflow",
+                lambda: torch.arange(1.175494351e-38, 3.402823466e+38, device=device))
 
     def test_arange_inference(self):
         saved_dtype = torch.get_default_dtype()
@@ -3831,7 +3895,6 @@ class _TestTorchMixin(object):
         self.assertEqual(x.narrow(-1, -1, 1), torch.Tensor([[2], [5], [8]]))
         self.assertEqual(x.narrow(-2, -1, 1), torch.Tensor([[6, 7, 8]]))
 
-    @skipIfRocm
     def test_narrow_empty(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
@@ -3894,8 +3957,8 @@ class _TestTorchMixin(object):
         res2 = torch.Tensor()
         torch.linspace(_from, to, 137, out=res2)
         self.assertEqual(res1, res2, 0)
-        self.assertRaises(RuntimeError, lambda: torch.linspace(0, 1, 1))
-        self.assertEqual(torch.linspace(0, 0, 1), torch.zeros(1), 0)
+        self.assertRaises(RuntimeError, lambda: torch.linspace(0, 1, -1))
+        self.assertEqual(torch.linspace(0, 1, 1), torch.zeros(1), 0)
 
         # Check linspace for generating with start > end.
         self.assertEqual(torch.linspace(2, 0, 3), torch.Tensor((2, 1, 0)), 0)
@@ -3912,8 +3975,8 @@ class _TestTorchMixin(object):
         res2 = torch.Tensor()
         torch.logspace(_from, to, 137, out=res2)
         self.assertEqual(res1, res2, 0)
-        self.assertRaises(RuntimeError, lambda: torch.logspace(0, 1, 1))
-        self.assertEqual(torch.logspace(0, 0, 1), torch.ones(1), 0)
+        self.assertRaises(RuntimeError, lambda: torch.logspace(0, 1, -1))
+        self.assertEqual(torch.logspace(0, 1, 1), torch.ones(1), 0)
 
         # Check logspace_ for generating with start > end.
         self.assertEqual(torch.logspace(1, 0, 2), torch.Tensor((10, 1)), 0)
@@ -4122,7 +4185,6 @@ class _TestTorchMixin(object):
         self.assertEqual(x.data, cast(x_exp))
 
     @skipIfNoLapack
-    @skipIfRocm
     def test_gesv_batched_dims(self):
         self._test_gesv_batched_dims(self, lambda t: t)
 
@@ -6822,6 +6884,7 @@ class _TestTorchMixin(object):
             self.assertEqual(x, x.roll(0, 1).roll(0, -1))
             self.assertEqual(x, x.roll(1, x.size(1)))
             self.assertEqual(x, x.roll(1))
+            self.assertEqual(x, x.roll((1, 1), (3, 1)))
 
             # unbind
             self.assertEqual((), x.unbind(0))
@@ -7404,6 +7467,10 @@ class _TestTorchMixin(object):
             expected = torch.tensor([8, 1, 2, 3, 4, 5, 6, 7], device=device)
             self.assertEqual(single_roll, expected, "{} did not equal expected result".format(single_roll))
 
+            roll_backwards = numbers.roll(-2, 0)
+            expected = torch.tensor([3, 4, 5, 6, 7, 8, 1, 2], device=device)
+            self.assertEqual(roll_backwards, expected, "{} did not equal expected result".format(roll_backwards))
+
             data = numbers.view(2, 2, 2)
             rolled = data.roll(1, 0)
             expected = torch.tensor([5, 6, 7, 8, 1, 2, 3, 4], device=device).view(2, 2, 2)
@@ -7430,6 +7497,18 @@ class _TestTorchMixin(object):
             expected = numbers.roll(1, 0).view(2, 4)
             self.assertEqual(expected, data.roll(1), "roll with no dims should flatten and roll.")
             self.assertEqual(expected, data.roll(1, dims=None), "roll with no dims should flatten and roll.")
+
+            # test roll over multiple dimensions
+            expected = torch.tensor([[7, 8, 5, 6], [3, 4, 1, 2]], device=device)
+            double_rolled = data.roll(shifts=(2, -1), dims=(1, 0))
+            self.assertEqual(double_rolled, expected,
+                             "should be able to roll over two dimensions, got {}".format(double_rolled))
+
+            self.assertRaisesRegex(RuntimeError, "required", lambda: data.roll(shifts=(), dims=()))
+            self.assertRaisesRegex(RuntimeError, "required", lambda: data.roll(shifts=(), dims=1))
+            # shifts/dims should align
+            self.assertRaisesRegex(RuntimeError, "align", lambda: data.roll(shifts=(1, 2), dims=(1,)))
+            self.assertRaisesRegex(RuntimeError, "align", lambda: data.roll(shifts=(1,), dims=(1, 2)))
 
     def test_reversed(self):
         val = torch.arange(0, 10)
@@ -7853,6 +7932,37 @@ class _TestTorchMixin(object):
                 f.seek(0)
                 c = torch.load(handle)
             self._test_serialization_assert(b, c)
+        # test non-ascii encoding of bytes arrays/strings
+        # The following bytes are produced by serializing
+        #   [b'\xc5\xbc\xc4\x85\xc4\x85\xc3\xb3\xc5\xbc\xc4\x85\xc5\xbc', torch.zeros(1, dtype=torch.float), 2]
+        # in Python 2.7.12 and PyTorch 0.4.1, where the first element contains
+        # bytes of some utf-8 characters (i.e., `utf8_str.encode('utf-8')`).
+        serialized = (
+            b'\x80\x02\x8a\nl\xfc\x9cF\xf9 j\xa8P\x19.\x80\x02M\xe9\x03.'
+            b'\x80\x02}q\x01(U\x10protocol_versionq\x02M\xe9\x03U\n'
+            b'type_sizesq\x03}q\x04(U\x03intq\x05K\x04U\x05shortq\x06K\x02U'
+            b'\x04longq\x07K\x04uU\rlittle_endianq\x08\x88u.\x80\x02]q'
+            b'\x01(U\x0e\xc5\xbc\xc4\x85\xc4\x85\xc3\xb3\xc5\xbc\xc4\x85'
+            b'\xc5\xbcq\x02ctorch._utils\n_rebuild_tensor_v2\nq\x03((U'
+            b'\x07storageq\x04ctorch\nFloatStorage\nq\x05U\x0845640624q'
+            b'\x06U\x03cpuq\x07\x8a\x01\x01NtQK\x00K\x01\x85K\x01\x85'
+            b'\x89NtRq\x08K\x02e.\x80\x02]q\x01U\x0845640624q\x02a.\x01\x00'
+            b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
+        )
+        buf = io.BytesIO(serialized)
+        utf8_bytes = b'\xc5\xbc\xc4\x85\xc4\x85\xc3\xb3\xc5\xbc\xc4\x85\xc5\xbc'
+        utf8_str = utf8_bytes.decode('utf-8')
+        if PY3:
+            with self.assertRaisesRegex(UnicodeDecodeError, "'ascii' codec can't decode byte"):
+                loaded = torch.load(buf)
+            buf.seek(0)
+            loaded_utf8 = torch.load(buf, encoding='utf-8')
+            self.assertEqual(loaded_utf8, [utf8_str, torch.zeros(1, dtype=torch.float), 2])
+            buf.seek(0)
+            loaded_bytes = torch.load(buf, encoding='bytes')
+        else:
+            loaded_bytes = torch.load(buf)
+        self.assertEqual(loaded_bytes, [utf8_bytes, torch.zeros(1, dtype=torch.float), 2])
 
     def test_serialization_filelike(self):
         # Test serialization (load and save) with a filelike object
@@ -8299,6 +8409,10 @@ class _TestTorchMixin(object):
             obj = t(100, 100).fill_(1)
             obj.__repr__()
             str(obj)
+        # test half tensor
+        obj = torch.rand(100, 100, device='cpu').half()
+        obj.__repr__()
+        str(obj)
         for t in torch._storage_classes:
             if t.is_cuda and not torch.cuda.is_available():
                 continue
@@ -8352,6 +8466,13 @@ tensor([ 0.0000e+00, 9.8813e-324, 9.8813e-323, 1.0000e+307, 1.0000e+308,
         x = torch.zeros(10000)
         self.assertEqual(x.__repr__(), str(x))
         self.assertExpectedInline(str(x), '''tensor([0., 0., 0.,  ..., 0., 0., 0.])''')
+
+        # test internal summary function
+        x = torch.rand(1, 20, 5, 30)
+        summary = torch._tensor_str.get_summarized_data(x)
+        self.assertEqual(summary.shape, (1, 6, 5, 6))
+        first_and_last = [0, 1, 2, -3, -2, -1]
+        self.assertEqual(summary, x[:, first_and_last][..., first_and_last])
 
         # test device
         if torch.cuda.is_available():
@@ -8655,6 +8776,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             np.int64,
             np.int32,
             np.int16,
+            np.int8,
             np.uint8,
             np.longlong,
         ]
@@ -8704,7 +8826,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             np.int64,
             np.int32,
             np.int16,
-            np.uint8
+            np.int8,
+            np.uint8,
         ]
 
         incorrect_byteorder = '>' if sys.byteorder == 'little' else '<'
@@ -9020,7 +9143,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertRaises(RuntimeError, lambda: torch.randn(2, 3, 4).t())
         self.assertRaises(RuntimeError, lambda: torch.randn(2, 3, 4).t_())
 
-    # unit test for THTensor_(copyTranspose)
+    # unit test for special case transposed copy (see ATen/native/Copy.cpp for details)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_big_transpose(self):
         t = torch.rand(456, 789)

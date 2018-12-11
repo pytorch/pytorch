@@ -5,8 +5,16 @@ import multiprocessing.connection
 import signal
 import sys
 
+from . import _prctl_pr_set_pdeathsig
+
 
 def _wrap(fn, i, args, error_queue):
+    # prctl(2) is a Linux specific system call.
+    # On other systems the following function call has no effect.
+    # This is set to ensure that non-daemonic child processes can
+    # terminate if their parent terminates before they do.
+    _prctl_pr_set_pdeathsig(signal.SIGINT)
+
     try:
         fn(i, *args)
     except KeyboardInterrupt:
@@ -38,6 +46,9 @@ class SpawnContext:
             process.sentinel: index
             for index, process in enumerate(processes)
         }
+
+    def pids(self):
+        return [int(process.pid) for process in self.processes]
 
     def join(self, timeout=None):
         r"""
@@ -103,7 +114,7 @@ class SpawnContext:
         raise Exception(msg)
 
 
-def spawn(fn, args=(), nprocs=1, join=True):
+def spawn(fn, args=(), nprocs=1, join=True, daemon=False):
     r"""Spawns ``nprocs`` processes that run ``fn`` with ``args``.
 
     If one of the processes exits with a non-zero exit status, the
@@ -125,6 +136,8 @@ def spawn(fn, args=(), nprocs=1, join=True):
         args (tuple): Arguments passed to ``fn``.
         nprocs (int): Number of processes to spawn.
         join (bool): Perform a blocking join on all processes.
+        daemon (bool): The spawned processes' daemon flag. If set to True,
+                       daemonic processes will be created.
 
     Returns:
         None if ``join`` is ``True``,
@@ -140,7 +153,7 @@ def spawn(fn, args=(), nprocs=1, join=True):
         process = mp.Process(
             target=_wrap,
             args=(fn, i, args, error_queue),
-            daemon=True,
+            daemon=daemon,
         )
         process.start()
         error_queues.append(error_queue)

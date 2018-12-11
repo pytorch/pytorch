@@ -46,7 +46,7 @@ public:
   /// construction.
   ~CUDAMultiStreamGuard() {
     for (const auto& s : original_streams_) {
-      uncheckedSetCurrentCUDAStream(s);
+      setCurrentCUDAStream(s);
     }
   }
 

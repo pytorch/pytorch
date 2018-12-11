@@ -1,8 +1,8 @@
-#include "ATen/ATen.h"
-#include "ATen/InitialTensorOptions.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/cuda/CUDAContext.h"
-#include "c10/util/Exception.h"
+#include <ATen/ATen.h>
+#include <ATen/InitialTensorOptions.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <c10/util/Exception.h>
 
 #include <THC/THCGeneral.h>
 #include <THC/THCThrustAllocator.cuh>
@@ -87,7 +87,7 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
 
           auto state = globalContext().getTHCState();
           THCThrustAllocator thrustAlloc(state);
-          auto policy = thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state));
+          auto policy = thrust::cuda::par(thrustAlloc).on(at::cuda::getCurrentCUDAStream());
 
           thrust::sequence(policy, result_data, result_data + n);
 

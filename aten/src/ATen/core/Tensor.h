@@ -1,25 +1,32 @@
 #pragma once
 
-#include "c10/Device.h"
-#include "ATen/core/Layout.h"
-#include "ATen/core/Scalar.h"
-#include "ATen/core/ScalarType.h"
-#include "ATen/core/SparseTensorRef.h"
-#include "ATen/core/Storage.h"
-#include "ATen/core/TensorAccessor.h"
-#include "ATen/core/TensorImpl.h"
-#include "ATen/core/UndefinedTensorImpl.h"
-#include "c10/util/Exception.h"
-#include "c10/util/Optional.h"
+#include <c10/Device.h>
+#include <c10/core/Layout.h>
+#include <c10/core/Scalar.h>
+#include <c10/core/ScalarType.h>
+#include <ATen/core/SparseTensorRef.h>
+#include <c10/core/Storage.h>
+#include <ATen/core/TensorAccessor.h>
+#include <ATen/core/TensorImpl.h>
+#include <ATen/core/UndefinedTensorImpl.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
+#include <ATen/core/LegacyTypeDispatch.h>
 
+namespace c10{
+struct TensorOptions;
+}
 namespace at {
 struct Generator;
 struct Type;
 class Tensor;
-struct TensorOptions;
 } // namespace at
 
 namespace at {
+
+class Tensor;
+using TensorList = ArrayRef<Tensor>;
+
 // Tensor is a "generic" object holding a pointer to the underlying TensorImpl object, which
 // has an embedded reference count. In this way, Tensor is similar to boost::intrusive_ptr.
 //
@@ -143,7 +150,7 @@ public:
     return impl_->is_contiguous();
   }
   Type & type() const {
-    return impl_->type();
+    return legacyTensorType(*impl_);
   }
   TensorTypeId type_id() const {
     return impl_->type_id();
@@ -153,6 +160,9 @@ public:
   }
   const Storage& storage() const {
     return impl_->storage();
+  }
+  bool is_alias_of(const at::Tensor& other) const{
+    return impl_->storage().is_alias_of(other.storage());
   }
   Tensor toType(const Type & t, bool non_blocking=false) const;
   Tensor & copy_(const Tensor & src, bool non_blocking=false);
@@ -177,6 +187,9 @@ public:
 
   /// Returns if a `Tensor` has CUDA backend.
   bool is_cuda() const;
+
+  /// Returns if a `Tensor` has HIP backend.
+  bool is_hip() const;
 
   /// Returns if a `Tensor` has sparse backend.
   bool is_sparse() const;
@@ -234,6 +247,7 @@ public:
 
   Tensor cpu() const;
   Tensor cuda() const;
+  Tensor hip() const;
 
   // ~~~~~ Autograd API ~~~~~
 
@@ -265,7 +279,6 @@ public:
 
   //example
   //Tensor * add(Tensor & b);
-  Tensor & _th_triu_(int64_t diagonal=0);
   Tensor abs() const;
   Tensor & abs_();
   Tensor acos() const;
@@ -352,8 +365,8 @@ public:
   Tensor irfft(int64_t signal_ndim, bool normalized=false, bool onesided=true, IntList signal_sizes={}) const;
   Tensor index(TensorList indices) const;
   Tensor & index_copy_(int64_t dim, const Tensor & index, const Tensor & source);
-  Tensor index_put(TensorList indices, const Tensor & values) const;
-  Tensor & index_put_(TensorList indices, const Tensor & values);
+  Tensor index_put(TensorList indices, const Tensor & values, bool accumulate=false) const;
+  Tensor & index_put_(TensorList indices, const Tensor & values, bool accumulate=false);
   Tensor inverse() const;
   Tensor isclose(const Tensor & other, double rtol=1e-05, double atol=1e-08, bool equal_nan=false) const;
   bool is_distributed() const;
@@ -381,9 +394,9 @@ public:
   Tensor max_values(int64_t dim, bool keepdim=false) const;
   Tensor mean(ScalarType dtype) const;
   Tensor mean() const;
-  Tensor mean(int64_t dim, bool keepdim, ScalarType dtype) const;
-  Tensor mean(int64_t dim, bool keepdim=false) const;
-  Tensor mean(int64_t dim, ScalarType dtype) const;
+  Tensor mean(IntList dim, bool keepdim, ScalarType dtype) const;
+  Tensor mean(IntList dim, bool keepdim=false) const;
+  Tensor mean(IntList dim, ScalarType dtype) const;
   std::tuple<Tensor,Tensor> median(int64_t dim, bool keepdim=false) const;
   std::tuple<Tensor,Tensor> min(int64_t dim, bool keepdim=false) const;
   Tensor min_values(int64_t dim, bool keepdim=false) const;
@@ -446,7 +459,7 @@ public:
   Tensor sqrt() const;
   Tensor & sqrt_();
   Tensor std(bool unbiased=true) const;
-  Tensor std(int64_t dim, bool unbiased=true, bool keepdim=false) const;
+  Tensor std(IntList dim, bool unbiased=true, bool keepdim=false) const;
   Tensor prod(ScalarType dtype) const;
   Tensor prod() const;
   Tensor prod(int64_t dim, bool keepdim, ScalarType dtype) const;
@@ -508,7 +521,7 @@ public:
   Tensor to(Device device, ScalarType dtype, bool non_blocking=false, bool copy=false) const;
   Tensor to(ScalarType dtype, bool non_blocking=false, bool copy=false) const;
   Tensor to(const Tensor & other, bool non_blocking=false, bool copy=false) const;
-  Scalar _local_scalar() const;
+  Scalar item() const;
   void* data_ptr() const;
   Tensor & set_(Storage source);
   Tensor & set_(Storage source, int64_t storage_offset, IntList size, IntList stride={});
@@ -725,4 +738,4 @@ Tensor make_tensor(Args&&... args) {
 
 } // namespace at
 
-#include "ATen/core/TensorMethods.h"
+#include <ATen/core/TensorMethods.h>

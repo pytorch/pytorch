@@ -1,9 +1,9 @@
 #pragma once
 
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 #include <memory>
-#include "torch/csrc/jit/tracer.h"
-#include "torch/csrc/utils/pybind.h"
+#include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/utils/pybind.h>
 
 namespace torch { namespace jit { namespace tracer {
 void initPythonTracerBindings(PyObject *module);
@@ -18,6 +18,7 @@ std::shared_ptr<Graph> createGraphByTracing(
     py::function func,
     Stack inputs,
     py::function var_name_lookup_fn,
+    bool force_outplace,
     c10::optional<size_t> num_real_inputs = {});
 } // namespace tracer
 

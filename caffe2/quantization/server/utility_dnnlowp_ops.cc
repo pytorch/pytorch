@@ -50,7 +50,7 @@ bool GatherDNNLowPOp<T>::RunOnDevice() {
         out_qparams = Fp32Op_()->GetOutputQuantizationParams(qfactory_.get());
       }
 
-      Quantize<T>(
+      fbgemm::Quantize<T>(
           static_cast<const float*>(Fp32Op_()->Get()->Output(0)->raw_data()),
           out_data,
           output->t.numel(),

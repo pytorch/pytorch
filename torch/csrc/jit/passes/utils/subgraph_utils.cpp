@@ -1,4 +1,4 @@
-#include "subgraph_utils.h"
+#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 
 namespace torch {
 namespace jit {
@@ -57,7 +57,8 @@ std::vector<Node*> unmergeSubgraph(Node* subgraphNode) {
 
   // Replace uses of group outputs and destroy the group
   const auto subgraphOutputs = subgraph->outputs();
-  for (size_t i = 0; i < subgraphOutputs.size(); ++i) {
+  JIT_ASSERT(subgraphOutputs.size() >= subgraphNode->outputs().size());
+  for (size_t i = 0; i < subgraphNode->outputs().size(); ++i) {
     const auto outerOutput = innerToOuter.at(subgraphOutputs[i]);
     subgraphNode->outputs()[i]->replaceAllUsesWith(outerOutput);
   }

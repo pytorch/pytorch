@@ -1,16 +1,16 @@
 #pragma once
 
-#include "torch/csrc/autograd/function_hook.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/constants.h"
-#include "torch/csrc/jit/stack.h"
-#include "torch/csrc/jit/type.h"
-#include "torch/csrc/utils/functional.h"
-#include "torch/csrc/utils/functional.h"
-#include "torch/csrc/utils/variadic.h"
-#include "torch/csrc/utils/variadic.h"
-#include "torch/csrc/WindowsTorchApiMacro.h"
+#include <torch/csrc/autograd/function_hook.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/stack.h>
+#include <torch/csrc/jit/type.h>
+#include <torch/csrc/utils/functional.h>
+#include <torch/csrc/utils/functional.h>
+#include <torch/csrc/utils/variadic.h>
+#include <torch/csrc/utils/variadic.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <ATen/Backtrace.h>
 
@@ -47,6 +47,7 @@ struct TORCH_API TracingState : public std::enable_shared_from_this<TracingState
   std::unordered_map<WeakTensor, Value*, WeakTensorHasher, WeakTensorEq> value_map;
   std::shared_ptr<Graph> graph;
   bool warn = true;
+  bool force_outplace = false;
   std::function<std::string(const Variable& var)> lookup_var_name_fn =
     [](const Variable& var) {return "";};
 };

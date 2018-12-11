@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorMath.cu"
+#define THC_GENERIC_FILE "THC/generic/THCTensorMath.cu"
 #else
 
 void THCTensor_(fill)(THCState* state, THCTensor *self_, scalar_t value)
@@ -174,11 +174,11 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
       param.outputStride[i] = THCTensor_(stride)(state, result, i);
     }
 
-    THCStream* stream = THCState_getStream(state);
+    at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
 
     // Template Declarations for dim = 1, 2, 3, 4
 #define HANDLE_CASE(DIMS) \
-  CatArrayBatchedCopy<scalar_t, unsigned int, DIMS><<<catGrid, applyBlock, 0, THCStream_stream(stream)>>>(data, d_inputs, param, dimension, param.outputStride[dimension]);
+  CatArrayBatchedCopy<scalar_t, unsigned int, DIMS><<<catGrid, applyBlock, 0, stream.stream()>>>(data, d_inputs, param, dimension, param.outputStride[dimension]);
 
     // Now we loop
     offset = 0;
@@ -205,7 +205,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
             stackInputs,
             j * sizeof(CatArrInputTensor<scalar_t, unsigned int>),
             cudaMemcpyHostToDevice,
-            THCStream_stream(stream)));
+            stream.stream()));
         THCudaHostRecord(state, stackInputs);
       }
 
@@ -395,8 +395,7 @@ accreal THCTensor_(trace)(THCState *state, THCTensor *src_) {
 
 void THCTensor_(linspace)(THCState *state, THCTensor *r_, scalar_t a, scalar_t b, int64_t n) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, r_));
-  // NumPy allows you to pass different points even if n <= 1 -- should we?
-  THArgCheck(n > 1 || ((n == 0 || n == 1) && (a == b)), 3, "invalid number of points");
+  THArgCheck((n >= 0), 3, "number of points must be non-negative");
   if (THCTensor_(nElement)(state, r_) != n) THCTensor_(resize1d)(state, r_, n);
   if (n == 0) {
     // skip
@@ -419,8 +418,7 @@ void THCTensor_(linspace)(THCState *state, THCTensor *r_, scalar_t a, scalar_t b
 
 void THCTensor_(logspace)(THCState *state, THCTensor *r_, scalar_t a, scalar_t b, int64_t n) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, r_));
-  // NumPy allows you to pass different points even if n <= 1 -- should we?
-  THArgCheck(n > 1 || ((n == 0 || n == 1) && (a == b)), 3, "invalid number of points");
+  THArgCheck((n >= 0), 3, "number of points must be non-negative");
   if (THCTensor_(nElement)(state, r_) != n) THCTensor_(resize1d)(state, r_, n);
   if (n == 0) {
     // skip
@@ -461,9 +459,16 @@ void THCTensor_(range)(THCState *state, THCTensor *r_, accreal xmin, accreal xma
 void THCTensor_(arange)(THCState* state, THCTensor *r_, accreal xmin, accreal xmax, accreal step) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, r_));
   THArgCheck(step > 0 || step < 0, 3, "step must be nonzero");
+  THArgCheck(std::isfinite(static_cast<double>(xmin)) &&
+              std::isfinite(static_cast<double>(xmax))
+              , 1, "unsupported range: ", xmin, " -> ", xmax);
   THArgCheck(((step > 0) && (xmax >= xmin)) || ((step < 0) && (xmax <= xmin))
               , 2, "upper bound and larger bound inconsistent with step sign");
-  ptrdiff_t size = (ptrdiff_t) ceil(ScalarConvert<accreal, double>::to(xmax - xmin) / step);
+  double size_d = ceil(ScalarConvert<accreal, double>::to(xmax - xmin) / step);
+  THArgCheck(size_d >= 0 && size_d <= static_cast<double>(PTRDIFF_MAX)
+              , 1, "invalid size, possible overflow?");
+  ptrdiff_t size = static_cast<ptrdiff_t>(size_d);
+
   if (THCTensor_(nElement)(state, r_) != size) THCTensor_(resize1d)(state, r_, size);
   THCTensor *r = THCTensor_(newContiguous)(state, r_);
   LinspaceOp<scalar_t,accreal> linspace_method(xmin, step);

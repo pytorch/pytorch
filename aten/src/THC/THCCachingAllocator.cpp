@@ -1,7 +1,8 @@
-#include "THCCachingAllocator.h"
+#include <THC/THCCachingAllocator.h>
 
 #include <ATen/Context.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAGuard.h>
 #include <ATen/cuda/Exceptions.h>
 
 #include <cuda_runtime_api.h>
@@ -41,8 +42,7 @@
 
 namespace {
 
-typedef std::shared_ptr<THCStream> THCStreamPtr;
-typedef std::set<THCStreamPtr> stream_set;
+using stream_set = std::unordered_set<at::cuda::CUDAStream>;
 
 const size_t kRoundSmall = 512;     // round up small allocs to 512 bytes
 const size_t kRoundLarge = 131072;  // round up large allocs to 128 KiB
@@ -336,20 +336,19 @@ struct THCCachingAllocator
     cacheInfoAux(small_blocks, dev_id, total, largest);
   }
 
-  void recordStream(void* ptr, THCStream* stream)
+  void recordStream(void* ptr, at::cuda::CUDAStream stream)
   {
     std::lock_guard<std::mutex> lock(mutex);
     Block* block = find_allocated_block(ptr);
     if (!block) {
       THError("invalid device pointer: %p", ptr);
     }
-    if (THCStream_stream(stream) == block->stream) {
+    if (stream.stream() == block->stream) {
       // ignore uses on the allocation stream, since those don't require any
       // special synchronization
       return;
     }
-    THCStream_retain(stream);
-    block->stream_uses.insert(THCStreamPtr(stream, &THCStream_free));
+    block->stream_uses.insert(stream);
   }
 
   /** moves a block into the free block list */
@@ -462,15 +461,14 @@ struct THCCachingAllocator
     int prev_device;
     AT_CUDA_CHECK(cudaGetDevice(&prev_device));
 
-    std::set<THCStreamPtr> streams(std::move(block->stream_uses));
+    stream_set streams(std::move(block->stream_uses));
     THAssert(block->stream_uses.empty());
     for (auto it = streams.begin(); it != streams.end(); ++it) {
-      auto& stream = *it;
-      AT_CUDA_CHECK(cudaSetDevice(THCStream_device(stream.get())));
+      AT_CUDA_CHECK(cudaSetDevice(it->device_index()));
 
       cudaEvent_t event;
       AT_CUDA_CHECK(cudaEventCreateWithFlags(&event, cudaEventDisableTiming));
-      AT_CUDA_CHECK(cudaEventRecord(event, THCStream_stream(stream.get())));
+      AT_CUDA_CHECK(cudaEventRecord(event, it->stream()));
 
       block->event_count++;
       cuda_events.emplace_back(event, block);
@@ -553,7 +551,7 @@ THC_API void* THCCachingAllocator_getBaseAllocation(void *ptr, size_t *size)
   return caching_allocator.getBaseAllocation(ptr, size);
 }
 
-THC_API void THCCachingAllocator_recordStream(void *ptr, THCStream* stream)
+THC_API void THCCachingAllocator_recordStream(void *ptr, at::cuda::CUDAStream stream)
 {
   caching_allocator.recordStream(ptr, stream);
 }
@@ -590,3 +588,58 @@ THC_API uint64_t THCCachingAllocator_maxMemoryCached(int device) {
   assertValidDevice(device);
   return caching_allocator.get_stats_for_device(device).max_amount_cached;
 }
+
+//
+// In CUDA IPC, sender sends a tensor to receiver, THCCaching_CUDAIpcDevptr
+// is called by the receiving process to map the CUDA memory from the sending
+// process into its own address space.
+//
+// CUDA IPC only allows sharing a big memory block associated with a cudaIpcMemHandle_t
+// and it can be opened only **once** per context per process. There can be
+// multiple types of storage in the same IPC mem block, so we must cache the
+// device ptr to construct typed storage as it comes.
+//
+// ipcMemHandle_to_devptr maps a cudaIpcMemHandle_t to a device pointer in the process
+// that can be used to access the memory block in the sender process.
+// It only saves a weak_ptr of the device pointer in the map, the shared_ptr
+// will be used to reconstruct all storages in this CudaMalloc allocation.
+// And it will deleted in cudaIpcCloseMemHandle when its reference count is 0.
+//
+namespace {
+  std::mutex IpcMutex;
+  std::unordered_map<std::string, std::weak_ptr<void>> ipcMemHandle_to_devptr;
+}
+
+AT_CUDA_API std::shared_ptr<void> THCCaching_CUDAIpcDevptr(std::string handle) {
+  std::lock_guard<std::mutex> lock(IpcMutex);
+
+  auto iter = ipcMemHandle_to_devptr.find(handle);
+  if (iter != ipcMemHandle_to_devptr.end()) {
+    auto devptr = iter->second.lock();
+    if (devptr) return devptr;
+  }
+  // This ipcMemHandle hasn't been opened, or already expired, open it to
+  // enable IPC access to that mem block.
+  void *dev = nullptr;
+  auto ipc_handle = reinterpret_cast<const cudaIpcMemHandle_t*>(handle.c_str());
+  THCudaCheck(cudaIpcOpenMemHandle(&dev, *ipc_handle, cudaIpcMemLazyEnablePeerAccess));
+  // devPtr has to be deleted in same device when created.
+  int curr_device;
+  THCudaCheck(cudaGetDevice(&curr_device));
+  auto sp = std::shared_ptr<void>(
+      dev,
+      [handle, curr_device](void *ptr) {
+        at::cuda::CUDAGuard device_guard(curr_device);
+        std::lock_guard<std::mutex> lock(IpcMutex);
+        THCudaCheck(cudaIpcCloseMemHandle(ptr));
+        ipcMemHandle_to_devptr.erase(handle);});
+  std::weak_ptr<void> wp = sp;
+  // To eliminate an additional search, we can use insert().
+  // It doesn't overwrite when key already exists(ptr expired).
+  // But in the deleter for sp we erased the entry,
+  // this should be safe to do now.
+  ipcMemHandle_to_devptr.insert(iter, {handle, wp});
+
+  return sp;
+}
+

@@ -1,20 +1,20 @@
-#include "torch/csrc/jit/fuser/codegen.h"
+#include <torch/csrc/jit/fuser/codegen.h>
 
-#include "ATen/ATen.h"
-#include "torch/csrc/jit/code_template.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/fuser/compiler.h"
-#include "torch/csrc/jit/fuser/config.h"
-#include "torch/csrc/jit/fuser/interface.h"
-#include "torch/csrc/jit/fuser/tensor_info.h"
+#include <ATen/ATen.h>
+#include <torch/csrc/jit/code_template.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/fuser/compiler.h>
+#include <torch/csrc/jit/fuser/config.h>
+#include <torch/csrc/jit/fuser/interface.h>
+#include <torch/csrc/jit/fuser/tensor_info.h>
 
 #if USE_CUDA_FUSER
-  #include "torch/csrc/jit/fuser/cuda/resource_strings.h"
+  #include <torch/csrc/jit/fuser/cuda/resource_strings.h>
 #endif 
 
 #if USE_CPU_FUSER
-  #include "torch/csrc/jit/fuser/cpu/resource_strings.h"
+  #include <torch/csrc/jit/fuser/cpu/resource_strings.h>
 #endif 
 
 #include <tuple>
@@ -39,6 +39,10 @@ static std::string valueName(const Value* n) {
 }
 
 static std::string scalarValue(const int64_t v) {
+  return std::to_string(v);
+}
+
+static std::string scalarValue(const bool v) {
   return std::to_string(v);
 }
 
@@ -77,10 +81,54 @@ static const char* scalarTypeName(const at::ScalarType type) {
   }
 }
 
+static const char* calcScalarTypeName(const at::ScalarType type) {
+  if (type == at::ScalarType::Half) {
+    return "float";
+  }
+  return scalarTypeName(type);
+}
+
+
+static std::string variableType(const std::shared_ptr<c10::Type> t) {
+  if (t->kind() == TypeKind::IntType) {
+    return "int";
+  } else if (t->kind() == TypeKind::FloatType) {
+    return "float";
+  } else if (t->kind() == TypeKind::TensorType) {
+    auto const tt = t->cast<TensorType>();
+    return calcScalarTypeName(tt->scalarType());
+  }
+  // something went wrong with the type analysis during shape propagation
+  throw std::runtime_error("unknown scalar type during JIT fusion code generation");
+}
+
+static std::string typeCastedValueName(const std::shared_ptr<c10::Type> t, const at::ScalarType outtype, const std::string& vn) {
+  if (t->kind() == TypeKind::IntType) {
+    if (! isIntegralType(outtype)) {
+      return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
+    }
+    return vn;
+  } else if (t->kind() == TypeKind::FloatType) {
+    if (! isFloatingType(outtype)) {
+      return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
+    }
+    return vn;
+  } else if (t->kind() == TypeKind::TensorType) {
+    auto const tt = t->cast<TensorType>();
+    if (tt->scalarType() != outtype) {
+      return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
+    }
+    return vn;
+  }
+  // something went wrong with the type analysis during shape propagation
+  throw std::runtime_error("unknown scalar type during JIT fusion code generation");
+}
+
 // Writes "simple mappable" ops
 static std::string encodeRHS(const Node* n) {
   static std::unordered_map<NodeKind, std::string> simple_map_ops = {
     // unary
+    {aten::_cast_Float, "static_cast<float>(${0})"},
     {aten::abs, "fabs(${0})"},
     {aten::sigmoid, "1.f / (1.f + expf(-${0}))"},
     {aten::relu, "${0} < 0 ? 0.f : ${0} "},
@@ -107,7 +155,7 @@ static std::string encodeRHS(const Node* n) {
     {aten::round, "roundf(${0})"},
     {aten::trunc, "truncf(${0})"},
     {aten::frac, "fracf(${0})"},
-    {aten::reciprocal, "reciprocalf(${0})"},
+    {aten::reciprocal, "1.f/(${0})"},
     {aten::neg, "-${0}"},
     //simple binary
     {aten::atan2, "atan2(${0}, ${1})"},
@@ -124,22 +172,22 @@ static std::string encodeRHS(const Node* n) {
     {aten::__or__, "${0} || ${1}"},
     {aten::__rshift__, "${0} >> ${1}"},
     {aten::__xor__, "${0} ^ ${1}"},
-    {aten::div, "${0} / ${1}"},
+    {aten::div, "${cast_0} / ${cast_1}"},
     {aten::eq, "${0} == ${1}"},
-    {aten::fmod, "fmodf(${0}, ${1})"},
+    {aten::fmod, "fmodf(${cast_0}, ${cast_1})"},
     {aten::ge, "(${0} >= ${1})"},
     {aten::gt, "${0} > ${1}"},
     {aten::le, "(${0} <= ${1})"},
     {aten::lt, "${0} < ${1}"},
-    {aten::type_as, "(${0})"}, //everything is implicitly convertible to float
-    {aten::mul, "${0} * ${1}"},
+    {aten::type_as, "(${cast_0})"},
+    {aten::mul, "${cast_0} * ${cast_1}"},
     {aten::ne, "${0} != ${1}"},
     {aten::remainder, "remainderf(${0}, ${1})"},
-    {aten::pow, "powf(${0}, ${1})"},
+    {aten::pow, "powf(${cast_0}, ${cast_1})"},
 
     //alpha
-    {aten::add, "${0} + ${2}*${1}"},
-    {aten::sub, "(${0} - ${2}*${1})"},
+    {aten::add, "${cast_0} + ${cast_2}*${cast_1}"},
+    {aten::sub, "(${cast_0} - ${cast_2}*${cast_1})"},
     {aten::rand_like, "uniform(rnd())"},
 
     // min, max
@@ -147,6 +195,9 @@ static std::string encodeRHS(const Node* n) {
     // this is so that if min or max is NaN, they are "ignored"
     // and when the input is NaN, the output is, too
     {aten::clamp, "(${0}<${1}?${1}:(${0}>${2}?${2}:${0}))"},
+
+    //where
+    {aten::where, "(${0} ? ${1} : ${2})"},
 
     // simple derivatives
     {aten::_sigmoid_backward, "${0} * ${1} * (1.f - ${1})"},
@@ -157,6 +208,8 @@ static std::string encodeRHS(const Node* n) {
     const auto val = toIValue(n->output()).value();
     if (val.isDouble()) {
       return scalarValue(val.toDouble());
+    } else if (val.isBool()) {
+      return scalarValue(val.toBool());
     } else {
       JIT_ASSERT(val.isInt());
       return scalarValue(val.toInt());
@@ -165,8 +218,13 @@ static std::string encodeRHS(const Node* n) {
 
   TemplateEnv env;
   size_t i = 0;
+  auto outtype = n->output()->type()->expect<c10::TensorType const>()->scalarType();
   for(auto in : n->inputs()) {
-    env.s(std::to_string(i++), valueName(in));
+    // PyTorch converts (scalar) argument types to result before applying the operator
+    // e.g. 1.4-torch.tensor(3) = -2
+    env.s(std::to_string(i), valueName(in));
+    env.s(std::string("cast_")+std::to_string(i), typeCastedValueName(in->type(), outtype, valueName(in)));
+    i++;
   }
 
   const auto & str = simple_map_ops.at(n->kind());
@@ -308,9 +366,9 @@ generateKernel(
     } else {
       env.s("access", format("t${formal}.data[t${formal}_offset]", env));
     }
+    env.s("lhs_type", calcScalarTypeName(input.second.scalar_type));
 
-    //TODO: actual type propagation rather than relying on auto..
-    body << format("auto ${node} = ${access};\n", env);
+    body << format("${lhs_type} ${node} = ${access};\n", env);
   }
 
   bool has_random = false;
@@ -327,7 +385,8 @@ generateKernel(
     }
     env.s("node", valueName(n->output()));
     env.s("rhs", encodeRHS(n));
-    body << format("auto ${node} = ${rhs};\n",env);
+    env.s("lhs_type", variableType(n->output()->type()));
+    body << format("${lhs_type} ${node} = ${rhs};\n",env);
   }
 
   // Generates writes to output tensors

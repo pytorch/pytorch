@@ -1,11 +1,11 @@
-#include "torch/csrc/autograd/engine.h"
+#include <torch/csrc/autograd/engine.h>
 
-#include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/functions/basic_ops.h"
-#include "torch/csrc/autograd/grad_mode.h"
-#include "torch/csrc/autograd/anomaly_mode.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/utils/memory.h"
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/functions/basic_ops.h>
+#include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/anomaly_mode.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/utils/memory.h>
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
@@ -27,11 +27,16 @@
 #include <queue>
 #include <TH/TH.h>
 
+#if defined(USE_CUDA) || defined(USE_ROCM)
 #ifdef USE_CUDA
 #include <cuda.h>
+#endif  // USE_CUDA
+#ifdef USE_ROCM
+#include <hip/hip_runtime.h>
+#endif  // USE_ROCM
 #include <THC/THC.h>
 #include <ATen/cuda/CUDAGuard.h>
-#endif
+#endif  // defined(USE_CUDA) || defined(USE_ROCM)
 
 namespace torch { namespace autograd {
 
@@ -206,7 +211,7 @@ Engine::~Engine() = default;
 // not CUDA.
 auto Engine::thread_init(int device) -> void {
   THInferNumThreads();
-#ifdef USE_CUDA
+#if defined(USE_CUDA) || defined(USE_ROCM)
   // NB: We MUST NOT construct the guard for device -1,
   // as in some settings we compile with USE_CUDA, but
   // have lazy stubs for CUDA functionality (so actually
@@ -340,7 +345,7 @@ static void validate_outputs(const edge_list& edges, variable_list& grads, const
         ss << metadata.shape();
         AT_ERROR(format_error(ss.str()));
       }
-      grads[i] = at::sum_to(grads[i], metadata.shape());
+      grads[i] = at::sum_to(std::move(grads[i]), metadata.shape());
     }
     if (!is_compatible_type(metadata.type(), grads[i].type())) {
       std::stringstream ss;
@@ -372,6 +377,18 @@ static variable_list call_function(FunctionTask& task) {
   variable_list outputs;
 
   if(has_post_hooks){
+    // In functions/accumulate_grad.cpp, there is some logic to check the conditions under which
+    // the incoming gradient can be stolen directly (which elides a deep copy) instead of cloned.
+    // One of these conditions is that the incoming gradient's refcount must be 1 (nothing else
+    // is referencing the same data).  Stashing inputs_copy here bumps the refcount, so if post hooks
+    // are employed, it's actually still ok for accumulate_grad.cpp to steal the gradient if the
+    // refcount is 2.
+    //
+    // "new_grad.use_count() <= 1 + !post_hooks().empty()" in accumulate_grad.cpp accounts for this,
+    // but also creates a silent dependency between engine.cpp (ie, this particular engine
+    // implementation) and accumulate_grad.cpp.
+    //
+    // If you change the logic here, make sure it's compatible with accumulate_grad.cpp.
     auto inputs_copy = inputs;
     outputs = fn(std::move(inputs_copy));
   }else{
@@ -618,10 +635,25 @@ auto Engine::ready_queue(int device) -> ReadyQueue& {
 auto Engine::start_threads() -> void {
   int num_devices = 0;
 #ifdef USE_CUDA
-  // check for case of compiled with CUDA but no available devices
-  if (cudaGetDeviceCount(&num_devices) != cudaSuccess) {
-    cudaGetLastError();
-    num_devices = 0;
+  {
+    int num_cuda_devices = 0;
+    // check for case of compiled with CUDA but no available devices
+    if (cudaGetDeviceCount(&num_cuda_devices) != cudaSuccess) {
+      cudaGetLastError();
+    } else {
+      num_devices += num_cuda_devices;
+    }
+  }
+#endif
+#ifdef USE_ROCM
+  {
+    int num_hip_devices = 0;
+    // check for case of compiled with CUDA but no available devices
+    if (hipGetDeviceCount(&num_hip_devices) != hipSuccess) {
+      hipGetLastError();
+    } else {
+      num_devices += num_hip_devices;
+    }
   }
 #endif
   // One for CPU, plus one for every GPU device

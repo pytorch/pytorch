@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCStorage.h"
+#define THC_GENERIC_FILE "THC/generic/THCStorage.h"
 #else
 
 #define THCStorage THStorage

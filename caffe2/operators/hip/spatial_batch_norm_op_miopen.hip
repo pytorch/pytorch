@@ -252,6 +252,8 @@ bool MIOpenSpatialBNOp::RunOnDevice() {
   }
   if (Input(0).IsType<float>()) {
     return DoRunWithType<float, float>();
+  } else if (Input(0).IsType<at::Half>()){
+    return DoRunWithType<at::Half, float>();
   } else {
     LOG(FATAL) << "Unsupported input types";
   }
@@ -336,6 +338,8 @@ bool MIOpenSpatialBNGradientOp::RunOnDevice() {
   }
   if (Input(0).IsType<float>()) {
     return DoRunWithType<float, float>();
+  } else if (Input(0).IsType<at::Half>()) {
+    return DoRunWithType<at::Half, float>();
   } else {
     LOG(FATAL) << "Unsupported input types";
   }

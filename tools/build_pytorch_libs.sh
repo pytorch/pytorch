@@ -8,7 +8,16 @@
 #
 # TODO: Replace this with the root-level CMakeLists.txt
 
-set -ex
+if [[ $VERBOSE_SCRIPT == '1' ]]; then
+  set -ex
+  report() {
+    echo "$@"
+  }
+else
+  report() {
+    :
+  }
+fi
 
 SYNC_COMMAND="cp"
 if [ -x "$(command -v rsync)" ]; then
@@ -28,8 +37,8 @@ if [[ -x "$(command -v cmake3)" ]]; then
         #   cmake3 version 3.11.0 CMake suite maintained and supported by Kitware (kitware.com/cmake).
         # Thus we extract the line that has 'version' in it and hope the actual
         # version number is gonna be the 3rd element
-        CMAKE_VERSION=$(cmake --version | grep 'version' | awk '{print $3}')
-        CMAKE3_VERSION=$(cmake3 --version | grep 'version' | awk '{print $3}')
+        CMAKE_VERSION=$(cmake --version | grep 'version' | awk '{print $3}' | awk -F. '{print $1"."$2"."$3}')
+        CMAKE3_VERSION=$(cmake3 --version | grep 'version' | awk '{print $3}' | awk -F. '{print $1"."$2"."$3}')
         CMAKE3_NEEDED=$($PYTORCH_PYTHON -c "from distutils.version import StrictVersion; print(1 if StrictVersion(\"${CMAKE_VERSION}\") < StrictVersion(\"3.5.0\") and StrictVersion(\"${CMAKE3_VERSION}\") > StrictVersion(\"${CMAKE_VERSION}\") else 0)")
     else
         # don't have cmake
@@ -58,6 +67,9 @@ while [[ $# -gt 0 ]]; do
           ;;
       --use-cuda)
           USE_CUDA=1
+          ;;
+      --use-distributed)
+          USE_DISTRIBUTED=1
           ;;
       --use-fbgemm)
           USE_FBGEMM=1
@@ -160,7 +172,7 @@ elif [[ -n "$REL_WITH_DEB_INFO" && $REL_WITH_DEB_INFO -ne 0 ]]; then
   BUILD_TYPE="RelWithDebInfo"
 fi
 
-echo "Building in $BUILD_TYPE mode"
+report "Building in $BUILD_TYPE mode"
 
 function path_remove {
   # Delete path by parts so we can never accidentally remove sub paths
@@ -214,6 +226,10 @@ function build_caffe2() {
 		       -DUSE_FBGEMM=$USE_FBGEMM \
 		       -DUSE_NUMPY=$USE_NUMPY \
 		       -DNUMPY_INCLUDE_DIR=$NUMPY_INCLUDE_DIR \
+		       -DUSE_SYSTEM_NCCL=$USE_SYSTEM_NCCL \
+		       -DNCCL_INCLUDE_DIR=$NCCL_INCLUDE_DIR \
+		       -DNCCL_ROOT_DIR=$NCCL_ROOT_DIR \
+		       -DNCCL_SYSTEM_LIB=$NCCL_SYSTEM_LIB \
 		       -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
 		       -DUSE_ROCM=$USE_ROCM \
 		       -DUSE_NNPACK=$USE_NNPACK \
@@ -221,6 +237,7 @@ function build_caffe2() {
 		       -DUSE_LMDB=$USE_LMDB \
 		       -DUSE_OPENCV=$USE_OPENCV \
 		       -DUSE_QNNPACK=$USE_QNNPACK \
+		       -DUSE_TENSORRT=$USE_TENSORRT \
 		       -DUSE_FFMPEG=$USE_FFMPEG \
 		       -DUSE_GLOG=OFF \
 		       -DUSE_GFLAGS=OFF \
@@ -263,8 +280,12 @@ function build_caffe2() {
 
   # Install Python proto files
   if [[ "$BUILD_PYTHON" == 'ON' ]]; then
-      echo "Copying Caffe2 proto files from $(pwd)/caffe2/proto to  $(cd .. && pwd)/caffe2/proto"
-      echo "All the files in caffe2/proto are $(find caffe2/proto)"
+
+      if [[ $VERBOSE_SCRIPT == '1' ]]; then
+        report "Copying Caffe2 proto files from $(pwd)/caffe2/proto to  $(cd .. && pwd)/caffe2/proto"
+        report "All the files in caffe2/proto are $(find caffe2/proto)"
+      fi
+
       for proto_file in $(pwd)/caffe2/proto/*.py; do
           cp $proto_file "$(pwd)/../caffe2/proto/"
       done
@@ -274,10 +295,10 @@ function build_caffe2() {
   # Fix rpaths of shared libraries
   if [[ $(uname) == 'Darwin' ]]; then
       # root/torch/lib/tmp_install/lib
-      echo "Updating all install_names in $INSTALL_DIR/lib"
+      report "Updating all install_names in $INSTALL_DIR/lib"
       pushd "$INSTALL_DIR/lib"
       for lib in *.dylib; do
-          echo "Updating install_name for $(pwd)/$lib"
+          report "Updating install_name for $(pwd)/$lib"
           install_name_tool -id @rpath/$lib $lib
       done
       popd
@@ -298,28 +319,27 @@ for arg in "$@"; do
     fi
 done
 
-pushd $TORCH_LIB_DIR
+pushd $TORCH_LIB_DIR > /dev/null
 
 # If all the builds succeed we copy the libraries, headers,
 # binaries to torch/lib
-echo "tools/build_pytorch_libs.sh succeeded at $(date)"
-echo "removing $INSTALL_DIR/lib/cmake and $INSTALL_DIR/lib/python"
+report "tools/build_pytorch_libs.sh succeeded at $(date)"
+report "removing $INSTALL_DIR/lib/cmake and $INSTALL_DIR/lib/python"
 rm -rf "$INSTALL_DIR/lib/cmake"
 rm -rf "$INSTALL_DIR/lib/python"
 
-echo "Copying $INSTALL_DIR/lib to $(pwd)"
+report "Copying $INSTALL_DIR/lib to $(pwd)"
 $SYNC_COMMAND -r "$INSTALL_DIR/lib"/* .
 if [ -d "$INSTALL_DIR/lib64/" ]; then
     $SYNC_COMMAND -r "$INSTALL_DIR/lib64"/* .
 fi
-echo "Copying $(cd ../.. && pwd)/aten/src/generic/THNN.h to $(pwd)"
+report "Copying $(cd ../.. && pwd)/aten/src/generic/THNN.h to $(pwd)"
 $SYNC_COMMAND ../../aten/src/THNN/generic/THNN.h .
 $SYNC_COMMAND ../../aten/src/THCUNN/generic/THCUNN.h .
 
-echo "Copying $INSTALL_DIR/include to $(pwd)"
+report "Copying $INSTALL_DIR/include to $(pwd)"
 $SYNC_COMMAND -r "$INSTALL_DIR/include" .
 if [ -d "$INSTALL_DIR/bin/" ]; then
     $SYNC_COMMAND -r "$INSTALL_DIR/bin/"/* .
 fi
-
-popd
+popd > /dev/null

@@ -2,15 +2,19 @@
 #include <unordered_set>
 #include <vector>
 #include <ATen/core/interned_strings.h>
-#include "c10/util/Exception.h"
+#include <c10/util/Exception.h>
 
 namespace c10 {
 class AliasInfo {
  public:
-  // Symbol for the set that can alias
+  // Symbol for the set that can alias anything
+  static Symbol wildcardSet() {
+    static const Symbol wc = Symbol::fromQualString("alias::*");
+    return wc;
+  }
   static AliasInfo createWildcard() {
     AliasInfo ret;
-    ret.addSet(wildcard());
+    ret.addSet(wildcardSet());
     return ret;
   }
 
@@ -36,13 +40,24 @@ class AliasInfo {
   }
 
   bool isWildcard() const {
-    return sets_.count(wildcard()) != 0;
+    return sets_.count(wildcardSet()) != 0;
   }
 
   void unionWith(const AliasInfo& other) {
     for (const auto& alias : other.sets()) {
       sets_.insert(alias);
     }
+  }
+
+  // TODO this doesn't check any contained types yet
+  // non-strict: returns true if self.sets() == other.sets()
+  bool isSubsetOf(const AliasInfo& other) const {
+    for (const auto& alias : this->sets()) {
+      if (other.sets().count(alias) == 0) {
+        return false;
+      }
+    }
+    return true;
   }
   // the alias info for the contained types of the type
   // e.g. if this is an annotation on List[T], `sets` refers to
@@ -57,10 +72,6 @@ class AliasInfo {
   }
 
  private:
-  static Symbol wildcard() {
-    static const Symbol wc = Symbol::fromQualString("alias::*");
-    return wc;
-  }
   std::unordered_set<Symbol> sets_;
   std::vector<AliasInfo> containedTypes_;
   bool isWrite_ = false;

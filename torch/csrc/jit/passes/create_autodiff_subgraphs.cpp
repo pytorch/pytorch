@@ -1,10 +1,11 @@
-#include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
+#include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/autodiff.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/passes/common_subexpression_elimination.h"
-#include "torch/csrc/jit/passes/utils/subgraph_utils.h"
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/autodiff.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/passes/alias_analysis.h>
+#include <torch/csrc/jit/passes/common_subexpression_elimination.h>
+#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 
 namespace torch {
 namespace jit {
@@ -13,8 +14,13 @@ namespace {
 
 class SubgraphSlicer {
  public:
-  SubgraphSlicer(Block* block, size_t minSubgraphSize)
-      : block_(block), minSubgraphSize_(minSubgraphSize) {}
+  SubgraphSlicer(
+      Block* block,
+      std::shared_ptr<Graph> graph,
+      size_t minSubgraphSize)
+      : block_(block),
+        graph_(std::move(graph)),
+        minSubgraphSize_(minSubgraphSize) {}
 
   void run(std::vector<Node*>& diffGraphs) {
     // We need to run the slicer multiple times in order to get all merge
@@ -34,9 +40,10 @@ class SubgraphSlicer {
     bool any_changed = true;
     while (any_changed) {
       any_changed = false;
+      auto aliasDb = AliasAnalysis(graph_);
       for (auto it = block_->nodes().rbegin(); it != block_->nodes().rend();) {
         bool changed;
-        std::tie(it, changed) = scanNode(*it);
+        std::tie(it, changed) = scanNode(*it, aliasDb);
         any_changed |= changed;
       }
     }
@@ -47,7 +54,7 @@ class SubgraphSlicer {
     auto curNode = *block_->nodes().rbegin();
     while (curNode != *block_->nodes().rend()) {
       for (auto subBlock : curNode->blocks()) {
-        SubgraphSlicer(subBlock, minSubgraphSize_).run(diffGraphs);
+        SubgraphSlicer(subBlock, graph_, minSubgraphSize_).run(diffGraphs);
       }
 
       // Save the previous node, since we might delete `curNode` in next block
@@ -66,7 +73,7 @@ class SubgraphSlicer {
     }
     // Run CSE one more time to eliminate duplicates that may have occured
     // while re-inlining subgraphs.
-    EliminateCommonSubexpression(block_);
+    EliminateCommonSubexpression(graph_);
   }
 
  private:
@@ -114,7 +121,9 @@ class SubgraphSlicer {
     return isDifferentiable(node);
   }
 
-  std::pair<graph_node_list::iterator, bool> scanNode(Node* consumer) {
+  std::pair<graph_node_list::iterator, bool> scanNode(
+      Node* consumer,
+      const AliasDb& aliasDb) {
     if (shouldConsiderForMerge(consumer)) {
       if (consumer->kind() != prim::DifferentiableGraph) {
         consumer = SubgraphUtils::createSingletonSubgraph(
@@ -122,7 +131,7 @@ class SubgraphSlicer {
       }
       auto inputs = sortReverseTopological(consumer->inputs());
       for (auto input : inputs) {
-        if (auto group = tryMerge(consumer, input->node())) {
+        if (auto group = tryMerge(consumer, input->node(), aliasDb)) {
           // we successfully merged, so the new group's `inputs` may have
           // changed. So rescan the new group for more merging opportunities.
           return std::make_pair(group.value()->reverseIterator(), true);
@@ -135,10 +144,13 @@ class SubgraphSlicer {
 
   // Try to merge `producer` into `consumer`. If successful, this destroys
   // `producer` and returns the `consumer` group.
-  c10::optional<Node*> tryMerge(Node* consumer, Node* producer) {
+  c10::optional<Node*> tryMerge(
+      Node* consumer,
+      Node* producer,
+      const AliasDb& aliasDb) {
     JIT_ASSERT(consumer->kind() == prim::DifferentiableGraph);
     bool canMerge = shouldConsiderForMerge(producer) &&
-        producer->moveBeforeTopologicallyValid(consumer);
+        producer->moveBeforeTopologicallyValid(consumer, aliasDb);
 
     if (!canMerge) {
       return c10::nullopt;
@@ -150,6 +162,7 @@ class SubgraphSlicer {
   }
 
   Block* block_;
+  std::shared_ptr<Graph> graph_;
   size_t minSubgraphSize_;
 };
 } // anonymous namespace
@@ -158,7 +171,7 @@ std::vector<Node*> CreateAutodiffSubgraphs(
     std::shared_ptr<Graph> graph,
     size_t threshold) {
   std::vector<Node*> diff_nodes;
-  SubgraphSlicer(graph->block(), threshold).run(diff_nodes);
+  SubgraphSlicer(graph->block(), graph, threshold).run(diff_nodes);
   return diff_nodes;
 }
 
