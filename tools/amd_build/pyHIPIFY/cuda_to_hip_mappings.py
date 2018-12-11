@@ -1729,7 +1729,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("cublasCgemmStridedBatched", ("rocblas_cgemm_strided_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
     ("cublasCgemm3mStridedBatched", ("rocblas_cgemm_3m_strided_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
     ("cublasZgemmStridedBatched", ("rocblas_zgemm_strided_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
-    ("cublasHgemmStridedBatched", ("rocblas_hgemm_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
+    ("cublasHgemmStridedBatched", ("rocblas_hgemm_strided_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
     ("cublasSgemm", ("rocblas_sgemm", CONV_MATH_FUNC, API_BLAS)),
     ("cublasDgemm", ("rocblas_dgemm", CONV_MATH_FUNC, API_BLAS)),
     ("cublasCgemm", ("rocblas_cgemm", CONV_MATH_FUNC, API_BLAS)),
