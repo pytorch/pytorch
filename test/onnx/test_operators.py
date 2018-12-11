@@ -487,6 +487,15 @@ class TestOperators(TestCase):
         x = torch.randn(6, 10, requires_grad=True)
         self.assertONNX(lambda x: torch.ones_like(x), x)
 
+    def test_expand(self):
+        x = torch.randn(6, 1, requires_grad=True)
+        self.assertONNX(lambda x: x.expand(4, 6, 2), x)
+
+    def test_ne(self):
+        x = torch.randn(1, 2, 3, 1, requires_grad=False).int()
+        y = torch.randn(1, 4, requires_grad=False).int()
+        self.assertONNX(lambda x, y: torch.ne(x, y), (x, y))
+
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'
     _onnx_dep = no_onnx_dep_flag not in common.UNITTEST_ARGS
