@@ -278,7 +278,7 @@ void initialize_python_bindings() {
   py_bind_tensor_types(tensor_types);
 
   // Use torch.float32 as the default tensor type
-  set_default_tensor_type(*autograd::VariableType::getVariableTypeFromBaseType(at::getNonVariableType(at::kCPU, at::kFloat)));
+  set_default_tensor_type(at::globalContext().getVariableType(at::Backend::CPU, at::kFloat));
 }
 
 static void py_bind_tensor_types(const std::vector<PyTensorType>& tensor_types) {
