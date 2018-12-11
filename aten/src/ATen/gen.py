@@ -119,6 +119,9 @@ TYPE_DEFAULT_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.h")
 TYPE_DEFAULT_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.cpp")
 
 LEGACY_TH_DISPATCHER_H = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHDispatcher.h")
+LEGACY_TH_DISPATCHER_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHDispatcher.cpp")
+LEGACY_TH_DISPATCHER_DERIVED_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHDispatcherDerived.cpp")
+LEGACY_TH_DISPATCHER_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHDispatcherDerived.h")
 
 REGISTER_CPU_H = CodeTemplate.from_file(TEMPLATE_PATH + "/RegisterCPU.h")
 REGISTER_CPU_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/RegisterCPU.cpp")
@@ -130,6 +133,7 @@ TENSOR_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Tensor.h")
 TENSOR_METHODS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorMethods.h")
 
 FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Functions.h")
+LEGACY_TH_FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHFunctions.h")
 
 NATIVE_FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/NativeFunctions.h")
 
@@ -326,6 +330,23 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     return env
 
 
+def generate_legacy_th_dispatcher(backend, density, scalar_type, declarations):
+    assert density != 'Sparse'
+    scalar_name, c_type, accreal, th_scalar_type, is_floating_type = scalar_type
+    env = {}
+    env['Backend'] = backend
+    env['Dispatcher'] = "LegacyTH{}{}Dispatcher".format(backend, scalar_name)
+
+    fm = file_manager
+    if backend == 'CUDA':
+        fm = cuda_file_manager
+
+    fm.write(env['Dispatcher'] + ".cpp", LEGACY_TH_DISPATCHER_DERIVED_CPP, env)
+    fm.write(env['Dispatcher'] + ".h", LEGACY_TH_DISPATCHER_DERIVED_H, env)
+
+    return env
+
+
 def iterate_types():
     for backend in backends:
         for density in densities:
@@ -345,7 +366,7 @@ def declare_outputs():
     for f in core_files:
         core_file_manager.will_write(f)
     files = ['Declarations.yaml', 'TypeExtendedInterface.h', 'TypeDefault.cpp', 'TypeDefault.h',
-             'LegacyTHDispatcher.h',
+             'LegacyTHDispatcher.h', 'LegacyTHDispatcher.cpp', 'LegacyTHFunctions.h',
              'Functions.h', 'NativeFunctions.h', 'RegisterCPU.cpp', 'RegisterCPU.h']
     for f in files:
         file_manager.will_write(f)
@@ -360,15 +381,19 @@ def declare_outputs():
     for backend, density, scalar_types in iterate_types():
         scalar_name = scalar_types[0]
         full_backend = "Sparse" + backend if density == "Sparse" else backend
+        fm = file_manager
+        if backend == 'CUDA':
+            fm = cuda_file_manager
         for kind in ["Type"]:
             if kind != 'Type' and density == "Sparse":
                 # No Storage or Tensor for sparse
                 continue
-            fm = file_manager
-            if backend == 'CUDA':
-                fm = cuda_file_manager
             fm.will_write("{}{}{}.h".format(full_backend, scalar_name, kind))
             fm.will_write("{}{}{}.cpp".format(full_backend, scalar_name, kind))
+        # output LegacyTHDispatchers
+        if density != 'Sparse':
+            fm.will_write("{}{}{}{}.h".format('LegacyTH', full_backend, scalar_name, 'Dispatcher'))
+            fm.will_write("{}{}{}{}.cpp".format('LegacyTH', full_backend, scalar_name, 'Dispatcher'))
 
 
 def filter_by_extension(files, *extensions):
@@ -429,6 +454,12 @@ def generate_outputs():
         all_types.append(generate_storage_type_and_tensor(
             backend, density, scalar_type, declarations))
 
+    all_legacy_th_dispatchers = []
+    for backend, density, scalar_type in iterate_types():
+        if density != 'Sparse':
+            all_legacy_th_dispatchers.append(generate_legacy_th_dispatcher(
+                backend, density, scalar_type, []))
+
     core_files = {
         'Type.h': TYPE_H,
         'Tensor.h': TENSOR_H,
@@ -443,6 +474,7 @@ def generate_outputs():
     file_manager.write('TypeDefault.cpp', TYPE_DEFAULT_CPP, top_env)
 
     file_manager.write('LegacyTHDispatcher.h', LEGACY_TH_DISPATCHER_H, top_env)
+    file_manager.write('LegacyTHDispatcher.cpp', LEGACY_TH_DISPATCHER_CPP, top_env)
 
     file_manager.write('RegisterCPU.h', REGISTER_CPU_H, top_env)
     file_manager.write('RegisterCPU.cpp', REGISTER_CPU_CPP, top_env)
@@ -451,6 +483,7 @@ def generate_outputs():
     cuda_file_manager.write('RegisterCUDA.cpp', REGISTER_CUDA_CPP, top_env)
 
     file_manager.write('Functions.h', FUNCTIONS_H, top_env)
+    file_manager.write('LegacyTHFunctions.h', LEGACY_TH_FUNCTIONS_H, top_env)
 
     file_manager.write('NativeFunctions.h', NATIVE_FUNCTIONS_H, top_env)
 
