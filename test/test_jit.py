@@ -3130,7 +3130,7 @@ class TestScript(JitTestCase):
             return torch.ones(x), x
         self.checkScript(stuff3, ([3, 2],))
 
-    def bool_list_io(self):
+    def test_bool_list_io(self):
         @torch.jit.script
         def stuff4(x):
             # type: (List[bool]) -> Tuple[List[bool], List[bool], List[List[bool]]]
