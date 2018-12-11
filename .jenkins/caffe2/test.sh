@@ -12,12 +12,18 @@ if [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
   PYTHON="python${BASH_REMATCH[1]}"
 fi
 
-# The prefix must mirror the setting from build.sh
-INSTALL_PREFIX="/usr/local/caffe2"
-
 # Add the site-packages in the caffe2 install prefix to the PYTHONPATH
 SITE_DIR=$($PYTHON -c "from distutils import sysconfig; print(sysconfig.get_python_lib(prefix=''))")
-INSTALL_SITE_DIR="${INSTALL_PREFIX}/${SITE_DIR}"
+
+# Find where Caffe2 is installed. This will be the absolute path to the
+# site-packages of the active Python installation
+INSTALL_SITE_DIR=$($PYTHON -c "from distutils import sysconfig; print(sysconfig.get_python_lib())")
+INSTALL_PREFIX="$INSTALL_SITE_DIR/caffe2"
+if [ ! -d "$INSTALL_PREFIX/cpp_test" ]; then
+  echo "Directory $INSTALL_PREFIX/cpp_test not found. Fallback to legacy location."
+  INSTALL_PREFIX="/usr/local/caffe2"
+  INSTALL_SITE_DIR="${INSTALL_PREFIX}/${SITE_DIR}"
+fi
 
 # Skip tests in environments where they are not built/applicable
 if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
@@ -46,20 +52,20 @@ echo "Running C++ tests.."
 gtest_reports_dir="${TEST_DIR}/cpp"
 junit_reports_dir="${TEST_DIR}/junit_reports"
 mkdir -p "$gtest_reports_dir" "$junit_reports_dir"
-for test in $(find "${INSTALL_PREFIX}/test" -executable -type f); do
+for test in $(find "${INSTALL_PREFIX}/cpp_test" -executable -type f); do
   case "$test" in
     # skip tests we know are hanging or bad
     */mkl_utils_test|*/aten/integer_divider_test)
       continue
       ;;
     */scalar_tensor_test|*/basic|*/native_test)
-	  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-		continue
-	  else
-	    "$test"
-	  fi
-	  ;;
-	*)
+      if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+        continue
+      else
+        "$test"
+      fi
+      ;;
+    *)
       # Currently, we use a mixture of gtest (caffe2) and Catch2 (ATen). While
       # planning to migrate to gtest as the common PyTorch c++ test suite, we
       # currently do NOT use the xml test reporter, because Catch doesn't
