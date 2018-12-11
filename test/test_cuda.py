@@ -2119,20 +2119,6 @@ class TestCuda(TestCase):
                 y = torch.randn(2, 1, device='cuda')
                 z = x + y
 
-    def test_tril_and_triu_indices(self):
-        device = torch.device('cuda:0')
-        self.assertEqual(
-            torch.ones(253, 257, dtype=torch.long, device=device)
-                 .tril(61).nonzero().transpose(0, 1),
-            torch.tril_indices(
-                253, 257, 61, dtype=torch.long, device=device))
-
-        self.assertEqual(
-            torch.ones(257, 3, dtype=torch.float32, device=device)
-                 .triu(36).nonzero().transpose(0, 1),
-            torch.triu_indices(
-                257, 3, 36, dtype=torch.float32, device=device))
-
 
 def load_ignore_file():
     from os.path import join, dirname

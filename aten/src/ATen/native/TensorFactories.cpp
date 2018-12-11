@@ -571,7 +571,7 @@ Tensor tril_indices(
   auto n_indices = get_tril_size(row, col, offset);
 
   // create an empty Tensor with correct soize
-  auto result = at::empty({n_indices, 2}, options.device(DeviceType::CPU));
+  auto result = at::empty({n_indices, 2}, options);
 
   // The following three design options result in very little performance
   // differences. Hence, the 3rd option is taken for simpler code. Refer to
@@ -607,7 +607,7 @@ Tensor tril_indices(
     }
   });
 
-  return result.transpose(0, 1).to(options.device());
+  return result.transpose(0, 1);
 }
 
 
@@ -619,7 +619,7 @@ Tensor triu_indices(
   auto n_indices = row * col - get_tril_size(row, col, offset - 1);
 
   // create an empty Tensor with correct soize
-  auto result = at::empty({n_indices, 2}, options.device(DeviceType::CPU));
+  auto result = at::empty({n_indices, 2}, options);
 
   AT_DISPATCH_ALL_TYPES(result.type(), "triu_indices", [&]() -> void {
     // fill the Tensor with correct values
@@ -646,7 +646,7 @@ Tensor triu_indices(
     }
   });
 
-  return result.transpose(0, 1).to(options.device());
+  return result.transpose(0, 1);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ zeros ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

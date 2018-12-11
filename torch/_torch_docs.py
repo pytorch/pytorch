@@ -4987,7 +4987,7 @@ Example::
 # as common args.
 add_docstr(torch.tril_indices,
            r"""
-tril_indices(row, column, offset=0, dtype=None, device=None) -> Tensor
+tril_indices(row, column, offset=0, dtype=None) -> Tensor
 
 Returns the indices of the lower triangular part of a :attr:`row`-by-
 :attr:`column` matrix in a 2-by-N Tensor, where the first row contains row
@@ -5010,7 +5010,6 @@ Args:
     column int64_t: number of columns in the 2-D matrix.
     offset int64_t: diagonal offset from the main diagonal.
     {dtype}
-    {device}
 
 Example::
     >>> a = torch.tril_indices(3, 3)
@@ -5094,7 +5093,7 @@ Example::
 # as common args.
 add_docstr(torch.triu_indices,
            r"""
-triu_indices(row, column, offset=0, dtype=None, device=None) -> Tensor
+triu_indices(row, column, offset=0, dtype=None) -> Tensor
 
 Returns the indices of the upper triangular part of a :attr:`row` by
 :attr:`column` matrix in a 2-by-N Tensor, where the first row contains row
@@ -5117,7 +5116,6 @@ Args:
     column int64_t: number of columns in the 2-D matrix
     offset int64_t: diagonal offset from the main diagonal
     {dtype}
-    {device}
 
 Example::
     >>> a = torch.triu_indices(3, 3)
