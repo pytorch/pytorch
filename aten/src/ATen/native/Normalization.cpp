@@ -419,6 +419,11 @@ Tensor group_norm(const Tensor& input, int64_t num_groups,
     }
 }
 
+std::tuple<Tensor, Tensor> batch_norm_update_stats_cpu(
+        const Tensor& self, const Tensor& running_mean, const Tensor& running_var, double momentum) {
+  AT_ERROR("Not implemented");
+}
+
 std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const Tensor& weight, const Tensor& bias,
                                                   const Tensor& running_mean, const Tensor& running_var,
                                                   bool train, double momentum, double eps) {
