@@ -34,6 +34,7 @@ C10_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
 
 namespace at {
 class Tensor;
+struct Type;
 }
 
 namespace c10 {
@@ -292,7 +293,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   virtual const Storage& storage() const;
 
   // TODO: Delete me.
-  friend struct Type;
+  friend struct at::Type;
 
   /**
    * The number of elements in a tensor.
