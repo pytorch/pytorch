@@ -535,12 +535,12 @@ struct TORCH_API Variable::DifferentiableViewImpl : public Variable::Impl {
 // Factory Functions
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-/// There are a lot of call sites to these factory functions that need to change
-/// the variable's size or storage afterwards, and they don't expect the original
+/// NOTE: `allow_tensor_metadata_change` is set to true by default, because there
+/// are a lot of call sites to these factory functions that need to change the
+/// variable's size or storage afterwards, and they don't expect the original
 /// tensor (where the variable is created from) to be updated. Setting
-/// `allow_tensor_metadata_change_` to false in these factory functions would
-/// unnecessarily prevent those tensor metadata changes on the variable from
-/// happening and is undesirable.
+/// `allow_tensor_metadata_change_` to false by default would unnecessarily
+/// prevent those changes from happening and is undesirable.
 
 // See NOTE [ Autograd View Variables ] for details.
 inline Variable make_variable_view(
