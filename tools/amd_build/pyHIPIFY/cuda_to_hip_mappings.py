@@ -2214,7 +2214,6 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("cudaHostAllocator", ("hipHostAllocator", API_PYTORCH)),
     ("cudaDeviceAllocator", ("hipDeviceAllocator", API_PYTORCH)),
     ("define MAX_NUM_BLOCKS 200", ("define MAX_NUM_BLOCKS 64", API_PYTORCH)),
-    ("DeviceType::CUDA", ("DeviceType::HIP", API_PYTORCH)),
 ])
 
 CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict([
