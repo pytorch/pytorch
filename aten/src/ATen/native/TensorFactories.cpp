@@ -9,6 +9,8 @@
 #include <ATen/CheckGenerator.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/LegacyTHFunctions.h>
+#include <ATen/LegacyTHDispatcher.h>
 #include <c10/core/ScalarType.h>
 #include <ATen/core/Deprecated.h>
 #include <c10/core/TensorOptions.h>
@@ -60,6 +62,7 @@ void window_function_checks(
       window_length);
 }
 
+// FIXME: point to LegacyTHDispatcher.
 const TypeExtendedInterface& getFactoryType(const TensorOptions& options) {
   return at::getType(options);
 }
@@ -86,7 +89,7 @@ Tensor& arange_out(Tensor& result, Scalar start, Scalar end) {
 }
 
 Tensor& arange_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
-  return at::_th_arange_out(result, start, end, step);
+  return at::legacy::th::_th_arange_out(result, start, end, step);
 }
 
 Tensor arange(Scalar end, const TensorOptions& options) {
@@ -95,11 +98,11 @@ Tensor arange(Scalar end, const TensorOptions& options) {
 }
 
 Tensor& arange_out(Tensor& result, Scalar end) {
-  return at::_th_arange_out(result, end);
+  return at::legacy::th::_th_arange_out(result, end);
 }
 
 Tensor _dim_arange(const Tensor& like, int64_t dim) {
-  return at::getType(like.options().dtype(at::kLong))._th_arange(like.size(dim));
+  return getFactoryType(like.options().dtype(at::kLong))._th_arange(like.size(dim));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -253,7 +256,7 @@ Tensor& linspace_out(Tensor& result, Scalar start, Scalar end) {
 }
 
 Tensor& linspace_out(Tensor& result, Scalar start, Scalar end, int64_t steps) {
-  return at::_th_linspace_out(result, start, end, steps);
+  return at::legacy::th::_th_linspace_out(result, start, end, steps);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ logspace ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -276,7 +279,7 @@ Tensor& logspace_out(Tensor& result, Scalar start, Scalar end) {
 }
 
 Tensor& logspace_out(Tensor& result, Scalar start, Scalar end, int64_t steps) {
-  return at::_th_logspace_out(result, start, end, steps);
+  return at::legacy::th::_th_logspace_out(result, start, end, steps);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ones ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -511,7 +514,7 @@ Tensor& range_out(Tensor& result, Scalar start, Scalar end) {
 }
 
 Tensor& range_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
-  return at::_th_range_out(result, start, end, step);
+  return at::legacy::th::_th_range_out(result, start, end, step);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ zeros ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
