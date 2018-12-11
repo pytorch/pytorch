@@ -1306,8 +1306,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
 
   // Now, actually run the computation.
   if (!no_bias_) {
-    auto* dbias = Output(BIAS_OR_INPUT_GRAD);
-    dbias->Resize(M);
+    auto* dbias = Output(BIAS_OR_INPUT_GRAD, {M}, at::dtype<T_DB>());
     CUDNN_ENFORCE(cudnnConvolutionBackwardBias(
         cudnn_wrapper_.inline_cudnn_handle(),
         cudnnTypeWrapper<T_DY>::kOne(),

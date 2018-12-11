@@ -38,6 +38,7 @@
 
 #include <c10/core/Backend.h>
 #include <c10/core/ScalarType.h>
+#include <ATen/core/LegacyDeviceTypeInit.h>
 #include <ATen/LegacyTHDispatcher.h>
 
 namespace at {
@@ -69,16 +70,51 @@ class CAFFE2_API LegacyTHDispatch {
     dispatcher_registry[static_cast<int>(b)][static_cast<int>(s)] = std::move(t);
   }
 
+  LegacyTHDispatcher & getLegacyTHDispatcher(Backend p, ScalarType s) {
+    auto* dispatcher = getLegacyTHDispatcherOpt(p, s);
+    if (!dispatcher) AT_ERROR(toString(p), toString(s), "THDispatcher is not enabled.");
+    return *dispatcher;
+  }
+private:
   LegacyTHDispatcher* getLegacyTHDispatcherRaw(Backend p, ScalarType s) {
     return dispatcher_registry[static_cast<int>(p)][static_cast<int>(s)].get();
   }
 
-  LegacyTHDispatcher & getLegacyTHDispatcher(Backend p, ScalarType s) {
-    auto* type = getLegacyTHDispatcherRaw(p, s);
-    if (!type) AT_ERROR(toString(p), toString(s), "THDispatcher is not enabled.");
-    return *type;
+  LegacyTHDispatcher* getLegacyTHDispatcherOpt(Backend p, ScalarType s) {
+    if (p != Backend::Undefined) {
+      initForDeviceType(backendToDeviceType(p));
+      // NB: there is no Complex for TH, so no initialization to be done.
+    }
+    auto dispatcher = getLegacyTHDispatcherRaw(p, s);
+
+    if(!dispatcher) {
+      if (p == Backend::Undefined || s == ScalarType::Undefined) {
+        AT_ERROR("Requested Undefined THDispatcher which is invalid.  Backend:",
+                 toString(p), "ScalarType: ", toString(s));
+      }
+    }
+
+    return dispatcher;
   }
-private:
+
+  void initForDeviceType(DeviceType p) {
+    static std::once_flag cpu_once;
+    static std::once_flag cuda_once;
+    if (p == DeviceType::CPU) {
+      std::call_once(cpu_once, [] {
+        getLegacyDeviceTypeInit().initCPU();
+      });
+    } else if (p == DeviceType::CUDA) {
+      std::call_once(cuda_once, [] {
+        getLegacyDeviceTypeInit().initCUDA();
+      });
+    } else if (p == DeviceType::HIP) {
+      std::call_once(cuda_once, [] {
+        getLegacyDeviceTypeInit().initHIP();
+      });
+    }
+  }
+
   // NB: dispatcher_registry has nullptr for all CUDA backends until
   // CUDA initialization has occurred
   LegacyTHDispatcherUniquePtr dispatcher_registry
