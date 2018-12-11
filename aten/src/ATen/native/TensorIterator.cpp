@@ -385,6 +385,9 @@ void TensorIterator::serial_for_each(const loop_t& loop, Range range) const {
 }
 
 void TensorIterator::serial_for_each(const loop2d_t& loop, Range range) const {
+  if (range.size() == 0) {
+    return;
+  }
   auto strides = get_strides();
   while (strides.size() < 2 * ntensors()) {
     strides.push_back(0);
@@ -677,8 +680,10 @@ DimCounter::DimCounter(IntList shape, Range range)
   int64_t ndim = values.size();
   for (int dim = 0; dim < ndim; dim++) {
     int64_t size = shape[dim];
-    values[dim] = linear_offset % size;
-    linear_offset /= size;
+    if (size > 0) {
+      values[dim] = linear_offset % size;
+      linear_offset /= size;
+    }
   }
   AT_ASSERT(linear_offset == 0);
 }
