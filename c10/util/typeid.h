@@ -446,7 +446,7 @@ class C10_API TypeMeta {
   const detail::TypeMetaData* data_;
 
   template<class T>
-  C10_API static const detail::TypeMetaData* _typeMetaDataInstance() noexcept;
+  static const detail::TypeMetaData* _typeMetaDataInstance() noexcept;
 };
 
 template<>
