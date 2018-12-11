@@ -6,17 +6,13 @@
 #include <stack>
 #include <mutex>
 
-// TODO: Get rid of the mutex, and just initialize these
-// handles in at::Context along with lazy CUDA initialization
-
 namespace at { namespace native {
 
 namespace {
 
 struct Handle {
-  bool responsible_for_destruction;
   cudnnHandle_t handle;
-  Handle() : handle(NULL), responsible_for_destruction(true) {
+  Handle() : handle(NULL) {
     AT_CUDNN_CHECK(cudnnCreate(&handle));
   }
   // std::vector.emplace() and push_back() may route through temporaries and call
@@ -29,15 +25,15 @@ struct Handle {
   // Another alternative is to wrap the saved Handles in unique_ptrs, i.e.,
   // unordered_map<int, vector<unique_ptr<Handle>>> created_handles;
   void transfer(Handle& rhs) {
-    responsible_for_destruction = true;
     handle = rhs.handle;
-    rhs.responsible_for_destruction = false;
+    rhs.handle = NULL;
   }
   Handle(Handle& rhs) { transfer(rhs); }
   Handle(Handle&& rhs) { transfer(rhs); }
-  Handle& operator=(Handle rhs) { transfer(rhs); }
+  // operator= takes argument by value
+  Handle& operator=(Handle rhs) { transfer(rhs); return *this; }
   ~Handle() {
-    if (handle && responsible_for_destruction) {
+    if(handle) {
 // this is because of something dumb in the ordering of
 // destruction. Sometimes atexit, the cuda context (or something)
 // would already be destroyed by the time this gets destroyed. It
@@ -119,7 +115,7 @@ class PoolWindow
   {
     std::lock_guard<std::mutex> guard(mutex);
     for(auto d_h : my_handles)
-      available_handles[d_h.first].push(d_h.second);
+      available_handles[d_h.first].push_back(d_h.second);
   }
 };
 
