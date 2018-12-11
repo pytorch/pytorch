@@ -281,6 +281,9 @@ SparseTensor& resize_as_sparse_(SparseTensor& self, const SparseTensor& src) {
   return self;
 }
 
+// --------------------------------------------------------------------
+// conversion between sparse and dense
+// --------------------------------------------------------------------
 SparseTensor dense_to_sparse(const Tensor& self){
   return dense_to_sparse(self, self.dim());
 }
@@ -288,7 +291,7 @@ SparseTensor dense_to_sparse(const Tensor& self){
 SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim){
   int64_t dims = self.dim();
   AT_CHECK(sparse_dim > 0, "sparse_dim must be >0");
-  AT_CHECK(sparse_dim <= dims, 
+  AT_CHECK(sparse_dim <= dims,
     "sparse_dim must be less than or equal to self.dim()");
   at::TensorOptions sparse_options = self.options().layout(kSparse);
   std::vector<int64_t> sizes = self.sizes().vec();
@@ -320,6 +323,9 @@ Tensor sparse_to_dense(const SparseTensor& self) {
   return dst.add_(self);
 }
 
+// --------------------------------------------------------------------
+// sparse copy from sparse
+// --------------------------------------------------------------------
 SparseTensor& copy_sparse_(SparseTensor& self, const SparseTensor& src, bool non_blocking) {
   if (is_same_tensor(self, src)) return self;
   get_sparse_impl(self)->resize_(src.sparse_dim(), src.dense_dim(), src.sizes());
@@ -327,7 +333,94 @@ SparseTensor& copy_sparse_(SparseTensor& self, const SparseTensor& src, bool non
   return self._coalesced_(src.is_coalesced());
 }
 
-SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
+// --------------------------------------------------------------------
+// coalesce sum / max / min
+// --------------------------------------------------------------------
+template <typename scalar_t>
+void coalesce_max_kernel_cpu(int64_t n, scalar_t* a, scalar_t* b) {
+  int64_t i;
+  #pragma omp parallel for
+  for (i = 0; i < n; i++) {
+    if (a[i] > b[i]) b[i] = a[i];
+  }
+}
+
+template <typename scalar_t>
+void coalesce_min_kernel_cpu(int64_t n, scalar_t* a, scalar_t* b) {
+  int64_t i;
+  #pragma omp parallel for
+  for (i = 0; i < n; i++) {
+    if (a[i] < b[i]) b[i] = a[i];
+  }
+}
+
+template <typename scalar_t>
+void coalesce_sum_kernel_cpu(int64_t n, scalar_t* a, scalar_t* b) {
+  int64_t i;
+  #pragma omp parallel for
+  for (i = 0; i < n; i++) {
+    b[i] += a[i];
+  }
+}
+
+template <typename scalar_t>
+void coalesce_copy_kernel_cpu(int64_t n, scalar_t* a, scalar_t* b) {
+  int64_t i;
+  #pragma omp parallel for
+  for (i = 0; i < n; i++) {
+    b[i] = a[i];
+  }
+}
+
+template <typename scalar_t, typename func_t>
+void coalesce_reduction_kernel_cpu(
+  Tensor& values,
+  Tensor& indices,
+  Tensor& indicesPermutation,
+  Tensor& indicesBuffer,
+  Tensor& newValues,
+  Tensor& newIndices,
+  Tensor& new_nnz,
+  int64_t sparse_dim,
+  int64_t nnz,
+  const func_t& reduce_op
+) {
+  int64_t prev = -1;
+  int64_t blockSize = values.stride(0);
+  int64_t* new_nnz_ptr = new_nnz.data<int64_t>();
+  new_nnz_ptr[0] = -1;
+  scalar_t* values_ptr = values.data<scalar_t>();
+  scalar_t* newValues_ptr = newValues.data<scalar_t>();
+  auto newIndicesAccessor = newIndices.accessor<int64_t, 2>();
+  auto indicesAccessor = indices.accessor<int64_t, 2>();
+  auto indicesPermutationAccessor = indicesPermutation.accessor<int64_t, 1>();
+  auto indicesBufferAccessor = indicesBuffer.accessor<int64_t, 1>();
+
+  for (int64_t j = 0; j < nnz; j++) {
+    int64_t pos = indicesPermutationAccessor[j];
+    int64_t curr = indicesBufferAccessor[j];
+    if (curr == prev) {
+      if (values.numel() > 0) {  // if values is an empty tensor, there are no elements to copy
+        reduce_op(blockSize, values_ptr + pos * blockSize, newValues_ptr + new_nnz_ptr[0] * blockSize);
+      }
+    } else {
+      new_nnz_ptr[0] += 1;
+      for (int64_t d = 0; d < sparse_dim; d++) {
+        newIndicesAccessor[d][new_nnz_ptr[0]] = indicesAccessor[d][pos];
+      }
+      if (values.numel() > 0) {  // if values is an empty tensor, there are no elements to copy
+        coalesce_copy_kernel_cpu<scalar_t>(blockSize, values_ptr + pos * blockSize, newValues_ptr + new_nnz_ptr[0] * blockSize);
+      }
+    }
+    prev = curr;
+  }
+  new_nnz_ptr[0] += 1;
+}
+
+// --------------------------------------------------------------------
+// coalesce sum
+// --------------------------------------------------------------------
+SparseTensor coalesce_sum_cpu(const SparseTensor& self) {
   AT_ASSERT(self.defined());
   AT_ASSERT(!self.is_variable());
   AT_ASSERT(self.is_sparse());
@@ -353,49 +446,157 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
 
   SparseTensor dst = new_sparse(self.options());
   get_sparse_impl(dst)->resize_(sparse_dim, dense_dim, self.sizes());
-  // TODO: is there a more idiomatic way to do this?
-  LongTensor newIndices = at::empty(indices.sizes(), indices.options());
-  Tensor newValues = at::empty(values.sizes(), values.options());
+  LongTensor newIndices = at::empty_like(indices);
+  Tensor newValues = at::empty_like(values);
   alias_into_sparse(dst, newIndices, newValues);
 
   LongTensor indicesBuffer;
   LongTensor indicesPermutation;
   std::tie(indicesBuffer, indicesPermutation) = indices_scalar.sort(0);
-  // NB: The accessor accesses here rely on self._nnz() > 0 (tested earlier in this function)
-  auto newIndicesAccessor = newIndices.accessor<int64_t, 2>();
-  auto indicesAccessor = indices.accessor<int64_t, 2>();
-  auto indicesPermutationAccessor = indicesPermutation.accessor<int64_t, 1>();
-  auto indicesBufferAccessor = indicesBuffer.accessor<int64_t, 1>();
 
-  int64_t i = -1;
-  AT_DISPATCH_ALL_TYPES(
-      values.type(), "coalesce", [&] {
-        int64_t prev = -1;
-        int64_t blockSize = values.stride(0);
-        scalar_t* values_ptr = values.data<scalar_t>();
-        scalar_t* newValues_ptr = newValues.data<scalar_t>();
-        for (int64_t j = 0; j < nnz; j++) {
-          int64_t pos = indicesPermutationAccessor[j];
-          int64_t curr = indicesBufferAccessor[j];
-          if (curr == prev) {
-            if (values.numel() > 0) {  // if values is an empty tensor, there are no elements to copy
-              THBlas_axpy<scalar_t>(blockSize, 1, values_ptr + pos * blockSize, 1, newValues_ptr + i * blockSize, 1);
-            }
-          } else {
-            ++i;
-            for (int64_t d = 0; d < sparse_dim; d++) {
-              newIndicesAccessor[d][i] = indicesAccessor[d][pos];
-            }
-            if (values.numel() > 0) {  // if values is an empty tensor, there are no elements to copy
-              THBlas_copy<scalar_t>(blockSize, values_ptr + pos * blockSize, 1, newValues_ptr + i * blockSize, 1);
-            }
-          }
-          prev = curr;
-        }
-    });
+  auto new_nnz = at::empty({1}, indices.options());
+
+  AT_DISPATCH_ALL_TYPES(values.type(), "coalesce", [&] {
+    coalesce_reduction_kernel_cpu<scalar_t>(
+      values,
+      indices,
+      indicesPermutation,
+      indicesBuffer,
+      newValues,
+      newIndices,
+      new_nnz,
+      sparse_dim,
+      nnz,
+      coalesce_sum_kernel_cpu<scalar_t>
+    );
+  });
 
   dst._coalesced_(true);
-  get_sparse_impl(dst)->set_nnz_and_narrow(i + 1);
+  get_sparse_impl(dst)->set_nnz_and_narrow(new_nnz.data<int64_t>()[0]);
+
+  return dst;
+}
+
+SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
+  return coalesce_sum_cpu(self);
+}
+
+// --------------------------------------------------------------------
+// coalesce max
+// --------------------------------------------------------------------
+SparseTensor coalesce_max_cpu(const SparseTensor& self) {
+  AT_ASSERT(self.defined());
+  AT_ASSERT(!self.is_variable());
+  AT_ASSERT(self.is_sparse());
+
+  if (self.is_coalesced()) {
+    return self;
+  }
+  // NOTE: Since `coalesce` is not an in-place operation when `is_coalesced` is false,
+  // we should keep the original tensor intact and do coalesce on a copy of the tensor
+  if (self._nnz() < 2) {
+    SparseTensor dst = self.clone();
+    dst._coalesced_(true);
+    return dst;
+  }
+
+  LongTensor indices = self._indices();
+  Tensor values = self._values().contiguous();
+  int64_t sparse_dim = self.sparse_dim();
+  int64_t dense_dim = self.dense_dim();
+  int64_t nnz = self._nnz();
+
+  LongTensor indices_scalar = flatten_indices(indices, self.sizes());
+
+  SparseTensor dst = new_sparse(self.options());
+  get_sparse_impl(dst)->resize_(sparse_dim, dense_dim, self.sizes());
+  LongTensor newIndices = at::empty_like(indices);
+  Tensor newValues = at::empty_like(values);
+  alias_into_sparse(dst, newIndices, newValues);
+
+  LongTensor indicesBuffer;
+  LongTensor indicesPermutation;
+  std::tie(indicesBuffer, indicesPermutation) = indices_scalar.sort(0);
+
+  auto new_nnz = at::empty({1}, indices.options());
+
+  AT_DISPATCH_ALL_TYPES(values.type(), "coalesce", [&] {
+    coalesce_reduction_kernel_cpu<scalar_t>(
+      values,
+      indices,
+      indicesPermutation,
+      indicesBuffer,
+      newValues,
+      newIndices,
+      new_nnz,
+      sparse_dim,
+      nnz,
+      coalesce_max_kernel_cpu<scalar_t>
+    );
+  });
+
+  dst._coalesced_(true);
+  get_sparse_impl(dst)->set_nnz_and_narrow(new_nnz.data<int64_t>()[0]);
+
+  return dst;
+}
+
+// --------------------------------------------------------------------
+// coalesce min
+// --------------------------------------------------------------------
+SparseTensor coalesce_min_cpu(const SparseTensor& self) {
+  AT_ASSERT(self.defined());
+  AT_ASSERT(!self.is_variable());
+  AT_ASSERT(self.is_sparse());
+
+  if (self.is_coalesced()) {
+    return self;
+  }
+  // NOTE: Since `coalesce` is not an in-place operation when `is_coalesced` is false,
+  // we should keep the original tensor intact and do coalesce on a copy of the tensor
+  if (self._nnz() < 2) {
+    SparseTensor dst = self.clone();
+    dst._coalesced_(true);
+    return dst;
+  }
+
+  LongTensor indices = self._indices();
+  Tensor values = self._values().contiguous();
+  int64_t sparse_dim = self.sparse_dim();
+  int64_t dense_dim = self.dense_dim();
+  int64_t nnz = self._nnz();
+
+  LongTensor indices_scalar = flatten_indices(indices, self.sizes());
+
+  SparseTensor dst = new_sparse(self.options());
+  get_sparse_impl(dst)->resize_(sparse_dim, dense_dim, self.sizes());
+  LongTensor newIndices = at::empty_like(indices);
+  Tensor newValues = at::empty_like(values);
+  alias_into_sparse(dst, newIndices, newValues);
+
+  LongTensor indicesBuffer;
+  LongTensor indicesPermutation;
+  std::tie(indicesBuffer, indicesPermutation) = indices_scalar.sort(0);
+
+  auto new_nnz = at::empty({1}, indices.options());
+
+  AT_DISPATCH_ALL_TYPES(values.type(), "coalesce", [&] {
+    coalesce_reduction_kernel_cpu<scalar_t>(
+      values,
+      indices,
+      indicesPermutation,
+      indicesBuffer,
+      newValues,
+      newIndices,
+      new_nnz,
+      sparse_dim,
+      nnz,
+      coalesce_min_kernel_cpu<scalar_t>
+    );
+  });
+
+  dst._coalesced_(true);
+  get_sparse_impl(dst)->set_nnz_and_narrow(new_nnz.data<int64_t>()[0]);
 
   return dst;
 }

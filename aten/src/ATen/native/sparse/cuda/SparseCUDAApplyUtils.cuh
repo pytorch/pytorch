@@ -327,7 +327,7 @@ __device__ void coalesce_values_kernel(
 }
 
 template <typename scalar_t>
-__device__ scalar_t coalesce_sum_op(scalar_t a, scalar_t b) {
+__device__ __forceinline__ scalar_t coalesce_sum_op(scalar_t a, scalar_t b) {
   return a + b;
 }
 
@@ -354,7 +354,7 @@ __global__ void coalesce_sum_kernel(
 }
 
 template <typename scalar_t>
-__device__ scalar_t coalesce_max_op(scalar_t a, scalar_t b) {
+__device__ __forceinline__ scalar_t coalesce_max_op(scalar_t a, scalar_t b) {
   return a > b ? a : b;
 }
 
@@ -381,7 +381,7 @@ __global__ void coalesce_max_kernel(
 }
 
 template <typename scalar_t>
-__device__ scalar_t coalesce_min_op(scalar_t a, scalar_t b) {
+__device__ __forceinline__ scalar_t coalesce_min_op(scalar_t a, scalar_t b) {
   return a < b ? a : b;
 }
 
