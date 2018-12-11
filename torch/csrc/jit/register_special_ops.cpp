@@ -278,7 +278,7 @@ DEFINE_TORCH_TENSOR_OP(bool, bool, at::empty({}, at::CPU(at::kByte).options()).f
         }
         checkListInputType(elem_type, node);
         at::ScalarType initial_scalar_type = scalarTypeFromJitType(elem_type);
-        return [initial_scalar_type](Stack& stack) {
+        return [initial_scalar_type, elem_type](Stack& stack) {
           IValue data;
           IValue dtype;
           IValue device;
@@ -295,6 +295,14 @@ DEFINE_TORCH_TENSOR_OP(bool, bool, at::empty({}, at::CPU(at::kByte).options()).f
           if (scalar_type != initial_scalar_type || dev != tensor.device()) {
             tensor = tensor.to(dev, scalar_type);
           }
+
+          if (tensor.scalar_type() != scalarTypeFromJitType(FloatType::get()) &&
+            tensor.numel() == 0) {
+            AT_WARN("Creating a tensor from an empty ", elem_type->str(),
+              "list will create a float tensor in python and a tensor of type ", elem_type->str(), " in torchscript.\n",
+              "Pass in a dtype argument to ensure consistent behavior");
+          }
+
           push(stack, tensor);
           return 0;
         };
