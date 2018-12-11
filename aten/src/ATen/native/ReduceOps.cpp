@@ -103,7 +103,7 @@ static std::unique_ptr<TensorIterator> make_reduction(
   // efficiency.
   // not generalize this to common mismatched input/output types to avoid cross
   // product of templated kernel launches.
-  if (self.type().scalarType() == dtype || 
+  if (self.type().scalarType() == dtype ||
       (self.is_cuda() && self.type().scalarType() == kHalf && dtype == kFloat)) {
     return TensorIterator::reduce_op(viewed_result, self);
   }
@@ -224,8 +224,8 @@ Tensor sum(const Tensor &self) {
   return at::native::sum(self, {}, false, c10::nullopt);
 }
 
-static Tensor& prod_out(Tensor& result, const Tensor& self, IntList dim,
-                        bool keepdim, optional<ScalarType> opt_dtype) {
+static Tensor& prod_impl(Tensor& result, const Tensor& self, IntList dim,
+                         bool keepdim, optional<ScalarType> opt_dtype) {
   ScalarType dtype = get_dtype(result, self, opt_dtype, true);
   auto iter = make_reduction("prod", result, self, dim, keepdim, dtype);
   if (iter->numel() == 0) {
@@ -236,18 +236,10 @@ static Tensor& prod_out(Tensor& result, const Tensor& self, IntList dim,
   return result;
 }
 
-static Tensor prod(const Tensor& self, IntList dim, bool keepdim, optional<ScalarType> dtype) {
+Tensor prod(const Tensor &self, optional<ScalarType> dtype) {
   Tensor result;
-  native::prod_out(result, self, dim, keepdim, dtype);
+  return at::native::prod_impl(result, self, {}, false, dtype);
   return result;
-}
-
-Tensor prod(const Tensor &self, ScalarType dtype) {
-  return at::native::prod(self, {}, false, optional<ScalarType>(dtype));
-}
-
-Tensor prod(const Tensor &self) {
-  return at::native::prod(self, {}, false, c10::nullopt);
 }
 
 static inline Tensor &mean_out(Tensor &result, const Tensor &self, IntList dim,
@@ -314,17 +306,8 @@ Tensor& sum_out(Tensor& result, const Tensor& self, IntList dim, ScalarType dtyp
   return at::native::sum_out(result, self, dim, false, dtype);
 }
 
-Tensor& prod_out(Tensor& result, const Tensor& self, int64_t dim, bool keepdim, ScalarType dtype) {
-  return at::native::prod_out(
-      result, self, dim, keepdim, c10::optional<ScalarType>(dtype));
-}
-
-Tensor& prod_out(Tensor& result, const Tensor& self, int64_t dim, bool keepdim) {
-  return at::native::prod_out(result, self, dim, keepdim, c10::nullopt);
-}
-
-Tensor& prod_out(Tensor& result, const Tensor& self, int64_t dim, ScalarType dtype) {
-  return at::native::prod_out(result, self, dim, false, dtype);
+Tensor& prod_out(Tensor& result, const Tensor& self, int64_t dim, bool keepdim, c10::optional<ScalarType> dtype) {
+  return at::native::prod_impl(result, self, dim, keepdim, dtype);
 }
 
 Tensor mean(const Tensor& self, IntList dim, bool keepdim, ScalarType dtype) {
@@ -351,16 +334,10 @@ Tensor sum(const Tensor& self, IntList dim, ScalarType dtype) {
   return at::native::sum(self, dim, false, dtype);
 }
 
-Tensor prod(const Tensor& self, int64_t dim, bool keepdim, ScalarType dtype) {
-  return at::native::prod(self, dim, keepdim, c10::optional<ScalarType>(dtype));
-}
-
-Tensor prod(const Tensor& self, int64_t dim, bool keepdim) {
-  return at::native::prod(self, dim, keepdim, c10::nullopt);
-}
-
-Tensor prod(const Tensor& self, int64_t dim, ScalarType dtype) {
-  return at::native::prod(self, dim, false, dtype);
+Tensor prod(const Tensor& self, int64_t dim, bool keepdim, optional<ScalarType> dtype) {
+  Tensor result;
+  return at::native::prod_impl(result, self, dim, keepdim, dtype);
+  return result;
 }
 
 Tensor& logsumexp_out(Tensor& result, const Tensor &self, int64_t dim_, bool keepdim) {

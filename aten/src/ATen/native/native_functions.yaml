@@ -1655,27 +1655,13 @@
 
 - func: std_out(Tensor result, Tensor self, IntList[1] dim, bool unbiased=true, bool keepdim=false) -> Tensor
 
-# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
-- func: prod(Tensor self, *, ScalarType dtype) -> Tensor
+- func: prod(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
-- func: prod(Tensor self) -> Tensor
+- func: prod(Tensor self, int64_t dim, bool keepdim=false, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
-- func: prod(Tensor self, int64_t dim, bool keepdim, *, ScalarType dtype) -> Tensor
-  variants: function, method
-
-- func: prod(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
-  variants: function, method
-
-- func: prod(Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
-  variants: function, method
-
-- func: prod_out(Tensor result, Tensor self, int64_t dim, bool keepdim, *, ScalarType dtype) -> Tensor
-
-- func: prod_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
-
-- func: prod_out(Tensor result, Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+- func: prod_out(Tensor result, Tensor self, int64_t dim, bool keepdim=false, *, ScalarType? dtype=None) -> Tensor
 
 - func: t(Tensor self) -> Tensor
   device_guard: False
