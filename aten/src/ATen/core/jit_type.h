@@ -871,7 +871,6 @@ inline TypePtr unshapedType(const TypePtr& type) {
 }
 
 inline TypePtr CompleteTensorType::fromNumberType(TypePtr typ) {
-  AT_ASSERT(typ->isSubtypeOf(NumberType::get()));
   if (typ->isSubtypeOf(IntType::get())) {
     return CompleteTensorType::create(at::kLong, at::kCPU, {});
   } else if (typ->isSubtypeOf(FloatType::get())) {

@@ -67,36 +67,34 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        "prim::TensorToBool(Tensor a) -> bool",
+        "prim::Bool(Tensor a) -> bool",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             at::Tensor a;
             pop(stack, a);
-            at::OptionalDeviceGuard guard(device_of(a));
             push(stack, a.item<int64_t>() != 0);
             return 0;
           };
         }),
     Operator(
-        "prim::TensorToNum(Tensor a) -> Scalar",
+        "prim::Int(Tensor a) -> int",
         [](const Node* node) -> Operation {
-          if(node->output()->type() == IntType::get()) {
+          return [](Stack& stack) {
+            at::Tensor a;
+            pop(stack, a);
+            push(stack, a.item<int64_t>());
+            return 0;
+          };
+        }),
+    Operator(
+        "prim::Float(Tensor a) -> float",
+        [](const Node* node) -> Operation {
             return [](Stack& stack) {
               at::Tensor a;
               pop(stack, a);
-              at::OptionalDeviceGuard guard(device_of(a));
-              push(stack, a.item<int64_t>());
-              return 0;
-            };
-          } else {
-            return [](Stack& stack) {
-              at::Tensor a;
-              pop(stack, a);
-              at::OptionalDeviceGuard guard(device_of(a));
               push(stack, a.item<double>());
               return 0;
             };
-          }
         }),
     Operator(
         "prim::ImplicitTensorToNum(Tensor a) -> Scalar",
@@ -106,7 +104,6 @@ RegisterOperators reg({
               at::Tensor a;
               pop(stack, a);
               checkImplicitTensorToNum(a, /*to int*/true);
-              at::OptionalDeviceGuard guard(device_of(a));
               push(stack, a.item<int64_t>());
               return 0;
             };
@@ -115,7 +112,6 @@ RegisterOperators reg({
               at::Tensor a;
               pop(stack, a);
               checkImplicitTensorToNum(a, /*to int*/false);
-              at::OptionalDeviceGuard guard(device_of(a));
               push(stack, a.item<double>());
               return 0;
             };
@@ -131,8 +127,10 @@ RegisterOperators reg({
             return 0;
           };
         }),
+    // note: this op needs to share a name with the Scalar -> Tensor conversion
+    // because all _to_tensor conversion have to have the same operator namet
     Operator(
-        "prim::BoolToTensor(bool a) -> Tensor",
+        "prim::NumToTensor(bool a) -> Tensor",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             bool b;
@@ -144,7 +142,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        "prim::IntToFloat(int a) -> float",
+        "prim::Float(int a) -> float",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             int64_t i;
@@ -154,7 +152,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        "prim::FloatToInt(float a) -> int",
+        "prim::Int(float a) -> int",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             double d;
@@ -164,7 +162,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        "prim::StringToFloat(str a) -> float",
+        "prim::Float(str a) -> float",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             auto s = pop(stack).toString();

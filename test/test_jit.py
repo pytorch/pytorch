@@ -241,7 +241,6 @@ class JitTestCase(TestCase):
         torch._C._jit_set_emit_module_hook(self.emitModuleHook)
 
     def emitModuleHook(self, module):
-
         def copy_structure_and_params(m):
             c = torch.jit.ScriptModule()
             for name, v, buffer in m._get_parameters():
@@ -4239,7 +4238,7 @@ a")
             b = float(2)
             return b + 1.0
 
-        with self.assertRaisesRegex(RuntimeError, "Cannot cast type"):
+        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
             @torch.jit.script
             def test_int_to_bool():
                 return bool(5)
@@ -4249,17 +4248,17 @@ a")
             b = int(5.0)
             return b + 1
 
-        with self.assertRaisesRegex(RuntimeError, "Cannot cast type"):
+        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
             @torch.jit.script
             def test_float_to_bool():
                 return bool(5.0)
 
-        with self.assertRaisesRegex(RuntimeError, "Cannot cast type"):
+        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
             @torch.jit.script
             def test_bool_to_float():
                 return float(True)
 
-        with self.assertRaisesRegex(RuntimeError, "Cannot cast type"):
+        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
             @torch.jit.script
             def test_bool_to_int():
                 return int(True)

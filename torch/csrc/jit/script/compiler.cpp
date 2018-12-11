@@ -73,62 +73,29 @@ struct PrintValue : public SugaredValue {
   }
 };
 
-static Value* typeCast(const SourceRange& loc, Value* value, TypePtr dst) {
-  auto& graph = *value->owningGraph();
-  const TypePtr orig = value->type();
-  Node* n = nullptr;
-
-  if(dst->isSubtypeOf(DynamicType::get()) && orig->isSubtypeOf(NumberType::get())) {
-    n = graph.createNumToTensor(value);
-  } else if (dst->isSubtypeOf(NumberType::get()) && orig->isSubtypeOf(DynamicType::get())) {
-    n = graph.createTensorToNum(dst, value);
-  } else if (dst->isSubtypeOf(BoolType::get()) && orig->isSubtypeOf(DynamicType::get())) {
-    n = graph.createTensorToBool(value);
-  } else if(dst->isSubtypeOf(IntType::get()) && orig->isSubtypeOf(FloatType::get())) {
-    n = graph.createFloatToInt(value);
-  } else if(dst->isSubtypeOf(FloatType::get()) && orig->isSubtypeOf(IntType::get())) {
-    n = graph.createIntToFloat(value);
-  } else if(dst->isSubtypeOf(FloatType::get()) && orig->isSubtypeOf(StringType::get())) {
-    n = graph.createStringToFloat(value);
-  } else {
-    throw ErrorReport(loc) << "Cannot cast type '" << orig->str() << "' to type '"
-      << dst->str() << "'.";
-  }
-
-  auto* result = graph.insertNode(n)
-      ->setSourceLocation(std::make_shared<SourceRange>(loc))
-      ->output();
-  return result;
-}
-
 // expressions like int(x)
-struct CastValue : public SugaredValue {
-  CastValue(TypePtr type)
-  : type(std::move(type)) {}
-  std::string kind() const override {
-    std::stringstream ss;
-    ss << "<" << type->str() << " cast primitive>";
-    return ss.str();
-  }
+// these are the same as call prim::Int or equivalent except it
+// is a noop when the input is a subtype of 'type'
+struct CastValue : public BuiltinFunction {
+  CastValue(TypePtr type, c10::Symbol method)
+  : BuiltinFunction(method, c10::nullopt)
+  , type_(std::move(type)) {}
   std::shared_ptr<SugaredValue> call(
     SourceRange loc,
     Method & m,
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) override {
-      if (!attributes.empty())
-        throw ErrorReport(loc) << "casts do not accept any keyword arguments";
-      if (inputs.size() != 1)
-        throw ErrorReport(loc) << "expected a single argument for cast";
-      auto values = toValues(*m.graph(), inputs);
-      Value* input = values.at(0);
-      if(!input->type()->isSubtypeOf(type)) {
-          input = typeCast(loc, input, type);
+      if(inputs.size() == 1 && attributes.size() == 0) {
+        auto v = inputs[0].value(*m.graph());
+        if (v->type()->isSubtypeOf(type_)) {
+          return std::make_shared<SimpleValue>(v);
+        }
       }
-      return std::make_shared<SimpleValue>(input);
+      return BuiltinFunction::call(loc, m , inputs, attributes, n_binders);
   }
 private:
-  TypePtr type;
+  TypePtr type_;
 };
 
 static Value* asSimple(SugaredValuePtr value) {
@@ -357,13 +324,13 @@ struct Environment {
     if(!retval) {
       static std::unordered_map<std::string, SugaredValuePtr> globals = {
         {"print", std::make_shared<PrintValue>()},
-        {"float", std::make_shared<CastValue>(FloatType::get())},
-        {"int", std::make_shared<CastValue>(IntType::get())},
-        {"bool", std::make_shared<CastValue>(BoolType::get())},
+        {"float", std::make_shared<CastValue>(FloatType::get(), prim::Float)},
+        {"int", std::make_shared<CastValue>(IntType::get(), prim::Int)},
+        {"bool", std::make_shared<CastValue>(BoolType::get(), prim::Bool)},
         {"getattr", std::make_shared<GetAttrValue>()},
         // todo(zach): remove when we can correctly export torch.full via ONNX
         // or we have implicit conversion that can convert numbers to tensors
-        {"_to_tensor", std::make_shared<CastValue>(DynamicType::get()) },
+        {"_to_tensor", std::make_shared<CastValue>(DynamicType::get(), prim::NumToTensor)},
       };
       auto it = globals.find(ident);
       if(it != globals.end())

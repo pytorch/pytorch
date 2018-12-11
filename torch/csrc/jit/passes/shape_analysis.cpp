@@ -386,13 +386,15 @@ class ShapePropagator {
         return;
       }
       case prim::ImplicitTensorToNum:
-      case prim::TensorToNum:
+      case prim::Bool:
+      case prim::Int:
+      case prim::Float:
         return; // correct num type is already set
       case prim::NumToTensor: {
-        if (node->input()->type()->isSubtypeOf(IntType::get())) {
+        TypePtr typ = node->input()->type();
+        if (typ->isSubtypeOf(IntType::get()) || typ->isSubtypeOf(BoolType::get())) {
           node->output()->setType(TensorType::create(at::kLong, at::kCPU, 0));
-        } else {
-          JIT_ASSERT(node->input()->type()->isSubtypeOf(FloatType::get()));
+        } else if (node->input()->type()->isSubtypeOf(FloatType::get())) {
           node->output()->setType(TensorType::create(at::kDouble, at::kCPU, 0));
         }
         return;
