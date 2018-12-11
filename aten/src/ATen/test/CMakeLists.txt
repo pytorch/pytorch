@@ -19,7 +19,8 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/undefined_tensor_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/verify_api_visibility.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/tbb_init_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/weakref_test.cpp)
+  ${CMAKE_CURRENT_SOURCE_DIR}/weakref_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/backend_extension_test.cpp)
 
 list(APPEND ATen_CUDA_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_integer_divider_test.cu
