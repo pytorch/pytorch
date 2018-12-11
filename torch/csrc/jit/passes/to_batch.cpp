@@ -36,12 +36,8 @@ void ToBatch::visitAten(Node* n, Block* block, Block* res_block){
 
   // transform scalar to tensor before pass to batch operator script
     for (auto& input : new_inputs) {
-    if(input->type() == IntType::get() || input->type() == FloatType::get()){
+    if(input->type() == IntType::get() || input->type() == FloatType::get() || input->type() == BoolType::get()){
       auto to_tensor_node = res_graph->createNumToTensor(input);
-      res_graph->insertNode(to_tensor_node);
-      input = to_tensor_node->output();
-    } else if(input->type() == BoolType::get()) {
-      auto to_tensor_node = res_graph->createBoolToTensor(input);
       res_graph->insertNode(to_tensor_node);
       input = to_tensor_node->output();
     }
@@ -51,29 +47,25 @@ void ToBatch::visitAten(Node* n, Block* block, Block* res_block){
   auto outputs = script::inlineCallTo(*res_block->owningGraph(), *batch_graph, new_inputs);
 
   // Assume all outputs from inlined operator implementation are in the triple form batched tensor or just a single non-tensor.
-  if(outputs.size() == 1){
+  if (outputs.size() == 1) {
     // if previous output is scalar, transform new output back to scalar from dynamic
-    if(n->outputs()[0]->type() != outputs[0]->type()){
-      Node* to_scalar_node;
-      if(n->outputs()[0]->type() == IntType::get()){
-        to_scalar_node = res_graph->createTensorToNum(IntType::get(), outputs[0]);
-      }
-      else if(n->outputs()[0]->type() == FloatType::get()){
-        to_scalar_node = res_graph->createTensorToNum(FloatType::get(), outputs[0]);
-      }
-      else if(n->outputs()[0]->type() == BoolType::get()){
-        to_scalar_node = res_graph->createTensorToBool(outputs[0]);
-      }
-      else{
+    TypePtr orig_type = n->outputs()[0]->type();
+    if (orig_type != outputs[0]->type()){
+      Symbol op;
+      if (orig_type == IntType::get()) {
+        op = prim::Int;
+      } else if (orig_type == FloatType::get()) {
+        op = prim::Float;
+      } else if (orig_type == BoolType::get()) {
+        op = prim::Bool;
+      } else {
         throw std::runtime_error("NYI: scalar types other than int, float, and bool are not supported yet");
       }
-      res_graph->insertNode(to_scalar_node);
-      rn_env[n->outputs()[0]] = to_scalar_node->output();
-    }
-    else
+      rn_env[n->outputs()[0]] = res_graph->insert(op, { outputs[0] });
+    } else {
       rn_env[n->outputs()[0]] = outputs[0];
-  }
-  else{
+    }
+  } else {
     for(size_t i = 0; i < n->outputs().size(); i++){
       auto output = n->outputs()[i];
       batch_map[output] = std::vector<Value*>(outputs.begin() + i * EXP_BTENSOR_SIZE, outputs.begin() + i * EXP_BTENSOR_SIZE + EXP_BTENSOR_SIZE);
@@ -342,17 +334,12 @@ void ToBatch::visitLoop(Node* n, Block* block, Block* res_block){
 
   // type of cond in loop should be int type
   if(rn_env.at(n->inputs()[0])->type() != IntType::get()){
-    auto to_int_node = res_graph->createTensorToNum(IntType::get(), rn_env.at(n->inputs()[0]));
-    res_graph->insertNode(to_int_node);
-    rn_env[n->inputs()[0]] = to_int_node->output();
+    rn_env[n->inputs()[0]] = res_graph->insert(prim::Int, {rn_env.at(n->inputs()[0])});
   }
   if(cond_is_tensor){
     auto cond = batch_map.at(n->inputs()[1]);
     auto cond_any = script::inlineCallTo(*res_block->owningGraph(), *getBatchOperator("any"), cond);
-    auto to_bool_node =
-        res_graph->createTensorToBool(cond_any[0]);
-    res_graph->insertNode(to_bool_node);
-    rn_env[n->inputs()[1]] = to_bool_node->output();
+    rn_env[n->inputs()[1]] =res_graph->insert(prim::Bool, {cond_any[0]});
   }
   for(size_t i = 2; i < n->inputs().size(); i++){
     auto input = n->inputs()[i];
@@ -433,10 +420,8 @@ void ToBatch::visitLoop(Node* n, Block* block, Block* res_block){
   if(cond_is_tensor){
     auto cond = batch_map.at(n->blocks()[0]->outputs()[0]);
     auto cond_any = script::inlineCallTo(*res_block->owningGraph(), *getBatchOperator("any"), cond);
-    auto to_bool_node =
-        res_graph->createTensorToBool(cond_any[0]);
-    res_graph->insertNode(to_bool_node);
-    loop_block->insertOutput(0, to_bool_node->output());
+    auto to_bool_output = res_graph->insert(prim::Bool, {cond_any[0]});
+    loop_block->insertOutput(0,  to_bool_output);
     for(size_t i = 0; i < EXP_BTENSOR_SIZE; i++){
       loop_block->insertOutput(i + 1, cond[i]);
     }
@@ -493,8 +478,9 @@ void ToBatch::toBatch(Block* block, Block* res_block) {
         case prim::NumToTensor:
           visitNumToTensor(n, block, res_block);
           break;
-        case prim::TensorToBool:
-        case prim::TensorToNum:
+        case prim::Bool:
+        case prim::Float:
+        case prim::Int:
           visitTensorToNum(n, block, res_block);
           break;
         case prim::ListConstruct:
