@@ -10,14 +10,14 @@ graph(%cond : Tensor) {
   %e : string = prim::Constant[value="bcd"]()
   %10 : int = prim::Constant[value=6]()
   %11 : Device = prim::Constant[value="cpu"]()
-  %12 : bool = prim::TensorToBool(%cond)
+  %12 : bool = prim::Bool(%cond)
   %c : int, %y : Tensor = prim::If(%12)
     block0() {
       -> (%3, %4)
     }
     block1() {
       %y.2 : Tensor = aten::rand(%2, %10, %c.1, %11)
-      %16 : bool = prim::TensorToBool(%cond)
+      %16 : bool = prim::Bool(%cond)
       %y.4 : Tensor = prim::If(%16)
         block0() {
           %y.3 : Tensor = aten::rand(%1, %10, %c.1, %11)

@@ -161,7 +161,7 @@ c10::optional<IValue> toIValueProp(const Value* v) {
     }
   }
 
-  if (v->node()->kind() == prim::StringToFloat) {
+  if (v->node()->kind() == prim::Float) {
     auto op = getOperation(v->node());
     if (auto input = toIValue(v->node()->input())) {
       auto op = getOperation(v->node());

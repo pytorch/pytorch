@@ -2,7 +2,7 @@ graph(%a : Tensor) {
   %1 : int = prim::Constant[value=1]()
   %2 : int = prim::Constant[value=2]()
   %3 : int = prim::Constant[value=0]()
-  %4 : bool = prim::TensorToBool(%a)
+  %4 : bool = prim::Bool(%a)
   %b : (int, int) = prim::If(%4)
     block0() {
       %b.1 : (int, int) = prim::TupleConstruct(%1, %2)
