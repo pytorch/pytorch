@@ -1121,20 +1121,57 @@ TEST(DataLoaderTest, TestExceptionsArePropagatedFromWorkers) {
   }
 }
 
-TEST(DataLoaderTest, TestStatefulDataset) {
+TEST(DataLoaderTest, StatefulBatchDatasetWithNoWorkers) {
   const int kNumberOfExamplesAfterWhichTheDatasetExhausts = 10;
-  const int kNumberOfWorkers = 8;
 
-  struct D : datasets::BatchDataset<D, torch::optional<int>, size_t> {
+  struct D : datasets::StatefulBatchDataset<D, int, size_t> {
     torch::optional<int> get_batch(size_t) override {
-      std::lock_guard<std::mutex> lock(mutex);
-      if (counter++ < kNumberOfExamplesAfterWhichTheDatasetExhausts) {
-        return counter;
+      if (counter < kNumberOfExamplesAfterWhichTheDatasetExhausts) {
+        return counter++;
       }
       return torch::nullopt;
     }
     torch::optional<size_t> size() const override {
       return 100;
+    }
+    void reset() override {
+      counter = 0;
+    }
+    int counter = 0;
+  };
+
+  auto data_loader = torch::data::make_data_loader2(D{}, DataLoaderOptions{});
+
+  for (size_t i = 0; i < 10; ++i) {
+    const auto number_of_iterations =
+        std::distance(data_loader->begin(), data_loader->end());
+    ASSERT_EQ(
+        number_of_iterations, kNumberOfExamplesAfterWhichTheDatasetExhausts)
+        << "epoch " << i;
+  }
+
+  for (const int i : *data_loader) {
+    ASSERT_LT(i, kNumberOfExamplesAfterWhichTheDatasetExhausts);
+  }
+}
+
+TEST(DataLoaderTest, StatefulBatchDatasetWithManyWorkers) {
+  const int kNumberOfExamplesAfterWhichTheDatasetExhausts = 10;
+  const int kNumberOfWorkers = 4;
+
+  struct D : datasets::StatefulBatchDataset<D, int, size_t> {
+    torch::optional<int> get_batch(size_t) override {
+      std::lock_guard<std::mutex> lock(mutex);
+      if (counter < kNumberOfExamplesAfterWhichTheDatasetExhausts) {
+        return counter++;
+      }
+      return torch::nullopt;
+    }
+    torch::optional<size_t> size() const override {
+      return 100;
+    }
+    void reset() override {
+      counter = 0;
     }
     int counter = 0;
     std::mutex mutex;
@@ -1144,10 +1181,93 @@ TEST(DataLoaderTest, TestStatefulDataset) {
       torch::data::datasets::make_shared_dataset<D>(),
       DataLoaderOptions().workers(kNumberOfWorkers));
 
-  for (size_t i = 0; i < 3; ++i) {
+  for (size_t i = 0; i < 10; ++i) {
     const auto number_of_iterations =
         std::distance(data_loader->begin(), data_loader->end());
     ASSERT_EQ(
-        number_of_iterations, kNumberOfExamplesAfterWhichTheDatasetExhausts);
+        number_of_iterations, kNumberOfExamplesAfterWhichTheDatasetExhausts)
+        << "epoch " << i;
+  }
+
+  for (const int i : *data_loader) {
+    ASSERT_LT(i, kNumberOfExamplesAfterWhichTheDatasetExhausts);
+  }
+}
+
+TEST(DataLoaderTest, StatefulDatasetWithManyWorkers) {
+  const int kNumberOfExamplesAfterWhichTheDatasetExhausts = 10;
+  const int kNumberOfWorkers = 4;
+
+  struct D : datasets::StatefulDataset<D, int> {
+    torch::optional<int> get(size_t index) override {
+      std::lock_guard<std::mutex> lock(mutex);
+      if (counter < kNumberOfExamplesAfterWhichTheDatasetExhausts) {
+        return counter++;
+      }
+      return torch::nullopt;
+    }
+    torch::optional<size_t> size() const override {
+      return 100;
+    }
+    void reset() override {
+      counter = 0;
+    }
+    int counter = 0;
+    std::mutex mutex;
+  };
+
+  auto data_loader = torch::data::make_data_loader2(
+      torch::data::datasets::make_shared_dataset<D>(),
+      DataLoaderOptions().workers(kNumberOfWorkers));
+
+  for (size_t i = 0; i < 10; ++i) {
+    const auto number_of_iterations =
+        std::distance(data_loader->begin(), data_loader->end());
+    ASSERT_EQ(
+        number_of_iterations, kNumberOfExamplesAfterWhichTheDatasetExhausts)
+        << "epoch " << i;
+  }
+
+  for (const std::vector<int> i : *data_loader) {
+    for (int j : i) {
+      ASSERT_LT(j, kNumberOfExamplesAfterWhichTheDatasetExhausts);
+    }
+  }
+}
+
+TEST(DataLoaderTest, StatefulBatchDatasetWithMap) {
+  const int kNumberOfExamplesAfterWhichTheDatasetExhausts = 10;
+
+  struct D : datasets::StatefulBatchDataset<D, int, size_t> {
+    torch::optional<int> get_batch(size_t) override {
+      if (counter < kNumberOfExamplesAfterWhichTheDatasetExhausts) {
+        return counter++;
+      }
+      return torch::nullopt;
+    }
+    torch::optional<size_t> size() const override {
+      return 100;
+    }
+    void reset() override {
+      counter = 0;
+    }
+    int counter = 0;
+  };
+
+  auto data_loader = torch::data::make_data_loader2(
+      D().map(transforms::BatchLambda<int, std::string>(
+          [](int x) { return std::to_string(x); })),
+      DataLoaderOptions{});
+
+  for (size_t i = 0; i < 10; ++i) {
+    const auto number_of_iterations =
+        std::distance(data_loader->begin(), data_loader->end());
+    ASSERT_EQ(
+        number_of_iterations, kNumberOfExamplesAfterWhichTheDatasetExhausts)
+        << "epoch " << i;
+  }
+
+  for (const std::string i : *data_loader) {
+    ASSERT_LT(std::stoi(i), kNumberOfExamplesAfterWhichTheDatasetExhausts);
   }
 }

@@ -26,6 +26,7 @@ template <typename Dataset>
 class DataLoader2 {
  public:
   using Batch = typename Dataset::BatchType;
+  using UnwrappedBatch = typename Batch::value_type;
   using BatchRequest = size_t;
 
   /// Constructs a new `DataLoader2` from a `dataset` to sample from and
@@ -54,21 +55,22 @@ class DataLoader2 {
   /// you should only use range-for loops to loop over the `DataLoader2`, but
   /// standard algorithms like `std::copy(dataloader.begin(), dataloader.end(),
   /// output_iterator)`  are supported too.
-  Iterator<Batch> begin() {
+  Iterator<UnwrappedBatch> begin() {
     AT_CHECK(
         shuttle_.in_flight_jobs() == 0,
         "Attempted to get a new DataLoader2 iterator "
         "while another iterator is not yet exhausted");
     reset();
-    return Iterator<Batch>(torch::make_unique<detail::ValidIterator<Batch>>(
-        [this] { return this->next(); }));
+    return Iterator<UnwrappedBatch>(
+        torch::make_unique<detail::ValidIterator<UnwrappedBatch>>(
+            [this] { return this->next(); }));
   }
 
   /// Returns a special "sentinel" iterator that compares equal with a
   /// non-sentinel iterator once the `DataLoader2` is exhausted.
-  Iterator<Batch> end() {
-    return Iterator<Batch>(
-        torch::make_unique<detail::SentinelIterator<Batch>>());
+  Iterator<UnwrappedBatch> end() {
+    return Iterator<UnwrappedBatch>(
+        torch::make_unique<detail::SentinelIterator<UnwrappedBatch>>());
   }
 
   /// Joins the `DataLoader2`'s worker threads and drains internal queues.
@@ -121,11 +123,12 @@ class DataLoader2 {
   /// The finished result of a job.
   struct Result : Sequenced {
     Result() = default;
-    Result(Batch&& b, size_t sqn) : Sequenced(sqn), batch(std::move(b)) {}
+    Result(optional<UnwrappedBatch>&& b, size_t sqn)
+        : Sequenced(sqn), batch(std::move(b)) {}
     Result(StopEpoch s, size_t sqn) : Sequenced(sqn), stop_epoch(s) {}
     Result(std::exception_ptr exception, size_t sqn)
         : Sequenced(sqn), exception(std::move(exception)) {}
-    optional<Batch> batch;
+    optional<UnwrappedBatch> batch;
     optional<StopEpoch> stop_epoch;
     std::exception_ptr exception;
   };
@@ -136,7 +139,8 @@ class DataLoader2 {
     shuttle_.drain();
     sequence_number_ = 0;
     sequencer_ = new_sequencer();
-    if (prefetch) {
+    dataset_.reset();
+    if (prefetch && options_.workers > 0) {
       this->prefetch();
     }
   }
@@ -157,26 +161,21 @@ class DataLoader2 {
   /// Returns the next batch of data, or an empty `optional` if the
   /// `DataLoader2` is exhausted. This operation will block until a batch is
   /// available.
-  optional<Batch> next() {
+
+  optional<UnwrappedBatch> next() {
     if (options_.workers > 0) {
-      optional<Result> result = sequencer_->next(
-          [this] { return this->shuttle_.pop_result(this->options_.timeout); });
-      if (result) {
+      while (auto result = pop_result()) {
         if (result->exception) {
           throw WorkerException(result->exception);
-        } else if (result->stop_epoch) {
-          shuttle_.drain();
-          return nullopt;
-        } else {
-          AT_ASSERT(result->batch.has_value());
+        } else if (result->batch) {
           prefetch(1);
           return std::move(result->batch);
         }
       }
     } else {
-      return dataset_->get_batch(options_.batch_size);
+      return dataset_.get_batch(options_.batch_size);
     }
-    return nullopt;
+    return at::nullopt;
   }
 
   /// The function that worker threads run.
@@ -187,11 +186,8 @@ class DataLoader2 {
         break;
       }
       try {
-        if (auto batch = dataset_.get_batch(std::move(*job.batch_request))) {
-          shuttle_.push_result({std::move(batch), job.sequence_number});
-        } else {
-          shuttle_.push_result({StopEpoch{}, job.sequence_number});
-        }
+        auto batch = dataset_.get_batch(std::move(*job.batch_request));
+        shuttle_.push_result({std::move(batch), job.sequence_number});
       } catch (...) {
         shuttle_.push_result({std::current_exception(), job.sequence_number});
       }
@@ -201,6 +197,11 @@ class DataLoader2 {
   template <typename T>
   void push_job(T value) {
     shuttle_.push_job({std::move(value), sequence_number_++});
+  }
+
+  optional<Result> pop_result() {
+    return sequencer_->next(
+        [this] { return this->shuttle_.pop_result(this->options_.timeout); });
   }
 
   std::unique_ptr<detail::sequencers::Sequencer<Result>> new_sequencer() {
