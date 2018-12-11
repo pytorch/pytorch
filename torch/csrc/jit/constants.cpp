@@ -133,7 +133,7 @@ RegisterOperators reg({
             return 0;
           };
         } else if (type == CastingType::get()) {
-          auto c = c10::parsePyCastingValue(node->s(attr::value)).value();
+          auto c = *c10::parsePyCastingValue(node->s(attr::value));
           return [c](Stack& stack) {
             push(stack, c);
             return 0;

@@ -299,7 +299,7 @@ struct SchemaParser {
     }
     auto casting = c10::parseCastingValue(text);
     if (casting) {
-      return casting.value();
+      return *casting;
     }
     throw ErrorReport(range) << "unexpected casting value";
   }

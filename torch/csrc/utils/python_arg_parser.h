@@ -400,7 +400,7 @@ inline c10::Casting PythonArgs::casting(int i) {
   if (!casting) {
     throw torch::ValueError("Invalid casting value '%s'", val.c_str());
   }
-  return casting.value();
+  return *casting;
 }
 
 inline c10::Casting PythonArgs::castingWithDefault(int i, c10::Casting default_casting) {

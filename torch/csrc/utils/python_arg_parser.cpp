@@ -252,7 +252,7 @@ void FunctionParameter::set_default_str(const std::string& str) {
     if (!casting) {
       throw std::runtime_error("invalid default casting string: " + str);
     }
-    default_casting = casting.value();
+    default_casting = *casting;
   } else if (type_ == ParameterType::LAYOUT) {
     if (str == "None") {
       default_layout = nullptr;
