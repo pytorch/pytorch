@@ -771,9 +771,9 @@ def create_generic(top_env, declarations):
         if option['api_name'].endswith('_out'):
             # _out variants must create buffers and insert them in the
             # arguments list between output and input arguments
-            for buffer in option['buffers']:
-                body.append('Tensor {} = at::empty({{0}}, output.options());'.format(buffer['name']))
             actuals = [arg['name'] for arg in option['arguments'] if arg.get('output')]
+            for buffer in option['buffers']:
+                body.append('Tensor {} = at::empty({{0}}, {}.options());'.format(buffer['name'], actuals[0]))
             actuals += [buffer['name'] for buffer in option['buffers']]
             actuals += [arg['name'] for arg in option['arguments'] if not arg.get('output')]
 
