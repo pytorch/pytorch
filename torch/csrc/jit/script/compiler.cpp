@@ -35,13 +35,6 @@ struct NoneValue : SugaredValue {
   }
 };
 
-// matched against for special handling of getattr expressions
-struct GetAttrValue : SugaredValue {
-  std::string kind() const override {
-    return "getattr";
-  }
-};
-
 struct PrintValue : public SugaredValue {
   std::string kind() const override {
     return "print";
@@ -328,6 +321,7 @@ struct Environment {
         {"int", std::make_shared<CastValue>(IntType::get(), prim::Int)},
         {"bool", std::make_shared<CastValue>(BoolType::get(), prim::Bool)},
         {"getattr", std::make_shared<GetAttrValue>()},
+        {"isinstance", std::make_shared<IsInstValue>()},
         // todo(zach): remove when we can correctly export torch.full via ONNX
         // or we have implicit conversion that can convert numbers to tensors
         {"_to_tensor", std::make_shared<CastValue>(DynamicType::get(), prim::NumToTensor)},
@@ -815,6 +809,7 @@ inline bool isSupportedListElementType(const TypePtr& type) {
       type->isSubtypeOf(NumberType::get());
 }
 
+c10::optional<std::string> parseBaseTypeName(const Expr& expr);
 TypePtr parseTypeFromExpr(const Expr& expr);
 c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(const Expr& expr);
 
@@ -2020,6 +2015,20 @@ private:
       return NamedValue(attr.range(), attr.name().name(), emitExpr(attr.value()));
     });
   }
+
+  void checkApplyExpr(Apply& apply, SourceRange& loc) {
+    if (apply.inputs().size() != 2) {
+      throw ErrorReport(loc)
+          << Var(apply.callee()).name().name()
+          << " expected exactly two arguments but found "
+          << apply.inputs().size();
+    }
+    if (apply.attributes().size() > 0) {
+      throw ErrorReport(loc)
+          << Var(apply.callee()).name().name()
+          << " takes no keyword arguments";
+    }
+  }
   std::shared_ptr<SugaredValue> emitApplyExpr(Apply &apply, size_t n_binders) {
     auto sv = emitSugaredExpr(apply.callee(), 1);
     auto loc = apply.callee().range();
@@ -2035,14 +2044,7 @@ private:
       auto attributes = emitAttributes(apply.attributes());
       return emitForkExpr(loc, forked, inputs, attributes);
     } else if (auto annotate_value = dynamic_cast<AnnotateValue*>(sv.get())) {
-      if (apply.inputs().size() != 2) {
-        throw ErrorReport(loc)
-            << "expected exactly two arguments to attribute but found "
-            << apply.inputs().size();
-      }
-      if (apply.attributes().size() > 0) {
-        throw ErrorReport(loc) << "attribute takes no keyword arguments";
-      }
+      checkApplyExpr(apply, loc);
       TypePtr type = parseTypeFromExpr(apply.inputs()[0]);
       Value* expr = tryConvertToType(
           apply.range(),
@@ -2057,12 +2059,7 @@ private:
       }
       return std::make_shared<SimpleValue>(expr);
     } else if(auto getattr = dynamic_cast<GetAttrValue*>(sv.get())) {
-      if (apply.attributes().size() > 0) {
-        throw ErrorReport(loc) << "getattr takes no keyword arguments";
-      }
-      if (apply.inputs().size() != 2) {
-        throw ErrorReport(loc) << "getattr expects 2 inputs";
-      }
+      checkApplyExpr(apply, loc);
       auto obj = emitSugaredExpr(apply.inputs()[0], 1);
       auto selector = apply.inputs()[1];
       if (selector.kind() != TK_STRINGLITERAL) {
@@ -2070,6 +2067,29 @@ private:
       }
       const std::string& name = StringLiteral(selector).text();
       return obj->attr(apply.range(), method, name);
+    } else if (auto isinst = dynamic_cast<IsInstValue*>(sv.get())) {
+      // NOTE: for `isinstance` builtin call in JIT, we only check the static types
+      // on the inputs to evaluate, and insert the corresponding constant node
+      checkApplyExpr(apply, loc);
+      auto type_name = parseBaseTypeName(apply.inputs()[1]);
+      if (!type_name) {
+        throw ErrorReport(apply.inputs()[1].range()) << "type must be a type identifier";
+      }
+      auto val = emitExpr(apply.inputs()[0]);
+      // Special casing for list and tuple since isintance(x, list) and isinstance(x, tuple)
+      // does not accept List[int] / Tuple[int] like subscript type annotation in python
+      bool is_instance_val = false;
+      if (*type_name == "list" && val->type()->cast<ListType>()) {
+          is_instance_val = true;
+      } else if (*type_name == "tuple" && val->type()->cast<TupleType>()) {
+          is_instance_val = true;
+      } else {
+        TypePtr type = parseTypeFromExpr(apply.inputs()[1]);
+        if (val->type()->isSubtypeOf(type)) {
+          is_instance_val = true;
+        }
+      }
+      return std::make_shared<SimpleValue>(graph->insertConstant(is_instance_val, loc));
     } else {
       auto inputs = getNamedValues(apply.inputs(), true);
       auto attributes = emitAttributes(apply.attributes());
