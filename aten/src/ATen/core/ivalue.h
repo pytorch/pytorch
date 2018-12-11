@@ -510,14 +510,36 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
  public:
+  /**
+  * Wait on the future until it completes.
+  */
   void wait() {
     if (completed()) {
       return;
     }
-    c10::global_work_queue().workOnTasksUntilCompleted(intrusive_from_this());
+    std::condition_variable finished;
+    bool fired = false;
+
+    // Add a callback to notify the current thread
+    // when the current future completes.
+    addCallback([&] {
+      std::unique_lock<std::mutex> lock(mutex_);
+      finished.notify_all();
+      fired = true;
+    });
+
+    // The current thread will be blocked unless the above callback is fired.
+    std::unique_lock<std::mutex> lock(mutex_);
+    while (!fired) {
+      finished.wait(lock);
+    }
+
     AT_ASSERT(completed());
   }
 
+  /**
+   * Explicitly mark the future as completed with the output value.
+   */
   void markCompleted(IValue value) {
     {
       // This is not to protect completed_ but to create a barrier
@@ -543,6 +565,12 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     return value_;
   }
 
+  /**
+   * Add a callback to the future.
+   * The callbacks will be executed once the future completes.
+   * If the future has already completed,
+   * this function will execute the callback immediately.
+   */
   void addCallback(std::function<void(void)> callback) {
     std::unique_lock<std::mutex> lock(mutex_);
     if (completed()) {
@@ -556,10 +584,6 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // Check if the current future has completed
   bool completed() {
     return completed_;
-  }
-
-  std::mutex& get_mutex() {
-    return mutex_;
   }
 
   CAFFE2_API friend std::ostream& operator<<(
