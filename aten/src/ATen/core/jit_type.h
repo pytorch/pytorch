@@ -901,7 +901,6 @@ TypePtr getTypePtr() {
       " could not be converted to any of the known types { ",
       C10_FORALL_TYPES(TYPE_STR) "}");
 #undef TYPE_STR
-  return nullptr;
 }
 
 template<> inline TypePtr getTypePtr<at::Tensor>() { return DynamicType::get(); }
