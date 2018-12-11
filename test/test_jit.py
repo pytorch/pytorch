@@ -16,6 +16,7 @@ from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     freeze_rng_state
 from common_nn import module_tests, new_module_tests, criterion_tests
 from textwrap import dedent
+from functools import wraps
 import os
 import io
 import itertools
@@ -10708,6 +10709,14 @@ def add_autograd_test(
         post_add_test(test_name, skipTestIf, do_test)
 
 
+def suppress_warnings(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        with warnings.catch_warnings(record=True):
+            return fn(*args, **kwargs)
+    return wrapper
+
+
 def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=(),
                            output_process_fn=lambda x: x, kwargs=None):
     test_name = 'test_nn_' + name
@@ -10717,6 +10726,7 @@ def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=()
 
     no_grad = variant_name == 'inplace'
 
+    @suppress_warnings
     def do_test(self, name=name, args=args, test_name=test_name):
         torch.manual_seed(2)
 
@@ -10780,6 +10790,7 @@ def add_nn_module_test(*args, **kwargs):
         test_name = "{}_{}".format(test_name, kwargs['desc'])
     test_name = 'test_nn_{}'.format(test_name)
 
+    @suppress_warnings
     def do_test(self):
         if test_name in EXCLUDE_SCRIPT_MODULES:
             return
