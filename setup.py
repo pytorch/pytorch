@@ -1025,7 +1025,7 @@ if __name__ == '__main__':
                 'share/cmake/Torch/*.cmake',
             ],
             'caffe2': [
-                rel_site_packages + '/caffe2/**/*.py'
+                'cpp_test/*',
             ]
         },
     )
