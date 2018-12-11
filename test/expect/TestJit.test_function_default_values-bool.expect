@@ -2,7 +2,7 @@ graph(%x : Tensor
       %a : Tensor
       %flag : Tensor) {
   %3 : int = prim::Constant[value=1]()
-  %4 : bool = prim::TensorToBool(%flag)
+  %4 : bool = prim::Bool(%flag)
   %result : Tensor = prim::If(%4)
     block0() {
       -> (%x)
