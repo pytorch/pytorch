@@ -100,6 +100,7 @@ struct TORCH_API Variable : public at::Tensor {
   friend Variable make_variable_view(
       Variable base,
       at::Tensor data,
+      bool allow_tensor_metadata_change,
       bool is_differentiable,
       Edge gradient_edge);
 
@@ -107,13 +108,19 @@ struct TORCH_API Variable : public at::Tensor {
   /// set only for leaves, and determines whether the `Variable` will accumulate
   /// gradients. NOTE: `data` must *not* be a `Variable` already. Its dynamic
   /// type *must* be `Tensor`.
-  friend Variable make_variable(at::Tensor data, bool requires_grad);
+  friend Variable make_variable(
+      at::Tensor data,
+      bool requires_grad,
+      bool allow_tensor_metadata_change);
 
   /// Creates a `Variable` from the given `Tensor` and specify a
   /// `gradient_edge`, i.e. a (function, input_nr) pair specifying the function
   /// in the autograd graph, and what particular input of that function, this
   /// variable is connected to.
-  friend Variable make_variable(at::Tensor data, Edge gradient_edge);
+  friend Variable make_variable(
+      at::Tensor data,
+      Edge gradient_edge,
+      bool allow_tensor_metadata_change);
 
   // Tensor Conversions
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -416,14 +423,6 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
 
   int64_t storage_offset() const override;
 
-  void set_allow_tensor_metadata_change(bool value) override {
-    data_.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(value);
-  }
-
-  bool allow_tensor_metadata_change() const override {
-    return data_.unsafeGetTensorImpl()->allow_tensor_metadata_change();
-  }
-
   /// The underlying data tensor for this Variable.
   /// This field will be removed once VariableImpl and TensorImpl are merged.
   at::Tensor data_;
@@ -547,18 +546,23 @@ struct TORCH_API Variable::DifferentiableViewImpl : public Variable::Impl {
 inline Variable make_variable_view(
     Variable base,
     at::Tensor data,
+    bool allow_tensor_metadata_change = true,
     bool is_differentiable = true,
     Edge gradient_edge = Edge()) {
   if (data.defined()) {
     if (is_differentiable) {
       /// Differentiable view. Track history with DifferentiableViewImpl.
-      auto data_copy = at::Tensor(data.getIntrusivePtr()->shallow_copy_and_detach());
+      auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach();
+      data_impl_copy->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+      auto data_copy = at::Tensor(data_impl_copy);
       auto diff_view_meta = c10::guts::make_unique<Variable::DifferentiableViewMeta>();
       return Variable(c10::make_intrusive<Variable::DifferentiableViewImpl>(
               std::move(base), std::move(data_copy), std::move(gradient_edge), std::move(diff_view_meta)));
     } else {
       /// Non-differentiable view. Just share version counter.
-      auto data_copy = at::Tensor(data.getIntrusivePtr()->shallow_copy_and_detach());
+      auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach();
+      data_impl_copy->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+      auto data_copy = at::Tensor(data_impl_copy);
       auto autograd_meta = c10::guts::make_unique<Variable::AutogradMeta>();
       auto var = Variable(c10::make_intrusive<Variable::Impl>(
               std::move(data_copy), std::move(autograd_meta), false, std::move(gradient_edge)));
@@ -569,24 +573,34 @@ inline Variable make_variable_view(
   return Variable();
 }
 
-inline Variable make_variable(at::Tensor data, bool requires_grad = false) {
+inline Variable make_variable(
+    at::Tensor data,
+    bool requires_grad = false,
+    bool allow_tensor_metadata_change = true) {
   AT_CHECK(
       !data.is_variable(),
       "Must not create a new variable from a variable, use its .data()");
   if (data.defined()) {
-    auto data_copy = at::Tensor(data.getIntrusivePtr()->shallow_copy_and_detach());
+    auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach();
+    data_impl_copy->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+    auto data_copy = at::Tensor(data_impl_copy);
     auto autograd_meta = c10::guts::make_unique<Variable::AutogradMeta>();
     return Variable(c10::make_intrusive<Variable::Impl>(data_copy, std::move(autograd_meta), requires_grad));
   }
   return Variable();
 }
 
-inline Variable make_variable(at::Tensor data, Edge gradient_edge) {
+inline Variable make_variable(
+    at::Tensor data,
+    Edge gradient_edge,
+    bool allow_tensor_metadata_change = true) {
   AT_CHECK(
       !data.is_variable(),
       "Must not create a new variable from a variable, use its .data()");
   if (data.defined()) {
-    auto data_copy = at::Tensor(data.getIntrusivePtr()->shallow_copy_and_detach());
+    auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach();
+    data_impl_copy->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+    auto data_copy = at::Tensor(data_impl_copy);
     auto autograd_meta = c10::guts::make_unique<Variable::AutogradMeta>();
     return Variable(c10::make_intrusive<Variable::Impl>(data_copy, std::move(autograd_meta), false, std::move(gradient_edge)));
   }
@@ -648,8 +662,7 @@ inline std::shared_ptr<Function> Variable::grad_accumulator() const {
 }
 
 inline Variable Variable::detach() const {
-  auto var = make_variable_view(*this, get()->data_, /*is_differentiable=*/false);
-  var.data().unsafeGetTensorImpl()->set_allow_tensor_metadata_change(false);
+  auto var = make_variable_view(*this, get()->data_, /*allow_tensor_metadata_change=*/false, /*is_differentiable=*/false);
   return var;
 }
 
