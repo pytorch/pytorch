@@ -5,7 +5,7 @@ import collections
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
-from caffe2.python import core, dyndep
+from caffe2.python import core, dyndep, workspace
 from caffe2.quantization.server import utils as dnnlowp_utils
 from dnnlowp_test_utils import (
     check_quantized_results_close,
@@ -16,6 +16,7 @@ from hypothesis import assume, given
 
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
+workspace.GlobalInit(["caffe2", "--caffe2_omp_num_threads=11"])
 
 
 class GroupWiseDNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):

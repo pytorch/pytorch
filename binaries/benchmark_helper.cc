@@ -231,7 +231,7 @@ void fillInputBlob(
       // int total_size = tensor_proto->float_data_size();
       caffe2::TensorCPU* tensor =
           new caffe2::TensorCPU(dims, caffe2::DeviceType::CPU);
-      serializer.Deserialize(*tensor_proto, tensor);
+      serializer.DeserializeToTensor(*tensor_proto, tensor);
       blob->Reset(tensor);
     }
     // todo: for other types
