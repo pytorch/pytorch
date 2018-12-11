@@ -35,7 +35,7 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   return THCState_getCurrentBlasHandle(at::globalContext().getTHCState());
 }
 
-#ifdef AT_ROCM_ENABLED()
+#if AT_ROCM_ENABLED()
 
 namespace {
 
