@@ -4,7 +4,7 @@ import collections
 
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
-from caffe2.python import core, dyndep
+from caffe2.python import core, dyndep, workspace
 from caffe2.python.fb import hardcode_scale_zp
 from caffe2.quantization.server import utils as dnnlowp_utils
 from dnnlowp_test_utils import check_quantized_results_close, generate_conv_inputs
@@ -12,6 +12,7 @@ from hypothesis import assume, given
 
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
+workspace.GlobalInit(["caffe2", "--caffe2_omp_num_threads=11"])
 
 
 class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
