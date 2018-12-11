@@ -957,16 +957,16 @@ class ScriptMeta(type(torch._C.ScriptModule)):
 if _enabled:
     class ScriptModule(with_metaclass(ScriptMeta, torch._C.ScriptModule, Module)):
         r"""
-        The core data structure in Torch Script is the ``ScriptModule``. It is an
+        The core data structure in TorchScript is the ``ScriptModule``. It is an
         analogue of torch's nn.Module and represents an entire model as a tree of
         submodules. Like normal modules, each individual module in a ScriptModule can
         have submodules, parameters, and methods. In nn.Modules methods are implemented
         as Python functions, but in ScriptModules methods typically implemented as
-        *Torch Script* functions,  a statically-typed subset of Python that contains all
+        *TorchScript* functions,  a statically-typed subset of Python that contains all
         of PyTorch's built-in Tensor operations. This difference allows your
         ScriptModules code to run without the need for a Python interpreter.
 
-        ScriptModules and the Torch Script functions inside of them can be created in
+        ScriptModules and the TorchScript functions inside of them can be created in
         two ways:
 
         **Tracing:**
@@ -974,7 +974,7 @@ if _enabled:
             Using ``torch.jit.trace``, you can take an existing module or python
             function, provide example inputs, and we run the function, recording the
             operations performed on all the tensors. We turn the resulting recording
-            into a Torch Script method that is installed as the ``forward`` method of a
+            into a TorchScript method that is installed as the ``forward`` method of a
             ScriptModule. This module also contains any parameters that the original
             module had as well.
 
@@ -1022,11 +1022,11 @@ if _enabled:
 
         **Scripting:**
 
-            You can write Torch Script code directly using Python syntax. You do this
+            You can write TorchScript code directly using Python syntax. You do this
             using the ``torch.jit.script`` annotation (for functions) or
             ``torch.jit.script_method`` annotation (for methods) on subclasses of
             ScriptModule. With this annotation the body of the annotated function is
-            directly translated into Torch Script. Torch Script itself is a subset of
+            directly translated into TorchScript. TorchScript itself is a subset of
             the Python language, so not all features in python work, but we provide
             enough functionality to compute on tensors and do control-dependent
             operations.

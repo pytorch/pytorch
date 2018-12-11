@@ -16,7 +16,7 @@ struct CAFFE2_API ${Type} : public TypeDefault {
       AT_ERROR("No function implemented for schema: ", schema);
     }
 
-    static FnPtr register_function(std::string schema, FnPtr fn) {
+    static void register_function(std::string schema, FnPtr fn) {
       fn_table_[schema] = fn;
     }
 

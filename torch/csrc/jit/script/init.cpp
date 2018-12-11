@@ -224,10 +224,7 @@ struct ModuleValue : public SugaredValue {
         v = module->find_parameter(field);
       }
       Value* the_tensor = m.get_or_add_parameter(v->slot());
-      Value* the_bool =
-          m.graph()
-              ->insertNode(m.graph()->createTensorToBool(the_tensor))
-              ->output();
+      Value* the_bool = m.graph()->insert(prim::Bool, {the_tensor});
       return std::make_shared<SimpleValue>(the_bool);
     }
 
@@ -688,7 +685,8 @@ void initJitScriptBindings(PyObject* module) {
         std::vector<at::Tensor> tensors;
         PythonPrint(ss, self, tensors, false);
         return ss.str();
-      });
+      })
+      .def("apply", &Module::apply);
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
     .def("graph", [&](Method& self) {
