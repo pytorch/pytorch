@@ -134,6 +134,8 @@ struct CAFFE2_API IValue final {
     return *this;
   }
 
+  void dump() const;
+
   bool isAliasOf(const IValue& rhs) const {
     if (this->tag != rhs.tag) {
       // Trivially don't alias if the type is different
