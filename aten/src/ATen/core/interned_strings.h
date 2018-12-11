@@ -69,6 +69,7 @@ namespace c10 {
   _(prim, ConstantChunk)           \
   _(prim, MMTreeReduce)            \
   _(prim, MMBatchSide)             \
+  _(aten, _ncf_unsqueeze)          \
   _(aten, warn)                    \
   _(aten, floordiv)                \
   _(aten, __round_to_zero_floordiv)\
