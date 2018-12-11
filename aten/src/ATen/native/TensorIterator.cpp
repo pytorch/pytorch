@@ -685,8 +685,10 @@ DimCounter::DimCounter(IntList shape, Range range)
   int64_t ndim = values.size();
   for (int dim = 0; dim < ndim; dim++) {
     int64_t size = shape[dim];
-    values[dim] = linear_offset % size;
-    linear_offset /= size;
+    if (size > 0) {
+      values[dim] = linear_offset % size;
+      linear_offset /= size;
+    }
   }
   AT_ASSERT(linear_offset == 0);
 }
