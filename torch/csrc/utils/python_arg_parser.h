@@ -398,7 +398,7 @@ inline c10::Casting PythonArgs::casting(int i) {
   std::string val = string(i);
   c10::optional<c10::Casting> casting = c10::parsePyCastingValue(val);
   if (!casting) {
-    throw torch::ValueError("Invalid casting value '%s'", val.c_str());
+    throw torch::ValueError(c10::castingValueErrorMessage());
   }
   return *casting;
 }

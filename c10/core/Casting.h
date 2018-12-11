@@ -65,4 +65,8 @@ static inline optional<Casting> parsePyCastingValue(const std::string& value) {
   return nullopt;
 }
 
+static inline const char* castingValueErrorMessage() {
+  return "casting must be one of 'no', 'promote', or 'unsafe'";
+}
+
 } // namespace c10
