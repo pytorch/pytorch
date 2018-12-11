@@ -33,6 +33,8 @@ def get_test_name(testcase):
 # Take a test case (a dict) as input, return the input for the module.
 def gen_input(testcase):
     if "input_size" in testcase:
+        if (testcase["input_size"] == ()):
+            testcase["input_size"] = (1,);
         return Variable(torch.randn(*testcase["input_size"]))
     elif "input_fn" in testcase:
         input = testcase["input_fn"]()
