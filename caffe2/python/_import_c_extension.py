@@ -19,9 +19,7 @@ with extension_loader.DlopenGuard():
     except ImportError as gpu_e:
         logging.info('Failed to import cuda module: {}'.format(gpu_e))
         try:
-            RTLD_LAZY = 1
-            with extension_loader.DlopenGuard(RTLD_LAZY):
-                from caffe2.python.caffe2_pybind11_state_hip import *  # noqa
+            from caffe2.python.caffe2_pybind11_state_hip import *  # noqa
             if num_hip_devices():
                 has_hip_support = True
                 logging.info('This caffe2 python run has AMD GPU support!')
