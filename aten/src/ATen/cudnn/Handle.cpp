@@ -12,23 +12,23 @@ namespace {
 
 struct Handle {
   cudnnHandle_t handle;
-  Handle() : handle(NULL) {
+  Handle() : handle(nullptr) {
     AT_CUDNN_CHECK(cudnnCreate(&handle));
   }
   // std::vector.emplace() and push_back() may route through temporaries and call
   // copy/move constructors along the way.  If this is the case, we don't want
   // the destructors of temporaries to call cudnnDestroy on the handle.
-  // We can achieve safety (for the narrow case of stashing within STL containers)
-  // by defining copy and move constructors that transfer cudnnDestroy
-  // responsibility to the latest constructed object.  This is NOT a substitute for
-  // full-blown reference counting, but reference counting may be overkill here.
+  // We can achieve safety (for the narrow case of stashing within std::vectors)
+  // by making Handle moveable but not copyable, and transferring handle ownership
+  // to the latest constructed object.  This is not a substitute for full-blown 
+  // reference counting, but reference counting may be overkill here.
   // Another alternative is to wrap the saved Handles in unique_ptrs, i.e.,
   // unordered_map<int, vector<unique_ptr<Handle>>> created_handles;
   void transfer(Handle& rhs) {
     handle = rhs.handle;
-    rhs.handle = NULL;
+    rhs.handle = nullptr;
   }
-  Handle(Handle& rhs) { transfer(rhs); }
+  Handle(const Handle& rhs) = delete;
   Handle(Handle&& rhs) { transfer(rhs); }
   // operator= takes argument by value
   Handle& operator=(Handle rhs) { transfer(rhs); return *this; }
