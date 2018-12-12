@@ -22,7 +22,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/operator.h"
-#include "caffe2/utils/string_utils.h"
+#include "c10/util/string_utils.h"
 
 using std::map;
 using std::shared_ptr;
@@ -59,7 +59,7 @@ void writeTextOutput(
     if (i > 0) {
       dims += ", ";
     }
-    dims += std::to_string(dim);
+    dims += c10::to_string(dim);
   }
   lines.push_back(dims);
   std::stringstream line;
