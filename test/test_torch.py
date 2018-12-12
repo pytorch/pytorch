@@ -93,9 +93,6 @@ class BytesIOContext(io.BytesIO):
     def __exit__(self, *args):
         pass
 
-DIM_TEST_SCENARIOS = [
-]
-
 
 # This is intentionally prefixed by an underscore. Otherwise pytest will try to
 # run its methods as test cases.
@@ -1973,27 +1970,24 @@ class _TestTorchMixin(object):
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_sum_dim(self):
-        for sizes, dim in DIM_TEST_SCENARIOS:
-            self._test_dim_ops(
-                lambda t, d: t.sum(d),
-                lambda n, d: n.sum(d))
+        self._test_dim_ops(
+            lambda t, d: t.sum(d),
+            lambda n, d: n.sum(d))
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_mean_dim(self):
-        for sizes, dim in DIM_TEST_SCENARIOS:
-            self._test_dim_ops(
-                lambda t, d: t.mean(d),
-                lambda n, d: n.mean(d),
-                use_integral=False)
+        self._test_dim_ops(
+            lambda t, d: t.mean(d),
+            lambda n, d: n.mean(d),
+            use_integral=False)
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_std_dim(self):
         for unbiased in [False, True]:
-            for sizes, dim in DIM_TEST_SCENARIOS:
-                self._test_dim_ops(
-                    lambda t, d: t.std(d, unbiased=unbiased),
-                    lambda n, d: n.std(d, ddof=1 if unbiased else 0),
-                    use_integral=False)
+            self._test_dim_ops(
+                lambda t, d: t.std(d, unbiased=unbiased),
+                lambda n, d: n.std(d, ddof=1 if unbiased else 0),
+                use_integral=False)
 
     def test_sum_out(self):
         x = torch.rand(100, 100)
