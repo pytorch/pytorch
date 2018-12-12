@@ -11,6 +11,8 @@
 #include <ATen/Generator.h>
 #include <TH/THGenerator.hpp>
 
+#include <c10/macros/Macros.h>
+
 namespace at {namespace native {
 
 static inline THGenerator* get_generator(at::Generator* gen) {
@@ -23,22 +25,17 @@ static inline THGenerator* get_generator(at::Generator* gen) {
 
 namespace {
 
-#ifdef __CUDA_ARCH__
-#define nvfunction_or_function nvstd::function
-#define deviceforcuda __device__
-#else
-#define nvfunction_or_function std::function
-#define deviceforcuda
+#ifndef __CUDA_ARCH__
 // we cannot use std::isnan directly due to some incompatibility of
 // gcc constexpr'ing and nvcc
 #define isnan std::isnan
 #endif
 
-template<typename scalar_t>
+template<typename scalar_t, typename sampler_t>
 struct BaseSampler {
-  nvfunction_or_function<scalar_t(void)> sampler;
-  deviceforcuda BaseSampler(nvfunction_or_function<scalar_t(void)> sampler): sampler(sampler) {}
-  deviceforcuda scalar_t sample() {
+  sampler_t sampler;
+  C10_DEVICE BaseSampler(const sampler_t& sampler): sampler(sampler) {}
+  C10_DEVICE scalar_t sample() {
     return sampler();
   }
 };
@@ -69,8 +66,8 @@ struct BaseSampler {
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
-template<typename scalar_t, typename accscalar_t>
-deviceforcuda scalar_t sample_gamma(scalar_t alpha, BaseSampler<accscalar_t>& standard_uniform, BaseSampler<accscalar_t>& standard_normal) {
+template<typename scalar_t, typename accscalar_t, typename uniform_sampler_t, typename normal_sampler_t>
+C10_DEVICE scalar_t sample_gamma(scalar_t alpha, BaseSampler<accscalar_t, uniform_sampler_t>& standard_uniform, BaseSampler<accscalar_t, normal_sampler_t>& standard_normal) {
   accscalar_t scale = 1.0f;
 
   // Boost alpha for higher acceptance probability.
@@ -101,7 +98,7 @@ deviceforcuda scalar_t sample_gamma(scalar_t alpha, BaseSampler<accscalar_t>& st
 }
 
 template <typename scalar_t>
-deviceforcuda static inline scalar_t polevl(const scalar_t x,  const scalar_t A[], size_t len) {
+C10_DEVICE static inline scalar_t polevl(const scalar_t x,  const scalar_t A[], size_t len) {
   scalar_t result = 0;
   for (size_t i = 0; i <= len; i++) {
     result = result * x + A[i];
@@ -118,7 +115,7 @@ deviceforcuda static inline scalar_t polevl(const scalar_t x,  const scalar_t A[
  * Copyright 1984, 1987, 1992, 2000 by Stephen L. Moshier
  */
 template<typename scalar_t, typename accscalar_t>
-deviceforcuda static inline scalar_t digamma_one(scalar_t x) {
+C10_DEVICE static inline scalar_t digamma_one(scalar_t x) {
   constexpr accscalar_t PSI_10 = 2.25175258906672110764;
   if (x == 0) {
     return INFINITY;
@@ -167,7 +164,7 @@ deviceforcuda static inline scalar_t digamma_one(scalar_t x) {
 // Computes the reparameterized gradient -(d/dalpha cdf(x;alpha)) / pdf(x;alpha)
 // for random number x drawn from a standard Gamma distribution Gamma(alpha).
 template <typename scalar_t, typename accscalar_t>
-deviceforcuda scalar_t standard_gamma_grad_one(scalar_t alpha_, scalar_t x_) {
+C10_DEVICE scalar_t standard_gamma_grad_one(scalar_t alpha_, scalar_t x_) {
   // Use a Taylor series expansion for small x.
   accscalar_t x = static_cast<accscalar_t>(x_);
   accscalar_t alpha = static_cast<accscalar_t>(alpha_);

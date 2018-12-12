@@ -4,12 +4,5 @@
   "disabled_modules": [
   ],
   "disabled_functions": [
-    {
-      "path": "aten/src/ATen/native/cuda/Distributions.cu",
-      "functions": [
-        "gamma_cuda_kernel",
-        "gamma_grad_cuda_kernel"
-      ]
-    }
   ]
 }
