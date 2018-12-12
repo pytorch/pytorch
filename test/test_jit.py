@@ -9612,6 +9612,31 @@ class TestFuser(JitTestCase):
         ge = self.checkTrace(scaleshift, inputs)
         self.assertExpectedGraph(ge.graph_for(*inputs))
 
+    @staticmethod
+    def _test_cast_Float(self, device):
+        def f(x, y):
+            z = x.float()
+            return z + y
+
+        inputs = [
+            torch.randn(4, 4, dtype=torch.double, device=device),
+            torch.randn(4, 4, dtype=torch.float, device=device),
+        ]
+
+        ge = self.checkScript(f, inputs)
+        self.assertAllFused(ge.graph_for(*inputs))
+
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @enable_cpu_fuser
+    def test_cast_Float(self):
+        return self._test_cast_Float(self, 'cpu')
+
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @unittest.skipIf(not RUN_CUDA, "No CUDA")
+    @skipIfRocm
+    def test_cast_Float_cuda(self):
+        return self._test_cast_Float(self, 'cuda')
+
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(not RUN_CUDA_HALF, "no half support")
