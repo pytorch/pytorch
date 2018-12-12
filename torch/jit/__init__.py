@@ -1379,22 +1379,7 @@ class _ConstSequential(_ConstModuleList):
 
 _builtin_table = None
 
-_modules_containing_builtins = (torch, torch.nn.functional, torch._C._nn)
-
-# These functions have been converted to weak script, so don't add them as
-# builtin aten ops. Instead, they will be compiled from the code in
-# torch.nn.functional when used.
-
-
-# TODO: delete _should_skip() and remove torch.nn.functional from builtins list
-# once everything in it has been converted to weak script
-def _should_skip(mod, name):
-    if mod is not torch.nn.functional:
-        return False
-    func = getattr(torch.nn.functional, name)
-    if func is None:
-        return False
-    return func in _compiled_weak_fns or func in _boolean_dispatched
+_modules_containing_builtins = (torch, torch._C._nn)
 
 
 def _unwrap_optional(x):
@@ -1412,7 +1397,7 @@ def _get_builtin_table():
     def register_all(mod):
         for name in dir(mod):
             v = getattr(mod, name)
-            if callable(v) and not _should_skip(mod, name):
+            if callable(v):
                 _builtin_table[id(v)] = "aten::" + name
     for mod in _modules_containing_builtins:
         register_all(mod)
@@ -1433,6 +1418,8 @@ def _get_builtin_table():
     _builtin_table[id(torch.nn.functional.upsample_nearest)] = "aten::__upsample_nearest"
     _builtin_table[id(torch.nn.functional.upsample)] = "aten::__upsample"
     _builtin_table[id(torch.nn.functional.upsample_bilinear)] = "aten::__upsample_bilinear"
+    _builtin_table[id(torch.nn.functional.fold)] = "aten::fold"
+    _builtin_table[id(torch.nn.functional.unfold)] = "aten::unfold"
 
     return _builtin_table
 
