@@ -16,8 +16,8 @@ MODULE_HEAD = """
 #include <c10/cuda/CUDAGuard.h>
 using SpecializedDeviceGuard = c10::cuda::CUDAGuard;
 #elif defined(USE_ROCM)
-#include <c10/hip/HIPGuard.h>
-using SpecializedDeviceGuard = c10::hip::HIPGuard;
+#include <ATen/cuda/detail/CUDAHIPCompat.h>
+using SpecializedDeviceGuard = c10::cuda::HIPGuardMasqueradingAsCUDA;
 #endif
 """
 REGISTER_METHOD_TEMPLATE = Template('  {"$name", (PyCFunction)$name, METH_STATIC | METH_VARARGS, NULL},\n')
