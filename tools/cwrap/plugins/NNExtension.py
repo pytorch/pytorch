@@ -16,7 +16,7 @@ MODULE_HEAD = """
 #include <c10/cuda/CUDAGuard.h>
 using SpecializedDeviceGuard = c10::cuda::CUDAGuard;
 #elif defined(USE_ROCM)
-#include <ATen/cuda/detail/CUDAHIPCompat.h>
+#include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h>
 // I'm not sure why the build doesn't like c10::cuda namespace...
 using SpecializedDeviceGuard = at::cuda::HIPGuardMasqueradingAsCUDA;
 #endif

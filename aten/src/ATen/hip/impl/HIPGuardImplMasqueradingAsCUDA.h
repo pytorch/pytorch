@@ -1,20 +1,34 @@
 #pragma once
 
-#include <ATen/cuda/CUDAConfig.h>
+#include <ATen/hip/HIPConfig.h>
 
-// The includes of CUDAGuard.h
-#include <c10/cuda/impl/CUDAGuardImpl.h>
-#include <c10/cuda/CUDAMacros.h>
+// The includes of HIPGuard.h
+#include <c10/hip/impl/HIPGuardImpl.h>
+#include <c10/hip/HIPMacros.h>
 #include <c10/DeviceType.h>
 #include <c10/impl/InlineDeviceGuard.h>
 #include <c10/impl/InlineStreamGuard.h>
 
-#if AT_ROCM_ENABLED()
 #include <c10/hip/impl/HIPGuardImpl.h>
 
-// Use of c10::hip namespace here makes hipification easier
+// Use of c10::hip namespace here makes hipification easier, because
+// I don't have to also fix namespaces.  Sorry!
 namespace c10 { namespace hip {
 
+// HIPGuardImplMasqueradingAsCUDA is like a HIPGuardImpl, but
+// it reports its DeviceType as CUDA (e.g., type() returns CUDA,
+// getDevice() reports the current HIP device as a CUDA device.)
+// We can't directly use HIPGuardImpl, since it (piously) requires
+// the DeviceType to be HIP.
+//
+// This is necessary for PyTorch at the moment, which is implemented
+// by pretending that CUDA is actually HIP.  Eventually, we want
+// to make PyTorch treat HIP as a separate DeviceType, and then we
+// can delete this class.
+//
+// Also, note that the cpp file associated with this also *overwrites*
+// the entry in the DeviceGuardImpl registry for CUDA with this HIP
+// implementation.
 struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplInterface {
   static constexpr DeviceType static_type = DeviceType::CUDA;
   HIPGuardImplMasqueradingAsCUDA() {}
@@ -55,11 +69,11 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
   }
 };
 
+// All of the guards which have HIPGuardImpl burned in need to also have
+// variants using HIPGuardImplMasqueradingAsCUDA.
 using HIPGuardMasqueradingAsCUDA = c10::impl::InlineDeviceGuard<HIPGuardImplMasqueradingAsCUDA>;
 using OptionalHIPGuardMasqueradingAsCUDA = c10::impl::InlineOptionalDeviceGuard<HIPGuardImplMasqueradingAsCUDA>;
 using HIPStreamGuardMasqueradingAsCUDA = c10::impl::InlineStreamGuard<HIPGuardImplMasqueradingAsCUDA>;
 using OptionalHIPStreamGuardMasqueradingAsCUDA = c10::impl::InlineOptionalStreamGuard<HIPGuardImplMasqueradingAsCUDA>;
 
 }} // namespace c10::hip
-
-#endif

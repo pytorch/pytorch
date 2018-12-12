@@ -2227,8 +2227,9 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("cuda::OptionalCUDAStreamGuard", ("hip::OptionalHIPStreamGuardMasqueradingAsCUDA", API_PYTORCH)),
     ("OptionalCUDAStreamGuard", ("OptionalHIPStreamGuardMasqueradingAsCUDA", API_PYTORCH)),
 
-    # TODO: Undo this special-case
-    ("c10/cuda/CUDAGuard.h", ("ATen/cuda/detail/CUDAHIPCompat.h", API_PYTORCH)),
+    # TODO: Undo this special-case; see the header for motivation behind this
+    # hack.  It's VERY important this is only applied to PyTorch HIPify.
+    ("c10/cuda/CUDAGuard.h", ("ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h", API_PYTORCH)),
 ])
 
 CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict([
