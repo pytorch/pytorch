@@ -9,6 +9,7 @@ from sys import platform
 import torch
 import torch.cuda
 import torch.multiprocessing as mp
+import torch.multiprocessing.pool as mp_pool
 import torch.utils.hooks
 from torch.nn import Parameter
 from common_utils import (TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, TEST_WITH_ASAN,
@@ -568,7 +569,7 @@ class TestMultiprocessing(TestCase):
 
     def test_queue_noctx(self):
         # Pool should not crash when instantiated without a context
-        q = mp.pool.Pool()
+        q = mp_pool.Pool()
 
 
 if __name__ == '__main__':
