@@ -2586,7 +2586,7 @@ in the output tensors having 1 fewer dimension than :attr:`input`.
 Args:
     input (Tensor): the input tensor
     dim (int): the dimension to reduce
-    keepdim (bool): whether the output tensors have :attr:`dim` retained or not
+    keepdim (bool, optional): whether the output tensors have :attr:`dim` retained or not. Default: ``False``.
     out (tuple, optional): the result tuple of two output tensors (max, max_indices)
 
 Example::
