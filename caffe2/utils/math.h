@@ -317,7 +317,7 @@ CAFFE2_API void Transpose(
 // Decaf gemm provides a simpler interface to the gemm functions, with the
 // limitation that the data has to be contiguous in memory.
 template <typename T, class Context, class Engine = DefaultEngine>
-CAFFE2_API void Gemm(
+void Gemm(
     const CBLAS_TRANSPOSE trans_A,
     const CBLAS_TRANSPOSE trans_B,
     const int M,
@@ -334,7 +334,7 @@ CAFFE2_API void Gemm(
 // We also provide a gemm that has explicit lda, ldb and ldc specified.
 // In most cases you probably want to use the function above, though.
 template <typename T, class Context, class Engine = DefaultEngine>
-CAFFE2_API void GemmEx(
+void GemmEx(
     const CBLAS_TRANSPOSE trans_A,
     const CBLAS_TRANSPOSE trans_B,
     const int M,
@@ -352,7 +352,7 @@ CAFFE2_API void GemmEx(
 
 // GemmBatched provides a simple abstraction into library routines
 template <typename T, class Context, class Engine = DefaultEngine>
-CAFFE2_API void GemmBatched(
+void GemmBatched(
     const CBLAS_TRANSPOSE trans_A,
     const CBLAS_TRANSPOSE trans_B,
     const int batch_size,
@@ -368,7 +368,7 @@ CAFFE2_API void GemmBatched(
     TensorProto::DataType math_type = TensorProto_DataType_FLOAT);
 
 template <typename T, class Context, class Engine = DefaultEngine>
-CAFFE2_API void GemmStridedBatched(
+void GemmStridedBatched(
     const CBLAS_TRANSPOSE trans_A,
     const CBLAS_TRANSPOSE trans_B,
     const int batch_size,
@@ -391,7 +391,7 @@ CAFFE2_API void GemmStridedBatched(
 // CblasNoTrans: x is an N dim vector and y is an M dim vector.
 // CblasTrans:   x is an M dim vector and y is an N dim vector.
 template <typename T, class Context, class Engine = DefaultEngine>
-CAFFE2_API void Gemv(
+void Gemv(
     const CBLAS_TRANSPOSE trans_A,
     const int M,
     const int N,
