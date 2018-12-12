@@ -94,6 +94,8 @@ static std::string variableType(const std::shared_ptr<c10::Type> t) {
     return "int";
   } else if (t->kind() == TypeKind::FloatType) {
     return "float";
+  } else if (t->kind() == TypeKind::BoolType) {
+    return "bool";
   } else if (t->kind() == TypeKind::TensorType) {
     auto const tt = t->cast<TensorType>();
     return calcScalarTypeName(tt->scalarType());
@@ -103,7 +105,7 @@ static std::string variableType(const std::shared_ptr<c10::Type> t) {
 }
 
 static std::string typeCastedValueName(const std::shared_ptr<c10::Type> t, const at::ScalarType outtype, const std::string& vn) {
-  if (t->kind() == TypeKind::IntType) {
+  if (t->kind() == TypeKind::IntType || t->kind() == TypeKind::BoolType) {
     if (! isIntegralType(outtype)) {
       return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
     }
