@@ -1,15 +1,15 @@
 // Adapted from interp.cpp from Caffe util by Pauline Luc
 // Originally developed by George Papandreou
-#include "THCUNN.h"
-#include "THCTensor.hpp"
-#include "common.h"
-#include "linear_upsampling.h"
-#include "THCDeviceTensor.cuh"
-#include "THCDeviceTensorUtils.cuh"
-#include "THCDeviceUtils.cuh"
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
-#include "THCAtomics.cuh"
+#include <THCUNN/THCUNN.h>
+#include <THC/THCTensor.hpp>
+#include <THCUNN/common.h>
+#include <THCUNN/linear_upsampling.h>
+#include <THC/THCDeviceTensor.cuh>
+#include <THC/THCDeviceTensorUtils.cuh>
+#include <THC/THCDeviceUtils.cuh>
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCAtomics.cuh>
 
 template<typename Dtype, typename Acctype>
 __global__ void caffe_gpu_interp2_kernel(const int n,
@@ -94,5 +94,5 @@ __global__ void caffe_gpu_interp2_kernel_backward(const int n,
 }
 
 
-#include "generic/TemporalUpSamplingLinear.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/TemporalUpSamplingLinear.cu>
+#include <THC/THCGenerateFloatTypes.h>

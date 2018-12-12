@@ -1,11 +1,11 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/AccumulateType.h"
-#include "ATen/CPUApplyUtils.h"
-#include "ATen/Parallel.h"
-#include "ATen/Config.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/AccumulateType.h>
+#include <ATen/CPUApplyUtils.h>
+#include <ATen/Parallel.h>
+#include <ATen/Config.h>
 
-#include "ATen/detail/CUDAHooksInterface.h"
+#include <ATen/detail/CUDAHooksInterface.h>
 
 #include <vector>
 

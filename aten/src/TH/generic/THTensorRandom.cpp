@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THTensorRandom.cpp"
+#define TH_GENERIC_FILE "TH/generic/THTensorRandom.cpp"
 #else
 
 #include <cmath>
@@ -10,7 +10,7 @@
 
 #include <cpuinfo.h>
 
-#include "THGenerator.hpp"
+#include <TH/THGenerator.hpp>
 
 void THTensor_(random)(THTensor *self, THGenerator *_generator)
 {

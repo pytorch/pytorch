@@ -1,13 +1,13 @@
-#include "torch/csrc/autograd/python_hook.h"
+#include <torch/csrc/autograd/python_hook.h>
 
 #include <sstream>
 
-#include "THP.h"
-#include "torch/csrc/autograd/python_variable.h"
-#include "torch/csrc/utils/auto_gil.h"
-#include "torch/csrc/utils/object_ptr.h"
-#include "torch/csrc/utils/python_strings.h"
-#include "torch/csrc/Exceptions.h"
+#include <torch/csrc/THP.h>
+#include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/utils/auto_gil.h>
+#include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/Exceptions.h>
 
 using torch::autograd::variable_list;
 using torch::autograd::Variable;

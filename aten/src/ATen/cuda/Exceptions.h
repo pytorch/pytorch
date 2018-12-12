@@ -1,7 +1,7 @@
 #pragma once
 
-#include "c10/util/Exception.h"
-#include "c10/cuda/CUDAException.h"
+#include <c10/util/Exception.h>
+#include <c10/cuda/CUDAException.h>
 
 // See Note [CHECK macro]
 #define AT_CUDNN_CHECK(EXPR)                                                     \

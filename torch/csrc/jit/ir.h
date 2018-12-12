@@ -1,25 +1,25 @@
 #pragma once
 
-#include "torch/csrc/jit/attributes.h"
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/generic_if.h"
-#include "torch/csrc/jit/graph_node_list.h"
-#include "torch/csrc/jit/interned_strings.h"
-#include "torch/csrc/jit/resource_guard.h"
-#include "torch/csrc/jit/scope.h"
-#include "torch/csrc/jit/source_location.h"
-#include "torch/csrc/jit/source_range.h"
-#include "torch/csrc/jit/constants.h"
-#include "torch/csrc/jit/function_schema.h"
-#include "torch/csrc/jit/ivalue.h"
-#include "torch/csrc/jit/type.h"
-#include "torch/csrc/jit/named_value.h"
+#include <torch/csrc/jit/attributes.h>
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/generic_if.h>
+#include <torch/csrc/jit/graph_node_list.h>
+#include <torch/csrc/jit/interned_strings.h>
+#include <torch/csrc/jit/resource_guard.h>
+#include <torch/csrc/jit/scope.h>
+#include <torch/csrc/jit/source_location.h>
+#include <torch/csrc/jit/source_range.h>
+#include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/function_schema.h>
+#include <torch/csrc/jit/ivalue.h>
+#include <torch/csrc/jit/type.h>
+#include <torch/csrc/jit/named_value.h>
 
-#include "torch/csrc/utils/disallow_copy.h"
-#include "torch/csrc/utils/functional.h"
-#include "torch/csrc/utils/object_ptr.h"
-#include "torch/csrc/utils/python_stub.h"
-#include "torch/csrc/WindowsTorchApiMacro.h"
+#include <torch/csrc/utils/disallow_copy.h>
+#include <torch/csrc/utils/functional.h>
+#include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/python_stub.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <ATen/ATen.h>
 #include <c10/util/ArrayRef.h>
@@ -867,13 +867,7 @@ public:
   TORCH_API Node* createList(const TypePtr& elem_type, at::ArrayRef<Value*> values);
   TORCH_API Node* createListUnpack(Value *v, size_t size);
   TORCH_API Node* createNumToTensor(Value* value);
-  TORCH_API Node* createBoolToTensor(Value* value);
-  TORCH_API Node* createTensorToNum(const TypePtr& type, Value* value);
   TORCH_API Node* createImplicitTensorToNum(const TypePtr& type, Value* value);
-  TORCH_API Node* createTensorToBool(Value* value);
-  TORCH_API Node* createIntToFloat(Value* value);
-  TORCH_API Node* createFloatToInt(Value* value);
-  TORCH_API Node* createStringToFloat(Value* value);
   Node* createPythonOp(
       THPObjectPtr&& pyobj,
       const std::string& cconv,
@@ -895,7 +889,7 @@ public:
   // argument matching rules, and checks that the op matches a known schema
   // if this node successfully completes, it guarentees the node is a correctly-formed invocation
   // of opname
-  Value* insert(
+  TORCH_API Value* insert(
       Symbol opname,
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs = {},

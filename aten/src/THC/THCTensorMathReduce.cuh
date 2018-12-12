@@ -1,13 +1,13 @@
 #ifndef THC_TENSORMATH_REDUCE_CUH
 #define THC_TENSORMATH_REDUCE_CUH
 
-#include "THCTensorMath.h"
-#include "THCGeneral.h"
-#include "THCNumerics.cuh"
-#include "THCReduce.cuh"
-#include "THCReduceAll.cuh"
-#include "THCTensorCopy.hpp"
-#include "THCThrustAllocator.cuh"
+#include <THC/THCTensorMath.h>
+#include <THC/THCGeneral.h>
+#include <THC/THCNumerics.cuh>
+#include <THC/THCReduce.cuh>
+#include <THC/THCReduceAll.cuh>
+#include <THC/THCTensorCopy.hpp>
+#include <THC/THCThrustAllocator.cuh>
 #include <thrust/functional.h>
 #include <thrust/device_ptr.h>
 #include <thrust/transform_reduce.h>
@@ -170,11 +170,7 @@ struct ReduceMin {
 template <typename T>
 struct ReduceMax {
   inline __device__ T operator()(T a, T b) const {
-#if defined(__HIP_PLATFORM_HCC__)
-    return (static_cast<int>(THCNumerics<T>::sub(a, b)) > 0 || THCNumerics<T>::isnan(a)) ? a : b;
-#else
     return (THCNumerics<T>::gt(a, b) || THCNumerics<T>::isnan(a)) ? a : b;
-#endif
   }
 };
 
@@ -211,7 +207,6 @@ __global__ void THCTensor_kernel_renorm(T *data,
   buffer[tx] = scalar_cast<AccT>(0);
   AccT norm;
 
-#if !defined(__HIP_DEVICE_COMPILE__)
   if (THCNumerics<AccT>::eq(value, scalar_cast<AccT, float>(INFINITY))) {
     // get norm of axis
     for (ptrdiff_t i = tx; i < size; i += step) {
@@ -258,7 +253,6 @@ __global__ void THCTensor_kernel_renorm(T *data,
       row[i] = scalar_cast<T>(THCNumerics<AccT>::mul(val, norm));
     }
   }
-#endif
 }
 
 template <typename T>

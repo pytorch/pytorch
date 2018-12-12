@@ -3,10 +3,10 @@
 #include <memory>
 #include <string>
 
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/script/error_report.h"
-#include "torch/csrc/jit/script/tree_views.h"
-#include "torch/csrc/jit/script/module.h"
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/script/error_report.h>
+#include <torch/csrc/jit/script/tree_views.h>
+#include <torch/csrc/jit/script/module.h>
 
 namespace torch {
 namespace jit {
@@ -144,7 +144,7 @@ struct TORCH_API BuiltinModule : public SugaredValue {
   BuiltinModule(std::string name,
                 c10::optional<int64_t> version = at::nullopt)
     : name(std::move(name))
-    , version(version) {}
+    , version(std::move(version)) {}
 
   std::string kind() const override {
     return "builtin module";

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/constants.h"
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/constants.h>
 
 namespace torch { namespace jit {
 

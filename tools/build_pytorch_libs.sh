@@ -8,7 +8,16 @@
 #
 # TODO: Replace this with the root-level CMakeLists.txt
 
-set -ex
+if [[ $VERBOSE_SCRIPT == '1' ]]; then
+  set -ex
+  report() {
+    echo "$@"
+  }
+else
+  report() {
+    :
+  }
+fi
 
 SYNC_COMMAND="cp"
 if [ -x "$(command -v rsync)" ]; then
@@ -163,7 +172,7 @@ elif [[ -n "$REL_WITH_DEB_INFO" && $REL_WITH_DEB_INFO -ne 0 ]]; then
   BUILD_TYPE="RelWithDebInfo"
 fi
 
-echo "Building in $BUILD_TYPE mode"
+report "Building in $BUILD_TYPE mode"
 
 function path_remove {
   # Delete path by parts so we can never accidentally remove sub paths
@@ -228,6 +237,7 @@ function build_caffe2() {
 		       -DUSE_LMDB=$USE_LMDB \
 		       -DUSE_OPENCV=$USE_OPENCV \
 		       -DUSE_QNNPACK=$USE_QNNPACK \
+		       -DUSE_TENSORRT=$USE_TENSORRT \
 		       -DUSE_FFMPEG=$USE_FFMPEG \
 		       -DUSE_GLOG=OFF \
 		       -DUSE_GFLAGS=OFF \
@@ -270,8 +280,12 @@ function build_caffe2() {
 
   # Install Python proto files
   if [[ "$BUILD_PYTHON" == 'ON' ]]; then
-      echo "Copying Caffe2 proto files from $(pwd)/caffe2/proto to  $(cd .. && pwd)/caffe2/proto"
-      echo "All the files in caffe2/proto are $(find caffe2/proto)"
+
+      if [[ $VERBOSE_SCRIPT == '1' ]]; then
+        report "Copying Caffe2 proto files from $(pwd)/caffe2/proto to  $(cd .. && pwd)/caffe2/proto"
+        report "All the files in caffe2/proto are $(find caffe2/proto)"
+      fi
+
       for proto_file in $(pwd)/caffe2/proto/*.py; do
           cp $proto_file "$(pwd)/../caffe2/proto/"
       done
@@ -281,10 +295,10 @@ function build_caffe2() {
   # Fix rpaths of shared libraries
   if [[ $(uname) == 'Darwin' ]]; then
       # root/torch/lib/tmp_install/lib
-      echo "Updating all install_names in $INSTALL_DIR/lib"
+      report "Updating all install_names in $INSTALL_DIR/lib"
       pushd "$INSTALL_DIR/lib"
       for lib in *.dylib; do
-          echo "Updating install_name for $(pwd)/$lib"
+          report "Updating install_name for $(pwd)/$lib"
           install_name_tool -id @rpath/$lib $lib
       done
       popd
@@ -305,28 +319,46 @@ for arg in "$@"; do
     fi
 done
 
-pushd $TORCH_LIB_DIR
+pushd $TORCH_LIB_DIR > /dev/null
 
 # If all the builds succeed we copy the libraries, headers,
 # binaries to torch/lib
-echo "tools/build_pytorch_libs.sh succeeded at $(date)"
-echo "removing $INSTALL_DIR/lib/cmake and $INSTALL_DIR/lib/python"
+report "tools/build_pytorch_libs.sh succeeded at $(date)"
+report "removing $INSTALL_DIR/lib/cmake and $INSTALL_DIR/lib/python"
 rm -rf "$INSTALL_DIR/lib/cmake"
 rm -rf "$INSTALL_DIR/lib/python"
 
-echo "Copying $INSTALL_DIR/lib to $(pwd)"
+report "Copying $INSTALL_DIR/lib to $(pwd)"
 $SYNC_COMMAND -r "$INSTALL_DIR/lib"/* .
 if [ -d "$INSTALL_DIR/lib64/" ]; then
     $SYNC_COMMAND -r "$INSTALL_DIR/lib64"/* .
 fi
-echo "Copying $(cd ../.. && pwd)/aten/src/generic/THNN.h to $(pwd)"
+report "Copying $(cd ../.. && pwd)/aten/src/generic/THNN.h to $(pwd)"
 $SYNC_COMMAND ../../aten/src/THNN/generic/THNN.h .
 $SYNC_COMMAND ../../aten/src/THCUNN/generic/THCUNN.h .
 
-echo "Copying $INSTALL_DIR/include to $(pwd)"
+report "Copying $INSTALL_DIR/include to $(pwd)"
 $SYNC_COMMAND -r "$INSTALL_DIR/include" .
 if [ -d "$INSTALL_DIR/bin/" ]; then
     $SYNC_COMMAND -r "$INSTALL_DIR/bin/"/* .
 fi
 
-popd
+# Copy the test files to pytorch/caffe2 manually
+# They were built in pytorch/torch/lib/tmp_install/test
+# Why do we do this? So, setup.py has this section called 'package_data' which
+# you need to specify to include non-default files (usually .py files).
+# package_data takes a map from 'python package' to 'globs of files to
+# include'. By 'python package', it means a folder with an __init__.py file
+# that's not excluded in the find_packages call earlier in setup.py. So to
+# include our cpp_test into the site-packages folder in
+# site-packages/caffe2/cpp_test, we have to copy the cpp_test folder into the
+# root caffe2 folder and then tell setup.py to include them. Having another
+# folder like site-packages/caffe2_cpp_test would also be possible by adding a
+# caffe2_cpp_test folder to pytorch with an __init__.py in it.
+if [[ "$INSTALL_TEST" == "ON" ]]; then
+    echo "Copying $INSTALL_DIR/test to $BASE_DIR/caffe2/cpp_test"
+    mkdir -p "$BASE_DIR/caffe2/cpp_test/"
+    $SYNC_COMMAND -r "$INSTALL_DIR/test/"/* "$BASE_DIR/caffe2/cpp_test/"
+fi
+
+popd > /dev/null
