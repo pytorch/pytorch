@@ -49,13 +49,16 @@ class CopyIDEEPToCPUOp final : public IDEEPOperator {
     if (BlobIsTensorType(input_blob, CPU)) {
       VLOG(2) << "Directing sharing of TensorCPU";
       const auto& X = OperatorBase::Input<Tensor>(0, CPU);
-      auto* Y = OperatorBase::Output<Tensor>(0, CPU);
-      Y->CopyFrom(X);
+      OutputTensorCopyFrom(0, at::device(CPU), X);
     } else {
       const auto& X = OperatorBase::Input<itensor>(0);
-      auto* Y = OperatorBase::Output<Tensor>(0, CPU);
-      Y->Resize(X.get_dims());
       if (X.get_data_type() == itensor::data_type::f32) {
+        std::vector<int64_t> dims;
+        for (int i = 0; i < X.get_dims().size(); ++i) {
+          dims.push_back(X.get_dims()[i]);
+        }
+        auto* Y =
+            OperatorBase::OutputTensor(0, dims, at::dtype<float>().device(CPU));
         X.reorder_to(Y->template mutable_data<float>());
       } else {
         CAFFE_THROW("Unsupported ideep type: ", X.get_data_type());

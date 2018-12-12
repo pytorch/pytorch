@@ -56,12 +56,19 @@ Stack deepCopy(const Stack& stack) {
 }
 
 bool deepEquals(const IValue& lhs, const IValue& rhs) {
-  // only check tensors for now
-  if (!lhs.isTensor() || !rhs.isTensor()) {
+  if (lhs.isInt() && rhs.isInt()) {
+    return lhs.toInt() == rhs.toInt();
+  } else if (lhs.isDouble() && rhs.isDouble()) {
+    return lhs.toDouble() == rhs.toDouble();
+  } else if (lhs.isNone() && rhs.isNone()) {
     return true;
+  } else if (lhs.isIntList() && rhs.isIntList()) {
+    return lhs.toIntList()->elements() == rhs.toIntList()->elements();
+  } else if (lhs.isTensor() && rhs.isTensor()) {
+    return lhs.toTensor().equal(rhs.toTensor());
   }
 
-  return lhs.toTensor().equal(rhs.toTensor());
+  throw std::runtime_error("Deep equals not implemented for type");
 }
 
 struct AliasAndIValue {
@@ -70,8 +77,8 @@ struct AliasAndIValue {
       const IValue& iValue)
       : aliasInfo(aliasInfo), iValue(iValue) {}
 
-  const c10::optional<at::AliasInfo>& aliasInfo;
-  const IValue& iValue;
+  const c10::optional<at::AliasInfo> aliasInfo;
+  const IValue iValue;
 };
 
 // No inputs should alias each other
@@ -161,7 +168,7 @@ c10::optional<IValue> toIValueProp(const Value* v) {
     }
   }
 
-  if (v->node()->kind() == prim::StringToFloat) {
+  if (v->node()->kind() == prim::Float) {
     auto op = getOperation(v->node());
     if (auto input = toIValue(v->node()->input())) {
       auto op = getOperation(v->node());

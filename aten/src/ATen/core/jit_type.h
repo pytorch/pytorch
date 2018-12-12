@@ -868,7 +868,6 @@ inline TypePtr unshapedType(const TypePtr& type) {
 }
 
 inline TypePtr CompleteTensorType::fromNumberType(TypePtr typ) {
-  AT_ASSERT(typ->isSubtypeOf(NumberType::get()));
   if (typ->isSubtypeOf(IntType::get())) {
     return CompleteTensorType::create(at::kLong, at::kCPU, {});
   } else if (typ->isSubtypeOf(FloatType::get())) {
@@ -902,7 +901,6 @@ TypePtr getTypePtr() {
       " could not be converted to any of the known types { ",
       C10_FORALL_TYPES(TYPE_STR) "}");
 #undef TYPE_STR
-  return nullptr;
 }
 
 template<> inline TypePtr getTypePtr<at::Tensor>() { return DynamicType::get(); }
