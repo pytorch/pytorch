@@ -460,6 +460,25 @@ struct Module {
 
   void save(const std::string& filename);
 
+  std::shared_ptr<Module> copy() const {
+    auto retval = std::make_shared<Module>();
+    std::unordered_map<at::Tensor*, at::Tensor*> parameter_remap;
+    for (auto &kv : parameters) {
+      retval->register_parameter(kv.key(), *kv.value().slot(), kv.value().is_buffer);
+      parameter_remap[kv.value().slot()] = retval->parameter_slot(kv.key());
+    }
+    for (auto &kv : modules) {
+      NamedModule nm;
+      nm.name = kv.key();
+      nm.module = kv.value().module->copy();
+      retval->modules[kv.key()] = nm;
+    }
+    for (auto &kv : methods) {
+      retval->create_method(kv.key(), kv.value()->graph()->copy(), {});
+    }
+    return retval;
+  }
+
  private:
   void to_impl(
       c10::optional<at::Device> device,

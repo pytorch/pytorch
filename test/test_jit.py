@@ -7126,6 +7126,30 @@ a")
         # Note: neg op from the traced function should be properly inlined
         self.assertExpected(canonical(tm.graph))
 
+    def test_trace_hierarchy(self):
+        # Test that we preserve the module hierarchy for a ScriptModule
+        # submodule during tracing
+
+        class SomeScriptMod(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def foo(self):
+                return torch.zeros(3, 4)
+
+            @torch.jit.script_method
+            def bar(self):
+                return torch.zeros(4, 3)
+
+        class TraceMe(torch.nn.Module):
+            def __init__(self):
+                super(TraceMe, self).__init__()
+                self.ssm = SomeScriptMod()
+
+            def forward(self, x):
+                return self.ssm.bar() + x
+
+        traced = torch.jit.trace(TraceMe(), (torch.rand(4, 3, dtype=torch.float),))
+        assert(traced.ssm._has_method('foo'))
+
     def test_call_traced_module_from_traced_module(self):
         class TracedModule1(torch.nn.Module):
             def __init__(self):
@@ -7171,11 +7195,11 @@ a")
         class ScriptMod(torch.jit.ScriptModule):
             def __init__(self):
                 super(ScriptMod, self).__init__()
-                self.param = torch.nn.Parameter(torch.rand(5, 7))
+                self.param_foo = torch.nn.Parameter(torch.rand(5, 7))
 
             @torch.jit.script_method
             def forward(self, x):
-                return torch.mm(x, self.param)
+                return torch.mm(x, self.param_foo)
 
         class TracedModule(torch.nn.Module):
             def __init__(self):

@@ -1304,7 +1304,14 @@ class TracedModule(ScriptModule):
             raise ValueError("Modules that have hooks assigned can't be compiled")
 
         for name, submodule in orig._modules.items():
-            self._modules[name] = TracedModule(submodule, id_set, optimize=optimize)
+            if isinstance(submodule, ScriptModule) and not isinstance(submodule, TracedModule):
+                self._modules[name] = submodule.copy()
+                p = self._modules[name]._get_parameters()
+                for i in range(len(p)):
+                    self._parameters[p[i][0]] = p[i][1]
+                    check_unique(p[i][1])
+            else:
+                self._modules[name] = TracedModule(submodule, id_set, optimize=optimize)
 
         self._freeze()
 
