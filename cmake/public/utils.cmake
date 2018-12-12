@@ -124,7 +124,7 @@ function(caffe2_hip_binary_target target_name_or_src)
   caffe2_binary_target(${target_name_or_src})
 
   target_compile_options(${__target} PRIVATE ${HIP_CXX_FLAGS})
-  target_include_directories(${__target} PRIVATE ${Caffe2_HIP_INCLUDES})
+  target_include_directories(${__target} PRIVATE ${Caffe2_HIP_INCLUDE})
 endfunction()
 
 ##############################################################################

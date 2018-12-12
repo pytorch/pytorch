@@ -38,6 +38,10 @@ parser.add_argument(
     help='output a list of dependencies into the given file and exit')
 parser.add_argument(
     '-d', '--install_dir', help='output directory', default='ATen')
+parser.add_argument(
+    '--rocm',
+    action='store_true',
+    help='reinterpret CUDA as ROCm/HIP and adjust filepaths accordingly')
 options = parser.parse_args()
 gen_to_source = os.environ.get('GEN_TO_SOURCE')  # update source directly as part of gen
 if not gen_to_source:
@@ -154,7 +158,7 @@ generators = {
     'CUDAGenerator.h': {
         'name': 'CUDA',
         'th_generator': '',
-        'header': 'THC/THC.h'
+        'header': 'THC/THC.h' if not options.rocm else 'THH/THH.h'
     },
 }
 
@@ -259,17 +263,30 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     top_env['type_ids'].append(tag + ',')
 
     if backend == 'CUDA':
-        env['th_headers'] = [
-            '#include <THC/THC.h>',
-            '#include <THC/THCTensor.hpp>',
-            '#include <THCUNN/THCUNN.h>',
-            '#undef THNN_',
-            '#undef THCIndexTensor_',
-        ]
-        env['extra_cuda_headers'] = ['#include <ATen/cuda/ATenCUDAGeneral.h>']
+        env['extra_cuda_headers'] = []
         env['extra_cuda_headers'].append('#include <ATen/DeviceGuard.h>')
-        env['extra_cuda_headers'].append('#include <ATen/cuda/CUDADevice.h>')
-        env['extra_cuda_headers'].append('#include <ATen/cuda/CUDATypeDefault.h>')
+        if options.rocm:
+            env['th_headers'] = [
+                '#include <THH/THH.h>',
+                '#include <THH/THHTensor.hpp>',
+                '#include <THHUNN/THHUNN.h>',
+                '#undef THNN_',
+                '#undef THCIndexTensor_',
+            ]
+            env['extra_cuda_headers'].append('#include <ATen/hip/ATenHIPGeneral.h>')
+            env['extra_cuda_headers'].append('#include <ATen/hip/HIPDevice.h>')
+            env['extra_cuda_headers'].append('#include <ATen/hip/HIPTypeDefault.h>')
+        else:
+            env['th_headers'] = [
+                '#include <THC/THC.h>',
+                '#include <THC/THCTensor.hpp>',
+                '#include <THCUNN/THCUNN.h>',
+                '#undef THNN_',
+                '#undef THCIndexTensor_',
+            ]
+            env['extra_cuda_headers'].append('#include <ATen/cuda/ATenCUDAGeneral.h>')
+            env['extra_cuda_headers'].append('#include <ATen/cuda/CUDADevice.h>')
+            env['extra_cuda_headers'].append('#include <ATen/cuda/CUDATypeDefault.h>')
         sname = '' if scalar_name == "Float" else scalar_name
         env['THType'] = 'Cuda{}'.format(sname)
         env['THStorage'] = 'THCuda{}Storage'.format(sname)
