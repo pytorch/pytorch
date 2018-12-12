@@ -1722,27 +1722,6 @@ class TestJit(JitTestCase):
         test_x = torch.rand(6, 3)
         self.assertEqual(foo(test_x), traced(test_x))
 
-    def test_export_expand_aten_fallback(self):
-        class ExpandTest(torch.jit.ScriptModule):
-            @torch.jit.script_method
-            def forward(self, x):
-                y = x
-                for i in range(5):
-                    y = x.expand([3, 4, i])
-                return y
-
-        mod = ExpandTest()
-        example_outs = mod(torch.rand(3, 4, 1))
-        f = io.BytesIO()
-        with self.assertRaisesRegex(RuntimeError, 'Could not export a broadcasted operation'):
-            torch.onnx.export_to_pretty_string(mod, (torch.rand(3, 4, 1),), f, verbose=False,
-                                               example_outputs=example_outs)
-
-        self.assertExpected(
-            torch.onnx.export_to_pretty_string(mod, (torch.rand(3, 4, 1),), f, verbose=False,
-                                               example_outputs=example_outs,
-                                               operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK))
-
     def test_export_dropout(self):
         test = torch.nn.Dropout()
         test.eval()
