@@ -16,6 +16,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(C10_USE_GFLAGS ${USE_GFLAGS}) # used in cmake_macros.h.in
 set(C10_USE_GLOG ${USE_GLOG}) # used in cmake_macros.h.in
 set(C10_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS}) # used in cmake_macros.h.in
+set(C10_USE_NUMA ${USE_NUMA})
+set(C10_DISABLE_NUMA ${CAFFE2_DISABLE_NUMA}) # used in cmake_macros.h.in
 configure_file(
     ${CMAKE_CURRENT_LIST_DIR}/macros/cmake_macros.h.in
     ${CMAKE_BINARY_DIR}/c10/macros/cmake_macros.h)
@@ -48,6 +50,20 @@ endif()
 
 if (${USE_GLOG})
     target_link_libraries(c10 PUBLIC glog::glog)
+endif()
+
+if (USE_NUMA)
+  if (NOT CAFFE2_DISABLE_NUMA)
+    message(STATUS "NUMA paths:")
+    message(STATUS ${Numa_INCLUDE_DIR})
+    message(STATUS ${Numa_LIBRARIES})
+    include_directories(SYSTEM ${Numa_INCLUDE_DIR})
+    target_link_libraries(c10 PRIVATE ${Numa_LIBRARIES})
+  else()
+    message(STATUS "NUMA is disabled")
+  endif()
+else()
+  message(STATUS "don't use NUMA")
 endif()
 
 if (ANDROID)
