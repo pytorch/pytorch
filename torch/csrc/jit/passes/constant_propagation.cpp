@@ -18,6 +18,7 @@ std::unordered_set<Symbol> skip_list = {
   prim::Loop, //TODO: handle Loop
   prim::Print,
   prim::RaiseException,
+  aten::warn,
   prim::PythonOp, //may have side effects
   prim::Constant,
   prim::Undefined,
