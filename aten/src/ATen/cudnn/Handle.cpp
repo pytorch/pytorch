@@ -30,7 +30,8 @@ struct Handle {
   }
   Handle(const Handle& rhs) = delete;
   Handle(Handle&& rhs) { transfer(rhs); }
-  // operator= takes argument by value
+  // operator= takes argument by value, following
+  // https://stackoverflow.com/questions/3279543/what-is-the-copy-and-swap-idiom
   Handle& operator=(Handle rhs) { transfer(rhs); return *this; }
   ~Handle() {
     if(handle) {
@@ -98,7 +99,7 @@ class PoolWindow
     else
     {
       // In local testing, I do observe that emplace_back sometimes routes through temporaries
-      // that incur copy-constructor and destructor calls.  See comments in Handle above.
+      // that incur move-constructor and destructor calls.  See comments in Handle above.
       created_handles[device].emplace_back(); // no arguments to Handle constructor
       my_handles[device] = created_handles[device].back().handle;
     }
