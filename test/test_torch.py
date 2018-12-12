@@ -3764,6 +3764,92 @@ class _TestTorchMixin(object):
         torch.tril(x, out=res2)
         self.assertEqual(res1, res2, 0)
 
+    def _compare_trilu_indices(self, row, col, offset=0, dtype=torch.long):
+        if row == 0 or col == 0:
+            # have to handle this separately as tril and triu does not take
+            # empty matrix as input
+            self.assertEqual(
+                torch.empty(0, 2, dtype=dtype).transpose(0, 1),
+                torch.tril_indices(row, col, offset, dtype=dtype))
+
+            self.assertEqual(
+                torch.empty(0, 2, dtype=dtype).transpose(0, 1),
+                torch.triu_indices(row, col, offset, dtype=dtype))
+
+        else:
+            self.assertEqual(
+                torch.ones(row, col, dtype=dtype)
+                     .tril(offset).nonzero().transpose(0, 1),
+                torch.tril_indices(row, col, offset, dtype=dtype))
+
+            self.assertEqual(
+                torch.ones(row, col, dtype=dtype)
+                     .triu(offset).nonzero().transpose(0, 1),
+                torch.triu_indices(row, col, offset, dtype=dtype))
+
+    def test_tril_and_triu_indices(self):
+        self._compare_trilu_indices(1, 1)
+        self._compare_trilu_indices(3, 3)
+        self._compare_trilu_indices(3, 3, offset=1)
+        self._compare_trilu_indices(3, 3, offset=2)
+        self._compare_trilu_indices(3, 3, offset=200)
+        self._compare_trilu_indices(3, 3, offset=-1)
+        self._compare_trilu_indices(3, 3, offset=-2)
+        self._compare_trilu_indices(3, 3, offset=-200)
+        self._compare_trilu_indices(0, 3, offset=0)
+        self._compare_trilu_indices(0, 3, offset=1)
+        self._compare_trilu_indices(0, 3, offset=-1)
+        self._compare_trilu_indices(3, 0, offset=0)
+        self._compare_trilu_indices(3, 0, offset=1)
+        self._compare_trilu_indices(3, 0, offset=-1)
+        self._compare_trilu_indices(0, 0, offset=0)
+        self._compare_trilu_indices(0, 0, offset=1)
+        self._compare_trilu_indices(0, 0, offset=-1)
+        self._compare_trilu_indices(3, 6, offset=0)
+        self._compare_trilu_indices(3, 6, offset=1)
+        self._compare_trilu_indices(3, 6, offset=3)
+        self._compare_trilu_indices(3, 6, offset=9)
+        self._compare_trilu_indices(3, 6, offset=-1)
+        self._compare_trilu_indices(3, 6, offset=-3)
+        self._compare_trilu_indices(3, 6, offset=-9)
+        self._compare_trilu_indices(6, 3, offset=0)
+        self._compare_trilu_indices(6, 3, offset=1)
+        self._compare_trilu_indices(6, 3, offset=3)
+        self._compare_trilu_indices(6, 3, offset=9)
+        self._compare_trilu_indices(6, 3, offset=-1)
+        self._compare_trilu_indices(6, 3, offset=-3)
+        self._compare_trilu_indices(6, 3, offset=-9)
+        self._compare_trilu_indices(258, 253, offset=1, dtype=torch.float32)
+        self._compare_trilu_indices(257, 258, offset=1, dtype=torch.float64)
+        self._compare_trilu_indices(258, 258, offset=1, dtype=torch.short)
+        self._compare_trilu_indices(3, 513, offset=1, dtype=torch.long)
+        self._compare_trilu_indices(513, 3, offset=1, dtype=torch.int)
+        self._compare_trilu_indices(513, 0, offset=1, dtype=torch.double)
+
+        x = torch.ones(
+            3, 3, dtype=torch.long, device='cpu', layout=torch.strided)
+        l = x.tril(0).nonzero().transpose(0, 1)
+        u = x.triu(0).nonzero().transpose(0, 1)
+        self.assertEqual(l, torch.tril_indices(3, 3))
+        self.assertEqual(l, torch.tril_indices(3, 3, device='cpu'))
+        self.assertEqual(
+            l, torch.tril_indices(3, 3, device='cpu', layout=torch.strided))
+
+        self.assertEqual(u, torch.triu_indices(3, 3))
+        self.assertEqual(u, torch.triu_indices(3, 3, device='cpu'))
+        self.assertEqual(
+            u, torch.triu_indices(3, 3, device='cpu', layout=torch.strided))
+
+        self.assertRaises(
+            RuntimeError,
+            lambda: torch.triu_indices(
+                1, 1, device='cpu', layout=torch.sparse_coo))
+
+        self.assertRaises(
+            RuntimeError,
+            lambda: torch.tril_indices(
+                1, 1, device='cpu', layout=torch.sparse_coo))
+
     def test_triu(self):
         x = torch.rand(SIZE, SIZE)
         res1 = torch.triu(x)
