@@ -2053,6 +2053,21 @@ class TestJit(JitTestCase):
 
         self.assertExpectedGraph(fn.graph)
 
+    def test_no_erroneous_warnings(self):
+        import warnings
+
+        def fn(x):
+            if bool(x > 0):
+                warnings.warn('This should NOT be printed')
+                x += 1
+            return x
+
+        with warnings.catch_warnings(record=True) as warns:
+            fn_script = torch.jit.script(fn)
+            fn_script(torch.tensor(0))
+        warns = [str(w.message) for w in warns]
+        self.assertEqual(len(warns), 0)
+
 
 class TestBatched(TestCase):
     # generate random examples and create an batchtensor with them
