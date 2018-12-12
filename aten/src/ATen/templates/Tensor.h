@@ -7,7 +7,7 @@
 #include <ATen/core/SparseTensorRef.h>
 #include <c10/core/Storage.h>
 #include <ATen/core/TensorAccessor.h>
-#include <ATen/core/TensorImpl.h>
+#include <c10/core/TensorImpl.h>
 #include <ATen/core/UndefinedTensorImpl.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
