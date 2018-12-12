@@ -383,8 +383,7 @@ public:
   Tensor log2() const;
   Tensor & log2_();
   Tensor logdet() const;
-  Tensor log_softmax(int64_t dim, ScalarType dtype) const;
-  Tensor log_softmax(int64_t dim) const;
+  Tensor log_softmax(int64_t dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
   Tensor logsumexp(int64_t dim, bool keepdim=false) const;
   Tensor matmul(const Tensor & other) const;
   Tensor matrix_power(int64_t n) const;

@@ -640,7 +640,7 @@ class ShapePropagator {
             "aten::log1p(Tensor self) -> Tensor",
             "aten::log2(Tensor self) -> Tensor",
             "aten::log_sigmoid(Tensor self) -> Tensor",
-            "aten::log_softmax(Tensor self, int dim) -> Tensor",
+            "aten::log_softmax(Tensor self, int dim, *, ScalarType? dtype) -> Tensor",
             "aten::floor(Tensor self) -> Tensor",
             "aten::frac(Tensor self) -> Tensor",
             "aten::flip(Tensor self, int[] dims) -> Tensor",

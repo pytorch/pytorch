@@ -1034,11 +1034,7 @@
 
 - func: logspace_out(Tensor result, Scalar start, Scalar end, int64_t steps) -> Tensor
 
-# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
-- func: log_softmax(Tensor self, int64_t dim, ScalarType dtype) -> Tensor
-  variants: function, method
-
-- func: log_softmax(Tensor self, int64_t dim) -> Tensor
+- func: log_softmax(Tensor self, int64_t dim, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
 - func: _log_softmax(Tensor self, int64_t dim, bool half_to_float) -> Tensor

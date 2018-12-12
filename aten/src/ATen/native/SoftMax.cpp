@@ -14,6 +14,9 @@ template <typename scalar_t, bool LogSoftMax>
 void host_softmax(Tensor output, const Tensor& input, const int64_t dim) {
   int64_t outer_size = 1;
   int64_t dim_size = input.size(dim);
+  if (input.numel() == 0) {
+    return;
+  }
   int64_t inner_size = 1;
   for (int64_t i = 0; i < dim; ++i)
     outer_size *= input.size(i);
@@ -121,11 +124,7 @@ Tensor softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_
   auto input = input_.contiguous();
   Tensor output = at::native::empty_like(input);
   int64_t dim = maybe_wrap_dim(dim_, input.dim());
-
-  if (input.numel() == 0) {
-    return output;
-  }
- if (input.dim() == 0)
+  if (input.dim() == 0)
     input = input.view(1);
   AT_CHECK(
       dim >= 0 && dim < input.dim(),
@@ -133,7 +132,7 @@ Tensor softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_
   if (input.ndimension() > 0 && dim == input.ndimension() - 1) {
     softmax_lastdim_kernel(kCPU, output, input);
   } else {
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "softmax", [&] {
+    AT_DISPATCH_FLOATING_TYPES(input.type(), "softmax", [&] {
       host_softmax<scalar_t, false>(output, input, dim);
     });
   }
@@ -145,10 +144,6 @@ Tensor log_softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half
   auto input = input_.contiguous();
   Tensor output = at::native::empty_like(input);
   int64_t dim = maybe_wrap_dim(dim_, input.dim());
-
-  if (input.numel() == 0) {
-    return output;
-  }
   if (input.dim() == 0)
     input = input.view(1);
   AT_CHECK(
@@ -157,7 +152,7 @@ Tensor log_softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half
   if (input.ndimension() > 0 && dim == input.ndimension() - 1) {
     log_softmax_lastdim_kernel(kCPU, output, input);
   } else {
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "log_softmax", [&] {
+    AT_DISPATCH_FLOATING_TYPES(input.type(), "log_softmax", [&] {
       host_softmax<scalar_t, true>(output, input, dim);
     });
   }
@@ -176,9 +171,6 @@ Tensor softmax_backward_cpu(
   auto output = output_.contiguous();
   Tensor grad_input = at::native::empty_like(grad);
 
-  if (output.numel() == 0) {
-    return grad_input;
-  }
   if (grad.dim() == 0)
     grad = grad.view(1);
   if (output.dim() == 0)
@@ -189,7 +181,7 @@ Tensor softmax_backward_cpu(
   if (grad.ndimension() > 0 && dim == grad.ndimension() - 1) {
     softmax_backward_lastdim_kernel(kCPU, grad_input, grad, output);
   } else {
-    AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(), "softmax_backward", [&] {
+    AT_DISPATCH_FLOATING_TYPES(grad.type(), "softmax_backward", [&] {
       host_softmax_backward<scalar_t, false>(grad_input, grad, output, dim);
     });
   }
@@ -208,9 +200,6 @@ Tensor log_softmax_backward_cpu(
   auto output = output_.contiguous();
   Tensor grad_input = at::native::empty_like(grad);
 
-  if (output.numel() == 0) {
-    return grad_input;
-  }
   if (grad.dim() == 0)
     grad = grad.view(1);
   if (output.dim() == 0)
@@ -221,7 +210,7 @@ Tensor log_softmax_backward_cpu(
   if (grad.ndimension() > 0 && dim == grad.ndimension() - 1) {
     log_softmax_backward_lastdim_kernel(kCPU, grad_input, grad, output);
   } else {
-    AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(), "log_softmax_backward", [&] {
+    AT_DISPATCH_FLOATING_TYPES(grad.type(), "log_softmax_backward", [&] {
       host_softmax_backward<scalar_t, true>(grad_input, grad, output, dim);
     });
   }
@@ -229,23 +218,20 @@ Tensor log_softmax_backward_cpu(
 }
 
 Tensor softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarType> dtype) {
-  if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half &&
-      dtype == ScalarType::Float) {
-    return at::_softmax(input_, dim_, true);
+  if (input_.is_cuda() && input_.type().scalarType() == ScalarType::Half
+      && dtype && *dtype == ScalarType::Float) {
+      return at::_softmax(input_, dim_, true);
   } else {
       return at::_softmax(dtype ? input_.toType(*dtype) : input_, dim_, false);
   }
 }
 
-Tensor log_softmax(const Tensor& input_, const int64_t dim_) {
-  return at::_log_softmax(input_, dim_, false);
-}
-
-Tensor log_softmax(const Tensor& input_, const int64_t dim_, ScalarType dtype) {
-  if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
+Tensor log_softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarType> dtype) {
+  if (input_.is_cuda() && input_.type().scalarType() == ScalarType::Half
+      && dtype && *dtype == ScalarType::Float) {
       return at::_log_softmax(input_, dim_, true);
   } else {
-      return at::_log_softmax(input_.toType(dtype), dim_, false);
+      return at::_log_softmax(dtype ? input_.toType(*dtype) : input_, dim_, false);
   }
 }
 
