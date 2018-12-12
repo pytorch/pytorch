@@ -21,7 +21,7 @@ struct CAFFE2_API ${Type} : public TypeDefault {
       get_fn_table()[schema] = fn;
     }
 
-    static std::map<std::string, FnPtr> get_fn_table() {
+    static std::map<std::string, FnPtr>& get_fn_table() {
       static std::map<std::string, FnPtr> fn_table;
       return fn_table;
     }
