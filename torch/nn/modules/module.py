@@ -3,7 +3,6 @@ import functools
 import itertools
 
 import torch
-import torch._six
 from ..backends.thnn import backend as thnn_backend
 from ..parameter import Parameter
 import torch.utils.hooks as hooks
@@ -21,31 +20,6 @@ def _addindent(s_, numSpaces):
     return s
 
 
-class ModuleMeta(type):
-    '''
-    A metaclass for torch.nn.Module to enable isinstance(m, torch.nn.Module) to
-    return true when ``m`` is a C++ module bound into Python.
-    '''
-    def __instancecheck__(cls, instance):
-        # See https://docs.python.org/3/reference/
-        # datamodel.html#customizing-instance-and-subclass-checks
-        if isinstance(instance, torch.cpp.nn.Module):
-            return True
-        return super(ModuleMeta, cls).__instancecheck__(instance)
-
-
-def with_metaclass(metaclass, *bases):
-    '''
-    Creates a base class with a metaclass, but first creates an intermediary
-    metaclass derived from both the given ``metaclass``, and ``ModuleMeta``.
-    This is required anytime you subclass ``torch.nn.Module`` and give it a
-    different metaclass.
-    '''
-    class IntermediateMeta(ModuleMeta, metaclass):
-        pass
-    return torch._six.with_metaclass(IntermediateMeta, *bases)
-
-
 def _if_float_tensor(fn):
     '''
     Calls `fn` on a value `t` only if `t` is a float tensor, or not a tensor (in
@@ -58,7 +32,7 @@ def _if_float_tensor(fn):
     return apply
 
 
-class Module(torch._six.with_metaclass(ModuleMeta)):
+class Module(object):
     r"""Base class for all neural network modules.
 
     Your models should also subclass this class.
