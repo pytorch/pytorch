@@ -2267,6 +2267,8 @@ Example::
     tensor([-10.,  -5.,   0.,   5.,  10.])
     >>> torch.linspace(start=-10, end=10, steps=5)
     tensor([-10.,  -5.,   0.,   5.,  10.])
+    >>> torch.linspace(start=-10, end=10, steps=1)
+    tensor([-10.])
 """.format(**factory_common_args))
 
 add_docstr(torch.log,
@@ -2395,6 +2397,8 @@ Example::
     tensor([ 1.0000e-10,  1.0000e-05,  1.0000e+00,  1.0000e+05,  1.0000e+10])
     >>> torch.logspace(start=0.1, end=1.0, steps=5)
     tensor([  1.2589,   2.1135,   3.5481,   5.9566,  10.0000])
+    >>> torch.logspace(start=0.1, end=1.0, steps=1)
+    tensor([1.2589])
 """.format(**factory_common_args))
 
 add_docstr(torch.logsumexp,
@@ -2647,12 +2651,13 @@ Example::
 .. function:: mean(input, dim, keepdim=False, out=None) -> Tensor
 
 Returns the mean value of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim`.
+dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
+reduce over all of them.
 
 If :attr:`keepdim` is ``True``, the output tensor is of the same size
-as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+as :attr:`input` except in the dimension(s) :attr:`dim` where it is of size 1.
 Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in the
-output tensor having 1 fewer dimension.
+output tensor having 1 (or ``len(dim)``) fewer dimension(s).
 
 Args:
     input (Tensor): the input tensor
@@ -4487,13 +4492,13 @@ Example::
 .. function:: sum(input, dim, keepdim=False, dtype=None) -> Tensor
 
 Returns the sum of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim`. If :attr::`dim` is a list of dimensions,
+dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
 reduce over all of them.
 
 If :attr:`keepdim` is ``True``, the output tensor is of the same size
-as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
-Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in
-the output tensor having 1 fewer dimension than :attr:`input`.
+as :attr:`input` except in the dimension(s) :attr:`dim` where it is of size 1.
+Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in the
+output tensor having 1 (or ``len(dim)``) fewer dimension(s).
 
 Args:
     input (Tensor): the input tensor
@@ -4707,7 +4712,7 @@ add_docstr(torch.roll,
            r"""
 roll(input, shifts, dims=None) -> Tensor
 
-Roll the tensor along the given dimension. Elements that are shifted beyond the
+Roll the tensor along the given dimension(s). Elements that are shifted beyond the
 last position are re-introduced at the first position. If a dimension is not
 specified, the tensor will be flattened before rolling and then restored
 to the original shape.
@@ -4715,7 +4720,9 @@ to the original shape.
 Args:
     input (Tensor): the input tensor
     shifts (int or tuple of ints): The number of places by which the elements
-        of the tensor are shifted
+        of the tensor are shifted. If shifts is a tuple, dims must be a tuple of
+        the same size, and each dimension will be rolled by the corresponding
+        value
     dims (int or tuple of ints): Axis along which to roll
 
 Example::
@@ -4736,6 +4743,11 @@ Example::
             [5, 6],
             [7, 8],
             [1, 2]])
+    >>> torch.roll(x, shifts=(2, 1), dims=(0, 1))
+    tensor([[6, 5],
+            [8, 7],
+            [2, 1],
+            [4, 3]])
 """)
 
 add_docstr(torch.rot90,
@@ -5242,6 +5254,40 @@ Example::
     tensor([[ 0.,  0.,  0.],
             [ 0.,  0.,  0.]])
 """.format(**factory_like_common_args))
+
+add_docstr(torch.btrifact,
+           r"""
+btrifact(A, pivot=True) -> (Tensor, IntTensor)
+
+Batch LU factorization.
+
+Returns a tuple containing the LU factorization and pivots. Pivoting is done if
+:attr:`pivot` is set.
+
+Arguments:
+    A (Tensor): the tensor to factor
+    pivot (bool, optional): controls whether pivoting is done
+
+Returns:
+    A tuple containing factorization and pivots.
+
+Example::
+
+    >>> A = torch.randn(2, 3, 3)
+    >>> A_LU, pivots = torch.btrifact(A)
+    >>> A_LU
+    tensor([[[ 1.3506,  2.5558, -0.0816],
+             [ 0.1684,  1.1551,  0.1940],
+             [ 0.1193,  0.6189, -0.5497]],
+
+            [[ 0.4526,  1.2526, -0.3285],
+             [-0.7988,  0.7175, -0.9701],
+             [ 0.2634, -0.9255, -0.3459]]])
+
+    >>> pivots
+    tensor([[ 3,  3,  3],
+            [ 3,  3,  3]], dtype=torch.int32)
+""")
 
 add_docstr(torch.btrifact_with_info,
            r"""

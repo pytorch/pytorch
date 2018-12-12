@@ -1,16 +1,18 @@
-#include "torch/csrc/autograd/edge.h"
-#include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/generated/variable_factories.h"
-#include "torch/csrc/autograd/profiler.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/fuser/interface.h"
-#include "torch/csrc/jit/graph_executor.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/operator.h"
-#include "torch/csrc/jit/custom_operator.h"
-#include "torch/csrc/jit/script/jit_exception.h"
+#include <torch/csrc/autograd/edge.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/fuser/interface.h>
+#include <torch/csrc/jit/graph_executor.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/custom_operator.h>
+#include <torch/csrc/jit/script/jit_exception.h>
 
-#include "torch/csrc/variable_tensor_functions.h"
+#include <ATen/ExpandUtils.h>
+#include <ATen/WrapDimUtils.h>
+#include <c10/util/SmallVector.h>
 
 #include <exception>
 #include <iostream>
@@ -64,36 +66,34 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        "prim::TensorToBool(Tensor a) -> bool",
+        "prim::Bool(Tensor a) -> bool",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             at::Tensor a;
             pop(stack, a);
-            at::OptionalDeviceGuard guard(device_of(a));
             push(stack, a.item<int64_t>() != 0);
             return 0;
           };
         }),
     Operator(
-        "prim::TensorToNum(Tensor a) -> Scalar",
+        "prim::Int(Tensor a) -> int",
         [](const Node* node) -> Operation {
-          if(node->output()->type() == IntType::get()) {
+          return [](Stack& stack) {
+            at::Tensor a;
+            pop(stack, a);
+            push(stack, a.item<int64_t>());
+            return 0;
+          };
+        }),
+    Operator(
+        "prim::Float(Tensor a) -> float",
+        [](const Node* node) -> Operation {
             return [](Stack& stack) {
               at::Tensor a;
               pop(stack, a);
-              at::OptionalDeviceGuard guard(device_of(a));
-              push(stack, a.item<int64_t>());
-              return 0;
-            };
-          } else {
-            return [](Stack& stack) {
-              at::Tensor a;
-              pop(stack, a);
-              at::OptionalDeviceGuard guard(device_of(a));
               push(stack, a.item<double>());
               return 0;
             };
-          }
         }),
     Operator(
         "prim::ImplicitTensorToNum(Tensor a) -> Scalar",
@@ -103,7 +103,6 @@ RegisterOperators reg({
               at::Tensor a;
               pop(stack, a);
               checkImplicitTensorToNum(a, /*to int*/true);
-              at::OptionalDeviceGuard guard(device_of(a));
               push(stack, a.item<int64_t>());
               return 0;
             };
@@ -112,7 +111,6 @@ RegisterOperators reg({
               at::Tensor a;
               pop(stack, a);
               checkImplicitTensorToNum(a, /*to int*/false);
-              at::OptionalDeviceGuard guard(device_of(a));
               push(stack, a.item<double>());
               return 0;
             };
@@ -128,8 +126,10 @@ RegisterOperators reg({
             return 0;
           };
         }),
+    // note: this op needs to share a name with the Scalar -> Tensor conversion
+    // because all _to_tensor conversion have to have the same operator namet
     Operator(
-        "prim::BoolToTensor(bool a) -> Tensor",
+        "prim::NumToTensor(bool a) -> Tensor",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             bool b;
@@ -141,7 +141,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        "prim::IntToFloat(int a) -> float",
+        "prim::Float(int a) -> float",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             int64_t i;
@@ -151,7 +151,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        "prim::FloatToInt(float a) -> int",
+        "prim::Int(float a) -> int",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             double d;
@@ -161,7 +161,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        "prim::StringToFloat(str a) -> float",
+        "prim::Float(str a) -> float",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             auto s = pop(stack).toString();
@@ -178,13 +178,28 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        "prim::device(Tensor a) -> int[]",
+        "aten::device(str a) -> Device",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
-            at::Tensor a;
-            pop(stack, a);
-            push(stack, std::vector<int64_t>({static_cast<int64_t>(a.device().type()),
-                                              a.device().index()}));
+            push(stack, c10::Device(pop(stack).toStringRef()));
+            return 0;
+          };
+        }),
+    Operator(
+        "aten::eq(Device a, Device b) -> bool",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            auto a = pop(stack).toDevice();
+            auto b = pop(stack).toDevice();
+            push(stack, a == b);
+            return 0;
+          };
+        }),
+    Operator(
+        "prim::device(Tensor a) -> Device",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            push(stack, pop(stack).toTensor().device());
             return 0;
           };
         }),
@@ -199,12 +214,32 @@ RegisterOperators reg({
           };
         }),
     Operator(
+        "prim::requires_grad(Tensor a) -> bool",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            at::Tensor a;
+            pop(stack, a);
+            push(stack, a.requires_grad());
+            return 0;
+          };
+        }),
+    Operator(
         "prim::shape(Tensor a) -> int[]",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             at::Tensor a;
             pop(stack, a);
             push(stack, a.sizes());
+            return 0;
+          };
+        }),
+    Operator(
+        "prim::is_cuda(Tensor a) -> bool",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            at::Tensor a;
+            pop(stack, a);
+            push(stack, a.is_cuda());
             return 0;
           };
         }),
@@ -249,6 +284,58 @@ RegisterOperators reg({
             return 0;
           };
         }),
+    Operator(
+        prim::BroadcastSizes,
+        [](const Node* node) -> Operation {
+          size_t num_inputs = node->inputs().size();
+          return [num_inputs](Stack& stack) {
+            std::vector<int64_t> size;
+            size.reserve(8);
+            for (size_t i = 0; i < num_inputs; ++i) {
+              size = at::infer_size(size, peek(stack, i, num_inputs).toIntList()->elements());
+            }
+            drop(stack, num_inputs);
+            push(stack, std::move(size));
+            return 0;
+          };
+        }),
+    Operator(
+        prim::ChunkSizes,
+        [](const Node* node) -> Operation {
+          int64_t raw_dim = node->i(attr::dim);
+          int64_t chunks = node->i(attr::chunks);
+          return [raw_dim, chunks](Stack& stack) {
+            Shared<IntList> sizes_l;
+            pop(stack, sizes_l);
+            const auto & shape = sizes_l->elements();
+            std::vector<int64_t> regular_shape = shape;
+            std::vector<int64_t> last_shape = shape;
+            int64_t dim = at::maybe_wrap_dim(raw_dim, shape.size());
+            AT_CHECK(dim < regular_shape.size(), "Dimension out of range for chunk");
+            int64_t split_size = (regular_shape[dim] + chunks - 1) / chunks;
+            regular_shape[dim] = split_size;
+            if (shape[dim] % chunks == 0) {
+              last_shape[dim] = split_size;
+            } else {
+              int64_t num_splits = std::max<int64_t>((shape[dim] + split_size - 1) / split_size, 1);
+              last_shape[dim] = split_size - (split_size * num_splits - shape[dim]);
+              JIT_ASSERT(last_shape[dim] >= 0);
+            }
+            push(stack, std::move(regular_shape));
+            push(stack, std::move(last_shape));
+            return 0;
+          };
+        }),
+    Operator(
+        FunctionSchema("aten::warn", {Argument("message", StringType::get()), Argument("stacklevel", IntType::get(), c10::nullopt, 2, true)}, {}),
+        [](const Node* node) {
+          return [](Stack& stack) {
+            drop(stack, 1);
+            AT_WARN(pop(stack).toStringRef());
+            return 0;
+          };
+        }),
+
     Operator(
         "prim::RaiseException(str msg) -> ()",
         [](const Node* node) -> Operation {
@@ -337,6 +424,17 @@ RegisterOperators reg({
               stack.emplace_back(a);
             else
               stack.emplace_back(a + b);
+            return 0;
+          };
+        }),
+    Operator(
+        "prim::SumToSize(Tensor(a) self, int[] size) -> Tensor(a)",
+        [](const Node* node) {
+          return [=](Stack& stack) {
+            at::Tensor self;
+            Shared<IntList> desired_sizes;
+            pop(stack, self, desired_sizes);
+            push(stack, at::sum_to(std::move(self), desired_sizes->elements()));
             return 0;
           };
         }),
@@ -539,7 +637,7 @@ RegisterOperators reg({
 
             push(stack, forked_interprester.getFuture());
 
-            c10::global_work_queue.schedule(std::move(continuation));
+            c10::global_work_queue().run(std::move(continuation));
             return 0;
           };
         }),
@@ -608,7 +706,7 @@ RegisterOperators reg({
     return [=](Stack& stack) {                                \
       int64_t a, b;                                           \
       pop(stack, a, b);                                       \
-      push(stack, op);                                        \
+      push(stack, op); /* NOLINT(hicpp-signed-bitwise) */     \
       return 0;                                               \
     };                                                        \
   }),
@@ -699,6 +797,37 @@ Operation listEq(const Node* node) {
   };
 }
 
+template <typename T>
+Operation listNe(const Node* node) {
+  return [=](Stack& stack) {
+    T a;
+    T b;
+    pop(stack, a, b);
+    push(stack, !(a->elements() == b->elements()));
+    return 0;
+  };
+}
+
+inline bool tensor_list_equal(Shared<TensorList> a, Shared<TensorList> b) {
+  if (a->elements().size() != b->elements().size()) {
+    return false;
+  }
+
+  for (size_t i = 0; i < a->elements().size(); ++i) {
+    const auto& a_element = a->elements()[i];
+    const auto& b_element = b->elements()[i];
+    // This preserves Python's semantics, which uses eq() to compare two
+    // elements, then passes the result to bool().
+    // see: https://docs.python.org/3.4/reference/datamodel.html#object.__ge__
+    const auto cmp_result = a_element.eq(b_element);
+    if (!cmp_result.is_nonzero()) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 // Specialization for at::Tensor, since it doesn't define operator==
 template <>
 Operation listEq<Shared<TensorList>>(const Node* node) {
@@ -706,25 +835,19 @@ Operation listEq<Shared<TensorList>>(const Node* node) {
     Shared<TensorList> a;
     Shared<TensorList> b;
     pop(stack, a, b);
-    if (a->elements().size() != b->elements().size()) {
-      push(stack, false);
-      return 0;
-    }
+    push(stack, tensor_list_equal(a, b));
+    return 0;
+  };
+}
 
-    for (size_t i = 0; i < a->elements().size(); ++i) {
-      const auto& a_element = a->elements()[i];
-      const auto& b_element = b->elements()[i];
-      // This preserves Python's semantics, which uses eq() to compare two
-      // elements, then passes the result to bool().
-      // see: https://docs.python.org/3.4/reference/datamodel.html#object.__ge__
-      const auto cmp_result = a_element.eq(b_element);
-      if (!cmp_result.is_nonzero()) {
-        push(stack, false);
-        return 0;
-      }
-    }
-
-    push(stack, true);
+// Specialization for at::Tensor, since it doesn't define operator==
+template <>
+Operation listNe<Shared<TensorList>>(const Node* node) {
+  return [=](Stack& stack) {
+    Shared<TensorList> a;
+    Shared<TensorList> b;
+    pop(stack, a, b);
+    push(stack, !tensor_list_equal(a, b));
     return 0;
   };
 }
@@ -869,17 +992,22 @@ Operator(                                                                      \
     Operator("aten::eq(int[] a, int[] b) -> bool", listEq<Shared<IntList>>),
     Operator("aten::eq(float[] a, float[] b) -> bool", listEq<Shared<DoubleList>>),
     Operator("aten::eq(Tensor[] a, Tensor[] b) -> bool", listEq<Shared<TensorList>>),
+    Operator("aten::ne(int[] a, int[] b) -> bool", listNe<Shared<IntList>>),
+    Operator("aten::ne(float[] a, float[] b) -> bool", listNe<Shared<DoubleList>>),
+    Operator("aten::ne(Tensor[] a, Tensor[] b) -> bool", listNe<Shared<TensorList>>),
+
 
 #define CREATE_COPY_OP(other_type, c_type)                              \
   Operator(                                                             \
-      "aten::copy_(Tensor(a!) t, " #other_type " other) -> Tensor(a!)", \
+      "aten::copy_(Tensor(a!) self, " #other_type                       \
+      " other) -> Tensor(a!)",                                          \
       [](const Node* node) {                                            \
         return [=](Stack& stack) {                                      \
           at::Tensor t;                                                 \
           c_type other;                                                 \
           pop(stack, t, other);                                         \
-          std::move(t) = other;                                         \
-          push(stack, std::move(t));                                    \
+          std::move(t) = other; /* NOLINT(bugprone-use-after-move) */   \
+          push(stack, std::move(t)); /* NOLINT(bugprone-use-after-move) */ \
           return 0;                                                     \
         };                                                              \
       }),
@@ -931,6 +1059,16 @@ Operator(                                                                      \
             double a, b;
             pop(stack, a, b);
             push(stack, a / b);
+            return 0;
+          };
+        }),
+
+    Operator("aten::floor(float a) -> int",
+        [](const Node* node) {
+          return [=](Stack& stack) {
+            double a;
+            pop(stack, a);
+            push(stack, static_cast<int64_t>(std::floor(a)));
             return 0;
           };
         }),
@@ -1022,6 +1160,230 @@ Operator(                                                                      \
 });
 
 
+// checking one of size & scale_factor is set
+// if scale_factor is a double list check that it's len == dim
+// reference: _check_size_scale_factor in torch/nn/functional.py
+void _check_size_factor(size_t dim, const IValue& size, IValue scale_factor) {
+  if (size.isNone() && scale_factor.isNone()) {
+    throw std::runtime_error("either size or scale_factor should be defined");
+  }
+  if (!size.isNone() && !scale_factor.isNone()) {
+    throw std::runtime_error("only one of size or scale_factor should be defined");
+  }
+  if (scale_factor.isDoubleList()) {
+    auto scale_len = scale_factor.toDoubleListRef().size();
+    if (scale_len != dim) {
+      std::stringstream str;
+      str << "scale_factor shape must match input shape. Input is " << dim
+        << "D, scale_factor size is " << scale_len;
+      throw std::runtime_error("only one of size or scale_factor should be defined");
+    }
+  }
+}
+
+// reference: _output_size in torch/nn/functional.py
+// size can be none, int or intlist
+// scale_factors can be none, float, or floatlist
+std::vector<int64_t> _output_size(at::Tensor input, size_t dim, IValue size, IValue scale_factors) {
+  if (!size.isNone()) {
+    if (size.isInt()) {
+      std::vector<int64_t> repeated(dim, size.toInt());
+      return repeated;
+    } else {
+      return size.toIntListRef();
+    }
+  }
+  std::vector<double> scale_repeated;
+  if (scale_factors.isDouble()) {
+    scale_repeated = std::vector<double>(dim, scale_factors.toDouble());
+  } else {
+    scale_repeated = scale_factors.toDoubleListRef();
+  }
+  std::vector<int64_t> ret;
+  for (size_t i = 0; i < dim; ++i) {
+    ret.push_back(std::floor(input.size(i + 2) * scale_repeated[i]));
+  }
+  return ret;
+}
+
+// reference: interpolate in torch/nn/functional.py
+// size can be none, int or intlist
+// scale_factors can be none, float, or floatlist
+at::Tensor interpolate(at::Tensor input, IValue size, IValue scale_factors,
+    std::string mode, c10::optional<bool> align_corners) {
+  if ((mode == "nearest" || mode == "area")) {
+    if (align_corners != c10::nullopt) {
+      throw std::runtime_error("align_corners option can only be set with the "
+                             "interpolating modes: linear | bilinear | trilinear");
+    }
+  } else {
+    if (align_corners == c10::nullopt) {
+      AT_WARN("Default upsampling behavior when mode=", mode, " is changed "
+        "to align_corners=False since 0.4.0. Please specify align_corners=True "
+        "if the old behavior is desired. See the documentation of nn.Upsample for details");
+      align_corners = false;
+    }
+  }
+
+  auto input_dim = input.dim();
+  if (input_dim == 3 && mode == "nearest")
+    return at::upsample_nearest1d(input, _output_size(input, 1, size, scale_factors));
+  if (input_dim == 4 && mode == "nearest")
+    return at::upsample_nearest2d(input, _output_size(input, 2, size, scale_factors));
+  if (input_dim == 5 && mode == "nearest")
+    return at::upsample_nearest3d(input, _output_size(input, 3, size, scale_factors));
+  if (input_dim == 3 && mode == "area")
+    return at::adaptive_avg_pool1d(input, _output_size(input, 1, size, scale_factors));
+  if (input_dim == 4 && mode == "area")
+    return at::adaptive_avg_pool2d(input, _output_size(input, 2, size, scale_factors));
+  if (input_dim == 5 && mode == "area")
+    return at::adaptive_avg_pool3d(input, _output_size(input, 3, size, scale_factors));
+  if (input_dim == 3 && mode == "linear")
+    return at::upsample_linear1d(input, _output_size(input, 1, size, scale_factors), *align_corners);
+  if (input_dim == 3 && mode == "bilinear")
+    throw std::runtime_error("Got 3D input, but bilinear mode needs 4D input");
+  if (input_dim == 3 && mode == "trilinear")
+    throw std::runtime_error("Got 3D input, but trilinear mode needs 5D input");
+  if (input_dim == 4 && mode == "linear")
+    throw std::runtime_error("Got 4D input, but linear mode needs 3D input");
+  if (input_dim == 4 && mode == "bilinear")
+    return at::upsample_bilinear2d(input, _output_size(input, 2, size, scale_factors), *align_corners);
+  if (input_dim == 4 && mode == "trilinear")
+    throw std::runtime_error("Got 4D input, but trilinear mode needs 5D input");
+  if (input_dim == 5 && mode == "linear")
+    throw std::runtime_error("Got 5D input, but linear mode needs 3D input");
+  if (input_dim == 5 && mode == "bilinear")
+    throw std::runtime_error("Got 5D input, but bilinear mode needs 4D input");
+  if (input_dim == 5 && mode == "trilinear")
+    return at::upsample_trilinear3d(input, _output_size(input, 3, size, scale_factors), *align_corners);
+
+  AT_ERROR("Input Error: Only 3D, 4D and 5D input Tensors supported",
+    " (got ", input_dim, "D) for the modes: nearest | linear | bilinear | trilinear",
+    " (got ", mode, ") ");
+}
+
+Operation interpolate_op(const Node* n) {
+  return [](Stack& stack) {
+    at::Tensor input;
+    IValue size;
+    IValue scale_factors;
+    std::string mode;
+    IValue align_corners;
+    pop(stack, input, size, scale_factors, mode, align_corners);
+    at::Tensor res = interpolate(input, size, scale_factors, mode, align_corners.toOptional<bool>());
+    push(stack, res);
+    return 0;
+  };
+}
+
+// interpolate takes in float & float[] for scale factor
+// upsample takes in int & int[], so convert the ints to floats before
+// passing on to the interpolate op
+IValue convert_scale_factor_to_double(IValue int_ivalue) {
+  IValue scale_factor_double;
+  if (int_ivalue.isInt()) {
+    scale_factor_double = static_cast<double>(int_ivalue.toInt());
+  } else if (int_ivalue.isIntList()) {
+    auto int_list = int_ivalue.toIntListRef();
+    std::vector<double> double_vec(int_list.begin(), int_list.end());
+    scale_factor_double = double_vec;
+  } else if (int_ivalue.isNone()) {
+    return IValue();
+  } else {
+    std::stringstream ss;
+    ss << "Expecting optional int or int list arg for scale factor, got" << int_ivalue;
+    throw std::runtime_error(ss.str());
+  }
+  return scale_factor_double;
+}
+
+Operation upsample_nearest_op(const Node* n) {
+  return [](Stack& stack) {
+    at::Tensor input;
+    IValue size;
+    IValue scale_factor_int;
+    pop(stack, input, size, scale_factor_int);
+    IValue scale_factor_double = convert_scale_factor_to_double(scale_factor_int);
+    at::Tensor res = interpolate(input, size, scale_factor_double, "nearest", c10::nullopt);
+    push(stack, res);
+    return 0;
+  };
+}
+
+Operation upsample_op(const Node* n) {
+  return [](Stack& stack) {
+    at::Tensor input;
+    IValue size;
+    IValue scale_factor_int;
+    std::string mode;
+    IValue align_corners;
+    pop(stack, input, size, scale_factor_int, mode, align_corners);
+    IValue scale_factor_double = convert_scale_factor_to_double(scale_factor_int);
+    at::Tensor res = interpolate(input, size, scale_factor_double, mode, align_corners.toOptional<bool>());
+    push(stack, res);
+    return 0;
+  };
+}
+
+Operation upsample_bilinear_op(const Node* n) {
+  return [](Stack& stack) {
+    at::Tensor input;
+    IValue size;
+    IValue scale_factor_int;
+    pop(stack, input, size, scale_factor_int);
+    IValue scale_factor_double = convert_scale_factor_to_double(scale_factor_int);
+    at::Tensor res = interpolate(input, size, scale_factor_double, "bilinear", true);
+    push(stack, res);
+    return 0;
+  };
+}
+
+
+RegisterOperators reg3({
+  Operator(
+      "aten::__interpolate(Tensor input, int? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None) -> Tensor",
+      interpolate_op),
+  Operator(
+      "aten::__interpolate(Tensor input, int[]? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None) -> Tensor",
+      interpolate_op),
+  Operator(
+      "aten::__interpolate(Tensor input, int? size = None, float? scale_factor = None, str mode = 'nearest', bool? align_corners = None) -> Tensor",
+      interpolate_op),
+  Operator(
+      "aten::__interpolate(Tensor input, int[]? size = None, float? scale_factor = None, str mode = 'nearest', bool? align_corners = None) -> Tensor",
+      interpolate_op),
+
+  Operator(
+      "aten::__upsample_nearest(Tensor input, int? size = None, int? scale_factor = None) -> Tensor",
+      upsample_nearest_op),
+  Operator(
+      "aten::__upsample_nearest(Tensor input, int[]? size = None, int? scale_factor = None) -> Tensor",
+      upsample_nearest_op),
+
+  Operator(
+      "aten::__upsample(Tensor input, int? size = None, int? scale_factor = None, str mode = 'nearest', bool? align_corners = None) -> Tensor",
+      upsample_op),
+  Operator(
+      "aten::__upsample(Tensor input, int[]? size = None, int? scale_factor = None, str mode = 'nearest', bool? align_corners = None) -> Tensor",
+      upsample_op),
+
+
+  Operator(
+      "aten::__upsample_bilinear(Tensor input, int? size = None, int? scale_factor = None) -> Tensor",
+      upsample_bilinear_op),
+  Operator(
+      "aten::__upsample_bilinear(Tensor input, int[]? size = None, int? scale_factor = None) -> Tensor",
+      upsample_bilinear_op),
+  Operator(
+      "aten::__upsample_bilinear(Tensor input, int? size = None, int[]? scale_factor = None) -> Tensor",
+      upsample_bilinear_op),
+  Operator(
+      "aten::__upsample_bilinear(Tensor input, int[]? size = None, int[]? scale_factor = None) -> Tensor",
+      upsample_bilinear_op),
+
+});
+
+
 at::Tensor leaky_relu(at::Tensor tensor, double scalar) {
   return at::leaky_relu(tensor, scalar);
 }
@@ -1029,7 +1391,7 @@ at::Tensor cat(std::vector<at::Tensor> tensors) {
   return at::cat(tensors);
 }
 
-static auto reg3 =
+static auto reg4 =
     torch::jit::RegisterOperators()
         .op("_test::leaky_relu(Tensor self, float v=0.01) -> Tensor", &leaky_relu)
         .op("_test::cat(Tensor[] inputs) -> Tensor", &cat);

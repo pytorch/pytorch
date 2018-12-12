@@ -1,11 +1,11 @@
-#include "l2_minimization.h"
-
-#include <array>
+#include <algorithm>
 #include <cmath>
 
-#include <x86intrin.h>
+#include <immintrin.h>
 
 namespace dnnlowp {
+
+namespace internal {
 
 float L2MinimizationKernelAVX2(
     int precision,
@@ -89,8 +89,8 @@ float L2MinimizationKernelAVX2(
 
     norm_v = _mm256_fmadd_ps(density_v, norm_delta_v, norm_v);
   } // src_bin loop vectorized
-  std::array<float, VLEN> norm_buf;
-  _mm256_storeu_ps(norm_buf.data(), norm_v);
+  float norm_buf[VLEN];
+  _mm256_storeu_ps(norm_buf, norm_v);
   for (int i = 0; i < VLEN; ++i) {
     norm += norm_buf[i];
   }
@@ -131,5 +131,7 @@ float L2MinimizationKernelAVX2(
 
   return norm;
 }
+
+} // namespace internal
 
 } // namespace dnnlowp

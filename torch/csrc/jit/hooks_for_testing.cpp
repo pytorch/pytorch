@@ -1,5 +1,5 @@
-#include "torch/csrc/jit/hooks_for_testing.h"
-#include "torch/csrc/jit/script/module.h"
+#include <torch/csrc/jit/hooks_for_testing.h>
+#include <torch/csrc/jit/script/module.h>
 
 namespace torch {
 namespace jit {

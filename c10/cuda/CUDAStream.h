@@ -41,6 +41,14 @@
 * then the functionality here may need to be extended to allow, for example,
 * "reserving" a subset of the pool so that other streams do not accidentally
 * overlap the performance critical streams.
+*
+* Note: although the notion of "current stream for device" is thread local
+* (every OS thread has a separate current stream, as one might expect),
+* the stream pool is global across all threads; stream 0 is always stream 0
+* no matter which thread you use it on.  Multiple threads can synchronize
+* on the same stream.  Although the CUDA documentation is not very clear
+* on the matter, streams are thread safe; e.g., it is safe to enqueue
+* a kernel on the same stream from two different threads.
 */
 
 namespace c10 {

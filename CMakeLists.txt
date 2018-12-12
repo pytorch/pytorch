@@ -75,12 +75,12 @@ cmake_dependent_option(
     "NOT BUILD_SHARED_LIBS" OFF)
 option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" OFF)
 cmake_dependent_option(
-    INSTALL_TEST "Install test binaries if BUILD_TEST is on" OFF
+    INSTALL_TEST "Install test binaries if BUILD_TEST is on" ON
     "BUILD_TEST" OFF)
 option(USE_ACL "Use ARM Compute Library" OFF)
 option(USE_ASAN "Use Address Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
-option(USE_ROCM "Use ROCm" OFF)
+option(USE_ROCM "Use ROCm" ON)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(
     USE_CUDNN "Use cuDNN" ON

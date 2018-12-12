@@ -159,7 +159,7 @@ void ReinitializeAndCopyFrom(
     Tensor* t,
     at::TensorOptions options,
     const Tensor& src,
-    BaseContext* context) {
+    bool async) {
   auto device_type = options.device().type();
   CAFFE_ENFORCE(t != nullptr, "Target tensor ptr is null.");
   if (!*t || device_type != t->GetDeviceType()) {
@@ -172,7 +172,7 @@ void ReinitializeAndCopyFrom(
       t->dtype(),
       " to: ",
       src.dtype());
-  t->CopyFrom(src, context);
+  t->CopyFrom(src, async);
 }
 
 namespace {

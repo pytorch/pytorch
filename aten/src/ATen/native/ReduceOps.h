@@ -2,7 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/native/DispatchStub.h>
-#include "c10/util/Optional.h"
+#include <c10/util/Optional.h>
 
 namespace at {
   struct TensorIterator;
@@ -14,6 +14,10 @@ using reduce_fn = void(*)(TensorIterator &);
 
 DECLARE_DISPATCH(reduce_fn, sum_stub);
 DECLARE_DISPATCH(reduce_fn, prod_stub);
+
+using reduce_std_function =
+  void (*)(TensorIterator&, bool unbiased);
+DECLARE_DISPATCH(reduce_std_function, std_stub);
 
 using reduce_norm_fn =
     void (*)(Tensor&, const Tensor&, Scalar, c10::optional<int64_t>);

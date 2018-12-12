@@ -1,7 +1,7 @@
-#include "torch/csrc/jit/script/python_tree_views.h"
+#include <torch/csrc/jit/script/python_tree_views.h>
 
-#include "torch/csrc/jit/script/compiler.h"
-#include "torch/csrc/jit/script/tree_views.h"
+#include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/script/tree_views.h>
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -85,7 +85,7 @@ void initTreeViewBindings(PyObject *module) {
 
   py::class_<Param, TreeView>(m, "Param")
     .def(py::init([](const Expr& type, const Ident& name) {
-      return Param::create(name.range(), name, type);
+      return Param::create(name.range(), name, type, Maybe<Expr>::create(name.range()));
     }));
   py::class_<Attribute, TreeView>(m, "Attribute")
     .def(py::init([](const Ident& name, const Expr& value) {
@@ -101,8 +101,8 @@ void initTreeViewBindings(PyObject *module) {
     return Expr(Compound::create(TK_NONE, range, {}));
   });
 
-  py::class_<Stmt, TreeView>(m, "Stmt");
-  py::class_<Expr, TreeView>(m, "Expr");
+  py::class_<Stmt, TreeView>(m, "Stmt"); // NOLINT(bugprone-unused-raii)
+  py::class_<Expr, TreeView>(m, "Expr"); // NOLINT(bugprone-unused-raii)
   py::class_<Def, TreeView>(m, "Def")
     .def(py::init([](const Ident& name,
                      Decl decl,

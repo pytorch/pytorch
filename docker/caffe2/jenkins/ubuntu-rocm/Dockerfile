@@ -1,14 +1,14 @@
 ARG UBUNTU_VERSION
 FROM ubuntu:${UBUNTU_VERSION}
 
+# Include BUILD_ENVIRONMENT environment variable in image
+ARG BUILD_ENVIRONMENT
+ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
+
 ARG EC2
 ARG UBUNTU_VERSION
 ADD ./install_base.sh install_base.sh
 RUN bash ./install_base.sh && rm install_base.sh
-
-# Include BUILD_ENVIRONMENT environment variable in image
-ARG BUILD_ENVIRONMENT
-ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 
 # Install Python
 ARG PYTHON_VERSION
@@ -60,7 +60,6 @@ ENV PATH /opt/rocm/bin:$PATH
 ENV PATH /opt/rocm/hcc/bin:$PATH
 ENV PATH /opt/rocm/hip/bin:$PATH
 ENV PATH /opt/rocm/opencl/bin:$PATH
-ENV MIOPEN_DISABLE_CACHE 1
 ENV HIP_PLATFORM hcc
 ENV LANG C.UTF-8
 ENV LC_ALL C.UTF-8

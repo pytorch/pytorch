@@ -486,6 +486,13 @@ bmm(batch2) -> Tensor
 See :func:`torch.bmm`
 """)
 
+add_docstr_all('btrifact',
+               r"""
+btrifact(pivot=True) -> (Tensor, Tensor)
+
+See :func:`torch.btrifact`
+""")
+
 add_docstr_all('btrifact_with_info',
                r"""
 btrifact_with_info(pivot=True) -> (Tensor, Tensor, Tensor)
@@ -1172,16 +1179,21 @@ Example::
 
 add_docstr_all('index_put_',
                r"""
-index_put_(indices, value) -> Tensor
+index_put_(indices, value, accumulate=False) -> Tensor
 
 Puts values from the tensor :attr:`value` into the tensor :attr:`self` using
 the indices specified in :attr:`indices` (which is a tuple of Tensors). The
 expression ``tensor.index_put_(indices, value)`` is equivalent to
 ``tensor[indices] = value``. Returns :attr:`self`.
 
+If :attr:`accumulate` is ``True``, the elements in :attr:`tensor` are added to
+:attr:`self`. If accumulate is ``False``, the behavior is undefined if indices
+contain duplicate elements.
+
 Args:
     indices (tuple of LongTensor): tensors used to index into `self`.
     value (Tensor): tensor of same dtype as `self`.
+    accumulate (bool): whether to accumulate into self
 """)
 
 add_docstr_all('index_select',
@@ -2917,4 +2929,73 @@ add_docstr_all('pinverse',
 pinverse() -> Tensor
 
 See :func:`torch.pinverse`
+""")
+
+add_docstr_all('grad',
+               r"""
+This attribute is ``None`` by default and becomes a Tensor the first time a call to
+:func:`backward` computes gradients for ``self``.
+The attribute will then contain the gradients computed and future calls to
+:func:`backward` will accumulate (add) gradients into it.
+""")
+
+add_docstr_all('requires_grad',
+               r"""
+Is ``True`` if gradients need to be computed for this Tensor, ``False`` otherwise.
+
+.. note::
+
+    The fact that gradients need to be computed for a Tensor do not mean that the :attr:`grad`
+    attribute will be populated, see :attr:`is_leaf` for more details.
+
+""")
+
+add_docstr_all('is_leaf',
+               r"""
+All Tensors that have :attr:`requires_grad` which is ``False`` will be leaf Tensors by convention.
+
+For Tensors that have :attr:`requires_grad` which is ``True``, they will be leaf Tensors if they were
+created by the user. This means that they are not the result of an operation and so
+:attr:`grad_fn` is None.
+
+Only leaf Tensors will have their :attr:`grad` populated during a call to :func:`backward`.
+To get :attr:`grad` populated for non-leaf Tensors, you can use :func:`retain_grad`.
+
+Example::
+
+    >>> a = torch.rand(10, requires_grad=True)
+    >>> a.is_leaf
+    True
+    >>> b = torch.rand(10, requires_grad=True).cuda()
+    >>> b.is_leaf
+    False
+    # b was created by the operation that cast a cpu Tensor into a cuda Tensor
+    >>> c = torch.rand(10, requires_grad=True) + 2
+    >>> c.is_leaf
+    False
+    # c was created by the addition operation
+    >>> d = torch.rand(10).cuda()
+    >>> d.is_leaf
+    True
+    # d does not require gradients and so has no operation creating it (that is tracked by the autograd engine)
+    >>> e = torch.rand(10).cuda().requires_grad_()
+    >>> e.is_leaf
+    True
+    # e requires gradients and has no operations creating it
+    >>> f = torch.rand(10, requires_grad=True, device="cuda")
+    >>> f.is_leaf
+    True
+    # f requires grad, has not operation creating it
+
+
+""")
+
+add_docstr_all('is_cuda',
+               r"""
+Is ``True`` if the Tensor is stored on the GPU, ``False`` otherwise.
+""")
+
+add_docstr_all('device',
+               r"""
+Is the :class:`torch.device` where this Tensor is.
 """)

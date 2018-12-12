@@ -317,6 +317,7 @@ CUDAStream getCurrentCUDAStream(DeviceIndex device_index) {
 }
 
 void setCurrentCUDAStream(CUDAStream stream) {
+  initCUDAStreamsOnce();
   auto ptr = CUDAStream_internals(stream);
   AT_ASSERT(ptr);
   current_streams[ptr->device_index] = ptr;

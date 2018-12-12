@@ -1,16 +1,20 @@
 import torch._C
 from torch import Tensor
 from torch.autograd import Variable, function
+from torch.serialization import validate_cuda_device
 from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
 from torch.jit.frontend import get_jit_ast, get_default_args
+import torch.backends.cudnn as cudnn
 import torch.jit.annotations
-from torch._six import raise_from, with_metaclass, get_function_from_type
+from torch._six import raise_from, with_metaclass, get_function_from_type, \
+    string_classes
 from .._jit_internal import createResolutionCallback, _compiled_weak_fns, \
     _weak_script_methods, _weak_modules, _weak_types, COMPILED, \
-    COMPILATION_PENDING
+    COMPILATION_PENDING, _boolean_dispatched
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
 import torch.testing
+import math
 from collections import defaultdict, OrderedDict, namedtuple
 import sys
 import warnings
@@ -69,17 +73,23 @@ def scope(scope_name):
             tracing_state.pop_scope()
 
 
-def load(f):
+def load(f, map_location=None):
     r"""
         Load a ``ScriptModule`` previously saved with :func:`save <torch.jit.save>`
 
-        .. DANGER::
-           All previously saved modules, no matter their device, are always loaded onto the CPU.
-           This is different from :func:`torch.load`'s semantics and may change in the future.
+        All previously saved modules, no matter their device, are first loaded onto CPU,
+        and then are moved to the devices they were saved from. If this fails (e.g. because
+        the run time system doesn't have certain devices), an exception is raised.
+        However, storages can be dynamically remapped to an alternative set of devices
+        using the `map_location` argument. Comparing to :func:`torch.load`, `map_location`
+        in this function is simplified, which only accepts a string (e.g., 'cpu', 'cuda:0'),
+        or torch.device (e.g., torch.device('cpu'))
 
         Arguments:
             f: a file-like object (has to implement read, readline, tell, and seek),
                 or a string containing a file name
+            map_location: can a string (e.g., 'cpu', 'cuda:0'), a device (e.g.,
+                torch.device('cpu'))
 
         Returns:
             A ``ScriptModule`` object.
@@ -89,7 +99,12 @@ def load(f):
             # Load ScriptModule from io.BytesIO object
             >>> with open('scriptmodule.pt', 'rb') as f:
                     buffer = io.BytesIO(f.read())
+            # Load all tensors to the original device
             >>> torch.jit.load(buffer)
+            # Load all tensors onto CPU, using a device
+            >>> torch.jit.load(buffer, map_location=torch.device('cpu'))
+            # Load all tensors onto CPU, using a string
+            >>> torch.jit.load(buffer, map_location='cpu')
     """
     m = ScriptModule()
 
@@ -101,12 +116,21 @@ def load(f):
             curr = getattr(curr, name)
         return curr
 
+    if isinstance(map_location, string_classes):
+        map_location = torch.device(map_location)
+    elif not (map_location is None or
+              isinstance(map_location, torch.device)):
+        raise ValueError("map_location should be either None, string or torch.device, "
+                         "but got type: " + str(type(map_location)))
+    if (str(map_location).startswith('cuda')):
+        validate_cuda_device(map_location)
+
     if isinstance(f, str) or \
             (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
             (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
-        torch._C.import_ir_module(module_lookup, f)
+        torch._C.import_ir_module(module_lookup, f, map_location)
     else:
-        torch._C.import_ir_module_from_buffer(module_lookup, f.read())
+        torch._C.import_ir_module_from_buffer(module_lookup, f.read(), map_location)
     return m
 
 
@@ -143,7 +167,7 @@ def save(m, f):
         f.write(ret)
 
 
-def get_trace_graph(f, args=(), kwargs=None):
+def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False):
     """
     Trace a function or model, returning a tuple consisting of the both the
     *trace* of an execution, as well as the original return value.
@@ -169,7 +193,7 @@ def get_trace_graph(f, args=(), kwargs=None):
         kwargs = {}
     if not isinstance(args, tuple):
         args = (args,)
-    return LegacyTracedModule(f)(*args, **kwargs)
+    return LegacyTracedModule(f, _force_outplace)(*args, **kwargs)
 
 
 def _unique_state_dict(module, keep_vars=False):
@@ -206,12 +230,13 @@ def _create_interpreter_name_lookup_fn(frames_up=1):
 
 
 class LegacyTracedModule(Module):
-    def __init__(self, inner):
+    def __init__(self, inner, force_outplace=False):
         super(LegacyTracedModule, self).__init__()
         # inner may be a Module, or it may be an arbitrary callable
         # If it's a Module, we get its parameters automatically, which lets
         # us avoid a special casing functions versus modules.
         self.inner = inner
+        self._force_outplace = force_outplace
 
     def forward(self, *args):
         in_vars, in_desc = _flatten(args)
@@ -219,6 +244,7 @@ class LegacyTracedModule(Module):
         # This differs from the compiler path, which doesn't support it at the moment.
         module_state = list(_unique_state_dict(self, keep_vars=True).values())
         trace, all_trace_inputs = torch._C._tracer_enter(*(in_vars + module_state))
+        torch._C._tracer_set_force_outplace(self._force_outplace)
         torch._C._tracer_set_get_unique_name_fn(_create_interpreter_name_lookup_fn())
         try:
             trace_inputs = _unflatten(all_trace_inputs[:len(in_vars)], in_desc)
@@ -395,13 +421,18 @@ class TracingCheckError(Exception):
 
 # Check the traced module against a set of user-provided validation inputs
 @torch.no_grad()
-def _check_trace(check_inputs, func, executor_options, module, check_tolerance):
+def _check_trace(check_inputs, func, executor_options, module, check_tolerance, force_outplace):
     # Note: tracing is independent of optimizations, which consume the trace
     executor_options['optimize'] = False
     for inputs in check_inputs:
         if isinstance(inputs, torch.Tensor):
             inputs = (inputs,)
-        check_mod = torch.jit.trace(func, _clone_inputs(inputs), check_trace=False, **executor_options)
+        check_mod = torch.jit.trace(
+            func,
+            _clone_inputs(inputs),
+            check_trace=False,
+            _force_outplace=force_outplace,
+            **executor_options)
 
         def graph_diagnostic_info():
             mod_canonicalized = torch._C._jit_pass_canonicalize(module.graph)
@@ -526,7 +557,13 @@ TracerWarning.ignore_lib_warnings()
 torch._C._tracer_warn_use_python()
 
 
-def trace(func, example_inputs, optimize=True, check_trace=True, check_inputs=None, check_tolerance=1e-5):
+def trace(func,
+          example_inputs,
+          optimize=True,
+          check_trace=True,
+          check_inputs=None,
+          check_tolerance=1e-5,
+          _force_outplace=False):
     """
     Trace a function and return an executable trace that will be optimized
     using just-in-time compilation.
@@ -594,14 +631,15 @@ def trace(func, example_inputs, optimize=True, check_trace=True, check_inputs=No
         example_inputs = tuple(example_inputs)
     module = TopLevelTracedModule(func, **executor_options)
     var_lookup_fn = _create_interpreter_name_lookup_fn(0)
-    module._create_method_from_trace('forward', func, example_inputs, var_lookup_fn)
+    module._create_method_from_trace('forward', func, example_inputs,
+                                     var_lookup_fn, _force_outplace)
 
     # Check the trace against new traces created from user-specified inputs
     if check_trace:
         if check_inputs is not None:
-            _check_trace(check_inputs, func, executor_options, module, check_tolerance)
+            _check_trace(check_inputs, func, executor_options, module, check_tolerance, _force_outplace)
         else:
-            _check_trace([example_inputs], func, executor_options, module, check_tolerance)
+            _check_trace([example_inputs], func, executor_options, module, check_tolerance, _force_outplace)
 
     return module
 
@@ -621,6 +659,12 @@ class CompilationUnit(object):
 
     def __getattr__(self, attr):
         return self.module._get_method(attr)
+
+
+def _try_get_dispatched_fn(fn):
+    if not callable(fn):
+        return None
+    return _boolean_dispatched.get(fn)
 
 
 def _try_compile_weak_script(fn):
@@ -843,7 +887,7 @@ class OrderedBufferDict(OrderedDictWrapper):
 # in addition, tuples and lists of these base types are also considered constants
 # If you edit this list, then you also need to edit the handlers in
 # ConstantValue in jit/script/init.cpp
-_constant_types = (bool, float, int, types.FunctionType, torch.device, torch.layout, torch.dtype)
+_constant_types = (bool, float, int, str, type(None), types.FunctionType, torch.device, torch.layout, torch.dtype)
 
 
 def _get_valid_constant(attr, v):
@@ -913,16 +957,16 @@ class ScriptMeta(type(torch._C.ScriptModule)):
 if _enabled:
     class ScriptModule(with_metaclass(ScriptMeta, torch._C.ScriptModule, Module)):
         r"""
-        The core data structure in Torch Script is the ``ScriptModule``. It is an
+        The core data structure in TorchScript is the ``ScriptModule``. It is an
         analogue of torch's nn.Module and represents an entire model as a tree of
         submodules. Like normal modules, each individual module in a ScriptModule can
         have submodules, parameters, and methods. In nn.Modules methods are implemented
         as Python functions, but in ScriptModules methods typically implemented as
-        *Torch Script* functions,  a statically-typed subset of Python that contains all
+        *TorchScript* functions,  a statically-typed subset of Python that contains all
         of PyTorch's built-in Tensor operations. This difference allows your
         ScriptModules code to run without the need for a Python interpreter.
 
-        ScriptModules and the Torch Script functions inside of them can be created in
+        ScriptModules and the TorchScript functions inside of them can be created in
         two ways:
 
         **Tracing:**
@@ -930,7 +974,7 @@ if _enabled:
             Using ``torch.jit.trace``, you can take an existing module or python
             function, provide example inputs, and we run the function, recording the
             operations performed on all the tensors. We turn the resulting recording
-            into a Torch Script method that is installed as the ``forward`` method of a
+            into a TorchScript method that is installed as the ``forward`` method of a
             ScriptModule. This module also contains any parameters that the original
             module had as well.
 
@@ -978,11 +1022,11 @@ if _enabled:
 
         **Scripting:**
 
-            You can write Torch Script code directly using Python syntax. You do this
+            You can write TorchScript code directly using Python syntax. You do this
             using the ``torch.jit.script`` annotation (for functions) or
             ``torch.jit.script_method`` annotation (for methods) on subclasses of
             ScriptModule. With this annotation the body of the annotated function is
-            directly translated into Torch Script. Torch Script itself is a subset of
+            directly translated into TorchScript. TorchScript itself is a subset of
             the Python language, so not all features in python work, but we provide
             enough functionality to compute on tensors and do control-dependent
             operations.
@@ -1061,7 +1105,13 @@ if _enabled:
                 if isinstance(value, Module) and _is_weak_type(type(value)):
                     # Compile weak script module
                     value = _make_strong(value)
+                if attr == 'training':
+                    if self._has_buffer('training'):
+                        self.__dict__['training'] = value
+                        self._get_parameter('training').fill_(int(value))
+                        return
                 return super(ScriptModule, self).__setattr__(attr, value)
+
             if hasattr(self, attr):
                 raise RuntimeError("attempting to re-assign constant '{}'".format(attr))
             if isinstance(value, ModuleList):
@@ -1097,17 +1147,25 @@ if _enabled:
             self.__dict__['_initialized'] = False
             super(WeakScriptModuleProxy, self).__init__()
 
-            # Copy constants
             self.__dict__["_original"] = weakref.ref(original)
-            self.__dict__["_constants_set"] = set(getattr(original, "__constants__", []))
 
             # Copy Parameters / Modules / Buffers
             for name in dir(original):
                 item = getattr(original, name)
-                if isinstance(item, Parameter) or (isinstance(item, Module) and item is not self):
+                if item is None and name in original._parameters:
+                    # XXX: treat None value simply as module attributes instead of adding them to the parameter list
+                    # TODO: need to handle this more generally when non-tensor attributes added to module
+                    object.__setattr__(self, name, item)
+                elif isinstance(item, Parameter) or (isinstance(item, Module) and item is not self):
                     ScriptModule.__setattr__(self, name, item)
             for name in original._buffers:
-                self.register_buffer(name, original._buffers[name])
+                if original._buffers[name] is None:
+                    object.__setattr__(self, name, None)
+                else:
+                    self.register_buffer(name, original._buffers[name])
+
+            # Copy constants
+            self.__dict__["_constants_set"] = set(getattr(original, "__constants__", []))
 
             self.__dict__["_initialized"] = True
             _create_methods_from_stubs(self, stubs)
@@ -1336,7 +1394,7 @@ def _should_skip(mod, name):
     func = getattr(torch.nn.functional, name)
     if func is None:
         return False
-    return func in _compiled_weak_fns
+    return func in _compiled_weak_fns or func in _boolean_dispatched
 
 
 def _unwrap_optional(x):
@@ -1366,6 +1424,15 @@ def _get_builtin_table():
     _builtin_table[id(_quadruple)] = "aten::_quadruple"
     _builtin_table[id(_list_with_default)] = "aten::list_with_default"
     _builtin_table[id(_unwrap_optional)] = "aten::_unwrap_optional"
+    _builtin_table[id(cudnn.is_acceptable)] = "aten::cudnn_is_acceptable"
+    _builtin_table[id(torch._C._infer_size)] = "aten::_infer_size"
+    _builtin_table[id(torch.nn.functional._no_grad_embedding_renorm_)] = "aten::_no_grad_embedding_renorm_"
+
+    _builtin_table[id(math.floor)] = "aten::floor"
+    _builtin_table[id(torch.nn.functional.interpolate)] = "aten::__interpolate"
+    _builtin_table[id(torch.nn.functional.upsample_nearest)] = "aten::__upsample_nearest"
+    _builtin_table[id(torch.nn.functional.upsample)] = "aten::__upsample"
+    _builtin_table[id(torch.nn.functional.upsample_bilinear)] = "aten::__upsample_bilinear"
 
     return _builtin_table
 
@@ -1379,8 +1446,6 @@ def _find_builtin(fn):
 
 
 _register_builtin(len, 'aten::len')
-
-
 _register_builtin(_wait, 'aten::wait')
 
 # torch.jit.Error

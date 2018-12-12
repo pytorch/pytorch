@@ -304,6 +304,19 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
     CopyBytes<SrcContext, DstContext>(n * meta.itemsize(), src, dst);
   }
 
+  static void CopyBytesAsync(
+      size_t nbytes,
+      const void* src,
+      Device src_device,
+      void* dst,
+      Device dst_device);
+  static void CopyBytesSync(
+      size_t nbytes,
+      const void* src,
+      Device src_device,
+      void* dst,
+      Device dst_device);
+
   // By default CUDA operators have async device parts
   static bool HasAsyncPartDefault() {
     return true;
@@ -336,24 +349,6 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
   curandGenerator_t curand_generator_{nullptr};
   static ThreadLocalCUDAObjects& getCudaObjects();
 };
-
-// For the CPU context, we also allow a (probably expensive) function
-// to copy the data from a cuda context. Inside the function, we create
-// a temporary CUDAContext object to carry out the copy. From the caller's
-// side, these functions are synchronous with respect to the host, similar
-// to a normal CPUContext::CopyBytes<CPUContext, CPUContext> call.
-template<>
-inline void CPUContext::CopyBytes<CUDAContext, CPUContext>(
-    size_t nbytes, const void* src, void* dst) {
-  CUDAContext context(GetGPUIDForPointer(src));
-  context.CopyBytes<CUDAContext, CPUContext>(nbytes, src, dst);
-}
-template<>
-inline void CPUContext::CopyBytes<CPUContext, CUDAContext>(
-    size_t nbytes, const void* src, void* dst) {
-  CUDAContext context(GetGPUIDForPointer(dst));
-  context.CopyBytes<CPUContext, CUDAContext>(nbytes, src, dst);
-}
 
 /**
  * An allocator that does the CPU memory allocation with pinned memory.

@@ -96,9 +96,7 @@ class AsyncInputIsOutputTest : public AsyncTest {
 
   void wait(std::shared_ptr<ProcessGroup::Work>& work) {
     at::cuda::CUDAMultiStreamGuard guard(streams_);
-    if (!work->wait()) {
-      throw work->exception();
-    }
+    work->wait();
   }
 
   std::vector<at::Tensor> getTensors() {

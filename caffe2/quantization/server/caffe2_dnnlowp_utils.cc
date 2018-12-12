@@ -67,7 +67,8 @@ TensorQuantizationParams GetInputTensorQuantizationParamsOf(
     CAFFE_ENFORCE(tensor->numel() == 0 || tensor->template data<float>());
 
     float min, max;
-    FindMinMax(tensor->template data<float>(), &min, &max, tensor->numel());
+    fbgemm::FindMinMax(
+        tensor->template data<float>(), &min, &max, tensor->numel());
 
     return qfactory->ChooseQuantizationParams(min, max, is_weight);
   }
@@ -142,7 +143,8 @@ const T* QuantizeInputIfNeeded(
     // Need to quantize
     const TensorCPU& tensor = op->Input<Tensor>(input_index, CPU);
     temp.resize(tensor.numel());
-    Quantize<T>(tensor.data<float>(), temp.data(), temp.size(), qparams);
+    fbgemm::Quantize<T>(
+        tensor.data<float>(), temp.data(), temp.size(), qparams);
     return temp.data();
   }
 }
@@ -165,7 +167,7 @@ const T* RowWiseQuantizeInputIfNeeded(
     int rowwidth = temp.size() / N;
     // quantize each row
     for (int i = 0; i < N; i++) {
-      Quantize<T>(
+      fbgemm::Quantize<T>(
           tensor.data<float>() + rowwidth * i,
           temp.data() + rowwidth * i,
           rowwidth,

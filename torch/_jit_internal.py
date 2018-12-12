@@ -23,6 +23,10 @@ _weak_modules = weakref.WeakKeyDictionary()
 # Types that have been declared as weak modules
 _weak_types = weakref.WeakKeyDictionary()
 
+# Wrapper functions that can call either of 2 functions depending on a boolean
+# argument
+_boolean_dispatched = weakref.WeakKeyDictionary()
+
 COMPILATION_PENDING = object()
 COMPILED = object()
 
@@ -104,3 +108,94 @@ def weak_script_method(fn):
         "original_method": fn
     }
     return fn
+
+
+def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
+    """
+    Dispatches to either of 2 weak script functions based on a boolean argument.
+    In TorchScript, the boolean argument must be constant so that the correct
+    function to use can be determined at compile time.
+    """
+    if _compiled_weak_fns.get(if_true) is None or _compiled_weak_fns.get(if_false) is None:
+        raise RuntimeError("both functions must be weak script")
+
+    def fn(*args, **kwargs):
+        dispatch_flag = False
+        if arg_name in kwargs:
+            dispatch_flag = kwargs[arg_name]
+        elif arg_index < len(args):
+            dispatch_flag = args[arg_index]
+
+        if dispatch_flag:
+            return if_true(*args, **kwargs)
+        else:
+            return if_false(*args, **kwargs)
+
+    if if_true.__doc__ is None and if_false.__doc__ is not None:
+        doc = if_false.__doc__
+        if_true.__doc__ = doc
+    elif if_false.__doc__ is None and if_true.__doc__ is not None:
+        doc = if_true.__doc__
+        if_false.__doc__ = doc
+    else:
+        raise RuntimeError("only one function can have a docstring")
+    fn.__doc__ = doc
+
+    _boolean_dispatched[fn] = {
+        "if_true": if_true,
+        "if_false": if_false,
+        "index": arg_index,
+        "default": default,
+        "arg_name": arg_name
+    }
+    return fn
+
+
+try:
+    import typing
+    from typing import Tuple, List
+
+    def is_tuple(ann):
+        # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
+        return ann.__module__ == 'typing' and \
+            (getattr(ann, '__origin__', None) is typing.Tuple or
+             getattr(ann, '__origin__', None) is tuple)
+except ImportError:
+    # A minimal polyfill for versions of Python that don't have typing.
+    # Note that this means that they also don't support the fancy annotation syntax, so
+    # those instances will only be used in our tiny `type: ` comment interpreter.
+
+    # The __getitem__ in typing is implemented using metaclasses, but I'm too lazy for that.
+    class TupleCls(object):
+        def __getitem__(self, types):
+            return TupleInstance(types)
+
+    class TupleInstance(object):
+        def __init__(self, types):
+            setattr(self, '__args__', types)
+
+    class ListInstance(object):
+        def __init__(self, types):
+            setattr(self, '__args__', types)
+
+    class ListCls(object):
+        def __getitem__(self, types):
+            return TupleInstance(types)
+
+    Tuple = TupleCls()
+    List = ListCls()
+
+    def is_tuple(ann):
+        return isinstance(ann, TupleInstance)
+
+
+# allows BroadcastingList instance to be subscriptable
+class BroadcastingListCls(object):
+    def __getitem__(self, types):
+        return
+
+# mypy doesn't support parameters on types, so we have to explicitly type each
+# list size
+BroadcastingList1 = BroadcastingListCls()
+for i in range(2, 7):
+    globals()["BroadcastingList{}".format(i)] = BroadcastingList1

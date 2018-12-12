@@ -27,12 +27,6 @@
         }
       },
       {
-        "path": "aten/src/TH/generic/THTensorMath.cpp",
-        "constants": {
-          "_OPENMP": "_OPENMP_STUB"
-        }
-      },
-      {
         "path": "aten/src/ATen/native/cuda/Distributions.cu",
         "s_constants": {
           "#include <nvfunctional>": ""
@@ -85,12 +79,6 @@
         }
       },
       {
-        "path": "aten/src/ATen/Context.h",
-        "s_constants": {
-            "detail::getCUDAHooks().getNumGPUs()": "1"
-        }
-      },
-      {
         "path": "aten/src/ATen/native/cuda/Unique.cu",
         "s_constants": {
             "inverse_indices_kernel<<<": "inverse_indices_kernel<scalar_t><<<"
@@ -104,12 +92,6 @@
       "path": "aten/src/ATen/cuda/CUDAApplyUtils.cuh",
       "functions": [
         "kernelPointwiseApply4"
-      ]
-    },
-    {
-      "path": "aten/src/ATen/cuda/detail/IndexUtils.cu",
-      "non_device_functions": [
-        "maybeOverlappingIndices"
       ]
     },
     {

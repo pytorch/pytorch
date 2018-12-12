@@ -29,6 +29,9 @@ enum class DeviceType : int16_t {
   ONLY_FOR_TEST = 20901, // This device type is only for test.
 };
 
+// define explicit int constant
+constexpr int COMPILE_TIME_MAX_DEVICE_TYPES =
+    static_cast<int>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES);
 C10_API std::string DeviceTypeName(
     DeviceType d,
     bool lower_case = false);
@@ -46,9 +49,3 @@ template <> struct hash<c10::DeviceType> {
   }
 };
 } // namespace std
-
-// TODO: Remove me when we get a global c10 namespace using in at
-namespace at {
-using c10::DeviceType;
-using c10::DeviceTypeName;
-}

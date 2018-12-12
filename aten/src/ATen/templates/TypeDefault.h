@@ -2,7 +2,7 @@
 
 // ${generated_comment}
 
-#include "ATen/TypeExtendedInterface.h"
+#include <ATen/TypeExtendedInterface.h>
 
 namespace at {
 
@@ -15,8 +15,11 @@ struct CAFFE2_API TypeDefault : public TypeExtendedInterface {
   bool is_cuda() const override {
     return backend() == Backend::CUDA || backend() == Backend::SparseCUDA;
   }
+  bool is_hip() const override {
+    return backend() == Backend::HIP || backend() == Backend::SparseHIP;
+  }
   bool is_sparse() const override {
-    return backend() == Backend::SparseCPU || backend() == Backend::SparseCUDA;
+    return backend() == Backend::SparseCPU || backend() == Backend::SparseCUDA || backend() == Backend::SparseHIP;
   }
   bool is_distributed() const override {
     return false;
@@ -39,7 +42,6 @@ struct CAFFE2_API TypeDefault : public TypeExtendedInterface {
   Tensor tensorFromBlob(void * data, IntList sizes, IntList strides, const std::function<void(void*)> & deleter=noop_deleter) const override;
   Tensor tensorWithAllocator(IntList sizes, Allocator* allocator) const override;
   Tensor tensorWithAllocator(IntList sizes, IntList strides, Allocator* allocator) const override;
-  Tensor scalarTensor(Scalar s) const override;
 
   Storage storage(bool resizable = false) const override;
   Storage storage(size_t size, bool resizable = false) const override;

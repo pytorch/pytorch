@@ -1,13 +1,14 @@
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 
-#include "torch/csrc/jit/python_tracer.h"
-#include "torch/csrc/jit/tracer.h"
-#include "torch/csrc/jit/export.h"
-#include "torch/csrc/jit/pybind.h"
-#include "torch/csrc/utils/python_strings.h"
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include <torch/csrc/jit/python_tracer.h>
+#include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/jit/export.h>
+#include <torch/csrc/jit/pybind.h>
+#include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/lower_tuples.h>
 
-#include "c10/util/Exception.h"
+#include <c10/util/Exception.h>
 
 #include <sstream>
 
@@ -39,6 +40,7 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
     py::function func,
     Stack trace_inputs,
     py::function var_name_lookup_fn,
+    bool force_outplace,
     c10::optional<size_t> num_real_inputs) {
   size_t num_func_inputs = num_real_inputs.value_or(trace_inputs.size());
   auto enter_info = tracer::enter(std::move(trace_inputs));
@@ -46,6 +48,7 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
     AutoGIL ag;
     return py::cast<std::string>(var_name_lookup_fn(var));
   };
+  getTracingState()->force_outplace = force_outplace;
   try {
 
     py::tuple py_inputs(num_func_inputs);
@@ -63,6 +66,8 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
     tracer::exit(toStack(out));
     auto graph = enter_info.first->graph;
     EliminateDeadCode(graph);
+    LowerSimpleTuples(graph);
+
     return graph;
   } catch (...) {
     tracer::abandon();
@@ -166,6 +171,11 @@ void initPythonTracerBindings(PyObject* module) {
       AutoGIL ag;
       return py::cast<std::string>(func(var));
     };
+  });
+  m.def("_tracer_set_force_outplace", [](bool force_outplace) {
+    auto tracing_state = getTracingState();
+    JIT_ASSERT(tracing_state);
+    tracing_state->force_outplace = force_outplace;
   });
 }
 
