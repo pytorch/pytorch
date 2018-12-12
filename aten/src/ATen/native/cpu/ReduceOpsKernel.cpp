@@ -58,6 +58,9 @@ struct NormReduction {
     }
     if (!dim.has_value()) {
       *out_ = reduce_all(data_, numel,  pval);
+      if (!(pval == 0 || pval == INFINITY || pval == -INFINITY)) {
+        *out_ = std::pow(*out_, 1.0/pval);
+      }
       return;
     }
     int64_t n = self.size(*dim);
@@ -77,7 +80,7 @@ struct NormReduction {
         int64_t i = bi % stride;
         const scalar_t* data = &data_[b * n * stride + i];
         out_[bi] = norm_reduce(data, n, stride, pval);
-        if (!(pval == 0 || std::isinf(pval))) {
+        if (!(pval == 0 || pval == INFINITY || pval == -INFINITY)) {
           out_[bi] = std::pow(out_[bi], 1.0/pval);
         }
       }
@@ -86,7 +89,7 @@ struct NormReduction {
 
   static scalar_t reduce_all(const scalar_t* data_, int64_t size,  float pval) {
     scalar_t result = 0;
-    if (std::isinf(pval)){
+    if (pval == INFINITY || pval == -INFINITY){
       result = norm_reduce_sequential(data_, size, 1, pval);
     } else {
       result = parallel_reduce(
@@ -101,9 +104,6 @@ struct NormReduction {
           return result_local;
         },
         std::plus<scalar_t>());
-      if (pval != 0) {
-        result = std::pow(result, 1.0/pval);
-      }
     }
     return result;
   }
