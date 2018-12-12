@@ -96,6 +96,24 @@ DataRandomFiller::DataRandomFiller(
       }
     }
 
+    // the output shape of Slice op must match with the input shape of
+    // next op which is Cast
+    if (op.type() == "Cast") {
+      const auto& prev_op = run_net.op(i - 1);
+      if (prev_op.type() == "Slice") {
+        inputs_[prev_op.input(1)].first.FixedValue({0, 0});
+        inputs_[prev_op.input(2)].first.FixedValue(input_dims[i][0]);
+      }
+    }
+
+    if (op.type() == "ConcatAddMulReplaceNaNClip") {
+      const auto& prev_op = run_net.op(i - 1);
+      if (prev_op.type() == "Slice") {
+        inputs_[prev_op.input(1)].first.FixedValue({0, 0});
+        inputs_[prev_op.input(2)].first.FixedValue(input_dims[i][2]);
+      }
+    }
+
     for (size_t j = 0; j < op.output_size(); ++j) {
       output_names.emplace(op.output(j));
     }
