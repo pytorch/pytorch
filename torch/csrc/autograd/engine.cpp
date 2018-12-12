@@ -27,17 +27,15 @@
 #include <queue>
 #include <TH/TH.h>
 
-#if defined(USE_CUDA) || defined(USE_ROCM)
 #ifdef USE_CUDA
 #include <cuda.h>
 #include <c10/cuda/CUDAGuard.h>
 #endif  // USE_CUDA
+
 #ifdef USE_ROCM
 #include <hip/hip_runtime.h>
 #include <ATen/cuda/detail/CUDAHIPCompat.h>
 #endif  // USE_ROCM
-#include <THC/THC.h>
-#endif  // defined(USE_CUDA) || defined(USE_ROCM)
 
 namespace torch { namespace autograd {
 

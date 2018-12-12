@@ -31,20 +31,15 @@ C10_DECLARE_bool(caffe2_keep_on_shrink);
 // respect caffe2_keep_on_shrink.
 C10_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
 
-namespace caffe2 {
 
-// Defined by protobuf
-class DeviceOption;
-
+namespace at {
+class Tensor;
+struct Type;
 }
 
 namespace c10 {
 class Scalar;
 struct Storage;
-}
-namespace at {
-struct Type;
-class Tensor;
 
 /**
  * A utility function to convert vector<int> to vector<int64_t>.
@@ -111,101 +106,27 @@ using PlacementDtor = void (*)(void*, size_t);
  * data pointer before the DataPtr is destructed.
  * `data_ptr_` owns the memory.
  */
-struct CAFFE2_API PlacementDeleteContext {
-  at::DataPtr data_ptr_;
+struct C10_API PlacementDeleteContext {
+  DataPtr data_ptr_;
   PlacementDtor placement_dtor_;
   size_t size_;
   PlacementDeleteContext(
-      at::DataPtr&& data_ptr,
+      DataPtr&& data_ptr,
       PlacementDtor placement_dtor,
       size_t size)
       : data_ptr_(std::move(data_ptr)),
         placement_dtor_(placement_dtor),
         size_(size) {}
-  static at::DataPtr makeDataPtr(
-      at::DataPtr&& data_ptr,
+  static DataPtr makeDataPtr(
+      DataPtr&& data_ptr,
       PlacementDtor placement_dtor,
       size_t size,
-      at::Device device);
+      Device device);
   ~PlacementDeleteContext() {
     placement_dtor_(data_ptr_.get(), size_);
     // original memory will be freed when data_ptr_ is destructed
   }
 };
-
-namespace detail {
-  // This is intended to be a centralized location by which we can determine
-  // what an appropriate TensorTypeId for a tensor is.
-  //
-  // This takes a TensorOptions, rather than just a DeviceType and Layout, because
-  // we reserve the right to change dispatch based on *any* aspect of
-  // TensorOptions.  WARNING: If you do this, you need to fix the calls
-  // to computeTensorTypeId in caffe2/tensor.h
-  inline TensorTypeId computeTensorTypeId(TensorOptions options) {
-    switch (options.layout()) {
-      case Layout::Strided:
-        switch (options.device().type()) {
-          case DeviceType::CPU:
-            return CPUTensorId();
-          case DeviceType::CUDA:
-            return CUDATensorId();
-          case DeviceType::MKLDNN:
-            return MKLDNNTensorId();
-          case DeviceType::OPENGL:
-            return OpenGLTensorId();
-          case DeviceType::OPENCL:
-            return OpenCLTensorId();
-          case DeviceType::IDEEP:
-            return IDEEPTensorId();
-          case DeviceType::HIP:
-            return HIPTensorId();
-          default:
-            AT_ERROR("Unsupported device type for dense layout: ", options.device().type());
-        }
-      case Layout::Sparse:
-        switch (options.device().type()) {
-          case DeviceType::CPU:
-            return SparseCPUTensorId();
-          case DeviceType::CUDA:
-            return SparseCUDATensorId();
-          case DeviceType::HIP:
-            return SparseHIPTensorId();
-          default:
-            AT_ERROR("Unsupported device type for sparse layout: ", options.device().type());
-        }
-      default:
-        AT_ERROR("Unsupported layout: ", options.layout());
-    }
-  }
-
-  inline DeviceType computeDeviceType(TensorTypeId tid) {
-    if (tid == CPUTensorId()) {
-      return DeviceType::CPU;
-    } else if (tid == CUDATensorId()) {
-      return DeviceType::CUDA;
-    } else if (tid == HIPTensorId()) {
-      return DeviceType::HIP;
-    } else if (tid == MKLDNNTensorId()) {
-      return DeviceType::MKLDNN;
-    } else if (tid == OpenGLTensorId()) {
-      return DeviceType::IDEEP;
-    } else if (tid == OpenCLTensorId()) {
-      return DeviceType::OPENCL;
-    } else if (tid == IDEEPTensorId()) {
-      return DeviceType::IDEEP;
-    } else if (tid == HIPTensorId()) {
-      return DeviceType::HIP;
-    } else if (tid == SparseCPUTensorId()) {
-      return DeviceType::CPU;
-    } else if (tid == SparseCUDATensorId()) {
-      return DeviceType::CUDA;
-    } else if (tid == SparseHIPTensorId()) {
-      return DeviceType::HIP;
-    } else {
-      AT_ASSERTM(false, "Unknown TensorTypeId: ", tid);
-    }
-  }
-} // namespace detail
 
 /**
  * The low-level representation of a tensor, which contains a pointer
@@ -278,7 +199,7 @@ namespace detail {
  *    tensor is fully initialized in all fields.  Please do not write new code
  *    that depends on these uninitialized states.
  */
-struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
+struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl() = delete;
 
   /**
@@ -372,7 +293,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   virtual const Storage& storage() const;
 
   // TODO: Delete me.
-  friend struct Type;
+  friend struct at::Type;
 
   /**
    * The number of elements in a tensor.
@@ -449,7 +370,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         return mystorage.device();
       }
     }
-    const auto device_type = detail::computeDeviceType(tid);
+    const auto device_type = computeDeviceType(tid);
     bool not_cpu = device_type != DeviceType::CPU;
     return Device(device_type, not_cpu ? get_device() : -1);
   }
@@ -592,7 +513,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * It is only valid to call this method on a Variable.
    * See Note [Tensor versus Variable in C++].
    */
-  virtual Tensor& grad();
+  virtual at::Tensor& grad();
 
   /**
    * Return the accumulated gradient of a tensor.  This gradient is written
@@ -601,7 +522,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * It is only valid to call this method on a Variable.
    * See Note [Tensor versus Variable in C++].
    */
-  virtual const Tensor& grad() const;
+  virtual const at::Tensor& grad() const;
 
   /**
    * Return a typed data pointer to the actual data which this tensor refers to.
@@ -782,7 +703,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * WARNING: It is NOT valid to call this method on a Variable.
    * See Note [We regret making Variable hold a Tensor]
    */
-  void set_sizes_contiguous(at::IntList new_size) {
+  void set_sizes_contiguous(IntList new_size) {
     AT_ASSERT(!is_variable());
     auto old_dim = sizes_.size();
     auto new_dim = new_size.size();
@@ -806,7 +727,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * WARNING: It is NOT valid to call this method on a Variable.
    * See Note [We regret making Variable hold a Tensor]
    */
-  void set_sizes_and_strides(at::IntList new_size, at::IntList new_stride) {
+  void set_sizes_and_strides(IntList new_size, IntList new_stride) {
     AT_ASSERT(!is_variable());
     AT_CHECK(
         new_size.size() == new_stride.size(),
@@ -878,16 +799,16 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * The device type of a Tensor, e.g., DeviceType::CPU or DeviceType::CUDA.
    */
-  at::DeviceType device_type() const {
+  DeviceType device_type() const {
     AT_ASSERT(!is_variable());
     return storage_.device_type();
   }
 
   /**
-   * The device of a Tensor; e.g., Device(at::kCUDA, 1) (the 1-index CUDA
+   * The device of a Tensor; e.g., Device(kCUDA, 1) (the 1-index CUDA
    * device).
    */
-  at::Device GetDevice() const {
+  Device GetDevice() const {
     return storage_.device();
   }
 
@@ -925,7 +846,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       if (data_type_ != src.dtype()) {
         // NB: copy preserves device_type
         // This storage will get initialized by the mutable_data call below.
-        storage_ = at::Storage(device_type(), src.dtype());
+        storage_ = Storage(device_type(), src.dtype());
       }
     }
     data_type_ = src.dtype();
@@ -934,12 +855,12 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     if (numel() > 0) {
       if (data_type_.copy()) {
         AT_ASSERTM(
-            device_type() == ::at::DeviceType::CPU,
+            device_type() == DeviceType::CPU,
             "In CopyFrom source and dest tensors must both be CPU for "
             "non-POD copy, but dest tensor was ",
             device_type());
         AT_ASSERTM(
-            src.device_type() == ::at::DeviceType::CPU,
+            src.device_type() == DeviceType::CPU,
             "In CopyFrom source and dest tensors must both be CPU for "
             "non-POD copy, but src tensor was ",
             src.device_type());
@@ -957,7 +878,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         //
         // note: raw_mutable_data initializes device here
         void* new_data = raw_mutable_data(data_type_);
-        at::CopyBytes(
+        CopyBytes(
             numel() * itemsize(),
             src.data(),
             src.device(),
@@ -1011,7 +932,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     auto* newData = raw_mutable_data(data_type_);
     if (data_type_.copy()) {
       AT_ASSERTM(
-          device_type() == ::at::DeviceType::CPU,
+          device_type() == DeviceType::CPU,
           "non-POD types work only on CPU");
       data_type_.copy()(oldData.get(), newData, oldSize);
     } else {
@@ -1024,7 +945,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       // Specifically, we might need to switch to a different context device
       // here explicitly to avoid relying on user synchronizing things
       // properly.
-      at::CopyBytes(
+      CopyBytes(
           oldSize * itemsize(),
           oldData.get(),
           device(),
@@ -1148,7 +1069,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    */
   inline void FreeMemory() {
     // We'll detach from the old Storage and create a new one
-    storage_ = at::Storage(storage_.device(), data_type_);
+    storage_ = Storage(storage_.device(), data_type_);
     storage_offset_ = 0;
   }
 
@@ -1194,7 +1115,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void ShareExternalPointer(
-      at::DataPtr&& data_ptr,
+      DataPtr&& data_ptr,
       const caffe2::TypeMeta& data_type,
       size_t capacity) {
     AT_ASSERTM(
@@ -1212,7 +1133,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     } else {
       int64_t numel = capacity / data_type.itemsize();
       // Create a new Storage
-      storage_ = at::Storage(data_type, numel, std::move(data_ptr), nullptr, true);
+      storage_ = Storage(data_type, numel, std::move(data_ptr), nullptr, true);
       data_type_ = data_type;
       storage_offset_ = 0;
     }
@@ -1240,7 +1161,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         storage_.set_dtype(meta);
       } else {
         if (data_type_ != meta) {
-          storage_ = at::Storage(storage_.device(), meta);
+          storage_ = Storage(storage_.device(), meta);
         }
       }
       data_type_ = meta;
@@ -1254,7 +1175,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         AT_ASSERT(storage_offset_ == 0); // because we just reallocated
         return storage_.data();
       }
-      const at::Allocator* allocator = storage_.allocator();
+      const Allocator* allocator = storage_.allocator();
       // TODO: Get rid of StaticContext
       if (allocator == nullptr) {
         allocator = caffe2::GetAllocator(storage_.device_type());
@@ -1330,7 +1251,7 @@ private:
   template <
       typename T,
       typename = typename std::enable_if<std::is_integral<T>::value>::type>
-  bool SetDimsTemplate(at::ArrayRef<T> src) {
+  bool SetDimsTemplate(ArrayRef<T> src) {
     auto old_numel = numel_;
     auto old_dim = sizes_.size();
     sizes_.resize(src.size());
@@ -1344,36 +1265,36 @@ private:
     return numel_ != old_numel;
   }
 
-  bool SetDims(at::ArrayRef<int64_t> s) {
+  bool SetDims(ArrayRef<int64_t> s) {
     return SetDimsTemplate(s);
   }
 
-  bool SetDims(at::ArrayRef<int> s) {
+  bool SetDims(ArrayRef<int> s) {
     return SetDimsTemplate(s);
   }
 
-  bool SetDims(at::ArrayRef<size_t> s) {
+  bool SetDims(ArrayRef<size_t> s) {
     return SetDimsTemplate(s);
   }
 
   bool SetDims() {
-    return SetDims(at::IntList{});
+    return SetDims(IntList{});
   }
 
   bool SetDims(const int64_t d0) {
-    return SetDims(at::IntList{d0});
+    return SetDims(IntList{d0});
   }
 
   bool SetDims(const int64_t d0, const int64_t d1) {
-    return SetDims(at::IntList{d0, d1});
+    return SetDims(IntList{d0, d1});
   }
 
   bool SetDims(const int64_t d0, const int64_t d1, const int64_t d2) {
-    return SetDims(at::IntList{d0, d1, d2});
+    return SetDims(IntList{d0, d1, d2});
   }
 
   bool SetDims(const int64_t d0, const int64_t d1, const int64_t d2, const int64_t d3) {
-    return SetDims(at::IntList{d0, d1, d2, d3});
+    return SetDims(IntList{d0, d1, d2, d3});
   }
 
   inline void update_to_contiguous_strides(size_t old_dim) {
@@ -1424,15 +1345,15 @@ protected:
   }
 
 public:
-  at::Storage storage_; // TODO: Fix visibility on me
+  Storage storage_; // TODO: Fix visibility on me
 
 protected:
   // We could save a word or two by combining the SmallVector structs,
   // since their size is redundant, and if we need to overflow the buffer space
   // we could keep the two pointers together. However, that would require
   // implementing another struct from scratch, so only do this if we're desperate.
-  at::SmallVector<int64_t,5> sizes_;
-  at::SmallVector<int64_t,5> strides_;
+  SmallVector<int64_t,5> sizes_;
+  SmallVector<int64_t,5> strides_;
 
   int64_t storage_offset_ = 0;
   // If sizes and strides are empty, the numel is 1!!  However, most of the
@@ -1514,4 +1435,4 @@ static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
 
-} // namespace at
+} // namespace c10

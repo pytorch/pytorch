@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/Tensor.h>
-#include <ATen/core/TensorImpl.h>
+#include <c10/core/TensorImpl.h>
 #include <c10/util/Exception.h>
 
 namespace at {

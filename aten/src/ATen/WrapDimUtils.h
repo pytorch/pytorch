@@ -1,7 +1,7 @@
 #pragma once
 
 #include <c10/core/WrapDimMinimal.h>
-#include <ATen/core/TensorImpl.h>
+#include <c10/core/TensorImpl.h>
 
 namespace at {
 
