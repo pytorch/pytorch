@@ -1588,7 +1588,8 @@ def create_extension_backend(backend_type_env, declarations):
                 try:
                     option['formals_types'] = [f['type'] for f in option['formals_list']]
                     option['native_actuals'] = [f['name'] for f in option['formals_list']]
-                    schema_args = ", ".join(["{} {}".format(f['dynamic_type'], f['name']) for f in option['formals_list']])
+                    schema_args = ", ".join(
+                        ["{} {}".format(f['dynamic_type'], f['name']) for f in option['formals_list']])
                     return_type = NATIVE_DYNAMIC_TYPE.get(option['return_type'], option['return_type'])
                     option['schema'] = "{}({}) -> {}".format(option['api_name'], schema_args, return_type)
                     env = nested_dict(option, backend_type_env)
