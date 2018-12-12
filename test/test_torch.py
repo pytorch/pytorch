@@ -3757,7 +3757,7 @@ class _TestTorchMixin(object):
         torch.tril(x, out=res2)
         self.assertEqual(res1, res2, 0)
 
-    def _compare_trilu_indices(self, row, col, offset=0, dtype=torch.uint8):
+    def _compare_trilu_indices(self, row, col, offset=0, dtype=torch.long):
         if row == 0 or col == 0:
             # have to handle this separately as tril and triu does not take
             # empty matrix as input
@@ -3781,7 +3781,6 @@ class _TestTorchMixin(object):
                 torch.triu_indices(row, col, offset, dtype=dtype))
 
     def test_tril_and_triu_indices(self):
-
         self._compare_trilu_indices(1, 1)
         self._compare_trilu_indices(3, 3)
         self._compare_trilu_indices(3, 3, offset=1)
@@ -3817,6 +3816,8 @@ class _TestTorchMixin(object):
         self._compare_trilu_indices(257, 258, offset=1, dtype=torch.float64)
         self._compare_trilu_indices(258, 258, offset=1, dtype=torch.short)
         self._compare_trilu_indices(3, 513, offset=1, dtype=torch.long)
+        self._compare_trilu_indices(513, 3, offset=1, dtype=torch.int)
+        self._compare_trilu_indices(513, 0, offset=1, dtype=torch.double)
 
         x = torch.ones(
             3, 3, dtype=torch.long, device='cpu', layout=torch.strided)

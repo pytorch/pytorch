@@ -5006,9 +5006,10 @@ the main diagonal. The main diagonal are the set of indices
 where :math:`d_{1}, d_{2}` are the dimensions of the matrix.
 
 Args:
-    row (``int...``): number of rows in the 2-D matrix.
-    column (``int...``): number of columns in the 2-D matrix.
-    offset (``int...``): diagonal offset from the main diagonal.
+    row (``int``): number of rows in the 2-D matrix.
+    column (``int``): number of columns in the 2-D matrix.
+    offset (``int``): diagonal offset from the main diagonal.
+        Default: if not provided, 0.
     dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
         Default: if ``None``, ``torch.long``.
     device (:class:`torch.device`, optional): currently only support ``cpu``.
@@ -5115,9 +5116,10 @@ the main diagonal. The main diagonal are the set of indices
 where :math:`d_{1}, d_{2}` are the dimensions of the matrix.
 
 Args:
-    row (``int...``): number of rows in the 2-D matrix.
-    column (``int...``): number of columns in the 2-D matrix.
-    offset (``int...``): diagonal offset from the main diagonal.
+    row (``int``): number of rows in the 2-D matrix.
+    column (``int``): number of columns in the 2-D matrix.
+    offset (``int``): diagonal offset from the main diagonal.
+        Default: if not provided, 0.
     dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
         Default: if ``None``, ``torch.long``.
     device (:class:`torch.device`, optional): currently only support ``cpu``.
