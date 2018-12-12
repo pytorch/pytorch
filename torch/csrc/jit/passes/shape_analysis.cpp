@@ -437,6 +437,7 @@ class ShapePropagator {
       case prim::PythonOp:
       case prim::Print:
       case prim::RaiseException:
+      case aten::warn:
       case prim::Undefined: {
         setUnshapedType(node);
         return;
