@@ -760,25 +760,14 @@ if(USE_ROCM)
     hip_include_directories(${Caffe2_HIP_INCLUDE})
 
     set(Caffe2_HIP_DEPENDENCY_LIBS
-      ${rocrand_LIBRARIES} ${hiprand_LIBRARIES} ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES})
-    # Additional libraries required by PyTorch AMD that aren't used by Caffe2 (not in Caffe2's docker image)
-    if(NOT BUILD_ATEN_MOBILE)
-      set(Caffe2_HIP_DEPENDENCY_LIBS ${Caffe2_HIP_DEPENDENCY_LIBS} ${hipsparse_LIBRARIES})
-    endif()
-    # Note [rocblas cmake bug]
-    # ~~~~~~~~~~~~~~~~~~~~~~~~
-    # TODO: There is a bug in rocblas's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
+      ${rocrand_LIBRARIES} ${hiprand_LIBRARIES} ${hipsparse_LIBRARIES} ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES})
+
+    # Note [rocblas & rocfft cmake bug]
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # TODO: There is a bug in rocblas's & rocfft's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
     # If you get this wrong, you'll get a complaint like 'ld: cannot find -lrocblas-targets'
     list(APPEND Caffe2_HIP_DEPENDENCY_LIBS
-      roc::rocblas)
-
-    # TODO: Currently pytorch hipify script uses a feature called
-    # "disabled_modules" that effectively ifdef out a file, but
-    # without doing extra processing in the callers, which results in
-    # some unresolved symbols in the shared lib
-    # (libcaffe2_hip.so). Remove this when all disabled_modules are
-    # eliminated.
-    set(CMAKE_EXE_LINKER_FLAGS "-Wl,--unresolved-symbols=ignore-in-shared-libs ${CMAKE_EXE_LINKER_FLAGS}")
+      roc::rocblas roc::rocfft)
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()
