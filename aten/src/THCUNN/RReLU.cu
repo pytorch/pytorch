@@ -12,25 +12,25 @@
 #define NUM_BLOCKS(n) min((int)THCCeilDiv(n, (ptrdiff_t) BLOCK_SIZE), MAX_NUM_BLOCKS)
 
 template<typename T>
-inline T __device__ curand_uniform_type(curandStateMtgp32 *state);
+inline T __device__ curand_uniform_type(curandStateMtgp32_t *state);
 
 template <>
-inline THHalf __device__ curand_uniform_type<THHalf>(curandStateMtgp32 *state) {
+inline THHalf __device__ curand_uniform_type<THHalf>(curandStateMtgp32_t *state) {
   return ScalarConvert<float, THHalf>::to(curand_uniform(state));
 }
 
 template <>
-inline float __device__ curand_uniform_type<float>(curandStateMtgp32 *state) {
+inline float __device__ curand_uniform_type<float>(curandStateMtgp32_t *state) {
   return curand_uniform(state);
 }
 
 template <>
-inline double __device__ curand_uniform_type<double>(curandStateMtgp32 *state) {
+inline double __device__ curand_uniform_type<double>(curandStateMtgp32_t *state) {
   return curand_uniform_double(state);
 }
 
 template <typename T>
-__global__ void rreluUpdateOutputTrain(int n, curandStateMtgp32 *state,
+__global__ void rreluUpdateOutputTrain(int n, curandStateMtgp32_t *state,
   T *input, T* noise, T *output, double a, double b)
 {
   CUDA_KERNEL_LOOP(i, n)

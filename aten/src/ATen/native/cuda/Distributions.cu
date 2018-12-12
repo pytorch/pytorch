@@ -9,7 +9,9 @@
 #include <curand_philox4x32_x.h>
 #include <utility>
 #include <functional>
+#ifndef __HIP_PLATFORM_HCC__
 #include <nvfunctional>
+#endif
 
 #include <ATen/native/Distributions.h>
 
