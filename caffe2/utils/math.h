@@ -413,7 +413,7 @@ RandUniform(const size_t n, const T a, const T b, T* r, Context* context);
 // Generate n values that sum up to a fixed sum
 // and subject to a restriction a <= x <= b for each x generated
 template <typename T, class Context>
-CAFFE2_API void RandFixedSum(
+void RandFixedSum(
     const size_t n,
     const T a,
     const T b,
@@ -422,7 +422,7 @@ CAFFE2_API void RandFixedSum(
     Context* context);
 
 template <typename T, class Context>
-CAFFE2_API void RandUniformUnique(
+void RandUniformUnique(
     const size_t n,
     const T a,
     const T b,
@@ -434,11 +434,11 @@ CAFFE2_API void RandUniformUnique(
 // Generate n values from synthetic data distribution,
 // define by unique accesses and stack distances
 template <typename T, class Context>
-CAFFE2_API void
+void
 RandSyntheticData(const size_t n, const T a, const T b, T* r, Context* context);
 
 template <typename T, class Context>
-CAFFE2_API void
+void
 RandGaussian(const size_t n, const T mean, const T std, T* r, Context* context);
 
 // Dot matrix of vector a and b, and writes the result to a single value y.
