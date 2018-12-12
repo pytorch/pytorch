@@ -490,7 +490,7 @@ namespace {
         const Tensor& weight_buf, cudnnHandle_t handle, const RNNDescriptorParams& rnn,
         const RNNDescriptor& rnn_desc, const TensorDescriptor& x_desc, cudnnDataType_t datatype) {
     FilterDescriptor w_desc;
-    w_desc.set(weight_buf, 3);
+    w_desc.set(weight_buf, Layout::NCF, 3);
 
     int64_t num_linear_layers = _num_linear_layers(rnn.mode);
     int64_t num_dir_layers = rnn.num_directions() * rnn.num_layers;
@@ -633,7 +633,7 @@ Tensor _cudnn_rnn_flatten_weight(
   auto weight_buf = at::zeros(num_weights, any_param.options());
 
   FilterDescriptor w_desc;
-  w_desc.set(weight_buf, 3);
+  w_desc.set(weight_buf, Layout::NCF, 3);
 
   // Slice off views into weight_buf
   std::vector<Tensor> params_arr;
@@ -724,7 +724,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   if (!weight_buf.defined()) {
     auto num_weights = get_num_weights(handle, descs.rnn_desc, descs.x_descs[0], fn.rnn.datatype);
     weight_buf = at::empty(num_weights, x.options());
-    w_desc.set(weight_buf, 3);
+    w_desc.set(weight_buf, Layout::NCF, 3);
     weight_buf.zero_();
     std::vector<Tensor> params;
     size_t params_stride0;
@@ -732,7 +732,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     _copyParams(MatrixRef<Tensor>{weight, static_cast<size_t>(weight_stride0)},
                 MatrixRef<Tensor>{params, params_stride0});
   } else {
-    w_desc.set(weight_buf, 3);
+    w_desc.set(weight_buf, Layout::NCF, 3);
   }
 
   AT_CHECK(!cx.defined() || cx.sizes().equals(hidden_size),
@@ -882,7 +882,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
   RNNDescriptors descs(fn, handle, x, y, hx, cx);
 
   FilterDescriptor w_desc;
-  w_desc.set(weight_buf, 3);
+  w_desc.set(weight_buf, Layout::NCF, 3);
 
   size_t workspace_size;
   auto x_descs_arr = descs.get_x_descs();
@@ -986,7 +986,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
   RNNDescriptors descs(fn, handle, x, y, hx, cx);
 
   FilterDescriptor w_desc;
-  w_desc.set(weight_buf, 3);
+  w_desc.set(weight_buf, Layout::NCF, 3);
 
   size_t workspace_size;
   auto x_descs_arr = descs.get_x_descs();

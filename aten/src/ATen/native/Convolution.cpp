@@ -295,7 +295,8 @@ at::Tensor _convolution(
     bool transposed_, IntList output_padding_, int64_t groups_,
     bool benchmark, bool deterministic, bool cudnn_enabled) {
 
-  auto input = input_r.contiguous();
+  at::Tensor output;
+  auto input = input_r;
   auto weight = weight_r;
   auto bias = bias_r;
   auto k = weight.ndimension();
@@ -325,18 +326,19 @@ at::Tensor _convolution(
     weight = view4d(weight);
   }
 
-  auto output = at::empty({0}, input.options());
+  const bool is_depthwise = params.is_depthwise(input, weight);
+  const bool use_cudnn = params.use_cudnn(input);
+  if (is_depthwise || !use_cudnn) {
+    // cuDNN path will deal with transposes on its own. We don't enforce this here,
+    // because we want to allow passing in NHWC inputs through this function as well.
+    input = input.contiguous();
+  }
 
-  if (params.is_depthwise(input, weight)) {
-      /* output.resize_(output_size(input, weight)); */
-
+  if (is_depthwise) {
       auto kernel_size = weight.sizes().slice(2);
-      auto stride = params.stride;
-      auto padding = params.padding;
-      auto dilation = params.dilation;
-
-      output = at::thnn_conv_depthwise2d(input, weight, kernel_size, bias, stride, padding, dilation);
-  } else if (params.use_cudnn(input)) {
+      output = at::thnn_conv_depthwise2d(input, weight, kernel_size, bias,
+                                         params.stride, params.padding, params.dilation);
+  } else if (use_cudnn) {
     AT_CHECK(input.type() == weight.type(),
              "Input type (", input.type().toString(), ") and weight type (", weight.type().toString(),
              ") should be the same");
@@ -346,7 +348,7 @@ at::Tensor _convolution(
 
     if (params.transposed) {
       output = at::cudnn_convolution_transpose(
-          input, weight, bias,
+          input.contiguous(), weight, bias,
           params.padding, params.output_padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     } else {
       output = at::cudnn_convolution(

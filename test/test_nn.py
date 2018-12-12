@@ -3889,6 +3889,25 @@ class TestNN(NNTestCase):
         run_test(benchmark=False)
         run_test(benchmark=True)
 
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @repeat_test_for_types(ALL_TENSORTYPES)
+    def test_conv_nhwc(self, dtype):
+        def nhwc(t):
+            return t.permute(0, 2, 3, 1).contiguous().permute(0, 3, 1, 2).detach().requires_grad_()
+
+        x = torch.randn(2, 4, 5, 5, device='cuda', dtype=dtype, requires_grad=True)
+        w = torch.randn(6, 4, 3, 3, device='cuda', dtype=dtype, requires_grad=True)
+        ref_out = F.conv2d(x, w)
+        grad_out = torch.randn_like(ref_out)
+        ref_grads = torch.autograd.grad(ref_out, (x, w), grad_out)
+
+        xc, wc = map(nhwc, (x, w))
+        for xt, wt in ((xc, wc), (xc, w), (x, wc)):
+            out = F.conv2d(xt, wt)
+            self.assertEqual(out, ref_out)
+            grads = torch.autograd.grad(out, (xt, wt), grad_out)
+            self.assertEqual(grads, ref_grads, prec=dtype2prec[dtype])
+
     def test_conv_modules_raise_error_on_incorrect_input_size(self):
         modules = [nn.Conv1d(3, 8, 3), nn.ConvTranspose1d(3, 8, 3),
                    nn.Conv2d(3, 8, 3), nn.ConvTranspose2d(3, 8, 3),

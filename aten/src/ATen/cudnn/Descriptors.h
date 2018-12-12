@@ -4,6 +4,7 @@
 #include <ATen/cuda/Exceptions.h>
 
 #include <ATen/cudnn/cudnn-wrapper.h>
+#include <ATen/cudnn/Layout.h>
 #include <ATen/ATen.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/ATenCUDAGeneral.h>
@@ -175,13 +176,14 @@ class FilterDescriptor
                       &cudnnDestroyFilterDescriptor>
 {
 public:
-  void set(const at::Tensor &t, int64_t pad = 0);
+  // NB: layout cannot be inferred from t, because some tensors are both valid NCHW and NHWC filters
+  void set(const at::Tensor &t, Layout layout, int64_t pad = 0);
 
   void print();
 
 private:
-  void set(cudnnDataType_t dataType, int dim, int* size) {
-    AT_CUDNN_CHECK(cudnnSetFilterNdDescriptor(mut_desc(), dataType, CUDNN_TENSOR_NCHW, dim, size));
+  void set(cudnnDataType_t dataType, int dim, int* size, cudnnTensorFormat_t format) {
+    AT_CUDNN_CHECK(cudnnSetFilterNdDescriptor(mut_desc(), dataType, format, dim, size));
   }
 };
 

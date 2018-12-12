@@ -106,7 +106,7 @@ std::ostream& operator<<(std::ostream & out, const TensorDescriptor& d) {
 
 void TensorDescriptor::print() { std::cout << *this; }
 
-void FilterDescriptor::set(const at::Tensor &t, int64_t pad) {
+void FilterDescriptor::set(const at::Tensor &t, Layout layout, int64_t pad) {
   auto dim = t.ndimension();
   if (dim > CUDNN_DIM_MAX || pad > CUDNN_DIM_MAX)
 #define _STR(X) #X
@@ -114,12 +114,16 @@ void FilterDescriptor::set(const at::Tensor &t, int64_t pad) {
     throw std::runtime_error("cuDNN supports only up to " STR(CUDNN_DIM_MAX) " dimensions");
 #undef _STR
 #undef STR
-  if (!t.is_contiguous()) {
-    // NB: It is possible for this test to be insufficient, because the
-    // Tensor passed in to set the filter descriptor may not be the actual
-    // Tensor whose data pointer is passed to cuDNN.  Nevertheless,
-    // that is the common case, so we can catch most client errors with this test.
-    throw std::runtime_error("cuDNN filters (a.k.a. weights) must be contiguous");
+  // NB: It is possible for this test to be insufficient, because the
+  // Tensor passed in to set the filter descriptor may not be the actual
+  // Tensor whose data pointer is passed to cuDNN.  Nevertheless,
+  // that is the common case, so we can catch most client errors with this test.
+  const char * err = "cuDNN filters (a.k.a. weights) must be contiguous";
+  if (layout == Layout::NCF) {
+    AT_ASSERTM(t.is_contiguous(), err);
+  } else if (layout == Layout::NFC) {
+    // TODO: this is an incomplete check
+    AT_ASSERTM(t.stride(1) == 1, err);
   }
   int size[CUDNN_DIM_MAX];
   for (int i = 0; i < dim; ++i) {
@@ -129,7 +133,7 @@ void FilterDescriptor::set(const at::Tensor &t, int64_t pad) {
     size[i] = (int) 1;
   }
   dim = std::max(dim, pad);
-  set(getDataType(t), (int) dim, size);
+  set(getDataType(t), (int) dim, size, getCudnnTensorFormat(layout));
 }
 
 std::ostream& operator<<(std::ostream & out, const FilterDescriptor& d) {

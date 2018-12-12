@@ -3,6 +3,7 @@
 #include <ATen/Config.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/Exceptions.h>
+#include <ATen/cudnn/Layout.h>
 
 #if !AT_CUDNN_ENABLED()
 
@@ -114,6 +115,7 @@ constexpr int weight_input_channels_dim = 1;
 
 // Often written as 2 + max_dim (extra dims for batch size and channels)
 constexpr int max_dim = 3;
+constexpr int max_all_dims = 5;
 
 // NB: conv_output_size and conv_input_size are not bijections,
 // as conv_output_size loses information; this is why conv_input_size
@@ -796,7 +798,7 @@ void cudnn_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const T
 void raw_cudnn_convolution_forward_out(
     const Tensor& output, const Tensor& input, const Tensor& weight,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
-    bool benchmark, bool deterministic) {
+    bool benchmark, bool deterministic, Layout layout) {
 
   auto dataType = getCudnnDataType(input);
 
@@ -804,7 +806,7 @@ void raw_cudnn_convolution_forward_out(
   args.handle = getCudnnHandle();
   setConvolutionParams(&args.params, input, weight, padding, stride, dilation, groups, deterministic);
   args.idesc.set(input);
-  args.wdesc.set(weight);
+  args.wdesc.set(weight, layout);
   args.odesc.set(output);
   args.cdesc.set(dataType, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
 
@@ -827,39 +829,76 @@ void raw_cudnn_convolution_forward_out(
     &zero, args.odesc.desc(), output.data_ptr()));
 }
 
+// Precondition: layout is either NCF or NFC.
+Tensor allocate_output(at::IntList sizes, Layout layout, const TensorOptions& options) {
+  switch (layout) {
+    case Layout::NCF:
+      return at::empty(sizes, options);
+    case Layout::NFC: {
+      // Allocate contiguous output with sizes in NFC layout
+      AT_ASSERT(sizes.size() >= 3);
+      std::array<int64_t, max_all_dims> transposed_sizes;
+      transposed_sizes[0] = sizes[0];
+      for (int64_t i = 2; i < sizes.size(); ++i) {
+        transposed_sizes[i - 1] = sizes[i];
+      }
+      transposed_sizes[sizes.size() - 1] = sizes[1];
+      auto output = at::empty(ArrayRef<int64_t>(transposed_sizes).slice(0, sizes.size()), options);
+
+      // Permute the dimensions to fix sizes to NCF
+      return output.permute(LayoutPermutation{Layout::NFC, Layout::NCF, sizes.size()});
+    }
+  }
+  AT_ASSERTM(false, "Unhandled layout in allocate_output");
+}
+
+Layout get_input_layout(TensorArg* input_arg) {
+  auto & input = input_arg->tensor;
+  if (auto layout = getLayout(input)) {
+    return *layout;
+  }
+  // For GPUs with WMMA (Tensor cores) it's usually faster to use NFC if
+  // we're paying the cost of a transpose anyway.
+  auto * prop = at::cuda::getCurrentDeviceProperties();
+  bool has_wmma = prop->major >= 7 && input.scalar_type() == at::kHalf;
+  auto layout = has_wmma ? Layout::NFC : Layout::NCF;
+  input = contiguousIn(input, layout);
+  return layout;
+}
+
 Tensor cudnn_convolution_forward(
     CheckedFrom c,
-    const TensorArg& input, const TensorArg& weight,
+    TensorArg input, TensorArg weight,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic)
 {
   checkAllSameType(c, {input, weight});
   checkAllSameGPU(c, {input, weight});
 
-  auto output_t = at::empty(
-                    conv_output_size(input->sizes(), weight->sizes(),
-                                     padding, stride, dilation, groups),
-                    input->options());
+  // XXX: this block can mutate input and weight!
+  Layout layout = get_input_layout(&input);
+  weight.tensor = contiguousIn(*weight, layout); // See #4500
 
-  // Avoid ambiguity of "output" when this is being used as backwards
+  auto output_t = allocate_output(
+      conv_output_size(input->sizes(), weight->sizes(),
+                       padding, stride, dilation, groups),
+      layout, input->options());
   TensorArg output{ output_t, "result", 0 };
-  convolution_shape_check(c, input, weight, output, padding, stride, dilation, groups);
 
-  // See #4500
-  Tensor weight_contig = weight->contiguous();
+  convolution_shape_check(c, input, weight, output, padding, stride, dilation, groups);
 
 #if CUDNN_VERSION < 7000
   for (int i = 0; i < groups; i++) {
     raw_cudnn_convolution_forward_out(
         narrowGroup(*output, output_channels_dim,        i, groups),
         narrowGroup(*input,  input_channels_dim,         i, groups),
-        narrowGroup(weight_contig, weight_output_channels_dim, i, groups),
-        padding, stride, dilation, 1, benchmark, deterministic);
+        narrowGroup(*weight, weight_output_channels_dim, i, groups),
+        padding, stride, dilation, 1, benchmark, deterministic, layout);
   }
 #else
   raw_cudnn_convolution_forward_out(
-      *output, *input, weight_contig,
-      padding, stride, dilation, groups, benchmark, deterministic);
+      *output, *input, *weight,
+      padding, stride, dilation, groups, benchmark, deterministic, layout);
 #endif
 
   return *output;
@@ -876,7 +915,7 @@ Tensor cudnn_convolution(
   setCuDNNStreamToCurrent();
   CheckedFrom c = "cudnn_convolution";
   auto output_t = cudnn_convolution_forward(
-    c, input, weight, padding, stride, dilation, groups, benchmark, deterministic);
+    c, std::move(input), std::move(weight), padding, stride, dilation, groups, benchmark, deterministic);
   if (bias->defined()) {
     cudnn_convolution_add_bias_(c, { output_t, "result", 0 }, bias);
   }
@@ -895,7 +934,7 @@ Tensor cudnn_convolution_transpose_backward_input(
   setCuDNNStreamToCurrent();
   return cudnn_convolution_forward(
     "cudnn_convolution_transpose_backward_input",
-    grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic);
+    std::move(grad_output), std::move(weight), padding, stride, dilation, groups, benchmark, deterministic);
 }
 
 std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_transpose_backward(
@@ -938,7 +977,7 @@ void raw_cudnn_convolution_backward_input_out(
   args.handle = getCudnnHandle();
   setConvolutionParams(&args.params, grad_input, weight, padding, stride, dilation, groups, deterministic);
   args.idesc.set(grad_input);
-  args.wdesc.set(weight);
+  args.wdesc.set(weight, Layout::NCF);
   args.odesc.set(grad_output);
   args.cdesc.set(dataType, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
 
@@ -1084,7 +1123,7 @@ void raw_cudnn_convolution_backward_weight_out(
   args.handle = getCudnnHandle();
   setConvolutionParams(&args.params, input, grad_weight, padding, stride, dilation, groups, deterministic);
   args.idesc.set(input);
-  args.wdesc.set(grad_weight);
+  args.wdesc.set(grad_weight, Layout::NCF);
   args.odesc.set(grad_output);
   args.cdesc.set(dataType, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
 
