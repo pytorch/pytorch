@@ -125,7 +125,6 @@ struct CAFFE2_API Type {
   virtual Tensor tensorFromBlob(void * data, IntList sizes, IntList strides, const std::function<void(void*)> & deleter=noop_deleter) const = 0;
   virtual Tensor tensorWithAllocator(IntList sizes, Allocator* allocator) const = 0;
   virtual Tensor tensorWithAllocator(IntList sizes, IntList strides, Allocator* allocator) const = 0;
-  virtual Tensor scalarTensor(Scalar s) const = 0;
 
   bool operator==(const Type& other) const {
     return this == &other;

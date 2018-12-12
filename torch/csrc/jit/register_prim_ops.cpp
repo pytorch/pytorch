@@ -9,7 +9,6 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/jit/script/jit_exception.h>
-#include <torch/csrc/variable_tensor_functions.h>
 
 #include <ATen/ExpandUtils.h>
 #include <ATen/WrapDimUtils.h>

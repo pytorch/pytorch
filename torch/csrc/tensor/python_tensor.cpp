@@ -16,7 +16,6 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/utils/tensor_types.h>
-#include <torch/csrc/variable_tensor_functions.h>
 
 #include <ATen/ATen.h>
 
@@ -279,7 +278,7 @@ void initialize_python_bindings() {
   py_bind_tensor_types(tensor_types);
 
   // Use torch.float32 as the default tensor type
-  set_default_tensor_type(torch::CPU(kFloat));
+  set_default_tensor_type(at::globalContext().getVariableType(at::Backend::CPU, at::kFloat));
 }
 
 static void py_bind_tensor_types(const std::vector<PyTensorType>& tensor_types) {
