@@ -12,7 +12,7 @@
 /* Separate kernel because curand_log_normal gets extra parameters. */
 
 template <typename T>
-__global__ void generateLogNormal(curandStateMtgp32_t *state, int size, T *result, double mean, double stddev)
+__global__ void generateLogNormal(curandStateMtgp32 *state, int size, T *result, double mean, double stddev)
 {
   int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;
   int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;
@@ -25,7 +25,7 @@ __global__ void generateLogNormal(curandStateMtgp32_t *state, int size, T *resul
 }
 
 template <>
-__global__ void generateLogNormal<double>(curandStateMtgp32_t *state, int size, double *result, double mean, double stddev)
+__global__ void generateLogNormal<double>(curandStateMtgp32 *state, int size, double *result, double mean, double stddev)
 {
   int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;
   int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;
@@ -294,7 +294,7 @@ sampleMultinomialOnce(int64_t* dest,
 
 template <typename T>
 __global__ void
-sampleMultinomialWithReplacement(curandStateMtgp32_t* state,
+sampleMultinomialWithReplacement(curandStateMtgp32* state,
                                  int totalSamples,
                                  int64_t* dest,
                                  int64_t distributions,
@@ -334,7 +334,7 @@ sampleMultinomialWithReplacement(curandStateMtgp32_t* state,
 
 template <typename T>
 __global__ void
-sampleMultinomialWithoutReplacement(curandStateMtgp32_t* state,
+sampleMultinomialWithoutReplacement(curandStateMtgp32* state,
                                     int totalSamples,
                                     int sample,
                                     int64_t* dest,

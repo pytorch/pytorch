@@ -7,7 +7,7 @@
 #include <mutex>
 
 typedef struct THCGeneratorState {
-  curandStateMtgp32_t* gen_states;
+  curandStateMtgp32* gen_states;
   mtgp32_kernel_params *kernel_params;
   int initf;
   uint64_t initial_seed;
