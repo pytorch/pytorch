@@ -4,11 +4,11 @@
 #include <math.h>
 #endif
 
-#include "ATen/ATen.h"
-#include "ATen/Config.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/detail/CUDAHooksInterface.h"
-#include "ATen/native/SpectralOpsUtils.h"
+#include <ATen/ATen.h>
+#include <ATen/Config.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/native/SpectralOpsUtils.h>
 
 #include <algorithm>
 #include <vector>

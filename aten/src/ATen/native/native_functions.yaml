@@ -439,10 +439,21 @@
 
 - func: conv_transpose3d(Tensor input, Tensor weight, Tensor? bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, int64_t groups=1, IntList[3] dilation=1) -> Tensor
 
-- func: _copy_(Tensor self, Tensor src) -> Tensor
+- func: s_copy_(Tensor self, Tensor src, bool non_blocking=false) -> Tensor
   cpu_half: True
   dispatch:
-    CPU: _copy__cpu
+    CPU: _s_copy__cpu
+    CUDA: _s_copy__cuda
+
+- func: _s_copy_from(Tensor self, Tensor dst, bool non_blocking=false) -> Tensor
+  cpu_half: True
+  dispatch:
+    CUDA: _s_copy_from_cuda
+
+- func: _copy_same_type_(Tensor self, Tensor src) -> void
+  cpu_half: True
+  dispatch:
+    CPU: _copy_same_type__cpu
 
 - func: cos(Tensor self) -> Tensor
   variants: function, method
@@ -1182,6 +1193,8 @@
 
 - func: mm_out(Tensor result, Tensor self, Tensor mat2) -> Tensor
 
+- func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
+
 - func: mode(Tensor self, int64_t dim=-1, bool keepdim=false) -> (Tensor, Tensor)
   variants: function, method
 
@@ -1264,6 +1277,8 @@
 
 - func: pinverse(Tensor self, double rcond=1e-15) -> Tensor
   variants: function, method
+
+- func: scalar_tensor(Scalar s, *, TensorOptions options={}) -> Tensor
 
 - func: rand(IntList size, *, TensorOptions options={}) -> Tensor
 
@@ -1632,10 +1647,10 @@
 - func: std(Tensor self, bool unbiased=true) -> Tensor
   variants: function, method
 
-- func: std(Tensor self, int64_t dim, bool unbiased=true, bool keepdim=false) -> Tensor
+- func: std(Tensor self, IntList[1] dim, bool unbiased=true, bool keepdim=false) -> Tensor
   variants: function, method
 
-- func: std_out(Tensor result, Tensor self, int64_t dim, bool unbiased=true, bool keepdim=false) -> Tensor
+- func: std_out(Tensor result, Tensor self, IntList[1] dim, bool unbiased=true, bool keepdim=false) -> Tensor
 
 # FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
 - func: prod(Tensor self, *, ScalarType dtype) -> Tensor
@@ -2316,9 +2331,8 @@
 
 - func: meshgrid(TensorList tensors) -> TensorList
 
-# This has a method dispatch to work around circular include problems
-- func: _local_scalar(Tensor self) -> Scalar
-  variants: function, method
+- func: item(Tensor self) -> Scalar
+  variants: method
 
 # NB: Does NOT check precondition that numel == 1
 # WARNING: Use of cpu_half here is generally not supported; please

@@ -1,5 +1,5 @@
-#include "torch/csrc/jit/import_method.h"
-#include "torch/csrc/jit/script/parser.h"
+#include <torch/csrc/jit/import_method.h>
+#include <torch/csrc/jit/script/parser.h>
 
 namespace torch { namespace jit {
 
@@ -26,6 +26,18 @@ struct ModuleAccessorValue : public script::SugaredValue {
   }
 private:
   std::shared_ptr<script::Module> module;
+};
+
+struct OpsValue : public script::SugaredValue {
+  OpsValue(size_t version)
+  : version_(version) {}
+  std::string kind() const override {
+    return "ops";
+  }
+  std::shared_ptr<SugaredValue> attr(SourceRange loc, script::Method & m, const std::string& field) override {
+    return std::make_shared<script::BuiltinModule>(field, version_);
+  }
+  size_t version_;
 };
 
 struct ConstantValue : public script::SugaredValue {
@@ -87,8 +99,8 @@ void import_methods(const std::shared_ptr<script::Module>& mod, const std::strin
   size_t version = parseVersionNumber(p.lexer());
 
   std::unordered_map<std::string, std::shared_ptr<script::SugaredValue>> env = {
-    {"aten", std::make_shared<script::BuiltinModule>("aten", version)},
-    {"prim", std::make_shared<script::BuiltinModule>("prim", version)},
+    {"torch", std::make_shared<script::BuiltinModule>("aten", version)},
+    {"ops", std::make_shared<OpsValue>(version)},
     {"CONSTANTS", std::make_shared<ConstantTableValue>(constant_table)},
     {"fork", std::make_shared<script::ForkValue>()},
     {"annotate", std::make_shared<script::AnnotateValue>()},

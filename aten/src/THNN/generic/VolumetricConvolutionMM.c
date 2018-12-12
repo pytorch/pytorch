@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/VolumetricConvolutionMM.c"
+#define TH_GENERIC_FILE "THNN/generic/VolumetricConvolutionMM.c"
 #else
 
 #include <ATen/div_rtn.h>

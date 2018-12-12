@@ -1,8 +1,8 @@
-#include "ATen/Config.h"
+#include <ATen/Config.h>
 
-#include "ATen/CUDAGenerator.h"
-#include "ATen/Context.h"
-#include "THCTensorRandom.h"
+#include <ATen/CUDAGenerator.h>
+#include <ATen/Context.h>
+#include <THC/THCTensorRandom.h>
 #include <stdexcept>
 
 // There is only one CUDAGenerator instance. Calls to seed(), manualSeed(),

@@ -1,4 +1,4 @@
-#include "BatchTensor.h"
+#include <torch/csrc/jit/batched/BatchTensor.h>
 
 namespace torch { namespace jit {
 

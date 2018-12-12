@@ -1,22 +1,22 @@
-#include "torch/csrc/jit/fuser/compiler.h"
+#include <torch/csrc/jit/fuser/compiler.h>
 
-#include "ATen/ATen.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/type.h"
-#include "torch/csrc/jit/code_template.h"
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/passes/shape_analysis.h"
-#include "torch/csrc/jit/fuser/interface.h"
-#include "torch/csrc/jit/fuser/kernel_cache.h"
-#include "torch/csrc/jit/fuser/codegen.h"
-#include "torch/csrc/jit/fuser/tensor_desc.h"
+#include <ATen/ATen.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/type.h>
+#include <torch/csrc/jit/code_template.h>
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/fuser/interface.h>
+#include <torch/csrc/jit/fuser/kernel_cache.h>
+#include <torch/csrc/jit/fuser/codegen.h>
+#include <torch/csrc/jit/fuser/tensor_desc.h>
 
 #if USE_CUDA_FUSER
-  #include "torch/csrc/jit/fuser/cuda/fused_kernel.h"
+  #include <torch/csrc/jit/fuser/cuda/fused_kernel.h>
 #endif // USE_CUDA_FUSER
 
 #if USE_CPU_FUSER
-  #include "torch/csrc/jit/fuser/cpu/fused_kernel.h"
+  #include <torch/csrc/jit/fuser/cpu/fused_kernel.h>
 #endif // USE_CUDA_FUSER
 
 #include <iostream>
@@ -103,7 +103,13 @@ static std::vector<int64_t> getInputDependencies(const Value* output) {
 static void setInputBroadcastGroups(KernelSpec& spec) {
   std::unordered_set<std::vector<int64_t>, torch::hash<std::vector<int64_t>>> broadcast_groups;
   for (const Value* output : (spec.graph())->outputs()) {
-    broadcast_groups.insert(getInputDependencies(output));
+    if (output->node()->kind() == prim::FusedConcat) {
+      for (const Value* concat_input : output->node()->inputs()) {
+        broadcast_groups.insert(getInputDependencies(concat_input));
+      }
+    } else {
+      broadcast_groups.insert(getInputDependencies(output));
+    }
   }
   std::copy(
     broadcast_groups.begin()

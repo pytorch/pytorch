@@ -307,26 +307,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
 
           .def(
               "recv_anysource",
-              [](::c10d::ProcessGroup& pg,
-                 std::vector<at::Tensor>& input,
-                 at::Tensor& srcRankTensor,
-                 int tag) {
-                if (srcRankTensor.type().scalarType() != at::kInt) {
-                  throw std::runtime_error(
-                      "source rank tensor needs to be "
-                      "CPU int tensor");
-                }
-                if (srcRankTensor.numel() != 1) {
-                  throw std::runtime_error(
-                      "source rank tensor needs to "
-                      "contain only one element");
-                }
-                return pg.recvAnysource(
-                    input, static_cast<int*>(srcRankTensor.data_ptr()), tag);
-              },
-              py::arg("tensors"),
-              py::arg("src_rank"),
-              py::arg("tag"),
+              &::c10d::ProcessGroup::recvAnysource,
               py::call_guard<py::gil_scoped_release>())
 
           .def(
@@ -402,7 +383,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
               // Use the hostname to resolve the network address to
               // use. Note: if the hostname does not resolve to an address (e.g.
               // because of misconfigured /etc/hosts file), this will not work.
-              std::array<char, HOST_NAME_MAX> hostname;
+              std::array<char, HOST_NAME_MAX> hostname{};
               auto rv = gethostname(hostname.data(), hostname.size());
               if (rv != 0) {
                 throw std::system_error(errno, std::system_category());
@@ -423,7 +404,16 @@ They are used in specifying strategies for reduction collectives, e.g.,
 #ifdef USE_C10D_NCCL
   shared_ptr_class_<::c10d::ProcessGroupNCCL>(
       module, "ProcessGroupNCCL", processGroup)
-      .def(py::init<const std::shared_ptr<::c10d::Store>&, int, int>());
+      .def(
+          py::init<
+              const std::shared_ptr<::c10d::Store>&,
+              int,
+              int,
+              const std::string&>(),
+          py::arg("store"),
+          py::arg("rank"),
+          py::arg("size"),
+          py::arg("groupName") = "");
 #endif
 
 #ifdef USE_C10D_MPI
@@ -438,6 +428,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def("is_completed", &::c10d::ProcessGroup::Work::isCompleted)
       .def("is_success", &::c10d::ProcessGroup::Work::isSuccess)
       .def("exception", &::c10d::ProcessGroup::Work::exception)
+      .def("source_rank", &::c10d::ProcessGroup::Work::sourceRank)
       .def("synchronize", &::c10d::ProcessGroup::Work::synchronize)
       .def(
           "wait",

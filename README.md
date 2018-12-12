@@ -162,7 +162,6 @@ export CMAKE_PREFIX_PATH="$(dirname $(which conda))/../" # [anaconda root direct
 
 # Install basic dependencies
 conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
-conda install -c mingfeima mkldnn
 
 # Add LAPACK support for the GPU
 conda install -c pytorch magma-cuda92 # or [magma-cuda80 | magma-cuda91] depending on your cuda version
@@ -212,7 +211,7 @@ python setup.py install
 
 ### Docker image
 
-Dockerfile is supplied to build images with cuda support and cudnn v7. You can pass `-e PYTHON_VERSION=x.y` flag to specificy which python to be used by Miniconda, or leave it unset to use the default. Build as usual
+Dockerfile is supplied to build images with cuda support and cudnn v7. You can pass `-e PYTHON_VERSION=x.y` flag to specify which python version is to be used by Miniconda, or leave it unset to use the default. Build as usual
 ```
 docker build -t pytorch -f docker/pytorch/Dockerfile .
 ```

@@ -1,4 +1,4 @@
-#include "ProcessGroup.hpp"
+#include <c10d/ProcessGroup.hpp>
 
 namespace c10d {
 
@@ -17,6 +17,12 @@ bool ProcessGroup::Work::isSuccess() const {
 std::exception_ptr ProcessGroup::Work::exception() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return exception_;
+}
+
+int ProcessGroup::Work::sourceRank() const {
+  throw std::runtime_error(
+      "sourceRank() may only be called on work objects "
+      "that correspond to a recv or recv-from-any call.");
 }
 
 void ProcessGroup::Work::synchronize() {}

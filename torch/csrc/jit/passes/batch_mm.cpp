@@ -1,14 +1,14 @@
-#include "torch/csrc/jit/passes/batch_mm.h"
+#include <torch/csrc/jit/passes/batch_mm.h>
 
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/jit/passes/peephole.h"
-#include "torch/csrc/jit/passes/alias_analysis.h"
-#include "torch/csrc/jit/interned_strings.h"
-#include "torch/csrc/jit/constants.h"
-#include "torch/csrc/jit/symbolic_variable.h"
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/custom_operator.h"
-#include "torch/csrc/utils/functional.h"
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/passes/alias_analysis.h>
+#include <torch/csrc/jit/interned_strings.h>
+#include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/symbolic_variable.h>
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/custom_operator.h>
+#include <torch/csrc/utils/functional.h>
 
 #include <ATen/ATen.h>
 #include <algorithm>
@@ -391,7 +391,23 @@ void BatchMMSide(Block * block, const AliasDb& alias_db) {
 
 }
 
+bool hasMutableOperators(Block* block) {
+  for (auto n : block->nodes()) {
+    if (n->kind().is_aten() && n->schema().is_mutable())
+      return true;
+    for (auto b : n->blocks()) {
+      if (hasMutableOperators(b))
+        return true;
+    }
+  }
+  return false;
+}
+
 void BatchMM(std::shared_ptr<Graph>& graph) {
+  if (hasMutableOperators(graph->block())) {
+    // TODO(suo): make BatchMM mutability-safe
+    return;
+  }
   const auto alias_db = AliasAnalysis(graph);
   BatchMMTreeReduce(graph->block());
   BatchMMSide(graph->block(), alias_db);

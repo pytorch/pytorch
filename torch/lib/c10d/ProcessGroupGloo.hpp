@@ -17,7 +17,7 @@
 
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAEvent.h>
-#include <ATen/cuda/CUDAStream.h>
+#include <c10/cuda/CUDAStream.h>
 #endif
 
 #include <c10d/ProcessGroup.hpp>
@@ -107,15 +107,16 @@ class ProcessGroupGloo : public ProcessGroup {
    public:
     explicit RecvWork(
         at::Tensor& tensor,
-        std::unique_ptr<::gloo::transport::UnboundBuffer> buffer,
-        int* srcRank);
+        std::unique_ptr<::gloo::transport::UnboundBuffer> buffer);
+
+    int sourceRank() const override;
 
     void wait() override;
 
    protected:
     at::Tensor tensor_;
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer_;
-    int* srcRank_;
+    int srcRank_;
   };
 
   struct Options {
@@ -180,7 +181,6 @@ class ProcessGroupGloo : public ProcessGroup {
 
   std::shared_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
-      int* srcRank,
       int tag) override;
 
   std::shared_ptr<ProcessGroup::Work> barrier(

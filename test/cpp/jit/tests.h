@@ -53,7 +53,6 @@
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/utils/hash.h"
-#include "torch/csrc/variable_tensor_functions.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
 
 #include "torch/csrc/autograd/engine.h"
@@ -439,38 +438,38 @@ std::shared_ptr<Graph> build_lstm() {
   return r;
 }
 
-void run(InterpreterState & interp, const std::vector<at::Tensor> & inputs, std::vector<at::Tensor> & outputs) {
+std::vector<at::Tensor> run(InterpreterState & interp, const std::vector<at::Tensor> & inputs) {
   std::vector<IValue> stack(inputs.begin(), inputs.end());
   interp.run(stack);
-  outputs.clear();
-  for (auto& ivalue : stack) {
-    outputs.push_back(std::move(ivalue).toTensor());
-  }
+  return fmap(stack, [](const IValue& i) { return i.toTensor(); });
 }
 
 std::pair<tensor_list, tensor_list> runGradient(
     Gradient& grad_spec,
     tensor_list& tensors_in,
     tensor_list& tensor_grads_in) {
-  tensor_list tensors_out, tensor_grads_out;
+  static const auto as_tensorlist = [](const Stack& stack) {
+    return fmap(stack, [](const IValue& i) { return i.toTensor(); });
+  };
   Code f_code{grad_spec.f}, df_code{grad_spec.df};
   InterpreterState f_interpreter{f_code}, df_interpreter{df_code};
 
-  run(f_interpreter, tensors_in, tensors_out);
+  auto f_stack = fmap<IValue>(tensors_in);
+  f_interpreter.run(f_stack);
 
-  tensor_list df_inputs;
-  df_inputs.insert(
-      df_inputs.end(), tensor_grads_in.begin(), tensor_grads_in.end());
+  Stack df_stack;
+  df_stack.insert(
+      df_stack.end(), tensor_grads_in.begin(), tensor_grads_in.end());
   for (auto offset : grad_spec.df_input_captured_inputs)
-    df_inputs.push_back(tensors_in[offset]);
+    df_stack.push_back(tensors_in[offset]);
   for (auto offset : grad_spec.df_input_captured_outputs)
-    df_inputs.push_back(tensors_out[offset]);
-  run(df_interpreter, df_inputs, tensor_grads_out);
+    df_stack.push_back(f_stack[offset]);
+  df_interpreter.run(df_stack);
 
   // Outputs of f needs to be sliced
-  tensors_out.erase(
-      tensors_out.begin() + grad_spec.f_real_outputs, tensors_out.end());
-  return std::make_pair(tensors_out, tensor_grads_out);
+  f_stack.erase(
+      f_stack.begin() + grad_spec.f_real_outputs, f_stack.end());
+  return std::make_pair(as_tensorlist(f_stack), as_tensorlist(df_stack));
 }
 
 void assertAllClose(const tensor_list& a, const tensor_list& b) {
@@ -496,9 +495,8 @@ void testInterp() {
 
   auto lstm_g = build_lstm();
   Code lstm_function(lstm_g);
-  std::vector<at::Tensor> outputs;
   InterpreterState lstm_interp(lstm_function);
-  run(lstm_interp, {input[0], hx, cx, w_ih, w_hh}, outputs);
+  auto outputs = run(lstm_interp, {input[0], hx, cx, w_ih, w_hh});
   std::tie(hx, cx) = lstm(input[0], hx, cx, w_ih, w_hh);
 
   // std::cout << almostEqual(outputs[0],hx) << "\n";
@@ -836,7 +834,7 @@ void testDifferentiate(std::ostream& out = std::cout) {
 
   auto grad_spec = differentiate(graph);
   std::vector<size_t> expected_captured_inputs = {0, 1};
-  std::vector<size_t> expected_captured_outputs = {1};
+  std::vector<size_t> expected_captured_outputs = {1, 2};
   std::vector<size_t> expected_input_vjps = {0, 1};
   std::vector<size_t> expected_output_vjps = {0, 1};
   ASSERT_EQ(grad_spec.f_real_outputs, 1);
@@ -867,11 +865,11 @@ void testDifferentiateWithRequiresGrad(std::ostream& out = std::cout) {
   PropagateRequiresGrad(graph);
 
   auto grad_spec = differentiate(graph);
-  std::vector<size_t> expected_input_vjps = {1, 2}; // for e and %4 = (d + a)
+  std::vector<size_t> expected_input_vjps = {1, 3}; // for e and %4 = (d + a)
   std::vector<size_t> expected_output_vjps = {0}; // only a requires grad
-  ASSERT_EQ(grad_spec.f_real_outputs, 2); // we need one temporary %4 = (d + a)
+  ASSERT_EQ(grad_spec.f_real_outputs, 2);
   ASSERT_EQ(grad_spec.df_input_captured_inputs, std::vector<size_t>({0}));
-  ASSERT_EQ(grad_spec.df_input_captured_outputs, std::vector<size_t>({2}));
+  ASSERT_EQ(grad_spec.df_input_captured_outputs, std::vector<size_t>({2, 3, 4, 5}));
   ASSERT_EQ(grad_spec.df_input_vjps, expected_input_vjps);
   ASSERT_EQ(grad_spec.df_output_vjps, expected_output_vjps);
   out << "testDifferentiateWithRequiresGrad\n";
@@ -1320,7 +1318,7 @@ void testCustomOperators() {
             "foo::bar_with_bad_schema(Tensor a) -> Tensor",
             [](double a) { return a; }),
         "Inferred type for argument #0 was float, "
-        "but the provided schema specified type Dynamic "
+        "but the provided schema specified type Tensor "
         "for the argument in that position");
     ASSERT_THROWS_WITH(
         createOperator(
@@ -1333,7 +1331,7 @@ void testCustomOperators() {
             "foo::bar_with_bad_schema(float a) -> Tensor",
             [](double a) { return a; }),
         "Inferred type for return value #0 was float, "
-        "but the provided schema specified type Dynamic "
+        "but the provided schema specified type Tensor "
         "for the return value in that position");
   }
   {

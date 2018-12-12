@@ -64,16 +64,16 @@ class DataPtr {
 // NB: Device is NOT tested for here; a CUDA nullptr is as much a nullptr as a
 // CPU nullptr
 
-inline bool operator==(const at::DataPtr& dp, std::nullptr_t) noexcept {
+inline bool operator==(const DataPtr& dp, std::nullptr_t) noexcept {
   return !dp;
 }
-inline bool operator==(std::nullptr_t, const at::DataPtr& dp) noexcept {
+inline bool operator==(std::nullptr_t, const DataPtr& dp) noexcept {
   return !dp;
 }
-inline bool operator!=(const at::DataPtr& dp, std::nullptr_t) noexcept {
+inline bool operator!=(const DataPtr& dp, std::nullptr_t) noexcept {
   return dp;
 }
-inline bool operator!=(std::nullptr_t, const at::DataPtr& dp) noexcept {
+inline bool operator!=(std::nullptr_t, const DataPtr& dp) noexcept {
   return dp;
 }
 
@@ -98,9 +98,10 @@ inline bool operator!=(std::nullptr_t, const at::DataPtr& dp) noexcept {
 // possible, or the raw interface will incorrectly reported as unsupported,
 // when it is actually possible.
 
-struct Allocator {
-  virtual ~Allocator() {}
-  virtual at::DataPtr allocate(size_t n) const = 0;
+struct C10_API Allocator {
+  virtual ~Allocator() = default;
+
+  virtual DataPtr allocate(size_t n) const = 0;
 
   // If this returns a non nullptr, it means that allocate()
   // is guaranteed to return a unique_ptr with this deleter attached;
@@ -127,7 +128,7 @@ struct C10_API InefficientStdFunctionContext {
   InefficientStdFunctionContext(
       std::unique_ptr<void, std::function<void(void*)>>&& ptr)
       : ptr_(std::move(ptr)) {}
-  static at::DataPtr makeDataPtr(
+  static DataPtr makeDataPtr(
       void* ptr,
       const std::function<void(void*)>& deleter,
       Device device);
@@ -146,12 +147,12 @@ namespace caffe2 {
  *  Also note that this is not thraed-safe, and we assume this function will
  *  only be called during initialization.
  */
-C10_API void SetAllocator(at::DeviceType t, at::Allocator* alloc);
-C10_API at::Allocator* GetAllocator(const at::DeviceType& t);
+C10_API void SetAllocator(DeviceType t, Allocator* alloc);
+C10_API Allocator* GetAllocator(const DeviceType& t);
 
-template <at::DeviceType t>
+template <DeviceType t>
 struct AllocatorRegisterer {
-  explicit AllocatorRegisterer(at::Allocator* alloc) {
+  explicit AllocatorRegisterer(Allocator* alloc) {
     SetAllocator(t, alloc);
   }
 };

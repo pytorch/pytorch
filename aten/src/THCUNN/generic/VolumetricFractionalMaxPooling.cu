@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/VolumetricFractionalMaxPooling.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/VolumetricFractionalMaxPooling.cu"
 #else
 
 void THNN_(VolumetricFractionalMaxPooling_updateOutput)(

@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/SpatialAdaptiveAveragePooling.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/SpatialAdaptiveAveragePooling.cu"
 #else
 
 #include <THCUNN/common.h>

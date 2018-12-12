@@ -1,6 +1,6 @@
-#include "THCBlas.h"
-#include "THCGeneral.h"
-#include "TH/THHalf.h"
+#include <THC/THCBlas.h>
+#include <THC/THCGeneral.h>
+#include <TH/THHalf.h>
 
 #include <algorithm>
 

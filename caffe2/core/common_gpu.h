@@ -69,13 +69,20 @@
 // CAFFE_HAS_CUDA_FP16 manually.
 
 #ifndef CAFFE_HAS_CUDA_FP16
-#if CUDA_VERSION >= 7050
+#if CUDA_VERSION >= 7050 || defined(__HIP_PLATFORM_HCC__)
 #define CAFFE_HAS_CUDA_FP16
 #endif // CUDA_VERSION >= 7050
 #endif // CAFFE_HAS_CUDA_FP16
 
 #ifdef CAFFE_HAS_CUDA_FP16
 #include <cuda_fp16.h>
+#endif
+
+// cuda major revision number below which fp16 compute is not supoorted
+#ifndef __HIP_PLATFORM_HCC__
+constexpr int kFp16CUDADevicePropMajor = 6;
+#else
+constexpr int kFp16CUDADevicePropMajor = 3;
 #endif
 
 // Re-enable strict aliasing diagnostic if it was disabled.
