@@ -20,6 +20,13 @@ struct SimpleCopy {
   }
 };
 
+template <typename scalar_t>
+struct AbsCopy {
+  __device__ __forceinline__ scalar_t operator() (const scalar_t a) const {
+    return ::abs(a);
+  }
+};
+
 } // namespace
 
 template <typename scalar_t, typename acc_t=scalar_t, typename out_t=scalar_t>
@@ -74,6 +81,48 @@ void mean_kernel_impl<int16_t, int16_t, int16_t>(TensorIterator& iter) {
 }
 #endif // __HIPCC__
 
+template <typename scalar_t, typename acc_t=scalar_t, typename out_t=scalar_t>
+void norm_kernel_cuda_impl(TensorIterator& iter, Scalar val) {
+  float p;
+  if (val.isIntegral()) {
+     p = val.to<int64_t>();
+  } else if (val.isFloatingPoint()) {
+     p = val.to<acc_t>();
+  } else {
+     AT_ERROR("norm_kernel_cuda_impl expects norm to be integer or float");
+  }
+
+  if (p == static_cast<float>(0)) {
+    gpu_reduce_kernel<scalar_t, out_t>(iter,
+        []GPU_LAMBDA(acc_t a) -> acc_t { return a==acc_t(0) ? acc_t(0) : acc_t(1); },
+        SimpleCopy<acc_t>(),
+        []GPU_LAMBDA(acc_t a, acc_t b) -> acc_t { return a + b; });
+  } else if (p == static_cast<float>(1)) {
+    gpu_reduce_kernel<scalar_t, out_t>(iter, AbsCopy<acc_t>(), SimpleCopy<acc_t>(),
+        []GPU_LAMBDA(acc_t a, acc_t b) -> acc_t { return a + b; });
+  } else if (p == static_cast<float>(2)) {
+    gpu_reduce_kernel<scalar_t, out_t>(iter,
+        []GPU_LAMBDA(acc_t a) -> acc_t { return a*a; },
+        []GPU_LAMBDA(acc_t a) -> acc_t { return ::sqrt(a); },
+        []GPU_LAMBDA(acc_t a, acc_t b) -> acc_t { return a + b; });
+  } else if (p == static_cast<float>(INFINITY)) {
+    gpu_reduce_kernel<scalar_t, out_t>(iter, AbsCopy<acc_t>(), SimpleCopy<acc_t>(),
+        []GPU_LAMBDA(acc_t a, acc_t b) -> acc_t { return ::max(a, b); },
+        std::numeric_limits<acc_t>::min());
+  } else if (p == static_cast<float>(-INFINITY)) {
+    gpu_reduce_kernel<scalar_t, out_t>(iter, AbsCopy<acc_t>(), SimpleCopy<acc_t>(),
+        []GPU_LAMBDA(acc_t a, acc_t b) -> acc_t { return ::min(a, b); },
+        std::numeric_limits<acc_t>::max());
+  } else {
+    acc_t exp = acc_t(p);
+    acc_t rt = 1.0 / exp;
+    gpu_reduce_kernel<scalar_t, out_t>(iter,
+        [exp]GPU_LAMBDA(acc_t a) -> acc_t { return ::pow(::abs(a), exp); },
+        [rt]GPU_LAMBDA(acc_t a) -> acc_t { return ::pow(a, rt); },
+        []GPU_LAMBDA(acc_t a, acc_t b) -> acc_t { return a + b; });
+  }
+}
+
 static void sum_kernel_cuda(TensorIterator& iter) {
   if (iter.type().scalarType() == kHalf) {
     return sum_kernel_impl<at::Half, float>(iter);
@@ -107,8 +156,21 @@ static void mean_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+static void norm_kernel_cuda(TensorIterator& iter, Scalar p) {
+  if (iter.type().scalarType() == kHalf) {
+    return norm_kernel_cuda_impl<at::Half, float>(iter, p);
+  } else if (iter.type(1).scalarType() == kHalf && iter.type().scalarType() == kFloat) {
+    // type promotion that does cast and reduction in a single kernel
+    return norm_kernel_cuda_impl<at::Half, float, float>(iter, p);
+  }
+  AT_DISPATCH_ALL_TYPES(iter.type(), "norm", [&]() {
+    norm_kernel_cuda_impl<scalar_t>(iter, p);
+  });
+}
+
 REGISTER_DISPATCH(sum_stub, &sum_kernel_cuda);
 REGISTER_DISPATCH(prod_stub, &prod_kernel_cuda);
 REGISTER_DISPATCH(mean_stub, &mean_kernel_cuda);
+REGISTER_DISPATCH(norm_stub, &norm_kernel_cuda);
 
 }} // namespace at::native

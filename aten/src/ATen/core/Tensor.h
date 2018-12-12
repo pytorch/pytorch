@@ -485,8 +485,11 @@ public:
   Tensor var(int64_t dim, bool unbiased=true, bool keepdim=false) const;
   Tensor view_as(const Tensor & other) const;
   Tensor where(const Tensor & condition, const Tensor & other) const;
+  Tensor norm(Scalar p, ScalarType dtype) const;
   Tensor norm(Scalar p=2) const;
-  Tensor norm(Scalar p, int64_t dim, bool keepdim=false) const;
+  Tensor norm(Scalar p, IntList dim, bool keepdim, ScalarType dtype) const;
+  Tensor norm(Scalar p, IntList dim, bool keepdim=false) const;
+  Tensor norm(Scalar p, IntList dim, ScalarType dtype) const;
   Tensor clone() const;
   Tensor & resize_as_(const Tensor & the_template);
   Tensor pow(Scalar exponent) const;

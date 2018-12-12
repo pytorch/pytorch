@@ -259,6 +259,70 @@ static void norm_kernel_impl(
   });
 }
 
+static void norm_kernel_tensor_iterator_impl(
+    TensorIterator& iter,
+    Scalar p) {
+  float val;
+  if (p.isIntegral()) {
+    val = p.to<int64_t>();
+  } else if (p.isFloatingPoint()) {
+    val = p.to<float>();
+  } else {
+    AT_ERROR("norm_kernel_tensor_iterator_impl expects norm to be integer or float");
+  }
+  if (val == 0) {
+    AT_DISPATCH_FLOATING_TYPES(iter.type(), "norm", [&] {
+      binary_kernel_reduce(
+        iter,
+        [=](scalar_t acc, scalar_t data) -> scalar_t { return acc + (data==scalar_t(0)? scalar_t(0) : scalar_t(1)); },
+        [=](scalar_t a, scalar_t b) -> scalar_t { return a + b; },
+        [=](scalar_t a) -> scalar_t { return a; }, scalar_t(0));
+    });
+  } else if (val == 1) {
+    AT_DISPATCH_FLOATING_TYPES(iter.type(), "norm", [&] {
+      binary_kernel_reduce(
+        iter,
+        [=](scalar_t acc, scalar_t data) -> scalar_t { return acc + std::abs(data); },
+        [=](scalar_t a, scalar_t b) -> scalar_t { return a + b; },
+        [=](scalar_t a) -> scalar_t { return a; }, scalar_t(0));
+    });
+  } else if (val == 2) {
+    AT_DISPATCH_FLOATING_TYPES(iter.type(), "norm", [&] {
+      binary_kernel_reduce(
+        iter,
+        [=](scalar_t acc, scalar_t data) -> scalar_t { return acc + data*data; },
+        [=](scalar_t a, scalar_t b) -> scalar_t { return a + b; },
+        [=](scalar_t a) -> scalar_t { return std::sqrt(a); }, scalar_t(0));
+    });
+  } else if (val == INFINITY) {
+    AT_DISPATCH_FLOATING_TYPES(iter.type(), "norm", [&] {
+      binary_kernel_reduce(
+        iter,
+        [=](scalar_t acc, scalar_t data) -> scalar_t { return std::max(acc, std::abs(data)); },
+        [=](scalar_t a, scalar_t b) -> scalar_t { return std::max(a, b); },
+        [=](scalar_t a) -> scalar_t { return a; }, std::numeric_limits<scalar_t>::min());
+    });
+  } else if (val == -INFINITY) {
+    AT_DISPATCH_FLOATING_TYPES(iter.type(), "norm", [&] {
+      binary_kernel_reduce(
+        iter,
+        [=](scalar_t acc, scalar_t data) -> scalar_t { return std::min(acc, std::abs(data)); },
+        [=](scalar_t a, scalar_t b) -> scalar_t { return std::min(a, b); },
+        [=](scalar_t a) -> scalar_t { return a; }, std::numeric_limits<scalar_t>::max());
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(iter.type(), "norm", [&] {
+      scalar_t exp = scalar_t(val);
+      scalar_t q = scalar_t(1.0) / exp;
+      binary_kernel_reduce(
+        iter,
+        [exp](scalar_t acc, scalar_t data) -> scalar_t { return acc + std::pow(std::abs(data), exp); },
+        [=](scalar_t a, scalar_t b) -> scalar_t { return a + b; },
+        [q](scalar_t a) -> scalar_t { return std::pow(a, q); }, scalar_t(0));
+    });
+  }
+}
+
 }  // anonymous namespace
 
 REGISTER_DISPATCH(sum_stub, &sum_kernel_impl);
@@ -266,5 +330,6 @@ REGISTER_DISPATCH(std_stub, &std_kernel_impl);
 REGISTER_DISPATCH(prod_stub, &prod_kernel_impl);
 REGISTER_DISPATCH(norm_kernel, &norm_kernel_impl);
 REGISTER_DISPATCH(mean_stub, &mean_kernel_impl);
+REGISTER_DISPATCH(norm_stub, &norm_kernel_tensor_iterator_impl);
 
 }}  // namespace at::native

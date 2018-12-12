@@ -392,8 +392,11 @@ struct CAFFE2_API Type {
   virtual Tensor var(const Tensor & self, int64_t dim, bool unbiased, bool keepdim) const = 0;
   virtual Tensor view_as(const Tensor & self, const Tensor & other) const = 0;
   virtual Tensor where(const Tensor & condition, const Tensor & self, const Tensor & other) const = 0;
+  virtual Tensor norm(const Tensor & self, Scalar p, ScalarType dtype) const = 0;
   virtual Tensor norm(const Tensor & self, Scalar p) const = 0;
-  virtual Tensor norm(const Tensor & self, Scalar p, int64_t dim, bool keepdim) const = 0;
+  virtual Tensor norm(const Tensor & self, Scalar p, IntList dim, bool keepdim, ScalarType dtype) const = 0;
+  virtual Tensor norm(const Tensor & self, Scalar p, IntList dim, bool keepdim) const = 0;
+  virtual Tensor norm(const Tensor & self, Scalar p, IntList dim, ScalarType dtype) const = 0;
   virtual Tensor clone(const Tensor & self) const = 0;
   virtual Tensor & resize_as_(Tensor & self, const Tensor & the_template) const = 0;
   virtual Tensor pow(const Tensor & self, Scalar exponent) const = 0;

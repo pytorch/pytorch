@@ -676,11 +676,20 @@ inline Tensor Tensor::view_as(const Tensor & other) const {
 inline Tensor Tensor::where(const Tensor & condition, const Tensor & other) const {
     return type().where(condition, *this, other);
 }
+inline Tensor Tensor::norm(Scalar p, ScalarType dtype) const {
+    return type().norm(*this, p, dtype);
+}
 inline Tensor Tensor::norm(Scalar p) const {
     return type().norm(*this, p);
 }
-inline Tensor Tensor::norm(Scalar p, int64_t dim, bool keepdim) const {
+inline Tensor Tensor::norm(Scalar p, IntList dim, bool keepdim, ScalarType dtype) const {
+    return type().norm(*this, p, dim, keepdim, dtype);
+}
+inline Tensor Tensor::norm(Scalar p, IntList dim, bool keepdim) const {
     return type().norm(*this, p, dim, keepdim);
+}
+inline Tensor Tensor::norm(Scalar p, IntList dim, ScalarType dtype) const {
+    return type().norm(*this, p, dim, dtype);
 }
 inline Tensor Tensor::clone() const {
     return type().clone(*this);
