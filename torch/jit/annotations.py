@@ -105,23 +105,46 @@ def parse_type_line(type_line):
 
 def get_type_line(source):
     """Tries to find the line containing a comment with the type annotation."""
-    lines = source.split('\n')
     type_comment = '# type:'
-    type_lines = list(filter(lambda line: type_comment in line, lines))
 
-    if len(type_lines) == 1:
-        return type_lines[0]
+    lines = source.split('\n')
+    lines = [(index, line) for index, line in enumerate(lines)]
+    lines = list(filter(lambda line: type_comment in line[1], lines))
 
-    # parse multiline type line according to PEP 484
+    if len(lines) == 0:
+        return None
+    elif len(lines) == 1:
+        # Only 1 type line, quit now
+        return lines[0][1]
+
+    # Parse split up argument types, ensuring they are placed on subsequent
+    # lines (except for the return type, which is n + 2 after the last arg line)
+    last_index = None
+    return_line = None
+    arg_type_lines = []
+    for index, line in lines:
+        if last_index is not None and last_index != index - 1:
+            # non-subsequent line
+            if last_index == index - 2 and '(...) -> ' in line:
+                return_line = line
+                break
+            raise RuntimeError("Missing type line before return type line")
+        last_index = index
+        arg_type_lines.append(line)
+
+    if not return_line:
+        raise RuntimeError("Incorrect return type line on multiline type annotation")
+
+    # Get type from each argument declaration
     types = []
-    for type_line in type_lines[:-1]:
+    for type_line in arg_type_lines:
         item_type = type_line[type_line.find(type_comment) + len(type_comment):]
         types.append(item_type.strip())
 
     parameter_types = ", ".join(types)
 
-    # replace (...) with (parameter_types)
-    line_parts = type_lines[-1].split("...")
+    # Replace (...) with (parameter_types)
+    line_parts = return_line.split("...")
     if len(line_parts) != 2:
         raise RuntimeError("Incorrect return type line on multiline type annotation")
 

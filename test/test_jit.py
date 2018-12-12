@@ -8240,6 +8240,7 @@ a")
                     y   # type: Tuple[Tensor, Tensor]
                     ):
                 # type: (...) -> Tuple[{output}, {output}]
+                # type: this is not used
                 return x, x
         ''')
         test_str = []
