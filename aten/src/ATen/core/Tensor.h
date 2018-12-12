@@ -435,8 +435,7 @@ public:
   Tensor slice(int64_t dim=0, int64_t start=0, int64_t end=9223372036854775807, int64_t step=1) const;
   std::tuple<Tensor,Tensor> slogdet() const;
   Tensor smm(const Tensor & mat2) const;
-  Tensor softmax(int64_t dim, ScalarType dtype) const;
-  Tensor softmax(int64_t dim) const;
+  Tensor softmax(int64_t dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
   std::vector<Tensor> split(int64_t split_size, int64_t dim=0) const;
   std::vector<Tensor> split_with_sizes(IntList split_sizes, int64_t dim=0) const;
   Tensor squeeze() const;

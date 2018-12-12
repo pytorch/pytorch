@@ -526,11 +526,8 @@ inline std::tuple<Tensor,Tensor> Tensor::slogdet() const {
 inline Tensor Tensor::smm(const Tensor & mat2) const {
     return type().smm(*this, mat2);
 }
-inline Tensor Tensor::softmax(int64_t dim, ScalarType dtype) const {
+inline Tensor Tensor::softmax(int64_t dim, c10::optional<ScalarType> dtype) const {
     return type().softmax(*this, dim, dtype);
-}
-inline Tensor Tensor::softmax(int64_t dim) const {
-    return type().softmax(*this, dim);
 }
 inline std::vector<Tensor> Tensor::split(int64_t split_size, int64_t dim) const {
     return type().split(*this, split_size, dim);
