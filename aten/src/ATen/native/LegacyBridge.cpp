@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/LegacyTHFunctions.h>
 #include <ATen/core/SparseTensorRef.h>
 #include <ATen/ExpandUtils.h>
 
@@ -26,7 +27,7 @@ Tensor clone(const Tensor& self) {
   if (_has_native(self)) {
     return native_clone(self);
   } else {
-    return _th_clone(self);
+    return legacy::th::_th_clone(self);
   }
 }
 
@@ -34,7 +35,7 @@ Tensor& resize_as_(Tensor& self, const Tensor& the_template) {
   if (_has_native(self)) {
     return native_resize_as_(self, the_template);
   } else {
-    return _th_resize_as_(self, the_template);
+    return legacy::th::_th_resize_as_(self, the_template);
   }
 }
 
@@ -42,7 +43,7 @@ Tensor& pow_out(Tensor& result, const Tensor& self, Scalar exponent) {
   if (_has_native(self)) {
     return native_pow_out(result, self, exponent);
   } else {
-    return _th_pow_out(result, self, exponent);
+    return legacy::th::_th_pow_out(result, self, exponent);
   }
 }
 
@@ -50,7 +51,7 @@ Tensor pow(const Tensor& self, Scalar exponent) {
   if (_has_native(self)) {
     return native_pow(self, exponent);
   } else {
-    return _th_pow(self, exponent);
+    return legacy::th::_th_pow(self, exponent);
   }
 }
 
@@ -58,7 +59,7 @@ Tensor& zero_(Tensor& self) {
   if (_has_native(self)) {
     return native_zero_(self);
   } else {
-    return _th_zero_(self);
+    return legacy::th::_th_zero_(self);
   }
 }
 
@@ -107,7 +108,7 @@ Tensor& addmm_out(Tensor& result, const Tensor& self, const Tensor& mat1, const 
     std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
     return s_native_addmm_out(result, b_self, mat1, mat2, beta, alpha);
   } else {
-    return _th_addmm_out(result, self, mat1, mat2, beta, alpha);
+    return legacy::th::_th_addmm_out(result, self, mat1, mat2, beta, alpha);
   }
 }
 
@@ -119,7 +120,7 @@ Tensor addmm(const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar 
     std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm");
     return s_native_addmm(b_self, mat1, mat2, beta, alpha);
   } else {
-    return _th_addmm(self, mat1, mat2, beta, alpha);
+    return legacy::th::_th_addmm(self, mat1, mat2, beta, alpha);
   }
 }
 
@@ -130,7 +131,7 @@ Tensor& addmm_(Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta
     // inplace is not broadcasting
     return s_native_addmm_(self, mat1, mat2, beta, alpha);
   } else {
-    return _th_addmm_(self, mat1, mat2, beta, alpha);
+    return legacy::th::_th_addmm_(self, mat1, mat2, beta, alpha);
   }
 }
 

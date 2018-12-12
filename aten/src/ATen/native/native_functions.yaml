@@ -1278,6 +1278,8 @@
 - func: pinverse(Tensor self, double rcond=1e-15) -> Tensor
   variants: function, method
 
+- func: scalar_tensor(Scalar s, *, TensorOptions options={}) -> Tensor
+
 - func: rand(IntList size, *, TensorOptions options={}) -> Tensor
 
 - func: rand(IntList size, *, Generator* generator, TensorOptions options={}) -> Tensor

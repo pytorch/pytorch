@@ -172,11 +172,11 @@ build_env_vars = ['BINARY', 'TEST', 'CAFFE2_OPS']
 from tools.setup_helpers.cuda import USE_CUDA, CUDA_HOME, CUDA_VERSION
 from tools.setup_helpers.build import (BUILD_BINARY, BUILD_TEST,
                                        BUILD_CAFFE2_OPS, USE_LEVELDB,
-                                       USE_LMDB, USE_OPENCV, USE_TENSORRT, USE_FFMPEG)
+                                       USE_LMDB, USE_OPENCV, USE_TENSORRT,
+                                       USE_FFMPEG, USE_FBGEMM)
 from tools.setup_helpers.rocm import USE_ROCM, ROCM_HOME, ROCM_VERSION
 from tools.setup_helpers.cudnn import (USE_CUDNN, CUDNN_LIBRARY,
                                        CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR)
-from tools.setup_helpers.fbgemm import USE_FBGEMM
 from tools.setup_helpers.miopen import (USE_MIOPEN, MIOPEN_LIBRARY,
                                         MIOPEN_LIB_DIR, MIOPEN_INCLUDE_DIR)
 from tools.setup_helpers.nccl import USE_NCCL, USE_SYSTEM_NCCL, NCCL_LIB_DIR, \
@@ -425,18 +425,6 @@ def build_libs(libs):
         sys.exit(1)
 
 
-# Copy Caffe2's Python proto files (generated during the build with the
-# protobuf python compiler) from the build folder to the root folder
-# cp root/build/caffe2/proto/proto.py root/caffe2/proto/proto.py
-def copy_protos():
-    report('setup.py::copy_protos()')
-    for src in glob.glob(
-            os.path.join(caffe2_build_dir, 'caffe2', 'proto', '*.py')):
-        dst = os.path.join(
-            cwd, os.path.relpath(src, caffe2_build_dir))
-        shutil.copyfile(src, dst)
-
-
 # Build all dependent libraries
 class build_deps(PytorchCommand):
     def run(self):
@@ -528,7 +516,6 @@ class develop(setuptools.command.develop.develop):
         self.run_command('create_version_file')
         setuptools.command.develop.develop.run(self)
         self.create_compile_commands()
-        copy_protos()
 
     def create_compile_commands(self):
         def load(filename):
@@ -1025,7 +1012,7 @@ if __name__ == '__main__':
                 'share/cmake/Torch/*.cmake',
             ],
             'caffe2': [
-                rel_site_packages + '/caffe2/**/*.py'
+                'cpp_test/*',
             ]
         },
     )

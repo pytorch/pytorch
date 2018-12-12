@@ -26,7 +26,6 @@ class IDEEPConcatOp final : public IDEEPOperator {
 
   bool RunOnDevice() override {
     auto* output = Output(OUTPUT);
-    TensorCPU* axis_info = OperatorBase::Output<TensorCPU>(AXIS_INFO, CPU);
 
     vector<itensor> inputs;
     for (int i = 0; i < InputSize(); ++i) {
@@ -44,7 +43,10 @@ class IDEEPConcatOp final : public IDEEPOperator {
     }
 
     auto axis_vdata = ideep::concat::compute(inputs, axis_, add_axis_, *output);
-    axis_info->Resize(vector<int64_t>(1, InputSize()));
+    Tensor* axis_info = OutputTensor(
+        AXIS_INFO,
+        vector<int64_t>(1, InputSize()),
+        at::dtype<int>().device(CPU));
     int* axis_data = axis_info->template mutable_data<int>();
     for (int i = 0; i < axis_vdata.size(); i++) {
       axis_data[i] = axis_vdata[i];

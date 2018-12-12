@@ -211,7 +211,9 @@ def matched_files_iter(root_path, includes=('*',), ignores=(), extensions=(), ou
 
     def match_extensions(filename):
         """Helper method to see if filename ends with certain extension"""
-        return os.path.splitext(filename)[1] in extensions
+        return any(filename.endswith(e) for e in extensions)
+
+    exact_matches = set(includes)
 
     # This is a very rough heuristic; really, we want to avoid scanning
     # any file which is not checked into source control, but this script
@@ -230,7 +232,9 @@ def matched_files_iter(root_path, includes=('*',), ignores=(), extensions=(), ou
                 dirs.remove("third_party")
         for filename in filenames:
             filepath = os.path.join(rel_dirpath, filename)
-            if _fnmatch(filepath, includes) and (not _fnmatch(filepath, ignores)) and match_extensions(filepath):
+            # We respect extensions, UNLESS you wrote the entire
+            # filename verbatim, in which case we always accept it
+            if _fnmatch(filepath, includes) and (not _fnmatch(filepath, ignores)) and (match_extensions(filepath) or filepath in exact_matches):
                 if not is_pytorch_file(filepath) and not is_caffe2_gpu_file(filepath):
                     continue
                 if out_of_place_only and not is_out_of_place(filepath):
@@ -714,11 +718,9 @@ def get_hip_file_path(filepath):
     """
     Returns the new name of the hipified file
     """
-    # At the moment, PyTorch is HIPIFYed in-place.  We'd prefer for this
-    # to not be the case, but we can't conveniently do this until we
-    # also fix up PyTorch's build system to know how to handle things
-    # out-of-place.
-    if is_pytorch_file(filepath):
+    # At the moment, some files are HIPified in place.  The predicate
+    # is_out_of_place tells us if this is the case or not.
+    if not is_out_of_place(filepath):
         return filepath
 
     dirpath, filename = os.path.split(filepath)
@@ -762,8 +764,13 @@ def get_hip_file_path(filepath):
     orig_dirpath = dirpath
 
     dirpath = dirpath.replace('cuda', 'hip')
+    dirpath = dirpath.replace('THC', 'THH')
+
     root = root.replace('cuda', 'hip')
     root = root.replace('CUDA', 'HIP')
+    # Special case to handle caffe2/core/THCCachingAllocator
+    if dirpath != "caffe2/core":
+        root = root.replace('THC', 'THH')
 
     if dirpath == orig_dirpath:
         dirpath = os.path.join(dirpath, 'hip')
@@ -772,7 +779,9 @@ def get_hip_file_path(filepath):
 
 
 def is_out_of_place(filepath):
-    return not is_pytorch_file(filepath)
+    if filepath.startswith("torch/"):
+        return False
+    return True
 
 
 # Keep this synchronized with includes/ignores in build_amd.py
@@ -872,6 +881,11 @@ for mapping in CUDA_TO_HIP_MAPPINGS:
 RE_CAFFE2_PREPROCESSOR = re.compile(CAFFE2_TRIE.pattern())
 RE_PYTORCH_PREPROCESSOR = re.compile(r'\b{0}\b'.format(PYTORCH_TRIE.pattern()))
 
+RE_QUOTE_HEADER = re.compile(r'#include "([^"]+)"')
+RE_ANGLE_HEADER = re.compile(r'#include <([^>]+)>')
+RE_THC_GENERIC_FILE = re.compile(r'#define THC_GENERIC_FILE "([^"]+)"')
+RE_CU_SUFFIX = re.compile(r'\.cu\b')  # be careful not to pick up .cuh
+
 def preprocessor(output_directory, filepath, stats):
     """ Executes the CUDA -> HIP conversion on the specified file. """
     fin_path = os.path.join(output_directory, filepath)
@@ -892,6 +906,24 @@ def preprocessor(output_directory, filepath, stats):
             def c2_repl(m):
                 return CAFFE2_MAP[m.group(0)]
             output_source = RE_CAFFE2_PREPROCESSOR.sub(c2_repl, output_source)
+
+        # Header rewrites
+        def mk_repl(templ):
+            def repl(m):
+                f = m.group(1)
+                if f.startswith("ATen/cuda") or f.startswith("ATen/native/cuda") or f.startswith("ATen/native/sparse/cuda") or f.startswith("THC/") or f.startswith("THCUNN/") or (f.startswith("THC") and not f.startswith("THCP")):
+                    return templ.format(get_hip_file_path(m.group(1)))
+                return m.group(0)
+            return repl
+        output_source = RE_QUOTE_HEADER.sub(mk_repl('#include "{0}"'), output_source)
+        output_source = RE_ANGLE_HEADER.sub(mk_repl('#include <{0}>'), output_source)
+        output_source = RE_THC_GENERIC_FILE.sub(mk_repl('#define THC_GENERIC_FILE "{0}"'), output_source)
+
+        # CMakeLists.txt rewrites
+        if filepath.endswith('CMakeLists.txt'):
+            output_source = output_source.replace('CUDA', 'HIP')
+            output_source = output_source.replace('THC', 'THH')
+            output_source = RE_CU_SUFFIX.sub('.hip', output_source)
 
         # Perform Kernel Launch Replacements
         output_source = processKernelLaunches(output_source, stats)
@@ -1226,7 +1258,7 @@ def add_static_casts(orig_filepath, filepath, KernelTemplateParams):
 
                 # PyTorch Specific: Add template type
                 # Here the template value will be resolved from <scalar_t> to <Dtype>.
-                if "THCUNN" in filepath.split("/") and "generic" not in filepath.split("/"):
+                if "THHUNN" in filepath.split("/") and "generic" not in filepath.split("/"):
                     kernel_name_with_template = kernel_name_with_template.replace("<scalar_t>", "<Dtype>")
 
                 full_new_kernel_launch = re.sub(r'\b{0}\b'.format(re.escape(original_kernel_name_with_template)),
@@ -1254,7 +1286,6 @@ def str2bool(v):
         return False
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
-
 
 
 def hipify(

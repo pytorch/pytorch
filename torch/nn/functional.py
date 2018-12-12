@@ -2333,9 +2333,13 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
         scale_factor (int): multiplier for spatial size. Has to be an integer.
         mode (string): algorithm used for upsampling:
             'nearest' | 'linear' | 'bilinear' | 'trilinear'. Default: 'nearest'
-        align_corners (bool, optional): if True, the corner pixels of the input
-            and output tensors are aligned, and thus preserving the values at
-            those pixels. This only has effect when :attr:`mode` is `linear`,
+        align_corners (bool, optional): Geometrically, we consider the pixels of the
+            input and output as squares rather than points.
+            If set to True, the input and output tensors are aligned by the
+            center points of their corner pixels. If set to False, the input and
+            output tensors are aligned by the corner points of their corner
+            pixels, and the interpolation uses edge value padding for out-of-boundary values.
+            This only has effect when :attr:`mode` is `linear`,
             `bilinear`, or `trilinear`. Default: False
 
     .. warning::
@@ -2374,9 +2378,13 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         scale_factor (float or Tuple[float]): multiplier for spatial size. Has to match input size if it is a tuple.
         mode (string): algorithm used for upsampling:
             'nearest' | 'linear' | 'bilinear' | 'trilinear' | 'area'. Default: 'nearest'
-        align_corners (bool, optional): if True, the corner pixels of the input
-            and output tensors are aligned, and thus preserving the values at
-            those pixels. This only has effect when :attr:`mode` is `linear`,
+        align_corners (bool, optional): Geometrically, we consider the pixels of the
+            input and output as squares rather than points.
+            If set to True, the input and output tensors are aligned by the
+            center points of their corner pixels. If set to False, the input and
+            output tensors are aligned by the corner points of their corner
+            pixels, and the interpolation uses edge value padding for out-of-boundary values.
+            This only has effect when :attr:`mode` is `linear`,
             `bilinear`, or `trilinear`. Default: False
 
     .. warning::
