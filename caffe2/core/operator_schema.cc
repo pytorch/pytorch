@@ -338,7 +338,8 @@ void SparseLengthsFillerHelper(
     std::vector<TensorFiller>* fillers) {
   CAFFE_ENFORCE_EQ(shapes[length_index].size(), 1);
   // filler.h: SparseLengths->FixedSum will select FD_FIXEDSUM distribution
-  (*fillers)[length_index].SparseLengths(shapes[value_index].front());
+  (*fillers)[length_index].SparseLengths(
+      shapes[value_index].front(), shapes[length_index].front());
 }
 
 void SparseWeightsFillerHelper(
