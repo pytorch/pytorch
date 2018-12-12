@@ -574,7 +574,7 @@ class Operator : public OperatorBase {
       : OperatorBase(operator_def, ws), context_(operator_def.device_option()) {
     // In the constructor, we switch to the device so that the child class
     // constructors will run on that device.
-    context_.SwitchToDevice(0);
+    context_.SwitchToDevice();
   }
   explicit Operator(
       const c10::FunctionSchema& fn_schema,
@@ -583,7 +583,7 @@ class Operator : public OperatorBase {
       : OperatorBase(fn_schema, inputs, outputs) {
     // In the constructor, we switch to the device so that the child class
     // constructors will run on that device.
-    context_.SwitchToDevice(0);
+    context_.SwitchToDevice();
   }
   ~Operator() noexcept override {}
 

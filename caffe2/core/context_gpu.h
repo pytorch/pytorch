@@ -197,6 +197,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
     CaffeCudaSetDevice(gpu_id_);
   }
 
+  // void SwitchToDevice()
   using BaseContext::SwitchToDevice;
 
   inline void WaitEvent(const Event& ev) override {
