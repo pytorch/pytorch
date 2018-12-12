@@ -451,11 +451,8 @@ public:
   Tensor sspaddmm(const Tensor & mat1, const Tensor & mat2, Scalar beta=1, Scalar alpha=1) const;
   Tensor stft(int64_t n_fft, int64_t hop_length, int64_t win_length, const Tensor & window={}, bool normalized=false, bool onesided=true) const;
   int64_t stride(int64_t dim) const;
-  Tensor sum(ScalarType dtype) const;
-  Tensor sum() const;
-  Tensor sum(IntList dim, bool keepdim, ScalarType dtype) const;
-  Tensor sum(IntList dim, bool keepdim=false) const;
-  Tensor sum(IntList dim, ScalarType dtype) const;
+  Tensor sum(c10::optional<ScalarType> dtype=c10::nullopt) const;
+  Tensor sum(IntList dim, bool keepdim=false, c10::optional<ScalarType> dtype=c10::nullopt) const;
   Tensor sum_to_size(IntList size) const;
   Tensor sqrt() const;
   Tensor & sqrt_();

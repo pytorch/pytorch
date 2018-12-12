@@ -745,20 +745,11 @@
 - name: rsub(Tensor self, Scalar other, *, Scalar alpha)
   self: -grad * alpha
 
-- name: sum(Tensor self)
-  self: grad.expand(self.sizes())
+- name: sum(Tensor self, *, ScalarType? dtype)
+  self: grad.expand(self.sizes()).to(self.type())
 
-- name: sum(Tensor self, ScalarType dtype)
-  self: grad.expand(self.sizes()).to(self.type().scalarType())
-
-- name: sum(Tensor self, IntList dim, bool keepdim)
-  self: sum_backward(grad, self.sizes(), dim, keepdim)
-
-- name: sum(Tensor self, IntList dim, ScalarType dtype)
-  self: sum_backward(grad, self.sizes(), dim, false).to(self.type().scalarType())
-
-- name: sum(Tensor self, IntList dim, bool keepdim, ScalarType dtype)
-  self: sum_backward(grad, self.sizes(), dim, keepdim).to(self.type().scalarType())
+- name: sum(Tensor self, IntList dim, bool keepdim, *, ScalarType? dtype)
+  self: sum_backward(grad, self.sizes(), dim, keepdim).to(self.type())
 
 - name: svd(Tensor self, bool some, bool compute_uv)
   self: svd_backward(grads, self, some, compute_uv, result0, result1, result2)

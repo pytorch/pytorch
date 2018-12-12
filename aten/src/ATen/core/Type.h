@@ -358,11 +358,8 @@ struct CAFFE2_API Type {
   virtual Tensor sspaddmm(const Tensor & self, const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) const = 0;
   virtual Tensor stft(const Tensor & self, int64_t n_fft, int64_t hop_length, int64_t win_length, const Tensor & window, bool normalized, bool onesided) const = 0;
   virtual int64_t stride(const Tensor & self, int64_t dim) const = 0;
-  virtual Tensor sum(const Tensor & self, ScalarType dtype) const = 0;
-  virtual Tensor sum(const Tensor & self) const = 0;
-  virtual Tensor sum(const Tensor & self, IntList dim, bool keepdim, ScalarType dtype) const = 0;
-  virtual Tensor sum(const Tensor & self, IntList dim, bool keepdim) const = 0;
-  virtual Tensor sum(const Tensor & self, IntList dim, ScalarType dtype) const = 0;
+  virtual Tensor sum(const Tensor & self, c10::optional<ScalarType> dtype) const = 0;
+  virtual Tensor sum(const Tensor & self, IntList dim, bool keepdim, c10::optional<ScalarType> dtype) const = 0;
   virtual Tensor sum_to_size(const Tensor & self, IntList size) const = 0;
   virtual Tensor sqrt(const Tensor & self) const = 0;
   virtual Tensor & sqrt_(Tensor & self) const = 0;

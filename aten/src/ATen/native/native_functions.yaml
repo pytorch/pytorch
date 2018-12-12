@@ -1607,27 +1607,13 @@
   variants: function, method
   device_guard: false
 
-# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
-- func: sum(Tensor self, *, ScalarType dtype) -> Tensor
+- func: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
-- func: sum(Tensor self) -> Tensor
+- func: sum(Tensor self, IntList[1] dim, bool keepdim=false, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
-- func: sum(Tensor self, IntList[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
-  variants: function, method
-
-- func: sum(Tensor self, IntList[1] dim, bool keepdim=False) -> Tensor
-  variants: function, method
-
-- func: sum(Tensor self, IntList[1] dim, *, ScalarType dtype) -> Tensor
-  variants: function, method
-
-- func: sum_out(Tensor result, Tensor self, IntList[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
-
-- func: sum_out(Tensor result, Tensor self, IntList[1] dim, bool keepdim=False) -> Tensor
-
-- func: sum_out(Tensor result, Tensor self, IntList[1] dim, *, ScalarType dtype) -> Tensor
+- func: sum_out(Tensor result, Tensor self, IntList[1] dim, bool keepdim=false, *, ScalarType? dtype=None) -> Tensor
 
 - func: sum_to_size(Tensor self, IntList size) -> Tensor
   variants: method

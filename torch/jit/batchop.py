@@ -468,7 +468,8 @@ def batch_narrow(data, mask, dims, dimension_, start_, length_):
 
 
 @torch.jit.script
-def batch_sum(data, mask, dims):
+def batch_sum(data, mask, dims, dtype):
+    # type: (Tensor, Tensor, Tensor, int) -> Tuple[Tensor, Tensor, Tensor]
     data = data * mask.type_as(data)
     for _ in range(dims.size(0)):
         data = data.sum(1)

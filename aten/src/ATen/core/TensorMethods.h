@@ -574,20 +574,11 @@ inline Tensor Tensor::stft(int64_t n_fft, int64_t hop_length, int64_t win_length
 inline int64_t Tensor::stride(int64_t dim) const {
     return type().stride(*this, dim);
 }
-inline Tensor Tensor::sum(ScalarType dtype) const {
+inline Tensor Tensor::sum(c10::optional<ScalarType> dtype) const {
     return type().sum(*this, dtype);
 }
-inline Tensor Tensor::sum() const {
-    return type().sum(*this);
-}
-inline Tensor Tensor::sum(IntList dim, bool keepdim, ScalarType dtype) const {
+inline Tensor Tensor::sum(IntList dim, bool keepdim, c10::optional<ScalarType> dtype) const {
     return type().sum(*this, dim, keepdim, dtype);
-}
-inline Tensor Tensor::sum(IntList dim, bool keepdim) const {
-    return type().sum(*this, dim, keepdim);
-}
-inline Tensor Tensor::sum(IntList dim, ScalarType dtype) const {
-    return type().sum(*this, dim, dtype);
 }
 inline Tensor Tensor::sum_to_size(IntList size) const {
     return type().sum_to_size(*this, size);
