@@ -46,18 +46,28 @@ def sanitize_types(types):
     return [sanitize_type(types)]
 
 
+def get_type_annotation(tensor_type):
+    paren_start = tensor_type.find("(")
+    annotation = None
+    if paren_start > -1:
+        annotation = tensor_type[paren_start:]
+        if not annotation.endswith("!)"):
+            raise RuntimeError("We only support writing alias anotations for now")
+        annotation = annotation.strip()
+        tensor_type = tensor_type[:paren_start]
+    return tensor_type, annotation
+
+
 def parse_arguments(args, func_decl, func_name, func_return):
     arguments = []
-    is_out_fn = func_name.endswith('_out')
-    if is_out_fn and func_decl.get('variants', []) not in [[], 'function', ['function']]:
-        raise RuntimeError("Native functions suffixed with _out MUST be declared with only the function variant; "
-                           "e.g., variants: function; otherwise you will tickle a Python argument binding bug "
-                           "(which usually manifests itself as the result variable being undefined.) "
-                           "The culprit was: {}".format(func_name))
     kwarg_only = False
+    is_out_fn = False
 
     if len(args.strip()) == 0:
-        return arguments
+        return arguments, func_name
+
+    # needed in case this is an out function
+    output_arguments = []
 
     # TODO: Use a real parser here; this will get bamboozled
     # by signatures that contain things like std::array<bool, 2> (note the space)
@@ -88,11 +98,35 @@ def parse_arguments(args, func_decl, func_name, func_return):
         # be better if we just named everything and matched by name.
         if is_out_fn and arg_idx < len(func_return):
             argument_dict['output'] = True
+        argument_dict["type"], argument_dict["annotation"] = get_type_annotation(argument_dict["type"])
+        # We assume that type annotations are only used for output tensors
+        is_output_arg = False
+        for ret in func_return:
+            if ret["annotation"] and ret["annotation"] == argument_dict["annotation"]:
+                argument_dict["output"] = True
+                output_arguments.append(argument_dict)
+                assert not is_output_arg
+                is_output_arg = True
+                break
+        if is_output_arg:
+            is_out_fn = True
+            continue
         if kwarg_only:
             argument_dict['kwarg_only'] = True
 
         arguments.append(argument_dict)
-    return arguments
+
+    arguments = output_arguments + arguments
+
+    if is_out_fn and func_decl.get('variants', []) not in [[], 'function', ['function']]:
+        raise RuntimeError("Native functions suffixed with _out MUST be declared with only the function variant; "
+                           "e.g., variants: function; otherwise you will tickle a Python argument binding bug "
+                           "(which usually manifests itself as the result variable being undefined.) "
+                           "The culprit was: {}".format(func_name))
+    if is_out_fn:
+        func_name += "_out"
+
+    return arguments, func_name
 
 
 def parse_return_arguments(return_decl, inplace):
@@ -117,6 +151,7 @@ def parse_return_arguments(return_decl, inplace):
         typ = sanitize_type(t)
         argument_dict = {'type': typ, 'name': name}
         argument_dict['output'] = True
+        argument_dict["type"], argument_dict["annotation"] = get_type_annotation(argument_dict["type"])
 
         arguments.append(argument_dict)
     return arguments
@@ -145,12 +180,14 @@ def run(paths):
                     func_decl, return_decl = [x.strip() for x in func['func'].split('->')]
                 else:
                     raise Exception('Expected return declaration')
-                fn_name, arguments = func_decl.split('(')
-                arguments = arguments.split(')')[0]
+                func_decl = func_decl.strip()
+                fn_name_start = func_decl.find("(")
+                fn_name = func_decl[:fn_name_start]
+                arguments = func_decl[fn_name_start + 1:-1]
                 declaration['name'] = func.get('name', fn_name)
                 declaration['inplace'] = re.search('(^__i|[^_]_$)', fn_name) is not None
                 return_arguments = parse_return_arguments(return_decl, declaration['inplace'])
-                arguments = parse_arguments(arguments, func, declaration['name'], return_arguments)
+                arguments, declaration['name'] = parse_arguments(arguments, func, declaration['name'], return_arguments)
                 output_arguments = [x for x in arguments if x.get('output')]
                 declaration['return'] = return_arguments if len(output_arguments) == 0 else output_arguments
                 declaration['variants'] = func.get('variants', ['function'])
@@ -164,6 +201,11 @@ def run(paths):
                 declaration['python_module'] = func.get('python_module', '')
                 declaration['aten_sparse'] = has_sparse_dispatches(
                     declaration['type_method_definition_dispatch'])
+                # The annotation field isn't required for further processing at this point
+                # so we remove it to produce the exact same code gen as without it.
+                for argument in declaration['arguments']:
+                    if 'annotation' in argument:
+                        del argument['annotation']
                 declarations.append(declaration)
             except Exception as e:
                 msg = '''Exception raised in processing function:
