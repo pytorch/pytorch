@@ -2093,6 +2093,9 @@ private:
           return true;
         } else if (*type_name == "tuple" && val->type()->cast<TupleType>()) {
           return true;
+        } else if (val->type()->cast<OptionalType>()) {
+          throw ErrorReport(loc)
+                << "Optional isinstance check is not supported, consider use is/isnot None instead";
         } else {
           TypePtr type = parseTypeFromExpr(classinfo);
           if (val->type()->isSubtypeOf(type)) {

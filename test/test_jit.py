@@ -4501,6 +4501,13 @@ a")
         for inp, typ, type_hint in zip(inputs, type_literals, type_annotations):
             test(inp, typ, type_hint)
 
+        # test optional isintance check
+        with self.assertRaisesRegex(RuntimeError, "Optional isinstance check is not supported"):
+            @torch.jit.script
+            def opt_func(x):
+                # type: (Optional[int]) -> bool
+                return isinstance(x, int)
+
     def test_python_call(self):
         def pyfunc(a):
             return a * 3.0
