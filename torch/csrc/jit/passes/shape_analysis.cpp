@@ -684,7 +684,7 @@ class ShapePropagator {
             "aten::slice(Tensor self, int dim, int start, int end, int step) -> Tensor",
             "aten::alias(Tensor self) -> Tensor",
             "aten::detach(Tensor self) -> Tensor",
-            "aten::cumprod(Tensor self, int dim) -> Tensor",
+            "aten::cumprod(Tensor self, int dim, *, ScalarType? dtype) -> Tensor",
             "aten::cumsum(Tensor self, int dim, *, ScalarType? dtype) -> Tensor",
             "aten::empty_like(Tensor self) -> Tensor",
             "aten::full_like(Tensor self, Scalar fill_value) -> Tensor",

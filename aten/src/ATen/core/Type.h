@@ -236,8 +236,7 @@ struct CAFFE2_API Type {
   virtual Tensor cosh(const Tensor & self) const = 0;
   virtual Tensor & cosh_(Tensor & self) const = 0;
   virtual Tensor cumsum(const Tensor & self, int64_t dim, c10::optional<ScalarType> dtype) const = 0;
-  virtual Tensor cumprod(const Tensor & self, int64_t dim, ScalarType dtype) const = 0;
-  virtual Tensor cumprod(const Tensor & self, int64_t dim) const = 0;
+  virtual Tensor cumprod(const Tensor & self, int64_t dim, c10::optional<ScalarType> dtype) const = 0;
   virtual Tensor det(const Tensor & self) const = 0;
   virtual Tensor diag_embed(const Tensor & self, int64_t offset, int64_t dim1, int64_t dim2) const = 0;
   virtual Tensor diagflat(const Tensor & self, int64_t offset) const = 0;

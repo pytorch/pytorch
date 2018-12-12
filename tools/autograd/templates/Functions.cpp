@@ -398,10 +398,6 @@ Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim) {
   return grad_input;
 }
 
-Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim, ScalarType dtype) {
-  return cumprod_backward(grad.to(input.scalar_type()), input, dim);
-}
-
 Tensor gesv_backward_self(const Tensor & grad, const Tensor & self, const Tensor & A) {
   return std::get<0>(at::gesv(grad, A.transpose(-2, -1)));
 }

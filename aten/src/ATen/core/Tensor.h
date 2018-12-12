@@ -329,8 +329,7 @@ public:
   Tensor cosh() const;
   Tensor & cosh_();
   Tensor cumsum(int64_t dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
-  Tensor cumprod(int64_t dim, ScalarType dtype) const;
-  Tensor cumprod(int64_t dim) const;
+  Tensor cumprod(int64_t dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
   Tensor det() const;
   Tensor diag_embed(int64_t offset=0, int64_t dim1=-2, int64_t dim2=-1) const;
   Tensor diagflat(int64_t offset=0) const;

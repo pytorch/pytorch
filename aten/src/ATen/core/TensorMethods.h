@@ -208,11 +208,8 @@ inline Tensor & Tensor::cosh_() {
 inline Tensor Tensor::cumsum(int64_t dim, c10::optional<ScalarType> dtype) const {
     return type().cumsum(*this, dim, dtype);
 }
-inline Tensor Tensor::cumprod(int64_t dim, ScalarType dtype) const {
+inline Tensor Tensor::cumprod(int64_t dim, c10::optional<ScalarType> dtype) const {
     return type().cumprod(*this, dim, dtype);
-}
-inline Tensor Tensor::cumprod(int64_t dim) const {
-    return type().cumprod(*this, dim);
 }
 inline Tensor Tensor::det() const {
     return type().det(*this);

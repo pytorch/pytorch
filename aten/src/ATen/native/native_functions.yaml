@@ -559,16 +559,10 @@
 
 - func: cumsum_out(Tensor result, Tensor self, int64_t dim, *, ScalarType? dtype=None) -> Tensor
 
-# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
-- func: cumprod(Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+- func: cumprod(Tensor self, int64_t dim, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
-- func: cumprod(Tensor self, int64_t dim) -> Tensor
-  variants: function, method
-
-- func: cumprod_out(Tensor result, Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
-
-- func: cumprod_out(Tensor result, Tensor self, int64_t dim) -> Tensor
+- func: cumprod_out(Tensor result, Tensor self, int64_t dim, *, ScalarType? dtype=None) -> Tensor
 
 - func: ctc_loss(Tensor log_probs, Tensor targets, IntList input_lengths, IntList target_lengths, int64_t blank=0, int64_t reduction=Reduction::Mean) -> Tensor
 
