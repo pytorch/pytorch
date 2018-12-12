@@ -1,6 +1,9 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
+
+// TODO: Remove the condition on AT_ROCM_ENABLED entirely,
+// don't build this file as part of CPU build.
 #include <ATen/cuda/CUDAConfig.h>
 
 #if !AT_ROCM_ENABLED()
@@ -74,7 +77,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_transpose_backwa
 
 #else  // AT_ROCM_ENABLED
 
-#include <THC/THC.h>
+#include <THH/THH.h>
 
 #include <ATen/miopen/miopen-wrapper.h>
 #include <ATen/miopen/Descriptors.h>
