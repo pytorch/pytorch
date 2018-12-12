@@ -11,7 +11,6 @@
 #include <torch/csrc/jit/ivalue.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/operator.h>
-#include <torch/csrc/variable_tensor_functions.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 
 #include <exception>

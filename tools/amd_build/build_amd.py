@@ -45,16 +45,23 @@ includes = [
     "aten/src/THC/*",
     "aten/src/THCUNN/*",
     "aten/src/ATen/test/*",
+    # CMakeLists.txt isn't processed by default, but there are a few
+    # we do want to handle, so explicitly specify them
+    "aten/src/THC/CMakeLists.txt",
+    "aten/src/THCUNN/CMakeLists.txt",
     "torch/*",
 ]
 
 ignores = [
     "caffe2/operators/depthwise_3x3_conv_op_cudnn.cu",
     "caffe2/operators/pool_op_cudnn.cu",
-    '**/hip/**',
+    '*/hip/*',
     # These files are compatible with both cuda and hip
     "aten/src/ATen/core/*",
-    "torch/csrc/autograd/engine.cpp"
+    "torch/csrc/autograd/engine.cpp",
+    # generated files we shouldn't frob
+    "torch/lib/tmp_install/*",
+    "torch/lib/include/*",
 ]
 
 json_settings = os.path.join(amd_build_dir, "disabled_features.json")
