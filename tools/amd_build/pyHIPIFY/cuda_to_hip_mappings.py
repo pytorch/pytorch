@@ -2215,21 +2215,24 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("cudaDeviceAllocator", ("hipDeviceAllocator", API_PYTORCH)),
     ("define MAX_NUM_BLOCKS 200", ("define MAX_NUM_BLOCKS 64", API_PYTORCH)),
 
-    ("c10::cuda::CUDAGuard", ("::at::cuda::detail::HIPGuardMasqueradingAsCUDA", API_C10)),
-    ("cuda::CUDAGuard", ("::at::cuda::detail::HIPGuardMasqueradingAsCUDA", API_C10)),
-    ("CUDAGuard", ("::at::cuda::detail::HIPGuardMasqueradingAsCUDA", API_C10)),
+    ("c10::cuda::CUDAGuard", ("::at::cuda::detail::HIPGuardMasqueradingAsCUDA", API_PYTORCH)),
+    ("cuda::CUDAGuard", ("::at::cuda::detail::HIPGuardMasqueradingAsCUDA", API_PYTORCH)),
+    ("CUDAGuard", ("::at::cuda::detail::HIPGuardMasqueradingAsCUDA", API_PYTORCH)),
 
-    ("c10::cuda::OptionalCUDAGuard", ("::at::cuda::detail::OptionalHIPGuardMasqueradingAsCUDA", API_C10)),
-    ("cuda::OptionalCUDAGuard", ("::at::cuda::detail::OptionalHIPGuardMasqueradingAsCUDA", API_C10)),
-    ("OptionalCUDAGuard", ("::at::cuda::detail::OptionalHIPGuardMasqueradingAsCUDA", API_C10)),
+    ("c10::cuda::OptionalCUDAGuard", ("::at::cuda::detail::OptionalHIPGuardMasqueradingAsCUDA", API_PYTORCH)),
+    ("cuda::OptionalCUDAGuard", ("::at::cuda::detail::OptionalHIPGuardMasqueradingAsCUDA", API_PYTORCH)),
+    ("OptionalCUDAGuard", ("::at::cuda::detail::OptionalHIPGuardMasqueradingAsCUDA", API_PYTORCH)),
 
-    ("c10::cuda::CUDAStreamGuard", ("::at::cuda::detail::HIPStreamGuardMasqueradingAsCUDA", API_C10)),
-    ("cuda::CUDAStreamGuard", ("::at::cuda::detail::HIPStreamGuardMasqueradingAsCUDA", API_C10)),
-    ("CUDAStreamGuard", ("::at::cuda::detail::HIPStreamGuardMasqueradingAsCUDA", API_C10)),
+    ("c10::cuda::CUDAStreamGuard", ("::at::cuda::detail::HIPStreamGuardMasqueradingAsCUDA", API_PYTORCH)),
+    ("cuda::CUDAStreamGuard", ("::at::cuda::detail::HIPStreamGuardMasqueradingAsCUDA", API_PYTORCH)),
+    ("CUDAStreamGuard", ("::at::cuda::detail::HIPStreamGuardMasqueradingAsCUDA", API_PYTORCH)),
 
-    ("c10::cuda::OptionalCUDAStreamGuard", ("::at::cuda::detail::OptionalHIPStreamGuardMasqueradingAsCUDA", API_C10)),
-    ("cuda::OptionalCUDAStreamGuard", ("::at::cuda::detail::OptionalHIPStreamGuardMasqueradingAsCUDA", API_C10)),
-    ("OptionalCUDAStreamGuard", ("::at::cuda::detail::OptionalHIPStreamGuardMasqueradingAsCUDA", API_C10)),
+    ("c10::cuda::OptionalCUDAStreamGuard", ("::at::cuda::detail::OptionalHIPStreamGuardMasqueradingAsCUDA", API_PYTORCH)),
+    ("cuda::OptionalCUDAStreamGuard", ("::at::cuda::detail::OptionalHIPStreamGuardMasqueradingAsCUDA", API_PYTORCH)),
+    ("OptionalCUDAStreamGuard", ("::at::cuda::detail::OptionalHIPStreamGuardMasqueradingAsCUDA", API_PYTORCH)),
+
+    # TODO: Undo this special-case
+    ("c10/cuda/CUDAGuard.h", ("ATen/cuda/detail/CUDAHIPCompat.h", API_PYTORCH)),
 ])
 
 CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict([
@@ -2270,10 +2273,11 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("CuDNN" ,("MIOPEN", API_CAFFE2)),
     ("cudnn" ,("miopen", API_CAFFE2)),
     ("namespace cuda", ("namespace hip", API_CAFFE2)),
-    ("cuda::CUDAGuard", ("hip::HIPGuard", API_C10)),
-    ("cuda::OptionalCUDAGuard", ("hip::OptionalHIPGuard", API_C10)),
-    ("cuda::CUDAStreamGuard", ("hip::HIPStreamGuard", API_C10)),
-    ("cuda::OptionalCUDAStreamGuard", ("hip::OptionalHIPStreamGuard", API_C10)),
+    ("cuda::CUDAGuard", ("hip::HIPGuard", API_CAFFE2)),
+    ("cuda::OptionalCUDAGuard", ("hip::OptionalHIPGuard", API_CAFFE2)),
+    ("cuda::CUDAStreamGuard", ("hip::HIPStreamGuard", API_CAFFE2)),
+    ("cuda::OptionalCUDAStreamGuard", ("hip::OptionalHIPStreamGuard", API_CAFFE2)),
+    ("c10/cuda/CUDAGuard.h", ("c10/hip/HIPGuard.h", API_CAFFE2)),
 ])
 
 # We must tread very carefully here.  Blanket conversions like are done
@@ -2292,8 +2296,6 @@ C10_MAPPINGS = collections.OrderedDict([
     ("c10/cuda/CUDAMacros.h", ("c10/hip/HIPMacros.h", API_C10)),
     ("c10/cuda/CUDAMathCompat.h", ("c10/hip/HIPMathCompat.h", API_C10)),
     ("c10/cuda/CUDAFunctions.h", ("c10/hip/HIPFunctions.h", API_C10)),
-    # TODO: Undo this special-case
-    ("c10/cuda/CUDAGuard.h", ("ATen/cuda/detail/CUDAHIPCompat.h", API_C10)),
     ("c10/cuda/CUDAStream.h", ("c10/hip/HIPStream.h", API_C10)),
     ("c10/cuda/impl/CUDATest.h", ("c10/hip/impl/HIPTest.h", API_C10)),
     ("c10/cuda/impl/CUDAGuardImpl.h", ("c10/hip/impl/HIPGuardImpl.h", API_C10)),
