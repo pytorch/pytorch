@@ -12,9 +12,9 @@
 #include "ATen/Utils.h"
 #include "ATen/WrapDimUtils.h"
 #include "ATen/core/Half.h"
-#include "c10/core/TensorImpl.h"
-#include "ATen/core/UndefinedTensorImpl.h"
-#include "c10/util/Optional.h"
+#include <c10/core/TensorImpl.h>
+#include <c10/core/UndefinedTensorImpl.h>
+#include <c10/util/Optional.h>
 
 #include <cstddef>
 #include <functional>
