@@ -3,7 +3,7 @@
 #include <ATen/ATen.h>
 #include <THC/THCTensor.hpp>
 
-#include <ATen/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAGuard.h>
 
 namespace at { namespace native {
 
