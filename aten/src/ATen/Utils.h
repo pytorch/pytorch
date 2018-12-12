@@ -94,7 +94,8 @@ static inline std::vector<TensorImpl*> checked_tensor_list_unwrap(ArrayRef<Tenso
                " for sequence element ", i , " in sequence argument at position #", pos, " '", name, "'");
     }
     if (expr.is_variable()) {
-      AT_ERROR("Expected Tensor (not Variable) for argument #", pos, " '", name, "'");
+      AT_ERROR("Expected Tensor (not Variable) for sequence element ",
+               i , " in sequence argument at position #", pos, " '", name, "'");
     }
     unwrapped.emplace_back(expr.unsafeGetTensorImpl());
   }
