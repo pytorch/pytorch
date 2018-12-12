@@ -38,9 +38,9 @@ class BlobTestNonDefaultConstructible {
 };
 }
 
-CAFFE_KNOWN_TYPE(BlobTestFoo);
-CAFFE_KNOWN_TYPE(BlobTestBar);
-CAFFE_KNOWN_TYPE(BlobTestNonDefaultConstructible);
+CAFFE_KNOWN_TYPE_ANONYMOUS(BlobTestFoo);
+CAFFE_KNOWN_TYPE_ANONYMOUS(BlobTestBar);
+CAFFE_KNOWN_TYPE_ANONYMOUS(BlobTestNonDefaultConstructible);
 
 class BlobTestFooSerializer : public BlobSerializerBase {
  public:
@@ -972,7 +972,7 @@ class DummyTypeDeserializer : public BlobDeserializerBase {
 };
 }
 
-CAFFE_KNOWN_TYPE(DummyType);
+CAFFE_KNOWN_TYPE_ANONYMOUS(DummyType);
 
 namespace {
 REGISTER_BLOB_SERIALIZER((TypeMeta::Id<DummyType>()), DummyTypeSerializer);
