@@ -300,6 +300,12 @@ Tensor ones_like(const Tensor& self, const TensorOptions& options) {
   return native::ones(self.sizes(), options);
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ scalar_tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Tensor scalar_tensor(Scalar s, const TensorOptions& options) {
+  return at::empty({}, options).fill_(s);
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ rand ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor rand(IntList size, const TensorOptions& options) {

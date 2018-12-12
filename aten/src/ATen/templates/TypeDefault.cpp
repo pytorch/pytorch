@@ -124,11 +124,6 @@ Storage TypeDefault::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   return Storage(c10::intrusive_ptr<StorageImpl>::reclaim(static_cast<StorageImpl*>(th_pointer)));
 }
 
-
-Tensor TypeDefault::scalarTensor(Scalar s) const {
-  return at::empty({}, this->options()).fill_(s);
-}
-
 ${type_method_definitions}
 
 }

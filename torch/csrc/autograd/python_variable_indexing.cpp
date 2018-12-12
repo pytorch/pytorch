@@ -115,10 +115,10 @@ static Variable valueToTensor(const at::Type & type, PyObject* value) {
     return reinterpret_cast<THPVariable*>(value)->cdata;
   }
   if (THPUtils_checkLong(value)) {
-    return type.scalarTensor(Scalar(THPUtils_unpackLong(value)));
+    return at::scalar_tensor(Scalar(THPUtils_unpackLong(value)), type.options());
   }
   if (PyFloat_Check(value)) {
-    return type.scalarTensor(Scalar(THPUtils_unpackDouble(value)));
+    return at::scalar_tensor(Scalar(THPUtils_unpackDouble(value)), type.options());
   }
   throw TypeError("can't assign a %s to a %s", Py_TYPE(value)->tp_name, type.toString());
 }
