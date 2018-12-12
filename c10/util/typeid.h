@@ -506,7 +506,7 @@ inline std::ostream& operator<<(
   }
 #define CAFFE_KNOWN_TYPE(T)                                               \
   template <>                                                             \
-  EXPORT_IF_NOT_GCC TypeIdentifier TypeIdentifier::Get<T>() {             \
+  TypeIdentifier TypeIdentifier::Get<T>() {             \
     static const TypeIdentifier type_id = TypeIdentifier::createTypeId(); \
     return type_id;                                                       \
   }                                                                       \
