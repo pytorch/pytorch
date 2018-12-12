@@ -13,6 +13,9 @@ import onnx.backend.test
 
 import caffe2.python.onnx.backend as c2
 
+from caffe2.python import core
+core.SetEnginePref({}, {})
+
 # This is a pytest magic variable to load extra plugins
 pytest_plugins = 'onnx.backend.test.report',
 
