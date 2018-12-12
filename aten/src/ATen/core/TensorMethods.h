@@ -370,11 +370,8 @@ inline Tensor & Tensor::log2_() {
 inline Tensor Tensor::logdet() const {
     return type().logdet(*this);
 }
-inline Tensor Tensor::log_softmax(int64_t dim, ScalarType dtype) const {
+inline Tensor Tensor::log_softmax(int64_t dim, c10::optional<ScalarType> dtype) const {
     return type().log_softmax(*this, dim, dtype);
-}
-inline Tensor Tensor::log_softmax(int64_t dim) const {
-    return type().log_softmax(*this, dim);
 }
 inline Tensor Tensor::logsumexp(int64_t dim, bool keepdim) const {
     return type().logsumexp(*this, dim, keepdim);

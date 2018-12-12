@@ -740,8 +740,10 @@ def where(g, condition, self, other):
     return g.op("ATen", condition, self, other, operator_s="where")
 
 
-@parse_args('v', 'i')
-def log_softmax(g, input, dim=None):
+@parse_args('v', 'i', 'none')
+def log_softmax(g, input, dim, dtype):
+    if dtype.node().kind() != 'prim::none':
+        return _unimplemented("scale", "dtype")
     # PyTorch dim and ONNX axis have different meanings.
     # See Softmax comment for details.
     if dim < 0:
