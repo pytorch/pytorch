@@ -4,11 +4,7 @@ import multiprocessing
 from multiprocessing.reduction import ForkingPickler
 import pickle
 
-if sys.version_info >= (3, 4):
-    # since python 3.4, multiprocessing.* should be used due to the introduction of contexts
-    import multiprocessing as mq
-else:
-    import multiprocessing.queues as mq
+import multiprocessing.queues as mq
 
 
 class ConnectionWrapper(object):
@@ -37,6 +33,8 @@ class ConnectionWrapper(object):
 class Queue(mq.Queue):
 
     def __init__(self, *args, **kwargs):
+        if 'ctx' not in kwargs:
+            kwargs['ctx'] = multiprocessing.get_context()
         super(Queue, self).__init__(*args, **kwargs)
         self._reader = ConnectionWrapper(self._reader)
         self._writer = ConnectionWrapper(self._writer)
@@ -45,6 +43,11 @@ class Queue(mq.Queue):
 
 
 class SimpleQueue(mq.SimpleQueue):
+
+    def __init__(self, *args, **kwargs):
+        if 'ctx' not in kwargs:
+            kwargs['ctx'] = multiprocessing.get_context()
+        super(SimpleQueue, self).__init__(*args, **kwargs)
 
     def _make_methods(self):
         if not isinstance(self._reader, ConnectionWrapper):
