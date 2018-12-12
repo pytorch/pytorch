@@ -177,11 +177,15 @@ class FilterDescriptor
 public:
   void set(const at::Tensor &t, int64_t pad = 0);
 
+  void print();
+
 private:
   void set(cudnnDataType_t dataType, int dim, int* size) {
     AT_CUDNN_CHECK(cudnnSetFilterNdDescriptor(mut_desc(), dataType, CUDNN_TENSOR_NCHW, dim, size));
   }
 };
+
+std::ostream& operator<<(std::ostream & out, const FilterDescriptor& d);
 
 struct AT_CUDA_API ConvolutionDescriptor
   : public Descriptor<cudnnConvolutionStruct,

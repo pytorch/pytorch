@@ -132,4 +132,33 @@ void FilterDescriptor::set(const at::Tensor &t, int64_t pad) {
   set(getDataType(t), (int) dim, size);
 }
 
+std::ostream& operator<<(std::ostream & out, const FilterDescriptor& d) {
+  out << "FilterDescriptor " << static_cast<void*>(d.desc()) << "\n";
+  int nbDims;
+  int dimA[CUDNN_DIM_MAX];
+  cudnnTensorFormat_t format;
+  cudnnDataType_t dtype;
+  cudnnGetFilterNdDescriptor(d.desc(), CUDNN_DIM_MAX, &dtype, &format, &nbDims, dimA);
+  out << "    type = " << cudnnTypeToString(dtype) << "\n";
+  out << "    nbDims = " << nbDims << "\n";
+  // Read out only nbDims of the array!
+  out << "    dimA = ";
+  for (auto i : ArrayRef<int>{dimA, static_cast<size_t>(nbDims)}) {
+    out << i << ", ";
+  }
+  out << "\n";
+  out << "    format = ";
+  if (format == CUDNN_TENSOR_NCHW) {
+    out << "NCHW";
+  } else if (format == CUDNN_TENSOR_NHWC) {
+    out << "NHWC";
+  } else {
+    out << "<unrecognized>";
+  }
+  out << "\n";
+  return out;
+}
+
+void FilterDescriptor::print() { std::cout << *this; }
+
 }}
