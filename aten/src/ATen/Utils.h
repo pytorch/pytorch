@@ -2,7 +2,7 @@
 
 #include <ATen/core/ATenGeneral.h>
 #include <c10/core/StorageImpl.h>
-#include <ATen/core/UndefinedTensorImpl.h>
+#include <c10/core/UndefinedTensorImpl.h>
 
 #include <c10/core/ScalarType.h>
 #include <ATen/Formatting.h>
