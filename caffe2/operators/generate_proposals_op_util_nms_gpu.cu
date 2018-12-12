@@ -1,11 +1,15 @@
 #include "caffe2/core/context_gpu.h"
-#include "generate_proposals_op_util_nms_gpu.h"
+#include "caffe2/operators/generate_proposals_op_util_nms_gpu.h"
 
 namespace caffe2 {
 namespace utils {
 namespace {
 // Helper data structure used locally
-struct __align__(16) Box {
+struct
+#ifndef __HIP_PLATFORM_HCC__
+__align__(16)
+#endif
+Box {
   float x1, y1, x2, y2;
 };
 
