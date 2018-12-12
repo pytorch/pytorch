@@ -141,6 +141,8 @@ static std::string encodeRHS(const Node* n) {
     {aten::lgamma, "lgammaf(${0})"},
     {aten::exp, "expf(${0})"},
     {aten::expm1, "expm1f(${0})"},
+    {aten::erf, "erff(${0})"},
+    {aten::erfc, "erfcf(${0})"},
     {aten::cos, "cosf(${0})"},
     {aten::acos, "acosf(${0})"},
     {aten::cosh, "coshf(${0})"},
