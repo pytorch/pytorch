@@ -118,19 +118,11 @@ static inline int64_t n_dim_size(const Tensor& self, IntList dim) {
   return numel;
 }
 
-static inline Tensor cumsum(const Tensor& self, int64_t dim, optional<ScalarType> dtype) {
+Tensor cumsum(const Tensor& self, int64_t dim, optional<ScalarType> dtype) {
   return at::legacy::th::_th_cumsum(integer_upcast(self, dtype), dim);
 }
 
-Tensor cumsum(const Tensor& self, int64_t dim, ScalarType dtype) {
-  return at::native::cumsum(self, dim, optional<ScalarType>(dtype));
-}
-
-Tensor cumsum(const Tensor& self, int64_t dim) {
-  return at::native::cumsum(self, dim, c10::nullopt);
-}
-
-static inline Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, optional<ScalarType> dtype) {
+Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, optional<ScalarType> dtype) {
   // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
   AT_CHECK(
       !dtype.has_value() || (result.type().scalarType() == dtype.value()),
@@ -140,14 +132,6 @@ static inline Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim
       toString(dtype.value()),
       ".");
   return at::legacy::th::_th_cumsum_out(result, self.toType(result.type().scalarType()), dim);
-}
-
-Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, ScalarType dtype) {
-  return at::native::cumsum_out(result, self, dim, optional<ScalarType>(dtype));
-}
-
-Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim) {
-  return at::native::cumsum_out(result, self, dim, c10::nullopt);
 }
 
 static inline Tensor cumprod(const Tensor& self, int64_t dim, optional<ScalarType> dtype) {

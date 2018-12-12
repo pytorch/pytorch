@@ -414,10 +414,6 @@ Tensor cumsum_backward(const Tensor & x, int64_t dim) {
   return ret;
 }
 
-Tensor cumsum_backward(const Tensor &x, int64_t dim, ScalarType input_dtype) {
-  return cumsum_backward(x.to(input_dtype), dim);
-}
-
 Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, int64_t dim, bool keepdim) {
   if (!keepdim && self.dim() != 0) {
     grad = grad.unsqueeze(dim);

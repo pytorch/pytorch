@@ -328,8 +328,7 @@ public:
   Tensor & cos_();
   Tensor cosh() const;
   Tensor & cosh_();
-  Tensor cumsum(int64_t dim, ScalarType dtype) const;
-  Tensor cumsum(int64_t dim) const;
+  Tensor cumsum(int64_t dim, c10::optional<ScalarType> dtype=c10::nullopt) const;
   Tensor cumprod(int64_t dim, ScalarType dtype) const;
   Tensor cumprod(int64_t dim) const;
   Tensor det() const;
