@@ -876,8 +876,9 @@ for mapping in CUDA_TO_HIP_MAPPINGS:
         if constants.API_CAFFE2 not in meta_data:
             PYTORCH_TRIE.add(src)
             PYTORCH_MAP[src] = dst
-        CAFFE2_TRIE.add(src)
-        CAFFE2_MAP[src] = dst
+        if constants.API_PYTORCH not in meta_data:
+            CAFFE2_TRIE.add(src)
+            CAFFE2_MAP[src] = dst
 RE_CAFFE2_PREPROCESSOR = re.compile(CAFFE2_TRIE.pattern())
 RE_PYTORCH_PREPROCESSOR = re.compile(r'\b{0}\b'.format(PYTORCH_TRIE.pattern()))
 

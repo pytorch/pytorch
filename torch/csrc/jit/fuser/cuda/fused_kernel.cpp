@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/fuser/cuda/fused_kernel.h>
 
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <THC/THC.h>
 #include <torch/csrc/cuda/cuda_check.h>
 #include <torch/csrc/jit/resource_guard.h>

@@ -2,7 +2,8 @@
 #define THC_DEVICE_ALLOCATOR_INC
 
 #ifdef __cplusplus
-#include <ATen/cuda/CUDAStream.h>
+#include <c10/cuda/CUDAStream.h>
+#include <ATen/cuda/ATenCUDAGeneral.h>
 #endif
 
 #if (__cplusplus >= 201103L) || (defined(_MSC_VER) && defined(__cplusplus))
