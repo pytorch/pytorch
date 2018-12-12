@@ -3261,15 +3261,27 @@
 
 - func: adaptive_avg_pool2d_out(Tensor output, Tensor self, IntList[2] output_size) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: adaptive_avg_pool2d_out_cpu
+    CUDA: adaptive_avg_pool2d_out_cuda
 
 - func: adaptive_avg_pool2d(Tensor self, IntList[2] output_size) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: adaptive_avg_pool2d_cpu
+    CUDA: adaptive_avg_pool2d_cuda
 
 - func: adaptive_avg_pool2d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: adaptive_avg_pool2d_backward_out_cpu
+    CUDA: adaptive_avg_pool2d_backward_out_cuda
 
 - func: adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: adaptive_avg_pool2d_backward_cpu
+    CUDA: adaptive_avg_pool2d_backward_cuda
 
 - func: adaptive_avg_pool3d_out(Tensor output, Tensor self, IntList[3] output_size) -> Tensor
   python_module: nn
