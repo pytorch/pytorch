@@ -34,7 +34,7 @@ struct CAFFE2_API ${Type} : public TypeDefault {
   virtual size_t elementSizeInBytes() const override;
   virtual TypeID ID() const override;
 
-  ${type_derived_method_declarations}
+  ${type_method_declarations}
 };
 
 } // namespace at

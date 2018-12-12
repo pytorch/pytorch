@@ -74,6 +74,7 @@ enum class TypeID {
   SparseCUDAInt,
   SparseCUDALong,
   SparseCUDAShort,
+  FPGA,
   CPUComplexFloat,
   CPUComplexDouble,
   CUDAComplexFloat,

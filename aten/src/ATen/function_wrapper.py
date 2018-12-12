@@ -1075,15 +1075,13 @@ def create_generic(top_env, declarations):
             raise Exception("broadcasting is not yet supported for native functions, "
                             "but specified for function {}", option['name'])
 
-        # Factory methods are not dispatched over `Type`.
-        if not is_factory_method:
-            if option['extended_method']:
-                top_env['pure_virtual_extended_type_method_declarations'].append(
-                    PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
-            else:
-                top_env['pure_virtual_type_method_declarations'].append(
-                    PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
-            top_env['type_method_declarations'].append(TYPE_METHOD_DECLARATION_CONCRETE.substitute(env))
+        if option['extended_method']:
+            top_env['pure_virtual_extended_type_method_declarations'].append(
+                PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
+        else:
+            top_env['pure_virtual_type_method_declarations'].append(
+                PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
+        top_env['type_method_declarations'].append(TYPE_METHOD_DECLARATION_CONCRETE.substitute(env))
         option['native_type_method_dispatch'] = type_method_dispatch
 
         # Note [Abstract ATen methods]
@@ -1099,7 +1097,7 @@ def create_generic(top_env, declarations):
             abstract = True
             top_env['type_method_definitions'].append(
                 TYPE_METHOD_DEFINITION_ABSTRACT.substitute(env))
-        elif not is_factory_method:
+        else:
             body = TYPE_DEFINITION_BODY_NATIVE.substitute(env)
             top_env['type_method_definitions'].append(
                 TYPE_METHOD_DEFINITION_CONCRETE.substitute(
@@ -1593,19 +1591,9 @@ def create_extension_backend(backend_type_env, declarations):
     type_object_declarations = []
     type_object_definitions = []
 
-    # Temporarily filter out factory methods, will move them to Type
-    factory_methods = [
-        "arange", "bartlett_window", "blackman_window", "empty_like",
-        "empty_strided", "eye", "full", "full_like", "hann_window",
-        "hamming_window", "linspace", "logspace", "ones", "ones_like",
-        "rand", "rand_like", "randint", "randint_like", "randn", "randn_like",
-        "randperm", "range", "zeros", "zeros_like", "sparse_coo_tensor",
-        "_sparse_coo_tensor_unsafe"
-    ]
-
     for declaration in declarations:
         for option in declaration['options']:
-            if not option.get('skip', False) and option['name'] not in factory_methods:
+            if not option.get('skip', False):
                 try:
                     option['formals_types'] = [f['type'] for f in option['formals_list']]
                     option['native_actuals'] = [f['name'] for f in option['formals_list']]

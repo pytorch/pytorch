@@ -37,13 +37,13 @@ const char * ${Type}::toString() const {
 }
 
 TypeID ${Type}::ID() const {
-  AT_ERROR("ID is not implemented for ${Type}");
+  return ${TypeID};
 }
 
 size_t ${Type}::elementSizeInBytes() const {
   AT_ERROR("elementSizeInBytes is not implemented for ${Type}");
 }
 
-${type_derived_method_definitions}
+${type_method_definitions}
 
 } // namespace at
