@@ -342,8 +342,7 @@ struct CAFFE2_API Type {
   virtual Tensor slice(const Tensor & self, int64_t dim, int64_t start, int64_t end, int64_t step) const = 0;
   virtual std::tuple<Tensor,Tensor> slogdet(const Tensor & self) const = 0;
   virtual Tensor smm(const Tensor & self, const Tensor & mat2) const = 0;
-  virtual Tensor softmax(const Tensor & self, int64_t dim, ScalarType dtype) const = 0;
-  virtual Tensor softmax(const Tensor & self, int64_t dim) const = 0;
+  virtual Tensor softmax(const Tensor & self, int64_t dim, c10::optional<ScalarType> dtype) const = 0;
   virtual std::vector<Tensor> split(const Tensor & self, int64_t split_size, int64_t dim) const = 0;
   virtual std::vector<Tensor> split_with_sizes(const Tensor & self, IntList split_sizes, int64_t dim) const = 0;
   virtual Tensor squeeze(const Tensor & self) const = 0;

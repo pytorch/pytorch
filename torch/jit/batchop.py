@@ -370,7 +370,8 @@ def batch_topk(data, mask, dims, k_, dim_, largest_, sorted_):
 
 
 @torch.jit.script
-def batch_softmax(data, mask, dims, dim_):
+def batch_softmax(data, mask, dims, dim_, dtype):
+    # type: (Tensor, Tensor, Tensor, Tensor, int) -> Tuple[Tensor, Tensor, Tensor]
     dim = int(dim_)
     # if dim == 0:
     #     raise ValueError("cannot do softmax along batch_dim")
@@ -387,11 +388,11 @@ def batch_softmax(data, mask, dims, dim_):
             while(valid_num.dim() >= 1):
                 valid_num = valid_num[0]
             valid_num = int(valid_num)
-            d = data[i].unsqueeze(0).narrow(dim, 0, valid_num).softmax(dim)
+            d = data[i].unsqueeze(0).narrow(dim, 0, valid_num).softmax(dim, dtype=dtype)
             if valid_num < max_len:
                 d = torch.cat([d, data[i].unsqueeze(0).narrow(dim, valid_num, max_len - valid_num)], dim)
         else:
-            d = data[i].unsqueeze(0).softmax(dim)
+            d = data[i].unsqueeze(0).softmax(dim, dtype=dtype)
         if i == 0:
             res_data = d
         else:
