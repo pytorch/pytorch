@@ -538,7 +538,7 @@ namespace {
 //      1 1 1
 //    In this case, we first calculate the size of top trapezoid, and then
 //    calculate the size of the bottom rectangle.
-int64_t get_tril_size(int64_t row, int64_t col, int64_t offset) {
+inline int64_t get_tril_size(int64_t row, int64_t col, int64_t offset) {
   // number of elements in the first row of the tril
   auto m_first_row = offset > 0 ?
     std::min<int64_t>(col, 1 + offset) : // upper bounded by col
@@ -561,21 +561,38 @@ int64_t get_tril_size(int64_t row, int64_t col, int64_t offset) {
 
   return n_indices;
 }
+
+inline void check_args(
+    int64_t row, int64_t col, const TensorOptions& options) {
+  AT_CHECK(row >= 0, "row must be non-negative, got", row);
+  AT_CHECK(col >= 0, "col must be non-negative, got", col);
+  if (options.has_device()) {
+    AT_CHECK(
+      options.device() == at::kCPU,
+      "only support device='cpu', got",
+      options.device());
+  }
+  if (options.has_layout()) {
+    AT_CHECK(
+      options.layout() == at::kStrided,
+      "only support layout=torch.strided, got",
+      options.layout())
+  }
+}
 } // namespace
 
 Tensor tril_indices(
     int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
-  AT_CHECK(row >= 0, "row must be non-negative, got", row);
-  AT_CHECK(col >= 0, "col must be non-negative, got", col);
+  check_args(row, col, options);
 
   auto n_indices = get_tril_size(row, col, offset);
 
-  // create an empty Tensor with correct soize
-  auto result = at::empty({n_indices, 2}, options);
+  // create an empty Tensor with correct size
+  auto result = at::empty({2, n_indices}, options);
 
-  // The following three design options result in very little performance
-  // differences. Hence, the 3rd option is taken for simpler code. Refer to
-  // #14904 for more details.
+  // The following three approaches result in very little performance
+  // differences. Hence, the 2nd option is taken for simpler code, and to return
+  // contiguous tensors. Refer to #14904 for more details.
   //
   // 1. sequential RAM access: fill row coordinates first, then columns. This
   //    results in two for-loop and more arithmetic operations.
@@ -583,18 +600,17 @@ Tensor tril_indices(
   // 2. interleaved RAM access: fill in index coordinates one by one, which
   //    jumps between the two output Tensor rows in every iteration.
   //
-  // 3. sequential RAM + transpose: create a n X 2 Tensor, fill the Tensor
-  //    sequentially, and then tranpose it.
+  // 3. sequential RAM + transpose: create an n X 2 Tensor, fill the Tensor
+  //    sequentially, and then transpose it.
   AT_DISPATCH_ALL_TYPES(result.type(), "tril_indices", [&]() -> void {
     // fill the Tensor with correct values
     scalar_t* result_data = result.data<scalar_t>();
     int64_t i = 0;
 
     scalar_t r = std::max<int64_t>(0, -offset), c = 0;
-    n_indices = n_indices << 1;
     while (i < n_indices) {
-      result_data[i++] = r;
-      result_data[i++] = c;
+      result_data[i] = r;
+      result_data[n_indices + i++] = c;
 
       // move to the next column and check if (r, c) is still in bound
       c += 1;
@@ -607,19 +623,17 @@ Tensor tril_indices(
     }
   });
 
-  return result.transpose(0, 1);
+  return result;
 }
-
 
 Tensor triu_indices(
     int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
-  AT_CHECK(row >= 0, "row must be non-negative, got", row);
-  AT_CHECK(col >= 0, "col must be non-negative, got", col);
+  check_args(row, col, options);
 
   auto n_indices = row * col - get_tril_size(row, col, offset - 1);
 
-  // create an empty Tensor with correct soize
-  auto result = at::empty({n_indices, 2}, options);
+  // create an empty Tensor with correct size
+  auto result = at::empty({2, n_indices}, options);
 
   AT_DISPATCH_ALL_TYPES(result.type(), "triu_indices", [&]() -> void {
     // fill the Tensor with correct values
@@ -629,10 +643,9 @@ Tensor triu_indices(
     // NOTE: no need to check if the returned value of std::max overflows
     // scalar_t, as i and n_indices act as a guard.
     scalar_t c = std::max<int64_t>(0, offset), r = 0;
-    n_indices = n_indices << 1;
     while (i < n_indices) {
-      result_data[i++] = r;
-      result_data[i++] = c;
+      result_data[i] = r;
+      result_data[n_indices + i++] = c;
 
       // move to the next column and check if (r, c) is still in bound
       c += 1;
@@ -646,7 +659,7 @@ Tensor triu_indices(
     }
   });
 
-  return result.transpose(0, 1);
+  return result;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ zeros ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
