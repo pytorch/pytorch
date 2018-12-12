@@ -14,7 +14,6 @@ from .._jit_internal import createResolutionCallback, _compiled_weak_fns, \
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
 import torch.testing
-from torch.nn.modules.module import ModuleMeta
 
 import math
 from collections import defaultdict, OrderedDict, namedtuple
@@ -957,16 +956,7 @@ class ScriptMeta(type(torch._C.ScriptModule)):
 
 
 if _enabled:
-    class IntermediateMeta(ScriptMeta, ModuleMeta):
-        '''
-        An intermediate metaclass to combine the ScriptMeta and ModuleMeta metaclasses.
-        Required because ModuleMeta is the metaclass of torch.nn.Module, and ScriptMeta
-        the metaclass we want to give ScriptModule, but they need to resolve to a common,
-        intermediate metaclass first.
-        '''
-        pass
-
-    class ScriptModule(with_metaclass(IntermediateMeta, torch._C.ScriptModule, Module)):
+    class ScriptModule(with_metaclass(ScriptMeta, torch._C.ScriptModule, Module)):
         r"""
         The core data structure in TorchScript is the ``ScriptModule``. It is an
         analogue of torch's nn.Module and represents an entire model as a tree of

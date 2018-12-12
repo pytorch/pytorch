@@ -40,6 +40,42 @@ template <typename ModuleType>
 using PyModuleClass =
     py::class_<ModuleType, torch::nn::Module, std::shared_ptr<ModuleType>>;
 
+/// Dynamically creates a subclass of `torch.nn.cpp.ModuleWrapper` that is also
+/// a subclass of `torch.nn.Module`, and passes it the user-provided C++ module
+/// to which it delegates all calls.
+template <typename ModuleType>
+void bind_cpp_module_wrapper(
+    py::module module,
+    PyModuleClass<ModuleType> cpp_class,
+    const char* name) {
+  // Grab the `torch.nn.cpp.ModuleWrapper` class, which we'll subclass
+  // with a dynamically created class below.
+  py::object cpp_module =
+      py::module::import("torch.nn.cpp").attr("ModuleWrapper");
+
+  // Grab the `type` class which we'll use as a metaclass to create a new class
+  // dynamically.
+  py::object type_metaclass =
+      py::reinterpret_borrow<py::object>((PyObject*)&PyType_Type);
+
+  // The `ModuleWrapper` constructor copies all functions to its own `__dict__`
+  // in its constructor, but we do need to give our dynamic class a constructor.
+  // Inside, we construct an instance of the original C++ module we're binding
+  // (the `torch::nn::Module` subclass), and then forward it to the
+  // `ModuleWrapper` constructor.
+  py::dict attributes;
+  attributes["__init__"] = py::cpp_function(
+      [cpp_module, cpp_class](
+          py::object self, py::args args, py::kwargs kwargs) {
+        cpp_module.attr("__init__")(self, cpp_class(*args, **kwargs));
+      },
+      py::is_method(py::none()));
+
+  // Dynamically create the subclass of `ModuleWrapper` and bind it as
+  // `module.<name>`.
+  module.attr(name) =
+      type_metaclass(name, py::make_tuple(cpp_module), attributes);
+}
 } // namespace detail
 
 /// Adds method bindings for a pybind11 `class_` that binds an `nn::Module`
@@ -64,8 +100,6 @@ py::class_<ModuleType, Extra...> add_module_bindings(
       .def_property_readonly(
           "training", [](ModuleType& module) { return module.is_training(); })
       .def("zero_grad", [](ModuleType& module) { module.zero_grad(); })
-      .def("cuda", [](ModuleType& module) { module.to(torch::kCUDA); })
-      .def("cpu", [](ModuleType& module) { module.to(torch::kCPU); })
       .def_property_readonly( "_parameters", [](ModuleType& module) {
             return module.named_parameters(/*recurse=*/false);
           })
@@ -88,7 +122,7 @@ py::class_<ModuleType, Extra...> add_module_bindings(
           },
           py::arg("recurse") = true)
       .def_property_readonly(
-          "_modules", [](ModuleType& module) { return module.children(); })
+          "_modules", [](ModuleType& module) { return module.named_children(); })
       .def("modules", [](ModuleType& module) { return module.modules(); })
       .def("named_modules",
           [](ModuleType& module, py::object /* unused */, std::string prefix) {
@@ -154,12 +188,16 @@ py::class_<ModuleType, Extra...> add_module_bindings(
 ///       .def("forward", &Net::forward);
 ///  }
 /// \endrst
-template <typename ModuleType>
+template <typename ModuleType, bool force_enable = false>
 torch::disable_if_t<
-    torch::detail::has_forward<ModuleType>::value,
+    torch::detail::has_forward<ModuleType>::value && !force_enable,
     detail::PyModuleClass<ModuleType>>
 bind_module(py::module module, const char* name) {
-  return add_module_bindings(detail::PyModuleClass<ModuleType>(module, name));
+  py::module cpp = module.def_submodule("cpp");
+  auto cpp_class =
+      add_module_bindings(detail::PyModuleClass<ModuleType>(cpp, name));
+  detail::bind_cpp_module_wrapper(module, cpp_class, name);
+  return cpp_class;
 }
 
 /// Creates a pybind11 class object for an `nn::Module` subclass type and adds
@@ -193,7 +231,7 @@ template <
 detail::PyModuleClass<ModuleType> bind_module(
     py::module module,
     const char* name) {
-  return add_module_bindings(detail::PyModuleClass<ModuleType>(module, name))
+  return bind_module<ModuleType, /*force_enable=*/true>(module, name)
       .def("forward", &ModuleType::forward)
       .def("__call__", &ModuleType::forward);
 }
