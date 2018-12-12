@@ -2062,8 +2062,7 @@ class TestNN(NNTestCase):
             return fn
 
         fn = fn_wrapper(dev)
-        gradcheck(fn, (weight, ))
-        gradgradcheck(fn, (weight, ))
+        _assertGradAndGradgradChecks(self, fn, (weight, ))
 
     def test_embedding_dense_grad(self):
         self._test_embedding_dense_grad("cpu")
@@ -2112,6 +2111,15 @@ class TestNN(NNTestCase):
                 indices = torch.LongTensor(other_indices + [padding_idx] * n)
                 pre = embedding.weight[padding_idx].clone()
                 embedding(indices).sum().backward()
+                after = (embedding.weight + embedding.weight.grad)[padding_idx]
+                embedding.zero_grad()
+                self.assertEqual(after, pre)
+
+                # test double backward
+                emb_sum = embedding(indices).sum()
+                emb_grad = torch.autograd.grad(outputs=emb_sum, inputs=list(embedding.parameters()), retain_graph=True)
+                scalar = emb_grad[0].sum() + emb_sum
+                scalar.backward()
                 after = (embedding.weight + embedding.weight.grad)[padding_idx]
                 embedding.zero_grad()
                 self.assertEqual(after, pre)
