@@ -435,10 +435,50 @@ has_elements:  False
     .Input(0, "tensor", "Input data tensor to check for elements.")
     .Output(0, "has_elements", "Output scalar boolean tensor. True if input has size > 0.");
 
+void GatherRangesInputFillerHelper(
+    const std::vector<std::vector<int64_t>>& shapes,
+    size_t value_index,
+    size_t ranges_index,
+    std::vector<TensorFiller>* fillers) {
+  int max_index = (shapes[value_index].size() - 1) / 2;
+  (*fillers)[ranges_index].Min(0).Max(std::max(0, max_index)).Dist(FD_UNIFORM);
+}
+
+// The helper is build input with starts and ends; e.g.:
+//  data  = [ 1, 2,  3,   4,   5,       6]
+//            ^       \___/    ^        ^
+//            |         ^      |        |
+//            |         |      |        |
+//          [0, 1]   [2, 2] [4, 1]   [5, 1]
+//  ranges = [
+//    [
+//      [0, 1],
+//      [2, 2],
+//    ],
+//    [
+//      [4, 1],
+//      [5, 1],
+//    ]
+//  ]
+OpSchema& OpSchema::GatherRangesInputFillers(
+    size_t value_index,
+    size_t ranges_index) {
+  filler_supplier_ = [this, value_index, ranges_index](
+                         const std::vector<std::vector<int64_t>>& shapes) {
+    auto fillers = SupplyDenseFillers(shapes);
+    // fill in the length (value_index is used to get the correct shape)
+    GatherRangesInputFillerHelper(shapes, value_index, ranges_index, &fillers);
+    return fillers;
+  };
+  return *this;
+}
+
 OPERATOR_SCHEMA(GatherRanges)
     .NumInputs(2)
     .NumOutputs(2)
-    .DisallowInputFillers()
+    .GatherRangesInputFillers(
+        GatherRangesOp<CPUContext>::DATA,
+        GatherRangesOp<CPUContext>::RANGES)
     .SetDoc(R"DOC(
 Given DATA tensor of rank 1, and RANGES tensor of rank 3, gather
 corresponding ranges into a 1-D tensor OUTPUT.
