@@ -1095,7 +1095,9 @@ class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
   const int root;
   const uint32_t tag;
 
-  void run() override {
+  void scatter(
+      std::vector<at::Tensor>& outputs,
+      std::vector<std::vector<at::Tensor>>& inputs) {
     const auto scalarType = outputs[0].type().scalarType();
     gloo::ScatterOptions opts(context);
     opts.setRoot(root);
@@ -1110,7 +1112,87 @@ class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
     GENERATE_ALL_TYPES(scalarType, setOutput, opts, outputs[0]);
     gloo::scatter(opts);
   }
+
+  void run() override {
+    scatter(outputs, inputs);
+  }
 };
+
+#ifdef USE_CUDA
+
+class AsyncScatterCUDAWork : public AsyncScatterWork {
+ public:
+  AsyncScatterCUDAWork(
+      const std::shared_ptr<gloo::Context>& context,
+      std::vector<at::Tensor>& outputs,
+      std::vector<std::vector<at::Tensor>>& inputs,
+      int root,
+      uint32_t tag)
+      : AsyncScatterWork(context, outputs, inputs, root, tag) {
+    initializeStreamsEvents(inputs, inputStreams, inputEvents);
+    initializeStreamsEvents(outputs, outputStreams, outputEvents);
+
+    // Kick off copy from CUDA tensors to pinned CPU tensors.
+    tmpInputs.resize(inputs.size());
+    at::cuda::OptionalCUDAStreamGuard guard;
+    for (size_t i = 0; i < inputs.size(); i++) {
+      guard.reset_stream(inputStreams[i]);
+      tmpInputs[i].reserve(inputs[i].size());
+      for (size_t j = 0; j < inputs[i].size(); j++) {
+        tmpInputs[i].push_back(
+            pinnedLike(inputs[i][j]).copy_(inputs[i][j], true));
+      }
+    }
+
+    tmpOutputs.reserve(outputs.size());
+    for (size_t i = 0; i < outputs.size(); i++) {
+      tmpOutputs.push_back(pinnedLike(outputs[i]));
+    }
+  }
+
+  void run() override {
+    // Synchronize with copy operations.
+    at::cuda::OptionalCUDAGuard device_guard;
+    for (size_t i = 0; i < inputs.size(); i++) {
+      device_guard.set_index(inputs[i][0].get_device());
+      AT_CUDA_CHECK(cudaStreamSynchronize(inputStreams[i]));
+    }
+    for (size_t i = 0; i < outputs.size(); i++) {
+      device_guard.set_index(outputs[i].get_device());
+      AT_CUDA_CHECK(cudaStreamSynchronize(outputStreams[i]));
+    }
+
+    // Run scatter on host side tensors.
+    scatter(tmpOutputs, tmpInputs);
+
+    // Kick off copy back to the CUDA tensors.
+    at::cuda::OptionalCUDAStreamGuard stream_guard;
+    for (size_t i = 0; i < outputs.size(); i++) {
+      stream_guard.reset_stream(outputStreams[i]);
+      outputs[i].copy_(tmpOutputs[i], /* non_blocking */ true);
+      outputEvents[i].record(outputStreams[i]);
+    }
+  }
+
+  void synchronize() override {
+    // Synchronize with the copy back to CUDA tensors.
+    at::cuda::OptionalCUDAGuard guard;
+    for (size_t i = 0; i < outputs.size(); i++) {
+      guard.set_index(static_cast<at::DeviceIndex>(outputs[i].get_device()));
+      outputEvents[i].block(at::cuda::getCurrentCUDAStream());
+    }
+  }
+
+  std::vector<at::Tensor> tmpOutputs;
+  std::vector<at::cuda::CUDAStream> outputStreams;
+  std::vector<at::cuda::CUDAEvent> outputEvents;
+
+  std::vector<std::vector<at::Tensor>> tmpInputs;
+  std::vector<at::cuda::CUDAStream> inputStreams;
+  std::vector<at::cuda::CUDAEvent> inputEvents;
+};
+
+#endif
 
 } // namespace
 
@@ -1125,7 +1207,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
   assertRootRank(invalidArgument, opts.rootRank, size_);
   assertSingleElementOutput(invalidArgument, outputs);
   assertDense(invalidArgument, outputs);
-  assertCPU(invalidArgument, outputs);
 
   if (getRank() == opts.rootRank) {
     if (inputs.size() != 1 ||
@@ -1143,8 +1224,30 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
     }
   }
 
-  auto work = std::make_shared<AsyncScatterWork>(
-      contexts_[0], outputs, inputs, opts.rootRank, nextTag());
+  const auto& device = outputs[0].device();
+  switch (device.type()) {
+    case at::kCPU:
+#ifdef USE_CUDA
+    case at::kCUDA:
+#endif
+      break;
+    default:
+      invalidArgument("unsupported device type");
+  }
+
+  std::shared_ptr<AsyncScatterWork> work;
+  auto& context = contexts_[0];
+  if (device.type() == at::kCPU) {
+    work = std::make_shared<AsyncScatterWork>(
+        context, outputs, inputs, opts.rootRank, nextTag());
+#ifdef USE_CUDA
+  } else if (device.type() == at::kCUDA) {
+    work = std::make_shared<AsyncScatterCUDAWork>(
+        context, outputs, inputs, opts.rootRank, nextTag());
+#endif
+  } else {
+    throw std::runtime_error("Invalid backend");
+  }
   enqueue(work);
   return work;
 }
