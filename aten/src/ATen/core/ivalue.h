@@ -2,7 +2,7 @@
 
 #include <ATen/core/Scalar.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/core/TensorImpl.h>
+#include <c10/core/TensorImpl.h>
 #include <ATen/core/UndefinedTensorImpl.h>
 #include <ATen/core/blob.h>
 #include <c10/util/intrusive_ptr.h>
