@@ -5,9 +5,6 @@ namespace at {
 ${Type}::${Type}()
   : TypeDefault(${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
 
-template <typename FnPtr>
-std::map<std::string, FnPtr> ${Type}::${Type}Dispatch<FnPtr>::fn_table_;
-
 Allocator* ${Type}::allocator() const {
   AT_ERROR("allocator is not implemented for ${Type}");
 }
