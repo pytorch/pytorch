@@ -929,13 +929,13 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             opts.rootRank = (self.rank + 1) % self.world_size
             pg.gather([[t1] * self.world_size], [t1], opts)
 
-    def test_gather_basics(self):
+    def _test_gather_basics(self, fn):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
 
         # Preallocate tensors for input/output
-        input = [torch.Tensor([self.rank])]
-        outputs = [torch.Tensor([-1]) for _ in range(self.world_size)]
+        input = [fn(torch.Tensor([self.rank]))]
+        outputs = [fn(torch.Tensor([-1])) for _ in range(self.world_size)]
 
         # Take turns being the gather root and accumulate work items
         work = []
@@ -953,6 +953,57 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             work[i].wait()
             if i == self.rank:
                 self.assertEqual(expected, outputs)
+
+    def test_gather_basics(self):
+        self._test_gather_basics(lambda t: t.clone())
+
+    @skip_if_not_multigpu
+    def test_gather_basics_cuda(self):
+        self._test_gather_basics(lambda t: t.clone().cuda())
+
+    def _test_gather_stress(self, inputs, fn):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts(threads=8))
+        work_handles = []
+        outputs = [
+            [
+                [fn(torch.Tensor([-1])) for _ in range(self.world_size)]
+            ] for _ in range(len(inputs))
+        ]
+        expected_outputs = [
+            [
+                [torch.Tensor([i + j]) for j in range(self.world_size)]
+            ] for i in range(len(inputs))
+        ]
+        for i in range(len(inputs)):
+            for root in range(self.world_size):
+                opts = c10d.GatherOptions()
+                opts.rootRank = root
+                if root == self.rank:
+                    work = pg.gather(outputs[i], [fn(inputs[i])], opts)
+                else:
+                    work = pg.gather([], [fn(inputs[i])], opts)
+                work_handles.append(work)
+
+        for i, work_handle in enumerate(work_handles):
+            work_handle.wait()
+            iter = i // self.world_size
+            root = i % self.world_size
+            if root == self.rank:
+                self.assertEqual(
+                    expected_outputs[iter],
+                    outputs[iter],
+                    "Mismatch in iteration %d for root %d" % (iter, root)
+                )
+
+    def test_gather_stress(self):
+        inputs = [torch.Tensor([i + self.rank]) for i in range(1000)]
+        self._test_gather_stress(inputs, lambda t: t.clone())
+
+    @skip_if_not_multigpu
+    def test_gather_stress_cuda(self):
+        inputs = [torch.Tensor([i + self.rank]).cuda() for i in range(1000)]
+        self._test_gather_stress(inputs, lambda t: t.clone().cuda())
 
     def test_allgather_checks(self):
         store = c10d.FileStore(self.file.name, self.world_size)
