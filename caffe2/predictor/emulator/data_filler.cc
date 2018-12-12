@@ -97,20 +97,22 @@ DataRandomFiller::DataRandomFiller(
     }
 
     // the output shape of Slice op must match with the input shape of
-    // next op which is Cast
-    if (op.type() == "Cast") {
-      const auto& prev_op = run_net.op(i - 1);
-      if (prev_op.type() == "Slice") {
-        inputs_[prev_op.input(1)].first.FixedValue({0, 0});
-        inputs_[prev_op.input(2)].first.FixedValue(input_dims[i][0]);
-      }
-    }
-
-    if (op.type() == "ConcatAddMulReplaceNaNClip") {
-      const auto& prev_op = run_net.op(i - 1);
-      if (prev_op.type() == "Slice") {
-        inputs_[prev_op.input(1)].first.FixedValue({0, 0});
-        inputs_[prev_op.input(2)].first.FixedValue(input_dims[i][2]);
+    // next op
+    if (op.type() == "Slice") {
+      for (size_t j = i + 1; j < run_net.op_size(); ++j) {
+        const auto& next_op = run_net.op(j);
+        auto found = false;
+        for (size_t k = 0; k < next_op.input_size(); ++k) {
+          if (op.output(0) == next_op.input(k)) {
+            inputs_[op.input(1)].first.FixedValue({0, 0});
+            inputs_[op.input(2)].first.FixedValue(input_dims[j][k]);
+            found = true;
+            break;
+          }
+        }
+        if (found) {
+          break;
+        }
       }
     }
 
@@ -124,7 +126,8 @@ DataRandomFiller::DataRandomFiller(
   for (size_t i = 0; i < run_net.arg_size(); ++i) {
     const auto& arg = run_net.arg(i);
     // TODO: replace "PredictorParameters" with the constant in OSS bbp
-    if (arg.has_name() && arg.name() == "PredictorParameters") {
+    if (arg.has_name() && ((arg.name() == "PredictorParameters")
+        || arg.name().find("RemovedOp") != std::string::npos)) {
       parameters.reserve(arg.strings_size());
       for (size_t j = 0; j < arg.strings_size(); ++j) {
         parameters.emplace(arg.strings(j));
