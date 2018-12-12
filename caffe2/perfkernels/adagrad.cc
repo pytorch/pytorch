@@ -195,21 +195,6 @@ void adagrad_update(
   BASE_DO(adagrad_update, N, w, g, h, nw, nh, epsilon, decay, lr);
 }
 
-template <typename SIndex>
-void sparse_adagrad(
-    int num_rows,
-    int block_size,
-    size_t param_size,
-    const float* w,
-    const float* g,
-    const float* h,
-    const SIndex* indices,
-    float* nw,
-    float* nh,
-    float epsilon,
-    float lr,
-    const std::string& param_name);
-
 SPARSE_ADAGRAD_SPECIALIZATION(int32_t, base);
 
 template <>
