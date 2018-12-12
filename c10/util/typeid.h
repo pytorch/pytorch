@@ -486,9 +486,6 @@ inline std::ostream& operator<<(
 //   http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2017/p0537r0.html
 //   https://gcc.gnu.org/bugzilla/show_bug.cgi?id=51930
 // and as a result, we define these two macros slightly differently.
-// #if defined(_MSC_VER) && defined(__clang__)
-// #define EXPORT_IF_NOT_GCC
-// #elif defined(_MSC_VER) || defined(__clang__)
 #if defined(_MSC_VER) || defined(__clang__)
 #define EXPORT_IF_NOT_GCC C10_EXPORT
 #else
@@ -504,13 +501,29 @@ inline std::ostream& operator<<(
   EXPORT_IF_NOT_GCC const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<T>() noexcept {     \
     return &MACRO_CONCAT(detail::_typeMetaDataInstance_, Counter);        \
   }
+#define _CAFFE_KNOWN_TYPE_DEFINE_TYPEMETADATA_INSTANCE_ANONYMOUS(T, Counter)        \
+  namespace detail {                                                      \
+  const TypeMetaData MACRO_CONCAT(_typeMetaDataInstance_, Counter) =      \
+      _makeTypeMetaDataInstance<T>(_typeName<T>(#T));                     \
+  }                                                                       \
+  template<>                                                              \
+  const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<T>() noexcept {     \
+    return &MACRO_CONCAT(detail::_typeMetaDataInstance_, Counter);        \
+  }
 #define CAFFE_KNOWN_TYPE(T)                                               \
+  template <>                                                             \
+  EXPORT_IF_NOT_GCC TypeIdentifier TypeIdentifier::Get<T>() {             \
+    static const TypeIdentifier type_id = TypeIdentifier::createTypeId(); \
+    return type_id;                                                       \
+  }                                                                       \
+  _CAFFE_KNOWN_TYPE_DEFINE_TYPEMETADATA_INSTANCE(T, __COUNTER__)
+#define CAFFE_KNOWN_TYPE_ANONYMOUS(T)                                               \
   template <>                                                             \
   TypeIdentifier TypeIdentifier::Get<T>() {             \
     static const TypeIdentifier type_id = TypeIdentifier::createTypeId(); \
     return type_id;                                                       \
   }                                                                       \
-  _CAFFE_KNOWN_TYPE_DEFINE_TYPEMETADATA_INSTANCE(T, __COUNTER__)
+  _CAFFE_KNOWN_TYPE_DEFINE_TYPEMETADATA_INSTANCE_ANONYMOUS(T, __COUNTER__)
 
 /**
  * CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE is used

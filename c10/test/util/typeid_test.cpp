@@ -10,8 +10,8 @@ class TypeMetaTestFoo {};
 class TypeMetaTestBar {};
 }
 
-CAFFE_KNOWN_TYPE(TypeMetaTestFoo);
-CAFFE_KNOWN_TYPE(TypeMetaTestBar);
+CAFFE_KNOWN_TYPE_ANONYMOUS(TypeMetaTestFoo);
+CAFFE_KNOWN_TYPE_ANONYMOUS(TypeMetaTestBar);
 
 namespace {
 
@@ -98,8 +98,8 @@ class ClassNoAssignment {
 };
 }
 
-CAFFE_KNOWN_TYPE(ClassAllowAssignment);
-CAFFE_KNOWN_TYPE(ClassNoAssignment);
+CAFFE_KNOWN_TYPE_ANONYMOUS(ClassAllowAssignment);
+CAFFE_KNOWN_TYPE_ANONYMOUS(ClassNoAssignment);
 
 namespace {
 
