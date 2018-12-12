@@ -425,7 +425,8 @@ class SGDR(_LRScheduler):
         \eta_t = \eta_{min} + \frac{1}{2}(\eta_{max} - \eta_{min})(1 +
         \cos(\frac{T_{cur}}{T_{i}}\pi))
 
-    When :math:`\T_{cur}=T_{i}`, set :math:`\eta_t = \eta_{min}` And :math:`\T_{cut}=0`(after restart), set :math:`\eta_t=\eta_{max}`.
+    When :math:`\T_{cur}=T_{i}`, set :math:`\eta_t = \eta_{min}`.
+    When :math:`\T_{cut}=0`(after restart), set :math:`\eta_t=\eta_{max}`.
 
     It has been proposed in
     `SGDR: Stochastic Gradient Descent with Warm Restarts`_.
@@ -450,7 +451,9 @@ class SGDR(_LRScheduler):
         self.T_cur = last_epoch
 
     def get_lr(self):
-        return [self.eta_min + (base_lr - self.eta_min) * (1 + math.cos(math.pi * self.T_cur / self.T)) / 2 for base_lr in self.base_lrs]
+        return [self.eta_min + (base_lr - self.eta_min) *
+                (1 + math.cos(math.pi * self.T_cur / self.T)) / 2 
+                for base_lr in self.base_lrs]
 
     def step(self, epoch=None):
         if epoch is None:
