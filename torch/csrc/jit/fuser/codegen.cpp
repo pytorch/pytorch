@@ -1,20 +1,20 @@
-#include "torch/csrc/jit/fuser/codegen.h"
+#include <torch/csrc/jit/fuser/codegen.h>
 
-#include "ATen/ATen.h"
-#include "torch/csrc/jit/code_template.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/fuser/compiler.h"
-#include "torch/csrc/jit/fuser/config.h"
-#include "torch/csrc/jit/fuser/interface.h"
-#include "torch/csrc/jit/fuser/tensor_info.h"
+#include <ATen/ATen.h>
+#include <torch/csrc/jit/code_template.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/fuser/compiler.h>
+#include <torch/csrc/jit/fuser/config.h>
+#include <torch/csrc/jit/fuser/interface.h>
+#include <torch/csrc/jit/fuser/tensor_info.h>
 
 #if USE_CUDA_FUSER
-  #include "torch/csrc/jit/fuser/cuda/resource_strings.h"
+  #include <torch/csrc/jit/fuser/cuda/resource_strings.h>
 #endif 
 
 #if USE_CPU_FUSER
-  #include "torch/csrc/jit/fuser/cpu/resource_strings.h"
+  #include <torch/csrc/jit/fuser/cpu/resource_strings.h>
 #endif 
 
 #include <tuple>

@@ -134,6 +134,8 @@ struct CAFFE2_API IValue final {
     return *this;
   }
 
+  void dump() const;
+
   bool isAliasOf(const IValue& rhs) const {
     if (this->tag != rhs.tag) {
       // Trivially don't alias if the type is different
@@ -510,14 +512,36 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
  public:
+  /**
+  * Wait on the future until it completes.
+  */
   void wait() {
     if (completed()) {
       return;
     }
-    c10::global_work_queue().workOnTasksUntilCompleted(intrusive_from_this());
+    std::condition_variable finished;
+    bool fired = false;
+
+    // Add a callback to notify the current thread
+    // when the current future completes.
+    addCallback([&] {
+      std::unique_lock<std::mutex> lock(mutex_);
+      finished.notify_all();
+      fired = true;
+    });
+
+    // The current thread will be blocked unless the above callback is fired.
+    std::unique_lock<std::mutex> lock(mutex_);
+    while (!fired) {
+      finished.wait(lock);
+    }
+
     AT_ASSERT(completed());
   }
 
+  /**
+   * Explicitly mark the future as completed with the output value.
+   */
   void markCompleted(IValue value) {
     {
       // This is not to protect completed_ but to create a barrier
@@ -543,6 +567,12 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     return value_;
   }
 
+  /**
+   * Add a callback to the future.
+   * The callbacks will be executed once the future completes.
+   * If the future has already completed,
+   * this function will execute the callback immediately.
+   */
   void addCallback(std::function<void(void)> callback) {
     std::unique_lock<std::mutex> lock(mutex_);
     if (completed()) {
@@ -558,10 +588,6 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     return completed_;
   }
 
-  std::mutex& get_mutex() {
-    return mutex_;
-  }
-
   CAFFE2_API friend std::ostream& operator<<(
       std::ostream& out,
       const Future& v);
@@ -575,6 +601,18 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
 #undef TORCH_FORALL_TAGS
 
+namespace detail {
+
+struct _guarded_unsigned_long_unique_dummy final {
+  _guarded_unsigned_long_unique_dummy(int64_t){};
+};
+using _guarded_unsigned_long = c10::guts::conditional_t<
+    std::is_same<unsigned long, uint32_t>::value ||
+        std::is_same<unsigned long, uint64_t>::value,
+    _guarded_unsigned_long_unique_dummy,
+    unsigned long>;
+
+} // namespace detail
 
 #define DEFINE_TO(type, method_name) \
 template<> \
@@ -587,7 +625,16 @@ inline type IValue::to<type>() const & { \
 }
 DEFINE_TO(at::Tensor, toTensor)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Tuple>, toTuple)
+DEFINE_TO(float, toDouble)
 DEFINE_TO(double, toDouble)
+DEFINE_TO(unsigned char, toInt)
+DEFINE_TO(signed char, toInt)
+DEFINE_TO(unsigned short, toInt)
+DEFINE_TO(short, toInt)
+DEFINE_TO(int, toInt)
+DEFINE_TO(uint32_t, toInt)
+DEFINE_TO(uint64_t, toInt)
+DEFINE_TO(detail::_guarded_unsigned_long, toInt)
 DEFINE_TO(int64_t, toInt)
 DEFINE_TO(bool, toBool)
 DEFINE_TO(c10::intrusive_ptr<ivalue::DoubleList>, toDoubleList)

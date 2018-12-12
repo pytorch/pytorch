@@ -1729,7 +1729,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("cublasCgemmStridedBatched", ("rocblas_cgemm_strided_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
     ("cublasCgemm3mStridedBatched", ("rocblas_cgemm_3m_strided_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
     ("cublasZgemmStridedBatched", ("rocblas_zgemm_strided_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
-    ("cublasHgemmStridedBatched", ("rocblas_hgemm_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
+    ("cublasHgemmStridedBatched", ("rocblas_hgemm_strided_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
     ("cublasSgemm", ("rocblas_sgemm", CONV_MATH_FUNC, API_BLAS)),
     ("cublasDgemm", ("rocblas_dgemm", CONV_MATH_FUNC, API_BLAS)),
     ("cublasCgemm", ("rocblas_cgemm", CONV_MATH_FUNC, API_BLAS)),
@@ -1905,6 +1905,8 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("cublasCgemm3mEx", ("rocblas_cgemm_3mex", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
     ("cublasZgemm_v2", ("rocblas_zgemm", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
     ("cublasZgemm3m", ("rocblas_zgemm_3m", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
+    # NB: The function rocblas_sgemmex doesn't actually exist in
+    # rocblas, as of 2018-12-05
     ("cublasSgemmEx", ("rocblas_sgemmex", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
     ("cublasGemmEx", ("rocblas_gemmex", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
     ("cublasCgemmEx", ("rocblas_cgemmex", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
@@ -2270,6 +2272,8 @@ C10_MAPPINGS = collections.OrderedDict([
     ("c10/cuda/CUDAMacros.h", ("c10/hip/HIPMacros.h", API_C10)),
     ("c10/cuda/CUDAMathCompat.h", ("c10/hip/HIPMathCompat.h", API_C10)),
     ("c10/cuda/CUDAFunctions.h", ("c10/hip/HIPFunctions.h", API_C10)),
+    ("c10/cuda/impl/CUDATest.h", ("c10/hip/impl/HIPTest.h", API_C10)),
+    ("c10/cuda/impl/cuda_cmake_macros.h", ("c10/hip/impl/hip_cmake_macros.h", API_C10)),
     ("C10_CUDA_CHECK", ("C10_HIP_CHECK", API_C10)),
     ("c10::cuda", ("c10::hip", API_C10)),
     # This substitution is not permissible, because there's another copy of this

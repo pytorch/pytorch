@@ -1,8 +1,8 @@
 #pragma once
 
-#include "Exceptions.h"
+#include <ATen/miopen/Exceptions.h>
 
-#include "miopen-wrapper.h"
+#include <ATen/miopen/miopen-wrapper.h>
 #include <ATen/ATen.h>
 #include <ATen/TensorUtils.h>
 

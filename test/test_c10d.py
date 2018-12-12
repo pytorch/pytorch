@@ -247,6 +247,7 @@ class RendezvousTest(TestCase):
 
 
 class RendezvousEnvTest(TestCase):
+    @retry_on_address_already_in_use_error
     def test_common_errors(self):
         # TODO remove this hack
         if not hasattr(c10d, "ProcessGroupNCCL"):
@@ -937,18 +938,18 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         with self.assertRaisesRegex(ValueError, "invalid tensor size"):
             pg.allgather([([t1, t3] * (self.world_size))[:self.world_size]], [t1])
 
-    def test_allgather_basics(self):
+    def _test_allgather_basics(self, fn):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
 
         # Run with N input tensor per rank
         for n in [1, 2, 3]:
             input = [
-                torch.Tensor([n * self.rank + i]) for i in range(n)
+                fn(torch.Tensor([n * self.rank + i])) for i in range(n)
             ]
             output = [
                 [
-                    torch.Tensor([-1]) for _ in range(n * self.world_size)
+                    fn(torch.Tensor([-1])) for _ in range(n * self.world_size)
                 ] for _ in range(n)
             ]
             expected_output = [
@@ -959,6 +960,48 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             work = pg.allgather(output, input)
             work.wait()
             self.assertEqual(expected_output, output)
+
+    def test_allgather_basics(self):
+        self._test_allgather_basics(lambda t: t.clone())
+
+    @skip_if_not_multigpu
+    def test_allgather_basics_cuda(self):
+        self._test_allgather_basics(lambda t: t.clone().cuda())
+
+    def _test_allgather_stress(self, inputs, fn):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts(threads=8))
+        work_handles = []
+        outputs = [
+            [
+                [fn(torch.Tensor([-1])) for _ in range(self.world_size)]
+            ] for _ in range(len(inputs))
+        ]
+        expected_outputs = [
+            [
+                [torch.Tensor([i + j]) for j in range(self.world_size)]
+            ] for i in range(len(inputs))
+        ]
+        for i in range(len(inputs)):
+            work = pg.allgather(outputs[i], [fn(inputs[i])])
+            work_handles.append(work)
+
+        for i, work_handle in enumerate(work_handles):
+            work_handle.wait()
+            self.assertEqual(
+                expected_outputs[i],
+                outputs[i],
+                "Mismatch in iteration %d" % i
+            )
+
+    def test_allgather_stress(self):
+        inputs = [torch.Tensor([i + self.rank]) for i in range(1000)]
+        self._test_allgather_stress(inputs, lambda t: t.clone())
+
+    @skip_if_not_multigpu
+    def test_allgather_stress_cuda(self):
+        inputs = [torch.Tensor([i + self.rank]).cuda() for i in range(1000)]
+        self._test_allgather_stress(inputs, lambda t: t.clone().cuda())
 
     def test_reduce_checks(self):
         store = c10d.FileStore(self.file.name, self.world_size)
@@ -1099,7 +1142,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
         # Sleep on one of the processes to trigger barrier timeout
         if self.rank == 0:
-            time.sleep(0.6)
+            time.sleep(1.0)
 
         # The barrier will now time out
         with self.assertRaisesRegex(RuntimeError, " (Timed out|closed) "):
@@ -1564,6 +1607,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         )
 
     @skip_if_not_nccl
+    @skip_if_not_multigpu
     def test_queue_reduction(self):
         # Set up process group.
         store = c10d.FileStore(self.file.name, self.world_size)
@@ -1591,6 +1635,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                          torch.ones(10) * (self.world_size + 1) * len(devices) / 2.0)
 
     @skip_if_not_nccl
+    @skip_if_not_multigpu
     def test_sync_reduction(self):
         # Set up process group.
         store = c10d.FileStore(self.file.name, self.world_size)

@@ -1,15 +1,15 @@
 #pragma once
 
-#include "TH/THMath.h"
+#include <TH/THMath.h>
 #ifdef __CUDA_ARCH__
 #include <nvfunctional>
 #endif
 
-#include "ATen/ATen.h"
-#include "ATen/CPUGenerator.h"
-#include "ATen/CheckGenerator.h"
-#include "ATen/Generator.h"
-#include "TH/THGenerator.hpp"
+#include <ATen/ATen.h>
+#include <ATen/CPUGenerator.h>
+#include <ATen/CheckGenerator.h>
+#include <ATen/Generator.h>
+#include <TH/THGenerator.hpp>
 
 namespace at {namespace native {
 

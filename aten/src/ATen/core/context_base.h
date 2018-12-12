@@ -11,6 +11,7 @@
 #include <c10/util/typeid.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
+#include <c10/core/CopyBytes.h>
 
 namespace caffe2 {
 class Event;
@@ -154,39 +155,6 @@ inline std::unique_ptr<at::BaseContext> CreateContext(
   return at::ContextRegistry()->Create(device.type(), device);
 }
 
-} // namespace at
-
-// TODO: move it to a separate file in c10 if possible
-namespace at {
-
-using CopyBytesFunction = void (*)(
-    size_t nbytes,
-    const void* src,
-    Device src_device,
-    void* dst,
-    Device dst_device);
-
-struct CAFFE2_API _CopyBytesFunctionRegisterer {
-  _CopyBytesFunctionRegisterer(
-      DeviceType from,
-      DeviceType to,
-      CopyBytesFunction func_sync,
-      CopyBytesFunction func_async = nullptr);
-};
-
-#define REGISTER_COPY_BYTES_FUNCTION(from, to, ...)           \
-  namespace {                                                 \
-  static _CopyBytesFunctionRegisterer C10_ANONYMOUS_VARIABLE( \
-      g_copy_function)(from, to, __VA_ARGS__);                \
-  }
-
-CAFFE2_API void CopyBytes(
-    size_t nbytes,
-    const void* src,
-    Device src_device,
-    void* dst,
-    Device dst_device,
-    bool async);
 } // namespace at
 
 namespace caffe2 {

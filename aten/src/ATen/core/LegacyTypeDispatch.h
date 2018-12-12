@@ -27,34 +27,10 @@
 #include <c10/core/ScalarType.h>
 #include <ATen/core/VariableHooksInterface.h>
 #include <c10/util/Exception.h>
+#include <ATen/core/LegacyDeviceTypeInit.h>
 #include <ATen/core/TensorImpl.h>
 
 namespace at {
-
-struct CAFFE2_API LegacyTypeInitInterface {
-  virtual ~LegacyTypeInitInterface() {}
-  virtual void initCPU() const {
-    AT_ERROR("cannot use CPU without ATen library");
-  }
-  virtual void initCUDA() const {
-    AT_ERROR("cannot use CUDA without ATen CUDA library");
-  }
-  virtual void initHIP() const {
-    AT_ERROR("cannot use HIP without ATen HIP library");
-  }
-  virtual void initComplex() const {
-    AT_ERROR("cannot use complex without ATen Complex library");
-  }
-};
-struct CAFFE2_API LegacyTypeInitArgs {};
-C10_DECLARE_REGISTRY(
-    LegacyTypeInitRegistry,
-    LegacyTypeInitInterface,
-    LegacyTypeInitArgs);
-#define REGISTER_LEGACY_TYPE_INIT(clsname) \
-  C10_REGISTER_CLASS(LegacyTypeInitRegistry, clsname, clsname)
-
-CAFFE2_API const LegacyTypeInitInterface& getLegacyTypeInit();
 
 struct Type;
 
@@ -133,15 +109,15 @@ private:
     static std::once_flag cuda_once;
     if (p == DeviceType::CPU) {
       std::call_once(cpu_once, [] {
-        getLegacyTypeInit().initCPU();
+        getLegacyDeviceTypeInit().initCPU();
       });
     } else if (p == DeviceType::CUDA) {
       std::call_once(cuda_once, [] {
-        getLegacyTypeInit().initCUDA();
+        getLegacyDeviceTypeInit().initCUDA();
       });
     } else if (p == DeviceType::HIP) {
       std::call_once(cuda_once, [] {
-        getLegacyTypeInit().initHIP();
+        getLegacyDeviceTypeInit().initHIP();
       });
     }
   }
@@ -150,7 +126,7 @@ private:
     // Only complex may need initialization
     if (isComplexType(s)) {
       std::call_once(once, [] {
-        getLegacyTypeInit().initComplex();
+        getLegacyDeviceTypeInit().initComplex();
       });
     }
   }

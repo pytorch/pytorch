@@ -1,9 +1,9 @@
-#include "ATen/ATen.h"
-#include "ATen/AccumulateType.h"
-#include "ATen/TensorUtils.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/cuda/CUDAContext.h"
-#include "ATen/cuda/CUDAApplyUtils.cuh"
+#include <ATen/ATen.h>
+#include <ATen/AccumulateType.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <THC/THCNumerics.cuh>
 
 namespace at { namespace native {

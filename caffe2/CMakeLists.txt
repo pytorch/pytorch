@@ -239,10 +239,8 @@ target_include_directories(caffe2 SYSTEM PRIVATE "${Caffe2_DEPENDENCY_INCLUDE}")
 # Set standard properties on the target
 torch_set_target_props(caffe2)
 
-if (MSVC)
-target_compile_options(caffe2 INTERFACE "-std=c++11")
-else()
-target_compile_options(caffe2 INTERFACE "$<$<COMPILE_LANGUAGE:CXX>:-std=c++11>")
+if (NOT MSVC)
+  target_compile_options(caffe2 INTERFACE "$<$<COMPILE_LANGUAGE:CXX>:-std=c++11>")
 endif()
 
 target_compile_options(caffe2 PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
@@ -467,6 +465,12 @@ if (BUILD_TEST)
   endif()
 endif()
 
+# Note: we only install the caffe2 python files if BUILD_CAFFE2_OPS is ON
+# This is because the build rules here written in such a way that they always
+# appear to need to be re-run generating >600 pieces of work during the pytorch
+# rebuild step. The long-term fix should be to clean up these rules so they
+# only rerun when needed.
+
 if (BUILD_PYTHON)
   # Python site-packages
   # Get canonical directory for python site packages (relative to install
@@ -624,37 +628,22 @@ if (BUILD_PYTHON)
   endif()
 
   # Finally, Copy all python files to build directory
-  # Generate and create all needed __init__.py files, if they aren't already
-  # present in the current source tree.
-  message(STATUS "Automatically generating missing __init__.py files.")
-  caffe_autogen_init_py_files()
-
   # Create a custom target that copies all python files.
   file(GLOB_RECURSE PYTHON_SRCS RELATIVE ${PROJECT_SOURCE_DIR}
        "${PROJECT_SOURCE_DIR}/caffe2/*.py")
-  add_custom_target(python_copy_files ALL)
-  if(MSVC OR CMAKE_GENERATOR MATCHES "Ninja")
-    # ninja fails when the command line is too long so we split
-    # the target into several. This would be beneficial for VS also
-    # since it build targets in parallel but not custom commands
-    foreach(python_src ${PYTHON_SRCS})
-      get_filename_component(dir ${python_src} DIRECTORY)
-      string(SHA1 name_hash "${python_src}")
-      # get_filename_component(name_we ${python_src} NAME_WE)
-      add_custom_target(python_copy_files_${name_hash}
-          COMMAND ${CMAKE_COMMAND} -E copy
-          ${PROJECT_SOURCE_DIR}/${python_src} ${CMAKE_BINARY_DIR}/${dir})
-      add_dependencies(python_copy_files python_copy_files_${name_hash})
-    endforeach()
-  else()
-    foreach(python_src ${PYTHON_SRCS})
-      get_filename_component(dir ${python_src} DIRECTORY)
-      add_custom_command(
-          TARGET python_copy_files PRE_BUILD
-          COMMAND ${CMAKE_COMMAND} -E copy
-          ${PROJECT_SOURCE_DIR}/${python_src} ${CMAKE_BINARY_DIR}/${dir})
-    endforeach()
-  endif()
+
+  set(build_files)
+  foreach(python_src ${PYTHON_SRCS})
+    add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/${python_src}
+                       DEPENDS ${PROJECT_SOURCE_DIR}/${python_src}
+                       COMMAND ${CMAKE_COMMAND} -E copy
+                       ${PROJECT_SOURCE_DIR}/${python_src}
+                       ${CMAKE_BINARY_DIR}/${python_src})
+    list(APPEND build_files ${CMAKE_BINARY_DIR}/${python_src})
+  endforeach()
+
+  add_custom_target(python_copy_files ALL DEPENDS ${build_files})
+
 
   # Install commands
   # Pick up static python files

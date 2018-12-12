@@ -1,10 +1,11 @@
-#include "DataLoader.h"
+#include <torch/csrc/DataLoader.h>
 
-// Together with `torch/utils/data/_utils/signal_handling.py`, the following
-// is an effort to do our best to provide some error message to users when a
-// worker dies due to error / critical signals.
-//
-// See NOTE [ Signal handling in multiprocessing data loading ] for more details.
+// In cases like DataLoader, if a worker process dies due to bus error/segfault
+// or just hang, the main process will hang waiting for data. This is difficult
+// to avoid on PyTorch side as it can be caused by limited shm, or other
+// libraries users call in the workers. The following methods is an effort to do
+// our best to provide some error message to users when such unfortunate events
+// happen.
 
 // TODO: The following don't work on Windows. Specifically, sigaction, waitid
 // calls, and SIGCHLD handler. Currently, dummy implementations are provided
@@ -15,12 +16,12 @@
 #include <atomic>
 #include <map>
 #include <set>
-#include <signal.h>
+#include <csignal>
 #include <sstream>
 #include <sys/wait.h>
 
-#include "torch/csrc/Exceptions.h"
-#include "torch/csrc/utils/python_numbers.h"
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/utils/python_numbers.h>
 
 using namespace torch;
 
@@ -34,7 +35,7 @@ static void HANDLER_NAME(int sig, siginfo_t *info, void *ctx)                 \
 {                                                                             \
   auto _w = write(STDERR_FILENO, ERROR_MSG, sizeof(ERROR_MSG) / sizeof(char));\
   (void)_w;                                                                   \
-  struct sigaction sa;                                                        \
+  struct sigaction sa{};                                                        \
   sa.sa_handler = SIG_DFL;                                                    \
   sa.sa_flags = 0;                                                            \
   if (sigemptyset(&sa.sa_mask) != 0 || sigaction(SIGNAL, &sa, nullptr) != 0) {   \
@@ -48,7 +49,7 @@ static void HANDLER_NAME(int sig, siginfo_t *info, void *ctx)                 \
 // http://man7.org/linux/man-pages/man2/signal.2.html
 static inline void setSignalHandler(int signal, void(*handler)(int, siginfo_t *, void *), struct sigaction *old_sa_ptr)
 {
-  struct sigaction sa;
+  struct sigaction sa{};
   sa.sa_sigaction = handler;
   sa.sa_flags = SA_RESTART|SA_SIGINFO|SA_NOCLDSTOP|SA_NODEFER;
   if (sigemptyset(&sa.sa_mask) != 0 || sigaction(signal, &sa, old_sa_ptr) != 0) {
@@ -76,7 +77,7 @@ static void handler_SIGTERM(int sig, siginfo_t *info, void *ctx)
   if (info->si_pid == getppid()) {
     _exit(EXIT_SUCCESS);
   }
-  struct sigaction sa;
+  struct sigaction sa{};
   sa.sa_handler = SIG_DFL;
   sa.sa_flags = 0;
   if (sigemptyset(&sa.sa_mask) != 0 || sigaction(SIGTERM, &sa, nullptr) != 0) {
@@ -106,8 +107,8 @@ static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module) {
   siginfo_t infop;
 
   // Only check the pids we care about
-  for (auto it = worker_pids.begin(); it != worker_pids.end(); ++it) {
-    pid_set = &(it->second);
+  for (auto& w : worker_pids) {
+    pid_set = &(w.second);
     for (auto pid_it = pid_set->begin(); pid_it != pid_set->end(); ++pid_it) {
       worker_pid = *pid_it;
       // Use waitid rather than waitpid so that we can set NOWAIT, and that Python
@@ -127,7 +128,7 @@ static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module) {
         // workers, and trigger this again.
         pid_set->clear();
         throw std::runtime_error(oss.str());
-      } else if (infop.si_code == CLD_KILLED || infop.si_code == CLD_DUMPED) {  // killed by signal
+      }  else if (infop.si_code == CLD_KILLED || infop.si_code == CLD_DUMPED) {  // killed by signal
         std::ostringstream oss;
         oss << "DataLoader worker (pid " << worker_pid << ") is killed "
             << "by signal: " << strsignal(infop.si_status) << ". ";

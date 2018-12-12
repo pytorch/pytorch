@@ -1,6 +1,6 @@
 #pragma once
 
-#include "torch/csrc/jit/ir.h"
+#include <torch/csrc/jit/ir.h>
 
 namespace torch { namespace jit {
 
@@ -12,5 +12,7 @@ namespace torch { namespace jit {
 // So, prefer to use the graph version if you can.
 TORCH_API void EliminateDeadCode(const std::shared_ptr<Graph>& graph);
 TORCH_API void EliminateDeadCode(Block *block, bool recurse=true);
+
+TORCH_API std::unordered_set<Node*> FindDeadNodes(Block *block, bool recurse=true);
 
 }}

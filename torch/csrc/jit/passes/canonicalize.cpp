@@ -1,4 +1,4 @@
-#include "torch/csrc/jit/passes/canonicalize.h"
+#include <torch/csrc/jit/passes/canonicalize.h>
 
 namespace torch { namespace jit {
 

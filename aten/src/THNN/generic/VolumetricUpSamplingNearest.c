@@ -1,8 +1,8 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/VolumetricUpSamplingNearest.c"
+#define TH_GENERIC_FILE "THNN/generic/VolumetricUpSamplingNearest.c"
 #else
 
-#include "linear_upsampling.h"
+#include <THNN/generic/linear_upsampling.h>
 
 static inline void THNN_(VolumetricUpSamplingNearest_shapeCheck)
      (THTensor *input, THTensor *gradOutput,
