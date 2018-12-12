@@ -967,7 +967,7 @@ def _import_module_from_library(module_name, path, is_python_module):
         if is_python_module:
             return imp.load_module(module_name, file, path, description)
         else:
-            return torch.ops.load_library(path)
+            torch.ops.load_library(path)
 
 
 def _write_ninja_file(path,
