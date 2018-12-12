@@ -1,0 +1,63 @@
+graph(%a.1_data : Tensor
+      %a.1_mask : Tensor
+      %a.1_dims : Tensor
+      %b_data : Tensor
+      %b_mask : Tensor
+      %b_dims : Tensor) {
+  %6 : int = prim::Constant[value=1]()
+  %7 : int = prim::Constant[value=9223372036854775807]()
+  %8 : Tensor = aten::gt(%a.1_data, %b_data)
+  %9 : Tensor = aten::mul(%a.1_mask, %b_mask)
+  %10 : Tensor = aten::__or__(%a.1_dims, %b_dims)
+  %11 : int = prim::Constant[value=0]()
+  %12 : Tensor = aten::mul(%8, %9)
+  %13 : int? = prim::None()
+  %14 : Tensor = aten::sum(%12, %13)
+  %15 : Tensor = aten::gt(%14, %11)
+  %16 : bool = prim::Bool(%15)
+  %17 : Tensor, %18 : Tensor, %a : Tensor, %20 : Tensor, %21 : Tensor = prim::Loop(%7, %16, %8, %9, %a.1_data, %a.1_mask, %a.1_dims)
+    block0(%loop_num : int, %cond_data.2 : Tensor, %cond_mask.2 : Tensor, %6_data : Tensor, %6_mask : Tensor, %6_dims : Tensor) {
+      %28 : Long() = prim::NumToTensor(%6)
+      %alpha : float = prim::Float(%28)
+      %data : Tensor = aten::sub(%6_data, %b_data, %alpha)
+      %mask : Tensor = aten::mul(%6_mask, %b_mask)
+      %dims : Tensor = aten::__or__(%6_dims, %b_dims)
+      %33 : Tensor = aten::gt(%data, %b_data)
+      %34 : Tensor = aten::mul(%mask, %b_mask)
+      %35 : bool = prim::Constant[value=1]()
+      %36 : int = prim::Constant[value=1]()
+      %37 : Tensor = aten::type_as(%cond_mask.2, %cond_data.2)
+      %data.2 : Tensor = aten::mul(%cond_data.2, %37)
+      %39 : int = aten::dim(%data.2)
+      %40 : bool = aten::eq(%39, %36)
+      %cond_data : Tensor, %cond_mask : Tensor = prim::If(%40)
+        block0() {
+          %43 : int = aten::dim(%data)
+          %44 : int = aten::sub(%43, %36)
+          %data.4 : Tensor = prim::Loop(%44, %35, %data.2)
+            block0(%46 : int, %47 : Tensor) {
+              %48 : int = aten::dim(%47)
+              %data.3 : Tensor = aten::unsqueeze(%47, %48)
+              -> (%35, %data.3)
+            }
+          %cond_data.1 : Tensor = aten::expand_as(%data.4, %data)
+          %cond_mask.1 : Tensor = aten::expand_as(%data.4, %mask)
+          -> (%cond_data.1, %cond_mask.1)
+        }
+        block1() {
+          -> (%data.2, %data.2)
+        }
+      %res_data : Tensor = aten::where(%cond_data, %data, %6_data)
+      %res_mask : Tensor = aten::where(%cond_mask, %mask, %6_mask)
+      %res_dims : Tensor = aten::__or__(%dims, %6_dims)
+      %55 : int = prim::Constant[value=0]()
+      %56 : Tensor = aten::mul(%33, %34)
+      %57 : int? = prim::None()
+      %58 : Tensor = aten::sum(%56, %57)
+      %59 : Tensor = aten::gt(%58, %55)
+      %60 : bool = prim::Bool(%59)
+      -> (%60, %33, %34, %res_data, %res_mask, %res_dims)
+    }
+  %61 : (Tensor, Tensor, Tensor) = prim::TupleConstruct(%a, %20, %21)
+  return (%61);
+}

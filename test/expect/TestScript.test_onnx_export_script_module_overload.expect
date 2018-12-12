@@ -6,14 +6,20 @@ ModelProto {
     GraphProto {
       name: "torch-jit-export"
       inputs: [{name: "x", type:Tensor dims: 1 2 3}]
-      outputs: [{name: "5", type:Tensor dims: 2 3}]
+      outputs: [{name: "11", type:Tensor dims: 2 3}]
       initializers: []
       nodes: [
         Node {type: "ReduceProd", inputs: [x], outputs: [1], attributes: [{ name: 'keepdims', type: int, value: 0}]},
         Node {type: "ReduceProd", inputs: [x], outputs: [2], attributes: [{ name: 'axes', type: ints, values: [0]},{ name: 'keepdims', type: int, value: 0}]},
         Node {type: "Add", inputs: [1,2], outputs: [3], attributes: []},
         Node {type: "ReduceProd", inputs: [x], outputs: [4], attributes: [{ name: 'axes', type: ints, values: [0]},{ name: 'keepdims', type: int, value: 0}]},
-        Node {type: "Add", inputs: [3,4], outputs: [5], attributes: []}
+        Node {type: "Add", inputs: [3,4], outputs: [5], attributes: []},
+        Node {type: "ReduceSum", inputs: [x], outputs: [6], attributes: [{ name: 'keepdims', type: int, value: 0}]},
+        Node {type: "Add", inputs: [5,6], outputs: [7], attributes: []},
+        Node {type: "ReduceSum", inputs: [x], outputs: [8], attributes: [{ name: 'axes', type: ints, values: [0]},{ name: 'keepdims', type: int, value: 0}]},
+        Node {type: "Add", inputs: [7,8], outputs: [9], attributes: []},
+        Node {type: "ReduceSum", inputs: [x], outputs: [10], attributes: [{ name: 'axes', type: ints, values: [0]},{ name: 'keepdims', type: int, value: 0}]},
+        Node {type: "Add", inputs: [9,10], outputs: [11], attributes: []}
       ]
     }
   opset_import: [OperatorSetIdProto { domain: }],

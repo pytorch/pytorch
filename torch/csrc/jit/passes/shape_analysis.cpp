@@ -913,7 +913,7 @@ class ShapePropagator {
             "aten::median(Tensor self) -> Tensor",
             "aten::norm(Tensor self, Scalar p) -> Tensor",
             "aten::std(Tensor self, bool unbiased) -> Tensor",
-            "aten::sum(Tensor self) -> Tensor",
+            "aten::sum(Tensor self, *, ScalarType? dtype) -> Tensor",
             "aten::trace(Tensor self) -> Tensor",
             "aten::var(Tensor self, bool unbiased) -> Tensor",
             "aten::all(Tensor self) -> Tensor",
@@ -937,7 +937,7 @@ class ShapePropagator {
     //   - First input should be the only tensor input
     static const register_formula_for all_reduce_ops_with_integer_upcast{
         {
-            "aten::sum(Tensor self) -> Tensor",
+            "aten::sum(Tensor self, *, ScalarType? dtype) -> Tensor",
             "aten::prod(Tensor self, *, ScalarType? dtype) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
@@ -1058,7 +1058,7 @@ class ShapePropagator {
     //   - has bool keepdim and int[] dim arguments
     static const register_formula_for multidim_reduce_ops_with_integer_upcast{
         {
-            "aten::sum(Tensor self, int[] dim, bool keepdim) -> Tensor",
+            "aten::sum(Tensor self, int[] dim, bool keepdim, *, ScalarType? dtype) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
           if (auto dim = node->get<std::vector<int64_t>>(attr::dim)) {
@@ -1528,11 +1528,11 @@ class ShapePropagator {
       sizes.at(dim) = length;
       node->output()->setType(tp->withSizesStrides(sizes, tp->strides()));
       return true;
-    } else if (node->matches("aten::sum(Tensor self) -> Tensor")) {
+    } else if (node->matches("aten::sum(Tensor self, *, ScalarType? dtype) -> Tensor")) {
       node->output()->setType(tensor_types.at(0)->withSizes({}));
       return true;
     } else if (node->matches(
-                   "aten::sum(Tensor self, int[] dim, bool keepdim) -> Tensor",
+                   "aten::sum(Tensor self, int[] dim, bool keepdim, *, ScalarType? dtype) -> Tensor",
                    /*const_inputs=*/{attr::dim, attr::keepdim})) {
       auto& tp = tensor_types.at(0);
       auto sizes = tp->sizes();

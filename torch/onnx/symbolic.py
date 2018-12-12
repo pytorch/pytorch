@@ -414,7 +414,23 @@ def _reduce_op_symbolic(onnx_op_name):
     return symbolic
 
 mean = _reduce_op_symbolic('ReduceMean')
-sum = _reduce_op_symbolic('ReduceSum')
+
+
+@overload_by_arg_count
+def sum(g, *args, **kwargs):
+    @parse_args('v', 'none')
+    def sum_nodim(g, self, dtype):
+        if dtype.node().kind() != 'prim::none':
+            return _unimplemented("scale", "dtype")
+        return g.op('ReduceSum', self, keepdims_i=0)
+
+    @parse_args('v', 'i', 'i', 'none')
+    def sum_dim(g, self, dim, keepdim, dtype):
+        if dtype.node().kind() != 'prim::none':
+            return _unimplemented("scale", "dtype")
+        return g.op('ReduceSum', self, axes_i=[dim], keepdims_i=keepdim)
+
+    return sum_nodim, sum_dim
 
 
 @overload_by_arg_count

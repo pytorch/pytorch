@@ -7624,7 +7624,10 @@ a")
             def forward(self, x):
                 return (torch.prod(x) +
                         torch.prod(x, 0) +
-                        torch.prod(x, 0, False))
+                        torch.prod(x, 0, False) +
+                        torch.sum(x) +
+                        torch.sum(x, 0) +
+                        torch.sum(x, 0, False))
 
         mte = ModuleToExport()
         outputs = mte(torch.zeros(1, 2, 3))

@@ -363,7 +363,8 @@ class TestAutograd(TestCase):
         # Compute the d loss / d intermediates in chunks of shard_size
         shard_size = 2
         d_intermediates = [d_i for intermediates_batch in group(intermediates, shard_size)
-                           for d_i in torch.autograd.grad(loss, intermediates_batch)]
+                           for d_i in torch.autograd.grad(loss, intermediates_batch,
+                                                          retain_graph=True)]
         # Compute rest of backward pass
         torch.autograd.backward(intermediates, d_intermediates)
 
