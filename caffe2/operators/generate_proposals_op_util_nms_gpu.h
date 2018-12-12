@@ -22,7 +22,7 @@ namespace utils {
 // dev_delete_mask, host_delete_mask : Tensors that will be used as temp storage by NMS
 //    Those tensors will be resized to the necessary size 
 // context : current CUDA context
-void nms_gpu_upright(
+CAFFE2_API void nms_gpu_upright(
     const float* d_desc_sorted_boxes,
     const int N,
     const float thresh,
