@@ -2215,21 +2215,17 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("cudaDeviceAllocator", ("hipDeviceAllocator", API_PYTORCH)),
     ("define MAX_NUM_BLOCKS 200", ("define MAX_NUM_BLOCKS 64", API_PYTORCH)),
 
-    ("c10::cuda::CUDAGuard", ("::at::cuda::detail::HIPGuardMasqueradingAsCUDA", API_PYTORCH)),
-    ("cuda::CUDAGuard", ("::at::cuda::detail::HIPGuardMasqueradingAsCUDA", API_PYTORCH)),
-    ("CUDAGuard", ("::at::cuda::detail::HIPGuardMasqueradingAsCUDA", API_PYTORCH)),
+    ("cuda::CUDAGuard", ("hip::HIPGuardMasqueradingAsCUDA", API_PYTORCH)),
+    ("CUDAGuard", ("HIPGuardMasqueradingAsCUDA", API_PYTORCH)),
 
-    ("c10::cuda::OptionalCUDAGuard", ("::at::cuda::detail::OptionalHIPGuardMasqueradingAsCUDA", API_PYTORCH)),
-    ("cuda::OptionalCUDAGuard", ("::at::cuda::detail::OptionalHIPGuardMasqueradingAsCUDA", API_PYTORCH)),
-    ("OptionalCUDAGuard", ("::at::cuda::detail::OptionalHIPGuardMasqueradingAsCUDA", API_PYTORCH)),
+    ("cuda::OptionalCUDAGuard", ("hip::OptionalHIPGuardMasqueradingAsCUDA", API_PYTORCH)),
+    ("OptionalCUDAGuard", ("OptionalHIPGuardMasqueradingAsCUDA", API_PYTORCH)),
 
-    ("c10::cuda::CUDAStreamGuard", ("::at::cuda::detail::HIPStreamGuardMasqueradingAsCUDA", API_PYTORCH)),
-    ("cuda::CUDAStreamGuard", ("::at::cuda::detail::HIPStreamGuardMasqueradingAsCUDA", API_PYTORCH)),
-    ("CUDAStreamGuard", ("::at::cuda::detail::HIPStreamGuardMasqueradingAsCUDA", API_PYTORCH)),
+    ("cuda::CUDAStreamGuard", ("hip::HIPStreamGuardMasqueradingAsCUDA", API_PYTORCH)),
+    ("CUDAStreamGuard", ("HIPStreamGuardMasqueradingAsCUDA", API_PYTORCH)),
 
-    ("c10::cuda::OptionalCUDAStreamGuard", ("::at::cuda::detail::OptionalHIPStreamGuardMasqueradingAsCUDA", API_PYTORCH)),
-    ("cuda::OptionalCUDAStreamGuard", ("::at::cuda::detail::OptionalHIPStreamGuardMasqueradingAsCUDA", API_PYTORCH)),
-    ("OptionalCUDAStreamGuard", ("::at::cuda::detail::OptionalHIPStreamGuardMasqueradingAsCUDA", API_PYTORCH)),
+    ("cuda::OptionalCUDAStreamGuard", ("hip::OptionalHIPStreamGuardMasqueradingAsCUDA", API_PYTORCH)),
+    ("OptionalCUDAStreamGuard", ("OptionalHIPStreamGuardMasqueradingAsCUDA", API_PYTORCH)),
 
     # TODO: Undo this special-case
     ("c10/cuda/CUDAGuard.h", ("ATen/cuda/detail/CUDAHIPCompat.h", API_PYTORCH)),
@@ -2303,6 +2299,7 @@ C10_MAPPINGS = collections.OrderedDict([
     ("C10_CUDA_CHECK", ("C10_HIP_CHECK", API_C10)),
     ("c10::cuda", ("c10::hip", API_C10)),
     ("cuda::CUDAStream", ("hip::HIPStream", API_C10)),
+    ("CUDAStream", ("HIPStream", API_C10)),
     # This substitution is not permissible, because there's another copy of this
     # function in torch/cuda.h
     # ("cuda::device_count", ("hip::device_count", API_C10)),

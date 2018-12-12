@@ -12,7 +12,8 @@
 #if AT_ROCM_ENABLED()
 #include <c10/hip/impl/HIPGuardImpl.h>
 
-namespace at { namespace cuda { namespace detail {
+// Use of c10::hip namespace here makes hipification easier
+namespace c10 { namespace hip {
 
 struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplInterface {
   static constexpr DeviceType static_type = DeviceType::CUDA;
@@ -59,6 +60,6 @@ using OptionalHIPGuardMasqueradingAsCUDA = c10::impl::InlineDeviceGuard<HIPGuard
 using HIPStreamGuardMasqueradingAsCUDA = c10::impl::InlineStreamGuard<HIPGuardImplMasqueradingAsCUDA>;
 using OptionalHIPStreamGuardMasqueradingAsCUDA = c10::impl::InlineOptionalStreamGuard<HIPGuardImplMasqueradingAsCUDA>;
 
-}}} // namespace at::cuda::detail
+}} // namespace c10::hip
 
 #endif
