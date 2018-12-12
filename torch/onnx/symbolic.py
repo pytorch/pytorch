@@ -453,8 +453,10 @@ def prod(g, *args, **kwargs):
     return prod_nodim, prod_dim
 
 
-@parse_args('v', 'i')
-def cumsum(g, input, dim):
+@parse_args('v', 'i', 'none')
+def cumsum(g, input, dim, dtype):
+    if dtype.node().kind() != 'prim::none':
+        return _unimplemented("scale", "dtype")
     return g.op("ATen", input, operator_s="cumsum", dim_i=dim)
 
 

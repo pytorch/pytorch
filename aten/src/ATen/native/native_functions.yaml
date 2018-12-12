@@ -554,16 +554,10 @@
   dispatch:
     CUDA: cudnn_grid_sampler_backward
 
-# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
-- func: cumsum(Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+- func: cumsum(Tensor self, int64_t dim, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
-- func: cumsum(Tensor self, int64_t dim) -> Tensor
-  variants: function, method
-
-- func: cumsum_out(Tensor result, Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
-
-- func: cumsum_out(Tensor result, Tensor self, int64_t dim) -> Tensor
+- func: cumsum_out(Tensor result, Tensor self, int64_t dim, *, ScalarType? dtype=None) -> Tensor
 
 # FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
 - func: cumprod(Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
