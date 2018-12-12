@@ -3309,7 +3309,7 @@ a")
             c = s(a, b)
             c.sum().backward()
             graph = backward_graph(s)
-            self.assertAllFused(graph, except_for={'prim::SumToSize'})
+            self.assertAllFused(graph, except_for={'prim::GradSumToSize'})
 
     def test_mul(self):
         def func(a, b):
