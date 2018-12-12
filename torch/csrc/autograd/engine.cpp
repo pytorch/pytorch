@@ -34,7 +34,7 @@
 
 #ifdef USE_ROCM
 #include <hip/hip_runtime.h>
-#include <ATen/cuda/detail/CUDAHIPCompat.h>
+#include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h>
 #endif  // USE_ROCM
 
 namespace torch { namespace autograd {
