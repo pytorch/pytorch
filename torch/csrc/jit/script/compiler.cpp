@@ -321,7 +321,7 @@ struct Environment {
         {"int", std::make_shared<CastValue>(IntType::get(), prim::Int)},
         {"bool", std::make_shared<CastValue>(BoolType::get(), prim::Bool)},
         {"getattr", std::make_shared<GetAttrValue>()},
-        {"isinstance", std::make_shared<IsInstValue>()},
+        {"isinstance", std::make_shared<IsInstanceValue>()},
         // todo(zach): remove when we can correctly export torch.full via ONNX
         // or we have implicit conversion that can convert numbers to tensors
         {"_to_tensor", std::make_shared<CastValue>(DynamicType::get(), prim::NumToTensor)},
@@ -2029,6 +2029,7 @@ private:
           << " takes no keyword arguments";
     }
   }
+
   std::shared_ptr<SugaredValue> emitApplyExpr(Apply &apply, size_t n_binders) {
     auto sv = emitSugaredExpr(apply.callee(), 1);
     auto loc = apply.callee().range();
@@ -2067,28 +2068,41 @@ private:
       }
       const std::string& name = StringLiteral(selector).text();
       return obj->attr(apply.range(), method, name);
-    } else if (auto isinst = dynamic_cast<IsInstValue*>(sv.get())) {
+    } else if (auto isinstance = dynamic_cast<IsInstanceValue*>(sv.get())) {
       // NOTE: for `isinstance` builtin call in JIT, we only check the static types
       // on the inputs to evaluate, and insert the corresponding constant node
-      checkApplyExpr(apply, loc);
-      auto type_name = parseBaseTypeName(apply.inputs()[1]);
-      if (!type_name) {
-        throw ErrorReport(apply.inputs()[1].range()) << "type must be a type identifier";
-      }
-      auto val = emitExpr(apply.inputs()[0]);
-      // Special casing for list and tuple since isintance(x, list) and isinstance(x, tuple)
-      // does not accept List[int] / Tuple[int] like subscript type annotation in python
-      bool is_instance_val = false;
-      if (*type_name == "list" && val->type()->cast<ListType>()) {
-          is_instance_val = true;
-      } else if (*type_name == "tuple" && val->type()->cast<TupleType>()) {
-          is_instance_val = true;
-      } else {
-        TypePtr type = parseTypeFromExpr(apply.inputs()[1]);
-        if (val->type()->isSubtypeOf(type)) {
-          is_instance_val = true;
+      std::function<bool(Expr, Expr)> isInstanceCheck = [&](Expr obj, Expr classinfo) {
+        if (classinfo.kind() == TK_TUPLE_LITERAL) {
+          // handle the case for recursive tuple classinfo
+          // return true if obj is an instance of any of the types
+          for (Expr e: TupleLiteral(classinfo).inputs()) {
+            if (isInstanceCheck(obj, e)) {
+              return true;
+            }
+          }
+          return false;
         }
-      }
+        auto type_name = parseBaseTypeName(classinfo);
+        if (!type_name) {
+          throw ErrorReport(classinfo.range()) << "type must be a type identifier";
+        }
+        auto val = emitExpr(obj);
+        // Special casing for list and tuple since isintance(x, list) and isinstance(x, tuple)
+        // does not accept List[int] / Tuple[int] like subscript type annotation in python
+        if (*type_name == "list" && val->type()->cast<ListType>()) {
+          return true;
+        } else if (*type_name == "tuple" && val->type()->cast<TupleType>()) {
+          return true;
+        } else {
+          TypePtr type = parseTypeFromExpr(classinfo);
+          if (val->type()->isSubtypeOf(type)) {
+            return true;
+          }
+        }
+        return false;
+      };
+      checkApplyExpr(apply, loc);
+      bool is_instance_val = isInstanceCheck(apply.inputs()[0], apply.inputs()[1]);
       return std::make_shared<SimpleValue>(graph->insertConstant(is_instance_val, loc));
     } else {
       auto inputs = getNamedValues(apply.inputs(), true);

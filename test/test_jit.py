@@ -4491,9 +4491,11 @@ a")
                 .format(typ)
             )
 
-        inputs = [True, 1, 1.0, torch.tensor(1), [1, 2], (1.0,)]
-        type_literals = ['bool', 'int', 'float', 'torch.Tensor', 'list', 'tuple']
-        type_annotations = ['bool', 'int', 'float', 'Tensor', 'List[int]', 'Tuple[float]']
+        inputs = [True, 1, 1.0, torch.tensor(1), [1, 2], (1.0,), [1, 2], 1]
+        type_literals = ['bool', 'int', 'float', 'torch.Tensor', 'list', 'tuple',
+                         '(list, tuple)', '(int, float, bool)']
+        type_annotations = ['bool', 'int', 'float', 'Tensor', 'List[int]', 'Tuple[float]',
+                            'List[int]', 'int']
 
         # do zipping to try different types
         for inp, typ, type_hint in zip(inputs, type_literals, type_annotations):

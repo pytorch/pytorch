@@ -186,8 +186,8 @@ struct TORCH_API GetAttrValue : SugaredValue {
 };
 
 // matched against for special handling of isinstance expressions
-struct TORCH_API IsInstValue : SugaredValue {
-  IsInstValue() = default;
+struct TORCH_API IsInstanceValue : SugaredValue {
+  IsInstanceValue() = default;
   std::string kind() const override {
     return "isinstance";
   }
