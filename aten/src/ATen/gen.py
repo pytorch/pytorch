@@ -139,8 +139,16 @@ LEGACY_TH_FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHFunctio
 
 NATIVE_FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/NativeFunctions.h")
 
+EXTENSION_BACKEND_REGISTRATION_H = CodeTemplate.from_file(TEMPLATE_PATH + "/ExtensionBackendRegistration.h")
+
 TYPE_REGISTER = CodeTemplate("""\
 context->registerType(Backend::${backend}, ScalarType::${scalar_type}, new ${type_name}());
+""")
+
+EXTENSION_BACKEND_REGISTER_SWITCH = CodeTemplate("""\
+case Backend::${Backend}:
+    ${Type}Dispatch::register_fn(schema, fn);
+    break;
 """)
 
 core_file_manager = FileManager(core_install_dir)
@@ -192,6 +200,8 @@ top_env = {
     'function_definitions': [],
     'type_ids': [],
     'native_function_declarations': [],
+    'extension_backend_headers': [],
+    'extension_backend_register_switches': [],
 }
 
 
@@ -354,6 +364,10 @@ def generate_type_extension_backend(backend, declarations):
     for scalar_name, _, _, _, _ in scalar_types:
         type_register = TYPE_REGISTER.substitute(backend=env['Backend'], scalar_type=scalar_name, type_name=env['Type'])
         top_env['cpu_type_registrations'].append(type_register)
+    extension_backend_register_switch = EXTENSION_BACKEND_REGISTER_SWITCH.substitute(env)
+    top_env['extension_backend_register_switches'].append(extension_backend_register_switch)
+    top_env['extension_backend_headers'].append(
+        '#include "ATen/{}.h"'.format(env['Type']))
     top_env['cpu_type_headers'].append(
         '#include "ATen/{}.h"'.format(env['Type']))
 
@@ -395,7 +409,7 @@ def declare_outputs():
         core_file_manager.will_write(f)
     files = ['Declarations.yaml', 'TypeExtendedInterface.h', 'TypeDefault.cpp', 'TypeDefault.h',
              'LegacyTHDispatcher.h', 'LegacyTHDispatcher.cpp', 'LegacyTHFunctions.h',
-             'Functions.h', 'NativeFunctions.h', 'RegisterCPU.cpp', 'RegisterCPU.h']
+             'Functions.h', 'NativeFunctions.h', 'RegisterCPU.cpp', 'RegisterCPU.h', 'ExtensionBackendRegistration.h']
     for f in files:
         file_manager.will_write(f)
     cuda_files = ['RegisterCUDA.cpp', 'RegisterCUDA.h']
@@ -519,6 +533,8 @@ def generate_outputs():
     file_manager.write('LegacyTHFunctions.h', LEGACY_TH_FUNCTIONS_H, top_env)
 
     file_manager.write('NativeFunctions.h', NATIVE_FUNCTIONS_H, top_env)
+
+    file_manager.write('ExtensionBackendRegistration.h', EXTENSION_BACKEND_REGISTRATION_H, top_env)
 
     file_manager.check_all_files_written()
     cuda_file_manager.check_all_files_written()

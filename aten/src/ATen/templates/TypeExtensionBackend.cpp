@@ -2,6 +2,27 @@
 
 namespace at {
 
+template<typename FnPtr>
+FnPtr ${Type}Dispatch::get_function(std::string schema) {
+  auto fn_table = get_fn_table<FnPtr>();
+  auto it = fn_table.find(schema);
+  if (it != fn_table.end()) {
+    return it->second;
+  }
+  AT_ERROR("No function implemented for schema: ", schema);
+}
+
+template<typename FnPtr>
+void ${Type}Dispatch::register_function(std::string schema, FnPtr fn) {
+  get_fn_table<FnPtr>()[schema] = fn;
+}
+
+template<typename FnPtr>
+std::map<std::string, FnPtr>& ${Type}Dispatch::get_fn_table() {
+  static std::map<std::string, FnPtr> fn_table;
+  return fn_table;
+}
+
 ${Type}::${Type}()
   : TypeDefault(${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
 

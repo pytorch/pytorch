@@ -2,7 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/FPGAType.h>
+#include <ATen/TypeExtensionBackend.h>
 
 using namespace at;
 
@@ -31,17 +31,20 @@ Tensor add_override(const Tensor & a, const Tensor & b , Scalar c) {
 
 TEST(BackendExtensionTest, TestRegisterOp) {
   EXPECT_ANY_THROW(empty({5, 5}, at::kFPGA));
-  FPGAType::FPGATypeDispatch<EmptyFnPtr>::register_function(
+  register_extension_backend_op(
+    at::kFPGA,
     "empty(IntList size, TensorOptions options) -> Tensor", &empty_override);
   Tensor a = empty({5, 5}, at::kFPGA);
 
   EXPECT_ANY_THROW(empty_like(a, at::kFPGA));
-  FPGAType::FPGATypeDispatch<EmptyLikeFnPtr>::register_function(
+  register_extension_backend_op(
+    at::kFPGA,
     "empty_like(Tensor self, TensorOptions options) -> Tensor", &empty_like_override);
   Tensor b = empty_like(a, at::kFPGA);
 
   EXPECT_ANY_THROW(add(a, b));
-  FPGAType::FPGATypeDispatch<AddFnPtr>::register_function(
+  register_extension_backend_op(
+    at::kFPGA,
     "add(Tensor self, Tensor other, Scalar alpha) -> Tensor", &add_override);
   add(a, b);
 }
