@@ -13,15 +13,25 @@ class OrderedDictWrapper(object):
     using properties does not work.
     """
 
-    def __init__(self, cpp_dict_getter):
-        self.cpp_dict_getter = cpp_dict_getter
+    def __init__(self, cpp_module, attr):
+        self.cpp_module = cpp_module
+        self.attr = attr
 
     @property
     def cpp_dict(self):
-        return self.cpp_dict_getter()
+        return getattr(self.cpp_module, self.attr)
 
     # Magic methods cannot be assigned dynamically and bypass ``getattr``, so we
     # must manually override them.
+
+    def items(self):
+        return self.cpp_dict.items()
+
+    def keys(self):
+        return self.cpp_dict.keys()
+
+    def values(self):
+        return self.cpp_dict.values()
 
     def __iter__(self):
         return self.cpp_dict.__iter__()
@@ -35,9 +45,6 @@ class OrderedDictWrapper(object):
     def __getitem__(self, key):
         return self.cpp_dict.__getitem__(key)
 
-    def __getattr__(self, name):
-        return getattr(self.cpp_dict, name)
-
 
 class ModuleWrapper(nn.Module):
     """
@@ -50,9 +57,9 @@ class ModuleWrapper(nn.Module):
         # assigned to in the super class constructor.
         self.cpp_module = cpp_module
         super(ModuleWrapper, self).__init__()
-        self._parameters = OrderedDictWrapper(lambda: cpp_module._parameters)
-        self._buffers = OrderedDictWrapper(lambda: cpp_module._buffers)
-        self._modules = OrderedDictWrapper(lambda: cpp_module._modules)
+        self._parameters = OrderedDictWrapper(cpp_module, "_parameters")
+        self._buffers = OrderedDictWrapper(cpp_module, "_buffers")
+        self._modules = OrderedDictWrapper(cpp_module, "_modules")
         for attr in dir(cpp_module):
             # Skip magic methods and the three attributes above.
             if not attr.startswith("_"):
