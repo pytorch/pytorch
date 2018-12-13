@@ -251,7 +251,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'const Type &': 'scalartype',
         'const THPLayout &': 'layout',
         'const Device &': 'device',
-        'optional<ScalarType>': 'scalartypeOptional',
         'int64_t': 'toInt64',
         'bool': 'toBool',
         'double': 'toDouble',
@@ -769,7 +768,7 @@ def get_python_signature(declaration, include_out):
         default = None
         if arg.get('default') is not None:
             default = arg['default']
-            if default == 'nullptr' or default == 'nullopt' or default == 'c10::nullopt' or default == '{}':
+            if default == 'nullptr' or default == 'nullopt' or default == '{}':
                 default = 'None'
         if arg.get('python_default_init') is not None:
             default = 'None'
