@@ -1,18 +1,18 @@
 #include <google/protobuf/util/json_util.h>
 #include <google/protobuf/util/type_resolver_util.h>
 
-#include "torch/csrc/jit/import.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/utils/functional.h"
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/operator.h"
-#include "torch/csrc/jit/import_method.h"
+#include <torch/csrc/jit/import.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/utils/functional.h>
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/import_method.h>
 
 
-#include "caffe2/core/types.h"
-#include "caffe2/proto/caffe2_pb.h"
-#include "caffe2/proto/torch_pb.h"
-#include "caffe2/serialize/inline_container.h"
+#include <caffe2/core/types.h>
+#include <caffe2/proto/caffe2_pb.h>
+#include <caffe2/proto/torch_pb.h>
+#include <caffe2/serialize/inline_container.h>
 
 #include <ATen/ATen.h>
 
@@ -142,7 +142,7 @@ at::Tensor ScriptModuleDeserializer::loadTensor(const torch::TensorDef& tensor_p
       storage_it = storageMap.insert(std::make_pair(
             record_key, cpu_storage)).first;
     } else if (device.type() == at::DeviceType::CUDA) {
-      at::Tensor cpu_tensor = at::CPU(type)._th_tensor(
+      at::Tensor cpu_tensor = at::empty({0}, at::CPU(type).options()).set_(
           cpu_storage, tensor_proto.offset(), dims, strides);
       at::Storage cuda_storage = cpu_tensor.to(device,
           cpu_tensor.scalar_type()).storage();
@@ -166,10 +166,10 @@ at::Tensor ScriptModuleDeserializer::loadTensor(const torch::TensorDef& tensor_p
 
   at::Tensor result;
   if (device.type() == at::DeviceType::CPU) {
-    result = at::CPU(type)._th_tensor(
+    result = at::empty({0}, at::CPU(type).options()).set_(
         storage_it->second, tensor_proto.offset(), dims, strides);
   } else if (device.type() == at::DeviceType::CUDA) {
-    result = at::CUDA(type)._th_tensor(
+    result = at::empty({0}, at::CUDA(type).options()).set_(
         storage_it->second, tensor_proto.offset(), dims, strides);
   }
   AT_ASSERT(result.defined());

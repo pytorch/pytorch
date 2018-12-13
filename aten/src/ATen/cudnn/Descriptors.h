@@ -1,12 +1,12 @@
 #pragma once
 
-#include "ATen/cuda/CUDAContext.h"
-#include "ATen/cuda/Exceptions.h"
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/Exceptions.h>
 
-#include "cudnn-wrapper.h"
+#include <ATen/cudnn/cudnn-wrapper.h>
 #include <ATen/ATen.h>
 #include <ATen/TensorUtils.h>
-#include "ATen/cuda/ATenCUDAGeneral.h"
+#include <ATen/cuda/ATenCUDAGeneral.h>
 #include <cuda.h>
 
 #if CUDNN_VERSION < 7000

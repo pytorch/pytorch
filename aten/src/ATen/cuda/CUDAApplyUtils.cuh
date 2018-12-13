@@ -1,9 +1,9 @@
 #pragma once
 
-#include "ATen/cuda/detail/IndexUtils.cuh"
-#include "ATen/TensorUtils.h"
-#include "THC/THCAtomics.cuh"
-#include "ATen/cuda/CUDAContext.h"
+#include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/TensorUtils.h>
+#include <THC/THCAtomics.cuh>
+#include <ATen/cuda/CUDAContext.h>
 
 #include <math.h>
 

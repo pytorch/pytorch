@@ -1,8 +1,8 @@
-#include "THCUNN.h"
-#include "THCTensor.hpp"
-#include "common.h"
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
+#include <THCUNN/THCUNN.h>
+#include <THC/THCTensor.hpp>
+#include <THCUNN/common.h>
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
 
 // Kernel for fast unfold+copy
 // Borrowed from Theano
@@ -157,5 +157,5 @@ void col2im3d(cudaStream_t stream, const Dtype* data_col, const int64_t channels
   THCudaCheck(cudaGetLastError());
 }
 
-#include "generic/VolumetricConvolution.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/VolumetricConvolution.cu>
+#include <THC/THCGenerateFloatTypes.h>

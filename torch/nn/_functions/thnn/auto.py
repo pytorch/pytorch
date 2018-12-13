@@ -282,7 +282,6 @@ def _generate_function_classes(scope_dict):
         'SpatialDilatedMaxPooling',
         'SpatialMaxUnpooling',
         'SpatialAdaptiveMaxPooling',
-        'SpatialAdaptiveAveragePooling',
         'VolumetricAveragePooling',
         'VolumetricMaxPooling',
         'VolumetricMaxUnpooling',

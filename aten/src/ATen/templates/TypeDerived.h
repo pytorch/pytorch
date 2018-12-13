@@ -2,9 +2,9 @@
 
 // ${generated_comment}
 
-#include "ATen/CPUTypeDefault.h"
-#include "ATen/Context.h"
-#include "ATen/CheckGenerator.h"
+#include <ATen/CPUTypeDefault.h>
+#include <ATen/Context.h>
+#include <ATen/CheckGenerator.h>
 
 $extra_cuda_headers
 

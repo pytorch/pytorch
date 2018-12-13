@@ -1,14 +1,14 @@
-#include "THCTensorRandom.h"
-#include "THCDeviceUtils.cuh"
-#include "THCGeneral.h"
-#include "THCTensorCopy.h"
-#include "THCTensorMath.h"
-#include "THCReduceApplyUtils.cuh"
-#include "THCTensorRandom.cuh"
-#include "THCGenerator.hpp"
-#include "ATen/Config.h"
+#include <THC/THCTensorRandom.h>
+#include <THC/THCDeviceUtils.cuh>
+#include <THC/THCGeneral.h>
+#include <THC/THCTensorCopy.h>
+#include <THC/THCTensorMath.h>
+#include <THC/THCReduceApplyUtils.cuh>
+#include <THC/THCTensorRandom.cuh>
+#include <THC/THCGenerator.hpp>
+#include <ATen/Config.h>
 
-#include "ATen/cuda/_curand_mtgp32_host.h"
+#include <ATen/cuda/_curand_mtgp32_host.h>
 
 #include <thrust/functional.h>
 #include <curand.h>
@@ -164,8 +164,8 @@ GENERATE_KERNEL2(generate_normal, at::Half, double mean, double stdv, float, cur
 GENERATE_KERNEL1(generate_exponential, at::Half, double lambda, float, curand_uniform, (ScalarConvert<float, at::Half>::to((float)(-1. / lambda * log(x)))))
 GENERATE_KERNEL2(generate_cauchy, at::Half, double median, double sigma, float, curand_uniform, (ScalarConvert<float, at::Half>::to((float)(median + sigma * tan(M_PI*(x-0.5))))))
 
-#include "generic/THCTensorRandom.cu"
-#include "THCGenerateAllTypes.h"
+#include <THC/generic/THCTensorRandom.cu>
+#include <THC/THCGenerateAllTypes.h>
 
 #undef GENERATE_KERNEL1
 #undef GENERATE_KERNEL2

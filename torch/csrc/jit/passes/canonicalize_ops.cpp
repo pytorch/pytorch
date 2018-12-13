@@ -1,6 +1,6 @@
-#include "torch/csrc/jit/passes/canonicalize_ops.h"
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/jit/symbolic_variable.h"
+#include <torch/csrc/jit/passes/canonicalize_ops.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/symbolic_variable.h>
 
 
 namespace torch { namespace jit {

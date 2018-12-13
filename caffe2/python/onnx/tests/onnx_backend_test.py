@@ -46,6 +46,9 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_atanh.*'  # Needs implementation
                      '|test_onehot.*'  # Needs implementation
                      '|test_scan.*'  # Needs implementation
+                     '|test_erf.*'  # Needs implementation
+                     '|test_isnan.*'  # Needs implementation
+                     '|test_scatter.*'  # Should be similar to ScatterAssign
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.
