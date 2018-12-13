@@ -326,11 +326,9 @@ struct C10_API TensorOptions {
 
   // Resolves the ATen backend specified by the current construction axes.
   Backend backend() const noexcept {
-    Backend backend;
-    if (device().type() == Device::Type::CPU) {
-      backend = (layout() == kStrided) ? Backend::CPU : Backend::SparseCPU;
-    } else {
-      backend = (layout() == kStrided) ? Backend::CUDA : Backend::SparseCUDA;
+    Backend backend = deviceTypeToBackend(device().type());
+    if (layout() != kStrided) {
+      backend = toSparse(backend);
     }
     return backend;
   }
