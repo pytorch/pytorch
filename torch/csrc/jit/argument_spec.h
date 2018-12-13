@@ -73,13 +73,20 @@ struct ArgumentSpec {
   }
 
   void addInput(const IValue& input, size_t& offset, bool with_grad) {
+    if (input.isTuple()) {
+      for (const IValue & elem : input.toTuple()->elements()) {
+        addInput(elem, offset, with_grad);
+      }
+      return;
+    }
+
+    JIT_ASSERT(offset < args.size());
     auto & arg = args[offset];
     // Initialize all fields to 0. This is convenient, because e.g.
     // requires_grad() can be checked even on tensors AND will make
     // padding bits all 0s.
     std::memset(&arg, 0, sizeof(ArgumentInfo));
     if (input.isTensor()) {
-      JIT_ASSERT(offset < args.size());
       at::Tensor t = input.toTensor();
       if ((arg.defined_ = t.defined())) {
         arg.requires_grad_ = with_grad && autograd::Variable(t).requires_grad();
@@ -89,18 +96,9 @@ struct ArgumentSpec {
       }
 
       arg.is_tensor_ = true;
-      combineHash(arg);
-      offset++;
-    } else if (input.isTuple()) {
-      for (const IValue & elem : input.toTuple()->elements()) {
-        addInput(elem, offset, with_grad);
-      }
-    } else {
-      JIT_ASSERT(offset < args.size());
-      // NB: no need to set is_tensor to false, because we memset the struct to 0 above
-      combineHash(arg);
-      offset++;
     }
+    combineHash(arg);
+    ++offset;
   }
 
   void combineHash(const ArgumentInfo &arg) {
