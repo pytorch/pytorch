@@ -94,7 +94,21 @@ else:
             return not self.manager_dead
 
 
-def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed, init_fn, worker_id):
+def _fix_dataset(dataset, base_seed):
+    prev_getitem = dataset.__getitem__
+
+    def getitem(self, idx):
+        random.seed(base_seed + idx)
+        torch.manual_seed(base_seed + idx)
+        return prev_getitem(idx)
+    ### Add this comment later
+    # It's okay to override class method
+    # Becuase this change is only visible to the current worker process
+    dataset.__class__.__getitem__ = getitem
+
+
+def _worker_loop(dataset, index_queue, data_queue, done_event,
+                 collate_fn, seed, init_fn, worker_id, fix_dataset):
     # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
     # logic of this function.
 
@@ -111,6 +125,10 @@ def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed,
         torch.set_num_threads(1)
         random.seed(seed)
         torch.manual_seed(seed)
+
+        torch.manual_seed(seed)  # To be deleted by me in the future
+        if fix_dataset:
+            _fix_dataset(dataset, seed)
 
         data_queue.cancel_join_thread()
 
@@ -517,6 +535,7 @@ class _DataLoaderIter(object):
 
     def __init__(self, loader):
         self.dataset = loader.dataset
+        self.fix_dataset = loader.fix_dataset
         self.collate_fn = loader.collate_fn
         self.batch_sampler = loader.batch_sampler
         self.num_workers = loader.num_workers
@@ -548,8 +567,8 @@ class _DataLoaderIter(object):
                     target=_worker_loop,
                     args=(self.dataset, index_queue,
                           self.worker_result_queue, self.done_event,
-                          self.collate_fn, base_seed + i,
-                          self.worker_init_fn, i))
+                          self.collate_fn, base_seed,
+                          self.worker_init_fn, i, self.fix_dataset))
                 w.daemon = True
                 # NB: Process.start() actually take some time as it needs to
                 #     start a process and pass the arguments over via a pipe.
@@ -767,7 +786,7 @@ class DataLoader(object):
 
     def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None, batch_sampler=None,
                  num_workers=0, collate_fn=default_collate, pin_memory=False, drop_last=False,
-                 timeout=0, worker_init_fn=None):
+                 timeout=0, worker_init_fn=None, fix_dataset=True):
         self.dataset = dataset
         self.batch_size = batch_size
         self.num_workers = num_workers
@@ -776,6 +795,7 @@ class DataLoader(object):
         self.drop_last = drop_last
         self.timeout = timeout
         self.worker_init_fn = worker_init_fn
+        self.fix_dataset = fix_dataset
 
         if timeout < 0:
             raise ValueError('timeout option should be non-negative')
