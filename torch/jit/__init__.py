@@ -14,6 +14,7 @@ from .._jit_internal import createResolutionCallback, _compiled_weak_fns, \
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
 import torch.testing
+
 import math
 from collections import defaultdict, OrderedDict, namedtuple
 import sys
@@ -957,16 +958,16 @@ class ScriptMeta(type(torch._C.ScriptModule)):
 if _enabled:
     class ScriptModule(with_metaclass(ScriptMeta, torch._C.ScriptModule, Module)):
         r"""
-        The core data structure in Torch Script is the ``ScriptModule``. It is an
+        The core data structure in TorchScript is the ``ScriptModule``. It is an
         analogue of torch's nn.Module and represents an entire model as a tree of
         submodules. Like normal modules, each individual module in a ScriptModule can
         have submodules, parameters, and methods. In nn.Modules methods are implemented
         as Python functions, but in ScriptModules methods typically implemented as
-        *Torch Script* functions,  a statically-typed subset of Python that contains all
+        *TorchScript* functions,  a statically-typed subset of Python that contains all
         of PyTorch's built-in Tensor operations. This difference allows your
         ScriptModules code to run without the need for a Python interpreter.
 
-        ScriptModules and the Torch Script functions inside of them can be created in
+        ScriptModules and the TorchScript functions inside of them can be created in
         two ways:
 
         **Tracing:**
@@ -974,7 +975,7 @@ if _enabled:
             Using ``torch.jit.trace``, you can take an existing module or python
             function, provide example inputs, and we run the function, recording the
             operations performed on all the tensors. We turn the resulting recording
-            into a Torch Script method that is installed as the ``forward`` method of a
+            into a TorchScript method that is installed as the ``forward`` method of a
             ScriptModule. This module also contains any parameters that the original
             module had as well.
 
@@ -1022,11 +1023,11 @@ if _enabled:
 
         **Scripting:**
 
-            You can write Torch Script code directly using Python syntax. You do this
+            You can write TorchScript code directly using Python syntax. You do this
             using the ``torch.jit.script`` annotation (for functions) or
             ``torch.jit.script_method`` annotation (for methods) on subclasses of
             ScriptModule. With this annotation the body of the annotated function is
-            directly translated into Torch Script. Torch Script itself is a subset of
+            directly translated into TorchScript. TorchScript itself is a subset of
             the Python language, so not all features in python work, but we provide
             enough functionality to compute on tensors and do control-dependent
             operations.
@@ -1379,22 +1380,7 @@ class _ConstSequential(_ConstModuleList):
 
 _builtin_table = None
 
-_modules_containing_builtins = (torch, torch.nn.functional, torch._C._nn)
-
-# These functions have been converted to weak script, so don't add them as
-# builtin aten ops. Instead, they will be compiled from the code in
-# torch.nn.functional when used.
-
-
-# TODO: delete _should_skip() and remove torch.nn.functional from builtins list
-# once everything in it has been converted to weak script
-def _should_skip(mod, name):
-    if mod is not torch.nn.functional:
-        return False
-    func = getattr(torch.nn.functional, name)
-    if func is None:
-        return False
-    return func in _compiled_weak_fns or func in _boolean_dispatched
+_modules_containing_builtins = (torch, torch._C._nn)
 
 
 def _unwrap_optional(x):
@@ -1412,7 +1398,7 @@ def _get_builtin_table():
     def register_all(mod):
         for name in dir(mod):
             v = getattr(mod, name)
-            if callable(v) and not _should_skip(mod, name):
+            if callable(v):
                 _builtin_table[id(v)] = "aten::" + name
     for mod in _modules_containing_builtins:
         register_all(mod)
@@ -1433,6 +1419,8 @@ def _get_builtin_table():
     _builtin_table[id(torch.nn.functional.upsample_nearest)] = "aten::__upsample_nearest"
     _builtin_table[id(torch.nn.functional.upsample)] = "aten::__upsample"
     _builtin_table[id(torch.nn.functional.upsample_bilinear)] = "aten::__upsample_bilinear"
+    _builtin_table[id(torch.nn.functional.fold)] = "aten::fold"
+    _builtin_table[id(torch.nn.functional.unfold)] = "aten::unfold"
 
     return _builtin_table
 

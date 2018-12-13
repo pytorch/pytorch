@@ -128,42 +128,6 @@ function(caffe2_parse_version_str LIBNAME VERSIONSTR)
   set(${LIBNAME}_VERSION "${${LIBNAME}_VERSION_MAJOR}.${${LIBNAME}_VERSION_MINOR}.${${LIBNAME}_VERSION_PATCH}" PARENT_SCOPE)
 endfunction()
 
-##############################################################################
-# Helper function to automatically generate __init__.py files where python
-# sources reside but there are no __init__.py present.
-function(caffe_autogen_init_py_files)
-  if (CAFFE2_AUTOGEN_INIT_PY_ALREADY_RUN)
-    message(STATUS
-        "A previous caffe2 cmake run already created the __init__.py files.")
-    return()
-  endif()
-  file(GLOB_RECURSE all_python_files RELATIVE ${PROJECT_SOURCE_DIR}
-       "${PROJECT_SOURCE_DIR}/caffe2/*.py")
-  set(python_paths_need_init_py)
-  foreach(python_file ${all_python_files})
-    get_filename_component(python_path ${python_file} PATH)
-    string(REPLACE "/" ";" path_parts ${python_path})
-    set(rebuilt_path ${CMAKE_BINARY_DIR})
-    foreach(path_part ${path_parts})
-      set(rebuilt_path "${rebuilt_path}/${path_part}")
-      list(APPEND python_paths_need_init_py ${rebuilt_path})
-    endforeach()
-  endforeach()
-  list(REMOVE_DUPLICATES python_paths_need_init_py)
-  # Since the _pb2.py files are yet to be created, we will need to manually
-  # add them to the list.
-  list(APPEND python_paths_need_init_py ${CMAKE_BINARY_DIR}/caffe2/proto)
-
-  foreach(tmp ${python_paths_need_init_py})
-    if(NOT EXISTS ${tmp}/__init__.py)
-      # message(STATUS "Generate " ${tmp}/__init__.py)
-      file(WRITE ${tmp}/__init__.py "")
-    endif()
-  endforeach()
-  set(CAFFE2_AUTOGEN_INIT_PY_ALREADY_RUN TRUE CACHE INTERNAL
-      "Helper variable to record if autogen_init_py is already run or not.")
-endfunction()
-
 ###
 # Removes common indentation from a block of text to produce code suitable for
 # setting to `python -c`, or using with pycmd. This allows multiline code to be

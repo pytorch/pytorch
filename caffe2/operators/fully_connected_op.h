@@ -208,9 +208,9 @@ class FullyConnectedGradientOp : public Operator<Context> {
     CAFFE_ENFORCE(K * N == W.numel(), dimErrorString());
 
     auto* dW = Output(0);
-    auto* db = Output(1);
+
     dW->ResizeLike(W);
-    db->Resize(N);
+    auto* db = Output(1, {N}, at::dtype<T_DB>());
 
     if (X.numel() == 0) {
       // generate a zero blob for db and dW when X is empty

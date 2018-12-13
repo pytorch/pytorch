@@ -1,4 +1,4 @@
-#include "remove_inplace_ops.h"
+#include <torch/csrc/jit/passes/remove_inplace_ops.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 
 namespace torch {

@@ -8,8 +8,6 @@ PyTorch is a Python package that provides two high-level features:
 
 You can reuse your favorite Python packages such as NumPy, SciPy and Cython to extend PyTorch when needed.
 
-We are in an early-release beta. Expect some adventures and rough edges.
-
 - [More about PyTorch](#more-about-pytorch)
 - [Installation](#installation)
   - [Binaries](#binaries)
@@ -162,7 +160,6 @@ export CMAKE_PREFIX_PATH="$(dirname $(which conda))/../" # [anaconda root direct
 
 # Install basic dependencies
 conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
-conda install -c mingfeima mkldnn
 
 # Add LAPACK support for the GPU
 conda install -c pytorch magma-cuda92 # or [magma-cuda80 | magma-cuda91] depending on your cuda version

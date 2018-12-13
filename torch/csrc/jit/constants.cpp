@@ -1,8 +1,8 @@
-#include "torch/csrc/jit/constants.h"
-#include "torch/csrc/jit/operator.h"
-#include "torch/csrc/jit/custom_operator.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/utils/functional.h"
+#include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/custom_operator.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/utils/functional.h>
 
 namespace torch { namespace jit {
 

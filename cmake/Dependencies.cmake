@@ -746,7 +746,6 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -Wno-unused-command-line-argument)
     list(APPEND HIP_CXX_FLAGS -Wno-duplicate-decl-specifier)
     list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
-    list(APPEND HIP_CXX_FLAGS -DROCBLAS_FP16=0)
 
     set(HIP_HCC_FLAGS ${HIP_CXX_FLAGS})
     # Ask hcc to generate device code during compilation so we can use
@@ -754,29 +753,21 @@ if(USE_ROCM)
     list(APPEND HIP_HCC_FLAGS -fno-gpu-rdc)
     list(APPEND HIP_HCC_FLAGS -amdgpu-target=${HCC_AMDGPU_TARGET})
 
-    set(Caffe2_HIP_INCLUDES
-      ${hip_INCLUDE_DIRS} ${hcc_INCLUDE_DIRS} ${hsa_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${thrust_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDES})
+    set(Caffe2_HIP_INCLUDE
+      ${hip_INCLUDE_DIRS} ${hcc_INCLUDE_DIRS} ${hsa_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${thrust_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDE})
 
     # This is needed for library added by hip_add_library (same for hip_add_executable)
-    hip_include_directories(${Caffe2_HIP_INCLUDES})
+    hip_include_directories(${Caffe2_HIP_INCLUDE})
 
     set(Caffe2_HIP_DEPENDENCY_LIBS
-      ${rocrand_LIBRARIES} ${hiprand_LIBRARIES} ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES})
-    # Additional libraries required by PyTorch AMD that aren't used by Caffe2 (not in Caffe2's docker image)
-    if(NOT BUILD_ATEN_MOBILE)
-      set(Caffe2_HIP_DEPENDENCY_LIBS ${Caffe2_HIP_DEPENDENCY_LIBS} ${hipsparse_LIBRARIES})
-    endif()
-    # TODO: There is a bug in rocblas's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
-    list(APPEND Caffe2_HIP_DEPENDENCY_LIBS
-      roc::rocblas)
+      ${rocrand_LIBRARIES} ${hiprand_LIBRARIES} ${hipsparse_LIBRARIES} ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES})
 
-    # TODO: Currently pytorch hipify script uses a feature called
-    # "disabled_modules" that effectively ifdef out a file, but
-    # without doing extra processing in the callers, which results in
-    # some unresolved symbols in the shared lib
-    # (libcaffe2_hip.so). Remove this when all disabled_modules are
-    # eliminated.
-    set(CMAKE_EXE_LINKER_FLAGS "-Wl,--unresolved-symbols=ignore-in-shared-libs ${CMAKE_EXE_LINKER_FLAGS}")
+    # Note [rocblas & rocfft cmake bug]
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # TODO: There is a bug in rocblas's & rocfft's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
+    # If you get this wrong, you'll get a complaint like 'ld: cannot find -lrocblas-targets'
+    list(APPEND Caffe2_HIP_DEPENDENCY_LIBS
+      roc::rocblas roc::rocfft)
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()

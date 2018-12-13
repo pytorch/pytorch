@@ -40,22 +40,22 @@
 //      they only bind to Tensor).
 
 
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 
-#include "torch/csrc/Device.h"
-#include "torch/csrc/Dtype.h"
-#include "torch/csrc/DynamicTypes.h"
-#include "torch/csrc/Exceptions.h"
-#include "torch/csrc/Generator.h"
-#include "torch/csrc/autograd/generated/VariableType.h"
-#include "torch/csrc/autograd/python_variable.h"
-#include "torch/csrc/jit/tracer.h"
-#include "torch/csrc/tensor/python_tensor.h"
-#include "torch/csrc/utils/numpy_stub.h"
-#include "torch/csrc/utils/object_ptr.h"
-#include "torch/csrc/utils/python_numbers.h"
-#include "torch/csrc/utils/python_strings.h"
-#include "torch/csrc/autograd/variable.h"
+#include <torch/csrc/Device.h>
+#include <torch/csrc/Dtype.h>
+#include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/Generator.h>
+#include <torch/csrc/autograd/generated/VariableType.h>
+#include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/tensor/python_tensor.h>
+#include <torch/csrc/utils/numpy_stub.h>
+#include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/python_numbers.h>
+#include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/autograd/variable.h>
 
 #include <ATen/ATen.h>
 

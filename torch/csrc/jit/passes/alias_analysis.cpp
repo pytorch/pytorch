@@ -1,6 +1,6 @@
-#include "alias_analysis.h"
+#include <torch/csrc/jit/passes/alias_analysis.h>
 
-#include "torch/csrc/jit/script/error_report.h"
+#include <torch/csrc/jit/script/error_report.h>
 
 namespace torch {
 namespace jit {

@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCUNN.h"
+#define THC_GENERIC_FILE "THCUNN/generic/THCUNN.h"
 #else
 
 #include <ATen/core/Reduction.h>
@@ -473,19 +473,6 @@ THC_API void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
                   THCTensor *gradOutput,
                   THCTensor *gradInput,
                   THCIndexTensor *indices);
-
-THC_API void THNN_(SpatialAdaptiveAveragePooling_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  int osizeW,
-                  int osizeH);
-
-THC_API void THNN_(SpatialAdaptiveAveragePooling_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput);
 
 THC_API void THNN_(SpatialAveragePooling_updateOutput)(
                   THCState *state,

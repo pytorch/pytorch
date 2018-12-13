@@ -1,7 +1,7 @@
 #pragma once
-#include "ATen/Tensor.h"
-#include "torch/csrc/jit/pybind.h"
-#include "ATen/ATen.h"
+#include <ATen/Tensor.h>
+#include <torch/csrc/jit/pybind.h>
+#include <ATen/ATen.h>
 #include <iostream>
 #include <vector>
 

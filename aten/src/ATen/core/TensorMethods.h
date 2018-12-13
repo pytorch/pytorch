@@ -1,11 +1,11 @@
 #pragma once
 
-#include "ATen/core/Tensor.h"
+#include <ATen/core/Tensor.h>
 #include <c10/core/Scalar.h>
 #include <c10/macros/Macros.h>
-#include "ATen/core/SparseTensorRef.h"
-#include "ATen/core/Type.h"
-#include "c10/core/TensorOptions.h"
+#include <ATen/core/SparseTensorRef.h>
+#include <ATen/core/Type.h>
+#include <c10/core/TensorOptions.h>
 
 namespace at {
 
@@ -598,7 +598,7 @@ inline Tensor & Tensor::sqrt_() {
 inline Tensor Tensor::std(bool unbiased) const {
     return type().std(*this, unbiased);
 }
-inline Tensor Tensor::std(int64_t dim, bool unbiased, bool keepdim) const {
+inline Tensor Tensor::std(IntList dim, bool unbiased, bool keepdim) const {
     return type().std(*this, dim, unbiased, keepdim);
 }
 inline Tensor Tensor::prod(ScalarType dtype) const {
