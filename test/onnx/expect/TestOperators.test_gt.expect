@@ -8,6 +8,16 @@ graph {
     output: "2"
     op_type: "Greater"
   }
+  node {
+    input: "2"
+    output: "3"
+    op_type: "Cast"
+    attribute {
+      name: "to"
+      i: 2
+      type: INT
+    }
+  }
   name: "torch-jit-export"
   input {
     name: "0"
@@ -48,7 +58,7 @@ graph {
     }
   }
   output {
-    name: "2"
+    name: "3"
     type {
       tensor_type {
         elem_type: 2
