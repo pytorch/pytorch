@@ -687,8 +687,10 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, scalar_t beta, THCT
         THCTensor_(data)(state, result_) + i * result_->stride(0), ldc);
   }
 #else
+#ifndef __HIP_PLATFORM_HCC__
   cudaDeviceProp* prop = THCState_getCurrentDeviceProperties(state);
   if (prop->major >= 5){
+#endif
 
   THCudaBlas_HgemmStridedBatched(
       state,
@@ -703,6 +705,7 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, scalar_t beta, THCT
       beta,
       THCTensor_(data)(state, result_), ldc, result_->stride(0),
       num_batches);
+#ifndef __HIP_PLATFORM_HCC__
    } else {
       for (int64_t i = 0; i < num_batches; ++i) {
         THCudaBlas_Hgemm(
@@ -719,6 +722,7 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, scalar_t beta, THCT
         THCTensor_(data)(state, result_) + i * result_->stride(0), ldc);
       }
    }
+#endif
 
 #endif
 #endif
