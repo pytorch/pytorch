@@ -276,7 +276,6 @@ CUDA_INCLUDE_MAP = collections.OrderedDict([
     ("cusparse.h", ("hipsparse.h", CONV_INCLUDE, API_RAND)),
     ("cufft.h", ("hipfft.h", CONV_INCLUDE, API_BLAS)),
     ("cufftXt.h", ("hipfft.h", CONV_INCLUDE, API_BLAS)),
-    ("#include <nvfunctional>", ("", CONV_INCLUDE, API_RAND, HIP_UNSUPPORTED)),
 ])
 
 CUDA_IDENTIFIER_MAP = collections.OrderedDict([
