@@ -908,6 +908,12 @@ if USE_CUDA:
             name=str('caffe2.python.caffe2_pybind11_state_gpu'),
             sources=[]),
     )
+if USE_ROCM:
+    extensions.append(
+        Extension(
+            name=str('caffe2.python.caffe2_pybind11_state_hip'),
+            sources=[]),
+    )
 
 cmdclass = {
     'create_version_file': create_version_file,
