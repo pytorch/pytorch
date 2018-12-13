@@ -42,7 +42,7 @@ static inline THGenerator* get_generator(at::Generator* gen) {
 
 namespace {
 
-#ifndef __CUDA_ARCH__
+#if !defined(__CUDA_ARCH__) && !defined(__HIP_PLATFORM_HCC__)
 // we cannot use std::isnan directly due to some incompatibility of
 // gcc constexpr'ing and nvcc
 #define isnan std::isnan
