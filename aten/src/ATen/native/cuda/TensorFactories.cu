@@ -1,7 +1,9 @@
 #include <ATen/ATen.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/native/TensorFactories.h>
 #include <c10/util/Exception.h>
 
 #include <THC/THCGeneral.h>
@@ -13,6 +15,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cmath>
 
 namespace at {
 namespace native {
@@ -99,6 +102,201 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
   }
 
   return result;
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangle ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+namespace {
+// f: the number of elements in the first row of the trapezoid.
+// x: the index of the target coordinates ordered by row and then column.
+// Assume x corresponding to coordinates (row, col) in the trapezoid, where
+// row and col start from 0, then we have:
+//     (f + f + row - 1) * row / 2 <= x < (f + f + row) * (row + 1) / 2.    [*]
+// Therefore, row is the maximum integer satisfying the following inequality:
+//              (row + 2f - 1)row <= 2x
+//         row^2 + (2f-1)row - 2x <= 0.
+// Based on the formula of root, we have:
+// a = 1
+// b = 2f - 1
+// c = -2x
+// Use the root on the right, intuitively because it is where the left-hand side
+// formular flips from negative to positive. Full proof can be derived from the
+// second inequality in [*].
+// row = floor((-b + sqrt(b^2 - 4c)) / 2)
+// col = x - (f + f + row - 1) * row / 2
+__device__
+inline void get_coordinate_in_tril_trapezoid(
+    int64_t f, int64_t x, int64_t & row, int64_t & col) {
+  f <<= 1;
+  auto b = f - 1;
+  auto c = - (x << 1);
+  row = (int64_t)floorf((-b + sqrtf((float)(b * b - 4 * c))) / 2);
+  col = x - ((f + row - 1) * row >> 1);
+}
+
+// f: the number of elements in the first row of the bottom trapezoid.
+// x: the index of the target coordinates ordered by row and then column.
+// Note that in triu, the trapezoid is upside down.
+// Assume x corresponding to coordinates (row, col) in the trapezoid, where
+// row and col start from 0, then we have:
+//     (f + f - row + 1) * row / 2 <= x < (f + f - row) * (row + 1) / 2.    [*]
+// Therefore, row is the maximum integer satisfying the following inequality:
+//              (-row + 2f + 1)row <= 2x
+//          row^2 - (2f+1)row + 2x >= 0.
+// Based on the formula of root, we have:
+// a = 1
+// b = -1 - 2f
+// c = 2x
+// Use the root on the left, intuitively because it is where the left-hand side
+// formular flips from positive to negative. Full proof can be derived from the
+// second inequality in [*].
+// row = floor((-b - sqrt(b^2 - 4c)) / 2)
+// col = x - (f + f - row + 1) * row / 2
+__device__
+inline void get_coordinate_in_triu_trapezoid(
+    int64_t f, int64_t x, int64_t & row, int64_t & col) {
+  f <<= 1;
+  auto b = -1 - f;
+  auto c = x << 1;
+  row = (int64_t)floorf((-b - sqrtf((float)(b * b - 4 * c))) / 2);
+  col = x - ((f - row + 1) * row >> 1) + row;
+}
+
+} // namespace
+
+template <typename scalar_t>
+__global__
+void tril_indices_kernel(scalar_t * tensor,
+                         int64_t row_offset,
+                         int64_t m_first_row,
+                         int64_t col,
+                         int64_t trapezoid_size,
+                         int64_t tril_size) {
+  int64_t linear_index = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (linear_index < tril_size) {
+    int64_t r, c;
+    if (linear_index < trapezoid_size) {
+      get_coordinate_in_tril_trapezoid(m_first_row, linear_index, r, c);
+    } else {
+      auto surplus = linear_index - trapezoid_size;
+      // add trapezoid height: m_last_row (col) - m_first_row + 1
+      r = surplus / col + col - m_first_row + 1;
+      c = surplus % col;
+    }
+    r += row_offset;
+
+    tensor[linear_index] = r;
+    tensor[linear_index + tril_size] = c;
+  }
+}
+
+Tensor tril_indices_cuda(
+    int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
+  check_args(row, col, options);
+
+  auto tril_size = get_tril_size(row, col, offset);
+  auto tensor = empty_cuda({2, tril_size}, options);
+
+  if (tril_size > 0) {
+    auto m_first_row = offset > 0 ?
+      std::min<int64_t>(col, 1 + offset) : // upper bounded by col
+      row + offset > 0; // either 0 or 1
+    auto trapezoid_row_offset = std::max<int64_t>(0, -offset);
+    auto rectangle_row_offset = trapezoid_row_offset + col - m_first_row + 1;
+    int64_t rectangle_size = 0;
+    if (rectangle_row_offset < row) {
+      rectangle_size = (row - rectangle_row_offset) * col;
+    }
+
+    dim3 dim_block = cuda::getApplyBlock();
+    dim3 dim_grid;
+    // using tril_size instead of tensor.numel(), as each thread takes care of
+    // two elements in the tensor.
+    AT_CHECK(
+      cuda::getApplyGrid(tril_size, dim_grid, tensor.get_device()),
+      "unable to get dim grid");
+
+    AT_DISPATCH_ALL_TYPES_AND_HALF(tensor.type(), "tril_indices_cuda", [&] {
+      tril_indices_kernel<<<
+          dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+        tensor.data<scalar_t>(),
+        trapezoid_row_offset,
+        m_first_row,
+        col,
+        tril_size - rectangle_size,
+        tril_size);
+    });
+  }
+
+  return tensor;
+}
+
+template <typename scalar_t>
+__global__
+void triu_indices_kernel(scalar_t * tensor,
+                         int64_t col_offset,
+                         int64_t m_first_row,
+                         int64_t col,
+                         int64_t rectangle_size,
+                         int64_t triu_size) {
+  int64_t linear_index = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (linear_index < triu_size) {
+    int64_t r, c;
+    if (linear_index < rectangle_size) {
+      r = linear_index / col;
+      c = linear_index % col;
+    } else {
+      get_coordinate_in_triu_trapezoid(
+        m_first_row, linear_index - rectangle_size, r, c);
+      r += rectangle_size / col;
+    }
+
+    c += col_offset;
+    tensor[linear_index] = r;
+    tensor[linear_index + triu_size] = c;
+  }
+}
+
+Tensor triu_indices_cuda(
+    int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
+  check_args(row, col, options);
+
+  auto triu_size = row * col - get_tril_size(row, col, offset - 1);
+  auto tensor = empty_cuda({2, triu_size}, options);
+
+  if (triu_size > 0) {
+    auto m_first_row = offset > 0 ?
+      std::max<int64_t>(col - offset, 0) : // upper bounded by col
+      col;
+
+    int64_t rectangle_size = 0;
+    if (offset < 0) {
+      rectangle_size = std::min<int64_t>(row, -offset) * col;
+    }
+
+    dim3 dim_block = cuda::getApplyBlock();
+    dim3 dim_grid;
+    // using triu_size instead of tensor.numel(), as each thread takes care of
+    // two elements in the tensor.
+    AT_CHECK(
+      cuda::getApplyGrid(triu_size, dim_grid, tensor.get_device()),
+      "unable to get dim grid");
+
+    AT_DISPATCH_ALL_TYPES_AND_HALF(tensor.type(), "triu_indices_cuda", [&] {
+      triu_indices_kernel<<<
+          dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+        tensor.data<scalar_t>(),
+        std::max<int64_t>(0, offset),
+        m_first_row,
+        col,
+        rectangle_size,
+        triu_size);
+    });
+  }
+
+  return tensor;
 }
 
 }} // namespace at::native

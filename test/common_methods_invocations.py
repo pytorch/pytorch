@@ -822,6 +822,76 @@ def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwarg
     kwargs_out = {k: map_arg(v) for k, v in call_kwargs.items()} if call_kwargs else {}
     return args_out, kwargs_out
 
+# (
+#   row
+#   col
+#   offset (optional)
+#   dtype (optional)
+# )
+tri_tests_args = [
+    (1, 1),
+    (3, 3),
+    (3, 3, 1),
+    (3, 3, 2),
+    (3, 3, 200),
+    (3, 3, -1),
+    (3, 3, -2),
+    (3, 3, -200),
+    (0, 3, 0),
+    (0, 3, 1),
+    (0, 3, -1),
+    (3, 0, 0),
+    (3, 0, 1),
+    (3, 0, -1),
+    (0, 0, 0),
+    (0, 0, 1),
+    (0, 0, -1),
+    (3, 6, 0),
+    (3, 6, 1),
+    (3, 6, 3),
+    (3, 6, 9),
+    (3, 6, -1),
+    (3, 6, -3),
+    (3, 6, -9),
+    (6, 3, 0),
+    (6, 3, 1),
+    (6, 3, 3),
+    (6, 3, 9),
+    (6, 3, -1),
+    (6, 3, -3),
+    (6, 3, -9),
+    (258, 253, 1, torch.float32),
+    (257, 258, 1, torch.float64),
+    (258, 258, 1, torch.short),
+    (3, 513, 1, torch.long),
+    (513, 3, 1, torch.int),
+    (513, 0, 1, torch.double)
+]
+
+
+def run_additional_tri_tests(self, device):
+    x = torch.ones(
+        3, 3, dtype=torch.long, device=device, layout=torch.strided)
+    l = x.tril(0).nonzero().transpose(0, 1)
+    u = x.triu(0).nonzero().transpose(0, 1)
+    self.assertEqual(l, torch.tril_indices(3, 3, device=device))
+    self.assertEqual(
+        l, torch.tril_indices(3, 3, device=device, layout=torch.strided))
+
+    self.assertEqual(u, torch.triu_indices(3, 3, device=device))
+    self.assertEqual(
+        u, torch.triu_indices(3, 3, device=device, layout=torch.strided))
+
+    self.assertRaises(
+        RuntimeError,
+        lambda: torch.triu_indices(
+            1, 1, device=device, layout=torch.sparse_coo))
+
+    self.assertRaises(
+        RuntimeError,
+        lambda: torch.tril_indices(
+            1, 1, device=device, layout=torch.sparse_coo))
+
 
 def unpack_variables(args):
     if isinstance(args, tuple):
