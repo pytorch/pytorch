@@ -2387,10 +2387,13 @@ private:
         continue;
       }
       auto index = emitExpr(subscript_expr);
+      std::cout<<"subscript expr: " << subscript_expr;
       if (index->type() == IntType::get()) {
         sliceable = emitSelect(loc, sliceable, dim, index);
+        ++dim;
         continue;
       } else if (index->type()->isSubtypeOf(DynamicType::get())) {
+        std::cout<<"index type is dynamic, handling tensor"<< std::endl;
         handle_tensor(index);
         continue;
       }
@@ -2402,6 +2405,7 @@ private:
     // Convert NULL tensorIndices to undefined tensors to pass to at::index.
     for (auto& index : tensor_indices) {
       if (index == nullptr) {
+        std::cout<<"index null detected!" << std::endl;
         index = graph->insertNode(graph->createUndefined())->output();
       }
     }

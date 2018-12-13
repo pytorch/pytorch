@@ -706,11 +706,12 @@ struct PythonPrintPass {
               return false;
             });
 
-        if (all_usable_schema) {
-          stmt << "None";
-        } else {
-          stmt << "annotate(" << node->output()->type()->python_str() << ", None)";
-        }
+        stmt << "None";
+        //if (all_usable_schema) {
+          //stmt << "None";
+        //} else {
+          //stmt << "annotate(" << node->output()->type()->python_str() << ", None)";
+        //}
       } break;
       case prim::ImplicitTensorToNum: {
         stmt << "annotate(" << node->output()->type()->python_str() << ", "

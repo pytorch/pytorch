@@ -3392,6 +3392,7 @@ a")
         scope = {}
         exec(code_str, globals(), scope)
         cu = torch.jit.CompilationUnit(code_str)
+        print(cu.func.graph)
         self.assertEqual(cu.func(*inputs), scope[fn_name](*inputs))
 
     @unittest.skipIf(not RUN_CUDA, 'no CUDA')
@@ -3635,6 +3636,8 @@ a")
 
         for expr, argdict in to_check:
             tensordict = {k: torch.tensor(v) for (k, v) in argdict.items()}
+            print(expr)
+            print(tensordict)
             check_indexing(expr, inp, **tensordict)
 
     def test_keyword(self):
