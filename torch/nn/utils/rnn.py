@@ -4,7 +4,8 @@ import warnings
 import torch
 
 
-PackedSequence_ = namedtuple('PackedSequence', ['data', 'batch_sizes'])
+PackedSequence_ = namedtuple('PackedSequence',
+                             ['data', 'batch_sizes', 'sorted_indices', 'unsorted_indices'])
 
 
 class PackedSequence(PackedSequence_):
@@ -28,65 +29,84 @@ class PackedSequence(PackedSequence_):
             information about the batch size at each sequence step
 
     """
-    def __new__(cls, data, batch_sizes=None):
+    def __new__(cls, data, batch_sizes=None, sorted_indices=None, unsorted_indices=None):
         # PackedSequence used to only have __init__(self, data, batch_sizes)
         # without a __new__ like this. So to preserve BC for calling in keyword
         # arg style (e.g., `PackedSequence(data=..., batch_sizes=...)`), we have
         # to provide two arguments with exact names `data` and `batch_sizes`.
-        #
-        # support being called as `PackedSequence(data, batch_sizes)`
+
+        # NB: if unsorted_indices is provided, it should be the inverse permutation
+        # to sorted_indices. Don't assert it here because the PackedSequence ctor
+        # should only be used internally.
+        if unsorted_indices is None:
+            unsorted_indices = invert_permutation(sorted_indices)
+
+        # support being called as `PackedSequence(data, batch_sizes, sorted_indices)`
         if batch_sizes is not None:
-            return super(PackedSequence, cls).__new__(cls, data, batch_sizes)
-        # support being called as `PackedSequence((data, batch_sizes))`
+            return super(PackedSequence, cls).__new__(
+                cls, data, batch_sizes, sorted_indices, unsorted_indices)
+
+        # support being called as `PackedSequence((data, batch_sizes), *, sorted_indices)`
         else:
             assert isinstance(data, (list, tuple)) and len(data) == 2
-            return super(PackedSequence, cls).__new__(cls, *data)
+            return super(PackedSequence, cls).__new__(
+                cls, data[0], data[1], sorted_indices)
 
     def cuda(self, *args, **kwargs):
         """Returns a GPU copy if `self.data` not already on the GPU"""
         if self.is_cuda:
             return self
         else:
-            return type(self)(self.data.cuda(*args, **kwargs), self.batch_sizes)
+            return type(self)(self.data.cuda(*args, **kwargs), self.batch_sizes,
+                              self.sorted_indices, self.unsorted_indices)
 
     def cpu(self):
         """Returns a CPU copy if `self.data` not already on the CPU"""
         if self.is_cuda:
-            return type(self)(self.data.cpu(), self.batch_sizes)
+            return type(self)(self.data.cpu(), self.batch_sizes,
+                              self.sorted_indices, self.unsorted_indices)
         else:
             return self
 
     def double(self):
         r"""Returns copy with `self.data` cast to double type"""
-        return type(self)(self.data.double(), self.batch_sizes)
+        return type(self)(self.data.double(), self.batch_sizes,
+                          self.sorted_indices, self.unsorted_indices)
 
     def float(self):
         r"""Returns copy with `self.data` cast to float type"""
-        return type(self)(self.data.float(), self.batch_sizes)
+        return type(self)(self.data.float(), self.batch_sizes,
+                          self.sorted_indices, self.unsorted_indices)
 
     def half(self):
         r"""Returns copy with `self.data` cast to half type"""
-        return type(self)(self.data.half(), self.batch_sizes)
+        return type(self)(self.data.half(), self.batch_sizes,
+                          self.sorted_indices, self.unsorted_indices)
 
     def long(self):
         r"""Returns copy with `self.data` cast to long type"""
-        return type(self)(self.data.long(), self.batch_sizes)
+        return type(self)(self.data.long(), self.batch_sizes,
+                          self.sorted_indices, self.unsorted_indices)
 
     def int(self):
         r"""Returns copy with `self.data` cast to int type"""
-        return type(self)(self.data.int(), self.batch_sizes)
+        return type(self)(self.data.int(), self.batch_sizes,
+                          self.sorted_indices, self.unsorted_indices)
 
     def short(self):
         r"""Returns copy with `self.data` cast to short type"""
-        return type(self)(self.data.short(), self.batch_sizes)
+        return type(self)(self.data.short(), self.batch_sizes,
+                          self.sorted_indices, self.unsorted_indices)
 
     def char(self):
         r"""Returns copy with `self.data` cast to char type"""
-        return type(self)(self.data.char(), self.batch_sizes)
+        return type(self)(self.data.char(), self.batch_sizes,
+                          self.sorted_indices, self.unsorted_indices)
 
     def byte(self):
         r"""Returns copy with `self.data` cast to byte type"""
-        return type(self)(self.data.byte(), self.batch_sizes)
+        return type(self)(self.data.byte(), self.batch_sizes,
+                          self.sorted_indices, self.unsorted_indices)
 
     def to(self, *args, **kwargs):
         r"""Performs dtype and/or device conversion on `self.data`.
@@ -103,7 +123,8 @@ class PackedSequence(PackedSequence_):
         if data is self.data:
             return self
         else:
-            return type(self)(data, self.batch_sizes)
+            return type(self)(data, self.batch_sizes,
+                              self.sorted_indices, self.unsorted_indices)
 
     @property
     def is_cuda(self):
@@ -111,7 +132,15 @@ class PackedSequence(PackedSequence_):
         return self.data.is_cuda
 
 
-def pack_padded_sequence(input, lengths, batch_first=False):
+def invert_permutation(permutation):
+    if permutation is None:
+        return None
+    output = torch.empty_like(permutation)
+    output.scatter_(0, permutation, torch.arange(0, permutation.numel()))
+    return output
+
+
+def pack_padded_sequence(input, lengths, batch_first=False, enforce_sorted=False):
     r"""Packs a Tensor containing padded sequences of variable length.
 
     Input can be of size ``T x B x *`` where `T` is the length of the longest sequence
@@ -119,9 +148,10 @@ def pack_padded_sequence(input, lengths, batch_first=False):
     dimensions (including 0). If ``batch_first`` is True ``B x T x *`` inputs are
     expected.
 
-    The sequences should be sorted by length in a decreasing order, i.e.
-    ``input[:,0]`` should be the longest sequence, and ``input[:,B-1]`` the
-    shortest one.
+    If ``enforce_sorted`` is ``True``, the sequences should be sorted by length in
+    a decreasing order, i.e. ``input[:,0]`` should be the longest sequence, and
+    ``input[:,B-1]`` the shortest one. ``enforce_sorted = True`` is only necessary
+    for ONNX export.
 
     Note:
         This function accepts any input that has at least two dimensions. You
@@ -134,6 +164,9 @@ def pack_padded_sequence(input, lengths, batch_first=False):
         lengths (Tensor): list of sequences lengths of each batch element.
         batch_first (bool, optional): if ``True``, the input is expected in ``B x T x *``
             format.
+        enforce_sorted (bool, optional): if ``True``, the input is expected to
+            contain sequences sorted by length in a decreasing order. If
+            ``False``, this condition is not checked. Default: ``False``.
 
     Returns:
         a :class:`PackedSequence` object
@@ -145,7 +178,16 @@ def pack_padded_sequence(input, lengths, batch_first=False):
                       'the trace incorrect for any other combination of lengths.',
                       category=torch.jit.TracerWarning, stacklevel=2)
     lengths = torch.as_tensor(lengths, dtype=torch.int64)
-    return PackedSequence(torch._C._VariableFunctions._pack_padded_sequence(input, lengths, batch_first))
+    if enforce_sorted:
+        sorted_indices = None
+    else:
+        lengths, sorted_indices = torch.sort(lengths, descending=True)
+        batch_dim = 0 if batch_first else 1
+        input = input.index_select(batch_dim, sorted_indices)
+
+    data, batch_sizes = \
+        torch._C._VariableFunctions._pack_padded_sequence(input, lengths, batch_first)
+    return PackedSequence(data, batch_sizes, sorted_indices)
 
 
 def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_length=None):
@@ -189,8 +231,13 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_le
                              "total_length={} and max sequence length being {}"
                              .format(total_length, max_seq_length))
         max_seq_length = total_length
-    return torch._C._VariableFunctions._pad_packed_sequence(
+    padded_output, lengths = torch._C._VariableFunctions._pad_packed_sequence(
         sequence.data, sequence.batch_sizes, batch_first, padding_value, max_seq_length)
+    if sequence.unsorted_indices is not None:
+        batch_dim = 0 if batch_first else 1
+        return padded_output.index_select(batch_dim, sequence.unsorted_indices), \
+            lengths.index_select(0, sequence.unsorted_indices)
+    return padded_output, lengths
 
 
 def pad_sequence(sequences, batch_first=False, padding_value=0):
@@ -252,12 +299,17 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
     return out_tensor
 
 
-def pack_sequence(sequences):
+def pack_sequence(sequences, enforce_sorted=False):
     r"""Packs a list of variable length Tensors
 
     ``sequences`` should be a list of Tensors of size ``L x *``, where `L` is
     the length of a sequence and `*` is any number of trailing dimensions,
-    including zero. They should be sorted in the order of decreasing length.
+    including zero.
+
+    If ``enforce_sorted`` is ``true``, they should be sorted in the order of
+    decreasing length. ``enforce_sorted = True`` is only necessary for ONNX
+    export.
+
 
     Example:
         >>> from torch.nn.utils.rnn import pack_sequence
@@ -270,8 +322,12 @@ def pack_sequence(sequences):
 
     Arguments:
         sequences (list[Tensor]): A list of sequences of decreasing length.
+        enforce_sorted (bool, optional): if ``True``, checks that the input
+            contains sequences sorted by length in a decreasing order. If
+            ``False``, this condition is not checked. Default: ``False``.
 
     Returns:
         a :class:`PackedSequence` object
     """
-    return pack_padded_sequence(pad_sequence(sequences), [v.size(0) for v in sequences])
+    lengths = [v.size(0) for v in sequences]
+    return pack_padded_sequence(pad_sequence(sequences), lengths, enforce_sorted=enforce_sorted)

@@ -1804,7 +1804,8 @@ class TestJit(JitTestCase):
                     self.rnn = clazz
 
                 def forward(self, x, lengths, h0):
-                    packed = torch.nn.utils.rnn.pack_padded_sequence(x, lengths)
+                    packed = torch.nn.utils.rnn.pack_padded_sequence(
+                        x, lengths, enforce_sorted=True)
                     out, h = self.rnn(packed, h0)
                     padded_outs, _ = torch.nn.utils.rnn.pad_packed_sequence(out)
                     return padded_outs
@@ -1827,7 +1828,8 @@ class TestJit(JitTestCase):
 
             def forward(self, x, lengths, hiddens):
                 h0, c0 = hiddens
-                packed = torch.nn.utils.rnn.pack_padded_sequence(x, lengths)
+                packed = torch.nn.utils.rnn.pack_padded_sequence(
+                    x, lengths, enforce_sorted=True)
                 out, (h, c) = self.rnn(packed, (h0, c0))
                 padded_outs, _ = torch.nn.utils.rnn.pad_packed_sequence(out)
                 return padded_outs
@@ -5210,7 +5212,7 @@ a")
                 super(PadPackedWrapper, self).__init__()
 
             def forward(self, x, seq_lens):
-                x = pack_padded_sequence(x, seq_lens)
+                x = pack_padded_sequence(x, seq_lens, enforce_sorted=True)
                 x, _ = pad_packed_sequence(x)
                 return x
 
