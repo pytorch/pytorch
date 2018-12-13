@@ -431,6 +431,13 @@ struct OperatorRegistry {
       return it->second;
     return empty;
   }
+
+  const OperatorMap getAllOperators() {
+    std::lock_guard<std::mutex> guard(lock);
+    registerPendingOperators();
+    return operators;
+  }
+
 };
 
 OperatorRegistry& getRegistry() {
@@ -458,7 +465,11 @@ const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name) {
   return getRegistry().getOperators(name);
 }
 
-Operator& sig(const char* signature) {
+const OperatorMap getAllOperators() {
+  return getRegistry().getAllOperators();
+}
+
+Operator& sig(const char *signature) {
   return *getRegistry().lookupByLiteral(signature);
 }
 

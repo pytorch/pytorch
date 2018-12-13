@@ -94,6 +94,10 @@ TORCH_API std::string canonicalSchemaString(const FunctionSchema& schema);
 
 TORCH_API const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(
     Symbol name);
+
+// returns a copy of the operator map
+TORCH_API const std::unordered_map<Symbol, std::vector<std::shared_ptr<Operator>>> getAllOperators();
+
 std::shared_ptr<Operator> findOperatorFor(const Node* node);
 const Operator& getOperatorFor(const Node* node);
 
