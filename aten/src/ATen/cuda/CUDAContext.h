@@ -80,7 +80,7 @@ struct CAFFE2_API CUDAP2PState {
     if (p2p_enable_status && src_device != target_device) {
       auto current_device = c10::cuda::current_device();
       c10::cuda::set_device(src_device);
-      AT_CUDA_CHECK(cudaDeviceDisablePeerAccess(target_device));
+      cudaDeviceDisablePeerAccess(target_device);
       c10::cuda::set_device(current_device);
     }
   }
