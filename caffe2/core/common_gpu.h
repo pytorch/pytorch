@@ -25,8 +25,7 @@
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
 
-#include <c10/cuda/CUDAMathCompat.h>
-#include <c10/cuda/CUDAGuard.h>
+#include "c10/cuda/CUDAMathCompat.h"
 
 // Defines CAFFE2_CUDA_EXPORT and CAFFE2_CUDA_IMPORT. On Windows, this
 // corresponds to different declarations (dllexport and dllimport). On
@@ -334,7 +333,21 @@ inline int CAFFE_GET_BLOCKS(const int N) {
       1);
 }
 
-using CUDAGuard = c10::cuda::CUDAGuard;
+class DeviceGuard {
+ public:
+  explicit DeviceGuard(int newDevice) : previous_(CaffeCudaGetDevice()) {
+    if (previous_ != newDevice) {
+      CaffeCudaSetDevice(newDevice);
+    }
+  }
+
+  ~DeviceGuard() noexcept {
+    CaffeCudaSetDevice(previous_);
+  }
+
+ private:
+  int previous_;
+};
 
 template <typename T, int N>
 struct SimpleArray {

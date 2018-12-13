@@ -5,11 +5,13 @@
 #include <torch/csrc/jit/type.h>
 #include <torch/csrc/jit/code_template.h>
 #include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/fuser/kernel_cache.h>
 #include <torch/csrc/jit/fuser/codegen.h>
 #include <torch/csrc/jit/fuser/tensor_desc.h>
+#include "torch/csrc/jit/fuser/interface.h"
 
 #if USE_CUDA_FUSER
   #include <torch/csrc/jit/fuser/cuda/fused_kernel.h>
@@ -132,16 +134,23 @@ static void upfrontCompilation(KernelSpec& spec) {
 }
 
 int64_t registerFusion(const Node* fusion_group) {
-  // Creates and stores the FusionSpec
-  auto graph = fusion_group->g(attr::Subgraph)->copy();
-  EraseShapeInformation(graph);
-  const auto key = store(graph);
+  auto graph = normalizeGraphForCache(fusion_group->g(attr::Subgraph));
 
-  if (canFuseOnCPU() || canFuseOnGPU()) {
-    const auto maybe_spec = retrieve(key);
-    JIT_ASSERT(maybe_spec);
-    upfrontCompilation(**maybe_spec);
+  // Don't re-register the fusion if we can use a pre-existing one
+  const auto maybe_spec = lookupGraph(graph);
+  if (maybe_spec) {
+    return (*maybe_spec)->key();
   }
+
+  // Unconditionally create and register the fusion
+  // This is necessary to support our global disable fusions flag: if someone
+  // runs some code under no-fusions mode and then runs some code with fusions
+  // enabled, the second time around the returned spec from the cache should
+  // be a valid spec (must have had upfrontCompilation run on it).
+  const auto key = store(graph);
+  const auto maybe_retrieved_spec = retrieve(key);
+  JIT_ASSERT(maybe_retrieved_spec);
+  upfrontCompilation(**maybe_retrieved_spec);
 
   return key;
 }

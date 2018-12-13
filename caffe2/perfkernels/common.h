@@ -1,3 +1,9 @@
+// !!!! PLEASE READ !!!!
+// Minimize (transitively) included headers from _avx*.cc because some of the
+// functions defined in the headers compiled with platform dependent compiler
+// options can be reused by other translation units generating illegal
+// instruction run-time error.
+
 // Common utilities for writing performance kernels and easy dispatching of
 // different backends.
 /*

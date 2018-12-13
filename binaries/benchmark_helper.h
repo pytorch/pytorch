@@ -22,6 +22,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/utils/string_utils.h"
 #include "c10/util/string_utils.h"
 
 using std::map;
