@@ -8,6 +8,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #define HANDLE_TH_ERRORS                                                       \
   try {
@@ -121,7 +122,7 @@ struct IndexError : public PyTorchError {
 
 // Translates to Python TypeError
 struct TypeError : public PyTorchError {
-  TypeError(const char *format, ...);
+  TORCH_API TypeError(const char *format, ...);
   PyObject* python_type() override {
     return PyExc_TypeError;
   }
