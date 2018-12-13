@@ -57,7 +57,7 @@ from torch.distributions.transforms import (AbsTransform, AffineTransform,
                                             SoftmaxTransform,
                                             StickBreakingTransform,
                                             identity_transform)
-from torch.distributions.utils import _finfo, probs_to_logits, lazy_property
+from torch.distributions.utils import probs_to_logits, lazy_property
 from torch.nn.functional import softmax
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -3480,7 +3480,7 @@ class TestNumericalStability(TestCase):
             self._test_pdf_score(dist_class=Bernoulli,
                                  probs=tensor_type([0]),
                                  x=tensor_type([1]),
-                                 expected_value=tensor_type([_finfo(tensor_type([])).eps]).log(),
+                                 expected_value=tensor_type([torch.finfo(tensor_type([]).dtype).eps]).log(),
                                  expected_gradient=tensor_type([0]))
 
             self._test_pdf_score(dist_class=Bernoulli,
