@@ -468,13 +468,14 @@ struct Module {
       parameter_remap[kv.value().slot()] = retval->parameter_slot(kv.key());
     }
     for (auto &kv : modules) {
-      NamedModule nm;
-      nm.name = kv.key();
-      nm.module = kv.value().module->copy();
-      retval->modules[kv.key()] = nm;
+      retval->register_module(kv.key(), kv.value().module->copy());
     }
     for (auto &kv : methods) {
-      retval->create_method(kv.key(), kv.value()->graph()->copy(), {});
+      std::vector<at::Tensor*> params;
+      for (auto &p : kv.value()->params()) {
+        params.push_back(parameter_remap[p]);
+      }
+      retval->create_method(kv.key(), kv.value()->graph()->copy(), params);
     }
     return retval;
   }

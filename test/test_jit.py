@@ -7130,7 +7130,16 @@ a")
         # Test that we preserve the module hierarchy for a ScriptModule
         # submodule during tracing
 
+        class AnotherScriptMod(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def bar(self):
+                return torch.zeros(4, 5)
+
         class SomeScriptMod(torch.jit.ScriptModule):
+            def __init__(self):
+                super(SomeScriptMod, self).__init__()
+                self.asm = AnotherScriptMod()
+
             @torch.jit.script_method
             def foo(self):
                 return torch.zeros(3, 4)
@@ -7151,6 +7160,7 @@ a")
         assert(traced.ssm._has_method('foo'))
         imported = self.getExportImportCopy(traced)
         assert(imported.ssm._has_method('foo'))
+        assert(imported.ssm.asm._has_method('bar'))
 
     def test_call_traced_module_from_traced_module(self):
         class TracedModule1(torch.nn.Module):
