@@ -9,6 +9,13 @@ using LongTensor = Tensor;
 using IntTensor = Tensor;
 using SparseType = Type;
 
+enum class CoalesceReductionType : std::uint8_t {
+  SUM = 0,
+  MAX,
+  MIN,
+};
+
+
 // This is an internal utility function for getting at the SparseTensorImpl,
 // so that we can write sparse tensor specific accessors for special fields
 // in SparseTensor.  You should only use this for writing low level

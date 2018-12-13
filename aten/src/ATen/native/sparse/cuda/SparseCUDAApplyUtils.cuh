@@ -280,10 +280,10 @@ __global__ void indexSparseIntersectionKernel(
 
 template <typename scalar_t>
 __global__ void coalesce_sum_kernel(
-  int64_t *segment_offsets,
-  int64_t *value_indices,
-  scalar_t *values,
-  scalar_t *newValues,
+  int64_t* segment_offsets,
+  int64_t* value_indices,
+  scalar_t* values,
+  scalar_t* newValues,
   int64_t nnz,
   int64_t newNnz,
   int64_t stride
@@ -328,10 +328,11 @@ __global__ void coalesce_sum_kernel(
 
 template <typename scalar_t, typename func_t>
 __device__ void coalesce_values_max_min_kernel(
-  int64_t *segment_offsets,
-  int64_t *value_indices,
-  scalar_t *values,
-  scalar_t *newValues,
+  int64_t* segment_offsets,
+  int64_t* value_indices,
+  int64_t* reduction_indices,
+  scalar_t* values,
+  scalar_t* newValues,
   int64_t nnz,
   int64_t newNnz,
   int64_t stride,
@@ -350,6 +351,8 @@ __device__ void coalesce_values_max_min_kernel(
     const int startFeature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
     scalar_t tmp[SZ];
     int is_filled[SZ];
+    int reduced_from[SZ];
+
     #pragma unroll
     for (int ii = 0; ii < SZ; ii++) {
       is_filled[ii] = 0;
@@ -368,7 +371,7 @@ __device__ void coalesce_values_max_min_kernel(
             is_filled[ii] = 1;
           }
           else {
-            tmp[ii] = op(tmp[ii], static_cast<scalar_t>(values[valueRow + featureDim]));
+            op(tmp, ii, static_cast<scalar_t>(values[valueRow + featureDim]), reduced_from, row);
           }
         }
       }
@@ -378,33 +381,50 @@ __device__ void coalesce_values_max_min_kernel(
       int featureDim = startFeature + ii * WARP_SIZE;
       if (featureDim < stride){
         newValues[newValueRow + featureDim] = static_cast<scalar_t>(tmp[ii]);
+        reduction_indices[newValueRow + featureDim] = static_cast<int64_t>(reduced_from[ii]);
       }
     }
   }
 }
 
 template <typename scalar_t>
-__device__ __forceinline__ scalar_t coalesce_max_op(scalar_t a, scalar_t b) {
-  return a > b ? a : b;
+__device__ __forceinline__ void coalesce_max_op(scalar_t* a, int i, scalar_t b, int* reduced_from, int row) {
+  if (b > a[i]) {
+    a[i] = b;
+    reduced_from[i] = row;
+  }
 }
 
 template <typename scalar_t>
-__global__ void coalesce_max_kernel(int64_t *segment_offsets, int64_t *value_indices, scalar_t *values,
-                                    scalar_t *newValues, int64_t nnz, int64_t newNnz, int64_t stride) {
-  coalesce_values_max_min_kernel(segment_offsets, value_indices, values, newValues, nnz, newNnz, stride,
-                         coalesce_max_op<scalar_t>);
+__device__ __forceinline__ void coalesce_min_op(scalar_t* a, int i, scalar_t b, int* reduced_from, int row) {
+  if (b < a[i]) {
+    a[i] = b;
+    reduced_from[i] = row;
+  }
 }
 
 template <typename scalar_t>
-__device__ __forceinline__ scalar_t coalesce_min_op(scalar_t a, scalar_t b) {
-  return a < b ? a : b;
+__global__ void coalesce_max_kernel(
+  int64_t* segment_offsets, int64_t* value_indices, int64_t* reduction_indices, scalar_t* values,
+  scalar_t* newValues, int64_t nnz, int64_t newNnz, int64_t stride
+) {
+  coalesce_values_max_min_kernel(
+    segment_offsets, value_indices, reduction_indices,
+    values, newValues, nnz, newNnz, stride,
+    coalesce_max_op<scalar_t>
+  );
 }
 
 template <typename scalar_t>
-__global__ void coalesce_min_kernel(int64_t *segment_offsets, int64_t *value_indices, scalar_t *values,
-                                    scalar_t *newValues, int64_t nnz, int64_t newNnz, int64_t stride) {
-  coalesce_values_max_min_kernel(segment_offsets, value_indices, values, newValues, nnz, newNnz, stride,
-                         coalesce_min_op<scalar_t>);
+__global__ void coalesce_min_kernel(
+  int64_t* segment_offsets, int64_t* value_indices, int64_t* reduction_indices, scalar_t* values,
+  scalar_t* newValues, int64_t nnz, int64_t newNnz, int64_t stride
+) {
+  coalesce_values_max_min_kernel(
+    segment_offsets, value_indices, reduction_indices,
+    values, newValues, nnz, newNnz, stride,
+    coalesce_min_op<scalar_t>
+  );
 }
 
 } // namespace apply

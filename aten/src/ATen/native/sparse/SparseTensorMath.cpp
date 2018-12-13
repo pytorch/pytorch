@@ -1008,7 +1008,10 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
       grad_input_values = grad_input_values.expand(dense_expand_size);
     }
     grad_input_values = grad_input_values.expand(expand_size).clone();
-    return at::_sparse_coo_tensor_with_dims_and_tensors(input_sparse_dim, input_dense_dim, input_sizes, input_indices.clone(), grad_input_values, input.options().dtype(grad_.dtype())); // convert to grad dtype
+    return at::_sparse_coo_tensor_with_dims_and_tensors(
+      input_sparse_dim, input_dense_dim, input_sizes, input_indices.clone(),
+      grad_input_values, input.options().dtype(grad_.dtype())
+    ); // convert to grad dtype
   }
   else {
     AT_CHECK(grad_.is_sparse(), "_sparse_sum_backward_cpu: expected grad_ Tensor to be sparse, but got dense");
@@ -1035,7 +1038,8 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
       auto grad_sparse_dim_to_keep_v = std::vector<int64_t>(grad_sparse_dim);
       std::iota(grad_sparse_dim_to_keep_v.begin(), grad_sparse_dim_to_keep_v.end(), 0);
 
-      auto grad_indices_1D = flatten_indices_by_dims(grad_indices, grad.sizes(), grad_sparse_dim_to_keep_v); // flatten indices on all sparse_dim of grad, output indices is coalesced and sorted
+      // flatten indices on all sparse_dim of grad, output indices is coalesced and sorted
+      auto grad_indices_1D = flatten_indices_by_dims(grad_indices, grad.sizes(), grad_sparse_dim_to_keep_v);
       auto grad_indices_1D_accessor = grad_indices_1D.accessor<int64_t, 1>();
       auto input_indices_1D = flatten_indices_by_dims(input_indices, input_sizes, sparse_dims_to_keep_v);
       auto input_indices_1D_accessor = input_indices_1D.accessor<int64_t, 1>();
@@ -1064,7 +1068,10 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
     else {
       grad_input_values = grad_values_expand;
     }
-    return at::_sparse_coo_tensor_with_dims_and_tensors(input_sparse_dim, input_dense_dim, input_sizes, input_indices.clone(), grad_input_values, grad.options());
+    return at::_sparse_coo_tensor_with_dims_and_tensors(
+      input_sparse_dim, input_dense_dim, input_sizes,
+      input_indices.clone(), grad_input_values, grad.options()
+    );
   }
 }
 
@@ -1075,7 +1082,7 @@ Tensor _sparse_max(const SparseTensor& input) {
   return input.coalesce().values().max();
 }
 
-Tensor _sparse_max_sparse_dim(const SparseTensor& input, int64_t dim_to_max) {
+std::tuple<SparseTensor, Tensor> _sparse_max_sparse_dim(const SparseTensor& input, int64_t dim_to_max) {
   const int64_t input_dim = input.dim();
   LongTensor indices = input._indices();
   Tensor values = input._values();
@@ -1103,9 +1110,12 @@ Tensor _sparse_max_sparse_dim(const SparseTensor& input, int64_t dim_to_max) {
   auto new_sizes = sizes.vec();
   new_sizes.erase(new_sizes.begin() + dim_to_max);
 
-  SparseTensor new_sparse = at::_sparse_coo_tensor_with_dims_and_tensors(sparse_dim - 1, dense_dim, new_sizes, new_indices, new_values, input.options());
-  new_sparse = new_sparse.coalesce_max();
-  return new_sparse;
+  SparseTensor new_sparse = at::_sparse_coo_tensor_with_dims_and_tensors(
+    sparse_dim - 1, dense_dim, new_sizes,
+    new_indices, new_values, input.options()
+  );
+  Tensor reduction_indices;
+  return new_sparse.coalesce_max();
 }
 
 Tensor _sparse_max(const SparseTensor& input_, int64_t dim_to_max) {
@@ -1118,7 +1128,9 @@ Tensor _sparse_max(const SparseTensor& input_, int64_t dim_to_max) {
   int64_t sparse_dim = input.sparse_dim();
 
   if (dim_to_max < sparse_dim) {
-    return at::_sparse_max_sparse_dim(input, dim_to_max);
+    Tensor max_res, max_indices;
+    std::tie(max_res, max_indices) = at::_sparse_max_sparse_dim(input, dim_to_max);
+    return max_res;
   }
   else {
     Tensor values = input.values();
@@ -1130,7 +1142,10 @@ Tensor _sparse_max(const SparseTensor& input_, int64_t dim_to_max) {
     std::tie(new_values, max_indices) = values.max(dim_to_max + 1 - sparse_dim);
     new_sizes.erase(new_sizes.begin() + dim_to_max);
 
-    return at::_sparse_coo_tensor_with_dims_and_tensors(sparse_dim, dense_dim - 1, new_sizes, indices, new_values, input.options());
+    return at::_sparse_coo_tensor_with_dims_and_tensors(
+      sparse_dim, dense_dim - 1, new_sizes,
+      indices, new_values, input.options()
+    );
   }
 }
 
@@ -1141,7 +1156,7 @@ Tensor _sparse_min(const SparseTensor& input) {
   return input.coalesce().values().min();
 }
 
-Tensor _sparse_min_sparse_dim(const SparseTensor& input, int64_t dim_to_min) {
+std::tuple<SparseTensor, Tensor> _sparse_min_sparse_dim(const SparseTensor& input, int64_t dim_to_min) {
   const int64_t input_dim = input.dim();
   LongTensor indices = input._indices();
   Tensor values = input._values();
@@ -1169,9 +1184,11 @@ Tensor _sparse_min_sparse_dim(const SparseTensor& input, int64_t dim_to_min) {
   auto new_sizes = sizes.vec();
   new_sizes.erase(new_sizes.begin() + dim_to_min);
 
-  SparseTensor new_sparse = at::_sparse_coo_tensor_with_dims_and_tensors(sparse_dim - 1, dense_dim, new_sizes, new_indices, new_values, input.options());
-  new_sparse = new_sparse.coalesce_min();
-  return new_sparse;
+  SparseTensor new_sparse = at::_sparse_coo_tensor_with_dims_and_tensors(
+    sparse_dim - 1, dense_dim, new_sizes,
+    new_indices, new_values, input.options()
+  );
+  return new_sparse.coalesce_min();
 }
 
 Tensor _sparse_min(const SparseTensor& input_, int64_t dim_to_min) {
@@ -1184,7 +1201,9 @@ Tensor _sparse_min(const SparseTensor& input_, int64_t dim_to_min) {
   int64_t sparse_dim = input.sparse_dim();
 
   if (dim_to_min < sparse_dim) {
-    return at::_sparse_min_sparse_dim(input, dim_to_min);
+    Tensor min_res, min_indices;
+    std::tie(min_res, min_indices) = at::_sparse_min_sparse_dim(input, dim_to_min);
+    return min_res;
   }
   else {
     Tensor values = input.values();
@@ -1196,7 +1215,10 @@ Tensor _sparse_min(const SparseTensor& input_, int64_t dim_to_min) {
     std::tie(new_values, min_indices) = values.min(dim_to_min + 1 - sparse_dim);
     new_sizes.erase(new_sizes.begin() + dim_to_min);
 
-    return at::_sparse_coo_tensor_with_dims_and_tensors(sparse_dim, dense_dim - 1, new_sizes, indices, new_values, input.options());
+    return at::_sparse_coo_tensor_with_dims_and_tensors(
+      sparse_dim, dense_dim - 1, new_sizes,
+      indices, new_values, input.options()
+    );
   }
 }
 

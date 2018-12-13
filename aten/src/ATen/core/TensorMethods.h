@@ -742,10 +742,10 @@ inline int64_t Tensor::_nnz() const {
 inline Tensor Tensor::coalesce_sum() const {
     return type().coalesce_sum(*this);
 }
-inline Tensor Tensor::coalesce_max() const {
+inline std::tuple<Tensor,Tensor> Tensor::coalesce_max() const {
     return type().coalesce_max(*this);
 }
-inline Tensor Tensor::coalesce_min() const {
+inline std::tuple<Tensor,Tensor> Tensor::coalesce_min() const {
     return type().coalesce_min(*this);
 }
 inline Tensor Tensor::coalesce() const {
