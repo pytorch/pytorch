@@ -1,20 +1,20 @@
-#include "torch/csrc/jit/script/init.h"
+#include <torch/csrc/jit/script/init.h>
 
-#include "torch/csrc/Device.h"
-#include "torch/csrc/Dtype.h"
-#include "torch/csrc/Layout.h"
-#include "torch/csrc/jit/import.h"
-#include "torch/csrc/jit/script/compiler.h"
+#include <torch/csrc/Device.h>
+#include <torch/csrc/Dtype.h>
+#include <torch/csrc/Layout.h>
+#include <torch/csrc/jit/import.h>
+#include <torch/csrc/jit/script/compiler.h>
 
-#include "torch/csrc/jit/python_tracer.h"
-#include "torch/csrc/jit/pybind_utils.h"
-#include "torch/csrc/jit/constants.h"
-#include "torch/csrc/jit/passes/to_batch.h"
-#include "torch/csrc/jit/function_schema.h"
-#include "torch/csrc/jit/script/parser.h"
-#include "torch/csrc/jit/import_method.h"
-#include "torch/csrc/jit/hooks_for_testing.h"
-#include "torch/csrc/jit/passes/python_print.h"
+#include <torch/csrc/jit/python_tracer.h>
+#include <torch/csrc/jit/pybind_utils.h>
+#include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/passes/to_batch.h>
+#include <torch/csrc/jit/function_schema.h>
+#include <torch/csrc/jit/script/parser.h>
+#include <torch/csrc/jit/import_method.h>
+#include <torch/csrc/jit/hooks_for_testing.h>
+#include <torch/csrc/jit/passes/python_print.h>
 
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 
@@ -224,10 +224,7 @@ struct ModuleValue : public SugaredValue {
         v = module->find_parameter(field);
       }
       Value* the_tensor = m.get_or_add_parameter(v->slot());
-      Value* the_bool =
-          m.graph()
-              ->insertNode(m.graph()->createTensorToBool(the_tensor))
-              ->output();
+      Value* the_bool = m.graph()->insert(prim::Bool, {the_tensor});
       return std::make_shared<SimpleValue>(the_bool);
     }
 
@@ -688,7 +685,8 @@ void initJitScriptBindings(PyObject* module) {
         std::vector<at::Tensor> tensors;
         PythonPrint(ss, self, tensors, false);
         return ss.str();
-      });
+      })
+      .def("apply", &Module::apply);
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
     .def("graph", [&](Method& self) {
@@ -711,6 +709,7 @@ void initJitScriptBindings(PyObject* module) {
       return self.graph_for(createStackForSchema(self.getSchema(), tuple_slice(std::move(args), 1), std::move(kwargs)));
     })
     .def("debug_disable_autodiff_subgraph_inlining", &Method::debugDisableAutodiffSubgraphInlining)
+    .def("schema", &Method::getSchema)
     .def("pretty_print_schema", &Method::pretty_print_schema)
     .def("python_print", [](Method &m) {
       std::ostringstream oss;

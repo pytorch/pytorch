@@ -1,8 +1,8 @@
-#include "torch/csrc/jit/passes/peephole.h"
+#include <torch/csrc/jit/passes/peephole.h>
 
-#include "torch/csrc/jit/symbolic_variable.h"
+#include <torch/csrc/jit/symbolic_variable.h>
 
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
 
 namespace torch { namespace jit {
 
@@ -120,7 +120,7 @@ void PeepholeOptimizeImpl(Block * block, bool addmm_fusion_enabled) {
           node->get<at::Scalar>(attr::other)->toDouble() == 0) {
         node->output()->replaceAllUsesWith(node->input(0));
       }
-    } else if (node->kind() == prim::TensorToNum || node->kind() == prim::ImplicitTensorToNum) {
+    } else if (node->kind() == prim::Float || node->kind() == prim::Int || node->kind() == prim::ImplicitTensorToNum) {
       Node* input_node = node->input()->node();
       if (input_node->kind() == prim::NumToTensor) {
         node->output()->replaceAllUsesWith(input_node->input());

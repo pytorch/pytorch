@@ -7,8 +7,7 @@ from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 
-import hypothesis
-from hypothesis import given
+from hypothesis import given, assume
 import hypothesis.strategies as st
 import numpy as np
 import unittest
@@ -95,7 +94,7 @@ class TestMomentumSGD(serial.SerializedTestCase):
         )
 
         # Verify that the generated indices are unique
-        hypothesis.assume(
+        assume(
             np.array_equal(
                 np.unique(indices.flatten()),
                 np.sort(indices.flatten())))
@@ -139,9 +138,10 @@ class TestMomentumSGD(serial.SerializedTestCase):
             [grad, m, lr, w, indices],
             sparse)
 
-    @given(n=st.integers(4, 8), nesterov=st.booleans(), **hu.gcs_gpu_only)
-    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
+    @unittest.skipIf(not workspace.has_gpu_support and not workspace.has_hip_support, "No gpu support.")
+    @given(n=st.integers(4, 8), nesterov=st.booleans(), **hu.gcs)
     def test_fp16momentum_sgd(self, n, nesterov, gc, dc):
+        assume(core.IsGPUDeviceType(gc.device_type))
         gpuvers = workspace.GetDeviceProperties(0)["major"]
         if gpuvers < 6:
             print("No FP16 support because major version {} < 6".format(gpuvers))

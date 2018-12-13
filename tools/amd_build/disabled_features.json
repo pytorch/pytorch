@@ -79,12 +79,6 @@
         }
       },
       {
-        "path": "aten/src/ATen/Context.h",
-        "s_constants": {
-            "detail::getCUDAHooks().getNumGPUs()": "1"
-        }
-      },
-      {
         "path": "aten/src/ATen/native/cuda/Unique.cu",
         "s_constants": {
             "inverse_indices_kernel<<<": "inverse_indices_kernel<scalar_t><<<"
@@ -98,12 +92,6 @@
       "path": "aten/src/ATen/cuda/CUDAApplyUtils.cuh",
       "functions": [
         "kernelPointwiseApply4"
-      ]
-    },
-    {
-      "path": "aten/src/ATen/cuda/detail/IndexUtils.cu",
-      "non_device_functions": [
-        "maybeOverlappingIndices"
       ]
     },
     {

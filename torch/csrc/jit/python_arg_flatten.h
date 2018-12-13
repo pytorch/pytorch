@@ -1,8 +1,8 @@
 #pragma once
 
-#include "torch/csrc/jit/pybind.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/utils/hash.h"
+#include <torch/csrc/jit/pybind.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/utils/hash.h>
 
 #include <ATen/ATen.h>
 #include <tuple>

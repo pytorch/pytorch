@@ -1,10 +1,10 @@
 #pragma once
 #include <memory>
 #include <vector>
-#include "c10/util/Optional.h"
+#include <c10/util/Optional.h>
 
-#include "torch/csrc/jit/ivalue.h"
-#include "torch/csrc/WindowsTorchApiMacro.h"
+#include <torch/csrc/jit/ivalue.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace at {
   class Tensor;

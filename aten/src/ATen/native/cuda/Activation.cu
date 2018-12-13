@@ -1,10 +1,10 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/Dispatch.h"
-#include "ATen/cuda/CUDAApplyUtils.cuh"
-#include "ATen/cuda/detail/IndexUtils.cuh"
-#include "ATen/native/Activation.h"
-#include "ATen/native/cuda/Loops.cuh"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Dispatch.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/native/Activation.h>
+#include <ATen/native/cuda/Loops.cuh>
 
 
 namespace at { namespace native {

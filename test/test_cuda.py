@@ -787,7 +787,7 @@ class TestCuda(TestCase):
 
         # interlace
         torch.cuda.empty_cache()
-        gen0 = self._test_memory_stats_generator(self, device=0, N=35)
+        gen0 = self._test_memory_stats_generator(self, device='cuda:0', N=35)
         gen1 = self._test_memory_stats_generator(self, device=torch.device('cuda:1'), N=35)
         end0 = end1 = False
         while not (end0 and end1):
@@ -2117,6 +2117,17 @@ class TestCuda(TestCase):
                 x = torch.randn(3, 1, device='cuda')
                 y = torch.randn(2, 1, device='cuda')
                 z = x + y
+
+    def test_tril_and_triu_indices(self):
+        self.assertRaises(
+            RuntimeError,
+            lambda: torch.triu_indices(
+                1, 1, device='cuda', layout=torch.strided))
+
+        self.assertRaises(
+            RuntimeError,
+            lambda: torch.tril_indices(
+                1, 1, device='cuda', layout=torch.strided))
 
 
 def load_ignore_file():
