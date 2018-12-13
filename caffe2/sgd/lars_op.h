@@ -28,8 +28,8 @@ class LarsOp final : public Operator<Context> {
     auto& wd = Input(2);
     auto& trust = Input(3);
     auto& lr_max = Input(4);
-    auto* lr_rescaled = Output(0);
-    lr_rescaled->Resize(vector<int64_t>{1});
+
+    auto* lr_rescaled = Output(0, vector<int64_t>{1}, at::dtype<T>());
 
     X_norm_tensor_.Resize(1);
     T* X_norm_ = X_norm_tensor_.template mutable_data<T>();

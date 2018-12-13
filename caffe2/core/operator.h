@@ -207,7 +207,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       int idx,
       at::TensorOptions options,
       const Tensor& src,
-      BaseContext* context = nullptr) {
+      bool async = false) {
     Tensor* t = Output<Tensor>(idx, options.device().type());
     // TODO:
     // We plan to use the following:
@@ -216,7 +216,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     CAFFE_ENFORCE(
         !t->dtype_initialized() || t->dtype() == src.dtype(),
         "We don't allow a change of data type in OutputTensor");
-    t->CopyFrom(src, context);
+    t->CopyFrom(src, async);
     return t;
   }
 
@@ -530,13 +530,6 @@ inline NetDef OperatorBase::GetSingleArgument<NetDef>(
   CAFFE_THROW("Cannot get NetDefs from IValue");
   return NetDef();
 }
-
-// If your operator does not need any specialized contructor or destructor,
-// you can simply use this to save two lines of code.
-#define USE_SIMPLE_BASE_CTOR_DTOR(name)                                        \
-  name(const OperatorDef& operator_def, Workspace* ws)                         \
-      : OperatorBase(operator_def, ws) {}                                      \
-  virtual ~name() noexcept {}
 
 // OP_SINGLE_ARG provides a shorter initialization choice for initialization of
 // member variables for the class constructors.

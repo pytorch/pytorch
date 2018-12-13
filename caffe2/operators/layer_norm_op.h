@@ -126,12 +126,12 @@ class LayerNormGradientOp final : public Operator<Context> {
     const auto& mean = Input(2);
     const auto& sig = Input(3);
     const auto& X = Input(4);
-    auto* dX = Output(0);
+
     const int canonical_axis = X.canonical_axis_index(axis_);
     const int M = X.size_to_dim(canonical_axis);
     const int N = X.size_from_dim(canonical_axis);
 
-    dX->ResizeLike(X);
+    auto* dX = Output(0, X.sizes(), at::dtype<T>());
     ds_.Resize(M);
     db_.Resize(M);
     dY_scale_.Resize(M);

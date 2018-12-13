@@ -1,9 +1,0 @@
-graph(%x : Tensor) {
-  %1 : int = prim::Constant[value=55]()
-  %2 : int = prim::Constant[value=199]()
-  %3 : int = prim::Constant[value=1]()
-  %4 : int = aten::add(%1, %2)
-  %5 : Tensor = ^python_op_in_weak_module()(%x)
-  %6 : Tensor = aten::add(%5, %4, %3)
-  return (%6);
-}

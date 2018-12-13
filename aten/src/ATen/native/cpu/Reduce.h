@@ -2,6 +2,7 @@
 
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/Parallel.h>
+#include <c10/util/TypeList.h>
 
 #include <sstream>
 
@@ -24,14 +25,101 @@ static inline bool is_outer_reduction(const int64_t* strides) {
          strides[3] == sizeof(typename traits::arg2_t);
 }
 
+template <typename T, typename... Args>
+struct all_same : c10::guts::conjunction<
+  std::is_same<T, Args>...
+> {};
+
+// data_t is the input/output data type.
+// acc_t is a type that contains all the necessary data
+// to continue reducing.
+//
+// Then:
+// reduce: (acc_t, data_t) -> acc_t adds one data point to the accumulated value.
+// combine: (acc_t, acc_t) -> acc_t combines two accumulated values into one.
+// project: acc_t -> data_t finishes the reduction, getting the required output.
+//
+// Additionally, acc_t must be default-constructible:
+// acc_t {} is an identity for combine,
+// and project(acc_t {}) is the value of the operation on zero elements.
+//
+// The point of `combine` is to support parallelization -
+// the idea is to one sequence of `reduce` calls per thread of execution,
+// and then to combine them at the end with `combine`.
+//
+// If there is more than one output element,
+// our parallelization strategy is to use one thread for each of them,
+// which means that `combine` will never be called.
+//
+// If, on the other hand, there is only one, then we split the input into
+// into several pieces, reduce each separately, and then combine them.
+
+template <typename rf_t,
+          typename cf_t,
+          typename pf_t>
+void binary_kernel_reduce(TensorIterator& iter, rf_t const &reduce, cf_t const &combine, pf_t const &project) {
+  using r_traits = binary_function_traits<rf_t>;
+  using c_traits = binary_function_traits<cf_t>;
+  using p_traits = unary_function_traits<pf_t>;
+  using acc_t = typename p_traits::arg1_t;
+  using data_t = typename p_traits::result_type;
+  static_assert(
+    all_same<
+      acc_t,
+      typename r_traits::arg1_t,
+      typename r_traits::result_type,
+      typename c_traits::arg1_t,
+      typename c_traits::arg2_t,
+      typename c_traits::result_type>::value,
+    "all accumulate types must match");
+  static_assert(
+    std::is_same<data_t, typename r_traits::arg2_t>::value,
+    "all data types must match");
+  static_assert(
+    std::is_default_constructible<acc_t>::value,
+    "the accumulate type must be default-constructible"
+  );
+  iter.foreach_reduced_elt([&](TensorIterator &sub_iter) {
+    auto numel = sub_iter.numel();
+    bool serial = numel < at::internal::GRAIN_SIZE || at::get_max_threads() == 1 || at::in_parallel_region();
+    int max_threads = serial ? 1 : at::get_max_threads();
+    AT_ASSERT(max_threads > 0);
+    std::vector<optional<acc_t>> buffer{(unsigned)max_threads, optional<acc_t> {}};
+    at::parallel_for(0, numel, serial ? (1 + numel) : internal::GRAIN_SIZE,
+    [&](int64_t begin, int64_t end) {
+      auto &acc = buffer[at::get_thread_num()];
+      sub_iter.serial_for_each([&acc, &reduce](int ntensors, char** data, const int64_t* strides, int64_t size) {
+        AT_ASSERT(ntensors == 2);
+        char *in = data[1];
+        int64_t stride = strides[1];
+        if (!acc && size > 0) {
+          acc = acc_t {};
+        }
+        for (int64_t i = 0; i < size; ++i) {
+          acc = reduce(*acc, *(data_t*)in);
+          in += stride;
+        }
+      }, {begin, end});
+    });
+    acc_t acc;
+    for (int i = 0; i < max_threads; ++i) {
+      if (buffer[i]) {
+        acc = combine(acc, *buffer[i]);
+      }
+    }
+    char *out = (char *)sub_iter.data_ptr(0);
+    *(data_t*)out = project(acc);
+  });
+}
+
 template <typename func_t, typename vec_func_t>
 void binary_kernel_reduce_vec(TensorIterator& iter, func_t op, vec_func_t vop, double ident=0) {
   using traits = binary_function_traits<func_t>;
   static_assert(
-    std::is_same<typename traits::result_type, typename traits::arg1_t>::value,
-    "all types must match");
-  static_assert(
-    std::is_same<typename traits::result_type, typename traits::arg2_t>::value,
+    all_same<
+      typename traits::result_type,
+      typename traits::arg1_t,
+      typename traits::arg2_t>::value,
     "all types must match");
 
   iter.output().fill_(ident);

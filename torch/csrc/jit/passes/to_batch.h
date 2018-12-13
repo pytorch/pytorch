@@ -1,7 +1,7 @@
 #pragma once
 
-#include "torch/csrc/jit/pybind.h"
-#include "torch/csrc/jit/ir.h"
+#include <torch/csrc/jit/pybind.h>
+#include <torch/csrc/jit/ir.h>
 
 #include <ATen/ATen.h>
 

@@ -1,14 +1,14 @@
 #pragma once
 
-#include "torch/csrc/jit/function_schema.h"
-#include "torch/csrc/jit/ivalue.h"
-#include "torch/csrc/jit/stack.h"
-#include "torch/csrc/jit/script/module.h"
-#include "torch/csrc/jit/type.h"
-#include "torch/csrc/jit/operator.h"
-#include "torch/csrc/utils/pybind.h"
-#include "torch/csrc/utils/auto_gil.h"
-#include "torch/csrc/Device.h"
+#include <torch/csrc/jit/function_schema.h>
+#include <torch/csrc/jit/ivalue.h>
+#include <torch/csrc/jit/stack.h>
+#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/type.h>
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/auto_gil.h>
+#include <torch/csrc/Device.h>
 
 #include <c10/util/Exception.h>
 
@@ -287,6 +287,8 @@ inline py::object toPyObject(IValue&& ivalue) {
       t[i] = toPyObject(IValue{elements[i]});
     }
     return t;
+  } else if (ivalue.isDevice()) {
+    return py::cast<py::object>(THPDevice_New(ivalue.toDevice()));
   } else {
     AT_ERROR("Missing cases in 'toPyObject'! File a bug report.");
   }

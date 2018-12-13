@@ -1,14 +1,14 @@
 #pragma once
-#include "torch/csrc/jit/fuser/config.h"
+#include <torch/csrc/jit/fuser/config.h>
 #if USE_CUDA_FUSER
 
-#include "ATen/ATen.h"
-#include "torch/csrc/WindowsTorchApiMacro.h"
-#include "torch/csrc/jit/fuser/fused_kernel.h"
+#include <ATen/ATen.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/fuser/fused_kernel.h>
 
-#include "nvrtc.h"
-#include "cuda.h"
-#include "cuda_runtime.h"
+#include <nvrtc.h>
+#include <cuda.h>
+#include <cuda_runtime.h>
 
 #include <cstdint>
 #include <vector>

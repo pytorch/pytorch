@@ -1,9 +1,9 @@
 #pragma once
 
-#include "torch/csrc/WindowsTorchApiMacro.h"
-#include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/autograd/symbolic.h"
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/autograd/symbolic.h>
 
 #include <memory>
 #include <string>

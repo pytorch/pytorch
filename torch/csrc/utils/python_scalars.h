@@ -1,10 +1,10 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 
-#include "python_numbers.h"
-#include "torch/csrc/Exceptions.h"
+#include <torch/csrc/utils/python_numbers.h>
+#include <torch/csrc/Exceptions.h>
 
 namespace torch { namespace utils {
 

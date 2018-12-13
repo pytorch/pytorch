@@ -1,15 +1,14 @@
-#include "torch/csrc/autograd/edge.h"
-#include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/generated/variable_factories.h"
-#include "torch/csrc/autograd/profiler.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/fuser/interface.h"
-#include "torch/csrc/jit/graph_executor.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/operator.h"
-#include "torch/csrc/jit/custom_operator.h"
-#include "torch/csrc/jit/script/jit_exception.h"
-#include "torch/csrc/variable_tensor_functions.h"
+#include <torch/csrc/autograd/edge.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/fuser/interface.h>
+#include <torch/csrc/jit/graph_executor.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/custom_operator.h>
+#include <torch/csrc/jit/script/jit_exception.h>
 
 #include <ATen/ExpandUtils.h>
 #include <ATen/WrapDimUtils.h>
@@ -67,36 +66,34 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        "prim::TensorToBool(Tensor a) -> bool",
+        "prim::Bool(Tensor a) -> bool",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             at::Tensor a;
             pop(stack, a);
-            at::OptionalDeviceGuard guard(device_of(a));
             push(stack, a.item<int64_t>() != 0);
             return 0;
           };
         }),
     Operator(
-        "prim::TensorToNum(Tensor a) -> Scalar",
+        "prim::Int(Tensor a) -> int",
         [](const Node* node) -> Operation {
-          if(node->output()->type() == IntType::get()) {
+          return [](Stack& stack) {
+            at::Tensor a;
+            pop(stack, a);
+            push(stack, a.item<int64_t>());
+            return 0;
+          };
+        }),
+    Operator(
+        "prim::Float(Tensor a) -> float",
+        [](const Node* node) -> Operation {
             return [](Stack& stack) {
               at::Tensor a;
               pop(stack, a);
-              at::OptionalDeviceGuard guard(device_of(a));
-              push(stack, a.item<int64_t>());
-              return 0;
-            };
-          } else {
-            return [](Stack& stack) {
-              at::Tensor a;
-              pop(stack, a);
-              at::OptionalDeviceGuard guard(device_of(a));
               push(stack, a.item<double>());
               return 0;
             };
-          }
         }),
     Operator(
         "prim::ImplicitTensorToNum(Tensor a) -> Scalar",
@@ -106,7 +103,6 @@ RegisterOperators reg({
               at::Tensor a;
               pop(stack, a);
               checkImplicitTensorToNum(a, /*to int*/true);
-              at::OptionalDeviceGuard guard(device_of(a));
               push(stack, a.item<int64_t>());
               return 0;
             };
@@ -115,7 +111,6 @@ RegisterOperators reg({
               at::Tensor a;
               pop(stack, a);
               checkImplicitTensorToNum(a, /*to int*/false);
-              at::OptionalDeviceGuard guard(device_of(a));
               push(stack, a.item<double>());
               return 0;
             };
@@ -131,8 +126,10 @@ RegisterOperators reg({
             return 0;
           };
         }),
+    // note: this op needs to share a name with the Scalar -> Tensor conversion
+    // because all _to_tensor conversion have to have the same operator namet
     Operator(
-        "prim::BoolToTensor(bool a) -> Tensor",
+        "prim::NumToTensor(bool a) -> Tensor",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             bool b;
@@ -144,7 +141,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        "prim::IntToFloat(int a) -> float",
+        "prim::Float(int a) -> float",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             int64_t i;
@@ -154,7 +151,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        "prim::FloatToInt(float a) -> int",
+        "prim::Int(float a) -> int",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             double d;
@@ -164,7 +161,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        "prim::StringToFloat(str a) -> float",
+        "prim::Float(str a) -> float",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             auto s = pop(stack).toString();
@@ -709,7 +706,7 @@ RegisterOperators reg({
     return [=](Stack& stack) {                                \
       int64_t a, b;                                           \
       pop(stack, a, b);                                       \
-      push(stack, op);                                        \
+      push(stack, op); /* NOLINT(hicpp-signed-bitwise) */     \
       return 0;                                               \
     };                                                        \
   }),
@@ -1009,8 +1006,8 @@ Operator(                                                                      \
           at::Tensor t;                                                 \
           c_type other;                                                 \
           pop(stack, t, other);                                         \
-          std::move(t) = other;                                         \
-          push(stack, std::move(t));                                    \
+          std::move(t) = other; /* NOLINT(bugprone-use-after-move) */   \
+          push(stack, std::move(t)); /* NOLINT(bugprone-use-after-move) */ \
           return 0;                                                     \
         };                                                              \
       }),
@@ -1217,7 +1214,7 @@ at::Tensor interpolate(at::Tensor input, IValue size, IValue scale_factors,
   if ((mode == "nearest" || mode == "area")) {
     if (align_corners != c10::nullopt) {
       throw std::runtime_error("align_corners option can only be set with the "
-                             "interpolating modes: linear | bilinear | trilinear");
+                             "interpolating modes: linear | bilinear | bicubic | trilinear");
     }
   } else {
     if (align_corners == c10::nullopt) {
@@ -1245,18 +1242,24 @@ at::Tensor interpolate(at::Tensor input, IValue size, IValue scale_factors,
     return at::upsample_linear1d(input, _output_size(input, 1, size, scale_factors), *align_corners);
   if (input_dim == 3 && mode == "bilinear")
     throw std::runtime_error("Got 3D input, but bilinear mode needs 4D input");
+  if (input_dim == 3 && mode == "bicubic")
+    throw std::runtime_error("Got 3D input, but bicubic mode needs 4D input");
   if (input_dim == 3 && mode == "trilinear")
     throw std::runtime_error("Got 3D input, but trilinear mode needs 5D input");
   if (input_dim == 4 && mode == "linear")
     throw std::runtime_error("Got 4D input, but linear mode needs 3D input");
   if (input_dim == 4 && mode == "bilinear")
     return at::upsample_bilinear2d(input, _output_size(input, 2, size, scale_factors), *align_corners);
+  if (input_dim == 4 && mode == "bicubic")
+    return at::upsample_bicubic2d(input, _output_size(input, 2, size, scale_factors), *align_corners);
   if (input_dim == 4 && mode == "trilinear")
     throw std::runtime_error("Got 4D input, but trilinear mode needs 5D input");
   if (input_dim == 5 && mode == "linear")
     throw std::runtime_error("Got 5D input, but linear mode needs 3D input");
   if (input_dim == 5 && mode == "bilinear")
     throw std::runtime_error("Got 5D input, but bilinear mode needs 4D input");
+  if (input_dim == 5 && mode == "bicubic")
+    throw std::runtime_error("Got 5D input, but bicubic mode needs 4D input");
   if (input_dim == 5 && mode == "trilinear")
     return at::upsample_trilinear3d(input, _output_size(input, 3, size, scale_factors), *align_corners);
 

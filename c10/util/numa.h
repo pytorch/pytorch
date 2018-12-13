@@ -3,6 +3,8 @@
 #include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
 
+C10_DECLARE_bool(caffe2_cpu_numa_enabled);
+
 namespace c10 {
 
 /**

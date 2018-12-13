@@ -65,7 +65,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     fi
 
     # Setup wrapper scripts
-    for compiler in cc c++ gcc g++ x86_64-linux-gnu-gcc; do
+    for compiler in cc c++ gcc g++; do
       (
         echo "#!/bin/sh"
         echo "exec $SCCACHE $(which $compiler) \"\$@\""

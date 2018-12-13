@@ -1,8 +1,8 @@
-#include "torch/csrc/autograd/profiler.h"
-#include "torch/csrc/jit/custom_operator.h"
-#include "torch/csrc/jit/operator.h"
-#include "torch/csrc/api/include/torch/utils.h"
-#include "../ATen/ExpandUtils.h"
+#include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/jit/custom_operator.h>
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/api/include/torch/utils.h>
+#include <ATen/ExpandUtils.h>
 
 #include <sstream>
 #include <regex>
