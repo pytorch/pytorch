@@ -19,10 +19,6 @@
  * above, whichever is greater.*/
 #define MIN_GLOBAL_SCRATCH_SPACE_PER_DEVICE 32768 * sizeof(float)
 
-/* Maximum number of P2P connections (if there are more than 9 then P2P is
- * enabled in groups of 8). */
-#define THC_CUDA_MAX_PEER_SIZE 8
-
 void THCState_free(THCState* state)
 {
   free(state);
@@ -64,23 +60,6 @@ void THCudaInit(THCState* state)
   state->rngState = (THCRNGState*)malloc(sizeof(THCRNGState));
   THCRandom_init(state, numDevices, device);
 
-  // p2pAccessEnabled records if p2p copies are allowed between pairs of
-  // devices. Values include "1" (copy allowed), "0" (copy not allowed), and
-  // "-1" (unknown).
-  // Currently the max number of gpus in P2P group is 8, so if there are more
-  // we enable P2P in groups of 8
-  state->p2pAccessEnabled = (int**) malloc(sizeof(int*) * numDevices);
-  for (int i = 0; i < numDevices; ++i) {
-    state->p2pAccessEnabled[i] = (int*) malloc(sizeof(int) * numDevices);
-    for (int j = 0; j < numDevices; ++j)
-      if (i == j)
-        state->p2pAccessEnabled[i][j] = 1;
-      else if (j / THC_CUDA_MAX_PEER_SIZE != i / THC_CUDA_MAX_PEER_SIZE)
-        state->p2pAccessEnabled[i][j] = 0;
-      else
-        state->p2pAccessEnabled[i][j] = -1;
-  }
-
   for (int i = 0; i < numDevices; ++i) {
     THCCudaResourcesPerDevice* res = THCState_getDeviceResourcePtr(state, i);
     THCudaCheck(cudaSetDevice(i));
@@ -115,12 +94,6 @@ void THCudaShutdown(THCState* state)
   THCudaCheck(cudaGetDevice(&prevDev));
   THCudaCheck(cudaGetDeviceCount(&deviceCount));
 
-  /* cleanup p2p access state */
-  for (int dev = 0; dev < deviceCount; ++dev) {
-    free(state->p2pAccessEnabled[dev]);
-  }
-  free(state->p2pAccessEnabled);
-
   /* cleanup per-device state */
   for (int dev = 0; dev < deviceCount; ++dev) {
     THCudaCheck(cudaSetDevice(dev));
@@ -146,39 +119,6 @@ void THCudaShutdown(THCState* state)
   }
 
   THCudaCheck(cudaSetDevice(prevDev));
-}
-
-int THCState_getPeerToPeerAccess(THCState* state, int dev, int devToAccess)
-{
-  if (dev < 0 || dev >= state->numDevices) {
-    THError("%d is not a device", dev);
-  }
-  if (devToAccess < 0 || devToAccess >= state->numDevices) {
-    THError("%d is not a device", devToAccess);
-  }
-  if (state->p2pAccessEnabled[dev][devToAccess] == -1) {
-    int prevDev = 0;
-    THCudaCheck(cudaGetDevice(&prevDev));
-    THCudaCheck(cudaSetDevice(dev));
-
-    int access = 0;
-    THCudaCheck(cudaDeviceCanAccessPeer(&access, dev, devToAccess));
-    if (access) {
-      cudaError_t err = cudaDeviceEnablePeerAccess(devToAccess, 0);
-      if (err == cudaErrorPeerAccessAlreadyEnabled) {
-        // ignore and clear the error if access was already enabled
-        cudaGetLastError();
-      } else {
-        THCudaCheck(err);
-      }
-      state->p2pAccessEnabled[dev][devToAccess] = 1;
-    } else {
-      state->p2pAccessEnabled[dev][devToAccess] = 0;
-    }
-
-    THCudaCheck(cudaSetDevice(prevDev));
-  }
-  return state->p2pAccessEnabled[dev][devToAccess];
 }
 
 struct cudaDeviceProp* THCState_getCurrentDeviceProperties(THCState* state)

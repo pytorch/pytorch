@@ -36,6 +36,65 @@ It is expected that the modules whose functions compose this interface will
 manage their own state. There is only a single CUDA context/state.
 */
 
+struct CAFFE2_API CUDAP2PState {
+  CUDAP2PState(int64_t src, int64_t target) 
+  : src_device(src), target_device(target) {
+    auto num_gpus = c10::cuda::device_count();
+    AT_ASSERT(src_device >= 0 && src_device < num_gpus);
+    AT_ASSERT(target_device >= 0 && target_device < num_gpus);
+    // if same device, no need for enabling
+    if(src_device == target_device) {
+      p2p_enable_status = true;
+    // if existing connection there, no need for enabling
+    } else if (!(p2p_enable_status)) {
+      auto current_device = c10::cuda::current_device();
+      c10::cuda::set_device(src_device);
+
+      int canAccess;
+      AT_CUDA_CHECK(cudaDeviceCanAccessPeer(&canAccess, src_device, target_device));
+      if (canAccess) {
+        cudaError_t err = cudaDeviceEnablePeerAccess(target_device, 0);
+        if (err == cudaErrorPeerAccessAlreadyEnabled || err == cudaSuccess) {
+          p2p_enable_status = true;
+        } else {
+          // if a device has more than 8 connections simultaneously (current max limit), we should
+          // get a cudaErrorTooManyPeers
+          p2p_enable_status = false;
+          std::string message = "P2P connection could not be established. Got cudaError_t: ";
+          message + std::string(cudaGetErrorName(err));
+          AT_WARN(message);
+        }
+        cudaGetLastError();
+      } else {
+        p2p_enable_status = false;
+        AT_WARN("The src device and the target device does not support P2P.");
+      }
+      c10::cuda::set_device(current_device);
+    }
+  }
+
+  ~CUDAP2PState() {
+    // when done with the connection, make sure to release the connection
+    // since currently there is a max limit of 8 devices that can establish
+    // p2p connections with another device, simultaneously
+    if (p2p_enable_status && src_device != target_device) {
+      auto current_device = c10::cuda::current_device();
+      c10::cuda::set_device(src_device);
+      AT_CUDA_CHECK(cudaDeviceDisablePeerAccess(target_device));
+      c10::cuda::set_device(current_device);
+    }
+  }
+
+  bool isEnabled() {
+    return p2p_enable_status;
+  }
+
+  private:
+    bool p2p_enable_status = false;
+    int64_t src_device;
+    int64_t target_device;
+};
+
 /* Device info */
 inline int64_t getNumGPUs() {
     return c10::cuda::device_count();

@@ -9,6 +9,7 @@
 #include <THC/THCGenerateAllTypes.h>
 
 #include <c10/util/intrusive_ptr.h>
+#include <ATen/cuda/CUDAContext.h>
 
 void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
 {
@@ -34,7 +35,7 @@ void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
 
     if (self->data_ptr()) {
       // Enable p2p access when the memcpy is across devices
-      THCState_getPeerToPeerAccess(state, device, THCStorage_getDevice(state, self));
+      at::cuda::CUDAP2PState p2p_connection(device, THCStorage_getDevice(state, self));
 
       THCudaCheck(cudaMemcpyAsync(data.get(),
                                   self->data(),

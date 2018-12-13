@@ -57,8 +57,8 @@ void copy_device_to_device(Tensor& dst, const Tensor& src) {
 
   // Try to enable p2p access. This also handles the case src_device ==
   // dst_device.
-  bool p2pEnabled = THCState_getPeerToPeerAccess(
-      globalContext().getTHCState(), src_device.index(), dst_device.index());
+  CUDAP2PState p2p_connection(src_device.index(), dst_device.index());
+  bool p2pEnabled = p2p_connection.isEnabled();
 
   // We always perform the copy on the source device, using the
   // current stream on the source device.
