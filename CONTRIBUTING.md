@@ -426,7 +426,7 @@ class A {
     return &singleton_;
   }
 };
-static_assert(std::is_same(A*, decltype(A::singelton()))::value, "hmm");
+static_assert(std::is_same(A*, decltype(A::singleton()))::value, "hmm");
 ```
 
 * The compiler will run out of heap if you attempt to compile files that

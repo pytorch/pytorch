@@ -3,7 +3,7 @@
 #include <torch/csrc/THP.h>
 #include <torch/csrc/cuda/Module.h>
 
-#include <ATen/cuda/CUDAStream.h>
+#include <c10/cuda/CUDAStream.h>
 
 #include <structmember.h>
 #include <cuda_runtime_api.h>

@@ -94,12 +94,6 @@ Tensor TypeDefault::tensorWithAllocator(IntList sizes, IntList strides, Allocato
   return at::empty({0}, options()).set_(storage, 0, sizes, strides);
 }
 
-Storage TypeDefault::storage(bool resizable) const {
-  return Storage(typeMeta(), 0, allocator(), resizable);
-}
-Storage TypeDefault::storage(size_t size, bool resizable) const {
-  return Storage(typeMeta(), size, allocator(), resizable);
-}
 Storage TypeDefault::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
     return Storage(
       typeMeta(),

@@ -5,7 +5,7 @@
 
 #include <cuda_runtime_api.h>
 
-#include <ATen/cuda/ATenCUDAGeneral.h>
+#include <c10/cuda/CUDAMacros.h>
 #include <c10/util/Exception.h>
 #include <c10/Stream.h>
 
@@ -51,14 +51,14 @@
 * a kernel on the same stream from two different threads.
 */
 
-namespace at {
+namespace c10 {
 namespace cuda {
 
 // Value object representing a CUDA stream.  This is just a wrapper
 // around c10::Stream, but it comes with a little extra CUDA-specific
 // functionality (conversion to cudaStream_t), and a guarantee that
 // the wrapped c10::Stream really is a CUDA stream.
-class AT_CUDA_API CUDAStream {
+class C10_CUDA_API CUDAStream {
 public:
 
   enum Unchecked { UNCHECKED };
@@ -178,8 +178,8 @@ C10_API std::ostream& operator<<(std::ostream& stream, const CUDAStream& s);
 
 namespace std {
   template <>
-  struct hash<at::cuda::CUDAStream> {
-    size_t operator()(at::cuda::CUDAStream s) const noexcept {
+  struct hash<c10::cuda::CUDAStream> {
+    size_t operator()(c10::cuda::CUDAStream s) const noexcept {
       return std::hash<c10::Stream>{}(s.unwrap());
     }
   };

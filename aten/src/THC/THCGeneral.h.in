@@ -9,7 +9,7 @@
 #undef expm1
 
 #ifdef __cplusplus
-#include <ATen/cuda/CUDAStream.h>
+#include <c10/cuda/CUDAStream.h>
 #endif
 
 #include <cuda.h>

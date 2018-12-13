@@ -2053,6 +2053,21 @@ class TestJit(JitTestCase):
 
         self.assertExpectedGraph(fn.graph)
 
+    def test_no_erroneous_warnings(self):
+        import warnings
+
+        def fn(x):
+            if bool(x > 0):
+                warnings.warn('This should NOT be printed')
+                x += 1
+            return x
+
+        with warnings.catch_warnings(record=True) as warns:
+            fn_script = torch.jit.script(fn)
+            fn_script(torch.tensor(0))
+        warns = [str(w.message) for w in warns]
+        self.assertEqual(len(warns), 0)
+
 
 class TestBatched(TestCase):
     # generate random examples and create an batchtensor with them
@@ -9611,6 +9626,31 @@ class TestFuser(JitTestCase):
         ]
         ge = self.checkTrace(scaleshift, inputs)
         self.assertExpectedGraph(ge.graph_for(*inputs))
+
+    @staticmethod
+    def _test_cast_Float(self, device):
+        def f(x, y):
+            z = x.float()
+            return z + y
+
+        inputs = [
+            torch.randn(4, 4, dtype=torch.double, device=device),
+            torch.randn(4, 4, dtype=torch.float, device=device),
+        ]
+
+        ge = self.checkScript(f, inputs)
+        self.assertAllFused(ge.graph_for(*inputs))
+
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @enable_cpu_fuser
+    def test_cast_Float(self):
+        return self._test_cast_Float(self, 'cpu')
+
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @unittest.skipIf(not RUN_CUDA, "No CUDA")
+    @skipIfRocm
+    def test_cast_Float_cuda(self):
+        return self._test_cast_Float(self, 'cuda')
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")

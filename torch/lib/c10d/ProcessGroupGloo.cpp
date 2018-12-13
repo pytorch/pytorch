@@ -10,8 +10,8 @@
 
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAEvent.h>
-#include <ATen/cuda/CUDAGuard.h>
-#include <ATen/cuda/CUDAStream.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAStream.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #endif
