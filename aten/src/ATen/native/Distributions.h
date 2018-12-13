@@ -1,15 +1,14 @@
 #pragma once
 
 #include <TH/THMath.h>
-#ifdef __CUDA_ARCH__
-#include <nvfunctional>
-#endif
 
 #include <ATen/ATen.h>
 #include <ATen/CPUGenerator.h>
 #include <ATen/CheckGenerator.h>
 #include <ATen/Generator.h>
 #include <TH/THGenerator.hpp>
+
+#include <c10/macros/Macros.h>
 
 namespace at {namespace native {
 
@@ -21,24 +20,41 @@ static inline THGenerator* get_generator(at::Generator* gen) {
 
 }}  // namespace at::native
 
+// ROCM hcc doesn't work well with using std:: in kernel functions
+#if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
+#include <c10/cuda/CUDAMathCompat.h>
+#define compat_exp c10::cuda::compat::exp
+#define compat_floor c10::cuda::compat::floor
+#define compat_log c10::cuda::compat::log
+#define compat_pow c10::cuda::compat::pow
+#define compat_sqrt c10::cuda::compat::sqrt
+#define compat_tan c10::cuda::compat::tan
+#else
+#define compat_exp std::exp
+#define compat_floor std::floor
+#define compat_log std::log
+#define compat_pow std::pow
+#define compat_sqrt std::sqrt
+#define compat_tan std::tan
+#endif
+
 namespace {
 
-#ifdef __CUDA_ARCH__
-#define nvfunction_or_function nvstd::function
-#define deviceforcuda __device__
-#else
-#define nvfunction_or_function std::function
-#define deviceforcuda
+#if !defined(__CUDA_ARCH__) && !defined(__HIP_PLATFORM_HCC__)
 // we cannot use std::isnan directly due to some incompatibility of
 // gcc constexpr'ing and nvcc
 #define isnan std::isnan
 #endif
 
-template<typename scalar_t>
+// Here sampler_t should be function type scalar_t(void). For gpu
+// "sampler" is a device function, but since ROCM doesn't have
+// equivalent to nvstd::function, we use a template type parameter to
+// capture it.
+template<typename scalar_t, typename sampler_t>
 struct BaseSampler {
-  nvfunction_or_function<scalar_t(void)> sampler;
-  deviceforcuda BaseSampler(nvfunction_or_function<scalar_t(void)> sampler): sampler(sampler) {}
-  deviceforcuda scalar_t sample() {
+  sampler_t sampler;
+  C10_DEVICE BaseSampler(const sampler_t& sampler): sampler(sampler) {}
+  C10_DEVICE scalar_t sample() {
     return sampler();
   }
 };
@@ -69,21 +85,21 @@ struct BaseSampler {
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
-template<typename scalar_t, typename accscalar_t>
-deviceforcuda scalar_t sample_gamma(scalar_t alpha, BaseSampler<accscalar_t>& standard_uniform, BaseSampler<accscalar_t>& standard_normal) {
+template<typename scalar_t, typename accscalar_t, typename uniform_sampler_t, typename normal_sampler_t>
+C10_DEVICE scalar_t sample_gamma(scalar_t alpha, BaseSampler<accscalar_t, uniform_sampler_t>& standard_uniform, BaseSampler<accscalar_t, normal_sampler_t>& standard_normal) {
   accscalar_t scale = 1.0f;
 
   // Boost alpha for higher acceptance probability.
   if (alpha < 1.0f) {
     if (alpha == 0.f) return 0.f;
-    scale *= std::pow(1 - standard_uniform.sample(), 1.0f / alpha);
+    scale *= compat_pow(1 - standard_uniform.sample(), 1.0f / alpha);
     alpha += 1.0f;
   }
 
   // This implements the acceptance-rejection method of Marsaglia and Tsang (2000)
   // doi:10.1145/358407.358414
   const accscalar_t d = alpha - 1.0f / 3.0f;
-  const accscalar_t c = 1.0f / std::sqrt(9.0f * d);
+  const accscalar_t c = 1.0f / compat_sqrt(9.0f * d);
   for (;;) {
     accscalar_t x, y;
     do {
@@ -95,13 +111,13 @@ deviceforcuda scalar_t sample_gamma(scalar_t alpha, BaseSampler<accscalar_t>& st
     const accscalar_t xx = x * x;
     if (u < 1.0f - 0.0331f * xx * xx)
       return static_cast<scalar_t>(scale * d * v);
-    if (std::log(u) < 0.5f * xx + d * (1.0f - v + std::log(v)))
+    if (compat_log(u) < 0.5f * xx + d * (1.0f - v + compat_log(v)))
       return static_cast<scalar_t>(scale * d * v);
   }
 }
 
 template <typename scalar_t>
-deviceforcuda static inline scalar_t polevl(const scalar_t x,  const scalar_t A[], size_t len) {
+C10_DEVICE static inline scalar_t polevl(const scalar_t x,  const scalar_t A[], size_t len) {
   scalar_t result = 0;
   for (size_t i = 0; i <= len; i++) {
     result = result * x + A[i];
@@ -118,20 +134,21 @@ deviceforcuda static inline scalar_t polevl(const scalar_t x,  const scalar_t A[
  * Copyright 1984, 1987, 1992, 2000 by Stephen L. Moshier
  */
 template<typename scalar_t, typename accscalar_t>
-deviceforcuda static inline scalar_t digamma_one(scalar_t x) {
+C10_DEVICE static inline scalar_t digamma_one(scalar_t x) {
   constexpr accscalar_t PSI_10 = 2.25175258906672110764;
   if (x == 0) {
     return INFINITY;
   }
   accscalar_t additional_summand = 0;
-  int x_is_integer = x == std::floor(x);
+  int x_is_integer = x == compat_floor(x);
   if (x < 0) {
     if (x_is_integer) {
       return INFINITY;
     }
     // it is more standard to write this as recursion, but
     // nvcc does not like that
-    additional_summand = - static_cast<accscalar_t>(M_PI) / std::tan(static_cast<accscalar_t>(M_PI) * x);
+    additional_summand = -static_cast<accscalar_t>(M_PI) /
+        compat_tan(static_cast<accscalar_t>(M_PI) * x);
     x = 1 - x;
   }
 
@@ -161,13 +178,14 @@ deviceforcuda static inline scalar_t digamma_one(scalar_t x) {
     accscalar_t z = 1.0 / (x * x);
     y = z * polevl<accscalar_t>(z, A, 6);
   }
-  return static_cast<scalar_t>(result + std::log(x) - (0.5f / x) - y + additional_summand);
+  return static_cast<scalar_t>(
+      result + compat_log(x) - (0.5f / x) - y + additional_summand);
 }
 
 // Computes the reparameterized gradient -(d/dalpha cdf(x;alpha)) / pdf(x;alpha)
 // for random number x drawn from a standard Gamma distribution Gamma(alpha).
 template <typename scalar_t, typename accscalar_t>
-deviceforcuda scalar_t standard_gamma_grad_one(scalar_t alpha_, scalar_t x_) {
+C10_DEVICE scalar_t standard_gamma_grad_one(scalar_t alpha_, scalar_t x_) {
   // Use a Taylor series expansion for small x.
   accscalar_t x = static_cast<accscalar_t>(x_);
   accscalar_t alpha = static_cast<accscalar_t>(alpha_);
@@ -182,11 +200,13 @@ deviceforcuda scalar_t standard_gamma_grad_one(scalar_t alpha_, scalar_t x_) {
       series1 += numer / denom;
       series2 += numer / (denom * denom);
     }
-    const auto pow_x_alpha = std::pow(x, alpha);
-    const auto gamma_pdf = std::pow(x, alpha - 1) * std::exp(-x);
+    const auto pow_x_alpha = compat_pow(x, alpha);
+    const auto gamma_pdf = compat_pow(x, alpha - 1) * compat_exp(-x);
     const auto gamma_cdf = pow_x_alpha * series1;
-    const auto gamma_cdf_alpha = (std::log(x) - digamma_one<accscalar_t,accscalar_t>(alpha)) * gamma_cdf
-        - pow_x_alpha * series2;
+    const auto gamma_cdf_alpha =
+        (compat_log(x) - digamma_one<accscalar_t, accscalar_t>(alpha)) *
+            gamma_cdf -
+        pow_x_alpha * series2;
     const auto result = -gamma_cdf_alpha / gamma_pdf;
     return isnan(result) ? static_cast<scalar_t>( 0.f ) : static_cast<scalar_t>(result);
   }
@@ -200,20 +220,22 @@ deviceforcuda scalar_t standard_gamma_grad_one(scalar_t alpha_, scalar_t x_) {
       const auto denom = 1244160 * (alpha * alpha) * (alpha * alpha);
       return static_cast<scalar_t>(numer_1 * numer_2 / denom);
     }
-    const auto denom = std::sqrt(8 * alpha);
+    const auto denom = compat_sqrt(8 * alpha);
     const auto term2 = denom / (alpha - x);
-    const auto term3 = std::pow(x - alpha - alpha * std::log(x / alpha), static_cast<accscalar_t>(-1.5));
+    const auto term3 = compat_pow(
+        x - alpha - alpha * compat_log(x / alpha),
+        static_cast<accscalar_t>(-1.5));
     const auto term23 = (x < alpha) ? term2 - term3 : term2 + term3;
-    const auto term1 = std::log(x / alpha) * term23
-                     - std::sqrt(2 / alpha) * (alpha + x) / ((alpha - x) * (alpha - x));
+    const auto term1 = compat_log(x / alpha) * term23 -
+        compat_sqrt(2 / alpha) * (alpha + x) / ((alpha - x) * (alpha - x));
     const auto stirling = 1 + 1 / (12 * alpha) * (1 + 1 / (24 * alpha));
     const auto numer = x * term1;
     return static_cast<scalar_t>(-stirling * numer / denom);
   }
 
   // Use a bivariate rational approximation to the reparameterized gradient.
-  const auto u = std::log(x / alpha);
-  const auto v = std::log(alpha);
+  const auto u = compat_log(x / alpha);
+  const auto v = compat_log(alpha);
   static const accscalar_t coef_uv[3][8] = {
     {0.16009398, -0.094634809, 0.025146376, -0.0030648343,
      1, 0.32668115, 0.10406089, 0.0014179084},
@@ -228,7 +250,7 @@ deviceforcuda scalar_t standard_gamma_grad_one(scalar_t alpha_, scalar_t x_) {
   }
   const auto p = coef_v[0] + v * (coef_v[1] + v * (coef_v[2] + v * coef_v[3]));
   const auto q = coef_v[4] + v * (coef_v[5] + v * (coef_v[6] + v * coef_v[7]));
-  return static_cast<scalar_t>(std::exp(p / q));
+  return static_cast<scalar_t>(compat_exp(p / q));
 }
 
 } // namespace
