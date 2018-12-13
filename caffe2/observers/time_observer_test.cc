@@ -12,10 +12,11 @@ namespace caffe2 {
 
 namespace {
 
-class SleepOp final : public OperatorBase {
+class SleepOp final : public Operator<CPUContext> {
  public:
-  using OperatorBase::OperatorBase;
-  bool Run(int /* unused */) override {
+  SleepOp(const OperatorDef& operator_def, Workspace* ws)
+    : Operator<CPUContext>(operator_def, ws) {}
+  bool RunOnDevice() override {
     StartAllObservers();
     std::this_thread::sleep_for(std::chrono::milliseconds(3000));
     StopAllObservers();
@@ -24,7 +25,6 @@ class SleepOp final : public OperatorBase {
 };
 
 REGISTER_CPU_OPERATOR(SleepOp, SleepOp);
-REGISTER_CUDA_OPERATOR(SleepOp, SleepOp);
 
 OPERATOR_SCHEMA(SleepOp)
     .NumInputs(0, INT_MAX)

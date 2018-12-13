@@ -790,6 +790,12 @@ class Operator : public OperatorBase {
 
 #define USE_OPERATOR_CONTEXT_FUNCTIONS USE_OPERATOR_FUNCTIONS(Context)
 
+// This helper allows you avoid having to manually define a constructor
+// which forwards to Operator.  This macro requires you to be templated
+// over a type named Context, and to have inherited from Operator<Context>.
+//
+// TODO: The explicit virtual destructor here is pointless, because BaseOperator
+// already defines a virtual destructor
 #define USE_SIMPLE_CTOR_DTOR(name)                                             \
   name(const OperatorDef& operator_def, Workspace* ws)                         \
       : Operator<Context>(operator_def, ws) {}                                 \

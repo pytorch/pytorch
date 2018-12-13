@@ -12,10 +12,10 @@ CAFFE2_MODULE(caffe2_module_test_static, "Static module for testing.");
 
 namespace caffe2 {
 
-class Caffe2ModuleTestStaticDummyOp : public OperatorBase {
+class Caffe2ModuleTestStaticDummyOp : public Operator<CPUContext> {
  public:
-  using OperatorBase::OperatorBase;
-  bool Run(int /* unused */ /*stream_id*/) override {
+  using Operator<CPUContext>::Operator;
+  bool RunOnDevice() override {
     return true;
   }
   virtual string type() {

@@ -11,10 +11,10 @@ using transform::Graph;
 
 static std::atomic<int> counter;
 
-class TransformDummyOp final : public OperatorBase {
+class TransformDummyOp final : public Operator<CPUContext> {
  public:
-  using OperatorBase::OperatorBase;
-  bool Run(int /* unused */) override {
+  using Operator<CPUContext>::Operator;
+  bool RunOnDevice() override {
     counter.fetch_add(1);
     return true;
   }
@@ -327,10 +327,10 @@ TEST(TransformTest, TestPatternMatchTypeGeneral) {
   EXPECT_EQ(replaced_netdef.op(2).type(), "TransformDummyOp3");
 }
 
-class TransformSleepFastOp final : public OperatorBase {
+class TransformSleepFastOp final : public Operator<CPUContext> {
  public:
-  using OperatorBase::OperatorBase;
-  bool Run(int /* unused */) override {
+  using Operator<CPUContext>::Operator;
+  bool RunOnDevice() override {
     std::this_thread::sleep_for(std::chrono::milliseconds(30));
     return true;
   }
@@ -343,10 +343,10 @@ OPERATOR_SCHEMA(TransformSleepFastOp)
     .NumOutputs(0, INT_MAX)
     .AllowInplace({{0, 0}, {1, 1}});
 
-class TransformSleepSlowOp final : public OperatorBase {
+class TransformSleepSlowOp final : public Operator<CPUContext> {
  public:
-  using OperatorBase::OperatorBase;
-  bool Run(int /* unused */) override {
+  using Operator<CPUContext>::Operator;
+  bool RunOnDevice() override {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     return true;
   }

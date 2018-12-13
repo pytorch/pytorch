@@ -11,31 +11,30 @@ using transform::Graph;
 
 static std::atomic<int> counter;
 
-template <typename Context>
-class GraphDummyOp final : public Operator<Context> {
+class GraphDummyOp final : public Operator<CPUContext> {
  public:
-  USE_SIMPLE_CTOR_DTOR(GraphDummyOp);
+  using Operator<CPUContext>::Operator;
   bool RunOnDevice() override {
     counter.fetch_add(1);
     return true;
   }
 };
 
-REGISTER_CPU_OPERATOR(GraphDummyOp1, GraphDummyOp<CPUContext>);
+REGISTER_CPU_OPERATOR(GraphDummyOp1, GraphDummyOp);
 
 OPERATOR_SCHEMA(GraphDummyOp1)
     .NumInputs(0, INT_MAX)
     .NumOutputs(0, INT_MAX)
     .AllowInplace({{0, 0}, {1, 1}});
 
-REGISTER_CPU_OPERATOR(GraphDummyOp2, GraphDummyOp<CPUContext>);
+REGISTER_CPU_OPERATOR(GraphDummyOp2, GraphDummyOp);
 
 OPERATOR_SCHEMA(GraphDummyOp2)
     .NumInputs(0, INT_MAX)
     .NumOutputs(0, INT_MAX)
     .AllowInplace({{0, 0}, {1, 1}});
 
-REGISTER_CPU_OPERATOR(GraphDummyOp3, GraphDummyOp<CPUContext>);
+REGISTER_CPU_OPERATOR(GraphDummyOp3, GraphDummyOp);
 
 OPERATOR_SCHEMA(GraphDummyOp3)
     .NumInputs(0, INT_MAX)

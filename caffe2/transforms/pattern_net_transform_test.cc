@@ -11,16 +11,19 @@ using transform::Graph;
 
 static std::atomic<int> counter;
 
-class DummyCounterOp final : public OperatorBase {
+class DummyCounterOp final : public Operator<CPUContext> {
  public:
-  using OperatorBase::OperatorBase;
-  bool Run(int /* unused */) override {
+  DummyCounterOp(const OperatorDef& operator_def, Workspace* ws)
+    : Operator<CPUContext>(operator_def, ws) {}
+  bool RunOnDevice() override {
     counter.fetch_add(1);
     return true;
   }
 };
 
 REGISTER_CPU_OPERATOR(DummyCounterOp1, DummyCounterOp);
+// NB: This operator is registered purely for graph rewriting purposes;
+// in this test, we don't ever actually try to run the CUDA DummyCounterOp.
 REGISTER_CUDA_OPERATOR(DummyCounterOp1, DummyCounterOp);
 
 OPERATOR_SCHEMA(DummyCounterOp1)

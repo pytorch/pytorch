@@ -11,18 +11,17 @@ namespace {
 
 static std::atomic<int> counter;
 
-// A net test dummy op that does nothing but scaffolding. Here, we
-// inherit from OperatorBase because we instantiate on both CPU and
-// GPU. In general, you want to only inherit from Operator<Context>.
-class NetTestDummyOp final : public OperatorBase {
+// A net test dummy op that does nothing but scaffolding.
+template <typename Context>
+class NetTestDummyOp final : public Operator<Context> {
  public:
   using OperatorBase::OperatorBase;
 
   NetTestDummyOp(const OperatorDef& operator_def, Workspace* ws)
-      : OperatorBase(operator_def, ws),
+      : Operator<Context>(operator_def, ws),
         fail_(OperatorBase::GetSingleArgument<bool>("fail", false)) {}
 
-  bool Run(int /* unused */ /*stream_id*/) override {
+  bool RunOnDevice() override {
     if (fail_) {
       return false;
     }
@@ -43,10 +42,10 @@ class NetTestDummyOp final : public OperatorBase {
   const bool fail_;
 };
 
-REGISTER_CPU_OPERATOR(NetTestDummy, NetTestDummyOp);
-REGISTER_CUDA_OPERATOR(NetTestDummy, NetTestDummyOp);
-REGISTER_CPU_OPERATOR(NetTestDummy2, NetTestDummyOp);
-REGISTER_CUDA_OPERATOR(NetTestDummy2, NetTestDummyOp);
+REGISTER_CPU_OPERATOR(NetTestDummy, NetTestDummyOp<CPUContext>);
+REGISTER_CUDA_OPERATOR(NetTestDummy, NetTestDummyOp<CUDAContext>);
+REGISTER_CPU_OPERATOR(NetTestDummy2, NetTestDummyOp<CPUContext>);
+REGISTER_CUDA_OPERATOR(NetTestDummy2, NetTestDummyOp<CUDAContext>);
 
 OPERATOR_SCHEMA(NetTestDummy)
     .NumInputs(0, INT_MAX)

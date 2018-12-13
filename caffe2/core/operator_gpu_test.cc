@@ -6,10 +6,10 @@
 
 namespace caffe2 {
 
-class JustTest : public OperatorBase {
+class JustTest : public Operator<CUDAContext> {
  public:
-  using OperatorBase::OperatorBase;
-  bool Run(int /* unused */ /*stream_id*/) override {
+  using Operator<CUDAContext>::Operator;
+  bool RunOnDevice() override {
     return true;
   }
   virtual std::string type() {
@@ -20,7 +20,7 @@ class JustTest : public OperatorBase {
 class JustTestCUDA : public JustTest {
  public:
   using JustTest::JustTest;
-  bool Run(int /* unused */ /*stream_id*/) override {
+  bool RunOnDevice() override {
     return true;
   }
   std::string type() override {
@@ -31,7 +31,7 @@ class JustTestCUDA : public JustTest {
 class JustTestCUDNN : public JustTest {
  public:
   using JustTest::JustTest;
-  bool Run(int /* unused */ /*stream_id*/) override {
+  bool RunOnDevice() override {
     return true;
   }
   std::string type() override {
