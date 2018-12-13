@@ -3017,8 +3017,9 @@
 
 - func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total) -> Tensor
 
-## NN wrappers
-# these all have "requires_tensor: True" because they directly call into THNN which doesn't support Variables.
+# except for the case below, these all  have "requires_tensor: True"
+# because they directly call into THNN which doesn't support Variables.
+# case: non-forward functions that just call the forward function, because these don't call directly into TH.
 
 - func: binary_cross_entropy_out(Tensor output, Tensor self, Tensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean) -> Tensor
   python_module: nn
@@ -3086,11 +3087,9 @@
 
 - func: multilabel_margin_loss_out(Tensor output, Tensor self, Tensor target, int64_t reduction=Reduction::Mean) -> Tensor
   python_module: nn
-  requires_tensor: True
 
 - func: multilabel_margin_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean) -> Tensor
   python_module: nn
-  requires_tensor: True
 
 - func: multilabel_margin_loss_forward_out(Tensor output, Tensor is_target, Tensor self, Tensor target, int64_t reduction) -> (Tensor, Tensor)
   python_module: nn
@@ -3110,11 +3109,9 @@
 
 - func: nll_loss_out(Tensor output, Tensor self, Tensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean, int64_t ignore_index=-100) -> Tensor
   python_module: nn
-  requires_tensor: True
 
 - func: nll_loss(Tensor self, Tensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean, int64_t ignore_index=-100) -> Tensor
   python_module: nn
-  requires_tensor: True
 
 - func: nll_loss_forward_out(Tensor output, Tensor total_weight, Tensor self, Tensor target, Tensor? weight, int64_t reduction, int64_t ignore_index) -> (Tensor, Tensor)
   python_module: nn
@@ -3134,11 +3131,9 @@
 
 - func: nll_loss2d_out(Tensor output, Tensor self, Tensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean, int64_t ignore_index=-100) -> Tensor
   python_module: nn
-  requires_tensor: True
 
 - func: nll_loss2d(Tensor self, Tensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean, int64_t ignore_index=-100) -> Tensor
   python_module: nn
-  requires_tensor: True
 
 - func: nll_loss2d_forward_out(Tensor output, Tensor total_weight, Tensor self, Tensor target, Tensor? weight, int64_t reduction, int64_t ignore_index) -> (Tensor, Tensor)
   python_module: nn
@@ -3266,11 +3261,9 @@
 
 - func: log_sigmoid_out(Tensor output, Tensor self) -> Tensor
   python_module: nn
-  requires_tensor: True
 
 - func: log_sigmoid(Tensor self) -> Tensor
   python_module: nn
-  requires_tensor: True
 
 - func: log_sigmoid_forward_out(Tensor output, Tensor buffer, Tensor self) -> (Tensor, Tensor)
   python_module: nn
@@ -3710,11 +3703,9 @@
 
 - func: thnn_conv_transpose2d_out(Tensor output, Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] output_padding=0, IntList[2] dilation=1) -> Tensor
   python_module: nn
-  requires_tensor: True
 
 - func: thnn_conv_transpose2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] output_padding=0, IntList[2] dilation=1) -> Tensor
   python_module: nn
-  requires_tensor: True
 
 - func: thnn_conv_transpose2d_forward_out(Tensor output, Tensor columns, Tensor ones, Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias, IntList[2] stride, IntList[2] padding, IntList[2] output_padding, IntList[2] dilation) -> (Tensor, Tensor, Tensor)
   python_module: nn
@@ -3734,11 +3725,9 @@
 
 - func: thnn_conv_transpose3d_out(Tensor output, Tensor self, Tensor weight, IntList[3] kernel_size, Tensor? bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, IntList[3] dilation=1) -> Tensor
   python_module: nn
-  requires_tensor: True
 
 - func: thnn_conv_transpose3d(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor? bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, IntList[3] dilation=1) -> Tensor
   python_module: nn
-  requires_tensor: True
 
 - func: thnn_conv_transpose3d_forward_out(Tensor output, Tensor finput, Tensor fgrad_input, Tensor self, Tensor weight, IntList[3] kernel_size, Tensor? bias, IntList[3] stride, IntList[3] padding, IntList[3] output_padding, IntList[3] dilation) -> (Tensor, Tensor, Tensor)
   python_module: nn
@@ -3758,11 +3747,9 @@
 
 - func: thnn_conv2d_out(Tensor output, Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias={}, IntList[2] stride=1, IntList[2] padding=0) -> Tensor
   python_module: nn
-  requires_tensor: True
 
 - func: thnn_conv2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias={}, IntList[2] stride=1, IntList[2] padding=0) -> Tensor
   python_module: nn
-  requires_tensor: True
 
 - func: thnn_conv2d_forward_out(Tensor output, Tensor finput, Tensor fgrad_input, Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias, IntList[2] stride, IntList[2] padding) -> (Tensor, Tensor, Tensor)
   python_module: nn
@@ -3806,11 +3793,9 @@
 
 - func: thnn_conv3d_out(Tensor output, Tensor self, Tensor weight, IntList[3] kernel_size, Tensor? bias={}, IntList[3] stride=1, IntList[3] padding=0) -> Tensor
   python_module: nn
-  requires_tensor: True
 
 - func: thnn_conv3d(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor? bias={}, IntList[3] stride=1, IntList[3] padding=0) -> Tensor
   python_module: nn
-  requires_tensor: True
 
 - func: thnn_conv3d_forward_out(Tensor output, Tensor finput, Tensor fgrad_input, Tensor self, Tensor weight, IntList[3] kernel_size, Tensor? bias, IntList[3] stride, IntList[3] padding) -> (Tensor, Tensor, Tensor)
   python_module: nn
@@ -3830,11 +3815,9 @@
 
 - func: thnn_conv_dilated2d_out(Tensor output, Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] dilation=1) -> Tensor
   python_module: nn
-  requires_tensor: True
 
 - func: thnn_conv_dilated2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] dilation=1) -> Tensor
   python_module: nn
-  requires_tensor: True
 
 - func: thnn_conv_dilated2d_forward_out(Tensor output, Tensor columns, Tensor ones, Tensor self, Tensor weight, IntList[2] kernel_size, Tensor? bias, IntList[2] stride, IntList[2] padding, IntList[2] dilation) -> (Tensor, Tensor, Tensor)
   python_module: nn
@@ -3854,11 +3837,9 @@
 
 - func: thnn_conv_dilated3d_out(Tensor output, Tensor self, Tensor weight, IntList[3] kernel_size, Tensor? bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] dilation=1) -> Tensor
   python_module: nn
-  requires_tensor: True
 
 - func: thnn_conv_dilated3d(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor? bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] dilation=1) -> Tensor
   python_module: nn
-  requires_tensor: True
 
 - func: thnn_conv_dilated3d_forward_out(Tensor output, Tensor columns, Tensor ones, Tensor self, Tensor weight, IntList[3] kernel_size, Tensor? bias, IntList[3] stride, IntList[3] padding, IntList[3] dilation) -> (Tensor, Tensor, Tensor)
   python_module: nn
