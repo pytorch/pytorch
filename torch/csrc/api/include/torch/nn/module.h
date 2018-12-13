@@ -253,11 +253,12 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   /// their keys.
   OrderedDict<std::string, std::shared_ptr<Module>> named_children() const;
 
-  /// Enables training mode.
-  virtual void train();
+  /// Enables "training" mode.
+  virtual void train(bool on = true);
 
-  /// Disables training mode.
-  virtual void eval();
+  /// Calls train(false) to enable "eval" mode.
+  /// Do not override this method, override `train()` instead.
+  void eval();
 
   /// True if the module is in training mode.
   ///
