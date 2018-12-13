@@ -4,6 +4,7 @@
 
 #include <unordered_map>
 #include <vector>
+#include <utility>
 #include <mutex>
 
 namespace at { namespace native {
@@ -12,8 +13,10 @@ namespace {
 
 struct Handle {
   cudnnHandle_t handle;
-  Handle() : handle(nullptr) {
-    AT_CUDNN_CHECK(cudnnCreate(&handle));
+  Handle(bool create = false) : handle(nullptr)
+  {
+    if(create)
+      AT_CUDNN_CHECK(cudnnCreate(&handle));
   }
   // std::vector.emplace() and push_back() may route through temporaries and call
   // copy/move constructors along the way.  If this is the case, we don't want
@@ -24,17 +27,14 @@ struct Handle {
   // reference counting, but reference counting may be overkill here.
   // Another alternative is to wrap the saved Handles in unique_ptrs, i.e.,
   // unordered_map<int, vector<unique_ptr<Handle>>> created_handles;
-  void transfer(Handle& rhs) {
-    handle = rhs.handle;
-    rhs.handle = nullptr;
-  }
   Handle(const Handle& rhs) = delete;
-  Handle(Handle&& rhs) { transfer(rhs); }
-  // operator= takes argument by value, following
-  // https://stackoverflow.com/questions/3279543/what-is-the-copy-and-swap-idiom
-  Handle& operator=(Handle rhs) { transfer(rhs); return *this; }
+  // Following https://stackoverflow.com/questions/3279543/what-is-the-copy-and-swap-idiom
+  Handle(Handle&& rhs) : Handle() { std::swap(handle, rhs.handle); }
+  // operator= takes argument by value
+  Handle& operator=(Handle rhs) { std::swap(handle, rhs.handle); return *this; }
   ~Handle() {
-    if(handle) {
+    if(handle)
+    {
 // this is because of something dumb in the ordering of
 // destruction. Sometimes atexit, the cuda context (or something)
 // would already be destroyed by the time this gets destroyed. It
@@ -100,7 +100,7 @@ class PoolWindow
     {
       // In local testing, I do observe that emplace_back sometimes routes through temporaries
       // that incur move-constructor and destructor calls.  See comments in Handle above.
-      created_handles[device].emplace_back(); // no arguments to Handle constructor
+      created_handles[device].emplace_back(true /*create*/);
       my_handles[device] = created_handles[device].back().handle;
     }
 
