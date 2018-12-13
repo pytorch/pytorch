@@ -1142,6 +1142,7 @@ if _enabled:
 
         def copy(self):
             m = ScriptModule()
+
             def module_lookup(names):
                 curr = m
                 for name in names:
