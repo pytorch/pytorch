@@ -22,6 +22,7 @@
 
 #include <c10/Device.h>
 #include <c10/Stream.h>
+#include <c10/cuda/CUDAStream.h>
 
 namespace caffe2 {
 
@@ -46,6 +47,10 @@ CAFFE2_CUDA_API CudaMemoryPoolType GetCudaMemoryPoolType();
  * having the ThreadLocalCUDAObjects wrapper that takes care of allocating
  * and deallocating these objects at the thread scope. This class is solely
  * used inside CUDAContext and should not be used externally.
+ *
+ * This class manages the mapping from logical stream ID (int stream_id
+ * passed around in Caffe2) and CUDAStream objects.  We intend to eventually
+ * deprecate the logical stream ID interface, but not for now.
  */
 class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
   friend class CUDAContext;
@@ -53,12 +58,11 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
  private:
   ThreadLocalCUDAObjects() {
     for (DeviceIndex i = 0; i < CAFFE2_COMPILE_TIME_MAX_GPUS; ++i) {
-      cuda_streams_[i] = vector<cudaStream_t>();
+      cuda_streams_[i] = vector<c10::cuda::CUDAStream>();
       cublas_handles_[i] = vector<cublasHandle_t>();
 #ifdef CAFFE2_USE_CUDNN
       cudnn_handles_[i] = vector<cudnnHandle_t>();
 #endif // CAFFE2_USE_CUDNN
-      current_stream_id_[i] = 0;
     }
   }
 
@@ -68,27 +72,28 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
   // CUDAContext::SwitchToDevice
   void SetCurrentStreamId(DeviceIndex gpu, StreamId stream_id) {
     // TODO: use current device id from thread local instead of passing gpu in
-    current_stream_id_[gpu] = stream_id;
+    c10::cuda::setCurrentCUDAStream(cuda_streams_[gpu].at(stream_id));
   }
 
   // Uses the logical stream id from the thread local to pick the stream
   // We're going to migrate all usages to this case API instead of passing the
   // stream id directly
   cudaStream_t GetStream(DeviceIndex gpu) {
-    return GetStream(gpu, current_stream_id_[gpu]);
+    return GetStream(gpu, c10::cuda::getCurrentCUDAStream(gpu));
   }
 
   cudaStream_t GetStream(DeviceIndex gpu, StreamId stream_id) {
-    vector<cudaStream_t>& gpu_streams = cuda_streams_[gpu];
-    if (gpu_streams.size() <= static_cast<size_t>(stream_id)) {
-      gpu_streams.resize(stream_id + 1, nullptr);
+    vector<c10::cuda::CUDAStream>& gpu_streams = cuda_streams_[gpu];
+    while (gpu_streams.size() <= static_cast<size_t>(stream_id)) {
+      // NB: This streams are not guaranteed to be unique; we'll
+      // wrap around once we run out of streams in the pool.
+      gpu_streams.emplace_back(c10::cuda::getStreamFromPool());
     }
-    if (!gpu_streams[stream_id]) {
-      DeviceGuard guard(gpu);
-      CUDA_ENFORCE(cudaStreamCreateWithFlags(
-          &gpu_streams[stream_id], cudaStreamNonBlocking));
-    }
-    return gpu_streams[stream_id];
+    return GetStream(gpu, gpu_streams[stream_id]);
+  }
+
+  cudaStream_t GetStream(/* unused */ DeviceIndex gpu, c10::cuda::CUDAStream stream) {
+    return stream.stream();
   }
 
   // Uses the logical stream id from the thread local to pick the stream
@@ -147,11 +152,6 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
           CUBLAS_CHECK(cublasDestroy(handle));
         }
       }
-      for (auto& stream : cuda_streams_[i]) {
-        if (stream) {
-          CUDA_CHECK(cudaStreamDestroy(stream));
-        }
-      }
 
 #ifdef CAFFE2_USE_CUDNN
       for (auto& handle : cudnn_handles_[i]) {
@@ -162,7 +162,7 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
 #endif // CAFFE2_USE_CUDNN
     }
   }
-  vector<cudaStream_t> cuda_streams_[CAFFE2_COMPILE_TIME_MAX_GPUS];
+  vector<c10::cuda::CUDAStream> cuda_streams_[CAFFE2_COMPILE_TIME_MAX_GPUS];
   vector<cublasHandle_t> cublas_handles_[CAFFE2_COMPILE_TIME_MAX_GPUS];
 #ifdef CAFFE2_USE_CUDNN
   vector<cudnnHandle_t> cudnn_handles_[CAFFE2_COMPILE_TIME_MAX_GPUS];
