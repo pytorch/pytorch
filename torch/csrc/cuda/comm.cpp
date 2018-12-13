@@ -11,7 +11,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/autograd/variable.h>
 

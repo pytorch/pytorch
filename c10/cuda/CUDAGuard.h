@@ -1,13 +1,14 @@
 #pragma once
 
-#include <ATen/cuda/detail/CUDAGuardImpl.h>
+#include <c10/cuda/impl/CUDAGuardImpl.h>
+#include <c10/cuda/CUDAMacros.h>
 #include <c10/DeviceType.h>
 #include <c10/impl/InlineDeviceGuard.h>
 #include <c10/impl/InlineStreamGuard.h>
 
 #include <cstddef>
 
-namespace at { namespace cuda {
+namespace c10 { namespace cuda {
 
 // This code is kind of boilerplatey.  See Note [Whither the DeviceGuard boilerplate]
 
@@ -56,7 +57,7 @@ struct CUDAGuard {
 
  private:
   /// The guard for the current device.
-  c10::impl::InlineDeviceGuard<at::cuda::impl::CUDAGuardImpl> guard_;
+  c10::impl::InlineDeviceGuard<impl::CUDAGuardImpl> guard_;
 };
 
 /// A variant of OptionalDeviceGuard that is specialized for CUDA.  See
@@ -108,7 +109,7 @@ struct OptionalCUDAGuard {
   void reset() { guard_.reset(); }
 
 private:
-  c10::impl::InlineOptionalDeviceGuard<at::cuda::impl::CUDAGuardImpl> guard_;
+  c10::impl::InlineOptionalDeviceGuard<impl::CUDAGuardImpl> guard_;
 };
 
 /// A variant of StreamGuard that is specialized for CUDA.  See CUDAGuard
@@ -165,7 +166,7 @@ struct CUDAStreamGuard {
   Device original_device() const { return guard_.original_device(); }
 
 private:
-  c10::impl::InlineStreamGuard<at::cuda::impl::CUDAGuardImpl> guard_;
+  c10::impl::InlineStreamGuard<impl::CUDAGuardImpl> guard_;
 };
 
 /// A variant of OptionalStreamGuard that is specialized for CUDA.  See CUDAGuard
@@ -228,8 +229,8 @@ struct OptionalCUDAStreamGuard {
   void reset() { guard_.reset(); }
 
 private:
-  c10::impl::InlineOptionalStreamGuard<at::cuda::impl::CUDAGuardImpl> guard_;
+  c10::impl::InlineOptionalStreamGuard<impl::CUDAGuardImpl> guard_;
 };
 
 } // namespace cuda
-} // namespace at
+} // namespace c10
