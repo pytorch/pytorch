@@ -1140,6 +1140,18 @@ if _enabled:
             rcb = createResolutionCallback(frames_up=1)
             self._define(lang, rcb, True)
 
+        def copy(self):
+            m = ScriptModule()
+            def module_lookup(names):
+                curr = m
+                for name in names:
+                    if not hasattr(curr, name):
+                        setattr(curr, name, ScriptModule())
+                    curr = getattr(curr, name)
+                return curr
+            self._copy(m, module_lookup, [])
+            return m
+
     class WeakScriptModuleProxy(ScriptModule):
         def __init__(self, original, stubs):
             # Guards behavior of __setattr__ and __getattr__ so ScriptModule
@@ -1306,7 +1318,6 @@ class TracedModule(ScriptModule):
         for name, submodule in orig._modules.items():
             if isinstance(submodule, ScriptModule) and not isinstance(submodule, TracedModule):
                 self._modules[name] = submodule.copy()
-                self._register_module(name, self._modules[name])
             else:
                 self._modules[name] = TracedModule(submodule, id_set, optimize=optimize)
 
