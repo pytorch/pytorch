@@ -4,8 +4,6 @@
 #include <string>
 
 struct Net : torch::nn::Module {
-  using torch::nn::Module::register_parameter;
-
   Net(int64_t in, int64_t out) : fc(in, out) {
     register_module("fc", fc);
     buffer = register_buffer("buf", torch::eye(5));

@@ -64,17 +64,34 @@ void bind_cpp_module_wrapper(
   // (the `torch::nn::Module` subclass), and then forward it to the
   // `ModuleWrapper` constructor.
   py::dict attributes;
-  attributes["__init__"] = py::cpp_function(
+
+  // `type()` always needs a `str`, but pybind11's `str()` method always creates
+  // a `unicode` object.
+#if PY_MAJOR_VERSION < 3
+  py::object name_str =
+      py::reinterpret_steal<py::object>(PyString_FromString(name));
+#else
+  py::object name_str = py::str(name);
+#endif
+
+  // Dynamically create the subclass of `ModuleWrapper`, which is a subclass of
+  // `torch.nn.Module`, and will delegate all calls to the C++ module we're
+  // binding.
+  py::object wrapper_class =
+      type_metaclass(name_str, py::make_tuple(cpp_module), attributes);
+
+  // The constructor of the dynamic class calls `ModuleWrapper.__init__()`,
+  // which replaces its methods with those of the C++ module.
+  wrapper_class.attr("__init__") = py::cpp_function(
       [cpp_module, cpp_class](
           py::object self, py::args args, py::kwargs kwargs) {
         cpp_module.attr("__init__")(self, cpp_class(*args, **kwargs));
       },
-      py::is_method(py::none()));
+      py::is_method(wrapper_class));
 
-  // Dynamically create the subclass of `ModuleWrapper` and bind it as
-  // `module.<name>`.
-  module.attr(name) =
-      type_metaclass(name, py::make_tuple(cpp_module), attributes);
+  // Calling `my_module.my_class` now means that `my_class` is a subclass of
+  // `ModuleWrapper`, and whose methods call into the C++ module we're binding.
+  module.attr(name) = wrapper_class;
 }
 } // namespace detail
 
