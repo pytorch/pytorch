@@ -35,8 +35,8 @@ bool PercentileOp<CPUContext>::RunOnDevice() {
     percentiles_tensor_data[ind] = value_pct_data[2 * ind + 1];
   }
 
-  auto* percentile_values = Output(PCT);
-  percentile_values->ResizeLike(original_values);
+  auto* percentile_values =
+      Output(PCT, original_values.sizes(), at::dtype<float>());
   float* percentile_values_data =
       percentile_values->template mutable_data<float>();
 
