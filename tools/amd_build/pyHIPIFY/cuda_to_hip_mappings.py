@@ -276,7 +276,6 @@ CUDA_INCLUDE_MAP = collections.OrderedDict([
     ("cusparse.h", ("hipsparse.h", CONV_INCLUDE, API_RAND)),
     ("cufft.h", ("hipfft.h", CONV_INCLUDE, API_BLAS)),
     ("cufftXt.h", ("hipfft.h", CONV_INCLUDE, API_BLAS)),
-    ("#include <nvfunctional>", ("", CONV_INCLUDE, API_RAND, HIP_UNSUPPORTED)),
 ])
 
 CUDA_IDENTIFIER_MAP = collections.OrderedDict([
@@ -2179,13 +2178,16 @@ CUDA_SPARSE_MAP = collections.OrderedDict([
     ("cusparseStatus_t", ("hipsparseStatus_t", CONV_MATH_FUNC, API_SPARSE)),
     ("cusparseHandle_t", ("hipsparseHandle_t", CONV_MATH_FUNC, API_SPARSE)),
     ("cusparseOperation_t", ("hipsparseOperation_t", CONV_TYPE, API_SPARSE)),
+    ("cusparseCreateMatDescr", ("hipsparseCreateMatDescr", CONV_MATH_FUNC, API_SPARSE)),
     ("cusparseCreate", ("hipsparseCreate", CONV_MATH_FUNC, API_SPARSE)),
+    ("cusparseDestroyMatDescr", ("hipsparseDestroyMatDescr", CONV_MATH_FUNC, API_SPARSE)),
     ("cusparseDestroy", ("hipsparseDestroy", CONV_MATH_FUNC, API_SPARSE)),
     ("cusparseXcoo2csr", ("hipsparseXcoo2csr", CONV_MATH_FUNC, API_SPARSE)),
     ("cusparseMatDescr_t", ("hipsparseMatDescr_t", CONV_MATH_FUNC, API_SPARSE)),
-    ("cusparseCreateMatDescr", ("hipsparseCreateMatDescr", CONV_MATH_FUNC, API_SPARSE)),
     ("cusparseScsrmm2", ("hipsparseScsrmm2", CONV_MATH_FUNC, API_SPARSE)),
     ("cusparseDcsrmm2", ("hipsparseDcsrmm2", CONV_MATH_FUNC, API_SPARSE)),
+    ("cusparseScsrmm", ("hipsparseScsrmm", CONV_MATH_FUNC, API_SPARSE)),
+    ("cusparseDcsrmm", ("hipsparseDcsrmm", CONV_MATH_FUNC, API_SPARSE)),
     ("cusparseXcsrsort_bufferSizeExt", ("hipsparseXcsrsort_bufferSizeExt", CONV_MATH_FUNC, API_SPARSE)),
     ("cusparseXcsrsort", ("hipsparseXcsrsort", CONV_MATH_FUNC, API_SPARSE)),
     ("cusparseXcoosort_bufferSizeExt", ("hipsparseXcoosort_bufferSizeExt", CONV_MATH_FUNC, API_SPARSE)),
@@ -2193,6 +2195,7 @@ CUDA_SPARSE_MAP = collections.OrderedDict([
     ("cusparseSetStream", ("hipsparseSetStream", CONV_MATH_FUNC, API_SPARSE)),
     ("cusparseCreateIdentityPermutation", ("hipsparseCreateIdentityPermutation", CONV_MATH_FUNC, API_SPARSE)),
     ("cusparseSetMatIndexBase", ("hipsparseSetMatIndexBase", CONV_MATH_FUNC, API_SPARSE)),
+    ("cusparseSetMatType", ("hipsparseSetMatType", CONV_MATH_FUNC, API_SPARSE)),
     ("CUSPARSE_STATUS_SUCCESS", ("HIPSPARSE_STATUS_SUCCESS", CONV_NUMERIC_LITERAL, API_SPARSE)),
     ("CUSPARSE_STATUS_NOT_INITIALIZED", ("HIPSPARSE_STATUS_NOT_INITIALIZED", CONV_NUMERIC_LITERAL, API_SPARSE)),
     ("CUSPARSE_STATUS_ALLOC_FAILED", ("HIPSPARSE_STATUS_ALLOC_FAILED", CONV_NUMERIC_LITERAL, API_SPARSE)),
@@ -2208,6 +2211,7 @@ CUDA_SPARSE_MAP = collections.OrderedDict([
     ("CUSPARSE_OPERATION_CONJUGATE_TRANSPOSE", ("HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE", CONV_NUMERIC_LITERAL, API_SPARSE)),
     ("CUSPARSE_INDEX_BASE_ZERO", ("HIPSPARSE_INDEX_BASE_ZERO", CONV_NUMERIC_LITERAL, API_SPARSE)),
     ("CUSPARSE_INDEX_BASE_ONE", ("HIPSPARSE_INDEX_BASE_ONE", CONV_NUMERIC_LITERAL, API_SPARSE)),
+    ("CUSPARSE_MATRIX_TYPE_GENERAL", ("HIPSPARSE_MATRIX_TYPE_GENERAL", CONV_NUMERIC_LITERAL, API_SPARSE)),
 ])
 
 PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict([
