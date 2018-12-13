@@ -2,6 +2,8 @@
 # torch/csrc/{autgrad,jit}/generated. In fbcode, this distinction is
 # not currently relevant so they are combined into one list.
 from __future__ import absolute_import, division, print_function, unicode_literals
+
+
 GENERATED_CPP = [
     "Functions.cpp",
     "THCUNN.cpp",
@@ -98,35 +100,33 @@ def torch_vars():
     # We start torch_sources with all cpp files, and exclude some.
     # This is a much better approach than listing all of them manually because
     # the number of excluded files is small and doesn"t change very frequently
-    r["torch_sources"] = native.glob(
-        ["torch/csrc/**/*.cpp"],
-        exclude = [
-            # remove anything that has "generic" in it"s path
-            "torch/csrc/**/generic/**/*.cpp",
-            # distributed only uses Module.cpp
-            # so remove all other files and just include that
-            "torch/csrc/distributed/**/*.cpp",
-        ],
-    ) + [
-        "torch/csrc/distributed/Module.cpp",
-        "torch/csrc/distributed/c10d/init.cpp",
-        "torch/csrc/distributed/c10d/ddp.cpp",
-    ] + [":generate-code=" + x for x in GENERATED_CPP]
+    r["torch_sources"] = (
+        native.glob(
+            ["torch/csrc/**/*.cpp"],
+            exclude=[
+                # remove anything that has "generic" in it"s path
+                "torch/csrc/**/generic/**/*.cpp",
+                # distributed only uses Module.cpp
+                # so remove all other files and just include that
+                "torch/csrc/distributed/**/*.cpp",
+            ],
+        )
+        + [
+            "torch/csrc/distributed/Module.cpp",
+            "torch/csrc/distributed/c10d/init.cpp",
+            "torch/csrc/distributed/c10d/ddp.cpp",
+        ]
+        + [":generate-code=" + x for x in GENERATED_CPP]
+    )
 
-    r["torch_sources_no_python"] = torch_sources_no_python_default + [
-        "torch/csrc/cuda/comm.cpp",
-        "torch/csrc/cuda/nccl.cpp",
-    ] + native.glob(
-        [
-            "torch/csrc/jit/fuser/**/*.cpp",
-        ],
+    r["torch_sources_no_python"] = (
+        torch_sources_no_python_default
+        + ["torch/csrc/cuda/comm.cpp", "torch/csrc/cuda/nccl.cpp"]
+        + native.glob(["torch/csrc/jit/fuser/**/*.cpp"])
     )
 
     r["torch_sources_no_python_cpu"] = torch_sources_no_python_default + native.glob(
-        [
-            "torch/csrc/jit/fuser/**/*.cpp",
-        ],
-        exclude = ["torch/csrc/jit/fuser/cuda/*.cpp"],
+        ["torch/csrc/jit/fuser/**/*.cpp"], exclude=["torch/csrc/jit/fuser/cuda/*.cpp"]
     )
 
     r["torch_csrc_flags"] = {
@@ -155,14 +155,9 @@ def torch_vars():
                 "-Wno-pessimizing-move",
                 "-Wno-return-type-c-linkage",
                 "-Wno-unknown-pragmas",
-            ],
+            ]
         },
-        "headers": native.glob(
-            [
-                "torch/csrc/**/*.h",
-                "torch/csrc/generic/*.cpp",
-            ],
-        ),
+        "headers": native.glob(["torch/csrc/**/*.h", "torch/csrc/generic/*.cpp"]),
         "preprocessor_flags": [
             "-Icaffe2",
             "-Icaffe2/torch/csrc/api/include",
@@ -174,7 +169,7 @@ def torch_vars():
         ],
     }
 
-    r["torch_csrc_flags_cpu"] = dict(r['torch_csrc_flags'])
+    r["torch_csrc_flags_cpu"] = dict(r["torch_csrc_flags"])
 
     r["torch_csrc_flags_cpu"]["preprocessor_flags"] = [
         "-Icaffe2",
