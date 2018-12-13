@@ -8891,6 +8891,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         # check zero dimensional
         x = np.zeros((0, 2))
         self.assertEqual(torch.from_numpy(x).shape, (0, 2))
+        x = np.zeros((2, 0))
+        self.assertEqual(torch.from_numpy(x).shape, (2, 0))
 
         # check ill-sized strides raise exception
         x = np.array([3., 5., 8.])
