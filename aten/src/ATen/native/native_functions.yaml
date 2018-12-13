@@ -1597,11 +1597,8 @@
 # missing the `pad_mode` and `center` arguments, which are taken care of at
 # `torch.functional.py`. They shall be moved here once we have mapping between
 # Python strings and C++ Enum in codegen.
-- func: stft(Tensor self, int64_t n_fft, int64_t hop_length, int64_t win_length, Tensor? window={}, bool normalized=false, bool onesided=true) -> Tensor
+- func: stft(Tensor self, int64_t n_fft, int64_t? hop_length=None, int64_t? win_length=None, Tensor? window={}, bool normalized=false, bool onesided=true) -> Tensor
   variants: function, method
-  python_default_init:
-    hop_length: n_fft >> 2
-    win_length: n_fft
 
 - func: stride(Tensor self, int64_t dim) -> int64_t
   variants: function, method
@@ -1890,14 +1887,10 @@
 - func: norm(Tensor self, Scalar p=2) -> Tensor
   variants: function, method
 
-- func: norm(Tensor self, Scalar p, int64_t dim, bool keepdim=false) -> Tensor
+- func: norm(Tensor self, Scalar? p, int64_t dim, bool keepdim=false) -> Tensor
   variants: function, method
-  python_default_init:
-    p: 2
 
-- func: norm_out(Tensor result, Tensor self, Scalar p, int64_t dim, bool keepdim=false) -> Tensor
-  python_default_init:
-    p: 2
+- func: norm_out(Tensor result, Tensor self, Scalar? p, int64_t dim, bool keepdim=false) -> Tensor
 
 - func: frobenius_norm(Tensor self) -> Tensor
   variants: function

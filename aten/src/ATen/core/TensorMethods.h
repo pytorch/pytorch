@@ -568,7 +568,7 @@ inline Tensor & Tensor::squeeze_(int64_t dim) {
 inline Tensor Tensor::sspaddmm(const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) const {
     return type().sspaddmm(*this, mat1, mat2, beta, alpha);
 }
-inline Tensor Tensor::stft(int64_t n_fft, int64_t hop_length, int64_t win_length, const Tensor & window, bool normalized, bool onesided) const {
+inline Tensor Tensor::stft(int64_t n_fft, c10::optional<int64_t> hop_length, c10::optional<int64_t> win_length, const Tensor & window, bool normalized, bool onesided) const {
     return type().stft(*this, n_fft, hop_length, win_length, window, normalized, onesided);
 }
 inline int64_t Tensor::stride(int64_t dim) const {
@@ -682,7 +682,7 @@ inline Tensor Tensor::where(const Tensor & condition, const Tensor & other) cons
 inline Tensor Tensor::norm(Scalar p) const {
     return type().norm(*this, p);
 }
-inline Tensor Tensor::norm(Scalar p, int64_t dim, bool keepdim) const {
+inline Tensor Tensor::norm(c10::optional<Scalar> p, int64_t dim, bool keepdim) const {
     return type().norm(*this, p, dim, keepdim);
 }
 inline Tensor Tensor::clone() const {

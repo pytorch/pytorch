@@ -320,11 +320,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                     default_expr += '.scalarType()'
                 expr = 'r.{}({}, {})'.format(unpack_with_default, arg_index, default_expr)
             else:
-                opt_match = re.match(r'c10::optional<(.+)>', typename)
-                if (opt_match):
-                    unpack = opt_match.group(1).lower() + 'Optional'
-                else:
-                    unpack = unpack_methods.get(typename, typename.lower())
+                unpack = unpack_methods.get(typename, typename.lower())
                 expr = 'r.{}({})'.format(unpack, arg_index)
 
             if unpack_args:

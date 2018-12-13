@@ -88,8 +88,8 @@ int64_t _safe_size(IntList sizes, IntList dim) {
   return size;
 }
 
-Tensor norm_backward(const Tensor & grad, const Tensor & self, const Scalar & p_, const Tensor & norm) {
-  double p = p_.toDouble();
+Tensor norm_backward(const Tensor & grad, const Tensor & self, const optional<Scalar> & p_, const Tensor & norm) {
+  double p = p_->toDouble();
   Tensor self_scaled;
   Tensor scale_v;
   if (p == 0.0) {
@@ -114,7 +114,7 @@ Tensor norm_backward(const Tensor & grad, const Tensor & self, const Scalar & p_
   return self_scaled * scale_v;
 }
 
-Tensor norm_backward(Tensor grad, const Tensor & self, const Scalar & p_, Tensor norm, int64_t dim, bool keepdim) {
+Tensor norm_backward(Tensor grad, const Tensor & self, const optional<Scalar> & p_, Tensor norm, int64_t dim, bool keepdim) {
   if (!keepdim && self.dim() != 0) {
     grad = grad.unsqueeze(dim);
     norm = norm.unsqueeze(dim);
