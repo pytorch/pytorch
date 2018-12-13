@@ -72,28 +72,30 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
   // CUDAContext::SwitchToDevice
   void SetCurrentStreamId(DeviceIndex gpu, StreamId stream_id) {
     // TODO: use current device id from thread local instead of passing gpu in
-    c10::cuda::setCurrentCUDAStream(cuda_streams_[gpu].at(stream_id));
+    c10::cuda::setCurrentCUDAStream(GetCUDAStream(gpu, stream_id));
   }
 
-  // Uses the logical stream id from the thread local to pick the stream
-  // We're going to migrate all usages to this case API instead of passing the
-  // stream id directly
-  cudaStream_t GetStream(DeviceIndex gpu) {
-    return GetStream(gpu, c10::cuda::getCurrentCUDAStream(gpu));
-  }
-
-  cudaStream_t GetStream(DeviceIndex gpu, StreamId stream_id) {
+  // Retrieves the CUDAStream corresponding to a logical stream ID, ensuring
+  // that it exists in cuda_streams_ if it has not been allocated yet.
+  c10::cuda::CUDAStream GetCUDAStream(DeviceIndex gpu, StreamId stream_id) {
     vector<c10::cuda::CUDAStream>& gpu_streams = cuda_streams_[gpu];
     while (gpu_streams.size() <= static_cast<size_t>(stream_id)) {
       // NB: This streams are not guaranteed to be unique; we'll
       // wrap around once we run out of streams in the pool.
       gpu_streams.emplace_back(c10::cuda::getStreamFromPool());
     }
-    return GetStream(gpu, gpu_streams[stream_id]);
+    return gpu_streams[stream_id];
   }
 
-  cudaStream_t GetStream(/* unused */ DeviceIndex gpu, c10::cuda::CUDAStream stream) {
-    return stream.stream();
+  // Uses the logical stream id from the thread local to pick the stream
+  // We're going to migrate all usages to this case API instead of passing the
+  // stream id directly
+  cudaStream_t GetStream(DeviceIndex gpu) {
+    return c10::cuda::getCurrentCUDAStream(gpu).stream();
+  }
+
+  cudaStream_t GetStream(DeviceIndex gpu, StreamId stream_id) {
+    return GetCUDAStream(gpu, stream_id).stream();
   }
 
   // Uses the logical stream id from the thread local to pick the stream
