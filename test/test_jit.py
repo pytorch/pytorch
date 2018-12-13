@@ -7149,6 +7149,8 @@ a")
 
         traced = torch.jit.trace(TraceMe(), (torch.rand(4, 3, dtype=torch.float),))
         assert(traced.ssm._has_method('foo'))
+        imported = self.getExportImportCopy(traced)
+        assert(imported.ssm._has_method('foo'))
 
     def test_call_traced_module_from_traced_module(self):
         class TracedModule1(torch.nn.Module):

@@ -1306,10 +1306,7 @@ class TracedModule(ScriptModule):
         for name, submodule in orig._modules.items():
             if isinstance(submodule, ScriptModule) and not isinstance(submodule, TracedModule):
                 self._modules[name] = submodule.copy()
-                p = self._modules[name]._get_parameters()
-                for i in range(len(p)):
-                    self._parameters[p[i][0]] = p[i][1]
-                    check_unique(p[i][1])
+                self._register_module(name, self._modules[name])
             else:
                 self._modules[name] = TracedModule(submodule, id_set, optimize=optimize)
 
