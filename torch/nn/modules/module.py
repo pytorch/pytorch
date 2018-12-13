@@ -20,6 +20,18 @@ def _addindent(s_, numSpaces):
     return s
 
 
+def _if_float_tensor(fn):
+    '''
+    Calls `fn` on a value `t` only if `t` is a float tensor, or not a tensor (in
+    which case it's a module, as part of a recursive call to apply()).
+    '''
+    def apply(t):
+        if not isinstance(t, torch.Tensor) or t.is_floating_point():
+            return fn(t)
+        return t
+    return apply
+
+
 class Module(object):
     r"""Base class for all neural network modules.
 
@@ -184,7 +196,7 @@ class Module(object):
 
     def _apply(self, fn):
         for module in self.children():
-            module._apply(fn)
+            fn(module)
 
         for param in self._parameters.values():
             if param is not None:
@@ -284,7 +296,7 @@ class Module(object):
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.float() if t.is_floating_point() else t)
+        return self._apply(_if_float_tensor(lambda t: t.float()))
 
     def double(self):
         r"""Casts all floating point parameters and buffers to ``double`` datatype.
@@ -292,7 +304,7 @@ class Module(object):
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.double() if t.is_floating_point() else t)
+        return self._apply(_if_float_tensor(lambda t: t.double()))
 
     def half(self):
         r"""Casts all floating point parameters and buffers to ``half`` datatype.
@@ -300,7 +312,7 @@ class Module(object):
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.half() if t.is_floating_point() else t)
+        return self._apply(_if_float_tensor(lambda t: t.half()))
 
     def to(self, *args, **kwargs):
         r"""Moves and/or casts the parameters and buffers.
@@ -376,7 +388,9 @@ class Module(object):
                                 'dtypes, but got desired dtype={}'.format(dtype))
 
         def convert(t):
-            return t.to(device, dtype if t.is_floating_point() else None, non_blocking)
+            if isinstance(t, torch.Tensor):
+                return t.to(device, dtype if t.is_floating_point() else None, non_blocking)
+            return t.to(device, dtype, non_blocking)
 
         return self._apply(convert)
 
