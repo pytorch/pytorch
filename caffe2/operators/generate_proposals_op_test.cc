@@ -92,6 +92,56 @@ TEST(GenerateProposalsTest, TestComputeAllAnchors) {
   EXPECT_EQ((all_anchors_result - all_anchors_gt).norm(), 0);
 }
 
+TEST(GenerateProposalsTest, TestComputeSortedAnchors) {
+  ERMatXf anchors(3, 4);
+  anchors << -38, -16, 53, 31, -84, -40, 99, 55, -176, -88, 191, 103;
+
+  int height = 4;
+  int width = 3;
+  int A = anchors.rows();
+  float feat_stride = 16;
+  int total = height * width * A;
+
+  // Generate all anchors for ground truth
+  Tensor anchors_tensor(vector<int64_t>{anchors.rows(), anchors.cols()}, CPU);
+  Eigen::Map<ERMatXf>(
+      anchors_tensor.mutable_data<float>(), anchors.rows(), anchors.cols()) =
+      anchors;
+  auto all_anchors =
+      utils::ComputeAllAnchors(anchors_tensor, height, width, feat_stride);
+  Eigen::Map<const ERMatXf> all_anchors_result(
+      all_anchors.data(), height * width * A, 4);
+
+  Eigen::Map<const ERArrXXf> anchors_map(
+      anchors.data(), anchors.rows(), anchors.cols());
+
+  // Test with random subsets and ordering of indices
+  vector<int> indices(total);
+  std::iota(indices.begin(), indices.end(), 0);
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::shuffle(indices.begin(), indices.end(), gen);
+  for (int count = 0; count <= total; ++count) {
+    vector<int> order(indices.begin(), indices.begin() + count);
+    auto result = utils::ComputeSortedAnchors(
+        anchors_map, height, width, feat_stride, order);
+
+    // Compare the result of ComputeSortedAnchors with first generating all
+    // anchors via ComputeAllAnchors and then applying ordering and filtering.
+    // Need to convert order from (A, H, W) to (H, W, A) format before for this.
+    const auto& order_AHW = utils::AsEArrXt(order);
+    const auto& order_AH = order_AHW / width;
+    const auto& order_W = order_AHW - order_AH * width;
+    const auto& order_A = order_AH / height;
+    const auto& order_H = order_AH - order_A * height;
+    const auto& order_HWA = (order_H * width + order_W) * A + order_A;
+
+    ERArrXXf gt;
+    utils::GetSubArrayRows(all_anchors_result.array(), order_HWA, &gt);
+    EXPECT_EQ((result.matrix() - gt.matrix()).norm(), 0);
+  }
+}
+
 namespace {
 
 template <class Derived>
@@ -154,6 +204,65 @@ TEST(GenerateProposalsTest, TestComputeAllAnchorsRotated) {
       result.data(), height * width * anchors.rows(), 5);
 
   EXPECT_EQ((all_anchors_result - all_anchors_gt).norm(), 0);
+}
+
+TEST(GenerateProposalsTest, TestComputeSortedAnchorsRotated) {
+  // Similar to TestComputeSortedAnchors but for rotated boxes with angle info.
+  ERMatXf anchors_xyxy(3, 4);
+  anchors_xyxy << -38, -16, 53, 31, -84, -40, 99, 55, -176, -88, 191, 103;
+
+  // Convert to RRPN format and add angles
+  ERMatXf anchors(3, 5);
+  anchors.block(0, 0, 3, 4) = boxes_xyxy_to_xywh(anchors_xyxy);
+  std::vector<float> angles{0.0, 45.0, -120.0};
+  for (int i = 0; i < anchors.rows(); ++i) {
+    anchors(i, 4) = angles[i % angles.size()];
+  }
+
+  int height = 4;
+  int width = 3;
+  int A = anchors.rows();
+  float feat_stride = 16;
+  int total = height * width * A;
+
+  // Generate all anchors for ground truth
+  Tensor anchors_tensor(vector<int64_t>{anchors.rows(), anchors.cols()}, CPU);
+  Eigen::Map<ERMatXf>(
+      anchors_tensor.mutable_data<float>(), anchors.rows(), anchors.cols()) =
+      anchors;
+  auto all_anchors =
+      utils::ComputeAllAnchors(anchors_tensor, height, width, feat_stride);
+  Eigen::Map<const ERMatXf> all_anchors_result(
+      all_anchors.data(), height * width * A, 5);
+
+  Eigen::Map<const ERArrXXf> anchors_map(
+      anchors.data(), anchors.rows(), anchors.cols());
+
+  // Test with random subsets and ordering of indices
+  vector<int> indices(total);
+  std::iota(indices.begin(), indices.end(), 0);
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::shuffle(indices.begin(), indices.end(), gen);
+  for (int count = 0; count <= total; ++count) {
+    vector<int> order(indices.begin(), indices.begin() + count);
+    auto result = utils::ComputeSortedAnchors(
+        anchors_map, height, width, feat_stride, order);
+
+    // Compare the result of ComputeSortedAnchors with first generating all
+    // anchors via ComputeAllAnchors and then applying ordering and filtering.
+    // Need to convert order from (A, H, W) to (H, W, A) format before for this.
+    const auto& order_AHW = utils::AsEArrXt(order);
+    const auto& order_AH = order_AHW / width;
+    const auto& order_W = order_AHW - order_AH * width;
+    const auto& order_A = order_AH / height;
+    const auto& order_H = order_AH - order_A * height;
+    const auto& order_HWA = (order_H * width + order_W) * A + order_A;
+
+    ERArrXXf gt;
+    utils::GetSubArrayRows(all_anchors_result.array(), order_HWA, &gt);
+    EXPECT_EQ((result.matrix() - gt.matrix()).norm(), 0);
+  }
 }
 
 TEST(GenerateProposalsTest, TestEmpty) {
@@ -610,11 +719,17 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotated) {
   EXPECT_NE(nullptr, op.get());
   EXPECT_TRUE(op->Run());
 
-  // Verify that the resulting angles are correct
   Blob* rois_blob = ws.GetBlob("rois");
   EXPECT_NE(nullptr, rois_blob);
   auto& rois = rois_blob->Get<TensorCPU>();
-  EXPECT_GT(rois.size(0), 0);
+  EXPECT_EQ(rois.sizes(), (vector<int64_t>{13, 6}));
+
+  Blob* rois_probs_blob = ws.GetBlob("rois_probs");
+  EXPECT_NE(nullptr, rois_probs_blob);
+  auto& rois_probs = rois_probs_blob->Get<TensorCPU>();
+  EXPECT_EQ(rois_probs.sizes(), (vector<int64_t>{13}));
+
+  // Verify that the resulting angles are correct
   auto rois_data =
       Eigen::Map<const ERMatXf>(rois.data<float>(), rois.size(0), rois.size(1));
   for (int i = 0; i < rois.size(0); ++i) {

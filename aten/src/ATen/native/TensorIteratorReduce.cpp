@@ -125,7 +125,7 @@ void TensorIterator::foreach_reduced_elt(const loop_subiter_t &loop) {
   if (tensor(0).numel() == 1) {
     loop(*this);
   }
-  else if (numel() < at::internal::GRAIN_SIZE || at::get_max_threads() == 1 || at::in_parallel_region()) {
+  else if (numel() < at::internal::GRAIN_SIZE || at::get_num_threads() <= 1 || at::in_parallel_region()) {
     auto reduce_dims = num_reduce_dims();
 
     auto non_reduced_shape = shape.slice(reduce_dims, shape.size() - reduce_dims);

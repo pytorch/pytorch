@@ -92,6 +92,7 @@ private:
   std::vector<int64_t> v_value;
 };
 
+// Pybind11 bindings for our optional type.
 // http://pybind11.readthedocs.io/en/stable/advanced/cast/stl.html#c-17-library-containers
 template <typename T>
 struct type_caster<c10::optional<T>> : optional_caster<c10::optional<T>> {};

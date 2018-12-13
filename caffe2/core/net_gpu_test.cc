@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "caffe2/core/common_gpu.h"
+#include "caffe2/core/context_gpu.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/net_async_base.h"
 #include "caffe2/core/operator.h"
@@ -15,7 +16,7 @@ static std::atomic<int> counter;
 template <typename Context>
 class NetTestDummyOp final : public Operator<Context> {
  public:
-  using OperatorBase::OperatorBase;
+  using Operator<Context>::Operator;
 
   NetTestDummyOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
@@ -31,11 +32,11 @@ class NetTestDummyOp final : public Operator<Context> {
 
   // Simulate CUDA operator behavior
   bool HasAsyncPart() const override {
-    return debug_def().device_option().device_type() == PROTO_CUDA;
+    return OperatorBase::debug_def().device_option().device_type() == PROTO_CUDA;
   }
 
   bool SupportsAsyncScheduling() const override {
-    return debug_def().device_option().device_type() == PROTO_CUDA;
+    return OperatorBase::debug_def().device_option().device_type() == PROTO_CUDA;
   }
 
  protected:

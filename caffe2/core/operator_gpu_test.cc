@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 #include "caffe2/core/common_gpu.h"
+#include "caffe2/core/context_gpu.h"
 #include "caffe2/core/operator.h"
 
 namespace caffe2 {
