@@ -106,7 +106,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, int64_t> sparse_coalesce_comm
   return std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, int64_t>(uniqueOffsets, origIndices, newValues, newIndices, indices1D, newNnz);
 }
 
-SparseTensor sparse_coalesce_sum_cuda(const SparseTensor& self) {
+SparseTensor coalesce_sum_cuda(const SparseTensor& self) {
   int64_t nnz = self._nnz();
 
   if (self.is_coalesced()) {
@@ -168,13 +168,13 @@ SparseTensor sparse_coalesce_sum_cuda(const SparseTensor& self) {
 }
 
 SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
-  return sparse_coalesce_sum_cuda(self);
+  return coalesce_sum_cuda(self);
 }
 
 // --------------------------------------------------------------------
 // coalesce max
 // --------------------------------------------------------------------
-SparseTensor sparse_coalesce_max_cuda(const SparseTensor& self) {
+SparseTensor coalesce_max_cuda(const SparseTensor& self) {
   int64_t nnz = self._nnz();
 
   if (self.is_coalesced()) {
@@ -238,7 +238,7 @@ SparseTensor sparse_coalesce_max_cuda(const SparseTensor& self) {
 // --------------------------------------------------------------------
 // coalesce min
 // --------------------------------------------------------------------
-SparseTensor sparse_coalesce_min_cuda(const SparseTensor& self) {
+SparseTensor coalesce_min_cuda(const SparseTensor& self) {
   int64_t nnz = self._nnz();
 
   if (self.is_coalesced()) {

@@ -456,7 +456,7 @@ SparseTensor coalesce_sum_cpu(const SparseTensor& self) {
 
   auto new_nnz = at::empty({1}, indices.options());
 
-  AT_DISPATCH_ALL_TYPES(values.type(), "coalesce", [&] {
+  AT_DISPATCH_ALL_TYPES(values.type(), "coalesce_sum_cpu", [&] {
     coalesce_reduction_kernel_cpu<scalar_t>(
       values,
       indices,
@@ -520,7 +520,7 @@ SparseTensor coalesce_max_cpu(const SparseTensor& self) {
 
   auto new_nnz = at::empty({1}, indices.options());
 
-  AT_DISPATCH_ALL_TYPES(values.type(), "coalesce", [&] {
+  AT_DISPATCH_ALL_TYPES(values.type(), "coalesce_max_cpu", [&] {
     coalesce_reduction_kernel_cpu<scalar_t>(
       values,
       indices,
@@ -580,7 +580,7 @@ SparseTensor coalesce_min_cpu(const SparseTensor& self) {
 
   auto new_nnz = at::empty({1}, indices.options());
 
-  AT_DISPATCH_ALL_TYPES(values.type(), "coalesce", [&] {
+  AT_DISPATCH_ALL_TYPES(values.type(), "coalesce_min_cpu", [&] {
     coalesce_reduction_kernel_cpu<scalar_t>(
       values,
       indices,

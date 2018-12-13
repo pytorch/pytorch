@@ -416,6 +416,9 @@ struct CAFFE2_API Type {
   virtual int64_t dense_dim(const Tensor & self) const = 0;
   virtual int64_t _dimV(const Tensor & self) const = 0;
   virtual int64_t _nnz(const Tensor & self) const = 0;
+  virtual Tensor coalesce_sum(const Tensor & self) const = 0;
+  virtual Tensor coalesce_max(const Tensor & self) const = 0;
+  virtual Tensor coalesce_min(const Tensor & self) const = 0;
   virtual Tensor coalesce(const Tensor & self) const = 0;
   virtual bool is_coalesced(const Tensor & self) const = 0;
   virtual Tensor _indices(const Tensor & self) const = 0;

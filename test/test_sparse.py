@@ -961,32 +961,21 @@ class TestSparse(TestCase):
     @skipIfRocm
     def test_sparse_sum(self):
 
-        def run_tests(S, td=None):
-            D = S.coalesce().to_dense().detach().requires_grad_(True)
-            mask = (D == 0)
-            if td is None:
-                S_sum = torch.sparse.sum(S)
-                D_sum = D.sum()
-                self.assertEqual(S_sum, D_sum)
+        def run_tests(sparse_op, dense_op, S):
+            D = S.to_dense()
+            S_sum = sparse_op(S)
+            S_sum = S_sum.to_dense() if S_sum.is_sparse else S_sum
+            D_sum = dense_op(D)
+            self.assertEqual(S_sum, D_sum)
 
-                def fn(S):
-                    res = torch.sparse.sum(S)
-                    if res.is_sparse:
-                        res = res.to_dense()
-                    return res
-                gradcheck(fn, (S,), check_sparse_nnz=True)
+            def fn(S):
+                res = sparse_op(S)
+                if res.is_sparse:
+                    res = res.to_dense()
+                return res
 
-            else:
-                S_sum = torch.sparse.sum(S, td)
-                D_sum = D.sum(td)
-                self.assertEqual(S_sum.to_dense() if S_sum.is_sparse else S_sum, D_sum)
-
-                def fn(S):
-                    res = torch.sparse.sum(S, td)
-                    if res.is_sparse:
-                        res = res.to_dense()
-                    return res
-                gradcheck(fn, (S,), check_sparse_nnz=True)
+            S.requires_grad_(True)
+            gradcheck(fn, (S,), check_sparse_nnz=True)
 
         nnz = 10
         sparse_dims = 2
@@ -1014,11 +1003,61 @@ class TestSparse(TestCase):
 
         # test values().sum()
         S = self._gen_sparse(sparse_dims, nnz, with_size)[0]
-        run_tests(S.requires_grad_(True))
+        run_tests(lambda x: torch.sparse.sum(x), lambda x: torch.sum(x), S)
 
         for test_dim in test_dims:
             S = self._gen_sparse(sparse_dims, nnz, with_size)[0]
-            run_tests(S.requires_grad_(True), test_dim)
+            run_tests(lambda x: torch.sparse.sum(x, test_dim), lambda x: torch.sum(x, test_dim), S)
+
+    @skipIfRocm
+    def test_sparse_max_min(self):
+
+        def run_tests(sparse_op, dense_op, bound_val, S):
+            D = S.to_dense()
+
+            mask_zero = (D == 0)
+            D.masked_fill_(mask_zero, bound_val)
+
+            S_reduced = sparse_op(S)
+            S_reduced = S_reduced.to_dense() if S_reduced.is_sparse else S_reduced
+            D_reduced_res = dense_op(D)
+            if isinstance(D_reduced_res, tuple):
+                D_reduced, D_reduced_indices = D_reduced_res
+            else:
+                D_reduced = D_reduced_res
+            D_reduced_mask = (D_reduced == bound_val)
+            D_reduced.masked_fill_(D_reduced_mask, 0)
+            self.assertEqual(S_reduced, D_reduced)
+
+            def fn(S):
+                res = sparse_op(S)
+                if res.is_sparse:
+                    res = res.to_dense()
+                return res
+
+            S.requires_grad_(True)
+            res = sparse_op(S)
+            self.assertTrue(res.grad_fn is not None)
+            gradcheck(fn, (S,), check_sparse_nnz=True)
+
+        sparse_ops = [torch.sparse.max, torch.sparse.min]
+        dense_ops = [torch.max, torch.min]
+        bound_val = [float('-inf'), float('inf')]
+        nnz = 4
+        sparse_dims = 2
+        with_size = [2, 2, 1, 2]
+        test_dims = list(itertools.combinations(range(len(with_size)), 1))  # only test 1-dim reduction
+
+        for i in range(len(sparse_ops)):
+            S = self._gen_sparse(sparse_dims, nnz, with_size)[0]
+            run_tests(sparse_ops[i], dense_ops[i], bound_val[i], S)
+            run_tests(lambda x: sparse_ops[i](x), lambda x: dense_ops[i](x), bound_val[i], S)
+
+        for i in range(len(sparse_ops)):
+            for test_dim in test_dims:
+                S = self._gen_sparse(sparse_dims, nnz, with_size)[0]
+                run_tests(lambda x: sparse_ops[i](x, test_dim[0]),
+                          lambda x: dense_ops[i](x, test_dim[0]), bound_val[i], S)
 
     def _test_basic_ops_shape(self, nnz_x1, nnz_x2, shape_i, shape_v=None):
         shape = shape_i + (shape_v or [])

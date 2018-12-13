@@ -506,6 +506,9 @@ public:
   int64_t dense_dim() const;
   int64_t _dimV() const;
   int64_t _nnz() const;
+  Tensor coalesce_sum() const;
+  Tensor coalesce_max() const;
+  Tensor coalesce_min() const;
   Tensor coalesce() const;
   bool is_coalesced() const;
   Tensor _indices() const;

@@ -842,7 +842,7 @@ Tensor _sparse_sum(const SparseTensor& input, IntList dims_to_sum, ScalarType dt
 }
 
 Tensor _sparse_sum(const SparseTensor& input, IntList dims_to_sum) {
-  AT_CHECK(input._nnz() > 0, "_sparse_sum: sparse tensor input._nnz() == 0, please call torch.sparse.sum(input) instead.")
+  AT_CHECK(input._nnz() > 0, "_sparse_sum: sparse tensor input._nnz() == 0, please call torch.sparse.sum(input) instead.");
 
   const int64_t input_dim = input.dim();
   auto dims_to_sum_b = dim_list_to_bitset(dims_to_sum, input_dim);
@@ -854,6 +854,11 @@ Tensor _sparse_sum(const SparseTensor& input, IntList dims_to_sum) {
   IntList sizes = input.sizes();
   const int64_t sparse_dim = input.sparse_dim();
   const int64_t dense_dim = input.dense_dim();
+
+  // shortcut to all dims sum
+  if (dims_to_sum_v.size() == sizes.size()) {
+    return at::_sparse_sum(input);
+  }
 
   auto dims_to_keep_v = std::vector<int64_t>();
   auto dense_dims_to_sum_v = std::vector<int64_t>();
@@ -879,11 +884,11 @@ Tensor _sparse_sum(const SparseTensor& input, IntList dims_to_sum) {
   }
 
   if (sum_all_sparse_dim) {
-    // return a dense tensor if sum over all sparse dims
+    // if sum over all sparse dims, return a dense tensor
     new_values = new_values.sum(0);
     return new_values;
   }
-  else { // !sum_all_sparse_dim
+  else { // not sum_all_sparse_dim
     // new indices
     LongTensor new_indices;
     if (sparse_dims_to_sum_size == 0) {
@@ -910,7 +915,6 @@ Tensor _sparse_sum(const SparseTensor& input, IntList dims_to_sum) {
     new_sparse = new_sparse.coalesce();
     return new_sparse;
   }
-
 }
 
 // --------------------------------------------------------------------
@@ -1061,6 +1065,138 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
       grad_input_values = grad_values_expand;
     }
     return at::_sparse_coo_tensor_with_dims_and_tensors(input_sparse_dim, input_dense_dim, input_sizes, input_indices.clone(), grad_input_values, grad.options());
+  }
+}
+
+// --------------------------------------------------------------------
+// sparse.max()
+// --------------------------------------------------------------------
+Tensor _sparse_max(const SparseTensor& input) {
+  return input.coalesce().values().max();
+}
+
+Tensor _sparse_max_sparse_dim(const SparseTensor& input, int64_t dim_to_max) {
+  const int64_t input_dim = input.dim();
+  LongTensor indices = input._indices();
+  Tensor values = input._values();
+  IntList sizes = input.sizes();
+  int64_t sparse_dim = input.sparse_dim();
+  int64_t dense_dim = input.dense_dim();
+
+  auto dims_to_keep_v = std::vector<int64_t>();
+  for (int64_t d = 0; d < input_dim; d++) {
+    if (d != dim_to_max) dims_to_keep_v.emplace_back(d);
+  }
+
+  // new values
+  Tensor new_values = values.clone();
+
+  // new indices
+  LongTensor new_indices = at::empty({sparse_dim - 1, input._nnz()}, indices.options());
+  for (int64_t i = 0; i < dims_to_keep_v.size(); i++) {
+    int64_t d = dims_to_keep_v[i];
+    if (d < sparse_dim) new_indices[i].copy_(indices[d]);
+    else break;
+  }
+
+  // new size
+  auto new_sizes = sizes.vec();
+  new_sizes.erase(new_sizes.begin() + dim_to_max);
+
+  SparseTensor new_sparse = at::_sparse_coo_tensor_with_dims_and_tensors(sparse_dim - 1, dense_dim, new_sizes, new_indices, new_values, input.options());
+  new_sparse = new_sparse.coalesce_max();
+  return new_sparse;
+}
+
+Tensor _sparse_max(const SparseTensor& input_, int64_t dim_to_max) {
+  // requires input to be coalesced before doing max reduction
+  auto input = input_.coalesce();
+  AT_CHECK(input._nnz() > 0, "_sparse_max: sparse tensor input._nnz() == 0, please call torch.sparse.max(input) instead.");
+
+  const int64_t input_dim = input.dim();
+  dim_to_max = maybe_wrap_dim(dim_to_max, input_dim);
+  int64_t sparse_dim = input.sparse_dim();
+
+  if (dim_to_max < sparse_dim) {
+    return at::_sparse_max_sparse_dim(input, dim_to_max);
+  }
+  else {
+    Tensor values = input.values();
+    Tensor indices = input._indices();
+    auto new_sizes = input.sizes().vec();
+    int64_t dense_dim = input.dense_dim();
+
+    Tensor new_values, max_indices;
+    std::tie(new_values, max_indices) = values.max(dim_to_max + 1 - sparse_dim);
+    new_sizes.erase(new_sizes.begin() + dim_to_max);
+
+    return at::_sparse_coo_tensor_with_dims_and_tensors(sparse_dim, dense_dim - 1, new_sizes, indices, new_values, input.options());
+  }
+}
+
+// --------------------------------------------------------------------
+// sparse.min()
+// --------------------------------------------------------------------
+Tensor _sparse_min(const SparseTensor& input) {
+  return input.coalesce().values().min();
+}
+
+Tensor _sparse_min_sparse_dim(const SparseTensor& input, int64_t dim_to_min) {
+  const int64_t input_dim = input.dim();
+  LongTensor indices = input._indices();
+  Tensor values = input._values();
+  IntList sizes = input.sizes();
+  int64_t sparse_dim = input.sparse_dim();
+  int64_t dense_dim = input.dense_dim();
+
+  auto dims_to_keep_v = std::vector<int64_t>();
+  for (int64_t d = 0; d < input_dim; d++) {
+    if (d != dim_to_min) dims_to_keep_v.emplace_back(d);
+  }
+
+  // new values
+  Tensor new_values = values.clone();
+
+  // new indices
+  LongTensor new_indices = at::empty({sparse_dim - 1, input._nnz()}, indices.options());
+  for (int64_t i = 0; i < dims_to_keep_v.size(); i++) {
+    int64_t d = dims_to_keep_v[i];
+    if (d < sparse_dim) new_indices[i].copy_(indices[d]);
+    else break;
+  }
+
+  // new size
+  auto new_sizes = sizes.vec();
+  new_sizes.erase(new_sizes.begin() + dim_to_min);
+
+  SparseTensor new_sparse = at::_sparse_coo_tensor_with_dims_and_tensors(sparse_dim - 1, dense_dim, new_sizes, new_indices, new_values, input.options());
+  new_sparse = new_sparse.coalesce_min();
+  return new_sparse;
+}
+
+Tensor _sparse_min(const SparseTensor& input_, int64_t dim_to_min) {
+  // requires input to be coalesced before doing min reduction
+  auto input = input_.coalesce();
+  AT_CHECK(input._nnz() > 0, "_sparse_min: sparse tensor input._nnz() == 0, please call torch.sparse.min(input) instead.");
+
+  const int64_t input_dim = input.dim();
+  dim_to_min = maybe_wrap_dim(dim_to_min, input_dim);
+  int64_t sparse_dim = input.sparse_dim();
+
+  if (dim_to_min < sparse_dim) {
+    return at::_sparse_min_sparse_dim(input, dim_to_min);
+  }
+  else {
+    Tensor values = input.values();
+    Tensor indices = input._indices();
+    auto new_sizes = input.sizes().vec();
+    int64_t dense_dim = input.dense_dim();
+
+    Tensor new_values, min_indices;
+    std::tie(new_values, min_indices) = values.min(dim_to_min + 1 - sparse_dim);
+    new_sizes.erase(new_sizes.begin() + dim_to_min);
+
+    return at::_sparse_coo_tensor_with_dims_and_tensors(sparse_dim, dense_dim - 1, new_sizes, indices, new_values, input.options());
   }
 }
 
