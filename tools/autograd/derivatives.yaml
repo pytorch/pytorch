@@ -728,7 +728,7 @@
 - name: std(Tensor self, bool unbiased)
   self: var_backward(grad / (result * 2), self, unbiased)
 
-- name: std(Tensor self, int64_t dim, bool unbiased, bool keepdim)
+- name: std(Tensor self, IntList dim, bool unbiased, bool keepdim)
   self: var_backward(grad / (result * 2), self, dim, unbiased, keepdim)
 
 - name: sub(Tensor self, Tensor other, *, Scalar alpha)
@@ -810,6 +810,9 @@
 
 - name: trunc(Tensor self)
   self: zeros_like(grad)
+
+- name: to_dense(Tensor self)
+  self: to_dense_backward(grad, self)
 
 - name: unfold(Tensor self, int64_t dimension, int64_t size, int64_t step)
   self: unfold_backward(grad, self.sizes(), dimension, size, step)
@@ -897,9 +900,6 @@
 
 - name: embedding_renorm_(Tensor self, Tensor indices, double max_norm, double norm_type)
   self: not_implemented("embedding_renorm")
-
-- name: no_grad_embedding_renorm_(Tensor self, Tensor indices, double max_norm, double norm_type)
-  output_differentiability: [False, False, False, False]
 
 - name: kl_div(Tensor self, Tensor target, int64_t reduction)
   self: kl_div_backward(grad, self, target, reduction)

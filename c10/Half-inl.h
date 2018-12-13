@@ -20,7 +20,7 @@ inline C10_HOST_DEVICE Half::Half(float value) {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
   x = __half_as_short(__float2half(value));
 #else
-  x = detail::float2halfbits(value);
+  x = detail::fp16_ieee_from_fp32_value(value);
 #endif
 }
 
@@ -30,7 +30,7 @@ inline C10_HOST_DEVICE Half::operator float() const {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
   return __half2float(*reinterpret_cast<const __half*>(&x));
 #else
-  return detail::halfbits2float(x);
+  return detail::fp16_ieee_to_fp32_value(x);
 #endif
 }
 

@@ -1,10 +1,10 @@
-#include "torch/csrc/jit/fuser/interface.h"
+#include <torch/csrc/jit/fuser/interface.h>
 
-#include "torch/csrc/jit/fuser/config.h"
+#include <torch/csrc/jit/fuser/config.h>
 #if USE_CUDA_FUSER || USE_CPU_FUSER
-  #include "torch/csrc/jit/fuser/compiler.h"
-  #include "torch/csrc/jit/fuser/executor.h"
-  #include "torch/csrc/jit/fuser/fallback.h"
+  #include <torch/csrc/jit/fuser/compiler.h>
+  #include <torch/csrc/jit/fuser/executor.h>
+  #include <torch/csrc/jit/fuser/fallback.h>
 #endif // USE_CUDA_FUSER || USE_CPU_FUSER
 
 #include <stdexcept>

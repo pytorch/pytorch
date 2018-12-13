@@ -2267,6 +2267,8 @@ Example::
     tensor([-10.,  -5.,   0.,   5.,  10.])
     >>> torch.linspace(start=-10, end=10, steps=5)
     tensor([-10.,  -5.,   0.,   5.,  10.])
+    >>> torch.linspace(start=-10, end=10, steps=1)
+    tensor([-10.])
 """.format(**factory_common_args))
 
 add_docstr(torch.log,
@@ -2395,6 +2397,8 @@ Example::
     tensor([ 1.0000e-10,  1.0000e-05,  1.0000e+00,  1.0000e+05,  1.0000e+10])
     >>> torch.logspace(start=0.1, end=1.0, steps=5)
     tensor([  1.2589,   2.1135,   3.5481,   5.9566,  10.0000])
+    >>> torch.logspace(start=0.1, end=1.0, steps=1)
+    tensor([1.2589])
 """.format(**factory_common_args))
 
 add_docstr(torch.logsumexp,
@@ -2582,7 +2586,7 @@ in the output tensors having 1 fewer dimension than :attr:`input`.
 Args:
     input (Tensor): the input tensor
     dim (int): the dimension to reduce
-    keepdim (bool): whether the output tensors have :attr:`dim` retained or not
+    keepdim (bool, optional): whether the output tensors have :attr:`dim` retained or not. Default: ``False``.
     out (tuple, optional): the result tuple of two output tensors (max, max_indices)
 
 Example::
@@ -4983,6 +4987,55 @@ Example::
             [-0.0614, -0.7344, -1.3164,  0.0000,  0.0000,  0.0000]])
 """)
 
+# docstr is split in two parts to avoid format mis-captureing :math: braces '{}'
+# as common args.
+add_docstr(torch.tril_indices,
+           r"""
+tril_indices(row, column, offset=0, dtype=torch.long, device='cpu', layout=torch.strided) -> Tensor
+
+Returns the indices of the lower triangular part of a :attr:`row`-by-
+:attr:`column` matrix in a 2-by-N Tensor, where the first row contains row
+coordinates of all indices and the second row contains column coordinates.
+Indices are ordered based on rows and then columns.
+
+The lower triangular part of the matrix is defined as the elements on and
+below the diagonal.
+
+The argument :attr:`offset` controls which diagonal to consider. If
+:attr:`offset` = 0, all elements on and below the main diagonal are
+retained. A positive value includes just as many diagonals above the main
+diagonal, and similarly a negative value excludes just as many diagonals below
+the main diagonal. The main diagonal are the set of indices
+:math:`\lbrace (i, i) \rbrace` for :math:`i \in [0, \min\{d_{1}, d_{2}\} - 1]`
+where :math:`d_{1}, d_{2}` are the dimensions of the matrix.
+
+Args:
+    row (``int``): number of rows in the 2-D matrix.
+    column (``int``): number of columns in the 2-D matrix.
+    offset (``int``): diagonal offset from the main diagonal.
+        Default: if not provided, 0.
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+        Default: if ``None``, ``torch.long``.
+    device (:class:`torch.device`, optional): currently only support ``cpu``.
+    layout (:class:`torch.layout`, optional): currently only support ``torch.strided``.
+
+Example::
+    >>> a = torch.tril_indices(3, 3)
+    >>> a
+    tensor([[0, 1, 1, 2, 2, 2],
+            [0, 0, 1, 0, 1, 2]])
+
+    >>> a = torch.tril_indices(4, 3, -1)
+    >>> a
+    tensor([[1, 2, 2, 3, 3, 3],
+            [0, 0, 1, 0, 1, 2]])
+
+    >>> a = torch.tril_indices(4, 3, 1)
+    >>> a
+    tensor([[0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3],
+            [0, 1, 0, 1, 2, 0, 1, 2, 0, 1, 2]])
+""")
+
 add_docstr(torch.triu,
            r"""
 triu(input, diagonal=0, out=None) -> Tensor
@@ -5042,6 +5095,55 @@ Example::
             [-0.2447,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
             [ 0.4333,  0.3146,  0.0000,  0.0000,  0.0000,  0.0000],
             [-0.9888,  1.0679, -1.3337,  0.0000,  0.0000,  0.0000]])
+""")
+
+# docstr is split in two parts to avoid format mis-captureing :math: braces '{}'
+# as common args.
+add_docstr(torch.triu_indices,
+           r"""
+triu_indices(row, column, offset=0, dtype=torch.long, device='cpu', layout=torch.strided) -> Tensor
+
+Returns the indices of the upper triangular part of a :attr:`row` by
+:attr:`column` matrix in a 2-by-N Tensor, where the first row contains row
+coordinates of all indices and the second row contains column coordinates.
+Indices are ordered based on rows and then columns.
+
+The upper triangular part of the matrix is defined as the elements on and
+above the diagonal.
+
+The argument :attr:`offset` controls which diagonal to consider. If
+:attr:`offset` = 0, all elements on and above the main diagonal are
+retained. A positive value excludes just as many diagonals above the main
+diagonal, and similarly a negative value includes just as many diagonals below
+the main diagonal. The main diagonal are the set of indices
+:math:`\lbrace (i, i) \rbrace` for :math:`i \in [0, \min\{d_{1}, d_{2}\} - 1]`
+where :math:`d_{1}, d_{2}` are the dimensions of the matrix.
+
+Args:
+    row (``int``): number of rows in the 2-D matrix.
+    column (``int``): number of columns in the 2-D matrix.
+    offset (``int``): diagonal offset from the main diagonal.
+        Default: if not provided, 0.
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+        Default: if ``None``, ``torch.long``.
+    device (:class:`torch.device`, optional): currently only support ``cpu``.
+    layout (:class:`torch.layout`, optional): currently only support ``torch.strided``.
+
+Example::
+    >>> a = torch.triu_indices(3, 3)
+    >>> a
+    tensor([[0, 0, 0, 1, 1, 2],
+            [0, 1, 2, 1, 2, 2]])
+
+    >>> a = torch.triu_indices(4, 3, -1)
+    >>> a
+    tensor([[0, 0, 0, 1, 1, 1, 2, 2, 3],
+            [0, 1, 2, 0, 1, 2, 1, 2, 2]])
+
+    >>> a = torch.triu_indices(4, 3, 1)
+    >>> a
+    tensor([[0, 0, 1],
+            [1, 2, 2]])
 """)
 
 add_docstr(torch.trtrs,
@@ -5250,6 +5352,40 @@ Example::
     tensor([[ 0.,  0.,  0.],
             [ 0.,  0.,  0.]])
 """.format(**factory_like_common_args))
+
+add_docstr(torch.btrifact,
+           r"""
+btrifact(A, pivot=True) -> (Tensor, IntTensor)
+
+Batch LU factorization.
+
+Returns a tuple containing the LU factorization and pivots. Pivoting is done if
+:attr:`pivot` is set.
+
+Arguments:
+    A (Tensor): the tensor to factor
+    pivot (bool, optional): controls whether pivoting is done
+
+Returns:
+    A tuple containing factorization and pivots.
+
+Example::
+
+    >>> A = torch.randn(2, 3, 3)
+    >>> A_LU, pivots = torch.btrifact(A)
+    >>> A_LU
+    tensor([[[ 1.3506,  2.5558, -0.0816],
+             [ 0.1684,  1.1551,  0.1940],
+             [ 0.1193,  0.6189, -0.5497]],
+
+            [[ 0.4526,  1.2526, -0.3285],
+             [-0.7988,  0.7175, -0.9701],
+             [ 0.2634, -0.9255, -0.3459]]])
+
+    >>> pivots
+    tensor([[ 3,  3,  3],
+            [ 3,  3,  3]], dtype=torch.int32)
+""")
 
 add_docstr(torch.btrifact_with_info,
            r"""

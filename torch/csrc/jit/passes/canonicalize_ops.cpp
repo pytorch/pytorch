@@ -1,6 +1,6 @@
-#include "torch/csrc/jit/passes/canonicalize_ops.h"
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/jit/symbolic_variable.h"
+#include <torch/csrc/jit/passes/canonicalize_ops.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/symbolic_variable.h>
 
 
 namespace torch { namespace jit {
@@ -58,6 +58,9 @@ static void CanonicalizeOps(Block* block) {
       SymbolicVariable mat2(it->inputs()[2]);
 
       auto mm_result = mat1.mm(mat2);
+      // Set this intermediate aten::mm node to have the same output type as the original aten::addmm
+      // otherwise the canonicalized graph will have DynamicType as the output of this node which is incorrect
+      (static_cast<Value*>(mm_result))->setType(it->output()->type());
       auto result = mat + mm_result;
       (static_cast<Value*>(result))->setType(it->output()->type());
 
@@ -71,7 +74,7 @@ static void CanonicalizeOps(Block* block) {
         if (other->dim() == 0) {
           WithInsertPoint insert_guard {*it};
           auto graph = it->owningGraph();
-          auto new_other = graph->insertConstant(other->_local_scalar());
+          auto new_other = graph->insertConstant(other->item());
           std::vector<Value*> inputs = it->inputs().vec();
           inputs.at(1) = new_other;
           Value * new_output = graph->insertNode(graph->create(it->kind(), inputs))->output();

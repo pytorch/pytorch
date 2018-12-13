@@ -1,21 +1,20 @@
-#include "torch/csrc/autograd/python_variable_indexing.h"
+#include <torch/csrc/autograd/python_variable_indexing.h>
 
-#include "torch/csrc/DynamicTypes.h"
-#include "torch/csrc/Exceptions.h"
-#include "torch/csrc/THP_export.h"
-#include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/python_variable.h"
-#include "torch/csrc/autograd/utils/wrap_outputs.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/utils/python_compat.h"
-#include "torch/csrc/utils/python_numbers.h"
-#include "torch/csrc/utils/tensor_new.h"
-#include "torch/csrc/utils/tensor_conversion_dispatch.h"
-#include "torch/csrc/jit/tracer.h"
+#include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/THP_export.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/autograd/utils/wrap_outputs.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/utils/python_compat.h>
+#include <torch/csrc/utils/python_numbers.h>
+#include <torch/csrc/utils/tensor_new.h>
+#include <torch/csrc/jit/tracer.h>
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/core/TensorOptions.h>
+#include <c10/core/TensorOptions.h>
 
 #include <vector>
 #include <tuple>
@@ -116,10 +115,10 @@ static Variable valueToTensor(const at::Type & type, PyObject* value) {
     return reinterpret_cast<THPVariable*>(value)->cdata;
   }
   if (THPUtils_checkLong(value)) {
-    return type.scalarTensor(Scalar(THPUtils_unpackLong(value)));
+    return at::scalar_tensor(Scalar(THPUtils_unpackLong(value)), type.options());
   }
   if (PyFloat_Check(value)) {
-    return type.scalarTensor(Scalar(THPUtils_unpackDouble(value)));
+    return at::scalar_tensor(Scalar(THPUtils_unpackDouble(value)), type.options());
   }
   throw TypeError("can't assign a %s to a %s", Py_TYPE(value)->tp_name, type.toString());
 }
@@ -194,12 +193,10 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
 
 static std::vector<Tensor> typeConvertIndices(const Variable& self, const variable_list& indices) {
   std::vector<Tensor> converted_inds(indices.size());
-  c10::Device device = self.device();
   for (size_t i = 0; i < indices.size(); ++i) {
     const auto &ind = indices[i];
     if (ind.defined()) {
-      auto& new_type = ind.type().toBackend(self.type().backend());
-      converted_inds[i] = torch::utils::dispatch_type_conversion(ind, new_type, device, false);
+      converted_inds[i] = ind.to(ind.options().device(self.device()));
     } else {
       converted_inds[i] = indices[i];
     }
@@ -208,15 +205,15 @@ static std::vector<Tensor> typeConvertIndices(const Variable& self, const variab
 }
 
 static Variable dispatch_index(const Variable& self, const variable_list& indices) {
-  std::vector<Tensor> converted_indices = typeConvertIndices(self, indices);
   AutoNoGIL no_gil;
+  std::vector<Tensor> converted_indices = typeConvertIndices(self, indices);
   OptionalDeviceGuard device_guard(device_of(self));
   return self.index(converted_indices);
 }
 
 static Variable dispatch_index_put_(Variable& self, const variable_list& indices, const Variable& value) {
-  std::vector<Tensor> converted_indices = typeConvertIndices(self, indices);
   AutoNoGIL no_gil;
+  std::vector<Tensor> converted_indices = typeConvertIndices(self, indices);
   OptionalDeviceGuard device_guard(device_of(self));
   return self.index_put_(converted_indices, value);
 }

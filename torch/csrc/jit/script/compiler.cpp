@@ -1,19 +1,19 @@
-#include "torch/csrc/jit/script/compiler.h"
-#include "torch/csrc/jit/passes/lower_tuples.h"
-#include "torch/csrc/jit/passes/constant_pooling.h"
-#include "torch/csrc/jit/operator.h"
-#include "torch/csrc/jit/interpreter.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/script/parser.h"
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/utils/object_ptr.h"
-#include "torch/csrc/jit/operator.h"
-#include "torch/csrc/jit/script/builtin_functions.h"
-#include "torch/csrc/jit/hooks_for_testing.h"
+#include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/passes/constant_pooling.h>
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/interpreter.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/script/parser.h>
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/script/builtin_functions.h>
+#include <torch/csrc/jit/hooks_for_testing.h>
 
-#include "torch/csrc/jit/constants.h"
+#include <torch/csrc/jit/constants.h>
 
-#include "c10/util/Optional.h"
+#include <c10/util/Optional.h>
 
 #include <climits>
 #include <set>
@@ -73,64 +73,37 @@ struct PrintValue : public SugaredValue {
   }
 };
 
-static Value* typeCast(const SourceRange& loc, Value* value, TypePtr dst) {
-  auto& graph = *value->owningGraph();
-  const TypePtr orig = value->type();
-  Node* n = nullptr;
-
-  if(dst->isSubtypeOf(DynamicType::get()) && orig->isSubtypeOf(NumberType::get())) {
-    n = graph.createNumToTensor(value);
-  } else if (dst->isSubtypeOf(NumberType::get()) && orig->isSubtypeOf(DynamicType::get())) {
-    n = graph.createTensorToNum(dst, value);
-  } else if (dst->isSubtypeOf(BoolType::get()) && orig->isSubtypeOf(DynamicType::get())) {
-    n = graph.createTensorToBool(value);
-  } else if(dst->isSubtypeOf(IntType::get()) && orig->isSubtypeOf(FloatType::get())) {
-    n = graph.createFloatToInt(value);
-  } else if(dst->isSubtypeOf(FloatType::get()) && orig->isSubtypeOf(IntType::get())) {
-    n = graph.createIntToFloat(value);
-  } else if(dst->isSubtypeOf(FloatType::get()) && orig->isSubtypeOf(StringType::get())) {
-    n = graph.createStringToFloat(value);
-  } else {
-    throw ErrorReport(loc) << "Cannot cast type '" << orig->str() << "' to type '"
-      << dst->str() << "'.";
-  }
-
-  auto* result = graph.insertNode(n)
-      ->setSourceLocation(std::make_shared<SourceRange>(loc))
-      ->output();
-  return result;
-}
-
 // expressions like int(x)
-struct CastValue : public SugaredValue {
-  CastValue(TypePtr type)
-  : type(std::move(type)) {}
-  std::string kind() const override {
-    std::stringstream ss;
-    ss << "<" << type->str() << " cast primitive>";
-    return ss.str();
-  }
+// these are the same as call prim::Int or equivalent except it
+// is a noop when the input is a subtype of 'type'
+struct CastValue : public BuiltinFunction {
+  CastValue(TypePtr type, c10::Symbol method)
+  : BuiltinFunction(method, c10::nullopt)
+  , type_(std::move(type)) {}
   std::shared_ptr<SugaredValue> call(
     SourceRange loc,
     Method & m,
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) override {
-      if (!attributes.empty())
-        throw ErrorReport(loc) << "casts do not accept any keyword arguments";
-      if (inputs.size() != 1)
-        throw ErrorReport(loc) << "expected a single argument for cast";
-      auto values = toValues(*m.graph(), inputs);
-      Value* input = values.at(0);
-      if(!input->type()->isSubtypeOf(type)) {
-          input = typeCast(loc, input, type);
+      if(inputs.size() == 1 && attributes.size() == 0) {
+        auto v = inputs[0].value(*m.graph());
+        if (v->type()->isSubtypeOf(type_)) {
+          return std::make_shared<SimpleValue>(v);
+        }
       }
-      return std::make_shared<SimpleValue>(input);
+      return BuiltinFunction::call(loc, m , inputs, attributes, n_binders);
   }
 private:
-  TypePtr type;
+  TypePtr type_;
 };
 
+static Value* asSimple(SugaredValuePtr value) {
+  if(SimpleValue* sv = dynamic_cast<SimpleValue*>(value.get())) {
+    return sv->getValue();
+  }
+  return nullptr;
+}
 // we consider _N where N is a number, to be a non-meaningful name
 // and do not record it as a unique name. This allows python printing to
 // be able to export and import more consistently named graphs
@@ -287,12 +260,6 @@ struct Environment {
   void setVar(const SourceRange& loc, const std::string& name, Value* value) {
     setSugaredVar(loc, name, std::make_shared<SimpleValue>(value));
   }
-  static Value* asSimple(SugaredValuePtr value) {
-    if(SimpleValue* sv = dynamic_cast<SimpleValue*>(value.get())) {
-      return sv->getValue();
-    }
-    return nullptr;
-  }
 
   void setSugaredVar(const SourceRange& loc, const std::string& name, SugaredValuePtr value) {
     Value* as_simple_value = asSimple(value);
@@ -357,13 +324,13 @@ struct Environment {
     if(!retval) {
       static std::unordered_map<std::string, SugaredValuePtr> globals = {
         {"print", std::make_shared<PrintValue>()},
-        {"float", std::make_shared<CastValue>(FloatType::get())},
-        {"int", std::make_shared<CastValue>(IntType::get())},
-        {"bool", std::make_shared<CastValue>(BoolType::get())},
+        {"float", std::make_shared<CastValue>(FloatType::get(), prim::Float)},
+        {"int", std::make_shared<CastValue>(IntType::get(), prim::Int)},
+        {"bool", std::make_shared<CastValue>(BoolType::get(), prim::Bool)},
         {"getattr", std::make_shared<GetAttrValue>()},
         // todo(zach): remove when we can correctly export torch.full via ONNX
         // or we have implicit conversion that can convert numbers to tensors
-        {"_to_tensor", std::make_shared<CastValue>(DynamicType::get()) },
+        {"_to_tensor", std::make_shared<CastValue>(DynamicType::get(), prim::NumToTensor)},
       };
       auto it = globals.find(ident);
       if(it != globals.end())
@@ -441,6 +408,13 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   return g.insertNode(g.createTupleUnpack(v))->outputs();
 }
 
+inline TypePtr unwrapOptional(TypePtr opt_type) {
+  if (auto unwrap_list_type = opt_type->cast<OptionalType>()) {
+    return unwrap_list_type->getElementType();
+  }
+  return opt_type;
+}
+
 static inline bool isIntOrFloatUsedAsList(
     const Value* value,
     const Argument& arg) {
@@ -448,9 +422,7 @@ static inline bool isIntOrFloatUsedAsList(
   auto v_type = value->type();
   if (v_type != FloatType::get() && v_type != IntType::get())
     return false;
-  auto arg_type = arg.type();
-  if (arg_type->cast<OptionalType>())
-    arg_type = arg_type->cast<OptionalType>()->getElementType();
+  auto arg_type = unwrapOptional(arg.type());
   auto list_type = arg_type->cast<ListType>();
   return list_type && list_type->getElementType() == v_type && arg.N();
 }
@@ -481,13 +453,13 @@ Value* tryConvertToType(
     Graph& graph,
     TypePtr concrete_type,
     Value* value,
-    bool convert_tensors_to_nums) {
+    bool allow_conversions) {
   // Allow homogeneous tuples to be casted implicitly to lists of appropriate
   // types
-  if (convertibleToList(value->type(), concrete_type) &&
+  if (convertibleToList(value->type(), unwrapOptional(concrete_type)) &&
       value->type()->kind() == TypeKind::TupleType) {
     auto unpacked = createTupleUnpack(value);
-    auto elem_type = concrete_type->expect<ListType>()->getElementType();
+    auto elem_type = unwrapOptional(concrete_type)->expect<ListType>()->getElementType();
     value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
   }
 
@@ -502,14 +474,21 @@ Value* tryConvertToType(
     }
   }
 
-  //implicit conversion of tensors to scalars
-  if(convert_tensors_to_nums && concrete_type->isSubtypeOf(NumberType::get())
+  //implicit conversions
+  if(allow_conversions) {
+     if(concrete_type->isSubtypeOf(NumberType::get())
       && value->type()->isSubtypeOf(DynamicType::get())) {
       auto n = graph.createImplicitTensorToNum(concrete_type, value);
       value = graph.insertNode(n)
         ->setSourceLocation(std::make_shared<SourceRange>(loc))
         ->output();
+    }
+    if (value->type()->isSubtypeOf(StringType::get()) &&
+        DeviceObjType::get()->isSubtypeOf(concrete_type))  {
+      return graph.insert(aten::device, { value }, {}, loc);
+    }
   }
+
   return value;
 }
 
@@ -519,7 +498,7 @@ Value* tryMatchArgument(
     const SourceRange& loc,
     const NamedValue& named_value,
     std::function<std::ostream&()> err,
-    bool convert_tensors_to_nums,
+    bool allow_conversions,
     TypeEnv & type_env) {
   Value* value = named_value.value(graph);
 
@@ -542,7 +521,7 @@ Value* tryMatchArgument(
   }
   const auto concrete_type = *matched_type.type;
 
-  value = tryConvertToType(loc, graph, concrete_type, value, convert_tensors_to_nums);
+  value = tryConvertToType(loc, graph, concrete_type, value, allow_conversions);
 
   if(!value->type()->isSubtypeOf(concrete_type)) {
     err() << "expected a value of type " << concrete_type->str() << " for argument '" << arg.name() << "' but found "
@@ -605,7 +584,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
     std::ostream& failure_messages,
-    bool convert_tensors_to_nums) {
+    bool allow_conversions) {
   auto err = [&]() -> std::ostream& {
     failure_messages << "\nfor operator " << schema << ":\n";
     return failure_messages;
@@ -635,15 +614,15 @@ c10::optional<MatchedSchema> tryMatchSchema(
         if (actual_type->kind() != TypeKind::ListType &&
             !convertibleToList(
                 actual_type,
-                arg.type())) { // and the actual should not be a list already
-          auto elem_type = arg.type()->expect<ListType>()->getElementType();
+                unwrapOptional(arg.type()))) { // and the actual should not be a list already
+          auto elem_type = unwrapOptional(arg.type())->expect<ListType>()->getElementType();
           Value* list = tryCreateList(
               elem_type,
               graph,
               loc,
               at::ArrayRef<NamedValue>(args).slice(used_args),
               err,
-              convert_tensors_to_nums,
+              allow_conversions,
               type_env);
           if (!list)
             return c10::nullopt;
@@ -674,7 +653,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
       return c10::nullopt;
     }
     Value* positional = tryMatchArgument(
-        arg, graph, loc, *v, err, convert_tensors_to_nums, type_env);
+        arg, graph, loc, *v, err, allow_conversions, type_env);
     if (!positional)
       return c10::nullopt;
     positional_inputs.push_back(positional);
@@ -768,7 +747,7 @@ Value* emitBuiltinCall(
   std::stringstream failure_messages;
   //first we try to match the schema without any conversion
   //if no schema matches then insert ImplicitTensorToNum
-  for (bool convert_tensors_to_nums : {false, true}) {
+  for (bool allow_conversions : {false, true}) {
     // clear previous error messages
     failure_messages.str("");
     for (const std::shared_ptr<Operator>& op : variants) {
@@ -780,7 +759,7 @@ Value* emitBuiltinCall(
           inputs,
           attributes,
           failure_messages,
-          convert_tensors_to_nums);
+          allow_conversions);
       if (matched_schema) {
         return emitBuiltinNode(*matched_schema, loc, graph, name);
       }
@@ -795,7 +774,7 @@ Value* emitBuiltinCall(
               attributes,
               failure_messages,
               nullptr,
-              convert_tensors_to_nums)) {
+              allow_conversions)) {
         return packOutputs(graph, *result);
       }
     }
@@ -1081,7 +1060,7 @@ private:
         TypePtr type = DynamicType::get();
         if (!schema.is_varret()) {
           type = schema.returns().at(return_type_idx).type();
-          r = tryConvertToType(range, *graph, type, r, /*convert_tensors_to_nums=*/false);
+          r = tryConvertToType(range, *graph, type, r, /*allow_conversions=*/false);
           if (!r->type()->isSubtypeOf(type)) {
             throw ErrorReport(return_stmt.range()) << "Return value at position "
               << return_type_idx << " was annotated as having type " << type->str()
@@ -1251,9 +1230,7 @@ private:
     return v;
   }
 
-  void emitIf(const If& stmt) {
-    Value* cond_value = emitCond(stmt.cond());
-
+  void emitIfElseBlocks(Value* cond_value, const If& stmt) {
     Node* n = graph->insertNode(create(prim::If, stmt.range(), 0));
     n->addInput(cond_value);
     auto* true_block = n->addBlock();
@@ -1336,6 +1313,62 @@ private:
       false_block->registerOutput(fv);
       environment_stack->setVar(stmt.range(), x, n->addOutput()->setType(*unified));
     }
+  }
+
+  void emitIf(const If& stmt) {
+    // NOTE: emitIf checks on If stmt condition to see if the cond AST kind == is/is not,
+    // for such cases we do meta programming and disable emitting the corresponding branches
+    Expr cond = stmt.cond();
+
+    if (cond.kind() != TK_IS && cond.kind() != TK_ISNOT) {
+      // emit normal IF stmt for cases except TK_IS and TK_ISNOT
+      Value* cond_value = emitCond(cond);
+      emitIfElseBlocks(cond_value, stmt);
+      return;
+    }
+    // meta programming on AST for is/is not cases and emit branches base on the possible output of cond
+    auto cond_op = BinOp(cond);
+    SugaredValuePtr lhs_val = emitSugaredExpr(cond_op.lhs(), 1);
+    SugaredValuePtr rhs_val = emitSugaredExpr(cond_op.rhs(), 1);
+
+    List<Stmt> always_none_branch = cond.kind() == TK_IS? stmt.trueBranch(): stmt.falseBranch();
+    List<Stmt> never_none_branch = cond.kind() == TK_IS? stmt.falseBranch(): stmt.trueBranch();
+
+    auto lhs_none= lhs_val->isNone();
+    auto rhs_none= rhs_val->isNone();
+
+    // Dispatch logic (A: ALWAYS, N: NEVER, M: MAYBE):
+    //
+    // AA, -> emit always_none_branch
+    // AN , NA-> emit never_none_branch
+    // MA, MM, MN, NM, NN, AM -> emit both conditional branches
+
+    if (lhs_none == ALWAYS && rhs_none == ALWAYS) {
+      // None is/is not None: only emit the always_none_branch
+      emitStatements(always_none_branch);
+    } else if ((lhs_none == ALWAYS && rhs_none == NEVER) ||
+        (lhs_none == NEVER && rhs_none == ALWAYS)){
+      // lhs_val/rhs_val with A/M: only emit never_none_branch
+      emitStatements(never_none_branch);
+    }
+    else {
+      // all other cases for lhs_val and rhs_val
+      // emit the whole If stmt as usual, finish emitCond first
+      auto lhs_range = cond_op.lhs().get()->range();
+      auto rhs_range = cond_op.rhs().get()->range();
+      auto kind = getNodeKind(cond.kind(), cond.get()->trees().size());
+      Value* cond_value = emitBuiltinCall(
+          cond.get()->range(),
+          *method.graph(),
+          kind,
+          c10::nullopt,
+          {lhs_val->asValue(lhs_range, method), rhs_val->asValue(rhs_range, method)},
+          {},
+          /*required=*/true);
+      emitIfElseBlocks(cond_value, stmt);
+
+    }
+
   }
 
   // *********************** Loop Operators ************************************
@@ -2016,7 +2049,7 @@ private:
           *graph,
           type,
           emitExpr(apply.inputs()[1], type),
-          /*convert_tensors_to_nums=*/true);
+          /*allow_conversions=*/true);
       if (!expr->type()->isSubtypeOf(type)) {
         throw ErrorReport(apply.inputs())
             << "expected an expression of type " << type->python_str()
@@ -2646,6 +2679,7 @@ const std::unordered_map<std::string, TypePtr> &ident_to_type_lut() {
     {"float", FloatType::get()},
     {"bool", BoolType::get()},
     {"str", StringType::get()},
+    {"Device", DeviceObjType::get()},
     // technically this is not a python type but we need it when
     // parsing serialized methods that use implicit converions to Scalar
     {"number", NumberType::get()},

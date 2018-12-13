@@ -1,12 +1,12 @@
-#include "torch/csrc/jit/passes/python_print.h"
-#include "torch/csrc/jit/attributes.h"
-#include "torch/csrc/jit/generic_if.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/ir_views.h"
-#include "torch/csrc/jit/export.h"
-#include "torch/csrc/jit/resource_guard.h"
-#include "torch/csrc/jit/script/error_report.h"
-#include "torch/csrc/jit/script/module.h"
+#include <torch/csrc/jit/passes/python_print.h>
+#include <torch/csrc/jit/attributes.h>
+#include <torch/csrc/jit/generic_if.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir_views.h>
+#include <torch/csrc/jit/export.h>
+#include <torch/csrc/jit/resource_guard.h>
+#include <torch/csrc/jit/script/error_report.h>
+#include <torch/csrc/jit/script/module.h>
 
 
 namespace torch {
@@ -628,6 +628,12 @@ struct PythonPrintPass {
       stmt << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
     } else if(v.isString()) {
       printQuotedString(stmt, v.toStringRef());
+    } else if(v.isDevice()) {
+      std::stringstream ss;
+      ss << v.toDevice();
+      stmt << "torch.device(";
+      printQuotedString(stmt, ss.str());
+      stmt << ")";
     } else if(v.isTensorList()) {
       stmt << "[";
       const char* delim = "";
@@ -706,26 +712,17 @@ struct PythonPrintPass {
           stmt << "annotate(" << node->output()->type()->python_str() << ", None)";
         }
       } break;
-      case prim::TensorToNum: {
-        if (node->output()->type()->isSubtypeOf(IntType::get())) {
-          printValueList(stmt, node->inputs(), "int(", ")");
-        } else {
-          JIT_ASSERT(node->output()->type()->isSubtypeOf(FloatType::get()));
-          printValueList(stmt, node->inputs(), "float(", ")");
-        }
-      } break;
       case prim::ImplicitTensorToNum: {
         stmt << "annotate(" << node->output()->type()->python_str() << ", "
              << useOf(node->input()) << ")";
       } break;
-      case prim::FloatToInt: {
+      case prim::Int: {
         printValueList(stmt, node->inputs(), "int(", ")");
       } break;
-      case prim::StringToFloat:
-      case prim::IntToFloat: {
+      case prim::Float: {
         printValueList(stmt, node->inputs(), "float(", ")");
       } break;
-      case prim::TensorToBool: {
+      case prim::Bool: {
         printValueList(stmt, node->inputs(), "bool(", ")");
       } break;
       case prim::Print: {
@@ -975,19 +972,14 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
   // schema to editing this list here. These cases should only be things
   // that require special handling because they do not fit normal schema
   const static std::unordered_set<Symbol> handled = {
-    prim::BoolToTensor,
     prim::Constant,
-    prim::TensorToBool,
-    prim::FloatToInt,
     prim::fork,
-    prim::IntToFloat,
     prim::ListConstruct,
     prim::ListUnpack,
     prim::None,
     prim::NoneGenerator,
     prim::Print,
     prim::PythonOp,
-    prim::StringToFloat,
     prim::TupleConstruct,
     prim::TupleIndex,
     prim::TupleSlice,
@@ -1006,6 +998,8 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
     prim::AutogradAdd, // temporarily inserted by autograd
     prim::ConstantChunk, // optimization pass adds it
     prim::DifferentiableGraph, // optimization pass adds it
+    prim::BroadcastSizes, // optimization pass (fuser) adds it
+    prim::ChunkSizes, // optimization pass (fuser) adds it
     prim::Drop, // used in interpreter only
     prim::FusedConcat, // optimization pass adds it
     prim::FusionGroup, // optimization pass adds it

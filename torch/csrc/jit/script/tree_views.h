@@ -1,6 +1,6 @@
 #pragma once
-#include "error_report.h"
-#include "tree.h"
+#include <torch/csrc/jit/script/error_report.h>
+#include <torch/csrc/jit/script/tree.h>
 
 #include <functional>
 #include <string>

@@ -486,6 +486,13 @@ bmm(batch2) -> Tensor
 See :func:`torch.bmm`
 """)
 
+add_docstr_all('btrifact',
+               r"""
+btrifact(pivot=True) -> (Tensor, Tensor)
+
+See :func:`torch.btrifact`
+""")
+
 add_docstr_all('btrifact_with_info',
                r"""
 btrifact_with_info(pivot=True) -> (Tensor, Tensor, Tensor)
@@ -1172,16 +1179,21 @@ Example::
 
 add_docstr_all('index_put_',
                r"""
-index_put_(indices, value) -> Tensor
+index_put_(indices, value, accumulate=False) -> Tensor
 
 Puts values from the tensor :attr:`value` into the tensor :attr:`self` using
 the indices specified in :attr:`indices` (which is a tuple of Tensors). The
 expression ``tensor.index_put_(indices, value)`` is equivalent to
 ``tensor[indices] = value``. Returns :attr:`self`.
 
+If :attr:`accumulate` is ``True``, the elements in :attr:`tensor` are added to
+:attr:`self`. If accumulate is ``False``, the behavior is undefined if indices
+contain duplicate elements.
+
 Args:
     indices (tuple of LongTensor): tensors used to index into `self`.
     value (Tensor): tensor of same dtype as `self`.
+    accumulate (bool): whether to accumulate into self
 """)
 
 add_docstr_all('index_select',

@@ -31,19 +31,12 @@ class LayerNormOp final : public Operator<Context> {
   bool DoRunWithType() {
     const auto& X = Input(0);
     auto* Y = Output(0);
-    auto* mean = Output(1);
-    auto* sig = Output(2);
     const int canonical_axis = X.canonical_axis_index(axis_);
     std::vector<int64_t> moments_dims(
         X.dims().cbegin(), X.dims().cbegin() + canonical_axis);
     moments_dims.push_back(1);
-    mean->Resize(moments_dims);
-    sig->Resize(moments_dims);
-    mean->template mutable_data<T>();
-    sig->template mutable_data<T>();
-    // TODO: change back
-    //auto* mean = Output(1, moments_dims, at::dtype<T>());
-    //auto* sig = Output(2, moments_dims, at::dtype<T>());
+    auto* mean = Output(1, moments_dims, at::dtype<T>());
+    auto* sig = Output(2, moments_dims, at::dtype<T>());
     runLayerNorm<T>(X, Y, mean, sig, canonical_axis, epsilon_, &scale_, &bias_, &context_);
     return true;
   }

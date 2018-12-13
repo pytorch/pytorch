@@ -1,13 +1,13 @@
-#include "ProcessGroupNCCL.hpp"
+#include <c10d/ProcessGroupNCCL.hpp>
 
 #include <map>
 #include <tuple>
 #include <unordered_set>
 
-#include <THC.h>
+#include <THC/THC.h>
 
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAGuard.h>
 
 #include <c10d/Utils.hpp>
 
@@ -140,26 +140,35 @@ void ProcessGroupNCCL::WorkNCCL::wait() {
   synchronize();
 }
 
-std::unordered_map<ssize_t, ssize_t> ProcessGroupNCCL::pgUniqueNCCLIDCnt_;
-ssize_t ProcessGroupNCCL::processGroupCounter_ = -1;
+std::unordered_map<std::string, ssize_t> ProcessGroupNCCL::pgUniqueNCCLIDCnt_;
+std::unordered_map<std::string, ssize_t>
+    ProcessGroupNCCL::processGroupCounterMap_;
+
 std::mutex ProcessGroupNCCL::pgTrackingLock_;
 
 ProcessGroupNCCL::ProcessGroupNCCL(
     const std::shared_ptr<Store>& store,
     int rank,
-    int size)
-    : ProcessGroup(rank, size), store_(store) {
+    int size,
+    const std::string& groupName)
+    : ProcessGroup(rank, size), store_(store), groupName_(groupName) {
   // Generate the Process Group ID for current PG, this needs to be identical
   // for all processes
   std::unique_lock<std::mutex> lock(pgTrackingLock_);
-  ++processGroupCounter_;
-  pgUniqueNCCLIDCnt_[processGroupCounter_] = -1;
-  processGroupID_ = std::to_string(processGroupCounter_);
+  // Default group is an empty string
+  const auto groupKey = groupName_ + "_";
+  if (processGroupCounterMap_.count(groupKey) == 0) {
+    processGroupCounterMap_[groupKey] = -1;
+  }
+  ++processGroupCounterMap_[groupKey];
+  processGroupID_ = std::to_string(processGroupCounterMap_[groupKey]);
+  groupPgID_ = groupName_ + "_" + processGroupID_;
+  pgUniqueNCCLIDCnt_[groupPgID_] = -1;
 }
 
 ProcessGroupNCCL::~ProcessGroupNCCL() {
   std::unique_lock<std::mutex> lock(pgTrackingLock_);
-  pgUniqueNCCLIDCnt_.erase(std::stoull(processGroupID_));
+  pgUniqueNCCLIDCnt_.erase(groupPgID_);
 }
 
 void ProcessGroupNCCL::broadcastUniqueNCCLID(ncclUniqueId* ncclID) {
@@ -168,9 +177,8 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(ncclUniqueId* ncclID) {
   // The key is a combination of processGroupID_ and the current count of
   // NCCL unique ID created
   std::unique_lock<std::mutex> lock(pgTrackingLock_);
-  auto processGroupIDKey = std::stoull(processGroupID_);
-  auto uniqueNCCLIDCnt = pgUniqueNCCLIDCnt_[processGroupIDKey] + 1;
-  pgUniqueNCCLIDCnt_[processGroupIDKey] = uniqueNCCLIDCnt;
+  auto groupPgId = groupName_ + "_" + processGroupID_;
+  const auto uniqueNCCLIDCnt = ++pgUniqueNCCLIDCnt_[groupPgID_];
 
   lock.unlock();
 

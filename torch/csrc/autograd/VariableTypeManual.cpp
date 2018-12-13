@@ -1,6 +1,6 @@
-#include "c10/util/Optional.h"
-#include "torch/csrc/autograd/VariableTypeUtils.h"
-#include "torch/csrc/utils/memory.h"
+#include <c10/util/Optional.h>
+#include <torch/csrc/autograd/VariableTypeUtils.h>
+#include <torch/csrc/utils/memory.h>
 
 #include <torch/csrc/utils/memory.h>
 
@@ -30,12 +30,6 @@ Allocator* VariableType::allocator() const {
 }
 Device VariableType::getDeviceFromPtr(void * data) const {
   return baseType->getDeviceFromPtr(data);
-}
-Storage VariableType::storage(bool resizable) const {
-  return baseType->storage();
-}
-Storage VariableType::storage(size_t size, bool resizable) const {
-  return baseType->storage(size);
 }
 Storage VariableType::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
   return baseType->storageFromBlob(data, size, deleter);
@@ -281,7 +275,7 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
   return self;
 }
 
-Tensor & VariableType::_s_copy_from(const Tensor & self, Tensor & dst, bool non_blocking) const {
+Tensor VariableType::_s_copy_from(const Tensor & self, const Tensor & dst, bool non_blocking) const {
   AT_ERROR("copy_from does not support automatic differentiation; use copy_ instead");
 }
 

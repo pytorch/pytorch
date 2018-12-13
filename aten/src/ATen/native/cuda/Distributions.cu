@@ -1,8 +1,8 @@
-#include "ATen/Dispatch.h"
-#include "ATen/ExpandUtils.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/cuda/CUDAApplyUtils.cuh"
-#include "ATen/AccumulateType.h"
+#include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/AccumulateType.h>
 
 #include <curand.h>
 #include <curand_kernel.h>
@@ -11,7 +11,7 @@
 #include <functional>
 #include <nvfunctional>
 
-#include "ATen/native/Distributions.h"
+#include <ATen/native/Distributions.h>
 
 #include <THC/THCGeneral.h>
 #include <THC/THCTensorRandom.h>

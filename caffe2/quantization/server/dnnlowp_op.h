@@ -8,6 +8,7 @@
 #include "caffe2/core/tensor_int8.h"
 #include "caffe2/quantization/server/caffe2_dnnlowp_utils.h"
 #include "caffe2/quantization/server/dnnlowp.h"
+#include "caffe2/quantization/server/fbgemm_pack_blob.h"
 #include "caffe2/quantization/server/op_wrapper.h"
 #include "caffe2/quantization/server/sigmoid.h"
 #include "caffe2/quantization/server/tanh.h"
@@ -92,9 +93,13 @@ class DNNLowPOp : public Operator<CPUContext> {
 
  protected:
   const TensorCPU& InputTensorCPU_(int idx) {
-    return InputIsType<int8::Int8TensorCPU>(idx)
-        ? OperatorBase::Input<int8::Int8TensorCPU>(idx).t
-        : Input(idx);
+    if (InputIsType<int8::Int8TensorCPU>(idx)) {
+      return this->Input<int8::Int8TensorCPU>(idx).t;
+    } else if (InputIsType<Int8FCDNNLowPPackedWeightBlob>(idx)) {
+      return this->Input<Int8FCDNNLowPPackedWeightBlob>(idx).original_tensor;
+    } else {
+      return Input(idx);
+    }
   }
 
   TensorCPU* OutputTensorCPU_(int idx) {

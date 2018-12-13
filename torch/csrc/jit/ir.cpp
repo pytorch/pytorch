@@ -1,13 +1,13 @@
-#include "ir.h"
+#include <torch/csrc/jit/ir.h>
 
 
-#include "torch/csrc/jit/operator.h"
-#include "torch/csrc/autograd/function.h"
-#include "torch/csrc/jit/constants.h"
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/script/compiler.h"
-#include "torch/csrc/jit/passes/python_print.h"
-#include "torch/csrc/jit/passes/alias_analysis.h"
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/passes/python_print.h>
+#include <torch/csrc/jit/passes/alias_analysis.h>
 
 #include <iostream>
 #include <unordered_map>
@@ -522,6 +522,10 @@ std::shared_ptr<Graph> Graph::copy() {
   return new_g;
 }
 
+bool Value::mustBeNone() const {
+  return node_->kind() == prim::None;
+}
+
 std::string Value::uniqueNameBase() const {
   std::string name = uniqueName();
   std::string name_base = name;
@@ -656,19 +660,19 @@ bool Node::isNondeterministic() const {
     "aten::poisson(Tensor self, Generator generator) -> Tensor",
     "aten::rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator generator) -> Tensor",
     "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator generator) -> Tensor",
-    "aten::rand(int[] size, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::rand(int[] size, *, int dtype, int layout, Device device) -> Tensor",
     "aten::rand_like(Tensor self) -> Tensor",
-    "aten::rand_like(Tensor self, *, int dtype, int layout, int[] device) -> Tensor",
-    "aten::randint(int high, int[] size, *, int dtype, int layout, int[] device) -> Tensor",
-    "aten::randint(int low, int high, int[] size, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::rand_like(Tensor self, *, int dtype, int layout, Device device) -> Tensor",
+    "aten::randint(int high, int[] size, *, int dtype, int layout, Device device) -> Tensor",
+    "aten::randint(int low, int high, int[] size, *, int dtype, int layout, Device device) -> Tensor",
     "aten::randint_like(Tensor self, int high) -> Tensor",
     "aten::randint_like(Tensor self, int low, int high) -> Tensor",
-    "aten::randint_like(Tensor self, int high, *, int dtype, int layout, int[] device) -> Tensor",
-    "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, int[] device) -> Tensor",
-    "aten::randn(int[] size, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::randint_like(Tensor self, int high, *, int dtype, int layout, Device device) -> Tensor",
+    "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, Device device) -> Tensor",
+    "aten::randn(int[] size, *, int dtype, int layout, Device device) -> Tensor",
     "aten::randn_like(Tensor self) -> Tensor",
-    "aten::randn_like(Tensor self, *, int dtype, int layout, int[] device) -> Tensor",
-    "aten::randperm(int n, *, int dtype, int layout, int[] device) -> Tensor"
+    "aten::randn_like(Tensor self, *, int dtype, int layout, Device device) -> Tensor",
+    "aten::randperm(int n, *, int dtype, int layout, Device device) -> Tensor"
   };
 
   if (nondeterministic_ops.find(this) == nullptr) {
@@ -862,18 +866,18 @@ Value* Node::insertOutput(size_t i) {
   return outputs_.at(i);
 }
 
-bool Node::isBefore(const Node * n) const {
-  if (this == n) {
-    return false;
-  }
-  return !isAfter(n);
-}
-
-bool Node::isAfter(const Node * n) const {
-  JIT_ASSERT(this->owningGraph() == n->owningGraph());
-
+bool Node::isBeforeOrAfter(const Node* n, MoveSide moveSide) const {
   if (this->owningBlock() == n->owningBlock()) {
-    return this->topo_position_ > n->topo_position_;
+    if (moveSide == MoveSide::BEFORE) {
+      return this->topo_position_ < n->topo_position_;
+    }
+
+    if (moveSide == MoveSide::AFTER) {
+      return this->topo_position_ > n->topo_position_;
+    }
+
+    JIT_ASSERT(this == n);
+    return false;
   }
 
   // These nodes don't share a common block. Traverse the blockchains upward
@@ -887,7 +891,7 @@ bool Node::isAfter(const Node * n) const {
       JIT_ASSERT(rhs->owningBlock());
 
       if (lhs->owningBlock() == rhs->owningBlock()) {
-        return lhs->isAfter(rhs);
+        return lhs->isBeforeOrAfter(rhs, moveSide);
       }
       rhs = rhs->owningBlock()->owningNode();
     }
@@ -896,6 +900,15 @@ bool Node::isAfter(const Node * n) const {
   }
   // should never reach here, since both nodes are ultimately in the same graph
   JIT_ASSERT(false);
+
+}
+
+bool Node::isBefore(const Node * n) const {
+  return isBeforeOrAfter(n, MoveSide::BEFORE);
+}
+
+bool Node::isAfter(const Node * n) const {
+  return isBeforeOrAfter(n, MoveSide::AFTER);
 }
 
 Node* Node::insertBefore(Node * n) {
@@ -1393,51 +1406,9 @@ Node* Graph::createNumToTensor(Value* value) {
   return result;
 }
 
-Node* Graph::createBoolToTensor(Value* value) {
-  auto typ = value->type();
-  Node * result = create(prim::BoolToTensor, {value});
-  if (!typ->isSubtypeOf(BoolType::get())) {
-    AT_ERROR("Cannot create bool type from ", typ->str());
-  }
-  result->output()->setType(CompleteTensorType::fromBoolType());
-  return result;
-}
-Node* Graph::createTensorToNum(const TypePtr& type, Value* value) {
-  auto* result = create(prim::TensorToNum, {value});
-  result->output()->setType(type);
-  return result;
-}
-
 Node* Graph::createImplicitTensorToNum(const TypePtr& type, Value* value) {
   auto* result = create(prim::ImplicitTensorToNum, {value});
   result->output()->setType(type);
-  return result;
-}
-
-Node* Graph::createTensorToBool(Value* value) {
-  auto* result = create(prim::TensorToBool, {value});
-  result->output()->setType(BoolType::get());
-  return result;
-}
-
-Node* Graph::createIntToFloat(Value* value) {
-  JIT_ASSERT(*value->type() == *IntType::get());
-  auto* result = create(prim::IntToFloat, {value});
-  result->output()->setType(FloatType::get());
-  return result;
-}
-
-Node* Graph::createFloatToInt(Value* value) {
-  JIT_ASSERT(*value->type() == *FloatType::get());
-  auto* result = create(prim::FloatToInt, {value});
-  result->output()->setType(IntType::get());
-  return result;
-}
-
-Node* Graph::createStringToFloat(Value* value) {
-  JIT_ASSERT(*value->type() == *StringType::get());
-  auto* result = create(prim::StringToFloat, {value});
-  result->output()->setType(FloatType::get());
   return result;
 }
 

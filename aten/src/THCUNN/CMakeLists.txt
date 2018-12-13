@@ -27,7 +27,6 @@ ${CMAKE_CURRENT_SOURCE_DIR}/SoftMarginCriterion.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SoftPlus.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SoftShrink.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SparseLinear.cu
-${CMAKE_CURRENT_SOURCE_DIR}/SpatialAdaptiveAveragePooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialAdaptiveMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialAveragePooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialClassNLLCriterion.cu

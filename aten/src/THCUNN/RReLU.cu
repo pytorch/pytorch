@@ -1,8 +1,8 @@
-#include "THCUNN.h"
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
+#include <THCUNN/THCUNN.h>
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
 #include <THC/THCApply.cuh>
-#include "common.h"
+#include <THCUNN/common.h>
 #include <curand.h>
 #include <curand_kernel.h>
 
@@ -118,5 +118,5 @@ struct RReLUupdateGradInputEvalIP_functor
   }
 };
 
-#include "generic/RReLU.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/RReLU.cu>
+#include <THC/THCGenerateFloatTypes.h>

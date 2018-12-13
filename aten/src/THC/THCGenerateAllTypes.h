@@ -14,14 +14,14 @@
 #define THCTypeIdxHalf   8
 #define THCTypeIdx_(T) TH_CONCAT_2(THCTypeIdx,T)
 
-#include "THCGenerateByteType.h"
-#include "THCGenerateCharType.h"
-#include "THCGenerateShortType.h"
-#include "THCGenerateIntType.h"
-#include "THCGenerateLongType.h"
-#include "THCGenerateHalfType.h"
-#include "THCGenerateFloatType.h"
-#include "THCGenerateDoubleType.h"
+#include <THC/THCGenerateByteType.h>
+#include <THC/THCGenerateCharType.h>
+#include <THC/THCGenerateShortType.h>
+#include <THC/THCGenerateIntType.h>
+#include <THC/THCGenerateLongType.h>
+#include <THC/THCGenerateHalfType.h>
+#include <THC/THCGenerateFloatType.h>
+#include <THC/THCGenerateDoubleType.h>
 
 #undef THCTypeIdxByte
 #undef THCTypeIdxChar
