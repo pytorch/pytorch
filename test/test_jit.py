@@ -9627,31 +9627,6 @@ class TestFuser(JitTestCase):
         ge = self.checkTrace(scaleshift, inputs)
         self.assertExpectedGraph(ge.graph_for(*inputs))
 
-    @staticmethod
-    def _test_cast_Float(self, device):
-        def f(x, y):
-            z = x.float()
-            return z + y
-
-        inputs = [
-            torch.randn(4, 4, dtype=torch.double, device=device),
-            torch.randn(4, 4, dtype=torch.float, device=device),
-        ]
-
-        ge = self.checkScript(f, inputs)
-        self.assertAllFused(ge.graph_for(*inputs))
-
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
-    @enable_cpu_fuser
-    def test_cast_Float(self):
-        return self._test_cast_Float(self, 'cpu')
-
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
-    @unittest.skipIf(not RUN_CUDA, "No CUDA")
-    @skipIfRocm
-    def test_cast_Float_cuda(self):
-        return self._test_cast_Float(self, 'cuda')
-
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(not RUN_CUDA_HALF, "no half support")
@@ -9941,6 +9916,60 @@ class TestFuser(JitTestCase):
 
         ge = self.checkTrace(self.fn_test_exp, (x, y))
         self.assertAllFused(ge.graph_for(x, y))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
+    @skipIfRocm
+    @enable_cpu_fuser
+    def test_fusion_reuse_multi_gpu(self):
+        def fn(x, y):
+            return x * y * x * y
+
+        inputs_cpu = [
+            torch.randn(4, 4, dtype=torch.float),
+            torch.randn(4, 4, dtype=torch.float),
+        ]
+        inputs_cuda0 = [x.cuda(0) for x in inputs_cpu]
+        inputs_cuda1 = [y.cuda(1) for y in inputs_cpu]
+
+        # Should not crash; these should compile different kernels.
+        ge = self.checkScript(fn, inputs_cpu)
+        self.assertAllFused(ge.graph_for(*inputs_cpu))
+        ge(*inputs_cuda0)
+        ge(*inputs_cuda1)
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
+    @skipIfRocm
+    @enable_cpu_fuser
+    def test_kernel_cache_multi_gpu(self):
+        def not_fusible(x):
+            return x
+
+        def fn(x, y, z):
+            x_out = x * x * x * x * x  # fusion: lambda x. x * x * x * x * x
+            y_out = y * y * y * y * y
+            z_out = z * z * z * z * z
+            return not_fusible(x_out), not_fusible(y_out), not_fusible(z_out)
+
+        inputs = [
+            torch.randn(4, 4, dtype=torch.float),
+            torch.randn(4, 4, dtype=torch.float, device='cuda:0'),
+            torch.randn(4, 4, dtype=torch.float, device='cuda:1'),
+        ]
+
+        prev_cache_size = torch._C._jit_debug_fuser_num_cached_kernel_specs()
+
+        # There are 3 FusionGroups. Because they have the same graph, they
+        # should reuse the same KernelSpec in the KernelSpec cache.
+        ge = self.checkScript(fn, inputs)
+        self.assertGraphContainsExactly(
+            ge.graph_for(*inputs), 'prim::FusionGroup', 3, True)
+        new_cache_size = torch._C._jit_debug_fuser_num_cached_kernel_specs()
+        # XXX: This assumes that the same kernel isn't already used by another test
+        self.assertEqual(new_cache_size - prev_cache_size, 1)
 
     # TODO: This test doesn't offer anything valuable, maybe we should delete it
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
