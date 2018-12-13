@@ -7131,6 +7131,10 @@ a")
         # submodule during tracing
 
         class AnotherScriptMod(torch.jit.ScriptModule):
+            def __init__(self):
+                super(AnotherScriptMod, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(1, 2, 3))
+
             @torch.jit.script_method
             def bar(self):
                 return torch.zeros(4, 5)
@@ -7161,6 +7165,7 @@ a")
         imported = self.getExportImportCopy(traced)
         assert(imported.ssm._has_method('foo'))
         assert(imported.ssm.asm._has_method('bar'))
+        assert(imported.ssm.asm._has_parameter('param'))
 
     def test_call_traced_module_from_traced_module(self):
         class TracedModule1(torch.nn.Module):
