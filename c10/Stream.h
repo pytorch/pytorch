@@ -60,6 +60,7 @@ private:
   StreamId id_;
 public:
   enum Unsafe { UNSAFE };
+  enum Default { DEFAULT };
 
   /// Unsafely construct a stream from a Device and a StreamId.  In
   /// general, only specific implementations of streams for a
@@ -75,7 +76,7 @@ public:
   /// NOT the same as the current stream; default stream is a fixed stream
   /// that never changes, whereas the current stream may be changed by
   /// StreamGuard.
-  explicit Stream(Device device)
+  explicit Stream(Default, Device device)
     : device_(device)
     , id_(0) {}
 
