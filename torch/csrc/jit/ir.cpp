@@ -686,6 +686,17 @@ bool Node::isNondeterministic() const {
   return true;
 }
 
+bool Node::hasSideEffects() const {
+  switch (kind_) {
+    case prim::PythonOp:
+    case prim::Print:
+    case prim::RaiseException:
+    case aten::warn:
+      return true;
+  }
+  return false;
+}
+
 // Assign this node a topological position, to facilitate fast isBefore() and
 // isAfter() queries. Must be called right after a node is inserted into the
 // node list.
