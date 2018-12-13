@@ -147,7 +147,7 @@ context->registerType(Backend::${backend}, ScalarType::${scalar_type}, new ${typ
 
 EXTENSION_BACKEND_REGISTER_SWITCH = CodeTemplate("""\
 case Backend::${Backend}:
-    ${Type}Dispatch::register_fn(schema, fn);
+    ${Type}Dispatch::register_function(schema, fn);
     break;
 """)
 
@@ -367,7 +367,7 @@ def generate_type_extension_backend(backend, declarations):
     extension_backend_register_switch = EXTENSION_BACKEND_REGISTER_SWITCH.substitute(env)
     top_env['extension_backend_register_switches'].append(extension_backend_register_switch)
     top_env['extension_backend_headers'].append(
-        '#include "ATen/{}.h"'.format(env['Type']))
+        '#include <ATen/{}.h>'.format(env['Type']))
     top_env['cpu_type_headers'].append(
         '#include "ATen/{}.h"'.format(env['Type']))
 

@@ -5,13 +5,25 @@ namespace at {
 
 struct CAFFE2_API ${Type}Dispatch {
   template<typename FnPtr>
-  static FnPtr get_function(std::string schema);
+  static FnPtr get_function(std::string schema) {
+    auto fn_table = get_fn_table<FnPtr>();
+    auto it = fn_table.find(schema);
+    if (it != fn_table.end()) {
+      return it->second;
+    }
+    AT_ERROR("No function implemented for schema: ", schema);
+  }
 
   template<typename FnPtr>
-  static void register_function(std::string schema, FnPtr fn);
+  static void register_function(std::string schema, FnPtr fn) {
+    get_fn_table<FnPtr>()[schema] = fn;
+  }
 
   template<typename FnPtr>
-  static std::map<std::string, FnPtr>& get_fn_table();
+  static std::map<std::string, FnPtr>& get_fn_table() {
+    static std::map<std::string, FnPtr> fn_table;
+    return fn_table;
+  }
 };
 
 struct CAFFE2_API ${Type} : public TypeDefault {
