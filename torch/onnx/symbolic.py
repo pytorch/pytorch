@@ -934,6 +934,7 @@ def min(g, self, dim_or_y, keepdim=None):
                     keepdim_i=keepdim,
                     outputs=2)
 
+
 @wrap_logical_op_with_cast_to_uint8
 def eq(g, self, other):
     return g.op("Equal", self, other)
