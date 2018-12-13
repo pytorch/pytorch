@@ -20,6 +20,7 @@ static inline THGenerator* get_generator(at::Generator* gen) {
 
 }}  // namespace at::native
 
+// ROCM hcc doesn't work well with using std:: in kernel functions
 #if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
 #include <c10/cuda/CUDAMathCompat.h>
 #define compat_exp c10::cuda::compat::exp
@@ -45,6 +46,10 @@ namespace {
 #define isnan std::isnan
 #endif
 
+// Here sampler_t should be function type scalar_t(void). For gpu
+// "sampler" is a device function, but since ROCM doesn't have
+// equivalent to nvstd::function, we use a template type parameter to
+// capture it.
 template<typename scalar_t, typename sampler_t>
 struct BaseSampler {
   sampler_t sampler;
