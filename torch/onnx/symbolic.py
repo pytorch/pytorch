@@ -1367,3 +1367,10 @@ def rrelu(g, input, lower, upper, training, generator):
 def log_sigmoid(g, input):
     p = g.op('Sigmoid', input)
     return g.op('Log', p)
+
+
+@parse_args('v', 'i', 'v', 'v')
+def scatter(g, self, dim, indices, src):
+    # src may be a scalar in torch
+    src=_maybe_get_scalar(src)
+    return g.op('Scatter', self, indices, src, axis_i=dim)

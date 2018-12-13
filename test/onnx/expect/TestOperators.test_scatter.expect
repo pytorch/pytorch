@@ -1,0 +1,81 @@
+ir_version: 3
+producer_name: "pytorch"
+producer_version: "0.4"
+graph {
+  node {
+    output: "1"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 2
+        dims: 3
+        data_type: 7
+        raw_data: "\001\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\002\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\002\000\000\000\000\000\000\000\001\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    output: "2"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 2
+        dims: 3
+        data_type: 1
+        raw_data: "L\363<=\276\007\316>\311y\201\277\241\360]>\356\275\034\277\242\354\000?"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "0"
+    input: "1"
+    input: "2"
+    output: "3"
+    op_type: "Scatter"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  name: "torch-jit-export"
+  input {
+    name: "0"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 3
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "3"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 3
+          }
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 9
+}

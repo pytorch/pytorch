@@ -175,6 +175,12 @@ class TestOperators(TestCase):
         x = torch.tensor([[0.0, 1.0], [2.0, 3.0]], requires_grad=True)
         self.assertONNX(lambda x: x.transpose(0, 1).transpose(1, 0), x)
 
+    def test_scatter(self):
+        data = torch.zeros(3, 3)
+        updates = torch.randn(2, 3)
+        indices=torch.tensor([[1,0,2],[0,2,1],])
+        self.assertONNX(lambda x: x.scatter_(0, indices, updates), data)
+
     def test_chunk(self):
         x = torch.tensor([0.0, 1.0, 2.0], requires_grad=True)
         self.assertONNX(lambda x: x.chunk(2), x)
