@@ -6697,7 +6697,7 @@ class _TestTorchMixin(object):
                                  [0, 1, 0, 0, 0],
                                  [1, 0, 0, 0, 0]])
         self.assertEqual(t, expected)
-        t = torch.to_one_hot(torch.tensor([3, 4, 1, 0]), 5)
+        t = torch.to_one_hot(torch.tensor([3, 4, 1, 0]), 6)
         expected = torch.tensor([[0, 0, 0, 1, 0, 0],
                                  [0, 0, 0, 0, 1, 0],
                                  [0, 1, 0, 0, 0, 0],
