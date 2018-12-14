@@ -6,26 +6,26 @@
 
 namespace at { namespace native {
 
-at::Tensor mkldnn_convolution(
-    const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias,
+Tensor mkldnn_convolution(
+    const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups) {
   AT_ERROR("mkldnn_convolution_forward: ATen not compiled with MKLDNN support");
 }
 
-at::Tensor mkldnn_convolution_backward_input(
-    IntArrayRef input_size, const at::Tensor& grad_output, const at::Tensor& weight,
+Tensor mkldnn_convolution_backward_input(
+    IntArrayRef input_size, const Tensor& grad_output, const Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool bias_defined) {
   AT_ERROR("mkldnn_convolution_backward_input: ATen not compiled with MKLDNN support");
 }
 
-std::tuple<at::Tensor,at::Tensor> mkldnn_convolution_backward_weights(
-    IntArrayRef weight_size, const at::Tensor& grad_output, const at::Tensor& input,
+std::tuple<Tensor,Tensor> mkldnn_convolution_backward_weights(
+    IntArrayRef weight_size, const Tensor& grad_output, const Tensor& input,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool bias_defined) {
   AT_ERROR("mkldnn_convolution_backward_weights: ATen not compiled with MKLDNN support");
 }
 
-std::tuple<at::Tensor,at::Tensor,at::Tensor> mkldnn_convolution_backward(
-    const at::Tensor& input, const at::Tensor& grad_output_t, const at::Tensor& weight,
+std::tuple<Tensor,Tensor,Tensor> mkldnn_convolution_backward(
+    const Tensor& input, const Tensor& grad_output_t, const Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, std::array<bool,3> output_mask) {
   AT_ERROR("mkldnn_convolution_backward: ATen not compiled with MKLDNN support");
 }
@@ -66,14 +66,14 @@ static std::vector<int64_t> conv_output_size(
   return output_size;
 }
 
-at::Tensor mkldnn_convolution(
-    const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias,
+Tensor mkldnn_convolution(
+    const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups)
 {
   auto output = at::empty(conv_output_size(
     input.sizes(), weight.sizes(), padding, stride, dilation, groups), input.options());
 
-  auto cpu_engine = CpuEngine::Instance().get_engine();
+  auto _engine = MKLDNNEngine::Instance().get_engine();
 
   int32_t g = groups;
 
@@ -125,29 +125,27 @@ at::Tensor mkldnn_convolution(
 
   std::shared_ptr<convolution_forward::primitive_desc> conv_forward_pd;
   conv_forward_pd.reset(new convolution_forward::primitive_desc(
-    *conv_forward_desc, cpu_engine));
+    *conv_forward_desc, _engine));
 
-  auto input_usr_memory = memory({{{input_tz}, data_t, format_nchw}, cpu_engine},
+  auto input_usr_memory = memory({{{input_tz}, data_t, format_nchw}, _engine},
     input.data_ptr());
-  auto weight_usr_memory = memory({{{weight_tz}, data_t,  format_weight}, cpu_engine},
+  auto weight_usr_memory = memory({{{weight_tz}, data_t,  format_weight}, _engine},
     weight.data_ptr());
-  auto output_usr_memory = memory({{{output_tz}, data_t, format_nchw}, cpu_engine},
+  auto output_usr_memory = memory({{{output_tz}, data_t, format_nchw}, _engine},
     output.data_ptr());
-
-  std::vector<primitive> net;
 
   auto input_pd = conv_forward_pd->src_primitive_desc();
   auto input_memory = input_usr_memory;
   if (input_usr_memory.get_primitive_desc() != memory::primitive_desc(input_pd)) {
     input_memory = memory(input_pd);
-    net.push_back(reorder(input_usr_memory, input_memory));
+    MKLDNN_EXEC(reorder(input_usr_memory, input_memory));
   }
 
   auto weight_pd = conv_forward_pd->weights_primitive_desc();
   auto weight_memory = weight_usr_memory;
   if (weight_usr_memory.get_primitive_desc() != memory::primitive_desc(weight_pd)) {
     weight_memory = memory(weight_pd);
-    net.push_back(reorder(weight_usr_memory, weight_memory));
+    MKLDNN_EXEC(reorder(weight_usr_memory, weight_memory));
   }
 
   auto output_pd = conv_forward_pd->dst_primitive_desc();
@@ -159,7 +157,7 @@ at::Tensor mkldnn_convolution(
   std::shared_ptr<convolution_forward> conv_forward;
   std::shared_ptr<memory> bias_usr_memory;
   if (bias.defined()) {
-    bias_usr_memory.reset(new memory({{{bias_tz}, data_t, format_x}, cpu_engine},
+    bias_usr_memory.reset(new memory({{{bias_tz}, data_t, format_x}, _engine},
       bias.data_ptr()));
     conv_forward.reset(new convolution_forward(*conv_forward_pd, input_memory,
       weight_memory, *bias_usr_memory, output_memory));
@@ -167,24 +165,22 @@ at::Tensor mkldnn_convolution(
     conv_forward.reset(new convolution_forward(*conv_forward_pd, input_memory,
       weight_memory, output_memory));
   }
-  net.push_back(*conv_forward);
+  MKLDNN_EXEC(*conv_forward);
 
   if (output_memory != output_usr_memory) {
-    net.push_back(reorder(output_memory, output_usr_memory));
+    MKLDNN_EXEC(reorder(output_memory, output_usr_memory));
   }
-
-  Stream::Instance().get_stream().submit(net);
 
   return output;
 }
 
 Tensor mkldnn_convolution_backward_input(
-    IntArrayRef input_size, const at::Tensor& grad_output, const at::Tensor& weight,
+    IntArrayRef input_size, const Tensor& grad_output, const Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool bias_defined)
 {
   auto grad_input = at::empty(input_size, grad_output.options());
 
-  auto cpu_engine = CpuEngine::Instance().get_engine();
+  auto _engine = MKLDNNEngine::Instance().get_engine();
 
   int32_t g = groups;
 
@@ -236,7 +232,7 @@ Tensor mkldnn_convolution_backward_input(
 
   std::shared_ptr<convolution_forward::primitive_desc> conv_forward_pd;
   conv_forward_pd.reset(new convolution_forward::primitive_desc(
-    *conv_forward_desc, cpu_engine));
+    *conv_forward_desc, _engine));
 
   std::shared_ptr<convolution_backward_data::desc> conv_backward_data_desc;
   conv_backward_data_desc.reset(new convolution_backward_data::desc(
@@ -245,29 +241,27 @@ Tensor mkldnn_convolution_backward_input(
 
   std::shared_ptr<convolution_backward_data::primitive_desc> conv_backward_data_pd;
   conv_backward_data_pd.reset(new convolution_backward_data::primitive_desc(
-    *conv_backward_data_desc, cpu_engine, *conv_forward_pd));
+    *conv_backward_data_desc, _engine, *conv_forward_pd));
 
-  auto grad_output_usr_memory = memory({{{output_tz}, data_t, format_nchw}, cpu_engine},
+  auto grad_output_usr_memory = memory({{{output_tz}, data_t, format_nchw}, _engine},
     grad_output.data_ptr());
-  auto weight_usr_memory = memory({{{weight_tz}, data_t, format_weight}, cpu_engine},
+  auto weight_usr_memory = memory({{{weight_tz}, data_t, format_weight}, _engine},
     weight.data_ptr());
-  auto grad_input_usr_memory = memory({{{input_tz}, data_t, format_nchw}, cpu_engine},
+  auto grad_input_usr_memory = memory({{{input_tz}, data_t, format_nchw}, _engine},
     grad_input.data_ptr());
-
-  std::vector<primitive> net;
 
   auto grad_output_pd = conv_backward_data_pd->diff_dst_primitive_desc();
   auto grad_output_memory = grad_output_usr_memory;
   if (grad_output_usr_memory.get_primitive_desc() != memory::primitive_desc(grad_output_pd)) {
     grad_output_memory = memory(grad_output_pd);
-    net.push_back(reorder(grad_output_usr_memory, grad_output_memory));
+    MKLDNN_EXEC(reorder(grad_output_usr_memory, grad_output_memory));
   }
 
   auto weight_pd = conv_backward_data_pd->weights_primitive_desc();
   auto weight_memory = weight_usr_memory;
   if (weight_usr_memory.get_primitive_desc() != memory::primitive_desc(weight_pd)) {
     weight_memory = memory(weight_pd);
-    net.push_back(reorder(weight_usr_memory, weight_memory));
+    MKLDNN_EXEC(reorder(weight_usr_memory, weight_memory));
   }
 
   auto grad_input_pd = conv_backward_data_pd->diff_src_primitive_desc();
@@ -279,19 +273,17 @@ Tensor mkldnn_convolution_backward_input(
   std::shared_ptr<convolution_backward_data> conv_backward_data;
   conv_backward_data.reset(new convolution_backward_data(*conv_backward_data_pd,
     grad_output_memory, weight_memory, grad_input_memory));
-  net.push_back(*conv_backward_data);
+  MKLDNN_EXEC(*conv_backward_data);
 
   if (grad_input_memory != grad_input_usr_memory) {
-    net.push_back(reorder(grad_input_memory, grad_input_usr_memory));
+    MKLDNN_EXEC(reorder(grad_input_memory, grad_input_usr_memory));
   }
-
-  Stream::Instance().get_stream().submit(net);
 
   return grad_input;
 }
 
-std::tuple<at::Tensor, at::Tensor> mkldnn_convolution_backward_weights(
-    IntArrayRef weight_size, const at::Tensor& grad_output, const at::Tensor& input,
+std::tuple<Tensor, Tensor> mkldnn_convolution_backward_weights(
+    IntArrayRef weight_size, const Tensor& grad_output, const Tensor& input,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool bias_defined)
 {
   auto grad_weight = at::empty(weight_size, grad_output.options());
@@ -301,7 +293,7 @@ std::tuple<at::Tensor, at::Tensor> mkldnn_convolution_backward_weights(
     grad_bias = at::empty({grad_output.size(1)}, grad_output.options());
   }
 
-  auto cpu_engine = CpuEngine::Instance().get_engine();
+  auto _engine = MKLDNNEngine::Instance().get_engine();
 
   int32_t g = groups;
 
@@ -354,7 +346,7 @@ std::tuple<at::Tensor, at::Tensor> mkldnn_convolution_backward_weights(
 
   std::shared_ptr<convolution_forward::primitive_desc> conv_forward_pd;
   conv_forward_pd.reset(new convolution_forward::primitive_desc(
-    *conv_forward_desc, cpu_engine));
+    *conv_forward_desc, _engine));
 
   std::shared_ptr<convolution_backward_weights::desc> conv_backward_weight_desc;
   if (bias_defined) {
@@ -369,30 +361,28 @@ std::tuple<at::Tensor, at::Tensor> mkldnn_convolution_backward_weights(
 
   std::shared_ptr<convolution_backward_weights::primitive_desc> conv_backward_weight_pd;
   conv_backward_weight_pd.reset(new convolution_backward_weights::primitive_desc(
-    *conv_backward_weight_desc, cpu_engine, *conv_forward_pd));
+    *conv_backward_weight_desc, _engine, *conv_forward_pd));
 
-  auto input_usr_memory = memory({{{input_tz}, data_t, format_nchw}, cpu_engine},
+  auto input_usr_memory = memory({{{input_tz}, data_t, format_nchw}, _engine},
     input.data_ptr());
-  auto grad_output_usr_memory = memory({{{output_tz}, data_t, format_nchw}, cpu_engine},
+  auto grad_output_usr_memory = memory({{{output_tz}, data_t, format_nchw}, _engine},
     grad_output.data_ptr());
-  auto grad_weight_usr_memory = memory({{{weight_tz}, data_t, format_weight}, cpu_engine},
+  auto grad_weight_usr_memory = memory({{{weight_tz}, data_t, format_weight}, _engine},
     grad_weight.data_ptr());
   std::shared_ptr<memory> grad_bias_memory;
-
-  std::vector<primitive> net;
 
   auto input_pd = conv_backward_weight_pd->src_primitive_desc();
   auto input_memory = input_usr_memory;
   if (input_usr_memory.get_primitive_desc() != memory::primitive_desc(input_pd)) {
     input_memory = memory(input_pd);
-    net.push_back(reorder(input_usr_memory, input_memory));
+    MKLDNN_EXEC(reorder(input_usr_memory, input_memory));
   }
 
   auto grad_output_pd = conv_backward_weight_pd->diff_dst_primitive_desc();
   auto grad_output_memory = grad_output_usr_memory;
   if (grad_output_usr_memory.get_primitive_desc() != memory::primitive_desc(grad_output_pd)) {
     grad_output_memory = memory(grad_output_pd);
-    net.push_back(reorder(grad_output_usr_memory, grad_output_memory));
+    MKLDNN_EXEC(reorder(grad_output_usr_memory, grad_output_memory));
   }
 
   auto grad_weight_pd = conv_backward_weight_pd->diff_weights_primitive_desc();
@@ -403,7 +393,7 @@ std::tuple<at::Tensor, at::Tensor> mkldnn_convolution_backward_weights(
 
   std::shared_ptr<convolution_backward_weights> conv_backward_weight;
   if (bias_defined) {
-    grad_bias_memory.reset(new memory({{{bias_tz}, data_t, format_x}, cpu_engine},
+    grad_bias_memory.reset(new memory({{{bias_tz}, data_t, format_x}, _engine},
       grad_bias.data_ptr()));
     conv_backward_weight.reset(new convolution_backward_weights(*conv_backward_weight_pd,
       input_memory, grad_output_memory, grad_weight_memory, *grad_bias_memory));
@@ -412,19 +402,17 @@ std::tuple<at::Tensor, at::Tensor> mkldnn_convolution_backward_weights(
       input_memory, grad_output_memory, grad_weight_memory));
   }
 
-  net.push_back(*conv_backward_weight);
+  MKLDNN_EXEC(*conv_backward_weight);
 
   if (grad_weight_memory != grad_weight_usr_memory) {
-    net.push_back(reorder(grad_weight_memory, grad_weight_usr_memory));
+    MKLDNN_EXEC(reorder(grad_weight_memory, grad_weight_usr_memory));
   }
 
-  Stream::Instance().get_stream().submit(net);
-
-  return std::tuple<at::Tensor, at::Tensor>{grad_weight, grad_bias};
+  return std::tuple<Tensor, Tensor>{grad_weight, grad_bias};
 }
 
-std::tuple<at::Tensor,at::Tensor,at::Tensor> mkldnn_convolution_backward(
-    const at::Tensor& input, const at::Tensor& grad_output_t, const at::Tensor& weight,
+std::tuple<Tensor,Tensor,Tensor> mkldnn_convolution_backward(
+    const Tensor& input, const Tensor& grad_output_t, const Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, std::array<bool,3> output_mask)
 {
   Tensor grad_output = grad_output_t.contiguous();
