@@ -3,6 +3,7 @@
 
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/workspace.h"
+#include "caffe2/utils/proto_utils.h"
 
 #include <cmath>
 #include <vector>
@@ -121,7 +122,7 @@ caffe2::Tensor* createTensorAndConstantFill(
   return tensor;
 }
 
-// Coincise util class to mutate a net in a chaining fashion.
+// Concise util class to mutate a net in a chaining fashion.
 class NetMutator {
  public:
   explicit NetMutator(caffe2::NetDef* net) : net_(net) {}
@@ -131,11 +132,20 @@ class NetMutator {
       const std::vector<string>& inputs,
       const std::vector<string>& outputs);
 
+  // Add argument to the last created op.
+  template <typename T>
+  NetMutator& addArgument(const string& name, const T& value) {
+    CAFFE_ENFORCE(lastCreatedOp_ != nullptr);
+    AddArgument(name, value, lastCreatedOp_);
+    return *this;
+  }
+
  private:
   caffe2::NetDef* net_;
+  caffe2::OperatorDef* lastCreatedOp_;
 };
 
-// Coincise util class to mutate a workspace in a chaining fashion.
+// Concise util class to mutate a workspace in a chaining fashion.
 class WorkspaceMutator {
  public:
   explicit WorkspaceMutator(caffe2::Workspace* workspace)

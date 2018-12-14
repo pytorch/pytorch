@@ -86,7 +86,7 @@ NetMutator& NetMutator::newOp(
     const std::string& type,
     const std::vector<string>& inputs,
     const std::vector<string>& outputs) {
-  createOperator(type, inputs, outputs, net_);
+  lastCreatedOp_ = createOperator(type, inputs, outputs, net_);
   return *this;
 }
 
