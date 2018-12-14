@@ -153,5 +153,5 @@ __global__ void bicubic_interp2d_backward_kernel(
 }
 
 
-#include "generic/SpatialUpSamplingBicubic.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/SpatialUpSamplingBicubic.cu>
+#include <THC/THCGenerateFloatTypes.h>
