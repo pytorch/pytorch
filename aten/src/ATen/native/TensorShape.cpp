@@ -171,7 +171,7 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
 }
 
 Tensor cat(TensorList tensors, int64_t dim) {
-  if (tensors.size() > 0 && 
+  if (tensors.size() > 0 &&
         tensors[0].is_sparse()) {
     return cat_sparse(tensors, dim);
   }
@@ -289,6 +289,13 @@ Tensor expand(const Tensor& self, IntList size, bool implicit) {
 
 Tensor expand_as(const Tensor& self, const Tensor& other) {
   return self.expand(other.sizes());
+}
+
+Tensor reduce_as(const Tensor& self, const Tensor& other) {
+  AT_CHECK(is_expandable_to(other.sizes(), self.sizes()),
+           "size {", other.sizes(), "} is not expandable to size {", self.sizes(), "}.");
+
+  return sum_to(self, other.sizes());
 }
 
 Tensor as_strided(const Tensor& self, IntList size, IntList stride, int64_t storage_offset) {

@@ -541,6 +541,7 @@ _(aten, random) \
 _(aten, randperm) \
 _(aten, range) \
 _(aten, reciprocal) \
+_(aten, reduce_as) \
 _(aten, reflection_pad1d) \
 _(aten, reflection_pad1d_backward) \
 _(aten, reflection_pad1d_forward) \

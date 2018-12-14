@@ -576,7 +576,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
   // If defined using Torchscript, use it instead of symbolic
   // symbolic_script is a map<schema, python_code_str> defined in symbolic_script.h
   for (auto& it : symbolic_scripts) {
-    if (node->matches(it.first.c_str())) {
+    if (node->matches(it.first)) {
       return build_script_grad(grad_values, it.second);
     }
   }
