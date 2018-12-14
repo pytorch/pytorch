@@ -131,13 +131,6 @@ inline void get_coordinate_in_tril_trapezoid(
   auto b = f - 1;
   auto c = - (x << 1);
   row = (int64_t) ::floor((-b + ::sqrt(b * b - 4.0 * c))/2);
-  // There is a chance that row could be rounded up due to loss of precision,
-  // e.g., tril_indices(5000, 5000) would produce a wrong result in the last
-  // index.
-  // Hence, applying this additional check to rule out that case.
-  if ((b + row) * row > x << 1) {
-    row -= 1;
-  }
   col = x - ((f + row - 1) * row >> 1);
 }
 
@@ -166,11 +159,6 @@ inline void get_coordinate_in_triu_trapezoid(
   auto b = -1 - f;
   auto c = x << 1;
   row = (int64_t) ::floor((-b - ::sqrt(b * b - 4.0 * c))/2);
-  // There is a chance that row could be rounded up due to loss of precision.
-  // Hence, applying this additional check to rule out that case.
-  if ((-b - row) * row > x << 1) {
-    row -= 1;
-  }
   col = x - ((f - row + 1) * row >> 1) + row;
 }
 

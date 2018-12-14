@@ -2135,16 +2135,12 @@ class TestCuda(TestCase):
             # and triu cuda kernel (see #15226)
             x = torch.ones(row, col, dtype=dtype, device='cpu') \
                      .tril(offset).nonzero().transpose(0, 1).cuda()
-            torch.cuda.synchronize()
             y = torch.tril_indices(row, col, offset, dtype=dtype, device='cuda')
-            torch.cuda.synchronize()
             self.assertEqual(x, y)
 
             x = torch.ones(row, col, dtype=dtype, device='cpu') \
                      .triu(offset).nonzero().transpose(0, 1).cuda()
-            torch.cuda.synchronize()
             y = torch.triu_indices(row, col, offset, dtype=dtype, device='cuda')
-            torch.cuda.synchronize()
             self.assertEqual(x, y)
 
     def test_tril_and_triu_indices(self):
