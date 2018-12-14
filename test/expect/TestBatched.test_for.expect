@@ -17,5 +17,6 @@ graph(%x.1_data : Tensor
       %data : Tensor = aten::where(%mask, %data.1, %5_data)
       -> (%7, %data, %mask, %dims)
     }
-  return (%x, %10, %11);
+  %22 : (Tensor, Tensor, Tensor) = prim::TupleConstruct(%x, %10, %11)
+  return (%22);
 }

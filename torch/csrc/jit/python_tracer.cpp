@@ -60,10 +60,7 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
       AT_ERROR("The traced function didn't return any values! Side-effects are not "
                "captured in traces, so it would be a no-op.");
     }
-    if (!PyTuple_Check(out.ptr())) {
-      out = py::make_tuple(out);
-    }
-    tracer::exit(toStack(out));
+    tracer::exit({toIValue(out)});
     auto graph = enter_info.first->graph;
     EliminateDeadCode(graph);
     LowerSimpleTuples(graph);
