@@ -2214,6 +2214,22 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("cudaHostAllocator", ("hipHostAllocator", API_PYTORCH)),
     ("cudaDeviceAllocator", ("hipDeviceAllocator", API_PYTORCH)),
     ("define MAX_NUM_BLOCKS 200", ("define MAX_NUM_BLOCKS 64", API_PYTORCH)),
+
+    ("cuda::CUDAGuard", ("hip::HIPGuardMasqueradingAsCUDA", API_PYTORCH)),
+    ("CUDAGuard", ("HIPGuardMasqueradingAsCUDA", API_PYTORCH)),
+
+    ("cuda::OptionalCUDAGuard", ("hip::OptionalHIPGuardMasqueradingAsCUDA", API_PYTORCH)),
+    ("OptionalCUDAGuard", ("OptionalHIPGuardMasqueradingAsCUDA", API_PYTORCH)),
+
+    ("cuda::CUDAStreamGuard", ("hip::HIPStreamGuardMasqueradingAsCUDA", API_PYTORCH)),
+    ("CUDAStreamGuard", ("HIPStreamGuardMasqueradingAsCUDA", API_PYTORCH)),
+
+    ("cuda::OptionalCUDAStreamGuard", ("hip::OptionalHIPStreamGuardMasqueradingAsCUDA", API_PYTORCH)),
+    ("OptionalCUDAStreamGuard", ("OptionalHIPStreamGuardMasqueradingAsCUDA", API_PYTORCH)),
+
+    # TODO: Undo this special-case; see the header for motivation behind this
+    # hack.  It's VERY important this is only applied to PyTorch HIPify.
+    ("c10/cuda/CUDAGuard.h", ("ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h", API_PYTORCH)),
 ])
 
 CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict([
@@ -2254,6 +2270,11 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("CuDNN" ,("MIOPEN", API_CAFFE2)),
     ("cudnn" ,("miopen", API_CAFFE2)),
     ("namespace cuda", ("namespace hip", API_CAFFE2)),
+    ("cuda::CUDAGuard", ("hip::HIPGuard", API_CAFFE2)),
+    ("cuda::OptionalCUDAGuard", ("hip::OptionalHIPGuard", API_CAFFE2)),
+    ("cuda::CUDAStreamGuard", ("hip::HIPStreamGuard", API_CAFFE2)),
+    ("cuda::OptionalCUDAStreamGuard", ("hip::OptionalHIPStreamGuard", API_CAFFE2)),
+    ("c10/cuda/CUDAGuard.h", ("c10/hip/HIPGuard.h", API_CAFFE2)),
 ])
 
 # We must tread very carefully here.  Blanket conversions like are done
@@ -2272,15 +2293,27 @@ C10_MAPPINGS = collections.OrderedDict([
     ("c10/cuda/CUDAMacros.h", ("c10/hip/HIPMacros.h", API_C10)),
     ("c10/cuda/CUDAMathCompat.h", ("c10/hip/HIPMathCompat.h", API_C10)),
     ("c10/cuda/CUDAFunctions.h", ("c10/hip/HIPFunctions.h", API_C10)),
+    ("c10/cuda/CUDAStream.h", ("c10/hip/HIPStream.h", API_C10)),
     ("c10/cuda/impl/CUDATest.h", ("c10/hip/impl/HIPTest.h", API_C10)),
+    ("c10/cuda/impl/CUDAGuardImpl.h", ("c10/hip/impl/HIPGuardImpl.h", API_C10)),
     ("c10/cuda/impl/cuda_cmake_macros.h", ("c10/hip/impl/hip_cmake_macros.h", API_C10)),
     ("C10_CUDA_CHECK", ("C10_HIP_CHECK", API_C10)),
     ("c10::cuda", ("c10::hip", API_C10)),
+    ("cuda::CUDAStream", ("hip::HIPStream", API_C10)),
+    ("CUDAStream", ("HIPStream", API_C10)),
     # This substitution is not permissible, because there's another copy of this
     # function in torch/cuda.h
     # ("cuda::device_count", ("hip::device_count", API_C10)),
     ("cuda::current_device", ("hip::current_device", API_C10)),
     ("cuda::set_device", ("hip::set_device", API_C10)),
+    ("cuda::getStreamFromPool", ("hip::getStreamFromPool", API_C10)),
+    ("getStreamFromPool", ("getStreamFromPool", API_C10)),
+    ("cuda::getDefaultCUDAStream", ("hip::getDefaultHIPStream", API_C10)),
+    ("getDefaultCUDAStream", ("getDefaultHIPStream", API_C10)),
+    ("cuda::getCurrentCUDAStream", ("hip::getCurrentHIPStream", API_C10)),
+    ("getCurrentCUDAStream", ("getCurrentHIPStream", API_C10)),
+    ("cuda::setCurrentCUDAStream", ("hip::setCurrentHIPStream", API_C10)),
+    ("setCurrentCUDAStream", ("setCurrentHIPStream", API_C10)),
 ])
 
 # NB: C10 mappings are more specific than Caffe2 mappings, so run them

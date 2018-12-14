@@ -194,7 +194,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
   ${TORCH_SRC_DIR}/csrc/jit/tracer.cpp
   ${TORCH_SRC_DIR}/csrc/jit/hooks_for_testing.cpp
-  ${TORCH_SRC_DIR}/csrc/torch.cpp
   ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
   ${TORCH_SRC_DIR}/csrc/utils/variadic.cpp
   ${TORCH_ROOT}/test/cpp/jit/no-gtest.cpp
@@ -228,7 +227,7 @@ CONFIGURE_FILE(
     ${TORCH_SRC_DIR}/csrc/jit/fuser/config.h.in
     ${CMAKE_CURRENT_SOURCE_DIR}/csrc/jit/fuser/config.h)
 
-if (NOT NO_API AND NOT USE_ROCM)
+if (NOT NO_API)
   list(APPEND TORCH_SRCS
     ${TORCH_SRC_DIR}/csrc/api/src/cuda.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/data/datasets/mnist.cpp
@@ -343,7 +342,7 @@ if(OPENMP_FOUND)
   endif()
 endif()
 
-if (NOT NO_API AND NOT USE_ROCM)
+if (NOT NO_API)
   target_include_directories(torch PUBLIC
     ${TORCH_SRC_DIR}/csrc/api
     ${TORCH_SRC_DIR}/csrc/api/include)
@@ -436,7 +435,7 @@ if (BUILD_TEST AND NOT MSVC AND NOT USE_ROCM)
   add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
 endif()
 
-if (BUILD_TEST AND NOT NO_API AND NOT USE_ROCM)
+if (BUILD_TEST AND NOT NO_API)
   add_subdirectory(${TORCH_ROOT}/test/cpp/api ${CMAKE_BINARY_DIR}/test_api)
 endif()
 
@@ -503,6 +502,7 @@ if (BUILD_PYTHON)
     ${TORCH_SRC_DIR}/csrc/PtrWrapper.cpp
     ${TORCH_SRC_DIR}/csrc/Size.cpp
     ${TORCH_SRC_DIR}/csrc/Storage.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/python/init.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/functions/init.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.cpp
@@ -573,6 +573,7 @@ if (BUILD_PYTHON)
     ${TORCH_ROOT}/third_party/pybind11/include
 
     ${TORCH_SRC_DIR}/csrc
+    ${TORCH_SRC_DIR}/csrc/api/include
     ${TORCH_SRC_DIR}/lib
     )
 

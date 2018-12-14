@@ -787,14 +787,27 @@ Tracer Warnings
 Builtin Functions
 ~~~~~~~~~~~~~~~~~
 
-TorchScript supports a subset of the builtin tensor and neural network functions that
-PyTorch provides. Most methods on Tensor as well as functions in the ``torch``
-namespace are available. Many functions in ``torch.nn.functional`` are also availiable.
+Torch Script supports a subset of the builtin tensor and neural network
+functions that PyTorch provides. Most methods on Tensor as well as functions in
+the ``torch`` namespace, all functions in ``torch.nn.functional`` and all
+modules from ``torch.nn`` are supported in Torch Script, excluding those in the
+table below. For unsupported modules, we suggest using :meth:`torch.jit.trace`.
+
+=====
+Unsupported ``torch.nn`` Modules
+=====
+``torch.nn.modules.adaptive.AdaptiveLogSoftmaxWithLoss``
+``torch.nn.modules.normalization.CrossMapLRN2d``
+``torch.nn.modules.fold.Fold``
+``torch.nn.modules.fold.Unfold``
+``torch.nn.modules.rnn.GRU``
+``torch.nn.modules.rnn.LSTM``
+``torch.nn.modules.rnn.RNN``
+``torch.nn.modules.rnn.GRUCell``
+``torch.nn.modules.rnn.LSTMCell``
+``torch.nn.modules.rnn.RNNCell``
+=====
 
 
-We currently do not provide any builtin ScriptModules e.g. a ``Linear`` or
-``Conv`` module. This functionality is something that will be developed in the future.
-For now we suggest using ``torch.jit.trace`` to transform standard ``torch.nn``
-modules into ScriptModules on construction.
 
 .. automodule:: torch.jit.supported_ops

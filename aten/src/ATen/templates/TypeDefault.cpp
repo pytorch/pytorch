@@ -94,12 +94,6 @@ Tensor TypeDefault::tensorWithAllocator(IntList sizes, IntList strides, Allocato
   return at::empty({0}, options()).set_(storage, 0, sizes, strides);
 }
 
-Storage TypeDefault::storage(bool resizable) const {
-  return Storage(typeMeta(), 0, allocator(), resizable);
-}
-Storage TypeDefault::storage(size_t size, bool resizable) const {
-  return Storage(typeMeta(), size, allocator(), resizable);
-}
 Storage TypeDefault::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
     return Storage(
       typeMeta(),
@@ -122,11 +116,6 @@ Storage TypeDefault::unsafeStorageFromTH(void * th_pointer, bool retain) const {
     c10::raw::intrusive_ptr::incref(static_cast<StorageImpl*>(th_pointer));
   }
   return Storage(c10::intrusive_ptr<StorageImpl>::reclaim(static_cast<StorageImpl*>(th_pointer)));
-}
-
-
-Tensor TypeDefault::scalarTensor(Scalar s) const {
-  return at::empty({}, this->options()).fill_(s);
 }
 
 ${type_method_definitions}

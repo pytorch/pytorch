@@ -17,7 +17,7 @@
 
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAEvent.h>
-#include <ATen/cuda/CUDAStream.h>
+#include <c10/cuda/CUDAStream.h>
 #endif
 
 #include <c10d/ProcessGroup.hpp>
