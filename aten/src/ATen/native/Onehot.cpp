@@ -3,7 +3,7 @@
 namespace at { namespace native {
 
 Tensor one_hot(const Tensor &self, int64_t num_classes) {
-    AT_ASSERTM((self.dtype() == kLong || self.dtype() == kInt || self.dtype() == kShort || self.dtype() == kChar || self.dtype() == kByte), "one_hot is only applicable to index tensor.");
+    AT_ASSERTM(self.dtype() == kLong, "one_hot is only applicable to index tensor.");
     auto shape = self.sizes().vec();
 
     // empty tensor could be converted to one hot representation,

@@ -1628,6 +1628,9 @@ class TestCuda(TestCase):
     def test_rot90(self):
         _TestTorchMixin._test_rot90(self, use_cuda=True)
 
+    def test_one_hot(self):
+        _TestTorchMixin._test_one_hot(self, use_cuda=True)
+
     def test_signal_window_functions(self):
         _TestTorchMixin._test_signal_window_functions(self, device=torch.device('cuda'))
 

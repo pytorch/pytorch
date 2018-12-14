@@ -6686,54 +6686,59 @@ class _TestTorchMixin(object):
         dst2.masked_fill_(dst2 > 0, val)
         self.assertEqual(dst, dst2, 0)
 
-    def test_one_hot(self):
+    @staticmethod
+    def _test_one_hot(self, use_cuda=False):
+        device = torch.device('cuda' if use_cuda else 'cpu')
         with self.assertRaises(RuntimeError):
-            torch.one_hot(torch.tensor([3, 4, -1, 0]), -1)
+            torch.one_hot(torch.tensor([3, 4, -1, 0], device=device), -1)
 
         with self.assertRaises(RuntimeError):
-            torch.one_hot(torch.tensor([3, 4, 1, 0]), 3)
+            torch.one_hot(torch.tensor([3, 4, 1, 0], device=device), 3)
 
-        t = torch.one_hot(torch.tensor([3, 4, 1, 0]))
+        t = torch.one_hot(torch.tensor([3, 4, 1, 0], device=device))
         expected = torch.tensor([[0, 0, 0, 1, 0],
                                  [0, 0, 0, 0, 1],
                                  [0, 1, 0, 0, 0],
-                                 [1, 0, 0, 0, 0]])
+                                 [1, 0, 0, 0, 0]], device=device)
         self.assertEqual(t, expected)
 
-        t = torch.one_hot(torch.tensor([3, 4, 1, 0]), -1)
+        t = torch.one_hot(torch.tensor([3, 4, 1, 0], device=device), -1)
         expected = torch.tensor([[0, 0, 0, 1, 0],
                                  [0, 0, 0, 0, 1],
                                  [0, 1, 0, 0, 0],
-                                 [1, 0, 0, 0, 0]])
+                                 [1, 0, 0, 0, 0]], device=device)
         self.assertEqual(t, expected)
 
-        t = torch.one_hot(torch.tensor([3, 4, 1, 0]), 6)
+        t = torch.one_hot(torch.tensor([3, 4, 1, 0], device=device), 6)
         expected = torch.tensor([[0, 0, 0, 1, 0, 0],
                                  [0, 0, 0, 0, 1, 0],
                                  [0, 1, 0, 0, 0, 0],
-                                 [1, 0, 0, 0, 0, 0]])
+                                 [1, 0, 0, 0, 0, 0]], device=device)
         self.assertEqual(t, expected)
 
-        t = torch.one_hot(torch.tensor([[3, 4], [1, 0]]))
+        t = torch.one_hot(torch.tensor([[3, 4], [1, 0]], device=device))
         expected = torch.tensor([[[0, 0, 0, 1, 0],
                                   [0, 0, 0, 0, 1]],
                                  [[0, 1, 0, 0, 0],
-                                  [1, 0, 0, 0, 0]]])
+                                  [1, 0, 0, 0, 0]]], device=device)
         self.assertEqual(t, expected)
 
-        t = torch.one_hot(torch.tensor(4))
-        expected = torch.tensor([0, 0, 0, 0, 1])
+        t = torch.one_hot(torch.tensor(4, device=device))
+        expected = torch.tensor([0, 0, 0, 0, 1], device=device)
         self.assertEqual(t, expected)
 
-        t = torch.one_hot(torch.empty([4, 0], dtype=torch.long), 100)
+        t = torch.one_hot(torch.empty([4, 0], dtype=torch.long, device=device), 100)
         expected = torch.empty([4, 0, 100])
         self.assertEqual(t, expected)
 
         with self.assertRaises(RuntimeError):
-            torch.one_hot(torch.empty([4, 0], dtype=torch.long))
+            torch.one_hot(torch.empty([4, 0], dtype=torch.long, device=device))
 
         with self.assertRaises(RuntimeError):
-            torch.one_hot(torch.tensor([3, 4, 1, 0]), -2)
+            torch.one_hot(torch.tensor([3, 4, 1, 0], device=device), -2)
+
+    def test_one_hot(self):
+        self._test_one_hot(self)
 
     def test_abs(self):
         def _test_abs(tensors_dict):

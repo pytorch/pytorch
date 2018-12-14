@@ -6258,9 +6258,9 @@ See also `One-hot on Wikipedia`_ .
 
 Arguments:
     tensor (LongTensor): class values of any shape.
-    num_classes (int):  Total number of classes. If set to 0 or less, the
-        actually number of classes will be inferred as the largest class
-        value in the input tensor.
+    num_classes (int):  Total number of classes. If set to -1, the actually
+        number of classes will be inferred as the largest class value in the
+        input tensor.
 
 Returns:
     Tensor: LongTensor that has one more dimension with 1 values at the
