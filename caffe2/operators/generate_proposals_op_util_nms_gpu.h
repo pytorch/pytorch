@@ -19,8 +19,9 @@ namespace utils {
 // N : number of boxes
 // d_keep_sorted_list : row indices of the selected proposals, sorted by score
 // h_nkeep  : number of selected proposals
-// dev_delete_mask, host_delete_mask : Tensors that will be used as temp storage by NMS
-//    Those tensors will be resized to the necessary size 
+// dev_delete_mask, host_delete_mask : Tensors that will be used as temp storage
+// by NMS
+//    Those tensors will be resized to the necessary size
 // context : current CUDA context
 CAFFE2_API void nms_gpu_upright(
     const float* d_desc_sorted_boxes,
