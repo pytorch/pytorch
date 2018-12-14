@@ -6689,26 +6689,41 @@ class _TestTorchMixin(object):
     def test_one_hot(self):
         with self.assertRaises(RuntimeError):
             torch.one_hot(torch.tensor([3, 4, -1, 0]), -1)
+
         with self.assertRaises(RuntimeError):
             torch.one_hot(torch.tensor([3, 4, 1, 0]), 3)
+
         t = torch.one_hot(torch.tensor([3, 4, 1, 0]))
         expected = torch.tensor([[0, 0, 0, 1, 0],
                                  [0, 0, 0, 0, 1],
                                  [0, 1, 0, 0, 0],
                                  [1, 0, 0, 0, 0]])
         self.assertEqual(t, expected)
+
         t = torch.one_hot(torch.tensor([3, 4, 1, 0]), 6)
         expected = torch.tensor([[0, 0, 0, 1, 0, 0],
                                  [0, 0, 0, 0, 1, 0],
                                  [0, 1, 0, 0, 0, 0],
                                  [1, 0, 0, 0, 0, 0]])
         self.assertEqual(t, expected)
+
         t = torch.one_hot(torch.tensor([[3, 4], [1, 0]]))
         expected = torch.tensor([[[0, 0, 0, 1, 0],
                                   [0, 0, 0, 0, 1]],
                                  [[0, 1, 0, 0, 0],
                                   [1, 0, 0, 0, 0]]])
         self.assertEqual(t, expected)
+
+        t = torch.one_hot(torch.tensor(4))
+        expected = torch.tensor([0, 0, 0, 0, 1])
+        self.assertEqual(t, expected)
+
+        t = torch.one_hot(torch.empty([4, 0], dtype=torch.long), 100)
+        expected = torch.empty([4, 0, 100])
+        self.assertEqual(t, expected)
+
+        with self.assertRaises(RuntimeError):
+            torch.one_hot(torch.empty([4, 0], dtype=torch.long))
 
     def test_abs(self):
         def _test_abs(tensors_dict):
