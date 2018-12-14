@@ -1,16 +1,27 @@
-#include <ATen/core/TensorImpl.h>
+#include <c10/core/TensorImpl.h>
 
 #include <c10/core/Backend.h>
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/util/Optional.h>
 
-namespace at {
+C10_DEFINE_bool(
+    caffe2_keep_on_shrink,
+    true,
+    "If set, keeps memory when a tensor is shrinking its size.");
 
-Tensor& TensorImpl::grad() {
+C10_DEFINE_int64(
+    caffe2_max_keep_on_shrink_memory,
+    LLONG_MAX,
+    "The maximum memory in bytes to keep on shrink, if the difference between "
+    "tensor sizes is bigger than this then tensor will be reset.");
+
+namespace c10 {
+
+at::Tensor& TensorImpl::grad() {
   AT_ERROR("grad is not implemented for Tensor");
 }
 
-const Tensor& TensorImpl::grad() const {
+const at::Tensor& TensorImpl::grad() const {
   AT_ERROR("grad is not implemented for Tensor");
 }
 
@@ -111,4 +122,4 @@ at::DataPtr PlacementDeleteContext::makeDataPtr(
           device};
 }
 
-} // namespace at
+} // namespace c10

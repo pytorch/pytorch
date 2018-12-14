@@ -42,10 +42,7 @@ struct CAFFE2_API TypeDefault : public TypeExtendedInterface {
   Tensor tensorFromBlob(void * data, IntList sizes, IntList strides, const std::function<void(void*)> & deleter=noop_deleter) const override;
   Tensor tensorWithAllocator(IntList sizes, Allocator* allocator) const override;
   Tensor tensorWithAllocator(IntList sizes, IntList strides, Allocator* allocator) const override;
-  Tensor scalarTensor(Scalar s) const override;
 
-  Storage storage(bool resizable = false) const override;
-  Storage storage(size_t size, bool resizable = false) const override;
   Storage storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const override;
   Storage storageWithAllocator(int64_t size, Allocator* allocator) const override;
   Storage unsafeStorageFromTH(void * th_pointer, bool retain) const override;

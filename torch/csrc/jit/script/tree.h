@@ -52,7 +52,8 @@ struct Tree : std::enable_shared_from_this<Tree> {
   const TreeRef& tree(size_t i) const {
     return trees().at(i);
   }
-  virtual TreeRef map(std::function<TreeRef(TreeRef)> fn) {
+  virtual TreeRef map(const std::function<TreeRef(TreeRef)>& fn) {
+    (void)fn;
     return shared_from_this();
   }
   template <typename... Args>
@@ -136,7 +137,7 @@ struct Compound : public Tree {
   bool isAtom() const override {
     return false;
   }
-  TreeRef map(std::function<TreeRef(TreeRef)> fn) override {
+  TreeRef map(const std::function<TreeRef(TreeRef)>& fn) override {
     TreeList trees_;
     for (auto& t : trees()) {
       trees_.push_back(fn(t));
@@ -200,7 +201,7 @@ static inline std::ostream& operator<<(std::ostream& out, pretty_tree t_) {
   return out << std::endl;
 }
 
-static inline std::ostream& operator<<(std::ostream& out, TreeRef t) {
+static inline std::ostream& operator<<(std::ostream& out, const TreeRef& t) {
   return out << pretty_tree(t);
 }
 

@@ -10,7 +10,7 @@ namespace jit {
 class DeadCodeEliminator {
  public:
   explicit DeadCodeEliminator(std::shared_ptr<Graph> graph)
-      : aliasDb_(AliasAnalysis(graph)) {}
+      : aliasDb_(AliasAnalysis(std::move(graph))) {}
   DeadCodeEliminator(bool collect_only = false)
       : collect_only_(collect_only) {}
 

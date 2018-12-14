@@ -882,7 +882,7 @@ PyObject* THPFunction_register_hook(THPFunction *self, PyObject *hook)
 
 static PyObject *unpack_saved_variables(
     THPFunction *self,
-    std::function<PyObject*(const Variable&)> unpack_fn)
+    const std::function<PyObject*(const Variable&)>& unpack_fn)
 {
   THPUtils_assert(!self->has_freed_buffers, ERR_BACKWARD_TWICE);
   auto& saved_variables = self->saved_variables;

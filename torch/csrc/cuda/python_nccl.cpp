@@ -9,7 +9,7 @@
 #include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/utils/functional.h>
 
-#include <ATen/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAGuard.h>
 
 #include <nccl.h>
 

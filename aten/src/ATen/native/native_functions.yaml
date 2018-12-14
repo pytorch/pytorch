@@ -1278,6 +1278,8 @@
 - func: pinverse(Tensor self, double rcond=1e-15) -> Tensor
   variants: function, method
 
+- func: scalar_tensor(Scalar s, *, TensorOptions options={}) -> Tensor
+
 - func: rand(IntList size, *, TensorOptions options={}) -> Tensor
 
 - func: rand(IntList size, *, Generator* generator, TensorOptions options={}) -> Tensor
@@ -2670,6 +2672,10 @@
 - func: tril(Tensor self, int64_t diagonal=0) -> Tensor
   variants: method, function
 
+- func: tril_indices(int64_t row, int64_t col, int64_t offset=0, TensorOptions options=at::kLong) -> Tensor
+
+- func: triu_indices(int64_t row, int64_t col, int64_t offset=0, TensorOptions options=at::kLong) -> Tensor
+
 - func: trace(Tensor self) -> Tensor
   variants: method, function
 
@@ -3262,15 +3268,27 @@
 
 - func: adaptive_avg_pool2d_out(Tensor output, Tensor self, IntList[2] output_size) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: adaptive_avg_pool2d_out_cpu
+    CUDA: adaptive_avg_pool2d_out_cuda
 
 - func: adaptive_avg_pool2d(Tensor self, IntList[2] output_size) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: adaptive_avg_pool2d_cpu
+    CUDA: adaptive_avg_pool2d_cuda
 
 - func: adaptive_avg_pool2d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: adaptive_avg_pool2d_backward_out_cpu
+    CUDA: adaptive_avg_pool2d_backward_out_cuda
 
 - func: adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: adaptive_avg_pool2d_backward_cpu
+    CUDA: adaptive_avg_pool2d_backward_cuda
 
 - func: adaptive_avg_pool3d_out(Tensor output, Tensor self, IntList[3] output_size) -> Tensor
   python_module: nn

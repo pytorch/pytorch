@@ -38,12 +38,12 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
 
   // what can we do with this thing?
   // use it as a value e.g.  `this + 4`
-  virtual Value * asValue(SourceRange loc, Method & m) {
+  virtual Value * asValue(const SourceRange& loc, Method & m) {
     throw ErrorReport(loc) << kind() << " cannot be used as a value";
   }
 
   // select an attribute on it, e.g. `this.field`
-  virtual std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) {
+  virtual std::shared_ptr<SugaredValue> attr(const SourceRange& loc, Method & m, const std::string& field) {
     throw ErrorReport(loc) << "attribute lookup is not defined on " << kind();
   }
   virtual NoneStatus isNone() {
@@ -53,15 +53,15 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
   // use it as a vector of values, e.g. a tuple of values as return value from
   // a method invocation
   virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(
-      SourceRange loc,
+      const SourceRange& loc,
       Method& m,
-      c10::optional<size_t> size_hint = {}) {
+      const c10::optional<size_t>& size_hint = {}) {
     throw ErrorReport(loc) << kind() << " cannot be used as a tuple";
   }
 
   // call it like a function, e.g. `outputs = this(inputs)`
   virtual std::shared_ptr<SugaredValue> call(
-    SourceRange loc,
+    const SourceRange& loc,
     Method & m,
     // note: names for args will be 'argument 0', 'argument 1', etc..
     at::ArrayRef<NamedValue> inputs_,
@@ -96,7 +96,7 @@ struct TORCH_API SimpleValue : public SugaredValue {
   std::string kind() const override {
     return "value";
   }
-  Value * asValue(SourceRange range, Method & m) override {
+  Value * asValue(const SourceRange& range, Method & m) override {
     return value;
   }
   NoneStatus isNone() override {
@@ -108,10 +108,10 @@ struct TORCH_API SimpleValue : public SugaredValue {
       return NEVER;
   }
   std::vector<std::shared_ptr<SugaredValue>> asTuple(
-      SourceRange loc,
+      const SourceRange& loc,
       Method& m,
-      c10::optional<size_t> size_hint = {}) override;
-  std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override;
+      const c10::optional<size_t>& size_hint = {}) override;
+  std::shared_ptr<SugaredValue> attr(const SourceRange& loc, Method & m, const std::string& field) override;
   Value* getValue() const {
     return value;
   }
@@ -133,7 +133,7 @@ struct TORCH_API BuiltinFunction : public SugaredValue {
     return "builtin";
   }
   std::shared_ptr<SugaredValue> call(
-      SourceRange loc,
+      const SourceRange& loc,
       Method& m,
       at::ArrayRef<NamedValue> attributes,
       at::ArrayRef<NamedValue> inputs,
@@ -149,7 +149,7 @@ struct TORCH_API BuiltinModule : public SugaredValue {
   std::string kind() const override {
     return "builtin module";
   }
-  std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override {
+  std::shared_ptr<SugaredValue> attr(const SourceRange& loc, Method & m, const std::string& field) override {
     return std::make_shared<BuiltinFunction>(Symbol::fromQualString(name+"::"+field), c10::nullopt);
   }
 
@@ -187,14 +187,14 @@ inline std::shared_ptr<SugaredValue> nativeResolver(const std::string& name, Met
 }
 
 TORCH_API void defineMethodsInModule(
-  std::shared_ptr<Module> m,
+  const std::shared_ptr<Module>& m,
   const std::vector<Def>& definitions,
   const std::vector<Resolver>& resolvers, /* determines how we handle free variables in each definition*/
-  std::shared_ptr<SugaredValue> self /* if non-null, the first argument to each def, is bound to this value */
+  const std::shared_ptr<SugaredValue>& self /* if non-null, the first argument to each def, is bound to this value */
 );
 
 // same as above but parse the definitions from source
-TORCH_API void defineMethodsInModule(std::shared_ptr<Module> m, const std::string& source, Resolver resolver, std::shared_ptr<SugaredValue> self);
+TORCH_API void defineMethodsInModule(std::shared_ptr<Module> m, const std::string& source, const Resolver& resolver, const std::shared_ptr<SugaredValue>& self);
 
 // pack outputs of a function following python rules. If there is a single value return
 // a SimpleValue, otherwise pack all the values into a Tuple.
@@ -209,10 +209,17 @@ struct MethodValue : public SugaredValue {
   std::string kind() const override {
     return "method";
   }
-  std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<NamedValue> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
-    return std::make_shared<SimpleValue>(packOutputs(*caller.graph(), caller.emit_call_to(loc, method, inputs, attributes)));
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Method& caller,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override {
+    return std::make_shared<SimpleValue>(packOutputs(
+        *caller.graph(), caller.emit_call_to(loc, method, inputs, attributes)));
   }
-private:
+
+ private:
   std::shared_ptr<Module> module;
   Method& method;
 
@@ -243,7 +250,7 @@ TORCH_API Value* emitBuiltinCall(
   const SourceRange& loc,
   Graph& graph,
   Symbol name,
-  c10::optional<NamedValue> self,
+  const c10::optional<NamedValue>& self,
   at::ArrayRef<NamedValue> inputs,
   at::ArrayRef<NamedValue> attributes,
   // if true, emitBuiltinCall will throw an exception if this builtin does not exist,

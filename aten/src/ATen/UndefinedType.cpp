@@ -23,12 +23,6 @@ Device UndefinedType::getDeviceFromPtr(void*) const {
   AT_ERROR("getDeviceFromPtr not defined for UndefinedType");
 }
 
-Storage UndefinedType::storage(bool resizable) const {
-  AT_ERROR("storage not defined for UndefinedType");
-}
-Storage UndefinedType::storage(size_t size, bool resizable) const {
-  AT_ERROR("storage(size_t) not defined for UndefinedType");
-}
 Storage UndefinedType::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
   AT_ERROR("storageFromBlob not defined for UndefinedType");
 }

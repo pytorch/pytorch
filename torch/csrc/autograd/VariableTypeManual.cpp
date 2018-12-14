@@ -31,12 +31,6 @@ Allocator* VariableType::allocator() const {
 Device VariableType::getDeviceFromPtr(void * data) const {
   return baseType->getDeviceFromPtr(data);
 }
-Storage VariableType::storage(bool resizable) const {
-  return baseType->storage();
-}
-Storage VariableType::storage(size_t size, bool resizable) const {
-  return baseType->storage(size);
-}
 Storage VariableType::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
   return baseType->storageFromBlob(data, size, deleter);
 }

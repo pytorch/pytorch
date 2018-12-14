@@ -44,7 +44,7 @@ bool isValidReturnForRunning(Value* v) {
 class ShapePropagator {
  public:
   explicit ShapePropagator(std::shared_ptr<Graph> graph)
-      : aliasDb_(AliasAnalysis(graph)) {}
+      : aliasDb_(AliasAnalysis(std::move(graph))) {}
 
   void PropagateShapeOnBlock(Block* block, bool insert_expands = true) {
     for (Node* node : block->nodes()) {
@@ -386,13 +386,15 @@ class ShapePropagator {
         return;
       }
       case prim::ImplicitTensorToNum:
-      case prim::TensorToNum:
+      case prim::Bool:
+      case prim::Int:
+      case prim::Float:
         return; // correct num type is already set
       case prim::NumToTensor: {
-        if (node->input()->type()->isSubtypeOf(IntType::get())) {
+        TypePtr typ = node->input()->type();
+        if (typ->isSubtypeOf(IntType::get()) || typ->isSubtypeOf(BoolType::get())) {
           node->output()->setType(TensorType::create(at::kLong, at::kCPU, 0));
-        } else {
-          JIT_ASSERT(node->input()->type()->isSubtypeOf(FloatType::get()));
+        } else if (node->input()->type()->isSubtypeOf(FloatType::get())) {
           node->output()->setType(TensorType::create(at::kDouble, at::kCPU, 0));
         }
         return;
@@ -435,6 +437,7 @@ class ShapePropagator {
       case prim::PythonOp:
       case prim::Print:
       case prim::RaiseException:
+      case aten::warn:
       case prim::Undefined: {
         setUnshapedType(node);
         return;
@@ -1580,7 +1583,7 @@ class ShapePropagator {
 };
 } // anonymous namespace
 
-void PropagateInputShapes(std::shared_ptr<Graph> graph) {
+void PropagateInputShapes(const std::shared_ptr<Graph>& graph) {
   ShapePropagator(graph).PropagateShapeOnBlock(graph->block());
 }
 
@@ -1605,7 +1608,7 @@ void EraseShapeInformation(Block * b) {
 
 } // anonymous namespace
 
-void EraseShapeInformation(std::shared_ptr<Graph> graph) {
+void EraseShapeInformation(const std::shared_ptr<Graph>& graph) {
   EraseShapeInformation(graph->block());
 }
 

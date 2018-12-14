@@ -21,7 +21,12 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
 
+try:
+    from shlex import quote
+except ImportError:
+    from pipes import quote
 
 Patterns = collections.namedtuple("Patterns", "positive, negative")
 
@@ -122,6 +127,34 @@ def get_changed_lines(revision, filename):
 
     return {"name": filename, "lines": changed_lines}
 
+ninja_template = """
+rule do_cmd
+  command = $cmd
+  description = Running clang-tidy
+
+{build_rules}
+"""
+
+build_template = """
+build {i}: do_cmd
+  cmd = {cmd}
+"""
+
+
+def run_shell_commands_in_parallel(commands):
+    """runs all the commands in parallel with ninja, commands is a List[List[str]]"""
+    build_entries = [build_template.format(i=i, cmd=' '.join([quote(s) for s in command]))
+                     for i, command in enumerate(commands)]
+
+    file_contents = ninja_template.format(build_rules='\n'.join(build_entries))
+    f = tempfile.NamedTemporaryFile(delete=False)
+    try:
+        f.write(file_contents)
+        f.close()
+        return run_shell_command(['ninja', '-f', f.name])
+    finally:
+        os.unlink(f.name)
+
 
 def run_clang_tidy(options, line_filters, files):
     """Executes the actual clang-tidy command in the shell."""
@@ -134,16 +167,22 @@ def run_clang_tidy(options, line_filters, files):
         with open(options.config_file) as config:
             # Here we convert the YAML config file to a JSON blob.
             command += ["-config", json.dumps(yaml.load(config))]
+    command += options.extra_args
+
     if line_filters:
         command += ["-line-filter", json.dumps(line_filters)]
-    command += options.extra_args
-    command += files
 
-    if options.dry_run:
-        command = [re.sub(r"^([{[].*[]}])$", r"'\1'", arg) for arg in command]
-        return " ".join(command)
+    if options.parallel:
+        commands = [list(command) + [f] for f in files]
+        output = run_shell_commands_in_parallel(commands)
+    else:
+        command += files
+        if options.dry_run:
+            command = [re.sub(r"^([{[].*[]}])$", r"'\1'", arg) for arg in command]
+            return " ".join(command)
 
-    output = run_shell_command(command)
+        output = run_shell_command(command)
+
     if not options.keep_going and "[clang-diagnostic-error]" in output:
         message = "Found clang-diagnostic-errors in clang-tidy output: {}"
         raise RuntimeError(message.format(output))
@@ -209,6 +248,12 @@ def parse_options():
         "--keep-going",
         action="store_true",
         help="Don't error on compiler errors (clang-diagnostic-error)",
+    )
+    parser.add_argument(
+        "-j",
+        "--parallel",
+        action="store_true",
+        help="Run clang tidy in parallel per-file (requires ninja to be installed).",
     )
     parser.add_argument(
         "extra_args", nargs="*", help="Extra arguments to forward to clang-tidy"

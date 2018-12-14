@@ -40,6 +40,8 @@ bool isDifferentiable(Node * n) {
     "aten::tanh(Tensor self) -> Tensor",
     "aten::relu(Tensor self) -> Tensor",
     "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",
+    "aten::erf(Tensor self) -> Tensor",
+    "aten::erfc(Tensor self) -> Tensor",
     "aten::exp(Tensor self) -> Tensor",
     "aten::t(Tensor self) -> Tensor",
     "aten::neg(Tensor self) -> Tensor",
@@ -55,6 +57,12 @@ bool isDifferentiable(Node * n) {
     "aten::ge(Tensor self, Tensor other) -> Tensor",
     "aten::eq(Tensor self, Tensor other) -> Tensor",
     "aten::ne(Tensor self, Tensor other) -> Tensor",
+    "aten::lt(Tensor self, Scalar other) -> Tensor",
+    "aten::le(Tensor self, Scalar other) -> Tensor",
+    "aten::gt(Tensor self, Scalar other) -> Tensor",
+    "aten::ge(Tensor self, Scalar other) -> Tensor",
+    "aten::eq(Tensor self, Scalar other) -> Tensor",
+    "aten::ne(Tensor self, Scalar other) -> Tensor",
     "aten::abs(Tensor self) -> Tensor",
     "aten::acos(Tensor self) -> Tensor",
     "aten::asin(Tensor self) -> Tensor",
@@ -142,7 +150,13 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     "aten::gt(Tensor self, Tensor other) -> Tensor",
     "aten::ge(Tensor self, Tensor other) -> Tensor",
     "aten::eq(Tensor self, Tensor other) -> Tensor",
-    "aten::ne(Tensor self, Tensor other) -> Tensor"
+    "aten::ne(Tensor self, Tensor other) -> Tensor",
+    "aten::lt(Tensor self, Scalar other) -> Tensor",
+    "aten::le(Tensor self, Scalar other) -> Tensor",
+    "aten::gt(Tensor self, Scalar other) -> Tensor",
+    "aten::ge(Tensor self, Scalar other) -> Tensor",
+    "aten::eq(Tensor self, Scalar other) -> Tensor",
+    "aten::ne(Tensor self, Scalar other) -> Tensor",
   };
   const auto sumToSizeOf = [node](SymbolicVariable v, Symbol input_name) -> SymbolicVariable {
     Value * size;
@@ -240,6 +254,12 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     } else if (node->matches("aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor")) {
       auto threshold = node->get<at::Scalar>(attr::threshold).value();
       return {grads.at(0) * (inputs.at(0) > threshold).type_as(outputs.at(0)), nullptr, nullptr};
+
+    } else if (node->matches("aten::erf(Tensor self) -> Tensor")) {
+      return {grads.at(0) * 1.12837916709551 * (-inputs.at(0) * inputs.at(0)).exp()};
+
+    } else if (node->matches("aten::erfc(Tensor self) -> Tensor")) {
+      return {-grads.at(0) * 1.12837916709551 * (-inputs.at(0) * inputs.at(0)).exp()};
 
     } else if (node->matches("aten::exp(Tensor self) -> Tensor")) {
       return {grads.at(0) * (outputs.at(0))};
