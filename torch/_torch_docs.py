@@ -6143,3 +6143,29 @@ Example::
     >>>                            [7, 8, 9]]))
     (tensor([1, 2, 3]), tensor([4, 5, 6]), tensor([7, 8, 9]))
 """)
+
+add_docstr(torch.to_one_hot,
+           r"""
+to_one_hot(tensor, num_classes=0) -> LongTensor
+
+Takes integer with :math:`n` dims and converts it to 1-hot representation
+with :math:`n+1` dims. The last dimension will have zeros everywhere but
+at the index of last dimension indicated by the input, where it will be
+equal to 1.
+
+Arguments:
+    tensor (LongTensor): class values of any shape.
+    num_classes (int):  Total number of classes. If set to 0 or less, the
+        actually number of classes will be inferred as the largest class
+        value in the input tensor.
+
+Returns:
+    Tensor: LongTensor that has one more dimension with 1 values at the
+        index of last dimension indicated by the input, and 0 everywhere
+        else.
+
+Examples::
+    >>> torch.to_one_hot(torch.arange(0, 5) % 3)
+    >>> to_one_hot(torch.arange(0, 5) % 3, num_classes=5)
+    >>> to_one_hot(torch.arange(0, 6).view(3,2) % 3)
+""")

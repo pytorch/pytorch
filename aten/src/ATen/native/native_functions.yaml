@@ -1731,6 +1731,9 @@
   variants: method
   device_guard: false
 
+- func: to_one_hot(IndexTensor self, int64_t num_classes=0) -> Tensor
+  variants: function
+
 - func: flip(Tensor self, IntList dims) -> Tensor
   variants: function, method
   dispatch:
