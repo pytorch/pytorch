@@ -589,7 +589,6 @@ c10::optional<MatchedSchema> tryMatchSchema(
     failure_messages << "\nfor operator " << schema << ":\n";
     return failure_messages;
   };
-
   TypeEnv type_env;
   std::vector<Value*> positional_inputs;
   std::vector<bool> used_kwarg(kwargs.size(), false);
@@ -604,7 +603,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
       self = c10::nullopt;
     } else if (!arg.kwarg_only() && used_args < args.size()) {
       // allow zeros(IntList sizes) to work with zeros(1, 2) or zeros(1)
-      if (arg.type()->kind() == TypeKind::ListType && // the formal must be a list
+      if (allow_conversions && arg.type()->kind() == TypeKind::ListType && // the formal must be a list
           !arg.N() && // it must not be a broadcasting list like int[3], otherwise
                     // a single int is a valid input
           (schema_i + 1 == schema.arguments().size() ||
@@ -2276,7 +2275,7 @@ private:
           elem_type = values.at(0)->type();
         }
         for (auto v : values) {
-          if (v->type() != elem_type) {
+          if (*v->type() != *elem_type)  {
             throw ErrorReport(tree)
                 << "Lists must contain only a single type, expected: "
                 << *elem_type << " but found " << *v->type() << " instead";
