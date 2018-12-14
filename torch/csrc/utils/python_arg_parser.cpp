@@ -28,6 +28,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"PyObject*", ParameterType::PYOBJECT},
   {"ScalarType", ParameterType::SCALARTYPE},
   {"optional<ScalarType>", ParameterType::SCALARTYPE},
+  {"optional<int64_t>", ParameterType::INT64},
   {"Layout", ParameterType::LAYOUT},
   {"Device", ParameterType::DEVICE},
   {"std::string", ParameterType::STRING},
