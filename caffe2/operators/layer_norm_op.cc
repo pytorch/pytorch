@@ -199,8 +199,14 @@ void layer_norm_c10(
   caffe2::Tensor Y = Y_;
   caffe2::Tensor mean = mean_;
   caffe2::Tensor sig = sig_;
-  caffe2::Tensor scale = cache->scale;
-  caffe2::Tensor bias = cache->bias;
+  if (!cache->scale.has_value()) {
+    cache->scale = caffe2::Tensor{caffe2::CPU};
+  }
+  if (!cache->bias.has_value()) {
+    cache->bias = caffe2::Tensor{caffe2::CPU};
+  }
+  caffe2::Tensor scale = *cache->scale;
+  caffe2::Tensor bias = *cache->bias;
 
   const int canonical_axis = X.canonical_axis_index(axis);
   std::vector<int64_t> moments_dims(
