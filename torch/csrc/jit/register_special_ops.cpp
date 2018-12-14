@@ -67,7 +67,7 @@ std::vector<int64_t> compute_sizes(const IValue& seq) {
   // because bool, int, and float lists are specialized, inner array will
   // will not be generic list
   auto seq_recur = seq;
-  while (seq.isGenericList()) {
+  while (seq_recur.isGenericList()) {
     auto seq_list = seq_recur.toGenericListRef();
     auto length = seq_list.size();
     AT_ASSERT(length != 0);

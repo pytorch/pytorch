@@ -4470,6 +4470,7 @@ a")
         with self.assertRaisesRegex(RuntimeError, "Expected sequence of length"):
             foo()
 
+    @suppress_warnings
     def test_torch_tensor_empty_list(self):
         def func():
             return torch.tensor(torch.jit.annotate(List[int], []))
