@@ -183,6 +183,8 @@ Tensor norm_sparse(const SparseTensor& self, Scalar value) {
 
 // --------------------------------------------------------------------
 // add(SparseTensor, SparseTensor, Scalar)  [broadcasts]
+//
+// r = t + alpha * src
 // --------------------------------------------------------------------
 
 SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const SparseTensor& src, Scalar value) {
@@ -285,8 +287,107 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
 }
 
 // --------------------------------------------------------------------
+// NOTE [_sparse_add]
+//
+// _sparse_add(SparseTensor, SparseTensor, Scalar) [broadcasting at sparse dims]
+//
+// return t + alpha * src
+//
+// This is the add() operation for masked SparseTensors so that values from
+// src will be added to the corresponding locations of t.
+
+// t has to be coalesced so that during broadcasting, the same value from src only added once.
+// we don't need to worry about how to scatter grad from a coalesced gradients to
+// uncoalesced grad-of-input since update of gradients will call add / sub,
+// which will coalesce input tensors. However, all these rely on other components
+// to work for model training on masked SparsesTenors, such as 'optimizer'.
+// --------------------------------------------------------------------
+SparseTensor _sparse_add_cpu(const SparseTensor& t_, const SparseTensor& src_, Scalar alpha) {
+  AT_ASSERT(t_.is_sparse());
+  AT_ASSERT(src_.is_sparse());
+  AT_CHECK(!t_.is_cuda(), "expected 't' to be a CPU tensor, but got a CUDA tensor");
+  AT_CHECK(!src_.is_cuda(), "expected 'src' to be a CPU tensor, but got a CUDA tensor");
+  // TODO: handle type promotion
+  AT_CHECK(t_.type() == src_.type(), "input SparseTensor 't' and 'src' must share the same type, but got t.type = ", t_.type(), " and src.type = ", src_.type());
+
+  auto t = t_.coalesce();
+  auto src = src_.coalesce();
+
+  IntList t_sizes = t.sizes();
+  IntList src_sizes = src.sizes();
+  int64_t t_sparse_dim = t.sparse_dim();
+  int64_t src_sparse_dim = src.sparse_dim();
+  auto t_sizes_v = t_sizes.vec();
+  auto src_sizes_v = src_sizes.vec();
+  AT_CHECK(t_sizes_v.size() == src_sizes_v.size(), "expected num of dims to be the same between t and src.");
+  AT_CHECK(t_sparse_dim == t_sparse_dim, "expected num of sparse dims to be the same between t and src.");
+
+  auto dims_to_flatten = std::vector<int64_t>();
+
+  // check all dense dims have same size between t and src
+  for (int64_t i = t_sizes_v.size()-1; i > t_sparse_dim; i--) {
+    if (t_sizes_v[i] != src_sizes_v[i]) {
+      AT_ERROR("add: expected dense dims to have same size between t and src SparseTensors");
+    }
+  }
+
+  // check if sparse dims are broadcastable
+  for (int64_t i = t_sparse_dim-1; i >= 0; i--) {
+    if (t_sizes_v[i] == src_sizes_v[i]) {
+      dims_to_flatten.emplace(dims_to_flatten.begin(), i);
+    }
+    else if (t_sizes_v[i] > src_sizes_v[i]) {
+      AT_CHECK(src_sizes_v[i] == 1, "add: expected src size at dim ", i, " equals to 1.");
+    }
+    else {
+      AT_ERROR("add: expected src size <= t size among all dims.");
+    }
+  }
+
+  LongTensor t_indices = t._indices();
+  LongTensor src_indices = src._indices();
+  Tensor t_values = t._values();
+  Tensor src_values = src._values();
+  int64_t t_nnz = t._nnz();
+  int64_t src_nnz = src._nnz();
+  Tensor r_values = t_values.clone();
+
+  LongTensor t_indices_1D = flatten_indices_by_dims(t_indices, t_sizes, dims_to_flatten);
+  LongTensor src_indices_1D = flatten_indices_by_dims(src_indices, src_sizes, dims_to_flatten);  // already sorted since only dims with size = 1 are not flattened
+
+  auto t_indices_1D_accessor = t_indices_1D.accessor<int64_t, 1>();
+  auto src_indices_1D_accessor = src_indices_1D.accessor<int64_t, 1>();
+
+  int64_t i;
+  #pragma omp parallel for private(i)
+  for (i = 0; i < t_nnz; i++) {
+    int64_t t_idx = t_indices_1D_accessor[i];
+    int64_t l = 0, r = src_nnz - 1;
+    while (l <= r) {
+      int64_t m = l + (r - l) / 2;
+      int64_t src_idx = src_indices_1D_accessor[m];
+      if (src_idx == t_idx) {
+        r_values[i] += alpha * src_values[m];
+        break;
+      }
+      else if (src_idx < t_idx) {
+        l = m + 1;
+      }
+      else {
+        r = m - 1;
+      }
+    }
+  }
+
+  SparseTensor r = at::_sparse_coo_tensor_with_dims_and_tensors(t_sparse_dim, t.dense_dim(), t_sizes, t_indices.clone(), r_values, t.options());
+  r._coalesced_(true);
+  return r;
+}
+
+// --------------------------------------------------------------------
 // add(Tensor, SparseTensor, Scalar)
-//    formerly known as spcadd
+//
+// formerly known as spcadd
 // --------------------------------------------------------------------
 
 template <typename scalar_t>

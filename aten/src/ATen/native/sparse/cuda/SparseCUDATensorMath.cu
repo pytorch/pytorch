@@ -402,6 +402,158 @@ SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const
 }
 
 // --------------------------------------------------------------------
+// see NOTE [_sparse_add]
+// --------------------------------------------------------------------
+template <typename scalar_t>
+__global__ void _sparse_add_kernel_cuda(
+  int64_t t_nnz,
+  const TensorInfo<int64_t, int64_t> src_indices_ti,
+  const TensorInfo<int64_t, int64_t> t_indices_ti,
+  const TensorInfo<int64_t, int64_t> t_indices_pos_ti,
+  const TensorInfo<scalar_t, int64_t> src_values_ti,
+  const TensorInfo<scalar_t, int64_t> t_values_ti,
+  TensorInfo<scalar_t, int64_t> r_values_ti,
+  scalar_t alpha_scalar
+) {
+
+  const int64_t i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= t_nnz) return;
+
+  const int64_t j = t_indices_pos_ti.data[i];
+
+  bool has_match = false;
+  if (src_indices_ti.data[j] == t_indices_ti.data[i]) {
+    has_match = true;
+  }
+
+  int64_t t_values_ti_stride0 = t_values_ti.strides[0];
+  int64_t out_start = i * t_values_ti_stride0;
+  int64_t out_end = (i + 1) * t_values_ti_stride0;
+
+  int64_t in_start = j * src_values_ti.strides[0];
+
+  if (has_match) {
+    for (int64_t out_i = out_start, in_i = in_start; out_i < out_end; out_i++, in_i++) {
+      r_values_ti.data[out_i] = t_values_ti.data[out_i] + alpha_scalar * src_values_ti.data[in_i];
+    }
+  }
+  else {
+    for (int64_t out_i = out_start; out_i < out_end; out_i++) {
+      r_values_ti.data[out_i] = t_values_ti.data[out_i];
+    }
+  }
+}
+
+SparseTensor _sparse_add_cuda(const SparseTensor& t_, const SparseTensor& src_, Scalar alpha) {
+  AT_ASSERT(t_.is_sparse());
+  AT_ASSERT(src_.is_sparse());
+  AT_CHECK(t_.is_cuda(), "add: expected 't' to be a CUDA tensor, but got a CPU tensor");
+  AT_CHECK(src_.is_cuda(), "add: expected 'src' to be a CUDA tensor, but got a CPU tensor");
+  // TODO: handle type promotion
+  AT_CHECK(t_.type() == src_.type(), "add: input SparseTensor 't' and 'src' must share the same type, but got t.type = ", t_.type(), " and src.type = ", src_.type());
+
+  auto t = t_.coalesce();
+  auto src = src_.coalesce();
+
+  IntList t_sizes = t.sizes();
+  IntList src_sizes = src.sizes();
+  int64_t t_sparse_dim = t.sparse_dim();
+  int64_t src_sparse_dim = src.sparse_dim();
+  auto t_sizes_v = t_sizes.vec();
+  auto src_sizes_v = src_sizes.vec();
+  AT_CHECK(t_sizes_v.size() == src_sizes_v.size(), "expected num of dims to be the same between t and src.");
+  AT_CHECK(t_sparse_dim == t_sparse_dim, "expected num of sparse dims to be the same between t and src.");
+
+  auto dims_to_flatten = std::vector<int64_t>();
+
+  // check all dense dims have same size between t and src
+  for (int64_t i = t_sizes_v.size()-1; i > t_sparse_dim; i--) {
+    if (t_sizes_v[i] != src_sizes_v[i]) {
+      AT_ERROR("add: expected dense dims to have same size between t and src SparseTensors");
+    }
+  }
+
+  // check if sparse dims are broadcastable
+  for (int64_t i = t_sparse_dim-1; i >= 0; i--) {
+    if (t_sizes_v[i] == src_sizes_v[i]) {
+      dims_to_flatten.emplace(dims_to_flatten.begin(), i);
+    }
+    else if (t_sizes_v[i] > src_sizes_v[i]) {
+      AT_CHECK(src_sizes_v[i] == 1, "add: expected src size at dim ", i, " equals to 1.");
+    }
+    else {
+      AT_ERROR("add: expected src size <= t size among all dims.");
+    }
+  }
+
+  LongTensor t_indices = t._indices();
+  LongTensor src_indices = src._indices();
+  Tensor t_values = t._values();
+  Tensor src_values = src._values();
+  int64_t t_nnz = t._nnz();
+  int64_t src_nnz = src._nnz();
+  Tensor r_values = at::empty_like(t_values);
+
+  // config for thrust
+  int curDevice = -1;
+  cudaGetDevice(&curDevice);
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
+  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  auto policy = thrust::cuda::par(allocator).on(stream);
+  typedef thrust::device_ptr<int64_t> thrust_ptr;
+
+  LongTensor t_indices_1D = flatten_indices_by_dims(t_indices, t_sizes, dims_to_flatten);
+  LongTensor src_indices_1D = flatten_indices_by_dims(src_indices, src_sizes, dims_to_flatten);  // already sorted since only dims with size = 1 are not flattened
+  LongTensor t_indices_pos = at::empty_like(t_indices_1D); // store lower_bound of input indices at grad indices
+
+  // std::cout << "t_indices_1D: " << t_indices_1D << std::endl;
+  // std::cout << "src_indices_1D: " << src_indices_1D << std::endl;
+
+  thrust_ptr t_indices_iter(t_indices_1D.data<int64_t>());
+  thrust_ptr src_indices_iter(src_indices_1D.data<int64_t>());
+  thrust_ptr t_indices_pos_iter(t_indices_pos.data<int64_t>());
+
+  thrust::lower_bound(policy,
+                      src_indices_iter, src_indices_iter + src_nnz,
+                      t_indices_iter, t_indices_iter + t_nnz,
+                      t_indices_pos_iter);
+
+  // std::cout << "t_indices_pos: " << t_indices_pos << std::endl;
+
+  // config to run cuda kernel
+  int64_t total_threads = t_nnz;
+  const dim3 block = dim3(std::min(static_cast<int64_t>(cuda::getApplyBlock().x), total_threads));
+  dim3 grid;
+  AT_CHECK(cuda::getApplyGrid(total_threads, grid, curDevice), "_sparse_add_cuda: input too large or too many dimensions");
+
+  auto src_indices_ti = getTensorInfo<int64_t, int64_t>(src_indices_1D);
+  auto t_indices_ti = getTensorInfo<int64_t, int64_t>(t_indices_1D);
+  auto t_indices_pos_ti = getTensorInfo<int64_t, int64_t>(t_indices_pos);
+
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(t_values.type(), "_sparse_add_cuda", [&] {
+    auto src_values_ti = getTensorInfo<scalar_t, int64_t>(src_values);
+    auto t_values_ti = getTensorInfo<scalar_t, int64_t>(t_values);
+    auto r_values_ti = getTensorInfo<scalar_t, int64_t>(r_values);
+    scalar_t alpha_scalar = alpha.to<scalar_t>();
+
+    _sparse_add_kernel_cuda<scalar_t><<<grid, block, 0, stream>>>(
+      t_nnz,
+      src_indices_ti,
+      t_indices_ti,
+      t_indices_pos_ti,
+      src_values_ti,
+      t_values_ti,
+      r_values_ti,
+      alpha_scalar
+    );
+  });
+
+  SparseTensor r = at::_sparse_coo_tensor_with_dims_and_tensors(t_sparse_dim, t.dense_dim(), t_sizes, t_indices.clone(), r_values, t.options());
+  r._coalesced_(true);
+  return r;
+}
+
+// --------------------------------------------------------------------
 // mul(SparseTensor, SparseTensor)  [broadcasts]
 // --------------------------------------------------------------------
 

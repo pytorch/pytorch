@@ -5,6 +5,8 @@ __all__ = [
     'addmm',
     'mm',
     'sum',
+    'add',
+    'sub',
 ]
 
 
@@ -132,3 +134,41 @@ def sum(input, dim=None, dtype=None):
             return torch._sparse_sum(input, dim, dtype=dtype)
         else:
             return torch._sparse_sum(input, dtype=dtype)
+
+
+def add(input, other):
+    r"""
+    Element of the SparseTensor :attr:`other` is added to corresponding
+    locations of SparseTensor :attr:`input`. The number of dims must be
+    the same between two inputs tensors. This operation supports broadcasting
+    on sparse dims, and requires dense dims to be the same between two inputs.
+    For a sparse dim ``i``, if ``sizes(i)`` differs, then ``input.sizes(i) > 1``
+    and ``other.sizes(i) == 1``.
+
+    Args:
+        input (SparseTensor): the first input SparseTensor
+        other (SparseTensor): the second input SparseTensor
+
+    Example::
+
+    """
+    return torch._sparse_add(input, other, alpha=1)
+
+
+def sub(input, other):
+    r"""
+    Element of the SparseTensor :attr:`other` is subtracted from corresponding
+    locations of SparseTensor :attr:`input`. The number of dims must be
+    the same between two inputs tensors. This operation supports broadcasting
+    on sparse dims, and requires dense dims to be the same between two inputs.
+    For a sparse dim ``i``, if ``sizes(i)`` differs, then ``input.sizes(i) > 1``
+    and ``other.sizes(i) == 1``.
+
+    Args:
+        input (SparseTensor): the first input SparseTensor
+        other (SparseTensor): the second input SparseTensor
+
+    Example::
+
+    """
+    return torch._sparse_add(input, other, alpha=-1)

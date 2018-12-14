@@ -935,6 +935,41 @@ class TestSparse(TestCase):
         self._test_spadd_shape(0, [50, 30, 0], [2, 0])
         self._test_spadd_shape(10, [50, 30, 20], [2, 0])
 
+    @skipIfRocm
+    def test_sparse_add_sub(self):
+
+        def test_add(nnz, sparse_dim, sizes1, sizes2):
+            S1 = self._gen_sparse(sparse_dim, nnz, sizes1)[0]
+            S2 = self._gen_sparse(sparse_dim, nnz, sizes2)[0]
+            S3 = torch.sparse.add(S1, S2)
+
+            D1 = S1.to_dense()
+            D2 = S2.to_dense()
+            mask = (D1 == 0)
+
+            D3 = D1 + D2
+            D3.masked_fill_(mask, 0)
+            self.assertEqual(S3.to_dense(), D3)
+
+        test_add(10, 2, [2, 3, 4], [2, 3, 4])
+        test_add(10, 2, [2, 3, 4], [2, 1, 4])
+
+        def test_sub(nnz, sparse_dim, sizes1, sizes2):
+            S1 = self._gen_sparse(sparse_dim, nnz, sizes1)[0]
+            S2 = self._gen_sparse(sparse_dim, nnz, sizes2)[0]
+            S3 = torch.sparse.sub(S1, S2)
+
+            D1 = S1.to_dense()
+            D2 = S2.to_dense()
+            mask = (D1 == 0)
+
+            D3 = D1 - D2
+            D3.masked_fill_(mask, 0)
+            self.assertEqual(S3.to_dense(), D3)
+
+        test_sub(10, 2, [2, 3, 4], [2, 3, 4])
+        test_sub(10, 2, [2, 3, 4], [2, 1, 4])
+
     def test_norm(self):
         def test_shape(sparse_dims, nnz, with_size):
             x, _, _ = self._gen_sparse(sparse_dims, nnz, with_size)
