@@ -10822,7 +10822,6 @@ def add_autograd_test(
                 args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace, call_kwargs=kwargs)
                 self_tensor = deepcopy(self_variable.data)
                 args_tensor = deepcopy(unpack_variables(args_variable))
-                output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
 
                 def fn(*inputs, **kwargs):
                     output = getattr(inputs[0], name)(*inputs[1:], **kwargs)
