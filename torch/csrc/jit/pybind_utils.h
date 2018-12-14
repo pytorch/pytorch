@@ -172,8 +172,6 @@ inline IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_
               std::vector<double> repeated(*N, value);
               return repeated;
             }
-          case TypeKind::BoolType:
-            return py::cast<std::vector<bool>>(obj);
           case TypeKind::TensorType:
           case TypeKind::DynamicType:
             return py::cast<std::vector<at::Tensor>>(obj);
