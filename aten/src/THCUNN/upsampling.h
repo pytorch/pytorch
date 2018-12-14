@@ -1,8 +1,8 @@
 #ifndef THCUNN_UPSAMPLING_H
 #define THCUNN_UPSAMPLING_H
 
-#include "THCDeviceTensor.cuh"
-#include "THCAtomics.cuh"
+#include <THC/THCDeviceTensor.cuh>
+#include <THC/THCAtomics.cuh>
 
 #undef MIN
 #define MIN(a,b) ( ((a)<(b)) ? (a) : (b) )
