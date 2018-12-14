@@ -357,7 +357,10 @@ def _get_longest_paths(g, source_nodes):
 
     ret = {}
     for cn in source_nodes:
-        pred, dist = nx.bellman_ford(ng, cn, weight="weight")
+        if (hasattr(nx, 'bellman_ford_predecessor_and_distance')):
+            pred, dist = nx.bellman_ford_predecessor_and_distance(ng, cn, weight="weight")
+        else:
+            pred, dist = nx.bellman_ford(ng, cn, weight="weight")
         path = _get_path(pred, dist)
         assert path[0] == cn
         assert len(path) - 1 == -dist[path[-1]]
