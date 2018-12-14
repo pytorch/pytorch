@@ -18,6 +18,13 @@ void assertTensorEqualsWithType(
 namespace caffe2 {
 namespace testing {
 
+// Asserts that two float values are close within epsilon.
+void assertNear(float value1, float value2, float epsilon) {
+  // These two enforces will give good debug messages.
+  CAFFE_ENFORCE_LE(value1, value2 + epsilon);
+  CAFFE_ENFORCE_GE(value1, value2 - epsilon);
+}
+
 void assertTensorEquals(const TensorCPU& tensor1, const TensorCPU& tensor2) {
   CAFFE_ENFORCE_EQ(tensor1.sizes(), tensor2.sizes());
   if (tensor1.IsType<float>()) {
@@ -49,6 +56,7 @@ void assertTensorListEquals(
 const caffe2::Tensor& getTensor(
     const caffe2::Workspace& workspace,
     const std::string& name) {
+  CAFFE_ENFORCE(workspace.HasBlob(name));
   return workspace.GetBlob(name)->Get<caffe2::Tensor>();
 }
 
