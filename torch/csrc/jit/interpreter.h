@@ -73,7 +73,7 @@ struct Suspend : public std::exception {
 
 struct InterpreterContinuation {
   InterpreterContinuation(InterpreterState state_, Stack stack_)
-      : state(std::move(state_)), stack(std::move(stack_)) {}
+      : state(state_), stack(std::move(stack_)) {}
 
   void operator()() {
     state.runAsync(stack);

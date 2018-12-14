@@ -185,7 +185,7 @@ struct VISIBILITY_HIDDEN ConstantPythonTupleValue : public PythonValue {
       const SourceRange& loc,
       Method& m) override {
     std::vector<Value*> values;
-    for (auto sugared_item : asTuple(loc, m)) {
+    for (const auto& sugared_item : asTuple(loc, m)) {
       values.push_back(sugared_item->asValue(loc, m));
     }
     auto node = m.graph()->createTuple(values);
@@ -532,6 +532,7 @@ void initJitScriptBindings(PyObject* module) {
           const std::vector<ResolutionCallback>& rcbs,
           const std::vector<FunctionDefaults>& defaults) {
         std::vector<Resolver> resolvers;
+        resolvers.reserve(rcbs.size());
         for(auto & callback : rcbs) {
           resolvers.push_back(pythonResolver(callback));
         }

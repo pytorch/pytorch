@@ -101,26 +101,26 @@ void Module::apply(const ConstModuleApplyFunction& function) const {
 
 void Module::apply(
     const NamedModuleApplyFunction& function,
-    std::string name_prefix) {
+    const std::string& name_prefix) {
   function(/*name=*/name_prefix, *this);
   apply_to_submodules(
       [&function](
           const std::string& name, const std::shared_ptr<Module>& module) {
         function(name, *module);
       },
-      std::move(name_prefix));
+      name_prefix);
 }
 
 void Module::apply(
     const ConstNamedModuleApplyFunction& function,
-    std::string name_prefix) const {
+    const std::string& name_prefix) const {
   function(/*name=*/name_prefix, *this);
   apply_to_submodules(
       [&function](
           const std::string& name, const std::shared_ptr<Module>& module) {
         function(name, *module);
       },
-      std::move(name_prefix));
+      name_prefix);
 }
 
 void Module::apply(const ModulePointerApplyFunction& function) const {
@@ -133,10 +133,10 @@ void Module::apply(const ModulePointerApplyFunction& function) const {
 
 void Module::apply(
     const NamedModulePointerApplyFunction& function,
-    std::string name_prefix) const {
+    const std::string& name_prefix) const {
   function(
       /*name=*/name_prefix, shared_from_this_checked());
-  apply_to_submodules(function, std::move(name_prefix));
+  apply_to_submodules(function, name_prefix);
 }
 
 std::vector<Tensor> Module::parameters(bool recurse) const {
@@ -199,7 +199,7 @@ std::vector<std::shared_ptr<Module>> Module::modules(bool include_self) const {
 }
 
 OrderedDict<std::string, std::shared_ptr<Module>> Module::named_modules(
-    std::string name_prefix,
+    const std::string& name_prefix,
     bool include_self) const {
   OrderedDict<std::string, std::shared_ptr<Module>> result;
   if (include_self) {
@@ -208,14 +208,14 @@ OrderedDict<std::string, std::shared_ptr<Module>> Module::named_modules(
             const std::string& key, const std::shared_ptr<Module>& module) {
           result.insert(key, module);
         },
-        std::move(name_prefix));
+        name_prefix);
   } else {
     apply_to_submodules(
         [&result](
             const std::string& key, const std::shared_ptr<Module>& module) {
           result.insert(key, module);
         },
-        std::move(name_prefix));
+        name_prefix);
   }
   return result;
 }
@@ -329,7 +329,7 @@ void Module::apply_to_submodules(
   for (const auto& child : children_) {
     auto qualified_name = join_name(name_prefix, child.key());
     function(qualified_name, child.value());
-    child.value()->apply_to_submodules(function, std::move(qualified_name));
+    child.value()->apply_to_submodules(function, qualified_name);
   }
 }
 
