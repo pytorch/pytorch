@@ -29,6 +29,13 @@ class CAFFE2_API Tensor final {
  public:
   Tensor() : impl_() {}
 
+  // Lots of Caffe2 users still think that "Tensor" is
+  // not a shared pointer.  Don't allow copies, which
+  // allow users to observe this expectation being
+  // violated.
+  Tensor(const Tensor&) = delete;
+  Tensor& operator=(const Tensor&) = delete;
+
   operator bool() const {
     return impl_.defined();
   }
