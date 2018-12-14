@@ -228,7 +228,9 @@ def group_declarations_by_name(declarations, should_bind_fn):
 
 
 def get_type_default(declaration):
-    if declaration['name'].startswith('randperm'):
+    if declaration['name'].startswith('randperm') or \
+            declaration['name'] == 'tril_indices' or \
+            declaration['name'] == 'triu_indices':
         return 'torch.int64'
     else:
         return 'None'

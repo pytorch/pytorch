@@ -16,7 +16,8 @@
 
 namespace torch { namespace jit { namespace fuser {
 
-// Performs device-independent "upfront" compilation of the given fusion_group
+// Performs device-independent "upfront" compilation of the given fusion_group,
+// if it has not been registered already.
 // Returns a key that can be used to run the fusion later
 TORCH_API int64_t registerFusion(const Node* fusion_group);
 

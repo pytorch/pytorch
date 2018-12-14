@@ -37,11 +37,11 @@ std::string getPythonInterpreterStackTrace() {
 }
 
 std::shared_ptr<torch::jit::Graph> createGraphByTracing(
-    py::function func,
+    const py::function& func,
     Stack trace_inputs,
-    py::function var_name_lookup_fn,
+    const py::function& var_name_lookup_fn,
     bool force_outplace,
-    c10::optional<size_t> num_real_inputs) {
+    const c10::optional<size_t>& num_real_inputs) {
   size_t num_func_inputs = num_real_inputs.value_or(trace_inputs.size());
   auto enter_info = tracer::enter(std::move(trace_inputs));
   getTracingState()->lookup_var_name_fn = [var_name_lookup_fn](const Variable& var) -> std::string {
@@ -76,7 +76,7 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
 }
 
 Node* preRecordPythonTrace(THPObjectPtr pyobj,
-                                  std::string arg_types,
+                                  const std::string& arg_types,
                                   at::ArrayRef<Variable> inputs,
                                   pyobj_list scalar_args) {
   THPObjectPtr apply(PyObject_GetAttrString(pyobj.get(), "apply"));

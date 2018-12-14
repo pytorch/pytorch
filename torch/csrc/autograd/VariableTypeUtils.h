@@ -71,7 +71,7 @@ inline void rebase_history(std::vector<Variable>&& vars, std::shared_ptr<Functio
       if (var.defined()) {
         // TODO: eliminate const_cast
         auto output_nr = grad_fn->add_input_metadata(var);
-        var.rebase_history({grad_fn, output_nr});
+        var.rebase_history({std::move(grad_fn), output_nr});
       } else {
         grad_fn->add_input_metadata(Function::undefined_input());
       }

@@ -28,7 +28,7 @@ void LinearImpl::reset() {
   }
 }
 
-Tensor LinearImpl::forward(Tensor input) {
+Tensor LinearImpl::forward(const Tensor& input) {
   AT_ASSERT(!options.with_bias_ || bias.defined());
   return torch::linear(input, weight, bias);
 }

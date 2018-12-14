@@ -5,7 +5,7 @@
 #include <THC/THCTensorRandom.h>
 #include <THC/THCGeneral.hpp>
 
-#include <ATen/cuda/CUDAStream.h>
+#include <c10/cuda/CUDAStream.h>
 
 #include <THC/THCCachingAllocator.h>
 #include <stdlib.h>

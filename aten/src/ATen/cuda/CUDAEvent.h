@@ -2,8 +2,8 @@
 
 #include <ATen/cuda/ATenCUDAGeneral.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAStream.h>
-#include <ATen/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAStream.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <ATen/cuda/Exceptions.h>
 #include <c10/util/Exception.h>
 
@@ -35,7 +35,7 @@ struct AT_CUDA_API CUDAEvent {
   ~CUDAEvent() {
     try {
       if (is_created_) {
-        at::cuda::CUDAGuard device_guard(static_cast<int16_t>(device_index_));
+        CUDAGuard device_guard(static_cast<int16_t>(device_index_));
         cudaEventDestroy(event_);
       }
     } catch (...) { /* No throw */ }
@@ -74,7 +74,7 @@ struct AT_CUDA_API CUDAEvent {
 
   // Note: cudaEventRecord must be called on the same device as the stream.
   void record(const CUDAStream& stream) {
-    at::cuda::CUDAGuard guard(static_cast<int16_t>(stream.device_index()));
+    CUDAGuard guard(static_cast<int16_t>(stream.device_index()));
 
     if (is_created_) {
       AT_ASSERT(device_index_ == stream.device_index());
@@ -92,7 +92,7 @@ struct AT_CUDA_API CUDAEvent {
   // The event has no actual GPU resources associated with it.
   void block(const CUDAStream& stream) {
     if (is_created_) {
-      at::cuda::CUDAGuard guard(static_cast<int16_t>(stream.device_index()));
+      CUDAGuard guard(static_cast<int16_t>(stream.device_index()));
       AT_CUDA_CHECK(cudaStreamWaitEvent(stream, event_, 0));
     }
   }

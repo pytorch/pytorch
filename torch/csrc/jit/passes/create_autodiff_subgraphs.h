@@ -12,6 +12,6 @@ namespace torch { namespace jit {
 // threshold - minimum number of nodes that will appear in a block
 // returns all differentiable blocks that have been found
 TORCH_API std::vector<Node*> CreateAutodiffSubgraphs(
-    std::shared_ptr<Graph> graph,
+    const std::shared_ptr<Graph>& graph,
     size_t threshold = 2);
 }}

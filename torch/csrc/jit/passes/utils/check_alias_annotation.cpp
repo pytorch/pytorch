@@ -73,9 +73,9 @@ bool deepEquals(const IValue& lhs, const IValue& rhs) {
 
 struct AliasAndIValue {
   AliasAndIValue(
-      const c10::optional<at::AliasInfo>& aliasInfo,
-      const IValue& iValue)
-      : aliasInfo(aliasInfo), iValue(iValue) {}
+      c10::optional<at::AliasInfo> aliasInfo,
+      IValue iValue)
+      : aliasInfo(std::move(aliasInfo)), iValue(std::move(iValue)) {}
 
   const c10::optional<at::AliasInfo> aliasInfo;
   const IValue iValue;
@@ -185,7 +185,7 @@ c10::optional<IValue> toIValueProp(const Value* v) {
 } // namespace
 
 void checkAliasAnnotation(
-    std::shared_ptr<Graph> graph,
+    const std::shared_ptr<Graph>& graph,
     std::vector<IValue> pythonInputs,
     const std::string& unqualifiedOpName) {
   // Find the node that corresponds to our op name

@@ -9,7 +9,7 @@ namespace torch { namespace jit {
 // IValue -> Constant node
 Value* insertConstant(
     Graph& g,
-    IValue val,
+    const IValue& val,
     c10::optional<SourceRange> loc,
     c10::optional<ScopePtr> scope) {
   Node * n = g.create(prim::Constant);
@@ -108,7 +108,8 @@ RegisterOperators reg({
             return 0;
           };
         } else if(type->isSubtypeOf(ListType::ofBools())) {
-          auto bs = node->is(attr::value);
+          auto int_list = node->is(attr::value);
+          std::vector<bool> bs(int_list.begin(), int_list.end());
           return [bs](Stack& stack) {
             push(stack, bs);
             return 0;

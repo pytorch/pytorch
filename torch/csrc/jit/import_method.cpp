@@ -13,7 +13,7 @@ struct ModuleAccessorValue : public script::SugaredValue {
     return "module";
   }
   // select an attribute on it, e.g. `this.field`
-  std::shared_ptr<SugaredValue> attr(SourceRange loc, script::Method & m, const std::string& field) override {
+  std::shared_ptr<SugaredValue> attr(const SourceRange& loc, script::Method & m, const std::string& field) override {
     if(script::NamedModule* v = module->find_module(field)) {
       return std::make_shared<ModuleAccessorValue>(v->module);
     } else if(script::NamedParameter* v = module->find_parameter(field)) {
@@ -34,7 +34,7 @@ struct OpsValue : public script::SugaredValue {
   std::string kind() const override {
     return "ops";
   }
-  std::shared_ptr<SugaredValue> attr(SourceRange loc, script::Method & m, const std::string& field) override {
+  std::shared_ptr<SugaredValue> attr(const SourceRange& loc, script::Method & m, const std::string& field) override {
     return std::make_shared<script::BuiltinModule>(field, version_);
   }
   size_t version_;
@@ -45,7 +45,7 @@ struct ConstantValue : public script::SugaredValue {
   : value_(std::move(value)) {}
   IValue value_;
   std::string kind() const override { return "constant"; }
-  Value * asValue(SourceRange loc, script::Method & m) override {
+  Value * asValue(const SourceRange& loc, script::Method & m) override {
     return m.graph()->insertConstant(value_);
   }
 };
@@ -60,7 +60,7 @@ struct ConstantTableValue : public script::SugaredValue {
     return "CONSTANTS";
   }
   // select an attribute on it, e.g. `this.field`
-  std::shared_ptr<SugaredValue> attr(SourceRange loc, script::Method & m, const std::string& field) override {
+  std::shared_ptr<SugaredValue> attr(const SourceRange& loc, script::Method & m, const std::string& field) override {
     const char* field_s = field.c_str();
     char* end;
     int64_t offset = std::strtoll(field_s + 1, &end, 10);
