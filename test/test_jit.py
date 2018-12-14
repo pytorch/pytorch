@@ -10612,15 +10612,6 @@ additional_module_tests = [
         extra_args=((S, S),)
     ),
     dict(
-        module_name='CTCLoss',
-        constructor_args=(14,),
-        input_fn=lambda: (torch.randn(50, 16, 20).log_softmax(2),
-                          torch.randint(1, 20, (16, 30), dtype=torch.long),
-                          torch.full((16,), 50, dtype=torch.long),
-                          torch.randint(10, 30, (16,), dtype=torch.long)),
-        no_grad=True,
-    ),
-    dict(
         module_name='RNNCell',
         constructor_args=(S, S),
         input_size=(S, S),
