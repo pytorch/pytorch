@@ -7,14 +7,19 @@ namespace {
 // Helper data structure used locally
 struct
 #ifndef __HIP_PLATFORM_HCC__
-__align__(16)
+    __align__(16)
 #endif
-Box {
+        Box {
   float x1, y1, x2, y2;
 };
 
 #define BOXES_PER_THREAD (8 * sizeof(int))
 #define CHUNK_SIZE 2000
+
+const dim3 CAFFE_CUDA_NUM_THREADS_2D = {
+    static_cast<unsigned int>(CAFFE_CUDA_NUM_THREADS_2D_DIMX),
+    static_cast<unsigned int>(CAFFE_CUDA_NUM_THREADS_2D_DIMY),
+    1u};
 
 __launch_bounds__(
     CAFFE_CUDA_NUM_THREADS_2D_DIMX* CAFFE_CUDA_NUM_THREADS_2D_DIMY,

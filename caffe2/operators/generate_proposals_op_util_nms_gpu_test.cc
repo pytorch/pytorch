@@ -1,10 +1,10 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/core/flags.h"
-#include "caffe2/operators/utility_ops.h"
-#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/operators/generate_proposals_op_util_nms.h"
 #include "caffe2/operators/generate_proposals_op_util_nms_gpu.h"
+#include "caffe2/operators/utility_ops.h"
+#include "caffe2/utils/eigen_utils.h"
 
 #include <gtest/gtest.h>
 
@@ -68,7 +68,6 @@ TEST(UtilsNMSTest, TestNMSGPU) {
       {0, 2}, {0, 2}, {0, 2}, {0, 1, 2, 3}, {0, 1, 2, 3, 4}};
 
   std::vector<int> keep(nboxes);
-  int nkeep;
   std::set<int> keep_as_set;
   for (int itest = 0; itest < input_thresh.size(); ++itest) {
     const float thresh = input_thresh[itest];

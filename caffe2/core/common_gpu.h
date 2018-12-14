@@ -320,9 +320,6 @@ constexpr int CAFFE_CUDA_NUM_THREADS = 128;
 // 2D grid
 constexpr int CAFFE_CUDA_NUM_THREADS_2D_DIMX = 16;
 constexpr int CAFFE_CUDA_NUM_THREADS_2D_DIMY = 16;
-const dim3 CAFFE_CUDA_NUM_THREADS_2D = {static_cast<unsigned int>(CAFFE_CUDA_NUM_THREADS_2D_DIMX),
-                                        static_cast<unsigned int>(CAFFE_CUDA_NUM_THREADS_2D_DIMY),
-                                        1u};
 
 // The maximum number of blocks to use in the default kernel call. We set it to
 // 4096 which would work for compute capability 2.x (where 65536 is the limit).
@@ -334,9 +331,6 @@ constexpr int CAFFE_MAXIMUM_NUM_BLOCKS = 4096;
 // 2D grid
 constexpr int CAFFE_MAXIMUM_NUM_BLOCKS_2D_DIMX = 128;
 constexpr int CAFFE_MAXIMUM_NUM_BLOCKS_2D_DIMY = 128;
-const dim3 CAFFE_MAXIMUM_NUM_BLOCKS_2D = {static_cast<unsigned int>(CAFFE_MAXIMUM_NUM_BLOCKS_2D_DIMX),
-                                          static_cast<unsigned int>(CAFFE_MAXIMUM_NUM_BLOCKS_2D_DIMX),
-                                          1u};
 
 constexpr int kCUDAGridDimMaxX = 2147483647;
 constexpr int kCUDAGridDimMaxY = 65535;
