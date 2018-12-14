@@ -178,7 +178,7 @@ class TestOperators(TestCase):
     def test_scatter(self):
         data = torch.zeros(3, 3)
         updates = torch.randn(2, 3)
-        indices=torch.tensor([[1,0,2],[0,2,1],])
+        indices = torch.tensor([[1, 0, 2], [0, 2, 1], ])
         self.assertONNX(lambda x: x.scatter(0, indices, updates), data)
 
     def test_chunk(self):
