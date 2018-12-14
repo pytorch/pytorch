@@ -2118,6 +2118,17 @@ class TestCuda(TestCase):
                 y = torch.randn(2, 1, device='cuda')
                 z = x + y
 
+    def test_tril_and_triu_indices(self):
+        self.assertRaises(
+            RuntimeError,
+            lambda: torch.triu_indices(
+                1, 1, device='cuda', layout=torch.strided))
+
+        self.assertRaises(
+            RuntimeError,
+            lambda: torch.tril_indices(
+                1, 1, device='cuda', layout=torch.strided))
+
 
 def load_ignore_file():
     from os.path import join, dirname

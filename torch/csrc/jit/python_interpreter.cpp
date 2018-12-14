@@ -11,8 +11,6 @@
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/pybind_utils.h>
 
-#include <torch/csrc/variable_tensor_functions.h>
-
 #include <typeinfo>
 
 #include <torch/csrc/autograd/python_engine.h>

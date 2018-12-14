@@ -11,7 +11,7 @@
 
 #ifdef USE_CUDA
 #include <THC/THC.h>
-#include <ATen/cuda/CUDAStream.h>
+#include <c10/cuda/CUDAStream.h>
 #endif
 
 #define THPUtils_(NAME) TH_CONCAT_4(THP,Real,Utils_,NAME)

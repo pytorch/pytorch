@@ -35,8 +35,6 @@ INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../aten/src/ATen/core/ScalarType.h \
                          ../../../aten/src/ATen/core/Tensor.h \
                          ../../../aten/src/ATen/cuda/CUDAContext.h \
-                         ../../../aten/src/ATen/cuda/CUDAGuard.h \
-                         ../../../aten/src/ATen/cuda/CUDAStream.h \
                          ../../../aten/src/ATen/cudnn/Descriptors.h \
                          ../../../aten/src/ATen/cudnn/Handles.h \
                          ../../../aten/src/ATen/cudnn/Types.h \
@@ -52,6 +50,8 @@ INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../c10/util/ArrayRef.h \
                          ../../../c10/util/Exception.h \
                          ../../../c10/util/Optional.h \
+                         ../../../c10/cuda/CUDAGuard.h \
+                         ../../../c10/cuda/CUDAStream.h \
                          ../../../torch/csrc/api/include \
                          ../../../torch/csrc/api/src \
                          ../../../torch/csrc/autograd/generated/variable_factories.h \
