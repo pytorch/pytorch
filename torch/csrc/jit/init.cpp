@@ -300,7 +300,7 @@ void initJITBindings(PyObject *module) {
   m.def("_jit_get_operation", [](const std::string& qualified_name) {
     try {
       auto symbol = Symbol::fromQualString(qualified_name);
-      auto operations = getAllOperatorsFor(std::move(symbol));
+      auto operations = getAllOperatorsFor(symbol);
       AT_CHECK(!operations.empty(), "No such operator ", qualified_name);
       AT_CHECK(
           operations.size() == 1,
@@ -338,7 +338,7 @@ void initJITBindings(PyObject *module) {
   });
   m.def("_jit_get_schemas_for_operator", [](const std::string& qualified_name) {
     auto symbol = Symbol::fromQualString(qualified_name);
-    auto operations = getAllOperatorsFor(std::move(symbol));
+    auto operations = getAllOperatorsFor(symbol);
     return fmap(operations, [](const std::shared_ptr<Operator>& op) {
         return op->schema();
       });

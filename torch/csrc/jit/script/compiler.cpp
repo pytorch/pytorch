@@ -419,7 +419,7 @@ static inline bool isIntOrFloatUsedAsList(
     const Value* value,
     const Argument& arg) {
   // Look for int[N] or float[N]
-  auto v_type = value->type();
+  const auto& v_type = value->type();
   if (v_type != FloatType::get() && v_type != IntType::get())
     return false;
   auto arg_type = unwrapOptional(arg.type());
@@ -1054,7 +1054,7 @@ private:
           << " return (" << schema.returns().size() << ") does not match"
           << " the number of returns from the function (" << results.size() << ")!";
       }
-      auto range = return_stmt.range();
+      const auto& range = return_stmt.range();
       size_t return_type_idx = 0;
       for (auto r : results) {
         TypePtr type = DynamicType::get();
@@ -1506,7 +1506,7 @@ private:
     auto instances = sv->asTuple(stmt.range(), method);
     const std::string& target_name = target.name();
     pushFrame(environment_stack->block());
-    for(auto inst : instances) {
+    for(const auto& inst : instances) {
       environment_stack->setSugaredVar(itrs[0].range(), target_name, inst);
       emitStatements(body);
     }
@@ -1988,7 +1988,7 @@ private:
       if(maybe_unpack && tree->kind() == TK_STARRED) {
         auto starred = Starred(tree);
         auto entries = emitSugaredExpr(starred.expr(), 1)->asTuple(starred.range(), method);
-        for(auto entry : entries) {
+        for(const auto& entry : entries) {
           values.emplace_back(
               tree->range(), entry->asValue(starred.range(), method));
         }
@@ -2639,7 +2639,7 @@ void defineMethodsInModule(const std::shared_ptr<Module>& m, const std::vector<D
   auto resolver_it = resolvers.begin();
   std::vector<Method*> methods;
   std::unordered_map<std::string, Method*> function_table;
-  for(Def def : definitions) {
+  for(const Def& def : definitions) {
     const std::string& name = def.name().name();
     auto resolver = *resolver_it++;
     JIT_ASSERT(resolver);

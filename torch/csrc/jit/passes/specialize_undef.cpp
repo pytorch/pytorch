@@ -15,7 +15,7 @@ void specializeUndef(Graph & g) {
   std::unordered_map<Value*, State> state;
 
   for (Value* input : g.inputs()) {
-    auto tp = input->type();
+    const auto& tp = input->type();
     if (tp->isSubtypeOf(UndefinedTensorType::get())) {
       state[input] = State::Undefined;
     } else if (tp->isSubtypeOf(DynamicType::get())) {

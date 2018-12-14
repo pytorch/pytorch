@@ -14,7 +14,7 @@ EmbeddingOptions::EmbeddingOptions(int64_t count, int64_t dimension)
     : count_(count), dimension_(dimension) {}
 
 EmbeddingImpl::EmbeddingImpl(EmbeddingOptions options)
-    : options(std::move(options)) {
+    : options(options) {
   reset();
 }
 

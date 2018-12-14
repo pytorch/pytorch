@@ -209,7 +209,7 @@ Tensor internal_new_from_data(
     auto device = device_opt.has_value() ? *device_opt : (type_inference ? var.device() : at::Device(torch::getDeviceType(type)));
     AutoNoGIL no_gil;
     maybe_initialize_cuda(device);
-    return var.to(device, scalar_type, /*blocking=*/false, /*copy=*/copy_variables);
+    return var.to(device, scalar_type, /*non_blocking=*/false, /*copy=*/copy_variables);
   }
 
 #ifdef USE_NUMPY
@@ -219,7 +219,7 @@ Tensor internal_new_from_data(
     auto device = device_opt.has_value() ? *device_opt : at::Device(type.device_type());
     AutoNoGIL no_gil;
     maybe_initialize_cuda(device);
-    return tensor.to(device, scalar_type, /*blocking=*/false, /*copy=*/copy_numpy);
+    return tensor.to(device, scalar_type, /*non_blocking=*/false, /*copy=*/copy_numpy);
   }
 #endif
 
@@ -232,7 +232,7 @@ Tensor internal_new_from_data(
   auto device = device_opt.has_value() ? *device_opt : at::Device(torch::getDeviceType(type));
   AutoNoGIL no_gil;
   maybe_initialize_cuda(device);
-  return tensor.to(device, scalar_type, /*blocking=*/false, /*copy=*/false);
+  return tensor.to(device, scalar_type, /*non_blocking=*/false, /*copy=*/false);
 }
 
 Tensor new_from_data_copy(
