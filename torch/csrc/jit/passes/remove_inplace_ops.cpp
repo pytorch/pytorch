@@ -52,7 +52,7 @@ void RemoveInplaceOps(Block* block) {
 }
 }
 
-void RemoveInplaceOps(std::shared_ptr<Graph> graph) {
+void RemoveInplaceOps(const std::shared_ptr<Graph>& graph) {
   RemoveInplaceOps(graph->block());
 }
 } // namespace jit

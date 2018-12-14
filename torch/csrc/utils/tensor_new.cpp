@@ -56,34 +56,34 @@ void maybe_initialize_cuda(const Device device) {
 Tensor dispatch_zeros(const Type& type, optional<Device> device, IntList sizes) {
   maybe_initialize_cuda(type);
   AutoNoGIL no_gil;
-  return torch::zeros(sizes, type.options(device));
+  return torch::zeros(sizes, type.options(std::move(device)));
 }
 
 Tensor dispatch_ones(const Type& type, optional<Device> device, IntList sizes) {
   maybe_initialize_cuda(type);
   AutoNoGIL no_gil;
-  return torch::ones(sizes, type.options(device));
+  return torch::ones(sizes, type.options(std::move(device)));
 }
 
 Tensor dispatch_full(const Type& type, Scalar fill_value, optional<Device> device, IntList sizes) {
   maybe_initialize_cuda(type);
   AutoNoGIL no_gil;
-  return torch::full(sizes, fill_value, type.options(device));
+  return torch::full(sizes, fill_value, type.options(std::move(device)));
 }
 
 Tensor new_with_sizes(const Type& type, optional<Device> device, IntList sizes) {
   maybe_initialize_cuda(type);
   AutoNoGIL no_gil;
-  return torch::empty(sizes, type.options(device));
+  return torch::empty(sizes, type.options(std::move(device)));
 }
 
 Tensor new_with_storage(const Type& type, Storage storage) {
   auto tensor = at::empty({}, type.options());
-  tensor.set_(storage);
+  tensor.set_(std::move(storage));
   return tensor;
 }
 
-Tensor new_with_tensor(const Type& type, Tensor other) {
+Tensor new_with_tensor(const Type& type, const Tensor& other) {
   if (other.type() != type) {
     throw TypeError("expected %s (got %s)", type.toString(), other.type().toString());
   }
@@ -239,7 +239,7 @@ Tensor new_from_data_copy(
     const Type& type,
     c10::optional<Device> device,
     PyObject* data) {
-  return internal_new_from_data(type, device, data, true, true, false);
+  return internal_new_from_data(type, std::move(device), data, true, true, false);
 }
 
 Tensor legacy_new_from_sequence(
@@ -249,7 +249,7 @@ Tensor legacy_new_from_sequence(
   if (!PySequence_Check(data)) {
     throw TypeError("new(): data must be a sequence (got %s)", Py_TYPE(data)->tp_name);
   }
-  return legacy_new_from_data(type, device, data);
+  return legacy_new_from_data(type, std::move(device), data);
 }
 
 void check_legacy_ctor_device(const Type& type, c10::optional<Device> device) {
@@ -453,7 +453,7 @@ Tensor legacy_new_from_data(
     const Type& type,
     c10::optional<Device> device,
     PyObject* data) {
-  return internal_new_from_data(type, device, data, false, false, false);
+  return internal_new_from_data(type, std::move(device), data, false, false, false);
 }
 
 Tensor sparse_coo_tensor_ctor(const Type& default_type, PyObject* args, PyObject* kwargs) {

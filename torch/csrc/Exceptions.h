@@ -51,8 +51,8 @@ struct python_error : public std::exception {
 
   python_error(python_error&& other) {
     type = std::move(other.type);
-    value = std::move(other.value);
-    traceback = std::move(other.traceback);
+    value = other.value;
+    traceback = other.traceback;
     other.type = nullptr;
     other.value = nullptr;
     other.traceback = nullptr;

@@ -14,7 +14,7 @@ struct SymbolicVariable {
     return v;
   }
   static SymbolicVariable asNewInput(Graph & g, std::string name = "") {
-    return g.addInput(name);
+    return g.addInput(std::move(name));
   }
   static SymbolicVariable asNewInput(Graph & g, TypePtr type) {
     return g.addInput()->setType(std::move(type));
@@ -239,13 +239,13 @@ struct SymbolicVariable {
     return create(aten::view, {*this, sizes})[0];
   }
   SymbolicVariable view(std::vector<std::int64_t> sizes) const {
-    return view(insertConstant(sizes));
+    return view(insertConstant(std::move(sizes)));
   }
   SymbolicVariable reshape(Value* sizes) const {
     return create(aten::reshape, {*this, sizes})[0];
   }
   SymbolicVariable reshape(std::vector<std::int64_t> sizes) const {
-    return reshape(insertConstant(sizes));
+    return reshape(insertConstant(std::move(sizes)));
   }
   SymbolicVariable addmm(SymbolicVariable mat1, SymbolicVariable mat2) const {
     return create(aten::addmm, {*this, mat1, mat2, insertConstant(1), insertConstant(1)})[0];
@@ -255,7 +255,7 @@ struct SymbolicVariable {
   }
 private:
   Value * insertConstant(IValue value) const {
-    return v->owningGraph()->insertConstant(value);
+    return v->owningGraph()->insertConstant(std::move(value));
   }
   SymbolicVariable typeLike(SymbolicVariable other) const {
     if (auto other_type = other.v->type()->cast<CompleteTensorType>())

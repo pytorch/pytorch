@@ -25,7 +25,7 @@ void EmbeddingImpl::reset() {
   weight.normal_(0, 1);
 }
 
-Tensor EmbeddingImpl::forward(Tensor input) {
+Tensor EmbeddingImpl::forward(const Tensor& input) {
   return torch::embedding(weight, /*indices=*/input);
 }
 } // namespace nn

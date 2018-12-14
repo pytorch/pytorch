@@ -12,6 +12,7 @@
 #include <torch/csrc/utils/python_numbers.h>
 
 #include <stdexcept>
+#include <utility>
 
 namespace py = pybind11;
 
@@ -33,7 +34,7 @@ struct type_caster<at::Tensor> {
   }
 
   static handle
-  cast(at::Tensor src, return_value_policy /* policy */, handle /* parent */) {
+  cast(const at::Tensor& src, return_value_policy /* policy */, handle /* parent */) {
     if (!src.is_variable()) {
       throw std::runtime_error(
           "Expected tensor's dynamic type to be Variable, not Tensor");
@@ -55,7 +56,7 @@ public:
     }
   }
   static handle cast(torch::autograd::Variable src, return_value_policy /* policy */, handle /* parent */) {
-    return handle(THPVariable_Wrap(src));
+    return handle(THPVariable_Wrap(std::move(src)));
   }
 };
 

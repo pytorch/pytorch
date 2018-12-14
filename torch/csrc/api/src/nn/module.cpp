@@ -74,7 +74,7 @@ const std::string& Module::name() const noexcept {
   return *name_;
 }
 
-std::shared_ptr<Module> Module::clone(optional<Device> device) const {
+std::shared_ptr<Module> Module::clone(const optional<Device>& device) const {
   AT_ERROR(
       "clone() has not been implemented for ",
       name(),
@@ -83,7 +83,7 @@ std::shared_ptr<Module> Module::clone(optional<Device> device) const {
       "> instead of torch::nn::Module to inherit the ability to clone.");
 }
 
-void Module::apply(ModuleApplyFunction function) {
+void Module::apply(const ModuleApplyFunction& function) {
   function(*this);
   apply_to_submodules(
       [&function](const std::string&, const std::shared_ptr<Module>& module) {
@@ -91,7 +91,7 @@ void Module::apply(ModuleApplyFunction function) {
       });
 }
 
-void Module::apply(ConstModuleApplyFunction function) const {
+void Module::apply(const ConstModuleApplyFunction& function) const {
   function(*this);
   apply_to_submodules(
       [&function](const std::string&, const std::shared_ptr<Module>& module) {
@@ -99,7 +99,9 @@ void Module::apply(ConstModuleApplyFunction function) const {
       });
 }
 
-void Module::apply(NamedModuleApplyFunction function, std::string name_prefix) {
+void Module::apply(
+    const NamedModuleApplyFunction& function,
+    std::string name_prefix) {
   function(/*name=*/name_prefix, *this);
   apply_to_submodules(
       [&function](
@@ -110,7 +112,7 @@ void Module::apply(NamedModuleApplyFunction function, std::string name_prefix) {
 }
 
 void Module::apply(
-    ConstNamedModuleApplyFunction function,
+    const ConstNamedModuleApplyFunction& function,
     std::string name_prefix) const {
   function(/*name=*/name_prefix, *this);
   apply_to_submodules(
@@ -121,7 +123,7 @@ void Module::apply(
       std::move(name_prefix));
 }
 
-void Module::apply(ModulePointerApplyFunction function) const {
+void Module::apply(const ModulePointerApplyFunction& function) const {
   function(shared_from_this_checked());
   apply_to_submodules(
       [&function](const std::string&, const std::shared_ptr<Module>& module) {
@@ -130,7 +132,7 @@ void Module::apply(ModulePointerApplyFunction function) const {
 }
 
 void Module::apply(
-    NamedModulePointerApplyFunction function,
+    const NamedModulePointerApplyFunction& function,
     std::string name_prefix) const {
   function(
       /*name=*/name_prefix, shared_from_this_checked());
@@ -319,13 +321,13 @@ Tensor& Module::register_buffer(std::string name, Tensor tensor) {
   return buffers_.insert(std::move(name), std::move(tensor));
 }
 
-void Module::clone_(Module& other, optional<Device> device) {}
+void Module::clone_(Module& other, const optional<Device>& device) {}
 
 void Module::apply_to_submodules(
     const NamedModulePointerApplyFunction& function,
-    std::string name_name_prefix) const {
+    const std::string& name_prefix) const {
   for (const auto& child : children_) {
-    auto qualified_name = join_name(name_name_prefix, child.key());
+    auto qualified_name = join_name(name_prefix, child.key());
     function(qualified_name, child.value());
     child.value()->apply_to_submodules(function, std::move(qualified_name));
   }

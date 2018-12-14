@@ -53,7 +53,7 @@ class AliasDb {
   void dump() const;
 
  private:
-  void analyze(std::shared_ptr<Graph> graph);
+  void analyze(const std::shared_ptr<Graph>& graph);
   void analyze(Block* block);
   void analyze(Node* node);
 

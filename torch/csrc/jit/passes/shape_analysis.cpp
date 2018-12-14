@@ -44,7 +44,7 @@ bool isValidReturnForRunning(Value* v) {
 class ShapePropagator {
  public:
   explicit ShapePropagator(std::shared_ptr<Graph> graph)
-      : aliasDb_(AliasAnalysis(graph)) {}
+      : aliasDb_(AliasAnalysis(std::move(graph))) {}
 
   void PropagateShapeOnBlock(Block* block, bool insert_expands = true) {
     for (Node* node : block->nodes()) {
@@ -1583,7 +1583,7 @@ class ShapePropagator {
 };
 } // anonymous namespace
 
-void PropagateInputShapes(std::shared_ptr<Graph> graph) {
+void PropagateInputShapes(const std::shared_ptr<Graph>& graph) {
   ShapePropagator(graph).PropagateShapeOnBlock(graph->block());
 }
 
@@ -1608,7 +1608,7 @@ void EraseShapeInformation(Block * b) {
 
 } // anonymous namespace
 
-void EraseShapeInformation(std::shared_ptr<Graph> graph) {
+void EraseShapeInformation(const std::shared_ptr<Graph>& graph) {
   EraseShapeInformation(graph->block());
 }
 
