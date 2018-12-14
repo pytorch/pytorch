@@ -54,19 +54,6 @@ void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
   }
 }
 
-template <typename dtype> // int64_t, bool, double
-Operation listConstruct(int64_t num_inputs) {
-  return [=](Stack& stack) {
-    auto inputs = peekSlice(stack, 0, num_inputs, num_inputs);
-    std::vector<dtype> vals = fmap(inputs, [](const IValue& v) {
-      return v.to<dtype>();
-    });
-    drop(stack, num_inputs);
-    push(stack, std::move(vals));
-    return 0;
-  };
-}
-
 RegisterOperators reg({
     Operator(
         prim::FusionGroup,
@@ -579,11 +566,25 @@ RegisterOperators reg({
           const auto num_inputs = node->inputs().size();
           ListTypePtr lt = node->output()->type()->expect<ListType>();
           if(IntType::get() == lt->getElementType()) {
-            return listConstruct<int64_t>(num_inputs);
+            return [=](Stack& stack) {
+              auto inputs = peekSlice(stack, 0, num_inputs, num_inputs);
+              std::vector<int64_t> vals = fmap(inputs, [](const IValue& v) {
+                return v.toInt();
+              });
+              drop(stack, num_inputs);
+              push(stack, std::move(vals));
+              return 0;
+            };
           } else if(FloatType::get() == lt->getElementType()) {
-            return listConstruct<double>(num_inputs);
-          } else if (lt->getElementType() == BoolType::get()) {
-            return listConstruct<bool>(num_inputs);
+            return [=](Stack& stack) {
+              auto inputs = peekSlice(stack, 0, num_inputs, num_inputs);
+              std::vector<double> vals = fmap(inputs, [](const IValue& v) {
+                return v.toDouble();
+              });
+              drop(stack, num_inputs);
+              push(stack, std::move(vals));
+              return 0;
+            };
           } else if (lt->getElementType()->isSubtypeOf(DynamicType::get())) {
             return [=](Stack& stack) {
               const size_t stack_size = stack.size();
@@ -747,16 +748,6 @@ typename TList::element_type::ElemType& getItem(TList& list, int64_t idx) {
   return list->elements()[normalized_idx];
 }
 
-// cannot return a reference to an element in a bool vector
-bool getBoolItem(const std::vector<bool>& list, int64_t idx) {
-  const int64_t list_size = list.size();
-  const int64_t normalized_idx = normalizeIndex(idx, list_size);
-  if (normalized_idx < 0 || normalized_idx >= list_size) {
-    throw std::out_of_range("list index out of range");
-  }
-  return list[normalized_idx];
-}
-
 template <typename TList, typename TElement>
 Operation listAppend(const Node* node) {
   return [](Stack& stack) {
@@ -784,21 +775,6 @@ Operation listSelect(const Node* node) {
   };
 }
 
-// needs specialization because cannot return a pointer to a bool in an array
-template<>
-Operation listSelect<Shared<BoolList>>(const Node* node) {
-  return [=](Stack& stack) {
-    Shared<BoolList> list;
-    int64_t idx;
-    pop(stack, list, idx);
-
-    auto element = getBoolItem(list->elements(), idx);
-    push(stack, std::move(element));
-    return 0;
-  };
-}
-
-
 template <typename T>
 Operation listLen(const Node* node) {
   return [=](Stack& stack) {
@@ -809,7 +785,6 @@ Operation listLen(const Node* node) {
     return 0;
   };
 }
-
 
 template <typename T>
 Operation listEq(const Node* node) {
@@ -950,29 +925,6 @@ Operation listSetItem(const Node* node) {
   };
 }
 
-
-template<>
-Operation listSetItem<Shared<BoolList>, bool>(const Node* node) {
-  return [](Stack& stack) {
-    Shared<BoolList> list;
-    int64_t idx;
-    bool value;
-
-    pop(stack, list, idx, value);
-
-    int64_t list_size = list->elements().size();
-    auto normalized_idx = normalizeIndex(idx, list_size);
-    if (normalized_idx < 0 || normalized_idx >= list_size) {
-      throw std::out_of_range("list index out of range");
-    }
-    list->elements()[normalized_idx] = value;
-
-    push(stack, list);
-    return 0;
-  };
-}
-
-
 RegisterOperators reg2({
 
 #define DEFINE_STRING_OP(op_name, string_op, result)                           \
@@ -1021,8 +973,6 @@ Operator(                                                                      \
     CREATE_IMMUTABLE_LIST_OPS("int", IntList)
     CREATE_IMMUTABLE_LIST_OPS("float", DoubleList)
     CREATE_IMMUTABLE_LIST_OPS("t", GenericList)
-    CREATE_IMMUTABLE_LIST_OPS("t", BoolList)
-
 
 #define CREATE_LIST_OPS(decl_type, c_type) \
     Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>), \
@@ -1035,7 +985,6 @@ Operator(                                                                      \
     CREATE_LIST_OPS("int", IntList)
     CREATE_LIST_OPS("float", DoubleList)
     CREATE_LIST_OPS("Tensor", TensorList)
-    CREATE_LIST_OPS("bool", BoolList)
     CREATE_LIST_OPS("t", GenericList)
 #undef CREATE_LIST_OPS
 
@@ -1043,11 +992,10 @@ Operator(                                                                      \
     Operator("aten::eq(int[] a, int[] b) -> bool", listEq<Shared<IntList>>),
     Operator("aten::eq(float[] a, float[] b) -> bool", listEq<Shared<DoubleList>>),
     Operator("aten::eq(Tensor[] a, Tensor[] b) -> bool", listEq<Shared<TensorList>>),
-    Operator("aten::eq(bool[] a, bool[] b) -> bool", listEq<Shared<BoolList>>),
     Operator("aten::ne(int[] a, int[] b) -> bool", listNe<Shared<IntList>>),
     Operator("aten::ne(float[] a, float[] b) -> bool", listNe<Shared<DoubleList>>),
     Operator("aten::ne(Tensor[] a, Tensor[] b) -> bool", listNe<Shared<TensorList>>),
-    Operator("aten::ne(bool[] a, bool[] b) -> bool", listNe<Shared<BoolList>>),
+
 
 #define CREATE_COPY_OP(other_type, c_type)                              \
   Operator(                                                             \
