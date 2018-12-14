@@ -2797,14 +2797,13 @@ c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(const Expr& expr)
   JIT_ASSERT(elem_ptr != ident_to_type_lut().end());
   TypePtr list_ptr = ListType::create(elem_ptr->second);
 
-  Parser const_parser(len);
-  auto constant = const_parser.parseConst();
-  if (!constant.isIntegral() || constant.asIntegral() <= 0) {
+  const char* len_c = len.c_str();
+  char* end;
+  size_t len_v = strtoull(len_c, &end, 10);
+  if (end != len_c + len.size()) {
     throw ErrorReport(subscript.subscript_exprs().range())
-        << "subscript of Broadcastable list must be positive integer";
+        << "subscript of Broadcastable list must be a positive integer";
   }
-
-  auto len_v = constant.asIntegral();
   return std::pair<TypePtr, int32_t>(list_ptr, len_v);
 }
 
