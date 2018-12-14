@@ -1791,19 +1791,19 @@ new_module_tests = [
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, 4, 'bicubic', False),
+        constructor_args=(None, 4., 'bicubic', False),
         input_size=(1, 2, 4, 4),
         desc='bicubic_scale_2d',
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, (2, 2), 'bicubic', False),
+        constructor_args=(None, (2., 2.), 'bicubic', False),
         input_size=(1, 2, 4, 4),
         desc='bicubic_scale_tuple_shared_2d',
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, (2, 1), 'bicubic', False),
+        constructor_args=(None, (2., 1.), 'bicubic', False),
         input_size=(1, 2, 4, 4),
         desc='bicubic_scale_tuple_skewed_2d',
     ),
@@ -1815,7 +1815,7 @@ new_module_tests = [
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, (2, 1), 'bicubic', True),
+        constructor_args=(None, (2., 1.), 'bicubic', True),
         input_size=(1, 2, 4, 4),
         desc='bicubic_scale_tuple_skewed_2d_align_corners',
     ),
