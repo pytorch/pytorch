@@ -643,6 +643,10 @@ if (BUILD_PYTHON)
   file(GLOB_RECURSE PYTHON_SRCS RELATIVE ${PROJECT_SOURCE_DIR}
        "${PROJECT_SOURCE_DIR}/caffe2/*.py")
 
+  # generated pb files are copied from build/caffe2 to caffe2
+  # if we copied them back to build this would create a build cycle
+  # consider removing the need for globs
+  list(FILTER PYTHON_SRCS EXCLUDE REGEX "proto/.*_pb")
   set(build_files)
   foreach(python_src ${PYTHON_SRCS})
     add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/${python_src}
