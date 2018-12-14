@@ -49,7 +49,7 @@ at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
 }
 
 
-int64_t list_size(IValue list) {
+int64_t list_size(const IValue& list) {
   if (list.isGenericList()) {
     return list.toGenericListRef().size();
   } else if (list.isIntList()) {
@@ -62,7 +62,7 @@ int64_t list_size(IValue list) {
   AT_ASSERTM(0, "Unexpected list type", list);
 }
 
-std::vector<int64_t> compute_sizes(IValue seq) {
+std::vector<int64_t> compute_sizes(const IValue& seq) {
   std::vector<int64_t> sizes;
   // because bool, int, and float lists are specialized, inner array will
   // will not be generic list
@@ -85,7 +85,7 @@ void checkSequenceSize(int64_t n, int64_t dim, int64_t seq_size) {
 
 template <typename DTYPE>
 void storeLastDimension(char* data, const std::vector<int64_t>& sizes, const c10::ArrayRef<int64_t>& strides, int64_t dim,
-    int elementSize, std::vector<DTYPE> obj) {
+    int elementSize, const std::vector<DTYPE>& obj) {
   auto n = sizes[dim];
   auto seq_size = obj.size();
   checkSequenceSize(n, dim, seq_size);
@@ -98,7 +98,7 @@ void storeLastDimension(char* data, const std::vector<int64_t>& sizes, const c10
 // bool vector needs to be cast to uint8_t
 template<>
 void storeLastDimension<bool>(char* data, const std::vector<int64_t>& sizes, const c10::ArrayRef<int64_t>& strides, int64_t dim,
-    int elementSize, std::vector<bool> obj) {
+    int elementSize, const std::vector<bool>& obj) {
   auto n = sizes[dim];
   auto seq_size = obj.size();
   checkSequenceSize(n, dim, seq_size);
@@ -111,7 +111,7 @@ void storeLastDimension<bool>(char* data, const std::vector<int64_t>& sizes, con
 // refernce python implementation recursive_store in tensor_new.cpp
 
 void recursiveStore(char* data, const std::vector<int64_t>& sizes, const c10::ArrayRef<int64_t>& strides, int64_t dim,
-   int elementSize, IValue obj) {
+   int elementSize, const IValue& obj) {
 
   auto ndim = sizes.size();
   auto n = sizes[dim];
