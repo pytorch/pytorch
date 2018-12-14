@@ -106,8 +106,8 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
   INPUT_TAGS(INPUT, FILTER, BIAS);
   OUTPUT_TAGS(OUTPUT);
 
-  int conv_algorithm_;
   bool training_mode_;
+  int conv_algorithm_;
   ideep::tensor filter_;
   ideep::tensor::descriptor cached_weights_descriptor_;
 };

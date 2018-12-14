@@ -137,7 +137,6 @@ class IDEEPConvFusionOp final : public IDEEPConvPoolOpBase {
 
  private:
   FusionType fusion_type_;
-
   bool training_mode_;
   int conv_algorithm_;
   ideep::tensor filter_;
