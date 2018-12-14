@@ -58,7 +58,6 @@ class BatchGatherGradientOp final : public Operator<Context> {
     auto& data = Input(DATA);
     auto& indices = Input(INDICES);
     auto& grad = Input(GRAD);
-    auto* output = Output(0);
 
     // ONNX allows negative axis to index from the back, valid range: [-r, r].
     int axis = axis_;
@@ -76,7 +75,7 @@ class BatchGatherGradientOp final : public Operator<Context> {
           "batch gather outer dimensions should match");
     }
 
-    output->ResizeLike(data);
+    auto* output = Output(0, data.sizes(), at::dtype<TData>());
     TData* out_data = output->template mutable_data<TData>();
     if (data.numel() <= 0) {
       return true;
