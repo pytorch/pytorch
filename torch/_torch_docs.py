@@ -6246,10 +6246,15 @@ add_docstr(torch.one_hot,
            r"""
 one_hot(tensor, num_classes=0) -> LongTensor
 
-Takes integer with :math:`n` dims and converts it to 1-hot representation
-with :math:`n+1` dims. The last dimension will have zeros everywhere but
-at the index of last dimension indicated by the input, where it will be
-equal to 1.
+Takes LongTensor with index values of shape ``(*)`` and returns a tensor
+of shape ``(*, num_classes)`` that have zeros everywhere except where the
+index of last dimension matches the corresponding value of the input tensor,
+in which case it will be 1.
+
+See also `One-hot on Wikipedia`_ .
+
+.. _One-hot on Wikipedia:
+    https://en.wikipedia.org/wiki/One-hot
 
 Arguments:
     tensor (LongTensor): class values of any shape.
