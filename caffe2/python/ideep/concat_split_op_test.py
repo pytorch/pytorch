@@ -113,6 +113,49 @@ class TestConcatSplitOps(hu.HypothesisTestCase):
             self.assertGradientChecks(gc, op, splits, i, [0])
 
 
+    @given(tensor_splits=_tensor_splits(add_axis=True), **mu.gcs)
+    def test_concat_with_TensorCPU(self, tensor_splits, gc, dc):
+        axis, _, splits = tensor_splits
+        op0 = core.CreateOperator(
+            "Concat",
+            ['X_{}'.format(i) for i in range(len(splits))],
+            ['concat_result0', 'split_info0'],
+            axis=axis,
+            add_axis=1,
+            device_option=dc[0]
+        )
+        op1 = core.CreateOperator(
+            "Concat",
+            ['X_{}'.format(i) for i in range(len(splits))],
+            ['concat_result1', 'split_info1'],
+            axis=axis,
+            add_axis=1,
+            device_option=dc[1]
+        )
+
+        for i, X in enumerate(splits):
+            workspace.FeedBlob('X_{}'.format(i), X, dc[0])
+
+        workspace.RunOperatorOnce(op0)
+        res0 = workspace.FetchBlob('concat_result0')
+        inf0 = workspace.FetchBlob('split_info0')
+
+        workspace.RunOperatorOnce(op1)
+        res1 = workspace.FetchBlob('concat_result1')
+        inf1 = workspace.FetchBlob('split_info1')
+
+        if not np.allclose(res0, res1, atol=0.0, rtol=0.0):
+            print(res1.flatten())
+            print(res0.flatten())
+            print(np.max(np.abs(res1 - res0)))
+            self.assertTrue(False)
+
+        if not np.allclose(inf0, inf1, atol=0.0, rtol=0.0):
+            print(inf1.flatten())
+            print(inf0.flatten())
+            print(np.max(np.abs(inf1 - inf0)))
+            self.assertTrue(False)
+
 
 if __name__ == "__main__":
     unittest.main()
