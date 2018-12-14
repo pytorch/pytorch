@@ -9,7 +9,6 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/utils/functional.h>
 #include "torch/csrc/jit/script/compiler.h"
-#include "torch/csrc/jit/script/module.h"
 
 #include <torch/csrc/jit/assertions.h>
 
@@ -541,17 +540,15 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
   // The input of compiled backward graph is [ctx, grad_values]
   // We run LowerSimpleTuples afterwards to elmininate all tuples generated in this process.
   // The original node will be cleaned up later in EliminateDeadCode
-  const auto build_script_grad = [node](const ArrayRef<Value*>& grads, const std::string& source) -> std::vector<Value*> {
-    // Compile the python code to a script module
-    auto cu = std::make_shared<script::Module>();
-    script::defineMethodsInModule(cu, source, script::nativeResolver, nullptr);
+  const auto build_script_grad = [node](const std::vector<std::shared_ptr<Graph>>& compiled_graphs,
+          const ArrayRef<Value*>& grads) -> std::vector<Value*> {
     auto graph = node->owningGraph();
 
     // Use forward graph to replace node in grad_desc.f
     value_list new_outputs;
     {
       WithInsertPoint guard(node->next());
-      auto fw_graph = cu->find_method("forward")->graph();
+      auto fw_graph = compiled_graphs[0]->copy();
       new_outputs = script::inlineCallTo(*graph, *fw_graph, node->inputs());
       for (size_t i = 0; i < node->outputs().size(); ++i) {
         new_outputs.at(i)->setType(node->outputs()[i]->type());
@@ -560,12 +557,12 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     }
 
     // Use backward graph to construct reverse_block
-    auto bwgraph = cu->find_method("backward")->graph();
+    auto bw_graph = compiled_graphs[1]->copy();
     auto grad_vec = grads.vec();
     auto it = grad_vec.begin();
     grad_vec.insert(it, new_outputs.back());
     ArrayRef<Value*> grad(grad_vec);
-    auto grad_inputs = script::inlineCallTo(*graph, *bwgraph, grad);
+    auto grad_inputs = script::inlineCallTo(*graph, *bw_graph, grad);
     return grad_inputs;
   };
 
@@ -573,11 +570,12 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     throw std::runtime_error(std::string("differentiation of ") + node->kind().toDisplayString() + " "
                              "is not supported, or it is missing necessary type information");
   }
-  // If defined using Torchscript, use it instead of symbolic
+  // If defined using torchscript, use it instead of symbolic
   // symbolic_script is a map<schema, python_code_str> defined in symbolic_script.h
   for (auto& it : symbolic_scripts) {
     if (node->matches(it.first)) {
-      return build_script_grad(grad_values, it.second);
+      auto compiled_script_graphs = get_cached_symbolic_graphs(it.first);
+      return build_script_grad(compiled_script_graphs, grad_values);
     }
   }
   // Definition not found in torchscript, look up in the build_sym_grad
