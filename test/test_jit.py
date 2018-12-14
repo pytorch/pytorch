@@ -7165,19 +7165,19 @@ a")
         # for each of these checks, check that *BOTH* the underlying
         # _C.ScriptModule object has the expected method/param, as well as the
         # Python object that wraps it.
-        assert(traced.ssm._has_method('foo'))
-        assert(hasattr(traced.ssm, 'foo'))
+        self.assertTrue(traced.ssm._has_method('foo'))
+        self.assertTrue(hasattr(traced.ssm, 'foo'))
 
         imported = self.getExportImportCopy(traced)
 
-        assert(imported.ssm._has_method('foo'))
-        assert(hasattr(imported.ssm, 'foo'))
+        self.assertTrue(imported.ssm._has_method('foo'))
+        self.assertTrue(hasattr(imported.ssm, 'foo'))
 
-        assert(imported.ssm.asm._has_method('bar'))
-        assert(hasattr(imported.ssm.asm, 'bar'))
+        self.assertTrue(imported.ssm.asm._has_method('bar'))
+        self.assertTrue(hasattr(imported.ssm.asm, 'bar'))
 
-        assert(imported.ssm.asm._has_parameter('param'))
-        assert(hasattr(imported.ssm.asm, 'param'))
+        self.assertTrue(imported.ssm.asm._has_parameter('param'))
+        self.assertTrue(hasattr(imported.ssm.asm, 'param'))
 
     def test_call_traced_module_from_traced_module(self):
         class TracedModule1(torch.nn.Module):

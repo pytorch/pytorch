@@ -460,16 +460,16 @@ struct Module {
 
   void save(const std::string& filename);
 
-  std::shared_ptr<Module> copy(std::shared_ptr<Module> retval, std::function<std::shared_ptr<Module>(std::vector<std::string>)> module_lookup, std::vector<std::string> names = {}) const {
+  void copy_into(std::function<std::shared_ptr<Module>(std::vector<std::string>)> module_lookup, std::vector<std::string> names = {}) const {
     std::unordered_map<at::Tensor*, at::Tensor*> parameter_remap;
+    auto curr = module_lookup(names);
     for (auto &kv : parameters) {
-      retval->register_parameter(kv.key(), *kv.value().slot(), kv.value().is_buffer);
-      parameter_remap[kv.value().slot()] = retval->parameter_slot(kv.key());
+      curr->register_parameter(kv.key(), *kv.value().slot(), kv.value().is_buffer);
+      parameter_remap[kv.value().slot()] = curr->parameter_slot(kv.key());
     }
     for (auto &kv : modules) {
       names.push_back(kv.key());
-      auto new_mod = module_lookup(names);
-      kv.value().module->copy(new_mod, module_lookup, names);
+      kv.value().module->copy_into(module_lookup, names);
       names.pop_back();
     }
     for (auto &kv : methods) {
@@ -477,9 +477,8 @@ struct Module {
       for (auto &p : kv.value()->params()) {
         params.push_back(parameter_remap[p]);
       }
-      retval->create_method(kv.key(), kv.value()->graph()->copy(), params);
+      curr->create_method(kv.key(), kv.value()->graph()->copy(), params);
     }
-    return retval;
   }
 
  private:

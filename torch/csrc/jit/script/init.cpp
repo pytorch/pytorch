@@ -687,7 +687,7 @@ void initJitScriptBindings(PyObject* module) {
         return ss.str();
       })
       .def("apply", &Module::apply)
-      .def("_copy", &Module::copy);
+      .def("_copy_into", &Module::copy_into);
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
     .def("graph", [&](Method& self) {
