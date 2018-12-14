@@ -253,7 +253,7 @@ struct SchemaParser {
           n = "-" + L.expect(TK_NUMBER).text();
         else
           n = L.expect(TK_NUMBER).text();
-        if(kind == TypeKind::FloatType || n.find(".") != std::string::npos || n.find("e") != std::string::npos) {
+        if(kind == TypeKind::FloatType || n.find('.') != std::string::npos || n.find('e') != std::string::npos) {
           return std::stod(n);
         } else {
           int64_t v = std::stoll(n);
@@ -405,7 +405,7 @@ private:
 
   // XXX - caller must be holding lock
   void registerPendingOperators() {
-    for(auto op : to_register) {
+    for(const auto& op : to_register) {
       Symbol sym = Symbol::fromQualString(op->schema().name());
       operators[sym].push_back(op);
       operators_by_sig[canonicalSchemaString(op->schema())] = op;
