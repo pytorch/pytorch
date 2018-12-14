@@ -144,9 +144,9 @@ Tensor pow_backward_exponent(Tensor grad, const Scalar & base, const Tensor & ex
 }
 
 Tensor mvlgamma_backward(Tensor grad, const Tensor & self, int64_t p) {
-  Tensor args = at::arange(-p + 1, 1, -1, self.options()).div_(2.);
+  Tensor args = at::arange(-p / 2. + 0.5, 0.5, 0.5, self.options());
   args = args.add(self.unsqueeze(-1));
-  return grad * args.digamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.);
+  return grad * args.digamma_().sum(-1);
 }
 
 Tensor permute_backwards(const Tensor & grad, IntList fwd_dims) {
