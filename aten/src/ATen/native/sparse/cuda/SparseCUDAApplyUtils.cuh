@@ -327,7 +327,7 @@ __global__ void coalesce_sum_kernel(
 }
 
 template <typename scalar_t, typename func_t>
-__device__ void coalesce_values_max_min_kernel(
+__device__ void coalesce_values_maxmin_kernel(
   int64_t* segment_offsets,
   int64_t* value_indices,
   int64_t* reduction_indices,
@@ -408,7 +408,7 @@ __global__ void coalesce_max_kernel(
   int64_t* segment_offsets, int64_t* value_indices, int64_t* reduction_indices, scalar_t* values,
   scalar_t* newValues, int64_t nnz, int64_t newNnz, int64_t stride
 ) {
-  coalesce_values_max_min_kernel(
+  coalesce_values_maxmin_kernel(
     segment_offsets, value_indices, reduction_indices,
     values, newValues, nnz, newNnz, stride,
     coalesce_max_op<scalar_t>
@@ -420,7 +420,7 @@ __global__ void coalesce_min_kernel(
   int64_t* segment_offsets, int64_t* value_indices, int64_t* reduction_indices, scalar_t* values,
   scalar_t* newValues, int64_t nnz, int64_t newNnz, int64_t stride
 ) {
-  coalesce_values_max_min_kernel(
+  coalesce_values_maxmin_kernel(
     segment_offsets, value_indices, reduction_indices,
     values, newValues, nnz, newNnz, stride,
     coalesce_min_op<scalar_t>

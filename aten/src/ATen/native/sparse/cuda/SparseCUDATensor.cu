@@ -85,8 +85,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, int64_t> sparse_coalesce_comm
   if (sparse_dim == 1) {
     newIndices = indices1D;
   } else {
-    // NB: maybe rewrite this to copy from original indices according
-    // to unique keys
     newIndices = at::empty({sparse_dim, new_nnz}, origIndices.options());
     if (TH_INDEX_BASE != 0) {
       indices1D.add_(-1);
@@ -168,13 +166,14 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
 }
 
 // --------------------------------------------------------------------
-// coalesce max
+// coalesce max / min
 // --------------------------------------------------------------------
-std::tuple<SparseTensor, Tensor> coalesce_max_cuda(const SparseTensor& self) {
+std::tuple<SparseTensor, Tensor> coalesce_maxmin_common_cuda(const SparseTensor& self, CoalesceReductionType reduction_type) {
   int64_t nnz = self._nnz();
   LongTensor indices = self._indices();
   Tensor values = self._values().contiguous();
-  auto reduction_indices = at::zeros({nnz, values.stride(0)}, indices.options());
+  // see NOTE [Reduction Indices at Coalesce]
+  LongTensor reduction_indices = at::arange(0, nnz, indices.options()).reshape({nnz, 1}).repeat({1, values.stride(0)});
 
   if (self.is_coalesced()) {
     return std::tuple<SparseTensor, Tensor>(self, reduction_indices);
@@ -208,17 +207,34 @@ std::tuple<SparseTensor, Tensor> coalesce_max_cuda(const SparseTensor& self) {
 
     dim3 grid(THCCeilDiv(new_nnz, (int64_t) 4), THCCeilDiv(stride, (int64_t) 128));
     dim3 block(32, 4);
-    AT_DISPATCH_ALL_TYPES_AND_HALF(values.type(), "coalesce_max_cuda", [&] {
-      apply::coalesce_max_kernel<scalar_t><<<grid, block, 0, stream>>>(
-        uniqueOffsets.data<int64_t>(),
-        origIndices.data<int64_t>(),
-        reduction_indices.data<int64_t>(),
-        values.data<scalar_t>(),
-        newValues.data<scalar_t>(),
-        nnz,
-        new_nnz,
-        stride
-      );
+    AT_DISPATCH_ALL_TYPES_AND_HALF(values.type(), "coalesce_maxmin_common_cuda", [&] {
+      if (reduction_type == CoalesceReductionType::MAX) {
+        apply::coalesce_max_kernel<scalar_t><<<grid, block, 0, stream>>>(
+          uniqueOffsets.data<int64_t>(),
+          origIndices.data<int64_t>(),
+          reduction_indices.data<int64_t>(),
+          values.data<scalar_t>(),
+          newValues.data<scalar_t>(),
+          nnz,
+          new_nnz,
+          stride
+        );
+      }
+      else if (reduction_type == CoalesceReductionType::MIN) {
+        apply::coalesce_min_kernel<scalar_t><<<grid, block, 0, stream>>>(
+          uniqueOffsets.data<int64_t>(),
+          origIndices.data<int64_t>(),
+          reduction_indices.data<int64_t>(),
+          values.data<scalar_t>(),
+          newValues.data<scalar_t>(),
+          nnz,
+          new_nnz,
+          stride
+        );
+      }
+      else {
+        AT_ERROR("coalesce_maxmin_common_cuda: Expected CoalesceReductionType MAX and MIN, but other type is found.");
+      }
     });
   }
 
@@ -231,68 +247,12 @@ std::tuple<SparseTensor, Tensor> coalesce_max_cuda(const SparseTensor& self) {
   return std::tuple<SparseTensor, Tensor>(out, reduction_indices);
 }
 
-// --------------------------------------------------------------------
-// coalesce min
-// --------------------------------------------------------------------
+std::tuple<SparseTensor, Tensor> coalesce_max_cuda(const SparseTensor& self) {
+  return coalesce_maxmin_common_cuda(self, CoalesceReductionType::MAX);
+}
+
 std::tuple<SparseTensor, Tensor> coalesce_min_cuda(const SparseTensor& self) {
-  int64_t nnz = self._nnz();
-  LongTensor indices = self._indices();
-  Tensor values = self._values().contiguous();
-  auto reduction_indices = at::zeros({nnz, values.stride(0)}, indices.options());
-
-  if (self.is_coalesced()) {
-    return std::tuple<SparseTensor, Tensor>(self, reduction_indices);;
-  }
-
-  // NOTE: Since `coalesce` is not an in-place operation when `is_coalesced` is false,
-  // we should keep the original tensor intact and do coalesce on a copy of the tensor
-  if (nnz < 2) {
-    SparseTensor out = self.clone();
-    out._coalesced_(true);
-    return std::tuple<SparseTensor, Tensor>(out, reduction_indices);;
-  }
-
-  int64_t sparse_dim = self.sparse_dim();
-  int64_t dense_dim = self.dense_dim();
-  IntList sizes = self.sizes();
-
-  Tensor uniqueOffsets, origIndices, newValues, new_indices, indices1D;
-  int64_t new_nnz = 0;
-
-  std::tie(uniqueOffsets, origIndices, newValues, new_indices, indices1D, new_nnz) = sparse_coalesce_common_cuda(self);
-
-  int64_t stride = at::prod_intlist(values.sizes().slice(1));
-  reduction_indices = at::zeros({new_nnz, values.stride(0)}, new_indices.options());
-
-  // If there is no values to copy, save running the kernel.
-  if (newValues.numel() > 0) {
-    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-    auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
-    auto policy = thrust::cuda::par(allocator).on(stream);
-
-    dim3 grid(THCCeilDiv(new_nnz, (int64_t) 4), THCCeilDiv(stride, (int64_t) 128));
-    dim3 block(32, 4);
-    AT_DISPATCH_ALL_TYPES_AND_HALF(values.type(), "coalesce_min_cuda", [&] {
-      apply::coalesce_min_kernel<scalar_t><<<grid, block, 0, stream>>>(
-        uniqueOffsets.data<int64_t>(),
-        origIndices.data<int64_t>(),
-        reduction_indices.data<int64_t>(),
-        values.data<scalar_t>(),
-        newValues.data<scalar_t>(),
-        nnz,
-        new_nnz,
-        stride
-      );
-    });
-  }
-
-  SparseTensor out = at::_sparse_coo_tensor_with_dims_and_tensors(
-    sparse_dim, dense_dim, sizes,
-    new_indices, newValues, self.options()
-  )._coalesced_(true);
-
-  THCudaCheck(cudaGetLastError());
-  return std::tuple<SparseTensor, Tensor>(out, reduction_indices);
+  return coalesce_maxmin_common_cuda(self, CoalesceReductionType::MIN);
 }
 
 }} // namespace at::native

@@ -334,51 +334,8 @@ SparseTensor& copy_sparse_(SparseTensor& self, const SparseTensor& src, bool non
 }
 
 // --------------------------------------------------------------------
-// coalesce sum / max / min
+// coalesce sum
 // --------------------------------------------------------------------
-template <typename scalar_t>
-void coalesce_max_op_cpu(int64_t n, scalar_t* a, scalar_t* b,
-  TensorAccessor<int64_t, 2>& reduction_indices_accessor,
-  int64_t new_nnz_i, int64_t nnz_i
-) {
-  int64_t i;
-  #pragma omp parallel for
-  for (i = 0; i < n; i++) {
-    if (a[i] > b[i]) {
-      b[i] = a[i];
-      reduction_indices_accessor[new_nnz_i][i] = nnz_i;
-    }
-  }
-}
-
-template <typename scalar_t>
-void coalesce_min_op_cpu(int64_t n, scalar_t* a, scalar_t* b,
-  TensorAccessor<int64_t, 2>& reduction_indices_accessor,
-  int64_t new_nnz_i, int64_t nnz_i
-) {
-  int64_t i;
-  #pragma omp parallel for
-  for (i = 0; i < n; i++) {
-    if (a[i] < b[i]) {
-      b[i] = a[i];
-      reduction_indices_accessor[new_nnz_i][i] = nnz_i;
-    }
-  }
-}
-
-template <typename scalar_t>
-void coalesce_max_min_copy_op_cpu(int64_t n, scalar_t* a, scalar_t* b,
-  TensorAccessor<int64_t, 2>& reduction_indices_accessor,
-  int64_t new_nnz_i, int64_t nnz_i
-) {
-  int64_t i;
-  #pragma omp parallel for
-  for (i = 0; i < n; i++) {
-    b[i] = a[i];
-    reduction_indices_accessor[new_nnz_i][i] = nnz_i;
-  }
-}
-
 template <typename scalar_t>
 void coalesce_sum_op_cpu(int64_t n, scalar_t* a, scalar_t* b) {
   int64_t i;
@@ -442,71 +399,14 @@ void coalesce_sum_kernel_cpu(
   new_nnz_ptr[0] += 1;
 }
 
-template <typename scalar_t, typename func_t>
-void coalesce_max_min_kernel_cpu(
-  Tensor& values,
-  Tensor& indices,
-  Tensor& indicesPermutation,
-  Tensor& indicesBuffer,
-  Tensor& newValues,
-  Tensor& newIndices,
-  Tensor& reduction_indices,
-  Tensor& new_nnz,
-  int64_t sparse_dim,
-  int64_t nnz,
-  const func_t& reduce_op
-) {
-  int64_t prev = -1;
-  int64_t blockSize = values.stride(0);
-  int64_t* new_nnz_ptr = new_nnz.data<int64_t>();
-  new_nnz_ptr[0] = -1;
-  scalar_t* values_ptr = values.data<scalar_t>();
-  scalar_t* newValues_ptr = newValues.data<scalar_t>();
-  auto newIndicesAccessor = newIndices.accessor<int64_t, 2>();
-  auto reduction_indices_accessor = reduction_indices.accessor<int64_t, 2>();
-  auto indicesAccessor = indices.accessor<int64_t, 2>();
-  auto indicesPermutationAccessor = indicesPermutation.accessor<int64_t, 1>();
-  auto indicesBufferAccessor = indicesBuffer.accessor<int64_t, 1>();
-
-  for (int64_t j = 0; j < nnz; j++) {
-    int64_t pos = indicesPermutationAccessor[j];
-    int64_t curr = indicesBufferAccessor[j];
-    if (curr == prev) {
-      if (values.numel() > 0) {  // if values is an empty tensor, there are no elements to copy
-        reduce_op(
-          blockSize,
-          values_ptr + pos * blockSize,
-          newValues_ptr + new_nnz_ptr[0] * blockSize,
-          reduction_indices_accessor,
-          new_nnz_ptr[0], j);
-      }
-    } else {
-      new_nnz_ptr[0] += 1;
-      for (int64_t d = 0; d < sparse_dim; d++) {
-        newIndicesAccessor[d][new_nnz_ptr[0]] = indicesAccessor[d][pos];
-      }
-      for (int64_t d = 0; d < blockSize; d++) {
-        reduction_indices_accessor[new_nnz_ptr[0]][d] = j;
-      }
-      if (values.numel() > 0) {  // if values is an empty tensor, there are no elements to copy
-        // copy & init both of values and indices
-        coalesce_max_min_copy_op_cpu<scalar_t>(
-          blockSize,
-          values_ptr + pos * blockSize,
-          newValues_ptr + new_nnz_ptr[0] * blockSize,
-          reduction_indices_accessor,
-          new_nnz_ptr[0], j
-        );
-      }
-    }
-    prev = curr;
-  }
-  new_nnz_ptr[0] += 1;
-}
-
-// --------------------------------------------------------------------
-// coalesce sum
-// --------------------------------------------------------------------
+// NOTE [Coalesce SparseTensor]
+//
+// 1. if input SparseTensor is already coalesced, return input
+// 2. if input has nnz <= 1, then it must be coalesced, return a clone of it with
+//    `is_coalesced = true`. It is because `coalesce` is not an in-place operation when
+//    `is_coalesced` is false, we should keep the original tensor intact and do coalesce
+//     on a copy of the tensor
+// 3. if input has nnz > 1, run coalesce kernel (sum, max, min) and return a coalesced tensor
 SparseTensor coalesce_sum_cpu(const SparseTensor& self) {
   AT_ASSERT(self.defined());
   AT_ASSERT(!self.is_variable());
@@ -569,9 +469,114 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
 }
 
 // --------------------------------------------------------------------
-// coalesce max
+// coalesce max / min
 // --------------------------------------------------------------------
-std::tuple<SparseTensor, Tensor> coalesce_max_cpu(const SparseTensor& self) {
+template <typename scalar_t>
+void coalesce_max_op_cpu(int64_t n, scalar_t* a, scalar_t* b,
+  TensorAccessor<int64_t, 2>& reduction_indices_accessor,
+  int64_t new_nnz_i, int64_t nnz_i
+) {
+  int64_t i;
+  #pragma omp parallel for
+  for (i = 0; i < n; i++) {
+    if (a[i] > b[i]) {
+      b[i] = a[i];
+      reduction_indices_accessor[new_nnz_i][i] = nnz_i;
+    }
+  }
+}
+
+template <typename scalar_t>
+void coalesce_min_op_cpu(int64_t n, scalar_t* a, scalar_t* b,
+  TensorAccessor<int64_t, 2>& reduction_indices_accessor,
+  int64_t new_nnz_i, int64_t nnz_i
+) {
+  int64_t i;
+  #pragma omp parallel for
+  for (i = 0; i < n; i++) {
+    if (a[i] < b[i]) {
+      b[i] = a[i];
+      reduction_indices_accessor[new_nnz_i][i] = nnz_i;
+    }
+  }
+}
+
+template <typename scalar_t>
+void coalesce_maxmin_copy_op_cpu(int64_t n, scalar_t* a, scalar_t* b,
+  TensorAccessor<int64_t, 2>& reduction_indices_accessor,
+  int64_t new_nnz_i, int64_t nnz_i
+) {
+  int64_t i;
+  #pragma omp parallel for
+  for (i = 0; i < n; i++) {
+    b[i] = a[i];
+    reduction_indices_accessor[new_nnz_i][i] = nnz_i;
+  }
+}
+
+template <typename scalar_t, typename func_t>
+void coalesce_maxmin_kernel_cpu(
+  Tensor& values,
+  Tensor& indices,
+  Tensor& indicesPermutation,
+  Tensor& indicesBuffer,
+  Tensor& newValues,
+  Tensor& newIndices,
+  Tensor& reduction_indices,
+  Tensor& new_nnz,
+  int64_t sparse_dim,
+  int64_t nnz,
+  const func_t& reduce_op
+) {
+  int64_t prev = -1;
+  int64_t blockSize = values.stride(0);
+  int64_t* new_nnz_ptr = new_nnz.data<int64_t>();
+  new_nnz_ptr[0] = -1;
+  scalar_t* values_ptr = values.data<scalar_t>();
+  scalar_t* newValues_ptr = newValues.data<scalar_t>();
+  auto newIndicesAccessor = newIndices.accessor<int64_t, 2>();
+  auto reduction_indices_accessor = reduction_indices.accessor<int64_t, 2>();
+  auto indicesAccessor = indices.accessor<int64_t, 2>();
+  auto indicesPermutationAccessor = indicesPermutation.accessor<int64_t, 1>();
+  auto indicesBufferAccessor = indicesBuffer.accessor<int64_t, 1>();
+
+  for (int64_t j = 0; j < nnz; j++) {
+    int64_t pos = indicesPermutationAccessor[j];
+    int64_t curr = indicesBufferAccessor[j];
+    if (curr == prev) {
+      if (values.numel() > 0) {  // if values is an empty tensor, there are no elements to copy
+        reduce_op(
+          blockSize,
+          values_ptr + pos * blockSize,
+          newValues_ptr + new_nnz_ptr[0] * blockSize,
+          reduction_indices_accessor,
+          new_nnz_ptr[0], j);
+      }
+    } else {
+      new_nnz_ptr[0] += 1;
+      for (int64_t d = 0; d < sparse_dim; d++) {
+        newIndicesAccessor[d][new_nnz_ptr[0]] = indicesAccessor[d][pos];
+      }
+      for (int64_t d = 0; d < blockSize; d++) {
+        reduction_indices_accessor[new_nnz_ptr[0]][d] = j;
+      }
+      if (values.numel() > 0) {  // if values is an empty tensor, there are no elements to copy
+        // copy & init both of values and indices
+        coalesce_maxmin_copy_op_cpu<scalar_t>(
+          blockSize,
+          values_ptr + pos * blockSize,
+          newValues_ptr + new_nnz_ptr[0] * blockSize,
+          reduction_indices_accessor,
+          new_nnz_ptr[0], j
+        );
+      }
+    }
+    prev = curr;
+  }
+  new_nnz_ptr[0] += 1;
+}
+
+std::tuple<SparseTensor, Tensor> coalesce_maxmin_common_cpu(const SparseTensor& self, CoalesceReductionType reduction_type) {
   AT_ASSERT(self.defined());
   AT_ASSERT(!self.is_variable());
   AT_ASSERT(self.is_sparse());
@@ -579,13 +584,19 @@ std::tuple<SparseTensor, Tensor> coalesce_max_cpu(const SparseTensor& self) {
   int64_t nnz = self._nnz();
   LongTensor indices = self._indices();
   Tensor values = self._values().contiguous();
-  LongTensor reduction_indices = at::zeros({nnz, values.stride(0)}, indices.options());
+  // NOTE [Reduction Indices at Coalesce]
+  // generate a 2D tensor reduction_indices with sizes = (nnz, values.stride(0)):
+  // [[0, 0, 0, 0, ..., 0],
+  //  [1, 1, 1, 1, ..., 1]
+  //  ...
+  //  [nnz-1, nnz-1, ...,]
+  // ]
+  LongTensor reduction_indices = at::arange(0, nnz, indices.options()).reshape({nnz, 1}).repeat({1, values.stride(0)});
 
   if (self.is_coalesced()) {
     return std::tuple<SparseTensor, Tensor>(self, reduction_indices);
   }
-  // NOTE: Since `coalesce` is not an in-place operation when `is_coalesced` is false,
-  // we should keep the original tensor intact and do coalesce on a copy of the tensor
+  // see NOTE [Coalesce SparseTensor]
   if (nnz < 2) {
     SparseTensor dst = self.clone();
     dst._coalesced_(true);
@@ -609,20 +620,41 @@ std::tuple<SparseTensor, Tensor> coalesce_max_cpu(const SparseTensor& self) {
 
   auto new_nnz = at::empty({1}, indices.options());
 
-  AT_DISPATCH_ALL_TYPES(values.type(), "coalesce_max_cpu", [&] {
-    coalesce_max_min_kernel_cpu<scalar_t>(
-      values,
-      indices,
-      indicesPermutation,
-      indicesBuffer,
-      newValues,
-      newIndices,
-      reduction_indices,
-      new_nnz,
-      sparse_dim,
-      nnz,
-      coalesce_max_op_cpu<scalar_t>
-    );
+  AT_DISPATCH_ALL_TYPES(values.type(), "coalesce_maxmin_common_cpu", [&] {
+
+    if (reduction_type == CoalesceReductionType::MAX) {
+      coalesce_maxmin_kernel_cpu<scalar_t>(
+        values,
+        indices,
+        indicesPermutation,
+        indicesBuffer,
+        newValues,
+        newIndices,
+        reduction_indices,
+        new_nnz,
+        sparse_dim,
+        nnz,
+        coalesce_max_op_cpu<scalar_t>
+      );
+    }
+    else if (reduction_type == CoalesceReductionType::MIN) {
+      coalesce_maxmin_kernel_cpu<scalar_t>(
+        values,
+        indices,
+        indicesPermutation,
+        indicesBuffer,
+        newValues,
+        newIndices,
+        reduction_indices,
+        new_nnz,
+        sparse_dim,
+        nnz,
+        coalesce_min_op_cpu<scalar_t>
+      );
+    }
+    else {
+      AT_ERROR("coalesce_maxmin_common_cpu: Expected CoalesceReductionType MAX and MIN, but other type is found.");
+    }
   });
 
   dst._coalesced_(true);
@@ -632,68 +664,12 @@ std::tuple<SparseTensor, Tensor> coalesce_max_cpu(const SparseTensor& self) {
   return std::tuple<SparseTensor, Tensor>(dst, reduction_indices);
 }
 
-// --------------------------------------------------------------------
-// coalesce min
-// --------------------------------------------------------------------
+std::tuple<SparseTensor, Tensor> coalesce_max_cpu(const SparseTensor& self) {
+  return coalesce_maxmin_common_cpu(self, CoalesceReductionType::MAX);
+}
+
 std::tuple<SparseTensor, Tensor> coalesce_min_cpu(const SparseTensor& self) {
-  AT_ASSERT(self.defined());
-  AT_ASSERT(!self.is_variable());
-  AT_ASSERT(self.is_sparse());
-
-  int64_t nnz = self._nnz();
-  LongTensor indices = self._indices();
-  Tensor values = self._values().contiguous();
-  LongTensor reduction_indices = at::zeros({nnz, values.stride(0)}, indices.options());
-
-  if (self.is_coalesced()) {
-    return std::tuple<SparseTensor, Tensor>(self, reduction_indices);
-  }
-  // NOTE: Since `coalesce` is not an in-place operation when `is_coalesced` is false,
-  // we should keep the original tensor intact and do coalesce on a copy of the tensor
-  if (nnz < 2) {
-    SparseTensor dst = self.clone();
-    dst._coalesced_(true);
-    return std::tuple<SparseTensor, Tensor>(dst, reduction_indices);
-  }
-
-  int64_t sparse_dim = self.sparse_dim();
-  int64_t dense_dim = self.dense_dim();
-
-  LongTensor indices_scalar = flatten_indices(indices, self.sizes());
-
-  SparseTensor dst = new_sparse(self.options());
-  get_sparse_impl(dst)->resize_(sparse_dim, dense_dim, self.sizes());
-  LongTensor newIndices = at::empty_like(indices);
-  Tensor newValues = at::empty_like(values);
-  alias_into_sparse(dst, newIndices, newValues);
-
-  LongTensor indicesBuffer;
-  LongTensor indicesPermutation;
-  std::tie(indicesBuffer, indicesPermutation) = indices_scalar.sort(0);
-
-  auto new_nnz = at::empty({1}, indices.options());
-
-  AT_DISPATCH_ALL_TYPES(values.type(), "coalesce_min_cpu", [&] {
-    coalesce_max_min_kernel_cpu<scalar_t>(
-      values,
-      indices,
-      indicesPermutation,
-      indicesBuffer,
-      newValues,
-      newIndices,
-      reduction_indices,
-      new_nnz,
-      sparse_dim,
-      nnz,
-      coalesce_min_op_cpu<scalar_t>
-    );
-  });
-
-  dst._coalesced_(true);
-  get_sparse_impl(dst)->set_nnz_and_narrow(new_nnz.data<int64_t>()[0]);
-  reduction_indices.narrow(1, 0, new_nnz.data<int64_t>()[0]);
-
-  return std::tuple<SparseTensor, Tensor>(dst, reduction_indices);
+  return coalesce_maxmin_common_cpu(self, CoalesceReductionType::MIN);
 }
 
 

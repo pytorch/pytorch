@@ -1076,13 +1076,11 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
 }
 
 // --------------------------------------------------------------------
-// sparse.max()
+// sparse max / min
 // --------------------------------------------------------------------
-Tensor _sparse_max(const SparseTensor& input) {
-  return input.coalesce().values().max();
-}
-
-std::tuple<SparseTensor, Tensor> _sparse_max_sparse_dim(const SparseTensor& input, int64_t dim_to_max) {
+std::tuple<SparseTensor, Tensor> sparse_maxmin_common_sparse_dim(
+  const SparseTensor& input, int64_t dim_to_reduce, CoalesceReductionType reduction_type
+) {
   const int64_t input_dim = input.dim();
   LongTensor indices = input._indices();
   Tensor values = input._values();
@@ -1092,7 +1090,7 @@ std::tuple<SparseTensor, Tensor> _sparse_max_sparse_dim(const SparseTensor& inpu
 
   auto dims_to_keep_v = std::vector<int64_t>();
   for (int64_t d = 0; d < input_dim; d++) {
-    if (d != dim_to_max) dims_to_keep_v.emplace_back(d);
+    if (d != dim_to_reduce) dims_to_keep_v.emplace_back(d);
   }
 
   // new values
@@ -1108,14 +1106,37 @@ std::tuple<SparseTensor, Tensor> _sparse_max_sparse_dim(const SparseTensor& inpu
 
   // new size
   auto new_sizes = sizes.vec();
-  new_sizes.erase(new_sizes.begin() + dim_to_max);
+  new_sizes.erase(new_sizes.begin() + dim_to_reduce);
 
   SparseTensor new_sparse = at::_sparse_coo_tensor_with_dims_and_tensors(
     sparse_dim - 1, dense_dim, new_sizes,
     new_indices, new_values, input.options()
   );
-  Tensor reduction_indices;
-  return new_sparse.coalesce_max();
+
+  if (reduction_type == CoalesceReductionType::MAX) {
+    return new_sparse.coalesce_max();
+  }
+  else if (reduction_type == CoalesceReductionType::MIN) {
+    return new_sparse.coalesce_min();
+  }
+  else {
+    AT_ERROR("_sparse_maxmin_common_sparse_dim: Expected CoalesceReductionType MAX and MIN, but other type is found.");
+  }
+}
+
+std::tuple<SparseTensor, Tensor> _sparse_max_sparse_dim(const SparseTensor& input, int64_t dim_to_max) {
+  return sparse_maxmin_common_sparse_dim(input, dim_to_max, CoalesceReductionType::MAX);
+}
+
+std::tuple<SparseTensor, Tensor> _sparse_min_sparse_dim(const SparseTensor& input, int64_t dim_to_min) {
+  return sparse_maxmin_common_sparse_dim(input, dim_to_min, CoalesceReductionType::MIN);
+}
+
+// --------------------------------------------------------------------
+// sparse.max()
+// --------------------------------------------------------------------
+Tensor _sparse_max(const SparseTensor& input) {
+  return input.coalesce().values().max();
 }
 
 Tensor _sparse_max(const SparseTensor& input_, int64_t dim_to_max) {
@@ -1154,41 +1175,6 @@ Tensor _sparse_max(const SparseTensor& input_, int64_t dim_to_max) {
 // --------------------------------------------------------------------
 Tensor _sparse_min(const SparseTensor& input) {
   return input.coalesce().values().min();
-}
-
-std::tuple<SparseTensor, Tensor> _sparse_min_sparse_dim(const SparseTensor& input, int64_t dim_to_min) {
-  const int64_t input_dim = input.dim();
-  LongTensor indices = input._indices();
-  Tensor values = input._values();
-  IntList sizes = input.sizes();
-  int64_t sparse_dim = input.sparse_dim();
-  int64_t dense_dim = input.dense_dim();
-
-  auto dims_to_keep_v = std::vector<int64_t>();
-  for (int64_t d = 0; d < input_dim; d++) {
-    if (d != dim_to_min) dims_to_keep_v.emplace_back(d);
-  }
-
-  // new values
-  Tensor new_values = values.clone();
-
-  // new indices
-  LongTensor new_indices = at::empty({sparse_dim - 1, input._nnz()}, indices.options());
-  for (int64_t i = 0; i < dims_to_keep_v.size(); i++) {
-    int64_t d = dims_to_keep_v[i];
-    if (d < sparse_dim) new_indices[i].copy_(indices[d]);
-    else break;
-  }
-
-  // new size
-  auto new_sizes = sizes.vec();
-  new_sizes.erase(new_sizes.begin() + dim_to_min);
-
-  SparseTensor new_sparse = at::_sparse_coo_tensor_with_dims_and_tensors(
-    sparse_dim - 1, dense_dim, new_sizes,
-    new_indices, new_values, input.options()
-  );
-  return new_sparse.coalesce_min();
 }
 
 Tensor _sparse_min(const SparseTensor& input_, int64_t dim_to_min) {

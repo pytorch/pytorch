@@ -10,8 +10,7 @@ using IntTensor = Tensor;
 using SparseType = Type;
 
 enum class CoalesceReductionType : std::uint8_t {
-  SUM = 0,
-  MAX,
+  MAX = 0,
   MIN,
 };
 
