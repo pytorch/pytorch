@@ -596,6 +596,7 @@ Interpreting Graphs
     graph of a method named ``bar`` on a ScriptModule by accessing ``.bar.graph``.
 
     The example script above produces the graph::
+
 	graph(%len : int) {
 	  %15 : int = prim::Constant[value=1]()
 	  %9 : bool = prim::Constant[value=1]()
@@ -675,7 +676,8 @@ Automatic Trace Checking
 
     Gives us the following diagnostic information::
 	ERROR: Graphs differed across invocations!
-	Graph diff:
+	Graph diff::
+  
 		  graph(%x : Tensor) {
 		    %1 : int = prim::Constant[value=0]()
 		    %2 : int = prim::Constant[value=0]()
@@ -793,21 +795,18 @@ the ``torch`` namespace, all functions in ``torch.nn.functional`` and all
 modules from ``torch.nn`` are supported in Torch Script, excluding those in the
 table below. For unsupported modules, we suggest using :meth:`torch.jit.trace`.
 
-=====
-Unsupported ``torch.nn`` Modules
-=====
-``torch.nn.modules.adaptive.AdaptiveLogSoftmaxWithLoss``
-``torch.nn.modules.normalization.CrossMapLRN2d``
-``torch.nn.modules.fold.Fold``
-``torch.nn.modules.fold.Unfold``
-``torch.nn.modules.rnn.GRU``
-``torch.nn.modules.rnn.LSTM``
-``torch.nn.modules.rnn.RNN``
-``torch.nn.modules.rnn.GRUCell``
-``torch.nn.modules.rnn.LSTMCell``
-``torch.nn.modules.rnn.RNNCell``
-=====
+Unsupported ``torch.nn`` Modules  ::
 
+    torch.nn.modules.adaptive.AdaptiveLogSoftmaxWithLoss
+    torch.nn.modules.normalization.CrossMapLRN2d
+    torch.nn.modules.fold.Fold
+    torch.nn.modules.fold.Unfold
+    torch.nn.modules.rnn.GRU
+    torch.nn.modules.rnn.LSTM
+    torch.nn.modules.rnn.RNN
+    torch.nn.modules.rnn.GRUCell
+    torch.nn.modules.rnn.LSTMCell
+    torch.nn.modules.rnn.RNNCell
 
 
 .. automodule:: torch.jit.supported_ops
