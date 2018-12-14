@@ -3,8 +3,48 @@
 
 #include "test_utils.h"
 
+namespace {
+template <typename T>
+void assertTensorEqualsWithType(
+    const caffe2::TensorCPU& tensor1,
+    const caffe2::TensorCPU& tensor2) {
+  CAFFE_ENFORCE_EQ(tensor1.sizes(), tensor2.sizes());
+  for (auto idx = 0; idx < tensor1.numel(); ++idx) {
+    CAFFE_ENFORCE_EQ(tensor1.data<T>()[idx], tensor2.data<T>()[idx]);
+  }
+}
+} // namespace
+
 namespace caffe2 {
 namespace testing {
+
+void assertTensorEquals(const TensorCPU& tensor1, const TensorCPU& tensor2) {
+  CAFFE_ENFORCE_EQ(tensor1.sizes(), tensor2.sizes());
+  if (tensor1.IsType<float>()) {
+    CAFFE_ENFORCE(tensor2.IsType<float>());
+    assertTensorEqualsWithType<float>(tensor1, tensor2);
+  } else if (tensor1.IsType<int>()) {
+    CAFFE_ENFORCE(tensor2.IsType<int>());
+    assertTensorEqualsWithType<int>(tensor1, tensor2);
+  } else if (tensor1.IsType<int64_t>()) {
+    CAFFE_ENFORCE(tensor2.IsType<int64_t>());
+    assertTensorEqualsWithType<int64_t>(tensor1, tensor2);
+  }
+  // Add more types if needed.
+}
+
+void assertTensorListEquals(
+    const std::vector<std::string>& tensorNames,
+    const Workspace& workspace1,
+    const Workspace& workspace2) {
+  for (const string& tensorName : tensorNames) {
+    CAFFE_ENFORCE(workspace1.HasBlob(tensorName));
+    CAFFE_ENFORCE(workspace2.HasBlob(tensorName));
+    auto& tensor1 = getTensor(workspace1, tensorName);
+    auto& tensor2 = getTensor(workspace2, tensorName);
+    assertTensorEquals(tensor1, tensor2);
+  }
+}
 
 const caffe2::Tensor& getTensor(
     const caffe2::Workspace& workspace,
