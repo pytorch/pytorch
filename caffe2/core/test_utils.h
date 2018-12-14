@@ -4,6 +4,9 @@
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/workspace.h"
 
+#include <cmath>
+#include <vector>
+
 // Utilities that make it easier to write caffe2 C++ unit tests.
 // These utils are designed to be concise and easy to use. They may sacrifice
 // performance and should only be used in tests/non production code.
@@ -12,6 +15,37 @@ namespace testing {
 
 // Asserts that the values of two tensors are the same.
 void assertTensorEquals(const TensorCPU& tensor1, const TensorCPU& tensor2);
+
+// Asserts that two float values are close within epsilon.
+void assertNear(float value1, float value2, float epsilon);
+
+// Asserts that the numeric values of a tensor is equal to a data vector.
+template <typename T>
+void assertTensorEquals(
+    const TensorCPU& tensor,
+    const std::vector<T>& data,
+    float epsilon = 0.1f) {
+  CAFFE_ENFORCE(tensor.IsType<T>());
+  CAFFE_ENFORCE_EQ(tensor.numel(), data.size());
+  for (auto idx = 0; idx < tensor.numel(); ++idx) {
+    if (tensor.IsType<float>()) {
+      assertNear(tensor.data<T>()[idx], data[idx], epsilon);
+    } else {
+      CAFFE_ENFORCE_EQ(tensor.data<T>()[idx], data[idx]);
+    }
+  }
+}
+
+// Assertion for tensor sizes and values.
+template <typename T>
+void assertTensor(
+    const TensorCPU& tensor,
+    const std::vector<int64_t>& sizes,
+    const std::vector<T>& data,
+    float epsilon = 0.1f) {
+  CAFFE_ENFORCE_EQ(tensor.sizes(), sizes);
+  assertTensorEquals(tensor, data, epsilon);
+}
 
 // Asserts a list of tensors presented in two workspaces are equal.
 void assertTensorListEquals(
@@ -121,7 +155,7 @@ class WorkspaceMutator {
   template <typename T>
   WorkspaceMutator& newTensorConst(
       const string& name,
-      const vector<int64_t>& shape,
+      const std::vector<int64_t>& shape,
       const T& data) {
     createTensorAndConstantFill<T>(name, shape, data, workspace_);
     return *this;
