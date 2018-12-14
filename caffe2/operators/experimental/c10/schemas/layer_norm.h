@@ -12,8 +12,8 @@ struct LayerNorm final {
   static constexpr const char* name = "LayerNorm";
 
   struct Cache final {
-    C10Tensor scale = empty({}, CPU);
-    C10Tensor bias = empty({}, CPU);
+      at::optional<C10Tensor> scale = at::nullopt;
+      at::optional<C10Tensor> bias = at::nullopt;
   };
 
   using Signature = void(
