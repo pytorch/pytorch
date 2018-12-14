@@ -6119,6 +6119,7 @@ class TestNN(NNTestCase):
                 input = torch.randn(1, 1, 2, 2, requires_grad=True)
                 gradcheck(lambda x: F.upsample(x, out_size, **kwargs), [input])
 
+    @skipIfRocm
     def test_upsamplingBicubic2d(self):
         # test output against known input
         in_t = torch.arange(4).view(1, 1, 2, 2).type(torch.FloatTensor)
