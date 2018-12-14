@@ -47,7 +47,7 @@ struct PrintValue : public SugaredValue {
     return "print";
   }
   std::shared_ptr<SugaredValue> call(
-    SourceRange loc,
+    const SourceRange& loc,
     Method & m,
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
@@ -81,7 +81,7 @@ struct CastValue : public BuiltinFunction {
   : BuiltinFunction(method, c10::nullopt)
   , type_(std::move(type)) {}
   std::shared_ptr<SugaredValue> call(
-    SourceRange loc,
+    const SourceRange& loc,
     Method & m,
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
@@ -98,7 +98,7 @@ private:
   TypePtr type_;
 };
 
-static Value* asSimple(SugaredValuePtr value) {
+static Value* asSimple(const SugaredValuePtr& value) {
   if(SimpleValue* sv = dynamic_cast<SimpleValue*>(value.get())) {
     return sv->getValue();
   }
@@ -229,7 +229,7 @@ struct Environment {
     return sv;
   }
 
-  SugaredValuePtr createCapturedInputIfNeeded(const SourceRange& loc, std::string ident) {
+  SugaredValuePtr createCapturedInputIfNeeded(const SourceRange& loc, const std::string& ident) {
     auto in_frame = findInThisFrame(ident);
     if (in_frame) {
       return in_frame;
@@ -318,7 +318,7 @@ struct Environment {
     return getSugaredVar(ident)->asValue(ident.range(), method);
   }
 
-  SugaredValuePtr getSugaredVar(const std::string& ident, SourceRange range, bool required=true) {
+  SugaredValuePtr getSugaredVar(const std::string& ident, const SourceRange& range, bool required=true) {
     auto retval = createCapturedInputIfNeeded(range, ident);
 
     if(!retval) {
@@ -352,7 +352,7 @@ struct Environment {
     return retval;
   }
 
-  Value* getVar(const std::string& ident, SourceRange range) {
+  Value* getVar(const std::string& ident, const SourceRange& range) {
     return getSugaredVar(ident, range)->asValue(range, method);
   }
 
@@ -427,7 +427,7 @@ static inline bool isIntOrFloatUsedAsList(
   return list_type && list_type->getElementType() == v_type && arg.N();
 }
 
-inline bool convertibleToList(TypePtr type, TypePtr list_type_) {
+inline bool convertibleToList(const TypePtr& type, const TypePtr& list_type_) {
   auto list_type = list_type_->cast<ListType>();
   if(!list_type) {
     return false;
@@ -451,7 +451,7 @@ inline bool convertibleToList(TypePtr type, TypePtr list_type_) {
 Value* tryConvertToType(
     const SourceRange& loc,
     Graph& graph,
-    TypePtr concrete_type,
+    const TypePtr& concrete_type,
     Value* value,
     bool allow_conversions) {
   // Allow homogeneous tuples to be casted implicitly to lists of appropriate
@@ -497,7 +497,7 @@ Value* tryMatchArgument(
     Graph& graph,
     const SourceRange& loc,
     const NamedValue& named_value,
-    std::function<std::ostream&()> err,
+    const std::function<std::ostream&()>& err,
     bool allow_conversions,
     TypeEnv & type_env) {
   Value* value = named_value.value(graph);
@@ -543,11 +543,11 @@ c10::optional<size_t> findInputWithName(
 }
 
 Value* tryCreateList(
-    TypePtr elem_type,
+    const TypePtr& elem_type,
     Graph& graph,
     const SourceRange& loc,
     at::ArrayRef<NamedValue> varargs,
-    std::function<std::ostream&()> err,
+    const std::function<std::ostream&()>& err,
     bool convert_tensor_to_num,
     TypeEnv & type_env) {
   Argument elem_arg("<varargs>", elem_type);
@@ -694,7 +694,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
   return MatchedSchema{std::move(positional_inputs), std::move(return_types)};
 }
 
-static std::string prefixLine(const std::string& str, std::string prefix) {
+static std::string prefixLine(const std::string& str, const std::string& prefix) {
   std::stringstream ss;
   bool was_newline = true;
   for(auto c : str) {
@@ -733,7 +733,7 @@ Value* emitBuiltinCall(
   const SourceRange& loc,
   Graph& graph,
   Symbol name,
-  c10::optional<NamedValue> self,
+  const c10::optional<NamedValue>& self,
   at::ArrayRef<NamedValue> inputs,
   at::ArrayRef<NamedValue> attributes,
   // if true, emitBuiltinCall will throw an exception if this builtin does not exist,
@@ -801,7 +801,7 @@ static Value* ensureInt(const SourceRange& range, Value* v) {
 }
 
 std::shared_ptr<SugaredValue> BuiltinFunction::call(
-    SourceRange loc,
+    const SourceRange& loc,
     Method& m,
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
@@ -810,25 +810,25 @@ std::shared_ptr<SugaredValue> BuiltinFunction::call(
       loc, *m.graph(), symbol, self, inputs, attributes, true));
 }
 
-inline bool isSupportedListElementType(TypePtr type) {
+inline bool isSupportedListElementType(const TypePtr& type) {
   return type->isSubtypeOf(DynamicType::get()) ||
       type->isSubtypeOf(NumberType::get());
 }
 
-TypePtr parseTypeFromExpr(Expr expr);
-c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(Expr expr);
+TypePtr parseTypeFromExpr(const Expr& expr);
+c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(const Expr& expr);
 
 struct to_ir {
   to_ir(
-      Def def,
+      Def def_,
       Resolver resolver_,
-      SugaredValuePtr self,
+      SugaredValuePtr self_,
       Method& method) // method being constructed
       : method(method)
       , graph(method.graph())
-      , def(def)
+      , def(std::move(def_))
       , resolver(std::move(resolver_))
-      , self(self)
+      , self(std::move(self_))
       , environment_stack(nullptr) {
     JIT_ASSERT(resolver);
     pushFrame(graph->block());
@@ -912,7 +912,7 @@ private:
     return default_values;
   }
 
-  std::vector<Argument> parseArgsFromDecl(Decl decl) {
+  std::vector<Argument> parseArgsFromDecl(const Decl& decl) {
     auto params_begin = decl.params().begin();
     auto params_end = decl.params().end();
     if (self)
@@ -962,7 +962,7 @@ private:
     return retval;
   }
 
-  std::vector<Argument> parseReturnsFromDecl(Decl decl) {
+  std::vector<Argument> parseReturnsFromDecl(const Decl& decl) {
     JIT_ASSERT(decl.return_type().present());
     if (handleBroadcastList(decl.return_type().get()))
       throw ErrorReport(decl.return_type().range()) << "Broadcastable lists cannot appear as a return type";
@@ -1002,7 +1002,7 @@ private:
       return FunctionSchema(name, args, returns, false, is_varret);
   }
 
-  std::vector<Argument> emitFormalArguments(SugaredValuePtr self, const FunctionSchema& schema) {
+  std::vector<Argument> emitFormalArguments(const SugaredValuePtr& self, const FunctionSchema& schema) {
     std::vector<Argument> arguments; // for schema
     // inputs
     auto it = def.decl().params().begin();
@@ -1135,7 +1135,7 @@ private:
 
   std::shared_ptr<Environment> emitSingleIfBranch(
       Block* b,
-      const List<Stmt> branch) {
+      const List<Stmt>& branch) {
     pushFrame(b);
     WithInsertPoint guard(b);
     emitStatements(branch);
@@ -1198,8 +1198,8 @@ private:
       popFrame();
     };
 
-    emit_if_expr(true_block, true_expr);
-    emit_if_expr(false_block, false_expr);
+    emit_if_expr(true_block, std::move(true_expr));
+    emit_if_expr(false_block, std::move(false_expr));
 
     auto true_type = unshapedType(true_block->outputs().at(0)->type());
     auto false_type = unshapedType(false_block->outputs().at(0)->type());
@@ -1215,7 +1215,7 @@ private:
     return expr_value;
   }
 
-  Value* emitCond(Expr cond) {
+  Value* emitCond(const Expr& cond) {
     Value* v = emitExpr(cond);
     if (!v->type()->isSubtypeOf(BoolType::get())) {
       ErrorReport error(cond);
@@ -1460,7 +1460,7 @@ private:
     }
   }
 
-  void emitForRange(SourceRange range, const Ident& target, const List<Expr>& args, const List<Stmt>& body) {
+  void emitForRange(const SourceRange& range, const Ident& target, const List<Expr>& args, const List<Stmt>& body) {
     // TODO: start, stop, step loop
     if (args.size() != 1) {
       throw ErrorReport(range)
@@ -1981,7 +1981,7 @@ private:
 
 
   std::vector<NamedValue> getNamedValues(
-      TreeList trees,
+      const TreeList& trees,
       bool maybe_unpack) {
     std::vector<NamedValue> values;
     for (const auto& tree : trees) {
@@ -1999,23 +1999,23 @@ private:
     return values;
   }
   std::vector<NamedValue> getNamedValues(
-      List<Expr> trees,
+      const List<Expr>& trees,
       bool maybe_unpack) {
     return getNamedValues(trees.tree()->trees(), maybe_unpack);
   }
 
   std::vector<Value*> getValues(
-      TreeList trees,
+      const TreeList& trees,
       bool maybe_unpack) {
     return toValues(*graph, getNamedValues(trees, maybe_unpack));
   }
   std::vector<Value*> getValues(
-      List<Expr> trees,
+      const List<Expr>& trees,
       bool maybe_unpack) {
     return getValues(trees.tree()->trees(), maybe_unpack);
   }
 
-  std::vector<NamedValue> emitAttributes(const List<Attribute> attributes) {
+  std::vector<NamedValue> emitAttributes(const List<Attribute>& attributes) {
     return fmap(attributes, [&](const Attribute& attr) {
       return NamedValue(attr.range(), attr.name().name(), emitExpr(attr.value()));
     });
@@ -2077,8 +2077,8 @@ private:
     }
   }
 
-  Value* emitExpr(Expr tree, TypePtr type_hint = nullptr) {
-    return emitSugaredExpr(tree, 1, type_hint)->asValue(tree.range(), method);
+  Value* emitExpr(const Expr& tree, TypePtr type_hint = nullptr) {
+    return emitSugaredExpr(tree, 1, std::move(type_hint))->asValue(tree.range(), method);
   }
 
   NodeKind reverseComparision(NodeKind kind) {
@@ -2101,7 +2101,7 @@ private:
   // or a = torch.jit.annotate(List[int], [])
   // the caller is responsible for checking that the result matches type_hint
   // emitSugaredExpr is free to ignore it.
-  std::shared_ptr<SugaredValue> emitSugaredExpr(Expr tree, size_t n_binders, TypePtr type_hint=nullptr) {
+  std::shared_ptr<SugaredValue> emitSugaredExpr(const Expr& tree, size_t n_binders, TypePtr type_hint=nullptr) {
     switch(tree.kind()) {
       case TK_VAR:
         return environment_stack->getSugaredVar(Var(tree).name());
@@ -2115,7 +2115,7 @@ private:
         return emitApplyExpr(apply, n_binders);
       } break;
       default:
-        return std::make_shared<SimpleValue>(emitSimpleExpr(tree, type_hint));
+        return std::make_shared<SimpleValue>(emitSimpleExpr(tree, std::move(type_hint)));
     }
   }
 
@@ -2191,7 +2191,7 @@ private:
 
   Value* emitSimpleExpr(
       const TreeRef& tree,
-      TypePtr type_hint = nullptr) {
+      const TypePtr& type_hint = nullptr) {
     switch (tree->kind()) {
       case '@':
       case TK_POW:
@@ -2583,7 +2583,7 @@ static const std::unordered_map<std::string, std::string> &builtin_cast_methods(
 
 // support syntax sugar for x.foo(y, z) by allowing x.foo to return a
 // callable value that will resolve to foo(x, y, z) when called.
-std::shared_ptr<SugaredValue> SimpleValue::attr(SourceRange loc, Method & m, const std::string& field) {
+std::shared_ptr<SugaredValue> SimpleValue::attr(const SourceRange& loc, Method & m, const std::string& field) {
   // Allow method-style casts on Tensor types. e.g. x.int()
   if (value->type()->isSubtypeOf(DynamicType::get())) {
     if (builtin_cast_methods().count(field)) {
@@ -2634,7 +2634,7 @@ std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> input
   return outputs;
 }
 
-void defineMethodsInModule(std::shared_ptr<Module> m, const std::vector<Def>& definitions, const std::vector<Resolver>& resolvers, SugaredValuePtr self) {
+void defineMethodsInModule(const std::shared_ptr<Module>& m, const std::vector<Def>& definitions, const std::vector<Resolver>& resolvers, const SugaredValuePtr& self) {
   JIT_ASSERT(definitions.size() == resolvers.size());
   auto resolver_it = resolvers.begin();
   std::vector<Method*> methods;
@@ -2714,13 +2714,13 @@ const std::unordered_map<std::string, std::function<TypePtr(Subscript)>> &subscr
   return map;
 }
 
-bool isTorch(Expr expr) {
+bool isTorch(const Expr& expr) {
   return expr.kind() == TK_VAR && Var(expr).name().name() == "torch";
 }
 
 // gets the base type name given namespaces where the types live
 // turns torch.Tensor -> Tensor, X -> X
-c10::optional<std::string> parseBaseTypeName(Expr expr) {
+c10::optional<std::string> parseBaseTypeName(const Expr& expr) {
   switch (expr.kind()) {
     case TK_VAR: {
       return Var(expr).name().name();
@@ -2735,7 +2735,7 @@ c10::optional<std::string> parseBaseTypeName(Expr expr) {
   return at::nullopt;
 }
 
-TypePtr parseTypeFromExpr(Expr expr) {
+TypePtr parseTypeFromExpr(const Expr& expr) {
   if (expr.kind() == TK_SUBSCRIPT) {
     auto subscript = Subscript(expr);
     auto value_name = parseBaseTypeName(subscript.value());
@@ -2757,7 +2757,7 @@ TypePtr parseTypeFromExpr(Expr expr) {
                                   << " cannot be used in a type expression";
 }
 
-c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(Expr expr) {
+c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(const Expr& expr) {
   if (expr.kind() != TK_SUBSCRIPT)
     return c10::nullopt;
   auto subscript = Subscript(expr);
@@ -2808,7 +2808,7 @@ c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(Expr expr) {
   return std::pair<TypePtr, int32_t>(list_ptr, len_v);
 }
 
-void defineMethodsInModule(std::shared_ptr<Module> m, const std::string& source, Resolver resolver, SugaredValuePtr self) {
+void defineMethodsInModule(std::shared_ptr<Module> m, const std::string& source, const Resolver& resolver, const SugaredValuePtr& self) {
   Parser p(source);
   std::vector<Def> definitions;
   std::vector<Resolver> resolvers;
@@ -2817,13 +2817,13 @@ void defineMethodsInModule(std::shared_ptr<Module> m, const std::string& source,
     definitions.push_back(def);
     resolvers.push_back(resolver);
   }
-  defineMethodsInModule(m, definitions, resolvers, self);
+  defineMethodsInModule(std::move(m), definitions, resolvers, self);
 }
 
 std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
-    SourceRange loc,
+    const SourceRange& loc,
     Method& m,
-    c10::optional<size_t> size_hint) {
+    const c10::optional<size_t>& size_hint) {
   static const auto make_simple_value = [](Value* v) -> std::shared_ptr<SugaredValue> {
     return std::make_shared<SimpleValue>(v);
   };

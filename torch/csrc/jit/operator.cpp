@@ -7,6 +7,11 @@
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/script/error_report.h>
 
+#include <functional>
+#include <memory>
+#include <utility>
+#include <vector>
+
 namespace torch { namespace jit {
 
 namespace script {
@@ -290,7 +295,7 @@ struct SchemaParser {
     L.expect(TK_NONE);
     return IValue();
   }
-  IValue parseDefaultValue(TypePtr arg_type, c10::optional<int32_t> arg_N) {
+  IValue parseDefaultValue(const TypePtr& arg_type, c10::optional<int32_t> arg_N) {
     auto range = L.cur().range;
     switch(arg_type->kind()) {
       case TypeKind::DynamicType:
@@ -328,7 +333,7 @@ struct SchemaParser {
     return IValue(); // silence warnings
   }
 
-  void parseList(int begin, int sep, int end, std::function<void()> callback) {
+  void parseList(int begin, int sep, int end, const std::function<void()>& callback) {
     auto r = L.cur().range;
     if (begin != TK_NOTHING)
       L.expect(begin);
