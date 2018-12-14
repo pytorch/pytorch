@@ -400,7 +400,6 @@ void convertValues() {
 
   int num_items = dims[0];
   int batch_size = getBatchSize(num_items);
-  int num_batches = num_items / batch_size;
   vector<string> lines;
   while (std::getline(infile, line)) {
     lines.push_back(line);
