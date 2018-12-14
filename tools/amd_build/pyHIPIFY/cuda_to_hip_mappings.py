@@ -2270,6 +2270,7 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("CUDA" ,("HIP", API_CAFFE2)),
     ("Cuda" ,("Hip", API_CAFFE2)),
     ("cuda_" ,("hip_", API_CAFFE2)),
+    ("_cuda" ,("_hip", API_CAFFE2)),
     ("CUDNN" ,("MIOPEN", API_CAFFE2)),
     ("CuDNN" ,("MIOPEN", API_CAFFE2)),
     ("cudnn" ,("miopen", API_CAFFE2)),
