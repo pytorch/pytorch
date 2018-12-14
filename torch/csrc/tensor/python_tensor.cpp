@@ -290,7 +290,7 @@ static void py_bind_tensor_types(const std::vector<PyTensorType>& tensor_types) 
 
   for (auto& tensor_type : tensor_types) {
     auto name = std::string(tensor_type.name);
-    auto idx = name.rfind(".");
+    auto idx = name.rfind('.');
     auto type_name = name.substr(idx + 1);
     auto module_name = name.substr(0, idx);
 

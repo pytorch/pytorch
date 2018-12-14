@@ -585,10 +585,7 @@ static Node* _trace_pre_record(
   Py_INCREF(op_obj);
   auto pyobj = THPObjectPtr(op_obj);
   return jit::tracer::preRecordPythonTrace(
-    std::move(pyobj),
-    std::move(arg_types),
-    input_vars,
-    std::move(scalar_args));
+      std::move(pyobj), arg_types, input_vars, std::move(scalar_args));
 }
 
 static void _trace_post_record(

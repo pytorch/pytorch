@@ -973,6 +973,7 @@ void PeepholeOptimizeShapeExpressions(Block * block) {
       }
       if (unique_to_value.size() != node->inputs().size()) {
         std::vector<Value*> inputs;
+        inputs.reserve(unique_to_value.size());
         for (auto & entry : unique_to_value) {
           inputs.push_back(entry.second);
         }

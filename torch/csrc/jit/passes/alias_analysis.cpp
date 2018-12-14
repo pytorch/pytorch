@@ -531,7 +531,7 @@ void AliasDb::addAlias(const Value* value, Symbol alias) {
     valueToAlias_[value].addSet(alias);
   } else {
     AliasInfo aliasInfo;
-    aliasInfo.addSet(std::move(alias));
+    aliasInfo.addSet(alias);
     valueToAlias_.insert({value, std::move(aliasInfo)});
   }
 }

@@ -50,7 +50,7 @@ struct python_error : public std::exception {
   }
 
   python_error(python_error&& other) {
-    type = std::move(other.type);
+    type = other.type;
     value = other.value;
     traceback = other.traceback;
     other.type = nullptr;

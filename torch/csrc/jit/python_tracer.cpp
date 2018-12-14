@@ -165,7 +165,7 @@ void initPythonTracerBindings(PyObject* module) {
     return setValueTrace(var, value);
   });
   m.def("_tracer_set_get_unique_name_fn", [](py::function func) {
-    auto tracing_state = getTracingState();
+    const auto& tracing_state = getTracingState();
     JIT_ASSERT(tracing_state);
     tracing_state->lookup_var_name_fn = [func](const Variable& var) -> std::string {
       AutoGIL ag;
@@ -173,7 +173,7 @@ void initPythonTracerBindings(PyObject* module) {
     };
   });
   m.def("_tracer_set_force_outplace", [](bool force_outplace) {
-    auto tracing_state = getTracingState();
+    const auto& tracing_state = getTracingState();
     JIT_ASSERT(tracing_state);
     tracing_state->force_outplace = force_outplace;
   });
