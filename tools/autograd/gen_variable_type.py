@@ -493,7 +493,17 @@ def emit_body(declaration):
                     assert not is_output
                 if inplace and is_output:
                     var = 'self'
-                expr = 'SavedVariable({}, {})'.format(var, str(is_output).lower())
+
+                if not is_output:
+                    is_output_str = "false"
+                else:
+                    # When modifying inplace a view, var is not an output of `grad_fn`
+                    # anymore. It is an output of the AsStridedBackward.
+                    if modifies_arguments:
+                        is_output_str = "!as_variable_ref({}).is_view()".format(var)
+                    else:
+                        is_output_str = "true"
+                expr = 'SavedVariable({}, {})'.format(var, is_output_str)
             elif arg['type'] == 'TensorList':
                 name += '_'
                 expr = 'make_saved_variable_list({})'.format(arg['name'])
