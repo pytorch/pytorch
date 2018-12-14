@@ -1733,7 +1733,7 @@
   variants: method
   device_guard: false
 
-- func: one_hot(IndexTensor self, int64_t num_classes=0) -> Tensor
+- func: one_hot(IndexTensor self, int64_t num_classes=-1) -> Tensor
   variants: function
 
 - func: flip(Tensor self, IntList dims) -> Tensor

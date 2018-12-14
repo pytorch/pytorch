@@ -6700,6 +6700,13 @@ class _TestTorchMixin(object):
                                  [1, 0, 0, 0, 0]])
         self.assertEqual(t, expected)
 
+        t = torch.one_hot(torch.tensor([3, 4, 1, 0]), -1)
+        expected = torch.tensor([[0, 0, 0, 1, 0],
+                                 [0, 0, 0, 0, 1],
+                                 [0, 1, 0, 0, 0],
+                                 [1, 0, 0, 0, 0]])
+        self.assertEqual(t, expected)
+
         t = torch.one_hot(torch.tensor([3, 4, 1, 0]), 6)
         expected = torch.tensor([[0, 0, 0, 1, 0, 0],
                                  [0, 0, 0, 0, 1, 0],
@@ -6724,6 +6731,9 @@ class _TestTorchMixin(object):
 
         with self.assertRaises(RuntimeError):
             torch.one_hot(torch.empty([4, 0], dtype=torch.long))
+
+        with self.assertRaises(RuntimeError):
+            torch.one_hot(torch.tensor([3, 4, 1, 0]), -2)
 
     def test_abs(self):
         def _test_abs(tensors_dict):
