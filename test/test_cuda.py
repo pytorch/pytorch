@@ -2131,14 +2131,16 @@ class TestCuda(TestCase):
                 torch.triu_indices(row, col, offset, dtype=dtype, device='cuda'))
 
         else:
+            # explicitly convert 'cpu' tensor to 'cuda' to avoid a bug in tril
+            # and triu cuda kernel (see #15226)
             self.assertEqual(
-                torch.ones(row, col, dtype=dtype, device='cuda')
-                     .tril(offset).nonzero().transpose(0, 1),
+                torch.ones(row, col, dtype=dtype, device='cpu')
+                     .tril(offset).nonzero().transpose(0, 1).cuda(),
                 torch.tril_indices(row, col, offset, dtype=dtype, device='cuda'))
 
             self.assertEqual(
-                torch.ones(row, col, dtype=dtype, device='cuda')
-                     .triu(offset).nonzero().transpose(0, 1),
+                torch.ones(row, col, dtype=dtype, device='cpu')
+                     .triu(offset).nonzero().transpose(0, 1).cuda(),
                 torch.triu_indices(row, col, offset, dtype=dtype, device='cuda'))
 
     def test_tril_and_triu_indices(self):
