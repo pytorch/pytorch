@@ -187,22 +187,29 @@ to the end.)
 namespace {
 template <class DataType>
 void layer_norm_c10(
-    const caffe2::Tensor& X,
-    caffe2::Tensor* Y,
-    caffe2::Tensor* mean,
-    caffe2::Tensor* sig,
+    const c10::C10Tensor& X_,
+    const c10::C10Tensor& Y_,
+    const c10::C10Tensor& mean_,
+    const c10::C10Tensor& sig_,
     int axis,
     float epsilon,
     caffe2::ops::LayerNorm::Cache* cache,
     caffe2::BaseContext* context) {
+  caffe2::Tensor X = X_;
+  caffe2::Tensor Y = Y_;
+  caffe2::Tensor mean = mean_;
+  caffe2::Tensor sig = sig_;
+  caffe2::Tensor scale = cache->scale;
+  caffe2::Tensor bias = cache->bias;
+
   const int canonical_axis = X.canonical_axis_index(axis);
   std::vector<int64_t> moments_dims(
       X.dims().cbegin(), X.dims().cbegin() + canonical_axis);
   moments_dims.push_back(1);
-  mean->Resize(moments_dims);
-  sig->Resize(moments_dims);
+  mean.Resize(moments_dims);
+  sig.Resize(moments_dims);
   caffe2::LayerNormOp<caffe2::CPUContext>::runLayerNorm<DataType>(
-    X, Y, mean, sig, canonical_axis, epsilon, &cache->scale, &cache->bias, static_cast<caffe2::CPUContext*>(context)
+    X, &Y, &mean, &sig, canonical_axis, epsilon, &scale, &bias, static_cast<caffe2::CPUContext*>(context)
   );
 }
 }

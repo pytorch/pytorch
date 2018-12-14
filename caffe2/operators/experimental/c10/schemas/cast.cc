@@ -4,7 +4,6 @@
 #include "caffe2/utils/cast.h"
 
 using caffe2::CPUContext;
-using caffe2::Tensor;
 
 C10_DEFINE_OP_SCHEMA(caffe2::ops::Cast);
 

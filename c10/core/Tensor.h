@@ -18,7 +18,7 @@ public:
   C10Tensor& operator=(C10Tensor&&) noexcept = default;
 
   const TensorImplPtr &impl() const & noexcept;
-  TensorImplPtr impl() && noexcept;
+  TensorImplPtr&& impl() && noexcept;
 
   TensorTypeId type_id() const;
 
@@ -33,7 +33,7 @@ inline const C10Tensor::TensorImplPtr &C10Tensor::impl() const & noexcept {
   return impl_;
 }
 
-inline C10Tensor::TensorImplPtr C10Tensor::impl() && noexcept {
+inline C10Tensor::TensorImplPtr&& C10Tensor::impl() && noexcept {
   return std::move(impl_);
 }
 
