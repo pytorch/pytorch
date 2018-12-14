@@ -261,7 +261,7 @@ static inline Tensor &mean_out(Tensor &result, const Tensor &self, IntList dim,
   ScalarType dtype = get_dtype(result, self, opt_dtype, true);
   auto iter = make_reduction("mean", result, self, dim, keepdim, dtype);
   if (iter->numel() == 0) {
-    result.zero_();
+    result.fill_(std::numeric_limits<double>::quiet_NaN());
   } else {
     mean_stub(iter->device_type(), *iter);
   }
