@@ -105,7 +105,7 @@ class CAFFE2_API Tensor final {
   }
 
   void CopyFrom(const Tensor& src, bool async = false) const {
-    impl_.get()->CopyFrom(*src.impl_.get(), async);
+    impl_.get()->CopyFrom(*src.impl_, async);
   }
 
   /**
