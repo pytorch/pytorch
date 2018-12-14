@@ -6242,9 +6242,9 @@ Example::
     (tensor([1, 2, 3]), tensor([4, 5, 6]), tensor([7, 8, 9]))
 """)
 
-add_docstr(torch.to_one_hot,
+add_docstr(torch.one_hot,
            r"""
-to_one_hot(tensor, num_classes=0) -> LongTensor
+one_hot(tensor, num_classes=0) -> LongTensor
 
 Takes integer with :math:`n` dims and converts it to 1-hot representation
 with :math:`n+1` dims. The last dimension will have zeros everywhere but
@@ -6263,19 +6263,19 @@ Returns:
         else.
 
 Examples::
-    >>> torch.to_one_hot(torch.arange(0, 5) % 3)
+    >>> torch.one_hot(torch.arange(0, 5) % 3)
     tensor([[1, 0, 0],
             [0, 1, 0],
             [0, 0, 1],
             [1, 0, 0],
             [0, 1, 0]])
-    >>> torch.to_one_hot(torch.arange(0, 5) % 3, num_classes=5)
+    >>> torch.one_hot(torch.arange(0, 5) % 3, num_classes=5)
     tensor([[1, 0, 0, 0, 0],
             [0, 1, 0, 0, 0],
             [0, 0, 1, 0, 0],
             [1, 0, 0, 0, 0],
             [0, 1, 0, 0, 0]])
-    >>> torch.to_one_hot(torch.arange(0, 6).view(3,2) % 3)
+    >>> torch.one_hot(torch.arange(0, 6).view(3,2) % 3)
     tensor([[[1, 0, 0],
              [0, 1, 0]],
 

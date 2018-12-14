@@ -6686,24 +6686,24 @@ class _TestTorchMixin(object):
         dst2.masked_fill_(dst2 > 0, val)
         self.assertEqual(dst, dst2, 0)
 
-    def test_to_one_hot(self):
+    def test_one_hot(self):
         with self.assertRaises(RuntimeError):
-            torch.to_one_hot(torch.tensor([3, 4, -1, 0]), -1)
+            torch.one_hot(torch.tensor([3, 4, -1, 0]), -1)
         with self.assertRaises(RuntimeError):
-            torch.to_one_hot(torch.tensor([3, 4, 1, 0]), 3)
-        t = torch.to_one_hot(torch.tensor([3, 4, 1, 0]))
+            torch.one_hot(torch.tensor([3, 4, 1, 0]), 3)
+        t = torch.one_hot(torch.tensor([3, 4, 1, 0]))
         expected = torch.tensor([[0, 0, 0, 1, 0],
                                  [0, 0, 0, 0, 1],
                                  [0, 1, 0, 0, 0],
                                  [1, 0, 0, 0, 0]])
         self.assertEqual(t, expected)
-        t = torch.to_one_hot(torch.tensor([3, 4, 1, 0]), 6)
+        t = torch.one_hot(torch.tensor([3, 4, 1, 0]), 6)
         expected = torch.tensor([[0, 0, 0, 1, 0, 0],
                                  [0, 0, 0, 0, 1, 0],
                                  [0, 1, 0, 0, 0, 0],
                                  [1, 0, 0, 0, 0, 0]])
         self.assertEqual(t, expected)
-        t = torch.to_one_hot(torch.tensor([[3, 4], [1, 0]]))
+        t = torch.one_hot(torch.tensor([[3, 4], [1, 0]]))
         expected = torch.tensor([[[0, 0, 0, 1, 0],
                                   [0, 0, 0, 0, 1]],
                                  [[0, 1, 0, 0, 0],
