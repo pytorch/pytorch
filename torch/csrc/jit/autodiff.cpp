@@ -530,7 +530,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
   //     return x*y, (x, y)
   // def backward(ctx, grad_output):
   //     x, y = ctx
-  //     return y * grad_output, x * grad_output
+  //     return (y * grad_output).reduce_as(x), (x * grad_output).reduce_as(y)
   // Note that ctx is a tuple that carries all input/intermediate results needed
   // in backward from forward pass.
   // grad_values(a.k.a gradOutputs) propagated through node->owningGraph() in reversed order.
