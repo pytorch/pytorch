@@ -205,25 +205,13 @@
 - func: _argmin(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
   variants: function
 
-- func: as_strided(Tensor self, IntList size, IntList stride) -> Tensor
+- func: as_strided(Tensor self, IntList size, IntList stride, int64_t? storage_offset=None) -> Tensor
   variants: function, method
   device_guard: false
 
-- func: as_strided_(Tensor self, IntList size, IntList stride) -> Tensor
+- func: as_strided_(Tensor self, IntList size, IntList stride, int64_t? storage_offset=None) -> Tensor
   variants: function, method
   device_guard: false
-
-- func: as_strided(Tensor self, IntList size, IntList stride, int64_t storage_offset) -> Tensor
-  variants: function, method
-  device_guard: false
-  python_default_init:
-    storage_offset: self.storage_offset()
-
-- func: as_strided_(Tensor self, IntList size, IntList stride, int64_t storage_offset) -> Tensor
-  variants: function, method
-  device_guard: false
-  python_default_init:
-    storage_offset: self.storage_offset()
 
 - func: asin(Tensor self) -> Tensor
   variants: function, method

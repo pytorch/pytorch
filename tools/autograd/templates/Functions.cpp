@@ -1371,7 +1371,7 @@ static inline int64_t _min_storage_size(IntList sizes, IntList strides, int64_t 
 }
 
 // See NOTE [ as_strided Backward and layout-aware/agnostic autograd ] for explanation
-Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList sizes, IntList strides, int64_t storage_offset) {
+Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList sizes, IntList strides, optional<int64_t> storage_offset_) {
   // For output geometry,
   //   check for size 0 dimensions,
   //   skip size 1 dimensions,
@@ -1379,6 +1379,7 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList s
   // Step (0)     for the algorithm in NOTE [ as_strided Backward and layout-aware/agnostic autograd ]
   // Step (0)~(1) for the algorithm in NOTE [ Detecting Memory Overlap Within A Strided Tensor ]
   //              on output geometry
+  auto storage_offset = storage_offset_.value_or(input_geometry.storage_offset());
   auto odim = grad.dim();
   std::vector<int64_t> out_sizes_, out_strides_;
   out_sizes_.reserve(odim);

@@ -115,16 +115,10 @@ inline Tensor Tensor::argmin(int64_t dim, bool keepdim) const {
 inline Tensor Tensor::argmin() const {
     return type().argmin(*this);
 }
-inline Tensor Tensor::as_strided(IntList size, IntList stride) const {
-    return type().as_strided(*this, size, stride);
-}
-inline Tensor & Tensor::as_strided_(IntList size, IntList stride) {
-    return type().as_strided_(*this, size, stride);
-}
-inline Tensor Tensor::as_strided(IntList size, IntList stride, int64_t storage_offset) const {
+inline Tensor Tensor::as_strided(IntList size, IntList stride, c10::optional<int64_t> storage_offset) const {
     return type().as_strided(*this, size, stride, storage_offset);
 }
-inline Tensor & Tensor::as_strided_(IntList size, IntList stride, int64_t storage_offset) {
+inline Tensor & Tensor::as_strided_(IntList size, IntList stride, c10::optional<int64_t> storage_offset) {
     return type().as_strided_(*this, size, stride, storage_offset);
 }
 inline Tensor Tensor::asin() const {

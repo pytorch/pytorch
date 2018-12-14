@@ -298,10 +298,8 @@ public:
   Tensor argmax() const;
   Tensor argmin(int64_t dim, bool keepdim=false) const;
   Tensor argmin() const;
-  Tensor as_strided(IntList size, IntList stride) const;
-  Tensor & as_strided_(IntList size, IntList stride);
-  Tensor as_strided(IntList size, IntList stride, int64_t storage_offset) const;
-  Tensor & as_strided_(IntList size, IntList stride, int64_t storage_offset);
+  Tensor as_strided(IntList size, IntList stride, c10::optional<int64_t> storage_offset=c10::nullopt) const;
+  Tensor & as_strided_(IntList size, IntList stride, c10::optional<int64_t> storage_offset=c10::nullopt);
   Tensor asin() const;
   Tensor & asin_();
   Tensor atan() const;

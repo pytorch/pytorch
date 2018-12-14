@@ -138,7 +138,7 @@
 - name: alias(Tensor self)
   self: grad
 
-- name: as_strided(Tensor self, IntList size, IntList stride, int64_t storage_offset)
+- name: as_strided(Tensor self, IntList size, IntList stride, int64_t? storage_offset)
   self: as_strided_backward(grad, TensorGeometry(self), size, stride, storage_offset)
 
 - name: asin(Tensor self)
