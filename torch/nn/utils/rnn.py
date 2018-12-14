@@ -58,13 +58,14 @@ class PackedSequence(PackedSequence_):
             return self
         else:
             return type(self)(self.data.cuda(*args, **kwargs), self.batch_sizes,
-                              self.sorted_indices, self.unsorted_indices)
+                              self.sorted_indices.cuda(*args, **kwargs),
+                              self.unsorted_indices.cuda(*args, **kwargs))
 
     def cpu(self):
         """Returns a CPU copy if `self.data` not already on the CPU"""
         if self.is_cuda:
             return type(self)(self.data.cpu(), self.batch_sizes,
-                              self.sorted_indices, self.unsorted_indices)
+                              self.sorted_indices.cpu(), self.unsorted_indices.cpu())
         else:
             return self
 
@@ -136,7 +137,8 @@ def invert_permutation(permutation):
     if permutation is None:
         return None
     output = torch.empty_like(permutation)
-    output.scatter_(0, permutation, torch.arange(0, permutation.numel()))
+    output.scatter_(0, permutation,
+                    torch.arange(0, permutation.numel(), device=permutation.device))
     return output
 
 
@@ -182,6 +184,7 @@ def pack_padded_sequence(input, lengths, batch_first=False, enforce_sorted=False
         sorted_indices = None
     else:
         lengths, sorted_indices = torch.sort(lengths, descending=True)
+        sorted_indices = sorted_indices.to(input.device)
         batch_dim = 0 if batch_first else 1
         input = input.index_select(batch_dim, sorted_indices)
 
@@ -236,7 +239,7 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_le
     if sequence.unsorted_indices is not None:
         batch_dim = 0 if batch_first else 1
         return padded_output.index_select(batch_dim, sequence.unsorted_indices), \
-            lengths.index_select(0, sequence.unsorted_indices)
+            lengths[sequence.unsorted_indices]
     return padded_output, lengths
 
 
