@@ -56,6 +56,16 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
   type_ = operator_def.type();
 }
 
+OperatorBase::OperatorBase(
+    const c10::FunctionSchema& fn_schema,
+    const std::vector<c10::IValue>& inputs,
+    const std::vector<c10::IValue*>& outputs)
+    : fn_schema_(make_unique<c10::FunctionSchema>(fn_schema)),
+      ivalue_inputs_(inputs),
+      ivalue_outputs_(outputs) {
+  output_tensors_.resize(ivalue_outputs_.size());
+}
+
 vector<TensorShape> OperatorBase::InputTensorShapes() const {
   vector<TensorShape> tps;
   for (const auto& blob : inputs_) {
@@ -343,6 +353,15 @@ C10_DEFINE_REGISTRY(
     GradientMakerBase,
     const OperatorDef&,
     const vector<GradientWrapper>&);
+
+C10_DEFINE_REGISTRY(
+    FunctionSchemaOperatorRegistry,
+    OperatorBase,
+    const c10::FunctionSchema,
+    const std::vector<c10::IValue>&,
+    const std::vector<c10::IValue*>&);
+
+C10_DEFINE_REGISTRY(FunctionSchemaRegistry, FunctionSchemaStorageBase);
 
 GradientOpsMeta GetGradientForOp(
     const OperatorDef& def, const vector<GradientWrapper>& g_output) {
@@ -686,6 +705,11 @@ std::set<std::string> GetRegisteredOperators() {
 
   // C10 operators
   for (const auto& name : C10OperatorRegistry()->Keys()) {
+    all_keys.emplace(name);
+  }
+
+  // FunctionSchema registered operators
+  for (const auto& name : FunctionSchemaOperatorRegistry()->Keys()) {
     all_keys.emplace(name);
   }
 

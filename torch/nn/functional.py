@@ -1885,17 +1885,40 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
-            'mean': the sum of the output will be divided by the number of
-            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
-            and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
+            'none' | 'batchmean' | 'sum' | 'mean'.
+            'none': no reduction will be applied
+            'batchmean': the sum of the output will be divided by the batchsize
+            'sum': the output will be summed
+            'mean': the output will be divided by the number of elements in the output
+            Default: 'mean'
+
+        .. note:: :attr:`size_average` and :attr:`reduce` are in the process of being deprecated,
+            and in the meantime, specifying either of those two args will override :attr:`reduction`.
+
+        .. note:: `reduction='mean'` doesn't return the true kl divergence value, please use
+            `reduction='batchmean'` which aligns with KL math definition.
+            In the next major release, 'mean' will be changed to be the same as 'batchmean'.
     """
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction_enum = _Reduction.get_enum(reduction)
-    return torch.kl_div(input, target, reduction_enum)
+        if reduction == 'mean':
+            warnings.warn("reduction: 'mean' divides the total loss by both the batch size and the support size."
+                          "'batchmean' divides only by the batch size, and aligns with the KL div math definition."
+                          "'mean' will be changed to behave the same as 'batchmean' in the next major release.")
+
+        # special case for batchmean
+        if reduction == 'batchmean':
+            reduction_enum = _Reduction.get_enum('sum')
+        else:
+            reduction_enum = _Reduction.get_enum(reduction)
+
+    reduced = torch.kl_div(input, target, reduction_enum)
+
+    if reduction == 'batchmean' and input.dim() != 0:
+        reduced = reduced / input.size()[0]
+
+    return reduced
 
 
 @torch._jit_internal.weak_script
@@ -2241,9 +2264,9 @@ def cosine_embedding_loss(input1, input2, target, margin=0, size_average=None,
 
 
 @torch._jit_internal.weak_script
-def multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None,
+def multi_margin_loss(input, target, p=1, margin=1., weight=None, size_average=None,
                       reduce=None, reduction='mean'):
-    # type: (Tensor, Tensor, int, int, Optional[Tensor], Optional[bool], Optional[bool], str) -> Tensor
+    # type: (Tensor, Tensor, int, float, Optional[Tensor], Optional[bool], Optional[bool], str) -> Tensor
     r"""multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None,
                           reduce=None, reduction='mean') -> Tensor
 
@@ -2310,9 +2333,13 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
         scale_factor (int): multiplier for spatial size. Has to be an integer.
         mode (string): algorithm used for upsampling:
             'nearest' | 'linear' | 'bilinear' | 'trilinear'. Default: 'nearest'
-        align_corners (bool, optional): if True, the corner pixels of the input
-            and output tensors are aligned, and thus preserving the values at
-            those pixels. This only has effect when :attr:`mode` is `linear`,
+        align_corners (bool, optional): Geometrically, we consider the pixels of the
+            input and output as squares rather than points.
+            If set to True, the input and output tensors are aligned by the
+            center points of their corner pixels. If set to False, the input and
+            output tensors are aligned by the corner points of their corner
+            pixels, and the interpolation uses edge value padding for out-of-boundary values.
+            This only has effect when :attr:`mode` is `linear`,
             `bilinear`, or `trilinear`. Default: False
 
     .. warning::
@@ -2351,9 +2378,13 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         scale_factor (float or Tuple[float]): multiplier for spatial size. Has to match input size if it is a tuple.
         mode (string): algorithm used for upsampling:
             'nearest' | 'linear' | 'bilinear' | 'trilinear' | 'area'. Default: 'nearest'
-        align_corners (bool, optional): if True, the corner pixels of the input
-            and output tensors are aligned, and thus preserving the values at
-            those pixels. This only has effect when :attr:`mode` is `linear`,
+        align_corners (bool, optional): Geometrically, we consider the pixels of the
+            input and output as squares rather than points.
+            If set to True, the input and output tensors are aligned by the
+            center points of their corner pixels. If set to False, the input and
+            output tensors are aligned by the corner points of their corner
+            pixels, and the interpolation uses edge value padding for out-of-boundary values.
+            This only has effect when :attr:`mode` is `linear`,
             `bilinear`, or `trilinear`. Default: False
 
     .. warning::

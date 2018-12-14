@@ -1,7 +1,7 @@
 graph(%x : Tensor) {
   %1 : bool = prim::Constant[value=1]()
   %y.1 : int = prim::Constant[value=0]()
-  %3 : int = prim::TensorToNum(%x)
+  %3 : int = prim::Int(%x)
   %4 : int = prim::Constant[value=0]()
   %5 : int = prim::Constant[value=8]()
   %6 : int = aten::__round_to_zero_floordiv(%3, %5)

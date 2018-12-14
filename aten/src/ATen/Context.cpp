@@ -1,8 +1,8 @@
-#include "ATen/Config.h"
+#include <ATen/Config.h>
 
-#include "Context.h"
+#include <ATen/Context.h>
 
-#include <ATen/core/TensorOptions.h>
+#include <c10/core/TensorOptions.h>
 
 #include <thread>
 #include <mutex>
@@ -10,12 +10,12 @@
 #include <string>
 #include <stdexcept>
 
-#include "ATen/CPUGenerator.h"
-#include "ATen/RegisterCPU.h"
-#include "ATen/Tensor.h"
+#include <ATen/CPUGenerator.h>
+#include <ATen/RegisterCPU.h>
+#include <ATen/Tensor.h>
 #include <ATen/cpu/FlushDenormal.h>
 
-#include "TH/TH.h"  // for USE_LAPACK
+#include <TH/TH.h>  // for USE_LAPACK
 
 namespace at {
 
@@ -111,12 +111,23 @@ TypeExtendedInterface& getType(const Tensor& t) {
   return getType(t.unsafeGetTensorImpl());
 }
 
+LegacyTHDispatcher& getLegacyTHDispatcher(TensorOptions options) {
+  return globalContext().getLegacyTHDispatcher(
+            options.backend(), typeMetaToScalarType(options.dtype()));
+}
+
+LegacyTHDispatcher& getLegacyTHDispatcher(const TensorImpl* impl) {
+  Backend backend = tensorTypeIdToBackend(impl->type_id());
+  return globalContext().getLegacyTHDispatcher(
+            backend, typeMetaToScalarType(impl->dtype()));
+}
+
 Allocator* getCPUAllocator() {
   return getTHDefaultAllocator();
 }
 
-struct LegacyTypeInit : public LegacyTypeInitInterface {
-  LegacyTypeInit(LegacyTypeInitArgs) {}
+struct LegacyDeviceTypeInit : public LegacyDeviceTypeInitInterface {
+  LegacyDeviceTypeInit(LegacyDeviceTypeInitArgs) {}
   void initCPU() const override {
     globalContext();
   }
@@ -130,6 +141,6 @@ struct LegacyTypeInit : public LegacyTypeInitInterface {
     globalContext().lazyInitComplex();
   }
 };
-REGISTER_LEGACY_TYPE_INIT(LegacyTypeInit);
+REGISTER_LEGACY_TYPE_INIT(LegacyDeviceTypeInit);
 
 }

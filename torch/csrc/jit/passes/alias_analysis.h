@@ -53,7 +53,7 @@ class AliasDb {
   void dump() const;
 
  private:
-  void analyze(std::shared_ptr<Graph> graph);
+  void analyze(const std::shared_ptr<Graph>& graph);
   void analyze(Block* block);
   void analyze(Node* node);
 
@@ -87,7 +87,7 @@ class AliasDb {
 };
 
 inline TORCH_API AliasDb AliasAnalysis(std::shared_ptr<Graph> graph) {
-  return AliasDb(graph);
+  return AliasDb(std::move(graph));
 }
 } // namespace jit
 } // namespace torch

@@ -1,7 +1,7 @@
-#include "Types.h"
+#include <ATen/miopen/Types.h>
 
 #include <ATen/ATen.h>
-#include "miopen/version.h"
+#include <miopen/version.h>
 
 namespace at { namespace native {
 

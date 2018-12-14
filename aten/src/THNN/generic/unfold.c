@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/unfold.c"
+#define TH_GENERIC_FILE "THNN/generic/unfold.c"
 #else
 
 /* note: due to write issues, this one cannot be parallelized as well as unfolded_copy */

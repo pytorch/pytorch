@@ -1,13 +1,13 @@
-#include "ProcessGroupNCCL.hpp"
+#include <c10d/ProcessGroupNCCL.hpp>
 
 #include <map>
 #include <tuple>
 #include <unordered_set>
 
-#include <THC.h>
+#include <THC/THC.h>
 
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAGuard.h>
 
 #include <c10d/Utils.hpp>
 

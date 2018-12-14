@@ -151,7 +151,7 @@ class MaxPool2d(_MaxPoolNd):
 @weak_module
 class MaxPool3d(_MaxPoolNd):
     r"""Applies a 3D max pooling over an input signal composed of several input
-    planes. This is not a test
+    planes.
 
     In the simplest case, the output value of the layer with input size :math:`(N, C, D, H, W)`,
     output :math:`(N, C, D_{out}, H_{out}, W_{out})` and :attr:`kernel_size` :math:`(kD, kH, kW)`
@@ -433,6 +433,7 @@ class MaxUnpool3d(_MaxUnpoolNd):
 
 @weak_module
 class _AvgPoolNd(Module):
+    __constants__ = ['kernel_size', 'stride', 'padding', 'ceil_mode', 'count_include_pad']
 
     def extra_repr(self):
         return 'kernel_size={}, stride={}, padding={}'.format(
@@ -482,9 +483,6 @@ class AvgPool1d(_AvgPoolNd):
         >>> m(torch.tensor([[[1.,2,3,4,5,6,7]]]))
         tensor([[[ 2.,  4.,  6.]]])
     """
-    __constants__ = ['kernel_size', 'stride', 'padding', 'ceil_mode',
-                     'count_include_pad']
-
     def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
                  count_include_pad=True):
         super(AvgPool1d, self).__init__()
@@ -552,9 +550,6 @@ class AvgPool2d(_AvgPoolNd):
         >>> input = torch.randn(20, 16, 50, 32)
         >>> output = m(input)
     """
-    __constants__ = ['kernel_size', 'stride', 'padding', 'ceil_mode',
-                     'count_include_pad']
-
     def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
                  count_include_pad=True):
         super(AvgPool2d, self).__init__()
@@ -628,9 +623,6 @@ class AvgPool3d(_AvgPoolNd):
         >>> input = torch.randn(20, 16, 50,44, 31)
         >>> output = m(input)
     """
-    __constants__ = ['kernel_size', 'stride', 'padding', 'ceil_mode',
-                     'count_include_pad']
-
     def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
                  count_include_pad=True):
         super(AvgPool3d, self).__init__()

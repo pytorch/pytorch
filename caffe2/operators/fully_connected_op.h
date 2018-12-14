@@ -207,10 +207,8 @@ class FullyConnectedGradientOp : public Operator<Context> {
     CAFFE_ENFORCE(M * K == X.numel(), dimErrorString());
     CAFFE_ENFORCE(K * N == W.numel(), dimErrorString());
 
-    auto* dW = Output(0);
-    auto* db = Output(1);
-    dW->ResizeLike(W);
-    db->Resize(N);
+    auto* dW = Output(0, W.sizes(), at::dtype<T_DW>());
+    auto* db = Output(1, {N}, at::dtype<T_DB>());
 
     if (X.numel() == 0) {
       // generate a zero blob for db and dW when X is empty
@@ -226,9 +224,7 @@ class FullyConnectedGradientOp : public Operator<Context> {
           &context_);
 
       if (OutputSize() == 3) {
-        auto* dX = Output(2);
-        dX->ResizeLike(X);
-        dX->template mutable_data<T_DX>();
+        Output(2, X.sizes(), at::dtype<T_DX>());
       }
 
       return true;
@@ -278,8 +274,7 @@ class FullyConnectedGradientOp : public Operator<Context> {
 
     // Compute dX
     if (OutputSize() == 3) {
-      auto* dX = Output(2);
-      dX->ResizeLike(X);
+      auto* dX = Output(2, X.sizes(), at::dtype<T_DX>());
       math::Gemm<T_DX, Context, Engine>(
           CblasNoTrans,
           TransposeWeight ? CblasNoTrans : CblasTrans,

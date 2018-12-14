@@ -1,11 +1,11 @@
-#include "alias_analysis.h"
+#include <torch/csrc/jit/passes/alias_analysis.h>
 
-#include "torch/csrc/jit/script/error_report.h"
+#include <torch/csrc/jit/script/error_report.h>
 
 namespace torch {
 namespace jit {
 namespace {
-bool shouldAnnotate(TypePtr type) {
+bool shouldAnnotate(const TypePtr& type) {
   return type->isSubtypeOf(DynamicType::get()) ||
       type->kind() == TypeKind::ListType ||
       type->kind() == TypeKind::TupleType ||
@@ -20,7 +20,7 @@ bool shouldAnnotate(const Value* v) {
 }
 } // namespace
 
-AliasDb::AliasDb(std::shared_ptr<Graph> graph) : graph_(graph) {
+AliasDb::AliasDb(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {
   analyze(graph_);
 
   // Build helper indices
@@ -36,7 +36,7 @@ AliasDb::AliasDb(std::shared_ptr<Graph> graph) : graph_(graph) {
     }
   }
   // - Set of all nodes with a wildcard
-  buildWildcardIndex(graph->block());
+  buildWildcardIndex(graph_->block());
 }
 
 void AliasDb::buildWildcardIndex(const Block* b) {
@@ -202,7 +202,7 @@ void AliasDb::dump() const {
   }
 }
 
-void AliasDb::analyze(std::shared_ptr<Graph> graph) {
+void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
   // Assign aliases to the graph's inputs, assuming that all inputs of a given
   // type may alias to each other.
   const auto tensorAlias = getFreshAlias(/*isGraphInput=*/true);
@@ -279,6 +279,8 @@ void AliasDb::analyze(Node* node) {
     case prim::MMTreeReduce:
     case prim::MMBatchSide:
     case prim::None:
+    case prim::BroadcastSizes:
+    case prim::ChunkSizes:
       return analyzeCreator(node);
     case prim::TupleUnpack:
     case prim::TupleIndex:
@@ -529,7 +531,7 @@ void AliasDb::addAlias(const Value* value, Symbol alias) {
     valueToAlias_[value].addSet(alias);
   } else {
     AliasInfo aliasInfo;
-    aliasInfo.addSet(std::move(alias));
+    aliasInfo.addSet(alias);
     valueToAlias_.insert({value, std::move(aliasInfo)});
   }
 }

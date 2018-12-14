@@ -1,47 +1,48 @@
-#include "torch/csrc/utils/pybind.h"
-#include "torch/csrc/utils/auto_gil.h"
+#include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/auto_gil.h>
 
-#include "torch/csrc/jit/python_tracer.h"
-#include "torch/csrc/jit/tracer.h"
-#include "torch/csrc/jit/python_ir.h"
-#include "torch/csrc/jit/python_arg_flatten.h"
-#include "torch/csrc/jit/export.h"
-#include "torch/csrc/jit/import.h"
-#include "torch/csrc/jit/argument_spec.h"
-#include "torch/csrc/jit/passes/remove_expands.h"
-#include "torch/csrc/jit/passes/graph_fuser.h"
-#include "torch/csrc/jit/passes/onnx.h"
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/jit/passes/erase_number_types.h"
-#include "torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h"
-#include "torch/csrc/jit/passes/common_subexpression_elimination.h"
-#include "torch/csrc/jit/passes/constant_pooling.h"
-#include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
-#include "torch/csrc/jit/passes/peephole.h"
-#include "torch/csrc/jit/passes/canonicalize.h"
-#include "torch/csrc/jit/passes/onnx/peephole.h"
-#include "torch/csrc/jit/passes/onnx/fixup_onnx_loop.h"
-#include "torch/csrc/jit/passes/shape_analysis.h"
-#include "torch/csrc/jit/passes/canonicalize_ops.h"
-#include "torch/csrc/jit/passes/remove_inplace_ops.h"
-#include "torch/csrc/jit/passes/constant_propagation.h"
-#include "torch/csrc/jit/passes/loop_unrolling.h"
-#include "torch/csrc/jit/passes/to_batch.h"
-#include "torch/csrc/jit/passes/lower_tuples.h"
-#include "torch/csrc/jit/passes/specialize_undef.h"
-#include "torch/csrc/jit/passes/utils/check_alias_annotation.h"
-#include "torch/csrc/jit/graph_executor.h"
-#include "torch/csrc/jit/script/init.h"
-#include "torch/csrc/jit/script/python_tree_views.h"
-#include "torch/csrc/jit/batched/BatchTensor.h"
-#include "torch/csrc/jit/pybind_utils.h"
-#include "torch/csrc/jit/function_schema.h"
-#include "torch/csrc/jit/operator.h"
-#include "torch/csrc/jit/fuser/interface.h"
-#include "torch/csrc/jit/script/jit_exception.h"
-#include "torch/csrc/jit/script/jit_exception.h"
+#include <torch/csrc/jit/python_tracer.h>
+#include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/jit/python_ir.h>
+#include <torch/csrc/jit/python_arg_flatten.h>
+#include <torch/csrc/jit/export.h>
+#include <torch/csrc/jit/import.h>
+#include <torch/csrc/jit/argument_spec.h>
+#include <torch/csrc/jit/fuser/kernel_cache.h>
+#include <torch/csrc/jit/passes/remove_expands.h>
+#include <torch/csrc/jit/passes/graph_fuser.h>
+#include <torch/csrc/jit/passes/onnx.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/erase_number_types.h>
+#include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
+#include <torch/csrc/jit/passes/common_subexpression_elimination.h>
+#include <torch/csrc/jit/passes/constant_pooling.h>
+#include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
+#include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/passes/canonicalize.h>
+#include <torch/csrc/jit/passes/onnx/peephole.h>
+#include <torch/csrc/jit/passes/onnx/fixup_onnx_loop.h>
+#include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/passes/canonicalize_ops.h>
+#include <torch/csrc/jit/passes/remove_inplace_ops.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/loop_unrolling.h>
+#include <torch/csrc/jit/passes/to_batch.h>
+#include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/passes/specialize_undef.h>
+#include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
+#include <torch/csrc/jit/graph_executor.h>
+#include <torch/csrc/jit/script/init.h>
+#include <torch/csrc/jit/script/python_tree_views.h>
+#include <torch/csrc/jit/batched/BatchTensor.h>
+#include <torch/csrc/jit/pybind_utils.h>
+#include <torch/csrc/jit/function_schema.h>
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/fuser/interface.h>
+#include <torch/csrc/jit/script/jit_exception.h>
+#include <torch/csrc/jit/script/jit_exception.h>
 
-#include "caffe2/serialize/inline_container.h"
+#include <caffe2/serialize/inline_container.h>
 
 #include <pybind11/functional.h>
 
@@ -90,9 +91,13 @@ void initJITBindings(PyObject *module) {
 
   py::register_exception<JITException>(m, "JITException");
 
-  py::class_<python::IODescriptor>(m, "IODescriptor");
+  py::class_<python::IODescriptor>(m, "IODescriptor"); // NOLINT(bugprone-unused-raii)
 
   m.def("_jit_init", loadPythonClasses)
+#if USE_CUDA_FUSER || USE_CPU_FUSER
+   .def("_jit_debug_fuser_num_cached_kernel_specs",
+       torch::jit::fuser::debugNumCachedKernelSpecs)
+#endif
    .def("_jit_pass_onnx", ToONNX)
    .def("_jit_pass_lower_all_tuples", LowerAllTuples)
    .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
@@ -172,12 +177,14 @@ void initJITBindings(PyObject *module) {
        checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
    });
 
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")
       .def("__repr__", [](CompleteArgumentSpec& self) {
         std::ostringstream s;
         s << self;
         return s.str();
       });
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<ArgumentSpec>(m, "ArgumentSpec");
   py::class_<Code>(m, "Code")
       .def("grad_executors", [](Code& c) {
@@ -293,7 +300,7 @@ void initJITBindings(PyObject *module) {
   m.def("_jit_get_operation", [](const std::string& qualified_name) {
     try {
       auto symbol = Symbol::fromQualString(qualified_name);
-      auto operations = getAllOperatorsFor(std::move(symbol));
+      auto operations = getAllOperatorsFor(symbol);
       AT_CHECK(!operations.empty(), "No such operator ", qualified_name);
       AT_CHECK(
           operations.size() == 1,
@@ -331,12 +338,13 @@ void initJITBindings(PyObject *module) {
   });
   m.def("_jit_get_schemas_for_operator", [](const std::string& qualified_name) {
     auto symbol = Symbol::fromQualString(qualified_name);
-    auto operations = getAllOperatorsFor(std::move(symbol));
+    auto operations = getAllOperatorsFor(symbol);
     return fmap(operations, [](const std::shared_ptr<Operator>& op) {
         return op->schema();
       });
   });
 
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<detail::Future>(m, "Future");
 
   m.def("fork", [](script::Module &sm, py::args args) {

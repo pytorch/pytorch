@@ -1,11 +1,11 @@
 #ifndef THC_CACHING_HOST_ALLOCATOR_INC
 #define THC_CACHING_HOST_ALLOCATOR_INC
 
-#include "THCGeneral.h"
+#include <THC/THCGeneral.h>
 
 
 #ifdef __cplusplus
-#include <ATen/cuda/CUDAStream.h>
+#include <c10/cuda/CUDAStream.h>
 #endif
 
 //

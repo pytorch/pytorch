@@ -49,7 +49,7 @@ static c10::optional<Tensor> _allreduce_return_trivial(
     Scalar ident) {
   // Return identity
   if (self.numel() == 0) {
-    return self.type().scalarTensor(ident);
+    return at::scalar_tensor(ident, self.options());
   }
   return c10::nullopt;
 }
