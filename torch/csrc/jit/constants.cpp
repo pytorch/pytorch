@@ -108,8 +108,7 @@ RegisterOperators reg({
             return 0;
           };
         } else if(type->isSubtypeOf(ListType::ofBools())) {
-          auto int_list = node->is(attr::value);
-          std::vector<bool> bs(int_list.begin(), int_list.end());
+          auto bs = node->is(attr::value);
           return [bs](Stack& stack) {
             push(stack, bs);
             return 0;

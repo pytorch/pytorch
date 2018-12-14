@@ -422,14 +422,14 @@ class TestCppExtension(common.TestCase):
                 super(M, self).__init__()
                 self.x = torch.nn.Parameter(torch.tensor(1.0))
                 self.net = extension.Net(3, 5)
-                self.net.to(torch.float64)
 
             def forward(self, input):
                 return self.net.forward(input) + self.x
 
         net = extension.Net(5, 2)
-        self.assertEqual(str(net), "Net")
         net.double()
+        net.to(torch.get_default_dtype())
+        self.assertEqual(str(net), "Net")
 
         # Further embed the torch.nn.Module into a Sequential, and also add the
         # C++ module as an element of the Sequential.
@@ -441,6 +441,25 @@ class TestCppExtension(common.TestCase):
         # The call operator is bound to forward too.
         self.assertEqual(output, sequential(input))
         self.assertEqual(list(output.shape), [2, 2])
+
+        # Do changes on the module hierarchy.
+        old_dtype = torch.get_default_dtype()
+        sequential.to(torch.float64)
+        sequential.to(torch.float32)
+        sequential.to(old_dtype)
+        self.assertEqual(sequential[2].parameters()[0].dtype, old_dtype)
+
+        # Make sure we can access these method recursively.
+        self.assertEqual(len(list(sequential.parameters())), len(net.parameters()) * 2 + 1)
+        self.assertEqual(len(list(sequential.named_parameters())), len(net.named_parameters()) * 2 + 1)
+        self.assertEqual(len(list(sequential.buffers())), len(net.buffers()) * 2)
+        self.assertEqual(len(list(sequential.modules())), 8)
+
+        # Test clone()
+        net2 = net.clone()
+        self.assertEqual(len(net.parameters()), len(net2.parameters()))
+        self.assertEqual(len(net.buffers()), len(net2.buffers()))
+        self.assertEqual(len(net.modules()), len(net2.modules()))
 
         # Try differentiating through the whole module.
         for parameter in net.parameters():
