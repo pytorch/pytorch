@@ -258,25 +258,12 @@ static inline Tensor &mean_out(Tensor &result, const Tensor &self, IntList dim,
       "Can only calculate the mean of floating types. Got ",
       toString(scalarType),
       " instead.");
-  if (self.device().type() == DeviceType::CUDA) {
-    ScalarType dtype = get_dtype(result, self, opt_dtype, true);
-    auto iter = make_reduction("mean", result, self, dim, keepdim, dtype);
-    if (iter->numel() == 0) {
-      result.zero_();
-    } else {
-      mean_stub(iter->device_type(), *iter);
-    }
+  ScalarType dtype = get_dtype(result, self, opt_dtype, true);
+  auto iter = make_reduction("mean", result, self, dim, keepdim, dtype);
+  if (iter->numel() == 0) {
+    result.zero_();
   } else {
-    at::native::sum_out(result, self.toType(scalarType), dim, keepdim, opt_dtype);
-    if (result.numel() > 0 && self.ndimension() > 0) {
-      int64_t numel = dim.size() == 0 ? self.numel() : n_dim_size(self, dim);
-      if (numel > 0) {
-        result.div_(numel);
-      } else {
-        // NumPy equivalent
-        result.fill_(std::numeric_limits<double>::quiet_NaN());
-      }
-    }
+    mean_stub(iter->device_type(), *iter);
   }
   return result;
 }

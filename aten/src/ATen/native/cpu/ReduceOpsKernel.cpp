@@ -23,11 +23,13 @@ static void sum_kernel_impl(TensorIterator& iter) {
 }
 
 static void mean_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES(iter.type(), "sum", [&] {
-    binary_kernel_reduce_vec(
+  AT_DISPATCH_ALL_TYPES(iter.type(), "mean", [&] {
+    scalar_t factor = scalar_t(iter.num_output_elements()) / iter.numel();
+    binary_kernel_reduce(
       iter,
       [=](scalar_t a, scalar_t b) -> scalar_t { return a + b; },
-      [=](Vec256<scalar_t> a, Vec256<scalar_t> b) { return a + b; });
+      [=](scalar_t a, scalar_t b) -> scalar_t { return a + b; },
+      [factor](scalar_t a) -> scalar_t { return a*factor; }, scalar_t(0));
   });
 }
 
@@ -72,7 +74,8 @@ static void std_kernel_impl(TensorIterator &iter, bool unbiased) {
       [unbiased](WelfordData acc) -> scalar_t {
         int64_t divisor = unbiased ? (acc.n - 1) : acc.n;
         return (divisor > 0) ? std::sqrt(acc.m2 / divisor) : NAN;
-      }
+      },
+      WelfordData()
     );
   });
 }
@@ -265,4 +268,3 @@ REGISTER_DISPATCH(norm_kernel, &norm_kernel_impl);
 REGISTER_DISPATCH(mean_stub, &mean_kernel_impl);
 
 }}  // namespace at::native
-
