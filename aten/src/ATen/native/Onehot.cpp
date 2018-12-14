@@ -3,7 +3,7 @@
 namespace at { namespace native {
 
 Tensor to_one_hot(const Tensor &self, int64_t num_classes) {
-    AT_CHECK(self.min().item().toLong() >= 0, "Class values must be positive");
+    AT_CHECK(self.min().item().toLong() >= 0, "Class values must be non-negative");
     if (num_classes <= 0) {
         num_classes = self.max().item().toLong() + 1;
     } else {
