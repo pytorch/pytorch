@@ -40,7 +40,7 @@ fi
 # otherwise we'd have to build ONNX protos as part of this CI job.
 time python tools/clang_tidy.py          \
   --verbose                              \
-  --paths torch/csrc                     \
+  --paths torch/csrc/                    \
   --diff "$BASE_BRANCH"                  \
   -g"-torch/csrc/distributed/Module.cpp" \
   -g"-torch/csrc/jit/export.cpp"         \

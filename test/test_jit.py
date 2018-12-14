@@ -9871,6 +9871,9 @@ class TestFuser(JitTestCase):
 
         ge = self.checkTrace(f, (x, y))
         self.assertAllFused(ge.graph_for(x, y))
+        x.requires_grad_(True)
+        y.requires_grad_(True)
+        self.assertAllFused(ge.graph_for(x, y), except_for=("aten::size", "prim::BroadcastSizes"))
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -10113,6 +10116,20 @@ class TestFuser(JitTestCase):
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
 
         ge = self.checkTrace(self.fn_test_relu, (x, y))
+
+    @staticmethod
+    def fn_test_erf(x):
+        return F.relu(torch.erf(x) - torch.erfc(x))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_erf_cuda(self):
+        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        ge = self.checkTrace(self.fn_test_erf, (x,))
+        self.assertAllFused(ge.graph_for(x))
+        x.requires_grad_(True)
+        self.assertAllFused(ge.graph_for(x), except_for=("aten::size", "prim::BroadcastSizes"))
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
     @enable_cpu_fuser
@@ -10717,7 +10734,6 @@ def add_autograd_test(
                 args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace, call_kwargs=kwargs)
                 self_tensor = deepcopy(self_variable.data)
                 args_tensor = deepcopy(unpack_variables(args_variable))
-                output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
 
                 def fn(*inputs, **kwargs):
                     output = getattr(inputs[0], name)(*inputs[1:], **kwargs)

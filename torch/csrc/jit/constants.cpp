@@ -9,7 +9,7 @@ namespace torch { namespace jit {
 // IValue -> Constant node
 Value* insertConstant(
     Graph& g,
-    IValue val,
+    const IValue& val,
     c10::optional<SourceRange> loc,
     c10::optional<ScopePtr> scope) {
   Node * n = g.create(prim::Constant);

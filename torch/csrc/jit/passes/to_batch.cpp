@@ -5,7 +5,7 @@ namespace torch { namespace jit {
 
 std::unordered_map<std::string, std::vector<std::shared_ptr<Graph>>> ToBatch::batch_operator_table;
 
-std::shared_ptr<Graph> ToBatch::getBatchOperator(std::string name, int64_t num_inputs){
+std::shared_ptr<Graph> ToBatch::getBatchOperator(const std::string& name, int64_t num_inputs){
   if(batch_operator_table.find(name) == batch_operator_table.end()){
     throw std::runtime_error("function " + name + " is not supported in batched tensor yet");
   }

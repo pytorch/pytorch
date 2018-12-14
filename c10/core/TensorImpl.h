@@ -34,7 +34,6 @@ C10_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
 
 namespace at {
 class Tensor;
-struct Type;
 }
 
 namespace c10 {
@@ -291,9 +290,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * operations.
    */
   virtual const Storage& storage() const;
-
-  // TODO: Delete me.
-  friend struct at::Type;
 
   /**
    * The number of elements in a tensor.
@@ -813,83 +809,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
-   * @brief Copies the data from a source tensor, with a contex provided to
-   * carry out the underlying memcpy operation.  This method respects
-   * caffe2_keep_on_shrink.
-   *
-   * After CopyFrom, this function guarantees that the destination tensor will
-   * have the same initialization state and dtype as src.  This function
-   * preserves the DeviceType of the source tensor (so, e.g., if you allocate
-   * a tensor on CPU and then CopyFrom a CUDA tensor, that will to a
-   * CUDA-to-CPU transfer).
-   *
-   * 'async' parameter triggers async copy for CUDA tensors
-   */
-  void CopyFrom(const TensorImpl& src, bool async = false) {
-    AT_ASSERT(!is_variable());
-    AT_ASSERTM(
-        src.is_contiguous(),
-        "Right now only copy of contiguous source Tensor is supported.");
-    AT_ASSERTM(
-        src.storage_initialized(),
-        "Cannot copy from an uninitialized Tensor");
-
-    if ((void*)&src == (void*)this) {
-      return;
-    }
-
-    // Test if we need to allocate a new storage
-    // Uninitialized storages are guaranteed to be uniquely owned,
-    // so we don't need to swap in this case.
-    if (storage_initialized()) {
-      // If the dtype changed, we need to reallocate storage.
-      if (data_type_ != src.dtype()) {
-        // NB: copy preserves device_type
-        // This storage will get initialized by the mutable_data call below.
-        storage_ = Storage(device_type(), src.dtype());
-      }
-    }
-    data_type_ = src.dtype();
-    Resize(src.sizes());
-
-    if (numel() > 0) {
-      if (data_type_.copy()) {
-        AT_ASSERTM(
-            device_type() == DeviceType::CPU,
-            "In CopyFrom source and dest tensors must both be CPU for "
-            "non-POD copy, but dest tensor was ",
-            device_type());
-        AT_ASSERTM(
-            src.device_type() == DeviceType::CPU,
-            "In CopyFrom source and dest tensors must both be CPU for "
-            "non-POD copy, but src tensor was ",
-            src.device_type());
-        data_type_.copy()(src.data(), raw_mutable_data(data_type_), numel());
-      } else {
-        // The following copy uses the current (thread local) stream for copying
-        // and also takes the GPU id from the device() field passed in.
-        //
-        // TODO: Potentially more enforcements are necessary to avoid accidental
-        // switch to sync copy if the currently set device is wrong.
-        //
-        // Specifically, we might need to switch to a different context device
-        // here explicitly to avoid relying on user synchronizing things
-        // properly.
-        //
-        // note: raw_mutable_data initializes device here
-        void* new_data = raw_mutable_data(data_type_);
-        CopyBytes(
-            numel() * itemsize(),
-            src.data(),
-            src.device(),
-            new_data,
-            device(),
-            async);
-      }
-    }
-  }
-
-  /**
    * @brief Extends the outer-most dimension of this tensor by num elements,
    * preserving the existing data.
    *
@@ -1235,6 +1154,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   bool dtype_initialized() const noexcept {
     return data_type_ != caffe2::TypeMeta();
+  }
+
+  void set_storage(at::Storage storage) {
+    storage_ = std::move(storage);
+    data_type_ = storage_.dtype();
   }
 
 private:

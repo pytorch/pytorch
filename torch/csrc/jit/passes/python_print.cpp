@@ -125,7 +125,7 @@ private:
 
 void createTensorToParameterNameMap(
     const script::Module& module,
-    QualifiedNamePtr prefix,
+    const QualifiedNamePtr& prefix,
     std::unordered_map<at::Tensor*, QualifiedNamePtr>& result) {
 
   for (const auto& elem : module.get_parameters()) {
@@ -615,7 +615,7 @@ struct PythonPrintPass {
       std::ostream& stmt,
       const char* the_type,
       size_t list_size,
-      IValue the_list) {
+      const IValue& the_list) {
     if(list_size == 0) {
       stmt << "annotate(List[" << the_type << "], [])";
     } else {
@@ -623,7 +623,7 @@ struct PythonPrintPass {
     }
   }
 
-  void printConstant(std::ostream& stmt, IValue v) {
+  void printConstant(std::ostream& stmt, const IValue& v) {
     if(v.isTensor()) {
       stmt << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
     } else if(v.isString()) {
@@ -813,7 +813,7 @@ struct PythonPrintPass {
     return out;
   }
 
-  void printDefaultValue(std::ostream& stmt, IValue value) {
+  void printDefaultValue(std::ostream& stmt, const IValue& value) {
     if (value.isTensor() && !value.toTensor().defined()) {
       // XXX - because undefined tensors are not stored as None, we need special handling.
       // otherwise they get printed as CONSTANTS.c0 and then cannot be recreated because
@@ -827,7 +827,7 @@ struct PythonPrintPass {
   void printFunctionDefinition(
       Graph& graph,
       const std::string& name,
-      const std::vector<c10::optional<IValue>> defaults = {},
+      const std::vector<c10::optional<IValue>>& defaults = {},
       const std::vector<std::string>& param_names = {}) {
 
     used_names_.clear(); // each graph can reuse local names

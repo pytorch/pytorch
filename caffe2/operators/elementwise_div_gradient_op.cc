@@ -173,14 +173,14 @@ class BinaryElementwiseWithArgsGradientOp<
 
   template <typename T>
   bool DoRunWithType() {
-    auto* dA = Output(0);
-    auto* dB = Output(1);
     const T* dC_data = nullptr;
     const T* A_data = nullptr;
     const T* B_data = nullptr;
     const T* C_data = nullptr;
     std::vector<int> A_dims;
     std::vector<int> B_dims;
+    at::IntList dA_sizes;
+    at::IntList dB_sizes;
     if (InputSize() == 3) {
       const auto& B = Input(0);
       const auto& C = Input(1);
@@ -207,8 +207,8 @@ class BinaryElementwiseWithArgsGradientOp<
       B_data = B.template data<T>();
       C_data = C.template data<T>();
       dC_data = dC.template data<T>();
-      dA->ResizeLike(C);
-      dB->ResizeLike(B);
+      dA_sizes = C.sizes();
+      dB_sizes = B.sizes();
     } else {
       const auto& dC = Input(0);
       const auto& A = Input(1);
@@ -237,9 +237,11 @@ class BinaryElementwiseWithArgsGradientOp<
       A_data = A.template data<T>();
       B_data = B.template data<T>();
       C_data = C.template data<T>();
-      dA->ResizeLike(A);
-      dB->ResizeLike(B);
+      dA_sizes = A.sizes();
+      dB_sizes = B.sizes();
     }
+    auto* dA = Output(0, dA_sizes, at::dtype<T>());
+    auto* dB = Output(1, dB_sizes, at::dtype<T>());
     auto* dA_data = dA->template mutable_data<T>();
     auto* dB_data = dB->template mutable_data<T>();
     return functor_.Backward(

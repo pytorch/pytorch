@@ -139,7 +139,7 @@ py::class_<ModuleType, Extra...> add_module_bindings(
           },
           py::arg("recurse") = true)
       .def_property_readonly(
-          "_modules", [](ModuleType& module) { return module.named_children(); })
+        "_modules", [](ModuleType& module) { return module.named_children(); })
       .def("modules", [](ModuleType& module) { return module.modules(); })
       .def("named_modules",
           [](ModuleType& module, py::object /* unused */, std::string prefix) {
@@ -166,10 +166,16 @@ py::class_<ModuleType, Extra...> add_module_bindings(
              py::object device,
              py::object dtype,
              bool non_blocking) {
-            module.to(
-                detail::py_object_to_device(device),
-                detail::py_object_to_dtype(dtype),
-                non_blocking);
+              if (device.is_none()) {
+                module.to(detail::py_object_to_dtype(dtype), non_blocking);
+              } else if (dtype.is_none()) {
+                module.to(detail::py_object_to_device(device), non_blocking);
+              } else {
+                module.to(
+                    detail::py_object_to_device(device),
+                    detail::py_object_to_dtype(dtype),
+                    non_blocking);
+              }
           },
           py::arg("device"),
           py::arg("dtype"),
