@@ -10,14 +10,14 @@
 namespace caffe2 {
 namespace testing {
 
-// Asserts that the numeric values of two tensors are the same.
-template <typename T>
-void assertTensorEquals(const TensorCPU& tensor1, const TensorCPU& tensor2) {
-  CAFFE_ENFORCE_EQ(tensor1.sizes(), tensor2.sizes());
-  for (auto idx = 0; idx < tensor1.numel(); ++idx) {
-    CAFFE_ENFORCE_EQ(tensor1.data<T>()[idx], tensor2.data<T>()[idx]);
-  }
-}
+// Asserts that the values of two tensors are the same.
+void assertTensorEquals(const TensorCPU& tensor1, const TensorCPU& tensor2);
+
+// Asserts a list of tensors presented in two workspaces are equal.
+void assertTensorListEquals(
+    const std::vector<std::string>& tensorNames,
+    const Workspace& workspace1,
+    const Workspace& workspace2);
 
 // Read a tensor from the workspace.
 const caffe2::Tensor& getTensor(
