@@ -60,6 +60,20 @@ void mean_kernel_impl(TensorIterator& iter) {
       []GPU_LAMBDA(acc_t a, acc_t b) -> acc_t { return a + b; });
 }
 
+#ifdef __HIPCC__
+template <>
+void mean_kernel_impl<int16_t, int16_t, int16_t>(TensorIterator& iter) {
+  // There is a Register Coalescing bug in LLVM causing the hcc
+  // compiler segfaults:
+  // https://bugs.llvm.org/show_bug.cgi?id=39602
+  // To work around it, use int32 as the accumulate type.
+  float factor = float(iter.num_output_elements()) / iter.numel();
+  gpu_reduce_kernel<int16_t, int16_t>(iter, SimpleCopy<int32_t>(),
+      [factor]GPU_LAMBDA(int32_t a) -> int32_t { return a*factor; },
+      []GPU_LAMBDA(int32_t a, int32_t b) -> int32_t { return a + b; });
+}
+#endif // __HIPCC__
+
 static void sum_kernel_cuda(TensorIterator& iter) {
   if (iter.type().scalarType() == kHalf) {
     return sum_kernel_impl<at::Half, float>(iter);
