@@ -732,7 +732,7 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def("parse_type_comment", [](const std::string& comment) {
     Parser p(comment);
-    return Decl(p.parseTypeComment(true));
+    return Decl(p.parseTypeComment());
   });
 
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
