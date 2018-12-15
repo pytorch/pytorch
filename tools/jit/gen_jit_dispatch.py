@@ -55,6 +55,7 @@ TYPE_MAP = {
     'Device': 'Device',
     'ScalarType': 'ScalarType',
     'int64_t': 'int',
+    'int64_t?': 'int?',
     'double': 'float',
     'bool': 'bool',
     'Generator': 'Generator',

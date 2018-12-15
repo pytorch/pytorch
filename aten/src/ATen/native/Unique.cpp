@@ -126,28 +126,16 @@ std::tuple<Tensor, Tensor> _unique_dim_cpu_template(
 } // namespace
 
 std::tuple<Tensor, Tensor>
-_unique_cpu(const Tensor& self, const bool sorted, const bool return_inverse) {
+_unique_cpu(const Tensor& self, optional<int64_t> dim, const bool sorted, const bool return_inverse) {
+  if (dim) {
+    return AT_DISPATCH_ALL_TYPES(self.type(), "unique", [&] {
+      // The current implementation using `dim` always sorts due to unhashable tensors
+      return _unique_dim_cpu_template<scalar_t>(self, dim.value(), return_inverse);
+    });
+  }
   return AT_DISPATCH_ALL_TYPES(self.type(), "unique", [&] {
     return _unique_cpu_template<scalar_t>(self, sorted, return_inverse);
   });
-}
-
-std::tuple<Tensor, Tensor>
-_unique_dim_cpu(const Tensor& self, const int64_t dim, const bool sorted, const bool return_inverse) {
-  return AT_DISPATCH_ALL_TYPES(self.type(), "unique_dim", [&] {
-    // The current implementation using `dim` always sorts due to unhashable tensors
-    return _unique_dim_cpu_template<scalar_t>(self, dim, return_inverse);
-  });
-}
-
-std::tuple<Tensor, Tensor>
-_unique_dim(const Tensor& self, int64_t dim, bool sorted, bool return_inverse) {
-  return at::unique(self, dim, sorted, return_inverse);
-}
-
-std::tuple<Tensor, Tensor>
-_unique(const Tensor& self, bool sorted, bool return_inverse) {
-  return at::unique(self, sorted, return_inverse);
 }
 
 }  // namespace native

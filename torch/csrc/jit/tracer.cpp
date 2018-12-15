@@ -120,6 +120,19 @@ void addInputs(Node *n, const char * name, const ArrayRef<double>& value) {
   AT_ERROR("Tracing float lists currently not supported!");
 }
 
+void addInputs(Node *n, const char * name, c10::optional<int64_t> value)  {
+  if(value) {
+    detail::genericAddInput(n, value.value());
+  } else {
+    Graph * g = n->owningGraph();
+    Value* none =
+        g->insertNode(g->createNone(IntType::get()))
+            ->output();
+    n->addInput(none);
+  }
+}
+
+
 void addOutput(Node* node, const at::Tensor& output) {
   Value * value = node->addOutput();
   if (output.defined()) {

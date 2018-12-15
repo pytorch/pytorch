@@ -19,6 +19,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"Tensor", ParameterType::TENSOR},
   {"Scalar", ParameterType::SCALAR},
   {"int64_t", ParameterType::INT64},
+  {"optional<int64_t>", ParameterType::INT64},
   {"double", ParameterType::DOUBLE},
   {"TensorList", ParameterType::TENSOR_LIST},
   {"IntList", ParameterType::INT_LIST},

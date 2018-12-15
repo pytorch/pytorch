@@ -435,19 +435,8 @@ def unique(input, sorted=False, return_inverse=False, dim=None):
                 [ 1,  2]])
 
     """
-    if dim is not None:
-        output, inverse_indices = torch._unique_dim(
-            input,
-            dim,
-            sorted=sorted,
-            return_inverse=return_inverse
-        )
-    else:
-        output, inverse_indices = torch._unique(
-            input,
-            sorted=sorted,
-            return_inverse=return_inverse,
-        )
+    output, inverse_indices = torch._C._VariableFunctions.unique(
+        input, dim, sorted=sorted, return_inverse=return_inverse)
     if return_inverse:
         return output, inverse_indices
     else:
