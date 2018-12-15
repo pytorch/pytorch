@@ -2288,6 +2288,15 @@ class TestNN(NNTestCase):
         offset[-1] = 100
         self.assertRaises(ValueError, lambda: es(input.view(-1), offset))
 
+    def test_embeddingbag_from_pretrained(self):
+        a = torch.Tensor([[1, 2, 3], [4, 5, 6]])
+        embeddingbag = nn.EmbeddingBag.from_pretrained(a)
+        self.assertEqual(a, embeddingbag.weight.data)
+
+        input = torch.LongTensor([[0, 1]])
+        output = embeddingbag(input)
+        self.assertEqual(a.mean(0), output.squeeze())
+
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_pool3d_size_one_feature_dim(self):
         # Tests crazy strides for feature dim of size 1

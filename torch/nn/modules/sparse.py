@@ -230,22 +230,26 @@ class EmbeddingBag(Module):
                 [ 1.1306, -2.5798, -1.0044]])
     """
     __constants__ = ['num_embeddings, embedding_dim', 'max_norm', 'norm_type',
-                     'scale_grad_by_freq', 'mode', 'sparse']
+                     'scale_grad_by_freq', 'mode', 'sparse', '_weight']
 
     def __init__(self, num_embeddings, embedding_dim,
                  max_norm=None, norm_type=2., scale_grad_by_freq=False,
-                 mode='mean', sparse=False):
+                 mode='mean', sparse=False, _weight=None):
         super(EmbeddingBag, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         self.max_norm = max_norm
         self.norm_type = norm_type
         self.scale_grad_by_freq = scale_grad_by_freq
-        self.weight = Parameter(torch.Tensor(num_embeddings, embedding_dim))
+        if _weight is None:
+            self.weight = Parameter(torch.Tensor(num_embeddings, embedding_dim))
+            self.reset_parameters()
+        else:
+            assert list(_weight.shape) == [num_embeddings, embedding_dim], \
+                'Shape of weight does not match num_embeddings and embedding_dim'
+            self.weight = Parameter(_weight)
         self.mode = mode
         self.sparse = sparse
-
-        self.reset_parameters()
 
     def reset_parameters(self):
         init.normal_(self.weight)
@@ -267,5 +271,39 @@ class EmbeddingBag(Module):
             s += ', scale_grad_by_freq={scale_grad_by_freq}'
         s += ', mode={mode}'
         return s.format(**self.__dict__)
+
+    @classmethod
+    def from_pretrained(cls, embeddings, freeze=True, sparse=False):
+        r"""Creates EmbeddingBag instance from given 2-dimensional FloatTensor.
+
+        Args:
+            embeddings (Tensor): FloatTensor containing weights for the EmbeddingBag.
+                First dimension is being passed to EmbeddingBag as 'num_embeddings', second as 'embedding_dim'.
+            freeze (boolean, optional): If ``True``, the tensor does not get updated in the learning process.
+                Equivalent to ``embeddingbag.weight.requires_grad = False``. Default: ``True``
+            sparse (bool, optional): if ``True``, gradient w.r.t. weight matrix will be a sparse tensor.
+                See Notes for more details regarding sparse gradients.
+
+        Examples::
+
+            >>> # FloatTensor containing pretrained weights
+            >>> weight = torch.FloatTensor([[1, 2.3, 3], [4, 5.1, 6.3]])
+            >>> embeddingbag = nn.EmbeddingBag.from_pretrained(weight)
+            >>> # Get embeddings for index 1
+            >>> input = torch.LongTensor([[1, 0]])
+            >>> embeddingbag(input)
+            tensor([[ 2.5000,  3.7000,  4.6500]])
+        """
+        assert embeddings.dim() == 2, \
+            'Embeddings parameter is expected to be 2-dimensional'
+        rows, cols = embeddings.shape
+        embeddingbag = cls(
+            num_embeddings=rows,
+            embedding_dim=cols,
+            _weight=embeddings,
+            sparse=sparse,
+        )
+        embeddingbag.weight.requires_grad = not freeze
+        return embeddingbag
 
 # TODO: SparseLinear
