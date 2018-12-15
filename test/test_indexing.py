@@ -45,6 +45,12 @@ class TestIndexing(TestCase):
         v = torch.tensor([1.])
         self.assertEqual(v[v == 0], torch.tensor([]))
 
+    def test_byte_mask_accumulate(self):
+        mask = torch.zeros(size=(10, ), dtype=torch.uint8)
+        y = torch.ones(size=(10, 10))
+        y.index_put_((mask, ), y[mask], accumulate=True)
+        self.assertEqual(y, torch.ones(size=(10, 10)))
+
     def test_multiple_byte_mask(self):
         v = torch.randn(5, 7, 3)
         # note: these broadcast together and are transposed to the first dim
@@ -103,6 +109,12 @@ class TestIndexing(TestCase):
             x = torch.randn(2, 3, 4, 5, device=device)
             self.assertEqual(torch.empty(2, 0, 6, 4, 5, device=device),
                              x[:, torch.empty(0, 6, dtype=torch.int64, device=device)])
+
+        x = torch.empty(10, 0)
+        self.assertEqual(x[[1, 2]].shape, (2, 0))
+        self.assertEqual(x[[], []].shape, (0,))
+        with self.assertRaisesRegex(RuntimeError, 'for dim with size 0'):
+            x[:, [0, 1]]
 
     def test_empty_ndim_index_bool(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']

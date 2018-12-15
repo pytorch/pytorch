@@ -89,9 +89,8 @@ class MaxReduceDimsGradientOp final : public Operator<Context> {
     auto& dY = Input(0);
     auto& X = Input(1);
     auto& Y = Input(2);
-    auto* dX = Output(0);
 
-    dX->ResizeLike(X);
+    auto* dX = Output(0, X.sizes(), at::dtype<float>());
     const int rows = FIRSTDIMS ? X.size_to_dim(num_reduce_dims_)
                                : X.size_to_dim(X.dim() - num_reduce_dims_);
     const int cols = FIRSTDIMS ? X.size_from_dim(num_reduce_dims_)

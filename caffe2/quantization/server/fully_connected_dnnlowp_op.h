@@ -40,9 +40,10 @@ class FullyConnectedDNNLowPOp
   std::vector<T_signed> W_quantized_;
 
   // pre-computed biases and offsets
-  std::vector<std::int32_t> b_quantized_;
+  std::shared_ptr<std::vector<std::int32_t>> b_quantized_;
   const std::int32_t* b_quantized_data_{nullptr};
-  std::vector<std::int32_t> row_offsets_, column_offsets_;
+  std::vector<std::int32_t> row_offsets_;
+  std::shared_ptr<std::vector<std::int32_t>> column_offsets_;
 
   // Dequantized bias populated when input bias is quantized and
   // dequantized_output_ == true

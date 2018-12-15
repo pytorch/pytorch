@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/Col2Im.c"
+#define TH_GENERIC_FILE "THNN/generic/Col2Im.c"
 #else
 
 #include <ATen/div_rtn.h>
@@ -140,17 +140,17 @@ static inline void THNN_(Col2Im_shapeCheck)(
   }
 
   int64_t inputLength  = input->size(batch_dim + 2);
-  int64_t nBlockdH = div_rtn<int64_t>(outputHeight + 2 * padH - dilationH * (kH - 1) - 1, dH) + 1;
-  int64_t nBlockdW = div_rtn<int64_t>(outputWidth + 2 * padW - dilationW * (kW - 1) - 1, dW) + 1;
+  int64_t nBlocksH = div_rtn<int64_t>(outputHeight + 2 * padH - dilationH * (kH - 1) - 1, dH) + 1;
+  int64_t nBlocksW = div_rtn<int64_t>(outputWidth + 2 * padW - dilationW * (kW - 1) - 1, dW) + 1;
 
-  if (inputLength != (nBlockdH * nBlockdW)) {
+  if (inputLength != (nBlocksH * nBlocksW)) {
     THError("Given output_size=(%d, %d), kernel_size=(%d, %d), "
             "dilation=(%d, %d), padding=(%d, %d), stride=(%d, %d), expected "
             "size of input's dimension 2 to match the calculated number of "
             "sliding blocks %lld * %lld = %lld, but got input.size(2)=%lld.",
             outputHeight, outputWidth, kH, kW, dilationH, dilationW, padH, padW, dH, dW,
-            (long long) nBlockdH, (long long) nBlockdW,
-            (long long) (nBlockdH * nBlockdW), (long long) inputLength);
+            (long long) nBlocksH, (long long) nBlocksW,
+            (long long) (nBlocksH * nBlocksW), (long long) inputLength);
   }
 
   if (outputWidth < 1 || outputHeight < 1) {

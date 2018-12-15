@@ -4,9 +4,10 @@
 #include "caffe2/core/storage.h"
 #include "caffe2/core/tensor_impl.h"
 
-#include <ATen/core/UndefinedTensorImpl.h>
+#include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/intrusive_ptr.h>
-#include "ATen/core/TensorOptions.h"
+#include "ATen/core/Tensor.h"
+#include <c10/core/TensorOptions.h>
 
 namespace caffe2 {
 
@@ -45,10 +46,16 @@ class CAFFE2_API Tensor final {
   explicit Tensor(at::Device device)
     : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
         Storage(device),
-        at::detail::computeTensorTypeId(at::device(device).layout(at::kStrided)),
+        c10::computeTensorTypeId(at::device(device).layout(at::kStrided)),
         /*is_variable=*/ false
       )) {
   }
+
+  /**
+   * @brief Creates a caffe2 tensor from an ATen tensor
+   */
+  explicit Tensor(const at::Tensor& tensor)
+      : impl_(std::move(tensor.getIntrusivePtr())) {}
 
   /**
    * @brief Creates a tensor of the given dimension.
@@ -97,8 +104,78 @@ class CAFFE2_API Tensor final {
     return impl_.get()->GetDevice();
   }
 
-  void CopyFrom(const Tensor& src, bool async = false) const {
-    impl_.get()->CopyFrom(*src.impl_.get(), async);
+  /**
+   * @brief Copies the data from a source tensor, with a contex provided to
+   * carry out the underlying memcpy operation.  This method respects
+   * caffe2_keep_on_shrink.
+   *
+   * After CopyFrom, this function guarantees that the destination tensor will
+   * have the same initialization state and dtype as src.  This function
+   * preserves the DeviceType of the source tensor (so, e.g., if you allocate
+   * a tensor on CPU and then CopyFrom a CUDA tensor, that will to a
+   * CUDA-to-CPU transfer).
+   *
+   * 'async' parameter triggers async copy for CUDA tensors
+   */
+  void CopyFrom(const Tensor& src, bool async = false) {
+    AT_ASSERT(!impl_->is_variable());
+    AT_ASSERTM(
+        src.impl_->is_contiguous(),
+        "Right now only copy of contiguous source Tensor is supported.");
+    AT_ASSERTM(
+        src.impl_->storage_initialized(),
+        "Cannot copy from an uninitialized Tensor");
+
+    if (src.impl_.get() == impl_.get()) {
+      return;
+    }
+
+    // Test if we need to allocate a new storage
+    // Uninitialized storages are guaranteed to be uniquely owned,
+    // so we don't need to swap in dst case.
+    // If the dtype changed, we need to reallocate storage.
+    if (impl_->dtype() != src.impl_->dtype()) {
+      // NB: copy preserves device_type
+      // This storage will get initialized by the mutable_data call below.
+      impl_->set_storage(at::Storage(impl_->device_type(), src.impl_->dtype()));
+    }
+    impl_->Resize(src.impl_->sizes());
+
+    if (impl_->numel() > 0) {
+      if (impl_->dtype().copy()) {
+        AT_ASSERTM(
+            impl_->device_type() == ::at::DeviceType::CPU,
+            "In CopyFrom source and dest tensors must both be CPU for "
+            "non-POD copy, but dest tensor was ",
+            impl_->device_type());
+        AT_ASSERTM(
+            src.impl_->device_type() == ::at::DeviceType::CPU,
+            "In CopyFrom source and dest tensors must both be CPU for "
+            "non-POD copy, but src tensor was ",
+            src.impl_->device_type());
+        impl_->dtype().copy()(src.impl_->data(), impl_->raw_mutable_data(impl_->dtype()), impl_->numel());
+      } else {
+        // The following copy uses the current (thread local) stream for copying
+        // and also takes the GPU id from the device() field passed in.
+        //
+        // TODO: Potentially more enforcements are necessary to avoid accidental
+        // switch to sync copy if the currently set device is wrong.
+        //
+        // Specifically, we might need to switch to a different context device
+        // here explicitly to avoid relying on user synchronizing things
+        // properly.
+        //
+        // note: raw_mutable_data initializes device here
+        void* new_data = impl_->raw_mutable_data(impl_->dtype());
+        at::CopyBytes(
+            impl_->numel() * impl_->itemsize(),
+            src.impl_->data(),
+            src.impl_->device(),
+            new_data,
+            impl_->device(),
+            async);
+      }
+    }
   }
 
   /**
@@ -243,6 +320,11 @@ class CAFFE2_API Tensor final {
       const TypeMeta& data_type,
       size_t capacity) {
     impl_.get()->ShareExternalPointer(std::move(data_ptr), data_type, capacity);
+  }
+
+  const c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>& getIntrusivePtr()
+      const {
+    return impl_;
   }
 
   /**

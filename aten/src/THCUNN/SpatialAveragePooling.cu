@@ -1,8 +1,8 @@
-#include "THCUNN.h"
-#include "THCTensor.hpp"
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
-#include "common.h"
+#include <THCUNN/THCUNN.h>
+#include <THC/THCTensor.hpp>
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THCUNN/common.h>
 
 template <typename Dtype, typename Acctype, bool COUNT_INCLUDE_PAD>
 __global__ void AvePoolForward(const int nthreads,
@@ -82,5 +82,5 @@ __global__ void AvePoolBackward(const int nthreads, const Dtype* const top_diff,
   }
 }
 
-#include "generic/SpatialAveragePooling.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/SpatialAveragePooling.cu>
+#include <THC/THCGenerateFloatTypes.h>

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "intrinsics.h"
-#include "vec256_base.h"
+#include <ATen/cpu/vec256/intrinsics.h>
+#include <ATen/cpu/vec256/vec256_base.h>
 #if defined(__AVX__) && !defined(_MSC_VER)
 #include <sleef.h>
 #endif
@@ -246,6 +246,19 @@ Vec256<double> inline operator|(const Vec256<double>& a, const Vec256<double>& b
 template <>
 Vec256<double> inline operator^(const Vec256<double>& a, const Vec256<double>& b) {
   return _mm256_xor_pd(a, b);
+}
+
+template <>
+void convert(const double* src, double* dst, int64_t n) {
+  int64_t i;
+#pragma unroll
+  for (i = 0; i <= (n - Vec256<double>::size); i += Vec256<double>::size) {
+    _mm256_storeu_pd(dst + i, _mm256_loadu_pd(src + i));
+  }
+#pragma unroll
+  for (; i < n; i++) {
+    dst[i] = src[i];
+  }
 }
 
 #ifdef __AVX2__

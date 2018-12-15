@@ -88,7 +88,6 @@ add_custom_command(
   "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_0.cpp"
   "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_1.cpp"
   "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_2.cpp"
-  "${TORCH_SRC_DIR}/csrc/jit/generated/aten_interned_strings.h"
   COMMAND
   ${PYCMD} tools/setup_helpers/generate_code.py
     --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
@@ -122,7 +121,6 @@ add_custom_command(
   "${TOOLS_PATH}/autograd/utils.py"
   "${TOOLS_PATH}/jit/gen_jit_dispatch.py"
   "${TOOLS_PATH}/jit/templates/register_aten_ops.cpp"
-  "${TOOLS_PATH}/jit/templates/aten_interned_strings.h"
   WORKING_DIRECTORY "${TORCH_ROOT}")
 
 set(TORCH_SRCS
@@ -185,6 +183,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/specialize_undef.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/python_print.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/utils/subgraph_utils.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/utils/check_alias_annotation.cpp
   ${TORCH_SRC_DIR}/csrc/jit/fuser/interface.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
@@ -195,7 +194,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
   ${TORCH_SRC_DIR}/csrc/jit/tracer.cpp
   ${TORCH_SRC_DIR}/csrc/jit/hooks_for_testing.cpp
-  ${TORCH_SRC_DIR}/csrc/torch.cpp
   ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
   ${TORCH_SRC_DIR}/csrc/utils/variadic.cpp
   ${TORCH_ROOT}/test/cpp/jit/no-gtest.cpp
@@ -229,7 +227,7 @@ CONFIGURE_FILE(
     ${TORCH_SRC_DIR}/csrc/jit/fuser/config.h.in
     ${CMAKE_CURRENT_SOURCE_DIR}/csrc/jit/fuser/config.h)
 
-if (NOT NO_API AND NOT USE_ROCM)
+if (NOT NO_API)
   list(APPEND TORCH_SRCS
     ${TORCH_SRC_DIR}/csrc/api/src/cuda.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/data/datasets/mnist.cpp
@@ -255,7 +253,6 @@ if (NOT NO_API AND NOT USE_ROCM)
     ${TORCH_SRC_DIR}/csrc/api/src/optim/sgd.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/serialize/input-archive.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/serialize/output-archive.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/utils.cpp
   )
 endif()
 
@@ -334,6 +331,7 @@ if(OPENMP_FOUND)
     message(STATUS "Compiling with OpenMP")
   endif()
   target_compile_options(torch INTERFACE ${OpenMP_CXX_FLAGS})
+  target_link_libraries(torch -fopenmp)
   #cmake only check for separate OpenMP library on AppleClang 7+
   #https://github.com/Kitware/CMake/blob/42212f7539040139ecec092547b7d58ef12a4d72/Modules/FindOpenMP.cmake#L252
   if (CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
@@ -344,7 +342,7 @@ if(OPENMP_FOUND)
   endif()
 endif()
 
-if (NOT NO_API AND NOT USE_ROCM)
+if (NOT NO_API)
   target_include_directories(torch PUBLIC
     ${TORCH_SRC_DIR}/csrc/api
     ${TORCH_SRC_DIR}/csrc/api/include)
@@ -403,14 +401,6 @@ set(TH_CPU_INCLUDE
   ${CMAKE_BINARY_DIR}/aten/src)
 target_include_directories(torch PRIVATE ${TH_CPU_INCLUDE})
 
-if(USE_CUDA OR USE_ROCM)
-  set(TH_CUDA_INCLUDE
-    # dense
-    ${TORCH_ROOT}/aten/src/THC
-    ${CMAKE_CURRENT_BINARY_DIR}/../aten/src/THC)
-  target_include_directories(torch PRIVATE ${TH_CUDA_INCLUDE})
-endif()
-
 set(ATen_CPU_INCLUDE
   ${TORCH_ROOT}/aten/src
   ${CMAKE_CURRENT_BINARY_DIR}/../aten/src
@@ -420,6 +410,9 @@ target_include_directories(torch PUBLIC ${ATen_CPU_INCLUDE})
 
 target_include_directories(torch PUBLIC
   ${TORCH_SRC_DIR}/csrc)
+
+target_include_directories(torch PUBLIC
+  ${TORCH_ROOT}/third_party/miniz-2.0.8)
 
 set_target_properties(torch PROPERTIES VERSION 1 SOVERSION 1)
 
@@ -442,7 +435,7 @@ if (BUILD_TEST AND NOT MSVC AND NOT USE_ROCM)
   add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
 endif()
 
-if (BUILD_TEST AND NOT NO_API AND NOT USE_ROCM)
+if (BUILD_TEST AND NOT NO_API)
   add_subdirectory(${TORCH_ROOT}/test/cpp/api ${CMAKE_BINARY_DIR}/test_api)
 endif()
 
@@ -509,6 +502,7 @@ if (BUILD_PYTHON)
     ${TORCH_SRC_DIR}/csrc/PtrWrapper.cpp
     ${TORCH_SRC_DIR}/csrc/Size.cpp
     ${TORCH_SRC_DIR}/csrc/Storage.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/python/init.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/functions/init.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.cpp
@@ -550,7 +544,6 @@ if (BUILD_PYTHON)
     ${TORCH_SRC_DIR}/csrc/utils/object_ptr.cpp
     ${TORCH_SRC_DIR}/csrc/utils/python_arg_parser.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_apply.cpp
-    ${TORCH_SRC_DIR}/csrc/utils/tensor_conversion_dispatch.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_dtypes.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_layouts.cpp
@@ -571,18 +564,16 @@ if (BUILD_PYTHON)
     ${CMAKE_BINARY_DIR}
     ${CMAKE_BINARY_DIR}/aten/src
     ${CMAKE_BINARY_DIR}/caffe2/aten/src
-    ${CMAKE_BINARY_DIR}/caffe2/aten/src/TH
-    ${CMAKE_BINARY_DIR}/caffe2/aten/src/THC
     ${CMAKE_BINARY_DIR}/third_party
     ${CMAKE_BINARY_DIR}/third_party/onnx
 
     ${TORCH_ROOT}/third_party/build/nccl/include
     ${TORCH_ROOT}/third_party/gloo
     ${TORCH_ROOT}/third_party/onnx
-    ${TORCH_ROOT}/third_party/protobuf/src
     ${TORCH_ROOT}/third_party/pybind11/include
 
     ${TORCH_SRC_DIR}/csrc
+    ${TORCH_SRC_DIR}/csrc/api/include
     ${TORCH_SRC_DIR}/lib
     )
 
