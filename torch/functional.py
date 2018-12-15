@@ -436,7 +436,7 @@ def unique(input, sorted=False, return_inverse=False, dim=None):
 
     """
     output, inverse_indices = torch._C._VariableFunctions.unique(
-        input, dim, sorted=sorted, return_inverse=return_inverse)
+        input, sorted=sorted, return_inverse=return_inverse, dim=dim)
     if return_inverse:
         return output, inverse_indices
     else:

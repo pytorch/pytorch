@@ -156,7 +156,7 @@ template <typename scalar_t>
 } // namespace
 
 std::tuple<Tensor, Tensor>
-_unique_cuda(const Tensor& self, optional<int64_t> dim, const bool sorted, const bool return_inverse) {
+_unique_cuda(const Tensor& self, const bool sorted, const bool return_inverse, optional<int64_t> dim) {
   if (dim) {
     return AT_DISPATCH_ALL_TYPES(self.type(), "unique", [&] {
       return _unique_dim_cuda_template<scalar_t>(self, dim.value(), return_inverse);

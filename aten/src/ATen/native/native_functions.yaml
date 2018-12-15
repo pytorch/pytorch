@@ -1770,7 +1770,7 @@
 - func: type_as(Tensor self, Tensor other) -> Tensor
   variants: method
 
-- func: unique(Tensor self, int64_t? dim=None, bool sorted=false, bool return_inverse=false) -> (Tensor, Tensor)
+- func: unique(Tensor self, bool sorted=false, bool return_inverse=false, int64_t? dim=None) -> (Tensor, Tensor)
   variants: function
   dispatch:
     CPU: _unique_cpu
