@@ -21,33 +21,65 @@
 #include "caffe2/core/db.h"
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
+#include "caffe2/core/timer.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
 
 C10_DEFINE_bool(color, true, "If set, load images in color.");
+C10_DEFINE_string(
+    crop,
+    "-1,-1",
+    "The center cropped hight and width. If the value is less than zero, "
+    "it is not cropped.");
 C10_DEFINE_string(input_images, "", "Comma separated images");
 C10_DEFINE_string(input_image_file, "", "The file containing imput images");
 C10_DEFINE_string(output_tensor, "", "The output tensor file in NCHW");
-C10_DEFINE_int(scale, 256, "Scale the shorter edge to the given value.");
-C10_DEFINE_bool(text_output, false, "Write the output in text format.");
-C10_DEFINE_bool(warp, false, "If warp is set, warp the images to square.");
 C10_DEFINE_string(
     preprocess,
     "",
     "Options to specify the preprocess routines. The available options are "
     "subtract128, normalize, mean, std, bgrtorgb. If multiple steps are provided, they "
     "are separated by comma (,) in sequence.");
+C10_DEFINE_string(
+    report_time,
+    "",
+    "Report the conversion stage time to screen. "
+    "The format of the string is <type>|<identifier>. "
+    "The valid type is 'json'. "
+    "The valid identifier is nothing or an identifer that prefix every line");
+C10_DEFINE_int(scale, 256, "Scale the shorter edge to the given value.");
+C10_DEFINE_bool(text_output, false, "Write the output in text format.");
+C10_DEFINE_bool(warp, false, "If warp is set, warp the images to square.");
 
 namespace caffe2 {
 
+void reportTime(
+    std::string type,
+    double ts,
+    std::string metric,
+    std::string unit) {
+  if (FLAGS_report_time == "") {
+    return;
+  }
+  vector<string> s = caffe2::split('|', FLAGS_report_time);
+  assert(s[0] == "json");
+  std::string identifier = "";
+  if (s.size() > 1) {
+    identifier = s[1];
+  }
+  std::cout << identifier << "{\"type\": \"" << type << "\", \"value\": " << ts
+            << ", \"metric\": \"" << metric << "\", \"unit\": \"" << unit
+            << "\"}" << std::endl;
+}
+
 cv::Mat resizeImage(cv::Mat& img) {
+  if (FLAGS_scale <= 0) {
+    return img;
+  }
   cv::Mat resized_img;
   int scaled_width, scaled_height;
-  if (FLAGS_warp) {
-    scaled_width = FLAGS_scale;
-    scaled_height = FLAGS_scale;
-  } else if (img.rows > img.cols) {
+  if (img.rows > img.cols) {
     scaled_width = FLAGS_scale;
     scaled_height = static_cast<float>(img.rows) * FLAGS_scale / img.cols;
   } else {
@@ -64,19 +96,27 @@ cv::Mat resizeImage(cv::Mat& img) {
   return resized_img;
 }
 
-cv::Mat cropToSquare(cv::Mat& img) {
+cv::Mat cropToRec(cv::Mat& img, int& height, int& width) {
   // Crop image to square
-  if (img.rows != img.cols) {
-    cv::Mat cropped_img;
-    int size = img.rows > img.cols ? img.cols : img.rows;
+  if ((height > 0) && (width > 0) &&
+      ((img.rows != height) || (img.cols != width))) {
+    cv::Mat cropped_img, cimg;
     cv::Rect roi;
-    roi.x = int((img.cols - size) / 2);
-    roi.y = int((img.rows - size) / 2);
-    roi.width = size;
-    roi.height = size;
-
+    roi.x = int((img.cols - width) / 2);
+    roi.y = int((img.rows - height) / 2);
+    roi.x = roi.x < 0 ? 0 : roi.x;
+    roi.y = roi.y < 0 ? 0 : roi.y;
+    width = width > img.cols ? img.cols : width;
+    height = height > img.rows ? img.rows : height;
+    roi.width = width;
+    roi.height = height;
+    assert(
+        0 <= roi.x && 0 <= roi.width && roi.x + roi.width <= img.cols &&
+        0 <= roi.y && 0 <= roi.height && roi.y + roi.height <= img.rows);
     cropped_img = img(roi);
-    return cropped_img;
+    // Make the image in continuous space in memory
+    cimg = cropped_img.clone();
+    return cimg;
   } else {
     return img;
   }
@@ -87,8 +127,7 @@ std::vector<float> convertToVector(cv::Mat& img) {
   std::vector<float> mean(3, 0);
   std::vector<float> std(3, 1);
   bool bgrtorgb = false;
-  assert(img.cols == FLAGS_scale);
-  assert(img.rows == FLAGS_scale);
+  int size = img.cols * img.rows;
   vector<string> steps = caffe2::split(',', FLAGS_preprocess);
   for (int i = 0; i < steps.size(); i++) {
     auto step = steps[i];
@@ -99,9 +138,9 @@ std::vector<float> convertToVector(cv::Mat& img) {
     } else if (step == "normalize") {
       normalize = {255, 255, 255};
     } else if (step == "mean") {
-      mean = {0.406, 0.456, 0.485};
+      mean = {0.406f, 0.456f, 0.485f};
     } else if (step == "std") {
-      std = {0.225, 0.224, 0.229};
+      std = {0.225f, 0.224f, 0.229f};
     } else if (step == "bgrtorgb") {
       bgrtorgb = true;
     } else {
@@ -113,7 +152,7 @@ std::vector<float> convertToVector(cv::Mat& img) {
   }
 
   int C = FLAGS_color ? 3 : 1;
-  int total_size = C * FLAGS_scale * FLAGS_scale;
+  int total_size = C * size;
   std::vector<float> values(total_size);
   if (C == 1) {
     cv::MatIterator_<uchar> it, end;
@@ -130,32 +169,50 @@ std::vector<float> convertToVector(cv::Mat& img) {
     for (it = img.begin<cv::Vec3b>(), end = img.end<cv::Vec3b>(); it != end;
          ++it, i++) {
       values[i] = (((*it)[b] / normalize[0] - mean[0]) / std[0]);
-      int offset = FLAGS_scale * FLAGS_scale + i;
+      int offset = size + i;
       values[offset] = (((*it)[g] / normalize[1] - mean[1]) / std[1]);
-      offset = FLAGS_scale * FLAGS_scale + offset;
+      offset = size + offset;
       values[offset] = (((*it)[r] / normalize[2] - mean[2]) / std[2]);
     }
   }
   return values;
 }
 
-std::vector<float> convertOneImage(std::string& filename) {
+std::vector<float> convertOneImage(
+    std::string& filename,
+    int& height,
+    int& width) {
   assert(filename[0] != '~');
 
   std::cout << "Converting " << filename << std::endl;
+
   // Load image
   cv::Mat img = cv::imread(
+#if CV_MAJOR_VERSION <= 3
       filename, FLAGS_color ? CV_LOAD_IMAGE_COLOR : CV_LOAD_IMAGE_GRAYSCALE);
-
-  cv::Mat crop = cropToSquare(img);
+#else
+      filename, FLAGS_color ? cv::IMREAD_COLOR : cv::IMREAD_GRAYSCALE);
+#endif
+  caffe2::Timer timer;
+  timer.Start();
 
   // Resize image
-  cv::Mat resized_img = resizeImage(crop);
+  cv::Mat resized_img = resizeImage(img);
+  vector<string> sizes = caffe2::split(',', FLAGS_crop);
+  height = std::stoi(sizes[0]);
+  width = std::stoi(sizes[1]);
+  if ((height <= 0) || (width <= 0)) {
+    height = resized_img.rows;
+    width = resized_img.cols;
+  }
+  cv::Mat crop = cropToRec(resized_img, height, width);
   // Assert we don't have to deal with alignment
-  DCHECK(resized_img.isContinuous());
-  assert(resized_img.rows == resized_img.cols);
-  assert(resized_img.rows == FLAGS_scale);
-  std::vector<float> one_image_values = convertToVector(resized_img);
+  DCHECK(crop.isContinuous());
+  assert(crop.rows == height);
+  assert(crop.rows == width);
+  std::vector<float> one_image_values = convertToVector(crop);
+  double ts = timer.MicroSeconds();
+  reportTime("image_preprocess", ts, "convert", "us");
   return one_image_values;
 }
 
@@ -181,10 +238,24 @@ void convertImages() {
   }
   std::vector<std::vector<float>> values;
   int C = FLAGS_color ? 3 : 1;
+  int height = -1;
+  int width = -1;
   for (int i = 0; i < file_names.size(); i++) {
-    std::vector<float> one_image_values = convertOneImage(file_names[i]);
+    int one_height, one_width;
+    std::vector<float> one_image_values =
+        convertOneImage(file_names[i], one_height, one_width);
+    if (height < 0 && width < 0) {
+      height = one_height;
+      width = one_width;
+    } else {
+      assert(height == one_height);
+      assert(width == one_width);
+    }
     values.push_back(one_image_values);
   }
+
+  caffe2::Timer timer;
+  timer.Start();
 
   TensorProtos protos;
   TensorProto* data;
@@ -192,15 +263,19 @@ void convertImages() {
   data->set_data_type(TensorProto::FLOAT);
   data->add_dims(values.size());
   data->add_dims(C);
-  data->add_dims(FLAGS_scale);
-  data->add_dims(FLAGS_scale);
+  data->add_dims(height);
+  data->add_dims(width);
 
+  // Not optimized
   for (int i = 0; i < values.size(); i++) {
-    assert(values[i].size() == C * FLAGS_scale * FLAGS_scale);
+    assert(values[i].size() == C * height * width);
     for (int j = 0; j < values[i].size(); j++) {
       data->add_float_data(values[i][j]);
     }
   }
+  double ts = timer.MicroSeconds();
+  reportTime("image_preprocess", ts, "pack", "us");
+
   if (FLAGS_text_output) {
     caffe2::WriteProtoToTextFile(protos, FLAGS_output_tensor);
   } else {

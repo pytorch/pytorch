@@ -20,6 +20,18 @@ def _addindent(s_, numSpaces):
     return s
 
 
+def _if_float_tensor(fn):
+    '''
+    Calls `fn` on a value `t` only if `t` is a float tensor, or not a tensor (in
+    which case it's a module, as part of a recursive call to apply()).
+    '''
+    def apply(t):
+        if not isinstance(t, torch.Tensor) or t.is_floating_point():
+            return fn(t)
+        return t
+    return apply
+
+
 class Module(object):
     r"""Base class for all neural network modules.
 
@@ -50,7 +62,7 @@ class Module(object):
     r"""This allows better BC support for :meth:`load_state_dict`. In
     :meth:`state_dict`, the version number will be saved as in the attribute
     `_metadata` of the returned state dict, and thus pickled. `_metadata` is a
-    dictionary with keys follow the naming convention of state dict. See
+    dictionary with keys that follow the naming convention of state dict. See
     ``_load_from_state_dict`` on how to use this information in loading.
 
     If new parameters/buffers are added/removed from a module, this number shall
@@ -184,7 +196,7 @@ class Module(object):
 
     def _apply(self, fn):
         for module in self.children():
-            module._apply(fn)
+            fn(module)
 
         for param in self._parameters.values():
             if param is not None:
@@ -284,7 +296,7 @@ class Module(object):
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.float() if t.is_floating_point() else t)
+        return self._apply(_if_float_tensor(lambda t: t.float()))
 
     def double(self):
         r"""Casts all floating point parameters and buffers to ``double`` datatype.
@@ -292,7 +304,7 @@ class Module(object):
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.double() if t.is_floating_point() else t)
+        return self._apply(_if_float_tensor(lambda t: t.double()))
 
     def half(self):
         r"""Casts all floating point parameters and buffers to ``half`` datatype.
@@ -300,7 +312,7 @@ class Module(object):
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.half() if t.is_floating_point() else t)
+        return self._apply(_if_float_tensor(lambda t: t.half()))
 
     def to(self, *args, **kwargs):
         r"""Moves and/or casts the parameters and buffers.
@@ -376,7 +388,9 @@ class Module(object):
                                 'dtypes, but got desired dtype={}'.format(dtype))
 
         def convert(t):
-            return t.to(device, dtype if t.is_floating_point() else None, non_blocking)
+            if isinstance(t, torch.Tensor):
+                return t.to(device, dtype if t.is_floating_point() else None, non_blocking)
+            return t.to(device, dtype, non_blocking)
 
         return self._apply(convert)
 
@@ -398,6 +412,16 @@ class Module(object):
             :class:`torch.utils.hooks.RemovableHandle`:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
+
+        .. warning ::
+
+            The current implementation will not have the presented behavior
+            for complex :class:`Module` that perform many operations.
+            In some failure cases, :attr:`grad_input` and :attr:`grad_output` will only
+            contain the gradients for a subset of the inputs and outputs.
+            For such :class:`Module`, you should use :func:`torch.Tensor.register_hook`
+            directly on a specific input or output to get the required gradients.
+
         """
         handle = hooks.RemovableHandle(self._backward_hooks)
         self._backward_hooks[handle.id] = hook

@@ -42,6 +42,7 @@ _(aten, _cast_Long) \
 _(aten, _cast_Short) \
 _(aten, _cat) \
 _(aten, _ceil) \
+_(aten, _cholesky_helper) \
 _(aten, _convolution) \
 _(aten, _convolution_double_backward) \
 _(aten, _convolution_nogroup) \
@@ -117,6 +118,7 @@ _(aten, _sin) \
 _(aten, _sinh) \
 _(aten, _sparseDims) \
 _(aten, _sparse_add) \
+_(aten, _sparse_addmm) \
 _(aten, _sparse_coo_tensor_with_dims) \
 _(aten, _sparse_coo_tensor_with_dims_and_tensors) \
 _(aten, _sparse_coo_tensor_unsafe) \
@@ -126,6 +128,7 @@ _(aten, _sparse_div_zerodim) \
 _(aten, _sparse_mul) \
 _(aten, _sparse_mul_scalar) \
 _(aten, _sparse_mul_zerodim) \
+_(aten, _sparse_sum) \
 _(aten, _sqrt) \
 _(aten, _standard_gamma) \
 _(aten, _standard_gamma_grad) \
@@ -194,6 +197,8 @@ _(aten, addcmul) \
 _(aten, addmm) \
 _(aten, addmv) \
 _(aten, addr) \
+_(aten, affine_grid_generator) \
+_(aten, affine_grid_generator_backward) \
 _(aten, alias) \
 _(aten, all) \
 _(aten, allclose) \
@@ -258,6 +263,7 @@ _(aten, copy_sparse_to_sparse) \
 _(aten, cos) \
 _(aten, cosh) \
 _(aten, cosine_embedding_loss) \
+_(aten, cosine_similarity) \
 _(aten, cross) \
 _(aten, ctc_loss) \
 _(aten, cudnn_affine_grid_generator) \

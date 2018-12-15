@@ -198,6 +198,13 @@ class TaskGroup(object):
         self._report_steps = []
         self._workspace_type = workspace_type
         self._tasks_by_node = None
+        self._remote_nets = []
+
+    def add_remote_net(self, net):
+        self._remote_nets.append(net)
+
+    def remote_nets(self):
+        return self._remote_nets
 
     def add(self, task):
         assert not self._already_used, (

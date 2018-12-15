@@ -20,6 +20,18 @@ function(filter_list output input)
     set(${output} ${result} PARENT_SCOPE)
 endfunction()
 
+function(filter_list_exclude output input)
+    unset(result)
+    foreach(filename ${${input}})
+        foreach(pattern ${ARGN})
+            if(NOT "${filename}" MATCHES "${pattern}")
+                list(APPEND result "${filename}")
+            endif()
+        endforeach()
+    endforeach()
+    set(${output} ${result} PARENT_SCOPE)
+endfunction()
+
 ################################################################################
 
 if (DEFINED ENV{PYTORCH_PYTHON})
@@ -134,10 +146,16 @@ if (NOT BUILD_ATEN_MOBILE)
 
   FILE(GLOB all_python "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/*.py")
 
+  set(GEN_ROCM_FLAG)
+  if (USE_ROCM)
+    set(GEN_ROCM_FLAG --rocm)
+  endif()
+
   SET(GEN_COMMAND
       ${PYCMD} ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/gen.py
       --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
       --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
+      ${GEN_ROCM_FLAG}
       ${cwrap_files}
   )
 

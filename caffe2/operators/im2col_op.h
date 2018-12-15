@@ -46,7 +46,7 @@ class Im2ColOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& X = Input(0);
-    auto* Y = Output(0);
+
     CAFFE_ENFORCE(4 == X.dim());
 
     int N = 0, C = 0, H = 0, W = 0;
@@ -76,8 +76,10 @@ class Im2ColOp final : public Operator<Context> {
 
     switch (order_) {
       case StorageOrder::NCHW: {
-        Y->Resize(
-            std::vector<int64_t>{N, C * kernel_h_ * kernel_w_, out_h, out_w});
+        auto* Y = Output(
+            0,
+            std::vector<int64_t>{N, C * kernel_h_ * kernel_w_, out_h, out_w},
+            at::dtype<T>());
 
         const size_t dx = X.numel() / N;
         const size_t dy = Y->numel() / N;
@@ -104,8 +106,10 @@ class Im2ColOp final : public Operator<Context> {
         }
       }; break;
       case StorageOrder::NHWC: {
-        Y->Resize(
-            std::vector<int64_t>{N, out_h, out_w, kernel_h_ * kernel_w_ * C});
+        auto* Y = Output(
+            0,
+            std::vector<int64_t>{N, out_h, out_w, kernel_h_ * kernel_w_ * C},
+            at::dtype<T>());
 
         const size_t dx = X.numel() / N;
         const size_t dy = Y->numel() / N;
@@ -188,8 +192,8 @@ class Col2ImOp final : public Operator<Context> {
   bool RunOnDevice() override {
     auto& X = Input(0);
     auto& Z = Input(1);
-    auto* Y = Output(0);
-    Y->ResizeLike(Z);
+
+    auto* Y = Output(0, Z.sizes(), at::dtype<T>());
     CAFFE_ENFORCE(4 == Y->dim());
 
     int N = 0, C = 0, H = 0, W = 0;

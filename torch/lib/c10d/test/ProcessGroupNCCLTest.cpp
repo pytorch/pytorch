@@ -5,8 +5,9 @@
 #include <c10d/test/CUDATest.hpp>
 #include <c10d/test/TestUtils.hpp>
 
-#include <ATen/cuda/CUDAGuard.h>
-#include <ATen/cuda/CUDAStream.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <ATen/cuda/CUDAMultiStreamGuard.h>
+#include <c10/cuda/CUDAStream.h>
 
 using namespace c10d::test;
 
@@ -27,7 +28,7 @@ class NCCLTestBase {
   }
 
   void initialize(int rank, int size) {
-    auto store = std::make_shared<::c10d::FileStore>(path_);
+    auto store = std::make_shared<::c10d::FileStore>(path_, size);
 
     pg_ = std::unique_ptr<::c10d::ProcessGroupNCCL>(
         new ::c10d::ProcessGroupNCCL(store, rank, size));

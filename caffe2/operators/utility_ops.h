@@ -196,7 +196,7 @@ class EnsureDenseOp final : public Operator<Context> {
     // allow the output to be copied from the input
     if (&input != output) {
       output->ResizeLike(input);
-      output->CopyFrom(input, &context_);
+      output->CopyFrom(input, true /*async*/);
     }
     return true;
   }
@@ -257,7 +257,7 @@ class SumOp : public Operator<Context> {
     auto& input0 = Input(0);
     auto* output = Output(0);
     if (InputSize() == 1) {
-      output->CopyFrom(input0, &context_);
+      output->CopyFrom(input0, true /*async*/);
       return true;
     }
     output->ResizeLike(input0);

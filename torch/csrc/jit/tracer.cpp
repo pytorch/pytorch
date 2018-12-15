@@ -1,12 +1,11 @@
-#include "torch/csrc/jit/tracer.h"
+#include <torch/csrc/jit/tracer.h>
 
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/engine.h"
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/jit/passes/remove_expands.h"
-#include "torch/csrc/variable_tensor_functions.h"
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/engine.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/remove_expands.h>
 
 #include <string>
 #include <sstream>
@@ -54,7 +53,11 @@ void addInputs(Node *n, const char * name, const c10::optional<at::Scalar>& valu
   if(value) {
     detail::genericAddInput(n, *value);
   } else {
-    detail::genericAddInput(n, IValue());
+    Graph * g = n->owningGraph();
+    Value* none =
+        g->insertNode(g->createNone(NumberType::get()))
+            ->output();
+    n->addInput(none);
   }
 }
 void addInputs(Node *n, const char * name, const std::string& value) { detail::genericAddInput(n, value); }
@@ -69,10 +72,7 @@ void addInputs(Node *n, const char * name, at::Generator * value)            {
   n->addInput(undef_gen);
 }
 void addInputs(Node *n, const char * name, at::Device value) {
-  std::vector<int64_t> device = {
-      static_cast<int64_t>(value.type()),
-      static_cast<int64_t>(value.index())};
-  detail::genericAddInput(n, std::move(device));
+  detail::genericAddInput(n, value);
 }
 void addInputs(Node *n, const char * name, at::Layout value) {
   detail::genericAddInput(n, static_cast<int64_t>(value));
@@ -186,22 +186,24 @@ void ArgumentStash::stashIntListElem(const std::string& arg_name, size_t size, s
 
   Value* ten = getValueTrace(var);
   auto& g = *ten->owningGraph();
-  auto prim = g.createTensorToNum(jit::IntType::get(), ten)
-                   ->insertAfter(ten->node())
-                   ->output();
+  WithInsertPoint guard(ten->node()->next());
+  auto prim = g.insert(prim::Int, {ten});
   list_trace[idx] = prim;
 }
 
-void ArgumentStash::stashValue(const std::string& arg_name, size_t idx, const Variable& var, TypePtr type) {
+void ArgumentStash::stashValue(const std::string& arg_name, size_t idx, const Variable& var, const TypePtr& type) {
   if (!isTracing()) return;
 
   Value* ten = getValueTrace(var);
-  if (type) {
-    auto& g = *ten->owningGraph();
-    ten = g.createTensorToNum(type, ten)
-                     ->insertAfter(ten->node())
-                     ->output();
+  WithInsertPoint guard(ten->node()->next());
+  auto& g = *ten->owningGraph();
+
+  if (type == IntType::get()) {
+    ten = g.insert(prim::Int, { ten });
+  } else if (type == FloatType::get()) {
+    ten = g.insert(prim::Float, { ten });
   }
+
   stash.values.emplace(arg_name, ten);
 }
 

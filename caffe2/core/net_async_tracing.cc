@@ -64,7 +64,7 @@ Tracer::Tracer(
       config_(config) {
   std::replace(filename_.begin(), filename_.end(), '/', '_');
   filename_ = this->config().filepath + "/" + filename_ + "_id_" +
-      caffe2::to_string(getCounterForNetName(net_name));
+      c10::to_string(getCounterForNetName(net_name));
   timer_.Start();
 }
 
@@ -81,7 +81,7 @@ std::string Tracer::opTraceName(const OperatorBase* op) {
   int unique_shard_id =
       op->has_debug_def() ? getUniqueShardId(op->debug_def()) : -1;
   if (unique_shard_id != -1) {
-    return op->type() + ":" + caffe2::to_string(unique_shard_id);
+    return op->type() + ":" + c10::to_string(unique_shard_id);
   } else {
     return op->type();
   }
@@ -366,7 +366,7 @@ int extractShardId(const std::string& name) {
     while (right_pos < name.length() && isdigit(name[right_pos])) {
       right_pos++;
     }
-    return caffe2::stoi(name.substr(left_pos, right_pos - left_pos));
+    return c10::stoi(name.substr(left_pos, right_pos - left_pos));
   } else {
     return -1;
   }
@@ -463,7 +463,7 @@ bool startIter(const std::shared_ptr<Tracer>& tracer) {
   tracer->setEnabled(is_enabled);
   if (should_dump) {
     int dumping_iter = tracer->bumpDumpingIter();
-    tracer->dumpTracingResultAndClearEvents(caffe2::to_string(dumping_iter));
+    tracer->dumpTracingResultAndClearEvents(c10::to_string(dumping_iter));
   }
   return is_enabled;
 }

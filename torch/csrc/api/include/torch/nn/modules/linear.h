@@ -11,7 +11,7 @@
 namespace torch {
 namespace nn {
 /// Options for the `Linear` module.
-struct LinearOptions {
+struct TORCH_API LinearOptions {
   LinearOptions(int64_t in, int64_t out);
   /// The number of input features (columns of the input matrix).
   TORCH_ARG(int64_t, in);
@@ -22,7 +22,7 @@ struct LinearOptions {
 };
 
 /// Applies a linear transformation with optional bias.
-class LinearImpl : public Cloneable<LinearImpl> {
+class TORCH_API LinearImpl : public Cloneable<LinearImpl> {
  public:
   LinearImpl(int64_t in, int64_t out) : LinearImpl(LinearOptions(in, out)) {}
   explicit LinearImpl(LinearOptions options);
@@ -31,7 +31,7 @@ class LinearImpl : public Cloneable<LinearImpl> {
 
   /// Transforms the `input` tensor by multiplying with the `weight` and
   /// optionally adding the `bias`, if `with_bias` is true in the options.
-  Tensor forward(Tensor input);
+  Tensor forward(const Tensor& input);
 
   /// The options used to configure this module.
   LinearOptions options;

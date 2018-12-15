@@ -1,7 +1,7 @@
-#include "THCTensorMath.h"
-#include "THCGeneral.h"
-#include "THCAtomics.cuh"
-#include "THCApply.cuh"
+#include <THC/THCTensorMath.h>
+#include <THC/THCGeneral.h>
+#include <THC/THCAtomics.cuh>
+#include <THC/THCApply.cuh>
 
 // Compute the offsets into the given tensors for a linear index. For the 't2'
 // tensor, dimension 'dim' is skipped. The tensors are assumed to have the same
@@ -180,5 +180,5 @@ __global__ void THCudaTensor_scatterFillKernel(
   }
 }
 
-#include "generic/THCTensorScatterGather.cu"
-#include "THCGenerateAllTypes.h"
+#include <THC/generic/THCTensorScatterGather.cu>
+#include <THC/THCGenerateAllTypes.h>

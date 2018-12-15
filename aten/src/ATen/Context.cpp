@@ -1,8 +1,8 @@
-#include "ATen/Config.h"
+#include <ATen/Config.h>
 
-#include "Context.h"
+#include <ATen/Context.h>
 
-#include <ATen/core/TensorOptions.h>
+#include <c10/core/TensorOptions.h>
 
 #include <thread>
 #include <mutex>
@@ -10,12 +10,12 @@
 #include <string>
 #include <stdexcept>
 
-#include "ATen/CPUGenerator.h"
-#include "ATen/RegisterCPU.h"
-#include "ATen/Tensor.h"
+#include <ATen/CPUGenerator.h>
+#include <ATen/RegisterCPU.h>
+#include <ATen/Tensor.h>
 #include <ATen/cpu/FlushDenormal.h>
 
-#include "TH/TH.h"  // for USE_LAPACK
+#include <TH/TH.h>  // for USE_LAPACK
 
 namespace at {
 
@@ -30,7 +30,9 @@ static inline void argErrorHandler(int arg, const char * msg, void * data) {
 
 Context::Context()
 : next_id(static_cast<size_t>(TypeID::NumOptions))
-, thc_state(nullptr, [](THCState* p){ /* no-op */ } ) {
+, thc_state(nullptr, [](THCState* p){ /* no-op */ } )
+, thh_state(nullptr, [](THHState* p){ /* no-op */ } )
+{
 
   THSetDefaultErrorHandler(errorHandler,nullptr);
   THSetDefaultArgErrorHandler(argErrorHandler,nullptr);
@@ -109,22 +111,36 @@ TypeExtendedInterface& getType(const Tensor& t) {
   return getType(t.unsafeGetTensorImpl());
 }
 
+LegacyTHDispatcher& getLegacyTHDispatcher(TensorOptions options) {
+  return globalContext().getLegacyTHDispatcher(
+            options.backend(), typeMetaToScalarType(options.dtype()));
+}
+
+LegacyTHDispatcher& getLegacyTHDispatcher(const TensorImpl* impl) {
+  Backend backend = tensorTypeIdToBackend(impl->type_id());
+  return globalContext().getLegacyTHDispatcher(
+            backend, typeMetaToScalarType(impl->dtype()));
+}
+
 Allocator* getCPUAllocator() {
   return getTHDefaultAllocator();
 }
 
-struct LegacyTypeInit : public LegacyTypeInitInterface {
-  LegacyTypeInit(LegacyTypeInitArgs) {}
+struct LegacyDeviceTypeInit : public LegacyDeviceTypeInitInterface {
+  LegacyDeviceTypeInit(LegacyDeviceTypeInitArgs) {}
   void initCPU() const override {
     globalContext();
   }
   void initCUDA() const override {
     globalContext().lazyInitCUDA();
   }
+  void initHIP() const override {
+    globalContext().lazyInitHIP();
+  }
   void initComplex() const override {
     globalContext().lazyInitComplex();
   }
 };
-REGISTER_LEGACY_TYPE_INIT(LegacyTypeInit);
+REGISTER_LEGACY_TYPE_INIT(LegacyDeviceTypeInit);
 
 }

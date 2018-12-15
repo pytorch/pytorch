@@ -1,6 +1,6 @@
 #pragma once
-#include "error_report.h"
-#include "tree.h"
+#include <torch/csrc/jit/script/error_report.h>
+#include <torch/csrc/jit/script/tree.h>
 
 #include <functional>
 #include <string>
@@ -151,7 +151,7 @@ struct List : public TreeView {
   T operator[](size_t i) const {
     return T(subtree(i));
   }
-  TreeRef map(std::function<TreeRef(const T&)> fn) {
+  TreeRef map(const std::function<TreeRef(const T&)>& fn) {
     return tree_->map([&](TreeRef v) { return fn(T(v)); });
   }
   static List create(const SourceRange& range, const std::vector<T>& subtrees) {
@@ -177,7 +177,7 @@ struct Maybe : public TreeView {
   T get() const {
     return T(tree_->trees().at(0));
   }
-  TreeRef map(std::function<TreeRef(const T&)> fn) {
+  TreeRef map(const std::function<TreeRef(const T&)>& fn) {
     return tree_->map([&](TreeRef v) { return fn(T(v)); });
   }
   static Maybe<T> create(const SourceRange& range) {
@@ -262,6 +262,10 @@ struct Expr : public TreeView {
       case TK_TUPLE_LITERAL:
       case '@':
       case TK_POW:
+      case TK_FLOOR_DIV:
+      case '&':
+      case '^':
+      case '|':
         return;
       default:
         throw ErrorReport(tree) << kindToString(tree->kind()) << " is not a valid Expr";
@@ -293,8 +297,8 @@ struct Param : public TreeView {
   explicit Param(const TreeRef& tree) : TreeView(tree) {
     tree_->match(TK_PARAM);
   }
-  static Param create(const SourceRange& range, const Ident& ident, const Expr& type) {
-    return Param(Compound::create(TK_PARAM, range, {ident, type}));
+  static Param create(const SourceRange& range, const Ident& ident, const Expr& type, const Maybe<Expr>& def) {
+    return Param(Compound::create(TK_PARAM, range, {ident, type, def}));
   }
   Ident ident() const {
     return Ident(subtree(0));
@@ -302,9 +306,11 @@ struct Param : public TreeView {
   Expr type() const {
     return Expr(subtree(1));
   }
-  template<typename T>
-  T typeExpect() const {
-    return T(type());
+  Maybe<Expr> defaultValue() const {
+    return Maybe<Expr>(subtree(2));
+  }
+  Param withType(const Expr& typ) const {
+    return Param::create(range(), ident(), typ, defaultValue());
   }
 };
 
@@ -322,7 +328,7 @@ struct Decl : public TreeView {
   Maybe<Expr> return_type() const {
     return Maybe<Expr>(subtree(1));
   }
-  static Decl create(const SourceRange& range, const List<Param>& params, Maybe<Expr> return_type) {
+  static Decl create(const SourceRange& range, const List<Param>& params, const Maybe<Expr>& return_type) {
     return Decl(Compound::create(TK_DECL, range, {params, return_type}));
   }
 };
@@ -332,7 +338,7 @@ struct Def : public TreeView {
     tree->match(TK_DEF);
   }
   Def withName(std::string new_name) const {
-    auto new_ident = Ident::create(name().range(), new_name);
+    auto new_ident = Ident::create(name().range(), std::move(new_name));
     return create(range(), new_ident, decl(), statements());
   }
   Ident name() const {
@@ -547,7 +553,7 @@ struct ExprStmt : public Stmt {
   Expr expr() {
     return Expr(subtree(0));
   }
-  static ExprStmt create(const SourceRange& range, const Expr list) {
+  static ExprStmt create(const SourceRange& range, const Expr& list) {
     return ExprStmt(Compound::create(TK_EXPR_STMT, range, {list}));
   }
 };
@@ -577,6 +583,10 @@ struct BinOp : public Expr {
       case '@':
       case TK_POW:
       case '%':
+      case '&':
+      case '^':
+      case '|':
+      case TK_FLOOR_DIV:
         if (tree->trees().size() != 2)
           throw ErrorReport(tree) << "BinOp expected 2 subtrees, found " << tree->trees().size();
         return;
@@ -626,7 +636,7 @@ struct Const : public Expr {
     return std::stoll(subtree(0)->stringValue());
   }
   double asFloatingPoint() const {
-    return std::stod(subtree(0)->stringValue());
+    return SharedParserData::strtod_c(subtree(0)->stringValue().c_str(), nullptr);
   }
   const std::string& text() const {
     return subtree(0)->stringValue();

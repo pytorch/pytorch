@@ -4,6 +4,7 @@
 #include <torch/nn/cloneable.h>
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <functional>
 #include <utility>
@@ -54,7 +55,7 @@ namespace nn {
 ///
 /// Note that `Functional` overloads the call operator (`operator()`) such that
 /// you can invoke it with `my_func(...)`.
-class FunctionalImpl : public torch::nn::Cloneable<FunctionalImpl> {
+class TORCH_API FunctionalImpl : public torch::nn::Cloneable<FunctionalImpl> {
  public:
   using Function = std::function<Tensor(Tensor)>;
 

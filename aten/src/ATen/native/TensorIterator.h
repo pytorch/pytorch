@@ -1,11 +1,11 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <ATen/core/SmallVector.h>
+#include <c10/util/SmallVector.h>
 #include <ATen/core/Range.h>
 #include <ATen/detail/ScalarTypeConversions.h>
 #include <bitset>
-#include "c10/util/Optional.h"
+#include <c10/util/Optional.h>
 
 // TensorIterator is a helper class for element-wise operations, such as
 // arithmetic, comparisions, and trigonometric functions. It handles
@@ -52,9 +52,26 @@
 
 namespace at {
 
+struct DimCounter {
+  DimCounter(IntList shape, Range range);
+
+  void increment(const std::array<int64_t, 2>& step);
+  bool is_done() const;
+  std::array<int64_t, 2> max_2d_step() const;
+
+  IntList shape;
+  Range range;
+  DimVector values;
+  int64_t offset;
+};
 struct CAFFE2_API OperandInfo {
   OperandInfo() {}
-  OperandInfo(const Tensor& t) : tensor(t) {}
+  OperandInfo(const Tensor& t, const Type* type=nullptr)
+    : tensor(t), type(const_cast<Type*>(type)) {
+      if (t.defined() && !type) {
+        this->type = &t.type();
+      }
+  }
 
   /// Stride after broadcasting. The stride is in bytes, not number of elements.
   DimVector stride_bytes;
@@ -73,9 +90,6 @@ struct CAFFE2_API OperandInfo {
   /// The data pointer. This may be different from tensor.data_ptr() if the
   /// iterator is split.
   void* data = nullptr;
-
-  /// True if the kernel needs to handle a cast operation for this operand.
-  bool needs_cast = false;
 
   bool is_output = false;
 
@@ -106,6 +120,10 @@ struct CAFFE2_API TensorIterator {
   // parallelization of the inner loop.
   using loop_t = std::function<void(int ntensors, char** data, const int64_t* strides, int64_t size)>;
   using loop2d_t = std::function<void(int ntensors, char** data, const int64_t* strides, int64_t size0, int64_t size1)>;
+
+  using loop_subiter_t = std::function<void(TensorIterator& subiter)>;
+
+  void foreach_reduced_elt(const loop_subiter_t& loop);
 
   static std::unique_ptr<TensorIterator> binary_op(Tensor& out, const Tensor& a, const Tensor& b);
   static std::unique_ptr<TensorIterator> reduce_op(Tensor& out, const Tensor& a);
@@ -153,6 +171,8 @@ struct CAFFE2_API TensorIterator {
   void remove_dimension(int dim);
   /// Shrinks an iterated dimension
   void narrow(int dim, int64_t start, int64_t size);
+  /// Narrows every dim after and including `start_dim` to size one.
+  void select_all_keeping_dim(int start_dim, IntList starts);
   /// Replaces the data pointer and strides for the operand at index `arg`
   void replace_operand(int arg, void* data, IntList stride);
 
@@ -210,10 +230,10 @@ protected:
   void compute_strides();
   void reorder_dimensions();
   void permute_dimensions(IntList perm);
-  void compute_common_type();
+  void compute_types();
+  Type& compute_common_type();
   void allocate_outputs();
   void coalesce_dimensions();
-  void check_type_conversions();
 
 protected:
   DimVector shape_;
@@ -223,6 +243,10 @@ protected:
   bool has_coalesced_dimensions_ = false;
   bool accumulate_ = false;
   bool resize_outputs_ = true;
+  bool is_reduction_ = false;
+  bool compute_common_dtype_ = true;
+  bool allow_cpu_scalars_ = false;
+  bool promote_gpu_output_dtypes_ = false;
 };
 
 struct TensorIterator::Builder {
@@ -230,15 +254,21 @@ struct TensorIterator::Builder {
 
   Builder() : iter_(new TensorIterator()) {};
 
-  Builder& add_output(const Tensor& output) {
-    iter_->operands_.emplace_back(output);
+  void add_output(const Tensor& output, const Type* type=nullptr) {
+    iter_->operands_.emplace_back(output, type);
     iter_->num_outputs_++;
-    return *this;
   }
 
-  Builder& add_input(const Tensor& input) {
-    iter_->operands_.emplace_back(input);
-    return *this;
+  void add_input(const Tensor& input, const Type* type=nullptr) {
+    iter_->operands_.emplace_back(input, type);
+  }
+
+  void dont_compute_common_dtype() {
+    iter_->compute_common_dtype_ = false;
+  }
+
+  void dont_resize_outputs() {
+    iter_->resize_outputs_ = false;
   }
 
   std::unique_ptr<TensorIterator> build();

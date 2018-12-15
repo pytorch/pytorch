@@ -1,8 +1,8 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/SpatialUpSamplingBilinear.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/SpatialUpSamplingBilinear.cu"
 #else
 
-#include "../linear_upsampling.h"
+#include <THCUNN/linear_upsampling.h>
 
 static inline void THNN_(SpatialUpSamplingBilinear_shapeCheck)
                         (THCState *state,
