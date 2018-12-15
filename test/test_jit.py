@@ -1186,6 +1186,23 @@ class TestJit(JitTestCase):
                 self.assertEqual(grad_v, expected_grad)
             self.assertEqual(fn.has_trace_for(x, y), rx or ry)
 
+    def test_optional_int(self):
+        def f(a):
+            b, c = torch.unique(a, return_inverse=True)
+            return b + 1
+
+        def g(a):
+            b = torch.unique(a)
+            return b + 1
+
+        a = torch.rand(5, 6, 7)
+
+        self.checkTrace(f, [a], inputs_require_grads=False)
+        self.checkScript(f, [a])
+        self.checkTrace(g, [a], inputs_require_grads=False)
+        # scripting unique when return_inverse = False is not supported yet
+        # self.checkScript(g, [a])
+
     def test_python_ir(self):
         x = torch.tensor([0.4], requires_grad=True)
         y = torch.tensor([0.7], requires_grad=True)
