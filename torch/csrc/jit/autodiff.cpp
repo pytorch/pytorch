@@ -194,9 +194,11 @@ static c10::optional<std::vector<Value*>> build_script_grad(
     auto fw_graph = compiled_graphs->forward;
     new_outputs = inlineCallTo(
         *graph, *fw_graph, node->inputs(), /*unpack_outputs=*/true);
-    for (size_t i = 0; i < node->outputs().size(); ++i) {
-      new_outputs.at(i)->setType(node->outputs()[i]->type());
-      new_outputs.at(i)->replaceAllUsesWith(node->outputs()[i]);
+    auto outputs = node->outputs();
+    JIT_ASSERT(new_outputs.size() == outputs.size() + 1);
+    for (size_t i = 0; i < outputs.size(); ++i) {
+      new_outputs[i]->setType(outputs[i]->type());
+      outputs[i]->replaceAllUsesWith(new_outputs[i]);
     }
   }
 

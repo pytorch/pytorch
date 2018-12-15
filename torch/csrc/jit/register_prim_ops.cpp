@@ -85,6 +85,15 @@ RegisterOperators reg({
         }),
 
     Operator(
+        "aten::_defined(Tensor? self) -> bool",
+        [](const Node* node) {
+          return [](Stack& stack) {
+            auto t = pop(stack).toTensor();
+            push(stack, t.defined() && t.requires_grad());
+            return 0;
+          };
+        }),
+    Operator(
         "prim::Bool(Tensor a) -> bool",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
