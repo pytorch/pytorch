@@ -820,10 +820,7 @@
 - name: uniform_(Tensor self, double from, double to, Generator generator)
   self: zeros_like(grad)
 
-- name: unique(Tensor self, bool sorted, bool return_inverse)
-  self: not_implemented("unique")
-
-- name: unique(Tensor self, int64_t dim, bool sorted, bool return_inverse)
+- name: unique(Tensor self, int64_t? dim, bool sorted, bool return_inverse)
   self: not_implemented("unique")
 
 - name: _unsafe_view(Tensor self, IntList size)

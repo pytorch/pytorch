@@ -90,6 +90,7 @@ FROM_IVALUE = {
     'bool': '{}.toBool()',
     'double': '{}.toDouble()',
     'int64_t': '{}.toInt()',
+    'int64_t?': '{}.toOptional<int64_t>()',
     'std::string': '{}.toString()->string()',
     'Generator': 'nullptr',
     'std::array<bool,2>': 'as_bool_array<2>({}.toIntList()->elements())',
