@@ -185,7 +185,7 @@ struct VISIBILITY_HIDDEN ConstantPythonTupleValue : public PythonValue {
       const SourceRange& loc,
       Method& m) override {
     std::vector<Value*> values;
-    for (auto sugared_item : asTuple(loc, m)) {
+    for (const auto& sugared_item : asTuple(loc, m)) {
       values.push_back(sugared_item->asValue(loc, m));
     }
     auto node = m.graph()->createTuple(values);
@@ -532,6 +532,7 @@ void initJitScriptBindings(PyObject* module) {
           const std::vector<ResolutionCallback>& rcbs,
           const std::vector<FunctionDefaults>& defaults) {
         std::vector<Resolver> resolvers;
+        resolvers.reserve(rcbs.size());
         for(auto & callback : rcbs) {
           resolvers.push_back(pythonResolver(callback));
         }
@@ -686,7 +687,8 @@ void initJitScriptBindings(PyObject* module) {
         PythonPrint(ss, self, tensors, false);
         return ss.str();
       })
-      .def("apply", &Module::apply);
+      .def("apply", &Module::apply)
+      .def("_copy_into", &Module::copy_into);
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
     .def("graph", [&](Method& self) {
@@ -730,7 +732,7 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def("parse_type_comment", [](const std::string& comment) {
     Parser p(comment);
-    return Decl(p.parseTypeComment(true));
+    return Decl(p.parseTypeComment());
   });
 
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);

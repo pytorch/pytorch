@@ -45,7 +45,7 @@ with prim::DifferentiableGraph_0 = graph(%0 : Float(*, *)
   %43 : int[] = aten::size(%ingate.1)
   %44 : int[] = prim::BroadcastSizes(%42, %40)
   %45 : int[] = prim::BroadcastSizes(%43, %41)
-  return (%hy, %cy, %9, %Wx.1, %11, %Uz.1, %13, %28, %25, %31, %30, %32, %14, %ingate.1, %forgetgate.1, %cellgate.1, %outgate.1, %44, %45, %34);
+  return (%hy, %cy, %Wx.1, %Uz.1, %13, %28, %25, %31, %30, %32, %14, %ingate.1, %forgetgate.1, %cellgate.1, %outgate.1, %44, %45, %34);
 }
 with prim::FusionGroup_0 = graph(%0 : Float(*, *)
       %1 : Tensor

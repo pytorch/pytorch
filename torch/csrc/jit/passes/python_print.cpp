@@ -637,7 +637,7 @@ struct PythonPrintPass {
     } else if(v.isTensorList()) {
       stmt << "[";
       const char* delim = "";
-      for(auto t : v.toTensorListRef()) {
+      for(const auto& t : v.toTensorListRef()) {
         stmt << delim << "CONSTANTS.c" << getOrAddTensorConstant(t);
         delim = ", ";
       }

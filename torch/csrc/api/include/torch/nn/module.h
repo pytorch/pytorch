@@ -150,7 +150,7 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   /// \endrst
   void apply(
       const NamedModuleApplyFunction& function,
-      std::string name_prefix = std::string());
+      const std::string& name_prefix = std::string());
 
   /// Applies the `function` to the `Module` and recursively to every submodule.
   /// The function must accept a `const std::string&` for the key of the module,
@@ -167,7 +167,7 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   /// \endrst
   void apply(
       const ConstNamedModuleApplyFunction& function,
-      std::string name_prefix = std::string()) const;
+      const std::string& name_prefix = std::string()) const;
 
   /// Applies the `function` to the `Module` and recursively to every submodule.
   /// The function must accept a `const std::shared_ptr<Module>&`.
@@ -198,7 +198,7 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   /// \endrst
   void apply(
       const NamedModulePointerApplyFunction& function,
-      std::string name_prefix = std::string()) const;
+      const std::string& name_prefix = std::string()) const;
 
   /// Returns the parameters of this `Module` and if `recurse` is true, also
   /// recursively of every submodule.
@@ -243,7 +243,7 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   ///   stored in a `shared_ptr`.
   /// \endrst
   OrderedDict<std::string, std::shared_ptr<Module>> named_modules(
-      std::string name_prefix = std::string(),
+      const std::string& name_prefix = std::string(),
       bool include_self = true) const;
 
   /// Returns the direct submodules of this `Module`.

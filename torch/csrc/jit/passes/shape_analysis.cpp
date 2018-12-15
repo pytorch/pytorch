@@ -201,7 +201,7 @@ class ShapePropagator {
       return dependsOnMutationMemo_[node];
     }
 
-    const auto writers = aliasDb_.getWritersForNode(node);
+    const auto writers = aliasDb_.getWriters(node);
     const auto hasWritersBefore =
         std::any_of(writers.cbegin(), writers.cend(), [&](const Node* writer) {
           return writer->isBefore(node);

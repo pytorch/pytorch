@@ -419,7 +419,7 @@ static inline bool isIntOrFloatUsedAsList(
     const Value* value,
     const Argument& arg) {
   // Look for int[N] or float[N]
-  auto v_type = value->type();
+  const auto& v_type = value->type();
   if (v_type != FloatType::get() && v_type != IntType::get())
     return false;
   auto arg_type = unwrapOptional(arg.type());
@@ -589,6 +589,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
     failure_messages << "\nfor operator " << schema << ":\n";
     return failure_messages;
   };
+
   TypeEnv type_env;
   std::vector<Value*> positional_inputs;
   std::vector<bool> used_kwarg(kwargs.size(), false);
@@ -603,7 +604,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
       self = c10::nullopt;
     } else if (!arg.kwarg_only() && used_args < args.size()) {
       // allow zeros(IntList sizes) to work with zeros(1, 2) or zeros(1)
-      if (allow_conversions && arg.type()->kind() == TypeKind::ListType && // the formal must be a list
+      if (arg.type()->kind() == TypeKind::ListType && // the formal must be a list
           !arg.N() && // it must not be a broadcasting list like int[3], otherwise
                     // a single int is a valid input
           (schema_i + 1 == schema.arguments().size() ||
@@ -1053,7 +1054,7 @@ private:
           << " return (" << schema.returns().size() << ") does not match"
           << " the number of returns from the function (" << results.size() << ")!";
       }
-      auto range = return_stmt.range();
+      const auto& range = return_stmt.range();
       size_t return_type_idx = 0;
       for (auto r : results) {
         TypePtr type = DynamicType::get();
@@ -1505,7 +1506,7 @@ private:
     auto instances = sv->asTuple(stmt.range(), method);
     const std::string& target_name = target.name();
     pushFrame(environment_stack->block());
-    for(auto inst : instances) {
+    for(const auto& inst : instances) {
       environment_stack->setSugaredVar(itrs[0].range(), target_name, inst);
       emitStatements(body);
     }
@@ -1987,7 +1988,7 @@ private:
       if(maybe_unpack && tree->kind() == TK_STARRED) {
         auto starred = Starred(tree);
         auto entries = emitSugaredExpr(starred.expr(), 1)->asTuple(starred.range(), method);
-        for(auto entry : entries) {
+        for(const auto& entry : entries) {
           values.emplace_back(
               tree->range(), entry->asValue(starred.range(), method));
         }
@@ -2275,7 +2276,7 @@ private:
           elem_type = values.at(0)->type();
         }
         for (auto v : values) {
-          if (*v->type() != *elem_type)  {
+          if (v->type() != elem_type) {
             throw ErrorReport(tree)
                 << "Lists must contain only a single type, expected: "
                 << *elem_type << " but found " << *v->type() << " instead";
@@ -2638,7 +2639,7 @@ void defineMethodsInModule(const std::shared_ptr<Module>& m, const std::vector<D
   auto resolver_it = resolvers.begin();
   std::vector<Method*> methods;
   std::unordered_map<std::string, Method*> function_table;
-  for(Def def : definitions) {
+  for(const Def& def : definitions) {
     const std::string& name = def.name().name();
     auto resolver = *resolver_it++;
     JIT_ASSERT(resolver);
@@ -2796,14 +2797,13 @@ c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(const Expr& expr)
   JIT_ASSERT(elem_ptr != ident_to_type_lut().end());
   TypePtr list_ptr = ListType::create(elem_ptr->second);
 
-  Parser const_parser(len);
-  auto constant = const_parser.parseConst();
-  if (!constant.isIntegral() || constant.asIntegral() <= 0) {
+  const char* len_c = len.c_str();
+  char* end;
+  size_t len_v = strtoull(len_c, &end, 10);
+  if (end != len_c + len.size()) {
     throw ErrorReport(subscript.subscript_exprs().range())
-        << "subscript of Broadcastable list must be positive integer";
+        << "subscript of Broadcastable list must be a positive integer";
   }
-
-  auto len_v = constant.asIntegral();
   return std::pair<TypePtr, int32_t>(list_ptr, len_v);
 }
 

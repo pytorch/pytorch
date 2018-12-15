@@ -2782,17 +2782,6 @@ class TestScript(JitTestCase):
             return torch.ones(x), x
         self.checkScript(stuff3, ([3, 2],))
 
-    def test_bool_list_io(self):
-        @torch.jit.script
-        def stuff4(x):
-            # type: (List[bool]) -> Tuple[List[bool], List[bool], List[List[bool]]]
-            return x, [True, False], [[True]]
-
-        li_1, li_2, li_3 = stuff4([True])
-        li_3 = li_3[0]
-        for li in [li_1, li_2, li_3]:
-            self.assertTrue(type(li[0]) == type(True))
-
     def test_nested_list(self):
         def foo(z):
             # type: (Tuple[int, List[List[int]]]) -> int
@@ -4442,83 +4431,6 @@ a")
     def test_tensor_number_math(self):
         self._test_tensor_number_math()
 
-    def test_torch_tensor_bad_input(self):
-        with self.assertRaisesRegex(RuntimeError, "Input list to torch.tensor must be of ints, floats, "
-                                    "or bools, got None"):
-            @torch.jit.script
-            def test():
-                return torch.tensor([None])
-
-        with self.assertRaisesRegex(RuntimeError, "Note: empty lists are constructed as Tensor"):
-            @torch.jit.script
-            def tmp():
-                return torch.tensor([])
-
-        @torch.jit.script
-        def foo():
-            return torch.tensor([[2, 2], [1]])
-        with self.assertRaisesRegex(RuntimeError, "Expected sequence of length"):
-            foo()
-
-    def test_torch_tensor_empty_list(self):
-        def func():
-            return torch.tensor(torch.jit.annotate(List[int], []))
-        cu = torch.jit.script(func)
-        t1 = cu()
-        t2 = func()
-
-        # torchscript returns int tensor, python returns float tensor
-        self.assertNotEqual(t1.dtype, t2.dtype)
-
-        def func():
-            li = torch.jit.annotate(List[int], [])
-            return torch.tensor([li, li])
-
-        self.checkScript(func, ())
-
-        def func():
-            li = torch.jit.annotate(List[int], [])
-            return torch.tensor([[[li]]])
-
-        self.checkScript(func, ())
-
-    def test_torch_tensor(self):
-        template = dedent('''
-        def func():
-            li = {list_create}
-            return torch.tensor(li {options})
-        ''')
-
-        lists = ["2.5", "4", "True", "False", "[2]", "[-.5]", "[False, True, False]", "[2, 2]",
-                 "torch.jit.annotate(List[int], [])", "[2.5, 2.5]", "[[2], [2]]", "[[-.5], [2.2]]", "[[False], [True]]"]
-
-        dtypes = ["", ", dtype=torch.float", ", dtype=torch.double", ", dtype=torch.half",
-                  ", dtype=torch.uint8", ", dtype=torch.int8", ", dtype=torch.short",
-                  ", dtype=torch.int", ", dtype=torch.long"]
-
-        devices = ['', ", device='cpu'"]
-        if RUN_CUDA:
-            devices.append(", device='cuda'")
-
-        option_pairs = [dtype + device for dtype in dtypes for device in devices]
-        for li in lists:
-            for option in option_pairs:
-                # tensor from empty list is type float in python and annotated type in torchscript
-                if "annotate" in li and "dtype" not in option:
-                    continue
-                code = template.format(list_create=li, options=option)
-                scope = {}
-                exec(code, globals(), scope)
-                cu = torch.jit.CompilationUnit(code)
-                t1 = cu.func()
-                t2 = scope['func']()
-                if t1.dtype == torch.float16:  # equality NYI for half tensor
-                    self.assertTrue(str(t1) == str(t2))
-                else:
-                    self.assertEqual(t1, t2)
-                self.assertEqual(t1.dtype, t2.dtype)
-                self.assertEqual(t1.device, t2.device)
-
     @unittest.skipIf(not RUN_CUDA, "No CUDA")
     @skipIfRocm
     def test_tensor_number_math_cuda(self):
@@ -5577,7 +5489,7 @@ a")
             print(int_fn(1))
             print(int_fn((1, 1, 1)))
 
-        with self.assertRaisesRegex(RuntimeError, "expected number"):
+        with self.assertRaisesRegex(RuntimeError, "must be a positive integer:"):
             @torch.jit.script
             def fn(x):
                 # type: (BroadcastingListx[int]) -> List[int]
@@ -7229,6 +7141,59 @@ a")
         # Note: neg op from the traced function should be properly inlined
         self.assertExpected(canonical(tm.graph))
 
+    def test_trace_hierarchy(self):
+        # Test that we preserve the module hierarchy for a ScriptModule
+        # submodule during tracing
+
+        class AnotherScriptMod(torch.jit.ScriptModule):
+            def __init__(self):
+                super(AnotherScriptMod, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(1, 2, 3))
+
+            @torch.jit.script_method
+            def bar(self):
+                return torch.zeros(4, 5)
+
+        class SomeScriptMod(torch.jit.ScriptModule):
+            def __init__(self):
+                super(SomeScriptMod, self).__init__()
+                self.asm = AnotherScriptMod()
+
+            @torch.jit.script_method
+            def foo(self):
+                return torch.zeros(3, 4)
+
+            @torch.jit.script_method
+            def bar(self):
+                return torch.zeros(4, 3)
+
+        class TraceMe(torch.nn.Module):
+            def __init__(self):
+                super(TraceMe, self).__init__()
+                self.ssm = SomeScriptMod()
+
+            def forward(self, x):
+                return self.ssm.bar() + x
+
+        orig = TraceMe()
+        traced = torch.jit.trace(orig, (torch.rand(4, 3, dtype=torch.float),))
+        # for each of these checks, check that *BOTH* the underlying
+        # _C.ScriptModule object has the expected method/param, as well as the
+        # Python object that wraps it.
+        self.assertTrue(traced.ssm._has_method('foo'))
+        self.assertTrue(hasattr(traced.ssm, 'foo'))
+
+        imported = self.getExportImportCopy(traced)
+
+        self.assertTrue(imported.ssm._has_method('foo'))
+        self.assertTrue(hasattr(imported.ssm, 'foo'))
+
+        self.assertTrue(imported.ssm.asm._has_method('bar'))
+        self.assertTrue(hasattr(imported.ssm.asm, 'bar'))
+
+        self.assertTrue(imported.ssm.asm._has_parameter('param'))
+        self.assertTrue(hasattr(imported.ssm.asm, 'param'))
+
     def test_call_traced_module_from_traced_module(self):
         class TracedModule1(torch.nn.Module):
             def __init__(self):
@@ -7274,11 +7239,11 @@ a")
         class ScriptMod(torch.jit.ScriptModule):
             def __init__(self):
                 super(ScriptMod, self).__init__()
-                self.param = torch.nn.Parameter(torch.rand(5, 7))
+                self.param_foo = torch.nn.Parameter(torch.rand(5, 7))
 
             @torch.jit.script_method
             def forward(self, x):
-                return torch.mm(x, self.param)
+                return torch.mm(x, self.param_foo)
 
         class TracedModule(torch.nn.Module):
             def __init__(self):
@@ -9959,6 +9924,9 @@ class TestFuser(JitTestCase):
 
         ge = self.checkTrace(f, (x, y))
         self.assertAllFused(ge.graph_for(x, y))
+        x.requires_grad_(True)
+        y.requires_grad_(True)
+        self.assertAllFused(ge.graph_for(x, y), except_for=("aten::size", "prim::BroadcastSizes"))
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -10201,6 +10169,20 @@ class TestFuser(JitTestCase):
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
 
         ge = self.checkTrace(self.fn_test_relu, (x, y))
+
+    @staticmethod
+    def fn_test_erf(x):
+        return F.relu(torch.erf(x) - torch.erfc(x))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_erf_cuda(self):
+        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        ge = self.checkTrace(self.fn_test_erf, (x,))
+        self.assertAllFused(ge.graph_for(x))
+        x.requires_grad_(True)
+        self.assertAllFused(ge.graph_for(x), except_for=("aten::size", "prim::BroadcastSizes"))
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
     @enable_cpu_fuser
@@ -10805,7 +10787,6 @@ def add_autograd_test(
                 args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace, call_kwargs=kwargs)
                 self_tensor = deepcopy(self_variable.data)
                 args_tensor = deepcopy(unpack_variables(args_variable))
-                output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
 
                 def fn(*inputs, **kwargs):
                     output = getattr(inputs[0], name)(*inputs[1:], **kwargs)
