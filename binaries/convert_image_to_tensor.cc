@@ -131,7 +131,7 @@ cv::Mat resizeImage(cv::Mat& img) {
   int scaled_height = int(round(img.rows * im_scale));
   assert((scaled_width <= max_size) && (scaled_height <= max_size));
   if ((scaled_width < min_size) || (scaled_height < min_size)) {
-    assert((scaled_width == max_size) || (scaled_width == max_size));
+    assert((scaled_width == max_size) || (scaled_height == max_size));
   } else {
     assert((scaled_width == min_size) || (scaled_height == min_size));
   }
