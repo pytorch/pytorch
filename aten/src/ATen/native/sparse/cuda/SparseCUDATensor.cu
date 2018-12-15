@@ -28,6 +28,8 @@ namespace at { namespace native {
 using namespace at::sparse;
 
 // --------------------------------------------------------------------
+// see NOTE [Sparse Coalesce]
+//
 // coalesce sum
 // --------------------------------------------------------------------
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, int64_t> sparse_coalesce_common_cuda(const SparseTensor& self) {
@@ -167,22 +169,24 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
 }
 
 // --------------------------------------------------------------------
+// see NOTE [Sparse Coalesce]
+//
 // coalesce max / min
 // --------------------------------------------------------------------
 std::tuple<SparseTensor, Tensor> coalesce_maxmin_common_cuda(const SparseTensor& self, CoalesceReductionType reduction_type) {
   int64_t nnz = self._nnz();
   LongTensor indices = self._indices();
   Tensor values = self._values().contiguous();
+  // see NOTE [Reduction Indices at Coalesce]
+  LongTensor reduction_indices;
 
   if (self.is_coalesced()) {
-    // see NOTE [Reduction Indices at Coalesce]
-    LongTensor reduction_indices = at::arange(0, nnz, indices.options()).reshape({nnz, 1}).repeat({1, values.stride(0)});
+    reduction_indices = at::arange(0, nnz, indices.options()).reshape({nnz, 1}).repeat({1, values.stride(0)});
     return std::tuple<SparseTensor, Tensor>(self, reduction_indices);
   }
 
   if (nnz < 2) {
-    // see NOTE [Reduction Indices at Coalesce]
-    LongTensor reduction_indices = at::arange(0, nnz, indices.options()).reshape({nnz, 1}).repeat({1, values.stride(0)});
+    reduction_indices = at::arange(0, nnz, indices.options()).reshape({nnz, 1}).repeat({1, values.stride(0)});
     // see NOTE [Coalesce SparseTensor]
     SparseTensor out = self.clone();
     out._coalesced_(true);
@@ -197,7 +201,7 @@ std::tuple<SparseTensor, Tensor> coalesce_maxmin_common_cuda(const SparseTensor&
   int64_t new_nnz = 0;
 
   std::tie(uniqueOffsets, origIndices, newValues, new_indices, indices1D, new_nnz) = sparse_coalesce_common_cuda(self);
-  LongTensor reduction_indices = at::empty({new_nnz, values.stride(0)}, new_indices.options());
+  reduction_indices = at::empty({new_nnz, values.stride(0)}, new_indices.options());
 
   int64_t stride = at::prod_intlist(values.sizes().slice(1));
 

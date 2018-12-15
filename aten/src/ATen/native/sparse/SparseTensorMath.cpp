@@ -1141,10 +1141,10 @@ std::tuple<SparseTensor, Tensor> _sparse_min_sparse_dim(const SparseTensor& inpu
 // --------------------------------------------------------------------
 // NOTE [Sparse max / min over parse_dim backward]
 //
-// The backward function relies on the assumption that grad Tensor:
+// The backward function relies on the assumption that grad SparseTensor:
 // 1. is coalesced
-// 2. has the same indices tensor as ouput from forward (instead of checking this one explicitly,
-//    we check shape between reduction_indices and grad.values())
+// 2. has the same indices tensor as the forward output (instead of checking this one explicitly,
+//    we check and assure the shapes are the same between reduction_indices and grad.values()).
 // --------------------------------------------------------------------
 template <typename scalar_t>
 void _sparse_maxmin_sparse_dim_backward_kernel_cpu(
@@ -1228,12 +1228,12 @@ Tensor _sparse_max(const SparseTensor& input_, int64_t dim_to_max) {
   dim_to_max = maybe_wrap_dim(dim_to_max, input_dim);
   int64_t sparse_dim = input.sparse_dim();
 
-  if (dim_to_max < sparse_dim) {
+  if (dim_to_max < sparse_dim) { // reduce on sparse dim
     Tensor max_res, max_indices;
     std::tie(max_res, max_indices) = at::_sparse_max_sparse_dim(input, dim_to_max);
     return max_res;
   }
-  else {
+  else { // reduce on dense dim, the backward replied on autograd of input.values()
     Tensor values = input.values();
     Tensor indices = input._indices();
     auto new_sizes = input.sizes().vec();
@@ -1269,12 +1269,12 @@ Tensor _sparse_min(const SparseTensor& input_, int64_t dim_to_min) {
   dim_to_min = maybe_wrap_dim(dim_to_min, input_dim);
   int64_t sparse_dim = input.sparse_dim();
 
-  if (dim_to_min < sparse_dim) {
+  if (dim_to_min < sparse_dim) { // reduce on sparse dim
     Tensor min_res, min_indices;
     std::tie(min_res, min_indices) = at::_sparse_min_sparse_dim(input, dim_to_min);
     return min_res;
   }
-  else {
+  else { // reduce on dense dim, the backward replied on autograd of input.values()
     Tensor values = input.values();
     Tensor indices = input._indices();
     auto new_sizes = input.sizes().vec();

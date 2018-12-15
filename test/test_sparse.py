@@ -1059,6 +1059,10 @@ class TestSparse(TestCase):
                 run_tests(lambda x: sparse_ops[i](x, test_dim[0]),
                           lambda x: dense_ops[i](x, test_dim[0]), bound_val[i], S)
 
+                S_not_hybrid = self._gen_sparse(4, nnz, with_size)[0]
+                run_tests(lambda x: sparse_ops[i](x, test_dim[0]),
+                          lambda x: dense_ops[i](x, test_dim[0]), bound_val[i], S_not_hybrid)
+
         # test for errors
         S = self._gen_sparse(sparse_dims, nnz, with_size)[0]
         empty_S = torch.sparse_coo_tensor(size=with_size)

@@ -138,6 +138,8 @@ def max(input, dim=None):
     r"""
     Returns the max of each row of SparseTensor :attr:`input` in the given
     dimensions :attr:`dim`. Currently it only supports one dimension reduction.
+    Unlike :func:`torch.max`, when :attr:`dim` is defined, this function only
+    ouputs the reduced Tensor instead of a tuple of (max, max_indices).
 
     The reduced :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting an output
     tensor having one fewer dimensions than :attr:`input`.
@@ -148,6 +150,42 @@ def max(input, dim=None):
     Args:
         input (Tensor): the input SparseTensor
         dim (int): the dimension to reduce. Default: reduce over all dims.
+
+    Example::
+
+        >>> nnz = 3
+        >>> dims = [3, 3, 2, 2]
+        >>> I = torch.cat([torch.randint(0, dims[0], size=(nnz,)),
+                           torch.randint(0, dims[1], size=(nnz,))], 0).reshape(2, nnz)
+        >>> V = torch.randn(nnz, dims[2], dims[3])
+        >>> size = torch.Size(dims)
+        >>> S = torch.sparse_coo_tensor(I, V, size)
+        >>> S
+        tensor(indices=tensor([[0, 1, 1],
+                               [2, 1, 2]]),
+               values=tensor([[[ 1.7238, -0.3070],
+                               [ 0.6081, -0.4609]],
+
+                              [[-1.5113, -0.6456],
+                               [ 1.1479, -1.6221]],
+
+                              [[ 0.4596, -0.1392],
+                               [ 0.8057, -0.1902]]]),
+               size=(3, 3, 2, 2), nnz=3, layout=torch.sparse_coo)
+
+        # when reduce over a sparse_dim, return a SparseTensor
+        >>> torch.sparse.max(S, 0)
+        tensor(indices=tensor([[1, 2]]),
+               values=tensor([[[-1.5113, -0.6456],
+                               [ 1.1479, -1.6221]],
+
+                              [[ 1.7238, -0.1392],
+                               [ 0.8057, -0.1902]]]),
+               size=(3, 2, 2), nnz=2, layout=torch.sparse_coo)
+
+        # when reduce over all dims, return a dense Tensor
+        >>> torch.sparse.max(S)
+        tensor(1.7238)
     """
     if dim is not None:
         return torch._sparse_max(input, dim)
@@ -159,6 +197,8 @@ def min(input, dim=None):
     r"""
     Returns the min of each row of SparseTensor :attr:`input` in the given
     dimensions :attr:`dim`. Currently it only supports one dimension reduction.
+    Unlike :func:`torch.min`, when :attr:`dim` is defined, this function only
+    ouputs the reduced Tensor instead of a tuple of (min, min_indices).
 
     The reduced :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting an output
     tensor having one fewer dimensions than :attr:`input`.
@@ -169,6 +209,42 @@ def min(input, dim=None):
     Args:
         input (Tensor): the input SparseTensor
         dim (int): the dimension to reduce. Default: reduce over all dims.
+
+    Example::
+
+        >>> nnz = 3
+        >>> dims = [3, 3, 2, 2]
+        >>> I = torch.cat([torch.randint(0, dims[0], size=(nnz,)),
+                           torch.randint(0, dims[1], size=(nnz,))], 0).reshape(2, nnz)
+        >>> V = torch.randn(nnz, dims[2], dims[3])
+        >>> size = torch.Size(dims)
+        >>> S = torch.sparse_coo_tensor(I, V, size)
+        >>> S
+        tensor(indices=tensor([[1, 0, 2],
+                               [2, 1, 1]]),
+               values=tensor([[[ 0.0155,  1.4717],
+                               [-0.9080,  1.2962]],
+
+                              [[ 0.5194,  0.3214],
+                               [ 1.3452, -0.5076]],
+
+                              [[-0.4205, -0.6785],
+                               [ 0.3130,  2.6872]]]),
+               size=(3, 3, 2, 2), nnz=3, layout=torch.sparse_coo)
+
+        # when reduce over a sparse_dim, return a SparseTensor
+        >>> torch.sparse.min(S, 0)
+        tensor(indices=tensor([[1, 2]]),
+               values=tensor([[[-0.4205, -0.6785],
+                               [ 0.3130, -0.5076]],
+
+                              [[ 0.0155,  1.4717],
+                               [-0.9080,  1.2962]]]),
+               size=(3, 2, 2), nnz=2, layout=torch.sparse_coo)
+
+        # when reduce over all dims, return a dense Tensor
+        >>> torch.sparse.min(S)
+        tensor(-0.9080)
     """
     if dim is not None:
         return torch._sparse_min(input, dim)

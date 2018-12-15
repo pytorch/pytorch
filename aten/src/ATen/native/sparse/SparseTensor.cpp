@@ -333,6 +333,28 @@ SparseTensor& copy_sparse_(SparseTensor& self, const SparseTensor& src, bool non
   return self._coalesced_(src.is_coalesced());
 }
 
+// -------------------------------------------------------------------------------------------
+// NOTE [Sparse Coalesce]
+//
+// Coalescing a SparseTensor typically will combine duplicates (indices and values),
+// and output a coalesced SparseTensor, where:
+// 1. indices are unique
+// 2. indices are sorted
+//
+// This is also called `coalesce_sum`, where the reduction is doing a sum operation.
+// Similarly, there are `coalesce_max` and `coalesce_min` where the reduction operations
+// are max and min.
+//
+// Depends on the input, coalesce will do the following:
+// 1. if input SparseTensor is already coalesced, return input
+// 2. if input has nnz <= 1, then it must be coalesced, return a clone of it with
+//    `is_coalesced = true`. It is because `coalesce` is not an in-place operation when
+//    `is_coalesced` is false, we should keep the original tensor intact and do coalesce
+//     on a copy of the tensor
+// 3. if input has nnz > 1, do the actual coalesce reduction (sum, max, min)
+//    and return a coalesced tensor
+// -------------------------------------------------------------------------------------------
+
 // --------------------------------------------------------------------
 // coalesce sum
 // --------------------------------------------------------------------
@@ -358,40 +380,40 @@ template <typename scalar_t, typename func_t>
 void coalesce_sum_kernel_cpu(
   Tensor& values,
   Tensor& indices,
-  Tensor& indicesPermutation,
-  Tensor& indicesBuffer,
-  Tensor& newValues,
-  Tensor& newIndices,
+  Tensor& indices_permutation,
+  Tensor& indices_buffer,
+  Tensor& new_values,
+  Tensor& new_indices,
   Tensor& new_nnz,
   int64_t sparse_dim,
   int64_t nnz,
   const func_t& reduce_op
 ) {
   int64_t prev = -1;
-  int64_t blockSize = values.stride(0);
+  int64_t block_size = values.stride(0);
   int64_t* new_nnz_ptr = new_nnz.data<int64_t>();
   new_nnz_ptr[0] = -1;
   scalar_t* values_ptr = values.data<scalar_t>();
-  scalar_t* newValues_ptr = newValues.data<scalar_t>();
-  auto newIndicesAccessor = newIndices.accessor<int64_t, 2>();
+  scalar_t* new_values_ptr = new_values.data<scalar_t>();
+  auto new_indices_accessor = new_indices.accessor<int64_t, 2>();
   auto indicesAccessor = indices.accessor<int64_t, 2>();
-  auto indicesPermutationAccessor = indicesPermutation.accessor<int64_t, 1>();
-  auto indicesBufferAccessor = indicesBuffer.accessor<int64_t, 1>();
+  auto indices_permutation_accessor = indices_permutation.accessor<int64_t, 1>();
+  auto indices_buffer_accessor = indices_buffer.accessor<int64_t, 1>();
 
   for (int64_t j = 0; j < nnz; j++) {
-    int64_t pos = indicesPermutationAccessor[j];
-    int64_t curr = indicesBufferAccessor[j];
+    int64_t pos = indices_permutation_accessor[j];
+    int64_t curr = indices_buffer_accessor[j];
     if (curr == prev) {
       if (values.numel() > 0) {  // if values is an empty tensor, there are no elements to copy
-        reduce_op(blockSize, values_ptr + pos * blockSize, newValues_ptr + new_nnz_ptr[0] * blockSize);
+        reduce_op(block_size, values_ptr + pos * block_size, new_values_ptr + new_nnz_ptr[0] * block_size);
       }
     } else {
       new_nnz_ptr[0] += 1;
       for (int64_t d = 0; d < sparse_dim; d++) {
-        newIndicesAccessor[d][new_nnz_ptr[0]] = indicesAccessor[d][pos];
+        new_indices_accessor[d][new_nnz_ptr[0]] = indicesAccessor[d][pos];
       }
       if (values.numel() > 0) {  // if values is an empty tensor, there are no elements to copy
-        coalesce_copy_op_cpu<scalar_t>(blockSize, values_ptr + pos * blockSize, newValues_ptr + new_nnz_ptr[0] * blockSize);
+        coalesce_copy_op_cpu<scalar_t>(block_size, values_ptr + pos * block_size, new_values_ptr + new_nnz_ptr[0] * block_size);
       }
     }
     prev = curr;
@@ -399,14 +421,6 @@ void coalesce_sum_kernel_cpu(
   new_nnz_ptr[0] += 1;
 }
 
-// NOTE [Coalesce SparseTensor]
-//
-// 1. if input SparseTensor is already coalesced, return input
-// 2. if input has nnz <= 1, then it must be coalesced, return a clone of it with
-//    `is_coalesced = true`. It is because `coalesce` is not an in-place operation when
-//    `is_coalesced` is false, we should keep the original tensor intact and do coalesce
-//     on a copy of the tensor
-// 3. if input has nnz > 1, run coalesce kernel (sum, max, min) and return a coalesced tensor
 SparseTensor coalesce_sum_cpu(const SparseTensor& self) {
   AT_ASSERT(self.defined());
   AT_ASSERT(!self.is_variable());
@@ -433,13 +447,13 @@ SparseTensor coalesce_sum_cpu(const SparseTensor& self) {
 
   SparseTensor dst = new_sparse(self.options());
   get_sparse_impl(dst)->resize_(sparse_dim, dense_dim, self.sizes());
-  LongTensor newIndices = at::empty_like(indices);
-  Tensor newValues = at::empty_like(values);
-  alias_into_sparse(dst, newIndices, newValues);
+  LongTensor new_indices = at::empty_like(indices);
+  Tensor new_values = at::empty_like(values);
+  alias_into_sparse(dst, new_indices, new_values);
 
-  LongTensor indicesBuffer;
-  LongTensor indicesPermutation;
-  std::tie(indicesBuffer, indicesPermutation) = indices_scalar.sort(0);
+  LongTensor indices_buffer;
+  LongTensor indices_permutation;
+  std::tie(indices_buffer, indices_permutation) = indices_scalar.sort(0);
 
   auto new_nnz = at::empty({1}, indices.options());
 
@@ -447,10 +461,10 @@ SparseTensor coalesce_sum_cpu(const SparseTensor& self) {
     coalesce_sum_kernel_cpu<scalar_t>(
       values,
       indices,
-      indicesPermutation,
-      indicesBuffer,
-      newValues,
-      newIndices,
+      indices_permutation,
+      indices_buffer,
+      new_values,
+      new_indices,
       new_nnz,
       sparse_dim,
       nnz,
@@ -518,10 +532,10 @@ template <typename scalar_t, typename func_t>
 void coalesce_maxmin_kernel_cpu(
   Tensor& values,
   Tensor& indices,
-  Tensor& indicesPermutation,
-  Tensor& indicesBuffer,
-  Tensor& newValues,
-  Tensor& newIndices,
+  Tensor& indices_permutation,
+  Tensor& indices_buffer,
+  Tensor& new_values,
+  Tensor& new_indices,
   Tensor& reduction_indices,
   Tensor& new_nnz,
   int64_t sparse_dim,
@@ -529,26 +543,26 @@ void coalesce_maxmin_kernel_cpu(
   const func_t& reduce_op
 ) {
   int64_t prev = -1;
-  int64_t blockSize = values.stride(0);
+  int64_t block_size = values.stride(0);
   int64_t* new_nnz_ptr = new_nnz.data<int64_t>();
   new_nnz_ptr[0] = -1;
   scalar_t* values_ptr = values.data<scalar_t>();
-  scalar_t* newValues_ptr = newValues.data<scalar_t>();
-  auto newIndicesAccessor = newIndices.accessor<int64_t, 2>();
+  scalar_t* new_values_ptr = new_values.data<scalar_t>();
+  auto new_indices_accessor = new_indices.accessor<int64_t, 2>();
   auto reduction_indices_accessor = reduction_indices.accessor<int64_t, 2>();
   auto indicesAccessor = indices.accessor<int64_t, 2>();
-  auto indicesPermutationAccessor = indicesPermutation.accessor<int64_t, 1>();
-  auto indicesBufferAccessor = indicesBuffer.accessor<int64_t, 1>();
+  auto indices_permutation_accessor = indices_permutation.accessor<int64_t, 1>();
+  auto indices_buffer_accessor = indices_buffer.accessor<int64_t, 1>();
 
   for (int64_t j = 0; j < nnz; j++) {
-    int64_t pos = indicesPermutationAccessor[j];
-    int64_t curr = indicesBufferAccessor[j];
+    int64_t pos = indices_permutation_accessor[j];
+    int64_t curr = indices_buffer_accessor[j];
     if (curr == prev) {
       if (values.numel() > 0) {  // if values is an empty tensor, there are no elements to copy
         reduce_op(
-          blockSize,
-          values_ptr + pos * blockSize,
-          newValues_ptr + new_nnz_ptr[0] * blockSize,
+          block_size,
+          values_ptr + pos * block_size,
+          new_values_ptr + new_nnz_ptr[0] * block_size,
           reduction_indices_accessor,
           new_nnz_ptr[0], pos
         );
@@ -556,17 +570,17 @@ void coalesce_maxmin_kernel_cpu(
     } else {
       new_nnz_ptr[0] += 1;
       for (int64_t d = 0; d < sparse_dim; d++) {
-        newIndicesAccessor[d][new_nnz_ptr[0]] = indicesAccessor[d][pos];
+        new_indices_accessor[d][new_nnz_ptr[0]] = indicesAccessor[d][pos];
       }
-      for (int64_t d = 0; d < blockSize; d++) {
+      for (int64_t d = 0; d < block_size; d++) {
         reduction_indices_accessor[new_nnz_ptr[0]][d] = j;
       }
       if (values.numel() > 0) {  // if values is an empty tensor, there are no elements to copy
         // copy & init both of values and indices
         coalesce_maxmin_copy_op_cpu<scalar_t>(
-          blockSize,
-          values_ptr + pos * blockSize,
-          newValues_ptr + new_nnz_ptr[0] * blockSize,
+          block_size,
+          values_ptr + pos * block_size,
+          new_values_ptr + new_nnz_ptr[0] * block_size,
           reduction_indices_accessor,
           new_nnz_ptr[0], pos
         );
@@ -586,22 +600,40 @@ std::tuple<SparseTensor, Tensor> coalesce_maxmin_common_cpu(const SparseTensor& 
   LongTensor indices = self._indices();
   Tensor values = self._values().contiguous();
 
+  // NOTE [Reduction Indices at Coalesce]
+  //
+  // A 2D dense tensor reduction_indices is created for backward of sparse reductions (max / min),
+  // during which grad values will be copied to grad-of-input based on reduction_indices.
+  // Specifically, reduction_indices is a 2D tensor with the same shape as grad.values() -
+  // {reduced_nnz, input.values().stride(0)}, therefore each value at reduction_indices indicates
+  // a location where a grad value should be copied into.
+  //
+  // 1. when input is already coalesced, no reduction is needed, grad and input tensors will share
+  //    the same shape. During backward values of grad will be copied to grad-of-input at
+  //    exact the same locations. Therefore reduction_indices is the following:
+  //
+  //   [
+  //      [0, 0, 0, 0, ..., 0],
+  //      [1, 1, 1, 1, ..., 1]
+  //      ...
+  //      [nnz-1, nnz-1, ...,]
+  //   ]
+  //
+  // 2. when input is uncoalesced, actual reduction will be performed, each row of reduction_indices
+  //    store locations of where the reduced values are coming from.
+  //
+  // Note that the 2nd dim of reduction_indices equals to input.values().stride(0), which is numel of
+  // of the dense tensor at the hybrid SparseTensor input. The size of 2nd dim equals to 1 when dense dim = 0.
+  LongTensor reduction_indices;
 
   if (self.is_coalesced()) {
-    // NOTE [Reduction Indices at Coalesce]
-    // generate a 2D tensor reduction_indices with sizes = (nnz, values.stride(0)):
-    // [[0, 0, 0, 0, ..., 0],
-    //  [1, 1, 1, 1, ..., 1]
-    //  ...
-    //  [nnz-1, nnz-1, ...,]
-    // ]
-    LongTensor reduction_indices = at::arange(0, nnz, indices.options()).reshape({nnz, 1}).repeat({1, values.stride(0)});
+    reduction_indices = at::arange(0, nnz, indices.options()).reshape({nnz, 1}).repeat({1, values.stride(0)});
     return std::tuple<SparseTensor, Tensor>(self, reduction_indices);
   }
 
   if (nnz < 2) {
     // see NOTE [Reduction Indices at Coalesce]
-    LongTensor reduction_indices = at::arange(0, nnz, indices.options()).reshape({nnz, 1}).repeat({1, values.stride(0)});
+    reduction_indices = at::arange(0, nnz, indices.options()).reshape({nnz, 1}).repeat({1, values.stride(0)});
     // see NOTE [Coalesce SparseTensor]
     SparseTensor dst = self.clone();
     dst._coalesced_(true);
@@ -615,16 +647,16 @@ std::tuple<SparseTensor, Tensor> coalesce_maxmin_common_cpu(const SparseTensor& 
 
   SparseTensor dst = new_sparse(self.options());
   get_sparse_impl(dst)->resize_(sparse_dim, dense_dim, self.sizes());
-  LongTensor newIndices = at::empty_like(indices);
-  Tensor newValues = at::empty_like(values);
-  alias_into_sparse(dst, newIndices, newValues);
+  LongTensor new_indices = at::empty_like(indices);
+  Tensor new_values = at::empty_like(values);
+  alias_into_sparse(dst, new_indices, new_values);
 
-  LongTensor indicesBuffer;
-  LongTensor indicesPermutation;
-  std::tie(indicesBuffer, indicesPermutation) = indices_scalar.sort(0);
+  LongTensor indices_buffer;
+  LongTensor indices_permutation;
+  std::tie(indices_buffer, indices_permutation) = indices_scalar.sort(0);
 
   auto new_nnz = at::empty({1}, indices.options());
-  LongTensor reduction_indices = at::empty({nnz, values.stride(0)}, indices.options());
+  reduction_indices = at::empty({nnz, values.stride(0)}, indices.options());
 
   AT_DISPATCH_ALL_TYPES(values.type(), "coalesce_maxmin_common_cpu", [&] {
 
@@ -632,10 +664,10 @@ std::tuple<SparseTensor, Tensor> coalesce_maxmin_common_cpu(const SparseTensor& 
       coalesce_maxmin_kernel_cpu<scalar_t>(
         values,
         indices,
-        indicesPermutation,
-        indicesBuffer,
-        newValues,
-        newIndices,
+        indices_permutation,
+        indices_buffer,
+        new_values,
+        new_indices,
         reduction_indices,
         new_nnz,
         sparse_dim,
@@ -647,10 +679,10 @@ std::tuple<SparseTensor, Tensor> coalesce_maxmin_common_cpu(const SparseTensor& 
       coalesce_maxmin_kernel_cpu<scalar_t>(
         values,
         indices,
-        indicesPermutation,
-        indicesBuffer,
-        newValues,
-        newIndices,
+        indices_permutation,
+        indices_buffer,
+        new_values,
+        new_indices,
         reduction_indices,
         new_nnz,
         sparse_dim,

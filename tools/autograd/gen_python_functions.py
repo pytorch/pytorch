@@ -23,6 +23,7 @@ SKIP_PYTHON_BINDINGS = [
     '_arange.*', '_range.*', '_linspace.*', '_logspace.*',
     '_sparse_add_out', '_sparse_div.*', '_sparse_mul.*', '_sparse_sub.*',
     'index', 'coalesce_sum', 'coalesce_max', 'coalesce_min',
+    '_sparse_max_sparse_dim', '_sparse_min_sparse_dim',
     '_indexCopy_', 'max_values', 'min_values', 'argmax', 'argmin',
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*',
     '_th_.*', '_thnn_.*',
