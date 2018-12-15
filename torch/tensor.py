@@ -327,7 +327,7 @@ class Tensor(torch._C._TensorBase):
 
         See :func:`torch.unique`
         """
-        return torch.unique(self, sorted=False, return_inverse=False, dim=dim)
+        return torch.unique(self, sorted, return_inverse, dim)
 
     def __rsub__(self, other):
         return _C._VariableFunctions.rsub(self, other)

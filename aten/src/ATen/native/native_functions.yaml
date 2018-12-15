@@ -1776,6 +1776,10 @@
     CPU: _unique_cpu
     CUDA: _unique_cuda
 
+# unique is not exposed to python, special cased in gen_python_functions.py
+- func: unique_dim(Tensor self, int64_t dim, bool sorted=false, bool return_inverse=false) -> (Tensor, Tensor)
+  variants: function
+
 - func: _unsafe_view(Tensor self, IntList size) -> Tensor
 
 - func: unsqueeze(Tensor self, int64_t dim) -> Tensor
