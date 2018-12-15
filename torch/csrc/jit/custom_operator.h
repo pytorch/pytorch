@@ -9,8 +9,28 @@
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
 
-namespace torch { namespace jit {
+namespace torch {
+namespace jit {
 namespace detail {
+/// Checks the static C++ type `T` for correctness to catch common error cases.
+template <typename T>
+void checkStaticArgumentTypes() {
+  // Give nice error messages for some of the common error cases.
+  // Use a LOUD ERROR MESSAGE SO USERS SEE THE STATIC_ASSERT
+  static_assert(
+      !std::is_integral<T>::value || std::is_same<T, int64_t>::value,
+      "INVALID TYPE: Only int64_t is supported as an integral argument type");
+  static_assert(
+      !std::is_same<T, float>::value,
+      "INVALID TYPE: float is not supported as an argument type, use double instead");
+}
+
+template <typename First, typename Second, typename... Rest>
+void checkStaticArgumentTypes() {
+  checkStaticArgumentTypes<First>();
+  checkStaticArgumentTypes<Second, Rest...>();
+}
+
 template <typename... Ts, size_t... Is>
 std::vector<Argument> createArgumentVectorFromTypes(Indices<Is...> indices) {
   // Arguments are named "_<index>"
@@ -92,6 +112,9 @@ void callOperatorWithTuple(
     std::tuple<Types...>& arguments,
     Indices<Is...>) {
   AT_ASSERT(stack.size() == sizeof...(Is));
+
+  // Check the C++ types for correctness.
+  checkStaticArgumentTypes<Types...>();
 
   // Pop values from the stack into the elements of the tuple.
   pop(stack, std::get<Is>(arguments)...);
