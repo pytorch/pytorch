@@ -197,7 +197,7 @@ void layer_norm_c10(
     caffe2::BaseContext* context) {
   const int canonical_axis = X.canonical_axis_index(axis);
   std::vector<int64_t> moments_dims(
-      X.dims().cbegin(), X.dims().cbegin() + canonical_axis);
+      X.sizes().cbegin(), X.sizes().cbegin() + canonical_axis);
   moments_dims.push_back(1);
   mean->Resize(moments_dims);
   sig->Resize(moments_dims);
