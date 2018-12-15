@@ -15,6 +15,7 @@
  */
 
 #include <opencv2/opencv.hpp>
+#include <cmath>
 #include <fstream>
 
 #include "caffe2/core/common.h"
@@ -26,6 +27,13 @@
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
 
+
+C10_DEFINE_int(
+    batch_size,
+    -1,
+    "Specify the batch size of the input. The number of items in the "
+    "input needs to be multiples of the batch size. If the batch size "
+    "is less than 0, all inputs are in one batch.")
 C10_DEFINE_bool(color, true, "If set, load images in color.");
 C10_DEFINE_string(
     crop,
@@ -34,7 +42,15 @@ C10_DEFINE_string(
     "it is not cropped.");
 C10_DEFINE_string(input_images, "", "Comma separated images");
 C10_DEFINE_string(input_image_file, "", "The file containing imput images");
-C10_DEFINE_string(output_tensor, "", "The output tensor file in NCHW");
+C10_DEFINE_string(input_text_file, "", "the text file to be written to blobs");
+C10_DEFINE_string(
+    output_tensor,
+    "",
+    "The output tensor file in NCHW for input images");
+C10_DEFINE_string(
+    output_text_tensor,
+    "",
+    "The output tensor file for the text input specified in input_text_file");
 C10_DEFINE_string(
     preprocess,
     "",
@@ -48,7 +64,13 @@ C10_DEFINE_string(
     "The format of the string is <type>|<identifier>. "
     "The valid type is 'json'. "
     "The valid identifier is nothing or an identifer that prefix every line");
-C10_DEFINE_int(scale, 256, "Scale the shorter edge to the given value.");
+C10_DEFINE_string(
+    scale,
+    "-1,-1",
+    "Scale the images to be within the min,max box. The shorter edge is "
+    "min pixels. But if the other edge is more than the max pixels, the "
+    "other edge and scaled to max pixels (and the shorter edge can be less "
+    "than the min pixels");
 C10_DEFINE_bool(text_output, false, "Write the output in text format.");
 C10_DEFINE_bool(warp, false, "If warp is set, warp the images to square.");
 
@@ -73,31 +95,60 @@ void reportTime(
             << "\"}" << std::endl;
 }
 
+void splitSizes(const std::string& arg, int* ptr0, int* ptr1) {
+  vector<string> sizes = caffe2::split(',', arg);
+  if (sizes.size() == 2) {
+    *ptr0 = std::stoi(sizes[0]);
+    *ptr1 = std::stoi(sizes[1]);
+  } else if (sizes.size() == 1) {
+    *ptr0 = std::stoi(sizes[0]);
+    *ptr1 = std::stoi(sizes[0]);
+  } else {
+    assert(false);
+  }
+}
+
+
 cv::Mat resizeImage(cv::Mat& img) {
-  if (FLAGS_scale <= 0) {
+  int min_size, max_size;
+  splitSizes(FLAGS_scale, &min_size, &max_size);
+  if ((min_size <= 0) && (max_size <= 0)) {
     return img;
   }
-  cv::Mat resized_img;
-  int scaled_width, scaled_height;
-  if (img.rows > img.cols) {
-    scaled_width = FLAGS_scale;
-    scaled_height = static_cast<float>(img.rows) * FLAGS_scale / img.cols;
-  } else {
-    scaled_height = FLAGS_scale;
-    scaled_width = static_cast<float>(img.cols) * FLAGS_scale / img.rows;
+  if (max_size < 0) {
+    max_size = INT_MAX;
   }
+  assert(min_size <= max_size);
+
+  int im_min_size = img.rows > img.cols ? img.cols : img.rows;
+  int im_max_size = img.rows > img.cols ? img.rows : img.cols;
+
+  double im_scale = 1.0 * min_size / im_min_size;
+  if (im_scale * im_max_size > max_size) {
+    im_scale = 1.0 * max_size / im_max_size;
+  }
+  int scaled_width = int(round(img.cols * im_scale));
+  int scaled_height = int(round(img.rows * im_scale));
+  assert((scaled_width <= max_size) && (scaled_height <= max_size));
+  if ((scaled_width < min_size) || (scaled_height < min_size)) {
+    assert((scaled_width == max_size) || (scaled_width == max_size));
+  } else {
+    assert((scaled_width == min_size) || (scaled_height == min_size));
+  }
+  cv::Mat resized_img;
   cv::resize(
       img,
       resized_img,
-      cv::Size(scaled_width, scaled_height),
-      0,
-      0,
+      cv::Size(),
+      im_scale,
+      im_scale,
       cv::INTER_LINEAR);
   return resized_img;
 }
 
-cv::Mat cropToRec(cv::Mat& img, int& height, int& width) {
-  // Crop image to square
+cv::Mat cropToRec(cv::Mat& img, int* height_ptr, int* width_ptr) {
+  int height = *height_ptr;
+  int width = *width_ptr;
   if ((height > 0) && (width > 0) &&
       ((img.rows != height) || (img.cols != width))) {
     cv::Mat cropped_img, cimg;
@@ -116,6 +167,8 @@ cv::Mat cropToRec(cv::Mat& img, int& height, int& width) {
     cropped_img = img(roi);
     // Make the image in continuous space in memory
     cimg = cropped_img.clone();
+    *height_ptr = height;
+    *width_ptr = width;
     return cimg;
   } else {
     return img;
@@ -155,18 +208,18 @@ std::vector<float> convertToVector(cv::Mat& img) {
   int total_size = C * size;
   std::vector<float> values(total_size);
   if (C == 1) {
-    cv::MatIterator_<uchar> it, end;
+    cv::MatIterator_<float> it, end;
     int idx = 0;
-    for (it = img.begin<uchar>(), end = img.end<uchar>(); it != end; ++it) {
+    for (it = img.begin<float>(), end = img.end<float>(); it != end; ++it) {
       values[idx++] = (*it / normalize[0] - mean[0]) / std[0];
     }
   } else {
     int i = 0;
-    cv::MatIterator_<cv::Vec3b> it, end;
+    cv::MatIterator_<cv::Vec3f> it, end;
     int b = bgrtorgb ? 2 : 0;
     int g = 1;
     int r = bgrtorgb ? 0 : 2;
-    for (it = img.begin<cv::Vec3b>(), end = img.end<cv::Vec3b>(); it != end;
+    for (it = img.begin<cv::Vec3f>(), end = img.end<cv::Vec3f>(); it != end;
          ++it, i++) {
       values[i] = (((*it)[b] / normalize[0] - mean[0]) / std[0]);
       int offset = size + i;
@@ -180,14 +233,14 @@ std::vector<float> convertToVector(cv::Mat& img) {
 
 std::vector<float> convertOneImage(
     std::string& filename,
-    int& height,
-    int& width) {
+    int* height_ptr,
+    int* width_ptr) {
   assert(filename[0] != '~');
 
   std::cout << "Converting " << filename << std::endl;
 
   // Load image
-  cv::Mat img = cv::imread(
+  cv::Mat img_uint8 = cv::imread(
 #if CV_MAJOR_VERSION <= 3
       filename, FLAGS_color ? CV_LOAD_IMAGE_COLOR : CV_LOAD_IMAGE_GRAYSCALE);
 #else
@@ -195,25 +248,84 @@ std::vector<float> convertOneImage(
 #endif
   caffe2::Timer timer;
   timer.Start();
-
+  cv::Mat img;
+  // Convert image to floating point values
+  img_uint8.convertTo(img, CV_32F);
   // Resize image
   cv::Mat resized_img = resizeImage(img);
-  vector<string> sizes = caffe2::split(',', FLAGS_crop);
-  height = std::stoi(sizes[0]);
-  width = std::stoi(sizes[1]);
+
+  int height, width;
+  splitSizes(FLAGS_crop, &height, &width);
   if ((height <= 0) || (width <= 0)) {
     height = resized_img.rows;
     width = resized_img.cols;
   }
-  cv::Mat crop = cropToRec(resized_img, height, width);
+  cv::Mat crop = cropToRec(resized_img, &height, &width);
+
   // Assert we don't have to deal with alignment
   DCHECK(crop.isContinuous());
   assert(crop.rows == height);
-  assert(crop.rows == width);
+  assert(crop.cols == width);
   std::vector<float> one_image_values = convertToVector(crop);
+  *height_ptr = height;
+  *width_ptr = width;
   double ts = timer.MicroSeconds();
   reportTime("image_preprocess", ts, "convert", "us");
   return one_image_values;
+}
+
+int getBatchSize(int num_items) {
+  int batch_size = FLAGS_batch_size;
+  if (batch_size < 0) {
+    batch_size = num_items;
+  } else {
+    assert(num_items % batch_size == 0);
+  }
+  return batch_size;
+}
+
+void writeValues(
+    std::vector<std::vector<float>>& values,
+    std::vector<int>& dims,
+    std::string output_file) {
+
+  caffe2::Timer timer;
+  timer.Start();
+
+  int batch_size = getBatchSize(values.size());
+  int num_batches = values.size() / batch_size;
+  assert(dims[0] == batch_size);
+
+  TensorProtos protos;
+  for (int k = 0; k < num_batches; k++) {
+    TensorProto* data;
+    data = protos.add_protos();
+    data->set_data_type(TensorProto::FLOAT);
+    for (int dim : dims) {
+      data->add_dims(dim);
+    }
+    long long int entry_size = 1;
+    for (int i = 1; i < dims.size(); i++) {
+      entry_size *= dims[i];
+    }
+
+    // Not optimized
+    for (int i = 0; i < batch_size; i++) {
+      int idx = k * batch_size + i;
+      assert(values[idx].size() == entry_size);
+      for (int j = 0; j < values[idx].size(); j++) {
+        data->add_float_data(values[idx][j]);
+      }
+    }
+  }
+  double ts = timer.MicroSeconds();
+  reportTime("preprocess", ts, "data_pack", "us");
+
+  if (FLAGS_text_output) {
+    caffe2::WriteProtoToTextFile(protos, output_file);
+  } else {
+    caffe2::WriteProtoToBinaryFile(protos, output_file);
+  }
 }
 
 void convertImages() {
@@ -234,7 +346,7 @@ void convertImages() {
       file_names.push_back(name);
     }
   } else {
-    assert(false);
+    return;
   }
   std::vector<std::vector<float>> values;
   int C = FLAGS_color ? 3 : 1;
@@ -243,7 +355,7 @@ void convertImages() {
   for (int i = 0; i < file_names.size(); i++) {
     int one_height, one_width;
     std::vector<float> one_image_values =
-        convertOneImage(file_names[i], one_height, one_width);
+        convertOneImage(file_names[i], &one_height, &one_width);
     if (height < 0 && width < 0) {
       height = one_height;
       width = one_width;
@@ -254,33 +366,60 @@ void convertImages() {
     values.push_back(one_image_values);
   }
 
-  caffe2::Timer timer;
-  timer.Start();
+  int batch_size = getBatchSize(values.size());
+  vector<int> dims = {batch_size, C, height, width};
+  writeValues(values, dims, FLAGS_output_tensor);
+}
 
-  TensorProtos protos;
-  TensorProto* data;
-  data = protos.add_protos();
-  data->set_data_type(TensorProto::FLOAT);
-  data->add_dims(values.size());
-  data->add_dims(C);
-  data->add_dims(height);
-  data->add_dims(width);
+template <class TYPE>
+vector<TYPE> splitString(std::string& line) {
+  vector<string> vector_str = caffe2::split(',', line);
+  vector<TYPE> vector_int;
+  for (string str : vector_str) {
+    vector_int.push_back((TYPE)std::stod(str));
+  }
+  return vector_int;
+}
 
-  // Not optimized
-  for (int i = 0; i < values.size(); i++) {
-    assert(values[i].size() == C * height * width);
-    for (int j = 0; j < values[i].size(); j++) {
-      data->add_float_data(values[i][j]);
+/* Convert the values in a json file to blobs
+   The format of the json file should be:
+   <number of items>,  <dim2>.... (dimensions of items)
+   <entry>, <entry>, <entry>... (all entries in one item)
+   <entry>, <entry>, <entry>...
+   ....
+*/
+void convertValues() {
+  if (FLAGS_input_text_file == "") {
+    return;
+  }
+  std::ifstream infile(FLAGS_input_text_file);
+  std::string line;
+  std::getline(infile, line);
+  vector<int> dims = splitString <int>(line);
+  assert(dims.size() >= 2);
+
+  int num_items = dims[0];
+  int batch_size = getBatchSize(num_items);
+  vector<string> lines;
+  while (std::getline(infile, line)) {
+    lines.push_back(line);
+  }
+  assert(lines.size() == num_items);
+  std::vector<std::vector<float>> values;
+  int num = -1;
+  for (std::string line : lines) {
+    vector<float> item = splitString<float>(line);
+    if (num < 0) {
+      num = item.size();
+    } else {
+      assert(num == item.size());
     }
+    values.push_back(item);
   }
-  double ts = timer.MicroSeconds();
-  reportTime("image_preprocess", ts, "pack", "us");
+  vector<int> batch_dims = dims;
+  batch_dims[0] = batch_size;
 
-  if (FLAGS_text_output) {
-    caffe2::WriteProtoToTextFile(protos, FLAGS_output_tensor);
-  } else {
-    caffe2::WriteProtoToBinaryFile(protos, FLAGS_output_tensor);
-  }
+  writeValues(values, dims, FLAGS_output_text_tensor);
 }
 
 } // namespace caffe2
@@ -288,5 +427,6 @@ void convertImages() {
 int main(int argc, char** argv) {
   caffe2::GlobalInit(&argc, &argv);
   caffe2::convertImages();
+  caffe2::convertValues();
   return 0;
 }
