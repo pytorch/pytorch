@@ -524,13 +524,14 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     }
     throw std::runtime_error(std::string("failed to differentiate `") + node->kind().toDisplayString() + "`");
   };
-  // Write gradient in Python and compile it to JIT graphs.
+  // NB: Write gradient in Python and compile it to JIT graphs.
   // For example, aten::mul() should be defined as follows
   // def forward(x, y):
   //     return x*y, (x, y)
   // def backward(ctx, grad_output):
   //     x, y = ctx
   //     return (y * grad_output).reduce_as(x), (x * grad_output).reduce_as(y)
+  //
   // Note that ctx is a tuple that carries all input/intermediate results needed
   // in backward from forward pass.
   // grad_values(a.k.a gradOutputs) propagated through node->owningGraph() in reversed order.
@@ -539,7 +540,11 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
   // The output of compiled forward graph is [real_outputs, ctx]
   // The input of compiled backward graph is [ctx, grad_values]
   // We run LowerSimpleTuples afterwards to elmininate all tuples generated in this process.
-  // The original node will be cleaned up later in EliminateDeadCode
+  // The original node and TupleConstruct nodes in forward graph will be cleaned up
+  // later using EliminateDeadCode(block).
+  // TupleUnPack node in backward graph will be removed in eliminateDeadcode(ReverseDetails)
+  // defined in this file. It cannot be cleaned by EliminateDeadCode(block) as it might
+  // accidentally remove the AutogradAdd node which is still useful in grad_map.
   const auto build_script_grad = [node](const std::vector<std::shared_ptr<Graph>>& compiled_graphs,
           const ArrayRef<Value*>& grads) -> std::vector<Value*> {
     auto graph = node->owningGraph();
