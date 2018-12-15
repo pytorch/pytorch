@@ -5297,7 +5297,7 @@ a")
                     self.rnn = torch.nn.GRU(input_size=C, hidden_size=C, num_layers=num_layers)
 
             def forward(self, x, seq_lens):
-                x = pack_padded_sequence(x, seq_lens)
+                x = pack_padded_sequence(x, seq_lens, enforce_sorted=True)
                 x, _ = self.rnn(x)
                 x, _ = pad_packed_sequence(x)
                 return x

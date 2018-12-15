@@ -18,11 +18,8 @@ _rnn_impls = {
 }
 
 
-def apply_permutation(tensor, permutation, contiguous_output, dim=1):
-    result = tensor.index_select(dim, permutation)
-    if contiguous_output:
-        return result.contiguous()
-    return result
+def apply_permutation(tensor, permutation, dim=1):
+    return tensor.index_select(dim, permutation)
 
 
 class RNNBase(Module):
@@ -162,14 +159,13 @@ class RNNBase(Module):
         else:
             check_hidden_size(hidden, expected_hidden_size)
 
-    def permute_hidden(self, hx, permutation, contiguous_output=False):
+    def permute_hidden(self, hx, permutation):
         if permutation is None:
             return hx
         if self.mode == 'LSTM':
-            return tuple(apply_permutation(state, permutation, contiguous_output=contiguous_output)
-                         for state in hx)
+            return tuple(apply_permutation(state, permutation) for state in hx)
         else:
-            return apply_permutation(hx, permutation, contiguous_output=contiguous_output)
+            return apply_permutation(hx, permutation)
 
     def forward(self, input, hx=None):
         is_packed = isinstance(input, PackedSequence)
@@ -207,7 +203,7 @@ class RNNBase(Module):
 
         if is_packed:
             output = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
-        return output, self.permute_hidden(hidden, unsorted_indices, contiguous_output=True)
+        return output, self.permute_hidden(hidden, unsorted_indices)
 
     def extra_repr(self):
         s = '{input_size}, {hidden_size}'
