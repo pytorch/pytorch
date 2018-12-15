@@ -695,8 +695,6 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
       set_grad(inputs[i], grad_inputs[i]);
     }
   }
-  // Clean up old nodes which has been replaced by forward graphs in torchscript
-  EliminateDeadCode(graph.block());
 
   auto inputs = graph.inputs();
   for (size_t i = 0, num_inputs = inputs.size(); i < num_inputs; ++i) {
@@ -712,9 +710,6 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
     grad_desc.df_output_vjps.push_back(i);
   }
 
-  // reverse_block must be cleaned after registerOutput, otherwise the whole block
-  // is deleted.
-  EliminateDeadCode(reverse_block);
   return ReverseDetails(std::move(grad_map), reverse_block);
 }
 
@@ -819,6 +814,18 @@ static void eliminateDeadCode(ReverseDetails& rev_info) {
     rev_info.grad_map.erase(v);
   }
   std::vector<Node*> sorted_dead_nodes(dead_nodes.begin(), dead_nodes.end());
+  // Eliminate TupleUnpack nodes introduced in bw_graph compiled from torchscript.
+  // We cannot merge this into the sort below as it's not topo sorted after the
+  // graph change.
+  for (auto it = sorted_dead_nodes.begin(); it != sorted_dead_nodes.end(); ) {
+    if ((*it)->kind() == prim::TupleUnpack) {
+      (*it)->destroy();
+      it = sorted_dead_nodes.erase(it);
+    } else {
+      ++it;
+    }
+  }
+
   std::sort(sorted_dead_nodes.begin(), sorted_dead_nodes.end(), [](Node* a, Node* b) { return a->isAfter(b); });
   for (Node * n : sorted_dead_nodes) {
     n->destroy();
@@ -968,6 +975,9 @@ Gradient differentiate(std::shared_ptr<Graph>& graph) {
   // Fills in df_input_vjps and df_output_vjps
   auto rev_info = addReverseInline(grad_desc);
   Optimize(grad_desc, rev_info);
+  // Clean up old nodes which has been replaced by forward graphs in torchscript
+  EliminateDeadCode(grad_desc.f->block());
+
   // Fills in f, df, f_real_outputs, df_input_captures,
   // modifies df_input_vjps (new vjps are added for temporaries)
   lambdaLiftReverse(grad_desc, rev_info);
