@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 
 #include <torch/csrc/jit/passes/alias_analysis.h>
+#include <torch/csrc/jit/ir_views.h>
+#include <torch/csrc/jit/passes/alias_analysis.h>
 
 #include <unordered_map>
 
@@ -11,28 +13,31 @@ class DeadCodeEliminator {
  public:
   explicit DeadCodeEliminator(std::shared_ptr<Graph> graph)
       : aliasDb_(AliasAnalysis(std::move(graph))) {}
-  DeadCodeEliminator(bool collect_only = false)
-      : collect_only_(collect_only) {}
+  DeadCodeEliminator() = default;
 
   // The algorithm is an inverse mark-and-sweep. Starting from the return node,
   // we mark "live" nodes that are necessary for the output. Nodes that have
   // side effects are also marked.
   void run(Block* block, bool recurse) {
     // Find the last wildcard in the block. We cannot eliminate any mutable ops
-    // that precede the last wildcard.
+    // that precede the last wildcard (since they may have written to the
+    // wildcard alias set)
     setLastWildcard();
 
-    // Initialize by adding the return node to work list
-    markAndEnqueue(block->return_node());
+    // Initialize by marking the return node and all its consumed values as live
+    mark(block->return_node());
 
     mark(block);
+
+    deleteCallback_(liveValues_);
+
     sweep(block, recurse);
   }
 
-  // *_once, because it should be called only once per run() call.
-  std::unordered_set<Node*> get_dead_once() {
-    JIT_ASSERT(collect_only_);
-    return std::move(dead_nodes_);
+  void setDeleteCallback(
+      std::function<void(const std::unordered_set<const Value*>&)>
+          deleteCallback) {
+    deleteCallback_ = std::move(deleteCallback);
   }
 
  private:
@@ -54,48 +59,134 @@ class DeadCodeEliminator {
     }
   }
 
+  // Special handling for block return nodes. Unlike other nodes, the block
+  // return node doesn't really "use" its inputs. Consider:
+  //
+  // %a0 = aten::foo()
+  // %b = aten::foo()
+  // %a2, %b2 = prim::If(%cond) {
+  //   block0() {
+  //     %a1 = aten::foo(%.0)
+  //     %b1 = aten::foo(%b)
+  //   } -> (%a1, %b1)
+  // }
+  // return (%a2)
+  //
+  // We want to be able to DCE all the %b stuff. So when processing block
+  // returns, we only mark producers for values that "live" (i.e. used outside
+  // the block).
+  void markReturnNode(Node* node) {
+    if (marked_.count(node)) {
+      return;
+    }
+
+    JIT_ASSERT(node->owningBlock()->return_node() == node);
+    auto outerNode = node->owningBlock()->owningNode();
+    if (outerNode == nullptr || outerNode->kind() == prim::Reverse) {
+      // If there's no outer node, we're looking at the graph's top-level
+      // return block. We consider all graph outputs to be "used", so just mark
+      // this node normally.
+      return mark(node);
+    }
+
+    // Collect all inputs that are actually live
+    if (outerNode->kind() == prim::Loop || outerNode->kind() == onnx::Loop) {
+      // Special handling to deal with loop carried dependencies.
+      auto loop = LoopView(outerNode);
+      for (size_t i = 0; i < loop.carriedOutputs().size(); i++) {
+        auto innerInput = loop.bodyCarriedInputs().at(i);
+        auto innerOutput = loop.bodyCarriedOutputs().at(i);
+        auto outerOutput = loop.carriedOutputs().at(i);
+        if (liveValues_.count(outerOutput) || innerInput->hasUses()) {
+          liveValues_.insert(innerOutput);
+        }
+      }
+
+      // Also mark the loop next condition as live, since it will be used inside
+      // the loop body.
+      liveValues_.insert(loop.nextCond());
+    } else {
+      JIT_ASSERT(outerNode->outputs().size() == node->inputs().size());
+      for (size_t i = 0; i < outerNode->outputs().size(); i++) {
+        auto innerOutput = node->inputs()[i];
+        auto outerOutput = outerNode->outputs()[i];
+        if (liveValues_.count(outerOutput)) {
+          liveValues_.insert(innerOutput);
+        }
+      }
+    }
+
+    marked_.insert(node);
+  }
+
   void mark(Block* block) {
     // Mark all nodes with side effects.
     for (auto node : block->nodes()) {
       if (hasSideEffects(node)) {
-        markAndEnqueue(node);
+        mark(node);
       }
     }
 
-    while (!workQueue_.empty()) {
-      auto node = workQueue_.front();
-      workQueue_.pop_front();
+    // Initialize by marking the return node
+    markReturnNode(block->return_node());
 
+    for (auto it = block->nodes().rbegin(); it != block->nodes().rend(); ++it) {
+      auto node = *it;
       for (auto subBlock : node->blocks()) {
         mark(subBlock);
       }
+      markIfLive(node);
+    }
+  }
 
-      // Mark all nodes in this node's blockchain (since owning nodes are
-      // considered live if they contain a live node)
-      if (node->owningBlock() != block) {
-        auto curNode = node;
-        while (curNode) {
-          if (!curNode->owningBlock()) {
-            break;
-          }
+  // If we output or write to a live value, mark this node
+  void markIfLive(Node* node) {
+    for (const auto output : node->outputs()) {
+      if (liveValues_.count(output)) {
+        return mark(node);
+      }
+    }
 
-          markAndEnqueue(curNode);
-          curNode = curNode->owningBlock()->owningNode();
+    if (aliasDb_) {
+      for (const auto write : aliasDb_->getWrites(node)) {
+        if (liveAliases_.count(write)) {
+          return mark(node);
         }
       }
+    }
+  }
 
-      // Find preceding writers for node, add to work list
+  // Mark this node as live and add this node's inputs and aliases to the live
+  // value sets.
+  void mark(Node* node) {
+    if (marked_.count(node)) {
+      return;
+    }
+
+    marked_.insert(node);
+
+    // Mark all nodes in this node's blockchain (since owning nodes are
+    // considered live if they contain a live node)
+    auto curNode = node;
+    while (curNode) {
+      if (!curNode->owningBlock()) {
+        break;
+      }
+
+      mark(curNode);
+      curNode = curNode->owningBlock()->owningNode();
+    }
+
+    for (const auto input : node->inputs()) {
+      if (liveValues_.count(input)) {
+        continue;
+      }
+      liveValues_.insert(input);
+
       if (aliasDb_) {
-        for (auto writer : aliasDb_->getWritersForNode(node)) {
-          if (writer->isBefore(node)) {
-            markAndEnqueue(writer);
-          }
+        for (const auto alias : aliasDb_->getAliases(input)) {
+          liveAliases_.insert(alias);
         }
-      }
-
-      // Find producers for all inputs, add to work list
-      for (auto input : node->inputs()) {
-        markAndEnqueue(input->node());
       }
     }
   }
@@ -107,46 +198,16 @@ class DeadCodeEliminator {
       auto node = *it;
       // note these occur before the recursion because we want to uncover
       // dead code in the blocks used to calculate the output
-      if (!collect_only_) {
-        removeDeadIfOutputs(node);
-        removeDeadLoopOutputs(node);
-      }
+      removeDeadBlockOutputs(node);
+      removeDeadLoopOutputs(node);
       if (recurse) {
         for (Block* block : node->blocks()) {
           sweep(block, true);
         }
       }
-      // TODO(suo): We shouldn't really have to check whether a node has uses,
-      // since the mark algorithm should do that. But currently, the marking
-      // doesn't reach loop counters in certain cases (see TestScript.test_pass)
-      if (!marked_.count(node) && !hasUsesOutsideDeadNodes(node)) {
-        if (collect_only_) {
-          dead_nodes_.insert(node);
-        } else {
-          it.destroyCurrent();
-        }
+      if (!marked_.count(node)) {
+        it.destroyCurrent();
       }
-    }
-  }
-
-  bool hasUsesOutsideDeadNodes(Node * n) {
-    if (!collect_only_) {
-      return n->hasUses();
-    }
-    for (Value * output : n->outputs()) {
-      for (const Use & u : output->uses()) {
-        if (dead_nodes_.count(u.user) == 0) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
-
-  void markAndEnqueue(Node* n) {
-    if (!marked_.count(n)) {
-      marked_.insert(n);
-      workQueue_.push_back(n);
     }
   }
 
@@ -181,8 +242,7 @@ class DeadCodeEliminator {
     if (it != memo_.end())
       return it->second;
     bool has_side_effects = node->kind() == prim::Print ||
-        node->kind() == aten::warn ||
-        node->kind() == prim::RaiseException ||
+        node->kind() == aten::warn || node->kind() == prim::RaiseException ||
         node->kind() == prim::PythonOp ||
         std::any_of(node->blocks().begin(),
                     node->blocks().end(),
@@ -198,9 +258,10 @@ class DeadCodeEliminator {
     return has_side_effects;
   }
 
-  void removeDeadIfOutputs(Node* node) {
-    if (node->kind() != prim::If)
+  void removeDeadBlockOutputs(Node* node) {
+    if (node->kind() != prim::If && node->kind() != prim::GradOf) {
       return;
+    }
 
     for (size_t i_1 = node->outputs().size(); i_1 > 0; --i_1) {
       size_t i = i_1 - 1;
@@ -236,11 +297,11 @@ class DeadCodeEliminator {
   c10::optional<AliasDb> aliasDb_;
   std::unordered_map<Node*, bool> memo_;
   std::unordered_set<Node*> marked_;
-  std::list<Node*> workQueue_;
+  std::unordered_set<const Value*> liveValues_;
+  std::unordered_set<const Value*> liveAliases_;
   c10::optional<const Node*> lastWildcard_;
-
-  bool collect_only_ = false;
-  std::unordered_set<Node*> dead_nodes_; // Will be filled iff collect_only_ is true
+  std::function<void(const std::unordered_set<const Value*>&)> deleteCallback_ =
+      [](const std::unordered_set<const Value*>&) {};
 };
 
 void EliminateDeadCode(const std::shared_ptr<Graph>& graph) {
@@ -251,10 +312,12 @@ void EliminateDeadCode(Block* block, bool recurse) {
   DeadCodeEliminator().run(block, recurse);
 }
 
-std::unordered_set<Node*> FindDeadNodes(Block* block, bool recurse) {
-  DeadCodeEliminator eliminator(/*collect_only=*/true);
-  eliminator.run(block, recurse);
-  return eliminator.get_dead_once();
+void EliminateDeadCode(
+    Block* block,
+    std::function<void(const std::unordered_set<const Value*>&)> cb) {
+  DeadCodeEliminator eliminator;
+  eliminator.setDeleteCallback(std::move(cb));
+  eliminator.run(block, /*recurse=*/true);
 }
 
 } // namespace jit

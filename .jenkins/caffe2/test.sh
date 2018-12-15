@@ -1,29 +1,6 @@
 #!/bin/bash
 
-set -ex
-
-LOCAL_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-ROOT_DIR=$(cd "$LOCAL_DIR"/../.. && pwd)
-TEST_DIR=$ROOT_DIR/caffe2_tests
-
-# Figure out which Python to use
-PYTHON="python"
-if [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
-  PYTHON="python${BASH_REMATCH[1]}"
-fi
-
-# Add the site-packages in the caffe2 install prefix to the PYTHONPATH
-SITE_DIR=$($PYTHON -c "from distutils import sysconfig; print(sysconfig.get_python_lib(prefix=''))")
-
-# Find where Caffe2 is installed. This will be the absolute path to the
-# site-packages of the active Python installation
-INSTALL_SITE_DIR=$($PYTHON -c "from distutils import sysconfig; print(sysconfig.get_python_lib())")
-INSTALL_PREFIX="$INSTALL_SITE_DIR/caffe2"
-if [ ! -d "$INSTALL_PREFIX/cpp_test" ]; then
-  echo "Directory $INSTALL_PREFIX/cpp_test not found. Fallback to legacy location."
-  INSTALL_PREFIX="/usr/local/caffe2"
-  INSTALL_SITE_DIR="${INSTALL_PREFIX}/${SITE_DIR}"
-fi
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 # Skip tests in environments where they are not built/applicable
 if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
@@ -31,27 +8,20 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   exit 0
 fi
 
-# Set PYTHONPATH and LD_LIBRARY_PATH so that python can find the installed
-# Caffe2.
-export PYTHONPATH="${PYTHONPATH}:$INSTALL_SITE_DIR"
-export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${INSTALL_PREFIX}/lib"
-
 cd "$ROOT_DIR"
 
-if [ -d $TEST_DIR ]; then
-  echo "Directory $TEST_DIR already exists; please remove it..."
-  exit 1
-fi
-
-mkdir -p $TEST_DIR/{cpp,python}
+TEST_DIR="$ROOT_DIR/caffe2_tests"
+rm -rf "$TEST_DIR" && mkdir -p "$TEST_DIR"
 
 cd "${WORKSPACE}"
 
-# C++ tests
+#############
+# C++ tests #
+#############
+
 echo "Running C++ tests.."
 gtest_reports_dir="${TEST_DIR}/cpp"
-junit_reports_dir="${TEST_DIR}/junit_reports"
-mkdir -p "$gtest_reports_dir" "$junit_reports_dir"
+mkdir -p "$gtest_reports_dir"
 for test in $(find "${INSTALL_PREFIX}/cpp_test" -executable -type f); do
   case "$test" in
     # skip tests we know are hanging or bad
@@ -76,14 +46,17 @@ for test in $(find "${INSTALL_PREFIX}/cpp_test" -executable -type f); do
       # output than it is to have XML output for Jenkins.
       # Note: in the future, if we want to use xml test reporter once we switch
       # to all gtest, one can simply do:
-      # "$test" --gtest_output=xml:"$gtest_reports_dir/$(basename $test).xml"
-      "$test"
+      "$test" --gtest_output=xml:"$gtest_reports_dir/$(basename $test).xml"
       ;;
   esac
 done
 
-# Get the relative path to where the caffe2 python module was installed
-CAFFE2_PYPATH="$INSTALL_SITE_DIR/caffe2"
+################
+# Python tests #
+################
+
+pytest_reports_dir="${TEST_DIR}/python"
+mkdir -p "$pytest_reports_dir"
 
 # Collect additional tests to run (outside caffe2/python)
 EXTRA_TESTS=()
@@ -104,7 +77,6 @@ if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/unique_ops_test.py")
 fi
 
-# Python tests
 # NB: Warnings are disabled because they make it harder to see what
 # the actual erroring test is
 echo "Running Python tests.."
@@ -114,7 +86,7 @@ pip install --user pytest-sugar
   -x \
   -v \
   --disable-warnings \
-  --junit-xml="$TEST_DIR/python/result.xml" \
+  --junit-xml="$pytest_reports_dir/result.xml" \
   --ignore "$CAFFE2_PYPATH/python/test/executor_test.py" \
   --ignore "$CAFFE2_PYPATH/python/operator_test/matmul_op_test.py" \
   --ignore "$CAFFE2_PYPATH/python/operator_test/pack_ops_test.py" \

@@ -131,7 +131,7 @@ RNNOutput RNNImplBase<Derived>::generic_forward(
   }
   Tensor output, new_state;
   std::tie(output, new_state) = function(
-      std::move(input),
+      input,
       std::move(state),
       flat_weights_,
       options.with_bias_,
@@ -208,12 +208,12 @@ RNNOutput RNNImpl::forward(const Tensor& input, Tensor state) {
     case RNNActivation::ReLU:
       return generic_forward(
           static_cast<RNNFunctionSignature*>(&torch::rnn_relu),
-          std::move(input),
+          input,
           std::move(state));
     case RNNActivation::Tanh:
       return generic_forward(
           static_cast<RNNFunctionSignature*>(&torch::rnn_tanh),
-          std::move(input),
+          input,
           std::move(state));
     default:
       AT_ERROR("Unhandled RNN activation function!");
@@ -244,7 +244,7 @@ RNNOutput LSTMImpl::forward(const Tensor& input, Tensor state) {
   }
   Tensor output, hidden_state, cell_state;
   std::tie(output, hidden_state, cell_state) = torch::lstm(
-      std::move(input),
+      input,
       {state[0], state[1]},
       flat_weights_,
       options.with_bias_,
@@ -266,9 +266,7 @@ GRUImpl::GRUImpl(const GRUOptions& options)
 
 RNNOutput GRUImpl::forward(const Tensor& input, Tensor state) {
   return generic_forward(
-      static_cast<RNNFunctionSignature*>(&torch::gru),
-      std::move(input),
-      std::move(state));
+      static_cast<RNNFunctionSignature*>(&torch::gru), input, std::move(state));
 }
 } // namespace nn
 } // namespace torch

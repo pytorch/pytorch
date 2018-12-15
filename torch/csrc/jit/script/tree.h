@@ -111,7 +111,7 @@ struct String : public Tree {
 };
 
 static SourceRange mergeRanges(SourceRange c, const TreeList& others) {
-  for (auto t : others) {
+  for (const auto& t : others) {
     if (t->isAtom())
       continue;
     size_t s = std::min(c.start(), t->range().start());
@@ -171,7 +171,7 @@ struct pretty_tree {
         break;
       default:
         out << "(" << kindToString(t->kind());
-        for (auto e : t->trees()) {
+        for (const auto& e : t->trees()) {
           out << " " << get_flat(e);
         }
         out << ")";
@@ -188,7 +188,7 @@ struct pretty_tree {
     }
     std::string k = kindToString(t->kind());
     out << "(" << k;
-    for (auto e : t->trees()) {
+    for (const auto& e : t->trees()) {
       out << "\n" << std::string(indent + 2, ' ');
       print(out, e, indent + 2);
     }
