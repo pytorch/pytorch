@@ -1043,10 +1043,10 @@ class TestSparse(TestCase):
         sparse_ops = [torch.sparse.max, torch.sparse.min]
         dense_ops = [torch.max, torch.min]
         bound_val = [float('-inf'), float('inf')]
-        nnz = 4
+        nnz = 10
         sparse_dims = 2
-        with_size = [2, 2, 1, 2]
-        test_dims = list(itertools.combinations(range(len(with_size)), 1))  # only test 1-dim reduction
+        with_size = [3, 4, 1, 5]
+        test_dims = list(itertools.combinations(range(len(with_size)), 1))  # only support 1-dim reduction
 
         for i in range(len(sparse_ops)):
             S = self._gen_sparse(sparse_dims, nnz, with_size)[0]
@@ -1058,6 +1058,19 @@ class TestSparse(TestCase):
                 S = self._gen_sparse(sparse_dims, nnz, with_size)[0]
                 run_tests(lambda x: sparse_ops[i](x, test_dim[0]),
                           lambda x: dense_ops[i](x, test_dim[0]), bound_val[i], S)
+
+        # test for errors
+        S = self._gen_sparse(sparse_dims, nnz, with_size)[0]
+        empty_S = torch.sparse_coo_tensor(size=with_size)
+
+        for op in sparse_ops:
+            # only support int type dim args
+            self.assertRaises(TypeError, lambda: op(S, [0]))
+            self.assertRaises(TypeError, lambda: op(S, [0, 1]))
+
+            # only support non-empty SparseTensor input
+            self.assertRaises(RuntimeError, lambda: op(empty_S, 0))
+            self.assertRaises(RuntimeError, lambda: op(empty_S))
 
     def _test_basic_ops_shape(self, nnz_x1, nnz_x2, shape_i, shape_v=None):
         shape = shape_i + (shape_v or [])

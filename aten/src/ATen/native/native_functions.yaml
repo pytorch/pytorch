@@ -1879,8 +1879,8 @@
 
 - func: _sparse_sum_backward(Tensor grad, Tensor self, IntList dim) -> Tensor
   dispatch:
-      SparseCPU: _sparse_sum_backward_cpu
-      SparseCUDA: _sparse_sum_backward_cuda
+    SparseCPU: _sparse_sum_backward_cpu
+    SparseCUDA: _sparse_sum_backward_cuda
 
 - func: _sparse_max(Tensor self) -> Tensor
 
@@ -1893,6 +1893,11 @@
 - func: _sparse_min(Tensor self, int64_t dim) -> Tensor
 
 - func: _sparse_min_sparse_dim(Tensor self, int64_t dim) -> (Tensor, Tensor)
+
+- func: _sparse_maxmin_sparse_dim_backward(Tensor grad, Tensor reduction_indices, Tensor self, int64_t dim) -> Tensor
+  dispatch:
+    SparseCPU: _sparse_maxmin_sparse_dim_backward_cpu
+    SparseCUDA: _sparse_maxmin_sparse_dim_backward_cuda
 
 - func: norm(Tensor self, Scalar p=2) -> Tensor
   variants: function, method

@@ -250,6 +250,10 @@ __global__ void indexSparseIntersectionKernel(
   *resultNnz = r_i;
 }
 
+// --------------------------------------------------------------------
+// coalesce sum kernel
+// --------------------------------------------------------------------
+
 // template <typename Dtype, typename Acctype>
 // __global__ void coalesceValuesKernel_gridStrided(
 //   long *segment_offsets, long *value_indices,
@@ -326,6 +330,9 @@ __global__ void coalesce_sum_kernel(
   }
 }
 
+// --------------------------------------------------------------------
+// coalesce max / min kernel
+// --------------------------------------------------------------------
 template <typename scalar_t, typename func_t>
 __device__ void coalesce_values_maxmin_kernel(
   int64_t* segment_offsets,
@@ -368,10 +375,11 @@ __device__ void coalesce_values_maxmin_kernel(
           if (is_filled[ii] == 0) {
             // fill tmp with input values to set proper bounds for max / min reduction
             tmp[ii] = static_cast<scalar_t>(values[valueRow + featureDim]);
+            reduced_from[ii] = value_indices[row];
             is_filled[ii] = 1;
           }
           else {
-            op(tmp, ii, static_cast<scalar_t>(values[valueRow + featureDim]), reduced_from, row);
+            op(tmp, ii, static_cast<scalar_t>(values[valueRow + featureDim]), reduced_from, value_indices[row]);
           }
         }
       }

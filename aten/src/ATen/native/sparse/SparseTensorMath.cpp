@@ -1008,10 +1008,13 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
       grad_input_values = grad_input_values.expand(dense_expand_size);
     }
     grad_input_values = grad_input_values.expand(expand_size).clone();
-    return at::_sparse_coo_tensor_with_dims_and_tensors(
+
+    SparseTensor grad_input = at::_sparse_coo_tensor_with_dims_and_tensors(
       input_sparse_dim, input_dense_dim, input_sizes, input_indices.clone(),
       grad_input_values, input.options().dtype(grad_.dtype())
     ); // convert to grad dtype
+    grad_input._coalesced_(true);
+    return grad_input;
   }
   else {
     AT_CHECK(grad_.is_sparse(), "_sparse_sum_backward_cpu: expected grad_ Tensor to be sparse, but got dense");
@@ -1068,10 +1071,13 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
     else {
       grad_input_values = grad_values_expand;
     }
-    return at::_sparse_coo_tensor_with_dims_and_tensors(
+
+    SparseTensor grad_input = at::_sparse_coo_tensor_with_dims_and_tensors(
       input_sparse_dim, input_dense_dim, input_sizes,
       input_indices.clone(), grad_input_values, grad.options()
     );
+    grad_input._coalesced_(true);
+    return grad_input;
   }
 }
 
@@ -1120,7 +1126,7 @@ std::tuple<SparseTensor, Tensor> sparse_maxmin_common_sparse_dim(
     return new_sparse.coalesce_min();
   }
   else {
-    AT_ERROR("_sparse_maxmin_common_sparse_dim: Expected CoalesceReductionType MAX and MIN, but other type is found.");
+    AT_ERROR("expected CoalesceReductionType MAX and MIN, but other type is found.");
   }
 }
 
@@ -1133,16 +1139,90 @@ std::tuple<SparseTensor, Tensor> _sparse_min_sparse_dim(const SparseTensor& inpu
 }
 
 // --------------------------------------------------------------------
+// NOTE [Sparse max / min over parse_dim backward]
+//
+// The backward function relies on the assumption that grad Tensor:
+// 1. is coalesced
+// 2. has the same indices tensor as ouput from forward (instead of checking this one explicitly,
+//    we check shape between reduction_indices and grad.values())
+// --------------------------------------------------------------------
+template <typename scalar_t>
+void _sparse_maxmin_sparse_dim_backward_kernel_cpu(
+  const Tensor& grad_values,
+  Tensor& grad_input_values,
+  const Tensor& reduction_indices,
+  int64_t grad_nnz,
+  int64_t reduction_indices_stride
+) {
+  auto reduction_indices_accessor = reduction_indices.accessor<int64_t, 2>();
+  scalar_t* grad_values_ptr = grad_values.data<scalar_t>();
+  scalar_t* grad_input_values_ptr = grad_input_values.data<scalar_t>();
+
+  int64_t i;
+  #pragma omp parallel for private(i)
+  for (i = 0; i < grad_nnz; i++) {
+    for (int64_t j = 0; j < reduction_indices_stride; j++) {
+      int64_t to_index = reduction_indices_accessor[i][j] * reduction_indices_stride + j;
+      int64_t from_index = i * reduction_indices_stride + j;
+      grad_input_values_ptr[to_index] = grad_values_ptr[from_index];
+    }
+  }
+}
+
+SparseTensor _sparse_maxmin_sparse_dim_backward_cpu(
+  const Tensor& grad, const Tensor& reduction_indices, const SparseTensor& input, int64_t dim_to_reduce
+) {
+  AT_CHECK(!grad.is_cuda(), "expected grad to be CPU tensor, but got CUDA tensor.");
+  AT_CHECK(!reduction_indices.is_cuda(), "expected reduction_indices to be CPU tensor, but got CUDA tensor.");
+  AT_CHECK(!input.is_cuda(), "expected input to be CPU tensor, but got CUDA tensor.");
+
+  AT_CHECK(grad.is_sparse(), "expected grad to be sparse.");
+  AT_CHECK(grad.is_coalesced(), "expected grad to be coalesced.");
+  AT_CHECK(input.is_sparse(), "expected input to be coalesced.");
+
+  int64_t grad_nnz = grad._nnz();
+  Tensor grad_values = grad._values().contiguous();
+  int64_t grad_values_stride = grad_values.stride(0);
+  int64_t reduction_indices_stride = reduction_indices.stride(0);
+
+  // NB: reduction_indices contains reduced_from index for each element at grad_values,
+  // hence the two should share the same shape.
+  AT_CHECK(reduction_indices.size(0) == grad_nnz, "expected grad nnz equals to reduction_indices size0.");
+  AT_CHECK(grad_values_stride == reduction_indices_stride, "expected grad_values stride0 equals to reduction_indices stride0.");
+
+  Tensor input_values = input._values();
+  Tensor grad_input_values = at::zeros_like(input_values);
+
+  AT_DISPATCH_ALL_TYPES(input_values.type(), "_sparse_maxmin_sparse_dim_backward_cpu", [&] {
+    _sparse_maxmin_sparse_dim_backward_kernel_cpu<scalar_t>(
+      grad_values,
+      grad_input_values,
+      reduction_indices,
+      grad_nnz,
+      reduction_indices_stride
+    );
+  });
+
+  SparseTensor grad_input = at::_sparse_coo_tensor_with_dims_and_tensors(
+    input.sparse_dim(), input.dense_dim(), input.sizes(),
+    input._indices().clone(), grad_input_values, input.options()
+  );
+  grad_input._coalesced_(true);
+  return grad_input;
+}
+
+// --------------------------------------------------------------------
 // sparse.max()
 // --------------------------------------------------------------------
 Tensor _sparse_max(const SparseTensor& input) {
+  AT_CHECK(input._nnz() > 0, "_sparse_max: expected sparse tensor input._nnz() > 0.");
   return input.coalesce().values().max();
 }
 
 Tensor _sparse_max(const SparseTensor& input_, int64_t dim_to_max) {
   // requires input to be coalesced before doing max reduction
   auto input = input_.coalesce();
-  AT_CHECK(input._nnz() > 0, "_sparse_max: sparse tensor input._nnz() == 0, please call torch.sparse.max(input) instead.");
+  AT_CHECK(input._nnz() > 0, "_sparse_max: expected sparse tensor input._nnz() > 0.");
 
   const int64_t input_dim = input.dim();
   dim_to_max = maybe_wrap_dim(dim_to_max, input_dim);
@@ -1163,10 +1243,12 @@ Tensor _sparse_max(const SparseTensor& input_, int64_t dim_to_max) {
     std::tie(new_values, max_indices) = values.max(dim_to_max + 1 - sparse_dim);
     new_sizes.erase(new_sizes.begin() + dim_to_max);
 
-    return at::_sparse_coo_tensor_with_dims_and_tensors(
+    SparseTensor out = at::_sparse_coo_tensor_with_dims_and_tensors(
       sparse_dim, dense_dim - 1, new_sizes,
       indices, new_values, input.options()
     );
+    out._coalesced_(true);
+    return out;
   }
 }
 
@@ -1174,13 +1256,14 @@ Tensor _sparse_max(const SparseTensor& input_, int64_t dim_to_max) {
 // sparse.min()
 // --------------------------------------------------------------------
 Tensor _sparse_min(const SparseTensor& input) {
+  AT_CHECK(input._nnz() > 0, "_sparse_min: expected sparse tensor input._nnz() > 0.");
   return input.coalesce().values().min();
 }
 
 Tensor _sparse_min(const SparseTensor& input_, int64_t dim_to_min) {
   // requires input to be coalesced before doing min reduction
   auto input = input_.coalesce();
-  AT_CHECK(input._nnz() > 0, "_sparse_min: sparse tensor input._nnz() == 0, please call torch.sparse.min(input) instead.");
+  AT_CHECK(input._nnz() > 0, "_sparse_min: expected sparse tensor input._nnz() > 0.");
 
   const int64_t input_dim = input.dim();
   dim_to_min = maybe_wrap_dim(dim_to_min, input_dim);
@@ -1201,10 +1284,12 @@ Tensor _sparse_min(const SparseTensor& input_, int64_t dim_to_min) {
     std::tie(new_values, min_indices) = values.min(dim_to_min + 1 - sparse_dim);
     new_sizes.erase(new_sizes.begin() + dim_to_min);
 
-    return at::_sparse_coo_tensor_with_dims_and_tensors(
+    SparseTensor out = at::_sparse_coo_tensor_with_dims_and_tensors(
       sparse_dim, dense_dim - 1, new_sizes,
       indices, new_values, input.options()
     );
+    out._coalesced_(true);
+    return out;
   }
 }
 

@@ -560,7 +560,13 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
       grad_input_values = grad_input_values.expand(dense_expand_size);
     }
     grad_input_values = grad_input_values.expand(expand_size).clone();
-    return at::_sparse_coo_tensor_with_dims_and_tensors(input_sparse_dim, input_dense_dim, input_sizes, input_indices.clone(), grad_input_values,  input.options().dtype(grad_.dtype())); // convert to grad dtype
+
+    SparseTensor grad_input = at::_sparse_coo_tensor_with_dims_and_tensors(
+      input_sparse_dim, input_dense_dim, input_sizes,
+      input_indices.clone(), grad_input_values, input.options().dtype(grad_.dtype())
+    ); // convert to grad dtype
+    grad_input._coalesced_(true);
+    return grad_input;
   }
   else {
     AT_CHECK(grad_.is_sparse(), "_sparse_sum_backward_cuda: expected grad_ Tensor to be sparse, but got dense");
@@ -635,8 +641,90 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
       });
     }
 
-    return at::_sparse_coo_tensor_with_dims_and_tensors(input_sparse_dim, input_dense_dim, input_sizes, input_indices.clone(), grad_input_values, grad.options());
+    SparseTensor grad_input = at::_sparse_coo_tensor_with_dims_and_tensors(
+      input_sparse_dim, input_dense_dim, input_sizes,
+      input_indices.clone(), grad_input_values, grad.options()
+    );
+    grad_input._coalesced_(true);
+    return grad_input;
   }
 }
+
+// --------------------------------------------------------------------
+// see NOTE [Sparse max / min over parse_dim backward]
+// --------------------------------------------------------------------
+template <typename scalar_t>
+__global__ void _sparse_maxmin_sparse_dim_backward_kernel_cuda(
+  const TensorInfo<scalar_t, int64_t> grad_values_ti,
+  TensorInfo<scalar_t, int64_t> grad_input_values_ti,
+  const TensorInfo<int64_t, int64_t> reduction_indices_ti,
+  int64_t grad_nnz
+) {
+  const int64_t i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= grad_nnz) return;
+
+  int64_t reduction_indices_stride = reduction_indices_ti.strides[0];
+
+  for (int64_t j = 0; j < reduction_indices_stride; j++) {
+    int64_t to_index = reduction_indices_ti.data[i * reduction_indices_stride + j] * reduction_indices_stride + j;
+    int64_t from_index = i * reduction_indices_stride + j;
+    grad_input_values_ti.data[to_index] = grad_values_ti.data[from_index];
+  }
+}
+
+SparseTensor _sparse_maxmin_sparse_dim_backward_cuda(
+  const Tensor& grad, const Tensor& reduction_indices, const SparseTensor& input, int64_t dim_to_reduce
+) {
+  AT_CHECK(grad.is_cuda(), "expected grad to be CUDA tensor, but got CPU tensor.");
+  AT_CHECK(reduction_indices.is_cuda(), "expected reduction_indices to be CUDA tensor, but got CPU tensor.");
+  AT_CHECK(input.is_cuda(), "expected input to be CUDA tensor, but got CPU tensor.");
+
+  AT_CHECK(grad.is_sparse(), "expected grad to be sparse.");
+  AT_CHECK(grad.is_coalesced(), "expected grad to be coalesced.");
+  AT_CHECK(input.is_sparse(), "expected input to be coalesced.");
+
+  int64_t grad_nnz = grad._nnz();
+  Tensor grad_values = grad._values().contiguous();
+  int64_t grad_values_stride = grad_values.stride(0);
+  int64_t reduction_indices_stride = reduction_indices.stride(0);
+
+  // NB: reduction_indices contains reduced_from index for each element at grad_values,
+  // hence the two should share the same shape.
+  AT_CHECK(reduction_indices.size(0) == grad_nnz, "expected grad nnz equals to reduction_indices size0.");
+  AT_CHECK(grad_values_stride == reduction_indices_stride, "expected grad_values stride0 equals to reduction_indices stride0.");
+
+  Tensor input_values = input._values();
+  Tensor grad_input_values = at::zeros_like(input_values);
+
+  // config to run cuda kernel
+  int curDevice = -1;
+  cudaGetDevice(&curDevice);
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
+  int64_t total_threads = grad_nnz;
+  const dim3 block = dim3(std::min(static_cast<int64_t>(cuda::getApplyBlock().x), total_threads));
+  dim3 grid;
+  AT_CHECK(cuda::getApplyGrid(total_threads, grid, curDevice), "input too large or too many dimensions");
+
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input_values.type(), "_sparse_maxmin_sparse_dim_backward_cuda", [&] {
+    auto grad_values_ti = getTensorInfo<scalar_t, int64_t>(grad_values);
+    auto grad_input_values_ti = getTensorInfo<scalar_t, int64_t>(grad_input_values);
+    auto reduction_indices_ti = getTensorInfo<int64_t, int64_t>(reduction_indices);
+
+    _sparse_maxmin_sparse_dim_backward_kernel_cuda<scalar_t><<<grid, block, 0, stream>>>(
+      grad_values_ti,
+      grad_input_values_ti,
+      reduction_indices_ti,
+      grad_nnz
+    );
+  });
+
+  SparseTensor grad_input = at::_sparse_coo_tensor_with_dims_and_tensors(
+    input.sparse_dim(), input.dense_dim(), input.sizes(),
+    input._indices().clone(), grad_input_values, input.options()
+  );
+  grad_input._coalesced_(true);
+  return grad_input;
+}
+
 
 }} // namespace at::native

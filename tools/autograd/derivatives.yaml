@@ -864,6 +864,12 @@
 - name: _sparse_sum(Tensor self, IntList dim)
   self: at::_sparse_sum_backward(grad, self, dim)
 
+- name: _sparse_max_sparse_dim(Tensor self, int64_t dim)
+  self: at::_sparse_maxmin_sparse_dim_backward(grad, result1, self, dim)
+
+- name: _sparse_min_sparse_dim(Tensor self, int64_t dim)
+  self: at::_sparse_maxmin_sparse_dim_backward(grad, result1, self, dim)
+
 - name: _standard_gamma(Tensor self, Generator generator)
   self: grad * _standard_gamma_grad(self, result)
 

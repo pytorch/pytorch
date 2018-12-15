@@ -550,7 +550,8 @@ void coalesce_maxmin_kernel_cpu(
           values_ptr + pos * blockSize,
           newValues_ptr + new_nnz_ptr[0] * blockSize,
           reduction_indices_accessor,
-          new_nnz_ptr[0], j);
+          new_nnz_ptr[0], pos
+        );
       }
     } else {
       new_nnz_ptr[0] += 1;
@@ -567,7 +568,7 @@ void coalesce_maxmin_kernel_cpu(
           values_ptr + pos * blockSize,
           newValues_ptr + new_nnz_ptr[0] * blockSize,
           reduction_indices_accessor,
-          new_nnz_ptr[0], j
+          new_nnz_ptr[0], pos
         );
       }
     }
@@ -584,20 +585,24 @@ std::tuple<SparseTensor, Tensor> coalesce_maxmin_common_cpu(const SparseTensor& 
   int64_t nnz = self._nnz();
   LongTensor indices = self._indices();
   Tensor values = self._values().contiguous();
-  // NOTE [Reduction Indices at Coalesce]
-  // generate a 2D tensor reduction_indices with sizes = (nnz, values.stride(0)):
-  // [[0, 0, 0, 0, ..., 0],
-  //  [1, 1, 1, 1, ..., 1]
-  //  ...
-  //  [nnz-1, nnz-1, ...,]
-  // ]
-  LongTensor reduction_indices = at::arange(0, nnz, indices.options()).reshape({nnz, 1}).repeat({1, values.stride(0)});
+
 
   if (self.is_coalesced()) {
+    // NOTE [Reduction Indices at Coalesce]
+    // generate a 2D tensor reduction_indices with sizes = (nnz, values.stride(0)):
+    // [[0, 0, 0, 0, ..., 0],
+    //  [1, 1, 1, 1, ..., 1]
+    //  ...
+    //  [nnz-1, nnz-1, ...,]
+    // ]
+    LongTensor reduction_indices = at::arange(0, nnz, indices.options()).reshape({nnz, 1}).repeat({1, values.stride(0)});
     return std::tuple<SparseTensor, Tensor>(self, reduction_indices);
   }
-  // see NOTE [Coalesce SparseTensor]
+
   if (nnz < 2) {
+    // see NOTE [Reduction Indices at Coalesce]
+    LongTensor reduction_indices = at::arange(0, nnz, indices.options()).reshape({nnz, 1}).repeat({1, values.stride(0)});
+    // see NOTE [Coalesce SparseTensor]
     SparseTensor dst = self.clone();
     dst._coalesced_(true);
     return std::tuple<SparseTensor, Tensor>(dst, reduction_indices);
@@ -619,6 +624,7 @@ std::tuple<SparseTensor, Tensor> coalesce_maxmin_common_cpu(const SparseTensor& 
   std::tie(indicesBuffer, indicesPermutation) = indices_scalar.sort(0);
 
   auto new_nnz = at::empty({1}, indices.options());
+  LongTensor reduction_indices = at::empty({nnz, values.stride(0)}, indices.options());
 
   AT_DISPATCH_ALL_TYPES(values.type(), "coalesce_maxmin_common_cpu", [&] {
 
@@ -653,14 +659,13 @@ std::tuple<SparseTensor, Tensor> coalesce_maxmin_common_cpu(const SparseTensor& 
       );
     }
     else {
-      AT_ERROR("coalesce_maxmin_common_cpu: Expected CoalesceReductionType MAX and MIN, but other type is found.");
+      AT_ERROR("expected CoalesceReductionType MAX and MIN, but other type is found.");
     }
   });
 
   dst._coalesced_(true);
   get_sparse_impl(dst)->set_nnz_and_narrow(new_nnz.data<int64_t>()[0]);
-  reduction_indices.narrow(1, 0, new_nnz.data<int64_t>()[0]);
-
+  reduction_indices = reduction_indices.narrow_copy(0, 0, new_nnz.data<int64_t>()[0]);
   return std::tuple<SparseTensor, Tensor>(dst, reduction_indices);
 }
 

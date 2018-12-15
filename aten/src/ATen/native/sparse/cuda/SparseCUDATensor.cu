@@ -155,7 +155,8 @@ SparseTensor coalesce_sum_cuda(const SparseTensor& self) {
     });
   }
 
-  SparseTensor out = at::_sparse_coo_tensor_with_dims_and_tensors(sparse_dim, dense_dim, sizes, newIndices, newValues, self.options())._coalesced_(true);
+  SparseTensor out = at::_sparse_coo_tensor_with_dims_and_tensors(sparse_dim, dense_dim, sizes, newIndices, newValues, self.options());
+  out._coalesced_(true);
 
   THCudaCheck(cudaGetLastError());
   return out;
@@ -172,16 +173,17 @@ std::tuple<SparseTensor, Tensor> coalesce_maxmin_common_cuda(const SparseTensor&
   int64_t nnz = self._nnz();
   LongTensor indices = self._indices();
   Tensor values = self._values().contiguous();
-  // see NOTE [Reduction Indices at Coalesce]
-  LongTensor reduction_indices = at::arange(0, nnz, indices.options()).reshape({nnz, 1}).repeat({1, values.stride(0)});
 
   if (self.is_coalesced()) {
+    // see NOTE [Reduction Indices at Coalesce]
+    LongTensor reduction_indices = at::arange(0, nnz, indices.options()).reshape({nnz, 1}).repeat({1, values.stride(0)});
     return std::tuple<SparseTensor, Tensor>(self, reduction_indices);
   }
 
-  // NOTE: Since `coalesce` is not an in-place operation when `is_coalesced` is false,
-  // we should keep the original tensor intact and do coalesce on a copy of the tensor
   if (nnz < 2) {
+    // see NOTE [Reduction Indices at Coalesce]
+    LongTensor reduction_indices = at::arange(0, nnz, indices.options()).reshape({nnz, 1}).repeat({1, values.stride(0)});
+    // see NOTE [Coalesce SparseTensor]
     SparseTensor out = self.clone();
     out._coalesced_(true);
     return std::tuple<SparseTensor, Tensor>(out, reduction_indices);
@@ -195,7 +197,7 @@ std::tuple<SparseTensor, Tensor> coalesce_maxmin_common_cuda(const SparseTensor&
   int64_t new_nnz = 0;
 
   std::tie(uniqueOffsets, origIndices, newValues, new_indices, indices1D, new_nnz) = sparse_coalesce_common_cuda(self);
-  reduction_indices = at::zeros({new_nnz, values.stride(0)}, new_indices.options());
+  LongTensor reduction_indices = at::empty({new_nnz, values.stride(0)}, new_indices.options());
 
   int64_t stride = at::prod_intlist(values.sizes().slice(1));
 
@@ -233,7 +235,7 @@ std::tuple<SparseTensor, Tensor> coalesce_maxmin_common_cuda(const SparseTensor&
         );
       }
       else {
-        AT_ERROR("coalesce_maxmin_common_cuda: Expected CoalesceReductionType MAX and MIN, but other type is found.");
+        AT_ERROR("expected CoalesceReductionType MAX and MIN, but other type is found.");
       }
     });
   }
@@ -244,6 +246,7 @@ std::tuple<SparseTensor, Tensor> coalesce_maxmin_common_cuda(const SparseTensor&
   )._coalesced_(true);
 
   THCudaCheck(cudaGetLastError());
+
   return std::tuple<SparseTensor, Tensor>(out, reduction_indices);
 }
 
