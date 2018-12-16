@@ -1560,22 +1560,34 @@ class _TestTorchMixin(object):
 
     @staticmethod
     def _test_btrifact(self, cast):
-        a = torch.FloatTensor((((1.3722, -0.9020),
-                                (1.8849, 1.9169)),
-                               ((0.7187, -1.1695),
-                                (-0.0139, 1.3572)),
-                               ((-1.6181, 0.7148),
-                                (1.3728, 0.1319))))
-        a = cast(a)
-        a_LU, pivots = a.btrifact()
+        from common_utils import random_fullrank_matrix_distinct_singular_value as fullrank
+        def run_test(matrix_size, batches, cast):
+            a = cast(fullrank(matrix_size, *batches))
+            a_LU_info, pivots_info, info_ = a.btrifact_with_info()
+            self.assertEqual(a_LU_info.size(), torch.Size(batches + (matrix_size, matrix_size)))
+            self.assertEqual(pivots_info.size(), torch.Size(batches + (matrix_size,)))
+            self.assertEqual(info_.size(), torch.Size(batches))
+            self.assertEqual(info_.abs().sum(), 0)
+            a_LU, pivots = a.btrifact()
+            self.assertEqual(a_LU, a_LU_info)
+            self.assertEqual(pivots_info, pivots)
+            if a.is_cuda:
+                a_LU_info_nopiv, nopiv, info_nopiv = a.btrifact_with_info(pivot=False)
+                self.assertIsNone(nopiv)
+                self.assertEqual(info_, info_nopiv)
 
-        a_LU_, pivots_, info_ = a.btrifact_with_info()
-        self.assertEqual(a_LU, a_LU_)
-        self.assertEqual(pivots, pivots_)
-        self.assertEqual(info_.abs().sum(), 0)
-        P, a_L, a_U = torch.btriunpack(a_LU, pivots)
-        a_ = torch.bmm(P, torch.bmm(a_L, a_U))
-        self.assertEqual(a_, a)
+        for ms, batch in product([3, 5, 7], [(2,), (3,), (3, 5)]):
+            run_test(ms, batch, cast)
+
+        # Info should be positive for rank deficient matrices
+        a = cast(fullrank(3, 5))
+        a[0, 1] = 2 * a[0, 0]  # Row 2 of a[0] is 2 times Row 1 of a[0], thereby causing a rank deficiency
+        self.assertGreater(a.btrifact_with_info()[2][0], 0)
+
+        # Error checking, no pivoting variant on CPU
+        with self.assertRaisesRegex(RuntimeError,
+                                    'btrifact without pivoting is not implemented on the CPU'):
+            torch.btrifact(torch.empty(1, 2, 2), pivot=False)
 
     @skipIfNoLapack
     def test_btrifact(self):

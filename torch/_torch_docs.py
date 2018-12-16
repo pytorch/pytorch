@@ -5362,6 +5362,11 @@ Batch LU factorization.
 Returns a tuple containing the LU factorization and pivots. Pivoting is done if
 :attr:`pivot` is set.
 
+.. note::
+    LU factorization without pivoting is not available for CPU, and attempting
+    to do so will throw an error. However, LU factorization without pivoting is
+    available for CUDA.
+
 Arguments:
     A (Tensor): the tensor to factor
     pivot (bool, optional): controls whether pivoting is done

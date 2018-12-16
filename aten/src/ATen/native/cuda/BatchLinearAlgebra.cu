@@ -420,7 +420,7 @@ AT_ERROR("btrifact: MAGMA library not found in "
 
   MAGMAQueue magma_queue(self.get_device());
 
-  // If pivots is defined, then we have to compute them.
+  // If `pivots` is defined, then we have to compute them.
   // We will use the normal getrf function to compute the LU factorization
   // and the pivots
   if (pivots.defined()) {
