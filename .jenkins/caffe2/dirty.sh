@@ -1,4 +1,5 @@
 #!/bin/bash
+exit 0
 set -ex
 upstream="$1"
 pr="$2"

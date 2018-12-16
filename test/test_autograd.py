@@ -2585,8 +2585,11 @@ class TestAutograd(TestCase):
         for p in l.parameters():
             p.requires_grad = False
         s = torch.randn(1, 1, 2, requires_grad=True, device=dev)
+        print("Before forward")
         out, _ = l(s)
+        print("Before backward")
         out.sum().backward()
+        print("After backward")
         self.assertFalse(s.grad is None or s.grad.abs().sum().item() == 0)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")

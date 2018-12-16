@@ -6,6 +6,7 @@
 #include <vector>
 #include <utility>
 #include <mutex>
+#include <iostream>
 
 namespace at { namespace native {
 
@@ -79,25 +80,43 @@ class PoolWindow
 {
   public:
   PoolWindow(){}
-  ~PoolWindow(){ release(); }
+  ~PoolWindow()
+  { 
+    std::cout << "thread " << std::this_thread::get_id()
+              << ", ~PoolWindow" << std::endl;
+    release(); 
+  }
 
   cudnnHandle_t reserve(int device)
   {
+    std::cout << "thread " << std::this_thread::get_id()
+              << ", reserve() before first case" << std::endl;
+
     // If this thread already has a handle for this device, return it
     if(my_handles.find(device) != my_handles.end())
       return my_handles[device];
+
+    std::cout << "thread " << std::this_thread::get_id()
+              << ", reserve() before mutex" << std::endl;
 
     // otherwise, either grab a handle from the pool if one is available,
     // or if not, create a new one.
     std::lock_guard<std::mutex> guard(mutex);
 
+    std::cout << "thread " << std::this_thread::get_id()
+              << ", reserve() after mutex" << std::endl;
+
     if(available_handles[device].size() > 0)
     {
+      std::cout << "thread " << std::this_thread::get_id()
+                << ", reserve() second case" << std::endl;
       my_handles[device] = available_handles[device].back();
       available_handles[device].pop_back();
     }
     else
     {
+      std::cout << "thread " << std::this_thread::get_id()
+                << ", reserve() third case" << std::endl;
       // In local testing, I do observe that emplace_back sometimes routes through temporaries
       // that incur move-constructor and destructor calls.  See comments in Handle above.
       created_handles[device].emplace_back(true /*create*/);
@@ -114,7 +133,11 @@ class PoolWindow
   // Called by the destructor.  Releases this thread's handles back into the pool.
   void release()
   {
+    std::cout << "thread " << std::this_thread::get_id()
+              << ", release() before mutex" << std::endl;
     std::lock_guard<std::mutex> guard(mutex);
+    std::cout << "thread " << std::this_thread::get_id()
+              << ", release() after mutex" << std::endl;
     for(auto d_h : my_handles)
       available_handles[d_h.first].push_back(d_h.second);
   }
@@ -130,6 +153,10 @@ cudnnHandle_t getCudnnHandle()
 {
   int device;
   AT_CUDA_CHECK(cudaGetDevice(&device));
+
+  std::cout << "thread " << std::this_thread::get_id()
+            << ", device " << device
+            << ", getCudnnHandle" << std::endl;
 
   return myPoolWindow.reserve(device);
 }
