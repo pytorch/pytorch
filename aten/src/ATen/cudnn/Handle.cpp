@@ -16,8 +16,14 @@ struct Handle {
   cudnnHandle_t handle;
   Handle(bool create = false) : handle(nullptr)
   {
+    std::cout << "thread " << std::this_thread::get_id()
+              << ", Handle(" << create << ")" << std::endl;
     if(create)
+    {
       AT_CUDNN_CHECK(cudnnCreate(&handle));
+      std::cout << "thread " << std::this_thread::get_id()
+                << " created cudnn handle " << handle << std::endl;
+    }
   }
   // std::vector.emplace() and push_back() may route through temporaries and call
   // copy/move constructors along the way.  If this is the case, we don't want
@@ -30,9 +36,21 @@ struct Handle {
   // unordered_map<int, vector<unique_ptr<Handle>>> created_handles;
   Handle(const Handle& rhs) = delete;
   // Following https://stackoverflow.com/questions/3279543/what-is-the-copy-and-swap-idiom
-  Handle(Handle&& rhs) : Handle() { std::swap(handle, rhs.handle); }
+  Handle(Handle&& rhs) : Handle()
+  {
+    std::cout << "thread " << std::this_thread::get_id()
+              << ", Handle(Handle&&)"
+              << ", " << handle << ", " << rhs.handle << std::endl;
+    std::swap(handle, rhs.handle);
+  }
   // operator= takes argument by value
-  Handle& operator=(Handle rhs) { std::swap(handle, rhs.handle); return *this; }
+  Handle& operator=(Handle rhs)
+  {
+    std::cout << "thread " << std::this_thread::get_id()
+              << ", operator="
+              << ", " << handle << ", " << rhs.handle << std::endl;
+    std::swap(handle, rhs.handle); return *this;
+  }
   ~Handle() {
     if(handle)
     {
@@ -44,7 +62,12 @@ struct Handle {
 //   - @soumith
 #ifdef NO_CUDNN_DESTROY_HANDLE
 #else
+      // These should only ever be called at the end of the process.
+      std::cout << "thread " << std::this_thread::get_id()
+                << "~Handle" << handle << std::endl;
       cudnnDestroy(handle);
+      std::cout << "thread " << std::this_thread::get_id()
+                << "destroyed handle" << handle << std::endl;
 #endif
     }
   }
@@ -121,6 +144,8 @@ class PoolWindow
       // that incur move-constructor and destructor calls.  See comments in Handle above.
       created_handles[device].emplace_back(true /*create*/);
       my_handles[device] = created_handles[device].back().handle;
+      std::cout << "thread " << std::this_thread::get_id()
+                << ", reserve() created new handle" << std::endl;
     }
 
     return my_handles[device];
