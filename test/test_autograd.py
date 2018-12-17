@@ -2588,7 +2588,7 @@ class TestAutograd(TestCase):
         print("Before forward", flush=True)
         out, _ = l(s)
         print("Before backward", flush=True)
-        # out.sum().backward()
+        out.sum().backward()
         print("After backward", flush=True)
         self.assertFalse(s.grad is None or s.grad.abs().sum().item() == 0)
 
