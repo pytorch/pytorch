@@ -53,19 +53,16 @@ private:
  // TODO: allow abstract kernels to use multiple generated kernels
  // TODO: allow abstract kernels to reuse generated kernels from common pool
 struct TORCH_API KernelSpec {
-  KernelSpec(
-    const int64_t _key
-  , std::shared_ptr<Graph> _graph)
-  : key_{_key}
-  , graph_{_graph}
-  , code_{_graph}
-  , nInputs_{_graph->inputs().size()}
-  , inputBroadcastGroups_{}
-  , inputChunks_{}
-  , kernels_{}
-  { }
+  KernelSpec(const int64_t _key, const std::shared_ptr<Graph>& _graph)
+      : key_{_key},
+        graph_{_graph},
+        code_{_graph},
+        nInputs_{_graph->inputs().size()},
+        inputBroadcastGroups_{},
+        inputChunks_{},
+        kernels_{} {}
 
-   // Getters
+  // Getters
   int64_t key() const { return key_; }
   std::shared_ptr<Graph> graph() const { return graph_; }
   const Code& code() const { return code_; }

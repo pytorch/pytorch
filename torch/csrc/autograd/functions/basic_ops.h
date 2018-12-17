@@ -28,11 +28,11 @@ struct TORCH_API Error : public Function {
 // NYI, grad_fn=<Error> will be printed if we use Error, which is confusing. So
 // special case with a new NotImplemented function here.
 struct TORCH_API NotImplemented : public Error {
-  NotImplemented(std::string forward_fn, edge_list&& next_edges)
+  NotImplemented(const std::string& forward_fn, edge_list&& next_edges)
     : Error("derivative for " + forward_fn + " is not implemented",
             std::move(next_edges)) {}
 
-  NotImplemented(std::string forward_fn)
+  NotImplemented(const std::string& forward_fn)
     : Error("derivative for " + forward_fn + " is not implemented") {}
 };
 

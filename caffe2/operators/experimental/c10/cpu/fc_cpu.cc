@@ -21,10 +21,10 @@ void fc_op_cpu_impl(
     int axis_w,
     caffe2::ops::FullyConnected::Cache* cache,
     BaseContext* context) {
-  Tensor X = X_;
-  Tensor W = W_;
-  Tensor b = b_;
-  Tensor Y = Y_;
+  Tensor X(X_);
+  Tensor W(W_);
+  Tensor b(b_);
+  Tensor Y(Y_);
 
   constexpr bool TransposeWeight = true;
 
@@ -97,7 +97,7 @@ void fc_op_cpu_impl(
       static_cast<Context*>(context),
       math_type);
   // Add bias term
-  Tensor bias_multiplier = cache->bias_multiplier_;
+  Tensor bias_multiplier(cache->bias_multiplier_);
   if (bias_multiplier.numel() != M) {
     // If the helper bias multiplier is not M, reshape and fill it with one.
     bias_multiplier.Resize(M);

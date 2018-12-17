@@ -12,8 +12,8 @@ template <class DataType>
 void relu_op_cpu_impl(
     const C10Tensor& input_,
     const C10Tensor& output_) {
-  Tensor input = input_;
-  Tensor output = output_;
+  Tensor input(input_);
+  Tensor output(output_);
 
   output.ResizeLike(input);
 

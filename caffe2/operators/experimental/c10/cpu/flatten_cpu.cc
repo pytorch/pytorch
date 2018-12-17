@@ -14,8 +14,8 @@ void flatten_op_cpu_impl(
     const C10Tensor& output_,
     int axis,
     BaseContext* context) {
-  Tensor input = input_;
-  Tensor output = output_;
+  Tensor input(input_);
+  Tensor output(output_);
   CAFFE_ENFORCE_GE(
       input.sizes().size(), axis, "The rank of the tensor must be >= axis.");
   output.Resize(input.size_to_dim(axis), input.size_from_dim(axis));

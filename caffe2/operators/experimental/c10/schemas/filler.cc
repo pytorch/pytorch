@@ -125,7 +125,7 @@ struct ValuesParameter final {
       values_data[i] = static_cast<Type>(source_values[i]);
     }
     // body_ = &GivenTensorFillOp::FillWithType<Type>;
-    return values;
+    return C10Tensor(values);
   }
 };
 } // namespace

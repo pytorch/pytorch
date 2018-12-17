@@ -26,8 +26,8 @@ void cast_op_cpu_impl(
     const C10Tensor& input_,
     const C10Tensor& output_,
     TensorProto_DataType to) {
-  Tensor input = input_;
-  Tensor output = output_;
+  Tensor input(input_);
+  Tensor output(output_);
 
   switch (to) {
     case caffe2::TensorProto_DataType_FLOAT:

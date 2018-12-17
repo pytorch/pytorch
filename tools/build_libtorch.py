@@ -4,9 +4,13 @@ import shlex
 import subprocess
 import sys
 
+from setup_helpers.env import check_env_flag, hotpatch_build_env_vars
+
+
+hotpatch_build_env_vars()
+
 from setup_helpers.cuda import USE_CUDA
 from setup_helpers.dist_check import USE_DISTRIBUTED, USE_GLOO_IBVERBS, IS_LINUX
-from setup_helpers.env import check_env_flag
 
 if __name__ == '__main__':
     # Placeholder for future interface. For now just gives a nice -h.

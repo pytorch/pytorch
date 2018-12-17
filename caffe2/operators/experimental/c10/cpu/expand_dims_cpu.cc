@@ -15,8 +15,8 @@ void expand_dims_op_cpu_impl(
     const std::vector<int>& dims,
     caffe2::ops::ExpandDims::State* state,
     BaseContext* context) {
-  Tensor input = input_;
-  Tensor output = output_;
+  Tensor input(input_);
+  Tensor output(output_);
 
   if (!state->initialized) {
     state->dims = dims;
