@@ -257,6 +257,18 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'std::string': 'string',
     }
 
+    unpack_with_default_methods = {
+        'IntList': 'setDefaultIntlist',
+        'Scalar': 'scalarWithDefault',
+        'int64_t': 'toInt64WithDefault',
+        'bool': 'setDefaultBool',
+        'double': 'setDefaultDouble',
+        'const Type &': 'scalartypeWithDefault',
+        'const THPLayout &': 'layoutWithDefault',
+        'const Device &': 'deviceWithDefault',
+        'ScalarType': 'scalartypeWithDefault',
+    }
+
     def emit_single_dispatch(declaration, out_idx, base_env):
         env = {}
         simple_return_type = declaration['return_type'].replace(' &', '')
@@ -298,8 +310,21 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             if typename.startswith('LongTensor'):
                 typename = 'Tensor'
 
-            unpack = unpack_methods.get(typename, typename.lower())
-            expr = 'r.{}({})'.format(unpack, arg_index)
+            if arg.get('python_default_init'):
+                assert typename in unpack_with_default_methods, \
+                 '`{}` type is not supported in python_default_init'.format(typename)
+                unpack_with_default = unpack_with_default_methods.get(typename)
+                default_expr = arg.get('python_default_init')
+# TODO: Type currently maps to ScalarType, figure out a cleaner solution
+                if typename == 'const Type &':
+                 default_expr += '.scalarType()'
+                expr = 'r.{}({}, {})'.format(unpack_with_default, arg_index, default_expr)
+            else:
+                unpack = unpack_methods.get(typename, typename.lower())
+                expr = 'r.{}({})'.format(unpack, arg_index)
+
+            # unpack = unpack_methods.get(typename, typename.lower())
+            # expr = 'r.{}({})'.format(unpack, arg_index)
 
             if unpack_args:
                 body.append('auto {} = {};'.format(name, expr))
@@ -524,6 +549,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'name': 'dtype',
                 'type': 'const Type &',
                 'simple_type': 'Type',
+                'python_default_init': py_default_dtype,
             }
             python_binding_arguments.append(dtype_arg)
         if is_factory_function or is_like_function_with_options:
@@ -535,6 +561,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'name': 'layout',
                 'type': 'const THPLayout &',
                 'simple_type': 'Layout',
+                'python_default_init': py_default_layout,
             }
             python_binding_arguments.append(layout_arg)
             py_default_device = 'self.device()' if is_like_function_with_options else None
@@ -546,6 +573,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'name': 'device',
                 'type': 'const Device &',
                 'simple_type': 'Device',
+                'python_default_init': py_default_device
             }
             python_binding_arguments.append(device_arg)
         if is_factory_or_like_function:

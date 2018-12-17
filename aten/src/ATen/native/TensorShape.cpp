@@ -315,14 +315,6 @@ Tensor &as_strided_(Tensor& self, IntList size, IntList stride, optional<int64_t
   return self;
 }
 
-Tensor as_strided(const Tensor& self, IntList size, IntList stride) {
-  return at::as_strided(self, size, stride, self.storage_offset());
-}
-
-Tensor &as_strided_(Tensor& self, IntList size, IntList stride) {
-  return self.as_strided_(size, stride, self.storage_offset());
-}
-
 Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   int64_t allDim = self.dim();
   int64_t end = start+length;
