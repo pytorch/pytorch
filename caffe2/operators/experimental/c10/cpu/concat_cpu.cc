@@ -17,10 +17,10 @@ void concat_op_cpu_impl(
     const C10Tensor& output_,
     const C10Tensor& split_,
     int axis,
-    int add_axis,
-    BaseContext* context) {
+    int add_axis) {
   Tensor output(output_);
   Tensor split(split_);
+  CPUContext context;
 
   split.Resize(vector<int64_t>(1, inputs.size()));
   int* axis_data = split.template mutable_data<int>();
@@ -98,7 +98,7 @@ void concat_op_cpu_impl(
         static_cast<char*>(output.raw_mutable_data(Tensor(inputs[0]).dtype())) +
             output_offset,
         output_channels * after,
-        static_cast<Context*>(context),
+        static_cast<Context*>(&context),
         Tensor(inputs[0]).dtype().copy());
     output_offset += axis_dim * after * input.itemsize();
   }

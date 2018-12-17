@@ -21,22 +21,20 @@ struct BatchMatmul final {
       int trans_a,
       int trans_b,
       int broadcast,
-      State* state,
-      BaseContext* context);
+      State* state);
 
   static constexpr size_t num_dispatch_args() {return 2;}
 
   static constexpr size_t num_outputs() {return 1;}
 
-  static constexpr c10::guts::array<const char*, 8> parameter_names = {
+  static constexpr c10::guts::array<const char*, 7> parameter_names = {
       {"A",
        "B",
        "output",
        "trans_a",
        "trans_b",
        "broadcast",
-       "state",
-       "context"}};
+       "state"}};
 };
 
 } // namespace ops

@@ -17,21 +17,19 @@ struct Concat final {
       const C10Tensor& output,
       const C10Tensor& split_info,
       int add,
-      int add_axis,
-      BaseContext* context);
+      int add_axis);
 
   static constexpr size_t num_outputs() {return 2;}
 
-  static constexpr c10::guts::array<const char*, 6> parameter_names = {
-      {"inputs", "output", "split_info_output", "add", "add_axis", "context"}};
+  static constexpr c10::guts::array<const char*, 5> parameter_names = {
+      {"inputs", "output", "split_info_output", "add", "add_axis"}};
 
   static c10::DeviceTypeId dispatch_key(
       at::ArrayRef<C10Tensor> inputs,
       const C10Tensor& output,
       const C10Tensor& split_info,
       int add,
-      int add_axis,
-      BaseContext* context) {
+      int add_axis) {
     return c10::DeviceTypeId::CPU;
   }
 };

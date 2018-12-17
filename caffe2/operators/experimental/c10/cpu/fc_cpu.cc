@@ -19,12 +19,12 @@ void fc_op_cpu_impl(
     const C10Tensor& Y_,
     int axis,
     int axis_w,
-    caffe2::ops::FullyConnected::Cache* cache,
-    BaseContext* context) {
+    caffe2::ops::FullyConnected::Cache* cache) {
   Tensor X(X_);
   Tensor W(W_);
   Tensor b(b_);
   Tensor Y(Y_);
+  CPUContext context;
 
   constexpr bool TransposeWeight = true;
 
@@ -94,7 +94,7 @@ void fc_op_cpu_impl(
       W.template data<DataType>(),
       0,
       Y.template mutable_data<DataType>(),
-      static_cast<Context*>(context),
+      static_cast<Context*>(&context),
       math_type);
   // Add bias term
   Tensor bias_multiplier(cache->bias_multiplier_);
@@ -105,7 +105,7 @@ void fc_op_cpu_impl(
         M,
         caffe2::convert::To<float, DataType>(1),
         bias_multiplier.template mutable_data<DataType>(),
-        static_cast<Context*>(context));
+        static_cast<Context*>(&context));
   }
   caffe2::math::Gemm<DataType, Context, caffe2::DefaultEngine>(
       CblasNoTrans,
@@ -118,7 +118,7 @@ void fc_op_cpu_impl(
       b.template data<DataType>(),
       1,
       Y.template mutable_data<DataType>(),
-      static_cast<Context*>(context),
+      static_cast<Context*>(&context),
       math_type);
 }
 } // namespace

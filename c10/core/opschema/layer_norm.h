@@ -3,10 +3,6 @@
 #include <c10/core/Tensor.h>
 #include <c10/util/Array.h>
 
-namespace at {
-class BaseContext;
-}
-
 namespace c10 {
 namespace core {
 namespace opschema {

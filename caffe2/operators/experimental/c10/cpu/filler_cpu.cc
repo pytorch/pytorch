@@ -49,10 +49,10 @@ void given_tensor_fill_op_cpu_impl(
     const std::vector<int64_t>& shape,
     const std::vector<int>& extra_shape,
     bool input_as_shape,
-    const C10Tensor& values_,
-    BaseContext* context) {
+    const C10Tensor& values_) {
   Tensor output(output_);
   Tensor values(values_);
+  CPUContext context;
 
   filler_init(inputs, output_, shape, extra_shape, input_as_shape);
 
@@ -64,7 +64,7 @@ void given_tensor_fill_op_cpu_impl(
   auto* data = output.template mutable_data<Type>();
   const Type* values_data = values.template data<Type>();
   if (output.numel()) {
-    context->CopySameDevice(output.numel(), values_data, data);
+    context.CopySameDevice(output.numel(), values_data, data);
   }
 }
 
@@ -75,9 +75,9 @@ void constant_fill_op_cpu_impl(
     const std::vector<int>& extra_shape,
     bool input_as_shape,
     int dtype,
-    caffe2::ops::ConstantFill::Value value,
-    BaseContext* context) {
+    caffe2::ops::ConstantFill::Value value) {
   Tensor output(output_);
+  CPUContext context;
 
   filler_init(inputs, output_, shape, extra_shape, input_as_shape);
 
@@ -87,25 +87,25 @@ void constant_fill_op_cpu_impl(
           output.numel(),
           value.as_float,
           output.template mutable_data<float>(),
-          static_cast<CPUContext*>(context));
+          static_cast<CPUContext*>(&context));
     } else if (dtype == caffe2::TensorProto_DataType_INT32) {
       caffe2::math::Set<int32_t, CPUContext>(
           output.numel(),
           value.as_int32,
           output.template mutable_data<int32_t>(),
-          static_cast<CPUContext*>(context));
+          static_cast<CPUContext*>(&context));
     } else if (dtype == caffe2::TensorProto_DataType_INT64) {
       caffe2::math::Set<int64_t, CPUContext>(
           output.numel(),
           value.as_int64,
           output.template mutable_data<int64_t>(),
-          static_cast<CPUContext*>(context));
+          static_cast<CPUContext*>(&context));
     } else if (dtype == caffe2::TensorProto_DataType_BOOL) {
       caffe2::math::Set<bool, CPUContext>(
           output.numel(),
           value.as_bool,
           output.template mutable_data<bool>(),
-          static_cast<CPUContext*>(context));
+          static_cast<CPUContext*>(&context));
     } else {
       throw std::logic_error(
           "Unimplemented data type for ConstantFill: " +
@@ -121,9 +121,9 @@ void uniform_fill_op_cpu_impl(
     const std::vector<int>& extra_shape,
     bool input_as_shape,
     float min,
-    float max,
-    BaseContext* context) {
+    float max) {
   Tensor output(output_);
+  CPUContext context;
 
   filler_init(inputs, output_, shape, extra_shape, input_as_shape);
 
@@ -145,7 +145,7 @@ void uniform_fill_op_cpu_impl(
       min,
       max,
       output.template mutable_data<float>(),
-      static_cast<CPUContext*>(context));
+      static_cast<CPUContext*>(&context));
 }
 } // namespace
 } // namespace caffe2

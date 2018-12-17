@@ -13,15 +13,14 @@ struct Flatten final {
   using Signature = void(
       const C10Tensor& input,
       const C10Tensor& output,
-      int axis,
-      BaseContext* context);
+      int axis);
 
   static constexpr size_t num_dispatch_args() {return 1;}
 
   static constexpr size_t num_outputs() {return 1;}
 
-  static constexpr c10::guts::array<const char*, 4> parameter_names = {
-      {"input", "output", "axis", "context"}};
+  static constexpr c10::guts::array<const char*, 3> parameter_names = {
+      {"input", "output", "axis"}};
 };
 
 } // namespace ops

@@ -3,7 +3,6 @@
 #include "caffe2/utils/math.h"
 #include "caffe2/core/tensor.h"
 
-using caffe2::BaseContext;
 using caffe2::Tensor;
 
 namespace caffe2 {
@@ -13,8 +12,7 @@ void expand_dims_op_cpu_impl(
     const C10Tensor& input_,
     const C10Tensor& output_,
     const std::vector<int>& dims,
-    caffe2::ops::ExpandDims::State* state,
-    BaseContext* context) {
+    caffe2::ops::ExpandDims::State* state) {
   Tensor input(input_);
   Tensor output(output_);
 
@@ -33,7 +31,7 @@ void expand_dims_op_cpu_impl(
     state->initialized = true;
   }
 
-  output.CopyFrom(input, context);
+  output.CopyFrom(input);
   if (state->dims.empty()) {
     return;
   }
