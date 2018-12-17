@@ -1106,6 +1106,12 @@
 - name: thnn_conv_dilated3d_backward(Tensor grad_output, Tensor self, Tensor weight, IntList kernel_size, IntList stride, IntList padding, IntList dilation, Tensor columns, Tensor ones, std::array<bool,3> output_mask)
   grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, self, stride, padding, dilation, false, {{0, 0, 0}}, 1, false, false, false, grad_input_mask)
 
+- name: thnn_col2im(Tensor self, IntList output_size, IntList kernel_size, IntList dilation, IntList padding, IntList stride)
+  self: thnn_col2im_backward(grad, kernel_size, dilation, padding, stride)
+
+- name: thnn_im2col(Tensor self, IntList kernel_size, IntList dilation, IntList padding, IntList stride)
+  self: thnn_im2col_backward(grad, {self.size(2), self.size(3)}, kernel_size, dilation, padding, stride)
+
 # NN double backwards support
 
 - name: adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self)
