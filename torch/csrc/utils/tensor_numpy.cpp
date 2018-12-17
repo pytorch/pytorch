@@ -153,6 +153,7 @@ static int aten_to_dtype(const at::Type& type) {
       case kInt: return NPY_INT32;
       case kShort: return NPY_INT16;
       case kByte: return NPY_UINT8;
+      case kChar: return NPY_INT8;
       default: break;
     }
   }

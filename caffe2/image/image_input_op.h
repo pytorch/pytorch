@@ -1243,12 +1243,14 @@ bool ImageInputOp<Context>::CopyPrefetched() {
   // Note(jiayq): The if statement below should be optimized away by the
   // compiler since std::is_same is a constexpr.
   if (std::is_same<Context, CPUContext>::value) {
-    OperatorBase::OutputTensorCopyFrom(0, options, prefetched_image_, &context_);
-    OperatorBase::OutputTensorCopyFrom(1, options, prefetched_label_, &context_);
+    OperatorBase::OutputTensorCopyFrom(
+        0, options, prefetched_image_, /* async */ true);
+    OperatorBase::OutputTensorCopyFrom(
+        1, options, prefetched_label_, /* async */ true);
 
     for (int i = 2; i < OutputSize(); ++i) {
       OperatorBase::OutputTensorCopyFrom(
-          i, options, prefetched_additional_outputs_[i - 2], &context_);
+          i, options, prefetched_additional_outputs_[i - 2], /* async */ true);
     }
   } else {
     // TODO: support color jitter and color lighting in gpu_transform
@@ -1276,14 +1278,17 @@ bool ImageInputOp<Context>::CopyPrefetched() {
 
     } else {
       OperatorBase::OutputTensorCopyFrom(
-          0, type, prefetched_image_on_device_, &context_);
+          0, type, prefetched_image_on_device_, /* async */ true);
     }
     OperatorBase::OutputTensorCopyFrom(
-        1, type, prefetched_label_on_device_, &context_);
+        1, type, prefetched_label_on_device_, /* async */ true);
 
     for (int i = 2; i < OutputSize(); ++i) {
       OperatorBase::OutputTensorCopyFrom(
-          i, type, prefetched_additional_outputs_on_device_[i - 2], &context_);
+          i,
+          type,
+          prefetched_additional_outputs_on_device_[i - 2],
+          /* async */ true);
     }
   }
   return true;
