@@ -12,9 +12,6 @@ at::Tensor MaxUnpooling2d_forward_out_cpu_(
     const Tensor& indices,
     int64_t outputHeight,
     int64_t outputWidth) {
-  // TODO: replicate is_empty() cbeck in SpatialMaxUnpooling.c
-  // TODO: zero out output inplace
-
   auto numBatch = input.size(0);
   auto numChannels = input.size(1);
   auto inputHeight = input.size(2);
@@ -30,7 +27,7 @@ at::Tensor MaxUnpooling2d_forward_out_cpu_(
     int k;
     int has_error = 0;
     int error_index = 0;
-    #pragma omp parallel for private(k)
+#pragma omp parallel for private(k)
     for (k = 0; k < numChannels; k++) {
       auto finalOutputOffset = nOutputOffset + k * outputWidth * outputHeight;
       auto finalInputOffset = nInputOffset + k * inputWidth * inputHeight;
@@ -43,11 +40,11 @@ at::Tensor MaxUnpooling2d_forward_out_cpu_(
         for (auto j = 0; j < inputWidth; j++) {
           maxp = ind_p_k[i * inputWidth + j];
           if (maxp < 0 || maxp >= outputWidth * outputHeight) {
-    #pragma omp critical
-          {
-            has_error = 1;
-            error_index = maxp;
-          }
+#pragma omp critical
+            {
+              has_error = 1;
+              error_index = maxp;
+            }
           } else {
             output_p_k[maxp] = input_p_k[i * inputWidth + j];
           }
@@ -55,8 +52,11 @@ at::Tensor MaxUnpooling2d_forward_out_cpu_(
       }
     }
     if (has_error) {
-      AT_ERROR("Found an invalid max index %ld (output volumes are of size %dx%d)",
-        error_index, outputHeight, outputWidth);
+      AT_ERROR(
+          "Found an invalid max index %ld (output volumes are of size %dx%d)",
+          error_index,
+          outputHeight,
+          outputWidth);
     }
   }
   return output;
@@ -76,22 +76,33 @@ at::Tensor& MaxUnpooling2d_forward_out_cpu(
   AT_CHECK(
       self.sizes() == indices.sizes(),
       "Shape of indices should match shape of input");
-  AT_CHECK(self.is_contiguous(), "input must be contiguous");
-  AT_CHECK(indices.is_contiguous(), "indices must be contiguous");
+
+  // is_empty check
+  for (int64_t i = 0; i < self.ndimension(); i++) {
+    AT_CHECK(
+        self.size(i) > 0,
+        "input must be nonempty, but input has sizes: ",
+        self.sizes());
+  }
 
   auto numBatch = self.size(0);
   auto numChannels = self.size(1);
   auto outputHeight = output_size[0];
   auto outputWidth = output_size[1];
-  AT_CHECK(
-      output.sizes() ==
-          IntList({numBatch, numChannels, outputHeight, outputWidth}),
-      "The first two dimensions of output should match those of input, and last two dimensions should match output_size");
+
+  output.zero_();
+  output.resize_({numBatch, numChannels, outputHeight, outputWidth});
+
   AT_CHECK(output.is_contiguous(), "output must be contiguous");
+
   AT_DISPATCH_FLOATING_TYPES(
       self.type(), "MaxUnpooling2d_forward_out_cpu_", ([&] {
         MaxUnpooling2d_forward_out_cpu_<scalar_t>(
-            output, self, indices, output_size[0], output_size[1]);
+            output,
+            self.contiguous(),
+            indices.contiguous(),
+            output_size[0],
+            output_size[1]);
       }));
   return output;
 };
@@ -107,6 +118,12 @@ at::Tensor MaxUnpooling2d_forward_cpu(
   AT_CHECK(
       output_size.size() == 2,
       "There should be exactly two elements (height, width) in output_size");
+  for (int64_t i = 0; i < self.ndimension(); i++) {
+    AT_CHECK(
+        self.size(i) > 0,
+        "input must be nonempty, but input has sizes: ",
+        self.sizes());
+  }
   auto output = at::zeros(
       {self.size(0), self.size(1), output_size[0], output_size[1]},
       self.options());
@@ -174,7 +191,7 @@ at::Tensor MaxUnpooling3d_forward_out_cpu_(
     int k;
     int has_error = 0;
     int error_index = 0;
-  #pragma omp parallel for private(k)
+#pragma omp parallel for private(k)
     for (k = 0; k < nSlices; k++) {
       auto finalInputOffset = inputOffset + k * iT * iW * iH;
       auto finalOutputOffset = outputOffset + k * oT * oW * oH;
@@ -189,7 +206,7 @@ at::Tensor MaxUnpooling3d_forward_out_cpu_(
             auto index = t * iH * iW + i * iW + j;
             maxp = ind_p_k[index];
             if (maxp < 0 || maxp >= oT * oW * oH) {
-              #pragma omp critical
+#pragma omp critical
               {
                 has_error = 1;
                 error_index = maxp;
@@ -201,12 +218,60 @@ at::Tensor MaxUnpooling3d_forward_out_cpu_(
         }
       }
       if (has_error) {
-        AT_ERROR("found an invalid max index %ld (output volumes are of size %dx%dx%d)",
-          error_index, oT, oH, oW);
+        AT_ERROR(
+            "found an invalid max index %ld (output volumes are of size %dx%dx%d)",
+            error_index,
+            oT,
+            oH,
+            oW);
       }
     }
   }
   return output;
+}
+
+void MaxUnpooling3d_shape_check(
+    const Tensor& input,
+    const Tensor& gradOutput,
+    const Tensor& indices,
+    IntList output_size,
+    IntList stride,
+    IntList padding,
+    bool check_grad) {
+  // is_empty check
+  for (int64_t i = 0; i < input.ndimension(); i++) {
+    AT_CHECK(
+        input.size(i) > 0,
+        "input must be nonempty, but input has sizes: ",
+        input.sizes());
+  }
+  AT_CHECK(input.sizes() == indices.sizes());
+  AT_CHECK(
+      stride[0] > 0 && stride[1] > 0 && stride[2] > 0,
+      "stride should be never greater than zero, but got stride: ",
+      stride);
+
+  int dimw = 4;
+  int dimh = 3;
+  int dimt = 2;
+  int dimn = 1;
+
+  int nslices = input.size(dimn);
+  if (check_grad) {
+    if (output_size[0] != gradOutput.size(dimt) ||
+        output_size[1] != gradOutput.size(dimh) ||
+        output_size[2] != gradOutput.size(dimw)) {
+      AT_ERROR(
+          "Inconsistent gradOutput size. output_size[1]= %d, output_size[1] = %d, output_size[2] = %d, gradOutput: %dx%dx%d",
+          output_size[0],
+          output_size[1],
+          output_size[2],
+          gradOutput[0],
+          gradOutput[1],
+          gradOutput[2]);
+    }
+    AT_CHECK(gradOutput.ndimension() == 5 && gradOutput.size(dimn) == nslices);
+  }
 }
 
 at::Tensor& MaxUnpooling3d_forward_out_cpu(
@@ -216,15 +281,13 @@ at::Tensor& MaxUnpooling3d_forward_out_cpu(
     IntList output_size,
     IntList stride,
     IntList padding) {
-  // _thnn_max_unpool3d(Tensor self, LongTensor indices, IntList[3] output_size,
-  // IntList[3] stride, IntList[3] padding)
   AT_CHECK(
       output.ndimension() == 5,
       "Output to MaxUnpooling2d should be a NCDHW Tensor",
       output.sizes());
   AT_CHECK(
       self.ndimension() == 5,
-      "Output to MaxUnpooling2d should be a NCDHW Tensor",
+      "Input to MaxUnpooling2d should be a NCDHW Tensor",
       self.sizes());
   AT_CHECK(
       output_size.size() == 3,
@@ -238,15 +301,20 @@ at::Tensor& MaxUnpooling3d_forward_out_cpu(
   AT_CHECK(
       self.sizes() == indices.sizes(),
       "Shape of indices should match shape of input");
-  AT_CHECK(self.is_contiguous(), "input must be contiguous");
-  AT_CHECK(indices.is_contiguous(), "indices must be contiguous");
-  AT_CHECK(output.is_contiguous(), "output must be contiguous");
+  MaxUnpooling3d_shape_check(
+      self, at::empty({}), indices, output_size, stride, padding, false);
+  output.zero_();
+  output.resize_({self.size(0),
+           self.size(1),
+           output_size[0],
+           output_size[1],
+           output_size[2]});
   AT_DISPATCH_FLOATING_TYPES(
       self.type(), "MaxUnpooling3d_forward_out_cpu_", ([&] {
         MaxUnpooling3d_forward_out_cpu_<scalar_t>(
             output,
-            self,
-            indices,
+            self.contiguous(),
+            indices.contiguous(),
             output_size[0],
             output_size[1],
             output_size[2],
@@ -293,7 +361,8 @@ at::Tensor& MaxUnpooling3d_forward_out_cuda(
     IntList output_size,
     IntList stride,
     IntList padding) {
-  return at::_thnn_max_unpool3d_out(output, self, indices, output_size, stride, padding);
+  return at::_thnn_max_unpool3d_out(
+      output, self, indices, output_size, stride, padding);
 }
 
 // stopgap until GPU version is implemented
