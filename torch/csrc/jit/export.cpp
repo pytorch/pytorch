@@ -69,10 +69,6 @@ void validateBlock(Block *b, onnx_torch::OperatorExportTypes operator_export_typ
             node->output(i)->replaceAllUsesWith(new_node->output(i));
           }
           new_node->s_(Symbol::fromQualString("attr::operator"), "expand");
-        } else {
-          FAIL_EXPORT(
-              "Could not export a broadcasted operation; ONNX likely does not support this form of broadcasting.\n\nBroadcast occurred at:\n" +
-              getNodeStackTraceString(node));
         }
       }
       if (node->kind() == prim::PackPadded || node->kind() == prim::PadPacked) {
