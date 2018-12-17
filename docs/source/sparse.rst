@@ -142,4 +142,6 @@ Functions
 
 .. autofunction:: torch.sparse.addmm
 .. autofunction:: torch.sparse.mm
+.. autofunction:: torch.sparse.max
+.. autofunction:: torch.sparse.min
 .. autofunction:: torch.sparse.sum
