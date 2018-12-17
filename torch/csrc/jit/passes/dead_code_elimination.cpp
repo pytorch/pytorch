@@ -205,7 +205,7 @@ class DeadCodeEliminator {
           sweep(block, true);
         }
       }
-      if (!marked_.count(node)) {
+      if (!(marked_.count(node) or node->hasUses())) {
         it.destroyCurrent();
       }
     }
