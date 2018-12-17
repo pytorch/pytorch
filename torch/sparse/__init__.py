@@ -153,7 +153,52 @@ def add(input, other):
         other (SparseTensor or a scalar): the value to add to input
 
     Example::
+        >>> nnz = 4
+        >>> dims1 = [2, 2]
+        >>> I = torch.cat([torch.randint(0, dims1[0], size=(nnz,)),
+                           torch.randint(0, dims1[1], size=(nnz,)),], 0).reshape(2, nnz)
+        >>> V = torch.rand(nnz)
+        >>> S1 = torch.sparse_coo_tensor(I, V, dims1)
+        >>> S1
+        tensor(indices=tensor([[0, 0, 0, 1],
+                               [0, 1, 0, 0]]),
+               values=tensor([0.7437, 0.2626, 0.9034, 0.0787]),
+               size=(2, 2), nnz=4, layout=torch.sparse_coo)
 
+        >>> dims2 = [2, 1]
+        >>> I = torch.cat([torch.randint(0, dims2[0], size=(nnz,)),
+                           torch.randint(0, dims2[1], size=(nnz,)),], 0).reshape(2, nnz)
+        >>> V = torch.rand(nnz)
+        >>> S2 = torch.sparse_coo_tensor(I, V, dims2)
+        >>> S2
+        tensor(indices=tensor([[1, 0, 1, 1],
+                               [0, 0, 0, 0]]),
+               values=tensor([0.8652, 0.6640, 0.2394, 0.8972]),
+               size=(2, 1), nnz=4, layout=torch.sparse_coo)
+
+        >>> S3 = torch.sparse.add(S1, S2)
+        >>> S3
+        tensor(indices=tensor([[0, 0, 1],
+                               [0, 1, 0]]),
+               values=tensor([2.3111, 0.9266, 2.0804]),
+               size=(2, 2), nnz=3, layout=torch.sparse_coo)
+
+        # add a scalar
+        >>> I = torch.cat([torch.randint(0, dims1[0], size=(nnz,)),
+                           torch.randint(0, dims1[1], size=(nnz,)),], 0).reshape(2, nnz)
+        >>> V = torch.rand(nnz)
+        >>> S4 = torch.sparse_coo_tensor(I, V, dims1)
+        >>> S4
+        tensor(indices=tensor([[0, 1, 1, 1],
+                               [1, 1, 0, 0]]),
+               values=tensor([0.0945, 0.3280, 0.7648, 0.8265]),
+               size=(2, 2), nnz=4, layout=torch.sparse_coo)
+
+        >>> torch.sparse.add(S1, 1)
+            tensor(indices=tensor([[0, 1, 1],
+                                   [1, 0, 1]]),
+                   values=tensor([1.0945, 2.5913, 1.3280]),
+                   size=(2, 2), nnz=3, layout=torch.sparse_coo)
     """
     return torch._sparse_add(input, other, alpha=1)
 
@@ -173,8 +218,5 @@ def sub(input, other):
     Args:
         input (SparseTensor): the first input SparseTensor
         other (SparseTensor or a scalar): the value to add to input
-
-    Example::
-
     """
     return torch._sparse_add(input, other, alpha=-1)

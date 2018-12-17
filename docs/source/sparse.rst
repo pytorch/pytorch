@@ -139,7 +139,16 @@ Therefore, representation of a SparseTensor of sparse_dim = 0 is simply a dense 
 
 Functions
 ----------------------------------
+Here shows function APIs for Masked SparseTensor, where operations will only be
+applied to nnz locations of SparseTensor inputs. This implies some operations
+will be mathematically inconsistent with dense counterpart. For instance, given
+a tensor of ``a = torch.tensor([1, 0, 2])``, ``torch.add(a, 1)`` outputs
+``torch.tensor([2, 1, 3])``, while a Masked SparseTensor op ``torch.sparse.add(a.to_sparse(), 1).to_dense()``
+outputs ``torch.tensor([2, 0, 3])``. These APIs will be very useful for Graph Network
+models and applications.
 
+.. autofunction:: torch.sparse.add
 .. autofunction:: torch.sparse.addmm
 .. autofunction:: torch.sparse.mm
 .. autofunction:: torch.sparse.sum
+.. autofunction:: torch.sparse.sub
