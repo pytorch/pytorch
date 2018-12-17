@@ -980,13 +980,27 @@ class TestSparse(TestCase):
         test_sub(10, 2, [2, 3, 4], [2, 1, 4])
         test_sub(10, 2, [2, 3, 4], [1, 3, 4])
 
-        # TODO:
-        # 1. test empty inputs
-        # 2. test inputs with shapes that are not broadcastable
-        #    1) len(S1.sizes()) < len(S2.sizes())
-        #    2) (2,3,4) vs (2,2,4)
-        #    3) (2,3,4) vs (3,4)  -> unsqueeze is needed
-        # 3. test differed dtypes
+        # test empty SparseTensor input
+        S1 = self._gen_sparse(3, 10, [2, 3, 4])[0]
+        S2 = self._gen_sparse(3, 10, [2, 3, 4])[0]
+        S_empty1 = torch.zeros(2, 3, 4, device=self.device).to_sparse()
+        S_empty2 = torch.zeros(2, 3, 4, device=self.device).to_sparse()
+        self.assertEqual(torch.sparse.add(S_empty1, S_empty2).to_dense(), S_empty1.to_dense())
+        self.assertEqual(torch.sparse.add(S1, S_empty2).to_dense(), S1.to_dense())
+        self.assertEqual(torch.sparse.add(S_empty1, S2).to_dense(), S_empty1.to_dense())
+
+        # test unbroadcastable shapes
+        S2 = self._gen_sparse(3, 10, [2, 2, 4])[0]
+        self.assertRaises(RuntimeError, lambda: torch.sparse.add(S1, S2))
+
+        S2 = self._gen_sparse(2, 10, [3, 4])[0]
+        self.assertRaises(RuntimeError, lambda: torch.sparse.add(S1, S2))
+
+        # test dtype mismatch
+        S2 = self._gen_sparse(2, 10, [2, 3, 4])[0]
+        S2 = S2.to(dtype=torch.double)
+        self.assertRaises(RuntimeError, lambda: torch.sparse.add(S1, S2))
+
 
     def test_norm(self):
         def test_shape(sparse_dims, nnz, with_size):
