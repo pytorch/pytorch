@@ -1222,7 +1222,6 @@ class TestJit(JitTestCase):
     def test_cpp_cuda(self):
         # rather than rebuild assertExpected in cpp,
         # just glob all the cpp outputs into one file for now
-        # print(torch._C._jit_run_cpp_tests())
         self.assertExpected(torch._C._jit_run_cpp_tests())
 
     def test_batchnorm(self):
