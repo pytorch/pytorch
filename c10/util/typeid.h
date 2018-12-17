@@ -18,7 +18,7 @@
 #include <exception>
 
 #include "c10/util/Backtrace.h"
-#include "c10/Half.h"
+#include "c10/util/Half.h"
 #include "c10/macros/Macros.h"
 #include "c10/util/C++17.h"
 #include "c10/util/Exception.h"
@@ -430,15 +430,15 @@ class C10_API TypeMeta {
     // variable template. '-Wpragmas' and '-Wunknown-warning-option' has to be
     // disabled for compilers that don't know '-Wundefined-var-template' and
     // would error at our attempt to disable it.
-#ifndef _MSC_VER  
-#  pragma GCC diagnostic push  
-#  pragma GCC diagnostic ignored "-Wpragmas"  
-#  pragma GCC diagnostic ignored "-Wunknown-warning-option"  
-#  pragma GCC diagnostic ignored "-Wundefined-var-template"  
+#ifndef _MSC_VER
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wpragmas"
+#  pragma GCC diagnostic ignored "-Wunknown-warning-option"
+#  pragma GCC diagnostic ignored "-Wundefined-var-template"
 #endif
     return TypeMeta(_typeMetaDataInstance<T>());
-#ifndef _MSC_VER  
-#  pragma GCC diagnostic pop  
+#ifndef _MSC_VER
+#  pragma GCC diagnostic pop
 #endif
   }
 

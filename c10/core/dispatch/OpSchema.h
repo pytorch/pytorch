@@ -3,7 +3,7 @@
 #include <c10/core/dispatch/DispatchKey.h>
 #include <c10/util/Array.h>
 #include <c10/util/Metaprogramming.h>
-#include <c10/DeviceType.h>
+#include <c10/core/DeviceType.h>
 #include <c10/core/Tensor.h>
 
 namespace c10 {

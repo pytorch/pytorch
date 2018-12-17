@@ -5,7 +5,7 @@
 // The includes of HIPGuard.h
 #include <c10/hip/impl/HIPGuardImpl.h>
 #include <c10/hip/HIPMacros.h>
-#include <c10/DeviceType.h>
+#include <c10/core/DeviceType.h>
 #include <c10/impl/InlineDeviceGuard.h>
 #include <c10/impl/InlineStreamGuard.h>
 

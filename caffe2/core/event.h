@@ -3,7 +3,7 @@
 
 #include <chrono>
 
-#include <c10/DeviceType.h>
+#include <c10/core/DeviceType.h>
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/proto/caffe2_pb.h"

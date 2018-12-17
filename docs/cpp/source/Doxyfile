@@ -45,8 +45,8 @@ INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../aten/src/ATen/Scalar.h \
                          ../../../aten/src/ATen/TensorOptions.h \
                          ../../../build/aten/src/ATen/Functions.h \
-                         ../../../c10/Device.h \
-                         ../../../c10/DeviceType.h \
+                         ../../../c10/core/Device.h \
+                         ../../../c10/core/DeviceType.h \
                          ../../../c10/util/ArrayRef.h \
                          ../../../c10/util/Exception.h \
                          ../../../c10/util/Optional.h \

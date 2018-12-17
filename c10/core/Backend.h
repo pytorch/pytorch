@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/DeviceType.h>
+#include <c10/core/DeviceType.h>
 #include <c10/core/TensorTypeId.h>
 #include <c10/core/TensorTypeIdRegistration.h>
 #include <c10/util/Exception.h>

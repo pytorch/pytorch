@@ -8,7 +8,7 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/core/ScalarType.h>
-#include <c10/Half.h>
+#include <c10/util/Half.h>
 
 namespace c10 {
 

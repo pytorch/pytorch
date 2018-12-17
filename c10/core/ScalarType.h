@@ -1,7 +1,7 @@
 #pragma once
 
 #include <c10/util/ArrayRef.h>
-#include <c10/Half.h>
+#include <c10/util/Half.h>
 #include <c10/util/typeid.h>
 
 #include <cstdint>
