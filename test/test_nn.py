@@ -2757,6 +2757,7 @@ class TestNN(NNTestCase):
     def test_one_hot(self):
         self._test_one_hot(self)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_one_hot_cuda(self):
         self._test_one_hot(self, use_cuda=True)
 
