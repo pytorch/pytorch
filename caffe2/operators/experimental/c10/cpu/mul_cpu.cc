@@ -18,9 +18,9 @@ void mul_op_cpu_impl(
     bool legacy_broadcast,
     int axis,
     BaseContext* context) {
-  Tensor A = A_;
-  Tensor B = B_;
-  Tensor C = C_;
+  Tensor A(A_);
+  Tensor B(B_);
+  Tensor C(C_);
   const DataType* A_data = A.template data<DataType>();
   const DataType* B_data = B.template data<DataType>();
   std::vector<int> A_dims;

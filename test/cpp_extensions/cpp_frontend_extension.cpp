@@ -3,9 +3,13 @@
 #include <cstddef>
 #include <string>
 
-struct Net : torch::nn::Module {
-  Net(int64_t in, int64_t out) : fc(in, out) {
-    register_module("fc", fc);
+struct Net : torch::nn::Cloneable<Net> {
+  Net(int64_t in, int64_t out) : in_(in), out_(out) {
+    reset();
+  }
+
+  void reset() override {
+    fc = register_module("fc", torch::nn::Linear(in_, out_));
     buffer = register_buffer("buf", torch::eye(5));
   }
 
@@ -34,7 +38,8 @@ struct Net : torch::nn::Module {
     register_module(name, torch::nn::Linear(fc->options));
   }
 
-  torch::nn::Linear fc;
+  int64_t in_, out_;
+  torch::nn::Linear fc{nullptr};
   torch::Tensor buffer;
 };
 

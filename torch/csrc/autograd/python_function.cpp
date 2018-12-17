@@ -585,10 +585,7 @@ static Node* _trace_pre_record(
   Py_INCREF(op_obj);
   auto pyobj = THPObjectPtr(op_obj);
   return jit::tracer::preRecordPythonTrace(
-    std::move(pyobj),
-    std::move(arg_types),
-    input_vars,
-    std::move(scalar_args));
+      std::move(pyobj), arg_types, input_vars, std::move(scalar_args));
 }
 
 static void _trace_post_record(
@@ -882,7 +879,7 @@ PyObject* THPFunction_register_hook(THPFunction *self, PyObject *hook)
 
 static PyObject *unpack_saved_variables(
     THPFunction *self,
-    std::function<PyObject*(const Variable&)> unpack_fn)
+    const std::function<PyObject*(const Variable&)>& unpack_fn)
 {
   THPUtils_assert(!self->has_freed_buffers, ERR_BACKWARD_TWICE);
   auto& saved_variables = self->saved_variables;

@@ -13,8 +13,8 @@ void stop_gradient_op_cpu_impl(
     const C10Tensor& input_,
     const C10Tensor& output_,
     BaseContext* context) {
-  Tensor input = input_;
-  Tensor output = output_;
+  Tensor input(input_);
+  Tensor output(output_);
   if (output.getIntrusivePtr() != input.getIntrusivePtr()) {
     output.CopyFrom(input, context);
   }

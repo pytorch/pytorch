@@ -20,6 +20,18 @@ function(filter_list output input)
     set(${output} ${result} PARENT_SCOPE)
 endfunction()
 
+function(filter_list_exclude output input)
+    unset(result)
+    foreach(filename ${${input}})
+        foreach(pattern ${ARGN})
+            if(NOT "${filename}" MATCHES "${pattern}")
+                list(APPEND result "${filename}")
+            endif()
+        endforeach()
+    endforeach()
+    set(${output} ${result} PARENT_SCOPE)
+endfunction()
+
 ################################################################################
 
 if (DEFINED ENV{PYTORCH_PYTHON})

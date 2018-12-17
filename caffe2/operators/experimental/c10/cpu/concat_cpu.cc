@@ -19,8 +19,8 @@ void concat_op_cpu_impl(
     int axis,
     int add_axis,
     BaseContext* context) {
-  Tensor output = output_;
-  Tensor split = split_;
+  Tensor output(output_);
+  Tensor split(split_);
 
   split.Resize(vector<int64_t>(1, inputs.size()));
   int* axis_data = split.template mutable_data<int>();
@@ -87,7 +87,7 @@ void concat_op_cpu_impl(
   output.Resize(output_dims);
   size_t output_offset = 0;
   for (int i = 0; i < inputs.size(); ++i) {
-    Tensor input = inputs[i];
+    Tensor input(inputs[i]);
     auto axis_dim = add_axis ? 1 : input.dim32(canonical_axis);
     caffe2::math::CopyMatrix<Context>(
         input.itemsize(),

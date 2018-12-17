@@ -15,10 +15,10 @@ void sparse_lengths_sum_op_cpu_impl(
     const C10Tensor& indicesInput_,
     const C10Tensor& lengthsInput_,
     const C10Tensor& output_) {
-  Tensor dataInput = dataInput_;
-  Tensor indicesInput = indicesInput_;
-  Tensor lengthsInput = lengthsInput_;
-  Tensor output = output_;
+  Tensor dataInput(dataInput_);
+  Tensor indicesInput(indicesInput_);
+  Tensor lengthsInput(lengthsInput_);
+  Tensor output(output_);
 
   using T = float;
   constexpr bool USE_MEAN = false;

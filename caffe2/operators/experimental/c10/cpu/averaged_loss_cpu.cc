@@ -16,14 +16,14 @@ void averaged_loss_op_cpu_impl(
     const C10Tensor& sum_,
     caffe2::ops::AveragedLoss::State* state,
     BaseContext* context) {
-  Tensor X = X_;
-  Tensor sum = sum_;
+  Tensor X(X_);
+  Tensor sum(sum_);
 
   sum.Resize(vector<int64_t>());
 
   T* data = sum.template mutable_data<T>();
 
-  Tensor scratch = state->scratch;
+  Tensor scratch(state->scratch);
   caffe2::math::Sum<T, Context>(
       X.numel(),
       X.template data<T>(),

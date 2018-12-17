@@ -195,22 +195,22 @@ void layer_norm_c10(
     float epsilon,
     caffe2::ops::LayerNorm::Cache* cache,
     caffe2::BaseContext* context) {
-  caffe2::Tensor X = X_;
-  caffe2::Tensor Y = Y_;
-  caffe2::Tensor mean = mean_;
-  caffe2::Tensor sig = sig_;
+  caffe2::Tensor X(X_);
+  caffe2::Tensor Y(Y_);
+  caffe2::Tensor mean(mean_);
+  caffe2::Tensor sig(sig_);
   if (!cache->scale.has_value()) {
-    cache->scale = caffe2::Tensor{caffe2::CPU};
+    cache->scale = c10::C10Tensor(caffe2::Tensor{caffe2::CPU});
   }
   if (!cache->bias.has_value()) {
-    cache->bias = caffe2::Tensor{caffe2::CPU};
+    cache->bias = c10::C10Tensor(caffe2::Tensor{caffe2::CPU});
   }
-  caffe2::Tensor scale = *cache->scale;
-  caffe2::Tensor bias = *cache->bias;
+  caffe2::Tensor scale(*cache->scale);
+  caffe2::Tensor bias(*cache->bias);
 
   const int canonical_axis = X.canonical_axis_index(axis);
   std::vector<int64_t> moments_dims(
-      X.dims().cbegin(), X.dims().cbegin() + canonical_axis);
+      X.sizes().cbegin(), X.sizes().cbegin() + canonical_axis);
   moments_dims.push_back(1);
   mean.Resize(moments_dims);
   sig.Resize(moments_dims);
