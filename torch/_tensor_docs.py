@@ -2832,13 +2832,12 @@ Args:
         as :attr:`other`.
 """)
 
-add_docstr_all('reduce_as',
+add_docstr_all('sum_to_size',
                r"""
-reduce_as(other) -> Tensor
+sum_to_size(*size) -> Tensor
 
-Reduce this tensor to the same size as :attr:`other` by summing over
-broadcasted dimensions.
-``other`` tensor size must be broadcastable to ``this`` tensor size.
+Sum ``this`` tensor to :attr:`size`.
+:attr:`size` must be broadcastable to ``this`` tensor size.
 Args:
     other (:class:`torch.Tensor`): The result tensor has the same size
         as :attr:`other`.

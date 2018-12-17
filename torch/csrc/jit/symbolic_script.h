@@ -14,7 +14,7 @@ def forward(self, other):
 def backward(ctx, grad_output):
     # type: (Tuple[Tensor, Tensor], Tensor) -> Tuple[Tensor, Tensor]
     self, other = ctx
-    return (grad_output * other).reduce_as(self), (grad_output * self).reduce_as(other)
+    return (grad_output * other).sum_to_size(self.size()), (grad_output * self).sum_to_size(other.size())
 )"},
     });
 

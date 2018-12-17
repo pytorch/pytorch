@@ -1630,7 +1630,7 @@
 
 - func: sum_out(Tensor result, Tensor self, IntList[1] dim, *, ScalarType dtype) -> Tensor
 
-- func: reduce_as(Tensor self, Tensor other) -> Tensor
+- func: sum_to_size(Tensor self, IntList size) -> Tensor
   variants: method
   device_guard: false
 

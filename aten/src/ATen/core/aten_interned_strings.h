@@ -541,7 +541,6 @@ _(aten, random) \
 _(aten, randperm) \
 _(aten, range) \
 _(aten, reciprocal) \
-_(aten, reduce_as) \
 _(aten, reflection_pad1d) \
 _(aten, reflection_pad1d_backward) \
 _(aten, reflection_pad1d_forward) \
@@ -627,6 +626,7 @@ _(aten, sub) \
 _(aten, sub_) \
 _(aten, rsub) \
 _(aten, sum) \
+_(aten, sum_to_size) \
 _(aten, svd) \
 _(aten, symeig) \
 _(aten, t) \

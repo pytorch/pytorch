@@ -291,11 +291,11 @@ Tensor expand_as(const Tensor& self, const Tensor& other) {
   return self.expand(other.sizes());
 }
 
-Tensor reduce_as(const Tensor& self, const Tensor& other) {
-  AT_CHECK(is_expandable_to(other.sizes(), self.sizes()),
-           "size {", other.sizes(), "} is not expandable to size {", self.sizes(), "}.");
+Tensor sum_to_size(const Tensor& self, IntList size) {
+  AT_CHECK(is_expandable_to(size, self.sizes()),
+           "size {", size, "} is not expandable to size {", self.sizes(), "}.");
 
-  return sum_to(self, other.sizes());
+  return sum_to(self, size);
 }
 
 Tensor as_strided(const Tensor& self, IntList size, IntList stride, int64_t storage_offset) {
