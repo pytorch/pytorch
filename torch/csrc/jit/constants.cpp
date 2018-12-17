@@ -102,19 +102,19 @@ RegisterOperators reg({
             return 0;
           };
         } else if(type->isSubtypeOf(ListType::ofInts())) {
-          auto is = node->is(attr::value);
+          const auto& is = node->is(attr::value);
           return [is](Stack& stack) {
             push(stack, is);
             return 0;
           };
         } else if(type->isSubtypeOf(ListType::ofBools())) {
-          auto bs = node->is(attr::value);
+          const auto& bs = node->is(attr::value);
           return [bs](Stack& stack) {
             push(stack, bs);
             return 0;
           };
         } else if(type->isSubtypeOf(ListType::ofTensors())) {
-          auto ts = fmap(node->ts(attr::value), [](const at::Tensor & t) -> at::Tensor {
+          const auto& ts = fmap(node->ts(attr::value), [](const at::Tensor & t) -> at::Tensor {
             return autograd::make_variable(t);
           });
           return [ts](Stack& stack) {
@@ -122,7 +122,7 @@ RegisterOperators reg({
             return 0;
           };
         } else if (type == StringType::get()) {
-          auto s = node->s(attr::value);
+          const auto& s = node->s(attr::value);
           return [s](Stack& stack) {
             push(stack, s);
             return 0;

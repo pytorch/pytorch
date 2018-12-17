@@ -3455,7 +3455,7 @@ Example::
 
     >>> a = torch.randn(3, 3)
     >>> a = torch.mm(a, a.t()) # make symmetric positive definite
-    >>> u = torch.cholesky(a)
+    >>> u = torch.cholesky(a, upper=True)
     >>> a
     tensor([[ 0.7747, -1.9549,  1.3086],
             [-1.9549,  6.7546, -5.4114],

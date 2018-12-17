@@ -889,7 +889,9 @@ bool Node::isBeforeOrAfter(const Node* n, MoveSide moveSide) const {
 
     auto rhs = n;
     while (rhs) {
-      JIT_ASSERT(rhs->owningBlock());
+      if (!rhs->owningBlock()) {
+        break;
+      }
 
       if (lhs->owningBlock() == rhs->owningBlock()) {
         return lhs->isBeforeOrAfter(rhs, moveSide);
@@ -1080,7 +1082,7 @@ struct WorkingSet {
 
   std::unordered_set<Node*> getWritersSameBlock(Node* n) const {
     std::unordered_set<Node*> writers;
-    for (const auto writer : aliasDb_.getWritersForNode(n)) {
+    for (const auto writer : aliasDb_.getWriters(n)) {
       if (auto sameBlock = findSameBlock(writer, n)) {
         writers.insert(sameBlock);
       }

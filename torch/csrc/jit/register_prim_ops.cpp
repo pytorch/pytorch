@@ -401,7 +401,7 @@ RegisterOperators reg({
           return [=](Stack& stack) {
             bool result = false;
             for (const IValue& t : last(stack, num_inputs)) {
-              if (std::move(t).toTensor().defined()) {
+              if (t.toTensor().defined()) {
                 result = true;
                 break;
               }
@@ -1135,6 +1135,7 @@ Operator(                                                                      \
             at::Tensor t;
             pop(stack, t);
             std::vector<int64_t> elems;
+            elems.reserve(t.size(0));
             for(int i = 0; i < t.size(0); i++){
               elems.push_back(*t[i].data<int32_t>());
             }

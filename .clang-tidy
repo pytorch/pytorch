@@ -24,7 +24,8 @@ Checks: '
   ,-modernize-use-auto
   ,-modernize-use-default-member-init
   ,-modernize-use-using
-  ,performance-unnecessary-value-param
+  ,performance-*
+  ,-performance-noexcept-move-constructor
   '
 WarningsAsErrors: '*'
 HeaderFilterRegex: 'torch/csrc/.*'

@@ -42,11 +42,17 @@ class AliasDb {
   bool writesToInputAlias(Node* n) const;
 
   // Get all nodes that write to any alias set inputed/outputed by `n`
-  std::unordered_set<Node*> getWritersForNode(const Node* n) const;
+  std::unordered_set<Node*> getWriters(const Node* n) const;
+
+  // Get all the values that `n` writes to.
+  std::unordered_set<const Value*> getWrites(Node* n) const;
+
+  // Get all values that may alias to `v`.
+  std::unordered_set<const Value*> getAliases(const Value* v) const;
 
   // Do any nodes  write to an alias set inputed/outputed by `n`?
   bool hasWriters(const Node* n) const {
-    return getWritersForNode(n).size() != 0;
+    return getWriters(n).size() != 0;
   }
 
   // For debugging: print alias db state to stdout
