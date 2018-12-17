@@ -147,6 +147,55 @@ bool isDifferentiable(Graph & g) {
                      static_cast<bool(*)(Node*)>(isDifferentiable));
 }
 
+// NB: Write gradient in Python and compile it to JIT graphs.
+// For example, aten::mul() should be defined as follows
+// def forward(x, y):
+//     return x*y, (x, y)
+// def backward(ctx, grad_output):
+//     x, y = ctx
+//     return (y * grad_output).reduce_as(x), (x * grad_output).reduce_as(y)
+//
+// Note that ctx is a tuple that carries all input/intermediate results needed
+// in backward from forward pass.
+// grad_values(a.k.a gradOutputs) propagated through node->owningGraph() in reversed order.
+// The forward graph should be inserted **after** the node being replaced,
+// so that we don't traverse it infinite times.
+// The output of compiled forward graph is [real_outputs, ctx]
+// The input of compiled backward graph is [ctx, grad_values]
+// We run LowerSimpleTuples afterwards to elmininate all tuples generated in this process.
+// The original node and TupleConstruct nodes in forward graph will be cleaned up
+// later using EliminateDeadCode(block).
+// TupleUnPack node in backward graph will be removed in eliminateDeadcode(ReverseDetails)
+// defined in this file. It cannot be cleaned by EliminateDeadCode(block) as it might
+// accidentally remove the AutogradAdd node which is still useful in grad_map.
+static std::vector<Value*> build_script_grad(Node* node,
+        const char* schema_name,
+        const ArrayRef<Value*>& grads){
+  auto compiled_graphs = get_cached_symbolic_graphs(schema_name);
+  auto graph = node->owningGraph();
+
+  // Use forward graph to replace node in grad_desc.f
+  value_list new_outputs;
+  {
+    WithInsertPoint guard(node->next());
+    auto fw_graph = compiled_graphs[0];
+    new_outputs = script::inlineCallTo(*graph, *fw_graph, node->inputs());
+    for (size_t i = 0; i < node->outputs().size(); ++i) {
+      new_outputs.at(i)->setType(node->outputs()[i]->type());
+      new_outputs.at(i)->replaceAllUsesWith(node->outputs()[i]);
+    }
+  }
+
+  // Use backward graph to construct reverse_block
+  auto bw_graph = compiled_graphs[1];
+  auto grad_vec = grads.vec();
+  auto it = grad_vec.begin();
+  grad_vec.insert(it, new_outputs.back());
+  ArrayRef<Value*> grad(grad_vec);
+  auto grad_inputs = script::inlineCallTo(*graph, *bw_graph, grad);
+  return grad_inputs;
+};
+
 
 static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_values) {
   static const OperatorSet comparison_ops = {
@@ -544,53 +593,6 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     }
     throw std::runtime_error(std::string("failed to differentiate `") + node->kind().toDisplayString() + "`");
   };
-  // NB: Write gradient in Python and compile it to JIT graphs.
-  // For example, aten::mul() should be defined as follows
-  // def forward(x, y):
-  //     return x*y, (x, y)
-  // def backward(ctx, grad_output):
-  //     x, y = ctx
-  //     return (y * grad_output).reduce_as(x), (x * grad_output).reduce_as(y)
-  //
-  // Note that ctx is a tuple that carries all input/intermediate results needed
-  // in backward from forward pass.
-  // grad_values(a.k.a gradOutputs) propagated through node->owningGraph() in reversed order.
-  // The forward graph should be inserted **after** the node being replaced,
-  // so that we don't traverse it infinite times.
-  // The output of compiled forward graph is [real_outputs, ctx]
-  // The input of compiled backward graph is [ctx, grad_values]
-  // We run LowerSimpleTuples afterwards to elmininate all tuples generated in this process.
-  // The original node and TupleConstruct nodes in forward graph will be cleaned up
-  // later using EliminateDeadCode(block).
-  // TupleUnPack node in backward graph will be removed in eliminateDeadcode(ReverseDetails)
-  // defined in this file. It cannot be cleaned by EliminateDeadCode(block) as it might
-  // accidentally remove the AutogradAdd node which is still useful in grad_map.
-  const auto build_script_grad = [node](const std::vector<std::shared_ptr<Graph>>& compiled_graphs,
-          const ArrayRef<Value*>& grads) -> std::vector<Value*> {
-    auto graph = node->owningGraph();
-
-    // Use forward graph to replace node in grad_desc.f
-    value_list new_outputs;
-    {
-      WithInsertPoint guard(node->next());
-      auto fw_graph = compiled_graphs[0];
-      new_outputs = script::inlineCallTo(*graph, *fw_graph, node->inputs());
-      for (size_t i = 0; i < node->outputs().size(); ++i) {
-        new_outputs.at(i)->setType(node->outputs()[i]->type());
-        new_outputs.at(i)->replaceAllUsesWith(node->outputs()[i]);
-      }
-    }
-
-    // Use backward graph to construct reverse_block
-    auto bw_graph = compiled_graphs[1];
-    auto grad_vec = grads.vec();
-    auto it = grad_vec.begin();
-    grad_vec.insert(it, new_outputs.back());
-    ArrayRef<Value*> grad(grad_vec);
-    auto grad_inputs = script::inlineCallTo(*graph, *bw_graph, grad);
-    return grad_inputs;
-  };
-
   if (!isDifferentiable(node)) {
     throw std::runtime_error(std::string("differentiation of ") + node->kind().toDisplayString() + " "
                              "is not supported, or it is missing necessary type information");
@@ -599,8 +601,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
   // symbolic_script is a map<schema, python_code_str> defined in symbolic_script.h
   for (auto& it : symbolic_scripts) {
     if (node->matches(it.first)) {
-      auto compiled_script_graphs = get_cached_symbolic_graphs(it.first);
-      return build_script_grad(compiled_script_graphs, grad_values);
+      return build_script_grad(node, it.first, grad_values);
     }
   }
   // Definition not found in torchscript, look up in the build_sym_grad
