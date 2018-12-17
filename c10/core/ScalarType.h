@@ -197,6 +197,13 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   return _promoteTypesLookup[static_cast<int>(a)][static_cast<int>(b)];
 }
 
+static inline bool canCastSameKind(ScalarType from, ScalarType to) {
+  return (from == to) || (promoteTypes(from, to) == to) ||
+      (isIntegralType(from) && isIntegralType(to)) ||
+      (isFloatingType(from) && isFloatingType(to)) ||
+      (isComplexType(from) && isComplexType(to));
+}
+
 inline std::ostream& operator<<(
     std::ostream& stream,
     at::ScalarType scalar_type) {
