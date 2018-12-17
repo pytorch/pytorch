@@ -1561,6 +1561,7 @@ class _TestTorchMixin(object):
     @staticmethod
     def _test_btrifact(self, cast):
         from common_utils import random_fullrank_matrix_distinct_singular_value as fullrank
+
         def run_test(matrix_size, batches, cast):
             a = cast(fullrank(matrix_size, *batches))
             a_LU_info, pivots_info, info_ = a.btrifact_with_info()
