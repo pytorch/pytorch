@@ -295,11 +295,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   virtual const Storage& storage() const;
 
-  void set_storage(const Storage& storage) {
-    AT_CHECK(allow_tensor_metadata_change(), "set_storage is not allowed on Tensor created from .data or .detach()");
-    storage_ = storage;
-  }
-
   /**
    * The number of elements in a tensor.
    *
@@ -1224,6 +1219,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void set_storage(at::Storage storage) {
+    AT_CHECK(allow_tensor_metadata_change(), "set_storage is not allowed on Tensor created from .data or .detach()");
     storage_ = std::move(storage);
     data_type_ = storage_.dtype();
   }

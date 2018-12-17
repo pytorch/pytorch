@@ -201,7 +201,6 @@ public:
     impl->reserved_ = reserved_;
 
     // Sparse-specific fields
-    impl->size_ = sizes().vec();
     impl->sparse_dim_ = sparse_dim();
     impl->dense_dim_ = dense_dim();
     impl->indices_ = indices();
