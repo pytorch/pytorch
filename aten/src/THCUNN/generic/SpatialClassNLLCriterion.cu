@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/SpatialClassNLLCriterion.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/SpatialClassNLLCriterion.cu"
 #else
 
 void THNN_(SpatialClassNLLCriterion_shapeCheck)(
@@ -118,7 +118,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
       input_data,
       target_data,
       weights_data,
-      reduction == Reduction::ElementwiseMean,
+      reduction == Reduction::Mean,
       THCTensor_(size)(state, input, 0),
       THCTensor_(size)(state, input, 1),
       THCTensor_(size)(state, input, 2) * THCTensor_(size)(state, input, 3),
@@ -126,7 +126,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
       ignore_index
   );
   THCudaCheck(cudaGetLastError());
-  if (reduction == Reduction::ElementwiseMean) {
+  if (reduction == Reduction::Mean) {
     cunn_SpatialClassNLLCriterion_sizeAverage_kernel<<<1, 1, 0, THCState_getCurrentStream(state)>>>(
       output_data, total_weight_data
     );
@@ -215,7 +215,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
       target_data,
       weights_data,
       total_weight_data,
-      reduction == Reduction::ElementwiseMean,
+      reduction == Reduction::Mean,
       THCTensor_(size)(state, input, 0),
       THCTensor_(size)(state, input, 1),
       THCTensor_(size)(state, input, 2) *THCTensor_(size)(state, input, 3),

@@ -99,7 +99,7 @@ expanded.shape: (1, 1, 100, 100)
     .Arg(
         "dims",
         "*(type: [int])* List of dimensions of *data* to add single dimensional entry.")
-    .InheritOnnxSchema("ExpandDims");
+    .InheritOnnxSchema();
 
 OPERATOR_SCHEMA(Squeeze)
     .NumInputs(1)
@@ -172,7 +172,7 @@ squeezed.shape: (100, 100)
       out[0] = CreateTensorShape(newDims, in[0].data_type());
       return out;
     })
-    .InheritOnnxSchema("Squeeze");
+    .InheritOnnxSchema();
 
 class GetSqueezeGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

@@ -3,7 +3,6 @@
 #include "caffe2/core/types.h"
 #include "caffe2/perfkernels/common.h"
 #include "caffe2/perfkernels/typed_axpy.h"
-#include "caffe2/utils/cpuid.h"
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
@@ -83,13 +82,19 @@ static void EmbeddingLookupGenericSlow(
 
 // Proxy back to generic implementation
 #define EMBEDDING_SPECIALIZATION(                                                                      \
-    IndexTypeName, IndexType, InTypeName, InType, OutTypeName, OutType, IS_WEIGHT_POSITIONAL)          \
+    IndexTypeName,                                                                                     \
+    IndexType,                                                                                         \
+    InTypeName,                                                                                        \
+    InType,                                                                                            \
+    OutTypeName,                                                                                       \
+    OutType,                                                                                           \
+    IS_WEIGHT_POSITIONAL)                                                                              \
   void                                                                                                 \
       EmbeddingLookup_##IndexTypeName##_##InTypeName##_##OutTypeName##_##IS_WEIGHT_POSITIONAL##__base( \
-          const int64_t block_size,                                                                     \
-          const int64_t output_size,                                                                    \
-          const int64_t index_size,                                                                     \
-          const int64_t data_size,                                                                      \
+          const int64_t block_size,                                                                    \
+          const int64_t output_size,                                                                   \
+          const int64_t index_size,                                                                    \
+          const int64_t data_size,                                                                     \
           const InType* input,                                                                         \
           const IndexType* indices,                                                                    \
           const int* lengths,                                                                          \
@@ -116,10 +121,10 @@ static void EmbeddingLookupGenericSlow(
   }                                                                                                    \
   template <>                                                                                          \
   void EmbeddingLookup<IndexType, InType, OutType, IS_WEIGHT_POSITIONAL>(                              \
-      const int64_t block_size,                                                                         \
-      const int64_t output_size,                                                                        \
-      const int64_t index_size,                                                                         \
-      const int64_t data_size,                                                                          \
+      const int64_t block_size,                                                                        \
+      const int64_t output_size,                                                                       \
+      const int64_t index_size,                                                                        \
+      const int64_t data_size,                                                                         \
       const InType* input,                                                                             \
       const IndexType* indices,                                                                        \
       const int* lengths,                                                                              \
@@ -159,15 +164,43 @@ EMBEDDING_SPECIALIZATION(int32_t, int32_t, float, float, float, float, false);
 EMBEDDING_SPECIALIZATION(int64_t, int64_t, float, float, float, float, false);
 EMBEDDING_SPECIALIZATION(int32_t, int32_t, half, at::Half, float, float, false);
 EMBEDDING_SPECIALIZATION(int64_t, int64_t, half, at::Half, float, float, false);
-EMBEDDING_SPECIALIZATION(int32_t, int32_t, uint8_t, uint8_t, float, float, false);
-EMBEDDING_SPECIALIZATION(int64_t, int64_t, uint8_t, uint8_t, float, float, false);
+EMBEDDING_SPECIALIZATION(
+    int32_t,
+    int32_t,
+    uint8_t,
+    uint8_t,
+    float,
+    float,
+    false);
+EMBEDDING_SPECIALIZATION(
+    int64_t,
+    int64_t,
+    uint8_t,
+    uint8_t,
+    float,
+    float,
+    false);
 
 EMBEDDING_SPECIALIZATION(int32_t, int32_t, float, float, float, float, true);
 EMBEDDING_SPECIALIZATION(int64_t, int64_t, float, float, float, float, true);
 EMBEDDING_SPECIALIZATION(int32_t, int32_t, half, at::Half, float, float, true);
 EMBEDDING_SPECIALIZATION(int64_t, int64_t, half, at::Half, float, float, true);
-EMBEDDING_SPECIALIZATION(int32_t, int32_t, uint8_t, uint8_t, float, float, true);
-EMBEDDING_SPECIALIZATION(int64_t, int64_t, uint8_t, uint8_t, float, float, true);
+EMBEDDING_SPECIALIZATION(
+    int32_t,
+    int32_t,
+    uint8_t,
+    uint8_t,
+    float,
+    float,
+    true);
+EMBEDDING_SPECIALIZATION(
+    int64_t,
+    int64_t,
+    uint8_t,
+    uint8_t,
+    float,
+    float,
+    true);
 
 #undef EMBEDDING_SPECIALIZATION
 

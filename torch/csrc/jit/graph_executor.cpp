@@ -1,38 +1,36 @@
-#include "torch/csrc/jit/graph_executor.h"
+#include <torch/csrc/jit/graph_executor.h>
 
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/autograd/grad_mode.h"
-#include "torch/csrc/jit/argument_spec.h"
-#include "torch/csrc/jit/autodiff.h"
-#include "torch/csrc/jit/interpreter.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/tracer.h"
-#include "torch/csrc/jit/passes/annotate_effects.h"
-#include "torch/csrc/jit/passes/batch_mm.h"
-#include "torch/csrc/jit/passes/common_subexpression_elimination.h"
-#include "torch/csrc/jit/passes/constant_pooling.h"
-#include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/jit/passes/erase_number_types.h"
-#include "torch/csrc/jit/passes/graph_fuser.h"
-#include "torch/csrc/jit/passes/inplace_check.h"
-#include "torch/csrc/jit/passes/peephole.h"
-#include "torch/csrc/jit/passes/shape_analysis.h"
-#include "torch/csrc/jit/passes/remove_expands.h"
-#include "torch/csrc/jit/passes/canonicalize_ops.h"
-#include "torch/csrc/jit/passes/specialize_undef.h"
-#include "torch/csrc/jit/passes/loop_unrolling.h"
-#include "torch/csrc/jit/passes/lower_grad_of.h"
-#include "torch/csrc/jit/passes/constant_propagation.h"
-#include "torch/csrc/jit/passes/inline_autodiff_subgraphs.h"
-#include "torch/csrc/jit/passes/requires_grad_analysis.h"
-#include "torch/csrc/jit/symbolic_variable.h"
-#include "torch/csrc/jit/ivalue.h"
-#include "torch/csrc/jit/custom_operator.h"
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/jit/argument_spec.h>
+#include <torch/csrc/jit/autodiff.h>
+#include <torch/csrc/jit/interpreter.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/jit/passes/batch_mm.h>
+#include <torch/csrc/jit/passes/common_subexpression_elimination.h>
+#include <torch/csrc/jit/passes/constant_pooling.h>
+#include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/graph_fuser.h>
+#include <torch/csrc/jit/passes/inplace_check.h>
+#include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/passes/remove_expands.h>
+#include <torch/csrc/jit/passes/canonicalize_ops.h>
+#include <torch/csrc/jit/passes/specialize_undef.h>
+#include <torch/csrc/jit/passes/loop_unrolling.h>
+#include <torch/csrc/jit/passes/lower_grad_of.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/inline_autodiff_subgraphs.h>
+#include <torch/csrc/jit/passes/requires_grad_analysis.h>
+#include <torch/csrc/jit/symbolic_variable.h>
+#include <torch/csrc/jit/ivalue.h>
+#include <torch/csrc/jit/custom_operator.h>
 
-#include "torch/csrc/autograd/edge.h"
-#include "torch/csrc/autograd/function.h"
-#include "torch/csrc/jit/script/compiler.h"
+#include <torch/csrc/autograd/edge.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/jit/script/compiler.h>
 
 #include <cstdint>
 #include <memory>
@@ -83,7 +81,7 @@ struct DifferentiableGraphBackward : public autograd::Function {
     ivalue_captures.reserve(capture_size);
   }
 
-  virtual variable_list apply(variable_list&& inputs) override {
+  variable_list apply(variable_list&& inputs) override {
     Stack stack;
     stack.reserve(is_var_capture.size() + inputs.size());
     stack.insert(stack.end(), std::make_move_iterator(inputs.begin()),
@@ -92,7 +90,7 @@ struct DifferentiableGraphBackward : public autograd::Function {
     auto ivalue_capture_it = ivalue_captures.begin();
     for (bool is_var : is_var_capture) {
       if (is_var) {
-        stack.push_back(var_capture_it->unpack(this->shared_from_this()));
+        stack.emplace_back(var_capture_it->unpack(this->shared_from_this()));
         ++var_capture_it;
       } else {
         stack.push_back(*ivalue_capture_it);
@@ -110,9 +108,9 @@ struct DifferentiableGraphBackward : public autograd::Function {
         auto output = std::move(stack[i]).toTensor();
         const auto & edge = next_edge(i);
         if (output.defined()) {
-          outputs.push_back(std::move(output));
+          outputs.emplace_back(std::move(output));
         } else if (edge.is_valid()) {
-          outputs.push_back(edge.function->input_metadata(edge.input_nr).zeros_like());
+          outputs.emplace_back(edge.function->input_metadata(edge.input_nr).zeros_like());
         } else {
           outputs.emplace_back();
         }
@@ -252,7 +250,7 @@ void packGradient(Gradient gradient, Node *dnode) {
        ->is_(attr::df_output_vjps, fmap<int64_t>(gradient.df_output_vjps));
 }
 
-Gradient getGradient(Node *n) {
+Gradient getGradient(const Node *n) {
   JIT_ASSERT(n->kind() == prim::DifferentiableGraph);
   Gradient grad;
   grad.f = n->g(attr::Subgraph);
@@ -270,7 +268,7 @@ Gradient getGradient(Node *n) {
 RegisterOperators reg_graph_executor_ops({
   Operator(
     prim::DifferentiableGraph,
-    [](Node *n) -> Operation {
+    [](const Node *n) -> Operation {
       return DifferentiableGraphOp(getGradient(n));
     })
 });
@@ -295,7 +293,7 @@ struct GraphExecutorImpl {
 
   static std::shared_ptr<Graph> prepareGraph(std::shared_ptr<Graph>& graph) {
     auto copy = graph->copy();
-    EraseShapeInformation(*copy);
+    EraseShapeInformation(copy);
     return copy;
   }
 
@@ -318,12 +316,26 @@ struct GraphExecutorImpl {
     return total;
   }
 
+  inline bool hasMutableOperators(Block* block) {
+    for(auto n : block->nodes()) {
+      if(n->kind().is_aten() && n->schema().is_mutable())
+        return true;
+      for(auto b : n->blocks()) {
+        if(hasMutableOperators(b))
+          return true;
+      }
+    }
+    return false;
+  }
+
   GraphExecutorImpl(std::shared_ptr<Graph> graph, bool optimize)
-    : graph(prepareGraph(graph))
-    , optimize(optimize)
-    , num_inputs(this->graph->inputs().size())
-    , num_flat_inputs(countFlatInputs(graph))
-    , num_outputs(this->graph->outputs().size()) {}
+      : graph(prepareGraph(graph)),
+        // until we have correct alias analysis any use of mutable operators
+        // disables all optimization
+        optimize(optimize),
+        num_inputs(this->graph->inputs().size()),
+        num_flat_inputs(countFlatInputs(graph)),
+        num_outputs(this->graph->outputs().size()) {}
 
   // entry point where execution begins
   void run(Stack & stack) {
@@ -338,6 +350,7 @@ struct GraphExecutorImpl {
   }
 
   std::shared_ptr<Graph> graphFor(const Stack& stack) const {
+    JIT_ASSERT(stack.size() >= num_inputs);
     auto inputs = last(stack, num_inputs);
     ArgumentSpec spec(autograd::GradMode::is_enabled(), inputs, num_flat_inputs);
 
@@ -414,7 +427,7 @@ private:
     //          constants, and constant propagation doesn't need shape information
     //          anyway, so it's better to run it first.
     ConstantPropagation(opt_graph);
-    PropagateInputShapes(*opt_graph);
+    PropagateInputShapes(opt_graph);
     PropagateRequiresGrad(opt_graph);
 
     // Phase 3. Run differentiable optimizations (i.e. simple graph rewrites that
@@ -426,7 +439,7 @@ private:
     // Phase 5. Apply non-differentiable optimizations to the graphs we've found
     //          (or the whole grpah if we know we won't need its derivative).
     if (needsGradient(opt_graph)) {
-      auto diff_nodes = CreateAutodiffSubgraphs(*opt_graph, autodiffSubgraphNodeThreshold);
+      auto diff_nodes = CreateAutodiffSubgraphs(opt_graph, autodiffSubgraphNodeThreshold);
       for (Node * dnode : diff_nodes) {
         auto diff_graph = std::move(dnode->g(attr::Subgraph));
         Gradient gradient = differentiate(diff_graph);
@@ -443,13 +456,22 @@ private:
   }
 
   void runOptimization(std::shared_ptr<Graph>& graph, const ArgumentSpec& spec) {
+    // Basic graph preprocessing to eliminate noise.
     EliminateDeadCode(graph);
     EliminateCommonSubexpression(graph);
     ConstantPooling(graph);
-    UnrollLoops(graph);
+
     PeepholeOptimize(graph);
-    CheckInplace(graph);
+
+    // Unroll small loops, and eliminate expressions that are the same at every
+    // iteration.
+    UnrollLoops(graph);
+    EliminateCommonSubexpression(graph);
+
+    // Rewrite subgraphs with many MMs into expressions that batch them.
     BatchMM(graph);
+
+    CheckInplace(graph);
   }
 
   void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
@@ -481,10 +503,10 @@ private:
   }
 
   void runTraced(Stack & stack) {
-    auto state = tracer::getTracingState();
+    const auto& state = tracer::getTracingState();
     auto inputs = last(stack, num_inputs);
     auto input_values = fmap(inputs, [](const IValue & v) {
-      return tracer::getValueTrace(v.toTensor());
+      return tracer::getNestedValueTrace(v);
     });
 
     ArgumentSpec spec(autograd::GradMode::is_enabled(), inputs, num_flat_inputs);
@@ -500,7 +522,7 @@ private:
     // been set.
     auto local_graph = this->graph->copy();
     setInputTypes(*local_graph, spec);
-    PropagateInputShapes(*local_graph);
+    PropagateInputShapes(local_graph);
     auto output_values = script::inlineCallTo(*state->graph, *local_graph, input_values);
 
     auto outputs = last(stack, num_outputs);

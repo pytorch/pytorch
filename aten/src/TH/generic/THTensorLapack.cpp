@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THTensorLapack.cpp"
+#define TH_GENERIC_FILE "TH/generic/THTensorLapack.cpp"
 #else
 
 /*
@@ -80,12 +80,17 @@ static THTensor *THTensor_(cloneColumnMajorNrows)(THTensor *self, THTensor *src,
   THTensor_(resize2d)(result, src->size(1), nrows);
   THTensor_(checkTransposed)(result);
 
-  if (src->size(0) == nrows)
-    THTensor_(copy)(result, src);
+  if (src->size(0) == nrows) {
+    at::Tensor result_wrap = THTensor_wrap(result);
+    at::Tensor src_wrap = THTensor_wrap(src);
+    at::_copy_same_type_(result_wrap, src_wrap);
+  }
   else
   {
     view = THTensor_(newNarrow)(result, 0, 0, src->size(0));
-    THTensor_(copy)(view, src);
+    at::Tensor view_wrap = THTensor_wrap(view);
+    at::Tensor src_wrap = THTensor_wrap(src);
+    at::_copy_same_type_(view_wrap, src_wrap);
     c10::raw::intrusive_ptr::decref(view);
   }
   return result;
@@ -217,8 +222,8 @@ void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
   THArgCheck(b->dim() == 1 || b->dim() == 2, 1, "B should have 1 or 2 "
       "dimensions, but has %d", b->dim());
   THArgCheck(!b->is_empty(), 1, "B should not be empty");
-  THArgCheck(a->size(0) == b->size(0), 2, "A,B size incompatible - A has %ld "
-      "rows, B has %ld", a->size(0), b->size(0));
+  AT_CHECK(a->size(0) == b->size(0), "Expected A and b to have same size "
+      "at dim 0, but A has ", a->size(0), " rows and B has ", b->size(0), " rows");
 
   if (THTensor_nDimensionLegacyAll(b) == 1) {
     b = THTensor_(newWithStorage2d)(THTensor_getStoragePtr(b), b->storage_offset(), b->size(0),
@@ -464,7 +469,7 @@ void THTensor_(gesdd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
   scalar_t *rv__data = NULL;
 
   rs__ = THTensor_(newContiguous)(rs_);
-  rs__data = rs__->data<scalar_t>();  
+  rs__data = rs__->data<scalar_t>();
   if (*compute_uv != 'N') {
     /* guard against someone passing a correct size, but wrong stride */
     ru__ = THTensor_(newTransposedContiguous)(ru_);
@@ -529,7 +534,9 @@ void THTensor_(gesdd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
       THTensor_(narrow)(rvf_,NULL,1,0,k);
 
     THTensor_(resizeAs)(rv_, rvf_);
-    THTensor_(copy)(rv_, rvf_);
+    at::Tensor rv__wrap = THTensor_wrap(rv_);
+    at::Tensor rvf__wrap =  THTensor_wrap(rvf_);
+    at::_copy_same_type_(rv__wrap, rvf__wrap);
     c10::raw::intrusive_ptr::decref(rvf_);
   } else {
     THTensor_(zero)(ru_);
@@ -1007,7 +1014,9 @@ void THTensor_(btrifact)(THTensor *ra_, THIntTensor *rpivots_, THIntTensor *rinf
 
   if (ra_ != a) {
     THTensor_(resizeAs)(ra_, a);
-    THTensor_(copy)(ra_, a);
+    at::Tensor ra__wrap = THTensor_wrap(ra_);
+    at::Tensor a_wrap = THTensor_wrap(a);
+    at::_copy_same_type_(ra__wrap, a_wrap);
   }
 
   int m = a->size(1);
@@ -1088,7 +1097,9 @@ void THTensor_(btrisolve)(THTensor *rb_, THTensor *b, THTensor *atf, THIntTensor
 
   if (rb_ != b) {
     THTensor_(resizeAs)(rb_, b);
-    THTensor_(copy)(rb_, b);
+    at::Tensor rb__wrap = THTensor_wrap(rb_);
+    at::Tensor b_wrap = THTensor_wrap(b);
+    at::_copy_same_type_(rb__wrap, b_wrap);
   }
 
   int64_t num_batches = atf->size(0);

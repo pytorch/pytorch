@@ -27,10 +27,12 @@ class CAFFE2_API StoreHandler {
 
   /*
    * Get the data for the key.
-   * The call should wait until the key is stored with default timeout
+   * The call should wait until the key is stored with specified timeout
    * and return data if set else fail.
    */
-  virtual std::string get(const std::string& name) = 0;
+  virtual std::string get(
+      const std::string& name,
+      const std::chrono::milliseconds& timeout = kDefaultTimeout) = 0;
 
   /*
    * Does an atomic add operation on the key and returns the latest updated
@@ -57,7 +59,6 @@ class CAFFE2_API StoreHandler {
  */
 struct CAFFE2_API StoreHandlerNotAvailableException
     : public std::runtime_error {
-  StoreHandlerNotAvailableException() = default;
   explicit StoreHandlerNotAvailableException(const std::string& msg)
       : std::runtime_error(msg) {}
 };
@@ -70,7 +71,6 @@ struct CAFFE2_API StoreHandlerNotAvailableException
  * Timeout accessing the store.
  */
 struct CAFFE2_API StoreHandlerTimeoutException : public std::runtime_error {
-  StoreHandlerTimeoutException() = default;
   explicit StoreHandlerTimeoutException(const std::string& msg)
       : std::runtime_error(msg) {}
 };

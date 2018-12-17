@@ -55,11 +55,11 @@ set LIB=%cd%\\mkl\\lib;%LIB
 :: Install MAGMA
 if "%REBUILD%"=="" (
   if "%BUILD_ENVIRONMENT%"=="" (
-    curl -k https://s3.amazonaws.com/ossci-windows/magma_cuda90_release_mkl_2018.2.185.7z --output magma_cuda90_release_mkl_2018.2.185.7z
+    curl -k https://s3.amazonaws.com/ossci-windows/magma_2.4.0_cuda90_release.7z --output magma_2.4.0_cuda90_release.7z
   ) else (
-    aws s3 cp s3://ossci-windows/magma_cuda90_release_mkl_2018.2.185.7z magma_cuda90_release_mkl_2018.2.185.7z --quiet
+    aws s3 cp s3://ossci-windows/magma_2.4.0_cuda90_release.7z magma_2.4.0_cuda90_release.7z --quiet
   )
-  7z x -aoa magma_cuda90_release_mkl_2018.2.185.7z -omagma
+  7z x -aoa magma_2.4.0_cuda90_release.7z -omagma
 )
 set MAGMA_HOME=%cd%\\magma
 
@@ -91,13 +91,18 @@ if "%REBUILD%"=="" (
   .\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=%CONDA_PARENT_DIR%\\Miniconda3
 )
 call %CONDA_PARENT_DIR%\\Miniconda3\\Scripts\\activate.bat %CONDA_PARENT_DIR%\\Miniconda3
-if "%REBUILD%"=="" ( call conda install -y -q numpy cffi pyyaml boto3 )
+if "%REBUILD%"=="" (
+  :: We have to pin Python version to 3.6.7, until mkl supports Python 3.7
+  call conda install -y -q python=3.6.7 numpy cffi pyyaml boto3
+)
 
 :: Install ninja
 if "%REBUILD%"=="" ( pip install ninja )
 
+set WORKING_DIR=%CD%
 call "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community\\VC\\Auxiliary\\Build\\vcvarsall.bat" x64
 call "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community\\VC\\Auxiliary\\Build\\vcvarsall.bat" x86_amd64
+cd %WORKING_DIR%
 
 git submodule update --init --recursive
 
@@ -147,6 +152,7 @@ if not "%USE_CUDA%"=="0" (
     if "%BUILD_ENVIRONMENT%"=="" (
       echo NOTE: To run \`import torch\`, please make sure to activate the conda environment by running \`call %CONDA_PARENT_DIR%\\Miniconda3\\Scripts\\activate.bat %CONDA_PARENT_DIR%\\Miniconda3\` in Command Prompt before running Git Bash.
     ) else (
+      mv %CD%\\build\\bin\\test_api.exe %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\torch\\lib
       7z a %IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\torch && python ci_scripts\\upload_image.py %IMAGE_COMMIT_TAG%.7z
     )
   )

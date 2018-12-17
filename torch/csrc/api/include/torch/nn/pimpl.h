@@ -2,7 +2,7 @@
 
 #include <torch/arg.h>
 #include <torch/serialize/archive.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <torch/csrc/utils/variadic.h>
 
@@ -13,7 +13,7 @@
 namespace torch {
 namespace detail {
 // Dump all the template metaprogramming in this file.
-#include "pimpl-inl.h"
+#include <torch/csrc/api/include/torch/nn/pimpl-inl.h>
 } // namespace detail
 
 namespace nn {
@@ -56,9 +56,9 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
   template <
       typename Head,
       typename... Tail,
-      typename = torch::disable_if_t<
-          detail::is_module_holder_of<Head, ContainedType>::value &&
-          (sizeof...(Tail) == 0)>>
+      typename = typename std::enable_if<
+          !(torch::detail::is_module_holder_of<Head, ContainedType>::value &&
+            (sizeof...(Tail) == 0))>::type>
   explicit ModuleHolder(Head&& head, Tail&&... tail)
       : impl_(new Contained(
             std::forward<Head>(head),
@@ -156,22 +156,20 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
   }
 };
 
-/// Serializes an `OptimizerBase` into an `OutputArchive`.
+/// Serializes a `ModuleHolder` into an `OutputArchive`.
 template <typename ModuleType>
 serialize::OutputArchive& operator<<(
     serialize::OutputArchive& archive,
     const nn::ModuleHolder<ModuleType>& module) {
-  module->save(archive);
-  return archive;
+  return archive << module.ptr();
 }
 
-/// Deserializes a `Tensor` from an `InputArchive`.
+/// Deserializes a `ModuleHolder` from an `InputArchive`.
 template <typename ModuleType>
 serialize::InputArchive& operator>>(
     serialize::InputArchive& archive,
     nn::ModuleHolder<ModuleType>& module) {
-  module->load(archive);
-  return archive;
+  return archive >> module.ptr();
 }
 
 } // namespace nn

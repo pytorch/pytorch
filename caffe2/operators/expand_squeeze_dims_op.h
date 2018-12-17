@@ -26,14 +26,14 @@ class ExpandDimsOp : public Operator<Context> {
   bool RunOnDevice() override {
     auto& input = Input(0);
     auto* output = Output(0);
-    output->CopyFrom(input, &context_);
+    output->CopyFrom(input, true /*async*/);
     if (dims_.empty()) {
       return true;
     }
 
-    auto newDims = input.dims().vec();
+    auto newDims = input.sizes().vec();
     CAFFE_ENFORCE_GE(
-        input.dims().size() + dims_.size(),
+        input.sizes().size() + dims_.size(),
         dims_.back() + 1,
         "Input needs at least ",
         (1 + dims_.back() - dims_.size()),
@@ -70,16 +70,16 @@ class SqueezeOp : public Operator<Context> {
   bool RunOnDevice() override {
     auto& input = Input(0);
     auto* output = Output(0);
-    output->CopyFrom(input, &context_);
+    output->CopyFrom(input, true /*async*/);
 
     CAFFE_ENFORCE_GT(
-        input.ndim(),
+        input.dim(),
         dims_.back(),
         "Input needs at least ",
         (dims_.back() + 1),
         " dimensions.");
 
-    std::vector<int> newDims = ComputeDims(input.dims(), dims_);
+    std::vector<int> newDims = ComputeDims(input.sizes(), dims_);
     output->Reshape(newDims);
     return true;
   }

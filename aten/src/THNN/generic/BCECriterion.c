@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/BCECriterion.c"
+#define TH_GENERIC_FILE "THNN/generic/BCECriterion.c"
 #else
 
 #define EPS 1e-12
@@ -38,7 +38,7 @@ void THNN_(BCECriterion_updateOutput)(
     return;
   }
 
-	THTensor_(resize1d)(output, 1);
+	THTensor_(resize0d)(output);
   scalar_t sum = 0;
 
   if (weights) {
@@ -63,10 +63,10 @@ void THNN_(BCECriterion_updateOutput)(
   }
 
 
-  if (reduction == Reduction::ElementwiseMean)
+  if (reduction == Reduction::Mean)
     sum /= THTensor_(nElement)(input);
 
-  THTensor_(set1d)(output, 0, sum);
+  THTensor_(set0d)(output, sum);
 }
 
 void THNN_(BCECriterion_updateGradInput)(
@@ -101,7 +101,7 @@ void THNN_(BCECriterion_updateGradInput)(
   }
 
   THNN_CHECK_DIM_SIZE(gradOutput, 1, 0, 1);
-  scalar_t norm = (reduction == Reduction::ElementwiseMean ? 1./((scalar_t)THTensor_(nElement)(input)) : 1.);
+  scalar_t norm = (reduction == Reduction::Mean ? 1./((scalar_t)THTensor_(nElement)(input)) : 1.);
 
   TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, input, scalar_t, target,
     scalar_t x = *input_data;

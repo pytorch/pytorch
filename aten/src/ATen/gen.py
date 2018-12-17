@@ -1,6 +1,5 @@
 import argparse
 import os
-import filecmp
 
 import yaml
 from collections import OrderedDict
@@ -14,7 +13,6 @@ import nn_parse
 import native_parse
 import preprocess_declarations
 import function_wrapper
-import copy_wrapper
 
 from code_template import CodeTemplate
 
@@ -40,6 +38,10 @@ parser.add_argument(
     help='output a list of dependencies into the given file and exit')
 parser.add_argument(
     '-d', '--install_dir', help='output directory', default='ATen')
+parser.add_argument(
+    '--rocm',
+    action='store_true',
+    help='reinterpret CUDA as ROCm/HIP and adjust filepaths accordingly')
 options = parser.parse_args()
 gen_to_source = os.environ.get('GEN_TO_SOURCE')  # update source directly as part of gen
 if not gen_to_source:
@@ -120,6 +122,11 @@ TYPE_EXTENDED_INTERFACE_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeExtende
 TYPE_DEFAULT_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.h")
 TYPE_DEFAULT_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.cpp")
 
+LEGACY_TH_DISPATCHER_H = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHDispatcher.h")
+LEGACY_TH_DISPATCHER_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHDispatcher.cpp")
+LEGACY_TH_DISPATCHER_DERIVED_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHDispatcherDerived.cpp")
+LEGACY_TH_DISPATCHER_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHDispatcherDerived.h")
+
 REGISTER_CPU_H = CodeTemplate.from_file(TEMPLATE_PATH + "/RegisterCPU.h")
 REGISTER_CPU_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/RegisterCPU.cpp")
 
@@ -130,6 +137,7 @@ TENSOR_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Tensor.h")
 TENSOR_METHODS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorMethods.h")
 
 FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Functions.h")
+LEGACY_TH_FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHFunctions.h")
 
 NATIVE_FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/NativeFunctions.h")
 
@@ -150,7 +158,7 @@ generators = {
     'CUDAGenerator.h': {
         'name': 'CUDA',
         'th_generator': '',
-        'header': 'THC/THC.h'
+        'header': 'THC/THC.h' if not options.rocm else 'THH/THH.h'
     },
 }
 
@@ -179,7 +187,6 @@ top_env = {
     'pure_virtual_extended_type_method_declarations': [],
     'type_method_declarations': [],
     'type_method_definitions': [],
-    'type_method_inline_definitions': [],
     'tensor_method_declarations': [],
     'tensor_method_definitions': [],
     'function_declarations': [],
@@ -248,7 +255,7 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     env['DenseBackend'] = backend
     env['storage_tensor_headers'] = []
     if density != 'Sparse':
-        env['storage_tensor_headers'] = ['#include "ATen/core/TensorImpl.h"']
+        env['storage_tensor_headers'] = ['#include <c10/core/TensorImpl.h>']
 
     # used for generating switch logic for external functions
     tag = density_tag + backend + scalar_name
@@ -256,17 +263,30 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     top_env['type_ids'].append(tag + ',')
 
     if backend == 'CUDA':
-        env['th_headers'] = [
-            '#include <THC/THC.h>',
-            '#include <THC/THCTensor.hpp>',
-            '#include <THCUNN/THCUNN.h>',
-            '#undef THNN_',
-            '#undef THCIndexTensor_',
-        ]
-        env['extra_cuda_headers'] = ['#include <ATen/cuda/ATenCUDAGeneral.h>']
+        env['extra_cuda_headers'] = []
         env['extra_cuda_headers'].append('#include <ATen/DeviceGuard.h>')
-        env['extra_cuda_headers'].append('#include <ATen/cuda/CUDADevice.h>')
-        env['extra_cuda_headers'].append('#include <ATen/cuda/CUDATypeDefault.h>')
+        if options.rocm:
+            env['th_headers'] = [
+                '#include <THH/THH.h>',
+                '#include <THH/THHTensor.hpp>',
+                '#include <THHUNN/THHUNN.h>',
+                '#undef THNN_',
+                '#undef THCIndexTensor_',
+            ]
+            env['extra_cuda_headers'].append('#include <ATen/hip/ATenHIPGeneral.h>')
+            env['extra_cuda_headers'].append('#include <ATen/hip/HIPDevice.h>')
+            env['extra_cuda_headers'].append('#include <ATen/hip/HIPTypeDefault.h>')
+        else:
+            env['th_headers'] = [
+                '#include <THC/THC.h>',
+                '#include <THC/THCTensor.hpp>',
+                '#include <THCUNN/THCUNN.h>',
+                '#undef THNN_',
+                '#undef THCIndexTensor_',
+            ]
+            env['extra_cuda_headers'].append('#include <ATen/cuda/ATenCUDAGeneral.h>')
+            env['extra_cuda_headers'].append('#include <ATen/cuda/CUDADevice.h>')
+            env['extra_cuda_headers'].append('#include <ATen/cuda/CUDATypeDefault.h>')
         sname = '' if scalar_name == "Float" else scalar_name
         env['THType'] = 'Cuda{}'.format(sname)
         env['THStorage'] = 'THCuda{}Storage'.format(sname)
@@ -327,6 +347,23 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     return env
 
 
+def generate_legacy_th_dispatcher(backend, density, scalar_type, declarations):
+    assert density != 'Sparse'
+    scalar_name, c_type, accreal, th_scalar_type, is_floating_type = scalar_type
+    env = {}
+    env['Backend'] = backend
+    env['Dispatcher'] = "LegacyTH{}{}Dispatcher".format(backend, scalar_name)
+
+    fm = file_manager
+    if backend == 'CUDA':
+        fm = cuda_file_manager
+
+    fm.write(env['Dispatcher'] + ".cpp", LEGACY_TH_DISPATCHER_DERIVED_CPP, env)
+    fm.write(env['Dispatcher'] + ".h", LEGACY_TH_DISPATCHER_DERIVED_H, env)
+
+    return env
+
+
 def iterate_types():
     for backend in backends:
         for density in densities:
@@ -346,11 +383,11 @@ def declare_outputs():
     for f in core_files:
         core_file_manager.will_write(f)
     files = ['Declarations.yaml', 'TypeExtendedInterface.h', 'TypeDefault.cpp', 'TypeDefault.h',
-             'Functions.h', 'CPUCopy.cpp', 'NativeFunctions.h',
-             'RegisterCPU.cpp', 'RegisterCPU.h']
+             'LegacyTHDispatcher.h', 'LegacyTHDispatcher.cpp', 'LegacyTHFunctions.h',
+             'Functions.h', 'NativeFunctions.h', 'RegisterCPU.cpp', 'RegisterCPU.h']
     for f in files:
         file_manager.will_write(f)
-    cuda_files = ['CUDACopy.cpp', 'RegisterCUDA.cpp', 'RegisterCUDA.h']
+    cuda_files = ['RegisterCUDA.cpp', 'RegisterCUDA.h']
     for f in cuda_files:
         cuda_file_manager.will_write(f)
     for fname in sorted(generators.keys()):
@@ -361,15 +398,19 @@ def declare_outputs():
     for backend, density, scalar_types in iterate_types():
         scalar_name = scalar_types[0]
         full_backend = "Sparse" + backend if density == "Sparse" else backend
+        fm = file_manager
+        if backend == 'CUDA':
+            fm = cuda_file_manager
         for kind in ["Type"]:
             if kind != 'Type' and density == "Sparse":
                 # No Storage or Tensor for sparse
                 continue
-            fm = file_manager
-            if backend == 'CUDA':
-                fm = cuda_file_manager
             fm.will_write("{}{}{}.h".format(full_backend, scalar_name, kind))
             fm.will_write("{}{}{}.cpp".format(full_backend, scalar_name, kind))
+        # output LegacyTHDispatchers
+        if density != 'Sparse':
+            fm.will_write("{}{}{}{}.h".format('LegacyTH', full_backend, scalar_name, 'Dispatcher'))
+            fm.will_write("{}{}{}{}.cpp".format('LegacyTH', full_backend, scalar_name, 'Dispatcher'))
 
 
 def filter_by_extension(files, *extensions):
@@ -379,6 +420,23 @@ def filter_by_extension(files, *extensions):
             if file.endswith(extension):
                 filtered_files.append(file)
     return filtered_files
+
+
+# because EOL may not be LF(\n) on some environment (e.g. Windows),
+# normalize EOL from CRLF/CR to LF and compare both files.
+def cmpfiles_with_eol_normalization(a, b, names):
+    results = ([], [], [])    # match, mismatch, error
+    for x in names:
+        try:
+            ax = open(os.path.join(a, x), 'r').read().replace('\r\n', '\n').replace('\r', '\n')
+            bx = open(os.path.join(b, x), 'r').read().replace('\r\n', '\n').replace('\r', '\n')
+            if ax == bx:
+                results[0].append(x)
+            else:
+                results[1].append(x)
+        except OSError:
+            results[2].append(x)
+    return results
 
 
 def generate_outputs():
@@ -413,6 +471,12 @@ def generate_outputs():
         all_types.append(generate_storage_type_and_tensor(
             backend, density, scalar_type, declarations))
 
+    all_legacy_th_dispatchers = []
+    for backend, density, scalar_type in iterate_types():
+        if density != 'Sparse':
+            all_legacy_th_dispatchers.append(generate_legacy_th_dispatcher(
+                backend, density, scalar_type, []))
+
     core_files = {
         'Type.h': TYPE_H,
         'Tensor.h': TENSOR_H,
@@ -426,6 +490,9 @@ def generate_outputs():
     file_manager.write('TypeDefault.h', TYPE_DEFAULT_H, top_env)
     file_manager.write('TypeDefault.cpp', TYPE_DEFAULT_CPP, top_env)
 
+    file_manager.write('LegacyTHDispatcher.h', LEGACY_TH_DISPATCHER_H, top_env)
+    file_manager.write('LegacyTHDispatcher.cpp', LEGACY_TH_DISPATCHER_CPP, top_env)
+
     file_manager.write('RegisterCPU.h', REGISTER_CPU_H, top_env)
     file_manager.write('RegisterCPU.cpp', REGISTER_CPU_CPP, top_env)
 
@@ -433,9 +500,8 @@ def generate_outputs():
     cuda_file_manager.write('RegisterCUDA.cpp', REGISTER_CUDA_CPP, top_env)
 
     file_manager.write('Functions.h', FUNCTIONS_H, top_env)
+    file_manager.write('LegacyTHFunctions.h', LEGACY_TH_FUNCTIONS_H, top_env)
 
-    file_manager.write('CPUCopy.cpp', copy_wrapper.create(all_types, 'CPU'))
-    cuda_file_manager.write('CUDACopy.cpp', copy_wrapper.create(all_types, 'CUDA'))
     file_manager.write('NativeFunctions.h', NATIVE_FUNCTIONS_H, top_env)
 
     file_manager.check_all_files_written()
@@ -443,7 +509,7 @@ def generate_outputs():
 
     # check that generated files match source files
     core_source_path = os.path.join(options.source_path, 'core')
-    match, mismatch, errors = filecmp.cmpfiles(core_install_dir, core_source_path, core_files.keys(), shallow=False)
+    match, mismatch, errors = cmpfiles_with_eol_normalization(core_install_dir, core_source_path, core_files.keys())
     if errors:
         raise RuntimeError("Error while trying to compare source and generated files for {}. "
                            "Source directory: {}.  Generated directory: {}."

@@ -3,6 +3,8 @@
 #include "caffe2/operators/conv_op.h"
 #include "caffe2/operators/conv_pool_op_base.h"
 
+#include "c10/macros/Macros.h"
+
 #ifdef __ARM_NEON__
 #include <arm_neon.h>
 #endif
@@ -163,11 +165,11 @@ void runDepthwise3x3Conv(
       int ih = oth * 2 - args.pad_rows;
       int iw = otw * 2 - args.pad_cols;
       // fast-path, all accesses in-bounds
-      if (__builtin_expect(
+      if (C10_LIKELY(
               ih >= 0 && iw >= 0 && ih + 3 < args.in_rows &&
                   iw + 3 < args.in_cols && 2 * oth + 1 < args.out_rows &&
-                  2 * otw + 1 < args.out_cols,
-              1)) {
+                  2 * otw + 1 < args.out_cols
+              )) {
         float32x4x4_t input_tile;
         for (int row = 0; row < 4; ++row) {
           input_tile.val[row] =
@@ -502,7 +504,7 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CPUContext> {
       }
     }
 #endif
-    if (c10::FLAGS_caffe2_profile_depthwise) {
+    if (FLAGS_caffe2_profile_depthwise) {
       char buffer[1024];
       const double gmacs = double(
                                Y->dim32(2) * Y->dim32(3) * Y->dim32(1) *

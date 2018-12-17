@@ -9,11 +9,11 @@
 // 2. Minmin Sun: http://on-demand.gputechconf.com/gtc/2016/presentation/s6383-minmin-sun-speech-recognition.pdf
 
 #include <ATen/TensorUtils.h>
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 
 #include <ATen/ATen.h>
-#include "ATen/Dispatch.h"
-#include "ATen/cuda/CUDAApplyUtils.cuh"
+#include <ATen/Dispatch.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
 
 #include <type_traits>
 #include <numeric>

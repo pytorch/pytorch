@@ -4,7 +4,7 @@
 
 namespace caffe2 {
 
-const char* kConvDoc = R"DOC(
+const char kConvDoc[] = R"DOC(
 The Conv2D operator computes a 2D convolution operation over an input blob $(X)$, with a filter blob $(filter)$ and a bias blob $(bias)$, and outputs a single output blob $(Y)$. Although there are several options for order, the convention is that the input $(X)$ is a blob of shape $(N,C_{in},H_{in},W_{in})$ and the output $(Y)$ is a blob of shape $(N,C_{out},H_{out},W_{out})$. Here, $N$ is the batch size, $C$ is the number of channels, $H$ is the spatial height, and $W$ is the spatial width. For example, if your input data was a batch of five, 100x120pixel RGB images, $X$ would have shape $(5,3,120,100)$.
 
 The $filter$ input blob may contain multiple filters and has shape $(M, C_{in}, K_H, K_W)$. Here, $M$ is the number of individual filters contained in the blob, $C_{in}$ is the number of channels of each filter (by convention in 2D convolution it is the same as the number of channels in the input), $K_H$ is the spatial height of the kernel, and $K_W$ is the spatial width of the kernel. The $bias$ blob is a vector of length $M$, where there is one bias for each filter in the $filter$ blob.
@@ -173,7 +173,7 @@ OPERATOR_SCHEMA(Conv)
     .CostInferenceFunction(OpSchema::CostInferenceFunctionType(
         ConvPoolOpBase<CPUContext>::CostInferenceForConv))
     .FillUsing(ConvDocGenerator(""))
-    .InheritOnnxSchema("Conv");
+    .InheritOnnxSchema();
 
 REGISTER_CPU_OPERATOR(Conv1D, ConvOp<float, CPUContext>);
 

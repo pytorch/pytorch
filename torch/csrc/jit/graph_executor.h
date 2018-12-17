@@ -1,11 +1,11 @@
 #pragma once
 
 #include <memory>
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/variable_tensor_list.h"
-#include "torch/csrc/jit/interpreter.h"
-#include "torch/csrc/jit/autodiff.h"
-#include "torch/csrc/jit/argument_spec.h"
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/variable_tensor_list.h>
+#include <torch/csrc/jit/interpreter.h>
+#include <torch/csrc/jit/autodiff.h>
+#include <torch/csrc/jit/argument_spec.h>
 
 namespace torch { namespace jit {
 
@@ -20,7 +20,7 @@ struct ExecutionPlanState {
 };
 
 struct GraphExecutorState {
-  const Graph* graph;
+  const Graph* graph = nullptr;
   ExecutionPlanState fallback; // XXX: members of this field are optional
   std::unordered_map<ArgumentSpec, ExecutionPlanState> execution_plans;
 };

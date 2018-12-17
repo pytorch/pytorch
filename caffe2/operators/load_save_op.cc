@@ -224,6 +224,9 @@ workspace.RunOperatorOnce(op)
     "of the workspace.")
     .Arg("db_type", "*(type: string)* Type of db to save (options: \"lmdb\", "
     "\"leveldb\", \"minidb\").")
+    .Arg("chunk_size", "*(type: string; default: kDefaultChunkSize)* The chunk "
+    "size to split tensor data into. If not set, caffe2_tensor_chunk_size will "
+    "be used")
     .Input(0, "X", "*(type: Tensor)* Input tensor(s).");
 
 OPERATOR_SCHEMA(Checkpoint)

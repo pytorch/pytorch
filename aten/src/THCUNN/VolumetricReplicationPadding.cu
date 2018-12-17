@@ -1,13 +1,13 @@
-#include "THCUNN.h"
-#include "THCTensor.hpp"
-#include "common.h"
-#include "THCDeviceTensor.cuh"
-#include "THCDeviceTensorUtils.cuh"
-#include "THCDeviceUtils.cuh"
-#include "THCReduceApplyUtils.cuh"
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
-#include "THCAtomics.cuh"
+#include <THCUNN/THCUNN.h>
+#include <THC/THCTensor.hpp>
+#include <THCUNN/common.h>
+#include <THC/THCDeviceTensor.cuh>
+#include <THC/THCDeviceTensorUtils.cuh>
+#include <THC/THCDeviceUtils.cuh>
+#include <THC/THCReduceApplyUtils.cuh>
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCAtomics.cuh>
 #include <THC/THCApply.cuh>
 
 template <typename Dtype>
@@ -86,5 +86,5 @@ __global__ void VolumetricReplicationPadding_updateGradInput(
 }
 
 
-#include "generic/VolumetricReplicationPadding.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/VolumetricReplicationPadding.cu>
+#include <THC/THCGenerateFloatTypes.h>

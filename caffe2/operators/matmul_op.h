@@ -22,7 +22,6 @@ class MatMulOp final : public Operator<Context> {
   bool RunOnDevice() override {
     const auto& A = Input(0);
     const auto& B = Input(1);
-    auto* Y = Output(0);
 
     const auto canonical_axis_a = A.canonical_axis_index(axis_a_);
     const auto canonical_axis_b = B.canonical_axis_index(axis_b_);
@@ -66,8 +65,8 @@ class MatMulOp final : public Operator<Context> {
 
     Y_shape_cache_[0] = a_dim0;
     Y_shape_cache_[1] = b_dim1;
-    Y->Resize(Y_shape_cache_);
-    CAFFE_ENFORCE(a_dim0 * b_dim1 == Y->size(), dimErrorString());
+    auto* Y = Output(0, Y_shape_cache_, at::dtype<T>());
+    CAFFE_ENFORCE(a_dim0 * b_dim1 == Y->numel(), dimErrorString());
     // Y = A * B
     math::Gemm<T, Context, Engine>(
         trans_a_ ? CblasTrans : CblasNoTrans,

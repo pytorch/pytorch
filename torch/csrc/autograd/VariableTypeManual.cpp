@@ -1,4 +1,8 @@
-#include "torch/csrc/autograd/VariableTypeUtils.h"
+#include <c10/util/Optional.h>
+#include <torch/csrc/autograd/VariableTypeUtils.h>
+#include <torch/csrc/utils/memory.h>
+
+#include <torch/csrc/utils/memory.h>
 
 using namespace at;
 using namespace torch::autograd::generated;
@@ -26,12 +30,6 @@ Allocator* VariableType::allocator() const {
 }
 Device VariableType::getDeviceFromPtr(void * data) const {
   return baseType->getDeviceFromPtr(data);
-}
-Storage VariableType::storage(bool resizable) const {
-  return baseType->storage();
-}
-Storage VariableType::storage(size_t size, bool resizable) const {
-  return baseType->storage(size);
 }
 Storage VariableType::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
   return baseType->storageFromBlob(data, size, deleter);
@@ -70,11 +68,12 @@ std::vector<std::unique_ptr<Type>> type_to_variable_type;
 // XXX - this is not threadsafe with uses of Variables
 void register_variable_type_for(TypeExtendedInterface* baseType) {
   AT_ASSERT(baseType);
-  size_t base_id = static_cast<size_t>(baseType->ID());
+  const auto base_id = static_cast<size_t>(baseType->ID());
   if(type_to_variable_type.size() <= base_id) {
     type_to_variable_type.resize(base_id + 1);
   }
-  type_to_variable_type[base_id].reset(new VariableType(&at::globalContext(), baseType));
+  type_to_variable_type[base_id] =
+      make_unique<VariableType>(&at::globalContext(), baseType);
 }
 
 struct VariableTypeRegistry {
@@ -173,17 +172,31 @@ std::vector<at::Type*> VariableType::allCUDATypes() {
   return allTypesForBackends({ Backend::CUDA, Backend::SparseCUDA });
 }
 
-Variable & VariableType::checked_cast_variable(const Tensor & t, const char * name, int pos) {
+const Variable & VariableType::checked_cast_variable(const Tensor & t, const char * name, int pos) {
   if (!t.defined()) {
     AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
   }
-  if (!isVariableType(t.type())) {
+  if (!t.is_variable()) {
     AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " for argument #", pos, " '", name, "'");
   }
-  return as_variable_ref(const_cast<Tensor&>(t));
+  return as_variable_ref(t);
 }
 
-Tensor & VariableType::unpack(const Tensor & t, const char * name, int pos) {
+Variable & VariableType::checked_cast_variable(Tensor & t, const char * name, int pos) {
+  if (!t.defined()) {
+    AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
+  }
+  if (!t.is_variable()) {
+    AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " for argument #", pos, " '", name, "'");
+  }
+  return as_variable_ref(t);
+}
+
+const Tensor & VariableType::unpack(const Tensor & t, const char * name, int pos) {
+  return checked_cast_variable(t, name, pos).data();
+}
+
+Tensor & VariableType::unpack(Tensor & t, const char * name, int pos) {
   return checked_cast_variable(t, name, pos).data();
 }
 
@@ -203,8 +216,7 @@ std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name
   for (size_t i = 0; i < tl.size(); ++i) {
     const auto &t = tl[i];
     if (!t.defined()) {
-      AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor at position #", i, " "
-                    "for iterable argument #", pos, " '", name, "'");
+      continue;
     }
     if (!isVariableType(t.type())) {
       AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " at position #", i, " "
@@ -215,7 +227,11 @@ std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name
   return ret;
 }
 
-void VariableType::backward(Tensor & self, at::optional<Tensor> gradient, bool keep_graph, bool create_graph) const {
+void VariableType::backward(
+    Tensor& self,
+    c10::optional<Tensor> gradient,
+    bool keep_graph,
+    bool create_graph) const {
   as_variable_ref(self).backward(gradient, keep_graph, create_graph);
 }
 
@@ -232,7 +248,7 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
     jit::tracer::addInputs(node, "src", src);
     jit::tracer::addInputs(node, "self", self);
     graph->appendNode(node);
-    jit::tracer::ensureUnique("copy_ (possibly due to an assignment)", self);
+    jit::tracer::ensureUniqueIfOutOfPlaced("copy_ (possibly due to an assignment)", self);
   }
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
   // it automatically
@@ -246,9 +262,7 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->set_next_edges(collect_next_edges(self, src));
     grad_fn->src_type = &src.type();
-    if (src.is_cuda()) {
-      grad_fn->src_device = src.get_device();
-    }
+    grad_fn->src_device = src.device();
   }
   if (self.is_sparse() && src.is_sparse()) baseType->copy_sparse_to_sparse_(self_, src_, non_blocking);
   else if (!self.is_sparse() && !src.is_sparse()) baseType->s_copy_(self_, src_, non_blocking);
@@ -261,7 +275,7 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
   return self;
 }
 
-Tensor & VariableType::_s_copy_from(const Tensor & self, Tensor & dst, bool non_blocking) const {
+Tensor VariableType::_s_copy_from(const Tensor & self, const Tensor & dst, bool non_blocking) const {
   AT_ERROR("copy_from does not support automatic differentiation; use copy_ instead");
 }
 
@@ -305,7 +319,7 @@ Tensor VariableType::detach(const Tensor & self) const {
 
   }
   // <NON_GENERATED_CODE>
-  auto result = as_variable_ref(const_cast<Tensor&>(self)).detach();
+  auto result = as_variable_ref(const_cast<Tensor&>(self)).detach(); // NOLINT(cppcoreguidelines-pro-type-const-cast)
   // </NON_GENERATED_CODE>
   if (jit::tracer::isTracing()) {
     jit::tracer::addOutput(node, result);
@@ -322,7 +336,7 @@ Tensor & VariableType::detach_(Tensor & self) const {
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
     graph->appendNode(node);
-    jit::tracer::ensureUnique("detach_", self);
+    jit::tracer::ensureUniqueIfOutOfPlaced("detach_", self);
   }
   // <NON_GENERATED_CODE>
   as_variable_ref(self).detach_();

@@ -1,8 +1,8 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/VolumetricUpSamplingTrilinear.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/VolumetricUpSamplingTrilinear.cu"
 #else
 
-#include "../linear_upsampling.h"
+#include <THCUNN/linear_upsampling.h>
 
 static inline void THNN_(VolumetricUpSamplingTrilinear_shapeCheck)
                         (THCState *state,

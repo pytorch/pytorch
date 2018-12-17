@@ -32,20 +32,18 @@ if (NOT BUILD_ATEN_MOBILE)
   # Add source, includes, and libs to lists
   list(APPEND Caffe2_CPU_SRCS ${ATen_CPU_SRCS})
   list(APPEND Caffe2_GPU_SRCS ${ATen_CUDA_SRCS})
+  list(APPEND Caffe2_HIP_SRCS ${ATen_HIP_SRCS})
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS})
   list(APPEND Caffe2_GPU_TEST_SRCS ${ATen_CUDA_TEST_SRCS})
+  list(APPEND Caffe2_HIP_TEST_SRCS ${ATen_HIP_TEST_SRCS})
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CORE_TEST_SRCS})
   list(APPEND Caffe2_CPU_INCLUDE ${ATen_CPU_INCLUDE})
   list(APPEND Caffe2_GPU_INCLUDE ${ATen_CUDA_INCLUDE})
+  list(APPEND Caffe2_HIP_INCLUDE ${ATen_HIP_INCLUDE})
   list(APPEND Caffe2_DEPENDENCY_LIBS ${ATen_CPU_DEPENDENCY_LIBS})
   list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS})
+  list(APPEND Caffe2_HIP_DEPENDENCY_LIBS ${ATen_HIP_DEPENDENCY_LIBS})
   list(APPEND Caffe2_DEPENDENCY_INCLUDE ${ATen_THIRD_PARTY_INCLUDE})
-
-  IF(USE_ROCM)
-    # Set the HIP Variables
-    set(Caffe2_HIP_SRCS ${Caffe2_HIP_SRCS} ${ATen_CUDA_SRCS})
-    set(Caffe2_HIP_INCLUDES ${Caffe2_HIP_INCLUDES} ${Caffe2_GPU_INCLUDE})
-  ENDIF(USE_ROCM)
 else()
   # Only add "ATen Core", a minimal, easy-to-compile fragment of ATen.
   # This codepath should only be exercised by the Android build.
@@ -64,6 +62,7 @@ endif()
 # ---[ Caffe2 build
 # Note: the folders that are being commented out have not been properly
 # addressed yet.
+
 if(NOT BUILD_ATEN_ONLY)
   add_subdirectory(proto)
   add_subdirectory(contrib)
@@ -71,7 +70,8 @@ if(NOT BUILD_ATEN_ONLY)
   add_subdirectory(utils)
   add_subdirectory(predictor)
   add_subdirectory(core/nomnigraph)
-  add_subdirectory(core/dispatch)
+  add_subdirectory(core/nomscheduler)
+  add_subdirectory(serialize)
   if (USE_NVRTC)
     add_subdirectory(cuda_rtc)
   endif()
@@ -88,6 +88,13 @@ if(NOT BUILD_ATEN_ONLY)
   if (BUILD_CAFFE2_OPS)
     add_subdirectory(operators)
     add_subdirectory(operators/rnn)
+    if (USE_FBGEMM)
+      add_subdirectory(quantization)
+      add_subdirectory(quantization/server)
+    endif()
+    if (USE_QNNPACK)
+      add_subdirectory(operators/quantized)
+    endif()
   endif()
   add_subdirectory(opt)
   add_subdirectory(perfkernels)
@@ -159,6 +166,11 @@ if (FALSE)
   foreach(tmp ${ATen_CUDA_TEST_SRCS})
     message(STATUS "  " ${tmp})
   endforeach()
+
+  message(STATUS "ATen HIP test sources: ")
+  foreach(tmp ${ATen_HIP_TEST_SRCS})
+    message(STATUS "  " ${tmp})
+  endforeach()
 endif()
 
 # ---[ List of libraries to link with
@@ -210,8 +222,16 @@ if(NOT BUILD_ATEN_ONLY)
   else()
     target_link_libraries(caffe2 PUBLIC protobuf::libprotobuf)
   endif()
-endif()
 
+  #cmake only check for separate OpenMP library on AppleClang 7+
+  #https://github.com/Kitware/CMake/blob/42212f7539040139ecec092547b7d58ef12a4d72/Modules/FindOpenMP.cmake#L252
+  if (WITH_OPENMP AND CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
+    if (CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL "7.0" OR
+        CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "7.0")
+      target_link_libraries(caffe2 PRIVATE ${OpenMP_libomp_LIBRARY})
+    endif()
+  endif()
+endif()
 target_link_libraries(caffe2 PUBLIC c10)
 target_link_libraries(caffe2 PUBLIC ${Caffe2_PUBLIC_DEPENDENCY_LIBS})
 target_link_libraries(caffe2 PRIVATE ${Caffe2_DEPENDENCY_LIBS})
@@ -220,12 +240,10 @@ target_include_directories(caffe2 INTERFACE $<INSTALL_INTERFACE:include>)
 target_include_directories(caffe2 PRIVATE ${Caffe2_CPU_INCLUDE})
 target_include_directories(caffe2 SYSTEM PRIVATE "${Caffe2_DEPENDENCY_INCLUDE}")
 # Set standard properties on the target
-aten_set_target_props(caffe2)
+torch_set_target_props(caffe2)
 
-if (MSVC)
-target_compile_options(caffe2 INTERFACE "-std=c++11")
-else()
-target_compile_options(caffe2 INTERFACE "$<$<COMPILE_LANGUAGE:CXX>:-std=c++11>")
+if (NOT MSVC)
+  target_compile_options(caffe2 INTERFACE "$<$<COMPILE_LANGUAGE:CXX>:-std=c++11>")
 endif()
 
 target_compile_options(caffe2 PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
@@ -315,6 +333,7 @@ if(USE_CUDA)
   torch_cuda_based_add_library(caffe2_gpu ${Caffe2_GPU_SRCS})
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   target_link_libraries(caffe2_gpu INTERFACE caffe2::cudart)
+  target_link_libraries(caffe2_gpu PUBLIC c10_cuda)
 
   target_include_directories(
       caffe2_gpu INTERFACE $<INSTALL_INTERFACE:include>)
@@ -344,7 +363,7 @@ if(USE_CUDA)
   endif()
 
   # Set standard properties on the target
-  aten_set_target_props(caffe2_gpu)
+  torch_set_target_props(caffe2_gpu)
 
   install(TARGETS caffe2_gpu EXPORT Caffe2Targets DESTINATION lib)
   caffe2_interface_library(caffe2_gpu caffe2_gpu_library)
@@ -353,7 +372,7 @@ endif()
 
 # ---[ Caffe2 HIP sources.
 if(USE_ROCM)
-  # Call again since Caffe2_HIP_INCLUDES is extended with ATen include dirs.
+  # Call again since Caffe2_HIP_INCLUDE is extended with ATen include dirs.
   # Get Compile Definitions from the directory (FindHIP.cmake bug)
   get_directory_property(MY_DEFINITIONS COMPILE_DEFINITIONS)
   if(MY_DEFINITIONS)
@@ -362,29 +381,35 @@ if(USE_ROCM)
     endforeach()
   endif()
 
-  # Call again since Caffe2_HIP_INCLUDES is extended with ATen include dirs.
-  hip_include_directories(${Caffe2_HIP_INCLUDES})
+  # Call again since Caffe2_HIP_INCLUDE is extended with ATen include dirs.
+  hip_include_directories(${Caffe2_HIP_INCLUDE})
 
-  filter_list(__caffe2_hip_srcs_cpp Caffe2_HIP_SRCS "\\.(cc|cpp|cu)$")
+  filter_list(__caffe2_hip_srcs_cpp Caffe2_HIP_SRCS "\\.(cu|hip)$")
   set_source_files_properties(${__caffe2_hip_srcs_cpp} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 
   # FindHIP.CMake checks if the SHARED flag is set and adds extra logic accordingly.
   hip_add_library(caffe2_hip ${Caffe2_HIP_SRCS})
 
   # Since PyTorch files contain HIP headers, these flags are required for the necessary definitions to be added.
-  target_compile_options(caffe2_hip PRIVATE ${HIP_HIPCC_FLAGS})
+  target_compile_options(caffe2_hip PRIVATE ${HIP_CXX_FLAGS})
   target_link_libraries(caffe2_hip PUBLIC caffe2)
+  target_link_libraries(caffe2_hip PUBLIC c10_hip)
+  if(NOT BUILD_ATEN_MOBILE)
+    # TODO: Cut this over to ATEN_HIP_FILES_GEN_LIB.  At the moment, we
+    # only generate CUDA files
+    # NB: This dependency must be PRIVATE, because we don't install
+    # ATEN_CUDA_FILES_GEN_LIB (it's a synthetic target just to get the
+    # correct dependency from generated files.)
+    target_link_libraries(caffe2_hip PRIVATE ATEN_CUDA_FILES_GEN_LIB)
+  endif()
   target_link_libraries(caffe2_hip PUBLIC ${Caffe2_HIP_DEPENDENCY_LIBS})
 
   # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
-  target_include_directories(caffe2_hip PRIVATE ${Caffe2_HIP_INCLUDES})
+  target_include_directories(caffe2_hip PRIVATE ${Caffe2_HIP_INCLUDE})
   target_include_directories(caffe2_hip INTERFACE $<INSTALL_INTERFACE:include>)
 
   # Set standard properties on the target
-  aten_set_target_props(caffe2_hip)
-
-  # When a library has object files that contain device code, it needs to use hipcc/hcc to link.
-  set_target_properties(caffe2_hip PROPERTIES LINKER_LANGUAGE HIP)
+  torch_set_target_props(caffe2_hip)
 
   caffe2_interface_library(caffe2_hip caffe2_hip_library)
   list(APPEND Caffe2_MAIN_LIBS caffe2_hip_library)
@@ -429,12 +454,12 @@ if (BUILD_TEST)
 
   if(USE_ROCM)
     foreach(test_src ${Caffe2_HIP_TEST_SRCS})
-      set_source_files_properties(${test_src} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
       get_filename_component(test_name ${test_src} NAME_WE)
-      hip_add_executable(${test_name} "${test_src}")
+      add_executable(${test_name} "${test_src}")
       target_link_libraries(${test_name} ${Caffe2_MAIN_LIBS} gtest_main)
       target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
-      target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
+      target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE} ${Caffe2_HIP_INCLUDE})
+      target_compile_options(${test_name} PRIVATE ${HIP_CXX_FLAGS})
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
       if (INSTALL_TEST)
         install(TARGETS ${test_name} DESTINATION test)
@@ -451,13 +476,23 @@ if (BUILD_TEST)
   endif()
 endif()
 
+# Note: we only install the caffe2 python files if BUILD_CAFFE2_OPS is ON
+# This is because the build rules here written in such a way that they always
+# appear to need to be re-run generating >600 pieces of work during the pytorch
+# rebuild step. The long-term fix should be to clean up these rules so they
+# only rerun when needed.
+
 if (BUILD_PYTHON)
   # Python site-packages
   # Get canonical directory for python site packages (relative to install
   # location).  It varies from system to system.
+  # We should pin the path separator to the forward slash on Windows.
+  # More details can be seen at
+  # https://github.com/pytorch/pytorch/tree/master/tools/build_pytorch_libs.bat#note-backslash-munging-on-windows
   pycmd(PYTHON_SITE_PACKAGES "
+      import os
       from distutils import sysconfig
-      print(sysconfig.get_python_lib(prefix=''))
+      print(sysconfig.get_python_lib(prefix='').replace(os.sep, '/'))
   ")
   SET(PYTHON_SITE_PACKAGES ${PYTHON_SITE_PACKAGES} PARENT_SCOPE) # for Summary
   # ---[ Options.
@@ -507,9 +542,6 @@ if (BUILD_PYTHON)
   if (APPLE)
     set_target_properties(caffe2_pybind11_state PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
   endif()
-  if (WIN32)
-    set_target_properties(caffe2_pybind11_state PROPERTIES LINK_FLAGS "/FORCE:UNRESOLVED")
-  endif()
   target_include_directories(caffe2_pybind11_state PRIVATE $<INSTALL_INTERFACE:include>)
   target_include_directories(caffe2_pybind11_state PRIVATE ${Caffe2_CPU_INCLUDE})
 
@@ -517,6 +549,7 @@ if (BUILD_PYTHON)
       caffe2_pybind11_state caffe2_library)
   if (WIN32)
     target_link_libraries(caffe2_pybind11_state ${PYTHON_LIBRARIES})
+    target_link_libraries(caffe2_pybind11_state onnx_proto)
   endif(WIN32)
 
   # Install caffe2_pybind11_state(_gpu|hip) in site-packages/caffe2/python,
@@ -535,15 +568,13 @@ if (BUILD_PYTHON)
     if (APPLE)
       set_target_properties(caffe2_pybind11_state_gpu PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
     endif()
-    if (WIN32)
-      set_target_properties(caffe2_pybind11_state_gpu PROPERTIES LINK_FLAGS "/FORCE:UNRESOLVED")
-    endif()
     target_include_directories(caffe2_pybind11_state_gpu PRIVATE $<INSTALL_INTERFACE:include>)
     target_include_directories(caffe2_pybind11_state_gpu PRIVATE ${Caffe2_CPU_INCLUDE})
     target_link_libraries(
         caffe2_pybind11_state_gpu caffe2_library caffe2_gpu_library)
     if (WIN32)
       target_link_libraries(caffe2_pybind11_state_gpu ${PYTHON_LIBRARIES})
+      target_link_libraries(caffe2_pybind11_state_gpu onnx_proto)
     endif(WIN32)
 
     # Install with same rpath as non-gpu caffe2_pybind11_state
@@ -555,19 +586,15 @@ if (BUILD_PYTHON)
   endif()
 
   if(USE_ROCM)
-    hip_add_library(caffe2_pybind11_state_hip MODULE ${Caffe2_HIP_PYTHON_SRCS})
-    set_target_properties(caffe2_pybind11_state_hip PROPERTIES LINKER_LANGUAGE HIP)
-    target_compile_options(caffe2_pybind11_state_hip PRIVATE ${HIP_HIPCC_FLAGS} -fvisibility=hidden)
+    add_library(caffe2_pybind11_state_hip MODULE ${Caffe2_HIP_PYTHON_SRCS})
+    target_compile_options(caffe2_pybind11_state_hip PRIVATE ${HIP_CXX_FLAGS} -fvisibility=hidden)
     set_target_properties(caffe2_pybind11_state_hip PROPERTIES PREFIX "")
     set_target_properties(caffe2_pybind11_state_hip PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
     if (APPLE)
       set_target_properties(caffe2_pybind11_state_hip PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
     endif()
-    if (WIN32)
-      set_target_properties(caffe2_pybind11_state_hip PROPERTIES LINK_FLAGS "/FORCE:UNRESOLVED")
-    endif()
     target_include_directories(caffe2_pybind11_state_hip PRIVATE $<INSTALL_INTERFACE:include>)
-    target_include_directories(caffe2_pybind11_state_hip PRIVATE ${Caffe2_CPU_INCLUDE})
+    target_include_directories(caffe2_pybind11_state_hip PRIVATE ${Caffe2_CPU_INCLUDE} ${Caffe2_HIP_INCLUDE})
     target_link_libraries(
         caffe2_pybind11_state_hip caffe2_library caffe2_hip_library)
     if (WIN32)
@@ -612,37 +639,27 @@ if (BUILD_PYTHON)
   endif()
 
   # Finally, Copy all python files to build directory
-  # Generate and create all needed __init__.py files, if they aren't already
-  # present in the current source tree.
-  message(STATUS "Automatically generating missing __init__.py files.")
-  caffe_autogen_init_py_files()
-
   # Create a custom target that copies all python files.
   file(GLOB_RECURSE PYTHON_SRCS RELATIVE ${PROJECT_SOURCE_DIR}
        "${PROJECT_SOURCE_DIR}/caffe2/*.py")
-  add_custom_target(python_copy_files ALL)
-  if(MSVC OR CMAKE_GENERATOR MATCHES "Ninja")
-    # ninja fails when the command line is too long so we split
-    # the target into several. This would be beneficial for VS also
-    # since it build targets in parallel but not custom commands
-    foreach(python_src ${PYTHON_SRCS})
-      get_filename_component(dir ${python_src} DIRECTORY)
-      string(SHA1 name_hash "${python_src}")
-      # get_filename_component(name_we ${python_src} NAME_WE)
-      add_custom_target(python_copy_files_${name_hash}
-          COMMAND ${CMAKE_COMMAND} -E copy
-          ${PROJECT_SOURCE_DIR}/${python_src} ${CMAKE_BINARY_DIR}/${dir})
-      add_dependencies(python_copy_files python_copy_files_${name_hash})
-    endforeach()
-  else()
-    foreach(python_src ${PYTHON_SRCS})
-      get_filename_component(dir ${python_src} DIRECTORY)
-      add_custom_command(
-          TARGET python_copy_files PRE_BUILD
-          COMMAND ${CMAKE_COMMAND} -E copy
-          ${PROJECT_SOURCE_DIR}/${python_src} ${CMAKE_BINARY_DIR}/${dir})
-    endforeach()
-  endif()
+
+  # generated pb files are copied from build/caffe2 to caffe2
+  # if we copied them back to build this would create a build cycle
+  # consider removing the need for globs
+  filter_list_exclude(PYTHON_SRCS PYTHON_SRCS "proto/.*_pb")
+
+  set(build_files)
+  foreach(python_src ${PYTHON_SRCS})
+    add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/${python_src}
+                       DEPENDS ${PROJECT_SOURCE_DIR}/${python_src}
+                       COMMAND ${CMAKE_COMMAND} -E copy
+                       ${PROJECT_SOURCE_DIR}/${python_src}
+                       ${CMAKE_BINARY_DIR}/${python_src})
+    list(APPEND build_files ${CMAKE_BINARY_DIR}/${python_src})
+  endforeach()
+
+  add_custom_target(python_copy_files ALL DEPENDS ${build_files})
+
 
   # Install commands
   # Pick up static python files

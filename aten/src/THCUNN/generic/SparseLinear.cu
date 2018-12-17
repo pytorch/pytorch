@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/SparseLinear.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/SparseLinear.cu"
 #else
 
 static bool THNN_(checkInput)(THCTensor* t)
@@ -18,13 +18,7 @@ static bool THNN_(checkSize1D)(THCTensor* t, int64_t size0)
 }
 
 static inline void THNN_(copyCudaFloatingType)(THCState *state, THCudaIntTensor *buf, THCTensor *t) {
-  #ifdef THC_REAL_IS_FLOAT
-  THCudaIntTensor_copyCudaFloat(state, buf, t);
-  #elif defined(THC_REAL_IS_DOUBLE)
-  THCudaIntTensor_copyCudaDouble(state, buf, t);
-  #elif defined(THC_REAL_IS_HALF)
-  THCudaIntTensor_copyCudaHalf(state, buf, t);
-  #endif
+  THCTensor_(copy)(state, buf, t);
 }
 
 void THNN_(SparseLinear_updateOutput)(
@@ -46,7 +40,7 @@ void THNN_(SparseLinear_updateOutput)(
   THArgCheck(THNN_(checkSize1D)(bias, outDim), 5, "bias size wrong");
 
   weight = THCTensor_(newContiguous)(state, weight);
-  
+
   int64_t batchnum = THCTensor_(size)(state, output, 0);
   int64_t nnz = THCTensor_(size)(state, input, 0);
 
@@ -71,7 +65,7 @@ void THNN_(SparseLinear_updateOutput)(
   THCTensor_(select)(state, sel, input, 1, 1);
   THNN_(copyCudaFloatingType)(state, colInds, sel);
   THCTensor_(select)(state, sel, input, 1, 2);
-  THCTensor_(copyCuda)(state, values, sel);
+  THCTensor_(copy)(state, values, sel);
 
   init_cusparse();
   cusparseXcoo2csr(cusparse_handle,
@@ -171,7 +165,7 @@ void THNN_(SparseLinear_accGradParameters)(
   THCTensor_(select)(state, sel, buf, 1, 1);
   THNN_(copyCudaFloatingType)(state, colbuf, sel);
   THCTensor_(select)(state, sel, buf, 1, 2);
-  THCTensor_(copyCuda)(state, values, sel);
+  THCTensor_(copy)(state, values, sel);
 
   init_cusparse();
   // Secretly coo2csc

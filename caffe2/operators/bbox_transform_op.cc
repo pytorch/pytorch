@@ -91,19 +91,18 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
   const auto& roi_in = Input(0);
   const auto& delta_in = Input(1);
   const auto& iminfo_in = Input(2);
-  auto* box_out = Output(0);
 
   const int box_dim = rotated_ ? 5 : 4;
   const int N = roi_in.dim32(0);
-  CAFFE_ENFORCE_EQ(roi_in.ndim(), 2);
+  CAFFE_ENFORCE_EQ(roi_in.dim(), 2);
   CAFFE_ENFORCE(roi_in.dim32(1) == box_dim || roi_in.dim32(1) == box_dim + 1);
 
-  CAFFE_ENFORCE_EQ(delta_in.ndim(), 2);
+  CAFFE_ENFORCE_EQ(delta_in.dim(), 2);
   CAFFE_ENFORCE_EQ(delta_in.dim32(0), N);
   CAFFE_ENFORCE_EQ(delta_in.dim32(1) % box_dim, 0);
   const int num_classes = delta_in.dim32(1) / box_dim;
 
-  CAFFE_ENFORCE_EQ(iminfo_in.ndim(), 2);
+  CAFFE_ENFORCE_EQ(iminfo_in.dim(), 2);
   CAFFE_ENFORCE_EQ(iminfo_in.dim32(1), 3);
   const int batch_size = iminfo_in.dim32(0);
 
@@ -128,11 +127,11 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
     }
   }
 
-  CAFFE_ENFORCE_EQ(iminfo_in.dims(), (at::IntList{batch_size, 3}));
+  CAFFE_ENFORCE_EQ(iminfo_in.sizes(), (at::IntList{batch_size, 3}));
   Eigen::Map<const ERArrXXf> iminfo(
-      iminfo_in.data<float>(), iminfo_in.dim(0), iminfo_in.dim(1));
+      iminfo_in.data<float>(), iminfo_in.size(0), iminfo_in.size(1));
 
-  box_out->ResizeLike(delta_in);
+  auto* box_out = Output(0, delta_in.sizes(), at::dtype<float>());
   Eigen::Map<ERArrXXf> new_boxes(
       box_out->template mutable_data<float>(),
       box_out->dim32(0),
@@ -176,8 +175,7 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
   }
 
   if (OutputSize() > 1) {
-    auto* roi_batch_splits = Output(1);
-    roi_batch_splits->Resize(batch_size);
+    auto* roi_batch_splits = Output(1, {batch_size}, at::dtype<float>());
     Eigen::Map<EArrXf> roi_batch_splits_map(
         roi_batch_splits->template mutable_data<float>(), batch_size);
     roi_batch_splits_map =

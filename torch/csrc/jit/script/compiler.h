@@ -3,19 +3,14 @@
 #include <memory>
 #include <string>
 
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/script/error_report.h"
-#include "torch/csrc/jit/script/tree_views.h"
-#include "torch/csrc/jit/script/module.h"
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/script/error_report.h>
+#include <torch/csrc/jit/script/tree_views.h>
+#include <torch/csrc/jit/script/module.h>
 
 namespace torch {
 namespace jit {
 namespace script {
-
-struct CallsiteDescriptor {
-  size_t n_outputs;
-  bool allow_varargs;
-};
 
 static inline std::vector<Value*> toValues(Graph& g, at::ArrayRef<NamedValue> nvs) {
   return fmap(nvs, [&](const NamedValue& v) {
@@ -31,33 +26,42 @@ static inline std::vector<Value*> toValues(Graph& g, at::ArrayRef<NamedValue> nv
 // that separates their behavior from the AST -> IR converter itself.
 // This allows us to keep dependencies on python minimal.
 
+enum NoneStatus {
+ ALWAYS,
+ MAYBE,
+ NEVER
+};
+
 struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
   // what is this node? for error reporting (e.g. Module, python function)
   virtual std::string kind() const = 0;
 
   // what can we do with this thing?
   // use it as a value e.g.  `this + 4`
-  virtual Value * asValue(SourceRange loc, Method & m) {
+  virtual Value * asValue(const SourceRange& loc, Method & m) {
     throw ErrorReport(loc) << kind() << " cannot be used as a value";
   }
 
   // select an attribute on it, e.g. `this.field`
-  virtual std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) {
+  virtual std::shared_ptr<SugaredValue> attr(const SourceRange& loc, Method & m, const std::string& field) {
     throw ErrorReport(loc) << "attribute lookup is not defined on " << kind();
+  }
+  virtual NoneStatus isNone() {
+    return NEVER;
   }
 
   // use it as a vector of values, e.g. a tuple of values as return value from
   // a method invocation
   virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(
-      SourceRange loc,
+      const SourceRange& loc,
       Method& m,
-      c10::optional<size_t> size_hint = {}) {
+      const c10::optional<size_t>& size_hint = {}) {
     throw ErrorReport(loc) << kind() << " cannot be used as a tuple";
   }
 
   // call it like a function, e.g. `outputs = this(inputs)`
   virtual std::shared_ptr<SugaredValue> call(
-    SourceRange loc,
+    const SourceRange& loc,
     Method & m,
     // note: names for args will be 'argument 0', 'argument 1', etc..
     at::ArrayRef<NamedValue> inputs_,
@@ -89,17 +93,25 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
 struct TORCH_API SimpleValue : public SugaredValue {
   SimpleValue(Value * value)
   : value(value) {}
-  virtual std::string kind() const override {
+  std::string kind() const override {
     return "value";
   }
-  virtual Value * asValue(SourceRange range, Method & m) override {
+  Value * asValue(const SourceRange& range, Method & m) override {
     return value;
   }
-  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(
-      SourceRange loc,
+  NoneStatus isNone() override {
+    if (value->mustBeNone())
+      return ALWAYS;
+    else if (value->type()->cast<OptionalType>())
+      return MAYBE;
+    else
+      return NEVER;
+  }
+  std::vector<std::shared_ptr<SugaredValue>> asTuple(
+      const SourceRange& loc,
       Method& m,
-      c10::optional<size_t> size_hint = {}) override;
-  virtual std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override;
+      const c10::optional<size_t>& size_hint = {}) override;
+  std::shared_ptr<SugaredValue> attr(const SourceRange& loc, Method & m, const std::string& field) override;
   Value* getValue() const {
     return value;
   }
@@ -108,20 +120,20 @@ private:
 };
 
 struct TORCH_API BuiltinFunction : public SugaredValue {
-  BuiltinFunction(Symbol symbol, c10::optional<NamedValue> value)
-      : symbol(std::move(symbol)), value(std::move(value)) {}
+  BuiltinFunction(Symbol symbol, c10::optional<NamedValue> self)
+      : symbol(symbol), self(std::move(self)) {}
 
   // The symbol of the function (e.g. `aten::relu`).
   Symbol symbol;
 
   // if this is method, then this is the self argument.
-  c10::optional<NamedValue> value;
+  c10::optional<NamedValue> self;
 
   std::string kind() const override {
     return "builtin";
   }
   std::shared_ptr<SugaredValue> call(
-      SourceRange loc,
+      const SourceRange& loc,
       Method& m,
       at::ArrayRef<NamedValue> attributes,
       at::ArrayRef<NamedValue> inputs,
@@ -129,16 +141,39 @@ struct TORCH_API BuiltinFunction : public SugaredValue {
 };
 
 struct TORCH_API BuiltinModule : public SugaredValue {
-  BuiltinModule(const std::string& name)
-    : name(name) {}
-  std::string name;
+  BuiltinModule(std::string name,
+                c10::optional<int64_t> version = at::nullopt)
+    : name(std::move(name))
+    , version(std::move(version)) {}
 
   std::string kind() const override {
     return "builtin module";
   }
+  std::shared_ptr<SugaredValue> attr(const SourceRange& loc, Method & m, const std::string& field) override {
+    return std::make_shared<BuiltinFunction>(Symbol::fromQualString(name+"::"+field), c10::nullopt);
+  }
 
-  std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override {
-    return std::make_shared<BuiltinFunction>(Symbol::aten(field), c10::nullopt);
+private:
+  std::string name;
+  // when we add operator versioning, emit this op as it exising at 'version'
+  // if not set, use the latest version
+  c10::optional<int64_t> version;
+};
+
+// These SugaredValues have special handling in the compiler because they
+// change the normal evalution order of the expression they participate in.
+// They are exposed here so that the python frontend can inject them
+// when it sees the equivalent thing in python
+struct TORCH_API ForkValue : public SugaredValue {
+  ForkValue() = default;
+  std::string kind() const override {
+    return "fork";
+  }
+};
+struct TORCH_API AnnotateValue : public SugaredValue {
+  AnnotateValue() = default;
+  std::string kind() const override {
+    return "annotate";
   }
 };
 
@@ -146,28 +181,25 @@ using Resolver = std::function<std::shared_ptr<SugaredValue>(const std::string& 
 
 inline std::shared_ptr<SugaredValue> nativeResolver(const std::string& name, Method& m, const SourceRange& loc){
   if (name == "torch") {
-    return std::make_shared<BuiltinModule>(name);
+    return std::make_shared<BuiltinModule>("aten");
   }
   return nullptr;
 }
 
 TORCH_API void defineMethodsInModule(
-  Module & m,
+  const std::shared_ptr<Module>& m,
   const std::vector<Def>& definitions,
   const std::vector<Resolver>& resolvers, /* determines how we handle free variables in each definition*/
-  std::shared_ptr<SugaredValue> self /* if non-null, the first argument to each def, is bound to this value */
+  const std::shared_ptr<SugaredValue>& self /* if non-null, the first argument to each def, is bound to this value */
 );
 
 // same as above but parse the definitions from source
-TORCH_API void defineMethodsInModule(Module & m, const std::string& source, Resolver resolver, std::shared_ptr<SugaredValue> self);
-TORCH_API std::shared_ptr<Graph> compileFunction(Def def, Resolver resolver);
+TORCH_API void defineMethodsInModule(std::shared_ptr<Module> m, const std::string& source, const Resolver& resolver, const std::shared_ptr<SugaredValue>& self);
 
 // pack outputs of a function following python rules. If there is a single value return
 // a SimpleValue, otherwise pack all the values into a Tuple.
 TORCH_API Value* packOutputs(Graph& g, at::ArrayRef<Value*> values);
 TORCH_API std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs);
-TORCH_API void ensureSizeMatches(SourceRange loc, size_t expected, size_t actual, const std::string& what);
-TORCH_API void ensureTensors(const SourceRange& range, at::ArrayRef<Value*> values);
 
 // defines how a method obtained from a module behaves in script
 struct MethodValue : public SugaredValue {
@@ -177,10 +209,17 @@ struct MethodValue : public SugaredValue {
   std::string kind() const override {
     return "method";
   }
-  virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<NamedValue> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
-    return std::make_shared<SimpleValue>(packOutputs(*caller.graph(), caller.emit_call_to(loc, method, inputs, attributes)));
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Method& caller,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override {
+    return std::make_shared<SimpleValue>(packOutputs(
+        *caller.graph(), caller.emit_call_to(loc, method, inputs, attributes)));
   }
-private:
+
+ private:
   std::shared_ptr<Module> module;
   Method& method;
 
@@ -198,25 +237,29 @@ struct MatchedSchema {
 };
 
 TORCH_API c10::optional<MatchedSchema> tryMatchSchema(
-    const FunctionSchema& schema,
-    const SourceRange& loc,
-    Graph& graph,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
-    std::ostream& failure_messages,
-    bool convert_tensors_to_nums);
-
-TORCH_API FunctionSchema extractSchemaFromDef(const Def &def, bool is_method=false);
+  const FunctionSchema& schema,
+  const SourceRange& loc,
+  Graph& graph,
+  c10::optional<NamedValue> self,
+  at::ArrayRef<NamedValue> inputs,
+  at::ArrayRef<NamedValue> attributes,
+  std::ostream& failure_messages,
+  bool allow_conversions);
 
 TORCH_API Value* emitBuiltinCall(
   const SourceRange& loc,
   Graph& graph,
   Symbol name,
+  const c10::optional<NamedValue>& self,
   at::ArrayRef<NamedValue> inputs,
   at::ArrayRef<NamedValue> attributes,
   // if true, emitBuiltinCall will throw an exception if this builtin does not exist,
   // otherwise it will return nullptr if the builtin is not found.
   bool required);
+
+TORCH_API c10::optional<size_t> findInputWithName(
+  const std::string& name,
+  at::ArrayRef<NamedValue> kwargs);
 
 } // namespace script
 } // namespace jit

@@ -27,7 +27,7 @@ class BatchMatMulOpTest : public testing::Test {
     auto* tensor = BlobGetMutableTensor(blob, CPU);
     tensor->Resize(dims);
     math::Set<float, CPUContext>(
-        tensor->size(),
+        tensor->numel(),
         value,
         tensor->template mutable_data<float>(),
         cpu_context_.get());
@@ -37,12 +37,12 @@ class BatchMatMulOpTest : public testing::Test {
     const Blob* Y_blob = ws_.GetBlob("Y");
     ASSERT_NE(nullptr, Y_blob);
     const auto& Y = Y_blob->Get<TensorCPU>();
-    const auto Y_dims = Y.dims();
+    const auto Y_dims = Y.sizes();
     ASSERT_EQ(dims.size(), Y_dims.size());
     for (std::size_t i = 0; i < dims.size(); ++i) {
       ASSERT_EQ(dims[i], Y_dims[i]);
     }
-    for (int i = 0; i < Y.size(); ++i) {
+    for (int i = 0; i < Y.numel(); ++i) {
       EXPECT_FLOAT_EQ(value, Y.data<float>()[i]);
     }
   }

@@ -1,12 +1,12 @@
 #include <torch/serialize/output-archive.h>
 
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/script/module.h>
 
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 
 #include <memory>
 #include <ostream>

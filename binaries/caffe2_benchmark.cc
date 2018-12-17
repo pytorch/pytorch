@@ -63,6 +63,14 @@ C10_DEFINE_int(
     sleep_before_run,
     0,
     "The seconds to sleep before starting the benchmarking.");
+C10_DEFINE_int(
+    sleep_between_iteration,
+    0,
+    "The seconds to sleep between the individual iterations.");
+C10_DEFINE_int(
+    sleep_between_net_and_operator,
+    0,
+    "The seconds to sleep between net and operator runs.");
 C10_DEFINE_bool(
     text_output,
     false,
@@ -78,19 +86,21 @@ int main(int argc, char** argv) {
   benchmark(
       argc,
       argv,
-      c10::FLAGS_backend,
-      c10::FLAGS_init_net,
-      c10::FLAGS_input,
-      c10::FLAGS_input_dims,
-      c10::FLAGS_input_file,
-      c10::FLAGS_input_type,
-      c10::FLAGS_iter,
-      c10::FLAGS_net,
-      c10::FLAGS_output,
-      c10::FLAGS_output_folder,
-      c10::FLAGS_run_individual,
-      c10::FLAGS_sleep_before_run,
-      c10::FLAGS_text_output,
-      c10::FLAGS_warmup,
-      c10::FLAGS_wipe_cache);
+      FLAGS_backend,
+      FLAGS_init_net,
+      FLAGS_input,
+      FLAGS_input_dims,
+      FLAGS_input_file,
+      FLAGS_input_type,
+      FLAGS_iter,
+      FLAGS_net,
+      FLAGS_output,
+      FLAGS_output_folder,
+      FLAGS_run_individual,
+      FLAGS_sleep_before_run,
+      FLAGS_sleep_between_iteration,
+      FLAGS_sleep_between_net_and_operator,
+      FLAGS_text_output,
+      FLAGS_warmup,
+      FLAGS_wipe_cache);
 }

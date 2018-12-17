@@ -1,17 +1,23 @@
-#include "torch/csrc/jit/constants.h"
-#include "torch/csrc/jit/operator.h"
-#include "torch/csrc/jit/custom_operator.h"
-#include "torch/csrc/autograd/variable.h"
+#include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/custom_operator.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/utils/functional.h>
 
 namespace torch { namespace jit {
 
 // IValue -> Constant node
-Value* insertConstant(Graph& g, IValue val, c10::optional<SourceRange> loc) {
+Value* insertConstant(
+    Graph& g,
+    const IValue& val,
+    c10::optional<SourceRange> loc,
+    c10::optional<ScopePtr> scope) {
   Node * n = g.create(prim::Constant);
   if(val.isTensor()) {
-    at::Tensor ref = std::move(val).toTensor();
+    at::Tensor ref = val.toTensor();
     if(!ref.defined()) {
-      throw constant_not_supported_error("undefined tensors cannot become constants");
+      n->destroy();
+      return g.insertNode(g.createUndefined())->output();
     }
     if (ref.is_variable()) {
       ref = autograd::Variable(ref).data();
@@ -42,30 +48,35 @@ Value* insertConstant(Graph& g, IValue val, c10::optional<SourceRange> loc) {
   } else if(val.isString()) {
     n->s_(attr::value, val.toString()->string());
     n->output()->setType(StringType::get());
+  } else if(val.isDevice()) {
+    std::stringstream ss;
+    ss << val.toDevice();
+    n->s_(attr::value, ss.str());
+    n->output()->setType(DeviceObjType::get());
   } else if(val.isNone()) {
     n->destroy();
     n = g.create(prim::None);
     n->output()->setType(NoneType::get());
-  } else if(val.isWorld()) {
-    n->output()->setType(WorldType::get());
   } else {
     throw constant_not_supported_error("Unsupported value kind: " + val.tagKind());
   }
   if(loc)
     n->setSourceLocation(std::make_shared<SourceRange>(*loc));
+  if(scope)
+    n->setScope(*scope);
   return g.insertNode(n)->output();
 }
 
 RegisterOperators reg({
   // Implementation of constant node, computes and IValue
   Operator(
-      prim::Constant,
-      [](Node* node) -> Operation {
+      FunctionSchema(prim::Constant, {}, {}, /*is_vararg=*/false, /*is_varret=*/true),
+      [](const Node* node) -> Operation {
         TypePtr type = node->output()->type();
         if(type->isSubtypeOf(DynamicType::get())) {
           auto t = autograd::make_variable(node->t(attr::value));
           return [t](Stack& stack) {
-            stack.push_back(t);
+            push(stack, t);
             return 0;
           };
         } else if (type->isSubtypeOf(BoolType::get())) {
@@ -91,19 +102,19 @@ RegisterOperators reg({
             return 0;
           };
         } else if(type->isSubtypeOf(ListType::ofInts())) {
-          auto is = node->is(attr::value);
+          const auto& is = node->is(attr::value);
           return [is](Stack& stack) {
             push(stack, is);
             return 0;
           };
         } else if(type->isSubtypeOf(ListType::ofBools())) {
-          auto bs = node->is(attr::value);
+          const auto& bs = node->is(attr::value);
           return [bs](Stack& stack) {
             push(stack, bs);
             return 0;
           };
         } else if(type->isSubtypeOf(ListType::ofTensors())) {
-          auto ts = fmap(node->ts(attr::value), [](const at::Tensor & t) -> at::Tensor {
+          const auto& ts = fmap(node->ts(attr::value), [](const at::Tensor & t) -> at::Tensor {
             return autograd::make_variable(t);
           });
           return [ts](Stack& stack) {
@@ -111,9 +122,15 @@ RegisterOperators reg({
             return 0;
           };
         } else if (type == StringType::get()) {
-          auto s = node->s(attr::value);
+          const auto& s = node->s(attr::value);
           return [s](Stack& stack) {
             push(stack, s);
+            return 0;
+          };
+        } else if (type == DeviceObjType::get()) {
+          auto d = c10::Device(node->s(attr::value));
+          return [d](Stack& stack) {
+            push(stack, d);
             return 0;
           };
         } else {
@@ -124,9 +141,10 @@ RegisterOperators reg({
       }),
 });
 
-c10::optional<IValue> toIValue(Value* v) {
-  if(v->node()->kind() != prim::Constant)
+c10::optional<IValue> toIValue(const Value* v) {
+  if (v->node()->kind() != prim::Constant) {
     return c10::nullopt;
+  }
   // use implemenation of prim::Constant to compute the output IValue
   auto op = getOperation(v->node());
   Stack stack;

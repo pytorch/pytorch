@@ -15,7 +15,9 @@ import glob
 import os
 import shutil
 import sys
-import common
+import common_utils as common
+
+from test_pytorch_common import skipIfCI
 
 
 '''Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
@@ -73,7 +75,6 @@ class TestOperators(TestCase):
             import test_onnx_common
             model_def = onnx.ModelProto.FromString(onnx_model_pb)
             onnx.checker.check_model(model_def)
-
             if _onnx_test:
                 test_function = inspect.stack()[1][0].f_code.co_name
                 test_name = test_function[0:4] + "_operator" + test_function[4:]
@@ -291,6 +292,10 @@ class TestOperators(TestCase):
         x = torch.randn(3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.full(x.shape, 2), x)
 
+    def test_full_like(self):
+        x = torch.randn(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: torch.full_like(x, 2), x)
+
     def test_max(self):
         x = torch.randn(3, 4, requires_grad=True)
         y = torch.randn(3, 4, requires_grad=True)
@@ -450,74 +455,37 @@ class TestOperators(TestCase):
         offset = torch.tensor([0]).long()
         self.assertONNX(emb_bag, (input, offset))
 
-    def test_symbolic_override(self):
-        """Lifted from fast-neural-style: custom implementation of instance norm
-        to be mapped to ONNX operator"""
+    def test_implicit_expand(self):
+        x = torch.randn(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: x + 1, x)
 
-        class CustomInstanceNorm(torch.nn.Module):
-            def __init__(self, dim, eps=1e-9):
-                super(CustomInstanceNorm, self).__init__()
-                self.scale = nn.Parameter(torch.zeros(dim, dtype=torch.float).uniform_())
-                self.shift = nn.Parameter(torch.zeros(dim, dtype=torch.float))
-                self.eps = eps
+    def test_reduce_sum_negative_indices(self):
+        x = torch.randn(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: x.sum(-1), x)
 
-            def forward(self, x):
-                return self._run_forward(x, self.scale, self.shift, eps=self.eps)
+    def test_randn(self):
+        x = torch.randn(1, 2, 3, 4)
+        self.assertONNX(lambda x: torch.randn(1, 2, 3, 4) + x, x)
 
-            @staticmethod
-            @torch.onnx.symbolic_override(
-                lambda g, x, scale, shift, eps: g.op(
-                    'InstanceNormalization', x, scale, shift, epsilon_f=eps)
-            )
-            def _run_forward(x, scale, shift, eps):
-                # since we hand-roll instance norm it doesn't perform well all in fp16
-                n = x.size(2) * x.size(3)
-                t = x.view(x.size(0), x.size(1), n)
-                mean = torch.mean(t, 2).unsqueeze(2).unsqueeze(3).expand_as(x)
-                # Calculate the biased var. torch.var returns unbiased var
-                var = torch.var(t, 2).unsqueeze(2).unsqueeze(3).expand_as(x) * ((float(n) - 1) / float(n))
-                scale_broadcast = scale.unsqueeze(1).unsqueeze(1).unsqueeze(0)
-                scale_broadcast = scale_broadcast.expand_as(x)
-                shift_broadcast = shift.unsqueeze(1).unsqueeze(1).unsqueeze(0)
-                shift_broadcast = shift_broadcast.expand_as(x)
-                out = (x - mean) / torch.sqrt(var + eps)
-                out = out * scale_broadcast + shift_broadcast
-                return out
+    def test_rrelu(self):
+        x = torch.randn(1, 2, 3, 4)
+        self.assertONNX(torch.nn.RReLU(), x)
 
-        instnorm = CustomInstanceNorm(10)
-        x = torch.randn(2, 10, 32, 32)
-        self.assertONNX(instnorm, x)
+    def test_log_sigmoid(self):
+        x = torch.randn(1, 2, 3, 4)
+        self.assertONNX(torch.nn.LogSigmoid(), x)
 
-    """
-    def test_rnn(self):
-        rnn = nn.RNN(30, 20, 2)
-        input = torch.randn(10, 32, 30)
-        output, hidden = rnn(input)
-        self.assertONNX(rnn, input)
-    """
+    def test_linear(self):
+        x = torch.randn(3, 4)
+        self.assertONNX(torch.nn.Linear(4, 5, bias=True), x)
 
-    def test_symbolic_override_nested(self):
-        def symb(g, x, y):
-            assert isinstance(x, torch._C.Value)
-            assert isinstance(y[0], torch._C.Value)
-            assert isinstance(y[1], torch._C.Value)
-            return g.op('Sum', x, y[0], y[1]), (
-                g.op('Neg', x), g.op('Neg', y[0]))
+    def test_zeros_like(self):
+        x = torch.randn(5, 8, requires_grad=True)
+        self.assertONNX(lambda x: torch.zeros_like(x), x)
 
-        @torch.onnx.symbolic_override(symb)
-        def foo(x, y):
-            return x + y[0] + y[1], (-x, -y[0])
-
-        class BigModule(torch.nn.Module):
-            def forward(self, x, y):
-                return foo(x, y)
-
-        inp = (torch.tensor([1], dtype=torch.float),
-               (torch.tensor([2], dtype=torch.float),
-                torch.tensor([3], dtype=torch.float)))
-        BigModule()(*inp)
-        self.assertONNX(BigModule(), inp)
-
+    def test_ones_like(self):
+        x = torch.randn(6, 10, requires_grad=True)
+        self.assertONNX(lambda x: torch.ones_like(x), x)
 
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'

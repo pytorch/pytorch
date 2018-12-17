@@ -105,7 +105,7 @@ inline bool getShouldStop(const Blob* b) {
   }
 
   const auto& t = b->Get<TensorCPU>();
-  CAFFE_ENFORCE(t.IsType<bool>() && t.size() == 1, "expects a scalar boolean");
+  CAFFE_ENFORCE(t.IsType<bool>() && t.numel() == 1, "expects a scalar boolean");
   return *(t.template data<bool>());
 }
 
@@ -422,7 +422,7 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
               LOG(ERROR) << "Parallel worker exception:\n" << first_exception;
             }
             compiledStep->gotFailure = true;
-            if (!c10::FLAGS_caffe2_handle_executor_threads_exceptions) {
+            if (!FLAGS_caffe2_handle_executor_threads_exceptions) {
               // In complex plans other threads might get stuck if another
               // one fails. So we let exception to go out of thread which
               // causes SIGABRT. In local setup one might use this flag

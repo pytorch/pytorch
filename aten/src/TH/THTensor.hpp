@@ -3,11 +3,18 @@
 // STOP!!! Thinking of including this header directly?  Please
 // read Note [TH abstraction violation]
 
-#include "THTensor.h"
-#include "THStorageFunctions.hpp"
+#include <TH/THTensor.h>
+#include <TH/THStorageFunctions.hpp>
 
 #include <atomic>
 #include <ATen/ATen.h>
+
+// Returns a Tensor given a TensorImpl. The TensorImpl remains valid after the
+// the Tensor is destroyed.
+inline at::Tensor THTensor_wrap(THTensor* tensor) {
+  c10::raw::intrusive_ptr::incref(tensor);
+  return at::Tensor(c10::intrusive_ptr<at::TensorImpl>::reclaim(tensor));
+}
 
 inline const int64_t* THTensor_getSizePtr(THTensor* tensor) {
   return tensor->sizes().data();
@@ -55,17 +62,17 @@ inline int THTensor_nDimensionLegacyNoScalars(const THTensor* tensor) {
   if (tensor->dim() == 0) {
     return 1;
   } else {
-    return tensor->dim();  
+    return tensor->dim();
   }
 }
 
 inline int THTensor_nDimensionLegacyAll(const THTensor* tensor) {
   if (tensor->is_empty()) {
-    return 0;  
+    return 0;
   } else if (tensor->dim() == 0) {
     return 1;
   } else {
-    return tensor->dim();  
+    return tensor->dim();
   }
 }
 
@@ -82,8 +89,8 @@ inline int64_t THTensor_sizeLegacyNoScalars(const THTensor *self, int dim)
   return self->dim() == 0 ? 1 : self->size(dim);
 }
 
-#include "generic/THTensorFastGetSet.hpp"
-#include "THGenerateAllTypes.h"
+#include <TH/generic/THTensorFastGetSet.hpp>
+#include <TH/THGenerateAllTypes.h>
 
 inline std::vector<int64_t> THTensor_sizesLegacyNoScalars(const THTensor *self) {
   if (self->dim() == 0) {
@@ -115,8 +122,8 @@ TH_CPP_API c10::optional<std::vector<int64_t>> THTensor_compute_stride(
     at::IntList oldstride,
     at::IntList newshape);
 
-#include "generic/THTensor.hpp"
-#include "THGenerateAllTypes.h"
+#include <TH/generic/THTensor.hpp>
+#include <TH/THGenerateAllTypes.h>
 
-#include "generic/THTensor.hpp"
-#include "THGenerateHalfType.h"
+#include <TH/generic/THTensor.hpp>
+#include <TH/THGenerateHalfType.h>

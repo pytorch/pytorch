@@ -163,6 +163,13 @@ class CAFFE2_API OpSchema {
   OpSchema& InheritOnnxSchema(const std::string& onnx_schema_name);
 
   /**
+   * @brief Shortcut to InheritOnnxSchema(type_)
+   */
+  OpSchema& InheritOnnxSchema() {
+    return InheritOnnxSchema(type_);
+  }
+
+  /**
    * @brief Sets the tensor inference function to produce the same output as
    * the input.
    */
@@ -364,7 +371,21 @@ class CAFFE2_API OpSchema {
     return device_inference_function_(def);
   }
 
-  // The helper is build sparse input with values, keys, and lengths; e.g.:
+  // The helper is build sparse input with values, keys, weights and lengths;
+  // e.g.:
+  // values  = [1, 2, 3, 2, 4, 6, 7, 3, 6]
+  // keys    = [0, 1, 4, 0, 1, 2, 5, 1, 2]
+  // weights = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+  //            \_____/  \________/  \__/
+  // lengths =    [3,        4,       2]
+  OpSchema& WeightedValueKeyLengthInputFillers(
+      size_t value_index,
+      size_t key_index,
+      size_t length_index,
+      size_t weight_index);
+
+  // The helper is build sparse input with values, keys, weights and lengths;
+  // e.g.:
   // values  = [1, 2, 3, 2, 4, 6, 7, 3, 6]
   // keys    = [0, 1, 4, 0, 1, 2, 5, 1, 2]
   //            \_____/  \________/  \__/
@@ -590,4 +611,16 @@ OpSchema::Cost PointwiseCostInference(
 
 #endif // CAFFE2_NO_OPERATOR_SCHEMA
 
+#ifdef CAFFE2_NO_GRADIENT_OPS
+
+#define GRADIENT_OPERATOR_SCHEMA(name)                              \
+  C10_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){}; \
+  static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =     \
+      1 ? nullptr : &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
+
+#else
+
+#define GRADIENT_OPERATOR_SCHEMA(name) OPERATOR_SCHEMA(name)
+
+#endif
 #endif // CAFFE2_CORE_OPERATOR_SCHEMA_H_

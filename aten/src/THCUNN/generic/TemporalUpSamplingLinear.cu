@@ -1,8 +1,8 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/TemporalUpSamplingLinear.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/TemporalUpSamplingLinear.cu"
 #else
 
-#include "../linear_upsampling.h"
+#include <THCUNN/linear_upsampling.h>
 
 static inline void THNN_(TemporalUpSamplingLinear_shapeCheck)
                         (THCState *state,

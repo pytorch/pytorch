@@ -1,18 +1,18 @@
-#include "torch/csrc/jit/passes/loop_unrolling.h"
+#include <torch/csrc/jit/passes/loop_unrolling.h>
 
-#include "torch/csrc/jit/interned_strings.h"
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/symbolic_variable.h"
+#include <torch/csrc/jit/interned_strings.h>
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/symbolic_variable.h>
 
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/jit/constants.h"
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/constants.h>
 
 namespace torch { namespace jit {
 
 namespace {
 
 static constexpr int64_t kUnrollFactor = 8;
-static constexpr int64_t kMaxBodySize = 16;
+static constexpr int64_t kMaxBodySize = 32;
 static constexpr int64_t kMaxBodyRepeats = 64;
 
 bool isTrueConstant(Value *val) {
@@ -142,7 +142,7 @@ void replaceLoopCounter(Node *loop) {
   Value* init_counter = graph->insertConstant(0);
 
   loop->insertInput(2, init_counter);
-  loop->insertOutput(0);
+  loop->insertOutput(0)->setType(IntType::get());
 
   Value * internal_counter = body->insertInput(1)->setType(init_counter->type());
   body->inputs()[0]->replaceAllUsesWith(internal_counter);
@@ -188,7 +188,7 @@ void unroll(Node *loop) {
 
   // Change the iteration counts of both loops
   Value* iter_count = loop->inputs().at(0);
-  Value* unrolled_iter_count = graph->insert(aten::floordiv, {iter_count, kUnrollFactor});
+  Value* unrolled_iter_count = graph->insert(aten::__round_to_zero_floordiv, {iter_count, kUnrollFactor});
   loop->replaceInput(0, unrolled_iter_count);
   loop_epilogue->replaceInput(0, graph->insert(aten::sub, {iter_count, graph->insert(aten::mul,{unrolled_iter_count , kUnrollFactor})}));
 }

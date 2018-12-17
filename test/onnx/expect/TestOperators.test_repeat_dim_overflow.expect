@@ -9,7 +9,7 @@ graph {
       name: "value"
       t {
         dims: 4
-        data_type: INT64
+        data_type: 7
         raw_data: "\001\000\000\000\000\000\000\000\002\000\000\000\000\000\000\000\003\000\000\000\000\000\000\000\004\000\000\000\000\000\000\000"
       }
       type: TENSOR
@@ -22,7 +22,7 @@ graph {
       name: "value"
       t {
         dims: 4
-        data_type: INT64
+        data_type: 7
         raw_data: "\001\000\000\000\000\000\000\000\001\000\000\000\000\000\000\000\001\000\000\000\000\000\000\000\002\000\000\000\000\000\000\000"
       }
       type: TENSOR
@@ -45,7 +45,7 @@ graph {
     name: "0"
     type {
       tensor_type {
-        elem_type: FLOAT
+        elem_type: 1
         shape {
           dim {
             dim_value: 1
@@ -61,7 +61,7 @@ graph {
     name: "4"
     type {
       tensor_type {
-        elem_type: FLOAT
+        elem_type: 1
         shape {
           dim {
             dim_value: 1

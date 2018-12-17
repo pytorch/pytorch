@@ -1,9 +1,9 @@
 #pragma once
-#include "ATen/ATen.h"
-#include "torch/csrc/jit/source_range.h"
-#include "torch/csrc/utils/variadic.h"
-#include "torch/csrc/jit/ivalue.h"
-#include "torch/csrc/jit/constants.h"
+#include <ATen/ATen.h>
+#include <torch/csrc/jit/source_range.h>
+#include <torch/csrc/utils/variadic.h>
+#include <torch/csrc/jit/ivalue.h>
+#include <torch/csrc/jit/constants.h>
 
 namespace torch { namespace jit {
 
@@ -68,7 +68,7 @@ struct NamedValue {
 private:
  c10::optional<SourceRange> loc_;
  c10::optional<std::string> name_;
- Value* value_;
+ Value* value_{nullptr};
  // only valid if value_ == nullptr;
  IValue ivalue_;
 };

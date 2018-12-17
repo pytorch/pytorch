@@ -1,8 +1,8 @@
-#include "torch/csrc/jit/passes/peephole.h"
+#include <torch/csrc/jit/passes/peephole.h>
 
-#include "torch/csrc/jit/symbolic_variable.h"
+#include <torch/csrc/jit/symbolic_variable.h>
 
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
 
 namespace torch { namespace jit {
 
@@ -21,12 +21,12 @@ namespace torch { namespace jit {
 // we would see redundant Gemm ops with sub-optimal inputs. This flag is exposed
 // so that ONNX export can pass `true` to get the fused behavior, but normal
 // JIT peephole optimization is left alone.
-void PeepholeOptimize(Block * block, bool addmm_fusion_enabled) {
+void PeepholeOptimizeImpl(Block * block, bool addmm_fusion_enabled) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto* node = *it;
 
     for (Block * sub_block : node->blocks()) {
-      PeepholeOptimize(sub_block, addmm_fusion_enabled);
+      PeepholeOptimizeImpl(sub_block, addmm_fusion_enabled);
     }
 
     // XXX: remember that if you want to simplify an expression by combining multiple nodes
@@ -120,19 +120,30 @@ void PeepholeOptimize(Block * block, bool addmm_fusion_enabled) {
           node->get<at::Scalar>(attr::other)->toDouble() == 0) {
         node->output()->replaceAllUsesWith(node->input(0));
       }
-    } else if(node->kind() == prim::TensorToNum || node->kind() == prim::ImplicitTensorToNum) {
+    } else if (node->kind() == prim::Float || node->kind() == prim::Int || node->kind() == prim::ImplicitTensorToNum) {
       Node* input_node = node->input()->node();
       if (input_node->kind() == prim::NumToTensor) {
         node->output()->replaceAllUsesWith(input_node->input());
+      }
+    } else if (node->matches("prim::SumToSize(Tensor(a) self, int[] size) -> Tensor(a)")) {
+      auto uses = node->output()->uses();
+      for (Use u : uses) {
+        if (u.user->matches("prim::SumToSize(Tensor(a) self, int[] size) -> Tensor(a)")) {
+          u.user->replaceInput(0, node->inputs().at(0));
+        }
       }
     }
   }
 }
 
-void PeepholeOptimize(std::shared_ptr<Graph>& graph, bool addmm_fusion_enabled) {
-  PeepholeOptimize(graph->block(), addmm_fusion_enabled);
+void PeepholeOptimize(Block* block, bool addmm_fusion_enabled) {
+  PeepholeOptimizeImpl(block, addmm_fusion_enabled);
   // Eliminate dead code created by any peephole passes we've just done
-  EliminateDeadCode(graph->block());
+  EliminateDeadCode(block);
+}
+
+void PeepholeOptimize(const std::shared_ptr<Graph>& graph, bool addmm_fusion_enabled) {
+  PeepholeOptimize(graph->block(), addmm_fusion_enabled);
 }
 
 }}

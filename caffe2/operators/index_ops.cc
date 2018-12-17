@@ -1,3 +1,4 @@
+#include "caffe2/operators/index_ops.h"
 #include <atomic>
 #include <limits>
 #include <mutex>
@@ -9,110 +10,6 @@
 #include "caffe2/core/tensor.h"
 
 namespace caffe2 {
-namespace {
-using IndexKeyTypes = TensorTypes<int32_t, int64_t, std::string>;
-using int64_tValue = int64_t;
-}  // namespace
-
-struct IndexBase {
- public:
-  IndexBase(int64_tValue maxElements, const TypeMeta& type)
-    : maxElements_{maxElements}
-    , meta_(type)
-    , frozen_{false} {}
-
-  void Freeze() { frozen_ = true; }
-
-  bool isFrozen() const {
-    return frozen_;
-  }
-
-  int64_t maxElements() const {
-    return maxElements_;
-  }
-
-  virtual ~IndexBase() {}
-
-  const TypeMeta& Type() const { return meta_; }
-
-  int64_tValue Size() {
-    std::lock_guard<std::mutex> guard(dictMutex_);
-    return nextId_;
-  }
-
- protected:
-  int64_t maxElements_;
-  TypeMeta meta_;
-  int64_tValue nextId_{1}; // guarded by dictMutex_
-  std::atomic<bool> frozen_{false};
-  std::mutex dictMutex_;
-};
-
-template<typename T>
-struct Index: IndexBase {
-  explicit Index(int64_tValue maxElements)
-    : IndexBase(maxElements, TypeMeta::Make<T>()) {}
-
-  void Get(const T* keys, int64_tValue* values, size_t numKeys) {
-    if (frozen_) {
-      FrozenGet(keys, values, numKeys);
-      return;
-    }
-    std::lock_guard<std::mutex> lock(dictMutex_);
-    for (int i = 0; i < numKeys; ++i) {
-      auto it = dict_.find(keys[i]);
-      if (it != dict_.end()) {
-        values[i] = it->second;
-      } else if (nextId_ < maxElements_) {
-        auto newValue = nextId_++;
-        dict_.insert({keys[i], newValue});
-        values[i] = newValue;
-      } else {
-        CAFFE_THROW("Dict max size reached");
-      }
-    }
-  }
-
-  bool Load(const T* keys, size_t numKeys) {
-    CAFFE_ENFORCE(
-        numKeys <= maxElements_,
-        "Cannot load index: Tensor is larger than max_elements.");
-    decltype(dict_) dict;
-    for (int i = 0; i < numKeys; ++i) {
-      CAFFE_ENFORCE(
-          dict.insert({keys[i], i + 1}).second,
-          "Repeated elements found: cannot load into dictionary.");
-    }
-    // assume no `get` is inflight while this happens
-    {
-      std::lock_guard<std::mutex> lock(dictMutex_);
-      // let the old dict get destructed outside of the lock
-      dict_.swap(dict);
-      nextId_ = numKeys + 1;
-    }
-    return true;
-  }
-
-  bool Store(Tensor* out) {
-    std::lock_guard<std::mutex> lock(dictMutex_);
-    out->Resize(nextId_ - 1);
-    auto outData = out->template mutable_data<T>();
-    for (const auto& entry : dict_) {
-      outData[entry.second - 1] = entry.first;
-    }
-    return true;
-  }
-
- private:
-  void FrozenGet(const T* keys, int64_tValue* values, size_t numKeys) {
-    for (int i = 0; i < numKeys; ++i) {
-      auto it = dict_.find(keys[i]);
-      values[i] = it != dict_.end() ? it->second : 0;
-    }
-  }
-
-  std::unordered_map<T, int64_tValue> dict_;
-};
 
 // TODO(azzolini): support sizes larger than int32
 template<class T>
@@ -148,12 +45,12 @@ class IndexGetOp: public Operator<CPUContext> {
     auto* dict = dynamic_cast_if_rtti<Index<T>*>(base.get());
     CAFFE_ENFORCE(dict, "Wrong dictionary type given input keys.");
     const auto& keys = Input(1);
-    auto* values = Output(0);
-    values->ResizeLike(keys);
+
+    auto* values = Output(0, keys.sizes(), at::dtype<int64_tValue>());
     dict->Get(
         keys.data<T>(),
         values->template mutable_data<int64_tValue>(),
-        keys.size());
+        keys.numel());
     return true;
   }
 };
@@ -175,9 +72,9 @@ class IndexLoadOp: public Operator<CPUContext> {
     CAFFE_ENFORCE(dict, "Wrong dictionary type given input keys.");
     const auto& keys = Input(1);
     const auto* keys_data = keys.data<T>();
-    auto keys_size = keys.size();
+    auto keys_size = keys.numel();
     if (skipFirstEntry_) {
-      CAFFE_ENFORCE(keys.size() > 0);
+      CAFFE_ENFORCE(keys.numel() > 0);
       ++keys_data;
       --keys_size;
     }
@@ -226,8 +123,8 @@ class IndexSizeOp : public Operator<CPUContext> {
 
   bool RunOnDevice() override {
     auto& base = OperatorBase::Input<std::unique_ptr<IndexBase>>(0);
-    auto* out = Output(0);
-    out->Resize(std::vector<int64_t>{});
+
+    auto* out = Output(0, std::vector<int64_t>{}, at::dtype<int64_tValue>());
     *out->template mutable_data<int64_tValue>() = base->Size();
     return true;
   }
@@ -348,10 +245,12 @@ class IndexSerializer : public BlobSerializerBase {
   ~IndexSerializer() {}
 
   void Serialize(
-      const Blob& blob,
+      const void* pointer,
+      TypeMeta typeMeta,
       const string& name,
       SerializationAcceptor acceptor) override {
-    auto& base = blob.template Get<std::unique_ptr<IndexBase>>();
+    CAFFE_ENFORCE(typeMeta.Match<std::unique_ptr<IndexBase>>());
+    const auto& base = *static_cast<const std::unique_ptr<IndexBase>*>(pointer);
     Blob tensor_blob;
     auto* tensor_out = BlobGetMutableTensor(&tensor_blob, CPU);
 
@@ -366,12 +265,12 @@ class IndexSerializer : public BlobSerializerBase {
     }
 
     CAFFE_ENFORCE(
-        tensor_out->size() <= std::numeric_limits<int32_t>::max(),
+        tensor_out->numel() <= std::numeric_limits<int32_t>::max(),
         "Index too large to be serialized.");
     BlobProto blob_proto;
     TensorSerializer ser;
     ser.Serialize(
-        *tensor_out, name, blob_proto.mutable_tensor(), 0, tensor_out->size());
+        *tensor_out, name, blob_proto.mutable_tensor(), 0, tensor_out->numel());
     blob_proto.set_name(name);
     blob_proto.set_type("std::unique_ptr<caffe2::IndexBase>");
 
@@ -379,7 +278,7 @@ class IndexSerializer : public BlobSerializerBase {
     os << base->maxElements() << " " << base->isFrozen();
     blob_proto.set_content(os.str());
 
-    acceptor(name, blob_proto.SerializeAsString());
+    acceptor(name, SerializeBlobProtoAsString_EnforceCheck(blob_proto));
   }
 
  private:
@@ -429,7 +328,7 @@ class IndexDeserializer : public BlobDeserializerBase {
       const Tensor& tensor_in) {
     base->reset(new Index<T>(maxElements));
     auto* dict = dynamic_cast_if_rtti<Index<T>*>(base->get());
-    dict->Load(tensor_in.data<T>(), tensor_in.size());
+    dict->Load(tensor_in.data<T>(), tensor_in.numel());
   }
 };
 

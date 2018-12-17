@@ -1,7 +1,7 @@
 #include <torch/optim/serialize.h>
 
 #include <torch/serialize/archive.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -17,6 +17,7 @@ void serialize(
     const std::string& key,
     const std::vector<int64_t>& steps) {
   std::vector<torch::Tensor> tensors;
+  tensors.reserve(steps.size());
   for (const auto& step : steps) {
     tensors.push_back(torch::tensor(static_cast<int64_t>(step)));
   }

@@ -1,6 +1,6 @@
 #pragma once
-#include <ATen/core/Device.h>
-#include <ATen/core/Error.h>
+#include <c10/Device.h>
+#include <c10/util/Exception.h>
 #include <caffe2/proto/caffe2.pb.h>
 
 namespace caffe2 {
