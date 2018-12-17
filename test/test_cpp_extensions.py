@@ -310,7 +310,11 @@ class TestCppExtension(common.TestCase):
             verbose=True,
         )
 
-        torch.empty(2, 2, dtype=torch.complex64)
+        # Make sure that the empty tensor is of the desired shape and type
+        # Refer to https://github.com/pytorch/pytorch/issues/14829
+        t = torch.empty(2, 2, dtype=torch.complex64)
+        self.assertEqual(t.size(), torch.Size([2, 2]))
+        self.assertEqual(t.type(), 'torch.ComplexFloatTensor')
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_half_support(self):
