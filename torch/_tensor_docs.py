@@ -2836,7 +2836,8 @@ add_docstr_all('reduce_as',
                r"""
 reduce_as(other) -> Tensor
 
-Reduce this tensor to the same size as :attr:`other`.
+Reduce this tensor to the same size as :attr:`other` by summing over
+broadcasted dimensions.
 ``other`` tensor size must be broadcastable to ``this`` tensor size.
 Args:
     other (:class:`torch.Tensor`): The result tensor has the same size
