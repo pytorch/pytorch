@@ -346,9 +346,11 @@ def t(g, self):
     return g.op("Transpose", self, perm_i=(1, 0))
 
 
-# There is no translation for it, but we don't want to raise an error yet
 def expand(g, self, size, implicit):
-    return None
+    size = _maybe_get_const(size, 'is')
+    if not _is_value(size):
+        size = g.op("Constant", value_t=torch.LongTensor(size))
+    return g.op("Expand", self, size)
 
 
 def expand_as(g, self, other):
@@ -911,6 +913,10 @@ def min(g, self, dim_or_y, keepdim=None):
 
 def eq(g, self, other):
     return g.op("Equal", self, other)
+
+
+def ne(g, self, other):
+    return g.op("Not", eq(g, self, other))
 
 
 def exp(g, self):
