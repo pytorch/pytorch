@@ -50,7 +50,7 @@ guts::array<TensorParameterDispatchKey, num_dispatch_args> getDispatchTypeIds__(
  */
 template<size_t num_dispatch_args, class... Args>
 guts::array<TensorParameterDispatchKey, num_dispatch_args> getDispatchTypeIds_(const Args&... args) {
-  auto tensor_args = guts::filter_map<const C10Tensor*, is_tensor_arg>([] (const auto& v){return &v;}, args...);
+  auto tensor_args = guts::filter_map<const C10Tensor*, is_tensor_arg>([] (const C10Tensor& v){return &v;}, args...);
   return getDispatchTypeIds__<num_dispatch_args>(tensor_args, guts::make_index_sequence<num_dispatch_args>());
 }
 
