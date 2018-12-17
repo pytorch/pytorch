@@ -98,14 +98,14 @@ cudnnHandle_t getCudnnHandle()
   {
     std::cout << "thread " << std::this_thread::get_id()
               << ", getCudnnHandle first case" << std::endl;
-    return handles[device].handle;
+    return handles[device].back().handle;
   }
   else
   {
     std::cout << "thread " << std::this_thread::get_id()
               << ", getCudnnHandle second case" << std::endl;
     handles[device].emplace_back(true /*create*/);
-    return handles[device].handle;
+    return handles[device].back().handle;
   }
 }
 
