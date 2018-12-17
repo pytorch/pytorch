@@ -22,62 +22,24 @@ configure_file(
     ${CMAKE_CURRENT_LIST_DIR}/macros/cmake_macros.h.in
     ${CMAKE_BINARY_DIR}/c10/macros/cmake_macros.h)
 
+function(c10_setup_visibility TARGET)
+  # If building shared library, set dllimport/dllexport proper.
+  target_compile_options(${TARGET} PRIVATE "-DC10_BUILD_MAIN_LIB")
+  # Enable hidden visibility if compiler supports it.
+  if (${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
+    target_compile_options(${TARGET} PRIVATE "-fvisibility=hidden")
+  endif()
+endfunction()
+
+add_subdirectory(util)
+add_subdirectory(core)
+add_subdirectory(test)
+
 # Note: if you want to add ANY dependency to the c10 library, make sure you
 # check with the core PyTorch developers as the dependendency will be
 # transitively passed on to all libraries dependent on PyTorch.
-file(GLOB C10_SRCS
-        *.cpp
-        core/*.cpp
-        core/dispatch/*.cpp
-        core/opschema/*.cpp
-        core/impl/*.cpp
-        macros/*.cpp
-        util/*.cpp
-        )
-file(GLOB_RECURSE C10_ALL_TEST_FILES test/*.cpp)
-file(GLOB_RECURSE C10_HEADERS *.h)
-add_library(c10 ${C10_SRCS} ${C10_HEADERS})
-# If building shared library, set dllimport/dllexport proper.
-target_compile_options(c10 PRIVATE "-DC10_BUILD_MAIN_LIB")
-# Enable hidden visibility if compiler supports it.
-if (${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
-  target_compile_options(c10 PRIVATE "-fvisibility=hidden")
-endif()
-
-# ---[ Dependency of c10
-if (${USE_GFLAGS})
-   target_link_libraries(c10 PUBLIC gflags)
-endif()
-
-if (${USE_GLOG})
-    target_link_libraries(c10 PUBLIC glog::glog)
-endif()
-
-if (USE_NUMA)
-  if (NOT CAFFE2_DISABLE_NUMA)
-    message(STATUS "NUMA paths:")
-    message(STATUS ${Numa_INCLUDE_DIR})
-    message(STATUS ${Numa_LIBRARIES})
-    include_directories(SYSTEM ${Numa_INCLUDE_DIR})
-    target_link_libraries(c10 PRIVATE ${Numa_LIBRARIES})
-  else()
-    message(STATUS "NUMA is disabled")
-  endif()
-else()
-  message(STATUS "don't use NUMA")
-endif()
-
-if (ANDROID)
-    target_link_libraries(c10 PRIVATE log)
-endif()
-
-target_include_directories(
-    c10 PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../>
-    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
-    $<INSTALL_INTERFACE:include>)
-
-add_subdirectory(test)
+add_library(c10 c10.h) # just use c10.h because we need at least one file in a library target
+target_link_libraries(c10 PUBLIC c10_util c10_core)
 
 if(USE_CUDA)
   add_subdirectory(cuda)
