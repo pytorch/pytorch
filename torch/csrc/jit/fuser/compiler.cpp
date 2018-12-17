@@ -51,7 +51,7 @@ int debugFuser() {
 // If the given node is used once by a chunk node, returns that node.
 // Returns nullptr otherwise.
 static const Node* usedInFusedChunk(const Value* input) {
-  const auto uses = input->uses();
+  const auto& uses = input->uses();
   if (uses.size() == 1) {
     const Node *user = uses[0].user;
     if (user->kind() == prim::ConstantChunk) {

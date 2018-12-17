@@ -15,7 +15,7 @@ void placeholderCreator(Method&) {
 
 c10::optional<std::vector<Value*>> try_emit_call_to(
     Graph& graph,
-    SourceRange loc,
+    const SourceRange& loc,
     Method& callee,
     c10::optional<NamedValue> self,
     ArrayRef<NamedValue> args,
@@ -33,7 +33,7 @@ c10::optional<std::vector<Value*>> try_emit_call_to(
 
   auto matched_schema = tryMatchSchema(
     callee.getSchema(),
-    loc, graph, self, args, kwargs, failure_messages, conv_tensors_to_nums);
+    loc, graph, std::move(self), args, kwargs, failure_messages, conv_tensors_to_nums);
   if(!matched_schema)
     return c10::nullopt;
 
@@ -48,7 +48,7 @@ c10::optional<std::vector<Value*>> try_emit_call_to(
   return inlineCallTo(graph, *callee.graph(), matched_schema->inputs);
 }
 
-std::vector<Value*> Method::emit_call_to(SourceRange loc, Method & callee, ArrayRef<NamedValue> args, ArrayRef<NamedValue> kwargs) {
+std::vector<Value*> Method::emit_call_to(const SourceRange& loc, Method & callee, ArrayRef<NamedValue> args, ArrayRef<NamedValue> kwargs) {
   JIT_ASSERT(!executor);
   std::stringstream failure_messages;
   if (auto result = try_emit_call_to(
@@ -96,8 +96,8 @@ void Module::save(const std::string& filename) {
 }
 
 void Module::to_impl(
-    c10::optional<at::Device> device,
-    c10::optional<at::ScalarType> dtype,
+    const c10::optional<at::Device>& device,
+    const c10::optional<at::ScalarType>& dtype,
     bool non_blocking) {
   // First call `to()` on every child module.
   for (auto& child : modules) {

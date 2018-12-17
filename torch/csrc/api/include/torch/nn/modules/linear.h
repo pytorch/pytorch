@@ -31,7 +31,7 @@ class TORCH_API LinearImpl : public Cloneable<LinearImpl> {
 
   /// Transforms the `input` tensor by multiplying with the `weight` and
   /// optionally adding the `bias`, if `with_bias` is true in the options.
-  Tensor forward(Tensor input);
+  Tensor forward(const Tensor& input);
 
   /// The options used to configure this module.
   LinearOptions options;

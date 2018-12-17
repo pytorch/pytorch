@@ -139,7 +139,7 @@ template
    typename ReduceOp,
    typename FinalizeOp,
    int ADims, int BDims>
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
 __launch_bounds__(32 * 16, 4)
 #endif
 __global__ void kernelReduceNoncontigDim_shared
@@ -254,7 +254,7 @@ template <typename T,
           typename ReduceOp,
           typename FinalizeOp,
           int ADims, int BDims>
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
 __launch_bounds__(32 * 16, 4)
 #endif
 __global__ void
