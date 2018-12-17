@@ -142,19 +142,17 @@ void createTensorToParameterNameMap(
   // they are keywords or namespaces used in the output
   const static std::unordered_set<std::string> reserved_names = {
     // identifiers in the environment while parsing
+    "_", // avoid the confusing unnamed _
     "aten",
-    "ops",
+    "attribute",
     "CONSTANTS",
     "fork",
-    "attribute",
     "getattr",
-    "_", // avoid the confusing unnamed _
     "inf",
     "nan",
+    "ops",
+    "self",
     // the python keywords
-    "False",
-    "None",
-    "True",
     "and",
     "as",
     "assert",
@@ -166,6 +164,7 @@ void createTensorToParameterNameMap(
     "elif",
     "else",
     "except",
+    "False",
     "finally",
     "for",
     "from",
@@ -175,12 +174,14 @@ void createTensorToParameterNameMap(
     "in",
     "is",
     "lambda",
+    "None",
     "nonlocal",
     "not",
     "or",
     "pass",
     "raise",
     "return",
+    "True",
     "try",
     "while",
     "with",
