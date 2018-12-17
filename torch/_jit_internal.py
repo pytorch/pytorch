@@ -137,6 +137,9 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
     elif if_false.__doc__ is None and if_true.__doc__ is not None:
         doc = if_true.__doc__
         if_false.__doc__ = doc
+    elif if_false.__doc__ is None and if_true.__doc__ is None:
+        # neither function has a docstring
+        doc = None
     else:
         raise RuntimeError("only one function can have a docstring")
     fn.__doc__ = doc
