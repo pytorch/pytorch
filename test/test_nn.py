@@ -570,6 +570,28 @@ class TestNN(NNTestCase):
         input = torch.randn(2, 3, dtype=torch.float)
         self.assertEqual(m(input).size(), (2, 5))
 
+    def test_share_memory(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.p = nn.Parameter(torch.eye(5))
+                self.par = nn.ParameterList()
+                self.par.append(nn.Parameter(torch.randn(10)))
+
+            def forward(inp):
+                return inp.clone()
+
+        net = Net()
+        for p in net.parameters():
+            self.assertFalse(p.storage().is_shared())
+        for b in net.buffers():
+            self.assertFalse(b.storage().is_shared())
+        net.share_memory()
+        for p in net.parameters():
+            self.assertTrue(p.storage().is_shared())
+        for b in net.buffers():
+            self.assertTrue(b.storage().is_shared())
+
     def test_hooks(self):
         module = nn.Sigmoid()
         input = torch.ones(5, 5, requires_grad=True)
