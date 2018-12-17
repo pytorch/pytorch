@@ -188,7 +188,7 @@ class RNNBase(Module):
         else:
             # Each batch of the hidden state should match the input sequence that
             # the user believes he/she is passing in.
-            self.permute_hidden(hx, sorted_indices)
+            hx = self.permute_hidden(hx, sorted_indices)
 
         self.check_forward_args(input, hx, batch_sizes)
         _impl = _rnn_impls[self.mode]

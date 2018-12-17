@@ -4267,19 +4267,39 @@ class TestNN(NNTestCase):
                 return var
             return torch.cat([var, var.new_zeros(length - var.size(0), *var.size()[1:])])
 
-        def check_lengths(lengths, enforce_sorted):
+        def maybe_index_tuple(maybe_tuple_of_tensors, index):
+            if maybe_tuple_of_tensors is None:
+                return None
+            return tuple(maybe_tuple_of_tensors[j][:, index:index + 1, :].contiguous()
+                         for j in range(2))
+
+        def check_lengths(lengths, enforce_sorted, use_default_hiddens):
+            input_size = 3
+            hidden_size = 4
+            num_layers = 2
+            bidirectional = True
+
             max_length = max(lengths)
-            x_leaf = torch.randn(max_length, len(lengths), 3, device=device,
+            x_leaf = torch.randn(max_length, len(lengths), input_size, device=device,
                                  dtype=dtype, requires_grad=True)
-            lstm = nn.LSTM(3, 4, bidirectional=True, num_layers=2).to(device, dtype)
+            num_directions = 2 if bidirectional else 1
+            lstm = nn.LSTM(input_size, hidden_size, bidirectional=bidirectional,
+                           num_layers=num_layers).to(device, dtype)
             lstm2 = deepcopy(lstm).to(device, dtype)
             x = x_leaf
+
+            hidden0 = None
+            if not use_default_hiddens:
+                hidden0 = tuple(torch.randn(num_directions * num_layers, len(lengths), hidden_size,
+                                            device=device, dtype=dtype)
+                                for _ in range(2))
 
             # Compute sequences separately
             seq_outs = []
             seq_hiddens = []
             for i, l in enumerate(lengths):
-                out, hid = lstm2(x[:l, i:i + 1])
+                hidden_i = maybe_index_tuple(hidden0, i)
+                out, hid = lstm2(x[:l, i:i + 1], hidden_i)
                 out_pad = pad(out, max_length)
                 seq_outs.append(out_pad)
                 seq_hiddens.append(hid)
@@ -4288,7 +4308,7 @@ class TestNN(NNTestCase):
 
             # Use packed format
             packed = rnn_utils.pack_padded_sequence(x, lengths, enforce_sorted=enforce_sorted)
-            packed_out, packed_hidden = lstm(packed)
+            packed_out, packed_hidden = lstm(packed, hidden0)
             unpacked, unpacked_len = rnn_utils.pad_packed_sequence(packed_out)
 
             # Check forward
@@ -4318,8 +4338,9 @@ class TestNN(NNTestCase):
             [False, [2, 1, 3, 2, 10, 5, 3]],
         ]
 
-        for enforce_sorted, seq_lens in tests:
-            check_lengths(seq_lens, enforce_sorted)
+        for enforce_sorted, seq_lens, in tests:
+            for use_default_hiddens in [True, False]:
+                check_lengths(seq_lens, enforce_sorted, use_default_hiddens)
 
     def test_variable_sequence(self):
         self._test_variable_sequence()
