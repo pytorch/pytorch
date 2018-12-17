@@ -8,7 +8,7 @@ cd "$INSTALL_PREFIX"
 if [[ $BUILD_ENVIRONMENT == *-cuda* ]]; then
     num_gpus=$(nvidia-smi -L | wc -l)
 elif [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
-    num_gpus=$(rocm-smi -i | grep 'GPU ID' | wc -l)
+    num_gpus=$(rocminfo | grep 'Device Type.*GPU' | wc -l)
 else
     num_gpus=0
 fi
