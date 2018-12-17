@@ -8764,6 +8764,18 @@ a")
 
         self.assertExpectedGraph(foo.graph)
 
+    def test_cpp_function_tensor_str(self):
+        x = torch.randn(2, 2)
+        scale = torch.randn(2, 2, requires_grad=True)
+        shift = torch.randn(2, 2, requires_grad=True)
+
+        @torch.jit.script
+        def fn(x, scale, shift):
+            return scale * x + shift
+
+        with self.capture_stdout() as captured:
+            print(fn(x, scale, shift))
+
 
 class MnistNet(nn.Module):
     def __init__(self):
