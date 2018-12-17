@@ -957,6 +957,7 @@ class TestSparse(TestCase):
 
         test_add(10, 2, [2, 3, 4], [2, 3, 4])
         test_add(10, 2, [2, 3, 4], [2, 1, 4])
+        test_add(10, 2, [2, 3, 4], [1, 3, 4])
 
         def test_sub(nnz, sparse_dim, sizes1, sizes2):
             S1 = self._gen_sparse(sparse_dim, nnz, sizes1)[0]
@@ -977,6 +978,15 @@ class TestSparse(TestCase):
 
         test_sub(10, 2, [2, 3, 4], [2, 3, 4])
         test_sub(10, 2, [2, 3, 4], [2, 1, 4])
+        test_sub(10, 2, [2, 3, 4], [1, 3, 4])
+
+        # TODO:
+        # 1. test empty inputs
+        # 2. test inputs with shapes that are not broadcastable
+        #    1) len(S1.sizes()) < len(S2.sizes())
+        #    2) (2,3,4) vs (2,2,4)
+        #    3) (2,3,4) vs (3,4)  -> unsqueeze is needed
+        # 3. test differed dtypes
 
     def test_norm(self):
         def test_shape(sparse_dims, nnz, with_size):

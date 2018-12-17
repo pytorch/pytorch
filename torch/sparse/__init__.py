@@ -145,6 +145,9 @@ def add(input, other):
     For a sparse dim ``i``, if ``sizes(i)`` differs, then ``input.sizes(i) > 1``
     and ``other.sizes(i) == 1``.
 
+    Backward supports for :attr:`input` but not :attr:`other`. Note that
+    the gradients of :attr:`input` is coalesced.
+
     Args:
         input (SparseTensor): the first input SparseTensor
         other (SparseTensor): the second input SparseTensor
@@ -163,6 +166,9 @@ def sub(input, other):
     on sparse dims, and requires dense dims to be the same between two inputs.
     For a sparse dim ``i``, if ``sizes(i)`` differs, then ``input.sizes(i) > 1``
     and ``other.sizes(i) == 1``.
+
+    Backward supports for :attr:`input` but not :attr:`other`. Note that
+    the gradients of :attr:`input` is coalesced.
 
     Args:
         input (SparseTensor): the first input SparseTensor
