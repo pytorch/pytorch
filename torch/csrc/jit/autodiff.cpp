@@ -573,7 +573,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     value_list new_outputs;
     {
       WithInsertPoint guard(node->next());
-      auto fw_graph = compiled_graphs[0]->copy();
+      auto fw_graph = compiled_graphs[0];
       new_outputs = script::inlineCallTo(*graph, *fw_graph, node->inputs());
       for (size_t i = 0; i < node->outputs().size(); ++i) {
         new_outputs.at(i)->setType(node->outputs()[i]->type());
@@ -582,7 +582,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     }
 
     // Use backward graph to construct reverse_block
-    auto bw_graph = compiled_graphs[1]->copy();
+    auto bw_graph = compiled_graphs[1];
     auto grad_vec = grads.vec();
     auto it = grad_vec.begin();
     grad_vec.insert(it, new_outputs.back());
