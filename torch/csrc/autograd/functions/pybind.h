@@ -22,7 +22,7 @@ public:
     return true;
   }
   static handle cast(std::shared_ptr<torch::autograd::Function> src, return_value_policy /* policy */, handle /* parent */) {
-    auto fn = functionToPyObject(src);
+    auto fn = functionToPyObject(std::move(src));
     return handle(fn);
   }
 };

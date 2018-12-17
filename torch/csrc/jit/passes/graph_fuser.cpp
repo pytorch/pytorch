@@ -46,6 +46,8 @@ bool isSimpleMap(Node *node) {
     "aten::div(Tensor self, Tensor other) -> Tensor",
     "aten::exp(Tensor self) -> Tensor",
     "aten::expm1(Tensor self) -> Tensor",
+    "aten::erf(Tensor self) -> Tensor",
+    "aten::erfc(Tensor self) -> Tensor",
     "aten::floor(Tensor self) -> Tensor",
     "aten::fmod(Tensor self, Tensor other) -> Tensor",
     "aten::frac(Tensor self) -> Tensor",
@@ -971,6 +973,7 @@ void PeepholeOptimizeShapeExpressions(Block * block) {
       }
       if (unique_to_value.size() != node->inputs().size()) {
         std::vector<Value*> inputs;
+        inputs.reserve(unique_to_value.size());
         for (auto & entry : unique_to_value) {
           inputs.push_back(entry.second);
         }

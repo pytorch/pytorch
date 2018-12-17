@@ -306,7 +306,7 @@ static variable_list call_pre_hooks(Function& fn, variable_list inputs) {
   return inputs;
 }
 
-static variable_list call_post_hooks(Function& fn, variable_list outputs, variable_list inputs) {
+static variable_list call_post_hooks(Function& fn, variable_list outputs, const variable_list& inputs) {
   for (const auto& hook : fn.post_hooks()) {
     outputs = (*hook)(outputs, inputs);
   }
@@ -408,7 +408,7 @@ static variable_list call_function(FunctionTask& task) {
 
   if(has_post_hooks){
     // NOLINTNEXTLINE(bugprone-use-after-move)
-    return call_post_hooks(fn, std::move(outputs), std::move(inputs));
+    return call_post_hooks(fn, std::move(outputs), inputs);
   }
   return outputs;
 }

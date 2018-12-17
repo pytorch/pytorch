@@ -38,7 +38,7 @@ struct IfView {
 
 struct LoopView {
   explicit LoopView(Node* node) : node_(node) {
-    JIT_ASSERT(node->kind() == prim::Loop);
+    JIT_ASSERT(node->kind() == prim::Loop || node->kind() == onnx::Loop);
   }
   Block* bodyBlock() const {
     return node_->blocks().at(0);

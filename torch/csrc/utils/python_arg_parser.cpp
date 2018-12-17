@@ -286,7 +286,7 @@ FunctionSignature::FunctionSignature(const std::string& fmt)
   while (!done) {
     auto offset = fmt.find(", ", last_offset);
     if (offset == std::string::npos) {
-      offset = fmt.find(")", last_offset);
+      offset = fmt.find(')', last_offset);
       done = true;
       next_offset = offset + 1;
     } else {

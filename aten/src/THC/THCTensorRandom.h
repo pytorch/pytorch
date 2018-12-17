@@ -5,9 +5,9 @@
 
 #include <THC/generic/THCTensorRandom.h>
 #include <THC/THCGenerateAllTypes.h>
-#ifdef __HIP_PLATFORM_HCC__
-#include <hiprand_kernel.h>
-#endif
+
+#include <curand.h>
+#include <curand_kernel.h>
 
 typedef struct THCGenerator THCGenerator;
 
@@ -29,6 +29,6 @@ THC_API uint64_t THCRandom_initialSeed(struct THCState *state);
 THC_API void THCRandom_getRNGState(struct THCState *state, THByteTensor *rng_state);
 THC_API void THCRandom_setRNGState(struct THCState *state, THByteTensor *rng_state);
 
-THC_API struct curandStateMtgp32* THCRandom_generatorStates(struct THCState* state);
+THC_API curandStateMtgp32* THCRandom_generatorStates(struct THCState* state);
 
 #endif

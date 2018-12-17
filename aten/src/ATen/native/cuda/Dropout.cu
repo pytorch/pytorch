@@ -33,7 +33,7 @@ template <
           typename accscalar_t,
           typename IndexType,
           int ADims>
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
 __launch_bounds__(256,8)
 #endif
 __global__ void

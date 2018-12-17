@@ -58,14 +58,14 @@ public:
   Tensor(const Tensor&) = default;
   Tensor(Tensor&&) = default;
 
-  /* implicit */ Tensor(C10Tensor tensor)
+  explicit Tensor(C10Tensor tensor)
       : impl_(std::move(tensor).impl()) {}
 
-  /* implicit */ operator C10Tensor() const & {
+  explicit operator C10Tensor() const & {
     return C10Tensor(impl_);
   }
 
-  /* implicit */ operator C10Tensor() && {
+  explicit operator C10Tensor() && {
     return C10Tensor(std::move(impl_));
   }
 
