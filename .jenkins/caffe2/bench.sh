@@ -17,4 +17,4 @@ else
     cmd="$cmd --num_gpus 1"
 fi
 
-"$cmd"
+eval "$cmd"
