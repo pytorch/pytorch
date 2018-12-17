@@ -467,7 +467,7 @@ void initPythonIRBindings(PyObject * module_) {
     .def(py::init([](std::vector<TypePtr> a){ return TupleType::create(a); }))
     .def("elements", [](TupleType &self){
       std::vector<TypePtr> types;
-      for (auto type : self.elements()) {
+      for (const auto& type : self.elements()) {
         types.push_back(type);
       }
       return types;

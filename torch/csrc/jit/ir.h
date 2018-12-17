@@ -264,7 +264,7 @@ public:
     return scope_;
   }
   void setScope(ScopePtr scope) {
-    scope_ = scope;
+    scope_ = std::move(scope);
   }
   std::string scopeName() const {
     if (!scope_) {
@@ -676,12 +676,12 @@ struct Block {
   }
   Value * addInput(std::string name="") {
     Value * v = input_->addOutput();
-    v->setUniqueName(name);
+    v->setUniqueName(std::move(name));
     return v;
   }
   Value* insertInput(size_t i, std::string name = "") {
     Value* v = input_->insertOutput(i);
-    v->setUniqueName(name);
+    v->setUniqueName(std::move(name));
     return v;
   }
   void eraseInput(size_t i) {
@@ -829,7 +829,7 @@ public:
     return current_scope_;
   }
   void set_current_scope(ScopePtr scope) {
-    current_scope_ = scope;
+    current_scope_ = std::move(scope);
   }
   Value * addInput(std::string name="") {
     return block_->addInput(std::move(name));
@@ -876,7 +876,7 @@ public:
   // use node_map to translate inputs of n to inputs of the cloned node
   // if copy_blocks is false, it will not recursively clone the nested blocks
   // this node contains.
-  TORCH_API Node * createClone(Node * n, std::function<Value*(Value*)> value_map, bool copy_blocks=true);
+  TORCH_API Node * createClone(Node * n, const std::function<Value*(Value*)>& value_map, bool copy_blocks=true);
 
   TORCH_API Value* insertConstant(
       IValue val,
@@ -893,7 +893,7 @@ public:
       Symbol opname,
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs = {},
-      c10::optional<SourceRange> range = {});
+      const c10::optional<SourceRange>& range = {});
 
   Node * appendNode(Node * n) {
     return block_->appendNode(n);
@@ -976,7 +976,7 @@ struct WithCurrentScope : public ResourceGuard {
     g.set_current_scope(prev_scope);
   })
   , prev_scope(g.current_scope()) {
-    g.set_current_scope(scope);
+    g.set_current_scope(std::move(scope));
   }
 private:
   ScopePtr prev_scope;
@@ -990,9 +990,9 @@ inline Value::Value(Node * node_, size_t offset_)
   node_->graph_->all_values.emplace(this);
 }
 
-inline Value* Value::setType(const TypePtr type) {
+inline Value* Value::setType(TypePtr type) {
   JIT_ASSERT(type);
-  type_ = type;
+  type_ = std::move(type);
   for (Use & use : uses_) {
     use.user->schema_ = nullptr;
   }

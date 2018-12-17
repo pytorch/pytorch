@@ -5,7 +5,7 @@
 namespace torch {
 namespace jit {
 namespace {
-bool shouldAnnotate(TypePtr type) {
+bool shouldAnnotate(const TypePtr& type) {
   return type->isSubtypeOf(DynamicType::get()) ||
       type->kind() == TypeKind::ListType ||
       type->kind() == TypeKind::TupleType ||
@@ -134,7 +134,7 @@ bool AliasDb::writesToInputAlias(Node* n) const {
   });
 }
 
-std::unordered_set<Node*> AliasDb::getWritersForNode(const Node* n) const {
+std::unordered_set<Node*> AliasDb::getWriters(const Node* n) const {
   // Get all alias sets of this node
   // ... check the inputs
   std::unordered_set<Symbol> aliasSets;
@@ -165,6 +165,37 @@ std::unordered_set<Node*> AliasDb::getWritersForNode(const Node* n) const {
     }
   }
   return writers;
+}
+
+std::unordered_set<const Value*> AliasDb::getAliases(const Value* v) const {
+  std::unordered_set<const Value*> ret;
+  if (!valueToAlias_.count(v)) {
+    return ret;
+  }
+
+  const auto& aliasSets = valueToAlias_.at(v).sets();
+  for (const auto& aliasSet : aliasSets) {
+    const auto& aliases = aliasToValue_.at(aliasSet);
+    for (auto alias : aliases) {
+      ret.insert(alias);
+    }
+  }
+  return ret;
+}
+
+std::unordered_set<const Value*> AliasDb::getWrites(Node* n) const {
+  std::unordered_set<const Value*> writes;
+  for (const auto input : n->inputs()) {
+    if (writesTo(n, input)) {
+      writes.insert(input);
+    }
+  }
+  for (const auto output : n->outputs()) {
+    if (writesTo(n, output)) {
+      writes.insert(output);
+    }
+  }
+  return writes;
 }
 
 void AliasDb::dump() const {
@@ -202,7 +233,7 @@ void AliasDb::dump() const {
   }
 }
 
-void AliasDb::analyze(std::shared_ptr<Graph> graph) {
+void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
   // Assign aliases to the graph's inputs, assuming that all inputs of a given
   // type may alias to each other.
   const auto tensorAlias = getFreshAlias(/*isGraphInput=*/true);
@@ -531,7 +562,7 @@ void AliasDb::addAlias(const Value* value, Symbol alias) {
     valueToAlias_[value].addSet(alias);
   } else {
     AliasInfo aliasInfo;
-    aliasInfo.addSet(std::move(alias));
+    aliasInfo.addSet(alias);
     valueToAlias_.insert({value, std::move(aliasInfo)});
   }
 }

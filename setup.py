@@ -145,29 +145,11 @@ import json
 import glob
 import importlib
 
-from tools.setup_helpers.env import check_env_flag, check_negative_env_flag
+from tools.setup_helpers.env import (check_env_flag, check_negative_env_flag,
+                                     hotpatch_build_env_vars)
 
 
-def hotpatch_var(var, prefix='USE_'):
-    if check_env_flag('NO_' + var):
-        os.environ[prefix + var] = '0'
-    elif check_negative_env_flag('NO_' + var):
-        os.environ[prefix + var] = '1'
-    elif check_env_flag('WITH_' + var):
-        os.environ[prefix + var] = '1'
-    elif check_negative_env_flag('WITH_' + var):
-        os.environ[prefix + var] = '0'
-
-# Before we run the setup_helpers, let's look for NO_* and WITH_*
-# variables and hotpatch environment with the USE_* equivalent
-use_env_vars = ['CUDA', 'CUDNN', 'FBGEMM', 'MIOPEN', 'MKLDNN', 'NNPACK', 'DISTRIBUTED',
-                'OPENCV', 'TENSORRT', 'QNNPACK', 'FFMPEG', 'SYSTEM_NCCL',
-                'GLOO_IBVERBS']
-list(map(hotpatch_var, use_env_vars))
-
-# Also hotpatch a few with BUILD_* equivalent
-build_env_vars = ['BINARY', 'TEST', 'CAFFE2_OPS']
-[hotpatch_var(v, 'BUILD_') for v in build_env_vars]
+hotpatch_build_env_vars()
 
 from tools.setup_helpers.cuda import USE_CUDA, CUDA_HOME, CUDA_VERSION
 from tools.setup_helpers.build import (BUILD_BINARY, BUILD_TEST,
@@ -425,18 +407,6 @@ def build_libs(libs):
         sys.exit(1)
 
 
-# Copy Caffe2's Python proto files (generated during the build with the
-# protobuf python compiler) from the build folder to the root folder
-# cp root/build/caffe2/proto/proto.py root/caffe2/proto/proto.py
-def copy_protos():
-    report('setup.py::copy_protos()')
-    for src in glob.glob(
-            os.path.join(caffe2_build_dir, 'caffe2', 'proto', '*.py')):
-        dst = os.path.join(
-            cwd, os.path.relpath(src, caffe2_build_dir))
-        shutil.copyfile(src, dst)
-
-
 # Build all dependent libraries
 class build_deps(PytorchCommand):
     def run(self):
@@ -528,7 +498,6 @@ class develop(setuptools.command.develop.develop):
         self.run_command('create_version_file')
         setuptools.command.develop.develop.run(self)
         self.create_compile_commands()
-        copy_protos()
 
     def create_compile_commands(self):
         def load(filename):
@@ -919,6 +888,12 @@ if USE_CUDA:
     extensions.append(
         Extension(
             name=str('caffe2.python.caffe2_pybind11_state_gpu'),
+            sources=[]),
+    )
+if USE_ROCM:
+    extensions.append(
+        Extension(
+            name=str('caffe2.python.caffe2_pybind11_state_hip'),
             sources=[]),
     )
 

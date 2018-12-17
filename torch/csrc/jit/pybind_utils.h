@@ -287,6 +287,8 @@ inline py::object toPyObject(IValue&& ivalue) {
       t[i] = toPyObject(IValue{elements[i]});
     }
     return t;
+  } else if (ivalue.isDevice()) {
+    return py::cast<py::object>(THPDevice_New(ivalue.toDevice()));
   } else {
     AT_ERROR("Missing cases in 'toPyObject'! File a bug report.");
   }
@@ -319,8 +321,8 @@ private:
 
 inline Stack createStackForSchema(
     const FunctionSchema& schema,
-    tuple_slice args,
-    py::kwargs kwargs = py::kwargs()) {
+    const tuple_slice& args,
+    const py::kwargs& kwargs = py::kwargs()) {
   if(args.size() + kwargs.size() > schema.arguments().size()) {
     throw std::runtime_error(c10::str(
         schema.name(), "() expected at most ", schema.arguments().size(),

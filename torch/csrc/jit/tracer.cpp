@@ -6,7 +6,6 @@
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
-#include <torch/csrc/variable_tensor_functions.h>
 
 #include <string>
 #include <sstream>
@@ -192,7 +191,7 @@ void ArgumentStash::stashIntListElem(const std::string& arg_name, size_t size, s
   list_trace[idx] = prim;
 }
 
-void ArgumentStash::stashValue(const std::string& arg_name, size_t idx, const Variable& var, TypePtr type) {
+void ArgumentStash::stashValue(const std::string& arg_name, size_t idx, const Variable& var, const TypePtr& type) {
   if (!isTracing()) return;
 
   Value* ten = getValueTrace(var);

@@ -135,7 +135,6 @@ class TestSparse(TestCase):
             printed.append('')
         self.assertExpected('\n'.join(printed))
 
-    @skipIfRocm
     def test_basic(self):
         def test_shape(sparse_dims, nnz, with_size):
             if isinstance(with_size, Number):
@@ -173,7 +172,6 @@ class TestSparse(TestCase):
         self.assertEqual(x._indices().numel(), 0)
         self.assertEqual(x._values().numel(), 0)
 
-    @skipIfRocm
     def test_coalecce(self):
         for empty_i, empty_v, empty_nnz in itertools.product([True, False], repeat=3):
             sparse_size = [] if empty_i else [2, 1]
@@ -206,7 +204,6 @@ class TestSparse(TestCase):
             RuntimeError,
             lambda: self.SparseTensor(indices, values, torch.Size([2, 4, 2, 1])))
 
-    @skipIfRocm
     def test_to_dense(self):
         def test_tensor(x, res):
             x.to_dense()  # Tests triple to_dense for memory corruption
@@ -271,7 +268,6 @@ class TestSparse(TestCase):
         sp, _, _ = self._gen_sparse(2, 10, [3, 3, 3])
         self.assertRaises(RuntimeError, lambda: sp.to_sparse())
 
-    @skipIfRocm
     def test_shared(self):
         i = self.IndexTensor([[2]])
         v = self.ValueTensor([5])
@@ -287,7 +283,6 @@ class TestSparse(TestCase):
         i[0][0] = 0
         self.assertEqual(self.ValueTensor(3, 0), self.safeToDense(x))
 
-    @skipIfRocm
     def test_to_dense_hybrid(self):
         def test_tensor(x, res):
             x.to_dense()  # Tests double to_dense for memory corruption
@@ -332,7 +327,6 @@ class TestSparse(TestCase):
         res = self.ValueTensor(3, 4, 2, 0)
         test_tensor(x, res)
 
-    @skipIfRocm
     def test_contig(self):
         def test_tensor(x, exp_i, exp_v):
             x = self.safeCoalesce(x)
@@ -413,7 +407,6 @@ class TestSparse(TestCase):
         exp_v = self.ValueTensor(2, 0)
         test_tensor(x, exp_i, exp_v)
 
-    @skipIfRocm
     def test_contig_hybrid(self):
         def test_tensor(x, exp_i, exp_v):
             x = self.safeCoalesce(x)
@@ -516,7 +509,6 @@ class TestSparse(TestCase):
         test_shape(3, 10, [100, 100, 100, 5, 5, 5, 0])
         test_shape(3, 0, [0, 0, 100, 5, 5, 5, 0])
 
-    @skipIfRocm
     def test_Sparse_to_Sparse_copy_(self):
         # This is for testing torch.copy_(SparseTensor, SparseTensor)
         sparse_dims = 3
@@ -602,7 +594,6 @@ class TestSparse(TestCase):
         x = torch.sparse.FloatTensor(2, 3, 4, 0)
         test_tensor(x)
 
-    @skipIfRocm
     def test_transpose(self):
         def test_shape(sparse_dims, nnz, with_size):
             x = self._gen_sparse(sparse_dims, nnz, with_size)[0]
@@ -671,7 +662,6 @@ class TestSparse(TestCase):
         test_in_place(x)
         test_not_in_place(x)
 
-    @skipIfRocm
     def test_add_zeros(self):
         def test_shape(sparse_dims, nnz, sizes):
             x, _, _ = self._gen_sparse(sparse_dims, nnz, sizes)
@@ -686,7 +676,6 @@ class TestSparse(TestCase):
         test_shape(2, 20, [3, 17, 19, 5])
         test_shape(2, 20, [3, 17, 19, 0])
 
-    @skipIfRocm
     def test_cat(self):
         # shapes: list of tuples (sparse_dims, nnz, sizes)
         def test_shapes(shapes, dim, fail_message=None):
@@ -927,7 +916,6 @@ class TestSparse(TestCase):
         expected = y + r * self.safeToDense(x_)
         self.assertEqual(res, expected)
 
-    @skipIfRocm
     def test_spadd(self):
         self._test_spadd_shape(10, [5, 6])
         self._test_spadd_shape(10, [10, 10, 10])
@@ -937,7 +925,6 @@ class TestSparse(TestCase):
         self._test_spadd_shape(0, [50, 0, 20])
         self._test_spadd_shape(0, [50, 30, 0])
 
-    @skipIfRocm
     def test_spadd_hybrid(self):
         self._test_spadd_shape(10, [5, 6], [2, 3])
         self._test_spadd_shape(10, [10, 10, 10], [3])
@@ -1115,7 +1102,6 @@ class TestSparse(TestCase):
         self._test_basic_ops_shape(0, 0, [10, 10, 10], [2, 0])
         self._test_basic_ops_shape(0, 0, [10, 10, 0], [2, 0])
 
-    @skipIfRocm
     def test_add_dense_sparse_mismatch(self):
         def test_shape(dense_size, sparse_dims_shape, dense_dims_shape, sparse_size):
             x = torch.zeros(dense_size, dtype=self.value_dtype, device=self.device)
@@ -1294,7 +1280,6 @@ class TestSparse(TestCase):
                 for length in range(dim_sz - start):
                     yield [dim, start, length]
 
-    @skipIfRocm
     def test_narrow(self):
         shape = [3, 3, 4, 2]
         input, _, _ = self._gen_sparse(4, 19, shape)
@@ -1443,7 +1428,6 @@ class TestSparse(TestCase):
         self._test_new_device((30, 20, 10), 1)
         self._test_new_device((30, 20, 10, 0), 1)
 
-    @skipIfRocm
     def test_new(self):
         def test_shape(sparse_dims, nnz, with_size):
             x, indices, values = self._gen_sparse(sparse_dims, nnz, with_size)
@@ -1595,7 +1579,6 @@ class TestSparse(TestCase):
         test_shape([3, 0], [0, 2, 4, 0], [0, 0, 0, 2, 4, 0], [0, 0, 0, 2, 4, 0])
         test_shape([3, 0], [0, 2, 4, 0], [1, 2, 3, 2, 4, 0], [1, 2, 3, 2, 4, 0])
 
-    @skipIfRocm
     def test_factory_dense_dim(self):
         indices = self.IndexTensor([[0]])
         values = self.ValueTensor([[[1, 1, 1], [1, 1, 1]]])
@@ -1750,7 +1733,6 @@ class TestSparse(TestCase):
         x = self.SparseTensor(1, 0)
         self.assertTrue(x.is_sparse)
 
-    @skipIfRocm
     def test_resize_as(self):
         def do_test(t):
             y = t.new().resize_as_(t).zero_()

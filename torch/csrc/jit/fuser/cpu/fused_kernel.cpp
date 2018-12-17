@@ -114,7 +114,6 @@ FusedKernelCPU::FusedKernelCPU(
           std::move(chunk_desc),
           std::move(concat_desc),
           has_random) {
-  auto& config = getConfig();
   TempFile so_file(so_template, 3);
   TempFile cpp_file(cpp_template, 4);
   cpp_file.write(code_);

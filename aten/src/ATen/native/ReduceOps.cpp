@@ -194,7 +194,7 @@ static inline Tensor mean(const Tensor &self, optional<ScalarType> dtype) {
     Tensor result = at::native::sum(self);
     return result.div_(self.numel());
   } else {
-    return self.type().scalarTensor(std::numeric_limits<double>::quiet_NaN());
+    return at::scalar_tensor(std::numeric_limits<double>::quiet_NaN(), self.options());
   }
 }
 
@@ -457,7 +457,7 @@ Tensor _norm(const Tensor &self, Scalar p) {
       return at::legacy::th::_th_norm(self, p);
     } else {
       if (self.is_contiguous()) {
-        Tensor result = CPU(kFloat).scalarTensor(0).toType(self.type());
+        Tensor result = at::scalar_tensor(0, CPU(kFloat).options()).toType(self.type());
         norm_kernel(kCPU, result, self, p, c10::nullopt);
         return result;
       } else {

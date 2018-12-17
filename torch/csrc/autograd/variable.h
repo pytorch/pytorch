@@ -304,7 +304,7 @@ struct TORCH_API Variable : public at::Tensor {
 /// Each `Variable` has one unique `AutogradMeta` struct, which stores autograd
 /// metadata fields that are necessary for tracking the Variable's autograd history.
 
-struct TORCH_API Variable::AutogradMeta : public at::AutogradMetaInterface {
+struct TORCH_API Variable::AutogradMeta : public c10::AutogradMetaInterface {
   std::string name;
 
   Variable grad_;
@@ -674,11 +674,11 @@ inline void Variable::backward(
     c10::optional<Tensor> gradient,
     bool keep_graph,
     bool create_graph) const {
-  get()->backward(gradient, keep_graph, create_graph);
+  get()->backward(std::move(gradient), keep_graph, create_graph);
 }
 
 inline void Variable::set_data(Tensor new_data) const {
-  get()->set_data(new_data);
+  get()->set_data(std::move(new_data));
 }
 
 inline void Variable::set_gradient_edge(Edge edge) noexcept {
