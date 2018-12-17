@@ -523,6 +523,11 @@ Tensor _sparse_addmm_sparse_backward(const Tensor& grad, const Tensor& sparse_, 
   return grad_sparse.sparse_mask(at::SparseTensorRef(sparse));
 }
 
+Tensor _sparse_add_backward(const Tensor& grad, const Tensor& t) {
+  AT_ASSERT(grad.is_sparse());
+  return grad.coalesce();
+}
+
 Tensor renorm_backward(const Tensor & grad, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
   auto transposed_sizes = self.transpose(dim, 0).sizes().vec();
   auto flatten = [&](const Tensor & t) {

@@ -2275,7 +2275,8 @@
 
 # NOTE [Masked SparseTensor APIs]
 #
-# This includes all sparse APIs under 'torch.sparse.*'
+# Masked SparseTensor APIs treats SparseTensor inputs as masked tensor, such that only nnz locations
+# will engage in computations performed by an operator. All maked SparseTensor APIs are under 'torch.sparse.*'.
 
 - func: _sparse_addmm(Tensor self, Tensor sparse, Tensor dense, *, Scalar beta=1, Scalar alpha=1) -> Tensor
 
@@ -2299,6 +2300,11 @@
   dispatch:
     SparseCPU: _sparse_add_cpu
     SparseCUDA: _sparse_add_cuda
+
+- func: _sparse_add(Tensor self, Scalar other, *, Scalar alpha=1) -> Tensor
+  dispatch:
+    SparseCPU: _sparse_add_scalar
+    SparseCUDA: _sparse_add_scalar
 
 - func: numel(Tensor self) -> int64_t
   variants: function, method

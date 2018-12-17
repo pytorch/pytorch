@@ -938,47 +938,42 @@ class TestSparse(TestCase):
     @skipIfRocm
     def test_sparse_add_sub(self):
 
-        def test_add(nnz, sparse_dim, sizes1, sizes2):
+        def test_shape(sparse_op, dense_op, nnz, sparse_dim, sizes1, sizes2):
             S1 = self._gen_sparse(sparse_dim, nnz, sizes1)[0]
             S2 = self._gen_sparse(sparse_dim, nnz, sizes2)[0]
-            S3 = torch.sparse.add(S1, S2)
+            S3 = sparse_op(S1, S2)
 
             D1 = S1.to_dense()
             D2 = S2.to_dense()
             mask = (D1 == 0)
 
-            D3 = D1 + D2
+            D3 = dense_op(D1, D2)
             D3.masked_fill_(mask, 0)
             self.assertEqual(S3.to_dense(), D3)
 
             def f(S1, S2):
-                return torch.sparse.add(S1, S2).to_dense()
+                return sparse_op(S1, S2).to_dense()
             gradcheck(f, (S1.requires_grad_(True), S2), check_sparse_nnz=True)
 
-        test_add(10, 2, [2, 3, 4], [2, 3, 4])
-        test_add(10, 2, [2, 3, 4], [2, 1, 4])
-        test_add(10, 2, [2, 3, 4], [1, 3, 4])
-
-        def test_sub(nnz, sparse_dim, sizes1, sizes2):
-            S1 = self._gen_sparse(sparse_dim, nnz, sizes1)[0]
-            S2 = self._gen_sparse(sparse_dim, nnz, sizes2)[0]
-            S3 = torch.sparse.sub(S1, S2)
-
-            D1 = S1.to_dense()
-            D2 = S2.to_dense()
-            mask = (D1 == 0)
-
-            D3 = D1 - D2
+            # test scalar
+            S3 = sparse_op(S1, 5)
+            D3 = dense_op(D1, 5)
             D3.masked_fill_(mask, 0)
             self.assertEqual(S3.to_dense(), D3)
 
-            def f(S1, S2):
-                return torch.sparse.sub(S1, S2).to_dense()
-            gradcheck(f, (S1.requires_grad_(True), S2), check_sparse_nnz=True)
+            def f(S1):
+                return sparse_op(S1, 5).to_dense()
+            gradcheck(f, (S1.requires_grad_(True),), check_sparse_nnz=True)
 
-        test_sub(10, 2, [2, 3, 4], [2, 3, 4])
-        test_sub(10, 2, [2, 3, 4], [2, 1, 4])
-        test_sub(10, 2, [2, 3, 4], [1, 3, 4])
+        sparse_add, dense_add = lambda a, b: torch.sparse.add(a, b), lambda a, b: torch.add(a, b)
+        test_shape(sparse_add, dense_add, 10, 2, [2, 3, 4], [2, 3, 4])
+        test_shape(sparse_add, dense_add, 10, 2, [2, 3, 4], [2, 1, 4])
+        test_shape(sparse_add, dense_add, 10, 2, [2, 3, 4], [1, 3, 4])
+
+        sparse_sub, dense_sub = lambda a, b: torch.sparse.sub(a, b), lambda a, b: torch.sub(a, b)
+        test_shape(sparse_sub, dense_sub, 10, 2, [2, 3, 4], [2, 3, 4])
+        test_shape(sparse_sub, dense_sub, 10, 2, [2, 3, 4], [2, 1, 4])
+        test_shape(sparse_sub, dense_sub, 10, 2, [2, 3, 4], [1, 3, 4])
 
         # test empty SparseTensor input
         S1 = self._gen_sparse(3, 10, [2, 3, 4])[0]
@@ -1000,7 +995,6 @@ class TestSparse(TestCase):
         S2 = self._gen_sparse(2, 10, [2, 3, 4])[0]
         S2 = S2.to(dtype=torch.double)
         self.assertRaises(RuntimeError, lambda: torch.sparse.add(S1, S2))
-
 
     def test_norm(self):
         def test_shape(sparse_dims, nnz, with_size):

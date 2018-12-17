@@ -867,7 +867,10 @@
   dense: mm_mat2_backward(grad, sparse, dense.sizes(), dense.strides(), alpha)
 
 - name: _sparse_add(Tensor self, Tensor other, *, Scalar alpha)
-  self: grad
+  self: _sparse_add_backward(grad, self)
+
+- name: _sparse_add(Tensor self, Scalar other, *, Scalar alpha)
+  self: _sparse_add_backward(grad, self)
 
 - name: _standard_gamma(Tensor self, Generator generator)
   self: grad * _standard_gamma_grad(self, result)

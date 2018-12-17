@@ -150,7 +150,7 @@ def add(input, other):
 
     Args:
         input (SparseTensor): the first input SparseTensor
-        other (SparseTensor): the second input SparseTensor
+        other (SparseTensor or a scalar): the value to add to input
 
     Example::
 
@@ -172,7 +172,7 @@ def sub(input, other):
 
     Args:
         input (SparseTensor): the first input SparseTensor
-        other (SparseTensor): the second input SparseTensor
+        other (SparseTensor or a scalar): the value to add to input
 
     Example::
 

@@ -302,6 +302,22 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
 // which will coalesce input tensors. However, all these rely on other components
 // to work for model training on masked SparsesTenors, such as 'optimizer'.
 // --------------------------------------------------------------------
+SparseTensor _sparse_add_scalar(const SparseTensor& t_, Scalar src, Scalar alpha) {
+  AT_ASSERT(t_.is_sparse());
+
+  if (t_._nnz() == 0) {
+    return t_.clone();
+  }
+
+  auto t = t_.coalesce();
+
+  Tensor r_values = at::add(t._values(), src, alpha);
+  SparseTensor r = at::_sparse_coo_tensor_with_dims_and_tensors(t.sparse_dim(), t.dense_dim(), t.sizes(), t._indices().clone(), r_values, t.options());
+  r._coalesced_(true);
+  return r;
+}
+
+
 SparseTensor _sparse_add_cpu(const SparseTensor& t_, const SparseTensor& src_, Scalar alpha) {
   AT_ASSERT(t_.is_sparse());
   AT_ASSERT(src_.is_sparse());
