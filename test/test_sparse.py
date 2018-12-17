@@ -951,6 +951,10 @@ class TestSparse(TestCase):
             D3.masked_fill_(mask, 0)
             self.assertEqual(S3.to_dense(), D3)
 
+            def f(S1, S2):
+                return torch.sparse.add(S1, S2).to_dense()
+            gradcheck(f, (S1.requires_grad_(True), S2), check_sparse_nnz=True)
+
         test_add(10, 2, [2, 3, 4], [2, 3, 4])
         test_add(10, 2, [2, 3, 4], [2, 1, 4])
 
@@ -966,6 +970,10 @@ class TestSparse(TestCase):
             D3 = D1 - D2
             D3.masked_fill_(mask, 0)
             self.assertEqual(S3.to_dense(), D3)
+
+            def f(S1, S2):
+                return torch.sparse.sub(S1, S2).to_dense()
+            gradcheck(f, (S1.requires_grad_(True), S2), check_sparse_nnz=True)
 
         test_sub(10, 2, [2, 3, 4], [2, 3, 4])
         test_sub(10, 2, [2, 3, 4], [2, 1, 4])
