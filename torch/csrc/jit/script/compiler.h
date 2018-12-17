@@ -177,6 +177,22 @@ struct TORCH_API AnnotateValue : public SugaredValue {
   }
 };
 
+// matched against for special handling of getattr expressions
+struct TORCH_API GetAttrValue : SugaredValue {
+  GetAttrValue() = default;
+  std::string kind() const override {
+    return "getattr";
+  }
+};
+
+// matched against for special handling of isinstance expressions
+struct TORCH_API IsInstanceValue : SugaredValue {
+  IsInstanceValue() = default;
+  std::string kind() const override {
+    return "isinstance";
+  }
+};
+
 using Resolver = std::function<std::shared_ptr<SugaredValue>(const std::string& name, Method& m, const SourceRange& loc)>;
 
 inline std::shared_ptr<SugaredValue> nativeResolver(const std::string& name, Method& m, const SourceRange& loc){
