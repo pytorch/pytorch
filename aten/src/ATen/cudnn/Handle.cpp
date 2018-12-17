@@ -14,7 +14,7 @@ namespace {
 
 struct Handle {
   cudnnHandle_t handle;
-  Handle(bool create = true) : handle(nullptr)
+  Handle(bool create = false) : handle(nullptr)
   {
     std::cout << "thread " << std::this_thread::get_id()
               << ", Handle(" << create << ")" << std::endl;
@@ -36,7 +36,7 @@ struct Handle {
   // unordered_map<int, vector<unique_ptr<Handle>>> created_handles;
   Handle(const Handle& rhs) = delete;
   // Following https://stackoverflow.com/questions/3279543/what-is-the-copy-and-swap-idiom
-  Handle(Handle&& rhs) : Handle(false)
+  Handle(Handle&& rhs) : Handle()
   {
     std::cout << "thread " << std::this_thread::get_id()
               << ", Handle(Handle&&)"
@@ -74,7 +74,7 @@ struct Handle {
 };
 
 std::mutex mutex;
-std::unordered_map<int, Handle> handles;
+std::unordered_map<int, std::vector<Handle>> handles;
 
 }  // namespace
 
@@ -84,8 +84,29 @@ cudnnHandle_t getCudnnHandle()
   int device;
   AT_CUDA_CHECK(cudaGetDevice(&device));
 
+  std::cout << "thread " << std::this_thread::get_id()
+            << ", device " << device
+            << ", getCudnnHandle before mutex" << std::endl;
+
   std::lock_guard<std::mutex> guard(mutex);
-  return handles[device].handle;
+
+  std::cout << "thread " << std::this_thread::get_id()
+            << ", device " << device
+            << ", getCudnnHandle after mutex" << std::endl;
+
+  if(handles[device].size() > 0)
+  {
+    std::cout << "thread " << std::this_thread::get_id()
+              << ", getCudnnHandle first case" << std::endl;
+    return handles[device].handle;
+  }
+  else
+  {
+    std::cout << "thread " << std::this_thread::get_id()
+              << ", getCudnnHandle second case" << std::endl;
+    handles[device].emplace_back(true /*create*/);
+    return handles[device].handle;
+  }
 }
 
 }} // namespace at::cudnn
