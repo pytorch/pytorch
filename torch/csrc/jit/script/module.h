@@ -1,20 +1,20 @@
 #pragma once
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/graph_executor.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/passes/shape_analysis.h"
-#include "torch/csrc/jit/argument_spec.h"
-#include "torch/csrc/jit/function_schema.h"
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/named_value.h"
-#include "torch/csrc/jit/source_range.h"
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/graph_executor.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/argument_spec.h>
+#include <torch/csrc/jit/function_schema.h>
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/named_value.h>
+#include <torch/csrc/jit/source_range.h>
 
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 #include <torch/csrc/utils/memory.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <c10/util/ArrayRef.h>
-#include "c10/util/Optional.h"
+#include <c10/util/Optional.h>
 
 #include <functional>
 #include <memory>
@@ -92,7 +92,7 @@ struct Method {
   // adding any extra parameters necessary to do this call
 
   // defined here to keep details of member_input handling confined to this class
-  std::vector<Value*> emit_call_to(SourceRange loc, Method & callee, ArrayRef<NamedValue> args, ArrayRef<NamedValue> kwargs);
+  std::vector<Value*> emit_call_to(const SourceRange& loc, Method & callee, ArrayRef<NamedValue> args, ArrayRef<NamedValue> kwargs);
 
   // if this isn't yet defined, run its method_creator function
   TORCH_API void ensure_defined();
@@ -123,7 +123,7 @@ struct Method {
       stack.push_back(*inp);
     }
     const auto size = stack.size();
-    setInputTypes(*retval, ArgumentSpec(with_grad, std::move(stack), size));
+    setInputTypes(*retval, ArgumentSpec(with_grad, stack, size));
     PropagateInputShapes(retval);
     return retval;
   }
@@ -334,7 +334,7 @@ struct Module {
   }
 
   IValue forward(std::vector<IValue> inputs) {
-    return get_method("forward")(inputs);
+    return get_method("forward")(std::move(inputs));
   }
 
   void register_parameter(const std::string & name, autograd::Variable v, bool is_buffer) {
@@ -356,7 +356,7 @@ struct Module {
   }
 
   Method& create_method(const std::string & name, std::function<void(Method&)> creator) {
-    std::unique_ptr<Method> method(new Method(this, name, optimize, std::make_shared<Graph>(), {}, creator));
+    std::unique_ptr<Method> method(new Method(this, name, optimize, std::make_shared<Graph>(), {}, std::move(creator)));
     return *methods.insert(name, std::move(method));
   }
 
@@ -403,6 +403,12 @@ struct Module {
       return pm->get();
     }
     return nullptr;
+  }
+  void apply(std::function<void(Module&)> fn) {
+    for (auto &submod : get_modules()) {
+      submod.value().module->apply(fn);
+    }
+    fn(*this);
   }
 
   /// Recursively casts all parameters to the given `dtype` and `device`.
@@ -454,10 +460,31 @@ struct Module {
 
   void save(const std::string& filename);
 
+  void copy_into(std::function<std::shared_ptr<Module>(std::vector<std::string>)> module_lookup, std::vector<std::string> names = {}) const {
+    std::unordered_map<at::Tensor*, at::Tensor*> parameter_remap;
+    auto curr = module_lookup(names);
+    for (auto &kv : parameters) {
+      curr->register_parameter(kv.key(), *kv.value().slot(), kv.value().is_buffer);
+      parameter_remap[kv.value().slot()] = curr->parameter_slot(kv.key());
+    }
+    for (auto &kv : modules) {
+      names.push_back(kv.key());
+      kv.value().module->copy_into(module_lookup, names);
+      names.pop_back();
+    }
+    for (auto &kv : methods) {
+      std::vector<at::Tensor*> params;
+      for (auto &p : kv.value()->params()) {
+        params.push_back(parameter_remap[p]);
+      }
+      curr->create_method(kv.key(), kv.value()->graph()->copy(), params);
+    }
+  }
+
  private:
   void to_impl(
-      c10::optional<at::Device> device,
-      c10::optional<at::ScalarType> dtype,
+      const c10::optional<at::Device>& device,
+      const c10::optional<at::ScalarType>& dtype,
       bool non_blocking);
 
   // invariant: to ensure member_inputs of Methods stay valid,
@@ -474,7 +501,7 @@ struct Module {
 // match the functions schema
 c10::optional<std::vector<Value*>> try_emit_call_to(
     Graph& graph,
-    SourceRange loc,
+    const SourceRange& loc,
     Method& callee,
     c10::optional<NamedValue> self,
     ArrayRef<NamedValue> args,

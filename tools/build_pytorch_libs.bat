@@ -27,7 +27,7 @@ if not exist torch\lib\tmp_install mkdir torch\lib\tmp_install
 
 : Variable defaults
 set /a USE_CUDA=0
-set /a USE_FBGEMM=0
+set /a USE_FBGEMM=1
 set /a USE_ROCM=0
 set /a USE_NNPACK=0
 set /a USE_QNNPACK=0
@@ -254,6 +254,15 @@ goto:eof
   %MAKE_COMMAND%
   IF ERRORLEVEL 1 exit 1
   IF NOT ERRORLEVEL 0 exit 1
+
+  :: Install Python proto files
+  IF "%BUILD_PYTHON%" == "ON" (
+    for /f "delims=" %%i in ('where /R caffe2\proto *.py') do (
+      IF NOT "%%i" == "%CD%\caffe2\proto\__init__.py" (
+        copy /Y %%i ..\caffe2\proto\
+      )
+    )
+  )
 
   popd
   @endlocal

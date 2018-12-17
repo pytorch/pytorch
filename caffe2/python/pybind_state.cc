@@ -6,7 +6,6 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "caffe2/contrib/script/compiler.h"
 #include "caffe2/core/asan.h"
 #include "caffe2/core/blob_stats.h"
 #include "caffe2/core/db.h"
@@ -355,7 +354,7 @@ void addObjectMethods(py::module& m) {
               auto feeder = CreateFeeder(option.device_type());
               CAFFE_ENFORCE(
                   feeder, "Unknown device type encountered in FeedBlob.");
-              feeder->Feed(option, array, blob);
+              feeder->Feed(option, array, blob, true); /* default to inplace feed */
               return true;
             }
 #else
@@ -938,29 +937,6 @@ void addObjectMethods(py::module& m) {
             }
             return pyout;
           });
-
-  py::class_<script::CompilationUnit>(m, "CompilationUnit")
-      .def(py::init<>())
-      .def("define", &script::CompilationUnit::define)
-      .def("get_proto", &script::CompilationUnit::getProto)
-      .def(
-          "create_net",
-          [](script::CompilationUnit* self, const std::string& name) {
-            auto net = self->createNet(gWorkspace, name);
-            CAFFE_ENFORCE(net);
-            return net;
-          })
-      .def(
-          "extern",
-          [](script::CompilationUnit* self,
-             const std::string& name,
-             py::object py_proto) {
-            py::bytes bytes = py_proto.attr("SerializeToString")();
-            std::unique_ptr<caffe2::NetDef> proto(new NetDef());
-            CAFFE_ENFORCE(ParseProtoFromLargeString(
-                bytes.cast<std::string>(), proto.get()));
-            self->defineExtern(name, std::move(proto));
-          });
 }
 
 void addGlobalMethods(py::module& m) {
@@ -1449,7 +1425,6 @@ void addGlobalMethods(py::module& m) {
               feeder,
               "Unknown device type encountered in FeedBlob: ",
               option.device_type());
-          // TODO: Blob store Tensor directly?
           feeder->Feed(option, array, blob);
           return true;
         }

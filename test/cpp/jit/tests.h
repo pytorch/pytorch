@@ -45,6 +45,7 @@
 #include "torch/csrc/jit/passes/constant_propagation.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
 #include "torch/csrc/jit/passes/lower_tuples.h"
 #include "torch/csrc/jit/passes/requires_grad_analysis.h"
@@ -53,7 +54,6 @@
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/utils/hash.h"
-#include "torch/csrc/variable_tensor_functions.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
 
 #include "torch/csrc/autograd/engine.h"
@@ -835,8 +835,8 @@ void testDifferentiate(std::ostream& out = std::cout) {
 
   auto grad_spec = differentiate(graph);
   std::vector<size_t> expected_captured_inputs = {0, 1};
-  std::vector<size_t> expected_captured_outputs = {1, 2, 3, 4, 5, 6, 7};
-  std::vector<size_t> expected_input_vjps = {0, 3};
+  std::vector<size_t> expected_captured_outputs = {1, 2};
+  std::vector<size_t> expected_input_vjps = {0, 1};
   std::vector<size_t> expected_output_vjps = {0, 1};
   ASSERT_EQ(grad_spec.f_real_outputs, 1);
   ASSERT_EQ(grad_spec.df_input_captured_inputs, expected_captured_inputs);
@@ -866,17 +866,61 @@ void testDifferentiateWithRequiresGrad(std::ostream& out = std::cout) {
   PropagateRequiresGrad(graph);
 
   auto grad_spec = differentiate(graph);
-  std::vector<size_t> expected_input_vjps = {1, 4}; // for e and %4 = (d + a)
+  std::vector<size_t> expected_input_vjps = {1, 2}; // for e and %4 = (d + a)
   std::vector<size_t> expected_output_vjps = {0}; // only a requires grad
   ASSERT_EQ(grad_spec.f_real_outputs, 2);
   ASSERT_EQ(grad_spec.df_input_captured_inputs, std::vector<size_t>({0}));
-  ASSERT_EQ(grad_spec.df_input_captured_outputs, std::vector<size_t>({2, 3, 4, 5, 6, 7, 8}));
+  ASSERT_EQ(grad_spec.df_input_captured_outputs, std::vector<size_t>({2, 3}));
   ASSERT_EQ(grad_spec.df_input_vjps, expected_input_vjps);
   ASSERT_EQ(grad_spec.df_output_vjps, expected_output_vjps);
   out << "testDifferentiateWithRequiresGrad\n";
   out << *grad_spec.f;
   out << *grad_spec.df;
   out << "\n";
+}
+
+void testRegisterFusionCachesKernel(std::ostream& out = std::cout) {
+  // Build up a fake graph with a FusionGroup
+  auto createGraphWithNames = [](std::string cname, std::string dname) {
+    auto graph = std::make_shared<Graph>();
+    at::ScalarType s = at::ScalarType::Float;
+    auto type = CompleteTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
+    auto a = SymbolicVariable::asNewInput(*graph, type);
+    auto b = SymbolicVariable::asNewInput(*graph, type);
+    auto c = a * b;
+    auto d = c * a;
+    c.value()->setUniqueName(cname);
+    d.value()->setUniqueName(dname);
+    graph->registerOutput(d.value());
+    FuseGraph(graph);
+    return graph;
+  };
+
+  auto getFusionGroup = [](const std::shared_ptr<Graph>& graph) {
+    const auto& nodes = graph->nodes();
+    auto maybe_fusion_group = std::find_if(
+        nodes.begin(), nodes.end(),
+        [](const Node* node) { return node->kind() == prim::FusionGroup; });
+    JIT_ASSERTM(
+        maybe_fusion_group != nodes.end(),
+        "testRegisterFusionCachesKernel: could not create FusionGroup");
+    return *maybe_fusion_group;
+  };
+
+  // Create two alpha-equivalent fusion groups
+  auto graph1 = createGraphWithNames("c1", "d1");
+  auto fg1 = getFusionGroup(graph1);
+
+  auto graph2 = createGraphWithNames("c2", "d2");
+  auto fg2 = getFusionGroup(graph2);
+
+  // Register both with the fusion compiler.
+  auto expected_key = registerFusion(fg1);
+  auto second_key = registerFusion(fg2);
+
+  // Because the graphs are alpha-equivalent, they should return the same key
+  // and therefore share a KernelSpec to share kernels for specializations
+  ASSERT_EQ(second_key, expected_key);
 }
 
 void testCreateAutodiffSubgraphs(std::ostream& out = std::cout) {

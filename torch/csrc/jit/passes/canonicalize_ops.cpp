@@ -1,6 +1,6 @@
-#include "torch/csrc/jit/passes/canonicalize_ops.h"
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/jit/symbolic_variable.h"
+#include <torch/csrc/jit/passes/canonicalize_ops.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/symbolic_variable.h>
 
 
 namespace torch { namespace jit {
@@ -74,7 +74,7 @@ static void CanonicalizeOps(Block* block) {
         if (other->dim() == 0) {
           WithInsertPoint insert_guard {*it};
           auto graph = it->owningGraph();
-          auto new_other = graph->insertConstant(other->_local_scalar());
+          auto new_other = graph->insertConstant(other->item());
           std::vector<Value*> inputs = it->inputs().vec();
           inputs.at(1) = new_other;
           Value * new_output = graph->insertNode(graph->create(it->kind(), inputs))->output();

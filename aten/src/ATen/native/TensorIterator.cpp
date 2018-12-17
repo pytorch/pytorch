@@ -6,19 +6,6 @@
 
 namespace at {
 
-struct DimCounter {
-  DimCounter(IntList shape, Range range);
-
-  void increment(const std::array<int64_t, 2>& step);
-  bool is_done() const;
-  std::array<int64_t, 2> max_step() const;
-
-  IntList shape;
-  Range range;
-  DimVector values;
-  int64_t offset;
-};
-
 using DimMask = TensorIterator::DimMask;
 using PtrVector = TensorIterator::PtrVector;
 using loop_t = TensorIterator::loop_t;
@@ -114,6 +101,13 @@ void TensorIterator::compute_types() {
         if (allow_cpu_scalars_ && op.tensor.defined() && op.tensor.dim() == 0 &&
             type.device_type() == kCUDA && op.tensor.type().device_type() == kCPU) {
           // don't cast CPU scalars in CUDA ops that directly support them
+          op.type = &op.tensor.type();
+        } else if (promote_gpu_output_dtypes_ && op.tensor.defined() &&
+            !op.is_output && op.tensor.type().scalarType() == kHalf &&
+            type.scalarType() == kFloat && type.device_type() == kCUDA &&
+            op.tensor.type().device_type() == kCUDA) {
+          // allow input tensor type upcasting for fp16 to fp32 in fused kernel
+          // on GPU
           op.type = &op.tensor.type();
         } else {
           op.type = &type;
@@ -385,6 +379,9 @@ void TensorIterator::serial_for_each(const loop_t& loop, Range range) const {
 }
 
 void TensorIterator::serial_for_each(const loop2d_t& loop, Range range) const {
+  if (range.size() == 0) {
+    return;
+  }
   auto strides = get_strides();
   while (strides.size() < 2 * ntensors()) {
     strides.push_back(0);
@@ -398,7 +395,7 @@ void TensorIterator::serial_for_each(const loop2d_t& loop, Range range) const {
     auto counter = DimCounter(shape_, range);
     while (!counter.is_done()) {
       auto ptrs = get_data_ptrs(base_ptrs, counter.values);
-      auto step = counter.max_step();
+      auto step = counter.max_2d_step();
       loop(ntensors(), ptrs.data(), strides.data(), step[0], step[1]);
       counter.increment(step);
     }
@@ -456,6 +453,16 @@ void TensorIterator::narrow(int dim, int64_t start, int64_t size) {
   }
 }
 
+void TensorIterator::select_all_keeping_dim(int start_dim, IntList indices) {
+  AT_ASSERT(start_dim <= ndim());
+  for (int i = start_dim; i < ndim(); ++i) {
+    for (auto& op : operands_) {
+      op.data = ((char*)op.data) + op.stride_bytes[i] * indices[i - start_dim];
+    }
+    shape_[i] = 1;
+  }
+}
+
 std::unique_ptr<TensorIterator> TensorIterator::binary_op(Tensor& out, const Tensor& a, const Tensor& b) {
   auto builder = TensorIterator::Builder();
   if (a.device().is_cuda() && b.device().is_cuda()) {
@@ -475,6 +482,7 @@ std::unique_ptr<TensorIterator> TensorIterator::reduce_op(Tensor& out, const Ten
   auto builder = TensorIterator::Builder();
   builder.add_output(out);
   builder.add_input(a);
+  builder.iter_->promote_gpu_output_dtypes_ = true;
   builder.iter_->resize_outputs_ = false;
   builder.iter_->is_reduction_ = true;
   return builder.build();
@@ -677,8 +685,10 @@ DimCounter::DimCounter(IntList shape, Range range)
   int64_t ndim = values.size();
   for (int dim = 0; dim < ndim; dim++) {
     int64_t size = shape[dim];
-    values[dim] = linear_offset % size;
-    linear_offset /= size;
+    if (size > 0) {
+      values[dim] = linear_offset % size;
+      linear_offset /= size;
+    }
   }
   AT_ASSERT(linear_offset == 0);
 }
@@ -713,7 +723,7 @@ void DimCounter::increment(const std::array<int64_t, 2>& step) {
   AT_ASSERT(overflow == 0 || overflow == 1);
 }
 
-std::array<int64_t, 2> DimCounter::max_step() const {
+std::array<int64_t, 2> DimCounter::max_2d_step() const {
   int64_t step0 = std::min(shape[0] - values[0], range.end - offset);
   int64_t step1 = 1;
   if (step0 == shape[0] && shape.size() >= 1) {

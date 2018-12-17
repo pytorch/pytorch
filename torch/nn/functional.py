@@ -11,7 +11,6 @@ from . import _reduction as _Reduction
 from . import _functions
 from .modules import utils
 from ._functions import vision
-from ._functions.thnn.fold import Col2Im, Im2Col
 from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad
 from . import _VF
@@ -1885,17 +1884,40 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
-            'mean': the sum of the output will be divided by the number of
-            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
-            and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
+            'none' | 'batchmean' | 'sum' | 'mean'.
+            'none': no reduction will be applied
+            'batchmean': the sum of the output will be divided by the batchsize
+            'sum': the output will be summed
+            'mean': the output will be divided by the number of elements in the output
+            Default: 'mean'
+
+        .. note:: :attr:`size_average` and :attr:`reduce` are in the process of being deprecated,
+            and in the meantime, specifying either of those two args will override :attr:`reduction`.
+
+        .. note:: `reduction='mean'` doesn't return the true kl divergence value, please use
+            `reduction='batchmean'` which aligns with KL math definition.
+            In the next major release, 'mean' will be changed to be the same as 'batchmean'.
     """
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
-        reduction_enum = _Reduction.get_enum(reduction)
-    return torch.kl_div(input, target, reduction_enum)
+        if reduction == 'mean':
+            warnings.warn("reduction: 'mean' divides the total loss by both the batch size and the support size."
+                          "'batchmean' divides only by the batch size, and aligns with the KL div math definition."
+                          "'mean' will be changed to behave the same as 'batchmean' in the next major release.")
+
+        # special case for batchmean
+        if reduction == 'batchmean':
+            reduction_enum = _Reduction.get_enum('sum')
+        else:
+            reduction_enum = _Reduction.get_enum(reduction)
+
+    reduced = torch.kl_div(input, target, reduction_enum)
+
+    if reduction == 'batchmean' and input.dim() != 0:
+        reduced = reduced / input.size()[0]
+
+    return reduced
 
 
 @torch._jit_internal.weak_script
@@ -2241,9 +2263,9 @@ def cosine_embedding_loss(input1, input2, target, margin=0, size_average=None,
 
 
 @torch._jit_internal.weak_script
-def multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None,
+def multi_margin_loss(input, target, p=1, margin=1., weight=None, size_average=None,
                       reduce=None, reduction='mean'):
-    # type: (Tensor, Tensor, int, int, Optional[Tensor], Optional[bool], Optional[bool], str) -> Tensor
+    # type: (Tensor, Tensor, int, float, Optional[Tensor], Optional[bool], Optional[bool], str) -> Tensor
     r"""multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None,
                           reduce=None, reduction='mean') -> Tensor
 
@@ -2301,7 +2323,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
     `mini-batch x channels x [optional depth] x [optional height] x width`.
 
     The modes available for upsampling are: `nearest`, `linear` (3D-only),
-    `bilinear` (4D-only), `trilinear` (5D-only)
+    `bilinear`, `bicubic` (4D-only), `trilinear` (5D-only)
 
     Args:
         input (Tensor): the input tensor
@@ -2309,11 +2331,15 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
             output spatial size.
         scale_factor (int): multiplier for spatial size. Has to be an integer.
         mode (string): algorithm used for upsampling:
-            'nearest' | 'linear' | 'bilinear' | 'trilinear'. Default: 'nearest'
-        align_corners (bool, optional): if True, the corner pixels of the input
-            and output tensors are aligned, and thus preserving the values at
-            those pixels. This only has effect when :attr:`mode` is `linear`,
-            `bilinear`, or `trilinear`. Default: False
+            'nearest' | 'linear' | 'bilinear' | 'bicubic' | 'trilinear'. Default: 'nearest'
+        align_corners (bool, optional): Geometrically, we consider the pixels of the
+            input and output as squares rather than points.
+            If set to True, the input and output tensors are aligned by the
+            center points of their corner pixels. If set to False, the input and
+            output tensors are aligned by the corner points of their corner
+            pixels, and the interpolation uses edge value padding for out-of-boundary values.
+            This only has effect when :attr:`mode` is `linear`,
+            `bilinear`, `bicubic` or `trilinear`. Default: False
 
     .. warning::
         With ``align_corners = True``, the linearly interpolating modes
@@ -2342,7 +2368,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
     `mini-batch x channels x [optional depth] x [optional height] x width`.
 
     The modes available for resizing are: `nearest`, `linear` (3D-only),
-    `bilinear` (4D-only), `trilinear` (5D-only), `area`
+    `bilinear`, `bicubic` (4D-only), `trilinear` (5D-only), `area`
 
     Args:
         input (Tensor): the input tensor
@@ -2350,11 +2376,15 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
             output spatial size.
         scale_factor (float or Tuple[float]): multiplier for spatial size. Has to match input size if it is a tuple.
         mode (string): algorithm used for upsampling:
-            'nearest' | 'linear' | 'bilinear' | 'trilinear' | 'area'. Default: 'nearest'
-        align_corners (bool, optional): if True, the corner pixels of the input
-            and output tensors are aligned, and thus preserving the values at
-            those pixels. This only has effect when :attr:`mode` is `linear`,
-            `bilinear`, or `trilinear`. Default: False
+            'nearest' | 'linear' | 'bilinear' | 'bicubic' | 'trilinear' | 'area'. Default: 'nearest'
+        align_corners (bool, optional): Geometrically, we consider the pixels of the
+            input and output as squares rather than points.
+            If set to True, the input and output tensors are aligned by the
+            center points of their corner pixels. If set to False, the input and
+            output tensors are aligned by the corner points of their corner
+            pixels, and the interpolation uses edge value padding for out-of-boundary values.
+            This only has effect when :attr:`mode` is `linear`,
+            `bilinear`, `bicubic`, or `trilinear`. Default: False
 
     .. warning::
         With ``align_corners = True``, the linearly interpolating modes
@@ -2391,7 +2421,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
     if mode in ('nearest', 'area'):
         if align_corners is not None:
             raise ValueError("align_corners option can only be set with the "
-                             "interpolating modes: linear | bilinear | trilinear")
+                             "interpolating modes: linear | bilinear | bicubic | trilinear")
     else:
         if align_corners is None:
             warnings.warn("Default upsampling behavior when mode={} is changed "
@@ -2430,9 +2460,11 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         raise NotImplementedError("Got 5D input, but bilinear mode needs 4D input")
     elif input.dim() == 5 and mode == 'trilinear':
         return torch._C._nn.upsample_trilinear3d(input, _output_size(3), align_corners)
+    elif input.dim() == 4 and mode == 'bicubic':
+        return torch._C._nn.upsample_bicubic2d(input, _output_size(2), align_corners)
     else:
         raise NotImplementedError("Input Error: Only 3D, 4D and 5D input Tensors supported"
-                                  " (got {}D) for the modes: nearest | linear | bilinear | trilinear"
+                                  " (got {}D) for the modes: nearest | linear | bilinear | bicubic | trilinear"
                                   " (got {})".format(input.dim(), mode))
 
 
@@ -2811,8 +2843,8 @@ def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
         assert_int_or_pair(padding, 'padding', msg)
         assert_int_or_pair(stride, 'stride', msg)
 
-        return Im2Col.apply(input, _pair(kernel_size),
-                            _pair(dilation), _pair(padding), _pair(stride))
+        return torch._C._nn.thnn_im2col(input, _pair(kernel_size),
+                                        _pair(dilation), _pair(padding), _pair(stride))
     else:
         raise NotImplementedError("Input Error: Only 4D input Tensors are supported (got {}D)".format(input.dim()))
 
@@ -2835,7 +2867,7 @@ def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
         assert_int_or_pair(padding, 'padding', msg)
         assert_int_or_pair(stride, 'stride', msg)
 
-        return Col2Im.apply(input, _pair(output_size), _pair(kernel_size),
-                            _pair(dilation), _pair(padding), _pair(stride))
+        return torch._C._nn.thnn_col2im(input, _pair(output_size), _pair(kernel_size),
+                                        _pair(dilation), _pair(padding), _pair(stride))
     else:
         raise NotImplementedError("Input Error: Only 3D input Tensors are supported (got {}D)".format(input.dim()))

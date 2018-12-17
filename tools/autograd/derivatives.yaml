@@ -728,7 +728,7 @@
 - name: std(Tensor self, bool unbiased)
   self: var_backward(grad / (result * 2), self, unbiased)
 
-- name: std(Tensor self, int64_t dim, bool unbiased, bool keepdim)
+- name: std(Tensor self, IntList dim, bool unbiased, bool keepdim)
   self: var_backward(grad / (result * 2), self, dim, unbiased, keepdim)
 
 - name: sub(Tensor self, Tensor other, *, Scalar alpha)
@@ -810,6 +810,9 @@
 
 - name: trunc(Tensor self)
   self: zeros_like(grad)
+
+- name: to_dense(Tensor self)
+  self: to_dense_backward(grad, self)
 
 - name: unfold(Tensor self, int64_t dimension, int64_t size, int64_t step)
   self: unfold_backward(grad, self.sizes(), dimension, size, step)
@@ -1012,6 +1015,9 @@
 - name: upsample_bilinear2d(Tensor self, IntList output_size, bool align_corners)
   self: upsample_bilinear2d_backward(grad, output_size, self.sizes(), align_corners)
 
+- name: upsample_bicubic2d(Tensor self, IntList output_size, bool align_corners)
+  self: upsample_bicubic2d_backward(grad, output_size, self.sizes(), align_corners)
+
 - name: upsample_trilinear3d(Tensor self, IntList output_size, bool align_corners)
   self: upsample_trilinear3d_backward(grad, output_size, self.sizes(), align_corners)
 
@@ -1099,6 +1105,12 @@
 
 - name: thnn_conv_dilated3d_backward(Tensor grad_output, Tensor self, Tensor weight, IntList kernel_size, IntList stride, IntList padding, IntList dilation, Tensor columns, Tensor ones, std::array<bool,3> output_mask)
   grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, self, stride, padding, dilation, false, {{0, 0, 0}}, 1, false, false, false, grad_input_mask)
+
+- name: thnn_col2im(Tensor self, IntList output_size, IntList kernel_size, IntList dilation, IntList padding, IntList stride)
+  self: thnn_col2im_backward(grad, kernel_size, dilation, padding, stride)
+
+- name: thnn_im2col(Tensor self, IntList kernel_size, IntList dilation, IntList padding, IntList stride)
+  self: thnn_im2col_backward(grad, {self.size(2), self.size(3)}, kernel_size, dilation, padding, stride)
 
 # NN double backwards support
 
@@ -1240,6 +1252,9 @@
 
 - name: upsample_bilinear2d_backward(Tensor grad_output, IntList output_size, IntList input_size, bool align_corners)
   grad_output: upsample_bilinear2d(grad, output_size, align_corners)
+
+- name: upsample_bicubic2d_backward(Tensor grad_output, IntList output_size, IntList input_size, bool align_corners)
+  grad_output: upsample_bicubic2d(grad, output_size, align_corners)
 
 - name: upsample_trilinear3d_backward(Tensor grad_output, IntList output_size, IntList input_size, bool align_corners)
   grad_output: upsample_trilinear3d(grad, output_size, align_corners)

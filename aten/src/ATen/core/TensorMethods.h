@@ -1,10 +1,11 @@
 #pragma once
 
-#include "ATen/core/Tensor.h"
+#include <ATen/core/Tensor.h>
 #include <c10/core/Scalar.h>
-#include "ATen/core/SparseTensorRef.h"
-#include "ATen/core/Type.h"
-#include "ATen/core/TensorOptions.h"
+#include <c10/macros/Macros.h>
+#include <ATen/core/SparseTensorRef.h>
+#include <ATen/core/Type.h>
+#include <c10/core/TensorOptions.h>
 
 namespace at {
 
@@ -597,7 +598,7 @@ inline Tensor & Tensor::sqrt_() {
 inline Tensor Tensor::std(bool unbiased) const {
     return type().std(*this, unbiased);
 }
-inline Tensor Tensor::std(int64_t dim, bool unbiased, bool keepdim) const {
+inline Tensor Tensor::std(IntList dim, bool unbiased, bool keepdim) const {
     return type().std(*this, dim, unbiased, keepdim);
 }
 inline Tensor Tensor::prod(ScalarType dtype) const {
@@ -783,8 +784,8 @@ inline Tensor Tensor::to(ScalarType dtype, bool non_blocking, bool copy) const {
 inline Tensor Tensor::to(const Tensor & other, bool non_blocking, bool copy) const {
     return type().to(*this, other, non_blocking, copy);
 }
-inline Scalar Tensor::_local_scalar() const {
-    return type()._local_scalar(*this);
+inline Scalar Tensor::item() const {
+    return type().item(*this);
 }
 inline void* Tensor::data_ptr() const {
     return type().data_ptr(*this);
@@ -1310,13 +1311,13 @@ inline bool is_sparse(Tensor self) {
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)
 #undef DEFINE_CAST
 
-#define DEFINE_TO_C_TYPE(T, name, _)   \
-  template <>                          \
-  inline T Tensor::item() const {      \
-    return _local_scalar().to##name(); \
+#define DEFINE_ITEM(T, name, _)   \
+  template <>                     \
+  inline T Tensor::item() const { \
+    return item().to##name();     \
   }
 
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_TO_C_TYPE)
-#undef DEFINE_TO_C_TYPE
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_ITEM)
+#undef DEFINE_ITEM
 
 } //namespace at

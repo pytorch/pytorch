@@ -1,7 +1,7 @@
 #pragma once
 
 #include <THD/base/DataChannel.hpp>
-#include "DataChannelUtils.hpp"
+#include <THD/base/data_channels/DataChannelUtils.hpp>
 
 #include <sys/poll.h>
 #include <cstdint>

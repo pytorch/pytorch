@@ -595,4 +595,90 @@ TEST(IsTestArg, non_standard) {
       "JustTestWithNonStandardIsTestArg");
 }
 
+class TestOperatorWithFunctionSchema final : public Operator<CPUContext> {
+ public:
+  TestOperatorWithFunctionSchema(const OperatorDef& def, Workspace* ws)
+      : Operator<CPUContext>(def, ws) {}
+
+  TestOperatorWithFunctionSchema(
+      const c10::FunctionSchema& f,
+      const std::vector<c10::IValue>& i,
+      const std::vector<c10::IValue*>& o)
+      : Operator<CPUContext>(f, i, o) {
+    if (HasArgument("test_arg")) {
+      test_arg_ =
+          static_cast<float>(this->GetSingleArgument<float>("test_arg", 0.01));
+    }
+  }
+
+  bool RunOnDevice() override {
+    auto out =
+        OutputTensor(0, {1, 1}, at::TensorOptions(TypeMeta::Make<float>()));
+    out->mutable_data<float>()[0] = test_arg_;
+    return true;
+  }
+
+ private:
+  float test_arg_ = 0;
+};
+
+REGISTER_CPU_OPERATOR(
+    TestOperatorWithFunctionSchema,
+    TestOperatorWithFunctionSchema);
+OPERATOR_SCHEMA(TestOperatorWithFunctionSchema)
+    .NumInputs(0, 1)
+    .NumOutputs(0, 1)
+    .Arg("test_arg", "this arg is required", true);
+
+// The new way combines OPERATOR_SCHEMA and REGISTER_OPERATOR
+REGISTER_FUNCTION_SCHEMA_OPERATOR(
+    TestOperatorWithFunctionSchema,
+    {c10::Argument("test_arg")},
+    {c10::Argument("output")},
+    TestOperatorWithFunctionSchema)
+
+TEST(FunctionSchema, Creation) {
+  std::vector<c10::IValue> inputs;
+  float test_val = 1337.0f;
+  inputs.emplace_back(test_val);
+
+  caffe2::Tensor out = TensorCPUFromValues<float>({1, 1}, {123.0f});
+  std::vector<c10::IValue*> outputs;
+  auto t = at::Tensor(std::move(out.getIntrusivePtr()));
+  auto out_val = c10::IValue(t);
+  outputs.emplace_back(&out_val);
+
+  auto fn = FunctionSchemaRegistry()
+                ->Create("TestOperatorWithFunctionSchema")
+                ->getSchema();
+  auto op = FunctionSchemaOperatorRegistry()->Create(
+      "TestOperatorWithFunctionSchema", fn, inputs, outputs);
+
+  op->Run();
+  EXPECT_EQ(out.data<float>()[0], test_val);
+}
+
+TEST(FunctionSchema, OutputChange) {
+  std::vector<c10::IValue> inputs;
+  float test_val = 1337.0f;
+  inputs.emplace_back(test_val);
+
+  // Wrong type
+  caffe2::Tensor out = TensorCPUFromValues<int>({1, 1}, {123});
+  std::vector<c10::IValue*> outputs;
+  auto t = at::Tensor(std::move(out.getIntrusivePtr()));
+  auto out_val = c10::IValue(t);
+  outputs.emplace_back(&out_val);
+
+  auto fn = FunctionSchemaRegistry()
+                ->Create("TestOperatorWithFunctionSchema")
+                ->getSchema();
+  auto op = FunctionSchemaOperatorRegistry()->Create(
+      "TestOperatorWithFunctionSchema", fn, inputs, outputs);
+
+  op->Run();
+  out = caffe2::Tensor(out_val.toTensor());
+  EXPECT_EQ(out.data<float>()[0], test_val);
+}
+
 }  // namespace caffe2

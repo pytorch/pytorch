@@ -1,20 +1,20 @@
-#include "torch/csrc/jit/script/init.h"
+#include <torch/csrc/jit/script/init.h>
 
-#include "torch/csrc/Device.h"
-#include "torch/csrc/Dtype.h"
-#include "torch/csrc/Layout.h"
-#include "torch/csrc/jit/import.h"
-#include "torch/csrc/jit/script/compiler.h"
+#include <torch/csrc/Device.h>
+#include <torch/csrc/Dtype.h>
+#include <torch/csrc/Layout.h>
+#include <torch/csrc/jit/import.h>
+#include <torch/csrc/jit/script/compiler.h>
 
-#include "torch/csrc/jit/python_tracer.h"
-#include "torch/csrc/jit/pybind_utils.h"
-#include "torch/csrc/jit/constants.h"
-#include "torch/csrc/jit/passes/to_batch.h"
-#include "torch/csrc/jit/function_schema.h"
-#include "torch/csrc/jit/script/parser.h"
-#include "torch/csrc/jit/import_method.h"
-#include "torch/csrc/jit/hooks_for_testing.h"
-#include "torch/csrc/jit/passes/python_print.h"
+#include <torch/csrc/jit/python_tracer.h>
+#include <torch/csrc/jit/pybind_utils.h>
+#include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/passes/to_batch.h>
+#include <torch/csrc/jit/function_schema.h>
+#include <torch/csrc/jit/script/parser.h>
+#include <torch/csrc/jit/import_method.h>
+#include <torch/csrc/jit/hooks_for_testing.h>
+#include <torch/csrc/jit/passes/python_print.h>
 
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 
@@ -105,7 +105,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   }
 
   // call it like a function, e.g. `outputs = this(inputs)`
-  std::shared_ptr<SugaredValue> call(SourceRange loc, Method & m, at::ArrayRef<NamedValue> inputs_, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
+  std::shared_ptr<SugaredValue> call(const SourceRange& loc, Method & m, at::ArrayRef<NamedValue> inputs_, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
     auto inputs = toValues(*m.graph(), inputs_);
     auto schema = getSchema(inputs.size(), n_binders);
 
@@ -139,7 +139,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
 
 protected:
 
-  py::object getattr(SourceRange loc, const std::string& name) {
+  py::object getattr(const SourceRange& loc, const std::string& name) {
     try {
       return py::getattr(self, name.c_str());
     } catch (py::error_already_set& e) {
@@ -151,10 +151,10 @@ protected:
 };
 
 struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {
-  explicit PythonModuleValue(py::object mod) : PythonValue(mod) {}
+  explicit PythonModuleValue(py::object mod) : PythonValue(std::move(mod)) {}
 
   std::shared_ptr<SugaredValue> attr(
-      SourceRange loc,
+      const SourceRange& loc,
       Method& m,
       const std::string& field) override {
     py::object member = getattr(loc, field);
@@ -166,11 +166,11 @@ struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {
 };
 
 struct VISIBILITY_HIDDEN ConstantPythonTupleValue : public PythonValue {
-  explicit ConstantPythonTupleValue(py::object tup) : PythonValue(tup) {}
+  explicit ConstantPythonTupleValue(py::object tup) : PythonValue(std::move(tup)) {}
   std::vector<std::shared_ptr<SugaredValue>> asTuple(
-      SourceRange loc,
+      const SourceRange& loc,
       Method& m,
-      c10::optional<size_t> size_hint = {}) override {
+      const c10::optional<size_t>& size_hint = {}) override {
     py::tuple tup = self;
     std::vector<std::shared_ptr<SugaredValue>> result;
     result.reserve(tup.size());
@@ -182,10 +182,10 @@ struct VISIBILITY_HIDDEN ConstantPythonTupleValue : public PythonValue {
   }
 
   Value* asValue(
-      SourceRange loc,
+      const SourceRange& loc,
       Method& m) override {
     std::vector<Value*> values;
-    for (auto sugared_item : asTuple(loc, m)) {
+    for (const auto& sugared_item : asTuple(loc, m)) {
       values.push_back(sugared_item->asValue(loc, m));
     }
     auto node = m.graph()->createTuple(values);
@@ -210,7 +210,7 @@ struct ModuleValue : public SugaredValue {
   }
 
   // select an attribute on it, e.g. `this.field`
-  std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override {
+  std::shared_ptr<SugaredValue> attr(const SourceRange& loc, Method & m, const std::string& field) override {
     // workaround to make self.training work
     // it adds a buffer 'training' to the model if one doesn't exist
     // and then loads that parameter, casting it to bool
@@ -224,10 +224,7 @@ struct ModuleValue : public SugaredValue {
         v = module->find_parameter(field);
       }
       Value* the_tensor = m.get_or_add_parameter(v->slot());
-      Value* the_bool =
-          m.graph()
-              ->insertNode(m.graph()->createTensorToBool(the_tensor))
-              ->output();
+      Value* the_bool = m.graph()->insert(prim::Bool, {the_tensor});
       return std::make_shared<SimpleValue>(the_bool);
     }
 
@@ -254,14 +251,14 @@ struct ModuleValue : public SugaredValue {
   }
 
   // call module.forward
-  std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<NamedValue> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
+  std::shared_ptr<SugaredValue> call(const SourceRange& loc, Method & caller, at::ArrayRef<NamedValue> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
     return attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, n_binders);
   }
 
   std::vector<std::shared_ptr<SugaredValue>> asTuple(
-      SourceRange loc,
+      const SourceRange& loc,
       Method& m,
-      c10::optional<size_t> size_hint = {}) override {
+      const c10::optional<size_t>& size_hint = {}) override {
     py::object py_module = py::cast(module);
     if(!py::isinstance(py_module, py::module::import("torch.jit").attr("_ConstModuleList")))
       return SugaredValue::asTuple(loc, m, size_hint);
@@ -299,7 +296,7 @@ struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
   }
 
   std::shared_ptr<SugaredValue> call(
-      SourceRange loc,
+      const SourceRange& loc,
       Method& caller,
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
@@ -453,7 +450,7 @@ static void gatherParametersAndBuffers(std::vector<at::Tensor*> & values, const 
 
 namespace {
 
-Resolver pythonResolver(ResolutionCallback rcb) {
+Resolver pythonResolver(const ResolutionCallback& rcb) {
   return [rcb](const std::string& name, Method& m, const SourceRange& loc)
              -> std::shared_ptr<SugaredValue> {
     AutoGIL ag;
@@ -469,8 +466,8 @@ Resolver pythonResolver(ResolutionCallback rcb) {
 
 FunctionSchema getSchemaWithNameAndDefaults(
     const SourceRange& range,
-    const FunctionSchema schema,
-    at::optional<std::string> new_name,
+    const FunctionSchema& schema,
+    const at::optional<std::string>& new_name,
     const FunctionDefaults& default_args) {
   std::vector<Argument> new_args;
   for (auto& arg : schema.arguments()) {
@@ -486,8 +483,7 @@ FunctionSchema getSchemaWithNameAndDefaults(
         } else {
           value = toIValue(it->second, arg.type());
         }
-        new_args.emplace_back(
-            Argument(arg.name(), arg.type(), arg.N(), value, arg.kwarg_only()));
+        new_args.emplace_back(arg.name(), arg.type(), arg.N(), value, arg.kwarg_only());
       } catch (py::cast_error& e) {
         throw ErrorReport(range)
             << "Expected a default value of type " << arg.type()->str()
@@ -536,6 +532,7 @@ void initJitScriptBindings(PyObject* module) {
           const std::vector<ResolutionCallback>& rcbs,
           const std::vector<FunctionDefaults>& defaults) {
         std::vector<Resolver> resolvers;
+        resolvers.reserve(rcbs.size());
         for(auto & callback : rcbs) {
           resolvers.push_back(pythonResolver(callback));
         }
@@ -689,7 +686,9 @@ void initJitScriptBindings(PyObject* module) {
         std::vector<at::Tensor> tensors;
         PythonPrint(ss, self, tensors, false);
         return ss.str();
-      });
+      })
+      .def("apply", &Module::apply)
+      .def("_copy_into", &Module::copy_into);
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
     .def("graph", [&](Method& self) {
@@ -712,6 +711,7 @@ void initJitScriptBindings(PyObject* module) {
       return self.graph_for(createStackForSchema(self.getSchema(), tuple_slice(std::move(args), 1), std::move(kwargs)));
     })
     .def("debug_disable_autodiff_subgraph_inlining", &Method::debugDisableAutodiffSubgraphInlining)
+    .def("schema", &Method::getSchema)
     .def("pretty_print_schema", &Method::pretty_print_schema)
     .def("python_print", [](Method &m) {
       std::ostringstream oss;
@@ -732,7 +732,7 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def("parse_type_comment", [](const std::string& comment) {
     Parser p(comment);
-    return Decl(p.parseTypeComment(true));
+    return Decl(p.parseTypeComment());
   });
 
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);

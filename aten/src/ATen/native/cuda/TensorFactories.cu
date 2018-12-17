@@ -1,8 +1,8 @@
-#include "ATen/ATen.h"
-#include "ATen/InitialTensorOptions.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/cuda/CUDAContext.h"
-#include "c10/util/Exception.h"
+#include <ATen/ATen.h>
+#include <ATen/InitialTensorOptions.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <c10/util/Exception.h>
 
 #include <THC/THCGeneral.h>
 #include <THC/THCThrustAllocator.cuh>
@@ -63,7 +63,7 @@ Tensor empty_cuda(IntList size, const TensorOptions& options) {
 
 Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
   AT_CHECK(n >= 0, "n must be non-negative, got", n);
-  AT_CHECK(result.type().scalarTensor(n).defined(),
+  AT_CHECK(at::scalar_tensor(n, result.options()).defined(),
   "n is too large for result tensor type: '", result.type().toString(), "'");
 
   result.resize_({n});

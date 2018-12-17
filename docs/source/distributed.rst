@@ -162,8 +162,6 @@ joined.
 
 .. autofunction:: is_initialized
 
-.. autofunction:: get_default_group
-
 .. autofunction:: is_mpi_available
 
 .. autofunction:: is_nccl_available

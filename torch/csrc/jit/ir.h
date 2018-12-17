@@ -1,25 +1,25 @@
 #pragma once
 
-#include "torch/csrc/jit/attributes.h"
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/generic_if.h"
-#include "torch/csrc/jit/graph_node_list.h"
-#include "torch/csrc/jit/interned_strings.h"
-#include "torch/csrc/jit/resource_guard.h"
-#include "torch/csrc/jit/scope.h"
-#include "torch/csrc/jit/source_location.h"
-#include "torch/csrc/jit/source_range.h"
-#include "torch/csrc/jit/constants.h"
-#include "torch/csrc/jit/function_schema.h"
-#include "torch/csrc/jit/ivalue.h"
-#include "torch/csrc/jit/type.h"
-#include "torch/csrc/jit/named_value.h"
+#include <torch/csrc/jit/attributes.h>
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/generic_if.h>
+#include <torch/csrc/jit/graph_node_list.h>
+#include <torch/csrc/jit/interned_strings.h>
+#include <torch/csrc/jit/resource_guard.h>
+#include <torch/csrc/jit/scope.h>
+#include <torch/csrc/jit/source_location.h>
+#include <torch/csrc/jit/source_range.h>
+#include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/function_schema.h>
+#include <torch/csrc/jit/ivalue.h>
+#include <torch/csrc/jit/type.h>
+#include <torch/csrc/jit/named_value.h>
 
-#include "torch/csrc/utils/disallow_copy.h"
-#include "torch/csrc/utils/functional.h"
-#include "torch/csrc/utils/object_ptr.h"
-#include "torch/csrc/utils/python_stub.h"
-#include "torch/csrc/WindowsTorchApiMacro.h"
+#include <torch/csrc/utils/disallow_copy.h>
+#include <torch/csrc/utils/functional.h>
+#include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/python_stub.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <ATen/ATen.h>
 #include <c10/util/ArrayRef.h>
@@ -264,7 +264,7 @@ public:
     return scope_;
   }
   void setScope(ScopePtr scope) {
-    scope_ = scope;
+    scope_ = std::move(scope);
   }
   std::string scopeName() const {
     if (!scope_) {
@@ -676,12 +676,12 @@ struct Block {
   }
   Value * addInput(std::string name="") {
     Value * v = input_->addOutput();
-    v->setUniqueName(name);
+    v->setUniqueName(std::move(name));
     return v;
   }
   Value* insertInput(size_t i, std::string name = "") {
     Value* v = input_->insertOutput(i);
-    v->setUniqueName(name);
+    v->setUniqueName(std::move(name));
     return v;
   }
   void eraseInput(size_t i) {
@@ -829,7 +829,7 @@ public:
     return current_scope_;
   }
   void set_current_scope(ScopePtr scope) {
-    current_scope_ = scope;
+    current_scope_ = std::move(scope);
   }
   Value * addInput(std::string name="") {
     return block_->addInput(std::move(name));
@@ -867,13 +867,7 @@ public:
   TORCH_API Node* createList(const TypePtr& elem_type, at::ArrayRef<Value*> values);
   TORCH_API Node* createListUnpack(Value *v, size_t size);
   TORCH_API Node* createNumToTensor(Value* value);
-  TORCH_API Node* createBoolToTensor(Value* value);
-  TORCH_API Node* createTensorToNum(const TypePtr& type, Value* value);
   TORCH_API Node* createImplicitTensorToNum(const TypePtr& type, Value* value);
-  TORCH_API Node* createTensorToBool(Value* value);
-  TORCH_API Node* createIntToFloat(Value* value);
-  TORCH_API Node* createFloatToInt(Value* value);
-  TORCH_API Node* createStringToFloat(Value* value);
   Node* createPythonOp(
       THPObjectPtr&& pyobj,
       const std::string& cconv,
@@ -882,7 +876,7 @@ public:
   // use node_map to translate inputs of n to inputs of the cloned node
   // if copy_blocks is false, it will not recursively clone the nested blocks
   // this node contains.
-  TORCH_API Node * createClone(Node * n, std::function<Value*(Value*)> value_map, bool copy_blocks=true);
+  TORCH_API Node * createClone(Node * n, const std::function<Value*(Value*)>& value_map, bool copy_blocks=true);
 
   TORCH_API Value* insertConstant(
       IValue val,
@@ -895,11 +889,11 @@ public:
   // argument matching rules, and checks that the op matches a known schema
   // if this node successfully completes, it guarentees the node is a correctly-formed invocation
   // of opname
-  Value* insert(
+  TORCH_API Value* insert(
       Symbol opname,
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs = {},
-      c10::optional<SourceRange> range = {});
+      const c10::optional<SourceRange>& range = {});
 
   Node * appendNode(Node * n) {
     return block_->appendNode(n);
@@ -982,7 +976,7 @@ struct WithCurrentScope : public ResourceGuard {
     g.set_current_scope(prev_scope);
   })
   , prev_scope(g.current_scope()) {
-    g.set_current_scope(scope);
+    g.set_current_scope(std::move(scope));
   }
 private:
   ScopePtr prev_scope;
@@ -996,9 +990,9 @@ inline Value::Value(Node * node_, size_t offset_)
   node_->graph_->all_values.emplace(this);
 }
 
-inline Value* Value::setType(const TypePtr type) {
+inline Value* Value::setType(TypePtr type) {
   JIT_ASSERT(type);
-  type_ = type;
+  type_ = std::move(type);
   for (Use & use : uses_) {
     use.user->schema_ = nullptr;
   }

@@ -1779,6 +1779,55 @@ new_module_tests = [
     ),
     dict(
         module_name='Upsample',
+        constructor_args=(12, None, 'bicubic', False),
+        input_size=(1, 2, 4, 4),
+        desc='bicubic_2d',
+        decorator=skipIfRocm
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=((4, 6), None, 'bicubic', False),
+        input_size=(1, 2, 2, 3),
+        desc='bicubic_tuple_2d',
+        decorator=skipIfRocm
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=(None, 4., 'bicubic', False),
+        input_size=(1, 2, 4, 4),
+        desc='bicubic_scale_2d',
+        decorator=skipIfRocm
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=(None, (2., 2.), 'bicubic', False),
+        input_size=(1, 2, 4, 4),
+        desc='bicubic_scale_tuple_shared_2d',
+        decorator=skipIfRocm
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=(None, (2., 1.), 'bicubic', False),
+        input_size=(1, 2, 4, 4),
+        desc='bicubic_scale_tuple_skewed_2d',
+        decorator=skipIfRocm
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=((4, 6), None, 'bicubic', True),
+        input_size=(1, 2, 4, 4),
+        desc='bicubic_tuple_2d_align_corners',
+        decorator=skipIfRocm
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=(None, (2., 1.), 'bicubic', True),
+        input_size=(1, 2, 4, 4),
+        desc='bicubic_scale_tuple_skewed_2d_align_corners',
+        decorator=skipIfRocm
+    ),
+    dict(
+        module_name='Upsample',
         constructor_args=(12, None, 'nearest'),
         input_size=(1, 2, 4, 4, 4),
         desc='nearest_3d',
@@ -2208,6 +2257,8 @@ def kldivloss_reference(input, target, reduction='mean'):
         return result.mean()
     elif reduction == 'sum':
         return result.sum()
+    elif reduction == 'batchmean' and results.dim() != 0:
+        return result.sum() / result.size(0)
     return result
 
 
@@ -2637,7 +2688,7 @@ criterion_tests = [
     ),
     dict(
         module_name='MultiMarginLoss',
-        constructor_args=(1, 1, torch.rand(10)),
+        constructor_args=(1, 1., torch.rand(10)),
         legacy_constructor_args=(1, torch.rand(10)),
         input_size=(5, 10),
         target_fn=lambda: torch.rand(5).mul(8).floor().long(),

@@ -14,8 +14,9 @@ from torch._six import inf, PY2
 from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
     freeze_rng_state
-from common_nn import module_tests, new_module_tests
+from common_nn import module_tests, new_module_tests, criterion_tests
 from textwrap import dedent
+from functools import wraps
 import os
 import io
 import itertools
@@ -240,7 +241,6 @@ class JitTestCase(TestCase):
         torch._C._jit_set_emit_module_hook(self.emitModuleHook)
 
     def emitModuleHook(self, module):
-
         def copy_structure_and_params(m):
             c = torch.jit.ScriptModule()
             for name, v, buffer in m._get_parameters():
@@ -347,6 +347,52 @@ class JitTestCase(TestCase):
             trace.set_graph(graph)
         return graph
 
+    def checkScript(self,
+                    script,
+                    inputs,
+                    optimize=True,
+                    outputs=None,
+                    name='func',
+                    capture_output=False,
+                    frames_up=1,
+                    check_expected=False):
+        if isinstance(script, str):
+            cu = torch.jit.CompilationUnit(script, optimize, _frames_up=frames_up)
+            ge = getattr(cu, name)
+        else:
+            if capture_output:
+                with self.capture_stdout() as captured:
+                    outputs = script(*inputs)
+            else:
+                outputs = script(*inputs)
+            # Check the string frontend first
+            source = textwrap.dedent(inspect.getsource(script))
+            self.checkScript(
+                source,
+                inputs,
+                optimize,
+                outputs,
+                script.__name__,
+                capture_output,
+                frames_up=2,
+                check_expected=check_expected)
+            # Continue checking the Python frontend
+            ge = torch.jit.script(script, optimize, _frames_up=1)
+
+        if capture_output:
+            with self.capture_stdout() as captured:
+                outputs_ge = ge(*inputs)
+            if not WINDOWS:
+                self.assertExpected(captured[0], subname='stdout')
+        else:
+            outputs_ge = ge(*inputs)
+        self.assertEqual(outputs, outputs_ge)
+
+        if check_expected:
+            self.assertExpectedGraph(ge.graph)
+
+        return ge
+
     def checkTrace(self, func, reference_tensors, input_tensors=None,
                    optimize=True, drop=None, allow_unused=False, verbose=False,
                    inputs_require_grads=True, check_tolerance=1e-5, export_import=True):
@@ -432,14 +478,6 @@ class JitTestCase(TestCase):
                 self.assertTrue(torch.allclose(g2, g2_ge, atol=8e-4, rtol=8e-4))
 
         return ge
-
-    def assertAllFused(self, graph, except_for=()):
-        if [n.kind() for n in graph.nodes()] == ['prim::DifferentiableGraph']:
-            graph = next(graph.nodes()).g('Subgraph')
-        allowed_nodes = {'prim::Constant', 'prim::FusionGroup'} | set(except_for)
-        self.assertTrue(all(node.kind() in allowed_nodes for node in graph.nodes()),
-                        'got {}'.format(graph))
-        self.assertTrue([node.kind() for node in graph.nodes()].count('prim::FusionGroup') == 1)
 
     def assertExportImport(self, trace, inputs):
         graph = trace if isinstance(trace, torch._C.Graph) else trace.graph()
@@ -641,42 +679,35 @@ class TestJit(JitTestCase):
                     return -input
 
         class MyModule(torch.jit.ScriptModule):
-            def __init__(self):
+            def __init__(self, module):
                 super(MyModule, self).__init__()
-                self.sub = Sub()
+                self.module = module
 
             @torch.jit.script_method
             def forward(self, input):
-                return self.sub(input) + 1
+                return self.module(input) + 1
 
-        m = MyModule()
+        m = MyModule(Sub())
         input = torch.rand(3, 4)
         self.assertEqual(input + 1, m(input))
         m.eval()
         self.assertEqual(-input + 1, m(input))
 
-    def test_train_eval_const(self):
-        class MyModule(torch.jit.ScriptModule):
-            __constants__ = ['training']
+        # test batchnorm and dropout train/eval
+        input = torch.randn(6, 10)
+        batchnorm = nn.BatchNorm1d(10)
+        dropout = nn.Dropout(p=0.2)
 
-            def __init__(self):
-                super(MyModule, self).__init__()
-                # TODO: it is illegal to try to call
-                # eval/train because training has already
-                # been set. Consider allowing
-                # constants to be mutable until the end of __init__
+        m_batchnorm = MyModule(batchnorm)
+        self.assertEqual(batchnorm(input) + 1, m_batchnorm(input))
+        batchnorm.eval()
+        m_batchnorm.eval()
+        self.assertEqual(batchnorm(input) + 1, m_batchnorm(input))
 
-            @torch.jit.script_method
-            def forward(self, input):
-                if self.training:
-                    x = 2 * input
-                else:
-                    x = -input
-                return x + 1
-
-        m = MyModule()
-        input = torch.rand(3, 4)
-        self.assertEqual(2 * input + 1, m(input))
+        m_dropout = MyModule(dropout)
+        dropout.eval()
+        m_dropout.eval()
+        self.assertEqual(dropout(input) + 1, m_dropout(input))
 
     def test_diff_subgraph_clones_constants(self):
         @torch.jit.script
@@ -766,308 +797,6 @@ class TestJit(JitTestCase):
 
         self.assertExportImport(trace, (t,) + tuple(model.parameters()))
         self.assertExpectedONNXGraph(trace)
-
-    @unittest.skipIf(not IS_WINDOWS, "Testing Fuse skipped on windows")
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    def test_windows_fuse(self):
-        def scaleshift(x, scale, shift):
-            return x * scale + shift
-
-        graph = torch.jit.script(scaleshift).graph
-
-        inputs = [
-            torch.randn(4, 4, dtype=torch.float, device='cuda'),
-            torch.randn(4, dtype=torch.float, device='cuda'),
-            torch.randn(4, dtype=torch.float, device='cuda'),
-        ]
-
-        ge = self.checkTrace(scaleshift, inputs)
-        fuse_graph = ge.graph_for(*inputs)
-
-        def run_graph(graph, inputs):
-            m = torch.jit.ScriptModule()
-            m._create_method_from_graph("forward", graph)
-            return m(*inputs)
-
-        self.assertEqual(run_graph(graph, inputs), run_graph(fuse_graph, inputs))
-
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @skipIfRocm
-    def test_broadcast_fusion_cuda(self):
-        def scaleshift(x, scale, shift):
-            return x * scale + shift
-
-        inputs = [
-            torch.randn(4, 4, dtype=torch.float, device='cuda'),
-            torch.randn(4, dtype=torch.float, device='cuda'),
-            torch.randn(4, dtype=torch.float, device='cuda'),
-        ]
-        ge = self.checkTrace(scaleshift, inputs)
-        self.assertExpectedGraph(ge.graph_for(*inputs))
-
-    # TODO: Fuser doesn't work at all when inputs require grad. Fix that
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @skipIfRocm
-    def test_lstm_fusion_cuda(self):
-        inputs = get_lstm_inputs('cuda')
-        ge = self.checkTrace(LSTMCellF, inputs)
-        self.assertExpectedGraph(ge.graph_for(*inputs))
-
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/8746")
-    @enable_cpu_fuser
-    def test_lstm_fusion_cpu(self):
-        inputs = get_lstm_inputs('cpu')
-        try:
-            ge = self.checkTrace(LSTMCellF, inputs)
-            self.assertExpectedGraph(ge.graph_for(*inputs))
-        except RuntimeError as e:
-            if 'Failed to compile' in e.args[0]:
-                warnings.warn('CPU fuser test has failed! This is not a hard failure, '
-                              'because the kernels sometimes trigger bugs in compilers '
-                              '(most notably GCC 7.2).')
-                raise unittest.SkipTest('Failed to compile')
-            else:
-                raise
-
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @skipIfRocm
-    def test_lstm_fusion_concat_cuda(self):
-        inputs = get_lstm_inputs('cuda')
-        ge = self.checkTrace(LSTMCellC, inputs)
-        self.assertExpectedGraph(ge.graph_for(*inputs))
-
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @skipIfRocm
-    def test_concat_fusion_cuda(self):
-        hx = torch.randn(3, 20, dtype=torch.float, device='cuda')
-        cx = torch.randn(3, 20, dtype=torch.float, device='cuda')
-
-        def foo(hx, cx):
-            return torch.cat((hx + cx, hx * cx))
-
-        ge = self.checkTrace(foo, (hx, cx))
-        self.assertExpectedGraph(ge.graph_for(hx, cx))
-
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @skipIfRocm
-    def test_concat_fusion_invariant_cuda(self):
-        # Invariant: the output of prim::FusedConcat may
-        # not be an input to any node inside the FusionGroup.
-        def fn(x, y, z):
-            x1 = x + y
-            y1 = x - y
-            w = torch.cat([x1, y1])
-            return w + z
-
-        x = torch.randn(2, 2, dtype=torch.float, device='cuda')
-        y = torch.randn(2, 2, dtype=torch.float, device='cuda')
-        z = torch.randn(4, 2, dtype=torch.float, device='cuda')
-        ge = self.checkTrace(fn, (x, y, z))
-        self.assertExpectedGraph(ge.graph_for(x, y, z))
-
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @skipIfRocm
-    def test_fusion_distribute_cuda(self):
-        def f(x, y):
-            z1, z2 = (x + y).chunk(2, dim=1)
-            return z1 * z2
-
-        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
-        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
-
-        ge = self.checkTrace(f, (x, y))
-        self.assertExpectedGraph(ge.graph_for(x, y))
-
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @skipIfRocm
-    def test_fusion_rand_cuda(self):
-        class M(torch.jit.ScriptModule):
-            __constants__ = ['d']
-
-            def __init__(self):
-                self.d = torch.device('cuda')
-
-            @torch.jit.script_method
-            def create(self, x):
-                return x * x + x + torch.rand_like(x)
-
-        x = torch.zeros([3, 4, 5], dtype=torch.float, device='cuda')
-        m = M()
-        out1 = m.create(x)
-        out2 = m.create(x)
-        self.assertNotEqual(out1, out2)
-        self.assertTrue(torch.all(out1 >= 0))
-        self.assertTrue(torch.all(out1 < 1))
-        self.assertTrue(torch.all(out2 >= 0))
-        self.assertTrue(torch.all(out2 < 1))
-
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @skipIfRocm
-    def test_fusion_arg_configurations_cuda(self):
-        # A smoke test to make sure we won't use the same kernel for contiguous
-        # and non-contiguous arguments.
-        # TODO: add optionally enabled debug counters to the fuser to verify
-        #       that we really can tell the difference between configurations
-        def f(x, y):
-            z1, z2 = (x + y).chunk(2, dim=1)
-            return z1 * z2
-
-        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
-        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
-        traced_f = torch.jit.trace(f, (x, y,))
-        self.assertEqual(traced_f(x.t().contiguous(), y), traced_f(x.t(), y))
-
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @skipIfRocm
-    def test_fusion_checks_cat_inputs(self):
-        # We shouldn't treat cat nodes as broadcasting. All their inputs
-        # need to be checked for having the same map size, before we can
-        # run the kernel.
-        @torch.jit.script
-        def f(x, y):
-            return torch.cat([x + 2 * x + x ** 2, y + 4 * y + y ** 3], dim=0)
-
-        # NOTE: y is broadcastable to x, but output of f(x, y) should have
-        # shape 3x4, and not 4x4.
-        x = torch.randn(2, 4, dtype=torch.float, device='cuda')
-        y = torch.randn(1, 4, dtype=torch.float, device='cuda')
-
-        self.assertEqual(f(x, y).shape, (3, 4))
-        self.assertAllFused(f.graph_for(x, y))
-
-    @staticmethod
-    def fn_test_comparison_gt_lt(x, y):
-        mask = (x > 0).type_as(x)
-        z = x * mask + y
-        mask = (x < 0).type_as(x)
-        z = z * mask + y
-        return z
-
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @skipIfRocm
-    def test_comparison_gt_lt_cuda(self):
-        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
-        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
-
-        ge = self.checkTrace(self.fn_test_comparison_gt_lt, (x, y))
-        self.assertAllFused(ge.graph_for(x, y))
-
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @skipIfRocm
-    def test_comparison_ge_le_cuda(self):
-        def f(x, y):
-            mask = (x >= 0).type_as(x)
-            z = x * mask + y
-            mask = (x <= 0).type_as(x)
-            z = z * mask + y
-            return z
-
-        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
-        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
-
-        ge = self.checkTrace(f, (x, y))
-        self.assertAllFused(ge.graph_for(x, y))
-
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @skipIfRocm
-    def test_comparison_eq_ne(self):
-        def f(x, y):
-            mask = (x == 0).type_as(x)
-            z = x * mask + y
-            mask = (x != 0).type_as(x)
-            z = z * mask + y
-            return z
-
-        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
-        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
-
-        ge = self.checkTrace(f, (x, y))
-        self.assertAllFused(ge.graph_for(x, y))
-
-    @staticmethod
-    def fn_test_relu(x, y):
-        return F.relu(x + .5 * y)
-
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @skipIfRocm
-    def test_relu_cuda(self):
-        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
-        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
-
-        ge = self.checkTrace(self.fn_test_relu, (x, y))
-
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    def test_small_constant_cuda(self):
-        def fn_test_small_constant(x, y):
-            return (1e-8 * x + 5e-9 * y) * 1e8
-        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
-        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
-
-        ge = self.checkTrace(fn_test_small_constant, (x, y))
-
-    @staticmethod
-    def fn_test_exp(x, y):
-        return (x + .5 * y).exp()
-
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @skipIfRocm
-    def test_exp_cuda(self):
-        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
-        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
-
-        ge = self.checkTrace(self.fn_test_exp, (x, y))
-
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @unittest.skipIf(not RUN_CUDA_HALF, "no half support")
-    def test_cuda_half(self):
-        x = torch.randn(4, 4, dtype=torch.half, device='cuda')
-        y = torch.randn(4, 4, dtype=torch.half, device='cuda')
-
-        funcs = [
-            self.fn_test_comparison_gt_lt,
-            self.fn_test_relu,
-            self.fn_test_exp
-        ]
-
-        # Note: Non fused inputs must be float to prevent loss of precision
-        inputs = (x.float(), y.float())
-        fusion_inputs = (x, y)
-        for fn in funcs:
-            local_inputs = [t.clone().requires_grad_() for t in inputs]
-            local_fusion_inputs = [t.clone().requires_grad_() for t in fusion_inputs]
-
-            # Verifies outputs
-            fusion = torch.jit.trace(fn, local_fusion_inputs, check_trace=False, optimize=True)
-            outputs = fn(*local_inputs)
-            fusion_outputs = fusion(*local_fusion_inputs)
-            outputs_half = [t.half() for t in outputs]
-            self.assertEqual(outputs_half, fusion_outputs)
-
-            # Verifies gradients
-            for output, fusion_output in zip(outputs_half, fusion_outputs):
-                grads = torch.autograd.grad(
-                    output.float().sum(), local_inputs, allow_unused=True, retain_graph=True)
-                fusion_grads = torch.autograd.grad(
-                    fusion_output.sum(), local_fusion_inputs, allow_unused=True, retain_graph=True)
-                grads_half = [t.half() for t in grads]
-                self.assertEqual(grads_half, fusion_grads)
 
     def test_canonicalize_tensor_iterator(self):
         x = torch.randn(4, 4)
@@ -1179,20 +908,6 @@ class TestJit(JitTestCase):
         graph = torch.jit.script(broadcast).graph
         torch._C._jit_pass_complete_shape_analysis(graph, (x, y), False)
         self.assertExpectedGraph(graph)
-
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
-    @skipIfRocm
-    def test_fuse_last_device_cuda(self):
-        device = 'cuda:' + str(1)
-        x = torch.tensor([0.4], dtype=torch.float, device=device)
-        y = torch.tensor([0.7], dtype=torch.float, device=device)
-
-        def doit(x, y):
-            return torch.sigmoid(torch.tanh(x * (x + y) + x))
-
-        ge = self.checkTrace(doit, (x, y))
-        self.assertExpectedGraph(ge.graph_for(x, y))
 
     # TODO: update verify to work with GraphExecutors
     @unittest.skip("verify needs to be updated to work with GraphExecutors")
@@ -1617,27 +1332,6 @@ class TestJit(JitTestCase):
     def test_ge_unoptimized(self):
         self.run_ge_tests(False, False)
 
-    def _test_fused_abs(self, device='cpu'):
-
-        @torch.jit.script
-        def func(x):
-            return x.abs() * 2
-
-        a = torch.randn(5, device=device)
-        self.assertEqual(func(a), a.abs() * 2)
-        self.assertAllFused(func.graph_for(a))
-
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
-    @enable_cpu_fuser
-    def test_fused_abs_cpu(self):
-        self._test_fused_abs()
-
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
-    @skipIfRocm
-    def test_fused_abs_cuda(self):
-        self._test_fused_abs(device="cuda")
-
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
     @enable_cpu_fuser
     def test_ge_optimized(self):
@@ -1648,25 +1342,6 @@ class TestJit(JitTestCase):
     @skipIfRocm
     def test_ge_cuda(self):
         self.run_ge_tests(True, True)
-
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
-    @enable_cpu_fuser
-    def test_fused_where_and_typing(self):
-        def f(x, y):
-            mask = x > y
-            res = torch.where(mask, x, y)
-            return mask, res
-
-        script_f = torch.jit.script(f)
-
-        x = torch.randn(4, 4, dtype=torch.double)
-        y = torch.randn(4, 4, dtype=torch.double)
-
-        result1, result2 = script_f(x, y)
-        expected1, expected2 = f(x, y)
-        self.assertEqual(result1, expected1)
-        self.assertEqual(result2, expected2)
-        self.assertAllFused(script_f.graph_for(x, y))
 
     # more manual test of graph executor that can be used as a scratchpad
     def test_ge(self):
@@ -2047,27 +1722,6 @@ class TestJit(JitTestCase):
         test_x = torch.rand(6, 3)
         self.assertEqual(foo(test_x), traced(test_x))
 
-    def test_export_expand_aten_fallback(self):
-        class ExpandTest(torch.jit.ScriptModule):
-            @torch.jit.script_method
-            def forward(self, x):
-                y = x
-                for i in range(5):
-                    y = x.expand([3, 4, i])
-                return y
-
-        mod = ExpandTest()
-        example_outs = mod(torch.rand(3, 4, 1))
-        f = io.BytesIO()
-        with self.assertRaisesRegex(RuntimeError, 'Could not export a broadcasted operation'):
-            torch.onnx.export_to_pretty_string(mod, (torch.rand(3, 4, 1),), f, verbose=False,
-                                               example_outputs=example_outs)
-
-        self.assertExpected(
-            torch.onnx.export_to_pretty_string(mod, (torch.rand(3, 4, 1),), f, verbose=False,
-                                               example_outputs=example_outs,
-                                               operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK))
-
     def test_export_dropout(self):
         test = torch.nn.Dropout()
         test.eval()
@@ -2377,6 +2031,21 @@ class TestJit(JitTestCase):
             return x
 
         self.assertExpectedGraph(fn.graph)
+
+    def test_no_erroneous_warnings(self):
+        import warnings
+
+        def fn(x):
+            if bool(x > 0):
+                warnings.warn('This should NOT be printed')
+                x += 1
+            return x
+
+        with warnings.catch_warnings(record=True) as warns:
+            fn_script = torch.jit.script(fn)
+            fn_script(torch.tensor(0))
+        warns = [str(w.message) for w in warns]
+        self.assertEqual(len(warns), 0)
 
 
 class TestBatched(TestCase):
@@ -2986,52 +2655,6 @@ class TestScript(JitTestCase):
             ge = torch.jit.script(script, optimize)
             ge(*inputs)
 
-    def checkScript(self,
-                    script,
-                    inputs,
-                    optimize=True,
-                    outputs=None,
-                    name='func',
-                    capture_output=False,
-                    frames_up=1,
-                    check_expected=False):
-        if isinstance(script, str):
-            cu = torch.jit.CompilationUnit(script, optimize, _frames_up=frames_up)
-            ge = getattr(cu, name)
-        else:
-            if capture_output:
-                with self.capture_stdout() as captured:
-                    outputs = script(*inputs)
-            else:
-                outputs = script(*inputs)
-            # Check the string frontend first
-            source = textwrap.dedent(inspect.getsource(script))
-            self.checkScript(
-                source,
-                inputs,
-                optimize,
-                outputs,
-                script.__name__,
-                capture_output,
-                frames_up=2,
-                check_expected=check_expected)
-            # Continue checking the Python frontend
-            ge = torch.jit.script(script, optimize, _frames_up=1)
-
-        if capture_output:
-            with self.capture_stdout() as captured:
-                outputs_ge = ge(*inputs)
-            if not WINDOWS:
-                self.assertExpected(captured[0], subname='stdout')
-        else:
-            outputs_ge = ge(*inputs)
-        self.assertEqual(outputs, outputs_ge)
-
-        if check_expected:
-            self.assertExpectedGraph(ge.graph)
-
-        return ge
-
     def test_training_param(self):
         class What(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -3294,29 +2917,6 @@ a")
         a = torch.rand(1, requires_grad=True)
         b = torch.rand(1, requires_grad=True)
         self.checkScript(func, (a, b), optimize=True)
-
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @skipIfRocm
-    def test_clamp_fusion(self):
-        def func2(a, b):
-            return torch.clamp(a + b, min=0, max=2)
-
-        def funcInf(a, b):
-            return torch.clamp(a + b, min=0, max=float('inf'))
-
-        a = torch.randn(4, 4, dtype=torch.float, device='cuda', requires_grad=True)
-        b = torch.randn(4, 4, dtype=torch.float, device='cuda')
-
-        funcs = (func2, funcInf)
-        for f in funcs:
-            s = self.checkScript(f, (a, b))
-            self.assertAllFused(s.graph_for(a, b), except_for={'aten::size'})
-
-            c = s(a, b)
-            c.sum().backward()
-            graph = backward_graph(s)
-            self.assertAllFused(graph, except_for={'prim::SumToSize'})
 
     def test_mul(self):
         def func(a, b):
@@ -3740,89 +3340,6 @@ a")
             func2.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
         self.assertExpected(canonical(func2.graph), subname='2')
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skipIf(not RUN_CUDA, "No CUDA")
-    @skipIfRocm
-    def test_chunk_fusion_cuda(self):
-        def fn(x):
-            a, b, c = x.chunk(3, 1)
-            return a * b + c
-
-        inputs = [torch.randn(10, 6, dtype=torch.float, device='cuda')]
-
-        self.checkScript(fn, inputs)
-
-        fn_script = torch.jit.script(fn)
-        _ = fn_script(*inputs)
-        self.assertExpectedGraph(fn_script.graph_for(*inputs))
-
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skipIf(not RUN_CUDA, "No CUDA")
-    @skipIfRocm
-    def test_chunk_multiple_fusion_cuda(self):
-        # The arguments are intentionally used out of order as a test to see
-        # if the fusion compiler adds extra args in the correct order
-        def fn(s, x, y, z):
-            z1, z2 = z.chunk(2, 2)
-            x1, x2, x3 = x.chunk(3, 1)
-            y1, y2 = y.chunk(2, 0)
-            return s + x1 + x2 + x3 + y1 + y2 + z1 + z2
-
-        inputs = [
-            torch.randn(5, 2, 3, dtype=torch.float, device='cuda'),
-            torch.randn(5, 6, 3, dtype=torch.float, device='cuda'),
-            torch.randn(10, 2, 3, dtype=torch.float, device='cuda'),
-            torch.randn(5, 2, 6, dtype=torch.float, device='cuda'),
-        ]
-
-        self.checkScript(fn, inputs)
-
-        fn_script = torch.jit.script(fn)
-        _ = fn_script(*inputs)
-        self.assertExpectedGraph(fn_script.graph_for(*inputs))
-
-    @staticmethod
-    def _test_chunk_fusion_correctness(self, device='cpu'):
-        def chunk_4_0(x):
-            x0, x1, x2, x3 = x.chunk(4, 0)
-            return x0 + x1 + x2 + x3
-
-        def chunk_4_1(x):
-            x0, x1, x2, x3 = x.chunk(4, 1)
-            return x0 + x1 + x2 + x3
-
-        def chunk_4_last(x):
-            x0, x1, x2, x3 = x.chunk(4, 2)
-            return x0 + x1 + x2 + x3
-
-        fns = [chunk_4_0, chunk_4_1, chunk_4_last]
-        tensors = [
-            # splitSize = 1
-            torch.randn(4, 4, 4, dtype=torch.float, device=device),
-
-            # contiguous case
-            torch.randn(12, 8, 16, dtype=torch.float, device=device),
-
-            # non-contiguous case
-            torch.randn(12, 8, 16, dtype=torch.float, device=device).transpose(1, 2),
-        ]
-
-        for tensor in tensors:
-            for fn in fns:
-                self.checkScript(fn, [tensor])
-
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
-    @skipIfRocm
-    @enable_cpu_fuser
-    def test_chunk_fusion_correctness(self):
-        return self._test_chunk_fusion_correctness(self, 'cpu')
-
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skipIf(not RUN_CUDA, "No CUDA")
-    @skipIfRocm
-    def test_chunk_fusion_correctness_cuda(self):
-        return self._test_chunk_fusion_correctness(self, 'cuda')
-
     def test_cat(self):
         @torch.jit.script
         def func(x):
@@ -3956,32 +3473,6 @@ a")
             return len(a) == 0
 
         self.checkScript(func2, ())
-
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @skipIfRocm
-    def test_tensor_scalar_fusion_cuda(self):
-        def should_fuse(x):
-            z = 3.
-            y = x + z
-            return x * y
-
-        # XXX: right now we only support fusing scalars if
-        # they're constant (#9940)
-        def should_not_fuse(x, z):
-            y = x + int(z)
-            return x * y
-
-        inputs = [torch.randn(2, 2, dtype=torch.float, device='cuda')]
-        ge = self.checkScript(should_fuse, inputs)
-        self.assertExpectedGraph(ge.graph_for(*inputs), subname='1')
-
-        inputs = [
-            torch.randn(2, 2, dtype=torch.float, device='cuda'),
-            torch.tensor(3., dtype=torch.float, device='cuda'),
-        ]
-        ge = self.checkScript(should_not_fuse, inputs)
-        self.assertExpectedGraph(ge.graph_for(*inputs), subname='2')
 
     def test_list_ops(self):
         def test_equality():
@@ -4241,97 +3732,6 @@ a")
         outputs = [torch.ones(20, 10, 10)] * 3
 
         self.assertEqual(cu.test_fuser_multiple_blocks(*inputs), outputs)
-
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
-    @enable_cpu_fuser
-    def test_scalar_fusion(self):
-        def fn(x, y):
-            return 2 * x + y
-
-        x = torch.tensor(0.1, dtype=torch.float, device='cpu')
-        y = torch.tensor(1, dtype=torch.float, device='cpu')
-        ge = self.checkScript(fn, (x, y))
-        self.assertExpectedGraph(ge.graph_for(x, y))
-
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @skipIfRocm
-    def test_fusion_chunk_motion_deduplicates_inputs(self):
-        def func1(x):
-            z = x * x
-            z0, z1 = z.chunk(2)
-            return z0 * z1
-
-        def func2(x):
-            z = x * x * x
-            z0, z1 = z.chunk(2)
-            return z0 * z1
-
-        inputs = [
-            torch.tensor([1.1, 1.2], device='cuda', dtype=torch.float),
-        ]
-        for func in [func1, func2]:
-            module = self.checkScript(func, inputs)
-            forward_graph = module.graph_for(*inputs)
-            self.assertGraphContainsExactly(forward_graph, 'prim::FusionGroup', 1)
-            fusion_group = list(forward_graph.nodes())[-1]
-            self.assertEqual(len(list(fusion_group.inputs())), 1)
-
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @skipIfRocm
-    def test_lstm_gates_permutations_fusion_cuda(self):
-        # lstm has gates = x.mm(w_ih.t()) + hx.mm(w_hh.t()) + b_ih + b_hh.
-        # Test that any permutation of this will still result in one FusionGroup.
-        choices = ['x.mm(w_ih.t())', 'hx.mm(w_hh.t())', 'b_ih', 'b_hh']
-        template = dedent('''
-        def cell(x, hx, cx, w_ih, w_hh, b_ih, b_hh):
-            gates = {} + {} + {} + {}
-            ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
-            return ingate * forgetgate * cellgate * outgate
-        ''')
-        for permutation in itertools.permutations(choices, len(choices)):
-            code = template.format(*permutation)
-            scope = {}
-            exec(code, globals(), scope)
-            cu = torch.jit.CompilationUnit(code)
-
-            inputs = get_lstm_inputs('cuda', training=False)
-            self.assertEqual(cu.cell(*inputs), scope['cell'](*inputs))
-            forward_graph = cu.cell.graph_for(*inputs)
-            self.assertGraphContainsExactly(forward_graph, 'prim::FusionGroup', 1)
-
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @skipIfRocm
-    def test_lstm_fusion_cuda(self):
-        inputs = get_lstm_inputs('cuda', training=True)
-        module = self.checkScript(LSTMCellS, inputs)
-        forward_graph = module.graph_for(*inputs)
-        with self.assertRaises(AssertionError):
-            self.assertGraphContainsExactly(
-                forward_graph, 'prim::FusionGroup', 1, consider_subgraphs=True)
-        self.assertExpectedGraph(forward_graph, subname='forward')
-
-        hy, cy = module(*inputs)
-        (hy + cy).sum().backward()
-        self.assertExpectedGraph(backward_graph(module), subname='backward')
-
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @skipIfRocm
-    def test_milstm_fusion_cuda(self):
-        inputs = get_milstm_inputs('cuda', training=True)
-        module = self.checkScript(MiLSTMCell, inputs)
-        forward_graph = module.graph_for(*inputs)
-        with self.assertRaises(AssertionError):
-            self.assertGraphContainsExactly(
-                forward_graph, 'prim::FusionGroup', 1, consider_subgraphs=True)
-        self.assertExpectedGraph(forward_graph, subname='forward')
-
-        hy, cy = module(*inputs)
-        (hy + cy).sum().backward()
-        self.assertExpectedGraph(backward_graph(module), subname='backward')
 
     def test_dropout_script(self):
 
@@ -4792,38 +4192,35 @@ a")
             throwsAnd(t)
 
     def test_type_cast(self):
-        @torch.jit.script
         def test_int_to_float():
             b = float(2)
             return b + 1.0
+        self.checkScript(test_int_to_float, ())
 
-        with self.assertRaisesRegex(RuntimeError, "Cannot cast type"):
+        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
             @torch.jit.script
             def test_int_to_bool():
                 return bool(5)
 
-        @torch.jit.script
         def test_float_to_int():
             b = int(5.0)
             return b + 1
+        self.checkScript(test_float_to_int, ())
 
-        with self.assertRaisesRegex(RuntimeError, "Cannot cast type"):
+        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
             @torch.jit.script
             def test_float_to_bool():
                 return bool(5.0)
 
-        with self.assertRaisesRegex(RuntimeError, "Cannot cast type"):
+        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
             @torch.jit.script
             def test_bool_to_float():
                 return float(True)
 
-        with self.assertRaisesRegex(RuntimeError, "Cannot cast type"):
+        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
             @torch.jit.script
             def test_bool_to_int():
                 return int(True)
-
-        self.assertExpectedGraph(test_int_to_float.graph, "test_int_to_float")
-        self.assertExpectedGraph(test_float_to_int.graph, "test_float_to_int")
 
     def test_multiple_assignment(self):
         def outer_func(x):
@@ -5052,6 +4449,43 @@ a")
         # do literals product to try any types combinations
         for op, lhs, rhs in product(ops, type_literals, type_literals):
             test(op, [lhs, rhs])
+
+    def test_isinstance(self):
+        # test isinstance operator for static type checking
+        template = dedent('''
+        def func(x):
+            # type: ({type_hint}) -> bool
+            return isinstance(x, {typ})
+        ''')
+
+        def test(inp, typ, type_hint):
+            code = template.format(typ=typ, type_hint=type_hint)
+            scope = {}
+            exec(code, globals(), scope)
+            cu = torch.jit.CompilationUnit(code)
+            self.assertEqual(
+                cu.func(inp),
+                scope['func'](inp),
+                "Failed with typ: {}"
+                .format(typ)
+            )
+
+        inputs = [True, 1, 1.0, torch.tensor(1), [1, 2], (1.0,), [1, 2], 1]
+        type_literals = ['bool', 'int', 'float', 'torch.Tensor', 'list', 'tuple',
+                         '(list, tuple)', '(int, float, bool)']
+        type_annotations = ['bool', 'int', 'float', 'Tensor', 'List[int]', 'Tuple[float]',
+                            'List[int]', 'int']
+
+        # do zipping to try different types
+        for inp, typ, type_hint in zip(inputs, type_literals, type_annotations):
+            test(inp, typ, type_hint)
+
+        # test optional isintance check
+        with self.assertRaisesRegex(RuntimeError, "Optional isinstance check is not supported"):
+            @torch.jit.script
+            def opt_func(x):
+                # type: (Optional[int]) -> bool
+                return isinstance(x, int)
 
     def test_python_call(self):
         def pyfunc(a):
@@ -5349,8 +4783,6 @@ a")
     def test_script_module_param_buffer_mutation(self):
         # TODO: add param mutation test case after JIT support it
         class ModuleBufferMutate(torch.jit.ScriptModule):
-            __constants__ = ['training']
-
             def __init__(self):
                 super(ModuleBufferMutate, self).__init__(False)
                 self.register_buffer('running_var', torch.tensor(0, dtype=torch.long))
@@ -5362,6 +4794,8 @@ a")
                 return self.running_var
 
         m = ModuleBufferMutate()
+        self.assertEqual(m(), 1)
+        m.eval()
         self.assertEqual(m(), 1)
 
     def test_script_module_for(self):
@@ -5436,6 +4870,115 @@ a")
 
         with self.assertRaisesRegex(RuntimeError, "did you forget to add it __constants__"):
             M()
+
+    class DerivedStateModule(torch.jit.ScriptModule):
+        def __init__(self):
+            super(TestScript.DerivedStateModule, self).__init__()
+            self.param = torch.nn.Parameter(torch.ones(3, 4, dtype=torch.float))
+            self.register_buffer('derived', torch.neg(self.param).detach())
+
+            # This is a flag so we can test that the pack method was called
+            self.register_buffer('pack_called', torch.zeros(1, dtype=torch.long))
+            # This is a flag so we can test that the unpack method was called
+            self.register_buffer('unpack_called', torch.zeros(1, dtype=torch.long))
+
+        @torch.jit.script_method
+        def _pack(self):
+            self.pack_called.set_(torch.ones(1, dtype=torch.long))
+            self.derived.set_(torch.rand(1, dtype=torch.float).detach())
+
+        @torch.jit.script_method
+        def _unpack(self):
+            self.unpack_called.set_(torch.ones(1, dtype=torch.long))
+            self.derived.set_(torch.neg(self.param).detach())
+
+        @torch.jit.script_method
+        def forward(self, x):
+            return x + self.derived
+
+    def test_pack_unpack_state(self):
+        sm = TestScript.DerivedStateModule()
+        x = torch.rand(3, 4, dtype=torch.float)
+        torch.testing.assert_allclose(sm(x), x + torch.neg(torch.ones(3, 4, dtype=torch.float)))
+
+        # Test save path
+        self.assertFalse(sm.pack_called.item())
+        self.assertFalse(sm.unpack_called.item())
+        sm.apply(lambda s: s._pack())
+        imported = self.getExportImportCopy(sm)
+        sm.apply(lambda s: s._unpack())
+        imported.apply(lambda s: s._unpack())
+        # ensure pack was called before serialization
+        self.assertTrue(sm.pack_called.item())
+        # ensure unpack was called after serialization so as to leave the module in an initialized state
+        self.assertTrue(sm.unpack_called.item())
+
+        torch.testing.assert_allclose(sm.derived, torch.neg(sm.param))
+
+        # Test load paths
+        self.assertTrue(imported.unpack_called.item())
+        torch.testing.assert_allclose(imported(x), x + torch.neg(torch.ones(3, 4, dtype=torch.float)))
+
+    def test_pack_unpack_nested(self):
+        class SubSubMod(torch.jit.ScriptModule):
+            def __init__(self):
+                super(SubSubMod, self).__init__()
+                self.register_buffer('buf', torch.ones(3, 4) * 3)
+
+            @torch.jit.script_method
+            def _pack(self):
+                self.buf.set_(torch.zeros(1, dtype=torch.double))
+
+            @torch.jit.script_method
+            def _unpack(self):
+                self.buf.set_(torch.ones(3, 4, dtype=torch.double) * 3)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return x + self.buf
+
+        class SubMod(torch.jit.ScriptModule):
+            def __init__(self):
+                super(SubMod, self).__init__()
+                self.register_buffer('buf', torch.ones(3, 4) * 2)
+                self.ssm = SubSubMod()
+
+            @torch.jit.script_method
+            def _pack(self):
+                self.buf.set_(torch.zeros(1, dtype=torch.double))
+
+            @torch.jit.script_method
+            def _unpack(self):
+                self.buf.set_(torch.ones(3, 4, dtype=torch.double) * 2)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return self.ssm(x + self.buf)
+
+        class Mod(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Mod, self).__init__()
+                self.submod = SubMod()
+                self.register_buffer('buf', torch.ones(3, 4) * 1)
+
+            @torch.jit.script_method
+            def _pack(self):
+                self.buf.set_(torch.zeros(1, dtype=torch.double))
+
+            @torch.jit.script_method
+            def _unpack(self):
+                self.buf.set_(torch.ones(3, 4, dtype=torch.double))
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return self.submod(x + self.buf)
+
+        m = Mod()
+        torch.testing.assert_allclose(m(torch.zeros(3, 4)), torch.ones(3, 4) * 6)
+        m.apply(lambda s: s._pack())
+        torch.testing.assert_allclose(m(torch.zeros(3, 4)), torch.zeros(3, 4))
+        m.apply(lambda s: s._unpack())
+        torch.testing.assert_allclose(m(torch.zeros(3, 4)), torch.ones(3, 4) * 6)
 
     def test_script_module_not_tuple(self):
         class M(torch.jit.ScriptModule):
@@ -5962,7 +5505,7 @@ a")
             print(int_fn(1))
             print(int_fn((1, 1, 1)))
 
-        with self.assertRaisesRegex(RuntimeError, "expected number"):
+        with self.assertRaisesRegex(RuntimeError, "must be a positive integer:"):
             @torch.jit.script
             def fn(x):
                 # type: (BroadcastingListx[int]) -> List[int]
@@ -6305,7 +5848,7 @@ a")
         self.assertEqual(m_orig.forward(input), m_import.forward(input))
 
     @skipIfNoTorchVision
-    def test_script_module_export_resnet18(self):
+    def test_script_module_trace_resnet18(self):
         x = torch.ones(1, 3, 224, 224)
         m_orig = torch.jit.trace(torchvision.models.resnet18(), torch.ones(1, 3, 224, 224))
         m_import = self.getExportImportCopy(m_orig)
@@ -6317,6 +5860,126 @@ a")
         input.grad.zero_()
 
         output_import = m_import(input)
+        output_import.sum().backward()
+        grad_import = input.grad.clone()
+
+        self.assertEqual(output_orig, output_import)
+        self.assertEqual(grad_orig, grad_import)
+
+    @skipIfNoTorchVision
+    def test_script_module_script_resnet(self):
+        def conv1x1(in_planes, out_planes, stride=1):
+            """1x1 convolution"""
+            return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=False)
+
+        def conv3x3(in_planes, out_planes, stride=1):
+            """3x3 convolution with padding"""
+            return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
+                             padding=1, bias=False)
+
+        class BasicBlock(torch.jit.ScriptModule):
+            expansion = 1
+            __constants__ = ['downsample']
+
+            def __init__(self, inplanes, planes, stride=1, downsample=None):
+                super(BasicBlock, self).__init__()
+                self.conv1 = conv3x3(inplanes, planes, stride)
+                self.bn1 = nn.BatchNorm2d(planes)
+                self.relu = nn.ReLU(inplace=True)
+                self.conv2 = conv3x3(planes, planes)
+                self.bn2 = nn.BatchNorm2d(planes)
+                self.downsample = downsample
+                self.stride = stride
+
+            @torch.jit.script_method
+            def forward(self, x):
+                residual = x
+
+                out = self.conv1(x)
+                out = self.bn1(out)
+                out = self.relu(out)
+
+                out = self.conv2(out)
+                out = self.bn2(out)
+
+                if self.downsample is not None:
+                    residual = self.downsample(x)
+
+                out += residual
+                out = self.relu(out)
+
+                return out
+
+        class ResNet(torch.jit.ScriptModule):
+            __constants__ = ['layer1', 'layer2', 'layer3', 'layer4']
+
+            def __init__(self, block, layers, num_classes=1000):
+                super(ResNet, self).__init__()
+                self.inplanes = 64
+                self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3,
+                                       bias=False)
+                self.bn1 = nn.BatchNorm2d(64)
+                self.relu = nn.ReLU(inplace=True)
+                self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+                self.layer1 = self._make_layer(block, 64, layers[0])
+                self.layer2 = self._make_layer(block, 128, layers[1], stride=2)
+                self.layer3 = self._make_layer(block, 256, layers[2], stride=2)
+                self.layer4 = self._make_layer(block, 512, layers[3], stride=2)
+                self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+                self.fc = nn.Linear(512 * block.expansion, num_classes)
+
+                for m in self.modules():
+                    if isinstance(m, nn.Conv2d):
+                        nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                    elif isinstance(m, nn.BatchNorm2d):
+                        nn.init.constant_(m.weight, 1)
+                        nn.init.constant_(m.bias, 0)
+
+            def _make_layer(self, block, planes, blocks, stride=1):
+                downsample = None
+                if stride != 1 or self.inplanes != planes * block.expansion:
+                    downsample = nn.Sequential(
+                        conv1x1(self.inplanes, planes * block.expansion, stride),
+                        nn.BatchNorm2d(planes * block.expansion),
+                    )
+
+                layers = []
+                layers.append(block(self.inplanes, planes, stride, downsample))
+                self.inplanes = planes * block.expansion
+                for _ in range(1, blocks):
+                    layers.append(block(self.inplanes, planes))
+
+                return nn.Sequential(*layers)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.bn1(x)
+                x = self.relu(x)
+                x = self.maxpool(x)
+
+                x = self.layer1(x)
+                x = self.layer2(x)
+                x = self.layer3(x)
+                x = self.layer4(x)
+
+                x = self.avgpool(x)
+                x = x.view(x.size(0), -1)
+                x = self.fc(x)
+
+                return x
+
+        resnet18 = ResNet(BasicBlock, [2, 2, 2, 2])
+
+        resnet18_imported = self.getExportImportCopy(resnet18)
+
+        input = torch.randn(1, 3, 224, 224, requires_grad=True)
+        output_orig = resnet18(input)
+        output_orig.sum().backward()
+        grad_orig = input.grad.clone()
+        input.grad.zero_()
+
+        output_import = resnet18_imported(input)
         output_import.sum().backward()
         grad_import = input.grad.clone()
 
@@ -6970,9 +6633,7 @@ a")
 
         self.checkScript(foo, ())
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     def test_rand(self):
-
         def test_rand():
             a = torch.rand([3, 4])
             return a + 1.0 - a
@@ -7496,6 +7157,59 @@ a")
         # Note: neg op from the traced function should be properly inlined
         self.assertExpected(canonical(tm.graph))
 
+    def test_trace_hierarchy(self):
+        # Test that we preserve the module hierarchy for a ScriptModule
+        # submodule during tracing
+
+        class AnotherScriptMod(torch.jit.ScriptModule):
+            def __init__(self):
+                super(AnotherScriptMod, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(1, 2, 3))
+
+            @torch.jit.script_method
+            def bar(self):
+                return torch.zeros(4, 5)
+
+        class SomeScriptMod(torch.jit.ScriptModule):
+            def __init__(self):
+                super(SomeScriptMod, self).__init__()
+                self.asm = AnotherScriptMod()
+
+            @torch.jit.script_method
+            def foo(self):
+                return torch.zeros(3, 4)
+
+            @torch.jit.script_method
+            def bar(self):
+                return torch.zeros(4, 3)
+
+        class TraceMe(torch.nn.Module):
+            def __init__(self):
+                super(TraceMe, self).__init__()
+                self.ssm = SomeScriptMod()
+
+            def forward(self, x):
+                return self.ssm.bar() + x
+
+        orig = TraceMe()
+        traced = torch.jit.trace(orig, (torch.rand(4, 3, dtype=torch.float),))
+        # for each of these checks, check that *BOTH* the underlying
+        # _C.ScriptModule object has the expected method/param, as well as the
+        # Python object that wraps it.
+        self.assertTrue(traced.ssm._has_method('foo'))
+        self.assertTrue(hasattr(traced.ssm, 'foo'))
+
+        imported = self.getExportImportCopy(traced)
+
+        self.assertTrue(imported.ssm._has_method('foo'))
+        self.assertTrue(hasattr(imported.ssm, 'foo'))
+
+        self.assertTrue(imported.ssm.asm._has_method('bar'))
+        self.assertTrue(hasattr(imported.ssm.asm, 'bar'))
+
+        self.assertTrue(imported.ssm.asm._has_parameter('param'))
+        self.assertTrue(hasattr(imported.ssm.asm, 'param'))
+
     def test_call_traced_module_from_traced_module(self):
         class TracedModule1(torch.nn.Module):
             def __init__(self):
@@ -7541,11 +7255,11 @@ a")
         class ScriptMod(torch.jit.ScriptModule):
             def __init__(self):
                 super(ScriptMod, self).__init__()
-                self.param = torch.nn.Parameter(torch.rand(5, 7))
+                self.param_foo = torch.nn.Parameter(torch.rand(5, 7))
 
             @torch.jit.script_method
             def forward(self, x):
-                return torch.mm(x, self.param)
+                return torch.mm(x, self.param_foo)
 
         class TracedModule(torch.nn.Module):
             def __init__(self):
@@ -8402,15 +8116,6 @@ a")
             foo(torch.tensor(1))
 
         @torch.jit.script
-        def foo():
-            a = Exception()
-            raise a
-
-        # a gets DCEd because the expression following raise is ignored
-        with self.assertRaisesRegex(torch.jit.Error, "failed in interpreter"):
-            foo()
-
-        @torch.jit.script
         def foo_except_used():
             a = Exception()
             print(a)
@@ -8489,11 +8194,8 @@ a")
             x = strong_script_fn(x)
             return weak_script_fn(x)
 
-        scripted = torch.jit.script(fn)
-
         input = torch.randn(3, 4, 5)
-        self.assertExpectedGraph(scripted.graph)
-        self.assertEqual(scripted(input), fn(input))
+        self.checkScript(fn, (input,))
 
     def test_python_op_exception(self):
         def python_op(x):
@@ -8580,9 +8282,9 @@ a")
         python_result = weak_mod(x)
         strong_mod = Passthrough()
         script_result = strong_mod(x)
+
         self.assertEqual(python_result, expected_result)
         self.assertEqual(script_result, expected_result)
-        self.assertExpectedGraph(strong_mod.graph, "basic")
 
         class Strong(torch.jit.ScriptModule):
             def __init__(self):
@@ -8603,7 +8305,6 @@ a")
         script_result2 = strong_mod2(x)
         self.assertEqual(script_result, expected_result)
         self.assertEqual(script_result, script_result2)
-        self.assertExpectedGraph(strong_mod.graph, "scope_test")
 
     def test_weak_module_parameters_and_buffers(self):
         weights = torch.randn(10, 10)
@@ -8649,7 +8350,6 @@ a")
                 return x + self.fc1(x) + self.fc1(x) + self.fc2(x)
 
         strong_mod = Strong()
-        self.assertExpectedGraph(strong_mod.graph)
 
         # Run same calculation as module
         inp = torch.ones(10)
@@ -8662,6 +8362,7 @@ a")
         expected_result = inp + (lin(inp) + torch.ones(10)) * 2 + lin2(inp) + torch.ones(10)
 
         self.assertEqual(strong_mod(inp), expected_result)
+        self.assertExportImportModule(strong_mod, (inp,))
 
     def test_weak_module_nested(self):
         @torch._jit_internal.weak_module
@@ -8717,7 +8418,6 @@ a")
                 return x + self.weak(x)
 
         strong_mod = Strong()
-        self.assertExpectedGraph(strong_mod.graph)
         inp = torch.randn(10)
         result = strong_mod(inp)
         expected_result = inp + (inp + inp * inp + inp + 27) + 3 \
@@ -9079,6 +8779,18 @@ a")
             return b
 
         self.assertExpectedGraph(foo.graph)
+
+    def test_cpp_function_tensor_str(self):
+        x = torch.randn(2, 2)
+        scale = torch.randn(2, 2, requires_grad=True)
+        shift = torch.randn(2, 2, requires_grad=True)
+
+        @torch.jit.script
+        def fn(x, scale, shift):
+            return scale * x + shift
+
+        with self.capture_stdout() as captured:
+            print(fn(x, scale, shift))
 
 
 class MnistNet(nn.Module):
@@ -9716,15 +9428,13 @@ EXCLUDE_PYTHON_PRINT = {
     'test_nn_max_unpool1d',
     'test_nn_max_unpool2d',
     'test_nn_max_unpool3d',
-    'test_nn_max_pool3d',
+    'test_nn_max_pool1d',
     'test_nn_max_pool2d',
-    'test_nn_max_pool3d'
+    'test_nn_max_pool3d',
+    'test_nn_max_pool1d_with_indices',
 }
 
 EXCLUDE_SCRIPT_MODULES = {
-    'test_nn_BatchNorm1d_not_tracking_stats',
-    'test_nn_BatchNorm2d_not_tracking_stats',
-    'test_nn_BatchNorm3d_not_tracking_stats',
     'test_nn_AdaptiveAvgPool2d_tuple_none',
     'test_nn_AdaptiveAvgPool3d_tuple_none',
     'test_nn_AdaptiveMaxPool2d_tuple_none',
@@ -9735,6 +9445,7 @@ DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
     'test_nn_avg_pool2d',
     'test_nn_log_softmax',
     'test_nn_threshold',
+    'test_nn_nll_loss',
 }
 
 
@@ -9930,9 +9641,668 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
     self.assertEqual(outputs, outputs_test)
     self.assertEqual(grads, grads_test)
     for g2, g2_test in zip(grads2, grads2_test):
-        if g2 is None and g2_ge is None:
+        if g2 is None and g2_test is None:
             continue
         self.assertTrue(torch.allclose(g2, g2_test, atol=5e-4, rtol=1e-4))
+
+
+class TestFuser(JitTestCase):
+    def assertAllFused(self, graph, except_for=()):
+        if [n.kind() for n in graph.nodes()] == ['prim::DifferentiableGraph']:
+            graph = next(graph.nodes()).g('Subgraph')
+        allowed_nodes = {'prim::Constant', 'prim::FusionGroup'} | set(except_for)
+        self.assertTrue(all(node.kind() in allowed_nodes for node in graph.nodes()),
+                        'got {}'.format(graph))
+        self.assertTrue([node.kind() for node in graph.nodes()].count('prim::FusionGroup') == 1)
+
+    def _test_fused_abs(self, device='cpu'):
+
+        @torch.jit.script
+        def func(x):
+            return x.abs() * 2
+
+        a = torch.randn(5, device=device)
+        self.assertEqual(func(a), a.abs() * 2)
+        self.assertAllFused(func.graph_for(a))
+
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @enable_cpu_fuser
+    def test_abs_cpu(self):
+        self._test_fused_abs()
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @skipIfRocm
+    def test_abs_cuda(self):
+        self._test_fused_abs(device="cuda")
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_arg_configurations_smoke_cuda(self):
+        # A smoke test to make sure we won't use the same kernel for contiguous
+        # and non-contiguous arguments.
+        # TODO: add optionally enabled debug counters to the fuser to verify
+        #       that we really can tell the difference between configurations
+        def f(x, y):
+            z1, z2 = (x + y).chunk(2, dim=1)
+            return z1 * z2
+
+        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        traced_f = torch.jit.trace(f, (x, y,))
+        self.assertEqual(traced_f(x.t().contiguous(), y), traced_f(x.t(), y))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_broadcast_cuda(self):
+        def scaleshift(x, scale, shift):
+            return x * scale + shift
+
+        inputs = [
+            torch.randn(4, 4, dtype=torch.float, device='cuda'),
+            torch.randn(4, dtype=torch.float, device='cuda'),
+            torch.randn(4, dtype=torch.float, device='cuda'),
+        ]
+        ge = self.checkTrace(scaleshift, inputs)
+        self.assertExpectedGraph(ge.graph_for(*inputs))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @unittest.skipIf(not RUN_CUDA_HALF, "no half support")
+    def test_cuda_half(self):
+        x = torch.randn(4, 4, dtype=torch.half, device='cuda')
+        y = torch.randn(4, 4, dtype=torch.half, device='cuda')
+
+        funcs = [
+            self.fn_test_comparison_gt_lt,
+            self.fn_test_relu,
+            self.fn_test_exp
+        ]
+
+        # Note: Non fused inputs must be float to prevent loss of precision
+        inputs = (x.float(), y.float())
+        fusion_inputs = (x, y)
+        for fn in funcs:
+            local_inputs = [t.clone().requires_grad_() for t in inputs]
+            local_fusion_inputs = [t.clone().requires_grad_() for t in fusion_inputs]
+
+            # Verifies outputs
+            fusion = torch.jit.trace(fn, local_fusion_inputs, check_trace=False, optimize=True)
+            outputs = fn(*local_inputs)
+            fusion_outputs = fusion(*local_fusion_inputs)
+            outputs_half = [t.half() for t in outputs]
+            self.assertEqual(outputs_half, fusion_outputs)
+
+            # Verifies gradients
+            for output, fusion_output in zip(outputs_half, fusion_outputs):
+                grads = torch.autograd.grad(
+                    output.float().sum(), local_inputs, allow_unused=True, retain_graph=True)
+                fusion_grads = torch.autograd.grad(
+                    fusion_output.sum(), local_fusion_inputs, allow_unused=True, retain_graph=True)
+                grads_half = [t.half() for t in grads]
+                self.assertEqual(grads_half, fusion_grads)
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_checks_cat_inputs(self):
+        # We shouldn't treat cat nodes as broadcasting. All their inputs
+        # need to be checked for having the same map size, before we can
+        # run the kernel.
+        @torch.jit.script
+        def f(x, y):
+            return torch.cat([x + 2 * x + x ** 2, y + 4 * y + y ** 3], dim=0)
+
+        # NOTE: y is broadcastable to x, but output of f(x, y) should have
+        # shape 3x4, and not 4x4.
+        x = torch.randn(2, 4, dtype=torch.float, device='cuda')
+        y = torch.randn(1, 4, dtype=torch.float, device='cuda')
+
+        self.assertEqual(f(x, y).shape, (3, 4))
+        self.assertAllFused(f.graph_for(x, y))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "No CUDA")
+    @skipIfRocm
+    def test_chunk_cuda(self):
+        def fn(x):
+            a, b, c = x.chunk(3, 1)
+            return a * b + c
+
+        inputs = [torch.randn(10, 6, dtype=torch.float, device='cuda')]
+
+        ge = self.checkScript(fn, inputs)
+        self.assertExpectedGraph(ge.graph_for(*inputs))
+
+    @staticmethod
+    def _test_chunk_correctness(self, device='cpu'):
+        def chunk_4_0(x):
+            x0, x1, x2, x3 = x.chunk(4, 0)
+            return x0 + x1 + x2 + x3
+
+        def chunk_4_1(x):
+            x0, x1, x2, x3 = x.chunk(4, 1)
+            return x0 + x1 + x2 + x3
+
+        def chunk_4_last(x):
+            x0, x1, x2, x3 = x.chunk(4, 2)
+            return x0 + x1 + x2 + x3
+
+        fns = [chunk_4_0, chunk_4_1, chunk_4_last]
+        tensors = [
+            # splitSize = 1
+            torch.randn(4, 4, 4, dtype=torch.float, device=device),
+
+            # contiguous case
+            torch.randn(12, 8, 16, dtype=torch.float, device=device),
+
+            # non-contiguous case
+            torch.randn(12, 8, 16, dtype=torch.float, device=device).transpose(1, 2),
+        ]
+
+        for tensor in tensors:
+            for fn in fns:
+                self.checkScript(fn, [tensor])
+
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @skipIfRocm
+    @enable_cpu_fuser
+    def test_chunk_correctness(self):
+        return self._test_chunk_correctness(self, 'cpu')
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "No CUDA")
+    @skipIfRocm
+    def test_chunk_correctness_cuda(self):
+        return self._test_chunk_correctness(self, 'cuda')
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_chunk_distributes_cuda(self):
+        def f(x, y):
+            z1, z2 = (x + y).chunk(2, dim=1)
+            return z1 * z2
+
+        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
+
+        ge = self.checkTrace(f, (x, y))
+        self.assertExpectedGraph(ge.graph_for(x, y))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_chunk_motion_deduplicates_inputs(self):
+        def func1(x):
+            z = x * x
+            z0, z1 = z.chunk(2)
+            return z0 * z1
+
+        def func2(x):
+            z = x * x * x
+            z0, z1 = z.chunk(2)
+            return z0 * z1
+
+        inputs = [
+            torch.tensor([1.1, 1.2], device='cuda', dtype=torch.float),
+        ]
+        for func in [func1, func2]:
+            module = self.checkScript(func, inputs)
+            forward_graph = module.graph_for(*inputs)
+            self.assertGraphContainsExactly(forward_graph, 'prim::FusionGroup', 1)
+            fusion_group = list(forward_graph.nodes())[-1]
+            self.assertEqual(len(list(fusion_group.inputs())), 1)
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "No CUDA")
+    @skipIfRocm
+    def test_chunk_multiple_cuda(self):
+        # The arguments are intentionally used out of order as a test to see
+        # if the fusion compiler adds extra args in the correct order
+        def fn(s, x, y, z):
+            z1, z2 = z.chunk(2, 2)
+            x1, x2, x3 = x.chunk(3, 1)
+            y1, y2 = y.chunk(2, 0)
+            return s + x1 + x2 + x3 + y1 + y2 + z1 + z2
+
+        inputs = [
+            torch.randn(5, 2, 3, dtype=torch.float, device='cuda'),
+            torch.randn(5, 6, 3, dtype=torch.float, device='cuda'),
+            torch.randn(10, 2, 3, dtype=torch.float, device='cuda'),
+            torch.randn(5, 2, 6, dtype=torch.float, device='cuda'),
+        ]
+
+        ge = self.checkScript(fn, inputs)
+        self.assertExpectedGraph(ge.graph_for(*inputs))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_clamp(self):
+        def func2(a, b):
+            return torch.clamp(a + b, min=0, max=2)
+
+        def funcInf(a, b):
+            return torch.clamp(a + b, min=0, max=float('inf'))
+
+        a = torch.randn(4, 4, dtype=torch.float, device='cuda', requires_grad=True)
+        b = torch.randn(4, 4, dtype=torch.float, device='cuda')
+
+        funcs = (func2, funcInf)
+        for f in funcs:
+            s = self.checkScript(f, (a, b))
+            self.assertAllFused(s.graph_for(a, b), except_for={'aten::size'})
+
+            c = s(a, b)
+            c.sum().backward()
+            graph = backward_graph(s)
+            self.assertAllFused(graph, except_for={'prim::SumToSize'})
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_comparison_eq_ne(self):
+        def f(x, y):
+            mask = (x == 0).type_as(x)
+            z = x * mask + y
+            mask = (x != 0).type_as(x)
+            z = z * mask + y
+            return z
+
+        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
+
+        ge = self.checkTrace(f, (x, y))
+        self.assertAllFused(ge.graph_for(x, y))
+
+    @staticmethod
+    def fn_test_comparison_gt_lt(x, y):
+        mask = (x > 0).type_as(x)
+        z = x * mask + y
+        mask = (x < 0).type_as(x)
+        z = z * mask + y
+        return z
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_comparison_gt_lt_cuda(self):
+        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
+
+        ge = self.checkTrace(self.fn_test_comparison_gt_lt, (x, y))
+        self.assertAllFused(ge.graph_for(x, y))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_comparison_ge_le_cuda(self):
+        def f(x, y):
+            mask = (x >= 0).type_as(x)
+            z = x * mask + y
+            mask = (x <= 0).type_as(x)
+            z = z * mask + y
+            return z
+
+        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
+
+        ge = self.checkTrace(f, (x, y))
+        self.assertAllFused(ge.graph_for(x, y))
+        x.requires_grad_(True)
+        y.requires_grad_(True)
+        self.assertAllFused(ge.graph_for(x, y), except_for=("aten::size", "prim::BroadcastSizes"))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_concat_cuda(self):
+        hx = torch.randn(3, 20, dtype=torch.float, device='cuda')
+        cx = torch.randn(3, 20, dtype=torch.float, device='cuda')
+
+        def foo(hx, cx):
+            return torch.cat((hx + cx, hx * cx))
+
+        ge = self.checkTrace(foo, (hx, cx))
+        self.assertExpectedGraph(ge.graph_for(hx, cx))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_concat_invariant_cuda(self):
+        # Invariant: the output of prim::FusedConcat may
+        # not be an input to any node inside the FusionGroup.
+        def fn(x, y, z):
+            x1 = x + y
+            y1 = x - y
+            w = torch.cat([x1, y1])
+            return w + z
+
+        x = torch.randn(2, 2, dtype=torch.float, device='cuda')
+        y = torch.randn(2, 2, dtype=torch.float, device='cuda')
+        z = torch.randn(4, 2, dtype=torch.float, device='cuda')
+        ge = self.checkTrace(fn, (x, y, z))
+        self.assertExpectedGraph(ge.graph_for(x, y, z))
+
+    @staticmethod
+    def fn_test_exp(x, y):
+        return (x + .5 * y).exp()
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_exp_cuda(self):
+        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
+
+        ge = self.checkTrace(self.fn_test_exp, (x, y))
+        self.assertAllFused(ge.graph_for(x, y))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
+    @skipIfRocm
+    @enable_cpu_fuser
+    def test_fusion_reuse_multi_gpu(self):
+        def fn(x, y):
+            return x * y * x * y
+
+        inputs_cpu = [
+            torch.randn(4, 4, dtype=torch.float),
+            torch.randn(4, 4, dtype=torch.float),
+        ]
+        inputs_cuda0 = [x.cuda(0) for x in inputs_cpu]
+        inputs_cuda1 = [y.cuda(1) for y in inputs_cpu]
+
+        # Should not crash; these should compile different kernels.
+        ge = self.checkScript(fn, inputs_cpu)
+        self.assertAllFused(ge.graph_for(*inputs_cpu))
+        ge(*inputs_cuda0)
+        ge(*inputs_cuda1)
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
+    @skipIfRocm
+    @enable_cpu_fuser
+    def test_kernel_cache_multi_gpu(self):
+        def not_fusible(x):
+            return x
+
+        def fn(x, y, z):
+            x_out = x * x * x * x * x  # fusion: lambda x. x * x * x * x * x
+            y_out = y * y * y * y * y
+            z_out = z * z * z * z * z
+            return not_fusible(x_out), not_fusible(y_out), not_fusible(z_out)
+
+        inputs = [
+            torch.randn(4, 4, dtype=torch.float),
+            torch.randn(4, 4, dtype=torch.float, device='cuda:0'),
+            torch.randn(4, 4, dtype=torch.float, device='cuda:1'),
+        ]
+
+        prev_cache_size = torch._C._jit_debug_fuser_num_cached_kernel_specs()
+
+        # There are 3 FusionGroups. Because they have the same graph, they
+        # should reuse the same KernelSpec in the KernelSpec cache.
+        ge = self.checkScript(fn, inputs)
+        self.assertGraphContainsExactly(
+            ge.graph_for(*inputs), 'prim::FusionGroup', 3, True)
+        new_cache_size = torch._C._jit_debug_fuser_num_cached_kernel_specs()
+        # XXX: This assumes that the same kernel isn't already used by another test
+        self.assertEqual(new_cache_size - prev_cache_size, 1)
+
+    # TODO: This test doesn't offer anything valuable, maybe we should delete it
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
+    @skipIfRocm
+    def test_last_device_cuda(self):
+        device = 'cuda:' + str(1)
+        x = torch.tensor([0.4], dtype=torch.float, device=device)
+        y = torch.tensor([0.7], dtype=torch.float, device=device)
+
+        def doit(x, y):
+            return torch.sigmoid(torch.tanh(x * (x + y) + x))
+
+        ge = self.checkTrace(doit, (x, y))
+        self.assertExpectedGraph(ge.graph_for(x, y))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_lstm_cuda(self):
+        inputs = get_lstm_inputs('cuda', training=True)
+        module = self.checkScript(LSTMCellS, inputs)
+        forward_graph = module.graph_for(*inputs)
+        self.assertGraphContainsExactly(
+            forward_graph, 'prim::FusionGroup', 1, consider_subgraphs=True)
+        self.assertExpectedGraph(forward_graph, subname='forward')
+
+        hy, cy = module(*inputs)
+        (hy + cy).sum().backward()
+        self.assertExpectedGraph(backward_graph(module), subname='backward')
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_lstm_concat_cuda(self):
+        inputs = get_lstm_inputs('cuda')
+        ge = self.checkTrace(LSTMCellC, inputs)
+        self.assertExpectedGraph(ge.graph_for(*inputs))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_lstm_gates_permutations_cuda(self):
+        # lstm has gates = x.mm(w_ih.t()) + hx.mm(w_hh.t()) + b_ih + b_hh.
+        # Test that any permutation of this will still result in one FusionGroup.
+        choices = ['x.mm(w_ih.t())', 'hx.mm(w_hh.t())', 'b_ih', 'b_hh']
+        template = dedent('''
+        def cell(x, hx, cx, w_ih, w_hh, b_ih, b_hh):
+            gates = {} + {} + {} + {}
+            ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
+            return ingate * forgetgate * cellgate * outgate
+        ''')
+        for permutation in itertools.permutations(choices, len(choices)):
+            code = template.format(*permutation)
+            scope = {}
+            exec(code, globals(), scope)
+            cu = torch.jit.CompilationUnit(code)
+
+            inputs = get_lstm_inputs('cuda', training=False)
+            self.assertEqual(cu.cell(*inputs), scope['cell'](*inputs))
+            forward_graph = cu.cell.graph_for(*inputs)
+            self.assertGraphContainsExactly(forward_graph, 'prim::FusionGroup', 1)
+
+    # TODO: Fuser doesn't work at all when inputs require grad. Fix that
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_lstm_traced_cuda(self):
+        inputs = get_lstm_inputs('cuda')
+        ge = self.checkTrace(LSTMCellF, inputs)
+        self.assertExpectedGraph(ge.graph_for(*inputs))
+
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/8746")
+    @enable_cpu_fuser
+    def test_lstm_traced_cpu(self):
+        inputs = get_lstm_inputs('cpu')
+        try:
+            ge = self.checkTrace(LSTMCellF, inputs)
+            self.assertExpectedGraph(ge.graph_for(*inputs))
+        except RuntimeError as e:
+            if 'Failed to compile' in e.args[0]:
+                warnings.warn('CPU fuser test has failed! This is not a hard failure, '
+                              'because the kernels sometimes trigger bugs in compilers '
+                              '(most notably GCC 7.2).')
+                raise unittest.SkipTest('Failed to compile')
+            else:
+                raise
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_milstm_cuda(self):
+        inputs = get_milstm_inputs('cuda', training=True)
+        module = self.checkScript(MiLSTMCell, inputs)
+        forward_graph = module.graph_for(*inputs)
+        self.assertGraphContainsExactly(
+            forward_graph, 'prim::FusionGroup', 1, consider_subgraphs=True)
+        self.assertExpectedGraph(forward_graph, subname='forward')
+
+        hy, cy = module(*inputs)
+        (hy + cy).sum().backward()
+        self.assertExpectedGraph(backward_graph(module), subname='backward')
+
+    # TODO: At some point we supported fusion of torch.rand_like but not anymore
+    @unittest.expectedFailure
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_rand_cuda(self):
+        class M(torch.jit.ScriptModule):
+            __constants__ = ['d']
+
+            def __init__(self):
+                self.d = torch.device('cuda')
+
+            @torch.jit.script_method
+            def create(self, x):
+                return x * x + x + torch.rand_like(x)
+
+        x = torch.zeros([3, 4, 5], dtype=torch.float, device='cuda')
+        m = M()
+        out1 = m.create(x)
+        out2 = m.create(x)
+        self.assertNotEqual(out1, out2)
+        self.assertTrue(torch.all(out1 >= 0))
+        self.assertTrue(torch.all(out1 < 1))
+        self.assertTrue(torch.all(out2 >= 0))
+        self.assertTrue(torch.all(out2 < 1))
+        self.assertAllFused(m.create.graph_for(x))
+
+    @staticmethod
+    def fn_test_relu(x, y):
+        return F.relu(x + .5 * y)
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_relu_cuda(self):
+        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
+
+        ge = self.checkTrace(self.fn_test_relu, (x, y))
+
+    @staticmethod
+    def fn_test_erf(x):
+        return F.relu(torch.erf(x) - torch.erfc(x))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_erf_cuda(self):
+        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        ge = self.checkTrace(self.fn_test_erf, (x,))
+        self.assertAllFused(ge.graph_for(x))
+        x.requires_grad_(True)
+        self.assertAllFused(ge.graph_for(x), except_for=("aten::size", "prim::BroadcastSizes"))
+
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @enable_cpu_fuser
+    def test_scalar(self):
+        def fn(x, y):
+            return 2 * x + y
+
+        x = torch.tensor(0.1, dtype=torch.float, device='cpu')
+        y = torch.tensor(1, dtype=torch.float, device='cpu')
+        ge = self.checkScript(fn, (x, y))
+        self.assertExpectedGraph(ge.graph_for(x, y))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_small_constant_cuda(self):
+        def fn_test_small_constant(x, y):
+            return (1e-8 * x + 5e-9 * y) * 1e8
+        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
+
+        ge = self.checkTrace(fn_test_small_constant, (x, y))
+        self.assertAllFused(ge.graph_for(x, y))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_tensor_scalar_ops_cuda(self):
+        def should_fuse(x):
+            z = 3.
+            y = x + z
+            return x * y
+
+        # XXX: right now we only support fusing scalars if
+        # they're constant (#9940)
+        def should_not_fuse(x, z):
+            y = x + int(z)
+            return x * y
+
+        inputs = [torch.randn(2, 2, dtype=torch.float, device='cuda')]
+        ge = self.checkScript(should_fuse, inputs)
+        self.assertExpectedGraph(ge.graph_for(*inputs), subname='1')
+
+        inputs = [
+            torch.randn(2, 2, dtype=torch.float, device='cuda'),
+            torch.tensor(3., dtype=torch.float, device='cuda'),
+        ]
+        ge = self.checkScript(should_not_fuse, inputs)
+        self.assertExpectedGraph(ge.graph_for(*inputs), subname='2')
+
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @enable_cpu_fuser
+    def test_where_and_typing(self):
+        def f(x, y):
+            mask = x > y
+            res = torch.where(mask, x, y)
+            return mask, res
+
+        script_f = torch.jit.script(f)
+
+        x = torch.randn(4, 4, dtype=torch.double)
+        y = torch.randn(4, 4, dtype=torch.double)
+
+        result1, result2 = script_f(x, y)
+        expected1, expected2 = f(x, y)
+        self.assertEqual(result1, expected1)
+        self.assertEqual(result2, expected2)
+        self.assertAllFused(script_f.graph_for(x, y))
+
+    # TODO: This test seems dead
+    @unittest.skipIf(not IS_WINDOWS, "Testing Fuse skipped on windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_windows(self):
+        def scaleshift(x, scale, shift):
+            return x * scale + shift
+
+        graph = torch.jit.script(scaleshift).graph
+
+        inputs = [
+            torch.randn(4, 4, dtype=torch.float, device='cuda'),
+            torch.randn(4, dtype=torch.float, device='cuda'),
+            torch.randn(4, dtype=torch.float, device='cuda'),
+        ]
+
+        ge = self.checkTrace(scaleshift, inputs)
+        fuse_graph = ge.graph_for(*inputs)
+
+        def run_graph(graph, inputs):
+            m = torch.jit.ScriptModule()
+            m._create_method_from_graph("forward", graph)
+            return m(*inputs)
+
+        self.assertEqual(run_graph(graph, inputs), run_graph(fuse_graph, inputs))
 
 
 # NB: torch.jit.script, when used as a function, uses the current scope
@@ -10252,65 +10622,6 @@ EXCLUDE_MODULE_EXPORT_IMPORT = {
     'AdaptiveAvgPool3d',
 }
 
-local_module_tests = []
-
-
-def to_module_test_format(tup):
-    dic = dict(module_name=tup[0], constructor_args=tup[1], input_fn=lambda: tup[2])
-    if len(tup) >= 5:
-        dic['desc'] = tup[4]
-    local_module_tests.append(dic)
-
-
-def add_interpolate_module_tests():
-    # logic from test_interpolate in test_nn.py
-    def _make_input(dim):
-        size = [1, 1]
-        size += [2] * dim
-        return torch.ones(size, requires_grad=True)
-
-    i = 0
-    size = None
-    for scale_factor in [0.5, 1.5, 2.0]:
-        for mode in ['nearest', 'area']:
-            args = (size, scale_factor, mode)
-            for input in [_make_input(1), _make_input(2), _make_input(3)]:
-                to_module_test_format(('Upsample', args, input, False, str(i)))
-                i = i + 1
-
-        for align_corners in [True, False]:
-            args = (size, scale_factor, 'linear', align_corners)
-            to_module_test_format(('Upsample', args, _make_input(1), False, str(i)))
-            i = i + 1
-
-            args = (size, scale_factor, 'bilinear', align_corners)
-            to_module_test_format(('Upsample', args, _make_input(2), False, str(i)))
-            i = i + 1
-
-            args = (size, scale_factor, 'trilinear', align_corners)
-            to_module_test_format(('Upsample', args, _make_input(3), False, str(i)))
-            i = i + 1
-
-    # test_upsamplingTrilinear3d_spatial_invariance
-    scale_factor = 3.
-    args = (size, scale_factor, 'trilinear', False)
-    in_t_9 = torch.zeros(1, 1, 9, 9, 9)
-    in_t_9[:, :, :4, :4, :4].normal_()
-    to_module_test_format(('Upsample', args, in_t_9, False, str(i)))
-    i = i + 1
-
-    # testing where size is not none test_upsamplingNearest2d
-    size = 4
-    scale_factor = None
-    in_t = torch.ones(1, 1, 2, 2)
-
-    args = (size, scale_factor)
-    to_module_test_format(('UpsamplingNearest2d', args, Variable(in_t), False,))
-    to_module_test_format(('UpsamplingBilinear2d', args, Variable(in_t), False,))
-
-
-add_interpolate_module_tests()
-
 # NB: JIT script tests for all nn functional interfaces, script mode does
 # not support in_place operations yet, so no inplace operation tests added.
 # removed all the deprecated functions
@@ -10430,7 +10741,7 @@ nn_functional_tests = [
     ('gumbel_softmax', (S, S), (2., True,), 'hard'),
     ('multilabel_margin_loss', torch.tensor([[0.2, -0.2, 0.07]]), (torch.tensor([[0, 0, 1]]),),),
     ('multi_margin_loss', (S, S), (non_differentiable(torch.randint(S, (S, ), dtype=torch.int64)), \
-                                   1, 1, non_differentiable(torch.randn(S))),),
+                                   1, 1., non_differentiable(torch.randn(S))),),
     ('binary_cross_entropy', torch.randn(3, 2).sigmoid(), (non_differentiable(torch.rand(3, 2)), \
                                                            non_differentiable(torch.randn(3, 2))),),
     ('binary_cross_entropy', torch.randn(3, 2).sigmoid(),
@@ -10504,7 +10815,6 @@ def add_autograd_test(
                 args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace, call_kwargs=kwargs)
                 self_tensor = deepcopy(self_variable.data)
                 args_tensor = deepcopy(unpack_variables(args_variable))
-                output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
 
                 def fn(*inputs, **kwargs):
                     output = getattr(inputs[0], name)(*inputs[1:], **kwargs)
@@ -10566,6 +10876,14 @@ def add_autograd_test(
         post_add_test(test_name, skipTestIf, do_test)
 
 
+def suppress_warnings(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        with warnings.catch_warnings(record=True):
+            return fn(*args, **kwargs)
+    return wrapper
+
+
 def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=(),
                            output_process_fn=lambda x: x, kwargs=None):
     test_name = 'test_nn_' + name
@@ -10575,6 +10893,7 @@ def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=()
 
     no_grad = variant_name == 'inplace'
 
+    @suppress_warnings
     def do_test(self, name=name, args=args, test_name=test_name):
         torch.manual_seed(2)
 
@@ -10621,6 +10940,8 @@ def add_nn_module_test(*args, **kwargs):
     elif 'constructor' in kwargs:
         name = kwargs['constructor'].__name__
 
+    no_grad = False if 'no_grad' not in kwargs else kwargs['no_grad']
+
     module_name = name.split("_")[0]
 
     module = getattr(torch.nn, module_name, None)
@@ -10636,6 +10957,7 @@ def add_nn_module_test(*args, **kwargs):
         test_name = "{}_{}".format(test_name, kwargs['desc'])
     test_name = 'test_nn_{}'.format(test_name)
 
+    @suppress_warnings
     def do_test(self):
         if test_name in EXCLUDE_SCRIPT_MODULES:
             return
@@ -10643,7 +10965,14 @@ def add_nn_module_test(*args, **kwargs):
             nn_module = kwargs['constructor']
         else:
             nn_module = getattr(torch.nn, name)
-        constructor_args = kwargs.get('constructor_args', ())
+
+        if "FunctionalModule" in str(nn_module):
+            return
+
+        if 'constructor_args_fn' in kwargs:
+            constructor_args = kwargs['constructor_args_fn']()
+        else:
+            constructor_args = kwargs.get('constructor_args', ())
 
         # Construct a script module that passes arguments through
         # to self.submodule
@@ -10687,19 +11016,28 @@ def add_nn_module_test(*args, **kwargs):
             module = nn_module(*constructor_args)
             return module(*args)
 
-        # Check against Python module as reference
+        # Set up inputs from tuple of sizes or constructor fn
         if 'input_fn' in kwargs:
             input = kwargs['input_fn']()
         else:
             input = (kwargs['input_size'],)
 
+        # Extra parameters to forward()
         if 'extra_args' in kwargs:
             input = input + kwargs['extra_args']
+
+        if 'target_size' in kwargs:
+            input = input + (kwargs['target_size'],)
+        elif 'target_fn' in kwargs:
+            if torch.is_tensor(input):
+                input = (input,)
+            input = input + (kwargs['target_fn'](),)
 
         args_variable, kwargs_variable = create_input(input)
         f_args_variable = deepcopy(unpack_variables(args_variable))
 
-        check_against_reference(self, create_script_module, create_nn_module, f_args_variable)
+        # Check against Python module as reference
+        check_against_reference(self, create_script_module, create_nn_module, f_args_variable, no_grad=no_grad)
 
     post_add_test(test_name, (), do_test)
 
@@ -10725,6 +11063,31 @@ class TestAsync(JitTestCase):
         y_hat = foo(x)
         y = torch.jit._wait(fut)
         # assert nothing; only to make sure the fake python path works
+
+    def test_async_parsing(self):
+        @torch.jit.script
+        def foo(x):
+            # type: (Tensor) -> List[Tensor]
+            return [torch.neg(x), x.t()]
+
+        @torch.jit.script
+        def bar(x):
+            futures = torch.jit.annotate(List[Future[List[Tensor]]], [])
+            for _ in range(3):
+                future = torch.jit.annotate(
+                    Future[List[Tensor]],
+                    torch.jit._fork(foo, x)
+                )
+                futures.append(future)
+
+            output = torch.jit.annotate(List[List[Tensor]], [])
+            for i in range(3):
+                output.append(torch.jit._wait(futures[i]))
+            return output
+
+        x = torch.rand(3, 3)
+        result = bar(x)
+        self.assertEqual(len(result), 3)
 
     def test_async_script(self):
         @torch.jit.script
@@ -10859,13 +11222,18 @@ class TestAsync(JitTestCase):
         self.assertEqual(y2, foo2(x1, x2))
         self.assertEqual(y3, foo3(x1, x2, x3))
 
+
 for test in autograd_method_tests:
     add_autograd_test(*test)
 
 for test in nn_functional_tests:
     add_nn_functional_test(*test)
 
-for test in module_tests + new_module_tests + additional_module_tests + local_module_tests:
+for test in module_tests + new_module_tests + additional_module_tests:
+    add_nn_module_test(**test)
+
+for test in criterion_tests:
+    test['no_grad'] = True
     add_nn_module_test(**test)
 
 if __name__ == '__main__':

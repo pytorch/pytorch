@@ -550,8 +550,7 @@ def is_mutable_formal_argument(argument, option):
 
 
 def check_methods_do_not_start_with_underscore(name, is_method):
-    if name in {'_local_scalar', '_values', '_indices', '_nnz', '_dimI',
-                '_dimV', '_coalesced_'}:
+    if name in {'_values', '_indices', '_nnz', '_dimI', '_dimV', '_coalesced_'}:
         return
     if is_method and name.startswith('_') and not name.startswith('__') and not name.startswith('_th_'):
         message = "Function '{}' starts with a single underscore and is ".format(name)
@@ -1266,7 +1265,7 @@ def create_derived(backend_type_env, declarations):
         if broadcasts_arg:
             return []
         zero_dim_actuals = [arg['name']
-                            if arg['name'] != zero_dim_dispatch else "at::_local_scalar({})".format(arg['name'])
+                            if arg['name'] != zero_dim_dispatch else "{}.item()".format(arg['name'])
                             for arg in option['formals_list']]
         return [ZERO_DIM_CHECK.substitute(env, check_name=zero_dim_dispatch, zero_dim_actuals=zero_dim_actuals)]
 
@@ -1519,9 +1518,9 @@ def create_derived(backend_type_env, declarations):
                     env, wrapped_tensor=wrapped_tensor, maybe_scalar=maybe_scalar))
             # return the same underlying Tensor type for both real and accreal; this ensures
             # e.g. x.sum(0) and x.sum() return the same type. We explicitly cast to the
-            # ScalarType before constructing the scalarTensor to avoid overflow checking.
+            # ScalarType before constructing the scalar_tensor to avoid overflow checking.
             elif ret['type'] == 'accreal' or ret['type'] == 'real':
-                return_scalar = 'return scalarTensor(convert<${ScalarType}>(${call}));'
+                return_scalar = 'return at::scalar_tensor(convert<${ScalarType}>(${call}), options());'
                 body.append(CodeTemplate(return_scalar).substitute(env, call=call))
             else:
                 # we using int64_t for long in the API, so correct it here...
