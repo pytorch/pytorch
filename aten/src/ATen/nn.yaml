@@ -237,6 +237,11 @@
     self: 'false'
     grad_input: 'false'
 
+- name: _thnn_upsample_bicubic2d(Tensor self, IntList[2] output_size, bool align_corners)
+  cname: SpatialUpSamplingBicubic
+  scalar_check:
+    grad_input: 'false'
+
 - name: _thnn_upsample_trilinear3d(Tensor self, IntList[3] output_size, bool align_corners)
   cname: VolumetricUpSamplingTrilinear
   scalar_check:
