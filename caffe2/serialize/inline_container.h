@@ -7,40 +7,53 @@
 #include <ostream>
 #include <fstream>
 
-namespace torch { namespace jit {
+#include <c10/core/Allocator.h>
+#include <ATen/core/Backend.h>
 
-// This file defines an on-disk serialization format to be used for PyTorch
-// model serialization. All integer values are serialized as little-endian.
-// Everything in this format is aligned to 64-byte boundaries to allow for direct
-// memory mapping and use in, for example, AVX512 instructions.
-// The format is as follows:
+#include "caffe2/core/logging.h"
+
+extern "C" {
+typedef struct mz_zip_archive mz_zip_archive;
+}
+
+// PyTorch containers are a special zip archive with the following layout
+// archive_name.zip contains:
+//    archive_name/
+//        version # a file with a single decimal number written in ascii,
+//                # used to establish the version of the archive format
+//        model.json # overall model description, this is a json output of
+//                   # ModelDef from torch.proto
+//        # the following names are by convention only, model.json will
+//        # refer to these files by full names
+//        tensors/
+//          0 # flat storage for tensor data, meta-data about shapes, etc. is
+//            # in model.json
+//          1
+//          ...
+//        # code entries will only exist for modules that have methods attached
+//        code/
+//          archive_name.py # serialized torch script code (python syntax, using PythonPrint)
+//          archive_name_my_submodule.py # submodules have separate files
 //
-// -- File header --
-// [8 bytes] Magic number - little endian integer that spells 'PYTORCH1' in ASCII
-// [8 bytes] Version number - The version of this file format that this file is in.
-//                            this allows us to revise and extend this format
-// [48 bytes] Padding/reserved
-//
-// After the file header reside N records of the format
-// [8 bytes] Tag - this is a tag that identifies the type of this record. The
-//                 values are defined in the RecordTags enum below.
-// [8 bytes] size - Size in bytes of the payload of this record
-// [48 bytes] Pad/reserved - This space pads out the payload to a 64-byte alignment.
-// [size bytes] Payload - The actual raw data for the object serialized in this record
-// [size - (size % 64) bytes] Pad/reserved - pad out this record so the next
-//                                                one is aligned to 64 bytes
-//
-// Following those records is a special footer:
-// [8 bytes] Tag - This tag field should contain the value for RecordTags::FOOTER
-//                 to correctly identify the footer
-// [8 bytes] Offset of last record - The last record in this format is used
-//                                   as an index into the rest of the file, so
-//                                   a reader can use this offset to seek to
-//                                   the last record and read the index.
-// [48 bytes] Pad/reserved - Pad out the footer s.t. the whole file's size is a
-//                           multiple of 64 bytes.
-//
-//
+// The PyTorchStreamWriter also ensures additional useful properties for these files
+// 1. All files are stored uncompressed.
+// 2. All files in the archive are aligned to 64 byte boundaries such that
+//    it is possible to mmap the entire file and get an aligned pointer to
+//    tensor data.
+// 3. We universally write in ZIP64 format for consistency.
+
+// The PyTorchStreamReader also provides additional properties:
+// 1. It can read zip files that are created with common
+//    zip tools. This means that even though our writer doesn't compress files,
+//    the reader can still read files that were compressed.
+// 2. It provides a getRecordOffset function which returns the offset into the
+//    raw file where file data lives. If the file was written with PyTorchStreamWriter
+//    it is guarenteed to be 64 byte aligned.
+
+// PyTorchReader/Writer handle checking the version number on the archive format
+// and ensure that all files are written to a archive_name directory so they
+// unzip cleanly.
+
 // When developing this format we want to pay particular attention to the
 // following use cases:
 //
@@ -59,248 +72,82 @@ namespace torch { namespace jit {
 //         been written. We place the variable-length index at the end and do
 //         not put any indicies into the header to fulfill this constraint.
 
-namespace {
-  struct RecordTags {
-    enum {
-      STORAGE = 1,
-      FOOTER = 2,
-    };
-  };
+// The model.json, which contains all the metadata information,
+// should be written as the last file. One reason is that the size of tensor data is
+// usually stable. As long as the shape and type of the tensor do not change,
+// the size of the data won't change. On the other sied, the size of the
+// serialized model is likely to change, so we store it as the last record, and
+// we don't need to move previous records when updating the model data.
 
-  // Common constants
-  static constexpr uint64_t kFileMagicNumber = 0x314843524f545950L; // PYTORCH1
-  static constexpr uint64_t kFieldAlignment = 64L; // 64 byte alignment supports up to AVX512 for mmap
+// The zip format is sufficiently flexible to handle the above use-case.
+// it puts its central directory at the end of the archive and we write
+// model.json as the last file when writing after we have accumulated all
+// other information.
 
-  // Reader-specific constants
-  static constexpr uint64_t kMaxSupportedFileFormatVersion = 0x1L;
+namespace torch { namespace jit {
 
-  // Writer-specific constants
-  static constexpr uint64_t kFileFormatVersion = 0x1L;
-  static constexpr uint8_t kPadValue = 0xEF;
+constexpr uint64_t kMinSupportedFileFormatVersion = 0x1L;
+constexpr uint64_t kMaxSupportedFileFormatVersion = 0x1L;
 
-}  // namespace
+// Writer-specific constants
+constexpr uint64_t kFileFormatVersion = 0x2L;
 
-class PyTorchStreamReader {
+// Writer-specific constants
+constexpr uint64_t kFieldAlignment = 64;
+
+class CAFFE2_API PyTorchStreamReader final {
  public:
-  PyTorchStreamReader(std::istream& in_) : in(in_) {
-    // Store file size so we know when we're done reading because the f* APIs
-    // don't do a good job of that
-    in.seekg(0L, in.end);
-    file_size = in.tellg();
-    in.seekg(0L);
-    readAndValidateFileHeader();
-    // Do this now since we're reasonably sure this is actually a PyT file from
-    // the header.
-    if (file_size % kFieldAlignment != 0) {
-      throw std::runtime_error("File length is not a multiple of the alignment"
-                               " size. Is this a valid PyTorch file?");
-    }
-    readAndValidateFileFooter();
-  }
-  std::tuple<at::DataPtr, size_t> getLastRecord() {
-    return getRecordWithKey(last_record_offset);
-  }
-  std::tuple<at::DataPtr, size_t> getRecordWithKey(uint64_t key) {
-    if (key + kFieldAlignment > file_size) {
-      throw std::runtime_error("Provided key is larger than the size of the file.");
-    }
-    if (key % kFieldAlignment != 0) {
-      throw std::runtime_error("Provided key is not divisible by the alignment size.");
-    }
-    // Seek to the provided offset
-    cursor = key;
-    in.seekg(cursor);
-    auto tag = read64BitIntegerLittleEndian();
-    if (tag != RecordTags::STORAGE) {
-      throw std::runtime_error("Attempted to read a record of non-storage type");
-    }
-    auto size = read64BitIntegerLittleEndian();
-    seekToNextAlignmentBoundary();
-    auto ptr = malloc(size);
-    at::DataPtr retval(ptr, ptr, free, at::kCPU);
+  PyTorchStreamReader(std::string archive_name, std::istream* in=nullptr);
+  PyTorchStreamReader(std::istream* in)
+  : PyTorchStreamReader("archive", in) {}
 
-    in.read((char*)ptr, size);
-    cursor += size;
-    seekToNextAlignmentBoundary();
-    return std::tuple<at::DataPtr, size_t>(std::move(retval), size);
-  }
-  ~PyTorchStreamReader() {
-  }
+  // return dataptr, size
+  std::tuple<at::DataPtr, size_t> getRecord(const std::string& name);
+
+  size_t getRecordOffset(const std::string& name);
+
+  ~PyTorchStreamReader();
+
  private:
-  std::istream& in;
-  size_t cursor = 0;
-  size_t file_size;
-  size_t last_record_offset;
+   size_t read(uint64_t pos, char* buf, size_t n);
+   void valid(const char* what);
+   size_t getFileID(const std::string& name);
 
-  // Utility functions
-  uint64_t read64BitIntegerLittleEndian() {
-   uint64_t retval;
-   // TODO endian swap on platforms that need it?
-   in.read(reinterpret_cast<char *>(&retval), 8);
-   std::streamsize read_bytes = in.gcount();
-   if (read_bytes != 8) {
-     std::ostringstream errmsg;
-     errmsg << "Expected to read 8 bytes but got " << read_bytes;
-     throw std::runtime_error(errmsg.str());
-   }
-   cursor += read_bytes;
-   return retval;
-  }
-
-  void seekToNextAlignmentBoundary() {
-   size_t next_offset = (cursor + kFieldAlignment) - (cursor % kFieldAlignment);
-   size_t pad_amount = next_offset - cursor;
-   cursor += pad_amount;
-   in.seekg(cursor);
-  }
-
-  // File format deserialization functions
-  void readAndValidateFileHeader() {
-   // Validate magic number
-   uint64_t magic = read64BitIntegerLittleEndian();
-   if (magic != kFileMagicNumber) {
-     throw std::runtime_error("Magic number mismatch in PyTorch file. File may"
-                              " be corrupted or is not actually a PyTorch file.");
-   }
-   uint64_t file_format_version = read64BitIntegerLittleEndian();
-   if (file_format_version > kMaxSupportedFileFormatVersion) {
-     std::ostringstream errmsg;
-     errmsg << "Attempted to read a PyTorch file with version " << file_format_version
-            << " but the maximum supported version for reading is " << kMaxSupportedFileFormatVersion
-            << ". Your PyTorch installation may be too old.";
-     throw std::runtime_error(errmsg.str());
-   }
-   seekToNextAlignmentBoundary();
-  }
-  void readAndValidateFileFooter() {
-    // Seek to location of file footer. We've already validated that the file
-    // length is a multiple of the alignment size
-    cursor = file_size - kFieldAlignment;
-    in.seekg(cursor);
-    auto tag = read64BitIntegerLittleEndian();
-    if (tag != RecordTags::FOOTER) {
-      throw std::runtime_error("File footer has wrong record type. Is this"
-                               " file corrupted?");
-    }
-    last_record_offset = read64BitIntegerLittleEndian();
-    if (last_record_offset > file_size) {
-      throw std::runtime_error("Offset of last record is higher than the size"
-                               " of the file! Is this file corrupted?");
-    }
-  }
+   friend size_t istream_read_func(void *pOpaque, uint64_t file_ofs, void *pBuf, size_t n);
+   std::unique_ptr<mz_zip_archive> ar_;
+   std::string archive_name_;
+   std::istream* in_;
+   std::ifstream file_stream_;
 };
 
-class PyTorchStreamWriter {
+class CAFFE2_API PyTorchStreamWriter final {
  public:
-  PyTorchStreamWriter(std::ostream& out_) : out(out_) {
-    writeFileHeader();
-    // In the case that we do not write any records into this file, the last
-    // record index written into the footer will point to the footer itself.
-    last_record_idx = cursor;
-  }
-  uint64_t writeRecord(const char* data, size_t size) {
-    JIT_ASSERT(!finalized);
-    uint64_t record_offset = cursor;
-    last_record_idx = record_offset;
-    write64BitIntegerLittleEndian(RecordTags::STORAGE);
-    write64BitIntegerLittleEndian(size);
-    padToNextAlignmentBoundary();
-    writeBuffer(data, size);
-    padToNextAlignmentBoundary();
-    return record_offset;
-  }
-  void writeEndOfFile() {
-    JIT_ASSERT(!finalized);
-    writeFileFooter();
-    finalized = true;
-  }
-  ~PyTorchStreamWriter() {
-    if (!finalized) {
-      writeEndOfFile();
-    }
-  }
- private:
-  std::ostream& out;
-  size_t cursor = 0;
-  bool finalized = false;
-  size_t last_record_idx = 0;
+  PyTorchStreamWriter(std::string archive_name, std::ostream* out=nullptr);
+  PyTorchStreamWriter(std::ostream* out)
+  : PyTorchStreamWriter("archive", out) {}
 
-  // Utility functions
-  void write64BitIntegerLittleEndian(const uint64_t value) {
-    // TODO endian swap on platforms that need it?
-    out.write(reinterpret_cast<const char *>(&value), 8);
-    cursor += 8u;
+  void writeRecord(const std::string& name, const void* data, size_t size);
+  void writeEndOfFile();
+
+  bool finalized() const {
+    return finalized_;
   }
 
-  void writePad(const size_t num_bytes) {
-    static std::vector<char> pad_buffer(/*count=*/kFieldAlignment,
-                                        /*value=*/kPadValue);
-    out.write(pad_buffer.data(), num_bytes);
-    cursor += num_bytes;
+  const std::string& archiveName() {
+    return archive_name_;
   }
 
-  void padToNextAlignmentBoundary() {
-    size_t next_offset = (cursor + kFieldAlignment) - (cursor % kFieldAlignment);
-    size_t pad_amount = next_offset - cursor;
-    writePad(pad_amount);
-  }
-
-  void writeBuffer(const char* data, size_t size) {
-    out.write(data, size);
-    cursor += size;
-  }
-
-  // File format write functions
-  void writeFileHeader() {
-    write64BitIntegerLittleEndian(kFileMagicNumber);
-    write64BitIntegerLittleEndian(kFileFormatVersion);
-    padToNextAlignmentBoundary();
-  }
-
-  void writeFileFooter() {
-    write64BitIntegerLittleEndian(RecordTags::FOOTER);
-    write64BitIntegerLittleEndian(last_record_idx);
-    padToNextAlignmentBoundary();
-  }
-};
-
-class PyTorchFileReader {
- public:
-  PyTorchFileReader(const std::string& filename) :
-    in(filename, std::ios_base::binary),
-    stream_reader(in) {}
-
-  std::tuple<at::DataPtr, size_t> getLastRecord() {
-    return stream_reader.getLastRecord();
-  }
-
-  std::tuple<at::DataPtr, size_t> getRecordWithKey(uint64_t key) {
-    return stream_reader.getRecordWithKey(key);
-  }
+  ~PyTorchStreamWriter();
 
  private:
-  std::ifstream in;
-  PyTorchStreamReader stream_reader;
-};
-
-class PyTorchFileWriter {
- public:
-  PyTorchFileWriter(const std::string& filename) :
-    out(filename, std::ios_base::binary),
-    stream_writer(out) {}
-
-  uint64_t writeRecord(const char* data, size_t size) {
-    return stream_writer.writeRecord(data, size);
-  }
-
-  void writeEndOfFile() {
-    stream_writer.writeEndOfFile();
-    out.close();
-  }
-
- private:
-  std::ofstream out;
-  PyTorchStreamWriter stream_writer;
+   void valid(const char* what);
+   size_t current_pos_ = 0;
+   std::unique_ptr<mz_zip_archive> ar_;
+   std::string archive_name_;
+   std::ostream* out_;
+   std::ofstream file_stream_;
+   bool finalized_ = false;
+   friend size_t ostream_write_func(void *pOpaque, uint64_t file_ofs, const void *pBuf, size_t n);
 };
 
 }}  // namespace torch::jit

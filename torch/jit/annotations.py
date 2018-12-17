@@ -3,40 +3,12 @@ import sys
 import ast
 import inspect
 import torch
+from .._jit_internal import List, Tuple, BroadcastingList1, BroadcastingList2, BroadcastingList3, is_tuple
 from torch._C import DynamicType, TupleType, FloatType, IntType
 from textwrap import dedent
 
 
 PY35 = sys.version_info >= (3, 5)
-
-
-try:
-    import typing
-    from typing import Tuple
-
-    def is_tuple(ann):
-        # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
-        return ann.__module__ == 'typing' and \
-            (getattr(ann, '__origin__', None) is typing.Tuple or
-             getattr(ann, '__origin__', None) is tuple)
-except ImportError:
-    # A minimal polyfill for versions of Python that don't have typing.
-    # Note that this means that they also don't support the fancy annotation syntax, so
-    # those instances will only be used in our tiny `type: ` comment interpreter.
-
-    # The __getitem__ in typing is implemented using metaclasses, but I'm too lazy for that.
-    class TupleCls(object):
-        def __getitem__(self, types):
-            return TupleInstance(types)
-
-    class TupleInstance(object):
-        def __init__(self, types):
-            setattr(self, '__args__', types)
-
-    Tuple = TupleCls()
-
-    def is_tuple(ann):
-        return isinstance(ann, TupleInstance)
 
 
 class Module(object):

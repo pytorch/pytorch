@@ -7,6 +7,7 @@ from collections import Iterable
 from torch._utils import annotate
 import math
 from typing import Optional, Tuple, List, Union
+import warnings
 
 __all__ = [
     'argmax',
@@ -22,6 +23,7 @@ __all__ = [
     'isnan',
     'norm',
     'meshgrid',
+    'potrf',
     'split',
     'stft',
     'tensordot',
@@ -364,7 +366,7 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
     the frequency that :math:`0 \leq \omega < \text{n\_fft}`. When
     :attr:`onesided` is the default value ``True``,
 
-    * :attr:`input` must be either a 1-D time sequenceor 2-D a batch of time
+    * :attr:`input` must be either a 1-D time sequence or a 2-D batch of time
       sequences.
 
     * If :attr:`hop_length` is ``None`` (default), it is treated as equal to
@@ -786,3 +788,20 @@ def chain_matmul(*matrices):
     .. _`[CLRS]`: https://mitpress.mit.edu/books/introduction-algorithms-third-edition
     """
     return torch._C._VariableFunctions.chain_matmul(matrices)
+
+
+def potrf(a, upper=True, out=None):
+    r"""Computes the Cholesky decomposition of a symmetric positive-definite
+    matrix :math:`A`.
+
+    For more information, regarding :func:`torch.potrf`, please check :func:`torch.cholesky`.
+
+    .. warning::
+        torch.potrf is deprecated in favour of torch.cholesky and will be removed in the next
+        release. Please use torch.cholesky instead and note that the :attr:`upper` argument in
+        torch.cholesky defaults to ``False``.
+    """
+    warnings.warn("torch.potrf is deprecated in favour of torch.cholesky and will be removed in the next "
+                  "release. Please use torch.cholesky instead and note that the :attr:`upper` argument in"
+                  " torch.cholesky defaults to ``False``.", stacklevel=2)
+    return torch.cholesky(a, upper=upper, out=out)

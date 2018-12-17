@@ -15,13 +15,17 @@ namespace torch { namespace autograd {
 struct CopyBackwards : public Function {
   variable_list apply(variable_list&& grads) override;
 
-  at::Type *src_type;
-  int32_t src_device = -1;
+  at::Type *src_type = nullptr; // initialized for safety.
+  at::Device src_device = at::kCPU;
 };
 
 // Performs grad[idx] = fn(grad[idx]), but out-of-place. The slicing operation
 // grad[idx] is defined by the relative sizes, strides, and offset of base and
 // view.
+// When an in-place operation is done on a differentiable view, the base's
+// grad_fn is updated to become a `CopySlice` wrapping the backward of the
+// in-place operation.
+// See NOTE [ Autograd View Variables ].
 struct CopySlices : public Function {
   CopySlices(
       const Variable& base_var,

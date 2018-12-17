@@ -7,7 +7,6 @@ from caffe2.python.model_helper import ModelHelper
 import numpy as np
 from scipy.misc import logsumexp
 import caffe2.python.hypothesis_test_util as hu
-from caffe2.python.test_util import IN_CIRCLECI_FLAKY_ENV
 import hypothesis.strategies as st
 from hypothesis import given
 import unittest
@@ -58,7 +57,6 @@ class TestCRFOp(hu.HypothesisTestCase):
             err_msg='CRF LOSS is not matching the reference'
         )
 
-    @unittest.skipIf(IN_CIRCLECI_FLAKY_ENV, "FIXME: flaky test in CircleCI")
     @given(num_tags=st.integers(1, 4),
            num_words=st.integers(2, 4))
     def test_crf_gradient(self, num_tags, num_words):

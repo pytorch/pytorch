@@ -20,7 +20,7 @@
 #endif
 
 #include "TH/THGenerator.hpp"
-#include "TH/THRandom.h"
+#include <TH/THRandom.h>
 
 namespace at { namespace native {
 namespace {

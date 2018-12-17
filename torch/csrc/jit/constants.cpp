@@ -6,12 +6,16 @@
 namespace torch { namespace jit {
 
 // IValue -> Constant node
-Value* insertConstant(Graph& g, IValue val, c10::optional<SourceRange> loc) {
+Value* insertConstant(
+    Graph& g,
+    IValue val,
+    c10::optional<SourceRange> loc,
+    c10::optional<ScopePtr> scope) {
   Node * n = g.create(prim::Constant);
   if(val.isTensor()) {
     at::Tensor ref = std::move(val).toTensor();
     if(!ref.defined()) {
-      throw constant_not_supported_error("undefined tensors cannot become constants");
+      return insertConstant(g, val, loc, scope);
     }
     if (ref.is_variable()) {
       ref = autograd::Variable(ref).data();
@@ -46,26 +50,26 @@ Value* insertConstant(Graph& g, IValue val, c10::optional<SourceRange> loc) {
     n->destroy();
     n = g.create(prim::None);
     n->output()->setType(NoneType::get());
-  } else if(val.isWorld()) {
-    n->output()->setType(WorldType::get());
   } else {
     throw constant_not_supported_error("Unsupported value kind: " + val.tagKind());
   }
   if(loc)
     n->setSourceLocation(std::make_shared<SourceRange>(*loc));
+  if(scope)
+    n->setScope(*scope);
   return g.insertNode(n)->output();
 }
 
 RegisterOperators reg({
   // Implementation of constant node, computes and IValue
   Operator(
-      prim::Constant,
-      [](Node* node) -> Operation {
+      FunctionSchema(prim::Constant, {}, {}, /*vararg=*/false, /*varret=*/true),
+      [](const Node* node) -> Operation {
         TypePtr type = node->output()->type();
         if(type->isSubtypeOf(DynamicType::get())) {
           auto t = autograd::make_variable(node->t(attr::value));
           return [t](Stack& stack) {
-            stack.push_back(t);
+            push(stack, t);
             return 0;
           };
         } else if (type->isSubtypeOf(BoolType::get())) {
@@ -124,7 +128,7 @@ RegisterOperators reg({
       }),
 });
 
-c10::optional<IValue> toIValue(Value* v) {
+c10::optional<IValue> toIValue(const Value* v) {
   if(v->node()->kind() != prim::Constant)
     return c10::nullopt;
   // use implemenation of prim::Constant to compute the output IValue

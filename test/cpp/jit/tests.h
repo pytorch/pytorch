@@ -16,6 +16,15 @@
   } catch (const std::exception& e) {                                    \
     ASSERT_NE(std::string(e.what()).find(substring), std::string::npos); \
   }
+#define ASSERT_ANY_THROW(statement)                                      \
+  bool threw = false;                                                    \
+  try {                                                                  \
+    (void)statement;                                                     \
+  } catch (const std::exception& e) {                                    \
+    threw = true;                                                        \
+  }                                                                      \
+  ASSERT_TRUE(threw);                                                    \
+
 #endif // defined(USE_GTEST)
 
 #include "torch/csrc/autograd/variable.h"
@@ -25,16 +34,22 @@
 #include "torch/csrc/jit/autodiff.h"
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/custom_operator.h"
-#include "torch/csrc/jit/fusers/interface.h"
+#include "torch/csrc/jit/dynamic_dag.h"
+#include "torch/csrc/jit/fuser/interface.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/operator.h"
+#include "torch/csrc/jit/passes/alias_analysis.h"
+#include "torch/csrc/jit/passes/common_subexpression_elimination.h"
+#include "torch/csrc/jit/passes/constant_propagation.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
+#include "torch/csrc/jit/passes/lower_tuples.h"
 #include "torch/csrc/jit/passes/requires_grad_analysis.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
+#include "torch/csrc/jit/passes/utils/subgraph_utils.h"
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/utils/hash.h"
@@ -52,6 +67,8 @@
 #include "onnx/onnx_pb.h"
 
 #include <ATen/ATen.h>
+
+#include <c10/util/Exception.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -153,7 +170,7 @@ void testFusion() {
     auto a = at::rand({3, 4}, at::kCUDA);
     auto b = at::rand({4, 3}, at::kCUDA).transpose(0, 1);
     auto o = at::zeros({3, 4}, at::kCUDA);
-    auto outputs = debugLaunchGraph(graph, 0, {a, b});
+    auto outputs = debugLaunchGraph(graph, {a, b});
     ASSERT_EQ(outputs.size(), 1);
     auto o2 = a * b;
     float max_diff = (o2 - outputs[0]).abs().max().item<double>();
@@ -206,7 +223,7 @@ void testFusion() {
     auto t5 = out1.tanh();
     auto out0 = t16 * t5;
 
-    auto outputs = debugLaunchGraph(graph, 0, inputs);
+    auto outputs = debugLaunchGraph(graph, inputs);
     ASSERT_EQ(outputs.size(), graph.outputs().size());
     ASSERT_TRUE(out0.is_same_size(outputs.front()));
     float max_diff = (outputs.front() - out0).abs().max().item<double>();
@@ -241,7 +258,7 @@ void testFusion() {
 
     auto o_r = a * b;
     auto o2_r = at::cat({a, o_r}, dim);
-    auto outputs = debugLaunchGraph(graph, 0, {a, b});
+    auto outputs = debugLaunchGraph(graph, {a, b});
     ASSERT_EQ(outputs.size(), 2);
 
     float max_diff = (o_r - outputs[0]).abs().max().item<double>();
@@ -321,7 +338,7 @@ void testFromQualString() {
     try {
       Symbol::fromQualString(input);
       ASSERT_TRUE(0);
-    } catch (std::runtime_error c) {
+    } catch (const std::exception& c) {
     }
   }
 }
@@ -431,6 +448,39 @@ void run(InterpreterState & interp, const std::vector<at::Tensor> & inputs, std:
   }
 }
 
+std::pair<tensor_list, tensor_list> runGradient(
+    Gradient& grad_spec,
+    tensor_list& tensors_in,
+    tensor_list& tensor_grads_in) {
+  tensor_list tensors_out, tensor_grads_out;
+  Code f_code{grad_spec.f}, df_code{grad_spec.df};
+  InterpreterState f_interpreter{f_code}, df_interpreter{df_code};
+
+  run(f_interpreter, tensors_in, tensors_out);
+
+  tensor_list df_inputs;
+  df_inputs.insert(
+      df_inputs.end(), tensor_grads_in.begin(), tensor_grads_in.end());
+  for (auto offset : grad_spec.df_input_captured_inputs)
+    df_inputs.push_back(tensors_in[offset]);
+  for (auto offset : grad_spec.df_input_captured_outputs)
+    df_inputs.push_back(tensors_out[offset]);
+  run(df_interpreter, df_inputs, tensor_grads_out);
+
+  // Outputs of f needs to be sliced
+  tensors_out.erase(
+      tensors_out.begin() + grad_spec.f_real_outputs, tensors_out.end());
+  return std::make_pair(tensors_out, tensor_grads_out);
+}
+
+void assertAllClose(const tensor_list& a, const tensor_list& b) {
+  ASSERT_EQ(a.size(), b.size());
+  for (size_t i = 0; i < a.size(); ++i) {
+    ASSERT_TRUE(a[i].is_same_size(b[i]));
+    ASSERT_TRUE(a[i].allclose(b[i]));
+  }
+}
+
 void testInterp() {
   constexpr int batch_size = 4;
   constexpr int input_size = 256;
@@ -454,6 +504,187 @@ void testInterp() {
   // std::cout << almostEqual(outputs[0],hx) << "\n";
   ASSERT_TRUE(exactlyEqual(outputs[0], hx));
   ASSERT_TRUE(exactlyEqual(outputs[1], cx));
+}
+
+void testTHNNConv() {
+  std::vector<int64_t> input_size = {4, 3, 15, 17}; // B x C x H x W
+  std::vector<int64_t> kernel_size = {3, 5};
+  std::vector<int64_t> stride = {1, 2};
+  std::vector<int64_t> padding = {2, 1};
+  constexpr int out_channels = 5;
+
+  // make inputs
+  at::Tensor input = torch::randn(input_size);
+  at::Tensor weight = torch::randn({out_channels, input_size[1], kernel_size[0], kernel_size[1]});
+  at::Tensor bias = torch::randn({out_channels});
+
+  // run forward eagerly
+  at::Tensor output, finput, fgradinput;
+  std::tie(output, finput, fgradinput) = at::thnn_conv2d_forward(input, weight, kernel_size,
+								 bias, stride, padding);
+
+  // make grad_outputs
+  at::Tensor grad_output = torch::randn_like(output);
+  at::Tensor grad_finput = torch::zeros_like(finput);
+  at::Tensor grad_fgradinput = torch::zeros_like(fgradinput);
+
+  // run backward eagerly
+  at::Tensor grad_input, grad_weight, grad_bias;
+  std::tie(grad_input, grad_weight, grad_bias) = at::thnn_conv2d_backward(grad_output, input, weight,
+									  kernel_size, stride, padding,
+									  finput, fgradinput, {true, true, true});
+
+  // make JIT graph
+  auto graph = std::make_shared<Graph>();
+  auto ksz_val = graph->insertConstant(IValue(kernel_size));
+  auto kst_val = graph->insertConstant(IValue(stride));
+  auto pad_val = graph->insertConstant(IValue(padding));
+
+  auto inputg = graph->addInput("self");
+  auto weightg = graph->addInput("weight");
+  auto biasg = graph->addInput("bias");
+
+  Value* conv = graph->insert(aten::thnn_conv2d_forward, {inputg, weightg, ksz_val, biasg, kst_val, pad_val});
+  auto outputs = conv->node()->outputs();
+  for (auto output : outputs) {
+    graph->registerOutput(output);
+  }
+  LowerAllTuples(graph);
+  graph->lint();
+
+  // differentiate JIT graph
+  EliminateDeadCode(graph); // Tracing of some ops depends on the DCE trick
+  ConstantPropagation(graph);
+  auto grad_spec = differentiate(graph);
+  LowerGradOf(*grad_spec.df);
+
+  // prepare JIT inputs / gradients
+  tensor_list tensors_in;
+  tensors_in.push_back(input);
+  tensors_in.push_back(weight);
+  tensors_in.push_back(bias);
+
+  tensor_list tensor_grads_in;
+  tensor_grads_in.push_back(grad_output);
+  tensor_grads_in.push_back(grad_finput);
+  tensor_grads_in.push_back(grad_fgradinput);
+
+  // Get outputs from the interpreter
+  tensor_list tensors_out, tensor_grads_out;
+  std::tie(tensors_out, tensor_grads_out) =
+    runGradient(grad_spec, tensors_in, tensor_grads_in);
+
+  // prepare expected structs
+  tensor_list expected_tensors_out, expected_tensor_grads_out;
+  expected_tensors_out.push_back(output);
+  expected_tensors_out.push_back(finput);
+  expected_tensors_out.push_back(fgradinput);
+  expected_tensor_grads_out.push_back(grad_input);
+  expected_tensor_grads_out.push_back(grad_weight);
+  expected_tensor_grads_out.push_back(grad_bias);
+
+  // Compare results
+  assertAllClose(tensors_out, expected_tensors_out);
+  assertAllClose(tensor_grads_out, expected_tensor_grads_out);
+}
+
+void testATenNativeBatchNorm() {
+  // aten::native_batch_norm(Tensor input, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
+  std::vector<int64_t> input_size = {4, 3, 15, 17}; // B x C x H x W
+  bool training = true;
+  float momentum = 0.9;
+  float eps = 1e-5;
+
+  // make inputs
+  at::Tensor input = torch::randn(input_size);
+  at::Tensor weight = torch::randn({input_size[1]});
+  at::Tensor bias = torch::randn({input_size[1]});
+  at::Tensor running_mean = torch::randn({input_size[1]});
+  at::Tensor running_var = torch::randn({input_size[1]});
+
+  // running_mean and running_var are changed in-place, so clone and send them
+  at::Tensor running_mean_eager = running_mean.clone();
+  at::Tensor running_var_eager = running_var.clone();
+  at::Tensor running_mean_jit = running_mean.clone();
+  at::Tensor running_var_jit = running_var.clone();
+
+  // run forward eagerly
+  at::Tensor output, savemean, saveinvstd;
+  std::tie(output, savemean, saveinvstd) = at::native_batch_norm(input, weight, bias, running_mean_eager, running_var_eager, training, momentum, eps);
+
+  // make grad_outputs
+  at::Tensor grad_output = torch::randn_like(output);
+  at::Tensor grad_savemean = torch::zeros_like(savemean);
+  at::Tensor grad_saveinvstd = torch::zeros_like(saveinvstd);
+
+  // run backward eagerly
+  at::Tensor grad_input, grad_weight, grad_bias;
+  // aten::native_batch_norm_backward(Tensor grad_out, Tensor input, Tensor weight, Tensor running_mean, Tensor running_var, Tensor save_mean, Tensor save_invstd, bool train, float eps, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  std::tie(grad_input, grad_weight, grad_bias) = at::native_batch_norm_backward(grad_output, input, weight,
+										running_mean_eager, running_var_eager,
+										savemean, saveinvstd, training, eps, {true, true, true});
+
+  // make JIT graph
+  auto graph = std::make_shared<Graph>();
+  auto training_val = graph->insertConstant(IValue(training));
+  auto momentum_val = graph->insertConstant(IValue(momentum));
+  auto eps_val = graph->insertConstant(IValue(eps));
+
+  auto inputg = graph->addInput("self");
+  auto weightg = graph->addInput("weight");
+  auto biasg = graph->addInput("bias");
+  auto running_meang = graph->addInput("running_mean");
+  auto running_varg = graph->addInput("running_var");
+
+  Value* bn = graph->insert(aten::native_batch_norm, {inputg, weightg, biasg, running_meang, running_varg, training_val, momentum_val, eps_val});
+  auto outputs = bn->node()->outputs();
+  for (auto output : outputs) {
+    graph->registerOutput(output);
+  }
+  LowerAllTuples(graph);
+  graph->lint();
+
+  // differentiate JIT graph
+  EliminateDeadCode(graph); // Tracing of some ops depends on the DCE trick
+  ConstantPropagation(graph);
+  auto grad_spec = differentiate(graph);
+  LowerGradOf(*grad_spec.df);
+
+  // prepare JIT inputs / gradients
+  tensor_list tensors_in;
+  tensors_in.push_back(input);
+  tensors_in.push_back(weight);
+  tensors_in.push_back(bias);
+  tensors_in.push_back(running_mean_jit);
+  tensors_in.push_back(running_var_jit);
+
+  tensor_list tensor_grads_in;
+  tensor_grads_in.push_back(grad_output);
+  tensor_grads_in.push_back(grad_savemean);
+  tensor_grads_in.push_back(grad_saveinvstd);
+
+  // Get outputs from the interpreter
+  tensor_list tensors_out, tensor_grads_out;
+  std::tie(tensors_out, tensor_grads_out) =
+    runGradient(grad_spec, tensors_in, tensor_grads_in);
+
+  // prepare expected structs
+  tensor_list expected_tensors_out, expected_tensor_grads_out;
+  expected_tensors_out.push_back(output);
+  expected_tensors_out.push_back(savemean);
+  expected_tensors_out.push_back(saveinvstd);
+  expected_tensors_out.push_back(running_mean_eager);
+  expected_tensors_out.push_back(running_var_eager);
+  expected_tensor_grads_out.push_back(grad_input);
+  expected_tensor_grads_out.push_back(grad_weight);
+  expected_tensor_grads_out.push_back(grad_bias);
+
+  tensors_out.push_back(running_mean_jit);
+  tensors_out.push_back(running_var_jit);
+
+  // Compare results
+  assertAllClose(tensors_out, expected_tensors_out);
+  assertAllClose(tensor_grads_out, expected_tensor_grads_out);
 }
 
 using var_meta_type = std::vector<int64_t>;
@@ -514,39 +745,6 @@ variable_list grad(
       fmap(inputs, get_edge));
 }
 
-void assertAllClose(const tensor_list& a, const tensor_list& b) {
-  ASSERT_EQ(a.size(), b.size());
-  for (size_t i = 0; i < a.size(); ++i) {
-    ASSERT_TRUE(a[i].is_same_size(b[i]));
-    ASSERT_TRUE(a[i].allclose(b[i]));
-  }
-}
-
-std::pair<tensor_list, tensor_list> runGradient(
-    Gradient& grad_spec,
-    tensor_list& tensors_in,
-    tensor_list& tensor_grads_in) {
-  tensor_list tensors_out, tensor_grads_out;
-  Code f_code{grad_spec.f}, df_code{grad_spec.df};
-  InterpreterState f_interpreter{f_code}, df_interpreter{df_code};
-
-  run(f_interpreter, tensors_in, tensors_out);
-
-  tensor_list df_inputs;
-  df_inputs.insert(
-      df_inputs.end(), tensor_grads_in.begin(), tensor_grads_in.end());
-  for (auto offset : grad_spec.df_input_captured_inputs)
-    df_inputs.push_back(tensors_in[offset]);
-  for (auto offset : grad_spec.df_input_captured_outputs)
-    df_inputs.push_back(tensors_out[offset]);
-  run(df_interpreter, df_inputs, tensor_grads_out);
-
-  // Outputs of f needs to be sliced
-  tensors_out.erase(
-      tensors_out.begin() + grad_spec.f_real_outputs, tensors_out.end());
-  return std::make_pair(tensors_out, tensor_grads_out);
-}
-
 void testADFormulas() {
   const auto unwrap = [](const Variable& v) { return v.data(); };
 
@@ -571,6 +769,12 @@ void testADFormulas() {
        unary_pointwise,
        [](const VL& v) -> VL { return {v[0].tanh()}; }},
       {"t", unary_pointwise_2d, [](const VL& v) -> VL { return {v[0].t()}; }},
+      {"view",
+        unary_pointwise_2d,
+        [](const VL& v) -> VL { return {v[0].view({3, 2})}; }},
+      {"expand",
+        {{2, 1}},
+        [](const VL& v) -> VL { return {v[0].expand({2, 3})}; }},
       {"mm",
        {{10, 12}, {12, 15}},
        [](const VL& v) -> VL { return {v[0].mm(v[1])}; }},
@@ -595,6 +799,7 @@ void testADFormulas() {
     // Trace and differentiate the op
     auto graph = trace(test, vars_in);
     EliminateDeadCode(graph); // Tracing of some ops depends on the DCE trick
+    ConstantPropagation(graph);
     auto grad_spec = differentiate(graph);
     LowerGradOf(*grad_spec.df);
     // Get outputs from the interpreter
@@ -621,7 +826,7 @@ std::string toString(std::shared_ptr<Graph>& graph) {
 void testDifferentiate(std::ostream& out = std::cout) {
   auto graph = std::make_shared<Graph>();
   at::ScalarType s = at::ScalarType::Float;
-  auto type = CompleteTensorType::create(s, -1, {2, 3, 4}, {12, 4, 1});
+  auto type = CompleteTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
 
   // Build up a fake graph
   auto a = SymbolicVariable::asNewInput(*graph, type);
@@ -655,10 +860,10 @@ void testDifferentiateWithRequiresGrad(std::ostream& out = std::cout) {
   graph->registerOutput(d.value());
   graph->registerOutput(e.value());
 
-  auto a_var = autograd::make_variable(at::CPU(at::kFloat).tensor(2, 2), true);
-  auto b_var = autograd::make_variable(at::CPU(at::kFloat).tensor(2, 2), false);
+  auto a_var = autograd::make_variable(at::empty_strided(2, 2, at::CPU(at::kFloat).options()), true);
+  auto b_var = autograd::make_variable(at::empty_strided(2, 2, at::CPU(at::kFloat).options()), false);
   setInputTypes(*graph, ArgumentSpec(true, {a_var, b_var}, 2));
-  PropagateInputShapes(*graph);
+  PropagateInputShapes(graph);
   PropagateRequiresGrad(graph);
 
   auto grad_spec = differentiate(graph);
@@ -677,9 +882,39 @@ void testDifferentiateWithRequiresGrad(std::ostream& out = std::cout) {
 
 void testCreateAutodiffSubgraphs(std::ostream& out = std::cout) {
   auto graph = build_lstm();
-  CreateAutodiffSubgraphs(*graph, /*threshold=*/2);
+  CreateAutodiffSubgraphs(graph, /*threshold=*/2);
   out << "testCreateAutodiffSubgraphs\n";
   out << *graph << "\n";
+}
+
+void testSubgraphUtils() {
+  auto graph = build_lstm();
+  EliminateCommonSubexpression(graph);
+
+  std::vector<Node*> originalNodes(
+      graph->nodes().begin(), graph->nodes().end());
+
+  // Merge everything into a single subgraph
+  bool first = true;
+  Node* subgraph;
+  for (auto it = graph->nodes().rbegin(); it != graph->nodes().rend();) {
+    if (first) {
+      subgraph = SubgraphUtils::createSingletonSubgraph(
+          *it, prim::DifferentiableGraph);
+      it = ++subgraph->reverseIterator();
+      first = false;
+    }
+
+    SubgraphUtils::mergeNodeIntoSubgraph(*it, subgraph);
+    it = ++subgraph->reverseIterator();
+  }
+
+  // Unmerge and compare with original node listing
+  SubgraphUtils::unmergeSubgraph(subgraph);
+  EliminateCommonSubexpression(graph);
+
+  std::vector<Node*> newNodes(graph->nodes().begin(), graph->nodes().end());
+  ASSERT_EQ(originalNodes.size(), newNodes.size());
 }
 
 autograd::Variable var(at::Type& t, at::IntList sizes, bool requires_grad) {
@@ -847,11 +1082,11 @@ const auto cf_examples = R"JIT(
     return a
 )JIT";
 void testControlFlow() {
-  script::Module cu;
+  auto cu = std::make_shared<script::Module>();
   script::defineMethodsInModule(
       cu, cf_examples, script::nativeResolver, nullptr);
   auto run = [&](const std::string& name, std::vector<IValue> stack) {
-    auto graph = cu.get_method(name).graph();
+    auto graph = cu->get_method(name).graph();
     Code code(graph);
     InterpreterState interp(code);
     interp.run(stack);
@@ -930,15 +1165,15 @@ void testCustomOperators() {
     ASSERT_EQ(ops.size(), 1);
 
     auto& op = ops.front();
-    ASSERT_EQ(op->schema().name, "foo::bar");
+    ASSERT_EQ(op->schema().name(), "foo::bar");
 
-    ASSERT_EQ(op->schema().arguments.size(), 2);
-    ASSERT_EQ(op->schema().arguments[0].name, "_0");
-    ASSERT_EQ(op->schema().arguments[0].type->kind(), TypeKind::FloatType);
-    ASSERT_EQ(op->schema().arguments[1].name, "_1");
-    ASSERT_EQ(op->schema().arguments[1].type->kind(), TypeKind::DynamicType);
+    ASSERT_EQ(op->schema().arguments().size(), 2);
+    ASSERT_EQ(op->schema().arguments()[0].name(), "_0");
+    ASSERT_EQ(op->schema().arguments()[0].type()->kind(), TypeKind::FloatType);
+    ASSERT_EQ(op->schema().arguments()[1].name(), "_1");
+    ASSERT_EQ(op->schema().arguments()[1].type()->kind(), TypeKind::DynamicType);
 
-    ASSERT_EQ(op->schema().returns[0].type->kind(), TypeKind::DynamicType);
+    ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::DynamicType);
 
     Stack stack;
     push(stack, 2.0f, autograd::make_variable(at::ones(5)));
@@ -958,16 +1193,16 @@ void testCustomOperators() {
     ASSERT_EQ(ops.size(), 1);
 
     auto& op = ops.front();
-    ASSERT_EQ(op->schema().name, "foo::bar_with_schema");
+    ASSERT_EQ(op->schema().name(), "foo::bar_with_schema");
 
-    ASSERT_EQ(op->schema().arguments.size(), 2);
-    ASSERT_EQ(op->schema().arguments[0].name, "a");
-    ASSERT_EQ(op->schema().arguments[0].type->kind(), TypeKind::FloatType);
-    ASSERT_EQ(op->schema().arguments[1].name, "b");
-    ASSERT_EQ(op->schema().arguments[1].type->kind(), TypeKind::DynamicType);
+    ASSERT_EQ(op->schema().arguments().size(), 2);
+    ASSERT_EQ(op->schema().arguments()[0].name(), "a");
+    ASSERT_EQ(op->schema().arguments()[0].type()->kind(), TypeKind::FloatType);
+    ASSERT_EQ(op->schema().arguments()[1].name(), "b");
+    ASSERT_EQ(op->schema().arguments()[1].type()->kind(), TypeKind::DynamicType);
 
-    ASSERT_EQ(op->schema().returns.size(), 1);
-    ASSERT_EQ(op->schema().returns[0].type->kind(), TypeKind::DynamicType);
+    ASSERT_EQ(op->schema().returns().size(), 1);
+    ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::DynamicType);
 
     Stack stack;
     push(stack, 2.0f, autograd::make_variable(at::ones(5)));
@@ -989,22 +1224,22 @@ void testCustomOperators() {
     ASSERT_EQ(ops.size(), 1);
 
     auto& op = ops.front();
-    ASSERT_EQ(op->schema().name, "foo::lists");
+    ASSERT_EQ(op->schema().name(), "foo::lists");
 
-    ASSERT_EQ(op->schema().arguments.size(), 3);
-    ASSERT_EQ(op->schema().arguments[0].name, "ints");
+    ASSERT_EQ(op->schema().arguments().size(), 3);
+    ASSERT_EQ(op->schema().arguments()[0].name(), "ints");
     ASSERT_TRUE(
-        op->schema().arguments[0].type->isSubtypeOf(ListType::ofInts()));
-    ASSERT_EQ(op->schema().arguments[1].name, "floats");
+        op->schema().arguments()[0].type()->isSubtypeOf(ListType::ofInts()));
+    ASSERT_EQ(op->schema().arguments()[1].name(), "floats");
     ASSERT_TRUE(
-        op->schema().arguments[1].type->isSubtypeOf(ListType::ofFloats()));
-    ASSERT_EQ(op->schema().arguments[2].name, "tensors");
+        op->schema().arguments()[1].type()->isSubtypeOf(ListType::ofFloats()));
+    ASSERT_EQ(op->schema().arguments()[2].name(), "tensors");
     ASSERT_TRUE(
-        op->schema().arguments[2].type->isSubtypeOf(ListType::ofTensors()));
+        op->schema().arguments()[2].type()->isSubtypeOf(ListType::ofTensors()));
 
-    ASSERT_EQ(op->schema().returns.size(), 1);
+    ASSERT_EQ(op->schema().returns().size(), 1);
     ASSERT_TRUE(
-        op->schema().returns[0].type->isSubtypeOf(ListType::ofFloats()));
+        op->schema().returns()[0].type()->isSubtypeOf(ListType::ofFloats()));
 
     Stack stack;
     push(stack, std::vector<int64_t>{1, 2});
@@ -1027,16 +1262,16 @@ void testCustomOperators() {
     ASSERT_EQ(ops.size(), 1);
 
     auto& op = ops.front();
-    ASSERT_EQ(op->schema().name, "foo::lists2");
+    ASSERT_EQ(op->schema().name(), "foo::lists2");
 
-    ASSERT_EQ(op->schema().arguments.size(), 1);
-    ASSERT_EQ(op->schema().arguments[0].name, "tensors");
+    ASSERT_EQ(op->schema().arguments().size(), 1);
+    ASSERT_EQ(op->schema().arguments()[0].name(), "tensors");
     ASSERT_TRUE(
-        op->schema().arguments[0].type->isSubtypeOf(ListType::ofTensors()));
+        op->schema().arguments()[0].type()->isSubtypeOf(ListType::ofTensors()));
 
-    ASSERT_EQ(op->schema().returns.size(), 1);
+    ASSERT_EQ(op->schema().returns().size(), 1);
     ASSERT_TRUE(
-        op->schema().returns[0].type->isSubtypeOf(ListType::ofTensors()));
+        op->schema().returns()[0].type()->isSubtypeOf(ListType::ofTensors()));
 
     Stack stack;
     push(stack, std::vector<at::Tensor>{autograd::make_variable(at::ones(5))});
@@ -1085,7 +1320,7 @@ void testCustomOperators() {
             "foo::bar_with_bad_schema(Tensor a) -> Tensor",
             [](double a) { return a; }),
         "Inferred type for argument #0 was float, "
-        "but the provided schema specified type Dynamic "
+        "but the provided schema specified type Tensor "
         "for the argument in that position");
     ASSERT_THROWS_WITH(
         createOperator(
@@ -1098,7 +1333,7 @@ void testCustomOperators() {
             "foo::bar_with_bad_schema(float a) -> Tensor",
             [](double a) { return a; }),
         "Inferred type for return value #0 was float, "
-        "but the provided schema specified type Dynamic "
+        "but the provided schema specified type Tensor "
         "for the return value in that position");
   }
   {
@@ -1125,38 +1360,613 @@ void testCustomOperators() {
 void testSchemaParser() {
   // nested arrays
   auto s = parseSchema("at::what(int[][4] foo) -> ()");
-  ASSERT_TRUE(s.arguments.at(0).N == 4);
-  ASSERT_TRUE(IntType::get()->isSubtypeOf(s.arguments.at(0)
-                                              .type->expect<ListType>()
+  ASSERT_TRUE(s.arguments().at(0).N() == 4);
+  ASSERT_TRUE(IntType::get()->isSubtypeOf(s.arguments().at(0)
+                                              .type()->expect<ListType>()
                                               ->getElementType()
                                               ->expect<ListType>()
                                               ->getElementType()));
   auto s2 = parseSchema("at::what(int[][] foo) -> ()");
-  ASSERT_TRUE(IntType::get()->isSubtypeOf(s2.arguments.at(0)
-                                            .type->expect<ListType>()
+  ASSERT_TRUE(IntType::get()->isSubtypeOf(s2.arguments().at(0)
+                                            .type()->expect<ListType>()
                                             ->getElementType()
                                             ->expect<ListType>()
                                             ->getElementType()));
-  // futures
-  try {
-    parseSchema("at::what(Future(int) foo) -> ()");
-    ASSERT_TRUE(false);
-  } catch (script::ErrorReport& er) {
-    ASSERT_TRUE(
-        std::string(er.what()).find("Futures are not yet implemented") !=
-        std::string::npos);
-  }
+
   // named returns
   parseSchema("at::what(Tensor! i_will_be_written_to) -> ()");
   auto s3 = parseSchema("at::what() -> (Tensor the_return, Tensor the_return2)");
-  ASSERT_TRUE(s3.returns.at(0).name == "the_return");
-  ASSERT_TRUE(s3.returns.at(1).name == "the_return2");
+  ASSERT_TRUE(s3.returns().at(0).name() == "the_return");
+  ASSERT_TRUE(s3.returns().at(1).name() == "the_return2");
+
+  // futures
+  auto s4 = parseSchema("at::what(Future(int) foo) -> ()");
+  ASSERT_TRUE(IntType::get()->isSubtypeOf(s4.arguments().at(0)
+                                          .type()->expect<FutureType>()
+                                          ->getElementType()));
 
   // test tensor with annotated alias sets
-  parseSchema("at::what(Tensor(t) foo) -> (Tensor(t))");
+  parseSchema("at::what(Tensor(a) foo) -> (Tensor(a))");
 
+  {
+    const auto s = parseSchema(
+        "at::what(Tensor(b|c)[](a!) list, Tensor(c) element)"
+        " -> (Tensor(b|c)[](a!))");
+
+    // The list itself is annotated with `a`
+    const auto& aliasInfo = *s.arguments().at(0).alias_info();
+    ASSERT_TRUE(
+        aliasInfo.sets() ==
+        std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
+    ASSERT_TRUE(aliasInfo.isWrite());
+
+    // Check the contained types
+    ASSERT_TRUE(!aliasInfo.containedTypes().empty());
+    const auto& containedAliasInfo = aliasInfo.containedTypes()[0];
+    const auto expected = std::unordered_set<Symbol>{
+        Symbol::fromQualString("alias::b"),
+        Symbol::fromQualString("alias::c"),
+    };
+    ASSERT_TRUE(containedAliasInfo.sets() == expected);
+    ASSERT_FALSE(containedAliasInfo.isWrite());
+  }
 }
 
+void testTopologicalIndex() {
+  {
+    Graph graph;
+    auto node1 = graph.create(prim::Undefined);
+    auto node2 = graph.create(prim::Undefined);
+    auto node3 = graph.create(prim::Undefined);
+    auto node4 = graph.create(prim::Undefined);
+
+    graph.appendNode(node4);
+    graph.prependNode(node1);
+    node2->insertAfter(node1);
+    node3->insertBefore(node4);
+
+    // nodes should be in numerical order
+    ASSERT_TRUE(node1->isBefore(node2));
+    ASSERT_TRUE(node1->isBefore(node3));
+    ASSERT_TRUE(node1->isBefore(node4));
+    ASSERT_TRUE(node2->isAfter(node1));
+    ASSERT_TRUE(node2->isBefore(node3));
+    ASSERT_TRUE(node2->isBefore(node4));
+    ASSERT_FALSE(node3->isBefore(node1));
+    ASSERT_FALSE(node3->isBefore(node2));
+    ASSERT_FALSE(node3->isAfter(node4));
+
+    // Built up a block structure
+    //  node3
+    //   /\        ...
+    //  A  B     block1
+    //      \      ...
+    //      C    block2
+    auto block1 = node3->addBlock();
+    auto A = graph.create(prim::Undefined);
+    block1->appendNode(A);
+    auto B = graph.create(prim::Undefined);
+    block1->appendNode(B);
+    auto block2 = B->addBlock();
+    auto C = graph.create(prim::Undefined);
+    block2->appendNode(C);
+
+    // Check isAfter on different block levels
+    ASSERT_TRUE(node1->isBefore(A));
+    ASSERT_TRUE(A->isBefore(B));
+    ASSERT_TRUE(A->isBefore(C));
+
+    // make sure things don't blow up on deletions
+    node2->destroy();
+    auto node2p = graph.create(prim::Undefined);
+    node2p->insertAfter(node1);
+    ASSERT_TRUE(node1->isBefore(node2p));
+    ASSERT_TRUE(node2p->isBefore(node3));
+  }
+  {
+    // Induce reindexing to test that path
+    Graph graph;
+    std::map<size_t, Node*> nodes;
+
+    auto anchor = graph.create(prim::Undefined);
+    graph.appendNode(anchor);
+    // Inserting to the same place a lot will trigger reindexing
+    for (auto i = 0; i < 100; ++i) {
+      auto n = graph.create(prim::Undefined);
+      n->insertAfter(anchor);
+      nodes[i] = n;
+    }
+
+    // Nodes should be in reverse order
+    for (auto i = 0; i < 100; ++i) {
+      for (auto j = i + 1; j < 100; ++j) {
+        ASSERT_TRUE(nodes[i]->isAfter(nodes[j]));
+      }
+    }
+  }
+}
+
+
+std::unique_ptr<detail::DynamicDAG<std::string>> newDynamicDAG() {
+  return std::unique_ptr<detail::DynamicDAG<std::string>>(new detail::DynamicDAG<std::string>());
+}
+
+void testNewVertex() {
+  auto graph = newDynamicDAG();
+  JIT_ASSERT(graph->debugNumVertices() == 0);
+  auto a = graph->newVertex("a");
+  JIT_ASSERT(graph->debugNumVertices() == 1);
+  JIT_ASSERT(a->ord == 0);
+  JIT_ASSERT(a->data.size() == 1);
+  JIT_ASSERT(a->data[0] == "a");
+  JIT_ASSERT(a->in_edges().size() == 0);
+  JIT_ASSERT(a->out_edges().size() == 0);
+  auto b = graph->newVertex("b");
+  auto c = graph->newVertex("c");
+  JIT_ASSERT(graph->debugNumVertices() == 3);
+  JIT_ASSERT(b->ord == 1);
+  JIT_ASSERT(c->ord == 2);
+}
+
+void testAddEdgeBasic() {
+  // a -> b -> c
+  // \---------^
+  auto graph = newDynamicDAG();
+  auto a = graph->newVertex("a");
+  auto b = graph->newVertex("b");
+  auto c = graph->newVertex("c");
+  graph->addEdge(a, b);
+  graph->addEdge(b, c);
+  graph->addEdge(a, c);
+  JIT_ASSERT(a->in_edges().size() == 0);
+  JIT_ASSERT(a->out_edges().size() == 2);
+  JIT_ASSERT(a->out_edges().contains(b));
+  JIT_ASSERT(a->out_edges().contains(c));
+  JIT_ASSERT(b->in_edges().size() == 1);
+  JIT_ASSERT(b->out_edges().size() == 1);
+  JIT_ASSERT(b->in_edges().contains(a));
+  JIT_ASSERT(b->out_edges().contains(c));
+  JIT_ASSERT(c->in_edges().size() == 2);
+  JIT_ASSERT(c->out_edges().size() == 0);
+  JIT_ASSERT(c->in_edges().contains(a));
+  JIT_ASSERT(c->in_edges().contains(b));
+}
+
+void testAddEdgeCycleDetection() {
+  // a -> b -> c
+  // ^---------/
+  auto graph = newDynamicDAG();
+  auto a = graph->newVertex("a");
+  auto b = graph->newVertex("b");
+  auto c = graph->newVertex("c");
+  graph->addEdge(a, b);
+  graph->addEdge(b, c);
+  bool erred = false;
+  try {
+    graph->addEdge(c, a);
+  } catch (c10::Error& err) {
+    erred = true;
+  }
+  JIT_ASSERT(erred);
+}
+
+void testAddEdgeReordersBasic() {
+  // a, b => b -> a
+  auto graph = newDynamicDAG();
+  auto a = graph->newVertex("a");
+  auto b = graph->newVertex("b");
+  JIT_ASSERT(a->ord == 0);
+  JIT_ASSERT(b->ord == 1);
+  graph->addEdge(b, a);
+  JIT_ASSERT(a->ord == 1);
+  JIT_ASSERT(b->ord == 0);
+}
+
+void testAddEdgeReordersComplicated() {
+  // a -> b  c -> d with addEdge(d, b) ==>
+  // c -> d -> a -> b
+  auto graph = newDynamicDAG();
+  auto a = graph->newVertex("a");
+  auto b = graph->newVertex("b");
+  auto c = graph->newVertex("c");
+  auto d = graph->newVertex("d");
+  graph->addEdge(a, b);
+  graph->addEdge(c, d);
+  JIT_ASSERT(a->ord == 0);
+  JIT_ASSERT(b->ord == 1);
+  JIT_ASSERT(c->ord == 2);
+  JIT_ASSERT(d->ord == 3);
+  graph->addEdge(d, a);
+  JIT_ASSERT(c->ord == 0);
+  JIT_ASSERT(d->ord == 1);
+  JIT_ASSERT(a->ord == 2);
+  JIT_ASSERT(b->ord == 3);
+  JIT_ASSERT(c->in_edges().size() == 0);
+  JIT_ASSERT(c->out_edges().size() == 1);
+  JIT_ASSERT(c->out_edges().contains(d));
+  JIT_ASSERT(d->in_edges().size() == 1);
+  JIT_ASSERT(d->out_edges().size() == 1);
+  JIT_ASSERT(d->in_edges().contains(c));
+  JIT_ASSERT(d->out_edges().contains(a));
+  JIT_ASSERT(a->in_edges().size() == 1);
+  JIT_ASSERT(a->out_edges().size() == 1);
+  JIT_ASSERT(a->in_edges().contains(d));
+  JIT_ASSERT(a->out_edges().contains(b));
+  JIT_ASSERT(b->in_edges().size() == 1);
+  JIT_ASSERT(b->out_edges().size() == 0);
+  JIT_ASSERT(b->in_edges().contains(a));
+}
+
+void testRemoveEdgeBasic() {
+  // a -> b
+  auto graph = newDynamicDAG();
+  auto a = graph->newVertex("a");
+  auto b = graph->newVertex("b");
+  graph->addEdge(a, b);
+  JIT_ASSERT(graph->debugNumVertices() == 2);
+  graph->removeEdge(a, b);
+  JIT_ASSERT(graph->debugNumVertices() == 2);
+  JIT_ASSERT(a->out_edges().size() == 0);
+  JIT_ASSERT(b->in_edges().size() == 0);
+}
+
+void testRemoveVertexBasic() {
+  // a -> b
+  auto graph = newDynamicDAG();
+  auto a = graph->newVertex("a");
+  auto b = graph->newVertex("b");
+  auto c = graph->newVertex("c");
+  graph->addEdge(a, b);
+  graph->addEdge(b, c);
+  JIT_ASSERT(graph->debugNumVertices() == 3);
+  graph->removeVertex(b);
+  JIT_ASSERT(graph->debugNumVertices() == 2);
+  JIT_ASSERT(a->out_edges().size() == 0);
+  JIT_ASSERT(c->in_edges().size() == 0);
+}
+
+void testContractEdgeBasic() {
+  // a -> b -> c -> d
+  auto graph = newDynamicDAG();
+  auto a = graph->newVertex("a");
+  auto b = graph->newVertex("b");
+  auto c = graph->newVertex("c");
+  auto d = graph->newVertex("d");
+  graph->addEdge(a, b);
+  graph->addEdge(b, c);
+  graph->addEdge(c, d);
+  graph->contractEdge(b, c);
+  JIT_ASSERT(graph->debugNumVertices() == 3);
+  JIT_ASSERT(a->out_edges().size() == 1);
+  JIT_ASSERT(d->in_edges().size() == 1);
+  JIT_ASSERT(*a->out_edges().begin() == *d->in_edges().begin());
+  auto* contracted = *a->out_edges().begin();
+  JIT_ASSERT(contracted->data.size() == 2);
+  JIT_ASSERT(contracted->data[0] == "b");
+  JIT_ASSERT(contracted->data[1] == "c");
+  JIT_ASSERT(contracted->out_edges().size() == 1);
+  JIT_ASSERT(contracted->in_edges().size() == 1);
+  JIT_ASSERT(contracted->in_edges().contains(a));
+  JIT_ASSERT(contracted->out_edges().contains(d));
+}
+
+void testContractEdgeCycleDetection() {
+  // a -> b -> c
+  // `---------^
+  // contractEdge(a, c) will cause a cycle
+  auto graph = newDynamicDAG();
+  auto a = graph->newVertex("a");
+  auto b = graph->newVertex("b");
+  auto c = graph->newVertex("c");
+  graph->addEdge(a, b);
+  graph->addEdge(b, c);
+  graph->addEdge(a, c);
+  JIT_ASSERT(!graph->contractEdge(a, c));
+}
+
+void testDynamicDAG() {
+  testNewVertex();
+  testAddEdgeBasic();
+  testAddEdgeCycleDetection();
+  testAddEdgeReordersBasic();
+  testAddEdgeReordersComplicated();
+  testRemoveEdgeBasic();
+  testRemoveVertexBasic();
+  testContractEdgeBasic();
+  testContractEdgeCycleDetection();
+}
+
+// Fixture to set up a graph and make assertions clearer
+struct TopoMoveTestFixture {
+  TopoMoveTestFixture() {
+    createGraph();
+    aliasDb = AliasAnalysis(graph);
+  }
+
+  // Nodes are named after their output.
+  // e.g. "a" is an alias for "the node that outputs the value `a`"
+  void createGraph() {
+    graph = std::make_shared<Graph>();
+    createNode("a", {});
+    createNode("b", {"a"});
+    createNode("c", {});
+    createNode("d", {"a", "b"});
+    createNode("e", {"c", "b"});
+    createNode("f", {"e"});
+    createNode("g", {"e"});
+    createNode("h", {"g"});
+    createNode("i", {"g"});
+    createNode("j", {"i"});
+    createNode("k", {"i"});
+    createNode("l", {"a"});
+    createNode("m", {}, {"l"}); // block depends on l
+    createNode("n", {"m"});
+    createNode("o", {"n"});
+    createNode("p", {});
+    createNode("q", {});
+    createNode("r", {"q"});
+    createNode("s", {"q"});
+
+    graph->lint();
+  }
+
+  void createNode(
+      const std::string& name,
+      const std::vector<std::string>& inputNames,
+      const std::vector<std::string>& blockInputNames = {}) {
+    std::vector<Value*> inputs;
+    for (const auto name : inputNames) {
+      inputs.push_back(nodes.at(name)->output());
+    }
+    auto node = graph->appendNode(graph->create(prim::Undefined, inputs));
+    node->output()->setUniqueName(name);
+    nodes[name] = node;
+
+    if (blockInputNames.size() != 0) {
+      node->addBlock();
+      std::vector<Value*> blockDeps;
+      for (const auto name : blockInputNames) {
+        blockDeps.push_back(nodes.at(name)->output());
+      }
+
+      auto block = node->blocks().at(0);
+      block->appendNode(graph->create(prim::Undefined, blockDeps));
+    }
+  }
+
+  bool moveBeforeTopologicallyValid(
+      const std::string& toInsert,
+      const std::string& insertPoint) {
+    std::function<bool(Node*, Node*)> func = [this](Node* toInsert,
+                                                Node* insertPoint) {
+      return toInsert->moveBeforeTopologicallyValid(insertPoint, *aliasDb);
+    };
+    return moveWithChecks(toInsert, insertPoint, func);
+  }
+
+  bool moveAfterTopologicallyValid(
+      const std::string& toInsert,
+      const std::string& insertPoint) {
+    std::function<bool(Node*, Node*)> func = [this](Node* toInsert,
+                                                Node* insertPoint) {
+      return toInsert->moveAfterTopologicallyValid(insertPoint, *aliasDb);
+    };
+    return moveWithChecks(toInsert, insertPoint, func);
+  }
+
+  bool moveWithChecks(
+      const std::string& toInsert,
+      const std::string& insertPoint,
+      std::function<bool(Node*, Node*)> func) {
+    auto n = nodes.at(toInsert);
+    auto insert = nodes.at(insertPoint);
+    bool isAfter = n->isAfter(insert);
+
+    std::vector<Node*> originalOrdering;
+    Node* original = isAfter ? n->next() : n->prev();
+
+    auto curNode = original;
+    while (curNode != n->owningBlock()->return_node()) {
+      originalOrdering.push_back(curNode);
+      if (isAfter) {
+        curNode = curNode->next();
+      } else {
+        curNode = curNode->prev();
+      }
+    }
+
+    const auto couldMove = func(n, insert);
+    // Check the graph is okay
+    graph->lint();
+
+    // If this is the picture of nodes
+    // <some nodes> ... toInsert ... <some more nodes> ... insertPoint
+    // ^----------^ check that these nodes haven't moved
+    curNode = original;
+    size_t idx = 0;
+    while (curNode != n->owningBlock()->return_node()) {
+      JIT_ASSERT(originalOrdering[idx] == curNode);
+      if (isAfter) {
+        curNode = curNode->next();
+      } else {
+        curNode = curNode->prev();
+      }
+      idx++;
+    }
+
+    return couldMove;
+  }
+
+  void checkPostCondition(
+      const std::string& toInsert,
+      const std::string& insertPoint,
+      bool after) {
+    if (after) {
+      JIT_ASSERT(nodes.at(toInsert)->prev() == nodes.at(insertPoint));
+    } else {
+      JIT_ASSERT(nodes.at(toInsert)->next() == nodes.at(insertPoint));
+    }
+  }
+
+  std::shared_ptr<Graph> graph;
+  c10::optional<AliasDb> aliasDb;
+  std::unordered_map<std::string, Node*> nodes;
+};
+
+void testTopologicalMove() {
+  {
+    // Check that we are removing `this`'s deps properly when we need to split
+    // `this` and deps (see code for what the hell that means)
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(fixture.moveBeforeTopologicallyValid("q", "s"));
+    fixture.checkPostCondition("q", "s", false);
+  }
+  // Move after
+  {
+    // Simple move backward
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(fixture.moveAfterTopologicallyValid("c", "a"));
+    fixture.checkPostCondition("c", "a", true);
+  }
+  {
+    // simple invalid move backward
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(!fixture.moveAfterTopologicallyValid("d", "a"));
+  }
+  {
+    // doesn't actually move anything
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(fixture.moveAfterTopologicallyValid("f", "e"));
+    fixture.checkPostCondition("f", "e", true);
+  }
+  {
+    // move backward with multiple dependencies
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(fixture.moveAfterTopologicallyValid("e", "c"));
+    fixture.checkPostCondition("e", "c", true);
+  }
+  {
+    // Move backward with non-zero working set
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(fixture.moveAfterTopologicallyValid("k", "f"));
+    fixture.checkPostCondition("k", "f", true);
+  }
+  {
+    // Simple move forward
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(fixture.moveAfterTopologicallyValid("c", "d"));
+    fixture.checkPostCondition("c", "d", true);
+  }
+  {
+    // Move forward with non-zero working set
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(fixture.moveAfterTopologicallyValid("f", "l"));
+    fixture.checkPostCondition("f", "l", true);
+  }
+
+  // Move before
+  {
+    // Simple move forward
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(fixture.moveBeforeTopologicallyValid("b", "d"));
+    fixture.checkPostCondition("b", "d", false);
+  }
+  {
+    // Simple move backward
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(fixture.moveBeforeTopologicallyValid("c", "a"));
+    fixture.checkPostCondition("c", "a", false);
+  }
+  {
+    // doesn't actually move anything
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(fixture.moveBeforeTopologicallyValid("a", "b"));
+    fixture.checkPostCondition("a", "b", false);
+  }
+  {
+    // move forward with deps
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(fixture.moveBeforeTopologicallyValid("f", "m"));
+    fixture.checkPostCondition("f", "m", false);
+  }
+  {
+    // move backward with deps
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(fixture.moveBeforeTopologicallyValid("l", "f"));
+    fixture.checkPostCondition("l", "f", false);
+  }
+
+  // check that dependencies in blocks are recognized
+  {
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(!fixture.moveAfterTopologicallyValid("l", "m"));
+    JIT_ASSERT(!fixture.moveBeforeTopologicallyValid("m", "l"));
+    JIT_ASSERT(!fixture.moveAfterTopologicallyValid("n", "l"));
+    JIT_ASSERT(!fixture.moveBeforeTopologicallyValid("l", "n"));
+  }
+
+  // Test that moveAfter(n) and moveBefore(n->next()) are not necessarily
+  // equivalent. Here, the dependency ordering is n -> o -> p.  So we can't
+  // move `n` after `o`, but we can move `n` before `p` (which pushes `o` after
+  // `p`)
+  {
+    TopoMoveTestFixture fixture;
+    JIT_ASSERT(!fixture.moveAfterTopologicallyValid("n", "o"));
+    JIT_ASSERT(fixture.moveBeforeTopologicallyValid("o", "p"));
+    fixture.checkPostCondition("o", "p", false);
+  }
+}
+
+void testAliasAnalysis() {
+  {
+    auto graph = std::make_shared<Graph>();
+    auto a = graph->addInput();
+    auto b = graph->addInput();
+
+    // addsB = b + b
+    // c = a + b
+    // a += b
+    // d = c + c
+    auto addsB = graph->insert(aten::add, {b, b});
+    auto c = graph->insert(aten::add, {a, b});
+    auto aMut = graph->insert(aten::add_, {a, b});
+    auto d = graph->insert(aten::add, {c, c});
+
+    graph->lint();
+
+    const auto aliasDb = AliasAnalysis(graph);
+    // Can't move past a mutation of a used value
+    JIT_ASSERT(!c->node()->moveAfterTopologicallyValid(aMut->node(), aliasDb));
+    JIT_ASSERT(d->node()->moveAfterTopologicallyValid(c->node(), aliasDb));
+
+    // b should alias to a (since they are both inputs)
+    JIT_ASSERT(
+        !addsB->node()->moveAfterTopologicallyValid(aMut->node(), aliasDb));
+    JIT_ASSERT(addsB->node()->moveAfterTopologicallyValid(c->node(), aliasDb));
+
+    graph->lint();
+  }
+  {
+    auto graph = std::make_shared<Graph>();
+    auto a = graph->addInput();
+    auto b = graph->addInput();
+
+    auto constant = graph->insertConstant(1);
+    auto fresh = graph->insert(aten::rand, {constant});
+    auto usesB = graph->insert(aten::add, {b, fresh});
+    auto aliasesB = graph->insert(aten::select, {a, constant, constant});
+    auto mutatesAliasOfB = graph->insert(aten::add_, {aliasesB, fresh});
+    auto c = graph->insert(aten::add, {fresh, aliasesB});
+    graph->lint();
+
+    const auto aliasDb = AliasAnalysis(graph);
+
+    JIT_ASSERT(!aliasesB->node()->moveAfterTopologicallyValid(
+        mutatesAliasOfB->node(), aliasDb));
+    JIT_ASSERT(!usesB->node()->moveAfterTopologicallyValid(
+        mutatesAliasOfB->node(), aliasDb));
+  }
+}
 } // namespace
 } // namespace jit
 } // namespace torch

@@ -6,14 +6,8 @@
 #include "cuda_runtime_api.h"
 
 #include <ATen/cuda/ATenCUDAGeneral.h>
-
-/*
-* A CUDAStream interface. See CUDAStream.cpp for implementation details.
-*
-* Includes the CUDAStream convenience class and a pointer-based stream API.
-*
-* The ATen/cuda/CUDAContext interface should be preferred when working with streams.
-*/
+#include <c10/util/Exception.h>
+#include <c10/Stream.h>
 
 /*
 * Stream pool note.
@@ -47,64 +41,146 @@
 * then the functionality here may need to be extended to allow, for example,
 * "reserving" a subset of the pool so that other streams do not accidentally
 * overlap the performance critical streams.
+*
+* Note: although the notion of "current stream for device" is thread local
+* (every OS thread has a separate current stream, as one might expect),
+* the stream pool is global across all threads; stream 0 is always stream 0
+* no matter which thread you use it on.  Multiple threads can synchronize
+* on the same stream.  Although the CUDA documentation is not very clear
+* on the matter, streams are thread safe; e.g., it is safe to enqueue
+* a kernel on the same stream from two different threads.
 */
-
-struct CUDAStreamInternals;
 
 namespace at {
 namespace cuda {
 
-struct CUDAEvent;
+// Value object representing a CUDA stream.  This is just a wrapper
+// around c10::Stream, but it comes with a little extra CUDA-specific
+// functionality (conversion to cudaStream_t), and a guarantee that
+// the wrapped c10::Stream really is a CUDA stream.
+class AT_CUDA_API CUDAStream {
+public:
 
-namespace detail {
+  enum Unchecked { UNCHECKED };
 
-// Pointer-based API (for internal use)
-AT_CUDA_API CUDAStreamInternals* CUDAStream_getDefaultStream(int64_t device = -1);
-
-AT_CUDA_API CUDAStreamInternals* CUDAStream_createStream(
-  const bool isHighPriority = false
-, int64_t device = -1);
-
-AT_CUDA_API CUDAStreamInternals* CUDAStream_getCurrentStream(int64_t device = -1);
-
-AT_CUDA_API void CUDAStream_setStream(CUDAStreamInternals* internals);
-AT_CUDA_API void CUDAStream_uncheckedSetStream(CUDAStreamInternals* internals);
-
-AT_CUDA_API cudaStream_t CUDAStream_stream(CUDAStreamInternals*);
-AT_CUDA_API int64_t CUDAStream_device(CUDAStreamInternals*);
-
-} // namespace detail
-
-// RAII for a CUDA stream
-// Allows use as a cudaStream_t, copying, moving, and metadata access.
-struct AT_CUDA_API CUDAStream {
-
-  // Constructors
-  CUDAStream() = default;
-  /* implicit */ CUDAStream(CUDAStreamInternals* internals_in)
-  : internals_{internals_in} { }
-
-  // Returns true if the CUDAStream is not null.
-  explicit operator bool() const noexcept { return internals_ != nullptr; }
-
-  // Implicit conversion to cudaStream_t
-  operator cudaStream_t() const { return detail::CUDAStream_stream(internals_); }
-
-  // Less than operator (to allow use in sets)
-  friend bool operator<(const CUDAStream& left, const CUDAStream& right) {
-    return left.internals_ < right.internals_;
+  /// Construct a CUDAStream from a Stream.  This construction is checked,
+  /// and will raise an error if the Stream is not, in fact, a CUDA stream.
+  explicit CUDAStream(Stream stream) : stream_(stream) {
+    AT_CHECK(stream_.device_type() == DeviceType::CUDA);
   }
 
-  // Getters
-  int64_t device() const { return detail::CUDAStream_device(internals_); }
-  cudaStream_t stream() const { return detail::CUDAStream_stream(internals_); }
-  CUDAStreamInternals* internals() const { return internals_; }
+  /// Construct a CUDAStream from a Stream with no error checking.
+  /// This constructor uses the "named" constructor idiom, and can
+  /// be invoked as: CUDAStream(CUDAStream::UNCHECKED, stream)
+  explicit CUDAStream(Unchecked, Stream stream) : stream_(stream) {}
 
-  void synchronize_with(const CUDAEvent& event) const;
+  bool operator==(const CUDAStream& other) const noexcept {
+    return unwrap() == other.unwrap();
+  }
+
+  bool operator!=(const CUDAStream& other) const noexcept {
+    return unwrap() != other.unwrap();
+  }
+
+  /// Implicit conversion to cudaStream_t.
+  operator cudaStream_t() const { return stream(); }
+
+  /// Implicit conversion to Stream (a.k.a., forget that the stream is a
+  /// CUDA stream).
+  operator Stream() const { return unwrap(); }
+
+  /// Get the CUDA device index that this stream is associated with.
+  DeviceIndex device_index() const { return stream_.device_index(); }
+
+  /// Get the full Device that this stream is associated with.  The Device
+  /// is guaranteed to be a CUDA device.
+  Device device() const { return Device(DeviceType::CUDA, device_index()); }
+
+  /// Return the stream ID corresponding to this particular stream.
+  StreamId id() const { return stream_.id(); }
+
+  /// Explicit conversion to cudaStream_t.
+  cudaStream_t stream() const;
+
+  /// Explicit conversion to Stream.
+  Stream unwrap() const { return stream_; }
+
+  /// Reversibly pack a CUDAStream into a uint64_t representation.  This may
+  /// be helpful when storing a CUDAStream in a C struct, where you cannot
+  /// conveniently place the CUDAStream object itself (which is morally
+  /// equivalent, but unfortunately is not POD due to the fact that it
+  /// has constructors.)
+  ///
+  /// The CUDAStream can be unpacked using unpack().  The format of
+  /// the uint64_t is unspecified and may be changed.
+  uint64_t pack() const noexcept {
+    return stream_.pack();
+  }
+
+  // Unpack a CUDAStream from the uint64_t representation generated by pack().
+  static CUDAStream unpack(uint64_t bits) {
+    return CUDAStream(Stream::unpack(bits));
+  }
+
+  // Deleted for now; use CUDAEvent::block instead
+  // void synchronize_with(const CUDAEvent& event) const;
 
 private:
-  CUDAStreamInternals* internals_ = nullptr;
+  Stream stream_;
 };
+
+/**
+ * Get a new stream from the CUDA stream pool.  You can think of this
+ * as "creating" a new stream, but no such creation actually happens;
+ * instead, streams are preallocated from the pool and returned in a
+ * round-robin fashion.
+ *
+ * You can request a stream from the high priority pool by setting
+ * isHighPriority to true, or a stream for a specific device by setting device
+ * (defaulting to the current CUDA stream.)
+ */
+CAFFE2_API CUDAStream
+getStreamFromPool(const bool isHighPriority = false, DeviceIndex device = -1);
+
+/**
+ * Get the default CUDA stream, for the passed CUDA device, or for the
+ * current device if no device index is passed.  The default stream is
+ * where most computation occurs when you aren't explicitly using
+ * streams.
+ */
+CAFFE2_API CUDAStream getDefaultCUDAStream(DeviceIndex device_index = -1);
+
+/**
+ * Get the current CUDA stream, for the passed CUDA device, or for the
+ * current device if no device index is passed.  The current CUDA stream
+ * will usually be the default CUDA stream for the device, but it may
+ * be different if someone called 'setCurrentCUDAStream' or used 'StreamGuard'
+ * or 'CUDAStreamGuard'.
+ */
+CAFFE2_API CUDAStream getCurrentCUDAStream(DeviceIndex device_index = -1);
+
+/**
+ * Set the current stream on the device of the passed in stream to be
+ * the passed in stream.  Yes, you read that right: this function
+ * has *nothing* to do with the current device: it toggles the current
+ * stream of the device of the passed stream.
+ *
+ * Confused?  Avoid using this function; prefer using 'CUDAStreamGuard' instead
+ * (which will switch both your current device and current stream in the way you
+ * expect, and reset it back to its original state afterwards).
+ */
+CAFFE2_API void setCurrentCUDAStream(CUDAStream stream);
+
+C10_API std::ostream& operator<<(std::ostream& stream, const CUDAStream& s);
 
 } // namespace cuda
 } // namespace at
+
+namespace std {
+  template <>
+  struct hash<at::cuda::CUDAStream> {
+    size_t operator()(at::cuda::CUDAStream s) const noexcept {
+      return std::hash<c10::Stream>{}(s.unwrap());
+    }
+  };
+} // namespace std

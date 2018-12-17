@@ -72,10 +72,12 @@ elseif(BLAS STREQUAL "MKL")
   if(MKL_FOUND)
     include_directories(SYSTEM ${MKL_INCLUDE_DIR})
     list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::mkl)
+    set(CAFFE2_USE_MKL ON)
   else()
     message(WARNING "MKL could not be found. Defaulting to Eigen")
     set(BLAS "Eigen" CACHE STRING "Selected BLAS library")
     set(CAFFE2_USE_EIGEN_FOR_BLAS ON)
+    set(CAFFE2_USE_MKL OFF)
   endif()
 elseif(BLAS STREQUAL "vecLib")
   find_package(vecLib REQUIRED)
@@ -85,11 +87,126 @@ else()
   message(FATAL_ERROR "Unrecognized blas option:" ${BLAS})
 endif()
 
+
+if (NOT BUILD_ATEN_MOBILE)
+  set(AT_MKL_ENABLED 0)
+  set(AT_MKL_MT 0)
+  set(USE_BLAS 1)
+  if(NOT (ATLAS_FOUND OR OPENBLAS_FOUND OR MKL_FOUND OR VECLIB_FOUND))
+    find_package(BLAS)
+    if (NOT BLAS_FOUND)
+      set(USE_BLAS 0)
+    endif()
+  endif()
+
+  if (MKL_FOUND)
+    ADD_DEFINITIONS(-DTH_BLAS_MKL)
+    if(NOT MKL_INCLUDE_DIR)
+      MESSAGE(FATAL_ERROR "MKL is used, but MKL header files are not found. \
+        You can get them by `conda install mkl-include` if using conda (if \
+        it is missing, run `conda upgrade -n root conda` first), and \
+        `pip install mkl-devel` if using pip. If build fails with header files \
+        available in the system, please make sure that CMake will search the \
+        directory containing them, e.g., by setting CMAKE_INCLUDE_PATH.")
+	endif()
+    if (MSVC AND MKL_LIBRARIES MATCHES ".*libiomp5md\\.lib.*")
+      ADD_DEFINITIONS(-D_OPENMP_NOFORCE_MANIFEST)
+      set(AT_MKL_MT 1)
+    endif()
+    set(AT_MKL_ENABLED 1)
+  endif()
+endif()
+
 # Directory where NNPACK and cpuinfo will download and build all dependencies
 set(CONFU_DEPENDENCIES_SOURCE_DIR ${PROJECT_BINARY_DIR}/confu-srcs
   CACHE PATH "Confu-style dependencies source directory")
 set(CONFU_DEPENDENCIES_BINARY_DIR ${PROJECT_BINARY_DIR}/confu-deps
   CACHE PATH "Confu-style dependencies binary directory")
+
+# ---[ QNNPACK
+if(USE_QNNPACK)
+  if (IOS)
+    list(LENGTH IOS_ARCH IOS_ARCH_COUNT)
+    if (IOS_ARCH_COUNT GREATER 1)
+      message(WARNING
+        "Multi-architecture (${IOS_ARCH}) builds are not supported in QNNPACK. "
+        "Specify a single architecture in IOS_ARCH and re-configure, or "
+        "turn this warning off by USE_QNNPACK=OFF.")
+      set(USE_QNNPACK OFF)
+    endif()
+    if (NOT IOS_ARCH MATCHES "^(i386|x86_64|armv7.*|arm64.*)$")
+      message(WARNING
+        "Target architecture \"${IOS_ARCH}\" is not supported in QNNPACK. "
+        "Supported architectures are x86, x86-64, ARM, and ARM64. "
+        "Turn this warning off by USE_QNNPACK=OFF.")
+      set(USE_QNNPACK OFF)
+    endif()
+  else()
+    if (NOT IOS AND NOT (CMAKE_SYSTEM_NAME MATCHES "^(Android|Linux|Darwin)$"))
+      message(WARNING
+        "Target platform \"${CMAKE_SYSTEM_NAME}\" is not supported in QNNPACK. "
+        "Supported platforms are Android, iOS, Linux, and macOS. "
+        "Turn this warning off by USE_QNNPACK=OFF.")
+      set(USE_QNNPACK OFF)
+    endif()
+    if (NOT IOS AND NOT (CMAKE_SYSTEM_PROCESSOR MATCHES "^(i686|AMD64|x86_64|armv[0-9].*|arm64|aarch64)$"))
+      message(WARNING
+        "Target architecture \"${CMAKE_SYSTEM_PROCESSOR}\" is not supported in QNNPACK. "
+        "Supported architectures are x86, x86-64, ARM, and ARM64. "
+        "Turn this warning off by USE_QNNPACK=OFF.")
+      set(USE_QNNPACK OFF)
+    endif()
+  endif()
+  if (USE_QNNPACK)
+    set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+
+    # Directories for QNNPACK dependencies submoduled in Caffe2
+    if (NOT DEFINED CPUINFO_SOURCE_DIR)
+      set(CPUINFO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/cpuinfo" CACHE STRING "cpuinfo source directory")
+    endif()
+    if (NOT DEFINED QNNPACK_SOURCE_DIR)
+      set(QNNPACK_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/QNNPACK" CACHE STRING "QNNPACK source directory")
+    endif()
+    if (NOT DEFINED FP16_SOURCE_DIR)
+      set(FP16_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/FP16" CACHE STRING "FP16 source directory")
+    endif()
+    if (NOT DEFINED FXDIV_SOURCE_DIR)
+      set(FXDIV_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/FXdiv" CACHE STRING "FXdiv source directory")
+    endif()
+    if (NOT DEFINED PSIMD_SOURCE_DIR)
+      set(PSIMD_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/psimd" CACHE STRING "PSimd source directory")
+    endif()
+    if (NOT DEFINED PTHREADPOOL_SOURCE_DIR)
+      set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
+    endif()
+
+    if(NOT TARGET qnnpack)
+      set(QNNPACK_BUILD_TESTS OFF CACHE BOOL "")
+      set(QNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
+      set(QNNPACK_CUSTOM_THREADPOOL ON CACHE BOOL "")
+      set(QNNPACK_LIBRARY_TYPE "static" CACHE STRING "")
+      set(PTHREADPOOL_LIBRARY_TYPE "static" CACHE STRING "")
+      set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
+      add_subdirectory(
+        "${QNNPACK_SOURCE_DIR}"
+        "${CONFU_DEPENDENCIES_BINARY_DIR}/QNNPACK")
+      # We build static versions of QNNPACK and pthreadpool but link
+      # them into a shared library for Caffe2, so they need PIC.
+      set_property(TARGET qnnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
+      set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
+      set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
+    endif()
+
+    list(APPEND Caffe2_DEPENDENCY_LIBS qnnpack)
+  endif()
+endif()
+
+# ---[ Caffe2 Int8 operators (enabled by USE_QNNPACK) depend on gemmlowp and neon2sse headers
+if(USE_QNNPACK)
+  set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+  include_directories(SYSTEM "${CAFFE2_THIRD_PARTY_ROOT}/gemmlowp")
+  include_directories(SYSTEM "${CAFFE2_THIRD_PARTY_ROOT}/neon2sse")
+endif()
 
 # ---[ NNPACK
 if(USE_NNPACK)
@@ -196,6 +313,43 @@ if(BUILD_TEST)
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
 endif()
 
+# ---[ FBGEMM
+if(USE_FBGEMM)
+  set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+  if(NOT DEFINED FBGEMM_SOURCE_DIR)
+    set(FBGEMM_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/fbgemm" CACHE STRING "FBGEMM source directory")
+  endif()
+  if(NOT CAFFE2_COMPILER_SUPPORTS_AVX512F_EXTENSIONS)
+    message(WARNING
+      "A compiler with AVX512 support is required for FBGEMM. "
+      "Not compiling with FBGEMM. "
+      "Turn this warning off by USE_FBGEMM=OFF.")
+    set(USE_FBGEMM OFF)
+  endif()
+  if(MSVC)
+    set(USE_FBGEMM OFF)
+  endif()
+  if(USE_FBGEMM AND NOT TARGET fbgemm)
+    set(FBGEMM_BUILD_TESTS OFF CACHE BOOL "")
+    set(FBGEMM_BUILD_BENCHMARKS OFF CACHE BOOL "")
+    set(FBGEMM_LIBRARY_TYPE "static" CACHE STRING "")
+    add_subdirectory("${FBGEMM_SOURCE_DIR}")
+    set_property(TARGET fbgemm_avx2 PROPERTY POSITION_INDEPENDENT_CODE ON)
+    set_property(TARGET fbgemm_avx512 PROPERTY POSITION_INDEPENDENT_CODE ON)
+    set_property(TARGET fbgemm PROPERTY POSITION_INDEPENDENT_CODE ON)
+  endif()
+
+  if(USE_FBGEMM)
+    list(APPEND Caffe2_DEPENDENCY_LIBS fbgemm)
+  endif()
+endif()
+
+if(USE_FBGEMM)
+  set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+  include_directories(SYSTEM "${CAFFE2_THIRD_PARTY_ROOT}")
+endif()
+
+
 # ---[ LMDB
 if(USE_LMDB)
   find_package(LMDB)
@@ -285,6 +439,9 @@ if(USE_OPENCV)
   if(OpenCV_FOUND)
     include_directories(SYSTEM ${OpenCV_INCLUDE_DIRS})
     list(APPEND Caffe2_DEPENDENCY_LIBS ${OpenCV_LIBS})
+    if (MSVC AND USE_CUDA)
+        list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${OpenCV_LIBS})
+    endif()
     message(STATUS "OpenCV found (${OpenCV_CONFIG_PATH})")
   else()
     message(WARNING "Not compiling with OpenCV. Suppress this warning with -DUSE_OPENCV=OFF")
@@ -398,7 +555,15 @@ if(BUILD_PYTHON)
   set(Python_ADDITIONAL_VERSIONS 3.7 3.6 3.5 2.8 2.7 2.6)
   find_package(PythonInterp 2.7)
   find_package(PythonLibs 2.7)
-  find_package(NumPy)
+
+  # When building pytorch, we pass this in directly from setup.py, and
+  # don't want to overwrite it because we trust python more than cmake
+  if (NUMPY_INCLUDE_DIR)
+    set(NUMPY_FOUND ON)
+  else()
+    find_package(NumPy)
+  endif()
+
   if(PYTHONINTERP_FOUND AND PYTHONLIBS_FOUND)
     include_directories(SYSTEM ${PYTHON_INCLUDE_DIR})
     caffe2_update_option(USE_NUMPY OFF)
@@ -416,15 +581,13 @@ endif()
 
 # ---[ pybind11
 find_package(pybind11 CONFIG)
-if((DEFINED pybind11_DIR) AND pybind11_DIR)
-  get_target_property(pybind11_INCLUDE_DIRS pybind11::pybind11 INTERFACE_INCLUDE_DIRECTORIES)
-else()
+if(NOT pybind11_FOUND)
   find_package(pybind11)
 endif()
 
 if(pybind11_FOUND)
     message(STATUS "System pybind11 found")
-    message(STATUS "pybind11l include dirs: " ${pybind11_INCLUDE_DIRS})
+    message(STATUS "pybind11 include dirs: " "${pybind11_INCLUDE_DIRS}")
     include_directories(SYSTEM ${pybind11_INCLUDE_DIRS})
 else()
     message(STATUS "Using third_party/pybind11.")
@@ -464,12 +627,37 @@ endif()
 
 # ---[ OpenMP
 if(USE_OPENMP)
-  find_package(OpenMP)
+  set(WITH_OPENMP ON CACHE BOOL "OpenMP support if available?")
+  if(APPLE AND CMAKE_COMPILER_IS_GNUCC)
+    exec_program(uname ARGS -v  OUTPUT_VARIABLE DARWIN_VERSION)
+    string(REGEX MATCH "[0-9]+" DARWIN_VERSION ${DARWIN_VERSION})
+    message(STATUS "MAC OS Darwin Version: ${DARWIN_VERSION}")
+    if(DARWIN_VERSION GREATER 9)
+      set(APPLE_OPENMP_SUCKS 1)
+    endif(DARWIN_VERSION GREATER 9)
+    execute_process(COMMAND ${CMAKE_C_COMPILER} -dumpversion
+      OUTPUT_VARIABLE GCC_VERSION)
+    if(APPLE_OPENMP_SUCKS AND GCC_VERSION VERSION_LESS 4.6.2)
+      message(STATUS "Warning: Disabling OpenMP (unstable with this version of GCC)")
+      message(STATUS " Install GCC >= 4.6.2 or change your OS to enable OpenMP")
+      add_compile_options(-Wno-unknown-pragmas)
+      set(WITH_OPENMP OFF CACHE BOOL "OpenMP support if available?" FORCE)
+    endif()
+  endif()
+
+  if(WITH_OPENMP AND NOT CHECKED_OPENMP)
+    find_package(OpenMP)
+    set(CHECKED_OPENMP ON CACHE BOOL "already checked for OpenMP")
+
+    # OPENMP_FOUND is not cached in FindOpenMP.cmake (all other variables are cached)
+    # see https://github.com/Kitware/CMake/blob/master/Modules/FindOpenMP.cmake
+    set(OPENMP_FOUND ${OPENMP_FOUND} CACHE BOOL "OpenMP Support found")
+  endif()
+
   if(OPENMP_FOUND)
     message(STATUS "Adding " ${OpenMP_CXX_FLAGS})
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
   else()
     message(WARNING "Not compiling with OpenMP. Suppress this warning with -DUSE_OPENMP=OFF")
     caffe2_update_option(USE_OPENMP OFF)
@@ -533,24 +721,33 @@ if(USE_CUDA)
 endif()
 
 # ---[ HIP
-if(NOT BUILD_ATEN_MOBILE)
+if(USE_ROCM)
   include(${CMAKE_CURRENT_LIST_DIR}/public/LoadHIP.cmake)
   if(PYTORCH_FOUND_HIP)
     message(INFO "Compiling with HIP for AMD.")
     caffe2_update_option(USE_ROCM ON)
 
-    list(APPEND HIP_HIPCC_FLAGS -fPIC)
-    list(APPEND HIP_HIPCC_FLAGS -D__HIP_PLATFORM_HCC__=1)
-    list(APPEND HIP_HIPCC_FLAGS -DCUDA_HAS_FP16=1)
-    list(APPEND HIP_HIPCC_FLAGS -D__HIP_NO_HALF_OPERATORS__=1)
-    list(APPEND HIP_HIPCC_FLAGS -D__HIP_NO_HALF_CONVERSIONS__=1)
-    list(APPEND HIP_HIPCC_FLAGS -Wno-macro-redefined)
-    list(APPEND HIP_HIPCC_FLAGS -Wno-inconsistent-missing-override)
-    list(APPEND HIP_HIPCC_FLAGS -Wno-exceptions)
-    list(APPEND HIP_HIPCC_FLAGS -Wno-shift-count-negative)
-    list(APPEND HIP_HIPCC_FLAGS -Wno-shift-count-overflow)
-    list(APPEND HIP_HIPCC_FLAGS -Wno-unused-command-line-argument)
-    list(APPEND HIP_HIPCC_FLAGS -Wno-duplicate-decl-specifier)
+    list(APPEND HIP_CXX_FLAGS -fPIC)
+    list(APPEND HIP_CXX_FLAGS -D__HIP_PLATFORM_HCC__=1)
+    list(APPEND HIP_CXX_FLAGS -DCUDA_HAS_FP16=1)
+    list(APPEND HIP_CXX_FLAGS -D__HIP_NO_HALF_OPERATORS__=1)
+    list(APPEND HIP_CXX_FLAGS -D__HIP_NO_HALF_CONVERSIONS__=1)
+    list(APPEND HIP_CXX_FLAGS -DHIP_VERSION=${HIP_VERSION_MAJOR})
+    list(APPEND HIP_CXX_FLAGS -Wno-macro-redefined)
+    list(APPEND HIP_CXX_FLAGS -Wno-inconsistent-missing-override)
+    list(APPEND HIP_CXX_FLAGS -Wno-exceptions)
+    list(APPEND HIP_CXX_FLAGS -Wno-shift-count-negative)
+    list(APPEND HIP_CXX_FLAGS -Wno-shift-count-overflow)
+    list(APPEND HIP_CXX_FLAGS -Wno-unused-command-line-argument)
+    list(APPEND HIP_CXX_FLAGS -Wno-duplicate-decl-specifier)
+    list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
+    list(APPEND HIP_CXX_FLAGS -DROCBLAS_FP16=0)
+
+    set(HIP_HCC_FLAGS ${HIP_CXX_FLAGS})
+    # Ask hcc to generate device code during compilation so we can use
+    # host linker to link.
+    list(APPEND HIP_HCC_FLAGS -fno-gpu-rdc)
+    list(APPEND HIP_HCC_FLAGS -amdgpu-target=${HCC_AMDGPU_TARGET})
 
     set(Caffe2_HIP_INCLUDES
       ${hip_INCLUDE_DIRS} ${hcc_INCLUDE_DIRS} ${hsa_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${thrust_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDES})
@@ -589,17 +786,6 @@ if(USE_ROCM)
  include_directories(SYSTEM ${HIPRAND_PATH}/include)
  include_directories(SYSTEM ${ROCRAND_PATH}/include)
  include_directories(SYSTEM ${THRUST_PATH})
-
- # load HIP cmake module and load platform id
- EXECUTE_PROCESS(COMMAND ${HIP_PATH}/bin/hipconfig -P OUTPUT_VARIABLE PLATFORM)
- EXECUTE_PROCESS(COMMAND ${HIP_PATH}/bin/hipconfig --cpp_config OUTPUT_VARIABLE HIP_CXX_FLAGS)
-
- # Link with HIPCC https://github.com/ROCm-Developer-Tools/HIP/blob/master/docs/markdown/hip_porting_guide.md#linking-with-hipcc
- # SET(CMAKE_CXX_LINK_EXECUTABLE ${HIP_HIPCC_EXECUTABLE})
-
- # Show message that we're using ROCm.
- MESSAGE(STATUS "ROCM TRUE:")
- MESSAGE(STATUS "CMAKE_CXX_COMPILER: " ${CMAKE_CXX_COMPILER})
 endif()
 
 # ---[ NCCL
@@ -636,35 +822,28 @@ if(USE_GLOO)
     message(WARNING "Gloo can only be used on 64-bit systems.")
     caffe2_update_option(USE_GLOO OFF)
   else()
-    set(Gloo_USE_CUDA ${USE_CUDA})
-    find_package(Gloo)
-    if(Gloo_FOUND)
-      include_directories(SYSTEM ${Gloo_INCLUDE_DIRS})
-      list(APPEND Caffe2_DEPENDENCY_LIBS gloo)
-    else()
-      set(GLOO_INSTALL OFF CACHE BOOL "" FORCE)
-      set(GLOO_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
+    set(GLOO_INSTALL ON CACHE BOOL "" FORCE)
+    set(GLOO_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
-      # Temporarily override variables to avoid building Gloo tests/benchmarks
-      set(__BUILD_TEST ${BUILD_TEST})
-      set(__BUILD_BENCHMARK ${BUILD_BENCHMARK})
-      set(BUILD_TEST OFF)
-      set(BUILD_BENCHMARK OFF)
-      add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
-      # Here is a little bit hacky. We have to put PROJECT_BINARY_DIR in front
-      # of PROJECT_SOURCE_DIR with/without conda system. The reason is that
-      # gloo generates a new config.h in the binary diretory.
-      include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
-      include_directories(BEFORE SYSTEM ${PROJECT_BINARY_DIR}/third_party/gloo)
-      set(BUILD_TEST ${__BUILD_TEST})
-      set(BUILD_BENCHMARK ${__BUILD_BENCHMARK})
+    # Temporarily override variables to avoid building Gloo tests/benchmarks
+    set(__BUILD_TEST ${BUILD_TEST})
+    set(__BUILD_BENCHMARK ${BUILD_BENCHMARK})
+    set(BUILD_TEST OFF)
+    set(BUILD_BENCHMARK OFF)
+    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
+    # Here is a little bit hacky. We have to put PROJECT_BINARY_DIR in front
+    # of PROJECT_SOURCE_DIR with/without conda system. The reason is that
+    # gloo generates a new config.h in the binary diretory.
+    include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
+    include_directories(BEFORE SYSTEM ${PROJECT_BINARY_DIR}/third_party/gloo)
+    set(BUILD_TEST ${__BUILD_TEST})
+    set(BUILD_BENCHMARK ${__BUILD_BENCHMARK})
 
-      # Add explicit dependency if NCCL is built from third_party.
-      # Without dependency, make -jN with N>1 can fail if the NCCL build
-      # hasn't finished when CUDA targets are linked.
-      if(NCCL_EXTERNAL)
-        add_dependencies(gloo_cuda nccl_external)
-      endif()
+    # Add explicit dependency if NCCL is built from third_party.
+    # Without dependency, make -jN with N>1 can fail if the NCCL build
+    # hasn't finished when CUDA targets are linked.
+    if(NCCL_EXTERNAL)
+      add_dependencies(gloo_cuda nccl_external)
     endif()
     # Pick the right dependency depending on USE_CUDA
     list(APPEND Caffe2_DEPENDENCY_LIBS gloo)
@@ -800,13 +979,7 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     set(ONNX_CUSTOM_PROTOC_EXECUTABLE ${CAFFE2_CUSTOM_PROTOC_EXECUTABLE})
   endif()
   set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
-  # We will build onnx as static libs and embed it directly into the binary.
   set(BUILD_SHARED_LIBS OFF)
-  if (MSVC AND BUILD_SHARED_LIBS)
-    # That also means we want to export all symbols from the shared
-    # library we are building
-    set(ONNX_BUILD_MAIN_LIB ON)
-  endif()
   set(ONNX_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
   set(ONNX_USE_LITE_PROTO ${CAFFE2_USE_LITE_PROTO})
   # If linking local protobuf, make sure ONNX has the same protobuf
@@ -856,56 +1029,19 @@ if (NOT BUILD_ATEN_MOBILE)
   # see https://cmake.org/Wiki/CMake_RPATH_handling
   if (APPLE)
     set(CMAKE_MACOSX_RPATH ON)
-  endif()
+    set(_rpath_portable_origin "@loader_path")
+  else()
+    set(_rpath_portable_origin $ORIGIN)
+  endif(APPLE)
+  # Use separate rpaths during build and install phases
   set(CMAKE_SKIP_BUILD_RPATH  FALSE)
+  # Don't use the install-rpath during the build phase
   set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
-  set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
+  set(CMAKE_INSTALL_RPATH "${_rpath_portable_origin}")
+  # Automatically add all linked folders that are NOT in the build directory to
+  # the rpath (per library?)
   set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
   set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
-  list(FIND CMAKE_PLATFORM_IMPLICIT_LINK_DIRECTORIES "${CMAKE_INSTALL_PREFIX}/lib" isSystemDir)
-  if ("${isSystemDir}" STREQUAL "-1")
-    set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
-  endif()
-
-  if (NOT MSVC)
-    set(CMAKE_CXX_FLAGS "--std=c++11 ${CMAKE_CXX_FLAGS}")
-  endif()
-
-  INCLUDE(CheckCXXSourceCompiles)
-
-  # disable some verbose warnings
-  IF (MSVC)
-    set(CMAKE_CXX_FLAGS "/wd4267 /wd4251 /wd4522 /wd4522 /wd4838 /wd4305 /wd4244 /wd4190 /wd4101 /wd4996 /wd4275 ${CMAKE_CXX_FLAGS}")
-  ENDIF()
-
-  # windef.h will define max/min macros if NOMINMAX is not defined
-  IF (MSVC)
-    add_definitions(/DNOMINMAX)
-  ENDIF()
-
-  #Check if certain std functions are supported. Sometimes
-  #_GLIBCXX_USE_C99 macro is not defined and some functions are missing.
-  CHECK_CXX_SOURCE_COMPILES("
-  #include <cmath>
-  #include <string>
-
-  int main() {
-    int a = std::isinf(3.0);
-    int b = std::isnan(0.0);
-    std::string s = std::to_string(1);
-
-    return 0;
-    }" SUPPORT_GLIBCXX_USE_C99)
-
-  if (NOT SUPPORT_GLIBCXX_USE_C99)
-    message(FATAL_ERROR
-            "The C++ compiler does not support required functions. "
-            "This is very likely due to a known bug in GCC 5 "
-            "(and maybe other versions) on Ubuntu 17.10 and newer. "
-            "For more information, see: "
-            "https://github.com/pytorch/pytorch/issues/5229"
-           )
-  endif()
 
   # Top-level build config
   ############################################
@@ -974,42 +1110,6 @@ if (NOT BUILD_ATEN_MOBILE)
     STRING(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_DEBUG "" ${CMAKE_CXX_FLAGS_DEBUG})
     STRING(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_RELEASE "" ${CMAKE_CXX_FLAGS_RELEASE})
   ENDIF()
-
-  # OpenMP support?
-  SET(WITH_OPENMP ON CACHE BOOL "OpenMP support if available?")
-  IF (APPLE AND CMAKE_COMPILER_IS_GNUCC)
-    EXEC_PROGRAM (uname ARGS -v  OUTPUT_VARIABLE DARWIN_VERSION)
-    STRING (REGEX MATCH "[0-9]+" DARWIN_VERSION ${DARWIN_VERSION})
-    MESSAGE (STATUS "MAC OS Darwin Version: ${DARWIN_VERSION}")
-    IF (DARWIN_VERSION GREATER 9)
-      SET(APPLE_OPENMP_SUCKS 1)
-    ENDIF (DARWIN_VERSION GREATER 9)
-    EXECUTE_PROCESS (COMMAND ${CMAKE_C_COMPILER} -dumpversion
-      OUTPUT_VARIABLE GCC_VERSION)
-    IF (APPLE_OPENMP_SUCKS AND GCC_VERSION VERSION_LESS 4.6.2)
-      MESSAGE(STATUS "Warning: Disabling OpenMP (unstable with this version of GCC)")
-      MESSAGE(STATUS " Install GCC >= 4.6.2 or change your OS to enable OpenMP")
-      add_compile_options(-Wno-unknown-pragmas)
-      SET(WITH_OPENMP OFF CACHE BOOL "OpenMP support if available?" FORCE)
-    ENDIF()
-  ENDIF()
-
-  IF (WITH_OPENMP AND NOT CHECKED_OPENMP)
-    FIND_PACKAGE(OpenMP)
-    SET(CHECKED_OPENMP ON CACHE BOOL "already checked for OpenMP")
-
-    # OPENMP_FOUND is not cached in FindOpenMP.cmake (all other variables are cached)
-    # see https://github.com/Kitware/CMake/blob/master/Modules/FindOpenMP.cmake
-    SET(OPENMP_FOUND ${OPENMP_FOUND} CACHE BOOL "OpenMP Support found")
-  ENDIF()
-
-  IF (OPENMP_FOUND)
-    MESSAGE(STATUS "Compiling with OpenMP support")
-    SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
-    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
-  ENDIF()
-
-
   SET(CUDA_ATTACH_VS_BUILD_RULE_TO_CUDA_FILE OFF)
 
   FIND_PACKAGE(MAGMA)
@@ -1051,24 +1151,6 @@ if (NOT BUILD_ATEN_MOBILE)
   IF (CORTEXA9_FOUND)
     MESSAGE(STATUS "Cortex-A9 Found with compiler flag : -mcpu=cortex-a9")
     add_compile_options(-mcpu=cortex-a9)
-  ENDIF()
-
-  # Check that our programs run.  This is different from the native CMake compiler
-  # check, which just tests if the program compiles and links.  This is important
-  # because with ASAN you might need to help the compiled library find some
-  # dynamic libraries.
-  CHECK_C_SOURCE_RUNS("
-  int main() { return 0; }
-  " COMPILER_WORKS)
-  IF (NOT COMPILER_WORKS)
-    # Force cmake to retest next time around
-    unset(COMPILER_WORKS CACHE)
-    MESSAGE(FATAL_ERROR
-        "Could not run a simple program built with your compiler. "
-        "If you are trying to use -fsanitize=address, make sure "
-        "libasan is properly installed on your system (you can confirm "
-        "if the problem is this by attempting to build and run a "
-        "small program.)")
   ENDIF()
 
   CHECK_INCLUDE_FILE(cpuid.h HAVE_CPUID_H)
@@ -1189,30 +1271,6 @@ if (NOT BUILD_ATEN_MOBILE)
       CACHE BOOL "Copy the required BLAS DLLs into the TH install dirs")
   ENDIF()
 
-  FIND_PACKAGE(BLAS)
-  SET(AT_MKL_ENABLED 0)
-  SET(AT_MKL_MT 0)
-  IF (BLAS_FOUND)
-    SET(USE_BLAS 1)
-    IF (BLAS_INFO STREQUAL "mkl")
-      ADD_DEFINITIONS(-DTH_BLAS_MKL)
-      IF(NOT BLAS_INCLUDE_DIR)
-        MESSAGE(FATAL_ERROR "MKL is used, but MKL header files are not found. \
-          You can get them by `conda install mkl-include` if using conda (if \
-          it is missing, run `conda upgrade -n root conda` first), and \
-          `pip install mkl-devel` if using pip. If build fails with header files \
-          available in the system, please make sure that CMake will search the \
-          directory containing them, e.g., by setting CMAKE_INCLUDE_PATH.")
-      ENDIF()
-      IF (MSVC AND MKL_LIBRARIES MATCHES ".*libiomp5md\\.lib.*")
-        ADD_DEFINITIONS(-D_OPENMP_NOFORCE_MANIFEST)
-        SET(AT_MKL_MT 1)
-      ENDIF()
-      INCLUDE_DIRECTORIES(SYSTEM ${BLAS_INCLUDE_DIR})  # include MKL headers
-      SET(AT_MKL_ENABLED 1)
-    ENDIF()
-  ENDIF()
-
   FIND_PACKAGE(LAPACK)
   IF (LAPACK_FOUND)
     SET(USE_LAPACK 1)
@@ -1243,19 +1301,24 @@ if (NOT BUILD_ATEN_MOBILE)
     set(AT_ROCM_ENABLED 1)
   ENDIF()
 
-  if (NO_MKLDNN)
-    message("disabling MKLDNN because NO_MKLDNN is set")
-    set(AT_MKLDNN_ENABLED 0)
-  else()
-    find_package(MKLDNN)
-    if(NOT MKLDNN_FOUND)
-      message(STATUS "MKLDNN not found. Compiling without MKLDNN support")
-      set(AT_MKLDNN_ENABLED 0)
-    else()
-      include_directories(SYSTEM ${MKLDNN_INCLUDE_DIRS})
-      set(AT_MKLDNN_ENABLED 1)
-    endif()
-  endif()
+  SET(AT_MKLDNN_ENABLED 0)
+  SET(CAFFE2_USE_MKLDNN OFF)
+  IF (USE_MKLDNN)
+    FIND_PACKAGE(MKLDNN)
+    INCLUDE(${CMAKE_CURRENT_LIST_DIR}/public/mkldnn.cmake)
+    IF(MKLDNN_FOUND)
+      SET(AT_MKLDNN_ENABLED 1)
+      INCLUDE_DIRECTORIES(SYSTEM ${MKLDNN_INCLUDE_DIR})
+      IF(BUILD_CAFFE2_OPS)
+        SET(CAFFE2_USE_MKLDNN ON)
+        LIST(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::mkldnn)
+      ENDIF(BUILD_CAFFE2_OPS)
+    ELSE()
+      MESSAGE(WARNING "MKLDNN could not be found.")
+    ENDIF()
+  ELSE()
+    MESSAGE("disabling MKLDNN because USE_MKLDNN is not set")
+  ENDIF()
 
   IF(UNIX AND NOT APPLE)
      INCLUDE(CheckLibraryExists)

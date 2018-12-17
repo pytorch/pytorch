@@ -68,7 +68,11 @@ std::tuple<std::vector<int64_t>, std::vector<int64_t>> inferExpandGeometry(
           ") must match the existing size (",
           size,
           ") at non-singleton dimension ",
-          i);
+          i,
+          ".  Target sizes: ",
+          sizes,
+          ".  Tensor sizes: ",
+          tensor_sizes);
       size = targetSize;
       stride = 0;
     }

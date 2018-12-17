@@ -95,7 +95,7 @@ __global__ static void pdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
   for (; a < end; a += stride, b += stride) {
     F::inc(agg, std::abs(*a - *b), p);
   }
-  
+
   // Reduce warps
   for (int offset = warpSize / 2; offset > 0; offset /= 2) {
     F::agg(agg, WARP_SHFL_DOWN(agg, offset));

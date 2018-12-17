@@ -81,6 +81,19 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
   }
 }
 
+static THCTensor* THNN_(newViewWeightMM2d)(THCState *state, THCTensor *weight) {
+  weight = THCTensor_(newContiguous)(state, weight);
+  if (weight->dim() == 4) {
+    int64_t s1 = weight->size(0);
+    int64_t s2 = weight->size(1) * weight->size(2) * weight->size(3);
+    THCTensor *old_weight = weight;
+    weight = THCTensor_(newWithStorage2d)(state, THTensor_getStoragePtr(weight), weight->storage_offset(),
+					  s1, -1, s2, -1);
+    THCTensor_(free)(state, old_weight);
+  }
+  return weight;
+}
+
 void THNN_(SpatialConvolutionMM_updateOutput)(
            THCState *state,
            THCTensor *input,
@@ -92,31 +105,34 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
            int kW, int kH,
            int dW, int dH,
            int padW, int padH) {
-
   THCUNN_assertSameGPU(state, 5, input, output, weight, columns, ones);
   if (bias) {
     THCUNN_assertSameGPU(state, 2, weight, bias);
   }
-  THArgCheck(THCTensor_(isContiguous)(state, weight), 4,
-             "weight tensor has to be contiguous");
+  weight = THNN_(newViewWeightMM2d)(state, weight);
+  THNN_(SpatialConvolutionMM_shapeCheck)
+       (state, input, NULL, weight, bias, kH, kW, dH, dW, padH, padW, 0);
   THArgCheck(!bias || THCTensor_(isContiguous)(state, bias), 5,
              "bias tensor has to be contiguous");
 
-  int freeWeight = 0;
+  int ndim = input->dim();
+  int dimf = 0;
+  int dimh = 1;
+  int dimw = 2;
 
-  // Params:
-  int nInputPlane = weight->dim() == 2 ? weight->size(1)/(kH*kW) : weight->size(1);
-  int nOutputPlane = weight->size(0);
-
-  if (weight->dim() == 4) {
-    int64_t s1 = weight->size(0);
-    int64_t s2 = weight->size(1) * weight->size(2) * weight->size(3);
-    weight = THCTensor_(newWithStorage2d)(state, THTensor_getStoragePtr(weight), weight->storage_offset(), s1, -1, s2, -1);
-    freeWeight = 1;
+  if (ndim == 4) {
+    dimf++;
+    dimh++;
+    dimw++;
   }
 
-  THNN_(SpatialConvolutionMM_shapeCheck)
-       (state, input, NULL, weight, bias, kH, kW, dH, dW, padH, padW, 0);
+  int64_t nInputPlane = input->size(dimf);
+  int64_t inputHeight  = input->size(dimh);
+  int64_t inputWidth   = input->size(dimw);
+  int64_t nOutputPlane = weight->size(0);
+  int64_t outputHeight = (inputHeight + 2*padH - kH) / dH + 1;
+  int64_t outputWidth  = (inputWidth + 2*padW - kW) / dW + 1;
+
 
   input = THCTensor_(newContiguous)(state, input);
   int is_batch = 1;
@@ -125,11 +141,6 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
     is_batch = 0;
     THCTensor_(resize4d)(state, input, 1, input->size(0), input->size(1), input->size(2));
   }
-
-  int64_t inputWidth   = input->size(3);
-  int64_t inputHeight  = input->size(2);
-  int64_t outputWidth  = (inputWidth + 2*padW - kW) / dW + 1;
-  int64_t outputHeight = (inputHeight + 2*padH - kH) / dH + 1;
 
   // Batch size + input planes
   int64_t batchSize = input->size(0);
@@ -226,8 +237,6 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
   // Free
   THCTensor_(free)(state, input_n);
   THCTensor_(free)(state, output_n);
-  if (freeWeight)
-    THCTensor_(free)(state, weight);
 
   // Resize output
   if (is_batch == 0) {
@@ -236,6 +245,7 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
   }
 
   THCTensor_(free)(state, input);
+  THCTensor_(free)(state, weight);
 }
 
 void THNN_(SpatialConvolutionMM_updateGradInput)(
@@ -252,8 +262,7 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
 
   THCUNN_assertSameGPU(state, 5, input, gradOutput, weight,
                        gradColumns, gradInput);
-  THArgCheck(THCTensor_(isContiguous)(state, weight), 4,
-             "weight tensor has to be contiguous");
+  weight = THNN_(newViewWeightMM2d)(state, weight);
 
   THNN_(SpatialConvolutionMM_shapeCheck)
        (state, input, gradOutput, weight, NULL, kH, kW, dH, dW, padH, padW, 0);
@@ -261,14 +270,6 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
   // Params
   int nInputPlane = weight->dim() == 2 ? weight->size(1)/(kW*kH) : weight->size(1);
   int nOutputPlane = weight->size(0);
-
-  int freeWeight = 0;
-  if (weight->dim() == 4) {
-    int64_t s1 = weight->size(0);
-    int64_t s2 = weight->size(1) * weight->size(2) * weight->size(3);
-    weight = THCTensor_(newWithStorage2d)(state, THTensor_getStoragePtr(weight), weight->storage_offset(), s1, -1, s2, -1);
-    freeWeight = 1;
-  }
 
   input = THCTensor_(newContiguous)(state, input);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
@@ -341,8 +342,7 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
   // Free
   THCTensor_(free)(state, gradInput_n);
   THCTensor_(free)(state, gradOutput_n);
-  if (freeWeight)
-    THCTensor_(free)(state, weight);
+  THCTensor_(free)(state, weight);
 
   // Resize output
   if (is_batch == 0) {
@@ -372,6 +372,7 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
   THCUNN_assertSameGPU(state, 5, input, gradOutput, gradWeight, gradBias, columns, ones);
   if (gradWeight) {
     THArgCheck(THCTensor_(isContiguous)(state, gradWeight), 4, "gradWeight needs to be contiguous");
+    gradWeight = THNN_(newViewWeightMM2d)(state, gradWeight);
   }
   if (gradBias) {
     THArgCheck(THCTensor_(isContiguous)(state, gradBias), 5, "gradBias needs to be contiguous");
@@ -395,14 +396,6 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
 
   int64_t nInputPlane = input->size(1);
   int64_t nOutputPlane = gradOutput->size(1);
-
-  int freeWeight = 0;
-  if (gradWeight && gradWeight->dim() == 4) {
-    int64_t s1 = gradWeight->size(0);
-    int64_t s2 = gradWeight->size(1) * gradWeight->size(2) * gradWeight->size(3);
-    gradWeight = THCTensor_(newWithStorage2d)(state, THTensor_getStoragePtr(gradWeight), gradWeight->storage_offset(), s1, -1, s2, -1);
-    freeWeight = 1;
-  }
 
   int64_t inputWidth   = input->size(3);
   int64_t inputHeight  = input->size(2);
@@ -513,7 +506,7 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
   // Free
   THCTensor_(free)(state, input_n);
   THCTensor_(free)(state, gradOutput_n);
-  if (freeWeight)
+  if (gradWeight)
     THCTensor_(free)(state, gradWeight);
 
   // Resize

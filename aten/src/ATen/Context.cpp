@@ -96,13 +96,13 @@ bool Context::setFlushDenormal(bool on) {
 
 TypeExtendedInterface& getType(TensorOptions options) {
   return globalContext().getType(
-            options.backend(), options.dtype(), options.is_variable());
+            options.backend(), typeMetaToScalarType(options.dtype()), options.is_variable());
 }
 
 TypeExtendedInterface& getType(const TensorImpl* impl) {
   Backend backend = tensorTypeIdToBackend(impl->type_id());
   return globalContext().getType(
-            backend, dataTypeToScalarType(impl->dtype().id()), impl->is_variable());
+            backend, typeMetaToScalarType(impl->dtype()), impl->is_variable());
 }
 
 TypeExtendedInterface& getType(const Tensor& t) {

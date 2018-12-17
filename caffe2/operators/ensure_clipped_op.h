@@ -28,15 +28,15 @@ class EnsureClippedOp final : public Operator<Context> {
       // spares gradient, selective checking clipping
       CAFFE_ENFORCE_EQ(
           Input(PARAM).size_from_dim(1),
-          Input(GRAD).size_from_dim(Input(INDICES).ndim()));
+          Input(GRAD).size_from_dim(Input(INDICES).dim()));
       return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
           this, Input(INDICES));
     } else {
       auto& X = Input(PARAM);
       auto* Y = Output(OUTPUT_PARAM);
       Y->ResizeLike(X);
-      EigenVectorMap<float>(Y->template mutable_data<float>(), Y->size()) =
-          ConstEigenVectorMap<float>(X.template data<float>(), X.size())
+      EigenVectorMap<float>(Y->template mutable_data<float>(), Y->numel()) =
+          ConstEigenVectorMap<float>(X.template data<float>(), X.numel())
               .cwiseMax(min_)
               .cwiseMin(max_);
       return true;

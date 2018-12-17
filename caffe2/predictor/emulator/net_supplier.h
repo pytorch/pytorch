@@ -1,10 +1,8 @@
 #pragma once
+#include <functional>
+
 #include "caffe2/predictor/emulator/data_filler.h"
 #include "caffe2/predictor/emulator/utils.h"
-
-C10_DECLARE_string(mutating_net_type);
-C10_DECLARE_bool(mutating_net_async_deferrable_mode);
-C10_DECLARE_int(mutating_net_async_workers);
 
 namespace caffe2 {
 namespace emulator {
@@ -12,9 +10,13 @@ namespace emulator {
 struct RunnableNet {
   const caffe2::NetDef& netdef;
   const Filler* filler;
+  std::string debug_info;
 
-  RunnableNet(const caffe2::NetDef& netdef_, const Filler* filler_)
-      : netdef(netdef_), filler(filler_) {}
+  RunnableNet(
+      const caffe2::NetDef& netdef_,
+      const Filler* filler_,
+      const std::string& info_ = "")
+      : netdef(netdef_), filler(filler_), debug_info(info_) {}
 };
 
 /*
@@ -49,8 +51,10 @@ class SingleNetSupplier : public NetSupplier {
 
 class MutatingNetSupplier : public NetSupplier {
  public:
-  MutatingNetSupplier(std::unique_ptr<NetSupplier>&& core)
-      : core_(std::move(core)) {}
+  explicit MutatingNetSupplier(
+      std::unique_ptr<NetSupplier>&& core,
+      std::function<void(NetDef*)> m)
+      : core_(std::move(core)), mutator_(m) {}
 
   RunnableNet next() override {
     RunnableNet orig = core_->next();
@@ -60,30 +64,15 @@ class MutatingNetSupplier : public NetSupplier {
       nets_.push_back(orig.netdef);
       new_net = &nets_.back();
     }
-    mutate(new_net);
-    return RunnableNet(*new_net, orig.filler);
-  }
-
- protected:
-  virtual void mutate(NetDef* net) {
-    // Using async scheduling net if specified
-    if (!FLAGS_mutating_net_type.empty()) {
-      net->set_type(FLAGS_mutating_net_type);
-      if (FLAGS_mutating_net_async_workers > 0) {
-        net->set_num_workers(FLAGS_mutating_net_async_workers);
-      }
-      if (FLAGS_mutating_net_async_deferrable_mode) {
-        auto* arg = net->add_arg();
-        arg->set_name("deferrable_mode");
-        arg->set_i(1);
-      }
-    }
+    mutator_(new_net);
+    return RunnableNet(*new_net, orig.filler, orig.debug_info);
   }
 
  private:
   std::mutex lock_;
   std::unique_ptr<NetSupplier> core_;
   std::vector<NetDef> nets_;
+  std::function<void(NetDef*)> mutator_;
 };
 
 } // namespace emulator

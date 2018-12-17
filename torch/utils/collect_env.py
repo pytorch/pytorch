@@ -1,5 +1,6 @@
 # This script outputs relevant system environment info
 # Run it with `python collect_env.py`.
+from __future__ import absolute_import, division, print_function, unicode_literals
 import re
 import subprocess
 import sys
@@ -65,9 +66,9 @@ def run_and_parse_first_match(run_lambda, command, regex):
 
 def get_conda_packages(run_lambda):
     if get_platform() == 'win32':
-        grep_cmd = 'findstr /R "torch soumith"'
+        grep_cmd = r'findstr /R "torch soumith"'
     else:
-        grep_cmd = 'grep "torch\|soumith"'
+        grep_cmd = r'grep "torch\|soumith"'
     out = run_and_read_all(run_lambda, 'conda list | ' + grep_cmd)
     if out is None:
         return out
@@ -91,7 +92,7 @@ def get_nvidia_driver_version(run_lambda):
 
 def get_gpu_info(run_lambda):
     smi = get_nvidia_smi()
-    uuid_regex = re.compile(' \(UUID: .+?\)')
+    uuid_regex = re.compile(r' \(UUID: .+?\)')
     rc, out, _ = run_lambda(smi + ' -L')
     if rc is not 0:
         return None
@@ -190,9 +191,9 @@ def get_pip_packages(run_lambda):
     # People generally have `pip` as `pip` or `pip3`
     def run_with_pip(pip):
         if get_platform() == 'win32':
-            grep_cmd = 'findstr /R "numpy torch"'
+            grep_cmd = r'findstr /R "numpy torch"'
         else:
-            grep_cmd = 'grep "torch\|numpy"'
+            grep_cmd = r'grep "torch\|numpy"'
         return run_and_read_all(run_lambda, pip + ' list --format=legacy | ' + grep_cmd)
 
     if not PY3:

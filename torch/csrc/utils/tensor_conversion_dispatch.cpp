@@ -14,19 +14,31 @@ namespace torch { namespace utils {
 at::Tensor dispatch_type_conversion(
     const at::Tensor& self,
     const at::Type& type,
-    c10::optional<int32_t> device_index,
+    c10::optional<c10::Device> device_opt,
     bool non_blocking) {
+
   if (type.is_cuda()) {
     torch::utils::cuda_lazy_init();
   }
   AutoNoGIL no_gil;
 
-  const int32_t tensor_device = self.is_cuda() ? self.get_device() : -1;
-  at::DeviceGuard device_guard(device_index.value_or(tensor_device));
+  // TODO: Make this less CUDA specific
+  at::Device device = device_opt.value_or(self.device());
+  at::DeviceGuard device_guard(device);
 
-  if (self.is_cuda() && type.is_cuda() && tensor_device != at::current_device()) {
-    // copy if the devices are different even if the types are the same
-    return type.copy(self, non_blocking);
+  if (self.device().type() == type.device_type()) {
+    switch (self.device().type()) {
+      case at::DeviceType::CPU:
+        // Do nothing, there is only one CPU "device"
+        // TODO: Maybe this wouldn't be true with NUMA
+        break;
+      default:
+        if (self.device() != device_guard.current_device()) {
+          // copy if the devices are different even if the types are the same
+          return type.copy(self, non_blocking);
+        }
+        break;
+    }
   }
 
   // Don't specialize cross-backend copies

@@ -39,7 +39,7 @@ void testHelper(const std::string& prefix = "") {
   std::string expectedCounterRes = std::to_string(numThreads * numIterations);
 
   for (auto i = 0; i < numThreads; i++) {
-    threads.push_back(std::move(
+    threads.push_back(
         std::thread([&sem1, &sem2, &clientStores, i, &expectedCounterRes] {
           for (auto j = 0; j < numIterations; j++) {
             clientStores[i]->add("counter", 1);
@@ -65,7 +65,7 @@ void testHelper(const std::string& prefix = "") {
             std::string val = "thread_val_" + std::to_string(numIterations - 1);
             c10d::test::check(*clientStores[i], key, val);
           }
-        })));
+        }));
   }
 
   sem1.wait(numThreads);

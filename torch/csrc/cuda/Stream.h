@@ -6,7 +6,11 @@
 
 struct THCPStream {
   PyObject_HEAD
-  THCStream *cdata;
+  // Can't conveniently put an actual c10::Stream here, because the
+  // class is not POD.  (We could put it here, but then we'd be on
+  // the hook for placement-new'ing/delete'ing it; simpler to just
+  // rely on the packed representation...)
+  uint64_t cdata;
   int device;
   cudaStream_t cuda_stream;
 };

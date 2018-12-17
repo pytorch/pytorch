@@ -3,7 +3,7 @@
 #define CAFFE2_CORE_MIOPEN_WRAPPERS_H_
 
 #include "caffe2/core/hip/common_miopen.h"
-#include "caffe2/core/hip/context_hip.h"
+#include "caffe2/core/hip/context_gpu.h"
 
 namespace caffe2 {
 
@@ -153,7 +153,7 @@ class MIOPENWrapper
 
     using PerGPUMIOPENStates =
         std::array<std::array<SyncedMIOPENState, CAFFE2_COMPILE_TIME_MAX_MIOPEN_STATES>,
-                   CAFFE2_COMPILE_TIME_MAX_HIP_GPUS>;
+                   CAFFE2_COMPILE_TIME_MAX_GPUS>;
     static PerGPUMIOPENStates& miopen_states();
 
     C10_DISABLE_COPY_AND_ASSIGN(MIOPENWrapper);

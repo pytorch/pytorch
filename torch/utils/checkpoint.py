@@ -1,3 +1,4 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
 import torch
 import warnings
 
@@ -20,12 +21,38 @@ def check_backward_validity(inputs):
         warnings.warn("None of the inputs have requires_grad=True. Gradients will be None")
 
 
+# Global switch to toggle whether or not checkpointed passes stash and restore
+# the RNG state.  If True, any checkpoints making use of RNG should achieve deterministic
+# output compared to non-checkpointed passes.
+preserve_rng_state = True
+
+
 class CheckpointFunction(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, run_function, *args):
         check_backward_validity(args)
         ctx.run_function = run_function
+        if preserve_rng_state:
+            # We can't know if the user will transfer some args from the host
+            # to the device during their run_fn.  Therefore, we stash both
+            # the cpu and cuda rng states unconditionally.
+            #
+            # TODO:
+            # We also can't know if the run_fn will internally move some args to a device
+            # other than the current device, which would require logic to preserve
+            # rng states for those devices as well.  We could paranoically stash and restore
+            # ALL the rng states for all visible devices, but that seems very wasteful for
+            # most cases.
+            ctx.fwd_cpu_rng_state = torch.get_rng_state()
+            # Don't eagerly initialize the cuda context by accident.
+            # (If the user intends that the context is initialized later, within their
+            # run_function, we SHOULD actually stash the cuda state here.  Unfortunately,
+            # we have no way to anticipate this will happen before we run the function.)
+            ctx.had_cuda_in_fwd = False
+            if torch.cuda._initialized:
+                ctx.had_cuda_in_fwd = True
+                ctx.fwd_cuda_rng_state = torch.cuda.get_rng_state()
         ctx.save_for_backward(*args)
         with torch.no_grad():
             outputs = run_function(*args)
@@ -36,9 +63,18 @@ class CheckpointFunction(torch.autograd.Function):
         if not torch.autograd._is_checkpoint_valid():
             raise RuntimeError("Checkpointing is not compatible with .grad(), please use .backward() if possible")
         inputs = ctx.saved_tensors
-        detached_inputs = detach_variable(inputs)
-        with torch.enable_grad():
-            outputs = ctx.run_function(*detached_inputs)
+        # Stash the surrounding rng state, and mimic the state that was
+        # present at this time during forward.  Restore the surrouding state
+        # when we're done.
+        rng_devices = [torch.cuda.current_device()] if ctx.had_cuda_in_fwd else []
+        with torch.random.fork_rng(devices=rng_devices, enabled=preserve_rng_state):
+            if preserve_rng_state:
+                torch.set_rng_state(ctx.fwd_cpu_rng_state)
+                if ctx.had_cuda_in_fwd:
+                    torch.cuda.set_rng_state(ctx.fwd_cuda_rng_state)
+            detached_inputs = detach_variable(inputs)
+            with torch.enable_grad():
+                outputs = ctx.run_function(*detached_inputs)
 
         if isinstance(outputs, torch.Tensor):
             outputs = (outputs,)

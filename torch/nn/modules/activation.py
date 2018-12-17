@@ -4,8 +4,10 @@ from torch.nn.parameter import Parameter
 
 from .module import Module
 from .. import functional as F
+from ..._jit_internal import weak_module, weak_script_method
 
 
+@weak_module
 class Threshold(Module):
     r"""Thresholds each element of the input Tensor
 
@@ -34,6 +36,7 @@ class Threshold(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+    __constants__ = ['threshold', 'value', 'inplace']
 
     def __init__(self, threshold, value, inplace=False):
         super(Threshold, self).__init__()
@@ -42,6 +45,7 @@ class Threshold(Module):
         self.inplace = inplace
         # TODO: check in THNN (if inplace == True, then assert value <= threshold)
 
+    @weak_script_method
     def forward(self, input):
         return F.threshold(input, self.threshold, self.value, self.inplace)
 
@@ -52,6 +56,7 @@ class Threshold(Module):
         )
 
 
+@weak_module
 class ReLU(Threshold):
     r"""Applies the rectified linear unit function element-wise
     :math:`\text{ReLU}(x)= \max(0, x)`
@@ -74,13 +79,14 @@ class ReLU(Threshold):
     """
 
     def __init__(self, inplace=False):
-        super(ReLU, self).__init__(0, 0, inplace)
+        super(ReLU, self).__init__(0., 0., inplace)
 
     def extra_repr(self):
         inplace_str = 'inplace' if self.inplace else ''
         return inplace_str
 
 
+@weak_module
 class RReLU(Module):
     r"""Applies the randomized leaky rectified liner unit function, element-wise,
     as described in the paper:
@@ -120,6 +126,7 @@ class RReLU(Module):
     .. _`Empirical Evaluation of Rectified Activations in Convolutional Network`:
         https://arxiv.org/abs/1505.00853
     """
+    __constants__ = ['lower', 'upper', 'inplace', 'training']
 
     def __init__(self, lower=1. / 8, upper=1. / 3, inplace=False):
         super(RReLU, self).__init__()
@@ -127,6 +134,7 @@ class RReLU(Module):
         self.upper = upper
         self.inplace = inplace
 
+    @weak_script_method
     def forward(self, input):
         return F.rrelu(input, self.lower, self.upper, self.training, self.inplace)
 
@@ -135,6 +143,7 @@ class RReLU(Module):
         return 'lower={}, upper={}{}'.format(self.lower, self.upper, inplace_str)
 
 
+@weak_module
 class Hardtanh(Module):
     r"""Applies the HardTanh function element-wise
 
@@ -171,8 +180,9 @@ class Hardtanh(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+    __constants__ = ['min_val', 'max_val', 'inplace']
 
-    def __init__(self, min_val=-1, max_val=1, inplace=False, min_value=None, max_value=None):
+    def __init__(self, min_val=-1., max_val=1., inplace=False, min_value=None, max_value=None):
         super(Hardtanh, self).__init__()
         if min_value is not None:
             warnings.warn("keyword argument min_value is deprecated and renamed to min_val")
@@ -186,6 +196,7 @@ class Hardtanh(Module):
         self.inplace = inplace
         assert self.max_val > self.min_val
 
+    @weak_script_method
     def forward(self, input):
         return F.hardtanh(input, self.min_val, self.max_val, self.inplace)
 
@@ -196,6 +207,7 @@ class Hardtanh(Module):
         )
 
 
+@weak_module
 class ReLU6(Hardtanh):
     r"""Applies the element-wise function:
 
@@ -220,13 +232,14 @@ class ReLU6(Hardtanh):
     """
 
     def __init__(self, inplace=False):
-        super(ReLU6, self).__init__(0, 6, inplace)
+        super(ReLU6, self).__init__(0., 6., inplace)
 
     def extra_repr(self):
         inplace_str = 'inplace' if self.inplace else ''
         return inplace_str
 
 
+@weak_module
 class Sigmoid(Module):
     r"""Applies the element-wise function:
 
@@ -248,10 +261,12 @@ class Sigmoid(Module):
         >>> output = m(input)
     """
 
+    @weak_script_method
     def forward(self, input):
         return torch.sigmoid(input)
 
 
+@weak_module
 class Tanh(Module):
     r"""Applies the element-wise function:
 
@@ -272,10 +287,12 @@ class Tanh(Module):
         >>> output = m(input)
     """
 
+    @weak_script_method
     def forward(self, input):
         return torch.tanh(input)
 
 
+@weak_module
 class ELU(Module):
     r"""Applies the element-wise function:
 
@@ -299,12 +316,14 @@ class ELU(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+    __constants__ = ['alpha', 'inplace']
 
     def __init__(self, alpha=1., inplace=False):
         super(ELU, self).__init__()
         self.alpha = alpha
         self.inplace = inplace
 
+    @weak_script_method
     def forward(self, input):
         return F.elu(input, self.alpha, self.inplace)
 
@@ -313,6 +332,7 @@ class ELU(Module):
         return 'alpha={}{}'.format(self.alpha, inplace_str)
 
 
+@weak_module
 class CELU(Module):
     r"""Applies the element-wise function:
 
@@ -341,12 +361,14 @@ class CELU(Module):
     .. _`Continuously Differentiable Exponential Linear Units`:
         https://arxiv.org/abs/1704.07483
     """
+    __constants__ = ['alpha', 'inplace']
 
     def __init__(self, alpha=1., inplace=False):
         super(CELU, self).__init__()
         self.alpha = alpha
         self.inplace = inplace
 
+    @weak_script_method
     def forward(self, input):
         return F.celu(input, self.alpha, self.inplace)
 
@@ -355,6 +377,7 @@ class CELU(Module):
         return 'alpha={}{}'.format(self.alpha, inplace_str)
 
 
+@weak_module
 class SELU(Module):
     r"""Applied element-wise, as:
 
@@ -384,11 +407,13 @@ class SELU(Module):
 
     .. _Self-Normalizing Neural Networks: https://arxiv.org/abs/1706.02515
     """
+    __constants__ = ['inplace']
 
     def __init__(self, inplace=False):
         super(SELU, self).__init__()
         self.inplace = inplace
 
+    @weak_script_method
     def forward(self, input):
         return F.selu(input, self.inplace)
 
@@ -397,6 +422,7 @@ class SELU(Module):
         return inplace_str
 
 
+@weak_module
 class GLU(Module):
     r"""Applies the gated linear unit function
     :math:`{GLU}(a, b)= a \otimes \sigma(b)` where :math:`a` is the first half
@@ -416,11 +442,13 @@ class GLU(Module):
         >>> input = torch.randn(4, 2)
         >>> output = m(input)
     """
+    __constants__ = ['dim']
 
     def __init__(self, dim=-1):
         super(GLU, self).__init__()
         self.dim = dim
 
+    @weak_script_method
     def forward(self, input):
         return F.glu(input, self.dim)
 
@@ -428,6 +456,7 @@ class GLU(Module):
         return 'dim={}'.format(self.dim)
 
 
+@weak_module
 class Hardshrink(Module):
     r"""Applies the hard shrinkage function element-wise:
 
@@ -455,11 +484,13 @@ class Hardshrink(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+    __constants__ = ['lambd']
 
     def __init__(self, lambd=0.5):
         super(Hardshrink, self).__init__()
         self.lambd = lambd
 
+    @weak_script_method
     def forward(self, input):
         return F.hardshrink(input, self.lambd)
 
@@ -467,6 +498,7 @@ class Hardshrink(Module):
         return '{}'.format(self.lambd)
 
 
+@weak_module
 class LeakyReLU(Module):
     r"""Applies the element-wise function:
 
@@ -500,12 +532,14 @@ class LeakyReLU(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+    __constants__ = ['inplace', 'negative_slope']
 
     def __init__(self, negative_slope=1e-2, inplace=False):
         super(LeakyReLU, self).__init__()
         self.negative_slope = negative_slope
         self.inplace = inplace
 
+    @weak_script_method
     def forward(self, input):
         return F.leaky_relu(input, self.negative_slope, self.inplace)
 
@@ -514,6 +548,7 @@ class LeakyReLU(Module):
         return 'negative_slope={}{}'.format(self.negative_slope, inplace_str)
 
 
+@weak_module
 class LogSigmoid(Module):
     r"""Applies the element-wise function:
 
@@ -533,10 +568,12 @@ class LogSigmoid(Module):
         >>> output = m(input)
     """
 
+    @weak_script_method
     def forward(self, input):
         return F.logsigmoid(input)
 
 
+@weak_module
 class Softplus(Module):
     r"""Applies the element-wise function:
 
@@ -566,12 +603,14 @@ class Softplus(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+    __constants__ = ['beta', 'threshold']
 
     def __init__(self, beta=1, threshold=20):
         super(Softplus, self).__init__()
         self.beta = beta
         self.threshold = threshold
 
+    @weak_script_method
     def forward(self, input):
         return F.softplus(input, self.beta, self.threshold)
 
@@ -579,6 +618,7 @@ class Softplus(Module):
         return 'beta={}, threshold={}'.format(self.beta, self.threshold)
 
 
+@weak_module
 class Softshrink(Module):
     r"""Applies the soft shrinkage function elementwise:
 
@@ -606,11 +646,13 @@ class Softshrink(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+    __constants__ = ['lambd']
 
     def __init__(self, lambd=0.5):
         super(Softshrink, self).__init__()
         self.lambd = lambd
 
+    @weak_script_method
     def forward(self, input):
         return F.softshrink(input, self.lambd)
 
@@ -618,6 +660,7 @@ class Softshrink(Module):
         return str(self.lambd)
 
 
+@weak_module
 class PReLU(Module):
     r"""Applies the element-wise function:
 
@@ -674,6 +717,7 @@ class PReLU(Module):
         super(PReLU, self).__init__()
         self.weight = Parameter(torch.Tensor(num_parameters).fill_(init))
 
+    @weak_script_method
     def forward(self, input):
         return F.prelu(input, self.weight)
 
@@ -681,6 +725,7 @@ class PReLU(Module):
         return 'num_parameters={}'.format(self.num_parameters)
 
 
+@weak_module
 class Softsign(Module):
     r"""Applies the element-wise function:
 
@@ -701,10 +746,12 @@ class Softsign(Module):
         >>> output = m(input)
     """
 
+    @weak_script_method
     def forward(self, input):
         return F.softsign(input)
 
 
+@weak_module
 class Tanhshrink(Module):
     r"""Applies the element-wise function:
 
@@ -725,10 +772,12 @@ class Tanhshrink(Module):
         >>> output = m(input)
     """
 
+    @weak_script_method
     def forward(self, input):
         return F.tanhshrink(input)
 
 
+@weak_module
 class Softmin(Module):
     r"""Applies the Softmin function to an n-dimensional input Tensor
     rescaling them so that the elements of the n-dimensional output Tensor
@@ -755,15 +804,18 @@ class Softmin(Module):
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
     """
+    __constants__ = ['dim']
 
     def __init__(self, dim=None):
         super(Softmin, self).__init__()
         self.dim = dim
 
+    @weak_script_method
     def forward(self, input):
         return F.softmin(input, self.dim, _stacklevel=5)
 
 
+@weak_module
 class Softmax(Module):
     r"""Applies the Softmax function to an n-dimensional input Tensor
     rescaling them so that the elements of the n-dimensional output Tensor
@@ -797,6 +849,7 @@ class Softmax(Module):
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
     """
+    __constants__ = ['dim']
 
     def __init__(self, dim=None):
         super(Softmax, self).__init__()
@@ -807,10 +860,12 @@ class Softmax(Module):
         if not hasattr(self, 'dim'):
             self.dim = None
 
+    @weak_script_method
     def forward(self, input):
         return F.softmax(input, self.dim, _stacklevel=5)
 
 
+@weak_module
 class Softmax2d(Module):
     r"""Applies SoftMax over features to each spatial location.
 
@@ -833,11 +888,13 @@ class Softmax2d(Module):
         >>> output = m(input)
     """
 
+    @weak_script_method
     def forward(self, input):
         assert input.dim() == 4, 'Softmax2d requires a 4D tensor as input'
         return F.softmax(input, 1, _stacklevel=5)
 
 
+@weak_module
 class LogSoftmax(Module):
     r"""Applies the :math:`\log(\text{Softmax}(x))` function to an n-dimensional
     input Tensor. The LogSoftmax formulation can be simplified as:
@@ -863,6 +920,7 @@ class LogSoftmax(Module):
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
     """
+    __constants__ = ['dim']
 
     def __init__(self, dim=None):
         super(LogSoftmax, self).__init__()
@@ -873,5 +931,6 @@ class LogSoftmax(Module):
         if not hasattr(self, 'dim'):
             self.dim = None
 
+    @weak_script_method
     def forward(self, input):
         return F.log_softmax(input, self.dim, _stacklevel=5)

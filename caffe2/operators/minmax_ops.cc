@@ -158,7 +158,7 @@ Min:
 template <typename T, class Context>
 bool MaxOp<T, Context>::Compute() {
   auto& input0 = Input(0);
-  const int N = input0.size();
+  const int N = input0.numel();
   T* output_data = Output(0)->template mutable_data<T>();
 
   for (int i = 1; i < InputSize(); i++) {
@@ -173,7 +173,7 @@ bool MaxOp<T, Context>::Compute() {
 template <typename T, class Context>
 bool MinOp<T, Context>::Compute() {
   auto& input0 = Input(0);
-  const int N = input0.size();
+  const int N = input0.numel();
   T* output_data = Output(0)->template mutable_data<T>();
 
   for (int i = 1; i < InputSize(); i++) {

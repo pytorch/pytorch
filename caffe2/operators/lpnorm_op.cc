@@ -9,19 +9,19 @@ namespace caffe2 {
 template <>
 bool LpNormOp<float, CPUContext>::RunOnDevice() {
   const auto& X = Input(0);
-  auto* norm = Output(0);
-  norm->Resize(1);
+
+  auto* norm = Output(0, {1}, at::dtype<float>());
   const float* X_data = X.data<float>();
-  const float size = average_ ? (float)X.size() : 1.0f;
+  const float size = average_ ? (float)X.numel() : 1.0f;
   CAFFE_ENFORCE_GT(size, 0);
   if (p_ == 1) {
     *(norm->template mutable_data<float>()) =
-        (ConstEigenVectorMap<float>(X_data, X.size()).array()).abs().sum() /
+        (ConstEigenVectorMap<float>(X_data, X.numel()).array()).abs().sum() /
         size;
     // L1(x) = sum(|x|), L1_average(x) = sum(\x\) / x.size()
   } else if (p_ == 2) {
     *(norm->template mutable_data<float>()) =
-        (ConstEigenVectorMap<float>(X_data, X.size()).array()).square().sum() /
+        (ConstEigenVectorMap<float>(X_data, X.numel()).array()).square().sum() /
         size;
     // L2(x) = (sum(|x|^2)), L2_average(x) = sum(|x|^2) / x.size()
   }
@@ -33,13 +33,13 @@ bool LpNormGradientOp<float, CPUContext>::RunOnDevice() {
   const auto& X = Input(0);
   const auto& dnorm = Input(1);
   auto* dX = Output(0);
-  CAFFE_ENFORCE_EQ(dnorm.ndim(), 1);
+  CAFFE_ENFORCE_EQ(dnorm.dim(), 1);
   CAFFE_ENFORCE_EQ(dnorm.dim32(0), 1);
   dX->ResizeLike(X);
-  const float size = average_ ? (float)X.size() : 1.0f;
+  const float size = average_ ? (float)X.numel() : 1.0f;
   if (p_ == 1) {
-    EigenVectorMap<float>(dX->template mutable_data<float>(), X.size())
-        .array() = ConstEigenVectorMap<float>(X.data<float>(), X.size())
+    EigenVectorMap<float>(dX->template mutable_data<float>(), X.numel())
+        .array() = ConstEigenVectorMap<float>(X.data<float>(), X.numel())
                        .array()
                        .unaryExpr([](float x) {
                          const float kEps = 1e-12f;
@@ -53,9 +53,9 @@ bool LpNormGradientOp<float, CPUContext>::RunOnDevice() {
                        }) *
         ((dnorm.data<float>())[0] / size);
   } else if (p_ == 2) {
-    EigenVectorMap<float>(dX->template mutable_data<float>(), X.size())
+    EigenVectorMap<float>(dX->template mutable_data<float>(), X.numel())
         .array() =
-        ConstEigenVectorMap<float>(X.data<float>(), X.size()).array() * 2.0f *
+        ConstEigenVectorMap<float>(X.data<float>(), X.numel()).array() * 2.0f *
         ((dnorm.data<float>())[0] / size);
   }
 

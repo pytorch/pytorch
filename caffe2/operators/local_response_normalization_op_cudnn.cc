@@ -97,9 +97,9 @@ bool CuDNNLRNOp::DoRunWithType() {
   auto* Y = Output(0);
 
   // Reshape tensor descriptors if necessary
-  if (X.dims() != cudnn_input_dims_) {
+  if (X.sizes() != cudnn_input_dims_) {
     VLOG(1) << "Setting descriptors";
-    cudnn_input_dims_ = X.dims().vec();
+    cudnn_input_dims_ = X.sizes().vec();
     int C = 1, H = 1, W = 1;
     // Normal 4-dimensional tensors for images.
     C = X.dim32(1);
@@ -153,9 +153,9 @@ bool CuDNNLRNGradientOp::DoRunWithType() {
   const auto& dY = Input(2);
   auto* dX = Output(0);
 
-  if (dY.dims() != cudnn_input_dims_) {
+  if (dY.sizes() != cudnn_input_dims_) {
     VLOG(1) << "Setting descriptors";
-    cudnn_input_dims_ = dY.dims().vec();
+    cudnn_input_dims_ = dY.sizes().vec();
     int C = 1, H = 1, W = 1;
     // Normal 4-dimensional tensors for images.
     C = dY.dim32(1);

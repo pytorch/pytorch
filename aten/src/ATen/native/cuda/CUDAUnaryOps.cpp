@@ -2,13 +2,13 @@
 
 namespace at { namespace native {
 
-Tensor& _clamp__cuda(Tensor& self, Scalar min, Scalar max) {
-  if (!std::isnan(min.toDouble()) && !std::isnan(max.toDouble())) {
-    return _th_clamp_out(self, self, min, max);
-  } else if (std::isnan(min.toDouble())) {
-    return _th_clamp_max_out(self, self, max);
-  } else if (std::isnan(max.toDouble())) {
-    return _th_clamp_min_out(self, self, min);
+Tensor& _clamp__cuda(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+  if (min && max) {
+    return _th_clamp_out(self, self, *min, *max);
+  } else if (max) {
+    return _th_clamp_max_out(self, self, *max);
+  } else if (min) {
+    return _th_clamp_min_out(self, self, *min);
   } else {
     return self;
   }
@@ -17,14 +17,14 @@ Tensor& _clamp__cuda(Tensor& self, Scalar min, Scalar max) {
 Tensor& _clamp_out_cuda(
     Tensor& result,
     const Tensor& self,
-    Scalar min,
-    Scalar max) {
-  if (!std::isnan(min.toDouble()) && !std::isnan(max.toDouble())) {
-    _th_clamp_out(result, self, min, max);
-  } else if (std::isnan(min.toDouble())) {
-    _th_clamp_max_out(result, self, max);
-  } else if (std::isnan(max.toDouble())) {
-    _th_clamp_min_out(result, self, min);
+    optional<Scalar> min,
+    optional<Scalar> max) {
+  if (min && max) {
+    _th_clamp_out(result, self, *min, *max);
+  } else if (max) {
+    _th_clamp_max_out(result, self, *max);
+  } else if (min) {
+    _th_clamp_min_out(result, self, *min);
   }
   return result;
 }
@@ -49,10 +49,10 @@ Tensor& _clamp_min_out_cuda(Tensor& result, const Tensor& self, Scalar min) {
 
 #define IMPLEMENT_UNARY_OP_PREQUEL(op)                           \
   Tensor& _##op##__cuda(Tensor& self) {                          \
-    return at::_##op##_out(self, self);                          \
+    return at::_th_##op##_out(self, self);                       \
   }                                                              \
   Tensor& _##op##_out_cuda(Tensor& result, const Tensor& self) { \
-    return at::_##op##_out(result, self);                        \
+    return at::_th_##op##_out(result, self);                     \
   }
 
 

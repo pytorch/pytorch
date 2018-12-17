@@ -12,9 +12,9 @@ void THTensor_(fill)(THTensor *r_, scalar_t value)
     TH_TENSOR_APPLY(scalar_t, r_,
       if (r__stride == 1) {
         THVector_(fill)(r__data, value, r__size);
-	r__i = r__size;
-	r__data += r__stride * r__size;
-	break;
+        r__i = r__size;
+        r__data += r__stride * r__size;
+        break;
       } else {
         *r__data = value;
       }
@@ -181,7 +181,7 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
     tensor_data = tensor->data<scalar_t>();
     src_data = src->data<scalar_t>();
     auto src_size0 = THTensor_sizeLegacyNoScalars(src, 0);
-    ptrdiff_t rowsize = src_size0 == 0 ? 1: THTensor_(nElement)(src) / src_size0;
+    ptrdiff_t rowsize = src_size0 == 0 ? 1 : THTensor_(nElement)(src) / src_size0;
 
     // check that the indices are within range
     int64_t max = src_size0 - 1 + TH_INDEX_BASE;
@@ -192,14 +192,18 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
       }
     }
 
-    if (src->dim() <= 1) {
-      #pragma omp parallel for if(numel > TH_OMP_OVERHEAD_THRESHOLD) private(i)
-      for (i=0; i<numel; i++)
-        tensor_data[i] = src_data[index_data[i] - TH_INDEX_BASE];
-    } else {
-      #pragma omp parallel for if(numel*rowsize > TH_OMP_OVERHEAD_THRESHOLD) private(i)
-      for (i=0; i<numel; i++)
-        memcpy(tensor_data + i*rowsize, src_data + (index_data[i] - TH_INDEX_BASE)*rowsize, rowsize*sizeof(scalar_t));
+    // When src is empty, tensor_data maybe nullptr, and the memcpy will trigger
+    // ubsan. So we skip copying at all when every slice to copy is empty.
+    if (rowsize > 0) {
+      if (src->dim() <= 1) {
+        #pragma omp parallel for if(numel > TH_OMP_OVERHEAD_THRESHOLD) private(i)
+        for (i=0; i<numel; i++)
+          tensor_data[i] = src_data[index_data[i] - TH_INDEX_BASE];
+      } else {
+        #pragma omp parallel for if(numel*rowsize > TH_OMP_OVERHEAD_THRESHOLD) private(i)
+        for (i=0; i<numel; i++)
+          memcpy(tensor_data + i*rowsize, src_data + (index_data[i] - TH_INDEX_BASE)*rowsize, rowsize*sizeof(scalar_t));
+      }
     }
   }
   else if (src->dim() <= 1)
@@ -215,7 +219,9 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
       sSlice = THTensor_(new)();
       THTensor_(select)(tSlice, tensor, dim, i);
       THTensor_(select)(sSlice, src, dim, index_data[i] - TH_INDEX_BASE);
-      THTensor_(copy)(tSlice, sSlice);
+      at::Tensor tSlice_wrap = THTensor_wrap(tSlice);
+      at::Tensor sSlice_wrap = THTensor_wrap(sSlice);
+      at::_copy_same_type_(tSlice_wrap, sSlice_wrap);
       c10::raw::intrusive_ptr::decref(tSlice);
       c10::raw::intrusive_ptr::decref(sSlice);
     }
@@ -246,7 +252,9 @@ void THTensor_(indexCopy)(THTensor *tensor, int dim, THLongTensor *index, THTens
     {
       THTensor_(select)(tSlice, tensor, dim, index_data[i] - TH_INDEX_BASE);
       THTensor_(select)(sSlice, src, dim, i);
-      THTensor_(copy)(tSlice, sSlice);
+      at::Tensor tSlice_wrap = THTensor_wrap(tSlice);
+      at::Tensor sSlice_wrap = THTensor_wrap(sSlice);
+      at::_copy_same_type_(tSlice_wrap, sSlice_wrap);
     }
 
     c10::raw::intrusive_ptr::decref(tSlice);
@@ -452,12 +460,18 @@ void THTensor_(gather)(THTensor *tensor, THTensor *src, int dim, THLongTensor *i
 void THTensor_(scatter)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src)
 {
   int64_t elems_per_row, i, idx;
+  int index_ndim_legacy_all = THTensor_nDimensionLegacyAll(index);
 
   THArgCheck(dim < THTensor_(nDimensionLegacyNoScalars)(tensor), 2, "Index dimension is out of bounds");
-  THArgCheck(THLongTensor_nDimensionLegacyNoScalars(index) == THTensor_(nDimensionLegacyNoScalars)(tensor), 3,
-             "Index tensor must have same dimensions as output tensor");
+  THArgCheck(index_ndim_legacy_all == 0
+             || THLongTensor_nDimensionLegacyNoScalars(index) == THTensor_(nDimensionLegacyNoScalars)(tensor), 3,
+             "Index tensor must be either empty or have same dimensions as output tensor");
   THArgCheck(THTensor_(nDimensionLegacyNoScalars)(src) == THTensor_(nDimensionLegacyNoScalars)(tensor), 4,
              "Input tensor must have same dimensions as output tensor");
+
+  // no-op if index is empty
+  if (index_ndim_legacy_all == 0)
+      return;
 
   elems_per_row = THTensor_sizeLegacyNoScalars(index, dim);
 
@@ -478,12 +492,18 @@ void THTensor_(scatter)(THTensor *tensor, int dim, THLongTensor *index, THTensor
 void THTensor_(scatterAdd)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src)
 {
   int64_t elems_per_row, i, idx;
+  int index_ndim_legacy_all = THTensor_nDimensionLegacyAll(index);
 
   THArgCheck(dim < THTensor_(nDimensionLegacyNoScalars)(tensor), 2, "Index dimension is out of bounds");
-  THArgCheck(THLongTensor_nDimensionLegacyNoScalars(index) == THTensor_(nDimensionLegacyNoScalars)(tensor), 3,
+  THArgCheck(index_ndim_legacy_all == 0
+             || THLongTensor_nDimensionLegacyNoScalars(index) == THTensor_(nDimensionLegacyNoScalars)(tensor), 3,
              "Index tensor must have same dimensions as output tensor");
   THArgCheck(THTensor_(nDimensionLegacyNoScalars)(src) == THTensor_(nDimensionLegacyNoScalars)(tensor), 4,
              "Input tensor must have same dimensions as output tensor");
+
+  // no-op if index is empty
+  if (index_ndim_legacy_all == 0)
+      return;
 
   elems_per_row = THTensor_sizeLegacyNoScalars(index, dim);
 
@@ -504,10 +524,15 @@ void THTensor_(scatterAdd)(THTensor *tensor, int dim, THLongTensor *index, THTen
 void THTensor_(scatterFill)(THTensor *tensor, int dim, THLongTensor *index, scalar_t val)
 {
   int64_t elems_per_row, i, idx;
+  int index_ndim_legacy_all = THLongTensor_nDimensionLegacyAll(index);
 
   THArgCheck(dim < THTensor_(nDimensionLegacyAll)(tensor), 2, "Index dimension is out of bounds");
-  THArgCheck(THLongTensor_nDimensionLegacyAll(index) == THTensor_(nDimensionLegacyAll)(tensor), 3,
-             "Index tensor must have same dimensions as output tensor");
+  THArgCheck(index_ndim_legacy_all == 0 || index_ndim_legacy_all == THLongTensor_nDimensionLegacyAll(tensor), 3,
+             "Index tensor must either be empty or have same dimensions as output tensor");
+
+  // no-op if index is empty
+  if (index_ndim_legacy_all == 0)
+      return;
 
   elems_per_row = THTensor_sizeLegacyNoScalars(index, dim);
 

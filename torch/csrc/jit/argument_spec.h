@@ -14,6 +14,9 @@ namespace torch { namespace jit {
 // GraphExecutor creates specializations of Graphs for different dimensionalitities
 // and types of inputs.
 
+inline static at::Device ConvertIntToCPUOrCUDA(int device){
+  return device < 0 ? at::kCPU : at::Device(at::DeviceType::CUDA, device);
+}
 struct ArgumentInfo {
   friend struct ArgumentSpec;
   using plain_data_type = uint32_t;
@@ -40,7 +43,7 @@ struct ArgumentInfo {
   operator TypePtr() const {
     if (!defined())
       return DynamicType::get();
-    return TensorType::create(type(), device(), dim());
+    return TensorType::create(type(), ConvertIntToCPUOrCUDA(device()), dim());
   }
 
 private:
@@ -63,8 +66,8 @@ struct ArgumentSpec {
     hash_code = num_flat_inputs;
     args.resize(num_flat_inputs);
     size_t offset = 0;
-    for (size_t i = 0; i < inputs.size(); ++i) {
-      addInput(inputs[i], offset, with_grad);
+    for (const auto& i : inputs) {
+      addInput(i, offset, with_grad);
     }
     JIT_ASSERT(offset == num_flat_inputs);
   }
@@ -81,7 +84,7 @@ struct ArgumentSpec {
       if ((arg.defined_ = t.defined())) {
         arg.requires_grad_ = with_grad && autograd::Variable(t).requires_grad();
         arg.dim_ = t.dim();
-        arg.device_ = t.type().is_cuda() ? t.get_device() : -1;
+        arg.device_ = t.is_cuda() ? t.get_device() : -1;
         arg.type_ = static_cast<unsigned>(t.type().scalarType());
       }
 
@@ -138,7 +141,7 @@ private:
       auto & arg = args.at(offset++);
       if (!arg.defined())
         return UndefinedTensorType::get();
-      return TensorType::create(arg.type(), arg.device(), arg.dim(), arg.requires_grad());
+      return TensorType::create(arg.type(), ConvertIntToCPUOrCUDA(arg.device()), arg.dim(), arg.requires_grad());
     } else if (auto tuple_type = original->cast<TupleType>()) {
       return TupleType::create(fmap(tuple_type->elements(), [&](const TypePtr& subtype) {
         return fillType(subtype, offset);
@@ -192,7 +195,7 @@ struct CompleteArgumentSpec {
     data.resize(ninputs + all_dims*2);
 
     // and reinterpret our data array as these structs
-    CompleteArgumentInfoPOD * pods = reinterpret_cast<CompleteArgumentInfoPOD*>(data.data());
+    auto* pods = reinterpret_cast<CompleteArgumentInfoPOD*>(data.data());
     int64_t * next_dim = sizes_strides();
     int32_t total_dims = 0;
     for(int32_t i = 0; i < num_inputs; i++) {
@@ -203,7 +206,7 @@ struct CompleteArgumentSpec {
         pod.defined = t.defined();
         if (pod.defined) {
           pod.type = static_cast<int>(t.type().scalarType());
-          pod.device = (!t.type().is_cuda()) ? -1 : t.get_device();
+          pod.device = (!t.is_cuda()) ? -1 : t.get_device();
           pod.requires_grad = with_grad && autograd::as_variable_ref(t).requires_grad();
           total_dims += t.ndimension();
           auto sizes = t.sizes();
@@ -294,7 +297,7 @@ struct CompleteArgumentInfo {
   operator TypePtr() const {
     if(!defined())
       return DynamicType::get();
-    return CompleteTensorType::create(type(), device(), sizes(), strides());
+    return CompleteTensorType::create(type(), ConvertIntToCPUOrCUDA(device()), sizes(), strides());
   }
 private:
   // offsetinto sizes_strides() array where the sizes start for tensor j

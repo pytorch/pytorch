@@ -34,22 +34,6 @@ C10_DEFINE_string(
     "Each element of the array is a mapping from "
     "operator index to its input types.");
 
-// aysnc net related params
-C10_DEFINE_string(
-    mutating_net_type,
-    "",
-    "If used, we will use async_scheduling instead simple net for predict net");
-
-C10_DEFINE_bool(
-    mutating_net_async_deferrable_mode,
-    true,
-    "If used, use deferrable_mode for DFS scheduling in async_scheduling net");
-
-C10_DEFINE_int(
-    mutating_net_async_workers,
-    -1,
-    "Set number of worker threads for the thread pool in asyn_scheduling net");
-
 namespace caffe2 {
 namespace emulator {
 

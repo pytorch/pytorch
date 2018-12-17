@@ -227,18 +227,18 @@ struct ComputeLocation<scalar_t, GridSamplerPadding::Border>
     , max_val(static_cast<scalar_t>(size - 1)) {}
 
   inline Vec apply(const Vec &in) const {
-    return min(Vec(max_val), max(unnormalize(in), Vec(0)));
+    return minimum(Vec(max_val), maximum(unnormalize(in), Vec(0)));
   }
   inline std::pair<Vec, Vec> apply_get_grad(const Vec &in) const {
     using int_t = int_same_size_t<scalar_t>;
     Vec max_val_vec(max_val), zeros(0);
     auto indices = unnormalize(in);
-    auto bounded_lo = max(indices, zeros);
+    auto bounded_lo = maximum(indices, zeros);
     // Integral type equality comparison is very very fast because it just looks
     // at the bits. Casting is free too. So we use the following pattern instead
     // of comparison + blendv.
     auto in_bound_lo = cast<scalar_t>(cast<int_t>(bounded_lo) == cast<int_t>(indices));
-    auto res = min(bounded_lo, max_val_vec);
+    auto res = minimum(bounded_lo, max_val_vec);
     auto in_bound_hi = cast<scalar_t>(cast<int_t>(res) == cast<int_t>(indices));
     return std::make_pair(res, (in_bound_lo & in_bound_hi) & Vec(half_max_val));
   }
@@ -273,7 +273,7 @@ struct ComputeLocation<scalar_t, GridSamplerPadding::Reflection>
     // Now we need to test if extra > max_val to find out if another flip is
     // needed. The following comparison does that and returns the correct
     // flipped value.
-    return min(extra, double_max_val_vec - extra);
+    return minimum(extra, double_max_val_vec - extra);
   }
 
   inline std::pair<Vec, Vec> apply_get_grad(const Vec &in) const {
@@ -745,8 +745,8 @@ static inline void grid_sample_2d_grid_slice_iterator(
           // prevents illegal memory access, sets the exceeding offsets to zero
           i_offsets = iVec::set(iVec(0), i_offsets, len);
         }
-        apply_fn(gather<sizeof(scalar_t)>(grid_ptr_x, i_offsets),
-                 gather<sizeof(scalar_t)>(grid_ptr_y, i_offsets),
+        apply_fn(vec256::gather<sizeof(scalar_t)>(grid_ptr_x, i_offsets),
+                 vec256::gather<sizeof(scalar_t)>(grid_ptr_y, i_offsets),
                  spatial_offset, len);
 
         i_offsets = i_offsets + i_offsets_delta;

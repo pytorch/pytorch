@@ -19,7 +19,6 @@ set(ATen_TH_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/THSize.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THStorageFunctions.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensor.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THTensorCopy.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorRandom.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorMath.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorMoreMath.cpp
@@ -112,8 +111,6 @@ INSTALL(FILES
   generic/THTensor.hpp
   generic/THTensorConv.cpp
   generic/THTensorConv.h
-  generic/THTensorCopy.cpp
-  generic/THTensorCopy.h
   generic/THTensorLapack.cpp
   generic/THTensorLapack.h
   generic/THTensorMath.cpp

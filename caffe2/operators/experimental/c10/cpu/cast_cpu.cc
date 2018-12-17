@@ -1,4 +1,4 @@
-#include "caffe2/core/dispatch/KernelRegistration.h"
+#include <c10/core/dispatch/KernelRegistration.h>
 #include "caffe2/operators/experimental/c10/schemas/cast.h"
 #include "caffe2/utils/math.h"
 
@@ -14,7 +14,7 @@ void do_cast_(const Tensor& input, Tensor* output) {
   output->ResizeLike(input);
   const auto* data = input.template data<SrcType>();
   auto* out = output->template mutable_data<DstType>();
-  auto N = input.size();
+  auto N = input.numel();
   for (int64_t i = 0; i < N; ++i) {
     out[i] = static_cast<DstType>(data[i]);
   }

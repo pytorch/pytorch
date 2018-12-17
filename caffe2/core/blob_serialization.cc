@@ -47,7 +47,7 @@ class StringSerializer : public BlobSerializerBase {
     blob_proto.set_name(name);
     blob_proto.set_type("std::string");
     blob_proto.set_content(*static_cast<const std::string*>(pointer));
-    acceptor(name, blob_proto.SerializeAsString());
+    acceptor(name, SerializeBlobProtoAsString_EnforceCheck(blob_proto));
   }
 };
 
@@ -119,7 +119,7 @@ void TensorSerializer::SerializeWithChunkSize(
   CAFFE_ENFORCE(typeMeta.Match<Tensor>());
   const auto& tensor = *static_cast<const Tensor*>(pointer);
   if (chunk_size == kNoChunking) {
-    chunk_size = tensor.size() + 1; // to account for empty tensors
+    chunk_size = tensor.numel() + 1; // to account for empty tensors
   } else if (chunk_size == kDefaultChunkSize) {
     chunk_size = FLAGS_caffe2_tensor_chunk_size;
   }
@@ -134,7 +134,7 @@ void TensorSerializer::SerializeWithChunkSize(
         tensor, name, blob_proto.mutable_tensor(), chunkStart, chunk_size);
     acceptor(
         c10::str(name, kChunkIdSeparator, chunkStart / chunk_size),
-        blob_proto.SerializeAsString());
+        SerializeBlobProtoAsString_EnforceCheck(blob_proto));
   };
 
 #ifndef __ANDROID__
@@ -147,7 +147,7 @@ void TensorSerializer::SerializeWithChunkSize(
       processChunk(chunkStart);
     }
   };
-  if (tensor.size() > chunk_size) {
+  if (tensor.numel() > chunk_size) {
     for (int i = 0; i < FLAGS_caffe2_max_tensor_serializer_threads; ++i) {
       futures.emplace_back(std::async(std::launch::async, task));
     }
@@ -158,11 +158,11 @@ void TensorSerializer::SerializeWithChunkSize(
   // Serialize whole vector. If vector is empty, it's shape still needs to be
   // serialized in empty proto
   for (size_t chunkBegin = 0;
-       chunkBegin < std::max(tensor.size(), static_cast<int64_t>(1));
+       chunkBegin < std::max(tensor.numel(), static_cast<int64_t>(1));
        chunkBegin += chunk_size) {
     VLOG(2) << "Starting a chunk at " << chunkBegin;
 #ifndef __ANDROID__
-    if (tensor.size() > chunk_size) {
+    if (tensor.numel() > chunk_size) {
       chunkQueue.Push(chunkBegin);
     } else {
       // Sync mode for small tensors
@@ -184,37 +184,46 @@ void TensorSerializer::SerializeWithChunkSize(
 
 void TensorSerializer::Serialize(
     const Tensor& input,
-    const string& /*name*/,
+    const string& name,
     TensorProto* proto_ptr,
     size_t chunkBegin,
     int32_t chunkSize) {
   CAFFE_ENFORCE(
-      chunkBegin <= input.size(),
+      chunkBegin <= input.numel(),
       "Chunk begin is out of tensor: ",
       chunkBegin,
       ' ',
-      input.size());
-  if (chunkBegin + chunkSize > input.size()) {
-    chunkSize = input.size() - chunkBegin;
+      input.numel());
+  if (chunkBegin + chunkSize > input.numel()) {
+    chunkSize = input.numel() - chunkBegin;
   }
 
-  CAFFE_ENFORCE(
-      input.raw_data() || chunkSize == 0,
-      "The input does not have data input yet. This is probably because you "
-      "created a tensor of non-zero shape but never filled its data via "
-      "mutable_data() calls. This means that it makes no sense to serialize "
-      "the tensor content.");
+  if (chunkSize != 0) {
+    CAFFE_ENFORCE(
+        input.raw_data(),
+        "The input does not have data input yet. This is probably because you "
+        "created a tensor of non-zero shape but never filled its data via "
+        "mutable_data() calls. This means that it makes no sense to serialize "
+        "the tensor content.");
+  } else if (!input.dtype_initialized()) {
+    C10_LOG_EVERY_MS(WARNING, 1000)
+        << "You're trying to serialize tensor with zero numel and no dtype. "
+        << "This is a legacy behavior and it WILL BREAK. Contact PyTorch team "
+        << "for details. Offending blob name: " << name;
+  }
 
   TensorProto& proto = *proto_ptr;
   proto.mutable_segment()->set_begin(chunkBegin);
   proto.mutable_segment()->set_end(chunkBegin + chunkSize);
 
-  for (int i = 0; i < input.ndim(); ++i) {
-    proto.add_dims(input.dim(i));
+  for (int i = 0; i < input.dim(); ++i) {
+    proto.add_dims(input.size(i));
   }
-  const TensorProto::DataType data_type = TypeMetaToDataType(input.meta());
+  const TensorProto::DataType data_type = TypeMetaToDataType(input.dtype());
   proto.set_data_type(data_type);
   StoreDeviceDetail(input, &proto);
+  // TODO: use DeviceGuard here instead of context and employ explicit sync
+  // copy
   auto uniq_ptr = CreateContext(input.GetDevice());
   // A lot of copypaste is error prone. Should we create a macro for this?
   switch (data_type) {
@@ -320,10 +329,12 @@ void TensorSerializer::Serialize(
       break;
     case TensorProto_DataType_UNDEFINED: {
       proto.mutable_string_data()->Reserve(chunkSize);
-      const char* raw_data = static_cast<const char*>(input.raw_data());
-      for (int i = chunkBegin; i < chunkBegin + chunkSize; ++i) {
-        proto.add_string_data(
-            SerializeBlob(raw_data + i * input.itemsize(), input.meta(), ""));
+      if (chunkSize > 0) {
+        const char* raw_data = static_cast<const char*>(input.raw_data());
+        for (int i = chunkBegin; i < chunkBegin + chunkSize; ++i) {
+          proto.add_string_data(SerializeBlob(
+              raw_data + i * input.itemsize(), input.dtype(), ""));
+        }
       }
     } break;
       // Note: we intentially do not provide "default:" so if any new data types
@@ -398,19 +409,19 @@ void TensorDeserializer::Deserialize(const TensorProto& proto, Tensor* tensor) {
   tensor->Resize(dims);
 
   int64_t chunkBegin = 0;
-  auto chunkEnd = tensor->size();
+  auto chunkEnd = tensor->numel();
   if (proto.has_segment()) {
     chunkBegin = proto.segment().begin();
     chunkEnd = proto.segment().end();
   }
   CAFFE_ENFORCE(
-      0 <= chunkBegin && chunkBegin <= chunkEnd && chunkEnd <= tensor->size(),
+      0 <= chunkBegin && chunkBegin <= chunkEnd && chunkEnd <= tensor->numel(),
       "Invalid chunk ",
       chunkBegin,
       ' ',
       chunkEnd,
       " with total tensor size ",
-      tensor->size());
+      tensor->numel());
   auto chunkSize = chunkEnd - chunkBegin;
 
   switch (proto.data_type()) {
@@ -542,6 +553,25 @@ void TensorDeserializer::Deserialize(const TensorProto& proto, Tensor* tensor) {
   }
   context->FinishDeviceComputation();
 }
+
+////////////////////////////////////////////////////////////////////////////////
+// Serialization Helpers
+////////////////////////////////////////////////////////////////////////////////
+
+std::string SerializeAsString_EnforceCheck(
+    const google::protobuf::MessageLite& msg,
+    const char* error_location) {
+  std::string serialize_output;
+  bool result = msg.SerializeToString(&serialize_output);
+  if (!error_location) {
+    CAFFE_ENFORCE(result, "protobuf::SerializeToString failed");
+  } else {
+    CAFFE_ENFORCE(result,
+        "protobuf::SerializeToString failed for ", error_location);
+  }
+  return serialize_output;
+}
+
 
 namespace {
 // Serialize Tensor

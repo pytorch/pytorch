@@ -50,7 +50,7 @@ void THNN_(GatedLinear_updateGradInput)(
   THCTensor *gradInputfirstHalf = THCTensor_(newNarrow)(state, gradInput, dim, 0, inputSize);
   const int64_t stride_i = THCTensor_(stride)(state, input, dim) * inputSize;
   const int64_t stride_gI = THCTensor_(stride)(state, gradInput, dim) * inputSize;
-  THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, gradInputfirstHalf, gradOutput, firstHalf, gatedLinearDerivative<scalar_t,accreal>(stride_i, stride_gI)); 
+  THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, gradInputfirstHalf, gradOutput, firstHalf, gatedLinearDerivative<scalar_t,accreal>(stride_i, stride_gI));
   THCTensor_(free)(state, firstHalf);
   THCTensor_(free)(state, gradInputfirstHalf);
 }

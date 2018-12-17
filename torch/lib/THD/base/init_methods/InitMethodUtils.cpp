@@ -1,10 +1,10 @@
 #include "InitMethodUtils.hpp"
 
-#include <unistd.h>
-#include <sys/types.h>
-#include <sys/ioctl.h>
-#include <net/if.h>
 #include <ifaddrs.h>
+#include <net/if.h>
+#include <sys/ioctl.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #include <tuple>
 
@@ -15,23 +15,27 @@ namespace {
 void sendPeerName(int socket) {
   struct sockaddr_storage master_addr;
   socklen_t master_addr_len = sizeof(master_addr);
-  SYSCHECK(getpeername(socket, reinterpret_cast<struct sockaddr*>(&master_addr), &master_addr_len));
+  SYSCHECK(getpeername(
+      socket,
+      reinterpret_cast<struct sockaddr*>(&master_addr),
+      &master_addr_len));
 
-  std::string addr_str = sockaddrToString(reinterpret_cast<struct sockaddr*>(&master_addr));
+  std::string addr_str =
+      sockaddrToString(reinterpret_cast<struct sockaddr*>(&master_addr));
   send_string(socket, addr_str);
 }
 
-}
+} // namespace
 
 std::vector<std::string> getInterfaceAddresses() {
-  struct ifaddrs *ifa;
+  struct ifaddrs* ifa;
   SYSCHECK(getifaddrs(&ifa));
   ResourceGuard ifaddrs_guard([ifa]() { ::freeifaddrs(ifa); });
 
   std::vector<std::string> addresses;
 
   while (ifa != nullptr) {
-    struct sockaddr *addr = ifa->ifa_addr;
+    struct sockaddr* addr = ifa->ifa_addr;
     if (addr) {
       bool is_loopback = ifa->ifa_flags & IFF_LOOPBACK;
       bool is_ip = addr->sa_family == AF_INET || addr->sa_family == AF_INET6;
@@ -61,7 +65,9 @@ std::string discoverWorkers(int listen_socket, rank_type world_size) {
   return public_addr;
 }
 
-std::pair<std::string, std::string> discoverMaster(std::vector<std::string> addresses, port_type port) {
+std::pair<std::string, std::string> discoverMaster(
+    std::vector<std::string> addresses,
+    port_type port) {
   // try to connect to address via any of the addresses
   std::string master_address = "";
   int socket;
@@ -70,11 +76,13 @@ std::pair<std::string, std::string> discoverMaster(std::vector<std::string> addr
       socket = connect(address, port, true, 2000);
       master_address = address;
       break;
-    } catch (...) {} // when connection fails just try different address
+    } catch (...) {
+    } // when connection fails just try different address
   }
 
   if (master_address == "") {
-    throw std::runtime_error("could not establish connection with other processes");
+    throw std::runtime_error(
+        "could not establish connection with other processes");
   }
   ResourceGuard socket_guard([socket]() { ::close(socket); });
   sendPeerName(socket);
@@ -83,8 +91,10 @@ std::pair<std::string, std::string> discoverMaster(std::vector<std::string> addr
   return std::make_pair(master_address, my_address);
 }
 
-rank_type getRank(const std::vector<int>& ranks, int assigned_rank,
-                  size_t order) {
+rank_type getRank(
+    const std::vector<int>& ranks,
+    int assigned_rank,
+    size_t order) {
   if (assigned_rank >= 0) {
     return assigned_rank;
   } else {
@@ -97,13 +107,14 @@ rank_type getRank(const std::vector<int>& ranks, int assigned_rank,
     auto unassigned = std::count(ranks.begin(), ranks.begin() + order, -1) + 1;
     rank_type rank = 0;
     while (true) {
-      if (!taken_ranks[rank]) unassigned--;
-      if (unassigned == 0) break;
+      if (!taken_ranks[rank])
+        unassigned--;
+      if (unassigned == 0)
+        break;
       rank++;
     }
 
     return rank;
   }
-
 }
-}
+} // namespace thd

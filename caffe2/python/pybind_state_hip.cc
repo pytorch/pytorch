@@ -6,8 +6,8 @@
 #include <pybind11/stl.h>
 
 #include "caffe2/core/hip/common_miopen.h"
-#include "caffe2/core/hip/context_hip.h"
-#include "caffe2/operators/hip/operator_fallback_hip.h"
+#include "caffe2/core/hip/context_gpu.h"
+#include "caffe2/operators/hip/operator_fallback_gpu.h"
 #include "caffe2/python/pybind_state_registry.h"
 
 namespace caffe2 {
@@ -27,8 +27,6 @@ namespace py = pybind11;
 
 void addHIPGlobalMethods(py::module& m) {
   m.def("num_hip_devices", &NumHipDevices);
-  m.def("set_default_gpu_id", &SetDefaultGPUID);
-  m.def("get_default_gpu_id", &GetDefaultGPUID);
   m.def("get_hip_version", &HipVersion);
   m.def("get_miopen_version", &miopenCompiledVersion);
   m.def("get_hip_peer_access_pattern", []() {

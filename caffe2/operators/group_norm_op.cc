@@ -6,7 +6,7 @@
 // This is a stand-alone op: Y = gamma * (X - mu) / sig + beta
 // ------------------------------------------------------------------
 
-#include "group_norm_op.h"
+#include "caffe2/operators/group_norm_op.h"
 
 namespace caffe2 {
 

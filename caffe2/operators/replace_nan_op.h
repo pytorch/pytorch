@@ -33,7 +33,7 @@ class ReplaceNaNOp final : public Operator<Context> {
     const T* input_data = input.template data<T>();
     T* output_data = output->template mutable_data<T>();
 
-    ReplaceNaN<T>(value, input.size(), input_data, output_data);
+    ReplaceNaN<T>(value, input.numel(), input_data, output_data);
 
     return true;
   }

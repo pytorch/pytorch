@@ -11,6 +11,20 @@
 #define STR_HELPER(x) #x
 #define STR(x) STR_HELPER(x)
 
+// Wait for work to complete
+void waitWork(
+    std::shared_ptr<c10d::ProcessGroupMPI> pg,
+    std::vector<std::shared_ptr<c10d::ProcessGroup::Work>> works) {
+  for (auto& work : works) {
+    try {
+      work->wait();
+    } catch (const std::exception& ex) {
+      std::cerr << "Exception received: " << ex.what() << std::endl;
+      pg->abort();
+    }
+  }
+}
+
 void testAllreduce(int iter = 1000) {
   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
   // Generate inputs
@@ -27,14 +41,7 @@ void testAllreduce(int iter = 1000) {
     works.push_back(std::move(work));
   }
 
-  for (auto& work : works) {
-    // Wait for work to complete
-    if (!work->wait()) {
-      std::cerr << "Exception received: " << work->exception().what()
-                << std::endl;
-      pg->abort();
-    }
-  }
+  waitWork(pg, works);
 
   // Get the world size
   auto worldSize = pg->getSize();
@@ -73,14 +80,7 @@ void testBroadcast(int iter = 10000) {
     works.push_back(std::move(work));
   }
 
-  for (auto& work : works) {
-    // Wait for work to complete
-    if (!work->wait()) {
-      std::cerr << "Exception received: " << work->exception().what()
-                << std::endl;
-      pg->abort();
-    }
-  }
+  waitWork(pg, works);
 
   // Verify outputs
   for (int i = 0; i < iter; ++i) {
@@ -111,14 +111,7 @@ void testReduce(int iter = 10000) {
     works.push_back(std::move(work));
   }
 
-  for (auto& work : works) {
-    // Wait for work to complete
-    if (!work->wait()) {
-      std::cerr << "Exception received: " << work->exception().what()
-                << std::endl;
-      pg->abort();
-    }
-  }
+  waitWork(pg, works);
 
   // Get the world size
   auto worldSize = pg->getSize();
@@ -165,14 +158,7 @@ void testAllgather(int iter = 10000) {
     works.push_back(std::move(work));
   }
 
-  for (auto& work : works) {
-    // Wait for work to complete
-    if (!work->wait()) {
-      std::cerr << "Exception received: " << work->exception().what()
-                << std::endl;
-      pg->abort();
-    }
-  }
+  waitWork(pg, works);
 
   // Verify outputs
   for (int i = 0; i < iter; ++i) {
@@ -220,14 +206,8 @@ void testGather(int iter = 10000) {
     works.push_back(std::move(work));
   }
 
-  for (auto& work : works) {
-    // Wait for work to complete
-    if (!work->wait()) {
-      std::cerr << "Exception received: " << work->exception().what()
-                << std::endl;
-      pg->abort();
-    }
-  }
+  waitWork(pg, works);
+
   // Verify outputs
   if (rank == 0) {
     for (int i = 0; i < iter; ++i) {
@@ -277,14 +257,8 @@ void testScatter(int iter = 1) {
     works.push_back(std::move(work));
   }
 
-  for (auto& work : works) {
-    // Wait for work to complete
-    if (!work->wait()) {
-      std::cerr << "Exception received: " << work->exception().what()
-                << std::endl;
-      pg->abort();
-    }
-  }
+  waitWork(pg, works);
+
   // Verify outputs
   for (int i = 0; i < iter; ++i) {
     for (int j = 0; j < worldSize; ++j) {
@@ -318,17 +292,11 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
     std::vector<std::shared_ptr<::c10d::ProcessGroup::Work>> works;
     for (auto& tensors : allTensors) {
       // Kick off work
-      std::shared_ptr<::c10d::ProcessGroup::Work> work = pg->send(tensors, 1, 0);
+      std::shared_ptr<::c10d::ProcessGroup::Work> work =
+          pg->send(tensors, 1, 0);
       works.push_back(std::move(work));
     }
-    for (auto& work : works) {
-      // Wait for work to complete
-      if (!work->wait()) {
-        std::cerr << "Exception received: " << work->exception().what()
-                  << std::endl;
-        pg->abort();
-      }
-    }
+    waitWork(pg, works);
   }
   if (rank == 1) {
     std::vector<std::shared_ptr<::c10d::ProcessGroup::Work>> works;
@@ -337,23 +305,17 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
     for (auto& tensors : allTensors) {
       // Kick off work
       if (!recvAnysource) {
-        std::shared_ptr<::c10d::ProcessGroup::Work> work = pg->recv(tensors, 0, 0);
+        std::shared_ptr<::c10d::ProcessGroup::Work> work =
+            pg->recv(tensors, 0, 0);
         works.push_back(std::move(work));
       } else {
         std::shared_ptr<::c10d::ProcessGroup::Work> work =
-            pg->recvAnysource(tensors, &srcRanks[i], 0);
+            pg->recvAnysource(tensors, 0);
         works.push_back(std::move(work));
       }
       ++i;
     }
-    for (auto& work : works) {
-      // Wait for work to complete
-      if (!work->wait()) {
-        std::cerr << "Exception received: " << work->exception().what()
-                  << std::endl;
-        pg->abort();
-      }
-    }
+    waitWork(pg, works);
     // Verify outputs
     for (int i = 0; i < iter; ++i) {
       if (recvAnysource && srcRanks[i] != 0) {
@@ -375,7 +337,7 @@ int main(int argc, char** argv) {
   // If we are within an openmpi mpirun, then skip the exec
   if (!std::getenv("OMPI_COMM_WORLD_SIZE")) {
     std::cout << "Execute mpiexec from: " << STR(MPIEXEC) << std::endl;
-    execl(STR(MPIEXEC), "-np 2", argv[0]);
+    execl(STR(MPIEXEC), "-np 2", argv[0], (char*)nullptr);
   }
 
   testAllreduce();

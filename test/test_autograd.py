@@ -19,7 +19,7 @@ from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
                           prod_single_zero, random_square_matrix_of_rank,
                           random_symmetric_matrix, random_symmetric_psd_matrix,
                           random_symmetric_pd_matrix, make_nonzero_det,
-                          random_fullrank_matrix_distinct_singular_value)
+                          random_fullrank_matrix_distinct_singular_value, load_tests)
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
 from torch.testing import make_non_contiguous, randn_like
@@ -31,6 +31,10 @@ from common_methods_invocations import (method_tests,
                                         exclude_tensor_method,
                                         mask_not_all_zeros,
                                         L, S)
+
+# load_tests from common_utils is used to automatically filter tests for
+# sharding on sandcastle. This line silences flake warnings
+load_tests = load_tests
 
 if sys.version_info[0] == 2:
     import cPickle as pickle
@@ -553,14 +557,14 @@ class TestAutograd(TestCase):
             [0, 2, 2],
         ])
         v1 = torch.DoubleTensor([[1, 2], [4, 5], [7, 8]])
-        sparse_grad1 = Variable(torch.sparse.DoubleTensor(i1, v1, size))
+        sparse_grad1 = torch.sparse.DoubleTensor(i1, v1, size)
         i2 = torch.LongTensor([
             [0, 1, 3, 4],
             [0, 1, 2, 2],
         ])
         v2 = torch.DoubleTensor([[1, 2], [4, 3], [4, 5], [7, 8]])
-        sparse_grad2 = Variable(torch.sparse.DoubleTensor(i2, v2, size))
-        dense_grad = Variable(torch.rand(size).double())
+        sparse_grad2 = torch.sparse.DoubleTensor(i2, v2, size)
+        dense_grad = torch.rand(size).double()
         sparse_fn1 = FixedGradientFunction(sparse_grad1)
         sparse_fn2 = FixedGradientFunction(sparse_grad2)
         dense_fn = FixedGradientFunction(dense_grad)
@@ -577,6 +581,63 @@ class TestAutograd(TestCase):
         x = torch.randn(size, requires_grad=True)
         (sparse_fn1(x) + sparse_fn2(x)).sum().backward()
         self.assertEqual(x.grad, sparse_grad1 + sparse_grad2)
+
+    @skipIfRocm
+    def test_sparse_mm_backward(self):
+        size = (3, 3)
+        sparse = torch.sparse_coo_tensor(size, requires_grad=True)
+        dense = torch.randn(size, requires_grad=True)
+
+        z = sparse.mm(dense)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "calculating the gradient of a sparse Tensor argument to mm is not supported."):
+            z.sum().backward()
+
+        z = dense.addmm(sparse, dense)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "calculating the gradient of a sparse Tensor argument to mm is not supported."):
+            z.sum().backward()
+
+    @skipIfRocm
+    def test_sparse_ctor_getter_backward(self):
+        # See NOTE [ Sparse: autograd and API ] on the expected behavior of this test
+        def test(size, sparse_dim, nnz, device):
+            v_size = [nnz] + list(size[sparse_dim:])
+            i = torch.rand(sparse_dim, nnz)
+            i.mul_(torch.tensor(size[:sparse_dim]).unsqueeze(1).to(i))
+            i = i.to(torch.long)
+
+            inp = torch.randn(v_size, requires_grad=True)
+            other = self.genSparseTensor(size, sparse_dim, nnz, is_uncoalesced=True)[0]
+            other = other.to(device)
+
+            def fn(v):
+                x = torch.sparse_coo_tensor(i, v, size, device=device)
+                y = (x + other).coalesce()
+                yv = y.values()
+                new_v = yv.tanh()
+                z = torch.sparse_coo_tensor(y.indices(), new_v, y.size())
+                return z.coalesce().values()
+
+            gradcheck(fn, (inp,))
+            # FIXME: make gradgradcheck work.
+            # gradgradcheck(fn, (inp,))
+
+            # assert that _values is non-differentiable
+            with self.assertRaisesRegex(RuntimeError, "does not have a grad_fn"):
+                other.detach().requires_grad_()._values().backward(torch.ones_like(other._values()))
+
+        devices = ['cpu']
+
+        if torch.cuda.is_available():
+            devices.append('cuda')
+
+        for empty_i, empty_v, empty_nnz in product([True, False], repeat=3):
+            sparse_size = [] if empty_i else [2, 1]
+            dense_size = [1, 0, 2] if empty_v else [1, 2]
+            nnz = 0 if empty_nnz else 5
+            for device in devices:
+                test(sparse_size + dense_size, len(sparse_size), nnz, device)
 
     def test_multi_backward(self):
         x = torch.randn(5, 5, requires_grad=True)
@@ -1979,19 +2040,25 @@ class TestAutograd(TestCase):
                               lambda a, b: torch.cat((a, b)),
                               True, f_args_variable, f_args_tensor)
 
-    def test_potrf(self):
-        root = Variable(torch.tril(torch.rand(S, S)), requires_grad=True)
+    @skipIfNoLapack
+    def test_cholesky(self):
+        def func(root):
+            x = torch.matmul(root, root.transpose(-1, -2)) + 1e-05
+            return torch.cholesky(x, upper)
 
-        def run_test(upper):
-            def func(root):
-                x = torch.mm(root, root.t())
-                return torch.potrf(x, upper)
+        def run_test(upper, dims):
+            root = torch.rand(*dims)
+            indices = torch.ones(dims[-1], dims[-1], dtype=torch.uint8).tril()
+            indices = indices.expand_as(root)
+            root[indices] = 0
+            root.requires_grad_()
 
             gradcheck(func, [root])
             gradgradcheck(func, [root])
 
-        run_test(upper=True)
-        run_test(upper=False)
+        for upper, dims in product([True, False], [(3, 3), (4, 3, 2, 2)]):
+            run_test(upper, dims)
+            run_test(upper, dims)
 
     @skipIfNoLapack
     def test_trtrs(self):
@@ -2142,6 +2209,7 @@ class TestAutograd(TestCase):
         a = torch.arange(1, 13, dtype=torch.double).view(3, 4).requires_grad_()
         gradcheck(lambda a: torch.pow(2, a), (a,))
 
+    @skipIfNoLapack
     def test_pinverse(self):
         # Why is pinverse tested this way, and not ordinarily as other linear algebra methods?
         # 1. Pseudo-inverses are not generally continuous, which means that they are not differentiable
@@ -2272,6 +2340,27 @@ class TestAutograd(TestCase):
     @skipIfRocm
     def test_where_functional_cuda(self):
         self._test_where_functional(lambda t: t.cuda())
+
+    def test_reduce_dtype(self):
+        def test_reduction(op, has_no_dim):
+            x = torch.randn(3, 3, dtype=torch.float, requires_grad=True)
+
+            if has_no_dim:
+                grad1, = torch.autograd.grad([op(x)], [x])
+                grad2, = torch.autograd.grad([op(x, dtype=torch.double)], [x])
+                self.assertEqual(grad1, grad2)
+                self.assertEqual(grad2.dtype, torch.float)
+
+            gi = torch.randn(op(x, dim=0).shape, dtype=torch.float)
+            grad1, = torch.autograd.grad([op(x, dim=0)], [x], gi)
+            grad2, = torch.autograd.grad([op(x, dim=0, dtype=torch.double)], [x], gi.double())
+            self.assertEqual(grad1, grad2)
+            self.assertEqual(grad2.dtype, torch.float)
+
+        test_reduction(torch.sum, True)
+        test_reduction(torch.prod, True)
+        test_reduction(torch.cumsum, False)
+        test_reduction(torch.cumprod, False)
 
     def test_inplace_view_backprop_base(self):
         # modify view and back-prop through base
@@ -2552,6 +2641,7 @@ class TestAutograd(TestCase):
                     out.backward()
             self.assertIn('MyFunc.apply', str(w[0].message))
 
+    @skipIfNoLapack
     def test_symeig_no_eigenvectors(self):
         A = torch.tensor([[1., 2.], [2., 4.]], dtype=torch.float32, requires_grad=True)
         w, v = torch.symeig(A, eigenvectors=False)
@@ -2559,6 +2649,7 @@ class TestAutograd(TestCase):
             torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
 
     @skipIfRocm
+    @skipIfNoLapack
     def test_svd_no_singularvectors(self):
         A = torch.randn(2, 2, dtype=torch.float32, requires_grad=True)
         u, s, v = torch.svd(A, compute_uv=False)
@@ -2605,6 +2696,13 @@ class TestAutograd(TestCase):
         self.assertFalse(p_a == p_b)
         # check one of them is using the computed buffer
         self.assertTrue(p_a == p_g or p_b == p_g)
+
+    def test_gradcheck_single_input(self):
+        def f(inp):
+            return inp.mul(5)
+
+        gradcheck(f, torch.rand(10, dtype=torch.float64, requires_grad=True))
+        gradgradcheck(f, torch.rand(10, dtype=torch.float64, requires_grad=True))
 
 
 def index_variable(shape, max_indices):

@@ -14,9 +14,23 @@ import torch.utils.data
 import torch.cuda
 import warnings
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
+import torch.hub as hub
 from torch.autograd._functions.utils import prepare_onnx_paddings
 from torch.autograd._functions.utils import check_onnx_broadcast
-from common_utils import IS_WINDOWS, IS_PPC, skipIfRocm
+from common_utils import IS_WINDOWS, IS_PPC, skipIfRocm, load_tests
+
+# load_tests from common_utils is used to automatically filter tests for
+# sharding on sandcastle. This line silences flake warnings
+load_tests = load_tests
+
+try:
+    import torchvision.models as models
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+
+
+skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 HAS_CUDA = torch.cuda.is_available()
 
@@ -142,6 +156,62 @@ class TestCheckpoint(TestCase):
         self.assertEqual(input_grad, checkpoint_input_grad)
         for name in grad_checkpointed:
             self.assertEqual(grad_checkpointed[name], grad_not_checkpointed[name])
+
+    def test_checkpoint_rng_cpu(self):
+        for i in range(5):
+            inp = torch.randn(20000, device='cpu').requires_grad_()
+            phase1 = torch.nn.Dropout()
+            phase2 = torch.nn.Dropout()
+
+            def run_fn(input):
+                return phase2(input)
+
+            state = torch.get_rng_state()
+
+            out = phase1(inp)
+            out = checkpoint(run_fn, out)
+            out.sum().backward()
+            grad_with_checkpointing = inp.grad
+
+            torch.set_rng_state(state)
+
+            inp.grad = None
+
+            out = phase1(inp)
+            out = run_fn(out)
+            out.sum().backward()
+            grad_no_checkpointing = inp.grad
+
+            self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
+
+    @unittest.skipIf(not HAS_CUDA, 'No CUDA')
+    @skipIfRocm
+    def test_checkpoint_rng_cuda(self):
+        for i in range(5):
+            inp = torch.randn(20000, device='cuda').requires_grad_()
+            phase1 = torch.nn.Dropout()
+            phase2 = torch.nn.Dropout()
+
+            def run_fn(input):
+                return phase2(input)
+
+            state = torch.cuda.get_rng_state()
+
+            out = phase1(inp)
+            out = checkpoint(run_fn, out)
+            out.sum().backward()
+            grad_with_checkpointing = inp.grad
+
+            torch.cuda.set_rng_state(state)
+
+            inp.grad = None
+
+            out = phase1(inp)
+            out = run_fn(out)
+            out.sum().backward()
+            grad_no_checkpointing = inp.grad
+
+            self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
 
 
 class TestDataLoader(TestCase):
@@ -370,6 +440,33 @@ class TestONNXUtils(TestCase):
         dims1 = [3, 4]
         dims2 = [1, 1]
         try_check_onnx_broadcast(dims1, dims2, True, False)
+
+
+class TestHub(TestCase):
+    @classmethod
+    @skipIfNoTorchVision
+    def setUpClass(cls):
+        cls.resnet18_pretrained = models.__dict__['resnet18'](pretrained=True).state_dict()
+
+    @skipIfNoTorchVision
+    def test_load_from_github(self):
+        hub_model = hub.load(
+            'pytorch/vision',
+            'resnet18',
+            pretrained=True)
+        self.assertEqual(self.resnet18_pretrained, hub_model.state_dict())
+
+    @skipIfNoTorchVision
+    def test_set_dir(self):
+        temp_dir = tempfile.gettempdir()
+        hub.set_dir(temp_dir)
+        hub_model = hub.load(
+            'pytorch/vision',
+            'resnet18',
+            pretrained=True)
+        self.assertEqual(self.resnet18_pretrained, hub_model.state_dict())
+        assert os.path.exists(temp_dir + '/vision_master')
+        shutil.rmtree(temp_dir + '/vision_master')
 
 
 if __name__ == '__main__':

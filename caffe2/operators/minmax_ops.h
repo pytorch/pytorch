@@ -30,14 +30,14 @@ class MaxMinOpBase : public Operator<Context> {
     // Dimension checking
     for (int i = 1; i < InputSize(); ++i) {
       CAFFE_ENFORCE_EQ(
-          output->dims(),
-          Input(i).dims(),
+          output->sizes(),
+          Input(i).sizes(),
           "Description: Input #",
           i,
           ", input dimension:",
-          Input(i).dims(),
+          Input(i).sizes(),
           " should match output dimension: ",
-          output->dims());
+          output->sizes());
     }
 
     return this->Compute();

@@ -104,7 +104,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
     }
 
     sum /= dim;
-    if(reduction == Reduction::ElementwiseMean)
+    if(reduction == Reduction::Mean)
       sum /= nframe;
 
     THTensor_(set1d)(output, 0, sum);
@@ -152,7 +152,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
              "inconsistent target size, got: ", target->sizes());
   }
 
-  g = (reduction == Reduction::ElementwiseMean ? 1./((scalar_t)(nframe*dim)) : 1./((scalar_t)dim));
+  g = (reduction == Reduction::Mean ? 1./((scalar_t)(nframe*dim)) : 1./((scalar_t)dim));
 
   input = THTensor_(newContiguous)(input);
   target = THIndexTensor_(newContiguous)(target);

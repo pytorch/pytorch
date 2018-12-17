@@ -41,10 +41,15 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_constantlike.*'  # Needs implementation
                      '|test_eyelike.*'  # Needs implementation
                      '|test_maxunpool.*'  # Needs implementation
+                     '|test_acosh.*'  # Needs implementation
+                     '|test_asinh.*'  # Needs implementation
+                     '|test_atanh.*'  # Needs implementation
+                     '|test_onehot.*'  # Needs implementation
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.
 backend_test.exclude('(test_cast_.*'
+                     '|test_compress_.*'
                      '|test_Conv1d_.*cuda'
                      '|test_Conv3d_groups_cuda'
                      '|test_rnn_seq_length'

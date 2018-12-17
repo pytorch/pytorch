@@ -6,6 +6,7 @@
 #include "torch/csrc/utils/pybind.h"
 #include "torch/csrc/jit/export.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
+#include "torch/csrc/jit/passes/python_print.h"
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/utils/python_strings.h"
@@ -16,8 +17,11 @@
 
 namespace torch { namespace jit {
 
+using c10::Type;
+
 std::string getPythonName(const PyObject* obj_) {
   AutoGIL gil;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   PyObject* obj = const_cast<PyObject*>(obj_);
   auto v = py::getattr(obj, "__name__", py::str("<python_value>"));
   // if this was a autograd.Function recover the name of the class
@@ -26,6 +30,7 @@ std::string getPythonName(const PyObject* obj_) {
 
 std::ostream& printPyObject(std::ostream & out, const THPObjectPtr& obj) {
   AutoGIL gil;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   auto pyobj = py::handle(const_cast<PyObject*>(obj.get()));
   if (py::isinstance<py::tuple>(pyobj)) {
     // This special-case for printing tuples handles a problem where
@@ -67,7 +72,7 @@ std::ostream& printPyObject(std::ostream & out, const THPObjectPtr& obj) {
 struct ConcretePythonOp : public PythonOp {
  ConcretePythonOp(Graph * graph)
  : PythonOp(graph) {}
- virtual std::string name() const override {
+ std::string name() const override {
    AutoGIL gil;
    if(auto autograd = autogradFunction()) {
      return getPythonName(autograd->get());
@@ -86,14 +91,15 @@ struct ConcretePythonOp : public PythonOp {
      this->scalar_args.emplace_back(sa.get());
    }
  }
- virtual Node * allocNewInstance(Graph * g) override {
+ Node * allocNewInstance(Graph * g) override {
    return new ConcretePythonOp(g);
  }
  // recover the autograd.Function instance, if this PythonOp's function
  // was originally SomeFunction.apply
  // used in ONNX for discovering symbolics
- virtual c10::optional<THPObjectPtr> autogradFunction() const override {
+ c10::optional<THPObjectPtr> autogradFunction() const override {
    AutoGIL gil;
+   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
    py::handle obj = const_cast<PyObject*>(pyobj.get());
 
    auto r = py::getattr(obj, "__self__", py::none());
@@ -113,7 +119,7 @@ struct ConcretePythonOp : public PythonOp {
    return THPObjectPtr(r.release().ptr());
  }
 
- virtual void writeScalars(std::ostream& out) const override {
+ void writeScalars(std::ostream& out) const override {
    out << "(";
    int i = 0;
    for (auto& scalar : scalar_args) {
@@ -143,16 +149,16 @@ void initPythonIRBindings(PyObject * module_) {
       ss << g;
       return ss.str();
     })
-    .def("propagate_shapes", [](Graph& g, std::vector<at::Tensor> inputs, bool with_grad) {
-      setInputTypes(g, ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
+    .def("propagate_shapes", [](std::shared_ptr<Graph> g, std::vector<at::Tensor> inputs, bool with_grad) {
+      setInputTypes(*g, ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
       PropagateInputShapes(g);
     })
-    .def("export", [](const std::shared_ptr<Graph> g, const std::vector<at::Tensor>& initializers,
+    .def("_export_onnx", [](const std::shared_ptr<Graph> g, const std::vector<at::Tensor>& initializers,
                       int64_t onnx_opset_version, bool defer_weight_export,
                       ::torch::onnx::OperatorExportTypes operator_export_type) {
       std::string graph;
       RawDataExportMap export_map;
-      std::tie(graph, export_map) = ExportGraph(
+      std::tie(graph, export_map) = export_onnx(
         g, initializers, onnx_opset_version, defer_weight_export, operator_export_type);
       std::unordered_map<std::string, py::bytes> python_serialized_export_map;
       for (auto& kv : export_map) {
@@ -168,12 +174,12 @@ void initPythonIRBindings(PyObject * module_) {
        py::arg("onnx_opset_version")=0,
        py::arg("defer_weight_export")=false,
        py::arg("operator_export_type")=::torch::onnx::OperatorExportTypes::ONNX)
-    .def("prettyPrintExport", [](const std::shared_ptr<Graph> g,
+    .def("_pretty_print_onnx", [](const std::shared_ptr<Graph> g,
           const std::vector<at::Tensor>& initializers,
           int64_t onnx_opset_version, bool defer_weight_export,
           ::torch::onnx::OperatorExportTypes operator_export_type,
           bool google_printer) {
-      return PrettyPrintExportedGraph(
+      return pretty_print_onnx(
         g, initializers, onnx_opset_version, defer_weight_export, operator_export_type,
         google_printer);
     }, py::arg("initializers"),
@@ -385,6 +391,7 @@ void initPythonIRBindings(PyObject * module_) {
         return n.t(Symbol::attr(name));
     })
     .def("zs_",[](Node & n, const char * name, TensorsAttr::ValueType v) {
+        // NOLINTNEXTLINE(modernize-loop-convert)
         for (size_t i = 0; i < v.size(); ++ i) {
             v[i] = autograd::Variable(v[i].view({})).data();
         }
@@ -413,6 +420,7 @@ void initPythonIRBindings(PyObject * module_) {
     })
     ;
 
+  using ::c10::Type;
   py::class_<Type,std::shared_ptr<Type>>(m,"Type")
     .def("__repr__",[](Type & t) {
       return t.python_str();
@@ -429,6 +437,8 @@ void initPythonIRBindings(PyObject * module_) {
           return "DynamicType";
         case TypeKind::TensorType:
           return "TensorType";
+        case TypeKind::OptionalType:
+          return "OptionalType";
         case TypeKind::NumberType:
           return "NumberType";
         case TypeKind::NoneType:
@@ -453,8 +463,8 @@ void initPythonIRBindings(PyObject * module_) {
           return "BoolType";
         case TypeKind::VarType:
           return "VarType";
-        case TypeKind::WorldType:
-          return "WorldType";
+        case TypeKind::FutureType:
+          return "FutureType";
         }
         // not reachable, but some compilers complain
         AT_ERROR("Unknown Type Kind");
@@ -469,7 +479,7 @@ void initPythonIRBindings(PyObject * module_) {
       return std::static_pointer_cast<Type>(t.expect<CompleteTensorType>()->contiguous());
     })
     .def("scalarType",[](Type& t) {
-      return at::toString(t.expect<TensorType>()->scalarType());
+      return toString(t.expect<TensorType>()->scalarType());
     })
     .def("__eq__", [](std::shared_ptr<Type>& self, std::shared_ptr<Type>& other) {
 		  return *self == *other;
@@ -477,7 +487,7 @@ void initPythonIRBindings(PyObject * module_) {
     .def("isSubtypeOf", [](std::shared_ptr<Type>& self, std::shared_ptr<Type> other) {
         return self->isSubtypeOf(other);
     })
-    .def_static("inferFrom", inferTypeFrom);
+    .def_static("inferFrom", c10::inferTypeFrom);
 
   py::class_<NumberType, Type, std::shared_ptr<NumberType>>(m, "NumberType")
     .def_static("get", &NumberType::get);

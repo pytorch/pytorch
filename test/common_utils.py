@@ -18,6 +18,7 @@ import warnings
 import random
 import contextlib
 import socket
+import time
 from collections import OrderedDict
 from functools import wraps
 from itertools import product
@@ -26,6 +27,9 @@ from numbers import Number
 
 import __main__
 import errno
+
+import expecttest
+import hashlib
 
 import torch
 import torch.cuda
@@ -44,7 +48,8 @@ parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
 args, remaining = parser.parse_known_args()
 SEED = args.seed
-ACCEPT = args.accept
+if not expecttest.ACCEPT:
+    expecttest.ACCEPT = args.accept
 UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
 
@@ -73,12 +78,13 @@ def _check_module_exists(name):
             return True
         except ImportError:
             return False
-    elif PY34:  # Python [3, 3.4)
+    elif not PY34:  # Python [3, 3.4)
         import importlib
         loader = importlib.find_loader(name)
         return loader is not None
     else:  # Python >= 3.4
         import importlib
+        import importlib.util
         spec = importlib.util.find_spec(name)
         return spec is not None
 
@@ -235,13 +241,20 @@ class CudaMemoryLeakCheck():
         if exec_type is not None:
             return
         afters = self.get_cuda_memory_usage()
+
         for i, (before, after) in enumerate(zip(self.befores, afters)):
-            self.testcase.assertEqual(
-                before, after, '{} leaked {} bytes CUDA memory on device {}'.format(
-                    self.name, after - before, i))
+            if not TEST_WITH_ROCM:
+                self.testcase.assertEqual(
+                    before, after, '{} leaked {} bytes CUDA memory on device {}'.format(
+                        self.name, after - before, i))
+            else:
+                # TODO: Investigate ROCm memory leaking.
+                if before != after:
+                    warnings.warn('{} leaked {} bytes ROCm memory on device {}'.format(
+                        self.name, after - before, i), RuntimeWarning)
 
 
-class TestCase(unittest.TestCase):
+class TestCase(expecttest.TestCase):
     precision = 1e-5
     maxDiff = None
     _do_cuda_memory_leak_check = False
@@ -286,6 +299,33 @@ class TestCase(unittest.TestCase):
         for index in iter_indices(x):
             max_err = max(max_err, abs(x[index] - y[index]))
         self.assertLessEqual(max_err, prec, message)
+
+    def genSparseTensor(self, size, sparse_dim, nnz, is_uncoalesced, device='cpu'):
+        # Assert not given impossible combination, where the sparse dims have
+        # empty numel, but nnz > 0 makes the indices containing values.
+        assert all(size[d] > 0 for d in range(sparse_dim)) or nnz == 0, 'invalid arguments'
+
+        v_size = [nnz] + list(size[sparse_dim:])
+        v = torch.randn(*v_size, device=device)
+        i = torch.rand(sparse_dim, nnz, device=device)
+        i.mul_(torch.tensor(size[:sparse_dim]).unsqueeze(1).to(i))
+        i = i.to(torch.long)
+        if is_uncoalesced:
+            v = torch.cat([v, torch.randn_like(v)], 0)
+            i = torch.cat([i, i], 1)
+
+        x = torch.sparse_coo_tensor(i, v, torch.Size(size))
+
+        if not is_uncoalesced:
+            x = x.coalesce()
+        else:
+            # FIXME: `x` is a sparse view of `v`. Currently rebase_history for
+            #        sparse views is not implemented, so this workaround is
+            #        needed for inplace operations done on `x`, e.g., copy_().
+            #        Remove after implementing something equivalent to CopySlice
+            #        for sparse views.
+            x = x.detach()
+        return x, x._indices().clone(), x._values().clone()
 
     def safeToDense(self, t):
         r = self.safeCoalesce(t)
@@ -530,7 +570,7 @@ class TestCase(unittest.TestCase):
         except IOError as e:
             if e.errno != errno.ENOENT:
                 raise
-            elif ACCEPT:
+            elif expecttest.ACCEPT:
                 return accept_output("output")
             else:
                 raise RuntimeError(
@@ -543,7 +583,7 @@ class TestCase(unittest.TestCase):
             expected = re.sub(r'CppOp\[(.+?)\]', 'CppOp[]', expected)
             s = re.sub(r'CppOp\[(.+?)\]', 'CppOp[]', s)
 
-        if ACCEPT:
+        if expecttest.ACCEPT:
             if expected != s:
                 return accept_output("updated output")
         else:
@@ -597,6 +637,25 @@ def find_free_port():
     return sockname[1]
 
 
+def retry_on_address_already_in_use_error(func):
+    """Reruns a test if it sees "Address already in use" error."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        tries_remaining = 10
+        while True:
+            try:
+                return func(*args, **kwargs)
+            except RuntimeError as error:
+                if str(error) == "Address already in use":
+                    tries_remaining -= 1
+                    if tries_remaining == 0:
+                        raise
+                    time.sleep(random.random())
+                    continue
+                raise
+    return wrapper
+
+
 # Methods for matrix generation
 # Used in test_autograd.py and test_torch.py
 def prod_single_zero(dim_size):
@@ -630,9 +689,9 @@ def random_symmetric_psd_matrix(l):
     return A.mm(A.transpose(0, 1))
 
 
-def random_symmetric_pd_matrix(l, eps=1e-5):
-    A = torch.randn(l, l)
-    return A.mm(A.transpose(0, 1)) + torch.eye(l) * eps
+def random_symmetric_pd_matrix(l, *batches):
+    A = torch.randn(*(batches + (l, l)))
+    return A.matmul(A.transpose(-2, -1)) + torch.eye(l) * 1e-5
 
 
 def make_nonzero_det(A, sign=None, min_singular_value=0.1):
@@ -646,7 +705,11 @@ def make_nonzero_det(A, sign=None, min_singular_value=0.1):
     return A
 
 
-def random_fullrank_matrix_distinct_singular_value(l, *batches):
+def random_fullrank_matrix_distinct_singular_value(l, *batches, **kwargs):
+    silent = kwargs.get("silent", False)
+    if silent and not torch._C.has_lapack:
+        return torch.ones(l, l)
+
     if len(batches) == 0:
         A = torch.randn(l, l)
         u, _, v = A.svd()
@@ -660,3 +723,144 @@ def random_fullrank_matrix_distinct_singular_value(l, *batches):
             s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
             all_matrices.append(u.mm(torch.diag(s)).mm(v.t()))
         return torch.stack(all_matrices).reshape(*(batches + (l, l)))
+
+
+def do_test_dtypes(self, dtypes, layout, device):
+    for dtype in dtypes:
+        if dtype != torch.float16:
+            out = torch.zeros((2, 3), dtype=dtype, layout=layout, device=device)
+            self.assertIs(dtype, out.dtype)
+            self.assertIs(layout, out.layout)
+            self.assertEqual(device, out.device)
+
+
+def do_test_empty_full(self, dtypes, layout, device):
+    shape = torch.Size([2, 3])
+
+    def check_value(tensor, dtype, layout, device, value, requires_grad):
+        self.assertEqual(shape, tensor.shape)
+        self.assertIs(dtype, tensor.dtype)
+        self.assertIs(layout, tensor.layout)
+        self.assertEqual(tensor.requires_grad, requires_grad)
+        if tensor.is_cuda and device is not None:
+            self.assertEqual(device, tensor.device)
+        if value is not None:
+            fill = tensor.new(shape).fill_(value)
+            self.assertEqual(tensor, fill)
+
+    def get_int64_dtype(dtype):
+        module = '.'.join(str(dtype).split('.')[1:-1])
+        if not module:
+            return torch.int64
+        return operator.attrgetter(module)(torch).int64
+
+    default_dtype = torch.get_default_dtype()
+    check_value(torch.empty(shape), default_dtype, torch.strided, -1, None, False)
+    check_value(torch.full(shape, -5), default_dtype, torch.strided, -1, None, False)
+    for dtype in dtypes:
+        for rg in {dtype.is_floating_point, False}:
+            int64_dtype = get_int64_dtype(dtype)
+            v = torch.empty(shape, dtype=dtype, device=device, layout=layout, requires_grad=rg)
+            check_value(v, dtype, layout, device, None, rg)
+            out = v.new()
+            check_value(torch.empty(shape, out=out, device=device, layout=layout, requires_grad=rg),
+                        dtype, layout, device, None, rg)
+            check_value(v.new_empty(shape), dtype, layout, device, None, False)
+            check_value(v.new_empty(shape, dtype=int64_dtype, device=device, requires_grad=False),
+                        int64_dtype, layout, device, None, False)
+            check_value(torch.empty_like(v), dtype, layout, device, None, False)
+            check_value(torch.empty_like(v, dtype=int64_dtype, layout=layout, device=device, requires_grad=False),
+                        int64_dtype, layout, device, None, False)
+
+            if dtype is not torch.float16 and layout != torch.sparse_coo:
+                fv = 3
+                v = torch.full(shape, fv, dtype=dtype, layout=layout, device=device, requires_grad=rg)
+                check_value(v, dtype, layout, device, fv, rg)
+                check_value(v.new_full(shape, fv + 1), dtype, layout, device, fv + 1, False)
+                out = v.new()
+                check_value(torch.full(shape, fv + 2, out=out, device=device, layout=layout, requires_grad=rg),
+                            dtype, layout, device, fv + 2, rg)
+                check_value(v.new_full(shape, fv + 3, dtype=int64_dtype, device=device, requires_grad=False),
+                            int64_dtype, layout, device, fv + 3, False)
+                check_value(torch.full_like(v, fv + 4), dtype, layout, device, fv + 4, False)
+                check_value(torch.full_like(v, fv + 5,
+                                            dtype=int64_dtype, layout=layout, device=device, requires_grad=False),
+                            int64_dtype, layout, device, fv + 5, False)
+
+
+IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
+
+THESE_TAKE_WAY_TOO_LONG = {
+    'test_Conv3d_groups',
+    'test_conv_double_backward_groups',
+    'test_Conv3d_dilated',
+    'test_Conv3d_stride_padding',
+    'test_Conv3d_dilated_strided',
+    'test_Conv3d',
+    'test_Conv2d_dilated',
+    'test_ConvTranspose3d_dilated',
+    'test_ConvTranspose2d_dilated',
+    'test_snli',
+    'test_Conv2d',
+    'test_Conv2d_padding',
+    'test_ConvTranspose2d_no_bias',
+    'test_ConvTranspose2d',
+    'test_ConvTranspose3d',
+    'test_Conv2d_no_bias',
+    'test_matmul_4d_4d',
+    'test_multinomial_invalid_probs',
+}
+
+
+running_script_path = None
+
+
+def set_running_script_path():
+    global running_script_path
+    try:
+        running_file = os.path.abspath(os.path.realpath(sys.argv[0]))
+        if running_file.endswith('.py'):  # skip if the running file is not a script
+            running_script_path = running_file
+    except Exception:
+        pass
+
+
+def check_test_defined_in_running_script(test_case):
+    if running_script_path is None:
+        return
+    test_case_class_file = os.path.abspath(os.path.realpath(inspect.getfile(test_case.__class__)))
+    assert test_case_class_file == running_script_path, "Class of loaded TestCase \"{}\" " \
+        "is not defined in the running script \"{}\", but in \"{}\". Did you " \
+        "accidentally import a unittest.TestCase from another file?".format(
+            test_case.id(), running_script_path, test_case_class_file)
+
+
+num_shards = os.environ.get('TEST_NUM_SHARDS', None)
+shard = os.environ.get('TEST_SHARD', None)
+if num_shards is not None and shard is not None:
+    num_shards = int(num_shards)
+    shard = int(shard)
+
+    def load_tests(loader, tests, pattern):
+        set_running_script_path()
+        test_suite = unittest.TestSuite()
+        for test_group in tests:
+            for test in test_group:
+                check_test_defined_in_running_script(test)
+                name = test.id().split('.')[-1]
+                if name in THESE_TAKE_WAY_TOO_LONG:
+                    continue
+                hash_id = int(hashlib.sha256(str(test).encode('utf-8')).hexdigest(), 16)
+                if hash_id % num_shards == shard:
+                    test_suite.addTest(test)
+        return test_suite
+else:
+
+    def load_tests(loader, tests, pattern):
+        set_running_script_path()
+        test_suite = unittest.TestSuite()
+        for test_group in tests:
+            for test in test_group:
+                check_test_defined_in_running_script(test)
+                test_suite.addTest(test)
+        return test_suite

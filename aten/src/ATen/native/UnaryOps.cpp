@@ -30,7 +30,7 @@
 namespace at {
 namespace native {
 
-Tensor clamp(const Tensor& self, Scalar min, Scalar max) {
+Tensor clamp(const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
   Tensor result = at::empty({0}, self.options());
   return clamp_out(result, self, min, max);
 }
@@ -45,13 +45,13 @@ Tensor clamp_min(const Tensor& self, Scalar min) {
   return clamp_min_out(result, self, min);
 }
 
-Tensor& _clamp__cpu(Tensor& self, Scalar min, Scalar max) {
-  if (!std::isnan(min.toDouble()) && !std::isnan(max.toDouble())) {
-    return _th_clamp_out(self, self, min, max);
-  } else if (std::isnan(min.toDouble())) {
-    return _th_clamp_max_out(self, self, max);
-  } else if (std::isnan(max.toDouble())) {
-    return _th_clamp_min_out(self, self, min);
+Tensor& _clamp__cpu(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+  if (min && max) {
+    return _th_clamp_out(self, self, *min, *max);
+  } else if (max) {
+    return _th_clamp_max_out(self, self, *max);
+  } else if (min) {
+    return _th_clamp_min_out(self, self, *min);
   } else {
     return self;
   }
@@ -60,14 +60,14 @@ Tensor& _clamp__cpu(Tensor& self, Scalar min, Scalar max) {
 Tensor& _clamp_out_cpu(
     Tensor& result,
     const Tensor& self,
-    Scalar min,
-    Scalar max) {
-  if (!std::isnan(min.toDouble()) && !std::isnan(max.toDouble())) {
-    _th_clamp_out(result, self, min, max);
-  } else if (std::isnan(min.toDouble())) {
-    _th_clamp_max_out(result, self, max);
-  } else if (std::isnan(max.toDouble())) {
-    _th_clamp_min_out(result, self, min);
+    optional<Scalar> min,
+    optional<Scalar> max) {
+  if (min && max) {
+    _th_clamp_out(result, self, *min, *max);
+  } else if (max) {
+    _th_clamp_max_out(result, self, *max);
+  } else if (min) {
+    _th_clamp_min_out(result, self, *min);
   }
   return result;
 }
@@ -89,11 +89,11 @@ Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
 }
 
 Tensor& fill_(Tensor& self, Scalar value) {
-  return at::_fill_(self, value);
+  return at::_th_fill_(self, value);
 }
 
 Tensor& fill_(Tensor& self, const Tensor& value) {
-  return at::_fill_(self, value);
+  return at::_th_fill_(self, value);
 }
 
 Tensor mvlgamma(const Tensor& self, int64_t p) {
@@ -151,7 +151,7 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   }                                                             \
   Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
     result.resize_(self.sizes());                               \
-    return at::_##op##_out(result, self);                       \
+    return at::_th_##op##_out(result, self);                    \
   }
 
 // NB: Temp. defaulting to TH implementation of abs due to issues with Apple

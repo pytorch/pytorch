@@ -7,8 +7,8 @@
 #include <unordered_map>
 
 #include <ATen/core/ATenGeneral.h>
-#include <ATen/core/Allocator.h>
-#include <ATen/core/typeid.h>
+#include <c10/core/Allocator.h>
+#include <c10/util/typeid.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
 
@@ -62,25 +62,6 @@ class CAFFE2_API BaseContext {
   virtual void CopyBytesFromCPU(size_t nbytes, const void* src, void* dst) = 0;
 
   virtual void CopyBytesToCPU(size_t nbytes, const void* src, void* dst) = 0;
-
-  virtual void CopyBytesToDevice(
-      size_t nbytes,
-      const void* src,
-      void* dst,
-      DeviceType type) {
-    if (type == DeviceType::CPU) {
-      CopyBytesToCPU(nbytes, src, dst);
-    } else if (type == device_type()) {
-      CopyBytesSameDevice(nbytes, src, dst);
-    } else {
-      AT_ERROR(
-          "CopyBytesToDevice can only copy to CPU or between same "
-          "device. Can't copy from: ",
-          device_type(),
-          " to",
-          type);
-    }
-  }
 
   template <typename T>
   inline void CopySameDevice(size_t n, const T* src, T* dst) {
@@ -175,8 +156,41 @@ inline std::unique_ptr<at::BaseContext> CreateContext(
 
 } // namespace at
 
+// TODO: move it to a separate file in c10 if possible
+namespace at {
+
+using CopyBytesFunction = void (*)(
+    size_t nbytes,
+    const void* src,
+    Device src_device,
+    void* dst,
+    Device dst_device);
+
+struct CAFFE2_API _CopyBytesFunctionRegisterer {
+  _CopyBytesFunctionRegisterer(
+      DeviceType from,
+      DeviceType to,
+      CopyBytesFunction func_sync,
+      CopyBytesFunction func_async = nullptr);
+};
+
+#define REGISTER_COPY_BYTES_FUNCTION(from, to, ...)           \
+  namespace {                                                 \
+  static _CopyBytesFunctionRegisterer C10_ANONYMOUS_VARIABLE( \
+      g_copy_function)(from, to, __VA_ARGS__);                \
+  }
+
+CAFFE2_API void CopyBytes(
+    size_t nbytes,
+    const void* src,
+    Device src_device,
+    void* dst,
+    Device dst_device,
+    bool async);
+} // namespace at
+
 namespace caffe2 {
 
 using at::BaseContext;
-
+using at::CreateContext;
 } // namespace caffe2

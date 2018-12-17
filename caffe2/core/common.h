@@ -29,11 +29,9 @@
 
 #include "c10/macros/Macros.h"
 
-namespace caffe2 {
+#include "c10/util/string_utils.h"
 
-// Since C10 is the core library for caffe2 (and aten), we will simply reroute
-// all abstractions defined in c10 to be available in caffe2 as well.
-using namespace c10;
+namespace caffe2 {
 
 // Note(Yangqing): NVCC does not play well with unordered_map on some platforms,
 // forcing us to use std::map instead of unordered_map. This may affect speed
@@ -129,48 +127,6 @@ make_unique(Args&&...) = delete;
 
 #endif
 
-// to_string, stoi and stod implementation for Android related stuff.
-// Note(jiayq): Do not use the CAFFE2_TESTONLY_FORCE_STD_STRING_TEST macro
-// outside testing code that lives under common_test.cc
-#if defined(__ANDROID__) || defined(CAFFE2_TESTONLY_FORCE_STD_STRING_TEST)
-#define CAFFE2_TESTONLY_WE_ARE_USING_CUSTOM_STRING_FUNCTIONS 1
-template <typename T>
-std::string to_string(T value)
-{
-  std::ostringstream os;
-  os << value;
-  return os.str();
-}
-
-inline int stoi(const string& str) {
-  std::stringstream ss;
-  int n = 0;
-  ss << str;
-  ss >> n;
-  return n;
-}
-
-inline double stod(const string& str, std::size_t* pos = 0) {
-  std::stringstream ss;
-  ss << str;
-  double val = 0;
-  ss >> val;
-  if (pos) {
-    if (ss.tellg() == std::streampos(-1)) {
-      *pos = str.size();
-    } else {
-      *pos = ss.tellg();
-    }
-  }
-  return val;
-}
-#else
-#define CAFFE2_TESTONLY_WE_ARE_USING_CUSTOM_STRING_FUNCTIONS 0
-using std::to_string;
-using std::stoi;
-using std::stod;
-#endif // defined(__ANDROID__) || defined(CAFFE2_FORCE_STD_STRING_FALLBACK_TEST)
-
 #if defined(__ANDROID__) && !defined(__NDK_MAJOR__)
 using ::round;
 #else
@@ -233,6 +189,6 @@ CAFFE2_API void SetHipRuntimeFlag();
 // CMake)
 CAFFE2_API const std::map<string, string>& GetBuildOptions();
 
-}  // namespace caffe2
+} // namespace caffe2
 
 #endif  // CAFFE2_CORE_COMMON_H_

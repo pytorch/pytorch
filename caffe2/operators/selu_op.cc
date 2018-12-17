@@ -11,8 +11,9 @@ bool SeluOp<float, CPUContext>::RunOnDevice() {
   auto* Y = Output(0);
   Y->ResizeLike(X);
 
-  ConstEigenVectorArrayMap<float> Xvec(X.data<float>(), X.size());
-  EigenVectorArrayMap<float> Yvec(Y->template mutable_data<float>(), Y->size());
+  ConstEigenVectorArrayMap<float> Xvec(X.data<float>(), X.numel());
+  EigenVectorArrayMap<float> Yvec(
+      Y->template mutable_data<float>(), Y->numel());
   Yvec = lambda_ * (Xvec > 0).select(Xvec, (alpha_ * Xvec.exp() - alpha_));
   return true;
 }
@@ -22,13 +23,13 @@ bool SeluGradientOp<float, CPUContext>::RunOnDevice() {
   auto& Y = Input(0);
   auto& dY = Input(1);
   auto* dX = Output(0);
-  CAFFE_ENFORCE_EQ(dY.size(), Y.size());
+  CAFFE_ENFORCE_EQ(dY.numel(), Y.numel());
   dX->ResizeLike(Y);
 
-  ConstEigenVectorArrayMap<float> Yvec(Y.data<float>(), Y.size());
-  ConstEigenVectorArrayMap<float> dYvec(dY.data<float>(), dY.size());
+  ConstEigenVectorArrayMap<float> Yvec(Y.data<float>(), Y.numel());
+  ConstEigenVectorArrayMap<float> dYvec(dY.data<float>(), dY.numel());
   EigenVectorArrayMap<float> dXvec(
-      dX->template mutable_data<float>(), dX->size());
+      dX->template mutable_data<float>(), dX->numel());
 
   const float la = lambda_ * alpha_;
   dXvec = (Yvec > 0).select(lambda_ * dYvec, dYvec * (Yvec + la));
