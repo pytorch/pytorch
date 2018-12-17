@@ -2581,6 +2581,7 @@ class TestAutograd(TestCase):
         # this checks whether it is possible to not require
         # weight parameters, but require inputs, see #7722
         dev = torch.device('cuda')
+        print("LSTM constructor", flush=True)
         l = torch.nn.LSTM(2, 3).to(dev)
         for p in l.parameters():
             p.requires_grad = False
