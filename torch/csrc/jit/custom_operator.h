@@ -14,7 +14,7 @@ namespace jit {
 namespace detail {
 /// Checks the static C++ type `T` for correctness to catch common error cases.
 template <typename T>
-void checkStaticArgumentTypes() {
+void checkStaticTypes() {
   // Give nice error messages for some of the common error cases.
   // Use a LOUD ERROR MESSAGE SO USERS SEE THE STATIC_ASSERT
   static_assert(
@@ -26,13 +26,14 @@ void checkStaticArgumentTypes() {
 }
 
 template <typename First, typename Second, typename... Rest>
-void checkStaticArgumentTypes() {
-  checkStaticArgumentTypes<First>();
-  checkStaticArgumentTypes<Second, Rest...>();
+void checkStaticTypes() {
+  checkStaticTypes<First>();
+  checkStaticTypes<Second, Rest...>();
 }
 
 template <typename... Ts, size_t... Is>
 std::vector<Argument> createArgumentVectorFromTypes(Indices<Is...> indices) {
+  checkStaticTypes<decay_t<Ts>...>();
   // Arguments are named "_<index>"
   return {Argument("_" + std::to_string(Is), getTypePtr<decay_t<Ts>>())...};
 }
@@ -53,6 +54,7 @@ std::vector<Argument> createReturns(std::tuple<Ts...>* tuple) {
 /// Create a single-element `vector` for simple (non-tuple) return types.
 template <typename ReturnType>
 std::vector<Argument> createReturns(ReturnType*) {
+  checkStaticTypes<decay_t<ReturnType>>();
   return {Argument("_1", getTypePtr<decay_t<ReturnType>>())};
 }
 
@@ -70,9 +72,11 @@ std::vector<Argument> createArgumentVectorFromTraits(Indices<Is...> indices) {
 template <typename FunctionTraits>
 FunctionSchema createFunctionSchemaFromTraits(const std::string& name) {
   using ReturnType = typename FunctionTraits::return_type;
+
   auto arguments = createArgumentVectorFromTraits<FunctionTraits>(
       typename MakeIndices<FunctionTraits::number_of_parameters>::indices{});
   auto returns = createReturns(static_cast<ReturnType*>(nullptr));
+
   return {name, arguments, returns};
 }
 
@@ -112,9 +116,6 @@ void callOperatorWithTuple(
     std::tuple<Types...>& arguments,
     Indices<Is...>) {
   AT_ASSERT(stack.size() == sizeof...(Is));
-
-  // Check the C++ types for correctness.
-  checkStaticArgumentTypes<Types...>();
 
   // Pop values from the stack into the elements of the tuple.
   pop(stack, std::get<Is>(arguments)...);
