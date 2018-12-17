@@ -2,6 +2,9 @@
 
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
+# Anywhere except $ROOT_DIR should work
+cd "$INSTALL_PREFIX"
+
 if [[ $BUILD_ENVIRONMENT == *-cuda* ]]; then
     num_gpus=$(nvidia-smi -L | wc -l)
 elif [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
