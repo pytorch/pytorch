@@ -16,12 +16,12 @@ void filler_init(
     const std::vector<int64_t>& shape,
     const std::vector<int>& extra_shape,
     bool input_as_shape) {
-  Tensor output = output_;
+  Tensor output(output_);
   if (inputs.size()) {
     auto real_shape = vector<int64_t>{};
     if (input_as_shape) {
       // Shape input must be in CPU context
-      Tensor input = inputs[0];
+      Tensor input(inputs[0]);
       CAFFE_ENFORCE_EQ(
           input.dim(),
           1,
@@ -31,7 +31,7 @@ void filler_init(
       real_shape.insert(
           real_shape.end(), shape_data, shape_data + input.dim32(0));
     } else {
-      Tensor input = inputs[0];
+      Tensor input(inputs[0]);
       real_shape.insert(
           real_shape.end(), input.sizes().begin(), input.sizes().end());
     }
@@ -51,8 +51,8 @@ void given_tensor_fill_op_cpu_impl(
     bool input_as_shape,
     const C10Tensor& values_,
     BaseContext* context) {
-  Tensor output = output_;
-  Tensor values = values_;
+  Tensor output(output_);
+  Tensor values(values_);
 
   filler_init(inputs, output_, shape, extra_shape, input_as_shape);
 
@@ -77,7 +77,7 @@ void constant_fill_op_cpu_impl(
     int dtype,
     caffe2::ops::ConstantFill::Value value,
     BaseContext* context) {
-  Tensor output = output_;
+  Tensor output(output_);
 
   filler_init(inputs, output_, shape, extra_shape, input_as_shape);
 
@@ -123,7 +123,7 @@ void uniform_fill_op_cpu_impl(
     float min,
     float max,
     BaseContext* context) {
-  Tensor output = output_;
+  Tensor output(output_);
 
   filler_init(inputs, output_, shape, extra_shape, input_as_shape);
 

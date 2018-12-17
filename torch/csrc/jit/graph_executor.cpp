@@ -503,7 +503,7 @@ private:
   }
 
   void runTraced(Stack & stack) {
-    auto state = tracer::getTracingState();
+    const auto& state = tracer::getTracingState();
     auto inputs = last(stack, num_inputs);
     auto input_values = fmap(inputs, [](const IValue & v) {
       return tracer::getNestedValueTrace(v);

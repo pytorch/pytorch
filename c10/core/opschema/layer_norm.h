@@ -9,7 +9,7 @@ class BaseContext;
 
 namespace c10 {
 namespace core {
-namespace ops {
+namespace opschema {
 
 // TODO This op schema should probably not live in c10 since it's not a method
 // on Tensor. It's only here as a proof-of-concept op and for LATTE team
@@ -40,6 +40,6 @@ struct LayerNorm final {
       {"input", "output", "output_mean", "output_stddev", "axis", "epsilon", "cache", "context"}};
 };
 
-} // namespace ops
+} // namespace opschema
 } // namespace core
 } // namespace c10

@@ -1,4 +1,5 @@
 #include <torch/python/init.h>
+#include <torch/python.h>
 
 #include <torch/nn/module.h>
 #include <torch/ordered_dict.h>
@@ -35,6 +36,7 @@ ITEM_TYPE_CASTER(std::shared_ptr<torch::nn::Module>, Module);
 
 namespace torch {
 namespace python {
+namespace {
 template <typename T>
 void bind_ordered_dict(py::module module, const char* dict_name) {
   using ODict = OrderedDict<std::string, T>;
@@ -56,6 +58,7 @@ void bind_ordered_dict(py::module module, const char* dict_name) {
       });
   // clang-format on
 }
+} // namespace
 
 void init_bindings(PyObject* module) {
   py::module m = py::handle(module).cast<py::module>();
@@ -65,7 +68,8 @@ void init_bindings(PyObject* module) {
   bind_ordered_dict<std::shared_ptr<nn::Module>>(cpp, "OrderedModuleDict");
 
   py::module nn = cpp.def_submodule("nn");
-  py::class_<nn::Module, std::shared_ptr<nn::Module>>(nn, "Module");
+  add_module_bindings(
+      py::class_<nn::Module, std::shared_ptr<nn::Module>>(nn, "Module"));
 }
 } // namespace python
 } // namespace torch

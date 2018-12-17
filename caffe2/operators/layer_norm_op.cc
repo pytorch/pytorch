@@ -1,6 +1,6 @@
 #include "caffe2/operators/layer_norm_op.h"
 #include "caffe2/utils/eigen_utils.h"
-#include <c10/core/op_schemas/layer_norm.h>
+#include <c10/core/opschema/layer_norm.h>
 #include <c10/core/dispatch/KernelRegistration.h>
 
 namespace caffe2 {
@@ -193,24 +193,24 @@ void layer_norm_c10(
     const c10::C10Tensor& sig_,
     int axis,
     float epsilon,
-    c10::core::ops::LayerNorm::Cache* cache,
+    c10::core::opschema::LayerNorm::Cache* cache,
     caffe2::BaseContext* context) {
-  caffe2::Tensor X = X_;
-  caffe2::Tensor Y = Y_;
-  caffe2::Tensor mean = mean_;
-  caffe2::Tensor sig = sig_;
+  caffe2::Tensor X(X_);
+  caffe2::Tensor Y(Y_);
+  caffe2::Tensor mean(mean_);
+  caffe2::Tensor sig(sig_);
   if (!cache->scale.has_value()) {
-    cache->scale = caffe2::Tensor{caffe2::CPU};
+    cache->scale = c10::C10Tensor(caffe2::Tensor{caffe2::CPU});
   }
   if (!cache->bias.has_value()) {
-    cache->bias = caffe2::Tensor{caffe2::CPU};
+    cache->bias = c10::C10Tensor(caffe2::Tensor{caffe2::CPU});
   }
-  caffe2::Tensor scale = *cache->scale;
-  caffe2::Tensor bias = *cache->bias;
+  caffe2::Tensor scale(*cache->scale);
+  caffe2::Tensor bias(*cache->bias);
 
   const int canonical_axis = X.canonical_axis_index(axis);
   std::vector<int64_t> moments_dims(
-      X.dims().cbegin(), X.dims().cbegin() + canonical_axis);
+      X.sizes().cbegin(), X.sizes().cbegin() + canonical_axis);
   moments_dims.push_back(1);
   mean.Resize(moments_dims);
   sig.Resize(moments_dims);
@@ -220,7 +220,7 @@ void layer_norm_c10(
 }
 }
 namespace c10 {
-C10_REGISTER_KERNEL(c10::core::ops::LayerNorm)
+C10_REGISTER_KERNEL(c10::core::opschema::LayerNorm)
     .kernel(&layer_norm_c10<float>)
     .dispatchKey(c10::DispatchKey<1>{
         c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,

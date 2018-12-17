@@ -7,6 +7,11 @@
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/script/error_report.h>
 
+#include <functional>
+#include <memory>
+#include <utility>
+#include <vector>
+
 namespace torch { namespace jit {
 
 namespace script {
@@ -248,7 +253,7 @@ struct SchemaParser {
           n = "-" + L.expect(TK_NUMBER).text();
         else
           n = L.expect(TK_NUMBER).text();
-        if(kind == TypeKind::FloatType || n.find(".") != std::string::npos || n.find("e") != std::string::npos) {
+        if(kind == TypeKind::FloatType || n.find('.') != std::string::npos || n.find('e') != std::string::npos) {
           return std::stod(n);
         } else {
           int64_t v = std::stoll(n);
@@ -290,7 +295,7 @@ struct SchemaParser {
     L.expect(TK_NONE);
     return IValue();
   }
-  IValue parseDefaultValue(TypePtr arg_type, c10::optional<int32_t> arg_N) {
+  IValue parseDefaultValue(const TypePtr& arg_type, c10::optional<int32_t> arg_N) {
     auto range = L.cur().range;
     switch(arg_type->kind()) {
       case TypeKind::DynamicType:
@@ -328,7 +333,7 @@ struct SchemaParser {
     return IValue(); // silence warnings
   }
 
-  void parseList(int begin, int sep, int end, std::function<void()> callback) {
+  void parseList(int begin, int sep, int end, const std::function<void()>& callback) {
     auto r = L.cur().range;
     if (begin != TK_NOTHING)
       L.expect(begin);
@@ -400,7 +405,7 @@ private:
 
   // XXX - caller must be holding lock
   void registerPendingOperators() {
-    for(auto op : to_register) {
+    for(const auto& op : to_register) {
       Symbol sym = Symbol::fromQualString(op->schema().name());
       operators[sym].push_back(op);
       operators_by_sig[canonicalSchemaString(op->schema())] = op;

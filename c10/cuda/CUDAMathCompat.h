@@ -22,31 +22,66 @@ namespace cuda {
 namespace compat {
 
 __MATH_FUNCTIONS_DECL__ float abs(float x) {
-  return fabsf(x);
+  return ::fabsf(x);
 }
 __MATH_FUNCTIONS_DECL__ double abs(double x) {
-  return fabs(x);
+  return ::fabs(x);
+}
+
+__MATH_FUNCTIONS_DECL__ float exp(float x) {
+  return ::expf(x);
+}
+__MATH_FUNCTIONS_DECL__ double exp(double x) {
+  return ::exp(x);
+}
+
+__MATH_FUNCTIONS_DECL__ float floor(float x) {
+  return ::floorf(x);
+}
+__MATH_FUNCTIONS_DECL__ double floor(double x) {
+  return ::floor(x);
+}
+
+__MATH_FUNCTIONS_DECL__ float log(float x) {
+  return ::logf(x);
+}
+__MATH_FUNCTIONS_DECL__ double log(double x) {
+  return ::log(x);
 }
 
 __MATH_FUNCTIONS_DECL__ float max(float x, float y) {
-  return fmaxf(x, y);
+  return ::fmaxf(x, y);
 }
 __MATH_FUNCTIONS_DECL__ double max(double x, double y) {
-  return fmax(x, y);
+  return ::fmax(x, y);
 }
 
 __MATH_FUNCTIONS_DECL__ float pow(float x, float y) {
-  return powf(x, y);
+  return ::powf(x, y);
 }
 __MATH_FUNCTIONS_DECL__ double pow(double x, double y) {
   return ::pow(x, y);
 }
 
 __MATH_FUNCTIONS_DECL__ void sincos(float x, float* sptr, float* cptr) {
-  return sincosf(x, sptr, cptr);
+  return ::sincosf(x, sptr, cptr);
 }
 __MATH_FUNCTIONS_DECL__ void sincos(double x, double* sptr, double* cptr) {
   return ::sincos(x, sptr, cptr);
+}
+
+__MATH_FUNCTIONS_DECL__ float sqrt(float x) {
+  return ::sqrtf(x);
+}
+__MATH_FUNCTIONS_DECL__ double sqrt(double x) {
+  return ::sqrt(x);
+}
+
+__MATH_FUNCTIONS_DECL__ float tan(float x) {
+  return ::tanf(x);
+}
+__MATH_FUNCTIONS_DECL__ double tan(double x) {
+  return ::tan(x);
 }
 
 } // namespace compat

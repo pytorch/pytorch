@@ -21,9 +21,9 @@ void batch_matmul_op_cpu_impl(
     int broadcast,
     caffe2::ops::BatchMatmul::State* state,
     BaseContext* context) {
-  Tensor A = A_;
-  Tensor B = B_;
-  Tensor Y = Y_;
+  Tensor A(A_);
+  Tensor B(B_);
+  Tensor Y(Y_);
   using Engine = caffe2::DefaultEngine;
 
   auto ndims_A = A.dim();

@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -143,7 +144,7 @@ class TestMomentumSGD(serial.SerializedTestCase):
     def test_fp16momentum_sgd(self, n, nesterov, gc, dc):
         assume(core.IsGPUDeviceType(gc.device_type))
         gpuvers = workspace.GetDeviceProperties(0)["major"]
-        if gpuvers < 6:
+        if gc.device_type == caffe2_pb2.CUDA and gpuvers < 6:
             print("No FP16 support because major version {} < 6".format(gpuvers))
             return
 
@@ -152,7 +153,6 @@ class TestMomentumSGD(serial.SerializedTestCase):
         lr = np.random.rand(1).astype(np.float32)
         param_momentum = np.random.rand(n).astype(np.float16)
         momentum = 0.9
-        nesterov = True
 
         def momentum_sgd(grad, param_momentum, lr, param=None):
             if not nesterov:
@@ -174,11 +174,13 @@ class TestMomentumSGD(serial.SerializedTestCase):
             weight_decay=0.0,
         )
 
+        threshold = 1e-3 if (gc.device_type == caffe2_pb2.HIP) else 1e-4
         self.assertReferenceChecks(
             device_option=gc,
             op=op,
             inputs=[grad, param_momentum, lr, param],
-            reference=momentum_sgd
+            reference=momentum_sgd,
+            threshold=threshold
         )
 
 

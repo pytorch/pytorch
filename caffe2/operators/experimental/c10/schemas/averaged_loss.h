@@ -10,7 +10,7 @@ namespace ops {
 
 struct AveragedLoss final {
   struct State final {
-    C10Tensor scratch = empty({}, CPU);
+    C10Tensor scratch = C10Tensor(empty({}, CPU));
   };
 
   static constexpr const char* name = "averaged_loss";

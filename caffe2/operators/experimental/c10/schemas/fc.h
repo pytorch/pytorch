@@ -12,7 +12,7 @@ struct FullyConnected final {
 
   struct Cache final {
     vector<int64_t> Y_shape_cache_;
-    C10Tensor bias_multiplier_ = Tensor{CPU};
+    C10Tensor bias_multiplier_ = C10Tensor(Tensor{CPU});
   };
 
   using Signature = void(
