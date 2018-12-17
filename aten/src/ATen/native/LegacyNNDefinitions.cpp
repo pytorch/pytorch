@@ -604,6 +604,22 @@ Tensor upsample_bilinear2d_backward(const Tensor & grad_output, IntList output_s
   return at::legacy::th::_thnn_upsample_bilinear2d_backward(grad_output, output_size, input_size, align_corners);
 }
 
+Tensor & upsample_bicubic2d_out(Tensor & output, const Tensor & self, IntList output_size, bool align_corners) {
+  return at::legacy::th::_thnn_upsample_bicubic2d_forward_out(output, self, output_size, align_corners);
+}
+
+Tensor upsample_bicubic2d(const Tensor & self, IntList output_size, bool align_corners) {
+  return at::legacy::th::_thnn_upsample_bicubic2d_forward(self, output_size, align_corners);
+}
+
+Tensor & upsample_bicubic2d_backward_out(Tensor & grad_input, const Tensor & grad_output, IntList output_size, IntList input_size, bool align_corners) {
+  return at::legacy::th::_thnn_upsample_bicubic2d_backward_out(grad_input, grad_output, output_size, input_size, align_corners);
+}
+
+Tensor upsample_bicubic2d_backward(const Tensor & grad_output, IntList output_size, IntList input_size, bool align_corners) {
+  return at::legacy::th::_thnn_upsample_bicubic2d_backward(grad_output, output_size, input_size, align_corners);
+}
+
 Tensor & upsample_trilinear3d_out(Tensor & output, const Tensor & self, IntList output_size, bool align_corners) {
   return at::legacy::th::_thnn_upsample_trilinear3d_forward_out(output, self, output_size, align_corners);
 }

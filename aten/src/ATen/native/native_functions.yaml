@@ -3491,6 +3491,18 @@
 - func: upsample_bilinear2d_backward(Tensor grad_output, IntList[2] output_size, IntList[4] input_size, bool align_corners) -> Tensor
   python_module: nn
 
+- func: upsample_bicubic2d_out(Tensor output, Tensor self, IntList[2] output_size, bool align_corners) -> Tensor
+  python_module: nn
+
+- func: upsample_bicubic2d(Tensor self, IntList[2] output_size, bool align_corners) -> Tensor
+  python_module: nn
+
+- func: upsample_bicubic2d_backward_out(Tensor grad_input, Tensor grad_output, IntList[2] output_size, IntList[4] input_size, bool align_corners) -> Tensor
+  python_module: nn
+
+- func: upsample_bicubic2d_backward(Tensor grad_output, IntList[2] output_size, IntList[4] input_size, bool align_corners) -> Tensor
+  python_module: nn
+
 - func: upsample_trilinear3d_out(Tensor output, Tensor self, IntList[3] output_size, bool align_corners) -> Tensor
   python_module: nn
 

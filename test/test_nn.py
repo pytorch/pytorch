@@ -6057,6 +6057,32 @@ class TestNN(NNTestCase):
                 input = torch.randn(1, 1, 2, 2, requires_grad=True)
                 gradcheck(lambda x: F.upsample(x, out_size, **kwargs), [input])
 
+    @skipIfRocm
+    def test_upsamplingBicubic2d(self):
+        # test output against known input
+        in_t = torch.arange(4).view(1, 1, 2, 2).type(torch.FloatTensor)
+        expected_out_t = torch.Tensor(
+            [[[[0.00000, 0.31481, 0.68519, 1.00000],
+               [0.62963, 0.94444, 1.31481, 1.62963],
+               [1.37037, 1.68518, 2.05556, 2.37037],
+               [2.00000, 2.31481, 2.68519, 3.00000]]]])
+        out_t = F.interpolate(in_t, scale_factor=2, mode='bicubic', align_corners=True)
+        torch.set_printoptions(precision=5)
+        self.assertEqual(out_t, expected_out_t)
+
+        for align_corners in [True, False]:
+            kwargs = dict(mode='bicubic', align_corners=align_corners)
+
+            # test float scale factor up & downsampling
+            for scale_factor in [0.5, 1.5, 2]:
+                in_t = torch.ones(2, 2, 2, 2)
+                out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
+                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                self.assertEqual(torch.ones(2, 2, out_size, out_size), out_t.data)
+
+                input = torch.randn(2, 2, 2, 2, requires_grad=True)
+                gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+
     def test_upsamplingBilinear2d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='bilinear', align_corners=False)
         in_t_9 = torch.zeros(1, 1, 9, 9)
@@ -6139,6 +6165,12 @@ class TestNN(NNTestCase):
 
                     kwargs = dict(mode='bilinear', align_corners=align_corners)
                     m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
+                    _test_interpolate_helper(_make_input(2), scale_factor, m)
+
+                    kwargs = dict(mode='bicubic', align_corners=align_corners)
+
+                    def m(t):
+                        return F.interpolate(t, scale_factor=scale_factor, **kwargs).to(device)
                     _test_interpolate_helper(_make_input(2), scale_factor, m)
 
                     kwargs = dict(mode='trilinear', align_corners=align_corners)

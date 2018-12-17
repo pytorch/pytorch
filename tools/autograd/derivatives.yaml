@@ -1015,6 +1015,9 @@
 - name: upsample_bilinear2d(Tensor self, IntList output_size, bool align_corners)
   self: upsample_bilinear2d_backward(grad, output_size, self.sizes(), align_corners)
 
+- name: upsample_bicubic2d(Tensor self, IntList output_size, bool align_corners)
+  self: upsample_bicubic2d_backward(grad, output_size, self.sizes(), align_corners)
+
 - name: upsample_trilinear3d(Tensor self, IntList output_size, bool align_corners)
   self: upsample_trilinear3d_backward(grad, output_size, self.sizes(), align_corners)
 
@@ -1243,6 +1246,9 @@
 
 - name: upsample_bilinear2d_backward(Tensor grad_output, IntList output_size, IntList input_size, bool align_corners)
   grad_output: upsample_bilinear2d(grad, output_size, align_corners)
+
+- name: upsample_bicubic2d_backward(Tensor grad_output, IntList output_size, IntList input_size, bool align_corners)
+  grad_output: upsample_bicubic2d(grad, output_size, align_corners)
 
 - name: upsample_trilinear3d_backward(Tensor grad_output, IntList output_size, IntList input_size, bool align_corners)
   grad_output: upsample_trilinear3d(grad, output_size, align_corners)

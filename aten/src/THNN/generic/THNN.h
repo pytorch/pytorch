@@ -706,7 +706,28 @@ TH_API void THNN_(SpatialUpSamplingBilinear_updateOutput)(
           int osizeH,
           int osizeW,
           bool align_corners);
+
 TH_API void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
+          THNNState *state,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          int isizeB,
+          int isizeC,
+          int isizeH,
+          int isizeW,
+          int osizeH,
+          int osizeW,
+          bool align_corners);
+
+TH_API void THNN_(SpatialUpSamplingBicubic_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          int osizeH,
+          int osizeW,
+          bool align_corners);
+
+TH_API void THNN_(SpatialUpSamplingBicubic_updateGradInput)(
           THNNState *state,
           THTensor *gradOutput,
           THTensor *gradInput,
