@@ -107,10 +107,10 @@ void initTreeViewBindings(PyObject *module) {
     .def(py::init([](const Ident& name,
                      Decl decl,
                      std::vector<Stmt> body) {
-      auto r = name.range();
+      const auto& r = name.range();
       return Def::create(r,
                          name,
-                         std::move(decl),
+                         decl,
                          wrap_list(r, std::move(body)));
     }));
   py::class_<Decl, TreeView>(m, "Decl")
@@ -127,7 +127,7 @@ void initTreeViewBindings(PyObject *module) {
     }));
   py::class_<AugAssign, Stmt>(m, "AugAssign")
     .def(py::init([](const Expr& lhs, std::string kind_str, const Expr& rhs) {
-      auto r = lhs.range();
+      const auto& r = lhs.range();
       auto kind = AugAssignKind(Compound::create(stringToKind(kind_str), r, {}));
       return AugAssign::create(r, lhs, kind, rhs);
     }));
@@ -198,13 +198,13 @@ void initTreeViewBindings(PyObject *module) {
     }));
   py::class_<Apply, Expr>(m, "Apply")
     .def(py::init([](const Expr& expr, std::vector<Expr> args, std::vector<Attribute> kwargs) {
-      auto r = expr.range();
+      const auto& r = expr.range();
       return Apply::create(expr.range(), expr,
                            wrap_list(r, std::move(args)), wrap_list(r, std::move(kwargs)));
     }));
   py::class_<Select, Expr>(m, "Select")
     .def(py::init([](const Expr& expr, const Ident& field) {
-      auto r = expr.range();
+      const auto& r = expr.range();
       return Select::create(expr.range(), expr, field);
     }));
   py::class_<TernaryIf, Expr>(m, "TernaryIf")

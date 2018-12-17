@@ -82,11 +82,11 @@ class ExpandGradientOp final : public Operator<Context> {
   bool DoRunWithType() {
     const auto& dY = Input(0);
     const auto& X = Input(1);
-    auto* dX = Output(0);
+
     const int ndim = dY.dim();
     const std::vector<int> dX_dims(X.sizes().cbegin(), X.sizes().cend());
     const std::vector<int> dY_dims(dY.sizes().cbegin(), dY.sizes().cend());
-    dX->ResizeLike(X);
+    auto* dX = Output(0, X.sizes(), at::dtype<T>());
     std::vector<int> axes;
     const int offset = ndim - X.dim();
     for (int i = 0; i < ndim; i++) {

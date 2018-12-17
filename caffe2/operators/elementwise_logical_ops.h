@@ -32,7 +32,7 @@ class WhereOp final : public Operator<Context> {
     auto& select = Input(0);
     auto& left = Input(1);
     auto& right = Input(2);
-    auto* output = Output(0);
+
     if (enable_broadcast_) {
       CAFFE_ENFORCE_EQ(select.dim(), 1);
       CAFFE_ENFORCE_EQ(select.size(0), right.size(0));
@@ -41,7 +41,7 @@ class WhereOp final : public Operator<Context> {
       CAFFE_ENFORCE_EQ(select.sizes(), left.sizes());
       CAFFE_ENFORCE_EQ(select.sizes(), right.sizes());
     }
-    output->ResizeLike(left);
+    auto* output = Output(0, left.sizes(), at::dtype<T>());
 
     const bool* select_data = select.template data<bool>();
     const T* left_data = left.template data<T>();
@@ -147,8 +147,8 @@ class IsMemberOfOp final : public Operator<Context> {
   template <typename T>
   bool DoRunWithType() {
     auto& input = Input(0);
-    auto* output = Output(0);
-    output->ResizeLike(input);
+
+    auto* output = Output(0, input.sizes(), at::dtype<bool>());
 
     if (!values_.has_values()) {
       values_.set(this->template GetRepeatedArgument<T>(VALUE_TAG));

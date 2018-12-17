@@ -151,7 +151,7 @@ struct List : public TreeView {
   T operator[](size_t i) const {
     return T(subtree(i));
   }
-  TreeRef map(std::function<TreeRef(const T&)> fn) {
+  TreeRef map(const std::function<TreeRef(const T&)>& fn) {
     return tree_->map([&](TreeRef v) { return fn(T(v)); });
   }
   static List create(const SourceRange& range, const std::vector<T>& subtrees) {
@@ -177,7 +177,7 @@ struct Maybe : public TreeView {
   T get() const {
     return T(tree_->trees().at(0));
   }
-  TreeRef map(std::function<TreeRef(const T&)> fn) {
+  TreeRef map(const std::function<TreeRef(const T&)>& fn) {
     return tree_->map([&](TreeRef v) { return fn(T(v)); });
   }
   static Maybe<T> create(const SourceRange& range) {
@@ -297,7 +297,7 @@ struct Param : public TreeView {
   explicit Param(const TreeRef& tree) : TreeView(tree) {
     tree_->match(TK_PARAM);
   }
-  static Param create(const SourceRange& range, const Ident& ident, const Expr& type, Maybe<Expr> def) {
+  static Param create(const SourceRange& range, const Ident& ident, const Expr& type, const Maybe<Expr>& def) {
     return Param(Compound::create(TK_PARAM, range, {ident, type, def}));
   }
   Ident ident() const {
@@ -309,7 +309,7 @@ struct Param : public TreeView {
   Maybe<Expr> defaultValue() const {
     return Maybe<Expr>(subtree(2));
   }
-  Param withType(Expr typ) const {
+  Param withType(const Expr& typ) const {
     return Param::create(range(), ident(), typ, defaultValue());
   }
 };
@@ -328,7 +328,7 @@ struct Decl : public TreeView {
   Maybe<Expr> return_type() const {
     return Maybe<Expr>(subtree(1));
   }
-  static Decl create(const SourceRange& range, const List<Param>& params, Maybe<Expr> return_type) {
+  static Decl create(const SourceRange& range, const List<Param>& params, const Maybe<Expr>& return_type) {
     return Decl(Compound::create(TK_DECL, range, {params, return_type}));
   }
 };
@@ -338,7 +338,7 @@ struct Def : public TreeView {
     tree->match(TK_DEF);
   }
   Def withName(std::string new_name) const {
-    auto new_ident = Ident::create(name().range(), new_name);
+    auto new_ident = Ident::create(name().range(), std::move(new_name));
     return create(range(), new_ident, decl(), statements());
   }
   Ident name() const {
@@ -553,7 +553,7 @@ struct ExprStmt : public Stmt {
   Expr expr() {
     return Expr(subtree(0));
   }
-  static ExprStmt create(const SourceRange& range, const Expr list) {
+  static ExprStmt create(const SourceRange& range, const Expr& list) {
     return ExprStmt(Compound::create(TK_EXPR_STMT, range, {list}));
   }
 };

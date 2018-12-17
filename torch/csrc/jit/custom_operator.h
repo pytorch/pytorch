@@ -63,7 +63,7 @@ Node* getTracedNode(
     const std::tuple<Types...>& tuple) {
   auto symbol = Symbol::fromQualString(schema.name());
   const auto& graph = tracer::getTracingState()->graph;
-  Node* node = graph->create(std::move(symbol), /*num_outputs=*/0);
+  Node* node = graph->create(symbol, /*num_outputs=*/0);
   tracer::recordSourceLocation(node);
 
   // Hack to call addInputs for the parameter pack in a sequenced fashion.
