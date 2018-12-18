@@ -5,12 +5,13 @@ import collections
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
-from caffe2.python import core, dyndep
+from caffe2.python import core, dyndep, workspace
 from dnnlowp_test_utils import check_quantized_results_close
 from hypothesis import assume, given
 
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
+workspace.GlobalInit(["caffe2", "--caffe2_omp_num_threads=11"])
 
 
 class DNNLowPOpPoolTest(hu.HypothesisTestCase):
@@ -150,7 +151,7 @@ class DNNLowPOpPoolTest(hu.HypothesisTestCase):
             X = np.round(np.random.rand(*((N,) + sizes + (C,))) * (max_ - min_) + min_)
             X = X.astype(np.float32)
             X[(0,) * (ndim + 2)] = min_
-            X[(0, 1,) + (0,) * ndim] = max_
+            X[(0, 1) + (0,) * ndim] = max_
 
         Output = collections.namedtuple("Output", ["Y", "op_type", "engine"])
         outputs = []

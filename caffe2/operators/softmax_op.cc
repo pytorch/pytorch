@@ -7,11 +7,11 @@ namespace caffe2 {
 template <>
 bool SoftmaxOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
-  auto* Y = Output(0);
+
   const auto canonical_axis = X.canonical_axis_index(axis_);
   const int N = X.size_to_dim(canonical_axis);
   const int D = X.size_from_dim(canonical_axis);
-  Y->ResizeLike(X);
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
   float* Ydata = Y->template mutable_data<float>();
   // First, get scales
   if (scale_.numel() != N) {
@@ -44,7 +44,7 @@ template <>
 bool SoftmaxGradientOp<float, CPUContext>::RunOnDevice() {
   auto& Y = Input(0);
   auto& dY = Input(1);
-  auto* dX = Output(0);
+
   const auto canonical_axis = Y.canonical_axis_index(axis_);
   const int N = Y.size_to_dim(canonical_axis);
   const int D = Y.size_from_dim(canonical_axis);
@@ -57,7 +57,7 @@ bool SoftmaxGradientOp<float, CPUContext>::RunOnDevice() {
     math::Set<float, CPUContext>(D, 1.f, sum_multiplier_.mutable_data<float>(),
                                  &context_);
   }
-  dX->ResizeLike(Y);
+  auto* dX = Output(0, Y.sizes(), at::dtype<float>());
   const float* Ydata = Y.data<float>();
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->mutable_data<float>();

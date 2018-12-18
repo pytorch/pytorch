@@ -27,3 +27,27 @@ def gather_paths(env_vars):
 
 def lib_paths_from_base(base_path):
     return [os.path.join(base_path, s) for s in ['lib/x64', 'lib', 'lib64']]
+
+
+def hotpatch_var(var, prefix='USE_'):
+    if check_env_flag('NO_' + var):
+        os.environ[prefix + var] = '0'
+    elif check_negative_env_flag('NO_' + var):
+        os.environ[prefix + var] = '1'
+    elif check_env_flag('WITH_' + var):
+        os.environ[prefix + var] = '1'
+    elif check_negative_env_flag('WITH_' + var):
+        os.environ[prefix + var] = '0'
+
+
+def hotpatch_build_env_vars():
+    # Before we run the setup_helpers, let's look for NO_* and WITH_*
+    # variables and hotpatch environment with the USE_* equivalent
+    use_env_vars = ['CUDA', 'CUDNN', 'FBGEMM', 'MIOPEN', 'MKLDNN', 'NNPACK', 'DISTRIBUTED',
+                    'OPENCV', 'TENSORRT', 'QNNPACK', 'FFMPEG', 'SYSTEM_NCCL',
+                    'GLOO_IBVERBS']
+    list(map(hotpatch_var, use_env_vars))
+
+    # Also hotpatch a few with BUILD_* equivalent
+    build_env_vars = ['BINARY', 'TEST', 'CAFFE2_OPS']
+    [hotpatch_var(v, 'BUILD_') for v in build_env_vars]

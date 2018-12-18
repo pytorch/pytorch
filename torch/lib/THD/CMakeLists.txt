@@ -105,7 +105,7 @@ SET(all_h THD.h ${base_h} ${process_group_h})
 
 EXCLUDE_DIR(all_cpp ".*/generic/.*\\.cpp$")
 
-INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
+INCLUDE_DIRECTORIES("${CMAKE_CURRENT_SOURCE_DIR}/..")
 
 ADD_LIBRARY(THD STATIC ${all_cpp})
 
@@ -114,10 +114,8 @@ TARGET_COMPILE_DEFINITIONS(THD PRIVATE "_THD_CORE=1")
 ADD_DEPENDENCIES(THD caffe2)
 
 target_include_directories(THD PRIVATE
-  ${CMAKE_SOURCE_DIR}/aten/src/TH # provides "THAllocator.h" to THCGeneral.h
   ${CMAKE_BINARY_DIR}/aten/src # provides "ATen/TypeExtendedInterface.h" to ATen.h
   ${CMAKE_BINARY_DIR}/caffe2/aten/src # provides <TH/THGeneral.h> to THC.h
-  ${CMAKE_BINARY_DIR}/caffe2/aten/src/THC # provides "THCGeneral.h" to THC.h
   )
 
 set_property(TARGET THD PROPERTY POSITION_INDEPENDENT_CODE ON)

@@ -1,7 +1,7 @@
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/type.h"
-#include "torch/csrc/jit/argument_spec.h"
-#include "torch/csrc/jit/operator.h"
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/type.h>
+#include <torch/csrc/jit/argument_spec.h>
+#include <torch/csrc/jit/operator.h>
 
 #include <vector>
 

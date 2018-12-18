@@ -826,10 +826,10 @@ Example::
 """)
 
 add_docstr(torch.cholesky, r"""
-cholesky(a, upper=False, out=None) -> Tensor
+cholesky(A, upper=False, out=None) -> Tensor
 
 Computes the Cholesky decomposition of a symmetric positive-definite
-matrix :math:`A`.
+matrix :math:`A` or for batches of symmetric positive-definite matrices.
 
 If :attr:`upper` is ``True``, the returned matrix `U` is upper-triangular, and
 the decomposition has the form:
@@ -845,16 +845,23 @@ the decomposition has the form:
 
     A = LL^T
 
+If :attr:`upper` is ``True``, and :attr:`A` is a batch of symmetric positive-definite
+matrices, then the returned tensor will be composed of upper-triangular Cholesky factors
+of each of the individual matrices. Similarly, when :attr:`upper` is ``False``, the returned
+tensor will be composed of lower-triangular Cholesky factors of each of the individual
+matrices.
+
 Args:
-    a (Tensor): the input 2-D tensor, a symmetric positive-definite matrix
-    upper (bool, optional): flag that indicates whether to return the
+    a (Tensor): the input tensor of size (*, n, n) where `*` is zero or more
+                batch dimensions consisting of symmetric positive-definite matrices.
+    upper (bool, optional): flag that indicates whether to return a
                             upper or lower triangular matrix. Default: ``False``
     out (Tensor, optional): the output matrix
 
 Example::
 
     >>> a = torch.randn(3, 3)
-    >>> a = torch.mm(a, a.t()) # make symmetric positive definite
+    >>> a = torch.mm(a, a.t()) # make symmetric positive-definite
     >>> l = torch.cholesky(a)
     >>> a
     tensor([[ 2.4112, -0.7486,  1.4551],
@@ -868,6 +875,12 @@ Example::
     tensor([[ 2.4112, -0.7486,  1.4551],
             [-0.7486,  1.3544,  0.1294],
             [ 1.4551,  0.1294,  1.6724]])
+    >>> a = torch.randn(3, 2, 2)
+    >>> a = torch.matmul(a, a.transpose(-1, -2)) + 1e-03 # make symmetric positive-definite
+    >>> l = torch.cholesky(a)
+    >>> z = torch.matmul(l, l.transpose(-1, -2))
+    >>> torch.max(torch.abs(z - a)) # Max non-zero
+    tensor(2.3842e-07)
 """)
 
 add_docstr(torch.clamp,
@@ -2254,6 +2267,8 @@ Example::
     tensor([-10.,  -5.,   0.,   5.,  10.])
     >>> torch.linspace(start=-10, end=10, steps=5)
     tensor([-10.,  -5.,   0.,   5.,  10.])
+    >>> torch.linspace(start=-10, end=10, steps=1)
+    tensor([-10.])
 """.format(**factory_common_args))
 
 add_docstr(torch.log,
@@ -2382,6 +2397,8 @@ Example::
     tensor([ 1.0000e-10,  1.0000e-05,  1.0000e+00,  1.0000e+05,  1.0000e+10])
     >>> torch.logspace(start=0.1, end=1.0, steps=5)
     tensor([  1.2589,   2.1135,   3.5481,   5.9566,  10.0000])
+    >>> torch.logspace(start=0.1, end=1.0, steps=1)
+    tensor([1.2589])
 """.format(**factory_common_args))
 
 add_docstr(torch.logsumexp,
@@ -2569,7 +2586,7 @@ in the output tensors having 1 fewer dimension than :attr:`input`.
 Args:
     input (Tensor): the input tensor
     dim (int): the dimension to reduce
-    keepdim (bool): whether the output tensors have :attr:`dim` retained or not
+    keepdim (bool, optional): whether the output tensors have :attr:`dim` retained or not. Default: ``False``.
     out (tuple, optional): the result tuple of two output tensors (max, max_indices)
 
 Example::
@@ -2634,12 +2651,13 @@ Example::
 .. function:: mean(input, dim, keepdim=False, out=None) -> Tensor
 
 Returns the mean value of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim`.
+dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
+reduce over all of them.
 
 If :attr:`keepdim` is ``True``, the output tensor is of the same size
-as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+as :attr:`input` except in the dimension(s) :attr:`dim` where it is of size 1.
 Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in the
-output tensor having 1 fewer dimension.
+output tensor having 1 (or ``len(dim)``) fewer dimension(s).
 
 Args:
     input (Tensor): the input tensor
@@ -3437,7 +3455,7 @@ Example::
 
     >>> a = torch.randn(3, 3)
     >>> a = torch.mm(a, a.t()) # make symmetric positive definite
-    >>> u = torch.cholesky(a)
+    >>> u = torch.cholesky(a, upper=True)
     >>> a
     tensor([[ 0.7747, -1.9549,  1.3086],
             [-1.9549,  6.7546, -5.4114],
@@ -3712,7 +3730,7 @@ The shape of the tensor is defined by the variable argument :attr:`size`.
 
 .. note:
     With the global dtype default (`torch.float32`), this function returns
-    a tensor with dtype `torch.float32`, NOT an integer dtype.
+    a tensor with dtype `torch.int64`.
 
 Args:
     low (int, optional): Lowest integer to be drawn from the distribution. Default: 0.
@@ -3727,17 +3745,17 @@ Args:
 Example::
 
     >>> torch.randint(3, 5, (3,))
-    tensor([ 4.,  3.,  4.])
+    tensor([4, 3, 4])
 
 
-    >>> torch.randint(10, (2,2))
-    tensor([[ 0.,  2.],
-            [ 5.,  5.]])
+    >>> torch.randint(10, (2, 2))
+    tensor([[0, 2],
+            [5, 5]])
 
 
-    >>> torch.randint(3, 10, (2,2))
-    tensor([[ 4.,  5.],
-            [ 6.,  7.]])
+    >>> torch.randint(3, 10, (2, 2))
+    tensor([[4, 5],
+            [6, 7]])
 
 
 """.format(**factory_common_args))
@@ -3752,7 +3770,7 @@ random integers generated uniformly between :attr:`low` (inclusive) and
 
 .. note:
     With the global dtype default (`torch.float32`), this function returns
-    a tensor with dtype `torch.float32`, NOT an integer dtype.
+    a tensor with dtype `torch.int64`.
 
 Args:
     {input}
@@ -3832,7 +3850,7 @@ Args:
 Example::
 
     >>> torch.randperm(4)
-    tensor([ 2,  1,  0,  3])
+    tensor([2, 1, 0, 3])
 """.format(**factory_common_args))
 
 add_docstr(torch.tensor,
@@ -4474,13 +4492,13 @@ Example::
 .. function:: sum(input, dim, keepdim=False, dtype=None) -> Tensor
 
 Returns the sum of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim`. If :attr::`dim` is a list of dimensions,
+dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
 reduce over all of them.
 
 If :attr:`keepdim` is ``True``, the output tensor is of the same size
-as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
-Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in
-the output tensor having 1 fewer dimension than :attr:`input`.
+as :attr:`input` except in the dimension(s) :attr:`dim` where it is of size 1.
+Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in the
+output tensor having 1 (or ``len(dim)``) fewer dimension(s).
 
 Args:
     input (Tensor): the input tensor
@@ -4694,7 +4712,7 @@ add_docstr(torch.roll,
            r"""
 roll(input, shifts, dims=None) -> Tensor
 
-Roll the tensor along the given dimension. Elements that are shifted beyond the
+Roll the tensor along the given dimension(s). Elements that are shifted beyond the
 last position are re-introduced at the first position. If a dimension is not
 specified, the tensor will be flattened before rolling and then restored
 to the original shape.
@@ -4702,7 +4720,9 @@ to the original shape.
 Args:
     input (Tensor): the input tensor
     shifts (int or tuple of ints): The number of places by which the elements
-        of the tensor are shifted
+        of the tensor are shifted. If shifts is a tuple, dims must be a tuple of
+        the same size, and each dimension will be rolled by the corresponding
+        value
     dims (int or tuple of ints): Axis along which to roll
 
 Example::
@@ -4723,6 +4743,11 @@ Example::
             [5, 6],
             [7, 8],
             [1, 2]])
+    >>> torch.roll(x, shifts=(2, 1), dims=(0, 1))
+    tensor([[6, 5],
+            [8, 7],
+            [2, 1],
+            [4, 3]])
 """)
 
 add_docstr(torch.rot90,
@@ -4962,6 +4987,55 @@ Example::
             [-0.0614, -0.7344, -1.3164,  0.0000,  0.0000,  0.0000]])
 """)
 
+# docstr is split in two parts to avoid format mis-captureing :math: braces '{}'
+# as common args.
+add_docstr(torch.tril_indices,
+           r"""
+tril_indices(row, column, offset=0, dtype=torch.long, device='cpu', layout=torch.strided) -> Tensor
+
+Returns the indices of the lower triangular part of a :attr:`row`-by-
+:attr:`column` matrix in a 2-by-N Tensor, where the first row contains row
+coordinates of all indices and the second row contains column coordinates.
+Indices are ordered based on rows and then columns.
+
+The lower triangular part of the matrix is defined as the elements on and
+below the diagonal.
+
+The argument :attr:`offset` controls which diagonal to consider. If
+:attr:`offset` = 0, all elements on and below the main diagonal are
+retained. A positive value includes just as many diagonals above the main
+diagonal, and similarly a negative value excludes just as many diagonals below
+the main diagonal. The main diagonal are the set of indices
+:math:`\lbrace (i, i) \rbrace` for :math:`i \in [0, \min\{d_{1}, d_{2}\} - 1]`
+where :math:`d_{1}, d_{2}` are the dimensions of the matrix.
+
+Args:
+    row (``int``): number of rows in the 2-D matrix.
+    column (``int``): number of columns in the 2-D matrix.
+    offset (``int``): diagonal offset from the main diagonal.
+        Default: if not provided, 0.
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+        Default: if ``None``, ``torch.long``.
+    device (:class:`torch.device`, optional): currently only support ``cpu``.
+    layout (:class:`torch.layout`, optional): currently only support ``torch.strided``.
+
+Example::
+    >>> a = torch.tril_indices(3, 3)
+    >>> a
+    tensor([[0, 1, 1, 2, 2, 2],
+            [0, 0, 1, 0, 1, 2]])
+
+    >>> a = torch.tril_indices(4, 3, -1)
+    >>> a
+    tensor([[1, 2, 2, 3, 3, 3],
+            [0, 0, 1, 0, 1, 2]])
+
+    >>> a = torch.tril_indices(4, 3, 1)
+    >>> a
+    tensor([[0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3],
+            [0, 1, 0, 1, 2, 0, 1, 2, 0, 1, 2]])
+""")
+
 add_docstr(torch.triu,
            r"""
 triu(input, diagonal=0, out=None) -> Tensor
@@ -5021,6 +5095,55 @@ Example::
             [-0.2447,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
             [ 0.4333,  0.3146,  0.0000,  0.0000,  0.0000,  0.0000],
             [-0.9888,  1.0679, -1.3337,  0.0000,  0.0000,  0.0000]])
+""")
+
+# docstr is split in two parts to avoid format mis-captureing :math: braces '{}'
+# as common args.
+add_docstr(torch.triu_indices,
+           r"""
+triu_indices(row, column, offset=0, dtype=torch.long, device='cpu', layout=torch.strided) -> Tensor
+
+Returns the indices of the upper triangular part of a :attr:`row` by
+:attr:`column` matrix in a 2-by-N Tensor, where the first row contains row
+coordinates of all indices and the second row contains column coordinates.
+Indices are ordered based on rows and then columns.
+
+The upper triangular part of the matrix is defined as the elements on and
+above the diagonal.
+
+The argument :attr:`offset` controls which diagonal to consider. If
+:attr:`offset` = 0, all elements on and above the main diagonal are
+retained. A positive value excludes just as many diagonals above the main
+diagonal, and similarly a negative value includes just as many diagonals below
+the main diagonal. The main diagonal are the set of indices
+:math:`\lbrace (i, i) \rbrace` for :math:`i \in [0, \min\{d_{1}, d_{2}\} - 1]`
+where :math:`d_{1}, d_{2}` are the dimensions of the matrix.
+
+Args:
+    row (``int``): number of rows in the 2-D matrix.
+    column (``int``): number of columns in the 2-D matrix.
+    offset (``int``): diagonal offset from the main diagonal.
+        Default: if not provided, 0.
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+        Default: if ``None``, ``torch.long``.
+    device (:class:`torch.device`, optional): currently only support ``cpu``.
+    layout (:class:`torch.layout`, optional): currently only support ``torch.strided``.
+
+Example::
+    >>> a = torch.triu_indices(3, 3)
+    >>> a
+    tensor([[0, 0, 0, 1, 1, 2],
+            [0, 1, 2, 1, 2, 2]])
+
+    >>> a = torch.triu_indices(4, 3, -1)
+    >>> a
+    tensor([[0, 0, 0, 1, 1, 1, 2, 2, 3],
+            [0, 1, 2, 0, 1, 2, 1, 2, 2]])
+
+    >>> a = torch.triu_indices(4, 3, 1)
+    >>> a
+    tensor([[0, 0, 1],
+            [1, 2, 2]])
 """)
 
 add_docstr(torch.trtrs,
@@ -5229,6 +5352,40 @@ Example::
     tensor([[ 0.,  0.,  0.],
             [ 0.,  0.,  0.]])
 """.format(**factory_like_common_args))
+
+add_docstr(torch.btrifact,
+           r"""
+btrifact(A, pivot=True) -> (Tensor, IntTensor)
+
+Batch LU factorization.
+
+Returns a tuple containing the LU factorization and pivots. Pivoting is done if
+:attr:`pivot` is set.
+
+Arguments:
+    A (Tensor): the tensor to factor
+    pivot (bool, optional): controls whether pivoting is done
+
+Returns:
+    A tuple containing factorization and pivots.
+
+Example::
+
+    >>> A = torch.randn(2, 3, 3)
+    >>> A_LU, pivots = torch.btrifact(A)
+    >>> A_LU
+    tensor([[[ 1.3506,  2.5558, -0.0816],
+             [ 0.1684,  1.1551,  0.1940],
+             [ 0.1193,  0.6189, -0.5497]],
+
+            [[ 0.4526,  1.2526, -0.3285],
+             [-0.7988,  0.7175, -0.9701],
+             [ 0.2634, -0.9255, -0.3459]]])
+
+    >>> pivots
+    tensor([[ 3,  3,  3],
+            [ 3,  3,  3]], dtype=torch.int32)
+""")
 
 add_docstr(torch.btrifact_with_info,
            r"""

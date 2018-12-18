@@ -1,0 +1,12 @@
+#!/bin/bash
+set -e
+echo "Running pre-commit flake8"
+python tools/flake8_hook.py
+echo "Running pre-commit clang-tidy"
+python tools/clang_tidy.py \
+  --paths torch/csrc \
+  --diff HEAD \
+  -g"-torch/csrc/distributed/Module.cpp" \
+  -g"-torch/csrc/jit/export.cpp" \
+  -g"-torch/csrc/jit/import.cpp" \
+  -j

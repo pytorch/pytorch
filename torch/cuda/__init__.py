@@ -64,7 +64,7 @@ def _load_cudart():
         return lib
 
     raise RuntimeError(
-        "couldn't find libcudart. Make sure CUDA libraries are installed in a"
+        "couldn't find libcudart. Make sure CUDA libraries are installed in a "
         "default location, or that they're in {}."
         .format('DYLD_LIBRARY_PATH' if platform.system() == 'Darwin' else
                 'LD_LIBRARY_PATH'))

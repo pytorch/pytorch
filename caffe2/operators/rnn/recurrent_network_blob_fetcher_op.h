@@ -40,7 +40,7 @@ class RecurrentNetworkBlobFetcherOp final : public Operator<Context> {
         const auto& currentTensor = currentBlob->Get<Tensor>();
 
         std::string newBlobName =
-            prefix_ + std::string("_") + blob_name + caffe2::to_string(i);
+            prefix_ + std::string("_") + blob_name + c10::to_string(i);
         blob_names_vector.push_back(newBlobName);
 
         BlobGetMutableTensor(ws_->CreateBlob(newBlobName), CPU)
@@ -51,8 +51,8 @@ class RecurrentNetworkBlobFetcherOp final : public Operator<Context> {
       }
     }
 
-    auto* output = Output(0);
-    output->Resize(blob_names_vector.size());
+    auto* output =
+      Output(0, {static_cast<int64_t>(blob_names_vector.size())}, at::dtype<std::string>());
     std::copy(
         blob_names_vector.begin(),
         blob_names_vector.end(),

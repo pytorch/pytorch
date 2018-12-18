@@ -56,6 +56,56 @@ ONNX_PYTORCH_OPERATOR_SET_SCHEMA(
             "Constrain index and length to integral tensors."));
 
 ONNX_PYTORCH_OPERATOR_SET_SCHEMA(
+    SparseLengthsWeightedSum,
+    1,
+    OpSchema()
+        .SetDoc("Mirror Caffe2 SparseLengthsWeightedSum operator")
+        .Input(0, "DATA", "data tensor", "T1")
+        .Input(1, "WEIGHTS", "data tensor", "T1")
+        .Input(2, "INDICES", "indices tensor", "T2")
+        .Input(3, "LENGTHS", "lengths tensor", "T2")
+        .Output(0, "output", "Output tensor", "T1")
+        .TypeConstraint(
+            "T1",
+            {"tensor(float16)", "tensor(float)", "tensor(double)"},
+            "Constrain input and output types to float tensors.")
+        .TypeConstraint(
+            "T2",
+            {"tensor(int8)",
+             "tensor(int16)",
+             "tensor(int32)",
+             "tensor(int64)",
+             "tensor(uint8)",
+             "tensor(uint16)",
+             "tensor(uint32)",
+             "tensor(uint64)"},
+            "Constrain index and length to integral tensors."));
+
+ONNX_PYTORCH_OPERATOR_SET_SCHEMA(
+    BatchGather,
+    1,
+    OpSchema()
+        .SetDoc("Mirror Caffe2 BatchGather operator")
+        .Input(0, "DATA", "data tensor", "T1")
+        .Input(1, "INDICES", "indices tensor", "T2")
+        .Output(0, "output", "Output tensor", "T1")
+        .TypeConstraint(
+            "T1",
+            {"tensor(float16)", "tensor(float)", "tensor(double)"},
+            "Constrain input and output types to float tensors.")
+        .TypeConstraint(
+            "T2",
+            {"tensor(int8)",
+             "tensor(int16)",
+             "tensor(int32)",
+             "tensor(int64)",
+             "tensor(uint8)",
+             "tensor(uint16)",
+             "tensor(uint32)",
+             "tensor(uint64)"},
+            "Constrain index and length to integral tensors."));
+
+ONNX_PYTORCH_OPERATOR_SET_SCHEMA(
     DotProduct,
     1,
     OpSchema()
