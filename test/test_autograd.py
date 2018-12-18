@@ -2593,128 +2593,128 @@ class TestAutograd(TestCase):
         print("After backward", flush=True)
         self.assertFalse(s.grad is None or s.grad.abs().sum().item() == 0)
 
-    # @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
-    # @skipIfRocm
-    # def test_lstmcell_backward_only_one_output_grad(self):
-    #     # checks that undefined gradients doen't hamper the backward
-    #     # see #11872
-    #     dev = torch.device('cuda')
-    #     l = torch.nn.LSTMCell(2, 3).to(dev).double()
-    #     s = torch.randn(1, 2, device=dev, dtype=torch.double, requires_grad=True)
-    #     for i in range(2):
-    #         out = l(s)[i]
-    #         out.sum().backward()
-    #         self.assertFalse(s.grad is None or s.grad.abs().sum().item() == 0)
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
+    @skipIfRocm
+    def test_lstmcell_backward_only_one_output_grad(self):
+        # checks that undefined gradients doen't hamper the backward
+        # see #11872
+        dev = torch.device('cuda')
+        l = torch.nn.LSTMCell(2, 3).to(dev).double()
+        s = torch.randn(1, 2, device=dev, dtype=torch.double, requires_grad=True)
+        for i in range(2):
+            out = l(s)[i]
+            out.sum().backward()
+            self.assertFalse(s.grad is None or s.grad.abs().sum().item() == 0)
 
-    # def test_anomaly_detect_nan(self):
-    #     size = 10
+    def test_anomaly_detect_nan(self):
+        size = 10
 
-    #     class MyFunc(Function):
-    #         @staticmethod
-    #         def forward(ctx, inp1, inp2, fail_0th):
-    #             ctx.fail_0th = fail_0th
-    #             return inp1.sum(0, keepdim=True)
+        class MyFunc(Function):
+            @staticmethod
+            def forward(ctx, inp1, inp2, fail_0th):
+                ctx.fail_0th = fail_0th
+                return inp1.sum(0, keepdim=True)
 
-    #         @staticmethod
-    #         def backward(ctx, gO):
-    #             gI = gO.clone().expand(size)
-    #             gI[0] = 0
-    #             gI[0] /= 0  # Generate a nan
-    #             if ctx.fail_0th:
-    #                 return gI, None, None
-    #             else:
-    #                 return None, gI, None
+            @staticmethod
+            def backward(ctx, gO):
+                gI = gO.clone().expand(size)
+                gI[0] = 0
+                gI[0] /= 0  # Generate a nan
+                if ctx.fail_0th:
+                    return gI, None, None
+                else:
+                    return None, gI, None
 
-    #     inp = torch.rand(size, requires_grad=True)
-    #     out = MyFunc.apply(inp, inp, True)
-    #     out.backward()  # Should not fail
+        inp = torch.rand(size, requires_grad=True)
+        out = MyFunc.apply(inp, inp, True)
+        out.backward()  # Should not fail
 
-    #     inp = torch.rand(size, requires_grad=True)
-    #     out = MyFunc.apply(inp, inp, True)
-    #     with self.assertRaisesRegex(RuntimeError, "Function 'MyFuncBackward' returned nan values in its 0th output."):
-    #         with warnings.catch_warnings(record=True) as w:
-    #             with detect_anomaly():
-    #                 out.backward()
-    #         self.assertIn('No forward pass information', str(w[0].message))
+        inp = torch.rand(size, requires_grad=True)
+        out = MyFunc.apply(inp, inp, True)
+        with self.assertRaisesRegex(RuntimeError, "Function 'MyFuncBackward' returned nan values in its 0th output."):
+            with warnings.catch_warnings(record=True) as w:
+                with detect_anomaly():
+                    out.backward()
+            self.assertIn('No forward pass information', str(w[0].message))
 
-    #     inp = torch.rand(size, requires_grad=True)
-    #     with self.assertRaisesRegex(RuntimeError, "Function 'MyFuncBackward' returned nan values in its 1th output."):
-    #         with warnings.catch_warnings(record=True) as w:
-    #             with detect_anomaly():
-    #                 out = MyFunc.apply(inp, inp, False)
-    #                 out.backward()
-    #         self.assertIn('MyFunc.apply', str(w[0].message))
+        inp = torch.rand(size, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "Function 'MyFuncBackward' returned nan values in its 1th output."):
+            with warnings.catch_warnings(record=True) as w:
+                with detect_anomaly():
+                    out = MyFunc.apply(inp, inp, False)
+                    out.backward()
+            self.assertIn('MyFunc.apply', str(w[0].message))
 
-    # @skipIfNoLapack
-    # def test_symeig_no_eigenvectors(self):
-    #     A = torch.tensor([[1., 2.], [2., 4.]], dtype=torch.float32, requires_grad=True)
-    #     w, v = torch.symeig(A, eigenvectors=False)
-    #     with self.assertRaisesRegex(RuntimeError, 'cannot compute backward'):
-    #         torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
+    @skipIfNoLapack
+    def test_symeig_no_eigenvectors(self):
+        A = torch.tensor([[1., 2.], [2., 4.]], dtype=torch.float32, requires_grad=True)
+        w, v = torch.symeig(A, eigenvectors=False)
+        with self.assertRaisesRegex(RuntimeError, 'cannot compute backward'):
+            torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
 
-    # @skipIfRocm
-    # @skipIfNoLapack
-    # def test_svd_no_singularvectors(self):
-    #     A = torch.randn(2, 2, dtype=torch.float32, requires_grad=True)
-    #     u, s, v = torch.svd(A, compute_uv=False)
-    #     with self.assertRaisesRegex(RuntimeError, 'cannot compute backward'):
-    #         torch.autograd.backward([u, s, v], [torch.ones_like(u), torch.ones_like(s), torch.ones_like(v)])
+    @skipIfRocm
+    @skipIfNoLapack
+    def test_svd_no_singularvectors(self):
+        A = torch.randn(2, 2, dtype=torch.float32, requires_grad=True)
+        u, s, v = torch.svd(A, compute_uv=False)
+        with self.assertRaisesRegex(RuntimeError, 'cannot compute backward'):
+            torch.autograd.backward([u, s, v], [torch.ones_like(u), torch.ones_like(s), torch.ones_like(v)])
 
-    # def test_no_grad_copy(self):
-    #     # create autograd function that saves grad pointer as class static
-    #     class MyFunc(Function):
-    #         static_grad_ptr = None
+    def test_no_grad_copy(self):
+        # create autograd function that saves grad pointer as class static
+        class MyFunc(Function):
+            static_grad_ptr = None
 
-    #         @staticmethod
-    #         def forward(ctx, inp1, inp2):
-    #             return inp1 + inp2
+            @staticmethod
+            def forward(ctx, inp1, inp2):
+                return inp1 + inp2
 
-    #         @staticmethod
-    #         def backward(ctx, grad):
-    #             MyFunc.static_grad_ptr = grad.data_ptr()
-    #             return grad, grad
+            @staticmethod
+            def backward(ctx, grad):
+                MyFunc.static_grad_ptr = grad.data_ptr()
+                return grad, grad
 
-    #     class NonContGradFunc(Function):
-    #         @staticmethod
-    #         def forward(ctx, inp1):
-    #             ctx.size = inp1.size()
-    #             return torch.tensor([1.])
+        class NonContGradFunc(Function):
+            @staticmethod
+            def forward(ctx, inp1):
+                ctx.size = inp1.size()
+                return torch.tensor([1.])
 
-    #         @staticmethod
-    #         def backward(ctx, grad):
-    #             return torch.ones(1).expand(ctx.size)
+            @staticmethod
+            def backward(ctx, grad):
+                return torch.ones(1).expand(ctx.size)
 
-    #     a = torch.randn(5, 6, requires_grad=True)
-    #     b = torch.randn(5, 6, requires_grad=True)
-    #     # non-contiguous grad should be copied
-    #     NonContGradFunc.apply(MyFunc.apply(a, b)).backward()
-    #     self.assertFalse(a.grad.data_ptr() == MyFunc.static_grad_ptr)
-    #     self.assertFalse(b.grad.data_ptr() == MyFunc.static_grad_ptr)
-    #     # test case that should trigger no copy for one of a,b
-    #     a.grad = b.grad = None
-    #     MyFunc.apply(a, b)[1][0].backward()
-    #     p_g = MyFunc.static_grad_ptr
-    #     p_a = a.grad.data_ptr()
-    #     p_b = b.grad.data_ptr()
-    #     # check a,b uses different grad buffer
-    #     self.assertFalse(p_a == p_b)
-    #     # check one of them is using the computed buffer
-    #     self.assertTrue(p_a == p_g or p_b == p_g)
+        a = torch.randn(5, 6, requires_grad=True)
+        b = torch.randn(5, 6, requires_grad=True)
+        # non-contiguous grad should be copied
+        NonContGradFunc.apply(MyFunc.apply(a, b)).backward()
+        self.assertFalse(a.grad.data_ptr() == MyFunc.static_grad_ptr)
+        self.assertFalse(b.grad.data_ptr() == MyFunc.static_grad_ptr)
+        # test case that should trigger no copy for one of a,b
+        a.grad = b.grad = None
+        MyFunc.apply(a, b)[1][0].backward()
+        p_g = MyFunc.static_grad_ptr
+        p_a = a.grad.data_ptr()
+        p_b = b.grad.data_ptr()
+        # check a,b uses different grad buffer
+        self.assertFalse(p_a == p_b)
+        # check one of them is using the computed buffer
+        self.assertTrue(p_a == p_g or p_b == p_g)
 
-    # def test_gradcheck_single_input(self):
-    #     def f(inp):
-    #         return inp.mul(5)
+    def test_gradcheck_single_input(self):
+        def f(inp):
+            return inp.mul(5)
 
-    #     gradcheck(f, torch.rand(10, dtype=torch.float64, requires_grad=True))
-    #     gradgradcheck(f, torch.rand(10, dtype=torch.float64, requires_grad=True))
+        gradcheck(f, torch.rand(10, dtype=torch.float64, requires_grad=True))
+        gradgradcheck(f, torch.rand(10, dtype=torch.float64, requires_grad=True))
 
-    # def test_gradcheck_sparse_input(self):
-    #     def fn(sparse):
-    #         return torch.sparse.sum(sparse)
+    def test_gradcheck_sparse_input(self):
+        def fn(sparse):
+            return torch.sparse.sum(sparse)
 
-    #     gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True), check_sparse_nnz=True)
-    #     with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
-    #         gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True), check_sparse_nnz=False)
+        gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True), check_sparse_nnz=True)
+        with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
+            gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True), check_sparse_nnz=False)
 
 
 def index_variable(shape, max_indices):
