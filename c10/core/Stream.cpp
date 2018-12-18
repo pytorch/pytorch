@@ -1,4 +1,4 @@
-#include <c10/Stream.h>
+#include <c10/core/Stream.h>
 
 namespace c10 {
 

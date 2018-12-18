@@ -21,7 +21,7 @@
 #endif // CAFFE2_USE_CUDNN
 
 #include <c10/core/Device.h>
-#include <c10/Stream.h>
+#include <c10/core/Stream.h>
 
 namespace caffe2 {
 

@@ -1,4 +1,4 @@
-#include <c10/impl/DeviceGuardImplInterface.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 
 namespace c10 {
 namespace impl {

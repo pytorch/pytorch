@@ -3,8 +3,8 @@
 #include <c10/cuda/impl/CUDAGuardImpl.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/core/DeviceType.h>
-#include <c10/impl/InlineDeviceGuard.h>
-#include <c10/impl/InlineStreamGuard.h>
+#include <c10/core/impl/InlineDeviceGuard.h>
+#include <c10/core/impl/InlineStreamGuard.h>
 
 #include <cstddef>
 

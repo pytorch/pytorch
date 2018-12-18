@@ -2,7 +2,7 @@
 #include <iostream>
 #include <memory>
 
-#include "c10/util/Registry.h"
+#include <c10/util/Registry.h>
 
 // Note: we use a different namespace to test if the macros defined in
 // Registry.h actuall works with a different namespace from c10.

@@ -2,7 +2,7 @@
 
 #include <c10/core/Device.h>
 #include <c10/core/DeviceType.h>
-#include <c10/Stream.h>
+#include <c10/core/Stream.h>
 
 // Just for C10_ANONYMOUS_VARIABLE
 #include <c10/util/Registry.h>

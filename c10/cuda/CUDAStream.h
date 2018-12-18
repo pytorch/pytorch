@@ -7,7 +7,7 @@
 
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/util/Exception.h>
-#include <c10/Stream.h>
+#include <c10/core/Stream.h>
 
 /*
 * Stream pool note.
