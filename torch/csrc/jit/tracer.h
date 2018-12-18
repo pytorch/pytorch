@@ -32,14 +32,20 @@ TORCH_API void setRecordSourceLocation(void (*v)(Node*));
 // Having finished adding a new 'node' to the graph IR 'setValueTrace' associates
 // this node with an output variable, so that further operations involving this
 // variable know which node in the IR to reference.
-inline void setValueTrace(const Variable& var, Value *value) {
-  JIT_ASSERT(var.defined());
-  getTracingState()->value_map[var] = value;
-}
+TORCH_API void setValueTrace(const IValue& v, Value* value);
 
 inline void delValueTrace(const Variable& var) {
   JIT_ASSERT(var.defined());
   getTracingState()->value_map.erase(var);
+}
+
+inline std::function<void()> pauseTracing() {
+  std::shared_ptr<tracer::TracingState> state = getTracingState();
+  tracer::setTracingState(nullptr);
+
+  return [state]() {
+    tracer::setTracingState(state);
+  };
 }
 
 // Given a variable 'var', return the 'node' which represents the instruction
