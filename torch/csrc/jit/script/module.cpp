@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/assertions.h>
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/operator.h>

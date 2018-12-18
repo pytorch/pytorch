@@ -5,6 +5,7 @@
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/jit/import.h>
 #include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/script/schema_matching.h>
 
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/jit/pybind_utils.h>

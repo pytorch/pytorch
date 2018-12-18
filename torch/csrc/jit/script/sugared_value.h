@@ -177,8 +177,6 @@ struct MethodValue : public SugaredValue {
 
 };
 
-
-
 struct TORCH_API PrintValue : public SugaredValue {
   std::string kind() const override {
     return "print";

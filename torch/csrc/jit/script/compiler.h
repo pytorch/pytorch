@@ -34,44 +34,6 @@ TORCH_API void defineMethodsInModule(const std::shared_ptr<Module>& m, const std
 
 TORCH_API std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs);
 
-// try to match a list if inputs and keyword 'attributes' to this schema,
-// if it works return the flat list of positional inputs to the call
-// if it returns nullopt, then failure_messages contains a good error report
-// set convert_tensor_to_num to true if ImplicitTensorToNums should be inserted to
-// match the schema
-
-struct MatchedSchema {
-  std::vector<Value*> inputs;
-  std::vector<TypePtr> return_types;
-};
-
-TORCH_API c10::optional<MatchedSchema> tryMatchSchema(
-  const FunctionSchema& schema,
-  const SourceRange& loc,
-  Graph& graph,
-  c10::optional<NamedValue> self,
-  at::ArrayRef<NamedValue> inputs,
-  at::ArrayRef<NamedValue> attributes,
-  std::ostream& failure_messages,
-  bool allow_conversions);
-
-TORCH_API Value* emitBuiltinCall(
-  const SourceRange& loc,
-  Graph& graph,
-  Symbol name,
-  const c10::optional<NamedValue>& self,
-  at::ArrayRef<NamedValue> inputs,
-  at::ArrayRef<NamedValue> attributes,
-  // if true, emitBuiltinCall will throw an exception if this builtin does not exist,
-  // otherwise it will return nullptr if the builtin is not found.
-  bool required);
-
-TORCH_API c10::optional<size_t> findInputWithName(
-  const std::string& name,
-  at::ArrayRef<NamedValue> kwargs);
-
-TORCH_API at::ArrayRef<Value*> createTupleUnpack(Value* v);
-
 } // namespace script
 } // namespace jit
 } // namespace torch

@@ -1103,4 +1103,7 @@ inline Node* Graph::createPythonOp(
 
 TORCH_API void LintGraph(std::shared_ptr<Graph>& graph);
 
+TORCH_API at::ArrayRef<Value*> createTupleUnpack(Value* v);
+
+
 }} // namespace torch::jit

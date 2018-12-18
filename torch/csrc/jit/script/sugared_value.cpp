@@ -40,6 +40,72 @@ std::shared_ptr<SugaredValue> PrintValue::call(
     return std::make_shared<NoneValue>();
 }
 
+static const std::unordered_map<std::string, std::string> &builtin_cast_methods() {
+  static std::unordered_map<std::string, std::string> builtin_cast_methods = {
+    {"byte", "_cast_Byte"},
+    {"char", "_cast_Char"},
+    {"double", "_cast_Double"},
+    {"float", "_cast_Float"},
+    {"int", "_cast_Int"},
+    {"long", "_cast_Long"},
+    {"short", "_cast_Short"},
+    {"half", "_cast_Half"}
+  };
+  return builtin_cast_methods;
+}
+
+// support syntax sugar for x.foo(y, z) by allowing x.foo to return a
+// callable value that will resolve to foo(x, y, z) when called.
+std::shared_ptr<SugaredValue> SimpleValue::attr(const SourceRange& loc, Method & m, const std::string& field) {
+  // Allow method-style casts on Tensor types. e.g. x.int()
+  if (value->type()->isSubtypeOf(DynamicType::get())) {
+    if (builtin_cast_methods().count(field)) {
+      return std::make_shared<BuiltinFunction>(
+          Symbol::aten(builtin_cast_methods().at(field)),
+          NamedValue(loc, "self", value));
+    }
+    // functions that are just direct property lookups on tensor
+    // must be registered as prim::<name>(Tensor t) -> <return_type>
+    static const std::unordered_set<std::string> fields = {
+      "dtype",
+      "device",
+      "shape",
+      "is_cuda",
+      "requires_grad",
+    };
+    if (fields.count(field)) {
+      auto r = m.graph()->insert(Symbol::fromQualString("prim::"+field), {value});
+      return std::make_shared<SimpleValue>(r);
+    }
+  }
+  if (getValue()->type()->isSubtypeOf(NumberType::get())) {
+    throw ErrorReport(loc) << "Cannot call methods on numbers";
+  }
+  return std::make_shared<BuiltinFunction>(
+      Symbol::aten(field), NamedValue(loc, "self", value));
+}
+
+std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
+    const SourceRange& loc,
+    Method& m,
+    const c10::optional<size_t>& size_hint) {
+  static const auto make_simple_value = [](Value* v) -> std::shared_ptr<SugaredValue> {
+    return std::make_shared<SimpleValue>(v);
+  };
+  if(value->type()->kind() == TypeKind::TupleType) {
+    auto outputs = createTupleUnpack(value);
+    return fmap(outputs, make_simple_value);
+  } else if (value->type()->kind() == TypeKind::ListType) {
+    if (!size_hint) {
+      throw ErrorReport(loc) << "cannot statically infer the expected size of a list in this context";
+    }
+    auto graph = value->owningGraph();
+    Node *unpack = graph->insertNode(graph->createListUnpack(value, *size_hint));
+    return fmap(unpack->outputs(), make_simple_value);
+  }
+  throw ErrorReport(loc) << value->type()->str() << " cannot be used as a tuple";
+}
+
 } // namespace script
 } // namespace jit
 } // namespace torch
