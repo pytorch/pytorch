@@ -14,18 +14,8 @@ clang --version
 # symbolize=1: Gives us much better errors when things go wrong
 export ASAN_OPTIONS=detect_leaks=0:symbolize=1
 
-# FIXME: Remove the hardcoded "-pthread" option.
-# With asan build, the cmake thread CMAKE_HAVE_LIBC_CREATE[1] checking will
-# succeed because "pthread_create" is in libasan.so. However, libasan doesn't
-# have the full pthread implementation. Other advanced pthread functions doesn't
-# exist in libasan.so[2]. If we need some pthread advanced functions, we still
-# need to link the pthread library.
-# [1] https://github.com/Kitware/CMake/blob/8cabaaf054a16ea9c8332ce8e9291bd026b38c62/Modules/FindThreads.cmake#L135
-# [2] https://wiki.gentoo.org/wiki/AddressSanitizer/Problems
-#
 # TODO: Make the ASAN flags a more unified env var
 CC="clang" CXX="clang++" LDSHARED="clang --shared" \
-  CFLAGS="-fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all -shared-libasan -pthread" \
-  CXX_FLAGS="-pthread" \
+  CFLAGS="-fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all -shared-libasan" \
   NO_CUDA=1 USE_MKLDNN=0 \
   python setup.py install
