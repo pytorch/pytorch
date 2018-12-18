@@ -3,6 +3,12 @@
 
 namespace c10 {
 
+// This *must* be in a .cpp file to not get ODR violations
+C10_EXPORT TensorImpl* UndefinedTensorImpl::singleton() {
+  static UndefinedTensorImpl _singleton;
+  return &_singleton;
+}
+
 // should this use the globalContext?  Can it get a context passed in somehow?
 UndefinedTensorImpl::UndefinedTensorImpl()
 : TensorImpl(UndefinedTensorId(), caffe2::TypeMeta(), nullptr, /* is variable */ false) {
@@ -35,6 +41,5 @@ int64_t UndefinedTensorImpl::storage_offset() const {
 IntList UndefinedTensorImpl::strides() const {
   AT_ERROR("strides() called on undefined Tensor");
 }
-UndefinedTensorImpl UndefinedTensorImpl::_singleton;
 
 }

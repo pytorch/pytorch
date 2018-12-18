@@ -73,14 +73,14 @@ class C10_API intrusive_ptr_target {
 // some other compilers don't know about -Wterminate or -Wexceptions and
 // will show a warning about unknown warning options otherwise.
 #ifdef _MSC_VER
-#  pragma warning(push)  
-#  pragma warning(disable: 4297) // function assumed not to throw an exception but does  
-#else  
-#  pragma GCC diagnostic push  
-#  pragma GCC diagnostic ignored "-Wpragmas"  
-#  pragma GCC diagnostic ignored "-Wunknown-warning-option"  
-#  pragma GCC diagnostic ignored "-Wterminate"  
-#  pragma GCC diagnostic ignored "-Wexceptions"  
+#  pragma warning(push)
+#  pragma warning(disable: 4297) // function assumed not to throw an exception but does
+#else
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wpragmas"
+#  pragma GCC diagnostic ignored "-Wunknown-warning-option"
+#  pragma GCC diagnostic ignored "-Wterminate"
+#  pragma GCC diagnostic ignored "-Wexceptions"
 #endif
     AT_ASSERTM(
         refcount_.load() == 0,
@@ -89,9 +89,9 @@ class C10_API intrusive_ptr_target {
         weakcount_.load() == 0,
         "Tried to destruct an intrusive_ptr_target that still has weak_intrusive_ptr to it");
 #ifdef _MSC_VER
-#  pragma warning(pop)  
-#else  
-#  pragma GCC diagnostic pop  
+#  pragma warning(pop)
+#else
+#  pragma GCC diagnostic pop
 #endif
   }
 
@@ -154,13 +154,6 @@ class intrusive_ptr final {
 //  static_assert(
 //      std::is_base_of<intrusive_ptr_target, TTarget>::value,
 //      "intrusive_ptr can only be used for classes that inherit from intrusive_ptr_target.");
-#ifndef _WIN32
-  // This static_assert triggers on MSVC
-  //  error C2131: expression did not evaluate to a constant
-  static_assert(
-      NullType::singleton() == NullType::singleton(),
-      "NullType must have a constexpr singleton() method");
-#endif
   static_assert(
       std::is_same<TTarget*, decltype(NullType::singleton())>::value,
       "NullType::singleton() must return a element_type* pointer");
@@ -409,13 +402,7 @@ class weak_intrusive_ptr final {
   static_assert(
       std::is_base_of<intrusive_ptr_target, TTarget>::value,
       "intrusive_ptr can only be used for classes that inherit from intrusive_ptr_target.");
-#ifndef _WIN32
-  // This static_assert triggers on MSVC
-  //  error C2131: expression did not evaluate to a constant
-  static_assert(
-      NullType::singleton() == NullType::singleton(),
-      "NullType must have a constexpr singleton() method");
-#endif
+
   static_assert(
       std::is_same<TTarget*, decltype(NullType::singleton())>::value,
       "NullType::singleton() must return a element_type* pointer");
