@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <functional>
 #include <map>
+#include <ostream>
 #include <string>
 #include <typeinfo>
 
@@ -321,6 +322,26 @@ Tensor& Module::register_buffer(std::string name, Tensor tensor) {
   return buffers_.insert(std::move(name), std::move(tensor));
 }
 
+void Module::pretty_print(std::ostream& stream) const {
+  stream << name();
+}
+
+void Module::pretty_print_recursive(
+    std::ostream& stream,
+    const std::string& indentation) const {
+  pretty_print(stream);
+  if (!children_.is_empty()) {
+    stream << "(\n";
+    const std::string next_indentation = indentation + "  ";
+    for (const auto& child : children_) {
+      stream << next_indentation << "(" << child.key() << "): ";
+      child.value()->pretty_print_recursive(stream, next_indentation);
+      stream << '\n';
+    }
+    stream << indentation << ")";
+  }
+}
+
 void Module::clone_(Module& other, const optional<Device>& device) {}
 
 void Module::apply_to_submodules(
@@ -349,6 +370,11 @@ std::shared_ptr<Module> Module::shared_from_this_checked() const {
         "to modules() or named_modules()");
   }
   return std::const_pointer_cast<Module>(ptr);
+}
+
+std::ostream& operator<<(std::ostream& stream, const nn::Module& module) {
+  module.pretty_print_recursive(stream, "");
+  return stream;
 }
 
 serialize::OutputArchive& operator<<(
