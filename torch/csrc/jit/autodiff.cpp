@@ -112,8 +112,11 @@ bool isDifferentiable(Node * n) {
     return true;
   if (differentiable_ops.find(n))
     return true;
-  if (defined_AD_in_torchscript(n))
+
+  auto schema = n->maybeSchema();
+  if (schema && hasGradientInfoForSchema(*schema)) {
     return true;
+  }
 
   if (n->matches("aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor")) {
     return n->get<std::vector<int64_t>>(attr::size) && n->is_constant(attr::implicit) &&

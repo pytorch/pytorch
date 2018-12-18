@@ -45,15 +45,15 @@ def backward(ctx, grad_output):
     return c10::nullopt;
   }
 
-  bool defined_AD_in_torchscript(Node* n) {
+  bool hasGradientInfoForSchema(const FunctionSchema& schema) {
     std::lock_guard<std::mutex> guard(lock);
-    auto schema = n->maybeSchema();
-    if (!schema) {
-      return false;
+    auto cache_it = cached_gradient_pairs.find(&schema);
+    if (cache_it == cached_gradient_pairs.end()) {
+      auto schema_str = canonicalSchemaString(schema);
+      auto sym_script_it = symbolic_scripts.find(schema_str);
+      return !(sym_script_it == symbolic_scripts.end());
     }
-    auto schema_str = canonicalSchemaString(*schema);
-    auto sym_script_it = symbolic_scripts.find(schema_str);
-    return !(sym_script_it == symbolic_scripts.end());
+    return true;
   }
 }}
 

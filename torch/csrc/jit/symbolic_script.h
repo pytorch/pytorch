@@ -14,5 +14,5 @@ namespace torch { namespace jit {
   };
 
   TORCH_API c10::optional<GradientPair> gradientInfoForSchema(const FunctionSchema& schema);
-  TORCH_API bool defined_AD_in_torchscript(Node* n);
+  TORCH_API bool hasGradientInfoForSchema(const FunctionSchema& schema);
 }}
