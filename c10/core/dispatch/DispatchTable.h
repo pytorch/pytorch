@@ -151,4 +151,4 @@ class DispatchTable final {
  * we can't rely on the one-definition-rule.
  */
 template <class OpSchemaDef>
-c10::DispatchTable<OpSchemaDef>& c10_dispatch_table();
+C10_API c10::DispatchTable<OpSchemaDef>& c10_dispatch_table();
