@@ -29,14 +29,20 @@ Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
   }
   Tensor r = result.is_contiguous() ? result : result.contiguous();
 
-  AT_DISPATCH_FLOATING_TYPES(r.type(), "linspace", [&]() {
-    scalar_t scalar_start = start.to<scalar_t>();
-    scalar_t scalar_end = end.to<scalar_t>();
-    scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
-    LinspaceOp<scalar_t> linspace_method(scalar_start, step);
-    thrust::device_ptr<scalar_t> data_(r.data<scalar_t>());
-    thrust::tabulate(data_, data_ + steps, linspace_method);
-  });
+  if (steps == 0) {
+    // skip
+  } else if (steps == 1) {
+    r.fill_(start);
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(r.type(), "linspace", [&]() {
+      scalar_t scalar_start = start.to<scalar_t>();
+      scalar_t scalar_end = end.to<scalar_t>();
+      scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
+      LinspaceOp<scalar_t> linspace_method(scalar_start, step);
+      thrust::device_ptr<scalar_t> data_(r.data<scalar_t>());
+      thrust::tabulate(data_, data_ + steps, linspace_method);
+    });
+  }
 
   if (!result.is_contiguous()) {
     result.copy_(r);
