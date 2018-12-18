@@ -65,6 +65,19 @@ class ModuleWrapper(nn.Module):
             if not attr.startswith("_"):
                 setattr(self, attr, getattr(self.cpp_module, attr))
 
+    def _apply(self, fn):
+        for param in self.parameters():
+            # Tensors stored in modules are graph leaves, and we don't
+            # want to create copy nodes, so we have to unpack the data.
+            param.data = fn(param.data)
+            if param._grad is not None:
+                param._grad.data = fn(param._grad.data)
+
+        for buf in self.buffers():
+            buf.data = fn(buf.data)
+
+        return self
+
     @property
     def training(self):
         return self.cpp_module.training

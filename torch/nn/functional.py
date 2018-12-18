@@ -11,7 +11,6 @@ from . import _reduction as _Reduction
 from . import _functions
 from .modules import utils
 from ._functions import vision
-from ._functions.thnn.fold import Col2Im, Im2Col
 from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad
 from . import _VF
@@ -2324,7 +2323,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
     `mini-batch x channels x [optional depth] x [optional height] x width`.
 
     The modes available for upsampling are: `nearest`, `linear` (3D-only),
-    `bilinear` (4D-only), `trilinear` (5D-only)
+    `bilinear`, `bicubic` (4D-only), `trilinear` (5D-only)
 
     Args:
         input (Tensor): the input tensor
@@ -2332,7 +2331,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
             output spatial size.
         scale_factor (int): multiplier for spatial size. Has to be an integer.
         mode (string): algorithm used for upsampling:
-            'nearest' | 'linear' | 'bilinear' | 'trilinear'. Default: 'nearest'
+            'nearest' | 'linear' | 'bilinear' | 'bicubic' | 'trilinear'. Default: 'nearest'
         align_corners (bool, optional): Geometrically, we consider the pixels of the
             input and output as squares rather than points.
             If set to True, the input and output tensors are aligned by the
@@ -2340,7 +2339,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
             output tensors are aligned by the corner points of their corner
             pixels, and the interpolation uses edge value padding for out-of-boundary values.
             This only has effect when :attr:`mode` is `linear`,
-            `bilinear`, or `trilinear`. Default: False
+            `bilinear`, `bicubic` or `trilinear`. Default: False
 
     .. warning::
         With ``align_corners = True``, the linearly interpolating modes
@@ -2369,7 +2368,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
     `mini-batch x channels x [optional depth] x [optional height] x width`.
 
     The modes available for resizing are: `nearest`, `linear` (3D-only),
-    `bilinear` (4D-only), `trilinear` (5D-only), `area`
+    `bilinear`, `bicubic` (4D-only), `trilinear` (5D-only), `area`
 
     Args:
         input (Tensor): the input tensor
@@ -2377,7 +2376,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
             output spatial size.
         scale_factor (float or Tuple[float]): multiplier for spatial size. Has to match input size if it is a tuple.
         mode (string): algorithm used for upsampling:
-            'nearest' | 'linear' | 'bilinear' | 'trilinear' | 'area'. Default: 'nearest'
+            'nearest' | 'linear' | 'bilinear' | 'bicubic' | 'trilinear' | 'area'. Default: 'nearest'
         align_corners (bool, optional): Geometrically, we consider the pixels of the
             input and output as squares rather than points.
             If set to True, the input and output tensors are aligned by the
@@ -2385,7 +2384,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
             output tensors are aligned by the corner points of their corner
             pixels, and the interpolation uses edge value padding for out-of-boundary values.
             This only has effect when :attr:`mode` is `linear`,
-            `bilinear`, or `trilinear`. Default: False
+            `bilinear`, `bicubic`, or `trilinear`. Default: False
 
     .. warning::
         With ``align_corners = True``, the linearly interpolating modes
@@ -2422,7 +2421,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
     if mode in ('nearest', 'area'):
         if align_corners is not None:
             raise ValueError("align_corners option can only be set with the "
-                             "interpolating modes: linear | bilinear | trilinear")
+                             "interpolating modes: linear | bilinear | bicubic | trilinear")
     else:
         if align_corners is None:
             warnings.warn("Default upsampling behavior when mode={} is changed "
@@ -2461,9 +2460,11 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         raise NotImplementedError("Got 5D input, but bilinear mode needs 4D input")
     elif input.dim() == 5 and mode == 'trilinear':
         return torch._C._nn.upsample_trilinear3d(input, _output_size(3), align_corners)
+    elif input.dim() == 4 and mode == 'bicubic':
+        return torch._C._nn.upsample_bicubic2d(input, _output_size(2), align_corners)
     else:
         raise NotImplementedError("Input Error: Only 3D, 4D and 5D input Tensors supported"
-                                  " (got {}D) for the modes: nearest | linear | bilinear | trilinear"
+                                  " (got {}D) for the modes: nearest | linear | bilinear | bicubic | trilinear"
                                   " (got {})".format(input.dim(), mode))
 
 
@@ -2825,7 +2826,9 @@ def assert_int_or_pair(arg, arg_name, message):
     assert isinstance(arg, int) or len(arg) == 2, message.format(arg_name)
 
 
+@torch._jit_internal.weak_script
 def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
+    # type: (Tensor, BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int]) -> Tensor  # noqa
     r"""Extracts sliding local blocks from an batched input tensor.
 
     .. warning::
@@ -2842,13 +2845,17 @@ def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
         assert_int_or_pair(padding, 'padding', msg)
         assert_int_or_pair(stride, 'stride', msg)
 
-        return Im2Col.apply(input, _pair(kernel_size),
-                            _pair(dilation), _pair(padding), _pair(stride))
+        ret = torch._C._nn.thnn_im2col(input, _pair(kernel_size),
+                                       _pair(dilation), _pair(padding), _pair(stride))
     else:
         raise NotImplementedError("Input Error: Only 4D input Tensors are supported (got {}D)".format(input.dim()))
+        ret = input  # TODO: remove when jit supports exception control flow
+    return ret
 
 
+@torch._jit_internal.weak_script
 def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
+    # type: (Tensor, BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int]) -> Tensor  # noqa
     r"""Combines an array of sliding local blocks into a large containing
     tensor.
 
@@ -2866,7 +2873,9 @@ def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
         assert_int_or_pair(padding, 'padding', msg)
         assert_int_or_pair(stride, 'stride', msg)
 
-        return Col2Im.apply(input, _pair(output_size), _pair(kernel_size),
-                            _pair(dilation), _pair(padding), _pair(stride))
+        ret = torch._C._nn.thnn_col2im(input, _pair(output_size), _pair(kernel_size),
+                                       _pair(dilation), _pair(padding), _pair(stride))
     else:
         raise NotImplementedError("Input Error: Only 3D input Tensors are supported (got {}D)".format(input.dim()))
+        ret = input  # TODO: remove when jit supports exception control flow
+    return ret
