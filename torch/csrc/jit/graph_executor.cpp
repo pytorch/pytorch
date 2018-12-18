@@ -513,7 +513,11 @@ private:
     // NB: we could just run the fallback in here and call it a day, but that would loose all
     // the control flow information we have in the graph. Thus, we run the fallback to
     // get the correct output values, but we will override the tracing states later.
-    getOrCompileFallback().run(stack);
+    {
+      // No need to trace a script module.
+      ResourceGuard guard(tracer::pauseTracing());
+      getOrCompileFallback().run(stack);
+    }
 
     // Traces always have types propagated through them, so we make sure to
     // also propagate types through the graph we are inserting here.
@@ -527,10 +531,7 @@ private:
 
     auto outputs = last(stack, num_outputs);
     for (size_t i = 0; i < outputs.size(); ++i) {
-      // We can't attach tracing states to scalars, so we have to skip them here
-      // TODO: Should we reinterpret them as scalar tensors instead?
-      if (!outputs[i].isTensor()) continue;
-      tracer::setValueTrace(outputs[i].toTensor(), output_values[i]);
+      tracer::setValueTrace(outputs[i], output_values[i]);
     }
   }
 

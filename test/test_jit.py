@@ -11222,6 +11222,59 @@ class TestAsync(JitTestCase):
         self.assertEqual(y2, foo2(x1, x2))
         self.assertEqual(y3, foo3(x1, x2, x3))
 
+    def test_async_script_trace(self):
+        class Traced(nn.Module):
+            def __init__(self):
+                super(Traced, self).__init__()
+
+            def forward(self, x):
+                return tuple([torch.neg(x), x])
+
+        class Module(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Module, self).__init__(False)
+                x = torch.rand(3, 3)
+                self.traced = torch.jit.trace(Traced(), (x), _force_outplace=True)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                # type: (Tensor) -> Tuple[List[Tensor], Tuple[Tensor, Tensor], Tensor]
+                future1 = torch.jit._fork(self.traced, x)
+                future2 = torch.jit._fork(torch.neg, x)
+
+                tensor_tuple = torch.jit._wait(future1)
+                tensor_single = torch.jit._wait(future2)
+
+                tensor_list = []
+                tensor_list.append(tensor_tuple[0])
+                tensor_list.append(tensor_single)
+
+                # return a nested structure of tensors
+                return (tensor_list, tensor_tuple, tensor_tuple[1])
+
+        class Tuple(nn.Module):
+            def __init__(self):
+                super(Tuple, self).__init__()
+                self.module = Module()
+
+            def forward(self, x):
+                z = torch.neg(x)
+                y = self.module(x)
+                list = [z, y[0][0], y[0][1], y[1][0], y[1][1], y[2]]
+                return tuple(list)
+
+        x = torch.rand(3, 3)
+        module = torch.jit.trace(Tuple(), (x), _force_outplace=True)
+
+        # Make sure we have forks
+        self.assertGraphContainsExactly(module.graph, kind='prim::fork', num_kind_nodes=2)
+        # Make sure 1 ::neg is in the root graph and 2 ::negs are in the subgraphs
+        self.assertGraphContainsExactly(module.graph, kind='aten::neg', num_kind_nodes=1)
+        self.assertGraphContainsExactly(module.graph, kind='aten::neg', num_kind_nodes=3, consider_subgraphs=True)
+
+        y = torch.neg(x)
+        self.assertEqual(module(x), tuple([y, y, y, y, x, x]))
+
 
 for test in autograd_method_tests:
     add_autograd_test(*test)
