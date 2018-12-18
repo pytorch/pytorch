@@ -112,7 +112,7 @@ bool isDifferentiable(Node * n) {
     return true;
   if (differentiable_ops.find(n))
     return true;
-  if (check_symbolic_scripts(n))
+  if (defined_AD_in_torchscript(n))
     return true;
 
   if (n->matches("aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor")) {
@@ -147,38 +147,43 @@ bool isDifferentiable(Graph & g) {
                      static_cast<bool(*)(Node*)>(isDifferentiable));
 }
 
-// NB: Write gradient in Python and compile it to JIT graphs.
-// For example, aten::mul() should be defined as follows
+// NB: Write gradient using torchscript
+// For example, node aten::mul() should be defined as follows
 // def forward(x, y):
 //     return x*y, (x, y)
 // def backward(ctx, grad_output):
 //     x, y = ctx
-//     return (y * grad_output).reduce_as(x), (x * grad_output).reduce_as(y)
+//     return (y * grad_output).sum_to_size(x), (x * grad_output).sum_to_size(y)
 //
-// Note that ctx is a tuple that carries all input/intermediate results needed
-// in backward from forward pass.
-// grad_values(a.k.a gradOutputs) propagated through node->owningGraph() in reversed order.
-// The forward graph should be inserted **after** the node being replaced,
-// so that we don't traverse it infinite times.
+// Here ctx is a tuple that carries all input/intermediate results needed in
+// backward from forward pass.
+// This python code is compiled into a GradientPair which includes a forward graph
+// and a backward graph. Forward graph will be used to replace the node in grad_desc.f,
+// and backward graph will be used to construct GradOf(node) in reverse_block.
+// Grad_values(a.k.a gradOutputs) propagated through node->owningGraph() in
+// **reversed** order, thus GradientPair.forward ahould be inserted **after**
+// the node being replaced, so that we don't traverse the graph infinite times.
 // The output of compiled forward graph is [real_outputs, ctx]
 // The input of compiled backward graph is [ctx, grad_values]
 // We run LowerSimpleTuples afterwards to elmininate all tuples generated in this process.
 // The original node and TupleConstruct nodes in forward graph will be cleaned up
 // later using EliminateDeadCode(block).
 // TupleUnPack node in backward graph will be removed in eliminateDeadcode(ReverseDetails)
-// defined in this file. It cannot be cleaned by EliminateDeadCode(block) as it might
-// accidentally remove the AutogradAdd node which is still useful in grad_map.
-static std::vector<Value*> build_script_grad(Node* node,
-        const char* schema_name,
-        const ArrayRef<Value*>& grads){
-  auto compiled_graphs = get_cached_symbolic_graphs(schema_name);
+// defined in this file.
+static c10::optional<std::vector<Value*>> build_script_grad(
+        Node* node,
+        const ArrayRef<Value*>& grads) {
   auto graph = node->owningGraph();
 
+  auto compiled_graphs = gradientInfoForSchema(node->schema());
+  if (!compiled_graphs) {
+    return c10::nullopt;
+  }
   // Use forward graph to replace node in grad_desc.f
   value_list new_outputs;
   {
     WithInsertPoint guard(node->next());
-    auto fw_graph = compiled_graphs[0];
+    auto fw_graph = compiled_graphs->forward;
     new_outputs = script::inlineCallTo(*graph, *fw_graph, node->inputs());
     for (size_t i = 0; i < node->outputs().size(); ++i) {
       new_outputs.at(i)->setType(node->outputs()[i]->type());
@@ -187,7 +192,7 @@ static std::vector<Value*> build_script_grad(Node* node,
   }
 
   // Use backward graph to construct reverse_block
-  auto bw_graph = compiled_graphs[1];
+  auto bw_graph = compiled_graphs->backward;
   auto grad_vec = grads.vec();
   auto it = grad_vec.begin();
   grad_vec.insert(it, new_outputs.back());
@@ -195,7 +200,6 @@ static std::vector<Value*> build_script_grad(Node* node,
   auto grad_inputs = script::inlineCallTo(*graph, *bw_graph, grad);
   return grad_inputs;
 };
-
 
 static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_values) {
   static const OperatorSet comparison_ops = {
@@ -597,13 +601,10 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     throw std::runtime_error(std::string("differentiation of ") + node->kind().toDisplayString() + " "
                              "is not supported, or it is missing necessary type information");
   }
-  // If defined using torchscript, use it instead of symbolic
-  // symbolic_script is a map<schema, python_code_str> defined in symbolic_script.h
-  for (auto& it : symbolic_scripts) {
-    if (node->matches(it.first)) {
-      return build_script_grad(node, it.first, grad_values);
-    }
-  }
+  // If AD is defined using torchscript, use it instead of symbolic
+  auto script_grads = build_script_grad(node, grad_values);
+  if (script_grads)
+    return *script_grads;
   // Definition not found in torchscript, look up in the build_sym_grad
   // TODO: migrate all to using torchscript
   auto sym_grads = build_sym_grad(fmap<SymbolicVariable>(grad_values));

@@ -205,6 +205,10 @@ class DeadCodeEliminator {
           sweep(block, true);
         }
       }
+      // NB: Checking hasUses() is required. AD graphs are not perfectly
+      // valid, as a node in grad_desc.f might be used in reverse_block.
+      // Reverse_block is inlined in grad_desc.f before it's separated
+      // to grad_desc.df.
       if (!(marked_.count(node) || node->hasUses())) {
         it.destroyCurrent();
       }
