@@ -1,21 +1,38 @@
 #pragma once
 
-#include <torch/data/impl.h>
+#include <torch/data/dataloader/impl.h>
+#include <torch/data/worker_exception.h>
+
+#include <torch/csrc/utils/memory.h>
+
+#include <c10/util/Exception.h>
+
+#include <cstddef>
+#include <thread>
+#include <utility>
 
 namespace torch {
 namespace data {
+namespace detail {
+namespace dataloader {
 template <typename Dataset, typename Sampler>
-class StatelessImpl : public Impl<Dataset, typename Sampler::BatchRequestType> {
+class StatelessImpl : public Impl<
+                          Dataset,
+                          typename Dataset::BatchType,
+                          typename Sampler::BatchRequestType> {
  public:
-  using super = Impl<Dataset, typename Sampler::BatchRequestType>;
+  using super = Impl<
+      Dataset,
+      typename Dataset::BatchType,
+      typename Sampler::BatchRequestType>;
   using super::options_;
+  using super::pop_result;
   using super::prefetch;
   using super::push_job;
-  using super::sequencer_;
   using super::workers_;
-  using typename super::Batch;
+  using typename super::BatchRequestType;
+  using typename super::BatchType;
   using typename super::Result;
-  using BatchRequest = typename Sampler::BatchRequestType;
 
   StatelessImpl(Dataset dataset, DataLoaderOptions options, Sampler sampler)
       : super(std::move(options)), sampler_(std::move(sampler)) {
@@ -24,9 +41,8 @@ class StatelessImpl : public Impl<Dataset, typename Sampler::BatchRequestType> {
       // has its own copy of the dataset. This means the dataset must be
       // trivially copiable, or else we don't expect more than one worker to
       // be in use.
-      workers_.emplace_back([this, dataset]() mutable {
-        this->worker_thread(std::move(dataset));
-      });
+      workers_.emplace_back(
+          [this, dataset]() mutable { this->worker_thread(dataset); });
     }
     if (options_.workers == 0) {
       main_thread_dataset_ = torch::make_unique<Dataset>(std::move(dataset));
@@ -39,11 +55,10 @@ class StatelessImpl : public Impl<Dataset, typename Sampler::BatchRequestType> {
   }
 
  private:
-  optional<Batch> next() {
-    optional<Batch> batch;
+  optional<BatchType> next() {
+    optional<BatchType> batch;
     if (options_.workers > 0) {
-      optional<Result> result = sequencer_->next(
-          [this] { return this->shuttle_.pop_result(this->options_.timeout); });
+      optional<Result> result = pop_result();
       if (result) {
         if (result->exception) {
           throw WorkerException(result->exception);
@@ -61,7 +76,7 @@ class StatelessImpl : public Impl<Dataset, typename Sampler::BatchRequestType> {
   }
 
   void prefetch(size_t requested_jobs) override {
-    while (requested_jobs-- > 0) {
+    for (size_t r = 0; r < requested_jobs; ++r) {
       if (auto batch_request = get_batch_request()) {
         push_job(std::move(*batch_request));
       } else {
@@ -70,7 +85,7 @@ class StatelessImpl : public Impl<Dataset, typename Sampler::BatchRequestType> {
     }
   }
 
-  optional<BatchRequest> get_batch_request() {
+  optional<BatchRequestType> get_batch_request() {
     auto indices = sampler_.next(options_.batch_size);
     if (!indices ||
         (indices->size() < options_.batch_size && options_.drop_last)) {
@@ -87,7 +102,8 @@ class StatelessImpl : public Impl<Dataset, typename Sampler::BatchRequestType> {
   std::unique_ptr<Dataset> main_thread_dataset_;
 
   Sampler sampler_;
-
-}; // namespace data
+};
+} // namespace dataloader
+} // namespace detail
 } // namespace data
 } // namespace torch

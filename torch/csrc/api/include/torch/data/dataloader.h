@@ -1,17 +1,16 @@
 #pragma once
 
+#include <torch/data/dataloader/impl.h>
+#include <torch/data/dataloader/stateful_impl.h>
+#include <torch/data/dataloader/stateless_impl.h>
 #include <torch/data/dataloader_options.h>
+#include <torch/data/datasets/stateful.h>
 #include <torch/data/detail/data_shuttle.h>
 #include <torch/data/detail/sequencers.h>
 #include <torch/data/iterator.h>
 #include <torch/data/samplers/random.h>
 #include <torch/data/worker_exception.h>
 #include <torch/types.h>
-
-#include <torch/data/datasets/stateful.h>
-#include <torch/data/impl.h>
-#include <torch/data/stateful_impl.h>
-#include <torch/data/stateless_impl.h>
 
 #include <torch/csrc/utils/memory.h>
 #include <torch/csrc/utils/variadic.h>
@@ -31,7 +30,12 @@ namespace data {
 template <typename Impl>
 class DataLoader {
  public:
-  using Batch = typename Impl::Batch;
+  using BatchType = typename Impl::BatchType;
+
+  /// Constructs the `DataLoader`, forwarding all arguments to the underlying
+  /// implementation object's constructor.
+  template <typename... Args>
+  explicit DataLoader(Args&&... args) : impl_(std::forward<Args>(args)...) {}
 
   virtual ~DataLoader() {
     join();
@@ -48,13 +52,13 @@ class DataLoader {
   /// should only use range-for loops to loop over the `DataLoader`, but
   /// standard algorithms like `std::copy(dataloader.begin(), dataloader.end(),
   /// output_iterator)`  are supported too.
-  Iterator<Batch> begin() {
+  Iterator<BatchType> begin() {
     return impl_.begin();
   }
 
   /// Returns a special "sentinel" iterator that compares equal with a
   /// non-sentinel iterator once the `DataLoader` is exhausted.
-  Iterator<Batch> end() {
+  Iterator<BatchType> end() {
     return impl_.end();
   }
 
@@ -70,82 +74,52 @@ class DataLoader {
     return impl_.options();
   }
 
-  template <typename... Args>
-  explicit DataLoader(Args&&... args) : impl_(std::forward<Args>(args)...) {}
-
  private:
   Impl impl_;
 }; // namespace data
 
+template <typename Dataset, typename Sampler>
+using StatelessDataLoader =
+    DataLoader<detail::dataloader::StatelessImpl<Dataset, Sampler>>;
 
-// !!!!
-//
-// Add a boolean to BatchDataset/StatefulBatchDataset that is is_stateful and enable_if true or false
-//
-// !!!!
+template <typename Dataset>
+using StatefulDataLoader =
+    DataLoader<detail::dataloader::StatefulImpl<Dataset>>;
 
-/// Creates a new `DataLoader`, inferring the necessary template types from
-/// the given arguments.
-template <typename... Ts, typename Sampler>
-std::unique_ptr<
-  DataLoader<
-    StatelessImpl<
-      datasets::BatchDataset<Ts...>, Sampler
-    >
-  >
->
-make_data_loader(
-    datasets::BatchDataset<Ts...>&& dataset,
-    DataLoaderOptions options,
-    Sampler sampler) {
-  return torch::make_unique<
-  DataLoader<
-    StatelessImpl<
-      datasets::BatchDataset<Ts...>, Sampler
-    >
-  >
-  >(
+template <typename Dataset, typename Sampler>
+torch::disable_if_t<
+    Dataset::is_stateful,
+    std::unique_ptr<StatelessDataLoader<Dataset, Sampler>>>
+make_data_loader(Dataset dataset, DataLoaderOptions options, Sampler sampler) {
+  return torch::make_unique<StatelessDataLoader<Dataset, Sampler>>(
       std::move(dataset), std::move(options), std::move(sampler));
 }
 
-template <typename... Ts>
-std::unique_ptr<
-  DataLoader<
-    StatefulImpl<
-      datasets::StatefulBatchDataset<Ts...>
-    >
-  >
->
-make_data_loader(
-    datasets::StatefulBatchDataset<Ts...> dataset,
+template <typename Dataset, typename = torch::enable_if_t<Dataset::is_stateful>>
+std::unique_ptr<StatefulDataLoader<Dataset>> make_data_loader(
+    Dataset dataset,
     DataLoaderOptions options = DataLoaderOptions()) {
-  return nullptr;
-  // return torch::make_unique<DataLoader<Dataset, Sampler>>(
-  //     std::move(dataset), std::move(options), std::move(sampler));
+  return torch::make_unique<StatefulDataLoader<Dataset>>(
+      std::move(dataset), std::move(options));
 }
 
 /// Creates a new `DataLoader`, inferring the necessary template types from
 /// the given arguments.
-// template <
-//     typename Sampler = samplers::RandomSampler,
-//     typename Dataset,
-//     typename =
-//         torch::enable_if_t<std::is_constructible<Sampler, size_t>::value>>
-//
-// std::unique_ptr<DataLoader<StatelessImpl<Dataset, Sampler>>>
-//
-//
-// make_data_loader(
-//     Dataset dataset,
-//     DataLoaderOptions options = DataLoaderOptions()) {
-//   const optional<size_t> size = dataset.size();
-//   AT_CHECK(
-//       size.has_value(),
-//       "Expected the dataset to be sized in "
-//       "order to construct the Sampler");
-//   return make_data_loader(
-//       std::move(dataset), std::move(options), Sampler(*size));
-// }
-
+template <
+    typename Sampler = samplers::RandomSampler,
+    typename Dataset,
+    typename = torch::enable_if_t<
+        !Dataset::is_stateful && std::is_constructible<Sampler, size_t>::value>>
+std::unique_ptr<StatelessDataLoader<Dataset, Sampler>> make_data_loader(
+    Dataset dataset,
+    DataLoaderOptions options = DataLoaderOptions()) {
+  const optional<size_t> size = dataset.size();
+  AT_CHECK(
+      size.has_value(),
+      "Expected the dataset to be sized in "
+      "order to construct the Sampler");
+  return make_data_loader(
+      std::move(dataset), std::move(options), Sampler(*size));
+}
 } // namespace data
 } // namespace torch
