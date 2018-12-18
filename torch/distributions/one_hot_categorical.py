@@ -78,7 +78,7 @@ class OneHotCategorical(Distribution):
         probs = self._categorical.probs
         num_events = self._categorical._num_events
         indices = self._categorical.sample(sample_shape)
-        return torch.nn.utils.one_hot(indices, num_events).to(probs)
+        return torch.nn.functional.one_hot(indices, num_events).to(probs)
 
     def log_prob(self, value):
         if self._validate_args:
