@@ -10635,6 +10635,8 @@ EXCLUDE_MODULE_EXPORT_IMPORT = {
     'MaxPool3d',
     'AdaptiveAvgPool2d',
     'AdaptiveAvgPool3d',
+    'Fold',
+    'Unfold',
 }
 
 # NB: JIT script tests for all nn functional interfaces, script mode does
