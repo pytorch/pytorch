@@ -532,6 +532,9 @@ struct CAFFE2_API FutureType : public SingleElementType<TypeKind::FutureType, Fu
     ss << "Future[" << getElementType()->python_str() << "]";
     return ss.str();
   }
+  TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
+    return create(contained_types.at(0));
+  }
 private:
   FutureType(TypePtr elem) : SingleElementType(elem) {}
 };
