@@ -144,18 +144,18 @@ static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module) {
 
 // We don't want to exit on any SIGCHLD from any child. child_pids is a tuple
 // of pids we are interested in.
-static PyObject *THPModule_updateWorkerPIDs(PyObject *module, PyObject *args) {
+static PyObject *THPModule_setWorkerPIDs(PyObject *module, PyObject *args) {
   HANDLE_TH_ERRORS
   if (PyTuple_GET_SIZE(args) != 2) {
-    throw TypeError("_update_worker_pids expectes exactly 2 arguments.");
+    throw TypeError("_set_worker_pids expects exactly 2 arguments.");
   }
   int64_t key = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 0));
   if (worker_pids.find(key) != worker_pids.end()) {
-    throw ValueError("_update_worker_pids should be called only once for each _DataLoaderIter.");
+    throw ValueError("_set_worker_pids should be called only once for each _DataLoaderIter.");
   }
   PyObject *child_pids = PyTuple_GET_ITEM(args, 1);
   if (!PyTuple_Check(child_pids)) {
-    throw TypeError("_update_worker_pids expects a tuple for child_pids, but got %s.",
+    throw TypeError("_set_worker_pids expects a tuple for child_pids, but got %s.",
         Py_TYPE(child_pids)->tp_name);
   }
 
@@ -163,7 +163,7 @@ static PyObject *THPModule_updateWorkerPIDs(PyObject *module, PyObject *args) {
   auto size = PyTuple_GET_SIZE(child_pids);
   for (int idx = 0; idx < size; idx++) {
     PyObject* obj = PyTuple_GET_ITEM(child_pids, idx);
-    pids_set.insert((pid_t) THPUtils_unpackLong(obj));
+    pids_set.insert(static_cast<pid_t>(THPUtils_unpackLong(obj)));
   }
 
   worker_pids[key] = pids_set;
@@ -195,7 +195,7 @@ static PyObject *THPModule_setWorkerSignalHandlers(PyObject *module, PyObject *_
   Py_RETURN_NONE;
 }
 
-static PyObject *THPModule_updateWorkerPIDs(PyObject *module, PyObject *_ignored) {
+static PyObject *THPModule_setWorkerPIDs(PyObject *module, PyObject *_ignored) {
   Py_RETURN_NONE;
 }
 
@@ -211,7 +211,7 @@ static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module, PyObject *_ig
 
 PyMethodDef DataLoaderMethods[] = {
   {"_set_worker_signal_handlers",  (PyCFunction)THPModule_setWorkerSignalHandlers,  METH_NOARGS,   nullptr},
-  {"_update_worker_pids",          (PyCFunction)THPModule_updateWorkerPIDs,         METH_VARARGS,  nullptr},
+  {"_set_worker_pids",             (PyCFunction)THPModule_setWorkerPIDs,            METH_VARARGS,  nullptr},
   {"_remove_worker_pids",          (PyCFunction)THPModule_removeWorkerPIDs,         METH_O,        nullptr},
   {"_error_if_any_worker_fails",   (PyCFunction)THPModule_errorIfAnyWorkerFails,    METH_NOARGS,   nullptr},
   {nullptr, nullptr, 0, nullptr}

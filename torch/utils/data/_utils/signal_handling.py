@@ -11,7 +11,7 @@ events happen.
 
 When a _DataLoaderIter starts worker processes, their pids are registered in a
 defined in `DataLoader.cpp`: id(_DataLoaderIter) => Collection[ Worker pids ]
-via `_update_worker_pids`.
+via `_set_worker_pids`.
 
 When an error happens in a worker process, the main process received a SIGCHLD,
 and Python will eventually call the handler registered below
@@ -33,7 +33,7 @@ multiprocessing data loading robust to errors.
 import signal
 import threading
 import torch
-from torch._C import _update_worker_pids, _remove_worker_pids, \
+from torch._C import _set_worker_pids, _remove_worker_pids, \
     _error_if_any_worker_fails, _set_worker_signal_handlers
 from . import IS_WINDOWS
 

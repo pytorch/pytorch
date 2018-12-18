@@ -406,7 +406,7 @@ class _DataLoaderIter(object):
             else:
                 self.data_queue = self.worker_result_queue
 
-            _utils.signal_handling._update_worker_pids(id(self), tuple(w.pid for w in self.workers))
+            _utils.signal_handling._set_worker_pids(id(self), tuple(w.pid for w in self.workers))
             _utils.signal_handling._set_SIGCHLD_handler()
             self.worker_pids_set = True
 
