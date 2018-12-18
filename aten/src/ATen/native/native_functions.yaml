@@ -1790,6 +1790,10 @@
   variants: method
   device_guard: false
 
+- func: _sparse_unsqueeze(Tensor self, int64_t dim) -> Tensor
+
+- func: _sparse_squeeze(Tensor self, int64_t dim) -> Tensor
+
 - func: var(Tensor self, bool unbiased=true) -> Tensor
   variants: function, method
 

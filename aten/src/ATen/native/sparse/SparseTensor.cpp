@@ -288,7 +288,7 @@ SparseTensor dense_to_sparse(const Tensor& self){
 SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim){
   int64_t dims = self.dim();
   AT_CHECK(sparse_dim > 0, "sparse_dim must be >0");
-  AT_CHECK(sparse_dim <= dims, 
+  AT_CHECK(sparse_dim <= dims,
     "sparse_dim must be less than or equal to self.dim()");
   at::TensorOptions sparse_options = self.options().layout(kSparse);
   std::vector<int64_t> sizes = self.sizes().vec();
@@ -491,6 +491,63 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
 SparseTensor sparse_mask_cpu(const Tensor& t, SparseTensorRef mask) {
   SparseTensor r = at::empty({0}, t.options().layout(kSparse));
   sparse_mask_out_cpu(r, t, mask.tref);
+  return r;
+}
+
+// --------------------------------------------------------------------
+// sparse_squeeze and sparse_unsqueeze
+// --------------------------------------------------------------------
+SparseTensor _sparse_squeeze(const SparseTensor& self, int64_t dim) {
+  AT_ASSERT(self.is_sparse());
+  dim = maybe_wrap_dim(dim, self.dim() + 1);
+  int64_t sparse_dim = self.sparse_dim();
+  int64_t dense_dim = self.dense_dim();
+  auto indices = self._indices();
+  auto new_sizes = self.sizes().vec();
+  new_sizes.erase(new_sizes.begin() + dim);
+  SparseTensor r;
+
+  if (dim < sparse_dim) {
+    int64_t nnz = self._nnz();
+    auto new_indices = at::empty({int64_t(new_sizes.size()), nnz}, indices.options());
+    int64_t i = 0;
+    for (int64_t j = 0; j < indices.size(0); j++) {
+      if (j == dim) continue;
+      new_indices[i++].copy_(indices[j]);
+    }
+    r = _sparse_coo_tensor_with_dims_and_tensors(
+      sparse_dim - 1, dense_dim, new_sizes, new_indices, self._values(), self.options());
+  } else {
+    r = _sparse_coo_tensor_with_dims_and_tensors(
+      sparse_dim, dense_dim - 1, new_sizes, indices, self._values().squeeze(dim - sparse_dim + 1), self.options());
+  }
+  r._coalesced_(self.is_coalesced());
+  return r;
+}
+
+SparseTensor _sparse_unsqueeze(const SparseTensor& self, int64_t dim) {
+  AT_ASSERT(self.is_sparse());
+  dim = maybe_wrap_dim(dim, self.dim() + 1);
+  int64_t sparse_dim = self.sparse_dim();
+  int64_t dense_dim = self.dense_dim();
+  auto indices = self._indices();
+  auto sizes = self.sizes().vec();
+  sizes.insert(sizes.begin() + dim, 1);
+  SparseTensor r;
+
+  if (dim <= sparse_dim) {
+    auto new_indices = native::cat({
+      indices.narrow(0, 0, dim),
+      native::zeros({1, indices.size(1)}, indices.options().dtype(kLong)),
+      indices.narrow(0, dim, indices.size(0) - dim)
+    });
+    r = _sparse_coo_tensor_with_dims_and_tensors(
+        sparse_dim + 1, dense_dim, sizes, new_indices, self._values(), self.options());
+  } else {
+    r = _sparse_coo_tensor_with_dims_and_tensors(
+        sparse_dim, dense_dim + 1, sizes, indices, self._values().unsqueeze(dim - sparse_dim + 1), self.options());
+  }
+  r._coalesced_(self.is_coalesced());
   return r;
 }
 

@@ -5,6 +5,8 @@ __all__ = [
     'addmm',
     'mm',
     'sum',
+    'squeeze',
+    'unsqueeze',
 ]
 
 
@@ -132,3 +134,11 @@ def sum(input, dim=None, dtype=None):
             return torch._sparse_sum(input, dim, dtype=dtype)
         else:
             return torch._sparse_sum(input, dtype=dtype)
+
+
+def squeeze(input, dim):
+    return torch._sparse_squeeze(input, dim)
+
+
+def unsqueeze(input, dim):
+    return torch._sparse_unsqueeze(input, dim)
