@@ -56,21 +56,21 @@ python setup.py build develop
 
 This is especially useful if you are only changing Python files.
 
-This mode will symlink the python files from the current local source tree into the
-python install.
+This mode will symlink the Python files from the current local source tree into the
+Python install.
 
-Hence, if you modify a python file, you do not need to reinstall pytorch again and again.
+Hence, if you modify a Python file, you do not need to reinstall pytorch again and again.
 
 For example:
 - Install local pytorch in `build develop` mode
-- modify your python file `torch/__init__.py` (for example)
+- modify your Python file `torch/__init__.py` (for example)
 - test functionality
-- modify your python file `torch/__init__.py`
+- modify your Python file `torch/__init__.py`
 - test functionality
-- modify your python file `torch/__init__.py`
+- modify your Python file `torch/__init__.py`
 - test functionality
 
-You do not need to repeatedly install after modifying python files.
+You do not need to repeatedly install after modifying Python files.
 
 In case you want to reinstall, make sure that you uninstall pytorch first by running `pip uninstall torch`
 and `python setup.py clean`. Then you can install in `build develop` mode again.
