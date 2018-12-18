@@ -1547,6 +1547,9 @@ class TestCuda(TestCase):
         self.assertEqual(x.sum(), 65504)
         self.assertEqual(x.sum(dtype=torch.float32), 65504)
 
+        x = torch.ones(65536, device='cuda', dtype=torch.float16)
+        self.assertEqual(x.sum(dtype=torch.float32), 65536)
+
         a = torch.zeros(1203611).bernoulli_(0.0005)
         x = a.to(device='cuda', dtype=torch.float16)
         self.assertEqual(x.sum().item(), a.sum().item())
@@ -1554,6 +1557,14 @@ class TestCuda(TestCase):
         a = torch.zeros(100, 121, 80).bernoulli_(0.0005)
         x = a.to(device='cuda', dtype=torch.float16)
         self.assertEqual(x.sum((0, 2)).float().cpu(), a.sum((0, 2)))
+
+    @skipIfRocm
+    def test_mean_fp16(self):
+        x = torch.ones(65536, device='cuda', dtype=torch.float16)
+        self.assertEqual(x.mean(), 1)
+
+        x = torch.ones(65536, device='cuda', dtype=torch.float16)
+        self.assertEqual(x.mean(dtype=torch.float32), 1)
 
     @staticmethod
     def _select_broadcastable_dims(dims_full=None):

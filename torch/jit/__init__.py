@@ -30,6 +30,7 @@ import numbers
 import collections
 import re
 import inspect
+import pickle
 if sys.version_info[0] > 2:
     import pathlib
 
@@ -1154,6 +1155,12 @@ if _enabled:
             self._copy_into(module_lookup, [])
             return m
 
+        def __getstate__(self):
+            raise pickle.PickleError(
+                "ScriptModules cannot be saved using torch.save. " +
+                "Mixed serialization of script and non-script modules is not supported. " +
+                "For purely script modules use my_script_module.save(<filename>) instead.")
+
     class WeakScriptModuleProxy(ScriptModule):
         def __init__(self, original, stubs):
             # Guards behavior of __setattr__ and __getattr__ so ScriptModule
@@ -1210,7 +1217,6 @@ if _enabled:
                 raise AttributeError("Cannot set new attribute '{}' on "
                                      "weak script module once it has been "
                                      "created".format(attr))
-
 else:
     ScriptModule = torch.nn.Module
 
