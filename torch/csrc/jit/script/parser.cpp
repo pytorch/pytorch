@@ -365,9 +365,10 @@ struct ParserImpl {
       }
       case TK_RETURN: {
         auto range = L.next().range;
-        // XXX: TK_NEWLINE makes it accept an empty list
-        auto values = parseList(TK_NOTHING, ',', TK_NEWLINE, &ParserImpl::parseExp);
-        return Return::create(range, values);
+        Expr value = L.cur().kind != TK_NEWLINE ? parseExpOrExpTuple()
+                                                : Expr(c(TK_NONE, range, {}));
+        L.expect(TK_NEWLINE);
+        return Return::create(range, value);
       }
       case TK_RAISE: {
         auto range = L.next().range;
@@ -461,20 +462,24 @@ struct ParserImpl {
     } while(!L.nextIf(TK_DEDENT));
     return c(TK_LIST, r, std::move(stmts));
   }
+
+  Maybe<Expr> parseReturnAnnotation() {
+    if (L.nextIf(TK_ARROW)) {
+      // Exactly one expression for return type annotation
+      auto return_type_range = L.cur().range;
+      return Maybe<Expr>::create(return_type_range, parseExp());
+    } else {
+      return Maybe<Expr>::create(L.cur().range);
+    }
+  }
+
   Decl parseDecl() {
     auto paramlist = parseList('(', ',', ')', &ParserImpl::parseParam);
     // Parse return type annotation
     TreeRef return_type;
-    if (L.nextIf(TK_ARROW)) {
-      // Exactly one expression for return type annotation
-      auto return_type_range = L.cur().range;
-      return_type = Maybe<Expr>::create(return_type_range, parseExp());
-    } else {
-      // Default to returning single tensor. TODO: better sentinel value?
-      return_type = Maybe<Expr>::create(L.cur().range);
-    }
+    Maybe<Expr> return_annotation = parseReturnAnnotation();
     L.expect(':');
-    return Decl::create(paramlist.range(), List<Param>(paramlist), Maybe<Expr>(return_type));
+    return Decl::create(paramlist.range(), List<Param>(paramlist), return_annotation);
   }
 
   TreeRef parseFunction(bool is_method) {
