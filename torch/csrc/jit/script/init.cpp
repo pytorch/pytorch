@@ -525,7 +525,7 @@ void initJitScriptBindings(PyObject* module) {
              const std::string& script,
              ResolutionCallback rcb, bool has_self) {
             auto self = has_self ? std::make_shared<ModuleValue>(m) : nullptr;
-            return defineMethodsInModule(m, script, pythonResolver(rcb), self);
+            defineMethodsInModule(m, script, pythonResolver(rcb), self);
           })
       .def("_create_methods", [](std::shared_ptr<Module> m,
           const std::vector<Def>& defs,
@@ -646,7 +646,7 @@ void initJitScriptBindings(PyObject* module) {
         if (self.find_method("forward")) {
           Method & m = self.get_method("forward");
           return m.graph_for(
-              createStackForSchema(m.getSchema(), tuple_slice(std::move(args), 1), std::move(kwargs)));
+              createStackForSchema(m.getSchema(), tuple_slice(std::move(args), 1), kwargs));
         }
         throw std::runtime_error("Attempted to call graph_for on a Module without a compiled forward()");
       })
@@ -708,7 +708,7 @@ void initJitScriptBindings(PyObject* module) {
     .def("graph_for", [](py::args args, py::kwargs kwargs) {
       // see: [pybind11 varargs]
       Method& self = py::cast<Method&>(args[0]);
-      return self.graph_for(createStackForSchema(self.getSchema(), tuple_slice(std::move(args), 1), std::move(kwargs)));
+      return self.graph_for(createStackForSchema(self.getSchema(), tuple_slice(std::move(args), 1), kwargs));
     })
     .def("debug_disable_autodiff_subgraph_inlining", &Method::debugDisableAutodiffSubgraphInlining)
     .def("schema", &Method::getSchema)

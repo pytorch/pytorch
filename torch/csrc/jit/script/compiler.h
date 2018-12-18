@@ -277,6 +277,8 @@ TORCH_API c10::optional<size_t> findInputWithName(
   const std::string& name,
   at::ArrayRef<NamedValue> kwargs);
 
+TORCH_API at::ArrayRef<Value*> createTupleUnpack(Value* v);
+
 } // namespace script
 } // namespace jit
 } // namespace torch
