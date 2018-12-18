@@ -162,7 +162,7 @@ inline std::pair<std::shared_ptr<TracingState>, Stack> enter(Stack inputs) {
     }
   };
   for (IValue& input : inputs) {
-    input = add_input(input, inferTypeFrom(input), state->graph->addInput());
+    input = add_input(input, incompleteInferTypeFrom(input), state->graph->addInput());
   }
   return std::make_pair(state, inputs);
 }

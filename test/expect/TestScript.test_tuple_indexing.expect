@@ -14,5 +14,6 @@ graph(%a : Tensor) {
     }
   %8 : int = prim::TupleIndex[index=0](%b)
   %9 : int = prim::TupleIndex[index=1](%b)
-  return (%8, %9);
+  %10 : (int, int) = prim::TupleConstruct(%8, %9)
+  return (%10);
 }
