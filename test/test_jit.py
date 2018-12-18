@@ -30,6 +30,7 @@ import shutil
 import warnings
 import math
 import types
+import pickle
 
 from common_methods_invocations import method_tests as autograd_method_tests
 from common_methods_invocations import create_input, unpack_variables, \
@@ -497,6 +498,13 @@ class JitTestCase(TestCase):
         return results
 
 
+# has to be at top level or Pickle complains
+class FooToPickle(torch.nn.Module):
+    def __init__(self):
+        super(FooToPickle, self).__init__()
+        self.bar = torch.jit.ScriptModule()
+
+
 class TestJit(JitTestCase):
 
     @unittest.skip("Requires a lot of RAM")
@@ -540,6 +548,10 @@ class TestJit(JitTestCase):
         self.assertEqual(tuple(m.buffers()), tuple(m2.buffers()))
         self.assertFalse(m2.p0.is_cuda)
         self.assertFalse(m2.b0.is_cuda)
+
+    def test_model_save_error(self):
+        with self.assertRaisesRegex(pickle.PickleError, "not supported"):
+            torch.save(FooToPickle(), "will_fail")
 
     @unittest.skipIf(not RUN_CUDA, "restore device requires CUDA")
     def test_restore_device_cuda(self):
@@ -4449,6 +4461,43 @@ a")
         # do literals product to try any types combinations
         for op, lhs, rhs in product(ops, type_literals, type_literals):
             test(op, [lhs, rhs])
+
+    def test_isinstance(self):
+        # test isinstance operator for static type checking
+        template = dedent('''
+        def func(x):
+            # type: ({type_hint}) -> bool
+            return isinstance(x, {typ})
+        ''')
+
+        def test(inp, typ, type_hint):
+            code = template.format(typ=typ, type_hint=type_hint)
+            scope = {}
+            exec(code, globals(), scope)
+            cu = torch.jit.CompilationUnit(code)
+            self.assertEqual(
+                cu.func(inp),
+                scope['func'](inp),
+                "Failed with typ: {}"
+                .format(typ)
+            )
+
+        inputs = [True, 1, 1.0, torch.tensor(1), [1, 2], (1.0,), [1, 2], 1]
+        type_literals = ['bool', 'int', 'float', 'torch.Tensor', 'list', 'tuple',
+                         '(list, tuple)', '(int, float, bool)']
+        type_annotations = ['bool', 'int', 'float', 'Tensor', 'List[int]', 'Tuple[float]',
+                            'List[int]', 'int']
+
+        # do zipping to try different types
+        for inp, typ, type_hint in zip(inputs, type_literals, type_annotations):
+            test(inp, typ, type_hint)
+
+        # test optional isintance check
+        with self.assertRaisesRegex(RuntimeError, "Optional isinstance check is not supported"):
+            @torch.jit.script
+            def opt_func(x):
+                # type: (Optional[int]) -> bool
+                return isinstance(x, int)
 
     def test_python_call(self):
         def pyfunc(a):
@@ -11027,6 +11076,31 @@ class TestAsync(JitTestCase):
         y = torch.jit._wait(fut)
         # assert nothing; only to make sure the fake python path works
 
+    def test_async_parsing(self):
+        @torch.jit.script
+        def foo(x):
+            # type: (Tensor) -> List[Tensor]
+            return [torch.neg(x), x.t()]
+
+        @torch.jit.script
+        def bar(x):
+            futures = torch.jit.annotate(List[Future[List[Tensor]]], [])
+            for _ in range(3):
+                future = torch.jit.annotate(
+                    Future[List[Tensor]],
+                    torch.jit._fork(foo, x)
+                )
+                futures.append(future)
+
+            output = torch.jit.annotate(List[List[Tensor]], [])
+            for i in range(3):
+                output.append(torch.jit._wait(futures[i]))
+            return output
+
+        x = torch.rand(3, 3)
+        result = bar(x)
+        self.assertEqual(len(result), 3)
+
     def test_async_script(self):
         @torch.jit.script
         def foo(x):
@@ -11159,6 +11233,59 @@ class TestAsync(JitTestCase):
         self.assertEqual(y1, foo1(x1))
         self.assertEqual(y2, foo2(x1, x2))
         self.assertEqual(y3, foo3(x1, x2, x3))
+
+    def test_async_script_trace(self):
+        class Traced(nn.Module):
+            def __init__(self):
+                super(Traced, self).__init__()
+
+            def forward(self, x):
+                return tuple([torch.neg(x), x])
+
+        class Module(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Module, self).__init__(False)
+                x = torch.rand(3, 3)
+                self.traced = torch.jit.trace(Traced(), (x), _force_outplace=True)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                # type: (Tensor) -> Tuple[List[Tensor], Tuple[Tensor, Tensor], Tensor]
+                future1 = torch.jit._fork(self.traced, x)
+                future2 = torch.jit._fork(torch.neg, x)
+
+                tensor_tuple = torch.jit._wait(future1)
+                tensor_single = torch.jit._wait(future2)
+
+                tensor_list = []
+                tensor_list.append(tensor_tuple[0])
+                tensor_list.append(tensor_single)
+
+                # return a nested structure of tensors
+                return (tensor_list, tensor_tuple, tensor_tuple[1])
+
+        class Tuple(nn.Module):
+            def __init__(self):
+                super(Tuple, self).__init__()
+                self.module = Module()
+
+            def forward(self, x):
+                z = torch.neg(x)
+                y = self.module(x)
+                list = [z, y[0][0], y[0][1], y[1][0], y[1][1], y[2]]
+                return tuple(list)
+
+        x = torch.rand(3, 3)
+        module = torch.jit.trace(Tuple(), (x), _force_outplace=True)
+
+        # Make sure we have forks
+        self.assertGraphContainsExactly(module.graph, kind='prim::fork', num_kind_nodes=2)
+        # Make sure 1 ::neg is in the root graph and 2 ::negs are in the subgraphs
+        self.assertGraphContainsExactly(module.graph, kind='aten::neg', num_kind_nodes=1)
+        self.assertGraphContainsExactly(module.graph, kind='aten::neg', num_kind_nodes=3, consider_subgraphs=True)
+
+        y = torch.neg(x)
+        self.assertEqual(module(x), tuple([y, y, y, y, x, x]))
 
 
 for test in autograd_method_tests:
