@@ -138,14 +138,10 @@ auto ConvParams::use_miopen(const at::Tensor& input) const -> bool {
 }
 
 auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
-#if AT_MKLDNN_ENABLED()
-  return input.type().backend() == at::Backend::CPU &&
-         input.type().scalarType() == kFloat && // only on CPU Float Tensors
-         !is_dilated() && // doesn't support dilation
-         !transposed && // or transposed tensors
-         input.ndimension() == 4; // must be in NCHW format
-#endif
-  return false;
+  return at::mkldnn_is_acceptable(input)
+         && !is_dilated() // doesn't support dilation for now
+         && !transposed // doesn't support tranposed convolution for now
+         && input.ndimension() == 4; // must be NCHW format
 }
 auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
 #if AT_NNPACK_ENABLED()
@@ -397,16 +393,15 @@ at::Tensor _convolution(
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     }
   } else if (params.use_mkldnn(input)) {
-#if AT_MKLDNN_ENABLED()
     AT_CHECK(input.type() == weight.type(),
              "Input type (", input.type().toString(), ") and weight type (", weight.type().toString(),
              ") should be the same");
     AT_CHECK(!bias.defined() || (input.type() == bias.type()),
              "Input type (", input.type().toString(), ") and bias type (", bias.type().toString(),
              ") should be the same");
+
     output = at::mkldnn_convolution(input, weight.contiguous(), bias.defined() ? bias.contiguous() : bias,
                                     params.padding, params.stride, params.dilation, params.groups);
-#endif
   } else {
     if (params.groups == 1) {
       output = at::_convolution_nogroup(
