@@ -21,7 +21,7 @@ std::shared_ptr<Graph> ToBatch::getBatchOperator(const std::string& name, int64_
 }
 
 std::vector<Value*> inlineUnpackedCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs) {
-  auto outputs = script::inlineCallTo(g, callee, inputs);
+  auto outputs = inlineCallTo(g, callee, inputs);
   if (callee.outputs().size() == 1 && callee.outputs().at(0)->type()->kind() == TupleType::Kind) {
     auto tc = createTupleUnpack(outputs.at(0));
     outputs = std::vector<Value*>(tc.begin(), tc.end());
