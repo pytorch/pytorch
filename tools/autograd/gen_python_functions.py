@@ -312,19 +312,16 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
             if arg.get('python_default_init'):
                 assert typename in unpack_with_default_methods, \
-                 '`{}` type is not supported in python_default_init'.format(typename)
+                    '`{}` type is not supported in python_default_init'.format(typename)
                 unpack_with_default = unpack_with_default_methods.get(typename)
                 default_expr = arg.get('python_default_init')
-# TODO: Type currently maps to ScalarType, figure out a cleaner solution
+                # TODO: Type currently maps to ScalarType, figure out a cleaner solution
                 if typename == 'const Type &':
-                 default_expr += '.scalarType()'
+                    default_expr += '.scalarType()'
                 expr = 'r.{}({}, {})'.format(unpack_with_default, arg_index, default_expr)
             else:
                 unpack = unpack_methods.get(typename, typename.lower())
                 expr = 'r.{}({})'.format(unpack, arg_index)
-
-            # unpack = unpack_methods.get(typename, typename.lower())
-            # expr = 'r.{}({})'.format(unpack, arg_index)
 
             if unpack_args:
                 body.append('auto {} = {};'.format(name, expr))
