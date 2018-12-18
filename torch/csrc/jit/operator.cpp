@@ -432,12 +432,20 @@ struct OperatorRegistry {
     return empty;
   }
 
-  const OperatorMap getAllOperators() {
+  std::multimap<int64_t, OperatorEntry> fuzzyFindOperators(std::function<OperatorScore(OperatorEntry)>
+      rankingFunc) {
     std::lock_guard<std::mutex> guard(lock);
     registerPendingOperators();
-    return operators;
-  }
 
+    std::multimap<int64_t, OperatorEntry> rankings;
+    for (OperatorEntry op: operators) {
+      OperatorScore maybe_score = rankingFunc(op);
+      if (maybe_score) {
+        rankings.insert(std::pair<int64_t, OperatorEntry>(*maybe_score, op));
+      }
+    }
+    return rankings;
+  }
 };
 
 OperatorRegistry& getRegistry() {
@@ -465,9 +473,11 @@ const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name) {
   return getRegistry().getOperators(name);
 }
 
-const OperatorMap getAllOperators() {
-  return getRegistry().getAllOperators();
+std::multimap<int64_t, OperatorEntry> fuzzyFindOperators(std::function<OperatorScore(OperatorEntry)>
+    rankingFunc) {
+  return getRegistry().fuzzyFindOperators(rankingFunc);
 }
+
 
 Operator& sig(const char *signature) {
   return *getRegistry().lookupByLiteral(signature);

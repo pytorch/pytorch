@@ -8199,7 +8199,7 @@ a")
             def close_match(x):
                 return x.masked_fill(True)
 
-        with self.assertRaisesRegex(RuntimeError, "This op may not exist or may not be currently"
+        with self.assertRaisesRegex(RuntimeError, "This op may not exist or may not be currently "
                                     "supported in TorchScript"):
             @torch.jit.script
             def unknown_op(x):
