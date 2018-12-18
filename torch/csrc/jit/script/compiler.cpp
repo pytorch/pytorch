@@ -788,7 +788,7 @@ Value* emitBuiltinCall(
               failure_messages,
               nullptr,
               allow_conversions)) {
-        return packOutputs(graph, *result);
+        return result;
       }
     }
   }
@@ -2097,8 +2097,8 @@ private:
     }
   }
 
-  Value* emitExpr(const Expr& tree, TypePtr type_hint = nullptr) {
-    return emitSugaredExpr(tree, 1, std::move(type_hint))->asValue(tree.range(), method);
+  Value* emitExpr(const Expr& tree, const TypePtr& type_hint = nullptr) {
+    return emitSugaredExpr(tree, 1, type_hint)->asValue(tree.range(), method);
   }
 
   NodeKind reverseComparision(NodeKind kind) {
@@ -2121,7 +2121,7 @@ private:
   // or a = torch.jit.annotate(List[int], [])
   // the caller is responsible for checking that the result matches type_hint
   // emitSugaredExpr is free to ignore it.
-  std::shared_ptr<SugaredValue> emitSugaredExpr(const Expr& tree, size_t n_binders, TypePtr type_hint=nullptr) {
+  std::shared_ptr<SugaredValue> emitSugaredExpr(const Expr& tree, size_t n_binders, const TypePtr& type_hint=nullptr) {
     switch(tree.kind()) {
       case TK_VAR:
         return environment_stack->getSugaredVar(Var(tree).name());
@@ -2135,7 +2135,7 @@ private:
         return emitApplyExpr(apply, n_binders);
       } break;
       default:
-        return std::make_shared<SimpleValue>(emitSimpleExpr(tree, std::move(type_hint)));
+        return std::make_shared<SimpleValue>(emitSimpleExpr(tree, type_hint));
     }
   }
 
@@ -2692,7 +2692,7 @@ void defineMethodsInModule(const std::shared_ptr<Module>& m, const std::vector<D
   didFinishEmitModule(m);
 }
 
-void defineMethodsInModule(std::shared_ptr<Module> m, const std::string& source, const Resolver& resolver, const SugaredValuePtr& self) {
+void defineMethodsInModule(const std::shared_ptr<Module>& m, const std::string& source, const Resolver& resolver, const SugaredValuePtr& self) {
   Parser p(source);
   std::vector<Def> definitions;
   std::vector<Resolver> resolvers;
@@ -2701,7 +2701,7 @@ void defineMethodsInModule(std::shared_ptr<Module> m, const std::string& source,
     definitions.push_back(def);
     resolvers.push_back(resolver);
   }
-  defineMethodsInModule(std::move(m), definitions, resolvers, self);
+  defineMethodsInModule(m, definitions, resolvers, self);
 }
 
 std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(

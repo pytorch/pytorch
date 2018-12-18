@@ -168,7 +168,7 @@ struct MethodValue : public SugaredValue {
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
       size_t n_binders) override {
-    return std::make_shared<SimpleValue>(caller.emit_call_to(loc, method, inputs, attributes).at(0));
+    return std::make_shared<SimpleValue>(caller.emit_call_to(loc, method, inputs, attributes));
   }
 
  private:

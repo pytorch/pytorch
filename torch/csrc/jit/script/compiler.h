@@ -36,7 +36,7 @@ TORCH_API void defineMethodsInModule(
 );
 
 // same as above but parse the definitions from source
-TORCH_API void defineMethodsInModule(std::shared_ptr<Module> m, const std::string& source, const Resolver& resolver, const std::shared_ptr<SugaredValue>& self);
+TORCH_API void defineMethodsInModule(const std::shared_ptr<Module>& m, const std::string& source, const Resolver& resolver, const std::shared_ptr<SugaredValue>& self);
 
 // pack outputs of a function following python rules. If there is a single value return
 // a SimpleValue, otherwise pack all the values into a Tuple.
