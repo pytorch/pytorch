@@ -7,7 +7,7 @@
 namespace torch { namespace jit { namespace script {
 
 
-TORCH_API size_t ComputeEditDistance(const std::string& word1, const std::string& word2,
+TORCH_API size_t ComputeEditDistance(const char * word1, const char * word2,
     size_t maxEditDistance);
 
 }}}

@@ -1,17 +1,18 @@
 #include <torch/csrc/jit/script/edit_distance.h>
 #include <algorithm>
 #include <memory>
+#include <string.h>
 
 namespace torch { namespace jit { namespace script {
 
 // computes levenshtein edit distance between two words
 // returns maxEditDistance + 1 if the edit distance exceeds MaxEditDistance
 // reference: http://llvm.org/doxygen/edit__distance_8h_source.html
-size_t ComputeEditDistance(const std::string& word1, const std::string& word2,
+size_t ComputeEditDistance(const char * word1, const char * word2,
     size_t maxEditDistance) {
 
-  size_t m = word1.size();;
-  size_t n = word2.size();
+  size_t m = strlen(word1);;
+  size_t n = strlen(word2);
 
   const unsigned small_buffer_size = 64;
   unsigned small_buffer[small_buffer_size];
