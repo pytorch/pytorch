@@ -1,16 +1,15 @@
-#include "c10/core/dispatch/OpSchema.h"
+#include <c10/core/dispatch/OpSchema.h>
 #include <c10/util/Array.h>
 
 using namespace c10;
-using namespace caffe2;
 
-static_assert(details::is_tensor_arg<Tensor>::value, "");
-static_assert(details::is_tensor_arg<const Tensor&>::value, "");
-static_assert(details::is_tensor_arg<Tensor&&>::value, "");
+static_assert(details::is_tensor_arg<C10Tensor>::value, "");
+static_assert(details::is_tensor_arg<const C10Tensor&>::value, "");
+static_assert(details::is_tensor_arg<C10Tensor&&>::value, "");
 static_assert(!details::is_tensor_arg<int>::value, "");
 
 struct SchemaDef final {
-  using Signature = bool(int, Tensor, float, Tensor, Tensor, unsigned int);
+  using Signature = bool(int, C10Tensor, float, C10Tensor, C10Tensor, unsigned int);
   static constexpr guts::array<const char*, 6> parameter_names = {{
       "1", "2", "3", "4", "5", "6"
   }};
@@ -21,6 +20,7 @@ static_assert(std::is_same<bool, typename OpSchema<SchemaDef>::signature::return
 static_assert(
     std::is_same<
         guts::typelist::
-            typelist<int, Tensor, float, Tensor, Tensor, unsigned int>,
+            typelist<int, C10Tensor, float, C10Tensor, C10Tensor, unsigned int>,
         typename OpSchema<SchemaDef>::signature::parameter_types>::value,
     "test num_dispatch_args");
+
