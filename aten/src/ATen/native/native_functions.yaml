@@ -1443,6 +1443,10 @@
   matches_jit_signature: True
   variants: function, method
 
+- func: mkldnn_is_acceptable(Tensor self) -> bool
+  matches_jit_signature: True
+  device_guard: false
+
 - func: mkldnn_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups) -> Tensor
   matches_jit_signature: True
 
