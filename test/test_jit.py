@@ -4396,11 +4396,7 @@ a")
         var_int = [2, -2]
         var_float = [1.4321, -1.2]
 
-        ops = ['+', '-', '*', '%', '<', '<=', '>', '>=', '==', '!=']
-        # TODO: turn this on for py3 (and add PY3 division semantics)
-        ops_py2_only = ['/']
-        if PY2:
-            ops.extend(ops_py2_only)
+        ops = ['+', '-', '*', '%', '<', '<=', '>', '>=', '==', '!=', '/']
 
         float_tensor = torch.randn(5, 5, device=device)
         double_tensor = torch.randn(5, 5, dtype=torch.double, device=device)
