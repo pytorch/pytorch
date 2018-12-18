@@ -107,6 +107,43 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangle ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 namespace {
+__device__
+inline int64_t resolve_root_int(
+    int64_t b, int64_t cX4, int64_t x, int32_t sign) {
+  int64_t bXb_cX4 = b*b - cX4;
+  // Potential precision loss could occur here when casting int64_t (63 bits
+  // precision) to double (52 bits precision)
+  double sr = ::sqrt((double)bXb_cX4);
+  int64_t res = ::__double2ll_rd((-b + sign * sr)/2);
+
+  // have to cast double to int64_t, otherwise it would only compare up to the
+  // precision of a double variable, ignoring the precision loss
+  if (bXb_cX4 != (int64_t) (sr * sr)) {
+    // handle precision loss
+    int64_t llsr = ::__double2ll_rd(sr);
+    // suppose z is the correct result of sqrt(bXb_cX4) without precision loss
+    // let d = abs(bXb_cX4 - llsr * llsr), then we have
+    // z = sqrt(bXb_cX4) <= sqrt(llsr * llsr + d) <= llsr + sqrt(d)
+    // z = sqrt(bXb_cX4) >= sqrt(llsr * llsr - d) >= llsr - sqrt(d)
+    // Hence, it is sufficient to search range [z - sqrt(d), z + sqrt(d))
+    int64_t diff = ::__double2ll_ru(::sqrt(::fabs((double)(bXb_cX4 - llsr * llsr))));
+    auto l = res > diff ? res - diff : 0;
+    auto r = res + diff;
+
+    // binary search for the correct answer
+    while (l + 1 < r) {
+      auto m = (l + r) >> 1;
+      if (sign * (b + m) * m >> 1 > x) {
+        r = m;
+      } else {
+        l = m;
+      }
+    }
+    res = l;
+  }
+
+  return res;
+}
 // f: the number of elements in the first row of the trapezoid.
 // x: the index of the target coordinates ordered by row and then column.
 // Assume x corresponding to coordinates (row, col) in the trapezoid, where
@@ -127,10 +164,11 @@ namespace {
 __device__
 inline void get_coordinate_in_tril_trapezoid(
     int64_t f, int64_t x, int64_t & row, int64_t & col) {
-  f <<= 1;
+  f <<= 1; // all statements use 2f, so only calculate it once here.
   auto b = f - 1;
-  auto c = - (x << 1);
-  row = (int64_t) ::floor((-b + ::sqrt(b * b - 4.0 * c))/2);
+  auto cX4 = - (x << 3); // 4 * c = 4 * (-2x) = 8x;
+  //row = ::__double2ll_rd((-b + ::sqrt((double)(b * b - cX4)))/2);
+  row = resolve_root_int(b, cX4, x, 1);
   col = x - ((f + row - 1) * row >> 1);
 }
 
@@ -155,10 +193,11 @@ inline void get_coordinate_in_tril_trapezoid(
 __device__
 inline void get_coordinate_in_triu_trapezoid(
     int64_t f, int64_t x, int64_t & row, int64_t & col) {
-  f <<= 1;
+  f <<= 1; // all statements use 2f, so only calculate it once here.
   auto b = -1 - f;
-  auto c = x << 1;
-  row = (int64_t) ::floor((-b - ::sqrt(b * b - 4.0 * c))/2);
+  auto cX4 = x << 3; // 4 * c = 4 * (2x) = 8x;
+  //row = ::__double2ll_rd((-b - ::sqrt((double)(b * b - cX4)))/2);
+  row = resolve_root_int(b, cX4, x, -1);
   col = x - ((f - row + 1) * row >> 1) + row;
 }
 
@@ -172,7 +211,7 @@ void tril_indices_kernel(scalar_t * tensor,
                          int64_t col,
                          int64_t trapezoid_size,
                          int64_t tril_size) {
-  int64_t linear_index = blockIdx.x * blockDim.x + threadIdx.x;
+  int64_t linear_index = blockIdx.x * (int64_t)blockDim.x + threadIdx.x;
 
   if (linear_index < tril_size) {
     int64_t r, c;
@@ -278,6 +317,7 @@ Tensor triu_indices_cuda(
 
     dim3 dim_block = cuda::getApplyBlock();
     dim3 dim_grid;
+
     // using triu_size instead of tensor.numel(), as each thread takes care of
     // two elements in the tensor.
     AT_CHECK(

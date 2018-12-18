@@ -822,6 +822,52 @@ def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwarg
     kwargs_out = {k: map_arg(v) for k, v in call_kwargs.items()} if call_kwargs else {}
     return args_out, kwargs_out
 
+
+def _compare_trilu_indices(
+        self, row, col, offset=0, dtype=torch.long, device='cpu'):
+    if row == 0 or col == 0:
+        # have to handle this separately as tril and triu does not take
+        # empty matrix as input
+        self.assertEqual(
+            torch.empty(0, 2, dtype=dtype, device=device).transpose(0, 1),
+            torch.tril_indices(row, col, offset, dtype=dtype, device=device))
+
+        self.assertEqual(
+            torch.empty(0, 2, dtype=dtype, device=device).transpose(0, 1),
+            torch.triu_indices(row, col, offset, dtype=dtype, device=device))
+
+    else:
+        self.assertEqual(
+            torch.ones(row, col, dtype=dtype, device='cpu')
+                 .tril(offset).nonzero().transpose(0, 1).to(device),
+            torch.tril_indices(row, col, offset, dtype=dtype, device=device))
+
+        self.assertEqual(
+            torch.ones(row, col, dtype=dtype, device='cpu')
+                 .tril(offset).nonzero().transpose(0, 1).to(device),
+            torch.tril_indices(row, col, offset, dtype=dtype, device=device))
+
+
+def _compare_large_trilu_indices(
+        self, row, col, offset=0, dtype=torch.long, device='cpu'):
+    l = torch.ones(row, col, dtype=dtype, device='cpu').tril(offset) \
+             .nonzero()[-100:-1, :].transpose(0, 1).to(device)
+    torch.cuda.empty_cache()
+
+    r = torch.tril_indices(
+        row, col, offset, dtype=dtype, device=device)[:, -100:-1]
+    self.assertEqual(l, r)
+    torch.cuda.empty_cache()
+
+    l = torch.ones(row, col, dtype=dtype, device='cpu').triu(offset) \
+             .nonzero()[-100:-1, :].transpose(0, 1).to(device)
+    torch.cuda.empty_cache()
+
+    r = torch.triu_indices(
+        row, col, offset, dtype=dtype, device=device)[:, -100:-1]
+    self.assertEqual(l, r)
+    torch.cuda.empty_cache()
+
 # (
 #   row
 #   col
@@ -881,6 +927,13 @@ tri_tests_args = [
     (2028, 1, -1),
     (5000, 5000),
     (10000, 10000)
+]
+
+tri_large_tests_args = [
+    (536870901, 1),
+    (1, 536870901),
+    (268435455, 2, 1),
+    (2, 268435455, 1)
 ]
 
 

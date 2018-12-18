@@ -16,7 +16,8 @@ from torch._six import inf, nan
 
 from test_torch import _TestTorchMixin
 
-from common_methods_invocations import tri_tests_args, run_additional_tri_tests
+from common_methods_invocations import tri_tests_args, tri_large_tests_args, \
+    run_additional_tri_tests, _compare_trilu_indices, _compare_large_trilu_indices
 from common_utils import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, \
     PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, TEST_NUMPY, TEST_WITH_ROCM, load_tests
 
@@ -2119,33 +2120,9 @@ class TestCuda(TestCase):
                 y = torch.randn(2, 1, device='cuda')
                 z = x + y
 
-    def _compare_trilu_indices(self, row, col, offset=0, dtype=torch.long):
-        if row == 0 or col == 0:
-            # have to handle this separately as tril and triu does not take
-            # empty matrix as input
-            self.assertEqual(
-                torch.empty(0, 2, dtype=dtype, device='cuda').transpose(0, 1),
-                torch.tril_indices(row, col, offset, dtype=dtype, device='cuda'))
-            self.assertEqual(
-                torch.empty(0, 2, dtype=dtype, device='cuda').transpose(0, 1),
-                torch.triu_indices(row, col, offset, dtype=dtype, device='cuda'))
-
-        else:
-            # explicitly convert 'cpu' tensor to 'cuda' to avoid a bug in tril
-            # and triu cuda kernel (see #15226)
-            x = torch.ones(row, col, dtype=dtype, device='cpu') \
-                     .tril(offset).nonzero().transpose(0, 1).cuda()
-            y = torch.tril_indices(row, col, offset, dtype=dtype, device='cuda')
-            self.assertEqual(x, y)
-
-            x = torch.ones(row, col, dtype=dtype, device='cpu') \
-                     .triu(offset).nonzero().transpose(0, 1).cuda()
-            y = torch.triu_indices(row, col, offset, dtype=dtype, device='cuda')
-            self.assertEqual(x, y)
-
-    def test_tril_and_triu_indices(self):
+    def test_trilu_indices(self):
         for test_args in tri_tests_args:
-            self._compare_trilu_indices(*test_args)
+            _compare_trilu_indices(self, *test_args, device='cuda')
 
         # test default options
         x = torch.ones(
@@ -2156,6 +2133,10 @@ class TestCuda(TestCase):
         self.assertEqual(
             x.triu(0).nonzero().transpose(0, 1),
             torch.triu_indices(3, 3, device='cuda'))
+
+    def test_large_trilu_indices(self):
+        for test_args in tri_large_tests_args:
+            _compare_large_trilu_indices(self, *test_args, device='cuda')
 
 
 def load_ignore_file():
