@@ -85,6 +85,7 @@ torch_sources_no_python_default = [
     "torch/csrc/jit/scope.cpp",
     "torch/csrc/jit/script/compiler.cpp",
     "torch/csrc/jit/script/type_parser.cpp",
+    "torch/csrc/jit/script/sugared_value.cpp",
     "torch/csrc/jit/script/parser.cpp",
     "torch/csrc/jit/import_method.cpp",
     "torch/csrc/jit/hooks_for_testing.cpp",
