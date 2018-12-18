@@ -8,5 +8,6 @@ graph(%a.1 : Tensor) {
   %7 : int[] = prim::ListConstruct(%5, %6)
   %8 : Tensor = aten::rand(%7, %4, %3, %2)
   %a : Tensor = aten::add_(%a.1, %8, %1)
-  return ();
+  %10 : None = prim::None()
+  return (%10);
 }

@@ -182,8 +182,12 @@ def get_execution_plan(graph_executor_state):
 
 
 def get_grad_executor(plan_state, diff_graph_idx=None):
-    if diff_graph_idx is None and len(list(plan_state.graph.nodes())) != 1:
-        raise RuntimeError("Can't get a grad_executor for a non-differentiable graph")
+    if diff_graph_idx is None:
+        nodes = list(plan_state.graph.nodes())
+        if len(nodes) == 1 or (len(nodes) == 2 and nodes[1].kind() == "prim::TupleConstruct"):
+            pass
+        else:
+            raise RuntimeError("Can't get a grad_executor for a non-differentiable graph")
     grad_executors = list(plan_state.code.grad_executors())
     return grad_executors[diff_graph_idx or 0]
 
@@ -262,7 +266,6 @@ class JitTestCase(TestCase):
             ppv = "op_version_set = 0\n{}".format(pp)
             sm = copy_structure_and_params(module)
             torch._C._jit_import_methods(sm, ppv, constant_table)
-
             pp2, _ = sm._python_print()
             if pp != pp2:
                 self.assertMultiLineEqual(pp, pp2)
@@ -552,6 +555,14 @@ class TestJit(JitTestCase):
     def test_model_save_error(self):
         with self.assertRaisesRegex(pickle.PickleError, "not supported"):
             torch.save(FooToPickle(), "will_fail")
+
+    def test_single_tuple_trace(self):
+        x = torch.tensor(2.)
+
+        def f2(x):
+            return (x,)
+        jit_f2 = torch.jit.trace(f2, x)
+        assert f2(x) == jit_f2(x)  # fails
 
     @unittest.skipIf(not RUN_CUDA, "restore device requires CUDA")
     def test_restore_device_cuda(self):
@@ -4272,7 +4283,7 @@ a")
         self.checkScript(one_return, [a], optimize=True)
         self.checkScript(multiple_returns, [a], optimize=True)
 
-        with self.assertRaisesRegex(RuntimeError, "Expected 1 return value"):
+        with self.assertRaisesRegex(RuntimeError, "but is actually of type None"):
             @torch.jit.script
             def no_return_bad_annotation(a):
                 # type: (Tensor) -> Tensor
@@ -7549,10 +7560,7 @@ a")
         self.checkScript(tuple_index, (torch.tensor([1]),), optimize=True)
         tuple_comp = torch.jit.script(tuple_index)
         self.assertExpectedGraph(tuple_comp.graph)
-        self.run_pass('lower_all_tuples', tuple_comp.graph)
-        m = torch.jit.ScriptModule()
-        m._create_method_from_graph("forward", tuple_comp.graph)
-        self.assertEqual(m(torch.tensor(1)), (1, 2))
+        self.assertEqual(tuple_comp(torch.tensor(1)), (1, 2))
 
         with self.assertRaisesRegex(RuntimeError, "tuple indices must be integer constants"):
             @torch.jit.script
@@ -7596,21 +7604,19 @@ a")
             return e
 
         self.checkScript(tuple_slice, (torch.tensor([1]),), optimize=True)
+        tuple_graph = torch.jit.script(tuple_slice)
+        self.assertExpectedGraph(tuple_graph.graph)
+        self.run_pass('lower_all_tuples', tuple_graph.graph)
+        self.assertTrue('Tuple' not in str(tuple_graph.graph))
         tuple_comp = torch.jit.script(tuple_slice)
-        self.assertExpectedGraph(tuple_comp.graph)
-        self.run_pass('lower_all_tuples', tuple_comp.graph)
-        self.assertTrue('Tuple' not in str(tuple_comp.graph))
-        m = torch.jit.ScriptModule()
-        m._create_method_from_graph("forward", tuple_comp.graph)
-        self.assertEqual(m(torch.tensor(1)), (2, 3))
+        self.assertEqual(tuple_comp(torch.tensor(1)), (2, 3))
 
         @torch.jit.script
         def test_indexing_end_out_of_bounds():
             c = (1, 2)
             return c[2:10]
 
-        # output is None in script and () in python
-        self.assertEqual(test_indexing_end_out_of_bounds(), None)
+        self.assertEqual(test_indexing_end_out_of_bounds(), ())
 
     def test_unwrap_optional_builtin(self):
         def test(x):
@@ -7665,9 +7671,7 @@ a")
         self.assertExpected(sm.__getattr__('forward').pretty_print_schema())
 
     def test_annotated_script_fn_return_mismatch(self):
-        with self.assertRaisesRegex(RuntimeError, r"Return value at position 0 was annotated as "
-                                                  r"having type \(Tensor, Tensor\) but is "
-                                                  r"actually of type Tensor"):
+        with self.assertRaisesRegex(RuntimeError, "but is actually of type"):
             @torch.jit.script
             def return_tup(x):
                 # type: (Tensor) -> Tuple[Tuple[Tensor, Tensor], Tensor]
@@ -9353,6 +9357,14 @@ class TestPytorchExportModes(JitTestCase):
                            export_type=torch.onnx.ExportTypes.DIRECTORY)
         shutil.rmtree(d)
 
+    def test_onnx_multiple_return(self):
+        @torch.jit.script
+        def foo(a):
+            return (a, a)
+        f = io.BytesIO()
+        x = torch.ones(3)
+        torch.onnx._export(foo, (x,), f, example_outputs=(x, x))
+
     @skipIfRocm
     @skipIfNoLapack
     def test_aten_fallback(self):
@@ -9571,19 +9583,10 @@ def check_alias_annotation(method_name, args, kwargs):
 
 def check_output_types(self, func, ref_outputs, args, kwargs):
     graph = getattr(func, 'last_graph', None)
-    if not isinstance(ref_outputs, tuple):
-        ref_outputs = (ref_outputs,)
     types = [o.type() for o in graph.outputs()]
-    self.assertEqual(len(types), len(ref_outputs))
-    for i, (t, ref_out) in enumerate(zip(types, ref_outputs)):
-        if isinstance(ref_out, list):
-            assert len(ref_out) > 0
-            elem = ref_out[0]
-            assert isinstance(elem, torch.Tensor)
-            self.assertTrue(t.isSubtypeOf(torch._C.ListType.ofTensors()))
-        else:
-            ref_type = torch._C.Type.inferFrom(ref_out)
-            self.assertTrue(ref_type.isSubtypeOf(t))
+    self.assertTrue(len(types) == 1)
+    t = types[0]
+    torch._C._jit_assert_is_instance(ref_outputs, t)
 
 
 def check_against_reference(self, func, reference_func, args, kwargs=None,
@@ -10289,7 +10292,7 @@ class TestFuser(JitTestCase):
         expected1, expected2 = f(x, y)
         self.assertEqual(result1, expected1)
         self.assertEqual(result2, expected2)
-        self.assertAllFused(script_f.graph_for(x, y))
+        self.assertAllFused(script_f.graph_for(x, y), except_for={'prim::TupleConstruct'})
 
     # TODO: This test seems dead
     @unittest.skipIf(not IS_WINDOWS, "Testing Fuse skipped on windows")
@@ -10372,7 +10375,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
 
         graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1, 1)
 
-        self.assertGraphSize(graph, 2)
+        self.assertGraphSize(graph, 3)
         self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 2)
 
     def test_merges_without_cycles(self):
@@ -10404,7 +10407,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
 
         graph = self._perform_ad_subgraph_slicing(fn, 2, 2)
 
-        self.assertGraphSize(graph, 1)
+        self.assertGraphSize(graph, 2)
         self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 1)
 
     def test_does_not_create_cycles(self):
@@ -10434,7 +10437,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
 
         graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1, 1)
 
-        self.assertGraphSize(graph, 2)
+        self.assertGraphSize(graph, 3)
         self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 1)
 
     def test_merges_down(self):
@@ -10449,7 +10452,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
 
         graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1, 1)
 
-        self.assertGraphSize(graph, 2)
+        self.assertGraphSize(graph, 3)
         self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 1)
 
     def test_respects_lexical_scoping(self):
