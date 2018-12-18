@@ -152,14 +152,6 @@
     output: 'false'
     grad_input: 'false'
 
-- name: _thnn_fractional_max_pool2d(Tensor self, IntList[2] kernel_size, IntList[2] output_size, Tensor random_samples)
-  cname: SpatialFractionalMaxPooling
-  scalar_check:
-    grad_input: 'false'
-  scalar_check:
-    output: 'false'
-    grad_input: 'false'
-
 - name: _thnn_max_pool2d_with_indices(Tensor self, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, IntList[2] dilation=1, bool ceil_mode=false)
   cname: SpatialDilatedMaxPooling
   default_init:
