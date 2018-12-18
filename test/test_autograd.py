@@ -2040,540 +2040,540 @@ class TestAutograd(TestCase):
                               lambda a, b: torch.cat((a, b)),
                               True, f_args_variable, f_args_tensor)
 
-    # @skipIfNoLapack
-    # def test_cholesky(self):
-    #     def func(root):
-    #         x = torch.matmul(root, root.transpose(-1, -2)) + 1e-05
-    #         return torch.cholesky(x, upper)
-
-    #     def run_test(upper, dims):
-    #         root = torch.rand(*dims)
-    #         indices = torch.ones(dims[-1], dims[-1], dtype=torch.uint8).tril()
-    #         indices = indices.expand_as(root)
-    #         root[indices] = 0
-    #         root.requires_grad_()
-
-    #         gradcheck(func, [root])
-    #         gradgradcheck(func, [root])
-
-    #     for upper, dims in product([True, False], [(3, 3), (4, 3, 2, 2)]):
-    #         run_test(upper, dims)
-    #         run_test(upper, dims)
-
-    # @skipIfNoLapack
-    # def test_trtrs(self):
-    #     def _test_with_size(N, C):
-    #         A = torch.rand(N, N, requires_grad=True)
-    #         b = torch.rand(N, C, requires_grad=True)
-
-    #         for upper, transpose, unitriangular in product((True, False), repeat=3):
-    #             def func(A, b):
-    #                 return torch.trtrs(b, A, upper, transpose, unitriangular)
-
-    #             gradcheck(func, [A, b])
-    #             gradgradcheck(func, [A, b])
-
-    #     _test_with_size(S, S + 1)
-    #     _test_with_size(S, S - 1)
-
-    # @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
-    # def test_fft_ifft_rfft_irfft(self):
-    #     def _test_complex(sizes, signal_ndim):
-    #         x = torch.randn(sizes, requires_grad=True, dtype=torch.double)
-
-    #         for normalized in (True, False):
-    #             def fft(x):
-    #                 return x.fft(signal_ndim, normalized=normalized)
-
-    #             gradcheck(fft, [x])
-    #             gradgradcheck(fft, [x], gen_non_contig_grad_outputs=True)
-
-    #             def ifft(fx):
-    #                 return fx.ifft(signal_ndim, normalized=normalized)
-
-    #             # Use output of fft(x) for inverse fft, due to symmetry requirements
-    #             fx = fft(x).detach()
-    #             fx.requires_grad = True
-    #             gradcheck(ifft, [fx])
-    #             gradgradcheck(ifft, [fx], gen_non_contig_grad_outputs=True)
-
-    #     def _test_real(sizes, signal_ndim):
-    #         x = torch.randn(sizes, requires_grad=True, dtype=torch.double)
-    #         if x.dim() == signal_ndim:
-    #             start_dim = 0
-    #         else:
-    #             start_dim = 1
-    #         signal_sizes = x.size()[start_dim:start_dim + signal_ndim]
-
-    #         for normalized, onesided in product((True, False), repeat=2):
-    #             def rfft(x):
-    #                 return x.rfft(signal_ndim, normalized=normalized, onesided=onesided)
-
-    #             gradcheck(rfft, [x])
-    #             gradgradcheck(rfft, [x], gen_non_contig_grad_outputs=True)
-
-    #             # Generally speaking, irfft itself won't and can't pass the
-    #             # current gradcheck as it assumes the input follows conjugate
-    #             # symmetry, an requirement that is never true with our point
-    #             # numerical Jacobian estimate. Without input symmtry, irfft's
-    #             # behavior is undefined.
-    #             #
-    #             # Even onesided results can't remove all redundancy. For
-    #             # example, consider the .select(last_signal_dim, 0) slice.
-    #             # It is entirely represented in the onesided results (except
-    #             # for 1D), and will be reflected onto itself!
-    #             #
-    #             # So only 1D onesided irfft should pass grad check as it is
-    #             # guaranteed that the input has no symmetrical values.
-    #             #
-    #             # In other cases, we test a function that first uses rfft to
-    #             # generate a tensor that follows the conjugate symmetry irfft
-    #             # expects, and then feeds it into irfft. Since rfft is already
-    #             # tested above, we thereby verify the correctness of irfft.
-    #             if signal_ndim == 1 and onesided:
-    #                 def irfft(fx):
-    #                     return fx.irfft(signal_ndim, normalized=normalized,
-    #                                     onesided=onesided, signal_sizes=signal_sizes)
-
-    #                 # Use output of rfft(x) for inverse rfft, due to symmetry requirements
-    #                 fx = rfft(x).detach()
-    #                 fx.requires_grad = True
-    #                 gradcheck(irfft, [fx])
-    #                 gradgradcheck(irfft, [fx], gen_non_contig_grad_outputs=True)
-    #             else:
-    #                 # Test this function: f(x) = ifft(rfft(x) + rfft(z)), where
-    #                 # z is some fixed tensor of same size as x. rfft(z) term is
-    #                 # needed because otherwise f becomes identity.
-    #                 z = torch.randn(sizes, dtype=torch.double)
-    #                 fz = z.rfft(signal_ndim, normalized=normalized, onesided=onesided)
-
-    #                 def rfft_irfft(x):
-    #                     fx = x.rfft(signal_ndim, normalized=normalized, onesided=onesided)
-    #                     y = fx + fz
-    #                     return y.irfft(signal_ndim, normalized=normalized,
-    #                                    onesided=onesided, signal_sizes=signal_sizes)
-
-    #                 gradcheck(rfft_irfft, [x])
-    #                 gradgradcheck(rfft_irfft, [x], gen_non_contig_grad_outputs=True)
-
-    #     _test_real((2, 10), 1)
-    #     _test_real((2, 3, 4), 2)
-    #     _test_real((2, 3, 4, 3), 3)
-
-    #     _test_complex((2, 2, 10, 2), 1)
-    #     _test_complex((1, 2, 3, 4, 2), 2)
-    #     _test_complex((2, 1, 3, 4, 3, 2), 3)
-
-    # def test_variable_traverse(self):
-    #     def get_out_and_unrefed_cycle():
-    #         inp = torch.randn(10, requires_grad=True)
-    #         tmp = inp.view(10, 1)
-    #         out = tmp.view(10)
-
-    #         # Create a reference cycle that contains an
-    #         # intermediary Variable in the graph
-    #         my_list = []
-    #         my_list.append(tmp)
-    #         my_list.append(my_list)
-
-    #         return out
-
-    #     out = get_out_and_unrefed_cycle()
-    #     gc.collect()
-    #     # This will segfault if things have been erroneously released
-    #     out.backward(torch.randn(out.size()))
-
-    # def test_norm_subgradient(self):
-    #     def run_test(input_size, norm_deg):
-    #         input = torch.zeros(*input_size, requires_grad=True)
-    #         input.norm(norm_deg).backward()
-    #         self.assertEqual(input.grad.data.abs().sum(), 0)
-
-    #     run_test((10,), 2)
-    #     run_test((10, 10), 2)
-    #     run_test((10,), 3)
-    #     run_test((10,), 1)
-    #     run_test((10,), 1.5)
-
-    # def test_pow_zero_tensor_gradient(self):
-    #     def run_test(input_size, exponent):
-    #         input = torch.zeros(*input_size, requires_grad=True)
-    #         input.pow(exponent).sum().backward()
-    #         self.assertEqual(input.grad.data.abs().sum(), 0)
-
-    #     run_test((10,), torch.zeros(10))
-    #     run_test((10, 10), torch.zeros(10, 10))
-    #     run_test((10,), 0)
-
-    # def test_pow_scalar_base(self):
-    #     a = torch.arange(1, 13, dtype=torch.double).view(3, 4).requires_grad_()
-    #     gradcheck(lambda a: torch.pow(2, a), (a,))
-
-    # @skipIfNoLapack
-    # def test_pinverse(self):
-    #     # Why is pinverse tested this way, and not ordinarily as other linear algebra methods?
-    #     # 1. Pseudo-inverses are not generally continuous, which means that they are not differentiable
-    #     # 2. Derivatives for pseudo-inverses exist typically for constant rank (Golub et al, 1973)
-    #     # 3. This method creates two orthogonal matrices, and a constructs a test case with large
-    #     #    singular values (given by x to the function).
-    #     # 4. This will ensure that small perturbations don't affect the rank of matrix, in which case
-    #     #    a derivative exists.
-    #     # 5. This test exists since pinverse is implemented using SVD, and is hence a backpropable method
-    #     m, n = 5, 10
-    #     U = torch.randn(n, m).qr()[0].t()  # Orthogonal with dimensions m x n
-    #     V = torch.randn(n, m).qr()[0].t()  # Orthogonal with dimensions m x n
-
-    #     def func(x):
-    #         S = torch.cat([x, torch.zeros(n - m)], 0)
-    #         M = U.mm(torch.diag(S)).mm(V.t())
-    #         return M.pinverse()
-
-    #     gradcheck(func, [torch.rand(m).add_(1).requires_grad_()])
-    #     gradcheck(func, [torch.rand(m).add_(10).requires_grad_()])
-    #     gradgradcheck(func, [torch.rand(m).add_(1).requires_grad_()])
-    #     gradgradcheck(func, [torch.rand(m).add_(10).requires_grad_()])
-
-    # @skipIfRocm
-    # def test_chain_matmul(self):
-    #     def gen_matrices(p):
-    #         matrices = []
-    #         for (pi, pi_1) in zip(p[:-1], p[1:]):
-    #             matrices.append(torch.randn(pi, pi_1).requires_grad_())
-    #         return matrices
-
-    #     gradcheck(torch.chain_matmul, gen_matrices([5, 10, 15, 5]))
-    #     gradcheck(torch.chain_matmul, gen_matrices([3, 5, 2, 6]))
-    #     gradcheck(torch.chain_matmul, gen_matrices([6, 2, 4, 8, 10]))
-    #     gradgradcheck(torch.chain_matmul, gen_matrices([5, 10, 15, 5]))
-    #     gradgradcheck(torch.chain_matmul, gen_matrices([3, 5, 2, 6]))
-    #     gradgradcheck(torch.chain_matmul, gen_matrices([6, 2, 4, 8, 10]))
-
-    # def test_profiler(self):
-    #     x = torch.randn(10, 10)
-
-    #     with profile() as p:
-    #         y = x * 2 + 4
-
-    #     last_end = 0
-    #     names = ['mul', 'add']
-    #     self.assertEqual(len(p.function_events), len(names))
-    #     for info, expected_name in zip(p.function_events, names):
-    #         self.assertGreater(info.cpu_interval.start, last_end)
-    #         self.assertEqual(info.name, expected_name)
-    #         last_end = info.cpu_interval.end
-
-    # def test_dir(self):
-    #     x = torch.randn(10, 10)
-    #     keys = dir(x)
-    #     self.assertIn('shape', keys)
-
-    #     for key in keys:
-    #         self.assertTrue(hasattr(x, key))
-
-    # def test_as_strided(self):
-
-    #     def test(x, prepro_fn, size, strides, offset=None):
-    #         x = x.to(torch.double).detach().requires_grad_()
-
-    #         # Check that forward will **not** resize storage because it may
-    #         # cause NaN in output and fail numerical Jacobian check consequently
-    #         with torch.no_grad():
-    #             y = prepro_fn(x) if prepro_fn is not None else x
-    #             max_offset = sum((si - 1) * st for si, st in zip(size, strides))
-    #             max_offset += offset if offset is not None else y.storage_offset()
-    #             assert max_offset < len(y.storage()), "test case resizes storage"
-
-    #         def closure(x):
-    #             if prepro_fn is not None:
-    #                 x = prepro_fn(x)
-    #             return x.as_strided(size, strides, offset)
-
-    #         gradcheck(closure, [x])
-    #         gradgradcheck(closure, [x])
-
-    #     # test
-    #     test(torch.arange(0, 25), lambda x: x.view(5, 5), [3, 3], [6, 2], 2)
-
-    #     # test crazy stride at dim with size 1 case
-    #     test(torch.randn(12), None, [1, 2, 1, 5], [0, 5, 100, 1], 2)
-
-    #     # test expand case
-    #     test(torch.randn(5), None, [3, 3, 3], [0, 1, 0], 2)
-    #     test(torch.randn(5), None, [3, 3, 3], [0, 0, 0], 4)
-    #     test(torch.randn(5), lambda x: x.expand(5, 5), [5, 5], [0, 1], 0)
-
-    #     # test non-expand overlapping case
-    #     test(torch.randn(35), None, [6, 6], [5, 1], 2)
-    #     test(torch.randn(15), None, [3, 2], [3, 6], 2)
-
-    #     # test transpose case
-    #     test(torch.randn(3, 4), None, [4, 3], [1, 4])
-
-    #     # test "getting things outside the input" case
-    #     x = torch.randn(6, 2)
-    #     test(x[3:], None, [3, 2], [2, 1], 0)  # should be all zeros
-    #     self.assertEqual(x[3:].as_strided([3, 2], [2, 1], 0), x[:3])
-
-    #     # test select on expanded input case
-    #     test(torch.randn(2, 3), lambda x: x.expand(10, 2, 3), [2, 3], [3, 1], 0)
-
-    # def _test_where_functional(self, t):
-    #     x = Variable(t(torch.randn(5, 5)), requires_grad=True)
-    #     y = Variable(t(torch.randn(5, 5)), requires_grad=True)
-    #     cond = Variable(t(mask_not_all_zeros((5, 5))), requires_grad=False)
-
-    #     def where(cond, x, y):
-    #         return torch.where(cond, x, y)
-
-    #     gradcheck(where, [cond, x, y], raise_exception=True)
-    #     gradgradcheck(where, [cond, x, y], [Variable(t(torch.randn(5, 5)))])
-
-    #     x = Variable(t(torch.randn(5, 1, 5)), requires_grad=True)
-    #     y = Variable(t(torch.randn(5, 5, 1)), requires_grad=True)
-    #     gradcheck(where, [cond, x, y], raise_exception=True)
-    #     gradgradcheck(where, [cond, x, y], [Variable(t(torch.randn(5, 5, 5)))])
-
-    # def test_where_functional(self):
-    #     self._test_where_functional(lambda t: t)
-
-    # @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
-    # @skipIfRocm
-    # def test_where_functional_cuda(self):
-    #     self._test_where_functional(lambda t: t.cuda())
-
-    # def test_reduce_dtype(self):
-    #     def test_reduction(op, has_no_dim):
-    #         x = torch.randn(3, 3, dtype=torch.float, requires_grad=True)
-
-    #         if has_no_dim:
-    #             grad1, = torch.autograd.grad([op(x)], [x])
-    #             grad2, = torch.autograd.grad([op(x, dtype=torch.double)], [x])
-    #             self.assertEqual(grad1, grad2)
-    #             self.assertEqual(grad2.dtype, torch.float)
-
-    #         gi = torch.randn(op(x, dim=0).shape, dtype=torch.float)
-    #         grad1, = torch.autograd.grad([op(x, dim=0)], [x], gi)
-    #         grad2, = torch.autograd.grad([op(x, dim=0, dtype=torch.double)], [x], gi.double())
-    #         self.assertEqual(grad1, grad2)
-    #         self.assertEqual(grad2.dtype, torch.float)
-
-    #     test_reduction(torch.sum, True)
-    #     test_reduction(torch.prod, True)
-    #     test_reduction(torch.cumsum, False)
-    #     test_reduction(torch.cumprod, False)
-
-    # def test_inplace_view_backprop_base(self):
-    #     # modify view and back-prop through base
-    #     root = torch.randn(2, 2, requires_grad=True)
-    #     x = root.clone()
-    #     v1 = x.narrow(0, 0, 1)
-    #     v1.mul_(2)
-    #     x.sum().backward()
-    #     self.assertEqual(root.grad.data.tolist(), [[2, 2], [1, 1]])
-
-    # def test_inplace_view_backprop_view_of_view(self):
-    #     # modify view and backprop through view-of-view
-    #     root = torch.randn(2, 2, requires_grad=True)
-    #     x = root.clone()
-    #     v1 = x.narrow(0, 0, 1)
-    #     v2 = x.narrow(0, 0, 1)
-    #     v1.mul_(2)
-    #     v2.sum().backward()
-    #     self.assertEqual(root.grad.data.tolist(), [[2, 2], [0, 0]])
-
-    # def test_inplace_view_of_view(self):
-    #     # modify view-of-view and backprop through base
-    #     root = torch.randn(2, 2, requires_grad=True)
-    #     x = root.clone()
-    #     v1 = x.narrow(0, 0, 1)
-    #     v2 = v1.narrow(1, 1, 1)
-    #     v2.mul_(2)
-    #     x.sum().backward()
-    #     self.assertEqual(root.grad.data.tolist(), [[1, 2], [1, 1]])
-
-    # def test_inplace_view_gradcheck(self):
-    #     # gradcheck modifications to views
-    #     a = torch.randn(4, 4, requires_grad=True)
-    #     b = torch.randn(2, 2, requires_grad=True)
-
-    #     def func(root, b):
-    #         x = root.clone()
-    #         x.narrow(1, 2, 2).narrow(0, 1, 2).mul_(b)
-    #         x.narrow(1, 0, 2).narrow(0, 1, 2).mul_(b)
-    #         return x
-
-    #     gradcheck(func, [a, b], raise_exception=True)
-    #     go = torch.randn(a.size(), requires_grad=True)
-    #     gradgradcheck(func, (a, b), (go,))
-
-    # def test_inplace_view_makes_base_require_grad(self):
-    #     # in-place modification to view makes base require grad
-    #     a = torch.randn(4, 4, requires_grad=False)
-    #     b = torch.randn(4, 2, requires_grad=True)
-
-    #     def func(root, b):
-    #         x = root.clone()
-    #         self.assertFalse(x.requires_grad)
-    #         x.narrow(1, 2, 2).mul_(b)
-    #         self.assertTrue(x.requires_grad)
-    #         return x
-
-    #     gradcheck(func, [a, b], raise_exception=True)
-    #     go = torch.randn(a.size(), requires_grad=True)
-    #     gradgradcheck(func, (a, b), (go,))
-
-    # def test_inplace_view_backprop_view(self):
-    #     # modify view and backprop through view
-    #     a = Variable(torch.Tensor([2, 5]), requires_grad=False)
-    #     b = Variable(torch.Tensor([3]), requires_grad=True)
-    #     res = a.narrow(0, 1, 1).mul_(b)
-    #     res.sum().backward()
-    #     self.assertEqual(b.grad.data.tolist(), [5])
-    #     self.assertIsNone(a.grad)
-
-    # def test_inplace_view_modify_base(self):
-    #     # Test that an in-place operation on a base that forced it to require
-    #     # grad also forces any previous views to require grad and backprop
-    #     # correctly
-    #     r = torch.ones(1, requires_grad=True)
-
-    #     def fn(r):
-    #         x = torch.ones(5)
-    #         v = x.select(0, 1)
-    #         self.assertFalse(v.requires_grad)
-    #         self.assertIsNone(v.grad_fn)
-    #         x.add_(r)  # v is now dependent on r due to the in-place op on x
-    #         self.assertTrue(v.requires_grad)
-    #         return v
-
-    #     gradcheck(fn, [r])
-    #     gradgradcheck(fn, [r])
-
-    # def test_inplace_view_python(self):
-    #     # in-place modifications of Python-autograd created view
-    #     a = torch.randn(4, 4, requires_grad=True)
-    #     b = torch.randn(2, 2, requires_grad=True)
-
-    #     class PyAdd(torch.autograd.Function):
-    #         @staticmethod
-    #         def forward(ctx, x, y):
-    #             ctx.mark_dirty(x)
-    #             x.add_(y)
-    #             return x
-
-    #         @staticmethod
-    #         def backward(ctx, grad):
-    #             return grad, grad
-
-    #     def func(root, b):
-    #         x = root.clone()
-    #         PyAdd.apply(x.narrow(1, 2, 2).narrow(0, 1, 2), b)
-    #         PyAdd.apply(x.narrow(1, 0, 2).narrow(0, 1, 2), b)
-    #         return x
-
-    #     gradcheck(func, [a, b], raise_exception=True)
-    #     go = torch.randn(a.size(), requires_grad=True)
-    #     gradgradcheck(func, (a, b), (go,))
-
-    # def test_inplace_view_non_contig(self):
-    #     data = torch.ones(2, 3, 2).select(2, 1).t()
-    #     root = Variable(data, requires_grad=True)
-    #     x = root.clone()
-    #     v1 = x.narrow(0, 0, 1)
-    #     v2 = v1.narrow(1, 1, 1)
-    #     v2.mul_(2)
-    #     x.sum().backward()
-    #     self.assertEqual(root.grad.data.tolist(), [[1, 2], [1, 1], [1, 1]])
-
-    # def test_inplace_view_saved_output(self):
-    #     # Test an in-place operation on a view in which the in-place op saves
-    #     # its output. Previously, this created a reference cycle.
-    #     dealloc = [0]
-
-    #     class IncrementOnDelete(object):
-    #         def __del__(self):
-    #             dealloc[0] += 1
-
-    #     def test():
-    #         root = torch.randn(3, 3, requires_grad=True)
-    #         copy = root.clone()
-    #         copy.grad_fn.register_hook(IncrementOnDelete())
-    #         view = copy.view(9)
-    #         torch.nn.functional.relu(view, inplace=True)
-
-    #     test()
-    #     self.assertEqual(dealloc[0], 1)
-
-    # def test_mul_out(self):
-    #     a = torch.randn(2, 2, requires_grad=True)
-    #     b = torch.randn(2, 2, requires_grad=True)
-    #     x = torch.zeros_like(a)
-
-    #     # out=... functions don't support automatic differentiation currently
-    #     self.assertRaisesRegex(RuntimeError, 'out=', lambda: torch.mul(a, b, out=x))
-
-    #     # the inputs can require grad if we're in no_grad() mode
-    #     with torch.no_grad():
-    #         torch.mul(a, b, out=x)
-    #         self.assertEqual(x, a * b)
-
-    # def test_mul_out_result_requires_grad(self):
-    #     a = torch.randn(2, 2)
-    #     b = torch.randn(2, 2)
-    #     x = torch.zeros(2, 2, requires_grad=True)
-    #     # we should throw an exception if the output requires grad
-    #     self.assertRaisesRegex(RuntimeError, 'out=', lambda: torch.mul(a, b, out=x))
-
-    # def test_diagonal_derivative_requires_grad(self):
-    #     # test that the backward requires grad
-    #     # we do this is because diagonal_backward uses inplace
-    #     # operations and gradgradcheck does not catch whether
-    #     # they works as expected (it will succeed even if
-    #     # the gradient has requires_grad == False
-    #     a = torch.randn(5, 6, requires_grad=True)
-    #     b = torch.diagonal(a)**2
-    #     c = b.sum()
-    #     d, = torch.autograd.grad(c, a, retain_graph=True, create_graph=True)
-    #     self.assertTrue(d.requires_grad)
-
-    # @staticmethod
-    # def _test_set_requires_grad_only_for_floats(self, cuda):
-    #     dtypes = [torch.int64, torch.int32, torch.int16, torch.int8,
-    #               torch.float, torch.double]
-    #     if cuda:
-    #         dtypes.append(torch.half)
-
-    #     def f1(dt):
-    #         a = torch.ones(1, dtype=dt, device='cuda' if cuda else 'cpu')
-    #         a.requires_grad_()
-
-    #     def f2(dt):
-    #         a = torch.ones(1, dtype=dt, device='cuda' if cuda else 'cpu')
-    #         a.requires_grad = True
-
-    #     def f3(dt):
-    #         torch.ones(1, dtype=dt, device='cuda' if cuda else 'cpu', requires_grad=True)
-
-    #     for dt in dtypes:
-    #         a = torch.ones(1, dtype=dt, device='cuda' if cuda else 'cpu')
-    #         a.requires_grad = False  # should always work
-    #         a.requires_grad_(False)
-
-    #         for f in [f1, f2, f3]:
-    #             if dt.is_floating_point:
-    #                 f(dt)
-    #             else:
-    #                 with self.assertRaisesRegex(RuntimeError, 'floating point',
-    #                                             msg="dt: {} device: {}".format(a.dtype, a.device)):
-    #                     f(dt)
-
-    # @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
-    # @skipIfRocm
-    # def test_set_requires_grad_only_for_floats_cuda(self):
-    #     self._test_set_requires_grad_only_for_floats(self, True)
-
-    # def test_set_requires_grad_only_for_floats(self):
-    #     self._test_set_requires_grad_only_for_floats(self, False)
+    @skipIfNoLapack
+    def test_cholesky(self):
+        def func(root):
+            x = torch.matmul(root, root.transpose(-1, -2)) + 1e-05
+            return torch.cholesky(x, upper)
+
+        def run_test(upper, dims):
+            root = torch.rand(*dims)
+            indices = torch.ones(dims[-1], dims[-1], dtype=torch.uint8).tril()
+            indices = indices.expand_as(root)
+            root[indices] = 0
+            root.requires_grad_()
+
+            gradcheck(func, [root])
+            gradgradcheck(func, [root])
+
+        for upper, dims in product([True, False], [(3, 3), (4, 3, 2, 2)]):
+            run_test(upper, dims)
+            run_test(upper, dims)
+
+    @skipIfNoLapack
+    def test_trtrs(self):
+        def _test_with_size(N, C):
+            A = torch.rand(N, N, requires_grad=True)
+            b = torch.rand(N, C, requires_grad=True)
+
+            for upper, transpose, unitriangular in product((True, False), repeat=3):
+                def func(A, b):
+                    return torch.trtrs(b, A, upper, transpose, unitriangular)
+
+                gradcheck(func, [A, b])
+                gradgradcheck(func, [A, b])
+
+        _test_with_size(S, S + 1)
+        _test_with_size(S, S - 1)
+
+    @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
+    def test_fft_ifft_rfft_irfft(self):
+        def _test_complex(sizes, signal_ndim):
+            x = torch.randn(sizes, requires_grad=True, dtype=torch.double)
+
+            for normalized in (True, False):
+                def fft(x):
+                    return x.fft(signal_ndim, normalized=normalized)
+
+                gradcheck(fft, [x])
+                gradgradcheck(fft, [x], gen_non_contig_grad_outputs=True)
+
+                def ifft(fx):
+                    return fx.ifft(signal_ndim, normalized=normalized)
+
+                # Use output of fft(x) for inverse fft, due to symmetry requirements
+                fx = fft(x).detach()
+                fx.requires_grad = True
+                gradcheck(ifft, [fx])
+                gradgradcheck(ifft, [fx], gen_non_contig_grad_outputs=True)
+
+        def _test_real(sizes, signal_ndim):
+            x = torch.randn(sizes, requires_grad=True, dtype=torch.double)
+            if x.dim() == signal_ndim:
+                start_dim = 0
+            else:
+                start_dim = 1
+            signal_sizes = x.size()[start_dim:start_dim + signal_ndim]
+
+            for normalized, onesided in product((True, False), repeat=2):
+                def rfft(x):
+                    return x.rfft(signal_ndim, normalized=normalized, onesided=onesided)
+
+                gradcheck(rfft, [x])
+                gradgradcheck(rfft, [x], gen_non_contig_grad_outputs=True)
+
+                # Generally speaking, irfft itself won't and can't pass the
+                # current gradcheck as it assumes the input follows conjugate
+                # symmetry, an requirement that is never true with our point
+                # numerical Jacobian estimate. Without input symmtry, irfft's
+                # behavior is undefined.
+                #
+                # Even onesided results can't remove all redundancy. For
+                # example, consider the .select(last_signal_dim, 0) slice.
+                # It is entirely represented in the onesided results (except
+                # for 1D), and will be reflected onto itself!
+                #
+                # So only 1D onesided irfft should pass grad check as it is
+                # guaranteed that the input has no symmetrical values.
+                #
+                # In other cases, we test a function that first uses rfft to
+                # generate a tensor that follows the conjugate symmetry irfft
+                # expects, and then feeds it into irfft. Since rfft is already
+                # tested above, we thereby verify the correctness of irfft.
+                if signal_ndim == 1 and onesided:
+                    def irfft(fx):
+                        return fx.irfft(signal_ndim, normalized=normalized,
+                                        onesided=onesided, signal_sizes=signal_sizes)
+
+                    # Use output of rfft(x) for inverse rfft, due to symmetry requirements
+                    fx = rfft(x).detach()
+                    fx.requires_grad = True
+                    gradcheck(irfft, [fx])
+                    gradgradcheck(irfft, [fx], gen_non_contig_grad_outputs=True)
+                else:
+                    # Test this function: f(x) = ifft(rfft(x) + rfft(z)), where
+                    # z is some fixed tensor of same size as x. rfft(z) term is
+                    # needed because otherwise f becomes identity.
+                    z = torch.randn(sizes, dtype=torch.double)
+                    fz = z.rfft(signal_ndim, normalized=normalized, onesided=onesided)
+
+                    def rfft_irfft(x):
+                        fx = x.rfft(signal_ndim, normalized=normalized, onesided=onesided)
+                        y = fx + fz
+                        return y.irfft(signal_ndim, normalized=normalized,
+                                       onesided=onesided, signal_sizes=signal_sizes)
+
+                    gradcheck(rfft_irfft, [x])
+                    gradgradcheck(rfft_irfft, [x], gen_non_contig_grad_outputs=True)
+
+        _test_real((2, 10), 1)
+        _test_real((2, 3, 4), 2)
+        _test_real((2, 3, 4, 3), 3)
+
+        _test_complex((2, 2, 10, 2), 1)
+        _test_complex((1, 2, 3, 4, 2), 2)
+        _test_complex((2, 1, 3, 4, 3, 2), 3)
+
+    def test_variable_traverse(self):
+        def get_out_and_unrefed_cycle():
+            inp = torch.randn(10, requires_grad=True)
+            tmp = inp.view(10, 1)
+            out = tmp.view(10)
+
+            # Create a reference cycle that contains an
+            # intermediary Variable in the graph
+            my_list = []
+            my_list.append(tmp)
+            my_list.append(my_list)
+
+            return out
+
+        out = get_out_and_unrefed_cycle()
+        gc.collect()
+        # This will segfault if things have been erroneously released
+        out.backward(torch.randn(out.size()))
+
+    def test_norm_subgradient(self):
+        def run_test(input_size, norm_deg):
+            input = torch.zeros(*input_size, requires_grad=True)
+            input.norm(norm_deg).backward()
+            self.assertEqual(input.grad.data.abs().sum(), 0)
+
+        run_test((10,), 2)
+        run_test((10, 10), 2)
+        run_test((10,), 3)
+        run_test((10,), 1)
+        run_test((10,), 1.5)
+
+    def test_pow_zero_tensor_gradient(self):
+        def run_test(input_size, exponent):
+            input = torch.zeros(*input_size, requires_grad=True)
+            input.pow(exponent).sum().backward()
+            self.assertEqual(input.grad.data.abs().sum(), 0)
+
+        run_test((10,), torch.zeros(10))
+        run_test((10, 10), torch.zeros(10, 10))
+        run_test((10,), 0)
+
+    def test_pow_scalar_base(self):
+        a = torch.arange(1, 13, dtype=torch.double).view(3, 4).requires_grad_()
+        gradcheck(lambda a: torch.pow(2, a), (a,))
+
+    @skipIfNoLapack
+    def test_pinverse(self):
+        # Why is pinverse tested this way, and not ordinarily as other linear algebra methods?
+        # 1. Pseudo-inverses are not generally continuous, which means that they are not differentiable
+        # 2. Derivatives for pseudo-inverses exist typically for constant rank (Golub et al, 1973)
+        # 3. This method creates two orthogonal matrices, and a constructs a test case with large
+        #    singular values (given by x to the function).
+        # 4. This will ensure that small perturbations don't affect the rank of matrix, in which case
+        #    a derivative exists.
+        # 5. This test exists since pinverse is implemented using SVD, and is hence a backpropable method
+        m, n = 5, 10
+        U = torch.randn(n, m).qr()[0].t()  # Orthogonal with dimensions m x n
+        V = torch.randn(n, m).qr()[0].t()  # Orthogonal with dimensions m x n
+
+        def func(x):
+            S = torch.cat([x, torch.zeros(n - m)], 0)
+            M = U.mm(torch.diag(S)).mm(V.t())
+            return M.pinverse()
+
+        gradcheck(func, [torch.rand(m).add_(1).requires_grad_()])
+        gradcheck(func, [torch.rand(m).add_(10).requires_grad_()])
+        gradgradcheck(func, [torch.rand(m).add_(1).requires_grad_()])
+        gradgradcheck(func, [torch.rand(m).add_(10).requires_grad_()])
+
+    @skipIfRocm
+    def test_chain_matmul(self):
+        def gen_matrices(p):
+            matrices = []
+            for (pi, pi_1) in zip(p[:-1], p[1:]):
+                matrices.append(torch.randn(pi, pi_1).requires_grad_())
+            return matrices
+
+        gradcheck(torch.chain_matmul, gen_matrices([5, 10, 15, 5]))
+        gradcheck(torch.chain_matmul, gen_matrices([3, 5, 2, 6]))
+        gradcheck(torch.chain_matmul, gen_matrices([6, 2, 4, 8, 10]))
+        gradgradcheck(torch.chain_matmul, gen_matrices([5, 10, 15, 5]))
+        gradgradcheck(torch.chain_matmul, gen_matrices([3, 5, 2, 6]))
+        gradgradcheck(torch.chain_matmul, gen_matrices([6, 2, 4, 8, 10]))
+
+    def test_profiler(self):
+        x = torch.randn(10, 10)
+
+        with profile() as p:
+            y = x * 2 + 4
+
+        last_end = 0
+        names = ['mul', 'add']
+        self.assertEqual(len(p.function_events), len(names))
+        for info, expected_name in zip(p.function_events, names):
+            self.assertGreater(info.cpu_interval.start, last_end)
+            self.assertEqual(info.name, expected_name)
+            last_end = info.cpu_interval.end
+
+    def test_dir(self):
+        x = torch.randn(10, 10)
+        keys = dir(x)
+        self.assertIn('shape', keys)
+
+        for key in keys:
+            self.assertTrue(hasattr(x, key))
+
+    def test_as_strided(self):
+
+        def test(x, prepro_fn, size, strides, offset=None):
+            x = x.to(torch.double).detach().requires_grad_()
+
+            # Check that forward will **not** resize storage because it may
+            # cause NaN in output and fail numerical Jacobian check consequently
+            with torch.no_grad():
+                y = prepro_fn(x) if prepro_fn is not None else x
+                max_offset = sum((si - 1) * st for si, st in zip(size, strides))
+                max_offset += offset if offset is not None else y.storage_offset()
+                assert max_offset < len(y.storage()), "test case resizes storage"
+
+            def closure(x):
+                if prepro_fn is not None:
+                    x = prepro_fn(x)
+                return x.as_strided(size, strides, offset)
+
+            gradcheck(closure, [x])
+            gradgradcheck(closure, [x])
+
+        # test
+        test(torch.arange(0, 25), lambda x: x.view(5, 5), [3, 3], [6, 2], 2)
+
+        # test crazy stride at dim with size 1 case
+        test(torch.randn(12), None, [1, 2, 1, 5], [0, 5, 100, 1], 2)
+
+        # test expand case
+        test(torch.randn(5), None, [3, 3, 3], [0, 1, 0], 2)
+        test(torch.randn(5), None, [3, 3, 3], [0, 0, 0], 4)
+        test(torch.randn(5), lambda x: x.expand(5, 5), [5, 5], [0, 1], 0)
+
+        # test non-expand overlapping case
+        test(torch.randn(35), None, [6, 6], [5, 1], 2)
+        test(torch.randn(15), None, [3, 2], [3, 6], 2)
+
+        # test transpose case
+        test(torch.randn(3, 4), None, [4, 3], [1, 4])
+
+        # test "getting things outside the input" case
+        x = torch.randn(6, 2)
+        test(x[3:], None, [3, 2], [2, 1], 0)  # should be all zeros
+        self.assertEqual(x[3:].as_strided([3, 2], [2, 1], 0), x[:3])
+
+        # test select on expanded input case
+        test(torch.randn(2, 3), lambda x: x.expand(10, 2, 3), [2, 3], [3, 1], 0)
+
+    def _test_where_functional(self, t):
+        x = Variable(t(torch.randn(5, 5)), requires_grad=True)
+        y = Variable(t(torch.randn(5, 5)), requires_grad=True)
+        cond = Variable(t(mask_not_all_zeros((5, 5))), requires_grad=False)
+
+        def where(cond, x, y):
+            return torch.where(cond, x, y)
+
+        gradcheck(where, [cond, x, y], raise_exception=True)
+        gradgradcheck(where, [cond, x, y], [Variable(t(torch.randn(5, 5)))])
+
+        x = Variable(t(torch.randn(5, 1, 5)), requires_grad=True)
+        y = Variable(t(torch.randn(5, 5, 1)), requires_grad=True)
+        gradcheck(where, [cond, x, y], raise_exception=True)
+        gradgradcheck(where, [cond, x, y], [Variable(t(torch.randn(5, 5, 5)))])
+
+    def test_where_functional(self):
+        self._test_where_functional(lambda t: t)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
+    @skipIfRocm
+    def test_where_functional_cuda(self):
+        self._test_where_functional(lambda t: t.cuda())
+
+    def test_reduce_dtype(self):
+        def test_reduction(op, has_no_dim):
+            x = torch.randn(3, 3, dtype=torch.float, requires_grad=True)
+
+            if has_no_dim:
+                grad1, = torch.autograd.grad([op(x)], [x])
+                grad2, = torch.autograd.grad([op(x, dtype=torch.double)], [x])
+                self.assertEqual(grad1, grad2)
+                self.assertEqual(grad2.dtype, torch.float)
+
+            gi = torch.randn(op(x, dim=0).shape, dtype=torch.float)
+            grad1, = torch.autograd.grad([op(x, dim=0)], [x], gi)
+            grad2, = torch.autograd.grad([op(x, dim=0, dtype=torch.double)], [x], gi.double())
+            self.assertEqual(grad1, grad2)
+            self.assertEqual(grad2.dtype, torch.float)
+
+        test_reduction(torch.sum, True)
+        test_reduction(torch.prod, True)
+        test_reduction(torch.cumsum, False)
+        test_reduction(torch.cumprod, False)
+
+    def test_inplace_view_backprop_base(self):
+        # modify view and back-prop through base
+        root = torch.randn(2, 2, requires_grad=True)
+        x = root.clone()
+        v1 = x.narrow(0, 0, 1)
+        v1.mul_(2)
+        x.sum().backward()
+        self.assertEqual(root.grad.data.tolist(), [[2, 2], [1, 1]])
+
+    def test_inplace_view_backprop_view_of_view(self):
+        # modify view and backprop through view-of-view
+        root = torch.randn(2, 2, requires_grad=True)
+        x = root.clone()
+        v1 = x.narrow(0, 0, 1)
+        v2 = x.narrow(0, 0, 1)
+        v1.mul_(2)
+        v2.sum().backward()
+        self.assertEqual(root.grad.data.tolist(), [[2, 2], [0, 0]])
+
+    def test_inplace_view_of_view(self):
+        # modify view-of-view and backprop through base
+        root = torch.randn(2, 2, requires_grad=True)
+        x = root.clone()
+        v1 = x.narrow(0, 0, 1)
+        v2 = v1.narrow(1, 1, 1)
+        v2.mul_(2)
+        x.sum().backward()
+        self.assertEqual(root.grad.data.tolist(), [[1, 2], [1, 1]])
+
+    def test_inplace_view_gradcheck(self):
+        # gradcheck modifications to views
+        a = torch.randn(4, 4, requires_grad=True)
+        b = torch.randn(2, 2, requires_grad=True)
+
+        def func(root, b):
+            x = root.clone()
+            x.narrow(1, 2, 2).narrow(0, 1, 2).mul_(b)
+            x.narrow(1, 0, 2).narrow(0, 1, 2).mul_(b)
+            return x
+
+        gradcheck(func, [a, b], raise_exception=True)
+        go = torch.randn(a.size(), requires_grad=True)
+        gradgradcheck(func, (a, b), (go,))
+
+    def test_inplace_view_makes_base_require_grad(self):
+        # in-place modification to view makes base require grad
+        a = torch.randn(4, 4, requires_grad=False)
+        b = torch.randn(4, 2, requires_grad=True)
+
+        def func(root, b):
+            x = root.clone()
+            self.assertFalse(x.requires_grad)
+            x.narrow(1, 2, 2).mul_(b)
+            self.assertTrue(x.requires_grad)
+            return x
+
+        gradcheck(func, [a, b], raise_exception=True)
+        go = torch.randn(a.size(), requires_grad=True)
+        gradgradcheck(func, (a, b), (go,))
+
+    def test_inplace_view_backprop_view(self):
+        # modify view and backprop through view
+        a = Variable(torch.Tensor([2, 5]), requires_grad=False)
+        b = Variable(torch.Tensor([3]), requires_grad=True)
+        res = a.narrow(0, 1, 1).mul_(b)
+        res.sum().backward()
+        self.assertEqual(b.grad.data.tolist(), [5])
+        self.assertIsNone(a.grad)
+
+    def test_inplace_view_modify_base(self):
+        # Test that an in-place operation on a base that forced it to require
+        # grad also forces any previous views to require grad and backprop
+        # correctly
+        r = torch.ones(1, requires_grad=True)
+
+        def fn(r):
+            x = torch.ones(5)
+            v = x.select(0, 1)
+            self.assertFalse(v.requires_grad)
+            self.assertIsNone(v.grad_fn)
+            x.add_(r)  # v is now dependent on r due to the in-place op on x
+            self.assertTrue(v.requires_grad)
+            return v
+
+        gradcheck(fn, [r])
+        gradgradcheck(fn, [r])
+
+    def test_inplace_view_python(self):
+        # in-place modifications of Python-autograd created view
+        a = torch.randn(4, 4, requires_grad=True)
+        b = torch.randn(2, 2, requires_grad=True)
+
+        class PyAdd(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                ctx.mark_dirty(x)
+                x.add_(y)
+                return x
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad, grad
+
+        def func(root, b):
+            x = root.clone()
+            PyAdd.apply(x.narrow(1, 2, 2).narrow(0, 1, 2), b)
+            PyAdd.apply(x.narrow(1, 0, 2).narrow(0, 1, 2), b)
+            return x
+
+        gradcheck(func, [a, b], raise_exception=True)
+        go = torch.randn(a.size(), requires_grad=True)
+        gradgradcheck(func, (a, b), (go,))
+
+    def test_inplace_view_non_contig(self):
+        data = torch.ones(2, 3, 2).select(2, 1).t()
+        root = Variable(data, requires_grad=True)
+        x = root.clone()
+        v1 = x.narrow(0, 0, 1)
+        v2 = v1.narrow(1, 1, 1)
+        v2.mul_(2)
+        x.sum().backward()
+        self.assertEqual(root.grad.data.tolist(), [[1, 2], [1, 1], [1, 1]])
+
+    def test_inplace_view_saved_output(self):
+        # Test an in-place operation on a view in which the in-place op saves
+        # its output. Previously, this created a reference cycle.
+        dealloc = [0]
+
+        class IncrementOnDelete(object):
+            def __del__(self):
+                dealloc[0] += 1
+
+        def test():
+            root = torch.randn(3, 3, requires_grad=True)
+            copy = root.clone()
+            copy.grad_fn.register_hook(IncrementOnDelete())
+            view = copy.view(9)
+            torch.nn.functional.relu(view, inplace=True)
+
+        test()
+        self.assertEqual(dealloc[0], 1)
+
+    def test_mul_out(self):
+        a = torch.randn(2, 2, requires_grad=True)
+        b = torch.randn(2, 2, requires_grad=True)
+        x = torch.zeros_like(a)
+
+        # out=... functions don't support automatic differentiation currently
+        self.assertRaisesRegex(RuntimeError, 'out=', lambda: torch.mul(a, b, out=x))
+
+        # the inputs can require grad if we're in no_grad() mode
+        with torch.no_grad():
+            torch.mul(a, b, out=x)
+            self.assertEqual(x, a * b)
+
+    def test_mul_out_result_requires_grad(self):
+        a = torch.randn(2, 2)
+        b = torch.randn(2, 2)
+        x = torch.zeros(2, 2, requires_grad=True)
+        # we should throw an exception if the output requires grad
+        self.assertRaisesRegex(RuntimeError, 'out=', lambda: torch.mul(a, b, out=x))
+
+    def test_diagonal_derivative_requires_grad(self):
+        # test that the backward requires grad
+        # we do this is because diagonal_backward uses inplace
+        # operations and gradgradcheck does not catch whether
+        # they works as expected (it will succeed even if
+        # the gradient has requires_grad == False
+        a = torch.randn(5, 6, requires_grad=True)
+        b = torch.diagonal(a)**2
+        c = b.sum()
+        d, = torch.autograd.grad(c, a, retain_graph=True, create_graph=True)
+        self.assertTrue(d.requires_grad)
+
+    @staticmethod
+    def _test_set_requires_grad_only_for_floats(self, cuda):
+        dtypes = [torch.int64, torch.int32, torch.int16, torch.int8,
+                  torch.float, torch.double]
+        if cuda:
+            dtypes.append(torch.half)
+
+        def f1(dt):
+            a = torch.ones(1, dtype=dt, device='cuda' if cuda else 'cpu')
+            a.requires_grad_()
+
+        def f2(dt):
+            a = torch.ones(1, dtype=dt, device='cuda' if cuda else 'cpu')
+            a.requires_grad = True
+
+        def f3(dt):
+            torch.ones(1, dtype=dt, device='cuda' if cuda else 'cpu', requires_grad=True)
+
+        for dt in dtypes:
+            a = torch.ones(1, dtype=dt, device='cuda' if cuda else 'cpu')
+            a.requires_grad = False  # should always work
+            a.requires_grad_(False)
+
+            for f in [f1, f2, f3]:
+                if dt.is_floating_point:
+                    f(dt)
+                else:
+                    with self.assertRaisesRegex(RuntimeError, 'floating point',
+                                                msg="dt: {} device: {}".format(a.dtype, a.device)):
+                        f(dt)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
+    @skipIfRocm
+    def test_set_requires_grad_only_for_floats_cuda(self):
+        self._test_set_requires_grad_only_for_floats(self, True)
+
+    def test_set_requires_grad_only_for_floats(self):
+        self._test_set_requires_grad_only_for_floats(self, False)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
     @skipIfRocm
