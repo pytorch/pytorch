@@ -2826,7 +2826,9 @@ def assert_int_or_pair(arg, arg_name, message):
     assert isinstance(arg, int) or len(arg) == 2, message.format(arg_name)
 
 
+@torch._jit_internal.weak_script
 def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
+    # type: (Tensor, BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int]) -> Tensor  # noqa
     r"""Extracts sliding local blocks from an batched input tensor.
 
     .. warning::
@@ -2843,13 +2845,17 @@ def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
         assert_int_or_pair(padding, 'padding', msg)
         assert_int_or_pair(stride, 'stride', msg)
 
-        return torch._C._nn.thnn_im2col(input, _pair(kernel_size),
-                                        _pair(dilation), _pair(padding), _pair(stride))
+        ret = torch._C._nn.thnn_im2col(input, _pair(kernel_size),
+                                       _pair(dilation), _pair(padding), _pair(stride))
     else:
         raise NotImplementedError("Input Error: Only 4D input Tensors are supported (got {}D)".format(input.dim()))
+        ret = input  # TODO: remove when jit supports exception control flow
+    return ret
 
 
+@torch._jit_internal.weak_script
 def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
+    # type: (Tensor, BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int]) -> Tensor  # noqa
     r"""Combines an array of sliding local blocks into a large containing
     tensor.
 
@@ -2867,7 +2873,9 @@ def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
         assert_int_or_pair(padding, 'padding', msg)
         assert_int_or_pair(stride, 'stride', msg)
 
-        return torch._C._nn.thnn_col2im(input, _pair(output_size), _pair(kernel_size),
-                                        _pair(dilation), _pair(padding), _pair(stride))
+        ret = torch._C._nn.thnn_col2im(input, _pair(output_size), _pair(kernel_size),
+                                       _pair(dilation), _pair(padding), _pair(stride))
     else:
         raise NotImplementedError("Input Error: Only 3D input Tensors are supported (got {}D)".format(input.dim()))
+        ret = input  # TODO: remove when jit supports exception control flow
+    return ret
