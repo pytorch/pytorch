@@ -197,7 +197,8 @@ __device__ Array<type_t, vt> load_memory(const type_t* in, int begin, int end, i
   return load_memory<vt>(in, begin, end, stride, [](int idx) { return idx; });
 }
 
-template <typename scalar_t, typename func_t, typename out_scalar_t=scalar_t>
+template <typename scalar_t, typename func_t, typename pre_func_t,
+          typename post_func_t, typename out_scalar_t=scalar_t>
 struct ReduceOp {
   using traits = binary_function_traits<func_t>;
   using arg_t = typename traits::arg2_t;
@@ -208,6 +209,8 @@ struct ReduceOp {
   static constexpr int vt0 = 4;
 
   func_t op;
+  pre_func_t pre_op;
+  post_func_t post_op;
   arg_t ident;
   ReduceConfig config;
   InputCalculator input_calc;
@@ -219,8 +222,11 @@ struct ReduceOp {
   bool accumulate;
 
   ReduceOp(func_t op, ReduceConfig config, InputCalculator input_calc, OutputCalculator output_calc,
-           const void* src, void* dst, void* buffer, int* semaphores)
+           const void* src, void* dst, void* buffer, int* semaphores, pre_func_t pre_op,
+           post_func_t post_op)
     : op(op)
+    , pre_op(pre_op)
+    , post_op(post_op)
     , config(config)
     , input_calc(input_calc)
     , output_calc(output_calc)
@@ -252,6 +258,7 @@ struct ReduceOp {
     if (config.should_global_reduce()) {
       value = global_reduce(value, out);
     } else if (config.should_store(output_idx)) {
+      value = post_op(value);
       if (accumulate) {
         value = op(*out, value);
       }
@@ -278,7 +285,7 @@ struct ReduceOp {
 
     arg_t value;
     strided_iterate<vt0>([&](int i, int idx) {
-      value = i == 0 ? (arg_t)values[0] : op(value, values[i]);
+      value = i == 0 ? pre_op(values[0]) : op(value, pre_op(values[i]));
     }, offset, config.num_inputs, config.step_input);
 
     return value;
@@ -371,6 +378,7 @@ struct ReduceOp {
       if (config.should_warp_reduce()) {
         value = warp_reduce(value);
       }
+      value = post_op(value);
       if (should_store) {
         if (accumulate) {
           value = op(*out, value);
@@ -393,14 +401,17 @@ static void launch_reduce_kernel(const ReduceConfig& config, const R& reduction)
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
-template <typename scalar_t, typename out_scalar_t, typename func_t, typename ident_t=double>
-inline void gpu_reduce_kernel(TensorIterator& iter, const func_t& op, ident_t ident=0) {
+template <typename scalar_t, typename out_scalar_t, typename func_t, typename pre_func_t,
+          typename post_func_t, typename ident_t=double>
+inline void gpu_reduce_kernel(TensorIterator& iter, const pre_func_t &pre_op,
+                              const post_func_t &post_op, const func_t& op,
+                              ident_t ident=0) {
   ASSERT_HOST_DEVICE_LAMBDA(func_t);
   AT_ASSERT(iter.numel() > 0 && iter.ntensors() == 2);
 
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      gpu_reduce_kernel<scalar_t, out_scalar_t>(sub_iter, op);
+      gpu_reduce_kernel<scalar_t, out_scalar_t>(sub_iter, pre_op, post_op, op);
     }
     return;
   }
@@ -465,7 +476,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const func_t& op, ident_t id
     auto stream = at::cuda::getCurrentCUDAStream();
     AT_CUDA_CHECK(cudaMemsetAsync(semaphores.get(), 0, config.semaphore_size(), stream));
   }
-  auto reduce = ReduceOp<scalar_t, func_t, out_scalar_t>(
+  auto reduce = ReduceOp<scalar_t, func_t, pre_func_t, post_func_t, out_scalar_t>(
       op,
       config,
       input_calc,
@@ -473,7 +484,9 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const func_t& op, ident_t id
       in_data,
       out_data,
       buffer.get(),
-      (int*)semaphores.get());
+      (int*)semaphores.get(),
+      pre_op,
+      post_op);
   reduce.ident = ident;
   reduce.accumulate = iter.should_accumulate();
 
