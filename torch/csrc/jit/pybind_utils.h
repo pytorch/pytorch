@@ -408,7 +408,7 @@ inline py::object invokeScriptMethodFromPython(
     AutoNoGIL no_gil_guard;
     method.run(stack);
   }
-  return createPyObjectForStack(std::move(stack));
+  return toPyObject(std::move(stack.back()));
 }
 
 inline py::object invokeOperatorFromPython(
