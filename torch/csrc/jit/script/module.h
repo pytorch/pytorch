@@ -141,12 +141,18 @@ struct Method {
       auto type = torch::jit::CompleteTensorType::create(scalar_type, at::kCPU, sizes);
       retval->inputs()[i]->setType(type);
     }
-    JIT_ASSERT(retval->outputs().size() == outputs.size());
+    at::ArrayRef<Value*> output_values = retval->outputs();
+    // patch this to still work if we are returning a tuple of multiple values
+    if (output_values.at(0)->type()->kind() == TupleType::Kind) {
+      JIT_ASSERT(output_values.at(0)->node()->kind()== prim::TupleConstruct);
+      output_values = output_values.at(0)->node()->inputs();
+    }
+    JIT_ASSERT(output_values.size() == outputs.size());
     for (size_t i=0; i < retval->outputs().size(); ++i) {
       auto scalar_type = outputs[i].type().scalarType();
       auto sizes = outputs[i].sizes();
       auto type = torch::jit::CompleteTensorType::create(scalar_type, at::kCPU, sizes);
-      retval->outputs()[i]->setType(type);
+      output_values[i]->setType(type);
     }
     return retval;
   }
