@@ -407,6 +407,8 @@ struct PythonPrintPass {
     for(auto v : values) {
       assignValue(v, genUniqueNameFor(v));
     }
+
+    next_id = 0;
   }
 
   size_t level = 0;
