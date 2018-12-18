@@ -178,6 +178,45 @@ struct MethodValue : public SugaredValue {
 };
 
 
+
+struct TORCH_API PrintValue : public SugaredValue {
+  std::string kind() const override {
+    return "print";
+  }
+  std::shared_ptr<SugaredValue> call(
+    const SourceRange& loc,
+    Method & m,
+    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> attributes,
+    size_t n_binders) override;
+};
+
+// expressions like int(x)
+// these are the same as call prim::Int or equivalent except it
+// is a noop when the input is a subtype of 'type'
+struct TORCH_API CastValue : public BuiltinFunction {
+  CastValue(TypePtr type, c10::Symbol method)
+  : BuiltinFunction(method, c10::nullopt)
+  , type_(std::move(type)) {}
+  std::shared_ptr<SugaredValue> call(
+    const SourceRange& loc,
+    Method & m,
+    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> attributes,
+    size_t n_binders) override {
+      if(inputs.size() == 1 && attributes.size() == 0) {
+        auto v = inputs[0].value(*m.graph());
+        if (v->type()->isSubtypeOf(type_)) {
+          return std::make_shared<SimpleValue>(v);
+        }
+      }
+      return BuiltinFunction::call(loc, m , inputs, attributes, n_binders);
+  }
+private:
+  TypePtr type_;
+};
+
+
 // These SugaredValues have special handling in the compiler because they
 // change the normal evalution order of the expression they participate in.
 // They are exposed here so that the python frontend can inject them
@@ -211,6 +250,12 @@ struct TORCH_API IsInstanceValue : SugaredValue {
     return "isinstance";
   }
 };
+
+static inline std::vector<Value*> toValues(Graph& g, at::ArrayRef<NamedValue> nvs) {
+  return fmap(nvs, [&](const NamedValue& v) {
+    return v.value(g);
+  });
+}
 
 }
 } // namespace jit

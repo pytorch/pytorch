@@ -13,12 +13,6 @@ namespace torch {
 namespace jit {
 namespace script {
 
-static inline std::vector<Value*> toValues(Graph& g, at::ArrayRef<NamedValue> nvs) {
-  return fmap(nvs, [&](const NamedValue& v) {
-    return v.value(g);
-  });
-}
-
 using Resolver = std::function<std::shared_ptr<SugaredValue>(const std::string& name, Method& m, const SourceRange& loc)>;
 
 inline std::shared_ptr<SugaredValue> nativeResolver(const std::string& name, Method& m, const SourceRange& loc){
@@ -38,9 +32,6 @@ TORCH_API void defineMethodsInModule(
 // same as above but parse the definitions from source
 TORCH_API void defineMethodsInModule(const std::shared_ptr<Module>& m, const std::string& source, const Resolver& resolver, const std::shared_ptr<SugaredValue>& self);
 
-// pack outputs of a function following python rules. If there is a single value return
-// a SimpleValue, otherwise pack all the values into a Tuple.
-TORCH_API Value* packOutputs(Graph& g, at::ArrayRef<Value*> values);
 TORCH_API std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs);
 
 // try to match a list if inputs and keyword 'attributes' to this schema,

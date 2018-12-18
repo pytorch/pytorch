@@ -28,69 +28,6 @@ using ValueTable = std::unordered_map<std::string, SugaredValuePtr>;
 using AttributeMap = std::unordered_map<std::string, Const>;
 using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
 
-struct NoneValue : SugaredValue {
-  NoneValue() = default;
-  std::string kind() const override {
-    return "None";
-  }
-};
-
-struct PrintValue : public SugaredValue {
-  std::string kind() const override {
-    return "print";
-  }
-  std::shared_ptr<SugaredValue> call(
-    const SourceRange& loc,
-    Method & m,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
-    size_t n_binders) override {
-      auto& g = *m.graph();
-      if (!attributes.empty())
-        throw ErrorReport(loc) << "print doesn't accept any keyword arguments";
-
-      //temporary hack to allow print statements to work in python 2, where
-      //print(a, b) is treated as a (a, b) tuple input.
-
-      std::vector<Value*> lowered_inputs = toValues(*m.graph(), inputs);
-      if(lowered_inputs.size() == 1 && lowered_inputs.at(0)->node()->kind() == prim::TupleConstruct) {
-        auto input = lowered_inputs[0];
-        for(size_t j = 0; j < input->node()->inputs().size(); ++j) {
-          lowered_inputs.insert(lowered_inputs.begin() + 1 + j, input->node()->inputs().at(j));
-        }
-        lowered_inputs.erase(lowered_inputs.begin());
-      }
-      g.insertNode(g.create(prim::Print, lowered_inputs, 0)
-                       ->setSourceLocation(std::make_shared<SourceRange>(loc)));
-      return std::make_shared<NoneValue>();
-  }
-};
-
-// expressions like int(x)
-// these are the same as call prim::Int or equivalent except it
-// is a noop when the input is a subtype of 'type'
-struct CastValue : public BuiltinFunction {
-  CastValue(TypePtr type, c10::Symbol method)
-  : BuiltinFunction(method, c10::nullopt)
-  , type_(std::move(type)) {}
-  std::shared_ptr<SugaredValue> call(
-    const SourceRange& loc,
-    Method & m,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
-    size_t n_binders) override {
-      if(inputs.size() == 1 && attributes.size() == 0) {
-        auto v = inputs[0].value(*m.graph());
-        if (v->type()->isSubtypeOf(type_)) {
-          return std::make_shared<SimpleValue>(v);
-        }
-      }
-      return BuiltinFunction::call(loc, m , inputs, attributes, n_binders);
-  }
-private:
-  TypePtr type_;
-};
-
 static Value* asSimple(const SugaredValuePtr& value) {
   if(SimpleValue* sv = dynamic_cast<SimpleValue*>(value.get())) {
     return sv->getValue();
@@ -386,6 +323,8 @@ private:
   ValueTable value_table;
 };
 
+// pack outputs of a function following python rules. If there is a single value return
+// a SimpleValue, otherwise pack all the values into a Tuple.
 Value* packOutputs(Graph& g, at::ArrayRef<Value*> values) {
   if(values.size() == 1) {
     return values[0];
