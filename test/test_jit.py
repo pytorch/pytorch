@@ -534,9 +534,7 @@ class TestJit(JitTestCase):
         def f(x, y):
             return torch.sigmoid(torch.tanh(x * (x + y)))
 
-        trace, z = torch.jit.get_trace_graph(f, (x, y))
-        self.assertExpectedGraph(trace)
-        self.assertExportImport(trace, (x, y))
+        self.checkTrace(f, (x, y))
 
     def test_restore_device(self):
         # main purpose is checking map_location works
@@ -779,9 +777,7 @@ class TestJit(JitTestCase):
                 out = torch.sigmoid(out)
             return out
 
-        trace, z = torch.jit.get_trace_graph(f, (x, y))
-        self.assertExpectedGraph(trace)
-        self.assertExportImport(trace, (x, y))
+        self.checkTrace(f, (x, y))
 
     def test_scopes_intermediate_node(self):
 
@@ -1981,7 +1977,6 @@ class TestJit(JitTestCase):
         def simple_fn(x, a=a, b=b, c=outer_var + outer_var2):
             return x + a + b + c
 
-        self.assertExpectedGraph(simple_fn.graph, "simple")
         self.assertEqual(
             simple_fn(torch.ones(1)),
             torch.ones(1) + 0.5 + 10 + (20 + 30))
@@ -2000,7 +1995,6 @@ class TestJit(JitTestCase):
                 result = x + a
             return result
 
-        self.assertExpectedGraph(bool_fn.graph, "bool")
         self.assertEqual(bool_fn(torch.ones(1)), torch.ones(1) + 9)
         self.assertEqual(
             bool_fn(torch.ones(1), torch.tensor(1), torch.tensor(True)),
@@ -2011,7 +2005,6 @@ class TestJit(JitTestCase):
             # type: (Optional[int]) -> Optional[int]
             return x
 
-        self.assertExpectedGraph(none_fn.graph, "none")
         self.assertEqual(none_fn(), None)
         self.assertEqual(none_fn(1), 1)
 
@@ -2020,7 +2013,6 @@ class TestJit(JitTestCase):
             # type: (Tensor, float, int) -> Tensor
             return x + a + b
 
-        self.assertExpectedGraph(hints.graph, "type_hints")
         self.assertEqual(hints(torch.ones(1)), torch.ones(1) + 0.5 + 10)
 
         with self.assertRaisesRegex(RuntimeError, "Expected a default value"):
@@ -10654,19 +10646,17 @@ EXCLUDE_MODULE_EXPORT_IMPORT = {
 #   kwargs for function,                                     // optional
 # )
 nn_functional_tests = [
-    # TODO: default arguments for None type not supported, add
-    # manually as argument, remove when ATen default arg system ready
-    ('conv1d', (S, S, S), ((S, S, S), None)),
-    ('conv2d', (S, S, S, S), ((S, S, S, S), None)),
-    ('conv3d', (S, S, S, S, S), ((S, S, S, S, S), None)),
-    ('conv_transpose1d', (S, S, S), ((S, S, S), None)),
-    ('conv_transpose2d', (S, S, S, S), ((S, S, S, S), None)),
-    ('conv_transpose3d', (S, S, S, S, S), ((S, S, S, S, S), None)),
+    ('conv1d', (S, S, S), ((S, S, S),)),
+    ('conv2d', (S, S, S, S), ((S, S, S, S),)),
+    ('conv3d', (S, S, S, S, S), ((S, S, S, S, S),)),
+    ('conv_transpose1d', (S, S, S), ((S, S, S),)),
+    ('conv_transpose2d', (S, S, S, S), ((S, S, S, S),)),
+    ('conv_transpose3d', (S, S, S, S, S), ((S, S, S, S, S),)),
     ('conv_tbc', (S, S, S), ((S, S, S), (S,), 2)),
     ('avg_pool1d', (S, S, S), (3,)),
     ('avg_pool2d', (S, S, S, S), (3,)),
     ('avg_pool3d', (S, S, S, S, S), (3,)),
-    ('fractional_max_pool2d', (S, S, S, S), (3, [2, 3], None)),
+    ('fractional_max_pool2d', (S, S, S, S), (3, [2, 3],)),
     ('max_pool1d', (S, S, S), (2, 1)),
     ('max_pool1d', (S, S, S), (2, 1, 1, 1, False, True), 'with_indices'),
     ('max_pool2d', (S, S, S, S), (2, 1)),
@@ -10716,16 +10706,16 @@ nn_functional_tests = [
     ('tanh', (S, S, S), (),),
     ('sigmoid', (S, S, S), (),),
     ('log_softmax', (S, S, S), (0,),),
-    ('linear', (S, S), ((M, S), None),),
-    ('bilinear', (S, S, S), ((S, S, M), torch.zeros(M, S, M), None),),
+    ('linear', (S, S), ((M, S),),),
+    ('bilinear', (S, S, S), ((S, S, M), torch.zeros(M, S, M),),),
     ('embedding', torch.tensor([[1, 2, 4, 5], [4, 3, 2, 5]]), (torch.rand(6, 3), ),),
     ('embedding_bag', torch.tensor([1, 2, 4, 2]), (torch.rand(5, 3), torch.tensor([0, 4]),),),
     ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)), ),),
     ('instance_norm', (S, S, S), (non_differentiable(torch.zeros(S)), non_differentiable(torch.ones(S))),),
-    ('layer_norm', (S, S, S, S), ([5], None, None),),
-    ('group_norm', (S, S, S), (1, torch.rand(5), None),),
+    ('layer_norm', (S, S, S, S), ([5],),),
+    ('group_norm', (S, S, S), (1, torch.rand(5),),),
     ('local_response_norm', (S, S, S), (2, ),),
-    ('nll_loss', F.log_softmax(torch.randn(3, 5), dim=0), (torch.tensor([1, 0, 4]), None, None),),
+    ('nll_loss', F.log_softmax(torch.randn(3, 5), dim=0), (torch.tensor([1, 0, 4]),),),
     ('poisson_nll_loss', torch.rand(S, 2), (torch.rand(S, 2),),),
     ('poisson_nll_loss', torch.rand(S, 2), (torch.rand(S, 2), True, True), 'full'),
     ('kl_div', F.log_softmax(torch.randn(S, 10), 1), (F.softmax(torch.randn(S, 10), 1),),),
@@ -10768,9 +10758,9 @@ nn_functional_tests = [
      (torch.randint(1, S, (S, S), dtype=torch.long), torch.full((S,), S, dtype=torch.long), \
       torch.randint(1, S, (S,), dtype=torch.long))),
     ('upsample', torch.randn(S, S, M, M), (None, 2), 'with_scale'),
-    ('upsample', torch.randn(S, S, M, M), (4, None), 'with_size'),
+    ('upsample', torch.randn(S, S, M, M), (4,), 'with_size'),
     ('interpolate', torch.randn(S, S, M, M), (None, 2.), 'with_scale'),
-    ('interpolate', torch.randn(S, S, M, M), (4, None), 'with_size'),
+    ('interpolate', torch.randn(S, S, M, M), (4,), 'with_size'),
 ]
 
 
