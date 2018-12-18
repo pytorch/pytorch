@@ -7,7 +7,8 @@
 using c10::C10Tensor;
 
 namespace {
-at::Tensor layer_norm(
+// TODO Return tuple<Tensor, Tensor, Tensor> instead of vector<Tensor>
+std::vector<at::Tensor> layer_norm(
     at::Tensor input,
     int64_t axis,
     double epsilon) {
@@ -20,13 +21,11 @@ at::Tensor layer_norm(
   C10Tensor c10_output_mean(at::empty({0}));
   C10Tensor c10_output_stdev(at::empty({0}));
   c10::Dispatcher<c10::core::opschema::LayerNorm>::call(c10_input, c10_output, c10_output_mean, c10_output_stdev, (int)axis, (float)epsilon, &cache);
-  // TODO Return tuple
-  // return std::tuple<at::Tensor, at::Tensor, at::Tensor>(
-  //   torch::autograd::make_variable(at::Tensor(std::move(c10_output)), false),
-  //   torch::autograd::make_variable(at::Tensor(std::move(c10_output_mean)), false)
-  //   torch::autograd::make_variable(at::Tensor(std::move(c10_output_stdev)), false)
-  // );
-  return torch::autograd::make_variable(at::Tensor(std::move(c10_output)), false);
+  return {
+    torch::autograd::make_variable(at::Tensor(std::move(c10_output)), false),
+    torch::autograd::make_variable(at::Tensor(std::move(c10_output_mean)), false),
+    torch::autograd::make_variable(at::Tensor(std::move(c10_output_stdev)), false)
+  };
 }
 }
 
