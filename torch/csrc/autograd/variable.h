@@ -100,8 +100,8 @@ struct TORCH_API Variable : public at::Tensor {
   friend Variable make_variable_view(
       Variable base,
       at::Tensor data,
-      bool allow_tensor_metadata_change,
       bool is_differentiable,
+      bool allow_tensor_metadata_change,
       Edge gradient_edge);
 
   /// Creates a `Variable` from the given `Tensor`. `requires_grad` should be
@@ -546,8 +546,8 @@ struct TORCH_API Variable::DifferentiableViewImpl : public Variable::Impl {
 inline Variable make_variable_view(
     Variable base,
     at::Tensor data,
-    bool allow_tensor_metadata_change = true,
     bool is_differentiable = true,
+    bool allow_tensor_metadata_change = true,
     Edge gradient_edge = Edge()) {
   if (data.defined()) {
     if (is_differentiable) {
@@ -662,7 +662,7 @@ inline std::shared_ptr<Function> Variable::grad_accumulator() const {
 }
 
 inline Variable Variable::detach() const {
-  auto var = make_variable_view(*this, get()->data_, /*allow_tensor_metadata_change=*/false, /*is_differentiable=*/false);
+  auto var = make_variable_view(*this, get()->data_, /*is_differentiable=*/false, /*allow_tensor_metadata_change=*/false, Edge());
   return var;
 }
 
