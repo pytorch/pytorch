@@ -37,6 +37,33 @@ thread_local std::shared_ptr<TracingState> tracing_state;
 
 } // namespace detail
 
+void setValueTrace(const IValue &v, Value *value) {
+  if (v.isTensor()) {
+    auto var = v.toTensor();
+    JIT_ASSERT(var.defined());
+    getTracingState()->value_map[var] = value;
+  } else if (v.isTensorList()) {
+    auto& outputs = v.toTensorList()->elements();
+    auto graph = getTracingState()->graph;
+    Node * unpack_node = graph->appendNode(graph->create(prim::ListUnpack, {value}, outputs.size()));
+    for (size_t i = 0; i < outputs.size(); ++i) {
+      setValueTrace(outputs[i], unpack_node->outputs()[i]);
+    }
+  } else if (v.isTuple()) {
+    auto& outputs = v.toTuple()->elements();
+    auto graph = getTracingState()->graph;
+    Node * unpack_node = graph->appendNode(graph->create(prim::TupleUnpack, {value}, outputs.size()));
+    for (size_t i = 0; i < outputs.size(); ++i) {
+      setValueTrace(outputs[i], unpack_node->outputs()[i]);
+    }
+  } else {
+    std::ostringstream os;
+    os << "Tracer cannot set value trace for type " << v.tagKind() << ". "
+       << "Supported types are tensor, tensor list, and tuple of tensors.";
+    throw std::runtime_error(os.str());
+  }
+}
+
 void addInputs(Node *n, const char * name, int64_t value) {
   using ArgumentStash = jit::tracer::ArgumentStash;
   if (ArgumentStash::hasValue(name)) {
