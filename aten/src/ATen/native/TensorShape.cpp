@@ -647,12 +647,12 @@ Tensor & t_(Tensor & self) {
 }
 
 Tensor t(const Tensor & self, int64_t dim0, int64_t dim1) {
-  check_t(self, "t()");
+  check_t(self, "t(dim0, dim1)");
   return self.transpose(dim0, dim1);
 }
 
 Tensor & t_(Tensor & self, int64_t dim0, int64_t dim1) {
-  check_t(self, "t_()");
+  check_t(self, "t_(dim0, dim1)");
   return self.transpose_(dim0, dim1);
 }
 
