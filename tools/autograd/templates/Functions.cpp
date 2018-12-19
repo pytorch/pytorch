@@ -457,6 +457,28 @@ Tensor unsqueeze_to(const Tensor & self, int64_t dim, IntList sizes) {
   return self;
 }
 
+Tensor squeeze_backward(const Tensor& grad, const Tensor& t, int64_t dim) {
+  if (t.is_sparse()) {
+    return at::_sparse_squeeze_backward(grad, t, dim);
+  }
+  IntList t_sizes = t.sizes();
+  dim = at::maybe_wrap_dim(dim, t_sizes.size());
+  // in NumPy it's not an error to unsqueeze a scalar, but we still need to avoided
+  // unsqueezing in the backward.
+  if (t_sizes.size() > 0 && t_sizes[dim] == 1) {
+    return grad.unsqueeze(dim);
+  }
+  return grad;
+}
+
+Tensor unsqueeze_backward(const Tensor& grad, const Tensor& t, int64_t dim) {
+  if (t.is_sparse()) {
+    return at::_sparse_unsqueeze_backward(grad, t, dim);
+  }
+  return grad.squeeze(dim);
+}
+
+
 std::vector<Tensor> cat_tensors_backward(const Tensor & grad, const std::vector<std::vector<int64_t>> &sizes, int64_t dim) {
   dim = at::legacy_cat_wrap_dim(dim, sizes);
   std::vector<Tensor> grad_inputs(sizes.size());

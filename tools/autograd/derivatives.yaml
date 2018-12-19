@@ -717,7 +717,7 @@
   self: unsqueeze_to(grad, self.sizes());
 
 - name: squeeze(Tensor self, int64_t dim)
-  self: unsqueeze_to(grad, dim, self.sizes())
+  self: squeeze_backward(grad, self, dim)
 
 - name: squeeze_(Tensor self)
   self: unsqueeze_to(grad, self.sizes());
@@ -833,7 +833,7 @@
   self: grad.reshape(self.sizes())
 
 - name: unsqueeze(Tensor self, int64_t dim)
-  self: grad.squeeze(dim)
+  self: unsqueeze_backward(grad, self, dim)
 
 - name: unsqueeze_(Tensor self, int64_t dim)
   self: grad.squeeze(dim)

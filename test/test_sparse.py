@@ -728,7 +728,7 @@ class TestSparse(TestCase):
             torch.cat((sp, dn))
 
     def _test_squeeze_unsqueeze(self, sparse_op, dense_op, sparse_dims, nnz,
-                                sizes, dim, fail_message=None, test_backward=False):
+                                sizes, dim, fail_message=None):
         S = self._gen_sparse(sparse_dims, nnz, sizes)[0]
         if fail_message:
             with self.assertRaisesRegex(RuntimeError, fail_message):
@@ -738,80 +738,64 @@ class TestSparse(TestCase):
             D_result = dense_op(S.to_dense(), dim)
             self.assertEqual(D_result, S_result.to_dense())
 
-            if test_backward:
-                def f(S):
-                    return sparse_op(S, dim).to_dense()
-                gradcheck(f, (S.requires_grad_(True),), check_sparse_nnz=True)
+            def f(S):
+                return sparse_op(S, dim).to_dense()
+            gradcheck(f, (S.requires_grad_(True),), check_sparse_nnz=True)
 
     @skipIfRocm
     def test_unsqueeze(self):
         # basic case
-        self._test_squeeze_unsqueeze(torch.unsqueeze, torch.unsqueeze, 3, 10, [5, 7, 11], 0)
+        self._test_squeeze_unsqueeze(torch.unsqueeze, torch.unsqueeze, 3, 10, [2, 3, 4], 0)
+        self._test_squeeze_unsqueeze(torch.sparse.unsqueeze, torch.unsqueeze, 3, 10, [2, 3, 4], 0)
 
         # hybrid sparse/dense, unsqueeze along sparse dim
-        self._test_squeeze_unsqueeze(torch.unsqueeze, torch.unsqueeze, 3, 10, [5, 7, 11, 13, 17], 0)
-        self._test_squeeze_unsqueeze(torch.unsqueeze, torch.unsqueeze, 3, 10, [5, 7, 11, 13, 17], 3)
+        self._test_squeeze_unsqueeze(torch.unsqueeze, torch.unsqueeze, 3, 10, [2, 3, 4, 3, 2], 0)
+        self._test_squeeze_unsqueeze(torch.unsqueeze, torch.unsqueeze, 3, 10, [2, 3, 4, 3, 2], 3)
+        self._test_squeeze_unsqueeze(torch.sparse.unsqueeze, torch.unsqueeze, 3, 10, [2, 3, 4, 3, 2], 0)
 
         # unsqueeze along dense dimensions
-        self._test_squeeze_unsqueeze(torch.unsqueeze, torch.unsqueeze, 3, 10, [5, 7, 11, 13, 17], 4)
-        self._test_squeeze_unsqueeze(torch.unsqueeze, torch.unsqueeze, 3, 10, [5, 7, 11, 13, 17], 5)
+        self._test_squeeze_unsqueeze(torch.unsqueeze, torch.unsqueeze, 3, 10, [2, 3, 4, 3, 2], 4)
+        self._test_squeeze_unsqueeze(torch.unsqueeze, torch.unsqueeze, 3, 10, [2, 3, 4, 3, 2], 5)
+        self._test_squeeze_unsqueeze(torch.sparse.unsqueeze, torch.unsqueeze, 3, 10, [2, 3, 4, 3, 2], 4)
 
         # wrapped dimensions
-        self._test_squeeze_unsqueeze(torch.unsqueeze, torch.unsqueeze, 3, 10, [5, 7, 11, 13, 17], -1)
-        self._test_squeeze_unsqueeze(torch.unsqueeze, torch.unsqueeze, 3, 10, [5, 7, 11, 13, 17], -6)
+        self._test_squeeze_unsqueeze(torch.unsqueeze, torch.unsqueeze, 3, 10, [2, 3, 4, 3, 2], -1)
+        self._test_squeeze_unsqueeze(torch.unsqueeze, torch.unsqueeze, 3, 10, [2, 3, 4, 3, 2], -6)
+        self._test_squeeze_unsqueeze(torch.sparse.unsqueeze, torch.unsqueeze, 3, 10, [2, 3, 4, 3, 2], -1)
 
         # bounds
-        self._test_squeeze_unsqueeze(torch.unsqueeze, torch.unsqueeze,
-                                     3, 10, [5, 7, 11, 13, 17], -7, "Dimension out of range")
-        self._test_squeeze_unsqueeze(torch.unsqueeze, torch.unsqueeze,
-                                     3, 10, [5, 7, 11, 13, 17], 6, "Dimension out of range")
+        self._test_squeeze_unsqueeze(torch.unsqueeze, torch.unsqueeze, 3, 10, [2, 3, 4, 3, 2], -7,
+                                     "Dimension out of range")
+        self._test_squeeze_unsqueeze(torch.unsqueeze, torch.unsqueeze, 3, 10, [2, 3, 4, 3, 2], 6,
+                                     "Dimension out of range")
+        self._test_squeeze_unsqueeze(torch.sparse.unsqueeze, torch.unsqueeze, 3, 10, [2, 3, 4, 3, 2], -7,
+                                     "Dimension out of range")
 
     @skipIfRocm
     def test_squeeze(self):
         # basic case
         self._test_squeeze_unsqueeze(torch.squeeze, torch.squeeze, 2, 10, [3, 1], 1)
+        self._test_squeeze_unsqueeze(torch.sparse.squeeze, torch.squeeze, 2, 10, [3, 1], 1)
 
         # hybrid sparse/dense, along sparse dim
         self._test_squeeze_unsqueeze(torch.squeeze, torch.squeeze, 2, 10, [3, 1, 4], 1)
+        self._test_squeeze_unsqueeze(torch.sparse.squeeze, torch.squeeze, 2, 10, [3, 1, 4], 1)
 
         # along dense dimensions
         self._test_squeeze_unsqueeze(torch.squeeze, torch.squeeze, 2, 10, [3, 4, 1, 2], 2)
+        self._test_squeeze_unsqueeze(torch.sparse.squeeze, torch.squeeze, 2, 10, [3, 4, 1, 2], 2)
 
         # wrapped dimensions
         self._test_squeeze_unsqueeze(torch.squeeze, torch.squeeze, 2, 10, [3, 4, 1, 2], -2)
+        self._test_squeeze_unsqueeze(torch.sparse.squeeze, torch.squeeze, 2, 10, [3, 4, 1, 2], -2)
 
         # unsqueezable dims
         self._test_squeeze_unsqueeze(torch.squeeze, torch.squeeze, 2, 10, [3, 4, 1, 2], 0)
+        self._test_squeeze_unsqueeze(torch.sparse.squeeze, torch.squeeze, 2, 10, [3, 4, 1, 2], 0)
 
-    @skipIfRocm
-    def test_sparse_squeeze(self):
-        self._test_squeeze_unsqueeze(torch.sparse.squeeze, torch.squeeze,
-                                     2, 10, [3, 1], 1, test_backward=True)
-        self._test_squeeze_unsqueeze(torch.sparse.squeeze, torch.squeeze,
-                                     2, 10, [3, 1, 4], 1, test_backward=True)
-        self._test_squeeze_unsqueeze(torch.sparse.squeeze, torch.squeeze,
-                                     2, 10, [3, 4, 1, 2], 2, test_backward=True)
-        self._test_squeeze_unsqueeze(torch.sparse.squeeze, torch.squeeze,
-                                     2, 10, [3, 4, 1, 2], -2, test_backward=True)
-        self._test_squeeze_unsqueeze(torch.sparse.squeeze, torch.squeeze,
-                                     2, 10, [3, 4, 1, 2], 0, test_backward=True)
-
-    @skipIfRocm
-    def test_sparse_unsqueeze(self):
-        self._test_squeeze_unsqueeze(torch.sparse.unsqueeze, torch.unsqueeze,
-                                     3, 10, [2, 3, 4], 0, test_backward=True)
-        self._test_squeeze_unsqueeze(torch.sparse.unsqueeze, torch.unsqueeze,
-                                     3, 10, [2, 3, 4, 3, 2], 0, test_backward=True)
-        self._test_squeeze_unsqueeze(torch.sparse.unsqueeze, torch.unsqueeze,
-                                     3, 10, [2, 3, 4, 3, 2], 3, test_backward=True)
-        self._test_squeeze_unsqueeze(torch.sparse.unsqueeze, torch.unsqueeze,
-                                     3, 10, [2, 3, 4, 3, 2], 4, test_backward=True)
-        self._test_squeeze_unsqueeze(torch.sparse.unsqueeze, torch.unsqueeze,
-                                     3, 10, [2, 3, 4, 3, 2], 5, test_backward=True)
-        self._test_squeeze_unsqueeze(torch.sparse.unsqueeze, torch.unsqueeze,
-                                     3, 10, [2, 3, 4, 3, 2], -1, test_backward=True)
-        self._test_squeeze_unsqueeze(torch.sparse.unsqueeze, torch.unsqueeze,
-                                     3, 10, [2, 3, 4, 3, 2], -6, test_backward=True)
+        # squeeze the only sparse_dim
+        self._test_squeeze_unsqueeze(torch.squeeze, torch.squeeze, 1, 10, [1, 2, 3], 0,
+                                     "Cannot squeeze sparse_dim of a SparseTensor with sparse_dim = 1 and its size = 1")
 
     @cpu_only
     def test_mm(self):

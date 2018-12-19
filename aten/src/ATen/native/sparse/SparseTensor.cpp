@@ -501,10 +501,20 @@ SparseTensor _sparse_squeeze(const SparseTensor& self, int64_t dim) {
   AT_ASSERT(self.is_sparse());
   dim = maybe_wrap_dim(dim, self.dim());
   auto sizes = self.sizes();
+
   if (sizes[dim] != 1) { // if dim is not squeezable, return a clone of input SparseTensor directly
     return self.clone();
   }
+
   int64_t sparse_dim = self.sparse_dim();
+
+  if (sparse_dim == 1 && dim == 0) {
+    // this should return a the values of a sparse, but we prefer to
+    // use SparseTensor.values() directly instead of SparseTensor.squeeze(0)
+    AT_ERROR("Cannot squeeze sparse_dim of a SparseTensor with sparse_dim = 1 and its size = 1, ",
+             "from which a dense tensor values() should be returned. Please use SparseTensor._values() directly");
+  }
+
   int64_t dense_dim = self.dense_dim();
   auto indices = self._indices();
   auto new_sizes = sizes.vec();

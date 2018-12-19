@@ -137,8 +137,50 @@ def sum(input, dim=None, dtype=None):
 
 
 def squeeze(input, dim):
+    r"""
+    Squeeze a given :attr:`dim` at a SparseTensor. Autograd is supported,
+    and gradients of :attr:`input` is coalesced. Note that squeeze a
+    ``sparse_dim`` of a SparseTensor input with ``sparse_dim = 1`` and
+    ``sizes(0) == 1`` is not allowed, because this should return the
+    ``values()`` of input, in that case please use ``SparseTensor.values()``
+    instead.
+
+    See :func:`torch.squeeze` for more details.
+
+    Args:
+        input (Tensor): the input SparseTensor
+        dim (int): the dim to squeeze
+
+    Example::
+
+      >>> S = torch.randn(2, 1, 3).to_sparse(2)
+      >>> torch.sparse.squeeze(S, 1)
+      tensor(indices=tensor([[0, 1]]),
+             values=tensor([[ 0.2486, -1.0453, -0.6903],
+                            [-0.0133,  1.1690, -1.6560]]),
+             size=(2, 3), nnz=2, layout=torch.sparse_coo)
+    """
     return torch._sparse_squeeze(input, dim)
 
 
 def unsqueeze(input, dim):
+    r"""
+    Unsqueeze a given :attr:`dim` at a SparseTensor. Autograd is supported,
+    and gradients of :attr:`input` is coalesced. See :func:`torch.unsqueeze`
+    for more details.
+
+    Args:
+        input (Tensor): the input SparseTensor
+        dim (int): the dim to unsqueeze
+
+    Example::
+
+      >>> S = torch.randn(2, 3).to_sparse(1)
+      >>> torch.sparse.unsqueeze(S, 1)
+      tensor(indices=tensor([[0, 1],
+                             [0, 0]]),
+             values=tensor([[-0.5497, -0.2158,  1.1104],
+                            [-0.2841,  0.3221, -0.3292]]),
+             size=(2, 1, 3), nnz=2, layout=torch.sparse_coo)
+    """
     return torch._sparse_unsqueeze(input, dim)

@@ -4396,6 +4396,8 @@ will squeeze the tensor to the shape :math:`(A \times B)`.
 .. note:: The returned tensor shares the storage with the input tensor,
           so changing the contents of one will change the contents of the other.
 
+.. note:: When :attr:`dim` is given, SparseTensor input is also supported.
+
 Args:
     input (Tensor): the input tensor
     dim (int, optional): if given, the input will be squeezed only in
@@ -5129,6 +5131,8 @@ The returned tensor shares the same underlying data with this tensor.
 A :attr:`dim` value within the range ``[-input.dim() - 1, input.dim() + 1)``
 can be used. Negative :attr:`dim` will correspond to :meth:`unsqueeze`
 applied at :attr:`dim` = ``dim + input.dim() + 1``.
+
+.. note:: When :attr:`dim` is given, SparseTensor input is also supported.
 
 Args:
     input (Tensor): the input tensor
