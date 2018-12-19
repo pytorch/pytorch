@@ -1,0 +1,15 @@
+graph(%a : Tensor
+      %b : Tensor) {
+  %2 : int = prim::Constant[value=1]()
+  %3 : int = prim::Constant[value=7]()
+  %4 : int = prim::Constant[value=4]()
+  %5 : int = prim::Constant[value=0]()
+  %6 : Tensor = aten::cumsum(%a, %5, %4)
+  %7 : int? = prim::None()
+  %8 : Tensor = aten::sum(%6, %7)
+  %9 : int? = prim::None()
+  %10 : Tensor = aten::cumprod(%b, %5, %9)
+  %11 : Tensor = aten::prod(%10, %3)
+  %12 : Tensor = aten::add(%8, %11, %2)
+  return (%12);
+}
