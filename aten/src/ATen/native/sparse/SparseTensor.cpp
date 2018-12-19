@@ -499,29 +499,58 @@ SparseTensor sparse_mask_cpu(const Tensor& t, SparseTensorRef mask) {
 // --------------------------------------------------------------------
 SparseTensor _sparse_squeeze(const SparseTensor& self, int64_t dim) {
   AT_ASSERT(self.is_sparse());
-  dim = maybe_wrap_dim(dim, self.dim() + 1);
+  dim = maybe_wrap_dim(dim, self.dim());
+  auto sizes = self.sizes();
+  if (sizes[dim] != 1) { // if dim is not squeezable, return a clone of input SparseTensor directly
+    return self.clone();
+  }
   int64_t sparse_dim = self.sparse_dim();
   int64_t dense_dim = self.dense_dim();
   auto indices = self._indices();
-  auto new_sizes = self.sizes().vec();
+  auto new_sizes = sizes.vec();
   new_sizes.erase(new_sizes.begin() + dim);
   SparseTensor r;
 
   if (dim < sparse_dim) {
     int64_t nnz = self._nnz();
-    auto new_indices = at::empty({int64_t(new_sizes.size()), nnz}, indices.options());
+    auto new_indices = at::empty({sparse_dim - 1, nnz}, indices.options());
     int64_t i = 0;
-    for (int64_t j = 0; j < indices.size(0); j++) {
+    for (int64_t j = 0; j < sparse_dim; j++) {
       if (j == dim) continue;
       new_indices[i++].copy_(indices[j]);
     }
     r = _sparse_coo_tensor_with_dims_and_tensors(
-      sparse_dim - 1, dense_dim, new_sizes, new_indices, self._values(), self.options());
+      sparse_dim - 1, dense_dim, new_sizes, new_indices, self._values().clone(), self.options());
   } else {
     r = _sparse_coo_tensor_with_dims_and_tensors(
-      sparse_dim, dense_dim - 1, new_sizes, indices, self._values().squeeze(dim - sparse_dim + 1), self.options());
+      sparse_dim, dense_dim - 1, new_sizes, indices.clone(), self._values().squeeze(dim - sparse_dim + 1), self.options());
   }
   r._coalesced_(self.is_coalesced());
+  return r;
+}
+
+SparseTensor _sparse_squeeze_backward(const SparseTensor& grad, const SparseTensor& t_, int64_t dim) {
+  AT_ASSERT(t_.is_sparse());
+  AT_ASSERT(grad.is_sparse());
+
+  auto t = t_.coalesce();
+  dim = at::maybe_wrap_dim(dim, t.dim());
+  int64_t sparse_dim = t.sparse_dim();
+  int64_t dense_dim = t.dense_dim();
+  auto indices = t._indices();
+  auto sizes = t.sizes();
+  SparseTensor r;
+
+  if (dim < sparse_dim) {
+    r = _sparse_coo_tensor_with_dims_and_tensors(
+        sparse_dim, dense_dim, sizes, indices.clone(), grad._values().clone(), t.options());
+  } else {
+    r = _sparse_coo_tensor_with_dims_and_tensors(
+        sparse_dim, dense_dim, sizes, indices.clone(), grad._values().unsqueeze(dim - sparse_dim + 1), t.options());
+  }
+  AT_ASSERT(r.sparse_dim() == t.sparse_dim());
+  AT_ASSERT(r.dense_dim() == t.dense_dim());
+  r._coalesced_(true);
   return r;
 }
 
@@ -538,16 +567,41 @@ SparseTensor _sparse_unsqueeze(const SparseTensor& self, int64_t dim) {
   if (dim <= sparse_dim) {
     auto new_indices = native::cat({
       indices.narrow(0, 0, dim),
-      native::zeros({1, indices.size(1)}, indices.options().dtype(kLong)),
+      native::zeros({1, indices.size(1)}, indices.options()),
       indices.narrow(0, dim, indices.size(0) - dim)
     });
     r = _sparse_coo_tensor_with_dims_and_tensors(
-        sparse_dim + 1, dense_dim, sizes, new_indices, self._values(), self.options());
+        sparse_dim + 1, dense_dim, sizes, new_indices, self._values().clone(), self.options());
   } else {
     r = _sparse_coo_tensor_with_dims_and_tensors(
-        sparse_dim, dense_dim + 1, sizes, indices, self._values().unsqueeze(dim - sparse_dim + 1), self.options());
+        sparse_dim, dense_dim + 1, sizes, indices.clone(), self._values().unsqueeze(dim - sparse_dim + 1), self.options());
   }
   r._coalesced_(self.is_coalesced());
+  return r;
+}
+
+SparseTensor _sparse_unsqueeze_backward(const SparseTensor& grad, const SparseTensor& t_, int64_t dim) {
+  AT_ASSERT(t_.is_sparse());
+  AT_ASSERT(grad.is_sparse());
+
+  auto t = t_.coalesce();
+  dim = at::maybe_wrap_dim(dim, t.dim() + 1);
+  int64_t sparse_dim = t.sparse_dim();
+  int64_t dense_dim = t.dense_dim();
+  auto indices = t._indices();
+  auto sizes = t.sizes();
+  SparseTensor r;
+
+  if (dim <= sparse_dim) {
+    r = _sparse_coo_tensor_with_dims_and_tensors(
+        sparse_dim, dense_dim, sizes, indices.clone(), grad._values().clone(), t.options());
+  } else {
+    r = _sparse_coo_tensor_with_dims_and_tensors(
+        sparse_dim, dense_dim, sizes, indices.clone(), grad._values().squeeze(dim - sparse_dim + 1), t.options());
+  }
+  AT_ASSERT(r.sparse_dim() == t.sparse_dim());
+  AT_ASSERT(r.dense_dim() == t.dense_dim());
+  r._coalesced_(true);
   return r;
 }
 

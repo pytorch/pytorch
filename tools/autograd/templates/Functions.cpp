@@ -457,18 +457,6 @@ Tensor unsqueeze_to(const Tensor & self, int64_t dim, IntList sizes) {
   return self;
 }
 
-Tensor _sparse_squeeze_backward(const Tensor& grad, int64_t dim) {
-  AT_ASSERT(grad.is_sparse());
-  auto r = at::_sparse_unsqueeze(grad, dim).coalesce();
-  return r;
-}
-
-Tensor _sparse_unsqueeze_backward(const Tensor& grad, int64_t dim) {
-  AT_ASSERT(grad.is_sparse());
-  auto r = at::_sparse_squeeze(grad, dim).coalesce();
-  return r;
-}
-
 std::vector<Tensor> cat_tensors_backward(const Tensor & grad, const std::vector<std::vector<int64_t>> &sizes, int64_t dim) {
   dim = at::legacy_cat_wrap_dim(dim, sizes);
   std::vector<Tensor> grad_inputs(sizes.size());

@@ -726,10 +726,10 @@
   self: unsqueeze_to(grad, dim, self.sizes())
 
 - name: _sparse_squeeze(Tensor self, int64_t dim)
-  self: _sparse_squeeze_backward(grad, dim)
+  self: at::_sparse_squeeze_backward(grad, self, dim)
 
 - name: _sparse_unsqueeze(Tensor self, int64_t dim)
-  self: _sparse_unsqueeze_backward(grad, dim)
+  self: at::_sparse_unsqueeze_backward(grad, self, dim)
 
 - name: std(Tensor self, bool unbiased)
   self: var_backward(grad / (result * 2), self, unbiased)
