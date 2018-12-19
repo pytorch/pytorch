@@ -1478,6 +1478,11 @@ class TestJit(JitTestCase):
         traced_model.cpu()
         cpu_out = traced_model(x.float())
         self.assertEqual(cpu_out, cuda_out)
+        traced_model.to('cuda')
+        cuda_out = traced_model(x.float().cuda())
+        traced_model.to('cpu')
+        cpu_out = traced_model(x.float())
+        self.assertEqual(cpu_out, cuda_out)
         traced_model.double()
 
         # state_dict + load_state_dict
