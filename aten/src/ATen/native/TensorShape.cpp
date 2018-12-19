@@ -639,6 +639,16 @@ Tensor & t_(Tensor & self) {
   return self.transpose_(0, 1);
 }
 
+Tensor t(const Tensor & self, int64_t dim0, int64_t dim1) {
+  check_t(self, "t()");
+  return self.transpose(dim0, dim1);
+}
+
+Tensor & t_(Tensor & self, int64_t dim0, int64_t dim1) {
+  check_t(self, "t_()");
+  return self.transpose_(dim0, dim1);
+}
+
 std::tuple<std::vector<int64_t>, std::vector<int64_t> >
 inferSqueezeGeometry(const Tensor &tensor) {
   std::vector<int64_t> sizes;

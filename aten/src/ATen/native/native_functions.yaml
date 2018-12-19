@@ -1681,6 +1681,14 @@
   device_guard: False
   variants: method
 
+- func: t(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
+  variants: function, method
+  device_guard: false
+
+- func: t_(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
+  variants: method
+  device_guard: false
+  
 - func: tan(Tensor self) -> Tensor
   variants: function, method
 
