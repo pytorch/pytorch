@@ -97,6 +97,7 @@ L = 20
 M = 10
 S = 5
 
+
 # (
 #   method name,
 #   input size/constructing fn,
@@ -417,14 +418,16 @@ def method_tests():
         ('addbmm', (S, M), ((S, S, S), (S, S, M)),),
         ('addbmm', (1,), ((S, S, S), (S, S, M)), 'broadcast_lhs'),
         ('addbmm', (S, M), ((S, S, S), (S, S, M)), 'coef', (), (), lambda x: x, {'beta': 0.2, 'alpha': 0.6}),
-        ('addbmm', (1,), ((S, S, S), (S, S, M)), 'broadcast_lhs_coef', (), (), lambda x: x, {'beta': 0.2, 'alpha': 0.6}),
+        ('addbmm', (1,), ((S, S, S), (S, S, M)), 'broadcast_lhs_coef',
+         (), (), lambda x: x, {'beta': 0.2, 'alpha': 0.6}),
         ('addbmm', (), ((S, S, S), (S, S, M)), 'scalar_broadcast_lhs'),
         ('addbmm', (), ((S, S, S), (S, S, M)), 'scalar_broadcast_lhs_coef', (), (), lambda x: x,
          {'beta': 0.2, 'alpha': 0.6}),
         ('baddbmm', (S, S, M), ((S, S, S), (S, S, M)),),
         ('baddbmm', (1,), ((S, S, S), (S, S, M)), 'broadcast_lhs'),
         ('baddbmm', (S, S, M), ((S, S, S), (S, S, M)), 'coef', (), (), lambda x: x, {'beta': 0.2, 'alpha': 0.6}),
-        ('baddbmm', (1,), ((S, S, S), (S, S, M)), 'broadcast_lhs_coef', (), (), lambda x: x, {'beta': 0.2, 'alpha': 0.6}),
+        ('baddbmm', (1,), ((S, S, S), (S, S, M)), 'broadcast_lhs_coef',
+         (), (), lambda x: x, {'beta': 0.2, 'alpha': 0.6}),
         ('baddbmm', (), ((S, S, S), (S, S, M)), 'scalar_broadcast_lhs'),
         ('baddbmm', (), ((S, S, S), (S, S, M)), 'scalar_broadcast_lhs_coef', (), (), lambda x: x,
          {'beta': 0.2, 'alpha': 0.6}),
@@ -582,8 +585,8 @@ def method_tests():
         ('index_copy', (), (0, torch.tensor(0, dtype=torch.int64), torch.tensor(2.)), 'scalar_all_dim', [0]),
         ('index_fill', (S, S), (0, index_variable(2, S), 2), 'dim', [0]),
         # FIXME: we should compute the derivative w.r.t torch.tensor(2)
-    ('index_fill', (S, S), (0, index_variable(2, S), non_differentiable(torch.tensor(2))),
-     'variable_dim', [0]),
+        ('index_fill', (S, S), (0, index_variable(2, S), non_differentiable(torch.tensor(2))),
+            'variable_dim', [0]),
         ('index_fill', (S, S), (0, torch.tensor(0, dtype=torch.int64), 2), 'scalar_index_dim', [0]),
         ('index_fill', (), (0, torch.tensor([0], dtype=torch.int64), 2), 'scalar_input_dim', [0]),
         ('index_fill', (), (0, torch.tensor(0, dtype=torch.int64), 2), 'scalar_both_dim', [0]),
@@ -605,7 +608,7 @@ def method_tests():
         # `make_nonzero_det` to make the random matrices have nonzero det. For
         # `logdet`, we also set `make_nonzero_det(matrix, sign=1)` to make the
         # matrix have positive det.
-    ('logdet', lambda: make_nonzero_det(torch.randn(S, S), 1), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
+        ('logdet', lambda: make_nonzero_det(torch.randn(S, S), 1), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
         ('logdet', lambda: make_nonzero_det(torch.randn(1, 1), 1), NO_ARGS, '1x1', NO_ARGS, [skipIfNoLapack]),
         ('logdet', lambda: make_nonzero_det(random_symmetric_matrix(S), 1), NO_ARGS,
          'symmetric', NO_ARGS, [skipIfNoLapack]),
@@ -641,7 +644,8 @@ def method_tests():
          'tall_all', NO_ARGS, [skipIfNoLapack], lambda usv: (usv[0][:, :(S - 2)], usv[1], usv[2])),
         ('svd', lambda: random_fullrank_matrix_distinct_singular_value(M), NO_ARGS,
          'large', NO_ARGS, [skipIfNoLapack]),
-        ('gesv', (S, S), (random_fullrank_matrix_distinct_singular_value(S, silent=True),), '', NO_ARGS, [skipIfNoLapack]),
+        ('gesv', (S, S), (random_fullrank_matrix_distinct_singular_value(
+            S, silent=True),), '', NO_ARGS, [skipIfNoLapack]),
         ('gesv', (S, S, S), (random_fullrank_matrix_distinct_singular_value(S, S, silent=True),),
          'batched', NO_ARGS, [skipIfNoLapack]),
         ('gesv', (2, 3, S, S), (random_fullrank_matrix_distinct_singular_value(S, 2, 3, silent=True),),
@@ -653,7 +657,7 @@ def method_tests():
         ('fill_', (S, S, S), (1,), 'number'),
         ('fill_', (), (1,), 'number_scalar'),
         # FIXME: we should compute the derivative w.r.t torch.tensor(1)
-    ('fill_', (S, S, S), (non_differentiable(torch.tensor(1)),), 'variable'),
+        ('fill_', (S, S, S), (non_differentiable(torch.tensor(1)),), 'variable'),
         ('eq_', (S, S, S), ((S, S, S),)),
         ('eq_', (S, S, S), ((1,),), 'broadcast_rhs'),
         ('eq_', (), ((),), 'scalar'),
@@ -735,7 +739,7 @@ def method_tests():
         ('masked_fill', (M, M), (torch.ByteTensor(M, M).bernoulli_(), 10)),
         ('masked_fill', (M, M), (torch.ByteTensor(M, M).bernoulli_(), torch.tensor(10)), 'tensor'),
         # no lhs or all broadcast on masked_fill or masked_scatter because it's always inplace
-    ('masked_fill', (M, M), (torch.ByteTensor(M,).bernoulli_(), 10), 'broadcast_rhs'),
+        ('masked_fill', (M, M), (torch.ByteTensor(M,).bernoulli_(), 10), 'broadcast_rhs'),
         ('masked_fill', (), (torch.tensor(0, dtype=torch.uint8, requires_grad=False).bernoulli_(), 10), 'scalar'),
         ('masked_fill', (), (torch.tensor(0, dtype=torch.uint8, requires_grad=False).bernoulli_(), torch.tensor(10)),
          'scalar_variable'),
