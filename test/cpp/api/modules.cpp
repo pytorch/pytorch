@@ -398,12 +398,12 @@ TEST_F(ModulesTest, PrettyPrintNestedModel) {
 
   ASSERT_EQ(
       c10::str(TestModule{}),
-      R"(TestModule(
+R"print(TestModule(
   (fc): torch::nn::Linear(in=4, out=5, with_bias=true)
   (table): torch::nn::Embedding(count=10, dimension=2)
   (inner): InnerTestModule(
     (fc): torch::nn::Linear(in=3, out=4, with_bias=true)
     (table): torch::nn::Embedding(count=10, dimension=2)
   )
-))");
+))print");
 }
