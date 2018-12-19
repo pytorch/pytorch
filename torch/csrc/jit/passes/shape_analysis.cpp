@@ -434,10 +434,6 @@ class ShapePropagator {
         }
         return;
       }
-      case prim::PythonOp:
-      case prim::Print:
-      case prim::RaiseException:
-      case aten::warn:
       case prim::Undefined: {
         setUnshapedType(node);
         return;
@@ -445,6 +441,11 @@ class ShapePropagator {
       default:
         break; // fall-through
     }
+
+    if (node->hasSideEffects()) {
+      return;
+    }
+
     if (node->matches("aten::cat(Tensor[] tensors, int dim) -> Tensor")
 	|| node->kind() == prim::FusedConcat) {
       return PropagateCatShape(node);
