@@ -14,7 +14,7 @@ void stop_gradient_op_cpu_impl(
     const C10Tensor& output_) {
   Tensor input(input_);
   Tensor output(output_);
-  if (output.getIntrusivePtr() != input.getIntrusivePtr()) {
+  if (!output.is_same(input)) {
     output.CopyFrom(input);
   }
 }

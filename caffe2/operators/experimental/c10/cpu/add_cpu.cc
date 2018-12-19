@@ -26,9 +26,8 @@ void add_op_cpu_impl(
   std::vector<int> B_dims;
 
   if (legacy_broadcast) {
-    CAFFE_ENFORCE_NE(
-        C.getIntrusivePtr(),
-        B.getIntrusivePtr(),
+    CAFFE_ENFORCE(
+        !B.is_same(C),
         "In-place is allowed only with the first tensor when "
         "legacy-broadcasting");
     C.ResizeLike(A);
@@ -50,9 +49,9 @@ void add_op_cpu_impl(
     const std::vector<int> C_dims =
         caffe2::elementwise_ops_utils::ComputeBinaryBroadcastForwardDims(
             A_dims, B_dims);
-    if (C.getIntrusivePtr() == A.getIntrusivePtr()) {
+    if (A.is_same(C)) {
       CAFFE_ENFORCE_EQ(C_dims, A_dims);
-    } else if (C.getIntrusivePtr() == B.getIntrusivePtr()) {
+    } else if (B.is_same(C)) {
       CAFFE_ENFORCE_EQ(C_dims, B_dims);
     } else {
       C.Resize(C_dims);
