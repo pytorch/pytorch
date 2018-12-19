@@ -15,9 +15,6 @@
 #include <magma_types.h>
 #endif
 
-#include <thrust/device_ptr.h>
-#include <thrust/sequence.h>
-
 namespace at {
 namespace native {
 
@@ -374,82 +371,89 @@ Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
   }
 }
 
-template <typename T, bool upper>
-struct BatchTensorTriOp {
-  BatchTensorTriOp(T* start_, int64_t stride_batch_, int64_t stride_row_, int64_t stride_col_, int64_t k_)
-    : start(start_), stride_batch(stride_batch_), stride_row(stride_row_), stride_col(stride_col_), k(k_) {}
-
-  __device__ __forceinline__ bool mask(ptrdiff_t n) {
-    bool stride_cond = stride_row > stride_col;
-    int64_t stride_max = stride_cond ? stride_row : stride_col;
-    int64_t stride_min = stride_cond ? stride_col : stride_row;
-
-    if (stride_batch > stride_max) {
-      n = n % stride_batch;
-    } else if (stride_batch > stride_min) {
-      n = n - n % stride_max + n % stride_batch;
-    }
-
-    int64_t row, col;
-    if (stride_cond) {
-      row = (int64_t) (n / stride_row);
-      col = (int64_t) ((n % stride_row) / stride_col);
-    } else {
-      row = (int64_t) ((n % stride_col) / stride_row);
-      col = (int64_t) (n / stride_col);
-    }
-    return upper ? (col - row >= k) : (col - row <= k);
-  }
-
-  __device__ __forceinline__ T operator()(ptrdiff_t index) {
-    if (!mask(index))
-      return T(0);
-    else
-      return start[index];
-  }
-
-  const T* start;
-  const int64_t stride_batch, stride_row, stride_col, k;
-};
-
 template <typename scalar_t, bool upper>
-void apply_triu_tril(Tensor& result, int64_t k) {
-  auto result_batch_stride = matrixStride(result);
-  auto result_row_stride = result.stride(-2);
-  auto result_column_stride = result.stride(-1);
-  auto result_data = result.data<scalar_t>();
+__global__
+void triu_tril_kernel(
+    scalar_t* result, scalar_t* self, int64_t k, int64_t N,
+    int64_t batch_stride, int64_t row_stride, int64_t column_stride,
+    int64_t max_stride, int64_t min_stride, bool row_is_max_stride) {
+  int64_t linear_idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (linear_idx >= N) {
+    return;
+  }
 
-  BatchTensorTriOp<scalar_t, upper> op(result_data, result_batch_stride, result_row_stride, result_column_stride, k);
-  thrust::device_ptr<scalar_t> data_(result_data);
-  thrust::tabulate(data_, data_ + result.numel(), op);
+  int64_t n = linear_idx;
+
+  if (batch_stride > max_stride) {
+    n = n % batch_stride;
+  } else if (batch_stride > min_stride) {
+    n = n - n % max_stride + n % batch_stride;
+  }
+
+  int64_t row, col;
+  if (row_is_max_stride) {
+    row = n / row_stride;
+    col = (n % row_stride) / column_stride;
+  } else {
+    row = (n % column_stride) / row_stride;
+    col = n / column_stride;
+  }
+
+  bool mask = upper ? (col - row >= k) : (col - row <= k);
+  result[linear_idx] = mask ? self[linear_idx] : scalar_t(0);
 }
 
-Tensor& _tril_cuda_(Tensor &self, int64_t k) {
+#define DECLARE_TRIL_TRIU_VARIABLES \
+  int64_t N = self.numel(), batch_stride = matrixStride(self), \
+          row_stride = self.stride(-2), col_stride = self.stride(-1), block_size = 512; \
+  bool row_is_max_stride = row_stride > col_stride; \
+  int64_t max_stride = row_is_max_stride ? row_stride : col_stride; \
+  int64_t min_stride = row_is_max_stride ? col_stride : row_stride; \
+  dim3 dim_block(block_size); \
+  dim3 dim_grid((N + block_size - 1) / block_size); \
+
+Tensor& tril_cuda_(Tensor &self, int64_t k) {
+  DECLARE_TRIL_TRIU_VARIABLES
   AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "tril", [&]{
-    apply_triu_tril<scalar_t, false>(self, k);
+    triu_tril_kernel<scalar_t, false>
+      <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+        self.data<scalar_t>(), self.data<scalar_t>(), k, N,
+        batch_stride, row_stride, col_stride, max_stride, min_stride, row_is_max_stride);
   });
   return self;
 }
 
-Tensor& _tril_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
-  result = self.clone();
+Tensor& tril_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
+  result = at::empty_like(self);
+  DECLARE_TRIL_TRIU_VARIABLES
   AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "tril", [&]{
-    apply_triu_tril<scalar_t, false>(result, k);
+    triu_tril_kernel<scalar_t, false>
+      <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+        result.data<scalar_t>(), self.data<scalar_t>(), k, N,
+        batch_stride, row_stride, col_stride, max_stride, min_stride, row_is_max_stride);
   });
   return result;
 }
 
-Tensor& _triu_cuda_(Tensor &self, int64_t k) {
+Tensor& triu_cuda_(Tensor &self, int64_t k) {
+  DECLARE_TRIL_TRIU_VARIABLES
   AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "triu", [&]{
-    apply_triu_tril<scalar_t, true>(self, k);
+    triu_tril_kernel<scalar_t, true>
+      <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+        self.data<scalar_t>(), self.data<scalar_t>(), k, N,
+        batch_stride, row_stride, col_stride, max_stride, min_stride, row_is_max_stride);
   });
   return self;
 }
 
-Tensor& _triu_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
-  result = self.clone();
+Tensor& triu_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
+  result = at::empty_like(self);
+  DECLARE_TRIL_TRIU_VARIABLES
   AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "triu", [&]{
-    apply_triu_tril<scalar_t, true>(result, k);
+    triu_tril_kernel<scalar_t, true>
+      <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+        result.data<scalar_t>(), self.data<scalar_t>(), k, N,
+        batch_stride, row_stride, col_stride, max_stride, min_stride, row_is_max_stride);
   });
   return result;
 }
@@ -457,3 +461,4 @@ Tensor& _triu_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
 }}  // namespace at::native
 
 #undef ALLOCATE_ARRAY
+#undef DECLARE_TRIL_TRIU_VARIABLES

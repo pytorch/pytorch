@@ -3788,7 +3788,14 @@ class _TestTorchMixin(object):
             torch.tril(x, diagonal=diagonal, out=res2)
             self.assertEqual(res1, res2, 0)
 
-        for s, d in product([(3, 3), (5, 3, 3), (7, 5, 3, 3)], [-2, -1, 0, 1, 2]):
+            # check by adding
+            self.assertEqual(x, x.triu(diagonal) + x.tril(diagonal - 1))
+
+        diagonals = [-2, -1, 0, 1, 2]
+        shapes = [(3, 3), (5, 3, 3), (7, 5, 3, 3),  # square matrices
+                  (7, 3), (5, 7, 3), (7, 5, 7, 3),  # fat matrices
+                  (3, 7), (5, 3, 7), (7, 5, 3, 7)]  # thin matrices
+        for s, d in product(shapes, diagonals):
             run_test(s, cast, d)
 
     def test_triu_tril(self):

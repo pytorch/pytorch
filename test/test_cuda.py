@@ -2141,6 +2141,7 @@ class TestCuda(TestCase):
     def test_triu_tril(self):
         _TestTorchMixin._test_triu_tril(self, lambda t: t.cuda())
 
+
 def load_ignore_file():
     from os.path import join, dirname
     global ignores

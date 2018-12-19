@@ -5045,7 +5045,7 @@ add_docstr(torch.triu,
            r"""
 triu(input, diagonal=0, out=None) -> Tensor
 
-Returns the upper triangular part of a matrix (2-D tensor) or batch of matrices 
+Returns the upper triangular part of a matrix (2-D tensor) or batch of matrices
 :attr:`input`, the other elements of the result tensor :attr:`out` are set to 0.
 
 The upper triangular part of the matrix is defined as the elements on and
