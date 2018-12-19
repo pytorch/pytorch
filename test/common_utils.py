@@ -878,4 +878,3 @@ else:
                 check_test_defined_in_running_script(test)
                 test_suite.addTest(test)
         return test_suite
->>>>>>> origin/master:test/common_utils.py
