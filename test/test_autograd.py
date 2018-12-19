@@ -2580,6 +2580,12 @@ class TestAutograd(TestCase):
     def test_rnn_backward_to_input_but_not_parameters_cuda(self):
         # this checks whether it is possible to not require
         # weight parameters, but require inputs, see #7722
+        print("torch.cuda._initialized = {}".format(torch.cuda._initialized))
+        print("memory_allocated     = {}".format(torch.cuda.memory_allocated()))
+        print("max_memory_allocated = {}".format(torch.cuda.max_memory_allocated()))
+        print("memory_cached     = {}".format(torch.cuda.memory_cached()))
+        print("max_memory_cached = {}".format(torch.cuda.max_memory_cached()))
+
         dev = torch.device('cuda')
         print("LSTM constructor", flush=True)
         l = torch.nn.LSTM(2, 3).to(dev)
