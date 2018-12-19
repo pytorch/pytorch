@@ -214,6 +214,7 @@ TORCH_API void addInputs(Node *n, const char * name, const at::TensorOptions& va
 TORCH_API void addInputs(Node *n, const char * name, at::Device value);
 TORCH_API void addInputs(Node *n, const char * name, at::Layout value);
 TORCH_API void addInputs(Node *n, const char * name, at::ScalarType value);
+TORCH_API void addInputs(Node *n, const char * name, const c10::optional<at::ScalarType>& value);
 TORCH_API void addInputs(Node *n, const char * name, at::Generator * value);
 
 template<size_t N>
