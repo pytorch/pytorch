@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/script/lexer.h>
 #include <torch/csrc/jit/script/parse_string_literal.h>
 #include <torch/csrc/jit/script/tree.h>
+#include <torch/csrc/jit/script/edit_distance.h>
 
 #include <functional>
 #include <memory>
@@ -432,16 +433,16 @@ struct OperatorRegistry {
     return empty;
   }
 
-  std::multimap<int64_t, OperatorEntry> fuzzyFindOperators(std::function<OperatorScore(OperatorEntry)>
-      rankingFunc) {
+  std::multimap<int64_t, OperatorEntry> findSimilarOperators(Symbol input_op) {
     std::lock_guard<std::mutex> guard(lock);
     registerPendingOperators();
 
     std::multimap<int64_t, OperatorEntry> rankings;
+    static constexpr size_t MAX_EDIT_DIST = 2u;
     for (OperatorEntry op: operators) {
-      OperatorScore maybe_score = rankingFunc(op);
-      if (maybe_score) {
-        rankings.insert(std::pair<int64_t, OperatorEntry>(*maybe_score, op));
+      auto edit_dist = script::ComputeEditDistance(input_op.toQualString(), op.first.toQualString(), MAX_EDIT_DIST);
+      if (edit_dist <= MAX_EDIT_DIST) {
+        rankings.emplace(edit_dist, op);
       }
     }
     return rankings;
@@ -473,9 +474,8 @@ const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name) {
   return getRegistry().getOperators(name);
 }
 
-std::multimap<int64_t, OperatorEntry> fuzzyFindOperators(std::function<OperatorScore(OperatorEntry)>
-    rankingFunc) {
-  return getRegistry().fuzzyFindOperators(rankingFunc);
+std::multimap<int64_t, OperatorEntry> findSimilarOperators(Symbol input_op) {
+  return getRegistry().findSimilarOperators(input_op);
 }
 
 

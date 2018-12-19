@@ -112,8 +112,7 @@ inline Operation getOperation(const Node* node) {
 using OperatorScore = c10::optional<int64_t>;
 using OperatorEntry = std::pair<Symbol, std::vector<std::shared_ptr<Operator>>>;
 
-TORCH_API std::multimap<int64_t, OperatorEntry> fuzzyFindOperators(std::function<OperatorScore(OperatorEntry)>
-    rankingFunc);
+TORCH_API std::multimap<int64_t, OperatorEntry> findSimilarOperators(Symbol input_op);
 
 TORCH_API void registerOperator(Operator&& op);
 
