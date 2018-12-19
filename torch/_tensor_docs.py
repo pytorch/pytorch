@@ -539,6 +539,13 @@ cholesky(upper=False) -> Tensor
 See :func:`torch.cholesky`
 """)
 
+add_docstr_all('cholesky_solve',
+               r"""
+cholesky_solve(input2, upper=False) -> Tensor
+
+See :func:`torch.cholesky_solve`
+""")
+
 add_docstr_all('clamp',
                r"""
 clamp(min, max) -> Tensor
@@ -1696,13 +1703,6 @@ add_docstr_all('potri',
 potri(upper=True) -> Tensor
 
 See :func:`torch.potri`
-""")
-
-add_docstr_all('potrs',
-               r"""
-potrs(input2, upper=True) -> Tensor
-
-See :func:`torch.potrs`
 """)
 
 add_docstr_all('pow',
