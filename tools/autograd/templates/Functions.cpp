@@ -89,7 +89,7 @@ int64_t _safe_size(IntList sizes, IntList dim) {
 }
 
 Tensor norm_backward(const Tensor & grad, const Tensor & self, const optional<Scalar> & p_, const Tensor & norm) {
-  double p = p_->toDouble();
+  double p = p_.value_or(2.0).toDouble();
   Tensor self_scaled;
   Tensor scale_v;
   if (p == 0.0) {

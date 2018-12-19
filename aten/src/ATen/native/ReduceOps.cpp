@@ -401,11 +401,11 @@ Tensor& _norm_out_cpu(Tensor& result, const Tensor& self, Scalar p, int64_t dim_
   }
 }
 
-Tensor& norm_out(Tensor &result, const Tensor &self, optional<Scalar> p_, int64_t dim, bool keepdim) {
+Tensor& norm_out(Tensor &result, const Tensor &self, optional<Scalar> pOpt, int64_t dim, bool keepdim) {
   AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
            "norm only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   AT_CHECK(at::isFloatingType(self.type().scalarType()), "norm only supports floating-point dtypes");
-  auto p = p_.value_or(2.0);
+  auto p = pOpt.value_or(2.0);
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial(result, self, 0, dim, keepdim)) {
     return result;
