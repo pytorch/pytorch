@@ -353,6 +353,7 @@ public:
   }
 
   TORCH_API bool isNondeterministic() const;
+  TORCH_API bool hasSideEffects () const;
 
   // Graphs
 
