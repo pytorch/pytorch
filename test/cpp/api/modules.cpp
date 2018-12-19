@@ -372,27 +372,30 @@ TEST_F(ModulesTest, PrettyPrintEmbedding) {
       "torch::nn::Embedding(count=10, dimension=2)");
 }
 
-struct InnerTestModule : torch::nn::Module {
-  InnerTestModule()
-      : fc(register_module("fc", torch::nn::Linear(3, 4))),
-        table(register_module("table", torch::nn::Embedding(10, 2))) {}
-
-  torch::nn::Linear fc;
-  torch::nn::Embedding table;
-};
-
-struct TestModule : torch::nn::Module {
-  TestModule()
-      : fc(register_module("fc", torch::nn::Linear(4, 5))),
-        table(register_module("table", torch::nn::Embedding(10, 2))),
-        inner(register_module("inner", std::make_shared<InnerTestModule>())) {}
-
-  torch::nn::Linear fc;
-  torch::nn::Embedding table;
-  std::shared_ptr<InnerTestModule> inner;
-};
-
 TEST_F(ModulesTest, PrettyPrintNestedModel) {
+  struct InnerTestModule : torch::nn::Module {
+    InnerTestModule()
+        : torch::nn::Module("InnerTestModule"),
+          fc(register_module("fc", torch::nn::Linear(3, 4))),
+          table(register_module("table", torch::nn::Embedding(10, 2))) {}
+
+    torch::nn::Linear fc;
+    torch::nn::Embedding table;
+  };
+
+  struct TestModule : torch::nn::Module {
+    TestModule()
+        : torch::nn::Module("TestModule"),
+          fc(register_module("fc", torch::nn::Linear(4, 5))),
+          table(register_module("table", torch::nn::Embedding(10, 2))),
+          inner(register_module("inner", std::make_shared<InnerTestModule>())) {
+    }
+
+    torch::nn::Linear fc;
+    torch::nn::Embedding table;
+    std::shared_ptr<InnerTestModule> inner;
+  };
+
   ASSERT_EQ(
       c10::str(TestModule{}),
       R"(TestModule(
