@@ -554,8 +554,9 @@ class TestJit(JitTestCase):
         self.assertFalse(m2.b0.is_cuda)
 
     def test_model_save_error(self):
-        with self.assertRaisesRegex(pickle.PickleError, "not supported"):
-            torch.save(FooToPickle(), "will_fail")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with self.assertRaisesRegex(pickle.PickleError, "not supported"):
+                torch.save(FooToPickle(), os.path.join(tmp_dir, "will_fail"))
 
     def test_single_tuple_trace(self):
         x = torch.tensor(2.)
