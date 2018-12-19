@@ -4,6 +4,7 @@
 // - https://github.com/skarupke/flat_hash_map/pull/25
 // - https://github.com/skarupke/flat_hash_map/pull/26
 // - replace size_t with uint64_t to fix it for 32bit
+// - add "GCC diagnostic" pragma to ignore -Wshadow
 
 //          Copyright Malte Skarupke 2017.
 // Distributed under the Boost Software License, Version 1.0.
@@ -19,6 +20,11 @@
 #include <iterator>
 #include <utility>
 #include <type_traits>
+
+#ifndef _MSC_VER
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wshadow"
+#endif
 
 #ifdef _MSC_VER
 #define SKA_NOINLINE(...) __declspec(noinline) __VA_ARGS__
