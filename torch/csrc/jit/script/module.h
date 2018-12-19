@@ -89,7 +89,7 @@ struct Method {
   // adding any extra parameters necessary to do this call
 
   // defined here to keep details of member_input handling confined to this class
-  std::vector<Value*> emit_call_to(const SourceRange& loc, Method & callee, ArrayRef<NamedValue> args, ArrayRef<NamedValue> kwargs);
+  Value* emit_call_to(const SourceRange& loc, Method & callee, ArrayRef<NamedValue> args, ArrayRef<NamedValue> kwargs);
 
   // if this isn't yet defined, run its method_creator function
   TORCH_API void ensure_defined();
@@ -197,6 +197,11 @@ struct Method {
     return *owner_;
   }
 
+  void check_single_output() {
+    AT_CHECK(
+        graph()->outputs().size() == 1,
+        "Method (but not graphs in general) require a single output. Use None/Tuple for 0 or 2+ outputs");
+  }
 private:
 
   static FunctionSchema defaultSchemaFor(const Method& method) {
@@ -217,9 +222,7 @@ private:
 
   GraphExecutor& get_executor() {
     std::call_once(executor_init, [&] {
-      AT_CHECK(
-          graph()->outputs().size() == 1,
-          "Method (but not graphs in general) require a single output. Use None/Tuple for 0 or 2+ outputs");
+      check_single_output();
       executor = GraphExecutor(graph(), optimize);
     });
     return executor;
@@ -506,9 +509,9 @@ struct Module {
   bool optimize;
 };
 
-// returns c10::nullopt and fills in failure_messages if the callee does not
+// returns nullptr and fills in failure_messages if the callee does not
 // match the functions schema
-c10::optional<std::vector<Value*>> try_emit_call_to(
+Value* try_emit_call_to(
     Graph& graph,
     const SourceRange& loc,
     Method& callee,
