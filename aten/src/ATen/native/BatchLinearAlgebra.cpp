@@ -351,20 +351,12 @@ Tensor cholesky(const Tensor &self, bool upper) {
   }
   squareCheckInputs(self);
 
-  // TODO: (#14071) Once `triu`, `tril` is implemented for batched tensors,
-  // this can be simplified. Currently, we are zero-ing out values in the
-  // batch of matrices by using a mask and the `where` function.
-  // The simplification with batched `triu` and `tril` would be this:
-  // if (upper) {
-  //   return raw_cholesky_output.triu();
-  // } else {
-  //   return raw_cholesky_output.tril();
-  // }
   auto raw_cholesky_output = at::_cholesky_helper(self, upper);
-  int64_t n = self.size(-1);
-  auto indices = at::ones({n, n}, self.options().dtype(at::kByte));
-  indices = upper ? indices.tril(-1).expand_as(self) : indices.triu(1).expand_as(self);
-  return at::where(indices, at::zeros({}, self.options()), raw_cholesky_output);
+  if (upper) {
+    return raw_cholesky_output.triu_();
+  } else {
+    return raw_cholesky_output.tril_();
+  }
 }
 
 Tensor& cholesky_out(Tensor &result, const Tensor &self, bool upper) {
@@ -419,7 +411,7 @@ void apply_triu_tril(Tensor& result, const Tensor& self, int64_t k) {
 }
 
 Tensor tril(const Tensor& self, int64_t k) {
-  auto result = at::empty_like(self);
+  Tensor result;
   at::tril_out(result, self, k);
   return result;
 }
@@ -432,7 +424,7 @@ Tensor& _tril_cpu_(Tensor &self, int64_t k) {
 }
 
 Tensor& _tril_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
-  result.resize_as_(self);
+  result = at::empty_like(self);
   AT_DISPATCH_ALL_TYPES(self.type(), "tril", [&]{
     apply_triu_tril<scalar_t, false, false>(result, self, k);
   });
@@ -440,7 +432,7 @@ Tensor& _tril_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
 }
 
 Tensor triu(const Tensor& self, int64_t k) {
-  auto result = at::empty_like(self);
+  Tensor result;
   at::triu_out(result, self, k);
   return result;
 }
@@ -453,7 +445,7 @@ Tensor& _triu_cpu_(Tensor &self, int64_t k) {
 }
 
 Tensor& _triu_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
-  result.resize_as_(self);
+  result = at::empty_like(self);
   AT_DISPATCH_ALL_TYPES(self.type(), "triu", [&]{
     apply_triu_tril<scalar_t, false, true>(result, self, k);
   });

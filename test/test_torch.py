@@ -3765,7 +3765,6 @@ class _TestTorchMixin(object):
     def test_trilu_indices(self):
         for test_args in tri_tests_args:
             _compare_trilu_indices(self, *test_args)
-
         run_additional_tri_tests(self, 'cpu')
 
         # test default options
@@ -3776,12 +3775,24 @@ class _TestTorchMixin(object):
         self.assertEqual(
             x.triu(0).nonzero().transpose(0, 1), torch.triu_indices(3, 3))
 
-    def test_triu(self):
-        x = torch.rand(SIZE, SIZE)
-        res1 = torch.triu(x)
-        res2 = torch.Tensor()
-        torch.triu(x, out=res2)
-        self.assertEqual(res1, res2, 0)
+    @staticmethod
+    def _test_triu_tril(self, cast):
+        def run_test(shape, cast, diagonal):
+            x = cast(torch.randn(*shape))
+            res1 = torch.triu(x, diagonal=diagonal)
+            res2 = cast(torch.Tensor())
+            torch.triu(x, diagonal=diagonal, out=res2)
+            self.assertEqual(res1, res2, 0)
+            res1 = torch.tril(x, diagonal=diagonal)
+            res2 = cast(torch.Tensor())
+            torch.tril(x, diagonal=diagonal, out=res2)
+            self.assertEqual(res1, res2, 0)
+
+        for s, d in product([(3, 3), (5, 3, 3), (7, 5, 3, 3)], [-2, -1, 0, 1, 2]):
+            run_test(s, cast, d)
+
+    def test_triu_tril(self):
+        self._test_triu_tril(self, lambda t: t)
 
     def test_cat(self):
         SIZE = 10
