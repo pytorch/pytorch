@@ -10704,6 +10704,17 @@ a")
         y = torch.randn(3, 6)
         self.checkScript(split_two, [(x + y)])
 
+    def test_optional_scalartype(self):
+        @torch.jit.script
+        def fn(a, b):
+            return torch.add(a.cumsum(0, dtype=torch.long).sum(dtype=None),
+                             b.cumprod(0, dtype=None).prod(dtype=torch.double))
+
+        a = torch.randn(4, 4, dtype=torch.float, requires_grad=True)
+        b = torch.randn(4, 4, dtype=torch.float, requires_grad=True)
+
+        self.assertExpectedGraph(fn.graph)
+
 
 class MnistNet(nn.Module):
     def __init__(self):
