@@ -33,8 +33,8 @@ class DataLoaderBase {
   /// to configure the DataLoader with, and a `sampler` that specifies the
   /// sampling strategy.
   DataLoaderBase(
-      std::unique_ptr<Dataset> main_thread_dataset,
-      DataLoaderOptions options)
+      DataLoaderOptions options,
+      std::unique_ptr<Dataset> main_thread_dataset = nullptr)
       : options_(std::move(options)),
         main_thread_dataset_(std::move(main_thread_dataset)),
         sequencer_(new_sequencer()) {}
@@ -59,7 +59,7 @@ class DataLoaderBase {
         shuttle_.in_flight_jobs() == 0,
         "Attempted to get a new DataLoader iterator "
         "while another iterator is not yet exhausted");
-    reset(/*prefetch=*/true);
+    reset();
     return Iterator<Batch>(torch::make_unique<detail::ValidIterator<Batch>>(
         [this] { return this->next(); }));
   }
@@ -135,13 +135,11 @@ class DataLoaderBase {
 
   /// Resets the internal state of the DataLoader, optionally pre-fetching
   /// new jobs.
-  virtual void reset(bool prefetch) {
+  virtual void reset() {
     shuttle_.drain();
     sequence_number_ = 0;
     sequencer_ = new_sequencer();
-    if (prefetch) {
-      this->prefetch();
-    }
+    prefetch();
   }
 
   /// Schedules `requested_jobs` many new batches to be fetched. The actual

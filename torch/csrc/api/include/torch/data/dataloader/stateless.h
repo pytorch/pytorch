@@ -13,6 +13,14 @@
 
 namespace torch {
 namespace data {
+
+/// A dataloader for stateless datasets.
+///
+/// This dataloader follows the traditional PyTorch dataloader design, whereby a
+/// (posssibly) stateful sampler produces *batch requests* for a stateless
+/// dataset, which acts as a simple batch request to batch mapping. The batch
+/// request will often be an array of indices, and if the dataset is a simple
+/// image dataset, the dataset would produce the images at those indices.
 template <typename Dataset, typename Sampler>
 class StatelessDataLoader : public DataLoaderBase<
                                 Dataset,
@@ -25,15 +33,13 @@ class StatelessDataLoader : public DataLoaderBase<
       typename Sampler::BatchRequestType>;
   using typename super::BatchRequestType;
 
+  /// Constructs the `StatelessDataLoader` from a `dataset`, a `sampler` and
+  /// some `options`.
   StatelessDataLoader(
       Dataset dataset,
-      DataLoaderOptions options,
-      Sampler sampler)
-      : super(
-            options.workers_ ? std::unique_ptr<Dataset>(nullptr)
-                             : torch::make_unique<Dataset>(std::move(dataset)),
-            std::move(options)),
-        sampler_(std::move(sampler)) {
+      Sampler sampler,
+      DataLoaderOptions options)
+      : super(std::move(options)), sampler_(std::move(sampler)) {
     for (size_t w = 0; w < this->options_.workers; ++w) {
       // Here we copy the dataset into the worker thread closure. Each worker
       // has its own copy of the dataset. This means the dataset must be
@@ -42,14 +48,22 @@ class StatelessDataLoader : public DataLoaderBase<
       this->workers_.emplace_back(
           [this, dataset]() mutable { this->worker_thread(dataset); });
     }
-  }
-
-  void reset(bool prefetch = true) override {
-    sampler_.reset();
-    super::reset(prefetch);
+    if (this->options_.workers == 0) {
+      this->main_thread_dataset_ =
+          torch::make_unique<Dataset>(std::move(dataset));
+    }
   }
 
  private:
+  /// Resets the internal state of the dataloader and the sampler.
+  void reset() override {
+    sampler_.reset();
+    // Call the base class method last because it calls `prefetch()`
+    super::reset();
+  }
+
+  /// Queries the sampler for the next batch request (possibly progressing its
+  /// internal state).
   optional<BatchRequestType> get_batch_request() override {
     auto indices = sampler_.next(this->options_.batch_size);
     if (!indices ||
@@ -61,6 +75,7 @@ class StatelessDataLoader : public DataLoaderBase<
     return indices;
   }
 
+  /// The `Sampler` used to produce batch requests.
   Sampler sampler_;
 };
 } // namespace data

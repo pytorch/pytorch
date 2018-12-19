@@ -84,8 +84,8 @@ TEST(DataTest, InfiniteStreamDataset) {
 
   auto data_loader = torch::data::make_data_loader(
       std::move(dataset),
-      kBatchSize,
-      samplers::StreamSampler(/*epoch_size=*/39));
+      samplers::StreamSampler(/*epoch_size=*/39),
+      kBatchSize);
 
   size_t batch_index = 0;
   for (auto& batch : *data_loader) {
@@ -672,9 +672,9 @@ struct TestIndexSampler : public samplers::Sampler<TestIndex> {
 };
 
 TEST(DataTest, CanUseCustomTypeAsIndexType) {
-  const size_t kBatchSize = 10;
+  const int kBatchSize = 10;
   auto data_loader = torch::data::make_data_loader(
-      TestIndexDataset(23), kBatchSize, TestIndexSampler(23));
+      TestIndexDataset(23), TestIndexSampler(23), kBatchSize);
 
   size_t i = 0;
   for (auto batch : *data_loader) {
@@ -1057,12 +1057,11 @@ struct Dataset : datasets::BatchDataset<Dataset, size_t> {
 TEST(DataLoaderTest, EnforcesOrderingAmongThreadsWhenConfigured) {
   auto data_loader = torch::data::make_data_loader(
       ordering_test::Dataset{},
+      torch::data::samplers::SequentialSampler(ordering_test::kNumberOfWorkers),
       DataLoaderOptions()
           .batch_size(1)
           .workers(ordering_test::kNumberOfWorkers)
-          .enforce_ordering(true),
-      torch::data::samplers::SequentialSampler(
-          ordering_test::kNumberOfWorkers));
+          .enforce_ordering(true));
   std::vector<size_t> output;
   for (size_t value : *data_loader) {
     output.push_back(value);
@@ -1105,7 +1104,7 @@ TEST(DataLoaderTest, TestExceptionsArePropagatedFromWorkers) {
   };
 
   auto data_loader = torch::data::make_data_loader(
-      D{}, DataLoaderOptions().workers(2), samplers::RandomSampler(100));
+      D{}, samplers::RandomSampler(100), DataLoaderOptions().workers(2));
   auto iterator = data_loader->begin();
 
   try {
