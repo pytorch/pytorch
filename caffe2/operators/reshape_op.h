@@ -99,7 +99,7 @@ class ReshapeOp : public Operator<Context> {
           unknown_idx,
           " can not be inferred since new size is zero.");
       CAFFE_ENFORCE(
-          std::lround(total_size) % std::lround(size) == 0,
+          lround(total_size) % lround(size) == 0,
           "Argument `shape` does not agree with the input data.",
           " (",
           total_size,
