@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/script/type_parser.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/interpreter.h>
@@ -361,9 +362,7 @@ inline bool isSupportedListElementType(const TypePtr& type) {
       type->isSubtypeOf(NumberType::get());
 }
 
-c10::optional<std::string> parseBaseTypeName(const Expr& expr);
-TypePtr parseTypeFromExpr(const Expr& expr);
-c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(const Expr& expr);
+c10::optional<std::pair<TypePtr, int32_t>> parseBroadcastList(const Expr& expr);
 
 struct to_ir {
   to_ir(
@@ -493,7 +492,7 @@ private:
       c10::optional<int32_t> N;
 
       //BroadcastList list can only appear at the argument level
-      if (auto maybe_broad_list = handleBroadcastList(decl_arg.type())) {
+      if (auto maybe_broad_list = parseBroadcastList(decl_arg.type())) {
         type = maybe_broad_list->first;
         N = maybe_broad_list->second;
       } else {
@@ -523,7 +522,7 @@ private:
     if(!decl.return_type().present())
       return {};
 
-    if (handleBroadcastList(decl.return_type().get()))
+    if (parseBroadcastList(decl.return_type().get()))
       throw ErrorReport(decl.return_type().range()) << "Broadcastable lists cannot appear as a return type";
     auto parsed_type = parseTypeFromExpr(decl.return_type().get());
     return {Argument(
@@ -2180,7 +2179,6 @@ private:
     }
   }
 };
-
 
 void defineMethodsInModule(const std::shared_ptr<Module>& m, const std::vector<Def>& definitions, const std::vector<Resolver>& resolvers, const SugaredValuePtr& self) {
   JIT_ASSERT(definitions.size() == resolvers.size());
