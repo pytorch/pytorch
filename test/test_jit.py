@@ -10787,6 +10787,21 @@ additional_module_tests = [
         input_size=(S, S),
         extra_args=((S, S),)
     ),
+    dict(
+        module_name='RNNCell',
+        constructor_args=(S, S),
+        input_size=(S, S),
+    ),
+    dict(
+        module_name='LSTMCell',
+        constructor_args=(S, S),
+        input_size=(S, S),
+    ),
+    dict(
+        module_name='GRUCell',
+        constructor_args=(S, S),
+        input_size=(S, S),
+    ),
 ]
 
 
