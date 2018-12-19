@@ -909,7 +909,7 @@ class ShapePropagator {
             "aten::logdet(Tensor self) -> Tensor",
             "aten::max(Tensor self) -> Tensor",
             "aten::min(Tensor self) -> Tensor",
-            "aten::mean(Tensor self) -> Tensor",
+            "aten::mean(Tensor self, *, ScalarType? dtype) -> Tensor",
             "aten::median(Tensor self) -> Tensor",
             "aten::norm(Tensor self, Scalar p) -> Tensor",
             "aten::std(Tensor self, bool unbiased) -> Tensor",
@@ -1033,7 +1033,7 @@ class ShapePropagator {
     static const register_formula_for multidim_reduce_ops{
         {
             "aten::logsumexp(Tensor self, int[] dim, bool keepdim) -> Tensor",
-            "aten::mean(Tensor self, int[] dim, bool keepdim) -> Tensor",
+            "aten::mean(Tensor self, int[] dim, bool keepdim, *, ScalarType? dtype) -> Tensor",
             "aten::norm(Tensor self, Scalar? p, int[] dim, bool keepdim) -> Tensor",
             "aten::std(Tensor self, int[] dim, bool unbiased, bool keepdim) -> Tensor",
             "aten::var(Tensor self, int[] dim, bool unbiased, bool keepdim) -> Tensor",

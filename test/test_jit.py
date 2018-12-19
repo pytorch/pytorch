@@ -7626,8 +7626,10 @@ a")
                         torch.prod(x, 0) +
                         torch.prod(x, 0, False) +
                         torch.sum(x) +
-                        torch.sum(x, 0) +
-                        torch.sum(x, 0, False))
+                        torch.sum(x, 0, False) +
+                        torch.mean(x) +
+                        torch.mean(x, 0) +
+                        torch.mean(x, 0, False))
 
         mte = ModuleToExport()
         outputs = mte(torch.zeros(1, 2, 3))

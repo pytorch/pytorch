@@ -397,20 +397,11 @@ inline std::tuple<Tensor,Tensor> Tensor::max(int64_t dim, bool keepdim) const {
 inline Tensor Tensor::max_values(int64_t dim, bool keepdim) const {
     return type().max_values(*this, dim, keepdim);
 }
-inline Tensor Tensor::mean(ScalarType dtype) const {
+inline Tensor Tensor::mean(c10::optional<ScalarType> dtype) const {
     return type().mean(*this, dtype);
 }
-inline Tensor Tensor::mean() const {
-    return type().mean(*this);
-}
-inline Tensor Tensor::mean(IntList dim, bool keepdim, ScalarType dtype) const {
+inline Tensor Tensor::mean(IntList dim, bool keepdim, c10::optional<ScalarType> dtype) const {
     return type().mean(*this, dim, keepdim, dtype);
-}
-inline Tensor Tensor::mean(IntList dim, bool keepdim) const {
-    return type().mean(*this, dim, keepdim);
-}
-inline Tensor Tensor::mean(IntList dim, ScalarType dtype) const {
-    return type().mean(*this, dim, dtype);
 }
 inline std::tuple<Tensor,Tensor> Tensor::median(int64_t dim, bool keepdim) const {
     return type().median(*this, dim, keepdim);

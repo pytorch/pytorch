@@ -402,18 +402,21 @@ def sigmoid(g, self):
     return g.op("Sigmoid", self)
 
 
-def _reduce_op_symbolic(onnx_op_name):
-    def symbolic(g, self, dim=None, keepdim=None):
-        if dim is None:
-            # all-reduce path
-            return g.op(onnx_op_name, self, keepdims_i=0)
-        else:
-            # dim-reduce path
-            dim, keepdim = _get_const(dim, 'i', 'dim'), _get_const(keepdim, 'i', 'keepdim')
-            return g.op(onnx_op_name, self, axes_i=[dim], keepdims_i=keepdim)
-    return symbolic
+@overload_by_arg_count
+def mean(g, *args, **kwargs):
+    @parse_args('v', 'none')
+    def mean_nodim(g, self, dtype):
+        if dtype.node().kind() != 'prim::none':
+            return _unimplemented("scale", "dtype")
+        return g.op('ReduceMean', self, keepdims_i=0)
 
-mean = _reduce_op_symbolic('ReduceMean')
+    @parse_args('v', 'i', 'i', 'none')
+    def mean_dim(g, self, dim, keepdim, dtype):
+        if dtype.node().kind() != 'prim::none':
+            return _unimplemented("scale", "dtype")
+        return g.op('ReduceMean', self, axes_i=[dim], keepdims_i=keepdim)
+
+    return mean_nodim, mean_dim
 
 
 @overload_by_arg_count

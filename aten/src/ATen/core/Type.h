@@ -299,11 +299,8 @@ struct CAFFE2_API Type {
   virtual Tensor matrix_power(const Tensor & self, int64_t n) const = 0;
   virtual std::tuple<Tensor,Tensor> max(const Tensor & self, int64_t dim, bool keepdim) const = 0;
   virtual Tensor max_values(const Tensor & self, int64_t dim, bool keepdim) const = 0;
-  virtual Tensor mean(const Tensor & self, ScalarType dtype) const = 0;
-  virtual Tensor mean(const Tensor & self) const = 0;
-  virtual Tensor mean(const Tensor & self, IntList dim, bool keepdim, ScalarType dtype) const = 0;
-  virtual Tensor mean(const Tensor & self, IntList dim, bool keepdim) const = 0;
-  virtual Tensor mean(const Tensor & self, IntList dim, ScalarType dtype) const = 0;
+  virtual Tensor mean(const Tensor & self, c10::optional<ScalarType> dtype) const = 0;
+  virtual Tensor mean(const Tensor & self, IntList dim, bool keepdim, c10::optional<ScalarType> dtype) const = 0;
   virtual std::tuple<Tensor,Tensor> median(const Tensor & self, int64_t dim, bool keepdim) const = 0;
   virtual std::tuple<Tensor,Tensor> min(const Tensor & self, int64_t dim, bool keepdim) const = 0;
   virtual Tensor min_values(const Tensor & self, int64_t dim, bool keepdim) const = 0;

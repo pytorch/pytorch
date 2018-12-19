@@ -198,6 +198,10 @@ static ScalarType get_dtype(Tensor& result, const Tensor& self, optional<ScalarT
   return src_type;
 }
 
+Tensor mean(const Tensor& self, optional<ScalarType> dtype) {
+  return at::native::mean(self, {}, false, dtype);
+}
+
 Tensor sum(const Tensor &self, optional<ScalarType> dtype) {
   return at::native::sum(self, {}, false, dtype);
 }
@@ -220,7 +224,11 @@ Tensor prod(const Tensor &self, optional<ScalarType> dtype) {
   return result;
 }
 
-static inline Tensor &mean_out(Tensor &result, const Tensor &self, IntList dim,
+// \ALL REDUCE ################################################################
+
+// DIM REDUCE #################################################################
+
+Tensor &mean_out(Tensor &result, const Tensor &self, IntList dim,
                  bool keepdim, optional<ScalarType> opt_dtype) {
   ScalarType scalarType = opt_dtype.has_value() ? opt_dtype.value() : self.type().scalarType();
   AT_CHECK(
@@ -238,37 +246,9 @@ static inline Tensor &mean_out(Tensor &result, const Tensor &self, IntList dim,
   return result;
 }
 
-// \ALL REDUCE ################################################################
-
-// DIM REDUCE #################################################################
-
-Tensor& mean_out(Tensor& result, const Tensor& self, IntList dim, bool keepdim, ScalarType dtype) {
-  return at::native::mean_out(
-      result, self, dim, keepdim, c10::optional<ScalarType>(dtype));
-}
-Tensor& mean_out(Tensor& result, const Tensor& self, IntList dim, bool keepdim) {
-  return at::native::mean_out(result, self, dim, keepdim, c10::nullopt);
-}
-
-Tensor& mean_out(Tensor& result, const Tensor& self, IntList dim, ScalarType dtype) {
-  return at::native::mean_out(result, self, dim, false, dtype);
-}
-
-static inline Tensor mean(const Tensor &self, IntList dim, bool keepdim, optional<ScalarType> dtype) {
+Tensor mean(const Tensor &self, IntList dim, bool keepdim, optional<ScalarType> dtype) {
   Tensor result;
   return at::native::mean_out(result, self, dim, keepdim, dtype);
-}
-
-static inline Tensor mean(const Tensor &self, optional<ScalarType> dtype) {
-  return at::native::mean(self, {}, false, dtype);
-}
-
-Tensor mean(const Tensor &self, ScalarType dtype) {
-  return at::native::mean(self, optional<ScalarType>(dtype));
-}
-
-Tensor mean(const Tensor &self) {
-  return at::native::mean(self, c10::nullopt);
 }
 
 Tensor& sum_out(Tensor& result, const Tensor& self, IntList dim, bool keepdim, optional<ScalarType> opt_dtype) {
@@ -284,18 +264,6 @@ Tensor& sum_out(Tensor& result, const Tensor& self, IntList dim, bool keepdim, o
 
 Tensor& prod_out(Tensor& result, const Tensor& self, int64_t dim, bool keepdim, optional<ScalarType> dtype) {
   return at::native::prod_impl(result, self, dim, keepdim, dtype);
-}
-
-Tensor mean(const Tensor& self, IntList dim, bool keepdim, ScalarType dtype) {
-  return at::native::mean(self, dim, keepdim, c10::optional<ScalarType>(dtype));
-}
-
-Tensor mean(const Tensor& self, IntList dim, bool keepdim) {
-  return at::native::mean(self, dim, keepdim, c10::nullopt);
-}
-
-Tensor mean(const Tensor& self, IntList dim, ScalarType dtype) {
-  return at::native::mean(self, dim, false, dtype);
 }
 
 Tensor sum(const Tensor& self, IntList dim, bool keepdim, optional<ScalarType> dtype) {
