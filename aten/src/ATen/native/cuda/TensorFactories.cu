@@ -119,9 +119,10 @@ inline int64_t resolve_root_int(
   // have to cast double to int64_t, otherwise it would only compare up to the
   // precision of a double variable, ignoring the precision loss
   if (bXb_cX4 != (int64_t) (sr * sr)) {
-    // handle precision loss
+    // handle precision loss by using binary search
     int64_t llsr = ::__double2ll_rd(sr);
-    // suppose z is the correct result of sqrt(bXb_cX4) without precision loss
+    // Use the following math to reduce search space.
+    // Suppose z is the correct result of sqrt(bXb_cX4) without precision loss
     // let d = abs(bXb_cX4 - llsr * llsr), then we have
     // z = sqrt(bXb_cX4) <= sqrt(llsr * llsr + d) <= llsr + sqrt(d)
     // z = sqrt(bXb_cX4) >= sqrt(llsr * llsr - d) >= llsr - sqrt(d)
@@ -133,6 +134,10 @@ inline int64_t resolve_root_int(
     // binary search for the correct answer
     while (l + 1 < r) {
       auto m = (l + r) >> 1;
+      // for tril:
+      //    b = 2f - 1, sign = 1, hence (2f + m - 1) * m / 2
+      // for triu:
+      //    b = -2f - 1, sign = -1, hence (2f - m + 1) * m / 2
       if (sign * (b + m) * m >> 1 > x) {
         r = m;
       } else {
@@ -144,6 +149,7 @@ inline int64_t resolve_root_int(
 
   return res;
 }
+
 // f: the number of elements in the first row of the trapezoid.
 // x: the index of the target coordinates ordered by row and then column.
 // Assume x corresponding to coordinates (row, col) in the trapezoid, where
@@ -166,8 +172,7 @@ inline void get_coordinate_in_tril_trapezoid(
     int64_t f, int64_t x, int64_t & row, int64_t & col) {
   f <<= 1; // all statements use 2f, so only calculate it once here.
   auto b = f - 1;
-  auto cX4 = - (x << 3); // 4 * c = 4 * (-2x) = 8x;
-  //row = ::__double2ll_rd((-b + ::sqrt((double)(b * b - cX4)))/2);
+  auto cX4 = - (x << 3); // 4 * c = 4 * (-2x) = -8x;
   row = resolve_root_int(b, cX4, x, 1);
   col = x - ((f + row - 1) * row >> 1);
 }
@@ -196,7 +201,6 @@ inline void get_coordinate_in_triu_trapezoid(
   f <<= 1; // all statements use 2f, so only calculate it once here.
   auto b = -1 - f;
   auto cX4 = x << 3; // 4 * c = 4 * (2x) = 8x;
-  //row = ::__double2ll_rd((-b - ::sqrt((double)(b * b - cX4)))/2);
   row = resolve_root_int(b, cX4, x, -1);
   col = x - ((f - row + 1) * row >> 1) + row;
 }
@@ -211,7 +215,7 @@ void tril_indices_kernel(scalar_t * tensor,
                          int64_t col,
                          int64_t trapezoid_size,
                          int64_t tril_size) {
-  int64_t linear_index = blockIdx.x * (int64_t)blockDim.x + threadIdx.x;
+  int64_t linear_index = blockIdx.x * blockDim.x + threadIdx.x;
 
   if (linear_index < tril_size) {
     int64_t r, c;
