@@ -1098,27 +1098,13 @@
 
 - func: max_pool3d(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> Tensor
 
-# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
-- func: mean(Tensor self, *, ScalarType dtype) -> Tensor
+- func: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
-- func: mean(Tensor self) -> Tensor
+- func: mean(Tensor self, IntList[1] dim, bool keepdim=false, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
-- func: mean(Tensor self, IntList[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
-  variants: function, method
-
-- func: mean(Tensor self, IntList[1] dim, bool keepdim=False) -> Tensor
-  variants: function, method
-
-- func: mean(Tensor self, IntList[1] dim, *, ScalarType dtype) -> Tensor
-  variants: function, method
-
-- func: mean_out(Tensor result, Tensor self, IntList[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
-
-- func: mean_out(Tensor result, Tensor self, IntList[1] dim, bool keepdim=False) -> Tensor
-
-- func: mean_out(Tensor result, Tensor self, IntList[1] dim, *, ScalarType dtype) -> Tensor
+- func: mean_out(Tensor result, Tensor self, IntList[1] dim, bool keepdim=false, *, ScalarType? dtype=None) -> Tensor
 
 - func: median(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
   variants: function, method
