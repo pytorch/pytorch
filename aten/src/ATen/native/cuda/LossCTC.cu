@@ -363,6 +363,7 @@ ctc_loss_backward_log_beta_gpu_kernel(scalar_t* __restrict__ log_beta_data,
 // calculation (with an atomic log add) is similarly in performance, but for large
 // alphabets the inplace nature is a considerable advantage.
 template<typename scalar_t, typename target_t>
+__global__ void
 #if defined (__HIP_PLATFORM_HCC__)
 __launch_bounds__((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
 #endif
@@ -411,6 +412,7 @@ ctc_loss_backward_collect_nonblank_gpu_kernel(scalar_t* __restrict__ gradient_da
 // This is the naive implementation of equation (16). It is parallelised in batch and input timestep.
 // It appears to be faster than the above method for small batch sizes.
 template<typename scalar_t, typename target_t>
+__global__ void
 #if defined (__HIP_PLATFORM_HCC__)
 __launch_bounds__((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
 #endif
