@@ -46,7 +46,8 @@ class ReshapeOp : public Operator<Context> {
       auto& shape = Input(1);
       CAFFE_ENFORCE(shape.dim() == 1, "Shape should be 1-D");
 
-      if (shape.dtype() == TypeMeta::Make<int64_t>()) {
+      if (shape.dtype() == TypeMeta::Make<int64_t>() ||
+          shape.dtype() == TypeMeta::Make<int32_t>()) {
         const T* shape_data = shape.template data<T>();
         // Bit awkward, but needed so works on both CPU and CUDA contexts
         std::vector<T> tmpv(shape.numel());
