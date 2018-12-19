@@ -36,6 +36,7 @@ inline TensorParameterDispatchKey tensor_to_dispatch_key(const C10Tensor& tensor
       tensor.impl()->dtype().id()};
 }
 
+// Extract type ids for all tensors from an array of tensors
 template<size_t num_dispatch_args, size_t num_tensor_args, size_t... indices>
 guts::array<TensorParameterDispatchKey, num_dispatch_args> getDispatchTypeIds__(const guts::array<const C10Tensor*, num_tensor_args>& tensor_args, guts::index_sequence<indices...>) {
   return {tensor_to_dispatch_key(*tensor_args[indices])...};
