@@ -251,7 +251,7 @@ struct PDist {
 
 };
 
-void pdist_forward_kernel_impl(Tensor& result, const Tensor& self, const double p) {
+static void pdist_forward_kernel_impl(Tensor& result, const Tensor& self, const double p) {
   AT_DISPATCH_FLOATING_TYPES(self.type(), "pdist", [&] {
     PDist<scalar_t>::apply(result, self, p);
   });
