@@ -265,11 +265,6 @@ class _DistTestBase(object):
 
         self._barrier()
 
-    # GET default group
-    def test_get_default_group(self):
-        default_grp = dist.get_default_group()
-        self.assertNotEqual(default_grp, None)
-
     def test_get_backend(self):
         if dist.get_world_size() > 2:
             group = [1, 2]
@@ -1014,7 +1009,11 @@ class _DistTestBase(object):
             else:
                 dist.broadcast(expected_time, dest, group_id)
                 dist.barrier(group_id)
-                self.assertGreaterEqual(time.time(), expected_time[0])
+                self.assertGreaterEqual(
+                    float(time.time()),
+                    float(expected_time[0]),
+                    "destination rank: %d, my rank: %d" % (dest, rank) +
+                    " (if you see this failure, please report in #14554)")
 
         # Use higher timeout for the instance where the test runs
         # against a subgroup and uses a CUDA tensor for expected time.
@@ -1235,9 +1234,9 @@ class _DistTestBase(object):
             self.assertEqual(p_gpu, p_DDP)
 
     def _test_DDP_5iter(
-        self, model_base, model_DDP, input, target, loss, local_bs, rank, batch_size
+        self, model_base, model_DDP, input, target, loss, local_bs, rank, batch_size, test_save
     ):
-        for _ in range(5):
+        for idx in range(5):
             # single cpu/gpu training
             self._test_DDP_helper(model_base, input, target, loss)
 
@@ -1259,17 +1258,19 @@ class _DistTestBase(object):
             # Shuffle the input so that DDP input is different
             input = input[torch.randperm(batch_size)]
 
-        # Test that saving and loading work
-        # TODO: It should be possible to save the entire model,
-        # but this doesn't work at the moment.  Update this test
-        # when it does work.
+            # save the model in the middle and reload
+            if test_save and idx == 2 and INIT_METHOD.startswith("file://"):
+                _, filename = tempfile.mkstemp(prefix=FOLDER)
+                torch.save(model_DDP, filename)
+                model_DDP = torch.load(filename)
+
         with tempfile.TemporaryFile() as tmp_file:
-            torch.save(model_DDP.state_dict(), tmp_file)
+            torch.save(model_DDP, tmp_file)
             tmp_file.seek(0)
-            saved_state_dict = torch.load(tmp_file)
+            saved_model = torch.load(tmp_file)
         for k in model_DDP.state_dict():
             self.assertEqual(model_DDP.state_dict()[k],
-                             saved_state_dict[k])
+                             saved_model.state_dict()[k])
 
     def _test_DistributedDataParallel(self, gpu_subset, rank, output_device=None):
         # Run a simple end to end DDP model, use result of single node model
@@ -1309,6 +1310,7 @@ class _DistTestBase(object):
             local_bs,
             rank,
             global_bs,
+            True
         )
         self._barrier()
 
@@ -1332,8 +1334,9 @@ class _DistTestBase(object):
         global_bs, input_cpu, target, loss = self._prepare_dummy_data(local_bs)
 
         # check two model parameters over 5 iterations
+        # TODO: add state pickling support for DistributedDataParallelCPU
         self._test_DDP_5iter(
-            model_base, model_DDP, input_cpu, target, loss, local_bs, rank, global_bs
+            model_base, model_DDP, input_cpu, target, loss, local_bs, rank, global_bs, False
         )
         self._barrier()
 

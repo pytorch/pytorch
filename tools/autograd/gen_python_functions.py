@@ -29,7 +29,7 @@ SKIP_PYTHON_BINDINGS = [
     'arange.*', 'range.*', '_gesv.*', '_getri.*', '_inverse.*',
     '_potrs.*', '_cholesky.*',
     'slice', 'randint(_out)?',
-    '_local_scalar', '_local_scalar_dense',
+    'item', '_local_scalar_dense',
     'max_pool1d', 'max_pool2d', 'max_pool3d', 'linear', 'to',
     'copy_sparse_to_sparse_',
 ]
@@ -228,7 +228,9 @@ def group_declarations_by_name(declarations, should_bind_fn):
 
 
 def get_type_default(declaration):
-    if declaration['name'].startswith('randperm'):
+    if declaration['name'].startswith('randperm') or \
+            declaration['name'] == 'tril_indices' or \
+            declaration['name'] == 'triu_indices':
         return 'torch.int64'
     else:
         return 'None'

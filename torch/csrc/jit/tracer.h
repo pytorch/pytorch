@@ -1,17 +1,17 @@
 #pragma once
 
-#include "torch/csrc/autograd/function_hook.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/constants.h"
-#include "torch/csrc/jit/stack.h"
-#include "torch/csrc/jit/tracing_state.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/utils/functional.h"
-#include "torch/csrc/utils/functional.h"
-#include "torch/csrc/utils/variadic.h"
-#include "torch/csrc/utils/variadic.h"
-#include "torch/csrc/WindowsTorchApiMacro.h"
+#include <torch/csrc/autograd/function_hook.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/stack.h>
+#include <torch/csrc/jit/tracing_state.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/utils/functional.h>
+#include <torch/csrc/utils/functional.h>
+#include <torch/csrc/utils/variadic.h>
+#include <torch/csrc/utils/variadic.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/Backtrace.h>
 
 #include <memory>
@@ -32,14 +32,20 @@ TORCH_API void setRecordSourceLocation(void (*v)(Node*));
 // Having finished adding a new 'node' to the graph IR 'setValueTrace' associates
 // this node with an output variable, so that further operations involving this
 // variable know which node in the IR to reference.
-inline void setValueTrace(const Variable& var, Value *value) {
-  JIT_ASSERT(var.defined());
-  getTracingState()->value_map[var] = value;
-}
+TORCH_API void setValueTrace(const IValue& v, Value* value);
 
 inline void delValueTrace(const Variable& var) {
   JIT_ASSERT(var.defined());
   getTracingState()->value_map.erase(var);
+}
+
+inline std::function<void()> pauseTracing() {
+  std::shared_ptr<tracer::TracingState> state = getTracingState();
+  tracer::setTracingState(nullptr);
+
+  return [state]() {
+    tracer::setTracingState(state);
+  };
 }
 
 // Given a variable 'var', return the 'node' which represents the instruction
@@ -156,7 +162,7 @@ inline std::pair<std::shared_ptr<TracingState>, Stack> enter(Stack inputs) {
     }
   };
   for (IValue& input : inputs) {
-    input = add_input(input, inferTypeFrom(input), state->graph->addInput());
+    input = add_input(input, incompleteInferTypeFrom(input), state->graph->addInput());
   }
   return std::make_pair(state, inputs);
 }

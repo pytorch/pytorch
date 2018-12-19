@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorMathPointwise.cu"
+#define THC_GENERIC_FILE "THC/generic/THCTensorMathPointwise.cu"
 #else
 
 #define IMPLEMENT_CUDA_TENSOR_BASIC_FUNC_(NAME, CFUNC, REAL)             \

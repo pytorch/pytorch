@@ -1,7 +1,7 @@
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
-#include "ATen/ATen.h"
-#include "ATen/core/Reduction.h"
+#include <ATen/ATen.h>
+#include <ATen/core/Reduction.h>
 
 // for TH compat test only...
 struct THFloatTensor;
@@ -12,7 +12,6 @@ extern "C" void THFloatTensor_fill(THFloatTensor *, float v);
 #include <chrono>
 #include <string.h>
 #include <sstream>
-#include "test_seed.h"
 
 #define ASSERT_EQ_RESOLVED(X, Y) \
   {                              \
@@ -158,7 +157,7 @@ void TestCopyBroadcasting(Type& type) {
   }
 }
 void TestAbsValue(Type& type) {
-  Tensor r = at::abs(type.scalarTensor(-3));
+  Tensor r = at::abs(at::scalar_tensor(-3, type.options()));
   ASSERT_EQ_RESOLVED(r.item<int32_t>(), 3);
 }
 /*
@@ -188,7 +187,7 @@ void TestSelect(Type& type) {
 }
 
 void TestZeroDim(Type& type) {
-  Tensor a = type.scalarTensor(4); // rand(type, {1});
+  Tensor a = at::scalar_tensor(4, type.options()); // rand(type, {1});
 
   Tensor b = rand({3, 4}, type);
   ASSERT_EQ_RESOLVED((a + a).dim(), 0);
@@ -278,11 +277,6 @@ void TestDispatch() {
   ASSERT_TRUE(result.allclose(mse_loss(relu(tensor), other)));
 }
 
-void TestCore() {
-  int i = CoreTest();
-  ASSERT_EQ_RESOLVED(i + 1, CoreTest());
-}
-
 void test(Type& type) {
   TestResize(type);
   TestOnesAndDot(type);
@@ -309,17 +303,16 @@ void test(Type& type) {
   TestIndexingByZerodimTensor();
   TestIndexingMixedDevice(type);
   TestDispatch();
-  TestCore();
 }
 
 TEST(BasicTest, BasicTestCPU) {
-  manual_seed(123, at::kCPU);
+  manual_seed(123);
 
   test(CPU(kFloat));
 }
 
 TEST(BasicTest, BasicTestCUDA) {
-  manual_seed(123, at::kCUDA);
+  manual_seed(123);
 
   if (at::hasCUDA()) {
     test(CUDA(kFloat));

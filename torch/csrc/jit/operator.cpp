@@ -1,10 +1,16 @@
-#include "ATen/ATen.h"
-#include "torch/csrc/jit/alias_info.h"
-#include "torch/csrc/jit/script/lexer.h"
-#include "torch/csrc/jit/script/tree.h"
-#include "torch/csrc/jit/operator.h"
-#include "torch/csrc/jit/passes/python_print.h"
-#include "torch/csrc/jit/script/error_report.h"
+#include <ATen/ATen.h>
+#include <torch/csrc/jit/alias_info.h>
+#include <torch/csrc/jit/script/lexer.h>
+#include <torch/csrc/jit/script/parse_string_literal.h>
+#include <torch/csrc/jit/script/tree.h>
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/passes/python_print.h>
+#include <torch/csrc/jit/script/error_report.h>
+
+#include <functional>
+#include <memory>
+#include <utility>
+#include <vector>
 
 namespace torch { namespace jit {
 
@@ -68,7 +74,7 @@ struct SchemaParser {
       {"Generator", GeneratorType::get() },
       {"ScalarType", IntType::get() },
       {"Layout", IntType::get() },
-      {"Device", ListType::ofInts() },
+      {"Device", DeviceObjType::get() },
       {"Scalar", NumberType::get() },
       {"str", StringType::get() },
       {"float", FloatType::get() },
@@ -224,13 +230,15 @@ struct SchemaParser {
       case TK_NONE:
         L.next();
         return IValue();
+      case TK_STRINGLITERAL: {
+        auto token = L.next();
+        return parseStringLiteral(token.range, token.text());
+      }
       case TK_IDENT: {
         auto tok = L.next();
         auto text = tok.text();
         if("float" == text) {
           return static_cast<int64_t>(at::kFloat);
-        } else if("cpu" == text) {
-          return static_cast<int64_t>(at::Device::Type::CPU);
         } else if("strided" == text) {
           return static_cast<int64_t>(at::kStrided);
         } else if("Mean" == text) {
@@ -245,7 +253,7 @@ struct SchemaParser {
           n = "-" + L.expect(TK_NUMBER).text();
         else
           n = L.expect(TK_NUMBER).text();
-        if(kind == TypeKind::FloatType || n.find(".") != std::string::npos || n.find("e") != std::string::npos) {
+        if(kind == TypeKind::FloatType || n.find('.') != std::string::npos || n.find('e') != std::string::npos) {
           return std::stod(n);
         } else {
           int64_t v = std::stoll(n);
@@ -287,13 +295,14 @@ struct SchemaParser {
     L.expect(TK_NONE);
     return IValue();
   }
-  IValue parseDefaultValue(TypePtr arg_type, c10::optional<int32_t> arg_N) {
+  IValue parseDefaultValue(const TypePtr& arg_type, c10::optional<int32_t> arg_N) {
     auto range = L.cur().range;
     switch(arg_type->kind()) {
       case TypeKind::DynamicType:
       case TypeKind::GeneratorType: {
         return parseTensorDefault(range);
       }  break;
+      case TypeKind::StringType:
       case TypeKind::OptionalType:
       case TypeKind::NumberType:
       case TypeKind::IntType:
@@ -301,6 +310,11 @@ struct SchemaParser {
       case TypeKind::FloatType:
         return parseSingleConstant(arg_type->kind());
         break;
+      case TypeKind::DeviceObjType: {
+        auto device_text = parseStringLiteral(range, L.expect(TK_STRINGLITERAL).text());
+        return c10::Device(device_text);
+        break;
+      }
       case TypeKind::ListType: {
         auto elem_kind = arg_type->cast<ListType>()->getElementType();
         if(L.cur().kind == TK_IDENT) {
@@ -319,7 +333,7 @@ struct SchemaParser {
     return IValue(); // silence warnings
   }
 
-  void parseList(int begin, int sep, int end, std::function<void()> callback) {
+  void parseList(int begin, int sep, int end, const std::function<void()>& callback) {
     auto r = L.cur().range;
     if (begin != TK_NOTHING)
       L.expect(begin);
@@ -338,38 +352,6 @@ struct SchemaParser {
 } // namespace script
 
 namespace {
-
-std::string canonicalSchemaString(const FunctionSchema& schema) {
-  std::ostringstream out;
-
-  out << schema.name();
-  out << "(";
-
-  bool seen_kwarg_only = false;
-  for(size_t i = 0; i < schema.arguments().size(); ++i) {
-    if (i > 0) out << ", ";
-    if (schema.arguments()[i].kwarg_only() && !seen_kwarg_only) {
-      out << "*, ";
-      seen_kwarg_only = true;
-    }
-    const auto & arg = schema.arguments()[i];
-    out << arg.type()->str() << " " << arg.name();
-  }
-
-  out << ") -> ";
-  if (schema.returns().size() == 1) {
-    out << schema.returns().at(0).type()->str();
-  } else if (schema.returns().size() > 1) {
-    out << "(";
-    for (size_t i = 0; i < schema.returns().size(); ++i) {
-      if (i > 0) out << ", ";
-      out << schema.returns()[i].type()->str();
-    }
-    out << ")";
-  }
-  return out.str();
-}
-
 using OperatorMap = std::unordered_map<Symbol, std::vector<std::shared_ptr<Operator>>>;
 struct OperatorRegistry  {
 private:
@@ -391,7 +373,7 @@ private:
 
   // XXX - caller must be holding lock
   void registerPendingOperators() {
-    for(auto op : to_register) {
+    for(const auto& op : to_register) {
       Symbol sym = Symbol::fromQualString(op->schema().name());
       operators[sym].push_back(op);
       operators_by_sig[canonicalSchemaString(op->schema())] = op;
@@ -468,6 +450,37 @@ Operator& sig(const char *signature) {
 
 FunctionSchema parseSchema(const std::string& schema) {
   return script::SchemaParser(schema).parseDeclarations().at(0);
+}
+
+std::string canonicalSchemaString(const FunctionSchema& schema) {
+  std::ostringstream out;
+
+  out << schema.name();
+  out << "(";
+
+  bool seen_kwarg_only = false;
+  for(size_t i = 0; i < schema.arguments().size(); ++i) {
+    if (i > 0) out << ", ";
+    if (schema.arguments()[i].kwarg_only() && !seen_kwarg_only) {
+      out << "*, ";
+      seen_kwarg_only = true;
+    }
+    const auto & arg = schema.arguments()[i];
+    out << arg.type()->str() << " " << arg.name();
+  }
+
+  out << ") -> ";
+  if (schema.returns().size() == 1) {
+    out << schema.returns().at(0).type()->str();
+  } else if (schema.returns().size() > 1) {
+    out << "(";
+    for (size_t i = 0; i < schema.returns().size(); ++i) {
+      if (i > 0) out << ", ";
+      out << schema.returns()[i].type()->str();
+    }
+    out << ")";
+  }
+  return out.str();
 }
 
 bool Operator::matches(const Node* node) const {

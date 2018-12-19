@@ -1,11 +1,11 @@
-#include "torch/csrc/jit/fuser/cpu/fused_kernel.h"
+#include <torch/csrc/jit/fuser/cpu/fused_kernel.h>
 
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/code_template.h"
-#include "torch/csrc/jit/fuser/compiler.h"
-#include "torch/csrc/jit/fuser/cpu/temp_file.h"
-#include "torch/csrc/jit/fuser/cpu/dynamic_library.h"
-#include "torch/csrc/utils/memory.h"
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/code_template.h>
+#include <torch/csrc/jit/fuser/compiler.h>
+#include <torch/csrc/jit/fuser/cpu/temp_file.h>
+#include <torch/csrc/jit/fuser/cpu/dynamic_library.h>
+#include <torch/csrc/utils/memory.h>
 
 #include <sstream>
 #include <cstdlib>
@@ -114,7 +114,6 @@ FusedKernelCPU::FusedKernelCPU(
           std::move(chunk_desc),
           std::move(concat_desc),
           has_random) {
-  auto& config = getConfig();
   TempFile so_file(so_template, 3);
   TempFile cpp_file(cpp_template, 4);
   cpp_file.write(code_);

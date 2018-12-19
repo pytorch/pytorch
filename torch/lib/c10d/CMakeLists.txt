@@ -97,11 +97,8 @@ if (USE_GLOO)
 endif()
 
 target_include_directories(c10d PUBLIC
-  ${CMAKE_SOURCE_DIR}/aten/src/TH # provides "THAllocator.h" to THCGeneral.h
-  ${CMAKE_SOURCE_DIR}/aten/src/THC # provides "THC.h" to ProcessGroupGloo.cpp
   ${CMAKE_BINARY_DIR}/aten/src # provides "ATen/TypeExtendedInterface.h" to ATen.h
   ${CMAKE_BINARY_DIR}/caffe2/aten/src # provides <TH/THGeneral.h> to THC.h
-  ${CMAKE_BINARY_DIR}/caffe2/aten/src/THC # provides "THCGeneral.h" to THC.h
   )
 
 # For <c10d/...>

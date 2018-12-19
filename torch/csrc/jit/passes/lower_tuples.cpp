@@ -1,7 +1,7 @@
-#include "torch/csrc/jit/passes/lower_tuples.h"
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/utils/functional.h"
-#include "torch/csrc/jit/assertions.h"
+#include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/utils/functional.h>
+#include <torch/csrc/jit/assertions.h>
 
 namespace torch { namespace jit {
 
@@ -157,11 +157,11 @@ static void EnsureNoTuples(Block* block) {
 
 void LowerAllTuples(std::shared_ptr<Graph>& graph) {
   LowerAllTuples(graph->block());
-  EliminateDeadCode(graph);
+  EliminateDeadCode(graph->block());
   EnsureNoTuples(graph->block());
 }
 
-static void LowerSimpleTuples(Block* block) {
+void LowerSimpleTuples(Block* block) {
   for(auto n : block->nodes()) {
     removeTupleNodes(n, /*must_remove_tuples*/false);
     for(auto b : n->blocks()) {

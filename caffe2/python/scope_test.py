@@ -55,6 +55,14 @@ class TestScope(unittest.TestCase):
 
         self.assertEquals(scope.CurrentNameScope(), "")
 
+    def testEmptyNamescopeBasic(self):
+        self.assertEquals(scope.CurrentNameScope(), "")
+
+        with scope.NameScope("test_scope"):
+            with scope.EmptyNameScope():
+                self.assertEquals(scope.CurrentNameScope(), "")
+            self.assertEquals(scope.CurrentNameScope(), "test_scope/")
+
     def testDevicescopeBasic(self):
         self.assertEquals(scope.CurrentDeviceScope(), None)
 

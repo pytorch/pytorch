@@ -1,7 +1,7 @@
 #pragma once
 
-#include "torch/csrc/jit/pybind.h"
-#include "torch/csrc/jit/ir.h"
+#include <torch/csrc/jit/pybind.h>
+#include <torch/csrc/jit/ir.h>
 
 #include <ATen/ATen.h>
 
@@ -19,7 +19,7 @@ private:
   std::function<Value*(Value*)> rn_fn = [this](Value* v) { return rn_env.at(v); };
 
 private:
-  std::shared_ptr<Graph> getBatchOperator(std::string name, int64_t input_num = -1);
+  std::shared_ptr<Graph> getBatchOperator(const std::string& name, int64_t input_num = -1);
   void visitAten(Node* n, Block* block, Block* res_block);
   void visitConstant(Node* n, Block* block, Block* res_block);
   void visitNumToTensor(Node* n, Block* block, Block* res_block);
@@ -33,6 +33,6 @@ public:
   TORCH_API void toBatch(Block* block, Block* res_block);
 };
 
-TORCH_API std::shared_ptr<Graph> to_batch_graph(std::shared_ptr<Graph>& graph);
+TORCH_API std::shared_ptr<Graph> to_batch_graph(std::shared_ptr<Graph> graph);
 TORCH_API void initRegisterBatchOpsBindings(PyObject* module);
 }}

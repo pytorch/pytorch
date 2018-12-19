@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorCopy.cu"
+#define THC_GENERIC_FILE "THC/generic/THCTensorCopy.cu"
 #else
 
 void THCTensor_(copy)(THCState* state, THCTensor* dst, THCTensor* src) {

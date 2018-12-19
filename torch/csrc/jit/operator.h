@@ -3,12 +3,12 @@
 // it now to implement correct semantic checking for script
 #pragma once
 
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/function_schema.h"
-#include "torch/csrc/jit/stack.h"
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/function_schema.h>
+#include <torch/csrc/jit/stack.h>
 
-#include "ATen/ATen.h"
+#include <ATen/ATen.h>
 
 #include <functional>
 #include <initializer_list>
@@ -79,6 +79,8 @@ private:
  std::shared_ptr<Operation> op_;
  OperationCreator op_creator_;
 };
+
+TORCH_API std::string canonicalSchemaString(const FunctionSchema& schema);
 
 TORCH_API const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name);
 std::shared_ptr<Operator> findOperatorFor(const Node* node);
