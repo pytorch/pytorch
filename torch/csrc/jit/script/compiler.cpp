@@ -603,7 +603,7 @@ private:
       // note: type is set later on pack_context and context when we know it
       Node* pack_context = graph->insertNode(graph->create(prim::TupleConstruct, {}, 1));
       Value* context = subgraph->addInput("context");
-      // cannot use createTupleUnpack because tpe is not known yet
+      // cannot use createTupleUnpack because the type is not known yet
       Node* unpack_context = subgraph->insertNode(subgraph->create(prim::TupleUnpack, {context}, 0));
 
       std::unordered_map<Value*, Value*> captures;
@@ -631,7 +631,7 @@ private:
   // 2. There is no export logic for it yet, so it cannot be exported/python_printed
   // 3. There is nothing preventing the assignment of already existing variables inside the closures
   //    the changes to those variables will just get forgotten.
-  // 4. There is parsing support in frontend.py, this is intentional since it
+  // 4. There is no parsing support in frontend.py, this is intentional since it
   //    prevents people from accidentally using this feature.
   void emitClosure(const Def& def) {
     Node* closure_node = graph->insertNode(graph->create(prim::Function, 1));
