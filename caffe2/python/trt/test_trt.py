@@ -136,23 +136,24 @@ class TensorRTOpTest(TestCase):
             Y_trt = namedtupledict('Outputs', op_outputs)(*output_values)
         np.testing.assert_allclose(Y_c2, Y_trt, rtol=1e-3)
 
-    @unittest.skip("Until fixing Reshape op")
+    @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_resnet50(self):
-        self._test_onnx_importer('resnet50', 0)
+        self._test_onnx_importer('resnet50', 0, 9)
 
     @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_bvlc_alexnet(self):
-        self._test_onnx_importer('bvlc_alexnet', 0)
+        self._test_onnx_importer('bvlc_alexnet', 0, 9)
 
     @unittest.skip("Until fixing Unsqueeze op")
     def test_densenet121(self):
         self._test_onnx_importer('densenet121', -1, 3)
 
-    @unittest.skip("Until fixing Reshape op")
+    @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_inception_v1(self):
+        # higher opsets bring double precision inputs, thus set to 3
         self._test_onnx_importer('inception_v1', -1, 3)
 
-    @unittest.skip("Until fixing Reshape op")
+    @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_inception_v2(self):
         self._test_onnx_importer('inception_v2', 0, 3)
 
@@ -162,14 +163,15 @@ class TensorRTOpTest(TestCase):
 
     @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_squeezenet(self):
-        self._test_onnx_importer('squeezenet', -1)
+        self._test_onnx_importer('squeezenet', -1, 9)
 
     @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_vgg16(self):
-        self._test_onnx_importer('vgg16', 0)
+        self._test_onnx_importer('vgg16', 0, 9)
 
-    @unittest.skip("Until fixing Reshape op")
+    @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_vgg19(self):
+        # higher opsets bring double precision inputs, thus set to 3
         self._test_onnx_importer('vgg19', -1, 3)
 
 

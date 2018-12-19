@@ -20,7 +20,7 @@ class ReshapeOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     if (InputSize() == 2) {
-      return DispatchHelper<TensorTypes<int, int64_t>>::call(this, Input(1));
+      return DispatchHelper<TensorTypes<int, int64_t, float, double>>::call(this, Input(1));
     }
     CAFFE_ENFORCE(
         OperatorBase::HasArgument("shape"), "Argument `shape` is missing.");
@@ -46,14 +46,19 @@ class ReshapeOp : public Operator<Context> {
       auto& shape = Input(1);
       CAFFE_ENFORCE(shape.dim() == 1, "Shape should be 1-D");
 
-      const T* shape_data = shape.template data<T>();
-
-      // Bit awkward, but needed so works on both CPU and CUDA contexts
-      std::vector<T> tmpv(shape.numel());
-      if (shape.numel() > 0) {
-        context_.CopyBytesToCPU(
-            shape.numel() * sizeof(T), shape_data, &tmpv[0]);
-        actual_new_shape.assign(tmpv.begin(), tmpv.begin() + shape.numel());
+      if (shape.dtype() == TypeMeta::Make<int64_t>()) {
+        const T* shape_data = shape.template data<T>();
+        // Bit awkward, but needed so works on both CPU and CUDA contexts
+        std::vector<T> tmpv(shape.numel());
+        if (shape.numel() > 0) {
+          context_.CopyBytesToCPU(shape.numel() * sizeof(T), shape_data, &tmpv[0]);
+          actual_new_shape.assign(tmpv.begin(), tmpv.begin() + shape.numel());
+        }
+      } else {  // opset>=5 may bring any data type (usually float)
+        actual_new_shape.resize(input.dim());
+        for (int i = 0; i < actual_new_shape.size(); ++i) {
+          actual_new_shape[i] = input.size(i);
+        }
       }
     }
 
@@ -93,7 +98,7 @@ class ReshapeOp : public Operator<Context> {
           unknown_idx,
           " can not be inferred since new size is zero.");
       CAFFE_ENFORCE(
-          total_size % size == 0,
+          std::lround(total_size) % std::lround(size) == 0,
           "Argument `shape` does not agree with the input data.",
           " (",
           total_size,
