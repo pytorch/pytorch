@@ -6880,6 +6880,7 @@ class _TestTorchMixin(object):
 
             # transpose, t
             self.assertEqual((0, 0, 3, 1), torch.transpose(x, 1, 3).shape)
+            self.assertEqual((0, 0, 3, 1), torch.t(x, 1, 3).shape)
             y = torch.randn((5, 0), device=device)
             self.assertEqual((0, 5), y.t().shape)
 
