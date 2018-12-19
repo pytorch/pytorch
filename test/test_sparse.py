@@ -1007,6 +1007,76 @@ class TestSparse(TestCase):
             S = self._gen_sparse(sparse_dims, nnz, with_size)[0]
             run_tests(S.requires_grad_(True), test_dim)
 
+    def test_sparse_mul_div(self):
+        def test_shape(sparse_op, dense_op, sparse_dim, nnz, sizes1, sizes2):
+            S1 = self._gen_sparse(sparse_dim, nnz, sizes1)[0]
+            S2 = self._gen_sparse(sparse_dim, nnz, sizes2)[0]
+
+            D1 = S1.to_dense()
+            D2 = S2.to_dense()
+
+            S_out = sparse_op(S1, S2)
+            S_out_dense = S_out.to_dense()
+            mask = (S_out_dense == 0)
+
+            D_out = dense_op(D1, D2)
+            # div() in dense tensor will have inf / nan at masked locations of SparseTensor counterpart
+            D_out.masked_fill_(mask, 0)
+
+            self.assertEqual(S_out.to_dense(), D_out)
+
+            def f(S1, S2):
+                return sparse_op(S1, S2).to_dense()
+            gradcheck(f, (S1.requires_grad_(True), S1.requires_grad_(True)), check_sparse_nnz=True)
+
+        test_shape(torch.sparse.mul, torch.mul, 2, 5, [3, 4, 5], [3, 1, 5])
+        test_shape(torch.sparse.mul, torch.mul, 2, 5, [3, 4, 5], [1, 1, 5])
+        test_shape(torch.sparse.mul, torch.mul, 3, 5, [3, 4, 5], [3, 1, 1])
+        test_shape(torch.sparse.div, torch.div, 2, 5, [3, 4, 5], [3, 1, 5])
+        test_shape(torch.sparse.div, torch.div, 2, 5, [3, 4, 5], [1, 1, 5])
+        test_shape(torch.sparse.div, torch.div, 3, 5, [3, 4, 5], [3, 1, 1])
+
+        # raise at dense size mismatch
+        S1 = self._gen_sparse(2, 5, [3, 4, 5])[0]
+        S2 = self._gen_sparse(2, 5, [3, 1, 1])[0]
+        self.assertRaises(RuntimeError, lambda: torch.sparse.mul(S1, S2))
+        self.assertRaises(RuntimeError, lambda: torch.sparse.div(S1, S2))
+
+        def test_empty_input(sparse_op, dense_op, S1, S2, D1, D2, err_msg=None):
+            if err_msg is not None:
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        err_msg):
+                    sparse_op(S1, S2)
+            else:
+                S_out = sparse_op(S1, S2)
+                S_out_dense = S_out.to_dense()
+                mask = (S_out_dense == 0)
+
+                D_out = dense_op(D1, D2)
+                D_out.masked_fill_(mask, 0)
+
+                self.assertEqual(S_out_dense, D_out)
+
+        S1 = self._gen_sparse(2, 5, [3, 4, 5])[0]
+        S2 = self._gen_sparse(2, 5, [3, 1, 5])[0]
+        empty_S1 = torch.sparse_coo_tensor(size=[3, 4, 5], device=self.device)
+        empty_S2 = torch.sparse_coo_tensor(size=[3, 1, 5], device=self.device)
+
+        D1 = S1.to_dense()
+        D2 = S2.to_dense()
+        empty_D1 = empty_S1.to_dense()
+        empty_D2 = empty_S2.to_dense()
+
+        test_empty_input(torch.sparse.mul, torch.mul, S1, empty_S2, D1, empty_D2)
+        test_empty_input(torch.sparse.mul, torch.mul, empty_S1, S2, empty_D1, D2)
+        test_empty_input(torch.sparse.mul, torch.mul, empty_S1, empty_S2, empty_D1, empty_D2)
+        test_empty_input(torch.sparse.div, torch.div, S1, empty_S2, D1, empty_D2,
+                         "sparse_div expected src to have nnz > 0")
+        test_empty_input(torch.sparse.div, torch.div, empty_S1, S2, empty_D1, D2)
+        test_empty_input(torch.sparse.div, torch.div, empty_S1, empty_S2, empty_D1, empty_D2,
+                         "sparse_div expected src to have nnz > 0")
+
     def _test_basic_ops_shape(self, nnz_x1, nnz_x2, shape_i, shape_v=None):
         shape = shape_i + (shape_v or [])
         x1, _, _ = self._gen_sparse(len(shape_i), nnz_x1, shape)

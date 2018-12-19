@@ -16,6 +16,7 @@
 #include <thrust/sequence.h>
 #include <thrust/binary_search.h>
 #include <thrust/sort.h>
+#include <thrust/scan.h>
 #include <thrust/system/cuda/execution_policy.h>
 
 #include <bitset>
@@ -402,7 +403,10 @@ SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const
 }
 
 // --------------------------------------------------------------------
-// mul(SparseTensor, SparseTensor)  [broadcasts]
+// NOTE [mul(SparseTensor, SparseTensor)  [broadcasts]]
+//
+// mul(S1, S2): S1 and S2 must have the same sizes if t_.dim() != 0
+// and src_.dim() != 0
 // --------------------------------------------------------------------
 
 SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, const SparseTensor& src_) {
@@ -474,6 +478,554 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
 
   return r_._coalesced_(true);
 }
+
+// --------------------------------------------------------------------
+// sparse_mul(SparseTensor, SparseTensor)  [broadcasts]
+// sparse_div(SparseTensor, SparseTensor)  [broadcasts]
+//
+// mul and div between two SparseTensors S1 and S2 needs matching between
+// S1.indices and S2.indices. The CUDA kernel is parallelized in the following
+// approach:
+// - flatten indices to 1D: S1.indices -> S1_indices_1D, S2.indices -> S2_indices_2D,
+//   here only flatten using sparse_dim that has the same size between the two
+//   indices. In this way S2_indices_2D is sorted.
+// - BinarySearch for insert locations of S1_indices_1D at S2_indices_2D in parallel
+// - compute flag of matching locations between S1_indices_1D and S2_indices_2D
+//   using BinarySearch results in parallel
+// - prefix-sum scan on matching flags in parallel
+// - compute and scatter values at matching locations to results
+//
+// Support broadcast, when S1 and S2 satisfies followings given any sparse_dim d:
+// - S1.size(d) == S2.size(d) or
+// - S1.size(d) > S2.size(d) and S2.size(d) == 1
+// --------------------------------------------------------------------
+template <typename scalar_t>
+__device__ __forceinline__ void sparse_mul_op(scalar_t r, scalar_t a, scalar_t b) {
+  r = a * b;
+}
+
+template <typename scalar_t>
+__device__ __forceinline__ void sparse_div_op(scalar_t r, scalar_t a, scalar_t b) {
+  r = a / b;
+}
+
+template <typename scalar_t>
+__global__ void check_has_match_kernel_cuda(
+  int64_t t_nnz,
+  const TensorInfo<int64_t, int64_t> src_indices_1D_ti,
+  const TensorInfo<int64_t, int64_t> t_indices_1D_ti,
+  const TensorInfo<int64_t, int64_t> t_indices_pos_ti,
+  TensorInfo<int64_t, int64_t> has_match_ti
+) {
+  const int64_t i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= t_nnz) return;
+
+  const int64_t j = t_indices_pos_ti.data[i];
+
+  if (src_indices_1D_ti.data[j] == t_indices_1D_ti.data[i]) {
+    has_match_ti.data[i] = 1;
+  }
+  else {
+    has_match_ti.data[i] = 0;
+  }
+}
+
+template <typename scalar_t, typename func_t>
+__global__ void _sparse_mul_div_common_kernel_cuda(
+  int64_t t_nnz,
+  const TensorInfo<int64_t, int64_t> t_indices_ti,
+  const TensorInfo<int64_t, int64_t> t_indices_pos_ti,
+  const TensorInfo<int64_t, int64_t> has_match_ti,
+  const TensorInfo<scalar_t, int64_t> src_values_ti,
+  const TensorInfo<scalar_t, int64_t> t_values_ti,
+  TensorInfo<scalar_t, int64_t> new_values_ti,
+  TensorInfo<int64_t, int64_t> new_indices_ti,
+  const func_t& op
+) {
+  const int64_t i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= t_nnz) return;
+
+  const int64_t j = t_indices_pos_ti.data[i];
+
+  bool to_copy = false;
+  if ((i == 0 && has_match_ti.data[i] > 0) || has_match_ti.data[i - 1] != has_match_ti.data[i]) {
+    to_copy = true;
+  }
+  if (!to_copy) return;
+
+  // a matching locations is found, perform operation and copy indices to results
+  int64_t t_values_stride0 = t_values_ti.strides[0];
+  int64_t t_start = i * t_values_stride0;
+  int64_t t_end = (i + 1) * t_values_stride0;
+  int64_t out_start = (has_match_ti.data[i] - 1) * t_values_stride0;  // shift left by one because of inclusive-scan
+  int64_t src_start = j * src_values_ti.strides[0];
+
+  // perform operations
+  for (int64_t t_i = t_start, src_i = src_start, out_i = out_start; t_i < t_end; t_i++, src_i++, out_i++) {
+    op(new_values_ti.data[out_i], t_values_ti.data[t_i], src_values_ti.data[src_i]);
+  }
+
+  // copy indices
+  int64_t new_indices_stride0 = new_indices_ti.strides[0];
+  int64_t sparse_dim = t_indices_ti.sizes[0];
+  int64_t t_indices_stride0 = t_indices_ti.strides[0];
+
+  for (int64_t ii = 0; ii < sparse_dim; ii++) {
+    new_indices_ti.data[ii * new_indices_stride0 + has_match_ti.data[i] - 1] = t_indices_ti.data[ii * t_indices_stride0 + i];
+  }
+}
+
+SparseTensor _sparse_mul_div_common_cuda(const SparseTensor& t_, const SparseTensor& src_, SparseBinaryOpType op_type) {
+  AT_ASSERT(t_.is_sparse());
+  AT_ASSERT(src_.is_sparse());
+  AT_CHECK(t_.is_cuda(), "expected 't' to be CUDA, but got CPU");
+  AT_CHECK(src_.is_cuda(), "expected 'src' to be CUDA, but got CPU");
+  // TODO: handle type promotion
+  AT_CHECK(t_.type() == src_.type(), "input SparseTensor 't' and 'src' must share the same type, but got t.type = ", t_.type(), " and src.type = ", src_.type());
+
+  if (op_type == SparseBinaryOpType::MUL) {
+    if (t_._nnz() == 0 ) return t_;
+    if (src_._nnz() == 0) return at::empty_like(t_);;
+  }
+  if (op_type == SparseBinaryOpType::DIV) {
+    if (src_._nnz() == 0) AT_ERROR("sparse_div expected src to have nnz > 0");
+    if (t_._nnz() == 0 ) return t_;
+  }
+
+  SparseTensor t = t_.coalesce();
+  SparseTensor src = src_.coalesce();
+
+  IntList t_sizes = t.sizes();
+  IntList src_sizes = src.sizes();
+  int64_t t_sparse_dim = t.sparse_dim();
+  int64_t src_sparse_dim = src.sparse_dim();
+  auto t_sizes_v = t_sizes.vec();
+  auto src_sizes_v = src_sizes.vec();
+  AT_CHECK(t_sizes_v.size() == src_sizes_v.size(), "expected num of dims to be the same between t and src.");
+  AT_CHECK(t_sparse_dim == t_sparse_dim, "expected num of sparse dims to be the same between t and src.");
+
+  auto dims_to_flatten = std::vector<int64_t>();
+
+  // check all dense dims have same size between t and src
+  for (int64_t i = t_sizes_v.size()-1; i >= t_sparse_dim; i--) {
+    if (t_sizes_v[i] != src_sizes_v[i]) {
+      AT_ERROR("expected dense dims to have same size between t and src SparseTensors");
+    }
+  }
+
+  // check if sparse dims are broadcastable
+  for (int64_t i = t_sparse_dim-1; i >= 0; i--) {
+    if (t_sizes_v[i] == src_sizes_v[i]) {
+      dims_to_flatten.emplace(dims_to_flatten.begin(), i);
+    }
+    else if (t_sizes_v[i] > src_sizes_v[i]) {
+      AT_CHECK(src_sizes_v[i] == 1, "expected src size at dim ", i, " equals to 1.");
+    }
+    else {
+      AT_ERROR("expected src size <= t size among all dims.");
+    }
+  }
+
+  LongTensor t_indices = t._indices();
+  LongTensor src_indices = src._indices();
+  Tensor t_values = t._values();
+  Tensor src_values = src._values();
+  int64_t t_nnz = t._nnz();
+  int64_t src_nnz = src._nnz();
+  Tensor r_values = t_values.clone();
+
+  int curDevice = -1;
+  cudaGetDevice(&curDevice);
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
+  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  auto policy = thrust::cuda::par(allocator).on(stream);
+  typedef thrust::device_ptr<int64_t> thrust_ptr;
+
+  LongTensor t_indices_1D = flatten_indices_by_dims(t_indices, t_sizes, dims_to_flatten);
+  LongTensor src_indices_1D = flatten_indices_by_dims(src_indices, src_sizes, dims_to_flatten);  // already sorted since only dims with size = 1 are not flattened
+
+  thrust_ptr t_indices_iter(t_indices_1D.data<int64_t>());
+  thrust_ptr src_indices_iter(src_indices_1D.data<int64_t>());
+
+  // store lower_bound of input indices at grad indices
+  LongTensor t_indices_pos = at::empty_like(t_indices_1D);
+  thrust_ptr t_indices_pos_iter(t_indices_pos.data<int64_t>());
+  thrust::lower_bound(policy,
+                      src_indices_iter, src_indices_iter + src_nnz,
+                      t_indices_iter, t_indices_iter + t_nnz,
+                      t_indices_pos_iter);
+
+  // config to run cuda kernel
+  int64_t total_threads = t_nnz;
+  const dim3 block = dim3(std::min(static_cast<int64_t>(cuda::getApplyBlock().x), total_threads));
+  dim3 grid;
+  AT_CHECK(cuda::getApplyGrid(total_threads, grid, curDevice), "input too large or too many dimensions");
+
+  LongTensor has_match = at::empty({t_nnz}, t_indices.options());
+  auto has_match_ti = getTensorInfo<int64_t, int64_t>(has_match);
+  auto src_indices_1D_ti = getTensorInfo<int64_t, int64_t>(src_indices_1D);
+  auto t_indices_1D_ti = getTensorInfo<int64_t, int64_t>(t_indices_1D);
+  auto t_indices_ti = getTensorInfo<int64_t, int64_t>(t_indices);
+  auto t_indices_pos_ti = getTensorInfo<int64_t, int64_t>(t_indices_pos);
+
+  // NOTE: flag has_match[i] = 1 if t_indices[i] has a match at src_indices[i],
+  // otherwise flag with has_match[i] = 0. has_match will then be used to
+  // compute prefix-sum as the write_to locations for result indices and values.
+  AT_DISPATCH_ALL_TYPES_AND_HALF(t_values.type(), "_sparse_mul_div_common_cuda", [&] {
+    auto src_values_ti = getTensorInfo<scalar_t, int64_t>(src_values);
+    auto t_values_ti = getTensorInfo<scalar_t, int64_t>(t_values);
+
+    check_has_match_kernel_cuda<scalar_t><<<grid, block, 0, stream>>>(
+      t_nnz,
+      src_indices_1D_ti,
+      t_indices_1D_ti,
+      t_indices_pos_ti,
+      has_match_ti
+    );
+  });
+
+  // inclusive_scan to compute prefix-sum
+  thrust_ptr has_match_iter(has_match.data<int64_t>());
+  thrust::inclusive_scan(policy, has_match_iter, has_match_iter + t_nnz, has_match_iter);
+
+  // how to avoid this new copy
+  LongTensor has_match_cpu = has_match.toType(CPU(kLong));
+  auto has_match_cpu_ptr = has_match_cpu.data<int64_t>();
+  int64_t new_nnz = has_match_cpu_ptr[t_nnz - 1];
+
+  auto new_values_sizes = t_values.sizes().vec();
+  new_values_sizes[0] = new_nnz;
+  Tensor new_values = at::empty(new_values_sizes, t_values.options());
+  LongTensor new_indices = at::empty({t_sparse_dim, new_nnz}, t_indices.options());
+
+  // compute mul() and write results to new_indices and new_values according to
+  // prefix-sum at has_match
+  AT_DISPATCH_ALL_TYPES_AND_HALF(t_values.type(), "_sparse_mul_div_common_cuda", [&] {
+    auto src_values_ti = getTensorInfo<scalar_t, int64_t>(src_values);
+    auto t_values_ti = getTensorInfo<scalar_t, int64_t>(t_values);
+    auto new_values_ti = getTensorInfo<scalar_t, int64_t>(new_values);
+    auto new_indices_ti = getTensorInfo<int64_t, int64_t>(new_indices);
+
+    if (op_type == SparseBinaryOpType::MUL) {
+      _sparse_mul_div_common_kernel_cuda<scalar_t><<<grid, block, 0, stream>>>(
+        t_nnz,
+        t_indices_ti,
+        t_indices_pos_ti,
+        has_match_ti,
+        src_values_ti,
+        t_values_ti,
+        new_values_ti,
+        new_indices_ti,
+        sparse_mul_op<scalar_t>
+      );
+    }
+    else if (op_type == SparseBinaryOpType::DIV) {
+      _sparse_mul_div_common_kernel_cuda<scalar_t><<<grid, block, 0, stream>>>(
+        t_nnz,
+        t_indices_ti,
+        t_indices_pos_ti,
+        has_match_ti,
+        src_values_ti,
+        t_values_ti,
+        new_values_ti,
+        new_indices_ti,
+        sparse_div_op<scalar_t>
+      );
+    }
+    else {
+      AT_ERROR("expected op_type to be MUL or DIV, but found unknown type");
+    }
+  });
+
+  SparseTensor r = at::_sparse_coo_tensor_with_dims_and_tensors(
+    t_sparse_dim, t.dense_dim(), t_sizes, new_indices, new_values, t.options());
+  r._coalesced_(true);
+  return r;
+}
+
+SparseTensor _sparse_mul_cuda(const SparseTensor& t_, const SparseTensor& src_) {
+  return _sparse_mul_div_common_cuda(t_, src_, SparseBinaryOpType::MUL);
+}
+
+SparseTensor _sparse_div_cuda(const SparseTensor& t_, const SparseTensor& src_) {
+  return _sparse_mul_div_common_cuda(t_, src_, SparseBinaryOpType::DIV);
+}
+
+// --------------------------------------------------------------------
+// sparse mul and div backward
+// --------------------------------------------------------------------
+template <typename scalar_t>
+__global__ void _sparse_mul_backward_kernel_cuda(
+  const int64_t* t_indices_1D_all_dims_ptr,
+  const int64_t* grad_indices_1D_all_dims_ptr,
+  const int64_t* t_indices_1D_overlapped_dims_ptr,
+  const int64_t* src_indices_1D_overlapped_dims_ptr,
+  const int64_t* t_indices_1D_all_dims_at_grad_pos_ptr,
+  const int64_t* t_indices_1D_overlapped_dims_at_src_pos_ptr,
+  const TensorInfo<scalar_t, int64_t> t_values_ti,
+  const scalar_t* grad_values_ptr,
+  const scalar_t* src_values_ptr,
+  scalar_t* grad_t_values_ptr,
+  scalar_t* grad_src_values_in_ptr
+) {
+  const int64_t t_nnz = t_values_ti.sizes[0];
+  const int64_t i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= t_nnz) return;
+
+  const int64_t grad_idx = t_indices_1D_all_dims_at_grad_pos_ptr[i];
+  const int64_t src_idx = t_indices_1D_overlapped_dims_at_src_pos_ptr[i];
+
+  // when a matching location is found, compute grad for SparseTensor inputs
+  if (t_indices_1D_all_dims_ptr[i] == grad_indices_1D_all_dims_ptr[grad_idx] &&
+      t_indices_1D_overlapped_dims_ptr[i] == src_indices_1D_overlapped_dims_ptr[src_idx]) {
+
+    int64_t t_values_stride = t_values_ti.strides[0];
+
+    int64_t t_start = i * t_values_stride;
+    int64_t t_end = (i + 1) * t_values_stride;
+
+    int64_t grad_start = grad_idx * t_values_stride;
+    int64_t src_start = src_idx * t_values_stride;
+
+    for (int64_t t_i = t_start, grad_i = grad_start, src_i = src_start; t_i < t_end; t_i++, grad_i++, src_i++) {
+      grad_t_values_ptr[t_i] = src_values_ptr[src_i] * grad_values_ptr[grad_i];
+
+      // grad_src_values_in is used to collect grad values for grad-of-src,
+      // this is not coalesced yet after this kernel call, thus a call to
+      // coalesce() is needed before return from backward function
+      grad_src_values_in_ptr[t_i] = t_values_ti.data[t_i] * grad_values_ptr[grad_i];
+    }
+  }
+}
+
+template <typename scalar_t>
+__global__ void _sparse_div_backward_kernel_cuda(
+  const int64_t* t_indices_1D_all_dims_ptr,
+  const int64_t* grad_indices_1D_all_dims_ptr,
+  const int64_t* t_indices_1D_overlapped_dims_ptr,
+  const int64_t* src_indices_1D_overlapped_dims_ptr,
+  const int64_t* t_indices_1D_all_dims_at_grad_pos_ptr,
+  const int64_t* t_indices_1D_overlapped_dims_at_src_pos_ptr,
+  const TensorInfo<scalar_t, int64_t> t_values_ti,
+  const scalar_t* grad_values_ptr,
+  const scalar_t* src_values_ptr,
+  scalar_t* grad_t_values_ptr,
+  scalar_t* grad_src_values_in_ptr
+) {
+  const int64_t t_nnz = t_values_ti.sizes[0];
+  const int64_t i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= t_nnz) return;
+
+  const int64_t grad_idx = t_indices_1D_all_dims_at_grad_pos_ptr[i];
+  const int64_t src_idx = t_indices_1D_overlapped_dims_at_src_pos_ptr[i];
+
+  // when a matching location is found, compute grad for SparseTensor inputs
+  if (t_indices_1D_all_dims_ptr[i] == grad_indices_1D_all_dims_ptr[grad_idx] &&
+      t_indices_1D_overlapped_dims_ptr[i] == src_indices_1D_overlapped_dims_ptr[src_idx]) {
+
+    int64_t t_values_stride = t_values_ti.strides[0];
+
+    int64_t t_start = i * t_values_stride;
+    int64_t t_end = (i + 1) * t_values_stride;
+
+    int64_t grad_start = grad_idx * t_values_stride;
+    int64_t src_start = src_idx * t_values_stride;
+
+    for (int64_t t_i = t_start, grad_i = grad_start, src_i = src_start; t_i < t_end; t_i++, grad_i++, src_i++) {
+      scalar_t src_value = src_values_ptr[src_i];
+      scalar_t src_value_square = src_value * src_value;
+
+      grad_t_values_ptr[t_i] = grad_values_ptr[grad_i] / src_value;
+
+      // grad_src_values_in is used to collect grad values for grad-of-src,
+      // this is not coalesced yet after this kernel call, thus a call to
+      // coalesce() is needed before return from backward function
+      grad_src_values_in_ptr[t_i] = - grad_values_ptr[grad_i] * t_values_ti.data[t_i] / src_value_square;
+    }
+  }
+}
+
+
+std::tuple<SparseTensor, SparseTensor> _sparse_mul_div_backward_common_cuda(const SparseTensor& grad, const SparseTensor& t_, const SparseTensor& src_, SparseBinaryOpType op_type) {
+  AT_ASSERT(grad.is_sparse());
+  AT_ASSERT(t_.is_sparse());
+  AT_ASSERT(src_.is_sparse());
+  AT_CHECK(t_.is_cuda(), "expected 't' to be CUDA, but got CPU");
+  AT_CHECK(src_.is_cuda(), "expected 'src' to be CUDA, but got CPU");
+  AT_CHECK(grad.is_cuda(), "expected 'grad' to be a CUDA tensor, but got a CPU tensor");
+  AT_ASSERT(grad.is_coalesced());
+
+  if (op_type == SparseBinaryOpType::MUL) {
+    if (t_._nnz() == 0 ) return std::tuple<SparseTensor, SparseTensor>(t_, at::empty_like(src_));
+    if (src_._nnz() == 0) return std::tuple<SparseTensor, SparseTensor>(at::empty_like(t_), src_);
+  }
+  if (op_type == SparseBinaryOpType::DIV) {
+    if (src_._nnz() == 0) AT_ERROR("sparse_div expected src to have nnz > 0");
+    if (t_._nnz() == 0 ) return std::tuple<SparseTensor, SparseTensor>(t_, at::empty_like(src_));
+  }
+
+  SparseTensor t = t_.coalesce();
+  SparseTensor src = src_.coalesce();
+
+  IntList t_sizes = t.sizes();
+  IntList grad_sizes = grad.sizes();
+  IntList src_sizes = src.sizes();
+
+  auto t_sizes_v = t_sizes.vec();
+  auto grad_sizes_v = grad_sizes.vec();
+  auto src_sizes_v = src_sizes.vec();
+
+  int64_t t_sparse_dim = t.sparse_dim();
+  int64_t grad_sparse_dim = grad.sparse_dim();
+  int64_t src_sparse_dim = src.sparse_dim();
+
+  AT_CHECK(t_sizes_v.size() == src_sizes_v.size() && t_sizes_v.size() == grad_sizes_v.size() , "expected num of dims to be the same among t, src, grad");
+  AT_CHECK(t_sparse_dim == t_sparse_dim && t_sparse_dim == grad_sparse_dim, "expected num of sparse dims to be the same among t, src and grad.");
+
+  auto dims_to_flatten = std::vector<int64_t>();
+  auto size_one_dim = std::vector<int64_t>();
+  for (int64_t i = t_sparse_dim - 1; i >= 0; i--) {
+    if (t_sizes_v[i] == src_sizes_v[i]) {
+      dims_to_flatten.emplace(dims_to_flatten.begin(), i);
+    }
+    else {
+      size_one_dim.emplace_back(i);
+    }
+  }
+
+  auto all_dims_to_flatten = std::vector<int64_t>(t_sparse_dim);
+  std::iota(all_dims_to_flatten.begin(), all_dims_to_flatten.end(), 0);
+
+  int64_t t_nnz = t._nnz();
+  int64_t grad_nnz = grad._nnz();
+  int64_t src_nnz = src._nnz();
+
+  LongTensor t_indices = t._indices();
+  LongTensor grad_indices = grad._indices();
+  LongTensor src_indices = src._indices();
+
+  Tensor t_values = t._values().contiguous();
+  Tensor grad_values = grad._values().contiguous();
+  Tensor src_values = src._values().contiguous();
+
+  Tensor grad_t_values = at::zeros_like(t_values);
+  Tensor grad_src_values_in = at::zeros_like(t_values);
+
+  Tensor grad_src_indices_in = t_indices.clone();
+  for (int64_t i = 0; i < size_one_dim.size(); i++) {
+    int64_t d_i = size_one_dim[i];
+    grad_src_indices_in[d_i].fill_(0);
+  }
+
+  int curDevice = -1;
+  cudaGetDevice(&curDevice);
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
+  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  auto policy = thrust::cuda::par(allocator).on(stream);
+  typedef thrust::device_ptr<int64_t> thrust_ptr;
+
+  LongTensor t_indices_1D_all_dims = flatten_indices_by_dims(t_indices, t_sizes, all_dims_to_flatten);
+  LongTensor t_indices_1D_overlapped_dims = flatten_indices_by_dims(t_indices, t_sizes, dims_to_flatten);
+  LongTensor grad_indices_1D_all_dims = flatten_indices_by_dims(grad_indices, grad_sizes, all_dims_to_flatten);
+  LongTensor grad_indices_1D_overlapped_dims = flatten_indices_by_dims(grad_indices, grad_sizes, dims_to_flatten);
+  LongTensor src_indices_1D_overlapped_dims = flatten_indices_by_dims(src_indices, src_sizes, dims_to_flatten);  // already sorted since only dims with size = 1 are not flattened
+
+  thrust_ptr t_indices_1D_all_dims_iter(t_indices_1D_all_dims.data<int64_t>());
+  thrust_ptr t_indices_1D_overlapped_dims_iter(t_indices_1D_overlapped_dims.data<int64_t>());
+  thrust_ptr grad_indices_1D_all_dims_iter(grad_indices_1D_all_dims.data<int64_t>());
+  thrust_ptr grad_indices_1D_overlapped_dims_iter(grad_indices_1D_overlapped_dims.data<int64_t>());
+  thrust_ptr src_indices_1D_overlapped_dims_iter(src_indices_1D_overlapped_dims.data<int64_t>());
+
+  // store lower_bound of input indices at grad indices
+  LongTensor t_indices_1D_all_dims_at_grad_pos = at::empty_like(t_indices_1D_all_dims);
+  thrust_ptr t_indices_1D_all_dims_at_grad_pos_iter(t_indices_1D_all_dims_at_grad_pos.data<int64_t>());
+  thrust::lower_bound(policy,
+                      grad_indices_1D_all_dims_iter, grad_indices_1D_all_dims_iter + grad_nnz,
+                      t_indices_1D_all_dims_iter, t_indices_1D_all_dims_iter + t_nnz,
+                      t_indices_1D_all_dims_at_grad_pos_iter);
+
+  // store lower_bound of input indices at src indices among overlapped sparse_dim
+  LongTensor t_indices_1D_overlapped_dims_at_src_pos = at::empty_like(t_indices_1D_overlapped_dims);
+  thrust_ptr t_indices_1D_overlapped_dims_at_src_pos_iter(t_indices_1D_overlapped_dims_at_src_pos.data<int64_t>());
+  thrust::lower_bound(policy,
+                      src_indices_1D_overlapped_dims_iter, src_indices_1D_overlapped_dims_iter + src_nnz,
+                      t_indices_1D_overlapped_dims_iter, t_indices_1D_overlapped_dims_iter + t_nnz,
+                      t_indices_1D_overlapped_dims_at_src_pos_iter);
+
+  // config to run cuda kernel
+  int64_t total_threads = t_nnz;
+  const dim3 block = dim3(std::min(static_cast<int64_t>(cuda::getApplyBlock().x), total_threads));
+  dim3 grid;
+  AT_CHECK(cuda::getApplyGrid(total_threads, grid, curDevice), "input too large or too many dimensions");
+
+  auto t_indices_1D_overlapped_dims_ptr = t_indices_1D_overlapped_dims.data<int64_t>();
+  auto src_indices_1D_overlapped_dims_ptr = src_indices_1D_overlapped_dims.data<int64_t>();
+  auto t_indices_1D_all_dims_at_grad_pos_ptr = t_indices_1D_all_dims_at_grad_pos.data<int64_t>();
+  auto t_indices_1D_overlapped_dims_at_src_pos_ptr = t_indices_1D_overlapped_dims_at_src_pos.data<int64_t>();
+  auto t_indices_1D_all_dims_ptr = t_indices_1D_all_dims.data<int64_t>();
+  auto grad_indices_1D_all_dims_ptr = grad_indices_1D_all_dims.data<int64_t>();
+
+  AT_DISPATCH_ALL_TYPES_AND_HALF(t_values.type(), "_sparse_mul_div_backward_common_cuda", [&] {
+    auto t_values_ti = getTensorInfo<scalar_t, int64_t>(t_values);
+    auto grad_values_ptr = grad_values.data<scalar_t>();
+    auto src_values_ptr = src_values.data<scalar_t>();
+    auto grad_t_values_ptr = grad_t_values.data<scalar_t>();
+    auto grad_src_values_in_ptr = grad_src_values_in.data<scalar_t>();
+
+    if (op_type == SparseBinaryOpType::MUL) {
+      _sparse_mul_backward_kernel_cuda<scalar_t><<<grid, block, 0, stream>>>(
+        t_indices_1D_all_dims_ptr,
+        grad_indices_1D_all_dims_ptr,
+        t_indices_1D_overlapped_dims_ptr,
+        src_indices_1D_overlapped_dims_ptr,
+        t_indices_1D_all_dims_at_grad_pos_ptr,
+        t_indices_1D_overlapped_dims_at_src_pos_ptr,
+        t_values_ti,
+        grad_values_ptr,
+        src_values_ptr,
+        grad_t_values_ptr,
+        grad_src_values_in_ptr
+      );
+    }
+    else if (op_type == SparseBinaryOpType::DIV) {
+      _sparse_div_backward_kernel_cuda<scalar_t><<<grid, block, 0, stream>>>(
+        t_indices_1D_all_dims_ptr,
+        grad_indices_1D_all_dims_ptr,
+        t_indices_1D_overlapped_dims_ptr,
+        src_indices_1D_overlapped_dims_ptr,
+        t_indices_1D_all_dims_at_grad_pos_ptr,
+        t_indices_1D_overlapped_dims_at_src_pos_ptr,
+        t_values_ti,
+        grad_values_ptr,
+        src_values_ptr,
+        grad_t_values_ptr,
+        grad_src_values_in_ptr
+      );
+    }
+    else {
+      AT_ERROR("expected op_type to be MUL or DIV, but found unknown type");
+    }
+  });
+
+  SparseTensor grad_t = at::_sparse_coo_tensor_with_dims_and_tensors(
+    t_sparse_dim, t.dense_dim(), t_sizes, t._indices().clone(), grad_t_values, t.options());
+  grad_t._coalesced_(true);
+
+  SparseTensor grad_src = at::_sparse_coo_tensor_with_dims_and_tensors(
+    src_sparse_dim, src.dense_dim(), src_sizes, grad_src_indices_in, grad_src_values_in, src.options());
+  grad_src = grad_src.coalesce();
+
+  return std::tuple<SparseTensor, SparseTensor>(grad_t, grad_src);
+}
+
+std::tuple<SparseTensor, SparseTensor> _sparse_mul_backward_cuda(const SparseTensor& grad, const SparseTensor& t_, const SparseTensor& src_) {
+  return _sparse_mul_div_backward_common_cuda(grad, t_, src_, SparseBinaryOpType::MUL);
+}
+
+std::tuple<SparseTensor, SparseTensor> _sparse_div_backward_cuda(const SparseTensor& grad, const SparseTensor& t_, const SparseTensor& src_) {
+  return _sparse_mul_div_backward_common_cuda(grad, t_, src_, SparseBinaryOpType::DIV);
+}
+
 
 // --------------------------------------------------------------------
 // sparse.sum() backward

@@ -1540,6 +1540,26 @@
     SparseCPU: mul_out_sparse_cpu
     SparseCUDA: mul_out_sparse_cuda
 
+- func: _sparse_mul(Tensor self, Tensor other) -> Tensor
+  dispatch:
+    SparseCPU: _sparse_mul_cpu
+    SparseCUDA: _sparse_mul_cuda
+
+- func: _sparse_mul_backward(Tensor grad, Tensor self, Tensor other) -> (Tensor, Tensor)
+  dispatch:
+    SparseCPU: _sparse_mul_backward_cpu
+    SparseCUDA: _sparse_mul_backward_cuda
+
+- func: _sparse_div(Tensor self, Tensor other) -> Tensor
+  dispatch:
+    SparseCPU: _sparse_div_cpu
+    SparseCUDA: _sparse_div_cuda
+
+- func: _sparse_div_backward(Tensor grad, Tensor self, Tensor other) -> (Tensor, Tensor)
+  dispatch:
+    SparseCPU: _sparse_div_backward_cpu
+    SparseCUDA: _sparse_div_backward_cuda
+
 - func: _sparse_mul_zerodim_out(Tensor result, Tensor self, Tensor other) -> Tensor
   dispatch:
     SparseCPU: mul_out_sparse_zerodim

@@ -112,6 +112,7 @@ Therefore, representation of a SparseTensor of sparse_dim = 0 is simply a dense 
     .. method:: dim
     .. method:: div
     .. method:: div_
+    .. method:: empty_like
     .. method:: get_device
     .. method:: hspmm
     .. method:: mm
@@ -131,6 +132,7 @@ Therefore, representation of a SparseTensor of sparse_dim = 0 is simply a dense 
     .. method:: transpose
     .. method:: transpose_
     .. method:: zero_
+    .. method:: zeros_like
     .. method:: coalesce
     .. method:: is_coalesced
     .. method:: _indices
@@ -141,5 +143,7 @@ Functions
 ----------------------------------
 
 .. autofunction:: torch.sparse.addmm
+.. autofunction:: torch.sparse.div
 .. autofunction:: torch.sparse.mm
+.. autofunction:: torch.sparse.mul
 .. autofunction:: torch.sparse.sum

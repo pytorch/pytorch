@@ -5,6 +5,8 @@ __all__ = [
     'addmm',
     'mm',
     'sum',
+    'mul',
+    'div',
 ]
 
 
@@ -132,3 +134,69 @@ def sum(input, dim=None, dtype=None):
             return torch._sparse_sum(input, dim, dtype=dtype)
         else:
             return torch._sparse_sum(input, dtype=dtype)
+
+
+def mul(input, other):
+    r"""
+    Each element of the SparseTensor :attr:`input` is multiplied by each element of the SparseTensor :attr:`other`.
+    The resulting SparseTensor is returned. The sparse_dim and dense_dim of :attr:`input` and :attr:`other`
+    must be the same. The each dense_dim size of :attr:`input` and :attr:`other` must be the same. The
+    sparse_dim shape of :attr:`input` and :attr:`other` must be broadcastable, e.g., given sparse_dim ``d``,
+    ``input.size(d) == other.size(d)`` or ``input.size(d) > other.size(d) and other.size(d) == 1``.
+    Autograd is supported, and gradients of :attr:`input` and :attr:`other` are coalesced.
+
+    Args:
+        input (SparseTensor): the first input SparseTensor
+        other (SparseTensor): the second multiplier
+
+    Example::
+        >>> S1 = torch.randn(2, 3, 2).to_sparse(2)
+        >>> S1
+        tensor(indices=tensor([[0, 0, 0, 1, 1, 1],
+                               [0, 1, 2, 0, 1, 2]]),
+               values=tensor([[ 0.0591, -1.0928],
+                              [-0.8267,  1.2014],
+                              [ 0.2587,  0.3160],
+                              [-0.8330, -1.1733],
+                              [ 0.2576, -1.6998],
+                              [-0.9416,  1.5348]]),
+               size=(2, 3, 2), nnz=6, layout=torch.sparse_coo)
+
+        >>> S2 = torch.randn(2, 1, 2).to_sparse(2)
+        >>> S2
+        tensor(indices=tensor([[0, 1],
+                               [0, 0]]),
+               values=tensor([[-0.2357, -1.1472],
+                              [ 0.0078,  0.3961]]),
+               size=(2, 1, 2), nnz=2, layout=torch.sparse_coo)
+
+        >>> S_out = torch.sparse.mul(S1, S2)
+        >>> S_out
+        tensor(indices=tensor([[0, 0, 0, 1, 1, 1],
+                               [0, 1, 2, 0, 1, 2]]),
+               values=tensor([[-0.0139,  1.2537],
+                              [ 0.1949, -1.3783],
+                              [-0.0610, -0.3625],
+                              [-0.0065, -0.4648],
+                              [ 0.0020, -0.6734],
+                              [-0.0073,  0.6080]]),
+               size=(2, 3, 2), nnz=6, layout=torch.sparse_coo)
+    """
+    return torch._sparse_mul(input, other)
+
+
+def div(input, other):
+    r"""
+    Each element of the SparseTensor :attr:`input` is divided by each element of the SparseTensor :attr:`other`.
+    The resulting SparseTensor is returned. The sparse_dim and dense_dim of :attr:`input` and :attr:`other`
+    must be the same. The each dense_dim size of :attr:`input` and :attr:`other` must be the same. The
+    sparse_dim shape of :attr:`input` and :attr:`other` must be broadcastable, e.g., given sparse_dim ``d``,
+    ``input.size(d) == other.size(d)`` or ``input.size(d) > other.size(d) and other.size(d) == 1``.
+    An error will be raised if :attr:`other` is an empty tensor. Autograd is supported, and gradients
+    of :attr:`input` and :attr:`other` are coalesced.
+
+    Args:
+        input (SparseTensor): the first input SparseTensor
+        other (SparseTensor or Scalar): the divisor
+    """
+    return torch._sparse_div(input, other)

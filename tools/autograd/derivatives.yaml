@@ -533,6 +533,12 @@
 - name: mul(Tensor self, Scalar other)
   self: grad * other
 
+- name: _sparse_mul(Tensor self, Tensor other)
+  self, other: at::_sparse_mul_backward(grad, self, other)
+
+- name: _sparse_div(Tensor self, Tensor other)
+  self, other: at::_sparse_div_backward(grad, self, other)
+
 - name: mv(Tensor self, Tensor vec)
   self: grad.ger(vec)
   vec: self.t().mv(grad)

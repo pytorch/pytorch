@@ -9,6 +9,11 @@ using LongTensor = Tensor;
 using IntTensor = Tensor;
 using SparseType = Type;
 
+enum class SparseBinaryOpType : std::uint8_t {
+  MUL = 0,
+  DIV,
+};
+
 // This is an internal utility function for getting at the SparseTensorImpl,
 // so that we can write sparse tensor specific accessors for special fields
 // in SparseTensor.  You should only use this for writing low level
@@ -120,6 +125,26 @@ inline LongTensor flatten_indices_by_dims(const LongTensor& indices, const IntLi
     new_indices.add_(indices.select(0, d));
   }
   return new_indices;
+}
+
+// binary search for matching of a[a_i] at b, and b has size = b_nnz
+inline int64_t binary_search_idx(const TensorAccessor<int64_t, 1>& a, const TensorAccessor<int64_t, 1>& b, int64_t a_i, int64_t b_nnz){
+  int64_t a_idx = a[a_i];
+  int64_t l = 0, r = b_nnz - 1;
+  while (l <= r) {
+    int64_t m = l + (r - l) / 2;
+    int64_t b_idx = b[m];
+    if (a_idx == b_idx) {
+      return m;
+    }
+    if (b_idx < a_idx) {
+      l = m + 1;
+    }
+    else {
+      r = m - 1;
+    }
+  }
+  return int64_t(-1);
 }
 
 }} // namespace at::sparse
