@@ -1,6 +1,7 @@
 import contextlib
 import gc
 import sys
+import os
 import math
 import torch
 import unittest
@@ -2581,6 +2582,7 @@ class TestAutograd(TestCase):
         # this checks whether it is possible to not require
         # weight parameters, but require inputs, see #7722
         print("torch.cuda._initialized = {}".format(torch.cuda._initialized))
+        os.system("nvidia-smi")
         print("memory_allocated     = {}".format(torch.cuda.memory_allocated()))
         print("max_memory_allocated = {}".format(torch.cuda.max_memory_allocated()))
         print("memory_cached     = {}".format(torch.cuda.memory_cached()))
