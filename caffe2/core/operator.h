@@ -531,6 +531,8 @@ inline NetDef OperatorBase::GetSingleArgument<NetDef>(
   return NetDef();
 }
 
+extern template class Observable<OperatorBase>;
+
 // OP_SINGLE_ARG provides a shorter initialization choice for initialization of
 // member variables for the class constructors.
 // This is a workaround for CUDA9.2 and GCC7
