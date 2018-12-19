@@ -555,7 +555,6 @@ TH_API void THNN_(SpatialFractionalMaxPooling_updateOutput)(
           int kW, int kH,
           THIndexTensor *indices,
           THTensor *randomSamples);
-
 TH_API void THNN_(SpatialFractionalMaxPooling_updateGradInput)(
           THNNState *state,
           THTensor *input,
