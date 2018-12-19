@@ -1495,7 +1495,7 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   return g.insertNode(g.createTupleUnpack(v))->outputs();
 }
 
-std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs) {
+std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs, bool unpack_outputs) {
   std::unordered_map<Value*, Value*> value_map;
   auto value_map_func = [&](Value* v) { return value_map.at(v); };
   JIT_ASSERT(callee.inputs().size() == inputs.size());
@@ -1514,6 +1514,21 @@ std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> input
   for (auto* output : callee.outputs()) {
     outputs.push_back(value_map_func(output));
   }
+
+  if (unpack_outputs && outputs.size() == 1 &&
+      callee.outputs().at(0)->type()->kind() == TupleType::Kind) {
+      auto tup = outputs[0];
+      outputs.clear();
+      for(Value* v : createTupleUnpack(tup)) {
+        outputs.emplace_back(v);
+      }
+      // if this was a peephole tuple unpack we can just get rid of
+      // the tuple construct here and prevent needing DCE
+      if (tup->node()->kind() == prim::TupleConstruct && !tup->node()->hasUses()) {
+        tup->node()->destroy();
+      }
+  }
+
   return outputs;
 }
 
