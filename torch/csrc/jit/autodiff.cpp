@@ -1,11 +1,14 @@
 #include <torch/csrc/jit/autodiff.h>
 
+#include "torch/csrc/jit/passes/lower_tuples.h"
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
+#include "torch/csrc/jit/symbolic_script.h"
 #include <torch/csrc/jit/symbolic_variable.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/utils/functional.h>
+#include "torch/csrc/jit/script/compiler.h"
 
 #include <torch/csrc/jit/assertions.h>
 
@@ -110,6 +113,11 @@ bool isDifferentiable(Node * n) {
   if (differentiable_ops.find(n))
     return true;
 
+  auto schema = n->maybeSchema();
+  if (schema && hasGradientInfoForSchema(*schema)) {
+    return true;
+  }
+
   if (n->matches("aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor")) {
     return n->get<std::vector<int64_t>>(attr::size) && n->is_constant(attr::implicit) &&
       n->namedInput(attr::self)->type()->cast<CompleteTensorType>();
@@ -142,6 +150,72 @@ bool isDifferentiable(Graph & g) {
                      static_cast<bool(*)(Node*)>(isDifferentiable));
 }
 
+// TODO: Remove this after #15355.
+namespace {
+  std::vector<Value*> inlineUnpackedCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs) {
+    auto outputs = script::inlineCallTo(g, callee, inputs);
+    if (callee.outputs().size() == 1 && callee.outputs().at(0)->type()->kind() == TupleType::Kind) {
+      auto tc = script::createTupleUnpack(outputs.at(0));
+      outputs = std::vector<Value*>(tc.begin(), tc.end());
+    }
+    return outputs;
+  }
+} //anonymous namespace
+
+
+// NB: Write gradient using torchscript
+// For example, node aten::mul() should be defined as follows
+// def forward(x, y):
+//     return x*y, (x, y)
+// def backward(ctx, grad_output):
+//     x, y = ctx
+//     return (y * grad_output).sum_to_size(x), (x * grad_output).sum_to_size(y)
+//
+// Here ctx is a tuple that carries all input/intermediate results needed in
+// backward from forward pass.
+// This python code is compiled into a GradientPair which includes a forward graph
+// and a backward graph. Forward graph will be used to replace the node in grad_desc.f,
+// and backward graph will be used to construct GradOf(node) in reverse_block.
+// Grad_values(a.k.a gradOutputs) propagated through node->owningGraph() in
+// **reversed** order, thus GradientPair.forward ahould be inserted **after**
+// the node being replaced, so that we don't traverse the graph infinite times.
+// The output of compiled forward graph is [real_outputs, ctx]
+// The input of compiled backward graph is [ctx, grad_values]
+// We run LowerSimpleTuples afterwards to elmininate all tuples generated in this process.
+// The original node and TupleConstruct nodes in forward graph will be cleaned up
+// later using EliminateDeadCode(block).
+// TupleUnPack node in backward graph will be removed in eliminateDeadcode(ReverseDetails)
+// defined in this file.
+static c10::optional<std::vector<Value*>> build_script_grad(
+        Node* node,
+        const ArrayRef<Value*>& grads) {
+  auto graph = node->owningGraph();
+
+  auto compiled_graphs = gradientInfoForSchema(node->schema());
+  if (!compiled_graphs) {
+    return c10::nullopt;
+  }
+  // Use forward graph to replace node in grad_desc.f
+  value_list new_outputs;
+  {
+    WithInsertPoint guard(node->next());
+    auto fw_graph = compiled_graphs->forward;
+    new_outputs = inlineUnpackedCallTo(*graph, *fw_graph, node->inputs());
+    for (size_t i = 0; i < node->outputs().size(); ++i) {
+      new_outputs.at(i)->setType(node->outputs()[i]->type());
+      new_outputs.at(i)->replaceAllUsesWith(node->outputs()[i]);
+    }
+  }
+
+  // Use backward graph to construct reverse_block
+  auto bw_graph = compiled_graphs->backward;
+  auto grad_vec = grads.vec();
+  auto it = grad_vec.begin();
+  grad_vec.insert(it, new_outputs.back());
+  ArrayRef<Value*> grad(grad_vec);
+  auto grad_inputs = inlineUnpackedCallTo(*graph, *bw_graph, grad);
+  return grad_inputs;
+};
 
 static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_values) {
   static const OperatorSet comparison_ops = {
@@ -543,6 +617,12 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     throw std::runtime_error(std::string("differentiation of ") + node->kind().toDisplayString() + " "
                              "is not supported, or it is missing necessary type information");
   }
+  // If AD is defined using torchscript, use it instead of symbolic
+  auto script_grads = build_script_grad(node, grad_values);
+  if (script_grads)
+    return *script_grads;
+  // Definition not found in torchscript, look up in the build_sym_grad
+  // TODO: migrate all to using torchscript
   auto sym_grads = build_sym_grad(fmap<SymbolicVariable>(grad_values));
   return fmap(sym_grads, [](const SymbolicVariable &v) { return v.value(); });
 }
@@ -647,6 +727,8 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
     }
 
     value_list grad_inputs = linearGradientForNode(node, fmap(node->outputs(), get_grad));
+    LowerSimpleTuples(reverse_block);
+
     JIT_ASSERT(grad_inputs.size() == node->inputs().size());
     for (size_t i = 0, num_inputs = grad_inputs.size(); i < num_inputs; ++i) {
       if (!inputs[i]->requires_grad()) continue;
@@ -670,6 +752,7 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
     reverse_block->registerOutput(get_grad(input));
     grad_desc.df_output_vjps.push_back(i);
   }
+
   return ReverseDetails(std::move(grad_map), reverse_block);
 }
 
@@ -918,6 +1001,9 @@ Gradient differentiate(std::shared_ptr<Graph>& graph) {
   // Fills in df_input_vjps and df_output_vjps
   auto rev_info = addReverseInline(grad_desc);
   Optimize(grad_desc, rev_info);
+  // Clean up old nodes which has been replaced by forward graphs in torchscript
+  EliminateDeadCode(grad_desc.f->block());
+
   // Fills in f, df, f_real_outputs, df_input_captures,
   // modifies df_input_vjps (new vjps are added for temporaries)
   lambdaLiftReverse(grad_desc, rev_info);
