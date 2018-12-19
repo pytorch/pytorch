@@ -589,6 +589,9 @@ inline Tensor Tensor::sum(IntList dim, bool keepdim) const {
 inline Tensor Tensor::sum(IntList dim, ScalarType dtype) const {
     return type().sum(*this, dim, dtype);
 }
+inline Tensor Tensor::sum_to_size(IntList size) const {
+    return type().sum_to_size(*this, size);
+}
 inline Tensor Tensor::sqrt() const {
     return type().sqrt(*this);
 }
