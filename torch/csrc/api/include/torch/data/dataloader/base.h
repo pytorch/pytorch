@@ -23,33 +23,35 @@
 
 namespace torch {
 namespace data {
-namespace detail {
-namespace dataloader {
 template <typename Dataset, typename Batch, typename BatchRequest>
-class Impl {
+class DataLoaderBase {
  public:
   using BatchType = Batch;
   using BatchRequestType = BatchRequest;
 
-  /// Constructs a new `DataLoader` from a `dataset` to sample from, `options`
-  /// to configure the `DataLoader` with, and a `sampler` that specifies the
+  /// Constructs a new DataLoader from a `dataset` to sample from, `options`
+  /// to configure the DataLoader with, and a `sampler` that specifies the
   /// sampling strategy.
-  Impl(DataLoaderOptions options)
-      : options_(std::move(options)), sequencer_(new_sequencer()) {}
+  DataLoaderBase(
+      std::unique_ptr<Dataset> main_thread_dataset,
+      DataLoaderOptions options)
+      : options_(std::move(options)),
+        main_thread_dataset_(std::move(main_thread_dataset)),
+        sequencer_(new_sequencer()) {}
 
-  virtual ~Impl() {
+  virtual ~DataLoaderBase() {
     join();
   }
 
-  /// Returns an iterator into the `DataLoader`. The lifetime of the iterator is
-  /// bound to the `DataLoader`. In C++ standards language, the category of the
+  /// Returns an iterator into the DataLoader. The lifetime of the iterator is
+  /// bound to the DataLoader. In C++ standards language, the category of the
   /// iterator is `OutputIterator`. See
   /// https://en.cppreference.com/w/cpp/named_req/OutputIterator for what this
   /// means. In short: you may increment the iterator and dereference it, but
   /// cannot go back, or step forward more than one position at a time. When the
-  /// `DataLoader` is exhausted, it will compare equal with the special
+  /// DataLoader is exhausted, it will compare equal with the special
   /// "sentinel" iterator returned by `DataLoader::end()`. Most of the time, you
-  /// should only use range-for loops to loop over the `DataLoader`, but
+  /// should only use range-for loops to loop over the DataLoader, but
   /// standard algorithms like `std::copy(dataloader.begin(), dataloader.end(),
   /// output_iterator)`  are supported too.
   Iterator<Batch> begin() {
@@ -63,15 +65,15 @@ class Impl {
   }
 
   /// Returns a special "sentinel" iterator that compares equal with a
-  /// non-sentinel iterator once the `DataLoader` is exhausted.
+  /// non-sentinel iterator once the DataLoader is exhausted.
   Iterator<Batch> end() {
     return Iterator<Batch>(
         torch::make_unique<detail::SentinelIterator<Batch>>());
   }
 
-  /// Joins the `DataLoader`'s worker threads and drains internal queues.
+  /// Joins the DataLoader's worker threads and drains internal queues.
   /// This function may only be invoked from the main thread (in which the
-  /// `DataLoader` lives).
+  /// DataLoader lives).
   void join() {
     if (joined_) {
       return;
@@ -89,7 +91,7 @@ class Impl {
     joined_ = true;
   }
 
-  /// Returns the options with which the `DataLoader` was configured.
+  /// Returns the options with which the DataLoader was configured.
   const FullDataLoaderOptions& options() const noexcept {
     return options_;
   }
@@ -126,7 +128,12 @@ class Impl {
     std::exception_ptr exception;
   };
 
-  /// Resets the internal state of the `DataLoader`, optionally pre-fetching
+  /// Subclass hook for getting the next batch request. The stateless case will
+  /// ask the sampler for a new batch request (e.g. a vector of indices), while
+  /// the stateful one will simply return the batch size.
+  virtual optional<BatchRequestType> get_batch_request() = 0;
+
+  /// Resets the internal state of the DataLoader, optionally pre-fetching
   /// new jobs.
   virtual void reset(bool prefetch) {
     shuttle_.drain();
@@ -138,17 +145,40 @@ class Impl {
   }
 
   /// Schedules `requested_jobs` many new batches to be fetched. The actual
-  /// number of jobs scheduled may be less if the `DataLoader` exhausts.
-  virtual void prefetch(size_t requested_jobs) = 0;
+  /// number of jobs scheduled may be less if the DataLoader exhausts.
+  void prefetch(size_t requested_jobs) {
+    for (size_t r = 0; r < requested_jobs; ++r) {
+      if (auto batch_request = get_batch_request()) {
+        this->push_job(std::move(*batch_request));
+      } else {
+        break;
+      }
+    }
+  }
 
   /// Schedules the maximum number of jobs (based on the `max_jobs` option).
   void prefetch() {
     prefetch(options_.max_jobs);
   }
 
-  /// Returns the next batch of data, or an empty `optional` if the `DataLoader`
-  /// is exhausted. This operation will block until a batch is available.
-  virtual optional<Batch> next() = 0;
+  /// Returns the next batch of data, or an empty `optional` if the DataLoader
+  /// is exhausted. This operation will block until a batch is available if one
+  /// is still expected.
+  optional<BatchType> next() {
+    if (options_.workers > 0) {
+      while (optional<Result> result = this->pop_result()) {
+        if (result->exception) {
+          throw WorkerException(result->exception);
+        } else if (result->batch) {
+          prefetch(1);
+          return std::move(result->batch);
+        }
+      }
+    } else if (auto batch_request = get_batch_request()) {
+      return this->main_thread_dataset_->get_batch(std::move(*batch_request));
+    }
+    return nullopt;
+  }
 
   /// The function that worker threads run.
   void worker_thread(Dataset& dataset) {
@@ -166,16 +196,21 @@ class Impl {
     }
   }
 
+  /// Convenience method that calls `shuttle_.push_job()` with the next sequence
+  /// number.
   template <typename T>
   void push_job(T value) {
     shuttle_.push_job({std::move(value), sequence_number_++});
   }
 
+  /// Convenience method that gets the next result from the sequencer.
   optional<Result> pop_result() {
     return sequencer_->next(
         [this] { return this->shuttle_.pop_result(this->options_.timeout); });
   }
 
+  /// Convenience method that creates a new sequencer based on the
+  /// `enforce_ordering` option.
   std::unique_ptr<detail::sequencers::Sequencer<Result>> new_sequencer() {
     if (options_.enforce_ordering) {
       return torch::make_unique<detail::sequencers::OrderedSequencer<Result>>(
@@ -184,8 +219,14 @@ class Impl {
     return torch::make_unique<detail::sequencers::NoSequencer<Result>>();
   }
 
-  /// The options the `DataLoader` was configured with.
+  /// The options the DataLoader was configured with.
   const FullDataLoaderOptions options_;
+
+  /// The dataset for the main thread, only has a value if the number of
+  /// worker threads was configured as zero, meaning the main thread has to do
+  /// all the work (synchronously). NOTE: Really want this to be on the heap
+  /// when empty, therefore `unique_ptr` and not `optional`.
+  std::unique_ptr<Dataset> main_thread_dataset_;
 
   /// The sequence number for the *next* batch to be retrieved from the
   /// dataset.
@@ -200,10 +241,8 @@ class Impl {
   /// The `Sequencer`, which handles optional ordering of batches.
   std::unique_ptr<detail::sequencers::Sequencer<Result>> sequencer_;
 
-  /// True if the `DataLoader` has joined its worker threads.
+  /// True if the DataLoader has joined its worker threads.
   bool joined_ = false;
-}; // namespace data
-} // namespace dataloader
-} // namespace detail
+};
 } // namespace data
 } // namespace torch

@@ -15,7 +15,7 @@ namespace torch {
 namespace data {
 namespace datasets {
 template <typename S, typename T>
-struct MapDataset;
+class MapDataset;
 template <typename D, typename T>
 MapDataset<D, T> map(D, T); // NOLINT
 } // namespace datasets
