@@ -5500,7 +5500,7 @@ class _TestTorchMixin(object):
         self._test_cholesky_batched(self, lambda t: t)
 
     @staticmethod
-    def _test_potrs(self, cast):
+    def _test_cholesky_solve(self, cast):
         a = torch.Tensor(((6.80, -2.11, 5.66, 5.97, 8.23),
                           (-6.05, -3.30, 5.36, -4.44, 1.08),
                           (-0.45, 2.58, -2.70, 0.27, 9.04),
@@ -5516,49 +5516,54 @@ class _TestTorchMixin(object):
 
         # upper Triangular Test
         U = torch.cholesky(a, True)
-        x = torch.potrs(b, U, True)
+        x = torch.cholesky_solve(b, U, True)
         self.assertLessEqual(b.dist(torch.mm(a, x)), 1e-12)
 
         # lower Triangular Test
         L = torch.cholesky(a, False)
-        x = torch.potrs(b, L, False)
+        x = torch.cholesky_solve(b, L, False)
         self.assertLessEqual(b.dist(torch.mm(a, x)), 1e-12)
 
+        # default arg Test
+        L_def = torch.cholesky(a)
+        x_def = torch.cholesky_solve(b, L_def)
+        self.assertLessEqual(b.dist(torch.mm(a, x_def)), 1e-12)
+
     @skipIfNoLapack
-    def test_potrs(self):
-        self._test_potrs(self, lambda t: t)
+    def test_cholesky_solve(self):
+        self._test_cholesky_solve(self, lambda t: t)
 
     @staticmethod
-    def _test_potrs_batched(self, cast):
+    def _test_cholesky_solve_batched(self, cast):
         from common_utils import random_symmetric_pd_matrix
 
-        def potrs_test_helper(A_dims, b_dims, cast, upper):
+        def cholesky_solve_test_helper(A_dims, b_dims, cast, upper):
             A = cast(random_symmetric_pd_matrix(*A_dims))
             L = torch.cholesky(A, upper)
             b = cast(torch.randn(*b_dims))
             return A, L, b
 
         for upper in [True, False]:
-            # test against potrs: one batch with both choices of upper
-            A, L, b = potrs_test_helper((5, 1), (1, 5, 10), cast, upper)
-            x_exp = torch.potrs(b.squeeze(0), L.squeeze(0), upper=upper)
-            x = torch.potrs(b, L, upper=upper)
+            # test against cholesky_solve: one batch with both choices of upper
+            A, L, b = cholesky_solve_test_helper((5, 1), (1, 5, 10), cast, upper)
+            x_exp = torch.cholesky_solve(b.squeeze(0), L.squeeze(0), upper=upper)
+            x = torch.cholesky_solve(b, L, upper=upper)
             self.assertEqual(x, x_exp.unsqueeze(0))
 
-            # test against potrs in a loop: four batches with both choices of upper
-            A, L, b = potrs_test_helper((5, 4), (4, 5, 10), cast, upper)
+            # test against cholesky_solve in a loop: four batches with both choices of upper
+            A, L, b = cholesky_solve_test_helper((5, 4), (4, 5, 10), cast, upper)
             x_exp_list = list()
             for i in range(4):
-                x_exp = torch.potrs(b[i], L[i], upper=upper)
+                x_exp = torch.cholesky_solve(b[i], L[i], upper=upper)
                 x_exp_list.append(x_exp)
             x_exp = torch.stack(x_exp_list)
 
-            x = torch.potrs(b, L, upper=upper)
+            x = torch.cholesky_solve(b, L, upper=upper)
             self.assertEqual(x, x_exp)
 
             # basic correctness test
-            A, L, b = potrs_test_helper((5, 3), (3, 5, 10), cast, upper)
-            x = torch.potrs(b, L, upper)
+            A, L, b = cholesky_solve_test_helper((5, 3), (3, 5, 10), cast, upper)
+            x = torch.cholesky_solve(b, L, upper)
             self.assertLessEqual(b.dist(torch.matmul(A, x)), 1e-12)
 
             # Test non-contiguous inputs.
@@ -5573,15 +5578,15 @@ class _TestTorchMixin(object):
             b = cast(b).permute(2, 1, 0)
             assert not A.is_contiguous() and not b.is_contiguous(), "contiguous inputs"
             L = torch.cholesky(A, upper)
-            x = torch.potrs(b, L, upper=upper)
+            x = torch.cholesky_solve(b, L, upper=upper)
             self.assertEqual(x, cast(x_exp))
 
     @skipIfNoLapack
-    def test_potrs_batched(self):
-        self._test_potrs_batched(self, lambda t: t)
+    def test_cholesky_solve_batched(self):
+        self._test_cholesky_solve_batched(self, lambda t: t)
 
     @staticmethod
-    def _test_potrs_batched_dims(self, cast):
+    def _test_cholesky_solve_batched_dims(self, cast):
         if not TEST_NUMPY:
             return
 
@@ -5594,7 +5599,7 @@ class _TestTorchMixin(object):
             x_exp = torch.Tensor(solve(A.numpy(), b.numpy()))
             A, b = cast(A), cast(b)
             L = torch.cholesky(A, upper)
-            x = torch.potrs(b, L, upper=upper)
+            x = torch.cholesky_solve(b, L, upper=upper)
             self.assertEqual(x, cast(x_exp))
 
         for upper in [True, False]:
@@ -5605,8 +5610,8 @@ class _TestTorchMixin(object):
             run_test((4, 1, 3, 1), (2, 1, 3, 4, 5), cast, upper)  # broadcasting A & b
 
     @skipIfNoLapack
-    def test_potrs_batched_dims(self):
-        self._test_potrs_batched_dims(self, lambda t: t)
+    def test_cholesky_solve_batched_dims(self):
+        self._test_cholesky_solve_batched_dims(self, lambda t: t)
 
     @skipIfNoLapack
     def test_potri(self):
