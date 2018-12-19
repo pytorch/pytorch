@@ -33,7 +33,7 @@ struct Vec256<int64_t> : public Vec256i {
   }
   template <int64_t mask>
   static Vec256<int64_t> blend(Vec256<int64_t> a, Vec256<int64_t> b) {
-    __at_align32__ int64_t tmp_values[size];
+    __at_align32__ int64_t tmp_values[size()];
     a.store(tmp_values);
     if (mask & 0x01)
       tmp_values[0] = _mm256_extract_epi64(b.values, 0);
