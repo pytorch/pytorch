@@ -8,7 +8,9 @@ from common_utils import (skipIfNoLapack,
                           prod_single_zero, random_square_matrix_of_rank,
                           random_symmetric_matrix, random_symmetric_psd_matrix,
                           random_symmetric_pd_matrix, make_nonzero_det,
-                          random_fullrank_matrix_distinct_singular_value)
+                          random_fullrank_matrix_distinct_singular_value, set_rng_seed)
+
+set_rng_seed(2)
 
 
 def index_variable(shape, max_indices):
