@@ -1123,8 +1123,8 @@ inline std::tuple<Tensor,Tensor,Tensor> Tensor::svd(bool some, bool compute_uv) 
 inline Tensor Tensor::cholesky(bool upper) const {
     return type().cholesky(*this, upper);
 }
-inline Tensor Tensor::potrs(const Tensor & input2, bool upper) const {
-    return type().potrs(*this, input2, upper);
+inline Tensor Tensor::cholesky_solve(const Tensor & input2, bool upper) const {
+    return type().cholesky_solve(*this, input2, upper);
 }
 inline Tensor Tensor::potri(bool upper) const {
     return type().potri(*this, upper);

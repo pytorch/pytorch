@@ -2810,16 +2810,16 @@
     CPU: _cholesky_helper_cpu
     CUDA: _cholesky_helper_cuda
 
-- func: potrs_out(Tensor result, Tensor self, Tensor input2, bool upper=true) -> Tensor
+- func: cholesky_solve_out(Tensor result, Tensor self, Tensor input2, bool upper=false) -> Tensor
 
-- func: potrs(Tensor self, Tensor input2, bool upper=true) -> Tensor
+- func: cholesky_solve(Tensor self, Tensor input2, bool upper=false) -> Tensor
   variants: method, function
 
-- func: _potrs_helper(Tensor self, Tensor A, bool upper) -> Tensor
+- func: _cholesky_solve_helper(Tensor self, Tensor A, bool upper) -> Tensor
   variants: function
   dispatch:
-    CPU: _potrs_helper_cpu
-    CUDA: _potrs_helper_cuda
+    CPU: _cholesky_solve_helper_cpu
+    CUDA: _cholesky_solve_helper_cuda
 
 - func: potri_out(Tensor result, Tensor self, bool upper=true) -> Tensor
 
