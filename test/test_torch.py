@@ -4031,22 +4031,24 @@ class _TestTorchMixin(object):
                 self.assertEqual(x.select(dim, i), res2[i])
 
     def test_linspace(self):
-        _from = random.random()
-        to = _from + random.random()
-        res1 = torch.linspace(_from, to, 137)
-        res2 = torch.Tensor()
-        torch.linspace(_from, to, 137, out=res2)
-        self.assertEqual(res1, res2, 0)
-        self.assertRaises(RuntimeError, lambda: torch.linspace(0, 1, -1))
-        self.assertEqual(torch.linspace(0, 1, 1), torch.zeros(1), 0)
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            _from = random.random()
+            to = _from + random.random()
+            res1 = torch.linspace(_from, to, 137)
+            res2 = torch.Tensor()
+            torch.linspace(_from, to, 137, out=res2)
+            self.assertEqual(res1, res2, 0)
+            self.assertRaises(RuntimeError, lambda: torch.linspace(0, 1, -1))
+            self.assertEqual(torch.linspace(0, 1, 1), torch.zeros(1), 0)
 
-        # Check linspace for generating with start > end.
-        self.assertEqual(torch.linspace(2, 0, 3), torch.Tensor((2, 1, 0)), 0)
+            # Check linspace for generating with start > end.
+            self.assertEqual(torch.linspace(2, 0, 3), torch.Tensor((2, 1, 0)), 0)
 
-        # Check linspace for non-contiguous tensors.
-        x = torch.zeros(2, 3)
-        y = torch.linspace(0, 3, 4, out=x.narrow(1, 1, 2))
-        self.assertEqual(x, torch.Tensor(((0, 0, 1), (0, 2, 3))), 0)
+            # Check linspace for non-contiguous tensors.
+            x = torch.zeros(2, 3)
+            y = torch.linspace(0, 3, 4, out=x.narrow(1, 1, 2))
+            self.assertEqual(x, torch.Tensor(((0, 0, 1), (0, 2, 3))), 0)
 
     def test_logspace(self):
         _from = random.random()

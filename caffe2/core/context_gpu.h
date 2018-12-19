@@ -82,7 +82,7 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
     while (gpu_streams.size() <= static_cast<size_t>(stream_id)) {
       // NB: This streams are not guaranteed to be unique; we'll
       // wrap around once we run out of streams in the pool.
-      gpu_streams.emplace_back(c10::cuda::getStreamFromPool());
+      gpu_streams.emplace_back(c10::cuda::getStreamFromPool(/* high priority */ false, gpu));
     }
     return gpu_streams[stream_id];
   }
@@ -198,6 +198,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
     CaffeCudaSetDevice(gpu_id_);
   }
 
+  // void SwitchToDevice()
   using BaseContext::SwitchToDevice;
 
   inline void WaitEvent(const Event& ev) override {

@@ -2832,6 +2832,18 @@ Args:
         as :attr:`other`.
 """)
 
+add_docstr_all('sum_to_size',
+               r"""
+sum_to_size(*size) -> Tensor
+
+Sum ``this`` tensor to :attr:`size`.
+:attr:`size` must be broadcastable to ``this`` tensor size.
+Args:
+    other (:class:`torch.Tensor`): The result tensor has the same size
+        as :attr:`other`.
+""")
+
+
 add_docstr_all('zero_',
                r"""
 zero_() -> Tensor

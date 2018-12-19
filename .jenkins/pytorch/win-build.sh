@@ -141,6 +141,11 @@ if not "%USE_CUDA%"=="0" (
     sccache --show-stats
     sccache --zero-stats
     rd /s /q %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\torch
+    for /f "delims=" %%i in ('where /R caffe2\proto *.py') do (
+      IF NOT "%%i" == "%CD%\caffe2\proto\__init__.py" (
+        del /S /Q %%i
+      )
+    )
     copy %CD%\\tmp_bin\\sccache.exe tmp_bin\\nvcc.exe
   )
 

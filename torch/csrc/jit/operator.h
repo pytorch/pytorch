@@ -80,6 +80,8 @@ private:
  OperationCreator op_creator_;
 };
 
+TORCH_API std::string canonicalSchemaString(const FunctionSchema& schema);
+
 TORCH_API const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name);
 std::shared_ptr<Operator> findOperatorFor(const Node* node);
 const Operator& getOperatorFor(const Node* node);

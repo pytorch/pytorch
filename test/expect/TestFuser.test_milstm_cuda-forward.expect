@@ -8,7 +8,8 @@ graph(%x : Float(*, *)
       %beta_h : Float(*)
       %bias : Float(*)) {
   %hy : Float(*, *), %cy : Float(*, *) = prim::DifferentiableGraph_0(%cx, %bias, %beta_h, %beta_i, %alpha, %hx, %w_hh, %x, %w_ih)
-  return (%hy, %cy);
+  %11 : (Float(*, *), Float(*, *)) = prim::TupleConstruct(%hy, %cy)
+  return (%11);
 }
 with prim::DifferentiableGraph_0 = graph(%0 : Float(*, *)
       %1 : Float(*)

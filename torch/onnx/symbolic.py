@@ -346,9 +346,11 @@ def t(g, self):
     return g.op("Transpose", self, perm_i=(1, 0))
 
 
-# There is no translation for it, but we don't want to raise an error yet
 def expand(g, self, size, implicit):
-    return None
+    size = _maybe_get_const(size, 'is')
+    if not _is_value(size):
+        size = g.op("Constant", value_t=torch.LongTensor(size))
+    return g.op("Expand", self, size)
 
 
 def expand_as(g, self, other):
@@ -879,7 +881,9 @@ def clamp_max(g, self, max):
 
 # torch.max (same for torch.min) actually has two interfaces smashed together:
 # torch.max(x, dim, keepdim) and torch.max(x, y)
-def max(g, self, dim_or_y, keepdim=None):
+def max(g, self, dim_or_y=None, keepdim=None):
+    if dim_or_y is None and keepdim is None:
+        return g.op("ReduceMax", self, keepdims_i=0)
     if keepdim is None:
         return g.op("Max", self, dim_or_y)
     else:
@@ -894,7 +898,9 @@ def max(g, self, dim_or_y, keepdim=None):
                     outputs=2)
 
 
-def min(g, self, dim_or_y, keepdim=None):
+def min(g, self, dim_or_y=None, keepdim=None):
+    if dim_or_y is None and keepdim is None:
+        return g.op("ReduceMin", self, keepdims_i=0)
     if keepdim is None:
         return g.op("Min", self, dim_or_y)
     else:
@@ -911,6 +917,10 @@ def min(g, self, dim_or_y, keepdim=None):
 
 def eq(g, self, other):
     return g.op("Equal", self, other)
+
+
+def ne(g, self, other):
+    return g.op("Not", eq(g, self, other))
 
 
 def exp(g, self):

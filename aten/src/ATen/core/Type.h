@@ -363,6 +363,7 @@ struct CAFFE2_API Type {
   virtual Tensor sum(const Tensor & self, IntList dim, bool keepdim, ScalarType dtype) const = 0;
   virtual Tensor sum(const Tensor & self, IntList dim, bool keepdim) const = 0;
   virtual Tensor sum(const Tensor & self, IntList dim, ScalarType dtype) const = 0;
+  virtual Tensor sum_to_size(const Tensor & self, IntList size) const = 0;
   virtual Tensor sqrt(const Tensor & self) const = 0;
   virtual Tensor & sqrt_(Tensor & self) const = 0;
   virtual Tensor std(const Tensor & self, bool unbiased) const = 0;
