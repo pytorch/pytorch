@@ -11287,7 +11287,7 @@ class TestAsync(JitTestCase):
         self.assertEqual(module(x), tuple([y, y, y, y, x, x]))
 
 
-for test in autograd_method_tests:
+for test in autograd_method_tests():
     add_autograd_test(*test)
 
 for test in nn_functional_tests:
