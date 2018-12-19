@@ -88,7 +88,7 @@ Y: [1.22883528 1.05188156 1.35112322 1.43744212 1.07812598]
         "output",
         "The hyperbolic cosine values of the input tensor, computed "
         "element-wise")
-    .InheritOnnxSchema("Cosh");
+    .InheritOnnxSchema();
 
 OPERATOR_SCHEMA(CoshGradient)
     .NumInputs(2)

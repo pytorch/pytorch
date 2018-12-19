@@ -27,9 +27,9 @@ std::unique_ptr<ThreadPool> ThreadPool::defaultThreadPool() {
 
   bool applyCap = false;
 #if CAFFE2_ANDROID
-  applyCap = c10::FLAGS_caffe2_threadpool_android_cap;
+  applyCap = FLAGS_caffe2_threadpool_android_cap;
 #elif CAFFE2_IOS
-  applyCap = c10::FLAGS_caffe2_threadpool_ios_cap;
+  applyCap = FLAGS_caffe2_threadpool_ios_cap;
 #endif
 
   if (applyCap) {
@@ -101,7 +101,7 @@ void ThreadPool::run(const std::function<void(int, size_t)>& fn, size_t range) {
   // If there are no worker threads, or if the range is too small (too
   // little work), just run locally
   const bool runLocally = range < minWorkSize_ ||
-      c10::FLAGS_caffe2_threadpool_force_inline || (numThreads_ == 0);
+      FLAGS_caffe2_threadpool_force_inline || (numThreads_ == 0);
   if (runLocally) {
     // Work is small enough to just run locally; multithread overhead
     // is too high

@@ -17,7 +17,6 @@ import caffe2.python.hypothesis_test_util as hu
 np.set_printoptions(precision=6)
 
 class TestFloatToFusedRandRowwiseQuantized(hu.HypothesisTestCase):
-    @unittest.skipIf("IN_CIRCLECI" in os.environ, "FIXME: flaky test in CircleCI")
     @given(X=hu.tensor(min_dim=2, max_dim=2,
                         min_value=1, max_value=17),  # only matrix is supported
            bitwidth_=st.sampled_from([1, 2, 4, 8]),

@@ -68,13 +68,13 @@ class CuDNNActivationOp final : public CuDNNActivationOpBase {
   template <typename T>
   bool DoRunWithType() {
     const auto& X = Input(0);
-    auto* Y = Output(0);
-    Y->ResizeLike(X);
-    if (X.size() == 0) {
+
+    auto* Y = Output(0, X.sizes(), at::dtype<T>());
+    if (X.numel() == 0) {
       Y->template mutable_data<T>();
       return true;
     }
-    this->SetTensorDescriptor(cudnnTypeWrapper<T>::type, X.size());
+    this->SetTensorDescriptor(cudnnTypeWrapper<T>::type, X.numel());
     CUDNN_ENFORCE(cudnnActivationForward(
         this->cudnn_wrapper_.inline_cudnn_handle(),
         this->act_desc_,
@@ -107,13 +107,13 @@ class CuDNNActivationGradientOp final : public CuDNNActivationOpBase {
   bool DoRunWithType() {
     const auto& Y = Input(0);
     const auto& dY = Input(1);
-    auto* dX = Output(0);
-    dX->ResizeLike(Y);
-    if (Y.size() == 0) {
+
+    auto* dX = Output(0, Y.sizes(), at::dtype<T>());
+    if (Y.numel() == 0) {
       dX->template mutable_data<T>();
       return true;
     }
-    this->SetTensorDescriptor(cudnnTypeWrapper<T>::type, Y.size());
+    this->SetTensorDescriptor(cudnnTypeWrapper<T>::type, Y.numel());
     CUDNN_ENFORCE(cudnnActivationBackward(
         this->cudnn_wrapper_.inline_cudnn_handle(),
         this->act_desc_,

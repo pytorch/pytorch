@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THTensorMath.h"
+#define TH_GENERIC_FILE "TH/generic/THTensorMath.h"
 #else
 
 TH_API void THTensor_(fill)(THTensor *r_, scalar_t value);
@@ -196,7 +196,6 @@ TH_API accreal THTensor_(varall)(THTensor *self, int biased);
 TH_API accreal THTensor_(stdall)(THTensor *self, int biased);
 TH_API accreal THTensor_(normall)(THTensor *t, scalar_t value);
 
-TH_API void THTensor_(linspace)(THTensor *r_, scalar_t a, scalar_t b, int64_t n);
 TH_API void THTensor_(logspace)(THTensor *r_, scalar_t a, scalar_t b, int64_t n);
 
 TH_API void THTensor_(dirichlet_grad)(THTensor *self, THTensor *x, THTensor *alpha, THTensor *total);

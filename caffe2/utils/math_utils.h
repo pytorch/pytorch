@@ -120,6 +120,8 @@ CAFFE2_API bool IsBothEndsBroadcastBinaryOp(
     int* nxt,
     bool* broadcast_1st);
 
+CAFFE2_API bool IsBatchTranspose2D(const int ndim, const int* axes);
+
 CAFFE2_API void ComputeTransposeAxesForReduceOp(
     const int num_dims,
     const int num_reduce_axes,

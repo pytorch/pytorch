@@ -1,4 +1,4 @@
-Torch Script
+TorchScript
 ============
 
 .. contents:: :local:
@@ -6,17 +6,17 @@ Torch Script
 .. automodule:: torch.jit
 .. currentmodule:: torch.jit
 
-Torch Script is a way to create serializable and optimizable models from PyTorch code.
-Any code written in Torch Script can be saved from your Python
+TorchScript is a way to create serializable and optimizable models from PyTorch code.
+Any code written in TorchScript can be saved from your Python
 process and loaded in a process where there is no Python dependency.
 
 We provide tools to incrementally transition a model from being a pure Python program
-to a Torch Script program that can be run independently from Python, for instance, in a standalone C++ program.
+to a TorchScript program that can be run independently from Python, for instance, in a standalone C++ program.
 This makes it possible to train models in PyTorch using familiar tools and then export
 the model to a production environment where it is not a good idea to run models as Python programs
 for performance and multi-threading reasons.
 
-Creating Torch Script Code
+Creating TorchScript Code
 --------------------------
 
 
@@ -117,26 +117,26 @@ Example:
             return self.resnet(input - self.means)
 
 
-Torch Script Language Reference
+TorchScript Language Reference
 -------------------------------
 
-Torch Script is a subset of Python that can either be written directly (using
+TorchScript is a subset of Python that can either be written directly (using
 the @script annotations) or generated automatically from Python code via
 tracing. When using tracing, code is automatically converted into this subset of
 Python by recording only the actual operators on tensors and simply executing and
 discarding the other surrounding Python code.
 
-When writing Torch Script directly using @script annotations, the programmer must
-only use the subset of Python supported in Torch Script. This section documents
-what is supported in Torch Script as if it were a language reference for a stand
+When writing TorchScript directly using @script annotations, the programmer must
+only use the subset of Python supported in TorchScript. This section documents
+what is supported in TorchScript as if it were a language reference for a stand
 alone language. Any features of Python not mentioned in this reference are not
-part of Torch Script.
+part of TorchScript.
 
-As a subset of Python any valid Torch Script function is also a valid Python
+As a subset of Python any valid TorchScript function is also a valid Python
 function. This makes it possible to remove the @script annotations and debug the
 function using standard Python tools like pdb. The reverse is not true: there
-are many valid python programs that are not valid Torch Script programs.
-Instead, Torch Script focuses specifically on the features of Python that are
+are many valid python programs that are not valid TorchScript programs.
+Instead, TorchScript focuses specifically on the features of Python that are
 needed to represent neural network models in Torch.
 
 .. envvar:: PYTORCH_JIT=1
@@ -150,9 +150,9 @@ needed to represent neural network models in Torch.
 Types
 ~~~~~
 
-The largest difference between Torch Script and the full Python language is that
-Torch Script only support a small set of types that are needed to express neural
-net models. In particular Torch Script supports:
+The largest difference between TorchScript and the full Python language is that
+TorchScript only support a small set of types that are needed to express neural
+net models. In particular TorchScript supports:
 
 ``Tensor``
     A PyTorch tensor of any dtype, dimension, or backend.
@@ -169,8 +169,8 @@ net models. In particular Torch Script supports:
 ``List[T]``
     A list of which all members are type ``T``
 
-Unlike Python, each variable in Torch Script function must have a single static type.
-This makes it easier to optimize Torch Script functions.
+Unlike Python, each variable in TorchScript function must have a single static type.
+This makes it easier to optimize TorchScript functions.
 
 Example::
 
@@ -183,9 +183,9 @@ Example::
         return r # Type mismatch: r is set to type Tensor in the true branch
                  # and type int in the false branch
 
-By default, all parameters to a Torch Script function are assumed to be Tensor
+By default, all parameters to a TorchScript function are assumed to be Tensor
 because this is the most common type used in modules. To specify that an
-argument to a Torch Script function is another type, it is possible to use
+argument to a TorchScript function is another type, it is possible to use
 MyPy-style type annotations using the types listed above:
 
 Example::
@@ -264,7 +264,7 @@ Subscripts
   ``t[i:j, i]``
 
   .. note::
-    Torch Script currently does not support mutating tensors in place, so any
+    TorchScript currently does not support mutating tensors in place, so any
     tensor indexing can only appear on the right-hand size of an expression.
 
 Function calls
@@ -328,7 +328,7 @@ Accessing Module Parameters
 Statements
 ~~~~~~~~~~
 
-Torch Script supports the following types of statements:
+TorchScript supports the following types of statements:
 
 Simple Assignments
 
@@ -375,12 +375,13 @@ For loops with ``range``
     ::
 
         x = 0
-        for i in range(0, 10):
+        for i in range(10):
             x *= i
 
     .. note::
       Script currently does not support iterating over generic iterable
-      objects like lists or tensors. This will be added in a future version.
+      objects like lists or tensors. Script currently does not support start or
+      increment parameters to range. These will be added in a future version.
 
 For loops over tuples:
 
@@ -437,7 +438,7 @@ Return
 Variable Resolution
 ~~~~~~~~~~~~~~~~~~~
 
-Torch Script supports a subset of Python's variable resolution (i.e. scoping)
+TorchScript supports a subset of Python's variable resolution (i.e. scoping)
 rules. Local variables behave the same as in Python, except for the restriction
 that a variable must have the same type along all paths through a function.
 If a variable has a different type on different sides of an if statement, it
@@ -455,23 +456,23 @@ Example::
         print(y) # Error: undefined value y
 
 Non-local variables are resolved to Python values at compile time when the
-function is defined. These values are then converted into Torch Script values using
+function is defined. These values are then converted into TorchScript values using
 the rules described in `Use of Python Values`_.
 
 Use of Python Values
 ~~~~~~~~~~~~~~~~~~~~
 
-To make writing Torch Script more convenient, we allow script code to refer
+To make writing TorchScript more convenient, we allow script code to refer
 to Python values in the surrounding scope. For instance, any time there is a
-reference to ``torch``, the Torch Script compiler is actually resolving it to the
+reference to ``torch``, the TorchScript compiler is actually resolving it to the
 ``torch`` Python module when the function is declared.  These Python values are
-not a first class part of Torch Script. Instead they are desugared at compile-time
-into the primitive types that Torch Script supports. This section describes the
-rules that are used when accessing Python values in Torch Script. They depend
+not a first class part of TorchScript. Instead they are desugared at compile-time
+into the primitive types that TorchScript supports. This section describes the
+rules that are used when accessing Python values in TorchScript. They depend
 on the dynamic type of the python valued referenced.
 
 Functions
-  Torch Script can call python functions. This functionality is very useful when
+  TorchScript can call python functions. This functionality is very useful when
   incrementally converting a model into script. The model can be moved function-by-function
   to script, leaving calls to Python functions in place. This way you can incrementally
   check the correctness of the model as you go.
@@ -494,12 +495,12 @@ Functions
 
 
 Attribute Lookup On Python Modules
-    Torch Script can lookup attributes on modules. Builtin functions like ``torch.add``
-    are accessed this way. This allows Torch Script to call functions defined in
+    TorchScript can lookup attributes on modules. Builtin functions like ``torch.add``
+    are accessed this way. This allows TorchScript to call functions defined in
     other modules.
 
 Python-defined Constants
-    Torch Script also provides a way to use constants that are defined in Python.
+    TorchScript also provides a way to use constants that are defined in Python.
     These can be used to hard-code hyper-parameters into the function, or to
     define universal constants. There are two ways of specifying that a Python
     value should be treated as a constant.
@@ -596,36 +597,35 @@ Interpreting Graphs
 
     The example script above produces the graph::
 
-        graph(%len : int) {
-          %13 : float = prim::Constant[value=1]()
-          %10 : int = prim::Constant[value=10]()
-          %2 : int = prim::Constant[value=4]()
-          %1 : int = prim::Constant[value=3]()
-          %3 : int[] = prim::ListConstruct(%1, %2)
-          %4 : int = prim::Constant[value=6]()
-          %5 : int = prim::Constant[value=0]()
-          %6 : int[] = prim::Constant[value=[0, -1]]()
-          %rv.1 : Dynamic = aten::zeros(%3, %4, %5, %6)
-          %8 : int = prim::Constant[value=1]()
-          %rv : Dynamic = prim::Loop(%len, %8, %rv.1)
-            block0(%i : int, %12 : Dynamic) {
-              %11 : int = aten::lt(%i, %10)
-              %rv.4 : Dynamic = prim::If(%11)
-                block0() {
-                  %14 : int = prim::Constant[value=1]()
-                  %rv.2 : Dynamic = aten::sub(%12, %13, %14)
-                  -> (%rv.2)
-                }
-                block1() {
-                  %16 : int = prim::Constant[value=1]()
-                  %rv.3 : Dynamic = aten::add(%12, %13, %16)
-                  -> (%rv.3)
-                }
-              %19 : int = prim::Constant[value=1]()
-              -> (%19, %rv.4)
-            }
-          return (%rv);
-        }
+	graph(%len : int) {
+	  %15 : int = prim::Constant[value=1]()
+	  %9 : bool = prim::Constant[value=1]()
+	  %7 : Device = prim::Constant[value="cpu"]()
+	  %6 : int = prim::Constant[value=0]()
+	  %5 : int = prim::Constant[value=6]()
+	  %1 : int = prim::Constant[value=3]()
+	  %2 : int = prim::Constant[value=4]()
+	  %11 : int = prim::Constant[value=10]()
+	  %14 : float = prim::Constant[value=1]()
+	  %4 : int[] = prim::ListConstruct(%1, %2)
+	  %rv.1 : Tensor = aten::zeros(%4, %5, %6, %7)
+	  %rv : Tensor = prim::Loop(%len, %9, %rv.1)
+	    block0(%i : int, %13 : Tensor) {
+	      %12 : bool = aten::lt(%i, %11)
+	      %rv.4 : Tensor = prim::If(%12)
+		block0() {
+		  %rv.2 : Tensor = aten::sub(%13, %14, %15)
+		  -> (%rv.2)
+		}
+		block1() {
+		  %rv.3 : Tensor = aten::add(%13, %14, %15)
+		  -> (%rv.3)
+		}
+	      -> (%9, %rv.4)
+	    }
+	  return (%rv);
+	}
+
 
     Take the instruction ``%rv.1 : Dynamic = aten::zeros(%3, %4, %5, %6)`` for
     example. ``%rv.1 : Dynamic`` means we assign the output to a (unique)
@@ -675,34 +675,39 @@ Automatic Trace Checking
         traced = torch.jit.trace(loop_in_traced_fn, inputs, check_inputs=check_inputs)
 
     Gives us the following diagnostic information::
-
-        ERROR: Graphs differed across invocations!
-        Graph diff:
-            graph(%0 : Dynamic) {
-                  %1 : int = prim::Constant[value=0]()
-                  %2 : int = prim::Constant[value=0]()
-                  %3 : Dynamic = aten::select(%0, %1, %2)
-                  %4 : int = prim::Constant[value=0]()
-                  %5 : int = prim::Constant[value=0]()
-                  %6 : Dynamic = aten::select(%0, %4, %5)
-                  %7 : Dynamic = aten::mul(%3, %6)
-                  %8 : int = prim::Constant[value=0]()
-                  %9 : int = prim::Constant[value=1]()
-                  %10 : Dynamic = aten::select(%0, %8, %9)
-                  %11 : Dynamic = aten::mul(%7, %10)
-                  %12 : int = prim::Constant[value=0]()
-                  %13 : int = prim::Constant[value=2]()
-                  %14 : Dynamic = aten::select(%0, %12, %13)
-                  %15 : Dynamic = aten::mul(%11, %14)
-              +   %16 : int = prim::Constant[value=0]()
-              +   %17 : int = prim::Constant[value=3]()
-              +   %18 : Dynamic = aten::select(%0, %16, %17)
-              +   %19 : Dynamic = aten::mul(%15, %18)
-              -   return (%15);
-              ?             ^
-              +   return (%19);
-              ?             ^
-            }
+	ERROR: Graphs differed across invocations!
+	Graph diff::
+  
+		  graph(%x : Tensor) {
+		    %1 : int = prim::Constant[value=0]()
+		    %2 : int = prim::Constant[value=0]()
+		    %result.1 : Tensor = aten::select(%x, %1, %2)
+		    %4 : int = prim::Constant[value=0]()
+		    %5 : int = prim::Constant[value=0]()
+		    %6 : Tensor = aten::select(%x, %4, %5)
+		    %result.2 : Tensor = aten::mul(%result.1, %6)
+		    %8 : int = prim::Constant[value=0]()
+		    %9 : int = prim::Constant[value=1]()
+		    %10 : Tensor = aten::select(%x, %8, %9)
+		-   %result : Tensor = aten::mul(%result.2, %10)
+		+   %result.3 : Tensor = aten::mul(%result.2, %10)
+		?          ++
+		    %12 : int = prim::Constant[value=0]()
+		    %13 : int = prim::Constant[value=2]()
+		    %14 : Tensor = aten::select(%x, %12, %13)
+		+   %result : Tensor = aten::mul(%result.3, %14)
+		+   %16 : int = prim::Constant[value=0]()
+		+   %17 : int = prim::Constant[value=3]()
+		+   %18 : Tensor = aten::select(%x, %16, %17)
+		-   %15 : Tensor = aten::mul(%result, %14)
+		?     ^                                 ^
+		+   %19 : Tensor = aten::mul(%result, %18)
+		?     ^                                 ^
+		-   return (%15);
+		?             ^
+		+   return (%19);
+		?             ^
+		  }
 
 
     This message indicates to us that the computation differed between when
@@ -732,23 +737,19 @@ Automatic Trace Checking
 
     Which produces::
 
-        graph(%x : Dynamic) {
-          %1 : int = prim::Constant[value=0]()
-          %2 : int = prim::Constant[value=0]()
-          %result.1 : Dynamic = aten::select(%x, %2, %1)
-          %4 : int = aten::size(%x, %1)
-          %5 : int = prim::Constant[value=1]()
-          %result : Dynamic = prim::Loop(%4, %5, %result.1)
-            block0(%i : int, %7 : Dynamic) {
-              %9 : int = prim::Constant[value=0]()
-              %10 : Dynamic = aten::select(%x, %9, %i)
-              %result.2 : Dynamic = aten::mul(%7, %10)
-              %12 : int = prim::Constant[value=1]()
-              -> (%12, %result.2)
-            }
-          return (%result);
-        }
-
+	graph(%x : Tensor) {
+	  %5 : bool = prim::Constant[value=1]()
+	  %1 : int = prim::Constant[value=0]()
+	  %result.1 : Tensor = aten::select(%x, %1, %1)
+	  %4 : int = aten::size(%x, %1)
+	  %result : Tensor = prim::Loop(%4, %5, %result.1)
+	    block0(%i : int, %7 : Tensor) {
+	      %10 : Tensor = aten::select(%x, %1, %i)
+	      %result.2 : Tensor = aten::mul(%7, %10)
+	      -> (%5, %result.2)
+	    }
+	  return (%result);
+	}
 
 Tracer Warnings
     The tracer produces warnings for several problematic patterns in traced
@@ -788,14 +789,24 @@ Tracer Warnings
 Builtin Functions
 ~~~~~~~~~~~~~~~~~
 
-Torch Script supports a subset of the builtin tensor and neural network functions that
-PyTorch provides. Most methods on Tensor as well as functions in the ``torch``
-namespace are available. Many functions in ``torch.nn.functional`` are also availiable.
+Torch Script supports a subset of the builtin tensor and neural network
+functions that PyTorch provides. Most methods on Tensor as well as functions in
+the ``torch`` namespace, all functions in ``torch.nn.functional`` and all
+modules from ``torch.nn`` are supported in Torch Script, excluding those in the
+table below. For unsupported modules, we suggest using :meth:`torch.jit.trace`.
 
+Unsupported ``torch.nn`` Modules  ::
 
-We currently do not provide any builtin ScriptModules e.g. a ``Linear`` or
-``Conv`` module. This functionality is something that will be developed in the future.
-For now we suggest using ``torch.jit.trace`` to transform standard ``torch.nn``
-modules into ScriptModules on construction.
+    torch.nn.modules.adaptive.AdaptiveLogSoftmaxWithLoss
+    torch.nn.modules.normalization.CrossMapLRN2d
+    torch.nn.modules.fold.Fold
+    torch.nn.modules.fold.Unfold
+    torch.nn.modules.rnn.GRU
+    torch.nn.modules.rnn.LSTM
+    torch.nn.modules.rnn.RNN
+    torch.nn.modules.rnn.GRUCell
+    torch.nn.modules.rnn.LSTMCell
+    torch.nn.modules.rnn.RNNCell
+
 
 .. automodule:: torch.jit.supported_ops

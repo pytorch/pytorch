@@ -1,7 +1,7 @@
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/type.h"
-#include "torch/csrc/jit/argument_spec.h"
-#include "torch/csrc/jit/operator.h"
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/type.h>
+#include <torch/csrc/jit/argument_spec.h>
+#include <torch/csrc/jit/operator.h>
 
 #include <vector>
 
@@ -66,9 +66,9 @@ void PropagateRequiresGradSimpleNode(Node* node) {
   auto inputs = node->inputs();
   auto outputs = node->outputs();
   bool should_require = std::any_of(inputs.begin(), inputs.end(), getRequiresGrad);
-  for (size_t i = 0; i < outputs.size(); ++i) {
-    if (auto type = outputs[i]->type()->cast<TensorType>()) {
-      setRequiresGrad(outputs[i], should_require && at::isFloatingType(type->scalarType()));
+  for (Value* output : outputs) {
+    if (auto type = output->type()->cast<TensorType>()) {
+      setRequiresGrad(output, should_require && at::isFloatingType(type->scalarType()));
     }
   }
 }

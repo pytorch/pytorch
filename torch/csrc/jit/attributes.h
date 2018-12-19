@@ -5,7 +5,7 @@
 #include <memory>
 #include <vector>
 #include <ATen/ATen.h>
-#include "ATen/Utils.h"
+#include <ATen/Utils.h>
 
 #include <torch/csrc/jit/assertions.h>
 #include <torch/csrc/jit/interned_strings.h>
@@ -229,7 +229,7 @@ struct Attributes {
     return s;
   }
 
-  void printValue(std::ostream & out, Symbol & name) const {
+  void printValue(std::ostream & out, const Symbol & name) const {
     switch(kindOf(name)) {
       case AttributeKind::f:
         out << f(name);
@@ -254,7 +254,7 @@ struct Attributes {
           at::Tensor tensor = t(name);
           // 1-elem tensors are usually boxed scalars, so print them like it
           if (tensor.numel() == 1) {
-            auto scalar_tensor = at::_local_scalar(tensor.view({}));
+            auto scalar_tensor = tensor.view({}).item();
             out << "{";
             if (scalar_tensor.isFloatingPoint()) {
               out << scalar_tensor.toDouble();

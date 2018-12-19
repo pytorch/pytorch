@@ -13,7 +13,7 @@ from caffe2.python.model_helper import ModelHelper
 import caffe2.python.ideep_test_util as mu
 
 
-@unittest.skipIf(not workspace.C.use_ideep, "No IDEEP support.")
+@unittest.skipIf(not workspace.C.use_mkldnn, "No MKLDNN support.")
 class TestSpatialBN(hu.HypothesisTestCase):
     @given(size=st.integers(7, 10),
            input_channels=st.integers(7, 10),

@@ -125,10 +125,9 @@ class C10_EXPORT IDEEPFallbackOp final : public IDEEPOperator {
           "IDEEP fallback op currently does not support non-TensorCPU "
           "output type who needs copying.");
       const auto& src = local_output_blobs_[i]->template Get<TensorCPU>();
-      auto src_dims = src.dims().vec();
-      if (src.template IsType<float>() &&
-          src.dims().size() != 0 && src.size_from_dim(0) != 0 &&
-          base_op_->type() != "Python") {
+      auto src_dims = src.sizes().vec();
+      if (src.template IsType<float>() && src.sizes().size() != 0 &&
+          src.numel() != 0 && base_op_->type() != "Python") {
         Blob* dst = OperatorBase::OutputBlob(i);
         // The output tensor must be ideep tensor with public format.
         // If reusing ideep tensor with non-public format, the tensor buffer

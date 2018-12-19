@@ -1,11 +1,12 @@
-#include "torch/csrc/jit/passes/to_batch.h"
-#include "torch/csrc/jit/script/compiler.h"
+#include <torch/csrc/jit/passes/to_batch.h>
+#include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
 
 namespace torch { namespace jit {
 
 std::unordered_map<std::string, std::vector<std::shared_ptr<Graph>>> ToBatch::batch_operator_table;
 
-std::shared_ptr<Graph> ToBatch::getBatchOperator(std::string name, int64_t num_inputs){
+std::shared_ptr<Graph> ToBatch::getBatchOperator(const std::string& name, int64_t num_inputs){
   if(batch_operator_table.find(name) == batch_operator_table.end()){
     throw std::runtime_error("function " + name + " is not supported in batched tensor yet");
   }
@@ -17,6 +18,15 @@ std::shared_ptr<Graph> ToBatch::getBatchOperator(std::string name, int64_t num_i
       return op;
   }
   throw std::runtime_error("function " + name + " with " + std::to_string(num_inputs) + " inputs is not supported in batched tensor yet");
+}
+
+std::vector<Value*> inlineUnpackedCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs) {
+  auto outputs = inlineCallTo(g, callee, inputs);
+  if (callee.outputs().size() == 1 && callee.outputs().at(0)->type()->kind() == TupleType::Kind) {
+    auto tc = createTupleUnpack(outputs.at(0));
+    outputs = std::vector<Value*>(tc.begin(), tc.end());
+  }
+  return outputs;
 }
 
 // replace aten operator node with BatchTensor operator graph
@@ -35,46 +45,37 @@ void ToBatch::visitAten(Node* n, Block* block, Block* res_block){
   }
 
   // transform scalar to tensor before pass to batch operator script
-  for(size_t i = 0; i < new_inputs.size(); i++){
-    auto input = new_inputs[i];
-    if(input->type() == IntType::get() || input->type() == FloatType::get()){
+    for (auto& input : new_inputs) {
+    if(input->type() == IntType::get() || input->type() == FloatType::get() || input->type() == BoolType::get()){
       auto to_tensor_node = res_graph->createNumToTensor(input);
       res_graph->insertNode(to_tensor_node);
-      new_inputs[i] = to_tensor_node->output();
-    } else if(input->type() == BoolType::get()) {
-      auto to_tensor_node = res_graph->createBoolToTensor(input);
-      res_graph->insertNode(to_tensor_node);
-      new_inputs[i] = to_tensor_node->output();
+      input = to_tensor_node->output();
     }
   }
 
   auto batch_graph = getBatchOperator(func_name, new_inputs.size());
-  auto outputs = script::inlineCallTo(*res_block->owningGraph(), *batch_graph, new_inputs);
+  auto outputs = inlineUnpackedCallTo(*res_block->owningGraph(), *batch_graph, new_inputs);
 
   // Assume all outputs from inlined operator implementation are in the triple form batched tensor or just a single non-tensor.
-  if(outputs.size() == 1){
+  if (outputs.size() == 1) {
     // if previous output is scalar, transform new output back to scalar from dynamic
-    if(n->outputs()[0]->type() != outputs[0]->type()){
-      Node* to_scalar_node;
-      if(n->outputs()[0]->type() == IntType::get()){
-        to_scalar_node = res_graph->createTensorToNum(IntType::get(), outputs[0]);
-      }
-      else if(n->outputs()[0]->type() == FloatType::get()){
-        to_scalar_node = res_graph->createTensorToNum(FloatType::get(), outputs[0]);
-      }
-      else if(n->outputs()[0]->type() == BoolType::get()){
-        to_scalar_node = res_graph->createTensorToBool(outputs[0]);
-      }
-      else{
+    TypePtr orig_type = n->outputs()[0]->type();
+    if (!orig_type->isSubtypeOf(outputs[0]->type())) {
+      Symbol op;
+      if (orig_type == IntType::get()) {
+        op = prim::Int;
+      } else if (orig_type == FloatType::get()) {
+        op = prim::Float;
+      } else if (orig_type == BoolType::get()) {
+        op = prim::Bool;
+      } else {
         throw std::runtime_error("NYI: scalar types other than int, float, and bool are not supported yet");
       }
-      res_graph->insertNode(to_scalar_node);
-      rn_env[n->outputs()[0]] = to_scalar_node->output();
-    }
-    else
+      rn_env[n->outputs()[0]] = res_graph->insert(op, { outputs[0] });
+    } else {
       rn_env[n->outputs()[0]] = outputs[0];
-  }
-  else{
+    }
+  } else {
     for(size_t i = 0; i < n->outputs().size(); i++){
       auto output = n->outputs()[i];
       batch_map[output] = std::vector<Value*>(outputs.begin() + i * EXP_BTENSOR_SIZE, outputs.begin() + i * EXP_BTENSOR_SIZE + EXP_BTENSOR_SIZE);
@@ -97,7 +98,7 @@ void ToBatch::visitNumToTensor(Node* n, Block* block, Block* res_block){
   auto res_graph = res_block->owningGraph();
   auto* r_node = res_graph->createClone(n, rn_fn);
   res_block->appendNode(r_node);
-  auto outputs = script::inlineCallTo(*res_block->owningGraph(), *getBatchOperator("batch_from_scalar_tensor"), r_node->outputs());
+  auto outputs = inlineUnpackedCallTo(*res_block->owningGraph(), *getBatchOperator("batch_from_scalar_tensor"), r_node->outputs());
   batch_map[n->output()] = outputs;
 }
 
@@ -238,7 +239,7 @@ void ToBatch::visitIf(Node* n, Block* block, Block* res_block){
     inputs.insert(inputs.end(), if_output.begin(), if_output.end());
     auto else_output = batch_map.at(n->blocks()[1]->outputs()[i]);
     inputs.insert(inputs.end(), else_output.begin(), else_output.end());
-    auto outputs = script::inlineCallTo(*res_block->owningGraph(), *getBatchOperator("where", inputs.size()), inputs);
+    auto outputs = inlineUnpackedCallTo(*res_block->owningGraph(), *getBatchOperator("where", inputs.size()), inputs);
     batch_map[n->outputs()[i]] = outputs;
   }
 }
@@ -343,17 +344,12 @@ void ToBatch::visitLoop(Node* n, Block* block, Block* res_block){
 
   // type of cond in loop should be int type
   if(rn_env.at(n->inputs()[0])->type() != IntType::get()){
-    auto to_int_node = res_graph->createTensorToNum(IntType::get(), rn_env.at(n->inputs()[0]));
-    res_graph->insertNode(to_int_node);
-    rn_env[n->inputs()[0]] = to_int_node->output();
+    rn_env[n->inputs()[0]] = res_graph->insert(prim::Int, {rn_env.at(n->inputs()[0])});
   }
   if(cond_is_tensor){
     auto cond = batch_map.at(n->inputs()[1]);
-    auto cond_any = script::inlineCallTo(*res_block->owningGraph(), *getBatchOperator("any"), cond);
-    auto to_bool_node =
-        res_graph->createTensorToBool(cond_any[0]);
-    res_graph->insertNode(to_bool_node);
-    rn_env[n->inputs()[1]] = to_bool_node->output();
+    auto cond_any = inlineUnpackedCallTo(*res_block->owningGraph(), *getBatchOperator("any"), cond);
+    rn_env[n->inputs()[1]] =res_graph->insert(prim::Bool, {cond_any[0]});
   }
   for(size_t i = 2; i < n->inputs().size(); i++){
     auto input = n->inputs()[i];
@@ -414,7 +410,7 @@ void ToBatch::visitLoop(Node* n, Block* block, Block* res_block){
       for(size_t j = 0; j < EXP_BTENSOR_SIZE; j++){
         inputs.push_back(loop_block->inputs()[i * EXP_BTENSOR_SIZE + j + EXP_BTENSOR_SIZE + 1]);
       }
-      outputs = script::inlineCallTo(*res_block->owningGraph(), *getBatchOperator("where"), inputs);
+      outputs = inlineUnpackedCallTo(*res_block->owningGraph(), *getBatchOperator("where"), inputs);
     }
     else{
       for(size_t j = 0; j < EXP_BTENSOR_SIZE; j++){
@@ -422,7 +418,7 @@ void ToBatch::visitLoop(Node* n, Block* block, Block* res_block){
       }
       auto data = batch_map.at(n->blocks()[0]->outputs()[i + 1]);
       inputs.insert(inputs.end(), data.begin(), data.end());
-      outputs = script::inlineCallTo(*res_block->owningGraph(), *getBatchOperator("update"), inputs);
+      outputs = inlineUnpackedCallTo(*res_block->owningGraph(), *getBatchOperator("update"), inputs);
     }
     batch_map[n->outputs()[i]] = outputs;
     for(size_t j = 0; j < EXP_BTENSOR_SIZE; j++){
@@ -433,11 +429,9 @@ void ToBatch::visitLoop(Node* n, Block* block, Block* res_block){
   // update loop conditions
   if(cond_is_tensor){
     auto cond = batch_map.at(n->blocks()[0]->outputs()[0]);
-    auto cond_any = script::inlineCallTo(*res_block->owningGraph(), *getBatchOperator("any"), cond);
-    auto to_bool_node =
-        res_graph->createTensorToBool(cond_any[0]);
-    res_graph->insertNode(to_bool_node);
-    loop_block->insertOutput(0, to_bool_node->output());
+    auto cond_any = inlineUnpackedCallTo(*res_block->owningGraph(), *getBatchOperator("any"), cond);
+    auto to_bool_output = res_graph->insert(prim::Bool, {cond_any[0]});
+    loop_block->insertOutput(0,  to_bool_output);
     for(size_t i = 0; i < EXP_BTENSOR_SIZE; i++){
       loop_block->insertOutput(i + 1, cond[i]);
     }
@@ -494,8 +488,9 @@ void ToBatch::toBatch(Block* block, Block* res_block) {
         case prim::NumToTensor:
           visitNumToTensor(n, block, res_block);
           break;
-        case prim::TensorToBool:
-        case prim::TensorToNum:
+        case prim::Bool:
+        case prim::Float:
+        case prim::Int:
           visitTensorToNum(n, block, res_block);
           break;
         case prim::ListConstruct:
@@ -528,17 +523,33 @@ void ToBatch::toBatch(Block* block, Block* res_block) {
   }
 }
 
-std::shared_ptr<Graph> to_batch_graph(std::shared_ptr<Graph>& graph){
-  std::shared_ptr<Graph> res_graph = std::make_shared<Graph>(graph->scope_root());
+std::shared_ptr<Graph> to_batch_graph(std::shared_ptr<Graph> graph) {
+  // lower the tuple before the pass
+  if (graph->outputs().at(0)->type()->kind() == TupleType::Kind) {
+    graph = graph->copy();
+    auto outs = createTupleUnpack(graph->outputs().at(0));
+    graph->eraseOutput(0);
+    for(auto o : outs)
+      graph->registerOutput(o);
+    EliminateDeadCode(graph->block());
+  }
+  std::shared_ptr<Graph> res_graph = std::make_shared<Graph>();
   ToBatch to_batch;
   to_batch.toBatch(graph->block(), res_graph->block());
+
+  // methods should only have a single output, so we pack everything into a tuple
+  auto tup = res_graph->insertNode(res_graph->createTuple(res_graph->outputs()));
+  while (res_graph->outputs().size() > 0)
+    res_graph->eraseOutput(res_graph->outputs().size() - 1);
+  res_graph->registerOutput(tup->output());
+  EliminateDeadCode(res_graph->block());
 
   return res_graph;
 }
 
 void initRegisterBatchOpsBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
-  m.def("to_batch_graph", &to_batch_graph);
+  m.def("to_batch_graph", to_batch_graph);
   m.def("register_batch_operator", [](std::string name, std::shared_ptr<Graph> graph){
     ToBatch::batch_operator_table[name].push_back(graph);
   });

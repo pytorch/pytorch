@@ -13,6 +13,7 @@ glob or regular expressions.
 """
 
 import argparse
+import collections
 import fnmatch
 import json
 import os.path
@@ -20,6 +21,14 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
+
+try:
+    from shlex import quote
+except ImportError:
+    from pipes import quote
+
+Patterns = collections.namedtuple("Patterns", "positive, negative")
 
 
 # NOTE: Clang-tidy cannot lint headers directly, because headers are not
@@ -38,33 +47,57 @@ def run_shell_command(arguments):
     """Executes a shell command."""
     if VERBOSE:
         print(" ".join(arguments))
-    result = subprocess.run(arguments, stdout=subprocess.PIPE)
-    output = result.stdout.decode().strip()
-    if result.returncode != 0:
-        raise RuntimeError("Error executing {}: {}".format(" ".join(arguments), output))
+    try:
+        output = subprocess.check_output(arguments).decode().strip()
+    except subprocess.CalledProcessError:
+        _, error, _ = sys.exc_info()
+        error_output = error.output.decode().strip()
+        raise RuntimeError("Error executing {}: {}".format(" ".join(arguments), error_output))
 
     return output
+
+
+def split_negative_from_positive_patterns(patterns):
+    """Separates negative patterns (that start with a dash) from positive patterns"""
+    positive, negative = [], []
+    for pattern in patterns:
+        if pattern.startswith("-"):
+            negative.append(pattern[1:])
+        else:
+            positive.append(pattern)
+
+    return Patterns(positive, negative)
 
 
 def get_file_patterns(globs, regexes):
     """Returns a list of compiled regex objects from globs and regex pattern strings."""
     # fnmatch.translate converts a glob into a regular expression.
     # https://docs.python.org/2/library/fnmatch.html#fnmatch.translate
-    regexes += [fnmatch.translate(glob) for glob in globs]
-    return [re.compile(regex) for regex in regexes] or [DEFAULT_FILE_PATTERN]
+    glob = split_negative_from_positive_patterns(globs)
+    regexes = split_negative_from_positive_patterns(regexes)
+
+    positive_regexes = regexes.positive + [fnmatch.translate(g) for g in glob.positive]
+    negative_regexes = regexes.negative + [fnmatch.translate(g) for g in glob.negative]
+
+    positive_patterns = [re.compile(regex) for regex in positive_regexes] or [
+        DEFAULT_FILE_PATTERN
+    ]
+    negative_patterns = [re.compile(regex) for regex in negative_regexes]
+
+    return Patterns(positive_patterns, negative_patterns)
 
 
 def filter_files(files, file_patterns):
     """Returns all files that match any of the patterns."""
+    if VERBOSE:
+        print("Filtering with these file patterns: {}".format(file_patterns))
     for file in files:
-        has_match = False
-        for pattern in file_patterns:
-            if pattern.match(file):
+        if not any(n.match(file) for n in file_patterns.negative):
+            if any(p.match(file) for p in file_patterns.positive):
                 yield file
-                has_match = True
-        if not has_match and VERBOSE:
-            message = "{} does not match any file pattern in {{{}}}"
-            print(message.format(file, ", ".join(map(str, file_patterns))))
+                continue
+        if VERBOSE:
+            print("{} ommitted due to file filters".format(file))
 
 
 def get_changed_files(revision, paths):
@@ -94,6 +127,34 @@ def get_changed_lines(revision, filename):
 
     return {"name": filename, "lines": changed_lines}
 
+ninja_template = """
+rule do_cmd
+  command = $cmd
+  description = Running clang-tidy
+
+{build_rules}
+"""
+
+build_template = """
+build {i}: do_cmd
+  cmd = {cmd}
+"""
+
+
+def run_shell_commands_in_parallel(commands):
+    """runs all the commands in parallel with ninja, commands is a List[List[str]]"""
+    build_entries = [build_template.format(i=i, cmd=' '.join([quote(s) for s in command]))
+                     for i, command in enumerate(commands)]
+
+    file_contents = ninja_template.format(build_rules='\n'.join(build_entries)).encode()
+    f = tempfile.NamedTemporaryFile(delete=False)
+    try:
+        f.write(file_contents)
+        f.close()
+        return run_shell_command(['ninja', '-f', f.name])
+    finally:
+        os.unlink(f.name)
+
 
 def run_clang_tidy(options, line_filters, files):
     """Executes the actual clang-tidy command in the shell."""
@@ -106,16 +167,22 @@ def run_clang_tidy(options, line_filters, files):
         with open(options.config_file) as config:
             # Here we convert the YAML config file to a JSON blob.
             command += ["-config", json.dumps(yaml.load(config))]
+    command += options.extra_args
+
     if line_filters:
         command += ["-line-filter", json.dumps(line_filters)]
-    command += options.extra_args
-    command += files
 
-    if options.dry_run:
-        command = [re.sub(r"^([{[].*[]}])$", r"'\1'", arg) for arg in command]
-        return " ".join(command)
+    if options.parallel:
+        commands = [list(command) + [f] for f in files]
+        output = run_shell_commands_in_parallel(commands)
+    else:
+        command += files
+        if options.dry_run:
+            command = [re.sub(r"^([{[].*[]}])$", r"'\1'", arg) for arg in command]
+            return " ".join(command)
 
-    output = run_shell_command(command)
+        output = run_shell_command(command)
+
     if not options.keep_going and "[clang-diagnostic-error]" in output:
         message = "Found clang-diagnostic-errors in clang-tidy output: {}"
         raise RuntimeError(message.format(output))
@@ -135,17 +202,19 @@ def parse_options():
     parser.add_argument(
         "-g",
         "--glob",
-        nargs="+",
+        action="append",
         default=[],
         help="Only lint files that match these glob patterns "
-        "(see documentation for `fnmatch` for supported syntax)",
+        "(see documentation for `fnmatch` for supported syntax)."
+        "If a pattern starts with a - the search is negated for that pattern.",
     )
     parser.add_argument(
         "-x",
         "--regex",
-        nargs="+",
+        action="append",
         default=[],
-        help="Only lint files that match these regular expressions (from the start of the filename)",
+        help="Only lint files that match these regular expressions (from the start of the filename). "
+        "If a pattern starts with a - the search is negated for that pattern.",
     )
     parser.add_argument(
         "-c",
@@ -179,6 +248,12 @@ def parse_options():
         "--keep-going",
         action="store_true",
         help="Don't error on compiler errors (clang-diagnostic-error)",
+    )
+    parser.add_argument(
+        "-j",
+        "--parallel",
+        action="store_true",
+        help="Run clang tidy in parallel per-file (requires ninja to be installed).",
     )
     parser.add_argument(
         "extra_args", nargs="*", help="Extra arguments to forward to clang-tidy"

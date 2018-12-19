@@ -1,17 +1,16 @@
-#include "ATen/Dispatch.h"
-#include "ATen/ExpandUtils.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/cuda/CUDAApplyUtils.cuh"
-#include "ATen/AccumulateType.h"
+#include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/AccumulateType.h>
 
 #include <curand.h>
 #include <curand_kernel.h>
 #include <curand_philox4x32_x.h>
 #include <utility>
 #include <functional>
-#include <nvfunctional>
 
-#include "ATen/native/Distributions.h"
+#include <ATen/native/Distributions.h>
 
 #include <THC/THCGeneral.h>
 #include <THC/THCTensorRandom.h>
@@ -72,13 +71,17 @@ void gamma_cuda_kernel(
             blockIdx.x * blockDim.x + threadIdx.x,
             seeds.second,
             &state);
-        BaseSampler<accscalar_t> standard_uniform([&state] __device__ () {
+
+        auto uniform_lambda = [&state] __device__ () {
           return curand_uniform(&state);
-        });
-        BaseSampler<accscalar_t> standard_normal([&state] __device__ () {
+        };
+        BaseSampler<accscalar_t, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
+
+        auto normal_lambda = [&state] __device__ () {
           return curand_normal(&state);
-        });
-        auto sample = sample_gamma<scalar_t, accscalar_t>(alpha, standard_uniform, standard_normal);
+        };
+        BaseSampler<accscalar_t, decltype(normal_lambda)> standard_normal(normal_lambda);
+        auto sample = sample_gamma<scalar_t, accscalar_t, decltype(uniform_lambda), decltype(normal_lambda)>(alpha, standard_uniform, standard_normal);
         auto min_value = std::numeric_limits<scalar_t>::lowest();
         ret_val = (min_value > sample) ? min_value : sample;
       });
@@ -221,7 +224,7 @@ Tensor& bernoulli_tensor_cuda_(Tensor &self, const Tensor& p_, Generator* gen) {
 
 Tensor& bernoulli_scalar_cuda_(Tensor &self, double p, Generator* gen) {
   AT_CHECK(0 <= p && p <= 1, "bernoulli_ expects p to be in [0, 1], but got p=", p);
-  AT_DISPATCH_ALL_TYPES(self.type(), "bernoulli_scalar_cuda_", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "bernoulli_scalar_cuda_", [&] {
     auto seeds = next_philox_seed(gen, 10);
     bernoulli_scalar_cuda_kernel<scalar_t>(self, p, seeds);
    });

@@ -1,10 +1,10 @@
-#include "torch/csrc/utils/pybind.h"
-#include "torch/csrc/jit/passes/onnx.h"
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/symbolic.h"
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/utils/functional.h"
+#include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/jit/passes/onnx.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/symbolic.h>
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/utils/functional.h>
 #include <unordered_map>
 #include <sstream>
 
@@ -12,14 +12,14 @@ namespace torch { namespace jit {
 
 // Transform PythonOps into Nodes that match ONNX semantics.
 std::shared_ptr<Graph> ToONNX(std::shared_ptr<Graph>& graph, ::torch::onnx::OperatorExportTypes operator_export_type) {
-  auto new_graph = std::make_shared<Graph>(graph->scope_root());
+  auto new_graph = std::make_shared<Graph>(graph->current_scope());
   std::unordered_map<Value*, Value*> env;
   BlockToONNX(graph->block(), new_graph->block(), operator_export_type, env);
   return new_graph;
 }
 
 void BlockToONNX(Block* old_block, Block* new_block, ::torch::onnx::OperatorExportTypes operator_export_type, std::unordered_map<Value*, Value*> env) {
-  torch::autograd::SymbolicContext ctx;
+  torch::autograd::SymbolicContext ctx{};
   ctx.block = new_block;
 
   py::object onnx = py::module::import("torch.onnx");
@@ -58,9 +58,10 @@ void BlockToONNX(Block* old_block, Block* new_block, ::torch::onnx::OperatorExpo
         // Unfortunately, they are on the hook for all internal nodes
         // (though in practice, the types are not computed.)
         outputs[i]->setType(old->type());
-        // Copy over source location information to all nodes created by
-        // the symbolic
+        // Copy over source location and scope information to all nodes
+        // created by the symbolic
         outputs[i]->node()->setSourceLocation(node->getSourceLocation());
+        outputs[i]->node()->setScope(node->scope());
         env[old] = outputs[i];
       } else {
         // Null output means that the ONNX op doesn't have outputs corresponding

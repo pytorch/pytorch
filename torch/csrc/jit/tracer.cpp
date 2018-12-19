@@ -1,12 +1,11 @@
-#include "torch/csrc/jit/tracer.h"
+#include <torch/csrc/jit/tracer.h>
 
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/engine.h"
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/jit/passes/remove_expands.h"
-#include "torch/csrc/variable_tensor_functions.h"
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/engine.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/remove_expands.h>
 
 #include <string>
 #include <sstream>
@@ -28,17 +27,66 @@ void genericAddInput(Node *n, T value) {
 
 template<typename T>
 void badArgType(const T& v) {
-  AT_ERROR("Found an unsupported argument type in the JIT tracer: ", at::demangle_type<T>(), ". File a bug report.");
+  AT_ERROR(
+      "Found an unsupported argument type in the JIT tracer: ",
+      c10::demangle_type<T>(),
+      ". File a bug report.");
 }
 
 thread_local std::shared_ptr<TracingState> tracing_state;
 
 } // namespace detail
 
-void addInputs(Node *n, const char * name, int64_t value)            { detail::genericAddInput(n, value); }
+void setValueTrace(const IValue &v, Value *value) {
+  if (v.isTensor()) {
+    auto var = v.toTensor();
+    JIT_ASSERT(var.defined());
+    getTracingState()->value_map[var] = value;
+  } else if (v.isTensorList()) {
+    auto& outputs = v.toTensorList()->elements();
+    auto graph = getTracingState()->graph;
+    Node * unpack_node = graph->appendNode(graph->create(prim::ListUnpack, {value}, outputs.size()));
+    for (size_t i = 0; i < outputs.size(); ++i) {
+      setValueTrace(outputs[i], unpack_node->outputs()[i]);
+    }
+  } else if (v.isTuple()) {
+    auto& outputs = v.toTuple()->elements();
+    auto graph = getTracingState()->graph;
+    Node * unpack_node = graph->appendNode(graph->create(prim::TupleUnpack, {value}, outputs.size()));
+    for (size_t i = 0; i < outputs.size(); ++i) {
+      setValueTrace(outputs[i], unpack_node->outputs()[i]);
+    }
+  } else {
+    std::ostringstream os;
+    os << "Tracer cannot set value trace for type " << v.tagKind() << ". "
+       << "Supported types are tensor, tensor list, and tuple of tensors.";
+    throw std::runtime_error(os.str());
+  }
+}
+
+void addInputs(Node *n, const char * name, int64_t value) {
+  using ArgumentStash = jit::tracer::ArgumentStash;
+  if (ArgumentStash::hasValue(name)) {
+    Value * v = ArgumentStash::popValue(name);
+    n->addInput(v);
+  } else {
+    detail::genericAddInput(n, value);
+  }
+}
 void addInputs(Node *n, const char * name, bool value)               { detail::genericAddInput(n, value); }
 void addInputs(Node *n, const char * name, double value)             { detail::genericAddInput(n, value); }
 void addInputs(Node *n, const char * name, const at::Scalar& value)  { detail::genericAddInput(n, value); }
+void addInputs(Node *n, const char * name, const c10::optional<at::Scalar>& value)  {
+  if(value) {
+    detail::genericAddInput(n, *value);
+  } else {
+    Graph * g = n->owningGraph();
+    Value* none =
+        g->insertNode(g->createNone(NumberType::get()))
+            ->output();
+    n->addInput(none);
+  }
+}
 void addInputs(Node *n, const char * name, const std::string& value) { detail::genericAddInput(n, value); }
 void addInputs(Node *n, const char * name, const at::Tensor& value)  { n->addInput(getValueTrace(value)); }
 void addInputs(Node *n, const char * name, const at::SparseTensorRef& value) { detail::badArgType(value); }
@@ -51,10 +99,7 @@ void addInputs(Node *n, const char * name, at::Generator * value)            {
   n->addInput(undef_gen);
 }
 void addInputs(Node *n, const char * name, at::Device value) {
-  std::vector<int64_t> device = {
-      static_cast<int64_t>(value.type()),
-      static_cast<int64_t>(value.index())};
-  detail::genericAddInput(n, std::move(device));
+  detail::genericAddInput(n, value);
 }
 void addInputs(Node *n, const char * name, at::Layout value) {
   detail::genericAddInput(n, static_cast<int64_t>(value));
@@ -71,7 +116,7 @@ void addInputs(Node *n, const char * name, at::TensorList value) {
 
 void addInputs(Node* n, const char * name, const at::TensorOptions& options) {
   // [TensorOptions in script] - update this when you change how we schematize TensorOptions
-  addInputs(n, name, options.dtype());
+  addInputs(n, name, at::typeMetaToScalarType(options.dtype()));
   addInputs(n, name, options.layout());
   addInputs(n, name, options.device());
 }
@@ -168,10 +213,25 @@ void ArgumentStash::stashIntListElem(const std::string& arg_name, size_t size, s
 
   Value* ten = getValueTrace(var);
   auto& g = *ten->owningGraph();
-  auto prim = g.createTensorToNum(jit::IntType::get(), ten)
-                   ->insertAfter(ten->node())
-                   ->output();
+  WithInsertPoint guard(ten->node()->next());
+  auto prim = g.insert(prim::Int, {ten});
   list_trace[idx] = prim;
+}
+
+void ArgumentStash::stashValue(const std::string& arg_name, size_t idx, const Variable& var, const TypePtr& type) {
+  if (!isTracing()) return;
+
+  Value* ten = getValueTrace(var);
+  WithInsertPoint guard(ten->node()->next());
+  auto& g = *ten->owningGraph();
+
+  if (type == IntType::get()) {
+    ten = g.insert(prim::Int, { ten });
+  } else if (type == FloatType::get()) {
+    ten = g.insert(prim::Float, { ten });
+  }
+
+  stash.values.emplace(arg_name, ten);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -187,7 +247,9 @@ void setRecordSourceLocation(void (*v)(Node*)) {
   record_source_location.store(v);
 }
 
-void defaultWarn(const std::string& str) { AT_WARN(str); }
+void defaultWarn(const std::string& str) {
+  AT_WARN(str);
+}
 std::atomic<warn_fn_type> warn_callback { defaultWarn };
 
 const char * WARN_PYTHON_DATAFLOW =

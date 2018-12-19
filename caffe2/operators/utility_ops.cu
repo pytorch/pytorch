@@ -44,8 +44,6 @@ REGISTER_CUDA_OPERATOR(ResizeLike, ResizeLikeOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(Sum, SumOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(WeightedSum, WeightedSumOp<CUDAContext>);
 
-REGISTER_CUDA_OPERATOR(UnsafeCoalesce, UnsafeCoalesceOp<CUDAContext>);
-
 CAFFE_KNOWN_TYPE(const float*);
 
 REGISTER_CUDA_OPERATOR(EnsureDense, EnsureDenseOp<CUDAContext>);
@@ -109,9 +107,8 @@ bool NanCheckOp<CUDAContext>::RunOnDevice() {
 
       {
         std::lock_guard<std::mutex> lock(CUDAContext::mutex());
-        cpu_X.CopyFrom(Input(j), &context_);
+        cpu_X.CopyFrom(Input(j)); // sync copy
       }
-      context_.FinishDeviceComputation();
       std::cerr << "Input tensor: " << j << ": [" << this->debug_def().input(j)
                 << "]" << std::endl;
       tensorPrinter_.Print<float>(cpu_X);
@@ -133,7 +130,7 @@ bool NanCheckOp<CUDAContext>::RunOnDevice() {
   // This op should act as an identity matrix if we don't find any NaNs/infs.
   // Copy over the data if we are not doing this in-place.
   if (&X != Y) {
-    Y->CopyFrom(X, &context_);
+    Y->CopyFrom(X, true /*async*/);
   }
   return true;
 }

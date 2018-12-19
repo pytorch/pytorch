@@ -17,12 +17,7 @@ class BatchMatMulOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         trans_a_(this->template GetSingleArgument<int>("trans_a", 0)),
         trans_b_(this->template GetSingleArgument<int>("trans_b", 0)),
-        broadcast_(this->template GetSingleArgument<int>("broadcast", 0)),
-        use_scratch_(this->template GetSingleArgument<int>("use_scratch", 0)) {
-    if (use_scratch_) {
-      scratch_ = std::make_shared<Tensor>(Context::GetDeviceType());
-    }
-  }
+        broadcast_(this->template GetSingleArgument<int>("broadcast", 0)) {}
 
   ~BatchMatMulOp() {}
 
@@ -34,12 +29,11 @@ class BatchMatMulOp final : public Operator<Context> {
   bool DoRunWithType() {
     const auto& A = Input(0);
     const auto& B = Input(1);
-    auto* Y = Output(0);
 
-    auto ndims_A = A.ndim();
-    auto dims_A = A.dims().vec();
-    auto ndims_B = B.ndim();
-    auto dims_B = B.dims().vec();
+    auto ndims_A = A.dim();
+    auto dims_A = A.sizes().vec();
+    auto ndims_B = B.dim();
+    auto dims_B = B.sizes().vec();
 
     auto noBroadcastErrorMsg = [](size_t dim1, size_t dim2) {
       std::stringstream ss;
@@ -91,7 +85,7 @@ class BatchMatMulOp final : public Operator<Context> {
           dims_B[0],
           "Vector-vector product requires each of the vectors to "
           "be the same size.");
-      Y->Resize(1);
+      auto* Y = Output(0, {1}, at::dtype<T>());
       math::Dot<T, Context>(
           dims_A[0], data_A, data_B, Y->template mutable_data<T>(), &context_);
     } else {
@@ -245,7 +239,7 @@ class BatchMatMulOp final : public Operator<Context> {
       }
 
       // Allocate output tensor
-      Y->Resize(new_dims);
+      auto* Y = Output(0, new_dims, at::dtype<T>());
       auto* Y_data = Y->template mutable_data<T>();
 
       // Zero batch dimension indicates no elements
@@ -280,9 +274,6 @@ class BatchMatMulOp final : public Operator<Context> {
   bool trans_a_;
   bool trans_b_;
   bool broadcast_;
-
-  bool use_scratch_;
-  std::shared_ptr<Tensor> scratch_;
 };
 
 } // namespace caffe2

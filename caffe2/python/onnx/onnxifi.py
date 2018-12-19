@@ -16,45 +16,35 @@ import caffe2.python._import_c_extension as C
 import numpy as np
 
 
-def _infer_shapes(pred_net, inputs):
-    workspace.RunNetOnce(pred_net)
-    hints = {}
-    for op in pred_net.op:
-        for o in op.output:
-            if o not in hints:
-                blob = workspace.FetchBlob(o)
-                if hasattr(blob, 'shape'):
-                    hints[o] = blob.shape
-        for i in op.input:
-            if i not in hints:
-                blob = workspace.FetchBlob(i)
-                if hasattr(blob, 'shape'):
-                    hints[i] = blob.shape
-
-    return hints
-
-
 def onnxifi_caffe2_net(
         pred_net,
         input_shapes,
-        populate_shapes=False,
+        infer_shapes=False,
         debug=False):
     """
-    Transfrom the caffe2_net by collapsing ONNXIFI-runnable nodes into Onnxifi c2 ops
+    Transform the caffe2_net by collapsing ONNXIFI-runnable nodes into Onnxifi c2 ops
     """
-    # Hacky way to infer shapes as not all our operators have shape inference function.
-    # Normally this is not needed
+    # Inject an fake input tensor to help popluate the shape if we
+    # do not do shape inference
     shape_hints = {}
-    if populate_shapes:
-        input_data = {}
+    external_inputs = []
+    if not infer_shapes:
         for k, v in input_shapes.items():
-            input_data[k] = np.random.randn(*v).astype(np.float32)
-        shape_hints = _infer_shapes(pred_net, input_data)
+            need_input_tensor = True
+            if workspace.HasBlob(k):
+                itensor = workspace.FetchBlob(k)
+                if itensor.shape == v:
+                    need_input_tensor = False
+            if need_input_tensor:
+                workspace.FeedBlob(k, np.random.randn(*v).astype(np.float32))
+                external_inputs.append(k)
 
     for k, v in input_shapes.items():
         shape_hints[k] = v
     pred_net_str = C.onnxifi(pred_net.SerializeToString(),
+                             external_inputs,
                              shape_hints,
+                             infer_shapes,
                              debug)
     pred_net_cut = caffe2_pb2.NetDef()
     pred_net_cut.ParseFromString(pred_net_str)

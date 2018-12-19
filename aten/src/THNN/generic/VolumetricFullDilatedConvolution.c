@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/VolumetricFullDilatedConvolution.c"
+#define TH_GENERIC_FILE "THNN/generic/VolumetricFullDilatedConvolution.c"
 #else
 
 static void THNN_(vol2col)(

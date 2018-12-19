@@ -1,7 +1,7 @@
 #pragma once
 
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/constants.h"
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/constants.h>
 
 namespace torch { namespace jit {
 
@@ -14,7 +14,7 @@ struct SymbolicVariable {
     return v;
   }
   static SymbolicVariable asNewInput(Graph & g, std::string name = "") {
-    return g.addInput(name);
+    return g.addInput(std::move(name));
   }
   static SymbolicVariable asNewInput(Graph & g, TypePtr type) {
     return g.addInput()->setType(std::move(type));
@@ -32,7 +32,18 @@ struct SymbolicVariable {
       if(g == nullptr) {
         g = inputs.at(0).value()->owningGraph();
       }
-      Node * n = g->insertNode(g->create(kind, num_outputs));
+      Node* n = g->insertNode(g->create(kind, num_outputs));
+      size_t max_depth = 0;
+      ScopePtr s;
+      for(auto n : inputs) {
+        size_t d = n.value()->node()->scope()->getDepth();
+        if(d > max_depth) {
+          max_depth = d;
+          s = n.value()->node()->scope();
+        }
+      }
+      n->setScope(s);
+
       for(auto i : inputs) {
         n->addInput(i.value());
       }
@@ -112,6 +123,15 @@ struct SymbolicVariable {
   SymbolicVariable operator%(at::Scalar rhs) const {
     return create(aten::remainder, {*this, insertConstant(rhs)})[0].typeLike(*this);
   }
+  Value* size() const {
+    return v->owningGraph()->insert(aten::size, {v});
+  }
+  SymbolicVariable sumToSize(Value * size) const {
+    return create(prim::SumToSize, {*this, size})[0];
+  }
+  SymbolicVariable expand(Value * size) const {
+    return v->owningGraph()->insert(aten::expand, {v, size});
+  }
   SymbolicVariable isnan() const {
     return create(aten::ne, {*this, *this})[0].typeLikeWithScalarType(*this, at::kByte);
   }
@@ -182,6 +202,9 @@ struct SymbolicVariable {
   SymbolicVariable cosh() const {
     return create(t("cosh"), {*this})[0];
   }
+  SymbolicVariable exp() const {
+    return create(t("exp"), {*this})[0];
+  }
   SymbolicVariable pow(at::Scalar other) const {
     return create(t("pow"), {*this, insertConstant(other)})[0];
   }
@@ -219,13 +242,13 @@ struct SymbolicVariable {
     return create(aten::view, {*this, sizes})[0];
   }
   SymbolicVariable view(std::vector<std::int64_t> sizes) const {
-    return view(insertConstant(sizes));
+    return view(insertConstant(std::move(sizes)));
   }
   SymbolicVariable reshape(Value* sizes) const {
     return create(aten::reshape, {*this, sizes})[0];
   }
   SymbolicVariable reshape(std::vector<std::int64_t> sizes) const {
-    return reshape(insertConstant(sizes));
+    return reshape(insertConstant(std::move(sizes)));
   }
   SymbolicVariable addmm(SymbolicVariable mat1, SymbolicVariable mat2) const {
     return create(aten::addmm, {*this, mat1, mat2, insertConstant(1), insertConstant(1)})[0];
@@ -235,7 +258,7 @@ struct SymbolicVariable {
   }
 private:
   Value * insertConstant(IValue value) const {
-    return v->owningGraph()->insertConstant(value);
+    return v->owningGraph()->insertConstant(std::move(value));
   }
   SymbolicVariable typeLike(SymbolicVariable other) const {
     if (auto other_type = other.v->type()->cast<CompleteTensorType>())
@@ -273,7 +296,7 @@ private:
 
 // shorter method so that toVar(v) + toVar(c) is short.
 static inline SymbolicVariable toVar(Value * v) {
-  return SymbolicVariable(v);
+  return {v};
 }
 
 template<typename T, typename = typename std::enable_if<std::is_arithmetic<T>::value>::type>

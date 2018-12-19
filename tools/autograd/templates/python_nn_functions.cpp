@@ -21,7 +21,7 @@ namespace torch { namespace autograd {
 static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
-  auto parsed = parse_to_conversion(args, kwargs);
+  auto parsed = parse_to_conversion(args, kwargs, /*allow_copy*/ false); // we don't want copy for nn.Module.to
   auto& device = std::get<0>(parsed);
   auto& scalarType = std::get<1>(parsed);
   auto non_blocking = std::get<2>(parsed);

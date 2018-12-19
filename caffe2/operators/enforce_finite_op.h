@@ -28,7 +28,7 @@ class EnforceFiniteOp final : public Operator<Context> {
   template <typename T>
   void EnforceOnCPU(const Tensor& input) {
     const T* input_data = input.template data<T>();
-    auto size = input.size();
+    auto size = input.numel();
 
     for (auto i = 0; i < size; i++) {
       CAFFE_ENFORCE(

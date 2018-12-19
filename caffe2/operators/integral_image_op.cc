@@ -16,13 +16,13 @@ using ConstEigenMatrixMapRowMajor = Eigen::Map<
 template <>
 bool IntegralImageOp<float, CPUContext>::RunOnDevice() {
   const auto& X = Input(0);
-  auto* Y = Output(0);
-  CAFFE_ENFORCE_EQ(X.ndim(), 4, "Only supports 4D tensors for the momement");
 
-  vector<int64_t> out_shape(X.dims().vec());
+  CAFFE_ENFORCE_EQ(X.dim(), 4, "Only supports 4D tensors for the momement");
+
+  vector<int64_t> out_shape(X.sizes().vec());
   out_shape[2] += 1; // H + 1 output size
   out_shape[3] += 1; // W + 1 output size
-  Y->Resize(out_shape);
+  auto* Y = Output(0, out_shape, at::dtype<float>());
   const int ind = X.dim32(0);
   const int chans = X.dim32(1);
   const int rows_in = X.dim32(2);
@@ -72,10 +72,10 @@ bool IntegralImageGradientOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0); // Original input to "forward" op
   auto& dY = Input(1); // Gradient of net w.r.t. output of "forward" op
   // (aka "gradOutput")
-  auto* dX = Output(0); // Gradient of net w.r.t. input to "forward" op
-  // (aka "gradInput")
+  auto* dX = Output(
+      0, X.sizes(), at::dtype<float>()); // Gradient of net w.r.t. input to
+                                         // "forward" op (aka "gradInput")
 
-  dX->ResizeLike(X);
   const int ind = X.dim32(0);
   const int chans = X.dim32(1);
   const int rows_in = dY.dim32(2);

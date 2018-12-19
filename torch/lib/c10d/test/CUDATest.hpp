@@ -1,14 +1,11 @@
 #pragma once
 
-#include <cuda.h>
-#include <cuda_runtime.h>
-
-#include <c10d/CUDAUtils.hpp>
+#include <c10/cuda/CUDAStream.h>
 
 namespace c10d {
 namespace test {
 
-void cudaSleep(CUDAStream& stream, uint64_t clocks);
+void cudaSleep(at::cuda::CUDAStream& stream, uint64_t clocks);
 
 int cudaNumDevices();
 

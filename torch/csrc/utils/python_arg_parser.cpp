@@ -1,9 +1,9 @@
-#include "torch/csrc/utils/python_arg_parser.h"
+#include <torch/csrc/utils/python_arg_parser.h>
 
-#include "torch/csrc/Exceptions.h"
-#include "torch/csrc/Layout.h"
-#include "torch/csrc/utils/invalid_arguments.h"
-#include "torch/csrc/utils/python_strings.h"
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/Layout.h>
+#include <torch/csrc/utils/invalid_arguments.h>
+#include <torch/csrc/utils/python_strings.h>
 
 #include <ATen/ATen.h>
 
@@ -47,6 +47,7 @@ static bool should_allow_numbers_as_tensors(const std::string& name) {
   return allowed.find(name) != allowed.end();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
   : optional(false)
   , allow_none(false)
@@ -168,12 +169,13 @@ std::string FunctionParameter::type_name() const {
   }
 }
 
-static inline at::optional<int64_t> parse_as_integer(const std::string& s) {
-  if (s.empty()) return at::nullopt;
+static inline c10::optional<int64_t> parse_as_integer(const std::string& s) {
+  if (s.empty())
+    return c10::nullopt;
   char *str_end;
   long ans = strtol(s.c_str(), &str_end, 0);
   // *str_end == 0 if the entire string was parsed as an integer.
-  return (*str_end == 0) ? at::optional<int64_t>(ans) : at::nullopt;
+  return (*str_end == 0) ? c10::optional<int64_t>(ans) : c10::nullopt;
 }
 
 /*
@@ -223,11 +225,7 @@ void FunctionParameter::set_default_str(const std::string& str) {
   } else if (type_ == ParameterType::DOUBLE) {
     default_double = atof(str.c_str());
   } else if (type_ == ParameterType::SCALAR) {
-    if (str == "None") {
-      // This is a bit awkward, but convenient for clamp which takes Scalars,
-      // but allows None.
-      default_scalar = at::Scalar(NAN);
-    } else {
+    if (str != "None") {
       // we sometimes rely on integer-vs-float values, e.g. with arange.
       const auto as_integer = parse_as_integer(str);
       default_scalar = as_integer.has_value() ? at::Scalar(as_integer.value()) :
@@ -288,7 +286,7 @@ FunctionSignature::FunctionSignature(const std::string& fmt)
   while (!done) {
     auto offset = fmt.find(", ", last_offset);
     if (offset == std::string::npos) {
-      offset = fmt.find(")", last_offset);
+      offset = fmt.find(')', last_offset);
       done = true;
       next_offset = offset + 1;
     } else {
@@ -522,7 +520,7 @@ PythonArgParser::PythonArgParser(std::vector<std::string> fmts, bool traceable)
  , traceable(traceable)
 {
   for (auto& fmt : fmts) {
-    signatures_.push_back(FunctionSignature(fmt));
+    signatures_.emplace_back(fmt);
   }
   for (auto& signature : signatures_) {
     if (signature.max_args > max_args) {

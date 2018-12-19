@@ -52,10 +52,11 @@ class UnaryElementwiseWithArgsOp final : public Operator<Context> {
   template <typename T>
   bool DoRunWithType() {
     const auto& X = Input(0);
-    auto* Y = Output(0);
-    Y->ResizeLike(X);
+
+    auto* Y = Output(
+        0, X.sizes(), at::dtype<typename OutputTypeMap::template type<T>>());
     return functor_(
-        X.size(),
+        X.numel(),
         X.template data<T>(),
         Y->template mutable_data<typename OutputTypeMap::template type<T>>(),
         &context_);
@@ -147,21 +148,21 @@ class BinaryElementwiseWithArgsOp final : public Operator<Context> {
   bool DoRunWithType() {
     const auto& A = Input(0);
     const auto& B = Input(1);
-    auto* C = Output(0);
+
     const T* A_data = A.template data<T>();
     const T* B_data = B.template data<T>();
     std::vector<int> A_dims;
     std::vector<int> B_dims;
+    std::vector<int64_t> C_dims;
 
     if (legacy_broadcast_) {
-      CAFFE_ENFORCE_NE(
-          C,
-          &B,
+      CAFFE_ENFORCE(
+          !IsInputOutputAlias(1, 0),
           "In-place is allowed only with the first tensor when "
           "legacy-broadcasting");
-      C->ResizeLike(A);
-      if (B.size() == 1) {
-        A_dims = {static_cast<int>(A.size())};
+      C_dims = A.sizes().vec();
+      if (B.numel() == 1) {
+        A_dims = {static_cast<int>(A.numel())};
         B_dims = {1};
       } else {
         size_t pre, n, post;
@@ -172,19 +173,25 @@ class BinaryElementwiseWithArgsOp final : public Operator<Context> {
         B_dims = {static_cast<int>(n), 1};
       }
     } else {
-      std::copy(A.dims().cbegin(), A.dims().cend(), std::back_inserter(A_dims));
-      std::copy(B.dims().cbegin(), B.dims().cend(), std::back_inserter(B_dims));
-      const std::vector<int> C_dims =
+      std::copy(
+          A.sizes().cbegin(), A.sizes().cend(), std::back_inserter(A_dims));
+      std::copy(
+          B.sizes().cbegin(), B.sizes().cend(), std::back_inserter(B_dims));
+      // TODO: change the types to vector<int64_t>
+      auto C_dims_int =
           elementwise_ops_utils::ComputeBinaryBroadcastForwardDims(
               A_dims, B_dims);
-      if (C == &A) {
-        CAFFE_ENFORCE_EQ(C_dims, A_dims);
-      } else if (C == &B) {
-        CAFFE_ENFORCE_EQ(C_dims, B_dims);
-      } else {
-        C->Resize(C_dims);
+      std::copy(
+          C_dims_int.cbegin(), C_dims_int.cend(), std::back_inserter(C_dims));
+      if (IsInputOutputAlias(0, 0)) {
+        CAFFE_ENFORCE_EQ(C_dims_int, A_dims);
+      } else if (IsInputOutputAlias(1, 0)) {
+        CAFFE_ENFORCE_EQ(C_dims_int, B_dims);
       }
     }
+
+    auto* C = Output(
+        0, C_dims, at::dtype<typename OutputTypeMap::template type<T>>());
     auto* C_data =
         C->template mutable_data<typename OutputTypeMap::template type<T>>();
     return functor_.Forward(A_dims, B_dims, A_data, B_data, C_data, &context_);
@@ -255,13 +262,12 @@ class BinaryElementwiseWithArgsGradientOp final : public Operator<Context> {
     const auto& dC = Input(0);
     const auto& A = Input(1);
     const auto& B = Input(2);
-    auto* dA = Output(0);
-    auto* dB = Output(1);
+
     vector<int> A_dims;
     vector<int> B_dims;
     if (legacy_broadcast_) {
-      if (B.size() == 1) {
-        A_dims = {static_cast<int>(A.size())};
+      if (B.numel() == 1) {
+        A_dims = {static_cast<int>(A.numel())};
         B_dims = {1};
       } else {
         size_t pre, n, post;
@@ -272,8 +278,10 @@ class BinaryElementwiseWithArgsGradientOp final : public Operator<Context> {
         B_dims = {static_cast<int>(n), 1};
       }
     } else {
-      std::copy(A.dims().cbegin(), A.dims().cend(), std::back_inserter(A_dims));
-      std::copy(B.dims().cbegin(), B.dims().cend(), std::back_inserter(B_dims));
+      std::copy(
+          A.sizes().cbegin(), A.sizes().cend(), std::back_inserter(A_dims));
+      std::copy(
+          B.sizes().cbegin(), B.sizes().cend(), std::back_inserter(B_dims));
     }
     const typename OutputTypeMap::template type<T>* C_data = nullptr;
     if (InputSize() == 4) {
@@ -284,8 +292,10 @@ class BinaryElementwiseWithArgsGradientOp final : public Operator<Context> {
         dC.template data<typename GradientTypeMap::template type<T>>();
     const T* A_data = A.template data<T>();
     const T* B_data = B.template data<T>();
-    dA->ResizeLike(A);
-    dB->ResizeLike(B);
+    auto* dA = Output(
+        0, A.sizes(), at::dtype<typename GradientTypeMap::template type<T>>());
+    auto* dB = Output(
+        1, B.sizes(), at::dtype<typename GradientTypeMap::template type<T>>());
     auto* dA_data =
         dA->template mutable_data<typename GradientTypeMap::template type<T>>();
     auto* dB_data =

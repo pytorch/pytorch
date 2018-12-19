@@ -18,15 +18,15 @@ class NormalizeOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     const auto& x = Input(0);
-    auto* y = Output(0);
+
     const auto* xData = x.template data<T>();
-    y->ResizeLike(x);
+    auto* y = Output(0, x.sizes(), at::dtype<T>());
     auto* yData = y->template mutable_data<T>();
 
     const auto canonical_axis = x.canonical_axis_index(
         this->template GetSingleArgument<int>("axis", -1));
     const int m = x.dim32(canonical_axis);
-    const int n = x.size() / m;
+    const int n = x.numel() / m;
     const int sf = x.size_from_dim(canonical_axis + 1);
     DoNormalize(xData, yData, m, n, sf);
     return true;
@@ -48,8 +48,8 @@ class NormalizeGradientOp final : public Operator<Context> {
   bool RunOnDevice() override {
     const auto& x = Input(0);
     const auto& gOut = Input(GRAD_OUT);
-    auto* gIn = Output(GRAD_IN);
-    gIn->ResizeLike(gOut);
+
+    auto* gIn = Output(GRAD_IN, gOut.sizes(), at::dtype<T>());
 
     const auto* xData = x.template data<T>();
     const auto* gOutData = gOut.template data<T>();
@@ -58,7 +58,7 @@ class NormalizeGradientOp final : public Operator<Context> {
     const auto canonical_axis = x.canonical_axis_index(
         this->template GetSingleArgument<int>("axis", -1));
     const int m = x.dim32(canonical_axis);
-    const int n = x.size() / m;
+    const int n = x.numel() / m;
     const int sf = x.size_from_dim(canonical_axis + 1);
     DoNormalize(xData, gOutData, gInData, m, n, sf);
     return true;

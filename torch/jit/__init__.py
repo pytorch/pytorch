@@ -1,11 +1,21 @@
 import torch._C
 from torch import Tensor
 from torch.autograd import Variable, function
+from torch.serialization import validate_cuda_device
 from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
-from torch.jit.frontend import get_jit_ast
+from torch.jit.frontend import get_jit_ast, get_default_args
+import torch.backends.cudnn as cudnn
 import torch.jit.annotations
-from torch._six import raise_from, with_metaclass
+from torch._six import raise_from, with_metaclass, get_function_from_type, \
+    string_classes
+from .._jit_internal import createResolutionCallback, _compiled_weak_fns, \
+    _weak_script_methods, _weak_modules, _weak_types, COMPILED, \
+    COMPILATION_PENDING, _boolean_dispatched
+from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
+    _list_with_default
 import torch.testing
+
+import math
 from collections import defaultdict, OrderedDict, namedtuple
 import sys
 import warnings
@@ -15,11 +25,12 @@ import types
 import contextlib
 import os
 import functools
-import inspect
 import copy
 import numbers
 import collections
 import re
+import inspect
+import pickle
 if sys.version_info[0] > 2:
     import pathlib
 
@@ -46,9 +57,10 @@ _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
 _jit_script_compile = torch._C._jit_script_compile
 BatchTensor = torch._C._jit.BatchTensor
-compiled_weak_fns = weakref.WeakKeyDictionary()
-COMPILATION_PENDING = object()
-COMPILED = object()
+
+Future = torch._C.Future
+_fork = torch._C.fork
+_wait = torch._C.wait
 
 
 @contextlib.contextmanager
@@ -63,17 +75,23 @@ def scope(scope_name):
             tracing_state.pop_scope()
 
 
-def load(f):
+def load(f, map_location=None):
     r"""
         Load a ``ScriptModule`` previously saved with :func:`save <torch.jit.save>`
 
-        .. DANGER::
-           All previously saved modules, no matter their device, are always loaded onto the CPU.
-           This is different from :func:`torch.load`'s semantics and may change in the future.
+        All previously saved modules, no matter their device, are first loaded onto CPU,
+        and then are moved to the devices they were saved from. If this fails (e.g. because
+        the run time system doesn't have certain devices), an exception is raised.
+        However, storages can be dynamically remapped to an alternative set of devices
+        using the `map_location` argument. Comparing to :func:`torch.load`, `map_location`
+        in this function is simplified, which only accepts a string (e.g., 'cpu', 'cuda:0'),
+        or torch.device (e.g., torch.device('cpu'))
 
         Arguments:
             f: a file-like object (has to implement read, readline, tell, and seek),
                 or a string containing a file name
+            map_location: can a string (e.g., 'cpu', 'cuda:0'), a device (e.g.,
+                torch.device('cpu'))
 
         Returns:
             A ``ScriptModule`` object.
@@ -83,7 +101,12 @@ def load(f):
             # Load ScriptModule from io.BytesIO object
             >>> with open('scriptmodule.pt', 'rb') as f:
                     buffer = io.BytesIO(f.read())
+            # Load all tensors to the original device
             >>> torch.jit.load(buffer)
+            # Load all tensors onto CPU, using a device
+            >>> torch.jit.load(buffer, map_location=torch.device('cpu'))
+            # Load all tensors onto CPU, using a string
+            >>> torch.jit.load(buffer, map_location='cpu')
     """
     m = ScriptModule()
 
@@ -95,12 +118,21 @@ def load(f):
             curr = getattr(curr, name)
         return curr
 
+    if isinstance(map_location, string_classes):
+        map_location = torch.device(map_location)
+    elif not (map_location is None or
+              isinstance(map_location, torch.device)):
+        raise ValueError("map_location should be either None, string or torch.device, "
+                         "but got type: " + str(type(map_location)))
+    if (str(map_location).startswith('cuda')):
+        validate_cuda_device(map_location)
+
     if isinstance(f, str) or \
             (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
             (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
-        torch._C.import_ir_module(module_lookup, f)
+        torch._C.import_ir_module(module_lookup, f, map_location)
     else:
-        torch._C.import_ir_module_from_buffer(module_lookup, f.read())
+        torch._C.import_ir_module_from_buffer(module_lookup, f.read(), map_location)
     return m
 
 
@@ -137,7 +169,7 @@ def save(m, f):
         f.write(ret)
 
 
-def get_trace_graph(f, args=(), kwargs=None):
+def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False):
     """
     Trace a function or model, returning a tuple consisting of the both the
     *trace* of an execution, as well as the original return value.
@@ -163,7 +195,7 @@ def get_trace_graph(f, args=(), kwargs=None):
         kwargs = {}
     if not isinstance(args, tuple):
         args = (args,)
-    return LegacyTracedModule(f)(*args, **kwargs)
+    return LegacyTracedModule(f, _force_outplace)(*args, **kwargs)
 
 
 def _unique_state_dict(module, keep_vars=False):
@@ -178,13 +210,35 @@ def _unique_state_dict(module, keep_vars=False):
     return filtered_dict
 
 
+def _create_interpreter_name_lookup_fn(frames_up=1):
+    def _get_interpreter_name_for_var(var):
+        frame = inspect.currentframe()
+        i = 0
+        while i < frames_up + 1:
+            frame = frame.f_back
+            i += 1
+
+        f_locals = frame.f_locals
+        f_globals = frame.f_globals
+
+        for k, v in f_locals.items():
+            if isinstance(v, torch.Tensor) and var is v:
+                return k
+        for k, v in f_globals.items():
+            if isinstance(v, torch.Tensor) and var is v:
+                return k
+        return ''
+    return _get_interpreter_name_for_var
+
+
 class LegacyTracedModule(Module):
-    def __init__(self, inner):
+    def __init__(self, inner, force_outplace=False):
         super(LegacyTracedModule, self).__init__()
         # inner may be a Module, or it may be an arbitrary callable
         # If it's a Module, we get its parameters automatically, which lets
         # us avoid a special casing functions versus modules.
         self.inner = inner
+        self._force_outplace = force_outplace
 
     def forward(self, *args):
         in_vars, in_desc = _flatten(args)
@@ -192,6 +246,8 @@ class LegacyTracedModule(Module):
         # This differs from the compiler path, which doesn't support it at the moment.
         module_state = list(_unique_state_dict(self, keep_vars=True).values())
         trace, all_trace_inputs = torch._C._tracer_enter(*(in_vars + module_state))
+        torch._C._tracer_set_force_outplace(self._force_outplace)
+        torch._C._tracer_set_get_unique_name_fn(_create_interpreter_name_lookup_fn())
         try:
             trace_inputs = _unflatten(all_trace_inputs[:len(in_vars)], in_desc)
             out = self.inner(*trace_inputs)
@@ -367,13 +423,18 @@ class TracingCheckError(Exception):
 
 # Check the traced module against a set of user-provided validation inputs
 @torch.no_grad()
-def _check_trace(check_inputs, func, executor_options, module, check_tolerance):
+def _check_trace(check_inputs, func, executor_options, module, check_tolerance, force_outplace):
     # Note: tracing is independent of optimizations, which consume the trace
     executor_options['optimize'] = False
     for inputs in check_inputs:
         if isinstance(inputs, torch.Tensor):
             inputs = (inputs,)
-        check_mod = torch.jit.trace(func, _clone_inputs(inputs), check_trace=False, **executor_options)
+        check_mod = torch.jit.trace(
+            func,
+            _clone_inputs(inputs),
+            check_trace=False,
+            _force_outplace=force_outplace,
+            **executor_options)
 
         def graph_diagnostic_info():
             mod_canonicalized = torch._C._jit_pass_canonicalize(module.graph)
@@ -498,7 +559,13 @@ TracerWarning.ignore_lib_warnings()
 torch._C._tracer_warn_use_python()
 
 
-def trace(func, example_inputs, optimize=True, check_trace=True, check_inputs=None, check_tolerance=1e-5):
+def trace(func,
+          example_inputs,
+          optimize=True,
+          check_trace=True,
+          check_inputs=None,
+          check_tolerance=1e-5,
+          _force_outplace=False):
     """
     Trace a function and return an executable trace that will be optimized
     using just-in-time compilation.
@@ -565,58 +632,18 @@ def trace(func, example_inputs, optimize=True, check_trace=True, check_inputs=No
     elif not isinstance(example_inputs, tuple):
         example_inputs = tuple(example_inputs)
     module = TopLevelTracedModule(func, **executor_options)
-    module._create_method_from_trace('forward', func, example_inputs)
+    var_lookup_fn = _create_interpreter_name_lookup_fn(0)
+    module._create_method_from_trace('forward', func, example_inputs,
+                                     var_lookup_fn, _force_outplace)
 
     # Check the trace against new traces created from user-specified inputs
     if check_trace:
         if check_inputs is not None:
-            _check_trace(check_inputs, func, executor_options, module, check_tolerance)
+            _check_trace(check_inputs, func, executor_options, module, check_tolerance, _force_outplace)
         else:
-            _check_trace([example_inputs], func, executor_options, module, check_tolerance)
+            _check_trace([example_inputs], func, executor_options, module, check_tolerance, _force_outplace)
 
     return module
-
-
-def createResolutionCallback(frames_up=0):
-    """
-    Creates a function which, given a string variable name,
-    returns the value of the variable in the scope of the caller of
-    the function which called createResolutionCallback (by default).
-
-    This is used to enable access in-scope Python variables inside
-    TorchScript fragments.
-
-    frames_up is number of additional frames to go up on the stack.
-    The default value is 0, which correspond to the frame of the caller
-    of createResolutionCallback. Also for example, if frames_up is set
-    to 1, then the frame of the caller's caller of createResolutionCallback
-    will be taken.
-
-    For example, the following program prints 2::
-
-        def bar():
-            cb = createResolutionCallback(1)
-            print(cb("foo"))
-
-        def baz():
-            foo = 2
-            bar()
-
-        baz()
-    """
-    frame = inspect.stack()[1 + frames_up][0]
-    f_locals = frame.f_locals
-    f_globals = frame.f_globals
-
-    def env(key):
-        if key in f_locals:
-            return f_locals[key]
-        elif key in f_globals:
-            return f_globals[key]
-        else:
-            return None
-
-    return env
 
 
 class CompilationUnit(object):
@@ -636,23 +663,20 @@ class CompilationUnit(object):
         return self.module._get_method(attr)
 
 
-def weak_script(fn, _frames_up=0):
-    compiled_weak_fns[fn] = {
-        "status": COMPILATION_PENDING,
-        "compiled_fn": None,
-        "rcb": createResolutionCallback(_frames_up + 1)
-    }
-    return fn
+def _try_get_dispatched_fn(fn):
+    if not callable(fn):
+        return None
+    return _boolean_dispatched.get(fn)
 
 
 def _try_compile_weak_script(fn):
-    entry = compiled_weak_fns.get(fn)
+    entry = _compiled_weak_fns.get(fn)
     if entry is None:
         return None
     if entry["status"] == COMPILATION_PENDING:
         compiled_fn = torch.jit.script(fn, True, 0, entry["rcb"])
         del entry["rcb"]
-        compiled_weak_fns[fn]["compiled_fn"] = compiled_fn
+        _compiled_weak_fns[fn]["compiled_fn"] = compiled_fn
         entry["status"] = COMPILED
         return compiled_fn
     else:
@@ -665,23 +689,16 @@ def script(fn, optimize=True, _frames_up=0, _rcb=None):
     if _rcb is None:
         _rcb = createResolutionCallback(_frames_up + 1)
     ast = get_jit_ast(fn, is_method=False)
-    graph = _jit_script_compile(ast, _rcb)
     mod = ScriptModule()
-    mod._create_method_from_graph('forward', graph)
-    # TODO: refactor everything so we're not 1) creating a ScriptModule
-    # 2) Throwing everything away except for the graph 3) Creating a new
-    # ScriptModule and dumping that graph in 4) Re-populating the schema
-    # because it was lost doing the previous
-    mod.__getattr__('forward').forward_schema(ast, False)
+    _jit_script_compile(mod, ast, _rcb, get_default_args(fn))
     # Forward docstrings
     mod.__doc__ = fn.__doc__
     return mod
 
-
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
 
 
-def script_method(fn):
+def script_method(fn, _rcb=None):
     if not _enabled:
         return fn
     # NOTE: we need to traverse two frames here because the meta-class frame
@@ -696,9 +713,26 @@ def script_method(fn):
     #
     # createResolutionCallback internally adds 1 to get us to the scope of this
     # function (the calling function). Adding 2 gets us to the proper surrounding scope.
-    rcb = createResolutionCallback(frames_up=2)
+    if _rcb is None:
+        _rcb = createResolutionCallback(frames_up=2)
     ast = get_jit_ast(fn, is_method=True)
-    return ScriptMethodStub(rcb, ast, fn)
+    return ScriptMethodStub(_rcb, ast, fn)
+
+
+def _try_get_weak_module(mod):
+    """
+    Get the WeakScriptModuleProxy corresponding to mod if it exists
+    """
+    if not isinstance(mod, Module):
+        return None
+    return _weak_modules.get(mod)
+
+
+def _is_weak_type(cls):
+    """
+    Check if a type has been annotated with `weak_module`
+    """
+    return cls in _weak_types
 
 
 def batch(batch_size=1, optimize=True, _frames_up=0):
@@ -855,21 +889,29 @@ class OrderedBufferDict(OrderedDictWrapper):
 # in addition, tuples and lists of these base types are also considered constants
 # If you edit this list, then you also need to edit the handlers in
 # ConstantValue in jit/script/init.cpp
-_constant_types = (bool, float, int, types.FunctionType, torch.device, torch.layout, torch.dtype)
+_constant_types = (bool, float, int, str, type(None), types.FunctionType, torch.device, torch.layout, torch.dtype)
 
 
-def _get_valid_constant(v):
+def _get_valid_constant(attr, v):
     if isinstance(v, _constant_types):
         return v
     elif isinstance(v, tuple) or isinstance(v, list):
-        return tuple(_get_valid_constant(x) for x in v)
+        return tuple(_get_valid_constant(attr, x) for x in v)
     constants = ", ".join(typ.__name__ for typ in _constant_types)
     raise TypeError(
-        "'{}' object is not a valid constant.\n".format(type(v).__name__) +
+        "'{}' object for attribute '{}' ".format(type(v).__name__, attr) +
+        "is not a valid constant.\n" +
         "Valid constants are:\n" +
         "  1. a nn.ModuleList\n" +
         "  2. a value of type {{{}}}\n".format(constants) +
         "  3. a list or tuple of (2)\n")
+
+
+def _create_methods_from_stubs(self, stubs):
+    defs = [m.def_ for m in stubs]
+    rcbs = [m.resolution_callback for m in stubs]
+    defaults = [get_default_args(m.original_method) for m in stubs]
+    self._create_methods(defs, rcbs, defaults)
 
 # For each user-defined class that subclasses ScriptModule this meta-class,
 # (1) finds all the methods annotated with @script_method
@@ -908,9 +950,7 @@ class ScriptMeta(type(torch._C.ScriptModule)):
             if cls is type(self):
                 torch._C.ScriptModule.__init__(self)
             original_init(self, *args, **kwargs)
-            defs = [m.def_ for m in methods]
-            rcbs = [m.resolution_callback for m in methods]
-            self._create_methods(defs, rcbs)
+            _create_methods_from_stubs(self, methods)
 
         cls.__init__ = init_then_register
         return super(ScriptMeta, cls).__init__(name, bases, attrs)
@@ -919,16 +959,16 @@ class ScriptMeta(type(torch._C.ScriptModule)):
 if _enabled:
     class ScriptModule(with_metaclass(ScriptMeta, torch._C.ScriptModule, Module)):
         r"""
-        The core data structure in Torch Script is the ``ScriptModule``. It is an
+        The core data structure in TorchScript is the ``ScriptModule``. It is an
         analogue of torch's nn.Module and represents an entire model as a tree of
         submodules. Like normal modules, each individual module in a ScriptModule can
         have submodules, parameters, and methods. In nn.Modules methods are implemented
         as Python functions, but in ScriptModules methods typically implemented as
-        *Torch Script* functions,  a statically-typed subset of Python that contains all
+        *TorchScript* functions,  a statically-typed subset of Python that contains all
         of PyTorch's built-in Tensor operations. This difference allows your
         ScriptModules code to run without the need for a Python interpreter.
 
-        ScriptModules and the Torch Script functions inside of them can be created in
+        ScriptModules and the TorchScript functions inside of them can be created in
         two ways:
 
         **Tracing:**
@@ -936,7 +976,7 @@ if _enabled:
             Using ``torch.jit.trace``, you can take an existing module or python
             function, provide example inputs, and we run the function, recording the
             operations performed on all the tensors. We turn the resulting recording
-            into a Torch Script method that is installed as the ``forward`` method of a
+            into a TorchScript method that is installed as the ``forward`` method of a
             ScriptModule. This module also contains any parameters that the original
             module had as well.
 
@@ -948,9 +988,9 @@ if _enabled:
                 traced_foo = torch.jit.trace(foo, (torch.rand(3), torch.rand(3)))
 
             .. note::
-                Tracing a *function* will produce a ScriptModule with a single
+                Tracing a *function* will produce a ``ScriptModule`` with a single
                 ``forward`` method that implements that function, and that contains
-                no parameteres.
+                no parameters.
 
             Example::
 
@@ -961,21 +1001,34 @@ if _enabled:
 
             .. note::
 
-                Since tracing only records operations on tensors, it will not record any
-                control-flow operations like if statements or loops. When this control-flow is
-                constant across your module, this is fine and it often just inlines
-                configuration decisions. But sometimes the control-flow is actually part of the
-                model itself. For instance, a beam search in sequence-to-sequence translation is
-                a loop over the (varying) sequence length of inputs. In this case tracing would
-                not be appropriate and the beam search should be written using scripting.
+                Tracing only records operations done when the given function is run on the given
+                tensors. Therefore, the returned ``ScriptModule`` will always run the same traced
+                graph on any input. This has some important implications when your module is
+                expected to run different sets of operations, depending on the input and/or the
+                module state. For example,
+
+                    + Tracing will not record any control-flow like if statements or loops. When
+                      this control-flow is constant across your module, this is fine and it often
+                      just inlines configuration decisions. But sometimes the control-flow is
+                      actually part of the model itself. For instance, a beam search in
+                      sequence-to-sequence translation is a loop over the (varying) sequence
+                      length of inputs.
+
+                    + In the returned ``ScriptModule``, operations that have different behaviors
+                      in ``training`` and ``eval`` modes will always behave as if it is in the
+                      mode it was in during tracing, no matter which mode the ``ScriptModule``
+                      is in.
+
+                In cases like these, tracing would not be appropriate and scripting is a better
+                choice.
 
         **Scripting:**
 
-            You can write Torch Script code directly using Python syntax. You do this
+            You can write TorchScript code directly using Python syntax. You do this
             using the ``torch.jit.script`` annotation (for functions) or
             ``torch.jit.script_method`` annotation (for methods) on subclasses of
             ScriptModule. With this annotation the body of the annotated function is
-            directly translated into Torch Script. Torch Script itself is a subset of
+            directly translated into TorchScript. TorchScript itself is a subset of
             the Python language, so not all features in python work, but we provide
             enough functionality to compute on tensors and do control-dependent
             operations.
@@ -1051,7 +1104,16 @@ if _enabled:
 
         def __setattr__(self, attr, value):
             if attr not in self._constants_set:
+                if isinstance(value, Module) and _is_weak_type(type(value)):
+                    # Compile weak script module
+                    value = _make_strong(value)
+                if attr == 'training':
+                    if self._has_buffer('training'):
+                        self.__dict__['training'] = value
+                        self._get_parameter('training').fill_(int(value))
+                        return
                 return super(ScriptModule, self).__setattr__(attr, value)
+
             if hasattr(self, attr):
                 raise RuntimeError("attempting to re-assign constant '{}'".format(attr))
             if isinstance(value, ModuleList):
@@ -1063,7 +1125,7 @@ if _enabled:
             elif isinstance(value, Sequential):
                 super(ScriptModule, self).__setattr__(attr, _ConstSequential(value))
             else:
-                super(ScriptModule, self).__setattr__(attr, _get_valid_constant(value))
+                super(ScriptModule, self).__setattr__(attr, _get_valid_constant(attr, value))
 
         def __dir__(self):
             return sorted(Module.__dir__(self) + self._method_names())
@@ -1079,8 +1141,122 @@ if _enabled:
             # we add 1 to get to the proper surrounding scope.
             rcb = createResolutionCallback(frames_up=1)
             self._define(lang, rcb, True)
+
+        def copy(self):
+            m = ScriptModule()
+
+            def module_lookup(names):
+                curr = m
+                for name in names:
+                    if not hasattr(curr, name):
+                        setattr(curr, name, ScriptModule())
+                    curr = getattr(curr, name)
+                return curr
+            self._copy_into(module_lookup, [])
+            return m
+
+        def __getstate__(self):
+            raise pickle.PickleError(
+                "ScriptModules cannot be saved using torch.save. " +
+                "Mixed serialization of script and non-script modules is not supported. " +
+                "For purely script modules use my_script_module.save(<filename>) instead.")
+
+    class WeakScriptModuleProxy(ScriptModule):
+        def __init__(self, original, stubs):
+            # Guards behavior of __setattr__ and __getattr__ so ScriptModule
+            # __init__ can run correctly
+            self.__dict__['_initialized'] = False
+            super(WeakScriptModuleProxy, self).__init__()
+
+            self.__dict__["_original"] = weakref.ref(original)
+
+            # Copy Parameters / Modules / Buffers
+            for name in dir(original):
+                item = getattr(original, name)
+                if item is None and name in original._parameters:
+                    # XXX: treat None value simply as module attributes instead of adding them to the parameter list
+                    # TODO: need to handle this more generally when non-tensor attributes added to module
+                    object.__setattr__(self, name, item)
+                elif isinstance(item, Parameter) or (isinstance(item, Module) and item is not self):
+                    ScriptModule.__setattr__(self, name, item)
+            for name in original._buffers:
+                if original._buffers[name] is None:
+                    object.__setattr__(self, name, None)
+                else:
+                    self.register_buffer(name, original._buffers[name])
+
+            # Copy constants
+            self.__dict__["_constants_set"] = set(getattr(original, "__constants__", []))
+
+            self.__dict__["_initialized"] = True
+            _create_methods_from_stubs(self, stubs)
+
+        def __getattr__(self, attr):
+            # Try to get the attribute directly, if that fails, fall back to the
+            # weak module itself
+            try:
+                return ScriptModule.__getattr__(self, attr)
+            except AttributeError:
+                if self.__dict__["_initialized"]:
+                    return getattr(self.__dict__["_original"](), attr)
+                else:
+                    # Only fall back to original once __init__() is done
+                    raise AttributeError("Weak module has no attribute '{}'"
+                                         .format(attr))
+
+        def __setattr__(self, attr, value):
+            # Once constructed, no new properties can be set
+
+            if not self.__dict__["_initialized"]:
+                # If constructing, don't fall back to original module
+                return ScriptModule.__setattr__(self, attr, value)
+
+            if hasattr(self, attr):
+                return ScriptModule.__setattr__(self, attr, value)
+            else:
+                raise AttributeError("Cannot set new attribute '{}' on "
+                                     "weak script module once it has been "
+                                     "created".format(attr))
 else:
     ScriptModule = torch.nn.Module
+
+
+def _get_weak_stubs(cls):
+    """
+    Calls script_method for each method on the type of the object passed in and
+    returns the generated ScriptMethodStubs
+    """
+    stubs = []
+    for name in dir(cls):
+        func = get_function_from_type(cls, name)
+        if func in _weak_script_methods:
+            entry = _weak_script_methods[func]
+            stub = script_method(entry["original_method"], entry["rcb"])
+            stubs.append(stub)
+    return stubs
+
+
+def _make_strong(mod):
+    """
+    Converts a weak module into a subclass of ScriptModule
+    """
+    if mod in _weak_modules:
+        return _weak_modules[mod]
+
+    stubs = _weak_types.get(type(mod))["method_stubs"]
+
+    if stubs is None:
+        # Generate stubs and and store on _weak_types in case this type is
+        # used again
+        stubs = _get_weak_stubs(type(mod))
+        _weak_types[type(mod)]["method_stubs"] = stubs
+
+    # Create proxy with stubs
+    proxy = WeakScriptModuleProxy(mod, stubs)
+
+    _weak_modules[mod] = proxy
+
+    return proxy
 
 
 def _get_methods(cls):
@@ -1148,7 +1324,10 @@ class TracedModule(ScriptModule):
             raise ValueError("Modules that have hooks assigned can't be compiled")
 
         for name, submodule in orig._modules.items():
-            self._modules[name] = TracedModule(submodule, id_set, optimize=optimize)
+            if isinstance(submodule, ScriptModule) and not isinstance(submodule, TracedModule):
+                self._modules[name] = submodule.copy()
+            else:
+                self._modules[name] = TracedModule(submodule, id_set, optimize=optimize)
 
         self._freeze()
 
@@ -1176,6 +1355,8 @@ class _ConstModuleList(ScriptModule):
     def __init__(self, modules):
         super(_ConstModuleList, self).__init__()
         for i, module in enumerate(modules):
+            if _is_weak_type(type(module)):
+                module = _make_strong(module)
             self.add_module(str(i), module)
 
     def __getitem__(self, idx):
@@ -1221,7 +1402,12 @@ class _ConstSequential(_ConstModuleList):
 
 _builtin_table = None
 
-_modules_containing_builtins = (torch, torch.nn.functional)
+_modules_containing_builtins = (torch, torch._C._nn)
+
+
+def _unwrap_optional(x):
+    assert x is not None, "Unwrapping null optional"
+    return x
 
 
 # lazily built to ensure the correct initialization order
@@ -1239,6 +1425,24 @@ def _get_builtin_table():
     for mod in _modules_containing_builtins:
         register_all(mod)
 
+    _builtin_table[id(warnings.warn)] = "aten::warn"
+    _builtin_table[id(_single)] = "aten::_single"
+    _builtin_table[id(_pair)] = "aten::_pair"
+    _builtin_table[id(_triple)] = "aten::_triple"
+    _builtin_table[id(_quadruple)] = "aten::_quadruple"
+    _builtin_table[id(_list_with_default)] = "aten::list_with_default"
+    _builtin_table[id(_unwrap_optional)] = "aten::_unwrap_optional"
+    _builtin_table[id(cudnn.is_acceptable)] = "aten::cudnn_is_acceptable"
+    _builtin_table[id(torch._C._infer_size)] = "aten::_infer_size"
+    _builtin_table[id(torch.nn.functional._no_grad_embedding_renorm_)] = "aten::_no_grad_embedding_renorm_"
+
+    _builtin_table[id(math.floor)] = "aten::floor"
+    _builtin_table[id(torch.nn.functional.interpolate)] = "aten::__interpolate"
+    _builtin_table[id(torch.nn.functional.upsample_nearest)] = "aten::__upsample_nearest"
+    _builtin_table[id(torch.nn.functional.upsample)] = "aten::__upsample"
+    _builtin_table[id(torch.nn.functional.upsample_bilinear)] = "aten::__upsample_bilinear"
+    _builtin_table[id(torch.nn.functional.assert_int_or_pair)] = "aten::_assert_int_or_pair"
+
     return _builtin_table
 
 
@@ -1250,6 +1454,13 @@ def _find_builtin(fn):
     return _get_builtin_table().get(id(fn))
 
 
+_register_builtin(len, 'aten::len')
+_register_builtin(_wait, 'aten::wait')
+
+# torch.jit.Error
+Error = torch._C.JITException
+
+
 class _disable_tracing(object):
     def __enter__(self):
         self.state = torch._C._get_tracing_state()
@@ -1259,6 +1470,11 @@ class _disable_tracing(object):
         torch._C._set_tracing_state(self.state)
         self.state = None
 
+
+# for use in python if using annotate
+def annotate(the_type, the_value):
+    # noop in python
+    return the_value
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")

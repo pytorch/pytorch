@@ -3,7 +3,7 @@
 #define CAFFE2_CORE_MIOPEN_WRAPPERS_H_
 
 #include "caffe2/core/hip/common_miopen.h"
-#include "caffe2/core/hip/context_hip.h"
+#include "caffe2/core/hip/context_gpu.h"
 
 namespace caffe2 {
 
@@ -123,9 +123,9 @@ class MIOPENWrapper
     void with_miopen_state(size_t state_idx, F&& f)
     {
         CAFFE_ENFORCE(state_idx < CAFFE2_COMPILE_TIME_MAX_MIOPEN_STATES, "Invalid state_idx");
-        auto& sync_state = miopen_states()[context_->hip_gpu_id()][state_idx];
+        auto& sync_state = miopen_states()[context_->device_id()][state_idx];
 
-        DeviceGuard dg(context_->hip_gpu_id());
+        DeviceGuard dg(context_->device_id());
 
         // We need to serialize execution on the MIOPENState as we can't
         // allow multiple threads to race through the cudaEventRecord
@@ -134,7 +134,7 @@ class MIOPENWrapper
         std::lock_guard<std::mutex> g(sync_state.mutex);
         if(!sync_state.state.get())
         {
-            sync_state.state.reset(new MIOPENState(context_->hip_gpu_id()));
+          sync_state.state.reset(new MIOPENState(context_->device_id()));
         }
         CHECK_NOTNULL(sync_state.state.get())->execute(context_->hip_stream(), f);
     }
@@ -153,7 +153,7 @@ class MIOPENWrapper
 
     using PerGPUMIOPENStates =
         std::array<std::array<SyncedMIOPENState, CAFFE2_COMPILE_TIME_MAX_MIOPEN_STATES>,
-                   CAFFE2_COMPILE_TIME_MAX_HIP_GPUS>;
+                   CAFFE2_COMPILE_TIME_MAX_GPUS>;
     static PerGPUMIOPENStates& miopen_states();
 
     C10_DISABLE_COPY_AND_ASSIGN(MIOPENWrapper);

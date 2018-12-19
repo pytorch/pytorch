@@ -1,5 +1,5 @@
 #include "caffe2/operators/fused_rowwise_random_quantization_ops.h"
-#include "c10/util/Registry.h"
+#include <c10/util/Registry.h>
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -15,15 +15,14 @@ bool FloatToFusedRandRowwiseQuantizedOp<Context>::RunOnDevice() {
   CAFFE_ENFORCE(IS_LITTLE_ENDIAN, "Unsupported endianness");
 
   const auto& input = Input(DATA_FLOAT);
-  auto* output = Output(DATA_FUSED_QUANTIZED);
 
   CAFFE_ENFORCE_EQ(
-      input.ndim(),
+      input.dim(),
       2,
       "Expect input to be a matrix. Reshape the input tensor to a matrix for usage.");
 
-  const auto input_rows = input.dim(0);
-  const auto input_columns = input.dim(1);
+  const auto input_rows = input.size(0);
+  const auto input_columns = input.size(1);
 
   // The "fused" representation stores the [bitwidth][tail][min][max]
   // with the row-wise quantized data in one tensor. Since we store 8/bitwidth
@@ -40,34 +39,45 @@ bool FloatToFusedRandRowwiseQuantizedOp<Context>::RunOnDevice() {
   size_t segment_size = (input_columns + data_per_byte - 1) / data_per_byte;
   const std::vector<int64_t> output_dimensions = {
       input_rows, 10 + static_cast<int64_t>(segment_size)};
-  output->Resize(output_dimensions);
+  auto* output =
+      Output(DATA_FUSED_QUANTIZED, output_dimensions, at::dtype<uint8_t>());
 
   const auto* input_data = input.template data<float>();
   auto* output_data = output->template mutable_data<uint8_t>();
-  const size_t output_columns = static_cast<size_t>(output->dim(1));
-  memset(output_data, 0, output->size());
+  const size_t output_columns = static_cast<size_t>(output->size(1));
+  memset(output_data, 0, output->numel());
 
   if (random_) {
-#ifdef FUSED_ROWWISE_RANDOM_QUANTIZATION_USE_MKL
     random_buffer_.resize(input_columns);
-#endif
   }
 
   for (size_t row = 0; row < input_rows; ++row) {
+    if (random_) {
+#ifdef FUSED_ROWWISE_RANDOM_QUANTIZATION_USE_MKL
+      int status = vsRngUniform(
+          VSL_RNG_METHOD_UNIFORM_STD,
+          vslStream_,
+          input_columns,
+          random_buffer_.data(),
+          0.0f,
+          1.0f);
+      if (status != VSL_ERROR_OK) {
+        LOG(WARNING) << "vsRngUniform returns " << status;
+      }
+#else
+      for (int i = 0; i < input_columns; ++i) {
+        random_buffer_[i] = (*dis_)(gen_);
+      }
+#endif
+    }
+
     math::quantize_and_compress(
         input_data + row * input_columns,
         output_data + row * output_columns,
         input_columns,
         bitwidth_,
         random_,
-#ifdef FUSED_ROWWISE_RANDOM_QUANTIZATION_USE_MKL
-        vslStream_,
-        random_buffer_
-#else
-        dis_,
-        gen_
-#endif
-    );
+        random_buffer_.data());
   }
 
   return true;
@@ -78,13 +88,15 @@ bool FusedRandRowwiseQuantizedToFloatOp<Context>::RunOnDevice() {
   CAFFE_ENFORCE(IS_LITTLE_ENDIAN, "Unsupported endianness");
 
   const auto& input = Input(DATA_FUSED_QUANTIZED);
-  auto* output = Output(DATA_FLOAT);
-  CAFFE_ENFORCE_EQ(input.ndim(), 2, "Expect input to be a matrix.");
-  CAFFE_ENFORCE_GE(
-      input.size(), 4, "Expect input to have size greater than or equal to 4.");
 
-  const auto input_rows = input.dim(0);
-  const auto input_columns = input.dim(1);
+  CAFFE_ENFORCE_EQ(input.dim(), 2, "Expect input to be a matrix.");
+  CAFFE_ENFORCE_GE(
+      input.numel(),
+      4,
+      "Expect input to have size greater than or equal to 4.");
+
+  const auto input_rows = input.size(0);
+  const auto input_columns = input.size(1);
   const auto* input_data = input.template data<uint8_t>();
   const size_t bitwidth = input_data[0];
   CAFFE_ENFORCE(
@@ -94,7 +106,7 @@ bool FusedRandRowwiseQuantizedToFloatOp<Context>::RunOnDevice() {
   const size_t output_columns = (input_columns - 10) * (8 / bitwidth) - tail;
   const std::vector<int64_t> output_dimensions = {
       input_rows, static_cast<int64_t>(output_columns)};
-  output->Resize(output_dimensions);
+  auto* output = Output(DATA_FLOAT, output_dimensions, at::dtype<float>());
   auto* output_data = output->template mutable_data<float>();
   for (size_t row = 0; row < input_rows; ++row) {
     math::decompress_and_dequantize(

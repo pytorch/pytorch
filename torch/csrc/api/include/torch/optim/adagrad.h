@@ -3,7 +3,7 @@
 #include <torch/nn/pimpl.h>
 #include <torch/optim/optimizer.h>
 #include <torch/optim/serialize.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <utility>
 #include <vector>
@@ -18,14 +18,14 @@ class InputArchive;
 namespace torch {
 namespace optim {
 
-struct AdagradOptions {
+struct TORCH_API AdagradOptions {
   AdagradOptions(double learning_rate);
   TORCH_ARG(double, learning_rate);
   TORCH_ARG(double, lr_decay) = 0;
   TORCH_ARG(double, weight_decay) = 0;
 };
 
-class Adagrad : public Optimizer {
+class TORCH_API Adagrad : public Optimizer {
  public:
   template <typename ParameterContainer>
   explicit Adagrad(

@@ -18,10 +18,10 @@ class CopyOp : public Operator<Context> {
         this->template Output<Tensor>(0, DstContext::GetDeviceType());
     output->ResizeLike(input);
     this->context_.template CopyItems<SrcContext, DstContext>(
-        input.meta(),
-        input.size(),
+        input.dtype(),
+        input.numel(),
         input.raw_data(),
-        output->raw_mutable_data(input.meta()));
+        output->raw_mutable_data(input.dtype()));
     return true;
   }
 };

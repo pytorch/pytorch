@@ -14,6 +14,9 @@ struct TemplatePutOp : public Operator<CPUContext> {
             "stat_name",
             operator_def.input().Get(0))),
         magnitude_expand_(GetSingleArgument<int64_t>("magnitude_expand", 1)),
+        bound_(GetSingleArgument<bool>("bound", false)),
+        has_default_(HasSingleArgumentOfType<float>("default_value")),
+        default_value_(GetSingleArgument<float>("default_value", 0.0)),
         stat_(given_name_) {}
 
   bool RunOnDevice() override {
@@ -31,14 +34,38 @@ struct TemplatePutOp : public Operator<CPUContext> {
 
   template <typename V>
   bool DoRunWithType() {
-    auto input = *Input(0).template data<V>();
+    V input = default_value_;
 
-    CAFFE_ENFORCE(
-        static_cast<int64_t>(input + 1) <
-            std::numeric_limits<int64_t>::max() / magnitude_expand_,
-        "Input value is too large for the given magnitude expansion!");
+    // If we receive an empty tensor
+    if (Input(0).template data<V>()) {
+      input = *Input(0).template data<V>();
+    } else if (!has_default_) {
+      CAFFE_THROW(
+          "Default value must be provided when recieving empty tensors for ",
+          given_name_);
+    }
 
-    int64_t int_value = input * magnitude_expand_;
+    int64_t bound_value =
+        std::numeric_limits<int64_t>::max() / magnitude_expand_;
+
+    int64_t int_value;
+    if (bound_) {
+      if (isNan(input)) {
+        int_value = 0;
+      } else if (input <= -bound_value) {
+        int_value = std::numeric_limits<int64_t>::min();
+      } else if (input >= bound_value) {
+        int_value = std::numeric_limits<int64_t>::max();
+      } else {
+        int_value = input * magnitude_expand_;
+      }
+    } else {
+      CAFFE_ENFORCE(
+          std::abs(static_cast<int64_t>(input)) < bound_value,
+          "Input value is too large for the given magnitude expansion!");
+      CAFFE_ENFORCE(!isNan(input), "Input value cannot be NaN!");
+      int_value = input * magnitude_expand_;
+    }
 
     CAFFE_EVENT(stat_, stat_value, int_value);
 
@@ -48,6 +75,21 @@ struct TemplatePutOp : public Operator<CPUContext> {
  private:
   const std::string given_name_;
   const int64_t magnitude_expand_;
+  const bool bound_;
+  const bool has_default_;
+  const float default_value_;
   T stat_;
+
+  template <typename V>
+  bool isNan(V input) {
+    /*
+    Checks if given number of is NaN, while being permissive with different
+    implementations of the standard libraries between operating systems.
+
+    Uses the preperties of NaN, defined by IEEE.
+    https://www.gnu.org/software/libc/manual/html_node/Infinity-and-NaN.html
+    */
+    return input != input;
+  }
 };
 } // namespace caffe2

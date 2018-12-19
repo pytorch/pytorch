@@ -1,8 +1,8 @@
 #include <torch/nn/modules/dropout.h>
 
-#include <torch/tensor.h>
+#include <torch/types.h>
 
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 
 #include <cstddef>
 #include <vector>
@@ -26,11 +26,11 @@ template class DropoutImplBase<FeatureDropoutImpl>;
 
 DropoutOptions::DropoutOptions(double rate) : rate_(rate) {}
 
-Tensor DropoutImpl::forward(Tensor input) {
+Tensor DropoutImpl::forward(const Tensor& input) {
   return torch::dropout(input, options.rate_, this->is_training());
 }
 
-Tensor FeatureDropoutImpl::forward(Tensor input) {
+Tensor FeatureDropoutImpl::forward(const Tensor& input) {
   return torch::feature_dropout(input, options.rate_, this->is_training());
 }
 } // namespace nn

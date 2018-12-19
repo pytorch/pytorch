@@ -227,6 +227,10 @@ class CAFFE2_API Caffe2Backend {
 
   Caffe2Ops CreateReciprocal(OnnxNode* onnx_node, const ConversionContext& ctx);
 
+  Caffe2Ops CreateRandomNormal(
+      OnnxNode* onnx_node,
+      const ConversionContext& ctx);
+
   Caffe2Ops CreateBatchNormalization(
       OnnxNode* onnx_node,
       const ConversionContext& ctx);

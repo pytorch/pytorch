@@ -8,7 +8,7 @@ import numpy as np
 from caffe2.python import core, workspace
 
 import unittest
-
+import os
 
 def rand_array(*dims):
     # np.random.rand() returns float instead of 0-dim array, that's why need to
@@ -42,13 +42,19 @@ def str_compare(a, b, encoding="utf8"):
     return a == b
 
 
+def get_default_test_flags():
+    return [
+        'caffe2',
+        '--caffe2_log_level=0',
+        '--caffe2_cpu_allocator_do_zero_fill=0',
+        '--caffe2_cpu_allocator_do_junk_fill=1',
+    ]
+
+
 class TestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        workspace.GlobalInit([
-            'caffe2',
-            '--caffe2_log_level=0',
-        ])
+        workspace.GlobalInit(get_default_test_flags())
         # clear the default engines settings to separate out its
         # affect from the ops tests
         core.SetEnginePref({}, {})

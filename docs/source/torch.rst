@@ -260,6 +260,7 @@ Other Operations
 .. autofunction:: broadcast_tensors
 .. autofunction:: cross
 .. autofunction:: diag
+.. autofunction:: diag_embed
 .. autofunction:: diagflat
 .. autofunction:: diagonal
 .. autofunction:: einsum
@@ -268,6 +269,7 @@ Other Operations
 .. autofunction:: histc
 .. autofunction:: meshgrid
 .. autofunction:: renorm
+.. autofunction:: roll
 .. autofunction:: tensordot
 .. autofunction:: trace
 .. autofunction:: tril
@@ -287,6 +289,8 @@ BLAS and LAPACK Operations
 .. autofunction:: btrifact_with_info
 .. autofunction:: btrisolve
 .. autofunction:: btriunpack
+.. autofunction:: chain_matmul
+.. autofunction:: cholesky
 .. autofunction:: dot
 .. autofunction:: eig
 .. autofunction:: gels

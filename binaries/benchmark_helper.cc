@@ -141,7 +141,7 @@ void loadInput(
         vector<string> input_dims_str = caffe2::split(',', input_dims_list[i]);
         vector<int> input_dims;
         for (const string& s : input_dims_str) {
-          input_dims.push_back(caffe2::stoi(s));
+          input_dims.push_back(c10::stoi(s));
         }
         caffe2::Blob* blob = workspace->GetBlob(input_names[i]);
         if (blob == nullptr) {
@@ -195,7 +195,7 @@ void fillInputBlob(
   if (tensor_protos_map.empty()) {
     return;
   }
-  static caffe2::TensorDeserializer serializer;
+  static caffe2::TensorDeserializer deserializer;
   for (auto& tensor_kv : tensor_protos_map) {
     caffe2::Blob* blob = workspace->GetBlob(tensor_kv.first);
     if (blob == nullptr) {
@@ -203,25 +203,15 @@ void fillInputBlob(
     }
     // todo: support gpu and make this function a tempalte
     int protos_size = tensor_kv.second.protos_size();
+    if (protos_size == 1 && iteration > 0) {
+      // Do not override the input data if there is only one input data,
+      // since it will clear all caches. Rely on wipe_cache to
+      // clear caches
+      continue;
+    }
     caffe2::TensorProto* tensor_proto =
         tensor_kv.second.mutable_protos(iteration % protos_size);
-    if (tensor_proto->data_type() == caffe2::TensorProto::STRING) {
-      caffe2::TensorCPU* tensor = BlobGetMutableTensor(blob, caffe2::CPU);
-      int total_size = tensor_proto->string_data_size();
-      for (size_t i = 0; i < total_size; i++) {
-        (tensor->mutable_data<string>())[i] = tensor_proto->string_data(i);
-      }
-    } else if (tensor_proto->data_type() == caffe2::TensorProto::FLOAT) {
-      vector<int64_t> dims;
-      for (const int64_t d : tensor_proto->dims()) {
-        dims.push_back(d);
-      }
-      // int total_size = tensor_proto->float_data_size();
-      caffe2::TensorCPU* tensor =
-          new caffe2::TensorCPU(dims, caffe2::DeviceType::CPU);
-      serializer.Deserialize(*tensor_proto, tensor);
-      blob->Reset(tensor);
-    }
+    BlobSetTensor(blob, deserializer.Deserialize(*tensor_proto));
     // todo: for other types
   }
 }
@@ -234,7 +224,9 @@ void runNetwork(
     const bool run_individual,
     const int warmup,
     const int iter,
-    const int sleep_before_run) {
+    const int sleep_before_run,
+    const int sleep_between_iteration,
+    const int sleep_between_net_and_operator) {
   if (!net_def.has_name()) {
     net_def.set_name("benchmark");
   }
@@ -262,6 +254,7 @@ void runNetwork(
       "Number of main runs should be non negative, provided ",
       iter,
       ".");
+  LOG(INFO) << "net runs.";
   for (int i = 0; i < iter; ++i) {
     caffe2::ObserverConfig::initSampleRate(1, 1, 1, 0, warmup);
     fillInputBlob(workspace, tensor_protos_map, i);
@@ -272,9 +265,28 @@ void runNetwork(
     if (wipe_cache) {
       caffe2::wipe_cache();
     }
-    if (run_individual) {
+    if (sleep_between_iteration > 0) {
+      std::this_thread::sleep_for(
+          std::chrono::seconds(sleep_between_iteration));
+    }
+  }
+  if (run_individual) {
+    LOG(INFO) << "operator runs.";
+    if (sleep_between_net_and_operator > 0) {
+      std::this_thread::sleep_for(
+          std::chrono::seconds(sleep_between_net_and_operator));
+    }
+    for (int i = 0; i < iter; ++i) {
       caffe2::ObserverConfig::initSampleRate(1, 1, 1, 1, warmup);
+      fillInputBlob(workspace, tensor_protos_map, i);
       CAFFE_ENFORCE(net->Run(), "Main run ", i, " with operator has failed.");
+      if (wipe_cache) {
+        caffe2::wipe_cache();
+      }
+      if (sleep_between_iteration > 0) {
+        std::this_thread::sleep_for(
+            std::chrono::seconds(sleep_between_iteration));
+      }
     }
   }
 }
@@ -336,6 +348,8 @@ int benchmark(
     const string& FLAGS_output_folder,
     bool FLAGS_run_individual,
     int FLAGS_sleep_before_run,
+    int FLAGS_sleep_between_iteration,
+    int FLAGS_sleep_between_net_and_operator,
     bool FLAGS_text_output,
     int FLAGS_warmup,
     bool FLAGS_wipe_cache) {
@@ -396,7 +410,9 @@ int benchmark(
       FLAGS_run_individual,
       FLAGS_warmup,
       FLAGS_iter,
-      FLAGS_sleep_before_run);
+      FLAGS_sleep_before_run,
+      FLAGS_sleep_between_iteration,
+      FLAGS_sleep_between_net_and_operator);
 
   writeOutput(
       workspace,

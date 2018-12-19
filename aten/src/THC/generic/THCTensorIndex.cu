@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorIndex.cu"
+#define THC_GENERIC_FILE "THC/generic/THCTensorIndex.cu"
 #else
 
 // Check tensor dimensions for index operations, and return the slice size.
@@ -560,7 +560,8 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
   indexSelectSmallIndex<TENSOR_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM>     \
     <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(           \
       dstInfo, srcInfo, indicesInfo,                            \
-      dstSelectDim, srcSelectDim, sliceSize, srcSelectDimSize);
+      dstSelectDim, srcSelectDim, static_cast<TYPE>(sliceSize), \
+      srcSelectDimSize);
 
 #define LARGE_INDEX(TENSOR_TYPE, TYPE,                           \
                     DST_DIM, SRC_DIM, IDX_DIM, IDX_IS_MAJOR)     \
@@ -568,8 +569,8 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
                         DST_DIM, SRC_DIM, IDX_DIM, IDX_IS_MAJOR> \
     <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(            \
       dstInfo, srcInfo, indicesInfo,                             \
-      dstSelectDim, srcSelectDim, dstTotalSize,                  \
-      (IDX_IS_MAJOR) ? sliceSize : numIndices,                   \
+      dstSelectDim, srcSelectDim, static_cast<TYPE>(dstTotalSize), \
+      static_cast<TYPE>((IDX_IS_MAJOR) ? sliceSize : numIndices),  \
       srcSelectDimSize);
 
   dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));

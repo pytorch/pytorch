@@ -18,9 +18,9 @@ Gets the profiling statistics.
         "op will be calculated separately")
     .Arg(
         "partial_net_name",
-        "(string) default to empty; describes the partial name of the ProfDAGNet")
+        "(string) default to empty; describes the partial name of the net")
     .Arg(
         "net_name",
-        "(string) default to empty; describes the name of the ProfDAGNet");
+        "(string) default to empty; describes the name of the net");
 } // namespace
 } // namespace caffe2

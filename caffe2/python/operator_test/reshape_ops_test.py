@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 import numpy as np
+import six
 
 from caffe2.python import core, workspace
 from caffe2.python.test_util import TestCase
@@ -61,9 +62,9 @@ class TestLengthsToShapeOps(TestCase):
         _test_reshape(old_shape=(4, 3, 2), new_shape=(-1, 0),
                      expected_shape=(8, 3), arg_shape=False)
 
-        self.assertRaisesRegexp(RuntimeError, "size is zero",
-                                _test_reshape, old_shape=(2, 0), new_shape=(-1, 0),
-                                expected_shape=(2, 0), arg_shape=False)
+        with six.assertRaisesRegex(self, RuntimeError, "size is zero"):
+            _test_reshape(old_shape=(2, 0), new_shape=(-1, 0),
+                          expected_shape=(2, 0), arg_shape=False)
 
     def test_backprop(self):
         old_shape = (4, 2, 1)
@@ -114,8 +115,8 @@ class TestLengthsToShapeOps(TestCase):
 def _test_reshape(old_shape, new_shape, expected_shape=None, arg_shape=True,
                  in_place=False):
     devices = [core.DeviceOption(caffe2_pb2.CPU, 0)]
-    if workspace.NumCudaDevices() > 0:
-        devices.append(core.DeviceOption(caffe2_pb2.CUDA, 0))
+    if workspace.NumGpuDevices() > 0:
+        devices.append(core.DeviceOption(workspace.GpuDeviceType, 0))
 
     for device_opt in devices:
         with core.DeviceScope(device_opt):

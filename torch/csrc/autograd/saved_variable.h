@@ -1,7 +1,7 @@
 #pragma once
 
-#include "torch/csrc/WindowsTorchApiMacro.h"
-#include "torch/csrc/autograd/variable_version.h"
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/autograd/variable_version.h>
 
 #include <ATen/ATen.h>
 

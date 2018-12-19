@@ -15,6 +15,7 @@
 #include <iterator>
 #include <list>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include <assert.h>
@@ -238,6 +239,11 @@ class Graph {
   /// \return A reference to the node created.
   NodeRef createNode(T&& data) {
     return createNodeInternal(Node<T, U...>(std::move(data)));
+  }
+
+  template <class Arg>
+  NodeRef createNode(Arg&& arg) {
+    return createNode(T(std::forward<Arg>(arg)));
   }
 
   NodeRef createNode() {
