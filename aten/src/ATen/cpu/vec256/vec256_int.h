@@ -22,7 +22,9 @@ public:
 
 template <>
 struct Vec256<int64_t> : public Vec256i {
-  static constexpr int size = 4;
+  static constexpr int size() {
+    return 4;
+  }
   using Vec256i::Vec256i;
   Vec256() {}
   Vec256(int64_t v) { values = _mm256_set1_epi64x(v); }
@@ -215,7 +217,7 @@ void convert(const int32_t *src, float *dst, int64_t n) {
 #ifndef _MSC_VER  
 # pragma unroll  
 #endif
-  for (i = 0; i <= (n - Vec256<int32_t>::size); i += Vec256<int32_t>::size) {
+  for (i = 0; i <= (n - Vec256<int32_t>::size()); i += Vec256<int32_t>::size()) {
     auto input_vec = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + i));
     auto output_vec = _mm256_cvtepi32_ps(input_vec);
     _mm256_storeu_ps(reinterpret_cast<float*>(dst + i), output_vec);
@@ -235,7 +237,7 @@ void convert(const int32_t *src, double *dst, int64_t n) {
 #ifndef _MSC_VER  
 # pragma unroll  
 #endif
-  for (i = 0; i <= (n - Vec256<double>::size); i += Vec256<double>::size) {
+  for (i = 0; i <= (n - Vec256<double>::size()); i += Vec256<double>::size()) {
     auto input_128_vec = _mm_loadu_si128(reinterpret_cast<const __m128i*>(src + i));
     auto output_vec = _mm256_cvtepi32_pd(input_128_vec);
     _mm256_storeu_pd(reinterpret_cast<double*>(dst + i), output_vec);
@@ -462,11 +464,11 @@ Vec256<int16_t> inline operator*(const Vec256<int16_t>& a, const Vec256<int16_t>
 
 template <typename T>
 Vec256<T> inline intdiv_256(const Vec256<T>& a, const Vec256<T>& b) {
-  T values_a[Vec256<T>::size];
-  T values_b[Vec256<T>::size];
+  T values_a[Vec256<T>::size()];
+  T values_b[Vec256<T>::size()];
   a.store(values_a);
   b.store(values_b);
-  for (int i = 0; i != Vec256<T>::size; i++) {
+  for (int i = 0; i != Vec256<T>::size(); i++) {
     values_a[i] /= values_b[i];
   }
   return Vec256<T>::loadu(values_a);
