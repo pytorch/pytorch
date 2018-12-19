@@ -238,25 +238,13 @@ Tensor full_like(const Tensor& self, Scalar fill_value, const TensorOptions& opt
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linspace ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor linspace(Scalar start, Scalar end, const TensorOptions& options) {
-  return native::linspace(start, end, /*steps=*/100, options);
-}
-
 Tensor linspace(
     Scalar start,
     Scalar end,
     int64_t steps,
     const TensorOptions& options) {
-  // Note [Native bindings for legacy TH factory functions]
-  return getFactoryType(options)._th_linspace(start, end, steps);
-}
-
-Tensor& linspace_out(Tensor& result, Scalar start, Scalar end) {
-  return native::linspace_out(result, start, end, /*steps=*/100);
-}
-
-Tensor& linspace_out(Tensor& result, Scalar start, Scalar end, int64_t steps) {
-  return at::legacy::th::_th_linspace_out(result, start, end, steps);
+  Tensor result = at::empty({steps}, options);
+  return at::linspace_out(result, start, end, steps);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ logspace ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -31,7 +31,7 @@ BatchTensor::BatchTensor(const std::vector<at::Tensor>& datalist, at::Tensor dim
   sizes[0] = bs;
   mask_sizes[0] = bs;
   for(int64_t i = 1; i < dims.size(0) + 1; i++){
-    for(auto x : datalist){
+    for(const auto& x : datalist){
       sizes[i] = std::max(sizes[i], x.size(i));
     }
     mask_sizes[i] = *dims[i - 1].data<uint8_t>() ? sizes[i] : 1;

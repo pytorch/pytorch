@@ -456,6 +456,7 @@ public:
   Tensor sum(IntList dim, bool keepdim, ScalarType dtype) const;
   Tensor sum(IntList dim, bool keepdim=false) const;
   Tensor sum(IntList dim, ScalarType dtype) const;
+  Tensor sum_to_size(IntList size) const;
   Tensor sqrt() const;
   Tensor & sqrt_();
   Tensor std(bool unbiased=true) const;

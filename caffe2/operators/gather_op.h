@@ -80,7 +80,7 @@ static bool gather_impl(
   // New shape:
   //  [data dims before axis] + [indices dims] + [data dims after axis]
   vector<int64_t> shape =
-      calc_output_shape_vector<int64_t>(data.dims(), indices.dims(), axis);
+      calc_output_shape_vector<int64_t>(data.sizes(), indices.sizes(), axis);
   Tensor* output = op->Output(outputIdx, shape, at::dtype(dataType));
   auto out = static_cast<char*>(output->raw_mutable_data(dataType));
 

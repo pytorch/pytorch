@@ -408,7 +408,7 @@ static variable_list call_function(FunctionTask& task) {
 
   if(has_post_hooks){
     // NOLINTNEXTLINE(bugprone-use-after-move)
-    return call_post_hooks(fn, std::move(outputs), std::move(inputs));
+    return call_post_hooks(fn, std::move(outputs), inputs);
   }
   return outputs;
 }

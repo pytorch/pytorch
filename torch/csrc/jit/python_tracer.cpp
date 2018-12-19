@@ -60,10 +60,7 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
       AT_ERROR("The traced function didn't return any values! Side-effects are not "
                "captured in traces, so it would be a no-op.");
     }
-    if (!PyTuple_Check(out.ptr())) {
-      out = py::make_tuple(out);
-    }
-    tracer::exit(toStack(out));
+    tracer::exit({toIValue(out)});
     auto graph = enter_info.first->graph;
     EliminateDeadCode(graph);
     LowerSimpleTuples(graph);
@@ -165,7 +162,7 @@ void initPythonTracerBindings(PyObject* module) {
     return setValueTrace(var, value);
   });
   m.def("_tracer_set_get_unique_name_fn", [](py::function func) {
-    auto tracing_state = getTracingState();
+    const auto& tracing_state = getTracingState();
     JIT_ASSERT(tracing_state);
     tracing_state->lookup_var_name_fn = [func](const Variable& var) -> std::string {
       AutoGIL ag;
@@ -173,7 +170,7 @@ void initPythonTracerBindings(PyObject* module) {
     };
   });
   m.def("_tracer_set_force_outplace", [](bool force_outplace) {
-    auto tracing_state = getTracingState();
+    const auto& tracing_state = getTracingState();
     JIT_ASSERT(tracing_state);
     tracing_state->force_outplace = force_outplace;
   });
