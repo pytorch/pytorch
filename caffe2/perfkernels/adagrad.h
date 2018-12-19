@@ -6,23 +6,28 @@
 #include <immintrin.h>
 #endif
 #include <ATen/core/Half.h>
-#include <c10/util/Logging.h>
 
 namespace caffe2 {
 
 namespace internal {
 
+// Use different names per ISA to avoid illegal instruction error
 template <typename T>
-static inline void adagrad_update_base_inlined(
-    int N,
-    const T* w,
-    const float* g,
-    const T* h,
-    T* nw,
-    T* nh,
-    float decay,
-    float epsilon,
-    float lr) {
+static inline void
+#ifdef __AVX__
+adagrad_update_inlined_avx_f16c
+#else
+adagrad_update_inlined_base
+#endif
+    (int N,
+     const T* w,
+     const float* g,
+     const T* h,
+     T* nw,
+     T* nh,
+     float decay,
+     float epsilon,
+     float lr) {
   for (auto i = 0; i < N; ++i) {
     float gi = g[i];
     float hi = decay * h[i] + gi * gi;
@@ -31,40 +36,64 @@ static inline void adagrad_update_base_inlined(
   }
 }
 
-inline void adagrad_update_prefetch_inlined(
-    int N,
-    const float* w,
-#ifdef CAFFE2_PERFKERNELS_ADAGRAD_H_USE_INTRINSIC
-    const float* w_n, // prefetch ptr
+// The following functions are inlined because they are performance critical
+
+// version with prefetching
+// TODO(msmelyan)
+// Crux of the computation is computing a  / (sqrt(b) + epsilon),
+// where a and b are vectors and epislon is very small (eg., 10^-5) and does not
+// change. Today it's computed using two vector sqrt and vector divide simd
+// instructions. It is slow. We can take advantage of existing fast vector
+// VRSQRTPS instruction that computes approximate reciprocals of square roots
+// of the vector. It is 6x faster than vsrt and vdiv combinations. Since the
+// addition of epislon is just done to avoid division by zero, we approximate a
+// / (sqrt(b) + epsilon) by a / (sqrt(b + sqrt(epsilon)) If we do that, we can
+// use VRSQRTPS instead now. VRSQRTPS is not very accurate. Specifically, for
+// the test on random numbers between 0.1 and 1 the absolute error was about
+// 10^-3 compared to using slower but more accurate combination of vsqrt and
+// vdiv. Extend Marat's function with more NR iterations to get more accuracy
+// for training
+// TODO(msmelyan)
+// explore streaming stores, but need to have unique indices (deduplication)
+inline void
+#ifdef __AVX__
+adagrad_update_prefetch_inlined_avx_f16c
 #else
-    const float* /* unused */,
+adagrad_update_prefetch_inlined_base
+#endif
+    (int N,
+     const float* w,
+#ifdef CAFFE2_PERFKERNELS_ADAGRAD_H_USE_INTRINSIC
+     const float* w_n, // prefetch ptr
+#else
+     const float* /* unused */,
 #endif
 
-    const float* g,
+     const float* g,
 
-    const float* h,
+     const float* h,
 #ifdef CAFFE2_PERFKERNELS_ADAGRAD_H_USE_INTRINSIC
-    const float* h_n, // prefetch ptr
+     const float* h_n, // prefetch ptr
 #else
-    const float* /* unused */,
+     const float* /* unused */,
 #endif
 
-    float* nw,
+     float* nw,
 #ifdef CAFFE2_PERFKERNELS_ADAGRAD_H_USE_INTRINSIC
-    float* nw_n, // prefetch ptr
+     float* nw_n, // prefetch ptr
 #else
-    float* /* unused */,
+     float* /* unused */,
 #endif
 
-    float* nh,
+     float* nh,
 #ifdef CAFFE2_PERFKERNELS_ADAGRAD_H_USE_INTRINSIC
-    float* nh_n, // prefetch ptr
+     float* nh_n, // prefetch ptr
 #else
-    float* /* unused */,
+     float* /* unused */,
 #endif
 
-    float epsilon,
-    float lr) {
+     float epsilon,
+     float lr) {
   auto i = 0;
 
 #ifdef CAFFE2_PERFKERNELS_ADAGRAD_H_USE_INTRINSIC
@@ -88,30 +117,39 @@ inline void adagrad_update_prefetch_inlined(
   }
 #endif
 
-  adagrad_update_base_inlined(
-      N - i, w + i, g + i, h + i, nw + i, nh + i, 1.0f, epsilon, lr);
+#ifdef __AVX__
+  internal::adagrad_update_inlined_avx_f16c
+#else
+  internal::adagrad_update_inlined_base
+#endif
+      (N - i, w + i, g + i, h + i, nw + i, nh + i, 1.0f, epsilon, lr);
 }
 
-inline void rowwise_adagrad_update_inlined(
-    int N,
-    float* w,
-#ifdef CAFFE2_PERFKERNELS_ADAGRAD_H_USE_INTRINSIC
-    float* w_n, // prefetch ptr
+inline void
+#ifdef __AVX__
+rowwise_adagrad_update_inlined_avx_16c
 #else
-    float* /* unused */,
+rowwise_adagrad_update_inlined_base
+#endif
+    (int N,
+     float* w,
+#ifdef CAFFE2_PERFKERNELS_ADAGRAD_H_USE_INTRINSIC
+     float* w_n, // prefetch ptr
+#else
+     float* /* unused */,
 #endif
 
-    const float* g,
+     const float* g,
 
-    float* h,
+     float* h,
 #ifdef CAFFE2_PERFKERNELS_ADAGRAD_H_USE_INTRINSIC
-    float* h_n, // prefetch ptr
+     float* h_n, // prefetch ptr
 #else
-    float* /* unused */,
+     float* /* unused */,
 #endif
 
-    float epsilon,
-    float lr) {
+     float epsilon,
+     float lr) {
   auto i = 0;
 
 #ifdef CAFFE2_PERFKERNELS_ADAGRAD_H_USE_INTRINSIC
@@ -238,8 +276,12 @@ void adagrad_update(
     float decay,
     float lr);
 
+/**
+ * @return num_rows if succeeds otherwise return the row idx where we pass
+ *         the boundary of param_size
+ */
 template <typename SIndex>
-void sparse_adagrad(
+int sparse_adagrad(
     int num_rows, // number of rows reading
     int block_size, // number of parameters per rows
     std::size_t param_size, // total number of parameters
@@ -250,11 +292,14 @@ void sparse_adagrad(
     float* nw, // output parameters
     float* nh, // output momentums
     float epsilon,
-    float lr,
-    const std::string& param_name); // name of parameters (for error reporting)
+    float lr);
 
+/**
+ * @return num_rows if succeeds otherwise return the row idx where we pass
+ *         the boundary of param_size
+ */
 #define SPARSE_ADAGRAD_SPECIALIZATION(SIndex, ISA)                       \
-  void sparse_adagrad_##SIndex##__##ISA(                                 \
+  int sparse_adagrad_##SIndex##__##ISA(                                  \
       int num_rows,                                                      \
       int block_size,                                                    \
       std::size_t param_size,                                            \
@@ -265,25 +310,15 @@ void sparse_adagrad(
       float* nw,                                                         \
       float* nh,                                                         \
       float epsilon,                                                     \
-      float lr,                                                          \
-      const std::string& param_name) {                                   \
+      float lr) {                                                        \
     for (int i = 0; i < num_rows; ++i) {                                 \
       auto idx = indices[i];                                             \
       auto offsetI = i * block_size;                                     \
       auto offsetIdx = idx * block_size;                                 \
                                                                          \
-      CAFFE_ENFORCE_GE(                                                  \
-          param_size,                                                    \
-          block_size + offsetIdx,                                        \
-          param_name,                                                    \
-          ", out of bound,  idx:",                                       \
-          idx,                                                           \
-          " for input i:",                                               \
-          i,                                                             \
-          " and block size:",                                            \
-          block_size,                                                    \
-          " max size:",                                                  \
-          param_size);                                                   \
+      if (block_size + offsetIdx > param_size) {                         \
+        return i;                                                        \
+      }                                                                  \
                                                                          \
       if (block_size == 1) {                                             \
         float gi = g[i];                                                 \
@@ -294,7 +329,7 @@ void sparse_adagrad(
         int i_pref = (i < num_rows - prefdist_T0) ? i + prefdist_T0 : i; \
         auto idx_pref = indices[i_pref];                                 \
                                                                          \
-        adagrad_update_prefetch__##ISA(                                  \
+        internal::adagrad_update_prefetch_inlined_##ISA(                 \
             block_size,                                                  \
             w + offsetIdx,                                               \
             &w[idx_pref * block_size],                                   \
@@ -309,8 +344,8 @@ void sparse_adagrad(
             lr);                                                         \
       }                                                                  \
     }                                                                    \
+    return num_rows;                                                     \
   };
-
 } // namespace caffe2
 
 #ifdef CAFFE2_PERFKERNELS_ADAGRAD_H_USE_INTRINSIC

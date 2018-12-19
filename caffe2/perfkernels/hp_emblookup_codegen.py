@@ -4,7 +4,7 @@ import argparse
 import sys
 
 
-sizeof = {"float": 4, "at::Half": 2, "uint8_t": 1}
+sizeof = {"float": 4, "at::Half": 2, "unsigned char": 1}
 
 
 def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused):
@@ -24,7 +24,7 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused):
                 "                _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (%d)))),\n"  # noqa
                 "            vop%d);" % (regid, regid, regid)
             )
-        elif InType == "uint8_t":
+        elif InType == "unsigned char":
             code.append(
                 "        vop%d = _mm256_fmadd_ps(\n"
                 "            vwgt,\n"
@@ -67,11 +67,12 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused):
     )
     code.append("        const " + IndexType + " idx = indices[dataInd];")
     code.append(
-        '        CAFFE_ENFORCE(\n            idx >= 0 && idx < data_size,\n            "Index ",\n            dataInd,\n'  # noqa
-        '            " is out of bounds: ",\n            idx,\n            ", range 0 to ",\n            data_size);'  # noqa
+        "        if (idx < 0 || idx >= data_size) {\n"
+        + "          return rangeIndex;\n"
+        + "        }"
     )
 
-    if InType == "uint8_t":
+    if InType == "unsigned char":
         code.append("        " + OutType + " wgt = 1.f;")
         code.append("        " + OutType + " bio;")
         code.append("        if (weights) {")
@@ -107,12 +108,22 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused):
         )
     )
     code.append("        const " + IndexType + " idx_pref_T0 = indices[next_T0];")
-    code.append("        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);")
-
     code.append(
-        "        const {}* ip_next_T0 = &input[idx_pref_T0"
-        " * fused_block_size];".format(InType)
+        "        if (idx_pref_T0 < 0 || idx_pref_T0 >= data_size) {\n"
+        + "          return rangeIndex;\n"
+        + "        }"
     )
+
+    if InType == "unsigned char":
+        code.append(
+            "        const {}* ip_next_T0 =\n"
+            "            &input[idx_pref_T0 * fused_block_size];".format(InType)
+        )
+    else:
+        code.append(
+            "        const {}* ip_next_T0 = "
+            "&input[idx_pref_T0 * fused_block_size];".format(InType)
+        )
 
     for i in range(0, uf):
         j = 8 * i
@@ -165,7 +176,7 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused):
                 "                      reinterpret_cast<const __m128i*>(&ip[j]))),\n"
                 "                  _mm256_loadu_ps(&op[j])));"
             )
-        elif InType == "uint8_t":
+        elif InType == "unsigned char":
             code.append(
                 "          _mm256_storeu_ps(\n"
                 "              &op[j],\n"
@@ -192,7 +203,7 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused):
     code.append("      " + OutType + "* op = &out[rangeIndex * block_size];")
 
     # initialize to 0
-    code.append("      int64_t j = 0;")
+    code.append("      long long j = 0;")
     code.append("      for (; j + 8 <= block_size; j += 8) {")
     code.append("        _mm256_storeu_ps(op + j, _mm256_setzero_ps());")
     code.append("      }")
@@ -208,11 +219,12 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused):
     )
     code.append("        const " + IndexType + " idx = indices[dataInd];")
     code.append(
-        '        CAFFE_ENFORCE(\n            idx >= 0 && idx < data_size,\n            "Index ",\n            dataInd,\n'  # noqa
-        + '            " is out of bounds: ",\n            idx,\n            ", range 0 to ",\n            data_size);'  # noqa
+        "        if (idx < 0 || idx >= data_size) {\n"
+        + "          return rangeIndex;\n"
+        + "        }"
     )
 
-    if InType == "uint8_t":
+    if InType == "unsigned char":
         code.append("        " + OutType + " wgt = 1.f;")
         code.append("        " + OutType + " bio;")
         code.append("        if (weights) {")
@@ -228,7 +240,6 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused):
             code.append("        bio = wgt * scale_bias[1];")
             code.append("        wgt = wgt * scale_bias[0];")
         else:
-            code.append("        assert(scale_bias);")
             code.append("        bio = wgt * scale_bias[2 * idx + 1];")
             code.append("        wgt = wgt * scale_bias[2 * idx];")
         code.append("        __m256 vbio = _mm256_set1_ps(bio);")
@@ -249,12 +260,21 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused):
         )
     )
     code.append("        const " + IndexType + " idx_pref_T0 = indices[next_T0];")
-    code.append("        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);")
     code.append(
-        "        const {}* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];".format(
-            InType
-        )
+        "        if (idx_pref_T0 < 0 || idx_pref_T0 >= data_size) {\n"
+        + "          return rangeIndex;\n"
+        + "        }"
     )
+    if InType == "unsigned char":
+        code.append(
+            "        const {}* ip_next_T0 =\n"
+            "            &input[idx_pref_T0 * fused_block_size];".format(InType)
+        )
+    else:
+        code.append(
+            "        const {}* ip_next_T0 = "
+            "&input[idx_pref_T0 * fused_block_size];".format(InType)
+        )
 
     # compute and store main loop
     code.append("        j = 0;")
@@ -271,7 +291,7 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused):
         code.append("          vtmp1[0] = ip[j];")
         code.append("          __m256 vtmp2 = _mm256_cvtph_ps(*((__m128i*)vtmp1));")
         code.append("          op[j] += wgt * ((float*)(&vtmp2))[0];")
-    elif InType == "uint8_t":
+    elif InType == "unsigned char":
         code.append("          op[j] += wgt * ((float)ip[j]) + bio;")
     else:
         assert False
@@ -314,12 +334,12 @@ else:
 fout = open(filename, "w")
 
 options = [
-    ["int32_t", "int32_t", "float", "float", "float", "float"],
-    ["int64_t", "int64_t", "float", "float", "float", "float"],
-    ["int32_t", "int32_t", "half", "at::Half", "float", "float"],
-    ["int64_t", "int64_t", "half", "at::Half", "float", "float"],
-    ["int32_t", "int32_t", "uint8_t", "uint8_t", "float", "float"],
-    ["int64_t", "int64_t", "uint8_t", "uint8_t", "float", "float"],
+    ["int32_t", "int", "float", "float", "float", "float"],
+    ["int64_t", "long long", "float", "float", "float", "float"],
+    ["int32_t", "int", "half", "at::Half", "float", "float"],
+    ["int64_t", "long long", "half", "at::Half", "float", "float"],
+    ["int32_t", "int", "uint8_t", "unsigned char", "float", "float"],
+    ["int64_t", "long long", "uint8_t", "unsigned char", "float", "float"],
 ]
 
 code = []
@@ -332,9 +352,7 @@ code.append("//// DO NOT MODIFY!!!")
 code.append("//// --------------------------\n")
 
 code.append("#include <ATen/core/Half.h>")
-code.append("#include <c10/util/Logging.h>")
 code.append("#include <immintrin.h>")
-code.append("#include <cassert>\n")
 
 code.append("namespace caffe2 {\n")
 for o in options:
@@ -346,14 +364,17 @@ for o in options:
         prefix, IndexTypeName, InTypeName, OutTypeName
     )
     suffix = "__avx2_fma"
-    fn = "static void " + fn_base + suffix
+    if prefix == "Fused8BitRowwise" and InTypeName == "uint8_t":
+        fn = "static long long\n" + fn_base + suffix
+    else:
+        fn = "static long long " + fn_base + suffix
     code.append(fn + "(")
 
     args = []
-    args.append("    const int64_t block_size,")
-    args.append("    const int64_t output_size,")
-    args.append("    const int64_t index_size,")
-    args.append("    const int64_t data_size,")
+    args.append("    const long long block_size,")
+    args.append("    const long long output_size,")
+    args.append("    const long long index_size,")
+    args.append("    const long long data_size,")
     args.append("    const " + InType + "* input,")
     args.append("    const " + IndexType + "* indices,")
     args.append("    const int* lengths,")
@@ -373,17 +394,6 @@ for o in options:
     )
 
     # code.append("printf(\"calling " + fn + "\\n\");");
-    if not opts.fused:
-        if InType != "uint8_t":
-            code.append(
-                "  CAFFE_ENFORCE(scale_bias == nullptr,"
-                ' "scale_bias must be nullptr");'
-            )
-        else:
-            code.append(
-                "  CAFFE_ENFORCE(scale_bias != nullptr,"
-                ' "scale_bias must not be nullptr");'
-            )
 
     code.append("  if (block_size == 128) {")
     code += unroll(16, IndexType, InType, OutType, True, "AVX2", opts.fused)
@@ -397,13 +407,14 @@ for o in options:
     code.append("    // generic code")
     code += generic(IndexType, InType, OutType, True, "AVX2", opts.fused)
     code.append("  }")
+    code.append("  return output_size;")
 
     code.append("}")
 
     for is_weight_positional in ["false", "true"]:
-        code.append("void " + fn_base + "_" + is_weight_positional + suffix + "(")
+        code.append("long long " + fn_base + "_" + is_weight_positional + suffix + "(")
         code += args
-        code.append("  " + fn_base + suffix + "<" + is_weight_positional + ">(")
+        code.append("  return " + fn_base + suffix + "<" + is_weight_positional + ">(")
         code.append("      block_size,")
         code.append("      output_size,")
         code.append("      index_size,")

@@ -3,9 +3,7 @@
 // computation library to different compiler options (-mno-avx2 or -mavx2).
 
 #include <immintrin.h>
-#include <cfloat>
 #include <cmath>
-#include <cstdint>
 
 namespace caffe2 {
 
@@ -15,7 +13,7 @@ static constexpr double QEPSILON = 1e-8;
 
 void quantize_and_compress__avx2(
     const float* input_data,
-    uint8_t* output_data,
+    unsigned char* output_data,
     size_t input_size,
     size_t bitwidth,
     bool random,
@@ -76,7 +74,7 @@ void quantize_and_compress__avx2(
 
   float gap = (maximum_element - minimum_element) / ((1 << bitwidth) - 1.0f);
   float gap_inverse = 1. / (gap + QEPSILON);
-  uint8_t max_q = (1 << bitwidth) - 1;
+  unsigned char max_q = (1 << bitwidth) - 1;
   size_t bit_start = 0;
   if (random) {
     for (int start = 0; start < input_size; start += segment_size) {
@@ -112,10 +110,11 @@ void quantize_and_compress__avx2(
             ? rounded
             : static_cast<float>(max_q);
         rounded = rounded > 0.0f ? rounded : 0.0f;
-        uint8_t qval = rounded;
+        unsigned char qval = rounded;
 
-        uint8_t orval = output_data[10 + i];
-        output_data[10 + i] = orval | static_cast<uint8_t>(qval << bit_start);
+        unsigned char orval = output_data[10 + i];
+        output_data[10 + i] =
+            orval | static_cast<unsigned char>(qval << bit_start);
       }
       bit_start += bitwidth;
     }
@@ -152,10 +151,11 @@ void quantize_and_compress__avx2(
             ? thetimes
             : static_cast<float>(max_q);
         thetimes = thetimes > 0.0f ? thetimes : 0.0f;
-        uint8_t qval = nearbyint(thetimes);
+        unsigned char qval = nearbyint(thetimes);
 
-        uint8_t orval = output_data[10 + i];
-        output_data[10 + i] = orval | static_cast<uint8_t>(qval << bit_start);
+        unsigned char orval = output_data[10 + i];
+        output_data[10 + i] =
+            orval | static_cast<unsigned char>(qval << bit_start);
       }
       bit_start += bitwidth;
     }
@@ -163,7 +163,7 @@ void quantize_and_compress__avx2(
 }
 
 void decompress_and_dequantize__avx2(
-    const uint8_t* input_data,
+    const unsigned char* input_data,
     float* output_data,
     size_t input_size) {
   // basic info
@@ -185,7 +185,7 @@ void decompress_and_dequantize__avx2(
   for (int start = 0; start < output_size; start += segment_size) {
     size_t stride = start + segment_size <= output_size ? segment_size
                                                         : output_size - start;
-    uint8_t mask = (1 << bitwidth) - 1;
+    unsigned char mask = (1 << bitwidth) - 1;
     int i = 0;
     // Can process 8 elements at a time because we need to expand uint8_t
     // to int32_t to use epi32 vector instructions.
