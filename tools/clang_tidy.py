@@ -146,7 +146,7 @@ def run_shell_commands_in_parallel(commands):
     build_entries = [build_template.format(i=i, cmd=' '.join([quote(s) for s in command]))
                      for i, command in enumerate(commands)]
 
-    file_contents = ninja_template.format(build_rules='\n'.join(build_entries))
+    file_contents = ninja_template.format(build_rules='\n'.join(build_entries)).encode()
     f = tempfile.NamedTemporaryFile(delete=False)
     try:
         f.write(file_contents)

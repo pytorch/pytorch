@@ -104,7 +104,7 @@ def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed,
 
         # Intialize C side signal handlers for SIGBUS and SIGSEGV. Python signal
         # module's handlers are executed after Python returns from C low-level
-        # handlers, likely when the same fatal signal happened again already.
+        # handlers, likely when the same fatal signal had already happened.
         # https://docs.python.org/3/library/signal.html Sec. 18.8.1.1
         _set_worker_signal_handlers()
 

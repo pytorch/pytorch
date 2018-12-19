@@ -968,13 +968,12 @@
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias={}) -> Tensor
 
-- func: linspace(Scalar start, Scalar end, TensorOptions options={}) -> Tensor
+- func: linspace(Scalar start, Scalar end, int64_t steps=100, TensorOptions options={}) -> Tensor
 
-- func: linspace(Scalar start, Scalar end, int64_t steps, TensorOptions options={}) -> Tensor
-
-- func: linspace_out(Tensor result, Scalar start, Scalar end) -> Tensor
-
-- func: linspace_out(Tensor result, Scalar start, Scalar end, int64_t steps) -> Tensor
+- func: linspace_out(Tensor result, Scalar start, Scalar end, int64_t steps=100) -> Tensor
+  dispatch:
+    CPU: linspace_cpu_out
+    CUDA: linspace_cuda_out
 
 - func: log(Tensor self) -> Tensor
   variants: function, method
@@ -1629,6 +1628,10 @@
 - func: sum_out(Tensor result, Tensor self, IntList[1] dim, bool keepdim=False) -> Tensor
 
 - func: sum_out(Tensor result, Tensor self, IntList[1] dim, *, ScalarType dtype) -> Tensor
+
+- func: sum_to_size(Tensor self, IntList size) -> Tensor
+  variants: method
+  device_guard: false
 
 - func: sqrt(Tensor self) -> Tensor
   variants: function, method
@@ -3489,6 +3492,18 @@
 - func: upsample_bilinear2d_backward(Tensor grad_output, IntList[2] output_size, IntList[4] input_size, bool align_corners) -> Tensor
   python_module: nn
 
+- func: upsample_bicubic2d_out(Tensor output, Tensor self, IntList[2] output_size, bool align_corners) -> Tensor
+  python_module: nn
+
+- func: upsample_bicubic2d(Tensor self, IntList[2] output_size, bool align_corners) -> Tensor
+  python_module: nn
+
+- func: upsample_bicubic2d_backward_out(Tensor grad_input, Tensor grad_output, IntList[2] output_size, IntList[4] input_size, bool align_corners) -> Tensor
+  python_module: nn
+
+- func: upsample_bicubic2d_backward(Tensor grad_output, IntList[2] output_size, IntList[4] input_size, bool align_corners) -> Tensor
+  python_module: nn
+
 - func: upsample_trilinear3d_out(Tensor output, Tensor self, IntList[3] output_size, bool align_corners) -> Tensor
   python_module: nn
 
@@ -3673,4 +3688,16 @@
   python_module: nn
 
 - func: thnn_conv_dilated3d_backward(Tensor grad_output, Tensor self, Tensor weight, IntList[3] kernel_size, IntList[3] stride, IntList[3] padding, IntList[3] dilation, Tensor columns, Tensor ones, std::array<bool,3> output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
+  python_module: nn
+
+- func: thnn_col2im(Tensor self, IntList[2] output_size, IntList[2] kernel_size, IntList[2] dilation, IntList[2] padding, IntList[2] stride) -> Tensor
+  python_module: nn
+
+- func: thnn_col2im_backward(Tensor grad_output, IntList[2] kernel_size, IntList[2] dilation, IntList[2] padding, IntList[2] stride) -> Tensor
+  python_module: nn
+
+- func: thnn_im2col(Tensor self, IntList[2] kernel_size, IntList[2] dilation, IntList[2] padding, IntList[2] stride) -> Tensor
+  python_module: nn
+
+- func: thnn_im2col_backward(Tensor grad_output, IntList[2] input_size, IntList[2] kernel_size, IntList[2] dilation, IntList[2] padding, IntList[2] stride) -> Tensor
   python_module: nn

@@ -251,7 +251,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'const Type &': 'scalartype',
         'const THPLayout &': 'layout',
         'const Device &': 'device',
-        'optional<ScalarType>': 'scalartypeOptional',
         'int64_t': 'toInt64',
         'bool': 'toBool',
         'double': 'toDouble',

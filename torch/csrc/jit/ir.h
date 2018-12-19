@@ -353,6 +353,7 @@ public:
   }
 
   TORCH_API bool isNondeterministic() const;
+  TORCH_API bool hasSideEffects () const;
 
   // Graphs
 
@@ -1102,5 +1103,9 @@ inline Node* Graph::createPythonOp(
 }
 
 TORCH_API void LintGraph(std::shared_ptr<Graph>& graph);
+
+TORCH_API at::ArrayRef<Value*> createTupleUnpack(Value* v);
+TORCH_API std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs);
+
 
 }} // namespace torch::jit

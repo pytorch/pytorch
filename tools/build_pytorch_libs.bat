@@ -255,6 +255,15 @@ goto:eof
   IF ERRORLEVEL 1 exit 1
   IF NOT ERRORLEVEL 0 exit 1
 
+  :: Install Python proto files
+  IF "%BUILD_PYTHON%" == "ON" (
+    for /f "delims=" %%i in ('where /R caffe2\proto *.py') do (
+      IF NOT "%%i" == "%CD%\caffe2\proto\__init__.py" (
+        copy /Y %%i ..\caffe2\proto\
+      )
+    )
+  )
+
   popd
   @endlocal
 
