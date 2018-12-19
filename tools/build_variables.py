@@ -56,6 +56,7 @@ torch_sources_no_python_default = [
     "torch/csrc/jit/import.cpp",
     "torch/csrc/jit/interpreter.cpp",
     "torch/csrc/jit/ir.cpp",
+    "torch/csrc/jit/symbolic_script.cpp",
     "torch/csrc/jit/operator.cpp",
     "torch/csrc/jit/passes/alias_analysis.cpp",
     "torch/csrc/jit/passes/batch_mm.cpp",
