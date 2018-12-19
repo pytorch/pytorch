@@ -2,7 +2,6 @@
 #
 # The following variables are optionally searched for defaults
 #  MKL_FOUND             : set to true if a library implementing the CBLAS interface is found
-#  USE_MKLDNN
 #
 # The following are set after configuration is done:
 #  MKLDNN_FOUND          : set to true if mkl-dnn is found.
@@ -13,10 +12,6 @@ IF (NOT MKLDNN_FOUND)
 
 SET(MKLDNN_LIBRARIES)
 SET(MKLDNN_INCLUDE_DIR)
-
-IF (NOT USE_MKLDNN)
-  RETURN()
-ENDIF(NOT USE_MKLDNN)
 
 IF(MSVC)
   MESSAGE(STATUS "MKL-DNN needs omp 3+ which is not supported in MSVC so far")
@@ -41,28 +36,15 @@ ENDIF(NOT IDEEP_INCLUDE_DIR OR NOT MKLDNN_INCLUDE_DIR)
 LIST(APPEND MKLDNN_INCLUDE_DIR ${IDEEP_INCLUDE_DIR})
 
 IF(MKL_FOUND)
+  # Configure MKL-DNN
+  ADD_DEFINITIONS(-DUSE_MKL)
+  SET(MKL_cmake_included TRUE)
+  SET(MKLDNN_THREADING "OMP:COMP")
+  INCLUDE_DIRECTORIES(AFTER ${MKL_INCLUDE_DIR})
+  LIST(APPEND mkldnn_LINKER_LIBS ${MKL_LIBRARIES})
+  # Append to mkldnn dependencies
   LIST(APPEND MKLDNN_LIBRARIES ${MKL_LIBRARIES})
   LIST(APPEND MKLDNN_INCLUDE_DIR ${MKL_INCLUDE_DIR})
-  # The OMP-related variables of MKL-DNN have to be overwritten here,
-  # if MKL is used, and the OMP version is defined by MKL.
-  # MKL_LIBRARIES_xxxx_LIBRARY is defined by MKL.
-  # INTEL_MKL_DIR gives the MKL root path.
-  IF (INTEL_MKL_DIR)
-    SET(MKLROOT ${INTEL_MKL_DIR})
-    IF(WIN32)
-      SET(MKLIOMP5DLL ${MKL_LIBRARIES_libiomp5md_LIBRARY} CACHE STRING "Overwrite MKL-DNN omp dependency" FORCE)
-    ELSE(WIN32)
-      IF (MKL_LIBRARIES_gomp_LIBRARY)
-        SET(MKLOMPLIB ${MKL_LIBRARIES_gomp_LIBRARY})
-      ELSE(MKL_LIBRARIES_gomp_LIBRARY)
-        SET(MKLOMPLIB ${MKL_LIBRARIES_iomp5_LIBRARY})
-      ENDIF(MKL_LIBRARIES_gomp_LIBRARY)
-      SET(MKLIOMP5LIB ${MKLOMPLIB} CACHE STRING "Overwrite MKL-DNN omp dependency" FORCE)
-    ENDIF(WIN32)
-  ELSE(INTEL_MKL_DIR)
-    MESSAGE(STATUS "Warning: MKL is found, but INTEL_MKL_DIR is not set!")
-  ENDIF(INTEL_MKL_DIR)
-
 ELSE(MKL_FOUND)
   # If we cannot find MKL, we will use the Intel MKL Small library
   # comes with ${MKLDNN_ROOT}/external
