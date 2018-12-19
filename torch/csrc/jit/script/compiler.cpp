@@ -367,13 +367,12 @@ c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(const Expr& expr)
 
 struct to_ir {
   to_ir(
-      Def def_,
+      Def def,
       Resolver resolver_,
       const SugaredValuePtr& self,
       Method& method) // method being constructed
       : method(method)
       , graph(method.graph())
-      , def(std::move(def_))
       , resolver(std::move(resolver_))
       , environment_stack(nullptr) {
     JIT_ASSERT(resolver);
@@ -387,15 +386,12 @@ struct to_ir {
     }
 
     method.setSchema(emitDef(def, self, graph->block()));
-    // remove any uses of tuples that we inserted that are not needed
-    LowerSimpleTuples(graph);
-    ConstantPooling(graph);
+    runCleanupPasses(graph);
   }
 
 private:
   Method& method;
   std::shared_ptr<Graph> graph;
-  Def def;
   Resolver resolver;
   std::unordered_map<int64_t, Value*> integral_constants;
   std::unordered_map<double, Value*> fp_constants;
@@ -413,9 +409,15 @@ private:
     return old_frame;
   }
 
+  void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
+    // remove any uses of tuples that we inserted that are not needed
+    LowerSimpleTuples(to_clean);
+    ConstantPooling(to_clean);
+  }
+
   FunctionSchema emitDef(const Def& def, const SugaredValuePtr& self, Block* block) {
     auto schema = extractSchemaFromDef(def, self);
-    std::vector<Argument> arguments = emitFormalArguments(self, schema, block);
+    std::vector<Argument> arguments = emitFormalArguments(def, self, schema, block);
 
     // body
     auto stmts = def.statements();
@@ -538,7 +540,7 @@ private:
       return FunctionSchema(name, std::move(args), std::move(returns), false, false);
   }
 
-  std::vector<Argument> emitFormalArguments(const SugaredValuePtr& self, const FunctionSchema& schema, Block* block) {
+  std::vector<Argument> emitFormalArguments(const Def& def, const SugaredValuePtr& self, const FunctionSchema& schema, Block* block) {
     std::vector<Argument> arguments; // for schema
     // inputs
     auto it = def.decl().params().begin();
@@ -596,6 +598,60 @@ private:
   void emitStatements(const List<Stmt>& statements) {
     return emitStatements(statements.begin(), statements.end());
   }
+  std::pair<std::shared_ptr<Graph>, Value*> lambdaLift(Block* block) {
+      auto subgraph = std::make_shared<Graph>();
+      // note: type is set later on pack_context and context when we know it
+      Node* pack_context = graph->insertNode(graph->create(prim::TupleConstruct, {}, 1));
+      Value* context = subgraph->addInput("context");
+      // cannot use createTupleUnpack because tpe is not known yet
+      Node* unpack_context = subgraph->insertNode(subgraph->create(prim::TupleUnpack, {context}, 0));
+
+      std::unordered_map<Value*, Value*> captures;
+      auto env = [&](Value* v) -> Value* {
+        auto it = captures.find(v);
+        if (it != captures.end()) {
+            return it->second;
+        }
+        pack_context->addInput(v);
+        Value* r = unpack_context->addOutput()->copyMetadata(v);
+        captures[v] = r;
+        return r;
+      };
+      subgraph->block()->cloneFrom(block, env);
+      auto context_type = TupleType::create(
+          fmap(pack_context->inputs(), [](Value* v) { return v->type(); }));
+      pack_context->output()->setType(context_type);
+      context->setType(context_type);
+      return std::make_pair(std::move(subgraph), pack_context->output());
+  }
+  // XXX - right now closures are used _only_ for defining gradients internally
+  // There are several unfinished aspects that make them unusable generally
+  // 1. We do not have a type, ivalue, operator to represent prim::Function, so closure_node has type None
+  //    and any graphs that contain it cannot be run
+  // 2. There is no export logic for it yet, so it cannot be exported/python_printed
+  // 3. There is nothing preventing the assignment of already existing variables inside the closures
+  //    the changes to those variables will just get forgotten.
+  // 4. There is parsing support in frontend.py, this is intentional since it
+  //    prevents people from accidentally using this feature.
+  void emitClosure(const Def& def) {
+    Node* closure_node = graph->insertNode(graph->create(prim::Function, 1));
+    closure_node->output()->setType(NoneType::get()); //it is not a real thing yet, so just say the type is none.
+    Block* block = closure_node->addBlock();
+    {
+      WithInsertPoint guard(block);
+      pushFrame(block);
+      emitDef(def, nullptr, block); //ignore schema return, we just wont use it for now since we never create a Method for the closure
+      popFrame();
+    }
+    std::shared_ptr<Graph> subgraph;
+    Value* context;
+    std::tie(subgraph, context) = lambdaLift(block);
+    runCleanupPasses(subgraph);
+    closure_node->eraseBlock(0);
+    closure_node->g_(attr::Subgraph, std::move(subgraph));
+    auto tup = graph->insertNode(graph->createTuple({closure_node->output(), context}))->output();
+    environment_stack->setVar(def.name().range(), def.name().name(), tup);
+  }
   void emitStatements(List<Stmt>::const_iterator begin, List<Stmt>::const_iterator end) {
     for (; begin != end; ++begin) {
       auto stmt = *begin;
@@ -638,6 +694,9 @@ private:
           break;
         case TK_PASS:
           // Emit nothing for pass
+          break;
+        case TK_DEF:
+          emitClosure(Def(stmt));
           break;
         default:
           throw ErrorReport(stmt)
