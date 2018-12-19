@@ -3,6 +3,7 @@ from . import _lazy_init, _lazy_call, device_count, device as device_ctx_manager
 
 __all__ = ['get_rng_state', 'get_rng_state_all',
            'set_rng_state', 'set_rng_state_all',
+           'manual_seed', 'manual_seed_all',
            'seed', 'seed_all', 'initial_seed']
 
 
