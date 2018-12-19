@@ -497,11 +497,11 @@ struct Return : public Stmt {
   explicit Return(const TreeRef& tree) : Stmt(tree) {
     tree_->match(TK_RETURN);
   }
-  List<Expr> values() const {
-    return List<Expr>(subtree(0));
+  Expr expr() const {
+    return Expr(subtree(0));
   }
-  static Return create(const SourceRange& range, const List<Expr>& values) {
-    return Return(Compound::create(TK_RETURN, range, {values}));
+  static Return create(const SourceRange& range, const Expr& value) {
+    return Return(Compound::create(TK_RETURN, range, {value}));
   }
 };
 

@@ -881,7 +881,9 @@ def clamp_max(g, self, max):
 
 # torch.max (same for torch.min) actually has two interfaces smashed together:
 # torch.max(x, dim, keepdim) and torch.max(x, y)
-def max(g, self, dim_or_y, keepdim=None):
+def max(g, self, dim_or_y=None, keepdim=None):
+    if dim_or_y is None and keepdim is None:
+        return g.op("ReduceMax", self, keepdims_i=0)
     if keepdim is None:
         return g.op("Max", self, dim_or_y)
     else:
@@ -896,7 +898,9 @@ def max(g, self, dim_or_y, keepdim=None):
                     outputs=2)
 
 
-def min(g, self, dim_or_y, keepdim=None):
+def min(g, self, dim_or_y=None, keepdim=None):
+    if dim_or_y is None and keepdim is None:
+        return g.op("ReduceMin", self, keepdims_i=0)
     if keepdim is None:
         return g.op("Min", self, dim_or_y)
     else:

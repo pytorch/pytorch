@@ -968,13 +968,12 @@
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias={}) -> Tensor
 
-- func: linspace(Scalar start, Scalar end, TensorOptions options={}) -> Tensor
+- func: linspace(Scalar start, Scalar end, int64_t steps=100, TensorOptions options={}) -> Tensor
 
-- func: linspace(Scalar start, Scalar end, int64_t steps, TensorOptions options={}) -> Tensor
-
-- func: linspace_out(Tensor result, Scalar start, Scalar end) -> Tensor
-
-- func: linspace_out(Tensor result, Scalar start, Scalar end, int64_t steps) -> Tensor
+- func: linspace_out(Tensor result, Scalar start, Scalar end, int64_t steps=100) -> Tensor
+  dispatch:
+    CPU: linspace_cpu_out
+    CUDA: linspace_cuda_out
 
 - func: log(Tensor self) -> Tensor
   variants: function, method
