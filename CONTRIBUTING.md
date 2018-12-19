@@ -39,7 +39,7 @@ cd pytorch
 
 3. Install PyTorch in `build develop` mode:
 
-A full set of instructions on installing PyTorch from source are here:
+A full set of instructions on installing PyTorch from source is here:
 https://github.com/pytorch/pytorch#from-source
 
 The change you have to make is to replace
