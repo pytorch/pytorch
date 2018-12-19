@@ -73,13 +73,13 @@ struct ArgumentSpec {
   }
 
   void addInput(const IValue& input, size_t& offset, bool with_grad) {
-    auto & arg = args[offset];
+    auto & arg = args.at(offset);
     // Initialize all fields to 0. This is convenient, because e.g.
     // requires_grad() can be checked even on tensors AND will make
     // padding bits all 0s.
     std::memset(&arg, 0, sizeof(ArgumentInfo));
+
     if (input.isTensor()) {
-      JIT_ASSERT(offset < args.size());
       at::Tensor t = input.toTensor();
       if ((arg.defined_ = t.defined())) {
         arg.requires_grad_ = with_grad && autograd::Variable(t).requires_grad();
@@ -96,7 +96,6 @@ struct ArgumentSpec {
         addInput(elem, offset, with_grad);
       }
     } else {
-      JIT_ASSERT(offset < args.size());
       // NB: no need to set is_tensor to false, because we memset the struct to 0 above
       combineHash(arg);
       offset++;

@@ -298,6 +298,9 @@ struct GraphExecutorImpl {
   }
 
   static size_t countFlatInputs(const TypePtr& ptr) {
+    if (auto optional_type = ptr->cast<OptionalType>()) {
+      return countFlatInputs(optional_type->getElementType());
+    }
     if (auto tuple_type = ptr->cast<TupleType>()) {
       size_t total = 0;
       for (auto & elem : tuple_type->elements()) {
