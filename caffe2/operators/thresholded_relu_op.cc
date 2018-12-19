@@ -8,8 +8,8 @@ namespace caffe2 {
 template <>
 bool ThresholdedReluOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
-  auto* Y = Output(0);
-  Y->ResizeLike(X);
+
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
 
   ConstEigenVectorArrayMap<float> Xvec(X.data<float>(), X.numel());
   EigenVectorArrayMap<float> Yvec(
@@ -30,9 +30,9 @@ template <>
 bool ThresholdedReluGradientOp<float, CPUContext>::RunOnDevice() {
   auto& Y = Input(0);
   auto& dY = Input(1);
-  auto* dX = Output(0);
+
   CAFFE_ENFORCE_EQ(dY.numel(), Y.numel());
-  dX->ResizeLike(Y);
+  auto* dX = Output(0, Y.sizes(), at::dtype<float>());
 
   const float* Ydata = Y.data<float>();
   const float* dYdata = dY.data<float>();
