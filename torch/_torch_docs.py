@@ -4659,28 +4659,11 @@ Examples::
 
 add_docstr(torch.t,
            r"""
-t(input) -> Tensor
+t(input, dim0=None, dim1=None) -> Tensor
 
-Expects :attr:`input` to be a matrix (2-D tensor) and transposes dimensions 0
-and 1.
-
-Can be seen as a short-hand function for ``transpose(input, 0, 1)``.
-
-Args:
-    input (Tensor): the input tensor
-
-Example::
-
-    >>> x = torch.randn(2, 3)
-    >>> x
-    tensor([[ 0.4875,  0.9158, -0.5872],
-            [ 0.3938, -0.6929,  0.6932]])
-    >>> torch.t(x)
-    tensor([[ 0.4875,  0.3938],
-            [ 0.9158, -0.6929],
-            [-0.5872,  0.6932]])
+The same as ``torch.transpose``
 """)
-
+    
 add_docstr(torch.flip,
            r"""
 flip(input, dims) -> Tensor

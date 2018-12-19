@@ -2344,14 +2344,14 @@ See :func:`torch.symeig`
 
 add_docstr_all('t',
                r"""
-t() -> Tensor
+t(dim0=None, dim1=None) -> Tensor
 
 See :func:`torch.t`
 """)
 
 add_docstr_all('t_',
                r"""
-t_() -> Tensor
+t_(dim0=None, dim1=None) -> Tensor
 
 In-place version of :meth:`~Tensor.t`
 """)
