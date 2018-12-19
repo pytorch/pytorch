@@ -140,14 +140,15 @@ inline int64_t resolve_root_int(
     // And the true value of row would also be with in range,
     //            [res - sqrt(d), res + sqrt(d) + 1)
     // as the denominator would only reduce the precision penalty.
-    int64_t diff = ::__double2ll_ru(::sqrt(::fabs((double)(bXb_cX4 - llsr * llsr))));
+    int64_t diff =
+      ::__double2ll_ru(::sqrt(::fabs((double)(bXb_cX4 - llsr * llsr))));
     // l never exceeds (could equal to) the target row index
     auto l = res > diff ? res - diff : 0;
     // r is always larger than the target row index
     auto r = res + diff + 1;
 
     // binary search for the correct answer
-    x <<= 1; // the loop always compare with 2x, so do it once here
+    x <<= 1; // the loop always compares with 2x, so do it once here
     while (l + 1 < r) {
       auto m = (l + r) >> 1;
       // for tril:
@@ -283,6 +284,10 @@ void tril_indices_kernel(scalar_t * tensor,
   }
 }
 
+// Some Large test cases for the fallback binary search path is disabled by
+// default to speed up CI tests and to avoid OOM error. When modifying the
+// implementation, please enable them in test/test_cuda.py and make sure they
+// pass on your local server.
 Tensor tril_indices_cuda(
     int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
   check_args(row, col, options);
@@ -353,6 +358,10 @@ void triu_indices_kernel(scalar_t * tensor,
   }
 }
 
+// Some Large test cases for the fallback binary search path is disabled by
+// default to speed up CI tests and to avoid OOM error. When modifying the
+// implementation, please enable them in test/test_cuda.py and make sure they
+// pass on your local server.
 Tensor triu_indices_cuda(
     int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
   check_args(row, col, options);

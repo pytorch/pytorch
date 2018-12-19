@@ -924,16 +924,25 @@ tri_tests_args = [
     (3, 2028, -1),
     (2028, 3),
     (2028, 1),
-    (2028, 1, -1),
-    (5000, 5000),
-    (10000, 10000)
+    (2028, 1, -1)
 ]
 
 tri_large_tests_args = [
-    (268435455, 1),
     (1, 268435455),
-    (134217727, 2, 1),
-    (2, 134217727, 1)
+    # Large test cases below are deliberately commented out to speed up CI
+    # tests and to avoid OOM error. When modifying implementations of
+    # tril_indices and triu_indices, please enable these tests and make sure
+    # they pass.
+    #
+    # (5000, 5000),
+    # (10000, 10000),
+    # (268435455, 1),
+    # (134217727, 2, 1),
+    # (2, 134217727, 1),
+    # (536870901, 1),
+    # (1, 536870901),
+    # (268435455, 2, 1),
+    # (2, 268435455, 1)
 ]
 
 
