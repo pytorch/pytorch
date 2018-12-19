@@ -2,14 +2,16 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from caffe2.python import core, workspace
+from caffe2.python import core, workspace, model_helper
+import random
 from caffe2.python.test.executor_test_util import (
     build_conv_model,
     build_resnet50_dataparallel_model,
     run_resnet50_epoch,
     ExecutorTestBase,
     executor_test_settings,
-    executor_test_model_names)
+    executor_test_model_names,
+)
 
 from caffe2.python.test_util import TestCase
 
@@ -24,10 +26,12 @@ ITERATIONS = 1
 
 
 class ExecutorCPUConvNetTest(ExecutorTestBase):
-    @given(executor=st.sampled_from(EXECUTORS),
-           model_name=st.sampled_from(executor_test_model_names()),
-           batch_size=st.sampled_from([1]),
-           num_workers=st.sampled_from([8]))
+    @given(
+        executor=st.sampled_from(EXECUTORS),
+        model_name=st.sampled_from(executor_test_model_names()),
+        batch_size=st.sampled_from([1]),
+        num_workers=st.sampled_from([8]),
+    )
     @executor_test_settings
     def test_executor(self, executor, model_name, batch_size, num_workers):
         model = build_conv_model(model_name, batch_size)
@@ -50,8 +54,7 @@ class ExecutorCPUConvNetTest(ExecutorTestBase):
 @unittest.skipIf(not workspace.has_gpu_support
                 and not workspace.has_hip_support, "no gpu")
 class ExecutorGPUResNetTest(ExecutorTestBase):
-    @given(executor=st.sampled_from(EXECUTORS),
-           num_workers=st.sampled_from([8]))
+    @given(executor=st.sampled_from(EXECUTORS), num_workers=st.sampled_from([8]))
     @executor_test_settings
     def test_executor(self, executor, num_workers):
         model = build_resnet50_dataparallel_model(
@@ -100,5 +103,33 @@ class ExecutorFailingOpTest(TestCase):
         self.assertFalse(res)
 
 
-if __name__ == '__main__':
+class ExecutorFuzzTest(ExecutorTestBase):
+    def test_fuzzy_model(self):
+        model = model_helper.ModelHelper(name="test")
+        inits = []
+        for i in range(100):
+            init = model.param_init_net.ConstantFill(
+                [], "ONE" + str(i), shape=[1], value=1.0
+            )
+            inits.append(init)
+        adds = []
+        for i in range(1000):
+            add = model.net.Add(
+                [random.choice(inits + adds), random.choice(inits + adds)],
+                "ADD" + str(i),
+            )
+            adds.append(add)
+
+        def run_model():
+            workspace.RunNet(model.net, 100)
+
+        self.compare_executors(
+            model,
+            ref_executor="simple",
+            test_executor="async_scheduling",
+            model_run_func=run_model,
+        )
+
+
+if __name__ == "__main__":
     unittest.main()
