@@ -69,7 +69,7 @@ void THCTensor_(maskedCopy)(THCState* state,
     maskPrefixSumData(THCudaLongTensor_data(state, maskPrefixSum));
 
   thrust::exclusive_scan(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     maskData,
@@ -139,7 +139,7 @@ void THCTensor_(maskedSelect)(THCState* state,
     maskPrefixSumData(THCudaLongTensor_data(state, maskPrefixSum));
 
   thrust::exclusive_scan(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     maskData,
