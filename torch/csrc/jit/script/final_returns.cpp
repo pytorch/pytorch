@@ -53,7 +53,7 @@ TreeRef spliceToEnd(const std::vector<bool>& path, size_t idx, const If& if_stmt
 void checkAlwaysReturns(const If& if_stmt, ReturnsInfo::Status status) {
   if (status != ReturnsInfo::AllReturn) {
     throw ErrorReport(if_stmt)
-        << "when returning from a (possibly nested) if statement there must be at most one branch that does not return. Here there are multiple returning branches";
+        << "when returning from a (possibly nested) if statement there must be at most one branch that does not return. Here there are multiple branches that do not return";
   }
 }
 
@@ -94,6 +94,7 @@ ReturnsInfo makeReturnsFinal(const List<Stmt>& stmts) {
           auto new_if =
               if_stmt.withNewBranches(true_final.stmts_, false_final.stmts_);
           TreeRef spliced = spliceToEnd(path, 0, new_if, rest_final.stmts_);
+          changed.emplace_back(spliced);
           if (rest_final.status_ == ReturnsInfo::AllReturn) {
             return ReturnsInfo(ReturnsInfo::AllReturn, stmts.range(), std::move(changed));
           } else {

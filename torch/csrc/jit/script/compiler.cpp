@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/schema_matching.h>
+#include <torch/csrc/jit/script/final_returns.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/script/type_parser.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
@@ -418,18 +419,16 @@ private:
     auto schema = extractSchemaFromDef(def, self);
     std::vector<Argument> arguments = emitFormalArguments(def, self, schema, block);
 
+
     // body
-    auto stmts = def.statements();
-    auto stmts_begin = stmts.begin();
-    auto stmts_end = stmts.end();
-    c10::optional<Return> return_stmt;
-    if (stmts_begin != stmts_end && (*std::prev(stmts_end)).kind() == TK_RETURN) {
-      --stmts_end;
-      return_stmt = Return(*stmts_end);
-    }
-    emitStatements(stmts_begin, stmts_end);
-    const SourceRange& range = return_stmt ? return_stmt->range() : def.range();
-    std::vector<Argument> returns = {emitReturn(range, return_stmt, schema, block)};
+    std::vector<TreeRef> stmts = def.statements().get()->trees();
+    // make sure everthing always returns.
+    // if an earlier statement returns moveAllReturnsToEnd will just delete this one
+    stmts.emplace_back(Return::create(
+        def.range(), Expr(Compound::create(TK_NONE, def.range(), {}))));
+    auto stmts_list = moveAllReturnsToEnd(List<Stmt>::unsafeCreate(def.statements().range(), std::move(stmts)));
+    emitStatements(stmts_list.begin(), stmts_list.end());
+    std::vector<Argument> returns = {emitReturn(def.range(), schema, block)};
     return {def.name().name(), std::move(arguments), std::move(returns)};
   }
 
@@ -573,16 +572,18 @@ private:
     return arguments;
   }
 
-  Argument emitReturn(const SourceRange& range, c10::optional<Return> return_stmt, const FunctionSchema& schema, Block* block) {
+  Argument emitReturn(const SourceRange& range, const FunctionSchema& schema, Block* block) {
     JIT_ASSERT(schema.returns().size() <= 1);
     // outputs
-    Value* result = return_stmt ? emitExpr(return_stmt->expr())
-                                : graph->insertConstant(IValue(), range);
+    Value* result = environment_stack->getVar("the return value", range);
     TypePtr result_type = schema.returns().size() > 0
         ? schema.returns().at(0).type()
         : result->type();
 
-    if (return_stmt) {
+    // this guard skips implicit conversion from None -> Tensor for the return type.
+    // otherwise forgetting a return a function returning a tensor will cause a None to be
+    // converted to a tensor.
+    if (!(result_type->isSubtypeOf(DynamicType::get()) && result->type()->isSubtypeOf(NoneType::get()))) {
       result = tryConvertToType(
           range, *graph, result_type, result, /*allow_conversions=*/true);
     }
@@ -687,10 +688,10 @@ private:
         case TK_ASSERT:
           emitAssert(Assert(stmt));
           break;
-        case TK_RETURN:
-          throw ErrorReport(stmt) << "return statements can appear only at the end "
-                                  << "of the function body";
-          break;
+        case TK_RETURN: {
+          Value* return_value = emitExpr(Return(stmt).expr());
+          environment_stack->setVar(stmt.range(), "the return value", return_value);
+        } break;
         case TK_PASS:
           // Emit nothing for pass
           break;
