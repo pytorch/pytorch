@@ -31,7 +31,6 @@ static void prod_kernel_impl(TensorIterator& iter) {
       /*identity=*/1);
   });
 }
-
 }  // anonymous namespace
 
 REGISTER_DISPATCH(sum_stub, &sum_kernel_impl);
