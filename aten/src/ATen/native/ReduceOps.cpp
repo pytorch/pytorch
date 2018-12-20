@@ -110,14 +110,6 @@ static std::unique_ptr<TensorIterator> make_reduction(
   return TensorIterator::reduce_op(viewed_result, self.to(dtype));
 }
 
-static inline int64_t n_dim_size(const Tensor& self, IntList dim) {
-  int64_t numel = 1;
-  for (auto d : dim) {
-    numel *= self.size(d);
-  }
-  return numel;
-}
-
 Tensor cumsum(const Tensor& self, int64_t dim, optional<ScalarType> dtype) {
   return at::legacy::th::_th_cumsum(integer_upcast(self, dtype), dim);
 }
@@ -150,8 +142,6 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, optional<Sc
   return at::legacy::th::_th_cumprod_out(result, self.toType(result.type().scalarType()), dim);
 }
 
-// ALL REDUCE #################################################################
-
 static ScalarType get_dtype(Tensor& result, const Tensor& self, optional<ScalarType> dtype,
                             bool promote_integers=false) {
   if (dtype.has_value()) {
@@ -170,8 +160,48 @@ Tensor mean(const Tensor& self, optional<ScalarType> dtype) {
   return at::native::mean(self, {}, false, dtype);
 }
 
+Tensor mean(const Tensor &self, IntList dim, bool keepdim, optional<ScalarType> dtype) {
+  Tensor result;
+  return at::native::mean_out(result, self, dim, keepdim, dtype);
+}
+
+Tensor &mean_out(Tensor &result, const Tensor &self, IntList dim,
+                 bool keepdim, optional<ScalarType> opt_dtype) {
+  ScalarType scalarType = opt_dtype.has_value() ? opt_dtype.value() : self.type().scalarType();
+  AT_CHECK(
+      at::isFloatingType(scalarType),
+      "Can only calculate the mean of floating types. Got ",
+      toString(scalarType),
+      " instead.");
+  ScalarType dtype = get_dtype(result, self, opt_dtype, true);
+  auto iter = make_reduction("mean", result, self, dim, keepdim, dtype);
+  if (iter->numel() == 0) {
+    result.fill_(std::numeric_limits<double>::quiet_NaN());
+  } else {
+    mean_stub(iter->device_type(), *iter);
+  }
+  return result;
+}
+
 Tensor sum(const Tensor &self, optional<ScalarType> dtype) {
   return at::native::sum(self, {}, false, dtype);
+}
+
+Tensor sum(const Tensor& self, IntList dim, bool keepdim, optional<ScalarType> dtype) {
+  Tensor result;
+  native::sum_out(result, self, dim, keepdim, dtype);
+  return result;
+}
+
+Tensor& sum_out(Tensor& result, const Tensor& self, IntList dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  ScalarType dtype = get_dtype(result, self, opt_dtype, true);
+  auto iter = make_reduction("sum", result, self, dim, keepdim, dtype);
+  if (iter->numel() == 0) {
+    result.zero_();
+  } else {
+    sum_stub(iter->device_type(), *iter);
+  }
+  return result;
 }
 
 static Tensor& prod_impl(Tensor& result, const Tensor& self, IntList dim,
@@ -192,58 +222,14 @@ Tensor prod(const Tensor &self, optional<ScalarType> dtype) {
   return result;
 }
 
-// \ALL REDUCE ################################################################
-
-// DIM REDUCE #################################################################
-
-Tensor &mean_out(Tensor &result, const Tensor &self, IntList dim,
-                 bool keepdim, optional<ScalarType> opt_dtype) {
-  ScalarType scalarType = opt_dtype.has_value() ? opt_dtype.value() : self.type().scalarType();
-  AT_CHECK(
-      at::isFloatingType(scalarType),
-      "Can only calculate the mean of floating types. Got ",
-      toString(scalarType),
-      " instead.");
-  ScalarType dtype = get_dtype(result, self, opt_dtype, true);
-  auto iter = make_reduction("mean", result, self, dim, keepdim, dtype);
-  if (iter->numel() == 0) {
-    result.fill_(std::numeric_limits<double>::quiet_NaN());
-  } else {
-    mean_stub(iter->device_type(), *iter);
-  }
-  return result;
-}
-
-Tensor mean(const Tensor &self, IntList dim, bool keepdim, optional<ScalarType> dtype) {
+Tensor prod(const Tensor& self, int64_t dim, bool keepdim, optional<ScalarType> dtype) {
   Tensor result;
-  return at::native::mean_out(result, self, dim, keepdim, dtype);
-}
-
-Tensor& sum_out(Tensor& result, const Tensor& self, IntList dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  ScalarType dtype = get_dtype(result, self, opt_dtype, true);
-  auto iter = make_reduction("sum", result, self, dim, keepdim, dtype);
-  if (iter->numel() == 0) {
-    result.zero_();
-  } else {
-    sum_stub(iter->device_type(), *iter);
-  }
+  return at::native::prod_impl(result, self, dim, keepdim, dtype);
   return result;
 }
 
 Tensor& prod_out(Tensor& result, const Tensor& self, int64_t dim, bool keepdim, optional<ScalarType> dtype) {
   return at::native::prod_impl(result, self, dim, keepdim, dtype);
-}
-
-Tensor sum(const Tensor& self, IntList dim, bool keepdim, optional<ScalarType> dtype) {
-  Tensor result;
-  native::sum_out(result, self, dim, keepdim, dtype);
-  return result;
-}
-
-Tensor prod(const Tensor& self, int64_t dim, bool keepdim, optional<ScalarType> dtype) {
-  Tensor result;
-  return at::native::prod_impl(result, self, dim, keepdim, dtype);
-  return result;
 }
 
 Tensor& logsumexp_out(Tensor& result, const Tensor &self, int64_t dim_, bool keepdim) {
