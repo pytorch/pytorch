@@ -163,8 +163,8 @@ class SparseFunHashGradientOp : public Operator<Context> {
     if (adaptive_) {
       const auto& alpha = Input(5);
       num_alpha = alpha.size(0);
-      auto* grad_alpha = Output(2);
-      grad_alpha->ResizeLike(alpha);
+
+      auto* grad_alpha = Output(2, alpha.sizes(), at::dtype<T>());
       grad_alpha_data = grad_alpha->template mutable_data<T>();
       memset(grad_alpha_data, 0, sizeof(T) * num_alpha);
     }

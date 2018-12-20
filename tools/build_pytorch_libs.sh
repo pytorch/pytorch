@@ -8,8 +8,9 @@
 #
 # TODO: Replace this with the root-level CMakeLists.txt
 
+set -e
 if [[ $VERBOSE_SCRIPT == '1' ]]; then
-  set -ex
+  set -x
   report() {
     echo "$@"
   }

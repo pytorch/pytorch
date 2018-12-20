@@ -28,6 +28,12 @@ void LinearImpl::reset() {
   }
 }
 
+void LinearImpl::pretty_print(std::ostream& stream) const {
+  stream << std::boolalpha << "torch::nn::Linear(in=" << options.in_
+         << ", out=" << options.out_ << ", with_bias=" << options.with_bias_
+         << ")";
+}
+
 Tensor LinearImpl::forward(const Tensor& input) {
   AT_ASSERT(!options.with_bias_ || bias.defined());
   return torch::linear(input, weight, bias);
