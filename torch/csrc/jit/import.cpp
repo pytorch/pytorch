@@ -8,7 +8,6 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/import_method.h>
 
-
 #include <caffe2/core/types.h>
 #include <caffe2/proto/caffe2_pb.h>
 #include <caffe2/proto/torch_pb.h>
@@ -31,11 +30,10 @@ namespace {
 // one are tensor data, and the last record is a serialized ModelProto, defined
 // in caffe2/proto/torch.proto. ModelProto contains all the metadata of the
 // model, and it is serialized as json.
+template <class Reader>
 class ScriptModuleDeserializer final {
  public:
-  ScriptModuleDeserializer(const std::string& filename);
-
-  ScriptModuleDeserializer(std::istream* is);
+  explicit ScriptModuleDeserializer(std::unique_ptr<Reader>&& reader);
 
   void deserialize(ModuleLookup module_lookup,
       c10::optional<at::Device> device);
@@ -49,7 +47,9 @@ private:
 
  void loadTensorTable(torch::ModelDef* model_def);
 
- PyTorchStreamReader reader_;
+ // Reader needs to implement function
+ //   - `pair<at::DataPtr, size_t> getRecord(std::string name)`
+ std::unique_ptr<Reader> reader_;
  // this is a hack to make sure the script module created in C++ is the
  // same as created in Python
  ModuleLookup moduleLookup_;
@@ -59,20 +59,17 @@ private:
  std::vector<at::Tensor> tensor_table_;
 };
 
-ScriptModuleDeserializer::ScriptModuleDeserializer(const std::string& filename)
-    : reader_(filename.c_str()) {
-  // TODO appropriate support for mmap, right now still use stream reader
-}
+template <class Reader>
+ScriptModuleDeserializer<Reader>::ScriptModuleDeserializer(std::unique_ptr<Reader>&& reader)
+  : reader_(std::move(reader)) {}
 
-ScriptModuleDeserializer::ScriptModuleDeserializer(std::istream* is)
-    : reader_(is) {}
-
-void ScriptModuleDeserializer::deserialize(ModuleLookup module_lookup,
+template <class Reader>
+void ScriptModuleDeserializer<Reader>::deserialize(ModuleLookup module_lookup,
     c10::optional<at::Device> device) {
   torch::ModelDef model_def;
   at::DataPtr data_ptr;
   size_t data_size;
-  std::tie(data_ptr, data_size) = reader_.getRecord("model.json");
+  std::tie(data_ptr, data_size) = reader_->getRecord("model.json");
   // NB: cannot use JsonStringToMessage, since fbcode's protobuf is too old
   // be consistent with JsonStringToMessage
   std::string url_prefix = "type.googleapis.com";
@@ -106,14 +103,16 @@ void ScriptModuleDeserializer::deserialize(ModuleLookup module_lookup,
   convertModule(module_def);
 }
 
-void ScriptModuleDeserializer::loadTensorTable(torch::ModelDef* model_def) {
+template <class Reader>
+void ScriptModuleDeserializer<Reader>::loadTensorTable(torch::ModelDef* model_def) {
   std::unordered_map<std::string, at::Storage> storageMap;
   for(const torch::TensorDef& tensor : model_def->tensors()) {
     tensor_table_.emplace_back(loadTensor(tensor, storageMap));
   }
 }
 
-at::Tensor ScriptModuleDeserializer::loadTensor(const torch::TensorDef& tensor_proto,
+template <class Reader>
+at::Tensor ScriptModuleDeserializer<Reader>::loadTensor(const torch::TensorDef& tensor_proto,
                 std::unordered_map<std::string, at::Storage>& storageMap) {
   std::vector<int64_t> dims(tensor_proto.dims().begin(), tensor_proto.dims().end());
   std::vector<int64_t> strides(tensor_proto.strides().begin(), tensor_proto.strides().end());
@@ -131,7 +130,7 @@ at::Tensor ScriptModuleDeserializer::loadTensor(const torch::TensorDef& tensor_p
   if (storage_it == storageMap.end()) {
     at::DataPtr storage_ptr;
     uint64_t record_size;
-    std::tie(storage_ptr, record_size) = reader_.getRecord(record_key);
+    std::tie(storage_ptr, record_size) = reader_->getRecord(record_key);
     auto cpu_storage = at::Storage(
         at::CPU(type).typeMeta(),
         std::move(storage_ptr),
@@ -178,7 +177,8 @@ at::Tensor ScriptModuleDeserializer::loadTensor(const torch::TensorDef& tensor_p
   return result;
 }
 
-void ScriptModuleDeserializer::convertModule(
+template <class Reader>
+void ScriptModuleDeserializer<Reader>::convertModule(
     const torch::ModuleDef& module_def) {
   std::shared_ptr<script::Module> module = moduleLookup_(moduleStack_);
   module->set_optimized(module_def.optimize());
@@ -197,7 +197,7 @@ void ScriptModuleDeserializer::convertModule(
   if (module_def.has_torchscript_arena()) {
     at::DataPtr data;
     size_t size;
-    std::tie(data, size) = reader_.getRecord(module_def.torchscript_arena().key());
+    std::tie(data, size) = reader_->getRecord(module_def.torchscript_arena().key());
     std::string data_str(static_cast<const char*>(data.get()), size);
     import_methods(module, data_str, tensor_table_);
   }
@@ -209,7 +209,8 @@ void import_ir_module(
     ModuleLookup module_lookup,
     std::istream& in,
     c10::optional<at::Device> device) {
-  ScriptModuleDeserializer deserializer(&in);
+  auto reader = caffe2::make_unique<PyTorchStreamReader>(&in);
+  ScriptModuleDeserializer<PyTorchStreamReader> deserializer(std::move(reader));
   deserializer.deserialize(module_lookup, device);
 }
 
@@ -217,7 +218,8 @@ void import_ir_module(
     ModuleLookup module_lookup,
     const std::string& filename,
     c10::optional<at::Device> device) {
-  ScriptModuleDeserializer deserializer(filename);
+  auto reader = caffe2::make_unique<PyTorchStreamReader>(filename);
+  ScriptModuleDeserializer<PyTorchStreamReader> deserializer(std::move(reader));
   deserializer.deserialize(module_lookup, device);
 }
 
@@ -236,7 +238,8 @@ std::shared_ptr<script::Module> load(std::istream& in,
     return curr;
   };
 
-  ScriptModuleDeserializer deserializer(&in);
+  auto reader = caffe2::make_unique<PyTorchStreamReader>(&in);
+  ScriptModuleDeserializer<PyTorchStreamReader> deserializer(std::move(reader));
   deserializer.deserialize(module_lookup, device);
 
   return module;
