@@ -5,6 +5,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/InferSize.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/LegacyTHFunctions.h>
 #include <ATen/WrapDimUtils.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
@@ -46,7 +47,7 @@ static void check_cat_no_zero_dim(TensorList tensors) {
 Tensor & cat_out(Tensor & result, TensorList tensors, int64_t dim) {
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
-  return at::_th_cat_out(result, tensors, dim);
+  return at::legacy::th::_th_cat_out(result, tensors, dim);
 }
 
 static bool sizes_match_except(IntList s1, IntList s2, int64_t dim_except /* should already be wrapped */) {
@@ -170,13 +171,13 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
 }
 
 Tensor cat(TensorList tensors, int64_t dim) {
-  if (tensors.size() > 0 && 
+  if (tensors.size() > 0 &&
         tensors[0].is_sparse()) {
     return cat_sparse(tensors, dim);
   }
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
-  return at::_th_cat(tensors, dim);
+  return at::legacy::th::_th_cat(tensors, dim);
 }
 
 std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
@@ -290,7 +291,15 @@ Tensor expand_as(const Tensor& self, const Tensor& other) {
   return self.expand(other.sizes());
 }
 
-Tensor as_strided(const Tensor& self, IntList size, IntList stride, int64_t storage_offset) {
+Tensor sum_to_size(const Tensor& self, IntList size) {
+  AT_CHECK(is_expandable_to(size, self.sizes()),
+           "size {", size, "} is not expandable to size {", self.sizes(), "}.");
+
+  return sum_to(self, size);
+}
+
+Tensor as_strided(const Tensor& self, IntList size, IntList stride, optional<int64_t> storage_offset_) {
+  auto storage_offset = storage_offset_.value_or(self.storage_offset());
   auto tid = self.type_id();
   AT_CHECK(
       tid == CPUTensorId() || tid == CUDATensorId(),
@@ -300,17 +309,10 @@ Tensor as_strided(const Tensor& self, IntList size, IntList stride, int64_t stor
   return result;
 }
 
-Tensor &as_strided_(Tensor& self, IntList size, IntList stride, int64_t storage_offset) {
+Tensor &as_strided_(Tensor& self, IntList size, IntList stride, optional<int64_t> storage_offset_) {
+  auto storage_offset = storage_offset_.value_or(self.storage_offset());
   setStrided(self, size, stride, storage_offset);
   return self;
-}
-
-Tensor as_strided(const Tensor& self, IntList size, IntList stride) {
-  return at::as_strided(self, size, stride, self.storage_offset());
-}
-
-Tensor &as_strided_(Tensor& self, IntList size, IntList stride) {
-  return self.as_strided_(size, stride, self.storage_offset());
 }
 
 Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_t length) {

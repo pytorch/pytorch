@@ -449,8 +449,7 @@ void initPythonIRBindings(PyObject * module_) {
     })
     .def("isSubtypeOf", [](std::shared_ptr<Type>& self, std::shared_ptr<Type> other) {
         return self->isSubtypeOf(other);
-    })
-    .def_static("inferFrom", c10::inferTypeFrom);
+    });
 
   py::class_<NumberType, Type, std::shared_ptr<NumberType>>(m, "NumberType")
     .def_static("get", &NumberType::get);
@@ -467,7 +466,7 @@ void initPythonIRBindings(PyObject * module_) {
     .def(py::init([](std::vector<TypePtr> a){ return TupleType::create(a); }))
     .def("elements", [](TupleType &self){
       std::vector<TypePtr> types;
-      for (auto type : self.elements()) {
+      for (const auto& type : self.elements()) {
         types.push_back(type);
       }
       return types;

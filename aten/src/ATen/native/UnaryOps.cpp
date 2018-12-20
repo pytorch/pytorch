@@ -8,6 +8,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/LegacyTHFunctions.h>
 #include <ATen/WrapDimUtils.h>
 
 #include <ATen/CPUApplyUtils.h>
@@ -55,11 +56,11 @@ Tensor& _clamp_out_cpu(
     optional<Scalar> min,
     optional<Scalar> max) {
   if (min && max) {
-    _th_clamp_out(result, self, *min, *max);
+    legacy::th::_th_clamp_out(result, self, *min, *max);
   } else if (max) {
-    _th_clamp_max_out(result, self, *max);
+    legacy::th::_th_clamp_max_out(result, self, *max);
   } else if (min) {
-    _th_clamp_min_out(result, self, *min);
+    legacy::th::_th_clamp_min_out(result, self, *min);
   } else {
     AT_ERROR("At least one of 'min' or 'max' must not be None");
   }
@@ -67,27 +68,27 @@ Tensor& _clamp_out_cpu(
 }
 
 Tensor& _clamp_max__cpu(Tensor& self, Scalar max) {
-  return _th_clamp_max_out(self, self, max);
+  return legacy::th::_th_clamp_max_out(self, self, max);
 }
 
 Tensor& _clamp_max_out_cpu(Tensor& result, const Tensor& self, Scalar max) {
-  return _th_clamp_max_out(result, self, max);
+  return legacy::th::_th_clamp_max_out(result, self, max);
 }
 
 Tensor& _clamp_min__cpu(Tensor& self, Scalar min) {
-  return _th_clamp_min_out(self, self, min);
+  return legacy::th::_th_clamp_min_out(self, self, min);
 }
 
 Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
-  return _th_clamp_min_out(result, self, min);
+  return legacy::th::_th_clamp_min_out(result, self, min);
 }
 
 Tensor& fill_(Tensor& self, Scalar value) {
-  return at::_th_fill_(self, value);
+  return at::legacy::th::_th_fill_(self, value);
 }
 
 Tensor& fill_(Tensor& self, const Tensor& value) {
-  return at::_th_fill_(self, value);
+  return at::legacy::th::_th_fill_(self, value);
 }
 
 Tensor mvlgamma(const Tensor& self, int64_t p) {
@@ -145,7 +146,7 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   }                                                             \
   Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
     result.resize_(self.sizes());                               \
-    return at::_th_##op##_out(result, self);                    \
+    return at::legacy::th::_th_##op##_out(result, self);                    \
   }
 
 // NB: Temp. defaulting to TH implementation of abs due to issues with Apple

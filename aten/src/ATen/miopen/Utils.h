@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <THC/THC.h>
+#include <THH/THH.h>
 #include <ATen/miopen/miopen-wrapper.h>
 #include <ATen/miopen/Handle.h>
 
@@ -10,7 +10,7 @@ namespace at { namespace native {
 inline void setMIOpenStreamToCurrent() {
   // NB: Due to in-place HIPify, getCurrentCUDAStream actually means
   // getCurrentHIPStream
-  MIOPEN_CHECK(miopenSetStream(getMiopenHandle(), at::cuda::getCurrentCUDAStream()));
+  MIOPEN_CHECK(miopenSetStream(getMiopenHandle(), at::hip::getCurrentHIPStream()));
 }
 
 // This function makes tensors which have zero stride contiguous, by

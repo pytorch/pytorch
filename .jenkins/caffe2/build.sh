@@ -132,7 +132,6 @@ CMAKE_ARGS+=("-DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}")
 
 if [[ $BUILD_ENVIRONMENT == *mkl* ]]; then
   CMAKE_ARGS+=("-DBLAS=MKL")
-  CMAKE_ARGS+=("-DUSE_MKLDNN=ON")
 fi
 
 if [[ $BUILD_ENVIRONMENT == py2-cuda9.0-cudnn7-ubuntu16.04 ]]; then
@@ -229,6 +228,11 @@ if [[ -z "$INTEGRATED" ]]; then
     exit 1
   fi
 
+  # This is to save test binaries for testing
+  mv "$INSTALL_PREFIX/test/" "$INSTALL_PREFIX/cpp_test/"
+
+  ls $INSTALL_PREFIX
+
 else
 
   # sccache will be stuck if  all cores are used for compiling
@@ -237,10 +241,12 @@ else
     export MAX_JOBS=`expr $(nproc) - 1`
   fi
 
-  USE_LEVELDB=1 USE_LMDB=1 USE_OPENCV=1 BUILD_BINARY=1 python setup.py install --user
+  USE_LEVELDB=1 USE_LMDB=1 USE_OPENCV=1 BUILD_TEST=1 BUILD_BINARY=1 python setup.py install --user
 
   # This is to save test binaries for testing
   cp -r torch/lib/tmp_install $INSTALL_PREFIX
+  mkdir -p "$INSTALL_PREFIX/cpp_test/"
+  cp -r caffe2/test/* "$INSTALL_PREFIX/cpp_test/"
 
   ls $INSTALL_PREFIX
 

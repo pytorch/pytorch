@@ -1,7 +1,7 @@
 graph(%a : Tensor) {
   %1 : int = prim::Constant[value=2]()
   %2 : Tensor = aten::lt(%a, %1)
-  %3 : bool = prim::TensorToBool(%2)
+  %3 : bool = prim::Bool(%2)
   %c : int = prim::If(%3)
     block0() {
       %5 : int = prim::Constant[value=5]()

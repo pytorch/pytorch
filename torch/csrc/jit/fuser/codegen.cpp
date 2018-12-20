@@ -11,11 +11,11 @@
 
 #if USE_CUDA_FUSER
   #include <torch/csrc/jit/fuser/cuda/resource_strings.h>
-#endif 
+#endif
 
 #if USE_CPU_FUSER
   #include <torch/csrc/jit/fuser/cpu/resource_strings.h>
-#endif 
+#endif
 
 #include <tuple>
 #include <iostream>
@@ -47,7 +47,7 @@ static std::string scalarValue(const bool v) {
 }
 
 // Note: The NAN, NEG_INFINITY and POS_INFINITY strings map to device-specific
-// implementations of these special values. These macros are found in the 
+// implementations of these special values. These macros are found in the
 // resource strings for each device.
 static std::string scalarValue(const double v) {
   std::ostringstream out;
@@ -89,11 +89,13 @@ static const char* calcScalarTypeName(const at::ScalarType type) {
 }
 
 
-static std::string variableType(const std::shared_ptr<c10::Type> t) {
+static std::string variableType(const std::shared_ptr<c10::Type>& t) {
   if (t->kind() == TypeKind::IntType) {
     return "int";
   } else if (t->kind() == TypeKind::FloatType) {
     return "float";
+  } else if (t->kind() == TypeKind::BoolType) {
+    return "bool";
   } else if (t->kind() == TypeKind::TensorType) {
     auto const tt = t->cast<TensorType>();
     return calcScalarTypeName(tt->scalarType());
@@ -102,8 +104,8 @@ static std::string variableType(const std::shared_ptr<c10::Type> t) {
   throw std::runtime_error("unknown scalar type during JIT fusion code generation");
 }
 
-static std::string typeCastedValueName(const std::shared_ptr<c10::Type> t, const at::ScalarType outtype, const std::string& vn) {
-  if (t->kind() == TypeKind::IntType) {
+static std::string typeCastedValueName(const std::shared_ptr<c10::Type>& t, const at::ScalarType outtype, const std::string& vn) {
+  if (t->kind() == TypeKind::IntType || t->kind() == TypeKind::BoolType) {
     if (! isIntegralType(outtype)) {
       return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
     }
@@ -139,6 +141,8 @@ static std::string encodeRHS(const Node* n) {
     {aten::lgamma, "lgammaf(${0})"},
     {aten::exp, "expf(${0})"},
     {aten::expm1, "expm1f(${0})"},
+    {aten::erf, "erff(${0})"},
+    {aten::erfc, "erfcf(${0})"},
     {aten::cos, "cosf(${0})"},
     {aten::acos, "acosf(${0})"},
     {aten::cosh, "coshf(${0})"},
@@ -270,7 +274,7 @@ std::tuple<
   std::string
 , std::vector<PartitionDesc>
 , std::vector<PartitionDesc>
-, bool> 
+, bool>
 generateKernel(
   const std::string& name
 , const Graph& graph
@@ -374,7 +378,7 @@ generateKernel(
   bool has_random = false;
   // Generates code for intermediate nodes
   // Note: Concat and Chunk are implicitly generated
-  // Note: Random number generation is only supported for CUDA kernels. 
+  // Note: Random number generation is only supported for CUDA kernels.
   for (const auto& n : graph.nodes()) {
     // Note: FusedConcat nodes work by narrowing the output Tensors before the kernel runs
     if (n->kind() == prim::FusedConcat) continue;

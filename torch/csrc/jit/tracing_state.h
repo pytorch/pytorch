@@ -91,7 +91,7 @@ struct ArgumentStash {
   TORCH_API static void stashValue(const std::string& arg_name,
                                    size_t idx,
                                    const Variable& var,
-                                   TypePtr type=nullptr);
+                                   const TypePtr& type=nullptr);
 
   static bool hasValue(const std::string& arg_name) {
     return stash.values.count(arg_name) > 0;
@@ -123,7 +123,7 @@ TORCH_API extern const char * WARN_CONSTRUCTOR;
 TORCH_API extern const char * WARN_RESIZE;
 TORCH_API void _do_warn(const char * _reason, const char * _kind);
 inline void warn(const char * _reason, const char * _kind=nullptr) {
-  if (auto state = getTracingState()) {
+  if (const auto& state = getTracingState()) {
     if (!state->warn) return;
     _do_warn(_reason, _kind);
   }

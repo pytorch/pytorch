@@ -120,11 +120,11 @@ void TensorIterator::compute_types() {
     if (op.tensor.defined() && op.tensor.type() != *op.type) {
       if (op.is_output) {
         AT_ERROR("output with type ", op.tensor.type().toString(),
-                 " doesn't match the desired type ", type().toString());
+                 " doesn't match the desired type ", op.type->toString());
       } else if (op.tensor.dim() == 0) {
         op.tensor = op.tensor.to(*op.type);
       } else {
-        AT_ERROR("expected type ", type().toString(), " but got ",
+        AT_ERROR("expected type ", op.type->toString(), " but got ",
             op.tensor.type().toString());
       }
     }
@@ -379,6 +379,9 @@ void TensorIterator::serial_for_each(const loop_t& loop, Range range) const {
 }
 
 void TensorIterator::serial_for_each(const loop2d_t& loop, Range range) const {
+  if (range.size() == 0) {
+    return;
+  }
   auto strides = get_strides();
   while (strides.size() < 2 * ntensors()) {
     strides.push_back(0);
@@ -682,8 +685,10 @@ DimCounter::DimCounter(IntList shape, Range range)
   int64_t ndim = values.size();
   for (int dim = 0; dim < ndim; dim++) {
     int64_t size = shape[dim];
-    values[dim] = linear_offset % size;
-    linear_offset /= size;
+    if (size > 0) {
+      values[dim] = linear_offset % size;
+      linear_offset /= size;
+    }
   }
   AT_ASSERT(linear_offset == 0);
 }
