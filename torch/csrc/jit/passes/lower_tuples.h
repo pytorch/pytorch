@@ -13,5 +13,6 @@ TORCH_API void LowerSimpleTuples(std::shared_ptr<Graph>& graph);
 // but will not work on graphs whose inputs contain tuples.
 TORCH_API void LowerAllTuples(std::shared_ptr<Graph>& graph);
 
+TORCH_API void LowerSimpleTuples(Block* block);
 
 }}

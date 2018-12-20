@@ -74,7 +74,7 @@ AsyncNetBase::AsyncNetBase(
   if (FLAGS_caffe2_net_async_inference_mode) {
     execution_chains_ = dag_utils::computeGroups(operator_nodes_);
   } else {
-    execution_chains_ = dag_utils::computeChains(operator_nodes_);
+    execution_chains_ = dag_utils::computeChains(*net_def, operator_nodes_);
   }
   chains_.reserve(execution_chains_.size());
   for (const auto& kv : execution_chains_) {
@@ -461,16 +461,20 @@ void AsyncNetBase::finalizeEvents() {
 }
 
 ProfDAGProtos AsyncNetBase::GetOperatorStats() const {
-  return counters_.GetOperatorStats();
+  return counters_.GetReport().GetOperatorStats();
 }
 
 ProfDAGProtos AsyncNetBase::GetPerOperatorCost() const {
-  return counters_.GetPerOperatorCost();
+  return counters_.GetReport().GetPerOperatorCost();
+}
+
+ProfDAGReport AsyncNetBase::GetProfReport() const {
+  return counters_.GetReport();
 }
 
 AsyncNetBase::~AsyncNetBase() {
   if (options_.report_stats_) {
-    counters_.PrintStats();
+    counters_.GetReport().PrintStats();
   }
 }
 

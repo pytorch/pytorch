@@ -6,6 +6,7 @@
 #include <ATen/cpu/vec256/vec256.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/cpu/Reduce.h>
 #include <c10/util/Optional.h>
 
@@ -27,55 +28,18 @@ static void mean_kernel_impl(TensorIterator& iter) {
     scalar_t factor = scalar_t(iter.num_output_elements()) / iter.numel();
     binary_kernel_reduce(
       iter,
-      [=](scalar_t a, scalar_t b) -> scalar_t { return a + b; },
-      [=](scalar_t a, scalar_t b) -> scalar_t { return a + b; },
-      [factor](scalar_t a) -> scalar_t { return a*factor; }, scalar_t(0));
+      MeanOps<scalar_t, scalar_t> {factor},
+      scalar_t(0)
+    );
   });
 }
-
-struct WelfordData {
-  double mean;
-  double m2;
-  int64_t n;
-  WelfordData() : mean(0), m2(0), n(0)  {}
-  WelfordData(double mean, double m2, int64_t n) : mean(mean), m2(m2), n(n) {}
-};
 
 static void std_kernel_impl(TensorIterator &iter, bool unbiased) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.type(), "std", [&] {
     binary_kernel_reduce(
       iter,
-      [](WelfordData acc, scalar_t data) -> WelfordData {
-        double delta = data - acc.mean;
-        double new_mean = acc.mean + delta / (acc.n + 1);
-        double new_delta = data - new_mean;
-        return {
-          new_mean,
-          acc.m2 + delta * new_delta,
-          acc.n + 1
-        };
-      },
-      [](WelfordData a, WelfordData b) -> WelfordData {
-        if (a.n == 0) {
-          return b;
-        }
-        if (b.n == 0) {
-          return a;
-        }
-        double delta = b.mean - a.mean;
-        int64_t new_count = a.n + b.n;
-        double nb_over_n = (double)b.n / new_count;
-        return {
-          a.mean + delta * nb_over_n,
-          a.m2 + b.m2 + delta * delta * a.n * nb_over_n,
-          new_count
-        };
-      },
-      [unbiased](WelfordData acc) -> scalar_t {
-        int64_t divisor = unbiased ? (acc.n - 1) : acc.n;
-        return (divisor > 0) ? std::sqrt(acc.m2 / divisor) : NAN;
-      },
-      WelfordData()
+      WelfordOps<scalar_t, double> { unbiased },
+      WelfordData<double>()
     );
   });
 }
@@ -216,7 +180,7 @@ struct NormReduction {
     if (pval == 1){
       for (int row = 0; row < rows; row ++) {
         for (int j = 0; j != 4; j++) {
-          auto val = Vec::loadu(&data[row * WIDTH + j * Vec::size]);
+          auto val = Vec::loadu(&data[row * WIDTH + j * Vec::size()]);
           acc[j] = acc[j] + val.abs();
         }
       }
@@ -224,7 +188,7 @@ struct NormReduction {
     else if (pval == 2) {
       for (int row = 0; row < rows; row ++) {
         for (int j = 0; j != 4; j++) {
-          auto val = Vec::loadu(&data[row * WIDTH + j * Vec::size]);
+          auto val = Vec::loadu(&data[row * WIDTH + j * Vec::size()]);
           acc[j] = acc[j] + val * val;
         }
       }
@@ -232,14 +196,14 @@ struct NormReduction {
     else if (pval == 3) {
       for (int row = 0; row < rows; row ++) {
         for (int j = 0; j != 4; j++) {
-          auto val = Vec::loadu(&data[row * WIDTH + j * Vec::size]);
+          auto val = Vec::loadu(&data[row * WIDTH + j * Vec::size()]);
           acc[j] = acc[j] + (val * val * val).abs();
         }
       }
     }
     scalar_t buf[WIDTH] = {0};
     for (int j = 0; j != 4; j++) {
-      acc[j].store(&buf[j * Vec::size]);
+      acc[j].store(&buf[j * Vec::size()]);
     }
     for (int i = 0; i < WIDTH; i++) {
       result += buf[i];
@@ -270,55 +234,47 @@ static void norm_kernel_tensor_iterator_impl(
   } else {
     AT_ERROR("norm_kernel_tensor_iterator_impl expects norm to be integer or float");
   }
+
+
   if (val == 0) {
     AT_DISPATCH_FLOATING_TYPES(iter.type(), "norm", [&] {
       binary_kernel_reduce(
         iter,
-        [=](scalar_t acc, scalar_t data) -> scalar_t { return acc + (data==scalar_t(0)? scalar_t(0) : scalar_t(1)); },
-        [=](scalar_t a, scalar_t b) -> scalar_t { return a + b; },
-        [=](scalar_t a) -> scalar_t { return a; }, scalar_t(0));
+        NormZeroOps<scalar_t>(),
+        scalar_t(0)
+      );
     });
   } else if (val == 1) {
     AT_DISPATCH_FLOATING_TYPES(iter.type(), "norm", [&] {
       binary_kernel_reduce(
         iter,
-        [=](scalar_t acc, scalar_t data) -> scalar_t { return acc + std::abs(data); },
-        [=](scalar_t a, scalar_t b) -> scalar_t { return a + b; },
-        [=](scalar_t a) -> scalar_t { return a; }, scalar_t(0));
-    });
-  } else if (val == 2) {
-    AT_DISPATCH_FLOATING_TYPES(iter.type(), "norm", [&] {
-      binary_kernel_reduce(
-        iter,
-        [=](scalar_t acc, scalar_t data) -> scalar_t { return acc + data*data; },
-        [=](scalar_t a, scalar_t b) -> scalar_t { return a + b; },
-        [=](scalar_t a) -> scalar_t { return std::sqrt(a); }, scalar_t(0));
+        NormOneOps<scalar_t>(),
+        scalar_t(0)
+      );
     });
   } else if (val == INFINITY) {
     AT_DISPATCH_FLOATING_TYPES(iter.type(), "norm", [&] {
       binary_kernel_reduce(
         iter,
-        [=](scalar_t acc, scalar_t data) -> scalar_t { return std::max(acc, std::abs(data)); },
-        [=](scalar_t a, scalar_t b) -> scalar_t { return std::max(a, b); },
-        [=](scalar_t a) -> scalar_t { return a; }, std::numeric_limits<scalar_t>::min());
+        AbsMaxOps<scalar_t>(),
+        std::numeric_limits<scalar_t>::min()
+      );
     });
   } else if (val == -INFINITY) {
     AT_DISPATCH_FLOATING_TYPES(iter.type(), "norm", [&] {
       binary_kernel_reduce(
         iter,
-        [=](scalar_t acc, scalar_t data) -> scalar_t { return std::min(acc, std::abs(data)); },
-        [=](scalar_t a, scalar_t b) -> scalar_t { return std::min(a, b); },
-        [=](scalar_t a) -> scalar_t { return a; }, std::numeric_limits<scalar_t>::max());
+        AbsMinOps<scalar_t>(),
+        std::numeric_limits<scalar_t>::max()
+      );
     });
   } else {
     AT_DISPATCH_FLOATING_TYPES(iter.type(), "norm", [&] {
-      scalar_t exp = scalar_t(val);
-      scalar_t q = scalar_t(1.0) / exp;
       binary_kernel_reduce(
         iter,
-        [exp](scalar_t acc, scalar_t data) -> scalar_t { return acc + std::pow(std::abs(data), exp); },
-        [=](scalar_t a, scalar_t b) -> scalar_t { return a + b; },
-        [q](scalar_t a) -> scalar_t { return std::pow(a, q); }, scalar_t(0));
+        NormOps<scalar_t> { scalar_t(val) },
+        scalar_t(0)
+      );
     });
   }
 }
