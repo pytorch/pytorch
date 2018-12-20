@@ -1064,4 +1064,39 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
   }
 }
 
+// --------------------------------------------------------------------
+// sparse_dropout
+// --------------------------------------------------------------------
+std::tuple<SparseTensor, Tensor> _sparse_dropout(const SparseTensor& t_, double p, bool train) {
+  AT_ASSERT(t_.is_sparse());
+  if (p == 0 || !train) {
+    return std::tuple<SparseTensor, Tensor>(t_, at::ones_like(t_._values()));
+  }
+  auto t = t_.coalesce();
+  Tensor t_values = t._values();
+
+  Tensor mask = at::empty_like(t_values);
+  mask.bernoulli_(1 - p).mul_(1. / (1. - p));
+  Tensor new_values = t_values.mul(mask);
+
+  auto r = at::_sparse_coo_tensor_with_dims_and_tensors(
+    t.sparse_dim(), t.dense_dim(), t.sizes(),
+    t._indices().clone(), new_values, t.options());
+  return std::tuple<SparseTensor, Tensor>(r, mask);
+}
+
+SparseTensor _sparse_dropout_backward(const SparseTensor& grad, const SparseTensor& t, const Tensor& mask, double p) {
+  AT_ASSERT(t.is_sparse());
+  AT_ASSERT(grad.is_sparse());
+  AT_ASSERT(grad.is_coalesced());
+
+  Tensor grad_values = grad._values();
+  Tensor new_values = grad_values.mul(mask);
+
+  auto r = at::_sparse_coo_tensor_with_dims_and_tensors(
+    grad.sparse_dim(), grad.dense_dim(), grad.sizes(),
+    grad._indices().clone(), new_values, grad.options());
+  return r;
+}
+
 }} // namespace at::native

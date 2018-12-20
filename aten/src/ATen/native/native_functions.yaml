@@ -67,6 +67,16 @@
 
 - func: dropout_(Tensor self, double p, bool train) -> Tensor
 
+- func: _sparse_dropout(Tensor self, double p, bool train) -> (Tensor, Tensor)
+  dispatch:
+    SparseCPU: _sparse_dropout
+    SparseCUDA: _sparse_dropout
+
+- func: _sparse_dropout_backward(Tensor grad, Tensor self, Tensor mask, double p) -> (Tensor)
+  dispatch:
+    SparseCPU: _sparse_dropout_backward
+    SparseCUDA: _sparse_dropout_backward
+
 - func: feature_dropout(Tensor input, double p, bool train) -> Tensor
 
 - func: feature_dropout_(Tensor self, double p, bool train) -> Tensor

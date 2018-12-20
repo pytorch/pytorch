@@ -132,3 +132,7 @@ def sum(input, dim=None, dtype=None):
             return torch._sparse_sum(input, dim, dtype=dtype)
         else:
             return torch._sparse_sum(input, dtype=dtype)
+
+
+def dropout(input, p=0.5, training=True):
+    return torch._sparse_dropout(input, p, training)[0]

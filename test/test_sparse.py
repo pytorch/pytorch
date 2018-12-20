@@ -1,5 +1,7 @@
 import torch
 from torch import sparse
+import torch.nn as nn
+import torch.nn.functional as F
 
 import itertools
 import functools
@@ -1019,6 +1021,39 @@ class TestSparse(TestCase):
         for test_dim in test_dims:
             S = self._gen_sparse(sparse_dims, nnz, with_size)[0]
             run_tests(S.requires_grad_(True), test_dim)
+
+    @skipIfRocm
+    def test_sparse_dropout(self):
+        def test_shape(sparse_dim, nnz, with_size, p):
+            S = self._gen_sparse(sparse_dim, nnz, with_size)[0]
+            D = S.to_dense()
+            D_out = F.dropout(D, p)
+            S_out = torch.sparse.dropout(S, p)
+            S_out_dense = S_out.to_dense()
+            D_mask = (D_out < 1e-10).mul_(D_out > -1e-10)
+            S_mask = (S_out_dense < 1e-10).mul_(S_out_dense > -1e-10)
+
+            self.assertEqual(D_out.masked_fill_(S_mask, 0), S_out_dense.masked_fill_(D_mask, 0))
+
+            # test backward
+            S.requires_grad_(True)
+            D.requires_grad_(True)
+            S_out = torch.sparse.dropout(S, p)
+            S_out_dense = S_out.to_dense()
+            S_y = torch.sparse.sum(S_out)
+            S_y.backward()
+            D_out = F.dropout(D, p)
+            D_y = D_out.sum()
+            D_y.backward()
+            D_mask = (D_out < 1e-10).mul_(D_out > -1e-10)
+            S_mask = (S_out_dense < 1e-10).mul_(S_out_dense > -1e-10)
+
+            self.assertEqual(D.grad.masked_fill_(S_mask, 0), S.grad.to_dense().masked_fill_(D_mask, 0))
+
+        test_shape(1, 10, [3, 4, 5], 0.5)
+        test_shape(2, 10, [3, 4, 5], 0.2)
+        test_shape(2, 10, [3, 4, 5], 0.5)
+        test_shape(3, 10, [3, 4, 5], 0.5)
 
     def _test_basic_ops_shape(self, nnz_x1, nnz_x2, shape_i, shape_v=None):
         shape = shape_i + (shape_v or [])

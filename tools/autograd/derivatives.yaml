@@ -262,6 +262,9 @@
 - name: _fused_dropout(Tensor self, double p, Generator generator)
   self: _fused_dropout_backward(grad, result1, p)
 
+- name: _sparse_dropout(Tensor self, double p, bool train)
+  self: at::_sparse_dropout_backward(grad, self, result1, p)
+
 - name: eig(Tensor self, bool eigenvectors)
   self: not_implemented("eig")
 
