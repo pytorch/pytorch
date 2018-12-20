@@ -119,7 +119,10 @@ PY_RETURN_NAMEDTUPLE_DEF = CodeTemplate("""\
 static PyStructSequence_Field fields${namedtuple_type_index}[] = {
   ${namedtuple_fields} {nullptr}
 };
-static PyStructSequence_Desc desc${namedtuple_type_index} = {"${name}", nullptr, fields${namedtuple_type_index}, ${namedtuple_size}};
+static PyStructSequence_Desc desc${namedtuple_type_index} = {
+  "${name}", nullptr,
+  fields${namedtuple_type_index}, ${namedtuple_size}
+};
 static PyTypeObject type${namedtuple_type_index};
 static bool namedtuple_type_initialized${namedtuple_type_index} = false;
 if (!namedtuple_type_initialized${namedtuple_type_index}) {
@@ -616,7 +619,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             if x['name'] in skip_names:
                 declaration['namedtuple_fields'] += '{PyStructSequence_UnnamedField, ""}, '
             else:
-                declaration['namedtuple_fields'] += '{"' + x['name'] +'", ""}, '
+                declaration['namedtuple_fields'] += '{"' + x['name'] + '", ""}, '
         declaration['namedtuple_size'] = len(returns)
         declaration['namedtuple_return_type'] = '&type{}, '.format(next_index)
         return PY_RETURN_NAMEDTUPLE_DEF.substitute(declaration), next_index + 1
