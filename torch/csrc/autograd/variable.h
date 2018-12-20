@@ -331,7 +331,7 @@ struct TORCH_API Variable::AutogradMeta : public c10::AutogradMetaInterface {
   // get_grad_accumulator.
   std::mutex mutex_;
 
-  void detach_(at::TensorImpl* self_impl);
+  void detach_(Variable self_var);
 
   /// Sets the `requires_grad` property of `Variable`. This should be true for
   /// leaf variables that want to accumulate gradients, and false for all other
@@ -356,11 +356,11 @@ struct TORCH_API Variable::AutogradMeta : public c10::AutogradMetaInterface {
     return grad_;
   }
 
-  virtual std::shared_ptr<Function>& get_grad_fn(at::TensorImpl* self_impl) {
+  virtual std::shared_ptr<Function>& get_grad_fn(Variable self_var) {
     return grad_fn_;
   }
 
-  std::shared_ptr<Function> get_grad_accumulator(at::TensorImpl* self_impl);
+  std::shared_ptr<Function> get_grad_accumulator(Variable self_var);
 
   virtual const Variable& base() const {
     throw std::runtime_error("Can't get base of non-view Variable");
@@ -370,7 +370,7 @@ struct TORCH_API Variable::AutogradMeta : public c10::AutogradMetaInterface {
       c10::optional<at::Tensor> gradient,
       bool keep_graph,
       bool create_graph,
-      at::TensorImpl* self_impl);
+      Variable self_var);
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -389,7 +389,7 @@ struct TORCH_API Variable::DifferentiableViewMeta : public Variable::AutogradMet
   /// Gets the up-to-date grad_fn. If the shared data or base was modified, we
   /// re-create the grad_fn to express the up-to-date view relationship between
   /// this and the base Variable.
-  std::shared_ptr<Function>& get_grad_fn(at::TensorImpl* self_impl) override;
+  std::shared_ptr<Function>& get_grad_fn(Variable self_var) override;
 
   const Variable& base() const override {
     return base_;
@@ -399,7 +399,7 @@ struct TORCH_API Variable::DifferentiableViewMeta : public Variable::AutogradMet
     return requires_grad_ || grad_fn_ || (is_view_ && base_.requires_grad());
   }
 
-  void rebase_history(Edge gradient_edge, at::TensorImpl* self_impl);
+  void rebase_history(Edge gradient_edge, Variable self_var);
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -650,7 +650,7 @@ inline at::Tensor& Variable::data() noexcept {
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 inline const std::shared_ptr<Function>& Variable::grad_fn() const {
-  return get_autograd_meta()->get_grad_fn(this->unsafeGetTensorImpl());
+  return get_autograd_meta()->get_grad_fn(*this);
 }
 
 inline Function* Variable::grad_fn_unsafe() const {
@@ -667,7 +667,7 @@ inline std::shared_ptr<Function> Variable::try_get_grad_accumulator() const {
 }
 
 inline std::shared_ptr<Function> Variable::grad_accumulator() const {
-  return get_autograd_meta()->get_grad_accumulator(this->unsafeGetTensorImpl());
+  return get_autograd_meta()->get_grad_accumulator(*this);
 }
 
 inline Variable Variable::detach() const {
@@ -676,14 +676,14 @@ inline Variable Variable::detach() const {
 }
 
 inline void Variable::detach_() {
-  get_autograd_meta()->detach_(get());
+  get_autograd_meta()->detach_(*this);
 }
 
 inline void Variable::backward(
     c10::optional<Tensor> gradient,
     bool keep_graph,
     bool create_graph) const {
-  get_autograd_meta()->backward(std::move(gradient), keep_graph, create_graph, get());
+  get_autograd_meta()->backward(std::move(gradient), keep_graph, create_graph, *this);
 }
 
 inline void Variable::set_data(Tensor new_data) const {
