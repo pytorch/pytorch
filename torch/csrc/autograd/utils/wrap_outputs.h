@@ -77,25 +77,6 @@ inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
   return r.release();
 }
 
-inline PyObject* wrap(const char *op, std::tuple<const char *, const char *, const char *, const char *> names,
-                      std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> tensors) {
-  PyStructSequence_Field fields[] = {
-    {std::get<0>(names), ""},
-    {std::get<1>(names), ""},
-    {std::get<2>(names), ""},
-    {std::get<3>(names), ""},
-    {NULL}
-  };
-  PyTypeObject *type = PyStructSequence_NewType(PyStructSequence_Desc(op, nullptr, fields, 4));
-  auto r = THPObjectPtr{PyStructSequence_New(type)};
-  if (!r) throw python_error();
-  PyStructSequence_SetItem(r.get(), 0, wrap(std::get<0>(tensors)));
-  PyStructSequence_SetItem(r.get(), 1, wrap(std::get<1>(tensors)));
-  PyStructSequence_SetItem(r.get(), 2, wrap(std::get<2>(tensors)));
-  PyStructSequence_SetItem(r.get(), 3, wrap(std::get<3>(tensors)));
-  return r.release();
-}
-
 inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor> tensors) {
   auto r = THPObjectPtr{PyTuple_New(5)};
   if (!r) throw python_error();
@@ -104,27 +85,6 @@ inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor,
   PyTuple_SET_ITEM(r.get(), 2, wrap(std::move(std::get<2>(tensors))));
   PyTuple_SET_ITEM(r.get(), 3, wrap(std::move(std::get<3>(tensors))));
   PyTuple_SET_ITEM(r.get(), 4, wrap(std::move(std::get<4>(tensors))));
-  return r.release();
-}
-
-inline PyObject* wrap(const char *op, std::tuple<const char *, const char *, const char *, const char *, const char *> names,
-                      std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor> tensors) {
-  PyStructSequence_Field fields[] = {
-    {std::get<0>(names), ""},
-    {std::get<1>(names), ""},
-    {std::get<2>(names), ""},
-    {std::get<3>(names), ""},
-    {std::get<4>(names), ""},
-    {NULL}
-  };
-  PyTypeObject *type = PyStructSequence_NewType(PyStructSequence_Desc(op, nullptr, fields, 3));
-  auto r = THPObjectPtr{PyStructSequence_New(type)};
-  if (!r) throw python_error();
-  PyStructSequence_SetItem(r.get(), 0, wrap(std::get<0>(tensors)));
-  PyStructSequence_SetItem(r.get(), 1, wrap(std::get<1>(tensors)));
-  PyStructSequence_SetItem(r.get(), 2, wrap(std::get<2>(tensors)));
-  PyStructSequence_SetItem(r.get(), 3, wrap(std::get<3>(tensors)));
-  PyStructSequence_SetItem(r.get(), 4, wrap(std::get<4>(tensors)));
   return r.release();
 }
 
