@@ -142,7 +142,7 @@ def invert_permutation(permutation):
     return output
 
 
-def pack_padded_sequence(input, lengths, batch_first=False, enforce_sorted=False):
+def pack_padded_sequence(input, lengths, batch_first=False, enforce_sorted=True):
     r"""Packs a Tensor containing padded sequences of variable length.
 
     Input can be of size ``T x B x *`` where `T` is the length of the longest sequence
@@ -150,10 +150,10 @@ def pack_padded_sequence(input, lengths, batch_first=False, enforce_sorted=False
     dimensions (including 0). If ``batch_first`` is True ``B x T x *`` inputs are
     expected.
 
-    If ``enforce_sorted`` is ``True``, the sequences should be sorted by length in
-    a decreasing order, i.e. ``input[:,0]`` should be the longest sequence, and
-    ``input[:,B-1]`` the shortest one. ``enforce_sorted = True`` is only necessary
-    for ONNX export.
+    For unsorted sequences, use `enforce_sorted = False`. If ``enforce_sorted`` is
+    ``True``, the sequences should be sorted by length in a decreasing order, i.e.
+    ``input[:,0]`` should be the longest sequence, and ``input[:,B-1]`` the shortest
+    one. `enforce_sorted = True` is only necessary for ONNX export.
 
     Note:
         This function accepts any input that has at least two dimensions. You
@@ -168,7 +168,7 @@ def pack_padded_sequence(input, lengths, batch_first=False, enforce_sorted=False
             format.
         enforce_sorted (bool, optional): if ``True``, the input is expected to
             contain sequences sorted by length in a decreasing order. If
-            ``False``, this condition is not checked. Default: ``False``.
+            ``False``, this condition is not checked. Default: ``True``.
 
     Returns:
         a :class:`PackedSequence` object
@@ -302,16 +302,16 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
     return out_tensor
 
 
-def pack_sequence(sequences, enforce_sorted=False):
+def pack_sequence(sequences, enforce_sorted=True):
     r"""Packs a list of variable length Tensors
 
     ``sequences`` should be a list of Tensors of size ``L x *``, where `L` is
     the length of a sequence and `*` is any number of trailing dimensions,
     including zero.
 
-    If ``enforce_sorted`` is ``true``, they should be sorted in the order of
-    decreasing length. ``enforce_sorted = True`` is only necessary for ONNX
-    export.
+    For unsorted sequences, use `enforce_sorted = False`. If ``enforce_sorted``
+    is ``True``, the sequences should be sorted in the order of decreasing length.
+    ``enforce_sorted = True`` is only necessary for ONNX export.
 
 
     Example:
@@ -327,7 +327,7 @@ def pack_sequence(sequences, enforce_sorted=False):
         sequences (list[Tensor]): A list of sequences of decreasing length.
         enforce_sorted (bool, optional): if ``True``, checks that the input
             contains sequences sorted by length in a decreasing order. If
-            ``False``, this condition is not checked. Default: ``False``.
+            ``False``, this condition is not checked. Default: ``True``.
 
     Returns:
         a :class:`PackedSequence` object

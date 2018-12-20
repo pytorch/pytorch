@@ -149,7 +149,7 @@ class PackedSequenceTest(TestCase):
         b = torch.ones(22, 300)
         b_a = rnn_utils.pad_sequence([b, a])
         self.assertRaises(
-            RuntimeError, lambda: rnn_utils.pack_padded_sequence(b_a, [22, 25], enforce_sorted=True))
+            RuntimeError, lambda: rnn_utils.pack_padded_sequence(b_a, [22, 25]))
 
     def test_total_length(self):
         padded, lengths = self._padded_sequence(torch.FloatTensor)
@@ -4147,14 +4147,14 @@ class TestNN(NNTestCase):
         a = torch.tensor([1, 2, 3])
         b = torch.tensor([4, 5])
         c = torch.tensor([6])
-        packed = rnn_utils.pack_sequence([a, b, c])
+        packed = rnn_utils.pack_sequence([a, b, c], enforce_sorted=False)
         expected = torch.tensor([1, 4, 6, 2, 5, 3])
         self.assertEqual(packed.batch_sizes, [3, 2, 1])
         self.assertEqual(packed.data.data, expected)
         self.assertEqual(packed.sorted_indices, [0, 1, 2])
         self.assertEqual(packed.unsorted_indices, [0, 1, 2])
 
-        packed_unsorted = rnn_utils.pack_sequence([b, c, a])
+        packed_unsorted = rnn_utils.pack_sequence([b, c, a], enforce_sorted=False)
         self.assertEqual(packed_unsorted.batch_sizes, [3, 2, 1])
         self.assertEqual(packed_unsorted.data.data, expected)
         self.assertEqual(packed_unsorted.sorted_indices, [2, 0, 1])

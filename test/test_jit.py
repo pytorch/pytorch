@@ -1804,8 +1804,7 @@ class TestJit(JitTestCase):
                     self.rnn = clazz
 
                 def forward(self, x, lengths, h0):
-                    packed = torch.nn.utils.rnn.pack_padded_sequence(
-                        x, lengths, enforce_sorted=True)
+                    packed = torch.nn.utils.rnn.pack_padded_sequence(x, lengths)
                     out, h = self.rnn(packed, h0)
                     padded_outs, _ = torch.nn.utils.rnn.pad_packed_sequence(out)
                     return padded_outs
@@ -1828,8 +1827,7 @@ class TestJit(JitTestCase):
 
             def forward(self, x, lengths, hiddens):
                 h0, c0 = hiddens
-                packed = torch.nn.utils.rnn.pack_padded_sequence(
-                    x, lengths, enforce_sorted=True)
+                packed = torch.nn.utils.rnn.pack_padded_sequence(x, lengths)
                 out, (h, c) = self.rnn(packed, (h0, c0))
                 padded_outs, _ = torch.nn.utils.rnn.pad_packed_sequence(out)
                 return padded_outs
@@ -5212,7 +5210,7 @@ a")
                 super(PadPackedWrapper, self).__init__()
 
             def forward(self, x, seq_lens):
-                x = pack_padded_sequence(x, seq_lens, enforce_sorted=True)
+                x = pack_padded_sequence(x, seq_lens)
                 x, _ = pad_packed_sequence(x)
                 return x
 
@@ -5297,7 +5295,7 @@ a")
                     self.rnn = torch.nn.GRU(input_size=C, hidden_size=C, num_layers=num_layers)
 
             def forward(self, x, seq_lens):
-                x = pack_padded_sequence(x, seq_lens, enforce_sorted=True)
+                x = pack_padded_sequence(x, seq_lens)
                 x, _ = self.rnn(x)
                 x, _ = pad_packed_sequence(x)
                 return x
