@@ -13,7 +13,7 @@ from torch.onnx import OperatorExportTypes
 from torch._six import inf, PY2
 from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
-    freeze_rng_state
+    freeze_rng_state, set_rng_seed
 from common_nn import module_tests, new_module_tests, criterion_tests
 from textwrap import dedent
 from functools import wraps
@@ -10859,6 +10859,7 @@ def add_autograd_test(
         def do_test(self, name=name, self_size=self_size, args=new_args, test_name=test_name,
                     output_process_fn=output_process_fn):
             def check(name):
+                set_rng_seed(2)
                 is_magic_method = name[:2] == '__' and name[-2:] == '__'
                 is_inplace = name[-1] == "_" and not is_magic_method
                 self_variable = create_input((self_size,))[0][0]
@@ -11361,7 +11362,7 @@ class TestAsync(JitTestCase):
         with self.assertRaisesRegex(Exception, 'expects a 2D tensor'):
             wait_script_nest(x)
 
-for test in autograd_method_tests:
+for test in autograd_method_tests():
     add_autograd_test(*test)
 
 for test in nn_functional_tests:
