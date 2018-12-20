@@ -257,7 +257,8 @@ Tensor fbgemm_pack_quantized_matrix(
       },
       at::kCPU);
 
-  auto retval = weight.clone().to(at::kByte).resize_({sizeof(fbgemm::PackBMatrix<int8_t>)});
+  auto retval = weight.clone().to(at::kByte).resize_(
+      {sizeof(fbgemm::PackBMatrix<int8_t>)});
   retval.storage().set_data_ptr(std::move(at_ptr));
 
   return retval;
@@ -266,13 +267,13 @@ Tensor fbgemm_pack_quantized_matrix(
 #else // USE_FBGEMM
 
 Tensor fbgemm_linear_int8_weight(
-    const Tensor& input,
-    const Tensor& weight,
-    const Tensor& packed,
-    const Tensor& col_offsets,
-    Scalar weight_scale,
-    Scalar weight_zero_point,
-    const Tensor& bias) {
+    const Tensor& /*input*/,
+    const Tensor& /*weight*/,
+    const Tensor& /*packed*/,
+    const Tensor& /*col_offsets*/,
+    Scalar /*weight_scale*/,
+    Scalar /*weight_zero_point*/,
+    const Tensor& /*bias*/) {
   // We make a strong guarantee that models using these operators will have the
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
@@ -281,7 +282,7 @@ Tensor fbgemm_linear_int8_weight(
 }
 
 std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
-    const Tensor& weight) {
+    const Tensor& /*weight*/) {
   // We make a strong guarantee that models using these operators will have the
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
@@ -289,7 +290,10 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
       false, "This PyTorch installation was not built with FBGEMM operators");
 }
 
-Tensor fbgemm_pack_quantized_matrix(const Tensor& input, int64_t K, int64_t N) {
+Tensor fbgemm_pack_quantized_matrix(
+    const Tensor& /*input*/,
+    int64_t /*K*/,
+    int64_t /*N*/) {
   // We make a strong guarantee that models using these operators will have the
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
