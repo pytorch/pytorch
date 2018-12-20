@@ -222,7 +222,7 @@ void THCTensor_(sortViaThrust)(THCState* state,
   thrust::counting_iterator<int64_t> countIter(0);
 
   thrust::copy(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     countIter, countIter + totalElements, indexIter);
@@ -231,13 +231,13 @@ void THCTensor_(sortViaThrust)(THCState* state,
   // (the values we're sorting)
   if (dir) {
     thrust::stable_sort_by_key(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       keyIter, keyIter + totalElements, indexIter, ThrustGTOp<scalar_t>());
   } else {
     thrust::stable_sort_by_key(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       keyIter, keyIter + totalElements, indexIter, ThrustLTOp<scalar_t>());
@@ -248,7 +248,7 @@ void THCTensor_(sortViaThrust)(THCState* state,
   // stably sorting here, preserving the relative order of values
   // per each slice
   thrust::stable_sort_by_key(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     indexIter, indexIter + totalElements, keyIter,
@@ -257,7 +257,7 @@ void THCTensor_(sortViaThrust)(THCState* state,
   // Translate the global integer 0-based index to a per-slice real
   // Lua index
   thrust::for_each(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     indexIter, indexIter + totalElements,
