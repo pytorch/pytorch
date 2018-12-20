@@ -502,8 +502,8 @@ SparseTensor _sparse_squeeze(const SparseTensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim());
   auto sizes = self.sizes();
 
-  if (sizes[dim] != 1) { // if dim is not squeezable, return a clone of input SparseTensor directly
-    return self.clone();
+  if (sizes[dim] != 1) { // if dim is not squeezable, return input SparseTensor directly
+    return self;
   }
 
   int64_t sparse_dim = self.sparse_dim();
