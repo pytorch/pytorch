@@ -79,6 +79,13 @@ class DistributedDataParallel(Module):
         distributed training and this applies to both single-node and multi-node
         distributed training
 
+    .. note:: This module also supports mixed-precision distributed training.
+        This means that your model can have different types of parameters such
+        as mixed types of fp16 and fp32, the gradient reduction on these
+        mixed types of parameters will just work fine.
+        Also note that ``nccl`` backend is currently the fastest and highly
+        recommended backend for fp16/fp32 mixed-precision training.
+
     .. warning::
         This module works only with the ``gloo`` and ``nccl`` backends.
 
