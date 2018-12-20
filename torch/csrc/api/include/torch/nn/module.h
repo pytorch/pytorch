@@ -8,6 +8,7 @@
 #include <ATen/ATen.h>
 
 #include <functional>
+#include <iosfwd>
 #include <map>
 #include <memory>
 #include <string>
@@ -386,6 +387,15 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   /// Deserializes the `Module` from the given `InputArchive`.
   virtual void load(serialize::InputArchive& archive);
 
+  /// Streams a pretty representation of the `Module` into the given `stream`.
+  /// By default, this representation will be the name of the module (taken from
+  /// `name()`), followed by a recursive pretty print of all of the `Module`'s
+  /// submodules.
+  ///
+  /// Override this method to change the pretty print. The input
+  /// `stream` should be returned from the method, to allow easy chaining.
+  virtual void pretty_print(std::ostream& stream) const;
+
  protected:
   /// Registers a parameter with this `Module`.
   ///
@@ -462,6 +472,11 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   template <typename Derived>
   friend class Cloneable;
 
+  /// Pretty prints the given `Module` into the `ostream`.
+  TORCH_API friend std::ostream& operator<<(
+      std::ostream& stream,
+      const nn::Module& module);
+
   // Private methods.
 
   /// Used in the implementation of `Cloneable`.
@@ -470,6 +485,11 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   /// The implementation of the various `to()` methods.
   template <typename... Ts>
   void to_impl(Ts&&... ts);
+
+  /// Implements pretty printing the module hierarchy.
+  void pretty_print_recursive(
+      std::ostream& stream,
+      const std::string& indentation) const;
 
   /// Applies the `function` to every submodule recursively, starting at this
   /// `Module`'s children (thus not including the module itself).
