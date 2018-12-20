@@ -164,15 +164,15 @@ class NLLLoss(_WeightedLoss):
 
     Shape:
         - Input: :math:`(N, C)` where `C = number of classes`, or
-            :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 2`
-            in the case of `K`-dimensional loss.
+          :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 2`
+          in the case of `K`-dimensional loss.
         - Target: :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`, or
-            :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 2` in the case of
-            K-dimensional loss.
+          :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 2` in the case of
+          K-dimensional loss.
         - Output: scalar. If reduce is ``False``, then the same size
-            as the target: :math:`(N)`, or
-            :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 2` in the case
-            of K-dimensional loss.
+          as the target: :math:`(N)`, or
+          :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 2` in the case
+          of K-dimensional loss.
 
     Examples::
 
@@ -354,7 +354,7 @@ class KLDivLoss(_Loss):
           dimensions
         - target: :math:`(N, *)`, same shape as the input
         - output: scalar by default. If `reduce` is ``False``, then :math:`(N, *)`,
-            the same shape as the input
+          the same shape as the input
 
     """
     __constants__ = ['reduction']
@@ -482,8 +482,8 @@ class BCELoss(_WeightedLoss):
         - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
         - Target: :math:`(N, *)`, same shape as the input
-        - Output: scalar. If `reduce` is False, then `(N, *)`, same shape as
-          input.
+        - Output: scalar. If `reduce` is False, then :math:`(N, *)`, same
+          shape as input.
 
     Examples::
 
@@ -698,7 +698,7 @@ class MultiLabelMarginLoss(_Loss):
         - Input: :math:`(C)` or :math:`(N, C)` where `N` is the batch size and `C`
           is the number of classes.
         - Target: :math:`(C)` or :math:`(N, C)`, same shape as the input.
-        - Output: scalar. If `reduce` is False, then `(N)`.
+        - Output: scalar. If `reduce` is False, then :math:`(N)`.
     """
     __constants__ = ['reduction']
 
@@ -873,15 +873,15 @@ class CrossEntropyLoss(_WeightedLoss):
 
     Shape:
         - Input: :math:`(N, C)` where `C = number of classes`, or
-            :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 2`
-            in the case of `K`-dimensional loss.
+          :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 2`
+          in the case of `K`-dimensional loss.
         - Target: :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`, or
-            :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 2` in the case of
-            K-dimensional loss.
+          :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 2` in the case of
+          K-dimensional loss.
         - Output: scalar. If reduce is ``False``, then the same size
-            as the target: :math:`(N)`, or
-            :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 2` in the case
-            of K-dimensional loss.
+          as the target: :math:`(N)`, or
+          :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 2` in the case
+          of K-dimensional loss.
 
     Examples::
 
@@ -939,7 +939,7 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
     Shape:
         - Input: :math:`(N, C)` where `N` is the batch size and `C` is the number of classes.
         - Target: :math:`(N, C)`, same shape as the input.
-        - Output: scalar. If `reduce` is False, then `(N)`.
+        - Output: scalar. If `reduce` is False, then :math:`(N)`.
     """
     __constants__ = ['weight', 'reduction']
 
@@ -1033,7 +1033,7 @@ class MarginRankingLoss(_Loss):
     Shape:
         - Input: :math:`(N, D)` where `N` is the batch size and `D` is the size of a sample.
         - Target: :math:`(N)`
-        - Output: scalar. If `reduce` is False, then `(N)`.
+        - Output: scalar. If `reduce` is False, then :math:`(N)`.
     """
     __constants__ = ['margin', 'reduction']
 
@@ -1157,7 +1157,7 @@ class TripletMarginLoss(_Loss):
 
     Shape:
         - Input: :math:`(N, D)` where `D` is the vector dimension.
-        - Output: scalar. If `reduce` is False, then `(N)`.
+        - Output: scalar. If `reduce` is False, then :math:`(N)`.
 
     >>> triplet_loss = nn.TripletMarginLoss(margin=1.0, p=2)
     >>> input1 = torch.randn(100, 128, requires_grad=True)

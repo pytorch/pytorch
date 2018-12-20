@@ -8,7 +8,7 @@ graph {
     attribute {
       name: "value"
       t {
-        data_type: INT64
+        data_type: 7
         raw_data: "\000\000\000\000\000\000\000\000"
       }
       type: TENSOR
@@ -36,7 +36,7 @@ graph {
     attribute {
       name: "value"
       t {
-        data_type: INT64
+        data_type: 7
         raw_data: "\001\000\000\000\000\000\000\000"
       }
       type: TENSOR
@@ -114,7 +114,7 @@ graph {
     name: "0"
     type {
       tensor_type {
-        elem_type: FLOAT
+        elem_type: 1
         shape {
           dim {
             dim_value: 3
@@ -130,7 +130,7 @@ graph {
     name: "10"
     type {
       tensor_type {
-        elem_type: FLOAT
+        elem_type: 1
         shape {
           dim {
             dim_value: 3

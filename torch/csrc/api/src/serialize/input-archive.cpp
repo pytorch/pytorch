@@ -54,12 +54,12 @@ void InputArchive::read(const std::string& key, InputArchive& archive) {
 
 void InputArchive::load_from(const std::string& filename,
     c10::optional<torch::Device> device /*= c10::nullopt*/) {
-  module_ = torch::jit::load(filename, device);
+  module_ = torch::jit::load(filename, std::move(device));
 }
 
 void InputArchive::load_from(std::istream& stream,
     c10::optional<torch::Device> device /*= c10::nullopt*/) {
-  module_ = torch::jit::load(stream, device);
+  module_ = torch::jit::load(stream, std::move(device));
 }
 } // namespace serialize
 } // namespace torch

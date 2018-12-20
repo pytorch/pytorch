@@ -1,8 +1,8 @@
-#include "THCUNN.h"
-#include "THCTensor.hpp"
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
-#include "THCAtomics.cuh"
+#include <THCUNN/THCUNN.h>
+#include <THC/THCTensor.hpp>
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCAtomics.cuh>
 
 #define CUDA_MAX_THREADS 1024   // this is safe, in reality 256 is our limit
 
@@ -259,7 +259,7 @@ __global__ void subgradinputAtomic(Dtype *gradInput, Dtype *gradOutput, Dtype *w
 }
 
 
-#include "generic/SpatialSubSampling.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/SpatialSubSampling.cu>
+#include <THC/THCGenerateFloatTypes.h>
 
 #undef CUDA_MAX_THREADS

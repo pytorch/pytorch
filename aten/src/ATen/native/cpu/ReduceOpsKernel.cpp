@@ -6,8 +6,9 @@
 #include <ATen/cpu/vec256/vec256.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/cpu/Reduce.h>
-#include "c10/util/Optional.h"
+#include <c10/util/Optional.h>
 
 namespace at { namespace native { namespace {
 
@@ -19,6 +20,27 @@ static void sum_kernel_impl(TensorIterator& iter) {
       iter,
       [=](scalar_t a, scalar_t b) -> scalar_t { return a + b; },
       [=](Vec256<scalar_t> a, Vec256<scalar_t> b) { return a + b; });
+  });
+}
+
+static void mean_kernel_impl(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES(iter.type(), "mean", [&] {
+    scalar_t factor = scalar_t(iter.num_output_elements()) / iter.numel();
+    binary_kernel_reduce(
+      iter,
+      MeanOps<scalar_t, scalar_t> {factor},
+      scalar_t(0)
+    );
+  });
+}
+
+static void std_kernel_impl(TensorIterator &iter, bool unbiased) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.type(), "std", [&] {
+    binary_kernel_reduce(
+      iter,
+      WelfordOps<scalar_t, double> { unbiased },
+      WelfordData<double>()
+    );
   });
 }
 
@@ -158,7 +180,7 @@ struct NormReduction {
     if (pval == 1){
       for (int row = 0; row < rows; row ++) {
         for (int j = 0; j != 4; j++) {
-          auto val = Vec::loadu(&data[row * WIDTH + j * Vec::size]);
+          auto val = Vec::loadu(&data[row * WIDTH + j * Vec::size()]);
           acc[j] = acc[j] + val.abs();
         }
       }
@@ -166,7 +188,7 @@ struct NormReduction {
     else if (pval == 2) {
       for (int row = 0; row < rows; row ++) {
         for (int j = 0; j != 4; j++) {
-          auto val = Vec::loadu(&data[row * WIDTH + j * Vec::size]);
+          auto val = Vec::loadu(&data[row * WIDTH + j * Vec::size()]);
           acc[j] = acc[j] + val * val;
         }
       }
@@ -174,14 +196,14 @@ struct NormReduction {
     else if (pval == 3) {
       for (int row = 0; row < rows; row ++) {
         for (int j = 0; j != 4; j++) {
-          auto val = Vec::loadu(&data[row * WIDTH + j * Vec::size]);
+          auto val = Vec::loadu(&data[row * WIDTH + j * Vec::size()]);
           acc[j] = acc[j] + (val * val * val).abs();
         }
       }
     }
     scalar_t buf[WIDTH] = {0};
     for (int j = 0; j != 4; j++) {
-      acc[j].store(&buf[j * Vec::size]);
+      acc[j].store(&buf[j * Vec::size()]);
     }
     for (int i = 0; i < WIDTH; i++) {
       result += buf[i];
@@ -204,7 +226,9 @@ static void norm_kernel_impl(
 }  // anonymous namespace
 
 REGISTER_DISPATCH(sum_stub, &sum_kernel_impl);
+REGISTER_DISPATCH(std_stub, &std_kernel_impl);
 REGISTER_DISPATCH(prod_stub, &prod_kernel_impl);
 REGISTER_DISPATCH(norm_kernel, &norm_kernel_impl);
+REGISTER_DISPATCH(mean_stub, &mean_kernel_impl);
 
 }}  // namespace at::native

@@ -1,22 +1,23 @@
-#include "ir.h"
+#include <torch/csrc/jit/ir.h>
 
 
-#include "torch/csrc/jit/operator.h"
-#include "torch/csrc/autograd/function.h"
-#include "torch/csrc/jit/constants.h"
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/script/compiler.h"
-#include "torch/csrc/jit/passes/python_print.h"
-#include "torch/csrc/jit/passes/alias_analysis.h"
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/script/schema_matching.h>
+#include <torch/csrc/jit/passes/python_print.h>
+#include <torch/csrc/jit/passes/alias_analysis.h>
 
+#include <algorithm>
 #include <iostream>
+#include <set>
+#include <sstream>
+#include <stack>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
-#include <set>
-#include <stack>
-#include <sstream>
-#include <algorithm>
-#include <string>
+#include <utility>
 
 namespace torch { namespace jit {
 // Constants relating to maintaining the topological index of nodes.
@@ -685,6 +686,17 @@ bool Node::isNondeterministic() const {
   return true;
 }
 
+bool Node::hasSideEffects() const {
+  switch (kind_) {
+    case prim::PythonOp:
+    case prim::Print:
+    case prim::RaiseException:
+    case aten::warn:
+      return true;
+  }
+  return false;
+}
+
 // Assign this node a topological position, to facilitate fast isBefore() and
 // isAfter() queries. Must be called right after a node is inserted into the
 // node list.
@@ -888,7 +900,9 @@ bool Node::isBeforeOrAfter(const Node* n, MoveSide moveSide) const {
 
     auto rhs = n;
     while (rhs) {
-      JIT_ASSERT(rhs->owningBlock());
+      if (!rhs->owningBlock()) {
+        break;
+      }
 
       if (lhs->owningBlock() == rhs->owningBlock()) {
         return lhs->isBeforeOrAfter(rhs, moveSide);
@@ -1079,7 +1093,7 @@ struct WorkingSet {
 
   std::unordered_set<Node*> getWritersSameBlock(Node* n) const {
     std::unordered_set<Node*> writers;
-    for (const auto writer : aliasDb_.getWritersForNode(n)) {
+    for (const auto writer : aliasDb_.getWriters(n)) {
       if (auto sameBlock = findSameBlock(writer, n)) {
         writers.insert(sameBlock);
       }
@@ -1294,7 +1308,7 @@ Value* Graph::insert(
     Symbol opname,
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
-    c10::optional<SourceRange> range) {
+    const c10::optional<SourceRange>& range) {
   return script::emitBuiltinCall(
       range.value_or(fakeRange()),
       *this,
@@ -1326,7 +1340,7 @@ Node* Graph::createUndefined() {
 
 Node* Graph::createNone(TypePtr typ) {
   Node * n = create(prim::None);
-  n->output()->setType(OptionalType::create(typ));
+  n->output()->setType(OptionalType::create(std::move(typ)));
   return n;
 }
 
@@ -1402,22 +1416,7 @@ Node* Graph::createListUnpack(Value *v, size_t size) {
 Node* Graph::createNumToTensor(Value* value) {
   auto typ = value->type();
   Node * result = create(prim::NumToTensor, {value});
-  result->output()->setType(CompleteTensorType::fromNumberType(typ));
-  return result;
-}
-
-Node* Graph::createBoolToTensor(Value* value) {
-  auto typ = value->type();
-  Node * result = create(prim::BoolToTensor, {value});
-  if (!typ->isSubtypeOf(BoolType::get())) {
-    AT_ERROR("Cannot create bool type from ", typ->str());
-  }
-  result->output()->setType(CompleteTensorType::fromBoolType());
-  return result;
-}
-Node* Graph::createTensorToNum(const TypePtr& type, Value* value) {
-  auto* result = create(prim::TensorToNum, {value});
-  result->output()->setType(type);
+  result->output()->setType(CompleteTensorType::fromNumberType(std::move(typ)));
   return result;
 }
 
@@ -1427,34 +1426,7 @@ Node* Graph::createImplicitTensorToNum(const TypePtr& type, Value* value) {
   return result;
 }
 
-Node* Graph::createTensorToBool(Value* value) {
-  auto* result = create(prim::TensorToBool, {value});
-  result->output()->setType(BoolType::get());
-  return result;
-}
-
-Node* Graph::createIntToFloat(Value* value) {
-  JIT_ASSERT(*value->type() == *IntType::get());
-  auto* result = create(prim::IntToFloat, {value});
-  result->output()->setType(FloatType::get());
-  return result;
-}
-
-Node* Graph::createFloatToInt(Value* value) {
-  JIT_ASSERT(*value->type() == *FloatType::get());
-  auto* result = create(prim::FloatToInt, {value});
-  result->output()->setType(IntType::get());
-  return result;
-}
-
-Node* Graph::createStringToFloat(Value* value) {
-  JIT_ASSERT(*value->type() == *StringType::get());
-  auto* result = create(prim::StringToFloat, {value});
-  result->output()->setType(FloatType::get());
-  return result;
-}
-
-Node* Graph::createClone(Node * n, std::function<Value*(Value*)> value_map, bool copy_blocks) {
+Node* Graph::createClone(Node * n, const std::function<Value*(Value*)>& value_map, bool copy_blocks) {
   //n can be from a different graph
   Node * r = n->allocNewInstance(this);
   for(auto o : n->outputs()) {
@@ -1476,7 +1448,7 @@ Value* Graph::insertConstant(
     IValue val,
     c10::optional<SourceRange> loc,
     c10::optional<ScopePtr> scope) {
-  return jit::insertConstant(*this, std::move(val), loc, scope);
+  return jit::insertConstant(*this, std::move(val), std::move(loc), std::move(scope));
 }
 
 std::string Graph::toString() const {
@@ -1514,6 +1486,52 @@ void Graph::freeBlock(Block * b) {
   all_blocks.erase(it);
 }
 
+at::ArrayRef<Value*> createTupleUnpack(Value* v) {
+  // small peephole optimization to ensure IntList attributes can still turn
+  // into constants e.g. in x.expand([3, 4])
+  if(v->node()->kind() == prim::TupleConstruct)
+    return v->node()->inputs();
+  auto & g = *v->owningGraph();
+  return g.insertNode(g.createTupleUnpack(v))->outputs();
+}
+
+std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs, bool unpack_outputs) {
+  std::unordered_map<Value*, Value*> value_map;
+  auto value_map_func = [&](Value* v) { return value_map.at(v); };
+  JIT_ASSERT(callee.inputs().size() == inputs.size());
+  for (size_t i = 0; i < inputs.size(); ++i) {
+    value_map[callee.inputs()[i]] = inputs[i];
+  }
+  for (auto* node : callee.nodes()) {
+    auto* new_node =
+        g.insertNode(g.createClone(node, value_map_func));
+    for (size_t i = 0; i < node->outputs().size(); ++i) {
+      value_map[node->outputs()[i]] = new_node->outputs()[i];
+    }
+  }
+
+  std::vector<Value*> outputs;
+  for (auto* output : callee.outputs()) {
+    outputs.push_back(value_map_func(output));
+  }
+
+  if (unpack_outputs && outputs.size() == 1 &&
+      callee.outputs().at(0)->type()->kind() == TupleType::Kind) {
+      auto tup = outputs[0];
+      outputs.clear();
+      for(Value* v : createTupleUnpack(tup)) {
+        outputs.emplace_back(v);
+      }
+      // if this was a peephole tuple unpack we can just get rid of
+      // the tuple construct here and prevent needing DCE
+      if (tup->node()->kind() == prim::TupleConstruct && !tup->node()->hasUses()) {
+        tup->node()->destroy();
+      }
+  }
+
+  return outputs;
+}
+
 PythonOp* defaultAllocPythonOp(Graph*g) {
   throw std::runtime_error("Trying to allocate a Python object without python bindings loaded");
 }
@@ -1526,5 +1544,6 @@ PythonOp* allocPythonOp(Graph* g) {
 void setAllocPythonOp(PythonOp* (*v)(Graph* g)) {
   alloc_python_op.store(v);
 }
+
 
 }} // namespace torch::jit

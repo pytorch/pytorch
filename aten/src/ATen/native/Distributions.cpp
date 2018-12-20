@@ -1,17 +1,17 @@
-#include "ATen/ATen.h"
-#include "ATen/CPUApplyUtils.h"
-#include "ATen/Config.h"
-#include "ATen/Dispatch.h"
-#include "ATen/ExpandUtils.h"
-#include "ATen/NativeFunctions.h"
-#include "c10/util/Exception.h"
+#include <ATen/ATen.h>
+#include <ATen/CPUApplyUtils.h>
+#include <ATen/Config.h>
+#include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
+#include <ATen/NativeFunctions.h>
+#include <c10/util/Exception.h>
 
-#include "ATen/CPUGenerator.h"
-#include "ATen/CheckGenerator.h"
-#include "ATen/core/Generator.h"
-#include "ATen/native/Distributions.h"
-#include "ATen/native/DispatchStub.h"
-#include "ATen/native/cpu/UnaryOpsKernel.h"
+#include <ATen/CPUGenerator.h>
+#include <ATen/CheckGenerator.h>
+#include <ATen/core/Generator.h>
+#include <ATen/native/Distributions.h>
+#include <ATen/native/DispatchStub.h>
+#include <ATen/native/cpu/UnaryOpsKernel.h>
 
 #include <type_traits>
 #include <functional>
@@ -19,8 +19,8 @@
 #include <cpuinfo.h>
 
 #include <TH/THRandom.h>
-#include "TH/THGenerator.hpp"
-#include "TH/THMath.h"
+#include <TH/THGenerator.hpp>
+#include <TH/THMath.h>
 
 namespace {
 /*
@@ -209,13 +209,17 @@ Tensor _s_gamma_cpu(const Tensor& alpha, Generator *gen) {
     std::lock_guard<std::mutex> lock(generator->mutex);
     CPU_tensor_apply2<scalar_t, scalar_t>(ret, alpha,
       [generator](scalar_t& ret_val, const scalar_t& alpha){
-        BaseSampler<double> standard_uniform([generator] () {
+
+        auto uniform_lambda = [generator] () {
           return THRandom_standard_uniform(generator);
-        });
-        BaseSampler<double> standard_normal([generator] () {
+        };
+        BaseSampler<double, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
+
+        auto normal_lambda = [generator] () {
           return THRandom_normal(generator, 0.0, 1.0);
-        });
-        auto sample = sample_gamma<scalar_t, double>(alpha, standard_uniform, standard_normal);
+        };
+        BaseSampler<double, decltype(normal_lambda)> standard_normal(normal_lambda);
+        auto sample = sample_gamma<scalar_t, double, decltype(uniform_lambda), decltype(normal_lambda)>(alpha, standard_uniform, standard_normal);
         ret_val = std::max(std::numeric_limits<scalar_t>::min(), (scalar_t) sample);
       }
     );

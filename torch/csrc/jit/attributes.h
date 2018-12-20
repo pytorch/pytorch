@@ -5,7 +5,7 @@
 #include <memory>
 #include <vector>
 #include <ATen/ATen.h>
-#include "ATen/Utils.h"
+#include <ATen/Utils.h>
 
 #include <torch/csrc/jit/assertions.h>
 #include <torch/csrc/jit/interned_strings.h>

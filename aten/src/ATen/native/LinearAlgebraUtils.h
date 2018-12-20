@@ -1,5 +1,5 @@
-#include "ATen/ATen.h"
-#include "ATen/ExpandUtils.h"
+#include <ATen/ATen.h>
+#include <ATen/ExpandUtils.h>
 #include <limits>
 
 namespace at { namespace native {
@@ -53,7 +53,7 @@ static inline double _get_epsilon(const ScalarType& sc_type) {
   }
 }
 
-// Validates input shapes for linear solve methods (gesv, potrs)
+// Validates input shapes for linear solve methods (gesv, cholesky_solve)
 static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A) {
   AT_CHECK(A.size(-1) == A.size(-2),
            "A must be batches of square matrices, "

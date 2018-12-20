@@ -1,14 +1,14 @@
-#include "ATen/native/cpu/SoftmaxKernel.h"
+#include <ATen/native/cpu/SoftmaxKernel.h>
 
 #include <algorithm>
 #include <iterator>
 #include <numeric>
 
-#include "ATen/Dispatch.h"
-#include "ATen/Parallel.h"
-#include "ATen/cpu/vec256/functional.h"
-#include "ATen/cpu/vec256/vec256.h"
-#include "c10/util/Optional.h"
+#include <ATen/Dispatch.h>
+#include <ATen/Parallel.h>
+#include <ATen/cpu/vec256/functional.h>
+#include <ATen/cpu/vec256/vec256.h>
+#include <c10/util/Optional.h>
 
 // [Note AVX-SSE transitions] In general we avoid calls into cmath for code
 // compiled with AVX/AVX2 This is because of SSE-AVX transitions and a bug in
@@ -29,7 +29,7 @@ inline void _vec_log_softmax_lastdim(
     int64_t outer_size,
     int64_t dim_size) {
   using Vec = vec256::Vec256<scalar_t>;
-  static constexpr int64_t CHUNK_SIZE = (128 / sizeof(scalar_t)) * Vec::size;
+  static constexpr int64_t CHUNK_SIZE = (128 / sizeof(scalar_t)) * Vec::size();
   int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size * CHUNK_SIZE);
   if (grain_size < CHUNK_SIZE)
     grain_size = CHUNK_SIZE;

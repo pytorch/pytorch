@@ -346,9 +346,11 @@ def t(g, self):
     return g.op("Transpose", self, perm_i=(1, 0))
 
 
-# There is no translation for it, but we don't want to raise an error yet
 def expand(g, self, size, implicit):
-    return None
+    size = _maybe_get_const(size, 'is')
+    if not _is_value(size):
+        size = g.op("Constant", value_t=torch.LongTensor(size))
+    return g.op("Expand", self, size)
 
 
 def expand_as(g, self, other):
@@ -879,7 +881,9 @@ def clamp_max(g, self, max):
 
 # torch.max (same for torch.min) actually has two interfaces smashed together:
 # torch.max(x, dim, keepdim) and torch.max(x, y)
-def max(g, self, dim_or_y, keepdim=None):
+def max(g, self, dim_or_y=None, keepdim=None):
+    if dim_or_y is None and keepdim is None:
+        return g.op("ReduceMax", self, keepdims_i=0)
     if keepdim is None:
         return g.op("Max", self, dim_or_y)
     else:
@@ -894,7 +898,9 @@ def max(g, self, dim_or_y, keepdim=None):
                     outputs=2)
 
 
-def min(g, self, dim_or_y, keepdim=None):
+def min(g, self, dim_or_y=None, keepdim=None):
+    if dim_or_y is None and keepdim is None:
+        return g.op("ReduceMin", self, keepdims_i=0)
     if keepdim is None:
         return g.op("Min", self, dim_or_y)
     else:
@@ -911,6 +917,10 @@ def min(g, self, dim_or_y, keepdim=None):
 
 def eq(g, self, other):
     return g.op("Equal", self, other)
+
+
+def ne(g, self, other):
+    return g.op("Not", eq(g, self, other))
 
 
 def exp(g, self):
@@ -1023,13 +1033,19 @@ def zeros(g, sizes, dtype, layout, device):
     return g.op("ConstantFill", sizes, dtype_i=scalar_type_to_onnx[dtype], input_as_shape_i=1, value_f=0)
 
 
-def zeros_like(g, input):
-    return g.op("Sub", input, input).setType(input.type().contiguous())
+@parse_args('v', 'i', 'v', 'v')
+def zeros_like(g, input, dtype, layout, device):
+    return g.op("ConstantLike", input, dtype_i=scalar_type_to_onnx[dtype], value_f=0.0)
 
 
 @parse_args('v', 'i', 'v', 'v')
 def ones(g, sizes, dtype, layout, device):
     return g.op("ConstantFill", sizes, dtype_i=scalar_type_to_onnx[dtype], input_as_shape_i=1, value_f=1)
+
+
+@parse_args('v', 'i', 'v', 'v')
+def ones_like(g, input, dtype, layout, device):
+    return g.op("ConstantLike", input, dtype_i=scalar_type_to_onnx[dtype], value_f=1.0)
 
 
 def full(g, sizes, value, dtype, layout, device):
@@ -1043,9 +1059,9 @@ def full(g, sizes, value, dtype, layout, device):
                     input_as_shape_i=1, value_f=const_value)
 
 
-def full_like(g, input, fill_value):
-    # TODO: a more efficient implementation (ConstantFill?)
-    return add(g, zeros_like(g, input), fill_value, g.op("Constant", value_t=torch.tensor(1)))
+@parse_args('v', 'f', 'i', 'v', 'v')
+def full_like(g, input, fill_value, dtype, layout, device):
+    return g.op("ConstantLike", input, dtype_i=scalar_type_to_onnx[dtype], value_f=fill_value)
 
 
 @parse_args('v', 'v', 'v', 'v', 'i')
@@ -1355,3 +1371,9 @@ def randn(g, *shapes):
 def rrelu(g, input, lower, upper, training, generator):
     p = g.op('RandomUniformLike', input, high_f=upper, low_f=lower)
     return g.op('PRelu', input, p)
+
+
+@parse_args('v')
+def log_sigmoid(g, input):
+    p = g.op('Sigmoid', input)
+    return g.op('Log', p)

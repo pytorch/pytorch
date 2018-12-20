@@ -1,24 +1,24 @@
 #include <google/protobuf/util/json_util.h>
 #include <google/protobuf/util/type_resolver_util.h>
 
-#include "torch/csrc/jit/export.h"
-#include "torch/csrc/autograd/symbolic.h"
-#include "torch/csrc/onnx/onnx.h"
+#include <torch/csrc/jit/export.h>
+#include <torch/csrc/autograd/symbolic.h>
+#include <torch/csrc/onnx/onnx.h>
 
-#include "torch/csrc/utils/functional.h"
+#include <torch/csrc/utils/functional.h>
 #include <torch/csrc/jit/assertions.h>
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/jit/passes/python_print.h"
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/python_print.h>
 
 
-#include "caffe2/core/types.h"
-#include "caffe2/proto/caffe2_pb.h"
-#include "caffe2/proto/torch_pb.h"
-#include "caffe2/serialize/inline_container.h"
-#include "onnx/onnx_pb.h"
+#include <caffe2/core/types.h>
+#include <caffe2/proto/caffe2_pb.h>
+#include <caffe2/proto/torch_pb.h>
+#include <caffe2/serialize/inline_container.h>
+#include <onnx/onnx_pb.h>
 
 #include <ATen/ATen.h>
-#include "c10/util/Optional.h"
+#include <c10/util/Optional.h>
 
 #include <fstream>
 #include <memory>
@@ -69,10 +69,6 @@ void validateBlock(Block *b, onnx_torch::OperatorExportTypes operator_export_typ
             node->output(i)->replaceAllUsesWith(new_node->output(i));
           }
           new_node->s_(Symbol::fromQualString("attr::operator"), "expand");
-        } else {
-          FAIL_EXPORT(
-              "Could not export a broadcasted operation; ONNX likely does not support this form of broadcasting.\n\nBroadcast occurred at:\n" +
-              getNodeStackTraceString(node));
         }
       }
       if (node->kind() == prim::PackPadded || node->kind() == prim::PadPacked) {
@@ -559,8 +555,8 @@ void ScriptModuleSerializer::convertAndWriteTensor(
       // NB: This new tensor is created to support cuda tensors.
       // Storages can be mutated when converting tensors from cuda to cpu,
       // and we need a cpu tensor to copy data from.
-      storage_tensor = at::getType(tensor)
-                           ._th_tensor(
+      storage_tensor = at::empty({0}, tensor.options())
+                           .set_(
                                tensor.storage(),
                                /* storageOffset = */ 0,
                                /* size = */

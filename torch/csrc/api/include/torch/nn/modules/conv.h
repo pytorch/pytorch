@@ -17,7 +17,7 @@ struct ConvOptions {
   ConvOptions(
       int64_t input_channels,
       int64_t output_channels,
-      ExpandingArray<D> kernel_size) : 
+      ExpandingArray<D> kernel_size) :
 		input_channels_(input_channels),
 		output_channels_(output_channels),
 		kernel_size_(std::move(kernel_size)) {}
@@ -88,6 +88,9 @@ class ConvImpl : public torch::nn::Cloneable<Derived> {
 
   void reset() override;
 
+  /// Pretty prints the `Conv{1,2,3}d` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
   /// The options with which this `Module` was constructed.
   ConvOptions<D> options;
 
@@ -106,7 +109,7 @@ class ConvImpl : public torch::nn::Cloneable<Derived> {
 class TORCH_API Conv1dImpl : public ConvImpl<1, Conv1dImpl> {
  public:
   using ConvImpl<1, Conv1dImpl>::ConvImpl;
-  Tensor forward(Tensor input);
+  Tensor forward(const Tensor& input);
 };
 
 /// `ConvOptions` specialized for 1-D convolution.
@@ -126,7 +129,7 @@ TORCH_MODULE(Conv1d);
 class TORCH_API Conv2dImpl : public ConvImpl<2, Conv2dImpl> {
  public:
   using ConvImpl<2, Conv2dImpl>::ConvImpl;
-  Tensor forward(Tensor input);
+  Tensor forward(const Tensor& input);
 };
 
 /// `ConvOptions` specialized for 2-D convolution.
@@ -146,7 +149,7 @@ TORCH_MODULE(Conv2d);
 class TORCH_API Conv3dImpl : public ConvImpl<3, Conv3dImpl> {
  public:
   using ConvImpl<3, Conv3dImpl>::ConvImpl;
-  Tensor forward(Tensor input);
+  Tensor forward(const Tensor& input);
 };
 
 /// `ConvOptions` specialized for 3-D convolution.

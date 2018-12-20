@@ -1,11 +1,14 @@
-#include "torch/csrc/jit/autodiff.h"
+#include <torch/csrc/jit/autodiff.h>
 
-#include "torch/csrc/jit/passes/common_subexpression_elimination.h"
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/jit/passes/constant_pooling.h"
-#include "torch/csrc/jit/symbolic_variable.h"
-#include "torch/csrc/jit/operator.h"
-#include "torch/csrc/utils/functional.h"
+#include "torch/csrc/jit/passes/lower_tuples.h"
+#include <torch/csrc/jit/passes/common_subexpression_elimination.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/constant_pooling.h>
+#include "torch/csrc/jit/symbolic_script.h"
+#include <torch/csrc/jit/symbolic_variable.h>
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/utils/functional.h>
+#include "torch/csrc/jit/script/compiler.h"
 
 #include <torch/csrc/jit/assertions.h>
 
@@ -40,6 +43,8 @@ bool isDifferentiable(Node * n) {
     "aten::tanh(Tensor self) -> Tensor",
     "aten::relu(Tensor self) -> Tensor",
     "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",
+    "aten::erf(Tensor self) -> Tensor",
+    "aten::erfc(Tensor self) -> Tensor",
     "aten::exp(Tensor self) -> Tensor",
     "aten::t(Tensor self) -> Tensor",
     "aten::neg(Tensor self) -> Tensor",
@@ -55,6 +60,12 @@ bool isDifferentiable(Node * n) {
     "aten::ge(Tensor self, Tensor other) -> Tensor",
     "aten::eq(Tensor self, Tensor other) -> Tensor",
     "aten::ne(Tensor self, Tensor other) -> Tensor",
+    "aten::lt(Tensor self, Scalar other) -> Tensor",
+    "aten::le(Tensor self, Scalar other) -> Tensor",
+    "aten::gt(Tensor self, Scalar other) -> Tensor",
+    "aten::ge(Tensor self, Scalar other) -> Tensor",
+    "aten::eq(Tensor self, Scalar other) -> Tensor",
+    "aten::ne(Tensor self, Scalar other) -> Tensor",
     "aten::abs(Tensor self) -> Tensor",
     "aten::acos(Tensor self) -> Tensor",
     "aten::asin(Tensor self) -> Tensor",
@@ -94,12 +105,18 @@ bool isDifferentiable(Node * n) {
   // "aten::min(Tensor self) -> Tensor"
 
   if (n->kind() == prim::Constant ||
+      n->kind() == prim::Undefined ||
       n->kind() == prim::AutogradAdd ||
       n->kind() == prim::ConstantChunk ||
       n->kind() == prim::None)
     return true;
   if (differentiable_ops.find(n))
     return true;
+
+  auto schema = n->maybeSchema();
+  if (schema && hasGradientInfoForSchema(*schema)) {
+    return true;
+  }
 
   if (n->matches("aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor")) {
     return n->get<std::vector<int64_t>>(attr::size) && n->is_constant(attr::implicit) &&
@@ -108,6 +125,10 @@ bool isDifferentiable(Node * n) {
   if (n->matches("aten::view(Tensor self, int[] size) -> Tensor")) {
     return n->get<std::vector<int64_t>>(attr::size) &&
       n->namedInput(attr::self)->type()->cast<CompleteTensorType>();
+  }
+  if (n->matches("aten::nll_loss(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> Tensor")) {
+    // TODO(asuhan): support weight
+    return n->namedInput(attr::weight)->node()->kind() == prim::Undefined;
   }
 
   // linear blocks may appear as inputs to graph executors, but they are removed
@@ -129,6 +150,59 @@ bool isDifferentiable(Graph & g) {
                      static_cast<bool(*)(Node*)>(isDifferentiable));
 }
 
+// NB: Write gradient using torchscript
+// For example, node aten::mul() should be defined as follows
+// def forward(x, y):
+//     return x*y, (x, y)
+// def backward(ctx, grad_output):
+//     x, y = ctx
+//     return (y * grad_output).sum_to_size(x), (x * grad_output).sum_to_size(y)
+//
+// Here ctx is a tuple that carries all input/intermediate results needed in
+// backward from forward pass.
+// This python code is compiled into a GradientPair which includes a forward graph
+// and a backward graph. Forward graph will be used to replace the node in grad_desc.f,
+// and backward graph will be used to construct GradOf(node) in reverse_block.
+// Grad_values(a.k.a gradOutputs) propagated through node->owningGraph() in
+// **reversed** order, thus GradientPair.forward ahould be inserted **after**
+// the node being replaced, so that we don't traverse the graph infinite times.
+// The output of compiled forward graph is [real_outputs, ctx]
+// The input of compiled backward graph is [ctx, grad_values]
+// We run LowerSimpleTuples afterwards to elmininate all tuples generated in this process.
+// The original node and TupleConstruct nodes in forward graph will be cleaned up
+// later using EliminateDeadCode(block).
+// TupleUnPack node in backward graph will be removed in eliminateDeadcode(ReverseDetails)
+// defined in this file.
+static c10::optional<std::vector<Value*>> build_script_grad(
+        Node* node,
+        const ArrayRef<Value*>& grads) {
+  auto graph = node->owningGraph();
+
+  auto compiled_graphs = gradientInfoForSchema(node->schema());
+  if (!compiled_graphs) {
+    return c10::nullopt;
+  }
+  // Use forward graph to replace node in grad_desc.f
+  value_list new_outputs;
+  {
+    WithInsertPoint guard(node->next());
+    auto fw_graph = compiled_graphs->forward;
+    new_outputs = inlineCallTo(*graph, *fw_graph, node->inputs(), /*unpack_outputs=*/true);
+    for (size_t i = 0; i < node->outputs().size(); ++i) {
+      new_outputs.at(i)->setType(node->outputs()[i]->type());
+      new_outputs.at(i)->replaceAllUsesWith(node->outputs()[i]);
+    }
+  }
+
+  // Use backward graph to construct reverse_block
+  auto bw_graph = compiled_graphs->backward;
+  auto grad_vec = grads.vec();
+  auto it = grad_vec.begin();
+  grad_vec.insert(it, new_outputs.back());
+  ArrayRef<Value*> grad(grad_vec);
+  auto grad_inputs = inlineCallTo(*graph, *bw_graph, grad, /*unpack_outputs=*/true);
+  return grad_inputs;
+};
 
 static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_values) {
   static const OperatorSet comparison_ops = {
@@ -137,7 +211,13 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     "aten::gt(Tensor self, Tensor other) -> Tensor",
     "aten::ge(Tensor self, Tensor other) -> Tensor",
     "aten::eq(Tensor self, Tensor other) -> Tensor",
-    "aten::ne(Tensor self, Tensor other) -> Tensor"
+    "aten::ne(Tensor self, Tensor other) -> Tensor",
+    "aten::lt(Tensor self, Scalar other) -> Tensor",
+    "aten::le(Tensor self, Scalar other) -> Tensor",
+    "aten::gt(Tensor self, Scalar other) -> Tensor",
+    "aten::ge(Tensor self, Scalar other) -> Tensor",
+    "aten::eq(Tensor self, Scalar other) -> Tensor",
+    "aten::ne(Tensor self, Scalar other) -> Tensor",
   };
   const auto sumToSizeOf = [node](SymbolicVariable v, Symbol input_name) -> SymbolicVariable {
     Value * size;
@@ -235,6 +315,12 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     } else if (node->matches("aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor")) {
       auto threshold = node->get<at::Scalar>(attr::threshold).value();
       return {grads.at(0) * (inputs.at(0) > threshold).type_as(outputs.at(0)), nullptr, nullptr};
+
+    } else if (node->matches("aten::erf(Tensor self) -> Tensor")) {
+      return {grads.at(0) * 1.12837916709551 * (-inputs.at(0) * inputs.at(0)).exp()};
+
+    } else if (node->matches("aten::erfc(Tensor self) -> Tensor")) {
+      return {-grads.at(0) * 1.12837916709551 * (-inputs.at(0) * inputs.at(0)).exp()};
 
     } else if (node->matches("aten::exp(Tensor self) -> Tensor")) {
       return {grads.at(0) * (outputs.at(0))};
@@ -483,6 +569,21 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       JIT_ASSERT(tuple_outputs.size() == size_t(3));
       return {tuple_outputs[0], tuple_outputs[1], tuple_outputs[2], nullptr, nullptr, nullptr, nullptr, nullptr};
 
+    } else if (node->matches("aten::nll_loss(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> Tensor")) {
+      auto graph = node->owningGraph();
+      auto total_weight = graph->insertNode(graph->createUndefined());
+      auto weight = graph->insertNode(graph->createUndefined());
+      auto backward_value = graph->insert(aten::nll_loss_backward, {
+        grads.at(0).value(),
+        inputs.at(0).value(),
+        inputs.at(1).value(),
+        weight->output(),
+        inputs.at(3).value(),
+        inputs.at(4).value(),
+        total_weight->output()
+      });
+      return {backward_value->node()->output(0), nullptr, nullptr, nullptr, nullptr};
+
     } else if (node->matches("aten::log_softmax(Tensor self, int dim) -> Tensor")) {
       JIT_ASSERT(grads.size() == 1);
       auto graph = node->owningGraph();
@@ -494,7 +595,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       });
       return {backward_value->node()->output(0), nullptr};
 
-    } else if (node->kind() == prim::Constant || node->kind() == prim::None) {
+    } else if (node->kind() == prim::Constant || node->kind() == prim::Undefined || node->kind() == prim::None) {
       return {};
     }
     throw std::runtime_error(std::string("failed to differentiate `") + node->kind().toDisplayString() + "`");
@@ -503,6 +604,12 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     throw std::runtime_error(std::string("differentiation of ") + node->kind().toDisplayString() + " "
                              "is not supported, or it is missing necessary type information");
   }
+  // If AD is defined using torchscript, use it instead of symbolic
+  auto script_grads = build_script_grad(node, grad_values);
+  if (script_grads)
+    return *script_grads;
+  // Definition not found in torchscript, look up in the build_sym_grad
+  // TODO: migrate all to using torchscript
   auto sym_grads = build_sym_grad(fmap<SymbolicVariable>(grad_values));
   return fmap(sym_grads, [](const SymbolicVariable &v) { return v.value(); });
 }
@@ -607,6 +714,8 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
     }
 
     value_list grad_inputs = linearGradientForNode(node, fmap(node->outputs(), get_grad));
+    LowerSimpleTuples(reverse_block);
+
     JIT_ASSERT(grad_inputs.size() == node->inputs().size());
     for (size_t i = 0, num_inputs = grad_inputs.size(); i < num_inputs; ++i) {
       if (!inputs[i]->requires_grad()) continue;
@@ -630,6 +739,7 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
     reverse_block->registerOutput(get_grad(input));
     grad_desc.df_output_vjps.push_back(i);
   }
+
   return ReverseDetails(std::move(grad_map), reverse_block);
 }
 
@@ -720,24 +830,19 @@ static void eliminateDeadCode(ReverseDetails& rev_info) {
   // point that doesn't require grad.
   // Of course, we need to filter out corresponding entries of grad_map, because
   // we don't want to accidentally access freed pointers later.
-  auto dead_nodes = FindDeadNodes(rev_info.reverse_block);
-  if (dead_nodes.empty()) {
-    return;
-  }
-  std::vector<Value*> to_erase;
-  for (auto & entry : rev_info.grad_map) {
-    if (dead_nodes.count(entry.second->node()) > 0) {
-      to_erase.push_back(entry.first);
-    }
-  }
-  for (Value * v : to_erase) {
-    rev_info.grad_map.erase(v);
-  }
-  std::vector<Node*> sorted_dead_nodes(dead_nodes.begin(), dead_nodes.end());
-  std::sort(sorted_dead_nodes.begin(), sorted_dead_nodes.end(), [](Node* a, Node* b) { return a->isAfter(b); });
-  for (Node * n : sorted_dead_nodes) {
-    n->destroy();
-  }
+  std::function<void(const std::unordered_set<const Value*>&)> cb =
+      [&](const std::unordered_set<const Value*>& live_values) {
+        std::vector<Value*> to_erase;
+        for (auto& entry : rev_info.grad_map) {
+          if (!live_values.count(entry.second)) {
+            to_erase.push_back(entry.first);
+          }
+        }
+        for (Value* v : to_erase) {
+          rev_info.grad_map.erase(v);
+        }
+      };
+  EliminateDeadCode(rev_info.reverse_block, std::move(cb));
 }
 
 static void Optimize(Gradient& grad_desc, ReverseDetails& rev_info) {
@@ -883,6 +988,9 @@ Gradient differentiate(std::shared_ptr<Graph>& graph) {
   // Fills in df_input_vjps and df_output_vjps
   auto rev_info = addReverseInline(grad_desc);
   Optimize(grad_desc, rev_info);
+  // Clean up old nodes which has been replaced by forward graphs in torchscript
+  EliminateDeadCode(grad_desc.f->block());
+
   // Fills in f, df, f_real_outputs, df_input_captures,
   // modifies df_input_vjps (new vjps are added for temporaries)
   lambdaLiftReverse(grad_desc, rev_info);

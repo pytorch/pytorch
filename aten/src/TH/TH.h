@@ -3,22 +3,22 @@
 
 #include <TH/THGeneral.h>
 
-#include "THBlas.h"
+#include <TH/THBlas.h>
 #ifdef USE_LAPACK
-#include "THLapack.h"
+#include <TH/THLapack.h>
 #endif
 
-#include "THVector.h"
-#include "THLogAdd.h"
-#include "THRandom.h"
-#include "THSize.h"
-#include "THStorageFunctions.h"
-#include "THTensor.h"
-#include "THTensorApply.h"
-#include "THTensorDimApply.h"
+#include <TH/THVector.h>
+#include <TH/THLogAdd.h>
+#include <TH/THRandom.h>
+#include <TH/THSize.h>
+#include <TH/THStorageFunctions.h>
+#include <TH/THTensor.h>
+#include <TH/THTensorApply.h>
+#include <TH/THTensorDimApply.h>
 
-#include "THFile.h"
-#include "THDiskFile.h"
-#include "THMemoryFile.h"
+#include <TH/THFile.h>
+#include <TH/THDiskFile.h>
+#include <TH/THMemoryFile.h>
 
 #endif
