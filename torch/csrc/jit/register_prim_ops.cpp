@@ -565,7 +565,7 @@ RegisterOperators reg({
         [](const Node* node) -> Operation {
           const auto num_inputs = node->inputs().size();
           ListTypePtr lt = node->output()->type()->expect<ListType>();
-          if(IntType::get() == lt->getElementType()) {
+          if(lt->getElementType() == IntType::get()) {
             return [=](Stack& stack) {
               auto inputs = peekSlice(stack, 0, num_inputs, num_inputs);
               std::vector<int64_t> vals = fmap(inputs, [](const IValue& v) {
@@ -575,7 +575,7 @@ RegisterOperators reg({
               push(stack, std::move(vals));
               return 0;
             };
-          } else if(FloatType::get() == lt->getElementType()) {
+          } else if(lt->getElementType() == FloatType::get()) {
             return [=](Stack& stack) {
               auto inputs = peekSlice(stack, 0, num_inputs, num_inputs);
               std::vector<double> vals = fmap(inputs, [](const IValue& v) {
@@ -585,13 +585,13 @@ RegisterOperators reg({
               push(stack, std::move(vals));
               return 0;
             };
-          } else if (lt->getElementType()->isSubtypeOf(DynamicType::get())) {
+          } else if (lt->getElementType()->isSubtypeOf(OptionalType::ofTensor())) {
             return [=](Stack& stack) {
               const size_t stack_size = stack.size();
               std::vector<at::Tensor> vals;
               vals.reserve(num_inputs);
               for (size_t i = stack_size - num_inputs; i < stack_size; ++i) {
-                vals.emplace_back(std::move(stack[i]).toTensor());
+                vals.emplace_back(std::move(stack[i]).toOptional<at::Tensor>());
               }
               drop(stack, num_inputs);
               push(stack, std::move(vals));

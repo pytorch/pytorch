@@ -679,42 +679,7 @@ struct PythonPrintPass {
       case prim::NoneGenerator:
       case prim::Undefined:
       case prim::None: {
-        if (node->output()->type()->isSubtypeOf(NoneType::get())) {
-          stmt << "None";
-          break;
-        }
-        // XXX - we'd like to just print None in these circumstances
-        // but implicit conversions from None to Tensor/Generator
-        // are not always considered. E.g. if they are being put into a list.
-        // Fixing this depends on removing specializations for Optional[Tensor]
-        // an Optional[Generator] and universally using None.
-
-        // XXX - when None has an Optional[T] type, we must ensure that type
-        // can be recovered on parsing. It cannot be recovered if it will be
-        // matched to schema with free variables. If it is used only in places where
-        // there is schema and the scheme has no free variables, then we can
-        // recover it without annotation. Otherwise, we annotate None with the right
-        // optional type
-        const auto& uses = node->output()->uses();
-        bool all_usable_schema =
-            std::all_of(uses.begin(), uses.end(), [](const Use& u) {
-              if (auto schema = u.user->maybeSchema()) {
-                if (u.offset >= schema->arguments().size()) {
-                  return false;
-                }
-                return !schema->arguments()
-                    .at(u.offset)
-                    .type()
-                    ->hasFreeVariables();
-              }
-              return false;
-            });
-
-        if (all_usable_schema) {
-          stmt << "None";
-        } else {
-          stmt << "annotate(" << node->output()->type()->python_str() << ", None)";
-        }
+        stmt << "None";
       } break;
       case prim::ImplicitTensorToNum: {
         stmt << "annotate(" << node->output()->type()->python_str() << ", "

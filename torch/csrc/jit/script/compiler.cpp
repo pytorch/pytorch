@@ -1919,17 +1919,28 @@ private:
         // if the list is non-empty use type_of(list[0])
         // otherwise assume it is List[Tensor]
         TypePtr elem_type = DynamicType::get();
+        bool isOptional = false;
         if (type_hint && type_hint->kind() == TypeKind::ListType) {
           elem_type = type_hint->expect<ListType>()->getElementType();
         } else if (!values.empty()) {
           elem_type = values.at(0)->type();
-        }
+          for (auto val: values) {
+            if (val->type() == NoneType::get()) {
+              isOptional = true;
+            } else {
+              elem_type = val->type();
+            }
+          }
+         }
         for (auto v : values) {
-          if (v->type() != elem_type) {
+          if (v->type() != NoneType::get() && v->type() != elem_type) {
             throw ErrorReport(tree)
                 << "Lists must contain only a single type, expected: "
                 << *elem_type << " but found " << *v->type() << " instead";
           }
+        }
+        if (isOptional) {
+          elem_type = OptionalType::create(elem_type);
         }
         Value* result = graph->insertNode(graph->createList(elem_type, values))
             ->output();
@@ -2040,6 +2051,7 @@ private:
       auto index = emitExpr(subscript_expr);
       if (index->type() == IntType::get()) {
         sliceable = emitSelect(loc, sliceable, dim, index);
+        ++ dim;
         continue;
       } else if (index->type()->isSubtypeOf(DynamicType::get())) {
         handle_tensor(index);

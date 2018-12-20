@@ -1398,7 +1398,8 @@ Node* Graph::createTupleSlice(Value * tup, int64_t beg, int64_t end) {
 Node* Graph::createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
   auto n = create(prim::ListConstruct, values);
   for(const auto & v : values) {
-    JIT_ASSERT(v->type()->isSubtypeOf(elem_type));
+    if (v->type() != NoneType::get())
+      JIT_ASSERT(v->type()->isSubtypeOf(elem_type));
   }
   n->output()->setType(ListType::create(elem_type));
   return n;
