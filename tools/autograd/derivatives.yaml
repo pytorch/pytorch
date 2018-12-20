@@ -599,10 +599,10 @@
   exponent: pow_backward_exponent(grad, self, exponent)
 
 - name: prod(Tensor self, *, ScalarType? dtype)
-  self: prod_backward(grad, self.to(grad.type()), result).to(self.scalar_type())
+  self: prod_backward(grad, self.to(grad.scalar_type()), result).to(self.scalar_type())
 
 - name: prod(Tensor self, int64_t dim, bool keepdim, *, ScalarType? dtype)
-  self: prod_backward(grad, self.to(grad.type()), result, dim, keepdim).to(self.scalar_type())
+  self: prod_backward(grad, self.to(grad.scalar_type()), result, dim, keepdim).to(self.scalar_type())
 
 - name: pstrf(Tensor self, bool upper, Scalar tol)
   self: not_implemented("pstrf")
