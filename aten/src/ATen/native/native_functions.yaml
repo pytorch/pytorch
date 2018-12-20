@@ -1899,15 +1899,6 @@
 - func: norm(Tensor self, Scalar p, IntList[1] dim, *, ScalarType dtype) -> Tensor
   variants: function, method
 
-- func: norm(Tensor self, Scalar p, int64_t dim, bool keepdim=false) -> Tensor
-  variants: function, method
-  python_default_init:
-    p: 2
-
-- func: norm_out(Tensor result, Tensor self, Scalar p, int64_t dim, bool keepdim=false) -> Tensor
-  python_default_init:
-    p: 2
-
 - func: norm_out(Tensor result, Tensor self, Scalar p, IntList[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
 
 - func: norm_out(Tensor result, Tensor self, Scalar p, IntList[1] dim, bool keepdim=false) -> Tensor

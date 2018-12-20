@@ -490,7 +490,6 @@ public:
   Tensor norm(Scalar p, IntList dim, bool keepdim, ScalarType dtype) const;
   Tensor norm(Scalar p, IntList dim, bool keepdim=false) const;
   Tensor norm(Scalar p, IntList dim, ScalarType dtype) const;
-  Tensor norm(Scalar p, int64_t dim, bool keepdim=false) const;
   Tensor clone() const;
   Tensor & resize_as_(const Tensor & the_template);
   Tensor pow(Scalar exponent) const;
