@@ -114,8 +114,7 @@ void THTensor_(gesv)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
   THArgCheck(a->dim() == 2, 2, "A should have 2 dimensions, but has %d",
       a->dim());
   THArgCheck(!a->is_empty(), 2, "A should not be empty");
-  THArgCheck(b->dim() == 1 || b->dim() == 2, 1, "B should have 1 or 2 "
-      "dimensions, but has %d", b->dim());
+  THArgCheck(b->dim() == 2, 1, "B should have 2 dimensions, but has %d", b->dim());
   THArgCheck(!b->is_empty(), 2, "B should not be empty");
   THArgCheck(a->size(0) == a->size(1), 2, "A should be square, but is %ldx%ld",
       a->size(0), a->size(1));
