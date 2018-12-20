@@ -108,7 +108,7 @@ inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor,
 }
 
 inline PyObject* wrap(const char *op, std::tuple<const char *, const char *, const char *, const char *, const char *> names,
-                      std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> tensors) {
+                      std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor> tensors) {
   PyStructSequence_Field fields[] = {
     {std::get<0>(names), ""},
     {std::get<1>(names), ""},
