@@ -49,7 +49,6 @@ private:
 
  void loadTensorTable(torch::ModelDef* model_def);
 
- std::ifstream ifs_;
  PyTorchStreamReader reader_;
  // this is a hack to make sure the script module created in C++ is the
  // same as created in Python
@@ -66,7 +65,7 @@ ScriptModuleDeserializer::ScriptModuleDeserializer(const std::string& filename)
 }
 
 ScriptModuleDeserializer::ScriptModuleDeserializer(std::istream* is)
-    : ifs_(), reader_(is) {}
+    : reader_(is) {}
 
 void ScriptModuleDeserializer::deserialize(ModuleLookup module_lookup,
     c10::optional<at::Device> device) {
