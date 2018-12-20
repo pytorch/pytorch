@@ -691,6 +691,9 @@ inline Tensor Tensor::norm(Scalar p, IntList dim, bool keepdim) const {
 inline Tensor Tensor::norm(Scalar p, IntList dim, ScalarType dtype) const {
     return type().norm(*this, p, dim, dtype);
 }
+inline Tensor Tensor::norm(Scalar p, int64_t dim, bool keepdim) const {
+    return type().norm(*this, p, dim, keepdim);
+}
 inline Tensor Tensor::clone() const {
     return type().clone(*this);
 }

@@ -397,6 +397,7 @@ struct CAFFE2_API Type {
   virtual Tensor norm(const Tensor & self, Scalar p, IntList dim, bool keepdim, ScalarType dtype) const = 0;
   virtual Tensor norm(const Tensor & self, Scalar p, IntList dim, bool keepdim) const = 0;
   virtual Tensor norm(const Tensor & self, Scalar p, IntList dim, ScalarType dtype) const = 0;
+  virtual Tensor norm(const Tensor & self, Scalar p, int64_t dim, bool keepdim) const = 0;
   virtual Tensor clone(const Tensor & self) const = 0;
   virtual Tensor & resize_as_(Tensor & self, const Tensor & the_template) const = 0;
   virtual Tensor pow(const Tensor & self, Scalar exponent) const = 0;

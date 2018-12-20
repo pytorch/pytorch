@@ -453,6 +453,11 @@ Tensor &norm_out(Tensor& result, const Tensor& self, Scalar p, ScalarType dtype)
   return at::native::norm_out(result, self, p, {}, false, optional<ScalarType>(dtype));
 }
 
+// keeping old api for distribution
+Tensor &norm_out(Tensor& result, const Tensor& self, Scalar p, int64_t dim, bool keepdim) {
+  return at::native::norm_out(result, self, p, {dim}, keepdim, c10::nullopt);
+}
+
 static Tensor norm(const Tensor& self, Scalar p, IntList dim, bool keepdim,
             optional<ScalarType> opt_dtype) {
   Tensor result;
@@ -473,6 +478,11 @@ Tensor norm(const Tensor& self, Scalar p, IntList dim, ScalarType dtype) {
 
 Tensor norm(const Tensor& self, Scalar p, IntList dim, bool keepdim) {
   return at::native::norm(self, p, dim, keepdim, c10::nullopt);
+}
+
+// keeping old api for distribution
+Tensor norm(const Tensor& self, Scalar p, int64_t dim, bool keepdim) {
+  return at::native::norm(self, p, {dim}, keepdim, c10::nullopt);
 }
 
 // leave it so we support sparse tensors
