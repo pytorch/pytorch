@@ -6724,6 +6724,7 @@ class _TestTorchMixin(object):
         ret = a.max(dim=0)
         self.assertEqual(ret.values, ret[0])
         self.assertEqual(ret.indices, ret[1])
+        #TODO: test 2, 3, 4
 
     def test_hardshrink(self):
         data_original = torch.tensor([1, 0.5, 0.3, 0.6]).view(2, 2)
