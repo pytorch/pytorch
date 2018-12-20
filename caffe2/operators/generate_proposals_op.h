@@ -144,6 +144,33 @@ class GenerateProposalsOp final : public Operator<Context> {
   // tolerance for backward compatibility. Set to negative value for
   // no clipping.
   float clip_angle_thresh_{1.0};
+
+  // Scratch space required by the CUDA version
+  // CUB buffers
+  Tensor dev_cub_sort_buffer_{Context::GetDeviceType()};
+  Tensor dev_cub_select_buffer_{Context::GetDeviceType()};
+  Tensor dev_image_offset_{Context::GetDeviceType()};
+  Tensor dev_conv_layer_indexes_{Context::GetDeviceType()};
+  Tensor dev_sorted_conv_layer_indexes_{Context::GetDeviceType()};
+  Tensor dev_sorted_scores_{Context::GetDeviceType()};
+  Tensor dev_boxes_{Context::GetDeviceType()};
+  Tensor dev_boxes_keep_flags_{Context::GetDeviceType()};
+
+  // prenms proposals (raw proposals minus empty boxes)
+  Tensor dev_image_prenms_boxes_{Context::GetDeviceType()};
+  Tensor dev_image_prenms_scores_{Context::GetDeviceType()};
+  Tensor dev_prenms_nboxes_{Context::GetDeviceType()};
+  Tensor host_prenms_nboxes_{CPU};
+
+  Tensor dev_image_boxes_keep_list_{Context::GetDeviceType()};
+
+  // Tensors used by NMS
+  Tensor dev_nms_mask_{Context::GetDeviceType()};
+  Tensor host_nms_mask_{CPU};
+
+  // Buffer for output
+  Tensor dev_postnms_rois_{Context::GetDeviceType()};
+  Tensor dev_postnms_rois_probs_{Context::GetDeviceType()};
 };
 
 } // namespace caffe2
