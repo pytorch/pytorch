@@ -1,4 +1,7 @@
 #include "predictor_config.h"
+
+#include <atomic>
+
 #include "caffe2/core/init.h"
 #include "caffe2/utils/proto_utils.h"
 #ifdef CAFFE2_OPTIMIZER
@@ -81,7 +84,11 @@ PredictorConfig makePredictorConfig(
       LOG(WARNING) << "Optimization pass failed: " << e.what();
     }
 #else
-    LOG(WARNING) << "Caffe2 is compiled without optimization passes.";
+    static std::atomic<bool> warningEmitted{};
+    // Emit the log only once.
+    if (!warningEmitted.exchange(true)) {
+      LOG(WARNING) << "Caffe2 is compiled without optimization passes.";
+    }
 #endif
   }
   return config;

@@ -409,7 +409,7 @@ class DataParallelModelTest(TestCase):
 
     def test_device_scope_check(self):
         with self.assertRaises(AssertionError):
-            with core.DeviceScope(core.DeviceOption(caffe2_pb2.CUDA, 0)):
+            with core.DeviceScope(core.DeviceOption(workspace.GpuDeviceType, 0)):
                 data_parallel_model.Parallelize_GPU(None, None, None)
 
     def test_net_transformer_function(self):
@@ -448,8 +448,14 @@ class DataParallelModelTest(TestCase):
         self.assertEqual(transform.call_count, 1)
 
     @given(seed=st.integers(0, 65535), batch_size=st.integers(1, 20))
-    def test_multi_device_bn_op_level(self, seed, batch_size):
+    def test_multi_device_bn_op_level_cpu(self, seed, batch_size):
         self._bn_check_op_level("cpu", seed, batch_size)
+
+    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
+    @unittest.skipIf(workspace.NumCudaDevices() < 2, "Need at least 2 GPUs.")
+    @given(seed=st.integers(0, 65535), batch_size=st.integers(1, 20))
+    def test_multi_device_bn_op_level_gpu(self, seed, batch_size):
+        self._bn_check_op_level("gpu", seed, batch_size)
 
     def _bn_check_op_level(self, device_type, seed, batch_size):
         '''
@@ -458,7 +464,7 @@ class DataParallelModelTest(TestCase):
         operator. We compare values produced with our manually calculated
         batch normalization values and gradients.
         '''
-        devices = [0, 1, 2]
+        devices = [0, 1]
         epsilon = 1e-3
         tolerance = 1e-3
 
@@ -529,7 +535,11 @@ class DataParallelModelTest(TestCase):
                 workspace.FeedBlob("{}_{}/data".format(device_type, device), data)
 
         def add_model_ops(model, loss_scale):
-            model.Tanh("data", "tanh")
+            if device_type == "gpu":
+                model.CopyCPUToGPU("data", "device_data")
+                model.Tanh("device_data", "tanh")
+            else:
+                model.Tanh("data", "tanh")
             model.SpatialBN("tanh", "bn_out", 1, epsilon=epsilon, is_test=False)
             model.Sqr("bn_out", "sqr")
             loss = model.SumElements("sqr", "loss")
@@ -574,6 +584,14 @@ class DataParallelModelTest(TestCase):
         if batch_size % 2 == 1:
             batch_size += 1
         self._test_multi_device_bn_net_lvl("cpu", seed, batch_size)
+
+    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
+    @unittest.skipIf(workspace.NumCudaDevices() < 2, "Need at least 2 GPUs.")
+    @given(seed=st.integers(0, 65535), batch_size=st.integers(1, 20))
+    def test_multi_device_bn_net_lvl_gpu(self, seed, batch_size):
+        if batch_size % 2 == 1:
+            batch_size += 1
+        self._test_multi_device_bn_net_lvl("gpu", seed, batch_size)
 
     def _test_multi_device_bn_net_lvl(self, device_type, seed, batch_size):
         '''
@@ -628,7 +646,11 @@ class DataParallelModelTest(TestCase):
                 workspace.FeedBlob("{}_1/data".format(device_type), data[half:])
 
             def add_model_ops(model, loss_scale):
-                model.Tanh("data", "tanh")
+                if device_type == "gpu":
+                    model.CopyCPUToGPU("data", "device_data")
+                    model.Tanh("device_data", "tanh")
+                else:
+                    model.Tanh("data", "tanh")
                 model.SpatialBN("tanh", "bn_out", 1, epsilon=epsilon, is_test=False)
                 model.Sqr("bn_out", "sqr")
                 loss = model.SumElements("sqr", "loss")
@@ -962,7 +984,7 @@ class SparseDataParallelModelTest(TestCase):
                                                   self.LR],
                                                   self.vecs)
         else:
-            with core.DeviceScope(core.DeviceOption(caffe2_pb2.CUDA, 0)):
+            with core.DeviceScope(core.DeviceOption(workspace.GpuDeviceType, 0)):
                 model.CopyGPUToCPU("gpu_0/gpuvecs", self.vecs)
 
         np.random.seed(2603)
@@ -984,12 +1006,12 @@ class SparseDataParallelModelTest(TestCase):
 
                 device_for_indices = core.DeviceOption(caffe2_pb2.CPU)
                 if not cpu_indices:
-                    device_for_indices = core.DeviceOption(caffe2_pb2.CUDA, g)
+                    device_for_indices = core.DeviceOption(workspace.GpuDeviceType, g)
 
                 with core.DeviceScope(device_for_indices):
                     workspace.FeedBlob("gpu_{}/indices".format(g), indices)
 
-                with core.DeviceScope(core.DeviceOption(caffe2_pb2.CUDA, g)):
+                with core.DeviceScope(core.DeviceOption(workspace.GpuDeviceType, g)):
                     workspace.FeedBlob("gpu_{}/label".format(g), labels)
 
             if i == 0:
@@ -1005,7 +1027,7 @@ class SparseDataParallelModelTest(TestCase):
                         workspace.FeedBlob(
                             "gpu_{}/gpuvecs".format(g),
                             orig_vecs,
-                            device_option=core.DeviceOption(caffe2_pb2.CUDA, g),
+                            device_option=core.DeviceOption(workspace.GpuDeviceType, g),
                         )
                 workspace.CreateNet(model.net)
 
@@ -1051,7 +1073,8 @@ class SparseDataParallelModelTest(TestCase):
         self._test_equiv_sparse(False)
 
 
-@unittest.skipIf(workspace.NumCudaDevices() < 2, "Need at least 2 GPUs.")
+@unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
+@unittest.skipIf(workspace.NumGpuDevices() < 2, "Need at least 2 GPUs.")
 class ParallelizeBMUFTest(TestCase):
 
     def _run_model(self, gpu_devices):
@@ -1110,7 +1133,7 @@ class ParallelizeBMUFTest(TestCase):
         cpu_device=st.booleans()
     )
     def test_parallelize_bmuf(self, cpu_device):
-        assume(cpu_device or workspace.has_gpu_support)
+        assume(cpu_device or workspace.has_gpu_support or workspace.has_hip_support)
 
         workspace.ResetWorkspace()
 
@@ -1124,7 +1147,7 @@ class ParallelizeBMUFTest(TestCase):
             return None
 
         if not cpu_device:
-            device_type = caffe2_pb2.CUDA
+            device_type = workspace.GpuDeviceType
             device_prefix = "gpu"
         else:
             device_type = caffe2_pb2.CPU
@@ -1198,7 +1221,7 @@ class ParallelizeBMUFTest(TestCase):
 
 
 @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
-@unittest.skipIf(workspace.NumCudaDevices() < 2, "Need at least 2 GPUs.")
+@unittest.skipIf(workspace.NumGpuDevices() < 2, "Need at least 2 GPUs.")
 class SparseDataParallelModelTestWithSharedIndices(TestCase):
 
     '''
@@ -1314,7 +1337,7 @@ class SparseDataParallelModelTestWithSharedIndices(TestCase):
         )
 
         # Update the vecs
-        with core.DeviceScope(core.DeviceOption(caffe2_pb2.CUDA, 0)):
+        with core.DeviceScope(core.DeviceOption(workspace.GpuDeviceType, 0)):
             for num, vec in enumerate(self.vecs[:-1]):
                 model.CopyGPUToCPU("gpu_0/gpuvec_{}".format(num), vec)
 
@@ -1332,7 +1355,7 @@ class SparseDataParallelModelTestWithSharedIndices(TestCase):
                 indices = full_indices[st:en].astype(np.int32)
                 labels = full_labels[st:en].astype(np.int32)
 
-                with core.DeviceScope(core.DeviceOption(caffe2_pb2.CUDA, g)):
+                with core.DeviceScope(core.DeviceOption(workspace.GpuDeviceType, g)):
                     workspace.FeedBlob("gpu_{}/indices".format(g), indices)
                     workspace.FeedBlob("gpu_{}/label".format(g), labels)
 
@@ -1355,7 +1378,7 @@ class SparseDataParallelModelTestWithSharedIndices(TestCase):
                             "gpu_{}/gpuvec_{}".format(g, num),
                             orig_vec,
                             device_option=core.DeviceOption(
-                                caffe2_pb2.CUDA, g),
+                                workspace.GpuDeviceType, g),
                         )
                 workspace.CreateNet(model.net)
 
@@ -1385,10 +1408,10 @@ class SparseDataParallelModelTestWithSharedIndices(TestCase):
         self.run_model(V, [0, 1])
         self.run_model(V, [0])
 
-        if workspace.NumCudaDevices() >= 4:
+        if workspace.NumGpuDevices() >= 4:
             self.run_model(V, list(range(4)))
 
-        if workspace.NumCudaDevices() >= 8:
+        if workspace.NumGpuDevices() >= 8:
             self.run_model(V, list(range(8)))
 
 

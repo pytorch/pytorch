@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensor.cpp"
+#define THC_GENERIC_FILE "THC/generic/THCTensor.cpp"
 #else
 
 #include <ATen/InferSize.h>
@@ -248,6 +248,11 @@ void THCTensor_(resize)(THCState *state, THCTensor *self, at::IntList size, at::
 void THCTensor_(resizeAs)(THCState *state, THCTensor *self, THCTensor *src)
 {
   THCTensor_resizeAs(state, self, src);
+}
+
+void THCTensor_(resize0d)(THCState *state, THCTensor *tensor)
+{
+  THCTensor_resizeNd(state, tensor, 0, {}, nullptr);
 }
 
 void THCTensor_(resize1d)(THCState *state, THCTensor *tensor, int64_t size0)
@@ -536,6 +541,19 @@ void THCTensor_(resizeNd)(THCState *state, THCTensor *self, int nDimension, cons
   THCTensor_resizeNd(state, self, nDimension, size, stride);
 }
 
+void THCTensor_(set0d)(THCState *state, THCTensor *tensor, scalar_t value)
+{
+  THArgCheck(THTensor_nDimension(tensor) == 0, 1, "tensor must have no dimensions");
+  THCStorage_(set)(state, THTensor_getStoragePtr(tensor), tensor->storage_offset(), value);
+}
+
+
+scalar_t THCTensor_(get0d)(THCState *state, const THCTensor *tensor)
+{
+  THArgCheck(THTensor_nDimension(tensor) == 0, 1, "tensor must have no dimensions dimension");
+  return THCStorage_(get)(state, THTensor_getStoragePtr(tensor), tensor->storage_offset());
+}
+
 void THCTensor_(set1d)(THCState *state, THCTensor *tensor, int64_t x0, scalar_t value)
 {
   THArgCheck(THTensor_nDimensionLegacyNoScalars(tensor) == 1, 1, "tensor must have one dimension");
@@ -596,7 +614,7 @@ int THCTensor_(checkGPU)(THCState *state, unsigned int nTensors, ...)
 {
   int curDev = -1;
   THCudaCheck(cudaGetDevice(&curDev));
-  va_list(args);
+  va_list args;
   va_start(args, nTensors);
   int valid = 1;
   for (unsigned int i = 0; i < nTensors; i++) {

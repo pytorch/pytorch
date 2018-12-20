@@ -1,3 +1,5 @@
+#pragma once
+
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
@@ -57,11 +59,19 @@ static void launch_kernel(int64_t N, const func_t& f) {
   dim3 grid((N + block.x * vt - 1) / (block.x * vt));
   auto stream = at::cuda::getCurrentCUDAStream();
   elementwise_kernel<nt, vt, func_t><<<grid, block, 0, stream>>>(N, f);
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<typename func_t>
 void gpu_nullary_kernel(TensorIterator& iter, const func_t& f) {
   ASSERT_HOST_DEVICE_LAMBDA(func_t);
+
+  if (!iter.can_use_32bit_indexing()) {
+    for (auto& sub_iter : iter.with_32bit_indexing()) {
+      gpu_nullary_kernel(sub_iter, f);
+    }
+    return;
+  }
 
   char* out_data = (char*)iter.data_ptr(0);
 
@@ -92,6 +102,13 @@ void gpu_nullary_kernel(TensorIterator& iter, const func_t& f) {
 template<typename func_t>
 void gpu_unary_kernel(TensorIterator& iter, const func_t& f) {
   ASSERT_HOST_DEVICE_LAMBDA(func_t);
+
+  if (!iter.can_use_32bit_indexing()) {
+    for (auto& sub_iter : iter.with_32bit_indexing()) {
+      gpu_unary_kernel(sub_iter, f);
+    }
+    return;
+  }
 
   char* out_data = (char*)iter.data_ptr(0);
   const char* in1_data = (char*)iter.data_ptr(1);

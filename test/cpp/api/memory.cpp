@@ -2,14 +2,14 @@
 
 #include <torch/csrc/utils/memory.h>
 
-#include <ATen/optional.h>
+#include <c10/util/Optional.h>
 
 struct TestValue {
   explicit TestValue(const int& x) : lvalue_(x) {}
   explicit TestValue(int&& x) : rvalue_(x) {}
 
-  at::optional<int> lvalue_;
-  at::optional<int> rvalue_;
+  c10::optional<int> lvalue_;
+  c10::optional<int> rvalue_;
 };
 
 TEST(MakeUniqueTest, ForwardRvaluesCorrectly) {

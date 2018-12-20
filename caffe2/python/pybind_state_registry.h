@@ -1,7 +1,7 @@
 #pragma once
 
 #include <pybind11/pybind11.h>
-#include "caffe2/core/registry.h"
+#include "c10/util/Registry.h"
 
 namespace caffe2 {
 namespace python {
@@ -14,19 +14,16 @@ struct PybindAddition {
   virtual ~PybindAddition(){};
 };
 
-CAFFE_DECLARE_REGISTRY(PybindAdditionRegistry, PybindAddition, py::module&);
+C10_DECLARE_REGISTRY(PybindAdditionRegistry, PybindAddition, py::module&);
 
-#define REGISTER_PYBIND_ADDITION(funcname)        \
-  namespace {                                     \
-  struct funcname##Impl : public PybindAddition { \
-    funcname##Impl(py::module& m) {               \
-      funcname(m);                                \
-    }                                             \
-  };                                              \
-  CAFFE_REGISTER_CLASS(                           \
-      PybindAdditionRegistry,                     \
-      funcname##Impl,                             \
-      funcname##Impl);                            \
+#define REGISTER_PYBIND_ADDITION(funcname)                                    \
+  namespace {                                                                 \
+  struct funcname##Impl : public PybindAddition {                             \
+    funcname##Impl(py::module& m) {                                           \
+      funcname(m);                                                            \
+    }                                                                         \
+  };                                                                          \
+  C10_REGISTER_CLASS(PybindAdditionRegistry, funcname##Impl, funcname##Impl); \
   }
 
 } // namespace python

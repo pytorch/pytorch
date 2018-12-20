@@ -2,7 +2,11 @@
 
 namespace caffe2 {
 
-CAFFE_DEFINE_REGISTRY(WorkspaceOptimizationPassRegistry, WorkspaceOptimizationPass, NNModule*, Workspace*);
-CAFFE_DEFINE_REGISTRY(OptimizationPassRegistry, OptimizationPass, NNModule*);
+C10_DEFINE_REGISTRY(
+    WorkspaceOptimizationPassRegistry,
+    WorkspaceOptimizationPass,
+    NNModule*,
+    Workspace*);
+C10_DEFINE_REGISTRY(OptimizationPassRegistry, OptimizationPass, NNModule*);
 
 } // namespace caffe2

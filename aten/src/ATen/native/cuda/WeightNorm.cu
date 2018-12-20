@@ -1,9 +1,9 @@
-#include "ATen/ATen.h"
-#include "ATen/AccumulateType.h"
-#include "ATen/TensorUtils.h"
-#include "ATen/core/Error.h"
+#include <ATen/ATen.h>
+#include <ATen/AccumulateType.h>
+#include <ATen/TensorUtils.h>
+#include <c10/util/Exception.h>
 
-#include "ATen/cuda/CUDAContext.h"
+#include <ATen/cuda/CUDAContext.h>
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>
 
@@ -329,7 +329,7 @@ std::tuple<Tensor,Tensor> weight_norm_cuda
                            at::ScalarType::Float : g.type().scalarType();
   // Will this create norms on the same device as g, regardless of what the thread's default 
   // current device is?  I believe so, because Type::* functions are DeviceGuard()ed.
-  auto norms = g.type().toScalarType(AccType).tensor(g.sizes(), g.strides());
+  auto norms = at::empty_strided(g.sizes(), g.strides(), g.options().dtype(AccType));
 
   const int ndims = v.dim();
 

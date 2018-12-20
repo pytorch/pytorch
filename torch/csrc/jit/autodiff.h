@@ -1,7 +1,7 @@
 #pragma once
 
-#include "torch/csrc/WindowsTorchApiMacro.h"
-#include "torch/csrc/jit/ir.h"
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/ir.h>
 
 #include <ATen/ATen.h>
 
@@ -45,7 +45,7 @@ struct Gradient {
   // Describes how to construct outputs of f from what its graph will return.
   // This is necessary because some trailing outputs are intermediates produced
   // only to be saved for df (and should be ignored).
-  size_t f_real_outputs;
+  size_t f_real_outputs = 0;  // initialized for safety.
 
   // df inputs are split into two sections: vjps (aka grad_outputs) and captures.
   // VJPs are "seeds" for the gradient computation given for each input capture

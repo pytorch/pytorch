@@ -1,12 +1,12 @@
-#include "THCUNN.h"
-#include "common.h"
-#include "row2col.h"
+#include <THCUNN/THCUNN.h>
+#include <THCUNN/common.h>
+#include <THCUNN/row2col.h>
 
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
-#include "THCTensor.hpp"
-#include "THCStorage.hpp"
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCTensor.hpp>
+#include <THC/THCStorage.hpp>
 
-#include "generic/TemporalRowConvolution.cu"
+#include <THCUNN/generic/TemporalRowConvolution.cu>
 
-#include "THCGenerateFloatTypes.h"
+#include <THC/THCGenerateFloatTypes.h>

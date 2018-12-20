@@ -16,11 +16,11 @@
 
 #include "caffe2/core/operator_c10wrapper.h"
 
-CAFFE2_DEFINE_int(
+C10_DEFINE_int(
     caffe2_operator_max_engine_name_length,
     10,
     "Maximum engine name length to be stored");
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_disable_implicit_engine_preference,
     false,
     "If set, disable implicit engine preferences. This is useful for unit "
@@ -54,6 +54,16 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
   }
 
   type_ = operator_def.type();
+}
+
+OperatorBase::OperatorBase(
+    const c10::FunctionSchema& fn_schema,
+    const std::vector<c10::IValue>& inputs,
+    const std::vector<c10::IValue*>& outputs)
+    : fn_schema_(make_unique<c10::FunctionSchema>(fn_schema)),
+      ivalue_inputs_(inputs),
+      ivalue_outputs_(outputs) {
+  output_tensors_.resize(ivalue_outputs_.size());
 }
 
 vector<TensorShape> OperatorBase::InputTensorShapes() const {
@@ -173,7 +183,8 @@ unique_ptr<OperatorBase> _CreateOperator(
             << engine;
     auto op = TryCreateOperator(key, operator_def, ws);
     if (op) {
-      if (engine.size() <= (unsigned)FLAGS_caffe2_operator_max_engine_name_length) {
+      if (engine.size() <=
+          (unsigned)FLAGS_caffe2_operator_max_engine_name_length) {
         op->annotate_engine(engine);
       } else {
         op->annotate_engine(
@@ -316,31 +327,41 @@ std::map<DeviceType, OperatorRegistry*>* gDeviceTypeRegistry() {
   return &g_device_type_registry;
 }
 
-CAFFE_DEFINE_REGISTRY(
+C10_DEFINE_REGISTRY(
     CPUOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
 CAFFE_REGISTER_DEVICE_TYPE(CPU, CPUOperatorRegistry);
 
-CAFFE_DEFINE_REGISTRY(
+C10_DEFINE_REGISTRY(
     CUDAOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
 CAFFE_REGISTER_DEVICE_TYPE(CUDA, CUDAOperatorRegistry);
 
-CAFFE_DEFINE_REGISTRY(
+C10_DEFINE_REGISTRY(
     HIPOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
 CAFFE_REGISTER_DEVICE_TYPE(HIP, HIPOperatorRegistry);
 
-CAFFE_DEFINE_REGISTRY(
+C10_DEFINE_REGISTRY(
     GradientRegistry,
     GradientMakerBase,
-    const OperatorDef&, const vector<GradientWrapper>&);
+    const OperatorDef&,
+    const vector<GradientWrapper>&);
+
+C10_DEFINE_REGISTRY(
+    FunctionSchemaOperatorRegistry,
+    OperatorBase,
+    const c10::FunctionSchema,
+    const std::vector<c10::IValue>&,
+    const std::vector<c10::IValue*>&);
+
+C10_DEFINE_REGISTRY(FunctionSchemaRegistry, FunctionSchemaStorageBase);
 
 GradientOpsMeta GetGradientForOp(
     const OperatorDef& def, const vector<GradientWrapper>& g_output) {
@@ -581,7 +602,7 @@ TensorShapes InferBlobShapesAndTypesFromWorkspace(
 }
 
 TensorShapes InferBlobShapesAndTypesFromMap(
-    const CaffeMap<std::string, std::vector<TIndex>>& blob_dimensions,
+    const CaffeMap<std::string, std::vector<int64_t>>& blob_dimensions,
     const vector<NetDef*>& nets) {
   CaffeMap<string, TensorShape> blob_desc;
   // Populate shapes from known blobs
@@ -597,7 +618,7 @@ TensorShapes InferBlobShapesAndTypesFromMap(
 }
 
 TensorShapes InferBlobShapesAndTypesFromMap(
-    const CaffeMap<std::string, std::vector<TIndex>>& blob_dimensions,
+    const CaffeMap<std::string, std::vector<int64_t>>& blob_dimensions,
     const CaffeMap<std::string, TensorProto_DataType>& blob_types,
     const vector<NetDef*>& nets) {
   CaffeMap<string, TensorShape> blob_desc;
@@ -647,12 +668,9 @@ std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(
           &_capacity,
           &blob_device);
 
-      if (blob_device.device_type() == PROTO_CUDA &&
-          blob_device.cuda_gpu_id() != op_device.cuda_gpu_id()) {
-        mismatches[blob_name] = std::make_pair(op_device, blob_device);
-      } else if (
-          blob_device.device_type() == PROTO_HIP &&
-          blob_device.hip_gpu_id() != op_device.hip_gpu_id()) {
+      if ((blob_device.device_type() == PROTO_CUDA ||
+           blob_device.device_type() == PROTO_HIP) &&
+          blob_device.device_id() != op_device.device_id()) {
         mismatches[blob_name] = std::make_pair(op_device, blob_device);
       }
     }
@@ -687,6 +705,11 @@ std::set<std::string> GetRegisteredOperators() {
 
   // C10 operators
   for (const auto& name : C10OperatorRegistry()->Keys()) {
+    all_keys.emplace(name);
+  }
+
+  // FunctionSchema registered operators
+  for (const auto& name : FunctionSchemaOperatorRegistry()->Keys()) {
     all_keys.emplace(name);
   }
 

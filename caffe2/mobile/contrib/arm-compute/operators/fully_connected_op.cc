@@ -40,7 +40,7 @@ bool GLFullyConnectedOp<T>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(1, B_->ndim());
   CAFFE_ENFORCE_EQ(N, B_->dim32(0));
 
-  vector<TIndex> output_dims = {M, N};
+  vector<int64_t> output_dims = {M, N};
   GLTensor<T> *Y =
       OperatorBase::Outputs()[0]->template GetMutable<GLTensor<T>>();
   if (first_run_) {

@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/SoftMarginCriterion.c"
+#define TH_GENERIC_FILE "THNN/generic/SoftMarginCriterion.c"
 #else
 
 void THNN_(SoftMarginCriterion_updateOutput)(
@@ -19,7 +19,7 @@ void THNN_(SoftMarginCriterion_updateOutput)(
     return;
   }
 
-  THTensor_(resize1d)(output, 1);
+  THTensor_(resize0d)(output);
 
   scalar_t sum;
 
@@ -28,10 +28,10 @@ void THNN_(SoftMarginCriterion_updateOutput)(
                    scalar_t z = log(1. + exp(-*input_data* *target_data));
                    sum += z;)
 
-  if (reduction == Reduction::ElementwiseMean)
+  if (reduction == Reduction::Mean)
     sum /= THTensor_(nElement)(input);
 
-  THTensor_(set1d)(output, 0, sum);
+  THTensor_(set0d)(output, sum);
 }
 
 void THNN_(SoftMarginCriterion_updateGradInput)(
@@ -55,7 +55,7 @@ void THNN_(SoftMarginCriterion_updateGradInput)(
     return;
   }
 
-  scalar_t norm = (reduction == Reduction::ElementwiseMean ? 1./((scalar_t)THTensor_(nElement)(input)) : 1.);
+  scalar_t norm = (reduction == Reduction::Mean ? 1./((scalar_t)THTensor_(nElement)(input)) : 1.);
 
   TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, input, scalar_t, target,
                    scalar_t z = exp(-*target_data * *input_data);

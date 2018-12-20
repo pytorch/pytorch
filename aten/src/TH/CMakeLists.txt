@@ -1,19 +1,8 @@
 set(extra_src)
 
-# IF ANY SIMD FOUND
-IF(C_AVX2_FOUND OR C_AVX_FOUND OR C_SSE4_2_FOUND OR C_SSE4_1_FOUND)
-  LIST(APPEND extra_src ${CMAKE_CURRENT_SOURCE_DIR}/generic/simd/convolve.cpp)
-ENDIF(C_AVX2_FOUND OR C_AVX_FOUND OR C_SSE4_2_FOUND OR C_SSE4_1_FOUND)
-
-# IF SSE4 FOUND
-IF(C_SSE4_1_FOUND OR C_SSE4_2_FOUND)
-  LIST(APPEND extra_src ${CMAKE_CURRENT_SOURCE_DIR}/generic/simd/convolve5x5_sse.cpp)
-ENDIF(C_SSE4_1_FOUND OR C_SSE4_2_FOUND)
-
 # IF AVX FOUND
 IF(C_AVX_FOUND)
   LIST(APPEND extra_src ${CMAKE_CURRENT_SOURCE_DIR}/vector/AVX.cpp)
-  LIST(APPEND extra_src ${CMAKE_CURRENT_SOURCE_DIR}/generic/simd/convolve5x5_avx.cpp)
 ENDIF(C_AVX_FOUND)
 
 IF(C_AVX2_FOUND)
@@ -30,7 +19,6 @@ set(ATen_TH_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/THSize.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THStorageFunctions.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensor.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THTensorCopy.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorRandom.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorMath.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorMoreMath.cpp
@@ -123,8 +111,6 @@ INSTALL(FILES
   generic/THTensor.hpp
   generic/THTensorConv.cpp
   generic/THTensorConv.h
-  generic/THTensorCopy.cpp
-  generic/THTensorCopy.h
   generic/THTensorLapack.cpp
   generic/THTensorLapack.h
   generic/THTensorMath.cpp

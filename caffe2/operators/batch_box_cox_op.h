@@ -27,8 +27,8 @@ class BatchBoxCoxOp final : public Operator<Context> {
  protected:
   template <typename T>
   void BoxCoxNaive(
-      TIndex N,
-      TIndex D,
+      int64_t N,
+      int64_t D,
       const T* data_ptr,
       const T* lambda1_ptr,
       const T* lambda2_ptr,
@@ -38,7 +38,7 @@ class BatchBoxCoxOp final : public Operator<Context> {
 #ifdef CAFFE2_USE_MKL
   template <typename T>
   void BoxCoxNonzeroLambda(
-      TIndex D,
+      int64_t D,
       const T* data_ptr,
       const T* lambda1,
       const T* lambda2,
@@ -47,7 +47,7 @@ class BatchBoxCoxOp final : public Operator<Context> {
 
   template <typename T>
   void BoxCoxZeroLambda(
-      TIndex D,
+      int64_t D,
       const T* data_ptr,
       const T* lambda2,
       T k_eps,

@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/SparseLinear.c"
+#define TH_GENERIC_FILE "THNN/generic/SparseLinear.c"
 #else
 
 #ifdef _OPENMP

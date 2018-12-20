@@ -7,7 +7,7 @@
 #include <torch/nn/modules/embedding.h>
 #include <torch/nn/modules/functional.h>
 #include <torch/nn/modules/linear.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <test/cpp/api/support.h>
@@ -52,7 +52,7 @@ TEST_F(ModulesTest, Conv1d) {
     ASSERT_EQ(y.size(i), 2);
   }
 
-  ASSERT_EQ(model->parameters()["weight"].grad().numel(), 3 * 2 * 3);
+  ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3);
 }
 
 TEST_F(ModulesTest, Conv2dEven) {
@@ -68,7 +68,7 @@ TEST_F(ModulesTest, Conv2dEven) {
     ASSERT_EQ(y.size(i), 2);
   }
 
-  ASSERT_EQ(model->parameters()["weight"].grad().numel(), 3 * 2 * 3 * 3);
+  ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3 * 3);
 }
 
 TEST_F(ModulesTest, Conv2dUneven) {
@@ -84,7 +84,7 @@ TEST_F(ModulesTest, Conv2dUneven) {
     ASSERT_EQ(y.size(i), 2);
   }
 
-  ASSERT_EQ(model->parameters()["weight"].grad().numel(), 3 * 2 * 3 * 2);
+  ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3 * 2);
 }
 
 TEST_F(ModulesTest, Conv3d) {
@@ -100,8 +100,7 @@ TEST_F(ModulesTest, Conv3d) {
     ASSERT_EQ(y.size(i), 2);
   }
 
-  ASSERT_TRUE(
-      model->parameters()["weight"].grad().numel() == 3 * 2 * 3 * 3 * 3);
+  ASSERT_TRUE(model->weight.grad().numel() == 3 * 2 * 3 * 3 * 3);
 }
 
 TEST_F(ModulesTest, Linear) {
@@ -116,7 +115,7 @@ TEST_F(ModulesTest, Linear) {
   ASSERT_EQ(y.size(0), 10);
   ASSERT_EQ(y.size(1), 2);
 
-  ASSERT_EQ(model->parameters()["weight"].grad().numel(), 2 * 5);
+  ASSERT_EQ(model->weight.grad().numel(), 2 * 5);
 }
 
 TEST_F(ModulesTest, SimpleContainer) {
@@ -134,13 +133,13 @@ TEST_F(ModulesTest, SimpleContainer) {
   ASSERT_EQ(x.ndimension(), 2);
   ASSERT_EQ(x.size(0), 1000);
   ASSERT_EQ(x.size(1), 100);
-  ASSERT_EQ(x.min().toCFloat(), 0);
+  ASSERT_EQ(x.min().item<float>(), 0);
 }
 
 TEST_F(ModulesTest, EmbeddingBasic) {
   const int64_t dict_size = 10;
   Embedding model(dict_size, 2);
-  ASSERT_TRUE(model->parameters().contains("weight"));
+  ASSERT_TRUE(model->named_parameters().contains("weight"));
   ASSERT_EQ(model->weight.ndimension(), 2);
   ASSERT_EQ(model->weight.size(0), dict_size);
   ASSERT_EQ(model->weight.size(1), 2);
@@ -157,7 +156,7 @@ TEST_F(ModulesTest, EmbeddingBasic) {
   ASSERT_EQ(y.size(0), 10);
   ASSERT_EQ(y.size(1), 2);
 
-  ASSERT_EQ(model->parameters()["weight"].grad().numel(), 2 * dict_size);
+  ASSERT_EQ(model->weight.grad().numel(), 2 * dict_size);
 }
 
 TEST_F(ModulesTest, EmbeddingList) {
@@ -181,17 +180,17 @@ TEST_F(ModulesTest, Dropout) {
   y.backward();
   ASSERT_EQ(y.ndimension(), 1);
   ASSERT_EQ(y.size(0), 100);
-  ASSERT_LT(y.sum().toCFloat(), 130); // Probably
-  ASSERT_GT(y.sum().toCFloat(), 70); // Probably
+  ASSERT_LT(y.sum().item<float>(), 130); // Probably
+  ASSERT_GT(y.sum().item<float>(), 70); // Probably
 
   dropout->eval();
   y = dropout->forward(x);
-  ASSERT_EQ(y.sum().toCFloat(), 100);
+  ASSERT_EQ(y.sum().item<float>(), 100);
 }
 
 TEST_F(ModulesTest, Parameters) {
   auto model = std::make_shared<NestedModel>();
-  auto parameters = model->parameters();
+  auto parameters = model->named_parameters();
   ASSERT_EQ(parameters["param"].size(0), 3);
   ASSERT_EQ(parameters["param"].size(1), 2);
   ASSERT_EQ(parameters["param"].size(2), 21);
@@ -228,15 +227,15 @@ TEST_F(ModulesTest, FunctionalCallsSuppliedFunction) {
 
 TEST_F(ModulesTest, FunctionalWithTorchFunction) {
   auto functional = Functional(torch::relu);
-  ASSERT_EQ(functional(torch::ones({})).toCFloat(), 1);
-  ASSERT_EQ(functional(torch::ones({})).toCFloat(), 1);
-  ASSERT_EQ(functional(torch::ones({}) * -1).toCFloat(), 0);
+  ASSERT_EQ(functional(torch::ones({})).item<float>(), 1);
+  ASSERT_EQ(functional(torch::ones({})).item<float>(), 1);
+  ASSERT_EQ(functional(torch::ones({}) * -1).item<float>(), 0);
 }
 
 TEST_F(ModulesTest, FunctionalArgumentBinding) {
   auto functional =
       Functional(torch::elu, /*alpha=*/1, /*scale=*/0, /*input_scale=*/1);
-  ASSERT_EQ(functional(torch::ones({})).toCFloat(), 0);
+  ASSERT_EQ(functional(torch::ones({})).item<float>(), 0);
 }
 
 TEST_F(ModulesTest, BatchNormStateful) {
@@ -307,7 +306,7 @@ TEST_F(ModulesTest, Linear_CUDA) {
   ASSERT_EQ(y.size(0), 10);
   ASSERT_EQ(y.size(1), 2);
 
-  ASSERT_EQ(model->parameters()["weight"].grad().numel(), 2 * 5);
+  ASSERT_EQ(model->weight.grad().numel(), 2 * 5);
 }
 
 TEST_F(ModulesTest, Linear2_CUDA) {
@@ -324,5 +323,87 @@ TEST_F(ModulesTest, Linear2_CUDA) {
   ASSERT_EQ(y.size(0), 10);
   ASSERT_EQ(y.size(1), 2);
 
-  ASSERT_EQ(model->parameters()["weight"].grad().numel(), 2 * 5);
+  ASSERT_EQ(model->weight.grad().numel(), 2 * 5);
+}
+
+TEST_F(ModulesTest, PrettyPrintLinear) {
+  ASSERT_EQ(
+      c10::str(Linear(3, 4)), "torch::nn::Linear(in=3, out=4, with_bias=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintConv) {
+  ASSERT_EQ(
+      c10::str(Conv1d(3, 4, 5)),
+      "torch::nn::Conv1d(input_channels=3, output_channels=4, kernel_size=5, stride=1)");
+  ASSERT_EQ(
+      c10::str(Conv2d(3, 4, 5)),
+      "torch::nn::Conv2d(input_channels=3, output_channels=4, kernel_size=[5, 5], stride=[1, 1])");
+  ASSERT_EQ(
+      c10::str(Conv2d(Conv2dOptions(3, 4, 5).stride(2))),
+      "torch::nn::Conv2d(input_channels=3, output_channels=4, kernel_size=[5, 5], stride=[2, 2])");
+
+  const auto options = Conv2dOptions(3, 4, torch::IntList{5, 6}).stride({1, 2});
+  ASSERT_EQ(
+      c10::str(Conv2d(options)),
+      "torch::nn::Conv2d(input_channels=3, output_channels=4, kernel_size=[5, 6], stride=[1, 2])");
+}
+
+TEST_F(ModulesTest, PrettyPrintDropout) {
+  ASSERT_EQ(c10::str(Dropout(0.5)), "torch::nn::Dropout(rate=0.5)");
+  ASSERT_EQ(
+      c10::str(FeatureDropout(0.5)), "torch::nn::FeatureDropout(rate=0.5)");
+}
+
+TEST_F(ModulesTest, PrettyPrintFunctional) {
+  ASSERT_EQ(c10::str(Functional(torch::relu)), "torch::nn::Functional()");
+}
+
+TEST_F(ModulesTest, PrettyPrintBatchNorm) {
+  ASSERT_EQ(
+      c10::str(BatchNorm(
+          BatchNormOptions(4).eps(0.5).momentum(0.1).affine(false).stateful(
+              true))),
+      "torch::nn::BatchNorm(features=4, eps=0.5, momentum=0.1, affine=false, stateful=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintEmbedding) {
+  ASSERT_EQ(
+      c10::str(Embedding(10, 2)),
+      "torch::nn::Embedding(count=10, dimension=2)");
+}
+
+TEST_F(ModulesTest, PrettyPrintNestedModel) {
+  struct InnerTestModule : torch::nn::Module {
+    InnerTestModule()
+        : torch::nn::Module("InnerTestModule"),
+          fc(register_module("fc", torch::nn::Linear(3, 4))),
+          table(register_module("table", torch::nn::Embedding(10, 2))) {}
+
+    torch::nn::Linear fc;
+    torch::nn::Embedding table;
+  };
+
+  struct TestModule : torch::nn::Module {
+    TestModule()
+        : torch::nn::Module("TestModule"),
+          fc(register_module("fc", torch::nn::Linear(4, 5))),
+          table(register_module("table", torch::nn::Embedding(10, 2))),
+          inner(register_module("inner", std::make_shared<InnerTestModule>())) {
+    }
+
+    torch::nn::Linear fc;
+    torch::nn::Embedding table;
+    std::shared_ptr<InnerTestModule> inner;
+  };
+
+  ASSERT_EQ(
+      c10::str(TestModule{}),
+      "TestModule(\n"
+      "  (fc): torch::nn::Linear(in=4, out=5, with_bias=true)\n"
+      "  (table): torch::nn::Embedding(count=10, dimension=2)\n"
+      "  (inner): InnerTestModule(\n"
+      "    (fc): torch::nn::Linear(in=3, out=4, with_bias=true)\n"
+      "    (table): torch::nn::Embedding(count=10, dimension=2)\n"
+      "  )\n"
+      ")");
 }

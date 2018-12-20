@@ -6,8 +6,6 @@ namespace caffe2 {
 
 namespace {
 
-constexpr int kFp16CUDADevicePropMajor = 6;
-
 template <class FullyConnectedOp>
 bool RunFullyConnectedOpOnCUDADevice(
     const bool float16_compute,

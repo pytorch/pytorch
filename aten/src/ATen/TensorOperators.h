@@ -1,8 +1,8 @@
 #pragma once
 
-#include "ATen/core/Scalar.h"
-#include "ATen/Tensor.h"
-#include "ATen/Type.h"
+#include <c10/core/Scalar.h>
+#include <ATen/Tensor.h>
+#include <ATen/Type.h>
 
 #include <string>
 #include <stdexcept>
@@ -59,7 +59,7 @@ inline Tensor Tensor::operator[](Tensor index) const {
       index.dim() == 0,
       "Can only index with tensors that are scalars (zero-dim)");
   // The Scalar(Tensor) constructor is explicit, so we need to call it.
-  return this->operator[](index._local_scalar());
+  return this->operator[](index.item());
 }
 inline Tensor Tensor::operator[](int64_t index) const {
   return select(0, index);
@@ -68,9 +68,9 @@ inline Tensor Tensor::operator[](int64_t index) const {
 #define AT_FORALL_BINARY_OPS(_) \
 _(+,x.add(y), y.add(x)) \
 _(*,x.mul(y), y.mul(x)) \
-_(-,x.sub(y), y.type().tensor().resize_(y.sizes()).fill_(x).sub_(y)) \
-_(/,x.div(y), y.type().tensor().resize_(y.sizes()).fill_(x).div_(y)) \
-_(%,x.remainder(y), y.type().tensor().resize_(y.sizes()).fill_(x).remainder_(y)) \
+_(-,x.sub(y), ::at::empty(y.sizes(), y.options()).fill_(x).sub_(y)) \
+_(/,x.div(y), ::at::empty(y.sizes(), y.options()).fill_(x).div_(y)) \
+_(%,x.remainder(y), ::at::empty(y.sizes(), y.options()).fill_(x).remainder_(y)) \
 _(<,x.lt(y), y.gt(x)) \
 _(<=,x.le(y), y.ge(x)) \
 _(>,x.gt(y),y.lt(x)) \

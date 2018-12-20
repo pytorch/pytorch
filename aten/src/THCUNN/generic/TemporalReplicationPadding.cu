@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/TemporalReplicationPadding.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/TemporalReplicationPadding.cu"
 #else
 
 void THNN_(TemporalReplicationPadding_updateOutput)(

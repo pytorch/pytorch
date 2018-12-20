@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorMathBlas.h"
+#define THC_GENERIC_FILE "THC/generic/THCTensorMathBlas.h"
 #else
 
 THC_API accreal THCTensor_(dot)(THCState *state, THCTensor *self, THCTensor *src);

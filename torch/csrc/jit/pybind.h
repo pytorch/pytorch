@@ -1,15 +1,15 @@
 #pragma once
 
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 
-#include "torch/csrc/utils/pybind.h"
-#include "torch/csrc/DynamicTypes.h"
-#include "torch/csrc/THP.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/interned_strings.h"
-#include "torch/csrc/jit/tracer.h"
-#include "torch/csrc/jit/ivalue.h"
-#include "torch/csrc/jit/pybind_utils.h"
+#include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/THP.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/interned_strings.h>
+#include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/jit/ivalue.h>
+#include <torch/csrc/jit/pybind_utils.h>
 
 #include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
@@ -33,7 +33,7 @@ public:
   }
 
   static handle cast(torch::jit::IValue src, return_value_policy /* policy */, handle /* parent */) {
-    return toPyObject(std::move(src)).release();
+    return torch::jit::toPyObject(std::move(src)).release();
   }
 };
 

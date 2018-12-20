@@ -192,7 +192,7 @@ class Event(object):
         return True
 
     def elapsed_time(self, end_event):
-        r"""Returns the time elapsed before the event was recorded."""
+        r"""Returns the time elapsed in milliseconds before the event was recorded."""
         time_ms = ctypes.c_float()
         check_error(cudart().cudaEventElapsedTime(
             ctypes.byref(time_ms), self, end_event))

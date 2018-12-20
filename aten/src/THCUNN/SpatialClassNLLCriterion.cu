@@ -1,11 +1,11 @@
-#include "THCUNN.h"
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
-#include "THCAtomics.cuh"
-#include "common.h"
-#include "THCDeviceTensor.cuh"
-#include "THCDeviceTensorUtils.cuh"
-#include "THCDeviceUtils.cuh"
+#include <THCUNN/THCUNN.h>
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCAtomics.cuh>
+#include <THCUNN/common.h>
+#include <THC/THCDeviceTensor.cuh>
+#include <THC/THCDeviceTensorUtils.cuh>
+#include <THC/THCDeviceUtils.cuh>
 #include <THC/THCApply.cuh>
 
 #include <thrust/functional.h>
@@ -67,6 +67,9 @@ __global__ void SpatialClassNLLCriterion_updateGradInput_no_reduce_kernel(
 }
 
 template <typename T, typename AccumT>
+#if defined(__HIP_PLATFORM_HCC__)
+__launch_bounds__(1024)
+#endif
 __global__ void cunn_SpatialClassNLLCriterion_updateOutput_kernel(
           T *output,
           T *total_weight,
@@ -157,5 +160,5 @@ __global__ void cunn_SpatialClassNLLCriterion_updateGradInput_kernel(
   }
 }
 
-#include "generic/SpatialClassNLLCriterion.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/SpatialClassNLLCriterion.cu>
+#include <THC/THCGenerateFloatTypes.h>

@@ -15,7 +15,7 @@ import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.ideep_test_util as mu
 
 
-@unittest.skipIf(not workspace.C.use_ideep, "No IDEEP support.")
+@unittest.skipIf(not workspace.C.use_mkldnn, "No MKLDNN support.")
 class ConvFusionTest(hu.HypothesisTestCase):
     @given(stride=st.integers(1, 3),
            pad=st.integers(0, 3),
@@ -129,10 +129,14 @@ class ConvFusionTest(hu.HypothesisTestCase):
     def test_convolution_sum_fusion(self, stride, pad, kernel, size,
                              input_channels, output_channels,
                              batch_size, use_bias, group, gc, dc):
-        relu_S0 = core.CreateOperator(
-            "Relu",
+        conv_S0 = core.CreateOperator(
+            "Conv",
+            ["SX0", "Sw0", "Sb0"] if use_bias else ["SX0", "Sw0"],
             ["S0"],
-            ["S0"],
+            stride=stride,
+            pad=pad,
+            kernel=kernel,
+            group=group,
             device_option=dc[0]
         )
         conv = core.CreateOperator(
@@ -153,10 +157,14 @@ class ConvFusionTest(hu.HypothesisTestCase):
         )
 
         # Manual fusion for Conv + Sum
-        relu_S1 = core.CreateOperator(
-            "Relu",
+        conv_S1 = core.CreateOperator(
+            "Conv",
+            ["SX1", "Sw1", "Sb1"] if use_bias else ["SX1", "Sw1"],
             ["S1"],
-            ["S1"],
+            stride=stride,
+            pad=pad,
+            kernel=kernel,
+            group=group,
             device_option=dc[1]
         )
         conv_fusion = core.CreateOperator(
@@ -170,6 +178,12 @@ class ConvFusionTest(hu.HypothesisTestCase):
             fusion_type = 2,
             device_option=dc[1]
         )
+        SX = np.random.rand(
+            batch_size, input_channels * group, size, size).astype(np.float32) - 0.5
+        Sw = np.random.rand(
+                output_channels * group, input_channels, kernel, kernel) \
+            .astype(np.float32) - 0.5
+        Sb = np.random.rand(output_channels * group).astype(np.float32) - 0.5
         X = np.random.rand(
             batch_size, input_channels * group, size, size).astype(np.float32) - 0.5
         w = np.random.rand(
@@ -179,23 +193,25 @@ class ConvFusionTest(hu.HypothesisTestCase):
 
         old_ws_name = workspace.CurrentWorkspace()
         workspace.SwitchWorkspace("_device_check_", True)
+        workspace.FeedBlob('SX0', SX, dc[0])
+        workspace.FeedBlob('Sw0', Sw, dc[0])
+        workspace.FeedBlob('Sb0', Sb, dc[0])
         workspace.FeedBlob('X0', X, dc[0])
         workspace.FeedBlob('w0', w, dc[0])
         workspace.FeedBlob('b0', b, dc[0])
+        workspace.RunOperatorOnce(conv_S0)
         workspace.RunOperatorOnce(conv)
-        Y0 = workspace.FetchBlob('Y0')
-        S = np.random.rand(*Y0.shape).astype(np.float32) - 0.5
-        workspace.FeedBlob('S0', S, dc[0])
-        workspace.RunOperatorOnce(relu_S0)
         workspace.RunOperatorOnce(sum)
         S0 = workspace.FetchBlob('S0')
 
         workspace.ResetWorkspace()
+        workspace.FeedBlob('SX1', SX, dc[1])
+        workspace.FeedBlob('Sw1', Sw, dc[1])
+        workspace.FeedBlob('Sb1', Sb, dc[1])
         workspace.FeedBlob('X1', X, dc[1])
         workspace.FeedBlob('w1', w, dc[1])
         workspace.FeedBlob('b1', b, dc[1])
-        workspace.FeedBlob('S1', S, dc[1])
-        workspace.RunOperatorOnce(relu_S1)
+        workspace.RunOperatorOnce(conv_S1)
         workspace.RunOperatorOnce(conv_fusion)
         S1 = workspace.FetchBlob('S1')
 
@@ -208,20 +224,22 @@ class ConvFusionTest(hu.HypothesisTestCase):
         # Auto fusion for Conv + Sum
         workspace.ResetWorkspace()
         old_net = caffe2_pb2.NetDef()
-        relu_S0_old = caffe2_pb2.OperatorDef()
-        relu_S0_old.CopyFrom(relu_S0)
-        relu_S0_old.device_option.CopyFrom(dc[1])
+        conv_S0_old = caffe2_pb2.OperatorDef()
+        conv_S0_old.CopyFrom(conv_S0)
+        conv_S0_old.device_option.CopyFrom(dc[1])
         conv_old = caffe2_pb2.OperatorDef()
         conv_old.CopyFrom(conv)
         conv_old.device_option.CopyFrom(dc[1])
         sum_old = caffe2_pb2.OperatorDef()
         sum_old.CopyFrom(sum)
         sum_old.device_option.CopyFrom(dc[1])
-        old_net.op.extend([relu_S0_old, conv_old, sum_old])
+        old_net.op.extend([conv_S0_old, conv_old, sum_old])
+        workspace.FeedBlob('SX0', SX, dc[1])
+        workspace.FeedBlob('Sw0', Sw, dc[1])
+        workspace.FeedBlob('Sb0', Sb, dc[1])
         workspace.FeedBlob('X0', X, dc[1])
         workspace.FeedBlob('w0', w, dc[1])
         workspace.FeedBlob('b0', b, dc[1])
-        workspace.FeedBlob('S0', S, dc[1])
         net = core.Net("net")
         net.Proto().CopyFrom(old_net)
         optimizeForIDEEP(net)
@@ -250,10 +268,14 @@ class ConvFusionTest(hu.HypothesisTestCase):
     def test_convolution_sum_relu_fusion(self, stride, pad, kernel, size,
                              input_channels, output_channels,
                              batch_size, use_bias, group, gc, dc):
-        relu_S0 = core.CreateOperator(
-            "Relu",
+        conv_S0 = core.CreateOperator(
+            "Conv",
+            ["SX0", "Sw0", "Sb0"] if use_bias else ["SX0", "Sw0"],
             ["S0"],
-            ["S0"],
+            stride=stride,
+            pad=pad,
+            kernel=kernel,
+            group=group,
             device_option=dc[0]
         )
         conv = core.CreateOperator(
@@ -280,10 +302,14 @@ class ConvFusionTest(hu.HypothesisTestCase):
         )
 
         # Manual fusion for Conv + Sum + ReLU
-        relu_S1 = core.CreateOperator(
-            "Relu",
+        conv_S1 = core.CreateOperator(
+            "Conv",
+            ["SX1", "Sw1", "Sb1"] if use_bias else ["SX1", "Sw1"],
             ["S1"],
-            ["S1"],
+            stride=stride,
+            pad=pad,
+            kernel=kernel,
+            group=group,
             device_option=dc[1]
         )
         conv_fusion = core.CreateOperator(
@@ -297,6 +323,12 @@ class ConvFusionTest(hu.HypothesisTestCase):
             fusion_type = 3,
             device_option=dc[1]
         )
+        SX = np.random.rand(
+            batch_size, input_channels * group, size, size).astype(np.float32) - 0.5
+        Sw = np.random.rand(
+                output_channels * group, input_channels, kernel, kernel) \
+            .astype(np.float32) - 0.5
+        Sb = np.random.rand(output_channels * group).astype(np.float32) - 0.5
         X = np.random.rand(
             batch_size, input_channels * group, size, size).astype(np.float32) - 0.5
         w = np.random.rand(
@@ -306,24 +338,26 @@ class ConvFusionTest(hu.HypothesisTestCase):
 
         old_ws_name = workspace.CurrentWorkspace()
         workspace.SwitchWorkspace("_device_check_", True)
+        workspace.FeedBlob('SX0', SX, dc[0])
+        workspace.FeedBlob('Sw0', Sw, dc[0])
+        workspace.FeedBlob('Sb0', Sb, dc[0])
         workspace.FeedBlob('X0', X, dc[0])
         workspace.FeedBlob('w0', w, dc[0])
         workspace.FeedBlob('b0', b, dc[0])
+        workspace.RunOperatorOnce(conv_S0)
         workspace.RunOperatorOnce(conv)
-        Y0 = workspace.FetchBlob('Y0')
-        S = np.random.rand(*Y0.shape).astype(np.float32) - 0.5
-        workspace.FeedBlob('S0', S, dc[0])
-        workspace.RunOperatorOnce(relu_S0)
         workspace.RunOperatorOnce(sum)
         workspace.RunOperatorOnce(relu)
         S0 = workspace.FetchBlob('S0')
 
         workspace.ResetWorkspace()
+        workspace.FeedBlob('SX1', SX, dc[1])
+        workspace.FeedBlob('Sw1', Sw, dc[1])
+        workspace.FeedBlob('Sb1', Sb, dc[1])
         workspace.FeedBlob('X1', X, dc[1])
         workspace.FeedBlob('w1', w, dc[1])
         workspace.FeedBlob('b1', b, dc[1])
-        workspace.FeedBlob('S1', S, dc[1])
-        workspace.RunOperatorOnce(relu_S1)
+        workspace.RunOperatorOnce(conv_S1)
         workspace.RunOperatorOnce(conv_fusion)
         S1 = workspace.FetchBlob('S1')
 
@@ -336,9 +370,9 @@ class ConvFusionTest(hu.HypothesisTestCase):
         # Auto fusion for Conv + Sum + ReLU
         workspace.ResetWorkspace()
         old_net = caffe2_pb2.NetDef()
-        relu_S0_old = caffe2_pb2.OperatorDef()
-        relu_S0_old.CopyFrom(relu_S0)
-        relu_S0_old.device_option.CopyFrom(dc[1])
+        conv_S0_old = caffe2_pb2.OperatorDef()
+        conv_S0_old.CopyFrom(conv_S0)
+        conv_S0_old.device_option.CopyFrom(dc[1])
         conv_old = caffe2_pb2.OperatorDef()
         conv_old.CopyFrom(conv)
         conv_old.device_option.CopyFrom(dc[1])
@@ -348,11 +382,13 @@ class ConvFusionTest(hu.HypothesisTestCase):
         relu_old = caffe2_pb2.OperatorDef()
         relu_old.CopyFrom(relu)
         relu_old.device_option.CopyFrom(dc[1])
-        old_net.op.extend([relu_S0_old, conv_old, sum_old, relu_old])
+        old_net.op.extend([conv_S0_old, conv_old, sum_old, relu_old])
+        workspace.FeedBlob('SX0', SX, dc[1])
+        workspace.FeedBlob('Sw0', Sw, dc[1])
+        workspace.FeedBlob('Sb0', Sb, dc[1])
         workspace.FeedBlob('X0', X, dc[1])
         workspace.FeedBlob('w0', w, dc[1])
         workspace.FeedBlob('b0', b, dc[1])
-        workspace.FeedBlob('S0', S, dc[1])
         net = core.Net("net")
         net.Proto().CopyFrom(old_net)
         optimizeForIDEEP(net)
