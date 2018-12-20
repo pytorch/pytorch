@@ -340,14 +340,14 @@ def sigmoid(g, self):
 def mean(g, *args, **kwargs):
     @parse_args('v', 'none')
     def mean_nodim(g, self, dtype):
-        if dtype.node().kind() != 'prim::none':
-            return _unimplemented("scale", "dtype")
+        if dtype.node().kind() != 'prim::None':
+            return _unimplemented("mean", "dtype")
         return g.op('ReduceMean', self, keepdims_i=0)
 
     @parse_args('v', 'i', 'i', 'none')
     def mean_dim(g, self, dim, keepdim, dtype):
-        if dtype.node().kind() != 'prim::none':
-            return _unimplemented("scale", "dtype")
+        if dtype.node().kind() != 'prim::None':
+            return _unimplemented("mean", "dtype")
         return g.op('ReduceMean', self, axes_i=[dim], keepdims_i=keepdim)
 
     return mean_nodim, mean_dim
@@ -357,14 +357,14 @@ def mean(g, *args, **kwargs):
 def sum(g, *args, **kwargs):
     @parse_args('v', 'none')
     def sum_nodim(g, self, dtype):
-        if dtype.node().kind() != 'prim::none':
-            return _unimplemented("scale", "dtype")
+        if dtype.node().kind() != 'prim::None':
+            return _unimplemented("sum", "dtype")
         return g.op('ReduceSum', self, keepdims_i=0)
 
     @parse_args('v', 'i', 'i', 'none')
     def sum_dim(g, self, dim, keepdim, dtype):
-        if dtype.node().kind() != 'prim::none':
-            return _unimplemented("scale", "dtype")
+        if dtype.node().kind() != 'prim::None':
+            return _unimplemented("sum", "dtype")
         return g.op('ReduceSum', self, axes_i=[dim], keepdims_i=keepdim)
 
     return sum_nodim, sum_dim
@@ -374,14 +374,14 @@ def sum(g, *args, **kwargs):
 def prod(g, *args, **kwargs):
     @parse_args('v', 'none')
     def prod_nodim(g, self, dtype):
-        if dtype.node().kind() != 'prim::none':
-            return _unimplemented("scale", "dtype")
+        if dtype.node().kind() != 'prim::None':
+            return _unimplemented("prod", "dtype")
         return g.op('ReduceProd', self, keepdims_i=0)
 
     @parse_args('v', 'i', 'i', 'none')
     def prod_dim(g, self, dim, keepdim, dtype):
-        if dtype.node().kind() != 'prim::none':
-            return _unimplemented("scale", "dtype")
+        if dtype.node().kind() != 'prim::None':
+            return _unimplemented("prod", "dtype")
         return g.op('ReduceProd', self, axes_i=[dim], keepdims_i=keepdim)
 
     return prod_nodim, prod_dim
@@ -389,8 +389,8 @@ def prod(g, *args, **kwargs):
 
 @parse_args('v', 'i', 'none')
 def cumsum(g, input, dim, dtype):
-    if dtype.node().kind() != 'prim::none':
-        return _unimplemented("scale", "dtype")
+    if dtype.node().kind() != 'prim::None':
+        return _unimplemented("cumsum", "dtype")
     return g.op("ATen", input, operator_s="cumsum", dim_i=dim)
 
 
@@ -544,8 +544,10 @@ def glu(g, input, dim):
     return g.op('Mul', first, g.op('Sigmoid', second))
 
 
-@parse_args('v', 'i')
-def softmax(g, input, dim):
+@parse_args('v', 'i', 'none')
+def softmax(g, input, dim, dtype):
+    if dtype.node().kind() != 'prim::None':
+        return _unimplemented("softmax", "dtype")
     # Softmax does normalization at vector level.
     # PyTorch and ONNX use different strategies to split the input tensor into vectors.
     # Thus dim and axis have different meanings.
@@ -742,8 +744,8 @@ def where(g, condition, self, other):
 
 @parse_args('v', 'i', 'none')
 def log_softmax(g, input, dim, dtype):
-    if dtype.node().kind() != 'prim::none':
-        return _unimplemented("scale", "dtype")
+    if dtype.node().kind() != 'prim::None':
+        return _unimplemented("log_softmax", "dtype")
     # PyTorch dim and ONNX axis have different meanings.
     # See Softmax comment for details.
     if dim < 0:
