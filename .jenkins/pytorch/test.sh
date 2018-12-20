@@ -76,8 +76,6 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   export PYTORCH_TEST_WITH_ROCM=1
-  export LANG=C.UTF-8
-  export LC_ALL=C.UTF-8
 fi
 
 if [[ "${JOB_BASE_NAME}" == *-NO_AVX-* ]]; then
