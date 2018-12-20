@@ -20,8 +20,8 @@ bool ConvReluOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       BlobGetMutableTensor(local_output_blobs_[0], Context::GetDeviceType());
   const T* output_local_data = local_output->template data<T>();
 
-  Tensor* output = Operator<Context>::Output(0);
-  output->ResizeLike(*local_output);
+  Tensor* output =
+      Operator<Context>::Output(0, local_output->sizes(), at::dtype<T>());
   T* output_data = output->template mutable_data<T>();
 #ifdef _OPENMP
 #pragma omp parallel for
@@ -51,8 +51,8 @@ bool ConvReluOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       BlobGetMutableTensor(local_output_blobs_[0], Context::GetDeviceType());
   const T* output_local_data = local_output->template data<T>();
 
-  Tensor* output = Operator<Context>::Output(0);
-  output->ResizeLike(*local_output);
+  Tensor* output =
+      Operator<Context>::Output(0, local_output->sizes(), at::dtype<T>());
   T* output_data = output->template mutable_data<T>();
 #ifdef _OPENMP
 #pragma omp parallel for
