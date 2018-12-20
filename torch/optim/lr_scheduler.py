@@ -443,27 +443,40 @@ class SGDR(_LRScheduler):
     """
 
     def __init__(self, optimizer, T_0, T_mult=1, eta_min=0, last_epoch=-1):
+        self.T_0 = int(T_0)
         self.T = int(T_0)
         self.T_mult = T_mult
         self.eta_min = eta_min
-        self.T_cur = last_epoch + 1
         super().__init__(optimizer, last_epoch)
         self.T_cur = last_epoch
 
     def get_lr(self):
-        return [self.eta_min + (base_lr - self.eta_min) *
-                (1 + math.cos(math.pi * self.T_cur / self.T)) / 2
-                for base_lr in self.base_lrs]
+        return [self.eta_min + (base_lr - self.eta_min) * (1 + math.cos(math.pi * self.T_cur / self.T)) / 2 for base_lr in self.base_lrs]
 
     def step(self, epoch=None):
+        """Step could be called after every update, i.e. if one epoeh has 10 iterations(num_train / batch_size),
+        we could called SGDR.step(0.1), SGDR.step(0.2), etc.
+        """
         if epoch is None:
             epoch = self.last_epoch + 1
             self.T_cur = self.T_cur + 1
-        self.last_epoch = epoch
-
-        if self.T_cur == self.T:
-            self.T_cur = 0
-            self.T = int(self.T * self.T_mult)
-
+            if self.T_cur >= self.T:
+                self.T_cur = self.T_cur - self.T
+                self.T = int(self.T * self.T_mult)
+        else:
+            if epoch >= self.T_0:
+                if self.T_mult == 1:
+                    self.T_cur = epoch % self.T_0
+                else:
+                    T = self.T_0
+                    self.T_cur = epoch
+                    while self.T_cur >= T:
+                        self.T_cur = self.T_cur - T
+                        T = int(T * self.T_mult)
+                    self.T = T
+            else:
+                self.T = self.T_0
+                self.T_cur = epoch
+        self.last_epoch = math.floor(epoch)
         for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
             param_group['lr'] = lr
