@@ -173,8 +173,8 @@ Tensor irfft(const Tensor& self, const int64_t signal_ndim, const bool normalize
 }
 
 
-Tensor stft(const Tensor& self, const int64_t n_fft, const int64_t hop_length,
-            const int64_t win_length, const Tensor& window,
+Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
+            const optional<int64_t> win_lengthOpt, const Tensor& window,
             const bool normalized, const bool onesided) {
   #define REPR(SS) \
     SS << "stft(" << self.type() << self.sizes() << ", n_fft=" << n_fft \
@@ -186,6 +186,10 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const int64_t hop_length,
       SS << "None"; \
     } \
     SS << ", normalized=" << normalized << ", onesided=" << onesided << ")"
+
+  // default_init hop_length and win_length
+  auto hop_length = hop_lengthOpt.value_or(n_fft >> 2);
+  auto win_length = win_lengthOpt.value_or(n_fft);
 
   if (!at::isFloatingType(self.type().scalarType()) || self.dim() > 2 || self.dim() < 1) {
     std::ostringstream ss;

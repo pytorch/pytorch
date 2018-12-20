@@ -298,7 +298,8 @@ Tensor sum_to_size(const Tensor& self, IntList size) {
   return sum_to(self, size);
 }
 
-Tensor as_strided(const Tensor& self, IntList size, IntList stride, int64_t storage_offset) {
+Tensor as_strided(const Tensor& self, IntList size, IntList stride, optional<int64_t> storage_offset_) {
+  auto storage_offset = storage_offset_.value_or(self.storage_offset());
   auto tid = self.type_id();
   AT_CHECK(
       tid == CPUTensorId() || tid == CUDATensorId(),
@@ -308,17 +309,10 @@ Tensor as_strided(const Tensor& self, IntList size, IntList stride, int64_t stor
   return result;
 }
 
-Tensor &as_strided_(Tensor& self, IntList size, IntList stride, int64_t storage_offset) {
+Tensor &as_strided_(Tensor& self, IntList size, IntList stride, optional<int64_t> storage_offset_) {
+  auto storage_offset = storage_offset_.value_or(self.storage_offset());
   setStrided(self, size, stride, storage_offset);
   return self;
-}
-
-Tensor as_strided(const Tensor& self, IntList size, IntList stride) {
-  return at::as_strided(self, size, stride, self.storage_offset());
-}
-
-Tensor &as_strided_(Tensor& self, IntList size, IntList stride) {
-  return self.as_strided_(size, stride, self.storage_offset());
 }
 
 Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_t length) {

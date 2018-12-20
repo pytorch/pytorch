@@ -103,7 +103,7 @@ static std::unique_ptr<TensorIterator> make_reduction(
   // efficiency.
   // not generalize this to common mismatched input/output types to avoid cross
   // product of templated kernel launches.
-  if (self.type().scalarType() == dtype || 
+  if (self.type().scalarType() == dtype ||
       (self.is_cuda() && self.type().scalarType() == kHalf && dtype == kFloat)) {
     return TensorIterator::reduce_op(viewed_result, self);
   }
@@ -401,10 +401,11 @@ Tensor& _norm_out_cpu(Tensor& result, const Tensor& self, Scalar p, int64_t dim_
   }
 }
 
-Tensor& norm_out(Tensor &result, const Tensor &self, Scalar p, int64_t dim, bool keepdim) {
+Tensor& norm_out(Tensor &result, const Tensor &self, optional<Scalar> pOpt, int64_t dim, bool keepdim) {
   AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
            "norm only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   AT_CHECK(at::isFloatingType(self.type().scalarType()), "norm only supports floating-point dtypes");
+  auto p = pOpt.value_or(2.0);
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial(result, self, 0, dim, keepdim)) {
     return result;
@@ -438,7 +439,7 @@ Tensor _norm(const Tensor &self, Scalar p) {
   }
 }
 
-Tensor norm(const Tensor& self, Scalar p, int64_t dim, bool keepdim) {
+Tensor norm(const Tensor& self, optional<Scalar> p, int64_t dim, bool keepdim) {
   Tensor result = at::empty({0}, self.options());
   return at::native::norm_out(result, self, p, dim, keepdim);
 }

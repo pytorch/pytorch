@@ -251,6 +251,9 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'const Type &': 'scalartype',
         'const THPLayout &': 'layout',
         'const Device &': 'device',
+        'c10::optional<ScalarType>': 'scalartypeOptional',
+        'c10::optional<Scalar>': 'scalarOptional',
+        'c10::optional<int64_t>': 'toInt64Optional',
         'int64_t': 'toInt64',
         'bool': 'toBool',
         'double': 'toDouble',
@@ -320,11 +323,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                     default_expr += '.scalarType()'
                 expr = 'r.{}({}, {})'.format(unpack_with_default, arg_index, default_expr)
             else:
-                opt_match = re.match(r'c10::optional<(.+)>', typename)
-                if (opt_match):
-                    unpack = opt_match.group(1).lower() + 'Optional'
-                else:
-                    unpack = unpack_methods.get(typename, typename.lower())
+                unpack = unpack_methods.get(typename, typename.lower())
                 expr = 'r.{}({})'.format(unpack, arg_index)
 
             if unpack_args:
@@ -349,7 +348,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             formal_args.append(formal)
 
         # We always want to unpack when we have TensorOptions.
-        unpack = any(arg.get('python_default_init') for arg in inputs) or has_tensor_options
+        unpack = has_tensor_options
         for arg in inputs:
             if arg['simple_type'] in ['Type', 'TensorOptions']:
                 continue
@@ -397,7 +396,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             elif arg['name'] == 'layout' and arg['simple_type'] == 'Layout':
                 # out(s) determines the type and layout if it is present, so only use this if there are no outputs.
                 if len(outputs) == 0:
-                    layout = parse_arg(arg, layout_idx, arg.get('python_default_init'))[0]
+                    layout = parse_arg(arg, layout_idx)[0]
             elif arg['name'] == 'device' and arg['simple_type'] == 'Device':
                 if len(outputs) == 0:
                     assert parsed_type_args
@@ -770,8 +769,6 @@ def get_python_signature(declaration, include_out):
             default = arg['default']
             if default == 'nullptr' or default == 'nullopt' or default == '{}':
                 default = 'None'
-        if arg.get('python_default_init') is not None:
-            default = 'None'
         if default is not None:
             param += '=' + str(default)
         return param
