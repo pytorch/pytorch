@@ -64,7 +64,7 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args)
 {
   HANDLE_TH_ERRORS
   ${unpack_self}
-  return wrap(${dispatch_name}(${actuals}));
+  return wrap(${return_names}${dispatch_name}(${actuals}));
   END_HANDLE_TH_ERRORS
 }
 """)
@@ -100,7 +100,7 @@ PY_VARIABLE_SET_REQUIRES_GRAD = CodeTemplate("""\
 ${call_dispatch}.set_requires_grad(${requires_grad})""")
 
 PY_VARIABLE_WRAP = CodeTemplate("""\
-return wrap(${call_dispatch});""")
+return wrap(${return_names}${call_dispatch});""")
 
 PY_VARIABLE_DISPATCH = CodeTemplate("""\
 inline ${simple_return_type} ${dispatch_name}(${formal_args}) {
@@ -589,9 +589,25 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             python_binding_arguments.append(requires_grad_arg)
         return python_binding_arguments
 
+    def get_namedtuple_names(declaration):
+        skip_names = ['output', 'result', 'result0', 'result1', 'result2', 'result3',
+                      'result4', 'result5', 'result6', 'result7', 'result8', 'result9']
+        returns = declaration['returns']
+        if len(returns) <= 1 or all([x['name'] in skip_names for x in returns]):
+            return ''
+        typename = declaration['name']
+
+        def get_return_name(name):
+            if name in skip_names:
+                return 'PyStructSequence_UnnamedField'
+            return '"{}"'.format(name)
+        return_names = ', '.join([get_return_name(x['name']) for x in returns])
+        return '"{}", std::make_tuple({}), '.format(typename, return_names)
+
     def process_function(name, declarations):
         for declaration in declarations:
             declaration['python_binding_arguments'] = get_python_binding_arguments(declaration)
+            declaration['return_names'] = get_namedtuple_names(declaration)
 
         env = {
             'name': name,
@@ -629,6 +645,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             tmpl = PY_VARIABLE_METHOD_NOARGS
             env['actuals'] = ['self']
             env['flags'] = 'METH_NOARGS'
+            env['return_names'] = declarations[0]['return_names']
         else:
             tmpl = PY_VARIABLE_METHOD_VARARGS
             env['flags'] = 'METH_VARARGS | METH_KEYWORDS'

@@ -111,7 +111,7 @@
 
 - func: adaptive_avg_pool1d(Tensor self, IntList[1] output_size) -> Tensor
 
-- func: adaptive_max_pool1d(Tensor self, IntList[1] output_size) -> (Tensor, Tensor)
+- func: adaptive_max_pool1d(Tensor self, IntList[1] output_size) -> (Tensor values, Tensor indices)
 
 - func: add(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function, method
@@ -852,10 +852,10 @@
 
 - func: ger_out(Tensor result, Tensor self, Tensor vec2) -> Tensor
 
-- func: gesv(Tensor self, Tensor A) -> (Tensor, Tensor)
+- func: gesv(Tensor self, Tensor A) -> (Tensor X, Tensor LU)
   variants: function, method
 
-- func: gesv_out(Tensor solution, Tensor lu, Tensor self, Tensor A) -> (Tensor, Tensor)
+- func: gesv_out(Tensor solution, Tensor lu, Tensor self, Tensor A) -> (Tensor X, Tensor LU)
 
 # gesv handles broadcasting of arbitrary batch dims while _gesv_helper does not.
 - func: _gesv_helper(Tensor self, Tensor A) -> (Tensor, Tensor)
@@ -959,10 +959,10 @@
     CPU: kl_div_backward_cpu
     CUDA: kl_div_backward_cuda
 
-- func: kthvalue(Tensor self, int64_t k, int64_t dim=-1, bool keepdim=false) -> (Tensor, Tensor)
+- func: kthvalue(Tensor self, int64_t k, int64_t dim=-1, bool keepdim=false) -> (Tensor values, Tensor indices)
   variants: function, method
 
-- func: kthvalue_out(Tensor values, Tensor indices, Tensor self, int64_t k, int64_t dim=-1, bool keepdim=false) -> (Tensor, Tensor)
+- func: kthvalue_out(Tensor values, Tensor indices, Tensor self, int64_t k, int64_t dim=-1, bool keepdim=false) -> (Tensor values, Tensor indices)
 
 - func: layer_norm(Tensor input, IntList normalized_shape, Tensor? weight={}, Tensor? bias={}, double eps=1e-5, bool cudnn_enable=True) -> Tensor
 
@@ -1082,15 +1082,15 @@
 - func: matrix_power(Tensor self, int64_t n) -> Tensor
   variants: function, method
 
-- func: max(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
+- func: max(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor values, Tensor indices)
   variants: function, method
 
-- func: max_out(Tensor max, Tensor max_values, Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
+- func: max_out(Tensor max, Tensor max_values, Tensor self, int64_t dim, bool keepdim=false) -> (Tensor values, Tensor indices)
 
 - func: max_values(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
   variants: function, method
 
-- func: max_pool1d_with_indices(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> (Tensor, Tensor)
+- func: max_pool1d_with_indices(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> (Tensor values, Tensor indices)
 
 - func: max_pool1d(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> Tensor
 
@@ -1120,15 +1120,15 @@
 
 - func: mean_out(Tensor result, Tensor self, IntList[1] dim, *, ScalarType dtype) -> Tensor
 
-- func: median(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
+- func: median(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor value, Tensor index)
   variants: function, method
 
 - func: median_out(Tensor values, Tensor indices, Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
 
-- func: min(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
+- func: min(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor values, Tensor indices)
   variants: function, method
 
-- func: min_out(Tensor min, Tensor min_indices, Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
+- func: min_out(Tensor min, Tensor min_indices, Tensor self, int64_t dim, bool keepdim=false) -> (Tensor values, Tensor indices)
 
 - func: min_values(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
   variants: function, method
@@ -1194,10 +1194,10 @@
 
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
 
-- func: mode(Tensor self, int64_t dim=-1, bool keepdim=false) -> (Tensor, Tensor)
+- func: mode(Tensor self, int64_t dim=-1, bool keepdim=false) -> (Tensor values, Tensor indices)
   variants: function, method
 
-- func: mode_out(Tensor values, Tensor indices, Tensor self, int64_t dim=-1, bool keepdim=false) -> (Tensor, Tensor)
+- func: mode_out(Tensor values, Tensor indices, Tensor self, int64_t dim=-1, bool keepdim=false) -> (Tensor values, Tensor indices)
 
 - func: mul(Tensor self, Tensor other) -> Tensor
   variants: function, method
@@ -1497,7 +1497,7 @@
   variants: function, method
   device_guard: false
 
-- func: slogdet(Tensor self) -> (Tensor, Tensor)
+- func: slogdet(Tensor self) -> (Tensor sign, Tensor log)
   variants: function, method
 
 - func: smm(Tensor self, Tensor mat2) -> Tensor
@@ -1773,13 +1773,13 @@
 - func: type_as(Tensor self, Tensor other) -> Tensor
   variants: method
 
-- func: _unique(Tensor self, bool sorted=false, bool return_inverse=false) -> (Tensor, Tensor)
+- func: _unique(Tensor self, bool sorted=false, bool return_inverse=false) -> (Tensor values, Tensor inverse_indices)
   variants: function
   dispatch:
     CPU: _unique_cpu
     CUDA: _unique_cuda
 
-- func: _unique_dim(Tensor self, int64_t dim, bool sorted=false, bool return_inverse=false) -> (Tensor, Tensor)
+- func: _unique_dim(Tensor self, int64_t dim, bool sorted=false, bool return_inverse=false) -> (Tensor values, Tensor inverse_indices)
   variants: function
   dispatch:
     CPU: _unique_dim_cpu
@@ -2774,29 +2774,29 @@
 - func: addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
   variants: method, function
 
-- func: gels_out(Tensor X, Tensor qr, Tensor self, Tensor A) -> (Tensor, Tensor)
+- func: gels_out(Tensor X, Tensor qr, Tensor self, Tensor A) -> (Tensor X, Tensor QR)
 
-- func: gels(Tensor self, Tensor A) -> (Tensor, Tensor)
+- func: gels(Tensor self, Tensor A) -> (Tensor X, Tensor QR)
   variants: method, function
 
-- func: trtrs_out(Tensor X, Tensor M, Tensor self, Tensor A, bool upper=true, bool transpose=false, bool unitriangular=false) -> (Tensor, Tensor)
+- func: trtrs_out(Tensor X, Tensor M, Tensor self, Tensor A, bool upper=true, bool transpose=false, bool unitriangular=false) -> (Tensor X, Tensor M)
 
-- func: trtrs(Tensor self, Tensor A, bool upper=true, bool transpose=false, bool unitriangular=false) -> (Tensor, Tensor)
+- func: trtrs(Tensor self, Tensor A, bool upper=true, bool transpose=false, bool unitriangular=false) -> (Tensor X, Tensor M)
   variants: method, function
 
-- func: symeig_out(Tensor e, Tensor V, Tensor self, bool eigenvectors=false, bool upper=true) -> (Tensor, Tensor)
+- func: symeig_out(Tensor e, Tensor V, Tensor self, bool eigenvectors=false, bool upper=true) -> (Tensor e, Tensor V)
 
-- func: symeig(Tensor self, bool eigenvectors=false, bool upper=true) -> (Tensor, Tensor)
+- func: symeig(Tensor self, bool eigenvectors=false, bool upper=true) -> (Tensor e, Tensor V)
   variants: method, function
 
-- func: eig_out(Tensor e, Tensor v, Tensor self, bool eigenvectors=false) -> (Tensor, Tensor)
+- func: eig_out(Tensor e, Tensor v, Tensor self, bool eigenvectors=false) -> (Tensor e, Tensor V)
 
-- func: eig(Tensor self, bool eigenvectors=false) -> (Tensor, Tensor)
+- func: eig(Tensor self, bool eigenvectors=false) -> (Tensor e, Tensor V)
   variants: method, function
 
-- func: svd_out(Tensor U, Tensor S, Tensor V, Tensor self, bool some=true, bool compute_uv=true) -> (Tensor, Tensor, Tensor)
+- func: svd_out(Tensor U, Tensor S, Tensor V, Tensor self, bool some=true, bool compute_uv=true) -> (Tensor U, Tensor S, Tensor V)
 
-- func: svd(Tensor self, bool some=true, bool compute_uv=true) -> (Tensor, Tensor, Tensor)
+- func: svd(Tensor self, bool some=true, bool compute_uv=true) -> (Tensor U, Tensor S, Tensor V)
   variants: method, function
 
 - func: cholesky_out(Tensor result, Tensor self, bool upper=false) -> Tensor
@@ -2826,14 +2826,14 @@
 - func: potri(Tensor self, bool upper=true) -> Tensor
   variants: method, function
 
-- func: pstrf_out(Tensor u, Tensor piv, Tensor self, bool upper=true, Scalar tol=-1) -> (Tensor, Tensor)
+- func: pstrf_out(Tensor u, Tensor piv, Tensor self, bool upper=true, Scalar tol=-1) -> (Tensor u, Tensor piv)
 
-- func: pstrf(Tensor self, bool upper=true, Scalar tol=-1) -> (Tensor, Tensor)
+- func: pstrf(Tensor self, bool upper=true, Scalar tol=-1) -> (Tensor u, Tensor piv)
   variants: method, function
 
-- func: qr_out(Tensor Q, Tensor R, Tensor self) -> (Tensor, Tensor)
+- func: qr_out(Tensor Q, Tensor R, Tensor self) -> (Tensor Q, Tensor R)
 
-- func: qr(Tensor self) -> (Tensor, Tensor)
+- func: qr(Tensor self) -> (Tensor Q, Tensor R)
   variants: method, function
 
 - func: geqrf_out(Tensor result0, Tensor result1, Tensor self) -> (Tensor, Tensor)
@@ -2851,14 +2851,14 @@
 - func: ormqr(Tensor self, Tensor input2, Tensor input3, bool left=true, bool transpose=false) -> Tensor
   variants: method, function
 
-- func: btrifact_out(Tensor A_LU, Tensor pivots, Tensor self, *, bool pivot=true) -> (Tensor, Tensor)
+- func: btrifact_out(Tensor A_LU, Tensor pivots, Tensor self, *, bool pivot=true) -> (Tensor A_LU, Tensor pivots)
 
-- func: btrifact(Tensor self, *, bool pivot=true) -> (Tensor, Tensor)
+- func: btrifact(Tensor self, *, bool pivot=true) -> (Tensor A_LU, Tensor pivots)
   variants: method, function
 
-- func: btrifact_with_info_out(Tensor A_LU, Tensor pivots, Tensor info, Tensor self, *, bool pivot=true) -> (Tensor, Tensor, Tensor)
+- func: btrifact_with_info_out(Tensor A_LU, Tensor pivots, Tensor info, Tensor self, *, bool pivot=true) -> (Tensor A_LU, Tensor pivots, Tensor info)
 
-- func: btrifact_with_info(Tensor self, *, bool pivot=true) -> (Tensor, Tensor, Tensor)
+- func: btrifact_with_info(Tensor self, *, bool pivot=true) -> (Tensor A_LU, Tensor pivots, Tensor info)
   variants: method, function
 
 - func: btrisolve_out(Tensor result, Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
@@ -2968,14 +2968,14 @@
 - func: median(Tensor self) -> Tensor
   variants: method, function
 
-- func: sort_out(Tensor values, Tensor indices, Tensor self, int64_t dim=-1, bool descending=false) -> (Tensor, Tensor)
+- func: sort_out(Tensor values, Tensor indices, Tensor self, int64_t dim=-1, bool descending=false) -> (Tensor values, Tensor indices)
 
-- func: sort(Tensor self, int64_t dim=-1, bool descending=false) -> (Tensor, Tensor)
+- func: sort(Tensor self, int64_t dim=-1, bool descending=false) -> (Tensor values, Tensor indices)
   variants: method, function
 
-- func: topk_out(Tensor values, Tensor indices, Tensor self, int64_t k, int64_t dim=-1, bool largest=true, bool sorted=true) -> (Tensor, Tensor)
+- func: topk_out(Tensor values, Tensor indices, Tensor self, int64_t k, int64_t dim=-1, bool largest=true, bool sorted=true) -> (Tensor values, Tensor indices)
 
-- func: topk(Tensor self, int64_t k, int64_t dim=-1, bool largest=true, bool sorted=true) -> (Tensor, Tensor)
+- func: topk(Tensor self, int64_t k, int64_t dim=-1, bool largest=true, bool sorted=true) -> (Tensor values, Tensor indices)
   variants: method, function
 
 - func: all(Tensor self) -> Tensor
