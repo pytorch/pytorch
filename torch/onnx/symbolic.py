@@ -346,9 +346,11 @@ def t(g, self):
     return g.op("Transpose", self, perm_i=(1, 0))
 
 
-# There is no translation for it, but we don't want to raise an error yet
 def expand(g, self, size, implicit):
-    return None
+    size = _maybe_get_const(size, 'is')
+    if not _is_value(size):
+        size = g.op("Constant", value_t=torch.LongTensor(size))
+    return g.op("Expand", self, size)
 
 
 def expand_as(g, self, other):
@@ -662,24 +664,50 @@ def upsample_bilinear2d(g, input, output_size, align_corners):
                 mode_s="linear")
 
 
+def wrap_logical_op_with_cast_to_uint8(func):
+    def wrap_with_cast(g, input, other):
+        return g.op("Cast", func(g, input, other), to_i=cast_pytorch_to_onnx['Byte'])
+    return wrap_with_cast
+
+
+def wrap_logical_op_with_negation(func):
+    def wrap_with_not(g, input, other):
+        return g.op("Not", func(g, input, other))
+    return wrap_with_not
+
+
+@wrap_logical_op_with_cast_to_uint8
 def gt(g, input, other):
+    return gt_impl(g, input, other)
+
+
+def gt_impl(g, input, other):
     other = _maybe_get_scalar(other)
     return g.op("Greater", input, _if_scalar_type_as(g, other, input))
 
 
+@wrap_logical_op_with_cast_to_uint8
 def lt(g, input, other):
+    return lt_impl(g, input, other)
+
+
+def lt_impl(g, input, other):
     other = _maybe_get_scalar(other)
     return g.op("Less", input, _if_scalar_type_as(g, other, input))
 
 
+@wrap_logical_op_with_cast_to_uint8
+@wrap_logical_op_with_negation
 def ge(g, input, other):
     other = _maybe_get_scalar(other)
-    return g.op("Not", lt(g, input, _if_scalar_type_as(g, other, input)))
+    return lt_impl(g, input, _if_scalar_type_as(g, other, input))
 
 
+@wrap_logical_op_with_cast_to_uint8
+@wrap_logical_op_with_negation
 def le(g, input, other):
     other = _maybe_get_scalar(other)
-    return g.op("Not", gt(g, input, _if_scalar_type_as(g, other, input)))
+    return gt_impl(g, input, _if_scalar_type_as(g, other, input))
 
 
 def where(g, condition, self, other):
@@ -879,7 +907,9 @@ def clamp_max(g, self, max):
 
 # torch.max (same for torch.min) actually has two interfaces smashed together:
 # torch.max(x, dim, keepdim) and torch.max(x, y)
-def max(g, self, dim_or_y, keepdim=None):
+def max(g, self, dim_or_y=None, keepdim=None):
+    if dim_or_y is None and keepdim is None:
+        return g.op("ReduceMax", self, keepdims_i=0)
     if keepdim is None:
         return g.op("Max", self, dim_or_y)
     else:
@@ -894,7 +924,9 @@ def max(g, self, dim_or_y, keepdim=None):
                     outputs=2)
 
 
-def min(g, self, dim_or_y, keepdim=None):
+def min(g, self, dim_or_y=None, keepdim=None):
+    if dim_or_y is None and keepdim is None:
+        return g.op("ReduceMin", self, keepdims_i=0)
     if keepdim is None:
         return g.op("Min", self, dim_or_y)
     else:
@@ -909,8 +941,13 @@ def min(g, self, dim_or_y, keepdim=None):
                     outputs=2)
 
 
+@wrap_logical_op_with_cast_to_uint8
 def eq(g, self, other):
     return g.op("Equal", self, other)
+
+
+def ne(g, self, other):
+    return g.op("Not", eq(g, self, other))
 
 
 def exp(g, self):

@@ -3,15 +3,15 @@
 If you are interested in contributing to PyTorch, your contributions will fall
 into two categories:
 1. You want to propose a new Feature and implement it
-    - post about your intended feature, and we shall discuss the design and
+    - Post about your intended feature, and we shall discuss the design and
     implementation. Once we agree that the plan looks good, go ahead and implement it.
 2. You want to implement a feature or bug-fix for an outstanding issue
     - Look at the outstanding issues here: https://github.com/pytorch/pytorch/issues
-    - Especially look at the Low Priority and Medium Priority issues
-    - Pick an issue and comment on the task that you want to work on this feature
+    - Especially look at the Low Priority and Medium Priority issues.
+    - Pick an issue and comment on the task that you want to work on this feature.
     - If you need more context on a particular issue, please ask and we shall provide.
 
-Once you finish implementing a feature or bugfix, please send a Pull Request to
+Once you finish implementing a feature or bug-fix, please send a Pull Request to
 https://github.com/pytorch/pytorch
 
 If you are not familiar with creating a Pull Request, here are some guides:
@@ -24,7 +24,7 @@ If you are not familiar with creating a Pull Request, here are some guides:
 To develop PyTorch on your machine, here are some tips:
 
 1. Uninstall all existing PyTorch installs:
-```
+```bash
 conda uninstall pytorch
 pip uninstall torch
 pip uninstall torch # run this command twice
@@ -32,80 +32,81 @@ pip uninstall torch # run this command twice
 
 2. Clone a copy of PyTorch from source:
 
-```
+```bash
 git clone https://github.com/pytorch/pytorch
 cd pytorch
 ```
 
 3. Install PyTorch in `build develop` mode:
 
-A full set of instructions on installing PyTorch from Source are here:
+A full set of instructions on installing PyTorch from source is here:
 https://github.com/pytorch/pytorch#from-source
 
 The change you have to make is to replace
 
-```
+```bash
 python setup.py install
 ```
 
 with
 
-```
+```bash
 python setup.py build develop
 ```
 
 This is especially useful if you are only changing Python files.
 
-This mode will symlink the python files from the current local source tree into the
-python install.
+This mode will symlink the Python files from the current local source tree into the
+Python install.
 
-Hence, if you modify a python file, you do not need to reinstall pytorch again and again.
+Hence, if you modify a Python file, you do not need to reinstall PyTorch again and again.
 
 For example:
-- Install local pytorch in `build develop` mode
-- modify your python file `torch/__init__.py` (for example)
+- Install local PyTorch in `build develop` mode
+- modify your Python file `torch/__init__.py` (for example)
 - test functionality
-- modify your python file `torch/__init__.py`
+- modify your Python file `torch/__init__.py`
 - test functionality
-- modify your python file `torch/__init__.py`
+- modify your Python file `torch/__init__.py`
 - test functionality
 
-You do not need to repeatedly install after modifying python files.
+You do not need to repeatedly install after modifying Python files.
 
-In case you want to reinstall, make sure that you uninstall pytorch first by running `pip uninstall torch`
+In case you want to reinstall, make sure that you uninstall PyTorch first by running `pip uninstall torch`
 and `python setup.py clean`. Then you can install in `build develop` mode again.
 
 ## Codebase structure
 
 * [c10](c10) - Core library files that work everywhere, both server
-  and mobile.  We are slowly moving pieces from ATen/core here.
-  This library is intended only to contain essential functionality,
-  and appropriate to use in settings where binary size matters.  (But
+  and mobile. We are slowly moving pieces from [ATen/core](aten/src/ATen/core)
+  here. This library is intended only to contain essential functionality,
+  and appropriate to use in settings where binary size matters. (But
   you'll have a lot of missing functionality if you try to use it
   directly.)
 * [aten](aten) - C++ tensor library for PyTorch (no autograd support)
-  * src
+  * [src](aten/src)
     * [TH](aten/src/TH)
       [THC](aten/src/THC)
       [THNN](aten/src/THNN)
       [THCUNN](aten/src/THCUNN) - Legacy library code from the original
-      Torch.  Try not to add things here; we're slowly porting these to
-      native.
+      Torch. Try not to add things here; we're slowly porting these to
+      [native](aten/src/ATen/native).
       * generic - Contains actual implementations of operators,
-        parametrized over `scalar_t`.  Files here get compiled N times
+        parametrized over `scalar_t`. Files here get compiled N times
         per supported scalar type in PyTorch.
-    * ATen
-      * [core](aten/src/ATen/core) - Core functionality of ATen.  This
+    * [ATen](aten/src/ATen)
+      * [core](aten/src/ATen/core) - Core functionality of ATen. This
         is migrating to top-level c10 folder.
       * [native](aten/src/ATen/native) - Modern implementations of
-        operators.  If you want to write a new operator, here is where
-        it should go.  Most CPU operators go in the top level directory,
+        operators. If you want to write a new operator, here is where
+        it should go. Most CPU operators go in the top level directory,
         except for operators which need to be compiled specially; see
         cpu below.
         * [cpu](aten/src/ATen/native/cpu) - Not actually CPU
           implementations of operators, but specifically implementations
           which are compiled with processor-specific instructions, like
-          AVX.  See the README for more details.
+          AVX. See the [README](aten/src/ATen/native/cpu/README.md) for more
+          details.
         * [cuda](aten/src/ATen/native/cuda) - CUDA implementations of
           operators.
         * [sparse](aten/src/ATen/native/sparse) - CPU and CUDA
@@ -114,34 +115,34 @@ and `python setup.py clean`. Then you can install in `build develop` mode again.
           [miopen](aten/src/ATen/native/miopen) [cudnn](aten/src/ATen/native/cudnn)
           - implementations of operators which simply bind to some
             backend library.
-* [torch](torch) - The actual PyTorch library.  Everything that is not
-  in csrc is Python modules, following the PyTorch Python frontend
-  module structure.
-  * [csrc](torch/csrc) - C++ files composing the PyTorch library.  Files
+* [torch](torch) - The actual PyTorch library. Everything that is not
+  in [csrc](torch/csrc) is a Python module, following the PyTorch Python
+  frontend module structure.
+  * [csrc](torch/csrc) - C++ files composing the PyTorch library. Files
     in this directory tree are a mix of Python binding code, and C++
-    heavy lifting.  Consult `setup.py` for the canonical list of Python
+    heavy lifting. Consult `setup.py` for the canonical list of Python
     binding files; conventionally, they are often prefixed with
     `python_`.
     * [jit](torch/csrc/jit) - Compiler and frontend for TorchScript JIT
       frontend.
     * [autograd](torch/csrc/autograd) - Implementation of reverse-mode automatic
-      differentation
+      differentiation.
     * [api](torch/csrc/api) - The PyTorch C++ frontend.
     * [distributed](torch/csrc/distributed) - Distributed training
       support for PyTorch.
 * [tools](tools) - Code generation scripts for the PyTorch library.
-  See README of this directory for more details.
-* [test](tests) - Python unit tests for PyTorch Python frontend
+  See [README](tools/README.md) of this directory for more details.
+* [test](tests) - Python unit tests for PyTorch Python frontend.
   * [test_torch.py](test/test_torch.py) - Basic tests for PyTorch
-    functionality
+    functionality.
   * [test_autograd.py](test/test_autograd.py) - Tests for non-NN
-    automatic differentiation support
+    automatic differentiation support.
   * [test_nn.py](test/test_nn.py) - Tests for NN operators and
-    their automatic differentiation
+    their automatic differentiation.
   * [test_jit.py](test/test_jit.py) - Tests for the JIT compiler
-    and TorchScript
+    and TorchScript.
   * ...
-  * [cpp](test/cpp) - C++ unit tests for PyTorch C++ frontend
+  * [cpp](test/cpp) - C++ unit tests for PyTorch C++ frontend.
   * [expect](test/expect) - Automatically generated "expect" files
     which are used to compare against expected output.
   * [onnx](test/onnx) - Tests for ONNX export functionality,
@@ -149,15 +150,15 @@ and `python setup.py clean`. Then you can install in `build develop` mode again.
 * [caffe2](caffe2) - The Caffe2 library.
   * [core](caffe2/core) - Core files of Caffe2, e.g., tensor, workspace,
     blobs, etc.
-  * [operators](caffe2/operators) - Operators of Caffe2
-  * [python](caffe2/python) - Python bindings to Caffe2
+  * [operators](caffe2/operators) - Operators of Caffe2.
+  * [python](caffe2/python) - Python bindings to Caffe2.
   * ...
 
 ## Unit testing
 
 PyTorch's testing is located under `test/`. Run the entire test suite with
 
-```
+```bash
 python test/run_test.py
 ```
 
@@ -169,7 +170,7 @@ a number of useful features for local developing. Install it via `pip install py
 
 If you want to just run tests that contain a specific substring, you can use the `-k` flag:
 
-```
+```bash
 pytest test/test_nn.py -k Loss -v
 ```
 
@@ -198,16 +199,16 @@ commands. To run this check locally, run `./check-doxygen.sh` from inside
 ## Managing multiple build trees
 
 One downside to using `python setup.py develop` is that your development
-version of pytorch will be installed globally on your account (e.g., if
+version of PyTorch will be installed globally on your account (e.g., if
 you run `import torch` anywhere else, the development version will be
 used.
 
 If you want to manage multiple builds of PyTorch, you can make use of
 [conda environments](https://conda.io/docs/using/envs.html) to maintain
 separate Python package environments, each of which can be tied to a
-specific build of PyTorch.  To set one up:
+specific build of PyTorch. To set one up:
 
-```
+```bash
 conda create -n pytorch-myfeature
 source activate pytorch-myfeature
 # if you run python now, torch will NOT be installed
@@ -219,7 +220,7 @@ python setup.py build develop
 If you are working on the C++ code, there are a few important things that you
 will want to keep in mind:
 
-1. How to rebuild only the code you are working on, and
+1. How to rebuild only the code you are working on.
 2. How to make rebuilds in the absence of changes go faster.
 
 ### Build only what you need.
@@ -229,10 +230,10 @@ not very optimized for incremental rebuilds, this will actually be very slow.
 Far better is to only request rebuilds of the parts of the project you are
 working on:
 
-- Working on the Python bindings?  Run `python setup.py develop` to rebuild
+- Working on the Python bindings? Run `python setup.py develop` to rebuild
   (NB: no `build` here!)
 
-- Working on `torch/csrc` or `aten`?  Run `python setup.py rebuild_libtorch` to
+- Working on `torch/csrc` or `aten`? Run `python setup.py rebuild_libtorch` to
   rebuild and avoid having to rebuild other dependent libraries we
   depend on.
 
@@ -240,8 +241,8 @@ working on:
   targets are listed in `dep_libs` in `setup.py`. prepend `build_` to
   get a target, and run as e.g. `python setup.py build_gloo`.
 
-- Working on a test binary?  Run `(cd build && ninja bin/test_binary_name)` to
-  rebuild only that test binary (without rerunning cmake).  (Replace `ninja` with
+- Working on a test binary? Run `(cd build && ninja bin/test_binary_name)` to
+  rebuild only that test binary (without rerunning cmake). (Replace `ninja` with
   `make` if you don't have ninja installed).
 
 On the initial build, you can also speed things up with the environment
@@ -252,7 +253,7 @@ variables `DEBUG` and `NO_CUDA`.
 - `NO_CUDA=1` will disable compiling CUDA (in case you are developing on something not CUDA related), to save compile time.
 
 For example:
-```
+```bash
 NO_CUDA=1 DEBUG=1 python setup.py build develop
 ```
 
@@ -271,9 +272,9 @@ information for the code in `torch/csrc`. More information at:
 
 #### Use Ninja
 Python `setuptools` is pretty dumb, and always rebuilds every C file in a
-project.  If you install the ninja build system with `pip install ninja`,
+project. If you install the ninja build system with `pip install ninja`,
 then PyTorch will use it to track dependencies correctly.
-If pytorch was already built, you will need to run `python setup.py clean` once
+If PyTorch was already built, you will need to run `python setup.py clean` once
 after installing ninja for builds to succeed.
 
 #### Use CCache
@@ -284,9 +285,9 @@ compilation was exactly the same.
 
 Using ccache in a situation like this is a real time-saver. However, by
 default, ccache does not properly support CUDA stuff, so here are the
-instructions for installing a custom `ccache` fork that has CUDA support:
+instructions for installing a custom ccache fork that has CUDA support:
 
-```
+```bash
 # install and export ccache
 if ! ls ~/ccache/bin/ccache
 then
@@ -340,13 +341,13 @@ than Linux, which are worth keeping in mind when fixing these problems.
 
 1. Symbols are NOT exported by default on Windows; instead, you have to explicitly
    mark a symbol as exported/imported in a header file with `__declspec(dllexport)` /
-   `__declspec(dllimport)`.  We have codified this pattern into a set of macros
+   `__declspec(dllimport)`. We have codified this pattern into a set of macros
    which follow the convention `*_API`, e.g., `CAFFE2_API` inside Caffe2 and ATen.
    (Every separate shared library needs a unique macro name, because symbol visibility
    is on a per shared library basis. See c10/macros/Macros.h for more details.)
 
    The upshot is if you see an "unresolved external" error in your Windows build, this
-   is probably because you forgot to mark a function with `*_API`.  However, there is
+   is probably because you forgot to mark a function with `*_API`. However, there is
    one important counterexample to this principle: if you want a *templated* function
    to be instantiated at the call site, do NOT mark it with `*_API` (if you do mark it,
    you'll have to explicitly instantiate all of the specializations used by the call
@@ -354,7 +355,7 @@ than Linux, which are worth keeping in mind when fixing these problems.
 
 2. If you link against a library, this does not make its dependencies transitively
    visible. You must explicitly specify a link dependency against every library whose
-   symbols you use.  (This is different from Linux where in most environments,
+   symbols you use. (This is different from Linux where in most environments,
    transitive dependencies can be used to fulfill unresolved symbols.)
 
 3. If you have a Windows box (we have a few on EC2 which you can request access to) and
@@ -364,10 +365,10 @@ than Linux, which are worth keeping in mind when fixing these problems.
 
 Even if you don't know anything about MSVC, you can use cmake to build simple programs on
 Windows; this can be helpful if you want to learn more about some peculiar linking behavior
-by reproducing it on a small example.  Here's a simple example cmake file that defines
+by reproducing it on a small example. Here's a simple example cmake file that defines
 two dynamic libraries, one linking with the other:
 
-```
+```CMake
 project(myproject CXX)
 set(CMAKE_CXX_STANDARD 11)
 add_library(foo SHARED foo.cpp)
@@ -379,7 +380,7 @@ target_link_libraries(bar PUBLIC foo)
 
 You can build it with:
 
-```
+```bash
 mkdir build
 cd build
 cmake ..
@@ -393,33 +394,33 @@ these exciting features lead to exciting bugs in Windows compilers.
 To add insult to injury, the error messages will often not tell you
 which line of code actually induced the erroring template instantiation.
 
-I've found the most effective way to debug these problems is to
+We've found the most effective way to debug these problems is to
 carefully read over diffs, keeping in mind known bugs in MSVC/NVCC.
 Here are a few well known pitfalls and workarounds:
 
 * This is not actually a bug per se, but in general, code generated by MSVC
   is more sensitive to memory errors; you may have written some code
   that does a use-after-free or stack overflows; on Linux the code
-  might work, but on Windows your program will crash.  ASAN may not
+  might work, but on Windows your program will crash. ASAN may not
   catch all of these problems: stay vigilant to the possibility that
   your crash is due to a real memory problem.
 
-* (NVCC) `c10::optional` does not work when used from device code.  Don't use
-  it from kernels.  Upstream issue: https://github.com/akrzemi1/Optional/issues/58
+* (NVCC) `c10::optional` does not work when used from device code. Don't use
+  it from kernels. Upstream issue: https://github.com/akrzemi1/Optional/issues/58
   and our local issue #10329.
 
 * `constexpr` generally works less well on MSVC.
 
   * The idiom `static_assert(f() == f())` to test if `f` is constexpr
     does not work; you'll get "error C2131: expression did not evaluate
-    to a constant".  Don't use these asserts on Windows.
+    to a constant". Don't use these asserts on Windows.
     (Example: `c10/util/intrusive_ptr.h`)
 
 * (NVCC) Code you access inside a `static_assert` will eagerly be
   evaluated as if it were device code, and so you might get an error
   that the code is "not accessible".
 
-```
+```cpp
 class A {
   static A singleton_;
   static constexpr inline A* singleton() {
@@ -429,8 +430,8 @@ class A {
 static_assert(std::is_same(A*, decltype(A::singleton()))::value, "hmm");
 ```
 
-* The compiler will run out of heap if you attempt to compile files that
-  are too large.  Splitting such files into separate files helps.
+* The compiler will run out of heap space if you attempt to compile files that
+  are too large. Splitting such files into separate files helps.
   (Example: `THTensorMath`, `THTensorMoreMath`, `THTensorEvenMoreMath`.)
 
 ### Running Clang-Tidy
@@ -454,8 +455,8 @@ have more checks than older versions. In our CI, we run clang-tidy-6.0.
    git revision (you may want to replace `HEAD~1` with `HEAD` to pick up
    uncommitted changes). Changes are picked up based on a `git diff` with the
    given revision:
-  ```sh
-  $ python tools/clang_tidy.py -d build -p torch/csrc --diff 'HEAD~1'
+  ```bash
+  python tools/clang_tidy.py -d build -p torch/csrc --diff 'HEAD~1'
   ```
 
 Above, it is assumed you are in the PyTorch root folder. `path/to/build` should
@@ -470,30 +471,30 @@ We use clang-tidy and flake8 to perform additional formatting and semantic check
 of code. We provide a pre-commit git hook for performing these checks, before
 a commit is created:
 
-  ```sh
-  $ ln -s ../../tools/git-pre-commit .git/hooks/pre-commit
+  ```bash
+  ln -s ../../tools/git-pre-commit .git/hooks/pre-commit
   ```
 
 ## Caffe2 notes
 
-In 2018, we merged Caffe2 into the PyTorch source repository.  While the
+In 2018, we merged Caffe2 into the PyTorch source repository. While the
 steady state aspiration is that Caffe2 and PyTorch share code freely,
 in the meantime there will be some separation.
 
 If you submit a PR to only PyTorch or only Caffe2 code, CI will only
-run for the project you edited.  The logic for this is implemented
+run for the project you edited. The logic for this is implemented
 in `.jenkins/pytorch/dirty.sh` and `.jenkins/caffe2/dirty.sh`; you
 can look at this to see what path prefixes constitute changes.
 This also means if you ADD a new top-level path, or you start
 sharing code between projects, you need to modify these files.
 
 There are a few "unusual" directories which, for historical reasons,
-are Caffe2/PyTorch specific.  Here they are:
+are Caffe2/PyTorch specific. Here they are:
 
 - `CMakeLists.txt`, `Makefile`, `binaries`, `cmake`, `conda`, `modules`,
-  `scripts` are Caffe2-specific.  Don't put PyTorch code in them without
+  `scripts` are Caffe2-specific. Don't put PyTorch code in them without
   extra coordination.
 
 - `mypy*`, `requirements.txt`, `setup.py`, `test`, `tools` are
-  PyTorch-specific.  Don't put Caffe2 code in them without extra
+  PyTorch-specific. Don't put Caffe2 code in them without extra
   coordination.

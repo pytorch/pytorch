@@ -186,7 +186,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     if (isLegacyOperator()) {
       CAFFE_ENFORCE_WITH_CALLER(
           options.device_opt() != c10::nullopt,
-          "device must be provided in option.");
+          "device must be provided in options.");
       return BlobGetMutableTensor(outputs_.at(idx), dims, options);
     }
     auto* ival = ivalue_outputs_[idx];
@@ -208,14 +208,17 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       at::TensorOptions options,
       const Tensor& src,
       bool async = false) {
-    Tensor* t = Output<Tensor>(idx, options.device().type());
-    // TODO:
-    // We plan to use the following:
-    // Tensor* t = OutputTensor(idx, src.sizes(), src.options()+options);
-    // that is overwrite options of src Tensor
-    CAFFE_ENFORCE(
-        !t->dtype_initialized() || t->dtype() == src.dtype(),
-        "We don't allow a change of data type in OutputTensor");
+    CAFFE_ENFORCE_WITH_CALLER(
+        options.device_opt() != c10::nullopt,
+        "device must be provided in options.");
+    // Ouptut Tensor will always have the same data type as `src`
+    if (!options.has_dtype()) {
+      options = options.dtype(src.dtype());
+    }
+    CAFFE_ENFORCE_WITH_CALLER(
+        options.dtype() == src.dtype(),
+        "We don't allow change of src data type in OutputTensorCopyFrom");
+    Tensor* t = OutputTensor(idx, src.sizes(), options);
     t->CopyFrom(src, async);
     return t;
   }
@@ -531,13 +534,6 @@ inline NetDef OperatorBase::GetSingleArgument<NetDef>(
   return NetDef();
 }
 
-// If your operator does not need any specialized contructor or destructor,
-// you can simply use this to save two lines of code.
-#define USE_SIMPLE_BASE_CTOR_DTOR(name)                                        \
-  name(const OperatorDef& operator_def, Workspace* ws)                         \
-      : OperatorBase(operator_def, ws) {}                                      \
-  virtual ~name() noexcept {}
-
 // OP_SINGLE_ARG provides a shorter initialization choice for initialization of
 // member variables for the class constructors.
 // This is a workaround for CUDA9.2 and GCC7
@@ -574,7 +570,7 @@ class Operator : public OperatorBase {
       : OperatorBase(operator_def, ws), context_(operator_def.device_option()) {
     // In the constructor, we switch to the device so that the child class
     // constructors will run on that device.
-    context_.SwitchToDevice(0);
+    context_.SwitchToDevice();
   }
   explicit Operator(
       const c10::FunctionSchema& fn_schema,
@@ -583,7 +579,7 @@ class Operator : public OperatorBase {
       : OperatorBase(fn_schema, inputs, outputs) {
     // In the constructor, we switch to the device so that the child class
     // constructors will run on that device.
-    context_.SwitchToDevice(0);
+    context_.SwitchToDevice();
   }
   ~Operator() noexcept override {}
 
@@ -594,6 +590,7 @@ class Operator : public OperatorBase {
   }
 
   Tensor XOutput(int idx, at::IntList dims, at::TensorOptions options) {
+    // We'll default device to the device of the current Operator Context
     if (options.device_opt() == c10::nullopt) {
       return OperatorBase::XOutputTensor(
           idx, dims, options.device(context_.device()));
@@ -602,6 +599,7 @@ class Operator : public OperatorBase {
   }
 
   Tensor* Output(int idx, at::IntList dims, at::TensorOptions options) {
+    // We'll default device to the device of the current Operator Context
     if (options.device_opt() == c10::nullopt) {
       return OperatorBase::OutputTensor(
           idx, dims, options.device(context_.device()));
@@ -611,6 +609,18 @@ class Operator : public OperatorBase {
 
   inline Tensor* Output(int idx, DeviceType type = Context::GetDeviceType()) {
     return OperatorBase::template Output<Tensor>(idx, type);
+  }
+
+  Tensor* OutputTensorCopyFrom(
+      int idx,
+      at::TensorOptions options,
+      const Tensor& src,
+      bool async = false) {
+    if (options.device_opt() == c10::nullopt) {
+      return OperatorBase::OutputTensorCopyFrom(
+          idx, options.device(context_.device()), src, async);
+    }
+    return OperatorBase::OutputTensorCopyFrom(idx, options, src, async);
   }
 
   void WaitEvent(const Event& ev, int stream_id = -1) final {
@@ -780,13 +790,14 @@ class Operator : public OperatorBase {
   /* using override */ using OperatorBase::OutputSize;              \
   /* using override */ using OperatorBase::IsInputOutputAlias
 
-#define USE_OPERATOR_FUNCTIONS(context)                    \
-  USE_OPERATOR_BASE_FUNCTIONS;                             \
-  /* using override */ using Operator<context>::context_;  \
-  /* using override */ using Operator<context>::Input;     \
-  /* using override */ using Operator<context>::InputBlob; \
-  /* using override */ using Operator<context>::Output;    \
-  /* using override */ using Operator<context>::OutputBlob
+#define USE_OPERATOR_FUNCTIONS(context)                     \
+  USE_OPERATOR_BASE_FUNCTIONS;                              \
+  /* using override */ using Operator<context>::context_;   \
+  /* using override */ using Operator<context>::Input;      \
+  /* using override */ using Operator<context>::InputBlob;  \
+  /* using override */ using Operator<context>::Output;     \
+  /* using override */ using Operator<context>::OutputBlob; \
+  /* using override */ using Operator<context>::OutputTensorCopyFrom
 
 #define USE_OPERATOR_CONTEXT_FUNCTIONS USE_OPERATOR_FUNCTIONS(Context)
 

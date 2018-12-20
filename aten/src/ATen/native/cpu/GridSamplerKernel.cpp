@@ -484,25 +484,25 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear, padding>
     // So we store the necessary vectors to temporary arrays and use the helper
     // mask_scatter_add defined above.
 
-    integer_t i_gInp_nw_offset_arr[iVec::size];
-    integer_t i_gInp_ne_offset_arr[iVec::size];
-    integer_t i_gInp_sw_offset_arr[iVec::size];
-    integer_t i_gInp_se_offset_arr[iVec::size];
+    integer_t i_gInp_nw_offset_arr[iVec::size()];
+    integer_t i_gInp_ne_offset_arr[iVec::size()];
+    integer_t i_gInp_sw_offset_arr[iVec::size()];
+    integer_t i_gInp_se_offset_arr[iVec::size()];
     i_gInp_nw_offset.store(i_gInp_nw_offset_arr);
     i_gInp_ne_offset.store(i_gInp_ne_offset_arr);
     i_gInp_sw_offset.store(i_gInp_sw_offset_arr);
     i_gInp_se_offset.store(i_gInp_se_offset_arr);
 
-    integer_t i_nw_mask_arr[iVec::size];
-    integer_t i_ne_mask_arr[iVec::size];
-    integer_t i_sw_mask_arr[iVec::size];
-    integer_t i_se_mask_arr[iVec::size];
+    integer_t i_nw_mask_arr[iVec::size()];
+    integer_t i_ne_mask_arr[iVec::size()];
+    integer_t i_sw_mask_arr[iVec::size()];
+    integer_t i_se_mask_arr[iVec::size()];
     nw_mask.store(i_nw_mask_arr);
     ne_mask.store(i_ne_mask_arr);
     sw_mask.store(i_sw_mask_arr);
     se_mask.store(i_se_mask_arr);
 
-    scalar_t gInp_corner_arr[Vec::size];
+    scalar_t gInp_corner_arr[Vec::size()];
 
     auto gx = Vec(0), gy = Vec(0);
     #ifndef _MSC_VER  
@@ -539,7 +539,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear, padding>
     gx = gx * gx_mult;
     gy = gy * gy_mult;
 
-    constexpr int64_t step = Vec::size;
+    constexpr int64_t step = Vec::size();
     auto interleaved_gGrid = interleave2(gx, gy);
     auto gGrid_ptr = gGrid_slice.data() + offset * 2;
     std::get<0>(interleaved_gGrid).store(gGrid_ptr,
@@ -630,9 +630,9 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Nearest, padding> 
 
     auto i_gInp_offset = i_y_nearest * iVec(inp_W) + i_x_nearest;  // gInp is contiguous
 
-    integer_t mask_arr[iVec::size];
+    integer_t mask_arr[iVec::size()];
     i_mask.store(mask_arr);
-    integer_t gInp_offset_arr[iVec::size];
+    integer_t gInp_offset_arr[iVec::size()];
     i_gInp_offset.store(gInp_offset_arr);
 
     #ifndef _MSC_VER  
@@ -666,7 +666,7 @@ static inline void grid_sample_2d_grid_slice_iterator(
 
   using Vec = Vec256<scalar_t>;
   using iVec = Vec256<int_same_size_t<scalar_t>>;
-  constexpr int64_t step = Vec::size;
+  constexpr int64_t step = Vec::size();
 
   // Loop over each output pixel in grid.
   // We consider the following three cases (after slicing out the batch

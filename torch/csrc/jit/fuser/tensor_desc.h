@@ -43,7 +43,7 @@ struct TORCH_API TensorDesc {
   TensorDesc(const at::Tensor& t)
   : TensorDesc(t.type().scalarType(), t.sizes(), t.strides()) {}
 
-  TensorDesc(CompleteTensorTypePtr type)
+  TensorDesc(const CompleteTensorTypePtr& type)
   : TensorDesc(type->scalarType(), type->sizes(), type->strides()) {}
 
   // number of dimensions after contiguity compression
@@ -91,7 +91,7 @@ inline std::ostream& operator<<(std::ostream& out, const TensorDesc& d) {
 }
 
 } // namespace fuser
-} // namespace jit 
+} // namespace jit
 } // namespace torch
 
 #endif // USE_CUDA_FUSER || USE_CPU_FUSER

@@ -82,7 +82,7 @@ class MomentsGradientOp final : public Operator<Context> {
     const auto& dvariance = Input(1);
     const auto& X = Input(2);
     const auto& mean = Input(3);
-    auto* dX = Output(0);
+
     const int ndim = X.dim();
     if (axes_.empty()) {
       axes_.resize(ndim);
@@ -100,7 +100,7 @@ class MomentsGradientOp final : public Operator<Context> {
     for (const int axis : axes_) {
       dY_dims[axis] = 1;
     }
-    dX->ResizeLike(X);
+    auto* dX = Output(0, X.sizes(), at::dtype<T>());
     return Compute(
         dY_dims,
         dX_dims,

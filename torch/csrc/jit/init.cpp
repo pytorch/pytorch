@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/import.h>
 #include <torch/csrc/jit/argument_spec.h>
+#include <torch/csrc/jit/fuser/kernel_cache.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/onnx.h>
@@ -93,6 +94,10 @@ void initJITBindings(PyObject *module) {
   py::class_<python::IODescriptor>(m, "IODescriptor"); // NOLINT(bugprone-unused-raii)
 
   m.def("_jit_init", loadPythonClasses)
+#if USE_CUDA_FUSER || USE_CPU_FUSER
+   .def("_jit_debug_fuser_num_cached_kernel_specs",
+       torch::jit::fuser::debugNumCachedKernelSpecs)
+#endif
    .def("_jit_pass_onnx", ToONNX)
    .def("_jit_pass_lower_all_tuples", LowerAllTuples)
    .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
@@ -295,7 +300,7 @@ void initJITBindings(PyObject *module) {
   m.def("_jit_get_operation", [](const std::string& qualified_name) {
     try {
       auto symbol = Symbol::fromQualString(qualified_name);
-      auto operations = getAllOperatorsFor(std::move(symbol));
+      auto operations = getAllOperatorsFor(symbol);
       AT_CHECK(!operations.empty(), "No such operator ", qualified_name);
       AT_CHECK(
           operations.size() == 1,
@@ -333,7 +338,7 @@ void initJITBindings(PyObject *module) {
   });
   m.def("_jit_get_schemas_for_operator", [](const std::string& qualified_name) {
     auto symbol = Symbol::fromQualString(qualified_name);
-    auto operations = getAllOperatorsFor(std::move(symbol));
+    auto operations = getAllOperatorsFor(symbol);
     return fmap(operations, [](const std::shared_ptr<Operator>& op) {
         return op->schema();
       });
@@ -351,6 +356,9 @@ void initJITBindings(PyObject *module) {
     // TODO: this is a fake stub
   });
 
+  m.def("_jit_assert_is_instance", [](py::object obj, TypePtr type) {
+    toIValue(obj, type);
+  });
 
   initPythonIRBindings(module);
   tracer::initPythonTracerBindings(module);

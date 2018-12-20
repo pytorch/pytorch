@@ -401,7 +401,7 @@ RegisterOperators reg({
           return [=](Stack& stack) {
             bool result = false;
             for (const IValue& t : last(stack, num_inputs)) {
-              if (std::move(t).toTensor().defined()) {
+              if (t.toTensor().defined()) {
                 result = true;
                 break;
               }
@@ -1135,6 +1135,7 @@ Operator(                                                                      \
             at::Tensor t;
             pop(stack, t);
             std::vector<int64_t> elems;
+            elems.reserve(t.size(0));
             for(int i = 0; i < t.size(0); i++){
               elems.push_back(*t[i].data<int32_t>());
             }
@@ -1163,7 +1164,7 @@ Operator(                                                                      \
 // checking one of size & scale_factor is set
 // if scale_factor is a double list check that it's len == dim
 // reference: _check_size_scale_factor in torch/nn/functional.py
-void _check_size_factor(size_t dim, const IValue& size, IValue scale_factor) {
+void _check_size_factor(size_t dim, const IValue& size, const IValue& scale_factor) {
   if (size.isNone() && scale_factor.isNone()) {
     throw std::runtime_error("either size or scale_factor should be defined");
   }
@@ -1184,7 +1185,7 @@ void _check_size_factor(size_t dim, const IValue& size, IValue scale_factor) {
 // reference: _output_size in torch/nn/functional.py
 // size can be none, int or intlist
 // scale_factors can be none, float, or floatlist
-std::vector<int64_t> _output_size(at::Tensor input, size_t dim, IValue size, IValue scale_factors) {
+std::vector<int64_t> _output_size(const at::Tensor& input, size_t dim, const IValue& size, const IValue& scale_factors) {
   if (!size.isNone()) {
     if (size.isInt()) {
       std::vector<int64_t> repeated(dim, size.toInt());
@@ -1209,12 +1210,16 @@ std::vector<int64_t> _output_size(at::Tensor input, size_t dim, IValue size, IVa
 // reference: interpolate in torch/nn/functional.py
 // size can be none, int or intlist
 // scale_factors can be none, float, or floatlist
-at::Tensor interpolate(at::Tensor input, IValue size, IValue scale_factors,
-    std::string mode, c10::optional<bool> align_corners) {
+at::Tensor interpolate(
+    const at::Tensor& input,
+    const IValue& size,
+    const IValue& scale_factors,
+    const std::string& mode,
+    c10::optional<bool> align_corners) {
   if ((mode == "nearest" || mode == "area")) {
     if (align_corners != c10::nullopt) {
       throw std::runtime_error("align_corners option can only be set with the "
-                             "interpolating modes: linear | bilinear | trilinear");
+                             "interpolating modes: linear | bilinear | bicubic | trilinear");
     }
   } else {
     if (align_corners == c10::nullopt) {
@@ -1242,18 +1247,24 @@ at::Tensor interpolate(at::Tensor input, IValue size, IValue scale_factors,
     return at::upsample_linear1d(input, _output_size(input, 1, size, scale_factors), *align_corners);
   if (input_dim == 3 && mode == "bilinear")
     throw std::runtime_error("Got 3D input, but bilinear mode needs 4D input");
+  if (input_dim == 3 && mode == "bicubic")
+    throw std::runtime_error("Got 3D input, but bicubic mode needs 4D input");
   if (input_dim == 3 && mode == "trilinear")
     throw std::runtime_error("Got 3D input, but trilinear mode needs 5D input");
   if (input_dim == 4 && mode == "linear")
     throw std::runtime_error("Got 4D input, but linear mode needs 3D input");
   if (input_dim == 4 && mode == "bilinear")
     return at::upsample_bilinear2d(input, _output_size(input, 2, size, scale_factors), *align_corners);
+  if (input_dim == 4 && mode == "bicubic")
+    return at::upsample_bicubic2d(input, _output_size(input, 2, size, scale_factors), *align_corners);
   if (input_dim == 4 && mode == "trilinear")
     throw std::runtime_error("Got 4D input, but trilinear mode needs 5D input");
   if (input_dim == 5 && mode == "linear")
     throw std::runtime_error("Got 5D input, but linear mode needs 3D input");
   if (input_dim == 5 && mode == "bilinear")
     throw std::runtime_error("Got 5D input, but bilinear mode needs 4D input");
+  if (input_dim == 5 && mode == "bicubic")
+    throw std::runtime_error("Got 5D input, but bicubic mode needs 4D input");
   if (input_dim == 5 && mode == "trilinear")
     return at::upsample_trilinear3d(input, _output_size(input, 3, size, scale_factors), *align_corners);
 
@@ -1279,7 +1290,7 @@ Operation interpolate_op(const Node* n) {
 // interpolate takes in float & float[] for scale factor
 // upsample takes in int & int[], so convert the ints to floats before
 // passing on to the interpolate op
-IValue convert_scale_factor_to_double(IValue int_ivalue) {
+IValue convert_scale_factor_to_double(const IValue& int_ivalue) {
   IValue scale_factor_double;
   if (int_ivalue.isInt()) {
     scale_factor_double = static_cast<double>(int_ivalue.toInt());
@@ -1384,10 +1395,10 @@ RegisterOperators reg3({
 });
 
 
-at::Tensor leaky_relu(at::Tensor tensor, double scalar) {
+at::Tensor leaky_relu(const at::Tensor& tensor, double scalar) {
   return at::leaky_relu(tensor, scalar);
 }
-at::Tensor cat(std::vector<at::Tensor> tensors) {
+at::Tensor cat(const std::vector<at::Tensor>& tensors) {
   return at::cat(tensors);
 }
 

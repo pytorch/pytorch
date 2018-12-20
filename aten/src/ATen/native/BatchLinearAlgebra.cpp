@@ -55,8 +55,8 @@ void lapackGetri(int n, scalar_t *a, int lda, int *ipiv, scalar_t *work, int lwo
 }
 
 template<class scalar_t>
-void lapackPotrs(char uplo, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, int *info) {
-  AT_ERROR("potrs only takes float or double Tensors");
+void lapackCholeskySolve(char uplo, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, int *info) {
+  AT_ERROR("cholesky_solve only takes float or double Tensors");
 }
 
 template<class scalar_t>
@@ -89,11 +89,11 @@ template<> void lapackGetrf<float>(int m, int n, float *a, int lda, int *ipiv, i
   sgetrf_(&m, &n, a, &lda, ipiv, info);
 }
 
-template<> void lapackPotrs<double>(char uplo, int n, int nrhs, double *a, int lda, double *b, int ldb, int *info) {
+template<> void lapackCholeskySolve<double>(char uplo, int n, int nrhs, double *a, int lda, double *b, int ldb, int *info) {
   dpotrs_(&uplo, &n, &nrhs, a, &lda, b, &ldb, info);
 }
 
-template<> void lapackPotrs<float>(char uplo, int n, int nrhs, float *a, int lda, float *b, int ldb, int *info) {
+template<> void lapackCholeskySolve<float>(char uplo, int n, int nrhs, float *a, int lda, float *b, int ldb, int *info) {
   spotrs_(&uplo, &n, &nrhs, a, &lda, b, &ldb, info);
 }
 
@@ -245,12 +245,12 @@ Tensor& inverse_out(Tensor &result, const Tensor &self) {
   return result;
 }
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ potrs ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<typename scalar_t>
-static void apply_potrs(Tensor& b, Tensor& A, bool upper, std::vector<int64_t>& infos) {
+static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, std::vector<int64_t>& infos) {
 #ifndef USE_LAPACK
-  AT_ERROR("potrs: LAPACK library not found in compilation");
+  AT_ERROR("cholesky_solve: LAPACK library not found in compilation");
 #else
   char uplo = upper ? 'U' : 'L';
 
@@ -267,7 +267,7 @@ static void apply_potrs(Tensor& b, Tensor& A, bool upper, std::vector<int64_t>& 
     int info;
     scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
     scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
-    lapackPotrs<scalar_t>(uplo, n, nrhs, A_working_ptr, n, b_working_ptr, n, &info);
+    lapackCholeskySolve<scalar_t>(uplo, n, nrhs, A_working_ptr, n, b_working_ptr, n, &info);
     infos[i] = info;
     if (info != 0) {
       return;
@@ -276,31 +276,31 @@ static void apply_potrs(Tensor& b, Tensor& A, bool upper, std::vector<int64_t>& 
 #endif
 }
 
-Tensor _potrs_helper_cpu(const Tensor& self, const Tensor& A, bool upper) {
+Tensor _cholesky_solve_helper_cpu(const Tensor& self, const Tensor& A, bool upper) {
   std::vector<int64_t> infos(batchCount(self), 0);
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "potrs", [&]{
-    apply_potrs<scalar_t>(self_working_copy, A_working_copy, upper, infos);
+  AT_DISPATCH_FLOATING_TYPES(self.type(), "cholesky_solve", [&]{
+    apply_cholesky_solve<scalar_t>(self_working_copy, A_working_copy, upper, infos);
   });
-  batchCheckErrors(infos, "potrs");
+  batchCheckErrors(infos, "cholesky_solve");
   return self_working_copy;
 }
 
 // Supports arbitrary batch dimensions for self and A
-Tensor potrs(const Tensor& self, const Tensor& A, bool upper) {
+Tensor cholesky_solve(const Tensor& self, const Tensor& A, bool upper) {
   if (self.dim() <= 2 && A.dim() <= 2) {
     return at::legacy::th::_th_potrs_single(self, A, upper);
   }
 
   Tensor self_broadcasted, A_broadcasted;
   std::tie(self_broadcasted, A_broadcasted) = _linear_solve_broadcast_args(self, A);
-  return at::_potrs_helper(self_broadcasted, A_broadcasted, upper);
+  return at::_cholesky_solve_helper(self_broadcasted, A_broadcasted, upper);
 }
 
-Tensor& potrs_out(Tensor& result, const Tensor& self, const Tensor& A, bool upper) {
+Tensor& cholesky_solve_out(Tensor& result, const Tensor& self, const Tensor& A, bool upper) {
   AT_CHECK(self.dim() == 2 && A.dim() == 2,
-           "torch.potrs() with the `out` keyword does not support batching. "
+           "torch.cholesky_solve() with the `out` keyword does not support batching. "
            "b.dim() (", self.dim(), ") and A.dim() (", A.dim(), ") must both be 2.");
   return at::legacy::th::_th_potrs_single_out(result, self, A, upper);
 }

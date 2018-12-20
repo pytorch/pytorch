@@ -925,6 +925,26 @@ THC_API void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
                   int outputWidth,
                   bool align_corners);
 
+THC_API void THNN_(SpatialUpSamplingBicubic_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  int outputHeight,
+                  int outputWidth,
+                  bool align_corners);
+
+THC_API void THNN_(SpatialUpSamplingBicubic_updateGradInput)(
+                  THCState *state,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  int nbatch,
+                  int nchannels,
+                  int inputHeight,
+                  int inputWidth,
+                  int outputHeight,
+                  int outputWidth,
+                  bool align_corners);
+
 THC_API void THNN_(SpatialUpSamplingNearest_updateGradInput)(
                   THCState *state,
                   THCTensor *gradOutput,
