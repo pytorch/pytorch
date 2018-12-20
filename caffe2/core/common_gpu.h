@@ -286,6 +286,12 @@ CAFFE2_CUDA_API const char* curandGetErrorString(curandStatus_t error);
   for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < (n); \
        i += blockDim.x * gridDim.x)
 
+#define CUDA_2D_KERNEL_LOOP(i, n, j, m)                             \
+  for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < (n);   \
+       i += blockDim.x * gridDim.x)                                 \
+    for (size_t j = blockIdx.y * blockDim.y + threadIdx.y; j < (m); \
+         j += blockDim.y * gridDim.y)
+
 // CUDA_KERNEL_ASSERT is a macro that wraps an assert() call inside cuda
 // kernels. This is not supported by Apple platforms so we special case it.
 // See http://docs.nvidia.com/cuda/cuda-c-programming-guide/#assertion
@@ -309,13 +315,22 @@ CAFFE2_CUDA_API const char* curandGetErrorString(curandStatus_t error);
 // The number of cuda threads to use. Since work is assigned to SMs at the
 // granularity of a block, 128 is chosen to allow utilizing more SMs for
 // smaller input sizes.
+// 1D grid
 constexpr int CAFFE_CUDA_NUM_THREADS = 128;
+// 2D grid
+constexpr int CAFFE_CUDA_NUM_THREADS_2D_DIMX = 16;
+constexpr int CAFFE_CUDA_NUM_THREADS_2D_DIMY = 16;
+
 // The maximum number of blocks to use in the default kernel call. We set it to
 // 4096 which would work for compute capability 2.x (where 65536 is the limit).
 // This number is very carelessly chosen. Ideally, one would like to look at
 // the hardware at runtime, and pick the number of blocks that makes most
 // sense for the specific runtime environment. This is a todo item.
+// 1D grid
 constexpr int CAFFE_MAXIMUM_NUM_BLOCKS = 4096;
+// 2D grid
+constexpr int CAFFE_MAXIMUM_NUM_BLOCKS_2D_DIMX = 128;
+constexpr int CAFFE_MAXIMUM_NUM_BLOCKS_2D_DIMY = 128;
 
 constexpr int kCUDAGridDimMaxX = 2147483647;
 constexpr int kCUDAGridDimMaxY = 65535;
@@ -331,6 +346,32 @@ inline int CAFFE_GET_BLOCKS(const int N) {
           CAFFE_MAXIMUM_NUM_BLOCKS),
       // Use at least 1 block, since CUDA does not allow empty block
       1);
+}
+
+/**
+ * @brief Compute the number of blocks needed to run N threads for a 2D grid
+ */
+inline dim3 CAFFE_GET_BLOCKS_2D(const int N, const int /* M */) {
+  dim3 grid;
+  // Not calling the 1D version for each dim to keep all constants as literals
+
+  grid.x = std::max(
+      std::min(
+          (N + CAFFE_CUDA_NUM_THREADS_2D_DIMX - 1) /
+              CAFFE_CUDA_NUM_THREADS_2D_DIMX,
+          CAFFE_MAXIMUM_NUM_BLOCKS_2D_DIMX),
+      // Use at least 1 block, since CUDA does not allow empty block
+      1);
+
+  grid.y = std::max(
+      std::min(
+          (N + CAFFE_CUDA_NUM_THREADS_2D_DIMY - 1) /
+              CAFFE_CUDA_NUM_THREADS_2D_DIMY,
+          CAFFE_MAXIMUM_NUM_BLOCKS_2D_DIMY),
+      // Use at least 1 block, since CUDA does not allow empty block
+      1);
+
+  return grid;
 }
 
 class DeviceGuard {
