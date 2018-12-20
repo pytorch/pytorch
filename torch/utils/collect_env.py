@@ -40,8 +40,8 @@ def run(command):
     output, err = p.communicate()
     rc = p.returncode
     if PY3:
-        output = output.decode("ascii")
-        err = err.decode("ascii")
+        output = output.decode("utf-8")
+        err = err.decode("utf-8")
     return rc, output.strip(), err.strip()
 
 
