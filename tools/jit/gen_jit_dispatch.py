@@ -73,7 +73,10 @@ def jit_type_of(arg):
         typ = 'int[{}]'.format(arg['size'])
 
     if arg.get('is_nullable') and '?' not in typ:
-        typ = '{}?'.format(typ)
+        if typ == 'Tensor[]':
+            typ = 'Tensor?[]'
+        else:
+            typ = '{}?'.format(typ)
     return typ
 
 

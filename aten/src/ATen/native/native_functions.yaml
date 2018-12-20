@@ -886,7 +886,7 @@
 - func: _cufft_clear_plan_cache() -> void
   device_guard: false
 
-- func: index(Tensor self, TensorList indices) -> Tensor
+- func: index(Tensor self, Tensor?[] indices) -> Tensor
   variants: function, method
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
 

@@ -36,6 +36,10 @@ def parse_default(s):
 def sanitize_type(typ):
     if typ == 'Generator*':
         return 'Generator *'
+    elif typ == 'Tensor[]' or typ == 'Tensor?[]':
+        # list of optional tensor type is also default to TensorList
+        # TODO: remove this when undefined tensor semantic is removed
+        return 'TensorList'
     return typ
 
 
@@ -77,7 +81,7 @@ def parse_arguments(args, func_decl, func_name, func_return):
 
         typ = sanitize_types(t)
         assert len(typ) == 1
-        argument_dict = {'type': typ[0].rstrip('?'), 'name': name, 'is_nullable': typ[0].endswith('?')}
+        argument_dict = {'type': typ[0].rstrip('?'), 'name': name, 'is_nullable': '?' in t}
         match = re.match(r'IntList\[(\d+)\]', argument_dict['type'])
         if match:
             argument_dict['type'] = 'IntList'
