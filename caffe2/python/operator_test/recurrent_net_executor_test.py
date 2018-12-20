@@ -294,12 +294,12 @@ class TestRNNExecutor(unittest.TestCase):
         # start failing as this function will become defective.
         self.assertEqual(1 if forward_only else 2, num_found)
 
-    if __name__ == "__main__":
-        import unittest
-        import random
-        random.seed(2603)
-        workspace.GlobalInit([
-            'caffe2',
-            '--caffe2_log_level=0',
-            '--caffe2_rnn_executor=1'])
-        unittest.main()
+if __name__ == "__main__":
+    import unittest
+    import random
+    random.seed(2603)
+    workspace.GlobalInit([
+        'caffe2',
+        '--caffe2_log_level=0',
+        '--caffe2_rnn_executor=1'])
+    unittest.main()
