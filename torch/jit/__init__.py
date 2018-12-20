@@ -1152,7 +1152,7 @@ if _enabled:
                         setattr(curr, name, ScriptModule())
                     curr = getattr(curr, name)
                 return curr
-            self._copy_into(module_lookup, [])
+            self._copy_into(module_lookup, {}, [])
             return m
 
         def __getstate__(self):
