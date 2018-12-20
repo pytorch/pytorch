@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/assertions.h>
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/operator.h>
@@ -13,7 +14,7 @@ void placeholderCreator(Method&) {
   throw RecursiveMethodCallError();
 }
 
-c10::optional<std::vector<Value*>> try_emit_call_to(
+Value* try_emit_call_to(
     Graph& graph,
     const SourceRange& loc,
     Method& callee,
@@ -35,7 +36,7 @@ c10::optional<std::vector<Value*>> try_emit_call_to(
     callee.getSchema(),
     loc, graph, std::move(self), args, kwargs, failure_messages, conv_tensors_to_nums);
   if(!matched_schema)
-    return c10::nullopt;
+    return nullptr;
 
   // parameters to callee method (which become parameters to _this_ method
   // if they were not already)
@@ -45,10 +46,11 @@ c10::optional<std::vector<Value*>> try_emit_call_to(
     }
     matched_schema->inputs.push_back(caller->get_or_add_parameter(member));
   }
-  return inlineCallTo(graph, *callee.graph(), matched_schema->inputs);
+  callee.check_single_output();
+  return inlineCallTo(graph, *callee.graph(), matched_schema->inputs).at(0);
 }
 
-std::vector<Value*> Method::emit_call_to(const SourceRange& loc, Method & callee, ArrayRef<NamedValue> args, ArrayRef<NamedValue> kwargs) {
+Value* Method::emit_call_to(const SourceRange& loc, Method & callee, ArrayRef<NamedValue> args, ArrayRef<NamedValue> kwargs) {
   JIT_ASSERT(!executor);
   std::stringstream failure_messages;
   if (auto result = try_emit_call_to(
@@ -61,7 +63,7 @@ std::vector<Value*> Method::emit_call_to(const SourceRange& loc, Method & callee
           failure_messages,
           this,
           /*conv_tensors_to_nums=*/true)) {
-    return *result;
+    return result;
   }
   throw ErrorReport(loc) << failure_messages.str();
 }

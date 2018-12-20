@@ -39,9 +39,13 @@ class DropoutImplBase : public torch::nn::Cloneable<Derived> {
 class TORCH_API DropoutImpl : public detail::DropoutImplBase<DropoutImpl> {
  public:
   using detail::DropoutImplBase<DropoutImpl>::DropoutImplBase;
+
   /// During training, applies a noise mask to the input tensor.
   /// During evaluation, applies an identity function.
   Tensor forward(const Tensor& input);
+
+  /// Pretty prints the `Dropout` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
 };
 
 /// Applies spatial [Dropout](https://arxiv.org/abs/1207.0580) to inputs with
@@ -53,12 +57,17 @@ class TORCH_API DropoutImpl : public detail::DropoutImplBase<DropoutImpl> {
 /// [Dropout3d](https://pytorch.org/docs/stable/nn.html#torch.nn.Dropout3d) for
 /// 3-D features. This `FeatureDropout` module can instead deal with both 2-D
 /// and 3-D features.
-class TORCH_API FeatureDropoutImpl : public detail::DropoutImplBase<FeatureDropoutImpl> {
+class TORCH_API FeatureDropoutImpl
+    : public detail::DropoutImplBase<FeatureDropoutImpl> {
  public:
   using detail::DropoutImplBase<FeatureDropoutImpl>::DropoutImplBase;
+
   /// During training, applies a noise mask to the input tensor.
   /// During evaluation, applies an identity function.
   Tensor forward(const Tensor& input);
+
+  /// Pretty prints the `FeatureDropout` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
 };
 
 /// A `ModuleHolder` subclass for `DropoutImpl`.

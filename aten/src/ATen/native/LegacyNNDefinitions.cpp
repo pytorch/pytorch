@@ -604,6 +604,22 @@ Tensor upsample_bilinear2d_backward(const Tensor & grad_output, IntList output_s
   return at::legacy::th::_thnn_upsample_bilinear2d_backward(grad_output, output_size, input_size, align_corners);
 }
 
+Tensor & upsample_bicubic2d_out(Tensor & output, const Tensor & self, IntList output_size, bool align_corners) {
+  return at::legacy::th::_thnn_upsample_bicubic2d_forward_out(output, self, output_size, align_corners);
+}
+
+Tensor upsample_bicubic2d(const Tensor & self, IntList output_size, bool align_corners) {
+  return at::legacy::th::_thnn_upsample_bicubic2d_forward(self, output_size, align_corners);
+}
+
+Tensor & upsample_bicubic2d_backward_out(Tensor & grad_input, const Tensor & grad_output, IntList output_size, IntList input_size, bool align_corners) {
+  return at::legacy::th::_thnn_upsample_bicubic2d_backward_out(grad_input, grad_output, output_size, input_size, align_corners);
+}
+
+Tensor upsample_bicubic2d_backward(const Tensor & grad_output, IntList output_size, IntList input_size, bool align_corners) {
+  return at::legacy::th::_thnn_upsample_bicubic2d_backward(grad_output, output_size, input_size, align_corners);
+}
+
 Tensor & upsample_trilinear3d_out(Tensor & output, const Tensor & self, IntList output_size, bool align_corners) {
   return at::legacy::th::_thnn_upsample_trilinear3d_forward_out(output, self, output_size, align_corners);
 }
@@ -862,6 +878,38 @@ std::tuple<Tensor &,Tensor &,Tensor &> thnn_conv_dilated3d_backward_out(Tensor &
 
 std::tuple<Tensor,Tensor,Tensor> thnn_conv_dilated3d_backward(const Tensor & grad_output, const Tensor & self, const Tensor & weight, IntList kernel_size, IntList stride, IntList padding, IntList dilation, const Tensor & columns, const Tensor & ones, std::array<bool,3> output_mask) {
   return at::legacy::th::_thnn_conv_dilated3d_backward(grad_output, self, weight, kernel_size, stride, padding, dilation, columns, ones, output_mask);
+}
+
+Tensor thnn_col2im(const Tensor & self, IntList output_size, IntList kernel_size, IntList dilation, IntList padding, IntList stride) {
+  return at::legacy::th::_thnn_col2im_forward(self, output_size, kernel_size, dilation, padding, stride);
+}
+
+Tensor & thnn_col2im_out(Tensor & output, const Tensor & self, IntList output_size, IntList kernel_size, IntList dilation, IntList padding, IntList stride) {
+  return at::legacy::th::_thnn_col2im_forward_out(output, self, output_size, kernel_size, dilation, padding, stride);
+}
+
+Tensor thnn_col2im_backward(const Tensor & grad_output, IntList kernel_size, IntList dilation, IntList padding, IntList stride) {
+  return at::legacy::th::_thnn_col2im_backward(grad_output, kernel_size, dilation, padding, stride);
+}
+
+Tensor & thnn_col2im_backward_out(Tensor & grad_input, const Tensor & grad_output, IntList kernel_size, IntList dilation, IntList padding, IntList stride) {
+  return at::legacy::th::_thnn_col2im_backward_out(grad_input, grad_output, kernel_size, dilation, padding, stride);
+}
+
+Tensor thnn_im2col(const Tensor & self, IntList kernel_size, IntList dilation, IntList padding, IntList stride) {
+  return at::legacy::th::_thnn_im2col_forward(self, kernel_size, dilation, padding, stride);
+}
+
+Tensor & thnn_im2col_out(Tensor & output, const Tensor & self, IntList kernel_size, IntList dilation, IntList padding, IntList stride) {
+  return at::legacy::th::_thnn_im2col_forward_out(output, self, kernel_size, dilation, padding, stride);
+}
+
+Tensor thnn_im2col_backward(const Tensor & grad_output, IntList input_size, IntList kernel_size, IntList dilation, IntList padding, IntList stride) {
+  return at::legacy::th::_thnn_im2col_backward(grad_output, input_size, kernel_size, dilation, padding, stride);
+}
+
+Tensor & thnn_im2col_backward_out(Tensor & grad_input, const Tensor & grad_output, IntList input_size, IntList kernel_size, IntList dilation, IntList padding, IntList stride) {
+  return at::legacy::th::_thnn_im2col_backward_out(grad_input, grad_output, input_size, kernel_size, dilation, padding, stride);
 }
 
 }} // namespace at::native

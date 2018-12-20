@@ -449,8 +449,7 @@ void initPythonIRBindings(PyObject * module_) {
     })
     .def("isSubtypeOf", [](std::shared_ptr<Type>& self, std::shared_ptr<Type> other) {
         return self->isSubtypeOf(other);
-    })
-    .def_static("inferFrom", c10::inferTypeFrom);
+    });
 
   py::class_<NumberType, Type, std::shared_ptr<NumberType>>(m, "NumberType")
     .def_static("get", &NumberType::get);

@@ -69,9 +69,6 @@ struct Method {
   IValue operator()(std::vector<IValue> stack) {
     checkInputsAgainstSchema(stack);
     run(stack);
-    if (stack.size() != 1) {
-      return Tuple::create(std::move(stack));
-    }
     return stack.front();
   }
 
@@ -92,7 +89,7 @@ struct Method {
   // adding any extra parameters necessary to do this call
 
   // defined here to keep details of member_input handling confined to this class
-  std::vector<Value*> emit_call_to(const SourceRange& loc, Method & callee, ArrayRef<NamedValue> args, ArrayRef<NamedValue> kwargs);
+  Value* emit_call_to(const SourceRange& loc, Method & callee, ArrayRef<NamedValue> args, ArrayRef<NamedValue> kwargs);
 
   // if this isn't yet defined, run its method_creator function
   TORCH_API void ensure_defined();
@@ -144,12 +141,18 @@ struct Method {
       auto type = torch::jit::CompleteTensorType::create(scalar_type, at::kCPU, sizes);
       retval->inputs()[i]->setType(type);
     }
-    JIT_ASSERT(retval->outputs().size() == outputs.size());
+    at::ArrayRef<Value*> output_values = retval->outputs();
+    // patch this to still work if we are returning a tuple of multiple values
+    if (output_values.at(0)->type()->kind() == TupleType::Kind) {
+      JIT_ASSERT(output_values.at(0)->node()->kind()== prim::TupleConstruct);
+      output_values = output_values.at(0)->node()->inputs();
+    }
+    JIT_ASSERT(output_values.size() == outputs.size());
     for (size_t i=0; i < retval->outputs().size(); ++i) {
       auto scalar_type = outputs[i].type().scalarType();
       auto sizes = outputs[i].sizes();
       auto type = torch::jit::CompleteTensorType::create(scalar_type, at::kCPU, sizes);
-      retval->outputs()[i]->setType(type);
+      output_values[i]->setType(type);
     }
     return retval;
   }
@@ -194,6 +197,11 @@ struct Method {
     return *owner_;
   }
 
+  void check_single_output() {
+    AT_CHECK(
+        graph()->outputs().size() == 1,
+        "Method (but not graphs in general) require a single output. Use None/Tuple for 0 or 2+ outputs");
+  }
 private:
 
   static FunctionSchema defaultSchemaFor(const Method& method) {
@@ -213,7 +221,8 @@ private:
   }
 
   GraphExecutor& get_executor() {
-    std::call_once(executor_init, [&]{
+    std::call_once(executor_init, [&] {
+      check_single_output();
       executor = GraphExecutor(graph(), optimize);
     });
     return executor;
@@ -231,7 +240,10 @@ private:
     for (size_t pos = 0; pos < schema.arguments().size(); ++pos) {
       const auto& argument = schema.arguments()[pos];
       if (pos < inputs.size()) {
-        const TypePtr inputType = inferTypeFrom(inputs[pos]);
+        // XXX - this fails to handle generic aggregates
+        // and should be replaced with a function isSubvalueOf(ivalue, type)
+        // That asks if the specific value is a valid instance of type.
+        const TypePtr inputType = incompleteInferTypeFrom(inputs[pos]);
         AT_CHECK(inputType->isSubtypeOf(argument.type()),
               "Expected value of type ", *argument.type(),
               " for argument '", argument.name(),
@@ -460,8 +472,11 @@ struct Module {
 
   void save(const std::string& filename);
 
-  void copy_into(std::function<std::shared_ptr<Module>(std::vector<std::string>)> module_lookup, std::vector<std::string> names = {}) const {
-    std::unordered_map<at::Tensor*, at::Tensor*> parameter_remap;
+  void copy_into(std::function<std::shared_ptr<Module>(
+      std::vector<std::string>)> module_lookup,
+      // parameter_remap is needed when a parent module uses a parameter of a submodule
+      std::unordered_map<at::Tensor*, at::Tensor*>& parameter_remap,
+      std::vector<std::string> names = {}) const {
     auto curr = module_lookup(names);
     for (auto &kv : parameters) {
       curr->register_parameter(kv.key(), *kv.value().slot(), kv.value().is_buffer);
@@ -469,13 +484,15 @@ struct Module {
     }
     for (auto &kv : modules) {
       names.push_back(kv.key());
-      kv.value().module->copy_into(module_lookup, names);
+      // Submodules must be translated first, otherwise parameter_remap entries
+      // will not be filled in for methods of this module.
+      kv.value().module->copy_into(module_lookup, parameter_remap, names);
       names.pop_back();
     }
     for (auto &kv : methods) {
       std::vector<at::Tensor*> params;
       for (auto &p : kv.value()->params()) {
-        params.push_back(parameter_remap[p]);
+        params.push_back(parameter_remap.at(p));
       }
       curr->create_method(kv.key(), kv.value()->graph()->copy(), params);
     }
@@ -497,9 +514,9 @@ struct Module {
   bool optimize;
 };
 
-// returns c10::nullopt and fills in failure_messages if the callee does not
+// returns nullptr and fills in failure_messages if the callee does not
 // match the functions schema
-c10::optional<std::vector<Value*>> try_emit_call_to(
+Value* try_emit_call_to(
     Graph& graph,
     const SourceRange& loc,
     Method& callee,

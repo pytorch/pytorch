@@ -1219,7 +1219,7 @@ at::Tensor interpolate(
   if ((mode == "nearest" || mode == "area")) {
     if (align_corners != c10::nullopt) {
       throw std::runtime_error("align_corners option can only be set with the "
-                             "interpolating modes: linear | bilinear | trilinear");
+                             "interpolating modes: linear | bilinear | bicubic | trilinear");
     }
   } else {
     if (align_corners == c10::nullopt) {
@@ -1247,18 +1247,24 @@ at::Tensor interpolate(
     return at::upsample_linear1d(input, _output_size(input, 1, size, scale_factors), *align_corners);
   if (input_dim == 3 && mode == "bilinear")
     throw std::runtime_error("Got 3D input, but bilinear mode needs 4D input");
+  if (input_dim == 3 && mode == "bicubic")
+    throw std::runtime_error("Got 3D input, but bicubic mode needs 4D input");
   if (input_dim == 3 && mode == "trilinear")
     throw std::runtime_error("Got 3D input, but trilinear mode needs 5D input");
   if (input_dim == 4 && mode == "linear")
     throw std::runtime_error("Got 4D input, but linear mode needs 3D input");
   if (input_dim == 4 && mode == "bilinear")
     return at::upsample_bilinear2d(input, _output_size(input, 2, size, scale_factors), *align_corners);
+  if (input_dim == 4 && mode == "bicubic")
+    return at::upsample_bicubic2d(input, _output_size(input, 2, size, scale_factors), *align_corners);
   if (input_dim == 4 && mode == "trilinear")
     throw std::runtime_error("Got 4D input, but trilinear mode needs 5D input");
   if (input_dim == 5 && mode == "linear")
     throw std::runtime_error("Got 5D input, but linear mode needs 3D input");
   if (input_dim == 5 && mode == "bilinear")
     throw std::runtime_error("Got 5D input, but bilinear mode needs 4D input");
+  if (input_dim == 5 && mode == "bicubic")
+    throw std::runtime_error("Got 5D input, but bicubic mode needs 4D input");
   if (input_dim == 5 && mode == "trilinear")
     return at::upsample_trilinear3d(input, _output_size(input, 3, size, scale_factors), *align_corners);
 

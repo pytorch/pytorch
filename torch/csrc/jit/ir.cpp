@@ -5,7 +5,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/assertions.h>
-#include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
 
@@ -684,6 +684,17 @@ bool Node::isNondeterministic() const {
     return false;
   }
   return true;
+}
+
+bool Node::hasSideEffects() const {
+  switch (kind_) {
+    case prim::PythonOp:
+    case prim::Print:
+    case prim::RaiseException:
+    case aten::warn:
+      return true;
+  }
+  return false;
 }
 
 // Assign this node a topological position, to facilitate fast isBefore() and
@@ -1475,6 +1486,52 @@ void Graph::freeBlock(Block * b) {
   all_blocks.erase(it);
 }
 
+at::ArrayRef<Value*> createTupleUnpack(Value* v) {
+  // small peephole optimization to ensure IntList attributes can still turn
+  // into constants e.g. in x.expand([3, 4])
+  if(v->node()->kind() == prim::TupleConstruct)
+    return v->node()->inputs();
+  auto & g = *v->owningGraph();
+  return g.insertNode(g.createTupleUnpack(v))->outputs();
+}
+
+std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs, bool unpack_outputs) {
+  std::unordered_map<Value*, Value*> value_map;
+  auto value_map_func = [&](Value* v) { return value_map.at(v); };
+  JIT_ASSERT(callee.inputs().size() == inputs.size());
+  for (size_t i = 0; i < inputs.size(); ++i) {
+    value_map[callee.inputs()[i]] = inputs[i];
+  }
+  for (auto* node : callee.nodes()) {
+    auto* new_node =
+        g.insertNode(g.createClone(node, value_map_func));
+    for (size_t i = 0; i < node->outputs().size(); ++i) {
+      value_map[node->outputs()[i]] = new_node->outputs()[i];
+    }
+  }
+
+  std::vector<Value*> outputs;
+  for (auto* output : callee.outputs()) {
+    outputs.push_back(value_map_func(output));
+  }
+
+  if (unpack_outputs && outputs.size() == 1 &&
+      callee.outputs().at(0)->type()->kind() == TupleType::Kind) {
+      auto tup = outputs[0];
+      outputs.clear();
+      for(Value* v : createTupleUnpack(tup)) {
+        outputs.emplace_back(v);
+      }
+      // if this was a peephole tuple unpack we can just get rid of
+      // the tuple construct here and prevent needing DCE
+      if (tup->node()->kind() == prim::TupleConstruct && !tup->node()->hasUses()) {
+        tup->node()->destroy();
+      }
+  }
+
+  return outputs;
+}
+
 PythonOp* defaultAllocPythonOp(Graph*g) {
   throw std::runtime_error("Trying to allocate a Python object without python bindings loaded");
 }
@@ -1487,5 +1544,6 @@ PythonOp* allocPythonOp(Graph* g) {
 void setAllocPythonOp(PythonOp* (*v)(Graph* g)) {
   alloc_python_op.store(v);
 }
+
 
 }} // namespace torch::jit

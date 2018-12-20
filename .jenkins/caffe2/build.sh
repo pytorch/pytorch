@@ -132,7 +132,6 @@ CMAKE_ARGS+=("-DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}")
 
 if [[ $BUILD_ENVIRONMENT == *mkl* ]]; then
   CMAKE_ARGS+=("-DBLAS=MKL")
-  CMAKE_ARGS+=("-DUSE_MKLDNN=ON")
 fi
 
 if [[ $BUILD_ENVIRONMENT == py2-cuda9.0-cudnn7-ubuntu16.04 ]]; then

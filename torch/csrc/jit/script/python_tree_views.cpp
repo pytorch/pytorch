@@ -132,8 +132,8 @@ void initTreeViewBindings(PyObject *module) {
       return AugAssign::create(r, lhs, kind, rhs);
     }));
   py::class_<Return, Stmt>(m, "Return")
-    .def(py::init([](const SourceRange& range, std::vector<Expr> values) {
-      return Return::create(range, wrap_list(range, std::move(values)));
+    .def(py::init([](const SourceRange& range, Expr* value) {
+      return Return::create(range, value ? *value : Expr(Compound::create(TK_NONE, range, {})));
     }));
   py::class_<Raise, Stmt>(m, "Raise")
     .def(py::init([](const SourceRange& range, Expr *expr) {

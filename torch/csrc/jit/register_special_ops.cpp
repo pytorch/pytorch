@@ -115,6 +115,15 @@ RegisterOperators reg({
           return 0;
         };
       }),
+    Operator(
+      "aten::_assert_int_or_pair(int[] vals, str name, str message) -> Tensor",
+      [](const Node* node) {
+        return [](Stack& stack) {
+          // Everything is a list at the point this is used, so don't do anything
+          drop(stack, 3);
+          return 0;
+        };
+      }),
 
 });
 }

@@ -393,29 +393,6 @@ accreal THCTensor_(trace)(THCState *state, THCTensor *src_) {
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
 
-void THCTensor_(linspace)(THCState *state, THCTensor *r_, scalar_t a, scalar_t b, int64_t n) {
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, r_));
-  THArgCheck((n >= 0), 3, "number of points must be non-negative");
-  if (THCTensor_(nElement)(state, r_) != n) THCTensor_(resize1d)(state, r_, n);
-  if (n == 0) {
-    // skip
-  } else if (n == 1) THCTensor_(fill)(state, r_, a);
-  else {
-    THCTensor *r = THCTensor_(isContiguous)(state, r_)
-                   ? r_ // if r_ is contiguous we can direct work on it
-                   : THCTensor_(newContiguous)(state, r_);
-    scalar_t step = THCNumerics<scalar_t>::div(THCNumerics<scalar_t>::sub(b, a),
-                                       ScalarConvert<int64_t,scalar_t>::to(n - 1));
-    LinspaceOp<scalar_t> linspace_method(a, step);
-    thrust::device_ptr<scalar_t> data_(THCTensor_(data)(state, r));
-    thrust::tabulate(data_, data_ + n, linspace_method);
-    if (!THCTensor_(isContiguous)(state, r_)) { // We need to move data back to r_
-      THCTensor_(freeCopyTo)(state, r, r_);
-    }
-  }
-  THCudaCheck(cudaGetLastError());
-}
-
 void THCTensor_(logspace)(THCState *state, THCTensor *r_, scalar_t a, scalar_t b, int64_t n) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, r_));
   THArgCheck((n >= 0), 3, "number of points must be non-negative");

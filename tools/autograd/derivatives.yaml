@@ -138,7 +138,7 @@
 - name: alias(Tensor self)
   self: grad
 
-- name: as_strided(Tensor self, IntList size, IntList stride, int64_t storage_offset)
+- name: as_strided(Tensor self, IntList size, IntList stride, int64_t? storage_offset)
   self: as_strided_backward(grad, TensorGeometry(self), size, stride, storage_offset)
 
 - name: asin(Tensor self)
@@ -189,6 +189,10 @@
 
 - name: cholesky(Tensor self, bool upper)
   self: cholesky_backward(grad, upper, result)
+
+- name: cholesky_solve(Tensor self, Tensor input2, bool upper)
+  self: not_implemented("cholesky_solve")
+  input2: not_implemented("cholesky_solve")
 
 # For clamp, gradient is not defined at the boundaries. But empirically it's helpful
 # to be able to get gradient on min and max, so we return the subgradient 1 for these cases.
@@ -470,11 +474,20 @@
   self: grad.clone().masked_fill_(self <= other, 0)
   other: grad.clone().masked_fill_(self > other, 0)
 
+- name: mean(Tensor self)
+  self: grad.expand(self.sizes()) / self.numel()
+
+- name: mean(Tensor self, ScalarType dtype)
+  self: grad.expand(self.sizes()).to(self.type().scalarType()) / self.numel()
+
 - name: mean(Tensor self, IntList dim, bool keepdim)
   self: sum_backward(grad, self.sizes(), dim, keepdim) / _safe_size(self.sizes(), dim)
 
-- name: mean(Tensor self)
-  self: grad.expand(self.sizes()) / self.numel()
+- name: mean(Tensor self, IntList dim, ScalarType dtype)
+  self: sum_backward(grad, self.sizes(), dim, false).to(self.type().scalarType()) / _safe_size(self.sizes(), dim)
+
+- name: mean(Tensor self, IntList dim, bool keepdim, ScalarType dtype)
+  self: sum_backward(grad, self.sizes(), dim, keepdim).to(self.type().scalarType()) / _safe_size(self.sizes(), dim)
 
 - name: median(Tensor self)
   self: select_equals_backward(grad, self, result)
@@ -548,7 +561,7 @@
 - name: norm(Tensor self, Scalar p)
   self: norm_backward(grad, self, p, result)
 
-- name: norm(Tensor self, Scalar p, int64_t dim, bool keepdim)
+- name: norm(Tensor self, Scalar? p, int64_t dim, bool keepdim)
   self: norm_backward(grad, self, p, result, dim, keepdim)
 
 - name: _pdist_forward(Tensor self, double p)
@@ -589,10 +602,6 @@
 
 - name: potri(Tensor self, bool upper)
   self: not_implemented("potri")
-
-- name: potrs(Tensor self, Tensor input2, bool upper)
-  self: not_implemented("potrs")
-  input2: not_implemented("potrs")
 
 - name: pow(Tensor self, Scalar exponent)
   self: pow_backward(grad, self, exponent)
@@ -1015,6 +1024,9 @@
 - name: upsample_bilinear2d(Tensor self, IntList output_size, bool align_corners)
   self: upsample_bilinear2d_backward(grad, output_size, self.sizes(), align_corners)
 
+- name: upsample_bicubic2d(Tensor self, IntList output_size, bool align_corners)
+  self: upsample_bicubic2d_backward(grad, output_size, self.sizes(), align_corners)
+
 - name: upsample_trilinear3d(Tensor self, IntList output_size, bool align_corners)
   self: upsample_trilinear3d_backward(grad, output_size, self.sizes(), align_corners)
 
@@ -1102,6 +1114,12 @@
 
 - name: thnn_conv_dilated3d_backward(Tensor grad_output, Tensor self, Tensor weight, IntList kernel_size, IntList stride, IntList padding, IntList dilation, Tensor columns, Tensor ones, std::array<bool,3> output_mask)
   grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, self, stride, padding, dilation, false, {{0, 0, 0}}, 1, false, false, false, grad_input_mask)
+
+- name: thnn_col2im(Tensor self, IntList output_size, IntList kernel_size, IntList dilation, IntList padding, IntList stride)
+  self: thnn_col2im_backward(grad, kernel_size, dilation, padding, stride)
+
+- name: thnn_im2col(Tensor self, IntList kernel_size, IntList dilation, IntList padding, IntList stride)
+  self: thnn_im2col_backward(grad, {self.size(2), self.size(3)}, kernel_size, dilation, padding, stride)
 
 # NN double backwards support
 
@@ -1243,6 +1261,9 @@
 
 - name: upsample_bilinear2d_backward(Tensor grad_output, IntList output_size, IntList input_size, bool align_corners)
   grad_output: upsample_bilinear2d(grad, output_size, align_corners)
+
+- name: upsample_bicubic2d_backward(Tensor grad_output, IntList output_size, IntList input_size, bool align_corners)
+  grad_output: upsample_bicubic2d(grad, output_size, align_corners)
 
 - name: upsample_trilinear3d_backward(Tensor grad_output, IntList output_size, IntList input_size, bool align_corners)
   grad_output: upsample_trilinear3d(grad, output_size, align_corners)

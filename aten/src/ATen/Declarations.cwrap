@@ -1629,8 +1629,7 @@
         - arg: THTensor* result
           output: True
         - THTensor* self
-        - arg: real p
-          python_default_init: AS_REAL(2)
+        - real p
         - arg: long dim
           wrap_dim: self
         - arg: bool keepdim
@@ -1881,25 +1880,6 @@
       broadcast: end fallback inplace
     - THTensor* end
     - real weight
-]]
-[[
-  name: _th_linspace
-  cname: linspace
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - real start
-    - real end
-    - long steps
 ]]
 [[
   name: _th_logspace

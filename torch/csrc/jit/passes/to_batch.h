@@ -33,6 +33,6 @@ public:
   TORCH_API void toBatch(Block* block, Block* res_block);
 };
 
-TORCH_API std::shared_ptr<Graph> to_batch_graph(std::shared_ptr<Graph>& graph);
+TORCH_API std::shared_ptr<Graph> to_batch_graph(std::shared_ptr<Graph> graph);
 TORCH_API void initRegisterBatchOpsBindings(PyObject* module);
 }}

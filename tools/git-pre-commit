@@ -10,3 +10,5 @@ python tools/clang_tidy.py \
   -g"-torch/csrc/jit/export.cpp" \
   -g"-torch/csrc/jit/import.cpp" \
   -j
+echo "Running pre-commit clang-format"
+python tools/clang_format.py

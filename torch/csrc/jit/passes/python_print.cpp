@@ -562,6 +562,10 @@ struct PythonPrintPass {
       return;
     switch (node->kind()) {
       case prim::Return:
+        if (enforce_importable_ && node->inputs().size() != 1) {
+          throw script::ErrorReport(node->getSourceLocation())
+              << "Exportable methods must have a single return value. Normal use of ScriptMethods should enforce this.";
+        }
         if (node->inputs().size() > 0) {
           indent();
           out << "return ";
@@ -813,7 +817,17 @@ struct PythonPrintPass {
     return out;
   }
 
-  void printDefaultValue(std::ostream& stmt, const IValue& value) {
+  void printDefaultValue(const TypePtr& typ, std::ostream& stmt, const IValue& value) {
+    // xxx - many weak script modules store default values for broadcasting lists
+    // that are not actually the same type as the argument. We can only serialize
+    // default values that will implicitly convert to their declared return type
+    // since we do not need to serialize these built-in modules with their defaults,
+    // we just drop them for now.
+    if (typ->kind() == ListType::Kind &&
+        (value.isInt() || value.isDouble() || value.isBool())) {
+      return;
+    }
+    stmt << "=";
     if (value.isTensor() && !value.toTensor().defined()) {
       // XXX - because undefined tensors are not stored as None, we need special handling.
       // otherwise they get printed as CONSTANTS.c0 and then cannot be recreated because
@@ -856,8 +870,7 @@ struct PythonPrintPass {
       if (defaults_offset != defaults.end()) {
         const c10::optional<IValue>& def = *defaults_offset++;
         if (def) {
-          out << "=";
-          printDefaultValue(out, *def);
+          printDefaultValue(input->type(), out, *def);
         }
       }
     }

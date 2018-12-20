@@ -16,10 +16,6 @@ namespace {
 std::unordered_set<Symbol> skip_list = {
   prim::If,
   prim::Loop, //TODO: handle Loop
-  prim::Print,
-  prim::RaiseException,
-  aten::warn,
-  prim::PythonOp, //may have side effects
   prim::Constant,
   prim::Undefined,
   prim::NoneGenerator,
@@ -125,7 +121,7 @@ void ConstantPropagation(Node* n, const AliasDb& aliasDb, bool recurse) {
         return v->node()->kind() == prim::Constant;
       });
   bool supported_node = !n->kind().is_onnx() &&
-      skip_list.count(n->kind()) == 0 && !n->isNondeterministic() &&
+      skip_list.count(n->kind()) == 0 && !n->isNondeterministic() && !n->hasSideEffects() &&
       !aliasDb.hasWriters(n) && !aliasDb.hasWildcard(n);
   auto run_blocks = [&]() {
     if (recurse) {

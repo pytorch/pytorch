@@ -44,6 +44,7 @@ ${CMAKE_CURRENT_SOURCE_DIR}/SpatialMaxUnpooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialReflectionPadding.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialReplicationPadding.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialSubSampling.cu
+${CMAKE_CURRENT_SOURCE_DIR}/SpatialUpSamplingBicubic.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialUpSamplingBilinear.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialUpSamplingNearest.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/Sqrt.cu
