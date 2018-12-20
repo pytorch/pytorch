@@ -828,6 +828,11 @@ def set_running_script_path():
 def check_test_defined_in_running_script(test_case):
     if running_script_path is None:
         return
+    if TEST_WITH_ROCM:
+        # In ROCm CI, to avoid forking after HIP is initialized, we
+        # indeed load test module from test/run_test.py and run all
+        # tests in the same process.
+        return
     test_case_class_file = os.path.abspath(os.path.realpath(inspect.getfile(test_case.__class__)))
     assert test_case_class_file == running_script_path, "Class of loaded TestCase \"{}\" " \
         "is not defined in the running script \"{}\", but in \"{}\". Did you " \

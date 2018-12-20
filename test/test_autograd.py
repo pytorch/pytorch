@@ -2925,7 +2925,7 @@ def add_test(
 
         setattr(TestAutograd, test_name, do_test)
 
-for test in method_tests:
+for test in method_tests():
     add_test(*test)
 
 if __name__ == '__main__':
