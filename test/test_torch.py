@@ -6719,6 +6719,12 @@ class _TestTorchMixin(object):
         val2 = rec.select(-1, -1).data.abs()[0][0][0].sum()
         self.assertEqual(val1, val2, 1e-8, 'absolute value')
 
+    def test_namedtuple_return(self):
+        a = torch.randn(5, 5)
+        ret = a.max(dim=0)
+        self.assertEqual(ret.values, ret[0])
+        self.assertEqual(ret.indices, ret[1])
+
     def test_hardshrink(self):
         data_original = torch.tensor([1, 0.5, 0.3, 0.6]).view(2, 2)
         float_types = [
