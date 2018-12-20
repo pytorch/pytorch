@@ -75,8 +75,6 @@ Tensor fbgemm_linear_int8_weight(
 
   q_params.precision = precision;
 
-  using namespace fbgemm;
-
   // This operation does the following:
   // 1) Quantizes the input matrix given the statistics we've calculated above
   // 2) Creates a "row buffer" vector with offset values that must be added
@@ -86,8 +84,8 @@ Tensor fbgemm_linear_int8_weight(
   //
   //  Note this is not executed eagerly, but rather within the fbgemmPacked call
   //  below.
-  PackAWithQuantRowOffset<uint8_t> packA(
-      /*trans=*/matrix_op_t::NoTranspose,
+  fbgemm::PackAWithQuantRowOffset<uint8_t> packA(
+      /*trans=*/fbgemm::matrix_op_t::NoTranspose,
       /*nRow=*/M,
       /*nCol=*/K,
       /*smat=*/input_ptr,
@@ -106,7 +104,7 @@ Tensor fbgemm_linear_int8_weight(
       static_cast<int32_t>(weight_zero_point.to<int64_t>());
 
   // This is the end of the pipeline, pass the resulting matrix through
-  DoNothing<float, float> doNothingObj{};
+  fbgemm::DoNothing<float, float> doNothingObj{};
 
   // After the uint8 * int8 matrix multiplication is performed, this operation
   // does:
@@ -133,7 +131,7 @@ Tensor fbgemm_linear_int8_weight(
       packed.storage().data_ptr().get());
 
   // Do the GEMM
-  fbgemmPacked(
+  fbgemm::fbgemmPacked(
       /*packA=*/packA,
       /*packB=*/*packB,
       /*C=*/output.data<float>(),
@@ -145,9 +143,8 @@ Tensor fbgemm_linear_int8_weight(
 
   // The resulting matrix here is 2-D, let's view it with the original
   // left hand dimensions of the input.
-  auto inp_sizes = input.sizes().vec();
-  std::vector<int64_t> out_sizes(inp_sizes.begin(), inp_sizes.end() - 1);
-  out_sizes.push_back(N);
+  std::vector<int64_t> out_sizes = input.sizes().vec();
+  out_sizes.back() = N;
   return output.view(out_sizes);
 }
 
@@ -257,8 +254,9 @@ Tensor fbgemm_pack_quantized_matrix(
       },
       at::kCPU);
 
-  auto retval = weight.clone().to(at::kByte).resize_(
-      {sizeof(fbgemm::PackBMatrix<int8_t>)});
+  auto retval = at::empty(
+      {sizeof(fbgemm::PackBMatrix<int8_t>)}, weight.options().dtype(at::kByte));
+
   retval.storage().set_data_ptr(std::move(at_ptr));
 
   return retval;
