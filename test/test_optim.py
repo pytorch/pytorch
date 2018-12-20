@@ -9,8 +9,9 @@ import torch.nn.functional as F
 from torch.optim import SGD
 from torch.autograd import Variable
 from torch import sparse
-from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau
+from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, SGDR
 from common_utils import TestCase, run_tests, TEST_WITH_UBSAN, skipIfRocm, load_tests
+import numpy as np
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -521,6 +522,74 @@ class TestLRScheduler(TestCase):
                              lr_lambda=[lambda x1: 0.9 ** x1, lambda x2: 0.8 ** x2])
         self._test(scheduler, targets, epochs)
 
+    def test_sgdr_lr1(self):
+        iters = 50
+        eta_min = 1e-10
+        T = 10
+        T_mult=1
+        T_cur = 0
+        targets = [[0.05], [0.5]]
+        scheduler = SGDR(self.opt, T_0=T, T_mult=T_mult, eta_min=eta_min)
+        for i in range(1, iters, 1):
+            T_cur += 1
+            if T_cur == T:
+                T_cur = 0
+                T *= T_mult
+            targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T)) / 2]
+            targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T)) / 2]
+        self._test(scheduler, targets, iters)
+
+    def test_sgdr_lr2(self):
+        iters = 70
+        eta_min = 1e-10
+        T = 10
+        T_mult=2
+        T_cur = 0
+        targets = [[0.05], [0.5]]
+        scheduler = SGDR(self.opt, T_0=T, T_mult=T_mult, eta_min=eta_min)
+        for i in range(1, iters, 1):
+            T_cur += 1
+            if T_cur == T:
+                T_cur = 0
+                T *= T_mult
+            targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T)) / 2]
+            targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T)) / 2]
+        self._test(scheduler, targets, iters)
+
+    def test_sgdr_lr3(self):
+        iters = 20
+        eta_min = 1e-10
+        T = 10
+        T_mult=1
+        T_cur = 0
+        targets = [[0.05], [0.5]]
+        scheduler = SGDR(self.opt, T_0=T, T_mult=T_mult, eta_min=eta_min)
+        for i in np.arange(0.1, iters, 0.1):
+            T_cur = round(T_cur + 0.1, 1)
+            if T_cur == T:
+                T_cur = 0
+                T *= T_mult
+            targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T)) / 2]
+            targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T)) / 2]
+        self._test_sgdr(scheduler, targets, iters)
+
+    def test_sgdr_lr4(self):
+        iters = 30
+        eta_min = 1e-10
+        T = 10
+        T_mult=2
+        T_cur = 0
+        targets = [[0.05], [0.5]]
+        scheduler = SGDR(self.opt, T_0=T, T_mult=T_mult, eta_min=eta_min)
+        for i in np.arange(0.1, iters, 0.1):
+            T_cur = round(T_cur + 0.1, 1)
+            if T_cur == T:
+                T_cur = 0
+                T *= T_mult
+            targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T)) / 2]
+            targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T)) / 2]
+        self._test_sgdr(scheduler, targets, iters)
+
     def test_step_lr_state_dict(self):
         self._check_scheduler_state_dict(
             lambda: StepLR(self.opt, gamma=0.1, step_size=3),
@@ -576,6 +645,11 @@ class TestLRScheduler(TestCase):
             if key not in {'optimizer'}:
                 self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key], allow_inf=True)
 
+    def test_sgdr_lr_state_dict(self):
+        self._check_scheduler_state_dict(
+            lambda: SGDR(self.opt, T_0=10, T_mult=2),
+            lambda: SGDR(self.opt, T_0=100))
+
     def _check_scheduler_state_dict(self, constr, constr2, epochs=10):
         scheduler = constr()
         for _ in range(epochs):
@@ -594,6 +668,15 @@ class TestLRScheduler(TestCase):
                 self.assertAlmostEqual(target[epoch], param_group['lr'],
                                        msg='LR is wrong in epoch {}: expected {}, got {}'.format(
                                            epoch, target[epoch], param_group['lr']), delta=1e-5)
+
+    def _test_sgdr(self, scheduler, targets, epochs=10):
+        for index, epoch in enumerate(np.arange(0, epochs, 0.1)):
+            epoch = round(epoch, 1)
+            scheduler.step(epoch)
+            for param_group, target in zip(self.opt.param_groups, targets):
+                self.assertAlmostEqual(target[index], param_group['lr'],
+                                       msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                                           epoch, target[index], param_group['lr']), delta=1e-5)
 
     def _test_reduce_lr_on_plateau(self, scheduler, targets, metrics, epochs=10, verbose=False):
         for epoch in range(epochs):
