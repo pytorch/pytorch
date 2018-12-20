@@ -343,7 +343,7 @@
 
 - name: gesv(Tensor self, Tensor A)
   self: gesv_backward_self(grad, self, A)
-  A: gesv_backward_A(grad, self, A, result0)
+  A: gesv_backward_A(grad, self, A, X)
 
 - name: indices(Tensor self)
   output_differentiability: [False]
@@ -397,7 +397,7 @@
   self: -at::matmul(result.transpose(-2, -1), at::matmul(grad, result.transpose(-2, -1)))
 
 - name: kthvalue(Tensor self, int64_t k, int64_t dim, bool keepdim)
-  self: index_select_backward(grad, dim, result1, self.sizes(), keepdim)
+  self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: le_(Tensor self, Scalar other)
   self: zeros_like(self)
@@ -465,7 +465,7 @@
   self: zeros_like(self.expand(at::infer_size(self.sizes(), mask.sizes()))).masked_scatter_(mask, grad)
 
 - name: max(Tensor self, int64_t dim, bool keepdim)
-  self: index_select_backward(grad, dim, result1, self.sizes(), keepdim)
+  self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: max(Tensor self)
   self: select_equals_backward(grad, self, result)
@@ -507,10 +507,10 @@
 # The backward implementation is correct in the sense that it returns the
 # subgradient on one side.
 - name: median(Tensor self, int64_t dim, bool keepdim)
-  self: index_select_backward(grad, dim, result1, self.sizes(), keepdim)
+  self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: min(Tensor self, int64_t dim, bool keepdim)
-  self: index_select_backward(grad, dim, result1, self.sizes(), keepdim)
+  self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: min(Tensor self)
   self: select_equals_backward(grad, self, result)
@@ -524,7 +524,7 @@
   mat2: mm_mat2_backward(grad, self, mat2.sizes(), mat2.strides(), 1)
 
 - name: mode(Tensor self, int64_t dim, bool keepdim)
-  self: index_select_backward(grad, dim, result1, self.sizes(), keepdim)
+  self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: mul(Tensor self, Tensor other)
   self: grad * other
@@ -708,10 +708,10 @@
   self: slice_backward(grad, self.sizes(), dim, start, end, step)
 
 - name: slogdet(Tensor self)
-  self: slogdet_backward(grads, self, result0, result1)
+  self: slogdet_backward(grads, self, sign, log)
 
 - name: sort(Tensor self, int64_t dim, bool descending)
-  self: index_select_backward(grad, dim, result1, self.sizes(), true)
+  self: index_select_backward(grad, dim, indices, self.sizes(), true)
 
 - name: split(Tensor self, int64_t split_size, int64_t dim)
   self: split_backward(grads, split_size, dim, self.sizes(), self.type())
@@ -770,10 +770,10 @@
   self: sum_backward(grad, self.sizes(), dim, keepdim).to(self.type().scalarType())
 
 - name: svd(Tensor self, bool some, bool compute_uv)
-  self: svd_backward(grads, self, some, compute_uv, result0, result1, result2)
+  self: svd_backward(grads, self, some, compute_uv, U, S, V)
 
 - name: symeig(Tensor self, bool eigenvectors, bool upper)
-  self: symeig_backward(grads, self, eigenvectors, upper, result0, result1)
+  self: symeig_backward(grads, self, eigenvectors, upper, e, V)
 
 - name: t(Tensor self)
   self: grad.t()
@@ -797,7 +797,7 @@
   self: tanh_backward(grad, result)
 
 - name: topk(Tensor self, int64_t k, int64_t dim, bool largest, bool sorted)
-  self: index_select_backward(grad, dim, result1, self.sizes(), true)
+  self: index_select_backward(grad, dim, indices, self.sizes(), true)
 
 - name: trace(Tensor self)
   self: trace_backward(grad, self.sizes())
@@ -815,7 +815,7 @@
   self: grad.triu(diagonal)
 
 - name: trtrs(Tensor self, Tensor A, bool upper, bool transpose, bool unitriangular)
-  self, A: trtrs_backward(grads[0], grads[1], self, A, result0, upper, transpose, unitriangular, grad_input_mask)
+  self, A: trtrs_backward(grads[0], grads[1], self, A, X, upper, transpose, unitriangular, grad_input_mask)
 
 - name: trunc(Tensor self)
   self: zeros_like(grad)
