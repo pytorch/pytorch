@@ -26,14 +26,7 @@ inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor> tensors) {
   return r.release();
 }
 
-inline PyObject* wrap(const char *op, std::tuple<const char *, const char *> names,
-                      std::tuple<at::Tensor, at::Tensor> tensors) {
-  PyStructSequence_Field fields[] = {
-    {std::get<0>(names), ""},
-    {std::get<1>(names), ""},
-    {NULL}
-  };
-  PyTypeObject *type = PyStructSequence_NewType(PyStructSequence_Desc(op, nullptr, fields, 2));
+inline PyObject* wrap(PyTypeObject *type, std::tuple<at::Tensor, at::Tensor> tensors) {
   auto r = THPObjectPtr{PyStructSequence_New(type)};
   if (!r) throw python_error();
   PyStructSequence_SetItem(r.get(), 0, wrap(std::get<0>(tensors)));
@@ -50,15 +43,7 @@ inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor> tensors) {
   return r.release();
 }
 
-inline PyObject* wrap(const char *op, std::tuple<const char *, const char *, const char *> names,
-                      std::tuple<at::Tensor, at::Tensor, at::Tensor> tensors) {
-  PyStructSequence_Field fields[] = {
-    {std::get<0>(names), ""},
-    {std::get<1>(names), ""},
-    {std::get<2>(names), ""},
-    {NULL}
-  };
-  PyTypeObject *type = PyStructSequence_NewType(PyStructSequence_Desc(op, nullptr, fields, 3));
+inline PyObject* wrap(PyTypeObject *type, std::tuple<at::Tensor, at::Tensor, at::Tensor> tensors) {
   auto r = THPObjectPtr{PyStructSequence_New(type)};
   if (!r) throw python_error();
   PyStructSequence_SetItem(r.get(), 0, wrap(std::get<0>(tensors)));
