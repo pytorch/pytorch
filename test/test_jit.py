@@ -4831,6 +4831,33 @@ a")
         a = A()
         self.assertEqual(a.with_docstring.__doc__, 'test str')
 
+    def test_lstm_quantized(self):
+        class LSTMMod(torch.nn.Module):
+            def __init__(self):
+                super(LSTMMod, self).__init__()
+                self.rnn = nn.LSTM(10, 20, 2).float()
+                self.h0 = torch.nn.Parameter(torch.randn(2, 3, 20, dtype=torch.float))
+                self.c0 = torch.nn.Parameter(torch.randn(2, 3, 20, dtype=torch.float))
+
+            def forward(self, x):
+                output, (hn, cn) = self.rnn(x, (self.h0, self.c0))
+                return output, hn, cn
+
+        quantized = LSTMMod()
+
+        import copy
+        ref = copy.deepcopy(quantized)
+        torch.jit.quantized.quantize_lstm_modules(quantized)
+        x = torch.randn(5, 3, 10, dtype=torch.float)
+
+        outs = quantized(x)
+        ref_outs = ref(x)
+
+        self.assertEqual(len(outs), len(ref_outs))
+        for out, ref_out in zip(outs, ref_outs):
+            torch.testing.assert_allclose(out, ref_out)
+
+
     def test_script_module(self):
         class M1(torch.jit.ScriptModule):
             def __init__(self):
