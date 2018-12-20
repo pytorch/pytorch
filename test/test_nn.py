@@ -125,31 +125,36 @@ class PackedSequenceTest(TestCase):
         """Test type casting of `PackedSequence` against type casting of tensor"""
         for _, (input_type, _) in self._type_by_name.items():
             for expected_type_str, (_, cast_str) in self._type_by_name.items():
-                padded, lengths = self._padded_sequence(input_type)
-                packed = rnn_utils.pack_padded_sequence(padded, lengths)
-                # Apply cast to `PackedSequence` instance and unpack
-                masked = getattr(packed, cast_str)()
-                unpacked, lengths_out = rnn_utils.pad_packed_sequence(masked)
-                self.assertEqual(unpacked.type(), expected_type_str)
+                for enforce_sorted in [True, False]:
+                    padded, lengths = self._padded_sequence(input_type)
+                    packed = rnn_utils.pack_padded_sequence(
+                        padded, lengths, enforce_sorted=enforce_sorted)
+                    # Apply cast to `PackedSequence` instance and unpack
+                    masked = getattr(packed, cast_str)()
+                    unpacked, lengths_out = rnn_utils.pad_packed_sequence(masked)
+                    self.assertEqual(unpacked.type(), expected_type_str)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_cuda_mask(self):
-        tensor_type = torch.FloatTensor
-        cuda_type_str = 'torch.cuda.FloatTensor'
-        padded, lengths = self._padded_sequence(tensor_type)
-        packed = rnn_utils.pack_padded_sequence(padded, lengths)
-        self.assertFalse(packed.is_cuda)
-        packed = packed.cuda()
-        self.assertTrue(packed.is_cuda)
-        unpacked, _ = rnn_utils.pad_packed_sequence(packed)
-        self.assertEqual(unpacked.type(), cuda_type_str)
+        for enforce_sorted in [True, False]:
+            tensor_type = torch.FloatTensor
+            cuda_type_str = 'torch.cuda.FloatTensor'
+            padded, lengths = self._padded_sequence(tensor_type)
+            packed = rnn_utils.pack_padded_sequence(
+                padded, lengths, enforce_sorted=enforce_sorted)
+            self.assertFalse(packed.is_cuda)
+            packed = packed.cuda()
+            self.assertTrue(packed.is_cuda)
+            unpacked, _ = rnn_utils.pad_packed_sequence(packed)
+            self.assertEqual(unpacked.type(), cuda_type_str)
 
     def test_wrong_order(self):
         a = torch.ones(25, 300)
         b = torch.ones(22, 300)
         b_a = rnn_utils.pad_sequence([b, a])
         self.assertRaises(
-            RuntimeError, lambda: rnn_utils.pack_padded_sequence(b_a, [22, 25]))
+            RuntimeError,
+            lambda: rnn_utils.pack_padded_sequence(b_a, [22, 25], enforce_sorted=True))
 
     def test_total_length(self):
         padded, lengths = self._padded_sequence(torch.FloatTensor)
@@ -185,22 +190,24 @@ class PackedSequenceTest(TestCase):
                 self.assertEqual(unpacked, ref_output)
 
     def test_to(self):
-        padded, lengths = self._padded_sequence(torch.IntTensor)
-        a = rnn_utils.pack_padded_sequence(padded, lengths).cpu()
+        for enforce_sorted in (True, False):
+            padded, lengths = self._padded_sequence(torch.IntTensor)
+            a = rnn_utils.pack_padded_sequence(
+                padded, lengths, enforce_sorted=enforce_sorted).cpu()
 
-        self.assertIs(a, a.to('cpu'))
-        self.assertIs(a, a.to('cpu', dtype=torch.int32))
-        self.assertEqual(a.long(), a.to(torch.int64))
+            self.assertIs(a, a.to('cpu'))
+            self.assertIs(a, a.to('cpu', dtype=torch.int32))
+            self.assertEqual(a.long(), a.to(torch.int64))
 
-        if torch.cuda.is_available():
-            for cuda in ['cuda', 'cuda:0' if torch.cuda.device_count() == 1 else 'cuda:1']:
-                b = a.cuda(device=cuda)
-                self.assertIs(b, b.to(cuda))
-                self.assertEqual(a, b.to('cpu'))
-                self.assertEqual(b, a.to(cuda))
-                self.assertEqual(a, b.to('cpu', dtype=torch.int32))
-                self.assertIs(b, b.to(dtype=torch.int32))
-                self.assertEqual(b.long(), b.to(dtype=torch.int64))
+            if torch.cuda.is_available():
+                for cuda in ['cuda', 'cuda:0' if torch.cuda.device_count() == 1 else 'cuda:1']:
+                    b = a.cuda(device=cuda)
+                    self.assertIs(b, b.to(cuda))
+                    self.assertEqual(a, b.to('cpu'))
+                    self.assertEqual(b, a.to(cuda))
+                    self.assertEqual(a, b.to('cpu', dtype=torch.int32))
+                    self.assertIs(b, b.to(dtype=torch.int32))
+                    self.assertEqual(b.long(), b.to(dtype=torch.int64))
 
 
 def default_tensor_type(type):
@@ -4339,7 +4346,7 @@ class TestNN(NNTestCase):
         ]
 
         for enforce_sorted, seq_lens, in tests:
-            for use_default_hiddens in [True, False]:
+            for use_default_hiddens in (True, False):
                 check_lengths(seq_lens, enforce_sorted, use_default_hiddens)
 
     def test_variable_sequence(self):

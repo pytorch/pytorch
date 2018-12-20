@@ -8,6 +8,12 @@ PackedSequence_ = namedtuple('PackedSequence',
                              ['data', 'batch_sizes', 'sorted_indices', 'unsorted_indices'])
 
 
+def bind(optional, fn):
+    if optional is None:
+        return None
+    return fn(optional)
+
+
 class PackedSequence(PackedSequence_):
     r"""Holds the data and list of :attr:`batch_sizes` of a packed sequence.
 
@@ -58,14 +64,15 @@ class PackedSequence(PackedSequence_):
             return self
         else:
             return type(self)(self.data.cuda(*args, **kwargs), self.batch_sizes,
-                              self.sorted_indices.cuda(*args, **kwargs),
-                              self.unsorted_indices.cuda(*args, **kwargs))
+                              bind(self.sorted_indices, lambda t: t.cuda(*args, **kwargs)),
+                              bind(self.unsorted_indices, lambda t: t.cuda(*args, **kwargs)))
 
     def cpu(self):
         """Returns a CPU copy if `self.data` not already on the CPU"""
         if self.is_cuda:
             return type(self)(self.data.cpu(), self.batch_sizes,
-                              self.sorted_indices.cpu(), self.unsorted_indices.cpu())
+                              bind(self.sorted_indices, lambda t: t.cpu()),
+                              bind(self.unsorted_indices, lambda t: t.cpu()))
         else:
             return self
 
@@ -121,11 +128,17 @@ class PackedSequence(PackedSequence_):
             Otherwise, returns a copy with the desired configuration.
         """
         data = self.data.to(*args, **kwargs)
+        sorted_indices = self.sorted_indices
+        unsorted_indices = self.unsorted_indices
+        device_kw = 'device'
+        if device_kw in kwargs:
+            sorted_indices = bind(sorted_indices, lambda t: t.to(kwargs[device_kw]))
+            unsorted_indices = bind(unsorted_indices, lambda t: t.to(kwargs[device_kw]))
         if data is self.data:
             return self
         else:
             return type(self)(data, self.batch_sizes,
-                              self.sorted_indices, self.unsorted_indices)
+                              sorted_indices, unsorted_indices)
 
     @property
     def is_cuda(self):
