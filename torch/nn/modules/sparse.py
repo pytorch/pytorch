@@ -132,7 +132,9 @@ class Embedding(Module):
         return s.format(**self.__dict__)
 
     @classmethod
-    def from_pretrained(cls, embeddings, freeze=True, sparse=False):
+    def from_pretrained(cls, embeddings, freeze=True, padding_idx=None,
+                        max_norm=None, norm_type=2., scale_grad_by_freq=False,
+                        sparse=False):
         r"""Creates Embedding instance from given 2-dimensional FloatTensor.
 
         Args:
@@ -140,8 +142,11 @@ class Embedding(Module):
                 First dimension is being passed to Embedding as 'num_embeddings', second as 'embedding_dim'.
             freeze (boolean, optional): If ``True``, the tensor does not get updated in the learning process.
                 Equivalent to ``embedding.weight.requires_grad = False``. Default: ``True``
-            sparse (bool, optional): if ``True``, gradient w.r.t. weight matrix will be a sparse tensor.
-                See Notes for more details regarding sparse gradients.
+            padding_idx (int, optional): See module initialization documentation.
+            max_norm (float, optional): See module initialization documentation.
+            norm_type (float, optional): See module initialization documentation. Default ``2``.
+            scale_grad_by_freq (boolean, optional): See module initialization documentation. Default ``False``.
+            sparse (bool, optional): See module initialization documentation.
 
         Examples::
 
@@ -160,8 +165,11 @@ class Embedding(Module):
             num_embeddings=rows,
             embedding_dim=cols,
             _weight=embeddings,
-            sparse=sparse,
-        )
+            padding_idx=padding_idx,
+            max_norm=max_norm,
+            norm_type=norm_type,
+            scale_grad_by_freq=scale_grad_by_freq,
+            sparse=sparse)
         embedding.weight.requires_grad = not freeze
         return embedding
 
@@ -273,7 +281,9 @@ class EmbeddingBag(Module):
         return s.format(**self.__dict__)
 
     @classmethod
-    def from_pretrained(cls, embeddings, freeze=True, sparse=False):
+    def from_pretrained(cls, embeddings, freeze=True, max_norm=None,
+                        norm_type=2., scale_grad_by_freq=False,
+                        mode='mean', sparse=False):
         r"""Creates EmbeddingBag instance from given 2-dimensional FloatTensor.
 
         Args:
@@ -281,8 +291,11 @@ class EmbeddingBag(Module):
                 First dimension is being passed to EmbeddingBag as 'num_embeddings', second as 'embedding_dim'.
             freeze (boolean, optional): If ``True``, the tensor does not get updated in the learning process.
                 Equivalent to ``embeddingbag.weight.requires_grad = False``. Default: ``True``
-            sparse (bool, optional): if ``True``, gradient w.r.t. weight matrix will be a sparse tensor.
-                See Notes for more details regarding sparse gradients.
+            max_norm (float, optional): See module initialization documentation. Default: ``None``
+            norm_type (float, optional): See module initialization documentation. Default ``2``.
+            scale_grad_by_freq (boolean, optional): See module initialization documentation. Default ``False``.
+            mode (string, optional): See module initialization documentation. Default: ``"mean"``
+            sparse (bool, optional): See module initialization documentation. Default: ``False``.
 
         Examples::
 
@@ -301,8 +314,11 @@ class EmbeddingBag(Module):
             num_embeddings=rows,
             embedding_dim=cols,
             _weight=embeddings,
-            sparse=sparse,
-        )
+            max_norm=max_norm,
+            norm_type=norm_type,
+            scale_grad_by_freq=scale_grad_by_freq,
+            mode=mode,
+            sparse=sparse)
         embeddingbag.weight.requires_grad = not freeze
         return embeddingbag
 
