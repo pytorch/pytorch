@@ -59,10 +59,10 @@ This is especially useful if you are only changing Python files.
 This mode will symlink the Python files from the current local source tree into the
 Python install.
 
-Hence, if you modify a Python file, you do not need to reinstall pytorch again and again.
+Hence, if you modify a Python file, you do not need to reinstall PyTorch again and again.
 
 For example:
-- Install local pytorch in `build develop` mode
+- Install local PyTorch in `build develop` mode
 - modify your Python file `torch/__init__.py` (for example)
 - test functionality
 - modify your Python file `torch/__init__.py`
@@ -72,14 +72,14 @@ For example:
 
 You do not need to repeatedly install after modifying Python files.
 
-In case you want to reinstall, make sure that you uninstall pytorch first by running `pip uninstall torch`
+In case you want to reinstall, make sure that you uninstall PyTorch first by running `pip uninstall torch`
 and `python setup.py clean`. Then you can install in `build develop` mode again.
 
 ## Codebase structure
 
 * [c10](c10) - Core library files that work everywhere, both server
-  and mobile. We are slowly moving pieces from ATen/core here.
-  This library is intended only to contain essential functionality,
+  and mobile. We are slowly moving pieces from [ATen/core](aten/src/ATen/core)
+  here. This library is intended only to contain essential functionality,
   and appropriate to use in settings where binary size matters. (But
   you'll have a lot of missing functionality if you try to use it
   directly.)
@@ -91,7 +91,7 @@ and `python setup.py clean`. Then you can install in `build develop` mode again.
       [THCUNN](aten/src/THCUNN) - Legacy library code from the original
       Torch. Try not to add things here; we're slowly porting these to
       [native](aten/src/ATen/native).
-      * [generic](aten/src/THCUNN/generic) - Contains actual implementations of operators,
+      * generic - Contains actual implementations of operators,
         parametrized over `scalar_t`. Files here get compiled N times
         per supported scalar type in PyTorch.
     * [ATen](aten/src/ATen)
@@ -199,7 +199,7 @@ commands. To run this check locally, run `./check-doxygen.sh` from inside
 ## Managing multiple build trees
 
 One downside to using `python setup.py develop` is that your development
-version of pytorch will be installed globally on your account (e.g., if
+version of PyTorch will be installed globally on your account (e.g., if
 you run `import torch` anywhere else, the development version will be
 used.
 
