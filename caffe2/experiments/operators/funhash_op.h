@@ -164,8 +164,8 @@ class FunHashGradientOp : public Operator<Context> {
     if (adaptive_) {
       const auto& alpha = Input(5);
       num_alpha = alpha.size(0);
-      auto* grad_alpha = Output(1);
-      grad_alpha->ResizeLike(alpha);
+
+      auto* grad_alpha = Output(1, alpha.sizes(), at::dtype<T>());
       grad_alpha_data = grad_alpha->template mutable_data<T>();
       memset(grad_alpha_data, 0, sizeof(T) * num_alpha);
     }
@@ -175,8 +175,7 @@ class FunHashGradientOp : public Operator<Context> {
     int64_t num_weight = weight.size(0);
     int64_t num_nz_ent = seg.size(0);
 
-    auto* grad_weight = Output(0);
-    grad_weight->ResizeLike(weight);
+    auto* grad_weight = Output(0, weight.sizes(), at::dtype<T>());
     T* grad_weight_data = grad_weight->template mutable_data<T>();
 
     const auto* grad_out_data = grad_out.template data<T>();
