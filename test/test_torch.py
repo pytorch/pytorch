@@ -22,10 +22,12 @@ from torch._six import inf, nan, string_classes
 from itertools import product, combinations
 from functools import reduce
 from torch import multiprocessing as mp
+from common_methods_invocations import tri_tests_args, run_additional_tri_tests, \
+    _compare_trilu_indices
 from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     TEST_LIBROSA, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfRocm, do_test_dtypes, do_test_empty_full, \
-    IS_SANDCASTLE, load_tests
+    IS_SANDCASTLE, load_tests, brute_pdist
 from multiprocessing.reduction import ForkingPickler
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -1124,27 +1126,19 @@ class _TestTorchMixin(object):
             x = torch.randn(shape, device=device)
             self.assertEqual(torch.zeros(3, device=device), torch.pdist(x))
 
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
-    def test_pdist_scipy(self):
-        from scipy.spatial.distance import pdist
+    def test_pdist_norm(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
-            for shape in [(4, 5), (3, 2), (2, 1)]:
+            for shape in [(4, 5), (3, 2), (2, 1), (2, 3, 4)]:
                 for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
                     for trans in [False, True]:
                         x = torch.randn(shape, device=device)
                         if trans:
-                            x.transpose_(0, 1)
+                            x.transpose_(-2, -1)
                         actual = torch.pdist(x, p=p)
-                        # pdist doesn't handle 0 or inf norm properly
-                        if p == 0:
-                            expected = pdist(x.cpu(), 'hamming') * x.shape[1]
-                        elif p == float('inf'):
-                            expected = pdist(x.cpu(), lambda a, b: np.abs(a - b).max())
-                        else:
-                            expected = pdist(x.cpu(), 'minkowski', p=p)
+                        expected = brute_pdist(x, p=p)
                         self.assertEqual(expected.shape, actual.shape)
-                        self.assertTrue(np.allclose(expected, actual.cpu().numpy()))
+                        self.assertTrue(torch.allclose(expected, actual))
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_logsumexp(self):
@@ -1943,6 +1937,10 @@ class _TestTorchMixin(object):
                         expected = numpy_op(tensor.numpy(), dim)
                     actual = pytorch_op(tensor, dim)
                     self._assert_matches_numpy(actual, expected)
+                    if torch.cuda.is_available():
+                        self._assert_matches_numpy(pytorch_op(tensor.cuda(),
+                                                              dim).cpu(),
+                                                   expected)
         do_one(self._make_tensors((5, 400000), use_floating=use_floating,
                use_integral=use_integral), 1)
         do_one(self._make_tensors((3, 5, 7), use_floating=use_floating,
@@ -3764,91 +3762,19 @@ class _TestTorchMixin(object):
         torch.tril(x, out=res2)
         self.assertEqual(res1, res2, 0)
 
-    def _compare_trilu_indices(self, row, col, offset=0, dtype=torch.long):
-        if row == 0 or col == 0:
-            # have to handle this separately as tril and triu does not take
-            # empty matrix as input
-            self.assertEqual(
-                torch.empty(0, 2, dtype=dtype).transpose(0, 1),
-                torch.tril_indices(row, col, offset, dtype=dtype))
+    def test_trilu_indices(self):
+        for test_args in tri_tests_args:
+            _compare_trilu_indices(self, *test_args)
 
-            self.assertEqual(
-                torch.empty(0, 2, dtype=dtype).transpose(0, 1),
-                torch.triu_indices(row, col, offset, dtype=dtype))
+        run_additional_tri_tests(self, 'cpu')
 
-        else:
-            self.assertEqual(
-                torch.ones(row, col, dtype=dtype)
-                     .tril(offset).nonzero().transpose(0, 1),
-                torch.tril_indices(row, col, offset, dtype=dtype))
-
-            self.assertEqual(
-                torch.ones(row, col, dtype=dtype)
-                     .triu(offset).nonzero().transpose(0, 1),
-                torch.triu_indices(row, col, offset, dtype=dtype))
-
-    def test_tril_and_triu_indices(self):
-        self._compare_trilu_indices(1, 1)
-        self._compare_trilu_indices(3, 3)
-        self._compare_trilu_indices(3, 3, offset=1)
-        self._compare_trilu_indices(3, 3, offset=2)
-        self._compare_trilu_indices(3, 3, offset=200)
-        self._compare_trilu_indices(3, 3, offset=-1)
-        self._compare_trilu_indices(3, 3, offset=-2)
-        self._compare_trilu_indices(3, 3, offset=-200)
-        self._compare_trilu_indices(0, 3, offset=0)
-        self._compare_trilu_indices(0, 3, offset=1)
-        self._compare_trilu_indices(0, 3, offset=-1)
-        self._compare_trilu_indices(3, 0, offset=0)
-        self._compare_trilu_indices(3, 0, offset=1)
-        self._compare_trilu_indices(3, 0, offset=-1)
-        self._compare_trilu_indices(0, 0, offset=0)
-        self._compare_trilu_indices(0, 0, offset=1)
-        self._compare_trilu_indices(0, 0, offset=-1)
-        self._compare_trilu_indices(3, 6, offset=0)
-        self._compare_trilu_indices(3, 6, offset=1)
-        self._compare_trilu_indices(3, 6, offset=3)
-        self._compare_trilu_indices(3, 6, offset=9)
-        self._compare_trilu_indices(3, 6, offset=-1)
-        self._compare_trilu_indices(3, 6, offset=-3)
-        self._compare_trilu_indices(3, 6, offset=-9)
-        self._compare_trilu_indices(6, 3, offset=0)
-        self._compare_trilu_indices(6, 3, offset=1)
-        self._compare_trilu_indices(6, 3, offset=3)
-        self._compare_trilu_indices(6, 3, offset=9)
-        self._compare_trilu_indices(6, 3, offset=-1)
-        self._compare_trilu_indices(6, 3, offset=-3)
-        self._compare_trilu_indices(6, 3, offset=-9)
-        self._compare_trilu_indices(258, 253, offset=1, dtype=torch.float32)
-        self._compare_trilu_indices(257, 258, offset=1, dtype=torch.float64)
-        self._compare_trilu_indices(258, 258, offset=1, dtype=torch.short)
-        self._compare_trilu_indices(3, 513, offset=1, dtype=torch.long)
-        self._compare_trilu_indices(513, 3, offset=1, dtype=torch.int)
-        self._compare_trilu_indices(513, 0, offset=1, dtype=torch.double)
-
+        # test default options
         x = torch.ones(
             3, 3, dtype=torch.long, device='cpu', layout=torch.strided)
-        l = x.tril(0).nonzero().transpose(0, 1)
-        u = x.triu(0).nonzero().transpose(0, 1)
-        self.assertEqual(l, torch.tril_indices(3, 3))
-        self.assertEqual(l, torch.tril_indices(3, 3, device='cpu'))
         self.assertEqual(
-            l, torch.tril_indices(3, 3, device='cpu', layout=torch.strided))
-
-        self.assertEqual(u, torch.triu_indices(3, 3))
-        self.assertEqual(u, torch.triu_indices(3, 3, device='cpu'))
+            x.tril(0).nonzero().transpose(0, 1), torch.tril_indices(3, 3))
         self.assertEqual(
-            u, torch.triu_indices(3, 3, device='cpu', layout=torch.strided))
-
-        self.assertRaises(
-            RuntimeError,
-            lambda: torch.triu_indices(
-                1, 1, device='cpu', layout=torch.sparse_coo))
-
-        self.assertRaises(
-            RuntimeError,
-            lambda: torch.tril_indices(
-                1, 1, device='cpu', layout=torch.sparse_coo))
+            x.triu(0).nonzero().transpose(0, 1), torch.triu_indices(3, 3))
 
     def test_triu(self):
         x = torch.rand(SIZE, SIZE)
