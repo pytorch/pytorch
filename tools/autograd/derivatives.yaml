@@ -138,7 +138,7 @@
 - name: alias(Tensor self)
   self: grad
 
-- name: as_strided(Tensor self, IntList size, IntList stride, int64_t storage_offset)
+- name: as_strided(Tensor self, IntList size, IntList stride, int64_t? storage_offset)
   self: as_strided_backward(grad, TensorGeometry(self), size, stride, storage_offset)
 
 - name: asin(Tensor self)
@@ -561,7 +561,7 @@
 - name: norm(Tensor self, Scalar p)
   self: norm_backward(grad, self, p, result)
 
-- name: norm(Tensor self, Scalar p, int64_t dim, bool keepdim)
+- name: norm(Tensor self, Scalar? p, int64_t dim, bool keepdim)
   self: norm_backward(grad, self, p, result, dim, keepdim)
 
 - name: _pdist_forward(Tensor self, double p)
