@@ -216,7 +216,7 @@ struct NormReduction {
     if (pval == 1){
       for (int row = 0; row < rows; row ++) {
         for (int j = 0; j != 4; j++) {
-          auto val = Vec::loadu(&data[row * WIDTH + j * Vec::size]);
+          auto val = Vec::loadu(&data[row * WIDTH + j * Vec::size()]);
           acc[j] = acc[j] + val.abs();
         }
       }
@@ -224,7 +224,7 @@ struct NormReduction {
     else if (pval == 2) {
       for (int row = 0; row < rows; row ++) {
         for (int j = 0; j != 4; j++) {
-          auto val = Vec::loadu(&data[row * WIDTH + j * Vec::size]);
+          auto val = Vec::loadu(&data[row * WIDTH + j * Vec::size()]);
           acc[j] = acc[j] + val * val;
         }
       }
@@ -232,14 +232,14 @@ struct NormReduction {
     else if (pval == 3) {
       for (int row = 0; row < rows; row ++) {
         for (int j = 0; j != 4; j++) {
-          auto val = Vec::loadu(&data[row * WIDTH + j * Vec::size]);
+          auto val = Vec::loadu(&data[row * WIDTH + j * Vec::size()]);
           acc[j] = acc[j] + (val * val * val).abs();
         }
       }
     }
     scalar_t buf[WIDTH] = {0};
     for (int j = 0; j != 4; j++) {
-      acc[j].store(&buf[j * Vec::size]);
+      acc[j].store(&buf[j * Vec::size()]);
     }
     for (int i = 0; i < WIDTH; i++) {
       result += buf[i];
