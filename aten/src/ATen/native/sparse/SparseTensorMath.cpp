@@ -1064,4 +1064,54 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
   }
 }
 
+// --------------------------------------------------------------------
+// sparse pointwise ops
+//
+// This provides an easy way to add unary ops for SparseTensor
+// when op(SparseTensor) is equivalent to sparse_coo_tensor(..., SparseTensor.values().op(), ...).
+// Autograd is automatically supported as well.
+// --------------------------------------------------------------------
+#define IMPLEMENT_SPARSE_UNARY_OP(op)                              \
+  SparseTensor _sparse_##op(const SparseTensor& t_) {                      \
+    AT_ASSERT(t_.is_sparse());                                         \
+    SparseTensor t = t_.coalesce();                                    \
+    Tensor new_values = t.values().op();                               \
+    SparseTensor r = at::_sparse_coo_tensor_with_dims_and_tensors(     \
+      t.sparse_dim(), t.dense_dim(), t.sizes(),                        \
+      t._indices().clone(), new_values, t.options());                    \
+    r._coalesced_(true);                                               \
+    return r;                                                          \
+  }
+
+IMPLEMENT_SPARSE_UNARY_OP(log1p)
+IMPLEMENT_SPARSE_UNARY_OP(abs)
+IMPLEMENT_SPARSE_UNARY_OP(acos)
+IMPLEMENT_SPARSE_UNARY_OP(asin)
+IMPLEMENT_SPARSE_UNARY_OP(atan)
+IMPLEMENT_SPARSE_UNARY_OP(ceil)
+IMPLEMENT_SPARSE_UNARY_OP(cos)
+IMPLEMENT_SPARSE_UNARY_OP(cosh)
+IMPLEMENT_SPARSE_UNARY_OP(digamma)
+IMPLEMENT_SPARSE_UNARY_OP(erf)
+IMPLEMENT_SPARSE_UNARY_OP(erfc)
+IMPLEMENT_SPARSE_UNARY_OP(erfinv)
+IMPLEMENT_SPARSE_UNARY_OP(exp)
+IMPLEMENT_SPARSE_UNARY_OP(expm1)
+IMPLEMENT_SPARSE_UNARY_OP(floor)
+IMPLEMENT_SPARSE_UNARY_OP(frac)
+IMPLEMENT_SPARSE_UNARY_OP(log)
+IMPLEMENT_SPARSE_UNARY_OP(log10)
+IMPLEMENT_SPARSE_UNARY_OP(log2)
+IMPLEMENT_SPARSE_UNARY_OP(reciprocal)
+IMPLEMENT_SPARSE_UNARY_OP(round)
+IMPLEMENT_SPARSE_UNARY_OP(rsqrt)
+IMPLEMENT_SPARSE_UNARY_OP(sigmoid)
+IMPLEMENT_SPARSE_UNARY_OP(sign)
+IMPLEMENT_SPARSE_UNARY_OP(sin)
+IMPLEMENT_SPARSE_UNARY_OP(sinh)
+IMPLEMENT_SPARSE_UNARY_OP(tan)
+IMPLEMENT_SPARSE_UNARY_OP(tanh)
+IMPLEMENT_SPARSE_UNARY_OP(trunc)
+
+
 }} // namespace at::native

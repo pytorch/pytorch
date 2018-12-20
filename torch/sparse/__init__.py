@@ -132,3 +132,203 @@ def sum(input, dim=None, dtype=None):
             return torch._sparse_sum(input, dim, dtype=dtype)
         else:
             return torch._sparse_sum(input, dtype=dtype)
+
+
+def log1p(input):
+    r"""
+    See :func:`torch.log1p`
+    """
+    return torch._sparse_log1p(input)
+
+
+def abs(input):
+    r"""
+    See :func:`torch.abs`
+    """
+    return torch._sparse_abs(input)
+
+
+def acos(input):
+    r"""
+    See :func:`torch.acos`
+    """
+    return torch._sparse_acos(input)
+
+
+def asin(input):
+    r"""
+    See :func:`torch.asin`
+    """
+    return torch._sparse_asin(input)
+
+
+def atan(input):
+    r"""
+    See :func:`torch.atan`
+    """
+    return torch._sparse_atan(input)
+
+
+def ceil(input):
+    r"""
+    See :func:`torch.ceil`
+    """
+    return torch._sparse_ceil(input)
+
+
+def cos(input):
+    r"""
+    See :func:`torch.cos`
+    """
+    return torch._sparse_cos(input)
+
+
+def cosh(input):
+    r"""
+    See :func:`torch.cosh`
+    """
+    return torch._sparse_cosh(input)
+
+
+def digamma(input):
+    r"""
+    See :func:`torch.digamma`
+    """
+    return torch._sparse_digamma(input)
+
+
+def erf(input):
+    r"""
+    See :func:`torch.erf`
+    """
+    return torch._sparse_erf(input)
+
+
+def erfc(input):
+    r"""
+    See :func:`torch.erfc`
+    """
+    return torch._sparse_erfc(input)
+
+
+def erfinv(input):
+    r"""
+    See :func:`torch.erfinv`
+    """
+    return torch._sparse_erfinv(input)
+
+def exp(input):
+    r"""
+    See :func:`torch.exp`
+    """
+    return torch._sparse_exp(input)
+
+
+def expm1(input):
+    r"""
+    See :func:`torch.expm1`
+    """
+    return torch._sparse_expm1(input)
+
+
+def floor(input):
+    r"""
+    See :func:`torch.floor`
+    """
+    return torch._sparse_floor(input)
+
+
+def frac(input):
+    r"""
+    See :func:`torch.frac`
+    """
+    return torch._sparse_frac(input)
+
+
+def log(input):
+    r"""
+    See :func:`torch.log`
+    """
+    return torch._sparse_log(input)
+
+
+def log10(input):
+    r"""
+    See :func:`torch.log10`
+    """
+    return torch._sparse_log10(input)
+
+def log2(input):
+    r"""
+    See :func:`torch.log2`
+    """
+    return torch._sparse_log2(input)
+
+
+def reciprocal(input):
+    r"""
+    See :func:`torch.reciprocal`
+    """
+    return torch._sparse_reciprocal(input)
+
+
+def round(input):
+    r"""
+    See :func:`torch.round`
+    """
+    return torch._sparse_round(input)
+
+
+def rsqrt(input):
+    r"""
+    See :func:`torch.rsqrt`
+    """
+    return torch._sparse_rsqrt(input)
+
+
+def sigmoid(input):
+    r"""
+    See :func:`torch.sigmoid`
+    """
+    return torch._sparse_sigmoid(input)
+
+
+def sign(input):
+    r"""
+    See :func:`torch.sign`
+    """
+    return torch._sparse_sign(input)
+
+def sin(input):
+    r"""
+    See :func:`torch.sin`
+    """
+    return torch._sparse_sin(input)
+
+
+def sinh(input):
+    r"""
+    See :func:`torch.sinh`
+    """
+    return torch._sparse_sinh(input)
+
+
+def tan(input):
+    r"""
+    See :func:`torch.tan`
+    """
+    return torch._sparse_tan(input)
+
+
+def tanh(input):
+    r"""
+    See :func:`torch.tanh`
+    """
+    return torch._sparse_tanh(input)
+
+
+def trunc(input):
+    r"""
+    See :func:`torch.trunc`
+    """
+    return torch._sparse_trunc(input)

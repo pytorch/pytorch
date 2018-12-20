@@ -1102,6 +1102,60 @@ class TestSparse(TestCase):
         self._test_basic_ops_shape(0, 0, [10, 10, 10], [2, 0])
         self._test_basic_ops_shape(0, 0, [10, 10, 0], [2, 0])
 
+    @skipIfRocm
+    def test_sparse_unary_ops(self):
+        def test_shape(sparse_op, dense_op, sparse_dim, nnz, sizes):
+            S = self._gen_sparse(sparse_dim, nnz, sizes)[0]
+            D = S.to_dense()
+            mask = (D == 0)
+            S_out = sparse_op(S)
+            D_out = dense_op(D)
+            D_out.masked_fill_(mask, 0)
+            self.assertEqual(S_out.to_dense(), D_out)
+
+            # test backward
+            D.requires_grad_(True)
+            S.requires_grad_(True)
+            D_out = dense_op(D)
+            D_y = D_out.sum()
+            D_y.backward()
+            D_grad = D.grad.masked_fill(mask, 0)
+            S_out = sparse_op(S)
+            S_y = torch.sparse.sum(S_out)
+            S_y.backward()
+            self.assertEqual(S.grad.to_dense(), D_grad)
+
+        test_shape(torch.sparse.log1p, torch.log1p, 2, 5, [2, 3, 4])
+        test_shape(torch.sparse.abs, torch.abs, 2, 5, [2, 3, 4])
+        test_shape(torch.sparse.acos, torch.acos, 2, 5, [2, 3, 4])
+        test_shape(torch.sparse.asin, torch.asin, 2, 5, [2, 3, 4])
+        test_shape(torch.sparse.atan, torch.atan, 2, 5, [2, 3, 4])
+        test_shape(torch.sparse.ceil, torch.ceil, 2, 5, [2, 3, 4])
+        test_shape(torch.sparse.cos, torch.cos, 2, 5, [2, 3, 4])
+        test_shape(torch.sparse.cosh, torch.cosh, 2, 5, [2, 3, 4])
+        test_shape(torch.sparse.digamma, torch.digamma, 2, 5, [2, 3, 4])
+        test_shape(torch.sparse.erf, torch.erf, 2, 5, [2, 3, 4])
+        test_shape(torch.sparse.erfc, torch.erfc, 2, 5, [2, 3, 4])
+        test_shape(torch.sparse.erfinv, torch.erfinv, 2, 5, [2, 3, 4])
+        test_shape(torch.sparse.exp, torch.exp, 2, 5, [2, 3, 4])
+        test_shape(torch.sparse.expm1, torch.expm1, 2, 5, [2, 3, 4])
+        test_shape(torch.sparse.floor, torch.floor, 2, 5, [2, 3, 4])
+        test_shape(torch.sparse.frac, torch.frac, 2, 5, [2, 3, 4])
+        test_shape(torch.sparse.log, torch.log, 2, 5, [2, 3, 4])
+        test_shape(torch.sparse.log10, torch.log10, 2, 5, [2, 3, 4])
+        test_shape(torch.sparse.log2, torch.log2, 2, 5, [2, 3, 4])
+        test_shape(torch.sparse.reciprocal, torch.reciprocal, 2, 5, [2, 3, 4])
+        test_shape(torch.sparse.round, torch.round, 2, 5, [2, 3, 4])
+        test_shape(torch.sparse.rsqrt, torch.rsqrt, 2, 5, [2, 3, 4])
+        test_shape(torch.sparse.sigmoid, torch.sigmoid, 2, 5, [2, 3, 4])
+        test_shape(torch.sparse.sign, torch.sign, 2, 5, [2, 3, 4])
+        test_shape(torch.sparse.sin, torch.sin, 2, 5, [2, 3, 4])
+        test_shape(torch.sparse.sinh, torch.sinh, 2, 5, [2, 3, 4])
+        test_shape(torch.sparse.tan, torch.tan, 2, 5, [2, 3, 4])
+        test_shape(torch.sparse.tanh, torch.tanh, 2, 5, [2, 3, 4])
+        test_shape(torch.sparse.trunc, torch.trunc, 2, 5, [2, 3, 4])
+
+    @skipIfRocm
     def test_add_dense_sparse_mismatch(self):
         def test_shape(dense_size, sparse_dims_shape, dense_dims_shape, sparse_size):
             x = torch.zeros(dense_size, dtype=self.value_dtype, device=self.device)

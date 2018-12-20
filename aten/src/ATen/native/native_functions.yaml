@@ -971,6 +971,67 @@
     CPU: linspace_cpu_out
     CUDA: linspace_cuda_out
 
+
+# sparse unary ops
+- func: _sparse_log1p(Tensor self) -> Tensor
+
+- func: _sparse_abs(Tensor self) -> Tensor
+
+- func: _sparse_acos(Tensor self) -> Tensor
+
+- func: _sparse_asin(Tensor self) -> Tensor
+
+- func: _sparse_atan(Tensor self) -> Tensor
+
+- func: _sparse_ceil(Tensor self) -> Tensor
+
+- func: _sparse_cos(Tensor self) -> Tensor
+
+- func: _sparse_cosh(Tensor self) -> Tensor
+
+- func: _sparse_digamma(Tensor self) -> Tensor
+
+- func: _sparse_erf(Tensor self) -> Tensor
+
+- func: _sparse_erfc(Tensor self) -> Tensor
+
+- func: _sparse_erfinv(Tensor self) -> Tensor
+
+- func: _sparse_exp(Tensor self) -> Tensor
+
+- func: _sparse_expm1(Tensor self) -> Tensor
+
+- func: _sparse_floor(Tensor self) -> Tensor
+
+- func: _sparse_frac(Tensor self) -> Tensor
+
+- func: _sparse_log(Tensor self) -> Tensor
+
+- func: _sparse_log10(Tensor self) -> Tensor
+
+- func: _sparse_log2(Tensor self) -> Tensor
+
+- func: _sparse_reciprocal(Tensor self) -> Tensor
+
+- func: _sparse_round(Tensor self) -> Tensor
+
+- func: _sparse_rsqrt(Tensor self) -> Tensor
+
+- func: _sparse_sigmoid(Tensor self) -> Tensor
+
+- func: _sparse_sign(Tensor self) -> Tensor
+
+- func: _sparse_sin(Tensor self) -> Tensor
+
+- func: _sparse_sinh(Tensor self) -> Tensor
+
+- func: _sparse_tan(Tensor self) -> Tensor
+
+- func: _sparse_tanh(Tensor self) -> Tensor
+
+- func: _sparse_trunc(Tensor self) -> Tensor
+
+
 - func: log(Tensor self) -> Tensor
   variants: function, method
 
