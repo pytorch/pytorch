@@ -2,18 +2,21 @@
 
 #include <iostream>
 #include <vector>
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/utils/hash.h"
-#include "torch/csrc/jit/stack.h"
-#include "torch/csrc/jit/type.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/variable_tensor_list.h"
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/utils/hash.h>
+#include <torch/csrc/jit/stack.h>
+#include <torch/csrc/jit/type.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/variable_tensor_list.h>
 
 namespace torch { namespace jit {
 
 // GraphExecutor creates specializations of Graphs for different dimensionalitities
 // and types of inputs.
 
+inline static at::Device ConvertIntToCPUOrCUDA(int device){
+  return device < 0 ? at::kCPU : at::Device(at::DeviceType::CUDA, device);
+}
 struct ArgumentInfo {
   friend struct ArgumentSpec;
   using plain_data_type = uint32_t;
@@ -40,7 +43,7 @@ struct ArgumentInfo {
   operator TypePtr() const {
     if (!defined())
       return DynamicType::get();
-    return TensorType::create(type(), device(), dim());
+    return TensorType::create(type(), ConvertIntToCPUOrCUDA(device()), dim());
   }
 
 private:
@@ -70,13 +73,13 @@ struct ArgumentSpec {
   }
 
   void addInput(const IValue& input, size_t& offset, bool with_grad) {
-    auto & arg = args[offset];
+    auto & arg = args.at(offset);
     // Initialize all fields to 0. This is convenient, because e.g.
     // requires_grad() can be checked even on tensors AND will make
     // padding bits all 0s.
     std::memset(&arg, 0, sizeof(ArgumentInfo));
+
     if (input.isTensor()) {
-      JIT_ASSERT(offset < args.size());
       at::Tensor t = input.toTensor();
       if ((arg.defined_ = t.defined())) {
         arg.requires_grad_ = with_grad && autograd::Variable(t).requires_grad();
@@ -93,7 +96,6 @@ struct ArgumentSpec {
         addInput(elem, offset, with_grad);
       }
     } else {
-      JIT_ASSERT(offset < args.size());
       // NB: no need to set is_tensor to false, because we memset the struct to 0 above
       combineHash(arg);
       offset++;
@@ -121,6 +123,9 @@ struct ArgumentSpec {
   size_t size() const {
     return args.size();
   }
+  const ArgumentInfo& at(size_t i) const {
+    return args[i];
+  }
   size_t hashCode() const {
     return hash_code;
   }
@@ -138,12 +143,13 @@ private:
       auto & arg = args.at(offset++);
       if (!arg.defined())
         return UndefinedTensorType::get();
-      return TensorType::create(arg.type(), arg.device(), arg.dim(), arg.requires_grad());
+      return TensorType::create(arg.type(), ConvertIntToCPUOrCUDA(arg.device()), arg.dim(), arg.requires_grad());
     } else if (auto tuple_type = original->cast<TupleType>()) {
       return TupleType::create(fmap(tuple_type->elements(), [&](const TypePtr& subtype) {
         return fillType(subtype, offset);
       }));
     } else {
+      offset++;
       return original;
     }
   }
@@ -294,7 +300,7 @@ struct CompleteArgumentInfo {
   operator TypePtr() const {
     if(!defined())
       return DynamicType::get();
-    return CompleteTensorType::create(type(), device(), sizes(), strides());
+    return CompleteTensorType::create(type(), ConvertIntToCPUOrCUDA(device()), sizes(), strides());
   }
 private:
   // offsetinto sizes_strides() array where the sizes start for tensor j
@@ -310,6 +316,28 @@ private:
   const CompleteArgumentSpec & spec;
   const int i;
 };
+
+inline std::ostream & operator<<(std::ostream & out, const ArgumentInfo & info) {
+  if(!info.defined()) {
+    return out << "<undefined>";
+  }
+  out << "Tensor(device=" << info.device()
+    << ", type=" << toString(info.type())
+    << ", requires_grad=" << info.requires_grad()
+    << ", dims=" << info.dim() << ")";
+  return out;
+}
+
+inline std::ostream& operator<<(std::ostream & out, const ArgumentSpec & spec) {
+  out << "{";
+  for(size_t i = 0; i < spec.size(); ++i) {
+    if (i > 0)
+      out << ", ";
+    out << spec.at(i);
+  }
+  out << "}";
+  return out;
+}
 
 inline std::ostream & operator<<(std::ostream & out, const CompleteArgumentInfo & info) {
   if(!info.defined()) {

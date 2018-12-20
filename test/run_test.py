@@ -3,6 +3,7 @@
 from __future__ import print_function
 
 import argparse
+from contextlib import contextmanager
 from datetime import datetime
 import os
 import shutil
@@ -10,6 +11,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import unittest
 
 import torch
 import torch._six
@@ -28,6 +30,7 @@ TESTS = [
     'distributions',
     'expecttest',
     'indexing',
+    'indexing_cuda',
     'jit',
     'multiprocessing',
     'multiprocessing_spawn',
@@ -131,14 +134,36 @@ def shell(command, cwd=None):
         p.wait()
 
 
+@contextmanager
+def cd(path):
+    if not os.path.isabs(path):
+        raise RuntimeError('Can only cd to absolute path, got: {}'.format(path))
+    orig_path = os.getcwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(orig_path)
+
+
 def run_test(executable, test_module, test_directory, options):
     unittest_args = options.additional_unittest_args
     if options.verbose:
         unittest_args.append('--verbose')
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
-    command = executable + [test_module + '.py'] + unittest_args
-    return shell(command, test_directory)
+    argv = [test_module + '.py'] + unittest_args
+
+    # Forking after HIP is initialized could trigger random
+    # ihipException issue, see
+    # https://github.com/pytorch/pytorch/issues/14497
+    if TEST_WITH_ROCM:
+        with cd(test_directory):
+            res = unittest.main(argv=argv, module=test_module, exit=False).result
+        return int(bool(len(res.failures) + len(res.errors)))
+    else:
+        command = executable + argv
+        return shell(command, test_directory)
 
 
 def test_cpp_extensions(executable, test_module, test_directory, options):
@@ -147,10 +172,16 @@ def test_cpp_extensions(executable, test_module, test_directory, options):
     except RuntimeError:
         print(CPP_EXTENSIONS_ERROR)
         return 1
+    cpp_extensions_test_dir = os.path.join(test_directory, 'cpp_extensions')
     return_code = shell([sys.executable, 'setup.py', 'install', '--root', './install'],
-                        os.path.join(test_directory, 'cpp_extensions'))
+                        cwd=cpp_extensions_test_dir)
     if return_code != 0:
         return return_code
+    if sys.platform != 'win32':
+        return_code = shell([sys.executable, 'setup.py', 'install', '--root', './install'],
+                            cwd=os.path.join(cpp_extensions_test_dir, 'no_python_abi_suffix_test'))
+        if return_code != 0:
+            return return_code
 
     python_path = os.environ.get('PYTHONPATH', '')
     try:

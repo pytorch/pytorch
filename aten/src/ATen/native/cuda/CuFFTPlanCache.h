@@ -1,8 +1,8 @@
-#include "ATen/ATen.h"
-#include "ATen/cuda/CUDAContext.h"
-#include "ATen/Config.h"
-#include "ATen/native/cuda/CuFFTUtils.h"
-#include "ATen/native/utils/ParamsHash.h"
+#include <ATen/ATen.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/Config.h>
+#include <ATen/native/cuda/CuFFTUtils.h>
+#include <ATen/native/utils/ParamsHash.h>
 
 #include <list>
 #include <unordered_map>
@@ -222,7 +222,7 @@ public:
     } else {
       std::ostringstream ss;
       ss << "hipFFT doesn't support tensor of type: "
-         << at::toString(input.type().scalarType());
+         << toString(input.type().scalarType());
       AT_ERROR(ss.str());
     }
 
@@ -243,7 +243,7 @@ public:
     } else {
       std::ostringstream ss;
       ss << "cuFFT doesn't support tensor of type: "
-         << at::toString(input.type().scalarType());
+         << toString(input.type().scalarType());
       AT_ERROR(ss.str());
     }
 #endif

@@ -20,7 +20,6 @@ class MaxReduceDimsOp final : public Operator<Context> {
 
   bool RunOnDevice() {
     auto& X = Input(0);
-    auto* Y = Output(0);
 
     CAFFE_ENFORCE(
         num_reduce_dims_ >= 0 && num_reduce_dims_ <= X.sizes().size(),
@@ -39,7 +38,7 @@ class MaxReduceDimsOp final : public Operator<Context> {
     for (int i = start_index; i < end_index; ++i) {
       output_shape.push_back(X.sizes()[i]);
     }
-    Y->Resize(output_shape);
+    auto* Y = Output(0, output_shape, at::dtype<float>());
     float* out_data = Y->template mutable_data<float>();
 
     if (cols == 0 || rows == 0) {
@@ -90,9 +89,8 @@ class MaxReduceDimsGradientOp final : public Operator<Context> {
     auto& dY = Input(0);
     auto& X = Input(1);
     auto& Y = Input(2);
-    auto* dX = Output(0);
 
-    dX->ResizeLike(X);
+    auto* dX = Output(0, X.sizes(), at::dtype<float>());
     const int rows = FIRSTDIMS ? X.size_to_dim(num_reduce_dims_)
                                : X.size_to_dim(X.dim() - num_reduce_dims_);
     const int cols = FIRSTDIMS ? X.size_from_dim(num_reduce_dims_)

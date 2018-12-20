@@ -1,20 +1,20 @@
 #pragma once
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/graph_executor.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/passes/shape_analysis.h"
-#include "torch/csrc/jit/argument_spec.h"
-#include "torch/csrc/jit/function_schema.h"
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/named_value.h"
-#include "torch/csrc/jit/source_range.h"
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/graph_executor.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/argument_spec.h>
+#include <torch/csrc/jit/function_schema.h>
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/named_value.h>
+#include <torch/csrc/jit/source_range.h>
 
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 #include <torch/csrc/utils/memory.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <c10/util/ArrayRef.h>
-#include "c10/util/Optional.h"
+#include <c10/util/Optional.h>
 
 #include <functional>
 #include <memory>
@@ -39,12 +39,15 @@ namespace torch { namespace jit { namespace script {
 // Note: because Method/Module are exposed to python these
 // classes use python method naming conventions
 
+struct Module;
+
 struct Method {
-  Method(std::string name, bool optimize,
+  Method(Module* owner, std::string name, bool optimize,
          std::shared_ptr<Graph> graph,
          std::vector<at::Tensor*> initial_members,
          std::function<void(Method&)> method_creator)
-  : name_(std::move(name))
+  : owner_(owner)
+  , name_(std::move(name))
   , graph_(std::move(graph))
   , optimize(optimize)
   , member_inputs(std::move(initial_members))
@@ -66,9 +69,6 @@ struct Method {
   IValue operator()(std::vector<IValue> stack) {
     checkInputsAgainstSchema(stack);
     run(stack);
-    if (stack.size() != 1) {
-      return Tuple::create(std::move(stack));
-    }
     return stack.front();
   }
 
@@ -89,7 +89,7 @@ struct Method {
   // adding any extra parameters necessary to do this call
 
   // defined here to keep details of member_input handling confined to this class
-  std::vector<Value*> emit_call_to(SourceRange loc, Method & callee, ArrayRef<NamedValue> args, ArrayRef<NamedValue> kwargs);
+  Value* emit_call_to(const SourceRange& loc, Method & callee, ArrayRef<NamedValue> args, ArrayRef<NamedValue> kwargs);
 
   // if this isn't yet defined, run its method_creator function
   TORCH_API void ensure_defined();
@@ -120,8 +120,8 @@ struct Method {
       stack.push_back(*inp);
     }
     const auto size = stack.size();
-    setInputTypes(*retval, ArgumentSpec(with_grad, std::move(stack), size));
-    PropagateInputShapes(*retval);
+    setInputTypes(*retval, ArgumentSpec(with_grad, stack, size));
+    PropagateInputShapes(retval);
     return retval;
   }
 
@@ -132,21 +132,27 @@ struct Method {
     }
     if (propagate) {
       setInputTypes(*retval, ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
-      PropagateInputShapes(*retval);
+      PropagateInputShapes(retval);
     }
     JIT_ASSERT(retval->inputs().size() == inputs.size());
     for (size_t i=0; i < retval->inputs().size(); ++i) {
       auto scalar_type = inputs[i].type().scalarType();
       auto sizes = inputs[i].sizes();
-      auto type = torch::jit::CompleteTensorType::create(scalar_type, -1, sizes);
+      auto type = torch::jit::CompleteTensorType::create(scalar_type, at::kCPU, sizes);
       retval->inputs()[i]->setType(type);
     }
-    JIT_ASSERT(retval->outputs().size() == outputs.size());
+    at::ArrayRef<Value*> output_values = retval->outputs();
+    // patch this to still work if we are returning a tuple of multiple values
+    if (output_values.at(0)->type()->kind() == TupleType::Kind) {
+      JIT_ASSERT(output_values.at(0)->node()->kind()== prim::TupleConstruct);
+      output_values = output_values.at(0)->node()->inputs();
+    }
+    JIT_ASSERT(output_values.size() == outputs.size());
     for (size_t i=0; i < retval->outputs().size(); ++i) {
       auto scalar_type = outputs[i].type().scalarType();
       auto sizes = outputs[i].sizes();
-      auto type = torch::jit::CompleteTensorType::create(scalar_type, -1, sizes);
-      retval->outputs()[i]->setType(type);
+      auto type = torch::jit::CompleteTensorType::create(scalar_type, at::kCPU, sizes);
+      output_values[i]->setType(type);
     }
     return retval;
   }
@@ -186,6 +192,16 @@ struct Method {
     return optimize;
   }
 
+  // the module that contains this method.
+  Module& owner() const {
+    return *owner_;
+  }
+
+  void check_single_output() {
+    AT_CHECK(
+        graph()->outputs().size() == 1,
+        "Method (but not graphs in general) require a single output. Use None/Tuple for 0 or 2+ outputs");
+  }
 private:
 
   static FunctionSchema defaultSchemaFor(const Method& method) {
@@ -204,12 +220,9 @@ private:
     return { method.name(), std::move(args), std::move(returns) };
   }
 
-  std::string name_;
-  std::shared_ptr<Graph> graph_; // for debugging and for inlining
-  bool optimize;
-
   GraphExecutor& get_executor() {
-    std::call_once(executor_init, [&]{
+    std::call_once(executor_init, [&] {
+      check_single_output();
       executor = GraphExecutor(graph(), optimize);
     });
     return executor;
@@ -227,7 +240,10 @@ private:
     for (size_t pos = 0; pos < schema.arguments().size(); ++pos) {
       const auto& argument = schema.arguments()[pos];
       if (pos < inputs.size()) {
-        const TypePtr inputType = inferTypeFrom(inputs[pos]);
+        // XXX - this fails to handle generic aggregates
+        // and should be replaced with a function isSubvalueOf(ivalue, type)
+        // That asks if the specific value is a valid instance of type.
+        const TypePtr inputType = incompleteInferTypeFrom(inputs[pos]);
         AT_CHECK(inputType->isSubtypeOf(argument.type()),
               "Expected value of type ", *argument.type(),
               " for argument '", argument.name(),
@@ -242,6 +258,15 @@ private:
       }
     }
   }
+
+
+  // Methods are uniqued onwed by a single module. This raw pointer allows
+  // looking up the module.
+  Module* owner_;
+
+  std::string name_;
+  std::shared_ptr<Graph> graph_; // for debugging and for inlining
+  bool optimize;
 
   GraphExecutor executor; // for execution
   // member_inputs are a list of additional arguments appended to graph that are
@@ -316,8 +341,12 @@ struct Module {
     optimize = o;
   }
 
+  bool is_optimized() const {
+    return optimize;
+  }
+
   IValue forward(std::vector<IValue> inputs) {
-    return get_method("forward")(inputs);
+    return get_method("forward")(std::move(inputs));
   }
 
   void register_parameter(const std::string & name, autograd::Variable v, bool is_buffer) {
@@ -334,12 +363,12 @@ struct Module {
 
   Method& create_method(const std::string & name, std::shared_ptr<Graph> graph, std::vector<at::Tensor*> member_inputs) {
     JIT_ASSERT(graph);
-    std::unique_ptr<Method> method(new Method(name, optimize, std::move(graph), std::move(member_inputs), nullptr));
+    std::unique_ptr<Method> method(new Method(this, name, optimize, std::move(graph), std::move(member_inputs), nullptr));
     return *methods.insert(name, std::move(method));
   }
 
   Method& create_method(const std::string & name, std::function<void(Method&)> creator) {
-    std::unique_ptr<Method> method(new Method(name, optimize, std::make_shared<Graph>(), {}, creator));
+    std::unique_ptr<Method> method(new Method(this, name, optimize, std::make_shared<Graph>(), {}, std::move(creator)));
     return *methods.insert(name, std::move(method));
   }
 
@@ -386,6 +415,12 @@ struct Module {
       return pm->get();
     }
     return nullptr;
+  }
+  void apply(std::function<void(Module&)> fn) {
+    for (auto &submod : get_modules()) {
+      submod.value().module->apply(fn);
+    }
+    fn(*this);
   }
 
   /// Recursively casts all parameters to the given `dtype` and `device`.
@@ -437,10 +472,36 @@ struct Module {
 
   void save(const std::string& filename);
 
+  void copy_into(std::function<std::shared_ptr<Module>(
+      std::vector<std::string>)> module_lookup,
+      // parameter_remap is needed when a parent module uses a parameter of a submodule
+      std::unordered_map<at::Tensor*, at::Tensor*>& parameter_remap,
+      std::vector<std::string> names = {}) const {
+    auto curr = module_lookup(names);
+    for (auto &kv : parameters) {
+      curr->register_parameter(kv.key(), *kv.value().slot(), kv.value().is_buffer);
+      parameter_remap[kv.value().slot()] = curr->parameter_slot(kv.key());
+    }
+    for (auto &kv : modules) {
+      names.push_back(kv.key());
+      // Submodules must be translated first, otherwise parameter_remap entries
+      // will not be filled in for methods of this module.
+      kv.value().module->copy_into(module_lookup, parameter_remap, names);
+      names.pop_back();
+    }
+    for (auto &kv : methods) {
+      std::vector<at::Tensor*> params;
+      for (auto &p : kv.value()->params()) {
+        params.push_back(parameter_remap.at(p));
+      }
+      curr->create_method(kv.key(), kv.value()->graph()->copy(), params);
+    }
+  }
+
  private:
   void to_impl(
-      c10::optional<at::Device> device,
-      c10::optional<at::ScalarType> dtype,
+      const c10::optional<at::Device>& device,
+      const c10::optional<at::ScalarType>& dtype,
       bool non_blocking);
 
   // invariant: to ensure member_inputs of Methods stay valid,
@@ -453,11 +514,11 @@ struct Module {
   bool optimize;
 };
 
-// returns c10::nullopt and fills in failure_messages if the callee does not
+// returns nullptr and fills in failure_messages if the callee does not
 // match the functions schema
-c10::optional<std::vector<Value*>> try_emit_call_to(
+Value* try_emit_call_to(
     Graph& graph,
-    SourceRange loc,
+    const SourceRange& loc,
     Method& callee,
     c10::optional<NamedValue> self,
     ArrayRef<NamedValue> args,

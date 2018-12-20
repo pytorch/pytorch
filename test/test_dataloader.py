@@ -12,10 +12,10 @@ import unittest
 import subprocess
 import itertools
 from torch import multiprocessing as mp
-from torch.utils.data import Dataset, TensorDataset, DataLoader, ConcatDataset
+from torch.utils.data import _utils, Dataset, TensorDataset, DataLoader, ConcatDataset
+from torch.utils.data._utils import ExceptionWrapper, MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
-from torch.utils.data.dataloader import default_collate, ExceptionWrapper, MP_STATUS_CHECK_INTERVAL
-from common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN,
+from common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, IS_PPC, NO_MULTIPROCESSING_SPAWN,
                           skipIfRocm, load_tests)
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -34,7 +34,7 @@ if not NO_MULTIPROCESSING_SPAWN:
     mp = mp.get_context(method='spawn')
 
 
-JOIN_TIMEOUT = 17.0 if IS_WINDOWS else 8.5
+JOIN_TIMEOUT = 17.0 if IS_WINDOWS or IS_PPC else 8.5
 
 
 class TestDatasetRandomSplit(TestCase):
@@ -788,16 +788,16 @@ class TestDataLoader(TestCase):
 
         # Should be a no-op
         arr = np.array(['a', 'b', 'c'])
-        default_collate(arr)
+        _utils.collate.default_collate(arr)
 
         arr = np.array([[['a', 'b', 'c']]])
-        self.assertRaises(TypeError, lambda: default_collate(arr))
+        self.assertRaises(TypeError, lambda: _utils.collate.default_collate(arr))
 
         arr = np.array([object(), object(), object()])
-        self.assertRaises(TypeError, lambda: default_collate(arr))
+        self.assertRaises(TypeError, lambda: _utils.collate.default_collate(arr))
 
         arr = np.array([[[object(), object(), object()]]])
-        self.assertRaises(TypeError, lambda: default_collate(arr))
+        self.assertRaises(TypeError, lambda: _utils.collate.default_collate(arr))
 
 
 class StringDataset(Dataset):

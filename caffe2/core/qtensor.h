@@ -46,6 +46,7 @@ class C10_EXPORT QTensor {
    * many low precision integers as a sum of popcnt(A & B) * 1 << bit.
    * Explained here: https://arxiv.org/abs/1606.06160
    */
+  // TODO: changing at::ArrayRef<int> to at::ArrayRef<int64_t>?
   explicit QTensor(
       at::ArrayRef<int> dims,
       const unsigned char precision,

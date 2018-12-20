@@ -11,9 +11,9 @@ namespace caffe2 {
  * Wrap a floating-point operator with quantized inputs with type T.
  * This class is to measure quantization error against fp32 reference.
  */
-template<typename OpType, typename T>
+template <typename OpType, typename T>
 class OpWrapper {
- public :
+ public:
   OpWrapper(OperatorBase* op, dnnlowp::QuantizationFactory* qfactory)
       : op_(op), qfactory_(qfactory) {
     for (auto name : op->debug_def().input()) {
@@ -35,8 +35,8 @@ class OpWrapper {
     for (int i = 0; i < op_->InputSize(); ++i) {
       if (op_->InputIsType<int8::Int8TensorCPU>(i)) {
         const TensorCPU& qtensor = op_->Input<int8::Int8TensorCPU>(i).t;
-        TensorCPU *float_tensor =
-          BlobGetMutableTensor(local_input_blobs_[i], CPU);
+        TensorCPU* float_tensor =
+            BlobGetMutableTensor(local_input_blobs_[i], CPU);
         // FIXME: doesn't work for bias so we shouldn't quantize bias before
         // model loading when we're running a shadow operator in fp32 for
         // example for measuring quantization error.
@@ -54,16 +54,18 @@ class OpWrapper {
     }
   }
 
-  OpType *Get() { return local_op_.get(); }
+  OpType* Get() {
+    return local_op_.get();
+  }
 
-  dnnlowp::TensorQuantizationParams
-    GetOutputQuantizationParams(
-        dnnlowp::QuantizationFactory *qfactory, int index = 0) {
+  dnnlowp::TensorQuantizationParams GetOutputQuantizationParams(
+      dnnlowp::QuantizationFactory* qfactory,
+      int index = 0) {
     using namespace dnnlowp;
 
     float min, max;
     auto& out_tensor = local_output_blobs_[index]->template Get<TensorCPU>();
-    FindMinMax(
+    fbgemm::FindMinMax(
         out_tensor.template data<float>(), &min, &max, out_tensor.numel());
     if (op_->OperatorBase::GetSingleArgument<std::string>("followed_by", "") ==
         "Relu") {
@@ -74,7 +76,7 @@ class OpWrapper {
     return qfactory->ChooseQuantizationParams(min, max);
   }
 
- private :
+ private:
   OperatorBase* op_; /* container quantized op */
   Workspace local_ws_;
   std::vector<Blob*> local_input_blobs_;
@@ -83,4 +85,4 @@ class OpWrapper {
   dnnlowp::QuantizationFactory* qfactory_;
 };
 
-} // caffe2
+} // namespace caffe2

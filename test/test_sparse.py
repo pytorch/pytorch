@@ -8,6 +8,7 @@ import unittest
 from common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, do_test_empty_full, load_tests
 from common_cuda import TEST_CUDA
 from numbers import Number
+from torch.autograd.gradcheck import gradcheck
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -134,7 +135,6 @@ class TestSparse(TestCase):
             printed.append('')
         self.assertExpected('\n'.join(printed))
 
-    @skipIfRocm
     def test_basic(self):
         def test_shape(sparse_dims, nnz, with_size):
             if isinstance(with_size, Number):
@@ -172,7 +172,6 @@ class TestSparse(TestCase):
         self.assertEqual(x._indices().numel(), 0)
         self.assertEqual(x._values().numel(), 0)
 
-    @skipIfRocm
     def test_coalecce(self):
         for empty_i, empty_v, empty_nnz in itertools.product([True, False], repeat=3):
             sparse_size = [] if empty_i else [2, 1]
@@ -205,7 +204,6 @@ class TestSparse(TestCase):
             RuntimeError,
             lambda: self.SparseTensor(indices, values, torch.Size([2, 4, 2, 1])))
 
-    @skipIfRocm
     def test_to_dense(self):
         def test_tensor(x, res):
             x.to_dense()  # Tests triple to_dense for memory corruption
@@ -213,6 +211,11 @@ class TestSparse(TestCase):
             x.to_dense()
             self.assertEqual(res, x.to_dense())
             self.assertEqual(res, self.safeToDense(x))
+
+            def fn(x):
+                return x.to_dense()
+            x.requires_grad_(True)
+            gradcheck(fn, (x,), check_sparse_nnz=True)
 
         i = self.IndexTensor([
             [0, 1, 2, 2],
@@ -265,7 +268,6 @@ class TestSparse(TestCase):
         sp, _, _ = self._gen_sparse(2, 10, [3, 3, 3])
         self.assertRaises(RuntimeError, lambda: sp.to_sparse())
 
-    @skipIfRocm
     def test_shared(self):
         i = self.IndexTensor([[2]])
         v = self.ValueTensor([5])
@@ -281,7 +283,6 @@ class TestSparse(TestCase):
         i[0][0] = 0
         self.assertEqual(self.ValueTensor(3, 0), self.safeToDense(x))
 
-    @skipIfRocm
     def test_to_dense_hybrid(self):
         def test_tensor(x, res):
             x.to_dense()  # Tests double to_dense for memory corruption
@@ -289,6 +290,11 @@ class TestSparse(TestCase):
             x.to_dense()
             self.assertEqual(res, x.to_dense())
             self.assertEqual(res, self.safeToDense(x))
+
+            def fn(x):
+                return x.to_dense()
+            x.requires_grad_(True)
+            gradcheck(fn, (x,), check_sparse_nnz=True)
 
         i = self.IndexTensor([
             [0, 1, 2, 2],
@@ -321,7 +327,6 @@ class TestSparse(TestCase):
         res = self.ValueTensor(3, 4, 2, 0)
         test_tensor(x, res)
 
-    @skipIfRocm
     def test_contig(self):
         def test_tensor(x, exp_i, exp_v):
             x = self.safeCoalesce(x)
@@ -402,7 +407,6 @@ class TestSparse(TestCase):
         exp_v = self.ValueTensor(2, 0)
         test_tensor(x, exp_i, exp_v)
 
-    @skipIfRocm
     def test_contig_hybrid(self):
         def test_tensor(x, exp_i, exp_v):
             x = self.safeCoalesce(x)
@@ -505,7 +509,6 @@ class TestSparse(TestCase):
         test_shape(3, 10, [100, 100, 100, 5, 5, 5, 0])
         test_shape(3, 0, [0, 0, 100, 5, 5, 5, 0])
 
-    @skipIfRocm
     def test_Sparse_to_Sparse_copy_(self):
         # This is for testing torch.copy_(SparseTensor, SparseTensor)
         sparse_dims = 3
@@ -591,7 +594,6 @@ class TestSparse(TestCase):
         x = torch.sparse.FloatTensor(2, 3, 4, 0)
         test_tensor(x)
 
-    @skipIfRocm
     def test_transpose(self):
         def test_shape(sparse_dims, nnz, with_size):
             x = self._gen_sparse(sparse_dims, nnz, with_size)[0]
@@ -660,7 +662,6 @@ class TestSparse(TestCase):
         test_in_place(x)
         test_not_in_place(x)
 
-    @skipIfRocm
     def test_add_zeros(self):
         def test_shape(sparse_dims, nnz, sizes):
             x, _, _ = self._gen_sparse(sparse_dims, nnz, sizes)
@@ -675,7 +676,6 @@ class TestSparse(TestCase):
         test_shape(2, 20, [3, 17, 19, 5])
         test_shape(2, 20, [3, 17, 19, 0])
 
-    @skipIfRocm
     def test_cat(self):
         # shapes: list of tuples (sparse_dims, nnz, sizes)
         def test_shapes(shapes, dim, fail_message=None):
@@ -694,15 +694,17 @@ class TestSparse(TestCase):
 
         # mismatched sizes
         test_shapes([(3, 10, [2, 3, 4]), (3, 10, [2, 1, 4])], 0,
-                    "Concatenating tensor.*of sizes \\[2, 1, 4].*of sizes \\[2, 3, 4]")
+                    "All tensors must have the same shape: \\[2, 3, 4].*\\[2, 1, 4]")
         # hybrid sparse/dense
         test_shapes(
             [(2, 10, [2, 3, 4]), (2, 10, [2, 1, 4]), (2, 10, [2, 4, 4])], 1)
-        test_shapes([(2, 10, [2, 3, 4]), (2, 10, [2, 1, 4])], 2,
-                    "Concatenating.*along non-sparse dimension 2")
+        # cat along dense dim
+        test_shapes([(2, 10, [2, 3, 4]), (2, 10, [2, 3, 7])], 2)
+        test_shapes([(1, 10, [2, 3, 4]), (1, 10, [2, 3, 4])], 1)
+        test_shapes([(1, 10, [2, 3, 4]), (1, 10, [2, 3, 4])], 2)
         # mismatched dimensions
         test_shapes([(2, 10, [2, 3, 4]), (3, 10, [2, 3, 4])], 0,
-                    "has dimension: sparse 3, dense 0.*Concatenating with tensor of dimensions 2, 1")
+                    "All tensors must have the same.*2, 1, but tensor at position 1 has 3, 0.")
         # wrapped dimension
         test_shapes(
             [(3, 10, [2, 3, 4]), (3, 10, [2, 1, 4]), (3, 10, [2, 4, 4])], -2)
@@ -711,7 +713,7 @@ class TestSparse(TestCase):
         sp = self._gen_sparse(3, 10, [2, 3, 4])[0]
         dn = sp.to_dense()
         with self.assertRaisesRegex(RuntimeError,
-                                    "Concatenating dense tensor.*with sparse"):
+                                    "Concatenating sparse tensors, but a dense tensor was found at position 1."):
             torch.cat((sp, dn))
 
     @skipIfRocm
@@ -803,6 +805,37 @@ class TestSparse(TestCase):
         test_shape(1000, 100, 0, 0)
 
     @skipIfRocm
+    def test_sparse_addmm(self):
+        def test_shape(m, n, p, nnz):
+            D1 = torch.randn(n, p, device=self.device).requires_grad_(True)
+            D2 = torch.randn(m, p, device=self.device).requires_grad_(True)
+            S = self._gen_sparse(2, nnz, [n, m])[0]
+            S_dense = S.to_dense().requires_grad_(True)
+            S.requires_grad_(True)
+            self.assertEqual(torch.sparse.addmm(D1, S, D2), torch.addmm(D1, S_dense, D2))
+
+            def fn(S, D1, D2):
+                return torch.sparse.addmm(D1, S, D2)
+            gradcheck(fn, (S, D1, D2), check_sparse_nnz=True)
+
+        test_shape(7, 8, 9, 20)
+
+    @skipIfRocm
+    def test_sparse_mm(self):
+        def test_shape(d1, d2, d3, nnz):
+            D = torch.randn(d2, d3, device=self.device).requires_grad_(True)
+            S = self._gen_sparse(2, nnz, [d1, d2])[0]
+            S_dense = S.to_dense().requires_grad_(True)
+            S.requires_grad_(True)
+            self.assertEqual(torch.sparse.mm(S, D), torch.mm(S_dense, D))
+
+            def fn(S, D):
+                return torch.sparse.mm(S, D)
+            gradcheck(fn, (S, D), check_sparse_nnz=True)
+
+        test_shape(7, 8, 9, 20)
+
+    @skipIfRocm
     def test_dsmm(self):
         def test_shape(di, dj, dk, nnz):
             x = self._gen_sparse(2, nnz, [di, dj])[0]
@@ -883,7 +916,6 @@ class TestSparse(TestCase):
         expected = y + r * self.safeToDense(x_)
         self.assertEqual(res, expected)
 
-    @skipIfRocm
     def test_spadd(self):
         self._test_spadd_shape(10, [5, 6])
         self._test_spadd_shape(10, [10, 10, 10])
@@ -893,7 +925,6 @@ class TestSparse(TestCase):
         self._test_spadd_shape(0, [50, 0, 20])
         self._test_spadd_shape(0, [50, 30, 0])
 
-    @skipIfRocm
     def test_spadd_hybrid(self):
         self._test_spadd_shape(10, [5, 6], [2, 3])
         self._test_spadd_shape(10, [10, 10, 10], [3])
@@ -913,6 +944,68 @@ class TestSparse(TestCase):
         test_shape(3, 10, 100)
         test_shape(4, 10, [100, 100, 100, 5, 5, 5, 0])
         test_shape(4, 0, [0, 0, 100, 5, 5, 5, 0])
+
+    @skipIfRocm
+    def test_sparse_sum(self):
+
+        def run_tests(S, td=None):
+            D = S.coalesce().to_dense().detach().requires_grad_(True)
+            mask = (D == 0)
+            if td is None:
+                S_sum = torch.sparse.sum(S)
+                D_sum = D.sum()
+                self.assertEqual(S_sum, D_sum)
+
+                def fn(S):
+                    res = torch.sparse.sum(S)
+                    if res.is_sparse:
+                        res = res.to_dense()
+                    return res
+                gradcheck(fn, (S,), check_sparse_nnz=True)
+
+            else:
+                S_sum = torch.sparse.sum(S, td)
+                D_sum = D.sum(td)
+                self.assertEqual(S_sum.to_dense() if S_sum.is_sparse else S_sum, D_sum)
+
+                def fn(S):
+                    res = torch.sparse.sum(S, td)
+                    if res.is_sparse:
+                        res = res.to_dense()
+                    return res
+                gradcheck(fn, (S,), check_sparse_nnz=True)
+
+        nnz = 10
+        sparse_dims = 2
+        with_size = [5, 5, 1, 4]  # use a dense dim = 1 to test for squeeze
+        test_dims = []
+        for i in range(1, 5):
+            test_dims += itertools.combinations(range(len(with_size)), i)
+
+        # not support SparseTensor.sum()
+        S = self._gen_sparse(sparse_dims, nnz, with_size)[0]
+        self.assertRaises(RuntimeError, lambda: S.sum())
+
+        # raise for incorrect input dims
+        self.assertRaises(RuntimeError, lambda: torch.sparse.sum(S, 5))
+        self.assertRaises(RuntimeError, lambda: torch.sparse.sum(S, [0, 0]))
+
+        # sum an empty tensor
+        empty_S = torch.sparse_coo_tensor(size=with_size)
+        self.assertRaises(RuntimeError, lambda: torch.sparse.sum(empty_S, [0]))
+        self.assertEqual(torch.sparse.sum(empty_S), torch.tensor(0,))
+        empty_S.requires_grad_(True)
+        empty_S_sum = torch.sparse.sum(empty_S)
+        empty_S_sum.backward()
+        self.assertEqual(empty_S.grad.to_dense(), empty_S.clone().detach().to_dense())
+
+        # test values().sum()
+        S = self._gen_sparse(sparse_dims, nnz, with_size)[0]
+        run_tests(S.requires_grad_(True))
+
+        for test_dim in test_dims:
+            S = self._gen_sparse(sparse_dims, nnz, with_size)[0]
+            run_tests(S.requires_grad_(True), test_dim)
 
     def _test_basic_ops_shape(self, nnz_x1, nnz_x2, shape_i, shape_v=None):
         shape = shape_i + (shape_v or [])
@@ -1009,7 +1102,6 @@ class TestSparse(TestCase):
         self._test_basic_ops_shape(0, 0, [10, 10, 10], [2, 0])
         self._test_basic_ops_shape(0, 0, [10, 10, 0], [2, 0])
 
-    @skipIfRocm
     def test_add_dense_sparse_mismatch(self):
         def test_shape(dense_size, sparse_dims_shape, dense_dims_shape, sparse_size):
             x = torch.zeros(dense_size, dtype=self.value_dtype, device=self.device)
@@ -1188,7 +1280,6 @@ class TestSparse(TestCase):
                 for length in range(dim_sz - start):
                     yield [dim, start, length]
 
-    @skipIfRocm
     def test_narrow(self):
         shape = [3, 3, 4, 2]
         input, _, _ = self._gen_sparse(4, 19, shape)
@@ -1337,7 +1428,6 @@ class TestSparse(TestCase):
         self._test_new_device((30, 20, 10), 1)
         self._test_new_device((30, 20, 10, 0), 1)
 
-    @skipIfRocm
     def test_new(self):
         def test_shape(sparse_dims, nnz, with_size):
             x, indices, values = self._gen_sparse(sparse_dims, nnz, with_size)
@@ -1489,7 +1579,6 @@ class TestSparse(TestCase):
         test_shape([3, 0], [0, 2, 4, 0], [0, 0, 0, 2, 4, 0], [0, 0, 0, 2, 4, 0])
         test_shape([3, 0], [0, 2, 4, 0], [1, 2, 3, 2, 4, 0], [1, 2, 3, 2, 4, 0])
 
-    @skipIfRocm
     def test_factory_dense_dim(self):
         indices = self.IndexTensor([[0]])
         values = self.ValueTensor([[[1, 1, 1], [1, 1, 1]]])
@@ -1644,7 +1733,6 @@ class TestSparse(TestCase):
         x = self.SparseTensor(1, 0)
         self.assertTrue(x.is_sparse)
 
-    @skipIfRocm
     def test_resize_as(self):
         def do_test(t):
             y = t.new().resize_as_(t).zero_()

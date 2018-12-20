@@ -1,10 +1,16 @@
-#include "ATen/ATen.h"
-#include "torch/csrc/jit/alias_info.h"
-#include "torch/csrc/jit/script/lexer.h"
-#include "torch/csrc/jit/script/tree.h"
-#include "torch/csrc/jit/operator.h"
-#include "torch/csrc/jit/passes/python_print.h"
-#include "torch/csrc/jit/script/error_report.h"
+#include <ATen/ATen.h>
+#include <torch/csrc/jit/alias_info.h>
+#include <torch/csrc/jit/script/lexer.h>
+#include <torch/csrc/jit/script/parse_string_literal.h>
+#include <torch/csrc/jit/script/tree.h>
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/passes/python_print.h>
+#include <torch/csrc/jit/script/error_report.h>
+
+#include <functional>
+#include <memory>
+#include <utility>
+#include <vector>
 
 namespace torch { namespace jit {
 
@@ -21,7 +27,6 @@ struct SchemaParser {
     }
     std::vector<Argument> arguments;
     std::vector<Argument> returns;
-    std::vector<Symbol> writes;
     bool kwarg_only = false;
     bool is_vararg = false;
     size_t idx = 0;
@@ -34,7 +39,7 @@ struct SchemaParser {
         is_vararg = true;
       } else {
         arguments.push_back(parseArgument(
-            idx++, /*is_return=*/false, /*kwarg_only=*/kwarg_only, writes));
+            idx++, /*is_return=*/false, /*kwarg_only=*/kwarg_only));
       }
     });
     idx = 0;
@@ -42,14 +47,14 @@ struct SchemaParser {
     if (L.cur().kind == '(') {
       parseList('(', ',', ')', [&] {
         returns.push_back(
-            parseArgument(idx++, /*is_return=*/true, /*kwarg_only=*/false, writes));
+            parseArgument(idx++, /*is_return=*/true, /*kwarg_only=*/false));
       });
     } else {
       returns.push_back(
-          parseArgument(0, /*is_return=*/true, /*kwarg_only=*/false, writes));
+          parseArgument(0, /*is_return=*/true, /*kwarg_only=*/false));
     }
-    return FunctionSchema { name, std::move(arguments), std::move(returns),
-                            is_vararg, false, std::move(writes) };
+    return FunctionSchema{
+        name, std::move(arguments), std::move(returns), is_vararg, false};
   }
 
   std::vector<FunctionSchema> parseDeclarations() {
@@ -69,7 +74,7 @@ struct SchemaParser {
       {"Generator", GeneratorType::get() },
       {"ScalarType", IntType::get() },
       {"Layout", IntType::get() },
-      {"Device", ListType::ofInts() },
+      {"Device", DeviceObjType::get() },
       {"Scalar", NumberType::get() },
       {"str", StringType::get() },
       {"float", FloatType::get() },
@@ -89,47 +94,60 @@ struct SchemaParser {
     }
     return it->second;
   }
-  static void addToWrites(std::vector<Symbol>& writes, const Symbol& alias_set) {
-    auto it = std::find(writes.begin(), writes.end(), alias_set);
-    if(it == writes.end())
-      writes.push_back(alias_set);
-  }
   // Examples:
   // Tensor(a) // Tensor is in set a
   // Tensor(a!) // it is also written to
   // Tensor!  // shorthand for Tensor(fresh_identifier!)
-  std::vector<Symbol> parseAliasAnnotation(std::vector<Symbol>& writes) {
-    std::vector<Symbol> sets;
-    if(L.nextIf('(')) {
+  // Tensor(a! -> a|b) // Tensor is in set a, written to,
+  //                      and after the write is in set a AND b.
+  c10::optional<AliasInfo> parseAliasAnnotation() {
+    std::set<Symbol> sets;
+    AliasInfo alias_info;
+    if (L.nextIf('(')) {
       // optional 'alias set annotation'
-      sets.push_back(Symbol::fromQualString("alias::"+L.expect(TK_IDENT).text()));
-      if(L.nextIf('!')) {
-        addToWrites(writes, sets.back());
+      parseList(TK_NOTHING, '|', TK_NOTHING, [&] {
+        if (L.nextIf('*')) {
+          alias_info = AliasInfo::createWildcard();
+
+          // If we found a wildcard, ignore all subsequent annotations
+        } else if (!alias_info.isWildcard()) {
+          alias_info.addSet(
+              Symbol::fromQualString("alias::" + L.expect(TK_IDENT).text()));
+        }
+      });
+      if (L.nextIf('!')) {
+        alias_info.setIsWrite(true);
       }
       L.expect(')');
-    } else if(L.nextIf('!')) {
-      sets.push_back(Symbol::fromQualString("alias::$"+std::to_string(next_id++)));
-      addToWrites(writes, sets.back());
+    } else if (L.nextIf('!')) {
+      alias_info.addSet(
+          Symbol::fromQualString("alias::$" + std::to_string(next_id++)));
+      alias_info.setIsWrite(true);
+    } else{
+      return c10::nullopt;
     }
-    return sets;
+
+    return alias_info;
   }
-  std::pair<TypePtr, AliasInfo> parseType(std::vector<Symbol>& writes) {
+
+  std::pair<TypePtr, c10::optional<AliasInfo>> parseType() {
     TypePtr value;
-    AliasInfo alias_info;
+    c10::optional<AliasInfo> alias_info;
+    // Tuple type
     if (L.cur().kind == '(') {
       std::vector<TypePtr> types;
-      std::vector<AliasInfo> alias_infos;
-      parseList('(', ',', ')', [&]{
-        auto r = parseType(writes);
+      parseList('(', ',', ')', [&] {
+        auto r = parseType();
         types.push_back(std::move(r.first));
-        alias_infos.push_back(std::move(r.second));
+        if (alias_info && r.second) {
+          alias_info->addContainedType(std::move(*r.second));
+        }
       });
       value = TupleType::create(std::move(types));
-      alias_info = AliasInfo({}, std::move(alias_infos));
     } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Future") {
       L.next(); // Future
       L.expect('(');
-      auto p = parseType(writes);
+      auto p = parseType();
       auto subtype = std::move(p.first);
       auto subalias = std::move(p.second);
       L.expect(')');
@@ -137,7 +155,7 @@ struct SchemaParser {
     } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Tensor") {
       L.next();
       value = DynamicType::get();
-      alias_info = AliasInfo(parseAliasAnnotation(writes));
+      alias_info = parseAliasAnnotation();
     } else {
       value = parseBaseType();
     }
@@ -146,7 +164,11 @@ struct SchemaParser {
         L.next(); // [
         L.next(); // ]
         value = ListType::create(value);
-        alias_info = AliasInfo(parseAliasAnnotation(writes), {std::move(alias_info)});
+        auto container = parseAliasAnnotation();
+        if (container && alias_info) {
+          container->addContainedType(std::move(*alias_info));
+        }
+        alias_info = std::move(container);
       } else if(L.nextIf('?')) {
         value = OptionalType::create(value);
       } else {
@@ -156,9 +178,9 @@ struct SchemaParser {
     return std::make_pair(std::move(value), std::move(alias_info));
   }
 
-  Argument parseArgument(size_t idx, bool is_return, bool kwarg_only, std::vector<Symbol>& writes) {
+  Argument parseArgument(size_t idx, bool is_return, bool kwarg_only) {
     Argument result;
-    auto p = parseType(writes);
+    auto p = parseType();
     auto type = std::move(p.first);
     auto alias_info = std::move(p.second);
     c10::optional<int32_t> N;
@@ -170,7 +192,11 @@ struct SchemaParser {
       type = ListType::create(type);
       N = std::stoll(L.expect(TK_NUMBER).text());
       L.expect(']');
-      alias_info = AliasInfo(parseAliasAnnotation(writes), {std::move(alias_info)});
+      auto container = parseAliasAnnotation();
+      if (container && alias_info) {
+        container->addContainedType(std::move(*alias_info));
+      }
+      alias_info = std::move(container);
     }
     if(is_return) {
       // optionally named return values
@@ -185,7 +211,13 @@ struct SchemaParser {
         default_value = parseDefaultValue(type, N);
       }
     }
-    return Argument(std::move(name), std::move(type), N, std::move(default_value), !is_return && kwarg_only, std::move(alias_info));
+    return Argument(
+        std::move(name),
+        std::move(type),
+        N,
+        std::move(default_value),
+        !is_return && kwarg_only,
+        std::move(alias_info));
   }
   IValue parseSingleConstant(TypeKind kind) {
     switch(L.cur().kind) {
@@ -198,13 +230,15 @@ struct SchemaParser {
       case TK_NONE:
         L.next();
         return IValue();
+      case TK_STRINGLITERAL: {
+        auto token = L.next();
+        return parseStringLiteral(token.range, token.text());
+      }
       case TK_IDENT: {
         auto tok = L.next();
         auto text = tok.text();
         if("float" == text) {
           return static_cast<int64_t>(at::kFloat);
-        } else if("cpu" == text) {
-          return static_cast<int64_t>(at::Device::Type::CPU);
         } else if("strided" == text) {
           return static_cast<int64_t>(at::kStrided);
         } else if("Mean" == text) {
@@ -219,7 +253,7 @@ struct SchemaParser {
           n = "-" + L.expect(TK_NUMBER).text();
         else
           n = L.expect(TK_NUMBER).text();
-        if(kind == TypeKind::FloatType || n.find(".") != std::string::npos || n.find("e") != std::string::npos) {
+        if(kind == TypeKind::FloatType || n.find('.') != std::string::npos || n.find('e') != std::string::npos) {
           return std::stod(n);
         } else {
           int64_t v = std::stoll(n);
@@ -261,13 +295,14 @@ struct SchemaParser {
     L.expect(TK_NONE);
     return IValue();
   }
-  IValue parseDefaultValue(TypePtr arg_type, c10::optional<int32_t> arg_N) {
+  IValue parseDefaultValue(const TypePtr& arg_type, c10::optional<int32_t> arg_N) {
     auto range = L.cur().range;
     switch(arg_type->kind()) {
       case TypeKind::DynamicType:
       case TypeKind::GeneratorType: {
         return parseTensorDefault(range);
       }  break;
+      case TypeKind::StringType:
       case TypeKind::OptionalType:
       case TypeKind::NumberType:
       case TypeKind::IntType:
@@ -275,6 +310,11 @@ struct SchemaParser {
       case TypeKind::FloatType:
         return parseSingleConstant(arg_type->kind());
         break;
+      case TypeKind::DeviceObjType: {
+        auto device_text = parseStringLiteral(range, L.expect(TK_STRINGLITERAL).text());
+        return c10::Device(device_text);
+        break;
+      }
       case TypeKind::ListType: {
         auto elem_kind = arg_type->cast<ListType>()->getElementType();
         if(L.cur().kind == TK_IDENT) {
@@ -293,7 +333,7 @@ struct SchemaParser {
     return IValue(); // silence warnings
   }
 
-  void parseList(int begin, int sep, int end, std::function<void()> callback) {
+  void parseList(int begin, int sep, int end, const std::function<void()>& callback) {
     auto r = L.cur().range;
     if (begin != TK_NOTHING)
       L.expect(begin);
@@ -312,38 +352,6 @@ struct SchemaParser {
 } // namespace script
 
 namespace {
-
-std::string canonicalSchemaString(const FunctionSchema& schema) {
-  std::ostringstream out;
-
-  out << schema.name();
-  out << "(";
-
-  bool seen_kwarg_only = false;
-  for(size_t i = 0; i < schema.arguments().size(); ++i) {
-    if (i > 0) out << ", ";
-    if (schema.arguments()[i].kwarg_only() && !seen_kwarg_only) {
-      out << "*, ";
-      seen_kwarg_only = true;
-    }
-    const auto & arg = schema.arguments()[i];
-    out << arg.type()->str() << " " << arg.name();
-  }
-
-  out << ") -> ";
-  if (schema.returns().size() == 1) {
-    out << schema.returns().at(0).type()->str();
-  } else if (schema.returns().size() > 1) {
-    out << "(";
-    for (size_t i = 0; i < schema.returns().size(); ++i) {
-      if (i > 0) out << ", ";
-      out << schema.returns()[i].type()->str();
-    }
-    out << ")";
-  }
-  return out.str();
-}
-
 using OperatorMap = std::unordered_map<Symbol, std::vector<std::shared_ptr<Operator>>>;
 struct OperatorRegistry  {
 private:
@@ -365,7 +373,7 @@ private:
 
   // XXX - caller must be holding lock
   void registerPendingOperators() {
-    for(auto op : to_register) {
+    for(const auto& op : to_register) {
       Symbol sym = Symbol::fromQualString(op->schema().name());
       operators[sym].push_back(op);
       operators_by_sig[canonicalSchemaString(op->schema())] = op;
@@ -444,6 +452,37 @@ FunctionSchema parseSchema(const std::string& schema) {
   return script::SchemaParser(schema).parseDeclarations().at(0);
 }
 
+std::string canonicalSchemaString(const FunctionSchema& schema) {
+  std::ostringstream out;
+
+  out << schema.name();
+  out << "(";
+
+  bool seen_kwarg_only = false;
+  for(size_t i = 0; i < schema.arguments().size(); ++i) {
+    if (i > 0) out << ", ";
+    if (schema.arguments()[i].kwarg_only() && !seen_kwarg_only) {
+      out << "*, ";
+      seen_kwarg_only = true;
+    }
+    const auto & arg = schema.arguments()[i];
+    out << arg.type()->str() << " " << arg.name();
+  }
+
+  out << ") -> ";
+  if (schema.returns().size() == 1) {
+    out << schema.returns().at(0).type()->str();
+  } else if (schema.returns().size() > 1) {
+    out << "(";
+    for (size_t i = 0; i < schema.returns().size(); ++i) {
+      if (i > 0) out << ", ";
+      out << schema.returns()[i].type()->str();
+    }
+    out << ")";
+  }
+  return out.str();
+}
+
 bool Operator::matches(const Node* node) const {
   // wrong name
   if (node->kind().toQualString() != schema().name()) {
@@ -508,6 +547,7 @@ const Operator& getOperatorFor(const Node* node) {
   for(auto & candidate : candidates) {
     er << "  " << candidate->schema() << "\n";
   }
+  er << *node->owningGraph() << "\n";
   throw er;
 }
 

@@ -1,17 +1,17 @@
 #pragma once
 
-#include "torch/csrc/autograd/function_hook.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/constants.h"
-#include "torch/csrc/jit/stack.h"
-#include "torch/csrc/jit/tracing_state.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/utils/functional.h"
-#include "torch/csrc/utils/functional.h"
-#include "torch/csrc/utils/variadic.h"
-#include "torch/csrc/utils/variadic.h"
-#include "torch/csrc/WindowsTorchApiMacro.h"
+#include <torch/csrc/autograd/function_hook.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/stack.h>
+#include <torch/csrc/jit/tracing_state.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/utils/functional.h>
+#include <torch/csrc/utils/functional.h>
+#include <torch/csrc/utils/variadic.h>
+#include <torch/csrc/utils/variadic.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/Backtrace.h>
 
 #include <memory>
@@ -32,14 +32,20 @@ TORCH_API void setRecordSourceLocation(void (*v)(Node*));
 // Having finished adding a new 'node' to the graph IR 'setValueTrace' associates
 // this node with an output variable, so that further operations involving this
 // variable know which node in the IR to reference.
-inline void setValueTrace(const Variable& var, Value *value) {
-  JIT_ASSERT(var.defined());
-  getTracingState()->value_map[var] = value;
-}
+TORCH_API void setValueTrace(const IValue& v, Value* value);
 
 inline void delValueTrace(const Variable& var) {
   JIT_ASSERT(var.defined());
   getTracingState()->value_map.erase(var);
+}
+
+inline std::function<void()> pauseTracing() {
+  std::shared_ptr<tracer::TracingState> state = getTracingState();
+  tracer::setTracingState(nullptr);
+
+  return [state]() {
+    tracer::setTracingState(state);
+  };
 }
 
 // Given a variable 'var', return the 'node' which represents the instruction
@@ -156,7 +162,7 @@ inline std::pair<std::shared_ptr<TracingState>, Stack> enter(Stack inputs) {
     }
   };
   for (IValue& input : inputs) {
-    input = add_input(input, inferTypeFrom(input), state->graph->addInput());
+    input = add_input(input, incompleteInferTypeFrom(input), state->graph->addInput());
   }
   return std::make_pair(state, inputs);
 }
@@ -194,6 +200,7 @@ inline void abandon() {
 // NB: those serve both as an intermediate steps in addInputs below,
 // as well as the overloads that terminate template recursion
 TORCH_API void addInputs(Node *n, const char * name, int64_t value);
+TORCH_API void addInputs(Node *n, const char * name, c10::optional<int64_t> value);
 TORCH_API void addInputs(Node *n, const char * name, bool value);
 TORCH_API void addInputs(Node *n, const char * name, double value);
 TORCH_API void addInputs(Node *n, const char * name, const at::Scalar& value);
@@ -208,6 +215,7 @@ TORCH_API void addInputs(Node *n, const char * name, const at::TensorOptions& va
 TORCH_API void addInputs(Node *n, const char * name, at::Device value);
 TORCH_API void addInputs(Node *n, const char * name, at::Layout value);
 TORCH_API void addInputs(Node *n, const char * name, at::ScalarType value);
+TORCH_API void addInputs(Node *n, const char * name, const c10::optional<at::ScalarType>& value);
 TORCH_API void addInputs(Node *n, const char * name, at::Generator * value);
 
 template<size_t N>
@@ -215,7 +223,13 @@ void addInputs(Node *n, const char * name, std::array<bool, N> value) {
   throw std::runtime_error("Found an unsupported argument type in the JIT tracer. File a bug report.");
 }
 
-inline void ensureUnique(const char * name, const at::Tensor& tensor) {
+inline void ensureUniqueIfOutOfPlaced(const char * name, const at::Tensor& tensor) {
+  auto& state = getTracingState();
+  if (state && state->force_outplace == false) {
+    // If we're not converting in-place ops to out-of-place, this check is
+    // unnecessary
+    return;
+  }
   auto aliases = tensor.storage().use_count();
   if (isTracing() && aliases > 1) {
     std::stringstream ss;

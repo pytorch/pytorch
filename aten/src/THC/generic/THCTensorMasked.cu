@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorMasked.cu"
+#define THC_GENERIC_FILE "THC/generic/THCTensorMasked.cu"
 #else
 
 
@@ -24,7 +24,7 @@ void THCTensor_(maskedFillByte)(THCState* state,
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, tensor));
   THCudaByteTensor* maskCuda = THCudaByteTensor_newWithSize(state, mask->sizes(), {});
-  THCudaByteTensor_copyByte(state, maskCuda, mask);
+  THCTensor_(copy)(state, maskCuda, mask);
   THCTensor_(maskedFill)(state, tensor, maskCuda, value);
   THCudaByteTensor_free(state, maskCuda);
 }
@@ -56,7 +56,7 @@ void THCTensor_(maskedCopy)(THCState* state,
   THCudaLongTensor* maskLong = THCudaLongTensor_new(state);
   at::IntList maskSizes = mask->sizes();
   THCudaLongTensor_resize(state, maskLong, maskSizes, {});
-  THCudaLongTensor_copyCudaByte(state, maskLong, mask);
+  THCTensor_(copy)(state, maskLong, mask);
 
   // Use a prefix sum to determine the output locations of the masked elements
   THCudaLongTensor* maskPrefixSum = THCudaLongTensor_new(state);
@@ -99,7 +99,7 @@ void THCTensor_(maskedCopyByte)(THCState* state,
                                 THCTensor *tensor, THByteTensor *mask, THCTensor *src) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
   THCudaByteTensor* maskCuda = THCudaByteTensor_newWithSize(state, mask->sizes(), {});
-  THCudaByteTensor_copyByte(state, maskCuda, mask);
+  THCTensor_(copy)(state, maskCuda, mask);
   THCTensor_(maskedCopy)(state, tensor, maskCuda, src);
   THCudaByteTensor_free(state, maskCuda);
 }
@@ -126,7 +126,7 @@ void THCTensor_(maskedSelect)(THCState* state,
   THCudaLongTensor* maskLong = THCudaLongTensor_new(state);
   at::IntList maskSizes = mask->sizes();
   THCudaLongTensor_resize(state, maskLong, maskSizes, {});
-  THCudaLongTensor_copyCudaByte(state, maskLong, mask);
+  THCTensor_(copy)(state, maskLong, mask);
 
   // Use a prefix sum to determine the output locations of the masked elements
   THCudaLongTensor* maskPrefixSum = THCudaLongTensor_new(state);
@@ -171,7 +171,7 @@ void THCTensor_(maskedSelectByte)(THCState* state,
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
   THCudaByteTensor* maskCuda = THCudaByteTensor_newWithSize(state, mask->sizes(), {});
-  THCudaByteTensor_copyByte(state, maskCuda, mask);
+  THCTensor_(copy)(state, maskCuda, mask);
   THCTensor_(maskedSelect)(state, tensor, src, maskCuda);
   THCudaByteTensor_free(state, maskCuda);
 }

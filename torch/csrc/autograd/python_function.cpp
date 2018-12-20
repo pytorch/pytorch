@@ -1,26 +1,26 @@
-#include "torch/csrc/autograd/python_function.h"
+#include <torch/csrc/autograd/python_function.h>
 
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 #include <structmember.h>
 #include <unordered_map>
 #include <unordered_set>
 #include <exception>
 #include <ATen/ATen.h>
 
-#include "THP.h"
-#include "torch/csrc/autograd/grad_mode.h"
-#include "torch/csrc/autograd/functions/accumulate_grad.h"
-#include "torch/csrc/autograd/functions/basic_ops.h"
-#include "torch/csrc/autograd/functions/utils.h"
-#include "torch/csrc/autograd/python_cpp_function.h"
-#include "torch/csrc/autograd/python_hook.h"
-#include "torch/csrc/autograd/saved_variable.h"
-#include "torch/csrc/autograd/python_anomaly_mode.h"
-#include "torch/csrc/jit/tracer.h"
-#include "torch/csrc/jit/python_tracer.h"
-#include "torch/csrc/DynamicTypes.h"
-#include "torch/csrc/utils/auto_gil.h"
-#include "torch/csrc/Exceptions.h"
+#include <torch/csrc/THP.h>
+#include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/functions/accumulate_grad.h>
+#include <torch/csrc/autograd/functions/basic_ops.h>
+#include <torch/csrc/autograd/functions/utils.h>
+#include <torch/csrc/autograd/python_cpp_function.h>
+#include <torch/csrc/autograd/python_hook.h>
+#include <torch/csrc/autograd/saved_variable.h>
+#include <torch/csrc/autograd/python_anomaly_mode.h>
+#include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/jit/python_tracer.h>
+#include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/utils/auto_gil.h>
+#include <torch/csrc/Exceptions.h>
 
 #include <exception>
 #include <functional>
@@ -594,10 +594,7 @@ static Node* _trace_pre_record(
   Py_INCREF(op_obj);
   auto pyobj = THPObjectPtr(op_obj);
   return jit::tracer::preRecordPythonTrace(
-    std::move(pyobj),
-    std::move(arg_types),
-    input_vars,
-    std::move(scalar_args));
+      std::move(pyobj), arg_types, input_vars, std::move(scalar_args));
 }
 
 static void _trace_post_record(
@@ -714,7 +711,7 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
 PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
 {
   HANDLE_TH_ERRORS
-  torch::autograd::profiler::RecordFunction record(((PyTypeObject*)cls)->tp_name, 
+  torch::autograd::profiler::RecordFunction record(((PyTypeObject*)cls)->tp_name,
                                                    Function::peek_at_next_sequence_nr());
 
   THPObjectPtr backward_cls(PyObject_GetAttrString(cls, "_backward_cls"));
@@ -891,7 +888,7 @@ PyObject* THPFunction_register_hook(THPFunction *self, PyObject *hook)
 
 static PyObject *unpack_saved_variables(
     THPFunction *self,
-    std::function<PyObject*(const Variable&)> unpack_fn)
+    const std::function<PyObject*(const Variable&)>& unpack_fn)
 {
   THPUtils_assert(!self->has_freed_buffers, ERR_BACKWARD_TWICE);
   auto& saved_variables = self->saved_variables;
@@ -1039,38 +1036,38 @@ PyTypeObject THPFunctionType = {
   sizeof(THPFunction),                   /* tp_basicsize */
   0,                                     /* tp_itemsize */
   (destructor)THPFunction_dealloc,       /* tp_dealloc */
-  0,                                     /* tp_print */
-  0,                                     /* tp_getattr */
-  0,                                     /* tp_setattr */
-  0,                                     /* tp_reserved */
-  0,                                     /* tp_repr */
-  0,                                     /* tp_as_number */
-  0,                                     /* tp_as_sequence */
-  0,                                     /* tp_as_mapping */
-  0,                                     /* tp_hash  */
-  0,                                     /* tp_call */
-  0,                                     /* tp_str */
-  0,                                     /* tp_getattro */
-  0,                                     /* tp_setattro */
-  0,                                     /* tp_as_buffer */
+  nullptr,                                     /* tp_print */
+  nullptr,                                     /* tp_getattr */
+  nullptr,                                     /* tp_setattr */
+  nullptr,                                     /* tp_reserved */
+  nullptr,                                     /* tp_repr */
+  nullptr,                                     /* tp_as_number */
+  nullptr,                                     /* tp_as_sequence */
+  nullptr,                                     /* tp_as_mapping */
+  nullptr,                                     /* tp_hash  */
+  nullptr,                                     /* tp_call */
+  nullptr,                                     /* tp_str */
+  nullptr,                                     /* tp_getattro */
+  nullptr,                                     /* tp_setattro */
+  nullptr,                                     /* tp_as_buffer */
   Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_HAVE_GC, /* tp_flags */
   nullptr,                               /* tp_doc */
   (traverseproc)THPFunction_traverse,    /* tp_traverse */
   (inquiry)THPFunction_clear,            /* tp_clear */
-  0,                                     /* tp_richcompare */
+  nullptr,                                     /* tp_richcompare */
   0,                                     /* tp_weaklistoffset */
-  0,                                     /* tp_iter */
-  0,                                     /* tp_iternext */
+  nullptr,                                     /* tp_iter */
+  nullptr,                                     /* tp_iternext */
   THPFunction_methods,                   /* tp_methods */
-  0,                                     /* tp_members */
+  nullptr,                                     /* tp_members */
   THPFunction_properties,                /* tp_getset */
-  0,                                     /* tp_base */
-  0,                                     /* tp_dict */
-  0,                                     /* tp_descr_get */
-  0,                                     /* tp_descr_set */
+  nullptr,                                     /* tp_base */
+  nullptr,                                     /* tp_dict */
+  nullptr,                                     /* tp_descr_get */
+  nullptr,                                     /* tp_descr_set */
   0,                                     /* tp_dictoffset */
-  0,                                     /* tp_init */
-  0,                                     /* tp_alloc */
+  nullptr,                                     /* tp_init */
+  nullptr,                                     /* tp_alloc */
   THPFunction_new                        /* tp_new */
 };
 

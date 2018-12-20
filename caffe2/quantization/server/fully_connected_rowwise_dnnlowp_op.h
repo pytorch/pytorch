@@ -8,10 +8,11 @@ namespace caffe2 {
 
 template <typename T>
 class FullyConnectedRowWiseDNNLowPOp final
-  : public DNNLowPOp<T, FullyConnectedOp<CPUContext>> {
+    : public DNNLowPOp<T, FullyConnectedOp<CPUContext>> {
  public:
-  FullyConnectedRowWiseDNNLowPOp
-    (const OperatorDef& operator_def, Workspace *ws);
+  FullyConnectedRowWiseDNNLowPOp(
+      const OperatorDef& operator_def,
+      Workspace* ws);
   bool RunOnDevice() override;
 
   USE_OPERATOR_FUNCTIONS(CPUContext);
@@ -30,14 +31,14 @@ class FullyConnectedRowWiseDNNLowPOp final
   using T_signed = typename std::make_signed<T>::type;
 
   // used in fast path for T == uint8_t
-  std::unique_ptr<fbgemm::PackBMatrix<std::int8_t>> Wq_packed_;
+  std::shared_ptr<fbgemm::PackBMatrix<std::int8_t>> Wq_packed_;
   std::vector<std::uint8_t> X_pack_buf_;
 
   // used in slow path for T != uint8_t
   std::vector<T_signed> W_quantized_;
-  std::vector<std::int32_t> b_quantized_;
+  std::shared_ptr<std::vector<std::int32_t>> b_quantized_;
 
-  std::vector<std::int32_t> column_offsets_;
+  std::shared_ptr<std::vector<std::int32_t>> column_offsets_;
   std::vector<std::int32_t> row_offsets_;
   std::vector<std::int32_t> Y_int32_;
 

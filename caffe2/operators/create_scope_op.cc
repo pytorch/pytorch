@@ -27,8 +27,8 @@ by Do operator to store local blobs
 template <>
 bool HasScopeOp<CPUContext>::RunOnDevice() {
   const auto& ws_stack = OperatorBase::Input<detail::WorkspaceStack>(0);
-  auto* output = Output(0);
-  output->Resize(1);
+
+  auto* output = Output(0, {1}, at::dtype<bool>());
   bool* output_value = output->template mutable_data<bool>();
   *output_value = !ws_stack.empty();
   return true;

@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THBlas.cpp"
+#define TH_GENERIC_FILE "TH/generic/THBlas.cpp"
 #else
 
 

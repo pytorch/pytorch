@@ -130,7 +130,7 @@ bool NanCheckOp<CUDAContext>::RunOnDevice() {
   // This op should act as an identity matrix if we don't find any NaNs/infs.
   // Copy over the data if we are not doing this in-place.
   if (&X != Y) {
-    Y->CopyFrom(X, &context_);
+    Y->CopyFrom(X, true /*async*/);
   }
   return true;
 }

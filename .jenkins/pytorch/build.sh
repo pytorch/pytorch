@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# Required environment variable: $BUILD_ENVIRONMENT
+# (This is set by default in the Docker images we build, so you don't
+# need to set it yourself.
+
+COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}-build"
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+
 # For distributed, four environmental configs:
 # (1) build with only NCCL
 # (2) build with NCCL and MPI
@@ -11,10 +18,14 @@ if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]]; then
   sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.2.13-1+cuda9.0 libnccl2=2.2.13-1+cuda9.0
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda8-* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-cudnn7-py2* ]] || [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9*gcc7* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda8-* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-cudnn7-py2* ]] || [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
   # TODO: move this to Docker
   sudo apt-get -qq update
-  sudo apt-get -qq install --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
+  if [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
+    sudo apt-get -qq install openmpi-bin libopenmpi-dev
+  else
+    sudo apt-get -qq install --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
+  fi
   sudo apt-get -qq install --no-install-recommends openssh-client openssh-server
   sudo mkdir -p /var/run/sshd
 fi
@@ -22,13 +33,6 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == "pytorch-linux-xenial-py3-clang5-asan" ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" $*
 fi
-
-# Required environment variable: $BUILD_ENVIRONMENT
-# (This is set by default in the Docker images we build, so you don't
-# need to set it yourself.
-
-COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}-build"
-source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Python version:"
 python --version
@@ -49,8 +53,33 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # tests. Setting MAX_JOBS to smaller number to make CI less flaky.
   export MAX_JOBS=4
 
-  python tools/amd_build/build_pytorch_amd.py
-  python tools/amd_build/build_caffe2_amd.py
+  # ROCm CI is using Caffe2 docker images, which needs these wrapper
+  # scripts to correctly use sccache.
+  if [ -n "${SCCACHE_BUCKET}" ]; then
+    mkdir -p ./sccache
+
+    SCCACHE="$(which sccache)"
+    if [ -z "${SCCACHE}" ]; then
+      echo "Unable to find sccache..."
+      exit 1
+    fi
+
+    # Setup wrapper scripts
+    for compiler in cc c++ gcc g++; do
+      (
+        echo "#!/bin/sh"
+        echo "exec $SCCACHE $(which $compiler) \"\$@\""
+      ) > "./sccache/$compiler"
+      chmod +x "./sccache/$compiler"
+    done
+
+    export CACHE_WRAPPER_DIR="$PWD/sccache"
+
+    # CMake must find these wrapper scripts
+    export PATH="$CACHE_WRAPPER_DIR:$PATH"
+  fi
+
+  python tools/amd_build/build_amd.py
   # OPENCV is needed to enable ImageInput operator in caffe2 resnet5_trainer
   # LMDB is needed to read datasets from https://download.caffe2.ai/databases/resnet_trainer.zip
   USE_ROCM=1 USE_LMDB=1 USE_OPENCV=1 python setup.py install --user

@@ -1,18 +1,17 @@
-#include "interpreter.h"
+#include <torch/csrc/jit/interpreter.h>
 
-#include "torch/csrc/autograd/edge.h"
-#include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/generated/variable_factories.h"
-#include "torch/csrc/autograd/profiler.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/graph_executor.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/ivalue.h"
-#include "torch/csrc/jit/constants.h"
-#include "torch/csrc/jit/operator.h"
-#include "torch/csrc/variable_tensor_functions.h"
-#include "torch/csrc/jit/script/jit_exception.h"
+#include <torch/csrc/autograd/edge.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/graph_executor.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ivalue.h>
+#include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/script/jit_exception.h>
 
 #include <exception>
 #include <iostream>
@@ -678,26 +677,36 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
 
           getOrCreateFuture();
 
-          InterpreterState state(intrusive_from_this());
-          e.future->addCallback([state](){
-            c10::global_work_queue.schedule(InterpreterContinuation(state, Stack()));
-          });
-
           if (get(inst.inputs.free_flags, 0)) {
             // make sure the register is not freed once we are waked up
             registers[get(inst.inputs.values, 0)] = e.future;
           }
+
+          // Make sure adding callback is the last step.
+          // Otherwise if e.future has completed,
+          // the current thread will continue running before it suspends.
+          InterpreterState state(intrusive_from_this());
+          e.future->addCallback([state]() {
+            c10::global_work_queue().run(
+                InterpreterContinuation(state, Stack()));
+          });
+
           return true;
-        } catch(std::exception & e) {
-          if (!instructions[pc].debug_location) {
-            throw;
-          }
-          auto msg = instructions[pc].debug_location->wrapException(e, "operation failed in interpreter");
-          if (dynamic_cast<JITException *>(&e)) {
-            throw JITException(msg);
+        } catch (Future::FutureError& e) {
+          // Error from the forked thread.
+          auto msg = e.error_msg; // copy the error for each callback
+          handleError(std::move(msg), false);
+          return false;
+        } catch (std::exception& e) {
+          // Error from the current thread
+          bool is_jit_exception = dynamic_cast<JITException*>(&e);
+          if (instructions[pc].debug_location) {
+            handleError(instructions[pc].debug_location->wrapException(
+                e, "operation failed in interpreter"), is_jit_exception);
           } else {
-            throw std::runtime_error(msg);
+            handleError(e.what(), is_jit_exception);
           }
+          return false;
         }
     }
     if (future) {
@@ -711,6 +720,16 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     }
 
     return false;
+  }
+
+  void handleError(std::string&& error_msg, bool is_jit_exception) {
+    if (future) {
+      future->markCompleted(Future::FutureError(std::move(error_msg)));
+    } else if (is_jit_exception) {
+      throw JITException(std::move(error_msg));
+    } else {
+      throw std::runtime_error(std::move(error_msg));
+    }
   }
 
  public:

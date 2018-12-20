@@ -6,7 +6,7 @@ namespace c10 {
 
 std::ostream& operator<<(std::ostream & out, const Type & t) {
   if(auto value = t.cast<CompleteTensorType>()) {
-    out << at::toString(value->scalarType()) << "(";
+    out << toString(value->scalarType()) << "(";
     auto& sizes = value->sizes();
     auto& strides = value->strides();
     AT_ASSERT(sizes.size() == strides.size());
@@ -24,7 +24,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     }
     out << ")";
   } else if (auto value = t.cast<TensorType>()) {
-    out << at::toString(value->scalarType()) << "(";
+    out << toString(value->scalarType()) << "(";
     for (int i = 0; i < value->dim(); ++i) {
       if (i > 0) {
         out << ", ";
@@ -32,39 +32,25 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       out << "*";
     }
     out << ")";
-  } else if(t.kind() == TypeKind::DynamicType) {
-    out << "Dynamic";
-  } else if(t.kind() == TypeKind::UndefinedTensorType) {
-    out << "Undefined";
-  } else if(t.kind() == TypeKind::TupleType) {
-    out << "Tuple";
-  } else if(t.kind() == TypeKind::NumberType) {
-    out << "Number";
-  } else if(t.kind() == TypeKind::FloatType) {
-    out << "float";
-  } else if(t.kind() == TypeKind::IntType) {
-    out << "int";
-  } else if(t.kind() == TypeKind::BoolType) {
-    out << "bool";
   } else if(t.kind() == TypeKind::ListType) {
     auto prim = t.cast<ListType>()->getElementType();
     out << *prim << "[]";
   } else if (t.kind() == TypeKind::OptionalType) {
     auto prim = t.cast<OptionalType>()->getElementType();
     out << *prim << "?";
-  } else if(t.kind() == TypeKind::NoneType) {
-    out << "None";
-  } else if(t.kind() == TypeKind::StringType) {
-    out << "string";
-  } else if(t.kind() == TypeKind::GeneratorType) {
-    out << "Generator";
-  } else if(t.kind() == TypeKind::VarType) {
-    out << t.expect<VarType>()->name();
   } else if(t.kind() == TypeKind::FutureType) {
     auto elem = t.cast<FutureType>()->getElementType();
     out << "Future[" << *elem << "]";
+  } else if(auto tup = t.cast<TupleType>()) {
+    out << "(";
+    for(size_t i = 0; i < tup->elements().size(); ++i) {
+      if(i > 0)
+        out << ", ";
+      out << *(tup->elements()[i]);
+    }
+    out << ")";
   } else {
-    AT_ERROR("unknown type kind");
+    out << t.str();
   }
   return out;
 }
@@ -105,6 +91,10 @@ StringTypePtr StringType::get() {
   static auto value = StringType::create();
   return value;
 }
+DeviceObjTypePtr DeviceObjType::get() {
+  static auto value = DeviceObjType::create();
+  return value;
+}
 OptionalTypePtr OptionalType::ofTensor() {
   static auto value = OptionalType::create(DynamicType::get());
   return value;
@@ -126,7 +116,13 @@ ListTypePtr ListType::ofBools() {
   return value;
 }
 
-TypePtr inferTypeFrom(const IValue& value) {
+// why incomplete? You cannot completely recover a type from
+// an IValue, List[List[int]] and List[List[Tensor]] will both
+// become ivalue.isGenericList() and cannot be recovered.
+// The only appropriate place to use this is where you know that
+// you are only dealing with a subset of objects where you can recover
+// the type, like in the tracer.
+TypePtr incompleteInferTypeFrom(const IValue& value) {
   if (value.isTensor()) {
     return CompleteTensorType::create(value.toTensor());
   } else if (value.isDouble()) {
@@ -146,9 +142,11 @@ TypePtr inferTypeFrom(const IValue& value) {
   } else if (value.isDoubleList()) {
     return ListType::ofFloats();
   } else if (value.isTuple()) {
-    return TupleType::create(fmap(value.toTuple()->elements(), inferTypeFrom));
+    return TupleType::create(fmap(value.toTuple()->elements(), incompleteInferTypeFrom));
+  } else if (value.isDevice()) {
+    return DeviceObjType::get();
   }
-  AT_ASSERTM(false, "Unhandled IValue kind in inferTypeFrom");
+  AT_ERROR("Type cannot be accurately recovered from this IValue.");
 }
 
 c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
@@ -291,10 +289,15 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       }
       ret.type = OptionalType::create(*optionedType.type);
       return ret;
-    } else {
+    } else if (!actual->isSubtypeOf(NoneType::get())) {
       // If the actual type is a non-optional, allow matching to the formal if
-      // its element type matches the actual
+      // its element type matches the actual.
+      // Don't match None because it is already an optional (but one of
+      // unknown type).
       return matchTypeVariables(opt_formal->getElementType(), actual, type_env);
+    } else {
+      ret.errMsg = "cannot match an Optional[T] to None, because there is no way to determine T from None.";
+      return ret;
     }
   }
 
@@ -316,6 +319,23 @@ CAFFE2_API TypePtr evalTypeVariables(TypePtr type, std::unordered_map<std::strin
     });
     return type->withContained(std::move(new_contained));
   }
+}
+
+
+const char * typeKindToString(TypeKind kind) {
+#define CASE_TYPE(T) case TypeKind::T: return #T;
+  switch(kind) {
+    C10_FORALL_TYPES(CASE_TYPE)
+  }
+#undef CASE_TYPE
+  return "";
+}
+
+bool Type::isSubtypeOf(const TypePtr rhs) const {
+  if(auto rhs_ = rhs->cast<OptionalType>()) {
+    return this->isSubtypeOf(rhs_->getElementType());
+  }
+  return *this == *rhs;
 }
 
 } // namespace c10
