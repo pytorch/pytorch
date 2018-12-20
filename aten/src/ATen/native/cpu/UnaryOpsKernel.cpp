@@ -37,9 +37,9 @@ template <>
 int64_t _sigmoid(float* x, float* y, int64_t size) {
   using Vec = Vec256<float>;
   int64_t i = 0;
-  for (; i < size - (size % (2 * Vec::size)); i += 2 * Vec::size) {
+  for (; i < size - (size % (2 * Vec::size())); i += 2 * Vec::size()) {
     Vec ret = Vec::loadu(y + i);
-    Vec ret2 = Vec::loadu(y + i + Vec::size);
+    Vec ret2 = Vec::loadu(y + i + Vec::size());
     ret = ret.neg();
     ret2 = ret2.neg();
 #if defined(__AVX2__) && !defined(_MSC_VER)
@@ -54,7 +54,7 @@ int64_t _sigmoid(float* x, float* y, int64_t size) {
     ret = ret.reciprocal();
     ret2 = ret2.reciprocal();
     ret.store(x + i);
-    ret2.store(x + i + Vec::size);
+    ret2.store(x + i + Vec::size());
   }
   return i;
 }
@@ -63,9 +63,9 @@ template <>
 int64_t _sigmoid(double* x, double* y, int64_t size) {
   using Vec = Vec256<double>;
   int64_t i = 0;
-  for (; i < size - (size % (2 * Vec::size)); i += 2 * Vec::size) {
+  for (; i < size - (size % (2 * Vec::size())); i += 2 * Vec::size()) {
     Vec ret = Vec::loadu(y + i);
-    Vec ret2 = Vec::loadu(y + i + Vec::size);
+    Vec ret2 = Vec::loadu(y + i + Vec::size());
     ret = ret.neg();
     ret2 = ret2.neg();
     ret = ret.exp();
@@ -75,7 +75,7 @@ int64_t _sigmoid(double* x, double* y, int64_t size) {
     ret = ret.reciprocal();
     ret2 = ret2.reciprocal();
     ret.store(x + i);
-    ret2.store(x + i + Vec::size);
+    ret2.store(x + i + Vec::size());
   }
   return i;
 }
@@ -95,9 +95,9 @@ static void sigmoid_kernel(Tensor& result, const Tensor& self) {
           if (stridex == 1 && stridey == 1) {
             i = _sigmoid(x, y, size);
           }
-          for (; i < size; i += Vec::size) {
-            scalar_t buffer[Vec::size];
-            int64_t width = Vec::size;
+          for (; i < size; i += Vec::size()) {
+            scalar_t buffer[Vec::size()];
+            int64_t width = Vec::size();
             width = std::min(width, size - i);
             for (int64_t j = 0; j < width; j++) {
               buffer[j] = y[stridey * (i + j)];

@@ -282,7 +282,7 @@ def _str(self):
     if self.grad_fn is not None:
         name = type(self.grad_fn).__name__
         if name == 'CppFunction':
-            name = self.grad_fn.name().rsplit('::', maxsplit=1)[-1]
+            name = self.grad_fn.name().rsplit('::', 1)[-1]
         suffixes.append('grad_fn=<{}>'.format(name))
     elif self.requires_grad:
         suffixes.append('requires_grad=True')

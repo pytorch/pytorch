@@ -1547,6 +1547,9 @@ class TestCuda(TestCase):
         self.assertEqual(x.sum(), 65504)
         self.assertEqual(x.sum(dtype=torch.float32), 65504)
 
+        x = torch.ones(65536, device='cuda', dtype=torch.float16)
+        self.assertEqual(x.sum(dtype=torch.float32), 65536)
+
         a = torch.zeros(1203611).bernoulli_(0.0005)
         x = a.to(device='cuda', dtype=torch.float16)
         self.assertEqual(x.sum().item(), a.sum().item())
@@ -1554,6 +1557,14 @@ class TestCuda(TestCase):
         a = torch.zeros(100, 121, 80).bernoulli_(0.0005)
         x = a.to(device='cuda', dtype=torch.float16)
         self.assertEqual(x.sum((0, 2)).float().cpu(), a.sum((0, 2)))
+
+    @skipIfRocm
+    def test_mean_fp16(self):
+        x = torch.ones(65536, device='cuda', dtype=torch.float16)
+        self.assertEqual(x.mean(), 1)
+
+        x = torch.ones(65536, device='cuda', dtype=torch.float16)
+        self.assertEqual(x.mean(dtype=torch.float32), 1)
 
     @staticmethod
     def _select_broadcastable_dims(dims_full=None):
@@ -1592,16 +1603,16 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_gesv_batched_dims(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    def test_potrs(self):
-        _TestTorchMixin._test_potrs(self, lambda t: t.cuda())
+    def test_cholesky_solve(self):
+        _TestTorchMixin._test_cholesky_solve(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    def test_potrs_batched(self):
-        _TestTorchMixin._test_potrs_batched(self, lambda t: t.cuda())
+    def test_cholesky_solve_batched(self):
+        _TestTorchMixin._test_cholesky_solve_batched(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    def test_potrs_batched_dims(self):
-        _TestTorchMixin._test_potrs_batched_dims(self, lambda t: t.cuda())
+    def test_cholesky_solve_batched_dims(self):
+        _TestTorchMixin._test_cholesky_solve_batched_dims(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_cholesky(self):

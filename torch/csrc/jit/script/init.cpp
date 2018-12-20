@@ -5,6 +5,7 @@
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/jit/import.h>
 #include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/script/schema_matching.h>
 
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/jit/pybind_utils.h>
@@ -124,11 +125,9 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     for(auto &i : matched_schema->inputs)
       new_node->addInput(i);
 
-    std::vector<Value*> outputs;
-    for(auto & ret_arg : matched_schema->return_types) {
-      outputs.push_back(new_node->addOutput()->setType(ret_arg));
-    }
-    return std::make_shared<SimpleValue>(packOutputs(*m.graph(), outputs));
+    JIT_ASSERT(matched_schema->return_types.size() == 1);
+    Value* output = new_node->addOutput()->setType(matched_schema->return_types.at(0));
+    return std::make_shared<SimpleValue>(output);
   }
 
   std::string kind() const override {
@@ -525,7 +524,7 @@ void initJitScriptBindings(PyObject* module) {
              const std::string& script,
              ResolutionCallback rcb, bool has_self) {
             auto self = has_self ? std::make_shared<ModuleValue>(m) : nullptr;
-            return defineMethodsInModule(m, script, pythonResolver(rcb), self);
+            defineMethodsInModule(m, script, pythonResolver(rcb), self);
           })
       .def("_create_methods", [](std::shared_ptr<Module> m,
           const std::vector<Def>& defs,
@@ -646,7 +645,7 @@ void initJitScriptBindings(PyObject* module) {
         if (self.find_method("forward")) {
           Method & m = self.get_method("forward");
           return m.graph_for(
-              createStackForSchema(m.getSchema(), tuple_slice(std::move(args), 1), std::move(kwargs)));
+              createStackForSchema(m.getSchema(), tuple_slice(std::move(args), 1), kwargs));
         }
         throw std::runtime_error("Attempted to call graph_for on a Module without a compiled forward()");
       })
@@ -708,7 +707,7 @@ void initJitScriptBindings(PyObject* module) {
     .def("graph_for", [](py::args args, py::kwargs kwargs) {
       // see: [pybind11 varargs]
       Method& self = py::cast<Method&>(args[0]);
-      return self.graph_for(createStackForSchema(self.getSchema(), tuple_slice(std::move(args), 1), std::move(kwargs)));
+      return self.graph_for(createStackForSchema(self.getSchema(), tuple_slice(std::move(args), 1), kwargs));
     })
     .def("debug_disable_autodiff_subgraph_inlining", &Method::debugDisableAutodiffSubgraphInlining)
     .def("schema", &Method::getSchema)

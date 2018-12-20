@@ -161,7 +161,7 @@ void LowerAllTuples(std::shared_ptr<Graph>& graph) {
   EnsureNoTuples(graph->block());
 }
 
-static void LowerSimpleTuples(Block* block) {
+void LowerSimpleTuples(Block* block) {
   for(auto n : block->nodes()) {
     removeTupleNodes(n, /*must_remove_tuples*/false);
     for(auto b : n->blocks()) {

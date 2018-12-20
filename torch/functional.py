@@ -20,6 +20,7 @@ __all__ = [
     'norm',
     'meshgrid',
     'potrf',
+    'potrs',
     'split',
     'stft',
     'tensordot',
@@ -732,3 +733,20 @@ def potrf(a, upper=True, out=None):
                   "release. Please use torch.cholesky instead and note that the :attr:`upper` argument in"
                   " torch.cholesky defaults to ``False``.", stacklevel=2)
     return torch.cholesky(a, upper=upper, out=out)
+
+
+def potrs(b, u, upper=True, out=None):
+    r"""Solves a linear system of equations with a positive semidefinite
+    matrix to be inverted given its Cholesky factor matrix :attr:`u`.
+
+    For more information, regarding :func:`torch.potrs`, please check :func:`torch.cholesky_solve`.
+
+    .. warning::
+        torch.potrs is deprecated in favour of torch.cholesky_solve and will be removed in the next
+        release. Please use torch.cholesky_solve instead and note that the :attr:`upper` argument in
+        torch.cholesky_solve defaults to ``False``.
+    """
+    warnings.warn("torch.potrs is deprecated in favour of torch.cholesky_solve and will be removed "
+                  "in the next release. Please use torch.cholesky instead and note that the "
+                  ":attr:`upper` argument in torch.cholesky_solve defaults to ``False``.", stacklevel=2)
+    return torch.cholesky_solve(b, u, upper=upper, out=out)

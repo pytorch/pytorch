@@ -30,6 +30,7 @@ import numbers
 import collections
 import re
 import inspect
+import pickle
 if sys.version_info[0] > 2:
     import pathlib
 
@@ -222,10 +223,10 @@ def _create_interpreter_name_lookup_fn(frames_up=1):
 
         for k, v in f_locals.items():
             if isinstance(v, torch.Tensor) and var is v:
-                return k
+                return k if k != 'self' else ''
         for k, v in f_globals.items():
             if isinstance(v, torch.Tensor) and var is v:
-                return k
+                return k if k != 'self' else ''
         return ''
     return _get_interpreter_name_for_var
 
@@ -1151,8 +1152,14 @@ if _enabled:
                         setattr(curr, name, ScriptModule())
                     curr = getattr(curr, name)
                 return curr
-            self._copy_into(module_lookup, [])
+            self._copy_into(module_lookup, {}, [])
             return m
+
+        def __getstate__(self):
+            raise pickle.PickleError(
+                "ScriptModules cannot be saved using torch.save. " +
+                "Mixed serialization of script and non-script modules is not supported. " +
+                "For purely script modules use my_script_module.save(<filename>) instead.")
 
     class WeakScriptModuleProxy(ScriptModule):
         def __init__(self, original, stubs):
@@ -1210,7 +1217,6 @@ if _enabled:
                 raise AttributeError("Cannot set new attribute '{}' on "
                                      "weak script module once it has been "
                                      "created".format(attr))
-
 else:
     ScriptModule = torch.nn.Module
 
@@ -1261,7 +1267,7 @@ def _get_methods(cls):
 
 _compiled_methods_whitelist = {
     'forward', 'register_buffer', 'register_parameter', 'add_module',
-    '_apply', 'apply', 'cuda', 'cpu', 'type', 'float', 'double', 'half',
+    '_apply', 'apply', 'cuda', 'cpu', 'to', 'type', 'float', 'double', 'half',
     'state_dict', 'load_state_dict', '_load_from_state_dict',
     '_named_members', 'parameters', 'named_parameters',
     'buffers', 'named_buffers', 'children', 'named_children', 'modules',
@@ -1435,8 +1441,7 @@ def _get_builtin_table():
     _builtin_table[id(torch.nn.functional.upsample_nearest)] = "aten::__upsample_nearest"
     _builtin_table[id(torch.nn.functional.upsample)] = "aten::__upsample"
     _builtin_table[id(torch.nn.functional.upsample_bilinear)] = "aten::__upsample_bilinear"
-    _builtin_table[id(torch.nn.functional.fold)] = "aten::fold"
-    _builtin_table[id(torch.nn.functional.unfold)] = "aten::unfold"
+    _builtin_table[id(torch.nn.functional.assert_int_or_pair)] = "aten::_assert_int_or_pair"
 
     return _builtin_table
 

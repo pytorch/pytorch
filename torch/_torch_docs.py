@@ -883,6 +883,67 @@ Example::
     tensor(2.3842e-07)
 """)
 
+add_docstr(torch.cholesky_solve, r"""
+cholesky_solve(b, u, upper=False, out=None) -> Tensor
+
+Solves a linear system of equations with a positive semidefinite
+matrix to be inverted given its Cholesky factor matrix :attr:`u`.
+
+If :attr:`upper` is ``False``, :attr:`u` is and lower triangular and `c` is
+returned such that:
+
+.. math::
+    c = (u u^T)^{-1} b
+
+If :attr:`upper` is ``True`` or not provided, :attr:`u` is upper triangular
+and `c` is returned such that:
+
+.. math::
+    c = (u^T u)^{-1} b
+
+`torch.cholesky_solve(b, u)` can take in 2D inputs `b, u` or inputs that are
+batches of 2D matrices. If the inputs are batches, then returns
+batched outputs `c`
+
+.. note::
+
+    The :attr:`out` keyword only supports 2D matrix inputs, that is,
+    `b, u` must be 2D matrices.
+
+Args:
+    b (Tensor): input matrix of size :math:`(*, m, k)`,
+                where :math:`*` is zero or more batch dimensions
+    u (Tensor): input matrix of size :math:`(*, m, m)`,
+                where :math:`*` is zero of more batch dimensions composed of
+                upper or lower triangular Cholesky factor
+    upper (bool, optional): whether to consider the Cholesky factor as a
+                            lower or upper triangular matrix. Default: ``False``.
+    out (Tensor, optional): the output tensor for `c`
+
+Example::
+
+    >>> a = torch.randn(3, 3)
+    >>> a = torch.mm(a, a.t()) # make symmetric positive definite
+    >>> u = torch.cholesky(a)
+    >>> a
+    tensor([[ 0.7747, -1.9549,  1.3086],
+            [-1.9549,  6.7546, -5.4114],
+            [ 1.3086, -5.4114,  4.8733]])
+    >>> b = torch.randn(3, 2)
+    >>> b
+    tensor([[-0.6355,  0.9891],
+            [ 0.1974,  1.4706],
+            [-0.4115, -0.6225]])
+    >>> torch.cholesky_solve(b, u)
+    tensor([[ -8.1625,  19.6097],
+            [ -5.8398,  14.2387],
+            [ -4.3771,  10.4173]])
+    >>> torch.mm(a.inverse(), b)
+    tensor([[ -8.1626,  19.6097],
+            [ -5.8398,  14.2387],
+            [ -4.3771,  10.4173]])
+""")
+
 add_docstr(torch.clamp,
            r"""
 clamp(input, min, max, out=None) -> Tensor
@@ -2661,7 +2722,7 @@ output tensor having 1 (or ``len(dim)``) fewer dimension(s).
 
 Args:
     input (Tensor): the input tensor
-    dim (int): the dimension to reduce
+    dim (int or tuple of ints): the dimension or dimensions to reduce
     keepdim (bool, optional): whether the output tensor has :attr:`dim` retained or not
     out (Tensor): the output tensor
 
@@ -3413,66 +3474,6 @@ Example::
     tensor([[ 1.9314,  1.2251, -0.0889],
             [ 1.2251,  2.4439,  0.2122],
             [-0.0889,  0.2122,  0.1412]])
-""")
-
-add_docstr(torch.potrs, r"""
-potrs(b, u, upper=True, out=None) -> Tensor
-
-Solves a linear system of equations with a positive semidefinite
-matrix to be inverted given its Cholesky factor matrix :attr:`u`.
-
-If :attr:`upper` is ``True`` or not provided, :attr:`u` is upper triangular
-and `c` is returned such that:
-
-.. math::
-    c = (u^T u)^{-1} b
-
-If :attr:`upper` is ``False``, :attr:`u` is and lower triangular and `c` is
-returned such that:
-
-.. math::
-    c = (u u^T)^{-1} b
-
-`torch.potrs(b, u)` can take in 2D inputs `b, u` or inputs that are
-batches of 2D matrices. If the inputs are batches, then returns
-batched outputs `c`
-
-.. note::
-
-    The :attr:`out` keyword only supports 2D matrix inputs, that is,
-    `b, u` must be 2D matrices.
-
-Args:
-    b (Tensor): input matrix of size :math:`(*, m, k)`,
-                where :math:`*` is zero or more batch dimensions
-    u (Tensor): input matrix of size :math:`(*, m, m)`,
-                where :math:`*` is zero of more batch dimensions composed of
-                upper or lower triangular Cholesky factor
-    upper (bool, optional): whether to return a upper (default) or lower triangular matrix
-    out (Tensor, optional): the output tensor for `c`
-
-Example::
-
-    >>> a = torch.randn(3, 3)
-    >>> a = torch.mm(a, a.t()) # make symmetric positive definite
-    >>> u = torch.cholesky(a, upper=True)
-    >>> a
-    tensor([[ 0.7747, -1.9549,  1.3086],
-            [-1.9549,  6.7546, -5.4114],
-            [ 1.3086, -5.4114,  4.8733]])
-    >>> b = torch.randn(3, 2)
-    >>> b
-    tensor([[-0.6355,  0.9891],
-            [ 0.1974,  1.4706],
-            [-0.4115, -0.6225]])
-    >>> torch.potrs(b,u)
-    tensor([[ -8.1625,  19.6097],
-            [ -5.8398,  14.2387],
-            [ -4.3771,  10.4173]])
-    >>> torch.mm(a.inverse(),b)
-    tensor([[ -8.1626,  19.6097],
-            [ -5.8398,  14.2387],
-            [ -4.3771,  10.4173]])
 """)
 
 add_docstr(torch.pow,
@@ -4442,19 +4443,20 @@ Example::
 .. function:: std(input, dim, keepdim=False, unbiased=True, out=None) -> Tensor
 
 Returns the standard-deviation of each row of the :attr:`input` tensor in the
-given dimension :attr:`dim`.
+dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
+reduce over all of them.
 
-If :attr:`keepdim` is ``True``, the output tensor is of the same size as
-:attr:`input` except in the dimension :attr:`dim` where it is of size 1.
-Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting
-in the output tensor having 1 fewer dimension than :attr:`input`.
+If :attr:`keepdim` is ``True``, the output tensor is of the same size
+as :attr:`input` except in the dimension(s) :attr:`dim` where it is of size 1.
+Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in the
+output tensor having 1 (or ``len(dim)``) fewer dimension(s).
 
 If :attr:`unbiased` is ``False``, then the standard-deviation will be calculated
 via the biased estimator. Otherwise, Bessel's correction will be used.
 
 Args:
     input (Tensor): the input tensor
-    dim (int): the dimension to reduce
+    dim (int or tuple of ints): the dimension or dimensions to reduce
     keepdim (bool): whether the output tensor has :attr:`dim` retained or not
     unbiased (bool): whether to use the unbiased estimation or not
     out (Tensor, optional): the output tensor

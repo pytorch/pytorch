@@ -43,7 +43,7 @@ inline THStorage* THTensor_getStoragePtr(const THTensor* tensor) {
 inline void THTensor_maybe_zero_dim(THTensor *tensor, bool condition_when_zero_dim) {
   bool set_zero_dim = condition_when_zero_dim && tensor->sizes().size() == 1 && tensor->size(0) == 1;
   if (set_zero_dim) {
-    tensor->resize_dim(0);
+    tensor->set_sizes_and_strides({}, {});
   }
 }
 
