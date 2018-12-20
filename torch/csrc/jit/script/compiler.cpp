@@ -42,6 +42,8 @@ static Value* asSimple(const SugaredValuePtr& value) {
 static bool meaningfulName(const std::string& name) {
   if (name.size() == 0)
     return false;
+  if (name[0] == '$')
+    return false;
   if (name[0] != '_')
     return true;
   for (size_t i = 1; i < name.size(); ++i) {
@@ -363,11 +365,17 @@ inline bool isSupportedListElementType(const TypePtr& type) {
       type->isSubtypeOf(NumberType::get());
 }
 
-c10::optional<std::pair<TypePtr, int32_t>> parseBroadcastList(const Expr& expr);
+// Information for each def being emitted.
+// Defs can be nested to support closures so we need a stack of this information
+// Currently records information about the functions return type.
+struct DefContext {
+  TypePtr declared_return_type_; // nullptr if not annotated
+  TypePtr merged_return_type_; // nullptr if a Return has not been seen yet
+};
 
 struct to_ir {
   to_ir(
-      Def def,
+      const Def& def,
       Resolver resolver_,
       const SugaredValuePtr& self,
       Method& method) // method being constructed
@@ -376,7 +384,7 @@ struct to_ir {
       , resolver(std::move(resolver_))
       , environment_stack(nullptr) {
     JIT_ASSERT(resolver);
-    pushFrame(graph->block());
+    pushFrame(graph->block(), /*starts_def=*/true);
 
     // Type annotations exclude explicitly typing the "self" parameter, so in the
     // case that this is a method with self we expect one fewer parameter annotation
@@ -399,13 +407,20 @@ private:
   // Singly-linked list of environments. This top element contains a member
   // `next` that points to the most immediate enclosing scope's value.
   std::shared_ptr<Environment> environment_stack;
+  std::vector<DefContext> def_stack_;
 
-  void pushFrame(Block * b) {
+  void pushFrame(Block * b, bool starts_def=false) {
+    if (starts_def) {
+      def_stack_.emplace_back();
+    }
     environment_stack = std::make_shared<Environment>(method, resolver, b, environment_stack);
   }
-  std::shared_ptr<Environment> popFrame() {
+  std::shared_ptr<Environment> popFrame(bool ends_def=false) {
     auto old_frame = environment_stack;
     environment_stack = environment_stack->next;
+    if(ends_def) {
+      def_stack_.pop_back();
+    }
     return old_frame;
   }
 
@@ -417,6 +432,9 @@ private:
 
   FunctionSchema emitDef(const Def& def, const SugaredValuePtr& self, Block* block) {
     auto schema = extractSchemaFromDef(def, self);
+    if (schema.returns().size() == 1) {
+      def_stack_.back().declared_return_type_ = schema.returns().at(0).type();
+    }
     std::vector<Argument> arguments = emitFormalArguments(def, self, schema, block);
 
 
@@ -428,7 +446,7 @@ private:
         def.range(), Expr(Compound::create(TK_NONE, def.range(), {}))));
     auto stmts_list = moveAllReturnsToEnd(List<Stmt>::unsafeCreate(def.statements().range(), std::move(stmts)));
     emitStatements(stmts_list.begin(), stmts_list.end());
-    std::vector<Argument> returns = {emitReturn(def.range(), schema, block)};
+    std::vector<Argument> returns = {emitOutput(def.range(), schema, block)};
     return {def.name().name(), std::move(arguments), std::move(returns)};
   }
 
@@ -572,29 +590,15 @@ private:
     return arguments;
   }
 
-  Argument emitReturn(const SourceRange& range, const FunctionSchema& schema, Block* block) {
-    JIT_ASSERT(schema.returns().size() <= 1);
+  Argument emitOutput(const SourceRange& range, const FunctionSchema& schema, Block* block) {
+    // rewrites ensure there is always a return statement in program
+    JIT_ASSERT(def_stack_.back().merged_return_type_);
     // outputs
-    Value* result = environment_stack->getVar("the return value", range);
-    TypePtr result_type = schema.returns().size() > 0
-        ? schema.returns().at(0).type()
-        : result->type();
-
-    // this guard skips implicit conversion from None -> Tensor for the return type.
-    // otherwise forgetting a return a function returning a tensor will cause a None to be
-    // converted to a tensor.
-    if (!(result_type->isSubtypeOf(DynamicType::get()) && result->type()->isSubtypeOf(NoneType::get()))) {
-      result = tryConvertToType(
-          range, *graph, result_type, result, /*allow_conversions=*/true);
-    }
-
-    if (!result->type()->isSubtypeOf(result_type)) {
-      throw ErrorReport(range) << "Return value was annotated as having type " << result_type->python_str()
-        << " but is actually of type " << result->type()->python_str();
-    }
+    Value* result = environment_stack->getVar("$return", range);
     block->registerOutput(result);
-    return Argument("", result_type);
+    return Argument("", def_stack_.back().merged_return_type_);
   }
+
   void emitStatements(const List<Stmt>& statements) {
     return emitStatements(statements.begin(), statements.end());
   }
@@ -639,9 +643,9 @@ private:
     Block* block = closure_node->addBlock();
     {
       WithInsertPoint guard(block);
-      pushFrame(block);
+      pushFrame(block, /*starts_def=*/true);
       emitDef(def, nullptr, block); //ignore schema return, we just wont use it for now since we never create a Method for the closure
-      popFrame();
+      popFrame(/*ends_def=*/true);
     }
     std::shared_ptr<Graph> subgraph;
     Value* context;
@@ -652,6 +656,42 @@ private:
     auto tup = graph->insertNode(graph->createTuple({closure_node->output(), context}))->output();
     environment_stack->setVar(def.name().range(), def.name().name(), tup);
   }
+
+  void emitReturn(const Return& stmt) {
+    Value* result = emitExpr(stmt.expr());
+    TypePtr result_type = def_stack_.back().declared_return_type_;
+    // result type is annotated, every return must convert to that type
+    if (result_type) {
+      // this guard skips implicit conversion from None -> Tensor for the return type.
+      // otherwise forgetting a return a function returning a tensor will cause a None to be
+      // converted to a tensor.
+      if (!(result_type->isSubtypeOf(DynamicType::get()) && result->type()->isSubtypeOf(NoneType::get()))) {
+        result = tryConvertToType(
+            stmt.range(), *graph, result_type, result, /*allow_conversions=*/true);
+      }
+
+      if (!result->type()->isSubtypeOf(result_type)) {
+        throw ErrorReport(stmt.range()) << "Return value was annotated as having type " << result_type->python_str()
+          << " but is actually of type " << result->type()->python_str();
+      }
+    } else {
+      result_type = def_stack_.back().merged_return_type_;
+      if (!result_type) {
+        result_type = result->type();
+      }
+      if(!unifyTypes(result_type, result->type())) {
+        throw ErrorReport(stmt.range())
+            << "Previous return statement returned a value of type "
+            << result_type->python_str()
+            << " but this return statement returns a value of type "
+            << result->type()->python_str();
+      }
+    }
+    JIT_ASSERT(result_type);
+    def_stack_.back().merged_return_type_ = result_type;
+    environment_stack->setVar(stmt.range(), "$return", result);
+  }
+
   void emitStatements(List<Stmt>::const_iterator begin, List<Stmt>::const_iterator end) {
     for (; begin != end; ++begin) {
       auto stmt = *begin;
@@ -689,8 +729,7 @@ private:
           emitAssert(Assert(stmt));
           break;
         case TK_RETURN: {
-          Value* return_value = emitExpr(Return(stmt).expr());
-          environment_stack->setVar(stmt.range(), "the return value", return_value);
+          emitReturn(Return(stmt));
         } break;
         case TK_PASS:
           // Emit nothing for pass
@@ -773,16 +812,17 @@ private:
     emit_if_expr(true_block, std::move(true_expr));
     emit_if_expr(false_block, std::move(false_expr));
 
-    auto true_type = unshapedType(true_block->outputs().at(0)->type());
-    auto false_type = unshapedType(false_block->outputs().at(0)->type());
-    if (*true_type != *false_type) {
+    auto true_type = true_block->outputs().at(0)->type();
+    auto false_type = false_block->outputs().at(0)->type();
+    auto unified = unifyTypes(true_type, false_type);
+    if (!unified) {
       throw ErrorReport(range)
           << "if-expression's true branch has type " << true_type->str()
           << " but false branch has type " << false_type->str();
     }
 
     // Add op outputs
-    auto expr_value = n->addOutput()->setType(true_type); // Resulting value
+    auto expr_value = n->addOutput()->setType(*unified); // Resulting value
 
     return expr_value;
   }

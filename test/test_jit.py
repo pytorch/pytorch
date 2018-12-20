@@ -6824,13 +6824,12 @@ a")
             MethodNoSelf()
 
     def test_return_stmt_not_at_end(self):
-        with self.assertRaisesRegex(RuntimeError, 'return statements can appear only at the end of the function body'):
-            @torch.jit.script
-            def return_stmt_wrong(x):
-                if bool(x > 3):
-                    return 3
-                else:
-                    return x
+        def return_stmt(x):
+            if bool(x > 3):
+                return x + 3
+            else:
+                return x
+        self.checkScript(return_stmt, (torch.rand(1),))
 
     def test_for_range_no_arg(self):
         with self.assertRaisesRegex(RuntimeError, r'range\(\) expects 1 argument but got 0'):
