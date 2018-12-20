@@ -256,13 +256,16 @@ struct SymbolicVariable {
   SymbolicVariable sinh() const {
     return create(t("sinh"), {*this})[0];
   }
-  SymbolicVariable sum() const {
-    return create(t("sum"), {*this})[0];
+  SymbolicVariable sum(c10::optional<c10::ScalarType> dtype=c10::nullopt) const {
+    return create(t("sum"), {*this, insertNullable(dtype)})[0];
   }
-  SymbolicVariable sum(int dim, bool keepdim) const {
+  SymbolicVariable sum(int dim, bool keepdim, c10::optional<c10::ScalarType> dtype=c10::nullopt) const {
     return create(
         t("sum"),
-        {*this, insertConstant(at::IntArrayRef{dim}), insertConstant(keepdim)})[0];
+        {*this,
+         insertConstant(at::IntList{dim}),
+         insertConstant(keepdim),
+         insertNullable(dtype)})[0];
   }
   SymbolicVariable squeeze(Value* dim) const {
     return create(t("squeeze"), {*this, dim})[0];
@@ -300,6 +303,15 @@ struct SymbolicVariable {
  private:
   Value* insertConstant(IValue value) const {
     return v->owningGraph()->insertConstant(std::move(value));
+  }
+  Value * insertNullable(c10::optional<c10::ScalarType> value) const {
+    if (value) {
+      return insertConstant(static_cast<int64_t>(*value));
+    } else {
+      return v->owningGraph()
+          ->insertNode(v->owningGraph()->createNone(IntType::get()))
+          ->output();
+    }
   }
   SymbolicVariable typeLike(SymbolicVariable other) const {
     if (auto other_type = other.v->type()->cast<CompleteTensorType>())
