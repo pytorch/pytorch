@@ -259,7 +259,9 @@ class JitTestCase(TestCase):
             try:
                 pp, constant_table = module._python_print()
             except RuntimeError as e:
-                if "could not export python function" not in str(e):
+                se = str(e)
+                if "could not export python function" not in se and \
+                   "closures are not exportable" not in se:
                     raise
                 else:
                     return
