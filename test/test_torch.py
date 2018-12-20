@@ -6728,7 +6728,7 @@ class _TestTorchMixin(object):
         self.assertEqual(ret.indices, ret[1])
 
         # return size 3
-        ret = a.svd(dim=0)
+        ret = a.svd()
         self.assertEqual(ret.U, ret[0])
         self.assertEqual(ret.S, ret[1])
         self.assertEqual(ret.V, ret[2])
