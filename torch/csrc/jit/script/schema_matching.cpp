@@ -84,7 +84,7 @@ Value* tryConvertToType(
 
   if (value->type()->isSubtypeOf(NoneType::get()) && !concrete_type->isSubtypeOf(NoneType::get())){
     if (concrete_type->isSubtypeOf(GeneratorType::get())) {
-      value = graph.insertNode(graph.createNoneGenerator())->output();
+      value = graph.insertNode(graph.createNone(GeneratorType::get()))->output();
     } else if (concrete_type->isSubtypeOf(OptionalType::ofTensor())) {
       // create undefined tensor when None pass to a optional[tensor] formal arg
       value = graph.insertNode(graph.createUndefined())->output();

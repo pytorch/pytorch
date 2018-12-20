@@ -68,7 +68,7 @@ _backend = Backend.UNDEFINED
 dist_backend = Backend
 
 
-class reduce_op(object):
+class _reduce_op(object):
     r"""
     Deprecated enum-like class for reduction operations: ``SUM``, ``PRODUCT``,
     ``MIN``, and ``MAX``.
@@ -87,7 +87,7 @@ class reduce_op(object):
                       "torch.distributed.ReduceOp instead")
         return object.__getattribute__(self, key)
 
-reduce_op = reduce_op()
+reduce_op = _reduce_op()
 
 
 class group(object):

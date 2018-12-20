@@ -1344,12 +1344,6 @@ Node* Graph::createNone(TypePtr typ) {
   return n;
 }
 
-Node * Graph::createNoneGenerator() {
-  auto n = create(prim::NoneGenerator);
-  n->output()->setType(GeneratorType::get());
-  return n;
-}
-
 Node * Graph::createFusionGroup() {
   auto n = create(prim::FusionGroup, 0);
   n->g_(attr::Subgraph,std::make_shared<Graph>(current_scope()));
