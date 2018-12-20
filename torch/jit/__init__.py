@@ -780,6 +780,7 @@ def batch(batch_size=1, optimize=True, _frames_up=0):
 #  view.items()
 #  view.keys()
 #  len(view)
+#  copy()
 
 class OrderedDictWrapper(object):
     def __init__(self, module):
@@ -812,6 +813,9 @@ class OrderedDictWrapper(object):
 
     def __setitem__(self, k, v):
         raise NotImplementedError
+
+    def copy(self):
+        return self.__class__(self)
 
 
 class OrderedModuleDict(OrderedDictWrapper):
