@@ -11329,6 +11329,37 @@ class TestAsync(JitTestCase):
         y = torch.neg(x)
         self.assertEqual(module(x), tuple([y, y, y, y, x, x]))
 
+    def test_async_script_error(self):
+        x = torch.rand(3, 4)
+
+        @torch.jit.script
+        def foo(x):
+            # error here
+            return x.t() + x
+
+        @torch.jit.script
+        def wait_script(x):
+            fut = torch.jit._fork(foo, x)
+            return torch.jit._wait(fut)
+
+        @torch.jit.script
+        def wait_script_nest(x):
+            fut = torch.jit._fork(wait_script, x)
+            return torch.jit._wait(fut)
+
+        # no future
+        error_msg = 'The size.*must match the size of tensor'
+        with self.assertRaisesRegex(Exception, error_msg):
+            foo(x)
+
+        # one future
+        with self.assertRaisesRegex(Exception, error_msg):
+            wait_script(x)
+
+        # two futures with a different error
+        x = torch.rand(3, 4, 5)
+        with self.assertRaisesRegex(Exception, 'expects a 2D tensor'):
+            wait_script_nest(x)
 
 for test in autograd_method_tests:
     add_autograd_test(*test)
