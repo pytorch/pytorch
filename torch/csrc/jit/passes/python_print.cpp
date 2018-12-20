@@ -768,6 +768,17 @@ struct PythonPrintPass {
         }
         stmt << ")";
       } break;
+      case prim::Function: {
+        if (enforce_importable_) {
+          throw script::ErrorReport(node->getSourceLocation()) << "closures are not exportable";
+        }
+        auto name = genMethodName("__lambda");
+        std::shared_ptr<Graph> graph = node->g(attr::Subgraph);
+        worklist.emplace_back([graph, name, this] {
+          printFunctionDefinition(*graph, name);
+        });
+        stmt << "self." << name;
+      } break;
       default: {
         Symbol kind = node->kind();
         if (kind.is_aten()) {
