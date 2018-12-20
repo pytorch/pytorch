@@ -188,7 +188,7 @@ static Tensor& prod_impl(Tensor& result, const Tensor& self, IntList dim,
 
 Tensor prod(const Tensor &self, optional<ScalarType> dtype) {
   Tensor result;
-  return at::native::prod_impl(result, self, {}, false, dtype);
+  at::native::prod_impl(result, self, {}, false, dtype);
   return result;
 }
 
