@@ -525,7 +525,8 @@ Tensor _sparse_addmm_sparse_backward(const Tensor& grad, const Tensor& sparse_, 
 
 Tensor _sparse_add_backward(const Tensor& grad, const Tensor& t) {
   AT_ASSERT(grad.is_sparse());
-  return grad.coalesce();
+  AT_ASSERT(grad.is_coalesced());
+  return grad;
 }
 
 Tensor renorm_backward(const Tensor & grad, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {

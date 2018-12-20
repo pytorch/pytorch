@@ -306,7 +306,7 @@ SparseTensor _sparse_add_scalar(const SparseTensor& t_, Scalar src, Scalar alpha
   AT_ASSERT(t_.is_sparse());
 
   if (t_._nnz() == 0) {
-    return t_.clone();
+    return t_;
   }
 
   auto t = t_.coalesce();
@@ -327,7 +327,7 @@ SparseTensor _sparse_add_cpu(const SparseTensor& t_, const SparseTensor& src_, S
   AT_CHECK(t_.type() == src_.type(), "input SparseTensor 't' and 'src' must share the same type, but got t.type = ", t_.type(), " and src.type = ", src_.type());
 
   if (t_._nnz() == 0 || src_._nnz() == 0) {
-    return t_.clone();
+    return t_;
   }
 
   auto t = t_.coalesce();
