@@ -534,7 +534,7 @@ SparseTensor _sparse_add_cuda(const SparseTensor& t_, const SparseTensor& src_, 
   auto t_indices_ti = getTensorInfo<int64_t, int64_t>(t_indices_1D);
   auto t_indices_pos_ti = getTensorInfo<int64_t, int64_t>(t_indices_pos);
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(t_values.type(), "_sparse_add_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_HALF(t_values.type(), "_sparse_add_cuda", [&] {
     auto src_values_ti = getTensorInfo<scalar_t, int64_t>(src_values);
     auto t_values_ti = getTensorInfo<scalar_t, int64_t>(t_values);
     auto r_values_ti = getTensorInfo<scalar_t, int64_t>(r_values);
