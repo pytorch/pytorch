@@ -15,14 +15,24 @@
 
 namespace at {
 namespace vec256 {
+
+// Note [Acceptable use of anonymous namespace in header]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Yes you saw right, this is an anonymous namespace in a header.  This header,
+// and all of its subheaders, REQUIRE their code to be entirely inlined into
+// the compilation unit that uses them.  It's important that these functions have
+// internal linkage so that kernels for different architectures don't get
+// combined during linking. It's sufficient to label functions "static", but
+// class methods must be an unnamed namespace to have internal linkage (since
+// static means something different in the context of classes).
 namespace {
 
 template <typename T>
 std::ostream& operator<<(std::ostream& stream, const Vec256<T>& vec) {
-  T buf[Vec256<T>::size];
+  T buf[Vec256<T>::size()];
   vec.store(buf);
   stream << "vec[";
-  for (int i = 0; i != Vec256<T>::size; i++) {
+  for (int i = 0; i != Vec256<T>::size(); i++) {
     if (i != 0) {
       stream << ", ";
     }
