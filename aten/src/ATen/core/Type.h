@@ -205,10 +205,8 @@ struct CAFFE2_API Type {
   virtual Tensor argmax(const Tensor & self) const = 0;
   virtual Tensor argmin(const Tensor & self, int64_t dim, bool keepdim) const = 0;
   virtual Tensor argmin(const Tensor & self) const = 0;
-  virtual Tensor as_strided(const Tensor & self, IntList size, IntList stride) const = 0;
-  virtual Tensor & as_strided_(Tensor & self, IntList size, IntList stride) const = 0;
-  virtual Tensor as_strided(const Tensor & self, IntList size, IntList stride, int64_t storage_offset) const = 0;
-  virtual Tensor & as_strided_(Tensor & self, IntList size, IntList stride, int64_t storage_offset) const = 0;
+  virtual Tensor as_strided(const Tensor & self, IntList size, IntList stride, c10::optional<int64_t> storage_offset) const = 0;
+  virtual Tensor & as_strided_(Tensor & self, IntList size, IntList stride, c10::optional<int64_t> storage_offset) const = 0;
   virtual Tensor asin(const Tensor & self) const = 0;
   virtual Tensor & asin_(Tensor & self) const = 0;
   virtual Tensor atan(const Tensor & self) const = 0;
@@ -356,7 +354,7 @@ struct CAFFE2_API Type {
   virtual Tensor & squeeze_(Tensor & self) const = 0;
   virtual Tensor & squeeze_(Tensor & self, int64_t dim) const = 0;
   virtual Tensor sspaddmm(const Tensor & self, const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) const = 0;
-  virtual Tensor stft(const Tensor & self, int64_t n_fft, int64_t hop_length, int64_t win_length, const Tensor & window, bool normalized, bool onesided) const = 0;
+  virtual Tensor stft(const Tensor & self, int64_t n_fft, c10::optional<int64_t> hop_length, c10::optional<int64_t> win_length, const Tensor & window, bool normalized, bool onesided) const = 0;
   virtual int64_t stride(const Tensor & self, int64_t dim) const = 0;
   virtual Tensor sum(const Tensor & self, ScalarType dtype) const = 0;
   virtual Tensor sum(const Tensor & self) const = 0;
@@ -394,7 +392,7 @@ struct CAFFE2_API Type {
   virtual Tensor view_as(const Tensor & self, const Tensor & other) const = 0;
   virtual Tensor where(const Tensor & condition, const Tensor & self, const Tensor & other) const = 0;
   virtual Tensor norm(const Tensor & self, Scalar p) const = 0;
-  virtual Tensor norm(const Tensor & self, Scalar p, int64_t dim, bool keepdim) const = 0;
+  virtual Tensor norm(const Tensor & self, c10::optional<Scalar> p, int64_t dim, bool keepdim) const = 0;
   virtual Tensor clone(const Tensor & self) const = 0;
   virtual Tensor & resize_as_(Tensor & self, const Tensor & the_template) const = 0;
   virtual Tensor pow(const Tensor & self, Scalar exponent) const = 0;

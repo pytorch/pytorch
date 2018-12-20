@@ -98,6 +98,16 @@ void RNNImplBase<Derived>::to(torch::Device device, bool non_blocking) {
 }
 
 template <typename Derived>
+void RNNImplBase<Derived>::pretty_print(std::ostream& stream) const {
+  const std::string name = this->name();
+  const std::string name_without_impl = name.substr(0, name.size() - 4);
+  stream << name_without_impl << "(input_size=" << options.input_size_
+         << ", hidden_size=" << options.hidden_size_
+         << ", layers=" << options.layers_ << ", dropout=" << options.dropout_
+         << ")";
+}
+
+template <typename Derived>
 void RNNImplBase<Derived>::flatten_parameters() {
   // Cache the flattened weight and bias vector.
   flat_weights_ = flat_weights();
@@ -202,6 +212,15 @@ RNNImpl::RNNImpl(const RNNOptions& options)
               .batch_first(options.batch_first_),
           static_cast<CuDNNMode>(options.activation_)),
       options(options) {}
+
+void RNNImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::RNN(input_size=" << options.input_size_
+         << ", hidden_size=" << options.hidden_size_
+         << ", layers=" << options.layers_ << ", dropout=" << options.dropout_
+         << ", activation="
+         << (options.activation_ == RNNActivation::Tanh ? "tanh" : "relu")
+         << ")";
+}
 
 RNNOutput RNNImpl::forward(const Tensor& input, Tensor state) {
   switch (options.activation_) {
