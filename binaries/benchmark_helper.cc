@@ -439,7 +439,7 @@ int benchmark(
       FLAGS_input_file,
       FLAGS_input_dims,
       FLAGS_input_type);
-  LOG(INFO) << "Num blobs: " << num_blobs;
+
   runNetwork(
       workspace,
       net_def,
