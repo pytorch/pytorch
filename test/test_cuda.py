@@ -2088,7 +2088,7 @@ class TestCuda(TestCase):
     @skipIfRocm
     def test_norm_type_conversion(self):
         a = torch.ones(65536).cuda().half()
-        self.assertEqual(a.norm(p=0,dtype=torch.float32), 65536)
+        self.assertEqual(a.norm(p=0, dtype=torch.float32), 65536)
 
     @skipIfRocm
     # Test that wrap_with_cuda_memory_check successfully detects leak
