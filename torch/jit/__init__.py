@@ -1152,7 +1152,7 @@ if _enabled:
                         setattr(curr, name, ScriptModule())
                     curr = getattr(curr, name)
                 return curr
-            self._copy_into(module_lookup, [])
+            self._copy_into(module_lookup, {}, [])
             return m
 
         def __getstate__(self):
@@ -1267,7 +1267,7 @@ def _get_methods(cls):
 
 _compiled_methods_whitelist = {
     'forward', 'register_buffer', 'register_parameter', 'add_module',
-    '_apply', 'apply', 'cuda', 'cpu', 'type', 'float', 'double', 'half',
+    '_apply', 'apply', 'cuda', 'cpu', 'to', 'type', 'float', 'double', 'half',
     'state_dict', 'load_state_dict', '_load_from_state_dict',
     '_named_members', 'parameters', 'named_parameters',
     'buffers', 'named_buffers', 'children', 'named_children', 'modules',

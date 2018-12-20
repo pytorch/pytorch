@@ -28,6 +28,9 @@ class TORCH_API EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
 
   void reset() override;
 
+  /// Pretty prints the `Embedding` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
   /// Performs a lookup on the embedding table stored in `weight` using the
   /// `indices` supplied and returns the result.
   Tensor forward(const Tensor& indices);

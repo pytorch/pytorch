@@ -200,6 +200,7 @@ inline void abandon() {
 // NB: those serve both as an intermediate steps in addInputs below,
 // as well as the overloads that terminate template recursion
 TORCH_API void addInputs(Node *n, const char * name, int64_t value);
+TORCH_API void addInputs(Node *n, const char * name, c10::optional<int64_t> value);
 TORCH_API void addInputs(Node *n, const char * name, bool value);
 TORCH_API void addInputs(Node *n, const char * name, double value);
 TORCH_API void addInputs(Node *n, const char * name, const at::Scalar& value);
@@ -214,6 +215,7 @@ TORCH_API void addInputs(Node *n, const char * name, const at::TensorOptions& va
 TORCH_API void addInputs(Node *n, const char * name, at::Device value);
 TORCH_API void addInputs(Node *n, const char * name, at::Layout value);
 TORCH_API void addInputs(Node *n, const char * name, at::ScalarType value);
+TORCH_API void addInputs(Node *n, const char * name, const c10::optional<at::ScalarType>& value);
 TORCH_API void addInputs(Node *n, const char * name, at::Generator * value);
 
 template<size_t N>

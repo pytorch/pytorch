@@ -472,8 +472,11 @@ struct Module {
 
   void save(const std::string& filename);
 
-  void copy_into(std::function<std::shared_ptr<Module>(std::vector<std::string>)> module_lookup, std::vector<std::string> names = {}) const {
-    std::unordered_map<at::Tensor*, at::Tensor*> parameter_remap;
+  void copy_into(std::function<std::shared_ptr<Module>(
+      std::vector<std::string>)> module_lookup,
+      // parameter_remap is needed when a parent module uses a parameter of a submodule
+      std::unordered_map<at::Tensor*, at::Tensor*>& parameter_remap,
+      std::vector<std::string> names = {}) const {
     auto curr = module_lookup(names);
     for (auto &kv : parameters) {
       curr->register_parameter(kv.key(), *kv.value().slot(), kv.value().is_buffer);
@@ -481,13 +484,15 @@ struct Module {
     }
     for (auto &kv : modules) {
       names.push_back(kv.key());
-      kv.value().module->copy_into(module_lookup, names);
+      // Submodules must be translated first, otherwise parameter_remap entries
+      // will not be filled in for methods of this module.
+      kv.value().module->copy_into(module_lookup, parameter_remap, names);
       names.pop_back();
     }
     for (auto &kv : methods) {
       std::vector<at::Tensor*> params;
       for (auto &p : kv.value()->params()) {
-        params.push_back(parameter_remap[p]);
+        params.push_back(parameter_remap.at(p));
       }
       curr->create_method(kv.key(), kv.value()->graph()->copy(), params);
     }

@@ -74,6 +74,9 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
   void to(torch::Dtype dtype, bool non_blocking = false) override;
   void to(torch::Device device, bool non_blocking = false) override;
 
+  /// Pretty prints the RNN module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
   /// Modifies the internal storage of weights for optimization purposes.
   ///
   /// On CPU, this method should be called if any of the weight or bias vectors
@@ -136,7 +139,7 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RNN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-enum class RNNActivation : uint32_t TORCH_API { ReLU, Tanh };
+enum class RNNActivation : uint32_t TORCH_API{ReLU, Tanh};
 
 /// Options for RNN modules.
 struct TORCH_API RNNOptions {
@@ -176,6 +179,9 @@ class TORCH_API RNNImpl : public detail::RNNImplBase<RNNImpl> {
   RNNImpl(int64_t input_size, int64_t hidden_size)
       : RNNImpl(RNNOptions(input_size, hidden_size)) {}
   explicit RNNImpl(const RNNOptions& options);
+
+  /// Pretty prints the `RNN` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
 
   /// Applies the `RNN` module to an input sequence and input state.
   /// The `input` should follow a `(sequence, batch, features)` layout unless

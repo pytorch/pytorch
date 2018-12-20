@@ -186,7 +186,7 @@ struct PDist {
     const int64_t n = self.size(1);
     const int64_t m = self.size(2);
     const int64_t combs = dist.size(1);
-    const int64_t remainder = m % Vec::size;
+    const int64_t remainder = m % Vec::size();
     const Vec pvec(p);
 
     const scalar_t * const grad_start = grad.data<scalar_t>();
@@ -197,27 +197,27 @@ struct PDist {
     // The only way to parallelize and avoid locking requires parallelizing
     // over the columns of the input, i.e. we compute the gradient for the
     // first section of each vector independentaly of the second section, etc.
-    int64_t mv = (m + Vec::size - 1) / Vec::size; // number of Vecs in a row rounded up
+    int64_t mv = (m + Vec::size() - 1) / Vec::size(); // number of Vecs in a row rounded up
     at::parallel_for(0, b * mv, internal::GRAIN_SIZE / (8 * n * n), [=, &pvec](int64_t start, int64_t end) {
       const int64_t l = start / mv;
       const int64_t v = start % mv;
 
       const scalar_t * self_l = self_start + l * n * m;
-      const scalar_t * self_v = self_l + v * Vec::size;
+      const scalar_t * self_v = self_l + v * Vec::size();
 
       const scalar_t * dist_l = dist_start + l * combs;
       const scalar_t * grad_l = grad_start + l * combs;
 
       scalar_t * res_l = res_start + l * n * m;
-      scalar_t * res_v = res_l + v * Vec::size;
+      scalar_t * res_v = res_l + v * Vec::size();
 
       while (start != end) {
-        backward_down_column<F>(self_v, res_v, grad_l, dist_l, pvec, n, m, std::min(int(m - (self_v - self_l)), Vec::size));
+        backward_down_column<F>(self_v, res_v, grad_l, dist_l, pvec, n, m, std::min(int(m - (self_v - self_l)), Vec::size()));
 
         start += 1;
-        self_v += Vec::size;
-        res_v += Vec::size;
-        if (self_v == self_l + mv * Vec::size) {
+        self_v += Vec::size();
+        res_v += Vec::size();
+        if (self_v == self_l + mv * Vec::size()) {
           // Reached the end of the row
           self_l += n * m;
           self_v = self_l;

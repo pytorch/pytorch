@@ -13,7 +13,7 @@ from torch.onnx import OperatorExportTypes
 from torch._six import inf, PY2
 from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
-    freeze_rng_state
+    freeze_rng_state, set_rng_seed
 from common_nn import module_tests, new_module_tests, criterion_tests
 from textwrap import dedent
 from functools import wraps
@@ -1476,6 +1476,11 @@ class TestJit(JitTestCase):
         traced_model.float().cuda()
         cuda_out = traced_model(x.float().cuda())
         traced_model.cpu()
+        cpu_out = traced_model(x.float())
+        self.assertEqual(cpu_out, cuda_out)
+        traced_model.to('cuda')
+        cuda_out = traced_model(x.float().cuda())
+        traced_model.to('cpu')
         cpu_out = traced_model(x.float())
         self.assertEqual(cpu_out, cuda_out)
         traced_model.double()
@@ -7221,6 +7226,45 @@ a")
         self.assertTrue(imported.ssm.asm._has_parameter('param'))
         self.assertTrue(hasattr(imported.ssm.asm, 'param'))
 
+    def test_trace_parameter(self):
+        class Param(nn.Module):
+            def __init__(self):
+                super(Param, self).__init__()
+                self.register_parameter("bias", nn.Parameter(torch.Tensor(4, 4)))
+
+            def forward(self, x):
+                return x
+
+        class M3(torch.jit.ScriptModule):
+            def __init__(self, model):
+                super(M3, self).__init__(False)
+                self.traced = torch.jit.trace(model, (torch.rand(3, 3)))
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return self.traced(x)
+
+        class M2(nn.Module):
+            def __init__(self, model):
+                super(M2, self).__init__()
+                self.module = M3(model)
+
+            def forward(self, x):
+                return self.module(x)
+
+        class M1(torch.jit.ScriptModule):
+            def __init__(self, model):
+                super(M1, self).__init__(False)
+                self.traced = torch.jit.trace(M2(model), (torch.rand(3, 3)))
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return self.traced(x)
+
+        module = M1(Param())
+        f = io.BytesIO()
+        torch.jit.save(module, f)
+
     def test_call_traced_module_from_traced_module(self):
         class TracedModule1(torch.nn.Module):
             def __init__(self):
@@ -10815,6 +10859,7 @@ def add_autograd_test(
         def do_test(self, name=name, self_size=self_size, args=new_args, test_name=test_name,
                     output_process_fn=output_process_fn):
             def check(name):
+                set_rng_seed(2)
                 is_magic_method = name[:2] == '__' and name[-2:] == '__'
                 is_inplace = name[-1] == "_" and not is_magic_method
                 self_variable = create_input((self_size,))[0][0]
@@ -11285,8 +11330,39 @@ class TestAsync(JitTestCase):
         y = torch.neg(x)
         self.assertEqual(module(x), tuple([y, y, y, y, x, x]))
 
+    def test_async_script_error(self):
+        x = torch.rand(3, 4)
 
-for test in autograd_method_tests:
+        @torch.jit.script
+        def foo(x):
+            # error here
+            return x.t() + x
+
+        @torch.jit.script
+        def wait_script(x):
+            fut = torch.jit._fork(foo, x)
+            return torch.jit._wait(fut)
+
+        @torch.jit.script
+        def wait_script_nest(x):
+            fut = torch.jit._fork(wait_script, x)
+            return torch.jit._wait(fut)
+
+        # no future
+        error_msg = 'The size.*must match the size of tensor'
+        with self.assertRaisesRegex(Exception, error_msg):
+            foo(x)
+
+        # one future
+        with self.assertRaisesRegex(Exception, error_msg):
+            wait_script(x)
+
+        # two futures with a different error
+        x = torch.rand(3, 4, 5)
+        with self.assertRaisesRegex(Exception, 'expects a 2D tensor'):
+            wait_script_nest(x)
+
+for test in autograd_method_tests():
     add_autograd_test(*test)
 
 for test in nn_functional_tests:

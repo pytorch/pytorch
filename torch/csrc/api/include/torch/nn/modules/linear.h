@@ -29,6 +29,9 @@ class TORCH_API LinearImpl : public Cloneable<LinearImpl> {
 
   void reset() override;
 
+  /// Pretty prints the `Linear` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
   /// Transforms the `input` tensor by multiplying with the `weight` and
   /// optionally adding the `bias`, if `with_bias` is true in the options.
   Tensor forward(const Tensor& input);
