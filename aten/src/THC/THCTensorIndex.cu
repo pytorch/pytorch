@@ -1,19 +1,19 @@
-#include "THC.h"
-#include "THCTensorMath.h"
-#include "THCGeneral.h"
-#include "THCBlas.h"
-#include "THCTensorCopy.h"
-#include "THCTensorRandom.h"
-#include "TH/THHalf.h"
-#include "THCApply.cuh"
-#include "THCReduce.cuh"
-#include "THCDeviceUtils.cuh"
-#include "THCNumerics.cuh"
-#include "THCAtomics.cuh"
-#include "THCThrustAllocator.cuh"
-#include "THCTensorSort.cuh"
-#include "THCTensor.hpp"
-#include "THCStorage.hpp"
+#include <THC/THC.h>
+#include <THC/THCTensorMath.h>
+#include <THC/THCGeneral.h>
+#include <THC/THCBlas.h>
+#include <THC/THCTensorCopy.h>
+#include <THC/THCTensorRandom.h>
+#include <TH/THHalf.h>
+#include <THC/THCApply.cuh>
+#include <THC/THCReduce.cuh>
+#include <THC/THCDeviceUtils.cuh>
+#include <THC/THCNumerics.cuh>
+#include <THC/THCAtomics.cuh>
+#include <THC/THCThrustAllocator.cuh>
+#include <THC/THCTensorSort.cuh>
+#include <THC/THCTensor.hpp>
+#include <THC/THCStorage.hpp>
 #include <thrust/device_ptr.h>
 #include <thrust/sort.h>
 #include <algorithm> // for std::min
@@ -478,5 +478,5 @@ void dispatchTakePut(THCState *state, TensorType *a, TensorType *b, THCudaLongTe
   }
 }
 
-#include "generic/THCTensorIndex.cu"
-#include "THCGenerateAllTypes.h"
+#include <THC/generic/THCTensorIndex.cu>
+#include <THC/THCGenerateAllTypes.h>

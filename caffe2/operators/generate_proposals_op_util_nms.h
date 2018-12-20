@@ -185,6 +185,233 @@ cv::RotatedRect bbox_to_rotated_rect(const Eigen::ArrayBase<Derived>& box) {
       cv::Point2f(box[0], box[1]), cv::Size2f(box[2], box[3]), -box[4]);
 }
 
+// TODO: cvfix_rotatedRectangleIntersection is a replacement function for
+// cv::rotatedRectangleIntersection, which has a bug due to float underflow
+// When OpenCV version is upgraded to be >= 4.0,
+// we can remove this replacement function.
+// For anyone interested, here're the PRs on OpenCV:
+// https://github.com/opencv/opencv/issues/12221
+// https://github.com/opencv/opencv/pull/12222
+int cvfix_rotatedRectangleIntersection(
+    const cv::RotatedRect& rect1,
+    const cv::RotatedRect& rect2,
+    cv::OutputArray intersectingRegion) {
+  const float samePointEps = 0.00001f;
+  // used to test if two points are the same
+
+  cv::Point2f vec1[4], vec2[4];
+  cv::Point2f pts1[4], pts2[4];
+
+  std::vector<cv::Point2f> intersection;
+
+  rect1.points(pts1);
+  rect2.points(pts2);
+
+  int ret = cv::INTERSECT_FULL;
+
+  // Specical case of rect1 == rect2
+  {
+    bool same = true;
+
+    for (int i = 0; i < 4; i++) {
+      if (fabs(pts1[i].x - pts2[i].x) > samePointEps ||
+          (fabs(pts1[i].y - pts2[i].y) > samePointEps)) {
+        same = false;
+        break;
+      }
+    }
+
+    if (same) {
+      intersection.resize(4);
+
+      for (int i = 0; i < 4; i++) {
+        intersection[i] = pts1[i];
+      }
+
+      cv::Mat(intersection).copyTo(intersectingRegion);
+
+      return cv::INTERSECT_FULL;
+    }
+  }
+
+  // Line vector
+  // A line from p1 to p2 is: p1 + (p2-p1)*t, t=[0,1]
+  for (int i = 0; i < 4; i++) {
+    vec1[i].x = pts1[(i + 1) % 4].x - pts1[i].x;
+    vec1[i].y = pts1[(i + 1) % 4].y - pts1[i].y;
+
+    vec2[i].x = pts2[(i + 1) % 4].x - pts2[i].x;
+    vec2[i].y = pts2[(i + 1) % 4].y - pts2[i].y;
+  }
+
+  // Line test - test all line combos for intersection
+  for (int i = 0; i < 4; i++) {
+    for (int j = 0; j < 4; j++) {
+      // Solve for 2x2 Ax=b
+      float x21 = pts2[j].x - pts1[i].x;
+      float y21 = pts2[j].y - pts1[i].y;
+
+      float vx1 = vec1[i].x;
+      float vy1 = vec1[i].y;
+
+      float vx2 = vec2[j].x;
+      float vy2 = vec2[j].y;
+
+      float det = vx2 * vy1 - vx1 * vy2;
+
+      float t1 = (vx2 * y21 - vy2 * x21) / det;
+      float t2 = (vx1 * y21 - vy1 * x21) / det;
+
+      // This takes care of parallel lines
+      if (cvIsInf(t1) || cvIsInf(t2) || cvIsInf(t1) || cvIsInf(t2)) {
+        continue;
+      }
+
+      if (t1 >= 0.0f && t1 <= 1.0f && t2 >= 0.0f && t2 <= 1.0f) {
+        float xi = pts1[i].x + vec1[i].x * t1;
+        float yi = pts1[i].y + vec1[i].y * t1;
+
+        intersection.push_back(cv::Point2f(xi, yi));
+      }
+    }
+  }
+
+  if (!intersection.empty()) {
+    ret = cv::INTERSECT_PARTIAL;
+  }
+
+  // Check for vertices from rect1 inside recct2
+  for (int i = 0; i < 4; i++) {
+    // We do a sign test to see which side the point lies.
+    // If the point all lie on the same sign for all 4 sides of the rect,
+    // then there's an intersection
+    int posSign = 0;
+    int negSign = 0;
+
+    float x = pts1[i].x;
+    float y = pts1[i].y;
+
+    for (int j = 0; j < 4; j++) {
+      // line equation: Ax + By + C = 0
+      // see which side of the line this point is at
+
+      // float causes underflow!
+      // Original version:
+      // float A = -vec2[j].y;
+      // float B = vec2[j].x;
+      // float C = -(A * pts2[j].x + B * pts2[j].y);
+      // float s = A * x + B * y + C;
+
+      double A = -vec2[j].y;
+      double B = vec2[j].x;
+      double C = -(A * pts2[j].x + B * pts2[j].y);
+      double s = A * x + B * y + C;
+
+      if (s >= 0) {
+        posSign++;
+      } else {
+        negSign++;
+      }
+    }
+
+    if (posSign == 4 || negSign == 4) {
+      intersection.push_back(pts1[i]);
+    }
+  }
+
+  // Reverse the check - check for vertices from rect2 inside recct1
+  for (int i = 0; i < 4; i++) {
+    // We do a sign test to see which side the point lies.
+    // If the point all lie on the same sign for all 4 sides of the rect,
+    // then there's an intersection
+    int posSign = 0;
+    int negSign = 0;
+
+    float x = pts2[i].x;
+    float y = pts2[i].y;
+
+    for (int j = 0; j < 4; j++) {
+      // line equation: Ax + By + C = 0
+      // see which side of the line this point is at
+
+      // float causes underflow!
+      // Original version:
+      // float A = -vec1[j].y;
+      // float B = vec1[j].x;
+      // float C = -(A * pts1[j].x + B * pts1[j].y);
+      // float s = A*x + B*y + C;
+
+      double A = -vec1[j].y;
+      double B = vec1[j].x;
+      double C = -(A * pts1[j].x + B * pts1[j].y);
+      double s = A * x + B * y + C;
+
+      if (s >= 0) {
+        posSign++;
+      } else {
+        negSign++;
+      }
+    }
+
+    if (posSign == 4 || negSign == 4) {
+      intersection.push_back(pts2[i]);
+    }
+  }
+
+  // Get rid of dupes
+  for (int i = 0; i < (int)intersection.size() - 1; i++) {
+    for (size_t j = i + 1; j < intersection.size(); j++) {
+      float dx = intersection[i].x - intersection[j].x;
+      float dy = intersection[i].y - intersection[j].y;
+      // can be a really small number, need double here
+      double d2 = dx * dx + dy * dy;
+
+      if (d2 < samePointEps * samePointEps) {
+        // Found a dupe, remove it
+        std::swap(intersection[j], intersection.back());
+        intersection.pop_back();
+        j--; // restart check
+      }
+    }
+  }
+
+  if (intersection.empty()) {
+    return cv::INTERSECT_NONE;
+  }
+
+  // If this check fails then it means we're getting dupes
+  // CV_Assert(intersection.size() <= 8);
+
+  // At this point, there might still be some edge cases failing the check above
+  // However, it doesn't affect the result of polygon area,
+  // even if the number of intersections is greater than 8.
+  // Therefore, we just print out these cases for now instead of assertion.
+  // TODO: These cases should provide good reference for improving the accuracy
+  // for intersection computation above (for example, we should use
+  // cross-product/dot-product of vectors instead of line equation to
+  // judge the relationships between the points and line segments)
+
+  if (intersection.size() > 8) {
+    LOG(ERROR) << "Intersection size = " << intersection.size();
+    LOG(ERROR) << "Rect 1:";
+    for (int i = 0; i < 4; i++) {
+      LOG(ERROR) << " (" << pts1[i].x << " ," << pts1[i].y << "),";
+    }
+    LOG(ERROR) << "Rect 2:";
+    for (int i = 0; i < 4; i++) {
+      LOG(ERROR) << " (" << pts2[i].x << " ," << pts2[i].y << "),";
+    }
+    LOG(ERROR) << "Intersections:";
+    for (auto& p : intersection) {
+      LOG(ERROR) << " (" << p.x << " ," << p.y << "),";
+    }
+  }
+
+  cv::Mat(intersection).copyTo(intersectingRegion);
+
+  return ret;
+}
+
 /**
  * Returns the intersection area of two rotated rectangles.
  */
@@ -194,7 +421,16 @@ double rotated_rect_intersection(
   std::vector<cv::Point2f> intersectPts, orderedPts;
 
   // Find points of intersection
-  auto ret = cv::rotatedRectangleIntersection(rect1, rect2, intersectPts);
+
+  // TODO: cvfix_rotatedRectangleIntersection is a replacement function for
+  // cv::rotatedRectangleIntersection, which has a bug due to float underflow
+  // When OpenCV version is upgraded to be >= 4.0,
+  // we can remove this replacement function and use the following instead:
+  // auto ret = cv::rotatedRectangleIntersection(rect1, rect2, intersectPts);
+  // For anyone interested, here're the PRs on OpenCV:
+  // https://github.com/opencv/opencv/issues/12221
+  // https://github.com/opencv/opencv/pull/12222
+  auto ret = cvfix_rotatedRectangleIntersection(rect1, rect2, intersectPts);
   if (intersectPts.size() <= 2) {
     return 0.0;
   }

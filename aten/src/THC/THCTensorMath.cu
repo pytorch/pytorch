@@ -1,12 +1,12 @@
-#include "THCTensorMath.h"
-#include "THCGeneral.h"
-#include "THCTensorCopy.h"
-#include "THCApply.cuh"
-#include "THCNumerics.cuh"
-#include "THCTensorMath.cuh"
-#include "THCThrustAllocator.cuh"
-#include "THCTensor.hpp"
-#include "THCStream.h"
+#include <THC/THCTensorMath.h>
+#include <THC/THCGeneral.h>
+#include <THC/THCTensorCopy.h>
+#include <THC/THCApply.cuh>
+#include <THC/THCNumerics.cuh>
+#include <THC/THCTensorMath.cuh>
+#include <THC/THCThrustAllocator.cuh>
+#include <THC/THCTensor.hpp>
+
 
 #include <thrust/copy.h>
 #include <thrust/count.h>
@@ -111,7 +111,7 @@ struct NonZeroOp
 
 template<typename T, typename accT = T>
 struct LinspaceOp {
-  __host__ __device__ LinspaceOp(accT start, accT step): 
+  __host__ __device__ LinspaceOp(accT start, accT step):
     start_(start), step_(step) { }
   __device__ __forceinline__ T operator()(ptrdiff_t index) {
     accT increment = THCNumerics<accT>::mul(step_, ScalarConvert<ptrdiff_t,accT>::to(index));
@@ -124,7 +124,7 @@ struct LinspaceOp {
 
 template<typename T, typename accT = T>
 struct LogspaceOp {
-  __host__ __device__ LogspaceOp(accT start, accT step): 
+  __host__ __device__ LogspaceOp(accT start, accT step):
     start_(start), step_(step) { }
   __device__ __forceinline__ T operator()(ptrdiff_t index) {
     accT increment = THCNumerics<accT>::mul(step_, ScalarConvert<ptrdiff_t,accT>::to(index));
@@ -136,5 +136,5 @@ struct LogspaceOp {
 };
 
 
-#include "generic/THCTensorMath.cu"
-#include "THCGenerateAllTypes.h"
+#include <THC/generic/THCTensorMath.cu>
+#include <THC/THCGenerateAllTypes.h>

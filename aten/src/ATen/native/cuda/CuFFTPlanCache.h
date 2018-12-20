@@ -1,8 +1,8 @@
-#include "ATen/ATen.h"
-#include "ATen/cuda/CUDAContext.h"
-#include "ATen/Config.h"
-#include "ATen/native/cuda/CuFFTUtils.h"
-#include "ATen/native/utils/ParamsHash.h"
+#include <ATen/ATen.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/Config.h>
+#include <ATen/native/cuda/CuFFTUtils.h>
+#include <ATen/native/utils/ParamsHash.h>
 
 #include <list>
 #include <unordered_map>
@@ -146,7 +146,8 @@ public:
     // See NOTE [ cuFFT Embedded Strides ].
     //
     // TODO: Figure out why windows fails to compile
-    //         at::optional<std::vector<long long int>> inembed_opt = at::nullopt;
+    //         c10::optional<std::vector<long long int>> inembed_opt =
+    //         c10::nullopt;
     //       Then move the following to a helper function.
 #ifdef __HIP_PLATFORM_HCC__
     std::vector<int> inembed(signal_ndim);
@@ -221,7 +222,7 @@ public:
     } else {
       std::ostringstream ss;
       ss << "hipFFT doesn't support tensor of type: "
-         << at::toString(input.type().scalarType());
+         << toString(input.type().scalarType());
       AT_ERROR(ss.str());
     }
 
@@ -242,7 +243,7 @@ public:
     } else {
       std::ostringstream ss;
       ss << "cuFFT doesn't support tensor of type: "
-         << at::toString(input.type().scalarType());
+         << toString(input.type().scalarType());
       AT_ERROR(ss.str());
     }
 #endif
@@ -337,16 +338,16 @@ private:
   int64_t ws_size;
 };
 
-// NB: cuFFT allocates a starting plan array of size 1024. It should grow the
-//     array as more plans are created. However, a bug in cuFFT (at least
-//     present in CUDA 9.1) causes the cufftSetAutoAllocation call on the
-//     1024-th plan to fail with CUFFT_INVALID_PLAN. Therefore, we check that
-//     cache size is leq 1023. The initial plan array size is 1024 for
-//     CUDA 8.0 ~ 9.2 so setting this as a CUDA-version-agnostic constant should
-//     be fine for now.
-// TODO: When CUDA 10 comes out, check if the bug is fixed or if we need another
-//       number for CUDA 10.
-constexpr int64_t CUFFT_MAX_PLAN_NUM = 1023;
+#if CUDA_VERSION < 10000
+  // Note that the max plan number for CUDA version < 10 has to be 1023
+  // due to a bug that fails on the 1024th plan
+  constexpr int64_t CUFFT_MAX_PLAN_NUM = 1023;
+#else
+  // The max plan number chosen for CUDA version > 10 is arbitrary.
+  // This number puts a limit on how big of a plan cache should we maintain.
+  // Without this number, the plan cache can grow unconditionally.
+  constexpr int64_t CUFFT_MAX_PLAN_NUM = 4096;
+#endif
 static_assert(CUFFT_MAX_PLAN_NUM >= 0 && CUFFT_MAX_PLAN_NUM <= std::numeric_limits<size_t>::max(),
               "CUFFT_MAX_PLAN_NUM not in size_t range");
 
@@ -414,7 +415,6 @@ public:
 
   void resize(int64_t new_size) {
     _set_max_size(new_size);
-
     auto cur_size = _usage_list.size();
     if (cur_size > _max_size) {
       auto delete_it = _usage_list.end();

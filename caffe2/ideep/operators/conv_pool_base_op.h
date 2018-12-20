@@ -39,7 +39,7 @@ class IDEEPConvPoolOpBase : public ConvPoolOpBase<IDEEPContext> {
     ideep::tensor::dims output_dims;
 
     auto input_dims = input.get_dims();
-    vector<TIndex> input_Tdims (input_dims.begin(), input_dims.end());
+    vector<int64_t> input_Tdims (input_dims.begin(), input_dims.end());
     InferOutputSize(
         input_Tdims,
         output_channel,

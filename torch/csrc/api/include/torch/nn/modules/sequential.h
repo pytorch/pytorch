@@ -5,12 +5,13 @@
 #include <torch/nn/module.h>
 #include <torch/nn/modules/any.h>
 #include <torch/nn/pimpl.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 
 #include <cstdint>
 #include <memory>
+#include <ostream>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -92,6 +93,8 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   using Iterator = std::vector<AnyModule>::iterator;
   using ConstIterator = std::vector<AnyModule>::const_iterator;
 
+  SequentialImpl() = default;
+
   /// Constructs the `Sequential` from a variadic list of modules.
   template <typename... Modules>
   explicit SequentialImpl(Modules&&... modules) {
@@ -102,7 +105,7 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   /// Special cloning function for `Sequential` because it does not use
   /// `reset()`.
   std::shared_ptr<Module> clone(
-      at::optional<Device> device = at::nullopt) const override {
+      const optional<Device>& device = nullopt) const override {
     auto clone = std::make_shared<SequentialImpl>();
     for (const auto& module : modules_) {
       clone->push_back(module.clone(device));
@@ -113,6 +116,11 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   /// `reset()` is empty for `Sequential`, since it does not have parameters of
   /// its own.
   void reset() override {}
+
+  /// Pretty prints the `Sequential` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override {
+    stream << "torch::nn::Sequential";
+  }
 
   /// Feeds `inputs` to the first module and then chains outputs to inputs,
   /// returning the last output.
@@ -159,9 +167,9 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
     }
     AT_ERROR(
         "The type of the return value is ",
-        at::demangle(input.type_info().name()),
+        c10::demangle(input.type_info().name()),
         ", but you asked for type ",
-        at::demangle(typeid(ReturnType).name()));
+        c10::demangle(typeid(ReturnType).name()));
   }
 
   /// Adds a new (boxed) `Module` to the `Sequential` container.

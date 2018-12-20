@@ -49,22 +49,21 @@ class SpatialBNOp : public Operator<Context> {
     const auto& X = Input(INPUT);
     const auto& scale = Input(SCALE);
     const auto& bias = Input(BIAS);
-    auto* Y = Output(OUTPUT);
 
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     CAFFE_ENFORCE_GE(ndim, 3);
     const int N = X.dim32(0);
     const int C =
         (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1));
-    const std::vector<int> X_dims(X.dims().cbegin(), X.dims().cend());
+    const std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
     const int HxW =
         std::accumulate(
             X_dims.cbegin() + 1, X_dims.cend(), 1, std::multiplies<int>()) /
         C;
-    CAFFE_ENFORCE_EQ(scale.size(), C);
-    CAFFE_ENFORCE_EQ(bias.size(), C);
+    CAFFE_ENFORCE_EQ(scale.numel(), C);
+    CAFFE_ENFORCE_EQ(bias.numel(), C);
 
-    Y->ResizeLike(X);
+    auto* Y = Output(OUTPUT, X.sizes(), at::dtype<T>());
     const T* X_data = X.template data<T>();
     const T* scale_data = scale.template data<T>();
     const T* bias_data = bias.template data<T>();
@@ -79,8 +78,8 @@ class SpatialBNOp : public Operator<Context> {
       }
       const auto& mean = Input(EST_MEAN);
       const auto& var = Input(EST_VAR);
-      CAFFE_ENFORCE_EQ(mean.size(), C);
-      CAFFE_ENFORCE_EQ(var.size(), C);
+      CAFFE_ENFORCE_EQ(mean.numel(), C);
+      CAFFE_ENFORCE_EQ(var.numel(), C);
       ComputeFusedParam<T>(
           C,
           scale_data,
@@ -90,35 +89,37 @@ class SpatialBNOp : public Operator<Context> {
           alpha_data,
           beta_data);
     } else {
-      auto* saved_mean = Output(SAVED_MEAN);
-      auto* saved_rstd = Output(SAVED_INV_STD);
-      if (num_batches_ == 1) {
-        saved_mean->Resize(C);
-        saved_rstd->Resize(C);
-      } else {
-        const auto& batch_mean_sum = Input(BATCH_MEAN_SUM);
-        const auto& batch_var_sum = Input(BATCH_VAR_SUM);
-        if (saved_mean != &batch_mean_sum) {
-          saved_mean->Resize(C);
-        }
-        if (saved_rstd != &batch_var_sum) {
-          saved_rstd->Resize(C);
-        }
-      }
+      auto* saved_mean = Output(SAVED_MEAN, {C}, at::dtype<T>());
+      auto* saved_rstd = Output(SAVED_INV_STD, {C}, at::dtype<T>());
       T* saved_mean_data = saved_mean->template mutable_data<T>();
       T* saved_rstd_data = saved_rstd->template mutable_data<T>();
-      auto* running_mean = Output(RUNNING_MEAN);
-      auto* running_var = Output(RUNNING_VAR);
-      if (running_mean->size() != C) {
-        running_mean->Resize(C);
-        math::Set<T, Context>(
-            C, T(0), running_mean->template mutable_data<T>(), &context_);
+
+      // Enforce Alias
+      CAFFE_ENFORCE(
+          IsInputOutputAlias(3, 1), "Input 3 and Output 1 should be alias.");
+      CAFFE_ENFORCE(
+          IsInputOutputAlias(4, 2), "Input 4 and Output 2 should be alias.");
+
+      Tensor* running_mean, *running_var;
+      const auto& mean = Input(EST_MEAN);
+      const auto& var = Input(EST_VAR);
+      if (mean.numel() != C) {
+       running_mean = Output(RUNNING_MEAN, {C}, at::dtype<T>());
+       C10_LOG_EVERY_MS(WARNING, 1000) << "[Depreacated] Running mean is not initialized in SpatialBatchNorm Op";
+       math::Set<T, Context>(C, T(0), running_mean->template mutable_data<T>(), &context_);
+      } else {
+       running_mean = Output(RUNNING_MEAN, {C}, at::dtype<T>());
       }
-      if (running_var->size() != C) {
-        running_var->Resize(C);
+      if (var.numel() != C) {
+        running_var = Output(RUNNING_VAR, {C}, at::dtype<T>());
         math::Set<T, Context>(
             C, T(0), running_var->template mutable_data<T>(), &context_);
+        C10_LOG_EVERY_MS(WARNING, 1000) << "[Deprecated] Running variance is not initialized in SpatialBatchNorm Op";
+      } else {
+        running_var = Output(RUNNING_VAR, {C}, at::dtype<T>());
       }
+
+
       T* running_mean_data = running_mean->template mutable_data<T>();
       T* running_var_data = running_var->template mutable_data<T>();
       if (N == 0) {
@@ -129,8 +130,8 @@ class SpatialBNOp : public Operator<Context> {
       if (num_batches_ > 1) {
         const auto& batch_mean_sum = Input(BATCH_MEAN_SUM);
         const auto& batch_var_sum = Input(BATCH_VAR_SUM);
-        CAFFE_ENFORCE_EQ(batch_mean_sum.size(), C);
-        CAFFE_ENFORCE_EQ(batch_var_sum.size(), C);
+        CAFFE_ENFORCE_EQ(batch_mean_sum.numel(), C);
+        CAFFE_ENFORCE_EQ(batch_var_sum.numel(), C);
         ComputeBatchMoments<T>(
             N,
             C,
@@ -302,36 +303,36 @@ class SpatialBNGradientOp : public Operator<Context> {
     const auto& scale = Input(SCALE);
     const auto& mean = Input(SAVED_MEAN);
     const auto& rstd = Input(SAVED_INV_STD);
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     CAFFE_ENFORCE_GE(ndim, 3);
     const int N = X.dim32(0);
     const int C =
         (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1));
-    const std::vector<int> X_dims(X.dims().cbegin(), X.dims().cend());
+    const std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
     const int HxW =
         std::accumulate(
             X_dims.cbegin() + 1, X_dims.cend(), 1, std::multiplies<int>()) /
         C;
-    CAFFE_ENFORCE_EQ(scale.size(), C);
-    CAFFE_ENFORCE_EQ(mean.size(), C);
-    CAFFE_ENFORCE_EQ(rstd.size(), C);
-    auto* dX = Output(INPUT_GRAD);
-    auto* dscale = Output(SCALE_GRAD);
-    auto* dbias = Output(BIAS_GRAD);
-    dX->ResizeLike(X);
+    CAFFE_ENFORCE_EQ(scale.numel(), C);
+    CAFFE_ENFORCE_EQ(mean.numel(), C);
+    CAFFE_ENFORCE_EQ(rstd.numel(), C);
+
+    auto* dX = Output(INPUT_GRAD, X.sizes(), at::dtype<T>());
+    at::IntList dscale_sizes, dbias_sizes;
     if (num_batches_ == 1) {
-      dscale->ResizeLike(scale);
-      dbias->ResizeLike(scale);
+      dscale_sizes = scale.sizes();
+      dbias_sizes = scale.sizes();
     } else {
       const auto& dscale_sum = Input(AGGREGATE_SCALE_GRAD);
       const auto& dbias_sum = Input(AGGREGATE_BIAS_GRAD);
-      if (dscale != &dscale_sum) {
-        dscale->ResizeLike(dscale_sum);
-      }
-      if (dbias != &dbias_sum) {
-        dbias->ResizeLike(dbias_sum);
-      }
+      // Note: previously there was alias check to decide whether to call
+      // ResizeLike or not, since we only call Resize when the size does not match
+      // the size of cached Tensor, this check is not necessary
+      dscale_sizes = dscale_sum.sizes();
+      dbias_sizes = dbias_sum.sizes();
     }
+    auto* dscale = Output(SCALE_GRAD, dscale_sizes, at::dtype<T>());
+    auto* dbias = Output(BIAS_GRAD, dbias_sizes, at::dtype<T>());
     const T* X_data = X.template data<T>();
     const T* dY_data = dY.template data<T>();
     const T* scale_data = scale.template data<T>();

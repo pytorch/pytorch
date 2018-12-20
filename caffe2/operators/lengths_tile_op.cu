@@ -28,8 +28,7 @@ bool LengthsTileOp<CUDAContext>::RunOnDevice() {
   CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
   CAFFE_ENFORCE_EQ(lengths.size(), data.dim(0));
 
-  lengths_host_.CopyFrom(lengths, &context_);
-  context_.FinishDeviceComputation();
+  lengths_host_.CopyFrom(lengths); // sync copy
   auto lengths_size = lengths_host_.size();
   auto* lengths_data = lengths_host_.data<int32_t>();
 
@@ -38,7 +37,7 @@ bool LengthsTileOp<CUDAContext>::RunOnDevice() {
   math::Sum<int32_t, CPUContext>(
       lengths_size, lengths_data, &total_length, &cpuContext);
 
-  auto shape = data.dims();
+  auto shape = data.dims().vec();
   shape[0] = total_length;
   output->Resize(shape);
 
@@ -50,7 +49,7 @@ bool LengthsTileOp<CUDAContext>::RunOnDevice() {
   rowMappingDevice_.Resize(total_length);
   auto* rowOffsets = rowMappingHost_.mutable_data<int32_t>();
   int32_t outputRow = 0;
-  for (TIndex i = 0; i < lengths_size; i++) {
+  for (int64_t i = 0; i < lengths_size; i++) {
     auto length = lengths_data[i];
     for (int32_t j = 0; j < length; j++) {
       rowOffsets[outputRow++] = i * numElementsPerRow;

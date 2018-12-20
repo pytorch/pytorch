@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/SpatialReplicationPadding.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/SpatialReplicationPadding.cu"
 #else
 
 void THNN_(SpatialReplicationPadding_updateOutput)(

@@ -418,7 +418,10 @@ class SaveOp final : public Operator<Context> {
         db_name_(this->template GetSingleArgument<string>("db", "")),
         db_type_(this->template GetSingleArgument<string>("db_type", "")),
         blob_names_(
-            this->template GetRepeatedArgument<string>("blob_name_overrides")) {
+            this->template GetRepeatedArgument<string>("blob_name_overrides")),
+        chunk_size_(this->template GetSingleArgument<int>(
+            "chunk_size",
+            kDefaultChunkSize)) {
     CAFFE_ENFORCE_GT(db_name_.size(), 0, "Must specify a db name.");
     CAFFE_ENFORCE_GT(db_type_.size(), 0, "Must specify a db type.");
     CAFFE_ENFORCE(
@@ -471,7 +474,7 @@ class SaveOp final : public Operator<Context> {
 
     const vector<const Blob*>& inputs = OperatorBase::Inputs();
     for (int i = 0; i < inputs.size(); ++i) {
-      SerializeBlob(*inputs[i], blob_names_[i], acceptor);
+      SerializeBlob(*inputs[i], blob_names_[i], acceptor, chunk_size_);
     }
     out_db->Close();
     return true;
@@ -484,6 +487,7 @@ class SaveOp final : public Operator<Context> {
   string db_name_;
   string db_type_;
   std::vector<std::string> blob_names_;
+  int chunk_size_;
 };
 
 template <typename... Ts>

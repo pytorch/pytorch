@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/LookupTable.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/LookupTable.cu"
 #else
 
 void THNN_(LookupTable_accGradParameters)(
@@ -40,8 +40,8 @@ void THNN_(LookupTable_accGradParameters)(
     dim3 block(WARP_SIZE, BLOCKDIMY);
 
     cunn_LookupTable_accGradParametersKernelByFeature<scalar_t, accreal>
-    <<<grid, 
-       block, 
+    <<<grid,
+       block,
        sizeof(accreal)*WARP_SIZE*BLOCKDIMY + sizeof(int)*WARP_SIZE*BLOCKDIMY,
        stream>>>
       (THCIndexTensor_(data)(state, input),

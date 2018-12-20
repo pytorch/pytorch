@@ -86,3 +86,36 @@ allocated by the group. If it finds that any of them still exist, they will be
 deallocated. We've tested this method and it proved to be robust to various
 failures. Still, if your system has high enough limits, and ``file_descriptor``
 is a supported strategy, we do not recommend switching to this one.
+
+Spawning subprocesses
+---------------------
+
+.. note::
+
+   Available for Python >= 3.4.
+
+   This depends on the ``spawn`` start method in Python's
+   ``multiprocessing`` package.
+
+Spawning a number of subprocesses to perform some function can be done
+by creating ``Process`` instances and calling ``join`` to wait for
+their completion. This approach works fine when dealing with a single
+subprocess but presents potential issues when dealing with multiple
+processes.
+
+Namely, joining processes sequentially implies they will terminate
+sequentially. If they don't, and the first process does not terminate,
+the process termination will go unnoticed. Also, there are no native
+facilities for error propagation.
+
+The ``spawn`` function below addresses these concerns and takes care
+of error propagation, out of order termination, and will actively
+terminate processes upon detecting an error in one of them.
+
+.. autofunction:: spawn
+
+.. class:: SpawnContext
+
+   Returned by :func:`~spawn` when called with ``join=False``.
+
+   .. automethod:: join

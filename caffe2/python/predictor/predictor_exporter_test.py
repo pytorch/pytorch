@@ -193,7 +193,7 @@ class PredictorExporterTest(unittest.TestCase):
 
         # check device options
         for op in list(init_net.Proto().op) + list(predict_init_net.Proto().op):
-            self.assertEqual(1, op.device_option.cuda_gpu_id)
+            self.assertEqual(1, op.device_option.device_id)
             self.assertEqual(caffe2_pb2.CPU, op.device_option.device_type)
 
     def test_db_fails_without_params(self):

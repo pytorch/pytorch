@@ -1,11 +1,16 @@
-#include "torch/csrc/jit/passes/erase_number_types.h"
-#include "torch/csrc/jit/constants.h"
+#include <torch/csrc/jit/passes/erase_number_types.h>
+#include <torch/csrc/jit/constants.h>
 
 namespace torch { namespace jit {
 
 static void EraseNumberTypesOnBlock(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end;
        ++it) {
+    for (auto inp : it->inputs()) {
+      if (inp->type()->isSubtypeOf(NumberType::get())) {
+        inp->setType(DynamicType::get());
+      }
+    }
     for (auto sub : it->blocks()) {
       EraseNumberTypesOnBlock(sub);
     }
@@ -13,14 +18,18 @@ static void EraseNumberTypesOnBlock(Block* block) {
       case prim::Constant: {
         // remove primitive constants, replacing with tensor equivalent
         // ONNX does not support non-tensor constants
-        if(it->output()->type()->isSubtypeOf(NumberType::get())) {
+        if (it->output()->type()->isSubtypeOf(NumberType::get()) ||
+            it->output()->type()->isSubtypeOf(BoolType::get())) {
           auto s = *constant_as<at::Scalar>(it->output());
           WithInsertPoint guard(*it);
-          Value* r = block->owningGraph()->insertConstant(scalar_to_tensor(s));
+          Value* r = block->owningGraph()->insertConstant(
+              scalar_to_tensor(s), c10::nullopt, it->scope());
           it->output()->replaceAllUsesWith(r);
         }
       } break;
-      case prim::TensorToNum:
+      case prim::Bool:
+      case prim::Float:
+      case prim::Int:
       case prim::ImplicitTensorToNum:
       case prim::NumToTensor: {
         it->output()->replaceAllUsesWith(it->inputs()[0]);
@@ -30,6 +39,8 @@ static void EraseNumberTypesOnBlock(Block* block) {
         for(auto o : it->outputs()) {
           if (o->type()->isSubtypeOf(NumberType::get())) {
             o->setType(CompleteTensorType::fromNumberType(o->type()));
+          } else if (o->type()->isSubtypeOf(BoolType::get())) {
+            o->setType(CompleteTensorType::fromBoolType());
           }
         }
       } break;

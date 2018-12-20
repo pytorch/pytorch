@@ -5,7 +5,7 @@
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/sequential.h>
 #include <torch/optim.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <test/cpp/api/optim_baseline.h>
@@ -44,7 +44,7 @@ bool test_optimizer_xor(Options options) {
     auto labels = torch::empty({kBatchSize});
     for (size_t i = 0; i < kBatchSize; i++) {
       inputs[i] = torch::randint(2, {2}, torch::kInt64);
-      labels[i] = inputs[i][0].toCLong() ^ inputs[i][1].toCLong();
+      labels[i] = inputs[i][0].item<int64_t>() ^ inputs[i][1].item<int64_t>();
     }
     inputs.set_requires_grad(true);
     optimizer.zero_grad();
@@ -54,7 +54,7 @@ bool test_optimizer_xor(Options options) {
 
     optimizer.step();
 
-    running_loss = running_loss * 0.99 + loss.toCFloat() * 0.01;
+    running_loss = running_loss * 0.99 + loss.item<float>() * 0.01;
     if (epoch > kMaximumNumberOfEpochs) {
       std::cout << "Loss is too high after epoch " << epoch << ": "
                 << running_loss << std::endl;
@@ -70,7 +70,7 @@ void assign_parameter(
     const Parameters& parameters,
     const char* name,
     torch::Tensor new_tensor) {
-  auto parameter = parameters.at(name);
+  auto parameter = parameters[name];
   parameter.set_requires_grad(false);
   parameter.flatten().copy_(new_tensor);
   parameter.set_requires_grad(true);
@@ -94,7 +94,7 @@ void check_exact_values(
   model->to(torch::kFloat64);
 
   // Use exact input values because matching random values is hard.
-  auto parameters = model->parameters();
+  auto parameters = model->named_parameters();
   assign_parameter(
       parameters,
       "0.weight",
@@ -105,7 +105,7 @@ void check_exact_values(
       parameters, "2.weight", torch::tensor({-0.0508, -0.3941, -0.2843}));
   assign_parameter(parameters, "2.bias", torch::tensor({-0.0711}));
 
-  auto optimizer = OptimizerClass(parameters, options);
+  auto optimizer = OptimizerClass(parameters.values(), options);
   torch::Tensor input =
       torch::tensor({0.1, 0.2, 0.3, 0.4, 0.5, 0.6}).reshape({3, 2});
 
@@ -121,8 +121,8 @@ void check_exact_values(
       ASSERT_TRUE(
           expected_parameters.at(i / kSampleEvery).size() == parameters.size());
       for (size_t p = 0; p < parameters.size(); ++p) {
-        ASSERT_TRUE(parameters.at(p)->defined());
-        auto computed = parameters.at(p)->flatten();
+        ASSERT_TRUE(parameters[p]->defined());
+        auto computed = parameters[p]->flatten();
         auto expected = expected_parameters.at(i / kSampleEvery).at(p);
         if (!computed.allclose(expected, /*rtol=*/1e-3, /*atol=*/5e-4)) {
           std::cout << "Iteration " << i << ": " << computed
@@ -191,53 +191,53 @@ TEST(OptimTest, XORConvergence_AdamWithAmsgrad) {
 }
 
 TEST(OptimTest, ProducesPyTorchValues_Adam) {
-  check_exact_values<Adam>(AdamOptions(1.0), expected_parameters::Adam);
+  check_exact_values<Adam>(AdamOptions(1.0), expected_parameters::Adam());
 }
 
 TEST(OptimTest, ProducesPyTorchValues_AdamWithWeightDecay) {
   check_exact_values<Adam>(
       AdamOptions(1.0).weight_decay(1e-2),
-      expected_parameters::Adam_with_weight_decay);
+      expected_parameters::Adam_with_weight_decay());
 }
 
 TEST(OptimTest, ProducesPyTorchValues_AdamWithWeightDecayAndAMSGrad) {
   check_exact_values<Adam>(
       AdamOptions(1.0).weight_decay(1e-6).amsgrad(true),
-      expected_parameters::Adam_with_weight_decay_and_amsgrad);
+      expected_parameters::Adam_with_weight_decay_and_amsgrad());
 }
 
 TEST(OptimTest, ProducesPyTorchValues_Adagrad) {
   check_exact_values<Adagrad>(
-      AdagradOptions(1.0), expected_parameters::Adagrad);
+      AdagradOptions(1.0), expected_parameters::Adagrad());
 }
 
 TEST(OptimTest, ProducesPyTorchValues_AdagradWithWeightDecay) {
   check_exact_values<Adagrad>(
       AdagradOptions(1.0).weight_decay(1e-2),
-      expected_parameters::Adagrad_with_weight_decay);
+      expected_parameters::Adagrad_with_weight_decay());
 }
 
 TEST(OptimTest, ProducesPyTorchValues_AdagradWithWeightDecayAndLRDecay) {
   check_exact_values<Adagrad>(
       AdagradOptions(1.0).weight_decay(1e-6).lr_decay(1e-3),
-      expected_parameters::Adagrad_with_weight_decay_and_lr_decay);
+      expected_parameters::Adagrad_with_weight_decay_and_lr_decay());
 }
 
 TEST(OptimTest, ProducesPyTorchValues_RMSprop) {
   check_exact_values<RMSprop>(
-      RMSpropOptions(0.1), expected_parameters::RMSprop);
+      RMSpropOptions(0.1), expected_parameters::RMSprop());
 }
 
 TEST(OptimTest, ProducesPyTorchValues_RMSpropWithWeightDecay) {
   check_exact_values<RMSprop>(
       RMSpropOptions(0.1).weight_decay(1e-2),
-      expected_parameters::RMSprop_with_weight_decay);
+      expected_parameters::RMSprop_with_weight_decay());
 }
 
 TEST(OptimTest, ProducesPyTorchValues_RMSpropWithWeightDecayAndCentered) {
   check_exact_values<RMSprop>(
       RMSpropOptions(0.1).weight_decay(1e-6).centered(true),
-      expected_parameters::RMSprop_with_weight_decay_and_centered);
+      expected_parameters::RMSprop_with_weight_decay_and_centered());
 }
 
 TEST(
@@ -245,29 +245,30 @@ TEST(
     ProducesPyTorchValues_RMSpropWithWeightDecayAndCenteredAndMomentum) {
   check_exact_values<RMSprop>(
       RMSpropOptions(0.1).weight_decay(1e-6).centered(true).momentum(0.9),
-      expected_parameters::RMSprop_with_weight_decay_and_centered_and_momentum);
+      expected_parameters::
+          RMSprop_with_weight_decay_and_centered_and_momentum());
 }
 
 TEST(OptimTest, ProducesPyTorchValues_SGD) {
-  check_exact_values<SGD>(SGDOptions(0.1), expected_parameters::SGD);
+  check_exact_values<SGD>(SGDOptions(0.1), expected_parameters::SGD());
 }
 
 TEST(OptimTest, ProducesPyTorchValues_SGDWithWeightDecay) {
   check_exact_values<SGD>(
       SGDOptions(0.1).weight_decay(1e-2),
-      expected_parameters::SGD_with_weight_decay);
+      expected_parameters::SGD_with_weight_decay());
 }
 
 TEST(OptimTest, ProducesPyTorchValues_SGDWithWeightDecayAndMomentum) {
   check_exact_values<SGD>(
       SGDOptions(0.1).weight_decay(1e-2).momentum(0.9),
-      expected_parameters::SGD_with_weight_decay_and_momentum);
+      expected_parameters::SGD_with_weight_decay_and_momentum());
 }
 
 TEST(OptimTest, ProducesPyTorchValues_SGDWithWeightDecayAndNesterovMomentum) {
   check_exact_values<SGD>(
       SGDOptions(0.1).weight_decay(1e-6).momentum(0.9).nesterov(true),
-      expected_parameters::SGD_with_weight_decay_and_nesterov_momentum);
+      expected_parameters::SGD_with_weight_decay_and_nesterov_momentum());
 }
 
 TEST(OptimTest, ZeroGrad) {
@@ -277,7 +278,7 @@ TEST(OptimTest, ZeroGrad) {
   SGD optimizer(model->parameters(), 0.1);
 
   for (const auto& parameter : model->parameters()) {
-    ASSERT_FALSE(parameter->grad().defined());
+    ASSERT_FALSE(parameter.grad().defined());
   }
 
   auto output = model->forward(torch::ones({5, 2}));
@@ -285,15 +286,15 @@ TEST(OptimTest, ZeroGrad) {
   loss.backward();
 
   for (const auto& parameter : model->parameters()) {
-    ASSERT_TRUE(parameter->grad().defined());
-    ASSERT_GT(parameter->grad().sum().toCFloat(), 0);
+    ASSERT_TRUE(parameter.grad().defined());
+    ASSERT_GT(parameter.grad().sum().item<float>(), 0);
   }
 
   optimizer.zero_grad();
 
   for (const auto& parameter : model->parameters()) {
-    ASSERT_TRUE(parameter->grad().defined());
-    ASSERT_EQ(parameter->grad().sum().toCFloat(), 0);
+    ASSERT_TRUE(parameter.grad().defined());
+    ASSERT_EQ(parameter.grad().sum().item<float>(), 0);
   }
 }
 

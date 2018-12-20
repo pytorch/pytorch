@@ -1,9 +1,9 @@
 #pragma once
 
-#include "caffe2/core/dispatch/Dispatcher.h"
+#include <c10/core/dispatch/Dispatcher.h>
 #include "caffe2/core/operator.h"
-#include <ATen/core/ArrayRef.h>
-#include "caffe2/utils/Metaprogramming.h"
+#include <c10/util/ArrayRef.h>
+#include <c10/util/Metaprogramming.h>
 
 namespace caffe2 {
 
@@ -21,8 +21,7 @@ inline std::shared_ptr<void> init_state<void>() {
 template <class T>
 using is_output_arg = std::is_same<Tensor*, T>;
 template <class ParameterDef>
-using extract_type_t =
-    c10::guts::result_of_t<decltype (&ParameterDef::parse)(ArgumentHelper)>;
+using extract_type_t = typename ParameterDef::type;
 } // namespace details
 
 /**
@@ -278,13 +277,14 @@ class C10OperatorWrapper final : public Operator<Context> {
 
 template <class ParameterDef>
 struct ParameterHelper final {
+  using type = typename ParameterDef::type;
   static typename ParameterDef::type parse(const ArgumentHelper& helper) {
     return helper.GetSingleArgument<typename ParameterDef::type>(
         ParameterDef::name(), ParameterDef::default_value());
   }
 };
 
-CAFFE_DECLARE_REGISTRY(
+C10_DECLARE_REGISTRY(
     C10OperatorRegistry,
     OperatorBase,
     const OperatorDef&,
@@ -293,14 +293,14 @@ CAFFE_DECLARE_REGISTRY(
 // TODO Currently we only register the CPU variant. This is going to be fixed
 //      once the tensor detemplatization lands.
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(OpSchemaDef, State, Name) \
-  CAFFE_REGISTER_CLASS(                                                     \
+  C10_REGISTER_CLASS(                                                       \
       C10OperatorRegistry,                                                  \
       Name,                                                                 \
       C10OperatorWrapper<OpSchemaDef, CPUContext, State, false, std::tuple<>>)
 
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_PARAMETERS( \
     OpSchemaDef, State, Name, ...)                                 \
-  CAFFE_REGISTER_CLASS(                                            \
+  C10_REGISTER_CLASS(                                              \
       C10OperatorRegistry,                                         \
       Name,                                                        \
       C10OperatorWrapper<                                          \
@@ -312,14 +312,14 @@ CAFFE_DECLARE_REGISTRY(
 
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT( \
     OpSchemaDef, State, Name)                                       \
-  CAFFE_REGISTER_CLASS(                                             \
+  C10_REGISTER_CLASS(                                               \
       C10OperatorRegistry,                                          \
       Name,                                                         \
       C10OperatorWrapper<OpSchemaDef, CPUContext, State, true, std::tuple<>>)
 
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS( \
     OpSchemaDef, State, Name, ...)                                                 \
-  CAFFE_REGISTER_CLASS(                                                            \
+  C10_REGISTER_CLASS(                                                              \
       C10OperatorRegistry,                                                         \
       Name,                                                                        \
       C10OperatorWrapper<                                                          \

@@ -1,8 +1,10 @@
 #pragma once
 
 #include <torch/arg.h>
+#include <torch/serialize/archive.h>
+#include <torch/types.h>
+
 #include <torch/csrc/utils/variadic.h>
-#include <torch/tensor.h>
 
 #include <memory>
 #include <type_traits>
@@ -10,17 +12,8 @@
 
 namespace torch {
 namespace detail {
-/// This class exists  only to do SFINAE on abstract types `T` that are really
-/// `ModuleHolder<ModuleType>`, because there's no good way to say that `T` is a
-/// `ModuleHolder` over some unknown type `ModuleType`. With this, you can do
-/// `enable_if_t<is_base_of_v<ModuleHolderIndicator, T>>`.
-struct ModuleHolderIndicator {};
-
-template <typename T>
-using is_module_holder = std::is_base_of<ModuleHolderIndicator, decay_t<T>>;
-
-template <typename T>
-using disable_if_module_holder_t = disable_if_t<is_module_holder<T>::value>;
+// Dump all the template metaprogramming in this file.
+#include <torch/csrc/api/include/torch/nn/pimpl-inl.h>
 } // namespace detail
 
 namespace nn {
@@ -40,7 +33,9 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
   using ContainedType = Contained;
 
   /// Default constructs the contained module if if has a default constructor,
-  /// else produces a static error. NOTE: This uses the behavior of template
+  /// else produces a static error.
+  ///
+  /// NOTE: This uses the behavior of template
   /// classes in C++ that constructors (or any methods) are only compiled when
   /// actually used.
   ModuleHolder() : impl_(default_construct()) {
@@ -58,9 +53,16 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
 
   /// Constructs the `ModuleHolder` with a contained module, forwarding all
   /// arguments to its constructor.
-  template <typename... Ts>
-  explicit ModuleHolder(Ts&&... ts)
-      : impl_(new Contained(std::forward<Ts>(ts)...)) {}
+  template <
+      typename Head,
+      typename... Tail,
+      typename = typename std::enable_if<
+          !(torch::detail::is_module_holder_of<Head, ContainedType>::value &&
+            (sizeof...(Tail) == 0))>::type>
+  explicit ModuleHolder(Head&& head, Tail&&... tail)
+      : impl_(new Contained(
+            std::forward<Head>(head),
+            std::forward<Tail>(tail)...)) {}
 
   /// Constructs the `ModuleHolder` from a pointer to the contained type.
   /// Example: `Linear(std::make_shared<LinearImpl>(...))`.
@@ -153,20 +155,40 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
     return nullptr;
   }
 };
+
+/// Pretty prints the given `Module` into the `ostream`.
+template <typename ModuleType>
+std::ostream& operator<<(
+    std::ostream& stream,
+    const nn::ModuleHolder<ModuleType>& module) {
+  return stream << *module;
+}
+
+/// Serializes a `ModuleHolder` into an `OutputArchive`.
+template <typename ModuleType>
+serialize::OutputArchive& operator<<(
+    serialize::OutputArchive& archive,
+    const nn::ModuleHolder<ModuleType>& module) {
+  return archive << module.ptr();
+}
+
+/// Deserializes a `ModuleHolder` from an `InputArchive`.
+template <typename ModuleType>
+serialize::InputArchive& operator>>(
+    serialize::InputArchive& archive,
+    nn::ModuleHolder<ModuleType>& module) {
+  return archive >> module.ptr();
+}
+
 } // namespace nn
 } // namespace torch
 
 /// Defines a class `Name` which inherits from `nn::ModuleHolder` to provide a
 /// wrapper over a `std::shared_ptr<Impl>`.
-#define TORCH_MODULE_IMPL(Name, Impl)                                         \
-  class Name : public torch::nn::ModuleHolder<Impl> { /* NOLINT */            \
-   public:                                                                    \
-    using torch::nn::ModuleHolder<Impl>::ModuleHolder;                        \
-    Name(const Name&) = default; /* NOLINT */                                 \
-    Name(Name&&) = default; /* NOLINT */                                      \
-    Name(Name& other) : Name(static_cast<const Name&>(other)) {} /* NOLINT */ \
-    Name& operator=(const Name&) = default; /* NOLINT */                      \
-    Name& operator=(Name&&) = default; /* NOLINT */                           \
+#define TORCH_MODULE_IMPL(Name, Impl)                              \
+  class Name : public torch::nn::ModuleHolder<Impl> { /* NOLINT */ \
+   public:                                                         \
+    using torch::nn::ModuleHolder<Impl>::ModuleHolder;             \
   }
 
 /// Like `TORCH_MODULE_IMPL`, but defaults the `Impl` name to `<Name>Impl`.

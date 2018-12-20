@@ -31,7 +31,7 @@ class LearningRateOp final : public Operator<Context> {
     T learning_rate = cur_base_lr_ * (*functor_)(iter);
     // Write to output.
     auto* output = Output(0);
-    output->Resize(vector<TIndex>());
+    output->Resize(vector<int64_t>());
     context_.template CopyFromCPU<T>(
         1, &learning_rate, Output(0)->template mutable_data<T>());
     return true;
