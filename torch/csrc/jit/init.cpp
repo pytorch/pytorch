@@ -356,6 +356,9 @@ void initJITBindings(PyObject *module) {
     // TODO: this is a fake stub
   });
 
+  m.def("_jit_assert_is_instance", [](py::object obj, TypePtr type) {
+    toIValue(obj, type);
+  });
 
   initPythonIRBindings(module);
   tracer::initPythonTracerBindings(module);

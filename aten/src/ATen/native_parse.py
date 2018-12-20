@@ -48,7 +48,6 @@ def sanitize_types(types):
 
 def parse_arguments(args, func_decl, func_name, func_return):
     arguments = []
-    python_default_inits = func_decl.get('python_default_init', {})
     is_out_fn = func_name.endswith('_out')
     if is_out_fn and func_decl.get('variants', []) not in [[], 'function', ['function']]:
         raise RuntimeError("Native functions suffixed with _out MUST be declared with only the function variant; "
@@ -71,15 +70,10 @@ def parse_arguments(args, func_decl, func_name, func_return):
 
         t, name = type_and_name
         default = None
-        python_default_init = None
 
         if '=' in name:
             ns = name.split('=', 1)
             name, default = ns[0], parse_default(ns[1])
-
-        if name in python_default_inits:
-            assert default is None
-            python_default_init = python_default_inits[name]
 
         typ = sanitize_types(t)
         assert len(typ) == 1
@@ -90,8 +84,6 @@ def parse_arguments(args, func_decl, func_name, func_return):
             argument_dict['size'] = int(match.group(1))
         if default is not None:
             argument_dict['default'] = default
-        if python_default_init is not None:
-            argument_dict['python_default_init'] = python_default_init
         # TODO: convention is that the ith-argument correspond to the i-th return, but it would
         # be better if we just named everything and matched by name.
         if is_out_fn and arg_idx < len(func_return):

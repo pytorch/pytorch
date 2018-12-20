@@ -352,38 +352,6 @@ struct SchemaParser {
 } // namespace script
 
 namespace {
-
-std::string canonicalSchemaString(const FunctionSchema& schema) {
-  std::ostringstream out;
-
-  out << schema.name();
-  out << "(";
-
-  bool seen_kwarg_only = false;
-  for(size_t i = 0; i < schema.arguments().size(); ++i) {
-    if (i > 0) out << ", ";
-    if (schema.arguments()[i].kwarg_only() && !seen_kwarg_only) {
-      out << "*, ";
-      seen_kwarg_only = true;
-    }
-    const auto & arg = schema.arguments()[i];
-    out << arg.type()->str() << " " << arg.name();
-  }
-
-  out << ") -> ";
-  if (schema.returns().size() == 1) {
-    out << schema.returns().at(0).type()->str();
-  } else if (schema.returns().size() > 1) {
-    out << "(";
-    for (size_t i = 0; i < schema.returns().size(); ++i) {
-      if (i > 0) out << ", ";
-      out << schema.returns()[i].type()->str();
-    }
-    out << ")";
-  }
-  return out.str();
-}
-
 using OperatorMap = std::unordered_map<Symbol, std::vector<std::shared_ptr<Operator>>>;
 struct OperatorRegistry  {
 private:
@@ -482,6 +450,37 @@ Operator& sig(const char *signature) {
 
 FunctionSchema parseSchema(const std::string& schema) {
   return script::SchemaParser(schema).parseDeclarations().at(0);
+}
+
+std::string canonicalSchemaString(const FunctionSchema& schema) {
+  std::ostringstream out;
+
+  out << schema.name();
+  out << "(";
+
+  bool seen_kwarg_only = false;
+  for(size_t i = 0; i < schema.arguments().size(); ++i) {
+    if (i > 0) out << ", ";
+    if (schema.arguments()[i].kwarg_only() && !seen_kwarg_only) {
+      out << "*, ";
+      seen_kwarg_only = true;
+    }
+    const auto & arg = schema.arguments()[i];
+    out << arg.type()->str() << " " << arg.name();
+  }
+
+  out << ") -> ";
+  if (schema.returns().size() == 1) {
+    out << schema.returns().at(0).type()->str();
+  } else if (schema.returns().size() > 1) {
+    out << "(";
+    for (size_t i = 0; i < schema.returns().size(); ++i) {
+      if (i > 0) out << ", ";
+      out << schema.returns()[i].type()->str();
+    }
+    out << ")";
+  }
+  return out.str();
 }
 
 bool Operator::matches(const Node* node) const {

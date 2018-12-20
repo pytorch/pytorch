@@ -434,10 +434,6 @@ class ShapePropagator {
         }
         return;
       }
-      case prim::PythonOp:
-      case prim::Print:
-      case prim::RaiseException:
-      case aten::warn:
       case prim::Undefined: {
         setUnshapedType(node);
         return;
@@ -445,6 +441,11 @@ class ShapePropagator {
       default:
         break; // fall-through
     }
+
+    if (node->hasSideEffects()) {
+      return;
+    }
+
     if (node->matches("aten::cat(Tensor[] tensors, int dim) -> Tensor")
 	|| node->kind() == prim::FusedConcat) {
       return PropagateCatShape(node);
@@ -901,7 +902,7 @@ class ShapePropagator {
             "aten::argmin(Tensor self, int dim, bool keepdim) -> Tensor",
             "aten::max_values(Tensor self, int dim, bool keepdim) -> Tensor",
             "aten::min_values(Tensor self, int dim, bool keepdim) -> Tensor",
-            "aten::norm(Tensor self, Scalar p, int dim, bool keepdim) -> Tensor",
+            "aten::norm(Tensor self, Scalar? p, int dim, bool keepdim) -> Tensor",
             "aten::var(Tensor self, int dim, bool unbiased, bool keepdim) -> Tensor",
             "aten::logsumexp(Tensor self, int dim, bool keepdim) -> Tensor",
             "aten::all(Tensor self, int dim, bool keepdim) -> Tensor",
@@ -1261,9 +1262,7 @@ class ShapePropagator {
           node->matches(
               "aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor") ||
           node->matches(
-              "aten::as_strided(Tensor self, int[] size, int[] stride) -> Tensor") ||
-          node->matches(
-              "aten::as_strided(Tensor self, int[] size, int[] stride, int storage_offset) -> Tensor")) {
+              "aten::as_strided(Tensor self, int[] size, int[] stride, int? storage_offset) -> Tensor")) {
         return reshape_prop(node, attr::size, tensor_types);
       } else if (node->matches(
                      "aten::reshape(Tensor self, int[] shape) -> Tensor")) {

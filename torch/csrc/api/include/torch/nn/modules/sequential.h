@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <ostream>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -115,6 +116,11 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   /// `reset()` is empty for `Sequential`, since it does not have parameters of
   /// its own.
   void reset() override {}
+
+  /// Pretty prints the `Sequential` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override {
+    stream << "torch::nn::Sequential";
+  }
 
   /// Feeds `inputs` to the first module and then chains outputs to inputs,
   /// returning the last output.

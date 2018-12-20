@@ -69,5 +69,4 @@
     (assert
       (eq (const 1) (const 1))
       (option (string_literal hello)))
-    (return
-      (list (variable (ident x))))))
+    (return (variable (ident x)))))

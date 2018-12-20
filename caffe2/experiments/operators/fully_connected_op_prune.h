@@ -220,7 +220,7 @@ namespace caffe2 {
           auto* Ag_dW_ptr = Output(4);
           auto& Ag_dW = *Ag_dW_ptr;
           // it is also the Input(5)
-          auto* mask_seq_auto = Output(5);
+
           // how about get threshold
           auto& thres = Input(6);
           //TODO(wyiming): check comp_lb is a float
@@ -251,9 +251,8 @@ namespace caffe2 {
             DCHECK_EQ(X.dim(), 1);
             DCHECK_EQ(N, dY.numel());
           }
-          auto* dW = Output(0);
 
-          dW->ResizeLike(W);
+          auto* dW = Output(0, W.sizes(), at::dtype<T>());
           auto* db = Output(1, {N}, at::dtype<T>());
 
           // Compute dW
@@ -292,7 +291,7 @@ namespace caffe2 {
                   Ag_dW.template mutable_data<T>(),
                   sum_buffer_.template mutable_data<T>(),
                   &context_);
-              mask_seq_auto->ResizeLike(W);
+              auto* mask_seq_auto = Output(5, W.sizes(), at::dtype<T>());
               T* mask_seq = mask_seq_auto->template mutable_data<T>();
               math::Set<T, Context>(N*K, static_cast<T>(0),
                   mask_seq_auto->template mutable_data<T>(), &context_);
@@ -338,8 +337,7 @@ namespace caffe2 {
               &context_);
           // Compute dX if necessary.
           if (OutputSize() == 7) {
-            auto* dX = Output(6);
-            dX->ResizeLike(X);
+            auto* dX = Output(6, X.sizes(), at::dtype<T>());
             math::Gemm<T, Context, Engine>(
                 CblasNoTrans, CblasNoTrans, M, K, N, 1,
                 dY.template data<T>(), W.template data<T>(),

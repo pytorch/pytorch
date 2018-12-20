@@ -22,10 +22,12 @@ from torch._six import inf, nan, string_classes
 from itertools import product, combinations
 from functools import reduce
 from torch import multiprocessing as mp
+from common_methods_invocations import tri_tests_args, run_additional_tri_tests, \
+    _compare_trilu_indices
 from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     TEST_LIBROSA, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfRocm, do_test_dtypes, do_test_empty_full, \
-    IS_SANDCASTLE, load_tests
+    IS_SANDCASTLE, load_tests, brute_pdist
 from multiprocessing.reduction import ForkingPickler
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -1124,27 +1126,19 @@ class _TestTorchMixin(object):
             x = torch.randn(shape, device=device)
             self.assertEqual(torch.zeros(3, device=device), torch.pdist(x))
 
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
-    def test_pdist_scipy(self):
-        from scipy.spatial.distance import pdist
+    def test_pdist_norm(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
-            for shape in [(4, 5), (3, 2), (2, 1)]:
+            for shape in [(4, 5), (3, 2), (2, 1), (2, 3, 4)]:
                 for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
                     for trans in [False, True]:
                         x = torch.randn(shape, device=device)
                         if trans:
-                            x.transpose_(0, 1)
+                            x.transpose_(-2, -1)
                         actual = torch.pdist(x, p=p)
-                        # pdist doesn't handle 0 or inf norm properly
-                        if p == 0:
-                            expected = pdist(x.cpu(), 'hamming') * x.shape[1]
-                        elif p == float('inf'):
-                            expected = pdist(x.cpu(), lambda a, b: np.abs(a - b).max())
-                        else:
-                            expected = pdist(x.cpu(), 'minkowski', p=p)
+                        expected = brute_pdist(x, p=p)
                         self.assertEqual(expected.shape, actual.shape)
-                        self.assertTrue(np.allclose(expected, actual.cpu().numpy()))
+                        self.assertTrue(torch.allclose(expected, actual))
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_logsumexp(self):
@@ -1943,6 +1937,10 @@ class _TestTorchMixin(object):
                         expected = numpy_op(tensor.numpy(), dim)
                     actual = pytorch_op(tensor, dim)
                     self._assert_matches_numpy(actual, expected)
+                    if torch.cuda.is_available():
+                        self._assert_matches_numpy(pytorch_op(tensor.cuda(),
+                                                              dim).cpu(),
+                                                   expected)
         do_one(self._make_tensors((5, 400000), use_floating=use_floating,
                use_integral=use_integral), 1)
         do_one(self._make_tensors((3, 5, 7), use_floating=use_floating,
@@ -3764,91 +3762,19 @@ class _TestTorchMixin(object):
         torch.tril(x, out=res2)
         self.assertEqual(res1, res2, 0)
 
-    def _compare_trilu_indices(self, row, col, offset=0, dtype=torch.long):
-        if row == 0 or col == 0:
-            # have to handle this separately as tril and triu does not take
-            # empty matrix as input
-            self.assertEqual(
-                torch.empty(0, 2, dtype=dtype).transpose(0, 1),
-                torch.tril_indices(row, col, offset, dtype=dtype))
+    def test_trilu_indices(self):
+        for test_args in tri_tests_args:
+            _compare_trilu_indices(self, *test_args)
 
-            self.assertEqual(
-                torch.empty(0, 2, dtype=dtype).transpose(0, 1),
-                torch.triu_indices(row, col, offset, dtype=dtype))
+        run_additional_tri_tests(self, 'cpu')
 
-        else:
-            self.assertEqual(
-                torch.ones(row, col, dtype=dtype)
-                     .tril(offset).nonzero().transpose(0, 1),
-                torch.tril_indices(row, col, offset, dtype=dtype))
-
-            self.assertEqual(
-                torch.ones(row, col, dtype=dtype)
-                     .triu(offset).nonzero().transpose(0, 1),
-                torch.triu_indices(row, col, offset, dtype=dtype))
-
-    def test_tril_and_triu_indices(self):
-        self._compare_trilu_indices(1, 1)
-        self._compare_trilu_indices(3, 3)
-        self._compare_trilu_indices(3, 3, offset=1)
-        self._compare_trilu_indices(3, 3, offset=2)
-        self._compare_trilu_indices(3, 3, offset=200)
-        self._compare_trilu_indices(3, 3, offset=-1)
-        self._compare_trilu_indices(3, 3, offset=-2)
-        self._compare_trilu_indices(3, 3, offset=-200)
-        self._compare_trilu_indices(0, 3, offset=0)
-        self._compare_trilu_indices(0, 3, offset=1)
-        self._compare_trilu_indices(0, 3, offset=-1)
-        self._compare_trilu_indices(3, 0, offset=0)
-        self._compare_trilu_indices(3, 0, offset=1)
-        self._compare_trilu_indices(3, 0, offset=-1)
-        self._compare_trilu_indices(0, 0, offset=0)
-        self._compare_trilu_indices(0, 0, offset=1)
-        self._compare_trilu_indices(0, 0, offset=-1)
-        self._compare_trilu_indices(3, 6, offset=0)
-        self._compare_trilu_indices(3, 6, offset=1)
-        self._compare_trilu_indices(3, 6, offset=3)
-        self._compare_trilu_indices(3, 6, offset=9)
-        self._compare_trilu_indices(3, 6, offset=-1)
-        self._compare_trilu_indices(3, 6, offset=-3)
-        self._compare_trilu_indices(3, 6, offset=-9)
-        self._compare_trilu_indices(6, 3, offset=0)
-        self._compare_trilu_indices(6, 3, offset=1)
-        self._compare_trilu_indices(6, 3, offset=3)
-        self._compare_trilu_indices(6, 3, offset=9)
-        self._compare_trilu_indices(6, 3, offset=-1)
-        self._compare_trilu_indices(6, 3, offset=-3)
-        self._compare_trilu_indices(6, 3, offset=-9)
-        self._compare_trilu_indices(258, 253, offset=1, dtype=torch.float32)
-        self._compare_trilu_indices(257, 258, offset=1, dtype=torch.float64)
-        self._compare_trilu_indices(258, 258, offset=1, dtype=torch.short)
-        self._compare_trilu_indices(3, 513, offset=1, dtype=torch.long)
-        self._compare_trilu_indices(513, 3, offset=1, dtype=torch.int)
-        self._compare_trilu_indices(513, 0, offset=1, dtype=torch.double)
-
+        # test default options
         x = torch.ones(
             3, 3, dtype=torch.long, device='cpu', layout=torch.strided)
-        l = x.tril(0).nonzero().transpose(0, 1)
-        u = x.triu(0).nonzero().transpose(0, 1)
-        self.assertEqual(l, torch.tril_indices(3, 3))
-        self.assertEqual(l, torch.tril_indices(3, 3, device='cpu'))
         self.assertEqual(
-            l, torch.tril_indices(3, 3, device='cpu', layout=torch.strided))
-
-        self.assertEqual(u, torch.triu_indices(3, 3))
-        self.assertEqual(u, torch.triu_indices(3, 3, device='cpu'))
+            x.tril(0).nonzero().transpose(0, 1), torch.tril_indices(3, 3))
         self.assertEqual(
-            u, torch.triu_indices(3, 3, device='cpu', layout=torch.strided))
-
-        self.assertRaises(
-            RuntimeError,
-            lambda: torch.triu_indices(
-                1, 1, device='cpu', layout=torch.sparse_coo))
-
-        self.assertRaises(
-            RuntimeError,
-            lambda: torch.tril_indices(
-                1, 1, device='cpu', layout=torch.sparse_coo))
+            x.triu(0).nonzero().transpose(0, 1), torch.triu_indices(3, 3))
 
     def test_triu(self):
         x = torch.rand(SIZE, SIZE)
@@ -4031,22 +3957,24 @@ class _TestTorchMixin(object):
                 self.assertEqual(x.select(dim, i), res2[i])
 
     def test_linspace(self):
-        _from = random.random()
-        to = _from + random.random()
-        res1 = torch.linspace(_from, to, 137)
-        res2 = torch.Tensor()
-        torch.linspace(_from, to, 137, out=res2)
-        self.assertEqual(res1, res2, 0)
-        self.assertRaises(RuntimeError, lambda: torch.linspace(0, 1, -1))
-        self.assertEqual(torch.linspace(0, 1, 1), torch.zeros(1), 0)
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            _from = random.random()
+            to = _from + random.random()
+            res1 = torch.linspace(_from, to, 137)
+            res2 = torch.Tensor()
+            torch.linspace(_from, to, 137, out=res2)
+            self.assertEqual(res1, res2, 0)
+            self.assertRaises(RuntimeError, lambda: torch.linspace(0, 1, -1))
+            self.assertEqual(torch.linspace(0, 1, 1), torch.zeros(1), 0)
 
-        # Check linspace for generating with start > end.
-        self.assertEqual(torch.linspace(2, 0, 3), torch.Tensor((2, 1, 0)), 0)
+            # Check linspace for generating with start > end.
+            self.assertEqual(torch.linspace(2, 0, 3), torch.Tensor((2, 1, 0)), 0)
 
-        # Check linspace for non-contiguous tensors.
-        x = torch.zeros(2, 3)
-        y = torch.linspace(0, 3, 4, out=x.narrow(1, 1, 2))
-        self.assertEqual(x, torch.Tensor(((0, 0, 1), (0, 2, 3))), 0)
+            # Check linspace for non-contiguous tensors.
+            x = torch.zeros(2, 3)
+            y = torch.linspace(0, 3, 4, out=x.narrow(1, 1, 2))
+            self.assertEqual(x, torch.Tensor(((0, 0, 1), (0, 2, 3))), 0)
 
     def test_logspace(self):
         _from = random.random()
@@ -5498,7 +5426,7 @@ class _TestTorchMixin(object):
         self._test_cholesky_batched(self, lambda t: t)
 
     @staticmethod
-    def _test_potrs(self, cast):
+    def _test_cholesky_solve(self, cast):
         a = torch.Tensor(((6.80, -2.11, 5.66, 5.97, 8.23),
                           (-6.05, -3.30, 5.36, -4.44, 1.08),
                           (-0.45, 2.58, -2.70, 0.27, 9.04),
@@ -5514,49 +5442,54 @@ class _TestTorchMixin(object):
 
         # upper Triangular Test
         U = torch.cholesky(a, True)
-        x = torch.potrs(b, U, True)
+        x = torch.cholesky_solve(b, U, True)
         self.assertLessEqual(b.dist(torch.mm(a, x)), 1e-12)
 
         # lower Triangular Test
         L = torch.cholesky(a, False)
-        x = torch.potrs(b, L, False)
+        x = torch.cholesky_solve(b, L, False)
         self.assertLessEqual(b.dist(torch.mm(a, x)), 1e-12)
 
+        # default arg Test
+        L_def = torch.cholesky(a)
+        x_def = torch.cholesky_solve(b, L_def)
+        self.assertLessEqual(b.dist(torch.mm(a, x_def)), 1e-12)
+
     @skipIfNoLapack
-    def test_potrs(self):
-        self._test_potrs(self, lambda t: t)
+    def test_cholesky_solve(self):
+        self._test_cholesky_solve(self, lambda t: t)
 
     @staticmethod
-    def _test_potrs_batched(self, cast):
+    def _test_cholesky_solve_batched(self, cast):
         from common_utils import random_symmetric_pd_matrix
 
-        def potrs_test_helper(A_dims, b_dims, cast, upper):
+        def cholesky_solve_test_helper(A_dims, b_dims, cast, upper):
             A = cast(random_symmetric_pd_matrix(*A_dims))
             L = torch.cholesky(A, upper)
             b = cast(torch.randn(*b_dims))
             return A, L, b
 
         for upper in [True, False]:
-            # test against potrs: one batch with both choices of upper
-            A, L, b = potrs_test_helper((5, 1), (1, 5, 10), cast, upper)
-            x_exp = torch.potrs(b.squeeze(0), L.squeeze(0), upper=upper)
-            x = torch.potrs(b, L, upper=upper)
+            # test against cholesky_solve: one batch with both choices of upper
+            A, L, b = cholesky_solve_test_helper((5, 1), (1, 5, 10), cast, upper)
+            x_exp = torch.cholesky_solve(b.squeeze(0), L.squeeze(0), upper=upper)
+            x = torch.cholesky_solve(b, L, upper=upper)
             self.assertEqual(x, x_exp.unsqueeze(0))
 
-            # test against potrs in a loop: four batches with both choices of upper
-            A, L, b = potrs_test_helper((5, 4), (4, 5, 10), cast, upper)
+            # test against cholesky_solve in a loop: four batches with both choices of upper
+            A, L, b = cholesky_solve_test_helper((5, 4), (4, 5, 10), cast, upper)
             x_exp_list = list()
             for i in range(4):
-                x_exp = torch.potrs(b[i], L[i], upper=upper)
+                x_exp = torch.cholesky_solve(b[i], L[i], upper=upper)
                 x_exp_list.append(x_exp)
             x_exp = torch.stack(x_exp_list)
 
-            x = torch.potrs(b, L, upper=upper)
+            x = torch.cholesky_solve(b, L, upper=upper)
             self.assertEqual(x, x_exp)
 
             # basic correctness test
-            A, L, b = potrs_test_helper((5, 3), (3, 5, 10), cast, upper)
-            x = torch.potrs(b, L, upper)
+            A, L, b = cholesky_solve_test_helper((5, 3), (3, 5, 10), cast, upper)
+            x = torch.cholesky_solve(b, L, upper)
             self.assertLessEqual(b.dist(torch.matmul(A, x)), 1e-12)
 
             # Test non-contiguous inputs.
@@ -5571,15 +5504,15 @@ class _TestTorchMixin(object):
             b = cast(b).permute(2, 1, 0)
             assert not A.is_contiguous() and not b.is_contiguous(), "contiguous inputs"
             L = torch.cholesky(A, upper)
-            x = torch.potrs(b, L, upper=upper)
+            x = torch.cholesky_solve(b, L, upper=upper)
             self.assertEqual(x, cast(x_exp))
 
     @skipIfNoLapack
-    def test_potrs_batched(self):
-        self._test_potrs_batched(self, lambda t: t)
+    def test_cholesky_solve_batched(self):
+        self._test_cholesky_solve_batched(self, lambda t: t)
 
     @staticmethod
-    def _test_potrs_batched_dims(self, cast):
+    def _test_cholesky_solve_batched_dims(self, cast):
         if not TEST_NUMPY:
             return
 
@@ -5592,7 +5525,7 @@ class _TestTorchMixin(object):
             x_exp = torch.Tensor(solve(A.numpy(), b.numpy()))
             A, b = cast(A), cast(b)
             L = torch.cholesky(A, upper)
-            x = torch.potrs(b, L, upper=upper)
+            x = torch.cholesky_solve(b, L, upper=upper)
             self.assertEqual(x, cast(x_exp))
 
         for upper in [True, False]:
@@ -5603,8 +5536,8 @@ class _TestTorchMixin(object):
             run_test((4, 1, 3, 1), (2, 1, 3, 4, 5), cast, upper)  # broadcasting A & b
 
     @skipIfNoLapack
-    def test_potrs_batched_dims(self):
-        self._test_potrs_batched_dims(self, lambda t: t)
+    def test_cholesky_solve_batched_dims(self):
+        self._test_cholesky_solve_batched_dims(self, lambda t: t)
 
     @skipIfNoLapack
     def test_potri(self):

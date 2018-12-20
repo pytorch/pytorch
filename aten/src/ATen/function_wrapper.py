@@ -395,7 +395,6 @@ THFormal = TypedDict('THFormal', {
     'is_nullable': bool,
     'default': str,
     'default_init': str,
-    'python_default_init': str,
     'output': bool,
     'size': int,
     'declared_type': str,
@@ -422,7 +421,6 @@ AtFormal = TypedDict('AtFormal', {
     'is_nullable': bool,
     'default': str,
     'default_init': str,
-    'python_default_init': str,
     'output': bool,
     'size': int,
 }, total=False)
@@ -619,10 +617,6 @@ def create_generic(top_env, declarations):
             default = translate_default(argument, type_str, argument['default'])
             translated['default'] = default
             translated['default_init'] = argument.get('default_init', default)
-        if 'python_default_init' in argument:
-            assert 'default' not in argument
-            default = translate_default(argument, type_str, argument['python_default_init'])
-            translated['python_default_init'] = default
         if argument.get('output'):
             translated['output'] = True
         if argument.get('size'):

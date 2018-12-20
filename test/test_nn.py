@@ -570,6 +570,28 @@ class TestNN(NNTestCase):
         input = torch.randn(2, 3, dtype=torch.float)
         self.assertEqual(m(input).size(), (2, 5))
 
+    def test_share_memory(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.p = nn.Parameter(torch.eye(5))
+                self.par = nn.ParameterList()
+                self.par.append(nn.Parameter(torch.randn(10)))
+
+            def forward(inp):
+                return inp.clone()
+
+        net = Net()
+        for p in net.parameters():
+            self.assertFalse(p.storage().is_shared())
+        for b in net.buffers():
+            self.assertFalse(b.storage().is_shared())
+        net.share_memory()
+        for p in net.parameters():
+            self.assertTrue(p.storage().is_shared())
+        for b in net.buffers():
+            self.assertTrue(b.storage().is_shared())
+
     def test_hooks(self):
         module = nn.Sigmoid()
         input = torch.ones(5, 5, requires_grad=True)
@@ -5272,10 +5294,10 @@ class TestNN(NNTestCase):
 
     @skipIfRocm
     def test_pdist(self):
-        for device, trans in itertools.product(device_(), [False, True]):
-            inp = torch.randn(4, 5, dtype=torch.double, device=device, requires_grad=True)
+        for device, trans, shape in itertools.product(device_(), [False, True], [(4, 5), (2, 3, 4)]):
+            inp = torch.randn(shape, dtype=torch.double, device=device, requires_grad=True)
             if trans:
-                inp = inp.transpose(0, 1)
+                inp = inp.transpose(-2, -1)
             for p in [0, 1, 2, 0.5, 1.5, 2.5, float('inf')]:
                 self.assertTrue(gradcheck(lambda x: F.pdist(x, p), (inp,)))
 
@@ -6057,6 +6079,32 @@ class TestNN(NNTestCase):
                 input = torch.randn(1, 1, 2, 2, requires_grad=True)
                 gradcheck(lambda x: F.upsample(x, out_size, **kwargs), [input])
 
+    @skipIfRocm
+    def test_upsamplingBicubic2d(self):
+        # test output against known input
+        in_t = torch.arange(4).view(1, 1, 2, 2).type(torch.FloatTensor)
+        expected_out_t = torch.Tensor(
+            [[[[0.00000, 0.31481, 0.68519, 1.00000],
+               [0.62963, 0.94444, 1.31481, 1.62963],
+               [1.37037, 1.68518, 2.05556, 2.37037],
+               [2.00000, 2.31481, 2.68519, 3.00000]]]])
+        out_t = F.interpolate(in_t, scale_factor=2, mode='bicubic', align_corners=True)
+        torch.set_printoptions(precision=5)
+        self.assertEqual(out_t, expected_out_t)
+
+        for align_corners in [True, False]:
+            kwargs = dict(mode='bicubic', align_corners=align_corners)
+
+            # test float scale factor up & downsampling
+            for scale_factor in [0.5, 1.5, 2]:
+                in_t = torch.ones(2, 2, 2, 2)
+                out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
+                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                self.assertEqual(torch.ones(2, 2, out_size, out_size), out_t.data)
+
+                input = torch.randn(2, 2, 2, 2, requires_grad=True)
+                gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+
     def test_upsamplingBilinear2d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='bilinear', align_corners=False)
         in_t_9 = torch.zeros(1, 1, 9, 9)
@@ -6139,6 +6187,12 @@ class TestNN(NNTestCase):
 
                     kwargs = dict(mode='bilinear', align_corners=align_corners)
                     m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
+                    _test_interpolate_helper(_make_input(2), scale_factor, m)
+
+                    kwargs = dict(mode='bicubic', align_corners=align_corners)
+
+                    def m(t):
+                        return F.interpolate(t, scale_factor=scale_factor, **kwargs).to(device)
                     _test_interpolate_helper(_make_input(2), scale_factor, m)
 
                     kwargs = dict(mode='trilinear', align_corners=align_corners)

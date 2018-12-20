@@ -16,6 +16,8 @@ from torch._six import inf, nan
 
 from test_torch import _TestTorchMixin
 
+from common_methods_invocations import tri_tests_args, tri_large_tests_args, \
+    run_additional_tri_tests, _compare_trilu_indices, _compare_large_trilu_indices
 from common_utils import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, \
     PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, TEST_NUMPY, TEST_WITH_ROCM, load_tests
 
@@ -1547,6 +1549,9 @@ class TestCuda(TestCase):
         self.assertEqual(x.sum(), 65504)
         self.assertEqual(x.sum(dtype=torch.float32), 65504)
 
+        x = torch.ones(65536, device='cuda', dtype=torch.float16)
+        self.assertEqual(x.sum(dtype=torch.float32), 65536)
+
         a = torch.zeros(1203611).bernoulli_(0.0005)
         x = a.to(device='cuda', dtype=torch.float16)
         self.assertEqual(x.sum().item(), a.sum().item())
@@ -1554,6 +1559,14 @@ class TestCuda(TestCase):
         a = torch.zeros(100, 121, 80).bernoulli_(0.0005)
         x = a.to(device='cuda', dtype=torch.float16)
         self.assertEqual(x.sum((0, 2)).float().cpu(), a.sum((0, 2)))
+
+    @skipIfRocm
+    def test_mean_fp16(self):
+        x = torch.ones(65536, device='cuda', dtype=torch.float16)
+        self.assertEqual(x.mean(), 1)
+
+        x = torch.ones(65536, device='cuda', dtype=torch.float16)
+        self.assertEqual(x.mean(dtype=torch.float32), 1)
 
     @staticmethod
     def _select_broadcastable_dims(dims_full=None):
@@ -1592,16 +1605,16 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_gesv_batched_dims(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    def test_potrs(self):
-        _TestTorchMixin._test_potrs(self, lambda t: t.cuda())
+    def test_cholesky_solve(self):
+        _TestTorchMixin._test_cholesky_solve(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    def test_potrs_batched(self):
-        _TestTorchMixin._test_potrs_batched(self, lambda t: t.cuda())
+    def test_cholesky_solve_batched(self):
+        _TestTorchMixin._test_cholesky_solve_batched(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    def test_potrs_batched_dims(self):
-        _TestTorchMixin._test_potrs_batched_dims(self, lambda t: t.cuda())
+    def test_cholesky_solve_batched_dims(self):
+        _TestTorchMixin._test_cholesky_solve_batched_dims(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_cholesky(self):
@@ -2107,16 +2120,23 @@ class TestCuda(TestCase):
                 y = torch.randn(2, 1, device='cuda')
                 z = x + y
 
-    def test_tril_and_triu_indices(self):
-        self.assertRaises(
-            RuntimeError,
-            lambda: torch.triu_indices(
-                1, 1, device='cuda', layout=torch.strided))
+    def test_trilu_indices(self):
+        for test_args in tri_tests_args:
+            _compare_trilu_indices(self, *test_args, device='cuda')
 
-        self.assertRaises(
-            RuntimeError,
-            lambda: torch.tril_indices(
-                1, 1, device='cuda', layout=torch.strided))
+        # test default options
+        x = torch.ones(
+            3, 3, dtype=torch.long, device='cuda', layout=torch.strided)
+        self.assertEqual(
+            x.tril(0).nonzero().transpose(0, 1),
+            torch.tril_indices(3, 3, device='cuda'))
+        self.assertEqual(
+            x.triu(0).nonzero().transpose(0, 1),
+            torch.triu_indices(3, 3, device='cuda'))
+
+    def test_large_trilu_indices(self):
+        for test_args in tri_large_tests_args:
+            _compare_large_trilu_indices(self, *test_args, device='cuda')
 
 
 def load_ignore_file():
