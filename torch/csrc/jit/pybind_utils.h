@@ -1,14 +1,14 @@
 #pragma once
 
-#include "torch/csrc/jit/function_schema.h"
-#include "torch/csrc/jit/ivalue.h"
-#include "torch/csrc/jit/stack.h"
-#include "torch/csrc/jit/script/module.h"
-#include "torch/csrc/jit/type.h"
-#include "torch/csrc/jit/operator.h"
-#include "torch/csrc/utils/pybind.h"
-#include "torch/csrc/utils/auto_gil.h"
-#include "torch/csrc/Device.h"
+#include <torch/csrc/jit/function_schema.h>
+#include <torch/csrc/jit/ivalue.h>
+#include <torch/csrc/jit/stack.h>
+#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/type.h>
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/auto_gil.h>
+#include <torch/csrc/Device.h>
 
 #include <c10/util/Exception.h>
 
@@ -287,6 +287,8 @@ inline py::object toPyObject(IValue&& ivalue) {
       t[i] = toPyObject(IValue{elements[i]});
     }
     return t;
+  } else if (ivalue.isDevice()) {
+    return py::cast<py::object>(THPDevice_New(ivalue.toDevice()));
   } else {
     AT_ERROR("Missing cases in 'toPyObject'! File a bug report.");
   }
@@ -319,8 +321,8 @@ private:
 
 inline Stack createStackForSchema(
     const FunctionSchema& schema,
-    tuple_slice args,
-    py::kwargs kwargs = py::kwargs()) {
+    const tuple_slice& args,
+    const py::kwargs& kwargs = py::kwargs()) {
   if(args.size() + kwargs.size() > schema.arguments().size()) {
     throw std::runtime_error(c10::str(
         schema.name(), "() expected at most ", schema.arguments().size(),
@@ -406,7 +408,7 @@ inline py::object invokeScriptMethodFromPython(
     AutoNoGIL no_gil_guard;
     method.run(stack);
   }
-  return createPyObjectForStack(std::move(stack));
+  return toPyObject(std::move(stack.back()));
 }
 
 inline py::object invokeOperatorFromPython(

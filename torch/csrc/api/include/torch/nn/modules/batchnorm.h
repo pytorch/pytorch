@@ -53,17 +53,23 @@ class TORCH_API BatchNormImpl : public torch::nn::Cloneable<BatchNormImpl> {
 
   void reset() override;
 
+  /// Pretty prints the `BatchNorm` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
   /// Applies batch normalization on the `input` using the stored mean and
   /// variance.
   ///
   /// The module must be constructed with `stateful = true` when calling this
   /// method, as the module will otherwise not store running statistics. If you
   /// want to supply the mean and variance yourself, use `pure_forward`.
-  Tensor forward(Tensor input);
+  Tensor forward(const Tensor& input);
 
   /// Applies batch normalization on the `input` using the given `mean` and
   /// `variance` statistics.
-  Tensor pure_forward(Tensor input, Tensor mean, Tensor variance);
+  Tensor pure_forward(
+      const Tensor& input,
+      const Tensor& mean,
+      const Tensor& variance);
 
   /// The options with which this module was constructed.
   BatchNormOptions options;

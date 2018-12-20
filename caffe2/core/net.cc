@@ -182,6 +182,14 @@ TaskThreadPoolBase* ExecutorHelper::GetPool(
   CAFFE_THROW("Not implemented");
 }
 
+std::vector<OperatorBase*> ExecutorHelper::GetOperators() const {
+  CAFFE_THROW("Not implemented");
+}
+
+int ExecutorHelper::GetNumWorkers() const {
+  CAFFE_THROW("Not implemented");
+}
+
 std::vector<float> NetBase::TEST_Benchmark(
     const int warmup_runs,
     const int main_runs,

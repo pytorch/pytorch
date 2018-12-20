@@ -40,22 +40,22 @@
 //      they only bind to Tensor).
 
 
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 
-#include "torch/csrc/Device.h"
-#include "torch/csrc/Dtype.h"
-#include "torch/csrc/DynamicTypes.h"
-#include "torch/csrc/Exceptions.h"
-#include "torch/csrc/Generator.h"
-#include "torch/csrc/autograd/generated/VariableType.h"
-#include "torch/csrc/autograd/python_variable.h"
-#include "torch/csrc/jit/tracer.h"
-#include "torch/csrc/tensor/python_tensor.h"
-#include "torch/csrc/utils/numpy_stub.h"
-#include "torch/csrc/utils/object_ptr.h"
-#include "torch/csrc/utils/python_numbers.h"
-#include "torch/csrc/utils/python_strings.h"
-#include "torch/csrc/autograd/variable.h"
+#include <torch/csrc/Device.h>
+#include <torch/csrc/Dtype.h>
+#include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/Generator.h>
+#include <torch/csrc/autograd/generated/VariableType.h>
+#include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/tensor/python_tensor.h>
+#include <torch/csrc/utils/numpy_stub.h>
+#include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/python_numbers.h>
+#include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/autograd/variable.h>
 
 #include <ATen/ATen.h>
 
@@ -80,6 +80,7 @@ struct PythonArgs;
 // Contains bound Python arguments in declaration order
 template<int N>
 struct ParsedArgs {
+  ParsedArgs() : args() { }
   PyObject* args[N];
 };
 
@@ -126,6 +127,7 @@ struct PythonArgs {
   inline at::ScalarType scalartypeWithDefault(int i, at::ScalarType default_scalartype);
   inline c10::optional<at::ScalarType> scalartypeOptional(int i);
   inline c10::optional<at::Scalar> scalarOptional(int i);
+  inline c10::optional<int64_t> toInt64Optional(int i);
   inline const THPLayout& layout(int i);
   inline const THPLayout& layoutWithDefault(int i, const THPLayout& default_layout);
   inline at::Device device(int i);
@@ -401,6 +403,12 @@ inline int64_t PythonArgs::toInt64(int i) {
 
 inline int64_t PythonArgs::toInt64WithDefault(int i, int64_t default_int) {
   if (!args[i]) return default_int;
+  return toInt64(i);
+}
+
+inline c10::optional<int64_t> PythonArgs::toInt64Optional(int i) {
+  if (!args[i])
+    return c10::nullopt;
   return toInt64(i);
 }
 

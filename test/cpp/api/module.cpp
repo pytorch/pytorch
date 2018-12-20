@@ -240,7 +240,8 @@ TEST_F(ModuleTest, CallingCloneOnModuleThatDoesNotOverrideCloneThrows) {
 TEST_F(ModuleTest, CallingCloneOnModuleThatDoesOverrideCloneDoesNotThrow) {
   struct Cloneable : Module {
     std::shared_ptr<Module> clone(
-        torch::optional<torch::Device> device = torch::nullopt) const override {
+        const torch::optional<torch::Device>& device =
+            torch::nullopt) const override {
       return nullptr;
     }
   };
@@ -830,4 +831,24 @@ TEST_F(ModuleTest, ThrowsWhenAttemptingtoGetTopLevelModuleAsSharedPtr) {
     auto module = std::make_shared<TestModule>(1);
     ASSERT_NO_THROW(module->modules());
   }
+}
+
+struct EmptyModule : torch::nn::Module {};
+
+TEST_F(ModuleTest, PrettyPrint) {
+  struct TestModule : torch::nn::Module {
+    TestModule(int x, float y) : x_(x), y_(y) {}
+
+    void pretty_print(std::ostream& stream) const {
+      stream << "TestModule(x=" << x_ << ", y=" << y_ << ")";
+    }
+
+    int x_;
+    float y_;
+  };
+
+  using namespace torch::nn;
+
+  ASSERT_EQ(c10::str(EmptyModule{}), "EmptyModule");
+  ASSERT_EQ(c10::str(TestModule(1, 3.14)), "TestModule(x=1, y=3.14)");
 }

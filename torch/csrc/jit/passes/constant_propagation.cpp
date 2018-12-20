@@ -1,13 +1,13 @@
-#include "torch/csrc/jit/passes/constant_propagation.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/constants.h"
-#include "torch/csrc/jit/interpreter.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/ivalue.h"
-#include "torch/csrc/jit/operator.h"
-#include "torch/csrc/jit/passes/alias_analysis.h"
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/utils/functional.h"
+#include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/interpreter.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ivalue.h>
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/passes/alias_analysis.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/utils/functional.h>
 
 namespace torch { namespace jit {
 
@@ -16,9 +16,6 @@ namespace {
 std::unordered_set<Symbol> skip_list = {
   prim::If,
   prim::Loop, //TODO: handle Loop
-  prim::Print,
-  prim::RaiseException,
-  prim::PythonOp, //may have side effects
   prim::Constant,
   prim::Undefined,
   prim::NoneGenerator,
@@ -124,7 +121,7 @@ void ConstantPropagation(Node* n, const AliasDb& aliasDb, bool recurse) {
         return v->node()->kind() == prim::Constant;
       });
   bool supported_node = !n->kind().is_onnx() &&
-      skip_list.count(n->kind()) == 0 && !n->isNondeterministic() &&
+      skip_list.count(n->kind()) == 0 && !n->isNondeterministic() && !n->hasSideEffects() &&
       !aliasDb.hasWriters(n) && !aliasDb.hasWildcard(n);
   auto run_blocks = [&]() {
     if (recurse) {

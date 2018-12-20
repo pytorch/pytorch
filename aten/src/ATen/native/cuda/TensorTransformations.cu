@@ -1,9 +1,9 @@
-#include "ATen/native/TensorTransformations.h"
+#include <ATen/native/TensorTransformations.h>
 
-#include "ATen/cuda/detail/IndexUtils.cuh"
-#include "ATen/NativeFunctions.h"
-#include "ATen/cuda/CUDAApplyUtils.cuh"
-#include "ATen/cuda/CUDAContext.h"
+#include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/NativeFunctions.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/CUDAContext.h>
 
 #include <cstddef>
 #include <vector>
@@ -15,7 +15,7 @@ namespace native {
 #define AT_APPLY_BLOCKS_PER_SM 4
 
 template <typename scalar_t, typename IndexType>
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
 __launch_bounds__(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void

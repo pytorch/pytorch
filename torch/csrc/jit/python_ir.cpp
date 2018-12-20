@@ -1,15 +1,15 @@
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/pybind.h"
-#include "torch/csrc/jit/python_tracer.h"
-#include "torch/csrc/utils/pybind.h"
-#include "torch/csrc/jit/export.h"
-#include "torch/csrc/jit/passes/shape_analysis.h"
-#include "torch/csrc/jit/passes/python_print.h"
-#include "torch/csrc/jit/argument_spec.h"
-#include "torch/csrc/utils/auto_gil.h"
-#include "torch/csrc/utils/python_strings.h"
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/pybind.h>
+#include <torch/csrc/jit/python_tracer.h>
+#include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/jit/export.h>
+#include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/passes/python_print.h>
+#include <torch/csrc/jit/argument_spec.h>
+#include <torch/csrc/utils/auto_gil.h>
+#include <torch/csrc/utils/python_strings.h>
 
 
 #include <iostream>
@@ -80,7 +80,7 @@ struct ConcretePythonOp : public PythonOp {
      return getPythonName(pyobj.get());
    }
  }
- virtual void cloneFrom(Node * other_) override {
+ void cloneFrom(Node * other_) override {
    Node::cloneFrom(other_);
    auto other = other_->cast<PythonOp>();
    this->cconv = other->cconv;
@@ -391,9 +391,8 @@ void initPythonIRBindings(PyObject * module_) {
         return n.t(Symbol::attr(name));
     })
     .def("zs_",[](Node & n, const char * name, TensorsAttr::ValueType v) {
-        // NOLINTNEXTLINE(modernize-loop-convert)
-        for (size_t i = 0; i < v.size(); ++ i) {
-            v[i] = autograd::Variable(v[i].view({})).data();
+        for (auto& i : v) {
+          i = autograd::Variable(i.view({})).data();
         }
         return n.ts_(Symbol::attr(name), std::move(v));
     })
@@ -450,8 +449,7 @@ void initPythonIRBindings(PyObject * module_) {
     })
     .def("isSubtypeOf", [](std::shared_ptr<Type>& self, std::shared_ptr<Type> other) {
         return self->isSubtypeOf(other);
-    })
-    .def_static("inferFrom", c10::inferTypeFrom);
+    });
 
   py::class_<NumberType, Type, std::shared_ptr<NumberType>>(m, "NumberType")
     .def_static("get", &NumberType::get);
@@ -468,7 +466,7 @@ void initPythonIRBindings(PyObject * module_) {
     .def(py::init([](std::vector<TypePtr> a){ return TupleType::create(a); }))
     .def("elements", [](TupleType &self){
       std::vector<TypePtr> types;
-      for (auto type : self.elements()) {
+      for (const auto& type : self.elements()) {
         types.push_back(type);
       }
       return types;

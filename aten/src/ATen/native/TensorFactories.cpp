@@ -4,17 +4,20 @@
 #include <math.h>
 #endif
 
-#include "ATen/ATen.h"
-#include "ATen/CPUGenerator.h"
-#include "ATen/CheckGenerator.h"
-#include "ATen/Dispatch.h"
-#include "ATen/NativeFunctions.h"
+#include <ATen/ATen.h>
+#include <ATen/CPUGenerator.h>
+#include <ATen/CheckGenerator.h>
+#include <ATen/Dispatch.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/LegacyTHFunctions.h>
+#include <ATen/LegacyTHDispatcher.h>
 #include <c10/core/ScalarType.h>
-#include "ATen/core/Deprecated.h"
-#include "ATen/core/TensorOptions.h"
+#include <ATen/core/Deprecated.h>
+#include <ATen/native/TensorFactories.h>
+#include <c10/core/TensorOptions.h>
 #include <TH/THRandom.h>
-#include "TH/THGenerator.hpp"
-#include "c10/util/Exception.h"
+#include <TH/THGenerator.hpp>
+#include <c10/util/Exception.h>
 
 #include <algorithm>
 #include <cmath>
@@ -60,6 +63,7 @@ void window_function_checks(
       window_length);
 }
 
+// FIXME: point to LegacyTHDispatcher.
 const TypeExtendedInterface& getFactoryType(const TensorOptions& options) {
   return at::getType(options);
 }
@@ -86,7 +90,7 @@ Tensor& arange_out(Tensor& result, Scalar start, Scalar end) {
 }
 
 Tensor& arange_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
-  return at::_th_arange_out(result, start, end, step);
+  return at::legacy::th::_th_arange_out(result, start, end, step);
 }
 
 Tensor arange(Scalar end, const TensorOptions& options) {
@@ -95,11 +99,11 @@ Tensor arange(Scalar end, const TensorOptions& options) {
 }
 
 Tensor& arange_out(Tensor& result, Scalar end) {
-  return at::_th_arange_out(result, end);
+  return at::legacy::th::_th_arange_out(result, end);
 }
 
 Tensor _dim_arange(const Tensor& like, int64_t dim) {
-  return at::getType(like.options().dtype(at::kLong))._th_arange(like.size(dim));
+  return getFactoryType(like.options().dtype(at::kLong))._th_arange(like.size(dim));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -235,25 +239,13 @@ Tensor full_like(const Tensor& self, Scalar fill_value, const TensorOptions& opt
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linspace ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor linspace(Scalar start, Scalar end, const TensorOptions& options) {
-  return native::linspace(start, end, /*steps=*/100, options);
-}
-
 Tensor linspace(
     Scalar start,
     Scalar end,
     int64_t steps,
     const TensorOptions& options) {
-  // Note [Native bindings for legacy TH factory functions]
-  return getFactoryType(options)._th_linspace(start, end, steps);
-}
-
-Tensor& linspace_out(Tensor& result, Scalar start, Scalar end) {
-  return native::linspace_out(result, start, end, /*steps=*/100);
-}
-
-Tensor& linspace_out(Tensor& result, Scalar start, Scalar end, int64_t steps) {
-  return at::_th_linspace_out(result, start, end, steps);
+  Tensor result = at::empty({steps}, options);
+  return at::linspace_out(result, start, end, steps);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ logspace ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -276,7 +268,7 @@ Tensor& logspace_out(Tensor& result, Scalar start, Scalar end) {
 }
 
 Tensor& logspace_out(Tensor& result, Scalar start, Scalar end, int64_t steps) {
-  return at::_th_logspace_out(result, start, end, steps);
+  return at::legacy::th::_th_logspace_out(result, start, end, steps);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ones ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -295,6 +287,12 @@ Tensor ones_like(const Tensor& self) {
 
 Tensor ones_like(const Tensor& self, const TensorOptions& options) {
   return native::ones(self.sizes(), options);
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ scalar_tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Tensor scalar_tensor(Scalar s, const TensorOptions& options) {
+  return at::empty({}, options).fill_(s);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ rand ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -511,7 +509,90 @@ Tensor& range_out(Tensor& result, Scalar start, Scalar end) {
 }
 
 Tensor& range_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
-  return at::_th_range_out(result, start, end, step);
+  return at::legacy::th::_th_range_out(result, start, end, step);
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangle ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Tensor tril_indices_cpu(
+    int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
+  check_args(row, col, options);
+
+  auto tril_size = get_tril_size(row, col, offset);
+
+  // create an empty Tensor with correct size
+  auto result = at::empty({2, tril_size}, options);
+
+  // The following three approaches result in very little performance
+  // differences. Hence, the 2nd option is taken for simpler code, and to return
+  // contiguous tensors. Refer to #14904 for more details.
+  //
+  // 1. sequential RAM access: fill row coordinates first, then columns. This
+  //    results in two for-loop and more arithmetic operations.
+  //
+  // 2. interleaved RAM access: fill in index coordinates one by one, which
+  //    jumps between the two output Tensor rows in every iteration.
+  //
+  // 3. sequential RAM + transpose: create an n X 2 Tensor, fill the Tensor
+  //    sequentially, and then transpose it.
+  AT_DISPATCH_ALL_TYPES(result.type(), "tril_indices", [&]() -> void {
+    // fill the Tensor with correct values
+    scalar_t* result_data = result.data<scalar_t>();
+    int64_t i = 0;
+
+    scalar_t r = std::max<int64_t>(0, -offset), c = 0;
+    while (i < tril_size) {
+      result_data[i] = r;
+      result_data[tril_size + i++] = c;
+
+      // move to the next column and check if (r, c) is still in bound
+      c += 1;
+      if (c > r + offset || c >= col) {
+        r += 1;
+        c = 0;
+        // NOTE: not necessary to check if r is less than row here, because i
+        // and tril_size provide the guarantee
+      }
+    }
+  });
+
+  return result;
+}
+
+Tensor triu_indices_cpu(
+    int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
+  check_args(row, col, options);
+
+  auto triu_size = row * col - get_tril_size(row, col, offset - 1);
+
+  // create an empty Tensor with correct size
+  auto result = at::empty({2, triu_size}, options);
+
+  AT_DISPATCH_ALL_TYPES(result.type(), "triu_indices", [&]() -> void {
+    // fill the Tensor with correct values
+    scalar_t* result_data = result.data<scalar_t>();
+    int64_t i = 0;
+    // not typing std::max with scalar_t as it could be an unsigned type
+    // NOTE: no need to check if the returned value of std::max overflows
+    // scalar_t, as i and triu_size act as a guard.
+    scalar_t c = std::max<int64_t>(0, offset), r = 0;
+    while (i < triu_size) {
+      result_data[i] = r;
+      result_data[triu_size + i++] = c;
+
+      // move to the next column and check if (r, c) is still in bound
+      c += 1;
+      if (c >= col) {
+        r += 1;
+        // not typing std::max with scalar_t as it could be an unsigned type
+        // NOTE: not necessary to check if c is less than col or overflows here,
+        // because i and triu_size act as a guard.
+        c = std::max<int64_t>(0, r + offset);
+      }
+    }
+  });
+
+  return result;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ zeros ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

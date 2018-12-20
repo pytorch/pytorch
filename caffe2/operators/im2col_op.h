@@ -192,8 +192,8 @@ class Col2ImOp final : public Operator<Context> {
   bool RunOnDevice() override {
     auto& X = Input(0);
     auto& Z = Input(1);
-    auto* Y = Output(0);
-    Y->ResizeLike(Z);
+
+    auto* Y = Output(0, Z.sizes(), at::dtype<T>());
     CAFFE_ENFORCE(4 == Y->dim());
 
     int N = 0, C = 0, H = 0, W = 0;

@@ -1,6 +1,6 @@
-#include "tensor_numpy.h"
+#include <torch/csrc/utils/tensor_numpy.h>
 
-#include "torch/csrc/utils/numpy_stub.h"
+#include <torch/csrc/utils/numpy_stub.h>
 
 #ifndef USE_NUMPY
 namespace torch { namespace utils {
@@ -16,9 +16,9 @@ bool is_numpy_scalar(PyObject* obj) {
 }}
 #else
 
-#include "torch/csrc/DynamicTypes.h"
-#include "torch/csrc/Exceptions.h"
-#include "torch/csrc/autograd/python_variable.h"
+#include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/autograd/python_variable.h>
 
 #include <ATen/ATen.h>
 #include <memory>
@@ -153,6 +153,7 @@ static int aten_to_dtype(const at::Type& type) {
       case kInt: return NPY_INT32;
       case kShort: return NPY_INT16;
       case kByte: return NPY_UINT8;
+      case kChar: return NPY_INT8;
       default: break;
     }
   }
@@ -166,6 +167,7 @@ ScalarType numpy_dtype_to_aten(int dtype) {
     case NPY_HALF: return kHalf;
     case NPY_INT32: return kInt;
     case NPY_INT16: return kShort;
+    case NPY_INT8: return kChar;
     case NPY_UINT8: return kByte;
     default:
       // Workaround: MSVC does not support two switch cases that have the same value
@@ -179,7 +181,7 @@ ScalarType numpy_dtype_to_aten(int dtype) {
   if (!pytype) throw python_error();
   throw TypeError(
       "can't convert np.ndarray of type %s. The only supported types are: "
-      "double, float, float16, int64, int32, and uint8.",
+      "float64, float32, float16, int64, int32, int16, int8, and uint8.",
       ((PyTypeObject*)pytype.get())->tp_name);
 }
 

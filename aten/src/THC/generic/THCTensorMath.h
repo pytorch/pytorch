@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorMath.h"
+#define THC_GENERIC_FILE "THC/generic/THCTensorMath.h"
 #else
 
 THC_API void THCTensor_(fill)(THCState *state, THCTensor *self, scalar_t value);
@@ -21,7 +21,6 @@ THC_API accreal THCTensor_(trace)(THCState *state, THCTensor *self);
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
 
-THC_API void THCTensor_(linspace)(THCState *state, THCTensor *r_, scalar_t a, scalar_t b, int64_t n);
 THC_API void THCTensor_(logspace)(THCState *state, THCTensor *r_, scalar_t a, scalar_t b, int64_t n);
 
 #endif

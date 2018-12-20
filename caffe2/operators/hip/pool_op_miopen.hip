@@ -117,6 +117,8 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext> {
     // TODO enable fp16
     if (X.IsType<float>()) {
       return DoRunWithType<float, float>();
+    } else if (X.IsType<at::Half>()){
+      return DoRunWithType<at::Half, float>();
     } else {
       LOG(FATAL) << "Unsupported input types";
     }
@@ -289,6 +291,8 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext> {
 
     if (X.IsType<float>()) {
       return DoRunWithType<float, float>();
+    } else if (X.IsType<at::Half>()) {
+      return DoRunWithType<at::Half, float>();
     } else {
       LOG(FATAL) << "Unsupported input types";
     }

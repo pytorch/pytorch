@@ -60,7 +60,7 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
   enum class CuDNNMode { RNN_RELU = 0, RNN_TANH = 1, LSTM = 2, GRU = 3 };
 
   explicit RNNImplBase(
-      RNNOptionsBase options_,
+      const RNNOptionsBase& options_,
       optional<CuDNNMode> cudnn_mode = nullopt,
       int64_t number_of_gates = 1);
 
@@ -73,6 +73,9 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
       override;
   void to(torch::Dtype dtype, bool non_blocking = false) override;
   void to(torch::Device device, bool non_blocking = false) override;
+
+  /// Pretty prints the RNN module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
 
   /// Modifies the internal storage of weights for optimization purposes.
   ///
@@ -113,7 +116,7 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
   /// RNN function as first argument.
   RNNOutput generic_forward(
       std::function<RNNFunctionSignature> function,
-      Tensor input,
+      const Tensor& input,
       Tensor state);
 
   /// Returns a flat vector of all weights, with layer weights following each
@@ -136,7 +139,7 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RNN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-enum class RNNActivation : uint32_t TORCH_API { ReLU, Tanh };
+enum class RNNActivation : uint32_t TORCH_API{ReLU, Tanh};
 
 /// Options for RNN modules.
 struct TORCH_API RNNOptions {
@@ -175,13 +178,16 @@ class TORCH_API RNNImpl : public detail::RNNImplBase<RNNImpl> {
  public:
   RNNImpl(int64_t input_size, int64_t hidden_size)
       : RNNImpl(RNNOptions(input_size, hidden_size)) {}
-  explicit RNNImpl(RNNOptions options);
+  explicit RNNImpl(const RNNOptions& options);
+
+  /// Pretty prints the `RNN` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
 
   /// Applies the `RNN` module to an input sequence and input state.
   /// The `input` should follow a `(sequence, batch, features)` layout unless
   /// `batch_first` is true, in which case the layout should be `(batch,
   /// sequence, features)`.
-  RNNOutput forward(Tensor input, Tensor state = {});
+  RNNOutput forward(const Tensor& input, Tensor state = {});
 
   RNNOptions options;
 };
@@ -203,13 +209,13 @@ class TORCH_API LSTMImpl : public detail::RNNImplBase<LSTMImpl> {
  public:
   LSTMImpl(int64_t input_size, int64_t hidden_size)
       : LSTMImpl(LSTMOptions(input_size, hidden_size)) {}
-  explicit LSTMImpl(LSTMOptions options);
+  explicit LSTMImpl(const LSTMOptions& options);
 
   /// Applies the `LSTM` module to an input sequence and input state.
   /// The `input` should follow a `(sequence, batch, features)` layout unless
   /// `batch_first` is true, in which case the layout should be `(batch,
   /// sequence, features)`.
-  RNNOutput forward(Tensor input, Tensor state = {});
+  RNNOutput forward(const Tensor& input, Tensor state = {});
 };
 
 /// A `ModuleHolder` subclass for `LSTMImpl`.
@@ -229,13 +235,13 @@ class TORCH_API GRUImpl : public detail::RNNImplBase<GRUImpl> {
  public:
   GRUImpl(int64_t input_size, int64_t hidden_size)
       : GRUImpl(GRUOptions(input_size, hidden_size)) {}
-  explicit GRUImpl(GRUOptions options);
+  explicit GRUImpl(const GRUOptions& options);
 
   /// Applies the `GRU` module to an input sequence and input state.
   /// The `input` should follow a `(sequence, batch, features)` layout unless
   /// `batch_first` is true, in which case the layout should be `(batch,
   /// sequence, features)`.
-  RNNOutput forward(Tensor input, Tensor state = {});
+  RNNOutput forward(const Tensor& input, Tensor state = {});
 };
 
 /// A `ModuleHolder` subclass for `GRUImpl`.

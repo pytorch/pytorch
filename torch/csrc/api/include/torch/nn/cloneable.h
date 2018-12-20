@@ -4,7 +4,7 @@
 #include <torch/types.h>
 #include <torch/utils.h>
 
-#include <ATen/core/TensorOptions.h>
+#include <c10/core/TensorOptions.h>
 #include <c10/util/Exception.h>
 
 #include <memory>
@@ -32,7 +32,7 @@ class Cloneable : public virtual Module {
   /// and submodules in the cloned module are different from those in the
   /// original module.
   std::shared_ptr<Module> clone(
-      optional<Device> device = nullopt) const override {
+      const optional<Device>& device = nullopt) const override {
     NoGradGuard no_grad;
 
     const auto& self = static_cast<const Derived&>(*this);
@@ -75,7 +75,7 @@ class Cloneable : public virtual Module {
   }
 
  private:
-  void clone_(Module& other, optional<Device> device) final {
+  void clone_(Module& other, const optional<Device>& device) final {
     // Here we are *pretty* certain that `other's` type is `Derived` (because it
     // was registered under the same name as `this`), but you never know what
     // crazy things `reset()` does, so `dynamic_cast` just to be safe.

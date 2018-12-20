@@ -57,7 +57,7 @@ from torch.distributions.transforms import (AbsTransform, AffineTransform,
                                             SoftmaxTransform,
                                             StickBreakingTransform,
                                             identity_transform)
-from torch.distributions.utils import _finfo, probs_to_logits, lazy_property
+from torch.distributions.utils import probs_to_logits, lazy_property
 from torch.nn.functional import softmax
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -1975,7 +1975,6 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @skipIfRocm
     def test_gamma_gpu_sample(self):
         set_rng_seed(0)
         for alpha, beta in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
@@ -3480,7 +3479,7 @@ class TestNumericalStability(TestCase):
             self._test_pdf_score(dist_class=Bernoulli,
                                  probs=tensor_type([0]),
                                  x=tensor_type([1]),
-                                 expected_value=tensor_type([_finfo(tensor_type([])).eps]).log(),
+                                 expected_value=tensor_type([torch.finfo(tensor_type([]).dtype).eps]).log(),
                                  expected_gradient=tensor_type([0]))
 
             self._test_pdf_score(dist_class=Bernoulli,
@@ -3603,6 +3602,7 @@ class TestLazyLogitsInitialization(TestCase):
 @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
 class TestAgainstScipy(TestCase):
     def setUp(self):
+        set_rng_seed(0)
         positive_var = torch.randn(20).exp()
         positive_var2 = torch.randn(20).exp()
         random_var = torch.randn(20)
@@ -4399,7 +4399,7 @@ class TestJit(TestCase):
             values, sample = self._perturb(Dist, keys, values, sample)
             expected = f(sample, *values)
             actual = traced_f(sample, *values)
-            self.assertEqual(expected, actual,
+            self.assertEqual(expected, actual, allow_inf=True,
                              message='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
 
 
