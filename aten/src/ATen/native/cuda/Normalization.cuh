@@ -6,6 +6,7 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/native/cuda/DeviceSqrt.cuh>
 
 #include <ATen/native/cuda/Normalization.cuh>
 
@@ -13,29 +14,8 @@ namespace at { namespace native {
 
 #if defined(__HIP_PLATFORM_HCC__)
 constexpr int WARP_SIZE = 64;
-
-// take these out when ROCm implements std:: math functions
-#include <math.h>
-template <typename scalar_t>
-static __forceinline__ __device__ scalar_t device_sqrt(scalar_t val);
-
-template <>
-__forceinline__ __device__ float device_sqrt(float val) {
-  return ::sqrtf(val);
-}
-
-template <>
-__forceinline__ __device__ double device_sqrt(double val) {
-  return ::sqrt(val);
-}
-
 #else
 constexpr int WARP_SIZE = 32;
-
-template<typename scalar_t>
-__forceinline__ __device__ double device_sqrt(scalar_t val) {
-  return std::sqrt(val);
-}
 #endif
 
 // The maximum number of threads in a block

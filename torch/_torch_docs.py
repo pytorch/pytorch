@@ -2722,7 +2722,7 @@ output tensor having 1 (or ``len(dim)``) fewer dimension(s).
 
 Args:
     input (Tensor): the input tensor
-    dim (int): the dimension to reduce
+    dim (int or tuple of ints): the dimension or dimensions to reduce
     keepdim (bool, optional): whether the output tensor has :attr:`dim` retained or not
     out (Tensor): the output tensor
 
@@ -4443,19 +4443,20 @@ Example::
 .. function:: std(input, dim, keepdim=False, unbiased=True, out=None) -> Tensor
 
 Returns the standard-deviation of each row of the :attr:`input` tensor in the
-given dimension :attr:`dim`.
+dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
+reduce over all of them.
 
-If :attr:`keepdim` is ``True``, the output tensor is of the same size as
-:attr:`input` except in the dimension :attr:`dim` where it is of size 1.
-Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting
-in the output tensor having 1 fewer dimension than :attr:`input`.
+If :attr:`keepdim` is ``True``, the output tensor is of the same size
+as :attr:`input` except in the dimension(s) :attr:`dim` where it is of size 1.
+Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in the
+output tensor having 1 (or ``len(dim)``) fewer dimension(s).
 
 If :attr:`unbiased` is ``False``, then the standard-deviation will be calculated
 via the biased estimator. Otherwise, Bessel's correction will be used.
 
 Args:
     input (Tensor): the input tensor
-    dim (int): the dimension to reduce
+    dim (int or tuple of ints): the dimension or dimensions to reduce
     keepdim (bool): whether the output tensor has :attr:`dim` retained or not
     unbiased (bool): whether to use the unbiased estimation or not
     out (Tensor, optional): the output tensor
