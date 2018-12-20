@@ -1852,6 +1852,14 @@ class TestSparse(TestCase):
                     "set_indices_and_values_unsafe is not allowed on Tensor created from .data or .detach()"):
                 a = self.SparseTensor(torch.tensor([[0, 1, 1], [2, 0, 2]]), torch.tensor([3., 4., 5.])).data
                 a.add_(a)
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    "resize_and_clear_ is not allowed on Tensor created from .data or .detach()"):
+                a.zero_()
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    "resize_ is not allowed on Tensor created from .data or .detach()"):
+                a.copy_(self.SparseTensor(3, 3))
 
         do_test(self.SparseTensor(3, 0).data)
         do_test(self.SparseTensor(3, 0).detach())
