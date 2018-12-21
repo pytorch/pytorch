@@ -21,6 +21,14 @@
 #define MIN(X, Y) std::min(X,Y)
 #endif
 
+// ROCM hcc doesn't work well with using std:: in kernel functions
+#if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
+#include <c10/cuda/CUDAMathCompat.h>
+#define compat_pow c10::cuda::compat::pow
+#else
+#define compat_pow std::pow
+#endif
+
 namespace at { namespace native {
 
 template <typename scalar_t>
@@ -156,7 +164,7 @@ struct NormOps {
   acc_t norm;
 
   inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data) const {
-    return acc + std::pow(std::abs(data), norm);
+    return acc + compat_pow(std::abs(data), norm);
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
@@ -164,7 +172,7 @@ struct NormOps {
   }
 
   inline C10_DEVICE acc_t project(acc_t a) const {
-    return std::pow(a, 1.0/norm);
+    return compat_pow(a, 1.0/norm);
   }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
