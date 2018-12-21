@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/stack.h>
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/type.h>
+#include <torch/csrc/jit/six.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/auto_gil.h>
@@ -69,16 +70,6 @@ inline void findErrorInKwargs(
     }
   }
 }
-
-// Usually instances of PyStructSequence is also an instance of tuple
-// but in some py2 environment it is not, so we have to manually check
-// the name of the type to determine if it is a namedtupled returned
-// by a pytorch operator.
-inline bool isTuple(py::handle input) {
-  std::string type_module_string = py::str(input.get_type().attr("__module__"));
-  return py::isinstance<py::tuple>(input) || type_module_string == "torch.return_types";
-}
-
 } // namespace detail
 
 inline IValue toIValue(py::handle input) {
@@ -88,7 +79,7 @@ inline IValue toIValue(py::handle input) {
       AT_ERROR("sparse tensors not supported");
     }
     return ten;
-  } else if (detail::isTuple(input)) {
+  } else if (six::isTuple(input)) {
     py::tuple input_tuple = py::cast<py::tuple>(input);
     Stack s;
     s.reserve(input_tuple.size());

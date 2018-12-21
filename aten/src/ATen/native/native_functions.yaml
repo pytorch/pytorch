@@ -843,7 +843,7 @@
 - func: gesv(Tensor self, Tensor A) -> (Tensor X, Tensor LU)
   variants: function, method
 
-- func: gesv_out(Tensor solution, Tensor lu, Tensor self, Tensor A) -> (Tensor X, Tensor LU)
+- func: gesv_out(Tensor X, Tensor LU, Tensor self, Tensor A) -> (Tensor X, Tensor LU)
 
 # gesv handles broadcasting of arbitrary batch dims while _gesv_helper does not.
 - func: _gesv_helper(Tensor self, Tensor A) -> (Tensor, Tensor)
@@ -1073,7 +1073,7 @@
 - func: max(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor values, Tensor indices)
   variants: function, method
 
-- func: max_out(Tensor max, Tensor max_values, Tensor self, int64_t dim, bool keepdim=false) -> (Tensor values, Tensor indices)
+- func: max_out(Tensor values, Tensor indices, Tensor self, int64_t dim, bool keepdim=false) -> (Tensor values, Tensor indices)
 
 - func: max_values(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
   variants: function, method
@@ -1116,7 +1116,7 @@
 - func: min(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor values, Tensor indices)
   variants: function, method
 
-- func: min_out(Tensor min, Tensor min_indices, Tensor self, int64_t dim, bool keepdim=false) -> (Tensor values, Tensor indices)
+- func: min_out(Tensor values, Tensor indices, Tensor self, int64_t dim, bool keepdim=false) -> (Tensor values, Tensor indices)
 
 - func: min_values(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
   variants: function, method
@@ -2765,7 +2765,7 @@
 - func: addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
   variants: method, function
 
-- func: gels_out(Tensor X, Tensor qr, Tensor self, Tensor A) -> (Tensor X, Tensor QR)
+- func: gels_out(Tensor X, Tensor QR, Tensor self, Tensor A) -> (Tensor X, Tensor QR)
 
 - func: gels(Tensor self, Tensor A) -> (Tensor X, Tensor QR)
   variants: method, function
@@ -2780,7 +2780,7 @@
 - func: symeig(Tensor self, bool eigenvectors=false, bool upper=true) -> (Tensor e, Tensor V)
   variants: method, function
 
-- func: eig_out(Tensor e, Tensor v, Tensor self, bool eigenvectors=false) -> (Tensor e, Tensor V)
+- func: eig_out(Tensor e, Tensor V, Tensor self, bool eigenvectors=false) -> (Tensor e, Tensor V)
 
 - func: eig(Tensor self, bool eigenvectors=false) -> (Tensor e, Tensor V)
   variants: method, function
