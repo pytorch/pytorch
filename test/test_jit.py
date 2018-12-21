@@ -4831,32 +4831,71 @@ a")
         a = A()
         self.assertEqual(a.with_docstring.__doc__, 'test str')
 
-    def test_lstm_quantized(self):
-        class LSTMMod(torch.nn.Module):
-            def __init__(self):
-                super(LSTMMod, self).__init__()
-                self.rnn = nn.LSTM(10, 20, 2).float()
-                self.h0 = torch.nn.Parameter(torch.randn(2, 3, 20, dtype=torch.float))
-                self.c0 = torch.nn.Parameter(torch.randn(2, 3, 20, dtype=torch.float))
+    if not TEST_WITH_UBSAN and torch.fbgemm_is_cpu_supported():
+        def test_rnn_cell_quantized(self):
+            d_in, d_hid = 2, 2
 
-            def forward(self, x):
-                output, (hn, cn) = self.rnn(x, (self.h0, self.c0))
-                return output, hn, cn
+            for cell in [
+                torch.nn.LSTMCell(d_in, d_hid).float(),
+                torch.nn.GRUCell(d_in, d_hid).float(),
+                torch.nn.RNNCell(d_in, d_hid).float(),
+            ]:
+                if isinstance(cell, torch.nn.LSTMCell):
+                    num_chunks = 4
+                elif isinstance(cell, torch.nn.GRUCell):
+                    num_chunks = 3
+                elif isinstance(cell, torch.nn.RNNCell):
+                    num_chunks = 1
 
-        quantized = LSTMMod()
+                # Replace parameter values s.t. the range of values is exactly
+                # 255, thus we will have 0 quantization error in the quantized
+                # GEMM call. This i s for testing purposes.
+                #
+                # Note that the current implementation does not support
+                # accumulation values outside of the range representable by a
+                # 16 bit integer, instead resulting in a saturated value. We
+                # must take care that in our test we do not end up with a dot
+                # product that overflows the int16 range, e.g.
+                # (255*127+255*127) = 64770. So, we hardcode the test values
+                # here and ensure a mix of signedness.
+                vals = [[100, -155],
+                        [100, -155],
+                        [-155, 100],
+                        [-155, 100],
+                        [100, -155],
+                        [-155, 100],
+                        [-155, 100],
+                        [100, -155]]
+                vals = vals[:d_hid*num_chunks]
+                cell.weight_ih = torch.nn.Parameter(
+                    torch.tensor(vals, dtype=torch.float),
+                    requires_grad=False)
+                cell.weight_hh = torch.nn.Parameter(
+                    torch.tensor(vals, dtype=torch.float),
+                    requires_grad=False)
 
-        import copy
-        ref = copy.deepcopy(quantized)
-        torch.jit.quantized.quantize_lstm_modules(quantized)
-        x = torch.randn(5, 3, 10, dtype=torch.float)
+                import copy
+                ref = copy.deepcopy(cell)
+                cell = torch.jit.quantized.quantize_rnn_cell_modules(cell)
+                x = torch.tensor([[100, -155],
+                                  [-155, 100],
+                                  [100, -155]], dtype=torch.float)
+                h0_vals = [[-155, 100],
+                           [-155, 155],
+                           [100, -155]]
+                hx = torch.tensor(h0_vals, dtype=torch.float)
+                if isinstance(cell, torch.jit.quantized.QuantizedLSTMCell):
+                    cx = torch.tensor(h0_vals, dtype=torch.float)
+                    hiddens = (hx, cx)
+                else:
+                    hiddens = hx
 
-        outs = quantized(x)
-        ref_outs = ref(x)
+                outs = cell(x, hiddens)
+                ref_outs = ref(x, hiddens)
 
-        self.assertEqual(len(outs), len(ref_outs))
-        for out, ref_out in zip(outs, ref_outs):
-            torch.testing.assert_allclose(out, ref_out)
-
+                self.assertEqual(len(outs), len(ref_outs))
+                for out, ref_out in zip(outs, ref_outs):
+                    torch.testing.assert_allclose(out, ref_out)
 
     def test_script_module(self):
         class M1(torch.jit.ScriptModule):
@@ -8288,7 +8327,7 @@ a")
             fb_ref = FooBar()
             fb_ref.linear1.weight = torch.nn.Parameter(fb.linear1.weight.clone(), requires_grad=False)
             fb_ref.linear1.bias = torch.nn.Parameter(fb.linear1.bias.clone(), requires_grad=False)
-            torch.jit.quantized.quantize_linear_modules(fb)
+            fb = torch.jit.quantized.quantize_linear_modules(fb)
 
             x = (torch.rand(1, K1).float() - 0.5) / 10.0
             traced = torch.jit.trace(fb, (x,))

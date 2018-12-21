@@ -751,5 +751,132 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm(
   return results;
 }
 
+std::tuple<Tensor, Tensor> quantized_lstm_cell(
+    const Tensor& input,
+    TensorList hx,
+    const Tensor& w_ih,
+    const Tensor& w_hh,
+    const Tensor& b_ih,
+    const Tensor& b_hh,
+    const Tensor& packed_ih,
+    const Tensor& packed_hh,
+    const Tensor& col_offsets_ih,
+    const Tensor& col_offsets_hh,
+    const Scalar scale_ih,
+    const Scalar scale_hh,
+    const Scalar zero_point_ih,
+    const Scalar zero_point_hh) {
+  QuantizedCellParams params(
+      w_ih,
+      w_hh,
+      b_ih,
+      b_hh,
+      packed_ih,
+      packed_hh,
+      col_offsets_ih,
+      col_offsets_hh,
+      scale_ih,
+      scale_hh,
+      zero_point_ih,
+      zero_point_hh);
+  return LSTMCell<QuantizedCellParams>{}(
+      input, std::make_tuple(hx[0], hx[1]), params);
+}
+
+Tensor quantized_gru_cell(
+    const Tensor& input,
+    const Tensor& hx,
+    const Tensor& w_ih,
+    const Tensor& w_hh,
+    const Tensor& b_ih,
+    const Tensor& b_hh,
+    const Tensor& packed_ih,
+    const Tensor& packed_hh,
+    const Tensor& col_offsets_ih,
+    const Tensor& col_offsets_hh,
+    const Scalar scale_ih,
+    const Scalar scale_hh,
+    const Scalar zero_point_ih,
+    const Scalar zero_point_hh) {
+  QuantizedCellParams params(
+      w_ih,
+      w_hh,
+      b_ih,
+      b_hh,
+      packed_ih,
+      packed_hh,
+      col_offsets_ih,
+      col_offsets_hh,
+      scale_ih,
+      scale_hh,
+      zero_point_ih,
+      zero_point_hh);
+  return GRUCell<QuantizedCellParams>{}(
+      input, hx, params);
+}
+
+Tensor quantized_rnn_relu_cell(
+    const Tensor& input,
+    const Tensor& hx,
+    const Tensor& w_ih,
+    const Tensor& w_hh,
+    const Tensor& b_ih,
+    const Tensor& b_hh,
+    const Tensor& packed_ih,
+    const Tensor& packed_hh,
+    const Tensor& col_offsets_ih,
+    const Tensor& col_offsets_hh,
+    const Scalar scale_ih,
+    const Scalar scale_hh,
+    const Scalar zero_point_ih,
+    const Scalar zero_point_hh) {
+  QuantizedCellParams params(
+      w_ih,
+      w_hh,
+      b_ih,
+      b_hh,
+      packed_ih,
+      packed_hh,
+      col_offsets_ih,
+      col_offsets_hh,
+      scale_ih,
+      scale_hh,
+      zero_point_ih,
+      zero_point_hh);
+  return SimpleCell<relu_f, QuantizedCellParams>{}(
+      input, hx, params);
+}
+
+Tensor quantized_rnn_tanh_cell(
+    const Tensor& input,
+    const Tensor& hx,
+    const Tensor& w_ih,
+    const Tensor& w_hh,
+    const Tensor& b_ih,
+    const Tensor& b_hh,
+    const Tensor& packed_ih,
+    const Tensor& packed_hh,
+    const Tensor& col_offsets_ih,
+    const Tensor& col_offsets_hh,
+    const Scalar scale_ih,
+    const Scalar scale_hh,
+    const Scalar zero_point_ih,
+    const Scalar zero_point_hh) {
+  QuantizedCellParams params(
+      w_ih,
+      w_hh,
+      b_ih,
+      b_hh,
+      packed_ih,
+      packed_hh,
+      col_offsets_ih,
+      col_offsets_hh,
+      scale_ih,
+      scale_hh,
+      zero_point_ih,
+      zero_point_hh);
+  return SimpleCell<tanh_f, QuantizedCellParams>{}(
+      input, hx, params);
+}
 
 }}  // namespace at::native
