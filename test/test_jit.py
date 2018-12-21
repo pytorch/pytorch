@@ -6825,13 +6825,12 @@ a")
             MethodNoSelf()
 
     def test_return_stmt_not_at_end(self):
-        with self.assertRaisesRegex(RuntimeError, 'return statements can appear only at the end of the function body'):
-            @torch.jit.script
-            def return_stmt_wrong(x):
-                if bool(x > 3):
-                    return 3
-                else:
-                    return x
+        def return_stmt(x):
+            if bool(x > 3):
+                return x + 3
+            else:
+                return x
+        self.checkScript(return_stmt, (torch.rand(1),))
 
     def test_for_range_no_arg(self):
         with self.assertRaisesRegex(RuntimeError, r'range\(\) expects 1 argument but got 0'):
@@ -8879,6 +8878,84 @@ a")
 
         with self.capture_stdout() as captured:
             print(fn(x, scale, shift))
+
+    def test_non_final_return(self):
+
+        def simple(x):
+            if bool(x > 3):
+                return x + 1
+            else:
+                return x + 2
+            raise RuntimeError("nope")
+
+        def nest(x):
+            x = x + 1
+            if bool(x > 3):
+                if bool(x > 4):
+                    x += 1
+                return x + 1
+            else:
+                return x + 2
+
+        def early_ret(x):
+            x = x + 1
+            if bool(x > 3):
+                return x + 1
+            x = x + 1
+            return x + 2
+
+        def nest_early_ret(x):
+            x = x + 1
+            if bool(x > 3):
+                if bool(x > 4):
+                    return x + 2
+                return x + 1
+            x = x + 1
+            return x + 2
+
+        self.checkScript(simple, torch.rand(1))
+        self.checkScript(nest, torch.rand(1))
+        self.checkScript(early_ret, torch.rand(1))
+        self.checkScript(nest_early_ret, torch.rand(1))
+
+        with self.assertRaisesRegex(RuntimeError, "early"):
+            @torch.jit.script
+            def not_early_ret(x):
+                if bool(x > 3):
+                    if bool(x > 4):
+                        return 1
+                    print("foo")
+                else:
+                    print("5")
+                return 7
+
+        with self.assertRaisesRegex(RuntimeError, "some paths"):
+            @torch.jit.script
+            def not_total_ret(x):
+                if bool(x > 3):
+                    if bool(x > 4):
+                        return 1
+                    else:
+                        return 2
+                else:
+                    print("5")
+                return 7
+
+        with self.assertRaisesRegex(RuntimeError, "from a loop"):
+            @torch.jit.script
+            def nest_while_ret(x):
+                while bool(x > 4):
+                    if bool(x < 3):
+                        return 4
+                return 5
+
+        with self.assertRaisesRegex(RuntimeError, "from a loop"):
+            @torch.jit.script
+            def nest_for_ret(x):
+                for i in range(3):
+                    if bool(x < 3):
+                        return 4
+                return 5
 
 
 class MnistNet(nn.Module):

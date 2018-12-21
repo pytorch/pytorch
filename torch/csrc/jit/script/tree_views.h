@@ -159,6 +159,9 @@ struct List : public TreeView {
     TreeList type_erased_sub {subtrees.begin(), subtrees.end()};
     return List(Compound::create(TK_LIST, range, std::move(type_erased_sub)));
   }
+  static List unsafeCreate(const SourceRange& range, TreeList&& subtrees) {
+    return List(Compound::create(TK_LIST, range, std::move(subtrees)));
+  }
   size_t size() const {
     return tree_->trees().size();
   }
@@ -379,6 +382,9 @@ struct If : public Stmt {
   }
   List<Stmt> falseBranch() const {
     return List<Stmt>(subtree(2));
+  }
+  If withNewBranches(const List<Stmt>& true_branch, const List<Stmt>& false_branch) const {
+    return create(range(), cond(), true_branch, false_branch);
   }
   static If create(
       const SourceRange& range,
