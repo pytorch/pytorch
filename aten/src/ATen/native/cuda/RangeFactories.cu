@@ -95,4 +95,32 @@ Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
   return result;
 }
 
+Tensor& range_cuda_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
+  AT_DISPATCH_ALL_TYPES_AND_HALF(result.type(), "range", [&]() {
+    using accscalar_t = at::acc_type<scalar_t, true>;
+    auto xstart = start.to<accscalar_t>();
+    auto xend = end.to<accscalar_t>();
+    auto xstep = step.to<accscalar_t>();
+
+    AT_CHECK(xstep > 0 || xstep < 0, "step must be nonzero");
+    AT_CHECK(((xstep > 0) && (xend >= xstart)) || ((xstep < 0) && (xend <= xstart)),
+             "upper bound and larger bound inconsistent with step sign");
+    int64_t size = static_cast<int64_t>(((xend - xstart) / xstep) + 1);
+    if (result.numel() != size) {
+      result.resize_({size});
+    }
+    Tensor r = result.is_contiguous() ? result : result.contiguous();
+    LinspaceOp<scalar_t, accscalar_t> linspace_method(xstart, xstep);
+    thrust::device_ptr<scalar_t> data_ptr(r.data<scalar_t>());
+    thrust::tabulate(data_ptr, data_ptr + size, linspace_method);
+
+    if (!result.is_contiguous()) {
+      result.copy_(r);
+    }
+  });
+
+  AT_CUDA_CHECK(cudaGetLastError());
+  return result;
+}
+
 }} // namespace at::native
