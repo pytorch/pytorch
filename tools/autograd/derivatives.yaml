@@ -828,7 +828,7 @@
 
 - name: uniform_(Tensor self, double from, double to, Generator generator)
   self: zeros_like(grad)
-  
+
 - name: unique(Tensor self, bool sorted, bool return_inverse, int64_t? dim)
   self: not_implemented("unique")
 
