@@ -312,6 +312,7 @@ void AliasDb::analyze(Node* node) {
     case prim::None:
     case prim::BroadcastSizes:
     case prim::ChunkSizes:
+    case prim::Function:
       return analyzeCreator(node);
     case prim::TupleUnpack:
     case prim::TupleIndex:
@@ -591,6 +592,5 @@ void AliasDb::giveFreshAlias(const Value* value) {
   }
   addAlias(value, getFreshAlias());
 }
-
 } // namespace jit
 } // namespace torch

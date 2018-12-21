@@ -8,6 +8,7 @@
 
 namespace at {
 namespace vec256 {
+// See Note [Acceptable use of anonymous namespace in header]
 namespace {
 
 #if defined(__AVX__) && !defined(_MSC_VER)
@@ -16,7 +17,9 @@ template <> class Vec256<float> {
 private:
   __m256 values;
 public:
-  static constexpr int size = 8;
+  static constexpr int size() {
+    return 8;
+  }
   Vec256() {}
   Vec256(__m256 v) : values(v) {}
   Vec256(float val) {
@@ -43,7 +46,7 @@ public:
       base + 4 * step, base + 5 * step, base + 6 * step, base + 7 * step);
   }
   static Vec256<float> set(const Vec256<float>& a, const Vec256<float>& b,
-                           int64_t count = size) {
+                           int64_t count = size()) {
     switch (count) {
       case 0:
         return a;
@@ -64,19 +67,19 @@ public:
     }
     return b;
   }
-  static Vec256<float> loadu(const void* ptr, int64_t count = size) {
-    if (count == size)
+  static Vec256<float> loadu(const void* ptr, int64_t count = size()) {
+    if (count == size())
       return _mm256_loadu_ps(reinterpret_cast<const float*>(ptr));
-    __at_align32__ float tmp_values[size];
+    __at_align32__ float tmp_values[size()];
     std::memcpy(
         tmp_values, reinterpret_cast<const float*>(ptr), count * sizeof(float));
     return _mm256_loadu_ps(tmp_values);
   }
-  void store(void* ptr, int64_t count = size) const {
-    if (count == size) {
+  void store(void* ptr, int64_t count = size()) const {
+    if (count == size()) {
       _mm256_storeu_ps(reinterpret_cast<float*>(ptr), values);
     } else if (count > 0) {
-      float tmp_values[size];
+      float tmp_values[size()];
       _mm256_storeu_ps(reinterpret_cast<float*>(tmp_values), values);
       std::memcpy(ptr, tmp_values, count * sizeof(float));
     }
@@ -260,7 +263,7 @@ template <>
 void convert(const float* src, float* dst, int64_t n) {
   int64_t i;
 #pragma unroll
-  for (i = 0; i <= (n - Vec256<float>::size); i += Vec256<float>::size) {
+  for (i = 0; i <= (n - Vec256<float>::size()); i += Vec256<float>::size()) {
     _mm256_storeu_ps(dst + i, _mm256_loadu_ps(src + i));
   }
 #pragma unroll

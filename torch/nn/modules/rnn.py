@@ -570,7 +570,7 @@ class RNNCellBase(Module):
 
     @weak_script_method
     def check_forward_hidden(self, input, hx, hidden_label=''):
-        # type: (Tensor, Tensor, str)
+        # type: (Tensor, Tensor, str) -> None
         if input.size(0) != hx.size(0):
             raise RuntimeError(
                 "Input batch size {} doesn't match hidden{} batch size {}".format(

@@ -1629,8 +1629,7 @@
         - arg: THTensor* result
           output: True
         - THTensor* self
-        - arg: real p
-          python_default_init: AS_REAL(2)
+        - real p
         - arg: long dim
           wrap_dim: self
         - arg: bool keepdim

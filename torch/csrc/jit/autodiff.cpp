@@ -150,19 +150,6 @@ bool isDifferentiable(Graph & g) {
                      static_cast<bool(*)(Node*)>(isDifferentiable));
 }
 
-// TODO: Remove this after #15355.
-namespace {
-  std::vector<Value*> inlineUnpackedCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs) {
-    auto outputs = inlineCallTo(g, callee, inputs);
-    if (callee.outputs().size() == 1 && callee.outputs().at(0)->type()->kind() == TupleType::Kind) {
-      auto tc = createTupleUnpack(outputs.at(0));
-      outputs = std::vector<Value*>(tc.begin(), tc.end());
-    }
-    return outputs;
-  }
-} //anonymous namespace
-
-
 // NB: Write gradient using torchscript
 // For example, node aten::mul() should be defined as follows
 // def forward(x, y):
@@ -200,7 +187,7 @@ static c10::optional<std::vector<Value*>> build_script_grad(
   {
     WithInsertPoint guard(node->next());
     auto fw_graph = compiled_graphs->forward;
-    new_outputs = inlineUnpackedCallTo(*graph, *fw_graph, node->inputs());
+    new_outputs = inlineCallTo(*graph, *fw_graph, node->inputs(), /*unpack_outputs=*/true);
     for (size_t i = 0; i < node->outputs().size(); ++i) {
       new_outputs.at(i)->setType(node->outputs()[i]->type());
       new_outputs.at(i)->replaceAllUsesWith(node->outputs()[i]);
@@ -213,7 +200,7 @@ static c10::optional<std::vector<Value*>> build_script_grad(
   auto it = grad_vec.begin();
   grad_vec.insert(it, new_outputs.back());
   ArrayRef<Value*> grad(grad_vec);
-  auto grad_inputs = inlineUnpackedCallTo(*graph, *bw_graph, grad);
+  auto grad_inputs = inlineCallTo(*graph, *bw_graph, grad, /*unpack_outputs=*/true);
   return grad_inputs;
 };
 

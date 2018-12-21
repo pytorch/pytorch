@@ -156,6 +156,14 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
   }
 };
 
+/// Pretty prints the given `Module` into the `ostream`.
+template <typename ModuleType>
+std::ostream& operator<<(
+    std::ostream& stream,
+    const nn::ModuleHolder<ModuleType>& module) {
+  return stream << *module;
+}
+
 /// Serializes a `ModuleHolder` into an `OutputArchive`.
 template <typename ModuleType>
 serialize::OutputArchive& operator<<(

@@ -325,3 +325,85 @@ TEST_F(ModulesTest, Linear2_CUDA) {
 
   ASSERT_EQ(model->weight.grad().numel(), 2 * 5);
 }
+
+TEST_F(ModulesTest, PrettyPrintLinear) {
+  ASSERT_EQ(
+      c10::str(Linear(3, 4)), "torch::nn::Linear(in=3, out=4, with_bias=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintConv) {
+  ASSERT_EQ(
+      c10::str(Conv1d(3, 4, 5)),
+      "torch::nn::Conv1d(input_channels=3, output_channels=4, kernel_size=5, stride=1)");
+  ASSERT_EQ(
+      c10::str(Conv2d(3, 4, 5)),
+      "torch::nn::Conv2d(input_channels=3, output_channels=4, kernel_size=[5, 5], stride=[1, 1])");
+  ASSERT_EQ(
+      c10::str(Conv2d(Conv2dOptions(3, 4, 5).stride(2))),
+      "torch::nn::Conv2d(input_channels=3, output_channels=4, kernel_size=[5, 5], stride=[2, 2])");
+
+  const auto options = Conv2dOptions(3, 4, torch::IntList{5, 6}).stride({1, 2});
+  ASSERT_EQ(
+      c10::str(Conv2d(options)),
+      "torch::nn::Conv2d(input_channels=3, output_channels=4, kernel_size=[5, 6], stride=[1, 2])");
+}
+
+TEST_F(ModulesTest, PrettyPrintDropout) {
+  ASSERT_EQ(c10::str(Dropout(0.5)), "torch::nn::Dropout(rate=0.5)");
+  ASSERT_EQ(
+      c10::str(FeatureDropout(0.5)), "torch::nn::FeatureDropout(rate=0.5)");
+}
+
+TEST_F(ModulesTest, PrettyPrintFunctional) {
+  ASSERT_EQ(c10::str(Functional(torch::relu)), "torch::nn::Functional()");
+}
+
+TEST_F(ModulesTest, PrettyPrintBatchNorm) {
+  ASSERT_EQ(
+      c10::str(BatchNorm(
+          BatchNormOptions(4).eps(0.5).momentum(0.1).affine(false).stateful(
+              true))),
+      "torch::nn::BatchNorm(features=4, eps=0.5, momentum=0.1, affine=false, stateful=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintEmbedding) {
+  ASSERT_EQ(
+      c10::str(Embedding(10, 2)),
+      "torch::nn::Embedding(count=10, dimension=2)");
+}
+
+TEST_F(ModulesTest, PrettyPrintNestedModel) {
+  struct InnerTestModule : torch::nn::Module {
+    InnerTestModule()
+        : torch::nn::Module("InnerTestModule"),
+          fc(register_module("fc", torch::nn::Linear(3, 4))),
+          table(register_module("table", torch::nn::Embedding(10, 2))) {}
+
+    torch::nn::Linear fc;
+    torch::nn::Embedding table;
+  };
+
+  struct TestModule : torch::nn::Module {
+    TestModule()
+        : torch::nn::Module("TestModule"),
+          fc(register_module("fc", torch::nn::Linear(4, 5))),
+          table(register_module("table", torch::nn::Embedding(10, 2))),
+          inner(register_module("inner", std::make_shared<InnerTestModule>())) {
+    }
+
+    torch::nn::Linear fc;
+    torch::nn::Embedding table;
+    std::shared_ptr<InnerTestModule> inner;
+  };
+
+  ASSERT_EQ(
+      c10::str(TestModule{}),
+      "TestModule(\n"
+      "  (fc): torch::nn::Linear(in=4, out=5, with_bias=true)\n"
+      "  (table): torch::nn::Embedding(count=10, dimension=2)\n"
+      "  (inner): InnerTestModule(\n"
+      "    (fc): torch::nn::Linear(in=3, out=4, with_bias=true)\n"
+      "    (table): torch::nn::Embedding(count=10, dimension=2)\n"
+      "  )\n"
+      ")");
+}

@@ -44,10 +44,10 @@ void magmaGetriBatched(
 }
 
 template<class scalar_t>
-void magmaPotrsBatched(
+void magmaCholeskySolveBatched(
     magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, scalar_t** dA_array, magma_int_t ldda,
     scalar_t** dB_array, magma_int_t lddb, magma_int_t& info, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
-  AT_ERROR("potrs only takes float or double Tensors");
+  AT_ERROR("cholesky_solve only takes float or double Tensors");
 }
 
 template<class scalar_t>
@@ -106,14 +106,14 @@ void magmaGetriBatched<float>(
 }
 
 template<>
-void magmaPotrsBatched<double>(
+void magmaCholeskySolveBatched<double>(
     magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, double** dA_array, magma_int_t ldda,
     double** dB_array, magma_int_t lddb, magma_int_t& info, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
     info = magma_dpotrs_batched(uplo, n, nrhs, dA_array, ldda, dB_array, lddb, batchsize, magma_queue.get_queue());
 }
 
 template<>
-void magmaPotrsBatched<float>(
+void magmaCholeskySolveBatched<float>(
     magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, float** dA_array, magma_int_t ldda,
     float** dB_array, magma_int_t lddb, magma_int_t& info, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
     info = magma_spotrs_batched(uplo, n, nrhs, dA_array, ldda, dB_array, lddb, batchsize, magma_queue.get_queue());
@@ -261,12 +261,12 @@ Tensor _inverse_helper_cuda(const Tensor& self) {
   return self_inv_working_copy;
 }
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ potrs ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
-static void apply_potrs(Tensor& b, Tensor& A, bool upper, int64_t& info) {
+static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, int64_t& info) {
 #ifndef USE_MAGMA
-AT_ERROR("potrs: MAGMA library not found in "
+AT_ERROR("cholesky_solve: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
 #else
   magma_uplo_t uplo = upper ? MagmaUpper : MagmaLower;
@@ -281,13 +281,9 @@ AT_ERROR("potrs: MAGMA library not found in "
   magma_int_t nrhs = magma_int_cast(b.size(-1), "b.size(-1)");
 
   magma_int_t info_tmp;
-  magma_int_t* ipiv_data;
-  magma_int_t** ipiv_array;
   scalar_t** A_array;
   scalar_t** b_array;
 
-  ALLOCATE_ARRAY(ipiv_data, magma_int_t, batch_size * n, b);
-  ALLOCATE_ARRAY(ipiv_array, magma_int_t*, batch_size, b);
   ALLOCATE_ARRAY(A_array, scalar_t*, batch_size, b);
   ALLOCATE_ARRAY(b_array, scalar_t*, batch_size, b);
 
@@ -295,11 +291,10 @@ AT_ERROR("potrs: MAGMA library not found in "
   for (int64_t i = 0; i < batch_size; i++) {
     A_array[i] = &A_data[i * A_mat_stride];
     b_array[i] = &b_data[i * b_mat_stride];
-    ipiv_array[i] = &ipiv_data[i * n];
   }
 
   MAGMAQueue magma_queue(b.get_device());
-  magmaPotrsBatched<scalar_t>(
+  magmaCholeskySolveBatched<scalar_t>(
       uplo, n, nrhs, A_array, n, b_array, n,
       info_tmp, batch_size, magma_queue);
 
@@ -307,14 +302,14 @@ AT_ERROR("potrs: MAGMA library not found in "
 #endif
 }
 
-Tensor _potrs_helper_cuda(const Tensor& self, const Tensor& A, bool upper) {
+Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upper) {
   int64_t info = 0;
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "potrs", [&]{
-    apply_potrs<scalar_t>(self_working_copy, A_working_copy, upper, info);
+  AT_DISPATCH_FLOATING_TYPES(self.type(), "cholesky_solve", [&]{
+    apply_cholesky_solve<scalar_t>(self_working_copy, A_working_copy, upper, info);
   });
-  AT_CHECK(info == 0, "MAGMA potrs : invalid argument: ", -info);
+  AT_CHECK(info == 0, "MAGMA cholesky_solve : invalid argument: ", -info);
   return self_working_copy;
 }
 

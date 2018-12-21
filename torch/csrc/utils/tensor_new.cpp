@@ -249,7 +249,7 @@ Tensor legacy_new_from_sequence(
   if (!PySequence_Check(data)) {
     throw TypeError("new(): data must be a sequence (got %s)", Py_TYPE(data)->tp_name);
   }
-  return legacy_new_from_data(type, std::move(device), data);
+  return internal_new_from_data(type, std::move(device), data, false, false, false);
 }
 
 void check_legacy_ctor_device(const Type& type, c10::optional<Device> device) {
@@ -449,11 +449,19 @@ Tensor legacy_tensor_new(const Type& type, PyObject* args, PyObject* kwargs) {
   throw std::runtime_error("new(): invalid arguments");
 }
 
-Tensor legacy_new_from_data(
+Tensor indexing_tensor_from_data(
     const Type& type,
     c10::optional<Device> device,
     PyObject* data) {
-  return internal_new_from_data(type, std::move(device), data, false, false, false);
+  // Specific to tensor indexing, converts an indexing list to an
+  // indexing tensor (type Byte or Long)
+  ScalarType scalar_type = infer_scalar_type(data);
+  if (scalar_type == ScalarType::Byte) {
+    auto& idx_type = type.toScalarType(scalar_type);
+    return internal_new_from_data(idx_type, std::move(device), data, false, false, false);
+  } else {
+    return internal_new_from_data(type, std::move(device), data, false, false, false);
+  }
 }
 
 Tensor sparse_coo_tensor_ctor(const Type& default_type, PyObject* args, PyObject* kwargs) {

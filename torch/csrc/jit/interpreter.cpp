@@ -692,16 +692,21 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           });
 
           return true;
-        } catch(std::exception & e) {
-          if (!instructions[pc].debug_location) {
-            throw;
-          }
-          auto msg = instructions[pc].debug_location->wrapException(e, "operation failed in interpreter");
-          if (dynamic_cast<JITException *>(&e)) {
-            throw JITException(msg);
+        } catch (Future::FutureError& e) {
+          // Error from the forked thread.
+          auto msg = e.error_msg; // copy the error for each callback
+          handleError(std::move(msg), false);
+          return false;
+        } catch (std::exception& e) {
+          // Error from the current thread
+          bool is_jit_exception = dynamic_cast<JITException*>(&e);
+          if (instructions[pc].debug_location) {
+            handleError(instructions[pc].debug_location->wrapException(
+                e, "operation failed in interpreter"), is_jit_exception);
           } else {
-            throw std::runtime_error(msg);
+            handleError(e.what(), is_jit_exception);
           }
+          return false;
         }
     }
     if (future) {
@@ -715,6 +720,16 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     }
 
     return false;
+  }
+
+  void handleError(std::string&& error_msg, bool is_jit_exception) {
+    if (future) {
+      future->markCompleted(Future::FutureError(std::move(error_msg)));
+    } else if (is_jit_exception) {
+      throw JITException(std::move(error_msg));
+    } else {
+      throw std::runtime_error(std::move(error_msg));
+    }
   }
 
  public:
