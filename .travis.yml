@@ -25,7 +25,7 @@ matrix:
       - env: MYPY_TYPE_CHECK
         python: "3.6"
         install: pip install mypy mypy-extensions
-        script: mypy @mypy-files.txt
+        script: mypy $(CHANGED_FILES=($(git diff --name-only $TRAVIS_COMMIT_RANGE)) | tr '\n' ' ')
       - env: CPP_DOC_CHECK
         python: "3.6"
         install:
@@ -41,4 +41,3 @@ matrix:
               - llvm-toolchain-trusty
             packages: clang-tidy
         script: tools/run-clang-tidy-in-ci.sh
-
