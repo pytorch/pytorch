@@ -16,6 +16,8 @@ from torch._six import inf, nan
 
 from test_torch import _TestTorchMixin
 
+from common_methods_invocations import tri_tests_args, tri_large_tests_args, \
+    run_additional_tri_tests, _compare_trilu_indices, _compare_large_trilu_indices
 from common_utils import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, \
     PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, TEST_NUMPY, TEST_WITH_ROCM, load_tests
 
@@ -2118,16 +2120,23 @@ class TestCuda(TestCase):
                 y = torch.randn(2, 1, device='cuda')
                 z = x + y
 
-    def test_tril_and_triu_indices(self):
-        self.assertRaises(
-            RuntimeError,
-            lambda: torch.triu_indices(
-                1, 1, device='cuda', layout=torch.strided))
+    def test_trilu_indices(self):
+        for test_args in tri_tests_args:
+            _compare_trilu_indices(self, *test_args, device='cuda')
 
-        self.assertRaises(
-            RuntimeError,
-            lambda: torch.tril_indices(
-                1, 1, device='cuda', layout=torch.strided))
+        # test default options
+        x = torch.ones(
+            3, 3, dtype=torch.long, device='cuda', layout=torch.strided)
+        self.assertEqual(
+            x.tril(0).nonzero().transpose(0, 1),
+            torch.tril_indices(3, 3, device='cuda'))
+        self.assertEqual(
+            x.triu(0).nonzero().transpose(0, 1),
+            torch.triu_indices(3, 3, device='cuda'))
+
+    def test_large_trilu_indices(self):
+        for test_args in tri_large_tests_args:
+            _compare_large_trilu_indices(self, *test_args, device='cuda')
 
 
 def load_ignore_file():

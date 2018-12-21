@@ -93,7 +93,7 @@ void setOperatorEngine(caffe2::NetDef* net_def, const string& backend) {
   }
 }
 
-void loadInput(
+int loadInput(
     shared_ptr<caffe2::Workspace> workspace,
     const bool run_on_gpu,
     map<string, caffe2::TensorProtos>& tensor_protos_map,
@@ -101,6 +101,8 @@ void loadInput(
     const string& input_file,
     const string& input_dims,
     const string& input_type) {
+  // How many input blobs are in the inputs
+  int blob_num = 1;
   // Load input.
   if (input.size()) {
     vector<string> input_names = caffe2::split(',', input);
@@ -116,6 +118,15 @@ void loadInput(
             caffe2::ReadProtoFromFile(input_files[i], &tensor_protos));
         workspace->CreateBlob(input_names[i]);
         tensor_protos_map.insert(std::make_pair(input_names[i], tensor_protos));
+      }
+      // Check that all blobs have the same number of entries
+      blob_num = tensor_protos_map[input_names[0]].protos_size();
+      for (int i = 1; i < input_names.size(); ++i) {
+        int bnum = tensor_protos_map[input_names[i]].protos_size();
+        CAFFE_ENFORCE_EQ(
+            blob_num,
+            bnum,
+            "Number of blobs are not the same for all inputs");
       }
     } else if (input_dims.size() || input_type.size()) {
       CAFFE_ENFORCE_GE(
@@ -186,6 +197,7 @@ void loadInput(
           "input_dims is set.");
     }
   }
+  return blob_num;
 }
 
 void fillInputBlob(
@@ -222,11 +234,17 @@ void runNetwork(
     map<string, caffe2::TensorProtos>& tensor_protos_map,
     const bool wipe_cache,
     const bool run_individual,
+    const bool run_on_gpu,
+    const bool text_output,
     const int warmup,
     const int iter,
+    const int num_blobs,
     const int sleep_before_run,
     const int sleep_between_iteration,
-    const int sleep_between_net_and_operator) {
+    const int sleep_between_net_and_operator,
+    const std::string& output,
+    const std::string& output_folder) {
+
   if (!net_def.has_name()) {
     net_def.set_name("benchmark");
   }
@@ -262,6 +280,15 @@ void runNetwork(
       caffe2::wipe_cache();
     }
     CAFFE_ENFORCE(net->Run(), "Main run ", i, " has failed.");
+    // Write the output for the first num_blobs times
+    writeOutput(
+        workspace,
+        run_on_gpu,
+        output,
+        output_folder,
+        text_output,
+        i,
+        num_blobs);
     if (wipe_cache) {
       caffe2::wipe_cache();
     }
@@ -296,39 +323,50 @@ void writeOutput(
     const bool run_on_gpu,
     const string& output,
     const string& output_folder,
-    const bool text_output) {
+    const bool text_output,
+    const int index,
+    const int num_blobs) {
+  if (output.size() == 0) {
+    return;
+  }
   string output_prefix = output_folder.size() ? output_folder + "/" : "";
-  if (output.size()) {
-    vector<string> output_names = caffe2::split(',', output);
-    if (output == "*") {
-      output_names = workspace->Blobs();
-    }
-    for (const string& name : output_names) {
-      CAFFE_ENFORCE(
-          workspace->HasBlob(name),
-          "You requested a non-existing blob: ",
-          name);
-      if (text_output) {
-        if (run_on_gpu) {
+  vector<string> output_names = caffe2::split(',', output);
+  if (output == "*") {
+    output_names = workspace->Blobs();
+  }
+  for (const string& name : output_names) {
+    CAFFE_ENFORCE(
+        workspace->HasBlob(name),
+        "You requested a non-existing blob: ",
+        name);
+    if (text_output) {
+      if (run_on_gpu) {
 #ifdef __CUDA_ARCH__
-          writeTextOutput<caffe2::CUDAContext, caffe2::TensorCUDA>(
-              workspace->GetBlob(name)->GetMutable<caffe2::TensorCUDA>(),
-              output_prefix,
-              name);
+        writeTextOutput<caffe2::CUDAContext, caffe2::TensorCUDA>(
+            workspace->GetBlob(name)->GetMutable<caffe2::TensorCUDA>(),
+            output_prefix,
+            name,
+            index,
+            num_blobs);
 #else
-          CAFFE_THROW("Not support GPU.");
+        CAFFE_THROW("Not support GPU.");
 #endif
-        } else {
-          writeTextOutput<caffe2::CPUContext, caffe2::TensorCPU>(
-              BlobGetMutableTensor(workspace->GetBlob(name), caffe2::CPU),
-              output_prefix,
-              name);
-        }
       } else {
-        string serialized = SerializeBlob(*workspace->GetBlob(name), name);
-        string output_filename = output_prefix + name;
-        caffe2::WriteStringToFile(serialized, output_filename.c_str());
+        writeTextOutput<caffe2::CPUContext, caffe2::TensorCPU>(
+            BlobGetMutableTensor(workspace->GetBlob(name), caffe2::CPU),
+            output_prefix,
+            name,
+            index,
+            num_blobs);
       }
+    } else {
+      // Do not support multiple entries per blob.
+      CAFFE_ENFORCE(
+          index == 0,
+          "Binary file only support one output.");
+      string serialized = SerializeBlob(*workspace->GetBlob(name), name);
+      string output_filename = output_prefix + name;
+      caffe2::WriteStringToFile(serialized, output_filename.c_str());
     }
   }
 }
@@ -393,7 +431,7 @@ int benchmark(
 
   map<string, caffe2::TensorProtos> tensor_protos_map;
 
-  loadInput(
+  int num_blobs = loadInput(
       workspace,
       run_on_gpu,
       tensor_protos_map,
@@ -408,18 +446,16 @@ int benchmark(
       tensor_protos_map,
       FLAGS_wipe_cache,
       FLAGS_run_individual,
+      run_on_gpu,
+      FLAGS_text_output,
       FLAGS_warmup,
       FLAGS_iter,
+      num_blobs,
       FLAGS_sleep_before_run,
       FLAGS_sleep_between_iteration,
-      FLAGS_sleep_between_net_and_operator);
-
-  writeOutput(
-      workspace,
-      run_on_gpu,
+      FLAGS_sleep_between_net_and_operator,
       FLAGS_output,
-      FLAGS_output_folder,
-      FLAGS_text_output);
+      FLAGS_output_folder);
 
   return 0;
 }

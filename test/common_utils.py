@@ -178,7 +178,10 @@ def to_gpu(obj, type_map={}):
 
 
 def get_function_arglist(func):
-    return inspect.getargspec(func).args
+    if sys.version_info > (3,):
+        return inspect.getfullargspec(func).args
+    else:
+        return inspect.getargspec(func).args
 
 
 def set_rng_seed(seed):
@@ -723,6 +726,20 @@ def random_fullrank_matrix_distinct_singular_value(l, *batches, **kwargs):
             s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
             all_matrices.append(u.mm(torch.diag(s)).mm(v.t()))
         return torch.stack(all_matrices).reshape(*(batches + (l, l)))
+
+
+def brute_pdist(inp, p=2):
+    """Computes the same as torch.pdist using primitives"""
+    n = inp.shape[-2]
+    k = n * (n - 1) // 2
+    if k == 0:
+        # torch complains about empty indices
+        return torch.empty(inp.shape[:-2] + (0,), device=inp.device)
+    square = torch.norm(inp[..., None, :] - inp[..., None, :, :], p=p, dim=-1)
+    unroll = square.view(square.shape[:-2] + (n * n,))
+    inds = torch.ones(k, dtype=torch.int)
+    inds[torch.arange(n - 1, 1, -1, dtype=torch.int).cumsum(0)] += torch.arange(2, n, dtype=torch.int)
+    return unroll[..., inds.cumsum(0)]
 
 
 def do_test_dtypes(self, dtypes, layout, device):

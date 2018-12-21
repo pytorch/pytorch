@@ -392,6 +392,9 @@ struct ParserImpl {
         L.expect(TK_NEWLINE);
         return Pass::create(range);
       }
+      case TK_DEF: {
+        return parseFunction(/*is_method=*/false);
+      }
       default: {
         auto lhs = parseExpOrExpTuple();
         if (L.cur().kind != TK_NEWLINE) {

@@ -75,6 +75,7 @@ namespace c10 {
   _(aten, __round_to_zero_floordiv)\
   _(prim, fork)                    \
   _(prim, RaiseException)          \
+  _(prim, Function)                \
   _(aten, append)                  \
   _(aten, format)                  \
   _(aten, __not__)                 \

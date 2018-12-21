@@ -367,15 +367,13 @@ c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(const Expr& expr)
 
 struct to_ir {
   to_ir(
-      Def def_,
+      Def def,
       Resolver resolver_,
-      SugaredValuePtr self_,
+      const SugaredValuePtr& self,
       Method& method) // method being constructed
       : method(method)
       , graph(method.graph())
-      , def(std::move(def_))
       , resolver(std::move(resolver_))
-      , self(std::move(self_))
       , environment_stack(nullptr) {
     JIT_ASSERT(resolver);
     pushFrame(graph->block());
@@ -386,34 +384,15 @@ struct to_ir {
     if (self && def.decl().params().size() == 0) {
       throw ErrorReport(def.decl().params().range()) << "methods must have a self argument";
     }
-    auto schema = extractSchemaFromDef(def);
-    std::vector<Argument> arguments = emitFormalArguments(self, schema);
 
-    // body
-    auto stmts = def.statements();
-    auto stmts_begin = stmts.begin();
-    auto stmts_end = stmts.end();
-    c10::optional<Return> return_stmt;
-    if (stmts_begin != stmts_end && (*std::prev(stmts_end)).kind() == TK_RETURN) {
-      --stmts_end;
-      return_stmt = Return(*stmts_end);
-    }
-    emitStatements(stmts_begin, stmts_end);
-    std::vector<Argument> returns = {emitReturn(
-        return_stmt ? return_stmt->range() : def.range(), return_stmt, schema)};
-
-    method.setSchema({def.name().name(), std::move(arguments), std::move(returns)});
-    // remove any uses of tuples that we inserted that are not needed
-    LowerSimpleTuples(graph);
-    ConstantPooling(graph);
+    method.setSchema(emitDef(def, self, graph->block()));
+    runCleanupPasses(graph);
   }
 
 private:
   Method& method;
   std::shared_ptr<Graph> graph;
-  Def def;
   Resolver resolver;
-  SugaredValuePtr self;
   std::unordered_map<int64_t, Value*> integral_constants;
   std::unordered_map<double, Value*> fp_constants;
 
@@ -428,6 +407,31 @@ private:
     auto old_frame = environment_stack;
     environment_stack = environment_stack->next;
     return old_frame;
+  }
+
+  void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
+    // remove any uses of tuples that we inserted that are not needed
+    LowerSimpleTuples(to_clean);
+    ConstantPooling(to_clean);
+  }
+
+  FunctionSchema emitDef(const Def& def, const SugaredValuePtr& self, Block* block) {
+    auto schema = extractSchemaFromDef(def, self);
+    std::vector<Argument> arguments = emitFormalArguments(def, self, schema, block);
+
+    // body
+    auto stmts = def.statements();
+    auto stmts_begin = stmts.begin();
+    auto stmts_end = stmts.end();
+    c10::optional<Return> return_stmt;
+    if (stmts_begin != stmts_end && (*std::prev(stmts_end)).kind() == TK_RETURN) {
+      --stmts_end;
+      return_stmt = Return(*stmts_end);
+    }
+    emitStatements(stmts_begin, stmts_end);
+    const SourceRange& range = return_stmt ? return_stmt->range() : def.range();
+    std::vector<Argument> returns = {emitReturn(range, return_stmt, schema, block)};
+    return {def.name().name(), std::move(arguments), std::move(returns)};
   }
 
   std::vector<IValue> evaluateDefaults(const SourceRange& r, const std::vector<Expr>& default_types, const std::vector<Expr>& default_exprs) {
@@ -461,7 +465,7 @@ private:
     return stack.at(0).toTuple()->elements();
   }
 
-  std::vector<Argument> parseArgsFromDecl(const Decl& decl) {
+  std::vector<Argument> parseArgsFromDecl(const Decl& decl, const SugaredValuePtr& self) {
     auto params_begin = decl.params().begin();
     auto params_end = decl.params().end();
     if (self)
@@ -529,14 +533,14 @@ private:
         /*default_value =*/c10::nullopt,
         /*kwarg_only =*/false)};
   }
-  FunctionSchema extractSchemaFromDef(const Def &def) {
+  FunctionSchema extractSchemaFromDef(const Def &def, const SugaredValuePtr& self) {
       auto name = def.name().name();
-      std::vector<Argument> args = parseArgsFromDecl(def.decl());
+      std::vector<Argument> args = parseArgsFromDecl(def.decl(), self);
       std::vector<Argument> returns = parseReturnFromDecl(def.decl());
       return FunctionSchema(name, std::move(args), std::move(returns), false, false);
   }
 
-  std::vector<Argument> emitFormalArguments(const SugaredValuePtr& self, const FunctionSchema& schema) {
+  std::vector<Argument> emitFormalArguments(const Def& def, const SugaredValuePtr& self, const FunctionSchema& schema, Block* block) {
     std::vector<Argument> arguments; // for schema
     // inputs
     auto it = def.decl().params().begin();
@@ -557,7 +561,7 @@ private:
     for(;it != end; ++it) {
       auto& name = (*it).ident().name();
       // Add the input to the graph
-      Value *new_input = graph->addInput();
+      Value *new_input = block->addInput();
       if (meaningfulName(name)) {
         new_input->setUniqueName(name);
       }
@@ -570,7 +574,7 @@ private:
     return arguments;
   }
 
-  Argument emitReturn(const SourceRange& range, c10::optional<Return> return_stmt, const FunctionSchema& schema) {
+  Argument emitReturn(const SourceRange& range, c10::optional<Return> return_stmt, const FunctionSchema& schema, Block* block) {
     JIT_ASSERT(schema.returns().size() <= 1);
     // outputs
     Value* result = return_stmt ? emitExpr(return_stmt->expr())
@@ -588,11 +592,65 @@ private:
       throw ErrorReport(range) << "Return value was annotated as having type " << result_type->python_str()
         << " but is actually of type " << result->type()->python_str();
     }
-    graph->registerOutput(result);
+    block->registerOutput(result);
     return Argument("", result_type);
   }
   void emitStatements(const List<Stmt>& statements) {
     return emitStatements(statements.begin(), statements.end());
+  }
+  std::pair<std::shared_ptr<Graph>, Value*> lambdaLift(Block* block) {
+      auto subgraph = std::make_shared<Graph>();
+      // note: type is set later on pack_context and context when we know it
+      Node* pack_context = graph->insertNode(graph->create(prim::TupleConstruct, {}, 1));
+      Value* context = subgraph->addInput("context");
+      // cannot use createTupleUnpack because the type is not known yet
+      Node* unpack_context = subgraph->insertNode(subgraph->create(prim::TupleUnpack, {context}, 0));
+
+      std::unordered_map<Value*, Value*> captures;
+      auto env = [&](Value* v) -> Value* {
+        auto it = captures.find(v);
+        if (it != captures.end()) {
+            return it->second;
+        }
+        pack_context->addInput(v);
+        Value* r = unpack_context->addOutput()->copyMetadata(v);
+        captures[v] = r;
+        return r;
+      };
+      subgraph->block()->cloneFrom(block, env);
+      auto context_type = TupleType::create(
+          fmap(pack_context->inputs(), [](Value* v) { return v->type(); }));
+      pack_context->output()->setType(context_type);
+      context->setType(context_type);
+      return std::make_pair(std::move(subgraph), pack_context->output());
+  }
+  // XXX - right now closures are used _only_ for defining gradients internally
+  // There are several unfinished aspects that make them unusable generally
+  // 1. We do not have a type, ivalue, operator to represent prim::Function, so closure_node has type None
+  //    and any graphs that contain it cannot be run
+  // 2. There is no export logic for it yet, so it cannot be exported/python_printed
+  // 3. There is nothing preventing the assignment of already existing variables inside the closures
+  //    the changes to those variables will just get forgotten.
+  // 4. There is no parsing support in frontend.py, this is intentional since it
+  //    prevents people from accidentally using this feature.
+  void emitClosure(const Def& def) {
+    Node* closure_node = graph->insertNode(graph->create(prim::Function, 1));
+    closure_node->output()->setType(NoneType::get()); //it is not a real thing yet, so just say the type is none.
+    Block* block = closure_node->addBlock();
+    {
+      WithInsertPoint guard(block);
+      pushFrame(block);
+      emitDef(def, nullptr, block); //ignore schema return, we just wont use it for now since we never create a Method for the closure
+      popFrame();
+    }
+    std::shared_ptr<Graph> subgraph;
+    Value* context;
+    std::tie(subgraph, context) = lambdaLift(block);
+    runCleanupPasses(subgraph);
+    closure_node->eraseBlock(0);
+    closure_node->g_(attr::Subgraph, std::move(subgraph));
+    auto tup = graph->insertNode(graph->createTuple({closure_node->output(), context}))->output();
+    environment_stack->setVar(def.name().range(), def.name().name(), tup);
   }
   void emitStatements(List<Stmt>::const_iterator begin, List<Stmt>::const_iterator end) {
     for (; begin != end; ++begin) {
@@ -636,6 +694,9 @@ private:
           break;
         case TK_PASS:
           // Emit nothing for pass
+          break;
+        case TK_DEF:
+          emitClosure(Def(stmt));
           break;
         default:
           throw ErrorReport(stmt)

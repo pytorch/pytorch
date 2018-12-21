@@ -1882,25 +1882,6 @@
     - real weight
 ]]
 [[
-  name: _th_logspace
-  cname: logspace
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - real start
-    - real end
-    - long steps
-]]
-[[
   name: _th_histc
   cname: histc
   types:

@@ -142,22 +142,22 @@ void createTensorToParameterNameMap(
   // they are keywords or namespaces used in the output
   const static std::unordered_set<std::string> reserved_names = {
     // identifiers in the environment while parsing
-    "_", // avoid the confusing unnamed _
     "aten",
-    "attribute",
+    "ops",
     "CONSTANTS",
     "fork",
+    "attribute",
     "getattr",
+    "_", // avoid the confusing unnamed _
     "inf",
     "nan",
-    "ops",
-    "self",
     // the python keywords
+    "False",
+    "None",
+    "True",
     "and",
     "as",
     "assert",
-    "async",
-    "await",
     "break",
     "class",
     "continue",
@@ -166,7 +166,6 @@ void createTensorToParameterNameMap(
     "elif",
     "else",
     "except",
-    "False",
     "finally",
     "for",
     "from",
@@ -176,14 +175,12 @@ void createTensorToParameterNameMap(
     "in",
     "is",
     "lambda",
-    "None",
     "nonlocal",
     "not",
     "or",
     "pass",
     "raise",
     "return",
-    "True",
     "try",
     "while",
     "with",
@@ -770,6 +767,17 @@ struct PythonPrintPass {
           stmt << ", " << useOf(v);
         }
         stmt << ")";
+      } break;
+      case prim::Function: {
+        if (enforce_importable_) {
+          throw script::ErrorReport(node->getSourceLocation()) << "closures are not exportable";
+        }
+        auto name = genMethodName("__lambda");
+        std::shared_ptr<Graph> graph = node->g(attr::Subgraph);
+        worklist.emplace_back([graph, name, this] {
+          printFunctionDefinition(*graph, name);
+        });
+        stmt << "self." << name;
       } break;
       default: {
         Symbol kind = node->kind();
