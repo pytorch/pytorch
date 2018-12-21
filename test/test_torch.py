@@ -22,6 +22,8 @@ from torch._six import inf, nan, string_classes
 from itertools import product, combinations
 from functools import reduce
 from torch import multiprocessing as mp
+from common_methods_invocations import tri_tests_args, run_additional_tri_tests, \
+    _compare_trilu_indices
 from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     TEST_LIBROSA, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfRocm, do_test_dtypes, do_test_empty_full, \
@@ -423,7 +425,7 @@ class _TestTorchMixin(object):
         def compare_reference(input, dtype):
             input = torch.tensor(input, dtype=dtype)
             res1 = torchfn(input.clone())
-            res2 = input.clone().apply_(lambda x: mathfn(x))
+            res2 = input.clone().apply_(mathfn)
             torch.testing.assert_allclose(res1, res2)
 
         # compare against the reference math function
@@ -1032,21 +1034,21 @@ class _TestTorchMixin(object):
     def test_reduction_empty(self):
         fns_to_test = [
             # name, function, identity
-            ('max', lambda *args, **kwargs: torch.max(*args, **kwargs), None),
+            ('max', torch.max, None),
             ('kthvalue', lambda *args, **kwargs: torch.kthvalue(*args, k=1, **kwargs), None),
-            ('argmax', lambda *args, **kwargs: torch.argmax(*args, **kwargs), None),
-            ('min', lambda *args, **kwargs: torch.min(*args, **kwargs), None),
-            ('argmin', lambda *args, **kwargs: torch.argmin(*args, **kwargs), None),
-            ('mode', lambda *args, **kwargs: torch.mode(*args, **kwargs), None),
-            ('median', lambda *args, **kwargs: torch.median(*args, **kwargs), None),
+            ('argmax', torch.argmax, None),
+            ('min', torch.min, None),
+            ('argmin', torch.argmin, None),
+            ('mode', torch.mode, None),
+            ('median', torch.median, None),
 
-            ('prod', lambda *args, **kwargs: torch.prod(*args, **kwargs), 1),
-            ('sum', lambda *args, **kwargs: torch.sum(*args, **kwargs), 0),
-            ('norm', lambda *args, **kwargs: torch.norm(*args, p=2, **kwargs), 0),
-            ('mean', lambda *args, **kwargs: torch.mean(*args, **kwargs), nan),
-            ('var', lambda *args, **kwargs: torch.var(*args, **kwargs), nan),
-            ('std', lambda *args, **kwargs: torch.std(*args, **kwargs), nan),
-            ('logsumexp', lambda *args, **kwargs: torch.logsumexp(*args, **kwargs), -inf),
+            ('prod', torch.prod, 1),
+            ('sum', torch.sum, 0),
+            ('norm', torch.norm, 0),
+            ('mean', torch.mean, nan),
+            ('var', torch.var, nan),
+            ('std', torch.std, nan),
+            ('logsumexp', torch.logsumexp, -inf),
         ]
 
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
@@ -3760,91 +3762,19 @@ class _TestTorchMixin(object):
         torch.tril(x, out=res2)
         self.assertEqual(res1, res2, 0)
 
-    def _compare_trilu_indices(self, row, col, offset=0, dtype=torch.long):
-        if row == 0 or col == 0:
-            # have to handle this separately as tril and triu does not take
-            # empty matrix as input
-            self.assertEqual(
-                torch.empty(0, 2, dtype=dtype).transpose(0, 1),
-                torch.tril_indices(row, col, offset, dtype=dtype))
+    def test_trilu_indices(self):
+        for test_args in tri_tests_args:
+            _compare_trilu_indices(self, *test_args)
 
-            self.assertEqual(
-                torch.empty(0, 2, dtype=dtype).transpose(0, 1),
-                torch.triu_indices(row, col, offset, dtype=dtype))
+        run_additional_tri_tests(self, 'cpu')
 
-        else:
-            self.assertEqual(
-                torch.ones(row, col, dtype=dtype)
-                     .tril(offset).nonzero().transpose(0, 1),
-                torch.tril_indices(row, col, offset, dtype=dtype))
-
-            self.assertEqual(
-                torch.ones(row, col, dtype=dtype)
-                     .triu(offset).nonzero().transpose(0, 1),
-                torch.triu_indices(row, col, offset, dtype=dtype))
-
-    def test_tril_and_triu_indices(self):
-        self._compare_trilu_indices(1, 1)
-        self._compare_trilu_indices(3, 3)
-        self._compare_trilu_indices(3, 3, offset=1)
-        self._compare_trilu_indices(3, 3, offset=2)
-        self._compare_trilu_indices(3, 3, offset=200)
-        self._compare_trilu_indices(3, 3, offset=-1)
-        self._compare_trilu_indices(3, 3, offset=-2)
-        self._compare_trilu_indices(3, 3, offset=-200)
-        self._compare_trilu_indices(0, 3, offset=0)
-        self._compare_trilu_indices(0, 3, offset=1)
-        self._compare_trilu_indices(0, 3, offset=-1)
-        self._compare_trilu_indices(3, 0, offset=0)
-        self._compare_trilu_indices(3, 0, offset=1)
-        self._compare_trilu_indices(3, 0, offset=-1)
-        self._compare_trilu_indices(0, 0, offset=0)
-        self._compare_trilu_indices(0, 0, offset=1)
-        self._compare_trilu_indices(0, 0, offset=-1)
-        self._compare_trilu_indices(3, 6, offset=0)
-        self._compare_trilu_indices(3, 6, offset=1)
-        self._compare_trilu_indices(3, 6, offset=3)
-        self._compare_trilu_indices(3, 6, offset=9)
-        self._compare_trilu_indices(3, 6, offset=-1)
-        self._compare_trilu_indices(3, 6, offset=-3)
-        self._compare_trilu_indices(3, 6, offset=-9)
-        self._compare_trilu_indices(6, 3, offset=0)
-        self._compare_trilu_indices(6, 3, offset=1)
-        self._compare_trilu_indices(6, 3, offset=3)
-        self._compare_trilu_indices(6, 3, offset=9)
-        self._compare_trilu_indices(6, 3, offset=-1)
-        self._compare_trilu_indices(6, 3, offset=-3)
-        self._compare_trilu_indices(6, 3, offset=-9)
-        self._compare_trilu_indices(258, 253, offset=1, dtype=torch.float32)
-        self._compare_trilu_indices(257, 258, offset=1, dtype=torch.float64)
-        self._compare_trilu_indices(258, 258, offset=1, dtype=torch.short)
-        self._compare_trilu_indices(3, 513, offset=1, dtype=torch.long)
-        self._compare_trilu_indices(513, 3, offset=1, dtype=torch.int)
-        self._compare_trilu_indices(513, 0, offset=1, dtype=torch.double)
-
+        # test default options
         x = torch.ones(
             3, 3, dtype=torch.long, device='cpu', layout=torch.strided)
-        l = x.tril(0).nonzero().transpose(0, 1)
-        u = x.triu(0).nonzero().transpose(0, 1)
-        self.assertEqual(l, torch.tril_indices(3, 3))
-        self.assertEqual(l, torch.tril_indices(3, 3, device='cpu'))
         self.assertEqual(
-            l, torch.tril_indices(3, 3, device='cpu', layout=torch.strided))
-
-        self.assertEqual(u, torch.triu_indices(3, 3))
-        self.assertEqual(u, torch.triu_indices(3, 3, device='cpu'))
+            x.tril(0).nonzero().transpose(0, 1), torch.tril_indices(3, 3))
         self.assertEqual(
-            u, torch.triu_indices(3, 3, device='cpu', layout=torch.strided))
-
-        self.assertRaises(
-            RuntimeError,
-            lambda: torch.triu_indices(
-                1, 1, device='cpu', layout=torch.sparse_coo))
-
-        self.assertRaises(
-            RuntimeError,
-            lambda: torch.tril_indices(
-                1, 1, device='cpu', layout=torch.sparse_coo))
+            x.triu(0).nonzero().transpose(0, 1), torch.triu_indices(3, 3))
 
     def test_triu(self):
         x = torch.rand(SIZE, SIZE)
@@ -5338,7 +5268,7 @@ class _TestTorchMixin(object):
             for i in range(o3.size(1)):
                 for j in range(k.size(1)):
                     o32[i].add(torch.xcorr2(x[i + j - 1], k[j]))
-        self._test_conv_corr_eq(lambda x, k: torch.xcorr3(x, k), reference)
+        self._test_conv_corr_eq(torch.xcorr3, reference)
 
     @unittest.skip("Not implemented yet")
     def test_xcorr3_xcorr2_eq_full(self):
@@ -5354,7 +5284,7 @@ class _TestTorchMixin(object):
             for i in range(o3.size(1)):
                 for j in range(k.size(1)):
                     o32[i].add(torch.conv2(x[i + j - 1], k[k.size(1) - j + 1]))
-        self._test_conv_corr_eq(lambda x, k: torch.conv3(x, k), reference)
+        self._test_conv_corr_eq(torch.conv3, reference)
 
     @unittest.skip("Not implemented yet")
     def test_fconv3_fconv2_eq(self):
