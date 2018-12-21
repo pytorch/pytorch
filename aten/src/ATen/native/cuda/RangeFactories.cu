@@ -1,5 +1,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/AccumulateType.h>
 #include <ATen/cuda/Exceptions.h>
 
 #include <thrust/device_ptr.h>
