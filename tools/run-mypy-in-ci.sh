@@ -10,10 +10,11 @@ if [[ $TRAVIS ]]; then
   BASE_BRANCH="upstream/$TRAVIS_BRANCH"
 fi
 
-echo $BASE_BRANCH
-echo $TRAVIS_BRANCH
-git status
-CHANGED_PYTHON_FILES=$(git diff --name-only $BASE_BRANCH..$TRAVIS_BRANCH | grep -E ".py\$" | tr '\n' ' ')
+echo $FETCH_HEAD
+echo $BASE_BRANCH   # upstream/master
+echo $TRAVIS_BRANCH # master
+CHANGED_PYTHON_FILES=$(git diff --name-only $BASE_BRANCH | grep -E ".py\$" | tr '\n' ' ')
+echo $(git diff --name-only $BASE_BRANCH)
 if [[ $CHANGED_PYTHON_FILES ]]; then
   time mypy $CHANGED_PYTHON_FILES
 else
