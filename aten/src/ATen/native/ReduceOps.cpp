@@ -386,22 +386,6 @@ Tensor logsumexp(const Tensor &self, int64_t dim_, bool keepdim) {
   return at::native::logsumexp_out(result, self, dim, keepdim);
 }
 
-static Tensor& _norm_out_cpu(Tensor& result, const Tensor& self, Scalar p, int64_t dim_, bool keepdim) {
-  int64_t dim = maybe_wrap_dim(dim_, self.dim());
-  if (_dimreduce_return_trivial(result, self, 0, dim, keepdim))
-    return result;
-  if (self.is_contiguous() && result.is_contiguous()) {
-    _dimreduce_setup(result, self, dim);
-    norm_kernel(kCPU, result, self, p, dim);
-    if (!keepdim) {
-      result.squeeze_(dim);
-    }
-    return result;
-  } else {
-    return at::legacy::th::_th_norm_out(result, self, p, dim, keepdim);
-  }
-}
-
 static Tensor& norm_out(Tensor &result, const Tensor &self, optional<Scalar> opt_p,
                                IntList dim, bool keepdim, optional<ScalarType> opt_dtype) {
   auto p = opt_p.value_or(2.0);
@@ -446,14 +430,6 @@ Tensor &norm_out(Tensor& result, const Tensor& self, optional<Scalar> p, IntList
   return at::native::norm_out(result, self, p, dim, keepdim, c10::nullopt);
 }
 
-// Tensor &norm_out(Tensor& result, const Tensor& self, Scalar p) {
-//   return at::native::norm_out(result, self, p, {}, false, c10::nullopt);
-// }
-
-// Tensor &norm_out(Tensor& result, const Tensor& self, Scalar p, ScalarType dtype) {
-//   return at::native::norm_out(result, self, p, {}, false, optional<ScalarType>(dtype));
-// }
-
 static Tensor norm(const Tensor& self, optional<Scalar> p, IntList dim, bool keepdim,
             optional<ScalarType> opt_dtype) {
   Tensor result;
@@ -467,10 +443,6 @@ Tensor norm(const Tensor& self, optional<Scalar> p, IntList dim, bool keepdim, S
 Tensor norm(const Tensor& self, optional<Scalar> p, ScalarType dtype) {
   return at::native::norm(self, p, {}, false, optional<ScalarType>(dtype));
 }
-
-// Tensor norm(const Tensor& self, Scalar p, IntList dim, ScalarType dtype) {
-//   return at::native::norm(self, p, dim, false, optional<ScalarType>(dtype));
-// }
 
 Tensor norm(const Tensor& self, optional<Scalar> p, IntList dim, bool keepdim) {
   return at::native::norm(self, p, dim, keepdim, c10::nullopt);
