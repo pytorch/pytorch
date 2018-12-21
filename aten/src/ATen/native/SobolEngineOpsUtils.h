@@ -25,7 +25,7 @@ static inline int64_t bitsubseq(const int64_t n, const int pos, const int length
 
 /// Function to perform the inner product between a batched square matrix and a power of 2 vector
 static inline at::Tensor cdot_pow2(const at::Tensor& bmat) {
-  at::Tensor inter = at::getType(bmat.options().dtype(at::kLong))._arange(bmat.size(-1) - 1, -1, -1);
+  at::Tensor inter = at::arange(bmat.size(-1) - 1, -1, -1, at::kLong);
   inter = at::pow(2, inter).expand_as(bmat);
   return at::mul(inter, bmat).sum(-1);
 }
