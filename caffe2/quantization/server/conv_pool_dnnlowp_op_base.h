@@ -6,6 +6,7 @@
 
 #include "caffe2/core/tensor_int8.h"
 #include "caffe2/operators/conv_pool_op_base.h"
+#include "caffe2/quantization/server/fbgemm_pack_blob.h"
 #include "caffe2/quantization/server/op_wrapper.h"
 
 #ifdef _OPENMP
@@ -44,9 +45,13 @@ class ConvPoolDNNLowPOpBase : public ConvPoolOpBase<CPUContext> {
 
  protected:
   const TensorCPU& InputTensorCPU_(int idx) {
-    return InputIsType<int8::Int8TensorCPU>(idx)
-        ? OperatorBase::Input<int8::Int8TensorCPU>(idx).t
-        : Input(idx);
+    if (InputIsType<int8::Int8TensorCPU>(idx)) {
+      return this->Input<int8::Int8TensorCPU>(idx).t;
+    } else if (InputIsType<Int8ConvDNNLowPPackedWeightBlob>(idx)) {
+      return this->Input<Int8ConvDNNLowPPackedWeightBlob>(idx).original_tensor;
+    } else {
+      return Input(idx);
+    }
   }
 
   TensorCPU* OutputTensorCPU_(int idx) {

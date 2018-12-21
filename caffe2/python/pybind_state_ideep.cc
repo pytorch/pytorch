@@ -161,7 +161,7 @@ public:
   }
 
   void Feed(const DeviceOption &option, PyArrayObject *original_array,
-            Blob *blob) {
+            Blob *blob, bool in_place) {
 #ifdef USE_NUMPY
     try {
       PyArrayObject *array = PyArray_GETCONTIGUOUS(original_array);
@@ -176,8 +176,15 @@ public:
         DeviceOption cpu_option(option);
         cpu_option.set_device_type(DeviceTypeProto::PROTO_CPU);
         TensorFeeder<CPUContext> cpu_tensor_feeder;
-        blob->Reset<Tensor>(new Tensor(
-            cpu_tensor_feeder.FeedTensor(cpu_option, original_array)));
+        if (in_place) {
+          cpu_tensor_feeder.FeedTensor(
+              option,
+              original_array,
+              BlobGetMutableTensor(blob, OptionToDevice(option).type()));
+        } else {
+          blob->Reset<Tensor>(new Tensor(
+                                  cpu_tensor_feeder.FeedTensor(cpu_option, original_array)));
+        }
       }
     } catch (ideep::error &e) {
       LOG(ERROR) << "IDEEP error: " << e.message;

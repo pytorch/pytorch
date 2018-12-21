@@ -215,7 +215,7 @@ inline at::Tensor flattenDenseTensors(at::TensorList tensors) {
   if (tensors.size() == 1) {
     return flatten(tensors[0]);
   }
-  return at::cat(fmap(tensors, flatten));
+  return at::cat(::c10d::fmap(tensors, flatten));
 }
 
 inline at::Tensor newLikeFlat(

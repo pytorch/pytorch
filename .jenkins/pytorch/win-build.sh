@@ -55,11 +55,11 @@ set LIB=%cd%\\mkl\\lib;%LIB
 :: Install MAGMA
 if "%REBUILD%"=="" (
   if "%BUILD_ENVIRONMENT%"=="" (
-    curl -k https://s3.amazonaws.com/ossci-windows/magma_cuda90_release_mkl_2018.2.185.7z --output magma_cuda90_release_mkl_2018.2.185.7z
+    curl -k https://s3.amazonaws.com/ossci-windows/magma_2.4.0_cuda90_release.7z --output magma_2.4.0_cuda90_release.7z
   ) else (
-    aws s3 cp s3://ossci-windows/magma_cuda90_release_mkl_2018.2.185.7z magma_cuda90_release_mkl_2018.2.185.7z --quiet
+    aws s3 cp s3://ossci-windows/magma_2.4.0_cuda90_release.7z magma_2.4.0_cuda90_release.7z --quiet
   )
-  7z x -aoa magma_cuda90_release_mkl_2018.2.185.7z -omagma
+  7z x -aoa magma_2.4.0_cuda90_release.7z -omagma
 )
 set MAGMA_HOME=%cd%\\magma
 
@@ -141,6 +141,11 @@ if not "%USE_CUDA%"=="0" (
     sccache --show-stats
     sccache --zero-stats
     rd /s /q %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\torch
+    for /f "delims=" %%i in ('where /R caffe2\proto *.py') do (
+      IF NOT "%%i" == "%CD%\caffe2\proto\__init__.py" (
+        del /S /Q %%i
+      )
+    )
     copy %CD%\\tmp_bin\\sccache.exe tmp_bin\\nvcc.exe
   )
 

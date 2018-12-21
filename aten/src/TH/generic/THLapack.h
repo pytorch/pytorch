@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THLapack.h"
+#define TH_GENERIC_FILE "TH/generic/THLapack.h"
 #else
 
 /* AX=B */

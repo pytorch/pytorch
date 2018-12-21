@@ -1,6 +1,6 @@
 #pragma once
-#include "torch/csrc/WindowsTorchApiMacro.h"
-#include "torch/csrc/jit/ir.h"
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/ir.h>
 #include <iostream>
 #include <vector>
 

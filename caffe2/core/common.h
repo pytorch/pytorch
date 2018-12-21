@@ -93,7 +93,7 @@ using std::vector;
 #define CAFFE2_NORETURN __attribute__((noreturn))
 #endif
 
-#if defined(_MSC_VER)
+#if (defined _MSC_VER && !defined NOMINMAX)
 #define NOMINMAX
 #endif
 

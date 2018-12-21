@@ -1,7 +1,7 @@
-#include "THCApply.cuh"
-#include "TH/THHalf.h"
-#include "THCNumerics.cuh"
-#include "THCTensorCopy.hpp"
+#include <THC/THCApply.cuh>
+#include <TH/THHalf.h>
+#include <THC/THCNumerics.cuh>
+#include <THC/THCTensorCopy.hpp>
 #include <type_traits>
 
 // Copy operator for the pointwise apply kernel
@@ -16,5 +16,5 @@ struct CopyOp {
   }
 };
 
-#include "generic/THCTensorCopy.cu"
-#include "THCGenerateAllTypes.h"
+#include <THC/generic/THCTensorCopy.cu>
+#include <THC/THCGenerateAllTypes.h>

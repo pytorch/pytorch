@@ -108,12 +108,12 @@ bool PoolGradientOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNCHW() {
   const auto& X = Input(0);
   const auto& Y = Input(1);
   auto& dY = Input(2);
-  auto* dX = Output(0);
+
   const auto p = OperatorBase::GetSingleArgument<float>("p", 2.0);
   const auto inv_p = 1.0 / p;
 
   // TODO(Yangqing): Add shape checks.
-  dX->ResizeLike(X);
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
   math::Set<float, CPUContext>(
       X.numel(), 0, dX->template mutable_data<float>(), &context_);
   const float* dYdata = dY.data<float>();
@@ -167,9 +167,9 @@ bool PoolGradientOp<float, CPUContext, LpPool>::RunOnDeviceWithOrderNHWC() {
   const auto& Y = Input(1);
   auto& dY = Input(2);
   CAFFE_ENFORCE_EQ(dY.dim(), 4);
-  auto* dX = Output(0);
+
   // TODO(Yangqing): Add shape checks.
-  dX->ResizeLike(X);
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
   math::Set<float, CPUContext>(
       X.numel(), 0, dX->template mutable_data<float>(), &context_);
   const float* dYdata = dY.data<float>();

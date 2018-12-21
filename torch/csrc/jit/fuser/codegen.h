@@ -1,12 +1,12 @@
 #pragma once
-#include "torch/csrc/jit/fuser/config.h"
+#include <torch/csrc/jit/fuser/config.h>
 #if USE_CUDA_FUSER || USE_CPU_FUSER
 
-#include "torch/csrc/WindowsTorchApiMacro.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/fuser/arg_spec.h"
-#include "torch/csrc/jit/fuser/partition_desc.h"
-#include "torch/csrc/jit/fuser/tensor_desc.h"
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/fuser/arg_spec.h>
+#include <torch/csrc/jit/fuser/partition_desc.h>
+#include <torch/csrc/jit/fuser/tensor_desc.h>
 
 #include <tuple>
 #include <vector>

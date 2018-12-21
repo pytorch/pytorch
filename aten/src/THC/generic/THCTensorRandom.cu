@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorRandom.cu"
+#define THC_GENERIC_FILE "THC/generic/THCTensorRandom.cu"
 #else
 
 #define NUM_BLOCKS min((int)THCCeilDiv(size, (ptrdiff_t) BLOCK_SIZE), MAX_NUM_BLOCKS)

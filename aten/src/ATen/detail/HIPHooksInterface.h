@@ -4,7 +4,7 @@
 #include <ATen/core/Generator.h>
 #include <c10/util/Exception.h>
 
-#include "c10/util/Registry.h"
+#include <c10/util/Registry.h>
 
 #include <cstddef>
 #include <functional>

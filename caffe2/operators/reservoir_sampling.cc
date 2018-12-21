@@ -81,7 +81,7 @@ class ReservoirSamplingOp final : public Operator<Context> {
     if (num_entries == 0) {
       if (!output_initialized) {
         // Get both shape and meta
-        output->CopyFrom(input, &context_);
+        output->CopyFrom(input, /* async */ true);
       }
       return true;
     }

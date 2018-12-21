@@ -129,7 +129,7 @@ def _rank_not_in_group(group):
     Helper that checks if the current process's rank is not in a given group
 
     """
-    default_backend, _ = _pg_map[get_default_group()]
+    default_backend, _ = _pg_map[_get_default_group()]
     if default_backend != Backend.MPI:
         return group == GroupMember.NON_GROUP_MEMBER
     else:
@@ -249,7 +249,7 @@ def is_initialized():
     return _default_pg is not None
 
 
-def get_default_group():
+def _get_default_group():
     """
     Getting the default process group created by init_process_group
 
@@ -447,7 +447,7 @@ def destroy_process_group(group=group.WORLD):
     global _default_pg
     global _default_pg_init_method
 
-    default_backend, _ = _pg_map[get_default_group()]
+    default_backend, _ = _pg_map[_get_default_group()]
     if (default_backend != Backend.MPI and
             group == GroupMember.NON_GROUP_MEMBER):
         return

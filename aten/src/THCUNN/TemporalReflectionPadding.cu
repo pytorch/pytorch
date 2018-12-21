@@ -1,16 +1,16 @@
-#include "THCUNN.h"
-#include "common.h"
-#include "THCDeviceTensor.cuh"
-#include "THCDeviceTensorUtils.cuh"
-#include "THCDeviceUtils.cuh"
-#include "THCReduceApplyUtils.cuh"
+#include <THCUNN/THCUNN.h>
+#include <THCUNN/common.h>
+#include <THC/THCDeviceTensor.cuh>
+#include <THC/THCDeviceTensorUtils.cuh>
+#include <THC/THCDeviceUtils.cuh>
+#include <THC/THCReduceApplyUtils.cuh>
 #include <THC/THCApply.cuh>
-#include "THCTensor.hpp"
-#include "THCStorage.hpp"
+#include <THC/THCTensor.hpp>
+#include <THC/THCStorage.hpp>
 
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
-#include "THCAtomics.cuh"
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCAtomics.cuh>
 
 template<typename Dtype>
 __global__ void TemporalReflectionPadding_updateOutput(
@@ -66,5 +66,5 @@ __global__ void TemporalReflectionPadding_updateGradInput(
   atomicAdd(&gradInput[batch][plane][inputPointX], valueToCopy);
 }
 
-#include "generic/TemporalReflectionPadding.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/TemporalReflectionPadding.cu>
+#include <THC/THCGenerateFloatTypes.h>

@@ -1,11 +1,11 @@
 #pragma once
 
 #include <memory>
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/variable_tensor_list.h"
-#include "torch/csrc/jit/interpreter.h"
-#include "torch/csrc/jit/autodiff.h"
-#include "torch/csrc/jit/argument_spec.h"
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/variable_tensor_list.h>
+#include <torch/csrc/jit/interpreter.h>
+#include <torch/csrc/jit/autodiff.h>
+#include <torch/csrc/jit/argument_spec.h>
 
 namespace torch { namespace jit {
 

@@ -72,10 +72,16 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return printList(out, v.toGenericList(), "[", "]");
     case IValue::Tag::Future:
       return out << "Future";
+    case IValue::Tag::Device:
+      return out << v.toDevice();
   }
   AT_ERROR("Tag not found\n");
 }
 
 #undef TORCH_FORALL_TAGS
+
+void IValue::dump() const {
+  std::cout << *this << "\n";
+}
 
 } // namespace c10

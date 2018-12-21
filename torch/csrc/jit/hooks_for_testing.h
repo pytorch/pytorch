@@ -1,6 +1,6 @@
 #pragma once
 #include <functional>
-#include "torch/csrc/WindowsTorchApiMacro.h"
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <memory>
 
 namespace torch {

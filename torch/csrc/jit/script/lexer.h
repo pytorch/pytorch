@@ -6,8 +6,8 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/source_range.h"
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/source_range.h>
 #include <torch/csrc/utils/memory.h>
 #include <clocale>
 
@@ -109,7 +109,7 @@ enum TokenKind {
 };
 
 std::string kindToString(int kind);
-int stringToKind(std::string str);
+int stringToKind(const std::string& str);
 
 // nested hash tables that indicate char-by-char what is a valid token.
 struct TokenTrie;

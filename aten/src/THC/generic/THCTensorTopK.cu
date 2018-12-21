@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorTopK.cu"
+#define THC_GENERIC_FILE "THC/generic/THCTensorTopK.cu"
 #else
 
 void THCTensor_(topk)(THCState* state,

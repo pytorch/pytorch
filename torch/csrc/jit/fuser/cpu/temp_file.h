@@ -1,13 +1,13 @@
 #pragma once
-#include "torch/csrc/jit/fuser/config.h"
+#include <torch/csrc/jit/fuser/config.h>
 #if USE_CPU_FUSER
 
-#include "ATen/ATen.h"
-#include "torch/csrc/WindowsTorchApiMacro.h"
-#include "torch/csrc/utils/disallow_copy.h"
-#include "torch/csrc/jit/assertions.h"
+#include <ATen/ATen.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/utils/disallow_copy.h>
+#include <torch/csrc/jit/assertions.h>
 
-#include "unistd.h"
+#include <unistd.h>
 
 #include <string>
 #include <vector>

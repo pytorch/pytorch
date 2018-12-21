@@ -1,12 +1,12 @@
 #pragma once
-#include "torch/csrc/jit/fuser/config.h"
+#include <torch/csrc/jit/fuser/config.h>
 #if USE_CUDA_FUSER || USE_CPU_FUSER
 
-#include "ATen/ATen.h"
-#include "torch/csrc/WindowsTorchApiMacro.h"
-#include "torch/csrc/utils/hash.h"
-#include "torch/csrc/jit/type.h"
-#include "torch/csrc/jit/assertions.h"
+#include <ATen/ATen.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/utils/hash.h>
+#include <torch/csrc/jit/type.h>
+#include <torch/csrc/jit/assertions.h>
 
 #include <vector>
 #include <iostream>
@@ -43,7 +43,7 @@ struct TORCH_API TensorDesc {
   TensorDesc(const at::Tensor& t)
   : TensorDesc(t.type().scalarType(), t.sizes(), t.strides()) {}
 
-  TensorDesc(CompleteTensorTypePtr type)
+  TensorDesc(const CompleteTensorTypePtr& type)
   : TensorDesc(type->scalarType(), type->sizes(), type->strides()) {}
 
   // number of dimensions after contiguity compression
@@ -91,7 +91,7 @@ inline std::ostream& operator<<(std::ostream& out, const TensorDesc& d) {
 }
 
 } // namespace fuser
-} // namespace jit 
+} // namespace jit
 } // namespace torch
 
 #endif // USE_CUDA_FUSER || USE_CPU_FUSER

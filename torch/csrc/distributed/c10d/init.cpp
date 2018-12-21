@@ -383,7 +383,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
               // Use the hostname to resolve the network address to
               // use. Note: if the hostname does not resolve to an address (e.g.
               // because of misconfigured /etc/hosts file), this will not work.
-              std::array<char, HOST_NAME_MAX> hostname;
+              std::array<char, HOST_NAME_MAX> hostname{};
               auto rv = gethostname(hostname.data(), hostname.size());
               if (rv != 0) {
                 throw std::system_error(errno, std::system_category());

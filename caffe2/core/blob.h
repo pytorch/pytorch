@@ -28,6 +28,29 @@ inline Tensor* BlobSetTensor(Blob* blob, const Tensor& tensor) {
   return blob->Reset<Tensor>(new Tensor(tensor));
 }
 
+inline Tensor GetSizedTensorWithOptions(
+    const Tensor& t,
+    at::IntList dims,
+    at::TensorOptions options) {
+  Tensor tensor = t;
+  if (tensor.GetDevice() == options.device() ||
+      (!tensor.GetDevice().has_index() &&
+       tensor.GetDeviceType() == options.device().type())) {
+    if (tensor.sizes() != dims) {
+      // Resize when the dims doesn't match
+      tensor.Resize(dims);
+    }
+    if (tensor.dtype() == options.dtype()) {
+      tensor.raw_mutable_data();
+    } else {
+      // create a new Tensor when the data_type doesn't match
+      return caffe2::empty(dims, options);
+    }
+    return tensor;
+  }
+  return caffe2::empty(dims, options);
+}
+
 // need to keep both functions that returns Tensor* and the one
 // returns Tensor for clangr codemod
 inline Tensor*

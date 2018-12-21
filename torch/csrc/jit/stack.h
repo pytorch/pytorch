@@ -1,7 +1,7 @@
 #pragma once
-#include "ATen/ATen.h"
+#include <ATen/ATen.h>
 
-#include "torch/csrc/jit/ivalue.h"
+#include <torch/csrc/jit/ivalue.h>
 
 namespace torch { namespace jit {
 

@@ -1,8 +1,8 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/VolumetricAveragePooling.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/VolumetricAveragePooling.cu"
 #else
 
-#include "pooling_shape.h"
+#include <THCUNN/generic/pooling_shape.h>
 
 static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
                          THCState *state,

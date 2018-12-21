@@ -1,8 +1,8 @@
 #pragma once
-#include "torch/csrc/jit/ivalue.h"
-#include "torch/csrc/jit/scope.h"
-#include "torch/csrc/jit/source_range.h"
-#include "torch/csrc/WindowsTorchApiMacro.h"
+#include <torch/csrc/jit/ivalue.h>
+#include <torch/csrc/jit/scope.h>
+#include <torch/csrc/jit/source_range.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 // helpers for handling constants in the IR
 // - create constant nodes from ints, floats, intlist, Tensors, and other types
@@ -22,7 +22,7 @@ struct TORCH_API constant_not_supported_error : public std::runtime_error {
 // closely related to the implementation of prim::Constant that is also in constants.cpp
 TORCH_API Value* insertConstant(
     Graph& g,
-    IValue val,
+    const IValue& val,
     c10::optional<SourceRange> loc = c10::nullopt,
     c10::optional<ScopePtr> scope = c10::nullopt);
 

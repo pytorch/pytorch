@@ -1,7 +1,7 @@
-#include "torch/csrc/jit/script/python_tree_views.h"
+#include <torch/csrc/jit/script/python_tree_views.h>
 
-#include "torch/csrc/jit/script/compiler.h"
-#include "torch/csrc/jit/script/tree_views.h"
+#include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/script/tree_views.h>
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -101,16 +101,16 @@ void initTreeViewBindings(PyObject *module) {
     return Expr(Compound::create(TK_NONE, range, {}));
   });
 
-  py::class_<Stmt, TreeView>(m, "Stmt");
-  py::class_<Expr, TreeView>(m, "Expr");
+  py::class_<Stmt, TreeView>(m, "Stmt"); // NOLINT(bugprone-unused-raii)
+  py::class_<Expr, TreeView>(m, "Expr"); // NOLINT(bugprone-unused-raii)
   py::class_<Def, TreeView>(m, "Def")
     .def(py::init([](const Ident& name,
                      Decl decl,
                      std::vector<Stmt> body) {
-      auto r = name.range();
+      const auto& r = name.range();
       return Def::create(r,
                          name,
-                         std::move(decl),
+                         decl,
                          wrap_list(r, std::move(body)));
     }));
   py::class_<Decl, TreeView>(m, "Decl")
@@ -127,13 +127,13 @@ void initTreeViewBindings(PyObject *module) {
     }));
   py::class_<AugAssign, Stmt>(m, "AugAssign")
     .def(py::init([](const Expr& lhs, std::string kind_str, const Expr& rhs) {
-      auto r = lhs.range();
+      const auto& r = lhs.range();
       auto kind = AugAssignKind(Compound::create(stringToKind(kind_str), r, {}));
       return AugAssign::create(r, lhs, kind, rhs);
     }));
   py::class_<Return, Stmt>(m, "Return")
-    .def(py::init([](const SourceRange& range, std::vector<Expr> values) {
-      return Return::create(range, wrap_list(range, std::move(values)));
+    .def(py::init([](const SourceRange& range, Expr* value) {
+      return Return::create(range, value ? *value : Expr(Compound::create(TK_NONE, range, {})));
     }));
   py::class_<Raise, Stmt>(m, "Raise")
     .def(py::init([](const SourceRange& range, Expr *expr) {
@@ -198,13 +198,13 @@ void initTreeViewBindings(PyObject *module) {
     }));
   py::class_<Apply, Expr>(m, "Apply")
     .def(py::init([](const Expr& expr, std::vector<Expr> args, std::vector<Attribute> kwargs) {
-      auto r = expr.range();
+      const auto& r = expr.range();
       return Apply::create(expr.range(), expr,
                            wrap_list(r, std::move(args)), wrap_list(r, std::move(kwargs)));
     }));
   py::class_<Select, Expr>(m, "Select")
     .def(py::init([](const Expr& expr, const Ident& field) {
-      auto r = expr.range();
+      const auto& r = expr.range();
       return Select::create(expr.range(), expr, field);
     }));
   py::class_<TernaryIf, Expr>(m, "TernaryIf")

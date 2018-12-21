@@ -66,7 +66,7 @@ class BlobFeederBase {
  public:
   virtual ~BlobFeederBase();
   virtual void
-  Feed(const DeviceOption& option, PyArrayObject* array, Blob* blob) = 0;
+  Feed(const DeviceOption& option, PyArrayObject* array, Blob* blob, bool in_place = false) = 0;
 };
 
 C10_DECLARE_TYPED_REGISTRY(
@@ -178,7 +178,10 @@ class TensorFetcher : public BlobFetcherBase {
 template <class Context>
 class TensorFeeder : public BlobFeederBase {
  public:
-  Tensor FeedTensor(const DeviceOption& option, PyArrayObject* original_array) {
+  Tensor FeedTensor(
+      const DeviceOption& option,
+      PyArrayObject* original_array,
+      Tensor* out = nullptr) {
 #ifdef USE_NUMPY
     PyArrayObject* array = PyArray_GETCONTIGUOUS(original_array);
     auto g = MakeGuard([&]() { Py_XDECREF(array); });
@@ -201,12 +204,19 @@ class TensorFeeder : public BlobFeederBase {
     }
 
     Tensor tensor;
+    bool in_place = out != nullptr;
+    if (in_place) {
+      out->Resize(dims);
+      tensor = *out;
+    }
     // Now, copy the data to the tensor.
     switch (npy_type) {
       case NPY_OBJECT: {
         PyObject** input = reinterpret_cast<PyObject**>(PyArray_DATA(array));
-        tensor = caffe2::empty(
-            dims, at::dtype<std::string>().device(Context::GetDeviceType()));
+        if (!in_place) {
+          tensor = caffe2::empty(
+              dims, at::dtype<std::string>().device(Context::GetDeviceType()));
+        }
         auto* outPtr = tensor.template mutable_data<std::string>();
         for (int i = 0; i < tensor.numel(); ++i) {
           char* str;
@@ -240,8 +250,12 @@ class TensorFeeder : public BlobFeederBase {
             "instead of unicode strings.");
         break;
       default:
-        tensor = caffe2::empty(
-            dims, at::TensorOptions(dtype).device(Context::GetDeviceType()));
+        if (!in_place) {
+          tensor = caffe2::empty(
+              dims, at::dtype(dtype).device(Context::GetDeviceType()));
+        } else {
+          tensor.raw_mutable_data(dtype);
+        }
         context.CopyBytesFromCPU(
             tensor.numel() * dtype.itemsize(),
             static_cast<void*>(PyArray_DATA(array)),
@@ -255,9 +269,19 @@ class TensorFeeder : public BlobFeederBase {
 #endif // USE_NUMPY
   }
 
-  virtual void
-  Feed(const DeviceOption& option, PyArrayObject* original_array, Blob* blob) {
-    blob->Reset<Tensor>(new Tensor(FeedTensor(option, original_array)));
+  virtual void Feed(
+      const DeviceOption& option,
+      PyArrayObject* original_array,
+      Blob* blob,
+      bool in_place) {
+    if (in_place) {
+      FeedTensor(
+          option,
+          original_array,
+          BlobGetMutableTensor(blob, OptionToDevice(option).type()));
+    } else {
+      blob->Reset<Tensor>(new Tensor(FeedTensor(option, original_array)));
+    }
   }
 };
 

@@ -1,9 +1,9 @@
 #pragma once
-#include "torch/csrc/jit/fuser/config.h"
+#include <torch/csrc/jit/fuser/config.h>
 #if USE_CUDA_FUSER || USE_CPU_FUSER
 
-#include "torch/csrc/WindowsTorchApiMacro.h"
-#include "torch/csrc/jit/stack.h"
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/stack.h>
 
 #include <cstdint>
 

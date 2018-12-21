@@ -25,11 +25,11 @@ class FullyConnectedDNNLowPAcc16Op final
   using BaseType::W_quantized_;
 
  private:
-  std::unique_ptr<fbgemm::PackBMatrix<std::int8_t, std::int16_t>>
+  std::shared_ptr<fbgemm::PackBMatrix<std::int8_t, std::int16_t>>
       Wq_acc16_packed_;
 
   // Wq outlier in CSC format
-  std::unique_ptr<fbgemm::CompressedSparseColumn> Wq_outlier_;
+  std::shared_ptr<fbgemm::CompressedSparseColumn> Wq_outlier_;
   int nbits_in_non_outlier_;
   int copy_to_32bit_frequency_;
 }; // class FullyConnectedDNNLowPAcc16Op

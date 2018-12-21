@@ -1,11 +1,11 @@
 #ifndef THC_TENSOR_MASKED_CUH
 #define THC_TENSOR_MASKED_CUH
-#include "THCTensorMath.h"
-#include "THCGeneral.h"
-#include "THCTensorCopy.h"
-#include "THCApply.cuh"
-#include "THCReduce.cuh"
-#include "THCThrustAllocator.cuh"
+#include <THC/THCTensorMath.h>
+#include <THC/THCGeneral.h>
+#include <THC/THCTensorCopy.h>
+#include <THC/THCApply.cuh>
+#include <THC/THCReduce.cuh>
+#include <THC/THCThrustAllocator.cuh>
 
 #include <thrust/device_ptr.h>
 #include <thrust/scan.h>

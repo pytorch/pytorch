@@ -41,7 +41,7 @@ if (NOT MSVC AND CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
       add_library(Caffe2_perfkernels_avx512 OBJECT ${avx512_srcs})
       add_dependencies(Caffe2_perfkernels_avx512 Caffe2_PROTO c10)
       set_target_properties(
-          Caffe2_perfkernels_avx512 PROPERTIES COMPILE_FLAGS "-mavx512f -mavx512dq -mavx2 -mfma -mavx -mf16c")
+          Caffe2_perfkernels_avx512 PROPERTIES COMPILE_FLAGS "-mavx512f -mavx512dq -mavx512vl -mavx2 -mfma -mavx -mf16c")
       set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS}
           $<TARGET_OBJECTS:Caffe2_perfkernels_avx512>)
   endif()

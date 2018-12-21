@@ -1,11 +1,11 @@
-#include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
+#include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/autodiff.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/passes/alias_analysis.h"
-#include "torch/csrc/jit/passes/common_subexpression_elimination.h"
-#include "torch/csrc/jit/passes/utils/subgraph_utils.h"
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/autodiff.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/passes/alias_analysis.h>
+#include <torch/csrc/jit/passes/common_subexpression_elimination.h>
+#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 
 namespace torch {
 namespace jit {
@@ -168,7 +168,7 @@ class SubgraphSlicer {
 } // anonymous namespace
 
 std::vector<Node*> CreateAutodiffSubgraphs(
-    std::shared_ptr<Graph> graph,
+    const std::shared_ptr<Graph>& graph,
     size_t threshold) {
   std::vector<Node*> diff_nodes;
   SubgraphSlicer(graph->block(), graph, threshold).run(diff_nodes);

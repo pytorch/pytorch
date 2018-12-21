@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THTensorMath.cpp"
+#define TH_GENERIC_FILE "TH/generic/THTensorMath.cpp"
 #else
 
 #include <TH/generic/THTensorApply.hpp>

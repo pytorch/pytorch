@@ -1,16 +1,16 @@
 #pragma once
-#include "torch/csrc/jit/fuser/config.h"
+#include <torch/csrc/jit/fuser/config.h>
 #if USE_CUDA_FUSER || USE_CPU_FUSER
 
-#include "ATen/ATen.h"
-#include "torch/csrc/WindowsTorchApiMacro.h"
-#include "c10/util/Optional.h"
-#include "torch/csrc/jit/stack.h"
-#include "torch/csrc/jit/interpreter.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/fuser/interface.h"
-#include "torch/csrc/jit/fuser/arg_spec.h"
-#include "torch/csrc/jit/fuser/fused_kernel.h"
+#include <ATen/ATen.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/util/Optional.h>
+#include <torch/csrc/jit/stack.h>
+#include <torch/csrc/jit/interpreter.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/fuser/interface.h>
+#include <torch/csrc/jit/fuser/arg_spec.h>
+#include <torch/csrc/jit/fuser/fused_kernel.h>
 
 #include <memory>
 #include <cstdint>
@@ -53,19 +53,16 @@ private:
  // TODO: allow abstract kernels to use multiple generated kernels
  // TODO: allow abstract kernels to reuse generated kernels from common pool
 struct TORCH_API KernelSpec {
-  KernelSpec(
-    const int64_t _key
-  , std::shared_ptr<Graph> _graph)
-  : key_{_key}
-  , graph_{_graph}
-  , code_{_graph}
-  , nInputs_{_graph->inputs().size()}
-  , inputBroadcastGroups_{}
-  , inputChunks_{}
-  , kernels_{}
-  { }
+  KernelSpec(const int64_t _key, const std::shared_ptr<Graph>& _graph)
+      : key_{_key},
+        graph_{_graph},
+        code_{_graph},
+        nInputs_{_graph->inputs().size()},
+        inputBroadcastGroups_{},
+        inputChunks_{},
+        kernels_{} {}
 
-   // Getters
+  // Getters
   int64_t key() const { return key_; }
   std::shared_ptr<Graph> graph() const { return graph_; }
   const Code& code() const { return code_; }

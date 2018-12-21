@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCStorage.cu"
+#define THC_GENERIC_FILE "THC/generic/THCStorage.cu"
 #else
 
 void THCStorage_(fill)(THCState *state, THCStorage *self, scalar_t value)

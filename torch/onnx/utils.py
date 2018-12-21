@@ -510,6 +510,8 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 elif n.kindOf("value") == "is":
                     value = torch.stack([torch.tensor(v) for v in n["value"]]) if n["value"] else []
                     return g.op("Constant", value_t=value)
+                elif n.output().type().kind() == "DeviceObjType":
+                    return None
                 else:
                     raise RuntimeError("Unsupported prim::Constant kind: `{}`. Send a bug report.".format(
                         n.kindOf("value")))

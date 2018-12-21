@@ -1,8 +1,8 @@
-#include "torch/csrc/autograd/profiler.h"
-#include "torch/csrc/jit/custom_operator.h"
-#include "torch/csrc/jit/operator.h"
-#include "torch/csrc/api/include/torch/utils.h"
-#include "../ATen/ExpandUtils.h"
+#include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/jit/custom_operator.h>
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/api/include/torch/utils.h>
+#include <ATen/ExpandUtils.h>
 
 #include <sstream>
 #include <regex>
@@ -112,6 +112,15 @@ RegisterOperators reg({
           at::Tensor result = at::embedding_renorm_(weight, input, max_norm, norm_type);
           push(stack, result);
 
+          return 0;
+        };
+      }),
+    Operator(
+      "aten::_assert_int_or_pair(int[] vals, str name, str message) -> Tensor",
+      [](const Node* node) {
+        return [](Stack& stack) {
+          // Everything is a list at the point this is used, so don't do anything
+          drop(stack, 3);
           return 0;
         };
       }),

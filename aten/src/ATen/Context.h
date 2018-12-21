@@ -1,20 +1,19 @@
 #pragma once
 
 #include <ATen/CPUGeneral.h>
-#include "ATen/Type.h"
-#include "ATen/TypeExtendedInterface.h"
-#include "ATen/Utils.h"
-#include "ATen/core/ATenGeneral.h"
-#include "ATen/core/Generator.h"
-#include "ATen/core/LegacyTypeDispatch.h"
-#include "ATen/core/VariableHooksInterface.h"
-#include "ATen/detail/CUDAHooksInterface.h"
-#include "ATen/detail/HIPHooksInterface.h"
-#include "ATen/detail/ComplexHooksInterface.h"
-#include "c10/util/Exception.h"
-
-// This is temporary
-#include "ATen/core/ATenCoreTest.h"
+#include <ATen/Type.h>
+#include <ATen/TypeExtendedInterface.h>
+#include <ATen/Utils.h>
+#include <ATen/LegacyTHDispatch.h>
+#include <ATen/LegacyTHDispatcher.h>
+#include <ATen/core/ATenGeneral.h>
+#include <ATen/core/Generator.h>
+#include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/core/VariableHooksInterface.h>
+#include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/detail/HIPHooksInterface.h>
+#include <ATen/detail/ComplexHooksInterface.h>
+#include <c10/util/Exception.h>
 
 #include <memory>
 #include <mutex>
@@ -42,11 +41,19 @@ class CAFFE2_API Context {
   TypeExtendedInterface & getType(Backend p, ScalarType s, bool is_variable) {
     return static_cast<TypeExtendedInterface&>(globalLegacyTypeDispatch().getType(p, s, is_variable));
   }
+  LegacyTHDispatcher& getLegacyTHDispatcher(Backend p, ScalarType s) {
+    return globalLegacyTHDispatch().getLegacyTHDispatcher(p, s);
+  }
   // The passed in Type must be delete'able
   // TODO: Just make it take a unique_ptr
   void registerType(Backend b, ScalarType s, Type* t) {
     globalLegacyTypeDispatch().registerType(b, s,
       LegacyTypeDispatch::TypeUniquePtr{t, LegacyTypeDeleter([](Type* p) { delete p; }) });
+  }
+
+  void registerLegacyTHDispatcher(Backend b, ScalarType s, LegacyTHDispatcher* t) {
+    globalLegacyTHDispatch().registerDispatcher(b, s,
+      LegacyTHDispatch::LegacyTHDispatcherUniquePtr{t, LegacyTHDispatcherDeleter([](LegacyTHDispatcher* p) { delete p; }) });
   }
 
   Generator & defaultGenerator(DeviceType device_type) {
@@ -185,6 +192,9 @@ static inline TypeExtendedInterface& HIP(ScalarType s) {
   return getNonVariableType(Backend::HIP, s);
 }
 
+CAFFE2_API LegacyTHDispatcher& getLegacyTHDispatcher(TensorOptions options);
+CAFFE2_API LegacyTHDispatcher& getLegacyTHDispatcher(const Tensor&);
+
 static inline bool hasCUDA() {
   return globalContext().hasCUDA();
 }
@@ -203,6 +213,15 @@ static inline bool hasLAPACK() {
 
 static inline bool hasMAGMA() {
   return globalContext().hasMAGMA();
+}
+
+static inline void manual_seed(uint64_t seed) {
+  globalContext().defaultGenerator(DeviceType::CPU).manualSeed(seed);
+  // NB: Sometimes we build with CUDA, but we don't have any GPUs
+  // available. In that case, we must not seed CUDA; it will fail!
+  if (hasCUDA() && detail::getCUDAHooks().getNumGPUs() > 0) {
+    globalContext().defaultGenerator(DeviceType::CUDA).manualSeedAll(seed);
+  }
 }
 
 } // namespace at

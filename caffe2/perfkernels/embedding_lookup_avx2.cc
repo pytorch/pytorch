@@ -5,9 +5,10 @@
 //// DO NOT MODIFY!!!
 //// --------------------------
 
-#include <caffe2/core/common.h>
-#include <caffe2/core/types.h>
+#include <ATen/core/Half.h>
+#include <c10/util/Logging.h>
 #include <immintrin.h>
+#include <cassert>
 
 namespace caffe2 {
 
@@ -1309,7 +1310,7 @@ static void EmbeddingLookup_int32_t_half_float__avx2_fma(
                   _mm256_loadu_ps(&op[j])));
           _mm_prefetch((&ip_next_T0[j]), _MM_HINT_T0);
         }
-        at::Half vtmp1[8] CAFFE2_ALIGNED(64);
+        alignas(64) at::Half vtmp1[8];
         for (; j < block_size; j++) {
           vtmp1[0] = ip[j];
           __m256 vtmp2 = _mm256_cvtph_ps(*((__m128i*)vtmp1));
@@ -1850,7 +1851,7 @@ static void EmbeddingLookup_int64_t_half_float__avx2_fma(
                   _mm256_loadu_ps(&op[j])));
           _mm_prefetch((&ip_next_T0[j]), _MM_HINT_T0);
         }
-        at::Half vtmp1[8] CAFFE2_ALIGNED(64);
+        alignas(64) at::Half vtmp1[8];
         for (; j < block_size; j++) {
           vtmp1[0] = ip[j];
           __m256 vtmp2 = _mm256_cvtph_ps(*((__m128i*)vtmp1));

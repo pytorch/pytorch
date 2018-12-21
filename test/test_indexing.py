@@ -45,6 +45,12 @@ class TestIndexing(TestCase):
         v = torch.tensor([1.])
         self.assertEqual(v[v == 0], torch.tensor([]))
 
+    def test_byte_mask_accumulate(self):
+        mask = torch.zeros(size=(10, ), dtype=torch.uint8)
+        y = torch.ones(size=(10, 10))
+        y.index_put_((mask, ), y[mask], accumulate=True)
+        self.assertEqual(y, torch.ones(size=(10, 10)))
+
     def test_multiple_byte_mask(self):
         v = torch.randn(5, 7, 3)
         # note: these broadcast together and are transposed to the first dim
@@ -499,6 +505,19 @@ class NumpyTests(TestCase):
         a = torch.ones((2, 3))
         self.assertEqual((1, 2, 3), a[True, True].shape)
         self.assertEqual((1, 2, 3), a[true, true].shape)
+
+    def test_boolean_list_indexing(self):
+        # Indexing a 2-dimensional array with
+        # boolean lists
+        a = tensor([[1, 2, 3],
+                    [4, 5, 6],
+                    [7, 8, 9]])
+        b = [True, False, False]
+        c = [True, True, False]
+        self.assertEqual(a[b], tensor([[1, 2, 3]]))
+        self.assertEqual(a[b, b], tensor([1]))
+        self.assertEqual(a[c], tensor([[1, 2, 3], [4, 5, 6]]))
+        self.assertEqual(a[c, c], tensor([1, 5]))
 
     def test_everything_returns_views(self):
         # Before `...` would return a itself.

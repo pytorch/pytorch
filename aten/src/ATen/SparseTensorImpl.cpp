@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/InitialTensorOptions.h>
+#include <ATen/core/LegacyTypeDispatch.h>
 
 namespace at {
 
@@ -31,24 +32,19 @@ namespace {
 // values tensor for such an empty tensor.
 SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, const caffe2::TypeMeta& data_type)
     : TensorImpl(type_id, data_type, nullptr, false)
-    , size_{0}
     , sparse_dim_(1)
     , dense_dim_(0)
     , indices_(at::empty({1, 0}, at::initialTensorOptions().device(sparseTensorIdToDeviceType(type_id)).dtype(ScalarType::Long)))
     , values_(at::empty({0}, at::initialTensorOptions().device(sparseTensorIdToDeviceType(type_id)).dtype(data_type))) {}
 
 IntList SparseTensorImpl::sizes() const {
-  return size_;
+  return sizes_;
 }
 IntList SparseTensorImpl::strides() const {
   AT_ERROR("sparse tensors do not have strides");
 }
 bool SparseTensorImpl::is_contiguous() const {
   AT_ERROR("sparse tensors do not have is_contiguous");
-}
-int64_t SparseTensorImpl::size(int64_t d) const {
-  d = at::maybe_wrap_dim(d, dim(), false);
-  return size_[d];
 }
 int64_t SparseTensorImpl::stride(int64_t d) const {
   AT_ERROR("sparse tensors do not have strides");
@@ -88,7 +84,7 @@ void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, cons
   AT_CHECK(!indices.is_sparse(), "expected indices to be a dense tensor, but got indices of layout ", indices.layout());
   AT_CHECK(!values.is_sparse(), "expected values to be a dense tensor, but got values of layout ", values.layout());
 
-  AT_CHECK(values.type().toSparse() == type(), "values type must match sparse tensor type");
+  AT_CHECK(values.type().toSparse() == legacyTensorType(*this), "values type must match sparse tensor type");
   AT_CHECK(indices.type().scalarType() == kLong, "indices must be an int64 tensor");
   AT_CHECK(indices.type().backend() == values.type().backend(), "backend of indices (", indices.type().backend(), ") must match backend of values (", values.type().backend(), ")");
   AT_CHECK(!indices.is_cuda() || indices.get_device() == values.get_device(), "device of indices (", indices.get_device(), ") must match device of values (", values.get_device(), ")");
