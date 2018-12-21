@@ -144,4 +144,4 @@ def istuple(obj):
     # the name of the type to determine if it is a namedtupled returned
     # by a pytorch operator.
     t = type(obj)
-    return isinstance(obj, tuple) or t.__name__.startswith('torch.return_types.')
+    return isinstance(obj, tuple) or t.__module__ == 'torch.return_types'

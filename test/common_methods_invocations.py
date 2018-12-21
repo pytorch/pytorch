@@ -981,7 +981,7 @@ def run_additional_tri_tests(self, device):
 
 
 def unpack_variables(args):
-    print(type(args).__name__)
+    print(type(args).__module__)
     print(istuple(args))
     if istuple(args):
         return tuple(unpack_variables(elem) for elem in args)
