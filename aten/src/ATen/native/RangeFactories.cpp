@@ -2,6 +2,8 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/Parallel.h>
 #include <ATen/Dispatch.h>
+#include <cmath>
+#include <limits>
 
 namespace at { namespace native {
 
@@ -81,9 +83,15 @@ Tensor& range_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
     auto xstep = step.to<accscalar_t>();
 
     AT_CHECK(xstep > 0 || xstep < 0, "step must be nonzero");
+    AT_CHECK(std::isfinite(static_cast<double>(xstart)) &&
+             std::isfinite(static_cast<double>(xend)),
+             "unsupported range: ", xstart, " -> ", xend);
     AT_CHECK(((xstep > 0) && (xend >= xstart)) || ((xstep < 0) && (xend <= xstart)),
              "upper bound and larger bound inconsistent with step sign");
-    int64_t size = static_cast<int64_t>(((xend - xstart) / xstep) + 1);
+    double size_d = (static_cast<double>(xend - xstart) / xstep) + 1;
+    AT_CHECK(size_d >= 0 && size_d <= static_cast<double>(std::numeric_limits<int64_t>::max()),
+             "invalid size, possible overflow?");
+    int64_t size = static_cast<int64_t>(size_d);
     if (result.numel() != size) {
       result.resize_({size});
     }
