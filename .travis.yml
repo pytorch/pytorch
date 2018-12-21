@@ -25,7 +25,7 @@ matrix:
       - env: MYPY_TYPE_CHECK
         python: "3.6"
         install: pip install mypy mypy-extensions
-        script: mypy $(CHANGED_FILES=($(git diff --name-only $TRAVIS_COMMIT_RANGE)) | tr '\n' ' ')
+        script: tools/run-mypy-in-ci.sh
       - env: CPP_DOC_CHECK
         python: "3.6"
         install:
