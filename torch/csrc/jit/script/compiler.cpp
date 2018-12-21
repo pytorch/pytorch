@@ -439,12 +439,7 @@ private:
 
 
     // body
-    std::vector<TreeRef> stmts = def.statements().get()->trees();
-    // make sure everthing always returns.
-    // if an earlier statement returns moveAllReturnsToEnd will just delete this one
-    stmts.emplace_back(Return::create(
-        def.range(), Expr(Compound::create(TK_NONE, def.range(), {}))));
-    auto stmts_list = moveAllReturnsToEnd(List<Stmt>::unsafeCreate(def.statements().range(), std::move(stmts)));
+    auto stmts_list = moveAllReturnsToEnd(def.statements());
     emitStatements(stmts_list.begin(), stmts_list.end());
     std::vector<Argument> returns = {emitOutput(def.range(), schema, block)};
     return {def.name().name(), std::move(arguments), std::move(returns)};
