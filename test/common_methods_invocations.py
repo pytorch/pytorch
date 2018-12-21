@@ -986,7 +986,11 @@ def unpack_variables(args):
     print(t.__bases__)
     print(hasattr(t, '_fields'))
     print(isinstance(args, tuple))
-    if isinstance(args, tuple):
+    # Usually instances of PyStructSequence is also an instance of tuple
+    # but in some py2 environment it is not, so we have to manually check
+    # the name of the type to determine if it is a namedtupled returned
+    # by a pytorch operator.
+    if isinstance(args, tuple) or t.__name__.startswith('torch.return_types.'):
         return tuple(unpack_variables(elem) for elem in args)
     else:
         return args

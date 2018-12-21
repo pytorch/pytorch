@@ -120,7 +120,7 @@ static PyStructSequence_Field fields${namedtuple_type_index}[] = {
   ${namedtuple_fields} {nullptr}
 };
 static PyStructSequence_Desc desc${namedtuple_type_index} = {
-  "${name}", nullptr,
+  "torch.return_types.${name}", nullptr,
   fields${namedtuple_type_index}, ${namedtuple_size}
 };
 static PyTypeObject type${namedtuple_type_index};
