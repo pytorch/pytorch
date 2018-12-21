@@ -981,6 +981,11 @@ def run_additional_tri_tests(self, device):
 
 
 def unpack_variables(args):
+    t = type(args)
+    print(t)
+    print(t.__bases__)
+    print(hasattr(t, '_fields'))
+    print(isinstance(args, tuple))
     if isinstance(args, tuple):
         return tuple(unpack_variables(elem) for elem in args)
     else:
