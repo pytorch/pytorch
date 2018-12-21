@@ -1026,13 +1026,12 @@
 - func: logdet(Tensor self) -> Tensor
   variants: function, method
 
-- func: logspace(Scalar start, Scalar end, TensorOptions options={}) -> Tensor
+- func: logspace(Scalar start, Scalar end, int64_t steps=100, TensorOptions options={}) -> Tensor
 
-- func: logspace(Scalar start, Scalar end, int64_t steps, TensorOptions options={}) -> Tensor
-
-- func: logspace_out(Tensor result, Scalar start, Scalar end) -> Tensor
-
-- func: logspace_out(Tensor result, Scalar start, Scalar end, int64_t steps) -> Tensor
+- func: logspace_out(Tensor result, Scalar start, Scalar end, int64_t steps=100) -> Tensor
+  dispatch:
+    CPU: logspace_cpu_out
+    CUDA: logspace_cuda_out
 
 # FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
 - func: log_softmax(Tensor self, int64_t dim, ScalarType dtype) -> Tensor
