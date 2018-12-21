@@ -137,9 +137,15 @@ Therefore, representation of a SparseTensor of sparse_dim = 0 is simply a dense 
     .. method:: _values
     .. method:: _nnz
 
+
 Functions
 ----------------------------------
 
 .. autofunction:: torch.sparse.addmm
 .. autofunction:: torch.sparse.mm
 .. autofunction:: torch.sparse.sum
+
+
+sparse.nn.functional
+----------------------------------
+.. autofunction:: torch.sparse.nn.functional.dropout

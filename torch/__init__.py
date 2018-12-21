@@ -286,6 +286,7 @@ import torch.nn
 import torch.optim
 import torch.multiprocessing
 import torch.sparse
+import torch.sparse.nn
 import torch.utils.backcompat
 import torch.onnx
 import torch.jit

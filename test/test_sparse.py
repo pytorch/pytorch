@@ -1028,7 +1028,7 @@ class TestSparse(TestCase):
             S = self._gen_sparse(sparse_dim, nnz, with_size)[0]
             D = S.to_dense()
             D_out = F.dropout(D, p)
-            S_out = torch.sparse.dropout(S, p)
+            S_out = torch.sparse.nn.functional.dropout(S, p)
             S_out_dense = S_out.to_dense()
             D_mask = (D_out < 1e-10).mul_(D_out > -1e-10)
             S_mask = (S_out_dense < 1e-10).mul_(S_out_dense > -1e-10)
@@ -1038,7 +1038,7 @@ class TestSparse(TestCase):
             # test backward
             S.requires_grad_(True)
             D.requires_grad_(True)
-            S_out = torch.sparse.dropout(S, p)
+            S_out = torch.sparse.nn.functional.dropout(S, p)
             S_out_dense = S_out.to_dense()
             S_y = torch.sparse.sum(S_out)
             S_y.backward()
