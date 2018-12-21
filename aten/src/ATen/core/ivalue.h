@@ -460,9 +460,9 @@ struct CAFFE2_API IValue final {
   toOptional() {
     if (this->isNone()) {
       // return undefined tensor for optional[Tensor] type when ivalue is None
-      return at::Tensor();
+      return T();
     }
-    return this->to<at::Tensor>();
+    return this->to<T>();
   }
 
   // this is a shallow comparison of two IValues to test the object identity

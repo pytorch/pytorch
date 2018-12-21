@@ -696,7 +696,7 @@ def unpack_args(env, declaration):
         if 'TensorOptions' not in dynamic_type:
             is_nullable = arg.get('is_nullable', False)
             ref = (not is_nullable) and dynamic_type not in ['TensorList', 'SparseTensorRef']
-            suffix = '_opt' if is_nullable and ref else ''
+            suffix = '_opt' if is_nullable and dynamic_type != 'TensorList' else ''
 
             body.append(UNPACK_TENSOR.substitute(
                 arg_name=arg['name'],
