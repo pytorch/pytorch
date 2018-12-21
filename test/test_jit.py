@@ -4894,7 +4894,7 @@ a")
         def __init__(self):
             super(TestScript.DerivedStateModule, self).__init__()
             self.param = torch.nn.Parameter(torch.ones(3, 4, dtype=torch.float))
-            self.register_buffer('derived', torch.neg(self.param).detach())
+            self.register_buffer('derived', torch.neg(self.param).detach().clone())
 
             # This is a flag so we can test that the pack method was called
             self.register_buffer('pack_called', torch.zeros(1, dtype=torch.long))
