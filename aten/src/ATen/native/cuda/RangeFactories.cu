@@ -111,10 +111,7 @@ Tensor& range_cuda_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
              "unsupported range: ", xstart, " -> ", xend);
     AT_CHECK(((xstep > 0) && (xend >= xstart)) || ((xstep < 0) && (xend <= xstart)),
              "upper bound and larger bound inconsistent with step sign");
-    double size_d = (static_cast<double>(xend - xstart) / xstep) + 1;
-    AT_CHECK(size_d >= 0 && size_d <= static_cast<double>(std::numeric_limits<int64_t>::max()),
-             "invalid size, possible overflow?");
-    int64_t size = static_cast<int64_t>(size_d);
+    int64_t size = static_cast<int64_t>(((xend - xstart) / xstep) + 1);
     if (result.numel() != size) {
       result.resize_({size});
     }
