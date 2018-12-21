@@ -7615,6 +7615,12 @@ a")
                     x = torch.neg(x)
                 return x
 
+        mte = ModuleToExport()
+        outputs = mte(torch.zeros(1, 2, 3, dtype=torch.long))
+        self.assertExpected(torch.onnx.export_to_pretty_string(
+            mte, (torch.zeros(1, 2, 3),), None, verbose=False,
+            example_outputs=outputs))
+
     def test_onnx_export_script_module_overload(self):
         class ModuleToExport(torch.jit.ScriptModule):
             def __init__(self):
@@ -7636,22 +7642,6 @@ a")
         self.assertExpected(torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs))
-
-    def test_onnx_export_script_module_overload_fail(self):
-        class ModuleToExport(torch.jit.ScriptModule):
-            def __init__(self):
-                super(ModuleToExport, self).__init__()
-
-            @torch.jit.script_method
-            def forward(self, x):
-                return torch.prod(x, dtype=torch.double)
-
-        mte = ModuleToExport()
-        outputs = mte(torch.zeros(1, 2, 3))
-        with self.assertRaisesRegex(RuntimeError, "Couldn't export operator"):
-            torch.onnx.export_to_pretty_string(
-                mte, (torch.zeros(1, 2, 3),), None, verbose=False,
-                example_outputs=outputs)
 
     def test_onnx_export_script_module_unsupported_optional(self):
         class ModuleToExport(torch.jit.ScriptModule):
