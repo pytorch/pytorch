@@ -172,7 +172,7 @@ struct NormOps {
   }
 
   inline C10_DEVICE acc_t project(acc_t a) const {
-    return compat_pow(a, 1.0/norm);
+    return compat_pow(a, acc_t(1.0)/norm);
   }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
