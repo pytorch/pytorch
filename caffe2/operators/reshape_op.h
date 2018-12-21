@@ -73,8 +73,8 @@ class ReshapeOp : public Operator<Context> {
     // Checks if the new shape is valid and fills in the missing dimension
     // specified by -1.
     // NOTE: At most one dimension can be -1.
-    auto total_size = input.numel();
-    T size = 1;
+    int64_t total_size = input.numel();
+    int64_t size = 1L;
     int unknown_idx = -1;
     for (int i = 0; i < actual_new_shape.size(); ++i) {
       const auto dim = actual_new_shape[i];
@@ -99,7 +99,7 @@ class ReshapeOp : public Operator<Context> {
           unknown_idx,
           " can not be inferred since new size is zero.");
       CAFFE_ENFORCE(
-          lround(total_size) % lround(size) == 0,
+          total_size % size == 0,
           "Argument `shape` does not agree with the input data.",
           " (",
           total_size,

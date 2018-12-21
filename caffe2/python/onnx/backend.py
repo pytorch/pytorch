@@ -31,7 +31,7 @@ from caffe2.proto import caffe2_pb2
 import caffe2.python.utils
 import numpy as np
 import onnx
-from onnx import checker, GraphProto, TensorProto, AttributeProto, ModelProto
+from onnx import checker, GraphProto, TensorProto, AttributeProto, ModelProto, mapping
 import onnx.numpy_helper
 import onnx.defs
 import onnx.optimizer
@@ -644,7 +644,8 @@ class Caffe2Backend(Backend):
             if value_info.name in initialized:
                 continue
             shape = list(d.dim_value for d in value_info.type.tensor_type.shape.dim)
-            ws.FeedBlob(value_info.name, np.ones(shape), device_option)
+            np_type = mapping.TENSOR_TYPE_TO_NP_TYPE[value_info.type.tensor_type.elem_type]
+            ws.FeedBlob(value_info.name, np.ones(shape, dtype=np_type), device_option)
 
     @staticmethod
     def optimize_onnx(input, init=False, predict=False):

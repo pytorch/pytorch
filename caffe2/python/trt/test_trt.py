@@ -150,7 +150,6 @@ class TensorRTOpTest(TestCase):
 
     @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_inception_v1(self):
-        # higher opsets bring double precision inputs, thus set to 3
         self._test_onnx_importer('inception_v1', -1, 3)
 
     @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
@@ -171,7 +170,6 @@ class TensorRTOpTest(TestCase):
 
     @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_vgg19(self):
-        # higher opsets bring double precision inputs, thus set to 3
         self._test_onnx_importer('vgg19', -1, 3)
 
 
