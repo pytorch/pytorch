@@ -1014,12 +1014,17 @@ feature_alpha_dropout_ = feature_alpha_dropout
 @parse_args('v', 't', 'i', 'i')
 def norm(g, self, p, dim, keepdim):
     if p == 1:
-        f = _reduce_op_symbolic("ReduceL1")
+        onnx_op_name = "ReduceL1"
     elif p == 2:
-        f = _reduce_op_symbolic("ReduceL2")
+        onnx_op_name = "ReduceL2"
     else:
         raise RuntimeError("ONNX export only p-norms with p of 1 or 2")
-    return f(g, self, dim=dim, keepdim=keepdim)
+    if dim is None:
+        # all-reduce path
+        return g.op(onnx_op_name, self, keepdims_i=0)
+    else:
+        # dim-reduce path
+        return g.op(onnx_op_name, self, axes_i=[dim], keepdims_i=keepdim)
 
 
 @parse_args('v', 'v', 'v', 'i')
