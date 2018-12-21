@@ -350,6 +350,9 @@ endif()
 if(USE_FBGEMM)
   set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
   include_directories(SYSTEM "${CAFFE2_THIRD_PARTY_ROOT}")
+  caffe2_update_option(USE_FBGEMM ON)
+else()
+  caffe2_update_option(USE_FBGEMM OFF)
 endif()
 
 

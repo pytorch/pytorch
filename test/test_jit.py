@@ -3,6 +3,7 @@ import torch
 import torch.jit
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.jit.quantized
 from contextlib import contextmanager
 from itertools import product, chain
 import torch.jit.frontend
@@ -8006,6 +8007,43 @@ a")
 
             traced = torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[(torch.rand(3, 4),)])
 
+    # These tests don't work because UBSAN has a false positive about accessing
+    # out of bounds on a dynamically sized struct internal to asmjit
+    if not TEST_WITH_UBSAN and torch.fbgemm_is_cpu_supported():
+        def test_int8_quantization_module(self):
+            K1, N1 = 2, 2
+
+            class FooBar(torch.nn.Module):
+                def __init__(self):
+                    super(FooBar, self).__init__()
+                    self.linear1 = torch.nn.Linear(K1, N1).float()
+
+                def forward(self, x):
+                    x = self.linear1(x)
+                    return x
+
+            fb = FooBar()
+            fb.linear1.weight = torch.nn.Parameter(
+                torch.tensor([[-150, 100], [100, -150]], dtype=torch.float), requires_grad=False)
+            fb.linear1.bias = torch.nn.Parameter(torch.zeros_like(fb.linear1.bias), requires_grad=False)
+            fb_ref = FooBar()
+            fb_ref.linear1.weight = torch.nn.Parameter(fb.linear1.weight.clone(), requires_grad=False)
+            fb_ref.linear1.bias = torch.nn.Parameter(fb.linear1.bias.clone(), requires_grad=False)
+            torch.jit.quantized.quantize_linear_modules(fb)
+
+            x = (torch.rand(1, K1).float() - 0.5) / 10.0
+            traced = torch.jit.trace(fb, (x,))
+            traced.apply(lambda s: s._pack() if s._has_method('_pack') else None)
+            fb = self.getExportImportCopy(traced)
+            traced.apply(lambda s: s._unpack() if s._has_method('_unpack') else None)
+
+            fb.apply(lambda s: s._unpack() if s._has_method('_unpack') else None)
+
+            x = torch.tensor([[100, -150]], dtype=torch.float)
+            y = fb(x)
+            y_ref = fb_ref(x)
+            torch.testing.assert_allclose(y, y_ref, rtol=0.0001, atol=1e-3)
+
     def checkTracerWarning(self, *args, **kwargs):
         with warnings.catch_warnings(record=True) as warns:
             torch.jit.trace(*args, **kwargs)
@@ -9112,7 +9150,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         self._test_reinforcement_learning(self, device='cuda', test_export_import=False)
 
     @staticmethod
-    def _test_snli(self, device, check_export_import=True):
+    def _test_snli(self, device, check_export_import=True, quantized=False):
         class Bottle(nn.Module):
 
             def forward(self, input):
@@ -9199,12 +9237,25 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         premise = torch.LongTensor(48, 128).random_(0, 100).to(device)
         hypothesis = torch.LongTensor(24, 128).random_(0, 100).to(device)
 
-        self.checkTrace(SNLIClassifier(Config()).to(device), (premise, hypothesis),
-                        inputs_require_grads=False, export_import=check_export_import)
+        if quantized:
+            snli = SNLIClassifier(Config()).cpu()
+            torch.jit.quantized.quantize_linear_modules(snli)
+            # we don't do export/import checks because we would need to call
+            # _pack/_unpack
+            self.checkTrace(snli, (premise, hypothesis), inputs_require_grads=False,
+                            export_import=False)
+        else:
+            self.checkTrace(SNLIClassifier(Config()).to(device), (premise, hypothesis),
+                            inputs_require_grads=False, export_import=check_export_import)
 
     @skipIfRocm
     def test_snli(self):
         self._test_snli(self, device='cpu')
+
+    if not TEST_WITH_UBSAN and torch.fbgemm_is_cpu_supported():
+        @skipIfRocm
+        def test_snli_quantized(self):
+            self._test_snli(self, device='cpu', quantized=True)
 
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
@@ -9308,7 +9359,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                         export_import=False)
 
     @staticmethod
-    def _test_vae(self, device, check_export_import=True):
+    def _test_vae(self, device, check_export_import=True, quantized=False):
         class VAE(nn.Module):
             def __init__(self):
                 super(VAE, self).__init__()
@@ -9340,12 +9391,25 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 z = self.reparameterize(mu, logvar)
                 return self.decode(z), mu, logvar
 
-        # eval() is present because randn_like makes this nondeterministic
-        self.checkTrace(VAE().to(device).eval(), (torch.rand(128, 1, 28, 28, device=device),),
-                        export_import=check_export_import)
+        if quantized:
+            vae = VAE().to(device).eval()
+            torch.jit.quantized.quantize_linear_modules(vae)
+            # We don't do export/import checks because we would need to call
+            # _unpack and _pack
+            self.checkTrace(vae, (torch.rand(128, 1, 28, 28, device=device),),
+                            export_import=False, allow_unused=True,
+                            inputs_require_grads=False)
+        else:
+            # eval() is present because randn_like makes this nondeterministic
+            self.checkTrace(VAE().to(device).eval(), (torch.rand(128, 1, 28, 28, device=device),),
+                            export_import=check_export_import)
 
     def test_vae(self):
         self._test_vae(self, device='cpu')
+
+    if not TEST_WITH_UBSAN and torch.fbgemm_is_cpu_supported():
+        def test_vae_quantized(self):
+            self._test_vae(self, device='cpu', quantized=True)
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_vae_cuda(self):

@@ -391,33 +391,6 @@ accreal THCTensor_(trace)(THCState *state, THCTensor *src_) {
   return trace;
 }
 
-#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
-
-void THCTensor_(logspace)(THCState *state, THCTensor *r_, scalar_t a, scalar_t b, int64_t n) {
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, r_));
-  THArgCheck((n >= 0), 3, "number of points must be non-negative");
-  if (THCTensor_(nElement)(state, r_) != n) THCTensor_(resize1d)(state, r_, n);
-  if (n == 0) {
-    // skip
-  } else if (n == 1) THCTensor_(fill)(state, r_, THCNumerics<scalar_t>::exp10(a));
-  else {
-    THCTensor *r = THCTensor_(isContiguous)(state, r_)
-                   ? r_
-                   : THCTensor_(newContiguous)(state, r_);
-    scalar_t step = THCNumerics<scalar_t>::div(THCNumerics<scalar_t>::sub(b, a),
-                                       ScalarConvert<int64_t,scalar_t>::to(n - 1));
-    LogspaceOp<scalar_t> logspace_method(a, step);
-    thrust::device_ptr<scalar_t> data_(THCTensor_(data)(state, r));
-    thrust::tabulate(data_, data_ + n, logspace_method);
-    if (!THCTensor_(isContiguous)(state, r_)) {
-      THCTensor_(freeCopyTo)(state, r, r_);
-    }
-  }
-  THCudaCheck(cudaGetLastError());
-}
-
-#endif
-
 void THCTensor_(range)(THCState *state, THCTensor *r_, accreal xmin, accreal xmax, accreal step) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, r_));
   THArgCheck(step > 0 || step < 0, 3, "step must be nonzero");
