@@ -5,6 +5,7 @@
 
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/tree_views.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
 namespace jit {
@@ -52,7 +53,7 @@ namespace script {
 //       <rest>
 //    Now it is another instance of case (2).
 
-List<Stmt> moveAllReturnsToEnd(const List<Stmt>& stmts);
+TORCH_API List<Stmt> moveAllReturnsToEnd(const List<Stmt>& stmts);
 
 }
 } // namespace jit

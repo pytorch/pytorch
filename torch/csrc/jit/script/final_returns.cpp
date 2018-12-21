@@ -19,12 +19,6 @@ void checkNoReturn(const TreeRef& ref) {
   }
 }
 
-void failReturns(const If& if_stmt, const char * what) {
-  throw ErrorReport(if_stmt)
-        << what << " contains some paths that return and some paths that do not. "
-        << "If statements must either entirely return or never return.";
-}
-
 // transform stmts so that its last action is to return or report that it
 // never returns.
 // return_none - if true, add an implicit `return None` to the end of the block
@@ -46,7 +40,9 @@ ReturnInfo makeReturnsFinal(const SourceRange& range, at::ArrayRef<TreeRef> stmt
         if (true_final.returns_ && if_stmt.falseBranch().size() == 0) {
           auto rest_final = makeReturnsFinal(range, stmts.slice(i + 1), return_none);
           if (!rest_final.returns_) {
-            failReturns(if_stmt, "The enclosing if statement");
+            throw ErrorReport(if_stmt)
+                  << "This if statement performs an early return, but the block of code that follows it does not return."
+                  << " Early returns are only allowed when the block following them also returns.";
           }
           changed.emplace_back(if_stmt.withNewBranches(true_final.stmts_, rest_final.stmts_));
           return {true, List<Stmt>::unsafeCreate(range, std::move(changed))};
@@ -63,9 +59,12 @@ ReturnInfo makeReturnsFinal(const SourceRange& range, at::ArrayRef<TreeRef> stmt
           changed.emplace_back(if_stmt.withNewBranches(true_final.stmts_, false_final.stmts_));
           return {true, List<Stmt>::unsafeCreate(range, std::move(changed))};
         }
-        failReturns(if_stmt, "This if statement");
+        throw ErrorReport(if_stmt)
+              << "This if statement contains some paths that return and some paths that do not. "
+              << "If statements must either entirely return or never return.";
       } break;
       case TK_WHILE:
+      case TK_FOR:
         changed.emplace_back(stmt);
         checkNoReturn(stmt);
         break;
