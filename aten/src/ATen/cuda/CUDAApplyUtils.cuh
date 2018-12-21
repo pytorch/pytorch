@@ -4,6 +4,7 @@
 #include <ATen/TensorUtils.h>
 #include <THC/THCAtomics.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/macros/Macros.h>
 
 #include <math.h>
 
@@ -198,8 +199,8 @@ inline void rearrangeDims(detail::TensorInfo<T1, IndexType>* aInfo,
 
 // Threads per block for our apply kernel
 // FIXME: use occupancy calculator instead
-#define AT_APPLY_THREADS_PER_BLOCK 32 * 16
-#define AT_APPLY_BLOCKS_PER_SM 4
+#define AT_APPLY_THREADS_PER_BLOCK C10_MAX_THREADS_PER_BLOCK(512)
+#define AT_APPLY_BLOCKS_PER_SM C10_MIN_BLOCKS_PER_SM(512, 4)
 
 // The `remaining_steps` argument is used to support Op that operates on
 // multiple elements at the same time. Generally, the strategy of ApplyOpN is to

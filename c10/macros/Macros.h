@@ -109,6 +109,12 @@ namespace at { namespace cuda { using namespace c10::hip; }}
 #define C10_HOST_DEVICE __host__ __device__
 #define C10_DEVICE __device__
 #define C10_HOST __host__
+#define C10_MAX_THREADS_PER_BLOCK(val) (((val) <= 1024) ? (val) : (512))
+#if __CUDA_ARCH__ >= 750
+#define C10_MIN_BLOCKS_PER_SM(threads_per_block, blocks_per_sm) ((((threads_per_block)*(blocks_per_sm) <= 1024) ? (blocks_per_sm) : ((1024 + threads_per_block - 1) / threads_per_block)))
+#else
+#define C10_MIN_BLOCKS_PER_SM(threads_per_block, blocks_per_sm) ((((threads_per_block)*(blocks_per_sm) <= 2048) ? (blocks_per_sm) : ((2048 + threads_per_block - 1) / threads_per_block)))
+#endif
 #else
 #define C10_HOST_DEVICE
 #define C10_HOST

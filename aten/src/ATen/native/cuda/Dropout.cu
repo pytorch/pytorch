@@ -3,6 +3,7 @@
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
+#include <c10/macros/Macros.h>
 #include <curand_kernel.h>
 
 #include <THC/THCGeneral.h>
@@ -34,7 +35,7 @@ template <
           typename IndexType,
           int ADims>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-__launch_bounds__(256,8)
+__launch_bounds__(C10_MAX_THREADS_PER_BLOCK(256), C10_MIN_BLOCKS_PER_SM(256, 8))
 #endif
 __global__ void
 fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
@@ -99,7 +100,7 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen){
   Tensor ret = at::empty_like(self);
   Tensor mask = at::empty(self.sizes(), self.options().dtype(kByte));
   const int64_t nelem = self.numel();
-  const int64_t block_size = 256;
+  const int64_t block_size = C10_MAX_THREADS_PER_BLOCK(256);
   unsigned int blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor/block_size;
   dim3 dim_block(block_size);
   dim3 grid((nelem + block_size -1)/block_size);
