@@ -1762,14 +1762,14 @@
 - func: type_as(Tensor self, Tensor other) -> Tensor
   variants: method
 
-- func: unique(Tensor self, bool sorted=false, bool return_inverse=false, int64_t? dim=None) -> (Tensor, Tensor)
+- func: unique(Tensor self, bool sorted=true, bool return_inverse=false, int64_t? dim=None) -> (Tensor, Tensor)
   variants: function
   dispatch:
     CPU: _unique_cpu
     CUDA: _unique_cuda
 
 # unique_dim is not exposed to python, special cased in gen_python_functions.py
-- func: unique_dim(Tensor self, int64_t dim, bool sorted=false, bool return_inverse=false) -> (Tensor, Tensor)
+- func: unique_dim(Tensor self, int64_t dim, bool sorted=true, bool return_inverse=false) -> (Tensor, Tensor)
   variants: function
 
 - func: _unsafe_view(Tensor self, IntList size) -> Tensor

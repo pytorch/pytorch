@@ -330,7 +330,7 @@ class Tensor(torch._C._TensorBase):
         """
         return self.clone().masked_fill_(mask, value)
 
-    def unique(self, sorted=False, return_inverse=False, dim=None):
+    def unique(self, sorted=True, return_inverse=False, dim=None):
         r"""Returns the unique scalar elements of the tensor as a 1-D tensor.
 
         See :func:`torch.unique`

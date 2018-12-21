@@ -392,7 +392,7 @@ def isnan(tensor):
     return tensor != tensor
 
 
-def unique(input, sorted=False, return_inverse=False, dim=None):
+def unique(input, sorted=True, return_inverse=False, dim=None):
     r"""Returns the unique scalar elements of the input tensor as a 1-D tensor.
 
     Arguments:
