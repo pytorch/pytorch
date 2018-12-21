@@ -77,7 +77,7 @@ inline void findErrorInKwargs(
 // by a pytorch operator.
 bool isTuple(py::handle input) {
   return py::isinstance<py::tuple>(input) ||
-         py::str(h.get_type().attr("__module__")) == "torch.return_types";
+         py::str(input.get_type().attr("__module__")) == "torch.return_types";
 }
 
 } // namespace detail
