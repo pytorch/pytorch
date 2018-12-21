@@ -122,19 +122,5 @@ struct LinspaceOp {
   const accT start_, step_;
 };
 
-template<typename T, typename accT = T>
-struct LogspaceOp {
-  __host__ __device__ LogspaceOp(accT start, accT step):
-    start_(start), step_(step) { }
-  __device__ __forceinline__ T operator()(ptrdiff_t index) {
-    accT increment = THCNumerics<accT>::mul(step_, ScalarConvert<ptrdiff_t,accT>::to(index));
-    accT value = THCNumerics<accT>::exp10(THCNumerics<accT>::add(start_, increment));
-    return ScalarConvert<accT,T>::to(value);
-  }
-
-  const accT start_, step_;
-};
-
-
 #include <THC/generic/THCTensorMath.cu>
 #include <THC/THCGenerateAllTypes.h>

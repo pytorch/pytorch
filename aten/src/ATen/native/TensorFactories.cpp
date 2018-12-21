@@ -250,25 +250,13 @@ Tensor linspace(
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ logspace ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor logspace(Scalar start, Scalar end, const TensorOptions& options) {
-  return native::logspace(start, end, /*steps=*/100, options);
-}
-
 Tensor logspace(
     Scalar start,
     Scalar end,
     int64_t steps,
     const TensorOptions& options) {
-  // Note [Native bindings for legacy TH factory functions]
-  return getFactoryType(options)._th_logspace(start, end, steps);
-}
-
-Tensor& logspace_out(Tensor& result, Scalar start, Scalar end) {
-  return native::logspace_out(result, start, end, /*steps=*/100);
-}
-
-Tensor& logspace_out(Tensor& result, Scalar start, Scalar end, int64_t steps) {
-  return at::legacy::th::_th_logspace_out(result, start, end, steps);
+  Tensor result = at::empty({steps}, options);
+  return at::logspace_out(result, start, end, steps);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ones ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
