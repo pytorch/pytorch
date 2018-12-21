@@ -223,6 +223,14 @@ class CAFFE2_API Workspace {
    * not exist, a nullptr is returned.
    */
   Blob* GetBlob(const string& name);
+  /**
+   * Like GetBlob but doesn't lookup the parent workspace.
+   */
+  const Blob* GetLocalBlob(const string& name) const;
+  /**
+   * Like GetBlob but doesn't lookup the parent workspace.
+   */
+  Blob* GetLocalBlob(const string& name);
 
   /**
    * Renames a local workspace blob. If blob is not found in the local blob list

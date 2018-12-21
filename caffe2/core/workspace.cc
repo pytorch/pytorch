@@ -176,6 +176,13 @@ const Blob* Workspace::GetBlob(const string& name) const {
   return nullptr;
 }
 
+const Blob* Workspace::GetLocalBlob(const string& name) const {
+  if (blob_map_.count(name)) {
+    return blob_map_.at(name).get();
+  }
+  return nullptr;
+}
+
 void Workspace::AddBlobMapping(
     const Workspace* parent,
     const std::unordered_map<string, string>& forwarded_blobs,
@@ -209,6 +216,11 @@ void Workspace::AddBlobMapping(
 
 Blob* Workspace::GetBlob(const string& name) {
   return const_cast<Blob*>(static_cast<const Workspace*>(this)->GetBlob(name));
+}
+
+Blob* Workspace::GetLocalBlob(const string& name) {
+  return const_cast<Blob*>(
+      static_cast<const Workspace*>(this)->GetLocalBlob(name));
 }
 
 NetBase* Workspace::CreateNet(const NetDef& net_def, bool overwrite) {
