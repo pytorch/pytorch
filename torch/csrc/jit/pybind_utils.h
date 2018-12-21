@@ -69,6 +69,17 @@ inline void findErrorInKwargs(
     }
   }
 }
+
+
+// Usually instances of PyStructSequence is also an instance of tuple
+// but in some py2 environment it is not, so we have to manually check
+// the name of the type to determine if it is a namedtupled returned
+// by a pytorch operator.
+bool isTuple(py::handle input) {
+  return py::isinstance<py::tuple>(input) ||
+         py::str(h.get_type().attr("__module__")) == "torch.return_types";
+}
+
 } // namespace detail
 
 inline IValue toIValue(py::handle input) {
@@ -78,7 +89,7 @@ inline IValue toIValue(py::handle input) {
       AT_ERROR("sparse tensors not supported");
     }
     return ten;
-  } else if (py::isinstance<py::tuple>(input)) {
+  } else if (detail::isTuple(input)) {
     py::tuple input_tuple = py::cast<py::tuple>(input);
     Stack s;
     s.reserve(input_tuple.size());
