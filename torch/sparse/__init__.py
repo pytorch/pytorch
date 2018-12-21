@@ -217,6 +217,7 @@ def erfinv(input):
     """
     return torch._sparse_erfinv(input)
 
+
 def exp(input):
     r"""
     See :func:`torch.exp`
@@ -258,6 +259,7 @@ def log10(input):
     """
     return torch._sparse_log10(input)
 
+
 def log2(input):
     r"""
     See :func:`torch.log2`
@@ -298,6 +300,7 @@ def sign(input):
     See :func:`torch.sign`
     """
     return torch._sparse_sign(input)
+
 
 def sin(input):
     r"""
