@@ -153,10 +153,15 @@ std::tuple<Tensor, Tensor> _gesv_helper_cpu(const Tensor& self, const Tensor& A)
 
 // Supports arbitrary batch dimensions for self and A
 std::tuple<Tensor,Tensor> gesv(const Tensor& self, const Tensor& A) {
-  if (self.dim() <= 2 && A.dim() <= 2) {
+  AT_CHECK(self.dim() >= 2,
+           "b should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+  AT_CHECK(A.dim() >= 2,
+           "A should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
+  if (self.dim() == 2 && A.dim() == 2) {
     // TODO: #7102: It's not necessary to have gesv (single) bindings for both
     // TH and ATen. We should remove the TH gesv bindings, especially
     // since the lapackGesv function is already in ATen.
+    linearSolveCheckInputs(self, A);  // Checks square shape of A, and compatibility of self and A
     return at::legacy::th::_th_gesv_single(self, A);
   }
 
