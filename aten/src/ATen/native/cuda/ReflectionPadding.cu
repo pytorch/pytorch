@@ -4,11 +4,7 @@
 #include "ATen/NativeFunctions.h"
 #include "ATen/TensorUtils.h"
 #include "ATen/Utils.h"
-#include "c10/util/Exception.h"
 #include <THC/THCGeneral.h>
-#include "THC/THCNumerics.cuh"
-
-#include <cmath>
 
 namespace at {
 namespace native {
