@@ -1,6 +1,4 @@
 import sys
-
-del sys.path[sys.path.index('/media/vishwak/Official/Projects/pytorch')]
 import io
 import os
 import math

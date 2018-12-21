@@ -62,7 +62,7 @@ class SobolEngine(object):
             #       once a batched version is introduced
             ltm = torch.randint(2, (self.dimension, self.MAXBIT, self.MAXBIT),
                                 generator=g).to(device=self.device)
-            tril_mask = torch.ones(self.MAXBIT, self.MAXBIT).byte().triu(-1).expand_as(ltm)
+            tril_mask = torch.ones(self.MAXBIT, self.MAXBIT).byte().triu(1).expand_as(ltm)
             ltm.masked_fill_(tril_mask, 0)
 
             self.sobolstate = torch._sobol_engine_scramble(self.sobolstate, ltm, self.dimension)
