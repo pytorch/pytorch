@@ -49,9 +49,13 @@ def rendezvous(url, **kwargs):
     return _rendezvous_handlers[result.scheme](url, **kwargs)
 
 
+def _rendezvous_error(msg):
+    return ValueError("Error initializing torch.distributed using " + msg)
+
+
 def _file_rendezvous_handler(url):
     def _error(msg):
-        return ValueError("file:// rendezvous: " + msg)
+        return _rendezvous_error("file:// rendezvous: " + msg)
 
     result = urlparse(url)
     path = result.path
@@ -65,7 +69,7 @@ def _file_rendezvous_handler(url):
 
     rank = int(query["rank"])
     world_size = int(query["world_size"])
-    store = FileStore(path)
+    store = FileStore(path, world_size)
     yield (store, rank, world_size)
 
     # If this configuration is invalidated, there is nothing we can do about it
@@ -74,7 +78,7 @@ def _file_rendezvous_handler(url):
 
 def _tcp_rendezvous_handler(url):
     def _error(msg):
-        return ValueError("tcp:// rendezvous: " + msg)
+        return _rendezvous_error("tcp:// rendezvous: " + msg)
 
     result = urlparse(url)
     if not result.port:
@@ -97,22 +101,37 @@ def _tcp_rendezvous_handler(url):
 
 def _env_rendezvous_handler(url):
     def _error(msg):
-        return ValueError("env:// rendezvous: " + msg)
+        return _rendezvous_error("env:// rendezvous: " + msg)
 
-    if url != "env://":
-        raise _error("Only `env://` is expected for the env init method")
-    world_size = os.environ["WORLD_SIZE"]
-    if world_size is None:
-        raise _error("world size is missing")
-    rank = os.environ["RANK"]
-    if rank is None:
-        raise _error("rank is missing")
-    master_addr = os.environ["MASTER_ADDR"]
+    def _env_error(var):
+        return _error("environment variable %s expected, but not set" % var)
+
+    if not url.startswith("env://"):
+        raise _error("url must be equal to `env://`")
+    result = urlparse(url)
+    query = dict(pair.split("=") for pair in filter(None, result.query.split("&")))
+
+    if "rank" in query:
+        rank = int(query["rank"])
+    else:
+        rank = os.environ.get("RANK", None)
+        if rank is None:
+            raise _env_error("RANK")
+
+    if "world_size" in query:
+        world_size = int(query["world_size"])
+    else:
+        world_size = os.environ.get("WORLD_SIZE", None)
+        if world_size is None:
+            raise _env_error("WORLD_SIZE")
+
+    master_addr = os.environ.get("MASTER_ADDR", None)
     if master_addr is None:
-        raise _error("master addr is missing")
-    master_port = os.environ["MASTER_PORT"]
+        raise _env_error("MASTER_ADDR")
+
+    master_port = os.environ.get("MASTER_PORT", None)
     if master_port is None:
-        raise _error("master port is missing")
+        raise _env_error("MASTER_PORT")
 
     # Converting before creating the store
     rank = int(rank)

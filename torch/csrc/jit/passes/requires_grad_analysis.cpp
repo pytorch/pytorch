@@ -1,7 +1,7 @@
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/type.h"
-#include "torch/csrc/jit/argument_spec.h"
-#include "torch/csrc/jit/operator.h"
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/type.h>
+#include <torch/csrc/jit/argument_spec.h>
+#include <torch/csrc/jit/operator.h>
 
 #include <vector>
 
@@ -66,9 +66,9 @@ void PropagateRequiresGradSimpleNode(Node* node) {
   auto inputs = node->inputs();
   auto outputs = node->outputs();
   bool should_require = std::any_of(inputs.begin(), inputs.end(), getRequiresGrad);
-  for (size_t i = 0; i < outputs.size(); ++i) {
-    if (auto type = outputs[i]->type()->cast<TensorType>()) {
-      setRequiresGrad(outputs[i], should_require && at::isFloatingType(type->scalarType()));
+  for (Value* output : outputs) {
+    if (auto type = output->type()->cast<TensorType>()) {
+      setRequiresGrad(output, should_require && at::isFloatingType(type->scalarType()));
     }
   }
 }
@@ -114,14 +114,7 @@ void PropagateRequiresGrad(Block * block) {
 
 } // anonymous namespace
 
-void PropagateRequiresGrad(std::shared_ptr<Graph>& graph, const ArgumentSpec & spec) {
-  auto inputs = graph->inputs();
-  JIT_ASSERT(spec.size() == inputs.size());
-  for (size_t i = 0; i < spec.size(); ++i) {
-    auto & arg = spec.at(i);
-    if (!arg.isTensor()) continue;
-    setRequiresGrad(inputs[i], arg.requires_grad());
-  }
+void PropagateRequiresGrad(std::shared_ptr<Graph>& graph) {
   PropagateRequiresGrad(graph->block());
 }
 

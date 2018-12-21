@@ -1,6 +1,6 @@
 #pragma once
 
-#include "THCGeneral.h"
+#include <THC/THCGeneral.h>
 
 /* Global state of THC. */
 struct THCState {

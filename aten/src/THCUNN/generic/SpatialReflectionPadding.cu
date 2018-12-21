@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/SpatialReflectionPadding.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/SpatialReflectionPadding.cu"
 #else
 
 void THNN_(SpatialReflectionPadding_updateOutput)(THCState *state,

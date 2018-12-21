@@ -5,7 +5,7 @@
 #include <TH/TH.h>
 
 #ifndef INT64_MAX
-#include "cstdint"
+#include <cstdint>
 #endif
 
 template <typename T> struct THPTypeInfo {};

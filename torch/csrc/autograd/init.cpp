@@ -1,11 +1,11 @@
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 
-#include "torch/csrc/Exceptions.h"
-#include "torch/csrc/utils/pybind.h"
-#include "torch/csrc/autograd/grad_mode.h"
-#include "torch/csrc/autograd/profiler.h"
-#include "torch/csrc/autograd/python_function.h"
-#include "torch/csrc/autograd/function.h"
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/autograd/python_function.h>
+#include <torch/csrc/autograd/function.h>
 
 PyObject * THPAutograd_initExtension(PyObject *_unused)
 {
@@ -45,15 +45,10 @@ PyObject * THPAutograd_initExtension(PyObject *_unused)
   m.def("_enable_profiler", torch::autograd::profiler::enableProfiler);
   m.def("_disable_profiler", torch::autograd::profiler::disableProfiler);
 
-  m.def("_push_range", [](const char* name) {
-    torch::autograd::profiler::pushRange(name);
+  m.def("_push_range", [](std::string name) {
+    torch::autograd::profiler::pushRange(std::move(name));
   });
   m.def("_pop_range", []() { torch::autograd::profiler::popRange(); });
-
-  /// TODO: Replace this ASAP with a better solution for deep autograd graphs!
-  m.def("_unsafe_set_delete_function_max_recursion_depth", [](size_t value) {
-    torch::autograd::deleteFunctionMaxRecursionDepth = value;
-  });
 
   Py_RETURN_TRUE;
 }

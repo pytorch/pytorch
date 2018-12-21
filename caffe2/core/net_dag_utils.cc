@@ -8,8 +8,11 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/static_tracepoint.h"
 #include "caffe2/core/timer.h"
+#include "caffe2/opt/converter.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
+
+#include "nomnigraph/Graph/Algorithms.h"
 
 namespace caffe2 {
 namespace dag_utils {
@@ -119,6 +122,146 @@ void updateOperatorNodes(
   }
 }
 } // namespace
+
+using namespace nom::repr;
+using DepGraph = nom::Graph<NNGraph::NodeRef>;
+
+// \brief This function prunes edges in the dependency
+// graph to increase the chaining opportunity.
+// It does not eliminate parallelism opportunity.
+void optimizeDependencyGraph(DepGraph* deps) {
+  auto edges = deps->getMutableEdges();
+  for (const auto& edge : edges) {
+    auto tail = edge->tail();
+    auto head = edge->head();
+    deps->deleteEdge(edge);
+    std::unordered_set<DepGraph::NodeRef> seen;
+    nom::algorithm::reachable<DepGraph>(tail, nullptr, &seen);
+    // Removing that edge removes a dominator, which is invalid
+    if (!seen.count(head)) {
+      deps->createEdge(tail, head);
+    }
+  }
+}
+
+ExecutionChains computeChains(
+    const caffe2::NetDef& predict_net,
+    std::vector<OperatorNode>& orig_nodes) {
+  // These serve as the map into predict_net.op()
+  std::vector<NNGraph::NodeRef> nom_ops;
+  auto nn = convertToNNModule(predict_net, false, &nom_ops);
+  CAFFE_ENFORCE_EQ(nom_ops.size(), predict_net.op().size());
+
+  // Create a map from NodeRef to index into predict_net.op()
+  // Now we can use pure nomnigraph functions and map back later
+  std::unordered_map<NNGraph::NodeRef, int> nom_op_to_pos;
+  for (auto idx = 0; idx < nom_ops.size(); ++idx) {
+    nom_op_to_pos[nom_ops[idx]] = idx;
+  }
+
+  // The algorithm:
+  // 1) create dependency graph of ops
+  // 2) for all nodes thats have multiple in edges, remove all in edges
+  // 3) for all nodes thats have multiple out edges, remove all out edges
+  // 4) return the components as chains
+
+  // Caveats that can easily be handled
+  // 1) Cannot have a chain that crosses device options
+  //    insert extra edge at each boundary
+  // 2) All CPU async ops have to be the last op in a chain
+  //    insert extra out edge
+  DepGraph deps;
+
+  // Map NodeRef to the node in the dependency graph
+  std::unordered_map<NNGraph::NodeRef, DepGraph::NodeRef> dep_map;
+  for (const auto& node : nn::filter<NeuralNetOperator>(nn)) {
+    dep_map[node] = deps.createNode(node);
+  }
+
+  // 1) Create dependency graph
+  for (const auto& node : nn::filter<NeuralNetOperator>(nn)) {
+    for (const auto& output : nn::getOutputs(node)) {
+      for (const auto& consumer : nn::getConsumers(output)) {
+        // Record single dependencies first
+        if (!deps.hasEdge(dep_map[node], dep_map[consumer])) {
+          deps.createEdge(dep_map[node], dep_map[consumer]);
+        }
+      }
+    }
+  }
+
+  optimizeDependencyGraph(&deps);
+
+  // Fixup device boundary and async op issues
+  for (const auto& dep : deps.getMutableNodes()) {
+    int op_idx = nom_op_to_pos[dep->data()];
+    auto d1 = orig_nodes.at(op_idx).operator_->device_option();
+    auto outEdges = dep->getOutEdges();
+    for (const auto& outEdge : outEdges) {
+      int op2_idx = nom_op_to_pos[outEdge->head()->data()];
+      auto d2 = orig_nodes.at(op2_idx).operator_->device_option();
+      if (!IsSameDevice(d1, d2)) {
+        deps.createEdge(dep, outEdge->head());
+      }
+    }
+    if (d1.device_type() == PROTO_CUDA) {
+      continue;
+    }
+    if (orig_nodes.at(op_idx).operator_->HasAsyncPart()) {
+      outEdges = dep->getOutEdges();
+      for (const auto& outEdge : outEdges) {
+        // Clone out edges
+        deps.createEdge(outEdge->tail(), outEdge->head());
+      }
+    }
+  }
+
+  // 2) Prune in edges if multiplicity > 1
+  // 3) Prune out edges if multiplicity > 1
+  for (const auto& dep : deps.getMutableNodes()) {
+    auto inEdges = dep->getInEdges();
+    if (inEdges.size() > 1) {
+      for (const auto& inEdge : inEdges) {
+        NOM_REQUIRE_OR_CONT(inEdge);
+        deps.deleteEdge(inEdge);
+      }
+    }
+    auto outEdges = dep->getOutEdges();
+    if (outEdges.size() > 1) {
+      for (const auto& outEdge : outEdges) {
+        NOM_REQUIRE_OR_CONT(outEdge);
+        deps.deleteEdge(outEdge);
+      }
+    }
+  }
+
+  // 4) Return components as chains
+  std::vector<DepGraph::NodeRef> chain_starts;
+  for (const auto& dep : deps.getMutableNodes()) {
+    if (dep->getInEdges().size() == 0) {
+      chain_starts.emplace_back(dep);
+    }
+  }
+
+  ExecutionChains chains;
+  for (const auto& dep : chain_starts) {
+    DepGraph::NodeRef front = dep;
+    std::vector<int> ops;
+    do {
+      ops.emplace_back(nom_op_to_pos[front->data()]);
+      auto outEdges = front->getOutEdges();
+      if (outEdges.size()) {
+        front = outEdges.at(0)->head();
+      } else {
+        front = nullptr;
+      }
+    } while (front);
+    chains[nom_op_to_pos[dep->data()]] = ops;
+  }
+
+  updateOperatorNodes(orig_nodes, chains);
+  return chains;
+}
 
 ExecutionChains computeChains(std::vector<OperatorNode>& orig_nodes) {
   const std::vector<OpGraphNode> nodes = pruneOpNodeGraph(orig_nodes);
@@ -273,6 +416,88 @@ ExecutionChains computeChains(std::vector<OperatorNode>& orig_nodes) {
       ", but seen only ",
       seen_nodes.size(),
       ".");
+
+  updateOperatorNodes(orig_nodes, chains);
+  return chains;
+}
+
+// Here chains are essentially groups, we used chain/group interchangeably
+ExecutionChains computeGroups(std::vector<OperatorNode>& orig_nodes) {
+  const std::vector<OpGraphNode> nodes = pruneOpNodeGraph(orig_nodes);
+  ExecutionChains chains;
+  std::vector<int> sync_frontier;
+  std::vector<int> async_frontier;
+
+  std::vector<int> in_degrees;
+  in_degrees.reserve(nodes.size());
+  std::transform(
+      nodes.begin(),
+      nodes.end(),
+      std::back_inserter(in_degrees),
+      [](const OpGraphNode& n) { return n.parents_.size(); });
+
+  // Screen out the primary root nodes
+  for (int idx = 0; idx < (int)nodes.size(); ++idx) {
+    if (in_degrees[idx] == 0) {
+      if (orig_nodes[idx].operator_->HasAsyncPart()) {
+        async_frontier.push_back(idx);
+      } else {
+        sync_frontier.push_back(idx);
+      }
+    }
+  }
+
+  // We check sync ops on the froniter first and then async ops. This gives us a
+  // head start to execute sync ops locally while waiting for async ops to
+  // finish.
+  std::queue<int> q;
+  while (!(async_frontier.empty() && sync_frontier.empty())) {
+    // Sync ops
+    for (const auto i : sync_frontier) {
+      q.push(i);
+    }
+    sync_frontier.clear();
+    std::vector<int> chain;
+    while (!q.empty()) {
+      int idx = q.front();
+      q.pop();
+      chain.push_back(idx);
+      for (int child : nodes[idx].children_) {
+        if (--in_degrees[child] == 0) {
+          if (orig_nodes[child].operator_->HasAsyncPart()) {
+            async_frontier.push_back(child);
+          } else {
+            q.push(child);
+          }
+        }
+      }
+    }
+    // add the whole group of continuous sync ops into one chain
+    if (!chain.empty()) {
+      chains.emplace(chain.front(), chain);
+    }
+
+    // Async ops
+    for (const auto i : async_frontier) {
+      q.push(i);
+    }
+    async_frontier.clear();
+    while (!q.empty()) {
+      int idx = q.front();
+      q.pop();
+      // Put each individual node as a new chain
+      chains[idx] = {idx};
+      for (int child : nodes[idx].children_) {
+        if (--in_degrees[child] == 0) {
+          if (orig_nodes[child].operator_->HasAsyncPart()) {
+            q.push(child);
+          } else {
+            sync_frontier.push_back(child);
+          }
+        }
+      }
+    }
+  }
 
   updateOperatorNodes(orig_nodes, chains);
   return chains;

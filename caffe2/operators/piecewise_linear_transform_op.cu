@@ -103,14 +103,14 @@ __global__ void PieceWiseLinearTransformBinaryKernel2(
 
 template <>
 void PiecewiseLinearTransformOp<float, CUDAContext>::setUpTensors(
-    TIndex& num_func_per_group,
-    TIndex& num_group,
-    TIndex M) {
+    int64_t& num_func_per_group,
+    int64_t& num_group,
+    int64_t M) {
   if (transform_param_from_arg_) {
     if (!gpu_copied_) {
-      TIndex num_bounds;
-      TIndex num_slopes;
-      TIndex num_intercepts;
+      int64_t num_bounds;
+      int64_t num_slopes;
+      int64_t num_intercepts;
 
       CAFFE_ENFORCE_EQ(InputSize(), 1);
 
@@ -162,9 +162,9 @@ void PiecewiseLinearTransformOp<float, CUDAContext>::setUpTensors(
       gpu_copied_ = true;
     }
   } else {
-    TIndex num_bounds;
-    TIndex num_slopes;
-    TIndex num_intercepts;
+    int64_t num_bounds;
+    int64_t num_slopes;
+    int64_t num_intercepts;
     CAFFE_ENFORCE_EQ(InputSize(), 4);
     auto& bounds_input = Input(BOUNDS);
     auto& slopes_input = Input(SLOPES);
@@ -196,12 +196,12 @@ bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformGeneral() {
   auto& X = Input(0);
   auto* Y = Output(0);
   CAFFE_ENFORCE_EQ(X.ndim(), 2);
-  TIndex N = X.dim32(0);
-  TIndex M = X.dim32(1);
+  int64_t N = X.dim32(0);
+  int64_t M = X.dim32(1);
   Y->ResizeLike(X);
 
-  TIndex num_func_per_group;
-  TIndex num_group;
+  int64_t num_func_per_group;
+  int64_t num_group;
 
   setUpTensors(num_func_per_group, num_group, M);
 
@@ -228,15 +228,15 @@ bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformBinary() {
   auto& X = Input(0);
   auto* Y = Output(0);
   CAFFE_ENFORCE(X.ndim() == 1 || X.ndim() == 2);
-  TIndex N = X.dim32(0);
-  TIndex M = X.ndim() == 2 ? X.dim32(1) : 1;
+  int64_t N = X.dim32(0);
+  int64_t M = X.ndim() == 2 ? X.dim32(1) : 1;
   CAFFE_ENFORCE(
       M == 1 || M == 2,
       "If binary is set to true, the input must be Nx2 or Nx1 tensor");
   Y->ResizeLike(X);
 
-  TIndex num_func_per_group;
-  TIndex num_group;
+  int64_t num_func_per_group;
+  int64_t num_group;
 
   setUpTensors(num_func_per_group, num_group, M);
 

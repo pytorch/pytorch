@@ -16,7 +16,7 @@ class CuDNNWeightedSumOp : public Operator<CUDAContext> {
       : Operator<CUDAContext>(operator_def, ws), cudnn_wrapper_(&context_) {
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&data_desc_));
     CUDNN_ENFORCE(cudnnCreateOpTensorDescriptor(&add_desc_));
-    // Both float and float16 require opTensorCompType to be CUDNN_DATA_FLOAT.
+    // Both float and at::Half require opTensorCompType to be CUDNN_DATA_FLOAT.
     CUDNN_ENFORCE(cudnnSetOpTensorDescriptor(
         add_desc_, CUDNN_OP_TENSOR_ADD, CUDNN_DATA_FLOAT, CUDNN_PROPAGATE_NAN));
   }
@@ -27,28 +27,28 @@ class CuDNNWeightedSumOp : public Operator<CUDAContext> {
   }
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
   }
 
   template <typename T>
   bool DoRunWithType() {
-    if (std::is_same<T, float16>::value) {
+    if (std::is_same<T, at::Half>::value) {
       LOG(WARNING)
           << "CuDNN only support same type for data and weight, "
-             "so the weight will be cast to float16 when data type is float16.";
+             "so the weight will be cast to at::Half when data type is Half.";
     }
     const int num_inputs = InputSize();
     CAFFE_ENFORCE_EQ(num_inputs % 2, 0);
     const auto& X0 = Input(0);
     const auto& weight0 = Input(1);
-    CAFFE_ENFORCE_GT(X0.size(), 0);
-    CAFFE_ENFORCE_EQ(weight0.size(), 1);
-    const int input_size = X0.size();
+    CAFFE_ENFORCE_GT(X0.numel(), 0);
+    CAFFE_ENFORCE_EQ(weight0.numel(), 1);
+    const int input_size = X0.numel();
     SetTensorDescriptor(cudnnTypeWrapper<T>::type, input_size);
-    auto* Y = Output(0);
-    if (Y != &X0) {
-      Y->ResizeLike(X0);
-    }
+
+    // Note: removed Aliasing check, since Output already has
+    // caching capability
+    auto* Y = Output(0, X0.sizes(), at::dtype<T>());
     T* Y_data = Y->template mutable_data<T>();
     T alpha = convert::To<float, T>(0.0f);
     T beta = convert::To<float, T>(0.0f);
@@ -65,17 +65,16 @@ class CuDNNWeightedSumOp : public Operator<CUDAContext> {
       return true;
     }
     const auto& X1 = Input(2);
-    CAFFE_ENFORCE_NE(
-        &X1,
-        Y,
+    CAFFE_ENFORCE(
+        !IsInputOutputAlias(2, 0),
         "Input #2 is the same as output. If you want to do in-place updates, "
         "put the output as input #0.");
     const auto& weight1 = Input(3);
-    CAFFE_ENFORCE_EQ(X1.size(), input_size);
-    CAFFE_ENFORCE_EQ(weight1.size(), 1);
+    CAFFE_ENFORCE_EQ(X1.numel(), input_size);
+    CAFFE_ENFORCE_EQ(weight1.numel(), 1);
     CopyWeightToHost<T>(weight1.template data<float>(), &alpha);
     CopyWeightToHost<T>(weight0.template data<float>(), &beta);
-    if (Y == &X0) {
+    if (IsInputOutputAlias(0, 0)) {
       CUDNN_ENFORCE(cudnnAddTensor(
           cudnn_wrapper_.inline_cudnn_handle(),
           &alpha,
@@ -105,10 +104,10 @@ class CuDNNWeightedSumOp : public Operator<CUDAContext> {
       const std::string err_msg = "Input #" + to_string(i) +
           " is the same as output. If you want to do in-place updates, "
           "put the output as input #0.";
-      CAFFE_ENFORCE_NE(&Xi, Y, err_msg);
+      CAFFE_ENFORCE(!IsInputOutputAlias(i, 0), err_msg);
       const auto& weighti = Input(i + 1);
-      CAFFE_ENFORCE_EQ(Xi.size(), input_size);
-      CAFFE_ENFORCE_EQ(weighti.size(), 1);
+      CAFFE_ENFORCE_EQ(Xi.numel(), input_size);
+      CAFFE_ENFORCE_EQ(weighti.numel(), 1);
       CopyWeightToHost<T>(weighti.template data<float>(), &alpha);
       CUDNN_ENFORCE(cudnnAddTensor(
           cudnn_wrapper_.inline_cudnn_handle(),

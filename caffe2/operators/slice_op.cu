@@ -123,9 +123,9 @@ bool SliceImplGpu(
   }
   if (dim == -1) {
     if (!backward) {
-      output->CopyFrom(data, context);
+      output->CopyFrom(data, true /*async*/);
     } else {
-      gdata->CopyFrom(*go, context);
+      gdata->CopyFrom(*go, true /*async*/);
     }
     return true;
   }
@@ -237,15 +237,15 @@ class SliceOp<CUDAContext> : public Operator<CUDAContext> {
   USE_OPERATOR_FUNCTIONS(CUDAContext);
   SliceOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CUDAContext>(operator_def, ws),
-        starts_(this->template GetRepeatedArgument<TIndex>("starts")),
-        ends_(this->template GetRepeatedArgument<TIndex>("ends")),
+        starts_(this->template GetRepeatedArgument<int64_t>("starts")),
+        ends_(this->template GetRepeatedArgument<int64_t>("ends")),
         statically_inited_(false) {}
 
   bool RunOnDevice() override {
     if (InputSize() > 1) {
-      return DispatchHelper<TensorTypes<int, TIndex>>::call(this, Input(1));
+      return DispatchHelper<TensorTypes<int, int64_t>>::call(this, Input(1));
     } else {
-      return DoRunWithType<TIndex>();
+      return DoRunWithType<int64_t>();
     }
   }
 
@@ -282,8 +282,8 @@ class SliceOp<CUDAContext> : public Operator<CUDAContext> {
         output, data, starts_host_, ends_host_, &context_);
   }
  private:
-  std::vector<TIndex> starts_;
-  std::vector<TIndex> ends_;
+  std::vector<int64_t> starts_;
+  std::vector<int64_t> ends_;
   bool statically_inited_;
   Tensor starts_host_{CPU};
   Tensor ends_host_{CPU};
@@ -298,17 +298,17 @@ class SliceGradientOp<CUDAContext> : public Operator<CUDAContext> {
   USE_OPERATOR_FUNCTIONS(CUDAContext);
   SliceGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CUDAContext>(operator_def, ws),
-        starts_(this->template GetRepeatedArgument<TIndex>("starts")),
-        ends_(this->template GetRepeatedArgument<TIndex>("ends")),
+        starts_(this->template GetRepeatedArgument<int64_t>("starts")),
+        ends_(this->template GetRepeatedArgument<int64_t>("ends")),
         statically_inited_(false) {}
 
-  AT_DISABLE_COPY_AND_ASSIGN(SliceGradientOp);
+  C10_DISABLE_COPY_AND_ASSIGN(SliceGradientOp);
 
   bool RunOnDevice() override {
     if (InputSize() == 4) {
-      return DispatchHelper<TensorTypes<int, TIndex>>::call(this, Input(1));
+      return DispatchHelper<TensorTypes<int, int64_t>>::call(this, Input(1));
     } else {
-      return DoRunWithType<TIndex>();
+      return DoRunWithType<int64_t>();
     }
   }
 
@@ -353,8 +353,8 @@ class SliceGradientOp<CUDAContext> : public Operator<CUDAContext> {
   }
  private:
 
-  std::vector<TIndex> starts_;
-  std::vector<TIndex> ends_;
+  std::vector<int64_t> starts_;
+  std::vector<int64_t> ends_;
   bool statically_inited_;
   Tensor starts_host_{CPU};
   Tensor ends_host_{CPU};

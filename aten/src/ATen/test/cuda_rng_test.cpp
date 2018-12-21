@@ -1,9 +1,9 @@
-#define CATCH_CONFIG_MAIN
-#include "catch_utils.hpp"
+#include <gtest/gtest.h>
 
-#include "ATen/ATen.h"
-#include "cuda.h"
-#include "cuda_runtime.h"
+#include <ATen/ATen.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <cuda.h>
+#include <cuda_runtime.h>
 #include <thread>
 
 void makeRandomNumber() {
@@ -21,7 +21,7 @@ void testCudaRNGMultithread() {
   }
 };
 
-CATCH_TEST_CASE( "CUDA RNG test", "[cuda]" ) {
-  CATCH_SECTION( "multithread" )
-    testCudaRNGMultithread();
+TEST(Cuda_RNGTest, MultithreadRNGTest) {
+  if (!at::cuda::is_available()) return;
+  testCudaRNGMultithread();
 }

@@ -5,7 +5,7 @@ namespace caffe2 {
 template <>
 bool RangeFillOp<float, CPUContext>::Fill(Tensor* output) {
   float* data = output->template mutable_data<float>();
-  for (int i = 0; i < output->size(); ++i) {
+  for (int i = 0; i < output->numel(); ++i) {
     data[i] = i;
   }
   return true;
@@ -18,10 +18,10 @@ bool DiagonalFillOp<CPUContext>::FillWithType(Tensor* output) {
   T value = OperatorBase::GetSingleArgument<T>("value", 0);
   auto* data = output->template mutable_data<T>();
   // first fill everything with 0
-  math::Set<T, CPUContext>(output->size(), T(0), data, &context_);
+  math::Set<T, CPUContext>(output->numel(), T(0), data, &context_);
   // then calculate step size for diagonal
   auto step = GetStepSize(output);
-  for (TIndex i = 0; i < output->size(); i += step) {
+  for (int64_t i = 0; i < output->numel(); i += step) {
     math::Set<T, CPUContext>(1, value, data, &context_);
     data += step;
   }
@@ -83,7 +83,7 @@ message TensorProto {
     UINT16 = 8;  // uint16_t
     INT16 = 9;  // int16_t
     INT64 = 10;  // int64_t
-    FLOAT16 = 12;  // caffe2::__f16, caffe2::float16
+    FLOAT16 = 12;  // at::Half
     DOUBLE = 13;  // double
   }
 ```

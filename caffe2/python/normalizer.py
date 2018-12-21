@@ -31,11 +31,12 @@ class BatchNormalizer(Normalizer):
 
 
 class LayerNormalizer(Normalizer):
-    def __init__(self, epsilon):
+    def __init__(self, epsilon, use_layer_norm_op=True):
         super(LayerNormalizer, self).__init__()
         self._epsilon = float(epsilon)
+        self._use_layer_norm_op = use_layer_norm_op
 
     def _run(self, layer_model, param):
         return layer_model.LayerNormalization(
-            param, epsilon=self._epsilon
+            param, epsilon=self._epsilon, use_layer_norm_op=self._use_layer_norm_op
         )

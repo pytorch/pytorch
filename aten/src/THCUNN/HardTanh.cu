@@ -1,6 +1,6 @@
-#include "THCUNN.h"
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
+#include <THCUNN/THCUNN.h>
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
 #include <THC/THCApply.cuh>
 
 template <typename T>
@@ -10,9 +10,7 @@ struct hardtanhupdateOutput_functor
   const T min_val_;
 
   hardtanhupdateOutput_functor(T min_val, T max_val)
-    : min_val_(min_val)
-    , max_val_(max_val)
-  {}
+      : max_val_(max_val), min_val_(min_val) {}
 
   __device__ void operator()(T *output, const T *input) const
   {
@@ -40,9 +38,7 @@ struct hardtanhupdateGradInput_functor
   const T min_val_;
 
   hardtanhupdateGradInput_functor(T min_val, T max_val)
-    : min_val_(min_val)
-    , max_val_(max_val)
-  {}
+      : max_val_(max_val), min_val_(min_val) {}
 
   __device__ void operator()(T *gradInput, const T *input, const T *gradOutput) const
   {
@@ -59,5 +55,5 @@ struct hardtanhupdateGradInput_functor
   }
 };
 
-#include "generic/HardTanh.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/HardTanh.cu>
+#include <THC/THCGenerateFloatTypes.h>

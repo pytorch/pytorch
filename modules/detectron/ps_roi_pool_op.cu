@@ -130,6 +130,7 @@ __global__ void PSRoIPoolForward(
     T bin_size_h = roi_height / static_cast<T>(pooled_height);
     T bin_size_w = roi_width / static_cast<T>(pooled_width);
 
+    // Add roi offsets and clip to input boundaries
     int hstart = floor(
       static_cast<T>(ph) * bin_size_h + roi_start_h);
     int wstart = floor(
@@ -138,7 +139,7 @@ __global__ void PSRoIPoolForward(
       static_cast<T>(ph + 1) * bin_size_h + roi_start_h);
     int wend = ceil(
       static_cast<T>(pw + 1) * bin_size_w + roi_start_w);
-    // Add roi offsets and clip to input boundaries
+
     hstart = min(max(hstart, 0), height);
     hend = min(max(hend, 0), height);
     wstart = min(max(wstart, 0),width);

@@ -18,6 +18,9 @@ NAME_PARAM_REGEX = r'(\w+)\((.*)\)'
 def argument_to_declaration(param, func=None):
     arg = {}
     arg['type'], name = param.split(' ')
+    if (arg['type'].endswith('?')):
+        arg['is_nullable'] = True
+        arg['type'] = arg['type'].rstrip('?')
     if arg['type'] == 'Tensor':
         arg['type'] = 'THTensor*'
     elif arg['type'] == 'LongTensor':
@@ -296,6 +299,11 @@ def backward_declaration(base, thnn_functions):
                 break
         arguments.insert(output_size_idx + 1, input_size_arg)
 
+    if 'im2col' in base['name']:
+        # Add input_size as parameter to im2col backwards function
+        input_size_arg = {'type': 'IntList', 'name': 'input_size', 'size': 2}
+        arguments.insert(2, input_size_arg)
+
     # outputs from the forward may be inputs to the backwards
     for arg in arguments:
         if 'output' in arg:
@@ -404,7 +412,6 @@ def run(paths):
                     bwd_functions.append(header_functions[cname + suffix])
 
             base = base_declaration(func, fwd_function, backends)
-            declarations.append(base)
             declarations.append(forward_declaration(base, fwd_function))
             declarations.append(backward_declaration(base, bwd_functions))
 

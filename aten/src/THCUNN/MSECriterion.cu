@@ -1,9 +1,9 @@
-#include "THCUNN.h"
-#include "common.h"
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
-#include "THCThrustAllocator.cuh"
-#include "THCApply.cuh"
+#include <THCUNN/THCUNN.h>
+#include <THCUNN/common.h>
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCThrustAllocator.cuh>
+#include <THC/THCApply.cuh>
 
 #include <thrust/fill.h>
 #include <thrust/functional.h>
@@ -33,8 +33,8 @@ struct mse_updateOutput_functor
   mse_updateOutput_functor() {}
 
   __device__ void operator()(
-      const Dtype *input, 
-      const Dtype *target, 
+      const Dtype *input,
+      const Dtype *target,
       Dtype *output)
   {
     Dtype diff = THCNumerics<Dtype>::sub(*input, *target);
@@ -58,5 +58,5 @@ struct mse_updateGradInput_functor
   }
 };
 
-#include "generic/MSECriterion.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/MSECriterion.cu>
+#include <THC/THCGenerateFloatTypes.h>

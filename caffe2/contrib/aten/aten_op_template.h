@@ -144,7 +144,7 @@ private:
   }
   template <typename T>
   void assignToValue(Tensor* dst, T v) {
-    dst->Resize(std::vector<TIndex>());
+    dst->Resize(std::vector<int64_t>());
     math::Set(1, v, dst->template mutable_data<T>(), &context_);
   }
   int findImplementation(const OperatorDef& operator_def) {
@@ -167,7 +167,7 @@ private:
       descriptor << "-" << a;
 
     std::string descriptor_sized =
-        descriptor.str() + "-" + caffe2::to_string(InputSize());
+        descriptor.str() + "-" + c10::to_string(InputSize());
     std::string descriptor_var_args = descriptor.str() + "-*";
     if (op_to_key.count(descriptor_sized) > 0) {
       return op_to_key[descriptor_sized];
@@ -212,7 +212,7 @@ private:
     #define DEFINE_IF(type,aten) \
       if(#type == name) \
         return at::k##aten;
-    DEFINE_IF(float16, Half)
+    DEFINE_IF(at::Half, Half)
     DEFINE_IF(float, Float)
     DEFINE_IF(double, Double)
     DEFINE_IF(uint8, Byte)

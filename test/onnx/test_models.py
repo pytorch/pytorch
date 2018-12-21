@@ -127,7 +127,7 @@ class TestModels(TestCase):
 
     def test_inception(self):
         x = Variable(
-            torch.randn(BATCH_SIZE, 3, 299, 299).fill_(1.0))
+            torch.randn(BATCH_SIZE, 3, 299, 299) + 1.)
         self.exportTest(toC(inception_v3()), toC(x))
 
     def test_squeezenet(self):

@@ -75,13 +75,13 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_transpose_backwar
 
 #else  // AT_CUDNN_ENABLED
 
-#include "THC/THC.h"
+#include <THC/THC.h>
 
 #include <ATen/cudnn/cudnn-wrapper.h>
 #include <ATen/cudnn/Descriptors.h>
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>
-#include "ATen/native/utils/ParamsHash.h"
+#include <ATen/native/utils/ParamsHash.h>
 
 #include <ATen/TensorUtils.h>
 
@@ -119,7 +119,7 @@ constexpr int max_dim = 3;
 // as conv_output_size loses information; this is why conv_input_size
 // takes an extra output_padding argument to resolve the ambiguity.
 
-std::vector<int64_t> conv_output_size(
+static std::vector<int64_t> conv_output_size(
     IntList input_size, IntList weight_size,
     IntList padding, IntList stride, IntList dilation, int64_t groups
 ) {
@@ -710,7 +710,7 @@ Workspace chooseAlgorithm(
   search::getWorkspaceSize(args, *algo, &workspace_size);
   try {
     return Workspace(workspace_size);
-  } catch (std::runtime_error& e) {
+  } catch (const std::exception& e) {
     cudaGetLastError(); // clear OOM error
 
     // switch to default algorithm and record it in the cache to prevent
@@ -836,9 +836,10 @@ Tensor cudnn_convolution_forward(
   checkAllSameType(c, {input, weight});
   checkAllSameGPU(c, {input, weight});
 
-  auto output_t = input->type().tensor(
+  auto output_t = at::empty(
                     conv_output_size(input->sizes(), weight->sizes(),
-                                     padding, stride, dilation, groups));
+                                     padding, stride, dilation, groups),
+                    input->options());
 
   // Avoid ambiguity of "output" when this is being used as backwards
   TensorArg output{ output_t, "result", 0 };
@@ -976,7 +977,7 @@ Tensor cudnn_convolution_backward_input(
   checkAllSameType(c, {grad_output, weight});
   checkAllSameGPU(c, {grad_output, weight});
 
-  auto grad_input_t = grad_output->type().tensor(input_size);
+  auto grad_input_t = at::empty(input_size, grad_output->options());
 
   // Avoid "grad_input" when this is being used as transposed convolution
   TensorArg grad_input{ grad_input_t, "result", 0 };
@@ -1111,7 +1112,7 @@ Tensor cudnn_convolution_backward_weight(
   checkAllSameType(c, {grad_output, input});
   checkAllSameGPU(c, {grad_output, input});
 
-  auto grad_weight_t = grad_output->type().tensor(weight_size);
+  auto grad_weight_t = at::empty(weight_size, grad_output->options());
 
   // For uniformity with everything else, although it seems grad_weight
   // would be unambiguous too.
@@ -1179,8 +1180,8 @@ Tensor cudnn_convolution_backward_bias(
   TensorArg grad_output{ grad_output_t, "grad_output", 1 };
   setCuDNNStreamToCurrent();
 
-  auto grad_bias_t = grad_output->type().tensor(
-                        { grad_output->size(output_channels_dim) });
+  auto grad_bias_t = at::empty(
+                        { grad_output->size(output_channels_dim) }, grad_output->options());
 
   TensorArg grad_bias{ grad_bias_t, "result", 0 };
 

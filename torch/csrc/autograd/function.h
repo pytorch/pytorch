@@ -1,17 +1,17 @@
 #pragma once
 
-#include "torch/csrc/autograd/edge.h"
-#include "torch/csrc/autograd/grad_mode.h"
-#include "torch/csrc/autograd/anomaly_mode.h"
-#include "torch/csrc/autograd/profiler.h"
-#include "torch/csrc/autograd/saved_variable.h"
-#include "torch/csrc/autograd/input_metadata.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/utils/python_stub.h"
-#include "torch/csrc/utils/variadic.h"
+#include <torch/csrc/autograd/edge.h>
+#include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/anomaly_mode.h>
+#include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/autograd/saved_variable.h>
+#include <torch/csrc/autograd/input_metadata.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/utils/python_stub.h>
+#include <torch/csrc/utils/variadic.h>
 
 #include <ATen/ATen.h>
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -32,8 +32,6 @@ using variable_list = std::vector<Variable>;
 using edge_list = std::vector<Edge>;
 using saved_variable_list = std::vector<SavedVariable>;
 using IndexRange = std::pair<size_t, size_t>;
-
-TORCH_API extern size_t deleteFunctionMaxRecursionDepth;
 
 // Custom deleter to prevent stack overflows.
 void deleteFunction(Function* function);
@@ -303,16 +301,6 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
   /// NOTE: this value matters only if is_traceable() returns false.
   virtual bool passes_state_transparently() {
     return false;
-  }
-
-  /// Returns `Variable`s saved by this `Function`.
-  /// This let's the JIT find inputs to apply that are not present explicitly
-  /// in arguments. Required only for functions that are not traceable, don't
-  /// pass state to backward transparently, and are not backwards closures of
-  /// functions that don't pass the state transparently. Which means that
-  /// hopefully they will hardly ever need to be implemented :)
-  virtual std::unique_ptr<saved_variable_list> saved_variables() {
-    return nullptr;
   }
 
   static uint64_t peek_at_next_sequence_nr();

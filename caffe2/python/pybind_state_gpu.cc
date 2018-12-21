@@ -143,10 +143,10 @@ void addCUDAObjectMethods(py::module& m) {
           "Copy data from given DLPack tensor into this tensor.")
       .def_property_readonly(
           "_shape",
-          [](const DLPackWrapper<CUDAContext>& t) { return t.tensor->dims(); })
+          [](const DLPackWrapper<CUDAContext>& t) { return t.tensor->sizes(); })
       .def(
           "_reshape",
-          [](DLPackWrapper<CUDAContext>* t, std::vector<TIndex> dims) {
+          [](DLPackWrapper<CUDAContext>* t, std::vector<int64_t> dims) {
             t->tensor->Resize(dims);
           });
 }

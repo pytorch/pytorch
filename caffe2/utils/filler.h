@@ -34,20 +34,20 @@ class TensorFiller {
     switch (dist_) {
       case FD_UNIFORM: {
         math::RandUniform<Type, Context>(
-            tensor->size(), min, max, data, context);
+            tensor->numel(), min, max, data, context);
         break;
       }
       case FD_FIXEDSUM: {
         auto fixed_sum = static_cast<Type>(fixed_sum_);
-        CAFFE_ENFORCE_LE(min * tensor->size(), fixed_sum);
-        CAFFE_ENFORCE_GE(max * tensor->size(), fixed_sum);
+        CAFFE_ENFORCE_LE(min * tensor->numel(), fixed_sum);
+        CAFFE_ENFORCE_GE(max * tensor->numel(), fixed_sum);
         math::RandFixedSum<Type, Context>(
-            tensor->size(), min, max, fixed_sum_, data, context);
+            tensor->numel(), min, max, fixed_sum_, data, context);
         break;
       }
       case FD_SYNTHETIC: {
         math::RandSyntheticData<Type, Context>(
-            tensor->size(), min, max, data, context);
+            tensor->numel(), min, max, data, context);
         break;
       }
     }
@@ -77,10 +77,13 @@ class TensorFiller {
     return *this;
   }
 
-  // a helper function to construct the lengths vector for sparse features
+  // A helper function to construct the lengths vector for sparse features
+  // We try to pad least one index per batch unless the total_length is 0
   template <class Type>
   TensorFiller& SparseLengths(Type total_length) {
-    return FixedSum(total_length).Min(0).Max(total_length);
+    return FixedSum(total_length)
+        .Min(std::min(static_cast<Type>(1), total_length))
+        .Max(total_length);
   }
 
   // a helper function to construct the segments vector for sparse features
@@ -90,19 +93,19 @@ class TensorFiller {
     return Min(0).Max(max_segment).Dist(FD_SYNTHETIC);
   }
 
-  TensorFiller& Shape(const std::vector<TIndex>& shape) {
+  TensorFiller& Shape(const std::vector<int64_t>& shape) {
     shape_ = shape;
     return *this;
   }
 
   template <class Type>
-  TensorFiller(const std::vector<TIndex>& shape, Type fixed_sum)
+  TensorFiller(const std::vector<int64_t>& shape, Type fixed_sum)
       : shape_(shape), dist_(FD_FIXEDSUM), fixed_sum_((double)fixed_sum) {}
 
-  TensorFiller(const std::vector<TIndex>& shape)
+  TensorFiller(const std::vector<int64_t>& shape)
       : shape_(shape), dist_(FD_UNIFORM), fixed_sum_(0) {}
 
-  TensorFiller() : TensorFiller(std::vector<TIndex>()) {}
+  TensorFiller() : TensorFiller(std::vector<int64_t>()) {}
 
   std::string DebugString() const {
     std::stringstream stream;
@@ -123,7 +126,7 @@ class TensorFiller {
   }
 
  private:
-  std::vector<TIndex> shape_;
+  std::vector<int64_t> shape_;
   // TODO: type is unknown until a user starts to fill data;
   // cast everything to double for now.
   double min_ = 0.0;

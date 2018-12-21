@@ -11,7 +11,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/proto/caffe2_pb.h"
 
-CAFFE2_DECLARE_bool(caffe2_workspace_stack_debug);
+C10_DECLARE_bool(caffe2_workspace_stack_debug);
 
 namespace caffe2 {
 namespace detail {

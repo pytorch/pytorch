@@ -36,7 +36,7 @@ class Float16ConstantFillOp : public Operator<CPUContext> {
   bool RunOnDevice() override;
 
  private:
-  vector<TIndex> shape_;
+  vector<int64_t> shape_;
 };
 
 class Float16UniformFillOp : public Operator<CPUContext> {
@@ -65,7 +65,7 @@ class Float16UniformFillOp : public Operator<CPUContext> {
   bool RunOnDevice() override;
 
  private:
-  vector<TIndex> shape_;
+  vector<int64_t> shape_;
   float min_;
   float max_;
 };

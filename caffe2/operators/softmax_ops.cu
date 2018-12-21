@@ -308,7 +308,7 @@ bool SoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
     }
   }
 
-  avg_loss->Resize(vector<TIndex>());
+  avg_loss->Resize(vector<int64_t>());
   if (losses_.size() != N) {
     losses_.Resize(N);
   }
@@ -423,7 +423,7 @@ bool SpatialSoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
       context_.cuda_stream()>>>(N, D, W, H, Xdata, Pdata);
 
   // Cross entropy
-  avg_loss->Resize(vector<TIndex>());
+  avg_loss->Resize(vector<int64_t>());
   float* avg_loss_data = avg_loss->template mutable_data<float>();
   math::Set<float, CUDAContext>(1, 0.0f, avg_loss_data, &context_);
 

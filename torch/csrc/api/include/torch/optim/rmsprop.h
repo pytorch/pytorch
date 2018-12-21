@@ -1,10 +1,10 @@
 #pragma once
 
+#include <torch/arg.h>
 #include <torch/nn/module.h>
 #include <torch/optim/optimizer.h>
-#include <torch/serialization.h>
-
-#include <ATen/ATen.h>
+#include <torch/optim/serialize.h>
+#include <torch/types.h>
 
 #include <functional>
 #include <memory>
@@ -12,9 +12,16 @@
 #include <vector>
 
 namespace torch {
+namespace serialize {
+class OutputArchive;
+class InputArchive;
+} // namespace serialize
+} // namespace torch
+
+namespace torch {
 namespace optim {
 
-struct RMSpropOptions {
+struct TORCH_API RMSpropOptions {
   RMSpropOptions(double learning_rate);
   TORCH_ARG(double, learning_rate);
   TORCH_ARG(double, alpha) = 0.99;
@@ -24,7 +31,7 @@ struct RMSpropOptions {
   TORCH_ARG(bool, centered) = false;
 };
 
-class RMSprop : public Optimizer {
+class TORCH_API RMSprop : public Optimizer {
  public:
   template <typename ParameterContainer>
   explicit RMSprop(
@@ -37,31 +44,22 @@ class RMSprop : public Optimizer {
 
   RMSpropOptions options;
 
-  template <class Archive>
-  void serialize(Archive& ar) {
-#if defined(TORCH_USE_CEREAL)
-    ar(CEREAL_NVP(square_average_buffers_));
-    ar(CEREAL_NVP(momentum_buffers_));
-    ar(CEREAL_NVP(grad_average_buffers_));
-#endif // defined(TORCH_USE_CEREAL)
-  }
+  void save(serialize::OutputArchive& archive) const override;
+  void load(serialize::InputArchive& archive) override;
+
+  std::vector<Tensor> square_average_buffers;
+  std::vector<Tensor> momentum_buffers;
+  std::vector<Tensor> grad_average_buffers;
 
  private:
-#if defined(TORCH_USE_CEREAL)
-  friend class cereal::access;
-#endif // defined(TORCH_USE_CEREAL)
   RMSprop() : options(0) {}
 
-  std::vector<Tensor> square_average_buffers_;
-  std::vector<Tensor> momentum_buffers_;
-  std::vector<Tensor> grad_average_buffers_;
+  template <typename Self, typename Archive>
+  static void serialize(Self& self, Archive& archive) {
+    TORCH_OPTIM_SERIALIZE(square_average_buffers);
+    TORCH_OPTIM_SERIALIZE(momentum_buffers);
+    TORCH_OPTIM_SERIALIZE(grad_average_buffers);
+  }
 };
 } // namespace optim
 } // namespace torch
-
-#if defined(TORCH_USE_CEREAL)
-CEREAL_REGISTER_TYPE(torch::optim::RMSprop);
-CEREAL_REGISTER_POLYMORPHIC_RELATION(
-    torch::optim::Optimizer,
-    torch::optim::RMSprop);
-#endif // defined(TORCH_USE_CEREAL)

@@ -2,7 +2,7 @@
 #include "caffe2/opt/converter.h"
 #include "caffe2/opt/fusion.h"
 
-#ifdef CAFFE2_USE_IDEEP
+#ifdef CAFFE2_USE_MKLDNN
 #include "caffe2/ideep/ideep_utils.h"
 #endif
 
@@ -11,7 +11,7 @@ namespace opt {
 
 using namespace nom;
 
-#ifndef CAFFE2_USE_IDEEP
+#ifndef CAFFE2_USE_MKLDNN
 void OptimizeForIdeep(
     repr::NNModule* nn,
     caffe2::Workspace* ws,
@@ -440,7 +440,7 @@ void OptimizeForIdeep(
   setPoolingInferenceMode(nn);
 }
 
-#endif // CAFFE2_USE_IDEEP
+#endif // CAFFE2_USE_MKLDNN
 
 } // namespace opt
 } // namespace caffe2

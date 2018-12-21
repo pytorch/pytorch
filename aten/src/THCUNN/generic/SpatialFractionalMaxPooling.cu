@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/SpatialFractionalMaxPooling.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/SpatialFractionalMaxPooling.cu"
 #else
 
 void THNN_(SpatialFractionalMaxPooling_updateOutput)(
