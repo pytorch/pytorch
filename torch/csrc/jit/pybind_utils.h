@@ -70,14 +70,13 @@ inline void findErrorInKwargs(
   }
 }
 
-
 // Usually instances of PyStructSequence is also an instance of tuple
 // but in some py2 environment it is not, so we have to manually check
 // the name of the type to determine if it is a namedtupled returned
 // by a pytorch operator.
-bool isTuple(py::handle input) {
-  return py::isinstance<py::tuple>(input) ||
-         py::str(input.get_type().attr("__module__")) == "torch.return_types";
+inline bool isTuple(py::handle input) {
+  std::string type_module_string = py::str(input.get_type().attr("__module__"));
+  return py::isinstance<py::tuple>(input) || type_module_string == "torch.return_types";
 }
 
 } // namespace detail
