@@ -19,6 +19,10 @@ _rnn_impls = {
 }
 
 
+def apply_permutation(tensor, permutation, dim=1):
+    return tensor.index_select(dim, permutation)
+
+
 class RNNBase(Module):
 
     def __init__(self, mode, input_size, hidden_size,
@@ -156,14 +160,24 @@ class RNNBase(Module):
         else:
             check_hidden_size(hidden, expected_hidden_size)
 
+    def permute_hidden(self, hx, permutation):
+        if permutation is None:
+            return hx
+        if self.mode == 'LSTM':
+            return tuple(apply_permutation(state, permutation) for state in hx)
+        else:
+            return apply_permutation(hx, permutation)
+
     def forward(self, input, hx=None):
         is_packed = isinstance(input, PackedSequence)
         if is_packed:
-            input, batch_sizes = input
+            input, batch_sizes, sorted_indices, unsorted_indices = input
             max_batch_size = int(batch_sizes[0])
         else:
             batch_sizes = None
             max_batch_size = input.size(0) if self.batch_first else input.size(1)
+            sorted_indices = None
+            unsorted_indices = None
 
         if hx is None:
             num_directions = 2 if self.bidirectional else 1
@@ -172,6 +186,10 @@ class RNNBase(Module):
                                  requires_grad=False)
             if self.mode == 'LSTM':
                 hx = (hx, hx)
+        else:
+            # Each batch of the hidden state should match the input sequence that
+            # the user believes he/she is passing in.
+            hx = self.permute_hidden(hx, sorted_indices)
 
         self.check_forward_args(input, hx, batch_sizes)
         _impl = _rnn_impls[self.mode]
@@ -185,8 +203,8 @@ class RNNBase(Module):
         hidden = result[1:] if self.mode == 'LSTM' else result[1]
 
         if is_packed:
-            output = PackedSequence(output, batch_sizes)
-        return output, hidden
+            output = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
+        return output, self.permute_hidden(hidden, unsorted_indices)
 
     def extra_repr(self):
         s = '{input_size}, {hidden_size}'
