@@ -833,6 +833,153 @@ def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwarg
     return args_out, kwargs_out
 
 
+def _compare_trilu_indices(
+        self, row, col, offset=0, dtype=torch.long, device='cpu'):
+    if row == 0 or col == 0:
+        # have to handle this separately as tril and triu does not take
+        # empty matrix as input
+        self.assertEqual(
+            torch.empty(0, 2, dtype=dtype, device=device).transpose(0, 1),
+            torch.tril_indices(row, col, offset, dtype=dtype, device=device))
+
+        self.assertEqual(
+            torch.empty(0, 2, dtype=dtype, device=device).transpose(0, 1),
+            torch.triu_indices(row, col, offset, dtype=dtype, device=device))
+
+    else:
+        self.assertEqual(
+            torch.ones(row, col, dtype=dtype, device='cpu')
+                 .tril(offset).nonzero().transpose(0, 1).to(device),
+            torch.tril_indices(row, col, offset, dtype=dtype, device=device))
+
+        self.assertEqual(
+            torch.ones(row, col, dtype=dtype, device='cpu')
+                 .tril(offset).nonzero().transpose(0, 1).to(device),
+            torch.tril_indices(row, col, offset, dtype=dtype, device=device))
+
+
+def _compare_large_trilu_indices(
+        self, row, col, offset=0, dtype=torch.long, device='cpu'):
+    l = torch.ones(row, col, dtype=dtype, device='cpu').tril(offset) \
+             .nonzero()[-100:-1, :].transpose(0, 1).to(device)
+    torch.cuda.empty_cache()
+
+    r = torch.tril_indices(
+        row, col, offset, dtype=dtype, device=device)[:, -100:-1]
+    self.assertEqual(l, r)
+    torch.cuda.empty_cache()
+
+    l = torch.ones(row, col, dtype=dtype, device='cpu').triu(offset) \
+             .nonzero()[-100:-1, :].transpose(0, 1).to(device)
+    torch.cuda.empty_cache()
+
+    r = torch.triu_indices(
+        row, col, offset, dtype=dtype, device=device)[:, -100:-1]
+    self.assertEqual(l, r)
+    torch.cuda.empty_cache()
+
+# (
+#   row
+#   col
+#   offset (optional)
+#   dtype (optional)
+# )
+tri_tests_args = [
+    (1, 1),
+    (3, 3),
+    (3, 3, 1),
+    (3, 3, 2),
+    (3, 3, 200),
+    (3, 3, -1),
+    (3, 3, -2),
+    (3, 3, -200),
+    (0, 3, 0),
+    (0, 3, 1),
+    (0, 3, -1),
+    (3, 0, 0),
+    (3, 0, 1),
+    (3, 0, -1),
+    (0, 0, 0),
+    (0, 0, 1),
+    (0, 0, -1),
+    (3, 6, 0),
+    (3, 6, 1),
+    (3, 6, 3),
+    (3, 6, 9),
+    (3, 6, -1),
+    (3, 6, -3),
+    (3, 6, -9),
+    (6, 3, 0),
+    (6, 3, 1),
+    (6, 3, 3),
+    (6, 3, 9),
+    (6, 3, -1),
+    (6, 3, -3),
+    (6, 3, -9),
+    (258, 253, 1, torch.float32),
+    (257, 258, 1, torch.float64),
+    (258, 258, 1, torch.short),
+    (3, 513, 1, torch.long),
+    (513, 3, 1, torch.int),
+    (513, 0, 1, torch.double),
+    (1024, 1024),
+    (1024, 1024, 500, torch.float32),
+    (1024, 1024, 1023),
+    (1024, 1024, -500),
+    (1023, 1025),
+    (1025, 1023, 1022),
+    (1024, 1024, -500),
+    (3, 2028),
+    (3, 2028, 1),
+    (3, 2028, -1),
+    (2028, 3),
+    (2028, 1),
+    (2028, 1, -1)
+]
+
+tri_large_tests_args = [
+    (1, 268435455),
+    # Large test cases below are deliberately commented out to speed up CI
+    # tests and to avoid OOM error. When modifying implementations of
+    # tril_indices and triu_indices, please enable these tests and make sure
+    # they pass.
+    #
+    # (5000, 5000),
+    # (10000, 10000),
+    # (268435455, 1),
+    # (134217727, 2, 1),
+    # (2, 134217727, 1),
+    # (536870901, 1),
+    # (1, 536870901),
+    # (268435455, 2, 1),
+    # (2, 268435455, 1)
+]
+
+
+def run_additional_tri_tests(self, device):
+    x = torch.ones(
+        3, 3, dtype=torch.long, device=device, layout=torch.strided)
+    l = x.tril(0).nonzero().transpose(0, 1)
+    u = x.triu(0).nonzero().transpose(0, 1)
+    self.assertEqual(l, torch.tril_indices(3, 3, device=device))
+    self.assertEqual(
+        l, torch.tril_indices(3, 3, device=device, layout=torch.strided))
+
+    self.assertEqual(u, torch.triu_indices(3, 3, device=device))
+    self.assertEqual(
+        u, torch.triu_indices(3, 3, device=device, layout=torch.strided))
+
+    self.assertRaises(
+        RuntimeError,
+        lambda: torch.triu_indices(
+            1, 1, device=device, layout=torch.sparse_coo))
+
+    self.assertRaises(
+        RuntimeError,
+        lambda: torch.tril_indices(
+            1, 1, device=device, layout=torch.sparse_coo))
+
+
 def unpack_variables(args):
     if isinstance(args, tuple):
         return tuple(unpack_variables(elem) for elem in args)

@@ -5011,6 +5011,9 @@ the main diagonal. The main diagonal are the set of indices
 :math:`\lbrace (i, i) \rbrace` for :math:`i \in [0, \min\{d_{1}, d_{2}\} - 1]`
 where :math:`d_{1}, d_{2}` are the dimensions of the matrix.
 
+NOTE: when running on 'cuda', row * col must be less than :math:`2^{59}` to
+prevent overflow during calculation.
+""" + r"""
 Args:
     row (``int``): number of rows in the 2-D matrix.
     column (``int``): number of columns in the 2-D matrix.
@@ -5018,7 +5021,7 @@ Args:
         Default: if not provided, 0.
     dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
         Default: if ``None``, ``torch.long``.
-    device (:class:`torch.device`, optional): currently only support ``cpu``.
+    {device}
     layout (:class:`torch.layout`, optional): currently only support ``torch.strided``.
 
 Example::
@@ -5036,7 +5039,7 @@ Example::
     >>> a
     tensor([[0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3],
             [0, 1, 0, 1, 2, 0, 1, 2, 0, 1, 2]])
-""")
+""".format(**factory_common_args))
 
 add_docstr(torch.triu,
            r"""
@@ -5121,6 +5124,9 @@ the main diagonal. The main diagonal are the set of indices
 :math:`\lbrace (i, i) \rbrace` for :math:`i \in [0, \min\{d_{1}, d_{2}\} - 1]`
 where :math:`d_{1}, d_{2}` are the dimensions of the matrix.
 
+NOTE: when running on 'cuda', row * col must be less than :math:`2^{59}` to
+prevent overflow during calculation.
+""" + r"""
 Args:
     row (``int``): number of rows in the 2-D matrix.
     column (``int``): number of columns in the 2-D matrix.
@@ -5128,7 +5134,7 @@ Args:
         Default: if not provided, 0.
     dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
         Default: if ``None``, ``torch.long``.
-    device (:class:`torch.device`, optional): currently only support ``cpu``.
+    {device}
     layout (:class:`torch.layout`, optional): currently only support ``torch.strided``.
 
 Example::
@@ -5146,7 +5152,7 @@ Example::
     >>> a
     tensor([[0, 0, 1],
             [1, 2, 2]])
-""")
+""".format(**factory_common_args))
 
 add_docstr(torch.trtrs,
            r"""
