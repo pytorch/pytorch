@@ -9501,6 +9501,7 @@ EXCLUDE_SCRIPT_MODULES = {
 
 DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
     'test_nn_avg_pool2d',
+    'test_nn_adaptive_avg_pool2d',
     'test_nn_log_softmax',
     'test_nn_threshold',
     'test_nn_nll_loss',
