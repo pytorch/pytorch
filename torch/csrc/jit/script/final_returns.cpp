@@ -6,7 +6,8 @@ namespace jit {
 namespace script {
 
 struct ReturnInfo {
-  bool returns_;
+  bool returns_; // true - all paths through stmts_ always return
+                 // false - all paths through stmts_ do not return
   List<Stmt> stmts_;
 };
 
@@ -24,7 +25,10 @@ void failReturns(const If& if_stmt, const char * what) {
         << "If statements must either entirely return or never return.";
 }
 
-
+// transform stmts so that its last action is to return or report that it
+// never returns.
+// return_none - if true, add an implicit `return None` to the end of the block
+//   this handles the case where the return is implicit at the end of the function.
 ReturnInfo makeReturnsFinal(const SourceRange& range, at::ArrayRef<TreeRef> stmts, bool return_none);
 ReturnInfo makeReturnsFinal(const List<Stmt>& stmts, bool return_none) {
   return makeReturnsFinal(stmts.range(), stmts.get()->trees(), return_none);
@@ -38,7 +42,7 @@ ReturnInfo makeReturnsFinal(const SourceRange& range, at::ArrayRef<TreeRef> stmt
       case TK_IF: {
         auto if_stmt = If(stmt);
         auto true_final = makeReturnsFinal(if_stmt.trueBranch(), false);
-        // early return an if statement without an else block:
+        // (3) early return an if statement without an else block:
         if (true_final.returns_ && if_stmt.falseBranch().size() == 0) {
           auto rest_final = makeReturnsFinal(range, stmts.slice(i + 1), return_none);
           if (!rest_final.returns_) {
@@ -49,10 +53,12 @@ ReturnInfo makeReturnsFinal(const SourceRange& range, at::ArrayRef<TreeRef> stmt
         }
 
         auto false_final = makeReturnsFinal(if_stmt.falseBranch(), false);
+        // (1) neither branch returns just keep processing the block
         if (!true_final.returns_ && !false_final.returns_) {
           changed.emplace_back(if_stmt);
           break;
         }
+        // (2) all branches return
         if (true_final.returns_ && false_final.returns_) {
           changed.emplace_back(if_stmt.withNewBranches(true_final.stmts_, false_final.stmts_));
           return {true, List<Stmt>::unsafeCreate(range, std::move(changed))};
@@ -65,7 +71,7 @@ ReturnInfo makeReturnsFinal(const SourceRange& range, at::ArrayRef<TreeRef> stmt
         break;
       case TK_RETURN:
         changed.emplace_back(stmt);
-        // ignore the rest the the block, all paths return
+        // ignore the rest the the block, it is dead.
         return {true, List<Stmt>::unsafeCreate(range, std::move(changed))};
       default:
         changed.emplace_back(stmt);
@@ -77,6 +83,7 @@ ReturnInfo makeReturnsFinal(const SourceRange& range, at::ArrayRef<TreeRef> stmt
     changed.emplace_back(Return::create(range, Expr(Compound::create(TK_NONE, range, {}))));
   }
   // we reach the end of the block, no returns have happened
+  // unless we just inserted a return_none implicit return.
   return {return_none, List<Stmt>::unsafeCreate(range, std::move(changed))};
 }
 
