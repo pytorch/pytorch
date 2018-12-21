@@ -1,9 +1,10 @@
-#include "ATen/ATen.h"
-#include "ATen/cuda/CUDAApplyUtils.cuh"
-#include "ATen/cuda/CUDAContext.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/TensorUtils.h"
-#include "ATen/Utils.h"
+#include <ATen/ATen.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/Utils.h>
+// keeping THC headers for atomicAdd
 #include <THC/THCGeneral.h>
 
 namespace at {
@@ -22,8 +23,8 @@ inline void get_index_mapping(
   auto output_offset =
     (blockIdx.y + blockIdx.z * gridDim.y) * gridDim.x * blockDim.x;
 
-  auto i_start_x = ::max(0L, (long) -pad_l);
-  auto o_start_x = ::max(0L, (long) pad_l);
+  auto i_start_x = ::max(0L, (long)-pad_l);
+  auto o_start_x = ::max(0L, (long)pad_l);
 
   int64_t input_x = ::abs(output_x - pad_l)
                     - ::abs(output_x - (input_dim_x + pad_l - 1))
@@ -73,11 +74,11 @@ void reflection_pad1d_out_template(
   AT_CHECK(canUse32BitIndexMath(input_),
     "input tensor must fit into 32-bit index math");
 
-  int plane_dim = 0;
-  int dimw = 1;
-  int num_batch = 1;
+  int64_t plane_dim = 0;
+  int64_t dimw = 1;
+  int64_t num_batch = 1;
 
-  for (int64_t i = 0; i < input_.ndimension(); ++i) {
+  for (auto i = 0; i < input_.ndimension(); ++i) {
     AT_CHECK(input_.size(i) > 0,
       "reflection_pad1d(): expected input to have non-empty temporal "
       "dimensions, but input has sizes ", input_.sizes(), "with dimension ", i,
@@ -93,17 +94,17 @@ void reflection_pad1d_out_template(
     dimw++;
   }
 
-  int num_planes = input_.size(plane_dim);
-  int input_w = input_.size(dimw);
+  int64_t num_planes = input_.size(plane_dim);
+  int64_t input_w = input_.size(dimw);
 
-  int pad_l = padding[0];
-  int pad_r = padding[1];
+  int64_t pad_l = padding[0];
+  int64_t pad_r = padding[1];
 
   AT_CHECK(pad_l < input_w && pad_r < input_w, "Padding size should be less "
     "than the corresponding input dimension, but got: padding (",  pad_l, ", ",
     pad_r, ") at dimension ", dimw, " of input ", input_);
 
-  int output_w  = input_w + pad_l + pad_r;
+  int64_t output_w  = input_w + pad_l + pad_r;
 
   AT_CHECK(output_w >= 1,
     "input (W: ", input_w, ")is too small. Calculated output W: ", output_w);
@@ -114,13 +115,14 @@ void reflection_pad1d_out_template(
     output.resize_({num_batch, num_planes, output_w});
   }
 
-  int output_plane_size = output.size(2);
+  int64_t output_plane_size = output.size(2);
   dim3 block_size(output_plane_size > 256 ? 256 : output_plane_size);
   dim3 grid_size(
     (int) ::ceil(output_plane_size / 256.0), output.size(1), output.size(0));
 
   Tensor input = input_.contiguous();
-  AT_DISPATCH_ALL_TYPES_AND_HALF(
+
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
     input.type(), "reflection_pad1d_out_template", [&] {
       scalar_t * input_data = input.data<scalar_t>();
       scalar_t * output_data = output.data<scalar_t>();
@@ -144,18 +146,18 @@ void reflection_pad1d_backward_out_template(
   AT_CHECK(canUse32BitIndexMath(grad_output_),
     "input tensor must fit into 32-bit index math");
 
-  int plane_dim = 0;
-  int dimw = 1;
+  int64_t plane_dim = 0;
+  int64_t dimw = 1;
 
   if (input.ndimension() == 3) {
     plane_dim++;
     dimw++;
   }
 
-  auto pad_l = padding[0];
-  auto pad_r = padding[1];
-  int iwidth = input.size(dimw);
-  int owidth  = iwidth + pad_l + pad_r;
+  int64_t pad_l = padding[0];
+  int64_t pad_r = padding[1];
+  int64_t iwidth = input.size(dimw);
+  int64_t owidth  = iwidth + pad_l + pad_r;
 
   Tensor grad_output = grad_output_.contiguous();
 
@@ -163,7 +165,7 @@ void reflection_pad1d_backward_out_template(
     "gradOutput width unexpected. Expected: ", owidth, ", Got: ",
     grad_output.size(dimw));
 
-  int grad_output_plane_size = grad_output.size(2);
+  int64_t grad_output_plane_size = grad_output.size(2);
   dim3 block_size(
     grad_output_plane_size > 256 ? 256 : grad_output_plane_size);
   dim3 grid_size(
@@ -171,7 +173,7 @@ void reflection_pad1d_backward_out_template(
     grad_output.size(1),
     grad_output.size(0));
 
-  AT_DISPATCH_ALL_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
     input.type(), "reflection_pad1d_backward_out_template", [&] {
       scalar_t * grad_input_data = grad_input.data<scalar_t>();
       scalar_t * grad_output_data = grad_output.data<scalar_t>();
@@ -203,7 +205,7 @@ Tensor& reflection_pad1d_backward_out_cuda(
     Tensor& grad_input, const Tensor& grad_output,
     const Tensor& input,
     IntList padding) {
-  grad_input.resize_as_(input);
+  grad_input = at::zeros_like(input);
   reflection_pad1d_backward_out_template(
     grad_input, grad_output, input, padding);
   return grad_input;

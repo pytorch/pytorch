@@ -1,5 +1,5 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
 #include <tuple>
 
 namespace at {
@@ -10,18 +10,17 @@ namespace {
 template <typename scalar_t>
 static void reflection_pad1d_out_frame(
     scalar_t *input_p, scalar_t *output_p,
-    long nslices,
-    long iwidth, long owidth,
-    int pad_l, int pad_r) {
-  int iStartX = std::fmax(0, -pad_l);
-  int oStartX = std::fmax(0, pad_l);
+    int64_t nslices,
+    int64_t iwidth, int64_t owidth,
+    int64_t pad_l, int64_t pad_r) {
+  int64_t i_start_x = std::max(0L, (long)-pad_l);
+  int64_t o_start_x = std::max(0L, (long)pad_l);
 
-  long k, ip_x;
+  int64_t k, ip_x;
 #pragma omp parallel for private(k, ip_x)
 
   for (k = 0; k < nslices; k++) {
-    long j;
-    for (j = 0; j < owidth; j++) {
+    for (int64_t j = 0; j < owidth; j++) {
       if (j < pad_l) {
         ip_x = pad_l * 2 - j;
       } else if (j >= pad_l && j < iwidth + pad_l) {
@@ -29,9 +28,8 @@ static void reflection_pad1d_out_frame(
       } else {
         ip_x = (iwidth + pad_l - 1) * 2 - j;
       }
-      ip_x = ip_x - oStartX + iStartX;
+      ip_x = ip_x - o_start_x + i_start_x;
 
-      /* scalar_t *dest_p = output_p + k*owidth*oheight + i * owidth + j; */
       scalar_t *dest_p = output_p + k*owidth + j;
       scalar_t *src_p = input_p + k*iwidth + ip_x;
       *dest_p = *src_p;
@@ -41,12 +39,12 @@ static void reflection_pad1d_out_frame(
 
 void reflection_pad1d_out_template(
     Tensor& output, Tensor const& input_, IntList padding) {
-  int dimw = 1;
-  int dimslices = 0;
-  long nbatch = 1;
-  long nslices;
-  long iwidth;
-  long owidth;
+  int64_t dimw = 1;
+  int64_t dimslices = 0;
+  int64_t nbatch = 1;
+  int64_t nslices;
+  int64_t iwidth;
+  int64_t owidth;
 
   for (int64_t i = 0; i < input_.ndimension(); ++i) {
     AT_CHECK(input_.size(i) > 0,
@@ -88,33 +86,35 @@ void reflection_pad1d_out_template(
   if (input.ndimension() == 2) {
     output.resize_({nslices, owidth});
 
-    AT_DISPATCH_ALL_TYPES(input.type(), "reflection_pad1d", [&] {
-      auto input_data = input.data<scalar_t>();
-      auto output_data = output.data<scalar_t>();
-      reflection_pad1d_out_frame<scalar_t>(input_data, output_data,
-                                           nslices,
-                                           iwidth, owidth,
-                                           pad_l, pad_r);
-      }
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+      input.type(), "reflection_pad1d", [&] {
+        auto input_data = input.data<scalar_t>();
+        auto output_data = output.data<scalar_t>();
+        reflection_pad1d_out_frame<scalar_t>(input_data, output_data,
+                                             nslices,
+                                             iwidth, owidth,
+                                             pad_l, pad_r);
+        }
     );
   } else {
     output.resize_({nbatch, nslices, owidth});
 
-    long p;
+    int64_t p;
 #pragma omp parallel for private(p)
     for (p = 0; p < nbatch; p++) {
-      AT_DISPATCH_ALL_TYPES(input.type(), "reflection_pad1d", [&] {
-        auto input_data = input.data<scalar_t>();
-        auto output_data = output.data<scalar_t>();
+      AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+        input.type(), "reflection_pad1d", [&] {
+          auto input_data = input.data<scalar_t>();
+          auto output_data = output.data<scalar_t>();
 
-        reflection_pad1d_out_frame<scalar_t>(
-          input_data+p*nslices*iwidth,
-          output_data+p*nslices*owidth,
-          nslices,
-          iwidth,
-          owidth,
-          pad_l, pad_r);
-        }
+          reflection_pad1d_out_frame<scalar_t>(
+            input_data+p*nslices*iwidth,
+            output_data+p*nslices*owidth,
+            nslices,
+            iwidth,
+            owidth,
+            pad_l, pad_r);
+          }
       );
     }
   }
@@ -123,18 +123,17 @@ void reflection_pad1d_out_template(
 template <typename scalar_t>
 static void reflection_pad1d_backward_out_frame(
     scalar_t *ginput_p, scalar_t *goutput_p,
-    long nslices,
-    long iwidth, long owidth,
-    int pad_l, int pad_r) {
-  int iStartX = fmax(0, -pad_l);
-  int oStartX = fmax(0, pad_l);
+    int64_t nslices,
+    int64_t iwidth, int64_t owidth,
+    int64_t pad_l, int64_t pad_r) {
+  int64_t i_start_x = std::max(0L, (long)-pad_l);
+  int64_t o_start_x = std::max(0L, (long)pad_l);
 
-  long k, ip_x;
+  int64_t k, ip_x;
 #pragma omp parallel for private(k, ip_x)
 
   for (k = 0; k < nslices; k++) {
-    long j;
-    for (j = 0; j < owidth; j++) {
+    for (int64_t j = 0; j < owidth; j++) {
       if (j < pad_l) {
         ip_x = pad_l * 2 - j;
       } else if (j >= pad_l && j < iwidth + pad_l) {
@@ -142,7 +141,7 @@ static void reflection_pad1d_backward_out_frame(
       } else {
         ip_x = (iwidth + pad_l - 1) * 2 - j;
       }
-      ip_x = ip_x - oStartX + iStartX;
+      ip_x = ip_x - o_start_x + i_start_x;
 
       scalar_t *src_p = goutput_p + k*owidth + j;
       scalar_t *dest_p = ginput_p + k*iwidth + ip_x;
@@ -154,12 +153,12 @@ static void reflection_pad1d_backward_out_frame(
 void reflection_pad1d_backward_out_template(
     Tensor const& input, Tensor const& grad_output_, Tensor& grad_input,
     IntList padding) {
-  int dimw = 1;
-  int dimslices = 0;
-  long nbatch = 1;
-  long nslices;
-  long iwidth;
-  long owidth;
+  int64_t dimw = 1;
+  int64_t dimslices = 0;
+  int64_t nbatch = 1;
+  int64_t nslices;
+  int64_t iwidth;
+  int64_t owidth;
 
   if (input.ndimension() == 3) {
     nbatch = input.size(0);
@@ -182,29 +181,31 @@ void reflection_pad1d_backward_out_template(
 
   /* backprop */
   if (input.ndimension() == 2) {
-    AT_DISPATCH_ALL_TYPES(input.type(), "reflection_pad1d_backward", [&] {
-      reflection_pad1d_backward_out_frame(
-        grad_input.data<scalar_t>(),
-        grad_output.data<scalar_t>(),
-        nslices,
-        iwidth,
-        owidth,
-        pad_l, pad_r);
-      }
-    );
-  } else {
-    long p;
-#pragma omp parallel for private(p)
-    for (p = 0; p < nbatch; p++) {
-      AT_DISPATCH_ALL_TYPES(input.type(), "reflection_pad1d_backward", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+      input.type(), "reflection_pad1d_backward", [&] {
         reflection_pad1d_backward_out_frame(
-          grad_input.data<scalar_t>() + p * nslices * iwidth,
-          grad_output.data<scalar_t>() + p * nslices * owidth,
+          grad_input.data<scalar_t>(),
+          grad_output.data<scalar_t>(),
           nslices,
           iwidth,
           owidth,
           pad_l, pad_r);
         }
+    );
+  } else {
+    int64_t p;
+#pragma omp parallel for private(p)
+    for (p = 0; p < nbatch; p++) {
+      AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+        input.type(), "reflection_pad1d_backward", [&] {
+          reflection_pad1d_backward_out_frame(
+            grad_input.data<scalar_t>() + p * nslices * iwidth,
+            grad_output.data<scalar_t>() + p * nslices * owidth,
+            nslices,
+            iwidth,
+            owidth,
+            pad_l, pad_r);
+          }
       );
     }
   }
@@ -228,7 +229,7 @@ Tensor& reflection_pad1d_backward_out_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     IntList padding) {
-  grad_input.resize_as_(input);
+  grad_input = at::zeros_like(input);
   reflection_pad1d_backward_out_template(input, grad_output, grad_input, padding);
   return grad_input;
 }
