@@ -22,8 +22,8 @@ inline void get_index_mapping(
   auto output_offset =
     (blockIdx.y + blockIdx.z * gridDim.y) * gridDim.x * blockDim.x;
 
-  auto i_start_x = ::max(0L, -pad_l);
-  auto o_start_x = ::max(0L, pad_l);
+  auto i_start_x = ::max(0L, (long) -pad_l);
+  auto o_start_x = ::max(0L, (long) pad_l);
 
   int64_t input_x = ::abs(output_x - pad_l)
                     - ::abs(output_x - (input_dim_x + pad_l - 1))
