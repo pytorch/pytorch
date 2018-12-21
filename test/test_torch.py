@@ -5316,19 +5316,23 @@ class _TestTorchMixin(object):
         x = torch.tensor([1, 2, 3])
         self.assertEqual(torch.isfinite(x), torch.ByteTensor([1, 1, 1]))
 
+    @staticmethod
+    def _test_isinf(self, cast):
+        t1 = cast(torch.Tensor([1, inf, 2, -inf, nan]))
+        t2 = cast(torch.ByteTensor([1, 2, 3]))
+        t3 = cast(torch.CharTensor([1, 2, 3]))
+        t4 = cast(torch.ShortTensor([1, 2, 3]))
+        t5 = cast(torch.IntTensor([1, 2, 3]))
+        t6 = cast(torch.LongTensor([1, 2, 3]))
+        self.assertEqual(torch.isinf(t1), cast(torch.ByteTensor([0, 1, 0, 1, 0])))
+        self.assertEqual(torch.isinf(t2), cast(torch.ByteTensor([0, 0, 0])))
+        self.assertEqual(torch.isinf(t3), cast(torch.ByteTensor([0, 0, 0])))
+        self.assertEqual(torch.isinf(t4), cast(torch.ByteTensor([0, 0, 0])))
+        self.assertEqual(torch.isinf(t5), cast(torch.ByteTensor([0, 0, 0])))
+        self.assertEqual(torch.isinf(t6), cast(torch.ByteTensor([0, 0, 0])))
+
     def test_isinf(self):
-        t1 = torch.Tensor([1, inf, 2, -inf, nan])
-        t2 = torch.ByteTensor([1, 2, 3])
-        t3 = torch.CharTensor([1, 2, 3])
-        t4 = torch.ShortTensor([1, 2, 3])
-        t5 = torch.IntTensor([1, 2, 3])
-        t6 = torch.LongTensor([1, 2, 3])
-        self.assertEqual(torch.isinf(t1), torch.ByteTensor([0, 1, 0, 1, 0]))
-        self.assertEqual(torch.isinf(t2), torch.ByteTensor([0, 0, 0]))
-        self.assertEqual(torch.isinf(t3), torch.ByteTensor([0, 0, 0]))
-        self.assertEqual(torch.isinf(t4), torch.ByteTensor([0, 0, 0]))
-        self.assertEqual(torch.isinf(t5), torch.ByteTensor([0, 0, 0]))
-        self.assertEqual(torch.isinf(t6), torch.ByteTensor([0, 0, 0]))
+        self._test_isinf(self, lambda t: t)
 
     def test_isnan(self):
         x = torch.Tensor([1, nan, 2])
