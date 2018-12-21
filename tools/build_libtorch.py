@@ -1,6 +1,6 @@
 # This module can be run either as a module, or as a standalone script.
-# cd <pytorch_root>; python -m tools.setup.py  # module
-# python ./.../build_libtorch.py             # standalone script
+# cd <pytorch_root>; python -m tools.build_libtorch  # module
+# python ./.../build_libtorch.py                     # standalone script
 
 from __future__ import print_function
 
@@ -28,6 +28,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Build libtorch. Please add platform specific'
                     ' environment variables on your own.')
+    parser.add_argument('-o', '--output',
+                        default=os.getcwd(),
+                        help='output directory (default: %(default)s)')
     options = parser.parse_args()
 
     IS_WINDOWS = (platform.system() == 'Windows')
@@ -51,7 +54,7 @@ if __name__ == '__main__':
     os.environ['PYTORCH_PYTHON'] = sys.executable
 
     tools_path = os.path.join(pytorch_root, 'tools')
-    build_path = os.path.join(pytorch_root, 'build')
+    build_path = options.output
 
     if IS_WINDOWS:
         # TODO: handle cwd if needed
