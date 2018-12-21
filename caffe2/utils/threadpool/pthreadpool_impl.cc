@@ -11,6 +11,14 @@ void pthreadpool_compute_1d(
     pthreadpool_function_1d_t function,
     void* argument,
     size_t range) {
+  if (threadpool == nullptr) {
+    /* No thread pool provided: execute function sequentially on the calling
+     * thread */
+    for (size_t i = 0; i < range; i++) {
+      function(argument, i);
+    }
+    return;
+  }
   reinterpret_cast<caffe2::ThreadPool*>(threadpool)
       ->run(
           [function, argument](int threadId, size_t workId) {
