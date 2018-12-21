@@ -247,11 +247,6 @@ inline c10::optional<at::Scalar> PythonArgs::scalarOptional(int i) {
   return scalar(i);
 }
 
-inline c10::optional<int64_t> PythonArgs::int64_tOptional(int i) {
-  if (!args[i]) return c10::nullopt;
-  return toInt64(i);
-}
-
 inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
   if (!args[i]) return std::vector<at::Tensor>();
   PyObject* arg = args[i];
