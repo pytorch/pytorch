@@ -137,9 +137,44 @@ Therefore, representation of a SparseTensor of sparse_dim = 0 is simply a dense 
     .. method:: _values
     .. method:: _nnz
 
+
 Functions
 ----------------------------------
 
 .. autofunction:: torch.sparse.addmm
 .. autofunction:: torch.sparse.mm
 .. autofunction:: torch.sparse.sum
+
+
+Unary Ops
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.sparse.abs
+.. autofunction:: torch.sparse.acos
+.. autofunction:: torch.sparse.asin
+.. autofunction:: torch.sparse.atan
+.. autofunction:: torch.sparse.ceil
+.. autofunction:: torch.sparse.cos
+.. autofunction:: torch.sparse.cosh
+.. autofunction:: torch.sparse.digamma
+.. autofunction:: torch.sparse.erf
+.. autofunction:: torch.sparse.erfc
+.. autofunction:: torch.sparse.erfinv
+.. autofunction:: torch.sparse.exp
+.. autofunction:: torch.sparse.expm1
+.. autofunction:: torch.sparse.floor
+.. autofunction:: torch.sparse.frac
+.. autofunction:: torch.sparse.log
+.. autofunction:: torch.sparse.log1p
+.. autofunction:: torch.sparse.log10
+.. autofunction:: torch.sparse.log2
+.. autofunction:: torch.sparse.reciprocal
+.. autofunction:: torch.sparse.round
+.. autofunction:: torch.sparse.rsqrt
+.. autofunction:: torch.sparse.sigmoid
+.. autofunction:: torch.sparse.sign
+.. autofunction:: torch.sparse.sin
+.. autofunction:: torch.sparse.sinh
+.. autofunction:: torch.sparse.tan
+.. autofunction:: torch.sparse.tanh
+.. autofunction:: torch.sparse.trunc
