@@ -1,6 +1,6 @@
 /// This file contains some tensor-agnostic operations to be used in the
 /// core functions of the `SobolEngine`
-#include "ATen/ATen.h"
+#include <ATen/ATen.h>
 
 /// Function to return the minimum of number of bits to represent the integer `n`
 static inline int bit_length(const int64_t n) {
@@ -25,9 +25,8 @@ static inline int64_t bitsubseq(const int64_t n, const int pos, const int length
 
 /// Function to perform the inner product between a batched square matrix and a power of 2 vector
 static inline at::Tensor cdot_pow2(const at::Tensor& bmat) {
-  at::Tensor inter = at::arange(bmat.size(-1) - 1, -1, -1, at::kLong);
-  inter = at::pow(2, inter).expand_as(bmat);
-  return at::mul(inter, bmat).sum(-1);
+  at::Tensor inter = at::pow(2, at::arange(bmat.size(-1) - 1, -1, -1, at::kLong));
+  return inter.mul(bmat).sum(-1);
 }
 
 /// All definitions below this point are data. These are constant, and should not be modified

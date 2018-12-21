@@ -1,7 +1,7 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
 
-#include "ATen/native/SobolEngineOpsUtils.h"
+#include <ATen/native/SobolEngineOpsUtils.h>
 
 #include <vector>
 
@@ -68,8 +68,6 @@ Tensor _sobol_engine_ff(const Tensor& quasi, int64_t n, const Tensor& sobolstate
 Tensor _sobol_engine_scramble(const Tensor& sobolstate, const Tensor& ltm, int64_t dimension) {
   AT_CHECK(sobolstate.dtype() == at::kLong,
            "sobolstate needs to be of type ", at::kLong);
-  AT_CHECK(quasi.dtype() == at::kLong,
-           "quasi needs to be of type ", at::kLong);
 
   Tensor wsobolstate = sobolstate.clone();
 
@@ -81,7 +79,8 @@ Tensor _sobol_engine_scramble(const Tensor& sobolstate, const Tensor& ltm, int64
   /// Instead, we perform an element-wise product of all the matrices and sum over the last dimension.
   /// The required product of the m^{th} row in the d^{th} square matrix in `ltm` can be accessed
   /// using ltm_d_a[d][m] m and d are zero-indexed
-  Tensor diag_true = ltm.clone().diagonal(0, -2, -1).fill_(1);
+  Tensor diag_true = ltm.clone();
+  diag_true.diagonal(0, -2, -1).fill_(1);
   Tensor ltm_dots = cdot_pow2(diag_true);
   auto ltm_d_a = ltm_dots.accessor<int64_t, 2>();
 
