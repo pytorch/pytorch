@@ -144,6 +144,7 @@ struct Compound : public Tree {
     }
     return Compound::create(kind(), range(), std::move(trees_));
   }
+
   const SourceRange& range() const override {
     return range_;
   }
