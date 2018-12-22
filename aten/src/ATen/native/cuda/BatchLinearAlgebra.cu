@@ -20,6 +20,13 @@ namespace native {
 
 #ifdef USE_MAGMA
 template<class scalar_t>
+void magmaGesv(
+    magma_int_t n, magma_int_t nrhs, scalar_t* dA, magma_int_t ldda,
+    magma_int_t* ipiv, scalar_t* dB, magma_int_t lddb, magma_int_t* info) {
+  AT_ERROR("gesv only takes float or double Tensors");
+}
+
+template<class scalar_t>
 void magmaGesvBatched(
     magma_int_t n, magma_int_t nrhs, scalar_t** dA_array, magma_int_t ldda,
     magma_int_t** dipiv_array, scalar_t** dB_array, magma_int_t lddb,
@@ -71,6 +78,20 @@ void magmaGesvBatched<float>(
     magma_int_t** dipiv_array, float** dB_array, magma_int_t lddb,
     magma_int_t* dinfo_array, magma_int_t batch_count, const MAGMAQueue& magma_queue) {
   magma_sgesv_batched(n, nrhs, dA_array, ldda, dipiv_array, dB_array, lddb, dinfo_array, batch_count, magma_queue.get_queue());
+}
+
+template<>
+void magmaGesv<double>(
+    magma_int_t n, magma_int_t nrhs, double* dA, magma_int_t ldda,
+    magma_int_t* ipiv, double* dB, magma_int_t lddb, magma_int_t* info) {
+  magma_dgesv_gpu(n, nrhs, dA, ldda, ipiv, dB, lddb, info);
+}
+
+template<>
+void magmaGesv<float>(
+    magma_int_t n, magma_int_t nrhs, float* dA, magma_int_t ldda,
+    magma_int_t* ipiv, float* dB, magma_int_t lddb, magma_int_t* info) {
+  magma_sgesv_gpu(n, nrhs, dA, ldda, ipiv, dB, lddb, info);
 }
 
 template<>
@@ -148,54 +169,65 @@ AT_ERROR("gesv: MAGMA library not found in "
 #else
   auto A_data = A.data<scalar_t>();
   auto b_data = b.data<scalar_t>();
-  auto A_mat_stride = matrixStride(A);
-  auto b_mat_stride = matrixStride(b);
-
-  magma_int_t batch_size = magma_int_cast(batchCount(A), "batchCount");
   magma_int_t n = magma_int_cast(A.size(-2), "A.size(-2)");
   magma_int_t nrhs = magma_int_cast(b.size(-1), "b.size(-1)");
 
-  magma_int_t* info_array;
-  magma_int_t* ipiv_data;
-  magma_int_t** ipiv_array;
-  scalar_t** A_array;
-  scalar_t** b_array;
+  if (b.dim() == 2) {
+    auto ipiv = at::empty({n}, at::kInt);
+    magma_int_t info = 0;
+    magmaGesv<scalar_t>(n, nrhs, A_data, n, ipiv.data<magma_int_t>(),
+                        b_data, n, &info);
+    infos[0] = info;
+  } else {
+    auto A_mat_stride = matrixStride(A);
+    auto b_mat_stride = matrixStride(b);
+    magma_int_t batch_size = magma_int_cast(batchCount(A), "batchCount");
 
-  ALLOCATE_ARRAY(info_array, magma_int_t, batch_size, b);
-  ALLOCATE_ARRAY(ipiv_data, magma_int_t, batch_size * n, b);
-  ALLOCATE_ARRAY(ipiv_array, magma_int_t*, batch_size, b);
-  ALLOCATE_ARRAY(A_array, scalar_t*, batch_size, b);
-  ALLOCATE_ARRAY(b_array, scalar_t*, batch_size, b);
+    magma_int_t* info_array;
+    magma_int_t* ipiv_data;
+    magma_int_t** ipiv_array;
+    scalar_t** A_array;
+    scalar_t** b_array;
 
-  // Set up the created arrays
-  for (int64_t i = 0; i < batch_size; i++) {
-    A_array[i] = &A_data[i * A_mat_stride];
-    b_array[i] = &b_data[i * b_mat_stride];
-    ipiv_array[i] = &ipiv_data[i * n];
-  }
+    ALLOCATE_ARRAY(info_array, magma_int_t, batch_size, b);
+    ALLOCATE_ARRAY(ipiv_data, magma_int_t, batch_size * n, b);
+    ALLOCATE_ARRAY(ipiv_array, magma_int_t*, batch_size, b);
+    ALLOCATE_ARRAY(A_array, scalar_t*, batch_size, b);
+    ALLOCATE_ARRAY(b_array, scalar_t*, batch_size, b);
 
-  MAGMAQueue magma_queue(b.get_device());
-  magmaGesvBatched<scalar_t>(
-      n, nrhs, A_array, n, ipiv_array, b_array, n,
-      info_array, batch_size, magma_queue);
+    // Set up the created arrays
+    for (int64_t i = 0; i < batch_size; i++) {
+      A_array[i] = &A_data[i * A_mat_stride];
+      b_array[i] = &b_data[i * b_mat_stride];
+      ipiv_array[i] = &ipiv_data[i * n];
+    }
 
-  for (int64_t i = 0; i < batch_size; i++) {
-    infos[i] = info_array[i];
+    MAGMAQueue magma_queue(b.get_device());
+    magmaGesvBatched<scalar_t>(
+        n, nrhs, A_array, n, ipiv_array, b_array, n,
+        info_array, batch_size, magma_queue);
+
+    for (int64_t i = 0; i < batch_size; i++) {
+      infos[i] = info_array[i];
+    }
   }
 #endif
 }
 
 std::tuple<Tensor, Tensor> _gesv_helper_cuda(const Tensor& self, const Tensor& A) {
-  std::vector<int64_t> infos(batchCount(self), 0);
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
+  std::vector<int64_t> infos(batchCount(self), 0);
   AT_DISPATCH_FLOATING_TYPES(self.type(), "gesv", [&]{
     apply_gesv<scalar_t>(self_working_copy, A_working_copy, infos);
   });
-  batchCheckErrors(infos, "gesv");
+  if (self.dim() > 2) {
+    batchCheckErrors(infos, "gesv");
+  } else {
+    singleCheckErrors(infos[0], "gesv");
+  }
   return std::tuple<Tensor, Tensor>(self_working_copy, A_working_copy);
 }
-
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
