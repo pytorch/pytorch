@@ -650,17 +650,17 @@ const FunctionSchema* Node::maybeSchema() const {
 bool Node::isNondeterministic() const {
   static const OperatorSet nondeterministic_ops = {
     "aten::dropout(Tensor input, float p, bool train) -> Tensor",
-    "aten::_fused_dropout(Tensor self, float p, Generator generator) -> (Tensor, Tensor)",
-    "aten::_standard_gamma(Tensor self, Generator generator) -> Tensor",
-    "aten::bernoulli(Tensor self, *, Generator generator) -> Tensor",
-    "aten::bernoulli(Tensor self, float p, *, Generator generator) -> Tensor",
-    "aten::multinomial(Tensor self, int num_samples, bool replacement, *, Generator generator) -> Tensor",
-    "aten::normal(Tensor mean, Tensor std, *, Generator generator) -> Tensor",
-    "aten::normal(float mean, Tensor std, *, Generator generator) -> Tensor",
-    "aten::normal(Tensor mean, float std, *, Generator generator) -> Tensor",
-    "aten::poisson(Tensor self, Generator generator) -> Tensor",
-    "aten::rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator generator) -> Tensor",
-    "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator generator) -> Tensor",
+    "aten::_fused_dropout(Tensor self, float p, Generator? generator) -> (Tensor, Tensor)",
+    "aten::_standard_gamma(Tensor self, Generator? generator) -> Tensor",
+    "aten::bernoulli(Tensor self, *, Generator? generator) -> Tensor",
+    "aten::bernoulli(Tensor self, float p, *, Generator? generator) -> Tensor",
+    "aten::multinomial(Tensor self, int num_samples, bool replacement, *, Generator? generator) -> Tensor",
+    "aten::normal(Tensor mean, Tensor std, *, Generator? generator) -> Tensor",
+    "aten::normal(float mean, Tensor std, *, Generator? generator) -> Tensor",
+    "aten::normal(Tensor mean, float std, *, Generator? generator) -> Tensor",
+    "aten::poisson(Tensor self, Generator? generator) -> Tensor",
+    "aten::rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
+    "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
     "aten::rand(int[] size, *, int dtype, int layout, Device device) -> Tensor",
     "aten::rand_like(Tensor self) -> Tensor",
     "aten::rand_like(Tensor self, *, int dtype, int layout, Device device) -> Tensor",
@@ -1341,12 +1341,6 @@ Node* Graph::createUndefined() {
 Node* Graph::createNone(TypePtr typ) {
   Node * n = create(prim::None);
   n->output()->setType(OptionalType::create(std::move(typ)));
-  return n;
-}
-
-Node * Graph::createNoneGenerator() {
-  auto n = create(prim::NoneGenerator);
-  n->output()->setType(GeneratorType::get());
   return n;
 }
 
