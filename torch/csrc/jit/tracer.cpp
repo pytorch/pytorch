@@ -107,7 +107,7 @@ void addInputs(Node *n, const char * name, at::Generator * value)            {
     detail::badArgType(value);
   }
   Graph * g = n->owningGraph();
-  Value * undef_gen = g->insertNode(g->createNoneGenerator())->output();
+  Value * undef_gen = g->insertNode(g->createNone(GeneratorType::get()))->output();
   n->addInput(undef_gen);
 }
 void addInputs(Node *n, const char * name, at::Device value) {

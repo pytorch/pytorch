@@ -67,7 +67,6 @@ namespace c10 {
   _(prim, AnyDefined)              \
   _(prim, FusedConcat)             \
   _(prim, ConstantChunk)           \
-  _(prim, NoneGenerator)           \
   _(prim, MMTreeReduce)            \
   _(prim, MMBatchSide)             \
   _(aten, warn)                    \
