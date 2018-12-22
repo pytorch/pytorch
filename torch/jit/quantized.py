@@ -102,6 +102,7 @@ class QuantizedRNNCellBase(torch.nn.Module):
                 "hidden{} has inconsistent hidden_size: got {}, expected {}".format(
                     hidden_label, hx.size(1), self.hidden_size))
 
+
 @torch._jit_internal.weak_module
 class QuantizedRNNCell(QuantizedRNNCellBase):
     __constants__ = ['input_size', 'hidden_size', 'bias', 'nonlinearity']
@@ -163,6 +164,7 @@ class QuantizedLSTMCell(QuantizedRNNCellBase):
             self.zero_point_hh
         )
 
+
 @torch._jit_internal.weak_module
 class QuantizedGRUCell(QuantizedRNNCellBase):
     def __init__(self, other):
@@ -203,6 +205,7 @@ def quantize_rnn_cell_modules(module):
         return QuantizedRNNCell(mod)
 
     return module
+
 
 def quantize_linear_modules(module):
     reassign = {}

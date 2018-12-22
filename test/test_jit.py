@@ -4866,7 +4866,7 @@ a")
                         [-155, 100],
                         [-155, 100],
                         [100, -155]]
-                vals = vals[:d_hid*num_chunks]
+                vals = vals[:d_hid * num_chunks]
                 cell.weight_ih = torch.nn.Parameter(
                     torch.tensor(vals, dtype=torch.float),
                     requires_grad=False)

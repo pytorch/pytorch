@@ -598,10 +598,6 @@ std::tuple<io_type, Tensor, Tensor> _lstm_impl(
 // PUBLIC FUNCTIONS
 ////////////////////////////////////////////////////////////////////////////////
 
-// From https://stackoverflow.com/questions/13842468/comma-in-c-c-macro
-template<typename T> struct argument_type;
-template<typename T, typename U> struct argument_type<T(U)> { typedef U type; };
-
 #define ONE_HIDDEN_RNN(NAME, CELL)                                             \
 DEFINE_DISPATCH(NAME##_cudnn_stub);                                            \
 DEFINE_DISPATCH(NAME##_packed_cudnn_stub);                                     \
@@ -621,7 +617,7 @@ std::tuple<Tensor, Tensor> NAME(                                               \
   check_device(_input, _params, hx);					\
   auto input = batch_first ? _input.transpose(0, 1) : _input;                  \
   auto params = gather_params(_params, has_biases);                            \
-  auto results = _rnn_impl_with_concat<argument_type<void(CELL)>::type, FullLayer, FullBidirectionalLayer>( \
+  auto results = _rnn_impl_with_concat<CELL, FullLayer, FullBidirectionalLayer>( \
           input, params, hx.unbind(0), num_layers, dropout_p, train, bidirectional); \
   if (batch_first) {                                                           \
     std::get<0>(results) = std::get<0>(results).transpose(0, 1);               \
@@ -641,15 +637,17 @@ std::tuple<Tensor, Tensor> NAME(                                               \
   }                                                                            \
   PackedSequence input { data, batch_sizes };                                  \
   auto params = gather_params(_params, has_biases);                            \
-  auto result = _rnn_impl_with_concat<argument_type<void(CELL)>::type, PackedLayer, PackedBidirectionalLayer>( \
+  auto result = _rnn_impl_with_concat<CELL, PackedLayer, PackedBidirectionalLayer>( \
           input, params, hx.unbind(0), num_layers, dropout_p, train, bidirectional); \
   auto & packed_output = std::get<0>(result);                                  \
   return std::make_tuple(packed_output.data, std::get<1>(result));             \
 }
 
 ONE_HIDDEN_RNN(gru, GRUCell<CellParams>)
-ONE_HIDDEN_RNN(rnn_tanh, (SimpleCell<tanh_f, CellParams>))
-ONE_HIDDEN_RNN(rnn_relu, (SimpleCell<relu_f, CellParams>))
+typedef SimpleCell<tanh_f, CellParams> tanf_cell_type;
+ONE_HIDDEN_RNN(rnn_tanh, tanf_cell_type)
+typedef SimpleCell<relu_f, CellParams> relu_cell_type;
+ONE_HIDDEN_RNN(rnn_relu, relu_cell_type);
 
 DEFINE_DISPATCH(lstm_cudnn_stub);
 DEFINE_DISPATCH(lstm_packed_cudnn_stub);
