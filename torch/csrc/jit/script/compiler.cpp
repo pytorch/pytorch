@@ -266,6 +266,7 @@ struct Environment {
         // todo(zach): remove when we can correctly export torch.full via ONNX
         // or we have implicit conversion that can convert numbers to tensors
         {"_to_tensor", std::make_shared<CastValue>(DynamicType::get(), prim::NumToTensor)},
+        {"len", std::make_shared<BuiltinFunction>(aten::len, at::nullopt)},
       };
       auto it = globals.find(ident);
       if(it != globals.end())
