@@ -223,7 +223,7 @@ def main():
                         help='path to Declarations.yaml')
     parser.add_argument('out', metavar='OUT',
                         help='path to output directory')
-    parser.add_argument('autograd', metavar='OUT',
+    parser.add_argument('autograd', metavar='AUTOGRAD',
                         help='path to autograd directory')
     args = parser.parse_args()
     gen_autograd(args.declarations, args.out, args.autograd)
