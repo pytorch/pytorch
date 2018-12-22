@@ -186,10 +186,15 @@ class QuantizedGRUCell(QuantizedRNNCellBase):
 
 
 def quantize_rnn_cell_modules(module):
+    reassign = {}
     for name, mod in module.named_modules():
         if mod is module:
             continue
-        setattr(module, name, quantize_rnn_cell_modules(mod))
+        new_mod = quantize_rnn_cell_modules(mod)
+        if new_mod != mod:
+            reassign[name] = new_mod
+    for name, mod in reassign.items():
+        setattr(module, name, mod)
     if isinstance(module, torch.nn.LSTMCell):
         return QuantizedLSTMCell(mod)
     if isinstance(module, torch.nn.GRUCell):
@@ -200,10 +205,16 @@ def quantize_rnn_cell_modules(module):
     return module
 
 def quantize_linear_modules(module):
+    reassign = {}
     for name, mod in module.named_modules():
         if mod is module:
             continue
-        setattr(module, name, quantize_linear_modules(mod))
+        new_mod = quantize_linear_modules(mod)
+        if new_mod != mod:
+            reassign[name] = new_mod
+
+    for name, mod in reassign.items():
+        setattr(module, name, mod)
     if isinstance(mod, torch.nn.Linear):
         return QuantizedLinear(mod)
     return module
