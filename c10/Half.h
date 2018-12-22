@@ -383,6 +383,13 @@ struct Converter<
   }
 };
 
+// In some versions of MSVC, there will be a compiler error when building.
+// C4146: unary minus operator applied to unsigned type, result still unsigned
+// It can be addressed by disabling the following warning. 
+#ifdef _MSC_VER
+#pragma warning( disable : 4146 )
+#endif
+
 // skip isnan and isinf check for integral types
 template <typename To, typename From>
 typename std::enable_if<std::is_integral<From>::value, bool>::type overflows(
@@ -393,11 +400,15 @@ typename std::enable_if<std::is_integral<From>::value, bool>::type overflows(
     // For example, with uint8, this allows for `a - b` to be treated as
     // `a + 255 * b`.
     return f > limit::max() ||
-        (f < 0 && static_cast<uint64_t>(f) > limit::max());
+        (f < 0 && -static_cast<uint64_t>(f) > limit::max());
   } else {
     return f < limit::lowest() || f > limit::max();
   }
 }
+
+#ifdef _MSC_VER
+#pragma warning( default : 4146 )
+#endif
 
 template <typename To, typename From>
 typename std::enable_if<std::is_floating_point<From>::value, bool>::type
