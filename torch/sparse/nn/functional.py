@@ -24,7 +24,7 @@ def dropout(input, p=0.5, training=True):
                values=tensor([-0.9493,  0.5793, -2.0528,  0.3294, -0.3047, -0.6994]),
                size=(2, 3), nnz=6, layout=torch.sparse_coo)
 
-        >>> S_out = torch.sparse.dropout(S, 0.5)
+        >>> S_out = torch.sparse.nn.functional.dropout(S, 0.5)
         >>> S_out
         tensor(indices=tensor([[0, 0, 0, 1, 1, 1],
                                [0, 1, 2, 0, 1, 2]]),
