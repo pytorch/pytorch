@@ -6647,17 +6647,30 @@ class _TestTorchMixin(object):
 
     def test_namedtuple_return(self):
         a = torch.randn(5, 5)
+        b = torch.empty()
 
-        # return size 2
+        # test max
         ret = a.max(dim=0)
         self.assertEqual(ret.values, ret[0])
         self.assertEqual(ret.indices, ret[1])
+        ret1 = a.max(dim=0, out=ret)
+        self.assertEqual(ret1.values, ret1[0])
+        self.assertEqual(ret1.indices, ret1[1])
+        self.assertEqual(ret1.values, ret[0])
+        self.assertEqual(ret1.indices, ret[1])
 
-        # return size 3
+        # test svd
         ret = a.svd()
         self.assertEqual(ret.U, ret[0])
         self.assertEqual(ret.S, ret[1])
         self.assertEqual(ret.V, ret[2])
+        ret1 = a.svd(out=ret)
+        self.assertEqual(ret1.U, ret1[0])
+        self.assertEqual(ret1.S, ret1[1])
+        self.assertEqual(ret1.V, ret1[2])
+        self.assertEqual(ret1.U, ret[0])
+        self.assertEqual(ret1.S, ret[1])
+        self.assertEqual(ret1.V, ret[2])
 
     def test_hardshrink(self):
         data_original = torch.tensor([1, 0.5, 0.3, 0.6]).view(2, 2)
