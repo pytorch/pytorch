@@ -618,7 +618,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 # TODO: When building on Windows, `PyStructSequence_UnnamedField` could not be
                 # resolved by the linker for some reason, which cause error in building:
                 #
-                # python_nn_functions.cpp.obj : error LNK2001: unresolved external symbol 
+                # python_nn_functions.cpp.obj : error LNK2001: unresolved external symbol
                 # PyStructSequence_UnnamedField
                 #
                 # To resolve this issue, we temporarily disable unnamed field
