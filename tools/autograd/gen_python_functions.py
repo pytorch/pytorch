@@ -53,9 +53,7 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
   ${unpack_self}
   ParsedArgs<${max_args}> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
-
   ${declare_namedtuple_return_types}
-
   ${dispatch}
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -66,9 +64,7 @@ PY_VARIABLE_METHOD_NOARGS = CodeTemplate("""\
 static PyObject * ${pycname}(PyObject* self_, PyObject* args)
 {
   HANDLE_TH_ERRORS
-
   ${declare_namedtuple_return_types}
-
   ${unpack_self}
   return wrap(${namedtuple_return_type}${dispatch_name}(${actuals}));
   END_HANDLE_TH_ERRORS
@@ -612,13 +608,13 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
     def emit_namedtuple_return_type_def(declaration, next_index):
         returns = declaration['returns']
-        if len(returns) <= 1 or all(['api_name' not in x for x in returns]):
+        if len(returns) <= 1 or all(['field_name' not in x for x in returns]):
             declaration['namedtuple_return_type'] = ''
             return '', next_index
         declaration['namedtuple_type_index'] = next_index
         declaration['namedtuple_fields'] = ''
         for x in returns:
-            if 'api_name' not in x:
+            if 'field_name' not in x:
                 # TODO: When building on Windows, `PyStructSequence_UnnamedField` could not be
                 # resolved by the linker for some reason, which cause error in building:
                 #
@@ -629,7 +625,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 # declaration['namedtuple_fields'] += '{PyStructSequence_UnnamedField, ""}, '
                 raise ValueError("Unnamed field is not supported by codegen")
             else:
-                declaration['namedtuple_fields'] += '{"' + x['api_name'] + '", ""}, '
+                declaration['namedtuple_fields'] += '{"' + x['field_name'] + '", ""}, '
         declaration['namedtuple_size'] = len(returns)
         declaration['namedtuple_return_type'] = '&type{}, '.format(next_index)
         return PY_RETURN_NAMEDTUPLE_DEF.substitute(declaration), next_index + 1

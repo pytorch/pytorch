@@ -41,6 +41,19 @@ using at::ScalarType;
 using at::Tensor;
 using namespace torch::autograd::utils;
 
+#ifndef _MSC_VER
+// TODO: remove this
+// When building on Windows, `PyStructSequence_UnnamedField` could not be
+// resolved by the linker for some reason, which cause error in building:
+//
+// python_nn_functions.cpp.obj : error LNK2001: unresolved external symbol
+// PyStructSequence_UnnamedField
+//
+// To resolve this issue, we temporarily disable unnamed field in gen_python_functions.py
+// and manually define this global variable
+char *PyStructSequence_UnnamedField = "unnamed field";
+#endif  // #ifndef _MSC_VER
+
 namespace torch { namespace autograd {
 
 static PyObject * THPVariable_apply_(PyObject* self, PyObject* arg)
