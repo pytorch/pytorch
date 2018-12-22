@@ -110,6 +110,26 @@ class QuantizedRNNCellBase(torch.nn.Module):
                 "hidden{} has inconsistent hidden_size: got {}, expected {}".format(
                     hidden_label, hx.size(1), self.hidden_size))
 
+    # TODO: for some reason weak_script_method causes a destruction of the
+    # module to occur, which in turn frees the packed_ih object via its DataPtr
+    # deleter. This is bizarre and should probably get fixed.
+    # @torch._jit_internal.weak_script_method
+    @torch.jit.script_method
+    def _unpack(self):
+        self.packed_ih.set_(torch.fbgemm_pack_quantized_matrix(
+            self.weight_ih, self.weight_ih.size(1), self.weight_ih.size(0)))
+        self.packed_hh.set_(
+            torch.fbgemm_pack_quantized_matrix(
+                self.weight_hh, self.weight_hh.size(1), self.weight_hh.size(0)))
+
+    # @torch._jit_internal.weak_script_method
+    @torch.jit.script_method
+    def _pack(self):
+        self.packed_ih.set_(
+            torch.zeros(torch.jit.annotate(List[int], []), dtype=torch.uint8).detach())
+        self.packed_hh.set_(
+            torch.zeros(torch.jit.annotate(List[int], []), dtype=torch.uint8).detach())
+
 
 @torch._jit_internal.weak_module
 class QuantizedRNNCell(QuantizedRNNCellBase):

@@ -305,6 +305,31 @@ class JitTestCase(TestCase):
             imported.save(fname)
             return torch.jit.load(fname, map_location=map_location)
 
+    def getExportImportCopyWithPacking(self, m, also_test_file=True, map_location=None):
+        buffer = io.BytesIO()
+        m.apply(lambda s: s._pack() if s._has_method('_pack') else None)
+        torch.jit.save(m, buffer)
+        m.apply(lambda s: s._unpack() if s._has_method('_unpack') else None)
+        buffer.seek(0)
+        imported = torch.jit.load(buffer, map_location=map_location)
+        imported.apply(lambda s: s._unpack() if s._has_method('_unpack') else None)
+
+        if not also_test_file:
+            return imported
+
+        # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
+        # opens the file, and it cannot be opened multiple times in Windows. To support Windows,
+        # close the file after creation and try to remove it manually
+        f = tempfile.NamedTemporaryFile(delete=False)
+        try:
+            f.close()
+            imported.save(f.name)
+            result = torch.jit.load(f.name, map_location=map_location)
+        finally:
+            os.unlink(f.name)
+
+        return result
+
     def assertGraphContains(self, graph, kind):
         self.assertTrue(any(n.kind() == kind for n in graph.nodes()))
 
@@ -4892,27 +4917,31 @@ a")
 
                 if isinstance(cell, torch.jit.quantized.QuantizedLSTMCell):
                     from typing import Tuple
+
                     class ScriptWrapper(torch.jit.ScriptModule):
                         def __init__(self, cell):
                             super(ScriptWrapper, self).__init__()
                             self.cell = cell
 
                         @torch.jit.script_method
-                        def forward(self, x : torch.Tensor, hiddens : Tuple[torch.Tensor, torch.Tensor]):
+                        def forward(self, x, hiddens):
+                            # type: (torch.Tensor, Tuple[torch.Tensor, torch.Tensor])
                             return self.cell(x, hiddens)
                 else:
+
                     class ScriptWrapper(torch.jit.ScriptModule):
                         def __init__(self, cell):
                             super(ScriptWrapper, self).__init__()
                             self.cell = cell
 
                         @torch.jit.script_method
-                        def forward(self, x : torch.Tensor, hiddens : torch.Tensor):
+                        def forward(self, x, hiddens):
+                            # type: (torch.Tensor, torch.Tensor)
                             return self.cell(x, hiddens)
 
                 cell = ScriptWrapper(cell)
-
-                cell = self.getExportImportCopy(cell)
+                outs = cell(x, hiddens)
+                cell = self.getExportImportCopyWithPacking(cell)
 
                 outs = cell(x, hiddens)
                 ref_outs = ref(x, hiddens)
@@ -5228,10 +5257,7 @@ a")
         # Test save path
         self.assertFalse(sm.pack_called.item())
         self.assertFalse(sm.unpack_called.item())
-        sm.apply(lambda s: s._pack())
-        imported = self.getExportImportCopy(sm)
-        sm.apply(lambda s: s._unpack())
-        imported.apply(lambda s: s._unpack())
+        imported = self.getExportImportCopyWithPacking(sm)
         # ensure pack was called before serialization
         self.assertTrue(sm.pack_called.item())
         # ensure unpack was called after serialization so as to leave the module in an initialized state
@@ -8355,11 +8381,7 @@ a")
 
             x = (torch.rand(1, K1).float() - 0.5) / 10.0
             traced = torch.jit.trace(fb, (x,))
-            traced.apply(lambda s: s._pack() if s._has_method('_pack') else None)
-            fb = self.getExportImportCopy(traced)
-            traced.apply(lambda s: s._unpack() if s._has_method('_unpack') else None)
-
-            fb.apply(lambda s: s._unpack() if s._has_method('_unpack') else None)
+            fb = self.getExportImportCopyWithPacking(traced)
 
             x = torch.tensor([[100, -150]], dtype=torch.float)
             y = fb(x)
