@@ -6647,7 +6647,6 @@ class _TestTorchMixin(object):
 
     def test_namedtuple_return(self):
         a = torch.randn(5, 5)
-        b = torch.empty()
 
         # test max
         ret = a.max(dim=0)
