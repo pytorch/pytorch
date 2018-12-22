@@ -19,9 +19,9 @@ inline bool isTuple(PyObject* obj) {
 }
 
 inline PyObject* maybeCastNamedtuple(PyObject* obj) {
-  std::string m = pybind11::str(pybind11::handle(obj).get_type().attr("__module__"));
+  std::string m = pybind11::str(pybind11::object(obj).get_type().attr("__module__"));
   if (m == "torch.return_types") {
-    return pybind11::cast<pybind11::tuple>(pybind11::handle(obj)).ptr();
+    return pybind11::cast<pybind11::tuple>(pybind11::object(obj)).ptr();
   }
   return obj;
 }
