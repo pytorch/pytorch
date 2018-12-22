@@ -4,6 +4,7 @@
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/utils/invalid_arguments.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/six.h>
 
 #include <ATen/ATen.h>
 
@@ -127,9 +128,9 @@ bool FunctionParameter::check(PyObject* obj) {
       }
       return false;
     }
-    case ParameterType::TENSOR_LIST: return PyTuple_Check(obj) || PyList_Check(obj);
+    case ParameterType::TENSOR_LIST: return six::isTuple(obj) || PyList_Check(obj);
     case ParameterType::INT_LIST: {
-      if (PyTuple_Check(obj) || PyList_Check(obj)) {
+      if (six::isTuple(obj) || PyList_Check(obj)) {
         return true;
       }
       // if a size is specified (e.g. IntList[2]) we also allow passing a single int
@@ -469,7 +470,7 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
       }
       return false;
     } else if (param.check(obj)) {
-      dst[i++] = obj;
+      dst[i++] = six::maybeCastNamedtuple(obj);
     // XXX: the Variable check is necessary because sizes become tensors when
     // tracer is enabled. This behavior easily leads to ambiguities, and we
     // should avoid having complex signatures that make use of it...
