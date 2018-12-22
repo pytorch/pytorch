@@ -138,6 +138,13 @@ def parse_native_yaml(path):
         return yaml.load(f, Loader=Loader)
 
 
+def propagate_field_names(output_arguments, return_arguments):
+    if output_arguments:
+        for i, r in enumerate(return_arguments):
+            if 'field_name' in r:
+                output_arguments[i]['field_name'] = r['field_name']
+
+
 def run(paths):
     declarations = []
     for path in paths:
@@ -155,6 +162,7 @@ def run(paths):
                 return_arguments = parse_return_arguments(return_decl, declaration['inplace'])
                 arguments = parse_arguments(arguments, func, declaration['name'], return_arguments)
                 output_arguments = [x for x in arguments if x.get('output')]
+                propagate_field_names(output_arguments, return_arguments)
                 declaration['return'] = return_arguments if len(output_arguments) == 0 else output_arguments
                 declaration['variants'] = func.get('variants', ['function'])
                 declaration['requires_tensor'] = func.get('requires_tensor', False)
