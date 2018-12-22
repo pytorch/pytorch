@@ -2,6 +2,7 @@
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Layout.h>
+#include <torch/csrc/utils/six.h>
 #include <torch/csrc/utils/invalid_arguments.h>
 #include <torch/csrc/utils/python_strings.h>
 
@@ -127,9 +128,9 @@ bool FunctionParameter::check(PyObject* obj) {
       }
       return false;
     }
-    case ParameterType::TENSOR_LIST: return PyTuple_Check(obj) || PyList_Check(obj);
+    case ParameterType::TENSOR_LIST: return six::isTuple(obj) || PyList_Check(obj);
     case ParameterType::INT_LIST: {
-      if (PyTuple_Check(obj) || PyList_Check(obj)) {
+      if (six::isTuple(obj) || PyList_Check(obj)) {
         return true;
       }
       // if a size is specified (e.g. IntList[2]) we also allow passing a single int

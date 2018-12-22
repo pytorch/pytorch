@@ -1,5 +1,5 @@
 #include <torch/csrc/jit/python_arg_flatten.h>
-#include <torch/csrc/jit/six.h>
+#include <torch/csrc/utils/six.h>
 
 #include <torch/csrc/autograd/grad_mode.h>
 
