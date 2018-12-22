@@ -105,6 +105,7 @@ def parse_return_arguments(return_decl, inplace):
 
     for arg_idx, arg in enumerate(return_decl.split(', ')):
         type_and_maybe_name = [a.strip() for a in arg.rsplit(' ', 1)]
+        field_name = None
         if len(type_and_maybe_name) == 1:
             t = type_and_maybe_name[0]
             if inplace:
@@ -113,9 +114,12 @@ def parse_return_arguments(return_decl, inplace):
                 name = 'result' if not multiple_args else 'result' + str(arg_idx)
         else:
             t, name = type_and_maybe_name
+            field_name = name
 
         typ = sanitize_type(t)
         argument_dict = {'type': typ, 'name': name}
+        if field_name is not None:
+            argument_dict['field_name'] = field_name
         argument_dict['output'] = True
 
         arguments.append(argument_dict)

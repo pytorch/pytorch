@@ -427,6 +427,7 @@ AtFormal = TypedDict('AtFormal', {
 
 ReturnType = TypedDict('ReturnType', {
     'name': str,
+    'field_name': str,
     'type': str,
     'dynamic_type': str,
 }, total=False)
@@ -465,6 +466,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'with_gil': bool,
     'cpu_half': bool,
     'deprecated': bool,
+    'field_name': str,
     'formals_list': List[AtFormal],
     'formals_with_defaults': List[str],
     'formals': List[str],
@@ -990,6 +992,8 @@ def create_generic(top_env, declarations):
             }  # type: ReturnType
             if name is not None:
                 rtype['name'] = name
+            if 'field_name' in t_raw:
+                rtype['field_name'] = t_raw['field_name']
             return_types.append(rtype)
 
         return return_types
