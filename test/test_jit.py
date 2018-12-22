@@ -4890,6 +4890,30 @@ a")
                 else:
                     hiddens = hx
 
+                if isinstance(cell, torch.jit.quantized.QuantizedLSTMCell):
+                    from typing import Tuple
+                    class ScriptWrapper(torch.jit.ScriptModule):
+                        def __init__(self, cell):
+                            super(ScriptWrapper, self).__init__()
+                            self.cell = cell
+
+                        @torch.jit.script_method
+                        def forward(self, x : torch.Tensor, hiddens : Tuple[torch.Tensor, torch.Tensor]):
+                            return self.cell(x, hiddens)
+                else:
+                    class ScriptWrapper(torch.jit.ScriptModule):
+                        def __init__(self, cell):
+                            super(ScriptWrapper, self).__init__()
+                            self.cell = cell
+
+                        @torch.jit.script_method
+                        def forward(self, x : torch.Tensor, hiddens : torch.Tensor):
+                            return self.cell(x, hiddens)
+
+                cell = ScriptWrapper(cell)
+
+                cell = self.getExportImportCopy(cell)
+
                 outs = cell(x, hiddens)
                 ref_outs = ref(x, hiddens)
 
