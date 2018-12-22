@@ -72,7 +72,7 @@ class MapDataset : public BatchDataset<
       typename D = SourceDataset,
       typename = torch::disable_if_t<D::is_stateful>>
   OutputBatchType get_batch_impl(BatchRequestType indices) {
-    return transform_.apply_batch(dataset_.get_batch(indices));
+    return transform_.apply_batch(dataset_.get_batch(std::move(indices)));
   }
 
   /// The implementation of `get_batch()` for the stateful case. Here, we follow
@@ -83,7 +83,7 @@ class MapDataset : public BatchDataset<
   template <typename D = SourceDataset>
   torch::enable_if_t<D::is_stateful, OutputBatchType> get_batch_impl(
       BatchRequestType indices) {
-    if (auto batch = dataset_.get_batch(indices)) {
+    if (auto batch = dataset_.get_batch(std::move(indices))) {
       return transform_.apply_batch(std::move(*batch));
     }
     return nullopt;
