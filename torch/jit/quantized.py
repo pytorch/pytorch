@@ -51,7 +51,7 @@ class QuantizedLinear(torch.jit.ScriptModule):
 
 
 # Quantized RNN cell implementations
-class QuantizedRNNCellBase(torch.nn.Module):
+class QuantizedRNNCellBase(torch.jit.ScriptModule):
     __constants__ = ['input_size', 'hidden_size', 'bias', 'scale_hh', 'scale_ih',
                      'zero_point_ih', 'zero_point_hh']
 
@@ -90,14 +90,14 @@ class QuantizedRNNCellBase(torch.nn.Module):
             s += ', nonlinearity={nonlinearity}'
         return s.format(**self.__dict__)
 
-    @torch._jit_internal.weak_script_method
+    @torch.jit.script_method
     def check_forward_input(self, input):
         if input.size(1) != self.input_size:
             raise RuntimeError(
                 "input has inconsistent input_size: got {}, expected {}".format(
                     input.size(1), self.input_size))
 
-    @torch._jit_internal.weak_script_method
+    @torch.jit.script_method
     def check_forward_hidden(self, input, hx, hidden_label=''):
         # type: (Tensor, Tensor, str) -> None
         if input.size(0) != hx.size(0):
@@ -131,7 +131,6 @@ class QuantizedRNNCellBase(torch.nn.Module):
             torch.zeros(torch.jit.annotate(List[int], []), dtype=torch.uint8).detach())
 
 
-@torch._jit_internal.weak_module
 class QuantizedRNNCell(QuantizedRNNCellBase):
     __constants__ = ['input_size', 'hidden_size', 'bias', 'scale_hh', 'scale_ih',
                      'zero_point_ih', 'zero_point_hh', 'nonlinearity']
@@ -140,7 +139,7 @@ class QuantizedRNNCell(QuantizedRNNCellBase):
         super(QuantizedRNNCell, self).__init__(other)
         self.nonlinearity = other.nonlinearity
 
-    @torch._jit_internal.weak_script_method
+    @torch.jit.script_method
     def forward(self, input, hx=None):
         # type: (Tensor, Optional[Tensor]) -> Tensor
         self.check_forward_input(input)
@@ -170,12 +169,11 @@ class QuantizedRNNCell(QuantizedRNNCellBase):
         return ret
 
 
-@torch._jit_internal.weak_module
 class QuantizedLSTMCell(QuantizedRNNCellBase):
     def __init__(self, other):
         super(QuantizedLSTMCell, self).__init__(other)
 
-    @torch._jit_internal.weak_script_method
+    @torch.jit.script_method
     def forward(self, input, hx=None):
         # type: (Tensor, Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tensor, Tensor]
         self.check_forward_input(input)
@@ -194,12 +192,11 @@ class QuantizedLSTMCell(QuantizedRNNCellBase):
         )
 
 
-@torch._jit_internal.weak_module
 class QuantizedGRUCell(QuantizedRNNCellBase):
     def __init__(self, other):
         super(QuantizedGRUCell, self).__init__(other)
 
-    @torch._jit_internal.weak_script_method
+    @torch.jit.script_method
     def forward(self, input, hx=None):
         # type: (Tensor, Optional[Tensor]) -> Tensor
         self.check_forward_input(input)
