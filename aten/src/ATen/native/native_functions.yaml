@@ -3434,15 +3434,27 @@
 
 - func: replication_pad1d_out(Tensor output, Tensor self, IntList[2] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: replication_pad1d_out_cpu
+    CUDA: replication_pad1d_out_cuda
 
 - func: replication_pad1d(Tensor self, IntList[2] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: replication_pad1d_cpu
+    CUDA: replication_pad1d_cuda
 
 - func: replication_pad1d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, IntList[2] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: replication_pad1d_backward_out_cpu
+    CUDA: replication_pad1d_backward_out_cuda
 
 - func: replication_pad1d_backward(Tensor grad_output, Tensor self, IntList[2] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: replication_pad1d_backward_cpu
+    CUDA: replication_pad1d_backward_cuda
 
 - func: replication_pad2d_out(Tensor output, Tensor self, IntList[4] padding) -> Tensor
   python_module: nn
