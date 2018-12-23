@@ -114,7 +114,7 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
             final_order = list(range(sz))
             for k, j in enumerate(LU_pivots[idx]):
                 final_order[k], final_order[j] = final_order[j], final_order[k]
-            P[idx] = P[idx].index_select(1, torch.tensor(final_order))
+            P[idx] = P[idx].index_select(1, torch.as_tensor(final_order, device=LU_pivots.device))
     else:
         P = None
 
