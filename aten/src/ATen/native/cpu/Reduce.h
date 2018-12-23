@@ -83,14 +83,7 @@ void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
     "the accumulate type must be default-constructible"
   );
   iter.foreach_reduced_elt([&](TensorIterator &sub_iter) {
-    auto numel = sub_iter.numel();
-    bool serial = numel < at::internal::GRAIN_SIZE || at::get_max_threads() == 1 || at::in_parallel_region();
-    int max_threads = serial ? 1 : at::get_max_threads();
-    AT_ASSERT(max_threads > 0);
-    std::vector<optional<acc_t>> buffer((unsigned)max_threads, optional<acc_t> {});
-    at::parallel_for(0, numel, serial ? (1 + numel) : internal::GRAIN_SIZE,
-    [&](int64_t begin, int64_t end) {
-      auto &acc = buffer[at::get_thread_num()];
+    auto reduction_body = [&](optional<acc_t>& acc, int64_t begin, int64_t end) {
       sub_iter.serial_for_each([&acc, &ops, &init](int ntensors, char** data, const int64_t* strides, int64_t size) {
         AT_ASSERT(ntensors == 2);
         char *in = data[1];
@@ -104,15 +97,33 @@ void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
           in += stride;
         }
       }, {begin, end});
-    });
-    acc_t acc = init;
-    for (int i = 0; i < max_threads; ++i) {
-      if (buffer[i]) {
-        acc = ops.combine(acc, *buffer[i]);
+    };
+    optional<acc_t> total_acc;
+    auto numel = sub_iter.numel();
+    if (numel < at::internal::GRAIN_SIZE || at::get_max_threads() == 1 || at::in_parallel_region()) {
+      reduction_body(total_acc, 0, numel);
+    } else {
+      int max_threads = at::get_max_threads();
+      AT_ASSERT(max_threads > 0);
+      std::vector<optional<acc_t>> buffer((unsigned)max_threads, optional<acc_t> {});
+      at::parallel_for(0, numel, internal::GRAIN_SIZE,
+      [&](int64_t begin, int64_t end) {
+        auto& acc = buffer[at::get_thread_num()];
+        reduction_body(acc, begin, end);
+      });
+      for (int i = 0; i < max_threads; ++i) {
+        if (buffer[i]) {
+          if (!total_acc) {
+            total_acc = init;
+          }
+          total_acc = ops.combine(*total_acc, *buffer[i]);
+        }
       }
     }
     char *out = (char *)sub_iter.data_ptr(0);
-    *(data_t*)out = ops.project(acc);
+    if (total_acc) {
+      *(data_t*)out = ops.project(*total_acc);
+    }
   });
 }
 
