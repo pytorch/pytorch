@@ -328,6 +328,7 @@ class JitTestCase(TestCase):
         finally:
             os.unlink(f.name)
 
+        result.apply(lambda s: s._unpack() if s._has_method('_unpack') else None)
         return result
 
     def assertGraphContains(self, graph, kind):
