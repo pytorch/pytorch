@@ -16,7 +16,9 @@ set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${common_srcs})
 # Currently MSVC seems to have a symbol not found error while linking (related
 # to source file order?). As a result we will currently disable the perfkernel
 # in msvc.
-if (NOT MSVC AND CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
+# Additionally, android seems to have incomplete AVX2 intrinsics in the headers that it ships,
+# so we are seeing compiler errors in android X86 mode. Hence, disabling for now.
+if (NOT MSVC AND NOT ANDROID AND CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
   add_library(Caffe2_perfkernels_avx OBJECT ${avx_srcs})
   add_library(Caffe2_perfkernels_avx2 OBJECT ${avx2_srcs})
   add_dependencies(Caffe2_perfkernels_avx Caffe2_PROTO c10)

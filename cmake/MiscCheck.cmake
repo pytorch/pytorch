@@ -174,8 +174,10 @@ if (CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
   # Currently MSVC seems to have a symbol not found error while linking (related
   # to source file order?). As a result we will currently disable the perfkernel
   # in msvc.
+  # Additionally, android seems to have incomplete AVX2 intrinsics in the headers that it ships,
+  # so we are seeing compiler errors in android X86 mode. Hence, disabling for now.
   # Also see CMakeLists.txt under caffe2/perfkernels.
-  if (NOT MSVC)
+  if (NOT MSVC AND NOT ANDROID)
     set(CAFFE2_PERF_WITH_AVX 1)
     set(CAFFE2_PERF_WITH_AVX2 1)
   endif()
