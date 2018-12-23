@@ -12,7 +12,7 @@ static void reflection_pad1d_out_frame(
     scalar_t *input_p, scalar_t *output_p,
     int64_t nslices,
     int64_t iwidth, int64_t owidth,
-    int64_t pad_l, int64_t pad_r) {
+    int64_t pad_l) {
   int64_t i_start_x = std::max(0L, (long)-pad_l);
   int64_t o_start_x = std::max(0L, (long)pad_l);
 
@@ -93,8 +93,8 @@ void reflection_pad1d_out_template(
         reflection_pad1d_out_frame<scalar_t>(input_data, output_data,
                                              nslices,
                                              iwidth, owidth,
-                                             pad_l, pad_r);
-        }
+                                             pad_l);
+      }
     );
   } else {
     output.resize_({nbatch, nslices, owidth});
@@ -113,7 +113,7 @@ void reflection_pad1d_out_template(
             nslices,
             iwidth,
             owidth,
-            pad_l, pad_r);
+            pad_l);
           }
       );
     }
@@ -125,7 +125,7 @@ static void reflection_pad1d_backward_out_frame(
     scalar_t *ginput_p, scalar_t *goutput_p,
     int64_t nslices,
     int64_t iwidth, int64_t owidth,
-    int64_t pad_l, int64_t pad_r) {
+    int64_t pad_l) {
   int64_t i_start_x = std::max(0L, (long)-pad_l);
   int64_t o_start_x = std::max(0L, (long)pad_l);
 
@@ -189,7 +189,7 @@ void reflection_pad1d_backward_out_template(
           nslices,
           iwidth,
           owidth,
-          pad_l, pad_r);
+          pad_l);
         }
     );
   } else {
@@ -204,8 +204,8 @@ void reflection_pad1d_backward_out_template(
             nslices,
             iwidth,
             owidth,
-            pad_l, pad_r);
-          }
+            pad_l);
+        }
       );
     }
   }
@@ -230,7 +230,8 @@ Tensor& reflection_pad1d_backward_out_cpu(
     const Tensor& input,
     IntList padding) {
   grad_input = at::zeros_like(input);
-  reflection_pad1d_backward_out_template(input, grad_output, grad_input, padding);
+  reflection_pad1d_backward_out_template(
+    input, grad_output, grad_input, padding);
   return grad_input;
 }
 

@@ -15,13 +15,15 @@ using at::cuda::detail::canUse32BitIndexMath;
 
 __device__
 inline void get_index_mapping(
-    int64_t input_dim_x, int64_t output_x, int64_t pad_l,
+    int64_t input_dim_x, int64_t output_dim_x,
+    int64_t output_x,
+    int64_t pad_l,
     int64_t & input_idx, int64_t & output_idx) {
   // 3D grid of 1D blocks
   auto input_offset =
     (blockIdx.y + blockIdx.z * gridDim.y) * input_dim_x;
   auto output_offset =
-    (blockIdx.y + blockIdx.z * gridDim.y) * gridDim.x * blockDim.x;
+    (blockIdx.y + blockIdx.z * gridDim.y) * output_dim_x;
 
   auto i_start_x = ::max(0L, (long)-pad_l);
   auto o_start_x = ::max(0L, (long)pad_l);
@@ -46,7 +48,8 @@ __global__ void reflection_pad1d_out_kernel(
 
   if (output_x < output_dim_x) {
     int64_t input_idx, output_idx;
-    get_index_mapping(input_dim_x, output_x, pad_l, input_idx, output_idx);
+    get_index_mapping(
+      input_dim_x, output_dim_x, output_x, pad_l, input_idx, output_idx);
 
     output[output_idx] = input[input_idx];
   }
@@ -62,7 +65,8 @@ __global__ void reflection_pad1d_backward_out_kernel(
 
   if (output_x < output_dim_x) {
     int64_t input_idx, output_idx;
-    get_index_mapping(input_dim_x, output_x, pad_l, input_idx, output_idx);
+    get_index_mapping(
+      input_dim_x, output_dim_x, output_x, pad_l, input_idx, output_idx);
 
     atomicAdd(&grad_input[input_idx], grad_output[output_idx]);
   }
