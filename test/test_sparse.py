@@ -996,6 +996,12 @@ class TestSparse(TestCase):
         S2 = S2.to(dtype=torch.double)
         self.assertRaises(RuntimeError, lambda: torch.sparse.add(S1, S2))
 
+        # raise at dense size mismatch
+        S1 = self._gen_sparse(2, 5, [3, 4, 5])[0]
+        S2 = self._gen_sparse(2, 5, [3, 1, 1])[0]
+        self.assertRaises(RuntimeError, lambda: torch.sparse.add(S1, S2))
+        self.assertRaises(RuntimeError, lambda: torch.sparse.sub(S1, S2))
+
     def test_norm(self):
         def test_shape(sparse_dims, nnz, with_size):
             x, _, _ = self._gen_sparse(sparse_dims, nnz, with_size)

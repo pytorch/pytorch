@@ -471,7 +471,7 @@ SparseTensor _sparse_add_cuda(const SparseTensor& t_, const SparseTensor& src_, 
   auto dims_to_flatten = std::vector<int64_t>();
 
   // check all dense dims have same size between t and src
-  for (int64_t i = t_sizes_v.size()-1; i > t_sparse_dim; i--) {
+  for (int64_t i = t_sizes_v.size()-1; i >= t_sparse_dim; i--) {
     if (t_sizes_v[i] != src_sizes_v[i]) {
       AT_ERROR("add: expected dense dims to have same size between t and src SparseTensors");
     }
@@ -492,8 +492,8 @@ SparseTensor _sparse_add_cuda(const SparseTensor& t_, const SparseTensor& src_, 
 
   LongTensor t_indices = t._indices();
   LongTensor src_indices = src._indices();
-  Tensor t_values = t._values();
-  Tensor src_values = src._values();
+  Tensor t_values = t._values().contiguous();
+  Tensor src_values = src._values().contiguous();
   int64_t t_nnz = t._nnz();
   int64_t src_nnz = src._nnz();
   Tensor r_values = at::empty_like(t_values);

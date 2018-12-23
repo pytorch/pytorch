@@ -345,7 +345,7 @@ SparseTensor _sparse_add_cpu(const SparseTensor& t_, const SparseTensor& src_, S
   auto dims_to_flatten = std::vector<int64_t>();
 
   // check all dense dims have same size between t and src
-  for (int64_t i = t_sizes_v.size()-1; i > t_sparse_dim; i--) {
+  for (int64_t i = t_sizes_v.size()-1; i >= t_sparse_dim; i--) {
     if (t_sizes_v[i] != src_sizes_v[i]) {
       AT_ERROR("add: expected dense dims to have same size between t and src SparseTensors");
     }
