@@ -13,6 +13,14 @@ namespace torch { namespace jit {
                 grad_other = (grad_output * self).sum_to_size(other.size())
                 return grad_self, grad_other
             return self * other, backward
+
+        def adaptive_avg_pool2d(self,
+                                output_size: List[int]):
+            def backward(grad_output):
+                grad_self = torch.adaptive_avg_pool2d_backward(grad_output, self)
+                return grad_self, None
+
+            return torch.adaptive_avg_pool2d(self, output_size), backward
       )"
     };
     std::unordered_map<std::string, GradientPair> schema_to_graphs;

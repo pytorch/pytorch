@@ -142,22 +142,22 @@ void createTensorToParameterNameMap(
   // they are keywords or namespaces used in the output
   const static std::unordered_set<std::string> reserved_names = {
     // identifiers in the environment while parsing
+    "_", // avoid the confusing unnamed _
     "aten",
-    "ops",
+    "attribute",
     "CONSTANTS",
     "fork",
-    "attribute",
     "getattr",
-    "_", // avoid the confusing unnamed _
     "inf",
     "nan",
+    "ops",
+    "self",
     // the python keywords
-    "False",
-    "None",
-    "True",
     "and",
     "as",
     "assert",
+    "async",
+    "await",
     "break",
     "class",
     "continue",
@@ -166,6 +166,7 @@ void createTensorToParameterNameMap(
     "elif",
     "else",
     "except",
+    "False",
     "finally",
     "for",
     "from",
@@ -175,12 +176,14 @@ void createTensorToParameterNameMap(
     "in",
     "is",
     "lambda",
+    "None",
     "nonlocal",
     "not",
     "or",
     "pass",
     "raise",
     "return",
+    "True",
     "try",
     "while",
     "with",
@@ -234,7 +237,6 @@ struct PythonPrintPass {
   bool isConstantLike(Node* n) {
     switch(n->kind()) {
       case prim::Constant:
-      case prim::NoneGenerator:
       case prim::Undefined:
       case prim::None:
         return true;
@@ -676,7 +678,6 @@ struct PythonPrintPass {
         IValue v = toIValue(node->output()).value();
         printConstant(stmt, v);
       } break;
-      case prim::NoneGenerator:
       case prim::Undefined:
       case prim::None: {
         if (node->output()->type()->isSubtypeOf(NoneType::get())) {
@@ -1001,7 +1002,6 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
     prim::ListConstruct,
     prim::ListUnpack,
     prim::None,
-    prim::NoneGenerator,
     prim::Print,
     prim::PythonOp,
     prim::TupleConstruct,
