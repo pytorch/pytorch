@@ -65,7 +65,7 @@ CMAKE_ARGS+=("-DBUILD_TEST=OFF")
 CMAKE_ARGS+=("-DBUILD_BINARY=OFF")
 CMAKE_ARGS+=("-DBUILD_PYTHON=OFF")
 CMAKE_ARGS+=("-DBUILD_SHARED_LIBS=OFF")
-CMAKE_ARGS+=("-DANDROID_TOOLCHAIN=gcc")
+CMAKE_ARGS+=("-DANDROID_TOOLCHAIN=clang")
 # Disable unused dependencies
 CMAKE_ARGS+=("-DUSE_CUDA=OFF")
 CMAKE_ARGS+=("-DUSE_GFLAGS=OFF")
@@ -106,3 +106,7 @@ if [ -z "$MAX_JOBS" ]; then
   fi
 fi
 cmake --build . -- "-j${MAX_JOBS}"
+
+touch $BUILD_ROOT/lib/libprotoc.a
+touch $BUILD_ROOT/bin/protoc
+cmake --build . -- "-j${MAX_JOBS}" install
