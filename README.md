@@ -157,10 +157,10 @@ On Linux
 ```bash
 export CMAKE_PREFIX_PATH="$(dirname $(which conda))/../" # [anaconda root directory]
 
-#Install basic dependencies
+# Install basic dependencies
 conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
 
-#Add LAPACK support for the GPU
+# Add LAPACK support for the GPU
 conda install -c pytorch magma-cuda92 # or [magma-cuda80 | magma-cuda91] depending on your cuda version
 ```
 
