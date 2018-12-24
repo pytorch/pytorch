@@ -129,6 +129,11 @@ def main():
         args = ["clang-format", "-i"]
         args.extend(name_to_diffs.keys())
         subprocess.check_output(args)
+
+        # add the changes so they will be committed
+        args = ["git", "add"]
+        args.extend(name_to_diffs.keys())
+        subprocess.check_output(args)
     else:
         print("ERROR: Running clang-format created changes: ")
         for name, diff in name_to_diffs.items():

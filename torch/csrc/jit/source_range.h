@@ -2,6 +2,9 @@
 #include <torch/csrc/jit/assertions.h>
 #include <torch/csrc/jit/source_location.h>
 
+#include <algorithm>
+#include <memory>
+
 namespace torch {
 namespace jit {
 

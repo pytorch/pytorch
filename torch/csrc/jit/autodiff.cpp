@@ -234,7 +234,6 @@ class GradientHelper {
 
  private:
   Node* node;
-  static const OperatorSet comparison_ops;
 
   SymbolicVariable sumToSizeOf(SymbolicVariable v, Symbol input_name) {
     Value* size;
@@ -247,6 +246,20 @@ class GradientHelper {
 
   std::vector<SymbolicVariable> buildSymbolicGradient(
       const std::vector<SymbolicVariable>& grads) {
+    static const OperatorSet comparison_ops = {
+        "aten::lt(Tensor self, Tensor other) -> Tensor",
+        "aten::le(Tensor self, Tensor other) -> Tensor",
+        "aten::gt(Tensor self, Tensor other) -> Tensor",
+        "aten::ge(Tensor self, Tensor other) -> Tensor",
+        "aten::eq(Tensor self, Tensor other) -> Tensor",
+        "aten::ne(Tensor self, Tensor other) -> Tensor",
+        "aten::lt(Tensor self, Scalar other) -> Tensor",
+        "aten::le(Tensor self, Scalar other) -> Tensor",
+        "aten::gt(Tensor self, Scalar other) -> Tensor",
+        "aten::ge(Tensor self, Scalar other) -> Tensor",
+        "aten::eq(Tensor self, Scalar other) -> Tensor",
+        "aten::ne(Tensor self, Scalar other) -> Tensor",
+    };
     auto inputs = fmap<SymbolicVariable>(node->inputs());
     auto outputs = fmap<SymbolicVariable>(node->outputs());
 
@@ -741,21 +754,6 @@ class GradientHelper {
         std::string("failed to differentiate `") +
         node->kind().toDisplayString() + "`");
   }
-};
-
-const OperatorSet GradientHelper::comparison_ops = {
-    "aten::lt(Tensor self, Tensor other) -> Tensor",
-    "aten::le(Tensor self, Tensor other) -> Tensor",
-    "aten::gt(Tensor self, Tensor other) -> Tensor",
-    "aten::ge(Tensor self, Tensor other) -> Tensor",
-    "aten::eq(Tensor self, Tensor other) -> Tensor",
-    "aten::ne(Tensor self, Tensor other) -> Tensor",
-    "aten::lt(Tensor self, Scalar other) -> Tensor",
-    "aten::le(Tensor self, Scalar other) -> Tensor",
-    "aten::gt(Tensor self, Scalar other) -> Tensor",
-    "aten::ge(Tensor self, Scalar other) -> Tensor",
-    "aten::eq(Tensor self, Scalar other) -> Tensor",
-    "aten::ne(Tensor self, Scalar other) -> Tensor",
 };
 } // namespace
 

@@ -3,6 +3,7 @@
 #if USE_CPU_FUSER
 
 #include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/utils/disallow_copy.h>
 
 #include <dlfcn.h>
 
