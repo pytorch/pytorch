@@ -856,7 +856,7 @@ class TestLRScheduler(TestCase):
         iters = 30
         eta_min = 1e-10
         T = 10
-        T_mult= 2
+        T_mult = 2
         T_cur = 0
         targets = [[0.05], [0.5]]
         scheduler = SGDR(self.opt, T_0=T, T_mult=T_mult, eta_min=eta_min)
