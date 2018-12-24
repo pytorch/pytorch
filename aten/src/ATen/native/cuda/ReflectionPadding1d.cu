@@ -15,23 +15,23 @@ using at::cuda::detail::canUse32BitIndexMath;
 
 __device__
 inline void get_index_mapping(
-    int64_t input_dim_x, int64_t output_dim_x,
+    int64_t input_w, int64_t output_w,
     int64_t output_x,
     int64_t pad_l,
     int64_t & input_idx, int64_t & output_idx) {
   // 3D grid of 1D blocks
   auto input_offset =
-    (blockIdx.y + blockIdx.z * gridDim.y) * input_dim_x;
+    (blockIdx.y + blockIdx.z * gridDim.y) * input_w;
   auto output_offset =
-    (blockIdx.y + blockIdx.z * gridDim.y) * output_dim_x;
+    (blockIdx.y + blockIdx.z * gridDim.y) * output_w;
 
   auto i_start_x = ::max(0L, (long)-pad_l);
   auto o_start_x = ::max(0L, (long)pad_l);
 
   int64_t input_x = ::abs(output_x - pad_l)
-                    - ::abs(output_x - (input_dim_x + pad_l - 1))
+                    - ::abs(output_x - (input_w + pad_l - 1))
                     - output_x
-                    + 2 * pad_l + input_dim_x - 1
+                    + 2 * pad_l + input_w - 1
                     - o_start_x + i_start_x;
 
   input_idx = input_offset + input_x;
@@ -41,15 +41,15 @@ inline void get_index_mapping(
 template<typename scalar_t>
 __global__ void reflection_pad1d_out_kernel(
     scalar_t * input, scalar_t * output,
-    int64_t input_dim_x,
+    int64_t input_w,
     int64_t pad_l, int64_t pad_r) {
   auto output_x = threadIdx.x + blockIdx.x * blockDim.x;
-  auto output_dim_x = input_dim_x + pad_l + pad_r;
+  auto output_w = input_w + pad_l + pad_r;
 
-  if (output_x < output_dim_x) {
+  if (output_x < output_w) {
     int64_t input_idx, output_idx;
     get_index_mapping(
-      input_dim_x, output_dim_x, output_x, pad_l, input_idx, output_idx);
+      input_w, output_w, output_x, pad_l, input_idx, output_idx);
 
     output[output_idx] = input[input_idx];
   }
@@ -58,15 +58,15 @@ __global__ void reflection_pad1d_out_kernel(
 template <typename scalar_t>
 __global__ void reflection_pad1d_backward_out_kernel(
     scalar_t * grad_input, scalar_t * grad_output,
-    int64_t input_dim_x,
+    int64_t input_w,
     int64_t pad_l, int64_t pad_r) {
   auto output_x = threadIdx.x + blockIdx.x * blockDim.x;
-  auto output_dim_x = input_dim_x + pad_l + pad_r;
+  auto output_w = input_w + pad_l + pad_r;
 
-  if (output_x < output_dim_x) {
+  if (output_x < output_w) {
     int64_t input_idx, output_idx;
     get_index_mapping(
-      input_dim_x, output_dim_x, output_x, pad_l, input_idx, output_idx);
+      input_w, output_w, output_x, pad_l, input_idx, output_idx);
 
     atomicAdd(&grad_input[input_idx], grad_output[output_idx]);
   }
@@ -78,56 +78,51 @@ void reflection_pad1d_out_template(
   AT_CHECK(canUse32BitIndexMath(input_),
     "input tensor must fit into 32-bit index math");
 
-  int64_t plane_dim = 0;
-  int64_t dimw = 1;
-  int64_t num_batch = 1;
+  int64_t dim_plane = 0;
+  int64_t dim_w = 1;
+  int64_t nbatch = 1;
 
   AT_CHECK(input_.numel() > 0 &&
     (input_.ndimension() == 2 || input_.ndimension() == 3), "non-empty 2D "
     "or 3D (batch mode) tensor expected for input, but got: ", input_);
 
   if (input_.ndimension() == 3) {
-    num_batch = input_.size(0);
-    plane_dim++;
-    dimw++;
+    nbatch = input_.size(0);
+    dim_plane++;
+    dim_w++;
   }
-
-  int64_t num_planes = input_.size(plane_dim);
-  int64_t input_w = input_.size(dimw);
 
   int64_t pad_l = padding[0];
   int64_t pad_r = padding[1];
 
+  int64_t nplane = input_.size(dim_plane);
+  int64_t input_w = input_.size(dim_w);
+  int64_t output_w  = input_w + pad_l + pad_r;
+
   AT_CHECK(pad_l < input_w && pad_r < input_w, "Padding size should be less "
     "than the corresponding input dimension, but got: padding (",  pad_l, ", ",
-    pad_r, ") at dimension ", dimw, " of input ", input_);
-
-  int64_t output_w  = input_w + pad_l + pad_r;
+    pad_r, ") at dimension ", dim_w, " of input ", input_);
 
   AT_CHECK(output_w >= 1,
     "input (W: ", input_w, ")is too small. Calculated output W: ", output_w);
 
   if (input_.ndimension() == 2) {
-    output.resize_({num_planes, output_w});
+    output.resize_({nplane, output_w});
   } else {
-    output.resize_({num_batch, num_planes, output_w});
+    output.resize_({nbatch, nplane, output_w});
   }
 
-  int64_t output_plane_size = output.size(2);
-  dim3 block_size(output_plane_size > 256 ? 256 : output_plane_size);
-  dim3 grid_size(
-    (int) ::ceil(output_plane_size / 256.0), output.size(1), output.size(0));
+  dim3 block_size(output_w > 256 ? 256 : output_w);
+  dim3 grid_size((int) ::ceil(output_w / 256.0), nplane, nbatch);
 
   Tensor input = input_.contiguous();
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
     input.type(), "reflection_pad1d_out_template", [&] {
-      scalar_t * input_data = input.data<scalar_t>();
-      scalar_t * output_data = output.data<scalar_t>();
-
       reflection_pad1d_out_kernel<<<
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
-          input_data, output_data, input.size(2), pad_l, pad_r);
+          input.data<scalar_t>(), output.data<scalar_t>(),
+          input_w, pad_l, pad_r);
     }
   );
 
@@ -144,41 +139,38 @@ void reflection_pad1d_backward_out_template(
   AT_CHECK(canUse32BitIndexMath(grad_output_),
     "input tensor must fit into 32-bit index math");
 
-  int64_t plane_dim = 0;
-  int64_t dimw = 1;
+  int64_t dim_plane = 0;
+  int64_t dim_w = 1;
+  int64_t nbatch = 1;
 
   if (input.ndimension() == 3) {
-    plane_dim++;
-    dimw++;
+    nbatch = input.size(0);
+    dim_plane++;
+    dim_w++;
   }
 
   int64_t pad_l = padding[0];
   int64_t pad_r = padding[1];
-  int64_t iwidth = input.size(dimw);
-  int64_t owidth  = iwidth + pad_l + pad_r;
+
+  int64_t nplane = input.size(dim_plane);
+  int64_t input_w = input.size(dim_w);
+  int64_t output_w  = input_w + pad_l + pad_r;
 
   Tensor grad_output = grad_output_.contiguous();
 
-  AT_CHECK(owidth == grad_output.size(dimw),
-    "gradOutput width unexpected. Expected: ", owidth, ", Got: ",
-    grad_output.size(dimw));
+  AT_CHECK(output_w == grad_output.size(dim_w),
+    "gradOutput width unexpected. Expected: ", output_w, ", Got: ",
+    grad_output.size(dim_w));
 
-  int64_t grad_output_plane_size = grad_output.size(2);
-  dim3 block_size(
-    grad_output_plane_size > 256 ? 256 : grad_output_plane_size);
-  dim3 grid_size(
-    (int) ::ceil(grad_output_plane_size / 256.0),
-    grad_output.size(1),
-    grad_output.size(0));
+  dim3 block_size(output_w > 256 ? 256 : output_w);
+  dim3 grid_size((int) ::ceil(output_w / 256.0), nplane, nbatch);
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
     input.type(), "reflection_pad1d_backward_out_template", [&] {
-      scalar_t * grad_input_data = grad_input.data<scalar_t>();
-      scalar_t * grad_output_data = grad_output.data<scalar_t>();
-
       reflection_pad1d_backward_out_kernel<<<
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
-          grad_input_data, grad_output_data, grad_input.size(2), pad_l, pad_r);
+          grad_input.data<scalar_t>(), grad_output.data<scalar_t>(),
+          input_w, pad_l, pad_r);
     }
   );
 
