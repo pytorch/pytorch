@@ -128,20 +128,20 @@ void reflection_pad2d_out_template(
 
   AT_CHECK(pad_l < input_w && pad_r < input_w,
     "Padding size should be less than the corresponding input dimension, but "
-    "got: padding (", pad_l, ", ", pad_r, ") at dimension ", dim_w, " of input ",
-    input_.sizes());
+    "got: padding (", pad_l, ", ", pad_r, ") at dimension ", dim_w,
+    " of input ", input_.sizes());
 
   AT_CHECK(pad_t < input_h && pad_b < input_h,
     "Padding size should be less than the corresponding input dimension, but "
-    "got: padding (", pad_t, ", ", pad_b, ") at dimension ", dim_h, " of input ",
-    input_.sizes());
+    "got: padding (", pad_t, ", ", pad_b, ") at dimension ", dim_h,
+    " of input ", input_.sizes());
 
   int output_h = input_h + pad_t + pad_b;
   int output_w  = input_w + pad_l + pad_r;
 
   AT_CHECK(output_w >= 1 || output_h >= 1,
-    "input (H: ", input_h, ", W: ", input_w, ")is too small.  Calculated output "
-    "H: ", output_h, " W: ", output_w);
+    "input (H: ", input_h, ", W: ", input_w, ")is too small.  Calculated "
+    "output H: ", output_h, " W: ", output_w);
 
   if (input_.ndimension() == 3) {
     output.resize_({nplane, output_h, output_w});
@@ -201,8 +201,8 @@ void reflection_pad2d_backward_out_template(
   int output_h = input_h + pad_t + pad_b;
   int output_w  = input_w + pad_l + pad_r;
 
-  AT_CHECK(output_w == grad_output_.size(dim_w), "grad_output width unexpected. "
-    "Expected: ", output_w, ", Got: ", grad_output_.size(dim_w));
+  AT_CHECK(output_w == grad_output_.size(dim_w), "grad_output width "
+    "unexpected. Expected: ", output_w, ", Got: ", grad_output_.size(dim_w));
   AT_CHECK(output_h == grad_output_.size(dim_h), "grad_output height "
     "unexpected. Expected: ", output_h, ", Got: ", grad_output_.size(dim_h));
 
