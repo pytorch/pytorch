@@ -6,7 +6,10 @@
 
 #include <dlfcn.h>
 
-namespace torch { namespace jit { namespace fuser { namespace cpu {
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace cpu {
 
 static void* checkDL(void* x) {
   if (!x) {
@@ -30,11 +33,12 @@ struct DynamicLibrary {
   }
 
   ~DynamicLibrary() {
-    if (!handle) return;
+    if (!handle)
+      return;
     dlclose(handle);
   }
 
-private:
+ private:
   void* handle = nullptr;
 };
 
