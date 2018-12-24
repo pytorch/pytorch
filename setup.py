@@ -962,6 +962,7 @@ if __name__ == '__main__':
                 'lib/include/torch/csrc/*.h',
                 'lib/include/torch/csrc/api/include/torch/*.h',
                 'lib/include/torch/csrc/api/include/torch/data/*.h',
+                'lib/include/torch/csrc/api/include/torch/data/dataloader/*.h',
                 'lib/include/torch/csrc/api/include/torch/data/datasets/*.h',
                 'lib/include/torch/csrc/api/include/torch/data/detail/*.h',
                 'lib/include/torch/csrc/api/include/torch/data/samplers/*.h',

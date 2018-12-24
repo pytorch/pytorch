@@ -208,9 +208,6 @@
 #include <THNN/generic/SpatialReplicationPadding.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/TemporalReplicationPadding.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/VolumetricReplicationPadding.c>
 #include <TH/THGenerateFloatTypes.h>
 
