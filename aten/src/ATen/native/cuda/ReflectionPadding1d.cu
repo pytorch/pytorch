@@ -82,14 +82,8 @@ void reflection_pad1d_out_template(
   int64_t dimw = 1;
   int64_t num_batch = 1;
 
-  for (auto i = 0; i < input_.ndimension(); ++i) {
-    AT_CHECK(input_.size(i) > 0,
-      "reflection_pad1d(): expected input to have non-empty temporal "
-      "dimensions, but input has sizes ", input_.sizes(), "with dimension ", i,
-      " being empty");
-  }
-
-  AT_CHECK(input_.ndimension() == 2 || input_.ndimension() == 3, "non-empty 2D "
+  AT_CHECK(input_.numel() > 0 &&
+    (input_.ndimension() == 2 || input_.ndimension() == 3), "non-empty 2D "
     "or 3D (batch mode) tensor expected for input, but got: ", input_);
 
   if (input_.ndimension() == 3) {
