@@ -308,7 +308,6 @@ def _generate_function_classes(scope_dict):
         'TemporalReplicationPadding': 'ReplicationPad1d',
         'SpatialDilatedConvolution': 'DilatedConv2d',
         'SpatialMaxUnpooling': 'MaxUnpool2d',
-        'SpatialReflectionPadding': 'ReflectionPad2d',
         'SpatialReplicationPadding': 'ReplicationPad2d',
         'VolumetricReplicationPadding': 'ReplicationPad3d',
         'VolumetricMaxUnpooling': 'MaxUnpool3d',

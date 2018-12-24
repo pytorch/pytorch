@@ -202,9 +202,6 @@
 #include <THNN/generic/VolumetricMaxUnpooling.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/SpatialReflectionPadding.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/SpatialReplicationPadding.c>
 #include <TH/THGenerateFloatTypes.h>
 
