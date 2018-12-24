@@ -8686,25 +8686,46 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             w.resize((10, 10))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    def test_toNumpy(self):
+    def test_to_numpy(self):
+        def get_castable_tensor(shape, tp):
+            dtype = tp.dtype
+            if dtype.is_floating_point:
+                dtype_info = torch.finfo(dtype)
+                # can't directly use min and max, because for double, max - min
+                # is greater than double range and sampling always gives inf.
+                low = max(dtype_info.min, -1e10)
+                high = min(dtype_info.max, 1e10)
+                t = torch.empty(shape, dtype=torch.float64).uniform_(low, high)
+            else:
+                # can't directly use min and max, because for int64_t, max - min
+                # is greater than int64_t range and triggers UB.
+                dtype_info = torch.iinfo(dtype)
+                low = max(dtype_info.min, int(-1e10))
+                high = min(dtype_info.max, int(1e10))
+                dtype_info = torch.iinfo(dtype)
+                t = torch.empty(shape, dtype=torch.int64).random_(low, high)
+            return t.to(dtype)
+
         types = [
-            'torch.ByteTensor',
-            'torch.IntTensor',
-            'torch.HalfTensor',
-            'torch.FloatTensor',
-            'torch.DoubleTensor',
-            'torch.LongTensor',
+            torch.ByteTensor,
+            torch.CharTensor,
+            torch.ShortTensor,
+            torch.IntTensor,
+            torch.HalfTensor,
+            torch.FloatTensor,
+            torch.DoubleTensor,
+            torch.LongTensor,
         ]
         for tp in types:
             # 1D
             sz = 10
-            x = torch.randn(sz).mul(255).type(tp)
+            x = get_castable_tensor(sz, tp)
             y = x.numpy()
             for i in range(sz):
                 self.assertEqual(x[i], y[i])
 
             # 1D > 0 storage offset
-            xm = torch.randn(sz * 2).mul(255).type(tp)
+            xm = get_castable_tensor(sz * 2, tp)
             x = xm.narrow(0, sz - 1, sz)
             self.assertTrue(x.storage_offset() > 0)
             y = x.numpy()
@@ -8724,13 +8745,13 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             # contiguous 2D
             sz1 = 3
             sz2 = 5
-            x = torch.randn(sz1, sz2).mul(255).type(tp)
+            x = get_castable_tensor((sz1, sz2), tp)
             y = x.numpy()
             check2d(x, y)
             self.assertTrue(y.flags['C_CONTIGUOUS'])
 
             # with storage offset
-            xm = torch.randn(sz1 * 2, sz2).mul(255).type(tp)
+            xm = get_castable_tensor((sz1 * 2, sz2), tp)
             x = xm.narrow(0, sz1 - 1, sz1)
             y = x.numpy()
             self.assertTrue(x.storage_offset() > 0)
@@ -8738,28 +8759,28 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertTrue(y.flags['C_CONTIGUOUS'])
 
             # non-contiguous 2D
-            x = torch.randn(sz2, sz1).mul(255).type(tp).t()
+            x = get_castable_tensor((sz2, sz1), tp).t()
             y = x.numpy()
             check2d(x, y)
             self.assertFalse(y.flags['C_CONTIGUOUS'])
 
             # with storage offset
-            xm = torch.randn(sz2 * 2, sz1).mul(255).type(tp)
+            xm = get_castable_tensor((sz2 * 2, sz1), tp)
             x = xm.narrow(0, sz2 - 1, sz2).t()
             y = x.numpy()
             self.assertTrue(x.storage_offset() > 0)
             check2d(x, y)
 
             # non-contiguous 2D with holes
-            xm = torch.randn(sz2 * 2, sz1 * 2).mul(255).type(tp)
+            xm = get_castable_tensor((sz2 * 2, sz1 * 2), tp)
             x = xm.narrow(0, sz2 - 1, sz2).narrow(1, sz1 - 1, sz1).t()
             y = x.numpy()
             self.assertTrue(x.storage_offset() > 0)
             check2d(x, y)
 
-            if tp != 'torch.HalfTensor':
+            if tp != torch.HalfTensor:
                 # check writeable
-                x = torch.randn(3, 4).mul(255).type(tp)
+                x = get_castable_tensor((3, 4), tp)
                 y = x.numpy()
                 self.assertTrue(y.flags.writeable)
                 y[0][1] = 3
