@@ -22,7 +22,7 @@ import re
 # (recursively) will be checked.
 CLANG_FORMAT_WHITELIST = ["torch/csrc/jit/"]
 
-CPP_FILE_REGEX = re.compile(".*\.(h|cpp|cc|c|hpp)$")
+CPP_FILE_REGEX = re.compile(".*\\.(h|cpp|cc|c|hpp)$")
 
 
 def parse_args():
@@ -43,6 +43,12 @@ def parse_args():
             "If true, apply whatever changes clang-format creates. "
             "Otherwise, just print the changes and exit"
         ),
+    )
+    parser.add_argument(
+        "--check-all",
+        action="store_true",
+        default=False,
+        help="If true, check all whitelisted files instead of just working copy changes",
     )
     parser.add_argument("--verbose", "-v", action="store_true", default=False)
     return parser.parse_args()
@@ -100,10 +106,13 @@ def get_diffs(files):
 def main():
     args = parse_args()
 
-    changed_files = get_changed_files(args.diff)
     whitelisted_files = get_whitelisted_files()
 
-    files_to_check = changed_files & whitelisted_files
+    if args.check_all:
+        files_to_check = whitelisted_files
+    else:
+        changed_files = get_changed_files(args.diff)
+        files_to_check = changed_files & whitelisted_files
 
     if args.verbose:
         print("Running clang-format on whitelisted files: ")
