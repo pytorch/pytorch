@@ -465,7 +465,8 @@ class SGDR(_LRScheduler):
         self.T_cur = last_epoch
 
     def get_lr(self):
-        return [self.eta_min + (base_lr - self.eta_min) * (1 + math.cos(math.pi * self.T_cur / self.T)) / 2 for base_lr in self.base_lrs]
+        return [self.eta_min + (base_lr - self.eta_min) * (1 + math.cos(math.pi * self.T_cur / self.T)) / 2
+                for base_lr in self.base_lrs]
 
     def step(self, epoch=None):
         """Step could be called after every update, i.e. if one epoeh has 10 iterations(num_train / batch_size),
