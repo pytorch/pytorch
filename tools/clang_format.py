@@ -20,7 +20,7 @@ import re
 
 # Whitelist of directories to check. All files that in that directory
 # (recursively) will be checked.
-CLANG_FORMAT_WHITELIST = ["torch/csrc/jit/"]
+CLANG_FORMAT_WHITELIST = ["torch/csrc/jit/", "test/cpp/jit/"]
 
 CPP_FILE_REGEX = re.compile(".*\\.(h|cpp|cc|c|hpp)$")
 
