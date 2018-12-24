@@ -499,15 +499,6 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
 // - S1.size(d) == S2.size(d) or
 // - S1.size(d) > S2.size(d) and S2.size(d) == 1
 // --------------------------------------------------------------------
-template <typename scalar_t>
-__device__ __forceinline__ void sparse_mul_op(scalar_t r, scalar_t a, scalar_t b) {
-  r = a * b;
-}
-
-template <typename scalar_t>
-__device__ __forceinline__ void sparse_div_op(scalar_t r, scalar_t a, scalar_t b) {
-  r = a / b;
-}
 
 template <typename scalar_t>
 __global__ void check_has_match_kernel_cuda(
@@ -530,7 +521,7 @@ __global__ void check_has_match_kernel_cuda(
   }
 }
 
-template <typename scalar_t, typename func_t>
+template <typename scalar_t>
 __global__ void _sparse_mul_div_common_kernel_cuda(
   int64_t t_nnz,
   const TensorInfo<int64_t, int64_t> t_indices_ti,
@@ -540,7 +531,7 @@ __global__ void _sparse_mul_div_common_kernel_cuda(
   const TensorInfo<scalar_t, int64_t> t_values_ti,
   TensorInfo<scalar_t, int64_t> new_values_ti,
   TensorInfo<int64_t, int64_t> new_indices_ti,
-  const func_t& op
+  SparseBinaryOpType op_type
 ) {
   const int64_t i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= t_nnz) return;
@@ -562,7 +553,12 @@ __global__ void _sparse_mul_div_common_kernel_cuda(
 
   // perform operations
   for (int64_t t_i = t_start, src_i = src_start, out_i = out_start; t_i < t_end; t_i++, src_i++, out_i++) {
-    op(new_values_ti.data[out_i], t_values_ti.data[t_i], src_values_ti.data[src_i]);
+    if (op_type == SparseBinaryOpType::MUL) {
+      new_values_ti.data[out_i] = t_values_ti.data[t_i] * src_values_ti.data[src_i];
+    }
+    else if (op_type == SparseBinaryOpType::DIV) {
+      new_values_ti.data[out_i] = t_values_ti.data[t_i] / src_values_ti.data[src_i];
+    }
   }
 
   // copy indices
@@ -582,6 +578,7 @@ SparseTensor _sparse_mul_div_common_cuda(const SparseTensor& t_, const SparseTen
   AT_CHECK(src_.is_cuda(), "expected 'src' to be CUDA, but got CPU");
   // TODO: handle type promotion
   AT_CHECK(t_.type() == src_.type(), "input SparseTensor 't' and 'src' must share the same type, but got t.type = ", t_.type(), " and src.type = ", src_.type());
+  AT_CHECK(op_type == SparseBinaryOpType::MUL || op_type == SparseBinaryOpType::DIV, "expected op_type to be MUL or DIV, but found unknown type");
 
   if (op_type == SparseBinaryOpType::MUL) {
     if (t_._nnz() == 0 ) return t_;
@@ -706,35 +703,17 @@ SparseTensor _sparse_mul_div_common_cuda(const SparseTensor& t_, const SparseTen
     auto new_values_ti = getTensorInfo<scalar_t, int64_t>(new_values);
     auto new_indices_ti = getTensorInfo<int64_t, int64_t>(new_indices);
 
-    if (op_type == SparseBinaryOpType::MUL) {
-      _sparse_mul_div_common_kernel_cuda<scalar_t><<<grid, block, 0, stream>>>(
-        t_nnz,
-        t_indices_ti,
-        t_indices_pos_ti,
-        has_match_ti,
-        src_values_ti,
-        t_values_ti,
-        new_values_ti,
-        new_indices_ti,
-        sparse_mul_op<scalar_t>
-      );
-    }
-    else if (op_type == SparseBinaryOpType::DIV) {
-      _sparse_mul_div_common_kernel_cuda<scalar_t><<<grid, block, 0, stream>>>(
-        t_nnz,
-        t_indices_ti,
-        t_indices_pos_ti,
-        has_match_ti,
-        src_values_ti,
-        t_values_ti,
-        new_values_ti,
-        new_indices_ti,
-        sparse_div_op<scalar_t>
-      );
-    }
-    else {
-      AT_ERROR("expected op_type to be MUL or DIV, but found unknown type");
-    }
+    _sparse_mul_div_common_kernel_cuda<scalar_t><<<grid, block, 0, stream>>>(
+      t_nnz,
+      t_indices_ti,
+      t_indices_pos_ti,
+      has_match_ti,
+      src_values_ti,
+      t_values_ti,
+      new_values_ti,
+      new_indices_ti,
+      op_type
+    );
   });
 
   SparseTensor r = at::_sparse_coo_tensor_with_dims_and_tensors(
