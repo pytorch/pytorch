@@ -10,9 +10,9 @@ namespace jit {
  * Alias analysis pass.
  *
  * This pass produces an AliasDb that contains aliasing and mutation
- * information about the graph. Callers (right now moveAfterTopologicallyValid)
- * can use this information to determine whether mutations to the graph are
- * safe, in that they don't reorder/change nodes in a way that affects output.
+ * information about the graph. Users can use this information to determine
+ * whether mutations to the graph are safe, i.e. they don't reorder/change
+ * nodes in a way that affects output.
  *
  * Every value with a mutable type (Tensors, Lists, Tuples, etc.) will be
  * associated with one or more "alias sets". If two values share an alias set,
@@ -28,18 +28,18 @@ class AliasDb {
  public:
   explicit AliasDb(std::shared_ptr<Graph> graph);
 
-  // Does `n` use or write to any wildcard aliases?
-  bool hasWildcard(const Node* n) const;
-
-  const std::unordered_set<const Node*>& getWildcardNodes() const {
-    return wildcardNodes_;
-  }
-
   // Does `n` write to any alias sets?
   bool hasWrites(Node* n) const;
 
-  // Does `n` write to a value that may alias one of the graph inputs?
-  bool writesToInputAlias(Node* n) const;
+  // There are limitations to what effects the alias analysis can track. Two
+  // kinds of nodes may have untracked effects:
+  // 1. Nodes that write to a value that may alias the graph inputs (since
+  //    the inputs can be used outside the graph).
+  // 2. Nodes that write to something in the wildcard set.
+  //
+  // These nodes are considered not safe to eliminate or mutate under any
+  // circumstances.
+  bool hasUntrackedEffects(Node* n) const;
 
   // Get all nodes that write to any alias set inputed/outputed by `n`
   std::unordered_set<Node*> getWriters(const Node* n) const;
@@ -50,15 +50,44 @@ class AliasDb {
   // Get all values that may alias to `v`.
   std::unordered_set<const Value*> getAliases(const Value* v) const;
 
-  // Do any nodes  write to an alias set inputed/outputed by `n`?
-  bool hasWriters(const Node* n) const {
-    return getWriters(n).size() != 0;
-  }
+  // Do any nodes write to an alias set inputed/outputed by `n`?
+  bool hasWriters(const Node* n) const;
+
+  // Same as hasWriters() but ignores writes after `n`.
+  bool hasWritersBefore(const Node* n) const;
+
+  // Move 'n' (already in the graph) after 'movePoint' in the topological order.
+  //
+  // Tries to preserve value dependencies, so other nodes might be moved. We
+  // make two gurantees about the postcondition of the node list:
+  //   - `n` is directly after `movePoint`.
+  //   - only nodes between `n` and `movePoint` have been moved.
+  //
+  // Returns `false` if it's impossible to move `n` after `MovePoint` without
+  // violating dependencies, otherwise executes the move and returns `true`
+  bool moveAfterTopologicallyValid(Node* n, Node* movePoint);
+  bool moveBeforeTopologicallyValid(Node* n, Node* movePoint);
+
+  bool couldMoveAfterTopologically(Node* n, Node* movePoint);
+  bool couldMoveBeforeTopologically(Node* n, Node* movePoint);
 
   // For debugging: print alias db state to stdout
   void dump() const;
 
  private:
+  // Helper for topologically-safe node moves.
+  class WorkingSet;
+  enum class MoveSide { BEFORE, AFTER };
+  bool tryMove(Node* movePoint, Node* toMove, MoveSide moveSide, bool dryRun);
+  void move(Node* movePoint, Node* toMove, MoveSide moveSide);
+  bool isBeforeOrAfter(const Node* n, MoveSide moveSide) const;
+
+  // Does `n` use or write to any wildcard aliases?
+  bool hasWildcard(const Node* n) const;
+
+  // Does `n` write to a value that may alias one of the graph inputs?
+  bool writesToInputAlias(Node* n) const;
+
   void analyze(const std::shared_ptr<Graph>& graph);
   void analyze(Block* block);
   void analyze(Node* node);
@@ -73,6 +102,7 @@ class AliasDb {
 
   Symbol getFreshAlias(bool isGraphInput = false);
   void addAlias(const Value* value, AliasInfo alias);
+
   void addAlias(const Value* value, Symbol alias);
   void addAlias(const Value* value, const Value* from);
   void mapAliases(at::ArrayRef<Value*> to, at::ArrayRef<Value*> from);
