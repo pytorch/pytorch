@@ -18,14 +18,6 @@ import difflib
 import sys
 
 
-# for python2 compatability
-PY2 = sys.version_info[0] == 2
-if PY2:
-
-    def input(foo):
-        return raw_input(foo)
-
-
 # Whitelist of files to check. Takes a glob syntax. Does not support
 # recursive globs ("**") because I am lazy and don't want to make that
 # work with Python 2.
@@ -43,10 +35,13 @@ def parse_args():
         help="Git revision to diff against to get changes",
     )
     parser.add_argument(
-        "--non-interactive",
+        "--accept-changes",
         action="store_true",
         default=False,
-        help="Don't prompt the user to apply clang-format changes. If there are any changes, just exit non-zero",
+        help=(
+            "If true, apply whatever changes clang-format creates. "
+            "Otherwise, just print the changes and exit"
+        ),
     )
     parser.add_argument("--verbose", "-v", action="store_true", default=False)
     return parser.parse_args()
@@ -115,31 +110,21 @@ def main():
 
     name_to_diffs = get_diffs(files_to_check)
 
-    if len(name_to_diffs) != 0:
+    if len(name_to_diffs) == 0:
+        return
+
+    if args.accept_changes:
+        # run clang-format on the necessary files
+        args = ["clang-format", "-i"]
+        args.extend(name_to_diffs.keys())
+        subprocess.check_output(args)
+    else:
         print("ERROR: Running clang-format created changes: ")
         for name, diff in name_to_diffs.items():
             print("In ", name)
             for line in diff:
                 print(line)
             print("\n")
-
-        if args.non_interactive:
-            exit(1)
-        else:
-            choice = None
-            # Loop until we choose y or n
-            while choice is None:
-                choice = input("Accept these changes? [Y/n] ").lower()
-                if choice != "" and choice[0] != "y" and choice[0] != "n":
-                    choice = None
-
-            if choice == "" or choice[0] == "y":
-                # run clang-format on the necessary files
-                args = ["clang-format", "-i"]
-                args.extend(name_to_diffs.keys())
-                subprocess.check_output(args)
-            else:
-                exit(1)
 
 
 if __name__ == "__main__":
