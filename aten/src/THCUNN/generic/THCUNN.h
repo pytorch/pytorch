@@ -754,24 +754,6 @@ THC_API void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
                   int dilationW, int dilationH,
                   bool ceil_mode);
 
-THC_API void THNN_(SpatialFractionalMaxPooling_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  int outputW, int outputH,
-                  int poolSizeW, int poolSizeH,
-                  THCIndexTensor *indices,
-                  THCTensor *randomSamples);
-
-THC_API void THNN_(SpatialFractionalMaxPooling_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  int outputW, int outputH,
-                  int poolSizeW, int poolSizeH,
-                  THCIndexTensor *indices);
-
 THC_API void THNN_(SpatialFullConvolution_updateOutput)(
                   THCState *state,
                   THCTensor *input,
