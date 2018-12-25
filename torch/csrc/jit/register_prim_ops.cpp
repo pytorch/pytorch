@@ -260,14 +260,6 @@ RegisterOperators reg({
         };
       }),
     Operator(
-        "prim::NoneGenerator() -> Generator",
-        [](const Node* node) {
-          return [](Stack& stack) {
-            stack.emplace_back();
-            return 0;
-          };
-        }),
-    Operator(
         prim::Print,
         [](const Node* node) {
           size_t num_inputs = node->inputs().size();

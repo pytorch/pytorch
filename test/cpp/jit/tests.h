@@ -52,6 +52,7 @@
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/utils/subgraph_utils.h"
 #include "torch/csrc/jit/symbolic_variable.h"
+#include "torch/csrc/jit/symbolic_script.h"
 #include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/utils/hash.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"

@@ -434,10 +434,6 @@ class ShapePropagator {
         }
         return;
       }
-      case prim::PythonOp:
-      case prim::Print:
-      case prim::RaiseException:
-      case aten::warn:
       case prim::Undefined: {
         setUnshapedType(node);
         return;
@@ -445,6 +441,11 @@ class ShapePropagator {
       default:
         break; // fall-through
     }
+
+    if (node->hasSideEffects()) {
+      return;
+    }
+
     if (node->matches("aten::cat(Tensor[] tensors, int dim) -> Tensor")
 	|| node->kind() == prim::FusedConcat) {
       return PropagateCatShape(node);
@@ -545,13 +546,13 @@ class ShapePropagator {
             "aten::ceil(Tensor self) -> Tensor",
             "aten::clone(Tensor self) -> Tensor",
             "aten::contiguous(Tensor self) -> Tensor",
-            "aten::bernoulli(Tensor self, *, Generator generator) -> Tensor",
+            "aten::bernoulli(Tensor self, *, Generator? generator) -> Tensor",
             "aten::celu(Tensor self, Scalar alpha) -> Tensor",
             "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor",
             "aten::clamp_max(Tensor self, Scalar max) -> Tensor",
             "aten::clamp_min(Tensor self, Scalar min) -> Tensor",
             "aten::alpha_dropout(Tensor input, float p, bool train) -> Tensor",
-            "aten::bernoulli(Tensor self, float p, *, Generator generator) -> Tensor",
+            "aten::bernoulli(Tensor self, float p, *, Generator? generator) -> Tensor",
             "aten::cos(Tensor self) -> Tensor",
             "aten::cosh(Tensor self) -> Tensor",
             "aten::digamma(Tensor self) -> Tensor",
@@ -580,15 +581,15 @@ class ShapePropagator {
             "aten::leaky_relu(Tensor self, Scalar negative_slope) -> Tensor",
             "aten::lgamma(Tensor self) -> Tensor",
             "aten::mvlgamma(Tensor self, int p) -> Tensor",
-            "aten::normal(float mean, Tensor std, *, Generator generator) -> Tensor",
-            "aten::normal(Tensor mean, float std, *, Generator generator) -> Tensor",
+            "aten::normal(float mean, Tensor std, *, Generator? generator) -> Tensor",
+            "aten::normal(Tensor mean, float std, *, Generator? generator) -> Tensor",
             "aten::permute(Tensor self, int[] dims) -> Tensor",
             "aten::pin_memory(Tensor self) -> Tensor",
             "aten::pinverse(Tensor self, float rcond) -> Tensor",
             "aten::reciprocal(Tensor self) -> Tensor",
             "aten::relu(Tensor self) -> Tensor",
             "aten::round(Tensor self) -> Tensor",
-            "aten::rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator generator) -> Tensor",
+            "aten::rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
             "aten::rsqrt(Tensor self) -> Tensor",
             "aten::selu(Tensor self) -> Tensor",
             "aten::sigmoid(Tensor self) -> Tensor",
@@ -722,7 +723,7 @@ class ShapePropagator {
     //   tensor outputs : 1
     static const register_formula_for binary_ops_strict_match{
         {
-            "aten::normal(Tensor mean, Tensor std, *, Generator generator) -> Tensor",
+            "aten::normal(Tensor mean, Tensor std, *, Generator? generator) -> Tensor",
             "aten::mm(Tensor self, Tensor mat2) -> Tensor",
             "aten::bmm(Tensor self, Tensor mat2) -> Tensor",
         },
@@ -901,7 +902,7 @@ class ShapePropagator {
             "aten::argmin(Tensor self, int dim, bool keepdim) -> Tensor",
             "aten::max_values(Tensor self, int dim, bool keepdim) -> Tensor",
             "aten::min_values(Tensor self, int dim, bool keepdim) -> Tensor",
-            "aten::norm(Tensor self, Scalar p, int dim, bool keepdim) -> Tensor",
+            "aten::norm(Tensor self, Scalar? p, int dim, bool keepdim) -> Tensor",
             "aten::var(Tensor self, int dim, bool unbiased, bool keepdim) -> Tensor",
             "aten::logsumexp(Tensor self, int dim, bool keepdim) -> Tensor",
             "aten::all(Tensor self, int dim, bool keepdim) -> Tensor",
@@ -1261,9 +1262,7 @@ class ShapePropagator {
           node->matches(
               "aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor") ||
           node->matches(
-              "aten::as_strided(Tensor self, int[] size, int[] stride) -> Tensor") ||
-          node->matches(
-              "aten::as_strided(Tensor self, int[] size, int[] stride, int storage_offset) -> Tensor")) {
+              "aten::as_strided(Tensor self, int[] size, int[] stride, int? storage_offset) -> Tensor")) {
         return reshape_prop(node, attr::size, tensor_types);
       } else if (node->matches(
                      "aten::reshape(Tensor self, int[] shape) -> Tensor")) {

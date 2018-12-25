@@ -353,6 +353,7 @@ public:
   }
 
   TORCH_API bool isNondeterministic() const;
+  TORCH_API bool hasSideEffects () const;
 
   // Graphs
 
@@ -857,7 +858,6 @@ public:
 
   TORCH_API Node* createNone(TypePtr typ); // value of None with type Optional[typ]
   TORCH_API Node* createUndefined();
-  TORCH_API Node* createNoneGenerator();
   TORCH_API Node* createFusionGroup();
   TORCH_API Node* createDifferentiableSubgraph();
   TORCH_API Node* createTuple(at::ArrayRef<Value*> values);
@@ -1102,5 +1102,11 @@ inline Node* Graph::createPythonOp(
 }
 
 TORCH_API void LintGraph(std::shared_ptr<Graph>& graph);
+
+TORCH_API at::ArrayRef<Value*> createTupleUnpack(Value* v);
+// unpack_outputs - if true, and the callee returns a single tuple value, then insert a tuple unpack node
+//                  and return the resulting values
+TORCH_API std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs, bool unpack_outputs=false);
+
 
 }} // namespace torch::jit

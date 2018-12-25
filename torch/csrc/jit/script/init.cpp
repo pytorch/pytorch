@@ -5,6 +5,7 @@
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/jit/import.h>
 #include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/script/schema_matching.h>
 
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/jit/pybind_utils.h>
@@ -124,11 +125,9 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     for(auto &i : matched_schema->inputs)
       new_node->addInput(i);
 
-    std::vector<Value*> outputs;
-    for(auto & ret_arg : matched_schema->return_types) {
-      outputs.push_back(new_node->addOutput()->setType(ret_arg));
-    }
-    return std::make_shared<SimpleValue>(packOutputs(*m.graph(), outputs));
+    JIT_ASSERT(matched_schema->return_types.size() == 1);
+    Value* output = new_node->addOutput()->setType(matched_schema->return_types.at(0));
+    return std::make_shared<SimpleValue>(output);
   }
 
   std::string kind() const override {

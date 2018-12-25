@@ -258,6 +258,14 @@ class Tensor(torch._C._TensorBase):
                       ":attr:`upper` argument in torch.cholesky defaults to ``False``.", stacklevel=2)
         return super(Tensor, self).cholesky(upper=upper)
 
+    def potrs(self, u, upper=True):
+        r"""See :func:`torch.cholesky_solve`"""
+        warnings.warn("torch.potrs is deprecated in favour of torch.cholesky_solve and "
+                      "will be removed in the next release. Please use torch.cholesky_solve instead "
+                      "and note that the :attr:`upper` argument in torch.cholesky_solve defaults "
+                      "to ``False``.", stacklevel=2)
+        return super(Tensor, self).cholesky_solve(u, upper=upper)
+
     def stft(self, n_fft, hop_length=None, win_length=None, window=None,
              center=True, pad_mode='reflect', normalized=False, onesided=True):
         r"""See :func:`torch.stft`
@@ -322,7 +330,7 @@ class Tensor(torch._C._TensorBase):
         """
         return self.clone().masked_fill_(mask, value)
 
-    def unique(self, sorted=False, return_inverse=False, dim=None):
+    def unique(self, sorted=True, return_inverse=False, dim=None):
         r"""Returns the unique scalar elements of the tensor as a 1-D tensor.
 
         See :func:`torch.unique`

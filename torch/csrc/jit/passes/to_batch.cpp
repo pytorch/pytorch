@@ -21,12 +21,7 @@ std::shared_ptr<Graph> ToBatch::getBatchOperator(const std::string& name, int64_
 }
 
 std::vector<Value*> inlineUnpackedCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs) {
-  auto outputs = script::inlineCallTo(g, callee, inputs);
-  if (callee.outputs().size() == 1 && callee.outputs().at(0)->type()->kind() == TupleType::Kind) {
-    auto tc = script::createTupleUnpack(outputs.at(0));
-    outputs = std::vector<Value*>(tc.begin(), tc.end());
-  }
-  return outputs;
+  return inlineCallTo(g, callee, inputs, /*unpack_outputs=*/true);
 }
 
 // replace aten operator node with BatchTensor operator graph
@@ -483,6 +478,7 @@ void ToBatch::toBatch(Block* block, Block* res_block) {
     else if(n->kind().is_prim()){
       switch(n->kind()){
         case prim::Constant:
+        case prim::None:
           visitConstant(n, block, res_block);
           break;
         case prim::NumToTensor:
@@ -527,7 +523,7 @@ std::shared_ptr<Graph> to_batch_graph(std::shared_ptr<Graph> graph) {
   // lower the tuple before the pass
   if (graph->outputs().at(0)->type()->kind() == TupleType::Kind) {
     graph = graph->copy();
-    auto outs = script::createTupleUnpack(graph->outputs().at(0));
+    auto outs = createTupleUnpack(graph->outputs().at(0));
     graph->eraseOutput(0);
     for(auto o : outs)
       graph->registerOutput(o);
