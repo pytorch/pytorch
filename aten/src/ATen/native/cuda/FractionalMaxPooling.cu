@@ -9,8 +9,6 @@
 #include "ATen/TensorUtils.h"
 #include "ATen/Utils.h"
 #include "c10/util/Exception.h"
-#include <THC/THCGeneral.h>
-// #include "THC/THCNumerics.cuh"
 
 #include <algorithm>
 #include <cfloat>
@@ -58,8 +56,6 @@ __device__ inline scalar_t* get_ref_by_coord(TensorInfo<scalar_t, index_t> tenso
   return tensor_info.data + offset;
 }
 
-// We template on poolSizeW to allow the innermost loop to be unrolled
-// template <int PoolSizeWStatic, typename scalar_t, typename Acctype>
 template <typename scalar_t>
 __global__ void fractional_max_pool2d_out_frame(
   TensorInfo<scalar_t, int> input,
@@ -73,7 +69,6 @@ __global__ void fractional_max_pool2d_out_frame(
 
   int poolSizeH = pool_size[0];
   int poolSizeW = pool_size[1];
-  // Output (h, w) point that this thread is responsible for
   int ourOutputPoint = threadIdx.x + blockIdx.x * blockDim.x;
   int plane = blockIdx.y;
   int batch = blockIdx.z;
@@ -86,11 +81,8 @@ __global__ void fractional_max_pool2d_out_frame(
     int outputH = ourOutputPoint / output.sizes[dim_output];
 
     int poolW = get_interval<scalar_t,
-                             accscalar_t//Acctype
-                             >(//ScalarConvert<scalar_t,
-                               //              Acctype
-                               //              >::to(samples[batch][plane][0]),
-                               static_cast<accscalar_t>(*(samples.data +
+                             accscalar_t
+                             >(static_cast<accscalar_t>(*(samples.data +
                                                       batch * samples.strides[0]
                                                       + plane * samples.strides[1])),
                                outputW,
@@ -98,11 +90,8 @@ __global__ void fractional_max_pool2d_out_frame(
                                output.sizes[dim_output],
                                poolSizeW);
     int poolH = get_interval<scalar_t,
-                             accscalar_t//Acctype
-                             >(//ScalarConvert<scalar_t,
-                               //              Acctype
-                               //              >::to(samples[batch][plane][1]),
-                               static_cast<accscalar_t>(*(samples.data +
+                             accscalar_t
+                             >(static_cast<accscalar_t>(*(samples.data +
                                   batch * samples.strides[0] +
                                   plane * samples.strides[1] + 1)),
                                outputH,
@@ -116,7 +105,6 @@ __global__ void fractional_max_pool2d_out_frame(
     for (int h = poolH; h < poolH + poolSizeH; ++h) {
       if (PoolSizeWStatic == -1) {
         for (int w = poolW; w < poolW + poolSizeW; ++w) {
-          // scalar_t val = input[batch][plane][h][w];
           scalar_t val = *get_ref_by_coord<scalar_t,
                                            int>(input, dim_output,
                                              batch, plane, h, w);
@@ -130,7 +118,6 @@ __global__ void fractional_max_pool2d_out_frame(
 #pragma unroll
         for (int i = 0; i < PoolSizeWStatic; ++i) {
           int w = i + poolW;
-          // scalar_t val = input[batch][plane][h][w];
           scalar_t val = *get_ref_by_coord<scalar_t,
                                            int>(input, dim_output,
                                              batch, plane, h, w);
@@ -146,15 +133,12 @@ __global__ void fractional_max_pool2d_out_frame(
     assert(maxVal != at::numeric_limits<scalar_t>::lowest());
     assert(maxIndex != -1);
 
-    // +1 for Lua index
     int idx_offset = outputW * output.strides[dim_output] +
                      outputH * output.strides[dim_output - 1] +
                      plane * output.strides[dim_output - 2] +
                      (dim_output == 3 ? 0 : batch * output.strides[0]);
     *(indices.data + idx_offset) = maxIndex;
     *(output.data + idx_offset) = maxVal;
-    // indices[batch][plane][outputH][outputW] = maxIndex;
-    // output[batch][plane][outputH][outputW] = maxVal;
   }
 }
 
@@ -176,7 +160,6 @@ __global__ void fractional_max_pool2d_backward_out_frame(
     int outputW = ourOutputPoint % gradOutput.sizes[dim_output];
     int outputH = ourOutputPoint / gradOutput.sizes[dim_output];
 
-    // int index = indices[batch][plane][outputH][outputW];
     int index = *get_ref_by_coord<int64_t,
                                   int>(indices, dim_output,
                                     batch, plane, outputH, outputW);
@@ -191,8 +174,6 @@ __global__ void fractional_max_pool2d_backward_out_frame(
               *get_ref_by_coord<scalar_t,
                                 int>(gradOutput, dim_output,
                                   batch, plane, inputH, inputW));
-    //atomicAdd(gradInput[batch][plane][inputH][inputW].data(),
-    //          gradOutput[batch][plane][outputH][outputW]);
   }
 }
 
@@ -248,12 +229,8 @@ void fractional_max_pool2d_out_cuda_template(
     output.resize_({numPlanes, outputH, outputW});
     /* indices will contain the locations for each output point */
     indices.resize_({numPlanes, outputH, outputW});
-//    devInput = getTensorInfo<scalar_t, int>(input).upcastOuter<4>();
-//    devOutput = getTensorInfo<scalar_t, int>(output).upcastOuter<4>();
-//    devIndices = getTensorInfo<int64_t, int>(indices).upcastOuter<4>();
   } else {
     output.resize_({numBatch, numPlanes, outputH, outputW});
-    /* indices will contain the locations for each output point */
     indices.resize_({numBatch, numPlanes, outputH, outputW});
   }
 
@@ -261,12 +238,11 @@ void fractional_max_pool2d_out_cuda_template(
   // grid handles overflow per each plane
   int outputPlaneSize = output.size(numInputDims - 1) *
     output.size(numInputDims);
-  dim3 grid((outputPlaneSize + 127) / 128, //THCCeilDiv(outputPlaneSize, 128),
+  dim3 grid((outputPlaneSize + 127) / 128,
             input.size(numInputDims - 2),
             numInputDims == 3 ? 1 : input.size(0));
   dim3 block(outputPlaneSize > 128 ? 128 : outputPlaneSize);
 
-//# define SFMP_UPDATE_OUTPUT(POOL_W)
   int POOL_W = (poolSizeW <= 7 && poolSizeW >= 2) ? poolSizeW : -1;
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(),
@@ -282,23 +258,6 @@ void fractional_max_pool2d_out_cuda_template(
           POOL_W);
         }
       );
-/*
-#define SFMP_UPDATE_OUTPUT_CASE(POOL_W)                 \
-  case POOL_W: SFMP_UPDATE_OUTPUT(POOL_W); break
-
-  switch (poolSizeW) {
-    SFMP_UPDATE_OUTPUT_CASE(2);
-    SFMP_UPDATE_OUTPUT_CASE(3);
-    SFMP_UPDATE_OUTPUT_CASE(4);
-    SFMP_UPDATE_OUTPUT_CASE(5);
-    SFMP_UPDATE_OUTPUT_CASE(6);
-    SFMP_UPDATE_OUTPUT_CASE(7);
-    default:
-      // dynamic pool width
-      SFMP_UPDATE_OUTPUT_CASE(-1);
-  }
-  THCudaCheck(cudaGetLastError());
-  */
 }
 
 void fractional_max_pool2d_backward_out_cuda_template(
@@ -312,15 +271,15 @@ void fractional_max_pool2d_backward_out_cuda_template(
   int dimh = 1;
   int dimw = 2;
 
-  int64_t numInputDims = input.ndimension();//THCTensor_(nDimensionLegacyNoScalars)(state, input);
+  int64_t numInputDims = input.ndimension();
   if (numInputDims == 4) {
     dimh++;
     dimw++;
   }
 
   /* sizes */
-  int64_t inputH = input.size(dimh);//THCTensor_(size)(state, input, dimh);
-  int64_t inputW = input.size(dimw);//THCTensor_(size)(state, input, dimw);
+  int64_t inputH = input.size(dimh);
+  int64_t inputW = input.size(dimw);
 
   int64_t outputH = output_size[0];
   int64_t outputW = output_size[1];
@@ -338,27 +297,13 @@ void fractional_max_pool2d_backward_out_cuda_template(
   int dim_output = gradOutput.ndimension();
 
   /* backprop */
-  /*
-  TensorInfo<scalar_t, int> devGradInput;
-  TensorInfo<scalar_t, int> devGradOutput;
-  TensorInfo<int64_t, int> devIndices;
-  if (numInputDims == 3) {
-    devGradInput = getTensorInfo<scalar_t, int>(gradInput).upcastOuter<4>();
-    devGradOutput = getTensorInfo<scalar_t, int>(gradOutput).upcastOuter<4>();
-    devIndices = getTensorInfo<int64_t, int>(indices).upcastOuter<4>();
-  } else {
-    devGradInput = getTensorInfo<scalar_t, int>(gradInput);
-    devGradOutput = getTensorInfo<scalar_t, int>(gradOutput);
-    devIndices = getTensorInfo<int64_t, int>(indices);
-  }*/
-
   // block is limited to 4 warps
   // grid handles overflow per each plane
   int outputPlaneSize = gradOutput.size(dim_output - 1) *
     gradOutput.size(dim_output);
-  dim3 grid((outputPlaneSize + 127) / 128, //THCCeilDiv(outputPlaneSize, 128),
-            gradInput.size(dim_output - 2), // devGradInput.sizes[1],
-            gradInput.size(dim_output - 3)); // devGradInput.sizes[0]);
+  dim3 grid((outputPlaneSize + 127) / 128,
+            gradInput.size(dim_output - 2),
+            gradInput.size(dim_output - 3));
   dim3 block(outputPlaneSize > 128 ? 128 : outputPlaneSize);
 
 AT_DISPATCH_FLOATING_TYPES_AND_HALF(gradOutput.type(),
@@ -371,8 +316,6 @@ AT_DISPATCH_FLOATING_TYPES_AND_HALF(gradOutput.type(),
         getTensorInfo<int64_t, int>(indices));
       }
     );
-
-//  THCudaCheck(cudaGetLastError());
 }
 
 }// namespace
