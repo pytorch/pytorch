@@ -54,6 +54,14 @@ static void prod_kernel_impl(TensorIterator& iter) {
   });
 }
 
+static void and_kernel_impl(TensorIterator& iter) {
+  binary_kernel_reduce_vec(
+    iter,
+    [=](uint8_t a, uint8_t b) -> uint8_t { return a && b; },
+    [=](Vec256<uint8_t> a, Vec256<uint8_t> b) {return a && b; },
+    /*identity=*/true);
+}
+
 static inline int64_t round_down(int64_t a, int64_t m) {
   return a - (a % m);
 }
@@ -230,5 +238,6 @@ REGISTER_DISPATCH(std_stub, &std_kernel_impl);
 REGISTER_DISPATCH(prod_stub, &prod_kernel_impl);
 REGISTER_DISPATCH(norm_kernel, &norm_kernel_impl);
 REGISTER_DISPATCH(mean_stub, &mean_kernel_impl);
+REGISTER_DISPATCH(and_stub, &and_kernel_impl);
 
 }}  // namespace at::native

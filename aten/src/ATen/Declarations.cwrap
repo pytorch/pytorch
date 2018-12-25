@@ -951,21 +951,6 @@
   name: _th_all
   types:
     - Byte
-  variants:
-    - function
-  backends:
-    - CPU
-    - CUDA
-  options:
-    - cname: logicalAndAll
-      return: real
-      arguments:
-        - THTensor* self
-]]
-[[
-  name: _th_all
-  types:
-    - Byte
   variants: function
   backends:
     - CPU

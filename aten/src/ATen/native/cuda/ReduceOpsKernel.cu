@@ -59,7 +59,7 @@ template <typename scalar_t, typename acc_t=scalar_t>
 void prod_kernel_impl(TensorIterator& iter) {
   gpu_reduce_kernel<scalar_t, scalar_t>(iter, func_wrapper<scalar_t> ([]GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
     return a * b;
-  }), 1);
+  }), true);
 }
 
 static void std_kernel_cuda(TensorIterator& iter, bool unbiased) {
@@ -72,6 +72,13 @@ template <typename scalar_t, typename acc_t=scalar_t, typename out_t=scalar_t>
 void mean_kernel_impl(TensorIterator& iter) {
   float factor = float(iter.num_output_elements()) / iter.numel();
   gpu_reduce_kernel<scalar_t, out_t>(iter, MeanOps<acc_t, float> {factor});
+}
+
+void and_kernel_impl(TensorIterator& iter) {
+  gpu_reduce_kernel<uint8_t, uint8_t>(
+    iter, func_wrapper<uint8_t> ([]GPU_LAMBDA(uint8_t a, uint8_t b) -> uint8_t {
+      return a && b;
+    }), 1);
 }
 
 #ifdef __HIPCC__
@@ -119,9 +126,14 @@ static void mean_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+static void and_kernel_cuda(TensorIterator& iter) {
+  and_kernel_impl(iter);
+}
+
 REGISTER_DISPATCH(std_stub, &std_kernel_cuda);
 REGISTER_DISPATCH(sum_stub, &sum_kernel_cuda);
 REGISTER_DISPATCH(prod_stub, &prod_kernel_cuda);
 REGISTER_DISPATCH(mean_stub, &mean_kernel_cuda);
+REGISTER_DISPATCH(and_stub, &and_kernel_cuda);
 
 }} // namespace at::native

@@ -138,6 +138,12 @@
 - name: alias(Tensor self)
   self: grad
 
+- name: all(Tensor self)
+  self: not_implemented("all")
+
+- name: all(Tensor self, int64_t dim, bool keepdim)
+  self: not_implemented("all")
+
 - name: as_strided(Tensor self, IntList size, IntList stride, int64_t? storage_offset)
   self: as_strided_backward(grad, TensorGeometry(self), size, stride, storage_offset)
 

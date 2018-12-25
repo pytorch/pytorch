@@ -126,7 +126,8 @@ struct CAFFE2_API TensorIterator {
   void foreach_reduced_elt(const loop_subiter_t& loop, bool parallelize=true);
 
   static std::unique_ptr<TensorIterator> binary_op(Tensor& out, const Tensor& a, const Tensor& b);
-  static std::unique_ptr<TensorIterator> reduce_op(Tensor& out, const Tensor& a);
+  static std::unique_ptr<TensorIterator> reduce_op(
+    Tensor& out, const Tensor& a);
 
   int ndim() const { return shape_.size(); }
   IntList shape() const { return shape_; }
