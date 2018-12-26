@@ -150,7 +150,7 @@ If you want to build on Windows, Visual Studio 2017 14.11 toolset and NVTX are a
 Especially, for CUDA 8 build on Windows, there will be an additional requirement for VS 2015 Update 3 and a patch for it.
 The details of the patch can be found out [here](https://support.microsoft.com/en-gb/help/4020481/fix-link-exe-crashes-with-a-fatal-lnk1000-error-when-you-use-wholearch).
 
-#### Install Optional Dependencies
+#### Install Dependencies
 
 Common
 ```
@@ -159,7 +159,7 @@ conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
 
 On Linux
 ```bash
-# Add LAPACK support for the GPU
+# Add LAPACK support for the GPU if needed
 conda install -c pytorch magma-cuda92 # or [magma-cuda80 | magma-cuda91] depending on your cuda version
 ```
 
