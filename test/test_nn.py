@@ -2323,7 +2323,7 @@ class TestNN(NNTestCase):
             "sparse": False
         }
         embeddingbag = nn.EmbeddingBag.from_pretrained(a, **opts)
-        
+
         input = torch.LongTensor([[0, 1]])
         output = embeddingbag(input)
         self.assertEqual(a.max(0, keepdim=True)[0], output)
