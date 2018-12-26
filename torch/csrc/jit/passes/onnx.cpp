@@ -11,12 +11,30 @@
 namespace torch {
 namespace jit {
 
+void removePrintOps(Block * block) {
+  for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end;
+       ++it) {
+    for (auto b: it->blocks()) {
+      removePrintOps(b);
+    }
+    if (it->kind() == prim::Print || it->kind() == aten::warn) {
+      it.destroyCurrent();
+    }
+  }
+}
+
+void removePrintOps(std::shared_ptr<Graph>& graph) {
+  removePrintOps(graph->block());
+  EliminateDeadCode(graph);
+}
+
 // Transform PythonOps into Nodes that match ONNX semantics.
 std::shared_ptr<Graph> ToONNX(
     std::shared_ptr<Graph>& graph,
     ::torch::onnx::OperatorExportTypes operator_export_type) {
   auto new_graph = std::make_shared<Graph>(graph->current_scope());
   std::unordered_map<Value*, Value*> env;
+  removePrintOps(graph);
   BlockToONNX(graph->block(), new_graph->block(), operator_export_type, env);
   return new_graph;
 }
