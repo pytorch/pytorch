@@ -6104,7 +6104,7 @@ a")
     def test_onnx_export_func_with_warnings(self):
         @torch.jit.script
         def func_with_warning(inp):
-            return torch.nn.functional.sigmoid(inp) # triggers a deprecation warning
+            return torch.nn.functional.sigmoid(inp)  # triggers a deprecation warning
 
         class WarningTest(torch.nn.Module):
             def __init__(self):
