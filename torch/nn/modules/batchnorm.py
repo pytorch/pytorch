@@ -1,6 +1,7 @@
 from __future__ import division
 
 import torch
+from ._functions import SyncBatchNorm as sync_batch_norm
 from .module import Module
 from torch.nn.parameter import Parameter
 from .. import functional as F
@@ -435,6 +436,6 @@ class SyncBatchNorm(_BatchNorm):
                 self.training or not self.track_running_stats,
                 exponential_average_factor, self.eps)
         else:
-            return self._backend.SyncBatchNorm.apply(
+            return sync_batch_norm.apply(
                 input, self.weight, self.bias, self.running_mean, self.running_var,
                 self.eps, exponential_average_factor, process_group, world_size)
