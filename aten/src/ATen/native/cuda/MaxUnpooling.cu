@@ -219,31 +219,6 @@ void MaxUnpooling3d_shape_check(
   }
 }
 
-Tensor MaxUnpooling3d_forward_cuda(
-    const Tensor& self,
-    const Tensor& indices,
-    IntList output_size,
-    IntList stride,
-    IntList padding) {
-      AT_CHECK(
-          self.ndimension() == 5,
-          "Input to MaxUnpooling2d should be a NCDHW Tensor",
-          self.sizes());
-      AT_CHECK(
-          output_size.size() == 3,
-          "There should be exactly three elements (depth, height, width) in output_size");
-
-  auto output = at::zeros(
-      {self.size(1),
-       self.size(2),
-       output_size[0],
-       output_size[1],
-       output_size[2]},
-      self.options());
-  MaxUnpooling3d_forward_out_cuda(output, self, indices, output_size, stride, padding);
-  return output;
-}
-
 Tensor& MaxUnpooling3d_forward_out_cuda(
     Tensor& output,
     const Tensor& self,
@@ -251,19 +226,19 @@ Tensor& MaxUnpooling3d_forward_out_cuda(
     IntList output_size,
     IntList stride,
     IntList padding) {
-  AT_CHECK(
-      self.ndimension() == 5,
-      "Input to MaxUnpooling2d should be a NCDHW Tensor",
-      self.sizes());
+
+  MaxUnpooling3d_shape_check(
+      self, at::empty({}), indices, output_size, stride, padding, false);
   AT_CHECK(
       output_size.size() == 3,
       "There should be exactly three elements (depth, height, width) in output_size");
+  AT_CHECK(
+      stride.size() == 3,
+      "There should be exactly three elements in stride");
+  AT_CHECK(
+      padding.size() == 3,
+      "There should be exactly three elements in padding");
 
-  auto batchSize = self.size(0);
-  auto inputSlices = self.size(1);
-  auto inputTime = self.size(2);
-  auto inputHeight = self.size(3);
-  auto inputWidth = self.size(4);
   auto outputTime = output_size[0];
   auto outputHeight = output_size[1];
   auto outputWidth = output_size[2];
@@ -276,14 +251,38 @@ Tensor& MaxUnpooling3d_forward_out_cuda(
   auto padH = padding[1];
   auto padW = padding[2];
 
-  MaxUnpooling3d_shape_check(
-      self, at::empty({}), indices, output_size, stride, padding, false);
   TensorArg output_arg{ output, "output", 1 },
           self_arg{ self, "self", 2 },
           indices_arg{ indices, "indices", 3 };
   checkAllSameGPU("MaxUnpooling3d_forward_out_cuda", {output_arg, self_arg, indices_arg});
 
-  AT_CHECK(output.is_contiguous(), "output must be contiguous");
+  int64_t batchSize;
+  int64_t inputSlices;
+  int64_t inputTime;
+  int64_t inputHeight;
+  int64_t inputWidth;
+
+  if(self.ndimension() == 4)
+  {
+    batchSize = 1;
+    inputSlices = self.size(0);
+    inputTime = self.size(1);
+    inputHeight = self.size(2);
+    inputWidth = self.size(3);
+    output.resize_({inputSlices, outputTime, outputHeight, outputWidth});
+  }
+  else
+  {
+    batchSize = self.size(0);
+    inputSlices = self.size(1);
+    inputTime = self.size(2);
+    inputHeight = self.size(3);
+    inputWidth = self.size(4);
+    output.resize_({batchSize, inputSlices, outputTime, outputHeight, outputWidth});
+  }
+  auto output_contiguous = output.contiguous();
+  output_contiguous.zero_();
+
 
   int totalZ = inputTime * inputSlices * batchSize;
   int offsetZ = 0;
@@ -318,7 +317,7 @@ Tensor& MaxUnpooling3d_forward_out_cuda(
               padH,
               padW,
               offsetZ,
-              output.data<scalar_t>());
+              output_contiguous.data<scalar_t>());
         }));
     AT_CHECK(
         cudaGetLastError() == cudaSuccess,
@@ -330,5 +329,29 @@ Tensor& MaxUnpooling3d_forward_out_cuda(
   return output;
 }
 
+Tensor MaxUnpooling3d_forward_cuda(
+    const Tensor& self,
+    const Tensor& indices,
+    IntList output_size,
+    IntList stride,
+    IntList padding) {
+      AT_CHECK(
+          (self.ndimension() == 4 || self.ndimension() == 5),
+          "Input to MaxUnpooling3d should be a NCDHW Tensor",
+          self.sizes());
+      AT_CHECK(
+          output_size.size() == 3,
+          "There should be exactly three elements (depth, height, width) in output_size");
+
+  auto output = at::zeros(
+      {self.size(1),
+       self.size(2),
+       output_size[0],
+       output_size[1],
+       output_size[2]},
+      self.options());
+  MaxUnpooling3d_forward_out_cuda(output, self, indices, output_size, stride, padding);
+  return output;
+}
 } // namespace native
 } // namespace at
