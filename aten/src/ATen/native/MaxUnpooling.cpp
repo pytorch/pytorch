@@ -145,16 +145,6 @@ Tensor MaxUnpooling2d_forward_cpu(
       self.options());
   MaxUnpooling2d_forward_out_cpu(output, self, indices, output_size);
   return output;
-<<<<<<< HEAD
-=======
-};
-
-Tensor MaxUnpooling2d_backward_cpu(
-    const Tensor& self,
-    const Tensor& indices,
-    IntList output_size) {
-  AT_ERROR("not implemented");
->>>>>>> Add maxunpooling forward functions in CUDA
 }
 
 template <typename scalar_t>
