@@ -63,11 +63,6 @@ static THCTensor* THCTensor_(newColumnMajor)(THCState *state, THCTensor *self, T
 void THCTensor_(gesv)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor *b_, THCTensor *a_)
 {
 #ifdef USE_MAGMA
-  THArgCheck(!a_->is_empty() && a_->dim() == 2, 1, "A should be (non-empty) 2 dimensional");
-  THArgCheck(!b_->is_empty() && b_->dim() == 2, 2, "b should be (non-empty) 2 dimensional");
-  THArgCheck(a_->size(0) == a_->size(1), 1, "A should be square");
-  THArgCheck(b_->size(0) == a_->size(0), 2, "A,b size incompatible");
-
   int64_t n = a_->size(0);
   int64_t nrhs = b_->size(1);
 
