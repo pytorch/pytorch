@@ -53,9 +53,11 @@ at::Tensor MaxUnpooling2d_forward_out_cpu_(
     }
     if (has_error) {
       AT_ERROR(
-          "Found an invalid max index %ld (output volumes are of size %dx%d)",
+          "Found an invalid max index",
           error_index,
+          " (output volumes are of size ",
           outputHeight,
+          "x",
           outputWidth);
     }
   }
@@ -305,10 +307,10 @@ at::Tensor& MaxUnpooling3d_forward_out_cpu(
       self, at::empty({}), indices, output_size, stride, padding, false);
   output.zero_();
   output.resize_({self.size(0),
-           self.size(1),
-           output_size[0],
-           output_size[1],
-           output_size[2]});
+                  self.size(1),
+                  output_size[0],
+                  output_size[1],
+                  output_size[2]});
   AT_DISPATCH_FLOATING_TYPES(
       self.type(), "MaxUnpooling3d_forward_out_cpu_", ([&] {
         MaxUnpooling3d_forward_out_cpu_<scalar_t>(
@@ -353,6 +355,219 @@ at::Tensor MaxUnpooling3d_forward_cpu(
   return output;
 }
 
+template <typename scalar_t>
+static void MaxUnpooling2d_backward_out_cpu_(
+  scalar_t* gradInput_p,
+  scalar_t* gradOutput_p,
+  int64_t* ind_p,
+  int64_t nslices,
+  int64_t iwidth, int64_t iheight,
+  int64_t owidth, int64_t oheight
+)
+{
+  int k;
+#pragma omp parallel for private(k)
+  for (k = 0; k < nslices; k++) {
+    scalar_t* gradInput_p_k = gradInput_p + k * iwidth * iheight;
+    scalar_t* gradOutput_p_k = gradOutput_p + k * owidth * oheight;
+    int64_t* ind_p_k = ind_p + k * iwidth * iheight;
+
+    int i, j;
+    int64_t maxp;
+    for (i = 0; i < iheight; i++) {
+      for (j = 0; j < iwidth; j++) {
+        maxp = ind_p_k[i * iwidth + j]; /* retrieve position of max */
+        if (maxp < 0 || maxp >= owidth * oheight) {
+          AT_ERROR(
+              "invalid max index ",
+              maxp,
+              ", owidth= ",
+              owidth,
+              ", oheight= ",
+              oheight);
+        }
+        gradInput_p_k[i * iwidth + j] =
+            gradOutput_p_k[maxp]; /* update gradient */
+      }
+    }
+  }
+}
+
+at::Tensor& MaxUnpooling2d_backward_out_cpu(
+    Tensor& grad_input,
+    const Tensor& grad_output,
+    const Tensor& self,
+    const Tensor& indices,
+    IntList output_size) {
+  int dimw = 3;
+  int dimh = 2;
+  int nbatch = 1;
+
+  AT_CHECK(
+      self.sizes() == indices.sizes(),
+      "Input shape must match indices shape");
+
+  AT_CHECK(output_size.size() == 2, "Output size must be 2");
+  int owidth = output_size[0];
+  int oheight = output_size[1];
+  auto gradOutput = grad_output.contiguous();
+  auto indicesContiguous = indices.contiguous();
+
+  grad_input.resize_as_(self);
+  grad_input.zero_();
+
+  int nslices = self.size(dimh - 1);
+  int iheight = self.size(dimh);
+  int iwidth = self.size(dimw);
+
+  if (output_size[0] != gradOutput.size(dimh) ||
+      output_size[1] != gradOutput.size(dimw)) {
+    AT_ERROR(
+        "Inconsistent gradOutput size",
+        output_size[0],
+        ", output width= ",
+        output_size[1],
+        ", gradOutput: ",
+        gradOutput.size(dimh),
+        "x",
+        gradOutput.size(dimw));
+  }
+
+  int p;
+  for (p = 0; p < nbatch; p++) {
+    auto inputOffset = p * nslices * iheight * iwidth;
+    auto outputOffset = p * nslices * oheight * owidth;
+    AT_DISPATCH_FLOATING_TYPES(
+        self.type(), "MaxUnpooling2d_backward_out_cpu_", ([&] {
+          MaxUnpooling2d_backward_out_cpu_<scalar_t>(
+              grad_input.data<scalar_t>() + inputOffset,
+              gradOutput.data<scalar_t>() + outputOffset,
+              indices.data<int64_t>() + inputOffset,
+              nslices,
+              iwidth,
+              iheight,
+              output_size[0],
+              output_size[1]);
+        }));
+  }
+  return grad_input;
+}
+
+at::Tensor MaxUnpooling2d_backward_cpu(
+    const Tensor& grad_output,
+    const Tensor& self,
+    const Tensor& indices,
+    IntList output_size) {
+  auto grad_input = at::zeros_like(self);
+  MaxUnpooling2d_backward_out_cpu(
+      grad_input, grad_output, self, indices, output_size);
+  return grad_input;
+}
+
+template <typename scalar_t>
+static void MaxUnpooling3d_backward_out_cpu_(
+    scalar_t* gradInput_p,
+    scalar_t* gradOutput_p,
+    int64_t* ind_p,
+    int64_t nslices,
+    int64_t iT,
+    int64_t iW,
+    int64_t iH,
+    int64_t oT,
+    int64_t oW,
+    int64_t oH) {
+  int k;
+#pragma omp parallel for private(k)
+  for (k = 0; k < nslices; k++) {
+    scalar_t* gradInput_p_k = gradInput_p + k * iT * iH * iW;
+    scalar_t* gradOutput_p_k = gradOutput_p + k * oT * oH * oW;
+    int64_t* ind_p_k = ind_p + k * iT * iH * iW;
+
+    int t, i, j, index;
+    int64_t maxp;
+    for (t = 0; t < iT; t++) {
+      for (i = 0; i < iH; i++) {
+        for (j = 0; j < iW; j++) {
+          index = t * iH * iW + i * iW + j;
+          maxp = ind_p_k[index]; /* retrieve position of max */
+          if (maxp < 0 || maxp >= oT * oH * oW) {
+            AT_ERROR(
+                "invalid max index ",
+                maxp,
+                ", oT= ",
+                oT,
+                ", oW= ",
+                oW,
+                ",oH= ",
+                oH);
+          }
+          gradInput_p_k[index] = gradOutput_p_k[maxp]; /* update gradient */
+        }
+      }
+    }
+  }
+}
+at::Tensor& MaxUnpooling3d_backward_out_cpu(
+    Tensor& grad_input,
+    const Tensor& grad_output,
+    const Tensor& self,
+    const Tensor& indices,
+    IntList output_size,
+    IntList stride,
+    IntList padding) {
+  int dimw = 4;
+  int dimh = 3;
+  int dimt = 2;
+
+  MaxUnpooling3d_shape_check(self, grad_output, indices, output_size, stride, padding, true);
+
+  auto grad_output_contiguous = grad_output.contiguous();
+  auto indices_contiguous = indices.contiguous();
+  /* resize */
+  grad_input.resize_as_(self);
+  grad_input.zero_();
+
+  /* sizes */
+  auto nbatch = self.size(0);
+  auto nslices = self.size(dimt-1);
+  auto iT = self.size(dimt);
+  auto iH = self.size(dimh);
+  auto iW = self.size(dimw);
+  auto oT = output_size[0];
+  auto oH = output_size[1];
+  auto oW = output_size[2];
+  /* backprop */
+  int p;
+  for(p = 0; p < nbatch; p++)
+  {
+    int inputOffset = p * nslices * iT * iH * iW;
+    int outputOffset = p * nslices * oT * oT * oW;
+    AT_DISPATCH_FLOATING_TYPES(
+        self.type(), "MaxUnpooling3d_backward_out_cpu_", ([&] {
+          MaxUnpooling3d_backward_out_cpu_<scalar_t>(
+              grad_input.data<scalar_t>() + inputOffset,
+              grad_output_contiguous.data<scalar_t>() + outputOffset,
+              indices_contiguous.data<int64_t>() + inputOffset,
+              nslices,
+              iT, iW, iH,
+              oT, oW, oH);
+        }));
+  }
+  return grad_input;
+}
+
+at::Tensor MaxUnpooling3d_backward_cpu(
+  const Tensor& grad_output,
+  const Tensor& self,
+  const Tensor& indices,
+  IntList output_size,
+  IntList stride,
+  IntList padding) {
+    auto grad_input = at::zeros_like(self);
+    MaxUnpooling3d_backward_out_cpu(grad_input, grad_output, self, indices, output_size, stride, padding);
+    return grad_input;
+  }
+
 // stopgap until GPU version is implemented
 at::Tensor& MaxUnpooling3d_forward_out_cuda(
     Tensor& output,
@@ -373,6 +588,22 @@ at::Tensor MaxUnpooling3d_forward_cuda(
     IntList stride,
     IntList padding) {
   return at::_thnn_max_unpool3d(self, indices, output_size, stride, padding);
+}
+
+Tensor & MaxUnpooling2d_backward_out_cuda(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, const Tensor & indices, IntList output_size) {
+  return at::_thnn_max_unpool2d_backward_out(grad_input, grad_output, self, indices, output_size);
+}
+
+Tensor MaxUnpooling2d_backward_cuda(const Tensor & grad_output, const Tensor & self, const Tensor & indices, IntList output_size) {
+  return at::_thnn_max_unpool2d_backward(grad_output, self, indices, output_size);
+}
+
+Tensor & MaxUnpooling3d_backward_out_cuda(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, const Tensor & indices, IntList output_size, IntList stride, IntList padding) {
+  return at::_thnn_max_unpool3d_backward_out(grad_input, grad_output, self, indices, output_size, stride, padding);
+}
+
+Tensor MaxUnpooling3d_backward_cuda(const Tensor & grad_output, const Tensor & self, const Tensor & indices, IntList output_size, IntList stride, IntList padding) {
+  return at::_thnn_max_unpool3d_backward(grad_output, self, indices, output_size, stride, padding);
 }
 
 } // namespace native

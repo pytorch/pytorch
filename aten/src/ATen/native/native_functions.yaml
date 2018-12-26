@@ -3381,9 +3381,17 @@
 
 - func: max_unpool2d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, Tensor indices, IntList[2] output_size) -> Tensor
   python_module: nn
+  variants: function
+  dispatch:
+    CPU: MaxUnpooling2d_backward_out_cpu
+    CUDA: MaxUnpooling2d_backward_out_cuda
 
 - func: max_unpool2d_backward(Tensor grad_output, Tensor self, Tensor indices, IntList[2] output_size) -> Tensor
   python_module: nn
+  variants: function
+  dispatch:
+    CPU: MaxUnpooling2d_backward_cpu
+    CUDA: MaxUnpooling2d_backward_cuda
 
 - func: max_unpool3d_out(Tensor output, Tensor self, Tensor indices, IntList[3] output_size, IntList[3] stride, IntList[3] padding) -> Tensor
   python_module: nn
@@ -3401,9 +3409,17 @@
 
 - func: max_unpool3d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, Tensor indices, IntList[3] output_size, IntList[3] stride, IntList[3] padding) -> Tensor
   python_module: nn
+  variants: function
+  dispatch:
+    CPU: MaxUnpooling3d_backward_out_cpu
+    CUDA: MaxUnpooling3d_backward_out_cuda
 
 - func: max_unpool3d_backward(Tensor grad_output, Tensor self, Tensor indices, IntList[3] output_size, IntList[3] stride, IntList[3] padding) -> Tensor
   python_module: nn
+  variants: function
+  dispatch:
+    CPU: MaxUnpooling3d_backward_cpu
+    CUDA: MaxUnpooling3d_backward_cuda
 
 - func: reflection_pad1d_out(Tensor output, Tensor self, IntList[2] padding) -> Tensor
   python_module: nn
