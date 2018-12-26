@@ -107,8 +107,8 @@ __global__ void fractional_max_pool2d_out_frame(
       }
     }
 
-    AT_ASSERT(maxVal != at::numeric_limits<scalar_t>::lowest());
-    AT_ASSERT(maxIndex != -1);
+    assert(maxVal != at::numeric_limits<scalar_t>::lowest());
+    assert(maxIndex != -1);
 
     auto indices_ref = get_ref_by_coord(indices, ndims,
       batch, plane, outputH, outputW);
@@ -139,10 +139,10 @@ __global__ void fractional_max_pool2d_backward_out_frame(
 
     int index = *get_ref_by_coord<int64_t, int>(
       indices, ndims, batch, plane, outputH, outputW);
-    AT_ASSERT(index >= 0);
+    assert(index >= 0);
     int inputW = index % gradInput.sizes[ndims - 1];
     int inputH = index / gradInput.sizes[ndims - 1];
-    AT_ASSERT(inputH < gradInput.sizes[ndims - 2]);
+    assert(inputH < gradInput.sizes[ndims - 2]);
 
     atomicAdd(
       get_ref_by_coord<scalar_t, int>(
