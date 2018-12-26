@@ -2088,9 +2088,25 @@ class TestNN(NNTestCase):
         embedding = nn.Embedding.from_pretrained(a)
         self.assertEqual(a, embedding.weight.data)
 
-        input = Variable(torch.LongTensor([0, 1]))
+        input = torch.LongTensor([0, 1])
         output = embedding(input)
         self.assertEqual(a, output)
+
+    def test_embedding_from_pretrained_options(self):
+        a = torch.Tensor([[1, 2, 3], [4, 5, 6]])
+        opts = {
+            "max_norm": 2.,
+            "norm_type": .5,
+            "scale_grad_by_freq": False,
+            "sparse": True
+        }
+        embedding = nn.Embedding.from_pretrained(a, **opts)
+        input = torch.LongTensor([0, 1])
+        output = embedding(input)
+        # test output and that weight matrix was renormalized
+        self.assertEqual(a, output)
+        self.assertTrue(a.ne(torch.arange(1, 7, dtype=a.dtype).view(2, 3)).all())
+        self.assertTrue(output.data.norm(p=opts["norm_type"], dim=1).le(opts["max_norm"]).all())
 
     def test_embedding_functional(self):
         a = torch.tensor([
@@ -2314,6 +2330,32 @@ class TestNN(NNTestCase):
         offset[0] = 0
         offset[-1] = 100
         self.assertRaises(ValueError, lambda: es(input.view(-1), offset))
+
+    def test_embeddingbag_from_pretrained(self):
+        a = torch.Tensor([[1, 2, 3], [4, 5, 6]])
+        embeddingbag = nn.EmbeddingBag.from_pretrained(a)
+        self.assertEqual(a, embeddingbag.weight.data)
+
+        input = torch.LongTensor([[0, 1]])
+        output = embeddingbag(input)
+        self.assertEqual(a.mean(0, keepdim=True), output)
+
+    def test_embeddingbag_from_pretrained_options(self):
+        a = torch.Tensor([[1, 2, 3], [4, 5, 6]])
+        opts = {
+            "max_norm": 2.,
+            "norm_type": .5,
+            "scale_grad_by_freq": False,
+            "mode": "max",
+            "sparse": False
+        }
+        embeddingbag = nn.EmbeddingBag.from_pretrained(a, **opts)
+
+        input = torch.LongTensor([[0, 1]])
+        output = embeddingbag(input)
+        self.assertEqual(a.max(0, keepdim=True)[0], output)
+        self.assertTrue(a.ne(torch.arange(1, 7, dtype=a.dtype).view(2, 3)).all())
+        self.assertTrue(a.norm(p=opts["norm_type"], dim=1).le(opts["max_norm"]).all())
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_pool3d_size_one_feature_dim(self):
