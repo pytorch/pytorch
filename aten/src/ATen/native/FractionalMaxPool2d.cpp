@@ -68,7 +68,7 @@ static void fractional_max_pool2d_out_frame(
         int64_t h2, w2;
         for (h2 = inputHStart; h2 < inputHStart + poolSizeH; ++h2) {
           for (w2 = inputWStart; w2 < inputWStart + poolSizeW; ++w2) {
-            AT_ASSERT(h2 >= 0 && h2 < inputH);//?
+            AT_ASSERT(h2 >= 0 && h2 < inputH);
             AT_ASSERT(w2 >= 0 && w2 < inputW);
 
             int64_t planeIndex = h2 * inputW + w2;
@@ -114,7 +114,8 @@ void fractional_max_pool2d_out_cpu_template(
 
   int64_t numInputDims = input.ndimension();
   AT_CHECK((numInputDims == 3 || numInputDims == 4),
-		"non-empty 3D or 4D (batch mode) tensor expected for input, but got: %s");
+		"non-empty 3D or 4D (batch mode) tensor expected for input, but got: ",
+    numInputDims);
 
   if (numInputDims == 4) {
     numBatch = input.size(0);
