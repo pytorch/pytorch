@@ -410,26 +410,40 @@ at::Tensor& MaxUnpooling2d_backward_out_cpu(
     const Tensor& self,
     const Tensor& indices,
     IntList output_size) {
-  int dimw = 3;
-  int dimh = 2;
+  int dimw = 2;
+  int dimh = 1;
   int nbatch = 1;
+  int nslices;
+  int iheight;
+  int iwidth;
 
   AT_CHECK(
       self.sizes() == indices.sizes(),
       "Input shape must match indices shape");
 
   AT_CHECK(output_size.size() == 2, "Output size must be 2");
+
   int owidth = output_size[0];
   int oheight = output_size[1];
+
+  /* get contiguous gradOutput and indices */
   auto gradOutput = grad_output.contiguous();
   auto indicesContiguous = indices.contiguous();
 
+  /* resize */
   grad_input.resize_as_(self);
   grad_input.zero_();
 
-  int nslices = self.size(dimh - 1);
-  int iheight = self.size(dimh);
-  int iwidth = self.size(dimw);
+  if(self.ndimension() == 4) {
+    nbatch = self.size(0);
+    dimw++;
+    dimh++;
+  }
+
+  /* sizes */
+  nslices = self.size(dimh - 1);
+  iheight = self.size(dimh);
+  iwidth = self.size(dimw);
 
   if (output_size[0] != gradOutput.size(dimh) ||
       output_size[1] != gradOutput.size(dimw)) {
@@ -526,27 +540,53 @@ at::Tensor& MaxUnpooling3d_backward_out_cpu(
     IntList output_size,
     IntList stride,
     IntList padding) {
-  int dimw = 4;
-  int dimh = 3;
-  int dimt = 2;
-
-  MaxUnpooling3d_shape_check(self, grad_output, indices, output_size, stride, padding, true);
-
-  auto grad_output_contiguous = grad_output.contiguous();
-  auto indices_contiguous = indices.contiguous();
-  /* resize */
-  grad_input.resize_as_(self);
-  grad_input.zero_();
-
-  /* sizes */
-  auto nbatch = self.size(0);
-  auto nslices = self.size(dimt-1);
-  auto iT = self.size(dimt);
-  auto iH = self.size(dimh);
-  auto iW = self.size(dimw);
+  AT_CHECK(
+      output_size.size() == 3,
+      "There should be exactly three elements (depth, height, width) in output_size");
+  AT_CHECK(
+      stride.size() == 3,
+      "There should be exactly three elements (depth, height, width) in stide");
+  AT_CHECK(
+      padding.size() == 3,
+      "There should be exactly three elements (depth, height, width) in padding");
   auto oT = output_size[0];
   auto oH = output_size[1];
   auto oW = output_size[2];
+  int dimw = 3;
+  int dimh = 2;
+  int dimt = 1;
+  int nbatch = 1;
+  int nslices;
+  int iT;
+  int iH;
+  int iW;
+
+
+  MaxUnpooling3d_shape_check(self, grad_output, indices, output_size, stride, padding, true);
+
+  // TODO (from THNN): check gradOutput shape
+  /* get contiguous gradOutput */
+  auto grad_output_contiguous = grad_output.contiguous();
+  auto indices_contiguous = indices.contiguous();
+
+  /* resize */
+  grad_input.resize_as_(self);
+  grad_input.zero_();
+  if(self.ndimension() == 5)
+  {
+    nbatch = self.size(0);
+    dimt++;
+    dimw++;
+    dimh++;
+  }
+
+  /* sizes */
+  nslices = self.size(dimt-1);
+  iT = self.size(dimt);
+  iH = self.size(dimh);
+  iW = self.size(dimw);
+
+
   /* backprop */
   int p;
   for(p = 0; p < nbatch; p++)
