@@ -1,6 +1,5 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <tuple>
 
 namespace at {
 namespace native {
@@ -14,10 +13,10 @@ static void reflection_pad2d_out_frame(
     int64_t input_w, int64_t input_h,
     int64_t output_w, int64_t output_h,
     int64_t pad_l, int64_t pad_t) {
-  auto i_start_x = std::max(0L, (long)-pad_l);
-  auto i_start_y = std::max(0L, (long)-pad_t);
-  auto o_start_x = std::max(0L, (long)pad_l);
-  auto o_start_y = std::max(0L, (long)pad_t);
+  auto i_start_x = std::max(int64_t(0), -pad_l);
+  auto i_start_y = std::max(int64_t(0), -pad_t);
+  auto o_start_x = std::max(int64_t(0), pad_l);
+  auto o_start_y = std::max(int64_t(0), pad_t);
 
   int64_t k, ip_x, ip_y;
 #pragma omp parallel for private(k, ip_x, ip_y)
@@ -137,10 +136,10 @@ static void reflection_pad2d_backward_out_frame(
     int64_t input_w, int64_t input_h,
     int64_t output_w, int64_t output_h,
     int64_t pad_l, int64_t pad_t) {
-  auto i_start_x = std::max(0L, (long)-pad_l);
-  auto i_start_y = std::max(0L, (long)-pad_t);
-  auto o_start_x = std::max(0L, (long)pad_l);
-  auto o_start_y = std::max(0L, (long)pad_t);
+  auto i_start_x = std::max(int64_t(0), -pad_l);
+  auto i_start_y = std::max(int64_t(0), -pad_t);
+  auto o_start_x = std::max(int64_t(0), pad_l);
+  auto o_start_y = std::max(int64_t(0), pad_t);
 
   int64_t k, ip_x, ip_y;
 #pragma omp parallel for private(k, ip_x, ip_y)
@@ -214,7 +213,7 @@ void reflection_pad2d_backward_out_template(
 
   /* backprop */
   if (input.ndimension() == 3) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+    AT_DISPATCH_FLOATING_TYPES(
       grad_output.type(), "reflection_pad2d_backward", [&] {
         reflection_pad2d_backward_out_frame(
           grad_input.data<scalar_t>(),
@@ -228,7 +227,7 @@ void reflection_pad2d_backward_out_template(
     int64_t p;
 #pragma omp parallel for private(p)
     for (p = 0; p < nbatch; p++) {
-      AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+      AT_DISPATCH_FLOATING_TYPES(
         grad_output.type(), "reflection_pad2d_backward", [&] {
           reflection_pad2d_backward_out_frame(
             grad_input.data<scalar_t>() + p * nplane * input_h * input_w,
@@ -250,7 +249,7 @@ Tensor& reflection_pad2d_out_cpu(
   return output;
 }
 
-Tensor reflection_pad2d_cpu(Tensor const& input, IntList padding) {
+Tensor reflection_pad2d_cpu(const Tensor& input, IntList padding) {
   auto output = at::empty({0}, input.options());
   reflection_pad2d_out_template(output, input, padding);
   return output;
@@ -261,7 +260,8 @@ Tensor& reflection_pad2d_backward_out_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     IntList padding) {
-  grad_input = at::zeros_like(input);
+  grad_input.resize_as_(input);
+  grad_input.zero_();
   reflection_pad2d_backward_out_template(
     grad_input, grad_output, input, padding);
   return grad_input;

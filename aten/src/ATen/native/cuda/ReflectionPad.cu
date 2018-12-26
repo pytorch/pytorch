@@ -5,7 +5,9 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 // keeping THC headers for atomicAdd
-#include <THC/THCGeneral.h>
+#include <THC/THCAtomics.cuh>
+
+#include <thrust/pair.h>
 
 namespace at {
 namespace native {
@@ -14,12 +16,11 @@ namespace {
 using at::cuda::detail::canUse32BitIndexMath;
 
 __device__
-inline void get_index_mapping(
+inline thrust::pair<int64_t, int64_t>  get_index_mapping(
     int64_t input_dim_x, int64_t input_dim_y,
     int64_t output_dim_x, int64_t output_dim_y,
     int64_t pad_l, int64_t pad_t,
-    int64_t output_xy,
-    int64_t & input_idx, int64_t & output_idx) {
+    int64_t output_xy) {
   // 3D grid of 1D blocks
   auto input_offset =
     (blockIdx.y + blockIdx.z * gridDim.y) * input_dim_x * input_dim_y;
@@ -29,10 +30,10 @@ inline void get_index_mapping(
   auto output_x = output_xy % output_dim_x;
   auto output_y = output_xy / output_dim_x;
 
-  auto i_start_x = ::max(0L, (long)-pad_l);
-  auto i_start_y = ::max(0L, (long)-pad_t);
-  auto o_start_x = ::max(0L, (long)pad_l);
-  auto o_start_y = ::max(0L, (long)pad_t);
+  auto i_start_x = ::max(int64_t(0), -pad_l);
+  auto i_start_y = ::max(int64_t(0), -pad_t);
+  auto o_start_x = ::max(int64_t(0), pad_l);
+  auto o_start_y = ::max(int64_t(0), pad_t);
 
   auto input_x = ::abs(output_x - pad_l)
                  - ::abs(output_x - (input_dim_x + pad_l - 1))
@@ -46,8 +47,9 @@ inline void get_index_mapping(
                  + 2 * pad_t + input_dim_y - 1
                  - o_start_y + i_start_y;
 
-  input_idx = input_offset + input_y * input_dim_x + input_x;
-  output_idx = output_offset + output_y * output_dim_x + output_x;
+  return thrust::make_pair<int64_t, int64_t>(
+    input_offset + input_y * input_dim_x + input_x,
+    output_offset + output_y * output_dim_x + output_x);
 }
 
 template<typename scalar_t>
@@ -60,16 +62,13 @@ __global__ void reflection_pad2d_out_kernel(
   auto output_dim_y = input_dim_y + pad_t + pad_b;
 
   if (output_xy < output_dim_x * output_dim_y) {
-    int64_t input_idx, output_idx;
-
-    get_index_mapping(
+    auto index_pair = get_index_mapping(
       input_dim_x, input_dim_y,
       output_dim_x, output_dim_y,
       pad_l, pad_t,
-      output_xy,
-      input_idx, output_idx);
+      output_xy);
 
-    output[output_idx] = input[input_idx];
+    output[index_pair.second] = input[index_pair.first];
   }
 }
 
@@ -83,16 +82,13 @@ __global__ void reflection_pad2d_backward_out_kernel(
   auto output_dim_y = input_dim_y + pad_t + pad_b;
 
   if (output_xy < output_dim_x * output_dim_y) {
-    int64_t input_idx, output_idx;
-
-    get_index_mapping(
+    auto index_pair = get_index_mapping(
       input_dim_x, input_dim_y,
       output_dim_x, output_dim_y,
       pad_l, pad_t,
-      output_xy,
-      input_idx, output_idx);
+      output_xy);
 
-    atomicAdd(&grad_input[input_idx], grad_output[output_idx]);
+    atomicAdd(&grad_input[index_pair.first], grad_output[index_pair.second]);
   }
 }
 
@@ -213,7 +209,7 @@ void reflection_pad2d_backward_out_template(
   dim3 grid_size(
     (int) std::ceil(output_plane_size/256.0), nplane, nbatch);
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES(
     input.type(), "reflection_pad2d_backward_out_template", [&] {
       reflection_pad2d_backward_out_kernel<<<
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -234,7 +230,7 @@ Tensor& reflection_pad2d_out_cuda(
   return output;
 }
 
-Tensor reflection_pad2d_cuda(Tensor const& input, IntList padding) {
+Tensor reflection_pad2d_cuda(const Tensor& input, IntList padding) {
   auto output = at::empty({0}, input.options());
   reflection_pad2d_out_template(output, input, padding);
   return output;
@@ -244,7 +240,8 @@ Tensor& reflection_pad2d_backward_out_cuda(
     Tensor& grad_input, const Tensor& grad_output,
     const Tensor& input,
     IntList padding) {
-  grad_input = at::zeros_like(input);
+  grad_input.resize_as_(input);
+  grad_input.zero_();
   reflection_pad2d_backward_out_template(
     grad_input, grad_output, input, padding);
   return grad_input;
