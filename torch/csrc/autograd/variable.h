@@ -150,6 +150,11 @@ struct TORCH_API Variable : public at::Tensor {
 
   /// Gets the gradient function of the `Variable`. If this is a leaf variable,
   /// the pointer returned will be null.
+  ///
+  /// For View Variables:
+  /// Gets the up-to-date grad_fn. If the shared data or base was modified, we
+  /// re-create the grad_fn to express the up-to-date view relationship between
+  /// this and the base Variable.
   const std::shared_ptr<Function>& grad_fn() const;
 
   /// Gets the raw gradient function pointer, whatever it currently is.
@@ -251,6 +256,10 @@ struct TORCH_API Variable : public at::Tensor {
 
   /// Update the `grad_fn` of an existing Variable. Called after in-place
   /// modifications.
+  ///
+  /// For View Variables:
+  /// Called after in-place modifications. Modifies the grad_fn of the base
+  /// Variable.
   void rebase_history(Edge gradient_edge);
 
   // Hooks
@@ -327,11 +336,9 @@ struct TORCH_API Variable::AutogradMeta : public c10::AutogradMetaInterface {
   PyObject* pyobj_ = nullptr; // weak reference
 
   // Mutex to ensure that concurrent read operations that modify internal
-  // state are still thread-safe. Used by get_grad_fn and
-  // get_grad_accumulator.
+  // state are still thread-safe. Used by grad_fn() and
+  // grad_accumulator().
   std::mutex mutex_;
-
-  void detach_(Variable self_var);
 
   /// Sets the `requires_grad` property of `Variable`. This should be true for
   /// leaf variables that want to accumulate gradients, and false for all other
@@ -355,22 +362,6 @@ struct TORCH_API Variable::AutogradMeta : public c10::AutogradMetaInterface {
   const Variable& grad() const override {
     return grad_;
   }
-
-  virtual std::shared_ptr<Function>& get_grad_fn(Variable self_var) {
-    return grad_fn_;
-  }
-
-  std::shared_ptr<Function> get_grad_accumulator(Variable self_var);
-
-  virtual const Variable& base() const {
-    throw std::runtime_error("Can't get base of non-view Variable");
-  }
-
-  void backward(
-      c10::optional<at::Tensor> gradient,
-      bool keep_graph,
-      bool create_graph,
-      Variable self_var);
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -386,20 +377,9 @@ struct TORCH_API Variable::DifferentiableViewMeta : public Variable::AutogradMet
   /// version_counter.current_version().
   uint32_t attr_version;
 
-  /// Gets the up-to-date grad_fn. If the shared data or base was modified, we
-  /// re-create the grad_fn to express the up-to-date view relationship between
-  /// this and the base Variable.
-  std::shared_ptr<Function>& get_grad_fn(Variable self_var) override;
-
-  const Variable& base() const override {
-    return base_;
-  }
-
   bool requires_grad() const override {
     return requires_grad_ || grad_fn_ || (is_view_ && base_.requires_grad());
   }
-
-  void rebase_history(Edge gradient_edge, Variable self_var);
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -496,7 +476,7 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
 /// Variable::DifferentiableViewImpl is created to support gradient tracking of
 /// such **in-place** operations. In particular,
 ///   + if an in-place op is done on base, the grad_fn field of the view may
-///     become stale. So accesses should always go through get_grad_fn(), which
+///     become stale. So accesses should always go through grad_fn(), which
 ///     reconstructs an updated grad_fn if the version_counter has incremented.
 ///     All other fields are always valid.
 ///   + if an in-place op is done on view, in rebase_history() of view, which is
@@ -531,10 +511,6 @@ struct TORCH_API Variable::DifferentiableViewImpl : public Variable::Impl {
 
   /// Reset all expensive fields to free up resources
   void release_resources() override;
-
-  /// Called after in-place modifications. Modifies the grad_fn of the base
-  /// Variable.
-  void rebase_history(Edge gradient_edge);
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -649,10 +625,6 @@ inline at::Tensor& Variable::data() noexcept {
 // Gradient Function and Edges
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-inline const std::shared_ptr<Function>& Variable::grad_fn() const {
-  return get_autograd_meta()->get_grad_fn(*this);
-}
-
 inline Function* Variable::grad_fn_unsafe() const {
   return get_autograd_meta()->grad_fn_.get();
 }
@@ -666,24 +638,9 @@ inline std::shared_ptr<Function> Variable::try_get_grad_accumulator() const {
   return get_autograd_meta()->grad_accumulator_.lock();
 }
 
-inline std::shared_ptr<Function> Variable::grad_accumulator() const {
-  return get_autograd_meta()->get_grad_accumulator(*this);
-}
-
 inline Variable Variable::detach() const {
   auto var = make_variable_view(*this, get()->data_, /*is_differentiable=*/false, /*allow_tensor_metadata_change=*/false, Edge());
   return var;
-}
-
-inline void Variable::detach_() {
-  get_autograd_meta()->detach_(*this);
-}
-
-inline void Variable::backward(
-    c10::optional<Tensor> gradient,
-    bool keep_graph,
-    bool create_graph) const {
-  get_autograd_meta()->backward(std::move(gradient), keep_graph, create_graph, *this);
 }
 
 inline void Variable::set_data(Tensor new_data) const {
@@ -747,7 +704,12 @@ inline bool Variable::is_view() const noexcept {
 }
 
 inline const Variable& Variable::base() const {
-  return get_autograd_meta()->base();
+  if (is_view()) {
+    auto diff_view_meta = static_cast<Variable::DifferentiableViewMeta*>(get_autograd_meta());
+    return diff_view_meta->base_;
+  } else {
+    throw std::runtime_error("Can't get base of non-view Variable");
+  }
 }
 
 // Miscellaneous
