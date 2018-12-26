@@ -3,9 +3,9 @@
 #include <memory>
 #include <string>
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/tree_views.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
 namespace jit {
@@ -33,8 +33,8 @@ namespace script {
 // In particular we allow:
 // 1. If statements where neither <true> nor <false> branch returns.
 // 2. If statements where both <true> and <false> always return.
-// 3. An 'early return' if statement where <true> always returns <false> is empty, and <rest>
-// always returns.
+// 3. An 'early return' if statement where <true> always returns <false> is
+// empty, and <rest> always returns.
 //
 // We do not allow returns from loops in any case.
 //
@@ -44,8 +44,10 @@ namespace script {
 // 2. Both branches return, so we recursively transform the program such that
 // <true> and <false>'s final action is to return. We then delete <rest>
 // because the code is dead. The remaining program preserves the inductive
-// property that its last action is to return since both branches end in a return.
-// 3. In this case we know that <true> and <rest> always returns, and <false> is empty.
+// property that its last action is to return since both branches end in a
+// return.
+// 3. In this case we know that <true> and <rest> always returns, and <false> is
+// empty.
 //    We transform the graph to:
 //    if <cond>:
 //       <true>
@@ -55,6 +57,6 @@ namespace script {
 
 TORCH_API List<Stmt> moveAllReturnsToEnd(const List<Stmt>& stmts);
 
-}
+} // namespace script
 } // namespace jit
 } // namespace torch
