@@ -461,7 +461,7 @@ class SGDR(_LRScheduler):
         self.T = int(T_0)
         self.T_mult = T_mult
         self.eta_min = eta_min
-        super().__init__(optimizer, last_epoch)
+        super(SGDR, self).__init__(optimizer, last_epoch)
         self.T_cur = last_epoch
 
     def get_lr(self):
