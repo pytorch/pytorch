@@ -154,7 +154,7 @@ The details of the patch can be found out [here](https://support.microsoft.com/e
 
 On Linux
 ```bash
-export CMAKE_PREFIX_PATH="$(dirname $(which conda))/../" # [anaconda root directory]
+export CONDA_PREFIX="$(dirname $(which conda))/../"  # anaconda root directory
 
 # Install basic dependencies
 conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
@@ -165,7 +165,7 @@ conda install -c pytorch magma-cuda92 # or [magma-cuda80 | magma-cuda91] dependi
 
 On macOS
 ```bash
-export CMAKE_PREFIX_PATH=[anaconda root directory]
+export CONDA_PREFIX="$(dirname $(which conda))/../"  # anaconda root directory
 conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
 ```
 
@@ -182,11 +182,13 @@ cd pytorch
 #### Install PyTorch
 On Linux
 ```bash
+export CMAKE_PREFIX_PATH="$(dirname $(which conda))/../"  # anaconda root directory
 python setup.py install
 ```
 
 On macOS
 ```bash
+export CMAKE_PREFIX_PATH="$(dirname $(which conda))/../"  # anaconda root directory
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
 ```
 
