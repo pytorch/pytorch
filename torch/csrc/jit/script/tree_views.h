@@ -33,6 +33,7 @@ namespace script {
 //       | Return(List<Expr> values)                                    TK_RETURN
 //       | ExprStmt(List<Expr> expr)                                    TK_EXPR_STMT
 //       | Raise(Expr expr)                                             TK_RAISE
+//       | Def                                                          TK_DEF
 //
 // Expr  = TernaryIf(Expr cond, Expr true_expr, Expr false_expr)        TK_IF_EXPR
 //       | BinOp(Expr lhs, Expr rhs)
@@ -158,6 +159,9 @@ struct List : public TreeView {
     TreeList type_erased_sub {subtrees.begin(), subtrees.end()};
     return List(Compound::create(TK_LIST, range, std::move(type_erased_sub)));
   }
+  static List unsafeCreate(const SourceRange& range, TreeList&& subtrees) {
+    return List(Compound::create(TK_LIST, range, std::move(subtrees)));
+  }
   size_t size() const {
     return tree_->trees().size();
   }
@@ -218,6 +222,7 @@ struct Stmt : public TreeView {
       case TK_RAISE:
       case TK_ASSERT:
       case TK_PASS:
+      case TK_DEF:
         return;
       default:
         throw ErrorReport(tree) << kindToString(tree->kind()) << " is not a valid Stmt";
@@ -377,6 +382,9 @@ struct If : public Stmt {
   }
   List<Stmt> falseBranch() const {
     return List<Stmt>(subtree(2));
+  }
+  If withNewBranches(const List<Stmt>& true_branch, const List<Stmt>& false_branch) const {
+    return create(range(), cond(), true_branch, false_branch);
   }
   static If create(
       const SourceRange& range,

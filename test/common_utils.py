@@ -178,7 +178,10 @@ def to_gpu(obj, type_map={}):
 
 
 def get_function_arglist(func):
-    return inspect.getargspec(func).args
+    if sys.version_info > (3,):
+        return inspect.getfullargspec(func).args
+    else:
+        return inspect.getargspec(func).args
 
 
 def set_rng_seed(seed):

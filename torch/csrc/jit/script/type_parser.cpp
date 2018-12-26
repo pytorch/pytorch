@@ -62,7 +62,7 @@ bool isTorch(const Expr& expr) {
 
 
 
-c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(const Expr& expr) {
+c10::optional<std::pair<TypePtr, int32_t>> parseBroadcastList(const Expr& expr) {
   if (expr.kind() != TK_SUBSCRIPT)
     return c10::nullopt;
   auto subscript = Subscript(expr);
@@ -73,7 +73,7 @@ c10::optional<std::pair<TypePtr, int32_t>> handleBroadcastList(const Expr& expr)
 
   // handle the case where the BroadcastingList is wrapped in a Optional type
   if(var.name().name() == "Optional") {
-    auto broadcast_list = handleBroadcastList(subscript_exprs[0]);
+    auto broadcast_list = parseBroadcastList(subscript_exprs[0]);
     if (broadcast_list) {
       TypePtr opt_type = OptionalType::create(broadcast_list->first);
       return std::pair<TypePtr, int32_t>(opt_type, broadcast_list->second);
