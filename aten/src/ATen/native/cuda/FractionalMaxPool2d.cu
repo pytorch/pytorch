@@ -23,10 +23,7 @@ namespace {
 
 template <typename scalar_t, typename accscalar_t>
 __device__ inline int get_interval(accscalar_t sample,
-                                  int index,
-                                  int inputSize,
-                                  int outputSize,
-                                  int poolSize) {
+  int index, int inputSize, int outputSize, int poolSize) {
   accscalar_t alpha = (accscalar_t)(inputSize - poolSize) / (accscalar_t) (outputSize - 1);
   if (index == outputSize - 1) {
     return inputSize - poolSize;
@@ -36,22 +33,14 @@ __device__ inline int get_interval(accscalar_t sample,
 }
 
 template <typename scalar_t, typename index_t>
-__device__ inline scalar_t* get_ref_by_coord(TensorInfo<scalar_t, index_t> tensor_info,
-                                             int ndims,
-                                             index_t batch,
-                                             index_t plane,
-                                             index_t H,
-                                             index_t W) {
-  index_t offset = 0;
-  if(ndims == 3) {
-    offset = plane * tensor_info.strides[0] +
-             H * tensor_info.strides[1] +
-             W * tensor_info.strides[2];
-  } else {
-    offset = batch * tensor_info.strides[0] +
-             plane * tensor_info.strides[1] +
-             H * tensor_info.strides[2] +
-             W * tensor_info.strides[3];
+__device__ inline scalar_t* get_ref_by_coord(
+  TensorInfo<scalar_t, index_t> tensor_info,
+  int ndims, index_t batch, index_t plane,
+  index_t h, index_t w) {
+  index_t offset = plane * tensor_info.strides[ndims - 3] +
+    h * tensor_info.strides[ndims - 2] + w * tensor_info.strides[ndims - 1];
+  if(ndims == 4) {
+    offset += batch * tensor_info.strides[0];
   }
   return tensor_info.data + offset;
 }
@@ -73,31 +62,21 @@ __global__ void fractional_max_pool2d_out_frame(
   int plane = blockIdx.y;
   int batch = blockIdx.z;
 
-  int dim_output = output.dims;
+  int ndims = output.dims;
 
   // Each thread generates a specific output point
-  if (ourOutputPoint < output.sizes[dim_output] * output.sizes[dim_output]) {
-    int outputW = ourOutputPoint % output.sizes[dim_output];
-    int outputH = ourOutputPoint / output.sizes[dim_output];
+  if (ourOutputPoint < output.sizes[ndims - 2] * output.sizes[ndims - 1]) {
+    int outputW = ourOutputPoint % output.sizes[ndims - 1];
+    int outputH = ourOutputPoint / output.sizes[ndims - 1];
 
-    int poolW = get_interval<scalar_t,
-                             accscalar_t
-                             >(static_cast<accscalar_t>(*(samples.data +
-                                                      batch * samples.strides[0]
-                                                      + plane * samples.strides[1])),
-                               outputW,
-                               input.sizes[dim_output],
-                               output.sizes[dim_output],
-                               poolSizeW);
-    int poolH = get_interval<scalar_t,
-                             accscalar_t
-                             >(static_cast<accscalar_t>(*(samples.data +
-                                  batch * samples.strides[0] +
-                                  plane * samples.strides[1] + 1)),
-                               outputH,
-                               input.sizes[dim_output - 1],
-                               output.sizes[dim_output - 1],
-                               poolSizeH);
+    int poolW = get_interval<scalar_t, accscalar_t>(
+      static_cast<accscalar_t>(*(samples.data + batch * samples.strides[0] +
+        plane * samples.strides[1])),
+        outputW, input.sizes[ndims - 1], output.sizes[ndims - 1], poolSizeW);
+    int poolH = get_interval<scalar_t, accscalar_t>(
+      static_cast<accscalar_t>(*(samples.data + batch * samples.strides[0] +
+        plane * samples.strides[1] + samples.strides[2])),
+        outputH, input.sizes[ndims - 2], output.sizes[ndims - 2], poolSizeH);
 
     scalar_t maxVal = at::numeric_limits<scalar_t>::lowest();
     int maxIndex = -1;
@@ -105,12 +84,11 @@ __global__ void fractional_max_pool2d_out_frame(
     for (int h = poolH; h < poolH + poolSizeH; ++h) {
       if (PoolSizeWStatic == -1) {
         for (int w = poolW; w < poolW + poolSizeW; ++w) {
-          scalar_t val = *get_ref_by_coord<scalar_t,
-                                           int>(input, dim_output,
-                                             batch, plane, h, w);
+          scalar_t val = *get_ref_by_coord<scalar_t, int>(
+            input, ndims, batch, plane, h, w);
           // for consistency with THNN, favor the first max
           if (val > maxVal) {
-            maxIndex = h * input.sizes[dim_output] + w;
+            maxIndex = h * input.sizes[ndims - 1] + w;
             maxVal = val;
           }
         }
@@ -118,27 +96,26 @@ __global__ void fractional_max_pool2d_out_frame(
 #pragma unroll
         for (int i = 0; i < PoolSizeWStatic; ++i) {
           int w = i + poolW;
-          scalar_t val = *get_ref_by_coord<scalar_t,
-                                           int>(input, dim_output,
-                                             batch, plane, h, w);
+          scalar_t val = *get_ref_by_coord<scalar_t, int>(
+            input, ndims, batch, plane, h, w);
           // for consistency with THNN, favor the first max
           if (val > maxVal) {
-            maxIndex = h * input.sizes[3] + w;
+            maxIndex = h * input.sizes[ndims - 1] + w;
             maxVal = val;
           }
         }
       }
     }
 
-    assert(maxVal != at::numeric_limits<scalar_t>::lowest());
-    assert(maxIndex != -1);
+    AT_ASSERT(maxVal != at::numeric_limits<scalar_t>::lowest());
+    AT_ASSERT(maxIndex != -1);
 
-    int idx_offset = outputW * output.strides[dim_output] +
-                     outputH * output.strides[dim_output - 1] +
-                     plane * output.strides[dim_output - 2] +
-                     (dim_output == 3 ? 0 : batch * output.strides[0]);
-    *(indices.data + idx_offset) = maxIndex;
-    *(output.data + idx_offset) = maxVal;
+    auto indices_ref = get_ref_by_coord(indices, ndims,
+      batch, plane, outputH, outputW);
+    auto output_ref = get_ref_by_coord(output, ndims,
+      batch, plane, outputH, outputW);
+    *indices_ref = maxIndex;
+    *output_ref = maxVal;
   }
 }
 
@@ -152,28 +129,26 @@ __global__ void fractional_max_pool2d_backward_out_frame(
   int plane = blockIdx.y;
   int batch = blockIdx.z;
 
-  int dim_output = gradOutput.dims;
+  int ndims = gradOutput.dims;
 
   // Each thread generates a specific output point
-  if (ourOutputPoint < gradOutput.sizes[dim_output - 1] *
-    gradOutput.sizes[dim_output]) {
-    int outputW = ourOutputPoint % gradOutput.sizes[dim_output];
-    int outputH = ourOutputPoint / gradOutput.sizes[dim_output];
+  if (ourOutputPoint < gradOutput.sizes[ndims - 2] *
+    gradOutput.sizes[ndims - 1]) {
+    int outputW = ourOutputPoint % gradOutput.sizes[ndims - 1];
+    int outputH = ourOutputPoint / gradOutput.sizes[ndims - 1];
 
-    int index = *get_ref_by_coord<int64_t,
-                                  int>(indices, dim_output,
-                                    batch, plane, outputH, outputW);
-    assert(index >= 0);
-    int inputW = index % gradInput.sizes[dim_output];
-    int inputH = index / gradInput.sizes[dim_output];
-    assert(inputH < gradInput.sizes[dim_output - 1]);
+    int index = *get_ref_by_coord<int64_t, int>(
+      indices, ndims, batch, plane, outputH, outputW);
+    AT_ASSERT(index >= 0);
+    int inputW = index % gradInput.sizes[ndims - 1];
+    int inputH = index / gradInput.sizes[ndims - 1];
+    AT_ASSERT(inputH < gradInput.sizes[ndims - 2]);
 
-    atomicAdd(get_ref_by_coord<scalar_t,
-                               int>(gradInput, dim_output,
-                                 batch, plane, inputH, inputW),
-              *get_ref_by_coord<scalar_t,
-                                int>(gradOutput, dim_output,
-                                  batch, plane, inputH, inputW));
+    atomicAdd(
+      get_ref_by_coord<scalar_t, int>(
+        gradInput, ndims, batch, plane, inputH, inputW),
+      *get_ref_by_coord<scalar_t, int>(
+        gradOutput, ndims, batch, plane, inputH, inputW));
   }
 }
 
@@ -189,18 +164,18 @@ void fractional_max_pool2d_out_cuda_template(
   int dimw = 2;
   int64_t numBatch = 1;
 
-  int numInputDims = input.ndimension();
-  for (int64_t i = 0; i < numInputDims; i++) {
+  int ndims = input.ndimension();
+  for (int64_t i = 0; i < ndims; i++) {
      AT_CHECK(input.size(i) > 0,
        "fractional_max_pool2d(): expected input to have non-empty spatial dimensions, "
        "but input has sizes ", input.sizes(), " with dimension ", i, " being "
        "empty");
    }
 
-   AT_CHECK((numInputDims == 3 || numInputDims == 4),
+   AT_CHECK((ndims == 3 || ndims == 4),
      "non-empty 3D or 4D (batch mode) tensor expected for input");
 
-  if (numInputDims == 4) {
+  if (ndims == 4) {
     numBatch = input.size(0);
     planeDim++;
     dimh++;
@@ -224,7 +199,7 @@ void fractional_max_pool2d_out_cuda_template(
            "pool_size width ", poolSizeW,
            " too large relative to input width ", inputW);
 
-  if (numInputDims == 3) {
+  if (ndims == 3) {
     /* resize output */
     output.resize_({numPlanes, outputH, outputW});
     /* indices will contain the locations for each output point */
@@ -236,11 +211,11 @@ void fractional_max_pool2d_out_cuda_template(
 
   // block is limited to 4 warps
   // grid handles overflow per each plane
-  int outputPlaneSize = output.size(numInputDims - 1) *
-    output.size(numInputDims);
+  int outputPlaneSize = output.size(ndims - 2) *
+    output.size(ndims - 1);
   dim3 grid((outputPlaneSize + 127) / 128,
-            input.size(numInputDims - 2),
-            numInputDims == 3 ? 1 : input.size(0));
+            input.size(ndims - 3),
+            ndims == 3 ? 1 : input.size(0));
   dim3 block(outputPlaneSize > 128 ? 128 : outputPlaneSize);
 
   int POOL_W = (poolSizeW <= 7 && poolSizeW >= 2) ? poolSizeW : -1;
@@ -271,8 +246,8 @@ void fractional_max_pool2d_backward_out_cuda_template(
   int dimh = 1;
   int dimw = 2;
 
-  int64_t numInputDims = input.ndimension();
-  if (numInputDims == 4) {
+  int64_t ndims = input.ndimension();
+  if (ndims == 4) {
     dimh++;
     dimw++;
   }
@@ -294,16 +269,14 @@ void fractional_max_pool2d_backward_out_cuda_template(
   /* resize */
   gradInput = at::zeros_like(input);
 
-  int dim_output = gradOutput.ndimension();
-
   /* backprop */
   // block is limited to 4 warps
   // grid handles overflow per each plane
-  int outputPlaneSize = gradOutput.size(dim_output - 1) *
-    gradOutput.size(dim_output);
+  int outputPlaneSize = gradOutput.size(ndims - 2) *
+    gradOutput.size(ndims - 1);
   dim3 grid((outputPlaneSize + 127) / 128,
-            gradInput.size(dim_output - 2),
-            gradInput.size(dim_output - 3));
+            gradInput.size(ndims - 3),
+            gradInput.size(ndims - 4));
   dim3 block(outputPlaneSize > 128 ? 128 : outputPlaneSize);
 
 AT_DISPATCH_FLOATING_TYPES_AND_HALF(gradOutput.type(),
