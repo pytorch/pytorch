@@ -154,7 +154,7 @@ The details of the patch can be found out [here](https://support.microsoft.com/e
 
 On Linux
 ```bash
-export CMAKE_PREFIX_PATH="$(dirname $(which conda))/../" # [anaconda root directory]
+export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 
 # Install basic dependencies
 conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
