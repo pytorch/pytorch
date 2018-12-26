@@ -6,7 +6,7 @@ namespace at {
 namespace native {
 
 template <typename scalar_t>
-at::Tensor MaxUnpooling2d_forward_out_cpu_(
+Tensor MaxUnpooling2d_forward_out_cpu_(
     Tensor& output,
     const Tensor& input,
     const Tensor& indices,
@@ -64,7 +64,7 @@ at::Tensor MaxUnpooling2d_forward_out_cpu_(
   return output;
 }
 
-at::Tensor& MaxUnpooling2d_forward_out_cpu(
+Tensor& MaxUnpooling2d_forward_out_cpu(
     Tensor& output,
     const Tensor& self,
     const Tensor& indices,
@@ -80,12 +80,8 @@ at::Tensor& MaxUnpooling2d_forward_out_cpu(
       "Shape of indices should match shape of input");
 
   // is_empty check
-  for (int64_t i = 0; i < self.ndimension(); i++) {
-    AT_CHECK(
-        self.size(i) > 0,
-        "input must be nonempty, but input has sizes: ",
-        self.sizes());
-  }
+  AT_CHECK(self.numel() > 0,
+    "Input must be non-empty");
 
   auto numBatch = self.size(0);
   auto numChannels = self.size(1);
@@ -109,7 +105,7 @@ at::Tensor& MaxUnpooling2d_forward_out_cpu(
   return output;
 };
 
-at::Tensor MaxUnpooling2d_forward_cpu(
+Tensor MaxUnpooling2d_forward_cpu(
     const Tensor& self,
     const Tensor& indices,
     IntList output_size) {
@@ -120,45 +116,20 @@ at::Tensor MaxUnpooling2d_forward_cpu(
   AT_CHECK(
       output_size.size() == 2,
       "There should be exactly two elements (height, width) in output_size");
-  for (int64_t i = 0; i < self.ndimension(); i++) {
-    AT_CHECK(
-        self.size(i) > 0,
-        "input must be nonempty, but input has sizes: ",
-        self.sizes());
-  }
+
+  // is_empty check
+  AT_CHECK(self.numel() > 0,
+    "Input must be non-empty");
+
   auto output = at::zeros(
       {self.size(0), self.size(1), output_size[0], output_size[1]},
       self.options());
   MaxUnpooling2d_forward_out_cpu(output, self, indices, output_size);
   return output;
-};
-
-Tensor MaxUnpooling2d_backward_cpu(
-    const Tensor& self,
-    const Tensor& indices,
-    IntList output_size) {
-  AT_ERROR("not implemented");
-}
-
-// stopgap until GPU version is implemented
-at::Tensor& MaxUnpooling2d_forward_out_cuda(
-    Tensor& output,
-    const Tensor& self,
-    const Tensor& indices,
-    IntList output_size) {
-  return at::_thnn_max_unpool2d_out(output, self, indices, output_size);
-}
-
-// stopgap until GPU version is implemented
-at::Tensor MaxUnpooling2d_forward_cuda(
-    const Tensor& self,
-    const Tensor& indices,
-    IntList output_size) {
-  return at::_thnn_max_unpool2d(self, indices, output_size);
 }
 
 template <typename scalar_t>
-at::Tensor MaxUnpooling3d_forward_out_cpu_(
+Tensor MaxUnpooling3d_forward_out_cpu_(
     Tensor& output,
     const Tensor& input,
     const Tensor& indices,
@@ -182,7 +153,6 @@ at::Tensor MaxUnpooling3d_forward_out_cpu_(
   auto iH = input.size(dimh);
   auto iW = input.size(dimw);
 
-  // TODO: zero out output inplace
   auto* input_data = input.data<scalar_t>();
   auto* output_data = output.data<scalar_t>();
   auto* indices_data = indices.data<int64_t>();
@@ -330,7 +300,7 @@ at::Tensor& MaxUnpooling3d_forward_out_cpu(
   return output;
 }
 
-at::Tensor MaxUnpooling3d_forward_cpu(
+Tensor MaxUnpooling3d_forward_cpu(
     const Tensor& self,
     const Tensor& indices,
     IntList output_size,
@@ -569,7 +539,24 @@ at::Tensor MaxUnpooling3d_backward_cpu(
   }
 
 // stopgap until GPU version is implemented
-at::Tensor& MaxUnpooling3d_forward_out_cuda(
+Tensor& MaxUnpooling2d_forward_out_cuda(
+    Tensor& output,
+    const Tensor& self,
+    const Tensor& indices,
+    IntList output_size) {
+  return at::_thnn_max_unpool2d_out(output, self, indices, output_size);
+}
+
+// stopgap until GPU version is implemented
+Tensor MaxUnpooling2d_forward_cuda(
+    const Tensor& self,
+    const Tensor& indices,
+    IntList output_size) {
+  return at::_thnn_max_unpool2d(self, indices, output_size);
+}
+
+// stopgap until GPU version is implemented
+Tensor& MaxUnpooling3d_forward_out_cuda(
     Tensor& output,
     const Tensor& self,
     const Tensor& indices,
@@ -581,7 +568,7 @@ at::Tensor& MaxUnpooling3d_forward_out_cuda(
 }
 
 // stopgap until GPU version is implemented
-at::Tensor MaxUnpooling3d_forward_cuda(
+Tensor MaxUnpooling3d_forward_cuda(
     const Tensor& self,
     const Tensor& indices,
     IntList output_size,
