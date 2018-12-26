@@ -10,28 +10,6 @@
 #include <cfloat>
 
 template <typename Dtype>
-__global__ void cuda_VolumetricMaxUnpooling_updateOutput(
-  THCDeviceTensor<Dtype, 4> input,
-  THCDeviceTensor<THCIndex_t, 4> indices,
-  Dtype* outputData,
-  int oT, int oH, int oW,
-  int dT, int dH, int dW,
-  int padT, int padH, int padW, int offsetZ)
-{
-  int64_t iColumn = blockIdx.x * blockDim.x + threadIdx.x;
-  int64_t iRow    = blockIdx.y * blockDim.y + threadIdx.y;
-  int64_t iFrame  = (blockIdx.z + offsetZ) % input.getSize(1); // intput frame/time
-  int64_t slice   = (blockIdx.z + offsetZ) / input.getSize(1); // intput slice/feature
-
-  if (iRow < input.getSize(2) && iColumn < input.getSize(3))
-  {
-    Dtype val = input[slice][iFrame][iRow][iColumn];
-    int64_t index = indices[slice][iFrame][iRow][iColumn];
-    outputData[slice*oT*oH*oW + index] = val;
-  }
-}
-
-template <typename Dtype>
 __global__ void cuda_VolumetricMaxUnpooling_updateGradInput(
   Dtype* gradOutputData,
   int oT, int oH, int oW,
