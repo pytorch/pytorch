@@ -9937,6 +9937,35 @@ class TestFuser(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_fuse_mutable(self):
+        def f(x):
+            y = x * 2
+            y.relu_()
+            return y * y
+
+        x = torch.randn(10, 10, device='cuda')
+        f_trace = torch.jit.trace(f, x, check_trace=False)
+        self.assertEqual(f_trace(x), f(x))
+        self.assertAllFused(f_trace.graph_for(x))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_fuse_mutable_incorrect(self):
+        def f(x):
+            y = x * 2
+            v = y[0]
+            y.relu_()
+            z = y ** y
+            return z, torch.mm(v, v)
+
+        x = torch.randn(2, 10, 10, device='cuda')
+        f_trace = torch.jit.trace(f, x, check_trace=False)
+        self.assertEqual(f_trace(x), f(x))
+        self.assertTrue(all(n.kind() != 'prim::FusionGroup'
+                            for n in f_trace.graph_for(x).nodes()))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_checks_cat_inputs(self):
         # We shouldn't treat cat nodes as broadcasting. All their inputs

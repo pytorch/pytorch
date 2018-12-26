@@ -116,6 +116,101 @@ bool isSimpleMap(Node* node) {
   return true;
 }
 
+bool isMutableMap(Node* node) {
+  // XXX: Before add new operators here, make sure that they:
+  //   - Are simple maps.
+  //   - Mutate their first argument only.
+  //   - Have immutable overloads of matching signature, except that they don't
+  //     have underscore at the end of their name.
+  static OperatorSet mutable_maps{{
+      "aten::abs_(Tensor(a!) self) -> Tensor(a!)",
+      "aten::acos_(Tensor(a!) self) -> Tensor(a!)",
+      "aten::add_(Tensor(a!) self, Tensor other, *, Scalar alpha) -> Tensor(a!)",
+      "aten::asin_(Tensor(a!) self) -> Tensor(a!)",
+      "aten::atan_(Tensor(a!) self) -> Tensor(a!)",
+      "aten::atan2_(Tensor(a!) self, Tensor other) -> Tensor(a!)",
+      "aten::ceil_(Tensor(a!) self) -> Tensor",
+      "aten::clamp_(Tensor(a!) self, Scalar? min, Scalar? max) -> Tensor(a!)",
+      "aten::cos_(Tensor(a!) self) -> Tensor(a!)",
+      "aten::cosh_(Tensor(a!) self) -> Tensor(a!)",
+      "aten::div_(Tensor(a!) self, Tensor other) -> Tensor(a!)",
+      "aten::exp_(Tensor(a!) self) -> Tensor(a!)",
+      "aten::expm1_(Tensor(a!) self) -> Tensor(a!)",
+      "aten::erf_(Tensor(a!) self) -> Tensor(a!)",
+      "aten::erfc_(Tensor(a!) self) -> Tensor(a!)",
+      "aten::floor_(Tensor(a!) self) -> Tensor(a!)",
+      "aten::fmod_(Tensor(a!) self, Tensor other) -> Tensor(a!)",
+      "aten::frac_(Tensor(a!) self) -> Tensor(a!)",
+      "aten::lgamma_(Tensor(a!) self) -> Tensor(a!)",
+      "aten::log_(Tensor(a!) self) -> Tensor(a!)",
+      "aten::log10_(Tensor(a!) self) -> Tensor(a!)",
+      "aten::log1p_(Tensor(a!) self) -> Tensor(a!)",
+      "aten::log2_(Tensor(a!) self) -> Tensor(a!)",
+      "aten::mul_(Tensor(a!) self, Tensor other) -> Tensor(a!)",
+      "aten::neg_(Tensor(a!) self) -> Tensor(a!)",
+      "aten::pow_(Tensor(a!) self, Tensor exponent) -> Tensor(a!)",
+      "aten::pow_(Tensor(a!) self, Scalar exponent) -> Tensor(a!)",
+      "aten::reciprocal_(Tensor(a!) self) -> Tensor(a!)",
+      "aten::relu_(Tensor(a!) self) -> Tensor(a!)",
+      "aten::remainder_(Tensor(a!) self, Tensor other) -> Tensor(a!)",
+      "aten::round_(Tensor(a!) self) -> Tensor(a!)",
+      "aten::rsqrt_(Tensor(a!) self) -> Tensor(a!)",
+      "aten::sigmoid_(Tensor(a!) self) -> Tensor(a!)",
+      "aten::sin_(Tensor(a!) self) -> Tensor(a!)",
+      "aten::sinh_(Tensor(a!) self) -> Tensor(a!)",
+      "aten::sqrt_(Tensor(a!) self) -> Tensor(a!)",
+      "aten::sub_(Tensor(a!) self, Tensor other, *, Scalar alpha) -> Tensor(a!)",
+      "aten::tan_(Tensor(a!) self) -> Tensor(a!)",
+      "aten::tanh_(Tensor(a!) self) -> Tensor(a!)",
+      "aten::trunc_(Tensor(a!) self) -> Tensor(a!)",
+      "aten::add_(Tensor(a!) self, Scalar other, Scalar alpha) -> Tensor(a!)",
+      "aten::sub_(Tensor(a!) self, Scalar other, Scalar alpha) -> Tensor(a!)",
+      "aten::mul_(Tensor(a!) self, Scalar other) -> Tensor(a!)",
+      "aten::div_(Tensor(a!) self, Scalar other) -> Tensor(a!)",
+
+      "aten::eq_(Tensor(a!) self, Tensor other) -> Tensor(a!)",
+      "aten::eq_(Tensor(a!) self, Scalar other) -> Tensor(a!)",
+      "aten::ne_(Tensor(a!) self, Tensor other) -> Tensor(a!)",
+      "aten::ne_(Tensor(a!) self, Scalar other) -> Tensor(a!)",
+      "aten::ge_(Tensor(a!) self, Tensor other) -> Tensor(a!)",
+      "aten::ge_(Tensor(a!) self, Scalar other) -> Tensor(a!)",
+      "aten::gt_(Tensor(a!) self, Tensor other) -> Tensor(a!)",
+      "aten::gt_(Tensor(a!) self, Scalar other) -> Tensor(a!)",
+      "aten::le_(Tensor(a!) self, Tensor other) -> Tensor(a!)",
+      "aten::le_(Tensor(a!) self, Scalar other) -> Tensor(a!)",
+      "aten::lt_(Tensor(a!) self, Tensor other) -> Tensor(a!)",
+      "aten::lt_(Tensor(a!) self, Scalar other) -> Tensor(a!)",
+  }};
+  if (!mutable_maps.find(node)) {
+    return false;
+  }
+  // Check that all non-tensor inputs are constant
+  for (Value* input : node->inputs()) {
+    if (input->type()->isSubtypeOf(DynamicType::get())) {
+      continue;
+    }
+    if (input->node()->kind() != prim::Constant) {
+      return false;
+    }
+  }
+  return true;
+}
+
+Value* deinplace(Value* old_output) {
+  Node* node = old_output->node();
+  WithInsertPoint insert_guard{node};
+  auto name = std::string(node->kind().toQualString());
+  JIT_ASSERT(name.at(name.size() - 1) == '_');
+  name.pop_back(); // Remove the underscore
+  Graph* graph = node->owningGraph();
+  Node* new_node = graph->insertNode(
+      graph->create(Symbol::fromQualString(name), node->inputs()));
+  Value* output = new_node->output();
+  node->output()->replaceAllUsesWith(output);
+  node->destroy();
+  return output;
+}
+
 Value* broadcastSizes(at::ArrayRef<Value*> sizes) {
   JIT_ASSERT(!sizes.empty());
   Graph* graph = sizes[0]->owningGraph();
@@ -128,6 +223,7 @@ Value* broadcastSizes(at::ArrayRef<Value*> sizes) {
 struct GraphFuser {
   Block* block_;
   std::shared_ptr<Graph> graph_;
+  c10::optional<AliasDb> aliasDb_;
 
   GraphFuser(Block* block, std::shared_ptr<Graph> graph)
       : block_(block), graph_(std::move(graph)) {}
@@ -138,12 +234,44 @@ struct GraphFuser {
     });
   }
 
+  const Node* getLastWildcardNode() {
+    auto& nodes = aliasDb_.value().getWildcardNodes();
+    auto it = std::max_element(
+        nodes.begin(), nodes.end(), [](const Node* a, const Node* b) -> bool {
+          return a->isBefore(b);
+        });
+    return it != nodes.end() ? *it : nullptr;
+  }
+
+  bool needsToMutate(Node* node) {
+    const Node* last_wildcard = getLastWildcardNode();
+    if (last_wildcard != nullptr && last_wildcard->isAfter(node)) {
+      return true;
+    }
+    // A node is safe to be de-inplaced if all uses of values
+    // that can alias its output (that are not its output) happen
+    // before this node.
+    Value* output = node->output();
+    for (const Value* v : aliasDb_.value().getAliases(output)) {
+      if (v == output) {
+        continue;
+      }
+      for (const Use& u : v->uses()) {
+        if (u.user->isAfter(node)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   bool isFusable(Node* node) {
     // We don't want to bother with cross-block node movements, as they
     // are not necessarily correct.
     if (node->owningBlock() != block_)
       return false;
-    return node->kind() == prim::FusionGroup || isSimpleMap(node);
+    return node->kind() == prim::FusionGroup || isSimpleMap(node) ||
+        (isMutableMap(node) && !needsToMutate(node));
   }
 
   bool isFusableCatNode(Node* node) {
@@ -349,10 +477,7 @@ struct GraphFuser {
     *insertion_point = n;
   }
 
-  at::optional<Node*> tryFuse(
-      Node* consumer,
-      Value* producer,
-      const AliasDb& aliasDb) {
+  at::optional<Node*> tryFuse(Node* consumer, Value* producer) {
     // this handles cases where producer can be moved _into_ the fusion group of
     // consumer.
     // TODO: extend to fusion of consumer into _producer's_ fusion blob
@@ -368,7 +493,8 @@ struct GraphFuser {
         // consumer. Fusion will rewrite those later uses to use the version of
         // producer generated by the fused blob. In this case, producer becomes
         // an output of the fusion group.
-        producer->node()->moveBeforeTopologicallyValid(real_consumer, aliasDb);
+        producer->node()->moveBeforeTopologicallyValid(
+            real_consumer, aliasDb_.value());
 
     if (!shouldFuse) {
       return at::nullopt;
@@ -399,6 +525,9 @@ struct GraphFuser {
     if (producer->node()->kind() == prim::FusionGroup) {
       mergeFusionGroups(group, producer->node());
       return group;
+    }
+    if (isMutableMap(producer->node())) {
+      producer = deinplace(producer);
     }
     JIT_ASSERT(producer->node()->outputs().size() == 1);
     Node* merged = mergeNodeIntoGroup(group, producer->node());
@@ -777,9 +906,7 @@ struct GraphFuser {
   }
 
   // returns where to continue scanning, and whether any fusion was made
-  std::pair<graph_node_list::iterator, bool> scanNode(
-      Node* consumer,
-      const AliasDb& aliasDb) {
+  std::pair<graph_node_list::iterator, bool> scanNode(Node* consumer) {
     if (isFusableAsExitNode(consumer)) {
       auto consumer_inputs = consumer->kind() == aten::cat
           ? consumer->namedInput(attr::tensors)->node()->inputs()
@@ -797,7 +924,7 @@ struct GraphFuser {
           // we scan this consumer again to perform the fusion
           return std::make_pair(consumer->reverseIterator(), true);
         }
-        auto fusion_group = tryFuse(consumer, producer, aliasDb);
+        auto fusion_group = tryFuse(consumer, producer);
         if (fusion_group) {
           // after fusion, consumer moves into a FusionGroup, so inputs is no
           // longer valid so we rescan the new FusionGroup for more fusions...
@@ -948,6 +1075,10 @@ struct GraphFuser {
     }
   }
 
+  void refreshAliasDb() {
+    aliasDb_ = AliasAnalysis(graph_);
+  }
+
   void run() {
     // Run the pass until no changes are made.
     // This is neccessary, because the algorithm can miss out on certain fusion
@@ -968,10 +1099,10 @@ struct GraphFuser {
     bool any_changed = true;
     while (any_changed) {
       any_changed = false;
-      auto aliasDb = AliasAnalysis(graph_);
+      refreshAliasDb();
       for (auto it = block_->nodes().rbegin(); it != block_->nodes().rend();) {
         bool changed;
-        std::tie(it, changed) = scanNode(*it, aliasDb);
+        std::tie(it, changed) = scanNode(*it);
         any_changed |= changed;
       }
     }
