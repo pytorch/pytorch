@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/import.h>
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/schema_matching.h>
+#include <torch/csrc/jit/script/module.h>
 
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/function_schema.h>
@@ -310,14 +311,6 @@ struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
     return "boolean dispatch";
   }
 
-  std::vector<NamedValue> removeIndex(
-      at::ArrayRef<NamedValue> arr,
-      size_t index) {
-    auto sliced = arr.vec();
-    sliced.erase(sliced.begin() + index);
-    return sliced;
-  }
-
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
       Method& caller,
@@ -356,6 +349,53 @@ struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
 
  private:
   py::dict dispatched_fn_;
+};
+
+struct VISIBILITY_HIDDEN OverloadedFunctionValue : public SugaredValue {
+  OverloadedFunctionValue(py::dict overloaded_fn)
+      : overloaded_fn_(std::move(overloaded_fn)) {}
+
+  std::string kind() const override {
+    return "overloaded function";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Method& caller,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override {
+    auto functions = py::cast<std::vector<py::object>>(overloaded_fn_["functions"]);
+
+    if (functions.size() == 0) {
+      throw ErrorReport(loc) << "No overloads found";
+    }
+
+    auto containing_class = py::getattr(functions.at(0), "__self__");
+    auto weak_module = py::module::import("torch.jit").attr("_try_get_weak_module")(containing_class);
+
+    if (weak_module.is_none()) {
+      throw ErrorReport(loc) << "Overloaded methods are only allowed on weak script modules";
+    }
+
+    std::stringstream err;
+    for (py::object fn : functions) {
+      auto fn_name = py::str(py::getattr(fn, "__name__"));
+      py::object py_method = py::getattr(weak_module, fn_name);
+      auto schema = py::cast<FunctionSchema>(py::getattr(py_method, "schema")());
+
+      auto match = tryMatchSchema(schema, loc, *caller.graph().get(), c10::nullopt, inputs, attributes, err, true);
+      if (match) {
+        Method& m = py::cast<Method&>(py_method);
+        MethodValue mv(nullptr, m);
+        return mv.call(loc, caller, inputs, attributes, n_binders);
+      }
+    }
+    throw ErrorReport(loc) << "Could not find any matching overloads\n" << err.str();
+  }
+
+ private:
+  py::dict overloaded_fn_;
 };
 
 std::shared_ptr<SugaredValue> toSugaredValue(
@@ -443,6 +483,11 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       py::module::import("torch.jit").attr("_try_get_dispatched_fn")(obj);
   if (!dispatched_fn.is_none()) {
     return std::make_shared<BooleanDispatchValue>(std::move(dispatched_fn));
+  }
+  py::object overloaded_fn =
+      py::module::import("torch.jit").attr("_try_get_overloaded_fn")(obj);
+  if (!overloaded_fn.is_none()) {
+    return std::make_shared<OverloadedFunctionValue>(std::move(overloaded_fn));
   }
   return std::make_shared<PythonValue>(obj);
 }

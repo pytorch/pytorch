@@ -10,7 +10,7 @@ from torch._six import raise_from, with_metaclass, get_function_from_type, \
     string_classes
 from .._jit_internal import createResolutionCallback, _compiled_weak_fns, \
     _weak_script_methods, _weak_modules, _weak_types, COMPILED, \
-    COMPILATION_PENDING, _boolean_dispatched
+    COMPILATION_PENDING, _boolean_dispatched, _overloaded_fns
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
 import torch.testing
@@ -667,6 +667,13 @@ def _try_get_dispatched_fn(fn):
     if not callable(fn):
         return None
     return _boolean_dispatched.get(fn)
+
+
+def _try_get_overloaded_fn(fn):
+    if not hasattr(fn, '__self__') or type(fn.__self__) is not WeakScriptModuleProxy:
+        return None
+    class_type = type(fn.__self__._original())
+    return _overloaded_fns.get(class_type)
 
 
 def _try_compile_weak_script(fn):
