@@ -145,6 +145,16 @@ Tensor MaxUnpooling2d_forward_cpu(
       self.options());
   MaxUnpooling2d_forward_out_cpu(output, self, indices, output_size);
   return output;
+<<<<<<< HEAD
+=======
+};
+
+Tensor MaxUnpooling2d_backward_cpu(
+    const Tensor& self,
+    const Tensor& indices,
+    IntList output_size) {
+  AT_ERROR("not implemented");
+>>>>>>> Add maxunpooling forward functions in CUDA
 }
 
 template <typename scalar_t>
@@ -363,45 +373,5 @@ Tensor MaxUnpooling3d_forward_cpu(
       output, self, indices, output_size, stride, padding);
   return output;
 }
-
-// stopgap until GPU version is implemented
-Tensor& MaxUnpooling2d_forward_out_cuda(
-    Tensor& output,
-    const Tensor& self,
-    const Tensor& indices,
-    IntList output_size) {
-  return at::_thnn_max_unpool2d_out(output, self, indices, output_size);
-}
-
-// stopgap until GPU version is implemented
-Tensor MaxUnpooling2d_forward_cuda(
-    const Tensor& self,
-    const Tensor& indices,
-    IntList output_size) {
-  return at::_thnn_max_unpool2d(self, indices, output_size);
-}
-
-// stopgap until GPU version is implemented
-Tensor& MaxUnpooling3d_forward_out_cuda(
-    Tensor& output,
-    const Tensor& self,
-    const Tensor& indices,
-    IntList output_size,
-    IntList stride,
-    IntList padding) {
-  return at::_thnn_max_unpool3d_out(
-      output, self, indices, output_size, stride, padding);
-}
-
-// stopgap until GPU version is implemented
-Tensor MaxUnpooling3d_forward_cuda(
-    const Tensor& self,
-    const Tensor& indices,
-    IntList output_size,
-    IntList stride,
-    IntList padding) {
-  return at::_thnn_max_unpool3d(self, indices, output_size, stride, padding);
-}
-
 } // namespace native
 } // namespace at
