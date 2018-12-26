@@ -9,44 +9,7 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
            THCIndexTensor *indices,
            int owidth, int oheight)
 {
-  THCUNN_assertSameGPU(state, 3, input, output, indices);
-  THCUNN_argCheck(state, !input->is_empty() && (input->dim() == 3 || input->dim() == 4), 2, input,
-                  "non-empty 3D or 4D (batch mode) tensor expected for input, but got: %s");
-  THCUNN_check_shape_indices(state, indices, input);
-
-  int64_t nInputCols, nInputRows, nInputPlane, batchSize;
-
-  if (input->dim() == 3) {
-    nInputCols = input->size(2);
-    nInputRows = input->size(1);
-    nInputPlane = input->size(0);
-    batchSize = 1;
-  }
-  else
-  {
-    nInputCols = input->size(3);
-    nInputRows = input->size(2);
-    nInputPlane = input->size(1);
-    batchSize = input->size(0);
-  }
-
-  input = THCTensor_(newContiguous)(state, input);
-  indices = THCIndexTensor_(newContiguous)(state, indices);
-  THCTensor_(resize4d)(state, output, batchSize, nInputPlane, oheight, owidth);
-  THCTensor_(zero)(state, output);
-
-  int count = THCTensor_(nElement)(state, input);
-
-  MaxUnpoolForward <<< GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>>
-      (count, THCTensor_(data)(state, input), THCIndexTensor_(data)(state, indices),
-      batchSize, nInputPlane, nInputRows, nInputCols, oheight, owidth, THCTensor_(data)(state, output));
-  THCudaCheck(cudaGetLastError());
-
-  if(input->dim() == 3)
-    THCTensor_(resize3d)(state, output, nInputPlane, oheight, owidth);
-
-  THCTensor_(free)(state, input);
-  THCIndexTensor_(free)(state, indices);
+  AT_ERROR("Deprecated");
 }
 
 void THNN_(SpatialMaxUnpooling_updateGradInput)(

@@ -35,6 +35,7 @@ __global__ void MaxUnpooling2d_forward_kernel(
     output[maxind] = input[linearIndex];
   }
 }
+
 template <typename T>
 __global__ void MaxUnpooling3d_forward_kernel(
     const T* input,
@@ -68,26 +69,7 @@ __global__ void MaxUnpooling3d_forward_kernel(
   }
 }
 
-at::Tensor MaxUnpooling2d_forward_cuda(
-    const Tensor& self,
-    const Tensor& indices,
-    IntList output_size) {
-  AT_CHECK(
-      self.ndimension() == 4,
-      "Input to MaxUnpooling2d should be a NCHW Tensor",
-      self.sizes());
-  AT_CHECK(
-      output_size.size() == 2,
-      "There should be exactly two elements (height, width) in output_size");
-
-  auto output = at::zeros(
-      {self.size(0), self.size(1), output_size[0], output_size[1]},
-      self.options());
-  MaxUnpooling2d_forward_out_cuda(output, self, indices, output_size);
-  return output;
-}
-
-at::Tensor& MaxUnpooling2d_forward_out_cuda(
+Tensor& MaxUnpooling2d_forward_out_cuda(
     Tensor& output,
     const Tensor& self,
     const Tensor& indices,
@@ -97,15 +79,11 @@ at::Tensor& MaxUnpooling2d_forward_out_cuda(
           indices_arg{ indices, "indices", 3 };
   checkAllSameGPU("MaxUnpooling2d_forward_cuda_out", {output_arg, self_arg, indices_arg});
 
-  for (int64_t i = 0; i < self.ndimension(); i++) {
-    AT_CHECK(
-        self.size(i) > 0,
-        "input must be nonempty, but input has sizes: ",
-        self.sizes());
-  }
+  AT_CHECK(self.numel() > 0, "Input must be non-empty tensor");
+
   AT_CHECK(
-      self.ndimension() == 4,
-      "Input to MaxUnpooling2d should be a NCHW Tensor",
+      (self.ndimension() == 3 || self.ndimension == 4),
+      "Input to MaxUnpooling2d should be a 3d or 4d Tensor",
       self.sizes());
   AT_CHECK(
       output_size.size() == 2,
@@ -146,6 +124,25 @@ at::Tensor& MaxUnpooling2d_forward_out_cuda(
   return output;
 }
 
+Tensor MaxUnpooling2d_forward_cuda(
+    const Tensor& self,
+    const Tensor& indices,
+    IntList output_size) {
+  AT_CHECK(
+      (self.ndimension() == 4 || self.ndimension() == 5),
+      "Input to MaxUnpooling2d should be a 4d or 5d Tensor, instead received:  ",
+      self.sizes());
+  AT_CHECK(
+      output_size.size() == 2,
+      "There should be exactly two elements (height, width) in output_size");
+
+  auto output = at::zeros(
+      {self.size(0), self.size(1), output_size[0], output_size[1]},
+      self.options());
+  MaxUnpooling2d_forward_out_cuda(output, self, indices, output_size);
+  return output;
+}
+
 void MaxUnpooling3d_shape_check(
     const Tensor& input,
     const Tensor& gradOutput,
@@ -155,22 +152,28 @@ void MaxUnpooling3d_shape_check(
     IntList padding,
     bool check_grad) {
   // is_empty check
-  for (int64_t i = 0; i < input.ndimension(); i++) {
-    AT_CHECK(
-        input.size(i) > 0,
-        "input must be nonempty, but input has sizes: ",
-        input.sizes());
-  }
+  AT_CHECK(input.numel() > 0,
+    "Input must be non-empty");
+  AT_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
+    "Input must be 4d or 5d tensor");
   AT_CHECK(input.sizes() == indices.sizes());
   AT_CHECK(
       stride[0] > 0 && stride[1] > 0 && stride[2] > 0,
       "stride should be never greater than zero, but got stride: ",
       stride);
 
-  int dimw = 4;
-  int dimh = 3;
-  int dimt = 2;
-  int dimn = 1;
+  int dimw = 3;
+  int dimh = 2;
+  int dimt = 1;
+  int dimn = 0;
+
+  if (input.ndimension() == 5)
+  {
+    dimw++;
+    dimh++;
+    dimt++;
+    dimn++;
+  }
 
   int nslices = input.size(dimn);
   if (check_grad) {
@@ -178,19 +181,16 @@ void MaxUnpooling3d_shape_check(
         output_size[1] != gradOutput.size(dimh) ||
         output_size[2] != gradOutput.size(dimw)) {
       AT_ERROR(
-          "Inconsistent gradOutput size. output_size[1]= %d, output_size[1] = %d, output_size[2] = %d, gradOutput: %dx%dx%d",
-          output_size[0],
-          output_size[1],
-          output_size[2],
-          gradOutput[0],
-          gradOutput[1],
-          gradOutput[2]);
+          "Inconsistent gradOutput size. output_size: ,",
+          output_size,
+          ". gradOutput: ",
+          gradOutput);
     }
-    AT_CHECK(gradOutput.ndimension() == 5 && gradOutput.size(dimn) == nslices);
+    AT_CHECK(gradOutput.ndimension() == input.ndimension() && gradOutput.size(dimn) == nslices);
   }
 }
 
-at::Tensor MaxUnpooling3d_forward_cuda(
+Tensor MaxUnpooling3d_forward_cuda(
     const Tensor& self,
     const Tensor& indices,
     IntList output_size,
@@ -215,7 +215,7 @@ at::Tensor MaxUnpooling3d_forward_cuda(
   return output;
 }
 
-at::Tensor& MaxUnpooling3d_forward_out_cuda(
+Tensor& MaxUnpooling3d_forward_out_cuda(
     Tensor& output,
     const Tensor& self,
     const Tensor& indices,
