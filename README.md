@@ -152,27 +152,17 @@ The details of the patch can be found out [here](https://support.microsoft.com/e
 
 #### Install Optional Dependencies
 
+Common
+```
+conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
+```
+
 On Linux
 ```bash
-export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
-
-# Install basic dependencies
-conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
-
 # Add LAPACK support for the GPU
 conda install -c pytorch magma-cuda92 # or [magma-cuda80 | magma-cuda91] depending on your cuda version
 ```
 
-On macOS
-```bash
-export CMAKE_PREFIX_PATH=[anaconda root directory]
-conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
-```
-
-On Windows
-```cmd
-conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
-```
 #### Get the PyTorch Source
 ```bash
 git clone --recursive https://github.com/pytorch/pytorch
@@ -182,11 +172,13 @@ cd pytorch
 #### Install PyTorch
 On Linux
 ```bash
+export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 python setup.py install
 ```
 
 On macOS
 ```bash
+export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
 ```
 
