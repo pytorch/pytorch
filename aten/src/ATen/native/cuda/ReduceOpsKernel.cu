@@ -59,7 +59,7 @@ template <typename scalar_t, typename acc_t=scalar_t>
 void prod_kernel_impl(TensorIterator& iter) {
   gpu_reduce_kernel<scalar_t, scalar_t>(iter, func_wrapper<scalar_t> ([]GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
     return a * b;
-  }), true);
+  }), 1);
 }
 
 static void std_kernel_cuda(TensorIterator& iter, bool unbiased) {
@@ -74,13 +74,6 @@ void mean_kernel_impl(TensorIterator& iter) {
   gpu_reduce_kernel<scalar_t, out_t>(iter, MeanOps<acc_t, float> {factor});
 }
 
-void and_kernel_impl(TensorIterator& iter) {
-  gpu_reduce_kernel<uint8_t, uint8_t>(
-    iter, func_wrapper<uint8_t> ([]GPU_LAMBDA(uint8_t a, uint8_t b) -> uint8_t {
-      return a && b;
-    }), 1);
-}
-
 #ifdef __HIPCC__
 template <>
 void mean_kernel_impl<int16_t, int16_t, int16_t>(TensorIterator& iter) {
@@ -92,6 +85,13 @@ void mean_kernel_impl<int16_t, int16_t, int16_t>(TensorIterator& iter) {
   gpu_reduce_kernel<int16_t, int16_t>(iter, MeanOps<int32_t, float> {factor});
 }
 #endif // __HIPCC__
+
+void and_kernel_impl(TensorIterator& iter) {
+  gpu_reduce_kernel<uint8_t, uint8_t>(
+    iter, func_wrapper<uint8_t> ([]GPU_LAMBDA(uint8_t a, uint8_t b) -> uint8_t {
+      return a && b;
+    }), true);
+}
 
 static void sum_kernel_cuda(TensorIterator& iter) {
   if (iter.type().scalarType() == kHalf) {

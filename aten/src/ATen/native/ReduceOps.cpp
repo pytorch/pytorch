@@ -85,7 +85,8 @@ static Tensor review_reduce_result(const Tensor& result, int ndim, DimMask mask,
 
 static std::unique_ptr<TensorIterator> make_reduction(
     const char* name, Tensor& result, const Tensor& self, IntList dim,
-    bool keepdim, ScalarType dtype) {
+    bool keepdim, ScalarType dtype)
+{
   // check that result type and dtype match if provided
   AT_CHECK(
       !result.defined() || result.type().scalarType() == dtype,
@@ -104,14 +105,10 @@ static std::unique_ptr<TensorIterator> make_reduction(
   // not generalize this to common mismatched input/output types to avoid cross
   // product of templated kernel launches.
   if (self.type().scalarType() == dtype ||
-      (self.is_cuda() &&
-      self.type().scalarType() == kHalf &&
-      dtype == kFloat)) {
+      (self.is_cuda() && self.type().scalarType() == kHalf && dtype == kFloat)) {
     return TensorIterator::reduce_op(viewed_result, self);
   }
-
-  return TensorIterator::reduce_op(
-    viewed_result, self.to(dtype));
+  return TensorIterator::reduce_op(viewed_result, self.to(dtype));
 }
 
 static inline int64_t n_dim_size(const Tensor& self, IntList dim) {
@@ -470,9 +467,8 @@ Tensor all(const Tensor& self) {
     "all only supports torch.uint8 dtype");
 
   Tensor result = at::empty({0}, self.options());
-  ScalarType dtype = get_dtype(result, self, {}, true);
-  auto iter = make_reduction("all", result, self, {}, false, dtype);
-
+  auto iter = make_reduction(
+    "all", result, self, {}, false, at::ScalarType::Byte);
   return _all(result, iter);
 }
 
@@ -489,8 +485,8 @@ Tensor &all_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
   if (_dimreduce_return_trivial(result, self, 1, dim, keepdim)) {
     return result;
   } else {
-    ScalarType dtype = get_dtype(result, self, {}, true);
-    auto iter = make_reduction("all", result, self, dim, keepdim, dtype);
+    auto iter = make_reduction(
+      "all", result, self, dim, keepdim, at::ScalarType::Byte);
     return _all(result, iter);
   }
 }
