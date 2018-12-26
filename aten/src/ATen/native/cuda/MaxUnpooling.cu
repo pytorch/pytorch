@@ -74,6 +74,10 @@ Tensor& MaxUnpooling2d_forward_out_cuda(
     const Tensor& self,
     const Tensor& indices,
     IntList output_size) {
+
+  auto outputHeight = output_size[0];
+  auto outputWidth = output_size[1];
+
   TensorArg output_arg{ output, "output", 1 },
           self_arg{ self, "self", 2 },
           indices_arg{ indices, "indices", 3 };
@@ -82,19 +86,40 @@ Tensor& MaxUnpooling2d_forward_out_cuda(
   AT_CHECK(self.numel() > 0, "Input must be non-empty tensor");
 
   AT_CHECK(
-      (self.ndimension() == 3 || self.ndimension == 4),
+      (self.ndimension() == 3 || self.ndimension() == 4),
       "Input to MaxUnpooling2d should be a 3d or 4d Tensor",
       self.sizes());
+  AT_CHECK(self.sizes() == indices.sizes(),
+      "Shape of input must match shape of indices");
   AT_CHECK(
       output_size.size() == 2,
       "There should be exactly two elements (height, width) in output_size");
 
-  auto numBatch = self.size(0);
-  auto numChannels = self.size(1);
-  auto inputHeight = self.size(2);
-  auto inputWidth = self.size(3);
-  auto outputHeight = output_size[0];
-  auto outputWidth = output_size[1];
+
+  int64_t dimw = 2;
+  int64_t dimh = 1;
+  int64_t numBatch = 1;
+
+  int64_t numChannels;
+  int64_t inputHeight;
+  int64_t inputWidth;
+
+  if(self.ndimension() == 4)
+  {
+    numBatch = self.size(0);
+    dimw++;
+    dimh++;
+  }
+  numChannels = self.size(dimh-1);
+  inputHeight = self.size(dimh);
+  inputWidth = self.size(dimw);
+
+  auto input_contiguous = self.contiguous();
+  auto indices_contiguous = indices.contiguous();
+
+  output.resize_({numBatch, numChannels, outputHeight, outputWidth});
+
+  output.zero_();
 
   dim3 block(512);
   dim3 grid((output.numel() + 512 - 1) / 512);
@@ -107,8 +132,8 @@ Tensor& MaxUnpooling2d_forward_out_cuda(
             0,
             at::cuda::getCurrentCUDAStream()>>>(
             self.numel(),
-            self.data<scalar_t>(),
-            indices.data<int64_t>(),
+            input_contiguous.data<scalar_t>(),
+            indices_contiguous.data<int64_t>(),
             numBatch,
             numChannels,
             inputHeight,
@@ -121,6 +146,10 @@ Tensor& MaxUnpooling2d_forward_out_cuda(
       cudaGetLastError() == cudaSuccess,
       "RoiPooling2d_forward_kernel failed with error code ",
       cudaGetLastError());
+  if(self.ndimension() == 3)
+  {
+    output.resize_({numChannels, outputHeight, outputWidth});
+  }
   return output;
 }
 
