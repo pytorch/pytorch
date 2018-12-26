@@ -2,57 +2,6 @@
 #define TH_GENERIC_FILE "generic/VolumetricMaxUnpooling.c"
 #else
 
-static inline void THNN_(VolumetricMaxUnpooling_shapeCheck)(
-                         THNNState *state,
-                         THTensor *input,
-                         THTensor *gradOutput,
-                         THIndexTensor *indices,
-                         int oT,
-                         int oW,
-                         int oH,
-                         int dT,
-                         int dW,
-                         int dH,
-                         int pT,
-                         int pW,
-                         int pH)
-{
-  THNN_ARGCHECK(!input->is_empty() && (input->dim() == 4 || input->dim() == 5), 2, input,
-                "non-empty 4D or 5D (batch mode) tensor expected for input, but got: %s");
-
-  THNN_CHECK_SHAPE_INDICES(input, indices);
-
-  THArgCheck(dT > 0 && dW > 0 && dH > 0, 10,
-             "stride should be greater than zero, but got dT: %d dH: %d dW: %d",
-             dT, dH, dW);
-
-  int dimw = 3;
-  int dimh = 2;
-  int dimt = 1;
-  int dimn = 0;
-
-  if (input->dim() == 5)
-  {
-    dimt++;
-    dimw++;
-    dimh++;
-    dimn++;
-  }
-  int nslices = input->size(dimn);
-
-  if (gradOutput != NULL) {
-    if (oT != gradOutput->size(dimt) || oW != gradOutput->size(dimw) || oH != gradOutput->size(dimh))
-    {
-      THError(
-        "Inconsistent gradOutput size. oT= %d, oH= %d, oW= %d, gradOutput: %dx%dx%d",
-        oT, oH, oW, gradOutput->size(dimt), gradOutput->size(dimh), gradOutput->size(dimw)
-      );
-    }
-
-    THNN_CHECK_DIM_SIZE(gradOutput, input->dim(), dimn, nslices);
-  }
-}
-
 void THNN_(VolumetricMaxUnpooling_updateOutput)(
           THNNState *state,
           THTensor *input,
@@ -71,47 +20,6 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
     THError("VolumetricMaxUnpooling_updateOutput has been deprecated");
 }
 
-static void THNN_(VolumetricMaxUnpooling_updateGradInput_frame)(
-          scalar_t *gradInput_p,
-          scalar_t *gradOutput_p,
-          THIndex_t *ind_p,
-          int nslices,
-          int iT,
-          int iW,
-          int iH,
-          int oT,
-          int oW,
-          int oH)
-{
-  int k;
-#pragma omp parallel for private(k)
-  for (k = 0; k < nslices; k++)
-  {
-    scalar_t *gradInput_p_k = gradInput_p + k * iT * iH * iW;
-    scalar_t *gradOutput_p_k = gradOutput_p + k * oT * oH * oW;
-    THIndex_t *ind_p_k = ind_p + k * iT * iH * iW;
-
-    int t, i, j, index;
-    THIndex_t maxp;
-    for (t = 0; t < iT; t++)
-    {
-      for (i = 0; i < iH; i++)
-      {
-        for (j = 0; j < iW; j++)
-        {
-          index = t * iH * iW + i * iW  + j;
-          maxp = ind_p_k[index] - TH_INDEX_BASE;  /* retrieve position of max */
-          if (maxp < 0 || maxp >= oT * oH * oW)
-          {
-            THError("invalid max index %ld, oT= %d, oW= %d, oH= %d", maxp, oT, oW, oH);
-          }
-          gradInput_p_k[index] = gradOutput_p_k[maxp];  /* update gradient */
-        }
-      }
-    }
-  }
-}
-
 void THNN_(VolumetricMaxUnpooling_updateGradInput)(
           THNNState *state,
           THTensor *input,
@@ -128,80 +36,7 @@ void THNN_(VolumetricMaxUnpooling_updateGradInput)(
           int pW,
           int pH)
 {
-  int dimw = 3;
-  int dimh = 2;
-  int dimt = 1;
-  int nbatch = 1;
-  int nslices;
-  int iT;
-  int iH;
-  int iW;
-  scalar_t *gradInput_data;
-  scalar_t *gradOutput_data;
-  THIndex_t *indices_data;
-
-  THNN_(VolumetricMaxUnpooling_shapeCheck)(
-        state, input, gradOutput, indices,
-        oT, oW, oH, dT, dW, dH, pT, pW, pH);
-
-  // TODO: check gradOutput shape
-  /* get contiguous gradOutput */
-  gradOutput = THTensor_(newContiguous)(gradOutput);
-  indices = THIndexTensor_(newContiguous)(indices);
-
-  /* resize */
-  THTensor_(resizeAs)(gradInput, input);
-  THTensor_(zero)(gradInput);
-
-  if (input->dim() == 5)
-  {
-    nbatch = input->size(0);
-    dimt++;
-    dimw++;
-    dimh++;
-  }
-
-  /* sizes */
-  nslices = input->size(dimt-1);
-  iT = input->size(dimt);
-  iH = input->size(dimh);
-  iW = input->size(dimw);
-
-  /* get raw pointers */
-  gradInput_data = gradInput->data<scalar_t>();
-  gradOutput_data = gradOutput->data<scalar_t>();
-  indices_data = THIndexTensor_(data)(indices);
-
-  /* backprop */
-  if (input->dim() == 4)
-  {
-    THNN_(VolumetricMaxUnpooling_updateGradInput_frame)(
-      gradInput_data, gradOutput_data,
-      indices_data,
-      nslices,
-      iT, iW, iH,
-      oT, oW, oH
-    );
-  }
-  else
-  {
-    int p;
-    for (p = 0; p < nbatch; p++)
-    {
-      THNN_(VolumetricMaxUnpooling_updateGradInput_frame)(
-        gradInput_data+p*nslices*iT*iW*iH,
-        gradOutput_data+p*nslices*oT*oW*oH,
-        indices_data+p*nslices*iT*iW*iH,
-        nslices,
-        iT, iW, iH,
-        oT, oW, oH
-      );
-    }
-  }
-
-  /* cleanup */
-  c10::raw::intrusive_ptr::decref(gradOutput);
-  THIndexTensor_(free)(indices);
+    THError("VolumetricMaxUnpooling_shapeCheck has been deprecated");
 }
 
 #endif
