@@ -733,10 +733,6 @@ Tensor all(const Tensor & self) {
   return at::legacy::th::_th_all(self);
 }
 
-Tensor any(const Tensor & self) {
-  return at::legacy::th::_th_any(self);
-}
-
 Tensor & renorm_out(Tensor & result, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
   return at::legacy::th::_th_renorm_out(result, self, p, dim, maxnorm);
 }

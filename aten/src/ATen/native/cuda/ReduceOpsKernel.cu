@@ -86,6 +86,13 @@ void mean_kernel_impl<int16_t, int16_t, int16_t>(TensorIterator& iter) {
 }
 #endif // __HIPCC__
 
+void or_kernel_impl(TensorIterator& iter) {
+  gpu_reduce_kernel<uint8_t, uint8_t>(
+    iter, func_wrapper<uint8_t> ([]GPU_LAMBDA(uint8_t a, uint8_t b) -> uint8_t {
+      return a || b;
+    }), false);
+}
+
 static void sum_kernel_cuda(TensorIterator& iter) {
   if (iter.type().scalarType() == kHalf) {
     return sum_kernel_impl<at::Half, float>(iter);
@@ -119,9 +126,14 @@ static void mean_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+static void or_kernel_cuda(TensorIterator& iter) {
+  or_kernel_impl(iter);
+}
+
 REGISTER_DISPATCH(std_stub, &std_kernel_cuda);
 REGISTER_DISPATCH(sum_stub, &sum_kernel_cuda);
 REGISTER_DISPATCH(prod_stub, &prod_kernel_cuda);
 REGISTER_DISPATCH(mean_stub, &mean_kernel_cuda);
+REGISTER_DISPATCH(or_stub, &or_kernel_cuda);
 
 }} // namespace at::native
