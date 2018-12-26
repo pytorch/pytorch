@@ -138,28 +138,19 @@ class CrossMapLRN2d(Function):
 class SyncBatchNorm(Function):
 
     @staticmethod
-    def forward(self, input, weight, bias, running_mean, running_var, eps, momentum, process_group=None):
+    def forward(self, input, weight, bias, running_mean, running_var, eps, momentum, process_group, world_size):
         input = input.contiguous()
 
         # calcualte mean/invstd for input.
         mean, invstd = torch.batch_norm_stats(input, eps)
-        if torch.distributed.is_initialized():
-            world_size = 0
-            if process_group:
-                world_size = torch.distributed.get_world_size(process_group)
-            else:
-                process_group = torch.distributed.get_default_group()
-                world_size = torch.distributed.get_world_size()
-            mean_all = torch.empty(world_size, mean.size(0), dtype=mean.dtype, device=mean.device)
-            invstd_all = torch.empty(world_size, invstd.size(0), dtype=invstd.dtype, device=invstd.device)
-            mean_l = [mean_all.narrow(0, i, 1) for i in range(world_size)]
-            invstd_l = [invstd_all.narrow(0, i, 1) for i in range(world_size)]
-            # using all_gather instead of all reduce so we can calculate mean/var in one go
-            torch.distributed.all_gather(mean_l, mean, process_group)
-            torch.distributed.all_gather(invstd_l, invstd, process_group)
-        else:
-            mean_all = mean.view(1, -1)
-            invstd_all = invstd.view(1, -1)
+
+        mean_all = torch.empty(world_size, mean.size(0), dtype=mean.dtype, device=mean.device)
+        invstd_all = torch.empty(world_size, invstd.size(0), dtype=invstd.dtype, device=invstd.device)
+        mean_l = list(mean_all.unbind(0))
+        invstd_l = list(invstd_all.unbind(0))
+        # using all_gather instead of all reduce so we can calculate mean/var in one go
+        torch.distributed.all_gather(mean_l, mean, process_group)
+        torch.distributed.all_gather(invstd_l, invstd, process_group)
 
         # calcualte global mean & invstd
         mean, invstd = torch.batch_norm_update_stats(
@@ -202,13 +193,14 @@ class SyncBatchNorm(Function):
 
         if self.needs_input_grad[0]:
             # synchronizing stats used to calculate input gradient.
+            # TODO: move div_ into batch_norm_backward_elemt kernel
             if torch.distributed.is_initialized():
                 torch.distributed.all_reduce(
                     mean_dy, torch.distributed.ReduceOp.SUM, process_group)
-                mean_dy = mean_dy / world_size
+                mean_dy.div_(world_size)
                 torch.distributed.all_reduce(
                     mean_dy_xmu, torch.distributed.ReduceOp.SUM, process_group)
-                mean_dy_xmu = mean_dy_xmu / world_size
+                mean_dy_xmu.div_(world_size)
             # backward pass for gradient calculation
             grad_input = torch.batch_norm_backward_elemt(
                 grad_output,
@@ -228,7 +220,7 @@ class SyncBatchNorm(Function):
         if weight is None or not self.needs_input_grad[2]:
             grad_bias = None
 
-        return grad_input, grad_weight, grad_bias, None, None, None, None, None
+        return grad_input, grad_weight, grad_bias, None, None, None, None, None, None
 
 
 _all_functions.append(CrossMapLRN2d)

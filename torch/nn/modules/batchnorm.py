@@ -421,8 +421,15 @@ class SyncBatchNorm(_BatchNorm):
             else:  # use exponential moving average
                 exponential_average_factor = self.momentum
 
+        world_size = 1
+        process_group = torch.distributed.group.WORLD 
+        if torch.distributed.is_initialized():
+            if self.process_group:
+                process_group = self.process_group
+            world_size = torch.distributed.get_world_size(process_group)
+
         # fallback to framework BN when synchronization is not necessary
-        if not self.training and self.track_running_stats:
+        if world_size == 1 or (not self.training and self.track_running_stats):
             return F.batch_norm(
                 input, self.running_mean, self.running_var, self.weight, self.bias,
                 self.training or not self.track_running_stats,
@@ -430,4 +437,4 @@ class SyncBatchNorm(_BatchNorm):
         else:
             return self._backend.SyncBatchNorm.apply(
                 input, self.weight, self.bias, self.running_mean, self.running_var,
-                self.eps, exponential_average_factor, self.process_group)
+                self.eps, exponential_average_factor, process_group, world_size)
