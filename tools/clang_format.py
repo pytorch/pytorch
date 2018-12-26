@@ -10,18 +10,19 @@ Running tools/clang_format.py manually with no arguments should replicate the pr
 Only files that are in CLANG_FORMAT_WHITELIST are checked.
 """
 import subprocess
-import glob
-import itertools
 import os
 import argparse
+import fnmatch
 import difflib
 import sys
+import re
 
 
-# Whitelist of files to check. Takes a glob syntax. Does not support
-# recursive globs ("**") because I am lazy and don't want to make that
-# work with Python 2.
-CLANG_FORMAT_WHITELIST = ["torch/csrc/jit/passes/alias_analysis*"]
+# Whitelist of directories to check. All files that in that directory
+# (recursively) will be checked.
+CLANG_FORMAT_WHITELIST = ["torch/csrc/jit/", "test/cpp/jit/"]
+
+CPP_FILE_REGEX = re.compile(".*\\.(h|cpp|cc|c|hpp)$")
 
 
 def parse_args():
@@ -43,21 +44,28 @@ def parse_args():
             "Otherwise, just print the changes and exit"
         ),
     )
+    parser.add_argument(
+        "--check-all",
+        action="store_true",
+        default=False,
+        help="If true, check all whitelisted files instead of just working copy changes",
+    )
     parser.add_argument("--verbose", "-v", action="store_true", default=False)
     return parser.parse_args()
 
 
 def get_whitelisted_files():
     """
-    Parse CLANG_FORMAT_WHITELIST and resolve all globs.
-    Returns the set of all whitelisted filenames.
+    Parse CLANG_FORMAT_WHITELIST and resolve all directories.
+    Returns the set of whitelist cpp source files.
     """
-    paths = [glob.glob(entry) for entry in CLANG_FORMAT_WHITELIST]
-    # flatten the files list
-    paths = itertools.chain(*paths)
-    # filter out directories
-    filenames = filter(lambda path: os.path.isfile(path), paths)
-    return set(filenames)
+    matches = []
+    for dir in CLANG_FORMAT_WHITELIST:
+        for root, dirnames, filenames in os.walk(dir):
+            for filename in filenames:
+                if CPP_FILE_REGEX.fullmatch(filename):
+                    matches.append(os.path.join(root, filename))
+    return set(matches)
 
 
 def get_changed_files(rev):
@@ -98,10 +106,13 @@ def get_diffs(files):
 def main():
     args = parse_args()
 
-    changed_files = get_changed_files(args.diff)
     whitelisted_files = get_whitelisted_files()
 
-    files_to_check = changed_files & whitelisted_files
+    if args.check_all:
+        files_to_check = whitelisted_files
+    else:
+        changed_files = get_changed_files(args.diff)
+        files_to_check = changed_files & whitelisted_files
 
     if args.verbose:
         print("Running clang-format on whitelisted files: ")
@@ -116,6 +127,11 @@ def main():
     if args.accept_changes:
         # run clang-format on the necessary files
         args = ["clang-format", "-i"]
+        args.extend(name_to_diffs.keys())
+        subprocess.check_output(args)
+
+        # add the changes so they will be committed
+        args = ["git", "add"]
         args.extend(name_to_diffs.keys())
         subprocess.check_output(args)
     else:

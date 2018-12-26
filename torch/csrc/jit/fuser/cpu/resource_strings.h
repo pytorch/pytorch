@@ -4,11 +4,15 @@
 
 #include <torch/csrc/jit/code_template.h>
 
-namespace torch { namespace jit { namespace fuser { namespace cpu {
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace cpu {
 
-/*with type_as not checking type of its input, a fusion group can have non-fp32 tensor as input.
-Correct code for this case is generated, however, nvrtc does not know how to handle int*_t integer types,
-so typedefs help it handle those cases*/
+/*with type_as not checking type of its input, a fusion group can have non-fp32
+tensor as input. Correct code for this case is generated, however, nvrtc does
+not know how to handle int*_t integer types, so typedefs help it handle those
+cases*/
 
 static auto type_declarations_template = CodeTemplate(R"(
 
@@ -29,9 +33,9 @@ struct TensorInfo<T, 0> {
 )");
 
 static auto cpu_compilation_unit_template = CodeTemplate(R"(
+#include <math.h>
 #include <cstddef>
 #include <cstdint>
-#include <math.h>
 
 template <typename scalar_t>
 scalar_t rsqrtf(scalar_t x) {
@@ -61,7 +65,7 @@ void ${kernelName}(IndexType totalElements, void ** args) {
 
 } // namespace cpu
 } // namespace fuser
-} // namespace jit 
+} // namespace jit
 } // namespace torch
 
 #endif // USE_CPU_FUSER
