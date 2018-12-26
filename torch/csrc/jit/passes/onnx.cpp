@@ -18,6 +18,16 @@ void removePrintOps(Block * block) {
       removePrintOps(b);
     }
     if (it->kind() == prim::Print || it->kind() == aten::warn) {
+      for (auto i = 0; i < it->inputs().size();) {
+        auto input = it->inputs().at(i);
+        // only handling constants bc of potential aliasing & side effects
+        if (input->uses().size() == 1 && input->node()->kind() == prim::Constant) {
+          it->removeInput(i);
+          input->node()->destroy();
+        } else {
+          ++i;
+        }
+      }
       it.destroyCurrent();
     }
   }
@@ -25,7 +35,6 @@ void removePrintOps(Block * block) {
 
 void removePrintOps(std::shared_ptr<Graph>& graph) {
   removePrintOps(graph->block());
-  EliminateDeadCode(graph);
 }
 
 // Transform PythonOps into Nodes that match ONNX semantics.
