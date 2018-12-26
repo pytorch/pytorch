@@ -72,9 +72,7 @@ bool deepEquals(const IValue& lhs, const IValue& rhs) {
 }
 
 struct AliasAndIValue {
-  AliasAndIValue(
-      c10::optional<at::AliasInfo> aliasInfo,
-      IValue iValue)
+  AliasAndIValue(c10::optional<at::AliasInfo> aliasInfo, IValue iValue)
       : aliasInfo(std::move(aliasInfo)), iValue(std::move(iValue)) {}
 
   const c10::optional<at::AliasInfo> aliasInfo;

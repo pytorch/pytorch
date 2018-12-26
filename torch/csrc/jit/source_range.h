@@ -1,7 +1,9 @@
 #pragma once
-#include <torch/csrc/jit/source_location.h>
 #include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/source_location.h>
 
+#include <algorithm>
+#include <memory>
 
 namespace torch {
 namespace jit {
@@ -10,10 +12,7 @@ namespace jit {
 // that
 // range.
 struct SourceRange : public SourceLocation {
-  SourceRange(
-      std::shared_ptr<std::string> file_,
-      size_t start_,
-      size_t end_)
+  SourceRange(std::shared_ptr<std::string> file_, size_t start_, size_t end_)
       : file_(std::move(file_)), start_(start_), end_(end_) {}
   const std::string text() const {
     return file().substr(start(), end() - start());
@@ -34,20 +33,22 @@ struct SourceRange : public SourceLocation {
     JIT_ASSERT(begin_line == 0 || str[begin_line - 1] == '\n');
     JIT_ASSERT(end_line == str.size() || str[end_line] == '\n');
 
-    size_t begin_highlight = begin_line; // beginning of context, CONTEXT lines before the highlight line
-    for(size_t i = 0; begin_highlight > 0; --begin_highlight) {
-      if(str[begin_highlight - 1] == '\n')
+    size_t begin_highlight = begin_line; // beginning of context, CONTEXT lines
+                                         // before the highlight line
+    for (size_t i = 0; begin_highlight > 0; --begin_highlight) {
+      if (str[begin_highlight - 1] == '\n')
         ++i;
-      if(i >= CONTEXT)
+      if (i >= CONTEXT)
         break;
     }
     JIT_ASSERT(begin_highlight == 0 || str[begin_highlight - 1] == '\n');
 
-    size_t end_highlight = end_line; // end of context, CONTEXT lines after the highlight line
-    for(size_t i = 0; end_highlight < str.size(); ++end_highlight) {
-      if(str[end_highlight] == '\n')
+    size_t end_highlight =
+        end_line; // end of context, CONTEXT lines after the highlight line
+    for (size_t i = 0; end_highlight < str.size(); ++end_highlight) {
+      if (str[end_highlight] == '\n')
         ++i;
-      if(i >= CONTEXT)
+      if (i >= CONTEXT)
         break;
     }
     JIT_ASSERT(end_highlight == str.size() || str[end_highlight] == '\n');
