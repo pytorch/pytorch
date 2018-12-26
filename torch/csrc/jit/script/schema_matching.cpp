@@ -1,8 +1,8 @@
-#include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/builtin_functions.h>
 #include <torch/csrc/jit/script/error_report.h>
+#include <torch/csrc/jit/script/schema_matching.h>
 
 namespace torch {
 namespace jit {
@@ -29,13 +29,13 @@ static inline bool isIntOrFloatUsedAsList(
 
 inline bool convertibleToList(const TypePtr& type, const TypePtr& list_type_) {
   auto list_type = list_type_->cast<ListType>();
-  if(!list_type) {
+  if (!list_type) {
     return false;
   }
-  if(type->isSubtypeOf(list_type_)) {
+  if (type->isSubtypeOf(list_type_)) {
     return true;
   }
-  if(auto tuple = type->cast<TupleType>()) {
+  if (auto tuple = type->cast<TupleType>()) {
     return std::all_of(
         tuple->elements().begin(),
         tuple->elements().end(),
@@ -46,21 +46,21 @@ inline bool convertibleToList(const TypePtr& type, const TypePtr& list_type_) {
   return false;
 }
 
-// applies implict conversion from value trying to turn it into type concrete_type
-// it succeeds if the return_value->isSubclassOf(concrete_type)
+// applies implict conversion from value trying to turn it into type
+// concrete_type it succeeds if the return_value->isSubclassOf(concrete_type)
 Value* tryConvertToType(
     const SourceRange& loc,
     Graph& graph,
     const TypePtr& concrete_type,
     Value* value,
     bool allow_conversions) {
-
   if (auto value_tuple = value->type()->cast<TupleType>()) {
     // Allow homogeneous tuples to be casted implicitly to lists of appropriate
     // types
     if (convertibleToList(value->type(), unwrapOptional(concrete_type))) {
       auto unpacked = createTupleUnpack(value);
-      auto elem_type = unwrapOptional(concrete_type)->expect<ListType>()->getElementType();
+      auto elem_type =
+          unwrapOptional(concrete_type)->expect<ListType>()->getElementType();
       value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
     }
     // inductively apply implicit conversions to tuples
@@ -82,27 +82,30 @@ Value* tryConvertToType(
     }
   }
 
-  if (value->type()->isSubtypeOf(NoneType::get()) && !concrete_type->isSubtypeOf(NoneType::get())){
+  if (value->type()->isSubtypeOf(NoneType::get()) &&
+      !concrete_type->isSubtypeOf(NoneType::get())) {
     if (concrete_type->isSubtypeOf(OptionalType::ofTensor())) {
       // create undefined tensor when None pass to a optional[tensor] formal arg
       value = graph.insertNode(graph.createUndefined())->output();
     } else if (auto optional_type = concrete_type->cast<OptionalType>()) {
-      value = graph.insertNode(graph.createNone(optional_type->getElementType()))->output();
+      value =
+          graph.insertNode(graph.createNone(optional_type->getElementType()))
+              ->output();
     }
   }
 
-  //implicit conversions
-  if(allow_conversions) {
-     if(concrete_type->isSubtypeOf(NumberType::get())
-      && value->type()->isSubtypeOf(DynamicType::get())) {
+  // implicit conversions
+  if (allow_conversions) {
+    if (concrete_type->isSubtypeOf(NumberType::get()) &&
+        value->type()->isSubtypeOf(DynamicType::get())) {
       auto n = graph.createImplicitTensorToNum(concrete_type, value);
       value = graph.insertNode(n)
-        ->setSourceLocation(std::make_shared<SourceRange>(loc))
-        ->output();
+                  ->setSourceLocation(std::make_shared<SourceRange>(loc))
+                  ->output();
     }
     if (value->type()->isSubtypeOf(StringType::get()) &&
-        DeviceObjType::get()->isSubtypeOf(concrete_type))  {
-      return graph.insert(aten::device, { value }, {}, loc);
+        DeviceObjType::get()->isSubtypeOf(concrete_type)) {
+      return graph.insert(aten::device, {value}, {}, loc);
     }
   }
 
@@ -116,7 +119,7 @@ Value* tryMatchArgument(
     const NamedValue& named_value,
     const std::function<std::ostream&()>& err,
     bool allow_conversions,
-    TypeEnv & type_env) {
+    TypeEnv& type_env) {
   Value* value = named_value.value(graph);
 
   // some functions that take lists of integers or floats for fixed size arrays
@@ -124,7 +127,8 @@ Value* tryMatchArgument(
   // the single int/float is then repeated to the length of the list
   if (isIntOrFloatUsedAsList(value, arg)) {
     std::vector<Value*> repeated(*arg.N(), value);
-    value = graph.insertNode(graph.createList(value->type(), repeated))->output();
+    value =
+        graph.insertNode(graph.createList(value->type(), repeated))->output();
   }
 
   const MatchTypeReturn matched_type =
@@ -140,8 +144,9 @@ Value* tryMatchArgument(
 
   value = tryConvertToType(loc, graph, concrete_type, value, allow_conversions);
 
-  if(!value->type()->isSubtypeOf(concrete_type)) {
-    err() << "expected a value of type " << concrete_type->str() << " for argument '" << arg.name() << "' but found "
+  if (!value->type()->isSubtypeOf(concrete_type)) {
+    err() << "expected a value of type " << concrete_type->str()
+          << " for argument '" << arg.name() << "' but found "
           << value->type()->str() << "\n"
           << named_value.locOr(loc);
     return nullptr;
@@ -152,8 +157,8 @@ Value* tryMatchArgument(
 c10::optional<size_t> findInputWithName(
     const std::string& name,
     at::ArrayRef<NamedValue> kwargs) {
-  for(size_t i = 0; i < kwargs.size(); ++i) {
-    if(kwargs[i].name() == name)
+  for (size_t i = 0; i < kwargs.size(); ++i) {
+    if (kwargs[i].name() == name)
       return i;
   }
   return c10::nullopt;
@@ -166,12 +171,13 @@ Value* tryCreateList(
     at::ArrayRef<NamedValue> varargs,
     const std::function<std::ostream&()>& err,
     bool convert_tensor_to_num,
-    TypeEnv & type_env) {
+    TypeEnv& type_env) {
   Argument elem_arg("<varargs>", elem_type);
   std::vector<Value*> list_ctor;
-  for(const auto& a : varargs) {
-    Value* av = tryMatchArgument(elem_arg, graph, loc, a, err, convert_tensor_to_num, type_env);
-    if(!av)
+  for (const auto& a : varargs) {
+    Value* av = tryMatchArgument(
+        elem_arg, graph, loc, a, err, convert_tensor_to_num, type_env);
+    if (!av)
       return nullptr;
     list_ctor.push_back(av);
   }
@@ -206,9 +212,10 @@ c10::optional<MatchedSchema> tryMatchSchema(
       self = c10::nullopt;
     } else if (!arg.kwarg_only() && used_args < args.size()) {
       // allow zeros(IntList sizes) to work with zeros(1, 2) or zeros(1)
-      if (arg.type()->kind() == TypeKind::ListType && // the formal must be a list
-          !arg.N() && // it must not be a broadcasting list like int[3], otherwise
-                    // a single int is a valid input
+      if (arg.type()->kind() ==
+              TypeKind::ListType && // the formal must be a list
+          !arg.N() && // it must not be a broadcasting list like int[3],
+                      // otherwise a single int is a valid input
           (schema_i + 1 == schema.arguments().size() ||
            schema.arguments()[schema_i + 1]
                .kwarg_only())) { // must be the last position argument
@@ -216,8 +223,10 @@ c10::optional<MatchedSchema> tryMatchSchema(
         if (actual_type->kind() != TypeKind::ListType &&
             !convertibleToList(
                 actual_type,
-                unwrapOptional(arg.type()))) { // and the actual should not be a list already
-          auto elem_type = unwrapOptional(arg.type())->expect<ListType>()->getElementType();
+                unwrapOptional(arg.type()))) { // and the actual should not be a
+                                               // list already
+          auto elem_type =
+              unwrapOptional(arg.type())->expect<ListType>()->getElementType();
           Value* list = tryCreateList(
               elem_type,
               graph,
@@ -254,19 +263,19 @@ c10::optional<MatchedSchema> tryMatchSchema(
             << loc;
       return c10::nullopt;
     }
-    Value* positional = tryMatchArgument(
-        arg, graph, loc, *v, err, allow_conversions, type_env);
+    Value* positional =
+        tryMatchArgument(arg, graph, loc, *v, err, allow_conversions, type_env);
     if (!positional)
       return c10::nullopt;
     positional_inputs.push_back(positional);
   }
   // check for unused self argument
-  if(self != c10::nullopt) {
+  if (self != c10::nullopt) {
     err() << "provided self argument not used in schema\n";
   }
 
   if (schema.is_vararg()) {
-    for(;used_args < args.size(); ++used_args) {
+    for (; used_args < args.size(); ++used_args) {
       positional_inputs.push_back(args[used_args].value(graph));
     }
   }
@@ -296,11 +305,10 @@ c10::optional<MatchedSchema> tryMatchSchema(
   return MatchedSchema{std::move(positional_inputs), std::move(return_types)};
 }
 
-
-// pack outputs of a function following python rules. If there is a single value return
-// a SimpleValue, otherwise pack all the values into a Tuple.
+// pack outputs of a function following python rules. If there is a single value
+// return a SimpleValue, otherwise pack all the values into a Tuple.
 Value* packOutputs(Graph& g, at::ArrayRef<Value*> values) {
-  if(values.size() == 1) {
+  if (values.size() == 1) {
     return values[0];
   }
   return g.insertNode(g.createTuple(values))->output();
@@ -314,9 +322,9 @@ static Value* emitBuiltinNode(
     Graph& graph,
     Symbol name) {
   auto n = graph.insertNode(graph.create(name, matched_schema.inputs, 0))
-                ->setSourceLocation(std::make_shared<SourceRange>(loc));
+               ->setSourceLocation(std::make_shared<SourceRange>(loc));
 
-  for(auto & ret : matched_schema.return_types) {
+  for (auto& ret : matched_schema.return_types) {
     n->addOutput()->setType(ret);
   }
 
@@ -327,11 +335,13 @@ static Value* emitBuiltinNode(
   return packOutputs(graph, n->outputs());
 }
 
-static std::string prefixLine(const std::string& str, const std::string& prefix) {
+static std::string prefixLine(
+    const std::string& str,
+    const std::string& prefix) {
   std::stringstream ss;
   bool was_newline = true;
-  for(auto c : str) {
-    if(was_newline)
+  for (auto c : str) {
+    if (was_newline)
       ss << prefix;
     ss.put(c);
     was_newline = c == '\n';
@@ -342,23 +352,21 @@ static std::string prefixLine(const std::string& str, const std::string& prefix)
 // Search for operators matching the provided symbol name and input types.
 // If one is found, emit a node to the graph for that operator.
 Value* emitBuiltinCall(
-  const SourceRange& loc,
-  Graph& graph,
-  Symbol name,
-  const c10::optional<NamedValue>& self,
-  at::ArrayRef<NamedValue> inputs,
-  at::ArrayRef<NamedValue> attributes,
-  // if true, emitBuiltinCall will throw an exception if this builtin does not exist,
-  // otherwise it will return nullptr if the builtin is not found.
-  bool required) {
-
-
+    const SourceRange& loc,
+    Graph& graph,
+    Symbol name,
+    const c10::optional<NamedValue>& self,
+    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> attributes,
+    // if true, emitBuiltinCall will throw an exception if this builtin does not
+    // exist, otherwise it will return nullptr if the builtin is not found.
+    bool required) {
   const auto& variants = getAllOperatorsFor(name);
   const auto& builtin_functions = getAllBuiltinFunctionsFor(name);
 
   std::stringstream failure_messages;
-  //first we try to match the schema without any conversion
-  //if no schema matches then insert ImplicitTensorToNum
+  // first we try to match the schema without any conversion
+  // if no schema matches then insert ImplicitTensorToNum
   for (bool allow_conversions : {false, true}) {
     // clear previous error messages
     failure_messages.str("");
@@ -396,14 +404,13 @@ Value* emitBuiltinCall(
   if (!required) {
     return nullptr;
   }
-  if(variants.size() == 0) {
+  if (variants.size() == 0) {
     throw ErrorReport(loc) << "unknown builtin op";
   }
   throw ErrorReport(loc) << "arguments for call are not valid:\n"
                          << prefixLine(failure_messages.str(), "  ")
                          << "for call at";
 }
-
 
 } // namespace script
 } // namespace jit
