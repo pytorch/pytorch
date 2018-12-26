@@ -5,7 +5,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 // keeping THC headers for atomicAdd
-#include <THC/THCGeneral.h>
+#include <THC/THCAtomics.cuh>
 
 namespace at {
 namespace native {
@@ -25,8 +25,8 @@ inline void get_index_mapping(
   auto output_offset =
     (blockIdx.y + blockIdx.z * gridDim.y) * output_w;
 
-  auto i_start_x = ::max(0L, (long)-pad_l);
-  auto o_start_x = ::max(0L, (long)pad_l);
+  auto i_start_x = ::max(int64_t(0), -pad_l);
+  auto o_start_x = ::max(int64_t(0), pad_l);
 
   int64_t input_x = ::abs(output_x - pad_l)
                     - ::abs(output_x - (input_w + pad_l - 1))

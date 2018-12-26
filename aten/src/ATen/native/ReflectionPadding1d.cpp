@@ -13,8 +13,8 @@ static void reflection_pad1d_out_frame(
     int64_t nslices,
     int64_t iwidth, int64_t owidth,
     int64_t pad_l) {
-  int64_t i_start_x = std::max(0L, (long)-pad_l);
-  int64_t o_start_x = std::max(0L, (long)pad_l);
+  int64_t i_start_x = std::max(int64_t(0), -pad_l);
+  int64_t o_start_x = std::max(int64_t(0), pad_l);
 
   int64_t k, ip_x;
 #pragma omp parallel for private(k, ip_x)
@@ -110,8 +110,8 @@ static void reflection_pad1d_backward_out_frame(
     int64_t nplane,
     int64_t input_w, int64_t output_w,
     int64_t pad_l) {
-  int64_t i_start_x = std::max(0L, (long)-pad_l);
-  int64_t o_start_x = std::max(0L, (long)pad_l);
+  int64_t i_start_x = std::max(int64_t(0), -pad_l);
+  int64_t o_start_x = std::max(int64_t(0), pad_l);
 
   int64_t k, ip_x;
 #pragma omp parallel for private(k, ip_x)
