@@ -423,7 +423,7 @@ class SyncBatchNorm(_BatchNorm):
                 exponential_average_factor = self.momentum
 
         world_size = 1
-        process_group = torch.distributed.group.WORLD 
+        process_group = torch.distributed.group.WORLD
         if torch.distributed.is_initialized():
             if self.process_group:
                 process_group = self.process_group
