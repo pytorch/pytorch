@@ -2142,8 +2142,8 @@ class _TestTorchMixin(object):
             torch.tensor([0, 0, 5, 0, 0], dtype=torch.float, device=device),
             actual)
         # no element falls between [min, max]
-        actual = torch.histc(torch.ones(5, dtype=torch.float, device=device),
-            bins=5, min=2, max=3)
+        actual = torch.histc(
+            torch.ones(5, dtype=torch.float, device=device), bins=5, min=2, max=3)
         self.assertEqual(
             torch.tensor([0, 0, 0, 0, 0], dtype=torch.float, device=device),
             actual)
@@ -2177,7 +2177,7 @@ class _TestTorchMixin(object):
             actual)
 
     def test_histc_cpu(self):
-        self._test_histc(self, 'cpu');
+        self._test_histc(self, 'cpu')
 
     def test_ones(self):
         res1 = torch.ones(100, 100)
