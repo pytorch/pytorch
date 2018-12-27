@@ -23,7 +23,7 @@ from itertools import product, combinations
 from functools import reduce
 from torch import multiprocessing as mp
 from common_methods_invocations import tri_tests_args, run_additional_tri_tests, \
-    _compare_trilu_indices
+    _compare_trilu_indices, _compare_all_results
 from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     TEST_LIBROSA, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfRocm, do_test_dtypes, do_test_empty_full, \
@@ -378,6 +378,9 @@ class _TestTorchMixin(object):
                     for k in range(50):
                         res2[i, j] += m1[i, k] * m2[k, j]
             self.assertEqual(res1, res2)
+
+    def test_func_all(self):
+        _compare_all_results(self, 'cpu')
 
     def test_allclose(self):
         x = torch.tensor([1.0, 2.0, 3.0])
