@@ -12,8 +12,8 @@ bool hasSubgraph(Node* n) {
 // Combine the nodes in two subgraph together. The nodes will end up in
 // `mergeTo`, and `mergeFrom` is destroyed.
 void mergeSubgraph(Node* mergeTo, Node* mergeFrom) {
-  Node * nodeBeforeMergeFrom = mergeFrom->prev();
-  Node * nodeAfterMergeFrom = mergeFrom->next();
+  Node* nodeBeforeMergeFrom = mergeFrom->prev();
+  Node* nodeAfterMergeFrom = mergeFrom->next();
   unmergeSubgraph(mergeFrom);
   std::vector<Node*> nodes;
   const auto end_it = nodeBeforeMergeFrom->reverseIterator();
@@ -21,7 +21,7 @@ void mergeSubgraph(Node* mergeTo, Node* mergeFrom) {
   ++it;
   while (it != end_it) {
     // NB: mergeNodeIntoSubgraph destroys node, hence the complications
-    Node * node = *it;
+    Node* node = *it;
     ++it;
     mergeNodeIntoSubgraph(node, mergeTo);
   }
@@ -36,7 +36,8 @@ void unmergeSubgraph(Node* subgraphNode) {
   JIT_ASSERT(subgraphNode->kind() == prim::DifferentiableGraph);
 
   // Inline the graph, replace uses of node outputs and destroy the node
-  const auto subgraphOutputs = inlineGraph(getSubgraph(subgraphNode), subgraphNode->inputs(), subgraphNode);
+  const auto subgraphOutputs = inlineGraph(
+      getSubgraph(subgraphNode), subgraphNode->inputs(), subgraphNode);
   JIT_ASSERT(subgraphOutputs.size() >= subgraphNode->outputs().size());
   for (size_t i = 0; i < subgraphNode->outputs().size(); ++i) {
     subgraphNode->outputs()[i]->replaceAllUsesWith(subgraphOutputs[i]);
@@ -127,9 +128,12 @@ void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode) {
   toMerge->destroy();
 }
 
-// Invariant we depend on in mergeSubgraph: All inlined nodes are created between
-// the node preceding insertBefore and insertBefore.
-std::vector<Value*> inlineGraph(const std::shared_ptr<Graph>& subgraph, at::ArrayRef<Value*> outerInputs, Node * insertBefore) {
+// Invariant we depend on in mergeSubgraph: All inlined nodes are created
+// between the node preceding insertBefore and insertBefore.
+std::vector<Value*> inlineGraph(
+    const std::shared_ptr<Graph>& subgraph,
+    at::ArrayRef<Value*> outerInputs,
+    Node* insertBefore) {
   auto outerGraph = insertBefore->owningGraph();
 
   // Initialize a map of inner graph values to outer graph values
@@ -152,10 +156,9 @@ std::vector<Value*> inlineGraph(const std::shared_ptr<Graph>& subgraph, at::Arra
     }
   }
 
-  return fmap(subgraph->outputs(),
-              [&](Value * output) {
-                return innerToOuter.at(output);
-              });
+  return fmap(subgraph->outputs(), [&](Value* output) {
+    return innerToOuter.at(output);
+  });
 }
 
 Node* createSingletonSubgraph(Node* n, Symbol subgraphKind) {
