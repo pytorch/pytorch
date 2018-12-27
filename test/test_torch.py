@@ -3770,19 +3770,40 @@ class _TestTorchMixin(object):
 
     @staticmethod
     def _test_triu_tril(self, cast):
-        def run_test(shape, cast, diagonal):
-            x = cast(torch.randn(*shape))
-            res1 = torch.triu(x, diagonal=diagonal)
-            res2 = cast(torch.Tensor())
-            torch.triu(x, diagonal=diagonal, out=res2)
-            self.assertEqual(res1, res2, 0)
-            res1 = torch.tril(x, diagonal=diagonal)
-            res2 = cast(torch.Tensor())
-            torch.tril(x, diagonal=diagonal, out=res2)
-            self.assertEqual(res1, res2, 0)
+        def gen_mask(shape, diagonal, cast, upper):
+            mask = torch.zeros(*shape[-2:]).byte()
+            for i in range(shape[-2]):
+                for j in range(shape[-1]):
+                    cond = j - i < diagonal if upper else j - i > diagonal
+                    if cond:
+                        mask[i, j] = 1
+            return cast(mask.expand(*shape))
 
-            # check by adding
-            self.assertEqual(x, x.triu(diagonal) + x.tril(diagonal - 1))
+        torch_functions = {True: torch.triu, False: torch.tril}
+        if TEST_NUMPY:
+            numpy_functions = {True: np.triu, False: np.tril}
+
+        def run_test(shape, cast, diagonal):
+            x_cpu = torch.randn(*shape)
+            x = cast(x_cpu)
+
+            for upper in [True, False]:
+                # normal test with mask
+                torch_tri_func = torch_functions[upper]
+                res1 = torch_tri_func(x, diagonal=diagonal)
+                res2 = cast(torch.Tensor())
+                torch_tri_func(x, diagonal=diagonal, out=res2)
+                exp_mask = gen_mask(shape, diagonal, cast, upper)
+                expected = torch.where(exp_mask, torch.tensor(0).type_as(x), x)
+                self.assertEqual(res1, res2, 0)
+                self.assertEqual(expected, res1, 0)
+
+                if not TEST_NUMPY:
+                    continue
+
+                # numpy test
+                numpy_tri_func = numpy_functions[upper]
+                self.assertEqual(numpy_tri_func(x_cpu.numpy(), diagonal), expected.cpu().numpy())
 
         diagonals = [-2, -1, 0, 1, 2]
         shapes = [(3, 3), (5, 3, 3), (7, 5, 3, 3),  # square matrices

@@ -445,6 +445,9 @@ Tensor tril(const Tensor& self, int64_t k) {
 }
 
 Tensor& tril_cpu_(Tensor &self, int64_t k) {
+  if (self.numel() == 0) {
+    return self;
+  }
   if (!self.is_contiguous()) self = self.contiguous();
   AT_DISPATCH_ALL_TYPES(self.type(), "tril", [&]{
     apply_triu_tril<scalar_t, true, false>(self, self, k);
@@ -454,6 +457,9 @@ Tensor& tril_cpu_(Tensor &self, int64_t k) {
 
 Tensor& tril_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
   result = at::empty_like(self);
+  if (self.numel() == 0) {
+    return result;
+  }
   Tensor self_c = self.is_contiguous() ? self : self.contiguous();
   AT_DISPATCH_ALL_TYPES(self.type(), "tril", [&]{
     apply_triu_tril<scalar_t, false, false>(result, self_c, k);
@@ -468,6 +474,9 @@ Tensor triu(const Tensor& self, int64_t k) {
 }
 
 Tensor& triu_cpu_(Tensor &self, int64_t k) {
+  if (self.numel() == 0) {
+    return self;
+  }
   if (!self.is_contiguous()) self = self.contiguous();
   AT_DISPATCH_ALL_TYPES(self.type(), "triu", [&]{
     apply_triu_tril<scalar_t, true, true>(self, self, k);
@@ -477,6 +486,9 @@ Tensor& triu_cpu_(Tensor &self, int64_t k) {
 
 Tensor& triu_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
   result = at::empty_like(self);
+  if (self.numel() == 0) {
+    return result;
+  }
   Tensor self_c = self.is_contiguous() ? self : self.contiguous();
   AT_DISPATCH_ALL_TYPES(self.type(), "triu", [&]{
     apply_triu_tril<scalar_t, false, true>(result, self_c, k);
