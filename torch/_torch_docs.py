@@ -5522,7 +5522,7 @@ full_like(input, fill_value, out=None, dtype=None, layout=torch.strided, device=
 
 Returns a tensor with the same size as :attr:`input` filled with :attr:`fill_value`.
 ``torch.full_like(input, fill_value)`` is equivalent to
-``torch.full_like(input.size(), fill_value, dtype=input.dtype, layout=input.layout, device=input.device)``.
+``torch.full(input.size(), fill_value, dtype=input.dtype, layout=input.layout, device=input.device)``.
 
 Args:
     {input}
