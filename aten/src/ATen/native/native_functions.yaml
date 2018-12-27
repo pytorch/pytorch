@@ -956,6 +956,14 @@
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias={}) -> Tensor
 
+- func: fbgemm_linear_int8_weight(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
+
+- func: fbgemm_linear_quantize_weight(Tensor input) -> (Tensor, Tensor, double, int64_t)
+
+- func: fbgemm_pack_quantized_matrix(Tensor input, int64_t K, int64_t N) -> Tensor
+
+- func: fbgemm_is_cpu_supported() -> bool
+
 - func: linspace(Scalar start, Scalar end, int64_t steps=100, TensorOptions options={}) -> Tensor
 
 - func: linspace_out(Tensor result, Scalar start, Scalar end, int64_t steps=100) -> Tensor
@@ -3427,15 +3435,27 @@
 
 - func: replication_pad1d_out(Tensor output, Tensor self, IntList[2] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: replication_pad1d_out_cpu
+    CUDA: replication_pad1d_out_cuda
 
 - func: replication_pad1d(Tensor self, IntList[2] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: replication_pad1d_cpu
+    CUDA: replication_pad1d_cuda
 
 - func: replication_pad1d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, IntList[2] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: replication_pad1d_backward_out_cpu
+    CUDA: replication_pad1d_backward_out_cuda
 
 - func: replication_pad1d_backward(Tensor grad_output, Tensor self, IntList[2] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: replication_pad1d_backward_cpu
+    CUDA: replication_pad1d_backward_cuda
 
 - func: replication_pad2d_out(Tensor output, Tensor self, IntList[4] padding) -> Tensor
   python_module: nn

@@ -3,11 +3,12 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/script/module.h>
 
-namespace torch { namespace jit { namespace script {
-
+namespace torch {
+namespace jit {
+namespace script {
 
 TORCH_API const std::vector<Method*>& getAllBuiltinFunctionsFor(Symbol name);
 
-
-
-}}}
+}
+} // namespace jit
+} // namespace torch

@@ -266,7 +266,7 @@ class PytorchCommand(setuptools.Command):
 # Version, create_version_file, and package_name
 ################################################################################
 package_name = os.getenv('TORCH_PACKAGE_NAME', 'torch')
-version = '1.0.0a0'
+version = '1.1.0a0'
 if os.getenv('PYTORCH_BUILD_VERSION'):
     assert os.getenv('PYTORCH_BUILD_NUMBER') is not None
     build_number = int(os.getenv('PYTORCH_BUILD_NUMBER'))
@@ -962,6 +962,7 @@ if __name__ == '__main__':
                 'lib/include/torch/csrc/*.h',
                 'lib/include/torch/csrc/api/include/torch/*.h',
                 'lib/include/torch/csrc/api/include/torch/data/*.h',
+                'lib/include/torch/csrc/api/include/torch/data/dataloader/*.h',
                 'lib/include/torch/csrc/api/include/torch/data/datasets/*.h',
                 'lib/include/torch/csrc/api/include/torch/data/detail/*.h',
                 'lib/include/torch/csrc/api/include/torch/data/samplers/*.h',

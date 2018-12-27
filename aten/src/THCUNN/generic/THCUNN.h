@@ -1170,19 +1170,6 @@ THC_API void THNN_(TemporalReflectionPadding_updateGradInput)(
                   THCTensor *gradInput,
                   int padL, int padR);
 
-THC_API void THNN_(TemporalReplicationPadding_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  int padL, int padR);
-
-THC_API void THNN_(TemporalReplicationPadding_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  int padL, int padR);
-
 THC_API void THNN_(TemporalUpSamplingLinear_updateOutput)(
                   THCState *state,
                   THCTensor *input,
