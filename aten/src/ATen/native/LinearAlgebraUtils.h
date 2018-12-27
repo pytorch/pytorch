@@ -41,6 +41,14 @@ static inline int64_t matrixStride(const Tensor& batched_matrices) {
   return batched_matrices.size(-1) * batched_matrices.size(-2);
 }
 
+// Checks if a given tensor has 0s in its stride
+static inline bool checkZeroStride(const Tensor& tensor) {
+  for (auto& stride : tensor.strides()) {
+    if (stride == 0) return true;
+  }
+  return false;
+}
+
 // Returns the epsilon value for floating types except half
 static inline double _get_epsilon(const ScalarType& sc_type) {
   switch (sc_type) {

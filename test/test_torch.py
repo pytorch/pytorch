@@ -3798,12 +3798,42 @@ class _TestTorchMixin(object):
                 self.assertEqual(res1, res2, 0)
                 self.assertEqual(expected, res1, 0)
 
+                # non-contiguous and expanded tensors test
+                if not (0 in shape or 1 in shape):
+                    # non-contiguous tensors
+                    x_nc = x.clone().transpose(-2, -1)
+                    exp_mask = gen_mask(shape[:-2] + (shape[-1], shape[-2]), diagonal, cast, upper)
+                    assert not x_nc.is_contiguous(), "x is intentionally non-contiguous"
+                    exp_nc = torch.where(exp_mask, torch.tensor(0).type_as(x), x_nc)
+                    self.assertEqual(torch_tri_func(x_nc, diagonal), exp_nc, 0)
+                    if upper:
+                        self.assertEqual(x_nc.triu_(diagonal), exp_nc, 0)
+                    else:
+                        self.assertEqual(x_nc.tril_(diagonal), exp_nc, 0)
+                    self.assertFalse(x_nc.is_contiguous(),
+                                     "x_nc should remain non-contiguous")
+
+                    # expanded tensors
+                    expanded_size = (x.size(0),) + x.size()
+                    x_expanded = x.clone().expand(*expanded_size)
+                    assert 0 in x_expanded.stride(), "x intentionally has 0 in its stride"
+                    output = torch_tri_func(x_expanded, diagonal)
+                    self.assertEqual(output, expected.expand(expanded_size), 0)
+                    self.assertTrue(0 in x_expanded.stride(),
+                                    "geometry of x_expanded should be the same")
+                    if upper:
+                        self.assertEqual(output, x_expanded.triu_(diagonal), 0)
+                    else:
+                        self.assertEqual(output, x_expanded.tril_(diagonal), 0)
+                    self.assertTrue(x_expanded.is_contiguous(),
+                                    "expanded tensors should be made contiguous by inplace op")
+
                 if not TEST_NUMPY:
                     continue
 
                 # numpy test
                 numpy_tri_func = numpy_functions[upper]
-                self.assertEqual(numpy_tri_func(x_cpu.numpy(), diagonal), expected.cpu().numpy())
+                self.assertEqual(numpy_tri_func(x_cpu.numpy(), diagonal), res1.cpu().numpy())
 
         diagonals = [-2, -1, 0, 1, 2]
         shapes = [(3, 3), (5, 3, 3), (7, 5, 3, 3),  # square matrices

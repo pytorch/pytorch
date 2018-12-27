@@ -409,7 +409,7 @@ void apply_triu_tril(Tensor& result, const Tensor& self, int64_t k) {
   auto n = self.size(-2);
   auto m = self.size(-1);
   auto self_data = self.data<scalar_t>();
-  auto self_stride = matrixStride(self);
+  auto self_stride = self.dim() > 2 ? self.stride(-3) : n * m;
   auto batchsize = batchCount(self);
   auto self_row_stride = self.stride(-2);
   auto self_column_stride = self.stride(-1);
@@ -417,7 +417,7 @@ void apply_triu_tril(Tensor& result, const Tensor& self, int64_t k) {
   auto result_data = result.data<scalar_t>();
   int64_t result_stride, result_row_stride, result_column_stride;
   if (result_data != self_data) {
-    result_stride = matrixStride(result);
+    result_stride = result.dim() > 2 ? result.stride(-3) : n * m;
     result_row_stride = result.stride(-2);
     result_column_stride = result.stride(-1);
   } else {
@@ -448,7 +448,7 @@ Tensor& tril_cpu_(Tensor &self, int64_t k) {
   if (self.numel() == 0) {
     return self;
   }
-  if (!self.is_contiguous()) self = self.contiguous();
+  if (checkZeroStride(self)) self = self.contiguous();
   AT_DISPATCH_ALL_TYPES(self.type(), "tril", [&]{
     apply_triu_tril<scalar_t, true, false>(self, self, k);
   });
@@ -460,7 +460,7 @@ Tensor& tril_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
   if (self.numel() == 0) {
     return result;
   }
-  Tensor self_c = self.is_contiguous() ? self : self.contiguous();
+  Tensor self_c = checkZeroStride(self) ? self.contiguous() : self;
   AT_DISPATCH_ALL_TYPES(self.type(), "tril", [&]{
     apply_triu_tril<scalar_t, false, false>(result, self_c, k);
   });
@@ -477,7 +477,7 @@ Tensor& triu_cpu_(Tensor &self, int64_t k) {
   if (self.numel() == 0) {
     return self;
   }
-  if (!self.is_contiguous()) self = self.contiguous();
+  if (checkZeroStride(self)) self = self.contiguous();
   AT_DISPATCH_ALL_TYPES(self.type(), "triu", [&]{
     apply_triu_tril<scalar_t, true, true>(self, self, k);
   });
@@ -489,7 +489,7 @@ Tensor& triu_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
   if (self.numel() == 0) {
     return result;
   }
-  Tensor self_c = self.is_contiguous() ? self : self.contiguous();
+  Tensor self_c = checkZeroStride(self) ? self.contiguous() : self;
   AT_DISPATCH_ALL_TYPES(self.type(), "triu", [&]{
     apply_triu_tril<scalar_t, false, true>(result, self_c, k);
   });
