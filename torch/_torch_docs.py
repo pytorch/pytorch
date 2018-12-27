@@ -3904,38 +3904,6 @@ Example::
     tensor([])
 """.format(**factory_data_common_args))
 
-add_docstr(torch.range,
-           r"""
-range(start=0, end, step=1, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
-
-Returns a 1-D tensor of size :math:`\left\lfloor \frac{\text{end} - \text{start}}{\text{step}} \right\rfloor + 1`
-with values from :attr:`start` to :attr:`end` with step :attr:`step`. Step is
-the gap between two values in the tensor.
-
-.. math::
-    \text{out}_{i+1} = \text{out}_i + \text{step}.
-""" + r"""
-.. warning::
-    This function is deprecated in favor of :func:`torch.arange`.
-
-Args:
-    start (float): the starting value for the set of points. Default: ``0``.
-    end (float): the ending value for the set of points
-    step (float): the gap between each pair of adjacent points. Default: ``1``.
-    {out}
-    {dtype}
-    {layout}
-    {device}
-    {requires_grad}
-
-Example::
-
-    >>> torch.range(1, 4)
-    tensor([ 1.,  2.,  3.,  4.])
-    >>> torch.range(1, 4, 0.5)
-    tensor([ 1.0000,  1.5000,  2.0000,  2.5000,  3.0000,  3.5000,  4.0000])
-""".format(**factory_common_args))
-
 add_docstr(torch.arange,
            r"""
 arange(start=0, end, step=1, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor

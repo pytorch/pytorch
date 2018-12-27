@@ -781,7 +781,7 @@ void THCTensor_(btrifact)(THCState *state, THCTensor *ra_, THCudaIntTensor *rpiv
 
   if (!pivot) {
     THCudaIntTensor *t = THCudaIntTensor_new(state);
-    THCudaIntTensor_range(state, t, 1, n, 1);
+    THCudaIntTensor_arange(state, t, 1, n-1, 1);
     THCudaIntTensor_unsqueeze1d(state, t, t, 0);
     THCudaIntTensor** ptrs = (THCudaIntTensor**) THAlloc(sizeof(THCudaIntTensor*)*num_batches);
     for (int64_t i=0; i<num_batches; i++) {

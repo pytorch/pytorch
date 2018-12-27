@@ -2904,50 +2904,6 @@ class _TestTorchMixin(object):
         self._spawn_method(test_method, torch.Tensor([1, 1, nan]))
         self._spawn_method(test_method, torch.Tensor([0, 1, 0]))
 
-    @suppress_warnings
-    def test_range(self):
-        res1 = torch.range(0, 1)
-        res2 = torch.Tensor()
-        torch.range(0, 1, out=res2)
-        self.assertEqual(res1, res2, 0)
-
-        # Check range for non-contiguous tensors.
-        x = torch.zeros(2, 3)
-        torch.range(0, 3, out=x.narrow(1, 1, 2))
-        res2 = torch.Tensor(((0, 0, 1), (0, 2, 3)))
-        self.assertEqual(x, res2, 1e-16)
-
-        # Check negative
-        res1 = torch.Tensor((1, 0))
-        res2 = torch.Tensor()
-        torch.range(1, 0, -1, out=res2)
-        self.assertEqual(res1, res2, 0)
-
-        # Equal bounds
-        res1 = torch.ones(1)
-        res2 = torch.Tensor()
-        torch.range(1, 1, -1, out=res2)
-        self.assertEqual(res1, res2, 0)
-        torch.range(1, 1, 1, out=res2)
-        self.assertEqual(res1, res2, 0)
-
-        # FloatTensor
-        res1 = torch.range(0.6, 0.9, 0.1, out=torch.FloatTensor())
-        self.assertEqual(res1.size(0), 4)
-        res1 = torch.range(1, 10, 0.3, out=torch.FloatTensor())
-        self.assertEqual(res1.size(0), 31)
-
-        # DoubleTensor
-        res1 = torch.range(0.6, 0.9, 0.1, out=torch.DoubleTensor())
-        self.assertEqual(res1.size(0), 4)
-        res1 = torch.range(1, 10, 0.3, out=torch.DoubleTensor())
-        self.assertEqual(res1.size(0), 31)
-
-    def test_range_warning(self):
-        with warnings.catch_warnings(record=True) as w:
-            torch.range(0, 10)
-            self.assertEqual(len(w), 1)
-
     def test_arange(self):
         res1 = torch.arange(0, 1)
         res2 = torch.Tensor()
