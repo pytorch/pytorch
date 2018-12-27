@@ -1,8 +1,8 @@
+#include <torch/csrc/jit/passes/onnx.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/symbolic.h>
 #include <torch/csrc/jit/assertions.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/onnx.h>
 #include <torch/csrc/utils/functional.h>
 #include <torch/csrc/utils/pybind.h>
 #include <sstream>
@@ -11,17 +11,18 @@
 namespace torch {
 namespace jit {
 
-void removePrintOps(Block * block) {
+void removePrintOps(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end;
        ++it) {
-    for (auto b: it->blocks()) {
+    for (auto b : it->blocks()) {
       removePrintOps(b);
     }
     if (it->kind() == prim::Print || it->kind() == aten::warn) {
       for (auto i = 0; i < it->inputs().size();) {
         auto input = it->inputs().at(i);
         // only handling constants bc of potential side effects
-        if (input->uses().size() == 1 && input->node()->kind() == prim::Constant) {
+        if (input->uses().size() == 1 &&
+            input->node()->kind() == prim::Constant) {
           it->removeInput(i);
           input->node()->destroy();
         } else {
