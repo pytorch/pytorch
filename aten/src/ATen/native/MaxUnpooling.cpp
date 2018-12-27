@@ -24,7 +24,7 @@ Tensor MaxUnpooling2d_forward_out_cpu_(
   }
   auto numChannels = input.size(dimc);
   auto inputHeight = input.size(dimh);
-  auto inputWidth = input.size(dimw);
+auto inputWidth = input.size(dimw);
 
   auto* rawInput = input.data<scalar_t>();
   auto* rawIndices = indices.data<int64_t>();
@@ -82,8 +82,8 @@ Tensor& MaxUnpooling2d_forward_out_cpu(
       output_size.size() == 2,
       "There should be exactly two elements (height, width) in output_size");
   AT_CHECK(
-      self.ndimension() == 4,
-      "Input to MaxUnpooling2d should be a NCHW Tensor");
+      (self.ndimension() == 3 || self.ndimension() == 4),
+      "Input to MaxUnpooling2d should be a 3d or 4d Tensor");
   AT_CHECK(
       self.sizes() == indices.sizes(),
       "Shape of indices should match shape of input");
@@ -130,7 +130,7 @@ Tensor MaxUnpooling2d_forward_cpu(
     const Tensor& indices,
     IntList output_size) {
   AT_CHECK(
-      (self.ndimension() == 4 || self.ndimension() == 5),
+      (self.ndimension() == 3 || self.ndimension() == 4),
       "Input to MaxUnpooling2d should be a 4d or 5d Tensor",
       self.sizes());
   AT_CHECK(
@@ -340,8 +340,8 @@ Tensor MaxUnpooling3d_forward_cpu(
     IntList stride,
     IntList padding) {
   AT_CHECK(
-      self.ndimension() == 5,
-      "Input to MaxUnpooling2d should be a NCDHW Tensor",
+      (self.ndimension() == 4 || self.ndimension() == 5),
+      "Input to MaxUnpooling2d should be a 4d or 5d Tensor",
       self.sizes());
   AT_CHECK(
       output_size.size() == 3,

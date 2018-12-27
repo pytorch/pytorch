@@ -216,8 +216,8 @@ Tensor MaxUnpooling2d_forward_cuda(
     const Tensor& indices,
     IntList output_size) {
   AT_CHECK(
-      (self.ndimension() == 4 || self.ndimension() == 5),
-      "Input to MaxUnpooling2d should be a 4d or 5d Tensor, instead received:  ",
+      (self.ndimension() == 3 || self.ndimension() == 4),
+      "Input to MaxUnpooling2d should be a 3d or 4d Tensor",
       self.sizes());
   AT_CHECK(
       output_size.size() == 2,
@@ -390,7 +390,7 @@ Tensor MaxUnpooling3d_forward_cuda(
     IntList padding) {
   AT_CHECK(
       (self.ndimension() == 4 || self.ndimension() == 5),
-      "Input to MaxUnpooling3d should be a NCDHW Tensor",
+      "Input to MaxUnpooling3d should be a 4d or 5d Tensor",
       self.sizes());
   AT_CHECK(
       output_size.size() == 3,
