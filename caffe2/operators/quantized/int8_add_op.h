@@ -68,6 +68,7 @@ class Int8AddOp final : public Operator<CPUContext> {
         static_cast<uint8_t>(Y_zero_point), Y_scale,
         activationLimits(Y_scale, Y_zero_point, Ac).first,
         activationLimits(Y_scale, Y_zero_point, Ac).second,
+        0 /* flags */,
         &qnnpackOperator_);
       CAFFE_ENFORCE(
           createStatus == qnnp_status_success,
