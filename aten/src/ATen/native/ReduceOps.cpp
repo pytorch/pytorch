@@ -85,7 +85,8 @@ static Tensor review_reduce_result(const Tensor& result, int ndim, DimMask mask,
 
 static std::unique_ptr<TensorIterator> make_reduction(
     const char* name, Tensor& result, const Tensor& self, IntList dim,
-    bool keepdim, ScalarType dtype) {
+    bool keepdim, ScalarType dtype)
+{
   // check that result type and dtype match if provided
   AT_CHECK(
       !result.defined() || result.type().scalarType() == dtype,

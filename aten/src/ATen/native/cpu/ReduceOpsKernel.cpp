@@ -59,7 +59,7 @@ static void or_kernel_impl(TensorIterator& iter) {
     iter,
     [=](uint8_t a, uint8_t b) -> uint8_t { return a || b; },
     [=](Vec256<uint8_t> a, Vec256<uint8_t> b) {return a || b; },
-    /*identity=*/false);
+    /*ident=*/false);
 }
 
 static inline int64_t round_down(int64_t a, int64_t m) {

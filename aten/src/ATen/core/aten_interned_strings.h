@@ -140,7 +140,6 @@ _(aten, _tanh) \
 _(aten, _tanh_backward) \
 _(aten, _tanh_forward) \
 _(aten, _th_all) \
-_(aten, _th_any) \
 _(aten, _th_baddbmm) \
 _(aten, _th_bmm) \
 _(aten, _th_clamp) \
