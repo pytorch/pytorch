@@ -11,7 +11,7 @@ from torch.autograd import Variable, Function
 from torch.autograd.function import traceable
 from torch.testing import assert_allclose
 from torch.onnx import OperatorExportTypes
-from torch._six import inf, PY2
+from torch._six import inf, PY2, builtins
 from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
     freeze_rng_state, set_rng_seed
@@ -4215,35 +4215,31 @@ a")
             throwsAnd(t)
 
     def test_type_cast(self):
-        def test_int_to_float():
-            b = float(2)
-            return b + 1.0
-        self.checkScript(test_int_to_float, ())
+        template = dedent('''
+        def cast(v):
+            # type: ({from_type}) -> {to_type}
+            return {to_type}(v)
+        ''')
 
-        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
-            @torch.jit.script
-            def test_int_to_bool():
-                return bool(5)
+        def check_cast(from_type, to_type, value, raises=False):
+            code = template.format(from_type=from_type, to_type=to_type)
+            expected = getattr(builtins, to_type)(value)
+            if raises:
+                with self.assertRaisesRegex(RuntimeError, "Cannot cast"):
+                    cu = torch.jit.CompilationUnit(code)
+            else:
+                self.checkScript(code, (value,), name='cast', outputs=expected)
 
-        def test_float_to_int():
-            b = int(5.0)
-            return b + 1
-        self.checkScript(test_float_to_int, ())
+        check_cast('int', 'float', 1)
+        check_cast('int', 'bool', 1)
+        check_cast('int', 'bool', 0)
 
-        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
-            @torch.jit.script
-            def test_float_to_bool():
-                return bool(5.0)
+        check_cast('float', 'int', 1.)
+        check_cast('float', 'bool', 1.)
+        check_cast('float', 'bool', 0.)
 
-        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
-            @torch.jit.script
-            def test_bool_to_float():
-                return float(True)
-
-        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
-            @torch.jit.script
-            def test_bool_to_int():
-                return int(True)
+        check_cast('bool', 'int', True)
+        check_cast('bool', 'float', True)
 
     def test_multiple_assignment(self):
         def outer_func(x):
