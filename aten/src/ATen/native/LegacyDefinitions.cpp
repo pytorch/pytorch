@@ -640,11 +640,11 @@ Tensor lerp(const Tensor & self, const Tensor & end, Scalar weight) {
 }
 
 Tensor & _histc_out_cpu(Tensor & result, const Tensor & self, int64_t bins, Scalar min, Scalar max) {
-  return at::_th_histc_out(result, self, bins, min, max);
+  return at::legacy::th::_th_histc_out(result, self, bins, min, max);
 }
 
 Tensor _histc_cpu(const Tensor & self, int64_t bins, Scalar min, Scalar max) {
-  return at::_th_histc(self, bins, min, max);
+  return at::legacy::th::_th_histc(self, bins, min, max);
 }
 
 Tensor & sign_out(Tensor & result, const Tensor & self) {
