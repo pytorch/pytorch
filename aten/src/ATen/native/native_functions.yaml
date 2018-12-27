@@ -1333,13 +1333,14 @@
     CPU: randperm_out_cpu
     CUDA: randperm_out_cuda
 
+- func: range(Scalar start, Scalar end, Scalar step=1, TensorOptions options={}) -> Tensor
+
 - func: range(Scalar start, Scalar end, TensorOptions options={}) -> Tensor
 
-- func: range(Scalar start, Scalar end, Scalar step, TensorOptions options={}) -> Tensor
-
-- func: range_out(Tensor result, Scalar start, Scalar end) -> Tensor
-
-- func: range_out(Tensor result, Scalar start, Scalar end, Scalar step) -> Tensor
+- func: range_out(Tensor result, Scalar start, Scalar end, Scalar step=1) -> Tensor
+  dispatch:
+    CPU: range_cpu_out
+    CUDA: range_cuda_out
 
 - func: repeat(Tensor self, IntList repeats) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
