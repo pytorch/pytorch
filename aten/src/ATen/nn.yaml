@@ -176,18 +176,6 @@
     output: 'false'
     grad_input: 'false'
 
-- name: _thnn_max_unpool2d(Tensor self, LongTensor indices, IntList[2] output_size)
-  cname: SpatialMaxUnpooling
-  scalar_check:
-    output: 'false'
-    grad_input: 'false'
-
-- name: _thnn_max_unpool3d(Tensor self, LongTensor indices, IntList[3] output_size, IntList[3] stride, IntList[3] padding)
-  cname: VolumetricMaxUnpooling
-  scalar_check:
-    output: 'false'
-    grad_input: 'false'
-
 # Padding
 
 - name: _thnn_reflection_pad1d(Tensor self, IntList[2] padding)

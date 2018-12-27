@@ -832,21 +832,6 @@ THC_API void THNN_(SpatialMaxPooling_updateGradInput)(
                   int padW, int padH,
                   bool ceil_mode);
 
-THC_API void THNN_(SpatialMaxUnpooling_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  THCIndexTensor *indices,
-                  int owidth, int oheight);
-
-THC_API void THNN_(SpatialMaxUnpooling_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  THCIndexTensor *indices,
-                  int owidth, int oheight);
-
 THC_API void THNN_(SpatialReflectionPadding_updateOutput)(
                   THCState *state,
                   THCTensor *input,
@@ -1440,25 +1425,6 @@ THC_API void THNN_(VolumetricMaxPooling_updateGradInput)(
                   int dT, int dW, int dH,
                   int padT, int padW, int padH,
                   bool ceilMode);
-
-THC_API void THNN_(VolumetricMaxUnpooling_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  THCIndexTensor *indices,
-                  int outputTime, int outputWidth, int outputHeight,
-                  int dT, int dW, int dH,
-                  int padT, int padW, int padH);
-
-THC_API void THNN_(VolumetricMaxUnpooling_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  THCIndexTensor *indices,
-                  int outputTime, int outputWidth, int outputHeight,
-                  int dT, int dW, int dH,
-                  int padT, int padW, int padH);
 
 THC_API void THNN_(VolumetricAdaptiveMaxPooling_updateOutput)(
                   THCState *state,
