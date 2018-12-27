@@ -41,4 +41,12 @@ matrix:
               - llvm-toolchain-trusty
             packages: clang-tidy
         script: tools/run-clang-tidy-in-ci.sh
-
+      - env: CLANG_FORMAT
+        python: "3.6"
+        addons:
+          apt:
+            sources:
+              - ubuntu-toolchain-r-test
+              - llvm-toolchain-trusty
+            packages: clang-format
+        script: tools/run-clang-format-in-ci.sh
