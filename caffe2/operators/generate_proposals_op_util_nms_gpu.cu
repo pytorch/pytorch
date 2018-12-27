@@ -195,10 +195,6 @@ void nms_gpu_upright(
 }
 
 namespace {
-struct RotatedBox {
-  float x_ctr, y_ctr, w, h, a;
-};
-
 struct Point {
   float x, y;
 };
