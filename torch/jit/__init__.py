@@ -673,7 +673,10 @@ def _try_get_overloaded_fn(fn):
     if not hasattr(fn, '__self__') or type(fn.__self__) is not WeakScriptModuleProxy:
         return None
     class_type = type(fn.__self__._original())
-    return _overloaded_fns.get(class_type)
+    overloads_by_name = _overloaded_fns.get(class_type)
+    if overloads_by_name is None:
+        return None
+    return overloads_by_name.get(fn.__name__)
 
 
 def _try_compile_weak_script(fn):

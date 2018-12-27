@@ -352,8 +352,8 @@ struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
 };
 
 struct VISIBILITY_HIDDEN OverloadedFunctionValue : public SugaredValue {
-  OverloadedFunctionValue(py::dict overloaded_fn)
-      : overloaded_fn_(std::move(overloaded_fn)) {}
+  OverloadedFunctionValue(py::list functions)
+      : possible_functions_(std::move(functions)) {}
 
   std::string kind() const override {
     return "overloaded function";
@@ -365,13 +365,12 @@ struct VISIBILITY_HIDDEN OverloadedFunctionValue : public SugaredValue {
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
       size_t n_binders) override {
-    auto functions = py::cast<std::vector<py::object>>(overloaded_fn_["functions"]);
-
-    if (functions.size() == 0) {
+    auto possible_functions = py::cast<std::vector<py::object>>(possible_functions_);
+    if (possible_functions.size() == 0) {
       throw ErrorReport(loc) << "No overloads found";
     }
 
-    auto containing_class = py::getattr(functions.at(0), "__self__");
+    auto containing_class = py::getattr(possible_functions.at(0), "__self__");
     auto weak_module = py::module::import("torch.jit").attr("_try_get_weak_module")(containing_class);
 
     if (weak_module.is_none()) {
@@ -379,7 +378,7 @@ struct VISIBILITY_HIDDEN OverloadedFunctionValue : public SugaredValue {
     }
 
     std::stringstream err;
-    for (py::object fn : functions) {
+    for (py::object fn : possible_functions) {
       auto fn_name = py::str(py::getattr(fn, "__name__"));
       py::object py_method = py::getattr(weak_module, fn_name);
       auto schema = py::cast<FunctionSchema>(py::getattr(py_method, "schema")());
@@ -395,7 +394,7 @@ struct VISIBILITY_HIDDEN OverloadedFunctionValue : public SugaredValue {
   }
 
  private:
-  py::dict overloaded_fn_;
+  py::list possible_functions_;
 };
 
 std::shared_ptr<SugaredValue> toSugaredValue(
@@ -484,7 +483,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   if (!dispatched_fn.is_none()) {
     return std::make_shared<BooleanDispatchValue>(std::move(dispatched_fn));
   }
-  py::object overloaded_fn =
+  py::list overloaded_fn =
       py::module::import("torch.jit").attr("_try_get_overloaded_fn")(obj);
   if (!overloaded_fn.is_none()) {
     return std::make_shared<OverloadedFunctionValue>(std::move(overloaded_fn));

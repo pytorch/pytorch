@@ -26,6 +26,8 @@ _weak_types = weakref.WeakKeyDictionary()
 # Wrapper functions that can call either of 2 functions depending on a boolean
 # argument
 _boolean_dispatched = weakref.WeakKeyDictionary()
+
+# Listing of possible overloads for
 _overloaded_fns = weakref.WeakKeyDictionary()
 
 COMPILATION_PENDING = object()
@@ -156,15 +158,14 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
 
 
 def overload(self, fn_name, fns):
-    _overloaded_fns[self] = {
-        "name": fn_name,
-        "functions": fns
-    }
+    entry = _overloaded_fns.get(self)
 
-    def fn():
-        pass
-
-    return fn
+    if entry is None:
+        _overloaded_fns[self] = {
+            fn_name: fns,
+        }
+    else:
+        entry[fn_name] = fns
 
 
 try:
