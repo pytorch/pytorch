@@ -6101,6 +6101,25 @@ a")
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs))
 
+    @suppress_warnings
+    def test_onnx_export_func_with_warnings(self):
+        @torch.jit.script
+        def func_with_warning(inp):
+            return torch.nn.functional.sigmoid(inp)  # triggers a deprecation warning
+
+        class WarningTest(torch.nn.Module):
+            def __init__(self):
+                super(WarningTest, self).__init__()
+
+            def forward(self, x):
+                return func_with_warning(x)
+
+        outputs = WarningTest()(torch.randn(42))
+        # no exception
+        torch.onnx.export_to_pretty_string(
+            WarningTest(), torch.randn(42), None, verbose=False,
+            example_outputs=outputs)
+
     def test_onnx_export_script_python_fail(self):
         class ModuleToInline(torch.jit.ScriptModule):
             def __init__(self):
