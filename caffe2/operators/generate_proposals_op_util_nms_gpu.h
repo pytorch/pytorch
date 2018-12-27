@@ -33,6 +33,10 @@ CAFFE2_API void nms_gpu_upright(
     TensorCPU& host_delete_mask,
     CUDAContext* context);
 
+struct RotatedBox {
+  float x_ctr, y_ctr, w, h, a;
+};
+
 // Same as nms_gpu_upright, but for rotated boxes with angle info.
 // d_desc_sorted_boxes : pixel coordinates of proposed bounding boxes
 //    size: (N,5), format: [x_ct; y_ctr; width; height; angle]
