@@ -251,6 +251,21 @@ public:
 
   // ~~~~~ Autograd API ~~~~~
 
+  Tensor& set_requires_grad(bool requires_grad) {
+    impl_->set_requires_grad(requires_grad);
+    return *this;
+  }
+  bool requires_grad() const {
+    return impl_->requires_grad();
+  }
+
+  Tensor& grad() {
+    return impl_->grad();
+  }
+  const Tensor& grad() const {
+    return impl_->grad();
+  }
+
   void set_data(Tensor new_data);
 
   /// Computes the gradient of current tensor w.r.t. graph leaves.

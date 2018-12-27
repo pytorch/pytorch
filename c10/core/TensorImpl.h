@@ -127,7 +127,13 @@ struct C10_API PlacementDeleteContext {
   }
 };
 
+struct TensorImpl;
+
 struct C10_API AutogradMetaInterface {
+  virtual void set_requires_grad(bool requires_grad, at::TensorImpl* self_impl) = 0;
+  virtual bool requires_grad() const = 0;
+  virtual at::Tensor& grad() = 0;
+  virtual const at::Tensor& grad() const = 0;
   virtual ~AutogradMetaInterface();
 };
 
@@ -481,6 +487,56 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   //
   // The way to fix this is to make Variable::Impl stop holding a tensor;
   // instead, it should just *be* a tensor.
+
+  /**
+   * Set whether or not a tensor requires gradient.
+   *
+   * It is only valid to call this method on a Variable.
+   * See Note [Tensor versus Variable in C++].
+   */
+  void set_requires_grad(bool requires_grad) {
+    if (autograd_meta()) {
+      autograd_meta()->set_requires_grad(requires_grad, this);
+    } else {
+      AT_ERROR("set_requires_grad is not implemented for Tensor");
+    }
+  }
+
+  /**
+   * True if a tensor requires gradient.  Tensors which require gradient
+   * have history tracked for any operations performed on them, so that
+   * we can automatically differentiate back to them.  A tensor that
+   * requires gradient and has no history is a "leaf" tensor, which we
+   * accumulate gradients into.
+   *
+   * It is only valid to call this method on a Variable.
+   * See Note [Tensor versus Variable in C++].
+   */
+  bool requires_grad() const {
+    if (autograd_meta()) {
+      return autograd_meta()->requires_grad();
+    } else {
+      AT_ERROR("requires_grad is not implemented for Tensor");
+    }
+  }
+
+  /**
+   * Return a mutable reference to the gradient.  This is conventionally
+   * used as `t.grad() = x` to set a gradient to a completely new tensor.
+   *
+   * It is only valid to call this method on a Variable.
+   * See Note [Tensor versus Variable in C++].
+   */
+  at::Tensor& grad();
+
+  /**
+   * Return the accumulated gradient of a tensor.  This gradient is written
+   * into when performing backwards, when this tensor is a leaf tensor.
+   *
+   * It is only valid to call this method on a Variable.
+   * See Note [Tensor versus Variable in C++].
+   */
+  const at::Tensor& grad() const;
 
   /**
    * Return a typed data pointer to the actual data which this tensor refers to.
