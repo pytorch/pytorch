@@ -90,7 +90,10 @@ if WINDOWS:
         finally:
             os.unlink(f.name)
 else:
-    TemporaryFileName = NamedTemporaryFile
+    @contextmanager
+    def TemporaryFileName():
+        with tempfile.NamedTemporaryFile() as f:
+            yield f.name
 
 
 def LSTMCellF(input, hx, cx, *params):
