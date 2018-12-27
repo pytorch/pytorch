@@ -205,13 +205,7 @@
 #include <THNN/generic/SpatialReflectionPadding.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/SpatialReplicationPadding.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/TemporalReflectionPadding.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/VolumetricReplicationPadding.c>
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/VolumetricUpSamplingNearest.c>
