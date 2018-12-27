@@ -17,7 +17,8 @@ from torch._six import inf, nan
 from test_torch import _TestTorchMixin
 
 from common_methods_invocations import tri_tests_args, tri_large_tests_args, \
-    run_additional_tri_tests, _compare_trilu_indices, _compare_large_trilu_indices
+    run_additional_tri_tests, _compare_trilu_indices, _compare_large_trilu_indices, \
+    _compare_any_results
 from common_utils import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, \
     PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, TEST_NUMPY, TEST_WITH_ROCM, load_tests
 
@@ -2137,6 +2138,9 @@ class TestCuda(TestCase):
     def test_large_trilu_indices(self):
         for test_args in tri_large_tests_args:
             _compare_large_trilu_indices(self, *test_args, device='cuda')
+
+    def test_func_any(self):
+        _compare_any_results(self, 'cuda')
 
 
 def load_ignore_file():
