@@ -89,7 +89,7 @@ def get_diffs(files):
     """
     name_to_diffs = {}
     for f in files:
-        formatted_text = subprocess.check_output(["clang-format", f]).decode()
+        formatted_text = subprocess.check_output(["./tools/clang-format", f]).decode()
         with open(f) as orig:
             orig_text = orig.read()
             if formatted_text != orig_text:
