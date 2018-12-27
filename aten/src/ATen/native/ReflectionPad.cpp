@@ -1,6 +1,5 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <tuple>
 
 namespace at {
 namespace native {
@@ -75,7 +74,7 @@ void reflection_pad1d_out_template(
   if (input.ndimension() == 2) {
     output.resize_({nplane, output_w});
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+    AT_DISPATCH_FLOATING_TYPES(
       input.type(), "reflection_pad1d", [&] {
         reflection_pad1d_out_frame<scalar_t>(
           input.data<scalar_t>(), output.data<scalar_t>(),
@@ -90,7 +89,7 @@ void reflection_pad1d_out_template(
     int64_t p;
 #pragma omp parallel for private(p)
     for (p = 0; p < nbatch; p++) {
-      AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+      AT_DISPATCH_FLOATING_TYPES(
         input.type(), "reflection_pad1d", [&] {
           reflection_pad1d_out_frame<scalar_t>(
             input.data<scalar_t>() + p * nplane * input_w,
@@ -163,7 +162,7 @@ void reflection_pad1d_backward_out_template(
   /* backprop */
   if (input.ndimension() == 2) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      input.type(), "reflection_pad1d_backward", [&] {
+      grad_input.type(), "reflection_pad1d_backward", [&] {
         reflection_pad1d_backward_out_frame(
           grad_input.data<scalar_t>(), grad_output.data<scalar_t>(),
           nplane,
@@ -176,7 +175,7 @@ void reflection_pad1d_backward_out_template(
 #pragma omp parallel for private(p)
     for (p = 0; p < nbatch; p++) {
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-        input.type(), "reflection_pad1d_backward", [&] {
+        grad_input.type(), "reflection_pad1d_backward", [&] {
           reflection_pad1d_backward_out_frame(
             grad_input.data<scalar_t>() + p * nplane * input_w,
             grad_output.data<scalar_t>() + p * nplane * output_w,

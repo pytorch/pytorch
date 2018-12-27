@@ -7,6 +7,8 @@
 // keeping THC headers for atomicAdd
 #include <THC/THCAtomics.cuh>
 
+#include <thrust/pair.h>
+
 namespace at {
 namespace native {
 namespace {
@@ -14,11 +16,10 @@ namespace {
 using at::cuda::detail::canUse32BitIndexMath;
 
 __device__
-inline void get_index_mapping(
+inline thrust::pair<int64_t, int64_t> get_index_mapping(
     int64_t input_w, int64_t output_w,
     int64_t output_x,
-    int64_t pad_l,
-    int64_t & input_idx, int64_t & output_idx) {
+    int64_t pad_l) {
   // 3D grid of 1D blocks
   auto input_offset =
     (blockIdx.y + blockIdx.z * gridDim.y) * input_w;
@@ -34,8 +35,8 @@ inline void get_index_mapping(
                     + 2 * pad_l + input_w - 1
                     - o_start_x + i_start_x;
 
-  input_idx = input_offset + input_x;
-  output_idx = output_offset + output_x;
+  return thrust::make_pair<int64_t, int64_t>(
+    input_offset + input_x, output_offset + output_x);
 }
 
 template<typename scalar_t>
@@ -47,11 +48,8 @@ __global__ void reflection_pad1d_out_kernel(
   auto output_w = input_w + pad_l + pad_r;
 
   if (output_x < output_w) {
-    int64_t input_idx, output_idx;
-    get_index_mapping(
-      input_w, output_w, output_x, pad_l, input_idx, output_idx);
-
-    output[output_idx] = input[input_idx];
+    auto index_pair = get_index_mapping(input_w, output_w, output_x, pad_l);
+    output[index_pair.second] = input[index_pair.first];
   }
 }
 
@@ -64,14 +62,11 @@ __global__ void reflection_pad1d_backward_out_kernel(
   auto output_w = input_w + pad_l + pad_r;
 
   if (output_x < output_w) {
-    int64_t input_idx, output_idx;
-    get_index_mapping(
-      input_w, output_w, output_x, pad_l, input_idx, output_idx);
-
-    atomicAdd(&grad_input[input_idx], grad_output[output_idx]);
+    auto index_pair = get_index_mapping(input_w, output_w, output_x, pad_l);
+    atomicAdd(
+      &grad_input[index_pair.first], grad_output[index_pair.second]);
   }
 }
-
 
 void reflection_pad1d_out_template(
     Tensor &output, const Tensor &input_, IntList padding) {
@@ -165,8 +160,8 @@ void reflection_pad1d_backward_out_template(
   dim3 block_size(output_w > 256 ? 256 : output_w);
   dim3 grid_size((int) ::ceil(output_w / 256.0), nplane, nbatch);
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-    input.type(), "reflection_pad1d_backward_out_template", [&] {
+  AT_DISPATCH_FLOATING_TYPES(
+    grad_input.type(), "reflection_pad1d_backward_out_template", [&] {
       reflection_pad1d_backward_out_kernel<<<
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
           grad_input.data<scalar_t>(), grad_output.data<scalar_t>(),
