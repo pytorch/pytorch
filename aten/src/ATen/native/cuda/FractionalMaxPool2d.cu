@@ -160,10 +160,10 @@ void fractional_max_pool2d_out_cuda_template(
   int planeDim = 0;
   int dimh = 1;
   int dimw = 2;
-  int64_t numBatch = 1;
+  int numBatch = 1;
 
   int ndims = input.ndimension();
-  for (int64_t i = 0; i < ndims; i++) {
+  for (int i = 0; i < ndims; i++) {
      AT_CHECK(input.size(i) > 0,
        "fractional_max_pool2d(): expected input to have non-empty spatial dimensions, "
        "but input has sizes ", input.sizes(), " with dimension ", i, " being "
@@ -181,12 +181,12 @@ void fractional_max_pool2d_out_cuda_template(
   }
 
   /* sizes */
-  int64_t numPlanes = input.size(planeDim);
-  int64_t inputH = input.size(dimh);
-  int64_t inputW = input.size(dimw);
+  int numPlanes = input.size(planeDim);
+  int inputH = input.size(dimh);
+  int inputW = input.size(dimw);
 
-  int64_t outputH = output_size[0];
-  int64_t outputW = output_size[1];
+  int outputH = output_size[0];
+  int outputW = output_size[1];
   int poolSizeH = pool_size[0];
   int poolSizeW = pool_size[1];
 
@@ -209,14 +209,12 @@ void fractional_max_pool2d_out_cuda_template(
 
   // block is limited to 4 warps
   // grid handles overflow per each plane
-  int64_t outputPlaneSize = output.size(ndims - 2) *
+  int outputPlaneSize = output.size(ndims - 2) *
     output.size(ndims - 1);
   dim3 grid((outputPlaneSize + 127) / 128,
             input.size(ndims - 3),
             ndims == 3 ? 1 : input.size(0));
   dim3 block(outputPlaneSize > 128 ? 128 : outputPlaneSize);
-
-  int POOL_W = (poolSizeW <= 7 && poolSizeW >= 2) ? poolSizeW : -1;
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(),
     "fractional_max_pool2d_out_cuda_frame",
@@ -228,9 +226,10 @@ void fractional_max_pool2d_out_cuda_template(
           getTensorInfo<scalar_t, int>(input),
           getTensorInfo<scalar_t, int>(randomSamples),
           poolSizeH, poolSizeW,
-          POOL_W);
-        }
-      );
+          (poolSizeW <= 7 && poolSizeW >= 2) ? poolSizeW : -1
+        );
+      }
+    );
 }
 
 void fractional_max_pool2d_backward_out_cuda_template(
@@ -244,20 +243,20 @@ void fractional_max_pool2d_backward_out_cuda_template(
   int dimh = 1;
   int dimw = 2;
 
-  int64_t ndims = input.ndimension();
+  int ndims = input.ndimension();
   if (ndims == 4) {
     dimh++;
     dimw++;
   }
 
   /* sizes */
-  int64_t inputH = input.size(dimh);
-  int64_t inputW = input.size(dimw);
+  int inputH = input.size(dimh);
+  int inputW = input.size(dimw);
 
-  int64_t outputH = output_size[0];
-  int64_t outputW = output_size[1];
-  int64_t poolSizeH = pool_size[0];
-  int64_t poolSizeW = pool_size[1];
+  int outputH = output_size[0];
+  int outputW = output_size[1];
+  int poolSizeH = pool_size[0];
+  int poolSizeW = pool_size[1];
 
   AT_CHECK(outputH == gradOutput.size(dimh),
            "fractional_max_pool2d(): gradOutput height unexpected");

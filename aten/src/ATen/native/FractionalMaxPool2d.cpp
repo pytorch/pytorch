@@ -9,18 +9,17 @@ namespace native {
 namespace {
 
 template <typename scalar_t>
-static std::vector<int64_t> fractional_max_pool2d_generate_intervals(
+static std::vector<int> fractional_max_pool2d_generate_intervals(
   scalar_t sample,
-  int64_t inputSize,
-  int64_t outputSize,
+  int inputSize,
+  int outputSize,
   int poolSize) {
   scalar_t alpha = (scalar_t) (inputSize - poolSize) / (scalar_t) (outputSize - 1);
-  std::vector<int64_t> sequence(outputSize, 0);
+  std::vector<int> sequence(outputSize, 0);
 
-  int64_t i;
-  for (i = 0; i < outputSize - 1; ++i) {
+  for (int i = 0; i < outputSize - 1; ++i) {
     sequence[i] =
-      (int64_t) ((i + sample) * alpha) - (int64_t) (sample * alpha);
+      (int) ((i + sample) * alpha) - (int) (sample * alpha);
   }
   sequence[outputSize - 1] = inputSize - poolSize;
 
@@ -33,11 +32,11 @@ static void fractional_max_pool2d_out_frame(
   scalar_t* output,
   int64_t* indices,
   scalar_t* randomSamples,
-  int64_t numPlanes,
-  int64_t inputW, int64_t inputH,
-  int64_t outputW, int64_t outputH,
+  int numPlanes,
+  int inputW, int inputH,
+  int outputW, int outputH,
   int poolSizeW, int poolSizeH) {
-  int64_t plane;
+  int plane;
 #pragma omp parallel for private(plane)
   for (plane = 0; plane < numPlanes; ++plane) {
     /* each plane contains 2 random samples, one for W and one for H */
@@ -50,28 +49,28 @@ static void fractional_max_pool2d_out_frame(
         randomSamplesForPlane[1], inputH, outputH, poolSizeH);
 
     /* loop over output */
-    int64_t h, w;
+    int h, w;
 
     scalar_t* inputForPlane = input + plane * inputW * inputH;
     scalar_t* outputForPlane = output + plane * outputW * outputH;
     int64_t* indicesForPlane = indices + plane * outputW * outputH;
 
     for (h = 0; h < outputH; ++h) {
-      int64_t inputHStart = sequenceH[h];
+      int inputHStart = sequenceH[h];
 
       for (w = 0; w < outputW; ++w) {
-        int64_t inputWStart = sequenceW[w];
+        int inputWStart = sequenceW[w];
 
         scalar_t maxVal = -std::numeric_limits<scalar_t>::infinity();
         int64_t maxIndex = -1;
 
-        int64_t h2, w2;
+        int h2, w2;
         for (h2 = inputHStart; h2 < inputHStart + poolSizeH; ++h2) {
           for (w2 = inputWStart; w2 < inputWStart + poolSizeW; ++w2) {
             AT_ASSERT(h2 >= 0 && h2 < inputH);
             AT_ASSERT(w2 >= 0 && w2 < inputW);
 
-            int64_t planeIndex = h2 * inputW + w2;
+            int planeIndex = h2 * inputW + w2;
             scalar_t val = inputForPlane[planeIndex];
             if (val > maxVal) {
               maxVal = val;
@@ -100,7 +99,7 @@ void fractional_max_pool2d_out_cpu_template(
   at::Tensor& indices,
   at::Tensor const& randomSamples) {
 
-  int64_t numBatch = 1;
+  int numBatch = 1;
   int planeDim = 0;
   int heightDim = 1;
   int widthDim = 2;
@@ -112,12 +111,12 @@ void fractional_max_pool2d_out_cpu_template(
   /* get contiguous input */
   auto input = input_.contiguous();
 
-  int64_t numInputDims = input.ndimension();
-  AT_CHECK((numInputDims == 3 || numInputDims == 4),
+  int ndims = input.ndimension();
+  AT_CHECK((ndims == 3 || ndims == 4),
 		"non-empty 3D or 4D (batch mode) tensor expected for input, but got: ",
-    numInputDims);
+    ndims);
 
-  if (numInputDims == 4) {
+  if (ndims == 4) {
     numBatch = input.size(0);
     planeDim++;
     heightDim++;
@@ -125,18 +124,18 @@ void fractional_max_pool2d_out_cpu_template(
   }
 
   /* sizes */
-  int64_t numPlanes = input.size(planeDim);
-  int64_t inputH = input.size(heightDim);
-  int64_t inputW = input.size(widthDim);
+  int numPlanes = input.size(planeDim);
+  int inputH = input.size(heightDim);
+  int inputW = input.size(widthDim);
 
   AT_CHECK(outputH + poolSizeH - 1 <= inputH,
-    "fractional_max_pool2d(): poolSizeH ", poolSizeH,
+    "fractional_max_pool2d(): pool height ", poolSizeH,
     " too large relative to input height ", inputH);
   AT_CHECK(outputW + poolSizeW - 1 <= inputW,
-    "fractional_max_pool2d(): poolSizeW ", poolSizeW,
+    "fractional_max_pool2d(): pool width ", poolSizeW,
     " too large relative to input width ", inputW);
 
-  if (numInputDims == 3) {
+  if (ndims == 3) {
     /* resize output */
     output.resize_({numPlanes, outputH, outputW});
     /* indices will contain the locations for each output point */
@@ -159,7 +158,7 @@ void fractional_max_pool2d_out_cpu_template(
     /* indices will contain the locations for each output point */
     indices.resize_({numBatch, numPlanes, outputH, outputW});
 
-    int64_t batch;
+    int batch;
 #pragma omp parallel for private(batch)
     for (batch = 0; batch < numBatch; ++batch) {
       AT_DISPATCH_FLOATING_TYPES(input.type(), "fractional_max_pool2d", [&] {
@@ -184,20 +183,20 @@ static void fractional_max_pool2d_backward_out_frame(
   scalar_t* gradInput,
   scalar_t* gradOutput,
   int64_t* indices,
-  int64_t numPlanes,
-  int64_t inputW, int64_t inputH,
-  int64_t outputW, int64_t outputH) {
-  int64_t plane;
+  int numPlanes,
+  int inputW, int inputH,
+  int outputW, int outputH) {
+  int plane;
 #pragma omp parallel for private(plane)
   for (plane = 0; plane < numPlanes; plane++) {
     scalar_t* gradInputForPlane = gradInput + plane * inputW * inputH;
     scalar_t* gradOutputForPlane = gradOutput + plane * outputW * outputH;
     int64_t* indicesForPlane = indices + plane * outputW * outputH;
 
-    int64_t h, w;
+    int h, w;
     for (h = 0; h < outputH; ++h) {
       for (w = 0; w < outputW; ++w) {
-        int64_t outputIndex = h * outputW + w;
+        int outputIndex = h * outputW + w;
         int64_t index = indicesForPlane[outputIndex];
         AT_ASSERT(index >= 0 && index < inputW * inputH);
 
@@ -215,7 +214,7 @@ Tensor& fractional_max_pool2d_backward_out_cpu_template(
   IntList pool_size,
   at::Tensor const& indices) {
 
-  int64_t numBatch = 1;
+  int numBatch = 1;
   int planeDim = 0;
   int heightDim = 1;
   int widthDim = 2;
@@ -225,8 +224,8 @@ Tensor& fractional_max_pool2d_backward_out_cpu_template(
   int poolSizeW = pool_size[0];
   int poolSizeH = pool_size[1];
 
-  int64_t numInputDims = input.ndimension();
-  if (numInputDims == 4) {
+  int ndims = input.ndimension();
+  if (ndims == 4) {
     numBatch = input.size(0);
     planeDim = 1;
     heightDim++;
@@ -234,9 +233,9 @@ Tensor& fractional_max_pool2d_backward_out_cpu_template(
   }
 
   /* sizes */
-  int64_t numPlanes = input.size(planeDim);
-  int64_t inputH = input.size(heightDim);
-  int64_t inputW = input.size(widthDim);
+  int numPlanes = input.size(planeDim);
+  int inputH = input.size(heightDim);
+  int inputW = input.size(widthDim);
 
   /* get contiguous gradOutput */
   auto gradOutput = gradOutput_.contiguous();
@@ -250,7 +249,7 @@ Tensor& fractional_max_pool2d_backward_out_cpu_template(
   gradInput = at::zeros_like(input);
 
   /* backprop */
-  if (numInputDims == 3) {
+  if (ndims == 3) {
     AT_DISPATCH_FLOATING_TYPES(
       input.type(), "fractional_max_pool2d_backward", [&] {
         auto gradInput_data = gradInput.data<scalar_t>();
@@ -264,7 +263,7 @@ Tensor& fractional_max_pool2d_backward_out_cpu_template(
         }
       );
   } else {
-    int64_t batch;
+    int batch;
 #pragma omp parallel for private(batch)
     for (batch = 0; batch < numBatch; ++batch) {
       AT_DISPATCH_FLOATING_TYPES(
