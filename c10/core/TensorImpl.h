@@ -127,6 +127,10 @@ struct C10_API PlacementDeleteContext {
   }
 };
 
+struct C10_API AutogradMetaInterface {
+  virtual ~AutogradMetaInterface();
+};
+
 /**
  * The low-level representation of a tensor, which contains a pointer
  * to a storage (which contains the actual data) and metadata (e.g., sizes and
@@ -646,6 +650,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * which is harder to misuse.
    */
   virtual void resize_dim(int64_t ndim) {
+    AT_CHECK(allow_tensor_metadata_change(), "resize_dim is not allowed on Tensor created from .data or .detach()");
     sizes_.resize(ndim, 0);
     strides_.resize(ndim, 0);
     refresh_numel();
@@ -661,6 +666,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * which is harder to misuse.
    */
   virtual void set_size(int64_t dim, int64_t new_size) {
+    AT_CHECK(allow_tensor_metadata_change(), "set_size is not allowed on Tensor created from .data or .detach()");
     sizes_.at(dim) = new_size;
     refresh_numel();
     refresh_contiguous();
@@ -673,6 +679,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * which is harder to misuse.
    */
   virtual void set_stride(int64_t dim, int64_t new_stride) {
+    AT_CHECK(allow_tensor_metadata_change(), "set_stride is not allowed on Tensor created from .data or .detach()");
     strides_[dim] = new_stride;
     refresh_numel();
     refresh_contiguous();
@@ -686,6 +693,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * (and resizing if necessary.)
    */
   virtual void set_storage_offset(int64_t storage_offset) {
+    AT_CHECK(allow_tensor_metadata_change(), "set_storage_offset is not allowed on Tensor created from .data or .detach()");
     storage_offset_ = storage_offset;
   }
 
@@ -700,6 +708,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * See Note [We regret making Variable hold a Tensor]
    */
   void set_sizes_contiguous(IntList new_size) {
+    AT_CHECK(allow_tensor_metadata_change(), "set_sizes_contiguous is not allowed on Tensor created from .data or .detach()");
     AT_ASSERT(!is_variable());
     auto old_dim = sizes_.size();
     auto new_dim = new_size.size();
@@ -724,6 +733,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * See Note [We regret making Variable hold a Tensor]
    */
   void set_sizes_and_strides(IntList new_size, IntList new_stride) {
+    AT_CHECK(allow_tensor_metadata_change(), "set_sizes_and_strides is not allowed on Tensor created from .data or .detach()");
     AT_ASSERT(!is_variable());
     AT_CHECK(
         new_size.size() == new_stride.size(),
@@ -777,6 +787,58 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * True if a tensor is a variable.  See Note [Tensor versus Variable in C++]
    */
   bool is_variable() const { return is_variable_; };
+
+  /**
+   * Set whether a tensor allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
+   */
+  virtual void set_allow_tensor_metadata_change(bool value) {
+    allow_tensor_metadata_change_ = value;
+  }
+
+  /**
+   * True if a tensor allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
+   */
+  virtual bool allow_tensor_metadata_change() const {
+    return allow_tensor_metadata_change_;
+  }
+
+  /**
+   * Set the pointer to autograd metadata.
+   */
+  void set_autograd_meta(std::unique_ptr<c10::AutogradMetaInterface> autograd_meta) {
+    autograd_meta_ = std::move(autograd_meta);
+  }
+
+  /**
+   * Return the pointer to autograd metadata.
+   */
+  c10::AutogradMetaInterface* autograd_meta() const {
+    return autograd_meta_.get();
+  }
+
+  /**
+   * Detach the autograd metadata unique_ptr from this tensor, and return it.
+   */
+  std::unique_ptr<c10::AutogradMetaInterface> detach_autograd_meta() {
+    return std::move(autograd_meta_);
+  }
+
+  // NOTE: `shallow_copy_and_detach()` does not copy the AutogradMeta pointer
+  // because it is unique for each Variable.
+  // NOTE: We don't set `allow_tensor_metadata_change_` to false here, because there are call sites
+  // to this function that need to change the shallow copy's size or storage afterwards, and setting
+  // `allow_tensor_metadata_change_` to false would prevent those changes from happening and is
+  // undesirable.
+  virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const {
+    auto impl = c10::make_intrusive<TensorImpl>(Storage(storage()), type_id(), is_variable());
+    impl->set_sizes_and_strides(sizes(), strides());
+    impl->storage_offset_ = storage_offset_;
+    impl->is_wrapped_number_ = is_wrapped_number_;
+    impl->reserved_ = reserved_;
+    impl->refresh_numel();
+    impl->refresh_contiguous();
+    return impl;
+  }
 
  private:
   // As an optimization, get_device handles the typical CUDA Tensor case and
@@ -1157,6 +1219,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void set_storage(at::Storage storage) {
+    AT_CHECK(allow_tensor_metadata_change(), "set_storage is not allowed on Tensor created from .data or .detach()");
     storage_ = std::move(storage);
     data_type_ = storage_.dtype();
   }
@@ -1268,10 +1331,14 @@ protected:
     is_contiguous_ = compute_contiguous();
   }
 
-public:
-  Storage storage_; // TODO: Fix visibility on me
-
 protected:
+  Storage storage_;
+  // This pointer points to an AutogradMeta struct that stores autograd-specific fields
+  // (such as grad_ / grad_fn_ / grad_accumulator_).
+  // This pointer always has unique ownership (meaning only one TensorImpl can own it
+  // at a time).
+  std::unique_ptr<c10::AutogradMetaInterface> autograd_meta_ = nullptr;
+
   // We could save a word or two by combining the SmallVector structs,
   // since their size is redundant, and if we need to overflow the buffer space
   // we could keep the two pointers together. However, that would require
@@ -1296,6 +1363,18 @@ protected:
   bool is_contiguous_ = true;
   bool is_variable_ = false;
   bool is_wrapped_number_ = false;
+
+  // Previously, if we change the tensor metadata (e.g. sizes / strides / storage / storage_offset)
+  // of a derived tensor (i.e. tensors created from Python `tensor.data` or Python/C++ `tensor.detach()`),
+  // those metadata in the original tensor will also be updated. However, the new behavior is that
+  // those metadata changes to a derived tensor will not update the original tensor anymore, and we
+  // need this flag to make such changes explicitly illegal, to prevent users from changing metadata of
+  // the derived tensor and expecting the original tensor to also be updated.
+  //
+  // NOTE: For a full list of tensor metadata fields, please see `shallow_copy_and_detach()` in TensorImpl
+  // and its subclasses to find which fields are copied by value.
+  bool allow_tensor_metadata_change_ = true;
+
   // we decide to keep reserved_ and it will
   // live in Tensor after the split
   // The logic is that if Extend() or ReserveSpace() were ever called,
@@ -1352,10 +1431,11 @@ protected:
 //    storage offset
 //    numel
 //    data type pointer
+//    autograd metadata pointer
 //    miscellaneous bitfield
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-              sizeof(TensorImpl) == sizeof(int64_t) * 24,
+              sizeof(TensorImpl) == sizeof(int64_t) * 25,
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
 

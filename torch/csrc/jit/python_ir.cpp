@@ -409,7 +409,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "t_",
           [](Node& n, const char* name, torch::autograd::Variable v) {
-            return n.t_(Symbol::attr(name), std::move(v.data()));
+            return n.t_(Symbol::attr(name), v.data());
           })
       .def(
           "t",
@@ -426,7 +426,7 @@ void initPythonIRBindings(PyObject* module_) {
             std::vector<at::Tensor> tensors;
             tensors.reserve(vs.size());
             for (auto& variable : vs) {
-              tensors.push_back(std::move(variable.data()));
+              tensors.push_back(variable.data());
             }
             return n.ts_(Symbol::attr(name), std::move(tensors));
           })

@@ -122,4 +122,6 @@ at::DataPtr PlacementDeleteContext::makeDataPtr(
           device};
 }
 
+AutogradMetaInterface::~AutogradMetaInterface() {}
+
 } // namespace c10
