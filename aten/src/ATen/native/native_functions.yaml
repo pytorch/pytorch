@@ -1327,6 +1327,8 @@
 
 - func: range(Scalar start, Scalar end, Scalar step=1, TensorOptions options={}) -> Tensor
 
+- func: range(Scalar start, Scalar end, TensorOptions options={}) -> Tensor
+
 - func: range_out(Tensor result, Scalar start, Scalar end, Scalar step=1) -> Tensor
   dispatch:
     CPU: range_cpu_out
