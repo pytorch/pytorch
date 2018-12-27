@@ -8957,6 +8957,41 @@ a")
                         return 4
                 return 5
 
+    def test_overloading(self):
+        @torch._jit_internal.weak_module
+        class W(torch.nn.Module):
+            def __init__(self):
+                super(W, self).__init__()
+                self.forward = torch._jit_internal.overload(type(self), 'forward', (self.forward_tensor, self.forward_tuple))
+
+            @torch._jit_internal.weak_script_method
+            def forward_tuple(self, x):
+                # type: (Tuple[Tensor, Tensor]) -> Tensor
+                return x[0] + 5
+
+            @torch._jit_internal.weak_script_method
+            def forward_tensor(self, x):
+                # type: (Tensor) -> Tensor
+                return x + 20
+
+        class S(torch.jit.ScriptModule):
+            def __init__(self):
+                super(S, self).__init__()
+                self.weak = W()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return self.weak(x)
+
+            @torch.jit.script_method
+            def forward_tuple(self, x):
+                return self.weak((x, x))
+
+        s = S()
+        x = torch.ones(1)
+        self.assertEqual(s(x), x + 20)
+        self.assertEqual(s.forward_tuple(x), x + 5)
+
 
 class MnistNet(nn.Module):
     def __init__(self):
