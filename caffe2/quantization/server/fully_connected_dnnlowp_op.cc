@@ -6,6 +6,7 @@
 #include "caffe2/core/tensor_int8.h"
 #include "caffe2/utils/cpuid.h"
 #include "fbgemm_pack_matrix_cache.h"
+#include "fbgemm_pack_op.h"
 #include "mmio.h"
 
 C10_DEFINE_bool(
@@ -28,6 +29,8 @@ FullyConnectedDNNLowPOp<T>::FullyConnectedDNNLowPOp(
     : BaseType(operator_def, ws),
       axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 1)),
       axis_w_(OperatorBase::GetSingleArgument<int32_t>("axis_w", 1)),
+      b_quantized_(make_shared<vector<int32_t>>()),
+      column_offsets_(make_shared<vector<int32_t>>()),
       is_weight_constant_(
           OperatorBase::GetSingleArgument<bool>("constant_weight", true)) {
   if (!is_weight_constant_) {
@@ -137,8 +140,7 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
       if (VLOG_IS_ON(3)) {
         t_begin = chrono::system_clock::now();
       }
-      Xdata = QuantizeInputIfNeeded<T>(
-          this, 0, in_qparams_[0], X_temp, qfactory_.get());
+      Xdata = QuantizeInputIfNeeded<T>(this, 0, in_qparams_[0], X_temp);
       if (VLOG_IS_ON(3)) {
         t_end = chrono::system_clock::now();
         double dt = chrono::duration<double>(t_end - t_begin).count();
@@ -162,19 +164,19 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
           K,
           X_pack_buf_.data(), // buffer for packed matrix
           1, // group
-          in_qparams_[0].zero_point,
           row_offsets_.data());
 
       DoNothing<> doNothingObj{};
       ReQuantizeOutput<false /* FUSE_RELU */> outputProcObj(
           doNothingObj,
-          requantization_params_.real_multiplier,
+          &requantization_params_.real_multiplier,
           out_qparams_.zero_point,
           in_qparams_[0].zero_point,
-          in_qparams_[1].zero_point,
+          &in_qparams_[1].zero_point,
           packA.getRowOffsetBuffer(),
-          column_offsets_.data(),
-          b_quantized_data_);
+          column_offsets_->data(),
+          b_quantized_data_,
+          N); // ncols per quant group
 
       Y_int32_.resize(Y->size());
       fbgemmPacked(
@@ -213,12 +215,13 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
         ReQuantizeForFloat<false /* FUSE_RELU*/> outputProcObj(
             doNothingObj,
             in_qparams_[0].scale,
-            in_qparams_[1].scale,
+            &in_qparams_[1].scale,
             in_qparams_[0].zero_point,
-            in_qparams_[1].zero_point,
+            &in_qparams_[1].zero_point,
             packA.getRowOffsetBuffer(),
-            column_offsets_.data(),
-            b_dequantized_data_); // bias
+            column_offsets_->data(),
+            b_dequantized_data_, // bias
+            N); // ncols per quant group
 
         fbgemmPacked(
             packA,
@@ -241,19 +244,19 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
             K,
             X_pack_buf_.data(), // buffer for packed matrix
             1, // group
-            in_qparams_[0].zero_point,
             row_offsets_.data());
 
         DoNothing<float, float> doNothingObj{};
         ReQuantizeForFloat<false /* FUSE_RELU*/> outputProcObj(
             doNothingObj,
             in_qparams_[0].scale,
-            in_qparams_[1].scale,
+            &in_qparams_[1].scale,
             in_qparams_[0].zero_point,
-            in_qparams_[1].zero_point,
+            &in_qparams_[1].zero_point,
             packA.getRowOffsetBuffer(),
-            column_offsets_.data(),
-            b_dequantized_data_); // bias
+            column_offsets_->data(),
+            b_dequantized_data_, // bias
+            N); // ncols per quant group
 
         fbgemmPacked(
             packA,
@@ -271,8 +274,7 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
     if (VLOG_IS_ON(3)) {
       t_begin = chrono::system_clock::now();
     }
-    Xdata = QuantizeInputIfNeeded<T>(
-        this, 0, in_qparams_[0], X_temp, qfactory_.get());
+    Xdata = QuantizeInputIfNeeded<T>(this, 0, in_qparams_[0], X_temp);
     if (VLOG_IS_ON(3)) {
       t_end = chrono::system_clock::now();
       double dt = chrono::duration<double>(t_end - t_begin).count();
@@ -328,7 +330,7 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
 
         for (int j = 0; j < N; ++j) {
           Y_int32_[i * N + j] -=
-              in_qparams_[0].zero_point * column_offsets_[j] + row_offset;
+              in_qparams_[0].zero_point * (*column_offsets_)[j] + row_offset;
           Ydata[i * N + j] = Y_int32_[i * N + j] * in_qparams_[0].scale *
                   in_qparams_[1].scale +
               b_dequantized_data_[j];
@@ -347,11 +349,11 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
 
         for (int j = 0; j < N; ++j) {
           Y_int32_[i * N + j] -=
-              in_qparams_[0].zero_point * column_offsets_[j] + row_offset;
+              in_qparams_[0].zero_point * (*column_offsets_)[j] + row_offset;
           Y_int32_[i * N + j] += b_quantized_data_[j];
 
-          Ydata[i * N + j] =
-              Requantize<T>(Y_int32_[i * N + j], requantization_params_);
+          Ydata[i * N + j] = fbgemm::Requantize<T>(
+              Y_int32_[i * N + j], requantization_params_);
         }
       }
     }
@@ -413,43 +415,34 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
         OperatorBase::debug_def().engine() != "DNNLOWP_ACC16";
 
     if ((fast_path && !Wq_packed_) || (!fast_path && W_quantized_.empty())) {
-      W_quantized_.resize(W.size());
-
-      if (OperatorBase::InputIsType<int8::Int8TensorCPU>(1)) {
-        in_qparams_[1].scale =
-            OperatorBase::Input<int8::Int8TensorCPU>(1).scale;
-        in_qparams_[1].zero_point =
-            OperatorBase::Input<int8::Int8TensorCPU>(1).zero_point + signed_min;
-
-        const T* W_data = W.template data<T>();
-        for (auto i = 0; i < W.size(); ++i) {
-          W_quantized_[i] = W_data[i] + signed_min;
-        }
+      if (this->template InputIsType<Int8FCDNNLowPPackedWeightBlob>(1)) {
+        const auto& packed_filter =
+            this->template Input<Int8FCDNNLowPPackedWeightBlob>(1);
+        CAFFE_ENFORCE_EQ(packed_filter.qparams.size(), 1);
+        in_qparams_[1] = packed_filter.qparams[0];
       } else {
-        in_qparams_[1] = qfactory_->ChooseQuantizationParams(
-            W.template data<float>(), W.size(), true /*weight*/);
-
-        // in_qparams_[1] is computed for unsigned type.
-        // Adjust for the fact that weight will actually use signed.
-        in_qparams_[1].zero_point += signed_min;
-
-        Quantize<T_signed>(
-            W.template data<float>(),
-            W_quantized_.data(),
-            W_quantized_.size(),
-            in_qparams_[1]);
+        vector<TensorQuantizationParams> temp_qparams(1);
+        QuantizeWeight<T>(
+            InputBlob(1), K, N, temp_qparams, W_quantized_, qfactory_.get());
+        in_qparams_[1] = temp_qparams[0];
       }
 
       if (fast_path) {
         // fast path using fbgemm
-        Wq_packed_ = GetOrCreateFbgemmPackBMatrix<int32_t>(
-            fbgemm::matrix_op_t::Transpose,
-            K,
-            N,
-            W.raw_data(),
-            reinterpret_cast<const int8_t*>(W_quantized_.data()),
-            K, // ld
-            in_qparams_[1].zero_point);
+        if (this->template InputIsType<Int8FCDNNLowPPackedWeightBlob>(1)) {
+          const auto& packed_filter =
+              this->template Input<Int8FCDNNLowPPackedWeightBlob>(1);
+          Wq_packed_ = packed_filter.W;
+        } else {
+          Wq_packed_ = GetOrCreateFbgemmPackBMatrix<int32_t>(
+              fbgemm::matrix_op_t::Transpose,
+              K,
+              N,
+              W.raw_data(),
+              reinterpret_cast<const int8_t*>(W_quantized_.data()),
+              K, // ld
+              in_qparams_[1].zero_point);
+        }
       } else {
         string reason;
         if (!is_same<T, uint8_t>::value) {
@@ -476,7 +469,7 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
     in_qparams_[1].zero_point += signed_min;
 
     W_quantized_.resize(W.size());
-    Quantize<T_signed>(
+    fbgemm::Quantize<T_signed>(
         W.template data<float>(),
         W_quantized_.data(),
         W_quantized_.size(),
@@ -490,14 +483,16 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
     t_begin = chrono::system_clock::now();
   }
   // Pre-compute column_offset
-  if (!is_weight_constant_ || column_offsets_.empty()) {
-    column_offsets_.resize(N);
-    for (int j = 0; j < N; ++j) {
-      int32_t sum = 0;
-      for (int k = 0; k < K; ++k) {
-        sum += W_quantized_[j * K + k];
-      }
-      column_offsets_[j] = sum - in_qparams_[1].zero_point * K;
+  if (!is_weight_constant_ || column_offsets_->empty()) {
+    if (this->template InputIsType<Int8FCDNNLowPPackedWeightBlob>(1)) {
+      const auto& packed_filter =
+          this->template Input<Int8FCDNNLowPPackedWeightBlob>(1);
+      column_offsets_ = packed_filter.column_offsets;
+    } else {
+      vector<TensorQuantizationParams> temp_qparams;
+      temp_qparams.push_back(in_qparams_[1]);
+      ComputeColumnOffsets<T_signed>(
+          K, N, W_quantized_.data(), temp_qparams, *column_offsets_);
     }
   }
   if (VLOG_IS_ON(3)) {
@@ -515,43 +510,51 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
   // Quantize bias
   if (!is_weight_constant_ || (!b_quantized_data_ && !b_dequantized_data_) ||
       in_qparams_[0].scale != in_qparams0_scale_old_) {
-    const auto& bias = InputTensorCPU_(2);
-    if (OperatorBase::InputIsType<int8::Int8TensorCPU>(2)) {
-      in_qparams_[2].scale = OperatorBase::Input<int8::Int8TensorCPU>(2).scale;
-      in_qparams_[2].zero_point =
-          OperatorBase::Input<int8::Int8TensorCPU>(2).zero_point;
-      CAFFE_ENFORCE_LE(
-          std::abs(
-              in_qparams_[2].scale -
-              in_qparams_[0].scale * in_qparams_[1].scale),
-          1e-4);
-      CAFFE_ENFORCE_EQ(in_qparams_[2].zero_point, 0);
-      b_quantized_data_ = bias.template data<int32_t>();
-      if (dequantize_output_) {
-        b_dequantized_.resize(N);
-        for (int j = 0; j < N; ++j) {
-          b_dequantized_[j] =
-              Dequantize<int32_t>(b_quantized_data_[j], in_qparams_[2]);
-        }
-        b_dequantized_data_ = b_dequantized_.data();
-      }
+    if (this->template InputIsType<Int8FCDNNLowPPackedWeightBlob>(2) &&
+        this->template Input<Int8FCDNNLowPPackedWeightBlob>(2).bias.get()) {
+      const auto& packed_filter =
+          this->template Input<Int8FCDNNLowPPackedWeightBlob>(2);
+      CAFFE_ENFORCE(!dequantize_output_);
+      b_quantized_ = packed_filter.bias;
+      b_quantized_data_ = b_quantized_->data();
     } else {
-      in_qparams_[2].scale = in_qparams_[0].scale * in_qparams_[1].scale;
-      in_qparams_[2].zero_point = 0;
-      b_dequantized_data_ = bias.template data<float>();
-      if (!dequantize_output_) {
-        b_quantized_.resize(N);
-        for (int j = 0; j < N; ++j) {
-          b_quantized_[j] = Quantize<int32_t>(
-              b_dequantized_data_[j],
-              in_qparams_[2].zero_point,
-              in_qparams_[2].scale,
-              32);
+      const auto& bias = InputTensorCPU_(2);
+      if (this->template InputIsType<int8::Int8TensorCPU>(2)) {
+        TensorQuantizationParams bias_qparams;
+        bias_qparams.scale = this->template Input<int8::Int8TensorCPU>(2).scale;
+        bias_qparams.zero_point =
+            this->template Input<int8::Int8TensorCPU>(2).zero_point;
+        CAFFE_ENFORCE_LE(
+            std::abs(
+                bias_qparams.scale -
+                in_qparams_[0].scale * in_qparams_[1].scale),
+            1e-4);
+        CAFFE_ENFORCE_EQ(bias_qparams.zero_point, 0);
+        b_quantized_data_ = bias.template data<int32_t>();
+        if (dequantize_output_) {
+          b_dequantized_.resize(N);
+          for (int j = 0; j < N; ++j) {
+            b_dequantized_[j] = fbgemm::Dequantize<int32_t>(
+                b_quantized_data_[j], in_qparams_[2]);
+          }
+          b_dequantized_data_ = b_dequantized_.data();
         }
-        b_quantized_data_ = b_quantized_.data();
+      } else {
+        b_dequantized_data_ = bias.template data<float>();
+        if (!dequantize_output_) {
+          b_quantized_->resize(N);
+          for (int j = 0; j < N; ++j) {
+            (*b_quantized_)[j] = fbgemm::Quantize<int32_t>(
+                b_dequantized_data_[j],
+                0,
+                in_qparams_[0].scale * in_qparams_[1].scale,
+                32);
+          }
+          b_quantized_data_ = b_quantized_->data();
+        }
       }
+      in_qparams0_scale_old_ = in_qparams_[0].scale;
     }
-    in_qparams0_scale_old_ = in_qparams_[0].scale;
 
     CAFFE_ENFORCE(
         (dequantize_output_ && b_dequantized_data_) ||

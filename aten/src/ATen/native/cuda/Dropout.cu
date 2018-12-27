@@ -1,9 +1,9 @@
-#include "ATen/ATen.h"
-#include "ATen/AccumulateType.h"
-#include "ATen/cuda/CUDAApplyUtils.cuh"
-#include "ATen/cuda/detail/IndexUtils.cuh"
-#include "ATen/cuda/detail/TensorInfo.cuh"
-#include "curand_kernel.h"
+#include <ATen/ATen.h>
+#include <ATen/AccumulateType.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/cuda/detail/TensorInfo.cuh>
+#include <curand_kernel.h>
 
 #include <THC/THCGeneral.h>
 #include <THC/THCTensorRandom.h>
@@ -33,7 +33,7 @@ template <
           typename accscalar_t,
           typename IndexType,
           int ADims>
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
 __launch_bounds__(256,8)
 #endif
 __global__ void

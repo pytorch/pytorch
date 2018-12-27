@@ -27,8 +27,8 @@ class CuDNNActivationOp<CUDNN_ACTIVATION_ELU> final
   template <typename T>
   bool DoRunWithType() {
     const auto& X = Input(0);
-    auto* Y = Output(0);
-    Y->ResizeLike(X);
+
+    auto* Y = Output(0, X.sizes(), at::dtype<T>());
     if (X.numel() == 0) {
       Y->template mutable_data<T>();
       return true;
@@ -74,8 +74,8 @@ class CuDNNActivationGradientOp<CUDNN_ACTIVATION_ELU> final
   bool DoRunWithType() {
     const auto& Y = Input(0);
     const auto& dY = Input(1);
-    auto* dX = Output(0);
-    dX->ResizeLike(Y);
+
+    auto* dX = Output(0, Y.sizes(), at::dtype<T>());
     if (Y.numel() == 0) {
       dX->template mutable_data<T>();
       return true;

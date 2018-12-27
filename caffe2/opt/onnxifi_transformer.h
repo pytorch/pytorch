@@ -18,9 +18,19 @@ namespace onnx {
 class OnnxExporter;
 }
 
-class CAFFE2_API OnnxifiTransformer {
+struct OnnxifiTransformerOptions {
+  // Run shape inference
+  bool infer_shapes{false};
+  // Dump onnx model for debugging
+  bool debug{false};
+  // Pass serialized onnx model if true, otherwise pass serialized c2 model
+  bool use_onnx{true};
+};
+
+class CAFFE2_API OnnxifiTransformer final {
  public:
-  explicit OnnxifiTransformer(bool infer_shapes, bool debug);
+  explicit OnnxifiTransformer(const OnnxifiTransformerOptions& opts);
+  ~OnnxifiTransformer();
 
   void Transform(
       Workspace* ws,
@@ -59,11 +69,16 @@ class CAFFE2_API OnnxifiTransformer {
       NetDef* pred_net,
       const std::unordered_map<std::string, TensorShape>& input_shape_hints);
 
-  // Run shape inference
-  bool infer_shapes_{false};
+  // Transform by passing ONNX proto to backend
+  NetDef TransformViaOnnx(
+      Workspace* ws,
+      NetDef* pred_net,
+      const std::unordered_set<std::string>& weights,
+      const std::unordered_set<int>& blacklisted_ops,
+      std::unordered_map<std::string, TensorShape>* shape_hints);
 
-  // Dump onnx model for debugging
-  bool debug_{false};
+  // Options
+  OnnxifiTransformerOptions opts_;
 
   // Pointer to loaded onnxifi library
   onnxifi_library* lib_{nullptr};

@@ -24,7 +24,12 @@ struct Argument {
         N_(std::move(N)),
         default_value_(std::move(default_value)),
         kwarg_only_(kwarg_only),
-        alias_info_(std::move(alias_info)) {}
+        alias_info_(std::move(alias_info)) {
+          if (default_value_ && default_value_->isTensor()) {
+            auto t = default_value_->toTensor();
+            AT_ASSERT(!t.defined() || t.is_variable());
+          }
+        }
   const std::string& name() const {
     return name_;
   }
@@ -116,7 +121,8 @@ public:
   bool is_mutable() const {
     return std::any_of(
         arguments_.cbegin(), arguments_.cend(), [](const Argument& arg) {
-          return arg.alias_info() && arg.alias_info()->isWrite();
+          const auto& aliasInfo = arg.alias_info();
+          return aliasInfo && aliasInfo.value().isWrite();
         });
   }
   c10::optional<int> argumentIndexWithName(const std::string& name) const {

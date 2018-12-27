@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/MSECriterion.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/MSECriterion.cu"
 #else
 
 void THNN_(MSECriterion_updateOutput)(

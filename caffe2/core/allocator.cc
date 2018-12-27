@@ -1,4 +1,4 @@
-#include <ATen/core/Allocator.h>
+#include <c10/core/Allocator.h>
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include <c10/util/typeid.h>

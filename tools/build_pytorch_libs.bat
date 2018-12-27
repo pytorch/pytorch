@@ -6,10 +6,16 @@ set PATH=%INSTALL_DIR%\bin;%PATH%
 : The following environment variables are used exclusively by cmake and should have forward slashes rather than backslashes
 set BASE_DIR=%cd:\=/%
 set TORCH_LIB_DIR=%cd:\=/%/torch/lib
-set INSTALL_DIR=%cd:\=/%/torch/lib/tmp_install
 set THIRD_PARTY_DIR=%cd:\=/%/third_party
 set BASIC_C_FLAGS=
 set BASIC_CUDA_FLAGS=
+
+IF NOT DEFINED INSTALL_DIR (
+  set "INSTALL_DIR=%cd:\=/%/torch/lib/tmp_install"
+) ELSE (
+  set "INSTALL_DIR=%INSTALL_DIR:\=/%"
+)
+
 set LDFLAGS=/LIBPATH:%INSTALL_DIR%/lib
 :: set TORCH_CUDA_ARCH_LIST=6.1
 
@@ -21,7 +27,7 @@ if not exist torch\lib\tmp_install mkdir torch\lib\tmp_install
 
 : Variable defaults
 set /a USE_CUDA=0
-set /a USE_FBGEMM=0
+set /a USE_FBGEMM=1
 set /a USE_ROCM=0
 set /a USE_NNPACK=0
 set /a USE_QNNPACK=0
@@ -140,11 +146,11 @@ FOR %%a IN (%_BUILD_ARGS%) DO (
 : Copy Artifacts
 cd torch\lib
 
-copy /Y tmp_install\lib\* .
-IF EXIST ".\tmp_install\bin" (
-  copy /Y tmp_install\bin\* .
+copy /Y "%INSTALL_DIR%\lib\*" .
+IF EXIST "%INSTALL_DIR%\bin" (
+  copy /Y "%INSTALL_DIR%\bin\*" .
 )
-xcopy /Y /E tmp_install\include\*.* include\*.*
+xcopy /Y /E "%INSTALL_DIR%\include\*.*" include\*.*
 xcopy /Y ..\..\aten\src\THNN\generic\THNN.h  .
 xcopy /Y ..\..\aten\src\THCUNN\generic\THCUNN.h .
 
@@ -184,7 +190,7 @@ goto:eof
 :build_caffe2
   @setlocal
   : Note [Backslash munging on Windows]
-  : In CMake, Windows native backslashes are not well handled. 
+  : In CMake, Windows native backslashes are not well handled.
   : It will cause a warning as the following
   :   CMake Warning (dev) at cmake (source_group):
   :    Syntax error in cmake code at cmake
@@ -193,12 +199,13 @@ goto:eof
   :    Invalid escape sequence \i
   : which is said to become an error in the future.
   : As an alternative, we should use forward slashes instead.
-  : Here those paths should be escaped before passing to CMake. 
-  set NVTOOLEXT_HOME=%NVTOOLEXT_HOME:\=/%
-  set CUDNN_INCLUDE_DIR=%CUDNN_INCLUDE_DIR:\=/%
-  set CUDNN_LIB_DIR=%CUDNN_LIB_DIR:\=/%
-  set CUDNN_LIBRARY=%CUDNN_LIBRARY:\=/%
-  set PYTORCH_PYTHON_LIBRARY=%PYTORCH_PYTHON_LIBRARY:\=/%
+  : Here those paths should be escaped before passing to CMake.
+  if not "%NVTOOLEXT_HOME%" == "" set NVTOOLEXT_HOME=%NVTOOLEXT_HOME:\=/%
+  if not "%CUDNN_INCLUDE_DIR%" == "" set CUDNN_INCLUDE_DIR=%CUDNN_INCLUDE_DIR:\=/%
+  if not "%CUDNN_LIB_DIR%" == "" set CUDNN_LIB_DIR=%CUDNN_LIB_DIR:\=/%
+  if not "%CUDNN_LIBRARY%" == "" set CUDNN_LIBRARY=%CUDNN_LIBRARY:\=/%
+  if not "%PYTORCH_PYTHON_LIBRARY%" == "" set PYTORCH_PYTHON_LIBRARY=%PYTORCH_PYTHON_LIBRARY:\=/%
+  if not "%NUMPY_INCLUDE_DIR%" == "" set NUMPY_INCLUDE_DIR=%NUMPY_INCLUDE_DIR:\=/%
 
   IF NOT "%PREBUILD_COMMAND%"=="" call "%PREBUILD_COMMAND%" %PREBUILD_COMMAND_ARGS%
   if not exist build mkdir build
@@ -220,6 +227,7 @@ goto:eof
                   -DUSE_DISTRIBUTED=%USE_DISTRIBUTED% ^
                   -DUSE_FBGEMM=%USE_FBGEMM% ^
                   -DUSE_NUMPY=%USE_NUMPY% ^
+                  -DNUMPY_INCLUDE_DIR="%NUMPY_INCLUDE_DIR%" ^
                   -DUSE_NNPACK=%USE_NNPACK% ^
                   -DUSE_LEVELDB=%USE_LEVELDB% ^
                   -DUSE_LMDB=%USE_LMDB% ^
@@ -246,6 +254,15 @@ goto:eof
   %MAKE_COMMAND%
   IF ERRORLEVEL 1 exit 1
   IF NOT ERRORLEVEL 0 exit 1
+
+  :: Install Python proto files
+  IF "%BUILD_PYTHON%" == "ON" (
+    for /f "delims=" %%i in ('where /R caffe2\proto *.py') do (
+      IF NOT "%%i" == "%CD%\caffe2\proto\__init__.py" (
+        copy /Y %%i ..\caffe2\proto\
+      )
+    )
+  )
 
   popd
   @endlocal

@@ -4,20 +4,20 @@
 #include <THD/base/Cuda.hpp>
 #include <THD/base/DataChannel.hpp>
 
-#include "gloo/algorithm.h"
-#include "gloo/allgather_ring.h"
-#include "gloo/allreduce_ring.h"
-#include "gloo/barrier_all_to_all.h"
-#include "gloo/broadcast_one_to_all.h"
+#include <gloo/algorithm.h>
+#include <gloo/allgather_ring.h>
+#include <gloo/allreduce_ring.h>
+#include <gloo/barrier_all_to_all.h>
+#include <gloo/broadcast_one_to_all.h>
 #ifdef USE_CUDA
-#include "gloo/cuda_allreduce_halving_doubling.h"
-#include "gloo/cuda_allreduce_halving_doubling_pipelined.h"
-#include "gloo/cuda_allreduce_ring.h"
-#include "gloo/cuda_broadcast_one_to_all.h"
+#include <gloo/cuda_allreduce_halving_doubling.h>
+#include <gloo/cuda_allreduce_halving_doubling_pipelined.h>
+#include <gloo/cuda_allreduce_ring.h>
+#include <gloo/cuda_broadcast_one_to_all.h>
 #endif
-#include "gloo/rendezvous/context.h"
-#include "gloo/rendezvous/prefix_store.h"
-#include "gloo/rendezvous/store.h"
+#include <gloo/rendezvous/context.h>
+#include <gloo/rendezvous/prefix_store.h>
+#include <gloo/rendezvous/store.h>
 
 #ifdef USE_CUDA
 #include <THC/THC.h>

@@ -34,7 +34,7 @@ class ONNXWhileOp final : public Operator<Context> {
         body_net_def_.set_name("loop_net");
       } else {
         ++counter;
-        body_net_def_.set_name("loop_net." + caffe2::to_string(counter));
+        body_net_def_.set_name("loop_net." + c10::to_string(counter));
       }
     }
   }
@@ -171,7 +171,7 @@ class ONNXWhileOp final : public Operator<Context> {
                 scan_outputs_sizes[i],
                 "Size of scan output changed across iterations");
             dims.insert(dims.begin(), itr);
-            scan_output_target->Extend(1, 100, &context_);
+            scan_output_target->Extend(1, 100);
 
             int64_t timestep_size = 1;
             for (const int64_t t : scan_outputs_sizes[i]) {

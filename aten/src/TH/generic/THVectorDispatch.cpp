@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THVectorDispatch.cpp"
+#define TH_GENERIC_FILE "TH/generic/THVectorDispatch.cpp"
 #else
 
 /* For now there are only SIMD implementations for FLOAT and DOUBLE.
@@ -177,20 +177,6 @@ void THVector_(divs)(scalar_t *y, const scalar_t *x, const scalar_t c, const ptr
   THVector_(divs_DISPATCHPTR)(y, x, c, n);
 }
 
-static void (*THVector_(copy_DISPATCHPTR))(scalar_t *, const scalar_t *, const ptrdiff_t) = &THVector_(copy_DEFAULT);
-static FunctionDescription THVector_(copy_DISPATCHTABLE)[] = {
-  #if defined(USE_AVX)
-    #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
-      FUNCTION_IMPL(THVector_(copy_AVX), SIMDExtension_AVX),
-    #endif
-  #endif
-
-  FUNCTION_IMPL(THVector_(copy_DEFAULT), SIMDExtension_DEFAULT)
-};
-void THVector_(copy)(scalar_t *y, const scalar_t *x, const ptrdiff_t n) {
-  THVector_(copy_DISPATCHPTR)(y, x, n);
-}
-
 
 static void (*THVector_(normal_fill_DISPATCHPTR))(scalar_t *, const int64_t, THGenerator *, const scalar_t, const scalar_t) = &THVector_(normal_fill_DEFAULT);
 static FunctionDescription THVector_(normal_fill_DISPATCHTABLE)[] = {
@@ -240,7 +226,6 @@ struct THVector_(startup) {
     INIT_DISPATCH_PTR(muls);
     INIT_DISPATCH_PTR(cdiv);
     INIT_DISPATCH_PTR(divs);
-    INIT_DISPATCH_PTR(copy);
     INIT_DISPATCH_PTR(normal_fill);
 
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)

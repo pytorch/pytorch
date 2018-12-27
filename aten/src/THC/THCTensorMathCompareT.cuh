@@ -1,12 +1,12 @@
 #ifndef THC_TENSORMATH_COMPARET_CUH
 #define THC_TENSORMATH_COMPARET_CUH
 
-#include "THCTensorMath.h"
-#include "THCGeneral.h"
-#include "THCTensorCopy.h"
-#include "THCApply.cuh"
-#include "THCNumerics.cuh"
-#include "THCReduce.cuh"
+#include <THC/THCTensorMath.h>
+#include <THC/THCGeneral.h>
+#include <THC/THCTensorCopy.h>
+#include <THC/THCApply.cuh>
+#include <THC/THCNumerics.cuh>
+#include <THC/THCReduce.cuh>
 
 template <typename T, typename TOut>
 struct TensorLTOp {

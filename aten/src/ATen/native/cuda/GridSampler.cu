@@ -1,10 +1,10 @@
-#include "ATen/ATen.h"
-#include "ATen/native/GridSampler.h"
-#include "ATen/cuda/CUDAContext.h"
-#include "ATen/cuda/CUDAApplyUtils.cuh"
-#include "ATen/cuda/detail/TensorInfo.cuh"
-#include "ATen/cuda/detail/IndexUtils.cuh"
-#include "ATen/cuda/detail/KernelUtils.h"
+#include <ATen/ATen.h>
+#include <ATen/native/GridSampler.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/detail/TensorInfo.cuh>
+#include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/cuda/detail/KernelUtils.h>
 
 namespace at { namespace native {
 

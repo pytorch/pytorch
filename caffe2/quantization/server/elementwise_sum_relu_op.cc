@@ -23,7 +23,7 @@ class SumReluOp : public SumOp<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SumReluOp(const OperatorDef& operator_def, Workspace* ws)
-    : SumOp<Context>(operator_def, ws) {}
+      : SumOp<Context>(operator_def, ws) {}
 
   template <typename T, typename M>
   bool DoRunWithType() {

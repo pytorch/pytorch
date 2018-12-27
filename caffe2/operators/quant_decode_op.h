@@ -151,8 +151,7 @@ class QuantDecodeGradientOp final : public Operator<CPUContext> {
     const auto& codebook = Input(0);
     CAFFE_ENFORCE(codebook.template IsType<float>(), codebook.dtype().name());
 
-    auto* gradient = Output(0);
-    gradient->ResizeLike(codebook);
+    auto* gradient = Output(0, codebook.sizes(), at::dtype<float>());
     auto* gradient_ptr = gradient->template mutable_data<float>();
     std::fill(gradient_ptr, gradient_ptr + gradient->numel(), 0);
 

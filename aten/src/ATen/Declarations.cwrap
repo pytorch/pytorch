@@ -1629,8 +1629,7 @@
         - arg: THTensor* result
           output: True
         - THTensor* self
-        - arg: real p
-          python_default_init: AS_REAL(2)
+        - real p
         - arg: long dim
           wrap_dim: self
         - arg: bool keepdim
@@ -1883,44 +1882,6 @@
     - real weight
 ]]
 [[
-  name: _th_linspace
-  cname: linspace
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - real start
-    - real end
-    - long steps
-]]
-[[
-  name: _th_logspace
-  cname: logspace
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - real start
-    - real end
-    - long steps
-]]
-[[
   name: _th_histc
   cname: histc
   types:
@@ -2162,6 +2123,8 @@
 [[
   name: _th_triu_
   cname: triu
+  variants:
+    - function
   return: self
   arguments:
     - THTensor* self
@@ -2473,6 +2436,7 @@
         - THTensor* tensor1
         - THTensor* tensor2
     - cname: spaddcmul
+      variants: function
       return: argument 0
       arguments:
         - THTensor* self
@@ -2682,7 +2646,7 @@
     - THTensor* self
 ]]
 [[
-  name: _th_potrf
+  name: _th_potrf_single
   cname: potrf
   types:
     - Float

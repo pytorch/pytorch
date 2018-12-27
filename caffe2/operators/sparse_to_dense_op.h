@@ -77,8 +77,8 @@ class SparseToDenseOp final : public Operator<Context> {
 
     auto shape = sparse_values.sizes().vec();
     shape[0] = output_first_dim;
-    auto* output = Output(0);
-    output->Resize(shape);
+
+    auto* output = Output(0, shape, at::dtype<TData>());
 
     TData* output_data = output->template mutable_data<TData>();
     if (!output_first_dim) {

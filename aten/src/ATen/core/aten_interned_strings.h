@@ -42,6 +42,8 @@ _(aten, _cast_Long) \
 _(aten, _cast_Short) \
 _(aten, _cat) \
 _(aten, _ceil) \
+_(aten, _cholesky_helper) \
+_(aten, _cholesky_solve_helper) \
 _(aten, _convolution) \
 _(aten, _convolution_double_backward) \
 _(aten, _convolution_nogroup) \
@@ -101,7 +103,6 @@ _(aten, _pack_padded_sequence_backward) \
 _(aten, _pad_packed_sequence) \
 _(aten, _pdist_backward) \
 _(aten, _pdist_forward) \
-_(aten, _potrs_helper) \
 _(aten, _prod) \
 _(aten, _prodall) \
 _(aten, _range) \
@@ -117,6 +118,7 @@ _(aten, _sin) \
 _(aten, _sinh) \
 _(aten, _sparseDims) \
 _(aten, _sparse_add) \
+_(aten, _sparse_addmm) \
 _(aten, _sparse_coo_tensor_with_dims) \
 _(aten, _sparse_coo_tensor_with_dims_and_tensors) \
 _(aten, _sparse_coo_tensor_unsafe) \
@@ -126,6 +128,7 @@ _(aten, _sparse_div_zerodim) \
 _(aten, _sparse_mul) \
 _(aten, _sparse_mul_scalar) \
 _(aten, _sparse_mul_zerodim) \
+_(aten, _sparse_sum) \
 _(aten, _sqrt) \
 _(aten, _standard_gamma) \
 _(aten, _standard_gamma_grad) \
@@ -194,6 +197,8 @@ _(aten, addcmul) \
 _(aten, addmm) \
 _(aten, addmv) \
 _(aten, addr) \
+_(aten, affine_grid_generator) \
+_(aten, affine_grid_generator_backward) \
 _(aten, alias) \
 _(aten, all) \
 _(aten, allclose) \
@@ -237,6 +242,7 @@ _(aten, ceil) \
 _(aten, celu) \
 _(aten, chain_matmul) \
 _(aten, cholesky) \
+_(aten, cholesky_solve) \
 _(aten, chunk) \
 _(aten, clamp) \
 _(aten, clamp_max) \
@@ -518,7 +524,6 @@ _(aten, pixel_shuffle) \
 _(aten, poisson) \
 _(aten, polygamma) \
 _(aten, potri) \
-_(aten, potrs) \
 _(aten, pow) \
 _(aten, prelu) \
 _(aten, prelu_backward) \
@@ -621,6 +626,7 @@ _(aten, sub) \
 _(aten, sub_) \
 _(aten, rsub) \
 _(aten, sum) \
+_(aten, sum_to_size) \
 _(aten, svd) \
 _(aten, symeig) \
 _(aten, t) \
@@ -678,6 +684,9 @@ _(aten, unsqueeze) \
 _(aten, upsample_bilinear2d) \
 _(aten, upsample_bilinear2d_backward) \
 _(aten, upsample_bilinear2d_forward) \
+_(aten, upsample_bicubic2d) \
+_(aten, upsample_bicubic2d_backward) \
+_(aten, upsample_bicubic2d_forward) \
 _(aten, upsample_linear1d) \
 _(aten, upsample_linear1d_backward) \
 _(aten, upsample_linear1d_forward) \

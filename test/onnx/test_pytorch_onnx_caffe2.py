@@ -189,8 +189,22 @@ class TestCaffe2Backend(unittest.TestCase):
                                 use_gpu=use_gpu_, example_outputs=example_outputs)
 
     def test_linear(self):
-        model = nn.Linear(1, 1)
-        input = torch.randn(1, 1, requires_grad=True)
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+                self.many_fc = nn.Sequential(
+                    nn.Linear(4, 5, bias=True),
+                    nn.ReLU(inplace=True),
+                    nn.Linear(5, 6, bias=True),
+                    nn.ReLU(inplace=True),
+                    nn.Linear(6, 7, bias=True),
+                )
+
+            def forward(self, input):
+                return self.many_fc(input)
+
+        model = MyModel()
+        input = torch.randn(3, 4, requires_grad=True)
         self.run_model_test(model, train=False, batch_size=0, input=input)
 
     def test_lstm_cell(self):

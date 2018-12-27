@@ -2,8 +2,8 @@
 #include "dnnlowp_op.h"
 
 #include <cassert>
-#include <limits>
 #include <cmath>
+#include <limits>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -16,9 +16,9 @@ using namespace std;
 void Histogram::Add(float f, uint64_t cnt) {
   int nbins = histogram_.size();
   float bin_width = (max_ - min_) / nbins;
-  int bin =
-    bin_width == 0
-    ? 0 : std::min(static_cast<int>((f - min_)/bin_width), nbins - 1);
+  int bin = bin_width == 0
+      ? 0
+      : std::min(static_cast<int>((f - min_) / bin_width), nbins - 1);
   bin = std::max(0, bin);
   assert(bin >= 0);
   histogram_[bin] += cnt;
@@ -38,7 +38,8 @@ void Histogram::Add(const float* f, int len) {
       Finalize();
     }
 
-    per_thread_histogram_.resize((caffe2::dnnlowp_get_max_threads() - 1) * nbins);
+    per_thread_histogram_.resize(
+        (caffe2::dnnlowp_get_max_threads() - 1) * nbins);
 
 #ifdef _OPENMP
 #pragma omp parallel
@@ -87,8 +88,9 @@ void Histogram::Finalize() {
 static const int OVER_BINNING_FACTOR = 4;
 
 DynamicHistogram::DynamicHistogram(int nbins)
-  : nbins_(nbins),
-    min_(numeric_limits<float>::max()), max_(numeric_limits<float>::lowest()) {
+    : nbins_(nbins),
+      min_(numeric_limits<float>::max()),
+      max_(numeric_limits<float>::lowest()) {
   assert(nbins_ > 0);
 }
 
@@ -111,7 +113,7 @@ void DynamicHistogram::Add(float f) {
               ceil((curr_hist.Min() - f) / old_spread) * old_spread;
         }
         histograms_.emplace_back(
-          curr_hist.GetHistogram()->size(), new_min, curr_hist.Max());
+            curr_hist.GetHistogram()->size(), new_min, curr_hist.Max());
       } else {
         float new_max;
         if (old_spread == 0) {
@@ -121,7 +123,7 @@ void DynamicHistogram::Add(float f) {
               ceil((f - curr_hist.Max()) / old_spread) * old_spread;
         }
         histograms_.emplace_back(
-          curr_hist.GetHistogram()->size(), curr_hist.Min(), new_max);
+            curr_hist.GetHistogram()->size(), curr_hist.Min(), new_max);
       }
     }
   }
@@ -175,7 +177,7 @@ void DynamicHistogram::Add(const float* f, int len) {
   new_hist.Add(f, len);
 }
 
-const Histogram *DynamicHistogram::Finalize() {
+const Histogram* DynamicHistogram::Finalize() {
   if (final_histogram_.get()) {
     return final_histogram_.get();
   }
@@ -190,7 +192,9 @@ const Histogram *DynamicHistogram::Finalize() {
     float src_bin_width = (hist.Max() - hist.Min()) / bins.size();
 
     for (int i = 0; i < bins.size(); ++i) {
-      if (bins[i] == 0) continue;
+      if (bins[i] == 0) {
+        continue;
+      }
       float src_bin_begin = hist.Min() + src_bin_width * i;
       float src_bin_end = src_bin_begin + src_bin_width;
       // dst_bin corresponds to the beginning of the src_bin

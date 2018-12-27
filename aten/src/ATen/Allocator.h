@@ -1,2 +1,2 @@
 #pragma once
-#include <ATen/core/Allocator.h>
+#include <c10/core/Allocator.h>
