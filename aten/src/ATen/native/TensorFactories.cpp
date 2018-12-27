@@ -492,7 +492,7 @@ Tensor range(
     Scalar start,
     Scalar end,
     const TensorOptions& options) {
-  return at::native::range(start, end, 1);
+  return at::native::range(start, end, 1, options);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangle ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
