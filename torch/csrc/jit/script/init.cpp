@@ -483,7 +483,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   if (!dispatched_fn.is_none()) {
     return std::make_shared<BooleanDispatchValue>(std::move(dispatched_fn));
   }
-  py::list overloaded_fn =
+  py::object overloaded_fn =
       py::module::import("torch.jit").attr("_try_get_overloaded_fn")(obj);
   if (!overloaded_fn.is_none()) {
     return std::make_shared<OverloadedFunctionValue>(std::move(overloaded_fn));
