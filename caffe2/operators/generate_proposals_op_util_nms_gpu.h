@@ -33,6 +33,31 @@ CAFFE2_API void nms_gpu_upright(
     TensorCPU& host_delete_mask,
     CUDAContext* context);
 
+// Same as nms_gpu_upright, but for rotated boxes with angle info.
+// d_desc_sorted_boxes : pixel coordinates of proposed bounding boxes
+//    size: (N,5), format: [x_ct; y_ctr; width; height; angle]
+//    the boxes are sorted by scores in descending order
+CAFFE2_API void nms_gpu_rotated(
+    const float* d_desc_sorted_boxes,
+    const int N,
+    const float thresh,
+    int* d_keep_sorted_list,
+    int* h_nkeep,
+    TensorCUDA& dev_delete_mask,
+    TensorCPU& host_delete_mask,
+    CUDAContext* context);
+
+CAFFE2_API void nms_gpu(
+    const float* d_desc_sorted_boxes,
+    const int N,
+    const float thresh,
+    int* d_keep_sorted_list,
+    int* h_nkeep,
+    TensorCUDA& dev_delete_mask,
+    TensorCPU& host_delete_mask,
+    CUDAContext* context,
+    const int box_dim);
+
 } // namespace utils
 } // namespace caffe2
 
