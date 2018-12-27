@@ -185,7 +185,7 @@ Tensor& reflection_pad1d_out_cuda(
   return output;
 }
 
-Tensor reflection_pad1d_cuda(Tensor const& input, IntList padding) {
+Tensor reflection_pad1d_cuda(const Tensor& input, IntList padding) {
   auto output = at::empty({0}, input.options());
   reflection_pad1d_out_template(output, input, padding);
   return output;
@@ -195,7 +195,8 @@ Tensor& reflection_pad1d_backward_out_cuda(
     Tensor& grad_input, const Tensor& grad_output,
     const Tensor& input,
     IntList padding) {
-  grad_input = at::zeros_like(input);
+  grad_input.resize_as_(input);
+  grad_input.zero_();
   reflection_pad1d_backward_out_template(
     grad_input, grad_output, input, padding);
   return grad_input;

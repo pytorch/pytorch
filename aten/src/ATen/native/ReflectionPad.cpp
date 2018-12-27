@@ -38,7 +38,7 @@ static void reflection_pad1d_out_frame(
 }
 
 void reflection_pad1d_out_template(
-    Tensor& output, Tensor const& input_, IntList padding) {
+    Tensor& output, const Tensor& input_, IntList padding) {
   int64_t dim_plane = 0;
   int64_t dim_w = 1;
   int64_t nbatch = 1;
@@ -135,7 +135,7 @@ static void reflection_pad1d_backward_out_frame(
 }
 
 void reflection_pad1d_backward_out_template(
-    Tensor& grad_input, Tensor const& grad_output_, Tensor const& input,
+    Tensor& grad_input, const Tensor& grad_output_, const Tensor& input,
     IntList padding) {
   int64_t dim_plane = 0;
   int64_t dim_w = 1;
@@ -157,7 +157,7 @@ void reflection_pad1d_backward_out_template(
   AT_CHECK(output_w == grad_output_.size(dim_w), "grad_output width unexpected."
     " Expected: ", output_w, ", Got: ", grad_output_.size(dim_w));
 
-  /* get contiguous gradOutput */
+  /* get contiguous grad_output */
   Tensor grad_output = grad_output_.contiguous();
 
   /* backprop */
@@ -196,7 +196,7 @@ Tensor& reflection_pad1d_out_cpu(
   return output;
 }
 
-Tensor reflection_pad1d_cpu(Tensor const& input, IntList padding) {
+Tensor reflection_pad1d_cpu(const Tensor& input, IntList padding) {
   auto output = at::empty({0}, input.options());
   reflection_pad1d_out_template(output, input, padding);
   return output;
@@ -207,7 +207,8 @@ Tensor& reflection_pad1d_backward_out_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     IntList padding) {
-  grad_input = at::zeros_like(input);
+  grad_input.resize_as_(input);
+  grad_input.zero_();
   reflection_pad1d_backward_out_template(
     grad_input, grad_output, input, padding);
   return grad_input;
