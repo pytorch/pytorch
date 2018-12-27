@@ -16,7 +16,7 @@ Tensor MaxUnpooling2d_forward_out_cpu_(
   int64_t dimc = 0;
   int64_t dimh = 1;
   int64_t dimw = 2;
-  if(input.ndimension() == 4) {
+  if (input.ndimension() == 4) {
     numBatch = input.size(0);
     dimc++;
     dimh++;
@@ -89,31 +89,26 @@ Tensor& MaxUnpooling2d_forward_out_cpu(
       "Shape of indices should match shape of input");
 
   // is_empty check
-  AT_CHECK(self.numel() > 0,
-    "Input must be non-empty");
+  AT_CHECK(self.numel() > 0, "Input must be non-empty");
 
   auto outputHeight = output_size[0];
   auto outputWidth = output_size[1];
 
-
   int64_t numBatch = 1;
   int64_t numChannels;
-  if(self.ndimension() == 4) {
+  if (self.ndimension() == 4) {
     numBatch = self.size(0);
     numChannels = self.size(1);
-  }
-  else {
+  } else {
     numChannels = self.size(0);
   }
 
   auto self_contiguous = self.contiguous();
   auto indices_contiguous = indices.contiguous();
 
-  if(self_contiguous.ndimension() == 3)
-  {
+  if (self_contiguous.ndimension() == 3) {
     output.resize_({numChannels, outputHeight, outputWidth});
-  }
-  else {
+  } else {
     output.resize_({numBatch, numChannels, outputHeight, outputWidth});
   }
   output.zero_();
@@ -168,14 +163,14 @@ Tensor MaxUnpooling3d_forward_out_cpu_(
   auto dimh = 2;
   auto dimt = 1;
 
-  if(input.ndimension() == 5) {
+  if (input.ndimension() == 5) {
     nBatch = input.size(0);
     dimw++;
     dimh++;
     dimt++;
   }
 
-  auto nSlices = input.size(dimt-1);
+  auto nSlices = input.size(dimt - 1);
   auto iT = input.size(dimt);
   auto iH = input.size(dimh);
   auto iW = input.size(dimw);
@@ -238,10 +233,10 @@ void MaxUnpooling3d_shape_check(
     IntList padding,
     bool check_grad) {
   // is_empty check
-  AT_CHECK(input.numel() > 0,
-    "Input must be non-empty");
-  AT_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
-    "Input must be 4d or 5d tensor");
+  AT_CHECK(input.numel() > 0, "Input must be non-empty");
+  AT_CHECK(
+      (input.ndimension() == 4 || input.ndimension() == 5),
+      "Input must be 4d or 5d tensor");
   AT_CHECK(input.sizes() == indices.sizes());
   AT_CHECK(
       stride[0] > 0 && stride[1] > 0 && stride[2] > 0,
@@ -253,8 +248,7 @@ void MaxUnpooling3d_shape_check(
   int dimt = 1;
   int dimn = 0;
 
-  if (input.ndimension() == 5)
-  {
+  if (input.ndimension() == 5) {
     dimw++;
     dimh++;
     dimt++;
@@ -272,11 +266,13 @@ void MaxUnpooling3d_shape_check(
           ". gradOutput: ",
           gradOutput);
     }
-    AT_CHECK(gradOutput.ndimension() == input.ndimension() && gradOutput.size(dimn) == nslices);
+    AT_CHECK(
+        gradOutput.ndimension() == input.ndimension() &&
+        gradOutput.size(dimn) == nslices);
   }
 }
 
-at::Tensor& MaxUnpooling3d_forward_out_cpu(
+Tensor& MaxUnpooling3d_forward_out_cpu(
     Tensor& output,
     const Tensor& self,
     const Tensor& indices,
@@ -306,19 +302,15 @@ at::Tensor& MaxUnpooling3d_forward_out_cpu(
   MaxUnpooling3d_shape_check(
       self, at::empty({}), indices, output_size, stride, padding, false);
 
-  if(self.ndimension() == 5)
-  {
+  if (self.ndimension() == 5) {
     output.resize_({self.size(0),
-             self.size(1),
-             output_size[0],
-             output_size[1],
-             output_size[2]});
-  }
-  else {
-    output.resize_({self.size(0),
-             output_size[0],
-             output_size[1],
-             output_size[2]});
+                    self.size(1),
+                    output_size[0],
+                    output_size[1],
+                    output_size[2]});
+  } else {
+    output.resize_(
+        {self.size(0), output_size[0], output_size[1], output_size[2]});
   }
   output.zero_();
 
@@ -368,14 +360,14 @@ Tensor MaxUnpooling3d_forward_cpu(
 
 template <typename scalar_t>
 static void MaxUnpooling2d_backward_out_cpu_(
-  scalar_t* gradInput_p,
-  scalar_t* gradOutput_p,
-  int64_t* ind_p,
-  int64_t nslices,
-  int64_t iwidth, int64_t iheight,
-  int64_t owidth, int64_t oheight
-)
-{
+    scalar_t* gradInput_p,
+    scalar_t* gradOutput_p,
+    int64_t* ind_p,
+    int64_t nslices,
+    int64_t iwidth,
+    int64_t iheight,
+    int64_t owidth,
+    int64_t oheight) {
   int k;
 #pragma omp parallel for private(k)
   for (k = 0; k < nslices; k++) {
@@ -404,7 +396,7 @@ static void MaxUnpooling2d_backward_out_cpu_(
   }
 }
 
-at::Tensor& MaxUnpooling2d_backward_out_cpu(
+Tensor& MaxUnpooling2d_backward_out_cpu(
     Tensor& grad_input,
     const Tensor& grad_output,
     const Tensor& self,
@@ -418,8 +410,7 @@ at::Tensor& MaxUnpooling2d_backward_out_cpu(
   int iwidth;
 
   AT_CHECK(
-      self.sizes() == indices.sizes(),
-      "Input shape must match indices shape");
+      self.sizes() == indices.sizes(), "Input shape must match indices shape");
 
   AT_CHECK(output_size.size() == 2, "Output size must be 2");
 
@@ -434,7 +425,7 @@ at::Tensor& MaxUnpooling2d_backward_out_cpu(
   grad_input.resize_as_(self);
   grad_input.zero_();
 
-  if(self.ndimension() == 4) {
+  if (self.ndimension() == 4) {
     nbatch = self.size(0);
     dimw++;
     dimh++;
@@ -478,7 +469,7 @@ at::Tensor& MaxUnpooling2d_backward_out_cpu(
   return grad_input;
 }
 
-at::Tensor MaxUnpooling2d_backward_cpu(
+Tensor MaxUnpooling2d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& self,
     const Tensor& indices,
@@ -532,7 +523,7 @@ static void MaxUnpooling3d_backward_out_cpu_(
     }
   }
 }
-at::Tensor& MaxUnpooling3d_backward_out_cpu(
+Tensor& MaxUnpooling3d_backward_out_cpu(
     Tensor& grad_input,
     const Tensor& grad_output,
     const Tensor& self,
@@ -561,8 +552,8 @@ at::Tensor& MaxUnpooling3d_backward_out_cpu(
   int iH;
   int iW;
 
-
-  MaxUnpooling3d_shape_check(self, grad_output, indices, output_size, stride, padding, true);
+  MaxUnpooling3d_shape_check(
+      self, grad_output, indices, output_size, stride, padding, true);
 
   // TODO (from THNN): check gradOutput shape
   /* get contiguous gradOutput */
@@ -572,8 +563,7 @@ at::Tensor& MaxUnpooling3d_backward_out_cpu(
   /* resize */
   grad_input.resize_as_(self);
   grad_input.zero_();
-  if(self.ndimension() == 5)
-  {
+  if (self.ndimension() == 5) {
     nbatch = self.size(0);
     dimt++;
     dimw++;
@@ -581,16 +571,14 @@ at::Tensor& MaxUnpooling3d_backward_out_cpu(
   }
 
   /* sizes */
-  nslices = self.size(dimt-1);
+  nslices = self.size(dimt - 1);
   iT = self.size(dimt);
   iH = self.size(dimh);
   iW = self.size(dimw);
 
-
   /* backprop */
   int p;
-  for(p = 0; p < nbatch; p++)
-  {
+  for (p = 0; p < nbatch; p++) {
     int inputOffset = p * nslices * iT * iH * iW;
     int outputOffset = p * nslices * oT * oT * oW;
     AT_DISPATCH_FLOATING_TYPES(
@@ -600,24 +588,29 @@ at::Tensor& MaxUnpooling3d_backward_out_cpu(
               grad_output_contiguous.data<scalar_t>() + outputOffset,
               indices_contiguous.data<int64_t>() + inputOffset,
               nslices,
-              iT, iW, iH,
-              oT, oW, oH);
+              iT,
+              iW,
+              iH,
+              oT,
+              oW,
+              oH);
         }));
   }
   return grad_input;
 }
 
-at::Tensor MaxUnpooling3d_backward_cpu(
-  const Tensor& grad_output,
-  const Tensor& self,
-  const Tensor& indices,
-  IntList output_size,
-  IntList stride,
-  IntList padding) {
-    auto grad_input = at::zeros_like(self);
-    MaxUnpooling3d_backward_out_cpu(grad_input, grad_output, self, indices, output_size, stride, padding);
-    return grad_input;
-  }
+Tensor MaxUnpooling3d_backward_cpu(
+    const Tensor& grad_output,
+    const Tensor& self,
+    const Tensor& indices,
+    IntList output_size,
+    IntList stride,
+    IntList padding) {
+  auto grad_input = at::zeros_like(self);
+  MaxUnpooling3d_backward_out_cpu(
+      grad_input, grad_output, self, indices, output_size, stride, padding);
+  return grad_input;
+}
 
 // stopgap until GPU version is implemented
 Tensor& MaxUnpooling2d_forward_out_cuda(
@@ -658,20 +651,46 @@ Tensor MaxUnpooling3d_forward_cuda(
   return at::_thnn_max_unpool3d(self, indices, output_size, stride, padding);
 }
 
-Tensor & MaxUnpooling2d_backward_out_cuda(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, const Tensor & indices, IntList output_size) {
-  return at::_thnn_max_unpool2d_backward_out(grad_input, grad_output, self, indices, output_size);
+Tensor& MaxUnpooling2d_backward_out_cuda(
+    Tensor& grad_input,
+    const Tensor& grad_output,
+    const Tensor& self,
+    const Tensor& indices,
+    IntList output_size) {
+  return at::_thnn_max_unpool2d_backward_out(
+      grad_input, grad_output, self, indices, output_size);
 }
 
-Tensor MaxUnpooling2d_backward_cuda(const Tensor & grad_output, const Tensor & self, const Tensor & indices, IntList output_size) {
-  return at::_thnn_max_unpool2d_backward(grad_output, self, indices, output_size);
+Tensor MaxUnpooling2d_backward_cuda(
+    const Tensor& grad_output,
+    const Tensor& self,
+    const Tensor& indices,
+    IntList output_size) {
+  return at::_thnn_max_unpool2d_backward(
+      grad_output, self, indices, output_size);
 }
 
-Tensor & MaxUnpooling3d_backward_out_cuda(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, const Tensor & indices, IntList output_size, IntList stride, IntList padding) {
-  return at::_thnn_max_unpool3d_backward_out(grad_input, grad_output, self, indices, output_size, stride, padding);
+Tensor& MaxUnpooling3d_backward_out_cuda(
+    Tensor& grad_input,
+    const Tensor& grad_output,
+    const Tensor& self,
+    const Tensor& indices,
+    IntList output_size,
+    IntList stride,
+    IntList padding) {
+  return at::_thnn_max_unpool3d_backward_out(
+      grad_input, grad_output, self, indices, output_size, stride, padding);
 }
 
-Tensor MaxUnpooling3d_backward_cuda(const Tensor & grad_output, const Tensor & self, const Tensor & indices, IntList output_size, IntList stride, IntList padding) {
-  return at::_thnn_max_unpool3d_backward(grad_output, self, indices, output_size, stride, padding);
+Tensor MaxUnpooling3d_backward_cuda(
+    const Tensor& grad_output,
+    const Tensor& self,
+    const Tensor& indices,
+    IntList output_size,
+    IntList stride,
+    IntList padding) {
+  return at::_thnn_max_unpool3d_backward(
+      grad_output, self, indices, output_size, stride, padding);
 }
 
 } // namespace native
