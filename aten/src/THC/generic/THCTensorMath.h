@@ -19,7 +19,6 @@ THC_API void THCTensor_(eye)(THCState *state, THCTensor *self, int64_t n, int64_
 
 THC_API accreal THCTensor_(trace)(THCState *state, THCTensor *self);
 
-THC_API void THCTensor_(range)(THCState *state, THCTensor *r_, accreal xmin, accreal xmax, accreal step);
 THC_API void THCTensor_(arange)(THCState *state, THCTensor *r_, accreal xmin, accreal xmax, accreal step);
 
 #endif
