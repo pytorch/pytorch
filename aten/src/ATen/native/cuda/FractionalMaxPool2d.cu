@@ -46,18 +46,16 @@ __device__ inline scalar_t* get_ref_by_coord(
 }
 
 template <typename scalar_t>
-__global__ void fractional_max_pool2d_out_frame(
-  TensorInfo<scalar_t, int> input,
+__global__ void fractional_max_pool2d_out_cuda_frame(
   TensorInfo<scalar_t, int> output,
   TensorInfo<int64_t, int> indices,
+  TensorInfo<scalar_t, int> input,
   TensorInfo<scalar_t, int> samples,
-  IntList pool_size,
+  int poolSizeH, int poolSizeW,
   int PoolSizeWStatic) {
 
   using accscalar_t = at::acc_type<scalar_t, true>;
 
-  int poolSizeH = pool_size[0];
-  int poolSizeW = pool_size[1];
   int ourOutputPoint = threadIdx.x + blockIdx.x * blockDim.x;
   int plane = blockIdx.y;
   int batch = blockIdx.z;
@@ -70,12 +68,12 @@ __global__ void fractional_max_pool2d_out_frame(
     int outputH = ourOutputPoint / output.sizes[ndims - 1];
 
     int poolW = get_interval<scalar_t, accscalar_t>(
-      static_cast<accscalar_t>(*(samples.data + batch * samples.strides[0] +
-        plane * samples.strides[1])),
+      static_cast<accscalar_t>(samples.data[batch * samples.strides[0] +
+        plane * samples.strides[1]]),
         outputW, input.sizes[ndims - 1], output.sizes[ndims - 1], poolSizeW);
     int poolH = get_interval<scalar_t, accscalar_t>(
-      static_cast<accscalar_t>(*(samples.data + batch * samples.strides[0] +
-        plane * samples.strides[1] + samples.strides[2])),
+      static_cast<accscalar_t>(samples.data[batch * samples.strides[0] +
+        plane * samples.strides[1] + samples.strides[2]]),
         outputH, input.sizes[ndims - 2], output.sizes[ndims - 2], poolSizeH);
 
     scalar_t maxVal = at::numeric_limits<scalar_t>::lowest();
@@ -120,7 +118,7 @@ __global__ void fractional_max_pool2d_out_frame(
 }
 
 template <typename scalar_t>
-__global__ void fractional_max_pool2d_backward_out_frame(
+__global__ void fractional_max_pool2d_backward_out_cuda_frame(
   TensorInfo<scalar_t, int> gradInput,
   TensorInfo<scalar_t, int> gradOutput,
   TensorInfo<int64_t, int> indices) {
@@ -148,7 +146,7 @@ __global__ void fractional_max_pool2d_backward_out_frame(
       get_ref_by_coord<scalar_t, int>(
         gradInput, ndims, batch, plane, inputH, inputW),
       *get_ref_by_coord<scalar_t, int>(
-        gradOutput, ndims, batch, plane, inputH, inputW));
+        gradOutput, ndims, batch, plane, outputH, outputW));
   }
 }
 
@@ -189,8 +187,8 @@ void fractional_max_pool2d_out_cuda_template(
 
   int64_t outputH = output_size[0];
   int64_t outputW = output_size[1];
-  int64_t poolSizeH = pool_size[0];
-  int64_t poolSizeW = pool_size[1];
+  int poolSizeH = pool_size[0];
+  int poolSizeW = pool_size[1];
 
   AT_CHECK(outputH + poolSizeH - 1 <= inputH,
              "fractional_max_pool2d(): pool_size height ", poolSizeH,
@@ -211,7 +209,7 @@ void fractional_max_pool2d_out_cuda_template(
 
   // block is limited to 4 warps
   // grid handles overflow per each plane
-  int outputPlaneSize = output.size(ndims - 2) *
+  int64_t outputPlaneSize = output.size(ndims - 2) *
     output.size(ndims - 1);
   dim3 grid((outputPlaneSize + 127) / 128,
             input.size(ndims - 3),
@@ -221,15 +219,15 @@ void fractional_max_pool2d_out_cuda_template(
   int POOL_W = (poolSizeW <= 7 && poolSizeW >= 2) ? poolSizeW : -1;
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(),
-    "fractional_max_pool2d_out_frame",
+    "fractional_max_pool2d_out_cuda_frame",
     [&] {
-      fractional_max_pool2d_out_frame<scalar_t>
+      fractional_max_pool2d_out_cuda_frame<scalar_t>
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-          getTensorInfo<scalar_t, int>(input),
           getTensorInfo<scalar_t, int>(output),
           getTensorInfo<int64_t, int>(indices),
+          getTensorInfo<scalar_t, int>(input),
           getTensorInfo<scalar_t, int>(randomSamples),
-          pool_size,
+          poolSizeH, poolSizeW,
           POOL_W);
         }
       );
@@ -280,9 +278,9 @@ void fractional_max_pool2d_backward_out_cuda_template(
   dim3 block(outputPlaneSize > 128 ? 128 : outputPlaneSize);
 
 AT_DISPATCH_FLOATING_TYPES_AND_HALF(gradOutput.type(),
-  "fractional_max_pool2d_backward_out_frame",
+  "fractional_max_pool2d_backward_out_cuda_frame",
   [&] {
-    fractional_max_pool2d_backward_out_frame<scalar_t>
+    fractional_max_pool2d_backward_out_cuda_frame<scalar_t>
       <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
         getTensorInfo<scalar_t, int>(gradInput),
         getTensorInfo<scalar_t, int>(gradOutput),
@@ -296,10 +294,10 @@ AT_DISPATCH_FLOATING_TYPES_AND_HALF(gradOutput.type(),
 std::tuple<Tensor&, Tensor&> fractional_max_pool2d_out_cuda(
   at::Tensor& output,
   at::Tensor& indices,
-  at::Tensor const& input,
+  const at::Tensor& input,
   IntList pool_size,
   IntList output_size,
-  at::Tensor const& randomSamples)
+  const at::Tensor& randomSamples)
 {
   fractional_max_pool2d_out_cuda_template(
     output,
@@ -312,10 +310,10 @@ std::tuple<Tensor&, Tensor&> fractional_max_pool2d_out_cuda(
 }
 
 std::tuple<Tensor, Tensor> fractional_max_pool2d_cuda(
-  at::Tensor const& input,
+  const at::Tensor& input,
   IntList pool_size,
   IntList output_size,
-  at::Tensor const& randomSamples)
+  const at::Tensor& randomSamples)
 {
   Tensor output = at::empty({0}, input.options());
   Tensor indices = at::empty({0}, input.options().dtype(kLong));
