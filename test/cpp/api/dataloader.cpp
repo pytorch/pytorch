@@ -16,6 +16,7 @@
 #include <iterator>
 #include <limits>
 #include <mutex>
+#include <numeric>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -1347,4 +1348,112 @@ TEST(DataLoaderTest, StatefulDatasetWithCollate) {
 
   ASSERT_TRUE(batch->data[0].allclose(torch::ones(kBatchSize + 1)));
   ASSERT_TRUE(batch->target[0].allclose(torch::zeros(kBatchSize - 1)));
+}
+
+class DummyChunkDataSet : public datasets::ChunkDataSet<
+                         DummyChunkDataSet,
+                         std::vector<int>,
+                         samplers::SequentialSampler,
+                         samplers::SequentialSampler> {
+ public:
+  using BatchType = torch::optional<std::vector<int>>;
+  using BatchRequestType = size_t;
+  DummyChunkDataSet(size_t num_chunks, size_t batch_size)
+      : datasets::ChunkDataSet<
+            DummyChunkDataSet,
+            std::vector<int>,
+            samplers::SequentialSampler,
+            samplers::SequentialSampler>(),
+        num_chunks_(num_chunks),
+        batch_size_(batch_size),
+        chunk_sampler_(std::move(samplers::SequentialSampler(num_chunks))),
+        example_sampler_(std::move(samplers::SequentialSampler(batch_size))) {}
+
+  std::vector<int> read_chunk(size_t chunk_index) override {
+    std::vector<int> batch(batch_size_);
+    size_t counter = chunk_index * batch_size_;
+    for (auto& i : batch) {
+      i = counter++;
+    }
+    return batch;
+  }
+
+  /// Simply returns an entire chunk to test the API for now.
+  torch::optional<std::vector<int>> get_batch(size_t batch_size) override {
+    int index = chunk_index_.fetch_add(1);
+    if (index < num_chunks_) {
+      return read_chunk(index);
+    }
+    return torch::nullopt;
+  }
+
+  samplers::SequentialSampler get_chunk_sampler() override {
+    return chunk_sampler_;
+  }
+
+  samplers::SequentialSampler get_example_sampler() override {
+    return example_sampler_;
+  }
+
+  size_t get_chunk_count() override {
+    return num_chunks_;
+  }
+
+ private:
+  std::atomic<int> chunk_index_{0};
+  size_t num_chunks_;
+  size_t batch_size_;
+  samplers::SequentialSampler chunk_sampler_;
+  samplers::SequentialSampler example_sampler_;
+};
+
+TEST(DataTest, DataLoaderWithChunkSupportSingleWorker) {
+  const size_t kBatchSize = 13;
+  const size_t kNumChunks = 10;
+
+  auto dataset = torch::data::datasets::make_shared_dataset<DummyChunkDataSet>(
+                     kNumChunks, kBatchSize)
+                     .map(transforms::BatchLambda<std::vector<int>, int>(
+                         [](const std::vector<int>& x) {
+                           return std::accumulate(x.begin(), x.end(), 0);
+                         }));
+  auto data_loader =
+      torch::data::make_data_loader(dataset, DataLoaderOptions(kBatchSize));
+
+  int count = 0;
+  for (int sum : *data_loader) {
+    int res = 0;
+    for (int i = 0; i < kBatchSize; ++i) {
+      res += count * kBatchSize + i;
+    }
+    ASSERT_EQ(sum, res);
+    count++;
+  }
+  ASSERT_EQ(count, 10);
+}
+
+TEST(DataTest, DataLoaderWithChunkSupportMultiWorker) {
+  const size_t kBatchSize = 13;
+  const size_t kNumChunks = 10;
+
+  auto dataset = torch::data::datasets::make_shared_dataset<DummyChunkDataSet>(
+                     kNumChunks, kBatchSize)
+                     .map(transforms::BatchLambda<std::vector<int>, int>(
+                         [](const std::vector<int>& x) {
+                           return std::accumulate(x.begin(), x.end(), 0);
+                         }));
+  auto data_loader =
+      torch::data::make_data_loader(dataset, DataLoaderOptions(kBatchSize));
+
+  int count = 0;
+  int result_sum = 0;
+  int expected_sum = 0;
+  for (int sum : *data_loader) {
+    result_sum += sum;
+    for (int i = 0; i < kBatchSize; ++i) {
+      expected_sum += count * kBatchSize + i;
+    }
+    count++;
+  }
+  ASSERT_EQ(result_sum, expected_sum);
 }
