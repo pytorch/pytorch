@@ -6109,7 +6109,7 @@ a")
 
         class WarningTest(torch.nn.Module):
             def __init__(self):
-                super().__init__()
+                super(WarningTest, self).__init__()
 
             def forward(self, x):
                 return func_with_warning(x)
