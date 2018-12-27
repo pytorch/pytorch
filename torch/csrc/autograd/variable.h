@@ -122,6 +122,44 @@ struct TORCH_API Variable : public at::Tensor {
       Edge gradient_edge,
       bool allow_tensor_metadata_change);
 
+  // Autograd API
+  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  /**
+   * Set whether or not a tensor requires gradient.
+   */
+  Tensor& set_requires_grad(bool requires_grad) {
+    get_autograd_meta()->set_requires_grad(requires_grad, unsafeGetTensorImpl());
+    return *this;
+  }
+
+  /**
+   * True if a tensor requires gradient.  Tensors which require gradient
+   * have history tracked for any operations performed on them, so that
+   * we can automatically differentiate back to them.  A tensor that
+   * requires gradient and has no history is a "leaf" tensor, which we
+   * accumulate gradients into.
+   */
+  bool requires_grad() const {
+    return get_autograd_meta()->requires_grad();
+  }
+
+  /**
+   * Return a mutable reference to the gradient.  This is conventionally
+   * used as `t.grad() = x` to set a gradient to a completely new tensor.
+   */
+  Tensor& grad() {
+    return get_autograd_meta()->grad();
+  }
+
+  /**
+   * Return the accumulated gradient of a tensor.  This gradient is written
+   * into when performing backwards, when this tensor is a leaf tensor.
+   */
+  const Tensor& grad() const {
+    return get_autograd_meta()->grad();
+  }
+
   // Tensor Conversions
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -343,23 +381,23 @@ struct TORCH_API Variable::AutogradMeta : public c10::AutogradMetaInterface {
   /// Sets the `requires_grad` property of `Variable`. This should be true for
   /// leaf variables that want to accumulate gradients, and false for all other
   /// variables.
-  void set_requires_grad(bool requires_grad, at::TensorImpl* self_impl) override {
+  void set_requires_grad(bool requires_grad, at::TensorImpl* self_impl) {
     AT_CHECK(
       !requires_grad || at::isFloatingType(at::typeMetaToScalarType(self_impl->dtype())),
       "Only Tensors of floating point dtype can require gradients");
     requires_grad_ = requires_grad;
   }
 
-  bool requires_grad() const override {
+  bool requires_grad() const {
     return requires_grad_ || grad_fn_;
   }
 
   /// Accesses the gradient `Variable` of this `Variable`.
-  Variable& grad() override {
+  Variable& grad() {
     return grad_;
   }
 
-  const Variable& grad() const override {
+  const Variable& grad() const {
     return grad_;
   }
 };
