@@ -2184,11 +2184,61 @@ class _TestTorchMixin(object):
         self.assertEqual(torch.zeros(shape), torch.zeros(shape, layout=torch.strided, out=out))
         self.assertEqual(torch.zeros(shape), torch.zeros(shape, device='cpu', out=out))
 
-    def test_histc(self):
-        x = torch.Tensor((2, 4, 2, 2, 5, 4))
-        y = torch.histc(x, 5, 1, 5)  # nbins,  min,  max
-        z = torch.Tensor((0, 3, 0, 2, 1))
-        self.assertEqual(y, z)
+    @staticmethod
+    def _test_histc(self, device):
+        # negative nbins throws
+        with self.assertRaisesRegex(RuntimeError, 'bins must be > 0'):
+            torch.histc(torch.tensor([1], dtype=torch.float, device=device), bins=-1)
+
+        # without nbins
+        actual = torch.histc(
+            torch.tensor([2, 5], dtype=torch.float, device=device))
+        expected = torch.zeros(100, dtype=torch.float, device=device)
+        expected.data[0] = 1
+        expected.data[99] = 1
+        self.assertEqual(expected, actual)
+        # tensor with the same element
+        actual = torch.histc(torch.ones(5, dtype=torch.float, device=device), bins=5)
+        self.assertEqual(
+            torch.tensor([0, 0, 5, 0, 0], dtype=torch.float, device=device),
+            actual)
+        # no element falls between [min, max]
+        actual = torch.histc(torch.ones(5, dtype=torch.float, device=device),
+            bins=5, min=2, max=3)
+        self.assertEqual(
+            torch.tensor([0, 0, 0, 0, 0], dtype=torch.float, device=device),
+            actual)
+        # element falls below min + integral bin size and
+        actual = torch.histc(
+            torch.tensor([2, 4, 2, 2, 5, 4], dtype=torch.float, device=device),
+            bins=5, min=1, max=5)
+        self.assertEqual(
+            torch.tensor([0, 3, 0, 2, 1], dtype=torch.float, device=device),
+            actual)
+        # non-integral bin size
+        actual = torch.histc(
+            torch.tensor([1, 2, 1], dtype=torch.float, device=device),
+            bins=4, min=0, max=3)
+        self.assertEqual(
+            torch.tensor([0, 2, 1, 0], dtype=torch.float, device=device),
+            actual)
+        # double input
+        actual = torch.histc(
+            torch.tensor([1, 2, 1], dtype=torch.double, device=device),
+            bins=4, min=0, max=3)
+        self.assertEqual(
+            torch.tensor([0, 2, 1, 0], dtype=torch.double, device=device),
+            actual)
+        # mixed input
+        actual = torch.histc(
+            torch.tensor([1., 2, 1], dtype=torch.float, device=device),
+            bins=4, min=0, max=3)
+        self.assertEqual(
+            torch.tensor([0, 2, 1, 0], dtype=torch.float, device=device),
+            actual)
+
+    def test_histc_cpu(self):
+        self._test_histc(self, 'cpu');
 
     def test_ones(self):
         res1 = torch.ones(100, 100)

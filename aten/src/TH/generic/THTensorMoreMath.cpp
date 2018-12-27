@@ -2092,7 +2092,7 @@ accreal THTensor_(stdall)(THTensor *tensor, int biased)
 void THTensor_(histc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t minvalue, scalar_t maxvalue)
 {
   if (nbins <= 0) {
-      THError("nbins must be > 0");
+      THError("bins must be > 0");
   }
   scalar_t minval;
   scalar_t maxval;

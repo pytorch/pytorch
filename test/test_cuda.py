@@ -2139,10 +2139,7 @@ class TestCuda(TestCase):
 
     @skipIfRocm
     def test_histc_cuda(self):
-        x = torch.tensor((2, 4, 2, 2, 5, 4)).to('cuda')
-        y = x.histc()
-        z = torch.tensor((0, 3, 0, 2, 1)).to('cuda')
-        self.assertEqual(z, y)
+        _TestTorchMixin._test_histc(self, device='cuda')
 
     @skipIfRocm
     def test_tiny_half_norm_(self):
