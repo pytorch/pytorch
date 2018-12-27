@@ -96,8 +96,8 @@ Tensor& range_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
     scalar_t *data_ptr = r.data<scalar_t>();
 
     at::parallel_for(0, size, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
-      scalar_t is = 0;
-      for (int64_t i = p_begin; i < p_end; ++i, is++) {
+      scalar_t is = p_begin;
+      for (int64_t i = p_begin; i < p_end; ++i, ++is) {
         data_ptr[i] = xstart + is * xstep;
       }
     });
