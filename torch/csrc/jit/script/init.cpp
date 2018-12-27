@@ -378,7 +378,7 @@ struct VISIBILITY_HIDDEN OverloadedFunctionValue : public SugaredValue {
     }
 
     std::stringstream err;
-    for (py::object fn : possible_functions) {
+    for (const py::object& fn : possible_functions) {
       auto fn_name = py::str(py::getattr(fn, "__name__"));
       py::object py_method = py::getattr(weak_module, fn_name);
       auto schema = py::cast<FunctionSchema>(py::getattr(py_method, "schema")());
