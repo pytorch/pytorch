@@ -3755,13 +3755,6 @@ class _TestTorchMixin(object):
         # input unchanged
         self.assertEqual(x, x0, 0)
 
-    def test_tril(self):
-        x = torch.rand(SIZE, SIZE)
-        res1 = torch.tril(x)
-        res2 = torch.Tensor()
-        torch.tril(x, out=res2)
-        self.assertEqual(res1, res2, 0)
-
     def test_trilu_indices(self):
         for test_args in tri_tests_args:
             _compare_trilu_indices(self, *test_args)
@@ -3794,7 +3787,10 @@ class _TestTorchMixin(object):
         diagonals = [-2, -1, 0, 1, 2]
         shapes = [(3, 3), (5, 3, 3), (7, 5, 3, 3),  # square matrices
                   (7, 3), (5, 7, 3), (7, 5, 7, 3),  # fat matrices
-                  (3, 7), (5, 3, 7), (7, 5, 3, 7)]  # thin matrices
+                  (3, 7), (5, 3, 7), (7, 5, 3, 7),  # thin matrices
+                  (3, 0), (0, 3, 3), (3, 3, 0, 0),  # no numel matrices
+                  (3, 1), (5, 3, 1), (7, 5, 3, 1),  # very fat matrices
+                  (1, 3), (5, 1, 3), (7, 5, 1, 3)]  # very thin matrices
         for s, d in product(shapes, diagonals):
             run_test(s, cast, d)
 
