@@ -53,10 +53,10 @@ def default_collate(batch):
         if elem.shape == ():  # scalars
             py_type = float if elem.dtype.name.startswith('float') else int
             return numpy_type_map[elem.dtype.name](list(map(py_type, batch)))
-    elif isinstance(batch[0], int_classes):
-        return torch.LongTensor(batch)
     elif isinstance(batch[0], float):
-        return torch.DoubleTensor(batch)
+        return torch.tensor(batch, dtype=torch.float64)
+    elif isinstance(batch[0], int_classes):
+        return torch.tensor(batch)
     elif isinstance(batch[0], string_classes):
         return batch
     elif isinstance(batch[0], container_abcs.Mapping):

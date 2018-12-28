@@ -782,13 +782,33 @@ class TestDataLoader(TestCase):
             batch = next(iter(loader))
             self.assertIsInstance(batch, tt)
 
+    def test_default_collate_dtype(self):
+        arr = [1, 2, -1]
+        collated = _utils.collate.default_collate(arr)
+        self.assertEqual(collated, torch.tensor(arr))
+        self.assertEqual(collated.dtype, torch.int64)
+
+        arr = [1.1, 2.3, -0.9]
+        collated = _utils.collate.default_collate(arr)
+        self.assertEqual(collated, torch.tensor(arr))
+        self.assertEqual(collated.dtype, torch.float64)
+
+        arr = [True, False]
+        collated = _utils.collate.default_collate(arr)
+        self.assertEqual(collated, torch.tensor(arr))
+        self.assertEqual(collated.dtype, torch.uint8)
+
+        # Should be a no-op
+        arr = ['a', 'b', 'c']
+        self.assertEqual(arr, _utils.collate.default_collate(arr))
+
     @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
     def test_default_collate_bad_numpy_types(self):
         import numpy as np
 
         # Should be a no-op
         arr = np.array(['a', 'b', 'c'])
-        _utils.collate.default_collate(arr)
+        self.assertEqual(arr, _utils.collate.default_collate(arr))
 
         arr = np.array([[['a', 'b', 'c']]])
         self.assertRaises(TypeError, lambda: _utils.collate.default_collate(arr))
