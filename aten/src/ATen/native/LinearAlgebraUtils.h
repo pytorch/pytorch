@@ -43,7 +43,7 @@ static inline int64_t matrixStride(const Tensor& batched_matrices) {
 
 // Checks if a given tensor has 0s in its stride
 static inline bool checkZeroStride(const Tensor& tensor) {
-  for (auto& stride : tensor.strides()) {
+  for (const auto& stride : tensor.strides()) {
     if (stride == 0) return true;
   }
   return false;

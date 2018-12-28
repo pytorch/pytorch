@@ -442,23 +442,14 @@ void triu_tril_kernel(
   AT_CHECK(cuda::getApplyGrid(N, dim_grid, SELF.get_device()), "Unable to get dim grid");
 
 Tensor& tril_cuda_(Tensor &self, int64_t k) {
-  if (self.numel() == 0) {
-    return self;
-  }
   if (checkZeroStride(self)) self = self.contiguous();
-  DECLARE_TRIL_TRIU_VARIABLES(self, self)
-  AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "tril", [&]{
-    triu_tril_kernel<scalar_t, false>
-      <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-        self.data<scalar_t>(), self.data<scalar_t>(), k, N,
-        res_batch_stride, self_batch_stride, res_row_stride, res_col_stride,
-        max_stride, min_stride, row_is_max_stride);
-  });
-  return self;
+  return tril_cuda_out(self, self, k);
 }
 
 Tensor& tril_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
-  result = at::empty_like(self);
+  if (result.sizes() != self.sizes()) {
+    result.resize_as_(self);
+  }
   if (self.numel() == 0) {
     return result;
   }
@@ -475,23 +466,14 @@ Tensor& tril_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
 }
 
 Tensor& triu_cuda_(Tensor &self, int64_t k) {
-  if (self.numel() == 0) {
-    return self;
-  }
   if (checkZeroStride(self)) self = self.contiguous();
-  DECLARE_TRIL_TRIU_VARIABLES(self, self)
-  AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "triu", [&]{
-    triu_tril_kernel<scalar_t, true>
-      <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-        self.data<scalar_t>(), self.data<scalar_t>(), k, N,
-        res_batch_stride, self_batch_stride, res_row_stride, res_col_stride,
-        max_stride, min_stride, row_is_max_stride);
-  });
-  return self;
+  return triu_cuda_out(self, self, k);
 }
 
 Tensor& triu_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
-  result = at::empty_like(self);
+  if (result.sizes() != self.sizes()) {
+    result.resize_as_(self);
+  }
   if (self.numel() == 0) {
     return result;
   }

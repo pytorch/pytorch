@@ -439,7 +439,7 @@ void apply_triu_tril(Tensor& result, const Tensor& self, int64_t k) {
 }
 
 Tensor tril(const Tensor& self, int64_t k) {
-  Tensor result;
+  Tensor result = at::empty({0}, self.options());
   at::tril_out(result, self, k);
   return result;
 }
@@ -456,7 +456,9 @@ Tensor& tril_cpu_(Tensor &self, int64_t k) {
 }
 
 Tensor& tril_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
-  result = at::empty_like(self);
+  if (result.sizes() != self.sizes()) {
+    result.resize_as_(self);
+  }
   if (self.numel() == 0) {
     return result;
   }
@@ -468,7 +470,7 @@ Tensor& tril_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
 }
 
 Tensor triu(const Tensor& self, int64_t k) {
-  Tensor result;
+  Tensor result = at::empty({0}, self.options());
   at::triu_out(result, self, k);
   return result;
 }
@@ -485,7 +487,9 @@ Tensor& triu_cpu_(Tensor &self, int64_t k) {
 }
 
 Tensor& triu_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
-  result = at::empty_like(self);
+  if (result.sizes() != self.sizes()) {
+    result.resize_as_(self);
+  }
   if (self.numel() == 0) {
     return result;
   }
