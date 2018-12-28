@@ -44,7 +44,7 @@ setup_ci_environment: &setup_ci_environment
 
     sudo pip -q install awscli==1.16.35
 
-    if [[ "${JOB_BASE_NAME}" == *-test* ]]; then
+    if [[ "${JOB_BASE_NAME}" == *-test* || "${JOB_BASE_NAME}" == smoke* ]]; then
       if [ -n "${CUDA_VERSION}" ]; then
         wget 'https://s3.amazonaws.com/ossci-linux/nvidia_driver/NVIDIA-Linux-x86_64-396.26.run'
         sudo /bin/bash ./NVIDIA-Linux-x86_64-396.26.run -s --no-drm
@@ -74,6 +74,11 @@ setup_ci_environment: &setup_ci_environment
     export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_ECR_READ_WRITE_V2}
     export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V2}
     eval $(aws ecr get-login --region us-east-1 --no-include-email)
+
+
+##############################################################################
+# Linux build defaults
+##############################################################################
 
 pytorch_linux_build_defaults: &pytorch_linux_build_defaults
   resource_class: large
@@ -284,6 +289,11 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
         export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./ci_test_script.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
         echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
+
+##############################################################################
+# Macos build defaults
+##############################################################################
+
 caffe2_macos_build_defaults: &caffe2_macos_build_defaults
   macos:
     xcode: "9.0"
@@ -360,6 +370,108 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
           if which sccache > /dev/null; then
             sccache --show-stats
           fi
+
+
+
+##############################################################################
+# Nighlty build smoke tests defaults
+##############################################################################
+
+smoke_parse_parameters: &smoke_parse_parameters
+  name: Parse date, package_type, python, and CUDA from parameters
+  command: |
+    set -ex
+    # Default date here so they can be changed in one place
+    echo "export DATE=today" >> /home/circleci/project/env
+    echo "export NIGHTLIES_DATE_PREAMBLE=1.0.0.dev" >> /home/circleci/project/env
+
+    # Set package_type, py_ver, and cu_ver, and maybe libtorch_type
+    IFS=_ confs=($JOB_BASE_NAME)
+    echo "export PACKAGE_TYPE=${confs[2]}" >> /home/circleci/project/env
+    echo "export DESIRED_PYTHON=${confs[3]}" >> /home/circleci/project/env
+    echo "export DESIRED_CUDA=${confs[4]}" >> /home/circleci/project/env
+
+    if [[ "${#confs[@]}" > 4 ]]; then
+      echo "export LIBTORCH_VARIANT=${confs[5]}" >> /home/circleci/project/env
+    fi
+
+    # Pick which docker image is needed
+    source /home/circleci/project/env
+    if [[ "$PACKAGE_TYPE" == conda ]]; then
+      docker_image="soumith/conda-cuda"
+    elif [[ "$DESIRED_CUDA" == cpu ]]; then
+      docker_image="soumith/manylinux-cuda80"
+    else
+      docker_image="soumith/manylinux-cuda${DESIRED_CUDA:2}"
+    fi
+    echo "export DOCKER_IMAGE=$docker_image" >> /home/circleci/project/env
+    export DOCKER_IMAGE=$docker_image
+
+smoke_linux_build: &smoke_linux_build
+  machine:
+    image: default
+  steps:
+  - run:
+      <<: *install_official_git_client
+  - run:
+      <<: *setup_ci_environment
+  - run:
+      <<: *smoke_parse_parameters
+  - run:
+      name: Build
+      no_output_timeout: "1h"
+      command: |
+        set -ex
+        source /home/circleci/project/env
+
+        cat >/home/circleci/project/ci_test_script.sh <<EOL
+        # =================== The following code will be executed inside Docker container ===================
+        git clone https://github.com/pytorch/builder.git
+        ./builder/smoke_test.sh
+        # =================== The above code will be executed inside Docker container ===================
+        EOL
+        chmod +x /home/circleci/project/ci_test_script.sh
+
+        echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
+        docker pull ${DOCKER_IMAGE}
+        if [ "${DESIRED_CUDA}" == 'cpu' ]; then
+          export id=$(docker run -t -d ${DOCKER_IMAGE})
+        else
+          nvidia-smi
+          export id=$(nvidia-docker run -t -d ${DOCKER_IMAGE})
+        fi
+        docker cp /home/circleci/project/. "$id:/circleci_stuff"
+
+        export COMMAND='((echo "source /circleci_stuff/env && /circleci_stuff/ci_test_script.sh") | docker exec -i "$id" bash) 2>&1'
+        echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
+
+smoke_mac_build: &smoke_mac_build
+  macos:
+    xcode: "9.0"
+  steps:
+    - run:
+        name: Build
+        no_output_timeout: "1h"
+        command: |
+          set -ex
+          export DATE=today
+          export NIGHTLIES_DATE_PREAMBLE=1.0.0.dev
+          # moreutils installs a `parallel` executable by default, which conflicts with the executable from the `parallel` formulae
+          brew install moreutils --without-parallel
+          brew install expect
+          IFS=_ confs=($JOB_BASE_NAME)
+          export PACKAGE_TYPE=${confs[2]}
+          export DESIRED_PYTHON=${confs[3]}
+          export DESIRED_CUDA=${confs[4]}
+          git clone https://github.com/pytorch/builder.git
+          unbuffer ./builder/smoke_test.sh | ts
+
+
+##############################################################################
+##############################################################################
+# Job specifications
+##############################################################################
+##############################################################################
 
 version: 2
 jobs:
@@ -474,7 +586,7 @@ jobs:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn6-py3-build
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn6-py3:262"
       PYTHON_VERSION: "3.6"
-      CUDA_VERSION: "8"
+      CUDA_VERSION: "9"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_xenial_cuda8_cudnn6_py3_test:
@@ -972,6 +1084,400 @@ jobs:
       PYTHON_VERSION: "2"
     <<: *caffe2_macos_build_defaults
 
+
+##############################################################################
+# Smoke test specs individual job specifications
+##############################################################################
+  smoke_linux_manywheel_2.7m_cpu:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_manywheel_2.7m_cpu"
+    <<: *smoke_linux_build
+
+  smoke_linux_manywheel_2.7mu_cpu:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_manywheel_2.7mu_cpu"
+    <<: *smoke_linux_build
+
+  smoke_linux_manywheel_3.5m_cpu:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_manywheel_3.5m_cpu"
+    <<: *smoke_linux_build
+
+  smoke_linux_manywheel_3.6m_cpu:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_manywheel_3.6m_cpu"
+    <<: *smoke_linux_build
+
+  smoke_linux_manywheel_3.7m_cpu:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_manywheel_3.7m_cpu"
+    <<: *smoke_linux_build
+
+  smoke_linux_manywheel_2.7m_cu80:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_manywheel_2.7m_cu80"
+      CUDA_VERSION: "8"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_manywheel_2.7mu_cu80:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_manywheel_2.7mu_cu80"
+      CUDA_VERSION: "8"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_manywheel_3.5m_cu80:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_manywheel_3.5m_cu80"
+      CUDA_VERSION: "8"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_manywheel_3.6m_cu80:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_manywheel_3.6m_cu80"
+      CUDA_VERSION: "8"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_manywheel_3.7m_cu80:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_manywheel_3.7m_cu80"
+      CUDA_VERSION: "8"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_manywheel_2.7m_cu90:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_manywheel_2.7m_cu90"
+      CUDA_VERSION: "9"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_manywheel_2.7mu_cu90:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_manywheel_2.7mu_cu90"
+      CUDA_VERSION: "9"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_manywheel_3.5m_cu90:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_manywheel_3.5m_cu90"
+      CUDA_VERSION: "9"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_manywheel_3.6m_cu90:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_manywheel_3.6m_cu90"
+      CUDA_VERSION: "9"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_manywheel_3.7m_cu90:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_manywheel_3.7m_cu90"
+      CUDA_VERSION: "9"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_manywheel_2.7m_cu100:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_manywheel_2.7m_cu100"
+      CUDA_VERSION: "10"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_manywheel_2.7mu_cu100:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_manywheel_2.7mu_cu100"
+      CUDA_VERSION: "10"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_manywheel_3.5m_cu100:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_manywheel_3.5m_cu100"
+      CUDA_VERSION: "10"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_manywheel_3.6m_cu100:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_manywheel_3.6m_cu100"
+      CUDA_VERSION: "10"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_manywheel_3.7m_cu100:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_manywheel_3.7m_cu100"
+      CUDA_VERSION: "10"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_conda_2.7_cpu:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_conda_2.7_cpu"
+    <<: *smoke_linux_build
+
+  smoke_linux_conda_3.5_cpu:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_conda_3.5_cpu"
+    <<: *smoke_linux_build
+
+  smoke_linux_conda_3.6_cpu:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_conda_3.6_cpu"
+    <<: *smoke_linux_build
+
+  smoke_linux_conda_3.7_cpu:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_conda_3.7_cpu"
+    <<: *smoke_linux_build
+
+  smoke_linux_conda_2.7_cu80:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_conda_2.7_cu80"
+      CUDA_VERSION: "8"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_conda_3.5_cu80:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_conda_3.5_cu80"
+      CUDA_VERSION: "8"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_conda_3.6_cu80:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_conda_3.6_cu80"
+      CUDA_VERSION: "8"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_conda_3.7_cu80:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_conda_3.7_cu80"
+      CUDA_VERSION: "8"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_conda_2.7_cu90:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_conda_2.7_cu90"
+      CUDA_VERSION: "9"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_conda_3.5_cu90:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_conda_3.5_cu90"
+      CUDA_VERSION: "9"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_conda_3.6_cu90:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_conda_3.6_cu90"
+      CUDA_VERSION: "9"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_conda_3.7_cu90:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_conda_3.7_cu90"
+      CUDA_VERSION: "9"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_conda_2.7_cu100:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_conda_2.7_cu100"
+      CUDA_VERSION: "10"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_conda_3.5_cu100:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_conda_3.5_cu100"
+      CUDA_VERSION: "10"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_conda_3.6_cu100:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_conda_3.6_cu100"
+      CUDA_VERSION: "10"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_conda_3.7_cu100:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_conda_3.7_cu100"
+      CUDA_VERSION: "10"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_libtorch_2.7m_cpu_shared-with-deps:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cpu_shared-with-deps"
+    <<: *smoke_linux_build
+
+  smoke_linux_libtorch_2.7m_cpu_shared-without-deps:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cpu_shared-without-deps"
+    <<: *smoke_linux_build
+
+  smoke_linux_libtorch_2.7m_cpu_static-with-deps:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cpu_static-with-deps"
+    <<: *smoke_linux_build
+
+  smoke_linux_libtorch_2.7m_cpu_static-without-deps:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cpu_static-without-deps"
+    <<: *smoke_linux_build
+
+  smoke_linux_libtorch_2.7m_cu80_shared-with-deps:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cu80_shared-with-deps"
+      CUDA_VERSION: "8"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_libtorch_2.7m_cu80_shared-without-deps:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cu80_shared-without-deps"
+      CUDA_VERSION: "8"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_libtorch_2.7m_cu80_static-with-deps:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cu80_static-with-deps"
+      CUDA_VERSION: "8"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_libtorch_2.7m_cu80_static-without-deps:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cu80_static-without-deps"
+      CUDA_VERSION: "8"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_libtorch_2.7m_cu90_shared-with-deps:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cu90_shared-with-deps"
+      CUDA_VERSION: "9"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_libtorch_2.7m_cu90_shared-without-deps:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cu90_shared-without-deps"
+      CUDA_VERSION: "9"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_libtorch_2.7m_cu90_static-with-deps:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cu90_static-with-deps"
+      CUDA_VERSION: "9"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_libtorch_2.7m_cu90_static-without-deps:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cu90_static-without-deps"
+      CUDA_VERSION: "9"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_libtorch_2.7m_cu100_shared-with-deps:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cu100_shared-with-deps"
+      CUDA_VERSION: "10"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_libtorch_2.7m_cu100_shared-without-deps:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cu100_shared-without-deps"
+      CUDA_VERSION: "10"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_libtorch_2.7m_cu100_static-with-deps:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cu100_static-with-deps"
+      CUDA_VERSION: "10"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_linux_libtorch_2.7m_cu100_static-without-deps:
+    environment:
+      JOB_BASE_NAME: "smoke_linux_libtorch_2.7m_cu100_static-without-deps"
+      CUDA_VERSION: "10"
+    resource_class: gpu.small
+    <<: *smoke_linux_build
+
+  smoke_macos_wheel_2.7_cpu:
+    environment:
+      JOB_BASE_NAME: "smoke_macos_wheel_2.7_cpu"
+    <<: *smoke_mac_build
+
+  smoke_macos_wheel_3.5_cpu:
+    environment:
+      JOB_BASE_NAME: "smoke_macos_wheel_3.5_cpu"
+    <<: *smoke_mac_build
+
+  smoke_macos_wheel_3.6_cpu:
+    environment:
+      JOB_BASE_NAME: "smoke_macos_wheel_3.6_cpu"
+    <<: *smoke_mac_build
+
+  smoke_macos_wheel_3.7_cpu:
+    environment:
+      JOB_BASE_NAME: "smoke_macos_wheel_3.7_cpu"
+    <<: *smoke_mac_build
+
+  smoke_macos_conda_2.7_cpu:
+    environment:
+      JOB_BASE_NAME: "smoke_macos_conda_2.7_cpu"
+    <<: *smoke_mac_build
+
+  smoke_macos_conda_3.5_cpu:
+    environment:
+      JOB_BASE_NAME: "smoke_macos_conda_3.5_cpu"
+    <<: *smoke_mac_build
+
+  smoke_macos_conda_3.6_cpu:
+    environment:
+      JOB_BASE_NAME: "smoke_macos_conda_3.6_cpu"
+    <<: *smoke_mac_build
+
+  smoke_macos_conda_3.7_cpu:
+    environment:
+      JOB_BASE_NAME: "smoke_macos_conda_3.7_cpu"
+    <<: *smoke_mac_build
+
+  smoke_macos_libtorch_2.7m_cpu:
+    environment:
+      JOB_BASE_NAME: "smoke_macos_libtorch_2.7m_cpu"
+    <<: *smoke_mac_build
+
+
+##############################################################################
+##############################################################################
+# Workflows
+##############################################################################
+##############################################################################
+
 workflows:
   version: 2
   build:
@@ -1083,3 +1589,78 @@ workflows:
 
       - caffe2_py2_ios_macos10_13_build
       - caffe2_py2_system_macos10_13_build
+
+
+##############################################################################
+# Daily smoke test trigger
+##############################################################################
+  nightly:
+    triggers:
+      - schedule:
+          cron: "15 16 * * *"
+          filters:
+            branches:
+              only:
+                - master
+    jobs:
+      - smoke_linux_manywheel_2.7m_cpu
+      - smoke_linux_manywheel_2.7mu_cpu
+      - smoke_linux_manywheel_3.5m_cpu
+      - smoke_linux_manywheel_3.6m_cpu
+      - smoke_linux_manywheel_3.7m_cpu
+      - smoke_linux_manywheel_2.7m_cu80
+      - smoke_linux_manywheel_2.7mu_cu80
+      - smoke_linux_manywheel_3.5m_cu80
+      - smoke_linux_manywheel_3.6m_cu80
+      - smoke_linux_manywheel_3.7m_cu80
+      - smoke_linux_manywheel_2.7m_cu90
+      - smoke_linux_manywheel_2.7mu_cu90
+      - smoke_linux_manywheel_3.5m_cu90
+      - smoke_linux_manywheel_3.6m_cu90
+      - smoke_linux_manywheel_3.7m_cu90
+      - smoke_linux_manywheel_2.7m_cu100
+      - smoke_linux_manywheel_2.7mu_cu100
+      - smoke_linux_manywheel_3.5m_cu100
+      - smoke_linux_manywheel_3.6m_cu100
+      - smoke_linux_manywheel_3.7m_cu100
+      - smoke_linux_conda_2.7_cpu
+      - smoke_linux_conda_3.5_cpu
+      - smoke_linux_conda_3.6_cpu
+      - smoke_linux_conda_3.7_cpu
+      - smoke_linux_conda_2.7_cu80
+      - smoke_linux_conda_3.5_cu80
+      - smoke_linux_conda_3.6_cu80
+      - smoke_linux_conda_3.7_cu80
+      - smoke_linux_conda_2.7_cu90
+      - smoke_linux_conda_3.5_cu90
+      - smoke_linux_conda_3.6_cu90
+      - smoke_linux_conda_3.7_cu90
+      - smoke_linux_conda_2.7_cu100
+      - smoke_linux_conda_3.5_cu100
+      - smoke_linux_conda_3.6_cu100
+      - smoke_linux_conda_3.7_cu100
+      - smoke_linux_libtorch_2.7m_cpu_shared-with-deps
+      - smoke_linux_libtorch_2.7m_cpu_shared-without-deps
+      - smoke_linux_libtorch_2.7m_cpu_static-with-deps
+      - smoke_linux_libtorch_2.7m_cpu_static-without-deps
+      - smoke_linux_libtorch_2.7m_cu80_shared-with-deps
+      - smoke_linux_libtorch_2.7m_cu80_shared-without-deps
+      - smoke_linux_libtorch_2.7m_cu80_static-with-deps
+      - smoke_linux_libtorch_2.7m_cu80_static-without-deps
+      - smoke_linux_libtorch_2.7m_cu90_shared-with-deps
+      - smoke_linux_libtorch_2.7m_cu90_shared-without-deps
+      - smoke_linux_libtorch_2.7m_cu90_static-with-deps
+      - smoke_linux_libtorch_2.7m_cu90_static-without-deps
+      - smoke_linux_libtorch_2.7m_cu100_shared-with-deps
+      - smoke_linux_libtorch_2.7m_cu100_shared-without-deps
+      - smoke_linux_libtorch_2.7m_cu100_static-with-deps
+      - smoke_linux_libtorch_2.7m_cu100_static-without-deps
+      - smoke_macos_wheel_2.7_cpu
+      - smoke_macos_wheel_3.5_cpu
+      - smoke_macos_wheel_3.6_cpu
+      - smoke_macos_wheel_3.7_cpu
+      - smoke_macos_conda_2.7_cpu
+      - smoke_macos_conda_3.5_cpu
+      - smoke_macos_conda_3.6_cpu
+      - smoke_macos_conda_3.7_cpu
+      - smoke_macos_libtorch_2.7m_cpu
