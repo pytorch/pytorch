@@ -58,7 +58,7 @@ static void and_kernel_impl(TensorIterator& iter) {
   binary_kernel_reduce_vec(
     iter,
     [=](uint8_t a, uint8_t b) -> uint8_t { return a && b; },
-    [=](Vec256<uint8_t> a, Vec256<uint8_t> b) {return a && b; },
+    [=](Vec256<uint8_t> a, Vec256<uint8_t> b) { return a && b; },
     /*ident=*/true);
 }
 
