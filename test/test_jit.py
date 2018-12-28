@@ -3304,6 +3304,16 @@ a")
         self.run_pass('constant_pooling', graph)
         self.assertExpectedGraph(graph)
 
+    def test_constant_pooling_none(self):
+        @torch.jit.script
+        def test(a):
+            # type: (bool)
+            if a:
+                print(None)
+            else:
+                print(None)
+        self.assertTrue(str(test.graph).count("prim::None") == 1)
+
     def test_literal(self):
         def func1(a, b):
             c = a, b
