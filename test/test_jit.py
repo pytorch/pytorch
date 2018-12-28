@@ -2047,13 +2047,39 @@ class TestJit(JitTestCase):
     def test_warnings(self):
         import warnings
 
-        @torch.jit.script
         def fn(x):
             if bool(x < 2):
                 warnings.warn("x is less than 2")
             return x
 
-        self.assertExpectedGraph(fn.graph)
+        scripted_fn = torch.jit.script(fn)
+
+        with warnings.catch_warnings(record=True) as warns:
+            fn(torch.ones(1))
+
+        with warnings.catch_warnings(record=True) as script_warns:
+            scripted_fn(torch.ones(1))
+
+        self.assertEqual(warns[0].category, script_warns[0].category)
+        self.assertEqual(warns[0].message.args[0], script_warns[0].message.args[0])
+        self.assertEqual(warns[0].filename, script_warns[0].filename)
+        self.assertEqual(warns[0].lineno, script_warns[0].lineno)
+
+    def test_warning_with_no_file(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__(False)
+                self.define("""
+                def forward(self, a):
+                warnings.warn("oh no")
+                return a
+                """)
+        m = M()
+        with warnings.catch_warnings(record=True) as script_warns:
+            m(torch.ones(1))
+
+        self.assertTrue(len(script_warns) == 1)
+        self.assertTrue('nn/modules/module.py' in script_warns[0].filename)
 
     def test_no_erroneous_warnings(self):
         import warnings

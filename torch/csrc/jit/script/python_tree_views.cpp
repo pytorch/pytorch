@@ -15,13 +15,19 @@ namespace jit {
 namespace script {
 
 struct SourceRangeFactory {
-  SourceRangeFactory(std::string source)
+  SourceRangeFactory(
+      std::string source,
+      std::string source_file,
+      int def_start_line)
       : source_(std::make_shared<std::string>(std::move(source))) {
     size_t pos = 0;
     do {
       line_len_prefix_sum_.push_back(pos);
       pos++;
     } while ((pos = source_->find('\n', pos)) != std::string::npos);
+
+    context_ = std::make_shared<SourceRange>(
+        std::make_shared<std::string>(std::move(source_file)), def_start_line, 0);
   }
   SourceRange create(int line, int start_col, int end_col) {
     // Python has a weird convention where col_offset points to the column
@@ -31,11 +37,12 @@ struct SourceRangeFactory {
     // Also, lines are counted from 1.
     line--;
     auto line_start = line_len_prefix_sum_.at(line);
-    return SourceRange(source_, line_start + start_col, line_start + end_col);
+    return SourceRange(source_, line_start + start_col, line_start + end_col, context_);
   }
 
   std::shared_ptr<std::string> source_;
   std::vector<size_t> line_len_prefix_sum_;
+  std::shared_ptr<SourceRange> context_;
 };
 
 template <typename T>
@@ -66,12 +73,12 @@ void initTreeViewBindings(PyObject* module) {
       .def_property_readonly("start", &SourceRange::start)
       .def_property_readonly("end", &SourceRange::end);
   py::class_<SourceRangeFactory>(m, "SourceRangeFactory")
-      .def(py::init<std::string&&>())
+      .def(py::init<std::string&&, std::string&&, int&&>())
       .def("make_range", &SourceRangeFactory::create)
       .def(
           "make_raw_range",
           [](const SourceRangeFactory& self, size_t start, size_t end) {
-            return SourceRange(self.source_, start, end);
+            return SourceRange(self.source_, start, end, self.context_);
           })
       .def_property_readonly("source", [](const SourceRangeFactory& self) {
         return *self.source_;

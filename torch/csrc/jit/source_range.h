@@ -1,4 +1,5 @@
 #pragma once
+#include <c10/util/Optional.h>
 #include <torch/csrc/jit/assertions.h>
 #include <torch/csrc/jit/source_location.h>
 
@@ -12,8 +13,15 @@ namespace jit {
 // that
 // range.
 struct SourceRange : public SourceLocation {
-  SourceRange(std::shared_ptr<std::string> file_, size_t start_, size_t end_)
-      : file_(std::move(file_)), start_(start_), end_(end_) {}
+  SourceRange(
+      std::shared_ptr<std::string> file_,
+      size_t start_,
+      size_t end_,
+      c10::optional<std::shared_ptr<SourceRange>> context_ = c10::nullopt)
+      : file_(std::move(file_)),
+        start_(start_),
+        end_(end_),
+        context_(context_) {}
   const std::string text() const {
     return file().substr(start(), end() - start());
   }
@@ -74,11 +82,15 @@ struct SourceRange : public SourceLocation {
   size_t end() const {
     return end_;
   }
+  const c10::optional<std::shared_ptr<SourceRange>> context() const {
+    return context_;
+  }
 
  private:
   std::shared_ptr<std::string> file_;
   size_t start_;
   size_t end_;
+  c10::optional<std::shared_ptr<SourceRange>> context_;
 };
 
 } // namespace jit

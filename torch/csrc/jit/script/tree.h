@@ -121,7 +121,7 @@ static SourceRange mergeRanges(SourceRange c, const TreeList& others) {
       continue;
     size_t s = std::min(c.start(), t->range().start());
     size_t e = std::max(c.end(), t->range().end());
-    c = SourceRange(c.file_ptr(), s, e);
+    c = SourceRange(c.file_ptr(), s, e, c.context());
   }
   return c;
 }

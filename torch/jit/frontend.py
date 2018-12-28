@@ -140,18 +140,20 @@ def _uses_true_division(fn):
 def get_jit_ast(fn, is_method):
     source = dedent(inspect.getsource(fn))
     py_ast = ast.parse(source)
+    source_file = inspect.getfile(fn)
+    fn_def_line = inspect.getsourcelines(fn)[-1]
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
         raise RuntimeError("expected a single top-level function")
     type_line = torch.jit.annotations.get_type_line(source)
-    ctx = SourceContext(source, _uses_true_division(fn))
+    ctx = SourceContext(source, source_file, fn_def_line, _uses_true_division(fn))
     return build_def(ctx, py_ast.body[0], type_line, is_method)
 
 
 # Thin wrapper around SourceRangeFactory to store extra metadata
 # about the function-to-be-compiled.
 class SourceContext(SourceRangeFactory):
-    def __init__(self, source, uses_true_division=True):
-        super(SourceContext, self).__init__(source)
+    def __init__(self, source, source_file, def_start_line, uses_true_division=True):
+        super(SourceContext, self).__init__(source, source_file, def_start_line)
         self.uses_true_division = uses_true_division
 
 

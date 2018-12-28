@@ -372,14 +372,29 @@ RegisterOperators reg({
             {Argument("message", StringType::get()),
              Argument("stacklevel", IntType::get(), c10::nullopt, 2, true)},
             {}),
-        [](const Node* node) {
-          return [](Stack& stack) {
+        [](const Node* node) -> Operation {
+          auto range =
+              std::dynamic_pointer_cast<SourceRange>(node->getSourceLocation());
+          const char* file_name = nullptr;
+          uint32_t line = 0;
+          if (range) {
+            auto context = range->context();
+            if (context) {
+              // If Python line info and source file are present, warn with them
+              // instead (otherwise the Python warning will use the top Python
+              // frame in the stack)
+              auto text = range->file();
+              size_t line_offset = std::count(text.begin(), text.begin() + range->start(), '\n');
+              line = static_cast<uint32_t>((*context)->start()) + line_offset;
+              file_name = (*context)->file_ptr()->c_str();
+            }
+          }
+          return [=](Stack& stack) {
             drop(stack, 1);
-            AT_WARN(pop(stack).toStringRef());
+            c10::Warning::warn({"", file_name, line}, pop(stack).toStringRef());
             return 0;
           };
         }),
-
     Operator(
         "prim::RaiseException(str msg) -> ()",
         [](const Node* node) -> Operation {
