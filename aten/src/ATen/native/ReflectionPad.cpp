@@ -9,8 +9,8 @@ namespace {
 template <typename scalar_t>
 static void reflection_pad1d_out_frame(
     scalar_t *input_p, scalar_t *output_p,
-    int64_t nslices,
-    int64_t iwidth, int64_t owidth,
+    int64_t nplane,
+    int64_t input_w, int64_t output_w,
     int64_t pad_l) {
   int64_t i_start_x = std::max(int64_t(0), -pad_l);
   int64_t o_start_x = std::max(int64_t(0), pad_l);
@@ -18,21 +18,39 @@ static void reflection_pad1d_out_frame(
   int64_t k, ip_x;
 #pragma omp parallel for private(k, ip_x)
 
-  for (k = 0; k < nslices; k++) {
-    for (int64_t j = 0; j < owidth; j++) {
+  for (k = 0; k < nplane; k++) {
+    for (int64_t j = 0; j < output_w; j++) {
       if (j < pad_l) {
         ip_x = pad_l * 2 - j;
-      } else if (j >= pad_l && j < iwidth + pad_l) {
+      } else if (j >= pad_l && j < input_w + pad_l) {
         ip_x = j;
       } else {
-        ip_x = (iwidth + pad_l - 1) * 2 - j;
+        ip_x = (input_w + pad_l - 1) * 2 - j;
       }
       ip_x = ip_x - o_start_x + i_start_x;
 
-      scalar_t *dest_p = output_p + k*owidth + j;
-      scalar_t *src_p = input_p + k*iwidth + ip_x;
+      scalar_t *dest_p = output_p + k*output_w + j;
+      scalar_t *src_p = input_p + k*input_w + ip_x;
       *dest_p = *src_p;
     }
+  }
+}
+
+template <typename scalar_t>
+inline void reflection_pad1d_out_loop(
+    scalar_t *input_p, scalar_t *output_p,
+    int64_t nbatch, int64_t nplane,
+    int64_t input_w, int64_t output_w,
+    int64_t pad_l) {
+  int64_t p;
+#pragma omp parallel for private(p)
+  for (p = 0; p < nbatch; p++) {
+    reflection_pad1d_out_frame<scalar_t>(
+      input_p + p * nplane * input_w,
+      output_p + p * nplane * output_w,
+      nplane,
+      input_w, output_w,
+      pad_l);
   }
 }
 
@@ -73,33 +91,22 @@ void reflection_pad1d_out_template(
   /* resize output */
   if (input.ndimension() == 2) {
     output.resize_({nplane, output_w});
-
-    AT_DISPATCH_FLOATING_TYPES(
-      input.type(), "reflection_pad1d", [&] {
-        reflection_pad1d_out_frame<scalar_t>(
-          input.data<scalar_t>(), output.data<scalar_t>(),
-          nplane,
-          input_w, output_w,
-          pad_l);
-      }
-    );
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "reflection_pad1d", [&] {
+      reflection_pad1d_out_frame<scalar_t>(
+        input.data<scalar_t>(), output.data<scalar_t>(),
+        nplane,
+        input_w, output_w,
+        pad_l);
+    });
   } else {
     output.resize_({nbatch, nplane, output_w});
-
-    int64_t p;
-#pragma omp parallel for private(p)
-    for (p = 0; p < nbatch; p++) {
-      AT_DISPATCH_FLOATING_TYPES(
-        input.type(), "reflection_pad1d", [&] {
-          reflection_pad1d_out_frame<scalar_t>(
-            input.data<scalar_t>() + p * nplane * input_w,
-            output.data<scalar_t>() + p * nplane * output_w,
-            nplane,
-            input_w, output_w,
-            pad_l);
-          }
-      );
-    }
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "reflection_pad1d", [&] {
+      reflection_pad1d_out_loop<scalar_t>(
+        input.data<scalar_t>(), output.data<scalar_t>(),
+        nbatch, nplane,
+        input_w, output_w,
+        pad_l);
+    });
   }
 }
 
@@ -133,6 +140,24 @@ static void reflection_pad1d_backward_out_frame(
   }
 }
 
+template <typename scalar_t>
+inline void reflection_pad1d_backward_out_loop(
+    scalar_t *grad_input, scalar_t *grad_output,
+    int64_t nbatch, int64_t nplane,
+    int64_t input_w, int64_t output_w,
+    int64_t pad_l) {
+  int64_t p;
+#pragma omp parallel for private(p)
+  for (p = 0; p < nbatch; p++) {
+    reflection_pad1d_backward_out_frame<scalar_t>(
+      grad_input + p * nplane * input_w,
+      grad_output + p * nplane * output_w,
+      nplane,
+      input_w, output_w,
+      pad_l);
+  }
+}
+
 void reflection_pad1d_backward_out_template(
     Tensor& grad_input, const Tensor& grad_output_, const Tensor& input,
     IntList padding) {
@@ -161,7 +186,7 @@ void reflection_pad1d_backward_out_template(
 
   /* backprop */
   if (input.ndimension() == 2) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+    AT_DISPATCH_FLOATING_TYPES(
       grad_input.type(), "reflection_pad1d_backward", [&] {
         reflection_pad1d_backward_out_frame(
           grad_input.data<scalar_t>(), grad_output.data<scalar_t>(),
@@ -171,20 +196,16 @@ void reflection_pad1d_backward_out_template(
         }
     );
   } else {
-    int64_t p;
-#pragma omp parallel for private(p)
-    for (p = 0; p < nbatch; p++) {
-      AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-        grad_input.type(), "reflection_pad1d_backward", [&] {
-          reflection_pad1d_backward_out_frame(
-            grad_input.data<scalar_t>() + p * nplane * input_w,
-            grad_output.data<scalar_t>() + p * nplane * output_w,
-            nplane,
-            input_w, output_w,
-            pad_l);
-        }
-      );
-    }
+    AT_DISPATCH_FLOATING_TYPES(
+      grad_input.type(), "reflection_pad1d_backward", [&] {
+        reflection_pad1d_backward_out_loop(
+          grad_input.data<scalar_t>(),
+          grad_output.data<scalar_t>(),
+          nbatch, nplane,
+          input_w, output_w,
+          pad_l);
+      }
+    );
   }
 }
 } // namespace
