@@ -82,8 +82,8 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
     auto* destData = (uint8_t*)dest->raw_mutable_data(src.meta());
     const auto* srcData = (uint8_t*)src.raw_data();
     if (OutputSize() == 2) {
-      auto* indicesOut = Output(1);
-      indicesOut->Resize(numOfOutput);
+      
+      auto* indicesOut = Output(1, {numOfOutput}, at::dtype<int64_t>());
       indicesOut->template mutable_data<int64_t>();
     }
 
