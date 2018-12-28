@@ -1377,8 +1377,14 @@ class _DistTestBase(object):
     def _convert_syncbn_model(self, module, process_group=None):
         mod = module
         if isinstance(module, nn.modules.batchnorm._BatchNorm):
-            mod = nn.SyncBatchNorm(module.num_features, module.eps, module.momentum, module.affine,
-                module.track_running_stats, process_group)
+            mod = nn.SyncBatchNorm(
+                module.num_features,
+                module.eps,
+                module.momentum,
+                module.affine,
+                module.track_running_stats,
+                process_group
+            )
             mod.running_mean = module.running_mean
             mod.running_var = module.running_var
             if module.affine:
