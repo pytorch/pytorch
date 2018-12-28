@@ -938,6 +938,9 @@ class TestCuda(TestCase):
     def test_neg(self):
         _TestTorchMixin._test_neg(self, lambda t: t.cuda())
 
+    def test_isinf(self):
+        _TestTorchMixin._test_isinf(self, lambda t: t.cuda())
+
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     def test_arithmetic_large_tensor(self):
         x = torch.empty(2**30, device='cuda')

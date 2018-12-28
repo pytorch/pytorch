@@ -1333,13 +1333,14 @@
     CPU: randperm_out_cpu
     CUDA: randperm_out_cuda
 
+- func: range(Scalar start, Scalar end, Scalar step=1, TensorOptions options={}) -> Tensor
+
 - func: range(Scalar start, Scalar end, TensorOptions options={}) -> Tensor
 
-- func: range(Scalar start, Scalar end, Scalar step, TensorOptions options={}) -> Tensor
-
-- func: range_out(Tensor result, Scalar start, Scalar end) -> Tensor
-
-- func: range_out(Tensor result, Scalar start, Scalar end, Scalar step) -> Tensor
+- func: range_out(Tensor result, Scalar start, Scalar end, Scalar step=1) -> Tensor
+  dispatch:
+    CPU: range_cpu_out
+    CUDA: range_cuda_out
 
 - func: repeat(Tensor self, IntList repeats) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
@@ -3434,15 +3435,27 @@
 
 - func: replication_pad1d_out(Tensor output, Tensor self, IntList[2] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: replication_pad1d_out_cpu
+    CUDA: replication_pad1d_out_cuda
 
 - func: replication_pad1d(Tensor self, IntList[2] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: replication_pad1d_cpu
+    CUDA: replication_pad1d_cuda
 
 - func: replication_pad1d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, IntList[2] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: replication_pad1d_backward_out_cpu
+    CUDA: replication_pad1d_backward_out_cuda
 
 - func: replication_pad1d_backward(Tensor grad_output, Tensor self, IntList[2] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: replication_pad1d_backward_cpu
+    CUDA: replication_pad1d_backward_cuda
 
 - func: replication_pad2d_out(Tensor output, Tensor self, IntList[4] padding) -> Tensor
   python_module: nn

@@ -240,6 +240,8 @@ def isinf(tensor):
     """
     if not isinstance(tensor, torch.Tensor):
         raise ValueError("The argument is not a tensor", str(tensor))
+    if tensor.dtype in [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]:
+        return torch.zeros_like(tensor, dtype=torch.uint8)
     return tensor.abs() == inf
 
 

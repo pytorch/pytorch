@@ -11,7 +11,7 @@ from torch.autograd import Variable, Function
 from torch.autograd.function import traceable
 from torch.testing import assert_allclose
 from torch.onnx import OperatorExportTypes
-from torch._six import inf, PY2
+from torch._six import inf, PY2, builtins
 from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
     freeze_rng_state, set_rng_seed
@@ -4215,35 +4215,31 @@ a")
             throwsAnd(t)
 
     def test_type_cast(self):
-        def test_int_to_float():
-            b = float(2)
-            return b + 1.0
-        self.checkScript(test_int_to_float, ())
+        template = dedent('''
+        def cast(v):
+            # type: ({from_type}) -> {to_type}
+            return {to_type}(v)
+        ''')
 
-        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
-            @torch.jit.script
-            def test_int_to_bool():
-                return bool(5)
+        def check_cast(from_type, to_type, value, raises=False):
+            code = template.format(from_type=from_type, to_type=to_type)
+            expected = getattr(builtins, to_type)(value)
+            if raises:
+                with self.assertRaisesRegex(RuntimeError, "Cannot cast"):
+                    cu = torch.jit.CompilationUnit(code)
+            else:
+                self.checkScript(code, (value,), name='cast', outputs=expected)
 
-        def test_float_to_int():
-            b = int(5.0)
-            return b + 1
-        self.checkScript(test_float_to_int, ())
+        check_cast('int', 'float', 1)
+        check_cast('int', 'bool', 1)
+        check_cast('int', 'bool', 0)
 
-        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
-            @torch.jit.script
-            def test_float_to_bool():
-                return bool(5.0)
+        check_cast('float', 'int', 1.)
+        check_cast('float', 'bool', 1.)
+        check_cast('float', 'bool', 0.)
 
-        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
-            @torch.jit.script
-            def test_bool_to_float():
-                return float(True)
-
-        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
-            @torch.jit.script
-            def test_bool_to_int():
-                return int(True)
+        check_cast('bool', 'int', True)
+        check_cast('bool', 'float', True)
 
     def test_multiple_assignment(self):
         def outer_func(x):
@@ -4894,7 +4890,7 @@ a")
         def __init__(self):
             super(TestScript.DerivedStateModule, self).__init__()
             self.param = torch.nn.Parameter(torch.ones(3, 4, dtype=torch.float))
-            self.register_buffer('derived', torch.neg(self.param).detach())
+            self.register_buffer('derived', torch.neg(self.param).detach().clone())
 
             # This is a flag so we can test that the pack method was called
             self.register_buffer('pack_called', torch.zeros(1, dtype=torch.long))
@@ -6100,6 +6096,25 @@ a")
         self.assertExpected(torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs))
+
+    @suppress_warnings
+    def test_onnx_export_func_with_warnings(self):
+        @torch.jit.script
+        def func_with_warning(inp):
+            return torch.nn.functional.sigmoid(inp)  # triggers a deprecation warning
+
+        class WarningTest(torch.nn.Module):
+            def __init__(self):
+                super(WarningTest, self).__init__()
+
+            def forward(self, x):
+                return func_with_warning(x)
+
+        outputs = WarningTest()(torch.randn(42))
+        # no exception
+        torch.onnx.export_to_pretty_string(
+            WarningTest(), torch.randn(42), None, verbose=False,
+            example_outputs=outputs)
 
     def test_onnx_export_script_python_fail(self):
         class ModuleToInline(torch.jit.ScriptModule):

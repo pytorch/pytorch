@@ -479,25 +479,20 @@ Tensor& randperm_out_cpu(Tensor& result, int64_t n, Generator* generator) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ range ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor range(Scalar start, Scalar end, const TensorOptions& options) {
-  return native::range(start, end, /*step=*/1, options);
-}
-
 Tensor range(
     Scalar start,
     Scalar end,
     Scalar step,
     const TensorOptions& options) {
-  // Note [Native bindings for legacy TH factory functions]
-  return getFactoryType(options)._th_range(start, end, step);
+  Tensor result = at::empty({0}, options);
+  return at::range_out(result, start, end, step);
 }
 
-Tensor& range_out(Tensor& result, Scalar start, Scalar end) {
-  return native::range_out(result, start, end, 1);
-}
-
-Tensor& range_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
-  return at::legacy::th::_th_range_out(result, start, end, step);
+Tensor range(
+    Scalar start,
+    Scalar end,
+    const TensorOptions& options) {
+  return at::native::range(start, end, 1, options);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangle ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -391,21 +391,6 @@ accreal THCTensor_(trace)(THCState *state, THCTensor *src_) {
   return trace;
 }
 
-void THCTensor_(range)(THCState *state, THCTensor *r_, accreal xmin, accreal xmax, accreal step) {
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, r_));
-  THArgCheck(step > 0 || step < 0, 3, "step must be nonzero");
-  THArgCheck(((step > 0) && (xmax >= xmin)) || ((step < 0) && (xmax <= xmin))
-              , 2, "upper bound and larger bound inconsistent with step sign");
-  ptrdiff_t size = (ptrdiff_t) (((xmax - xmin) / step) + 1);
-  if (THCTensor_(nElement)(state, r_) != size) THCTensor_(resize1d)(state, r_, size);
-  THCTensor *r = THCTensor_(newContiguous)(state, r_);
-  LinspaceOp<scalar_t,accreal> linspace_method(xmin, step);
-  thrust::device_ptr<scalar_t> data_(THCTensor_(data)(state, r));
-  thrust::tabulate(data_, data_ + size, linspace_method);
-  THCTensor_(freeCopyTo)(state, r, r_);
-  THCudaCheck(cudaGetLastError());
-}
-
 void THCTensor_(arange)(THCState* state, THCTensor *r_, accreal xmin, accreal xmax, accreal step) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, r_));
   THArgCheck(step > 0 || step < 0, 3, "step must be nonzero");

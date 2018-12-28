@@ -5320,9 +5320,23 @@ class _TestTorchMixin(object):
         x = torch.tensor([1, 2, 3])
         self.assertEqual(torch.isfinite(x), torch.ByteTensor([1, 1, 1]))
 
+    @staticmethod
+    def _test_isinf(self, cast):
+        t1 = cast(torch.Tensor([1, inf, 2, -inf, nan]))
+        t2 = cast(torch.ByteTensor([1, 2, 3]))
+        t3 = cast(torch.CharTensor([1, 2, 3]))
+        t4 = cast(torch.ShortTensor([1, 2, 3]))
+        t5 = cast(torch.IntTensor([1, 2, 3]))
+        t6 = cast(torch.LongTensor([1, 2, 3]))
+        self.assertEqual(torch.isinf(t1), cast(torch.ByteTensor([0, 1, 0, 1, 0])))
+        self.assertEqual(torch.isinf(t2), cast(torch.ByteTensor([0, 0, 0])))
+        self.assertEqual(torch.isinf(t3), cast(torch.ByteTensor([0, 0, 0])))
+        self.assertEqual(torch.isinf(t4), cast(torch.ByteTensor([0, 0, 0])))
+        self.assertEqual(torch.isinf(t5), cast(torch.ByteTensor([0, 0, 0])))
+        self.assertEqual(torch.isinf(t6), cast(torch.ByteTensor([0, 0, 0])))
+
     def test_isinf(self):
-        x = torch.Tensor([1, inf, 2, -inf, nan])
-        self.assertEqual(torch.isinf(x), torch.ByteTensor([0, 1, 0, 1, 0]))
+        self._test_isinf(self, lambda t: t)
 
     def test_isnan(self):
         x = torch.Tensor([1, nan, 2])
@@ -8690,25 +8704,46 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             w.resize((10, 10))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    def test_toNumpy(self):
+    def test_to_numpy(self):
+        def get_castable_tensor(shape, tp):
+            dtype = tp.dtype
+            if dtype.is_floating_point:
+                dtype_info = torch.finfo(dtype)
+                # can't directly use min and max, because for double, max - min
+                # is greater than double range and sampling always gives inf.
+                low = max(dtype_info.min, -1e10)
+                high = min(dtype_info.max, 1e10)
+                t = torch.empty(shape, dtype=torch.float64).uniform_(low, high)
+            else:
+                # can't directly use min and max, because for int64_t, max - min
+                # is greater than int64_t range and triggers UB.
+                dtype_info = torch.iinfo(dtype)
+                low = max(dtype_info.min, int(-1e10))
+                high = min(dtype_info.max, int(1e10))
+                dtype_info = torch.iinfo(dtype)
+                t = torch.empty(shape, dtype=torch.int64).random_(low, high)
+            return t.to(dtype)
+
         types = [
-            'torch.ByteTensor',
-            'torch.IntTensor',
-            'torch.HalfTensor',
-            'torch.FloatTensor',
-            'torch.DoubleTensor',
-            'torch.LongTensor',
+            torch.ByteTensor,
+            torch.CharTensor,
+            torch.ShortTensor,
+            torch.IntTensor,
+            torch.HalfTensor,
+            torch.FloatTensor,
+            torch.DoubleTensor,
+            torch.LongTensor,
         ]
         for tp in types:
             # 1D
             sz = 10
-            x = torch.randn(sz).mul(255).type(tp)
+            x = get_castable_tensor(sz, tp)
             y = x.numpy()
             for i in range(sz):
                 self.assertEqual(x[i], y[i])
 
             # 1D > 0 storage offset
-            xm = torch.randn(sz * 2).mul(255).type(tp)
+            xm = get_castable_tensor(sz * 2, tp)
             x = xm.narrow(0, sz - 1, sz)
             self.assertTrue(x.storage_offset() > 0)
             y = x.numpy()
@@ -8728,13 +8763,13 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             # contiguous 2D
             sz1 = 3
             sz2 = 5
-            x = torch.randn(sz1, sz2).mul(255).type(tp)
+            x = get_castable_tensor((sz1, sz2), tp)
             y = x.numpy()
             check2d(x, y)
             self.assertTrue(y.flags['C_CONTIGUOUS'])
 
             # with storage offset
-            xm = torch.randn(sz1 * 2, sz2).mul(255).type(tp)
+            xm = get_castable_tensor((sz1 * 2, sz2), tp)
             x = xm.narrow(0, sz1 - 1, sz1)
             y = x.numpy()
             self.assertTrue(x.storage_offset() > 0)
@@ -8742,28 +8777,28 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertTrue(y.flags['C_CONTIGUOUS'])
 
             # non-contiguous 2D
-            x = torch.randn(sz2, sz1).mul(255).type(tp).t()
+            x = get_castable_tensor((sz2, sz1), tp).t()
             y = x.numpy()
             check2d(x, y)
             self.assertFalse(y.flags['C_CONTIGUOUS'])
 
             # with storage offset
-            xm = torch.randn(sz2 * 2, sz1).mul(255).type(tp)
+            xm = get_castable_tensor((sz2 * 2, sz1), tp)
             x = xm.narrow(0, sz2 - 1, sz2).t()
             y = x.numpy()
             self.assertTrue(x.storage_offset() > 0)
             check2d(x, y)
 
             # non-contiguous 2D with holes
-            xm = torch.randn(sz2 * 2, sz1 * 2).mul(255).type(tp)
+            xm = get_castable_tensor((sz2 * 2, sz1 * 2), tp)
             x = xm.narrow(0, sz2 - 1, sz2).narrow(1, sz1 - 1, sz1).t()
             y = x.numpy()
             self.assertTrue(x.storage_offset() > 0)
             check2d(x, y)
 
-            if tp != 'torch.HalfTensor':
+            if tp != torch.HalfTensor:
                 # check writeable
-                x = torch.randn(3, 4).mul(255).type(tp)
+                x = get_castable_tensor((3, 4), tp)
                 y = x.numpy()
                 self.assertTrue(y.flags.writeable)
                 y[0][1] = 3
@@ -9492,6 +9527,24 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             torch.tensor(2).to("cuda:1") / torch.tensor(3).to("cuda:0")
         with self.assertRaisesRegex(RuntimeError, "expected both inputs to be on same device"):
             torch.tensor(2).to("cuda:1") // torch.tensor(3).to("cuda:0")
+
+    def test_allow_tensor_metadata_change(self):
+        def do_test(t):
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    "set_sizes_contiguous is not allowed on Tensor created from .data or .detach()"):
+                t.resize_((2, 1))
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    "set_storage is not allowed on Tensor created from .data or .detach()"):
+                t.set_()
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    "set_storage_offset is not allowed on Tensor created from .data or .detach()"):
+                t.set_(t.storage(), 0, t.size(), list(t.stride()))
+
+        do_test(torch.tensor([[1, 2]]).data)
+        do_test(torch.tensor([[1, 2]]).detach())
 
 # Functions to test negative dimension wrapping
 METHOD = 1
