@@ -406,17 +406,17 @@ Value* emitBuiltinCall(
   }
   // no operators found with the same name, print out similarly named operators
   if (variants.size() == 0) {
-    auto close_operators = findSimilarOperators(name);
+    const auto close_symbols = findSimilarOperators(name);
     auto error = ErrorReport(loc);
-    auto user_function_name = name.toQualString();
+    const auto& user_function_name = name.toQualString();
     error << "unknown builtin op: " << user_function_name << "\n";
-    if (close_operators.size() == 0) {
+    if (close_symbols.size() == 0) {
       error << "Could not find any similar ops to " << user_function_name
         << ". This op may not exist or may not be currently supported in TorchScript\n";
     } else {
       error << "Here are some suggestions: \n";
-      for (auto op: close_operators) {
-        error << "\t" << op.second.first.toQualString() << "\n";
+      for (const auto& sym : close_symbols) {
+        error << "\t" << sym.toQualString() << "\n";
       }
     }
     throw error;

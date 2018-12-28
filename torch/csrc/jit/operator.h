@@ -108,9 +108,7 @@ inline Operation getOperation(const Node* node) {
 }
 
 
-// return nullopt if it's not a match, otherwise it's score
-using OperatorEntry = std::pair<Symbol, std::vector<std::shared_ptr<Operator>>>;
-TORCH_API std::multimap<int64_t, OperatorEntry> findSimilarOperators(Symbol input_op);
+TORCH_API std::vector<Symbol> findSimilarOperators(Symbol input_op);
 
 TORCH_API void registerOperator(Operator&& op);
 
