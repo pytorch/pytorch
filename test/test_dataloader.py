@@ -821,7 +821,6 @@ class TestDataLoader(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
     def test_default_collate_shared_tensor(self):
-        import unittest.mock
         import numpy as np
         t_in = torch.zeros(1)
         n_in = np.zeros(1)
@@ -830,9 +829,15 @@ class TestDataLoader(TestCase):
 
         self.assertEqual(default_collate([t_in]).is_shared(), False)
         self.assertEqual(default_collate([n_in]).is_shared(), False)
-        with unittest.mock.patch('torch.utils.data.dataloader._use_shared_memory', True):
+
+        old = torch.utils.data.dataloader._use_shared_memory
+        try:
+            torch.utils.data.dataloader._use_shared_memory = True
             self.assertEqual(default_collate([t_in]).is_shared(), True)
             self.assertEqual(default_collate([n_in]).is_shared(), True)
+        finally:
+            torch.utils.data.dataloader._use_shared_memory = old
+
 
 class StringDataset(Dataset):
     def __init__(self):
