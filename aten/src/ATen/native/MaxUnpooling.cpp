@@ -24,7 +24,7 @@ Tensor MaxUnpooling2d_forward_out_cpu_(
   }
   auto numChannels = input.size(dimc);
   auto inputHeight = input.size(dimh);
-auto inputWidth = input.size(dimw);
+  auto inputWidth = input.size(dimw);
 
   auto* rawInput = input.data<scalar_t>();
   auto* rawIndices = indices.data<int64_t>();

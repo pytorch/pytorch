@@ -2,7 +2,6 @@
 #include "ATen/NativeFunctions.h"
 #include "ATen/TensorUtils.h"
 
-#include "ATen/cuda/Array.h"
 #include "ATen/cuda/CUDAContext.h"
 #include "c10/util/Exception.h"
 
@@ -38,31 +37,20 @@ __global__ void MaxUnpooling2d_forward_kernel(
 
 template <typename T>
 __global__ void MaxUnpooling3d_forward_kernel(
-    const T* input,
-    const int64_t* indices,
-    const int64_t inputTime,
-    const int64_t inputHeight,
-    const int64_t inputWidth,
+    PackedTensorAccessor<T, 4> input,
+    PackedTensorAccessor<int64_t, 4> indices,
+    T* output,
     const int64_t oT,
     const int64_t oW,
     const int64_t oH,
-    const int64_t dT,
-    const int64_t dW,
-    const int64_t dH,
-    const int64_t pT,
-    const int64_t pW,
-    const int64_t pH,
-    const int64_t offsetZ,
-    T* output) {
+    const int64_t offsetZ) {
   int64_t iColumn = blockIdx.x * blockDim.x + threadIdx.x;
   int64_t iRow = blockIdx.y * blockDim.y + threadIdx.y;
-  int64_t iFrame = (blockIdx.z + offsetZ) % inputTime; // intput frame/time
-  int64_t slice = (blockIdx.z + offsetZ) / inputTime; // intput slice/feature
-  if (iRow < inputHeight && iColumn < inputWidth) {
-    int64_t newIndex = slice * (inputTime * inputHeight * inputWidth) +
-        iFrame * (inputHeight * inputWidth) + iRow * inputWidth + iColumn;
-    T val = input[newIndex];
-    int64_t index = indices[newIndex];
+  int64_t iFrame = (blockIdx.z + offsetZ) % input.size(1); // input frame/time
+  int64_t slice = (blockIdx.z + offsetZ) / input.size(1); // input slice/feature
+  if (iRow < input.size(2) && iColumn < input.size(3)) {
+    T val = input[slice][iFrame][iRow][iColumn];
+    int64_t index = indices[slice][iFrame][iRow][iColumn];
     output[slice * oT * oH * oW + index] = val;
   }
 }
@@ -92,37 +80,22 @@ __global__ void MaxUnpooling2d_backward_kernel(
 template <typename T>
 __global__ void MaxUnpooling3d_backward_kernel(
     T* gradOutputData,
-    at::cuda::Array<int64_t, 3> output_size_array,
-    int64_t* indices,
-    T* gradInput,
-    int offsetZ,
-    at::cuda::Array<int64_t, 5> grad_input_sizes,
-    at::cuda::Array<int64_t, 5> indices_sizes) {
-  int64_t oT = output_size_array[0];
-  int64_t oH = output_size_array[1];
-  int64_t oW = output_size_array[2];
+    int64_t oT,
+    int64_t oH,
+    int64_t oW,
+    PackedTensorAccessor<int64_t, 4> indices,
+    PackedTensorAccessor<T, 4> gradInput,
+    int offsetZ) {
   int iColumn = blockIdx.x * blockDim.x + threadIdx.x;
   int iRow = blockIdx.y * blockDim.y + threadIdx.y;
-  int iFrame =
-      (blockIdx.z + offsetZ) % grad_input_sizes[1]; // output frame/time
+  int iFrame = (blockIdx.z + offsetZ) % gradInput.size(1); // output frame/time
   int slice =
-      (blockIdx.z + offsetZ) / grad_input_sizes[1]; // output slice/feature
+      (blockIdx.z + offsetZ) / gradInput.size(1); // output slice/feature
 
-  if (iRow < grad_input_sizes[3] && iColumn < grad_input_sizes[4]) {
-    // int64_t index = indices[slice][iFrame][iRow][iColumn];
-    int64_t indices_index =
-        slice * (indices_sizes[2] * indices_sizes[3] * indices_sizes[4]) +
-        iFrame * (indices_sizes[3] * indices_sizes[4]) +
-        iRow * (indices_sizes[4]) + iColumn;
-    int64_t index = indices[indices_index];
-
+  if (iRow < gradInput.size(2) && iColumn < gradInput.size(3)) {
+    int64_t index = indices[slice][iFrame][iRow][iColumn];
     T grad_val = gradOutputData[slice * oT * oH * oW + index];
-    int64_t grad_input_index = slice *
-            (grad_input_sizes[2] * grad_input_sizes[3] * grad_input_sizes[4]) +
-        iFrame * (grad_input_sizes[3] * grad_input_sizes[4]) +
-        iRow * (grad_input_sizes[4]) + iColumn;
-    gradInput[grad_input_index] = grad_val;
-    // gradInput[slice][iFrame][iRow][iColumn] = grad_val;
+    gradInput[slice][iFrame][iRow][iColumn] = grad_val;
   }
 }
 
@@ -314,6 +287,7 @@ Tensor& MaxUnpooling3d_forward_out_cuda(
   int64_t inputWidth;
 
   if (self.ndimension() == 4) {
+    /* 5D */
     batchSize = 1;
     inputSlices = self.size(0);
     inputTime = self.size(1);
@@ -321,6 +295,7 @@ Tensor& MaxUnpooling3d_forward_out_cuda(
     inputWidth = self.size(3);
     output.resize_({inputSlices, outputTime, outputHeight, outputWidth});
   } else {
+    /* resize output */
     batchSize = self.size(0);
     inputSlices = self.size(1);
     inputTime = self.size(2);
@@ -329,8 +304,28 @@ Tensor& MaxUnpooling3d_forward_out_cuda(
     output.resize_(
         {batchSize, inputSlices, outputTime, outputHeight, outputWidth});
   }
+  auto input_contiguous = self.contiguous();
+  auto indices_contiguous = indices.contiguous();
+
   auto output_contiguous = output.contiguous();
   output_contiguous.zero_();
+
+  // Collapse batch and feature dimensions if needed
+  auto input_contiguous_reshaped = input_contiguous;
+  auto indices_contiguous_reshaped = indices_contiguous;
+
+  if (input_contiguous.ndimension() == 5) {
+    input_contiguous_reshaped = input_contiguous.reshape(
+        {input_contiguous.size(0) * input_contiguous.size(1),
+         input_contiguous.size(2),
+         input_contiguous.size(3),
+         input_contiguous.size(4)});
+    indices_contiguous_reshaped = indices_contiguous.reshape(
+        {indices_contiguous.size(0) * indices_contiguous.size(1),
+         indices_contiguous.size(2),
+         indices_contiguous.size(3),
+         indices_contiguous.size(4)});
+  }
 
   int totalZ = inputTime * inputSlices * batchSize;
   int offsetZ = 0;
@@ -348,22 +343,13 @@ Tensor& MaxUnpooling3d_forward_out_cuda(
               block,
               0,
               at::cuda::getCurrentCUDAStream()>>>(
-              self.contiguous().data<scalar_t>(),
-              indices.contiguous().data<int64_t>(),
-              inputTime,
-              inputHeight,
-              inputWidth,
+              input_contiguous_reshaped.packed_accessor<scalar_t, 4>(),
+              indices_contiguous_reshaped.packed_accessor<int64_t, 4>(),
+              output_contiguous.data<scalar_t>(),
               outputTime,
               outputHeight,
               outputWidth,
-              dT,
-              dH,
-              dW,
-              padT,
-              padH,
-              padW,
-              offsetZ,
-              output_contiguous.data<scalar_t>());
+              offsetZ);
         }));
     AT_CHECK(
         cudaGetLastError() == cudaSuccess,
@@ -519,6 +505,10 @@ at::Tensor& MaxUnpooling3d_backward_out_cuda(
   AT_CHECK(stride.size() == 3, "stride must have three elements");
   AT_CHECK(padding.size() == 3, "padding must have three elements");
 
+  auto outputTime = output_size[0];
+  auto outputHeight = output_size[1];
+  auto outputWidth = output_size[2];
+
   AT_CHECK(
       (self.ndimension() == 4 || self.ndimension() == 5),
       "self must be a 4d or 5d tensor");
@@ -532,15 +522,13 @@ at::Tensor& MaxUnpooling3d_backward_out_cuda(
       "MaxUnpooling3d_backward_out_cuda",
       {self_arg, indices_arg, grad_output_arg, grad_input_arg});
 
-  if (self.ndimension() == 4)
-  {
+  if (self.ndimension() == 4) {
     batchSize = 1;
     inputSlices = self.size(0);
     inputTime = self.size(1);
     inputHeight = self.size(2);
     inputWidth = self.size(3);
-  }
-  else {
+  } else {
     batchSize = self.size(0);
     inputSlices = self.size(1);
     inputTime = self.size(2);
@@ -554,21 +542,25 @@ at::Tensor& MaxUnpooling3d_backward_out_cuda(
   auto indices_contiguous = indices.contiguous();
   auto grad_output_contiguous = grad_output.contiguous();
 
+  // Collapse batch and feature dimensions if needed
+  auto grad_input_reshaped = grad_input;
+  auto indices_contiguous_reshaped = indices_contiguous;
+
+  if (grad_input.ndimension() == 5) {
+    grad_input_reshaped =
+        grad_input.reshape({grad_input.size(0) * grad_input.size(1),
+                            grad_input.size(2),
+                            grad_input.size(3),
+                            grad_input.size(4)});
+    indices_contiguous_reshaped = indices_contiguous.reshape(
+        {indices_contiguous.size(0) * indices_contiguous.size(1),
+         indices_contiguous.size(2),
+         indices_contiguous.size(3),
+         indices_contiguous.size(4)});
+  }
+
   int totalZ = inputTime * inputSlices * batchSize;
   int offsetZ = 0;
-
-  auto output_size_array = at::cuda::Array<int64_t, 3>();
-  auto grad_input_sizes_array = at::cuda::Array<int64_t, 5>();
-  auto indices_sizes_array = at::cuda::Array<int64_t, 5>();
-
-  for(int64_t i = 0; i < 3; i++) {
-    output_size_array[i] = output_size[i];
-  }
-
-  for(int64_t i = 0; i < 5; i++) {
-    grad_input_sizes_array[i] = grad_input.size(i);
-    indices_sizes_array[i] = indices_contiguous.size(i);
-  }
 
   dim3 block(32, 8);
   while (totalZ > 0) {
@@ -584,12 +576,12 @@ at::Tensor& MaxUnpooling3d_backward_out_cuda(
               0,
               at::cuda::getCurrentCUDAStream()>>>(
               grad_output.data<scalar_t>(),
-              output_size_array,
-              indices_contiguous.data<int64_t>(),
-              grad_input.data<scalar_t>(),
-              offsetZ,
-              grad_input_sizes_array,
-              indices_sizes_array);
+              outputTime,
+              outputHeight,
+              outputWidth,
+              indices_contiguous_reshaped.packed_accessor<int64_t, 4>(),
+              grad_input_reshaped.packed_accessor<scalar_t, 4>(),
+              offsetZ);
         }));
     AT_CHECK(
         cudaGetLastError() == cudaSuccess,
