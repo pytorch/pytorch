@@ -64,9 +64,8 @@ def get_num_params(fn):
     if source is None:
         return None
     py_ast = ast.parse(source)
-    if isinstance(py_ast.body[0], ast.ClassDef):
-        module_name = source[source.index('class') + 6: source.index('(')]
-        raise RuntimeError("cannot create a module (%s) inside jit.script" % module_name)
+    if len(py_ast.body) == 1 and isinstance(py_ast.body[0], ast.ClassDef):
+        raise RuntimeError("cannot create a module ({}) inside jit.script".format(py_ast.body[0].name))
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
         raise RuntimeError("expected a single top-level function")
     py_def = py_ast.body[0]
