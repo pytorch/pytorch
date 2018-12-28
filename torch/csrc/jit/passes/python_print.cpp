@@ -740,6 +740,9 @@ struct PythonPrintPass {
         stmt << "annotate(" << node->output()->type()->python_str() << ", "
              << useOf(node->input()) << ")";
       } break;
+      case prim::_unchecked_unwrap_optional: {
+        printValueList(stmt, node->inputs(), "_unchecked_unwrap_optional(", ")");
+      } break;
       case prim::Int: {
         printValueList(stmt, node->inputs(), "int(", ")");
       } break;

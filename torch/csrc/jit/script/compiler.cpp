@@ -29,6 +29,21 @@ using ValueTable = std::unordered_map<std::string, SugaredValuePtr>;
 using AttributeMap = std::unordered_map<std::string, Const>;
 using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
 
+using Refinements = std::unordered_map<Value *, TypePtr>;
+
+// When a comparison like x is None is made, we associate type refinements
+// with its true value and its false value. If a boolean that has refinements associated
+// with it is used in a conditional of an if statememt, the true and false refinements
+// are inserted into the corresponding block
+struct BoolInfo {
+  BoolInfo(Refinements true_refinements, Refinements false_refinements):
+    true_refinements(true_refinements), false_refinements(false_refinements) {};
+  BoolInfo() {};
+
+  Refinements true_refinements;
+  Refinements false_refinements;
+};
+
 static Value* asSimple(const SugaredValuePtr& value) {
   if (SimpleValue* sv = dynamic_cast<SimpleValue*>(value.get())) {
     return sv->getValue();
@@ -95,6 +110,9 @@ struct Environment {
   std::unordered_map<std::string, std::string> error_messages;
   Block* b;
 
+  Refinements * active_refinements;
+  std::unordered_map<Value *, BoolInfo> bool_information;
+
   std::shared_ptr<Environment> next;
 
   // set type error in the lowest environment. if the variable is used after an
@@ -107,6 +125,7 @@ struct Environment {
     runner->error_messages[name] = msg;
   }
 
+
   // see if type error has been set for a variable
   c10::optional<std::string> findVariableTypeError(const std::string& name) {
     auto runner = this;
@@ -118,6 +137,54 @@ struct Environment {
       return msg->second;
     } else {
       return c10::nullopt;
+    }
+  }
+
+  void setBoolInfo(Value * v, BoolInfo info) {
+    bool_information[v] = info;
+  }
+
+  c10::optional<BoolInfo> getBoolInfo(Value * v) {
+    for (auto runner = this; runner; runner = runner->next.get()) {
+      auto info = runner->bool_information.find(v);
+      if (info != runner->bool_information.end()) {
+        return info->second;
+      }
+    }
+    return c10::nullopt;
+  }
+
+  void setRefinements() {
+    if (getBlockOwningKind() != prim::If)
+      return;
+
+    auto cond_value = b->owningNode()->input();
+    auto maybe_bool_info = getBoolInfo(cond_value);
+    if (maybe_bool_info) {
+      auto bool_info = *maybe_bool_info;
+      auto is_true_block = b->owningNode()->blocks().at(0) == b;
+      if (is_true_block) {
+        active_refinements = &maybe_bool_info->true_refinements;
+      } else {
+        active_refinements = &maybe_bool_info->false_refinements;
+      }
+      insertRefinements();
+    }
+  }
+
+  void insertRefinements() {
+    if (active_refinements == nullptr)
+      return;
+    auto g = b->owningGraph();
+    WithInsertPoint guard(b);
+    for (auto value_type: *active_refinements) {
+      Value * v = value_type.first;
+      auto type = value_type.second;
+      if (type != NoneType::get()) {
+        auto output = g->insert(prim::_unchecked_unwrap_optional, {v});
+        //set name using "a" and not "a.1"
+        setVar(fakeRange(), v->uniqueNameBase(), output);
+      }
     }
   }
 
@@ -444,6 +511,7 @@ struct to_ir {
     }
     environment_stack =
         std::make_shared<Environment>(method, resolver, b, environment_stack);
+    environment_stack->setRefinements();
   }
   std::shared_ptr<Environment> popFrame(bool ends_def = false) {
     auto old_frame = environment_stack;
@@ -836,22 +904,105 @@ struct to_ir {
     return emitIfExpr(expr.range(), cond_value, true_expr, false_expr);
   }
 
+  BoolInfo mergeAnd(BoolInfo a, BoolInfo b) {
+    // if the result of an AND is true, both a & b had to be true,
+    // so we take the union of a.true_refinements and b.true_refinements.
+    // if the result is false, either a or b could have been false,
+    // so we take their intersection.
+    auto true_refinements = unionRefinements(a.true_refinements, b.true_refinements);
+    auto false_refinements = intersectRefinements(a.false_refinements, b.false_refinements);
+    return BoolInfo(true_refinements, false_refinements);
+  }
+
+  BoolInfo mergeOr(BoolInfo a, BoolInfo b) {
+    // if the result of an OR is true, either a & b could have been true,
+    // so we take the intersection of a.true_refinements & b.true_refinements.
+    // if the result is false, both a and b had to be false,
+    // so we take their union.
+    auto true_refinements = intersectRefinements(a.true_refinements, b.true_refinements);
+    auto false_refinements = unionRefinements(a.false_refinements, b.false_refinements);
+    return BoolInfo(true_refinements, false_refinements);
+  }
+
+  // return the intersection of the values to type mappings in a and b whose
+  // types can be unified
+  Refinements intersectRefinements(Refinements a, Refinements b) {
+    Refinements ret;
+    for (auto& value_type: a) {
+      Value * v_1 = value_type.first;
+      TypePtr t_1 = value_type.second;
+      auto maybe_t_2 = b.find(v_1);
+      if (maybe_t_2 != b.end()) {
+        TypePtr t_2 = maybe_t_2->second;
+        auto maybe_unified_type = unifyTypes(t_1, t_2);
+        if (maybe_unified_type)
+          ret[v_1] = *maybe_unified_type;
+      }
+    }
+    return ret;
+  }
+
+  // return the union of the values to type mappings in a and b whose
+  // types can be unified
+  Refinements unionRefinements(Refinements a, Refinements b) {
+    Refinements ret;
+    for (auto& value_type: a) {
+      Value * v_1 = value_type.first;
+      TypePtr t_1 = value_type.second;
+      auto maybe_t_2 = b.find(v_1);
+      if (maybe_t_2 != b.end()) {
+        TypePtr t_2 = maybe_t_2->second;
+        auto maybe_unified_type = unifyTypes(t_1, t_2);
+        if (maybe_unified_type)
+          ret[v_1] = *maybe_unified_type;
+      } else {
+        ret[v_1] = t_1;
+      }
+    }
+
+    for (auto& value_type: b) {
+      Value * v_1 = value_type.first;
+      TypePtr t_1 = value_type.second;
+      if (a.count(v_1) == 0) {
+        ret[v_1] = t_1;
+      }
+    }
+
+    return ret;
+  }
+
   Value* emitShortCircuitIf(
       const SourceRange& loc,
       const TreeRef& first_expr,
       const TreeRef& second_expr,
       bool is_or) {
-    Value* first_value = emitCond(Expr(first_expr));
+    Value * first_value = emitCond(Expr(first_expr));
+    BoolInfo fst_expr_bool_info = getConditionBoolInfo(first_value);
+    BoolInfo snd_expr_bool_info;
 
-    auto get_first_expr = [first_value] { return first_value; };
-    auto get_second_expr = [&] { return emitCond(Expr(second_expr)); };
+    auto get_first_expr = [first_value] {
+      return first_value;
+    };
+    auto get_second_expr = [&] {
+      auto v = emitCond(Expr(second_expr));
+      snd_expr_bool_info = getConditionBoolInfo(v);
+      return v;
+    };
 
-    // if this is an OR, eval second expression if first expr is False.
+    // if this is an OR, eval second expression if first expr is False
     // If this is an AND, eval second expression if first expr is True
+    // Combine the bool information associated with first and second expr in the
+    // resulting value
     if (is_or) {
-      return emitIfExpr(loc, first_value, get_first_expr, get_second_expr);
+      auto v = emitIfExpr(loc, first_value, get_first_expr, get_second_expr);
+      auto bool_info = mergeOr(fst_expr_bool_info, snd_expr_bool_info);
+      environment_stack->setBoolInfo(v, bool_info);
+      return v;
     } else {
-      return emitIfExpr(loc, first_value, get_second_expr, get_first_expr);
+      auto v = emitIfExpr(loc, first_value, get_second_expr, get_first_expr);
+      auto bool_info = mergeAnd(fst_expr_bool_info, snd_expr_bool_info);
+      environment_stack->setBoolInfo(v, bool_info);
+      return v;
     }
   }
 
@@ -892,6 +1043,35 @@ struct to_ir {
     return expr_value;
   }
 
+  BoolInfo getConditionBoolInfo(Value * cond) {
+    JIT_ASSERT(cond->type() == BoolType::get());
+    if (auto maybe_found = environment_stack->getBoolInfo(cond)) {
+      return *maybe_found;
+    }
+    Refinements true_refinements, false_refinements;
+    if (cond->node()->kind() == aten::__is__ || cond->node()->kind() == aten::__isnot__) {
+      Value * input_val = cond->node()->inputs().at(0);
+      // only handling t? is None / t? is not None
+      if (input_val->type()->cast<OptionalType>() &&
+          cond->node()->inputs().at(1)->mustBeNone()) {
+
+        true_refinements[input_val] = NoneType::get();
+        false_refinements[input_val] = input_val->type()->expect<OptionalType>()->getElementType();
+        if (cond->node()->kind() == aten::__isnot__) {
+          return BoolInfo(false_refinements, true_refinements);
+        }
+      }
+    }
+    return BoolInfo(true_refinements, false_refinements);
+  }
+
+  void setConditionBoolInfo(Value *v) {
+    if (!environment_stack->getBoolInfo(v)) {
+      auto bool_info = getConditionBoolInfo(v);
+      environment_stack->setBoolInfo(v, bool_info);
+    }
+  }
+
   Value* emitCond(const Expr& cond) {
     Value* v = emitExpr(cond);
     if (!v->type()->isSubtypeOf(BoolType::get())) {
@@ -904,7 +1084,24 @@ struct to_ir {
       }
       throw error;
     }
+    setConditionBoolInfo(v);
     return v;
+  }
+
+  // if a value is only set by an unchecked unwrap optional, than the value
+  // has not changed and we omit adding an if node output for it.
+  // this also prevents jitter when importing an if expression like:
+  // x = x if x is not None else 1
+  bool valueNotWrittenTo(const std::unordered_set<std::string>& true_set,
+      const std::unordered_set<std::string>& false_set,
+      Value * true_v, Value * false_v, const std::string& x) {
+
+    bool set_in_false = false_set.count(x) != 0;
+    bool set_in_true = true_set.count(x) != 0;
+    bool tv_not_unwrap = true_v->node()->kind() != prim::_unchecked_unwrap_optional;
+    bool fv_not_unwrap = false_v->node()->kind() != prim::_unchecked_unwrap_optional;
+
+    return !((set_in_false && tv_not_unwrap) || (set_in_true && fv_not_unwrap));
   }
 
   void emitIfElseBlocks(Value* cond_value, const If& stmt) {
@@ -942,23 +1139,32 @@ struct to_ir {
 
     // ordered set, because we want deterministic graph output
     std::set<std::string> mutated_variables;
+    auto true_vars = save_true->definedVariables();
+    auto false_vars = save_false->definedVariables();
 
-    for (auto& v : save_true->definedVariables()) {
+    for (auto & v : true_vars) {
       if (save_false->findInAnyFrame(v)) {
         mutated_variables.insert(v);
       }
     }
-    for (auto& v : save_false->definedVariables()) {
+    for (auto & v : false_vars) {
       if (save_true->findInAnyFrame(v)) {
         mutated_variables.insert(v);
       }
     }
+
+    std::unordered_set<std::string> true_set(true_vars.begin(), true_vars.end());
+    std::unordered_set<std::string> false_set(false_vars.begin(), false_vars.end());
 
     // Register outputs in each block
     for (const auto& x : mutated_variables) {
       auto tv = save_true->getVar(x, stmt.range());
       auto fv = save_false->getVar(x, stmt.range());
       auto unified = unifyTypes(tv->type(), fv->type());
+
+      if (valueNotWrittenTo(true_set, false_set, tv, fv, x)) {
+        continue;
+      }
 
       // attempt to unify the types. we allow variables to be set to different
       // types in each branch as long as that variable is not already in scope,
@@ -1049,6 +1255,7 @@ struct to_ir {
            rhs_val->asValue(rhs_range, method)},
           {},
           /*required=*/true);
+      setConditionBoolInfo(cond_value);
       emitIfElseBlocks(cond_value, stmt);
     }
   }
@@ -1813,6 +2020,21 @@ struct to_ir {
           isInstanceCheck(apply.inputs()[0], apply.inputs()[1]);
       return std::make_shared<SimpleValue>(
           graph->insertConstant(is_instance_val, loc));
+    } else if (auto isinstance = dynamic_cast<UncheckedUnwrapOptional*>(sv.get())) {
+      JIT_ASSERT(apply.inputs().size() == 1);
+      auto input = emitExpr(apply.inputs()[0]);
+
+      // When a graph is exported and reimported, the implicitly inserted unchecked
+      // optionals will exist when inserting the ones from the previous compilation
+      // here, special case so that we don't emit chains of unchecked optionals
+      if (input->node()->kind() == prim::_unchecked_unwrap_optional) {
+        Value * prev_input = input->node()->input();
+        prev_input->setUniqueName(prev_input->uniqueNameBase()); //reset name to prevent jittering
+        input = prev_input;
+      }
+      Value * output_val = graph->insert(prim::_unchecked_unwrap_optional, {input});
+      return std::make_shared<SimpleValue>(output_val);
+>>>>>>> Add optional unwrapping
     } else {
       auto inputs = getNamedValues(apply.inputs(), true);
       auto attributes = emitAttributes(apply.attributes());
