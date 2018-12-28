@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/script/edit_distance.h>
-#include <string.h>
 #include <algorithm>
+#include <cstring>
 #include <memory>
 
 namespace torch {
