@@ -2070,6 +2070,7 @@ class TestJit(JitTestCase):
         warns = [str(w.message) for w in warns]
         self.assertEqual(len(warns), 0)
 
+    @unittest.skipIf(sys.platform == "win32", "TODO: need to fix this test case for Windows")
     def test_torch_load_error(self):
         class J(torch.jit.ScriptModule):
             def __init__(self):
