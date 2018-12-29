@@ -387,6 +387,7 @@ struct Converter<
 // C4146: unary minus operator applied to unsigned type, result still unsigned
 // It can be addressed by disabling the following warning. 
 #ifdef _MSC_VER
+#pragma warning( push )
 #pragma warning( disable : 4146 )
 #endif
 
@@ -407,7 +408,7 @@ typename std::enable_if<std::is_integral<From>::value, bool>::type overflows(
 }
 
 #ifdef _MSC_VER
-#pragma warning( default : 4146 )
+#pragma warning( pop )
 #endif
 
 template <typename To, typename From>
