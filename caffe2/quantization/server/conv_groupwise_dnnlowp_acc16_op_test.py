@@ -5,12 +5,11 @@ import collections
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
-from caffe2.python import core, dyndep, workspace
+from caffe2.python import core, dyndep, utils, workspace
 from caffe2.quantization.server import utils as dnnlowp_utils
 from dnnlowp_test_utils import (
     check_quantized_results_close,
     generate_conv_inputs,
-    nhwc2nchw,
 )
 from hypothesis import assume, given
 
@@ -107,8 +106,8 @@ class GroupWiseDNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
                 ] += g
 
         if order == "NCHW":
-            X = nhwc2nchw(X)
-            W = nhwc2nchw(W)
+            X = utils.NHWC2NCHW(X)
+            W = utils.NHWC2NCHW(W)
 
         # No input quantization error in bias
         b = np.round(np.random.randn(output_channels)).astype(np.float32)
@@ -267,8 +266,8 @@ class GroupWiseDNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
                 ] += g
 
             if order == "NCHW":
-                X = nhwc2nchw(X)
-                W = nhwc2nchw(W)
+                X = utils.NHWC2NCHW(X)
+                W = utils.NHWC2NCHW(W)
 
             # No input quantization error in bias
             b = np.round(np.random.randn(output_channels)).astype(np.float32)
