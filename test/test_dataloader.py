@@ -830,13 +830,13 @@ class TestDataLoader(TestCase):
         self.assertEqual(_utils.collate.default_collate([t_in]).is_shared(), False)
         self.assertEqual(_utils.collate.default_collate([n_in]).is_shared(), False)
 
-        old = torch.utils.data.dataloader._use_shared_memory
+        old = _utils.collate._use_shared_memory
         try:
-            torch.utils.data.dataloader._use_shared_memory = True
+            _utils.collate._use_shared_memory = True
             self.assertEqual(_utils.collate.default_collate([t_in]).is_shared(), True)
             self.assertEqual(_utils.collate.default_collate([n_in]).is_shared(), True)
         finally:
-            torch.utils.data.dataloader._use_shared_memory = old
+            _utils.collate._use_shared_memory = old
 
 
 class StringDataset(Dataset):
