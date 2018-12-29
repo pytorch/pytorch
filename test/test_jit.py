@@ -2070,7 +2070,6 @@ class TestJit(JitTestCase):
         warns = [str(w.message) for w in warns]
         self.assertEqual(len(warns), 0)
 
-    @unittest.skipIf(sys.platform == "win32", "TODO: need to fix this test case for Windows")
     def test_torch_load_error(self):
         class J(torch.jit.ScriptModule):
             def __init__(self):
@@ -2081,10 +2080,16 @@ class TestJit(JitTestCase):
                 return input + 100
 
         j = J()
-        with tempfile.NamedTemporaryFile() as f:
-            j.save(f.name)
-            with self.assertRaisesRegex(RuntimeError, "is a zip"):
-                torch.load(f.name)
+        for use_name in (False, True):
+            # Passing filename to torch.save(...) will cause the file to be opened twice,
+            # which is not supported on Windows
+            if sys.platform == "win32" and use_name:
+                continue
+            with tempfile.NamedTemporaryFile() as f:
+                handle = f if not use_name else f.name
+                j.save(handle)
+                with self.assertRaisesRegex(RuntimeError, "is a zip"):
+                    torch.load(handle)
 
 
 class TestBatched(TestCase):
