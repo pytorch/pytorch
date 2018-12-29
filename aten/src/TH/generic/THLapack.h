@@ -2,8 +2,6 @@
 #define TH_GENERIC_FILE "TH/generic/THLapack.h"
 #else
 
-/* AX=B */
-TH_API void THLapack_(gesv)(int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int* info);
 /* Solve a triangular system of the form A * X = B  or A^T * X = B */
 TH_API void THLapack_(trtrs)(char uplo, char trans, char diag, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, int* info);
 /* ||AX-B|| */

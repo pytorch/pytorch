@@ -2464,25 +2464,6 @@
     - THTensor* tensor2
 ]]
 [[
-  name: _th_gesv_single
-  cname: gesv
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-    - CUDA
-  variants: function
-  return: argument 0,1
-  arguments:
-    - arg: THTensor* solution
-      output: True
-    - arg: THTensor* lu
-      output: True
-    - THTensor* self
-    - THTensor* A
-]]
-[[
   name: _th_gels
   cname: gels
   types:

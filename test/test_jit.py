@@ -2070,6 +2070,22 @@ class TestJit(JitTestCase):
         warns = [str(w.message) for w in warns]
         self.assertEqual(len(warns), 0)
 
+    @unittest.skipIf(sys.platform == "win32", "TODO: need to fix this test case for Windows")
+    def test_torch_load_error(self):
+        class J(torch.jit.ScriptModule):
+            def __init__(self):
+                super(J, self).__init__()
+
+            @torch.jit.script_method
+            def forward(self, input):
+                return input + 100
+
+        j = J()
+        with tempfile.NamedTemporaryFile() as f:
+            j.save(f.name)
+            with self.assertRaisesRegex(RuntimeError, "is a zip"):
+                torch.load(f.name)
+
 
 class TestBatched(TestCase):
     # generate random examples and create an batchtensor with them

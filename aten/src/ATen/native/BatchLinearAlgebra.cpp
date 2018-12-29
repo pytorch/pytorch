@@ -118,36 +118,45 @@ static void apply_gesv(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
 #else
   auto A_data = A.data<scalar_t>();
   auto b_data = b.data<scalar_t>();
-  auto A_mat_stride = matrixStride(A);
-  auto b_mat_stride = matrixStride(b);
-
-  auto batch_size = batchCount(A);
   auto n = A.size(-2);
   auto nrhs = b.size(-1);
 
   auto ipiv = at::empty({n}, b.type().toScalarType(kInt));
 
   int info;
-  for (int64_t i = 0; i < batch_size; i++) {
-    scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
-    scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
-    lapackGesv<scalar_t>(n, nrhs, A_working_ptr, n, ipiv.data<int>(), b_working_ptr, n, &info);
-    infos[i] = info;
-    if (info != 0) {
-      return;
+  if (b.dim() == 2) {
+    lapackGesv<scalar_t>(n, nrhs, A_data, n, ipiv.data<int>(), b_data, n, &info);
+    infos[0] = info;
+  } else {
+    auto A_mat_stride = matrixStride(A);
+    auto b_mat_stride = matrixStride(b);
+    auto batch_size = batchCount(A);
+
+    for (int64_t i = 0; i < batch_size; i++) {
+      scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
+      scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
+      lapackGesv<scalar_t>(n, nrhs, A_working_ptr, n, ipiv.data<int>(), b_working_ptr, n, &info);
+      infos[i] = info;
+      if (info != 0) {
+        return;
+      }
     }
   }
 #endif
 }
 
 std::tuple<Tensor, Tensor> _gesv_helper_cpu(const Tensor& self, const Tensor& A) {
-  std::vector<int64_t> infos(batchCount(self), 0);
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
+  std::vector<int64_t> infos(batchCount(self), 0);
   AT_DISPATCH_FLOATING_TYPES(self.type(), "gesv", [&]{
     apply_gesv<scalar_t>(self_working_copy, A_working_copy, infos);
   });
-  batchCheckErrors(infos, "gesv");
+  if (self.dim() > 2) {
+    batchCheckErrors(infos, "gesv");
+  } else {
+    singleCheckErrors(infos[0], "gesv");
+  }
   return std::tuple<Tensor, Tensor>(self_working_copy, A_working_copy);
 }
 
@@ -157,14 +166,6 @@ std::tuple<Tensor,Tensor> gesv(const Tensor& self, const Tensor& A) {
            "b should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   AT_CHECK(A.dim() >= 2,
            "A should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
-  if (self.dim() == 2 && A.dim() == 2) {
-    // TODO: #7102: It's not necessary to have gesv (single) bindings for both
-    // TH and ATen. We should remove the TH gesv bindings, especially
-    // since the lapackGesv function is already in ATen.
-    linearSolveCheckInputs(self, A);  // Checks square shape of A, and compatibility of self and A
-    return at::legacy::th::_th_gesv_single(self, A);
-  }
-
   Tensor self_broadcasted, A_broadcasted;
   std::tie(self_broadcasted, A_broadcasted) = _linear_solve_broadcast_args(self, A);
   return at::_gesv_helper(self_broadcasted, A_broadcasted);
@@ -174,7 +175,8 @@ std::tuple<Tensor&,Tensor&> gesv_out(Tensor& solution, Tensor& lu, const Tensor&
   AT_CHECK(self.dim() == 2 && A.dim() == 2, 
            "torch.gesv() with the `out` keyword does not support batching. "
            "b.dim() (", self.dim(), ") and A.dim() (", A.dim(), ") must both be 2.");
-  return at::legacy::th::_th_gesv_single_out(solution, lu, self, A);
+  std::tie(solution, lu) = at::_gesv_helper(self, A);
+  return std::tuple<Tensor&, Tensor&>(solution, lu);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

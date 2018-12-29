@@ -106,43 +106,6 @@ static THTensor *THTensor_(cloneColumnMajor)(THTensor *self, THTensor *src)
   return THTensor_(cloneColumnMajorNrows)(self, src, src->size(0));
 }
 
-void THTensor_(gesv)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
-{
-  int free_b = 0;
-  if (a == NULL) a = ra_;
-  if (b == NULL) b = rb_;
-
-  int n, nrhs, lda, ldb, info;
-  THIntTensor *ipiv;
-  THTensor *ra__;  // working version of A matrix to be passed into lapack GELS
-  THTensor *rb__;  // working version of B matrix to be passed into lapack GELS
-
-  ra__ = THTensor_(cloneColumnMajor)(ra_, a);
-  rb__ = THTensor_(cloneColumnMajor)(rb_, b);
-
-  n    = (int)ra__->size(0);
-  nrhs = (int)rb__->size(1);
-  lda  = n;
-  ldb  = n;
-
-  ipiv = THIntTensor_newWithSize1d((int64_t)n);
-  THLapack_(gesv)(n, nrhs,
-		  ra__->data<scalar_t>(), lda, THIntTensor_data(ipiv),
-		  rb__->data<scalar_t>(), ldb, &info);
-
-  THLapackCheckWithCleanup("Lapack Error in %s : U(%d,%d) is zero, singular U.",
-                           THCleanup(
-                               c10::raw::intrusive_ptr::decref(ra__);
-                               c10::raw::intrusive_ptr::decref(rb__);
-                               THIntTensor_free(ipiv);
-                               if (free_b) c10::raw::intrusive_ptr::decref(b);),
-                           "gesv", info, info);
-
-  THTensor_(freeCopyTo)(ra__, ra_);
-  THTensor_(freeCopyTo)(rb__, rb_);
-  THIntTensor_free(ipiv);
-}
-
 void THTensor_(trtrs)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a,
                       const char *uplo, const char *trans, const char *diag)
 {

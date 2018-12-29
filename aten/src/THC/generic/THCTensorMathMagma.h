@@ -5,7 +5,6 @@
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
 
 // MAGMA (i.e. CUDA implementation of LAPACK functions)
-THC_API void THCTensor_(gesv)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor *b_, THCTensor *a_);
 THC_API void THCTensor_(trtrs)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor *b_, THCTensor *a_,
                                const char *uplo, const char *trans, const char *diag);
 THC_API void THCTensor_(gels)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor *b_, THCTensor *a_);
