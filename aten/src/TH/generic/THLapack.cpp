@@ -3,8 +3,6 @@
 #else
 
 
-TH_EXTERNC void dgesv_(int *n, int *nrhs, double *a, int *lda, int *ipiv, double *b, int *ldb, int *info);
-TH_EXTERNC void sgesv_(int *n, int *nrhs, float *a, int *lda, int *ipiv, float *b, int *ldb, int *info);
 TH_EXTERNC void dtrtrs_(char *uplo, char *trans, char *diag, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb, int *info);
 TH_EXTERNC void strtrs_(char *uplo, char *trans, char *diag, int *n, int *nrhs, float *a, int *lda, float *b, int *ldb, int *info);
 TH_EXTERNC void dgels_(char *trans, int *m, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb, double *work, int *lwork, int *info);
@@ -36,21 +34,6 @@ TH_EXTERNC void dormqr_(char *side, char *trans, int *m, int *n, int *k, double 
 TH_EXTERNC void spstrf_(char *uplo, int *n, float *a, int *lda, int *piv, int *rank, float *tol, float *work, int *info);
 TH_EXTERNC void dpstrf_(char *uplo, int *n, double *a, int *lda, int *piv, int *rank, double *tol, double *work, int *info);
 
-
-/* Compute the solution to a real system of linear equations  A * X = B */
-void THLapack_(gesv)(int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int* info)
-{
-#ifdef USE_LAPACK
-#if defined(TH_REAL_IS_DOUBLE)
-  dgesv_(&n, &nrhs, a, &lda, ipiv, b, &ldb, info);
-#else
-  sgesv_(&n, &nrhs, a, &lda, ipiv, b, &ldb, info);
-#endif
-#else
-  THError("gesv : Lapack library not found in compile time\n");
-#endif
-  return;
-}
 
 /* Solve a triangular system of the form A * X = B  or A^T * X = B */
 void THLapack_(trtrs)(char uplo, char trans, char diag, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, int* info)
