@@ -49,7 +49,7 @@ def default_collate(batch):
             if np_str_obj_array_pattern.search(elem.dtype.str) is not None:
                 raise TypeError(error_msg_fmt.format(elem.dtype))
 
-            return torch.stack([torch.from_numpy(b) for b in batch], 0)
+            return default_collate([torch.from_numpy(b) for b in batch])
         if elem.shape == ():  # scalars
             py_type = float if elem.dtype.name.startswith('float') else int
             return numpy_type_map[elem.dtype.name](list(map(py_type, batch)))
