@@ -82,6 +82,9 @@ class CountingIterableDataset(IterableDataset):
     def __iter__(self):
         return iter(range(self.n))
 
+    def __len__(self):
+        return self.n
+
 
 class TestTensorDataset(TestCase):
 
