@@ -9,9 +9,12 @@ from torch import randperm
 class Dataset(object):
     r"""An abstract class representing a :class:`Dataset`.
 
-    All other datasets should subclass it. All subclasses should override
-    ``__len__``, that provides the size of the dataset, and ``__getitem__``,
-    supporting integer indexing in range from 0 to len(self) exclusive.
+    All datasets that represent a map from keys to data samples should subclass
+    it. All subclasses should overrite ``__getitem__``, supporting fetching a
+    data sample for a given key. Subclasses could also optionally overwrite
+    ``__len__``, which is expected to return the size of the dataset for many
+    :class:`~torch.data.utils.Sampler` implementations and the default options
+    of :class:`~torch.data.utils.DataLoader`.
     """
 
     def __getitem__(self, index):
@@ -27,15 +30,21 @@ class Dataset(object):
 class IterableDataset(Dataset):
     r"""An iterable Dataset.
 
-    All other datasets should subclass it. All subclasses should override
-    ``__len__``, that provides the size of the dataset, and ``__getitem__``,
-    supporting integer indexing in range from 0 to len(self) exclusive.
+    All datasets that represent an iterable of data samples should subclass it.
+    Such form of datasets is particularly useful when data come from a stream.
+
+    All subclasses should overrite ``__iter__``, which would return an iterator
+    of samples in this dataset.
+
+    When a subclass is used with :class:`~torch.data.utils.DataLoader`, each
+    item in the dataset will be yielded from the :class:`~torch.data.utils.DataLoader`
+    iterator. When ``num_workers > 0``, each worker process will have a
+    different copy of the dataset object. :func:`~torch.data.utils.get_worker_info`
+    and the :class:`~torch.data.utils.DataLoader` 's ``worker_init_fn`` option
+    can be used to config each copy independently.
     """
 
     def __iter__(self):
-        raise NotImplementedError
-
-    def __len__(self):
         raise NotImplementedError
 
     def __add__(self, other):
@@ -86,6 +95,8 @@ class ConcatDataset(Dataset):
         super(ConcatDataset, self).__init__()
         assert len(datasets) > 0, 'datasets should not be an empty iterable'
         self.datasets = list(datasets)
+        for d in self.datasets:
+            assert not isinstance(d, IterableDataset), "ConcatDataset does not support IterableDataset"
         self.cumulative_sizes = self.cumsum(self.datasets)
 
     def __len__(self):

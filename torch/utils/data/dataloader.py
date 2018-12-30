@@ -213,11 +213,11 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
 
     def __next__(self):
         if self.mode == DataLoaderMode.Iterable:
-            data = next(self.dataset_iter)  # may raise StopIteration
+            data = self.convert_fn(next(self.dataset_iter))  # may raise StopIteration
         else:
             index = self._next_index()  # may raise StopIteration
             if self.mode == DataLoaderMode.Map:
-                data = self.dataset[index]
+                data = self.convert_fn(self.dataset[index])
             else:
                 # mode == DataLoaderMode.MapWithBatchedRead:
                 data = self.collate_fn([self.convert_fn(self.dataset[i]) for i in index])

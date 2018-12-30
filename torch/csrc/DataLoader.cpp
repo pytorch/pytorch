@@ -103,7 +103,7 @@ static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module) {
   int error;
   std::set<pid_t> *pid_set;
   pid_t worker_pid;
-  siginfo_t infop;
+  siginfo_t infop {};
 
   // Only check the pids we care about
   for (auto& w : worker_pids) {

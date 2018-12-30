@@ -74,6 +74,15 @@ class TestDatasetRandomSplit(TestCase):
         self.assertListEqual(data, all_values)
 
 
+class CountingIterableDataset(IterableDataset):
+    def __init__(self, n):
+        super(CountingIterableDataset, self).__init__()
+        self.n = n
+
+    def __iter__(self):
+        return iter(range(self.n))
+
+
 class TestTensorDataset(TestCase):
 
     def test_len(self):
@@ -157,6 +166,20 @@ class TestConcatDataset(TestCase):
         self.assertEqual(0, (d1[0][0] - result[0][0]).abs().sum())
         self.assertEqual(0, (d2[0][0] - result[7][0]).abs().sum())
         self.assertEqual(0, (d3[0][0] - result[14][0]).abs().sum())
+
+    def test_iterable_dataset_err(self):
+        d1 = TensorDataset(torch.rand(7, 3, 28, 28), torch.rand(7))
+        it1 = CountingIterableDataset(5)
+        it2 = CountingIterableDataset(10)
+
+        with self.assertRaisesRegex(AssertionError, "does not support IterableDataset"):
+            ConcatDataset([d1, it2, it1])
+
+        with self.assertRaisesRegex(AssertionError, "does not support IterableDataset"):
+            ConcatDataset([it2])
+
+        with self.assertRaisesRegex(AssertionError, "does not support IterableDataset"):
+            ConcatDataset([it1, d1])
 
 
 # Stores the first encountered exception in .exception.
@@ -608,6 +631,21 @@ class TestDataLoader(TestCase):
                 p.terminate()
 
     def test_iterable_dataset(self):
+        # single process loading
+        dataset = CountingIterableDataset(20)
+        for i, d in enumerate(DataLoader(dataset)):
+            self.assertIsInstance(d, torch.Tensor)
+            self.assertEqual(d, i)
+
+        # concatenation
+        dataset1 = CountingIterableDataset(20)
+        dataset2 = CountingIterableDataset(15)
+        expected = list(range(20)) + list(range(15))
+        for i, d in zip(expected, DataLoader(dataset,)):
+            self.assertIsInstance(d, torch.Tensor)
+            self.assertEqual(d, i)
+
+        # multiprocessing loading
         num_workers = 3
         sizes_for_all_workers = [0, 4, 20]
         expected = set(sum((list(range(s)) for s in sizes_for_all_workers), []))
