@@ -10398,7 +10398,7 @@ class TestFuser(JitTestCase):
 
             out_noopt = model_noopt(x, y)
             rep_noopt = str(model_noopt.graph_for(x, y))
-            self.assertEqual(out, out_noopt)
+            self.assertEqual(out, out_noopt, prec=3e-5)
 
         # Check that batch_norm has really been decomposed
         self.assertIn('aten::batch_norm_update_stats', rep)
