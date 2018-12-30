@@ -38,6 +38,11 @@ _use_shared_memory = False
 r"""Whether to use shared memory in default_collate"""
 
 
+default_collate_err_msg_format = (
+    "default_collate: batch must contain tensors, numpy arrays, numbers, "
+    "dicts or lists; found {}")
+
+
 def default_collate(batch):
     r"""Puts each data field into a tensor with outer dimension batch size"""
 
@@ -71,7 +76,7 @@ def default_collate(batch):
         if elem_type.__name__ == 'ndarray':
             # array of string classes and object
             if np_str_obj_array_pattern.search(elem.dtype.str) is not None:
-                raise TypeError(error_msg_fmt.format(elem.dtype))
+                raise TypeError(default_collate_err_msg_format.format(elem.dtype))
 
             return default_collate([torch.from_numpy(b) for b in batch])
         if elem.shape == ():  # scalars
@@ -89,4 +94,4 @@ def default_collate(batch):
         transposed = zip(*batch)
         return [default_collate(samples) for samples in transposed]
 
-    raise TypeError("default_collate: batch must contain tensors, numbers, dicts or lists; found {}".format(elem_type))
+    raise TypeError(default_collate_err_msg_format.format(elem_type))
