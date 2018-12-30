@@ -1597,6 +1597,24 @@ class _TestTorchMixin(object):
     def test_btrisolve(self):
         self._test_btrisolve(self, lambda t: t)
 
+    @staticmethod
+    def _test_btriunpack(self, cast):
+        def run_test(shape, cast):
+            a = cast(torch.randn(*shape))
+            a_lu, p = torch.btrifact(a.reshape(-1, shape[-1], shape[-1]))
+            a_lu = a_lu.reshape_as(a)
+            p = p.reshape(a.shape[:-1])
+            p_ref, l_ref, u_ref = torch.btriunpack(a_lu, p)
+            self.assertEqual(p_ref.matmul(l_ref.matmul(u_ref)), a)
+
+        run_test((5, 3, 3), cast)
+        run_test((7, 3, 5, 5), cast)
+        run_test((7, 5, 3, 3, 3), cast)
+
+    @skipIfNoLapack
+    def test_btriunpack(self):
+        self._test_btriunpack(self, lambda t: t)
+
     def test_bmm(self):
         num_batches = 10
         M, N, O = 23, 8, 12
