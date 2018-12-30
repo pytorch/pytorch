@@ -846,7 +846,7 @@ Tensor allocate_output(at::IntList sizes, Layout layout, const TensorOptions& op
       auto output = at::empty(ArrayRef<int64_t>(transposed_sizes).slice(0, sizes.size()), options);
 
       // Permute the dimensions to fix sizes to NCF
-      return output.permute(LayoutPermutation{Layout::NFC, Layout::NCF, sizes.size()});
+      return output.permute(LayoutPermutation{Layout::NFC, Layout::NCF, static_cast<int64_t>(sizes.size())});
     }
   }
   AT_ASSERTM(false, "Unhandled layout in allocate_output");
