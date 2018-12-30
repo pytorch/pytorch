@@ -3,6 +3,7 @@ import torch.nn.functional as F
 from torch._six import inf
 from operator import mul
 from functools import reduce
+from itertools import product
 import math
 import warnings
 
@@ -143,7 +144,7 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
         >>> A_ = torch.bmm(P, torch.bmm(A_L, A_U))
     """
 
-    nBatch, sz, _ = LU_data.size()
+    sz = LU_data.size(-1)
 
     if unpack_data:
         U = LU_data.triu()
@@ -153,13 +154,13 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
         L = U = None
 
     if unpack_pivots:
-        P = torch.eye(sz).type_as(LU_data).unsqueeze(0).repeat(nBatch, 1, 1)
-        for i in range(nBatch):
-            for j in range(sz):
-                k = int(LU_pivots[i, j] - 1)
-                t = P[i, :, j].clone()
-                P[i, :, j] = P[i, :, k]
-                P[i, :, k] = t
+        P = torch.eye(sz, device=LU_data.device, dtype=LU_data.dtype).expand_as(LU_data).clone()
+        LU_pivots = LU_pivots - 1
+        for idx in product(*map(lambda x: list(range(x)), LU_data.shape[:-2])):
+            final_order = list(range(sz))
+            for k, j in enumerate(LU_pivots[idx]):
+                final_order[k], final_order[j] = final_order[j], final_order[k]
+            P[idx] = P[idx].index_select(1, torch.as_tensor(final_order, device=LU_pivots.device))
     else:
         P = None
 
