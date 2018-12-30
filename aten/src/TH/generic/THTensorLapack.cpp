@@ -600,30 +600,6 @@ void THTensor_(copyUpLoTriangle)(THTensor *a, const char *uplo)
   }
 }
 
-void THTensor_(potrf)(THTensor *ra_, THTensor *a, const char *uplo)
-{
-  if (a == NULL) a = ra_;
-  THArgCheck(THTensor_nDimensionLegacyAll(a) == 2, 1, "A should be 2 dimensional");
-  THArgCheck(a->size(0) == a->size(1), 1, "A should be square");
-
-  int n, lda, info;
-  THTensor *ra__ = NULL;
-
-  ra__ = THTensor_(cloneColumnMajor)(ra_, a);
-
-  n = ra__->size(0);
-  lda = n;
-
-  /* Run Factorization */
-  THLapack_(potrf)(uplo[0], n, ra__->data<scalar_t>(), lda, &info);
-  THLapackCheckWithCleanup("Lapack Error in %s : the leading minor of order %d is not positive definite",
-                           THCleanup(c10::raw::intrusive_ptr::decref(ra__);),
-                           "potrf", info, "");
-
-  THTensor_(clearUpLoTriangle)(ra__, uplo);
-  THTensor_(freeCopyTo)(ra__, ra_);
-}
-
 void THTensor_(potrs)(THTensor *rb_, THTensor *b, THTensor *a, const char *uplo)
 {
   int free_b = 0;
