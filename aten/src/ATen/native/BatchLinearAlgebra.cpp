@@ -322,18 +322,22 @@ static void apply_cholesky(Tensor& self, bool upper, std::vector<int64_t>& infos
   char uplo = upper ? 'U' : 'L';
 
   auto self_data = self.data<scalar_t>();
-  auto self_matrix_stride = matrixStride(self);
-
-  auto batch_size = batchCount(self);
   auto n = self.size(-2);
 
   int info;
-  for (int64_t i = 0; i < batch_size; i++) {
-    scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
-    lapackCholesky<scalar_t>(uplo, n, self_working_ptr, n, &info);
-    infos[i] = info;
-    if (info != 0) {
-      return;
+  if (self.dim() == 2) {
+    lapackCholesky<scalar_t>(uplo, n, self_data, n, &info);
+    infos[0] = info;
+  } else {
+    auto self_matrix_stride = matrixStride(self);
+    auto batch_size = batchCount(self);
+    for (int64_t i = 0; i < batch_size; i++) {
+      scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
+      lapackCholesky<scalar_t>(uplo, n, self_working_ptr, n, &info);
+      infos[i] = info;
+      if (info != 0) {
+        return;
+      }
     }
   }
 #endif
@@ -345,16 +349,17 @@ Tensor _cholesky_helper_cpu(const Tensor& self, bool upper) {
   AT_DISPATCH_FLOATING_TYPES(self.type(), "cholesky", [&]{
     apply_cholesky<scalar_t>(self_working_copy, upper, infos);
   });
-  batchCheckErrors(infos, "cholesky");
+  if (self.dim() > 2) {
+    batchCheckErrors(infos, "cholesky");
+  } else {
+    singleCheckErrors(infos[0], "cholesky");
+  }
   return self_working_copy;
 }
 
 Tensor cholesky(const Tensor &self, bool upper) {
   if (self.size(-1) == 0) {
     return at::empty_like(self);
-  }
-  if (self.dim() == 2) {
-    return at::legacy::th::_th_potrf_single(self, upper);
   }
   squareCheckInputs(self);
 

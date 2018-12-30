@@ -19,8 +19,6 @@ TH_API void THLapack_(getrs)(char trans, int n, int nrhs, scalar_t *a, int lda, 
 TH_API void THLapack_(getri)(int n, scalar_t *a, int lda, int *ipiv, scalar_t *work, int lwork, int* info);
 
 /* Positive Definite matrices */
-/* Cholesky factorization */
-TH_API void THLapack_(potrf)(char uplo, int n, scalar_t *a, int lda, int *info);
 /* Matrix inverse based on Cholesky factorization */
 TH_API void THLapack_(potri)(char uplo, int n, scalar_t *a, int lda, int *info);
 /* Solve A*X = B with a symmetric positive definite matrix A using the Cholesky factorization */

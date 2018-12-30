@@ -10,7 +10,6 @@ TH_API void THTensor_(gesdd)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTens
 TH_API void THTensor_(gesdd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra_, THTensor *a,
                               const char *some, const char* compute_uv);
 TH_API void THTensor_(getri)(THTensor *ra_, THTensor *a);
-TH_API void THTensor_(potrf)(THTensor *ra_, THTensor *a, const char *uplo);
 TH_API void THTensor_(potrs)(THTensor *rb_, THTensor *b_, THTensor *a_,  const char *uplo);
 TH_API void THTensor_(potri)(THTensor *ra_, THTensor *a, const char *uplo);
 TH_API void THTensor_(qr)(THTensor *rq_, THTensor *rr_, THTensor *a);

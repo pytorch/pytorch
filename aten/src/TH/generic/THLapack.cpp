@@ -19,8 +19,6 @@ TH_EXTERNC void dgetrs_(char *trans, int *n, int *nrhs, double *a, int *lda, int
 TH_EXTERNC void sgetrs_(char *trans, int *n, int *nrhs, float *a, int *lda, int *ipiv, float *b, int *ldb, int *info);
 TH_EXTERNC void dgetri_(int *n, double *a, int *lda, int *ipiv, double *work, int *lwork, int *info);
 TH_EXTERNC void sgetri_(int *n, float *a, int *lda, int *ipiv, float *work, int *lwork, int *info);
-TH_EXTERNC void dpotrf_(char *uplo, int *n, double *a, int *lda, int *info);
-TH_EXTERNC void spotrf_(char *uplo, int *n, float *a, int *lda, int *info);
 TH_EXTERNC void dpotri_(char *uplo, int *n, double *a, int *lda, int *info);
 TH_EXTERNC void spotri_(char *uplo, int *n, float *a, int *lda, int *info);
 TH_EXTERNC void dpotrs_(char *uplo, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb, int *info);
@@ -148,20 +146,6 @@ void THLapack_(getri)(int n, scalar_t *a, int lda, int *ipiv, scalar_t *work, in
 #endif
 #else
   THError("getri : Lapack library not found in compile time\n");
-#endif
-}
-
-/* Cholesky factorization */
-void THLapack_(potrf)(char uplo, int n, scalar_t *a, int lda, int *info)
-{
-#ifdef  USE_LAPACK
-#if defined(TH_REAL_IS_DOUBLE)
-  dpotrf_(&uplo, &n, a, &lda, info);
-#else
-  spotrf_(&uplo, &n, a, &lda, info);
-#endif
-#else
-  THError("potrf : Lapack library not found in compile time\n");
 #endif
 }
 

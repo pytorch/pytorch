@@ -539,42 +539,6 @@ void THCTensor_(potri)(THCState *state, THCTensor *ra_, THCTensor *a, const char
 #endif
 }
 
-void THCTensor_(potrf)(THCState *state, THCTensor *ra_, THCTensor *a, const char *uplo)
-{
-#ifdef USE_MAGMA
-  THArgCheck(!a->is_empty() && a->dim() == 2, 2, "A should be (non-empty) 2 dimensional");
-  THArgCheck(a->size(0) == a->size(1), 2, "A should be square");
-
-  int64_t n = a->size(0);
-  magma_uplo_t ul = uplo[0] == 'U' ?  MagmaUpper : MagmaLower;
-
-  THCTensor *input = THCTensor_(newColumnMajor)(state, ra_, a);
-  scalar_t *input_data = THCTensor_(data)(state, input);
-
-  int info;
-#if defined(THC_REAL_IS_FLOAT)
-  magma_spotrf_gpu(ul, n, input_data, n, &info);
-#else
-  magma_dpotrf_gpu(ul, n, input_data, n, &info);
-#endif
-
-  // check error value
-  if (info > 0)
-    THError("MAGMA potrf : A(%d,%d) is 0, A cannot be factorized", info, info);
-  else if (info < 0)
-    THError("MAGMA potrf : Argument %d : illegal value", -info);
-
-  if (uplo[0] == 'U') {
-    THCTensor_(triu)(state, ra_, input, 0);
-  } else {
-    THCTensor_(tril)(state, ra_, input, 0);
-  }
-  THCTensor_(free)(state, input);
-#else
-  THError(NoMagma(potrf));
-#endif
-}
-
 void THCTensor_(potrs)(THCState *state, THCTensor *rb_, THCTensor *b, THCTensor *a, const char *uplo)
 {
 #ifdef USE_MAGMA
