@@ -24,10 +24,10 @@ get_worker_info = _utils.worker.get_worker_info
 default_collate = _utils.collate.default_collate
 
 
-class DataLoaderMode(object):
-    Map = "map_dataset"
-    MapWithBatchedRead = "map_dataset_with_batched_read"
-    Iterable = "iterable_dataset"
+class _DataLoaderMode(object):
+    Map = 0
+    MapWithBatchedRead = 1
+    Iterable = 2
 
 
 class DataLoader(object):
@@ -93,15 +93,15 @@ class DataLoader(object):
         self.collate_fn = collate_fn
         if isinstance(dataset, IterableDataset):
             # FIXME: check default for some args
-            self.mode = DataLoaderMode.Iterable
-            self.index_sampler = None
+            self.mode = _DataLoaderMode.Iterable
+            self.sampler = None
         elif sampler is not None and batch_size is None:
             # FIXME: check default for some args
-            self.mode = DataLoaderMode.Map
-            self.index_sampler = sampler
+            self.mode = _DataLoaderMode.Map
+            self.sampler = sampler
         else:
             # FIXME: check default for some args
-            self.mode = DataLoaderMode.MapWithBatchedRead
+            self.mode = _DataLoaderMode.MapWithBatchedRead
 
             self.batch_size = batch_size
             self.drop_last = drop_last
@@ -133,7 +133,7 @@ class DataLoader(object):
                         sampler = SequentialSampler(dataset)
                 batch_sampler = BatchSampler(sampler, batch_size, drop_last)
 
-            self.index_sampler = batch_sampler
+            self.sampler = batch_sampler
         self.__initialized = True
 
     def __setattr__(self, attr, val):
@@ -150,28 +150,28 @@ class DataLoader(object):
             return _MultiProcessingDataLoaderIter(self)
 
     def __len__(self):
-        if self.mode == DataLoaderMode.Iterable:
-            raise NotImplementedError
-        return len(self.index_sampler)
+        if self.mode == _DataLoaderMode.Iterable:
+            raise len(self.dataset)
+        return len(self.sampler)
 
 
 class _BaseDataLoaderIter(object):
     def __init__(self, loader):
         self.dataset = loader.dataset
         self.mode = loader.mode
-        self.index_sampler = loader.index_sampler
+        self.sampler = loader.sampler
         self.num_workers = loader.num_workers
         self.pin_memory = loader.pin_memory and torch.cuda.is_available()
         self.timeout = loader.timeout
         self.convert_fn = loader.convert_fn
         self.collate_fn = loader.collate_fn
 
-        if self.mode == DataLoaderMode.Iterable:
-            self.index_sampler_iter = None
+        if self.mode == _DataLoaderMode.Iterable:
+            self.sampler_iter = None
         else:
-            self.index_sampler_iter = iter(self.index_sampler)
+            self.sampler_iter = iter(self.sampler)
 
-        if self.mode == DataLoaderMode.Iterable and self.num_workers == 0:
+        if self.mode == _DataLoaderMode.Iterable and self.num_workers == 0:
             self.dataset_iter = iter(self.dataset)
         else:
             self.dataset_iter = None
@@ -182,19 +182,19 @@ class _BaseDataLoaderIter(object):
         return self
 
     def _next_index(self):
-        if self.mode == DataLoaderMode.Iterable:
+        if self.mode == _DataLoaderMode.Iterable:
             return None
         else:
-            return next(self.index_sampler_iter)  # may raise StopIteration
+            return next(self.sampler_iter)  # may raise StopIteration
 
     def __next__(self):
         raise NotImplementedError
 
     def __len__(self):
-        if self.mode == DataLoaderMode.Iterable:
-            raise NotImplementedError
+        if self.mode == _DataLoaderMode.Iterable:
+            raise len(self.dataset)
         else:
-            return len(self.index_sampler)
+            return len(self.sampler)
 
     def __getstate__(self):
         # TODO: add limited pickling support for sharing an iterator
@@ -212,14 +212,14 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
         assert self.num_workers == 0
 
     def __next__(self):
-        if self.mode == DataLoaderMode.Iterable:
+        if self.mode == _DataLoaderMode.Iterable:
             data = self.convert_fn(next(self.dataset_iter))  # may raise StopIteration
         else:
             index = self._next_index()  # may raise StopIteration
-            if self.mode == DataLoaderMode.Map:
+            if self.mode == _DataLoaderMode.Map:
                 data = self.convert_fn(self.dataset[index])
             else:
-                # mode == DataLoaderMode.MapWithBatchedRead:
+                # mode == _DataLoaderMode.MapWithBatchedRead:
                 data = self.collate_fn([self.convert_fn(self.dataset[i]) for i in index])
         if self.pin_memory:
             data = _utils.pin_memory.pin_memory_data(data)
@@ -628,7 +628,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             idx, data = self.get_data()
             self.tasks_outstanding -= 1
 
-            if self.mode == DataLoaderMode.Iterable:
+            if self.mode == _DataLoaderMode.Iterable:
                 # Check for IterableDatasetStopIteration
                 if isinstance(data, _utils.worker.IterableDatasetStopIteration):
                     worker_id = data.worker_id
