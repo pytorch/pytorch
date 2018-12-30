@@ -1826,6 +1826,10 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_btrisolve(self, lambda t: t.cuda())
 
     @skipIfRocm
+    def test_btriunpack(self):
+        _TestTorchMixin._test_btriunpack(self, lambda t: t.cuda())
+
+    @skipIfRocm
     def test_dim_reduction(self):
         _TestTorchMixin._test_dim_reduction(self, lambda t: t.cuda())
 
