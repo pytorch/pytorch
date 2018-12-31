@@ -1673,7 +1673,7 @@ class _TestTorchMixin(object):
 
     @staticmethod
     def _test_clamp(self, device='cpu'):
-        m1 = torch.rand(100, device = device).mul(5).add(-2.5)  # uniform in [-2.5, 2.5]
+        m1 = torch.rand(100, device=device).mul(5).add(-2.5)  # uniform in [-2.5, 2.5]
         # just in case we're extremely lucky.
         min_val = -1
         max_val = 1
