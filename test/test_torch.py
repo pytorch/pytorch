@@ -1710,9 +1710,7 @@ class _TestTorchMixin(object):
         self.assertEqual(out, res1)
 
         # if the tensor contains nan case
-        test_tens = torch.FloatTensor([float('nan')])
-        if device == 'cuda':
-            test_tens = test_tens.cuda()
+        test_tens = torch.tensor([nan], device=device)
 
         res1 = test_tens.clone()
         res1.clamp_(min_val, max_val)
