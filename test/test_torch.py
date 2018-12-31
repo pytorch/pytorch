@@ -1671,8 +1671,9 @@ class _TestTorchMixin(object):
         res6 = torch.baddbmm(.1, res2, .5, b1, b2)
         self.assertEqual(res6, res2 * .1 + res * .5)
 
-    def test_clamp(self):
-        m1 = torch.rand(100).mul(5).add(-2.5)  # uniform in [-2.5, 2.5]
+    @staticmethod
+    def _test_clamp(self, device='cpu'):
+        m1 = torch.rand(100, device = device).mul(5).add(-2.5)  # uniform in [-2.5, 2.5]
         # just in case we're extremely lucky.
         min_val = -1
         max_val = 1
@@ -1710,6 +1711,8 @@ class _TestTorchMixin(object):
 
         # if the tensor contains nan case
         test_tens = torch.FloatTensor([float('nan')])
+        if device == 'cuda':
+            test_tens = test_tens.cuda()
 
         res1 = test_tens.clone()
         res1.clamp_(min_val, max_val)
@@ -1745,6 +1748,9 @@ class _TestTorchMixin(object):
             m1.clamp()
         with self.assertRaisesRegex(RuntimeError, error_msg):
             m1.clamp_()
+
+    def test_clamp(self):
+        self._test_clamp(self)
 
     def test_pow(self):
         # [res] torch.pow([res,] x)

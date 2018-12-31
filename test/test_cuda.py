@@ -1227,80 +1227,8 @@ class TestCuda(TestCase):
         z = torch.cat([x, y], 0)
         self.assertEqual(z.get_device(), x.get_device())
 
-    def test_clamp_cuda(self):
-        m1 = torch.rand(100).mul(5).add(-2.5).cuda()  # uniform in [-2.5, 2.5]
-        # just in case we're extremely lucky.
-        min_val = -1
-        max_val = 1
-        m1[1] = min_val
-        m1[2] = max_val
-
-        res1 = m1.clone()
-        res1.clamp_(min_val, max_val)
-        res2 = m1.clone()
-        for i in iter_indices(res2):
-            res2[i] = max(min_val, min(max_val, res2[i]))
-        self.assertEqual(res1, res2)
-
-        out = m1.clone()
-        torch.clamp(m1, min=min_val, max=max_val, out=out)
-        self.assertEqual(out, res1)
-
-        res1 = torch.clamp(m1, min=min_val)
-        res2 = m1.clone()
-        for i in iter_indices(res2):
-            res2[i] = max(min_val, res2[i])
-        self.assertEqual(res1, res2)
-
-        torch.clamp(m1, min=min_val, out=out)
-        self.assertEqual(out, res1)
-
-        res1 = torch.clamp(m1, max=max_val)
-        res2 = m1.clone()
-        for i in iter_indices(res2):
-            res2[i] = min(max_val, res2[i])
-        self.assertEqual(res1, res2)
-
-        torch.clamp(m1, max=max_val, out=out)
-        self.assertEqual(out, res1)
-
-        # if the tensor contains nan case
-        test_tens = torch.FloatTensor([float('nan')]).cuda()
-
-        res1 = test_tens.clone()
-        res1.clamp_(min_val, max_val)
-        res2 = test_tens.clone()
-        for i in iter_indices(res2):
-            res2[i] = max(min(res2[i], max_val), min_val)
-        self.assertEqual(torch.isnan(res1), torch.isnan(res2))
-
-        out = test_tens.clone()
-        torch.clamp(test_tens, min=min_val, max=max_val, out=out)
-        self.assertEqual(torch.isnan(out), torch.isnan(res1))
-
-        res1 = torch.clamp(test_tens, min=min_val)
-        res2 = test_tens.clone()
-        for i in iter_indices(res2):
-            res2[i] = max(res2[i], min_val)
-        self.assertEqual(torch.isnan(res1), torch.isnan(res2))
-
-        torch.clamp(test_tens, min=min_val, out=out)
-        self.assertEqual(torch.isnan(out), torch.isnan(res1))
-
-        res1 = torch.clamp(test_tens, max=max_val)
-        res2 = test_tens.clone()
-        for i in iter_indices(res2):
-            res2[i] = min(res2[i], max_val)
-        self.assertEqual(torch.isnan(res1), torch.isnan(res2))
-
-        torch.clamp(test_tens, max=max_val, out=out)
-        self.assertEqual(torch.isnan(out), torch.isnan(res1))
-
-        error_msg = 'At least one of \'min\' or \'max\' must not be None'
-        with self.assertRaisesRegex(RuntimeError, error_msg):
-            m1.clamp()
-        with self.assertRaisesRegex(RuntimeError, error_msg):
-            m1.clamp_()
+    def test_clamp(self):
+        _TestTorchMixin._test_clamp(self, 'cuda')
 
     def test_cat(self):
         SIZE = 10
