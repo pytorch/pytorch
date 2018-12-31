@@ -160,8 +160,8 @@ class PoolWindow
   {
     std::cout << "thread " << std::this_thread::get_id()
               << ", release()" << std::endl;
-    if(my_handles.size() > 0)
-    {
+    // if(my_handles.size() > 0)
+    // {
       std::cout << "thread " << std::this_thread::get_id()
                 << ", release() before mutex" << std::endl;
       std::lock_guard<std::mutex> guard(mutex);
@@ -169,7 +169,7 @@ class PoolWindow
                 << ", release() after mutex" << std::endl;
       for(auto d_h : my_handles)
         available_handles[d_h.first].push_back(d_h.second);
-    }
+    // }
   }
 };
 
