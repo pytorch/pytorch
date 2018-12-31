@@ -95,25 +95,37 @@ struct Vec256<int64_t> : public Vec256i {
     return _mm256_cmpeq_epi64(values, other.values);
   }
   Vec256<int64_t> operator!=(const Vec256<int64_t>& other) const {
-    auto zero = _mm256_set1_epi64x(0);
     auto eq = _mm256_cmpeq_epi64(values, other.values);
-    return _mm256_xor_si256(zero, eq);  // invert
+    // now invert the eq mask to get the ne mask
+    // so, let's xor with ones, >= the result with 0
+    auto one = _mm256_set1_epi64x(1);
+    auto out = _mm256_xor_si256(one, eq);
+    auto zero = _mm256_set1_epi64x(0);
+    return _mm256_cmpgt_epi64(out, zero);
   }
   Vec256<int64_t> operator<(const Vec256<int64_t>& other) const {
     return _mm256_cmpgt_epi64(other.values, values);
   }
   Vec256<int64_t> operator<=(const Vec256<int64_t>& other) const {
-    auto zero = _mm256_set1_epi64x(0);
     auto gt = _mm256_cmpgt_epi64(values, other.values);
-    return _mm256_xor_si256(zero, gt);  // invert
+    // now invert the gt mask to get the le mask
+    // so, let's xor with ones, >= the result with 0
+    auto one = _mm256_set1_epi64x(1);
+    auto out = _mm256_xor_si256(one, gt);
+    auto zero = _mm256_set1_epi64x(0);
+    return _mm256_cmpgt_epi64(out, zero);
   }
   Vec256<int64_t> operator>(const Vec256<int64_t>& other) const {
     return _mm256_cmpgt_epi64(values, other.values);
   }
   Vec256<int64_t> operator>=(const Vec256<int64_t>& other) const {
-    auto zero = _mm256_set1_epi64x(0);
     auto lt = _mm256_cmpgt_epi64(other.values, values);
-    return _mm256_xor_si256(zero, lt);  // invert
+    // now invert the lt mask to get the ge mask
+    // so, let's xor with ones, >= the result with 0
+    auto one = _mm256_set1_epi64x(1);
+    auto out = _mm256_xor_si256(one, lt);
+    auto zero = _mm256_set1_epi64x(0);
+    return _mm256_cmpgt_epi64(out, zero);
   }
 };
 
@@ -190,25 +202,37 @@ struct Vec256<int32_t> : public Vec256i {
     return _mm256_cmpeq_epi32(values, other.values);
   }
   Vec256<int32_t> operator!=(const Vec256<int32_t>& other) const {
-    auto zero = _mm256_set1_epi64x(0);
     auto eq = _mm256_cmpeq_epi32(values, other.values);
-    return _mm256_xor_si256(zero, eq);  // invert
+    // now invert the eq mask to get the ne mask
+    // so, let's xor with ones, >= the result with 0
+    auto one = _mm256_set1_epi64x(1);
+    auto out = _mm256_xor_si256(one, eq);
+    auto zero = _mm256_set1_epi64x(0);
+    return _mm256_cmpgt_epi32(out, zero);
   }
   Vec256<int32_t> operator<(const Vec256<int32_t>& other) const {
     return _mm256_cmpgt_epi32(other.values, values);
   }
   Vec256<int32_t> operator<=(const Vec256<int32_t>& other) const {
-    auto zero = _mm256_set1_epi64x(0);
     auto gt = _mm256_cmpgt_epi32(values, other.values);
-    return _mm256_xor_si256(zero, gt);  // invert
+    // now invert the gt mask to get the le mask
+    // so, let's xor with ones, >= the result with 0
+    auto one = _mm256_set1_epi64x(1);
+    auto out = _mm256_xor_si256(one, gt);
+    auto zero = _mm256_set1_epi64x(0);
+    return _mm256_cmpgt_epi32(out, zero);
   }
   Vec256<int32_t> operator>(const Vec256<int32_t>& other) const {
     return _mm256_cmpgt_epi32(values, other.values);
   }
   Vec256<int32_t> operator>=(const Vec256<int32_t>& other) const {
-    auto zero = _mm256_set1_epi64x(0);
     auto lt = _mm256_cmpgt_epi32(other.values, values);
-    return _mm256_xor_si256(zero, lt);  // invert
+    // now invert the lt mask to get the ge mask
+    // so, let's xor with ones, >= the result with 0
+    auto one = _mm256_set1_epi64x(1);
+    auto out = _mm256_xor_si256(one, lt);
+    auto zero = _mm256_set1_epi64x(0);
+    return _mm256_cmpgt_epi32(out, zero);
   }
 };
 
@@ -216,16 +240,16 @@ template <>
 void convert(const int32_t *src, float *dst, int64_t n) {
   int64_t i;
   // int32_t and float have same size
-#ifndef _MSC_VER  
-# pragma unroll  
+#ifndef _MSC_VER
+# pragma unroll
 #endif
   for (i = 0; i <= (n - Vec256<int32_t>::size()); i += Vec256<int32_t>::size()) {
     auto input_vec = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + i));
     auto output_vec = _mm256_cvtepi32_ps(input_vec);
     _mm256_storeu_ps(reinterpret_cast<float*>(dst + i), output_vec);
   }
-#ifndef _MSC_VER  
-# pragma unroll  
+#ifndef _MSC_VER
+# pragma unroll
 #endif
   for (; i < n; i++) {
     dst[i] = static_cast<float>(src[i]);
@@ -236,16 +260,16 @@ template <>
 void convert(const int32_t *src, double *dst, int64_t n) {
   int64_t i;
   // int32_t has half the size of double
-#ifndef _MSC_VER  
-# pragma unroll  
+#ifndef _MSC_VER
+# pragma unroll
 #endif
   for (i = 0; i <= (n - Vec256<double>::size()); i += Vec256<double>::size()) {
     auto input_128_vec = _mm_loadu_si128(reinterpret_cast<const __m128i*>(src + i));
     auto output_vec = _mm256_cvtepi32_pd(input_128_vec);
     _mm256_storeu_pd(reinterpret_cast<double*>(dst + i), output_vec);
   }
-#ifndef _MSC_VER  
-# pragma unroll  
+#ifndef _MSC_VER
+# pragma unroll
 #endif
   for (; i < n; i++) {
     dst[i] = static_cast<double>(src[i]);
@@ -380,25 +404,37 @@ struct Vec256<int16_t> : public Vec256i {
     return _mm256_cmpeq_epi16(values, other.values);
   }
   Vec256<int16_t> operator!=(const Vec256<int16_t>& other) const {
-    auto zero = _mm256_set1_epi64x(0);
     auto eq = _mm256_cmpeq_epi16(values, other.values);
-    return _mm256_xor_si256(zero, eq);  // invert
+    // now invert the eq mask to get the ne mask
+    // so, let's xor with ones, >= the result with 0
+    auto one = _mm256_set1_epi64x(1);
+    auto out = _mm256_xor_si256(one, eq);
+    auto zero = _mm256_set1_epi64x(0);
+    return _mm256_cmpgt_epi16(out, zero);
   }
   Vec256<int16_t> operator<(const Vec256<int16_t>& other) const {
     return _mm256_cmpgt_epi16(other.values, values);
   }
   Vec256<int16_t> operator<=(const Vec256<int16_t>& other) const {
-    auto zero = _mm256_set1_epi64x(0);
     auto gt = _mm256_cmpgt_epi16(values, other.values);
-    return _mm256_xor_si256(zero, gt);  // invert
+    // now invert the gt mask to get the le mask
+    // so, let's xor with ones, >= the result with 0
+    auto one = _mm256_set1_epi64x(1);
+    auto out = _mm256_xor_si256(one, gt);
+    auto zero = _mm256_set1_epi64x(0);
+    return _mm256_cmpgt_epi16(out, zero);
   }
   Vec256<int16_t> operator>(const Vec256<int16_t>& other) const {
     return _mm256_cmpgt_epi16(values, other.values);
   }
   Vec256<int16_t> operator>=(const Vec256<int16_t>& other) const {
-    auto zero = _mm256_set1_epi64x(0);
     auto lt = _mm256_cmpgt_epi16(other.values, values);
-    return _mm256_xor_si256(zero, lt);  // invert
+    // now invert the lt mask to get the ge mask
+    // so, let's xor with ones, >= the result with 0
+    auto one = _mm256_set1_epi64x(1);
+    auto out = _mm256_xor_si256(one, lt);
+    auto zero = _mm256_set1_epi64x(0);
+    return _mm256_cmpgt_epi16(out, zero);
   }
 };
 

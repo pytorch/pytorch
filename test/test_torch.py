@@ -1388,6 +1388,14 @@ class _TestTorchMixin(object):
     def test_neg(self):
         self._test_neg(self, lambda t: t)
 
+    def test_threshold(self):
+        for dtype in torch.testing.get_all_dtypes():
+            if dtype != torch.uint8 and dtype != torch.float16:
+                # 100 is wide enough to use AVX2 instructions for all types
+                x = torch.randn(100).sign().to(dtype=dtype)
+                y = torch.threshold(x, 0, 0)
+                self.assertTrue(y.le(0).any())
+
     def test_reciprocal(self):
         a = torch.randn(100, 89)
         res_div = 1 / a
