@@ -1993,7 +1993,7 @@ Example::
 
 add_docstr(torch.gesv,
            r"""
-torch.gesv(B, A) -> (Tensor, Tensor)
+torch.gesv(B, A, out=None) -> (Tensor, Tensor)
 
 This function returns the solution to the system of linear
 equations represented by :math:`AX = B` and the LU factorization of
