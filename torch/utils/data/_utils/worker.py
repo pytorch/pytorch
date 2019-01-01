@@ -163,7 +163,9 @@ def _worker_loop(mode, dataset, index_queue, data_queue, done_event, convert_fn,
                         data = convert_fn(next(dataset_iter))
                     except StopIteration:
                         data = IterableDatasetStopIteration(worker_id)
-                        iteration_end = True  # don't waste resource in future iter
+                        # set `iteration_end` to save future `next(...)` calls,
+                        # and to avoid sending multiple `IterableDatasetStopIteration`.
+                        iteration_end = True
                 elif mode == _DataLoaderMode.Map:
                     data = convert_fn(dataset[index])
                 else:

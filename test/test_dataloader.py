@@ -373,8 +373,6 @@ class TestProperExitIterableDataset(IterableDataset):
         return self.size
 
     def __iter__(self):
-        if self.error_event is not None and self.error_event.is_set():
-            raise RuntimeError('Worker error')
         return self
 
     def __next__(self):
@@ -384,6 +382,8 @@ class TestProperExitIterableDataset(IterableDataset):
         if self.remaining < 0:
             raise StopIteration
         return torch.tensor(-1000)
+
+    next = __next__  # py2 compatibility
 
 
 # See TestDataLoader.test_proper_exit for usage
@@ -495,7 +495,8 @@ def _test_get_worker_info():
     worker_pids = [w.pid for w in it.workers]
     data = torch.cat(data, 0)
     for d in data:
-        # each `d` is a [worker_id, worker_pid] set in test_worker_info_init_fn
+        # each `d` is a [worker_id, worker_pid] pair, which is set in
+        # test_worker_info_init_fn
         assert d[1] == worker_pids[d[0]]
     # get_worker_info returns None in main proc after data loading
     assert torch.utils.data.get_worker_info() is None

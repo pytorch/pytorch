@@ -624,7 +624,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 data = self.task_info.pop(self.rcvd_idx)[1]
                 return self.process_data(data)
 
-            # assert (not self.shutdown and self.tasks_outstanding > 0)
+            assert (not self.shutdown and self.tasks_outstanding > 0)
             idx, data = self.get_data()
             self.tasks_outstanding -= 1
 
@@ -645,8 +645,8 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                     # Note that we don't actually join the worker here
                     # because joining may be slow. Joinning is deferred to
                     # shutdown_workers, which it is called when all workers
-                    # finished their IterableDataset or this iterator is
-                    # garbage collected.
+                    # finish their IterableDataset copies or when this iterator
+                    # is garbage collected.
                     self.worker_activity[worker_id] = False
                     continue
 
