@@ -32,6 +32,7 @@ class Threshold(Module):
 
     Examples::
 
+        >>> import torch.nn as nn
         >>> m = nn.Threshold(0.1, 20)
         >>> input = torch.randn(2)
         >>> output = m(input)
@@ -73,6 +74,7 @@ class ReLU(Threshold):
 
     Examples::
 
+        >>> import torch.nn as nn
         >>> m = nn.ReLU()
         >>> input = torch.randn(2)
         >>> output = m(input)
@@ -126,6 +128,7 @@ class RReLU(Module):
 
     Examples::
 
+        >>> import torch.nn as nn
         >>> m = nn.RReLU(0.1, 0.3)
         >>> input = torch.randn(2)
         >>> output = m(input)
@@ -183,6 +186,7 @@ class Hardtanh(Module):
 
     Examples::
 
+        >>> import torch.nn as nn
         >>> m = nn.Hardtanh(-2, 2)
         >>> input = torch.randn(2)
         >>> output = m(input)
@@ -233,6 +237,7 @@ class ReLU6(Hardtanh):
 
     Examples::
 
+        >>> import torch.nn as nn
         >>> m = nn.ReLU6()
         >>> input = torch.randn(2)
         >>> output = m(input)
@@ -263,6 +268,7 @@ class Sigmoid(Module):
 
     Examples::
 
+        >>> import torch.nn as nn
         >>> m = nn.Sigmoid()
         >>> input = torch.randn(2)
         >>> output = m(input)
@@ -289,6 +295,7 @@ class Tanh(Module):
 
     Examples::
 
+        >>> import torch.nn as nn
         >>> m = nn.Tanh()
         >>> input = torch.randn(2)
         >>> output = m(input)
@@ -319,6 +326,7 @@ class ELU(Module):
 
     Examples::
 
+        >>> import torch.nn as nn
         >>> m = nn.ELU()
         >>> input = torch.randn(2)
         >>> output = m(input)
@@ -361,6 +369,7 @@ class CELU(Module):
 
     Examples::
 
+        >>> import torch.nn as nn
         >>> m = nn.CELU()
         >>> input = torch.randn(2)
         >>> output = m(input)
@@ -408,6 +417,7 @@ class SELU(Module):
 
     Examples::
 
+        >>> import torch.nn as nn
         >>> m = nn.SELU()
         >>> input = torch.randn(2)
         >>> output = m(input)
@@ -445,6 +455,7 @@ class GLU(Module):
 
     Examples::
 
+        >>> import torch.nn as nn
         >>> m = nn.GLU()
         >>> input = torch.randn(4, 2)
         >>> output = m(input)
@@ -487,6 +498,7 @@ class Hardshrink(Module):
 
     Examples::
 
+        >>> import torch.nn as nn
         >>> m = nn.Hardshrink()
         >>> input = torch.randn(2)
         >>> output = m(input)
@@ -535,6 +547,7 @@ class LeakyReLU(Module):
 
     Examples::
 
+        >>> import torch.nn as nn
         >>> m = nn.LeakyReLU(0.1)
         >>> input = torch.randn(2)
         >>> output = m(input)
@@ -570,6 +583,7 @@ class LogSigmoid(Module):
 
     Examples::
 
+        >>> import torch.nn as nn
         >>> m = nn.LogSigmoid()
         >>> input = torch.randn(2)
         >>> output = m(input)
@@ -606,6 +620,7 @@ class Softplus(Module):
 
     Examples::
 
+        >>> import torch.nn as nn
         >>> m = nn.Softplus()
         >>> input = torch.randn(2)
         >>> output = m(input)
@@ -649,6 +664,7 @@ class Softshrink(Module):
 
     Examples::
 
+        >>> import torch.nn as nn
         >>> m = nn.Softshrink()
         >>> input = torch.randn(2)
         >>> output = m(input)
@@ -714,6 +730,7 @@ class PReLU(Module):
 
     Examples::
 
+        >>> import torch.nn as nn
         >>> m = nn.PReLU()
         >>> input = torch.randn(2)
         >>> output = m(input)
@@ -748,6 +765,7 @@ class Softsign(Module):
 
     Examples::
 
+        >>> import torch.nn as nn
         >>> m = nn.Softsign()
         >>> input = torch.randn(2)
         >>> output = m(input)
@@ -774,6 +792,7 @@ class Tanhshrink(Module):
 
     Examples::
 
+        >>> import torch.nn as nn
         >>> m = nn.Tanhshrink()
         >>> input = torch.randn(2)
         >>> output = m(input)
@@ -808,7 +827,8 @@ class Softmin(Module):
 
     Examples::
 
-        >>> m = nn.Softmin()
+        >>> import torch.nn as nn
+        >>> m = nn.Softmin(dim=1)
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
     """
@@ -854,7 +874,8 @@ class Softmax(Module):
 
     Examples::
 
-        >>> m = nn.Softmax()
+        >>> import torch.nn as nn
+        >>> m = nn.Softmax(dim=1)
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
     """
@@ -891,6 +912,7 @@ class Softmax2d(Module):
 
     Examples::
 
+        >>> import torch.nn as nn
         >>> m = nn.Softmax2d()
         >>> # you softmax over the 2nd dimension
         >>> input = torch.randn(2, 3, 12, 13)
@@ -926,7 +948,8 @@ class LogSoftmax(Module):
 
     Examples::
 
-        >>> m = nn.LogSoftmax()
+        >>> import torch.nn as nn
+        >>> m = nn.LogSoftmax(dim=1)
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
     """
@@ -944,3 +967,11 @@ class LogSoftmax(Module):
     @weak_script_method
     def forward(self, input):
         return F.log_softmax(input, self.dim, _stacklevel=5)
+
+if __name__ == '__main__':
+    """
+    CommandLine:
+        xdoctest -m torch.nn.modules.activation all
+    """
+    import xdoctest
+    xdoctest.doctest_module(__file__)
