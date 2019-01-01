@@ -52,10 +52,11 @@ class Embedding(Module):
     Examples::
 
         >>> # an Embedding module containing 10 tensors of size 3
+        >>> from torch import nn
         >>> embedding = nn.Embedding(10, 3)
         >>> # a batch of 2 samples of 4 indices each
         >>> input = torch.LongTensor([[1,2,4,5],[4,3,2,9]])
-        >>> embedding(input)
+        >>> embedding(input)  # xdoctest: +IGNORE_WANT
         tensor([[[-0.0251, -1.6902,  0.7172],
                  [-0.6431,  0.0748,  0.6969],
                  [ 1.4970,  1.3448, -0.9685],
@@ -70,7 +71,7 @@ class Embedding(Module):
         >>> # example with padding_idx
         >>> embedding = nn.Embedding(10, 3, padding_idx=0)
         >>> input = torch.LongTensor([[0,2,0,5]])
-        >>> embedding(input)
+        >>> embedding(input)  # xdoctest: +IGNORE_WANT
         tensor([[[ 0.0000,  0.0000,  0.0000],
                  [ 0.1535, -2.0309,  0.9315],
                  [ 0.0000,  0.0000,  0.0000],
@@ -150,11 +151,12 @@ class Embedding(Module):
         Examples::
 
             >>> # FloatTensor containing pretrained weights
+            >>> from torch import nn
             >>> weight = torch.FloatTensor([[1, 2.3, 3], [4, 5.1, 6.3]])
             >>> embedding = nn.Embedding.from_pretrained(weight)
             >>> # Get embeddings for index 1
             >>> input = torch.LongTensor([1])
-            >>> embedding(input)
+            >>> embedding(input)  # xdoctest: +IGNORE_WHITESPACE
             tensor([[ 4.0000,  5.1000,  6.3000]])
         """
         assert embeddings.dim() == 2, \
@@ -228,13 +230,14 @@ class EmbeddingBag(Module):
     Examples::
 
         >>> # an Embedding module containing 10 tensors of size 3
+        >>> from torch import nn
         >>> embedding_sum = nn.EmbeddingBag(10, 3, mode='sum')
         >>> # a batch of 2 samples of 4 indices each
         >>> input = torch.LongTensor([1,2,4,5,4,3,2,9])
         >>> offsets = torch.LongTensor([0,4])
-        >>> embedding_sum(input, offsets)
-        tensor([[-0.8861, -5.4350, -0.0523],
-                [ 1.1306, -2.5798, -1.0044]])
+        >>> embedding_sum(input, offsets)  # xdoctest: +IGNORE_WANT
+        tensor([[1.9289, 0.9535, 0.3619],
+                [2.5564, 0.9600, 1.2902]], grad_fn=<EmbeddingBagBackward>)
     """
     __constants__ = ['num_embeddings, embedding_dim', 'max_norm', 'norm_type',
                      'scale_grad_by_freq', 'mode', 'sparse', '_weight']
@@ -299,11 +302,12 @@ class EmbeddingBag(Module):
         Examples::
 
             >>> # FloatTensor containing pretrained weights
+            >>> from torch import nn
             >>> weight = torch.FloatTensor([[1, 2.3, 3], [4, 5.1, 6.3]])
             >>> embeddingbag = nn.EmbeddingBag.from_pretrained(weight)
             >>> # Get embeddings for index 1
             >>> input = torch.LongTensor([[1, 0]])
-            >>> embeddingbag(input)
+            >>> embeddingbag(input)  # xdoctest: +IGNORE_WHITESPACE
             tensor([[ 2.5000,  3.7000,  4.6500]])
         """
         assert embeddings.dim() == 2, \
@@ -322,3 +326,10 @@ class EmbeddingBag(Module):
         return embeddingbag
 
 # TODO: SparseLinear
+if __name__ == '__main__':
+    """
+    CommandLine:
+        xdoctest -m torch.nn.modules.sparse
+    """
+    import xdoctest
+    xdoctest.doctest_module(__file__)

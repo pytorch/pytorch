@@ -2,6 +2,7 @@
 from .module import Module
 from .. import functional as F
 from ..._jit_internal import weak_module, weak_script_method
+import torch  # NOQA
 
 
 @weak_module
@@ -80,6 +81,7 @@ class Fold(Module):
 
     Examples::
 
+        >>> from torch import nn
         >>> fold = nn.Fold(output_size=(4, 5), kernel_size=(2, 2))
         >>> input = torch.randn(1, 3 * 2 * 2, 1)
         >>> output = fold(input)
@@ -184,6 +186,7 @@ class Unfold(Module):
 
     Examples::
 
+        >>> from torch import nn
         >>> unfold = nn.Unfold(kernel_size=(2, 3))
         >>> input = torch.randn(2, 5, 3, 4)
         >>> output = unfold(input)
