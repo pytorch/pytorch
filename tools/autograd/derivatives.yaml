@@ -138,6 +138,9 @@
 - name: alias(Tensor self)
   self: grad
 
+# The two items below are necessary to avoid the type mismatch error
+# (Variable[CPUByteType] vs CPUByteType) in TensorIterator. It is because
+# codegen is not unwrapping the input Tensor for all(*) without this line.
 - name: all(Tensor self)
   self: not_implemented("all")
 
