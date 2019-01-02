@@ -1689,8 +1689,9 @@ class _TestTorchMixin(object):
         res6 = torch.baddbmm(.1, res2, .5, b1, b2)
         self.assertEqual(res6, res2 * .1 + res * .5)
 
-    def test_clamp(self):
-        m1 = torch.rand(100).mul(5).add(-2.5)  # uniform in [-2.5, 2.5]
+    @staticmethod
+    def _test_clamp(self, device='cpu'):
+        m1 = torch.rand(100, device=device).mul(5).add(-2.5)  # uniform in [-2.5, 2.5]
         # just in case we're extremely lucky.
         min_val = -1
         max_val = 1
@@ -1726,11 +1727,46 @@ class _TestTorchMixin(object):
         torch.clamp(m1, max=max_val, out=out)
         self.assertEqual(out, res1)
 
+        # if the tensor contains nan case
+        test_tens = torch.tensor([nan], device=device)
+
+        res1 = test_tens.clone()
+        res1.clamp_(min_val, max_val)
+        res2 = test_tens.clone()
+        for i in iter_indices(res2):
+            res2[i] = max(min(res2[i], max_val), min_val)
+        self.assertEqual(torch.isnan(res1), torch.isnan(res2))
+
+        out = test_tens.clone()
+        torch.clamp(test_tens, min=min_val, max=max_val, out=out)
+        self.assertEqual(torch.isnan(out), torch.isnan(res1))
+
+        res1 = torch.clamp(test_tens, min=min_val)
+        res2 = test_tens.clone()
+        for i in iter_indices(res2):
+            res2[i] = max(res2[i], min_val)
+        self.assertEqual(torch.isnan(res1), torch.isnan(res2))
+
+        torch.clamp(test_tens, min=min_val, out=out)
+        self.assertEqual(torch.isnan(out), torch.isnan(res1))
+
+        res1 = torch.clamp(test_tens, max=max_val)
+        res2 = test_tens.clone()
+        for i in iter_indices(res2):
+            res2[i] = min(res2[i], max_val)
+        self.assertEqual(torch.isnan(res1), torch.isnan(res2))
+
+        torch.clamp(test_tens, max=max_val, out=out)
+        self.assertEqual(torch.isnan(out), torch.isnan(res1))
+
         error_msg = 'At least one of \'min\' or \'max\' must not be None'
         with self.assertRaisesRegex(RuntimeError, error_msg):
             m1.clamp()
         with self.assertRaisesRegex(RuntimeError, error_msg):
             m1.clamp_()
+
+    def test_clamp(self):
+        self._test_clamp(self)
 
     def test_pow(self):
         # [res] torch.pow([res,] x)
