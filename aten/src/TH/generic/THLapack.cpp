@@ -21,8 +21,6 @@ TH_EXTERNC void dgetri_(int *n, double *a, int *lda, int *ipiv, double *work, in
 TH_EXTERNC void sgetri_(int *n, float *a, int *lda, int *ipiv, float *work, int *lwork, int *info);
 TH_EXTERNC void dpotri_(char *uplo, int *n, double *a, int *lda, int *info);
 TH_EXTERNC void spotri_(char *uplo, int *n, float *a, int *lda, int *info);
-TH_EXTERNC void dpotrs_(char *uplo, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb, int *info);
-TH_EXTERNC void spotrs_(char *uplo, int *n, int *nrhs, float *a, int *lda, float *b, int *ldb, int *info);
 TH_EXTERNC void sgeqrf_(int *m, int *n, float *a, int *lda, float *tau, float *work, int *lwork, int *info);
 TH_EXTERNC void dgeqrf_(int *m, int *n, double *a, int *lda, double *tau, double *work, int *lwork, int *info);
 TH_EXTERNC void sorgqr_(int *m, int *n, int *k, float *a, int *lda, float *tau, float *work, int *lwork, int *info);
@@ -146,20 +144,6 @@ void THLapack_(getri)(int n, scalar_t *a, int lda, int *ipiv, scalar_t *work, in
 #endif
 #else
   THError("getri : Lapack library not found in compile time\n");
-#endif
-}
-
-/* Solve A*X = B with a symmetric positive definite matrix A using the Cholesky factorization */
-void THLapack_(potrs)(char uplo, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, int *info)
-{
-#ifdef  USE_LAPACK
-#if defined(TH_REAL_IS_DOUBLE)
-  dpotrs_(&uplo, &n, &nrhs, a, &lda, b, &ldb, info);
-#else
-  spotrs_(&uplo, &n, &nrhs, a, &lda, b, &ldb, info);
-#endif
-#else
-  THError("potrs: Lapack library not found in compile time\n");
 #endif
 }
 
