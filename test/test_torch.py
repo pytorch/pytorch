@@ -1570,6 +1570,8 @@ class _TestTorchMixin(object):
                 a_LU_info_nopiv, nopiv, info_nopiv = a.btrifact_with_info(pivot=False)
                 self.assertIsNone(nopiv)
                 self.assertEqual(info_, info_nopiv)
+            P, L, U = torch.btriunpack(a_LU, pivots)
+            self.assertEqual(P.matmul(L.matmul(U)), a)
 
         for ms, batch in product([3, 5, 7], [(2,), (3,), (3, 5)]):
             run_test(ms, batch, cast)
