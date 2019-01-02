@@ -8988,6 +8988,15 @@ a")
                         return 4
                 return 5
 
+    def test_select_after_chunk(self):
+        def foo(x):
+            chunked = torch.chunk(x, 1)
+            foo = chunked[0]
+            foo.add_(5)
+            return x
+
+        self.checkScript(foo, [torch.rand(2, 3)])
+
 
 class MnistNet(nn.Module):
     def __init__(self):

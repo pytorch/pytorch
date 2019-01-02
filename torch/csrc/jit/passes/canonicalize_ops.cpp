@@ -15,10 +15,10 @@ static c10::optional<std::vector<ChunkOutput>> getChunkOutputs(Node* chunk) {
   std::vector<ChunkOutput> outputs;
   for (auto list_use : chunk->output()->uses()) {
     if (list_use.user->matches(
-            "aten::select(Tensor[] list, int idx) -> Tensor", attr::b)) {
+            "aten::select(Tensor[] list, int idx) -> Tensor", attr::idx)) {
       outputs.emplace_back(
           list_use.user->output(),
-          list_use.user->get<int64_t>(attr::b).value());
+          list_use.user->get<int64_t>(attr::idx).value());
     } else if (list_use.user->kind() == prim::ListUnpack) {
       // This sometimes happens if the sizes can't be evenly divided by the
       // number of chunks
