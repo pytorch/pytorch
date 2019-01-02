@@ -20,7 +20,11 @@ namespace at {
 Tensor & TypeDefault::copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
   Tensor b_src;
   if (is_sparse()) {
-    b_src = src;
+    if (src.is_sparse()) {
+      b_src = src;
+    } else {
+      b_src = src.to_sparse(self.sparse_dim());
+    }
   } else {
     std::tie(b_src) = expand_inplace(self, src, "copy");
   }
