@@ -129,4 +129,40 @@ Tensor& range_cuda_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
   return result;
 }
 
+Tensor& arange_cuda_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
+  AT_DISPATCH_ALL_TYPES_AND_HALF(result.type(), "arange", [&]() {
+    using accscalar_t = at::acc_type<scalar_t, true>;
+    auto xstart = start.to<accscalar_t>();
+    auto xend = end.to<accscalar_t>();
+    auto xstep = step.to<accscalar_t>();
+
+    AT_CHECK(xstep > 0 || xstep < 0, "step must be nonzero");
+    AT_CHECK(std::isfinite(static_cast<double>(xstart)) &&
+             std::isfinite(static_cast<double>(xend)),
+             "unsupported range: ", xstart, " -> ", xend);
+    AT_CHECK(((xstep > 0) && (xend >= xstart)) || ((xstep < 0) && (xend <= xstart)),
+             "upper bound and larger bound inconsistent with step sign");
+
+    double size_d = std::ceil(static_cast<double>(xend - xstart) / xstep);
+    AT_CHECK(size_d >= 0 && size_d <= static_cast<double>(std::numeric_limits<int64_t>::max()),
+             "invalid size, possible overflow?");
+    int64_t size = static_cast<int64_t>(size_d);
+
+    if (result.numel() != size) {
+      result.resize_({size});
+    }
+    Tensor r = result.is_contiguous() ? result : result.contiguous();
+    LinspaceOp<scalar_t, accscalar_t> linspace_method(xstart, xstep);
+    thrust::device_ptr<scalar_t> data_ptr(r.data<scalar_t>());
+    thrust::tabulate(data_ptr, data_ptr + size, linspace_method);
+
+    if (!result.is_contiguous()) {
+      result.copy_(r);
+    }
+  });
+
+  AT_CUDA_CHECK(cudaGetLastError());
+  return result;
+}
+
 }} // namespace at::native
