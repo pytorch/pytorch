@@ -10,7 +10,7 @@ from hypothesis import assume, given
 import hypothesis.strategies as st
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import brew, core, workspace
+from caffe2.python import brew, core, utils, workspace
 import caffe2.python.hip_test_util as hiputl
 import caffe2.python.hypothesis_test_util as hu
 from caffe2.python.model_helper import ModelHelper
@@ -54,14 +54,6 @@ def _cudnn_convolution_algo_count(direction):
             assert False
     except Exception:
         return st.sampled_from([-1])
-
-
-def nhwc2nchw(tensor):
-    return tensor.transpose((0, tensor.ndim - 1) + tuple(range(1, tensor.ndim - 1)))
-
-
-def nchw2nhwc(tensor):
-    return tensor.transpose((0,) + tuple(range(2, tensor.ndim)) + (1,))
 
 
 class TestConvolution(serial.SerializedTestCase):
@@ -119,8 +111,8 @@ class TestConvolution(serial.SerializedTestCase):
         ).astype(np.float32) - 0.5
         b = np.random.rand(output_channels).astype(np.float32) - 0.5
         if order == "NCHW":
-            X = X.transpose((0, 3, 1, 2))
-            w = w.transpose((0, 3, 1, 2))
+            X = utils.NHWC2NCHW(X)
+            w = utils.NHWC2NCHW(w)
 
         inputs = [X, w, b] if use_bias else [X, w]
 
@@ -178,8 +170,8 @@ class TestConvolution(serial.SerializedTestCase):
                 device_option=gc,
             )
             if order == "NCHW":
-                X_f = X.transpose((0, 3, 1, 2))
-                w_f = w.transpose((0, 3, 1, 2))
+                X_f = utils.NHWC2NCHW(X)
+                w_f = utils.NHWC2NCHW(w)
             else:
                 X_f = X
                 w_f = w
@@ -190,7 +182,7 @@ class TestConvolution(serial.SerializedTestCase):
             outputs[order] = self.ws.blobs["Y"].fetch()
         np.testing.assert_allclose(
             outputs["NCHW"],
-            outputs["NHWC"].transpose((0, 3, 1, 2)),
+            utils.NHWC2NCHW(outputs["NHWC"]),
             atol=1e-4,
             rtol=1e-4)
 
@@ -260,8 +252,8 @@ class TestConvolution(serial.SerializedTestCase):
         ).astype(np.float32) - 0.5
         b = np.random.rand(output_channels).astype(np.float32) - 0.5
         if order == "NCHW":
-            X = X.transpose((0, 3, 1, 2))
-            w = w.transpose((0, 3, 1, 2))
+            X = utils.NHWC2NCHW(X)
+            w = utils.NHWC2NCHW(w)
 
         inputs = [X, w, b] if use_bias else [X, w]
         # Error handling path.
@@ -320,8 +312,8 @@ class TestConvolution(serial.SerializedTestCase):
             w = np.random.rand(*filter_dims).astype(np.float32) - 0.5
             b = np.random.rand(output_channels).astype(np.float32) - 0.5
             if order == "NHWC":
-                X = nchw2nhwc(X)
-                w = nchw2nhwc(w)
+                X = utils.NCHW2NHWC(X)
+                w = utils.NCHW2NHWC(w)
 
             inputs = [X, w, b] if use_bias else [X, w]
 
@@ -523,8 +515,8 @@ class TestConvolution(serial.SerializedTestCase):
                     exhaustive_search=True,
                 )
                 if order == "NCHW":
-                    X_f = X.transpose((0, 3, 1, 2))
-                    w_f = w.transpose((0, 3, 1, 2))
+                    X_f = utils.NHWC2NCHW(X)
+                    w_f = utils.NHWC2NCHW(w)
                 else:
                     X_f = X
                     w_f = w
@@ -542,7 +534,7 @@ class TestConvolution(serial.SerializedTestCase):
 
         def canonical(o):
             if o.order == "NHWC":
-                return o.Y.transpose((0, 3, 1, 2))
+                return utils.NHWC2NCHW(o.Y)
             else:
                 return o.Y
 

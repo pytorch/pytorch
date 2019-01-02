@@ -1,6 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import numpy as np
+from caffe2.python import utils
 from hypothesis import assume
 
 
@@ -31,14 +32,6 @@ def pairwise(iterable):
     a, b = tee(iterable)
     next(b, None)
     return zip(a, b)
-
-
-def nhwc2nchw(tensor):
-    return tensor.transpose((0, tensor.ndim - 1) + tuple(range(1, tensor.ndim - 1)))
-
-
-def nchw2nhwc(tensor):
-    return tensor.transpose((0,) + tuple(range(2, tensor.ndim)) + (1,))
 
 
 # Make sure we won't have overflows from vpmaddubsw instruction used in fbgemm)
@@ -271,8 +264,8 @@ def generate_convnd_inputs(
         )
 
     if order == "NCHW":
-        X = nhwc2nchw(X)
-        W = nhwc2nchw(W)
+        X = utils.NHWC2NCHW(X)
+        W = utils.NHWC2NCHW(W)
 
     b = np.random.randn(output_channels).astype(np.float32)
 

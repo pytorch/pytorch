@@ -305,7 +305,6 @@ def _generate_function_classes(scope_dict):
     name_remap = {
         'TemporalConvolution': 'Conv1d',
         'TemporalReflectionPadding': 'ReflectionPad1d',
-        'TemporalReplicationPadding': 'ReplicationPad1d',
         'SpatialDilatedConvolution': 'DilatedConv2d',
         'SpatialMaxUnpooling': 'MaxUnpool2d',
         'SpatialReflectionPadding': 'ReflectionPad2d',
