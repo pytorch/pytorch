@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import brew, core, workspace
+from caffe2.python import brew, core, utils, workspace
 import caffe2.python.hip_test_util as hiputl
 import caffe2.python.hypothesis_test_util as hu
 from caffe2.python.model_helper import ModelHelper
@@ -62,7 +62,7 @@ class TestSpatialBN(serial.SerializedTestCase):
             .astype(np.float32) - 0.5
 
         if order == "NHWC":
-            X = X.transpose(0, 2, 3, 4, 1)
+            X = utils.NCHW2NHWC(X)
         self.assertReferenceChecks(gc, op, [X, scale, bias, mean, var],
                                    reference_spatialbn_test)
         self.assertDeviceChecks(dc, op, [X, scale, bias, mean, var], [0])
