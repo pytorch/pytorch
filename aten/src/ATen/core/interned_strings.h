@@ -137,7 +137,8 @@ namespace c10 {
   _(attr, name)                    \
   _(attr, a)                       \
   _(attr, b)                       \
-  _(attr, beg)
+  _(attr, beg)                     \
+  _(attr, idx)
 #else
 #define FORALL_NS_SYMBOLS(_) \
   _(namespaces, prim)              \
