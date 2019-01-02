@@ -91,7 +91,7 @@ void reflection_pad1d_out_template(
   /* resize output */
   if (input.ndimension() == 2) {
     output.resize_({nplane, output_w});
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "reflection_pad1d", [&] {
+    AT_DISPATCH_FLOATING_TYPES(input.type(), "reflection_pad1d", [&] {
       reflection_pad1d_out_frame<scalar_t>(
         input.data<scalar_t>(), output.data<scalar_t>(),
         nplane,
@@ -100,7 +100,7 @@ void reflection_pad1d_out_template(
     });
   } else {
     output.resize_({nbatch, nplane, output_w});
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "reflection_pad1d", [&] {
+    AT_DISPATCH_FLOATING_TYPES(input.type(), "reflection_pad1d", [&] {
       reflection_pad1d_out_loop<scalar_t>(
         input.data<scalar_t>(), output.data<scalar_t>(),
         nbatch, nplane,
