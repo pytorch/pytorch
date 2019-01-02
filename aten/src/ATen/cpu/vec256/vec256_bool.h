@@ -13,6 +13,10 @@ template <>
 struct Vec256<uint8_t> {
 private:
   __m256i values;
+  static inline __m256i invert(const __m256i& v) {
+    const auto ones = _mm256_set1_epi64x(-1);
+    return _mm256_xor_si256(ones, v);
+  }
 public:
   static constexpr int size() {
     return 32;
@@ -230,42 +234,28 @@ public:
     return values;
   }
   Vec256<uint8_t> operator==(const Vec256<uint8_t>& other) const {
-    // _mm256_cmpeq_epi8 set all bits in byte to 1 if the two values equal. We
-    // only use the lowest bit in every byte to make sure it returns 1 instead
-    // of 255.
-    static auto one  = _mm256_set1_epi8(1);
-    return _mm256_and_si256(one, _mm256_cmpeq_epi8(values, other.values));
+    return _mm256_cmpeq_epi8(values, other.values);
   }
   Vec256<uint8_t> operator!=(const Vec256<uint8_t>& other) const {
-    static auto one = _mm256_set1_epi8(1);
-    auto eq = _mm256_cmpeq_epi8(values, other.values);
-    return _mm256_and_si256(one, _mm256_xor_si256(one, eq));  // invert
+    return invert(_mm256_cmpeq_epi8(values, other.values));
   }
   Vec256<uint8_t> operator<(const Vec256<uint8_t>& other) const {
     // cannot use _mm256_cmpgt_epi8 which is for signed bytes
-    static auto one = _mm256_set1_epi8(1);
     auto min = _mm256_min_epu8(values, other.values);
-    auto gte = _mm256_cmpeq_epi8(min, other.values);
-    return _mm256_and_si256(one, _mm256_xor_si256(one, gte));  // invert
+    return invert(_mm256_cmpeq_epi8(min, other.values));
   }
   Vec256<uint8_t> operator<=(const Vec256<uint8_t>& other) const {
     // cannot use _mm256_cmpgt_epi8 which is for signed bytes
-    static auto one = _mm256_set1_epi8(1);
-    auto min = _mm256_min_epu8(values, other.values);
-    return _mm256_and_si256(one, _mm256_cmpeq_epi8(min, values));
+    return _mm256_cmpeq_epi8(_mm256_min_epu8(values, other.values), values);
   }
   Vec256<uint8_t> operator>(const Vec256<uint8_t>& other) const {
     // cannot use _mm256_cmpgt_epi8 which is for signed bytes
-    static auto one = _mm256_set1_epi8(1);
     auto max = _mm256_max_epu8(values, other.values);
-    auto lte = _mm256_cmpeq_epi8(max, other.values);
-    return _mm256_and_si256(one, _mm256_xor_si256(one, lte));  // invert
+    return invert(_mm256_cmpeq_epi8(max, other.values));
   }
   Vec256<uint8_t> operator>=(const Vec256<uint8_t>& other) const {
     // cannot use _mm256_cmpgt_epi8 which is for signed bytes
-    static auto one = _mm256_set1_epi8(1);
-    auto max = _mm256_max_epu8(values, other.values);
-    return _mm256_and_si256(one, _mm256_cmpeq_epi8(max, values));
+    return _mm256_cmpeq_epi8(_mm256_max_epu8(values, other.values), values);
   }
 };
 
