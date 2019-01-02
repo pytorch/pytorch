@@ -12,6 +12,11 @@ namespace {
 struct Vec256i {
 protected:
   __m256i values;
+
+  static inline __m256i invert(__m256i v) {
+    const auto ones = _mm256_set1_epi64x(-1);
+    return _mm256_xor_si256(ones, v);
+  }
 public:
   Vec256i() {}
   Vec256i(__m256i v) : values(v) {}
@@ -92,33 +97,22 @@ struct Vec256<int64_t> : public Vec256i {
     return _mm256_sub_epi64(inverse, is_larger);
   }
   Vec256<int64_t> operator==(const Vec256<int64_t>& other) const {
-    // _mm256_cmpeq_epi64 would set all bits in a int64_t to 1 if two values
-    // equal. Hence, we need to mask it to 0/1 instead of returning 0/-1.
-    static const auto one = _mm256_setr_epi64x(1, 1, 1, 1);
-    return _mm256_and_si256(one, _mm256_cmpeq_epi64(values, other.values));
+    return _mm256_cmpeq_epi64(values, other.values);
   }
   Vec256<int64_t> operator!=(const Vec256<int64_t>& other) const {
-    static const auto one = _mm256_setr_epi64x(1, 1, 1, 1);
-    auto eq = _mm256_cmpeq_epi64(values, other.values);
-    return _mm256_and_si256(one, _mm256_xor_si256(one, eq));  // invert
+    return invert(_mm256_cmpeq_epi64(values, other.values));
   }
   Vec256<int64_t> operator<(const Vec256<int64_t>& other) const {
-    static const auto one = _mm256_setr_epi64x(1, 1, 1, 1);
-    return _mm256_and_si256(one, _mm256_cmpgt_epi64(other.values, values));
+    return _mm256_cmpgt_epi64(other.values, values);
   }
   Vec256<int64_t> operator<=(const Vec256<int64_t>& other) const {
-    static const auto one = _mm256_setr_epi64x(1, 1, 1, 1);
-    auto gt = _mm256_cmpgt_epi64(values, other.values);
-    return _mm256_and_si256(one, _mm256_xor_si256(one, gt));  // invert
+    return invert(_mm256_cmpgt_epi64(values, other.values));
   }
   Vec256<int64_t> operator>(const Vec256<int64_t>& other) const {
-    static const auto one = _mm256_setr_epi64x(1, 1, 1, 1);
-    return _mm256_and_si256(one, _mm256_cmpgt_epi64(values, other.values));
+    return _mm256_cmpgt_epi64(values, other.values);
   }
   Vec256<int64_t> operator>=(const Vec256<int64_t>& other) const {
-    static const auto one = _mm256_setr_epi64x(1, 1, 1, 1);
-    auto lt = _mm256_cmpgt_epi64(other.values, values);
-    return _mm256_and_si256(one, _mm256_xor_si256(one, lt));  // invert
+    return invert(_mm256_cmpgt_epi64(other.values, values));
   }
 };
 
@@ -192,33 +186,22 @@ struct Vec256<int32_t> : public Vec256i {
     return _mm256_abs_epi32(values);
   }
   Vec256<int32_t> operator==(const Vec256<int32_t>& other) const {
-    // _mm256_cmpeq_epi32 would set all bits in a int16_t to 1 if two values
-    // equal. Hence, we need to mask it with 1 to return 0/1 instead of 0/-1
-    static const auto one = _mm256_set1_epi32(1);
-    return _mm256_and_si256(one, _mm256_cmpeq_epi32(values, other.values));
+    return _mm256_cmpeq_epi32(values, other.values);
   }
   Vec256<int32_t> operator!=(const Vec256<int32_t>& other) const {
-    static const auto one = _mm256_set1_epi32(1);
-    auto eq = _mm256_cmpeq_epi32(values, other.values);
-    return _mm256_and_si256(one, _mm256_xor_si256(one, eq));  // invert
+    return invert(_mm256_cmpeq_epi32(values, other.values));
   }
   Vec256<int32_t> operator<(const Vec256<int32_t>& other) const {
-    static const auto one = _mm256_set1_epi32(1);
-    return _mm256_and_si256(one, _mm256_cmpgt_epi32(other.values, values));
+    return _mm256_cmpgt_epi32(other.values, values);
   }
   Vec256<int32_t> operator<=(const Vec256<int32_t>& other) const {
-    static const auto one = _mm256_set1_epi32(1);
-    auto gt = _mm256_cmpgt_epi32(values, other.values);
-    return _mm256_and_si256(one, _mm256_xor_si256(one, gt));  // invert
+    return invert(_mm256_cmpgt_epi32(values, other.values));
   }
   Vec256<int32_t> operator>(const Vec256<int32_t>& other) const {
-    static const auto one = _mm256_set1_epi32(1);
-    return _mm256_and_si256(one, _mm256_cmpgt_epi32(values, other.values));
+    return _mm256_cmpgt_epi32(values, other.values);
   }
   Vec256<int32_t> operator>=(const Vec256<int32_t>& other) const {
-    static const auto one = _mm256_set1_epi32(1);
-    auto lt = _mm256_cmpgt_epi32(other.values, values);
-    return _mm256_and_si256(one, _mm256_xor_si256(one, lt));  // invert
+    return invert(_mm256_cmpgt_epi32(other.values, values));
   }
 };
 
@@ -387,33 +370,22 @@ struct Vec256<int16_t> : public Vec256i {
     return _mm256_abs_epi16(values);
   }
   Vec256<int16_t> operator==(const Vec256<int16_t>& other) const {
-    // _mm256_cmpeq_epi16 would set all bits in a int16_t to 1 if two values
-    // equal. Hence, we need to mask it with 1 to return 0/1 instead of 0/-1
-    static const auto one = _mm256_set1_epi16(1);
-    return _mm256_and_si256(one, _mm256_cmpeq_epi16(values, other.values));
+    return _mm256_cmpeq_epi16(values, other.values);
   }
   Vec256<int16_t> operator!=(const Vec256<int16_t>& other) const {
-    static const auto one = _mm256_set1_epi16(1);
-    auto eq = _mm256_cmpeq_epi16(values, other.values);
-    return _mm256_and_si256(one, _mm256_xor_si256(one, eq));  // invert
+    return invert(_mm256_cmpeq_epi16(values, other.values));
   }
   Vec256<int16_t> operator<(const Vec256<int16_t>& other) const {
-    static const auto one = _mm256_set1_epi16(1);
-    return _mm256_and_si256(one, _mm256_cmpgt_epi16(other.values, values));
+    return _mm256_cmpgt_epi16(other.values, values);
   }
   Vec256<int16_t> operator<=(const Vec256<int16_t>& other) const {
-    static const auto one = _mm256_set1_epi16(1);
-    auto gt = _mm256_cmpgt_epi16(values, other.values);
-    return _mm256_and_si256(one, _mm256_xor_si256(one, gt));  // invert
+    return invert(_mm256_cmpgt_epi16(values, other.values));
   }
   Vec256<int16_t> operator>(const Vec256<int16_t>& other) const {
-    static const auto one = _mm256_set1_epi16(1);
-    return _mm256_and_si256(one, _mm256_cmpgt_epi16(values, other.values));
+    return _mm256_cmpgt_epi16(values, other.values);
   }
   Vec256<int16_t> operator>=(const Vec256<int16_t>& other) const {
-    static const auto one = _mm256_set1_epi16(1);
-    auto lt = _mm256_cmpgt_epi16(other.values, values);
-    return _mm256_and_si256(one, _mm256_xor_si256(one, lt));  // invert
+    return invert(_mm256_cmpgt_epi16(other.values, values));
   }
 };
 
