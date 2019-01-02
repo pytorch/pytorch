@@ -677,6 +677,17 @@ def wrap_logical_op_with_negation(func):
 
 
 @wrap_logical_op_with_cast_to_uint8
+def eq(g, self, other):
+    return g.op("Equal", self, other)
+
+
+@wrap_logical_op_with_cast_to_uint8
+@wrap_logical_op_with_negation
+def ne(g, self, other):
+    return g.op("Equal", self, other)
+
+
+@wrap_logical_op_with_cast_to_uint8
 def gt(g, input, other):
     return gt_impl(g, input, other)
 
@@ -939,15 +950,6 @@ def min(g, self, dim_or_y=None, keepdim=None):
                     dim_i=dim,
                     keepdim_i=keepdim,
                     outputs=2)
-
-
-@wrap_logical_op_with_cast_to_uint8
-def eq(g, self, other):
-    return g.op("Equal", self, other)
-
-
-def ne(g, self, other):
-    return g.op("Not", eq(g, self, other))
 
 
 def exp(g, self):
