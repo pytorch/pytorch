@@ -13,7 +13,7 @@ struct Vec256i {
 protected:
   __m256i values;
 
-  static inline __m256i invert(__m256i v) {
+  static inline __m256i invert(const __m256i& v) {
     const auto ones = _mm256_set1_epi64x(-1);
     return _mm256_xor_si256(ones, v);
   }
