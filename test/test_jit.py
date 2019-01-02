@@ -8998,7 +8998,6 @@ a")
         self.checkScript(foo, [torch.rand(2, 3)])
 
 
-
 class MnistNet(nn.Module):
     def __init__(self):
         super(MnistNet, self).__init__()
