@@ -209,7 +209,7 @@ void reflection_pad2d_backward_out_template(
   dim3 grid_size(
     (int) std::ceil(output_plane_size/256.0), nplane, nbatch);
 
-  AT_DISPATCH_FLOATING_TYPES(
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
     input.type(), "reflection_pad2d_backward_out_template", [&] {
       reflection_pad2d_backward_out_kernel<<<
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
