@@ -163,7 +163,7 @@ std::tuple<Tensor, Tensor> _gesv_helper_cpu(const Tensor& self, const Tensor& A)
 // Supports arbitrary batch dimensions for self and A
 std::tuple<Tensor,Tensor> gesv(const Tensor& self, const Tensor& A) {
   AT_CHECK(self.dim() >= 2,
-           "b should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+           "B should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   AT_CHECK(A.dim() >= 2,
            "A should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
   Tensor self_broadcasted, A_broadcasted;
