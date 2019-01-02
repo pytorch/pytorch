@@ -980,45 +980,6 @@ def run_additional_tri_tests(self, device):
             1, 1, device=device, layout=torch.sparse_coo))
 
 
-def _compare_any_results(self, device):
-    x = torch.zeros([2, 3, 4], dtype=torch.uint8, device=device)
-
-    self.assertEqual(
-        torch.tensor(0, dtype=torch.uint8, device=device),
-        x.any())
-
-    self.assertEqual(
-        torch.zeros([1, 3, 4], dtype=torch.uint8, device=device),
-        x.any(0, keepdim=True))
-
-    self.assertEqual(
-        torch.zeros([2, 1, 4], dtype=torch.uint8, device=device),
-        x.any(1, keepdim=True))
-
-    self.assertEqual(
-        torch.zeros([2, 3, 1], dtype=torch.uint8, device=device),
-        x.any(2, keepdim=True))
-
-    # set the last element to 0
-    x[1][2][3] = 1
-
-    self.assertEqual(
-        torch.tensor(1, dtype=torch.uint8, device=device),
-        x.any())
-
-    y = torch.zeros([1, 3, 4], dtype=torch.uint8, device=device)
-    y[0][2][3] = 1
-    self.assertEqual(y, x.any(0, keepdim=True))
-
-    y = torch.zeros([2, 1, 4], dtype=torch.uint8, device=device)
-    y[1][0][3] = 1
-    self.assertEqual(y, x.any(1, keepdim=True))
-
-    y = torch.zeros([2, 3, 1], dtype=torch.uint8, device=device)
-    y[1][2][0] = 1
-    self.assertEqual(y, x.any(2, keepdim=True))
-
-
 def unpack_variables(args):
     if isinstance(args, tuple):
         return tuple(unpack_variables(elem) for elem in args)
