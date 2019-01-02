@@ -53,8 +53,9 @@ std::mutex mutex;
 
 // Handles are lazily created as different threads request them,
 // but are never destroyed until the end of the process.
-// The maximum number of handles this process will create is equal to the high-water
-// mark of the number of concurrently active threads that have requested handles.
+// The maximum number of handles this process will create for each device is equal
+// to the high-water mark of the number of concurrently active threads that request
+// handles for that device.
 // When threads terminate, they release their handles back into the pool for reuse.
 // Otherwise, new handles would be created every time new threads were spawned,
 // resulting in poor performance for Python modules that repeatedly or frequently
