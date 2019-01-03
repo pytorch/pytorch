@@ -337,8 +337,11 @@ if(USE_CUDA)
   # These public dependencies must go after the previous dependencies, as the
   # order of the libraries in the linker call matters here when statically
   # linking; libculibos and cublas must be last.
-  target_link_libraries(
-      caffe2_gpu PUBLIC caffe2 ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+  if (CAFFE2_STATIC_LINK_CUDA)
+          target_link_libraries(caffe2_gpu PRIVATE caffe2 ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+  else()
+      target_link_libraries(caffe2_gpu PUBLIC caffe2 ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+  endif()
 
   # See Note [Supporting both static and dynamic libraries on Window]
   # TODO: I'm actually not sure why this is necessary, because caffe2_gpu
