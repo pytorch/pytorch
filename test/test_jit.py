@@ -7955,6 +7955,29 @@ a")
             test_str.append(fn.__getattr__('forward').pretty_print_schema())
         self.assertExpected("\n".join(test_str))
 
+    def test_bad_multiline_annotations(self):
+        with self.assertRaisesRegex(RuntimeError, "Could not parse"):
+            @torch.jit.script
+            def fn(a, # type: Tensor
+                   b, # type: Tensor
+                   c  # type: Tensor
+                   ):
+                # type: (int, int, int) -> Tensor
+                # type: this is fake
+                return a + b + c
+
+        with self.assertRaisesRegex(RuntimeError, "Could not parse"):
+            @torch.jit.script
+            def fn(a, # type: Tensor
+                   b,
+                   c  # type: Tensor
+                   ):
+                # type: (int, int, int) -> Tensor
+                # type: this is fake
+                return a + b + c
+
+
+
     #  Python AST Frontend , Python 3-style type annotations , Script method
     @unittest.skipIf(not PY35, "Python 3.5 needed")
     def test_annot_ast_py3_method(self):

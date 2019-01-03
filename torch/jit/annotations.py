@@ -108,46 +108,48 @@ def get_type_line(source):
     type_comment = '# type:'
 
     lines = source.split('\n')
-    lines = [(index, line) for index, line in enumerate(lines)]
+    lines = [(line_no, line) for line_no, line in enumerate(lines)]
     lines = list(filter(lambda line: type_comment in line[1], lines))
 
     if len(lines) == 0:
         return None
     elif len(lines) == 1:
         # Only 1 type line, quit now
-        return lines[0][1]
+        return lines[0][1].strip()
 
     # Parse split up argument types, ensuring they are placed on subsequent
     # lines (except for the return type, which is n + 2 after the last arg line)
-    last_index = None
+    # according to PEP 484
+    # https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code
+    last_line_no = None
     return_line = None
-    arg_type_lines = []
-    for index, line in lines:
-        if last_index is not None and last_index != index - 1:
-            # non-subsequent line
-            if last_index == index - 2 and '(...) -> ' in line:
+    parameter_type_lines = []
+    for line_no, line in lines:
+        if last_line_no is not None and last_line_no + 1 != line_no:
+            # non-subsequent type line
+            if last_line_no == line_no - 2 and '# type: (...) -> ' in line:
+                # if it's the return line, it's supposed to be last_line_no + 2
+                # away
                 return_line = line
                 break
-            raise RuntimeError("Missing type line before return type line")
-        last_index = index
-        arg_type_lines.append(line)
+            raise RuntimeError("Could not parse multiline type annotation")
+        last_line_no = line_no
+        parameter_type_lines.append(line)
 
     if not return_line:
-        raise RuntimeError("Incorrect return type line on multiline type annotation")
+        # Did not find return type line (missing or not in the right place)
+        raise RuntimeError("Missing return type line on multiline type annotation")
 
-    # Get type from each argument declaration
     types = []
-    for type_line in arg_type_lines:
+    # Get each individual type from each argument declaration
+    for type_line in parameter_type_lines:
         item_type = type_line[type_line.find(type_comment) + len(type_comment):]
         types.append(item_type.strip())
 
     parameter_types = ", ".join(types)
 
-    # Replace (...) with (parameter_types)
+    # Replace (...) with (`parameter_types`)
     line_parts = return_line.split("...")
-    if len(line_parts) != 2:
-        raise RuntimeError("Incorrect return type line on multiline type annotation")
-
     return line_parts[0] + parameter_types + line_parts[1]
 
 
