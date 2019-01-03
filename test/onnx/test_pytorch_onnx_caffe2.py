@@ -150,7 +150,7 @@ class TestCaffe2Backend(unittest.TestCase):
             torch_out = (torch_out,)
 
         caffe2_out = run_embed_params(onnxir, model, input, state_dict, use_gpu)
-        for i, (x, y) in enumerate(zip(torch_out, caffe2_out)):
+        for _, (x, y) in enumerate(zip(torch_out, caffe2_out)):
             np.testing.assert_almost_equal(x.data.cpu().numpy(), y, decimal=3)
 
     def run_actual_test(self, model, train, batch_size, state_dict=None,
@@ -995,6 +995,11 @@ class TestCaffe2Backend(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         self.run_model_test(ReduceSumNegativeIndices(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_group_norm(self):
+        c = torch.randn(BATCH_SIZE, 6, 224)
+        model = nn.GroupNorm(3, 6)
+        self.run_model_test(model, train=True, input=c, batch_size=BATCH_SIZE)
 
 
 # a bit of metaprogramming to set up all the rnn tests

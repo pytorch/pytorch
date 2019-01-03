@@ -1,13 +1,14 @@
 #pragma once
 
-#include <memory>
+#include <torch/csrc/jit/argument_spec.h>
+#include <torch/csrc/jit/autodiff.h>
+#include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/variable_tensor_list.h>
-#include <torch/csrc/jit/interpreter.h>
-#include <torch/csrc/jit/autodiff.h>
-#include <torch/csrc/jit/argument_spec.h>
+#include <memory>
 
-namespace torch { namespace jit {
+namespace torch {
+namespace jit {
 
 struct GraphExecutorState;
 
@@ -29,7 +30,7 @@ struct GraphExecutorImpl;
 struct TORCH_API GraphExecutor {
   GraphExecutor() = default;
   GraphExecutor(std::shared_ptr<Graph> graph, bool optimize = true);
-  void run(Stack & inputs);
+  void run(Stack& inputs);
   explicit operator bool() const {
     return pImpl != nullptr;
   }
@@ -37,7 +38,8 @@ struct TORCH_API GraphExecutor {
   std::shared_ptr<Graph> graphFor(const Stack& inputs) const;
   GraphExecutorState getDebugState();
   void debugDisableAutodiffSubgraphInlining();
-private:
+
+ private:
   std::shared_ptr<GraphExecutorImpl> pImpl;
 };
 
@@ -51,5 +53,5 @@ GraphExecutor* getGradExecutor(Operation& op);
 
 } // namespace detail
 
-
-}}
+} // namespace jit
+} // namespace torch

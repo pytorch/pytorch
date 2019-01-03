@@ -1155,6 +1155,12 @@ def pixel_shuffle(g, self, upscale_factor):
                  upscale_factor])
 
 
+@parse_args('v', 'i', 'v', 'v', 'f', 'i')
+def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
+    return g.op("ATen", input, weight, bias, num_groups_i=num_groups,
+                eps_f=eps, cudnn_enabled_i=cudnn_enabled, operator_s="group_norm")
+
+
 def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
                  num_layers, dropout, train, bidirectional, batch_first=None, batch_sizes=None):
     weights_per_layer = 4 if has_biases else 2

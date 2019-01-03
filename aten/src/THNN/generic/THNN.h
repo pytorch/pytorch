@@ -1047,19 +1047,6 @@ TH_API void THNN_(TemporalReflectionPadding_updateGradInput)(
           THTensor *gradInput,
           int pad_left, int pad_right);
 
-TH_API void THNN_(TemporalReplicationPadding_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          int pad_left, int pad_right);
-
-TH_API void THNN_(TemporalReplicationPadding_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          int pad_left, int pad_right);
-
 TH_API void THNN_(Tanh_updateOutput)(
           THNNState *state,
           THTensor *input,
