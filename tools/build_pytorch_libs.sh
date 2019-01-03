@@ -20,49 +20,18 @@ else
   }
 fi
 
-# We test the presence of cmake3 (for platforms like CentOS and Ubuntu 14.04)
-# and use the newer of cmake and cmake3 if so.
-CMAKE_COMMAND="cmake"
-if [[ -x "$(command -v cmake3)" ]]; then
-    if [[ -x "$(command -v cmake)" ]]; then
-        # have both cmake and cmake3, compare versions
-        # Usually cmake --version returns two lines,
-        #   cmake version #.##.##
-        #   <an empty line>
-        # On the nightly machines it returns one line
-        #   cmake3 version 3.11.0 CMake suite maintained and supported by Kitware (kitware.com/cmake).
-        # Thus we extract the line that has 'version' in it and hope the actual
-        # version number is gonna be the 3rd element
-        CMAKE_VERSION=$(cmake --version | grep 'version' | awk '{print $3}' | awk -F. '{print $1"."$2"."$3}')
-        CMAKE3_VERSION=$(cmake3 --version | grep 'version' | awk '{print $3}' | awk -F. '{print $1"."$2"."$3}')
-        CMAKE3_NEEDED=$($PYTORCH_PYTHON -c "from distutils.version import StrictVersion; print(1 if StrictVersion(\"${CMAKE_VERSION}\") < StrictVersion(\"3.5.0\") and StrictVersion(\"${CMAKE3_VERSION}\") > StrictVersion(\"${CMAKE_VERSION}\") else 0)")
-    else
-        # don't have cmake
-        CMAKE3_NEEDED=1
-    fi
-    if [[ $CMAKE3_NEEDED == "1" ]]; then
-        CMAKE_COMMAND="cmake3"
-    fi
-    unset CMAKE_VERSION CMAKE3_VERSION CMAKE3_NEEDED
-fi
-
 # Options for building only a subset of the libraries
-USE_CUDA=0
 USE_FBGEMM=0
 USE_ROCM=0
 USE_NNPACK=0
 USE_MKLDNN=0
 USE_QNNPACK=0
 USE_GLOO_IBVERBS=0
-CAFFE2_STATIC_LINK_CUDA=0
 RERUN_CMAKE=1
 while [[ $# -gt 0 ]]; do
     case "$1" in
       --dont-rerun-cmake)
           RERUN_CMAKE=0
-          ;;
-      --use-cuda)
-          USE_CUDA=1
           ;;
       --use-distributed)
           USE_DISTRIBUTED=1
@@ -85,9 +54,6 @@ while [[ $# -gt 0 ]]; do
       --use-gloo-ibverbs)
           USE_GLOO_IBVERBS=1
           ;;
-      --cuda-static-link)
-          CAFFE2_STATIC_LINK_CUDA=1
-          ;;
       *)
           break
           ;;
@@ -96,8 +62,6 @@ while [[ $# -gt 0 ]]; do
 done
 
 CMAKE_INSTALL=${CMAKE_INSTALL-make install}
-
-BUILD_SHARED_LIBS=${BUILD_SHARED_LIBS-ON}
 
 # Save user specified env vars, we will manually propagate them
 # to cmake.  We copy distutils semantics, referring to
@@ -126,7 +90,6 @@ fi
 
 BASE_DIR=$(cd $(dirname "$0")/.. && printf "%q\n" "$(pwd)")
 TORCH_LIB_DIR="$BASE_DIR/torch/lib"
-INSTALL_DIR="$BASE_DIR/torch"
 THIRD_PARTY_DIR="$BASE_DIR/third_party"
 
 C_FLAGS=""
@@ -161,15 +124,6 @@ if [ -z "$MAX_JOBS" ]; then
   MAX_JOBS="$(getconf _NPROCESSORS_ONLN)"
 fi
 
-BUILD_TYPE="Release"
-if [[ -n "$DEBUG" && $DEBUG -ne 0 ]]; then
-  BUILD_TYPE="Debug"
-elif [[ -n "$REL_WITH_DEB_INFO" && $REL_WITH_DEB_INFO -ne 0 ]]; then
-  BUILD_TYPE="RelWithDebInfo"
-fi
-
-report "Building in $BUILD_TYPE mode"
-
 # purposefully not using build() because we need Caffe2 to build the same
 # regardless of whether it is inside PyTorch or not, so it
 # cannot take any special flags
@@ -201,16 +155,13 @@ function build_caffe2() {
 		       -DPYTHON_INCLUDE_DIR="${PYTORCH_PYTHON_INCLUDE_DIR}" \
 		       -DBUILDING_WITH_TORCH_LIBS=ON \
 		       -DTORCH_BUILD_VERSION="$PYTORCH_BUILD_VERSION" \
-		       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
 		       -DBUILD_TORCH=$BUILD_TORCH \
 		       -DBUILD_PYTHON=$BUILD_PYTHON \
-		       -DBUILD_SHARED_LIBS=$BUILD_SHARED_LIBS \
 		       -DBUILD_BINARY=$BUILD_BINARY \
 		       -DBUILD_TEST=$BUILD_TEST \
 		       -DINSTALL_TEST=$INSTALL_TEST \
 		       -DBUILD_CAFFE2_OPS=$BUILD_CAFFE2_OPS \
 		       -DONNX_NAMESPACE=$ONNX_NAMESPACE \
-		       -DUSE_CUDA=$USE_CUDA \
 		       -DUSE_DISTRIBUTED=$USE_DISTRIBUTED \
 		       -DUSE_FBGEMM=$USE_FBGEMM \
 		       -DUSE_NUMPY=$USE_NUMPY \
@@ -219,7 +170,6 @@ function build_caffe2() {
 		       -DNCCL_INCLUDE_DIR=$NCCL_INCLUDE_DIR \
 		       -DNCCL_ROOT_DIR=$NCCL_ROOT_DIR \
 		       -DNCCL_SYSTEM_LIB=$NCCL_SYSTEM_LIB \
-		       -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
 		       -DUSE_ROCM=$USE_ROCM \
 		       -DUSE_NNPACK=$USE_NNPACK \
 		       -DUSE_LEVELDB=$USE_LEVELDB \
@@ -236,7 +186,7 @@ function build_caffe2() {
 		       -DCUDNN_LIBRARY=$CUDNN_LIBRARY \
 		       -DUSE_MKLDNN=$USE_MKLDNN \
 		       -DNCCL_EXTERNAL=$USE_CUDA \
-		       -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
+		       -DCMAKE_INSTALL_PREFIX="$BASE_DIR/torch" \
 		       -DTORCH_INSTALL_BIN_DIR="lib" \
 		       -DTORCH_INSTALL_INCLUDE_DIR="lib/include" \
 		       -DCMAKE_C_FLAGS="$USER_CFLAGS" \
@@ -286,11 +236,12 @@ function build_caffe2() {
       done
   fi
 
-
+  # As of Jan 7 2019 Jesse is intending to delete/move this block
+  #
   # Fix rpaths of shared libraries
   if [[ $(uname) == 'Darwin' ]]; then
-      report "Updating all install_names in $INSTALL_DIR/lib"
-      pushd "$INSTALL_DIR/lib"
+      report "Updating all install_names in $BASE_DIR/torch/lib"
+      pushd "$BASE_DIR/torch/lib"
       for lib in *.dylib; do
           report "Updating install_name for $(pwd)/$lib"
           install_name_tool -id @rpath/$lib $lib
@@ -300,36 +251,3 @@ function build_caffe2() {
 }
 
 build_caffe2
-
-pushd $TORCH_LIB_DIR > /dev/null
-
-# If all the builds succeed we copy the libraries, headers,
-# binaries to torch/lib
-report "tools/build_pytorch_libs.sh succeeded at $(date)"
-report "removing $INSTALL_DIR/lib/cmake and $INSTALL_DIR/lib/python"
-rm -rf "$INSTALL_DIR/lib/cmake"
-rm -rf "$INSTALL_DIR/lib/python"
-
-report "Copying $(cd ../.. && pwd)/aten/src/generic/THNN.h to $(pwd)"
-cp ../../aten/src/THNN/generic/THNN.h .
-cp ../../aten/src/THCUNN/generic/THCUNN.h .
-
-# Copy the test files to pytorch/caffe2 manually
-# They were built in pytorch/torch/lib/tmp_install/test
-# Why do we do this? So, setup.py has this section called 'package_data' which
-# you need to specify to include non-default files (usually .py files).
-# package_data takes a map from 'python package' to 'globs of files to
-# include'. By 'python package', it means a folder with an __init__.py file
-# that's not excluded in the find_packages call earlier in setup.py. So to
-# include our cpp_test into the site-packages folder in
-# site-packages/caffe2/cpp_test, we have to copy the cpp_test folder into the
-# root caffe2 folder and then tell setup.py to include them. Having another
-# folder like site-packages/caffe2_cpp_test would also be possible by adding a
-# caffe2_cpp_test folder to pytorch with an __init__.py in it.
-if [[ "$INSTALL_TEST" == "ON" ]]; then
-    echo "Copying $INSTALL_DIR/test to $BASE_DIR/caffe2/cpp_test"
-    mkdir -p "$BASE_DIR/caffe2/cpp_test/"
-    cp -r "$INSTALL_DIR/test/"/* "$BASE_DIR/caffe2/cpp_test/"
-fi
-
-popd > /dev/null

@@ -52,6 +52,18 @@ if(APPLE)
   set(CMAKE_MACOSX_RPATH ON)
 endif()
 
+if($ENV{BUILD_SHARED_LIBS})
+  set(BUILD_SHARED_LIBS $ENV{BUILD_SHARED_LIBS})
+endif()
+
+if($ENV{USE_CUDA})
+  set(USE_CUDA $ENV{USE_CUDA})
+endif()
+
+if($ENV{CAFFE2_STATIC_LINK_CUDA})
+  set(CAFFE2_STATIC_LINK_CUDA $ENV{CAFFE2_STATIC_LINK_CUDA})
+endif()
+
 # ---[ Options.
 # Note to developers: if you add an option below, make sure you also add it to
 # cmake/Summary.cmake so that the summary prints out the option values.
@@ -185,8 +197,16 @@ set(CAFFE2_WHITELIST "" CACHE STRING "A whitelist file of files that one should 
 
 # Set default build type
 if(NOT CMAKE_BUILD_TYPE)
-    message(STATUS "Build type not set - defaulting to Release")
-    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build from: Debug Release RelWithDebInfo MinSizeRel Coverage." FORCE)
+    if($ENV{DEBUG})
+        message(STATUS "Build type detected as Debug")
+        set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Choose the type of build from: Debug Release RelWithDebInfo MinSizeRel Coverage." FORCE)
+    elseif($ENV{REL_WITH_DEB_INFO})
+        message(STATUS "Build type detected as RelWithDebInfo")
+        set(CMAKE_BUILD_TYPE "RelWithDebInfo" CACHE STRING "Choose the type of build from: Debug Release RelWithDebInfo MinSizeRel Coverage." FORCE)
+    else()
+        message(STATUS "Build type not set - defaulting to Release")
+        set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build from: Debug Release RelWithDebInfo MinSizeRel Coverage." FORCE)
+    endif()
 endif()
 
 # ---[ Misc checks to cope with various compiler modes

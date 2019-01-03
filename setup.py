@@ -349,11 +349,8 @@ def build_libs(libs):
         my_env["NCCL_SYSTEM_LIB"] = NCCL_SYSTEM_LIB
     if USE_CUDA:
         my_env["CUDA_BIN_PATH"] = CUDA_HOME
-        build_libs_cmd += ['--use-cuda']
         if IS_WINDOWS:
             my_env["NVTOOLEXT_HOME"] = NVTOOLEXT_HOME
-    if USE_CUDA_STATIC_LINK:
-        build_libs_cmd += ['--cuda-static-link']
     if USE_FBGEMM:
         build_libs_cmd += ['--use-fbgemm']
     if USE_ROCM:
@@ -392,8 +389,42 @@ def build_libs(libs):
     my_env["USE_FFMPEG"] = "ON" if USE_FFMPEG else "OFF"
     my_env["USE_DISTRIBUTED"] = "ON" if USE_DISTRIBUTED else "OFF"
     my_env["USE_SYSTEM_NCCL"] = "ON" if USE_SYSTEM_NCCL else "OFF"
+    my_env["USE_CUDA"] = "ON" if USE_CUDA else "OFF"
+
+    # NOTE the spelling changes
+    my_env["CAFFE2_STATIC_LINK_CUDA"] = "ON" if USE_CUDA_STATIC_LINK else "OFF"
+
     if VERBOSE_SCRIPT:
         my_env['VERBOSE_SCRIPT'] = '1'
+
+    # We test the presence of cmake3 (for platforms like CentOS and Ubuntu 14.04)
+    # and use the newer of cmake and cmake3 if so.
+    cmake_command = 'cmake'
+    try:
+        cmake3_version = subprocess.check_output(['cmake3', '--version'])
+        cmake3_version = [l for l in cmake3_version.lines() if 'version' in l][0].split()[2]
+        try:
+            cmake_version = subprocess.check_output(['cmake', '--version'])
+            cmake_version = [l for l in cmake_version.lines() if 'version' in l][0].split()[2]
+
+            # have both cmake and cmake3, compare versions
+            # Usually cmake --version returns two lines,
+            #   cmake version #.##.##
+            #   <an empty line>
+            # On the nightly machines it returns one line
+            #   cmake3 version 3.11.0 CMake suite maintained and supported by Kitware (kitware.com/cmake).
+            # Thus we extract the line that has 'version' in it and hope the actual
+            # version number is gonna be the 3rd element
+            from distutils import StrictVersion
+            if StrictVersion(cmake_version) < StrictVersion('3.5.0') and \
+               StrictVersion(cmake_version) < StrictVersion(cmake3_version):
+                cmake_command = 'cmake3'
+        except Exception as e:
+            cmake_command = 'cmake3'
+    except Exception as e:
+        pass
+    my_env['CMAKE_COMMAND'] = cmake_command
+
     try:
         os.mkdir('build')
     except OSError:
@@ -431,6 +462,27 @@ class build_deps(PytorchCommand):
         libs = []
         libs += ['caffe2']
         build_libs(libs)
+
+        # Copy the test files to pytorch/caffe2 manually
+        # They were built in pytorch/torch/lib/tmp_install/test
+        # Why do we do this? So, setup.py has this section called 'package_data' which
+        # you need to specify to include non-default files (usually .py files).
+        # package_data takes a map from 'python package' to 'globs of files to
+        # include'. By 'python package', it means a folder with an __init__.py file
+        # that's not excluded in the find_packages call earlier in setup.py. So to
+        # include our cpp_test into the site-packages folder in
+        # site-packages/caffe2/cpp_test, we have to copy the cpp_test folder into the
+        # root caffe2 folder and then tell setup.py to include them. Having another
+        # folder like site-packages/caffe2_cpp_test would also be possible by adding a
+        # caffe2_cpp_test folder to pytorch with an __init__.py in it.
+        if BUILD_TEST:
+            report("Copying test to cpp_test")
+            try:
+                os.mkdir('caffe2')
+                os.mkdir(os.path.join('caffe2', 'cpp_test'))
+            except OSError:
+                pass
+            self.copy_tree('torch/test', 'caffe2/cpp_test')
 
         # Use copies instead of symbolic files.
         # Windows has very poor support for them.

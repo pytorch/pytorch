@@ -21,6 +21,7 @@ if __name__ == '__main__':
     os.environ['BUILD_TEST'] = 'ON'
     os.environ['ONNX_NAMESPACE'] = 'onnx_torch'
     os.environ['PYTORCH_PYTHON'] = sys.executable
+    os.environ['CMAKE_COMMAND'] = 'cmake'
 
     tools_path = os.path.dirname(os.path.abspath(__file__))
     if sys.platform == 'win32':
