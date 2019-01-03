@@ -41,7 +41,7 @@ if (NOT BUILD_ATEN_MOBILE)
   list(APPEND Caffe2_GPU_INCLUDE ${ATen_CUDA_INCLUDE})
   list(APPEND Caffe2_HIP_INCLUDE ${ATen_HIP_INCLUDE})
   list(APPEND Caffe2_DEPENDENCY_LIBS ${ATen_CPU_DEPENDENCY_LIBS})
-  list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS})
+  target_link_libraries(caffe2_private_cuda_dependencies INTERFACE ${ATen_CUDA_DEPENDENCY_LIBS})
   list(APPEND Caffe2_HIP_DEPENDENCY_LIBS ${ATen_HIP_DEPENDENCY_LIBS})
   list(APPEND Caffe2_DEPENDENCY_INCLUDE ${ATen_THIRD_PARTY_INCLUDE})
 else()
@@ -324,21 +324,35 @@ if(USE_CUDA)
   set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
   torch_cuda_based_add_library(caffe2_gpu ${Caffe2_GPU_SRCS})
   set(CUDA_LINK_LIBRARIES_KEYWORD)
-  target_link_libraries(caffe2_gpu INTERFACE caffe2::cudart)
+  if(NOT CAFFE2_STATIC_LINK_CUDA)
+    # This flag is only used when building binaries, when we also package the
+    # needed CUDA runtime libraries and ship them alongside the caffe2/torch
+    # libs, so we don't want any transitive dependencies on these CUDA
+    # libraries
+    # TODO, or does this dependency still need to be stated somehow? We already
+    # patch the actual library dependencies so that our final shared libraries
+    # don't have this dep. We want to remove the dep in cmake land so that the
+    # Caffe2Targets.cmake does not reference any CUDA libraries as a reqs
+    target_link_libraries(caffe2_gpu INTERFACE caffe2::cudart)
+  endif()
   target_link_libraries(caffe2_gpu PUBLIC c10_cuda)
 
-  target_include_directories(
-      caffe2_gpu INTERFACE $<INSTALL_INTERFACE:include>)
-  target_include_directories(
-      caffe2_gpu PRIVATE ${Caffe2_GPU_INCLUDE})
-  target_link_libraries(
-      caffe2_gpu PRIVATE ${Caffe2_CUDA_DEPENDENCY_LIBS})
+  target_include_directories(caffe2_gpu INTERFACE $<INSTALL_INTERFACE:include>)
+  target_include_directories(caffe2_gpu PRIVATE ${Caffe2_GPU_INCLUDE})
+  target_link_libraries(caffe2_gpu PRIVATE caffe2_private_cuda_dependencies)
 
   # These public dependencies must go after the previous dependencies, as the
   # order of the libraries in the linker call matters here when statically
   # linking; libculibos and cublas must be last.
-  target_link_libraries(
-      caffe2_gpu PUBLIC caffe2 ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+  target_link_libraries(caffe2_gpu PUBLIC caffe2)
+  if(CAFFE2_STATIC_LINK_CUDA)
+    # If linking CUDA statically, we don't want these dependencies to be
+    # propogated to downstream targets that depend on caffe2_gpu, since the
+    # CUDA libraries will be shipped with the binary
+    target_link_libraries(caffe2_gpu PRIVATE Caffe2::public_cuda_dependencies)
+  else()
+    target_link_libraries(caffe2_gpu PUBLIC Caffe2::public_cuda_dependencies)
+  endif()
 
   # See Note [Supporting both static and dynamic libraries on Window]
   # TODO: I'm actually not sure why this is necessary, because caffe2_gpu

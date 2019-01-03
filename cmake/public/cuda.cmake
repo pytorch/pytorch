@@ -4,6 +4,9 @@
 if(TARGET caffe2::cudart)
   return()
 endif()
+if(TARGET caffe2_public_cuda_dependencies)
+  return()
+endif()
 
 # sccache is only supported in CMake master and not in the newest official
 # release (3.11.3) yet. Hence we need our own Modules_CUDA_fix to enable sccache.
@@ -63,7 +66,7 @@ if(CUDA_FOUND)
       "Perhaps, try re-running this command again with PATH=${CUDA_TOOLKIT_ROOT_DIR}/bin:$PATH.  "
       "See above log messages for more diagnostics, and see https://github.com/pytorch/pytorch/issues/8092 for more details.")
   endif()
-endif()
+endif(CUDA_FOUND)
 
 # Find cuDNN.
 if(CAFFE2_STATIC_LINK_CUDA)
@@ -103,23 +106,6 @@ if(NOT CUDNN_FOUND)
   set(CAFFE2_USE_CUDNN OFF)
 else()
   set(CAFFE2_USE_CUDNN ON)
-endif()
-
-# Optionally, find TensorRT
-if(CAFFE2_USE_TENSORRT)
-  find_path(TENSORRT_INCLUDE_DIR NvInfer.h
-    HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR}
-    PATH_SUFFIXES include)
-  find_library(TENSORRT_LIBRARY nvinfer
-    HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR}
-    PATH_SUFFIXES lib lib64 lib/x64)
-  find_package_handle_standard_args(
-    TENSORRT DEFAULT_MSG TENSORRT_INCLUDE_DIR TENSORRT_LIBRARY)
-  if(NOT TENSORRT_FOUND)
-    message(WARNING
-      "Caffe2: Cannot find TensorRT library. Turning the option off")
-    set(CAFFE2_USE_TENSORRT OFF)
-  endif()
 endif()
 
 # ---[ Extract versions
@@ -168,113 +154,118 @@ find_library(CUDA_NVRTC_LIB nvrtc
 # libraries installed. This flag should only be used for binary builds, so
 # end-users should never have this flag set.
 
-# cuda
-add_library(caffe2::cuda UNKNOWN IMPORTED)
-set_property(
-    TARGET caffe2::cuda PROPERTY IMPORTED_LOCATION
-    ${CUDA_CUDA_LIB})
-set_property(
-    TARGET caffe2::cuda PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-    ${CUDA_INCLUDE_DIRS})
 
-# cudart. CUDA_LIBRARIES is actually a list, so we will make an interface
-# library.
-add_library(caffe2::cudart INTERFACE IMPORTED)
-if(CAFFE2_STATIC_LINK_CUDA)
-    set_property(
-        TARGET caffe2::cudart PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcudart_static.a" rt)
-else()
-    set_property(
-        TARGET caffe2::cudart PROPERTY INTERFACE_LINK_LIBRARIES
-        ${CUDA_LIBRARIES})
-endif()
-set_property(
-    TARGET caffe2::cudart PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-    ${CUDA_INCLUDE_DIRS})
-
-# cudnn
-# static linking is handled by USE_STATIC_CUDNN environment variable
-if(CAFFE2_USE_CUDNN)
-  add_library(caffe2::cudnn UNKNOWN IMPORTED)
-  set_property(
-      TARGET caffe2::cudnn PROPERTY IMPORTED_LOCATION
-      ${CUDNN_LIBRARY})
-  set_property(
-      TARGET caffe2::cudnn PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-      ${CUDNN_INCLUDE_DIR})
-endif()
-
-# curand
-add_library(caffe2::curand UNKNOWN IMPORTED)
-if(CAFFE2_STATIC_LINK_CUDA)
-    set_property(
-        TARGET caffe2::curand PROPERTY IMPORTED_LOCATION
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcurand_static.a")
-else()
-    set_property(
-        TARGET caffe2::curand PROPERTY IMPORTED_LOCATION
-        ${CUDA_curand_LIBRARY})
-endif()
-set_property(
-    TARGET caffe2::curand PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-    ${CUDA_INCLUDE_DIRS})
+# We will create a caffe2_public_cuda_dependencies "library" that is just a
+# wrapper around all the transitive CUDA dependencies (mostly CUDA libraries).
+# N.B. there are other libraries that caffe2_gpu will need to depend on if e.g.
+# OpenCV is enabled, but these are private dependencies that are not needed by
+# downstream libraries; these are defined in cmake/Dependencies.cmake as
+# caffe2_private_cuda_dependencies
+add_library(caffe2_public_cuda_dependencies INTERFACE)
+target_include_directories(caffe2_public_cuda_dependencies INTERFACE "${CUDA_INCLUDE_DIRS}")
 
 # cufft. CUDA_CUFFT_LIBRARIES is actually a list, so we will make an
 # interface library similar to cudart.
 add_library(caffe2::cufft INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA)
-    set_property(
-        TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static.a")
+  set_target_properties(caffe2::cufft PROPERTIES INTERFACE_LINK_LIBRARIES "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static.a")
 else()
-    set_property(
-        TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES
-        ${CUDA_CUFFT_LIBRARIES})
+  set_target_properties(caffe2::cufft PROPERTIES INTERFACE_LINK_LIBRARIES "${CUDA_CUFFT_LIBRARIES}")
 endif()
-set_property(
-    TARGET caffe2::cufft PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-    ${CUDA_INCLUDE_DIRS})
+target_link_libraries(caffe2_public_cuda_dependencies INTERFACE caffe2::cufft)
 
-# TensorRT
-if(CAFFE2_USE_TENSORRT)
-  add_library(caffe2::tensorrt UNKNOWN IMPORTED)
-  set_property(
-      TARGET caffe2::tensorrt PROPERTY IMPORTED_LOCATION
-      ${TENSORRT_LIBRARY})
-  set_property(
-      TARGET caffe2::tensorrt PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-      ${TENSORRT_INCLUDE_DIR})
+# curand
+add_library(caffe2::curand UNKNOWN IMPORTED)
+if(CAFFE2_STATIC_LINK_CUDA)
+  set_target_properties(caffe2::curand PROPERTIES IMPORTED_LOCATION "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcurand_static.a")
+else()
+  set_target_properties(caffe2::curand PROPERTIES IMPORTED_LOCATION "${CUDA_curand_LIBRARY}")
+endif()
+target_link_libraries(caffe2_public_cuda_dependencies INTERFACE caffe2::curand)
+
+# nvrtc
+if(CAFFE2_USE_NVRTC)
+  # cuda
+  add_library(caffe2::cuda UNKNOWN IMPORTED)
+  set_target_properties(caffe2::cuda PROPERTIES IMPORTED_LOCATION "${CUDA_CUDA_LIB}")
+  target_link_libraries(caffe2_public_cuda_dependencies INTERFACE caffe2::cuda)
+
+  add_library(caffe2::nvrtc UNKNOWN IMPORTED)
+  set_target_properties(caffe2::nvrtc PROPERTIES IMPORTED_LOCATION "${CUDA_NVRTC_LIB}")
+  target_link_libraries(caffe2_public_cuda_dependencies INTERFACE caffe2::nvrtc)
+endif()
+
+# cudnn
+# static linking is handled by USE_STATIC_CUDNN environment variable
+if(CAFFE2_USE_CUDNN)
+  add_library(caffe2::cudnn UNKNOWN IMPORTED)
+  set_target_properties(caffe2::cudnn PROPERTIES IMPORTED_LOCATION "${CUDNN_LIBRARY}")
+  target_link_libraries(caffe2_public_cuda_dependencies INTERFACE caffe2::cudnn)
+endif()
+
+# culibos, only needed for static linking
+if(CAFFE2_STATIC_LINK_CUDA)
+  add_library(caffe2::culibos UNKNOWN IMPORTED)
+  set_target_properties(caffe2::culibos PROPERTIES IMPORTED_LOCATION "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a")
+  target_link_libraries(caffe2_public_cuda_dependencies INTERFACE caffe2::culibos)
 endif()
 
 # cublas. CUDA_CUBLAS_LIBRARIES is actually a list, so we will make an
 # interface library similar to cudart.
 add_library(caffe2::cublas INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA)
-    set_property(
-        TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a")
+  set_target_properties(caffe2::cublas PROPERTIES INTERFACE_LINK_LIBRARIES "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a")
 else()
-    set_property(
-        TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
-        ${CUDA_CUBLAS_LIBRARIES})
+  set_target_properties(caffe2::cublas PROPERTIES INTERFACE_LINK_LIBRARIES "${CUDA_CUBLAS_LIBRARIES}")
 endif()
-set_property(
-    TARGET caffe2::cublas PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-    ${CUDA_INCLUDE_DIRS})
+target_link_libraries(caffe2_public_cuda_dependencies INTERFACE caffe2::cublas)
 
-# nvrtc
-add_library(caffe2::nvrtc UNKNOWN IMPORTED)
-set_property(
-    TARGET caffe2::nvrtc PROPERTY IMPORTED_LOCATION
-    ${CUDA_NVRTC_LIB})
-set_property(
-    TARGET caffe2::nvrtc PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-    ${CUDA_INCLUDE_DIRS})
+# cudart. CUDA_LIBRARIES is actually a list, so we will make an interface
+# library.
+add_library(caffe2::cudart INTERFACE IMPORTED)
+if(CAFFE2_STATIC_LINK_CUDA)
+  set_target_properties(caffe2::cudart PROPERTIES INTERFACE_LINK_LIBRARIES "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcudart_static.a" rt)
+else()
+  set_target_properties(caffe2::cudart PROPERTIES INTERFACE_LINK_LIBRARIES "${CUDA_LIBRARIES}")
+endif()
+# Some targets link only against cudart, so this target needs its own interface
+# dependency on the headers
+set_target_properties(caffe2::cudart PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${CUDA_INCLUDE_DIRS}")
 
-# Note: in theory, we can add similar dependent library wrappers. For
-# now, Caffe2 only uses the above libraries, so we will only wrap
-# these.
+# TensorRT
+# TODO This target doesn't seem to be referenced from anywhere
+if(CAFFE2_USE_TENSORRT)
+  find_path(TENSORRT_INCLUDE_DIR NvInfer.h
+    HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR}
+    PATH_SUFFIXES include)
+  find_library(TENSORRT_LIBRARY nvinfer
+    HINTS ${TENSORRT_ROOT} ${CUDA_TOOLKIT_ROOT_DIR}
+    PATH_SUFFIXES lib lib64 lib/x64)
+  find_package_handle_standard_args(
+    TENSORRT DEFAULT_MSG TENSORRT_INCLUDE_DIR TENSORRT_LIBRARY)
+  if(NOT TENSORRT_FOUND)
+    message(WARNING
+      "Caffe2: Cannot find TensorRT library. Turning the option off")
+    set(CAFFE2_USE_TENSORRT OFF)
+  else()
+    add_library(caffe2::tensorrt UNKNOWN IMPORTED)
+    set_target_properties(caffe2::tensorrt PROPERTIES IMPORTED_LOCATION ${TENSORRT_LIBRARY})
+    set_target_properties(caffe2::tensorrt PROPERTIES INTERFACE_INCLUDE_DIRECTORIES ${TENSORRT_INCLUDE_DIR})
+    target_link_libraries(caffe2_public_cuda_dependencies INTERFACE caffe2::tensorrt)
+  endif()
+endif()
+
+# Define an alias library for dependencies to link to. This avoids
+# caffe2_public_cuda_dependencies from being defined both in an import of
+# Caffe2Targets and in this file
+add_library(Caffe2::public_cuda_dependencies ALIAS caffe2_public_cuda_dependencies)
+
+# We only static link CUDA when building binaries, when all the static
+# libraries are also copied into the binaries. In this case we don't want there
+# to be a cmake target dependency on these libraries
+#if(NOT CAFFE2_STATIC_LINK_CUDA)
+#  install(TARGETS caffe2_public_cuda_dependencies EXPORT Caffe2Targets DESTINATION lib)
+#endif()
 
 # Special care for windows platform: we know that 32-bit windows does not
 # support cuda.

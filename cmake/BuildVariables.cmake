@@ -26,9 +26,9 @@ set(Caffe2_GPU_INCLUDE)
 # depend on when it links against Caffe2.
 set(Caffe2_MAIN_LIBS)
 
-# Lists for Caffe2 dependency libraries, for CPU and CUDA respectively.
+# Lists for Caffe2 dependency libraries
 set(Caffe2_DEPENDENCY_LIBS "")
-set(Caffe2_CUDA_DEPENDENCY_LIBS "")
+
 # This variable contains dependency libraries of Caffe2 which requires whole
 # symbol linkage. One example is the onnx lib where we need all its schema
 # symbols. However, if the lib is whole linked in caffe2 lib, we don't want
@@ -42,7 +42,6 @@ set(Caffe2_DEPENDENCY_WHOLE_LINK_LIBS "")
 # Lists for Caffe2 public dependency libraries. These libraries will be
 # transitive to any libraries that depends on Caffe2.
 set(Caffe2_PUBLIC_DEPENDENCY_LIBS "")
-set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS "")
 
 # List of modules that is built as part of the main Caffe2 build. For all
 # binary targets, such as Python and native binaries, they will be linked
