@@ -1101,7 +1101,7 @@ RegisterOperators reg2({
       CREATE_IMMUTABLE_LIST_OPS("int", IntList),
       CREATE_IMMUTABLE_LIST_OPS("float", DoubleList),
       CREATE_IMMUTABLE_LIST_OPS("t", GenericList),
-      CREATE_IMMUTABLE_LIST_OPS("bool", BoolList)
+      CREATE_IMMUTABLE_LIST_OPS("bool", BoolList),
 
   #define CREATE_LIST_OPS(decl_type, c_type)                                          \
     Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>),         \

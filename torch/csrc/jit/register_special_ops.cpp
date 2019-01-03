@@ -298,6 +298,7 @@ DEFINE_TORCH_TENSOR_OP(bool, bool, at::empty({}, at::CPU(at::kByte).options()).f
             return 0;
           };
         }),
+    Operator(
       "aten::tensor(t[] data, *, ScalarType? dtype=None, Device? device=None) -> Tensor",
       [](const Node* node) {
         auto input = node->inputs().at(0);
