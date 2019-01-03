@@ -2145,9 +2145,6 @@ class TestNN(NNTestCase):
             y_draw = F.gumbel_softmax(logits, hard=True)
             counts = counts + y_draw
 
-        # check that we have (some) gradient
-        self.assertTrue(y_draw.requires_grad)
-
         # All values positive
         self.assertGreaterEqual(y_draw.min(), 0)
         # Each experiment should result in 1 draw.
@@ -2161,6 +2158,23 @@ class TestNN(NNTestCase):
         # occurs with prob alpha~>=0.01 if unbiased
         self.assertLess(z.abs().max().item(), 2.58)
 
+    def _test_gumbel_softmax_grad(cuda, dtype):
+        # "hard" and "not hard" should propagate same gradient.
+        device = torch.device("cuda") if cuda else torch.device("cpu")
+        logits_soft = torch.zeros(10, 10, dtype=dtype, device = device, requires_grad=True)
+        logits_hard = torch.zeros(10, 10, dtype=dtype, device = device, requires_grad=True)
+
+        seed = torch.random.get_rng_state()
+        y_soft = gumbel_softmax(logits_soft, hard=False)
+        torch.random.set_rng_state(seed)
+        y_hard = gumbel_softmax(logits_hard, hard=True)
+
+        y_soft.sum().backward()
+        y_hard.sum().backward()
+
+        tol = torch.finfo(dtype).eps
+        self.assertAlmostEqual(logits_soft.grad, logits_hard.grad, delta = tol)
+
     @repeat_test_for_types(NO_HALF_TENSORTYPES)
     def test_gumbel_softmax(self, dtype=torch.float):
         """
@@ -2172,6 +2186,7 @@ class TestNN(NNTestCase):
         self._test_gumbel_softmax_st_shapes(cuda=False, dtype=dtype, shape=[5, 4, 3], dim=1, count_expected=5 * 3)
         self._test_gumbel_softmax_st_shapes(cuda=False, dtype=dtype, shape=[5, 4, 3], dim=-1, count_expected=5 * 4)
         self._test_gumbel_softmax_straight_through(cuda=False, dtype=dtype)
+        self._test_gumbel_softmax_grad(cuda=False, dtype=dtype)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
@@ -2182,6 +2197,7 @@ class TestNN(NNTestCase):
         self._test_gumbel_softmax_st_shapes(cuda=True, dtype=dtype, shape=[5, 4, 3], dim=1, count_expected=5 * 3)
         self._test_gumbel_softmax_st_shapes(cuda=True, dtype=dtype, shape=[5, 4, 3], dim=-1, count_expected=5 * 4)
         self._test_gumbel_softmax_straight_through(cuda=True, dtype=dtype)
+        self._test_gumbel_softmax_grad(cuda=True, dtype=dtype)
 
     def _test_EmbeddingBag(self, cuda, mode, sparse, dtype=torch.double):
         # check a known test example
