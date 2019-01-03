@@ -505,6 +505,18 @@ struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
         pref,
         0,
         algo));
+    
+    // cudnnConvolutionFwdAlgoPerf_t perfResults;
+    // int returnedAlgoCount;
+    // AT_CUDNN_CHECK(cudnnGetConvolutionForwardAlgorithm_v7(
+    //     args.handle,
+    //     args.idesc.desc(),
+    //     args.wdesc.desc(),
+    //     args.cdesc.desc(),
+    //     args.odesc.desc(),
+    //     2,
+    //     returnedAlgoCount,
+    //     perfResults));
   }
 
   static void getWorkspaceSize(
