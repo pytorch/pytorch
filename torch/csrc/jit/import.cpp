@@ -1,13 +1,12 @@
 #include <google/protobuf/util/json_util.h>
 #include <google/protobuf/util/type_resolver_util.h>
 
-#include <torch/csrc/jit/import.h>
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/utils/functional.h>
 #include <torch/csrc/jit/assertions.h>
-#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/import.h>
 #include <torch/csrc/jit/import_method.h>
-
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/utils/functional.h>
 
 #include <caffe2/core/types.h>
 #include <caffe2/proto/caffe2_pb.h>
@@ -16,12 +15,13 @@
 
 #include <ATen/ATen.h>
 
+#include <fstream>
+#include <string>
 #include <unordered_map>
 #include <vector>
-#include <string>
-#include <fstream>
 
-namespace torch { namespace jit {
+namespace torch {
+namespace jit {
 
 namespace {
 
@@ -37,26 +37,27 @@ class ScriptModuleDeserializer final {
 
   ScriptModuleDeserializer(std::istream* is);
 
-  void deserialize(ModuleLookup module_lookup,
+  void deserialize(
+      ModuleLookup module_lookup,
       c10::optional<at::Device> device);
 
-private:
- at::Tensor loadTensor(
-     const torch::TensorDef& tensor_proto,
-     std::unordered_map<std::string, at::Storage>& storageMap);
+ private:
+  at::Tensor loadTensor(
+      const torch::TensorDef& tensor_proto,
+      std::unordered_map<std::string, at::Storage>& storageMap);
 
- void convertModule(const torch::ModuleDef& module_def);
+  void convertModule(const torch::ModuleDef& module_def);
 
- void loadTensorTable(torch::ModelDef* model_def);
+  void loadTensorTable(torch::ModelDef* model_def);
 
- PyTorchStreamReader reader_;
- // this is a hack to make sure the script module created in C++ is the
- // same as created in Python
- ModuleLookup moduleLookup_;
- c10::optional<at::Device> device_;
- std::vector<std::string> moduleStack_;
+  PyTorchStreamReader reader_;
+  // this is a hack to make sure the script module created in C++ is the
+  // same as created in Python
+  ModuleLookup moduleLookup_;
+  c10::optional<at::Device> device_;
+  std::vector<std::string> moduleStack_;
 
- std::vector<at::Tensor> tensor_table_;
+  std::vector<at::Tensor> tensor_table_;
 };
 
 ScriptModuleDeserializer::ScriptModuleDeserializer(const std::string& filename)
@@ -67,7 +68,8 @@ ScriptModuleDeserializer::ScriptModuleDeserializer(const std::string& filename)
 ScriptModuleDeserializer::ScriptModuleDeserializer(std::istream* is)
     : reader_(is) {}
 
-void ScriptModuleDeserializer::deserialize(ModuleLookup module_lookup,
+void ScriptModuleDeserializer::deserialize(
+    ModuleLookup module_lookup,
     c10::optional<at::Device> device) {
   torch::ModelDef model_def;
   at::DataPtr data_ptr;
@@ -108,15 +110,18 @@ void ScriptModuleDeserializer::deserialize(ModuleLookup module_lookup,
 
 void ScriptModuleDeserializer::loadTensorTable(torch::ModelDef* model_def) {
   std::unordered_map<std::string, at::Storage> storageMap;
-  for(const torch::TensorDef& tensor : model_def->tensors()) {
+  for (const torch::TensorDef& tensor : model_def->tensors()) {
     tensor_table_.emplace_back(loadTensor(tensor, storageMap));
   }
 }
 
-at::Tensor ScriptModuleDeserializer::loadTensor(const torch::TensorDef& tensor_proto,
-                std::unordered_map<std::string, at::Storage>& storageMap) {
-  std::vector<int64_t> dims(tensor_proto.dims().begin(), tensor_proto.dims().end());
-  std::vector<int64_t> strides(tensor_proto.strides().begin(), tensor_proto.strides().end());
+at::Tensor ScriptModuleDeserializer::loadTensor(
+    const torch::TensorDef& tensor_proto,
+    std::unordered_map<std::string, at::Storage>& storageMap) {
+  std::vector<int64_t> dims(
+      tensor_proto.dims().begin(), tensor_proto.dims().end());
+  std::vector<int64_t> strides(
+      tensor_proto.strides().begin(), tensor_proto.strides().end());
   auto type = at::typeMetaToScalarType(
       caffe2::DataTypeToTypeMeta(tensor_proto.data_type()));
   const std::string& record_key = tensor_proto.data().key();
@@ -138,17 +143,19 @@ at::Tensor ScriptModuleDeserializer::loadTensor(const torch::TensorDef& tensor_p
         record_size / at::CPU(type).typeMeta().itemsize(),
         nullptr); // NB: we didn't set any allocator for the tensor
     if (device.type() == at::DeviceType::CPU) {
-      storage_it = storageMap.insert(std::make_pair(
-            record_key, cpu_storage)).first;
+      storage_it =
+          storageMap.insert(std::make_pair(record_key, cpu_storage)).first;
     } else if (device.type() == at::DeviceType::CUDA) {
-      at::Tensor cpu_tensor = at::empty({0}, at::CPU(type).options()).set_(
-          cpu_storage, tensor_proto.offset(), dims, strides);
-      at::Storage cuda_storage = cpu_tensor.to(device,
-          cpu_tensor.scalar_type()).storage();
-      storage_it = storageMap.insert(std::make_pair(
-            record_key, cuda_storage)).first;
+      at::Tensor cpu_tensor =
+          at::empty({0}, at::CPU(type).options())
+              .set_(cpu_storage, tensor_proto.offset(), dims, strides);
+      at::Storage cuda_storage =
+          cpu_tensor.to(device, cpu_tensor.scalar_type()).storage();
+      storage_it =
+          storageMap.insert(std::make_pair(record_key, cuda_storage)).first;
     } else {
-      AT_ERROR("supported devices include CPU and CUDA, however got ",
+      AT_ERROR(
+          "supported devices include CPU and CUDA, however got ",
           at::DeviceTypeName(device.type(), false));
     }
   }
@@ -157,19 +164,20 @@ at::Tensor ScriptModuleDeserializer::loadTensor(const torch::TensorDef& tensor_p
        storage_it->second.device().index() != device.index())) {
     std::stringstream oss;
     oss << "storage previously was specified with device "
-      << storage_it->second.device()
-      << "but now is specified with device "
-      << device << std::endl;
+        << storage_it->second.device() << "but now is specified with device "
+        << device << std::endl;
     AT_ERROR(oss.str());
   }
 
   at::Tensor result;
   if (device.type() == at::DeviceType::CPU) {
-    result = at::empty({0}, at::CPU(type).options()).set_(
-        storage_it->second, tensor_proto.offset(), dims, strides);
+    result =
+        at::empty({0}, at::CPU(type).options())
+            .set_(storage_it->second, tensor_proto.offset(), dims, strides);
   } else if (device.type() == at::DeviceType::CUDA) {
-    result = at::empty({0}, at::CUDA(type).options()).set_(
-        storage_it->second, tensor_proto.offset(), dims, strides);
+    result =
+        at::empty({0}, at::CUDA(type).options())
+            .set_(storage_it->second, tensor_proto.offset(), dims, strides);
   }
   AT_ASSERT(result.defined());
 
@@ -191,19 +199,19 @@ void ScriptModuleDeserializer::convertModule(
   for (int i = 0; i < module_def.parameters_size(); ++i) {
     const torch::ParameterDef& param_def = module_def.parameters(i);
     at::Tensor tensor = tensor_table_.at(param_def.tensor_id());
-    module->register_parameter(
-        param_def.name(), tensor, param_def.is_buffer());
+    module->register_parameter(param_def.name(), tensor, param_def.is_buffer());
   }
   if (module_def.has_torchscript_arena()) {
     at::DataPtr data;
     size_t size;
-    std::tie(data, size) = reader_.getRecord(module_def.torchscript_arena().key());
+    std::tie(data, size) =
+        reader_.getRecord(module_def.torchscript_arena().key());
     std::string data_str(static_cast<const char*>(data.get()), size);
     import_methods(module, data_str, tensor_table_);
   }
 }
 
-}  // namespace
+} // namespace
 
 void import_ir_module(
     ModuleLookup module_lookup,
@@ -221,7 +229,8 @@ void import_ir_module(
   deserializer.deserialize(module_lookup, device);
 }
 
-std::shared_ptr<script::Module> load(std::istream& in,
+std::shared_ptr<script::Module> load(
+    std::istream& in,
     c10::optional<at::Device> device) {
   auto module = std::make_shared<script::Module>();
 
@@ -242,15 +251,17 @@ std::shared_ptr<script::Module> load(std::istream& in,
   return module;
 }
 
-std::shared_ptr<script::Module> load(const std::string& filename,
+std::shared_ptr<script::Module> load(
+    const std::string& filename,
     c10::optional<at::Device> device) {
   std::ifstream in(filename, std::ios_base::binary);
 
-  AT_CHECK(! in.fail(), "load: could not open file ", filename);
+  AT_CHECK(!in.fail(), "load: could not open file ", filename);
 
   auto module = load(in, device);
 
   return module;
 }
 
-}}
+} // namespace jit
+} // namespace torch

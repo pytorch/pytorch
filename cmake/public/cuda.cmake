@@ -10,7 +10,7 @@ endif()
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/../Modules_CUDA_fix)
 
 # Find CUDA.
-find_package(CUDA 7.0)
+find_package(CUDA)
 if(NOT CUDA_FOUND)
   message(WARNING
     "Caffe2: CUDA cannot be found. Depending on whether you are building "

@@ -266,6 +266,7 @@ Other Operations
 .. autofunction:: einsum
 .. autofunction:: flatten
 .. autofunction:: flip
+.. autofunction:: rot90
 .. autofunction:: histc
 .. autofunction:: meshgrid
 .. autofunction:: renorm
