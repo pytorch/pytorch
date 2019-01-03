@@ -2185,8 +2185,8 @@ class TestNN(NNTestCase):
     def _test_gumbel_softmax_grad(self, cuda, dtype):
         # "hard" and "not hard" should propagate same gradient.
         device = torch.device("cuda") if cuda else torch.device("cpu")
-        logits_soft = torch.zeros(10, 10, dtype=dtype, device = device, requires_grad=True)
-        logits_hard = torch.zeros(10, 10, dtype=dtype, device = device, requires_grad=True)
+        logits_soft = torch.zeros(10, 10, dtype=dtype, device=device, requires_grad=True)
+        logits_hard = torch.zeros(10, 10, dtype=dtype, device=device, requires_grad=True)
 
         seed = torch.random.get_rng_state()
         y_soft = gumbel_softmax(logits_soft, hard=False)
@@ -2197,7 +2197,7 @@ class TestNN(NNTestCase):
         y_hard.sum().backward()
 
         tol = torch.finfo(dtype).eps
-        self.assertAlmostEqual(logits_soft.grad, logits_hard.grad, delta = tol)
+        self.assertAlmostEqual(logits_soft.grad, logits_hard.grad, delta=tol)
 
     @repeat_test_for_types(NO_HALF_TENSORTYPES)
     def test_gumbel_softmax(self, dtype=torch.float):
