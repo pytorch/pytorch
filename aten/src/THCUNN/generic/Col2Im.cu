@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/Col2Im.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/Col2Im.cu"
 #else
 
 #include <ATen/div_rtn.h>
@@ -93,7 +93,7 @@ void THNN_(Col2Im_updateOutput)(
     THCTensor_(select)(state, input_n, input, 0, elt);
     THCTensor_(select)(state, output_n, output, 0, elt);
 
-    col2im<real, accreal>(
+    col2im<scalar_t, accreal>(
       THCState_getCurrentStream(state),
       THCTensor_(data)(state, input_n),
       nOutputPlane,

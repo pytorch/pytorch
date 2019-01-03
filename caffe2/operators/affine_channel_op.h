@@ -32,35 +32,23 @@ class AffineChannelOp final : public Operator<Context> {
     const auto& X = Input(0);
     const auto& scale = Input(1);
     const auto& bias = Input(2);
-    auto* Y = Output(0);
+
     if (is_learnable_) {
-      CAFFE_ENFORCE_NE(
-          Y,
-          &X,
+      CAFFE_ENFORCE(
+          !IsInputOutputAlias(0, 0),
           "In-place affine_channel_op is not supported when "
           "is_learnable = true.");
     }
     const int N = X.dim32(0);
     const int C = X.dim32(1);
-    const int HxW = X.size() / (N * C);
-    const std::array<int, 3> X_dims = {N, C, HxW};
-    const std::array<int, 3> scale_dims = {1, C, 1};
-    Y->ResizeLike(X);
-    math::Mul<T, Context>(
-        3,
-        X_dims.data(),
-        3,
-        scale_dims.data(),
+    const int HxW = X.numel() / (N * C);
+    auto* Y = Output(0, X.sizes(), at::dtype<T>());
+    math::AffineChannel<T, Context, StorageOrder::NCHW>(
+        N,
+        C,
+        HxW,
         X.template data<T>(),
         scale.template data<T>(),
-        Y->template mutable_data<T>(),
-        &context_);
-    math::Add<T, Context>(
-        3,
-        X_dims.data(),
-        3,
-        scale_dims.data(),
-        Y->template data<T>(),
         bias.template data<T>(),
         Y->template mutable_data<T>(),
         &context_);
@@ -71,30 +59,25 @@ class AffineChannelOp final : public Operator<Context> {
     const auto& X = Input(0);
     const auto& scale = Input(1);
     const auto& bias = Input(2);
-    auto* Y = Output(0);
+
     if (is_learnable_) {
-      CAFFE_ENFORCE_NE(
-          Y,
-          &X,
+      CAFFE_ENFORCE(
+          !IsInputOutputAlias(0, 0),
           "In-place affine_channel_op is not supported when "
           "is_learnable = true.");
     }
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
+    const int N = X.dim32(0);
     const int C = X.dim32(ndim - 1);
-    const int rows = X.size() / C;
-    const int cols = C;
-    Y->ResizeLike(X);
-    math::RowwiseMul<T, Context>(
-        rows,
-        cols,
+    const int HxW = X.numel() / (N * C);
+    auto* Y =
+        Output(0, X.sizes(), at::dtype<T>());
+    math::AffineChannel<T, Context, StorageOrder::NHWC>(
+        N,
+        C,
+        HxW,
         X.template data<T>(),
         scale.template data<T>(),
-        Y->template mutable_data<T>(),
-        &context_);
-    math::RowwiseAdd<T, Context>(
-        rows,
-        cols,
-        Y->template data<T>(),
         bias.template data<T>(),
         Y->template mutable_data<T>(),
         &context_);

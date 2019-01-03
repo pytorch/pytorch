@@ -29,3 +29,18 @@ void ShutdownProtobufLibrary() {
 }
 
 }  // namespace caffe2
+
+namespace torch {
+
+// Caffe2 wrapper functions for protobuf's GetEmptyStringAlreadyInited() function
+// used to avoid duplicated global variable in the case when protobuf
+// is built with hidden visibility.
+CAFFE2_API const ::std::string& GetEmptyStringAlreadyInited() {
+  return ::google::protobuf::internal::GetEmptyStringAlreadyInited();
+}
+
+void ShutdownProtobufLibrary() {
+  ::google::protobuf::ShutdownProtobufLibrary();
+}
+
+}  // namespace torch

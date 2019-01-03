@@ -139,6 +139,9 @@ view of a storage and defines numeric operations on it.
    .. automethod:: new_ones
    .. automethod:: new_zeros
 
+   .. autoattribute:: is_cuda
+   .. autoattribute:: device
+
    .. automethod:: abs
    .. automethod:: abs_
    .. automethod:: acos
@@ -157,6 +160,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: addmv_
    .. automethod:: addr
    .. automethod:: addr_
+   .. automethod:: allclose
    .. automethod:: apply_
    .. automethod:: argmax
    .. automethod:: argmin
@@ -179,6 +183,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: ceil
    .. automethod:: ceil_
    .. automethod:: char
+   .. automethod:: cholesky
+   .. automethod:: cholesky_solve
    .. automethod:: chunk
    .. automethod:: clamp
    .. automethod:: clamp_
@@ -196,9 +202,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cumsum
    .. automethod:: data_ptr
    .. automethod:: det
-   .. autoattribute:: device
-      :annotation:
    .. automethod:: diag
+   .. automethod:: diag_embed
    .. automethod:: dim
    .. automethod:: dist
    .. automethod:: div
@@ -254,8 +259,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: int
    .. automethod:: inverse
    .. automethod:: is_contiguous
-   .. autoattribute:: is_cuda
-      :annotation:
    .. automethod:: is_pinned
    .. automethod:: is_set_to
    .. automethod:: is_signed
@@ -284,6 +287,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: masked_fill_
    .. automethod:: masked_select
    .. automethod:: matmul
+   .. automethod:: matrix_power
    .. automethod:: max
    .. automethod:: mean
    .. automethod:: median
@@ -335,6 +339,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: reshape_as
    .. automethod:: resize_
    .. automethod:: resize_as_
+   .. automethod:: roll
    .. automethod:: round
    .. automethod:: round_
    .. automethod:: rsqrt
@@ -357,6 +362,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: slogdet
    .. automethod:: sort
    .. automethod:: split
+   .. automethod:: sparse_mask
    .. automethod:: sqrt
    .. automethod:: sqrt_
    .. automethod:: squeeze
@@ -381,6 +387,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: tanh_
    .. automethod:: tolist
    .. automethod:: topk
+   .. automethod:: to_sparse
    .. automethod:: trace
    .. automethod:: transpose
    .. automethod:: transpose_

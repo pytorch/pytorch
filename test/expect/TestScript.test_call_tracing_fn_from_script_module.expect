@@ -1,6 +1,6 @@
-graph(%x : Dynamic
-      %1 : Dynamic) {
-  %2 : Dynamic = aten::mm(%x, %1)
+graph(%x : Tensor
+      %1 : Tensor) {
+  %2 : Tensor = aten::mm(%x, %1)
   %3 : Double(3, 3) = aten::neg(%2)
   return (%3);
 }

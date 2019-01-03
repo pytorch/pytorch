@@ -1,10 +1,10 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCStorageCopy.cu"
+#define THC_GENERIC_FILE "THC/generic/THCStorageCopy.cu"
 #else
 
-void THCStorage_(rawCopy)(THCState *state, THCStorage *self, real *src)
+void THCStorage_(rawCopy)(THCState *state, THCStorage *self, scalar_t *src)
 {
-  THCudaCheck(cudaMemcpyAsync(THCStorage_(data)(state, self), src, self->numel() * sizeof(real), cudaMemcpyDeviceToDevice, THCState_getCurrentStream(state)));
+  THCudaCheck(cudaMemcpyAsync(THCStorage_(data)(state, self), src, self->numel() * sizeof(scalar_t), cudaMemcpyDeviceToDevice, THCState_getCurrentStream(state)));
 }
 
 // conversions are delegated to THCTensor implementation
@@ -15,7 +15,7 @@ void THCStorage_(copyCuda##TYPEC)(THCState *state, THCStorage *self, struct THCu
   THCTensor* selfTensor = THCTensor_(newWithStorage1d)(state, self, 0, self->numel(), 1);  \
   struct THCuda##TYPECUDA##Tensor* srcTensor =                                          \
       THCuda##TYPECUDA##Tensor_newWithStorage1d(state, src, 0, src->numel(), 1);           \
-  THCTensor_(copyCuda##TYPEC)(state, selfTensor, srcTensor);                            \
+  THCTensor_(copy)(state, selfTensor, srcTensor);                            \
   THCuda##TYPECUDA##Tensor_free(state, srcTensor);                                      \
   THCTensor_(free)(state, selfTensor);                                                  \
 }

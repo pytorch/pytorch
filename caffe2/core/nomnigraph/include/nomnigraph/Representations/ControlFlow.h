@@ -4,6 +4,7 @@
 #include "caffe2/core/common.h"
 #include "nomnigraph/Graph/Graph.h"
 #include "nomnigraph/Representations/Compiler.h"
+#include "nomnigraph/Support/Pointer.h"
 
 #include <unordered_map>
 
@@ -14,10 +15,13 @@ namespace repr {
 /// of the data flow graph as well as an ordering on instruction
 /// execution.  Basic blocks are used for control flow analysis.
 template <typename T, typename... U>
-class CAFFE2_API BasicBlock {
+class BasicBlock {
  public:
   using NodeRef = typename Subgraph<T, U...>::NodeRef;
   BasicBlock() {}
+  BasicBlock(const BasicBlock&) = delete;
+  BasicBlock(BasicBlock&&) = default;
+  BasicBlock& operator=(const BasicBlock&) = delete;
   ~BasicBlock() {
     for (auto pair : callbacks_) {
       pair.first->deleteDestructorCallback(pair.second);
@@ -46,8 +50,11 @@ class CAFFE2_API BasicBlock {
     instructions_.emplace_back(node);
     trackNode(node);
   }
-  const std::vector<NodeRef>& getInstructions() {
+  const std::vector<NodeRef>& getInstructions() const {
     return instructions_;
+  }
+  std::vector<NodeRef>* getMutableInstructions() {
+    return &instructions_;
   }
 
   bool hasInstruction(NodeRef instr) const {
@@ -92,7 +99,7 @@ class CAFFE2_API BasicBlock {
 using Program = Graph<Value>;
 
 template <typename G>
-struct CAFFE2_API ControlFlowGraphImpl {
+struct ControlFlowGraphImpl {
   // Hack to help debugging in case this class is misused.
   static_assert(
       sizeof(ControlFlowGraphImpl),
@@ -102,24 +109,9 @@ struct CAFFE2_API ControlFlowGraphImpl {
 };
 
 template <typename T, typename... U>
-struct CAFFE2_API ControlFlowGraphImpl<Graph<T, U...>> {
-  using type = Graph<std::unique_ptr<BasicBlock<T, U...>>, int>;
+struct ControlFlowGraphImpl<Graph<T, U...>> {
+  using type = Graph<BasicBlock<T, U...>, int>;
   using bbType = BasicBlock<T, U...>;
-};
-
-/// \brief Control flow graph is a graph of basic blocks that
-/// can be used as an analysis tool.
-///
-/// \note G Must be of type Graph<T, U...>.
-template <typename G>
-class CAFFE2_API ControlFlowGraph : public ControlFlowGraphImpl<G>::type {
- public:
-  // This is for C++11 compatibility, otherwise we could use "using"
-  ControlFlowGraph() {}
-  ControlFlowGraph(const ControlFlowGraph&) = delete;
-  ControlFlowGraph(ControlFlowGraph&&) = default;
-  ControlFlowGraph& operator=(ControlFlowGraph&&) = default;
-  ~ControlFlowGraph() {}
 };
 
 /// \brief Helper for extracting the type of BasicBlocks given
@@ -128,23 +120,48 @@ class CAFFE2_API ControlFlowGraph : public ControlFlowGraphImpl<G>::type {
 template <typename G>
 using BasicBlockType = typename ControlFlowGraphImpl<G>::bbType;
 
-/// \brief Converts graph to SSA representation.  Modifies the graph
-/// by inserting versions and phi nodes.
-template <typename Phi, typename G>
-CAFFE2_API void addSSA(G* dfg, ControlFlowGraph<G>* cfg) {
-  static_assert(
-      std::is_base_of<Instruction, Phi>::value,
-      "Phi type must be derived from Instruction.");
-  auto dfMap = dominanceFrontierMap(cfg);
-  for (auto pair : dfMap) {
-    for (auto n : pair.second) {
-      printf(
-          "%llu -> %llu\n",
-          (unsigned long long)pair.first,
-          (unsigned long long)n);
-    }
+/// \brief Control flow graph is a graph of basic blocks that
+/// can be used as an analysis tool.
+///
+/// \note G Must be of type Graph<T, U...>.
+template <typename G>
+class ControlFlowGraph : public ControlFlowGraphImpl<G>::type {
+ public:
+  // This is for C++11 compatibility, otherwise we could use "using"
+  ControlFlowGraph() {}
+  ControlFlowGraph(const ControlFlowGraph&) = delete;
+  ControlFlowGraph(ControlFlowGraph&&) = default;
+  ControlFlowGraph& operator=(ControlFlowGraph&&) = default;
+  ~ControlFlowGraph() {}
+  std::unordered_map<
+      std::string,
+      typename ControlFlowGraphImpl<G>::type::SubgraphType>
+      functions;
+  using BasicBlockRef = typename ControlFlowGraphImpl<G>::type::NodeRef;
+
+  // Named functions are simply basic blocks stored in labeled Subgraphs
+  BasicBlockRef createNamedFunction(std::string name) {
+    assert(name != "anonymous" && "Reserved token anonymous cannot be used");
+    auto bb = this->createNode(BasicBlockType<G>());
+    assert(functions.count(name) == 0 && "Name already in use.");
+    typename ControlFlowGraphImpl<G>::type::SubgraphType sg;
+    sg.addNode(bb);
+    functions[name] = sg;
+    return bb;
   }
-}
+
+  // Anonymous functions are aggregated into a single Subgraph
+  BasicBlockRef createAnonymousFunction() {
+    if (!functions.count("anonymous")) {
+      functions["anonymous"] =
+          typename ControlFlowGraphImpl<G>::type::SubgraphType();
+    }
+
+    auto bb = this->createNode(BasicBlockType<G>());
+    functions["anonymous"].addNode(bb);
+    return bb;
+  }
+};
 
 /// \brief Deletes a referenced node from the control flow graph.
 template <typename G>

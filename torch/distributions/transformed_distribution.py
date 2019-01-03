@@ -56,6 +56,16 @@ class TransformedDistribution(Distribution):
         event_shape = shape[len(shape) - event_dim:]
         super(TransformedDistribution, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(TransformedDistribution, _instance)
+        batch_shape = torch.Size(batch_shape)
+        base_dist_batch_shape = batch_shape + self.base_dist.batch_shape[len(self.batch_shape):]
+        new.base_dist = self.base_dist.expand(base_dist_batch_shape)
+        new.transforms = self.transforms
+        super(TransformedDistribution, new).__init__(batch_shape, self.event_shape, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
+
     @constraints.dependent_property
     def support(self):
         return self.transforms[-1].codomain if self.transforms else self.base_dist.support

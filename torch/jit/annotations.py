@@ -3,40 +3,12 @@ import sys
 import ast
 import inspect
 import torch
+from .._jit_internal import List, Tuple, BroadcastingList1, BroadcastingList2, BroadcastingList3, is_tuple
 from torch._C import DynamicType, TupleType, FloatType, IntType
 from textwrap import dedent
 
 
 PY35 = sys.version_info >= (3, 5)
-
-
-try:
-    import typing
-    from typing import Tuple
-
-    def is_tuple(ann):
-        # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
-        return ann.__module__ == 'typing' and \
-            (getattr(ann, '__origin__', None) is typing.Tuple or
-             getattr(ann, '__origin__', None) is tuple)
-except ImportError:
-    # A minimal polyfill for versions of Python that don't have typing.
-    # Note that this means that they also don't support the fancy annotation syntax, so
-    # those instances will only be used in our tiny `type: ` comment interpreter.
-
-    # The __getitem__ in typing is implemented using metaclasses, but I'm too lazy for that.
-    class TupleCls(object):
-        def __getitem__(self, types):
-            return TupleInstance(types)
-
-    class TupleInstance(object):
-        def __init__(self, types):
-            setattr(self, '__args__', types)
-
-    Tuple = TupleCls()
-
-    def is_tuple(ann):
-        return isinstance(ann, TupleInstance)
 
 
 class Module(object):
@@ -105,16 +77,6 @@ def get_num_params(fn):
         return num_params
 
 
-def flatten_return_type(type):
-    if isinstance(type, TupleType):
-        return_types = []
-        for elem_type in type.elements():
-            return_types.append(elem_type)
-        return return_types
-    else:
-        return [type]
-
-
 def parse_type_line(type_line):
     """Parses a type annotation specified as a comment.
 
@@ -138,9 +100,7 @@ def parse_type_line(type_line):
         raise RuntimeError("Failed to parse the return type of a type annotation")
 
     arg_types = [ann_to_type(ann) for ann in arg_ann]
-    ret_types = flatten_return_type(ann_to_type(ret_ann))
-
-    return arg_types, ret_types
+    return arg_types, ann_to_type(ret_ann)
 
 
 def get_type_line(source):
@@ -191,8 +151,8 @@ def try_real_annotations(fn):
 
     arg_types = [ann_to_type(as_ann(p.annotation))
                  for p in sig.parameters.values()]
-    return_types = flatten_return_type(ann_to_type(as_ann(sig.return_annotation)))
-    return arg_types, return_types
+    return_type = ann_to_type(as_ann(sig.return_annotation))
+    return arg_types, return_type
 
 
 def ann_to_type(ann):

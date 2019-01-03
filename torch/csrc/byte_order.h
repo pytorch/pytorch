@@ -1,8 +1,8 @@
 #ifndef THP_BYTE_ORDER_H
 #define THP_BYTE_ORDER_H
 
-#include <stdint.h>
-#include <stddef.h>
+#include <cstdint>
+#include <cstddef>
 #include <THHalf.h>
 
 enum THPByteOrder {

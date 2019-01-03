@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/VolumetricConvolution.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/VolumetricConvolution.cu"
 #else
 
 #include <ATen/div_rtn.h>
@@ -169,7 +169,7 @@ void THNN_(VolumetricConvolution_updateOutput)(
   {
     // Resize plane and fill with ones...
     THCTensor_(resize3d)(state, ones, outputHeight, outputWidth, outputDepth);
-    THCTensor_(fill)(state, ones, ScalarConvert<int, real>::to(1));
+    THCTensor_(fill)(state, ones, ScalarConvert<int, scalar_t>::to(1));
   }
 
   // Helpers
@@ -202,10 +202,10 @@ void THNN_(VolumetricConvolution_updateOutput)(
         state,
         't', 'n',
         n_, m_, k_,
-        ScalarConvert<int, real>::to(1),
+        ScalarConvert<int, scalar_t>::to(1),
         THCTensor_(data)(state, ones), k_,
         THCTensor_(data)(state, bias), k_,
-        ScalarConvert<int, real>::to(0),
+        ScalarConvert<int, scalar_t>::to(0),
         THCTensor_(data)(state, output_n), n_
       );
     } else {
@@ -237,10 +237,10 @@ void THNN_(VolumetricConvolution_updateOutput)(
       state,
       'n', 'n',
       n, m, k,
-      ScalarConvert<int, real>::to(1),
+      ScalarConvert<int, scalar_t>::to(1),
       THCTensor_(data)(state, columns), n,
       THCTensor_(data)(state, weight), k,
-      ScalarConvert<int, real>::to(1),
+      ScalarConvert<int, scalar_t>::to(1),
       THCTensor_(data)(state, output_n), n
     );
   }
@@ -337,15 +337,15 @@ void THNN_(VolumetricConvolution_updateGradInput)(
       state,
       'n', 't',
       n, m, k,
-      ScalarConvert<int, real>::to(1),
+      ScalarConvert<int, scalar_t>::to(1),
       THCTensor_(data)(state, gradOutput_n), n,
       THCTensor_(data)(state, weight), m,
-      ScalarConvert<int, real>::to(0),
+      ScalarConvert<int, scalar_t>::to(0),
       THCTensor_(data)(state, gradColumns), n
     );
 
     // Unpack columns back into input:
-    col2im3d<real, accreal>(
+    col2im3d<scalar_t, accreal>(
       THCState_getCurrentStream(state),
       THCTensor_(data)(state, gradColumns),
       nInputPlane, inputHeight, inputWidth, inputDepth, kT, kH, kW, padT, padH, padW, dT, dH, dW,
@@ -381,7 +381,7 @@ void THNN_(VolumetricConvolution_accGradParameters)(
            int padT, int padW, int padH,
            accreal scale_)
 {
-  real scale = ScalarConvert<accreal, real>::to(scale_);
+  scalar_t scale = ScalarConvert<accreal, scalar_t>::to(scale_);
   THCTensor *columns = finput;
   THCTensor *ones = fgradInput;
   THCUNN_assertSameGPU(state, 6, input, gradOutput, gradWeight, gradBias, columns, ones);
@@ -422,7 +422,7 @@ void THNN_(VolumetricConvolution_accGradParameters)(
   {
     // Resize plane and fill with ones...
     THCTensor_(resize3d)(state, ones, outputHeight, outputWidth, outputDepth);
-    THCTensor_(fill)(state, ones, ScalarConvert<int, real>::to(1));
+    THCTensor_(fill)(state, ones, ScalarConvert<int, scalar_t>::to(1));
   }
 
   // Resize temporary columns
@@ -467,7 +467,7 @@ void THNN_(VolumetricConvolution_accGradParameters)(
       scale,
       THCTensor_(data)(state, columns), k,
       THCTensor_(data)(state, gradOutput_n), k,
-      ScalarConvert<int, real>::to(1),
+      ScalarConvert<int, scalar_t>::to(1),
       THCTensor_(data)(state, gradWeight), n
     );
 
@@ -491,7 +491,7 @@ void THNN_(VolumetricConvolution_accGradParameters)(
         scale,
         THCTensor_(data)(state, gradOutput_n), k_,
         THCTensor_(data)(state, ones), 1,
-        ScalarConvert<int, real>::to(1),
+        ScalarConvert<int, scalar_t>::to(1),
         THCTensor_(data)(state, gradBias), 1
       );
       #endif
@@ -503,7 +503,7 @@ void THNN_(VolumetricConvolution_accGradParameters)(
         scale,
         THCTensor_(data)(state, gradOutput_n), k_,
         THCTensor_(data)(state, ones), k_,
-        ScalarConvert<int, real>::to(1),
+        ScalarConvert<int, scalar_t>::to(1),
         THCTensor_(data)(state, gradBias), m_
       );
       #endif

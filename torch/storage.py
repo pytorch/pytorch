@@ -39,7 +39,9 @@ class _StorageBase(object):
 
     def clone(self):
         """Returns a copy of this storage"""
-        return type(self)(self.size()).copy_(self)
+        device = self.get_device() if self.is_cuda else -1
+        with torch.cuda.device(device):
+            return type(self)(self.size()).copy_(self)
 
     def tolist(self):
         """Returns a list containing the elements of this storage"""

@@ -65,7 +65,9 @@ else
 
   # Determine the number of CPUs to build with.
   # If the `CAFFE_MAKE_NCPUS` variable is not specified, use them all.
-  if [ -n "${CAFFE_MAKE_NCPUS}" ]; then
+  if [ -n "${MAX_JOBS}" ]; then
+      CAFFE_MAKE_NCPUS="$MAX_JOBS"
+  elif [ -n "${CAFFE_MAKE_NCPUS}" ]; then
       CAFFE_MAKE_NCPUS="$CAFFE_MAKE_NCPUS"
   elif [ "$(uname)" == 'Darwin' ]; then
       CAFFE_MAKE_NCPUS="$(sysctl -n hw.ncpu)"

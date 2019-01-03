@@ -1,13 +1,15 @@
-#include "THCGeneral.h"
-#include "THCTensor.hpp"
-#include "THCTensorCopy.h"
+#include <THC/THCGeneral.h>
+#include <THC/THCTensor.hpp>
+#include <THC/THCTensorCopy.h>
 
 #include <new>
 
-#include "generic/THCTensor.cpp"
-#include "THCGenerateAllTypes.h"
+#include <THC/generic/THCTensor.cpp>
+#include <THC/THCGenerateAllTypes.h>
 
-#include "THCTensorInfo.cuh"
+#include <THC/THCTensorInfo.cuh>
+
+#include <ATen/native/cuda/Resize.cuh>
 
 int THCTensor_nDimension(THCState *state, const THCTensor *self) {
   return THTensor_nDimension(self);
@@ -40,8 +42,9 @@ int64_t THCTensor_strideLegacyNoScalars(THCState *state, const THCTensor *self, 
   return THTensor_strideLegacyNoScalars(self, dim);
 }
 
-THCTensor *THCTensor_new(THCState *state, at::ScalarType scalar_type) {
-  switch(scalar_type) {
+THCTensor *THCTensor_new(THCState *state, caffe2::TypeMeta type_meta) {
+  auto scalar_type = at::typeMetaToScalarType(type_meta);
+  switch (scalar_type) {
     case at::ScalarType::Byte:
       return THCudaByteTensor_new(state);
     case at::ScalarType::Char:
@@ -59,7 +62,7 @@ THCTensor *THCTensor_new(THCState *state, at::ScalarType scalar_type) {
     case at::ScalarType::Double:
       return THCudaDoubleTensor_new(state);
     default:
-      AT_ERROR("unexpected ScalarType: ", at::toString(scalar_type));
+      AT_ERROR("unexpected ScalarType: ", toString(scalar_type));
   }
 }
 
@@ -97,61 +100,12 @@ void THCTensor_resizeAs(THCState *state, THCTensor *self, THCTensor *src) {
 void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, const int64_t *size, const int64_t *stride)
 {
   AT_CHECK(nDimension >= 0, "resizeNd nDimension must be non-negative");
-  int d;
-  ptrdiff_t totalSize;
-  bool hascorrectsize = true;
-
-  for(d = 0; d < nDimension; d++)
-  {
-    if((self->dim() > d) && (size[d] != self->size(d))) {
-      hascorrectsize = false;
-    }
-
-    // NB: this used to test that stride[d] was >= 0
-    if((self->dim() > d) && stride && (stride[d] != self->stride(d))) {
-      hascorrectsize = false;
-    }
+  at::IntList sizes(size, nDimension);
+  at::optional<at::IntList> strides;
+  if (stride) {
+    strides = at::IntList(stride, nDimension);
   }
-
-  if(nDimension != self->dim()) {
-    hascorrectsize = false;
-  }
-
-  if(hascorrectsize) {
-    return;
-  }
-
-  if(nDimension != self->dim())
-  {
-    self->resize_dim(nDimension);
-  }
-
-  totalSize = 1;
-  for(d = nDimension-1; d >= 0; d--)
-  {
-    self->set_size(d, size[d]);
-    if(stride && (stride[d] >= 0) ) {
-      self->set_stride(d, stride[d]);
-    } else {
-      if(d == nDimension-1) {
-        self->set_stride(d, 1);
-      } else {
-        // Keep stride monotonically increasing to match NumPy.
-        self->set_stride(d, std::max<int64_t>(self->size(d+1),1)*self->stride(d+1));
-      }
-    }
-    totalSize += (self->size(d)-1)*self->stride(d);
-  }
-
-  if(totalSize+self->storage_offset() > 0)
-  {
-    if(!THTensor_getStoragePtr(self)) {
-      THError("Tensor: invalid null storage");
-    }
-    if(totalSize+self->storage_offset() > THTensor_getStoragePtr(self)->numel()) {
-      THCStorage_resize(state, THTensor_getStoragePtr(self), totalSize+self->storage_offset());
-    }
-  }
+  at::native::resize_impl_cuda_(self, sizes, strides, /*device_guard=*/false);
 }
 
 void THCTensor_set(THCState *state, THCTensor *self, THCTensor *src)
@@ -189,13 +143,12 @@ void THCTensor_setStorageNd(THCState *state, THCTensor *self, THCStorage *storag
     if (!THTensor_getStoragePtr(self)) {
       THError("Tensor: invalid null storage");
     }
-    auto scalar_type = at::dataTypeToScalarType(THTensor_getStoragePtr(self)->dtype());
-
+    auto data_type = THTensor_getStoragePtr(self)->dtype();
     if (storage) {
       c10::raw::intrusive_ptr::incref(storage);
       THTensor_stealAndSetStoragePtr(self, storage);
     } else {
-      THTensor_stealAndSetStoragePtr(self, THCStorage_new(state, scalar_type));
+      THTensor_stealAndSetStoragePtr(self, THCStorage_new(state, data_type));
     }
   }
 
@@ -227,7 +180,7 @@ void THCTensor_squeeze1d(THCState *state, THCTensor *self, THCTensor *src, int d
       self->set_size(d, self->size(d+1));
       self->set_stride(d, self->stride(d+1));
     }
-    self->resize_dim(self->dim() - 1);
+    self->resize_dim((unsigned int)(self->dim() - 1));
   }
 }
 

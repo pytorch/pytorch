@@ -19,18 +19,18 @@ important gotchas:
 
 ## Notes
 
-### Note [Storage is not NULL]
+### Note [Storage is not nullptr]
 
-Historically, Torch supported NULL storage, as a minor optimization to
+Historically, Torch supported nullptr storage, as a minor optimization to
 avoid having to allocate a storage object when it would be empty.
 However, this is actually a confusing special case to deal with, so
-by-in-large, PyTorch assumes that, in fact, storage is never NULL.
+by-in-large, PyTorch assumes that, in fact, storage is never nullptr.
 
 One important case where this assumption is important is when tracking
 the CUDA device a tensor is stored in: this information is stored
-solely in the storage, so if a storage is NULL, we lose this information.
+solely in the storage, so if a storage is nullptr, we lose this information.
 
-Although storage is never NULL, the data field of THStorage may be NULL.  This
+Although storage is never nullptr, the data field of THStorage may be nullptr.  This
 mostly occurs when we want to pre-allocate an output tensor struct, but then
 have it be resized and filled with data by some operator: there's no point in
 allocating data for it in this case!

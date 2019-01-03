@@ -7,8 +7,8 @@
 // Graves et al call the probabilities y, we use log_probs (also calling them inputs)
 
 #include <ATen/ATen.h>
-#include "ATen/Dispatch.h"
-#include "ATen/TensorUtils.h"
+#include <ATen/Dispatch.h>
+#include <ATen/TensorUtils.h>
 
 #include <numeric>
 #include <type_traits>
@@ -287,7 +287,7 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
       for (int64_t c = 0; c < num_labels; c++) {
         scalar_t& res = grad_a[t][c];
         scalar_t lp = log_probs_a[t][c];
-        res = std::exp(lp)-std::exp(res + nll - lp) * gr;
+        res = (std::exp(lp)-std::exp(res + nll - lp)) * gr;
       }
     }
     // zero the remainder
@@ -353,7 +353,7 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, IntList input_le
   } else {
     res = std::get<0>(at::_ctc_loss(log_probs, targets, input_lengths, target_lengths, BLANK));
   }
-  if (reduction == Reduction::ElementwiseMean) {
+  if (reduction == Reduction::Mean) {
     auto target_lengths_t = at::tensor(target_lengths, res.options().device(at::Device(at::Device::Type::CPU)).dtype(kLong)).toType(res.type());
     return (res / target_lengths_t).mean();
   } else if (reduction == Reduction::Sum) {

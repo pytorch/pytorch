@@ -1,11 +1,10 @@
-#include "caffe2/core/dispatch/KernelRegistration.h"
+#include <c10/core/dispatch/KernelRegistration.h>
 #include "caffe2/operators/experimental/c10/schemas/cast.h"
 #include "caffe2/utils/math.h"
 
 using caffe2::CPUContext;
 using caffe2::Tensor;
 using caffe2::TensorProto_DataType;
-using caffe2::TIndex;
 
 namespace caffe2 {
 namespace {
@@ -15,8 +14,8 @@ void do_cast_(const Tensor& input, Tensor* output) {
   output->ResizeLike(input);
   const auto* data = input.template data<SrcType>();
   auto* out = output->template mutable_data<DstType>();
-  auto N = input.size();
-  for (TIndex i = 0; i < N; ++i) {
+  auto N = input.numel();
+  for (int64_t i = 0; i < N; ++i) {
     out[i] = static_cast<DstType>(data[i]);
   }
 }
@@ -58,7 +57,7 @@ void cast_op_cpu_impl(
       do_cast_<int64_t, SrcType>(input, output);
       break;
     case caffe2::TensorProto_DataType_FLOAT16:
-      CAFFE_THROW("Casting to and from float16 on CPU is not supported yet");
+      CAFFE_THROW("Casting to and from Half on CPU is not supported yet");
       // break;
     case caffe2::TensorProto_DataType_DOUBLE:
       do_cast_<double, SrcType>(input, output);

@@ -1,9 +1,11 @@
 #pragma once
 
-#include "torch/csrc/python_headers.h"
-#include <stdint.h>
+#include <torch/csrc/python_headers.h>
+#include <cstdint>
 #include <stdexcept>
-#include "torch/csrc/Exceptions.h"
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/utils/tensor_numpy.h>
+#include <torch/csrc/jit/tracing_state.h>
 
 // largest integer that can be represented consecutively in a double
 const int64_t DOUBLE_INT_MAX = 9007199254740992;
@@ -64,6 +66,7 @@ inline bool THPUtils_checkIndex(PyObject *obj) {
   if (THPUtils_checkLong(obj)) {
     return true;
   }
+  torch::jit::tracer::NoWarn no_warn_guard;
   auto index = THPObjectPtr(PyNumber_Index(obj));
   if (!index) {
     PyErr_Clear();
@@ -78,16 +81,24 @@ inline int64_t THPUtils_unpackIndex(PyObject* obj) {
     if (index == nullptr) {
       throw python_error();
     }
-    obj = index.get();
+    // NB: This needs to be called before `index` goes out of scope and the
+    // underlying object's refcount is decremented
+    return THPUtils_unpackLong(index.get());
   }
   return THPUtils_unpackLong(obj);
 }
 
 inline bool THPUtils_checkDouble(PyObject* obj) {
-#if PY_MAJOR_VERSION == 2
-  return PyFloat_Check(obj) || PyLong_Check(obj) || PyInt_Check(obj);
+  bool is_numpy_scalar;
+#ifdef USE_NUMPY
+  is_numpy_scalar = torch::utils::is_numpy_scalar(obj);
 #else
-  return PyFloat_Check(obj) || PyLong_Check(obj);
+  is_numpy_scalar = false;
+#endif
+#if PY_MAJOR_VERSION == 2
+  return PyFloat_Check(obj) || PyLong_Check(obj) || PyInt_Check(obj) || is_numpy_scalar;
+#else
+  return PyFloat_Check(obj) || PyLong_Check(obj) || is_numpy_scalar;
 #endif
 }
 
@@ -116,4 +127,13 @@ inline double THPUtils_unpackDouble(PyObject* obj) {
     throw python_error();
   }
   return value;
+}
+
+inline std::complex<double> THPUtils_unpackComplexDouble(PyObject *obj) {
+  Py_complex value = PyComplex_AsCComplex(obj);
+  if (value.real == -1.0 && PyErr_Occurred()) {
+    throw python_error();
+  }
+
+  return std::complex<double>(value.real, value.imag);
 }

@@ -52,6 +52,10 @@ class Cluster(object):
     def node_kwargs(self):
         return self._node_kwargs
 
+    def __repr__(self):
+        return "Cluster(nodes={}, node_kwargs={})".format(
+            self.nodes(), self.node_kwargs())
+
 
 @context.define_context(allow_default=True)
 class Node(object):
@@ -84,6 +88,9 @@ class Node(object):
 
     def __str__(self):
         return self._name
+
+    def __repr__(self):
+        return "Node(name={}, kwargs={})".format(self._name, self._kwargs)
 
     def kwargs(self):
         return self._kwargs
@@ -150,7 +157,7 @@ def add_setup_steps(step, init_nets, exit_nets, name):
     if init_nets:
         steps.append(core.execution_step('%s:init' % name, init_nets))
     steps.append(step)
-    if exit_nets:
+    if len(exit_nets) > 0:
         steps.append(core.execution_step('%s:exit' % name, exit_nets))
     return core.execution_step(name, steps)
 
@@ -198,6 +205,13 @@ class TaskGroup(object):
         self._report_steps = []
         self._workspace_type = workspace_type
         self._tasks_by_node = None
+        self._remote_nets = []
+
+    def add_remote_net(self, net):
+        self._remote_nets.append(net)
+
+    def remote_nets(self):
+        return self._remote_nets
 
     def add(self, task):
         assert not self._already_used, (
@@ -215,11 +229,10 @@ class TaskGroup(object):
         self._tasks.append(task)
 
     def tasks(self):
-        if not self._already_used:
-            for task in self._tasks_to_add:
-                self.add(task)
-            self._tasks_to_add = []
-            self._already_used = True
+        for task in self._tasks_to_add:
+            self.add(task)
+        self._tasks_to_add = []
+        self._already_used = True
         return self._tasks
 
     def num_registered_tasks(self):
@@ -260,8 +273,9 @@ class TaskGroup(object):
         # tasks_by_node can't be called twice because the setup won't
         # work properly a second time.
         node_map = {}
-        for node in self.used_nodes():
-            node_map[node] = node_remap(node) if node_remap else node
+        for task in self.tasks():
+            node_map[task.node] =\
+                node_remap(task.node) if node_remap else task.node
         if self._tasks_by_node is not None:
             tasks_by_node, prev_node_map = self._tasks_by_node
             assert prev_node_map == node_map, (
@@ -285,7 +299,11 @@ class TaskGroup(object):
         grouped_by_node = TaskGroup()
         for node, tasks in viewitems(tasks_by_node):
             report_steps = report_steps_by_node[node]
-
+            node_inits, node_exits = get_setup_nets(
+                TaskGroup.LOCAL_SETUP,
+                [t.get_step() for t in tasks] + report_steps,
+                self)
+            # shortcut for single task with no queue
             steps = report_steps
             outputs = []
             grouped_workspace_type = WorkspaceType.PRIVATE
@@ -307,15 +325,16 @@ class TaskGroup(object):
             else:
                 step = core.execution_step(
                     '%s:body' % node, steps, concurrent_substeps=True)
-
-            # Prepend and append setup nets.
-            node_inits, node_exits = get_setup_nets(
-                TaskGroup.LOCAL_SETUP,
-                [t.get_step() for t in tasks] + report_steps,
-                self,
-            )
-            step = add_setup_steps(step, node_inits, node_exits, node)
-
+            if len(node_inits) > 0 or len(node_exits) > 0:
+                steps = []
+                if len(node_inits) > 0:
+                    steps.append(
+                        core.execution_step('%s:init' % node, node_inits))
+                steps.append(step)
+                if len(node_exits) > 0:
+                    steps.append(
+                        core.execution_step('%s:exit' % node, node_exits))
+                step = core.execution_step(node, steps)
             Task(
                 node=node, step=step, outputs=outputs,
                 name='grouped_by_node',
@@ -332,6 +351,10 @@ class TaskGroup(object):
 
     def workspace_type(self):
         return self._workspace_type
+
+    def __repr__(self):
+        return "TaskGroup(tasks={}, workspace_type={}, remote_nets={})".format(
+            self.tasks(), self.workspace_type(), self.remote_nets())
 
 
 class TaskOutput(object):
@@ -377,6 +400,9 @@ class TaskOutput(object):
         else:
             return fetched_vals
 
+    def __repr__(self):
+        return "TaskOutput(names={}, values={})".format(self.names, self._values)
+
 
 def final_output(blob_or_record):
     """
@@ -411,6 +437,9 @@ class TaskOutputList(object):
             o.set(values[offset:offset + num], _fetch_func)
             offset += num
         assert offset == len(values), 'Wrong number of output values.'
+
+    def __repr__(self):
+        return "TaskOutputList(outputs={})".format(self.outputs)
 
 
 @context.define_context()
@@ -577,6 +606,11 @@ class Task(object):
             Task.TASK_SETUP, [self._step] + report_steps, self)
         instance_init_nets, instance_exit_nets = get_setup_nets(
             Task.TASK_INSTANCE_SETUP, [self._step] + report_steps, self)
+        if len(self._outputs) == 0:
+            output_net = core.Net('%s:output' % self.name)
+            self.add_output(output_net.ConstantFill(
+                [], 1, dtype=core.DataType.INT32, value=0))
+            task_exit_nets.append(output_net)
 
         # Add instance-level report steps
         body = self._step if not report_steps else core.execution_step(
@@ -607,6 +641,10 @@ class Task(object):
     def _notify_used(self):
         self.get_step()
         self._already_used = True
+
+    def __repr__(self):
+        return "Task(name={}, node={}, outputs={})".format(
+            self.name, self.node, self.outputs())
 
 
 class SetupNets(object):
@@ -651,3 +689,7 @@ class SetupNets(object):
 
     def exit(self, exit_net):
         return self.exit_nets
+
+    def __repr__(self):
+        return "SetupNets(init_nets={}, exit_nets={})".format(
+            self.init_nets, self.exit_nets)

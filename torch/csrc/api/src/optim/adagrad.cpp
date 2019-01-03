@@ -1,6 +1,7 @@
 #include <torch/optim/adagrad.h>
 
 #include <torch/csrc/autograd/variable.h>
+#include <torch/serialize/archive.h>
 #include <torch/utils.h>
 
 #include <ATen/ATen.h>
@@ -26,17 +27,25 @@ void Adagrad::step() {
       p.grad() = p.grad() + options.weight_decay_ * p;
     }
 
-    buffer_at(step_, i) += 1.0;
+    buffer_at(step_buffers, i) += 1.0;
     const auto clr = options.learning_rate_ /
-        (1.0 + (buffer_at(step_, i) - 1.0) * options.lr_decay_);
+        (1.0 + (buffer_at(step_buffers, i) - 1.0) * options.lr_decay_);
 
-    auto& sum = buffer_at(sum_, i);
+    auto& sum = buffer_at(sum_buffers, i);
     sum.addcmul_(p.grad(), p.grad(), 1.0);
-    const auto std = buffer_at(sum_, i).sqrt().add_(1e-10);
+    const auto std = buffer_at(sum_buffers, i).sqrt().add_(1e-10);
 
     NoGradGuard guard;
     p.addcdiv_(p.grad(), std, -clr);
   }
+}
+
+void Adagrad::save(serialize::OutputArchive& archive) const {
+  serialize(*this, archive);
+}
+
+void Adagrad::load(serialize::InputArchive& archive) {
+  serialize(*this, archive);
 }
 } // namespace optim
 } // namespace torch

@@ -1,46 +1,34 @@
 ---
-# NOTE: there must be no spaces before the '-', so put the comma first.
+# NOTE there must be no spaces before the '-', so put the comma first.
 Checks: '
-  *
-  ,clang-analyzer-*
-  ,modernize-*
-  ,-cert-err58-cpp
-  ,-cert-err60-cpp
-  ,-clang-diagnostic-*
+  -*
+  ,bugprone-*
+  ,-bugprone-forward-declaration-namespace
+  ,-bugprone-macro-parentheses
+  ,cppcoreguidelines-*
+  ,-cppcoreguidelines-interfaces-global-init
   ,-cppcoreguidelines-owning-memory
   ,-cppcoreguidelines-pro-bounds-array-to-pointer-decay
   ,-cppcoreguidelines-pro-bounds-constant-array-index
-  ,-cppcoreguidelines-pro-type-member-init
+  ,-cppcoreguidelines-pro-bounds-pointer-arithmetic
+  ,-cppcoreguidelines-pro-type-cstyle-cast
+  ,-cppcoreguidelines-pro-type-reinterpret-cast
   ,-cppcoreguidelines-pro-type-static-cast-downcast
+  ,-cppcoreguidelines-pro-type-union-access
   ,-cppcoreguidelines-pro-type-vararg
   ,-cppcoreguidelines-special-member-functions
-  ,-fuchsia-*
-  ,-google-build-using-namespace
-  ,-google-explicit-constructor
-  ,-google-readability-braces-around-statements
-  ,-google-readability-namespace-comments
-  ,-google-readability-todo
-  ,-google-runtime-references
-  ,-google-runtime-references
-  ,-hicpp-braces-around-statements
-  ,-hicpp-explicit-conversions
-  ,-hicpp-no-array-decay
-  ,-hicpp-signed-bitwise
-  ,-hicpp-special-member-functions
-  ,-hicpp-vararg
-  ,-llvm-header-guard
-  ,-llvm-include-order
-  ,-llvm-namespace-comment
-  ,-misc-unused-parameters
-  ,-modernize-make-unique
+  ,hicpp-exception-baseclass
+  ,hicpp-avoid-goto
+  ,modernize-*
+  ,-modernize-return-braced-init-list
+  ,-modernize-use-auto
   ,-modernize-use-default-member-init
-  ,-performance-unnecessary-value-param
-  ,-readability-braces-around-statements
-  ,-readability-else-after-return
-  ,-readability-named-parameter
+  ,-modernize-use-using
+  ,performance-*
+  ,-performance-noexcept-move-constructor
   '
-WarningsAsErrors: ''
-HeaderFilterRegex: 'torch/csrc/'
+WarningsAsErrors: '*'
+HeaderFilterRegex: 'torch/csrc/.*'
 AnalyzeTemporaryDtors: false
 CheckOptions:
 ...

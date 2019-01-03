@@ -1,4 +1,4 @@
-#include "caffe2/core/dispatch/KernelRegistration.h"
+#include <c10/core/dispatch/KernelRegistration.h>
 #include "caffe2/operators/elementwise_ops_utils.h"
 #include "caffe2/operators/experimental/c10/schemas/add.h"
 #include "caffe2/utils/math.h"
@@ -29,8 +29,8 @@ void add_op_cpu_impl(
         "In-place is allowed only with the first tensor when "
         "legacy-broadcasting");
     C->ResizeLike(A);
-    if (B.size() == 1) {
-      A_dims = {static_cast<int>(A.size())};
+    if (B.numel() == 1) {
+      A_dims = {static_cast<int>(A.numel())};
       B_dims = {1};
     } else {
       size_t pre, n, post;
@@ -42,8 +42,8 @@ void add_op_cpu_impl(
       B_dims = {static_cast<int>(n), 1};
     }
   } else {
-    std::copy(A.dims().cbegin(), A.dims().cend(), std::back_inserter(A_dims));
-    std::copy(B.dims().cbegin(), B.dims().cend(), std::back_inserter(B_dims));
+    std::copy(A.sizes().cbegin(), A.sizes().cend(), std::back_inserter(A_dims));
+    std::copy(B.sizes().cbegin(), B.sizes().cend(), std::back_inserter(B_dims));
     const std::vector<int> C_dims =
         caffe2::elementwise_ops_utils::ComputeBinaryBroadcastForwardDims(
             A_dims, B_dims);

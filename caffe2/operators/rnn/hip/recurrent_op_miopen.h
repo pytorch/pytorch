@@ -2,7 +2,7 @@
 #define CAFFE2_OPERATORS_RECURRENT_OP_MIOPEN_H_
 
 #include "caffe2/core/context.h"
-#include "caffe2/core/hip/context_hip.h"
+#include "caffe2/core/hip/context_gpu.h"
 #include "caffe2/core/hip/miopen_wrapper.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
@@ -56,7 +56,7 @@ class RecurrentBaseOp : public Operator<HIPContext> {
   std::unique_ptr<detail::TensorDescriptors<T>> xDesc_;
   std::unique_ptr<detail::TensorDescriptors<T>> yDesc_;
 
-  std::vector<TIndex> cachedInputDims_;
+  std::vector<int64_t> cachedInputDims_;
   size_t reserveNbytes_;
   size_t miopenWsNbytes_;
 

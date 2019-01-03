@@ -3,10 +3,10 @@
 
 #include <cuda.h>
 #include <assert.h>
-#include "THCGeneral.h"
-#include "THCTensor.h"
-#include "THCDeviceUtils.cuh"
-#include "THCTensorInfo.cuh"
+#include <THC/THCGeneral.h>
+#include <THC/THCTensor.h>
+#include <THC/THCDeviceUtils.cuh>
+#include <THC/THCTensorInfo.cuh>
 
 // Enum that indicates whether tensor arguments are read/write or
 // read-only

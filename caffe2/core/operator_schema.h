@@ -9,9 +9,9 @@
 #include <vector>
 #include <unordered_map>
 
+#include "c10/util/Registry.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
-#include "caffe2/core/registry.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/filler.h"
 
@@ -163,6 +163,13 @@ class CAFFE2_API OpSchema {
   OpSchema& InheritOnnxSchema(const std::string& onnx_schema_name);
 
   /**
+   * @brief Shortcut to InheritOnnxSchema(type_)
+   */
+  OpSchema& InheritOnnxSchema() {
+    return InheritOnnxSchema(type_);
+  }
+
+  /**
    * @brief Sets the tensor inference function to produce the same output as
    * the input.
    */
@@ -190,7 +197,7 @@ class CAFFE2_API OpSchema {
     uint64_t flops{0}; // Floating point operations.
     uint64_t bytes_read{0}; // Total memory read.
     uint64_t bytes_written{0}; // Total memory written.
-    uint64_t params_bytes{0}; // Memory footprint of parameters
+    uint64_t params_bytes{0}; // Memory read for parameters.
   };
   /**
    * @brief Registers a function that takes in an OperatorDef
@@ -328,7 +335,7 @@ class CAFFE2_API OpSchema {
     return inplace_enforced_(x, y);
   }
 
-  friend std::ostream& operator<<(std::ostream& out, const OpSchema& schema);
+  CAFFE2_API friend std::ostream& operator<<(std::ostream& out, const OpSchema& schema);
 
   const std::vector<Argument>& args() const {
     return args_;
@@ -364,7 +371,21 @@ class CAFFE2_API OpSchema {
     return device_inference_function_(def);
   }
 
-  // The helper is build sparse input with values, keys, and lengths; e.g.:
+  // The helper is build sparse input with values, keys, weights and lengths;
+  // e.g.:
+  // values  = [1, 2, 3, 2, 4, 6, 7, 3, 6]
+  // keys    = [0, 1, 4, 0, 1, 2, 5, 1, 2]
+  // weights = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+  //            \_____/  \________/  \__/
+  // lengths =    [3,        4,       2]
+  OpSchema& WeightedValueKeyLengthInputFillers(
+      size_t value_index,
+      size_t key_index,
+      size_t length_index,
+      size_t weight_index);
+
+  // The helper is build sparse input with values, keys, weights and lengths;
+  // e.g.:
   // values  = [1, 2, 3, 2, 4, 6, 7, 3, 6]
   // keys    = [0, 1, 4, 0, 1, 2, 5, 1, 2]
   //            \_____/  \________/  \__/
@@ -383,11 +404,11 @@ class CAFFE2_API OpSchema {
   OpSchema& DisallowInputFillers();
 
   std::vector<TensorFiller> InputFillers(
-      const std::vector<std::vector<TIndex>>& shapes) const;
+      const std::vector<std::vector<int64_t>>& shapes) const;
 
  private:
   std::vector<TensorFiller> SupplyDenseFillers(
-      const std::vector<std::vector<TIndex>>& shapes);
+      const std::vector<std::vector<int64_t>>& shapes);
 
  private:
   string type_;
@@ -438,9 +459,9 @@ class CAFFE2_API OpSchema {
       };
 
   std::function<std::vector<TensorFiller>(
-      const std::vector<std::vector<TIndex>>&)>
+      const std::vector<std::vector<int64_t>>&)>
       filler_supplier_ =
-          [this](const std::vector<std::vector<TIndex>>& shapes) {
+          [this](const std::vector<std::vector<int64_t>>& shapes) {
             return SupplyDenseFillers(shapes);
           };
 };
@@ -508,8 +529,8 @@ inline TensorShape CreateTensorShape(
 }
 
 // Helper function
-inline vector<TIndex> GetDimsVector(const TensorShape& shape) {
-  vector<TIndex> dims;
+inline vector<int64_t> GetDimsVector(const TensorShape& shape) {
+  vector<int64_t> dims;
   for (auto d : shape.dims()) {
     dims.push_back(d);
   }
@@ -518,8 +539,22 @@ inline vector<TIndex> GetDimsVector(const TensorShape& shape) {
 
 // Helper function
 inline uint64_t nElemFromDim(const TensorShape& X, int dim = 0) {
+  CAFFE_ENFORCE_GE(dim, 0, "Invalid maximum index specified");
+
   uint64_t nElem = 1;
   for (int i = dim; i < X.dims_size(); ++i) {
+    nElem *= X.dims(i);
+  }
+  return nElem;
+}
+
+// Helper function
+inline uint64_t nElemBetweenDim(const TensorShape& X, int start, int stop) {
+  CAFFE_ENFORCE_GE(start, 0, "Invalid maximum index specified");
+  CAFFE_ENFORCE_LE(stop, X.dims_size(), "Invalid maximum index specified");
+
+  uint64_t nElem = 1;
+  for (int i = start; i < stop; ++i) {
     nElem *= X.dims(i);
   }
   return nElem;
@@ -562,18 +597,30 @@ OpSchema::Cost PointwiseCostInference(
 
 #ifndef CAFFE2_NO_OPERATOR_SCHEMA
 
-#define OPERATOR_SCHEMA(name)                                     \
-  void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){};          \
-  static OpSchema* CAFFE_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED = \
+#define OPERATOR_SCHEMA(name)                                       \
+  C10_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){}; \
+  static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =     \
       &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
 
 #else // CAFFE2_NO_OPERATOR_SCHEMA
 
-#define OPERATOR_SCHEMA(name)                                     \
-  void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){};          \
-  static OpSchema* CAFFE_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED = \
+#define OPERATOR_SCHEMA(name)                                       \
+  C10_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){}; \
+  static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =     \
       1 ? nullptr : &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
 
 #endif // CAFFE2_NO_OPERATOR_SCHEMA
 
+#ifdef CAFFE2_NO_GRADIENT_OPS
+
+#define GRADIENT_OPERATOR_SCHEMA(name)                              \
+  C10_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){}; \
+  static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =     \
+      1 ? nullptr : &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
+
+#else
+
+#define GRADIENT_OPERATOR_SCHEMA(name) OPERATOR_SCHEMA(name)
+
+#endif
 #endif // CAFFE2_CORE_OPERATOR_SCHEMA_H_

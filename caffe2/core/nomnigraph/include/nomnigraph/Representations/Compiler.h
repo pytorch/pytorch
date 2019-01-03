@@ -25,7 +25,7 @@ class CAFFE2_API Value {
 class CAFFE2_API Data : public Value {
  public:
   Data() : Value(ValueKind::Data) {}
-  CAFFE2_API static bool classof(const Value* V) {
+  static bool classof(const Value* V) {
     return V->getKind() == ValueKind::Data;
   }
   virtual ~Data() = default;
@@ -54,7 +54,7 @@ class CAFFE2_API Instruction : public Value {
   };
   Instruction() : Value(ValueKind::Instruction), op_(Opcode::Generic) {}
   Instruction(Opcode op) : Value(ValueKind::Instruction), op_(op) {}
-  CAFFE2_API static bool classof(const Value* V) {
+  static bool classof(const Value* V) {
     return V->getKind() == ValueKind::Instruction;
   }
   virtual ~Instruction() = default;

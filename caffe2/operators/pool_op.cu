@@ -1,13 +1,21 @@
 // TODO(ataei): reduce the apparent redundancy of all the code below.
+#include "caffe2/operators/pool_op.h"
+
 #include <cfloat>
 
 #include "caffe2/core/context_gpu.h"
-#include "caffe2/operators/pool_op.h"
 
 namespace caffe2 {
 namespace {
-class AveragePool {};
-class MaxPool {};
+
+struct AveragePool {
+  explicit AveragePool(const OperatorBase& /* op */) {}
+};
+
+struct MaxPool {
+  explicit MaxPool(const OperatorBase& /* op */) {}
+};
+
 }  // namespace
 
 namespace {
@@ -1667,6 +1675,7 @@ bool PoolGradientOp<float, CUDAContext, MaxPool>::RunOnDeviceWithOrderNHWC() {
               stride_h(),
               pad_t(),
               dX->template mutable_data<float>());
+      break;
     case 2:
       MaxPool2DBackwardNHWC<float>
           <<<CAFFE_GET_BLOCKS(X.size()),

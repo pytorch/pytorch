@@ -3,11 +3,11 @@
 
 #include <cuda.h>
 #include <assert.h>
-#include "THCGeneral.h"
-#include "THCHalf.h"
-#include "THCTensor.hpp"
-#include "THCTensorInfo.cuh"
-#include "THCTensor.hpp"
+#include <THC/THCGeneral.h>
+#include <TH/THHalf.h>
+#include <THC/THCTensor.hpp>
+#include <THC/THCTensorInfo.cuh>
+#include <THC/THCTensor.hpp>
 
 /// A utility for accessing THCuda*Tensor types in a generic manner
 
@@ -79,57 +79,5 @@ template <typename T>
 struct ScalarInv {
   static __host__ __device__ T to(const T v) { return ((T) 1) / v; }
 };
-
-template <>
-struct ScalarNegate<half> {
-  static __host__ __device__ half to(const half v) {
-#ifdef __CUDA_ARCH__
-    return __float2half(-__half2float(v));
-#else
-#if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)
-    half out = v;
-#else
-    __half_raw out = __half_raw(v);
-#endif
-    out.x ^= 0x8000; // toggle sign bit
-    return out;
-#endif
-  }
-};
-
-template <>
-struct ScalarInv<half> {
-  static __host__ __device__ half to(const half v) {
-#if defined (__CUDA_ARCH_) || defined(__HIP_PLATFORM_HCC__)
-    return __float2half(1.0f / __half2float(v));
-#else
-    float fv = THC_half2float(v);
-    fv = 1.0f / fv;
-    return THC_float2half(fv);
-#endif
-  }
-};
-
-inline bool operator==(half a, half b) {
-#if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)
-  return a.x == b.x;
-#else
-  __half_raw araw, braw;
-  araw = __half_raw(a);
-  braw = __half_raw(b);
-  return araw.x == braw.x;
-#endif
-}
-
-inline bool operator!=(half a, half b) {
-#if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)
-    return a.x != b.x;
-#else
-  __half_raw araw, braw;
-  araw = __half_raw(a);
-  braw = __half_raw(b);
-  return araw.x != braw.x;
-#endif
-}
 
 #endif // THC_TENSOR_TYPE_UTILS_INC

@@ -1,8 +1,8 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/TemporalUpSamplingNearest.c"
+#define TH_GENERIC_FILE "THNN/generic/TemporalUpSamplingNearest.c"
 #else
 
-#include "linear_upsampling.h"
+#include <THNN/generic/upsampling.h>
 
 static inline void THNN_(TemporalUpSamplingNearest_shapeCheck)
      (THTensor *input, THTensor *gradOutput,
@@ -47,37 +47,37 @@ void THNN_(TemporalUpSamplingNearest_updateOutput)(
 
   input = THTensor_(newContiguous)(input);
   THTensor_(zero)(output);
-  real *idata = THTensor_(data)(input);
-  real *odata = THTensor_(data)(output);
+  scalar_t *idata = input->data<scalar_t>();
+  scalar_t *odata = output->data<scalar_t>();
 
   // special case: just copy
   if (inputWidth == outputWidth) {
     for (int w2 = 0; w2 < outputWidth; ++w2) {
       const int w1 = w2;
-      const real* pos1 = &idata[w1];
-      real* pos2 = &odata[w2];
+      const scalar_t* pos1 = &idata[w1];
+      scalar_t* pos2 = &odata[w2];
       for (int c = 0; c < channels; ++c) {
         pos2[0] = pos1[0];
         pos1 += inputWidth;
         pos2 += outputWidth;
       }
     }
-    THTensor_(free)(input);
+    c10::raw::intrusive_ptr::decref(input);
     return;
   }
 
   for (int w2 = 0; w2 < outputWidth; ++w2) {
     const accreal src_x = nearest_neighbor_compute_source_index(scale, w2, inputWidth);
     const int w1 = src_x;
-    const real* pos1 = &idata[w1];
-    real* pos2 = &odata[w2];
+    const scalar_t* pos1 = &idata[w1];
+    scalar_t* pos2 = &odata[w2];
     for (int c = 0; c < channels; ++c) {
       pos2[0] = pos1[0];
       pos1 += inputWidth;
       pos2 += outputWidth;
     }
   }
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
 }
 
 void THNN_(TemporalUpSamplingNearest_updateGradInput)(
@@ -93,8 +93,8 @@ void THNN_(TemporalUpSamplingNearest_updateGradInput)(
   THTensor_(resize3d)(gradInput, nbatch, channels, inputWidth);
   THTensor_(zero)(gradInput);
   gradOutput = THTensor_(newContiguous)(gradOutput);
-  real *data1 = THTensor_(data)(gradInput);
-  real *data2 = THTensor_(data)(gradOutput);
+  scalar_t *data1 = gradInput->data<scalar_t>();
+  scalar_t *data2 = gradOutput->data<scalar_t>();
   channels = nbatch * channels;
   const float scale = (float) inputWidth / (float)outputWidth;
 
@@ -102,29 +102,29 @@ void THNN_(TemporalUpSamplingNearest_updateGradInput)(
   if (inputWidth == outputWidth) {
     for (int w2 = 0; w2 < outputWidth; ++w2) {
       const int w1 = w2;
-      real* pos1 = &data1[w1];
-      const real* pos2 = &data2[w2];
+      scalar_t* pos1 = &data1[w1];
+      const scalar_t* pos2 = &data2[w2];
       for (int c = 0; c < channels; ++c) {
         pos1[0] += pos2[0];
         pos1 += inputWidth;
         pos2 += outputWidth;
       }
     }
-    THTensor_(free)(gradOutput);
+    c10::raw::intrusive_ptr::decref(gradOutput);
     return;
   }
 
   for (int w2 = 0; w2 < outputWidth; ++w2) {
     const int w1 = nearest_neighbor_compute_source_index(scale, w2, inputWidth);
-    real* pos1 = &data1[w1];
-    const real* pos2 = &data2[w2];
+    scalar_t* pos1 = &data1[w1];
+    const scalar_t* pos2 = &data2[w2];
     for (int c = 0; c < channels; ++c) {
       pos1[0] += pos2[0];
       pos1 += inputWidth;
       pos2 += outputWidth;
     }
   }
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

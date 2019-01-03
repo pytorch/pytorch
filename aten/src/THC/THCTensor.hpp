@@ -3,10 +3,10 @@
 // STOP!!! Thinking of including this header directly?  Please
 // read Note [TH abstraction violation]
 
-#include "THCTensor.h"
-#include "THTensor.hpp"
-#include "THCStorage.hpp"
-#include "THCGeneral.hpp"
+#include <THC/THCTensor.h>
+#include <TH/THTensor.hpp>
+#include <THC/THCStorage.hpp>
+#include <THC/THCGeneral.hpp>
 
 #include <atomic>
 #include <ATen/ATen.h>
@@ -21,7 +21,7 @@ THC_API int64_t THCTensor_sizeLegacyNoScalars(THCState *state, const THCTensor *
 THC_API int64_t THCTensor_stride(THCState *state, const THCTensor *self, int dim);
 THC_API int64_t THCTensor_strideLegacyNoScalars(THCState *state, const THCTensor *self, int dim);
 
-THC_API THCTensor *THCTensor_new(THCState *state, at::ScalarType scalar_type);
+THC_API THCTensor *THCTensor_new(THCState *state, caffe2::TypeMeta type_meta);
 
 THC_API void THCTensor_resize(THCState *state, THCTensor *tensor, at::IntList size, at::IntList stride);
 THC_API void THCTensor_resizeNd(THCState *state, THCTensor *tensor, int nDimension, const int64_t *size, const int64_t *stride);
@@ -54,5 +54,5 @@ THC_API void THCTensor_preserveReduceDimSemantics(THCState *state, THCTensor *te
 /* true otherwise.                                             */
 THC_API bool THCTensor_maybeOverlappingIndices(THCState* state, const THCTensor* t);
 
-#include "generic/THCTensor.hpp"
-#include "THCGenerateAllTypes.h"
+#include <THC/generic/THCTensor.hpp>
+#include <THC/THCGenerateAllTypes.h>

@@ -31,15 +31,19 @@ class Tensor(torch._C._TensorBase):
             return new_tensor
 
     def __reduce_ex__(self, proto):
+        # See Note [Don't serialize hooks]
+        torch.utils.hooks.warn_if_has_hooks(self)
         args = (self.storage(),
                 self.storage_offset(),
                 tuple(self.size()),
                 self.stride(),
                 self.requires_grad,
-                self._backward_hooks)
+                OrderedDict())  # previously was self._backward_hooks
         return (torch._utils._rebuild_tensor_v2, args)
 
     def __setstate__(self, state):
+        # Warning: this method is NOT called when you torch.load() a tensor;
+        # that is managed by _rebuild_tensor_v2
         if not self.is_leaf:
             raise RuntimeError('__setstate__ can be only called on leaf Tensors')
         if len(state) == 4:
@@ -50,6 +54,8 @@ class Tensor(torch._C._TensorBase):
             # legacy serialization of Variable
             self.data = state[0]
             state = (state[3], state[4], state[2])
+        # The setting of _backward_hooks is expected to be a no-op.
+        # See Note [Don't serialize hooks]
         self.requires_grad, _, self._backward_hooks = state
 
     def __repr__(self):
@@ -141,7 +147,7 @@ class Tensor(torch._C._TensorBase):
 
         raise RuntimeError(trim(r"""reinforce() was removed.
             Use torch.distributions instead.
-            See http://pytorch.org/docs/master/distributions.html
+            See https://pytorch.org/docs/master/distributions.html
 
             Instead of:
 
@@ -169,9 +175,17 @@ class Tensor(torch._C._TensorBase):
 
     .. note::
 
-      Returned Tensor uses the same data tensor as the original one.
+      Returned Tensor shares the same storage with the original one.
       In-place modifications on either of them will be seen, and may trigger
       errors in correctness checks.
+      IMPORTANT NOTE: Previously, in-place size / stride / storage changes
+      (such as `resize_` / `resize_as_` / `set_` / `transpose_`) to the returned tensor
+      also update the original tensor. Now, these in-place changes will not update the
+      original tensor anymore, and will instead trigger an error.
+      For sparse tensors:
+      In-place indices / values changes (such as `zero_` / `copy_` / `add_`) to the
+      returned tensor will not update the original tensor anymore, and will instead
+      trigger an error.
     """)
 
     detach_ = _add_docstr(_C._TensorBase.detach_, r"""
@@ -241,19 +255,24 @@ class Tensor(torch._C._TensorBase):
         r"""See :func: `torch.argsort`"""
         return torch.argsort(self, dim, descending)
 
-    def btrifact(self, info=None, pivot=True):
-        r"""See :func:`torch.btrifact`
-        """
-        if info is not None:
-            warnings.warn("info option in btrifact is deprecated and will be removed in v0.4, "
-                          "consider using btrifact_with_info instead", stacklevel=2)
-            factorization, pivots, _info = super(Tensor, self).btrifact_with_info(pivot=pivot)
-            if info.type() != _info.type():
-                raise ValueError('btrifact expects info to be an IntTensor')
-            info.resize_as_(_info).copy_(_info)
-            return factorization, pivots
-        else:
-            return super(Tensor, self).btrifact(pivot=pivot)
+    def norm(self, p="fro", dim=None, keepdim=False):
+        r"""See :func: `torch.norm`"""
+        return torch.norm(self, p, dim, keepdim)
+
+    def potrf(self, upper=True):
+        r"""See :func:`torch.cholesky`"""
+        warnings.warn("torch.potrf is deprecated in favour of torch.cholesky and will be removed "
+                      "in the next release. Please use torch.cholesky instead and note that the "
+                      ":attr:`upper` argument in torch.cholesky defaults to ``False``.", stacklevel=2)
+        return super(Tensor, self).cholesky(upper=upper)
+
+    def potrs(self, u, upper=True):
+        r"""See :func:`torch.cholesky_solve`"""
+        warnings.warn("torch.potrs is deprecated in favour of torch.cholesky_solve and "
+                      "will be removed in the next release. Please use torch.cholesky_solve instead "
+                      "and note that the :attr:`upper` argument in torch.cholesky_solve defaults "
+                      "to ``False``.", stacklevel=2)
+        return super(Tensor, self).cholesky_solve(u, upper=upper)
 
     def stft(self, n_fft, hop_length=None, win_length=None, window=None,
              center=True, pad_mode='reflect', normalized=False, onesided=True):
@@ -319,19 +338,21 @@ class Tensor(torch._C._TensorBase):
         """
         return self.clone().masked_fill_(mask, value)
 
-    def unique(self, sorted=False, return_inverse=False, dim=None):
+    def unique(self, sorted=True, return_inverse=False, dim=None):
         r"""Returns the unique scalar elements of the tensor as a 1-D tensor.
 
         See :func:`torch.unique`
         """
         if dim is not None:
-            output, inverse_indices = self._unique_dim(
+            output, inverse_indices = torch._unique_dim(
+                self,
                 sorted=sorted,
                 return_inverse=return_inverse,
                 dim=dim
             )
         else:
-            output, inverse_indices = self._unique(
+            output, inverse_indices = torch._unique(
+                self,
                 sorted=sorted,
                 return_inverse=return_inverse
             )
@@ -341,7 +362,7 @@ class Tensor(torch._C._TensorBase):
             return output
 
     def __rsub__(self, other):
-        return torch.sub(other, self)
+        return _C._VariableFunctions.rsub(self, other)
 
     def __rdiv__(self, other):
         if self.dtype.is_floating_point:
@@ -401,6 +422,11 @@ class Tensor(torch._C._TensorBase):
         # map will interleave them.)
         if self.dim() == 0:
             raise TypeError('iteration over a 0-d tensor')
+        if torch._C._get_tracing_state():
+            warnings.warn('Iterating over a tensor might cause the trace to be incorrect. '
+                          'Passing a tensor of different shape won\'t change the number of '
+                          'iterations executed (and might lead to errors or silently give '
+                          'incorrect results).', category=RuntimeWarning)
         return iter(imap(lambda i: self[i], range(self.size(0))))
 
     def __hash__(self):
@@ -411,6 +437,11 @@ class Tensor(torch._C._TensorBase):
         tensor_methods.remove('volatile')  # deprecated
         attrs = list(self.__dict__.keys())
         keys = tensor_methods + attrs
+
+        # property only available dense, cuda tensors
+        if (not self.is_cuda) or self.is_sparse:
+            keys.remove("__cuda_array_interface__")
+
         return sorted(keys)
 
     # Numpy array interface, to support `numpy.asarray(tensor) -> ndarray`
@@ -429,5 +460,57 @@ class Tensor(torch._C._TensorBase):
             # Workaround, torch has no built-in bool tensor
             array = array.astype('uint8')
         return torch.from_numpy(array)
+
+    @property
+    def __cuda_array_interface__(self):
+        """Array view description for cuda tensors.
+
+        See:
+        https://numba.pydata.org/numba-doc/latest/cuda/cuda_array_interface.html
+        """
+
+        # raise AttributeError for unsupported tensors, so that
+        # hasattr(cpu_tensor, "__cuda_array_interface__") is False.
+        if not self.is_cuda:
+            raise AttributeError(
+                "Can't get __cuda_array_interface__ on non-CUDA tensor type: %s "
+                "If CUDA data is required use tensor.cuda() to copy tensor to device memory." %
+                self.type()
+            )
+
+        if self.is_sparse:
+            raise AttributeError(
+                "Can't get __cuda_array_interface__ on sparse type: %s "
+                "Use Tensor.to_dense() to convert to a dense tensor first." %
+                self.type()
+            )
+
+        # RuntimeError, matching tensor.__array__() behavior.
+        if self.requires_grad:
+            raise RuntimeError(
+                "Can't get __cuda_array_interface__ on Variable that requires grad. "
+                "If gradients aren't required, use var.detach() to get Variable that doesn't require grad."
+            )
+
+        # CUDA devices are little-endian and tensors are stored in native byte
+        # order. 1-byte entries are endian-agnostic.
+        typestr = {
+            torch.float16: "<f2",
+            torch.float32: "<f4",
+            torch.float64: "<f8",
+            torch.uint8: "|u1",
+            torch.int8: "|i1",
+            torch.int16: "<i2",
+            torch.int32: "<i4",
+            torch.int64: "<i8",
+        }[self.dtype]
+
+        itemsize = self.storage().element_size()
+
+        shape = self.shape
+        strides = tuple(s * itemsize for s in self.stride())
+        data = (self.data_ptr(), False)  # read-only is false
+
+        return dict(typestr=typestr, shape=shape, strides=strides, data=data, version=0)
 
     __module__ = 'torch'

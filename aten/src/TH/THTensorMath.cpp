@@ -1,7 +1,7 @@
-#include "THTensor.hpp"
-#include "THVector.h"
-#include "THBlas.h"
-#include "THTensorDimApply.h"
+#include <TH/THTensor.hpp>
+#include <TH/THVector.h>
+#include <TH/THBlas.h>
+#include <TH/THTensorDimApply.h>
 
-#include "generic/THTensorMath.cpp"
-#include "THGenerateAllTypes.h"
+#include <TH/generic/THTensorMath.cpp>
+#include <TH/THGenerateAllTypes.h>

@@ -1,6 +1,9 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
+
+// TODO: Remove the condition on AT_ROCM_ENABLED entirely,
+// don't build this file as part of CPU build.
 #include <ATen/cuda/CUDAConfig.h>
 
 #if !AT_ROCM_ENABLED()
@@ -13,68 +16,68 @@ at::Tensor miopen_convolution(
     const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias /* optional */,
     IntList padding, IntList stride, IntList dilation,
     int64_t groups, bool benchmark, bool deterministic) {
-  throw std::runtime_error("miopen_convolution: ATen not compiled with MIOpen support");
+  AT_ERROR("miopen_convolution: ATen not compiled with MIOpen support");
 }
 
 at::Tensor miopen_convolution_backward_input(
     IntList input_size, const at::Tensor& grad_output, const at::Tensor& weight,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic) {
-  throw std::runtime_error("miopen_convolution_backward_input: ATen not compiled with MIOpen support");
+  AT_ERROR("miopen_convolution_backward_input: ATen not compiled with MIOpen support");
 }
 
 at::Tensor miopen_convolution_backward_weight(
     IntList weight_size, const at::Tensor& grad_output, const at::Tensor& input,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic) {
-  throw std::runtime_error("miopen_convolution_backward_weight: ATen not compiled with MIOpen support");
+  AT_ERROR("miopen_convolution_backward_weight: ATen not compiled with MIOpen support");
 }
 
 at::Tensor miopen_convolution_backward_bias(
     const at::Tensor& grad_output) {
-  throw std::runtime_error("miopen_convolution_backward_bias: ATen not compiled with MIOpen support");
+  AT_ERROR("miopen_convolution_backward_bias: ATen not compiled with MIOpen support");
 }
 
 std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_backward(
     const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
-  throw std::runtime_error("miopen_convolution_backward: ATen not compiled with MIOpen support");
+  AT_ERROR("miopen_convolution_backward: ATen not compiled with MIOpen support");
 }
 
 at::Tensor miopen_convolution_transpose(
     const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias /* optional */,
     IntList padding, IntList output_padding, IntList stride, IntList dilation,
     int64_t groups, bool benchmark, bool deterministic) {
-  throw std::runtime_error("miopen_convolution_transpose: ATen not compiled with MIOpen support");
+  AT_ERROR("miopen_convolution_transpose: ATen not compiled with MIOpen support");
 }
 
 at::Tensor miopen_convolution_transpose_backward_input(
     const at::Tensor& grad_output, const at::Tensor& weight,
     IntList padding, IntList stride, IntList dilation,
     int64_t groups, bool benchmark, bool deterministic) {
-  throw std::runtime_error("miopen_convolution_transpose_backward: ATen not compiled with MIOpen support");
+  AT_ERROR("miopen_convolution_transpose_backward: ATen not compiled with MIOpen support");
 }
 
 at::Tensor miopen_convolution_transpose_backward_weight(
     IntList weight_size, const at::Tensor& grad_output, const at::Tensor& input,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic) {
-  throw std::runtime_error("miopen_convolution_transpose_backward_weight: ATen not compiled with MIOpen support");
+  AT_ERROR("miopen_convolution_transpose_backward_weight: ATen not compiled with MIOpen support");
 }
 
 std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_transpose_backward(
     const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
     IntList padding, IntList output_padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
-  throw std::runtime_error("miopen_convolution_transpose_backward: ATen not compiled with MIOpen support");
+  AT_ERROR("miopen_convolution_transpose_backward: ATen not compiled with MIOpen support");
 }
 
 }}
 
 #else  // AT_ROCM_ENABLED
 
-#include "THC/THC.h"
+#include <THH/THH.h>
 
 #include <ATen/miopen/miopen-wrapper.h>
 #include <ATen/miopen/Descriptors.h>
@@ -114,7 +117,7 @@ constexpr int max_dim = 3;
 // as conv_output_size loses information; this is why conv_input_size
 // takes an extra output_padding argument to resolve the ambiguity.
 
-std::vector<int64_t> conv_output_size(
+static std::vector<int64_t> conv_output_size(
     IntList input_size, IntList weight_size,
     IntList padding, IntList stride, IntList dilation, int64_t groups
 ) {
@@ -180,16 +183,12 @@ Tensor narrowGroup(const Tensor& t, int dim, int group_idx, int64_t groups) {
 // Used on pad, stride and dilation
 static void check_args(CheckedFrom c, IntList args, size_t expected_size, const char* arg_name)
 {
-  if (args.size() > expected_size){
-    std::stringstream ss;
-    ss << "Too many " << arg_name << " values (" << args.size() << ") supplied, expecting " << expected_size << " (while checking arguments for " << c << ")";
-    throw std::runtime_error(ss.str());
-  }
-  else if (args.size() < expected_size){
-    std::stringstream ss;
-    ss << "Not enough " << arg_name << " values (" << args.size() << ") supplied, expecting " << expected_size << " (while checking arguments for " << c << ")";
-    throw std::runtime_error(ss.str());
-  }
+  AT_CHECK(args.size() <= expected_size,
+           "Too many ", arg_name, " values (", args.size(), ") supplied, expecting ",
+           expected_size, " (while checking arguments for ", c, ")");
+  AT_CHECK(args.size() >= expected_size,
+           "Not enough ", arg_name, " values (", args.size(), ") supplied, expecting ",
+           expected_size, " (while checking arguments for ", c, ")");
 
   auto num_negative_values = std::count_if(args.begin(), args.end(), [](int x){return x < 0;});
   if (num_negative_values > 0){
@@ -197,7 +196,7 @@ static void check_args(CheckedFrom c, IntList args, size_t expected_size, const 
     ss << arg_name << " should be greater than zero but got (";
     std::copy(args.begin(), args.end() - 1, std::ostream_iterator<int>(ss,", "));
     ss << args.back() <<  ")" << " (while checking arguments for " << c << ")";
-    throw std::runtime_error(ss.str());
+    AT_ERROR(ss.str());
   }
 }
 
@@ -234,6 +233,7 @@ struct ConvolutionParams
   int dilation[max_dim];
   int64_t groups;
   bool deterministic;
+  int device_id; //This is needed to distinguish between miopen handles of multiple gpus.
   // NB: transposed purposely omitted: transposed just swaps
   // forward and backward, so you can reuse the benchmark entry,
 };
@@ -265,6 +265,9 @@ void setConvolutionParams(
   }
   params->groups = groups;
   params->deterministic = deterministic;
+  int device_id;
+  HIP_CHECK(hipGetDevice(&device_id));
+  params->device_id = device_id;
 }
 
 // Convenience struct for passing around descriptors and data
@@ -461,20 +464,20 @@ template<>
 struct algorithm_search<miopenConvBwdWeightsAlgorithm_t> {
   using perf_t = miopenConvAlgoPerf_t;
   using algo_t = miopenConvBwdWeightsAlgorithm_t;
-  
+
   static constexpr auto DEFAULT_ALGO = miopenConvolutionBwdWeightsAlgoGEMM;
   static BenchmarkCache<algo_t>& cache() { return bwd_filter_algos; }
-  
+
   static perf_t findAlgorithm(const ConvolutionArgs& args) {
     int perf_count;
-    perf_t perf_results; 
+    perf_t perf_results;
     size_t max_ws_size = getWorkspaceSize(args, DEFAULT_ALGO);
     Workspace ws(max_ws_size);
     MIOPEN_CHECK(miopenFindConvolutionBackwardWeightsAlgorithm(
         args.handle,
         args.odesc.desc(), args.output.data_ptr(),
         args.idesc.desc(), args.input.data_ptr(),
-        args.cdesc.desc(), 
+        args.cdesc.desc(),
         args.wdesc.desc(), args.weight.data_ptr(),
         1,      // just return the fastest
         &perf_count,
@@ -526,7 +529,7 @@ Workspace chooseAlgorithm(
   workspace_size = getWorkspaceSize(args, *algo);
   try {
     return Workspace(workspace_size);
-  } catch (std::runtime_error& e) {
+  } catch (const std::exception& e) {
     hipGetLastError(); // clear OOM error
 
     // switch to default algorithm and record it in the cache to prevent
@@ -559,9 +562,10 @@ void miopen_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const 
   auto handle = getMiopenHandle();
   auto dataType = getMiopenDataType(*bias);
   Constant one(dataType, 1);
+  Constant zero(dataType, 0);
 
   MIOPEN_CHECK(miopenConvolutionForwardBias(handle, &one, bdesc.desc(), bias->data_ptr(),
-                                     &one, odesc.desc(), output->data_ptr()));
+                                     &zero, odesc.desc(), output->data_ptr()));
 }
 
 // see NOTE [ Convolution design ] in src/Aten/native/cudnn/Conv.cpp
@@ -607,7 +611,7 @@ void raw_miopen_convolution_forward_out(
     args.handle,
     &one, args.idesc.desc(), input.data_ptr(),
     args.wdesc.desc(), weight.data_ptr(),
-    args.cdesc.desc(), fwdAlg, &zero, 
+    args.cdesc.desc(), fwdAlg, &zero,
     args.odesc.desc(), output.data_ptr(), workspace.data, workspace.size));
 }
 
@@ -620,9 +624,10 @@ Tensor miopen_convolution_forward(
   checkAllSameType(c, {input, weight});
   checkAllSameGPU(c, {input, weight});
 
-  auto output_t = input->type().tensor(
+  auto output_t = at::empty(
                     conv_output_size(input->sizes(), weight->sizes(),
-                                     padding, stride, dilation, groups));
+                                     padding, stride, dilation, groups),
+                    input->options());
 
   // Avoid ambiguity of "output" when this is being used as backwards
   TensorArg output{ output_t, "result", 0 };
@@ -723,7 +728,7 @@ void raw_miopen_convolution_backward_input_out(
       args.handle,
       &one, args.odesc.desc(), grad_output.data_ptr(),
       args.wdesc.desc(), weight.data_ptr(),
-      args.cdesc.desc(), bwdDataAlg, &zero, 
+      args.cdesc.desc(), bwdDataAlg, &zero,
       args.idesc.desc(), grad_input.data_ptr(), workspace.data, workspace.size));
 }
 
@@ -738,7 +743,7 @@ Tensor miopen_convolution_backward_input(
   checkAllSameType(c, {grad_output, weight});
   checkAllSameGPU(c, {grad_output, weight});
 
-  auto grad_input_t = grad_output->type().tensor(input_size);
+  auto grad_input_t = at::empty(input_size, grad_output->options());
 
   // Avoid "grad_input" when this is being used as transposed convolution
   TensorArg grad_input{ grad_input_t, "result", 0 };
@@ -863,7 +868,7 @@ Tensor miopen_convolution_backward_weight(
   checkAllSameType(c, {grad_output, input});
   checkAllSameGPU(c, {grad_output, input});
 
-  auto grad_weight_t = grad_output->type().tensor(weight_size);
+  auto grad_weight_t = at::empty(weight_size, grad_output->options());
 
   // For uniformity with everything else, although it seems grad_weight
   // would be unambiguous too.
@@ -921,8 +926,7 @@ Tensor miopen_convolution_backward_bias(
   TensorArg grad_output{ grad_output_t, "grad_output", 1 };
   setMIOpenStreamToCurrent();
 
-  auto grad_bias_t = grad_output->type().tensor(
-                        { grad_output->size(output_channels_dim) });
+  auto grad_bias_t = at::empty( { grad_output->size(output_channels_dim) }, grad_output->options());
 
   TensorArg grad_bias{ grad_bias_t, "result", 0 };
 

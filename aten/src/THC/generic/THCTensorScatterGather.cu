@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorScatterGather.cu"
+#define THC_GENERIC_FILE "THC/generic/THCTensorScatterGather.cu"
 #else
 
 #define RUN(TYPE, DIMS, REAL)                                           \
@@ -49,46 +49,46 @@ void THCTensor_(gather)(THCState* state, THCTensor *tensor,
     if (THCTensor_canUse32BitIndexMath(state, tensor) &&
         THCTensor_canUse32BitIndexMath(state, src) &&
         THCTensor_canUse32BitIndexMath(state, index)) {
-      TensorInfo<real, unsigned int> tensorInfo =
-        getTensorInfo<real, THCTensor, unsigned int>(state, tensor);
-      TensorInfo<real, unsigned int> srcInfo =
-        getTensorInfo<real, THCTensor, unsigned int>(state, src);
+      TensorInfo<scalar_t, unsigned int> tensorInfo =
+        getTensorInfo<scalar_t, THCTensor, unsigned int>(state, tensor);
+      TensorInfo<scalar_t, unsigned int> srcInfo =
+        getTensorInfo<scalar_t, THCTensor, unsigned int>(state, src);
       TensorInfo<int64_t, unsigned int> indexInfo =
         getTensorInfo<int64_t, THCudaLongTensor, unsigned int>(state, index);
 
       // Specialize for a small number of dimensions.
       switch (indexInfo.dims) {
         case 1:
-          RUN(unsigned int, 1, real);
+          RUN(unsigned int, 1, scalar_t);
           THCudaCheck(cudaGetLastError());
           break;
         case 2:
-          RUN(unsigned int, 2, real);
+          RUN(unsigned int, 2, scalar_t);
           THCudaCheck(cudaGetLastError());
           break;
         case 3:
-          RUN(unsigned int, 3, real);
+          RUN(unsigned int, 3, scalar_t);
           THCudaCheck(cudaGetLastError());
           break;
         default:
-          RUN(unsigned int, -1, real);
+          RUN(unsigned int, -1, scalar_t);
           THCudaCheck(cudaGetLastError());
           break;
       }
     } else {
-      TensorInfo<real, uint64_t> tensorInfo =
-        getTensorInfo<real, THCTensor, uint64_t>(state, tensor);
-      TensorInfo<real, uint64_t> srcInfo =
-        getTensorInfo<real, THCTensor, uint64_t>(state, src);
+      TensorInfo<scalar_t, uint64_t> tensorInfo =
+        getTensorInfo<scalar_t, THCTensor, uint64_t>(state, tensor);
+      TensorInfo<scalar_t, uint64_t> srcInfo =
+        getTensorInfo<scalar_t, THCTensor, uint64_t>(state, src);
       TensorInfo<int64_t, uint64_t> indexInfo =
         getTensorInfo<int64_t, THCudaLongTensor, uint64_t>(state, index);
-      RUN(uint64_t, -1, real);
+      RUN(uint64_t, -1, scalar_t);
       THCudaCheck(cudaGetLastError());
     }
   }
 
   if (oldTensor) {
-    THCTensor_copyIgnoringOverlaps<real>(state, oldTensor, tensor);
+    THCTensor_copyIgnoringOverlaps<scalar_t>(state, oldTensor, tensor);
     THCTensor_(free)(state, tensor);
     tensor = oldTensor;
   }
@@ -107,12 +107,18 @@ void THCTensor_(scatter)(THCState* state, THCTensor *tensor, int dim, THCudaLong
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, index));
 
+  int index_ndim_legacy_all = THCudaLongTensor_nDimensionLegacyAll(state, index);
   THArgCheck(dim >= 0 && dim < THCTensor_(nDimensionLegacyNoScalars)(state, tensor), 2,
              "Index dimension is out of bounds");
-  THArgCheck(THCudaLongTensor_nDimensionLegacyNoScalars(state, index) == THCTensor_(nDimensionLegacyNoScalars)(state, src), 3,
-             "Index tensor must have same dimensions as input tensor");
+  THArgCheck(index_ndim_legacy_all == 0
+             || THCudaLongTensor_nDimensionLegacyNoScalars(state, index) == THCTensor_(nDimensionLegacyNoScalars)(state, src), 3,
+             "Index tensor must be either empty or have same dimensions as input tensor");
   THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, src) == THCTensor_(nDimensionLegacyNoScalars)(state, tensor), 4,
              "Input tensor must have same dimensions as output tensor");
+
+  // no-op if index is empty
+  if (index_ndim_legacy_all == 0)
+      return;
 
   for (int d = 0; d < THCTensor_(nDimensionLegacyNoScalars)(state, tensor); d++) {
     int64_t indexSizeD = THCudaLongTensor_sizeLegacyNoScalars(state, index, d);
@@ -146,42 +152,42 @@ void THCTensor_(scatter)(THCState* state, THCTensor *tensor, int dim, THCudaLong
     if (THCTensor_canUse32BitIndexMath(state, tensor) &&
         THCTensor_canUse32BitIndexMath(state, src) &&
         THCTensor_canUse32BitIndexMath(state, index)) {
-      TensorInfo<real, unsigned int> tensorInfo =
-        getTensorInfo<real, THCTensor, unsigned int>(state, tensor);
-      TensorInfo<real, unsigned int> srcInfo =
-        getTensorInfo<real, THCTensor, unsigned int>(state, src);
+      TensorInfo<scalar_t, unsigned int> tensorInfo =
+        getTensorInfo<scalar_t, THCTensor, unsigned int>(state, tensor);
+      TensorInfo<scalar_t, unsigned int> srcInfo =
+        getTensorInfo<scalar_t, THCTensor, unsigned int>(state, src);
       TensorInfo<int64_t, unsigned int> indexInfo =
         getTensorInfo<int64_t, THCudaLongTensor, unsigned int>(state, index);
 
       // Specialize for a small number of dimensions.
       switch (indexInfo.dims) {
         case 1:
-          RUN(unsigned int, 1, real);
+          RUN(unsigned int, 1, scalar_t);
           break;
         case 2:
-          RUN(unsigned int, 2, real);
+          RUN(unsigned int, 2, scalar_t);
           break;
         case 3:
-          RUN(unsigned int, 3, real);
+          RUN(unsigned int, 3, scalar_t);
           break;
         default:
-          RUN(unsigned int, -1, real);
+          RUN(unsigned int, -1, scalar_t);
           break;
       }
     } else {
-      TensorInfo<real, uint64_t> tensorInfo =
-        getTensorInfo<real, THCTensor, uint64_t>(state, tensor);
-      TensorInfo<real, uint64_t> srcInfo =
-        getTensorInfo<real, THCTensor, uint64_t>(state, src);
+      TensorInfo<scalar_t, uint64_t> tensorInfo =
+        getTensorInfo<scalar_t, THCTensor, uint64_t>(state, tensor);
+      TensorInfo<scalar_t, uint64_t> srcInfo =
+        getTensorInfo<scalar_t, THCTensor, uint64_t>(state, src);
       TensorInfo<int64_t, uint64_t> indexInfo =
         getTensorInfo<int64_t, THCudaLongTensor, uint64_t>(state, index);
 
-      RUN(uint64_t, -1, real)
+      RUN(uint64_t, -1, scalar_t)
     }
   }
 
   if (oldTensor) {
-    THCTensor_copyIgnoringOverlaps<real>(state, oldTensor, tensor);
+    THCTensor_copyIgnoringOverlaps<scalar_t>(state, oldTensor, tensor);
     THCTensor_(free)(state, tensor);
     tensor = oldTensor;
   }
@@ -201,10 +207,17 @@ void THCTensor_(scatterAdd)(THCState* state, THCTensor *tensor, int dim, THCudaL
 
   THArgCheck(dim >= 0 && dim < THCTensor_(nDimensionLegacyNoScalars)(state, tensor), 2,
              "Index dimension is out of bounds");
-  THArgCheck(THCudaLongTensor_nDimensionLegacyNoScalars(state, index) == THCTensor_(nDimensionLegacyNoScalars)(state, src), 3,
-             "Index tensor must have same dimensions as input tensor");
+  int index_ndim_legacy_all = THCudaLongTensor_nDimensionLegacyAll(state, index);
+
+  THArgCheck(index_ndim_legacy_all == 0
+             || THCudaLongTensor_nDimensionLegacyNoScalars(state, index) == THCTensor_(nDimensionLegacyNoScalars)(state, src), 3,
+             "Index tensor must either be empty or have same dimensions as input tensor");
   THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, src) == THCTensor_(nDimensionLegacyNoScalars)(state, tensor), 4,
              "Input tensor must have same dimensions as output tensor");
+
+  // no-op if index is empty
+  if (index_ndim_legacy_all == 0)
+      return;
 
   for (int d = 0; d < THCTensor_(nDimensionLegacyNoScalars)(state, tensor); d++) {
     int64_t indexSizeD = THCudaLongTensor_sizeLegacyNoScalars(state, index, d);
@@ -238,42 +251,42 @@ void THCTensor_(scatterAdd)(THCState* state, THCTensor *tensor, int dim, THCudaL
     if (THCTensor_canUse32BitIndexMath(state, tensor) &&
         THCTensor_canUse32BitIndexMath(state, src) &&
         THCTensor_canUse32BitIndexMath(state, index)) {
-      TensorInfo<real, unsigned int> tensorInfo =
-        getTensorInfo<real, THCTensor, unsigned int>(state, tensor);
-      TensorInfo<real, unsigned int> srcInfo =
-        getTensorInfo<real, THCTensor, unsigned int>(state, src);
+      TensorInfo<scalar_t, unsigned int> tensorInfo =
+        getTensorInfo<scalar_t, THCTensor, unsigned int>(state, tensor);
+      TensorInfo<scalar_t, unsigned int> srcInfo =
+        getTensorInfo<scalar_t, THCTensor, unsigned int>(state, src);
       TensorInfo<int64_t, unsigned int> indexInfo =
         getTensorInfo<int64_t, THCudaLongTensor, unsigned int>(state, index);
 
       // Specialize for a small number of dimensions.
       switch (indexInfo.dims) {
         case 1:
-          RUN(unsigned int, 1, real);
+          RUN(unsigned int, 1, scalar_t);
           break;
         case 2:
-          RUN(unsigned int, 2, real);
+          RUN(unsigned int, 2, scalar_t);
           break;
         case 3:
-          RUN(unsigned int, 3, real);
+          RUN(unsigned int, 3, scalar_t);
           break;
         default:
-          RUN(unsigned int, -1, real);
+          RUN(unsigned int, -1, scalar_t);
           break;
       }
     } else {
-      TensorInfo<real, uint64_t> tensorInfo =
-        getTensorInfo<real, THCTensor, uint64_t>(state, tensor);
-      TensorInfo<real, uint64_t> srcInfo =
-        getTensorInfo<real, THCTensor, uint64_t>(state, src);
+      TensorInfo<scalar_t, uint64_t> tensorInfo =
+        getTensorInfo<scalar_t, THCTensor, uint64_t>(state, tensor);
+      TensorInfo<scalar_t, uint64_t> srcInfo =
+        getTensorInfo<scalar_t, THCTensor, uint64_t>(state, src);
       TensorInfo<int64_t, uint64_t> indexInfo =
         getTensorInfo<int64_t, THCudaLongTensor, uint64_t>(state, index);
 
-      RUN(uint64_t, -1, real)
+      RUN(uint64_t, -1, scalar_t)
     }
   }
 
   if (oldTensor) {
-    THCTensor_copyIgnoringOverlaps<real>(state, oldTensor, tensor);
+    THCTensor_copyIgnoringOverlaps<scalar_t>(state, oldTensor, tensor);
     THCTensor_(free)(state, tensor);
     tensor = oldTensor;
   }
@@ -289,15 +302,20 @@ void THCTensor_(scatterAdd)(THCState* state, THCTensor *tensor, int dim, THCudaL
 
 void
 THCTensor_(scatterFill)(THCState* state, THCTensor *tensor,
-                         int dim, THCudaLongTensor *index, real value) {
+                         int dim, THCudaLongTensor *index, scalar_t value) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, tensor));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, index));
 
+  int index_ndim_legacy_all = THCudaLongTensor_nDimensionLegacyAll(state, index);
   THArgCheck(dim >= 0 && dim < THCTensor_(nDimensionLegacyNoScalars)(state, tensor), 2,
              "Index dimension is out of bounds");
-  THArgCheck(THCudaLongTensor_nDimensionLegacyNoScalars(state, index) ==
-             THCTensor_(nDimensionLegacyNoScalars)(state, tensor), 3,
-             "Index tensor must have same dimensions as output tensor");
+  THArgCheck(index_ndim_legacy_all == 0
+             || THCudaLongTensor_nDimensionLegacyNoScalars(state, index) == THCTensor_(nDimensionLegacyNoScalars)(state, tensor), 3,
+             "Index tensor must be either empty or have same dimensions as output tensor");
+
+  // no-op if index is empty
+  if (index_ndim_legacy_all == 0)
+      return;
 
   for (int d = 0; d < THCTensor_(nDimensionLegacyNoScalars)(state, tensor); d++) {
     if (d != dim) {
@@ -325,37 +343,37 @@ THCTensor_(scatterFill)(THCState* state, THCTensor *tensor,
 
   if (THCTensor_canUse32BitIndexMath(state, tensor) &&
       THCTensor_canUse32BitIndexMath(state, index)) {
-    TensorInfo<real, unsigned int> tensorInfo =
-      getTensorInfo<real, THCTensor, unsigned int>(state, tensor);
+    TensorInfo<scalar_t, unsigned int> tensorInfo =
+      getTensorInfo<scalar_t, THCTensor, unsigned int>(state, tensor);
     TensorInfo<int64_t, unsigned int> indexInfo =
       getTensorInfo<int64_t, THCudaLongTensor, unsigned int>(state, index);
 
     // Specialize for a small number of dimensions.
     switch (indexInfo.dims) {
       case 1:
-        RUN(unsigned int, 1, real);
+        RUN(unsigned int, 1, scalar_t);
         break;
       case 2:
-        RUN(unsigned int, 2, real);
+        RUN(unsigned int, 2, scalar_t);
         break;
       case 3:
-        RUN(unsigned int, 3, real);
+        RUN(unsigned int, 3, scalar_t);
         break;
       default:
-        RUN(unsigned int, -1, real);
+        RUN(unsigned int, -1, scalar_t);
         break;
     }
   } else {
-    TensorInfo<real, uint64_t> tensorInfo =
-      getTensorInfo<real, THCTensor, uint64_t>(state, tensor);
+    TensorInfo<scalar_t, uint64_t> tensorInfo =
+      getTensorInfo<scalar_t, THCTensor, uint64_t>(state, tensor);
     TensorInfo<int64_t, uint64_t> indexInfo =
       getTensorInfo<int64_t, THCudaLongTensor, uint64_t>(state, index);
 
-    RUN(uint64_t, -1, real);
+    RUN(uint64_t, -1, scalar_t);
   }
 
   if (oldTensor) {
-    THCTensor_copyIgnoringOverlaps<real>(state, oldTensor, tensor);
+    THCTensor_copyIgnoringOverlaps<scalar_t>(state, oldTensor, tensor);
     THCTensor_(free)(state, tensor);
     tensor = oldTensor;
   }

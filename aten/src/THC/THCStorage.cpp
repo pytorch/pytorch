@@ -1,14 +1,14 @@
-#include "THCStorage.hpp"
-#include "THCGeneral.h"
+#include <THC/THCStorage.hpp>
+#include <THC/THCGeneral.h>
 
-#include "THCHalf.h"
+#include <TH/THHalf.h>
 
 #include <new>
 
-#include "generic/THCStorage.cpp"
-#include "THCGenerateAllTypes.h"
+#include <THC/generic/THCStorage.cpp>
+#include <THC/THCGenerateAllTypes.h>
 
-#include <ATen/core/intrusive_ptr.h>
+#include <c10/util/intrusive_ptr.h>
 
 void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
 {
@@ -55,9 +55,9 @@ int THCStorage_getDevice(THCState* state, const THCStorage* storage) {
 
 THC_API THCStorage* THCStorage_new(
     THCState* state,
-    at::ScalarType scalar_type) {
+    caffe2::TypeMeta data_type) {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
-      at::scalarTypeToDataType(scalar_type),
+      data_type,
       0,
       state->cudaDeviceAllocator,
       true).release();

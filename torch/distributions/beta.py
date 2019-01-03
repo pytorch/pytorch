@@ -36,6 +36,14 @@ class Beta(ExponentialFamily):
         self._dirichlet = Dirichlet(concentration1_concentration0)
         super(Beta, self).__init__(self._dirichlet._batch_shape, validate_args=validate_args)
 
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(Beta, _instance)
+        batch_shape = torch.Size(batch_shape)
+        new._dirichlet = self._dirichlet.expand(batch_shape)
+        super(Beta, new).__init__(batch_shape, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
+
     @property
     def mean(self):
         return self.concentration1 / (self.concentration1 + self.concentration0)

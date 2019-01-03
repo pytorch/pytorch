@@ -99,7 +99,7 @@ bool SelectSmoothL1LossOp<float, CUDAContext>::RunOnDevice() {
   auto& S         = Input(3);
   auto* avg_loss  = Output(0);
 
-  avg_loss->Resize(vector<TIndex>());
+  avg_loss->Resize(vector<int64_t>());
   if (Y.size() == 0){
     math::Set<float, CUDAContext>(
       1, static_cast<float>(0), avg_loss->mutable_data<float>(), &context_);

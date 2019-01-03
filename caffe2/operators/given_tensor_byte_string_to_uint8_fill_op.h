@@ -35,21 +35,21 @@ class GivenTensorByteStringToUInt8FillOp final : public FillerOp<Context> {
   }
 
   bool Fill(Tensor* output) override {
-    DCHECK_EQ(output->size(), values_.size())
-        << "output size: " << output->size()
-        << " given size: " << values_.size();
+    DCHECK_EQ(output->numel(), values_.numel())
+        << "output size: " << output->numel()
+        << " given size: " << values_.numel();
     auto* data = output->template mutable_data<uint8_t>();
     const uint8_t* values_data = values_.template data<uint8_t>();
-    if (output->size()) {
+    if (output->numel()) {
       context_.template CopySameDevice<uint8_t>(
-          output->size(), values_data, data);
+          output->numel(), values_data, data);
     }
     return true;
   }
 
  private:
   void Extract() {
-    auto source_values = OperatorBase::GetRepeatedArgument<string>("values");
+    auto source_values = this->template GetRepeatedArgument<string>("values");
     DCHECK_EQ(source_values.size(), 1)
         << "expected size: 1 "
         << " given size: " << source_values.size();

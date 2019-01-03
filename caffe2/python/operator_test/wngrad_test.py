@@ -14,6 +14,7 @@ import numpy as np
 
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 logger = logging.getLogger(__name__)
 
@@ -76,8 +77,8 @@ def wngrad_sparse_test_helper(parent_test, inputs, seq_b, lr, epsilon,
     )
 
 
-class TestWngrad(hu.HypothesisTestCase):
-    @given(inputs=hu.tensors(n=2),
+class TestWngrad(serial.SerializedTestCase):
+    @serial.given(inputs=hu.tensors(n=2),
            seq_b=st.floats(min_value=0.01, max_value=0.99,
                         allow_nan=False, allow_infinity=False),
            lr=st.floats(min_value=0.01, max_value=0.99,
@@ -174,7 +175,7 @@ class TestWngrad(hu.HypothesisTestCase):
         return wngrad_sparse_test_helper(self, inputs, seq_b, lr, epsilon,
             None, gc, dc)
 
-    @given(inputs=hu.tensors(n=1),
+    @serial.given(inputs=hu.tensors(n=1),
            lr=st.floats(min_value=0.01, max_value=0.99,
                         allow_nan=False, allow_infinity=False),
            seq_b=st.floats(min_value=0.01, max_value=0.99,

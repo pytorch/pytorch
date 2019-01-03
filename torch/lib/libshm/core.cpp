@@ -3,9 +3,9 @@
 #include <unordered_map>
 
 #include <TH/TH.h>
-#include "err.h"
-#include "socket.h"
-#include "libshm.h"
+#include <libshm/err.h>
+#include <libshm/socket.h>
+#include <libshm/libshm.h>
 
 std::unordered_map<std::string, ClientSocket> managers;
 std::string manager_executable_path;

@@ -28,11 +28,8 @@ class no_grad(object):
         >>> z.requires_grad
         False
     """
-
-    def __init__(self):
-        self.prev = torch.is_grad_enabled()
-
     def __enter__(self):
+        self.prev = torch.is_grad_enabled()
         torch._C.set_grad_enabled(False)
 
     def __exit__(self, *args):
@@ -69,17 +66,14 @@ class enable_grad(object):
         >>> @torch.enable_grad()
         ... def doubler(x):
         ...     return x * 2
-        >>> with torch.no_grad:
+        >>> with torch.no_grad():
         ...     z = doubler(x)
         >>> z.requires_grad
         True
 
     """
-
-    def __init__(self):
-        self.prev = torch.is_grad_enabled()
-
     def __enter__(self):
+        self.prev = torch.is_grad_enabled()
         torch._C.set_grad_enabled(True)
 
     def __exit__(self, *args):
