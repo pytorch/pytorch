@@ -254,7 +254,7 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
       output = node->output();
     } else {
       output = graph->insert(
-          jit::aten::s_copy_,
+          jit::aten::copy_,
           {jit::tracer::getValueTrace(self), jit::tracer::getValueTrace(src)});
     }
   }
