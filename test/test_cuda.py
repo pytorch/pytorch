@@ -1574,6 +1574,11 @@ class TestCuda(TestCase):
         x = torch.ones(65536, device='cuda', dtype=torch.float16)
         self.assertEqual(x.mean(dtype=torch.float32), 1)
 
+    def test_prod_large(self):
+        # tests global reduction (should_global_reduce = true) in case of non-zero identity element
+        x = torch.ones(240000, device='cuda', dtype=torch.float32)
+        self.assertEqual(x.prod(), 1)
+
     @staticmethod
     def _select_broadcastable_dims(dims_full=None):
         return _TestTorchMixin._select_broadcastable_dims(dims_full)
