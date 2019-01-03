@@ -1263,6 +1263,13 @@ is_contiguous() -> bool
 Returns True if :attr:`self` tensor is contiguous in memory in C order.
 """)
 
+add_docstr_all('is_floating_point',
+               r"""
+is_floating_point() -> bool
+
+Returns True if the data type of :attr:`self` is a floating point data type.
+""")
+
 add_docstr_all('is_set_to',
                r"""
 is_set_to(tensor) -> bool
