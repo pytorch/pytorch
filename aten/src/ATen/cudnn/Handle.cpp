@@ -115,6 +115,15 @@ class PoolWindow
   // Called by the destructor.  Releases this thread's handles back into the pool.
   void release()
   {
+    // The conditional check below is certainly worthwhile for efficiency.
+    // However, it also serves another purpose:  Without the conditional,
+    // we observe weird nondeterministic hangs on Windows when the process first
+    // attempts to create a cudnn handle.  Example with added debug print statements:
+    // https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-win-ws2016-cuda9-cudnn7-py3-test2/19238/console
+    // The print statements reveal that when these hangs occur, the thread that is attempting
+    // to create a cudnn handle for the first time hangs on the call to cudnnCreate itself.
+    // These hangs have never manifested on anything but that particular Windows build.
+    // All other builds seem fine.
     if(my_handles.size() > 0)
     {
       std::lock_guard<std::mutex> guard(mutex);
