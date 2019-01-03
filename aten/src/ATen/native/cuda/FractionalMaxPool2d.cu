@@ -3,7 +3,6 @@
 #include "ATen/cuda/CUDAApplyUtils.cuh"
 #include "ATen/cuda/CUDAContext.h"
 #include "ATen/cuda/detail/IndexUtils.cuh"
-#include "ATen/cuda/detail/TensorInfo.cuh"
 #include "ATen/cuda/detail/KernelUtils.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/TensorUtils.h"
@@ -34,25 +33,12 @@ __device__ inline int get_interval(accscalar_t sample,
   }
 }
 
-template <typename scalar_t, typename index_t>
-__device__ inline scalar_t* get_ref_by_coord(
-  TensorInfo<scalar_t, index_t> tensor_info,
-  int ndims, index_t batch, index_t plane,
-  index_t h, index_t w) {
-  index_t offset = plane * tensor_info.strides[ndims - 3] +
-    h * tensor_info.strides[ndims - 2] + w * tensor_info.strides[ndims - 1];
-  if(ndims == 4) {
-    offset += batch * tensor_info.strides[0];
-  }
-  return tensor_info.data + offset;
-}
-
 template <typename scalar_t>
 __global__ void fractional_max_pool2d_out_cuda_frame(
-  TensorInfo<scalar_t, int> output,
-  TensorInfo<int64_t, int> indices,
-  TensorInfo<scalar_t, int> input,
-  TensorInfo<scalar_t, int> samples,
+  PackedTensorAccessor<scalar_t, 4> output,
+  PackedTensorAccessor<int64_t, 4> indices,
+  PackedTensorAccessor<scalar_t, 4> input,
+  PackedTensorAccessor<scalar_t, 3> samples,
   int poolSizeH, int poolSizeW,
   int PoolSizeWStatic) {
 
@@ -62,21 +48,17 @@ __global__ void fractional_max_pool2d_out_cuda_frame(
   int plane = blockIdx.y;
   int batch = blockIdx.z;
 
-  int ndims = output.dims;
-
   // Each thread generates a specific output point
-  if (ourOutputPoint < output.sizes[ndims - 2] * output.sizes[ndims - 1]) {
-    int outputW = ourOutputPoint % output.sizes[ndims - 1];
-    int outputH = ourOutputPoint / output.sizes[ndims - 1];
+  if (ourOutputPoint < output.size(2) * output.size(3)) {
+    int outputW = ourOutputPoint % output.size(3);
+    int outputH = ourOutputPoint / output.size(3);
 
     int poolW = get_interval<scalar_t, accscalar_t>(
-      static_cast<accscalar_t>(samples.data[batch * samples.strides[0] +
-        plane * samples.strides[1]]),
-        outputW, input.sizes[ndims - 1], output.sizes[ndims - 1], poolSizeW);
+      static_cast<accscalar_t>(samples[batch][plane][0]),
+        outputW, input.size(3), output.size(3), poolSizeW);
     int poolH = get_interval<scalar_t, accscalar_t>(
-      static_cast<accscalar_t>(samples.data[batch * samples.strides[0] +
-        plane * samples.strides[1] + samples.strides[2]]),
-        outputH, input.sizes[ndims - 2], output.sizes[ndims - 2], poolSizeH);
+      static_cast<accscalar_t>(samples[batch][plane][1]),
+        outputH, input.size(2), output.size(2), poolSizeH);
 
     scalar_t maxVal = at::numeric_limits<scalar_t>::lowest();
     int maxIndex = -1;
@@ -84,11 +66,10 @@ __global__ void fractional_max_pool2d_out_cuda_frame(
     for (int h = poolH; h < poolH + poolSizeH; ++h) {
       if (PoolSizeWStatic == -1) {
         for (int w = poolW; w < poolW + poolSizeW; ++w) {
-          scalar_t val = *get_ref_by_coord<scalar_t, int>(
-            input, ndims, batch, plane, h, w);
+          scalar_t val = input[batch][plane][h][w];
           // for consistency with THNN, favor the first max
           if (val > maxVal) {
-            maxIndex = h * input.sizes[ndims - 1] + w;
+            maxIndex = h * input.size(3) + w;
             maxVal = val;
           }
         }
@@ -96,11 +77,10 @@ __global__ void fractional_max_pool2d_out_cuda_frame(
 #pragma unroll
         for (int i = 0; i < PoolSizeWStatic; ++i) {
           int w = i + poolW;
-          scalar_t val = *get_ref_by_coord<scalar_t, int>(
-            input, ndims, batch, plane, h, w);
+          scalar_t val = input[batch][plane][h][w];
           // for consistency with THNN, favor the first max
           if (val > maxVal) {
-            maxIndex = h * input.sizes[ndims - 1] + w;
+            maxIndex = h * input.size(3) + w;
             maxVal = val;
           }
         }
@@ -110,45 +90,37 @@ __global__ void fractional_max_pool2d_out_cuda_frame(
     assert(maxVal != at::numeric_limits<scalar_t>::lowest());
     assert(maxIndex != -1);
 
-    auto indices_ref = get_ref_by_coord(indices, ndims,
-      batch, plane, outputH, outputW);
-    auto output_ref = get_ref_by_coord(output, ndims,
-      batch, plane, outputH, outputW);
-    *indices_ref = maxIndex;
-    *output_ref = maxVal;
+    indices[batch][plane][outputH][outputW] = maxIndex;
+    output[batch][plane][outputH][outputW] = maxVal;
   }
 }
 
 template <typename scalar_t>
 __global__ void fractional_max_pool2d_backward_out_cuda_frame(
-  TensorInfo<scalar_t, int> gradInput,
-  TensorInfo<scalar_t, int> gradOutput,
-  TensorInfo<int64_t, int> indices) {
+  PackedTensorAccessor<scalar_t, 4> gradInput,
+  PackedTensorAccessor<scalar_t, 4> gradOutput,
+  PackedTensorAccessor<int64_t, 4> indices) {
   // Output (h, w) point that this thread is responsible for
   int ourOutputPoint = threadIdx.x + blockIdx.x * blockDim.x;
   int plane = blockIdx.y;
   int batch = blockIdx.z;
 
-  int ndims = gradOutput.dims;
-
   // Each thread generates a specific output point
-  if (ourOutputPoint < gradOutput.sizes[ndims - 2] *
-    gradOutput.sizes[ndims - 1]) {
-    int outputW = ourOutputPoint % gradOutput.sizes[ndims - 1];
-    int outputH = ourOutputPoint / gradOutput.sizes[ndims - 1];
+  if (ourOutputPoint < gradOutput.size(2) *
+    gradOutput.size(3)) {
+    int outputW = ourOutputPoint % gradOutput.size(3);
+    int outputH = ourOutputPoint / gradOutput.size(3);
 
-    int index = *get_ref_by_coord<int64_t, int>(
-      indices, ndims, batch, plane, outputH, outputW);
+    int index = indices[batch][plane][outputH][outputW];
     assert(index >= 0);
-    int inputW = index % gradInput.sizes[ndims - 1];
-    int inputH = index / gradInput.sizes[ndims - 1];
-    assert(inputH < gradInput.sizes[ndims - 2]);
+    int inputW = index % gradInput.size(3);
+    int inputH = index / gradInput.size(3);
+    assert(inputH < gradInput.size(2));
 
     atomicAdd(
-      get_ref_by_coord<scalar_t, int>(
-        gradInput, ndims, batch, plane, inputH, inputW),
-      *get_ref_by_coord<scalar_t, int>(
-        gradOutput, ndims, batch, plane, outputH, outputW));
+      &gradInput[batch][plane][inputH][inputW],
+      gradOutput[batch][plane][outputH][outputW]
+    );
   }
 }
 
@@ -209,24 +181,36 @@ void fractional_max_pool2d_out_cuda_template(
     indices.resize_({numBatch, numPlanes, outputH, outputW});
   }
 
+  auto output_ = output;
+  auto input_ = input;
+  auto indices_ = indices;
+
+  if(ndims == 3) {
+    output_.reshape({1, numPlanes, outputH, outputW});
+    indices_.reshape({1, numPlanes, outputH, outputW});
+    input_.reshape({1, input.size(0), input.size(1), input.size(2)});
+  }
+
   // block is limited to 4 warps
   // grid handles overflow per each plane
-  int outputPlaneSize = output.size(ndims - 2) *
-    output.size(ndims - 1);
+  int outputPlaneSize = output_.size(2) *
+    output_.size(3);
   dim3 grid((outputPlaneSize + 127) / 128,
-            input.size(ndims - 3),
-            ndims == 3 ? 1 : input.size(0));
+            input_.size(1),
+            input_.size(0));
   dim3 block(outputPlaneSize > 128 ? 128 : outputPlaneSize);
+
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(),
     "fractional_max_pool2d_out_cuda_frame",
     [&] {
+      auto devInput = input_.packed_accessor<scalar_t, 4>();
+      auto devOutput = output_.packed_accessor<scalar_t, 4>();
+      auto devIndices = indices_.packed_accessor<int64_t, 4>();
+      auto devSamples = randomSamples.packed_accessor<scalar_t, 3>();
       fractional_max_pool2d_out_cuda_frame<scalar_t>
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-          getTensorInfo<scalar_t, int>(output),
-          getTensorInfo<int64_t, int>(indices),
-          getTensorInfo<scalar_t, int>(input),
-          getTensorInfo<scalar_t, int>(randomSamples),
+          devOutput, devIndices, devInput, devSamples,
           poolSizeH, poolSizeW,
           (poolSizeW <= 7 && poolSizeW >= 2) ? poolSizeW : -1
         );
@@ -266,26 +250,38 @@ void fractional_max_pool2d_backward_out_cuda_template(
            "fractional_max_pool2d(): gradOutput width unexpected");
 
   /* resize */
-  gradInput = at::zeros_like(input);
+  gradInput.resize_as_(input);
+  gradInput.zero_();
+
+  auto gradInput_ = gradInput;
+  auto gradOutput_ = gradOutput;
+  auto indices_ = indices;
+
+  if(ndims == 3) {
+    gradInput_.reshape({1, input.size(0), inputH, inputW});
+    gradOutput_.reshape({1, gradOutput.size(0), outputH, outputW});
+    indices_.reshape({1, indices_.size(0), outputH, outputW});
+  }
 
   /* backprop */
   // block is limited to 4 warps
   // grid handles overflow per each plane
-  int outputPlaneSize = gradOutput.size(ndims - 2) *
-    gradOutput.size(ndims - 1);
+  int outputPlaneSize = gradOutput_.size(2) *
+    gradOutput_.size(3);
   dim3 grid((outputPlaneSize + 127) / 128,
-            gradInput.size(ndims - 3),
-            gradInput.size(ndims - 4));
+            gradInput_.size(1),
+            gradInput_.size(0));
   dim3 block(outputPlaneSize > 128 ? 128 : outputPlaneSize);
 
+  auto devIndices = indices.packed_accessor<int64_t, 4>();
 AT_DISPATCH_FLOATING_TYPES_AND_HALF(gradOutput.type(),
   "fractional_max_pool2d_backward_out_cuda_frame",
   [&] {
+    auto devGradInput = gradInput_.packed_accessor<scalar_t, 4>();
+    auto devGradOutput = gradOutput_.packed_accessor<scalar_t, 4>();
     fractional_max_pool2d_backward_out_cuda_frame<scalar_t>
       <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-        getTensorInfo<scalar_t, int>(gradInput),
-        getTensorInfo<scalar_t, int>(gradOutput),
-        getTensorInfo<int64_t, int>(indices));
+        devGradInput, devGradOutput, devIndices);
       }
     );
 }
@@ -330,11 +326,11 @@ std::tuple<Tensor, Tensor> fractional_max_pool2d_cuda(
 
 Tensor& fractional_max_pool2d_backward_out_cuda(
   at::Tensor& gradInput,
-  at::Tensor const& gradOutput_,
-  at::Tensor const& input,
+  const at::Tensor& gradOutput_,
+  const at::Tensor& input,
   IntList pool_size,
   IntList output_size,
-  at::Tensor const& indices)
+  const at::Tensor& indices)
 {
   gradInput.resize_as_(input);
   fractional_max_pool2d_backward_out_cuda_template(
@@ -348,13 +344,13 @@ Tensor& fractional_max_pool2d_backward_out_cuda(
 }
 
 Tensor fractional_max_pool2d_backward_cuda(
-  at::Tensor const& gradOutput_,
-  at::Tensor const& input,
+  const at::Tensor& gradOutput_,
+  const at::Tensor& input,
   IntList pool_size,
   IntList output_size,
-  at::Tensor const& indices)
+  const at::Tensor& indices)
 {
-  Tensor gradInput = at::zeros_like(input);
+  Tensor gradInput = at::empty({0}, input.options());
   fractional_max_pool2d_backward_out_cuda_template(
     gradInput,
     gradOutput_,
