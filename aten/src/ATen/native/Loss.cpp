@@ -1,7 +1,7 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/Dispatch.h"
-#include "ATen/CPUApplyUtils.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Dispatch.h>
+#include <ATen/CPUApplyUtils.h>
 
 #define EPSILON 1e-12
 
@@ -93,7 +93,7 @@ Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& targe
     if (pos_weight.defined()) {
         // pos_weight need to be broadcasted, thus mul(target) is not inplace.
         auto log_weight = (pos_weight - 1).mul(target).add_(1);
-        loss = (1 - target).mul_(input).add_(log_weight.mul_((-max_val).exp_().mul_(1 + (-input).exp_()).log_().add_(max_val)));
+        loss = (1 - target).mul_(input).add_(log_weight.mul_(((-max_val).exp_().add_((-input - max_val).exp_())).log_().add_(max_val)));
     } else {
         loss = (1 - target).mul_(input).add_(max_val).add_((-max_val).exp_().add_((-input -max_val).exp_()).log_());
     }

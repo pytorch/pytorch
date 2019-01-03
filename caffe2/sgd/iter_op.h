@@ -45,9 +45,9 @@ class IterOp final : public Operator<Context> {
                       "be deprecated soon. More specifically, IterOp now "
                       "requires an explicit in-place input and output.";
 
-        auto* output = OperatorBase::Output<Tensor>(0, CPU);
         VLOG(1) << "Initializing iter counter.";
-        output->Resize(1);
+        auto* output = OperatorBase::OutputTensor(
+            0, {1}, at::dtype<int64_t>().device(CPU));
         output->template mutable_data<int64_t>()[0] = 0;
       }
     }

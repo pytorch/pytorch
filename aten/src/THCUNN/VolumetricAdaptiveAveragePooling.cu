@@ -1,8 +1,8 @@
-#include "THCUNN.h"
-#include "THCTensor.hpp"
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
-#include "THCAtomics.cuh"
+#include <THCUNN/THCUNN.h>
+#include <THC/THCTensor.hpp>
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCAtomics.cuh>
 
 #define START_IND(a,b,c) (int)floor((float)(a * c) / b)
 #define END_IND(a,b,c) (int)ceil((float)((a + 1) * c) / b)
@@ -240,8 +240,8 @@ __global__ void cunn_atomic_VolumetricAdaptiveAveragePooling_updateGradInput_ker
   }
 }
 
-#include "generic/VolumetricAdaptiveAveragePooling.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/VolumetricAdaptiveAveragePooling.cu>
+#include <THC/THCGenerateFloatTypes.h>
 
 #undef CUDA_MAX_THREADS
 #undef START_IND

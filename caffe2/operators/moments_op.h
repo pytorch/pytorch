@@ -22,8 +22,7 @@ class MomentsOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     const auto& X = Input(0);
-    auto* mean = Output(0);
-    auto* variance = Output(1);
+
     const int ndim = X.dim();
     if (axes_.empty()) {
       axes_.resize(ndim);
@@ -37,7 +36,7 @@ class MomentsOp final : public Operator<Context> {
           "Axes ids must be smaller than the dimensions of input.");
     }
     const std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
-    std::vector<int> Y_dims;
+    std::vector<int64_t> Y_dims;
     Y_dims.reserve(ndim);
     std::size_t cur_axis = 0;
     for (int i = 0; i < ndim; ++i) {
@@ -50,8 +49,8 @@ class MomentsOp final : public Operator<Context> {
         Y_dims.push_back(X_dims[i]);
       }
     }
-    mean->Resize(Y_dims);
-    variance->Resize(Y_dims);
+    auto* mean = Output(0, Y_dims, at::dtype<T>());
+    auto* variance = Output(1, Y_dims, at::dtype<T>());
     math::Moments<float, Context>(
         X_dims.size(),
         X_dims.data(),
@@ -83,7 +82,7 @@ class MomentsGradientOp final : public Operator<Context> {
     const auto& dvariance = Input(1);
     const auto& X = Input(2);
     const auto& mean = Input(3);
-    auto* dX = Output(0);
+
     const int ndim = X.dim();
     if (axes_.empty()) {
       axes_.resize(ndim);
@@ -101,7 +100,7 @@ class MomentsGradientOp final : public Operator<Context> {
     for (const int axis : axes_) {
       dY_dims[axis] = 1;
     }
-    dX->ResizeLike(X);
+    auto* dX = Output(0, X.sizes(), at::dtype<T>());
     return Compute(
         dY_dims,
         dX_dims,

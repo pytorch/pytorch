@@ -1,6 +1,7 @@
 #include <gloo/transport/tcp/device.h>
 
-#include <ATen/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <ATen/cuda/CUDAMultiStreamGuard.h>
 
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
@@ -45,7 +46,7 @@ class AsyncTest {
   }
 
   void start(int rank, int size) {
-    auto store = std::make_shared<::c10d::FileStore>(path_);
+    auto store = std::make_shared<::c10d::FileStore>(path_, size);
 
     // Use tiny timeout to make this test run fast
     ::c10d::ProcessGroupGloo::Options options;
@@ -95,9 +96,7 @@ class AsyncInputIsOutputTest : public AsyncTest {
 
   void wait(std::shared_ptr<ProcessGroup::Work>& work) {
     at::cuda::CUDAMultiStreamGuard guard(streams_);
-    if (!work->wait()) {
-      throw work->exception();
-    }
+    work->wait();
   }
 
   std::vector<at::Tensor> getTensors() {

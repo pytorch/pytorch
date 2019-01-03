@@ -249,22 +249,6 @@
     - long step
 ]]
 [[
-  name: _th_range
-  cname: range
-  variants:
-    - function
-  backends:
-    - CPU
-    - CUDA
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - accreal start
-    - accreal end
-    - accreal step
-]]
-[[
   name: _th_arange
   variants:
     - function
@@ -1629,8 +1613,7 @@
         - arg: THTensor* result
           output: True
         - THTensor* self
-        - arg: real p
-          python_default_init: AS_REAL(2)
+        - real p
         - arg: long dim
           wrap_dim: self
         - arg: bool keepdim
@@ -1883,44 +1866,6 @@
     - real weight
 ]]
 [[
-  name: _th_linspace
-  cname: linspace
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - real start
-    - real end
-    - long steps
-]]
-[[
-  name: _th_logspace
-  cname: logspace
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - real start
-    - real end
-    - long steps
-]]
-[[
   name: _th_histc
   cname: histc
   types:
@@ -2162,6 +2107,8 @@
 [[
   name: _th_triu_
   cname: triu
+  variants:
+    - function
   return: self
   arguments:
     - THTensor* self
@@ -2473,6 +2420,7 @@
         - THTensor* tensor1
         - THTensor* tensor2
     - cname: spaddcmul
+      variants: function
       return: argument 0
       arguments:
         - THTensor* self
@@ -2514,25 +2462,6 @@
       kwarg_only: True
     - THTensor* tensor1
     - THTensor* tensor2
-]]
-[[
-  name: _th_gesv_single
-  cname: gesv
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-    - CUDA
-  variants: function
-  return: argument 0,1
-  arguments:
-    - arg: THTensor* solution
-      output: True
-    - arg: THTensor* lu
-      output: True
-    - THTensor* self
-    - THTensor* A
 ]]
 [[
   name: _th_gels
@@ -2680,27 +2609,6 @@
     - arg: THTensor* output
       output: True
     - THTensor* self
-]]
-[[
-  name: _th_potrf
-  cname: potrf
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* output
-      output: True
-    - THTensor* self
-    - arg: bool upper
-      if_true: U
-      if_false: L
-      default: U
 ]]
 [[
   name: _th_potrs_single

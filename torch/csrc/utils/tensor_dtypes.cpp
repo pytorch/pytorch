@@ -1,10 +1,10 @@
-#include "torch/csrc/python_headers.h"
-#include "tensor_dtypes.h"
-#include "torch/csrc/Dtype.h"
-#include "torch/csrc/DynamicTypes.h"
-#include "torch/csrc/Exceptions.h"
-#include "torch/csrc/autograd/generated/VariableType.h"
-#include "torch/csrc/utils/tensor_types.h"
+#include <torch/csrc/python_headers.h>
+#include <torch/csrc/utils/tensor_dtypes.h>
+#include <torch/csrc/Dtype.h>
+#include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/autograd/generated/VariableType.h>
+#include <torch/csrc/utils/tensor_types.h>
 
 namespace torch { namespace utils {
 
@@ -43,7 +43,7 @@ static std::pair<std::string, std::string> getDtypeNames(at::ScalarType scalarTy
 
 void initializeDtypes() {
   auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
-  if (!torch_module) python_error();
+  if (!torch_module) throw python_error();
 
 #define DEFINE_SCALAR_TYPE(_1,n,_2) at::ScalarType::n,
 

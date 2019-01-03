@@ -13,7 +13,7 @@ graph {
     name: "0"
     type {
       tensor_type {
-        elem_type: INT32
+        elem_type: 6
         shape {
           dim {
             dim_value: 1
@@ -35,7 +35,7 @@ graph {
     name: "1"
     type {
       tensor_type {
-        elem_type: INT32
+        elem_type: 6
         shape {
           dim {
             dim_value: 1
@@ -51,7 +51,7 @@ graph {
     name: "2"
     type {
       tensor_type {
-        elem_type: UINT8
+        elem_type: 2
         shape {
           dim {
             dim_value: 1

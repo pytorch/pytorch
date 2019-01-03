@@ -716,6 +716,21 @@ TEST_F(BroadcastTest, BroadcastFloatTest) {
       {1.0f, 1.0f, 2.0f, 2.0f, 1.0f, 1.0f, 2.0f, 2.0f});
 }
 
+class RandFixedSumTest : public testing::Test {
+ protected:
+  void SetUp() override {
+    cpu_context_ = make_unique<CPUContext>(option_);
+  }
+  DeviceOption option_;
+  std::unique_ptr<CPUContext> cpu_context_;
+};
+
+TEST_F(RandFixedSumTest, UpperBound) {
+  std::vector<int> l(20);
+  math::RandFixedSum<int, CPUContext>(
+      20, 1, 1000, 1000, l.data(), cpu_context_.get());
+}
+
 class MomentsTest : public testing::Test {
  protected:
   void SetUp() override {

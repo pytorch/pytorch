@@ -18,6 +18,7 @@ import warnings
 import random
 import contextlib
 import socket
+import time
 from collections import OrderedDict
 from functools import wraps
 from itertools import product
@@ -177,7 +178,10 @@ def to_gpu(obj, type_map={}):
 
 
 def get_function_arglist(func):
-    return inspect.getargspec(func).args
+    if sys.version_info > (3,):
+        return inspect.getfullargspec(func).args
+    else:
+        return inspect.getargspec(func).args
 
 
 def set_rng_seed(seed):
@@ -240,10 +244,17 @@ class CudaMemoryLeakCheck():
         if exec_type is not None:
             return
         afters = self.get_cuda_memory_usage()
+
         for i, (before, after) in enumerate(zip(self.befores, afters)):
-            self.testcase.assertEqual(
-                before, after, '{} leaked {} bytes CUDA memory on device {}'.format(
-                    self.name, after - before, i))
+            if not TEST_WITH_ROCM:
+                self.testcase.assertEqual(
+                    before, after, '{} leaked {} bytes CUDA memory on device {}'.format(
+                        self.name, after - before, i))
+            else:
+                # TODO: Investigate ROCm memory leaking.
+                if before != after:
+                    warnings.warn('{} leaked {} bytes ROCm memory on device {}'.format(
+                        self.name, after - before, i), RuntimeWarning)
 
 
 class TestCase(expecttest.TestCase):
@@ -316,7 +327,8 @@ class TestCase(expecttest.TestCase):
             #        needed for inplace operations done on `x`, e.g., copy_().
             #        Remove after implementing something equivalent to CopySlice
             #        for sparse views.
-            x = x.detach()
+            # NOTE: We do clone() after detach() here because we need to be able to change size/storage of x afterwards
+            x = x.detach().clone()
         return x, x._indices().clone(), x._values().clone()
 
     def safeToDense(self, t):
@@ -629,6 +641,25 @@ def find_free_port():
     return sockname[1]
 
 
+def retry_on_address_already_in_use_error(func):
+    """Reruns a test if it sees "Address already in use" error."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        tries_remaining = 10
+        while True:
+            try:
+                return func(*args, **kwargs)
+            except RuntimeError as error:
+                if str(error) == "Address already in use":
+                    tries_remaining -= 1
+                    if tries_remaining == 0:
+                        raise
+                    time.sleep(random.random())
+                    continue
+                raise
+    return wrapper
+
+
 # Methods for matrix generation
 # Used in test_autograd.py and test_torch.py
 def prod_single_zero(dim_size):
@@ -696,6 +727,20 @@ def random_fullrank_matrix_distinct_singular_value(l, *batches, **kwargs):
             s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
             all_matrices.append(u.mm(torch.diag(s)).mm(v.t()))
         return torch.stack(all_matrices).reshape(*(batches + (l, l)))
+
+
+def brute_pdist(inp, p=2):
+    """Computes the same as torch.pdist using primitives"""
+    n = inp.shape[-2]
+    k = n * (n - 1) // 2
+    if k == 0:
+        # torch complains about empty indices
+        return torch.empty(inp.shape[:-2] + (0,), device=inp.device)
+    square = torch.norm(inp[..., None, :] - inp[..., None, :, :], p=p, dim=-1)
+    unroll = square.view(square.shape[:-2] + (n * n,))
+    inds = torch.ones(k, dtype=torch.int)
+    inds[torch.arange(n - 1, 1, -1, dtype=torch.int).cumsum(0)] += torch.arange(2, n, dtype=torch.int)
+    return unroll[..., inds.cumsum(0)]
 
 
 def do_test_dtypes(self, dtypes, layout, device):
@@ -800,6 +845,11 @@ def set_running_script_path():
 
 def check_test_defined_in_running_script(test_case):
     if running_script_path is None:
+        return
+    if TEST_WITH_ROCM:
+        # In ROCm CI, to avoid forking after HIP is initialized, we
+        # indeed load test module from test/run_test.py and run all
+        # tests in the same process.
         return
     test_case_class_file = os.path.abspath(os.path.realpath(inspect.getfile(test_case.__class__)))
     assert test_case_class_file == running_script_path, "Class of loaded TestCase \"{}\" " \

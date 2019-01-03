@@ -1,21 +1,20 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+from __future__ import absolute_import, division, print_function, unicode_literals
 
-import numpy as np
-import caffe2.python.hypothesis_test_util as hu
-from caffe2.python import core, dyndep
-from hypothesis import given
-import hypothesis.strategies as st
 import collections
 
+import caffe2.python.hypothesis_test_util as hu
+import hypothesis.strategies as st
+import numpy as np
+from caffe2.python import core, dyndep, workspace
+from hypothesis import given
+
+
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
+workspace.GlobalInit(["caffe2", "--caffe2_omp_num_threads=11"])
 
 
 class DNNLowPSigmoidOpTest(hu.HypothesisTestCase):
-    @given(size=st.integers(1024, 2048),
-           **hu.gcs_cpu_only)
+    @given(size=st.integers(1024, 2048), **hu.gcs_cpu_only)
     def test_dnnlowp_sigmoid(self, size, gc, dc):
 
         X = (np.random.rand(size) * 20 - 10).astype(np.float32)
@@ -54,18 +53,15 @@ class DNNLowPSigmoidOpTest(hu.HypothesisTestCase):
 
             if engine == "DNNLOWP":
                 dequantize = core.CreateOperator(
-                    "Dequantize",
-                    ["Y_q"],
-                    ["Y"],
-                    engine=engine,
-                    device_option=gc,
+                    "Dequantize", ["Y_q"], ["Y"], engine=engine, device_option=gc
                 )
                 net.Proto().op.extend([dequantize])
 
             self.ws.create_blob("X").feed(X, device_option=gc)
             self.ws.run(net)
-            outputs.append(Output(
-                Y=self.ws.blobs["Y"].fetch(), op_type=op_type, engine=engine))
+            outputs.append(
+                Output(Y=self.ws.blobs["Y"].fetch(), op_type=op_type, engine=engine)
+            )
 
         for o in outputs:
             np.testing.assert_allclose(o.Y, outputs[0].Y, atol=0.01, rtol=0)

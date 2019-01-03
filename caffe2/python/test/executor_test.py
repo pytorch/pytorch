@@ -19,7 +19,7 @@ import hypothesis.strategies as st
 import unittest
 
 
-EXECUTORS = ["async_scheduling", "async_polling", "dag", "async_dag"]
+EXECUTORS = ["parallel", "async_scheduling"]
 ITERATIONS = 1
 
 
@@ -47,14 +47,15 @@ class ExecutorCPUConvNetTest(ExecutorTestBase):
         )
 
 
-@unittest.skipIf(not workspace.has_gpu_support, "no gpu")
+@unittest.skipIf(not workspace.has_gpu_support
+                and not workspace.has_hip_support, "no gpu")
 class ExecutorGPUResNetTest(ExecutorTestBase):
     @given(executor=st.sampled_from(EXECUTORS),
            num_workers=st.sampled_from([8]))
     @executor_test_settings
     def test_executor(self, executor, num_workers):
         model = build_resnet50_dataparallel_model(
-            num_gpus=workspace.NumCudaDevices(), batch_size=8, epoch_size=8)
+            num_gpus=workspace.NumGpuDevices(), batch_size=8, epoch_size=8)
         model.Proto().num_workers = num_workers
 
         def run_model():

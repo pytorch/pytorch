@@ -31,7 +31,7 @@ from random import shuffle
 
 import torch
 from torch._six import inf
-from common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests
+from common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests, skipIfRocm
 from common_cuda import TEST_CUDA
 from torch.autograd import grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
@@ -57,7 +57,7 @@ from torch.distributions.transforms import (AbsTransform, AffineTransform,
                                             SoftmaxTransform,
                                             StickBreakingTransform,
                                             identity_transform)
-from torch.distributions.utils import _finfo, probs_to_logits, lazy_property
+from torch.distributions.utils import probs_to_logits, lazy_property
 from torch.nn.functional import softmax
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -3479,7 +3479,7 @@ class TestNumericalStability(TestCase):
             self._test_pdf_score(dist_class=Bernoulli,
                                  probs=tensor_type([0]),
                                  x=tensor_type([1]),
-                                 expected_value=tensor_type([_finfo(tensor_type([])).eps]).log(),
+                                 expected_value=tensor_type([torch.finfo(tensor_type([]).dtype).eps]).log(),
                                  expected_gradient=tensor_type([0]))
 
             self._test_pdf_score(dist_class=Bernoulli,
@@ -3602,6 +3602,7 @@ class TestLazyLogitsInitialization(TestCase):
 @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
 class TestAgainstScipy(TestCase):
     def setUp(self):
+        set_rng_seed(0)
         positive_var = torch.randn(20).exp()
         positive_var2 = torch.randn(20).exp()
         random_var = torch.randn(20)
@@ -4094,6 +4095,7 @@ class TestConstraintRegistry(TestCase):
             self.assertEqual(j.shape, x.shape[:x.dim() - t.event_dim])
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @skipIfRocm
     def test_biject_to_cuda(self):
         for constraint in self.get_constraints(is_cuda=True):
             try:
@@ -4126,6 +4128,7 @@ class TestConstraintRegistry(TestCase):
             self.assertEqual(y, y2, message="Error in transform_to({}) pseudoinverse".format(constraint))
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @skipIfRocm
     def test_transform_to_cuda(self):
         for constraint in self.get_constraints(is_cuda=True):
             t = transform_to(constraint)
@@ -4396,7 +4399,7 @@ class TestJit(TestCase):
             values, sample = self._perturb(Dist, keys, values, sample)
             expected = f(sample, *values)
             actual = traced_f(sample, *values)
-            self.assertEqual(expected, actual,
+            self.assertEqual(expected, actual, allow_inf=True,
                              message='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
 
 

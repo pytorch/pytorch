@@ -190,7 +190,8 @@ class RecurrentNetworkOp final : public Operator<Context> {
             false)),
         timestep_(this->template GetSingleArgument<std::string>(
             "timestep",
-            "timestep")) {
+            "timestep")),
+        operator_def_(operator_def) {
     CAFFE_ENFORCE(ws);
 
     stepNetDef_ = detail::extractNetDef(operator_def, "step_net");
@@ -204,14 +205,7 @@ class RecurrentNetworkOp final : public Operator<Context> {
         links_, timestep_, operator_def.device_option(), &stepNetDef_);
 
     if (FLAGS_caffe2_rnn_executor && enable_rnn_executor_) {
-      VLOG(1) << "Use RecurrentNetworkExecutor";
-      auto recurrent_map = detail::GetRecurrentMapping(links_, false /* backward */);
-      rnnExecutor_ =
-          createRNNExecutor<Context>(
-              stepNetDef_,
-              recurrent_map,
-              timestep_,
-              ArgumentHelper(operator_def));
+      InitializeExecutor(operator_def);
     }
   }
 
@@ -372,7 +366,17 @@ class RecurrentNetworkOp final : public Operator<Context> {
     }
 
     if (rnnExecutor_) {
-      rnnExecutor_->Run(seqLen);
+      try {
+        rnnExecutor_->Run(seqLen);
+      } catch (const std::exception& e) {
+        LOG(ERROR) << "Encountered exception in RNN executor: " << e.what();
+        InitializeExecutor(operator_def_);
+        return false;
+      } catch (...) {
+        LOG(ERROR) << "Encountered exception in RNN executor: unknown";
+        InitializeExecutor(operator_def_);
+        return false;
+      }
     }
 
     for (const auto& alias : aliases_) {
@@ -396,6 +400,16 @@ class RecurrentNetworkOp final : public Operator<Context> {
   std::vector<detail::OffsetAlias> aliases_;
   std::vector<detail::RecurrentInput> recurrentInputs_;
   std::string timestep_;
+  OperatorDef operator_def_;
+
+ private:
+  void InitializeExecutor(const OperatorDef& operator_def) {
+    VLOG(1) << "Use RecurrentNetworkExecutor";
+    auto recurrent_map =
+        detail::GetRecurrentMapping(links_, false /* backward */);
+    rnnExecutor_ = createRNNExecutor<Context>(
+        stepNetDef_, recurrent_map, timestep_, ArgumentHelper(operator_def));
+  }
 };
 
 template <class Context>

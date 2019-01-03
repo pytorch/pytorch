@@ -3,7 +3,7 @@
 #include <unordered_map>
 
 #include <TH/TH.h>
-#include "libshm.h"
+#include <libshm_windows/libshm.h>
 
 
 void libshm_init(const char *manager_exec_path) {

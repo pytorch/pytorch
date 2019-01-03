@@ -56,7 +56,9 @@ if NOT "%BUILD_ENVIRONMENT%"=="" (
 )
 pip install ninja future hypothesis
 
+set WORKING_DIR=%CD%
 call "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community\\VC\\Auxiliary\\Build\\vcvarsall.bat" x86_amd64
+cd %WORKING_DIR%
 
 set PATH=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\bin;C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\libnvvp;%PATH%
 set CUDA_PATH=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0
@@ -108,17 +110,27 @@ python model.py --export-script-module="build/model.pt"
 cd build
 set PATH=C:\\Program Files\\NVIDIA Corporation\\NvToolsExt/bin/x64;%CD%\\..\\..\\torch\\lib;%PATH%
 test_custom_ops.exe model.pt
+EOL
 
+cat >ci_scripts/test_libtorch.bat <<EOL
+call ci_scripts/setup_pytorch_env.bat
+dir
+dir %CD%\\test 
+dir %CD%\\test\\torch
+dir %CD%\\test\\torch\\lib
+cd %CD%\\test\\torch\\lib
+set PATH=C:\\Program Files\\NVIDIA Corporation\\NvToolsExt/bin/x64;%CD%\\..\\..\\torch\\lib;%PATH%
+test_api.exe --gtest_filter="-IntegrationTest.MNIST*"
 EOL
 
 run_tests() {
     if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
-        ci_scripts/test_python_nn.bat && ci_scripts/test_python_all_except_nn.bat && ci_scripts/test_custom_script_ops.bat
+        ci_scripts/test_python_nn.bat && ci_scripts/test_python_all_except_nn.bat && ci_scripts/test_custom_script_ops.bat && ci_scripts/test_libtorch.bat
     else
         if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
             ci_scripts/test_python_nn.bat
         elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
-            ci_scripts/test_python_all_except_nn.bat && ci_scripts/test_custom_script_ops.bat
+            ci_scripts/test_python_all_except_nn.bat && ci_scripts/test_custom_script_ops.bat && ci_scripts/test_libtorch.bat
         fi
     fi
 }

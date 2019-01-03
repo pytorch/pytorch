@@ -55,7 +55,7 @@ inline std::vector<char> make_filename(std::string name_prefix) {
 #endif // !defined(_WIN32)
 } // namespace detail
 
-struct TORCH_API TempFile {
+struct TempFile {
 #if !defined(_WIN32)
   TempFile(std::string name, int fd) : fd(fd), name(std::move(name)) {}
 

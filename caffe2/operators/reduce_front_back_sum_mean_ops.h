@@ -26,7 +26,6 @@ class SumReduceDimsOp final : public Operator<Context> {
   template <typename T>
   bool DoRunWithType() {
     auto& X = Input(0);
-    auto* Y = Output(0);
 
     CAFFE_ENFORCE(
         num_reduce_dims_ >= 0 && num_reduce_dims_ <= X.sizes().size(),
@@ -39,7 +38,7 @@ class SumReduceDimsOp final : public Operator<Context> {
     for (int i = start_index; i < end_index; ++i) {
       output_shape.push_back(X.sizes()[i]);
     }
-    Y->Resize(output_shape);
+    auto* Y = Output(0, output_shape, at::dtype<T>());
 
     const int rows = FIRSTDIMS ? X.size_to_dim(num_reduce_dims_)
                                : X.size_to_dim(X.dim() - num_reduce_dims_);
@@ -103,8 +102,8 @@ class SumReduceDimsGradientOp final : public Operator<Context> {
   bool DoRunWithType() {
     auto& dY = Input(0);
     auto& input_1 = Input(1);
-    auto* dX = Output(0);
 
+    vector<int64_t> dX_sizes;
     // In previous diff we changed the semantic: Input(1) was changed from
     // the shape of the input to the data tensor. This made the backward
     // computation incompatible with old models. To fix this, we check
@@ -113,14 +112,14 @@ class SumReduceDimsGradientOp final : public Operator<Context> {
       // Input(1) is the shape of the input
       shape_.CopyFrom(input_1);
       // Copy first dims
-      vector<int64_t> output_shape(
+      dX_sizes = vector<int64_t>(
           shape_.template data<int64_t>(),
           shape_.template data<int64_t>() + shape_.numel());
-      dX->Resize(output_shape);
     } else {
       // Input(1) is data tensor X
-      dX->ResizeLike(input_1);
+      dX_sizes = input_1.sizes().vec();
     }
+    auto* dX = Output(0, dX_sizes, at::dtype<T>());
 
     const int rows = FIRSTDIMS ? dX->size_to_dim(num_reduce_dims_)
                                : dX->size_to_dim(dX->dim() - num_reduce_dims_);

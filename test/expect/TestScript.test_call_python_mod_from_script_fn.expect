@@ -1,6 +1,6 @@
-graph(%x : Dynamic) {
+graph(%x : Tensor) {
   %2 : int = prim::Constant[value=1]()
-  %1 : Dynamic = ^<python_value>()(%x)
-  %4 : Dynamic = aten::add(%1, %2, %2)
+  %1 : Tensor = ^<python_value>()(%x)
+  %4 : Tensor = aten::add(%1, %2, %2)
   return (%4);
 }

@@ -481,7 +481,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   auto& X = Input(INPUT);
   auto& filter = Input(FILTER);
   auto& dY = Input(OUTPUT_GRAD);
-  auto* dfilter = Output(FILTER_GRAD);
+
   const int N = X.dim32(0), C = X.dim32(1);
 
   const vector<int> input_dims = this->GetDims(X);
@@ -503,7 +503,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   }
 
   CAFFE_ENFORCE_EQ(M % group_, 0);
-  dfilter->ResizeLike(filter);
+  auto* dfilter = Output(FILTER_GRAD, filter.sizes(), at::dtype<T>());
   // The dimension of each kernel
   const int kernel_dim = C / group_ * kernel_dims_size;
   // The offset corresponding to a single input image, and a single output
@@ -540,8 +540,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
 
   T* dbias_data = nullptr;
   if (!no_bias_) {
-    auto* dbias = Output(BIAS_OR_INPUT_GRAD);
-    dbias->Resize(M);
+    auto* dbias = Output(BIAS_OR_INPUT_GRAD, {M}, at::dtype<T>());
     if (bias_multiplier_.numel() != output_image_size) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
       bias_multiplier_.Resize(vector<int64_t>(1, output_image_size));
@@ -624,8 +623,9 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   }
   if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
     // Compute the gradient w.r.t. the input.
-    auto* dX = Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD);
-    dX->ResizeLike(X);
+
+    auto* dX = Output(
+        no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD, X.sizes(), at::dtype<T>());
     T* dXdata = dX->template mutable_data<T>();
     dYdata = dY.template data<T>();
     for (int image_id = 0; image_id < N; ++image_id) {
@@ -689,7 +689,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(INPUT);
   auto& filter = Input(FILTER);
   auto& dY = Input(OUTPUT_GRAD);
-  auto* dfilter = Output(FILTER_GRAD);
+
   const int N = X.dim32(0), C = X.dim32(X.dim() - 1);
 
   const vector<int> input_dims = this->GetDims(X);
@@ -711,7 +711,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   }
 
   CAFFE_ENFORCE_EQ(M % group_, 0);
-  dfilter->ResizeLike(filter);
+  auto* dfilter = Output(FILTER_GRAD, filter.sizes(), at::dtype<T>());
   // The dimension of each kernel
   const int kernel_dim = C / group_ * kernel_dims_size;
   // The offset corresponding to a single input image, and a single output
@@ -744,8 +744,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
 
   T* dbias_data = nullptr;
   if (!no_bias_) {
-    auto* dbias = Output(BIAS_OR_INPUT_GRAD);
-    dbias->Resize(M);
+    auto* dbias = Output(BIAS_OR_INPUT_GRAD, {M}, at::dtype<T>());
     dbias_data = dbias->template mutable_data<T>();
     math::Set<T, Context>(dbias->numel(), 0, dbias_data, &context_);
     if (bias_multiplier_.numel() != output_image_size) {
@@ -832,8 +831,9 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
 
   if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
     // Compute the gradient w.r.t. the input.
-    auto* dX = Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD);
-    dX->ResizeLike(X);
+
+    auto* dX = Output(
+        no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD, X.sizes(), at::dtype<T>());
     T* dXdata = dX->template mutable_data<T>();
     for (int image_id = 0; image_id < N; ++image_id) {
       // Compute gradient into col_buffer.

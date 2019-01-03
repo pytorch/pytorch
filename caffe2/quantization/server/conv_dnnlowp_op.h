@@ -1,7 +1,7 @@
 #pragma once
 
 #include <fbgemm/Fbgemm.h>
-#include <fbgemm/src/FbgemmI8Depthwise.h>
+#include <fbgemm/src/FbgemmI8DepthwiseAvx2.h>
 #include "caffe2/operators/conv_op.h"
 #include "caffe2/operators/conv_pool_op_base.h"
 #include "caffe2/quantization/server/caffe2_dnnlowp_utils.h"
@@ -19,7 +19,7 @@ class ConvDNNLowPOp : public ConvPoolDNNLowPOpBase<T, ConvFp32Op> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS(CPUContext);
   USE_CONV_POOL_DNNLOWP_OPERATOR_BASE_FUNCTIONS(T, ConvFp32Op);
-  ConvDNNLowPOp(const OperatorDef& operator_def, Workspace *ws);
+  ConvDNNLowPOp(const OperatorDef& operator_def, Workspace* ws);
   virtual ~ConvDNNLowPOp();
 
  protected:
@@ -28,6 +28,11 @@ class ConvDNNLowPOp : public ConvPoolDNNLowPOpBase<T, ConvFp32Op> {
 
   virtual bool GetQuantizationParameters_();
 
+  /**
+   * @return true if convolution is basically a GEMM point-wise (e.g., 1x1)
+   *              convolution, no stride/dilation/pad
+   */
+  bool IsConvGEMM_() const;
   bool NoIm2ColNHWC_();
   int KernelDim_();
 
@@ -63,7 +68,7 @@ class ConvDNNLowPOp : public ConvPoolDNNLowPOpBase<T, ConvFp32Op> {
   std::vector<T_signed> W_quantized_;
 
   // pre-computed biases and offsets
-  std::vector<std::int32_t> column_offsets_;
+  std::shared_ptr<std::vector<std::int32_t>> column_offsets_;
   std::vector<std::int32_t> row_offsets_;
   const std::int32_t* b_quantized_data_{nullptr};
 
@@ -82,6 +87,11 @@ class ConvDNNLowPOp : public ConvPoolDNNLowPOpBase<T, ConvFp32Op> {
 
   std::vector<std::int32_t> Y_int32_;
   std::vector<dnnlowp::TensorQuantizationParams> filter_qparams_;
+  std::vector<float> filter_scales_;
+  std::vector<std::int32_t> filter_zero_points_;
+
+  std::vector<float> requantization_multipliers_;
+  bool quantize_groupwise_;
 
  private:
   void QuantizeWeight_();
@@ -91,8 +101,17 @@ class ConvDNNLowPOp : public ConvPoolDNNLowPOpBase<T, ConvFp32Op> {
   bool TakeDepthWise3x3FastPath_();
   bool TakeDepthWise3x3x3FastPath_();
 
-  template <typename InType> bool RunOnDeviceWithOrderNCHWAndType_();
-  template <typename InType> bool RunOnDeviceWithOrderNHWCAndType_();
+  template <typename InType>
+  bool RunOnDeviceWithOrderNCHWAndType_();
+  template <typename InType>
+  bool RunOnDeviceWithOrderNHWCAndType_();
+
+  template <typename PackAMatrix, fbgemm::QuantizationGranularity Q_GRAN>
+  void DispatchFBGEMM(
+      PackAMatrix& packA,
+      vector<std::int32_t>* Y_int32,
+      uint8_t* Y_uint8_data,
+      float* Y_float_data);
 
   template <typename InType>
   void ConvNHWCCore_(
@@ -103,15 +122,15 @@ class ConvDNNLowPOp : public ConvPoolDNNLowPOpBase<T, ConvFp32Op> {
   std::vector<dnnlowp::RequantizationParams> requantization_params_;
 
   // used in fast path for T == uint8_t
-  std::vector<std::unique_ptr<fbgemm::PackBMatrix<std::int8_t>>> Wq_packed_;
+  std::shared_ptr<fbgemm::PackBMatrix<std::int8_t>> Wq_packed_;
 
   // For depthwise 3x3 conv
-  std::unique_ptr<fbgemm::Packed3x3ConvMatrix> Wq_depthwise_3x3_packed_;
+  std::shared_ptr<fbgemm::Packed3x3ConvMatrix> Wq_depthwise_3x3_packed_;
   // For depthwise 3x3x3 conv
-  std::unique_ptr<fbgemm::Packed3x3x3ConvMatrix> Wq_depthwise_3x3x3_packed_;
+  std::shared_ptr<fbgemm::Packed3x3x3ConvMatrix> Wq_depthwise_3x3x3_packed_;
 
   // pre-computed biases and offsets
-  std::vector<std::int32_t> b_quantized_;
+  std::shared_ptr<std::vector<std::int32_t>> b_quantized_;
 
   // Dequantized bias populated when input bias is quantized and
   // dequantized_output_ == true
@@ -119,7 +138,6 @@ class ConvDNNLowPOp : public ConvPoolDNNLowPOpBase<T, ConvFp32Op> {
   const float* b_dequantized_data_{nullptr};
 
   float in_qparams_scale_old_ = 0;
-  bool quantize_groupwise_;
 }; // class ConvDNNLowPOp
 
 } // namespace caffe2

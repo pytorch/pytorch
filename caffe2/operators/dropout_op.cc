@@ -5,10 +5,10 @@ namespace caffe2 {
 template <>
 bool DropoutOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
-  auto* Y = Output(0);
-  Y->Resize(X.sizes());
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
+
   if (is_test_) {
-    if (Y != &X) {
+    if (!IsInputOutputAlias(0, 0)) {
       context_.CopyFromCPU<float>(
           X.numel(), X.data<float>(), Y->template mutable_data<float>());
     }
@@ -20,8 +20,8 @@ bool DropoutOp<float, CPUContext>::RunOnDevice() {
     std::bernoulli_distribution dist(1. - ratio_);
     const float* Xdata = X.data<float>();
     float* Ydata = Y->template mutable_data<float>();
-    auto mask = Output(1);
-    mask->Resize(X.sizes());
+
+    auto mask = Output(1, X.sizes(), at::dtype<bool>());
     bool* mask_data = mask->template mutable_data<bool>();
     auto& gen = context_.RandGenerator();
     for (int i = 0; i < X.numel(); ++i) {
@@ -35,8 +35,8 @@ bool DropoutOp<float, CPUContext>::RunOnDevice() {
 template <>
 bool DropoutGradientOp<float, CPUContext>::RunOnDevice() {
   auto& dY = Input(0);
-  auto* dX = Output(0);
-  dX->Resize(dY.sizes());
+
+  auto* dX = Output(0, dY.sizes(), at::dtype<float>());
   if (is_test_) {
     if (dX != &dY) {
       context_.CopyFromCPU<float>(

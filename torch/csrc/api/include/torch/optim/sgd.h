@@ -19,7 +19,7 @@ class InputArchive;
 namespace torch {
 namespace optim {
 
-struct SGDOptions {
+struct TORCH_API SGDOptions {
   /* implicit */ SGDOptions(double learning_rate);
   TORCH_ARG(double, learning_rate);
   TORCH_ARG(double, momentum) = 0;
@@ -28,7 +28,7 @@ struct SGDOptions {
   TORCH_ARG(bool, nesterov) = false;
 };
 
-class SGD : public Optimizer {
+class TORCH_API SGD : public Optimizer {
  public:
   template <typename ParameterContainer>
   explicit SGD(ParameterContainer&& parameters, const SGDOptions& options)
