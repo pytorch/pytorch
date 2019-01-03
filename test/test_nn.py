@@ -6518,6 +6518,12 @@ class TestNN(NNTestCase):
         dummy_out = func(*inputs)
         grad_y = torch.randn_like(dummy_out, device=device, dtype=dtype, requires_grad=True)
 
+        # Issue #15353: test mkldnn double backward, don't run gradgradcheck due
+        # to imprecision issues
+        if dtype == torch.float:
+            g, = torch.autograd.grad(dummy_out.sum(), x, create_graph=True)
+            return g.requires_grad
+
         return gradgradcheck(func, inputs, (grad_y,))
 
     def test_conv_double_backward(self):
@@ -6526,20 +6532,22 @@ class TestNN(NNTestCase):
             for stride, padding, chan_in, chan_out, dilation in \
                     product([1, 2], [0, 1, 2], [2], [3], dilations):
                 for no_weight in (True, False):
-                    result = self.run_conv_double_back_test(kern, stride,
-                                                            padding, chan_in, chan_out,
-                                                            batch_size, inp_size, dilation,
-                                                            no_weight)
-                    self.assertTrue(result,
-                                    "Conv double backward test failed with parameters:" +
-                                    "\nkern: " + str(kern) +
-                                    "\nstride: " + str(stride) +
-                                    "\npadding: " + str(padding) +
-                                    "\nchan_in: " + str(chan_in) +
-                                    "\nchan_out: " + str(chan_out) +
-                                    "\nbatch_size: " + str(batch_size) +
-                                    "\ninp_size: " + str(inp_size) +
-                                    "\ndilation: " + str(dilation))
+                    for dtype in (torch.float, torch.double):
+                        result = self.run_conv_double_back_test(kern, stride,
+                                                                padding, chan_in, chan_out,
+                                                                batch_size, inp_size, dilation,
+                                                                no_weight, dtype=dtype)
+                        self.assertTrue(result,
+                                        "Conv double backward test failed with parameters:" +
+                                        "\nkern: " + str(kern) +
+                                        "\nstride: " + str(stride) +
+                                        "\npadding: " + str(padding) +
+                                        "\nchan_in: " + str(chan_in) +
+                                        "\nchan_out: " + str(chan_out) +
+                                        "\nbatch_size: " + str(batch_size) +
+                                        "\ninp_size: " + str(inp_size) +
+                                        "\ndilation: " + str(dilation) +
+                                        "\ndtype: " + str(dtype))
 
     def test_conv_double_backward_no_bias(self):
         kern = 3
