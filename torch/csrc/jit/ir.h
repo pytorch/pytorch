@@ -805,13 +805,19 @@ struct Graph {
   // by default this is set to append to the top level block
   Node* insert_before_;
 
+  // If this graph is a subgraph, this is the outer node. Otherwise it's null.
+  Node* owning_node_;
+
  public:
-  Graph(ScopePtr scope_root)
+  Graph(ScopePtr scope_root, Node* owning_node)
       : next_unique_(0),
         current_scope_(std::move(scope_root)),
         block_(new Block(this, nullptr)),
-        insert_before_(return_node()) {}
+        insert_before_(return_node()),
+        owning_node_(owning_node) {}
 
+  Graph(ScopePtr scope_root) : Graph(scope_root, nullptr) {}
+  Graph(Node* owning_node) : Graph(c10::make_intrusive<Scope>(), owning_node) {}
   Graph() : Graph(c10::make_intrusive<Scope>()) {}
 
   at::ArrayRef<Value*> inputs() {
@@ -879,6 +885,13 @@ struct Graph {
     return block_->registerOutput(n);
   }
 
+  Node* owningNode() const {
+    return owning_node_;
+  }
+  Node* owningNode() {
+    return owning_node_;
+  }
+
   TORCH_API Node* create(NodeKind kind, size_t num_outputs = 1);
   TORCH_API Node* create(
       NodeKind kind,
@@ -889,7 +902,6 @@ struct Graph {
       TypePtr typ); // value of None with type Optional[typ]
   TORCH_API Node* createUndefined();
   TORCH_API Node* createFusionGroup();
-  TORCH_API Node* createDifferentiableSubgraph();
   TORCH_API Node* createTuple(at::ArrayRef<Value*> values);
   TORCH_API Node* createTupleUnpack(Value* v);
   TORCH_API Node* createTupleIndex(Value* tup, int64_t index);
@@ -914,7 +926,7 @@ struct Graph {
       bool copy_blocks = true);
 
   TORCH_API Value* insertConstant(
-      IValue val,
+      const IValue& val,
       c10::optional<SourceRange> loc = c10::nullopt,
       c10::optional<ScopePtr> scope = c10::nullopt);
 

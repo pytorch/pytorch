@@ -989,21 +989,24 @@ void testSubgraphUtils() {
 
   // Merge everything into a single subgraph
   bool first = true;
-  Node* subgraph;
+  Node* subgraphNode;
   for (auto it = graph->nodes().rbegin(); it != graph->nodes().rend();) {
     if (first) {
-      subgraph = SubgraphUtils::createSingletonSubgraph(
+      subgraphNode = SubgraphUtils::createSingletonSubgraph(
           *it, prim::DifferentiableGraph);
-      it = ++subgraph->reverseIterator();
+      it = ++subgraphNode->reverseIterator();
       first = false;
     }
 
-    SubgraphUtils::mergeNodeIntoSubgraph(*it, subgraph);
-    it = ++subgraph->reverseIterator();
+    SubgraphUtils::mergeNodeIntoSubgraph(*it, subgraphNode);
+    it = ++subgraphNode->reverseIterator();
   }
 
+  auto subgraph = SubgraphUtils::getSubgraph(subgraphNode);
+  JIT_ASSERT(subgraph->owningNode() == subgraphNode);
+
   // Unmerge and compare with original node listing
-  SubgraphUtils::unmergeSubgraph(subgraph);
+  SubgraphUtils::unmergeSubgraph(subgraphNode);
   EliminateCommonSubexpression(graph);
 
   std::vector<Node*> newNodes(graph->nodes().begin(), graph->nodes().end());

@@ -257,6 +257,7 @@ struct DifferentiableGraphOp {
 
 void packGradient(Gradient gradient, Node* dnode) {
   JIT_ASSERT(dnode->kind() == prim::DifferentiableGraph);
+  JIT_ASSERT(gradient.f->owningNode() == dnode);
   dnode->g_(attr::Subgraph, gradient.f)
       ->g_(attr::ReverseSubgraph, gradient.df)
       ->i_(attr::f_real_outputs, gradient.f_real_outputs)

@@ -2,16 +2,12 @@
 
 namespace torch {
 namespace jit {
-
-// Canonicalize a graph, renumbering it so that all structurally equivalent
-// graphs have same numbers.
-// keep_unique_names: If false, canonicalizes unique names by removing them
-//   and replacing them with normal value names.
-//   Otherwise, ignores values with unique names.
-std::shared_ptr<Graph> Canonicalize(
+namespace {
+std::shared_ptr<Graph> canonicalize(
     const std::shared_ptr<Graph>& graph,
+    Node* graph_owner,
     bool keep_unique_names) {
-  auto r = std::make_shared<Graph>(graph->current_scope());
+  auto r = std::make_shared<Graph>(graph->current_scope(), graph_owner);
   std::unordered_map<Value*, Value*> rn_env;
   auto rn_fn = [&](Value* v) { return rn_env.at(v); };
   for (auto* input : graph->inputs()) {
@@ -37,7 +33,7 @@ std::shared_ptr<Graph> Canonicalize(
     if (node->hasAttribute(attr::Subgraph)) {
       r_node->g_(
           attr::Subgraph,
-          Canonicalize(node->g(attr::Subgraph), keep_unique_names));
+          canonicalize(node->g(attr::Subgraph), r_node, keep_unique_names));
     }
   }
   for (auto* output : graph->outputs()) {
@@ -45,6 +41,18 @@ std::shared_ptr<Graph> Canonicalize(
   }
 
   return r;
+}
+} // namespace
+
+// Canonicalize a graph, renumbering it so that all structurally equivalent
+// graphs have same numbers.
+// keep_unique_names: If false, canonicalizes unique names by removing them
+//   and replacing them with normal value names.
+//   Otherwise, ignores values with unique names.
+std::shared_ptr<Graph> Canonicalize(
+    const std::shared_ptr<Graph>& graph,
+    bool keep_unique_names) {
+  return canonicalize(graph, nullptr, keep_unique_names);
 }
 
 } // namespace jit

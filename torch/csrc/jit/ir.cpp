@@ -280,6 +280,12 @@ void Node::lint() const {
     }
   }
 
+  // Check subgraphs have the correct owner.
+  if (this->hasAttribute(attr::Subgraph)) {
+    auto g = this->g(attr::Subgraph);
+    JIT_ASSERT(g->owningNode() == this);
+  }
+
   // Node subclass invariants
   IR_IF(this, Constant)
   JIT_ASSERT(inputs_.size() == 0);
@@ -356,11 +362,11 @@ void Graph::lint() const {
   // Struct enables mutual recursion in linting methods.
   // Putting it inside Graph::lint enables access to private Graph members
   struct LintImpl {
-    LintImpl(const Graph& g)
+    LintImpl(const Graph* g)
         : g(g),
           scope(new LintScope()),
-          all_nodes_set(ALL_OF(g.all_nodes)) {} // NB: all_nodes is *unordered*
-    const Graph& g;
+          all_nodes_set(ALL_OF(g->all_nodes)) {} // NB: all_nodes is *unordered*
+    const Graph* g;
     std::unique_ptr<LintScope> scope;
     std::unordered_set<size_t> seen_uniques;
     std::unordered_map<const Node*, int64_t> anticipated_uses;
@@ -371,11 +377,11 @@ void Graph::lint() const {
       scope->insert(v);
       auto b2 = seen_uniques.insert(v->unique());
       JIT_ASSERT(b2.second); // insertion took place
-      JIT_ASSERT(v->unique() < g.next_unique_);
+      JIT_ASSERT(v->unique() < g->next_unique_);
 
       for (auto use : v->uses()) {
         JIT_ASSERT(!scope->contains(use.user));
-        JIT_ASSERT(g.all_nodes.count(use.user) == 1);
+        JIT_ASSERT(g->all_nodes.count(use.user) == 1);
         anticipated_uses[use.user]++; // int default constructs to 0
       }
     }
@@ -446,17 +452,23 @@ void Graph::lint() const {
       sum_set.insert(ALL_OF(output_set));
     }
     void check_graph() {
+      // Check subgraph ownership invariants
+      if (auto owner = g->owning_node_) {
+        JIT_ASSERT(
+            owner->hasAttribute(attr::Subgraph) &&
+            owner->g(attr::Subgraph).get() == g);
+      }
       node_set all_nodes_set(
-          ALL_OF(g.all_nodes)); // NB: all_nodes is *unordered*
+          ALL_OF(g->all_nodes)); // NB: all_nodes is *unordered*
 
-      check_block(g.block_);
+      check_block(g->block_);
       for (auto kv : anticipated_uses) {
         JIT_ASSERT(kv.second == -1);
       }
       JIT_ASSERT(std::includes(ALL_OF(sum_set), ALL_OF(all_nodes_set)));
     }
   };
-  LintImpl(*this).check_graph();
+  LintImpl(this).check_graph();
 }
 
 void Graph::dump() const {
@@ -1378,7 +1390,7 @@ Node* Graph::createNone(TypePtr typ) {
 
 Node* Graph::createFusionGroup() {
   auto n = create(prim::FusionGroup, 0);
-  n->g_(attr::Subgraph, std::make_shared<Graph>(current_scope()));
+  n->g_(attr::Subgraph, std::make_shared<Graph>(current_scope(), n));
   return n;
 }
 
@@ -1474,11 +1486,10 @@ Node* Graph::createClone(
 }
 
 Value* Graph::insertConstant(
-    IValue val,
+    const IValue& val,
     c10::optional<SourceRange> loc,
     c10::optional<ScopePtr> scope) {
-  return jit::insertConstant(
-      *this, std::move(val), std::move(loc), std::move(scope));
+  return jit::insertConstant(*this, val, std::move(loc), std::move(scope));
 }
 
 std::string Graph::toString() const {

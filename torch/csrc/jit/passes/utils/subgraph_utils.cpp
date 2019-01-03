@@ -154,7 +154,9 @@ Node* createSingletonSubgraph(Node* n, Symbol subgraphKind) {
   JIT_ASSERT(isSubgraphNodeKind(subgraphKind));
   auto graph = n->owningGraph();
   auto subgraph = graph->create(subgraphKind, 0);
-  subgraph->g_(attr::Subgraph, std::make_shared<Graph>(graph->current_scope()));
+  subgraph->g_(
+      attr::Subgraph,
+      std::make_shared<Graph>(graph->current_scope(), subgraph));
   subgraph->insertBefore(n);
   mergeNodeIntoSubgraph(n, subgraph);
   return subgraph;

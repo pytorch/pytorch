@@ -707,7 +707,7 @@ struct to_ir {
                   // never create a Method for the closure
       popFrame(/*ends_def=*/true);
     }
-    std::shared_ptr<Graph> subgraph;
+    auto subgraph = std::make_shared<Graph>(closure_node);
     Value* context;
     std::tie(subgraph, context) = lambdaLift(block);
     runCleanupPasses(subgraph);
@@ -1917,7 +1917,7 @@ struct to_ir {
     }
 
     // Fork a new graph from its orignal owning graph
-    auto forked_graph = std::make_shared<Graph>();
+    auto forked_graph = std::make_shared<Graph>(fork_node);
 
     // Make sure we capture everything in the new graph.
     // The uncaptured values will be added to the fork signature.
