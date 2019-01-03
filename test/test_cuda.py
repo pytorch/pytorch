@@ -1427,7 +1427,7 @@ class TestCuda(TestCase):
 
         with torch.cuda.device(d1):
             s1 = torch.cuda.current_stream()
-            torch.cuda._sleep(5000000000)  # spin for about 5 sec on device1
+            torch.cuda._sleep(50000000)  # spin for about 50 ms on device1
 
         self.assertTrue(s0.query())
         self.assertFalse(s1.query())
@@ -1442,6 +1442,17 @@ class TestCuda(TestCase):
 
         with torch.cuda.device(d1):
             s1.synchronize()
+
+        self.assertTrue(s0.query())
+        self.assertTrue(s1.query())
+
+        with torch.cuda.device(d0):
+            self.assertTrue(s0.query())
+            self.assertTrue(s1.query())
+
+        with torch.cuda.device(d1):
+            self.assertTrue(s0.query())
+            self.assertTrue(s1.query())
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_tensor_device(self):
