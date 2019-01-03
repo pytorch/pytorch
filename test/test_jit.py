@@ -10695,10 +10695,6 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 2)
 
 
-class TestJitGenerated(JitTestCase):
-    pass
-
-
 class TestCustomOperators(JitTestCase):
 
     def test_dynamic_op_registry(self):
@@ -10808,6 +10804,18 @@ graph(%x : Tensor) {
   return (%1);
 }
 ''')
+
+
+class TestJitGeneratedAutograd(JitTestCase):
+    pass
+
+
+class TestJitGeneratedModule(JitTestCase):
+    pass
+
+
+class TestJitGeneratedFunctional(JitTestCase):
+    pass
 
 
 # UBSAN per-function exclusions don't seem to work with OpenMP pragmas,
@@ -11129,7 +11137,7 @@ def add_autograd_test(
             if hasattr(torch.ones(1), inplace_name) and not broadcast_skip_inplace:
                 check(inplace_name)
 
-        post_add_test(test_name, skipTestIf, do_test)
+        post_add_test(test_name, skipTestIf, do_test, TestJitGeneratedAutograd)
 
 
 def suppress_warnings(fn):
@@ -11185,7 +11193,7 @@ def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=()
             else:
                 run_test()
 
-    post_add_test(test_name, skipTestIf, do_test)
+    post_add_test(test_name, skipTestIf, do_test, TestJitGeneratedFunctional)
 
 
 def add_nn_module_test(*args, **kwargs):
@@ -11295,17 +11303,17 @@ def add_nn_module_test(*args, **kwargs):
         # Check against Python module as reference
         check_against_reference(self, create_script_module, create_nn_module, f_args_variable, no_grad=no_grad)
 
-    post_add_test(test_name, (), do_test)
+    post_add_test(test_name, (), do_test, TestJitGeneratedModule)
 
 
-def post_add_test(test_name, skipTestIf, do_test):
-    assert not hasattr(TestJitGenerated, test_name), 'Two tests have the same name: ' + test_name
+def post_add_test(test_name, skipTestIf, do_test, test_class):
+    assert not hasattr(test_class, test_name), 'Two tests have the same name: ' + test_name
 
     for skip in skipTestIf:
         do_test = skip(do_test)
 
     if not (TEST_WITH_UBSAN and test_name in UBSAN_BLACKLISTED_TESTS):
-        setattr(TestJitGenerated, test_name, do_test)
+        setattr(test_class, test_name, do_test)
 
 
 class TestAsync(JitTestCase):
