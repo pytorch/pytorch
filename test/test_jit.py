@@ -1160,6 +1160,14 @@ class TestJit(JitTestCase):
         if RUN_CUDA_MULTI_GPU:
             run(device="cuda:1")
 
+    def test_trace_indexed_assignment(self):
+        def stuff(x, y):
+            x = x.clone()
+            x[0] = y
+            return x
+        example = torch.rand(3, 4)
+        self.checkTrace(stuff, (example, example[0] + 1))
+
     # TODO: implement
     @unittest.expectedFailure
     def test_output_unflatten(self):
@@ -8098,9 +8106,7 @@ a")
                 x[i, :] = torch.zeros(4)
             return x
 
-        self.assertWarnsRegex(lambda: torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[torch.rand(3, 4)]),
-                              'Output nr 1. of the traced function does not match the '
-                              'corresponding output of the Python function')
+        self.checkTrace(foo, (torch.rand(3, 4),))
 
     def test_trace_checker_inplace_on_view(self):
         def foo(x):

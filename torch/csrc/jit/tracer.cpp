@@ -192,7 +192,10 @@ void addInputs(Node* n, const char* name, const ArrayRef<double>& value) {
 }
 
 void addOutput(Node* node, const at::Tensor& output) {
-  Value* value = node->addOutput();
+  setOutput(node->addOutput(), output);
+}
+
+void setOutput(Value* value, const at::Tensor& output) {
   if (output.defined()) {
     value->inferTypeFrom(output);
     setValueTrace(autograd::as_variable_ref(output), value);
