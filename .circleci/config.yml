@@ -46,8 +46,8 @@ setup_ci_environment: &setup_ci_environment
 
     if [[ "${JOB_BASE_NAME}" == *-test* || "${JOB_BASE_NAME}" == smoke* ]]; then
       if [ -n "${CUDA_VERSION}" ]; then
-        wget 'https://s3.amazonaws.com/ossci-linux/nvidia_driver/NVIDIA-Linux-x86_64-396.26.run'
-        sudo /bin/bash ./NVIDIA-Linux-x86_64-396.26.run -s --no-drm
+        wget 'https://s3.amazonaws.com/ossci-linux/nvidia_driver/NVIDIA-Linux-x86_64-410.79.run'
+        sudo /bin/bash ./NVIDIA-Linux-x86_64-410.79.run -s --no-drm
         nvidia-smi
       fi
     fi
