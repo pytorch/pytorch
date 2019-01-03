@@ -70,6 +70,7 @@ RegisterOperators reg({
             return 0;
           };
         }),
+
     Operator(
         "prim::Bool(Tensor a) -> bool",
         [](const Node* node) -> Operation {
@@ -77,6 +78,26 @@ RegisterOperators reg({
             at::Tensor a;
             pop(stack, a);
             push(stack, a.item<int64_t>() != 0);
+            return 0;
+          };
+        }),
+    Operator(
+        "prim::Bool(int a) -> bool",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            int64_t i;
+            pop(stack, i);
+            push(stack, (bool) i);
+            return 0;
+          };
+        }),
+    Operator(
+        "prim::Bool(float a) -> bool",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            double d;
+            pop(stack, d);
+            push(stack, (bool) d);
             return 0;
           };
         }),
@@ -160,6 +181,26 @@ RegisterOperators reg({
             double d;
             pop(stack, d);
             push(stack, (int64_t)d);
+            return 0;
+          };
+        }),
+    Operator(
+        "prim::Float(bool a) -> float",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            bool b;
+            pop(stack, b);
+            push(stack, (float) b);
+            return 0;
+          };
+        }),
+    Operator(
+        "prim::Int(bool a) -> int",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            bool b;
+            pop(stack, b);
+            push(stack, (int) b);
             return 0;
           };
         }),
@@ -1067,7 +1108,10 @@ RegisterOperators reg2({
     DEFINE_BINARY_OP(aten::sub, a - b),
     DEFINE_BINARY_OP(aten::mul, a* b),
     DEFINE_BINARY_OP(aten::pow, static_cast<decltype(a)>(pow(a, b))),
-
+    // min and max are in prim:: because there is a difference between
+    // the python builtin 'min' and 'torch.min'
+    DEFINE_BINARY_OP(prim::min, a < b ? a : b),
+    DEFINE_BINARY_OP(prim::max, a > b ? a : b),
     // Pass in two ops for handling int and float separately as % in C++ only
     // works for int The modulus calculation is different between C++ and Python
     // (on negative), we preserve the python behavior as it's more common and

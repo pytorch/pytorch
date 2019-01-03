@@ -81,6 +81,11 @@ struct C10_API DeviceGuardImplInterface {
   virtual Stream exchangeStream(Stream) const noexcept = 0;
 
   /**
+   * Get the number of devices.
+   */
+  virtual DeviceIndex deviceCount() const = 0;
+
+  /**
    * Intended use of this class is to leak the DeviceGuardImpl at program end.
    * So you better not call the destructor, buster!
    */

@@ -11,7 +11,7 @@ from torch.autograd import Variable, Function
 from torch.autograd.function import traceable
 from torch.testing import assert_allclose
 from torch.onnx import OperatorExportTypes
-from torch._six import inf, PY2
+from torch._six import inf, PY2, builtins
 from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
     freeze_rng_state, set_rng_seed
@@ -1160,6 +1160,14 @@ class TestJit(JitTestCase):
         if RUN_CUDA_MULTI_GPU:
             run(device="cuda:1")
 
+    def test_trace_indexed_assignment(self):
+        def stuff(x, y):
+            x = x.clone()
+            x[0] = y
+            return x
+        example = torch.rand(3, 4)
+        self.checkTrace(stuff, (example, example[0] + 1))
+
     # TODO: implement
     @unittest.expectedFailure
     def test_output_unflatten(self):
@@ -2069,6 +2077,22 @@ class TestJit(JitTestCase):
             fn_script(torch.tensor(0))
         warns = [str(w.message) for w in warns]
         self.assertEqual(len(warns), 0)
+
+    @unittest.skipIf(sys.platform == "win32", "TODO: need to fix this test case for Windows")
+    def test_torch_load_error(self):
+        class J(torch.jit.ScriptModule):
+            def __init__(self):
+                super(J, self).__init__()
+
+            @torch.jit.script_method
+            def forward(self, input):
+                return input + 100
+
+        j = J()
+        with tempfile.NamedTemporaryFile() as f:
+            j.save(f.name)
+            with self.assertRaisesRegex(RuntimeError, "is a zip"):
+                torch.load(f.name)
 
 
 class TestBatched(TestCase):
@@ -4215,35 +4239,31 @@ a")
             throwsAnd(t)
 
     def test_type_cast(self):
-        def test_int_to_float():
-            b = float(2)
-            return b + 1.0
-        self.checkScript(test_int_to_float, ())
+        template = dedent('''
+        def cast(v):
+            # type: ({from_type}) -> {to_type}
+            return {to_type}(v)
+        ''')
 
-        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
-            @torch.jit.script
-            def test_int_to_bool():
-                return bool(5)
+        def check_cast(from_type, to_type, value, raises=False):
+            code = template.format(from_type=from_type, to_type=to_type)
+            expected = getattr(builtins, to_type)(value)
+            if raises:
+                with self.assertRaisesRegex(RuntimeError, "Cannot cast"):
+                    cu = torch.jit.CompilationUnit(code)
+            else:
+                self.checkScript(code, (value,), name='cast', outputs=expected)
 
-        def test_float_to_int():
-            b = int(5.0)
-            return b + 1
-        self.checkScript(test_float_to_int, ())
+        check_cast('int', 'float', 1)
+        check_cast('int', 'bool', 1)
+        check_cast('int', 'bool', 0)
 
-        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
-            @torch.jit.script
-            def test_float_to_bool():
-                return bool(5.0)
+        check_cast('float', 'int', 1.)
+        check_cast('float', 'bool', 1.)
+        check_cast('float', 'bool', 0.)
 
-        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
-            @torch.jit.script
-            def test_bool_to_float():
-                return float(True)
-
-        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
-            @torch.jit.script
-            def test_bool_to_int():
-                return int(True)
+        check_cast('bool', 'int', True)
+        check_cast('bool', 'float', True)
 
     def test_multiple_assignment(self):
         def outer_func(x):
@@ -4335,21 +4355,33 @@ a")
         self.checkScript(tensor_test, (x, y))
 
     def test_number_math(self):
-        template = dedent('''
+        ops_template = dedent('''
         def func():
             return {scalar1} {op} {scalar2}
         ''')
         ops = ['+', '-', '*', '%', '<', '<=', '>', '>=', '==', '!=', '//']
+        funcs_template = dedent('''
+        def func():
+            return {func}({scalar1}, {scalar2})
+        ''')
+        funcs = ['min', 'max']
         scalars = ['7', '2', '3', '-3', '3.14', '0.125', '-0.5', '2.0', '-2.0']
         scalar_pairs = [(scalar1, scalar2) for scalar1 in scalars for scalar2 in scalars]
+
+        def run_test(code):
+            scope = {}
+            exec(code, globals(), scope)
+            cu = torch.jit.CompilationUnit(code)
+
+            self.assertEqual(cu.func(), scope['func']())
+
         for scalar1, scalar2 in scalar_pairs:
             for op in ops:
-                code = template.format(op=op, scalar1=scalar1, scalar2=scalar2)
-                scope = {}
-                exec(code, globals(), scope)
-                cu = torch.jit.CompilationUnit(code)
-
-                self.assertEqual(cu.func(), scope['func']())
+                code = ops_template.format(op=op, scalar1=scalar1, scalar2=scalar2)
+                run_test(code)
+            for func in funcs:
+                code = funcs_template.format(func=func, scalar1=scalar1, scalar2=scalar2)
+                run_test(code)
 
     def test_number_div(self):
         self.checkScript(div_int_future, (), optimize=True)
@@ -4894,7 +4926,7 @@ a")
         def __init__(self):
             super(TestScript.DerivedStateModule, self).__init__()
             self.param = torch.nn.Parameter(torch.ones(3, 4, dtype=torch.float))
-            self.register_buffer('derived', torch.neg(self.param).detach())
+            self.register_buffer('derived', torch.neg(self.param).detach().clone())
 
             # This is a flag so we can test that the pack method was called
             self.register_buffer('pack_called', torch.zeros(1, dtype=torch.long))
@@ -5997,7 +6029,6 @@ a")
         output_orig.sum().backward()
         grad_orig = input.grad.clone()
         input.grad.zero_()
-
         output_import = resnet18_imported(input)
         output_import.sum().backward()
         grad_import = input.grad.clone()
@@ -6100,6 +6131,25 @@ a")
         self.assertExpected(torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs))
+
+    @suppress_warnings
+    def test_onnx_export_func_with_warnings(self):
+        @torch.jit.script
+        def func_with_warning(inp):
+            return torch.nn.functional.sigmoid(inp)  # triggers a deprecation warning
+
+        class WarningTest(torch.nn.Module):
+            def __init__(self):
+                super(WarningTest, self).__init__()
+
+            def forward(self, x):
+                return func_with_warning(x)
+
+        outputs = WarningTest()(torch.randn(42))
+        # no exception
+        torch.onnx.export_to_pretty_string(
+            WarningTest(), torch.randn(42), None, verbose=False,
+            example_outputs=outputs)
 
     def test_onnx_export_script_python_fail(self):
         class ModuleToInline(torch.jit.ScriptModule):
@@ -8056,9 +8106,7 @@ a")
                 x[i, :] = torch.zeros(4)
             return x
 
-        self.assertWarnsRegex(lambda: torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[torch.rand(3, 4)]),
-                              'Output nr 1. of the traced function does not match the '
-                              'corresponding output of the Python function')
+        self.checkTrace(foo, (torch.rand(3, 4),))
 
     def test_trace_checker_inplace_on_view(self):
         def foo(x):
@@ -8998,6 +9046,15 @@ a")
         x = torch.ones(1)
         self.assertEqual(s(x), x + 20)
         self.assertEqual(s.forward_tuple(x), x + 5)
+
+    def test_select_after_chunk(self):
+        def foo(x):
+            chunked = torch.chunk(x, 1)
+            foo = chunked[0]
+            foo.add_(5)
+            return x
+
+        self.checkScript(foo, [torch.rand(2, 3)])
 
 
 class MnistNet(nn.Module):
