@@ -21,11 +21,6 @@
 
 namespace caffe2 {
 
-// Earlier in the days Caffe sets the default miopen workspace to 8MB. We bump
-// it up to 64MB in Caffe2, as this enables the use of Winograd in many cases,
-// something very beneficial to more recent CNN models.
-static constexpr size_t kCONV_MIOPEN_WORKSPACE_LIMIT_BYTES = 64 * 1024 * 1024;
-
 class MIOPENConvOpBase : public ConvPoolOpBase<HIPContext> {
  public:
   MIOPENConvOpBase(const OperatorDef& operator_def, Workspace* ws)
