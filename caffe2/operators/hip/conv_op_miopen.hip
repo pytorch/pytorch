@@ -33,9 +33,6 @@ class MIOPENConvOpBase : public ConvPoolOpBase<HIPContext> {
         miopen_wrapper_(&context_),
         miopen_state_(
             OperatorBase::GetSingleArgument<size_t>("miopen_state", 0)),
-        miopen_ws_nbytes_limit_(OperatorBase::GetSingleArgument<size_t>(
-            "ws_nbytes_limit",
-            kCONV_MIOPEN_WORKSPACE_LIMIT_BYTES)),
         exhaustive_search_(
             OperatorBase::GetSingleArgument<bool>("exhaustive_search", false)),
         alpha_(OperatorBase::GetSingleArgument<float>("alpha", 1.0)),
@@ -81,7 +78,6 @@ class MIOPENConvOpBase : public ConvPoolOpBase<HIPContext> {
   miopenConvolutionDescriptor_t conv_desc_;
   miopenConvolutionMode_t mode_;
   size_t miopen_state_;
-  const size_t miopen_ws_nbytes_limit_;
   bool exhaustive_search_;
   const float alpha_;
   const float beta_;
