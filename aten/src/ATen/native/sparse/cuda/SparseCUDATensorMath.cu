@@ -510,9 +510,6 @@ SparseTensor _sparse_add_cuda(const SparseTensor& t_, const SparseTensor& src_, 
   LongTensor src_indices_1D = flatten_indices_by_dims(src_indices, src_sizes, dims_to_flatten);  // already sorted since only dims with size = 1 are not flattened
   LongTensor t_indices_pos = at::empty_like(t_indices_1D); // store lower_bound of input indices at grad indices
 
-  // std::cout << "t_indices_1D: " << t_indices_1D << std::endl;
-  // std::cout << "src_indices_1D: " << src_indices_1D << std::endl;
-
   thrust_ptr t_indices_iter(t_indices_1D.data<int64_t>());
   thrust_ptr src_indices_iter(src_indices_1D.data<int64_t>());
   thrust_ptr t_indices_pos_iter(t_indices_pos.data<int64_t>());
@@ -521,8 +518,6 @@ SparseTensor _sparse_add_cuda(const SparseTensor& t_, const SparseTensor& src_, 
                       src_indices_iter, src_indices_iter + src_nnz,
                       t_indices_iter, t_indices_iter + t_nnz,
                       t_indices_pos_iter);
-
-  // std::cout << "t_indices_pos: " << t_indices_pos << std::endl;
 
   // config to run cuda kernel
   int64_t total_threads = t_nnz;
