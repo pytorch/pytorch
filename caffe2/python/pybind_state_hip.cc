@@ -18,8 +18,8 @@ REGISTER_HIP_OPERATOR(
     PythonGradient,
     GPUFallbackOp);
 
-REGISTER_HIP_OPERATOR(PythonDLPack, PythonOp<HIPContext, true>);
-REGISTER_HIP_OPERATOR(PythonDLPackGradient, PythonGradientOp<HIPContext, true>);
+REGISTER_HIP_OPERATOR(PythonDLPack, GPUFallbackOp);
+REGISTER_HIP_OPERATOR(PythonDLPackGradient, GPUFallbackOp);
 
 REGISTER_BLOB_FEEDER(HIP, TensorFeeder<HIPContext>);
 
