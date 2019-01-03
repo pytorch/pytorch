@@ -2189,9 +2189,9 @@ class TestNN(NNTestCase):
         logits_hard = torch.zeros(10, 10, dtype=dtype, device=device, requires_grad=True)
 
         seed = torch.random.get_rng_state()
-        y_soft = gumbel_softmax(logits_soft, hard=False)
+        y_soft = F.gumbel_softmax(logits_soft, hard=False)
         torch.random.set_rng_state(seed)
-        y_hard = gumbel_softmax(logits_hard, hard=True)
+        y_hard = F.gumbel_softmax(logits_hard, hard=True)
 
         y_soft.sum().backward()
         y_hard.sum().backward()
