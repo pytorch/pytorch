@@ -1,26 +1,26 @@
-#include "torch/csrc/autograd/python_function.h"
+#include <torch/csrc/autograd/python_function.h>
 
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 #include <structmember.h>
 #include <unordered_map>
 #include <unordered_set>
 #include <exception>
 #include <ATen/ATen.h>
 
-#include "THP.h"
-#include "torch/csrc/autograd/grad_mode.h"
-#include "torch/csrc/autograd/functions/accumulate_grad.h"
-#include "torch/csrc/autograd/functions/basic_ops.h"
-#include "torch/csrc/autograd/functions/utils.h"
-#include "torch/csrc/autograd/python_cpp_function.h"
-#include "torch/csrc/autograd/python_hook.h"
-#include "torch/csrc/autograd/saved_variable.h"
-#include "torch/csrc/autograd/python_anomaly_mode.h"
-#include "torch/csrc/jit/tracer.h"
-#include "torch/csrc/jit/python_tracer.h"
-#include "torch/csrc/DynamicTypes.h"
-#include "torch/csrc/utils/auto_gil.h"
-#include "torch/csrc/Exceptions.h"
+#include <torch/csrc/THP.h>
+#include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/functions/accumulate_grad.h>
+#include <torch/csrc/autograd/functions/basic_ops.h>
+#include <torch/csrc/autograd/functions/utils.h>
+#include <torch/csrc/autograd/python_cpp_function.h>
+#include <torch/csrc/autograd/python_hook.h>
+#include <torch/csrc/autograd/saved_variable.h>
+#include <torch/csrc/autograd/python_anomaly_mode.h>
+#include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/jit/python_tracer.h>
+#include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/utils/auto_gil.h>
+#include <torch/csrc/Exceptions.h>
 
 #include <exception>
 #include <functional>
@@ -585,10 +585,7 @@ static Node* _trace_pre_record(
   Py_INCREF(op_obj);
   auto pyobj = THPObjectPtr(op_obj);
   return jit::tracer::preRecordPythonTrace(
-    std::move(pyobj),
-    std::move(arg_types),
-    input_vars,
-    std::move(scalar_args));
+      std::move(pyobj), arg_types, input_vars, std::move(scalar_args));
 }
 
 static void _trace_post_record(
@@ -882,7 +879,7 @@ PyObject* THPFunction_register_hook(THPFunction *self, PyObject *hook)
 
 static PyObject *unpack_saved_variables(
     THPFunction *self,
-    std::function<PyObject*(const Variable&)> unpack_fn)
+    const std::function<PyObject*(const Variable&)>& unpack_fn)
 {
   THPUtils_assert(!self->has_freed_buffers, ERR_BACKWARD_TWICE);
   auto& saved_variables = self->saved_variables;

@@ -10,13 +10,15 @@
 #include <c10/core/ScalarType.h>
 #include <c10/Half.h>
 
-namespace at {
-class Tensor;
-struct Type;
-}
-
 namespace c10 {
 
+/**
+ * Scalar represents a 0-dimensional tensor which contains a single element.
+ * Unlike a tensor, numeric literals (in C++) are implicitly convertible to Scalar
+ * (which is why, for example, we provide both add(Tensor) and add(Scalar) overloads
+ * for many operations). It may also be used in circumstances where you statically
+ * know a tensor is 0-dim and single size, but don't know it's type.
+ */
 class C10_API Scalar {
  public:
   Scalar() : Scalar(int64_t(0)) {}
@@ -87,7 +89,6 @@ private:
     //    error: designator may not specify a non-POD subobject
     double z[2];
   } v;
-  friend struct at::Type;
 };
 
 // define the scalar.to<int64_t>() specializations

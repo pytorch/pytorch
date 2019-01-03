@@ -45,8 +45,8 @@ class IndexGetOp: public Operator<CPUContext> {
     auto* dict = dynamic_cast_if_rtti<Index<T>*>(base.get());
     CAFFE_ENFORCE(dict, "Wrong dictionary type given input keys.");
     const auto& keys = Input(1);
-    auto* values = Output(0);
-    values->ResizeLike(keys);
+
+    auto* values = Output(0, keys.sizes(), at::dtype<int64_tValue>());
     dict->Get(
         keys.data<T>(),
         values->template mutable_data<int64_tValue>(),

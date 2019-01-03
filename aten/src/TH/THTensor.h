@@ -1,32 +1,32 @@
 #ifndef TH_TENSOR_INC
 #define TH_TENSOR_INC
 
-#include "THStorageFunctions.h"
-#include "THTensorApply.h"
+#include <TH/THStorageFunctions.h>
+#include <TH/THTensorApply.h>
 
 #define THTensor_(NAME)   TH_CONCAT_4(TH,Real,Tensor_,NAME)
 
 /* basics */
-#include "generic/THTensor.h"
-#include "THGenerateAllTypes.h"
+#include <TH/generic/THTensor.h>
+#include <TH/THGenerateAllTypes.h>
 
-#include "generic/THTensor.h"
-#include "THGenerateHalfType.h"
+#include <TH/generic/THTensor.h>
+#include <TH/THGenerateHalfType.h>
 
 /* random numbers */
-#include "THRandom.h"
-#include "generic/THTensorRandom.h"
-#include "THGenerateAllTypes.h"
+#include <TH/THRandom.h>
+#include <TH/generic/THTensorRandom.h>
+#include <TH/THGenerateAllTypes.h>
 
 /* maths */
-#include "generic/THTensorMath.h"
-#include "THGenerateAllTypes.h"
+#include <TH/generic/THTensorMath.h>
+#include <TH/THGenerateAllTypes.h>
 
 /* convolutions */
-#include "generic/THTensorConv.h"
-#include "THGenerateAllTypes.h"
+#include <TH/generic/THTensorConv.h>
+#include <TH/THGenerateAllTypes.h>
 
 /* lapack support */
-#include "generic/THTensorLapack.h"
-#include "THGenerateFloatTypes.h"
+#include <TH/generic/THTensorLapack.h>
+#include <TH/THGenerateFloatTypes.h>
 #endif

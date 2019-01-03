@@ -1,4 +1,4 @@
-#include "undef_macros.h"
+#include <torch/csrc/cuda/undef_macros.h>
 
 #define THWStoragePtr THCStoragePtr
 #define THPStoragePtr THCPStoragePtr

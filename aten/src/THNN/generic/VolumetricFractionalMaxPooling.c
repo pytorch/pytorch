@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/VolumetricFractionalMaxPooling.c"
+#define TH_GENERIC_FILE "THNN/generic/VolumetricFractionalMaxPooling.c"
 #else
 
 static int64_t* THNN_(VolumetricFractionalMaxPooling_generateIntervals)(

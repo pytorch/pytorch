@@ -395,7 +395,6 @@ THFormal = TypedDict('THFormal', {
     'is_nullable': bool,
     'default': str,
     'default_init': str,
-    'python_default_init': str,
     'output': bool,
     'size': int,
     'declared_type': str,
@@ -422,7 +421,6 @@ AtFormal = TypedDict('AtFormal', {
     'is_nullable': bool,
     'default': str,
     'default_init': str,
-    'python_default_init': str,
     'output': bool,
     'size': int,
 }, total=False)
@@ -619,10 +617,6 @@ def create_generic(top_env, declarations):
             default = translate_default(argument, type_str, argument['default'])
             translated['default'] = default
             translated['default_init'] = argument.get('default_init', default)
-        if 'python_default_init' in argument:
-            assert 'default' not in argument
-            default = translate_default(argument, type_str, argument['python_default_init'])
-            translated['python_default_init'] = default
         if argument.get('output'):
             translated['output'] = True
         if argument.get('size'):
@@ -1518,9 +1512,9 @@ def create_derived(backend_type_env, declarations):
                     env, wrapped_tensor=wrapped_tensor, maybe_scalar=maybe_scalar))
             # return the same underlying Tensor type for both real and accreal; this ensures
             # e.g. x.sum(0) and x.sum() return the same type. We explicitly cast to the
-            # ScalarType before constructing the scalarTensor to avoid overflow checking.
+            # ScalarType before constructing the scalar_tensor to avoid overflow checking.
             elif ret['type'] == 'accreal' or ret['type'] == 'real':
-                return_scalar = 'return scalarTensor(convert<${ScalarType}>(${call}));'
+                return_scalar = 'return at::scalar_tensor(convert<${ScalarType}>(${call}), options());'
                 body.append(CodeTemplate(return_scalar).substitute(env, call=call))
             else:
                 # we using int64_t for long in the API, so correct it here...

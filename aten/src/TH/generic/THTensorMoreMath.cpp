@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THTensorMoreMath.cpp"
+#define TH_GENERIC_FILE "TH/generic/THTensorMoreMath.cpp"
 #else
 
 #include <TH/generic/THTensorApply.hpp>
@@ -617,48 +617,6 @@ void THTensor_(eye)(THTensor *r_, int64_t n, int64_t m)
   sz = THMin(THTensor_(size)(r_, 0), THTensor_(size)(r_, 1));
   for(i = 0; i < sz; i++)
     r__data[i*(r_->stride(0)+r_->stride(1))] = 1;
-}
-
-
-void THTensor_(range)(THTensor *r_, accreal xmin, accreal xmax, accreal step)
-{
-  ptrdiff_t size;
-  scalar_t i = 0;
-
-  THArgCheck(step > 0 || step < 0, 3, "step must be nonzero");
-  THArgCheck(((step > 0) && (xmax >= xmin)) || ((step < 0) && (xmax <= xmin))
-              , 2, "upper bound and larger bound inconsistent with step sign");
-
-  size = (ptrdiff_t) (((xmax - xmin) / step) + 1);
-
-  if (THTensor_(nElement)(r_) != size) {
-    THTensor_(resize1d)(r_, size);
-  }
-
-  TH_TENSOR_APPLY(scalar_t, r_, *r__data = xmin + (i++)*step;);
-}
-
-void THTensor_(arange)(THTensor *r_, accreal xmin, accreal xmax, accreal step) {
-  ptrdiff_t size;
-  scalar_t i = 0;
-
-  THArgCheck(step > 0 || step < 0, 3, "step must be nonzero");
-  THArgCheck(std::isfinite(static_cast<double>(xmin)) &&
-              std::isfinite(static_cast<double>(xmax))
-              , 1, "unsupported range: ", xmin, " -> ", xmax);
-  THArgCheck(((step > 0) && (xmax >= xmin)) || ((step < 0) && (xmax <= xmin))
-              , 2, "upper bound and larger bound inconsistent with step sign");
-
-  double size_d = ceil(static_cast<double>(xmax - xmin) / step);
-  THArgCheck(size_d >= 0 && size_d <= static_cast<double>(PTRDIFF_MAX)
-             , 1, "invalid size, possible overflow?");
-  size = static_cast<ptrdiff_t>(size_d);
-
-  if (THTensor_(nElement)(r_) != size) {
-    THTensor_(resize1d)(r_, size);
-  }
-
-  TH_TENSOR_APPLY(scalar_t, r_, *r__data = xmin + (i++)*step;);
 }
 
 void THTensor_(randperm)(THTensor *r_, THGenerator *_generator, int64_t n)
@@ -2129,48 +2087,6 @@ accreal THTensor_(varall)(THTensor *tensor, int biased)
 accreal THTensor_(stdall)(THTensor *tensor, int biased)
 {
   return sqrt(THTensor_(varall)(tensor, biased));
-}
-
-void THTensor_(linspace)(THTensor *r_, scalar_t a, scalar_t b, int64_t n)
-{
-  scalar_t i = 0;
-
-  THArgCheck((n >= 0), 3, "number of points must be non-negative");
-
-  if (THTensor_(nElement)(r_) != n) {
-    THTensor_(resize1d)(r_, n);
-  }
-
-  if (n == 0) {
-  } else if (n == 1) {
-    THTensor_(set1d)(r_, 0, a);
-  } else {
-     TH_TENSOR_APPLY(scalar_t, r_,
-             *r__data = a + (b-a)/((scalar_t)(n-1))*i;
-             i++;
-           );
-  }
-}
-
-void THTensor_(logspace)(THTensor *r_, scalar_t a, scalar_t b, int64_t n)
-{
-  scalar_t i = 0;
-
-  THArgCheck((n >= 0), 3, "number of points must be non-negative");
-
-  if (THTensor_(nElement)(r_) != n) {
-    THTensor_(resize1d)(r_, n);
-  }
-
-  if (n == 0) {
-  } else if (n == 1) {
-    THTensor_(set1d)(r_, 0, TH_MATH_NAME(pow)(10.0, a));
-  } else {
-    TH_TENSOR_APPLY(scalar_t, r_,
-        *r__data = TH_MATH_NAME(pow)(10.0, a + i*(b-a)/((scalar_t)(n-1)));
-        i++;
-        );
-  }
 }
 
 void THTensor_(histc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t minvalue, scalar_t maxvalue)

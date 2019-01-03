@@ -52,8 +52,9 @@ class UnaryElementwiseWithArgsOp final : public Operator<Context> {
   template <typename T>
   bool DoRunWithType() {
     const auto& X = Input(0);
-    auto* Y = Output(0);
-    Y->ResizeLike(X);
+
+    auto* Y = Output(
+        0, X.sizes(), at::dtype<typename OutputTypeMap::template type<T>>());
     return functor_(
         X.numel(),
         X.template data<T>(),
@@ -159,7 +160,7 @@ class BinaryElementwiseWithArgsOp final : public Operator<Context> {
           !IsInputOutputAlias(1, 0),
           "In-place is allowed only with the first tensor when "
           "legacy-broadcasting");
-      C_dims = A.dims().vec();
+      C_dims = A.sizes().vec();
       if (B.numel() == 1) {
         A_dims = {static_cast<int>(A.numel())};
         B_dims = {1};
@@ -261,8 +262,7 @@ class BinaryElementwiseWithArgsGradientOp final : public Operator<Context> {
     const auto& dC = Input(0);
     const auto& A = Input(1);
     const auto& B = Input(2);
-    auto* dA = Output(0);
-    auto* dB = Output(1);
+
     vector<int> A_dims;
     vector<int> B_dims;
     if (legacy_broadcast_) {
@@ -292,8 +292,10 @@ class BinaryElementwiseWithArgsGradientOp final : public Operator<Context> {
         dC.template data<typename GradientTypeMap::template type<T>>();
     const T* A_data = A.template data<T>();
     const T* B_data = B.template data<T>();
-    dA->ResizeLike(A);
-    dB->ResizeLike(B);
+    auto* dA = Output(
+        0, A.sizes(), at::dtype<typename GradientTypeMap::template type<T>>());
+    auto* dB = Output(
+        1, B.sizes(), at::dtype<typename GradientTypeMap::template type<T>>());
     auto* dA_data =
         dA->template mutable_data<typename GradientTypeMap::template type<T>>();
     auto* dB_data =

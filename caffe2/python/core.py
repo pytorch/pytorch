@@ -14,7 +14,7 @@ from six import binary_type, string_types, text_type
 from caffe2.proto import caffe2_pb2
 from caffe2.python import scope, utils, workspace
 from caffe2.python.control_ops_grad import \
-    gen_do_gradient, gen_if_gradient, gen_while_gradient
+    gen_do_gradient, gen_if_gradient, gen_while_gradient, disambiguate_grad_if_op_output
 
 import caffe2.python._import_c_extension as C
 
@@ -725,8 +725,12 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
                 break
 
     def _DisambiguateGradOpOutput(self, grad_op, idx, cnt):
-        grad_op.output[idx] = (
+        new_grad_output = (
             '_' + grad_op.output[idx] + '_autosplit_{}'.format(cnt))
+        if grad_op.type == "If":
+            disambiguate_grad_if_op_output(grad_op, idx, new_grad_output)
+        else:
+            grad_op.output[idx] = new_grad_output
         return grad_op.output[idx], cnt + 1
 
     def _CheckSumOpsConflict(self, out_base_name, g):

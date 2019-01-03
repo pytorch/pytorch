@@ -4,7 +4,6 @@
 #include <caffe2/operators/accuracy_op.h>
 #include <caffe2/operators/bbox_transform_op.h>
 #include <caffe2/operators/box_with_nms_limit_op.h>
-#include <caffe2/operators/channel_shuffle_op.h>
 #include <caffe2/operators/collect_and_distribute_fpn_rpn_proposals_op.h>
 #include <caffe2/operators/conv_transpose_op.h>
 #include <caffe2/operators/cross_entropy_op.h>
@@ -41,9 +40,6 @@
 namespace caffe2 {
 
 REGISTER_IDEEP_OPERATOR(Softmax, IDEEPFallbackOp<SoftmaxOp<float, CPUContext>>);
-REGISTER_IDEEP_OPERATOR(
-    ChannelShuffle,
-    IDEEPFallbackOp<ChannelShuffleOp<float, CPUContext>>);
 REGISTER_IDEEP_OPERATOR(
     LabelCrossEntropy,
     IDEEPFallbackOp<LabelCrossEntropyOp<float, CPUContext>>);

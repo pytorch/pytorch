@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/AbsCriterion.c"
+#define TH_GENERIC_FILE "THNN/generic/AbsCriterion.c"
 #else
 
 void THNN_(AbsCriterion_updateOutput)(

@@ -52,6 +52,8 @@ target_include_directories(
     $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
     $<INSTALL_INTERFACE:include>)
 
+add_subdirectory(test)
+
 # ---[ Installation
 install(TARGETS c10_hip EXPORT Caffe2Targets DESTINATION lib)
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}

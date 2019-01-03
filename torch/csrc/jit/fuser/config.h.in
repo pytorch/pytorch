@@ -1,4 +1,6 @@
 #pragma once
 
+// clang-format off
 #define USE_CPU_FUSER @USE_CPU_FUSER@
 #define USE_CUDA_FUSER @USE_CUDA_FUSER@
+// clang-format on

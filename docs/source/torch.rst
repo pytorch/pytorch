@@ -266,6 +266,7 @@ Other Operations
 .. autofunction:: einsum
 .. autofunction:: flatten
 .. autofunction:: flip
+.. autofunction:: rot90
 .. autofunction:: histc
 .. autofunction:: meshgrid
 .. autofunction:: renorm
@@ -291,6 +292,7 @@ BLAS and LAPACK Operations
 .. autofunction:: btriunpack
 .. autofunction:: chain_matmul
 .. autofunction:: cholesky
+.. autofunction:: cholesky_solve
 .. autofunction:: dot
 .. autofunction:: eig
 .. autofunction:: gels

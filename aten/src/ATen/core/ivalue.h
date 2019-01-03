@@ -2,8 +2,8 @@
 
 #include <ATen/core/Scalar.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/core/TensorImpl.h>
-#include <ATen/core/UndefinedTensorImpl.h>
+#include <c10/core/TensorImpl.h>
+#include <c10/core/UndefinedTensorImpl.h>
 #include <ATen/core/blob.h>
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/thread_pool.h>
@@ -133,6 +133,8 @@ struct CAFFE2_API IValue final {
     IValue(rhs).swap(*this);
     return *this;
   }
+
+  void dump() const;
 
   bool isAliasOf(const IValue& rhs) const {
     if (this->tag != rhs.tag) {
@@ -510,14 +512,49 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
  public:
+  struct CAFFE2_API FutureError final : public std::exception {
+    FutureError(std::string&& error_msg_)
+        : error_msg(std::move(error_msg_)) {}
+
+    FutureError() = default;
+
+    const char* what() const noexcept override {
+      return error_msg.c_str();
+    }
+
+    std::string error_msg;
+  };
+
+  /**
+  * Wait on the future until it completes.
+  */
   void wait() {
     if (completed()) {
       return;
     }
-    c10::global_work_queue().workOnTasksUntilCompleted(intrusive_from_this());
+    std::condition_variable finished;
+    bool fired = false;
+
+    // Add a callback to notify the current thread
+    // when the current future completes.
+    addCallback([&] {
+      std::unique_lock<std::mutex> lock(mutex_);
+      finished.notify_all();
+      fired = true;
+    });
+
+    // The current thread will be blocked unless the above callback is fired.
+    std::unique_lock<std::mutex> lock(mutex_);
+    while (!fired) {
+      finished.wait(lock);
+    }
+
     AT_ASSERT(completed());
   }
 
+  /**
+   * Explicitly mark the future as completed with the output value.
+   */
   void markCompleted(IValue value) {
     {
       // This is not to protect completed_ but to create a barrier
@@ -528,21 +565,39 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       value_ = std::move(value);
     }
 
-    // There is no need to protect callbacks anymore.
-    // Once completed_ is set to true, no one can add new callback to the list.
-    for (auto& callback : callbacks) {
-      callback();
+    fireCallbacks();
+  }
+
+  void markCompleted(FutureError&& error_) {
+    {
+      // This is not to protect completed_ but to create a barrier
+      // from possible addCallback() calls
+      std::unique_lock<std::mutex> lock(mutex_);
+      AT_ASSERT(!completed());
+      completed_ = true;
+      has_error = true;
+      error = std::move(error_);
     }
-    callbacks.clear();
+
+    fireCallbacks();
   }
 
   // Get the result of the current future.
   IValue value() {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
+    if (has_error) {
+      throw error;
+    }
     return value_;
   }
 
+  /**
+   * Add a callback to the future.
+   * The callbacks will be executed once the future completes.
+   * If the future has already completed,
+   * this function will execute the callback immediately.
+   */
   void addCallback(std::function<void(void)> callback) {
     std::unique_lock<std::mutex> lock(mutex_);
     if (completed()) {
@@ -558,19 +613,27 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     return completed_;
   }
 
-  std::mutex& get_mutex() {
-    return mutex_;
-  }
-
   CAFFE2_API friend std::ostream& operator<<(
       std::ostream& out,
       const Future& v);
 
  private:
+  void fireCallbacks() {
+    AT_ASSERT(completed());
+    // There is no need to protect callbacks with the lock.
+    // Once completed_ is set to true, no one can add new callback to the list.
+    for (auto& callback : callbacks) {
+      callback();
+    }
+    callbacks.clear();
+  }
+
   std::mutex mutex_;
   IValue value_; // when finished the value
   std::atomic_bool completed_ = {false}; // is this future complete
   std::vector<std::function<void(void)>> callbacks;
+  bool has_error = false;
+  FutureError error;
 };
 
 #undef TORCH_FORALL_TAGS

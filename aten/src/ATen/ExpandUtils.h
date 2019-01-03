@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ATen/Tensor.h"
-#include "c10/util/Exception.h"
+#include <ATen/Tensor.h>
+#include <c10/util/Exception.h>
 
 #include <functional>
 #include <sstream>

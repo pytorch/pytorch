@@ -92,7 +92,7 @@ class ReduceGradientOp final : public Operator<Context> {
     const auto& dY = Input(0);
     const auto& X = Input(1);
     const auto& Y = Input(2);
-    auto* dX = Output(0);
+
     const int ndim = X.dim();
     if (axes_.empty()) {
       axes_.resize(ndim);
@@ -113,7 +113,7 @@ class ReduceGradientOp final : public Operator<Context> {
     for (const int axis : axes_) {
       dY_dims[axis] = 1;
     }
-    dX->ResizeLike(X);
+    auto* dX = Output(0, X.sizes(), at::dtype<T>());
     return reducer_.template Backward<T>(
         dY_dims,
         dX_dims,

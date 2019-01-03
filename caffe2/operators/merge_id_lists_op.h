@@ -20,8 +20,7 @@ class MergeIdListsOp : public Operator<Context> {
     CAFFE_ENFORCE_EQ(first_lengths.dim(), 1, "LENGTHS should be 1-D");
     const auto batch_size = first_lengths.numel();
 
-    auto* out_lengths = Output(0);
-    out_lengths->ResizeLike(first_lengths);
+    auto* out_lengths = Output(0, first_lengths.sizes(), at::dtype<int32_t>());
 
     auto* out_lengths_data = out_lengths->template mutable_data<int32_t>();
 

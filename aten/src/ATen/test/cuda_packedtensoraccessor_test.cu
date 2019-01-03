@@ -1,8 +1,8 @@
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
-#include "ATen/ATen.h"
-#include "ATen/core/TensorAccessor.h"
-#include "ATen/cuda/CUDAContext.h"
+#include <ATen/ATen.h>
+#include <ATen/core/TensorAccessor.h>
+#include <ATen/cuda/CUDAContext.h>
 
 #include <assert.h>
 

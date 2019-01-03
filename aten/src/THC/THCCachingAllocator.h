@@ -2,14 +2,15 @@
 #define THC_DEVICE_ALLOCATOR_INC
 
 #ifdef __cplusplus
-#include <ATen/cuda/CUDAStream.h>
+#include <c10/cuda/CUDAStream.h>
+#include <ATen/cuda/ATenCUDAGeneral.h>
 #endif
 
 #if (__cplusplus >= 201103L) || (defined(_MSC_VER) && defined(__cplusplus))
 #include <mutex>
 #endif
 
-#include "THCGeneral.h"
+#include <THC/THCGeneral.h>
 
 THC_API THCDeviceAllocator* THCCachingAllocator_get(void);
 THC_API void THCCachingAllocator_emptyCache(void);

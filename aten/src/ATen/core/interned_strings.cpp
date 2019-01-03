@@ -1,4 +1,4 @@
-#include "ATen/core/interned_strings.h"
+#include <ATen/core/interned_strings.h>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
@@ -7,9 +7,9 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include "ATen/core/interned_strings_class.h"
-#include "c10/util/Exception.h"
-#include "c10/util/Optional.h"
+#include <ATen/core/interned_strings_class.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 
 namespace c10 {
 

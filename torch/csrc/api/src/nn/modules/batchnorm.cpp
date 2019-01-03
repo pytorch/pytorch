@@ -6,6 +6,7 @@
 #include <c10/util/Exception.h>
 
 #include <cstddef>
+#include <ostream>
 #include <utility>
 #include <vector>
 
@@ -13,8 +14,7 @@ namespace torch {
 namespace nn {
 BatchNormOptions::BatchNormOptions(int64_t features) : features_(features) {}
 
-BatchNormImpl::BatchNormImpl(BatchNormOptions options)
-    : options(std::move(options)) {
+BatchNormImpl::BatchNormImpl(BatchNormOptions options) : options(options) {
   reset();
 }
 
@@ -33,7 +33,15 @@ void BatchNormImpl::reset() {
   }
 }
 
-Tensor BatchNormImpl::forward(Tensor input) {
+void BatchNormImpl::pretty_print(std::ostream& stream) const {
+  stream << std::boolalpha
+         << "torch::nn::BatchNorm(features=" << options.features_
+         << ", eps=" << options.eps_ << ", momentum=" << options.momentum_
+         << ", affine=" << options.affine_ << ", stateful=" << options.stateful_
+         << ")";
+}
+
+Tensor BatchNormImpl::forward(const Tensor& input) {
   AT_CHECK(
       options.stateful_,
       "Calling BatchNorm::forward is only permitted when "
@@ -42,7 +50,10 @@ Tensor BatchNormImpl::forward(Tensor input) {
   return pure_forward(input, running_mean, running_variance);
 }
 
-Tensor BatchNormImpl::pure_forward(Tensor input, Tensor mean, Tensor variance) {
+Tensor BatchNormImpl::pure_forward(
+    const Tensor& input,
+    const Tensor& mean,
+    const Tensor& variance) {
   if (is_training()) {
     const auto num_channels = input.dim() > 1 ? input.size(1) : 1;
     AT_CHECK(

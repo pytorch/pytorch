@@ -245,9 +245,8 @@ class MapDeserializer : public BlobDeserializerBase {
         tensor_protos.ParseFromString(proto.content()),
         "Fail to parse TensorProtos");
     TensorDeserializer deser;
-    Tensor key_tensor(CPU), value_tensor(CPU);
-    deser.Deserialize(tensor_protos.protos(0), &key_tensor);
-    deser.Deserialize(tensor_protos.protos(1), &value_tensor);
+    Tensor key_tensor = deser.Deserialize(tensor_protos.protos(0));
+    Tensor value_tensor = deser.Deserialize(tensor_protos.protos(1));
     auto* key_data = key_tensor.data<KEY_T>();
     auto* value_data = value_tensor.data<VALUE_T>();
 

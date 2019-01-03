@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ATen/TypeDefault.h"
-#include "ATen/CheckGenerator.h"
+#include <ATen/TypeDefault.h>
+#include <ATen/CheckGenerator.h>
 
 #ifdef _MSC_VER
 #ifdef Type
@@ -18,8 +18,6 @@ struct UndefinedType final : public TypeDefault {
   virtual Backend backend() const override;
   virtual Allocator* allocator() const override;
   virtual Device getDeviceFromPtr(void* data) const override;
-  virtual Storage storage(bool resizable = false) const override;
-  virtual Storage storage(size_t size, bool resizable = false) const override;
   virtual Storage storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const override;
   virtual Storage storageWithAllocator(int64_t size, Allocator* allocator) const override;
   virtual std::unique_ptr<Generator> generator() const override;

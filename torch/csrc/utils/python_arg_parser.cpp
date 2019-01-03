@@ -1,9 +1,9 @@
-#include "torch/csrc/utils/python_arg_parser.h"
+#include <torch/csrc/utils/python_arg_parser.h>
 
-#include "torch/csrc/Exceptions.h"
-#include "torch/csrc/Layout.h"
-#include "torch/csrc/utils/invalid_arguments.h"
-#include "torch/csrc/utils/python_strings.h"
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/Layout.h>
+#include <torch/csrc/utils/invalid_arguments.h>
+#include <torch/csrc/utils/python_strings.h>
 
 #include <ATen/ATen.h>
 
@@ -27,7 +27,6 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"Storage", ParameterType::STORAGE},
   {"PyObject*", ParameterType::PYOBJECT},
   {"ScalarType", ParameterType::SCALARTYPE},
-  {"optional<ScalarType>", ParameterType::SCALARTYPE},
   {"Layout", ParameterType::LAYOUT},
   {"Device", ParameterType::DEVICE},
   {"std::string", ParameterType::STRING},
@@ -286,7 +285,7 @@ FunctionSignature::FunctionSignature(const std::string& fmt)
   while (!done) {
     auto offset = fmt.find(", ", last_offset);
     if (offset == std::string::npos) {
-      offset = fmt.find(")", last_offset);
+      offset = fmt.find(')', last_offset);
       done = true;
       next_offset = offset + 1;
     } else {

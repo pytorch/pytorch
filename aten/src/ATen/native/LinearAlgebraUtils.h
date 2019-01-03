@@ -1,5 +1,5 @@
-#include "ATen/ATen.h"
-#include "ATen/ExpandUtils.h"
+#include <ATen/ATen.h>
+#include <ATen/ExpandUtils.h>
 #include <limits>
 
 namespace at { namespace native {
@@ -53,7 +53,7 @@ static inline double _get_epsilon(const ScalarType& sc_type) {
   }
 }
 
-// Validates input shapes for linear solve methods (gesv, potrs)
+// Validates input shapes for linear solve methods (gesv, cholesky_solve)
 static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A) {
   AT_CHECK(A.size(-1) == A.size(-2),
            "A must be batches of square matrices, "
@@ -85,6 +85,18 @@ static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* nam
     } else if (info > 0) {
       AT_ERROR(name, ": For batch ", i, ": U(", info, ",", info, ") is zero, singular U.");
     }
+  }
+}
+
+/*
+ * Given a info int, obtained after a single operation, this function check if the computation
+ * has been successful (info = 0) or not, and report in case of the latter.
+ */
+static inline void singleCheckErrors(int64_t info, const char* name) {
+  if (info < 0) {
+    AT_ERROR(name, ": Argument ", -info, " has illegal value");
+  } else if (info > 0) {
+    AT_ERROR(name, ": U(", info, ",", info, ") is zero, singular U.");
   }
 }
 

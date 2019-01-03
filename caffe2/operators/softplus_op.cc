@@ -8,8 +8,8 @@ namespace caffe2 {
 template <>
 bool SoftplusOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
-  auto* Y = Output(0);
-  Y->ResizeLike(X);
+
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
 
   EigenVectorMap<float>(Y->template mutable_data<float>(), X.numel()) =
       (ConstEigenVectorMap<float>(X.data<float>(), X.numel()).array().exp() +
@@ -22,9 +22,9 @@ template <>
 bool SoftplusGradientOp<float, CPUContext>::RunOnDevice() {
   auto& Y = Input(0);
   auto& dY = Input(1);
-  auto* dX = Output(0);
+
   DCHECK_EQ(dY.numel(), Y.numel());
-  dX->ResizeLike(Y);
+  auto* dX = Output(0, Y.sizes(), at::dtype<float>());
 
   const float* Ydata = Y.data<float>();
   const float* dYdata = dY.data<float>();

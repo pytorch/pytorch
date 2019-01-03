@@ -72,10 +72,10 @@ bool IntegralImageGradientOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0); // Original input to "forward" op
   auto& dY = Input(1); // Gradient of net w.r.t. output of "forward" op
   // (aka "gradOutput")
-  auto* dX = Output(0); // Gradient of net w.r.t. input to "forward" op
-  // (aka "gradInput")
+  auto* dX = Output(
+      0, X.sizes(), at::dtype<float>()); // Gradient of net w.r.t. input to
+                                         // "forward" op (aka "gradInput")
 
-  dX->ResizeLike(X);
   const int ind = X.dim32(0);
   const int chans = X.dim32(1);
   const int rows_in = dY.dim32(2);

@@ -250,7 +250,7 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   auto& X = Input(INPUT);
   auto& filter = Input(FILTER);
   auto& dY = Input(OUTPUT_GRAD);
-  auto* dfilter = Output(FILTER_GRAD);
+
   const int N = X.dim32(0), M = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
   // We only handle LegacyPadding::NOTSET case and ignore cases of
   // LegacyPadding::VALID and LegacyPadding::SAME
@@ -264,7 +264,7 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   CAFFE_ENFORCE(
       filter.dim32(3) == this->kernel_w(),
       "filter width must be equal to kernel width");
-  dfilter->ResizeLike(filter);
+  auto* dfilter = Output(FILTER_GRAD, filter.sizes(), at::dtype<T>());
 
   const int kernel_dim = C * this->kernel_h() * this->kernel_w();
   const int output_image_size = dY.dim32(2) * dY.dim32(3);
@@ -353,8 +353,9 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     // Compute gradients w.r.t. the input
     // Since we have changed dYdata in the above loop, we will need to reset.
     dYdata = dY.template data<T>();
-    auto* dX = Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD);
-    dX->ResizeLike(X);
+
+    auto* dX = Output(
+        no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD, X.sizes(), at::dtype<T>());
     T* dXdata = dX->template mutable_data<T>();
     for (auto image_id = 0; image_id < N; ++image_id) {
       // Im2Col.
@@ -402,7 +403,7 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(INPUT);
   auto& filter = Input(FILTER);
   auto& dY = Input(OUTPUT_GRAD);
-  auto* dfilter = Output(FILTER_GRAD);
+
   const int N = X.dim32(0), H = X.dim32(1), W = X.dim32(2), M = X.dim32(3);
   // We only handle LegacyPadding::NOTSET case and ignore cases of
   // LegacyPadding::VALID and LegacyPadding::SAME
@@ -416,7 +417,7 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       filter.dim32(2) == this->kernel_w(),
       "filter width must be equal to kernel width");
   const int C = filter.dim32(3);
-  dfilter->ResizeLike(filter);
+  auto* dfilter = Output(FILTER_GRAD, filter.sizes(), at::dtype<T>());
 
   const int kernel_dim = C * this->kernel_h() * this->kernel_w();
   const int output_image_size = dY.dim32(1) * dY.dim32(2);
@@ -505,8 +506,9 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
     // Compute gradients w.r.t. the input
     // Since we have changed dYdata in the above loop, we will need to reset.
     dYdata = dY.template data<T>();
-    auto* dX = Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD);
-    dX->ResizeLike(X);
+
+    auto* dX = Output(
+        no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD, X.sizes(), at::dtype<T>());
     T* dXdata = dX->template mutable_data<T>();
     for (auto image_id = 0; image_id < N; ++image_id) {
       // Im2Col.
