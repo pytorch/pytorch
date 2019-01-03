@@ -26,7 +26,7 @@
 namespace at { namespace native {
 
 template<int nt, int vt, typename func_t>
-__launch_bounds__(C10_MAX_THREADS_PER_BLOCK(nt), C10_MIN_BLOCKS_PER_SM(nt, 4))
+C10_LAUNCH_BOUNDS(nt, 4)
 __global__ void elementwise_kernel(int N, func_t f) {
   int tid = threadIdx.x;
   int nv = nt * vt;

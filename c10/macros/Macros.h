@@ -109,12 +109,39 @@ namespace at { namespace cuda { using namespace c10::hip; }}
 #define C10_HOST_DEVICE __host__ __device__
 #define C10_DEVICE __device__
 #define C10_HOST __host__
-#define C10_MAX_THREADS_PER_BLOCK(val) (((val) <= 1024) ? (val) : (512))
+// constants from (https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#features-and-technical-specifications)
+// The maximum number of threads per multiprocessor is 1024 for Turing architecture (7.5) 
+// but 2048 for previous architectures. You'll get warnings if you exceed these constants. 
+// Hence, the following macros adjust the input values from the user to resolve potential warnings.
 #if __CUDA_ARCH__ >= 750
-#define C10_MIN_BLOCKS_PER_SM(threads_per_block, blocks_per_sm) ((((threads_per_block)*(blocks_per_sm) <= 1024) ? (blocks_per_sm) : ((1024 + threads_per_block - 1) / threads_per_block)))
+constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 1024;
 #else
-#define C10_MIN_BLOCKS_PER_SM(threads_per_block, blocks_per_sm) ((((threads_per_block)*(blocks_per_sm) <= 2048) ? (blocks_per_sm) : ((2048 + threads_per_block - 1) / threads_per_block)))
+constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 2048;
 #endif
+// CUDA_MAX_THREADS_PER_BLOCK is same for all architectures currently
+constexpr uint32_t CUDA_MAX_THREADS_PER_BLOCK = 1024;
+// CUDA_THREADS_PER_BLOCK_FALLBACK is the "canonical fallback" choice of block size.
+// 256 is a good number for this fallback and should give good occupancy and 
+// versatility across all architectures.
+constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
+// Suppose you were planning to write __launch_bounds__(a, b), based on your performance tuning on a modern GPU. 
+// Instead, you should write __launch_bounds__(C10_MAX_THREADS_PER_BLOCK<a>(), C10_MIN_BLOCKS_PER_SM<a, b>()), 
+// which will also properly respect limits on old architectures.
+template<uint32_t val>
+constexpr uint32_t C10_MAX_THREADS_PER_BLOCK() {
+  return (val <= CUDA_MAX_THREADS_PER_BLOCK ? val : CUDA_THREADS_PER_BLOCK_FALLBACK);
+}
+template<uint32_t threads_per_block, uint32_t blocks_per_sm>
+constexpr uint32_t C10_MIN_BLOCKS_PER_SM() {
+  return ((threads_per_block * blocks_per_sm) <= CUDA_MAX_THREADS_PER_SM ? blocks_per_sm : ((CUDA_MAX_THREADS_PER_SM + threads_per_block - 1) / threads_per_block));
+}
+// C10_LAUNCH_BOUNDS is analogous to __launch_bounds__
+// https://stackoverflow.com/a/8814003 snippet to have macro with an optional argument
+#define C10_LAUNCH_BOUNDS_0 __launch_bounds__(256, 4) // default launch bounds that should give good occupancy and versatility across all architectures.
+#define C10_LAUNCH_BOUNDS_1(max_threads_per_block) __launch_bounds__((C10_MAX_THREADS_PER_BLOCK<(max_threads_per_block)>()))
+#define C10_LAUNCH_BOUNDS_2(max_threads_per_block, min_blocks_per_sm) __launch_bounds__((C10_MAX_THREADS_PER_BLOCK<(max_threads_per_block)>()), (C10_MIN_BLOCKS_PER_SM<(max_threads_per_block), (min_blocks_per_sm)>()))
+#define C10_LAUNCH_BOUNDS_X(x,max_threads_per_block,min_blocks_per_sm,FUNC, ...) FUNC
+#define C10_LAUNCH_BOUNDS(...) C10_LAUNCH_BOUNDS_X(,##__VA_ARGS__, C10_LAUNCH_BOUNDS_2(__VA_ARGS__), C10_LAUNCH_BOUNDS_1(__VA_ARGS__), C10_LAUNCH_BOUNDS_0(__VA_ARGS__))
 #else
 #define C10_HOST_DEVICE
 #define C10_HOST

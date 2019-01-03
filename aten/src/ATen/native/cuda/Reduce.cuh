@@ -147,7 +147,7 @@ struct ReduceConfig {
 std::ostream& operator<<(std::ostream& out, const ReduceConfig& config);
 
 template<int nt, typename R>
-__launch_bounds__(C10_MAX_THREADS_PER_BLOCK(nt), C10_MIN_BLOCKS_PER_SM(nt, 4))
+C10_LAUNCH_BOUNDS(nt, 4)
 __global__ void reduce_kernel(R reduction) {
   reduction.run();
 }

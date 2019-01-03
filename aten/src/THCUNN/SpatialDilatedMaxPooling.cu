@@ -48,7 +48,7 @@ __global__ void MaxPoolForward(const int nthreads, const Dtype* bottom_data,
 const int BACKWARD_THREADS = 256;
 
 template <typename Dtype, typename AccType>
-__launch_bounds__(C10_MAX_THREADS_PER_BLOCK(BACKWARD_THREADS), C10_MIN_BLOCKS_PER_SM(BACKWARD_THREADS, 8))
+C10_LAUNCH_BOUNDS(BACKWARD_THREADS, 8)
 __global__ void MaxPoolBackward(const int nthreads, const Dtype* top_diff,
     const int64_t* top_mask, const int num, const int channels,
     const int height, const int width, const int pooled_height,
