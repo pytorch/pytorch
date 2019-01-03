@@ -222,16 +222,8 @@ if(NOT BUILD_ATEN_ONLY)
   else()
     target_link_libraries(caffe2 PUBLIC protobuf::libprotobuf)
   endif()
-
-  #cmake only check for separate OpenMP library on AppleClang 7+
-  #https://github.com/Kitware/CMake/blob/42212f7539040139ecec092547b7d58ef12a4d72/Modules/FindOpenMP.cmake#L252
-  if (WITH_OPENMP AND CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
-    if (CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL "7.0" OR
-        CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "7.0")
-      target_link_libraries(caffe2 PRIVATE ${OpenMP_libomp_LIBRARY})
-    endif()
-  endif()
 endif()
+
 target_link_libraries(caffe2 PUBLIC c10)
 target_link_libraries(caffe2 PUBLIC ${Caffe2_PUBLIC_DEPENDENCY_LIBS})
 target_link_libraries(caffe2 PRIVATE ${Caffe2_DEPENDENCY_LIBS})
@@ -642,6 +634,11 @@ if (BUILD_PYTHON)
   # Create a custom target that copies all python files.
   file(GLOB_RECURSE PYTHON_SRCS RELATIVE ${PROJECT_SOURCE_DIR}
        "${PROJECT_SOURCE_DIR}/caffe2/*.py")
+
+  # generated pb files are copied from build/caffe2 to caffe2
+  # if we copied them back to build this would create a build cycle
+  # consider removing the need for globs
+  filter_list_exclude(PYTHON_SRCS PYTHON_SRCS "proto/.*_pb")
 
   set(build_files)
   foreach(python_src ${PYTHON_SRCS})

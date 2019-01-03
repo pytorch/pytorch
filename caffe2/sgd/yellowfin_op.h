@@ -157,9 +157,9 @@ for (int i = 0; i < param_tensor.dim(); ++i) {
 
 // Output data
 
-#define CAFFE2_YF_READ_OUTPUT(OUTPUT_NAME, VAR_NAME)         \
-  auto VAR_NAME##_out_tensor = Output(OUTPUT_##OUTPUT_NAME); \
-  VAR_NAME##_out_tensor->ResizeLike(VAR_NAME##_tensor);      \
+#define CAFFE2_YF_READ_OUTPUT(OUTPUT_NAME, VAR_NAME)                           \
+  auto VAR_NAME##_out_tensor =                                                 \
+      Output(OUTPUT_##OUTPUT_NAME, VAR_NAME##_tensor.sizes(), at::dtype<T>()); \
   VAR_NAME##_out_ = VAR_NAME##_out_tensor->template mutable_data<T>();
 
     CAFFE2_YF_READ_OUTPUT(PARAM, param)

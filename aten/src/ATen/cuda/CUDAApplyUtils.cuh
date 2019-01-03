@@ -271,7 +271,7 @@ template <typename Op,
           typename IndexType,
           int ADims,
           int step>
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
 __launch_bounds__(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void kernelPointwiseApply1(detail::TensorInfo<scalar, IndexType> a,
@@ -355,7 +355,7 @@ template <typename Op,
           typename IndexType,
           int ADims, int BDims,
           int step>
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
 __launch_bounds__(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void
@@ -464,7 +464,7 @@ template <typename Op,
           typename IndexType,
           int ADims, int BDims, int CDims,
           int step>
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
 __launch_bounds__(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void
@@ -587,7 +587,7 @@ template <typename Op,
           typename IndexType,
           int ADims, int BDims, int CDims, int DDims,
           int step>
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
 __launch_bounds__(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void

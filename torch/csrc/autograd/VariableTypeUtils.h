@@ -153,7 +153,7 @@ inline Tensor as_variable(Tensor tensor) {
 
 inline std::vector<Tensor> as_variable(TensorList tl) {
   return fmap(tl, [](const Tensor& t) -> Tensor {
-      return make_variable(std::move(t), /*requires_grad=*/false);
+      return make_variable(t, /*requires_grad=*/false);
   });
 }
 

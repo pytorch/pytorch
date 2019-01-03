@@ -98,6 +98,16 @@ void RNNImplBase<Derived>::to(torch::Device device, bool non_blocking) {
 }
 
 template <typename Derived>
+void RNNImplBase<Derived>::pretty_print(std::ostream& stream) const {
+  const std::string name = this->name();
+  const std::string name_without_impl = name.substr(0, name.size() - 4);
+  stream << name_without_impl << "(input_size=" << options.input_size_
+         << ", hidden_size=" << options.hidden_size_
+         << ", layers=" << options.layers_ << ", dropout=" << options.dropout_
+         << ")";
+}
+
+template <typename Derived>
 void RNNImplBase<Derived>::flatten_parameters() {
   // Cache the flattened weight and bias vector.
   flat_weights_ = flat_weights();
@@ -131,7 +141,7 @@ RNNOutput RNNImplBase<Derived>::generic_forward(
   }
   Tensor output, new_state;
   std::tie(output, new_state) = function(
-      std::move(input),
+      input,
       std::move(state),
       flat_weights_,
       options.with_bias_,
@@ -203,17 +213,26 @@ RNNImpl::RNNImpl(const RNNOptions& options)
           static_cast<CuDNNMode>(options.activation_)),
       options(options) {}
 
+void RNNImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::RNN(input_size=" << options.input_size_
+         << ", hidden_size=" << options.hidden_size_
+         << ", layers=" << options.layers_ << ", dropout=" << options.dropout_
+         << ", activation="
+         << (options.activation_ == RNNActivation::Tanh ? "tanh" : "relu")
+         << ")";
+}
+
 RNNOutput RNNImpl::forward(const Tensor& input, Tensor state) {
   switch (options.activation_) {
     case RNNActivation::ReLU:
       return generic_forward(
           static_cast<RNNFunctionSignature*>(&torch::rnn_relu),
-          std::move(input),
+          input,
           std::move(state));
     case RNNActivation::Tanh:
       return generic_forward(
           static_cast<RNNFunctionSignature*>(&torch::rnn_tanh),
-          std::move(input),
+          input,
           std::move(state));
     default:
       AT_ERROR("Unhandled RNN activation function!");
@@ -244,7 +263,7 @@ RNNOutput LSTMImpl::forward(const Tensor& input, Tensor state) {
   }
   Tensor output, hidden_state, cell_state;
   std::tie(output, hidden_state, cell_state) = torch::lstm(
-      std::move(input),
+      input,
       {state[0], state[1]},
       flat_weights_,
       options.with_bias_,
@@ -266,9 +285,7 @@ GRUImpl::GRUImpl(const GRUOptions& options)
 
 RNNOutput GRUImpl::forward(const Tensor& input, Tensor state) {
   return generic_forward(
-      static_cast<RNNFunctionSignature*>(&torch::gru),
-      std::move(input),
-      std::move(state));
+      static_cast<RNNFunctionSignature*>(&torch::gru), input, std::move(state));
 }
 } // namespace nn
 } // namespace torch

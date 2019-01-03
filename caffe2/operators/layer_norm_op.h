@@ -33,7 +33,7 @@ class LayerNormOp final : public Operator<Context> {
     auto* Y = Output(0);
     const int canonical_axis = X.canonical_axis_index(axis_);
     std::vector<int64_t> moments_dims(
-        X.dims().cbegin(), X.dims().cbegin() + canonical_axis);
+        X.sizes().cbegin(), X.sizes().cbegin() + canonical_axis);
     moments_dims.push_back(1);
     auto* mean = Output(1, moments_dims, at::dtype<T>());
     auto* sig = Output(2, moments_dims, at::dtype<T>());

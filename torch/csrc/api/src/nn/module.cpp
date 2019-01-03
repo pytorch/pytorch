@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <functional>
 #include <map>
+#include <ostream>
 #include <string>
 #include <typeinfo>
 
@@ -101,26 +102,26 @@ void Module::apply(const ConstModuleApplyFunction& function) const {
 
 void Module::apply(
     const NamedModuleApplyFunction& function,
-    std::string name_prefix) {
+    const std::string& name_prefix) {
   function(/*name=*/name_prefix, *this);
   apply_to_submodules(
       [&function](
           const std::string& name, const std::shared_ptr<Module>& module) {
         function(name, *module);
       },
-      std::move(name_prefix));
+      name_prefix);
 }
 
 void Module::apply(
     const ConstNamedModuleApplyFunction& function,
-    std::string name_prefix) const {
+    const std::string& name_prefix) const {
   function(/*name=*/name_prefix, *this);
   apply_to_submodules(
       [&function](
           const std::string& name, const std::shared_ptr<Module>& module) {
         function(name, *module);
       },
-      std::move(name_prefix));
+      name_prefix);
 }
 
 void Module::apply(const ModulePointerApplyFunction& function) const {
@@ -133,10 +134,10 @@ void Module::apply(const ModulePointerApplyFunction& function) const {
 
 void Module::apply(
     const NamedModulePointerApplyFunction& function,
-    std::string name_prefix) const {
+    const std::string& name_prefix) const {
   function(
       /*name=*/name_prefix, shared_from_this_checked());
-  apply_to_submodules(function, std::move(name_prefix));
+  apply_to_submodules(function, name_prefix);
 }
 
 std::vector<Tensor> Module::parameters(bool recurse) const {
@@ -199,7 +200,7 @@ std::vector<std::shared_ptr<Module>> Module::modules(bool include_self) const {
 }
 
 OrderedDict<std::string, std::shared_ptr<Module>> Module::named_modules(
-    std::string name_prefix,
+    const std::string& name_prefix,
     bool include_self) const {
   OrderedDict<std::string, std::shared_ptr<Module>> result;
   if (include_self) {
@@ -208,14 +209,14 @@ OrderedDict<std::string, std::shared_ptr<Module>> Module::named_modules(
             const std::string& key, const std::shared_ptr<Module>& module) {
           result.insert(key, module);
         },
-        std::move(name_prefix));
+        name_prefix);
   } else {
     apply_to_submodules(
         [&result](
             const std::string& key, const std::shared_ptr<Module>& module) {
           result.insert(key, module);
         },
-        std::move(name_prefix));
+        name_prefix);
   }
   return result;
 }
@@ -321,6 +322,26 @@ Tensor& Module::register_buffer(std::string name, Tensor tensor) {
   return buffers_.insert(std::move(name), std::move(tensor));
 }
 
+void Module::pretty_print(std::ostream& stream) const {
+  stream << name();
+}
+
+void Module::pretty_print_recursive(
+    std::ostream& stream,
+    const std::string& indentation) const {
+  pretty_print(stream);
+  if (!children_.is_empty()) {
+    stream << "(\n";
+    const std::string next_indentation = indentation + "  ";
+    for (const auto& child : children_) {
+      stream << next_indentation << "(" << child.key() << "): ";
+      child.value()->pretty_print_recursive(stream, next_indentation);
+      stream << '\n';
+    }
+    stream << indentation << ")";
+  }
+}
+
 void Module::clone_(Module& other, const optional<Device>& device) {}
 
 void Module::apply_to_submodules(
@@ -329,7 +350,7 @@ void Module::apply_to_submodules(
   for (const auto& child : children_) {
     auto qualified_name = join_name(name_prefix, child.key());
     function(qualified_name, child.value());
-    child.value()->apply_to_submodules(function, std::move(qualified_name));
+    child.value()->apply_to_submodules(function, qualified_name);
   }
 }
 
@@ -349,6 +370,11 @@ std::shared_ptr<Module> Module::shared_from_this_checked() const {
         "to modules() or named_modules()");
   }
   return std::const_pointer_cast<Module>(ptr);
+}
+
+std::ostream& operator<<(std::ostream& stream, const nn::Module& module) {
+  module.pretty_print_recursive(stream, "");
+  return stream;
 }
 
 serialize::OutputArchive& operator<<(

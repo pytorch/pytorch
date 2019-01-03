@@ -9,5 +9,6 @@ graph(%x.1 : Float(*, *)
     block1() {
       -> (%x.1, %x.1, %y.1)
     }
-  return (%x, %y, %z);
+  %7 : (Float(*, *), Tensor, Tensor) = prim::TupleConstruct(%x, %y, %z)
+  return (%7);
 }

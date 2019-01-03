@@ -160,7 +160,7 @@ class BinaryElementwiseWithArgsOp final : public Operator<Context> {
           !IsInputOutputAlias(1, 0),
           "In-place is allowed only with the first tensor when "
           "legacy-broadcasting");
-      C_dims = A.dims().vec();
+      C_dims = A.sizes().vec();
       if (B.numel() == 1) {
         A_dims = {static_cast<int>(A.numel())};
         B_dims = {1};

@@ -6,6 +6,7 @@
 #include <c10/util/Exception.h>
 
 #include <cstddef>
+#include <ostream>
 #include <utility>
 #include <vector>
 
@@ -13,8 +14,7 @@ namespace torch {
 namespace nn {
 BatchNormOptions::BatchNormOptions(int64_t features) : features_(features) {}
 
-BatchNormImpl::BatchNormImpl(BatchNormOptions options)
-    : options(std::move(options)) {
+BatchNormImpl::BatchNormImpl(BatchNormOptions options) : options(options) {
   reset();
 }
 
@@ -31,6 +31,14 @@ void BatchNormImpl::reset() {
     running_variance =
         register_buffer("running_variance", torch::ones({options.features_}));
   }
+}
+
+void BatchNormImpl::pretty_print(std::ostream& stream) const {
+  stream << std::boolalpha
+         << "torch::nn::BatchNorm(features=" << options.features_
+         << ", eps=" << options.eps_ << ", momentum=" << options.momentum_
+         << ", affine=" << options.affine_ << ", stateful=" << options.stateful_
+         << ")";
 }
 
 Tensor BatchNormImpl::forward(const Tensor& input) {

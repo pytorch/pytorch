@@ -6,7 +6,9 @@
 
 #include <cstdlib>
 
-namespace torch { namespace jit { namespace fuser {
+namespace torch {
+namespace jit {
+namespace fuser {
 
 void runFallback(int64_t key, Stack& stack);
 

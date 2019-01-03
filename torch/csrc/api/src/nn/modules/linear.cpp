@@ -10,7 +10,7 @@ namespace torch {
 namespace nn {
 LinearOptions::LinearOptions(int64_t in, int64_t out) : in_(in), out_(out) {}
 
-LinearImpl::LinearImpl(LinearOptions options) : options(std::move(options)) {
+LinearImpl::LinearImpl(LinearOptions options) : options(options) {
   reset();
 }
 
@@ -26,6 +26,12 @@ void LinearImpl::reset() {
   for (auto& p : this->parameters()) {
     p.uniform_(-stdv, stdv);
   }
+}
+
+void LinearImpl::pretty_print(std::ostream& stream) const {
+  stream << std::boolalpha << "torch::nn::Linear(in=" << options.in_
+         << ", out=" << options.out_ << ", with_bias=" << options.with_bias_
+         << ")";
 }
 
 Tensor LinearImpl::forward(const Tensor& input) {
