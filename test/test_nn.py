@@ -3843,8 +3843,6 @@ class TestNN(NNTestCase):
         # This function is intended to test the lazy creation and reuse of per-thread
         # cudnn handles on each device in aten/src/ATen/cudnn/Handles.cpp.
         # Failure here likely indicates something wrong with that logic.
-        os.system("nvcc -V")
-        print("cudnn version = {}".format(torch.backends.cudnn.version()), flush=True)
 
         weight = torch.ones((1, 1, 2, 2), device='cuda')
 

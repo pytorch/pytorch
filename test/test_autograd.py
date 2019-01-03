@@ -2580,9 +2580,6 @@ class TestAutograd(TestCase):
     def test_rnn_backward_to_input_but_not_parameters_cuda(self):
         # this checks whether it is possible to not require
         # weight parameters, but require inputs, see #7722
-        import os
-        os.system("nvcc -V")
-        print("cudnn version = {}".format(torch.backends.cudnn.version()), flush=True)
 
         dev = torch.device('cuda')
         l = torch.nn.LSTM(2, 3).to(dev)

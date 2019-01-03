@@ -117,7 +117,7 @@ class PoolWindow
   {
     // The conditional check below is certainly worthwhile for efficiency.
     // However, it also serves another purpose:  Without the conditional,
-    // as of cuda V9.0.176 and
+    // as of cuda V9.0.176 and torch.backends.cudnn.version() = 7005,
     // we observe weird nondeterministic hangs on Windows when the process first
     // attempts to create a cudnn handle.  Example with added debug print statements:
     // https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-win-ws2016-cuda9-cudnn7-py3-test2/19238/console
