@@ -219,14 +219,30 @@ void max_unpooling3d_shape_check(
     const Tensor& indices,
     IntList output_size,
     IntList stride,
-    IntList padding,
-    bool check_grad) {
+    IntList padding) {
 
-  AT_CHECK(input.numel() > 0, "Input must be non-empty");
+  AT_CHECK(
+      indices.scalar_type() == at::ScalarType::Long,
+      "elements in indices should be type Long");
   AT_CHECK(
       (input.ndimension() == 4 || input.ndimension() == 5),
-      "Input must be 4d or 5d tensor");
-  AT_CHECK(input.sizes() == indices.sizes());
+      "Input to max_unpooling3d should be a 4d or 5d Tensor",
+      input.sizes());
+  AT_CHECK(
+      output_size.size() == 3,
+      "There should be exactly three elements (depth, height, width) in output_size");
+  AT_CHECK(
+      stride.size() == 3,
+      "There should be exactly three elements (depth, height, width) in stride");
+  AT_CHECK(
+      padding.size() == 3,
+      "There should be exactly three elements (depth, height, width) in padding");
+  AT_CHECK(
+      input.sizes() == indices.sizes(),
+      "Shape of indices should match shape of input");
+
+  AT_CHECK(input.numel() > 0, "Input must be non-empty");
+
   AT_CHECK(
       stride[0] > 0 && stride[1] > 0 && stride[2] > 0,
       "stride should be never greater than zero, but got stride: ",
@@ -245,7 +261,8 @@ void max_unpooling3d_shape_check(
   }
 
   int nslices = input.size(dimn);
-  if (check_grad) {
+
+  if (gradOutput.defined()) {
     if (output_size[0] != gradOutput.size(dimt) ||
         output_size[1] != gradOutput.size(dimh) ||
         output_size[2] != gradOutput.size(dimw)) {
@@ -257,7 +274,8 @@ void max_unpooling3d_shape_check(
     }
     AT_CHECK(
         gradOutput.ndimension() == input.ndimension() &&
-        gradOutput.size(dimn) == nslices);
+            gradOutput.size(dimn) == nslices,
+        "gradOutput and input Tensors should have same number of dimensions and also the same number of channels/slices");
   }
 }
 
@@ -268,27 +286,8 @@ Tensor& max_unpooling3d_forward_out_cpu(
     IntList output_size,
     IntList stride,
     IntList padding) {
-  AT_CHECK(
-      indices.scalar_type() == at::ScalarType::Long,
-      "elements in indices should be type Long");
-  AT_CHECK(
-      (self.ndimension() == 4 || self.ndimension() == 5),
-      "Input to max_unpooling3d should be a 4d or 5d Tensor",
-      self.sizes());
-  AT_CHECK(
-      output_size.size() == 3,
-      "There should be exactly three elements (depth, height, width) in output_size");
-  AT_CHECK(
-      stride.size() == 3,
-      "There should be exactly three elements (depth, height, width) in stide");
-  AT_CHECK(
-      padding.size() == 3,
-      "There should be exactly three elements (depth, height, width) in padding");
-  AT_CHECK(
-      self.sizes() == indices.sizes(),
-      "Shape of indices should match shape of input");
   max_unpooling3d_shape_check(
-      self, at::empty({}), indices, output_size, stride, padding, false);
+      self, Tensor(), indices, output_size, stride, padding);
 
   if (self.ndimension() == 5) {
     output.resize_({self.size(0),
@@ -327,13 +326,6 @@ Tensor max_unpooling3d_forward_cpu(
     IntList output_size,
     IntList stride,
     IntList padding) {
-  AT_CHECK(
-      (self.ndimension() == 4 || self.ndimension() == 5),
-      "Input to max_unpooling2d should be a 4d or 5d Tensor",
-      self.sizes());
-  AT_CHECK(
-      output_size.size() == 3,
-      "There should be exactly three elements (depth, height, width) in output_size");
   auto output = at::empty(
       {0},
       self.options());
@@ -352,6 +344,9 @@ static void max_unpooling2d_backward_out_cpu_frame(
     int64_t iheight,
     int64_t owidth,
     int64_t oheight) {
+
+  bool has_error = false;
+  int64_t error_index = 0;
   int k;
 #pragma omp parallel for private(k)
   for (k = 0; k < nslices; k++) {
@@ -361,22 +356,27 @@ static void max_unpooling2d_backward_out_cpu_frame(
 
     int64_t i, j;
     int64_t maxp;
+
     for (i = 0; i < iheight; i++) {
       for (j = 0; j < iwidth; j++) {
         maxp = ind_p_k[i * iwidth + j]; /* retrieve position of max */
         if (maxp < 0 || maxp >= owidth * oheight) {
-          AT_ERROR(
-              "invalid max index ",
-              maxp,
-              ", owidth= ",
-              owidth,
-              ", oheight= ",
-              oheight);
+          has_error = true;
+          error_index = maxp;
         }
         gradInput_p_k[i * iwidth + j] =
             gradOutput_p_k[maxp]; /* update gradient */
       }
     }
+  }
+  if(has_error) {
+    AT_ERROR(
+        "invalid max index ",
+        error_index,
+        ", owidth= ",
+        owidth,
+        ", oheight= ",
+        oheight);
   }
 }
 
@@ -517,18 +517,6 @@ Tensor& max_unpooling3d_backward_out_cpu(
     IntList output_size,
     IntList stride,
     IntList padding) {
-  AT_CHECK(
-      indices.scalar_type() == at::ScalarType::Long,
-      "elements in indices should be type Long");
-  AT_CHECK(
-      output_size.size() == 3,
-      "There should be exactly three elements (depth, height, width) in output_size");
-  AT_CHECK(
-      stride.size() == 3,
-      "There should be exactly three elements (depth, height, width) in stide");
-  AT_CHECK(
-      padding.size() == 3,
-      "There should be exactly three elements (depth, height, width) in padding");
   auto oT = output_size[0];
   auto oH = output_size[1];
   auto oW = output_size[2];
@@ -542,7 +530,7 @@ Tensor& max_unpooling3d_backward_out_cpu(
   int iW;
 
   max_unpooling3d_shape_check(
-      self, grad_output, indices, output_size, stride, padding, true);
+      self, grad_output, indices, output_size, stride, padding);
 
   // TODO (from THNN): check gradOutput shape
   /* get contiguous gradOutput */

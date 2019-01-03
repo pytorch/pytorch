@@ -186,14 +186,6 @@ Tensor max_unpooling2d_forward_cuda(
     const Tensor& self,
     const Tensor& indices,
     IntList output_size) {
-  AT_CHECK(
-      (self.ndimension() == 3 || self.ndimension() == 4),
-      "Input to max_unpooling2d should be a 3d or 4d Tensor",
-      self.sizes());
-  AT_CHECK(
-      output_size.size() == 2,
-      "There should be exactly two elements (height, width) in output_size");
-
   auto output = at::empty(
       {0},
       self.options());
@@ -207,13 +199,30 @@ void max_unpooling3d_shape_check(
     const Tensor& indices,
     IntList output_size,
     IntList stride,
-    IntList padding,
-    bool check_grad) {
-  AT_CHECK(input.numel() > 0, "Input must be non-empty");
+    IntList padding) {
+
+  AT_CHECK(
+      indices.scalar_type() == at::ScalarType::Long,
+      "elements in indices should be type Long");
   AT_CHECK(
       (input.ndimension() == 4 || input.ndimension() == 5),
-      "Input must be 4d or 5d tensor");
-  AT_CHECK(input.sizes() == indices.sizes());
+      "Input to max_unpooling3d should be a 4d or 5d Tensor",
+      input.sizes());
+  AT_CHECK(
+      output_size.size() == 3,
+      "There should be exactly three elements (depth, height, width) in output_size");
+  AT_CHECK(
+      stride.size() == 3,
+      "There should be exactly three elements (depth, height, width) in stride");
+  AT_CHECK(
+      padding.size() == 3,
+      "There should be exactly three elements (depth, height, width) in padding");
+  AT_CHECK(
+      input.sizes() == indices.sizes(),
+      "Shape of indices should match shape of input");
+
+  AT_CHECK(input.numel() > 0, "Input must be non-empty");
+
   AT_CHECK(
       stride[0] > 0 && stride[1] > 0 && stride[2] > 0,
       "stride should be never greater than zero, but got stride: ",
@@ -232,7 +241,8 @@ void max_unpooling3d_shape_check(
   }
 
   int nslices = input.size(dimn);
-  if (check_grad) {
+
+  if (gradOutput.defined()) {
     if (output_size[0] != gradOutput.size(dimt) ||
         output_size[1] != gradOutput.size(dimh) ||
         output_size[2] != gradOutput.size(dimw)) {
@@ -244,7 +254,8 @@ void max_unpooling3d_shape_check(
     }
     AT_CHECK(
         gradOutput.ndimension() == input.ndimension() &&
-        gradOutput.size(dimn) == nslices);
+            gradOutput.size(dimn) == nslices,
+        "gradOutput and input Tensors should have same number of dimensions and also the same number of channels/slices");
   }
 }
 
@@ -255,18 +266,9 @@ Tensor& max_unpooling3d_forward_out_cuda(
     IntList output_size,
     IntList stride,
     IntList padding) {
-  AT_CHECK(
-      indices.scalar_type() == at::ScalarType::Long,
-      "elements in indices should be type Long");
+
   max_unpooling3d_shape_check(
-      self, at::empty({}), indices, output_size, stride, padding, false);
-  AT_CHECK(
-      output_size.size() == 3,
-      "There should be exactly three elements (depth, height, width) in output_size");
-  AT_CHECK(
-      stride.size() == 3, "There should be exactly three elements in stride");
-  AT_CHECK(
-      padding.size() == 3, "There should be exactly three elements in padding");
+      self, Tensor(), indices, output_size, stride, padding);
 
   auto outputTime = output_size[0];
   auto outputHeight = output_size[1];
@@ -372,14 +374,6 @@ Tensor max_unpooling3d_forward_cuda(
     IntList output_size,
     IntList stride,
     IntList padding) {
-  AT_CHECK(
-      (self.ndimension() == 4 || self.ndimension() == 5),
-      "Input to max_unpooling3d should be a 4d or 5d Tensor",
-      self.sizes());
-  AT_CHECK(
-      output_size.size() == 3,
-      "There should be exactly three elements (depth, height, width) in output_size");
-
   auto output = at::empty(
       {0},
       self.options());
@@ -500,28 +494,20 @@ at::Tensor& max_unpooling3d_backward_out_cuda(
     IntList output_size,
     IntList stride,
     IntList padding) {
-  AT_CHECK(
-      indices.scalar_type() == at::ScalarType::Long,
-      "elements in indices should be type Long");
+
+  max_unpooling3d_shape_check(
+      self, grad_output, indices, output_size, stride, padding);
+
   int batchSize = 0;
   int inputSlices = 0;
   int inputTime = 0;
   int64_t inputHeight = 0;
   int64_t inputWidth = 0;
-  AT_CHECK(output_size.size() == 3, "output_size must have three elements");
-  AT_CHECK(stride.size() == 3, "stride must have three elements");
-  AT_CHECK(padding.size() == 3, "padding must have three elements");
 
   auto outputTime = output_size[0];
   auto outputHeight = output_size[1];
   auto outputWidth = output_size[2];
 
-  AT_CHECK(
-      (self.ndimension() == 4 || self.ndimension() == 5),
-      "self must be a 4d or 5d tensor");
-
-  max_unpooling3d_shape_check(
-      self, grad_output, indices, output_size, stride, padding, true);
   TensorArg self_arg{self, "self", 1}, indices_arg{indices, "indices", 2},
       grad_output_arg{grad_output, "grad_output", 3},
       grad_input_arg{grad_input, "grad_input", 4};
