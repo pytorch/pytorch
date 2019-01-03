@@ -496,6 +496,14 @@ class TestOperators(TestCase):
         y = torch.randn(1, 4, requires_grad=False).int()
         self.assertONNX(lambda x, y: torch.ne(x, y), (x, y))
 
+    def test_reducemax(self):
+        x = torch.randn(1, 2, 3, 4)
+        self.assertONNX(lambda x: torch.max(x), x)
+
+    def test_reducemin(self):
+        x = torch.randn(1, 2, 3, 4)
+        self.assertONNX(lambda x: torch.min(x), x)
+
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'
     _onnx_dep = no_onnx_dep_flag not in common.UNITTEST_ARGS

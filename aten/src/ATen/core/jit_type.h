@@ -916,7 +916,7 @@ template<> inline TypePtr getTypePtr<std::vector<at::Tensor>>() { return ListTyp
 template<> inline TypePtr getTypePtr<std::vector<double>>() { return ListType::ofFloats(); }
 template<> inline TypePtr getTypePtr<std::vector<int64_t>>() { return ListType::ofInts(); }
 
-CAFFE2_API TypePtr inferTypeFrom(const IValue& value);
+CAFFE2_API TypePtr incompleteInferTypeFrom(const IValue& value);
 
 using TypeEnv = std::unordered_map<std::string, TypePtr>;
 struct MatchTypeReturn {

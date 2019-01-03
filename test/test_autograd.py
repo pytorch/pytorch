@@ -2827,7 +2827,7 @@ def add_test(
                 # FixMe: run grad checks on inplace self
                 if is_inplace:
                     self_variable.requires_grad = False
-                # need to record this because methods can change the szie (e.g. unsqueeze)
+                # need to record this because methods can change the size (e.g. unsqueeze)
                 args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace, call_kwargs=kwargs)
                 self_tensor = deepcopy(self_variable.data)
                 args_tensor = deepcopy(unpack_variables(args_variable))
@@ -2925,7 +2925,7 @@ def add_test(
 
         setattr(TestAutograd, test_name, do_test)
 
-for test in method_tests:
+for test in method_tests():
     add_test(*test)
 
 if __name__ == '__main__':

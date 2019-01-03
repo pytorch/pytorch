@@ -80,15 +80,15 @@ template <typename func_t, typename vec_func_t>
 static inline void vectorized_binary_loop(char** data, int64_t n, func_t op, vec_func_t vop) {
   VEC_LOOP_HEADER(func_t, data)
   int64_t i = 0;
-  for (; i <= n - 2 * Vec::size; i += 2 * Vec::size) {
+  for (; i <= n - 2 * Vec::size(); i += 2 * Vec::size()) {
     auto a1 = Vec::loadu(in1_ptr + i * sizeof(scalar_t));
-    auto a2 = Vec::loadu(in1_ptr + (i + Vec::size) * sizeof(scalar_t));
+    auto a2 = Vec::loadu(in1_ptr + (i + Vec::size()) * sizeof(scalar_t));
     auto b1 = Vec::loadu(in2_ptr + i * sizeof(scalar_t));
-    auto b2 = Vec::loadu(in2_ptr + (i + Vec::size) * sizeof(scalar_t));
+    auto b2 = Vec::loadu(in2_ptr + (i + Vec::size()) * sizeof(scalar_t));
     auto out1 = vop(a1, b1);
     auto out2 = vop(a2, b2);
     out1.store(out_ptr + i * sizeof(scalar_t));
-    out2.store(out_ptr + (i + Vec::size) * sizeof(scalar_t));
+    out2.store(out_ptr + (i + Vec::size()) * sizeof(scalar_t));
   }
   int64_t strides[] = { sizeof(scalar_t), sizeof(scalar_t), sizeof(scalar_t) };
   binary_loop(data, strides, i, n, op);
@@ -100,13 +100,13 @@ static inline void vectorized_binary_loop_s1(char** data, int64_t n, func_t op, 
   VEC_LOOP_HEADER(func_t, data)
   int64_t i = 0;
   auto a = Vec(*(scalar_t*)in1_ptr);
-  for (; i <= n - 2 * Vec::size; i += 2 * Vec::size) {
+  for (; i <= n - 2 * Vec::size(); i += 2 * Vec::size()) {
     auto b1 = Vec::loadu(in2_ptr + i * sizeof(scalar_t));
-    auto b2 = Vec::loadu(in2_ptr + (i + Vec::size) * sizeof(scalar_t));
+    auto b2 = Vec::loadu(in2_ptr + (i + Vec::size()) * sizeof(scalar_t));
     auto out1 = vop(a, b1);
     auto out2 = vop(a, b2);
     out1.store(out_ptr + i * sizeof(scalar_t));
-    out2.store(out_ptr + (i + Vec::size) * sizeof(scalar_t));
+    out2.store(out_ptr + (i + Vec::size()) * sizeof(scalar_t));
   }
   int64_t strides[] = { sizeof(scalar_t), 0, sizeof(scalar_t) };
   binary_loop(data, strides, i, n, op);
@@ -118,13 +118,13 @@ static inline void vectorized_binary_loop_s2(char** data, int64_t n, func_t op, 
   VEC_LOOP_HEADER(func_t, data)
   int64_t i = 0;
   auto b = Vec(*(scalar_t*)in2_ptr);
-  for (; i <= n - 2 * Vec::size; i += 2 * Vec::size) {
+  for (; i <= n - 2 * Vec::size(); i += 2 * Vec::size()) {
     auto a1 = Vec::loadu(in1_ptr + i * sizeof(scalar_t));
-    auto a2 = Vec::loadu(in1_ptr + (i + Vec::size) * sizeof(scalar_t));
+    auto a2 = Vec::loadu(in1_ptr + (i + Vec::size()) * sizeof(scalar_t));
     auto out1 = vop(a1, b);
     auto out2 = vop(a2, b);
     out1.store(out_ptr + i * sizeof(scalar_t));
-    out2.store(out_ptr + (i + Vec::size) * sizeof(scalar_t));
+    out2.store(out_ptr + (i + Vec::size()) * sizeof(scalar_t));
   }
   int64_t strides[] = { sizeof(scalar_t), sizeof(scalar_t), 0 };
   binary_loop(data, strides, i, n, op);
@@ -137,27 +137,27 @@ static inline void reduction128(char** data, int64_t n, int64_t stride, func_t o
   char* in_ptr = data[1];
   Vec acc[4];
   for  (int j = 0; j < 4; j++) {
-    acc[j] = Vec::loadu(in_ptr + j * Vec::size * sizeof(scalar_t));
+    acc[j] = Vec::loadu(in_ptr + j * Vec::size() * sizeof(scalar_t));
   }
   for (int64_t i = 1; i < n; i++) {
     const char* ptr = in_ptr + stride * i;
-    acc[0] = vop(acc[0], Vec::loadu(ptr + (0 * Vec::size * sizeof(scalar_t))));
-    acc[1] = vop(acc[1], Vec::loadu(ptr + (1 * Vec::size * sizeof(scalar_t))));
-    acc[2] = vop(acc[2], Vec::loadu(ptr + (2 * Vec::size * sizeof(scalar_t))));
-    acc[3] = vop(acc[3], Vec::loadu(ptr + (3 * Vec::size * sizeof(scalar_t))));
+    acc[0] = vop(acc[0], Vec::loadu(ptr + (0 * Vec::size() * sizeof(scalar_t))));
+    acc[1] = vop(acc[1], Vec::loadu(ptr + (1 * Vec::size() * sizeof(scalar_t))));
+    acc[2] = vop(acc[2], Vec::loadu(ptr + (2 * Vec::size() * sizeof(scalar_t))));
+    acc[3] = vop(acc[3], Vec::loadu(ptr + (3 * Vec::size() * sizeof(scalar_t))));
   }
   if (reduce) {
-    scalar_t buffer[Vec::size];
+    scalar_t buffer[Vec::size()];
     acc[0] = vop(vop(acc[0], acc[1]), vop(acc[2], acc[3]));
     acc[0].store(buffer);
-    for (int j = 1; j < Vec::size; j++) {
+    for (int j = 1; j < Vec::size(); j++) {
       buffer[0] = op(buffer[0], buffer[j]);
     }
     auto dst = (scalar_t*)out_ptr;
     *dst = op(*dst, buffer[0]);
   } else {
     for (int j = 0; j < 4; j++) {
-      auto dst = out_ptr + j * Vec::size * sizeof(scalar_t);
+      auto dst = out_ptr + j * Vec::size() * sizeof(scalar_t);
       acc[j] = vop(acc[j], Vec::loadu(dst));
       acc[j].store(dst);
     }
@@ -177,14 +177,14 @@ static inline void UNARY_OUTER_LOOP(char* data[2], const int64_t strides[2], int
 template <typename func_t, typename vec_func_t>
 static inline void vectorized_inner_reduction(char** data, int64_t n, func_t op, vec_func_t vop) {
   VEC_HEADER(func_t)
-  int64_t vector_stride = 4 * Vec::size * sizeof(scalar_t);
-  int64_t count = n / (4 * Vec::size);
+  int64_t vector_stride = 4 * Vec::size() * sizeof(scalar_t);
+  int64_t count = n / (4 * Vec::size());
   if (count > 0) {
     reduction128(data, count, vector_stride, op, vop, /*reduce=*/true);
   }
   char* ptrs[3] = { data[0], data[0], data[1] };
   int64_t strides[] = { 0, 0, sizeof(scalar_t) };
-  binary_loop(ptrs, strides, count * 4 * Vec::size, n, op);
+  binary_loop(ptrs, strides, count * 4 * Vec::size(), n, op);
 }
 
 // computes the reduction out = op(out, in)
@@ -192,15 +192,15 @@ template <typename func_t, typename vec_func_t>
 static inline void vectorized_outer_reduction(char** data, int64_t inner_stride, int64_t size0, int64_t size1, func_t op, vec_func_t vop) {
   VEC_HEADER(func_t)
 
-  // reduce down each column of 4 * Vec::size elements (128 bytes)
+  // reduce down each column of 4 * Vec::size() elements (128 bytes)
   int64_t outer_stride[2] = { 128, 128 };
-  UNARY_OUTER_LOOP(data, outer_stride, size1 / (4 * Vec::size), [&] {
+  UNARY_OUTER_LOOP(data, outer_stride, size1 / (4 * Vec::size()), [&] {
     reduction128(data, size0, inner_stride, op, vop, /*reduce=*/false);
   });
 
   // reduce down the remaining columns
   int64_t step[] = { sizeof(scalar_t), sizeof(scalar_t) };
-  int64_t remaining = size1 % (4 * Vec::size);
+  int64_t remaining = size1 % (4 * Vec::size());
   UNARY_OUTER_LOOP(data, step, remaining, [&] {
     char* ptrs[3] = { data[0], data[0], data[1] };
     int64_t strides[] = { 0, 0, inner_stride };

@@ -4,14 +4,12 @@ import collections
 
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
-from caffe2.python import core, dyndep, workspace
+from caffe2.python import core, dyndep, utils, workspace
 from caffe2.quantization.server import utils as dnnlowp_utils
 from dnnlowp_test_utils import (
     check_quantized_results_close,
     generate_conv_inputs,
     generate_convnd_inputs,
-    nchw2nhwc,
-    nhwc2nchw,
 )
 from hypothesis import given
 
@@ -229,8 +227,8 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
             fall_back_to_NCHW = "DNNLOWP" not in engine
 
             if fall_back_to_NCHW:
-                X_nchw = nhwc2nchw(X)
-                W_nchw = nhwc2nchw(W)
+                X_nchw = utils.NHWC2NCHW(X)
+                W_nchw = utils.NHWC2NCHW(W)
             do_quantize = "DNNLOWP" in engine
             do_dequantize = "DNNLOWP" in engine
             do_prepack_weight = engine == "DNNLOWP" and prepack_weight
@@ -303,7 +301,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
             self.ws.run(net)
             Y = self.ws.blobs["Y"].fetch()
             if fall_back_to_NCHW:
-                Y = nchw2nhwc(Y)
+                Y = utils.NCHW2NHWC(Y)
             outputs.append(Output(Y=Y, op_type=op_type, engine=engine, order=order))
 
         check_quantized_results_close(outputs, symmetric=preserve_activation_sparsity)

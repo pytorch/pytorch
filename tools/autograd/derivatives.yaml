@@ -138,7 +138,7 @@
 - name: alias(Tensor self)
   self: grad
 
-- name: as_strided(Tensor self, IntList size, IntList stride, int64_t storage_offset)
+- name: as_strided(Tensor self, IntList size, IntList stride, int64_t? storage_offset)
   self: as_strided_backward(grad, TensorGeometry(self), size, stride, storage_offset)
 
 - name: asin(Tensor self)
@@ -189,6 +189,10 @@
 
 - name: cholesky(Tensor self, bool upper)
   self: cholesky_backward(grad, upper, result)
+
+- name: cholesky_solve(Tensor self, Tensor input2, bool upper)
+  self: not_implemented("cholesky_solve")
+  input2: not_implemented("cholesky_solve")
 
 # For clamp, gradient is not defined at the boundaries. But empirically it's helpful
 # to be able to get gradient on min and max, so we return the subgradient 1 for these cases.
@@ -557,7 +561,7 @@
 - name: norm(Tensor self, Scalar p)
   self: norm_backward(grad, self, p, result)
 
-- name: norm(Tensor self, Scalar p, int64_t dim, bool keepdim)
+- name: norm(Tensor self, Scalar? p, int64_t dim, bool keepdim)
   self: norm_backward(grad, self, p, result, dim, keepdim)
 
 - name: _pdist_forward(Tensor self, double p)
@@ -598,10 +602,6 @@
 
 - name: potri(Tensor self, bool upper)
   self: not_implemented("potri")
-
-- name: potrs(Tensor self, Tensor input2, bool upper)
-  self: not_implemented("potrs")
-  input2: not_implemented("potrs")
 
 - name: pow(Tensor self, Scalar exponent)
   self: pow_backward(grad, self, exponent)

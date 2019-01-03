@@ -22,7 +22,9 @@ public:
 
 template <>
 struct Vec256<int64_t> : public Vec256i {
-  static constexpr int size = 4;
+  static constexpr int size() {
+    return 4;
+  }
   using Vec256i::Vec256i;
   Vec256() {}
   Vec256(int64_t v) { values = _mm256_set1_epi64x(v); }
@@ -31,7 +33,7 @@ struct Vec256<int64_t> : public Vec256i {
   }
   template <int64_t mask>
   static Vec256<int64_t> blend(Vec256<int64_t> a, Vec256<int64_t> b) {
-    __at_align32__ int64_t tmp_values[size];
+    __at_align32__ int64_t tmp_values[size()];
     a.store(tmp_values);
     if (mask & 0x01)
       tmp_values[0] = _mm256_extract_epi64(b.values, 0);
@@ -51,7 +53,7 @@ struct Vec256<int64_t> : public Vec256i {
     return Vec256<int64_t>(base, base + step, base + 2 * step, base + 3 * step);
   }
   static Vec256<int64_t>
-  set(Vec256<int64_t> a, Vec256<int64_t> b, int64_t count = size) {
+  set(Vec256<int64_t> a, Vec256<int64_t> b, int64_t count = size()) {
     switch (count) {
       case 0:
         return a;
@@ -68,15 +70,15 @@ struct Vec256<int64_t> : public Vec256i {
     return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
   }
   static Vec256<int64_t> loadu(const void* ptr, int64_t count) {
-    __at_align32__ int64_t tmp_values[size];
+    __at_align32__ int64_t tmp_values[size()];
     std::memcpy(tmp_values, ptr, count * sizeof(int64_t));
     return loadu(tmp_values);
   }
-  void store(void* ptr, int count = size) const {
-    if (count == size) {
+  void store(void* ptr, int count = size()) const {
+    if (count == size()) {
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
     } else if (count > 0) {
-      __at_align32__ int64_t tmp_values[size];
+      __at_align32__ int64_t tmp_values[size()];
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
       std::memcpy(ptr, tmp_values, count * sizeof(int64_t));
     }
@@ -117,7 +119,9 @@ struct Vec256<int64_t> : public Vec256i {
 
 template <>
 struct Vec256<int32_t> : public Vec256i {
-  static constexpr int size = 8;
+  static constexpr int size() {
+    return 8;
+  }
   using Vec256i::Vec256i;
   Vec256() {}
   Vec256(int32_t v) { values = _mm256_set1_epi32(v); }
@@ -139,7 +143,7 @@ struct Vec256<int32_t> : public Vec256i {
       base + 4 * step, base + 5 * step, base + 6 * step, base + 7 * step);
   }
   static Vec256<int32_t>
-  set(Vec256<int32_t> a, Vec256<int32_t> b, int32_t count = size) {
+  set(Vec256<int32_t> a, Vec256<int32_t> b, int32_t count = size()) {
     switch (count) {
       case 0:
         return a;
@@ -164,15 +168,15 @@ struct Vec256<int32_t> : public Vec256i {
     return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
   }
   static Vec256<int32_t> loadu(const void* ptr, int32_t count) {
-    __at_align32__ int32_t tmp_values[size];
+    __at_align32__ int32_t tmp_values[size()];
     std::memcpy(tmp_values, ptr, count * sizeof(int32_t));
     return loadu(tmp_values);
   }
-  void store(void* ptr, int count = size) const {
-    if (count == size) {
+  void store(void* ptr, int count = size()) const {
+    if (count == size()) {
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
     } else if (count > 0) {
-      __at_align32__ int32_t tmp_values[size];
+      __at_align32__ int32_t tmp_values[size()];
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
       std::memcpy(ptr, tmp_values, count * sizeof(int32_t));
     }
@@ -215,7 +219,7 @@ void convert(const int32_t *src, float *dst, int64_t n) {
 #ifndef _MSC_VER  
 # pragma unroll  
 #endif
-  for (i = 0; i <= (n - Vec256<int32_t>::size); i += Vec256<int32_t>::size) {
+  for (i = 0; i <= (n - Vec256<int32_t>::size()); i += Vec256<int32_t>::size()) {
     auto input_vec = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + i));
     auto output_vec = _mm256_cvtepi32_ps(input_vec);
     _mm256_storeu_ps(reinterpret_cast<float*>(dst + i), output_vec);
@@ -235,7 +239,7 @@ void convert(const int32_t *src, double *dst, int64_t n) {
 #ifndef _MSC_VER  
 # pragma unroll  
 #endif
-  for (i = 0; i <= (n - Vec256<double>::size); i += Vec256<double>::size) {
+  for (i = 0; i <= (n - Vec256<double>::size()); i += Vec256<double>::size()) {
     auto input_128_vec = _mm_loadu_si128(reinterpret_cast<const __m128i*>(src + i));
     auto output_vec = _mm256_cvtepi32_pd(input_128_vec);
     _mm256_storeu_pd(reinterpret_cast<double*>(dst + i), output_vec);
@@ -250,7 +254,9 @@ void convert(const int32_t *src, double *dst, int64_t n) {
 
 template <>
 struct Vec256<int16_t> : public Vec256i {
-  static constexpr int size = 16;
+  static constexpr int size() {
+    return 16;
+  }
   using Vec256i::Vec256i;
   Vec256() {}
   Vec256(int16_t v) { values = _mm256_set1_epi16(v); }
@@ -263,7 +269,7 @@ struct Vec256<int16_t> : public Vec256i {
   }
   template <int64_t mask>
   static Vec256<int16_t> blend(Vec256<int16_t> a, Vec256<int16_t> b) {
-    __at_align32__ int16_t tmp_values[size];
+    __at_align32__ int16_t tmp_values[size()];
     a.store(tmp_values);
     if (mask & 0x01)
       tmp_values[0] = _mm256_extract_epi16(b.values, 0);
@@ -311,7 +317,7 @@ struct Vec256<int16_t> : public Vec256i {
       base + 12 * step, base + 13 * step, base + 14 * step, base + 15 * step);
   }
   static Vec256<int16_t>
-  set(Vec256<int16_t> a, Vec256<int16_t> b, int16_t count = size) {
+  set(Vec256<int16_t> a, Vec256<int16_t> b, int16_t count = size()) {
     switch (count) {
       case 0:
         return a;
@@ -352,15 +358,15 @@ struct Vec256<int16_t> : public Vec256i {
     return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
   }
   static Vec256<int16_t> loadu(const void* ptr, int16_t count) {
-    __at_align32__ int16_t tmp_values[size];
+    __at_align32__ int16_t tmp_values[size()];
     std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
     return loadu(tmp_values);
   }
-  void store(void* ptr, int count = size) const {
-    if (count == size) {
+  void store(void* ptr, int count = size()) const {
+    if (count == size()) {
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
     } else if (count > 0) {
-      __at_align32__ int16_t tmp_values[size];
+      __at_align32__ int16_t tmp_values[size()];
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
       std::memcpy(ptr, tmp_values, count * sizeof(int16_t));
     }
@@ -462,11 +468,11 @@ Vec256<int16_t> inline operator*(const Vec256<int16_t>& a, const Vec256<int16_t>
 
 template <typename T>
 Vec256<T> inline intdiv_256(const Vec256<T>& a, const Vec256<T>& b) {
-  T values_a[Vec256<T>::size];
-  T values_b[Vec256<T>::size];
+  T values_a[Vec256<T>::size()];
+  T values_b[Vec256<T>::size()];
   a.store(values_a);
   b.store(values_b);
-  for (int i = 0; i != Vec256<T>::size; i++) {
+  for (int i = 0; i != Vec256<T>::size(); i++) {
     values_a[i] /= values_b[i];
   }
   return Vec256<T>::loadu(values_a);

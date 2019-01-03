@@ -881,7 +881,9 @@ def clamp_max(g, self, max):
 
 # torch.max (same for torch.min) actually has two interfaces smashed together:
 # torch.max(x, dim, keepdim) and torch.max(x, y)
-def max(g, self, dim_or_y, keepdim=None):
+def max(g, self, dim_or_y=None, keepdim=None):
+    if dim_or_y is None and keepdim is None:
+        return g.op("ReduceMax", self, keepdims_i=0)
     if keepdim is None:
         return g.op("Max", self, dim_or_y)
     else:
@@ -896,7 +898,9 @@ def max(g, self, dim_or_y, keepdim=None):
                     outputs=2)
 
 
-def min(g, self, dim_or_y, keepdim=None):
+def min(g, self, dim_or_y=None, keepdim=None):
+    if dim_or_y is None and keepdim is None:
+        return g.op("ReduceMin", self, keepdims_i=0)
     if keepdim is None:
         return g.op("Min", self, dim_or_y)
     else:
@@ -1149,6 +1153,12 @@ def pixel_shuffle(g, self, upscale_factor):
     return view(g, after_transpose,
                 [-1, output_channel, dims[2] * upscale_factor, dims[3] *
                  upscale_factor])
+
+
+@parse_args('v', 'i', 'v', 'v', 'f', 'i')
+def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
+    return g.op("ATen", input, weight, bias, num_groups_i=num_groups,
+                eps_f=eps, cudnn_enabled_i=cudnn_enabled, operator_s="group_norm")
 
 
 def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,

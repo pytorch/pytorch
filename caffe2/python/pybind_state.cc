@@ -1618,7 +1618,10 @@ void addGlobalMethods(py::module& m) {
           tensor_shapes.emplace(
               it.first, CreateTensorShape(it.second, TensorProto::FLOAT));
         }
-        OnnxifiTransformer ts(infer_shapes, debug_builder);
+        OnnxifiTransformerOptions opts;
+        opts.infer_shapes = infer_shapes;
+        opts.debug = debug_builder;
+        OnnxifiTransformer ts(opts);
         ts.Transform(
             GetCurrentWorkspace(),
             &pred_net,

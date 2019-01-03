@@ -539,6 +539,13 @@ cholesky(upper=False) -> Tensor
 See :func:`torch.cholesky`
 """)
 
+add_docstr_all('cholesky_solve',
+               r"""
+cholesky_solve(input2, upper=False) -> Tensor
+
+See :func:`torch.cholesky_solve`
+""")
+
 add_docstr_all('clamp',
                r"""
 clamp(min, max) -> Tensor
@@ -1698,13 +1705,6 @@ potri(upper=True) -> Tensor
 See :func:`torch.potri`
 """)
 
-add_docstr_all('potrs',
-               r"""
-potrs(input2, upper=True) -> Tensor
-
-See :func:`torch.potrs`
-""")
-
 add_docstr_all('pow',
                r"""
 pow(exponent) -> Tensor
@@ -2831,6 +2831,18 @@ Args:
     other (:class:`torch.Tensor`): The result tensor has the same size
         as :attr:`other`.
 """)
+
+add_docstr_all('sum_to_size',
+               r"""
+sum_to_size(*size) -> Tensor
+
+Sum ``this`` tensor to :attr:`size`.
+:attr:`size` must be broadcastable to ``this`` tensor size.
+Args:
+    other (:class:`torch.Tensor`): The result tensor has the same size
+        as :attr:`other`.
+""")
+
 
 add_docstr_all('zero_',
                r"""
