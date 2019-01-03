@@ -1108,7 +1108,10 @@ RegisterOperators reg2({
     DEFINE_BINARY_OP(aten::sub, a - b),
     DEFINE_BINARY_OP(aten::mul, a* b),
     DEFINE_BINARY_OP(aten::pow, static_cast<decltype(a)>(pow(a, b))),
-
+    // min and max are in prim:: because there is a difference between
+    // the python builtin 'min' and 'torch.min'
+    DEFINE_BINARY_OP(prim::min, a < b ? a : b),
+    DEFINE_BINARY_OP(prim::max, a > b ? a : b),
     // Pass in two ops for handling int and float separately as % in C++ only
     // works for int The modulus calculation is different between C++ and Python
     // (on negative), we preserve the python behavior as it's more common and
