@@ -144,7 +144,7 @@ void fractional_max_pool2d_out_cpu_template(
   auto input = input_.contiguous();
 
   int ndims = input.ndimension();
-  AT_CHECK((ndims == 3 || ndims == 4),
+  AT_CHECK(input.numel() > 0 && (ndims == 3 || ndims == 4),
 		"non-empty 3D or 4D (batch mode) tensor expected for input, but got: ",
     ndims);
 
@@ -292,7 +292,8 @@ Tensor& fractional_max_pool2d_backward_out_cpu_template(
     "fractional_max_pool2d_backward(): gradOutput height unexpected");
 
   /* resize */
-  gradInput = at::zeros_like(input);
+  gradInput.resize_as_(input);
+  gradInput.zero_();
 
   /* backprop */
   AT_DISPATCH_FLOATING_TYPES(
@@ -377,7 +378,7 @@ Tensor fractional_max_pool2d_backward_cpu(
   IntList output_size,
   const at::Tensor& indices)
 {
-  Tensor gradInput = at::zeros_like(input);
+  Tensor gradInput = at::empty({0}, input.options());
   fractional_max_pool2d_backward_out_cpu_template(
     input,
     gradOutput_,
