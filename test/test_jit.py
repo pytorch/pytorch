@@ -2060,10 +2060,7 @@ class TestJit(JitTestCase):
         with warnings.catch_warnings(record=True) as script_warns:
             scripted_fn(torch.ones(1))
 
-        self.assertEqual(warns[0].category, script_warns[0].category)
-        self.assertEqual(warns[0].message.args[0], script_warns[0].message.args[0])
-        self.assertEqual(warns[0].filename, script_warns[0].filename)
-        self.assertEqual(warns[0].lineno, script_warns[0].lineno)
+        self.assertEqual(str(warns[0]), str(script_warns[0]))
 
     def test_warning_with_no_file(self):
         class M(torch.jit.ScriptModule):
@@ -2071,8 +2068,8 @@ class TestJit(JitTestCase):
                 super(M, self).__init__(False)
                 self.define("""
                 def forward(self, a):
-                warnings.warn("oh no")
-                return a
+                    warnings.warn("oh no")
+                    return a
                 """)
         m = M()
         with warnings.catch_warnings(record=True) as script_warns:
