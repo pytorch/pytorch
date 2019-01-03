@@ -2196,8 +2196,8 @@ class TestNN(NNTestCase):
         y_soft.sum().backward()
         y_hard.sum().backward()
 
-        # 2eps = 1x addition + 1x subtraction. 
-        tol = 2*torch.finfo(dtype).eps
+        # 2eps = 1x addition + 1x subtraction.
+        tol = 2 * torch.finfo(dtype).eps
         self.assertAlmostEqual(logits_soft.grad, logits_hard.grad, delta=tol)
 
     @repeat_test_for_types(NO_HALF_TENSORTYPES)
