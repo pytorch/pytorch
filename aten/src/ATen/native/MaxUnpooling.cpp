@@ -1,12 +1,12 @@
 #include <tuple>
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
 
 namespace at {
 namespace native {
 
 template <typename scalar_t>
-Tensor MaxUnpooling2d_forward_out_cpu_(
+Tensor max_unpooling2d_forward_out_cpu_frame(
     Tensor& output,
     const Tensor& input,
     const Tensor& indices,
@@ -22,36 +22,36 @@ Tensor MaxUnpooling2d_forward_out_cpu_(
     dimh++;
     dimw++;
   }
-  auto numChannels = input.size(dimc);
-  auto inputHeight = input.size(dimh);
-  auto inputWidth = input.size(dimw);
+  int64_t numChannels = input.size(dimc);
+  int64_t inputHeight = input.size(dimh);
+  int64_t inputWidth = input.size(dimw);
 
   auto* rawInput = input.data<scalar_t>();
   auto* rawIndices = indices.data<int64_t>();
   auto* rawOutput = output.data<scalar_t>();
 
-  for (auto n = 0; n < numBatch; n++) {
-    auto nOutputOffset = n * numChannels * outputWidth * outputHeight;
-    auto nInputOffset = n * numChannels * inputWidth * inputHeight;
-    int k;
-    int has_error = 0;
-    int error_index = 0;
+  for (int64_t n = 0; n < numBatch; n++) {
+    int64_t nOutputOffset = n * numChannels * outputWidth * outputHeight;
+    int64_t nInputOffset = n * numChannels * inputWidth * inputHeight;
+    int64_t k;
+    bool has_error = false;
+    int64_t error_index = 0;
 #pragma omp parallel for private(k)
     for (k = 0; k < numChannels; k++) {
-      auto finalOutputOffset = nOutputOffset + k * outputWidth * outputHeight;
-      auto finalInputOffset = nInputOffset + k * inputWidth * inputHeight;
-      auto* output_p_k = rawOutput + finalOutputOffset;
-      auto* input_p_k = rawInput + finalInputOffset;
-      auto* ind_p_k = rawIndices + finalInputOffset;
+      int64_t finalOutputOffset = nOutputOffset + k * outputWidth * outputHeight;
+      int64_t finalInputOffset = nInputOffset + k * inputWidth * inputHeight;
+      scalar_t* output_p_k = rawOutput + finalOutputOffset;
+      scalar_t* input_p_k = rawInput + finalInputOffset;
+      int64_t* ind_p_k = rawIndices + finalInputOffset;
 
-      int maxp;
-      for (auto i = 0; i < inputHeight; i++) {
-        for (auto j = 0; j < inputWidth; j++) {
+      int64_t maxp;
+      for (int64_t i = 0; i < inputHeight; i++) {
+        for (int64_t j = 0; j < inputWidth; j++) {
           maxp = ind_p_k[i * inputWidth + j];
           if (maxp < 0 || maxp >= outputWidth * outputHeight) {
 #pragma omp critical
             {
-              has_error = 1;
+              has_error = true;
               error_index = maxp;
             }
           } else {
@@ -73,49 +73,46 @@ Tensor MaxUnpooling2d_forward_out_cpu_(
   return output;
 }
 
-Tensor& MaxUnpooling2d_forward_out_cpu(
+Tensor& max_unpooling2d_forward_out_cpu(
     Tensor& output,
     const Tensor& self,
     const Tensor& indices,
     IntList output_size) {
   AT_CHECK(
+      indices.scalar_type() == at::ScalarType::Long,
+      "elements in indices should be type Long");
+  AT_CHECK(
       output_size.size() == 2,
       "There should be exactly two elements (height, width) in output_size");
   AT_CHECK(
       (self.ndimension() == 3 || self.ndimension() == 4),
-      "Input to MaxUnpooling2d should be a 3d or 4d Tensor");
+      "Input to max_unpooling2d should be a 3d or 4d Tensor");
   AT_CHECK(
       self.sizes() == indices.sizes(),
       "Shape of indices should match shape of input");
 
-  // is_empty check
   AT_CHECK(self.numel() > 0, "Input must be non-empty");
 
   auto outputHeight = output_size[0];
   auto outputWidth = output_size[1];
 
-  int64_t numBatch = 1;
-  int64_t numChannels;
-  if (self.ndimension() == 4) {
-    numBatch = self.size(0);
-    numChannels = self.size(1);
-  } else {
-    numChannels = self.size(0);
-  }
-
   auto self_contiguous = self.contiguous();
   auto indices_contiguous = indices.contiguous();
 
   if (self_contiguous.ndimension() == 3) {
+    int64_t numBatch = 1;
+    int64_t numChannels = self.size(0);
     output.resize_({numChannels, outputHeight, outputWidth});
   } else {
+    int64_t numBatch = self.size(0);
+    int64_t numChannels = self.size(1);
     output.resize_({numBatch, numChannels, outputHeight, outputWidth});
   }
   output.zero_();
 
   AT_DISPATCH_FLOATING_TYPES(
-      self.type(), "MaxUnpooling2d_forward_out_cpu_", ([&] {
-        MaxUnpooling2d_forward_out_cpu_<scalar_t>(
+      self.type(), "max_unpooling2d_forward_out_cpu_frame", ([&] {
+        max_unpooling2d_forward_out_cpu_frame<scalar_t>(
             output,
             self_contiguous,
             indices_contiguous,
@@ -125,27 +122,19 @@ Tensor& MaxUnpooling2d_forward_out_cpu(
   return output;
 };
 
-Tensor MaxUnpooling2d_forward_cpu(
+Tensor max_unpooling2d_forward_cpu(
     const Tensor& self,
     const Tensor& indices,
     IntList output_size) {
-  AT_CHECK(
-      (self.ndimension() == 3 || self.ndimension() == 4),
-      "Input to MaxUnpooling2d should be a 4d or 5d Tensor",
-      self.sizes());
-  AT_CHECK(
-      output_size.size() == 2,
-      "There should be exactly two elements (height, width) in output_size");
-
-  auto output = at::zeros(
-      {self.size(0), self.size(1), output_size[0], output_size[1]},
+  auto output = at::empty(
+      {0},
       self.options());
-  MaxUnpooling2d_forward_out_cpu(output, self, indices, output_size);
+  max_unpooling2d_forward_out_cpu(output, self, indices, output_size);
   return output;
 }
 
 template <typename scalar_t>
-Tensor MaxUnpooling3d_forward_out_cpu_(
+Tensor max_unpooling3d_forward_out_cpu_frame(
     Tensor& output,
     const Tensor& input,
     const Tensor& indices,
@@ -158,10 +147,10 @@ Tensor MaxUnpooling3d_forward_out_cpu_(
     int64_t pT,
     int64_t pW,
     int64_t pH) {
-  auto nBatch = 1;
-  auto dimw = 3;
-  auto dimh = 2;
-  auto dimt = 1;
+  int64_t nBatch = 1;
+  int64_t dimw = 3;
+  int64_t dimh = 2;
+  int64_t dimt = 1;
 
   if (input.ndimension() == 5) {
     nBatch = input.size(0);
@@ -170,39 +159,39 @@ Tensor MaxUnpooling3d_forward_out_cpu_(
     dimt++;
   }
 
-  auto nSlices = input.size(dimt - 1);
-  auto iT = input.size(dimt);
-  auto iH = input.size(dimh);
-  auto iW = input.size(dimw);
+  int64_t nSlices = input.size(dimt - 1);
+  int64_t iT = input.size(dimt);
+  int64_t iH = input.size(dimh);
+  int64_t iW = input.size(dimw);
 
-  auto* input_data = input.data<scalar_t>();
-  auto* output_data = output.data<scalar_t>();
-  auto* indices_data = indices.data<int64_t>();
+  scalar_t* input_data = input.data<scalar_t>();
+  scalar_t* output_data = output.data<scalar_t>();
+  int64_t* indices_data = indices.data<int64_t>();
 
-  for (auto p = 0; p < nBatch; p++) {
-    auto inputOffset = p * nSlices * iT * iW * iH;
-    auto outputOffset = p * nSlices * oT * oW * oH;
-    int k;
-    int has_error = 0;
+  for (int64_t p = 0; p < nBatch; p++) {
+    int64_t inputOffset = p * nSlices * iT * iW * iH;
+    int64_t outputOffset = p * nSlices * oT * oW * oH;
+    int64_t k;
+    bool has_error = false;
     int error_index = 0;
 #pragma omp parallel for private(k)
     for (k = 0; k < nSlices; k++) {
-      auto finalInputOffset = inputOffset + k * iT * iW * iH;
-      auto finalOutputOffset = outputOffset + k * oT * oW * oH;
+      int64_t finalInputOffset = inputOffset + k * iT * iW * iH;
+      int64_t finalOutputOffset = outputOffset + k * oT * oW * oH;
 
-      auto* output_p_k = output_data + finalOutputOffset;
-      auto* input_p_k = input_data + finalInputOffset;
-      auto* ind_p_k = indices_data + finalInputOffset;
+      scalar_t* output_p_k = output_data + finalOutputOffset;
+      scalar_t* input_p_k = input_data + finalInputOffset;
+      int64_t* ind_p_k = indices_data + finalInputOffset;
       int maxp;
-      for (auto t = 0; t < iT; t++) {
-        for (auto i = 0; i < iH; i++) {
-          for (auto j = 0; j < iW; j++) {
-            auto index = t * iH * iW + i * iW + j;
+      for (int64_t t = 0; t < iT; t++) {
+        for (int64_t i = 0; i < iH; i++) {
+          for (int64_t j = 0; j < iW; j++) {
+            int64_t index = t * iH * iW + i * iW + j;
             maxp = ind_p_k[index];
             if (maxp < 0 || maxp >= oT * oW * oH) {
 #pragma omp critical
               {
-                has_error = 1;
+                has_error = true;
                 error_index = maxp;
               }
             } else {
@@ -224,7 +213,7 @@ Tensor MaxUnpooling3d_forward_out_cpu_(
   return output;
 }
 
-void MaxUnpooling3d_shape_check(
+void max_unpooling3d_shape_check(
     const Tensor& input,
     const Tensor& gradOutput,
     const Tensor& indices,
@@ -232,7 +221,7 @@ void MaxUnpooling3d_shape_check(
     IntList stride,
     IntList padding,
     bool check_grad) {
-  // is_empty check
+
   AT_CHECK(input.numel() > 0, "Input must be non-empty");
   AT_CHECK(
       (input.ndimension() == 4 || input.ndimension() == 5),
@@ -272,7 +261,7 @@ void MaxUnpooling3d_shape_check(
   }
 }
 
-Tensor& MaxUnpooling3d_forward_out_cpu(
+Tensor& max_unpooling3d_forward_out_cpu(
     Tensor& output,
     const Tensor& self,
     const Tensor& indices,
@@ -280,12 +269,11 @@ Tensor& MaxUnpooling3d_forward_out_cpu(
     IntList stride,
     IntList padding) {
   AT_CHECK(
-      (output.ndimension() == 4 || output.ndimension() == 5),
-      "Output to MaxUnpooling2d should be a 4d or 5d Tensor",
-      output.sizes());
+      indices.scalar_type() == at::ScalarType::Long,
+      "elements in indices should be type Long");
   AT_CHECK(
       (self.ndimension() == 4 || self.ndimension() == 5),
-      "Input to MaxUnpooling2d should be a 4d or 5d Tensor",
+      "Input to max_unpooling3d should be a 4d or 5d Tensor",
       self.sizes());
   AT_CHECK(
       output_size.size() == 3,
@@ -299,7 +287,7 @@ Tensor& MaxUnpooling3d_forward_out_cpu(
   AT_CHECK(
       self.sizes() == indices.sizes(),
       "Shape of indices should match shape of input");
-  MaxUnpooling3d_shape_check(
+  max_unpooling3d_shape_check(
       self, at::empty({}), indices, output_size, stride, padding, false);
 
   if (self.ndimension() == 5) {
@@ -315,8 +303,8 @@ Tensor& MaxUnpooling3d_forward_out_cpu(
   output.zero_();
 
   AT_DISPATCH_FLOATING_TYPES(
-      self.type(), "MaxUnpooling3d_forward_out_cpu_", ([&] {
-        MaxUnpooling3d_forward_out_cpu_<scalar_t>(
+      self.type(), "max_unpooling3d_forward_out_cpu_frame", ([&] {
+        max_unpooling3d_forward_out_cpu_frame<scalar_t>(
             output,
             self.contiguous(),
             indices.contiguous(),
@@ -333,7 +321,7 @@ Tensor& MaxUnpooling3d_forward_out_cpu(
   return output;
 }
 
-Tensor MaxUnpooling3d_forward_cpu(
+Tensor max_unpooling3d_forward_cpu(
     const Tensor& self,
     const Tensor& indices,
     IntList output_size,
@@ -341,25 +329,21 @@ Tensor MaxUnpooling3d_forward_cpu(
     IntList padding) {
   AT_CHECK(
       (self.ndimension() == 4 || self.ndimension() == 5),
-      "Input to MaxUnpooling2d should be a 4d or 5d Tensor",
+      "Input to max_unpooling2d should be a 4d or 5d Tensor",
       self.sizes());
   AT_CHECK(
       output_size.size() == 3,
       "There should be exactly three elements (depth, height, width) in output_size");
-  auto output = at::zeros(
-      {self.size(0),
-       self.size(1),
-       output_size[0],
-       output_size[1],
-       output_size[2]},
+  auto output = at::empty(
+      {0},
       self.options());
-  MaxUnpooling3d_forward_out_cpu(
+  max_unpooling3d_forward_out_cpu(
       output, self, indices, output_size, stride, padding);
   return output;
 }
 
 template <typename scalar_t>
-static void MaxUnpooling2d_backward_out_cpu_(
+static void max_unpooling2d_backward_out_cpu_frame(
     scalar_t* gradInput_p,
     scalar_t* gradOutput_p,
     int64_t* ind_p,
@@ -375,7 +359,7 @@ static void MaxUnpooling2d_backward_out_cpu_(
     scalar_t* gradOutput_p_k = gradOutput_p + k * owidth * oheight;
     int64_t* ind_p_k = ind_p + k * iwidth * iheight;
 
-    int i, j;
+    int64_t i, j;
     int64_t maxp;
     for (i = 0; i < iheight; i++) {
       for (j = 0; j < iwidth; j++) {
@@ -396,7 +380,7 @@ static void MaxUnpooling2d_backward_out_cpu_(
   }
 }
 
-Tensor& MaxUnpooling2d_backward_out_cpu(
+Tensor& max_unpooling2d_backward_out_cpu(
     Tensor& grad_input,
     const Tensor& grad_output,
     const Tensor& self,
@@ -408,7 +392,9 @@ Tensor& MaxUnpooling2d_backward_out_cpu(
   int nslices;
   int iheight;
   int iwidth;
-
+  AT_CHECK(
+      indices.scalar_type() == at::ScalarType::Long,
+      "elements in indices should be type Long");
   AT_CHECK(
       self.sizes() == indices.sizes(), "Input shape must match indices shape");
 
@@ -454,8 +440,8 @@ Tensor& MaxUnpooling2d_backward_out_cpu(
     auto inputOffset = p * nslices * iheight * iwidth;
     auto outputOffset = p * nslices * oheight * owidth;
     AT_DISPATCH_FLOATING_TYPES(
-        self.type(), "MaxUnpooling2d_backward_out_cpu_", ([&] {
-          MaxUnpooling2d_backward_out_cpu_<scalar_t>(
+        self.type(), "max_unpooling2d_backward_out_cpu_frame", ([&] {
+          max_unpooling2d_backward_out_cpu_frame<scalar_t>(
               grad_input.data<scalar_t>() + inputOffset,
               gradOutput.data<scalar_t>() + outputOffset,
               indices.data<int64_t>() + inputOffset,
@@ -469,19 +455,19 @@ Tensor& MaxUnpooling2d_backward_out_cpu(
   return grad_input;
 }
 
-Tensor MaxUnpooling2d_backward_cpu(
+Tensor max_unpooling2d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& self,
     const Tensor& indices,
     IntList output_size) {
-  auto grad_input = at::zeros_like(self);
-  MaxUnpooling2d_backward_out_cpu(
+  auto grad_input = at::empty_like(self);
+  max_unpooling2d_backward_out_cpu(
       grad_input, grad_output, self, indices, output_size);
   return grad_input;
 }
 
 template <typename scalar_t>
-static void MaxUnpooling3d_backward_out_cpu_(
+static void max_unpooling3d_backward_out_cpu_frame(
     scalar_t* gradInput_p,
     scalar_t* gradOutput_p,
     int64_t* ind_p,
@@ -523,7 +509,7 @@ static void MaxUnpooling3d_backward_out_cpu_(
     }
   }
 }
-Tensor& MaxUnpooling3d_backward_out_cpu(
+Tensor& max_unpooling3d_backward_out_cpu(
     Tensor& grad_input,
     const Tensor& grad_output,
     const Tensor& self,
@@ -531,6 +517,9 @@ Tensor& MaxUnpooling3d_backward_out_cpu(
     IntList output_size,
     IntList stride,
     IntList padding) {
+  AT_CHECK(
+      indices.scalar_type() == at::ScalarType::Long,
+      "elements in indices should be type Long");
   AT_CHECK(
       output_size.size() == 3,
       "There should be exactly three elements (depth, height, width) in output_size");
@@ -552,7 +541,7 @@ Tensor& MaxUnpooling3d_backward_out_cpu(
   int iH;
   int iW;
 
-  MaxUnpooling3d_shape_check(
+  max_unpooling3d_shape_check(
       self, grad_output, indices, output_size, stride, padding, true);
 
   // TODO (from THNN): check gradOutput shape
@@ -582,8 +571,8 @@ Tensor& MaxUnpooling3d_backward_out_cpu(
     int inputOffset = p * nslices * iT * iH * iW;
     int outputOffset = p * nslices * oT * oT * oW;
     AT_DISPATCH_FLOATING_TYPES(
-        self.type(), "MaxUnpooling3d_backward_out_cpu_", ([&] {
-          MaxUnpooling3d_backward_out_cpu_<scalar_t>(
+        self.type(), "max_unpooling3d_backward_out_cpu_frame", ([&] {
+          max_unpooling3d_backward_out_cpu_frame<scalar_t>(
               grad_input.data<scalar_t>() + inputOffset,
               grad_output_contiguous.data<scalar_t>() + outputOffset,
               indices_contiguous.data<int64_t>() + inputOffset,
@@ -599,15 +588,15 @@ Tensor& MaxUnpooling3d_backward_out_cpu(
   return grad_input;
 }
 
-Tensor MaxUnpooling3d_backward_cpu(
+Tensor max_unpooling3d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& self,
     const Tensor& indices,
     IntList output_size,
     IntList stride,
     IntList padding) {
-  auto grad_input = at::zeros_like(self);
-  MaxUnpooling3d_backward_out_cpu(
+  auto grad_input = at::empty_like(self);
+  max_unpooling3d_backward_out_cpu(
       grad_input, grad_output, self, indices, output_size, stride, padding);
   return grad_input;
 }
