@@ -190,12 +190,6 @@
 
 # Padding
 
-- name: _thnn_reflection_pad1d(Tensor self, IntList[2] padding)
-  cname: TemporalReflectionPadding
-  scalar_check:
-    output: 'false'
-    grad_input: 'false'
-
 - name: _thnn_reflection_pad2d(Tensor self, IntList[4] padding)
   cname: SpatialReflectionPadding
   scalar_check:
