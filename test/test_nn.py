@@ -2196,13 +2196,14 @@ class TestNN(NNTestCase):
         y_soft.sum().backward()
         y_hard.sum().backward()
 
-        tol = torch.finfo(dtype).eps
+        # 2eps = 1x addition + 1x subtraction. 
+        tol = 2*torch.finfo(dtype).eps
         self.assertAlmostEqual(logits_soft.grad, logits_hard.grad, delta=tol)
 
     @repeat_test_for_types(NO_HALF_TENSORTYPES)
     def test_gumbel_softmax(self, dtype=torch.float):
         """
-        NO_HALF_TENSORTYPES because most half-ops doesnt work on cpu.
+        NO_HALF_TENSORTYPES because many half-ops doesnt work on cpu.
         """
         self._test_gumbel_softmax_st_shapes(cuda=False, dtype=dtype, shape=[5], dim=0, count_expected=1)
         self._test_gumbel_softmax_st_shapes(cuda=False, dtype=dtype, shape=[5], dim=-1, count_expected=1)
