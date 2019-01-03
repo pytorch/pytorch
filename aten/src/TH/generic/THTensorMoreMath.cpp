@@ -619,29 +619,6 @@ void THTensor_(eye)(THTensor *r_, int64_t n, int64_t m)
     r__data[i*(r_->stride(0)+r_->stride(1))] = 1;
 }
 
-void THTensor_(arange)(THTensor *r_, accreal xmin, accreal xmax, accreal step) {
-  ptrdiff_t size;
-  scalar_t i = 0;
-
-  THArgCheck(step > 0 || step < 0, 3, "step must be nonzero");
-  THArgCheck(std::isfinite(static_cast<double>(xmin)) &&
-              std::isfinite(static_cast<double>(xmax))
-              , 1, "unsupported range: ", xmin, " -> ", xmax);
-  THArgCheck(((step > 0) && (xmax >= xmin)) || ((step < 0) && (xmax <= xmin))
-              , 2, "upper bound and larger bound inconsistent with step sign");
-
-  double size_d = ceil(static_cast<double>(xmax - xmin) / step);
-  THArgCheck(size_d >= 0 && size_d <= static_cast<double>(PTRDIFF_MAX)
-             , 1, "invalid size, possible overflow?");
-  size = static_cast<ptrdiff_t>(size_d);
-
-  if (THTensor_(nElement)(r_) != size) {
-    THTensor_(resize1d)(r_, size);
-  }
-
-  TH_TENSOR_APPLY(scalar_t, r_, *r__data = xmin + (i++)*step;);
-}
-
 void THTensor_(randperm)(THTensor *r_, THGenerator *_generator, int64_t n)
 {
   std::lock_guard<std::mutex> lock(_generator->mutex);
