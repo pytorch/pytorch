@@ -24,11 +24,13 @@ namespace {
 template <typename scalar_t, typename accscalar_t>
 __device__ inline int get_interval(accscalar_t sample,
   int index, int inputSize, int outputSize, int poolSize) {
-  accscalar_t alpha = (accscalar_t)(inputSize - poolSize) / (accscalar_t) (outputSize - 1);
+  accscalar_t alpha = static_cast<accscalar_t>(inputSize - poolSize) /
+    static_cast<accscalar_t>(outputSize - 1);
   if (index == outputSize - 1) {
     return inputSize - poolSize;
   } else {
-    return (int) ((index + sample) * alpha) - (int) (sample * alpha);
+    return static_cast<int>((index + sample) * alpha) -
+      static_cast<int>(sample * alpha);
   }
 }
 
@@ -54,7 +56,7 @@ __global__ void fractional_max_pool2d_out_cuda_frame(
   int poolSizeH, int poolSizeW,
   int PoolSizeWStatic) {
 
-  using accscalar_t = at::acc_type<scalar_t, true>;
+  using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
 
   int ourOutputPoint = threadIdx.x + blockIdx.x * blockDim.x;
   int plane = blockIdx.y;

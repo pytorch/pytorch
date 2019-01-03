@@ -14,12 +14,13 @@ static std::vector<int> fractional_max_pool2d_generate_intervals(
   int inputSize,
   int outputSize,
   int poolSize) {
-  scalar_t alpha = (scalar_t) (inputSize - poolSize) / (scalar_t) (outputSize - 1);
-  std::vector<int> sequence(outputSize, 0);
+  scalar_t alpha = static_cast<scalar_t>(inputSize - poolSize) /
+    static_cast<scalar_t>(outputSize - 1);
+  std::vector<int> sequence(outputSize);
 
   for (int i = 0; i < outputSize - 1; ++i) {
     sequence[i] =
-      (int) ((i + sample) * alpha) - (int) (sample * alpha);
+      static_cast<int>((i + sample) * alpha) - static_cast<int>(sample * alpha);
   }
   sequence[outputSize - 1] = inputSize - poolSize;
 
@@ -27,7 +28,7 @@ static std::vector<int> fractional_max_pool2d_generate_intervals(
 }
 
 template <typename scalar_t>
-static void fractional_max_pool2d_out_frame(
+static void fractional_max_pool2d_out_single_batch_frame(
   scalar_t* input,
   scalar_t* output,
   int64_t* indices,
@@ -83,7 +84,6 @@ static void fractional_max_pool2d_out_frame(
         AT_ASSERT(maxIndex != -1);
 
         outputForPlane[h * outputW + w] = maxVal;
-        /* +1 to lua index */
         indicesForPlane[h * outputW + w] = maxIndex;
       }
     }
@@ -91,13 +91,45 @@ static void fractional_max_pool2d_out_frame(
   }
 }
 
+template <typename scalar_t>
+static void fractional_max_pool2d_out_frame(
+  scalar_t* input,
+  scalar_t* output,
+  int64_t* indices,
+  scalar_t* randomSamples,
+  int numBatch, int numPlanes,
+  int inputW, int inputH,
+  int outputW, int outputH,
+  int poolSizeW, int poolSizeH) {
+    if(numBatch == 1) {
+      fractional_max_pool2d_out_single_batch_frame<scalar_t>(
+        input,
+        output,
+        indices,
+        randomSamples,
+        numPlanes, inputW, inputH, outputW, outputH, poolSizeW, poolSizeH
+      );
+      return;
+    }
+    int batch;
+#pragma omp parallel for private(batch)
+    for(batch = 0; batch < numBatch; ++ batch) {
+      fractional_max_pool2d_out_single_batch_frame<scalar_t>(
+        input + batch * numPlanes * inputH * inputW,
+        output + batch * numPlanes * outputH * outputW,
+        indices + batch * numPlanes * outputH * outputW,
+        randomSamples + batch * numPlanes * 2,
+        numPlanes, inputW, inputH, outputW, outputH, poolSizeW, poolSizeH);
+    }
+  }
+
 void fractional_max_pool2d_out_cpu_template(
-  at::Tensor const& input_,
+  const at::Tensor& input_,
   at::Tensor& output,
   IntList output_size,
   IntList pool_size,
   at::Tensor& indices,
-  at::Tensor const& randomSamples) {
+  const at::Tensor& randomSamples) {
 
   int numBatch = 1;
   int planeDim = 0;
@@ -140,46 +172,33 @@ void fractional_max_pool2d_out_cpu_template(
     output.resize_({numPlanes, outputH, outputW});
     /* indices will contain the locations for each output point */
     indices.resize_({numPlanes, outputH, outputW});
-
-    AT_DISPATCH_FLOATING_TYPES(input.type(), "fractional_max_pool2d", [&] {
-      auto input_data = input.data<scalar_t>();
-      auto output_data = output.data<scalar_t>();
-      auto indices_data = indices.data<int64_t>();
-      auto randomSamples_data = randomSamples.data<scalar_t>();
-      fractional_max_pool2d_out_frame<scalar_t>(
-        input_data,
-        output_data,
-        indices_data,
-        randomSamples_data,
-        numPlanes, inputW, inputH, outputW, outputH, poolSizeW, poolSizeH);
-      });
   } else {
     output.resize_({numBatch, numPlanes, outputH, outputW});
     /* indices will contain the locations for each output point */
     indices.resize_({numBatch, numPlanes, outputH, outputW});
-
-    int batch;
-#pragma omp parallel for private(batch)
-    for (batch = 0; batch < numBatch; ++batch) {
-      AT_DISPATCH_FLOATING_TYPES(input.type(), "fractional_max_pool2d", [&] {
-        auto input_data = input.data<scalar_t>();
-        auto output_data = output.data<scalar_t>();
-        auto indices_data = indices.data<int64_t>();
-        auto randomSamples_data = randomSamples.data<scalar_t>();
-        fractional_max_pool2d_out_frame<scalar_t>(
-          input_data + batch * numPlanes * inputH * inputW,
-          output_data + batch * numPlanes * outputH * outputW,
-          indices_data + batch * numPlanes * outputH * outputW,
-          randomSamples_data + batch * numPlanes * 2,
-          numPlanes, inputW, inputH, outputW, outputH, poolSizeW, poolSizeH);
-        });
-    }
   }
 
+  AT_DISPATCH_FLOATING_TYPES(input.type(),
+  "fractional_max_pool2d_out_frame", [&] {
+    auto input_data = input.data<scalar_t>();
+    auto output_data = output.data<scalar_t>();
+    auto indices_data = indices.data<int64_t>();
+    auto randomSamples_data = randomSamples.data<scalar_t>();
+    fractional_max_pool2d_out_frame<scalar_t>(
+      input_data,
+      output_data,
+      indices_data,
+      randomSamples_data,
+      numBatch, numPlanes,
+      inputW, inputH,
+      outputW, outputH,
+      poolSizeW, poolSizeH);
+    }
+  );
 }
 
 template <typename scalar_t>
-static void fractional_max_pool2d_backward_out_frame(
+static void fractional_max_pool2d_backward_out_single_batch_frame(
   scalar_t* gradInput,
   scalar_t* gradOutput,
   int64_t* indices,
@@ -206,13 +225,40 @@ static void fractional_max_pool2d_backward_out_frame(
   }
 }
 
+template <typename scalar_t>
+static void fractional_max_pool2d_backward_out_frame(
+  scalar_t* gradInput,
+  scalar_t* gradOutput,
+  int64_t* indices,
+  int numBatch, int numPlanes,
+  int inputW, int inputH,
+  int outputW, int outputH) {
+    if(numBatch == 1) {
+      fractional_max_pool2d_backward_out_single_batch_frame<scalar_t>(
+        gradInput, gradOutput, indices,
+        numPlanes,
+        inputW, inputH, outputW, outputH
+      );
+      return;
+    }
+    int batch;
+#pragma omp parallel for private(batch)
+    for(batch = 0; batch < numBatch; ++ batch) {
+      fractional_max_pool2d_backward_out_single_batch_frame<scalar_t>(
+        gradInput + batch * numPlanes * inputH * inputW,
+        gradOutput + batch * numPlanes * outputH * outputW,
+        indices + batch * numPlanes * outputH * outputW,
+        numPlanes, inputW, inputH, outputW, outputH);
+    }
+}
+
 Tensor& fractional_max_pool2d_backward_out_cpu_template(
-  at::Tensor const& input,
-  at::Tensor const& gradOutput_,
+  const at::Tensor& input,
+  const at::Tensor& gradOutput_,
   at::Tensor& gradInput,
   IntList output_size,
   IntList pool_size,
-  at::Tensor const& indices) {
+  const at::Tensor& indices) {
 
   int numBatch = 1;
   int planeDim = 0;
@@ -249,39 +295,22 @@ Tensor& fractional_max_pool2d_backward_out_cpu_template(
   gradInput = at::zeros_like(input);
 
   /* backprop */
-  if (ndims == 3) {
-    AT_DISPATCH_FLOATING_TYPES(
-      input.type(), "fractional_max_pool2d_backward", [&] {
-        auto gradInput_data = gradInput.data<scalar_t>();
-        auto gradOutput_data = gradOutput.data<scalar_t>();
-        auto indices_data = indices.data<int64_t>();
-        fractional_max_pool2d_backward_out_frame<scalar_t>(
-          gradInput_data,
-          gradOutput_data,
-          indices_data,
-          numPlanes, inputW, inputH, outputW, outputH);
-        }
+  AT_DISPATCH_FLOATING_TYPES(
+    input.type(), "fractional_max_pool2d_backward_out_frame", [&] {
+      auto gradInput_data = gradInput.data<scalar_t>();
+      auto gradOutput_data = gradOutput.data<scalar_t>();
+      auto indices_data = indices.data<int64_t>();
+      fractional_max_pool2d_backward_out_frame<scalar_t>(
+        gradInput_data,
+        gradOutput_data,
+        indices_data,
+        numBatch, numPlanes,
+        inputW, inputH,
+        outputW, outputH
       );
-  } else {
-    int batch;
-#pragma omp parallel for private(batch)
-    for (batch = 0; batch < numBatch; ++batch) {
-      AT_DISPATCH_FLOATING_TYPES(
-        input.type(), "fractional_max_pool2d_backward", [&] {
-          auto gradInput_data = gradInput.data<scalar_t>();
-          auto gradOutput_data = gradOutput.data<scalar_t>();
-          auto indices_data = indices.data<int64_t>();
-          fractional_max_pool2d_backward_out_frame<scalar_t>(
-            gradInput_data + batch * numPlanes * inputH * inputW,
-            gradOutput_data + batch * numPlanes * outputH * outputW,
-            indices_data + batch * numPlanes * outputH * outputW,
-            numPlanes, inputW, inputH, outputW, outputH);
-          }
-        );
-    }
-  }
+      }
+    );
   return gradInput;
-
 }
 
 } // namespace
@@ -289,10 +318,10 @@ Tensor& fractional_max_pool2d_backward_out_cpu_template(
 std::tuple<Tensor&, Tensor&> fractional_max_pool2d_out_cpu(
   at::Tensor& output,
   at::Tensor& indices,
-  at::Tensor const& input,
+  const at::Tensor& input,
   IntList pool_size,
   IntList output_size,
-  at::Tensor const& randomSamples)
+  const at::Tensor& randomSamples)
 {
   fractional_max_pool2d_out_cpu_template(
     input,
@@ -305,10 +334,10 @@ std::tuple<Tensor&, Tensor&> fractional_max_pool2d_out_cpu(
 }
 
 std::tuple<Tensor, Tensor> fractional_max_pool2d_cpu(
-  at::Tensor const& input,
+  const at::Tensor& input,
   IntList pool_size,
   IntList output_size,
-  at::Tensor const& randomSamples)
+  const at::Tensor& randomSamples)
 {
   Tensor output = at::empty({0}, input.options());
   Tensor indices = at::empty({0}, input.options().dtype(kLong));
@@ -324,11 +353,11 @@ std::tuple<Tensor, Tensor> fractional_max_pool2d_cpu(
 
 Tensor& fractional_max_pool2d_backward_out_cpu(
   at::Tensor& gradInput,
-  at::Tensor const& gradOutput_,
-  at::Tensor const& input,
+  const at::Tensor& gradOutput_,
+  const at::Tensor& input,
   IntList pool_size,
   IntList output_size,
-  at::Tensor const& indices)
+  const at::Tensor& indices)
 {
   gradInput.resize_as_(input);
   fractional_max_pool2d_backward_out_cpu_template(
@@ -342,11 +371,11 @@ Tensor& fractional_max_pool2d_backward_out_cpu(
 }
 
 Tensor fractional_max_pool2d_backward_cpu(
-  at::Tensor const& gradOutput_,
-  at::Tensor const& input,
+  const at::Tensor& gradOutput_,
+  const at::Tensor& input,
   IntList pool_size,
   IntList output_size,
-  at::Tensor const& indices)
+  const at::Tensor& indices)
 {
   Tensor gradInput = at::zeros_like(input);
   fractional_max_pool2d_backward_out_cpu_template(
