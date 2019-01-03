@@ -1,11 +1,8 @@
 #!/bin/bash
+set -e
+
 echo "Running pre-commit flake8"
-FLAKE8_OUT=$(python tools/flake8_hook.py)
-if [[ ${FLAKE8_OUT} ]]
-then
-  echo "${FLAKE8_OUT}"
-  exit 1
-fi
+python tools/flake8_hook.py
 
 if [ $(which clang-tidy) ]
 then
