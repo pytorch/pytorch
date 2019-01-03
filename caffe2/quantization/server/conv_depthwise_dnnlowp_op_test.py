@@ -4,14 +4,12 @@ import collections
 
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
-from caffe2.python import core, dyndep, workspace
+from caffe2.python import core, dyndep, utils, workspace
 from caffe2.quantization.server import utils as dnnlowp_utils
 from dnnlowp_test_utils import (
     check_quantized_results_close,
     generate_conv_inputs,
     generate_convnd_inputs,
-    nchw2nhwc,
-    nhwc2nchw,
 )
 from hypothesis import given
 
@@ -169,7 +167,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
     @given(
         stride=st.integers(1, 2),
         size=st.integers(10, 16),
-        # depthwise 3x3 fast path only works for a multiple of 8
+        # depthwise 3x3x3 fast path only works for a multiple of 8
         group=st.sampled_from([8, 32, 40]),
         batch_size=st.integers(1, 3),
         prepack_weight=st.booleans(),
@@ -225,12 +223,6 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
             init_net = core.Net("test_init_net")
             net = core.Net("test_net")
 
-            # TODO: no fall back to NCHW
-            fall_back_to_NCHW = "DNNLOWP" not in engine
-
-            if fall_back_to_NCHW:
-                X_nchw = nhwc2nchw(X)
-                W_nchw = nhwc2nchw(W)
             do_quantize = "DNNLOWP" in engine
             do_dequantize = "DNNLOWP" in engine
             do_prepack_weight = engine == "DNNLOWP" and prepack_weight
@@ -272,7 +264,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
                 kernels=[kernel] * 3,
                 dilations=[dilation] * 3,
                 pads=[pad] * (3 * 2),
-                order="NCHW" if fall_back_to_NCHW else order,
+                order=order,
                 shared_buffer=(1 if share_col_buffer else 0),
                 preserve_activation_sparsity=preserve_activation_sparsity,
                 preserve_weight_sparsity=preserve_weight_sparsity,
@@ -292,18 +284,12 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([dequantize])
 
-            self.ws.create_blob("X").feed(
-                X_nchw if fall_back_to_NCHW else X, device_option=gc
-            )
-            self.ws.create_blob("W").feed(
-                W_nchw if fall_back_to_NCHW else W, device_option=gc
-            )
+            self.ws.create_blob("X").feed(X, device_option=gc)
+            self.ws.create_blob("W").feed(W, device_option=gc)
             self.ws.create_blob("b").feed(b, device_option=gc)
             self.ws.run(init_net)
             self.ws.run(net)
             Y = self.ws.blobs["Y"].fetch()
-            if fall_back_to_NCHW:
-                Y = nchw2nhwc(Y)
             outputs.append(Output(Y=Y, op_type=op_type, engine=engine, order=order))
 
         check_quantized_results_close(outputs, symmetric=preserve_activation_sparsity)

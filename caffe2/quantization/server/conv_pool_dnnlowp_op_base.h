@@ -82,7 +82,7 @@ class ConvPoolDNNLowPOpBase : public ConvPoolOpBase<CPUContext> {
       actual = OutputTensorCPU_(0)->template data<float>();
     } else {
       actual_temp.resize(OutputTensorCPU_(0)->numel());
-      Dequantize(
+      fbgemm::Dequantize<T>(
           OutputTensorCPU_(0)->template data<T>(),
           actual_temp.data(),
           OutputTensorCPU_(0)->numel(),
@@ -105,7 +105,7 @@ class ConvPoolDNNLowPOpBase : public ConvPoolOpBase<CPUContext> {
 
   void RunOnDeviceEpilogue_() {
     if (dequantize_output_) {
-      Dequantize(
+      fbgemm::Dequantize<T>(
           out_temp_.data(),
           OutputTensorCPU_(0)->template mutable_data<float>(),
           OutputTensorCPU_(0)->size(),
