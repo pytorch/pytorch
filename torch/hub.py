@@ -73,9 +73,13 @@ def _load_attr_from_module(module_name, func_name):
 
 def set_dir(d):
     r"""
-    Optionally set hub_dir to a local dir to save the intermediate model & checkpoint files.
-        If this argument is not set, env variable `TORCH_HUB_DIR` will be searched first,
-        `~/.torch/hub` will be created and used as fallback.
+    Optionally set hub_dir to a local dir to save downloaded models & weights.
+
+    If this argument is not set, env variable `TORCH_HUB_DIR` will be searched first,
+    `~/.torch/hub` will be created and used as fallback.
+
+    Args:
+        d: path to a local folder to save downloaded models & weights.
     """
     global hub_dir
     hub_dir = d
@@ -89,7 +93,7 @@ def load(github, model, force_reload=False, *args, **kwargs):
         github: Required, a string with format "repo_owner/repo_name[:tag_name]" with an optional
             tag/branch. The default branch is `master` if not specified.
             Example: 'pytorch/vision[:hub]'
-        model: Required, a string of callable name defined in repo's hubconf.py
+        model: Required, a string of entrypoint name defined in repo's hubconf.py
         force_reload: Optional, whether to discard the existing cache and force a fresh download.
             Default is `False`.
         *args: Optional, the corresponding args for callable `model`.
@@ -124,10 +128,7 @@ def load(github, model, force_reload=False, *args, **kwargs):
     # Download zipped code from github
     url = _git_archive_link(repo_info, branch)
     cached_file = os.path.join(hub_dir, branch + '.zip')
-    extracted_repo = os.path.join(hub_dir, repo_name + '-' + branch)
     repo_dir = os.path.join(hub_dir, repo_name + '_' + branch)
-
-    sys.path.insert(0, repo_dir)  # Make Python interpreter aware of the repo
 
     use_cache = (not force_reload) and os.path.exists(repo_dir)
 
@@ -138,14 +139,21 @@ def load(github, model, force_reload=False, *args, **kwargs):
         sys.stderr.write('Using cache found in {}'.format(repo_dir))
     else:
         _remove_if_exists(cached_file)
-        _remove_if_exists(extracted_repo)
-        _remove_if_exists(repo_dir)
-
         _download_url_to_file(url, cached_file)
-        zipfile.ZipFile(cached_file).extractall(hub_dir)
+
+        cached_zipfile = zipfile.ZipFile(cached_file)
+
+        # Github renames folder repo-v1.x.x to repo-1.x.x
+        extraced_repo_name = cached_zipfile.infolist()[0].filename
+        extracted_repo = os.path.join(hub_dir, extraced_repo_name)
+        _remove_if_exists(extracted_repo)
+        cached_zipfile.extractall(hub_dir)
 
         _remove_if_exists(cached_file)
+        _remove_if_exists(repo_dir)
         shutil.move(extracted_repo, repo_dir)  # rename the repo
+
+    sys.path.insert(0, repo_dir)  # Make Python interpreter aware of the repo
 
     dependencies = _load_attr_from_module('hubconf', 'dependencies')
 

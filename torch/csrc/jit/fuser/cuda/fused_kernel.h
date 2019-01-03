@@ -1,20 +1,23 @@
 #pragma once
-#include "torch/csrc/jit/fuser/config.h"
+#include <torch/csrc/jit/fuser/config.h>
 #if USE_CUDA_FUSER
 
-#include "ATen/ATen.h"
-#include "torch/csrc/WindowsTorchApiMacro.h"
-#include "torch/csrc/jit/fuser/fused_kernel.h"
+#include <ATen/ATen.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/fuser/fused_kernel.h>
 
-#include "nvrtc.h"
-#include "cuda.h"
-#include "cuda_runtime.h"
+#include <cuda.h>
+#include <cuda_runtime.h>
+#include <nvrtc.h>
 
 #include <cstdint>
-#include <vector>
 #include <string>
+#include <vector>
 
-namespace torch { namespace jit { namespace fuser { namespace cuda {
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace cuda {
 
 // A class holding metadata for an actual CUDA function.
 // Note: CUDA functions are per device.
@@ -40,7 +43,7 @@ struct TORCH_API FusedKernelCUDA : public ::torch::jit::fuser::FusedKernel {
     return at::Backend::CUDA;
   }
 
-private:
+ private:
   static constexpr auto kBlockSize = 128;
 
   // Note: per device to store device properties and compute launch heuristics

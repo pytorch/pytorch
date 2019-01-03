@@ -23,34 +23,14 @@
 // NB: We don't use Registry for this, because we don't want to
 // pay for a hash table lookup every time we do an operation.
 
-#include <ATen/core/Backend.h>
-#include <ATen/core/ScalarType.h>
+#include <c10/core/Backend.h>
+#include <c10/core/ScalarType.h>
 #include <ATen/core/VariableHooksInterface.h>
 #include <c10/util/Exception.h>
+#include <ATen/core/LegacyDeviceTypeInit.h>
+#include <c10/core/TensorImpl.h>
 
 namespace at {
-
-struct CAFFE2_API LegacyTypeInitInterface {
-  virtual ~LegacyTypeInitInterface() {}
-  virtual void initCPU() const {
-    AT_ERROR("cannot use CPU without ATen library");
-  }
-  virtual void initCUDA() const {
-    AT_ERROR("cannot use CUDA without ATen CUDA library");
-  }
-  virtual void initComplex() const {
-    AT_ERROR("cannot use complex without ATen Complex library");
-  }
-};
-struct CAFFE2_API LegacyTypeInitArgs {};
-C10_DECLARE_REGISTRY(
-    LegacyTypeInitRegistry,
-    LegacyTypeInitInterface,
-    LegacyTypeInitArgs);
-#define REGISTER_LEGACY_TYPE_INIT(clsname) \
-  C10_REGISTER_CLASS(LegacyTypeInitRegistry, clsname, clsname)
-
-CAFFE2_API const LegacyTypeInitInterface& getLegacyTypeInit();
 
 struct Type;
 
@@ -129,11 +109,15 @@ private:
     static std::once_flag cuda_once;
     if (p == DeviceType::CPU) {
       std::call_once(cpu_once, [] {
-        getLegacyTypeInit().initCPU();
+        getLegacyDeviceTypeInit().initCPU();
       });
     } else if (p == DeviceType::CUDA) {
       std::call_once(cuda_once, [] {
-        getLegacyTypeInit().initCUDA();
+        getLegacyDeviceTypeInit().initCUDA();
+      });
+    } else if (p == DeviceType::HIP) {
+      std::call_once(cuda_once, [] {
+        getLegacyDeviceTypeInit().initHIP();
       });
     }
   }
@@ -142,7 +126,7 @@ private:
     // Only complex may need initialization
     if (isComplexType(s)) {
       std::call_once(once, [] {
-        getLegacyTypeInit().initComplex();
+        getLegacyDeviceTypeInit().initComplex();
       });
     }
   }
@@ -155,5 +139,19 @@ private:
 };
 
 CAFFE2_API LegacyTypeDispatch& globalLegacyTypeDispatch();
+
+/**
+ * Return the Type object corresponding to this Tensor, which we can
+ * use to do dynamic dispatch to operators from.  This method is NOT
+ * intended to be used by end-users; it is purely an implementation
+ * detail.
+ */
+inline Type& legacyTensorType(const TensorImpl& tensor) {
+  // NB: It's valid to use getTypeRaw here, because the TensorImpl
+  // could not have been created without initializing the Type first.
+  // TODO: This is not actually true via the Caffe2 codepath!  Make
+  // it so.
+  return *globalLegacyTypeDispatch().getTypeRaw(tensorTypeIdToBackend(tensor.type_id()), typeMetaToScalarType(tensor.dtype()), tensor.is_variable());
+}
 
 } // namespace at

@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/VolumetricReplicationPadding.c"
+#define TH_GENERIC_FILE "THNN/generic/VolumetricReplicationPadding.c"
 #else
 
 static inline void THNN_(VolumetricReplicationPadding_shapeCheck)(

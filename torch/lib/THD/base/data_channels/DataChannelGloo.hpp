@@ -1,11 +1,11 @@
 #pragma once
 
-#include "../ChannelUtils.hpp"
-#include "../DataChannel.hpp"
-#include "DataChannelUtils.hpp"
+#include <THD/base/ChannelUtils.hpp>
+#include <THD/base/DataChannel.hpp>
+#include <THD/base/data_channels/DataChannelUtils.hpp>
 
-#include "gloo/rendezvous/store.h"
-#include "gloo/transport/device.h"
+#include <gloo/rendezvous/store.h>
+#include <gloo/transport/device.h>
 
 #include <map>
 

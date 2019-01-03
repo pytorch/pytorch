@@ -409,7 +409,7 @@ class DataParallelModelTest(TestCase):
 
     def test_device_scope_check(self):
         with self.assertRaises(AssertionError):
-            with core.DeviceScope(core.DeviceOption(caffe2_pb2.CUDA, 0)):
+            with core.DeviceScope(core.DeviceOption(workspace.GpuDeviceType, 0)):
                 data_parallel_model.Parallelize_GPU(None, None, None)
 
     def test_net_transformer_function(self):
@@ -984,7 +984,7 @@ class SparseDataParallelModelTest(TestCase):
                                                   self.LR],
                                                   self.vecs)
         else:
-            with core.DeviceScope(core.DeviceOption(caffe2_pb2.CUDA, 0)):
+            with core.DeviceScope(core.DeviceOption(workspace.GpuDeviceType, 0)):
                 model.CopyGPUToCPU("gpu_0/gpuvecs", self.vecs)
 
         np.random.seed(2603)
@@ -1006,12 +1006,12 @@ class SparseDataParallelModelTest(TestCase):
 
                 device_for_indices = core.DeviceOption(caffe2_pb2.CPU)
                 if not cpu_indices:
-                    device_for_indices = core.DeviceOption(caffe2_pb2.CUDA, g)
+                    device_for_indices = core.DeviceOption(workspace.GpuDeviceType, g)
 
                 with core.DeviceScope(device_for_indices):
                     workspace.FeedBlob("gpu_{}/indices".format(g), indices)
 
-                with core.DeviceScope(core.DeviceOption(caffe2_pb2.CUDA, g)):
+                with core.DeviceScope(core.DeviceOption(workspace.GpuDeviceType, g)):
                     workspace.FeedBlob("gpu_{}/label".format(g), labels)
 
             if i == 0:
@@ -1027,7 +1027,7 @@ class SparseDataParallelModelTest(TestCase):
                         workspace.FeedBlob(
                             "gpu_{}/gpuvecs".format(g),
                             orig_vecs,
-                            device_option=core.DeviceOption(caffe2_pb2.CUDA, g),
+                            device_option=core.DeviceOption(workspace.GpuDeviceType, g),
                         )
                 workspace.CreateNet(model.net)
 
@@ -1073,7 +1073,8 @@ class SparseDataParallelModelTest(TestCase):
         self._test_equiv_sparse(False)
 
 
-@unittest.skipIf(workspace.NumCudaDevices() < 2, "Need at least 2 GPUs.")
+@unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
+@unittest.skipIf(workspace.NumGpuDevices() < 2, "Need at least 2 GPUs.")
 class ParallelizeBMUFTest(TestCase):
 
     def _run_model(self, gpu_devices):
@@ -1132,7 +1133,7 @@ class ParallelizeBMUFTest(TestCase):
         cpu_device=st.booleans()
     )
     def test_parallelize_bmuf(self, cpu_device):
-        assume(cpu_device or workspace.has_gpu_support)
+        assume(cpu_device or workspace.has_gpu_support or workspace.has_hip_support)
 
         workspace.ResetWorkspace()
 
@@ -1146,7 +1147,7 @@ class ParallelizeBMUFTest(TestCase):
             return None
 
         if not cpu_device:
-            device_type = caffe2_pb2.CUDA
+            device_type = workspace.GpuDeviceType
             device_prefix = "gpu"
         else:
             device_type = caffe2_pb2.CPU
@@ -1220,7 +1221,7 @@ class ParallelizeBMUFTest(TestCase):
 
 
 @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
-@unittest.skipIf(workspace.NumCudaDevices() < 2, "Need at least 2 GPUs.")
+@unittest.skipIf(workspace.NumGpuDevices() < 2, "Need at least 2 GPUs.")
 class SparseDataParallelModelTestWithSharedIndices(TestCase):
 
     '''
@@ -1336,7 +1337,7 @@ class SparseDataParallelModelTestWithSharedIndices(TestCase):
         )
 
         # Update the vecs
-        with core.DeviceScope(core.DeviceOption(caffe2_pb2.CUDA, 0)):
+        with core.DeviceScope(core.DeviceOption(workspace.GpuDeviceType, 0)):
             for num, vec in enumerate(self.vecs[:-1]):
                 model.CopyGPUToCPU("gpu_0/gpuvec_{}".format(num), vec)
 
@@ -1354,7 +1355,7 @@ class SparseDataParallelModelTestWithSharedIndices(TestCase):
                 indices = full_indices[st:en].astype(np.int32)
                 labels = full_labels[st:en].astype(np.int32)
 
-                with core.DeviceScope(core.DeviceOption(caffe2_pb2.CUDA, g)):
+                with core.DeviceScope(core.DeviceOption(workspace.GpuDeviceType, g)):
                     workspace.FeedBlob("gpu_{}/indices".format(g), indices)
                     workspace.FeedBlob("gpu_{}/label".format(g), labels)
 
@@ -1377,7 +1378,7 @@ class SparseDataParallelModelTestWithSharedIndices(TestCase):
                             "gpu_{}/gpuvec_{}".format(g, num),
                             orig_vec,
                             device_option=core.DeviceOption(
-                                caffe2_pb2.CUDA, g),
+                                workspace.GpuDeviceType, g),
                         )
                 workspace.CreateNet(model.net)
 
@@ -1407,10 +1408,10 @@ class SparseDataParallelModelTestWithSharedIndices(TestCase):
         self.run_model(V, [0, 1])
         self.run_model(V, [0])
 
-        if workspace.NumCudaDevices() >= 4:
+        if workspace.NumGpuDevices() >= 4:
             self.run_model(V, list(range(4)))
 
-        if workspace.NumCudaDevices() >= 8:
+        if workspace.NumGpuDevices() >= 8:
             self.run_model(V, list(range(8)))
 
 

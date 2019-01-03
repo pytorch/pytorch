@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ATen/ATen.h"
-#include "TensorInfo.cuh"
+#include <ATen/ATen.h>
+#include <ATen/cuda/detail/TensorInfo.cuh>
 #include <limits>
 
 namespace at {

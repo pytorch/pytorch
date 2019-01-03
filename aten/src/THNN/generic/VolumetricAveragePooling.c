@@ -1,6 +1,9 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/VolumetricAveragePooling.c"
+#define TH_GENERIC_FILE "THNN/generic/VolumetricAveragePooling.c"
 #else
+
+#include <THNN/generic/pooling_shape.h>
+#include <algorithm>
 
 static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
                          THNNState *state,
@@ -66,29 +69,9 @@ static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
   iheight = input->size(dimh);
   iwidth  = input->size(dimw);
 
-  if (ceil_mode) {
-    otime   = (int64_t)(ceil((float)(itime   - kT + 2*padT) / dT)) + 1;
-    oheight = (int64_t)(ceil((float)(iheight - kH + 2*padH) / dH)) + 1;
-    owidth  = (int64_t)(ceil((float)(iwidth  - kW + 2*padW) / dW)) + 1;
-  }
-  else
-  {
-    otime   = (int64_t)(floor((float)(itime   - kT + 2*padT) / dT)) + 1;
-    oheight = (int64_t)(floor((float)(iheight - kH + 2*padH) / dH)) + 1;
-    owidth  = (int64_t)(floor((float)(iwidth  - kW + 2*padW) / dW)) + 1;
-  }
-
-  if (padT || padW || padH)
-  {
-    // ensure that the last pooling starts inside the image
-    // needed to avoid problems in ceil mode
-    if ((otime   - 1)*dT >= itime   + padT)
-      --otime;
-    if ((oheight - 1)*dH >= iheight + padH)
-      --oheight;
-    if ((owidth  - 1)*dW >= iwidth  + padW)
-      --owidth;
-  }
+  otime = pooling_output_shape<int64_t>(itime, kT, padT, dT, 1, ceil_mode);
+  oheight = pooling_output_shape<int64_t>(iheight, kH, padH, dH, 1, ceil_mode);
+  owidth = pooling_output_shape<int64_t>(iwidth, kW, padW, dW, 1, ceil_mode);
 
   if (otime < 1 || owidth < 1 || oheight < 1)
     THError("Given input size: (%dx%dx%dx%d). "
@@ -147,16 +130,16 @@ static void THNN_(VolumetricAveragePooling_updateOutput_frame)(
           int64_t tstart = ti * dT - padT;
           int64_t hstart = i  * dH - padH;
           int64_t wstart = j  * dW - padW;
-          int64_t tend = fminf(tstart + kT, itime + padT);
-          int64_t hend = fminf(hstart + kH, iheight + padH);
-          int64_t wend = fminf(wstart + kW, iwidth + padW);
+          int64_t tend = std::min(tstart + kT, itime + padT);
+          int64_t hend = std::min(hstart + kH, iheight + padH);
+          int64_t wend = std::min(wstart + kW, iwidth + padW);
           int64_t pool_size = (tend - tstart) * (hend - hstart) * (wend - wstart);
-          tstart = fmaxf(tstart, 0);
-          hstart = fmaxf(hstart, 0);
-          wstart = fmaxf(wstart, 0);
-          tend = fmin(tend, itime);
-          hend = fmin(hend, iheight);
-          wend = fmin(wend, iwidth);
+          tstart = std::max(tstart, (int64_t) 0);
+          hstart = std::max(hstart, (int64_t) 0);
+          wstart = std::max(wstart, (int64_t) 0);
+          tend = std::min(tend, itime);
+          hend = std::min(hend, iheight);
+          wend = std::min(wend, iwidth);
 
           int divide_factor;
           if (count_include_pad)
@@ -235,29 +218,9 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
   itime   = input->size(dimt);
   iheight = input->size(dimh);
   iwidth  = input->size(dimw);
-  if (ceil_mode)
-  {
-    otime   = (int64_t)(ceil((float)(itime   - kT + 2*padT) / dT)) + 1;
-    oheight = (int64_t)(ceil((float)(iheight - kH + 2*padH) / dH)) + 1;
-    owidth  = (int64_t)(ceil((float)(iwidth  - kW + 2*padW) / dW)) + 1;
-  }
-  else
-  {
-    otime   = (int64_t)(floor((float)(itime   - kT + 2*padT) / dT)) + 1;
-    oheight = (int64_t)(floor((float)(iheight - kH + 2*padH) / dH)) + 1;
-    owidth  = (int64_t)(floor((float)(iwidth  - kW + 2*padW) / dW)) + 1;
-  }
-  if (padT || padH || padW)
-  {
-    // ensure that the last pooling starts inside the image
-    // needed to avoid problems in ceil mode
-    if ((otime   - 1)*dT >= itime   + padT)
-      --otime;
-    if ((oheight - 1)*dH >= iheight + padH)
-      --oheight;
-    if ((owidth  - 1)*dW >= iwidth  + padW)
-      --owidth;
-  }
+  otime = pooling_output_shape<int64_t>(itime, kT, padT, dT, 1, ceil_mode);
+  oheight = pooling_output_shape<int64_t>(iheight, kH, padH, dH, 1, ceil_mode);
+  owidth = pooling_output_shape<int64_t>(iwidth, kW, padW, dW, 1, ceil_mode);
 
   /* get contiguous input */
   input = THTensor_(newContiguous)(input);
@@ -356,16 +319,16 @@ static void THNN_(VolumetricAveragePooling_updateGradInput_frame)(
           int64_t tstart = ti * dT - padT;
           int64_t hstart = i  * dH - padH;
           int64_t wstart = j  * dW - padW;
-          int64_t tend = fminf(tstart + kT, itime + padT);
-          int64_t hend = fminf(hstart + kH, iheight + padH);
-          int64_t wend = fminf(wstart + kW, iwidth + padW);
+          int64_t tend = std::min(tstart + kT, itime + padT);
+          int64_t hend = std::min(hstart + kH, iheight + padH);
+          int64_t wend = std::min(wstart + kW, iwidth + padW);
           int64_t pool_size = (tend -tstart) * (hend - hstart) * (wend - wstart);
-          tstart = fmaxf(tstart, 0);
-          hstart = fmaxf(hstart, 0);
-          wstart = fmaxf(wstart, 0);
-          tend = fminf(tend, itime);
-          hend = fminf(hend, iheight);
-          wend = fminf(wend, iwidth);
+          tstart = std::max(tstart, (int64_t) 0);
+          hstart = std::max(hstart, (int64_t) 0);
+          wstart = std::max(wstart, (int64_t) 0);
+          tend = std::min(tend, itime);
+          hend = std::min(hend, iheight);
+          wend = std::min(wend, iwidth);
 
           int64_t divide_factor;
           if (count_include_pad)

@@ -1,6 +1,6 @@
-#include "ATen/ATen.h"
-#include "ATen/cuda/CUDAContext.h"
-#include "ATen/cuda/CUDAApplyUtils.cuh"
+#include <ATen/ATen.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
 
 namespace at {
 namespace cuda {
@@ -112,25 +112,25 @@ __global__ void kernelHistogram1D(
   }
 }
 
-#define HANDLE_CASE(MEMORY_TYPE, WEIGHTS_OP)                               \
+#define HANDLE_CASE(MEMORY_TYPE, WEIGHTS_OP, SHARED_MEM)                   \
   kernelHistogram1D<output_t, input_t, IndexType, 1, 2, 1, MEMORY_TYPE>    \
       <<<grid,                                                             \
          block,                                                            \
-         (MEMORY_TYPE == CUDAHistogramMemoryType::SHARED) ? sharedMem : 0, \
+         SHARED_MEM,                                                       \
          getCurrentCUDAStream()>>>(                    \
           aInfo, pInfo, bInfo, binsize, totalElements, WEIGHTS_OP);        \
   AT_ASSERTM(cudaGetLastError() == cudaSuccess, "kernelHistogram1D failed");
 
-#define HANDLE_SWITCH_CASE(mType, getOp)                        \
-  switch (mType) {                                              \
-    case CUDAHistogramMemoryType::SHARED:                       \
-      HANDLE_CASE(CUDAHistogramMemoryType::SHARED, getOp);      \
-      break;                                                    \
-    case CUDAHistogramMemoryType::MULTI_BLOCK:                  \
-      HANDLE_CASE(CUDAHistogramMemoryType::MULTI_BLOCK, getOp); \
-      break;                                                    \
-    default:                                                    \
-      HANDLE_CASE(CUDAHistogramMemoryType::GLOBAL, getOp);      \
+#define HANDLE_SWITCH_CASE(mType, getOp)                                   \
+  switch (mType) {                                                         \
+    case CUDAHistogramMemoryType::SHARED:                                  \
+      HANDLE_CASE(CUDAHistogramMemoryType::SHARED, getOp, sharedMem);      \
+      break;                                                               \
+    case CUDAHistogramMemoryType::MULTI_BLOCK:                             \
+      HANDLE_CASE(CUDAHistogramMemoryType::MULTI_BLOCK, getOp, 0);         \
+      break;                                                               \
+    default:                                                               \
+      HANDLE_CASE(CUDAHistogramMemoryType::GLOBAL, getOp, 0);              \
   }
 
 inline int64_t getFreeGlobalMemory() {

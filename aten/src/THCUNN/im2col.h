@@ -1,8 +1,8 @@
 #ifndef THCUNN_IM2COL_H
 #define THCUNN_IM2COL_H
 
-#include "common.h"
-#include "THCNumerics.cuh"
+#include <THCUNN/common.h>
+#include <THC/THCNumerics.cuh>
 
 // Kernel for fast unfold+copy
 // (borrowed from Caffe: https://github.com/BVLC/caffe/blob/master/src/caffe/layers/conv_layer.cu)

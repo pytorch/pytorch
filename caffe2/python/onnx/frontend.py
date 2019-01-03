@@ -86,11 +86,10 @@ class Caffe2Frontend(object):
     def _common_caffe2_arg_to_onnx_attr(cls, op_def, arg):
         # name
         op_type = op_def.type
+        name = cls._global_renamed_args.get(arg.name, arg.name)
         if op_type in cls._per_op_renamed_args:
-            name = cls._per_op_renamed_args[op_type].get(
-                arg.name, arg.name)
-        else:
-            name = cls._global_renamed_args.get(arg.name, arg.name)
+            # Per-op attribute renames override the global attribute renames
+            name = cls._per_op_renamed_args[op_type].get(arg.name, name)
 
         # value
         if arg.HasField('f'):

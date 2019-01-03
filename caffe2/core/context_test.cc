@@ -6,11 +6,6 @@
 
 namespace caffe2 {
 
-TEST(CPUContextTest, ATenCoreTest) {
-  int i = at::CoreTest();
-  EXPECT_EQ(i + 1, at::CoreTest());
-}
-
 TEST(CPUContextTest, TestAllocAlignment) {
   for (int i = 1; i < 10; ++i) {
     auto data = CPUContext::New(i);

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "torch/csrc/utils/python_stub.h"
+#include <torch/csrc/utils/python_stub.h>
 
 template<class T>
 class THPPointer {

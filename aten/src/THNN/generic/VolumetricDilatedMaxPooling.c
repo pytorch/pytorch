@@ -1,6 +1,9 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/VolumetricDilatedMaxPooling.c"
+#define TH_GENERIC_FILE "THNN/generic/VolumetricDilatedMaxPooling.c"
 #else
+
+#include <THNN/generic/pooling_shape.h>
+#include <algorithm>
 
 static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
                          THNNState *state,
@@ -55,29 +58,9 @@ static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
   itime   = input->size(dimt);
   iheight = input->size(dimh);
   iwidth  = input->size(dimw);
-  if (ceilMode)
-  {
-    otime = (int)(ceil((float)(itime - (dilationT * (kT - 1) + 1) + 2*pT) / dT)) + 1;
-    oheight = (int)(ceil((float)(iheight - (dilationH * (kH - 1) + 1) + 2*pH) / dH)) + 1;
-    owidth  = (int)(ceil((float)(iwidth  - (dilationW * (kW - 1) + 1) + 2*pW) / dW)) + 1;
-  }
-  else
-  {
-    otime = (int)(floor((float)(itime - (dilationT * (kT - 1) + 1) + 2*pT) / dT)) + 1;
-    oheight = (int)(floor((float)(iheight - (dilationH * (kH - 1) + 1) + 2*pH) / dH)) + 1;
-    owidth  = (int)(floor((float)(iwidth  - (dilationW * (kW - 1) + 1) + 2*pW) / dW)) + 1;
-  }
-
-  if (pT || pW || pH)
-  {
-    // ensure that the last pooling starts inside the image
-    if ((otime - 1)*dT >= itime + pT)
-      --otime;
-    if ((oheight - 1)*dH >= iheight + pH)
-      --oheight;
-    if ((owidth  - 1)*dW >= iwidth  + pW)
-      --owidth;
-  }
+  otime = pooling_output_shape<int64_t>(itime, kT, pT, dT, dilationT, ceilMode);
+  oheight = pooling_output_shape<int64_t>(iheight, kH, pH, dH, dilationH, ceilMode);
+  owidth = pooling_output_shape<int64_t>(iwidth, kW, pW, dW, dilationW, ceilMode);
 
   if (otime < 1 || owidth < 1 || oheight < 1)
     THError("Given input size: (%dx%dx%dx%d). Calculated output size: (%dx%dx%dx%d). Output size is too small",
@@ -140,9 +123,9 @@ static void THNN_(VolumetricDilatedMaxPooling_updateOutput_frame)(
           int64_t start_h = i * dH - pH;
           int64_t start_w = j * dW - pW;
 
-          int64_t end_t = fminf(start_t + (kT - 1) * dilationT + 1, itime);
-          int64_t end_h = fminf(start_h + (kH - 1) * dilationH + 1, iheight);
-          int64_t end_w = fminf(start_w + (kW - 1) * dilationW + 1, iwidth);
+          int64_t end_t = std::min(start_t + (kT - 1) * dilationT + 1, itime);
+          int64_t end_h = std::min(start_h + (kH - 1) * dilationH + 1, iheight);
+          int64_t end_w = std::min(start_w + (kW - 1) * dilationW + 1, iwidth);
 
           while(start_t < 0)
             start_t += dilationT;
@@ -245,29 +228,9 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
   itime   = input->size(dimt);
   iheight = input->size(dimh);
   iwidth  = input->size(dimw);
-  if (ceilMode)
-  {
-    otime = (int)(ceil((float)(itime - (dilationT * (kT - 1) + 1) + 2*pT) / dT)) + 1;
-    oheight = (int)(ceil((float)(iheight - (dilationH * (kH - 1) + 1) + 2*pH) / dH)) + 1;
-    owidth  = (int)(ceil((float)(iwidth  - (dilationW * (kW - 1) + 1) + 2*pW) / dW)) + 1;
-  }
-  else
-  {
-    otime = (int)(floor((float)(itime - (dilationT * (kT - 1) + 1) + 2*pT) / dT)) + 1;
-    oheight = (int)(floor((float)(iheight - (dilationH * (kH - 1) + 1) + 2*pH) / dH)) + 1;
-    owidth  = (int)(floor((float)(iwidth  - (dilationW * (kW - 1) + 1) + 2*pW) / dW)) + 1;
-  }
-
-  if (pT || pW || pH)
-  {
-    // ensure that the last pooling starts inside the image
-    if ((otime - 1)*dT >= itime + pT)
-      --otime;
-    if ((oheight - 1)*dH >= iheight + pH)
-      --oheight;
-    if ((owidth  - 1)*dW >= iwidth  + pW)
-      --owidth;
-  }
+  otime = pooling_output_shape<int64_t>(itime, kT, pT, dT, dilationT, ceilMode);
+  oheight = pooling_output_shape<int64_t>(iheight, kH, pH, dH, dilationH, ceilMode);
+  owidth = pooling_output_shape<int64_t>(iwidth, kW, pW, dW, dilationW, ceilMode);
 
   /* get contiguous input */
   input = THTensor_(newContiguous)(input);

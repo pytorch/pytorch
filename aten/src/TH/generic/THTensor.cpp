@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THTensor.cpp"
+#define TH_GENERIC_FILE "TH/generic/THTensor.cpp"
 #else
 
 #include <ATen/InferSize.h>
@@ -155,7 +155,9 @@ THTensor *THTensor_(newClone)(THTensor *self)
 {
   THTensor *tensor = THTensor_(new)();
   THTensor_(resizeAs)(tensor, self);
-  THTensor_(copy)(tensor, self);
+  at::Tensor tensor_wrap = THTensor_wrap(tensor);
+  at::Tensor self_wrap = THTensor_wrap(self);
+  at::_copy_same_type_(tensor_wrap, self_wrap);
   return tensor;
 }
 
@@ -224,6 +226,11 @@ void THTensor_(resizeAs)(THTensor *self, THTensor *src)
 {
   if(!THTensor_(isSameSizeAs)(self, src))
     THTensor_(resizeNd)(self, src->dim(), THTensor_getSizePtr(src), NULL);
+}
+
+void THTensor_(resize0d)(THTensor *tensor)
+{
+  THTensor_(resizeNd)(tensor, 0, {}, nullptr);
 }
 
 void THTensor_(resize1d)(THTensor *tensor, int64_t size0)
@@ -572,8 +579,11 @@ void THTensor_(free)(THTensor *self)
 
 void THTensor_(freeCopyTo)(THTensor *self, THTensor *dst)
 {
-  if(self != dst)
-    THTensor_(copy)(dst, self);
+  if(self != dst) {
+    at::Tensor dst_wrap = THTensor_wrap(dst);
+    at::Tensor self_wrap = THTensor_wrap(self);
+    at::_copy_same_type_(dst_wrap, self_wrap);
+  }
 
   THTensor_(free)(self);
 }
@@ -588,6 +598,18 @@ void THTensor_(setStorageNd)(THTensor *self, THStorage *storage, ptrdiff_t stora
 void THTensor_(resizeNd)(THTensor *self, int nDimension, const int64_t *size, const int64_t *stride)
 {
   return THTensor_resizeNd(self, nDimension, size, stride);
+}
+
+void THTensor_(set0d)(THTensor *tensor, scalar_t value)
+{
+  THArgCheck(THTensor_nDimension(tensor) == 0, 1, "tensor must have no dimensions");
+  THStorage_(set)(THTensor_getStoragePtr(tensor), tensor->storage_offset(), value);
+}
+
+scalar_t THTensor_(get0d)(const THTensor *tensor)
+{
+  THArgCheck(THTensor_nDimension(tensor) == 0, 1, "tensor must have no dimensions");
+  return THStorage_(get)(THTensor_getStoragePtr(tensor), tensor->storage_offset());
 }
 
 void THTensor_(set1d)(THTensor *tensor, int64_t x0, scalar_t value)

@@ -1,9 +1,9 @@
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 #include <stdarg.h>
 #include <string>
-#include "THCP.h"
+#include <torch/csrc/cuda/THCP.h>
 
-#include "override_macros.h"
+#include <torch/csrc/cuda/override_macros.h>
 
 #define THC_GENERIC_FILE "torch/csrc/generic/utils.cpp"
 #include <THC/THCGenerateAllTypes.h>
@@ -27,11 +27,11 @@ std::vector<c10::optional<at::cuda::CUDAStream>> THPUtils_PySequence_to_CUDAStre
 
     if (PyObject_IsInstance(stream, THCPStreamClass)) {
       // Spicy hot reinterpret cast!!
-      streams.emplace_back( at::cuda::CUDAStream((reinterpret_cast<THCPStream*>(stream))->cdata) );
+      streams.emplace_back( at::cuda::CUDAStream::unpack((reinterpret_cast<THCPStream*>(stream))->cdata) );
     } else if (stream == Py_None) {
       streams.emplace_back();
     } else {
-      std::runtime_error("Unknown data type found in stream list. Need THCStream or None");
+      std::runtime_error("Unknown data type found in stream list. Need torch.cuda.Stream or None");
     }
   }
   return streams;
