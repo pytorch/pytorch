@@ -59,7 +59,7 @@ TYPE_MAP = {
     'int64_t?': 'int?',
     'double': 'float',
     'bool': 'bool',
-    'Generator': 'Generator',
+    'Generator': 'Generator?',
 }
 
 

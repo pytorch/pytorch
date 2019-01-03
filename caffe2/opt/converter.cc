@@ -384,10 +384,13 @@ repr::NNModule convertToNNModule(
 
   for (const auto& outputName : net.external_output()) {
     CAFFE_ENFORCE(
-        blobMap.count(outputName),
-        "NetDef has ill-formed external_output: \"",
-        outputName,
-        "\"");
+        !strict || blobMap.count(outputName),
+        "NetDef has ill-formed external_output:",
+        outputName);
+    if (!blobMap.count(outputName)) {
+      LOG(ERROR) << "NetDef has ill-formed external_output: " << outputName;
+      continue;
+    }
     module.outputs.insert(blobMap[outputName]);
   }
 

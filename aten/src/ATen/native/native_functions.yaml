@@ -956,6 +956,14 @@
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias={}) -> Tensor
 
+- func: fbgemm_linear_int8_weight(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
+
+- func: fbgemm_linear_quantize_weight(Tensor input) -> (Tensor, Tensor, double, int64_t)
+
+- func: fbgemm_pack_quantized_matrix(Tensor input, int64_t K, int64_t N) -> Tensor
+
+- func: fbgemm_is_cpu_supported() -> bool
+
 - func: linspace(Scalar start, Scalar end, int64_t steps=100, TensorOptions options={}) -> Tensor
 
 - func: linspace_out(Tensor result, Scalar start, Scalar end, int64_t steps=100) -> Tensor
@@ -1026,13 +1034,12 @@
 - func: logdet(Tensor self) -> Tensor
   variants: function, method
 
-- func: logspace(Scalar start, Scalar end, TensorOptions options={}) -> Tensor
+- func: logspace(Scalar start, Scalar end, int64_t steps=100, TensorOptions options={}) -> Tensor
 
-- func: logspace(Scalar start, Scalar end, int64_t steps, TensorOptions options={}) -> Tensor
-
-- func: logspace_out(Tensor result, Scalar start, Scalar end) -> Tensor
-
-- func: logspace_out(Tensor result, Scalar start, Scalar end, int64_t steps) -> Tensor
+- func: logspace_out(Tensor result, Scalar start, Scalar end, int64_t steps=100) -> Tensor
+  dispatch:
+    CPU: logspace_cpu_out
+    CUDA: logspace_cuda_out
 
 # FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
 - func: log_softmax(Tensor self, int64_t dim, ScalarType dtype) -> Tensor
@@ -1326,13 +1333,14 @@
     CPU: randperm_out_cpu
     CUDA: randperm_out_cuda
 
+- func: range(Scalar start, Scalar end, Scalar step=1, TensorOptions options={}) -> Tensor
+
 - func: range(Scalar start, Scalar end, TensorOptions options={}) -> Tensor
 
-- func: range(Scalar start, Scalar end, Scalar step, TensorOptions options={}) -> Tensor
-
-- func: range_out(Tensor result, Scalar start, Scalar end) -> Tensor
-
-- func: range_out(Tensor result, Scalar start, Scalar end, Scalar step) -> Tensor
+- func: range_out(Tensor result, Scalar start, Scalar end, Scalar step=1) -> Tensor
+  dispatch:
+    CPU: range_cpu_out
+    CUDA: range_cuda_out
 
 - func: repeat(Tensor self, IntList repeats) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
@@ -1721,6 +1729,10 @@
   variants: method
   device_guard: false
 
+- func: one_hot(IndexTensor self, int64_t num_classes=-1) -> Tensor
+  python_module: nn
+  variants: function
+
 - func: flip(Tensor self, IntList dims) -> Tensor
   variants: function, method
   dispatch:
@@ -1758,13 +1770,13 @@
 - func: type_as(Tensor self, Tensor other) -> Tensor
   variants: method
 
-- func: _unique(Tensor self, bool sorted=false, bool return_inverse=false) -> (Tensor, Tensor)
+- func: _unique(Tensor self, bool sorted=true, bool return_inverse=false) -> (Tensor, Tensor)
   variants: function
   dispatch:
     CPU: _unique_cpu
     CUDA: _unique_cuda
 
-- func: _unique_dim(Tensor self, int64_t dim, bool sorted=false, bool return_inverse=false) -> (Tensor, Tensor)
+- func: _unique_dim(Tensor self, int64_t dim, bool sorted=true, bool return_inverse=false) -> (Tensor, Tensor)
   variants: function
   dispatch:
     CPU: _unique_dim_cpu
@@ -2654,8 +2666,14 @@
   variants: method, function
 
 - func: tril_indices(int64_t row, int64_t col, int64_t offset=0, TensorOptions options=at::kLong) -> Tensor
+  dispatch:
+    CPU: tril_indices_cpu
+    CUDA: tril_indices_cuda
 
 - func: triu_indices(int64_t row, int64_t col, int64_t offset=0, TensorOptions options=at::kLong) -> Tensor
+  dispatch:
+    CPU: triu_indices_cpu
+    CUDA: triu_indices_cuda
 
 - func: trace(Tensor self) -> Tensor
   variants: method, function
@@ -3417,15 +3435,27 @@
 
 - func: replication_pad1d_out(Tensor output, Tensor self, IntList[2] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: replication_pad1d_out_cpu
+    CUDA: replication_pad1d_out_cuda
 
 - func: replication_pad1d(Tensor self, IntList[2] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: replication_pad1d_cpu
+    CUDA: replication_pad1d_cuda
 
 - func: replication_pad1d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, IntList[2] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: replication_pad1d_backward_out_cpu
+    CUDA: replication_pad1d_backward_out_cuda
 
 - func: replication_pad1d_backward(Tensor grad_output, Tensor self, IntList[2] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: replication_pad1d_backward_cpu
+    CUDA: replication_pad1d_backward_cuda
 
 - func: replication_pad2d_out(Tensor output, Tensor self, IntList[4] padding) -> Tensor
   python_module: nn

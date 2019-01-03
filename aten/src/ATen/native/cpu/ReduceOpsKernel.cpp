@@ -6,6 +6,7 @@
 #include <ATen/cpu/vec256/vec256.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/cpu/Reduce.h>
 #include <c10/util/Optional.h>
 
@@ -27,55 +28,18 @@ static void mean_kernel_impl(TensorIterator& iter) {
     scalar_t factor = scalar_t(iter.num_output_elements()) / iter.numel();
     binary_kernel_reduce(
       iter,
-      [=](scalar_t a, scalar_t b) -> scalar_t { return a + b; },
-      [=](scalar_t a, scalar_t b) -> scalar_t { return a + b; },
-      [factor](scalar_t a) -> scalar_t { return a*factor; }, scalar_t(0));
+      MeanOps<scalar_t, scalar_t> {factor},
+      scalar_t(0)
+    );
   });
 }
-
-struct WelfordData {
-  double mean;
-  double m2;
-  int64_t n;
-  WelfordData() : mean(0), m2(0), n(0)  {}
-  WelfordData(double mean, double m2, int64_t n) : mean(mean), m2(m2), n(n) {}
-};
 
 static void std_kernel_impl(TensorIterator &iter, bool unbiased) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.type(), "std", [&] {
     binary_kernel_reduce(
       iter,
-      [](WelfordData acc, scalar_t data) -> WelfordData {
-        double delta = data - acc.mean;
-        double new_mean = acc.mean + delta / (acc.n + 1);
-        double new_delta = data - new_mean;
-        return {
-          new_mean,
-          acc.m2 + delta * new_delta,
-          acc.n + 1
-        };
-      },
-      [](WelfordData a, WelfordData b) -> WelfordData {
-        if (a.n == 0) {
-          return b;
-        }
-        if (b.n == 0) {
-          return a;
-        }
-        double delta = b.mean - a.mean;
-        int64_t new_count = a.n + b.n;
-        double nb_over_n = (double)b.n / new_count;
-        return {
-          a.mean + delta * nb_over_n,
-          a.m2 + b.m2 + delta * delta * a.n * nb_over_n,
-          new_count
-        };
-      },
-      [unbiased](WelfordData acc) -> scalar_t {
-        int64_t divisor = unbiased ? (acc.n - 1) : acc.n;
-        return (divisor > 0) ? std::sqrt(acc.m2 / divisor) : NAN;
-      },
-      WelfordData()
+      WelfordOps<scalar_t, double> { unbiased },
+      WelfordData<double>()
     );
   });
 }

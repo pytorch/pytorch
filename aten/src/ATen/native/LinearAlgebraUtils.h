@@ -88,6 +88,18 @@ static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* nam
   }
 }
 
+/*
+ * Given a info int, obtained after a single operation, this function check if the computation
+ * has been successful (info = 0) or not, and report in case of the latter.
+ */
+static inline void singleCheckErrors(int64_t info, const char* name) {
+  if (info < 0) {
+    AT_ERROR(name, ": Argument ", -info, " has illegal value");
+  } else if (info > 0) {
+    AT_ERROR(name, ": U(", info, ",", info, ") is zero, singular U.");
+  }
+}
+
 // Checks if all the Tensors in a TensorList are of the same dimensions
 static inline void checkAllSameDim(TensorList tensors, int64_t dim) {
   for (auto &t : tensors) {

@@ -506,6 +506,19 @@ class NumpyTests(TestCase):
         self.assertEqual((1, 2, 3), a[True, True].shape)
         self.assertEqual((1, 2, 3), a[true, true].shape)
 
+    def test_boolean_list_indexing(self):
+        # Indexing a 2-dimensional array with
+        # boolean lists
+        a = tensor([[1, 2, 3],
+                    [4, 5, 6],
+                    [7, 8, 9]])
+        b = [True, False, False]
+        c = [True, True, False]
+        self.assertEqual(a[b], tensor([[1, 2, 3]]))
+        self.assertEqual(a[b, b], tensor([1]))
+        self.assertEqual(a[c], tensor([[1, 2, 3], [4, 5, 6]]))
+        self.assertEqual(a[c, c], tensor([1, 5]))
+
     def test_everything_returns_views(self):
         # Before `...` would return a itself.
         a = tensor([5])

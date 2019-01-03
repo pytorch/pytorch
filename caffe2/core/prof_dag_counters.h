@@ -64,10 +64,13 @@ class ProfDAGReport {
   void PrintStats();
 
  private:
-  ProfDAGProto statsProto(const std::string& name, const ProfDAGStats& stats)
-      const;
+  ProfDAGProto statsProto(
+      const std::string& name,
+      const ProfDAGStats& stats,
+      const std::vector<std::string>& op_extra_info) const;
 
   std::vector<std::string> op_types_;
+  std::vector<std::vector<std::string>> op_extra_info_;
 
   std::string net_name_;
 

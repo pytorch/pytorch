@@ -2729,21 +2729,28 @@ pdist = _add_docstr(torch.pdist, r"""
 pdist(input, p=2) -> Tensor
 
 Computes the p-norm distance between every pair of row vectors in the input.
-This is identical to the upper triangular portion, excluding the diagonal, of
-`torch.norm(input[:, None] - input, dim=2, p=p)`. This function will be faster
-if the rows are contiguous.
+If the input tensor has shape ... B x N x M, the result will be tensor with
+shape ... B x N * (N - 1) / 2. Every dimension prior to the last two are
+treated as independent batches of N vectors, each with M elements. If we use
+ordinal numbers to refer to the vectors in a batch, the last dimension of the
+output will be ordered as:
 
-If input has shape :math:`N \times M` then the output will have shape
-:math:`\frac{1}{2} N (N - 1)`.
+```
+[dist(1, 2), dist(1, 2), ..., dist(1, N), dist(2, 3), ..., dist(N-1, N)]
+```
 
-This function is equivalent to `scipy.spatial.distance.pdist(input,
-'minkowski', p=p)` if :math:`p \in (0, \infty)`. When :math:`p = 0` it is
-equivalent to `scipy.spatial.distance.pdist(input, 'hamming') * M`.
-When :math:`p = \infty`, the closest scipy function is
-`scipy.spatial.distance.pdist(xn, lambda x, y: np.abs(x - y).max())`.
+The square verion of pdist that has redundant distances and the diagonal can be
+be computed with
+`torch.norm(inpup[..., None, :] - input[..., None, :, :], p=p, dim=-1)`.
+Appropriately selecting and flattening the upper triangular of the
+last two dimensions will produce identical results as pdist.
+
+This function is similar to
+`scipy.spatial.distance.pdist(input, 'minkowski', p=p)`
+if :math:`p \in (0, \infty)`.
 
 Args:
-    input: input tensor of shape :math:`N \times M`.
+    input: input tensor of shape :math:`... \times N \times M`.
     p: p value for the p-norm distance to calculate between each vector pair
         :math:`\in [0, \infty]`.
 """)
@@ -2774,6 +2781,55 @@ Example::
     >>> input2 = torch.randn(100, 128)
     >>> output = F.cosine_similarity(input1, input2)
     >>> print(output)
+""")
+
+
+one_hot = _add_docstr(torch._C._nn.one_hot, r"""
+one_hot(tensor, num_classes=0) -> LongTensor
+
+Takes LongTensor with index values of shape ``(*)`` and returns a tensor
+of shape ``(*, num_classes)`` that have zeros everywhere except where the
+index of last dimension matches the corresponding value of the input tensor,
+in which case it will be 1.
+
+See also `One-hot on Wikipedia`_ .
+
+.. _One-hot on Wikipedia:
+    https://en.wikipedia.org/wiki/One-hot
+
+Arguments:
+    tensor (LongTensor): class values of any shape.
+    num_classes (int):  Total number of classes. If set to -1, the number
+        of classes will be inferred as one greater than the largest class
+        value in the input tensor.
+
+Returns:
+    Tensor: LongTensor that has one more dimension with 1 values at the
+        index of last dimension indicated by the input, and 0 everywhere
+        else.
+
+Examples::
+    >>> torch.one_hot(torch.arange(0, 5) % 3)
+    tensor([[1, 0, 0],
+            [0, 1, 0],
+            [0, 0, 1],
+            [1, 0, 0],
+            [0, 1, 0]])
+    >>> torch.one_hot(torch.arange(0, 5) % 3, num_classes=5)
+    tensor([[1, 0, 0, 0, 0],
+            [0, 1, 0, 0, 0],
+            [0, 0, 1, 0, 0],
+            [1, 0, 0, 0, 0],
+            [0, 1, 0, 0, 0]])
+    >>> torch.one_hot(torch.arange(0, 6).view(3,2) % 3)
+    tensor([[[1, 0, 0],
+             [0, 1, 0]],
+
+            [[0, 0, 1],
+             [1, 0, 0]],
+
+            [[0, 1, 0],
+             [0, 0, 1]]])
 """)
 
 

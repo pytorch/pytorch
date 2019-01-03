@@ -5,11 +5,12 @@
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/stack.h>
 
+#include <cstdint>
 #include <memory>
 #include <vector>
-#include <cstdint>
 
-namespace torch { namespace jit {
+namespace torch {
+namespace jit {
 
 constexpr int kCPUDevice = -1;
 
@@ -27,15 +28,16 @@ TORCH_API void runFusion(const int64_t key, Stack& stack);
 TORCH_API bool canFuseOnCPU();
 TORCH_API bool canFuseOnGPU();
 
-// Sets whether fusion on the CPU is allowed (disabled by default due to flakiness)
+// Sets whether fusion on the CPU is allowed (disabled by default due to
+// flakiness)
 TORCH_API void overrideCanFuseOnCPU(bool value);
 
 // Treats the given graph as a fusion group and launches it on the
 // specified device with the given inputs.
 // Returns the outputs.
 TORCH_API std::vector<at::Tensor> debugLaunchGraph(
-  Graph& graph
-, at::ArrayRef<at::Tensor> inputs);
+    Graph& graph,
+    at::ArrayRef<at::Tensor> inputs);
 
 TORCH_API size_t nCompiledKernels();
 

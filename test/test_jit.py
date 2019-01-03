@@ -3,6 +3,7 @@ import torch
 import torch.jit
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.jit.quantized
 from contextlib import contextmanager
 from itertools import product, chain
 import torch.jit.frontend
@@ -10,7 +11,7 @@ from torch.autograd import Variable, Function
 from torch.autograd.function import traceable
 from torch.testing import assert_allclose
 from torch.onnx import OperatorExportTypes
-from torch._six import inf, PY2
+from torch._six import inf, PY2, builtins
 from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
     freeze_rng_state, set_rng_seed
@@ -259,7 +260,9 @@ class JitTestCase(TestCase):
             try:
                 pp, constant_table = module._python_print()
             except RuntimeError as e:
-                if "could not export python function" not in str(e):
+                se = str(e)
+                if "could not export python function" not in se and \
+                   "closures are not exportable" not in se:
                     raise
                 else:
                     return
@@ -2066,6 +2069,22 @@ class TestJit(JitTestCase):
             fn_script(torch.tensor(0))
         warns = [str(w.message) for w in warns]
         self.assertEqual(len(warns), 0)
+
+    @unittest.skipIf(sys.platform == "win32", "TODO: need to fix this test case for Windows")
+    def test_torch_load_error(self):
+        class J(torch.jit.ScriptModule):
+            def __init__(self):
+                super(J, self).__init__()
+
+            @torch.jit.script_method
+            def forward(self, input):
+                return input + 100
+
+        j = J()
+        with tempfile.NamedTemporaryFile() as f:
+            j.save(f.name)
+            with self.assertRaisesRegex(RuntimeError, "is a zip"):
+                torch.load(f.name)
 
 
 class TestBatched(TestCase):
@@ -4212,35 +4231,31 @@ a")
             throwsAnd(t)
 
     def test_type_cast(self):
-        def test_int_to_float():
-            b = float(2)
-            return b + 1.0
-        self.checkScript(test_int_to_float, ())
+        template = dedent('''
+        def cast(v):
+            # type: ({from_type}) -> {to_type}
+            return {to_type}(v)
+        ''')
 
-        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
-            @torch.jit.script
-            def test_int_to_bool():
-                return bool(5)
+        def check_cast(from_type, to_type, value, raises=False):
+            code = template.format(from_type=from_type, to_type=to_type)
+            expected = getattr(builtins, to_type)(value)
+            if raises:
+                with self.assertRaisesRegex(RuntimeError, "Cannot cast"):
+                    cu = torch.jit.CompilationUnit(code)
+            else:
+                self.checkScript(code, (value,), name='cast', outputs=expected)
 
-        def test_float_to_int():
-            b = int(5.0)
-            return b + 1
-        self.checkScript(test_float_to_int, ())
+        check_cast('int', 'float', 1)
+        check_cast('int', 'bool', 1)
+        check_cast('int', 'bool', 0)
 
-        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
-            @torch.jit.script
-            def test_float_to_bool():
-                return bool(5.0)
+        check_cast('float', 'int', 1.)
+        check_cast('float', 'bool', 1.)
+        check_cast('float', 'bool', 0.)
 
-        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
-            @torch.jit.script
-            def test_bool_to_float():
-                return float(True)
-
-        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
-            @torch.jit.script
-            def test_bool_to_int():
-                return int(True)
+        check_cast('bool', 'int', True)
+        check_cast('bool', 'float', True)
 
     def test_multiple_assignment(self):
         def outer_func(x):
@@ -4332,21 +4347,33 @@ a")
         self.checkScript(tensor_test, (x, y))
 
     def test_number_math(self):
-        template = dedent('''
+        ops_template = dedent('''
         def func():
             return {scalar1} {op} {scalar2}
         ''')
         ops = ['+', '-', '*', '%', '<', '<=', '>', '>=', '==', '!=', '//']
+        funcs_template = dedent('''
+        def func():
+            return {func}({scalar1}, {scalar2})
+        ''')
+        funcs = ['min', 'max']
         scalars = ['7', '2', '3', '-3', '3.14', '0.125', '-0.5', '2.0', '-2.0']
         scalar_pairs = [(scalar1, scalar2) for scalar1 in scalars for scalar2 in scalars]
+
+        def run_test(code):
+            scope = {}
+            exec(code, globals(), scope)
+            cu = torch.jit.CompilationUnit(code)
+
+            self.assertEqual(cu.func(), scope['func']())
+
         for scalar1, scalar2 in scalar_pairs:
             for op in ops:
-                code = template.format(op=op, scalar1=scalar1, scalar2=scalar2)
-                scope = {}
-                exec(code, globals(), scope)
-                cu = torch.jit.CompilationUnit(code)
-
-                self.assertEqual(cu.func(), scope['func']())
+                code = ops_template.format(op=op, scalar1=scalar1, scalar2=scalar2)
+                run_test(code)
+            for func in funcs:
+                code = funcs_template.format(func=func, scalar1=scalar1, scalar2=scalar2)
+                run_test(code)
 
     def test_number_div(self):
         self.checkScript(div_int_future, (), optimize=True)
@@ -4891,7 +4918,7 @@ a")
         def __init__(self):
             super(TestScript.DerivedStateModule, self).__init__()
             self.param = torch.nn.Parameter(torch.ones(3, 4, dtype=torch.float))
-            self.register_buffer('derived', torch.neg(self.param).detach())
+            self.register_buffer('derived', torch.neg(self.param).detach().clone())
 
             # This is a flag so we can test that the pack method was called
             self.register_buffer('pack_called', torch.zeros(1, dtype=torch.long))
@@ -5994,7 +6021,6 @@ a")
         output_orig.sum().backward()
         grad_orig = input.grad.clone()
         input.grad.zero_()
-
         output_import = resnet18_imported(input)
         output_import.sum().backward()
         grad_import = input.grad.clone()
@@ -6097,6 +6123,25 @@ a")
         self.assertExpected(torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs))
+
+    @suppress_warnings
+    def test_onnx_export_func_with_warnings(self):
+        @torch.jit.script
+        def func_with_warning(inp):
+            return torch.nn.functional.sigmoid(inp)  # triggers a deprecation warning
+
+        class WarningTest(torch.nn.Module):
+            def __init__(self):
+                super(WarningTest, self).__init__()
+
+            def forward(self, x):
+                return func_with_warning(x)
+
+        outputs = WarningTest()(torch.randn(42))
+        # no exception
+        torch.onnx.export_to_pretty_string(
+            WarningTest(), torch.randn(42), None, verbose=False,
+            example_outputs=outputs)
 
     def test_onnx_export_script_python_fail(self):
         class ModuleToInline(torch.jit.ScriptModule):
@@ -6822,13 +6867,12 @@ a")
             MethodNoSelf()
 
     def test_return_stmt_not_at_end(self):
-        with self.assertRaisesRegex(RuntimeError, 'return statements can appear only at the end of the function body'):
-            @torch.jit.script
-            def return_stmt_wrong(x):
-                if bool(x > 3):
-                    return 3
-                else:
-                    return x
+        def return_stmt(x):
+            if bool(x > 3):
+                return x + 3
+            else:
+                return x
+        self.checkScript(return_stmt, (torch.rand(1),))
 
     def test_for_range_no_arg(self):
         with self.assertRaisesRegex(RuntimeError, r'range\(\) expects 1 argument but got 0'):
@@ -8004,6 +8048,43 @@ a")
 
             traced = torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[(torch.rand(3, 4),)])
 
+    # These tests don't work because UBSAN has a false positive about accessing
+    # out of bounds on a dynamically sized struct internal to asmjit
+    if not TEST_WITH_UBSAN and torch.fbgemm_is_cpu_supported():
+        def test_int8_quantization_module(self):
+            K1, N1 = 2, 2
+
+            class FooBar(torch.nn.Module):
+                def __init__(self):
+                    super(FooBar, self).__init__()
+                    self.linear1 = torch.nn.Linear(K1, N1).float()
+
+                def forward(self, x):
+                    x = self.linear1(x)
+                    return x
+
+            fb = FooBar()
+            fb.linear1.weight = torch.nn.Parameter(
+                torch.tensor([[-150, 100], [100, -150]], dtype=torch.float), requires_grad=False)
+            fb.linear1.bias = torch.nn.Parameter(torch.zeros_like(fb.linear1.bias), requires_grad=False)
+            fb_ref = FooBar()
+            fb_ref.linear1.weight = torch.nn.Parameter(fb.linear1.weight.clone(), requires_grad=False)
+            fb_ref.linear1.bias = torch.nn.Parameter(fb.linear1.bias.clone(), requires_grad=False)
+            torch.jit.quantized.quantize_linear_modules(fb)
+
+            x = (torch.rand(1, K1).float() - 0.5) / 10.0
+            traced = torch.jit.trace(fb, (x,))
+            traced.apply(lambda s: s._pack() if s._has_method('_pack') else None)
+            fb = self.getExportImportCopy(traced)
+            traced.apply(lambda s: s._unpack() if s._has_method('_unpack') else None)
+
+            fb.apply(lambda s: s._unpack() if s._has_method('_unpack') else None)
+
+            x = torch.tensor([[100, -150]], dtype=torch.float)
+            y = fb(x)
+            y_ref = fb_ref(x)
+            torch.testing.assert_allclose(y, y_ref, rtol=0.0001, atol=1e-3)
+
     def checkTracerWarning(self, *args, **kwargs):
         with warnings.catch_warnings(record=True) as warns:
             torch.jit.trace(*args, **kwargs)
@@ -8840,6 +8921,93 @@ a")
         with self.capture_stdout() as captured:
             print(fn(x, scale, shift))
 
+    def test_non_final_return(self):
+
+        def simple(x):
+            if bool(x > 3):
+                return x + 1
+            else:
+                return x + 2
+            raise RuntimeError("nope")
+
+        def nest(x):
+            x = x + 1
+            if bool(x > 3):
+                if bool(x > 4):
+                    x += 1
+                return x + 1
+            else:
+                return x + 2
+
+        def early_ret(x):
+            x = x + 1
+            if bool(x > 3):
+                return x + 1
+            x = x + 1
+            return x + 2
+
+        def nest_early_ret(x):
+            x = x + 1
+            if bool(x > 3):
+                if bool(x > 4):
+                    return x + 2
+                return x + 1
+            x = x + 1
+            return x + 2
+
+        self.checkScript(simple, torch.rand(1))
+        self.checkScript(nest, torch.rand(1))
+        self.checkScript(early_ret, torch.rand(1))
+        self.checkScript(nest_early_ret, torch.rand(1))
+
+        with self.assertRaisesRegex(RuntimeError, "early"):
+            @torch.jit.script
+            def not_early_ret(x):
+                if bool(x > 3):
+                    if bool(x > 4):
+                        return 1
+                    print("foo")
+                else:
+                    print("5")
+                return 7
+
+        with self.assertRaisesRegex(RuntimeError, "some paths"):
+            @torch.jit.script
+            def not_total_ret(x):
+                if bool(x > 3):
+                    if bool(x > 4):
+                        return 1
+                    else:
+                        return 2
+                else:
+                    print("5")
+                return 7
+
+        with self.assertRaisesRegex(RuntimeError, "from a loop"):
+            @torch.jit.script
+            def nest_while_ret(x):
+                while bool(x > 4):
+                    if bool(x < 3):
+                        return 4
+                return 5
+
+        with self.assertRaisesRegex(RuntimeError, "from a loop"):
+            @torch.jit.script
+            def nest_for_ret(x):
+                for i in range(3):
+                    if bool(x < 3):
+                        return 4
+                return 5
+
+    def test_select_after_chunk(self):
+        def foo(x):
+            chunked = torch.chunk(x, 1)
+            foo = chunked[0]
+            foo.add_(5)
+            return x
+
+        self.checkScript(foo, [torch.rand(2, 3)])
+
 
 class MnistNet(nn.Module):
     def __init__(self):
@@ -9110,7 +9278,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         self._test_reinforcement_learning(self, device='cuda', test_export_import=False)
 
     @staticmethod
-    def _test_snli(self, device, check_export_import=True):
+    def _test_snli(self, device, check_export_import=True, quantized=False):
         class Bottle(nn.Module):
 
             def forward(self, input):
@@ -9197,12 +9365,25 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         premise = torch.LongTensor(48, 128).random_(0, 100).to(device)
         hypothesis = torch.LongTensor(24, 128).random_(0, 100).to(device)
 
-        self.checkTrace(SNLIClassifier(Config()).to(device), (premise, hypothesis),
-                        inputs_require_grads=False, export_import=check_export_import)
+        if quantized:
+            snli = SNLIClassifier(Config()).cpu()
+            torch.jit.quantized.quantize_linear_modules(snli)
+            # we don't do export/import checks because we would need to call
+            # _pack/_unpack
+            self.checkTrace(snli, (premise, hypothesis), inputs_require_grads=False,
+                            export_import=False)
+        else:
+            self.checkTrace(SNLIClassifier(Config()).to(device), (premise, hypothesis),
+                            inputs_require_grads=False, export_import=check_export_import)
 
     @skipIfRocm
     def test_snli(self):
         self._test_snli(self, device='cpu')
+
+    if not TEST_WITH_UBSAN and torch.fbgemm_is_cpu_supported():
+        @skipIfRocm
+        def test_snli_quantized(self):
+            self._test_snli(self, device='cpu', quantized=True)
 
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
@@ -9306,7 +9487,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                         export_import=False)
 
     @staticmethod
-    def _test_vae(self, device, check_export_import=True):
+    def _test_vae(self, device, check_export_import=True, quantized=False):
         class VAE(nn.Module):
             def __init__(self):
                 super(VAE, self).__init__()
@@ -9338,12 +9519,25 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 z = self.reparameterize(mu, logvar)
                 return self.decode(z), mu, logvar
 
-        # eval() is present because randn_like makes this nondeterministic
-        self.checkTrace(VAE().to(device).eval(), (torch.rand(128, 1, 28, 28, device=device),),
-                        export_import=check_export_import)
+        if quantized:
+            vae = VAE().to(device).eval()
+            torch.jit.quantized.quantize_linear_modules(vae)
+            # We don't do export/import checks because we would need to call
+            # _unpack and _pack
+            self.checkTrace(vae, (torch.rand(128, 1, 28, 28, device=device),),
+                            export_import=False, allow_unused=True,
+                            inputs_require_grads=False)
+        else:
+            # eval() is present because randn_like makes this nondeterministic
+            self.checkTrace(VAE().to(device).eval(), (torch.rand(128, 1, 28, 28, device=device),),
+                            export_import=check_export_import)
 
     def test_vae(self):
         self._test_vae(self, device='cpu')
+
+    if not TEST_WITH_UBSAN and torch.fbgemm_is_cpu_supported():
+        def test_vae_quantized(self):
+            self._test_vae(self, device='cpu', quantized=True)
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_vae_cuda(self):
@@ -9499,6 +9693,7 @@ EXCLUDE_SCRIPT_MODULES = {
 
 DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
     'test_nn_avg_pool2d',
+    'test_nn_adaptive_avg_pool2d',
     'test_nn_log_softmax',
     'test_nn_threshold',
     'test_nn_nll_loss',

@@ -1829,6 +1829,41 @@ class TestSparse(TestCase):
         with self.assertRaisesRegex(RuntimeError, "bool value of Tensor with no values is ambiguous"):
             torch.sparse_coo_tensor(([0, 1],), self.ValueTensor(2, 0), (4, 0)).is_nonzero()
 
+    def test_allow_tensor_metadata_change(self):
+        def do_test(t):
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    "raw_resize_ is not allowed on Tensor created from .data or .detach()"):
+                t.transpose_(0, 1)
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    "resize_ is not allowed on Tensor created from .data or .detach()"):
+                t.resize_as_(self.SparseTensor(3, 3))
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    "resize_and_clear_ is not allowed on Tensor created from .data or .detach()"):
+                t.mul_(t)
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    "set_coalesced is not allowed on Tensor created from .data or .detach()"):
+                t._coalesced_(True)
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    "set_indices_and_values_unsafe is not allowed on Tensor created from .data or .detach()"):
+                a = self.SparseTensor(torch.tensor([[0, 1, 1], [2, 0, 2]]), torch.tensor([3., 4., 5.])).data
+                a.add_(a)
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    "resize_and_clear_ is not allowed on Tensor created from .data or .detach()"):
+                a.zero_()
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    "resize_ is not allowed on Tensor created from .data or .detach()"):
+                a.copy_(self.SparseTensor(3, 3))
+
+        do_test(self.SparseTensor(3, 0).data)
+        do_test(self.SparseTensor(3, 0).detach())
+
 
 class TestUncoalescedSparse(TestSparse):
     def setUp(self):
