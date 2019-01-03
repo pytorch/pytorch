@@ -1417,6 +1417,44 @@ class TestCuda(TestCase):
             self.assertEqual(torch.cuda.current_stream().device, 1)
             self.assertNotEqual(torch.cuda.current_stream(), default_stream)
 
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    @skipIfRocm
+    def test_streams_multi_gpu_query(self):
+        d0 = torch.device('cuda:0')
+        d1 = torch.device('cuda:1')
+
+        with torch.cuda.device(d0):
+            s0 = torch.cuda.current_stream()
+
+        with torch.cuda.device(d1):
+            s1 = torch.cuda.current_stream()
+            torch.cuda._sleep(50000000)  # spin for about 50 ms on device1
+
+        self.assertTrue(s0.query())
+        self.assertFalse(s1.query())
+
+        with torch.cuda.device(d0):
+            self.assertTrue(s0.query())
+            self.assertFalse(s1.query())
+
+        with torch.cuda.device(d1):
+            self.assertTrue(s0.query())
+            self.assertFalse(s1.query())
+
+        with torch.cuda.device(d1):
+            s1.synchronize()
+
+        self.assertTrue(s0.query())
+        self.assertTrue(s1.query())
+
+        with torch.cuda.device(d0):
+            self.assertTrue(s0.query())
+            self.assertTrue(s1.query())
+
+        with torch.cuda.device(d1):
+            self.assertTrue(s0.query())
+            self.assertTrue(s1.query())
+
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_tensor_device(self):
         self.assertEqual(torch.cuda.FloatTensor(1).get_device(), 0)
