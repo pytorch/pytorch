@@ -1440,6 +1440,9 @@ class TestCuda(TestCase):
             self.assertTrue(s0.query())
             self.assertFalse(s1.query())
 
+        with torch.cuda.device(d1):
+            s1.synchronize()
+
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_tensor_device(self):
         self.assertEqual(torch.cuda.FloatTensor(1).get_device(), 0)
