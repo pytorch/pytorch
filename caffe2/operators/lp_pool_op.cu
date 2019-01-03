@@ -6,7 +6,9 @@
 
 namespace caffe2 {
 namespace {
-class LpPool {};
+struct LpPoolFunctor {
+  explicit LpPoolFunctor(const OperatorBase& /* op */) {}
+};
 } // namespace
 
 namespace {
@@ -211,7 +213,7 @@ __global__ void LpPoolBackwardNHWC(
 } // namespace
 
 template <>
-bool PoolOp<float, CUDAContext, LpPool>::RunOnDeviceWithOrderNCHW() {
+bool PoolOp<float, CUDAContext, LpPoolFunctor>::RunOnDeviceWithOrderNCHW() {
   auto& X = Input(0);
   auto* Y = Output(0);
   ConvPoolOpBase<CUDAContext>::SetOutputSize(X, Y, X.dim32(1));
@@ -241,7 +243,7 @@ bool PoolOp<float, CUDAContext, LpPool>::RunOnDeviceWithOrderNCHW() {
 }
 
 template <>
-bool PoolOp<float, CUDAContext, LpPool>::RunOnDeviceWithOrderNHWC() {
+bool PoolOp<float, CUDAContext, LpPoolFunctor>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(0);
   auto* Y = Output(0);
   ConvPoolOpBase<CUDAContext>::SetOutputSize(X, Y, X.dim32(3));
@@ -271,7 +273,7 @@ bool PoolOp<float, CUDAContext, LpPool>::RunOnDeviceWithOrderNHWC() {
 }
 
 template <>
-bool PoolGradientOp<float, CUDAContext, LpPool>::
+bool PoolGradientOp<float, CUDAContext, LpPoolFunctor>::
     RunOnDeviceWithOrderNCHW() {
   auto& X = Input(0);
   auto& Y = Input(1);
@@ -307,7 +309,7 @@ bool PoolGradientOp<float, CUDAContext, LpPool>::
 }
 
 template <>
-bool PoolGradientOp<float, CUDAContext, LpPool>::
+bool PoolGradientOp<float, CUDAContext, LpPoolFunctor>::
     RunOnDeviceWithOrderNHWC() {
   auto& X = Input(0);
   auto& Y = Input(1);
@@ -342,8 +344,8 @@ bool PoolGradientOp<float, CUDAContext, LpPool>::
   return true;
 }
 
-REGISTER_CUDA_OPERATOR(LpPool, PoolOp<float, CUDAContext, LpPool>);
+REGISTER_CUDA_OPERATOR(LpPool, PoolOp<float, CUDAContext, LpPoolFunctor>);
 REGISTER_CUDA_OPERATOR(
     LpPoolGradient,
-    PoolGradientOp<float, CUDAContext, LpPool>);
+    PoolGradientOp<float, CUDAContext, LpPoolFunctor>);
 }
