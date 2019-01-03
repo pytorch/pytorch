@@ -272,7 +272,8 @@ class CosineAnnealingRestartsLR(_LRScheduler):
     schedule with warm restarts, where :math:`\eta_{max}` is set to the
     initial learning rate, :math:`T_{cur}` is the number of epochs since the
     last restart and :math:`T_i` is the number of epochs in :math:`i`-th run
-    (after performing :math:`i` restarts):
+    (after performing :math:`i` restarts). If the learning rate is set
+    solely by this scheduler, the learning rate at each step becomes:
 
     .. math::
 
@@ -281,6 +282,8 @@ class CosineAnnealingRestartsLR(_LRScheduler):
 
         T_i = T T_{mult}^i
 
+    Notice that because the schedule is defined recursively, the learning rate
+    can be simultaneously modified outside this scheduler by other operators.
     When last_epoch=-1, sets initial lr as lr.
 
     It has been proposed in
@@ -316,23 +319,34 @@ class CosineAnnealingRestartsLR(_LRScheduler):
         super(CosineAnnealingRestartsLR, self).__init__(optimizer, last_epoch)
 
     def get_lr(self):
+        if self.last_epoch == 0:
+            return self.base_lrs
+
         if self.T_mult == 1:
             i_restarts = self.last_epoch // self.T
             last_restart = i_restarts * self.T
-            T_i = self.T
-
         else:
             # computation of the last restarting epoch is based on sum of geometric series:
             # last_restart = T * (1 + T_mult + T_mult ** 2 + ... + T_mult ** i_restarts)
-            i_restarts = math.floor(math.log(1 - self.last_epoch * (1 - self.T_mult) / self.T,
-                                             self.T_mult))
-            last_restart = self.T * (1 - self.T_mult ** i_restarts) / (1 - self.T_mult)
+            i_restarts = int(math.log(1 - self.last_epoch * (1 - self.T_mult) / self.T,
+                                      self.T_mult))
+            last_restart = int(self.T * (1 - self.T_mult ** i_restarts) / (1 - self.T_mult))
+
+        if self.last_epoch == last_restart:
+            T_i1 = self.T * self.T_mult ** (i_restarts - 1)  # T_{i-1}
+            lr_update = self.eta_mult / self._decay(T_i1 - 1, T_i1)
+        else:
             T_i = self.T * self.T_mult ** i_restarts
+            t = self.last_epoch - last_restart
+            lr_update = self._decay(t, T_i) / self._decay(t - 1, T_i)
 
-        t = (self.last_epoch - last_restart) / T_i
-        decay = 0.5 * (self.eta_mult ** i_restarts) * (1 + math.cos(math.pi * t))
+        return [lr_update * (group['lr'] - self.eta_min) + self.eta_min
+                for group in self.optimizer.param_groups]
 
-        return [decay * base_lr + (1 - decay) * self.eta_min for base_lr in self.base_lrs]
+    @staticmethod
+    def _decay(t, T):
+        """Cosine decay for step t in run of length T, where 0 <= t < T."""
+        return 0.5 * (1 + math.cos(math.pi * t / T))
 
 
 class ReduceLROnPlateau(object):
