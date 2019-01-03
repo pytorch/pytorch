@@ -159,6 +159,12 @@ struct Environment {
       return;
 
     auto cond_value = b->owningNode()->input();
+
+    // only allow expressions within the conditional to refine types
+    // do not allow assigning expression to a variable and then using variable
+    if (cond_value->hasUniqueName())
+      return;
+
     auto maybe_bool_info = getBoolInfo(cond_value);
     if (maybe_bool_info) {
       auto bool_info = *maybe_bool_info;
@@ -1045,30 +1051,34 @@ struct to_ir {
 
   BoolInfo getConditionBoolInfo(Value * cond) {
     JIT_ASSERT(cond->type() == BoolType::get());
+
+    // only allow expressions within the conditional to refine types
+    // do not allow assigning expression to a variable and then using variable
+    if (cond->hasUniqueName()) {
+      return BoolInfo();
+    }
     if (auto maybe_found = environment_stack->getBoolInfo(cond)) {
       return *maybe_found;
     }
-    Refinements true_refinements, false_refinements;
-    if (cond->node()->kind() == aten::__is__ || cond->node()->kind() == aten::__isnot__) {
-      Value * input_val = cond->node()->inputs().at(0);
-      // only handling t? is None / t? is not None
-      if (input_val->type()->cast<OptionalType>() &&
-          cond->node()->inputs().at(1)->mustBeNone()) {
-
-        true_refinements[input_val] = NoneType::get();
-        false_refinements[input_val] = input_val->type()->expect<OptionalType>()->getElementType();
-        if (cond->node()->kind() == aten::__isnot__) {
-          return BoolInfo(false_refinements, true_refinements);
-        }
-      }
-    }
-    return BoolInfo(true_refinements, false_refinements);
+    return BoolInfo();
   }
 
-  void setConditionBoolInfo(Value *v) {
-    if (!environment_stack->getBoolInfo(v)) {
-      auto bool_info = getConditionBoolInfo(v);
-      environment_stack->setBoolInfo(v, bool_info);
+  void setIsBoolInfo(Value * val) {
+    JIT_ASSERT(val->node()->kind() == aten::__is__ || val->node()->kind() == aten::__isnot__);
+    Value * input_val = val->node()->inputs().at(0);
+
+    if (!(input_val->type()->cast<OptionalType>() &&
+        val->node()->inputs().at(1)->mustBeNone())) {
+      return;
+    }
+
+    Refinements true_info, false_info;
+    true_info[input_val] = NoneType::get();
+    false_info[input_val] = input_val->type()->expect<OptionalType>()->getElementType();
+    if (val->node()->kind() == aten::__isnot__) {
+      environment_stack->setBoolInfo(val, BoolInfo(false_info, true_info));
+    } else {
+      environment_stack->setBoolInfo(val, BoolInfo(true_info, false_info));
     }
   }
 
@@ -1084,7 +1094,6 @@ struct to_ir {
       }
       throw error;
     }
-    setConditionBoolInfo(v);
     return v;
   }
 
@@ -1245,17 +1254,10 @@ struct to_ir {
       // emit the whole If stmt as usual, finish emitCond first
       auto lhs_range = cond_op.lhs().get()->range();
       auto rhs_range = cond_op.rhs().get()->range();
+
       auto kind = getNodeKind(cond.kind(), cond.get()->trees().size());
-      Value* cond_value = emitBuiltinCall(
-          cond.get()->range(),
-          *method.graph(),
-          kind,
-          c10::nullopt,
-          {lhs_val->asValue(lhs_range, method),
-           rhs_val->asValue(rhs_range, method)},
-          {},
-          /*required=*/true);
-      setConditionBoolInfo(cond_value);
+      Value * cond_value = emitIs(cond.get()->range(), lhs_val->asValue(lhs_range, method),
+        rhs_val->asValue(rhs_range, method), kind);
       emitIfElseBlocks(cond_value, stmt);
     }
   }
@@ -2020,21 +2022,6 @@ struct to_ir {
           isInstanceCheck(apply.inputs()[0], apply.inputs()[1]);
       return std::make_shared<SimpleValue>(
           graph->insertConstant(is_instance_val, loc));
-    } else if (auto isinstance = dynamic_cast<UncheckedUnwrapOptional*>(sv.get())) {
-      JIT_ASSERT(apply.inputs().size() == 1);
-      auto input = emitExpr(apply.inputs()[0]);
-
-      // When a graph is exported and reimported, the implicitly inserted unchecked
-      // optionals will exist when inserting the ones from the previous compilation
-      // here, special case so that we don't emit chains of unchecked optionals
-      if (input->node()->kind() == prim::_unchecked_unwrap_optional) {
-        Value * prev_input = input->node()->input();
-        prev_input->setUniqueName(prev_input->uniqueNameBase()); //reset name to prevent jittering
-        input = prev_input;
-      }
-      Value * output_val = graph->insert(prim::_unchecked_unwrap_optional, {input});
-      return std::make_shared<SimpleValue>(output_val);
->>>>>>> Add optional unwrapping
     } else {
       auto inputs = getNamedValues(apply.inputs(), true);
       auto attributes = emitAttributes(apply.attributes());
@@ -2114,6 +2101,19 @@ struct to_ir {
     return graph->insertConstant(stack[0], tree->range());
   }
 
+  Value * emitIs(const SourceRange& loc, NamedValue left, NamedValue right, NodeKind kind) {
+    Value * val = emitBuiltinCall(
+               loc,
+               *method.graph(),
+               kind,
+               c10::nullopt,
+               {left, right},
+               {},
+               /*required=*/true);
+   setIsBoolInfo(val);
+   return val;
+  }
+
   // This function extract a new graph from its original subgraph
   std::shared_ptr<SugaredValue> emitForkExpr(
       SourceRange loc,
@@ -2167,8 +2167,6 @@ struct to_ir {
     switch (tree->kind()) {
       case '@':
       case TK_POW:
-      case TK_IS:
-      case TK_ISNOT:
       case TK_NOT:
       case TK_NE:
       case TK_EQ:
@@ -2205,6 +2203,13 @@ struct to_ir {
         const auto& inputs = tree->trees();
         return emitShortCircuitIf(
             tree->range(), inputs[0], inputs[1], tree->kind() == TK_OR);
+      }
+      case TK_IS:
+      case TK_ISNOT: {
+        const auto& inputs = tree->trees();
+        auto kind = getNodeKind(tree->kind(), inputs.size());
+        auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
+        return emitIs(tree->range(), named_values[0], named_values[1], kind);
       }
       case TK_STARRED: {
         throw ErrorReport(tree)
