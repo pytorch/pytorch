@@ -16,8 +16,8 @@ graph {
     attribute {
       name: "split"
       ints: 2
-      ints: 2
-      ints: 2
+      ints: 1
+      ints: 3
       type: INTS
     }
   }
@@ -64,7 +64,7 @@ graph {
             dim_value: 2
           }
           dim {
-            dim_value: 2
+            dim_value: 1
           }
         }
       }
@@ -80,7 +80,7 @@ graph {
             dim_value: 2
           }
           dim {
-            dim_value: 2
+            dim_value: 3
           }
         }
       }
