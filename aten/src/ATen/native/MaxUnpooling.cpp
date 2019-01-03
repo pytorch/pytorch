@@ -1,6 +1,6 @@
-#include <tuple>
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
+#include <tuple>
 
 namespace at {
 namespace native {
@@ -38,7 +38,8 @@ Tensor max_unpooling2d_forward_out_cpu_frame(
     int64_t error_index = 0;
 #pragma omp parallel for private(k)
     for (k = 0; k < numChannels; k++) {
-      int64_t finalOutputOffset = nOutputOffset + k * outputWidth * outputHeight;
+      int64_t finalOutputOffset =
+          nOutputOffset + k * outputWidth * outputHeight;
       int64_t finalInputOffset = nInputOffset + k * inputWidth * inputHeight;
       scalar_t* output_p_k = rawOutput + finalOutputOffset;
       scalar_t* input_p_k = rawInput + finalInputOffset;
@@ -126,9 +127,7 @@ Tensor max_unpooling2d_forward_cpu(
     const Tensor& self,
     const Tensor& indices,
     IntList output_size) {
-  auto output = at::empty(
-      {0},
-      self.options());
+  auto output = at::empty({0}, self.options());
   max_unpooling2d_forward_out_cpu(output, self, indices, output_size);
   return output;
 }
@@ -220,7 +219,6 @@ void max_unpooling3d_shape_check(
     IntList output_size,
     IntList stride,
     IntList padding) {
-
   AT_CHECK(
       indices.scalar_type() == at::ScalarType::Long,
       "elements in indices should be type Long");
@@ -326,9 +324,7 @@ Tensor max_unpooling3d_forward_cpu(
     IntList output_size,
     IntList stride,
     IntList padding) {
-  auto output = at::empty(
-      {0},
-      self.options());
+  auto output = at::empty({0}, self.options());
   max_unpooling3d_forward_out_cpu(
       output, self, indices, output_size, stride, padding);
   return output;
@@ -344,7 +340,6 @@ static void max_unpooling2d_backward_out_cpu_frame(
     int64_t iheight,
     int64_t owidth,
     int64_t oheight) {
-
   bool has_error = false;
   int64_t error_index = 0;
   int k;
@@ -369,7 +364,7 @@ static void max_unpooling2d_backward_out_cpu_frame(
       }
     }
   }
-  if(has_error) {
+  if (has_error) {
     AT_ERROR(
         "invalid max index ",
         error_index,

@@ -186,9 +186,7 @@ Tensor max_unpooling2d_forward_cuda(
     const Tensor& self,
     const Tensor& indices,
     IntList output_size) {
-  auto output = at::empty(
-      {0},
-      self.options());
+  auto output = at::empty({0}, self.options());
   max_unpooling2d_forward_out_cuda(output, self, indices, output_size);
   return output;
 }
@@ -200,7 +198,6 @@ void max_unpooling3d_shape_check(
     IntList output_size,
     IntList stride,
     IntList padding) {
-
   AT_CHECK(
       indices.scalar_type() == at::ScalarType::Long,
       "elements in indices should be type Long");
@@ -266,7 +263,6 @@ Tensor& max_unpooling3d_forward_out_cuda(
     IntList output_size,
     IntList stride,
     IntList padding) {
-
   max_unpooling3d_shape_check(
       self, Tensor(), indices, output_size, stride, padding);
 
@@ -374,9 +370,7 @@ Tensor max_unpooling3d_forward_cuda(
     IntList output_size,
     IntList stride,
     IntList padding) {
-  auto output = at::empty(
-      {0},
-      self.options());
+  auto output = at::empty({0}, self.options());
   max_unpooling3d_forward_out_cuda(
       output, self, indices, output_size, stride, padding);
   return output;
@@ -494,7 +488,6 @@ at::Tensor& max_unpooling3d_backward_out_cuda(
     IntList output_size,
     IntList stride,
     IntList padding) {
-
   max_unpooling3d_shape_check(
       self, grad_output, indices, output_size, stride, padding);
 
