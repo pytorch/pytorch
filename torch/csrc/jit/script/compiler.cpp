@@ -29,16 +29,18 @@ using ValueTable = std::unordered_map<std::string, SugaredValuePtr>;
 using AttributeMap = std::unordered_map<std::string, Const>;
 using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
 
-using Refinements = std::unordered_map<Value *, TypePtr>;
+using Refinements = std::unordered_map<Value*, TypePtr>;
 
 // When a comparison like x is None is made, we associate type refinements
-// with its true value and its false value. If a boolean that has refinements associated
-// with it is used in a conditional of an if statememt, the true and false refinements
-// are inserted into the corresponding block
+// with its true value and its false value. If a boolean that has refinements
+// associated with it is used in a conditional of an if statememt, the true and
+// false refinements are inserted into the corresponding block
+
 struct BoolInfo {
-  BoolInfo(Refinements true_refinements, Refinements false_refinements):
-    true_refinements(true_refinements), false_refinements(false_refinements) {};
-  BoolInfo() {};
+  BoolInfo(Refinements true_refinements, Refinements false_refinements)
+      : true_refinements(true_refinements),
+        false_refinements(false_refinements){};
+  BoolInfo(){};
 
   Refinements true_refinements;
   Refinements false_refinements;
@@ -110,8 +112,8 @@ struct Environment {
   std::unordered_map<std::string, std::string> error_messages;
   Block* b;
 
-  Refinements * active_refinements;
-  std::unordered_map<Value *, BoolInfo> bool_information;
+  Refinements* active_refinements;
+  std::unordered_map<Value*, BoolInfo> bool_information;
 
   std::shared_ptr<Environment> next;
 
@@ -140,11 +142,11 @@ struct Environment {
     }
   }
 
-  void setBoolInfo(Value * v, BoolInfo info) {
+  void setBoolInfo(Value* v, BoolInfo info) {
     bool_information[v] = info;
   }
 
-  c10::optional<BoolInfo> getBoolInfo(Value * v) {
+  c10::optional<BoolInfo> getBoolInfo(Value* v) {
     for (auto runner = this; runner; runner = runner->next.get()) {
       auto info = runner->bool_information.find(v);
       if (info != runner->bool_information.end()) {
@@ -183,12 +185,12 @@ struct Environment {
       return;
     auto g = b->owningGraph();
     WithInsertPoint guard(b);
-    for (auto value_type: *active_refinements) {
-      Value * v = value_type.first;
+    for (auto value_type : *active_refinements) {
+      Value* v = value_type.first;
       auto type = value_type.second;
       if (type != NoneType::get()) {
         auto output = g->insert(prim::_unchecked_unwrap_optional, {v});
-        //set name using "a" and not "a.1"
+        // set name using "a" and not "a.1"
         setVar(fakeRange(), v->uniqueNameBase(), output);
       }
     }
@@ -915,8 +917,10 @@ struct to_ir {
     // so we take the union of a.true_refinements and b.true_refinements.
     // if the result is false, either a or b could have been false,
     // so we take their intersection.
-    auto true_refinements = unionRefinements(a.true_refinements, b.true_refinements);
-    auto false_refinements = intersectRefinements(a.false_refinements, b.false_refinements);
+    auto true_refinements =
+        unionRefinements(a.true_refinements, b.true_refinements);
+    auto false_refinements =
+        intersectRefinements(a.false_refinements, b.false_refinements);
     return BoolInfo(true_refinements, false_refinements);
   }
 
@@ -925,8 +929,10 @@ struct to_ir {
     // so we take the intersection of a.true_refinements & b.true_refinements.
     // if the result is false, both a and b had to be false,
     // so we take their union.
-    auto true_refinements = intersectRefinements(a.true_refinements, b.true_refinements);
-    auto false_refinements = unionRefinements(a.false_refinements, b.false_refinements);
+    auto true_refinements =
+        intersectRefinements(a.true_refinements, b.true_refinements);
+    auto false_refinements =
+        unionRefinements(a.false_refinements, b.false_refinements);
     return BoolInfo(true_refinements, false_refinements);
   }
 
@@ -934,8 +940,8 @@ struct to_ir {
   // types can be unified
   Refinements intersectRefinements(Refinements a, Refinements b) {
     Refinements ret;
-    for (auto& value_type: a) {
-      Value * v_1 = value_type.first;
+    for (auto& value_type : a) {
+      Value* v_1 = value_type.first;
       TypePtr t_1 = value_type.second;
       auto maybe_t_2 = b.find(v_1);
       if (maybe_t_2 != b.end()) {
@@ -952,8 +958,8 @@ struct to_ir {
   // types can be unified
   Refinements unionRefinements(Refinements a, Refinements b) {
     Refinements ret;
-    for (auto& value_type: a) {
-      Value * v_1 = value_type.first;
+    for (auto& value_type : a) {
+      Value* v_1 = value_type.first;
       TypePtr t_1 = value_type.second;
       auto maybe_t_2 = b.find(v_1);
       if (maybe_t_2 != b.end()) {
@@ -966,8 +972,8 @@ struct to_ir {
       }
     }
 
-    for (auto& value_type: b) {
-      Value * v_1 = value_type.first;
+    for (auto& value_type : b) {
+      Value* v_1 = value_type.first;
       TypePtr t_1 = value_type.second;
       if (a.count(v_1) == 0) {
         ret[v_1] = t_1;
@@ -982,13 +988,11 @@ struct to_ir {
       const TreeRef& first_expr,
       const TreeRef& second_expr,
       bool is_or) {
-    Value * first_value = emitCond(Expr(first_expr));
+    Value* first_value = emitCond(Expr(first_expr));
     BoolInfo fst_expr_bool_info = getConditionBoolInfo(first_value);
     BoolInfo snd_expr_bool_info;
 
-    auto get_first_expr = [first_value] {
-      return first_value;
-    };
+    auto get_first_expr = [first_value] { return first_value; };
     auto get_second_expr = [&] {
       auto v = emitCond(Expr(second_expr));
       snd_expr_bool_info = getConditionBoolInfo(v);
@@ -1049,7 +1053,7 @@ struct to_ir {
     return expr_value;
   }
 
-  BoolInfo getConditionBoolInfo(Value * cond) {
+  BoolInfo getConditionBoolInfo(Value* cond) {
     JIT_ASSERT(cond->type() == BoolType::get());
 
     // only allow expressions within the conditional to refine types
@@ -1063,18 +1067,21 @@ struct to_ir {
     return BoolInfo();
   }
 
-  void setIsBoolInfo(Value * val) {
-    JIT_ASSERT(val->node()->kind() == aten::__is__ || val->node()->kind() == aten::__isnot__);
-    Value * input_val = val->node()->inputs().at(0);
+  void setIsBoolInfo(Value* val) {
+    JIT_ASSERT(
+        val->node()->kind() == aten::__is__ ||
+        val->node()->kind() == aten::__isnot__);
+    Value* input_val = val->node()->inputs().at(0);
 
     if (!(input_val->type()->cast<OptionalType>() &&
-        val->node()->inputs().at(1)->mustBeNone())) {
+          val->node()->inputs().at(1)->mustBeNone())) {
       return;
     }
 
     Refinements true_info, false_info;
     true_info[input_val] = NoneType::get();
-    false_info[input_val] = input_val->type()->expect<OptionalType>()->getElementType();
+    false_info[input_val] =
+        input_val->type()->expect<OptionalType>()->getElementType();
     if (val->node()->kind() == aten::__isnot__) {
       environment_stack->setBoolInfo(val, BoolInfo(false_info, true_info));
     } else {
@@ -1101,14 +1108,19 @@ struct to_ir {
   // has not changed and we omit adding an if node output for it.
   // this also prevents jitter when importing an if expression like:
   // x = x if x is not None else 1
-  bool valueNotWrittenTo(const std::unordered_set<std::string>& true_set,
+  bool valueNotWrittenTo(
+      const std::unordered_set<std::string>& true_set,
       const std::unordered_set<std::string>& false_set,
-      Value * true_v, Value * false_v, const std::string& x) {
+      Value* true_v,
+      Value* false_v,
+      const std::string& x) {
 
     bool set_in_false = false_set.count(x) != 0;
     bool set_in_true = true_set.count(x) != 0;
-    bool tv_not_unwrap = true_v->node()->kind() != prim::_unchecked_unwrap_optional;
-    bool fv_not_unwrap = false_v->node()->kind() != prim::_unchecked_unwrap_optional;
+    bool tv_not_unwrap =
+        true_v->node()->kind() != prim::_unchecked_unwrap_optional;
+    bool fv_not_unwrap =
+        false_v->node()->kind() != prim::_unchecked_unwrap_optional;
 
     return !((set_in_false && tv_not_unwrap) || (set_in_true && fv_not_unwrap));
   }
@@ -1151,12 +1163,12 @@ struct to_ir {
     auto true_vars = save_true->definedVariables();
     auto false_vars = save_false->definedVariables();
 
-    for (auto & v : true_vars) {
+    for (auto& v : true_vars) {
       if (save_false->findInAnyFrame(v)) {
         mutated_variables.insert(v);
       }
     }
-    for (auto & v : false_vars) {
+    for (auto& v : false_vars) {
       if (save_true->findInAnyFrame(v)) {
         mutated_variables.insert(v);
       }
@@ -1256,8 +1268,11 @@ struct to_ir {
       auto rhs_range = cond_op.rhs().get()->range();
 
       auto kind = getNodeKind(cond.kind(), cond.get()->trees().size());
-      Value * cond_value = emitIs(cond.get()->range(), lhs_val->asValue(lhs_range, method),
-        rhs_val->asValue(rhs_range, method), kind);
+      Value* cond_value = emitIs(
+          cond.get()->range(),
+          lhs_val->asValue(lhs_range, method),
+          rhs_val->asValue(rhs_range, method),
+          kind);
       emitIfElseBlocks(cond_value, stmt);
     }
   }
