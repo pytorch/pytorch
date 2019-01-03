@@ -2182,7 +2182,7 @@ class TestNN(NNTestCase):
         # occurs with prob alpha~>=0.01 if unbiased
         self.assertLess(z.abs().max().item(), 2.58)
 
-    def _test_gumbel_softmax_grad(cuda, dtype):
+    def _test_gumbel_softmax_grad(self, cuda, dtype):
         # "hard" and "not hard" should propagate same gradient.
         device = torch.device("cuda") if cuda else torch.device("cpu")
         logits_soft = torch.zeros(10, 10, dtype=dtype, device = device, requires_grad=True)
