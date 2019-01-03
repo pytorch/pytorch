@@ -4,8 +4,6 @@
 
 namespace caffe2 {
 
-static constexpr size_t kCONV_MIOPEN_WORKSPACE_LIMIT_BYTES = 64 * 1024 * 1024;
-
 class MIOPENConvTransposeOpBase : public ConvTransposeUnpoolBase<HIPContext> {
  public:
   MIOPENConvTransposeOpBase(const OperatorDef& operator_def, Workspace* ws)
@@ -13,9 +11,6 @@ class MIOPENConvTransposeOpBase : public ConvTransposeUnpoolBase<HIPContext> {
         miopen_wrapper_(&context_),
         miopen_state_(
             OperatorBase::GetSingleArgument<size_t>("miopen_state", 0)),
-        miopen_ws_nbytes_limit_(OperatorBase::GetSingleArgument<size_t>(
-            "ws_nbytes_limit",
-            kCONV_MIOPEN_WORKSPACE_LIMIT_BYTES)),
         exhaustive_search_(
             OperatorBase::GetSingleArgument<bool>("exhaustive_search", false)),
         alpha_(OperatorBase::GetSingleArgument<float>("alpha", 1.0)),
@@ -48,7 +43,6 @@ class MIOPENConvTransposeOpBase : public ConvTransposeUnpoolBase<HIPContext> {
   miopenTensorDescriptor_t top_desc_for_bias_;
   miopenConvolutionDescriptor_t conv_desc_;
   size_t miopen_state_;
-  const size_t miopen_ws_nbytes_limit_;
   bool exhaustive_search_;
   const float alpha_;
   const float beta_;
