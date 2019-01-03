@@ -163,17 +163,18 @@
 
 - func: any_out(Tensor result, Tensor self, int64_t dim, bool keepdim=false) -> Tensor
 
+- func: arange(Scalar end, TensorOptions options={}) -> Tensor
+
 - func: arange(Scalar start, Scalar end, TensorOptions options={}) -> Tensor
 
 - func: arange(Scalar start, Scalar end, Scalar step, TensorOptions options={}) -> Tensor
 
-- func: arange_out(Tensor result, Scalar start, Scalar end) -> Tensor
-
-- func: arange_out(Tensor result, Scalar start, Scalar end, Scalar step) -> Tensor
-
-- func: arange(Scalar end, TensorOptions options={}) -> Tensor
-
 - func: arange_out(Tensor result, Scalar end) -> Tensor
+
+- func: arange_out(Tensor result, Scalar start, Scalar end, Scalar step=1) -> Tensor
+  dispatch:
+    CPU: arange_cpu_out
+    CUDA: arange_cuda_out
 
 # This function is a temporary hack to allow tracing of arange like constructs with dynamic
 # bounds on arange.  Normal arange is not traceable because it does not take any tensor inputs;
