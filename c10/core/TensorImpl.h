@@ -35,7 +35,7 @@ C10_IMPORT extern const std::string err_msg_for_changing_metadata_on_derived_ten
   "is not allowed on Tensor created from .data or .detach(). "
   "If you are using Python API, please make sure the Python function is called on the original tensor "
   "(not the tensor created from .data or .detach()), "
-  "and the function call is wrapped in a `with torch.no_grad():` block"
+  "and the function call is wrapped in a `with torch.no_grad():` block";
 
 namespace at {
 class Tensor;
