@@ -16,7 +16,6 @@ Tensor max_unpooling2d_forward_out_cpu_frame(
   int64_t dimc = 0;
   int64_t dimh = 1;
   int64_t dimw = 2;
-
   if (input.ndimension() == 4) {
     numBatch = input.size(0);
     dimc++;
