@@ -202,8 +202,7 @@ bool AddPaddingOp<CUDAContext>::MakePadding(
 
   int32_t* lengths_out_ptr = nullptr;
   if (OutputSize() > 1) {
-    auto* lengths_out = Output(1);
-    lengths_out->Resize(lengths_size);
+    auto* lengths_out = Output(1, {lengths_size}, at::dtype<int32_t>());
     lengths_out_ptr = lengths_out->template mutable_data<int32_t>();
   }
 
@@ -248,12 +247,9 @@ bool RemovePaddingOp<CUDAContext>::DoRunWithType() {
     lengths_size = lengths.size();
   }
 
-  auto* out = Output(0);
-  {
-    auto out_dims = in.dims().vec();
-    out_dims[0] -= (startPaddingWidth_ + endPaddingWidth_) * lengths_size;
-    out->Resize(std::move(out_dims));
-  }
+  auto out_dims = in.dims().vec();
+  out_dims[0] -= (startPaddingWidth_ + endPaddingWidth_) * lengths_size;
+  auto* out = Output(0, out_dims, at::dtype<T>());
   const auto* in_ptr = in.template data<T>();
   auto* out_ptr = out->template mutable_data<T>();
 
@@ -272,8 +268,7 @@ bool RemovePaddingOp<CUDAContext>::DoRunWithType() {
 
   int32_t* lengths_out_ptr = nullptr;
   if (OutputSize() > 1) {
-    auto* lengths_out = Output(1);
-    lengths_out->Resize(lengths_size);
+    auto* lengths_out = Output(1, {lengths_size}, at::dtype<int32_t>());
     lengths_out_ptr = lengths_out->template mutable_data<int32_t>();
   }
 

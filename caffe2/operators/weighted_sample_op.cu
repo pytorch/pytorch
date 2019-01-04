@@ -48,12 +48,12 @@ bool WeightedSampleOp<float, CUDAContext>::RunOnDevice() {
       "The number of tensors of the input and the output must be the same.");
 
   auto& in_weights = Input(0);
-  auto* out_idx = Output(0);
+
   int batch_size = in_weights.dim(0);
   int weights_dim = in_weights.dim(1);
 
   if (batch_size > 0 && weights_dim > 0) {
-    out_idx->Resize(batch_size, 1);
+    auto* out_idx = Output(0, {batch_size, 1}, at::dtype<int>());
     unif_samples_.Resize(batch_size);
 
     const float* in_weights_data = in_weights.data<float>();
@@ -69,8 +69,7 @@ bool WeightedSampleOp<float, CUDAContext>::RunOnDevice() {
           "The sampling weights tensor and the sampling values tensor must have the same dimensions.");
       in_val_data = in_val.data<float>();
 
-      auto* out_val = Output(1);
-      out_val->Resize(batch_size, 1);
+      auto* out_val = Output(1, {batch_size, 1}, at::dtype<float>());
       out_val_data = out_val->template mutable_data<float>();
     }
 
@@ -91,12 +90,9 @@ bool WeightedSampleOp<float, CUDAContext>::RunOnDevice() {
         out_idx_data,
         out_val_data);
   } else {
-    out_idx->Resize(0);
-    out_idx->template mutable_data<int>();
+    /* out_idx = */ Output(0, {0}, at::dtype<int>());
     if (OutputSize() == 2) {
-      auto* out_val = Output(1);
-      out_val->Resize(0);
-      out_val->template mutable_data<float>();
+      /* out_val = */ Output(1, {0}, at::dtype<float>());
     }
   }
 
