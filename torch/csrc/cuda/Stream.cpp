@@ -46,17 +46,7 @@ static PyObject * THCPStream_pynew(PyTypeObject *type, PyObject *args, PyObject 
 
 static PyObject * THCPStream_query(THCPStream *self) {
   HANDLE_TH_ERRORS
-
-  at::cuda::CUDAGuard device_guard{self->device};
-  cudaError_t err = cudaStreamQuery(self->cuda_stream);
-
-  if (err == cudaErrorNotReady) {
-    return PyBool_FromLong(0);
-  } else if (err != cudaSuccess) {
-    AT_CUDA_CHECK(err);
-  }
-
-  return PyBool_FromLong(1);
+  return PyBool_FromLong(at::cuda::CUDAStream::unpack(self->cdata).query());
   END_HANDLE_TH_ERRORS
 }
 
