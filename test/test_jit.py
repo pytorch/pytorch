@@ -9014,6 +9014,17 @@ a")
 
         self.checkScript(foo, [torch.rand(2, 3)])
 
+    def test_list_python_op(self):
+        def python_list_op(lst):
+            # type: (List[Tensor]) -> Tensor
+            return lst[0]
+
+        def script_fn(lst):
+            # type: (List[Tensor]) -> Tensor
+            return python_list_op(lst)
+
+        self.checkScript(foo, [torch.ones(2) + 2, torch.ones(2)])
+
 
 class MnistNet(nn.Module):
     def __init__(self):
