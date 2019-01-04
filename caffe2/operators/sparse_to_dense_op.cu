@@ -47,8 +47,8 @@ namespace caffe2 {
 
     auto shape = sparse_values.dims().vec();
     shape[0] = output_first_dim;
-    auto* output = Output(0);
-    output->Resize(shape);
+
+    auto* output = Output(0, shape, at::dtype<TData>());
 
     TData* output_data = output->template mutable_data<TData>();
     math::Set<TData>(output->size(), TData(0), output_data, &context_);

@@ -243,11 +243,11 @@ template<>
 bool PSRoIPoolOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);  // Input data to pool
   auto& R = Input(1);  // RoIs
-  auto* Y = Output(0); // PSRoI pooled data
-  auto* A = Output(1); // mapping_channel
+   // PSRoI pooled data
+   // mapping_channel
 
-  Y->Resize(R.dim32(0), output_dim_, pooled_height_, pooled_width_);
-  A->Resize(Y->dims());
+  auto* Y = Output(0, {R.dim32(0), output_dim_, pooled_height_, pooled_width_}, at::dtype<float>());
+  auto* A = Output(1, Y->dims(), at::dtype<int>());
   int output_size = Y->size();
   PSRoIPoolForward<float><<<CAFFE_GET_BLOCKS(output_size),
                             CAFFE_CUDA_NUM_THREADS,
