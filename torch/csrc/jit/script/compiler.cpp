@@ -2024,7 +2024,7 @@ struct to_ir {
           elem_type = values.at(0)->type();
         }
         for (auto v : values) {
-          if (v->type() != elem_type) {
+          if (*v->type() != *elem_type)  {
             throw ErrorReport(tree)
                 << "Lists must contain only a single type, expected: "
                 << *elem_type << " but found " << *v->type() << " instead";
