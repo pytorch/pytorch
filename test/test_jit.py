@@ -9019,11 +9019,11 @@ a")
             # type: (List[Tensor]) -> Tensor
             return lst[0]
 
-        def script_fn(lst):
+        def fn(lst):
             # type: (List[Tensor]) -> Tensor
             return python_list_op(lst)
 
-        self.checkScript(foo, [torch.ones(2) + 2, torch.ones(2)])
+        self.checkScript(fn, ([torch.ones(2) + 2, torch.ones(2)],))
 
 
 class MnistNet(nn.Module):
