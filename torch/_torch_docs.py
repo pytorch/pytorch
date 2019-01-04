@@ -3023,8 +3023,8 @@ Example::
 
 .. function:: mul(input, other, out=None)
 
-Each element of the tensor :attr:`input` is multiplied by each element of the
-Tensor :attr:`other`. The resulting tensor is returned.
+Each element of the tensor :attr:`input` is multiplied by the corresponding
+element of the Tensor :attr:`other`. The resulting tensor is returned.
 
 The shapes of :attr:`input` and :attr:`other` must be
 :ref:`broadcastable <broadcasting-semantics>`.

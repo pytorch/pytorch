@@ -1034,19 +1034,6 @@ TH_API void THNN_(VolumetricUpSamplingTrilinear_updateGradInput)(
           int osizeW,
           bool align_corners);
 
-TH_API void THNN_(TemporalReflectionPadding_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          int pad_left, int pad_right);
-
-TH_API void THNN_(TemporalReflectionPadding_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          int pad_left, int pad_right);
-
 TH_API void THNN_(Tanh_updateOutput)(
           THNNState *state,
           THTensor *input,

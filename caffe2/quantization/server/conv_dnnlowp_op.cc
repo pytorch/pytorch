@@ -101,8 +101,7 @@ template <typename T, bool ReluFused>
 bool ConvDNNLowPOp<T, ReluFused>::TakeDepthWise3x3FastPath_() {
   const Tensor& X = InputTensorCPU_(INPUT);
   return StorageOrder::NHWC == ConvPoolOpBase<CPUContext>::order_ &&
-      is_same<T, uint8_t>::value && X.template IsType<T>() &&
-      this->debug_def().engine() != "DNNLOWP_ACC16" &&
+      is_same<T, uint8_t>::value && X.template IsType<T>() && !Acc16() &&
       group_ == X.dim32(X.dim() - 1) && group_ % 8 == 0 &&
       this->kernel_.size() == 2 && kernel_h() == 3 && kernel_w() == 3 &&
       stride_h() == stride_w() && (stride_h() == 1 || stride_h() == 2) &&
@@ -115,8 +114,7 @@ template <typename T, bool ReluFused>
 bool ConvDNNLowPOp<T, ReluFused>::TakeDepthWise3x3x3FastPath_() {
   const Tensor& X = InputTensorCPU_(INPUT);
   bool ret = StorageOrder::NHWC == ConvPoolOpBase<CPUContext>::order_ &&
-      is_same<T, uint8_t>::value && X.template IsType<T>() &&
-      this->debug_def().engine() != "DNNLOWP_ACC16" &&
+      is_same<T, uint8_t>::value && X.template IsType<T>() && !Acc16() &&
       group_ == X.dim32(X.dim() - 1) && group_ % 8 == 0 &&
       this->kernel_.size() == 3 && this->kernel_[0] == 3 &&
       this->kernel_[1] == 3 && this->kernel_[2] == 3 &&
@@ -301,8 +299,7 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeWeight_() {
   int M = filter.dim32(0);
 
   bool packW = ConvPoolOpBase<CPUContext>::order_ == StorageOrder::NHWC &&
-      OperatorBase::debug_def().engine() != "DNNLOWP_ACC16" &&
-      is_same<T, uint8_t>::value && GetCpuId().avx2() &&
+      !Acc16() && is_same<T, uint8_t>::value && GetCpuId().avx2() &&
       !FLAGS_caffe2_dnnlowp_force_slow_path;
 
   bool depthwise_3x3_fast_path = false, depthwise_3x3x3_fast_path = false;
@@ -399,9 +396,7 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeWeight_() {
         reason = "fbgemm only supports 8-bit integers";
       } else if (!GetCpuId().avx2()) {
         reason = "fbgemm only supports AVX2+";
-      } else if (
-          OperatorBase::debug_def().engine() == "DNNLOWP_ACC16" ||
-          depthwise_3x3_fast_path) {
+      } else if (Acc16()) {
         reason = "";
       } else if (FLAGS_caffe2_dnnlowp_force_slow_path) {
         reason = "slow path enforced";
@@ -1079,7 +1074,7 @@ static void conv_nhwc_ref_(
 
 template <typename T, bool ReluFused>
 template <typename PackAMatrix, fbgemm::QuantizationGranularity Q_GRAN>
-void ConvDNNLowPOp<T, ReluFused>::DispatchFBGEMM(
+void ConvDNNLowPOp<T, ReluFused>::DispatchFBGEMM_(
     PackAMatrix& packA,
     vector<int32_t>* Y_int32,
     uint8_t* Y_uint8_data,
@@ -1297,12 +1292,12 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
             row_offsets_.data() + tid * row_offset_size_per_thread);
 
         if (quantize_groupwise_) {
-          DispatchFBGEMM<
+          DispatchFBGEMM_<
               PackAWithIm2Col<uint8_t>,
               QuantizationGranularity::GROUP>(
               packA, Y_int32, Y_uint8_data, Y_float_data);
         } else {
-          DispatchFBGEMM<
+          DispatchFBGEMM_<
               PackAWithIm2Col<uint8_t>,
               QuantizationGranularity::TENSOR>(
               packA, Y_int32, Y_uint8_data, Y_float_data);
@@ -1333,12 +1328,12 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
             row_offsets_.data() + tid * row_offset_size_per_thread);
 
         if (quantize_groupwise_) {
-          DispatchFBGEMM<
+          DispatchFBGEMM_<
               PackAWithIm2Col<uint8_t, int32_t, 3>,
               QuantizationGranularity::GROUP>(
               packA, Y_int32, Y_uint8_data, Y_float_data);
         } else {
-          DispatchFBGEMM<
+          DispatchFBGEMM_<
               PackAWithIm2Col<uint8_t, int32_t, 3>,
               QuantizationGranularity::TENSOR>(
               packA, Y_int32, Y_uint8_data, Y_float_data);
@@ -1358,12 +1353,12 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
           row_offsets_.data() + tid * row_offset_size_per_thread);
 
       if (quantize_groupwise_) {
-        DispatchFBGEMM<
+        DispatchFBGEMM_<
             PackAWithRowOffset<uint8_t>,
             QuantizationGranularity::GROUP>(
             packA, Y_int32, Y_uint8_data, Y_float_data);
       } else {
-        DispatchFBGEMM<
+        DispatchFBGEMM_<
             PackAWithRowOffset<uint8_t>,
             QuantizationGranularity::TENSOR>(
             packA, Y_int32, Y_uint8_data, Y_float_data);

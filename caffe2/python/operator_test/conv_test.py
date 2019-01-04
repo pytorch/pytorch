@@ -353,14 +353,15 @@ class TestConvolution(serial.SerializedTestCase):
     def _nd_convolution(
         self,
         n,
-        input_channels,
-        output_channels,
+        input_channels_per_group,
+        output_channels_per_group,
         batch_size,
         stride,
         size,
         kernel,
         dilation,
         pad,
+        group,
         order,
         use_bias,
         engine,
@@ -370,6 +371,19 @@ class TestConvolution(serial.SerializedTestCase):
         gc,
         dc,
     ):
+        # TODO: Group conv in NHWC not implemented for GPU yet.
+        # TODO: Group 1D conv in NCHW not implemented for GPU yet.
+        assume(
+            group == 1
+            or (n != 1 and order == "NCHW")
+            or gc.device_type == caffe2_pb2.CPU
+        )
+        if group != 1 and (n == 1 or order == "NHWC"):
+            dc = [d for d in dc if d.device_type == caffe2_pb2.CPU]
+
+        input_channels = group * input_channels_per_group
+        output_channels = group * output_channels_per_group
+
         dkernel = dilation * (kernel - 1) + 1
         for op_type in ["Conv", "Conv" + str(n) + "D"]:
             op = core.CreateOperator(
@@ -380,6 +394,7 @@ class TestConvolution(serial.SerializedTestCase):
                 kernels=[kernel] * n,
                 dilations=[dilation] * n,
                 pads=[pad] * n * 2,
+                group=group,
                 order=order,
                 engine=engine,
                 force_algo_fwd=force_algo_fwd,
@@ -389,7 +404,7 @@ class TestConvolution(serial.SerializedTestCase):
 
             input_dims = [batch_size, input_channels]
             input_dims.extend([size] * n)
-            filter_dims = [output_channels, input_channels]
+            filter_dims = [output_channels, input_channels // group]
             filter_dims.extend([kernel] * n)
 
             X = np.random.rand(*input_dims).astype(np.float32) - 0.5
@@ -419,6 +434,7 @@ class TestConvolution(serial.SerializedTestCase):
         kernel=st.integers(1, 2),
         dilation=st.integers(1, 3),
         pad=st.integers(0, 3),
+        group=st.integers(1, 2),
         order=st.sampled_from(["NCHW", "NHWC"]),
         use_bias=st.booleans(),
         engine=st.sampled_from(["", "CUDNN"]),
@@ -437,6 +453,7 @@ class TestConvolution(serial.SerializedTestCase):
         kernel,
         dilation,
         pad,
+        group,
         order,
         use_bias,
         engine,
@@ -464,6 +481,7 @@ class TestConvolution(serial.SerializedTestCase):
             kernel,
             dilation,
             pad,
+            group,
             order,
             use_bias,
             engine,
@@ -483,6 +501,7 @@ class TestConvolution(serial.SerializedTestCase):
         kernel=st.integers(1, 2),
         dilation=st.integers(1, 2),
         pad=st.integers(0, 2),
+        group=st.integers(1, 2),
         order=st.sampled_from(["NCHW", "NHWC"]),
         use_bias=st.booleans(),
         engine=st.sampled_from([""]),  # TODO: add "CUDNN"
@@ -501,6 +520,7 @@ class TestConvolution(serial.SerializedTestCase):
         kernel,
         dilation,
         pad,
+        group,
         order,
         use_bias,
         engine,
@@ -524,6 +544,7 @@ class TestConvolution(serial.SerializedTestCase):
             kernel,
             dilation,
             pad,
+            group,
             order,
             use_bias,
             engine,
@@ -761,8 +782,8 @@ class TestConvolution(serial.SerializedTestCase):
                     dim_in=d,
                     dim_out=d,
                     kernel=3,
-                    weight_init=("ConstantFill", {'value': w1}),
-                    bias_init=("ConstantFill", {'value': b1}),
+                    weight_init=("ConstantFill", {"value": w1}),
+                    bias_init=("ConstantFill", {"value": b1}),
                     cudnn_state=np.random.randint(0, 3),
                     stride=1,
                     pad=1,
@@ -779,8 +800,8 @@ class TestConvolution(serial.SerializedTestCase):
                     kernel=3,
                     stride=1,
                     pad=1,
-                    weight_init=("ConstantFill", {'value': w2}),
-                    bias_init=("ConstantFill", {'value': b2}),
+                    weight_init=("ConstantFill", {"value": w2}),
+                    bias_init=("ConstantFill", {"value": b2}),
                     deterministic=1,
                     cudnn_state=np.random.randint(0, 3),
                     use_cudnn=use_cudnn,
