@@ -3,6 +3,7 @@
 #include <torch/csrc/THP.h>
 #include <torch/csrc/cuda/Module.h>
 
+#include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 
 #include <structmember.h>
@@ -46,9 +47,16 @@ static PyObject * THCPStream_pynew(PyTypeObject *type, PyObject *args, PyObject 
 static PyObject * THCPStream_query(THCPStream *self) {
   HANDLE_TH_ERRORS
 
-  THCPModule_setDevice(self->device);
-  return PyBool_FromLong(cudaStreamQuery(self->cuda_stream) == cudaSuccess);
+  at::cuda::CUDAGuard device_guard{self->device};
+  cudaError_t err = cudaStreamQuery(self->cuda_stream);
 
+  if (err == cudaErrorNotReady) {
+    return PyBool_FromLong(0);
+  } else if (err != cudaSuccess) {
+    AT_CUDA_CHECK(err);
+  }
+
+  return PyBool_FromLong(1);
   END_HANDLE_TH_ERRORS
 }
 
