@@ -432,9 +432,9 @@ class GLU(Module):
         dim (int): the dimension on which to split the input. Default: -1
 
     Shape:
-        - Input: :math:`(*, N, *)` where `*` means, any number of additional
+        - Input: :math:`(*_1, N, *_2)` where `*` means, any number of additional
           dimensions
-        - Output: :math:`(*, N / 2, *)`
+        - Output: :math:`(*_1, M, *_2)` where M = N / 2
 
     Examples::
 
@@ -787,8 +787,9 @@ class Softmin(Module):
         \text{Softmin}(x_{i}) = \frac{\exp(-x_i)}{\sum_j \exp(-x_j)}
 
     Shape:
-        - Input: any shape
-        - Output: same as input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(*)`, same shape as the input
 
     Arguments:
         dim (int): A dimension along which Softmin will be computed (so every slice
@@ -827,8 +828,9 @@ class Softmax(Module):
         \text{Softmax}(x_{i}) = \frac{\exp(x_i)}{\sum_j \exp(x_j)}
 
     Shape:
-        - Input: any shape
-        - Output: same as input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(*)`, same shape as the input
 
     Returns:
         a Tensor of the same dimension and shape as the input with
@@ -903,8 +905,9 @@ class LogSoftmax(Module):
         \text{LogSoftmax}(x_{i}) = \log\left(\frac{\exp(x_i) }{ \sum_j \exp(x_j)} \right)
 
     Shape:
-        - Input: any shape
-        - Output: same as input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(*)`, same shape as the input
 
     Arguments:
         dim (int): A dimension along which Softmax will be computed (so every slice
