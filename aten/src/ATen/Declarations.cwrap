@@ -2587,28 +2587,6 @@
     - THTensor* self
 ]]
 [[
-  name: _th_potrs_single
-  cname: potrs
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - THTensor* input2
-    - arg: bool upper
-      if_true: U
-      if_false: L
-      default: U
-]]
-[[
   name: _th_potri
   cname: potri
   types:
