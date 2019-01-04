@@ -22,8 +22,8 @@ namespace fuser {
 TORCH_API std::string generateKernel(
     const std::string& name,
     const Graph& graph,
-    const std::vector<std::pair<const Value*, const TensorDesc>> inputs,
-    const std::vector<std::pair<const Value*, const TensorDesc>> outputs,
+    const std::vector<std::pair<const Value*, const TensorDesc>>& inputs,
+    const std::vector<std::pair<const Value*, const TensorDesc>>& outputs,
     const bool use_cuda);
 
 } // namespace fuser
