@@ -43,6 +43,15 @@ static PyObject * THCPStream_pynew(PyTypeObject *type, PyObject *args, PyObject 
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THCPStream_query(THCPStream *self) {
+  HANDLE_TH_ERRORS
+
+  THCPModule_setDevice(self->device);
+  return PyBool_FromLong(cudaStreamQuery(self->cuda_stream) == cudaSuccess);
+
+  END_HANDLE_TH_ERRORS
+}
+
 static struct PyMemberDef THCPStream_members[] = {
   {(char*)"_cdata", T_ULONGLONG, offsetof(THCPStream, cdata), READONLY, nullptr},
   {(char*)"device", T_INT, offsetof(THCPStream, device), READONLY, nullptr},
@@ -51,6 +60,7 @@ static struct PyMemberDef THCPStream_members[] = {
 };
 
 static PyMethodDef THCPStream_methods[] = {
+  {(char*)"__query__", (PyCFunction)THCPStream_query, METH_NOARGS, nullptr},
   {nullptr}
 };
 
