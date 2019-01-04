@@ -19,7 +19,7 @@ from test_torch import _TestTorchMixin
 from common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     run_additional_tri_tests, _compare_trilu_indices, _compare_large_trilu_indices
 from common_utils import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, \
-    PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, TEST_NUMPY, TEST_WITH_ROCM, load_tests
+    PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, TEST_NUMPY, TEST_WITH_ROCM, load_tests, iter_indices
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -938,6 +938,9 @@ class TestCuda(TestCase):
     def test_neg(self):
         _TestTorchMixin._test_neg(self, lambda t: t.cuda())
 
+    def test_isinf(self):
+        _TestTorchMixin._test_isinf(self, lambda t: t.cuda())
+
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     def test_arithmetic_large_tensor(self):
         x = torch.empty(2**30, device='cuda')
@@ -1227,6 +1230,9 @@ class TestCuda(TestCase):
         z = torch.cat([x, y], 0)
         self.assertEqual(z.get_device(), x.get_device())
 
+    def test_clamp(self):
+        _TestTorchMixin._test_clamp(self, 'cuda')
+
     def test_cat(self):
         SIZE = 10
         for dim in range(-3, 3):
@@ -1411,6 +1417,44 @@ class TestCuda(TestCase):
             self.assertEqual(torch.cuda.current_stream().device, 1)
             self.assertNotEqual(torch.cuda.current_stream(), default_stream)
 
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    @skipIfRocm
+    def test_streams_multi_gpu_query(self):
+        d0 = torch.device('cuda:0')
+        d1 = torch.device('cuda:1')
+
+        with torch.cuda.device(d0):
+            s0 = torch.cuda.current_stream()
+
+        with torch.cuda.device(d1):
+            s1 = torch.cuda.current_stream()
+            torch.cuda._sleep(50000000)  # spin for about 50 ms on device1
+
+        self.assertTrue(s0.query())
+        self.assertFalse(s1.query())
+
+        with torch.cuda.device(d0):
+            self.assertTrue(s0.query())
+            self.assertFalse(s1.query())
+
+        with torch.cuda.device(d1):
+            self.assertTrue(s0.query())
+            self.assertFalse(s1.query())
+
+        with torch.cuda.device(d1):
+            s1.synchronize()
+
+        self.assertTrue(s0.query())
+        self.assertTrue(s1.query())
+
+        with torch.cuda.device(d0):
+            self.assertTrue(s0.query())
+            self.assertTrue(s1.query())
+
+        with torch.cuda.device(d1):
+            self.assertTrue(s0.query())
+            self.assertTrue(s1.query())
+
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_tensor_device(self):
         self.assertEqual(torch.cuda.FloatTensor(1).get_device(), 0)
@@ -1568,6 +1612,11 @@ class TestCuda(TestCase):
         x = torch.ones(65536, device='cuda', dtype=torch.float16)
         self.assertEqual(x.mean(dtype=torch.float32), 1)
 
+    def test_prod_large(self):
+        # tests global reduction (should_global_reduce = true) in case of non-zero identity element
+        x = torch.ones(240000, device='cuda', dtype=torch.float32)
+        self.assertEqual(x.prod(), 1)
+
     @staticmethod
     def _select_broadcastable_dims(dims_full=None):
         return _TestTorchMixin._select_broadcastable_dims(dims_full)
@@ -1595,6 +1644,10 @@ class TestCuda(TestCase):
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_det_logdet_slogdet(self):
         _TestTorchMixin._test_det_logdet_slogdet(self, lambda t: t.cuda())
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_gesv(self):
+        _TestTorchMixin._test_gesv(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_gesv_batched(self):
@@ -1817,6 +1870,10 @@ class TestCuda(TestCase):
     @skipIfRocm
     def test_btrisolve(self):
         _TestTorchMixin._test_btrisolve(self, lambda t: t.cuda())
+
+    @skipIfRocm
+    def test_btriunpack(self):
+        _TestTorchMixin._test_btriunpack(self, lambda t: t.cuda())
 
     @skipIfRocm
     def test_dim_reduction(self):

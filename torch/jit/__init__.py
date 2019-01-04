@@ -1278,7 +1278,7 @@ _compiled_methods_whitelist = {
 
 def _make_fail(name):
     def fail(self, *args, **kwargs):
-        raise RuntimeError(name + " is not supported on TracedModules")
+        raise RuntimeError(name + " is not supported on ScriptModules")
     return fail
 
 

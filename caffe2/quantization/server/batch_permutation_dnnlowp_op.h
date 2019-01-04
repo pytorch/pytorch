@@ -1,11 +1,12 @@
 #pragma once
 
-#include "caffe2/fb/operators/batch_permutation_op.h"
+#include "caffe2/operators/copy_op.h"
 #include "caffe2/quantization/server/dnnlowp_op.h"
 
 namespace caffe2 {
 
-using BatchPermutationFP32Op = BatchPermutationOp<float, CPUContext>;
+// FIXME
+using BatchPermutationFP32Op = CopyOp<CPUContext, CPUContext, CPUContext>;
 
 template <typename T>
 class BatchPermutationDNNLowPOp final

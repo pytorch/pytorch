@@ -298,7 +298,8 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
             pads_.data(),
             X_data,
             col_buffer_data,
-            &context_);
+            &context_,
+            group_);
       }
       // Weight term
       for (int group_id = 0; group_id < group_; ++group_id) {
@@ -579,7 +580,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       } else {
         math::Im2ColNd<T, Context, StorageOrder::NCHW>(
             kernel_.size(),
-            C * input_image_size,
+            input_offset,
             col_buffer_size,
             img_shape.data(),
             col_buffer_shape.data(),
@@ -664,7 +665,7 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
         } else {
           math::Col2ImNd<T, Context, StorageOrder::NCHW>(
               kernel_.size(),
-              C * input_image_size,
+              input_offset,
               col_buffer_size,
               img_shape.data(),
               col_buffer_shape.data(),
@@ -793,7 +794,8 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
           pads_.data(),
           Xdata,
           col_buffer_data,
-          &context_);
+          &context_,
+          group_);
     }
     // Gradient with respect to filter.
     for (int group_id = 0; group_id < group_; ++group_id) {
@@ -886,7 +888,8 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
             pads_.data(),
             col_buffer_data,
             dXdata,
-            &context_);
+            &context_,
+            group_);
       }
       dXdata += input_offset;
     } // for each image
