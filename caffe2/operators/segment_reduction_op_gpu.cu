@@ -430,7 +430,6 @@ class CUDASparseLengthsSumOp : public Operator<CUDAContext> {
   bool DoRunWithType() {
     auto& dataInput = Input(0);
     auto& lengthsInput = Input(LENGTHS);
-    auto* output = Output(0);
 
     CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
     const int64_t dataSize = dataInput.dim(0);
@@ -441,7 +440,7 @@ class CUDASparseLengthsSumOp : public Operator<CUDAContext> {
 
     auto shape = dataInput.dims().vec();
     shape[0] = outputSize;
-    output->Resize(shape);
+    auto* output = Output(0, shape, at::dtype<T>());
     T* out_data = output->template mutable_data<T>();
 
     if (len_length <= 0) {
@@ -551,7 +550,6 @@ class CUDASparseLengthsMeanOp : public Operator<CUDAContext> {
   bool DoRunWithType() {
     auto& dataInput = Input(0);
     auto& lengthsInput = Input(LENGTHS);
-    auto* output = Output(0);
 
     CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
     const int64_t dataSize = dataInput.dim(0);
@@ -562,7 +560,7 @@ class CUDASparseLengthsMeanOp : public Operator<CUDAContext> {
 
     auto shape = dataInput.dims().vec();
     shape[0] = outputSize;
-    output->Resize(shape);
+    auto* output = Output(0, shape, at::dtype<T>());
     T* out_data = output->template mutable_data<T>();
 
     if (len_length <= 0) {
@@ -673,7 +671,6 @@ class CUDASparseLengthsMaxOp : public Operator<CUDAContext> {
   bool DoRunWithType() {
     auto& dataInput = Input(0);
     auto& lengthsInput = Input(LENGTHS);
-    auto* output = Output(0);
 
     CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
     const int64_t dataSize = dataInput.dim(0);
@@ -684,7 +681,7 @@ class CUDASparseLengthsMaxOp : public Operator<CUDAContext> {
 
     auto shape = dataInput.dims().vec();
     shape[0] = outputSize;
-    output->Resize(shape);
+    auto* output = Output(0, shape, at::dtype<T>());
 
     if (len_length <= 0) {
       // return early to avoid invalid empty kernel
@@ -804,7 +801,6 @@ class CUDASparseLengthsWeightedSumOp : public Operator<CUDAContext> {
     auto& weightsInput = Input(WEIGHTS);
     auto& indicesInput = Input(INDICES);
     auto& lengthsInput = Input(LENGTHS);
-    auto* output = Output(0);
 
     CAFFE_ENFORCE_EQ(1, weightsInput.ndim(), "WEIGHTS must be a vector");
     CAFFE_ENFORCE_EQ(1, indicesInput.ndim(), "INDICES must be a vector");
@@ -818,7 +814,7 @@ class CUDASparseLengthsWeightedSumOp : public Operator<CUDAContext> {
 
     auto shape = dataInput.dims().vec();
     shape[0] = outputSize;
-    output->Resize(shape);
+    auto* output = Output(0, shape, at::dtype<T>());
     T* out_data = output->template mutable_data<T>();
 
     if (len_length <= 0) {
@@ -940,7 +936,6 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
   bool RunOnDevice() override {
     auto& data = Input(0);
     auto& segment_ids = Input(1);
-    auto* output = Output(0);
 
     if (segment_ids.size() == 0 || data.size() == 0) {
       // Special handling for empty input
@@ -948,8 +943,7 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
       if (dims.size() > 0) {
         dims[0] = 0;
       }
-      output->Resize(dims);
-      output->template mutable_data<T>();
+      Output(0, dims, at::dtype<T>());
       return true;
     }
 
@@ -995,7 +989,7 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
 
     auto dims = data.dims().vec();
     dims[0] = K + 1;
-    output->Resize(dims);
+    auto* output = Output(0, dims, at::dtype<T>());
 
     // Clear the output as we will be accumulating the values
     math::Set<T, CUDAContext>(
@@ -1300,7 +1294,7 @@ class CUDASparseLengthsSumGradientWithIndicesOp : public Operator<CUDAContext> {
     auto& segmentGradsInput = Input(0);
     auto& lengthsInput = Input(1);
     auto& indicesInput = Input(2);
-    auto* dataGradsOutput = Output(0);
+
     CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
 
     const int len_length = lengthsInput.dim(0);
@@ -1310,7 +1304,7 @@ class CUDASparseLengthsSumGradientWithIndicesOp : public Operator<CUDAContext> {
     auto shape = segmentGradsInput.dims().vec();
     int output_0dim = indicesInput.dim(0);
     shape[0] = output_0dim;
-    dataGradsOutput->Resize(shape);
+    auto* dataGradsOutput = Output(0, shape, at::dtype<T>());
     T* out_data = dataGradsOutput->template mutable_data<T>();
 
     if (len_length <= 0) {
@@ -1379,7 +1373,7 @@ class CUDASparseLengthsMeanGradientWithIndicesOp
     auto& segmentGradsInput = Input(0);
     auto& lengthsInput = Input(1);
     auto& indicesInput = Input(2);
-    auto* dataGradsOutput = Output(0);
+
     CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
 
     const int len_length = lengthsInput.dim(0);
@@ -1389,7 +1383,7 @@ class CUDASparseLengthsMeanGradientWithIndicesOp
     auto shape = segmentGradsInput.dims().vec();
     int output_0dim = indicesInput.dim(0);
     shape[0] = output_0dim;
-    dataGradsOutput->Resize(shape);
+    auto* dataGradsOutput = Output(0, shape, at::dtype<T>());
     T* out_data = dataGradsOutput->template mutable_data<T>();
 
     if (len_length <= 0) {
@@ -1459,7 +1453,7 @@ class CUDASparseLengthsWeightedSumGradientWithIndicesOp
     auto& segmentGradsInput = Input(1);
     auto& lengthsInput = Input(2);
     auto& indicesInput = Input(3);
-    auto* dataGradsOutput = Output(0);
+
     CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
     CAFFE_ENFORCE_EQ(1, weightsInput.ndim(), "WEIGHTS must be a vector");
 
@@ -1470,7 +1464,7 @@ class CUDASparseLengthsWeightedSumGradientWithIndicesOp
     auto shape = segmentGradsInput.dims().vec();
     int output_0dim = indicesInput.dim(0);
     shape[0] = output_0dim;
-    dataGradsOutput->Resize(shape);
+    auto* dataGradsOutput = Output(0, shape, at::dtype<T>());
     T* out_data = dataGradsOutput->template mutable_data<T>();
     if (len_length <= 0) {
       // return early to avoid invalid empty kernel
@@ -1597,7 +1591,7 @@ class CUDALengthsMaxWithMainInputAndForwardOutputGradientOp
     auto& lengthsInput = Input(2);
     auto& dataInput = Input(3);
     auto& dataOutput = Input(0); // based on CPU version
-    auto* dataGradsOutput = Output(0);
+
     CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
     int len_length = lengthsInput.dim(0);
     CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
@@ -1616,7 +1610,7 @@ class CUDALengthsMaxWithMainInputAndForwardOutputGradientOp
         inclusive_scan_length_buffer_.template data<int>();
 
     auto shape = dataInput.dims().vec();
-    dataGradsOutput->Resize(shape);
+    auto* dataGradsOutput = Output(0, shape, at::dtype<T>());
 
     const T* in_data = segmentGradsInput.template data<T>();
     T* out_data = dataGradsOutput->template mutable_data<T>();
@@ -1692,7 +1686,7 @@ class CUDASparseLengthsIndicesInGradientWeightedSumWithMainInputGradientOp
     auto& lengthsInput = Input(2);
     auto& dataInput = Input(3);
     auto& indicesInput = Input(4);
-    auto* dataGradsOutput = Output(0);
+
     auto* weightGradsOutput = Output(1);
     CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
     CAFFE_ENFORCE_EQ(1, weightsInput.ndim(), "WEIGHTS must be a vector");
@@ -1704,7 +1698,7 @@ class CUDASparseLengthsIndicesInGradientWeightedSumWithMainInputGradientOp
     auto shape = segmentGradsInput.dims().vec();
     int output_0dim = indicesInput.dim(0);
     shape[0] = output_0dim;
-    dataGradsOutput->Resize(shape);
+    auto* dataGradsOutput = Output(0, shape, at::dtype<T>());
     weightGradsOutput->ResizeLike(indicesInput);
     T* out_data_grads = dataGradsOutput->template mutable_data<T>();
     T* out_weight_grads = weightGradsOutput->template mutable_data<T>();
