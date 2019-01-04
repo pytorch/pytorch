@@ -15,6 +15,18 @@ namespace cuda {
   See `CUDA_tensor_histogram` below.
  */
 enum class CUDAHistogramMemoryType { SHARED, MULTI_BLOCK, GLOBAL };
+namespace {
+  template<typename input_t, typename IndexType>
+  __device__ static IndexType getBin(input_t bVal, input_t minvalue, input_t maxvalue, int nbins) {
+    IndexType bin = (int)((bVal - minvalue) * nbins / (maxvalue - minvalue));
+    // (only applicable for histc)
+    // while each bin is inclusive at the lower end and exclusive at the higher, i.e. [start, end)
+    // the last bin is inclusive at both, i.e. [start, end], in order to include maxvalue if exists
+    // therefore when bin == nbins, adjust bin to the last bin
+    if (bin == nbins) bin -= 1;
+    return bin;
+  }
+}
 
 /*
   Kernel for computing the histogram of the input.
@@ -56,8 +68,7 @@ __global__ void kernelHistogram1D(
       const auto bVal = b.data[bOffset];
       if (bVal >= minvalue && bVal <= maxvalue) {
         // Use value at `b` as an offset of `smem`
-        IndexType bin = (int)((bVal - minvalue) * nbins / (maxvalue - minvalue));
-        if (bin == nbins) bin -= 1;
+        const IndexType bin = getBin<input_t, IndexType>(bVal, minvalue, maxvalue, nbins);
         atomicAdd(&smem[bin], getOp(linearIndex));
       }
     }
@@ -83,8 +94,7 @@ __global__ void kernelHistogram1D(
       const auto bVal = b.data[bOffset];
       if (bVal >= minvalue && bVal <= maxvalue) {
         // Use value at `b` as an offset of `p`
-        IndexType bin = (int)((bVal - minvalue) * nbins / (maxvalue - minvalue));
-        if (bin == nbins) bin -= 1;
+        const IndexType bin = getBin<input_t, IndexType>(bVal, minvalue, maxvalue, nbins);
         const IndexType pIdx = p.strides[0] * blockIdx.x + bin;
         const IndexType pOffset =
             detail::IndexToOffset<output_t, IndexType, PDims>::get(pIdx, p);
@@ -115,8 +125,7 @@ __global__ void kernelHistogram1D(
       const auto bVal = b.data[bOffset];
       if (bVal >= minvalue && bVal <= maxvalue) {
         // Use value at `b` as an offset of `a`
-        IndexType bin = (int)((bVal - minvalue) * nbins / (maxvalue - minvalue));
-        if (bin == nbins) bin -= 1;
+        const IndexType bin = getBin<input_t, IndexType>(bVal, minvalue, maxvalue, nbins);
         const IndexType aOffset =
             detail::IndexToOffset<output_t, IndexType, ADims>::get(bin, a);
         atomicAdd(&a.data[aOffset], getOp(linearIndex));
@@ -311,7 +320,7 @@ Tensor _histc_cuda_template(
     maxvalue = maxvalue + 1;
   }
   auto ret = cuda::CUDA_tensor_histogram<int64_t, input_t, false>(
-    output, self, at::empty({0}, self.options()), nbins, minvalue, maxvalue);
+    output, self, Tensor(), nbins, minvalue, maxvalue);
   return output;
 }
 } // namespace
@@ -335,7 +344,9 @@ Tensor _histc_cuda(
     int64_t nbins,
     Scalar min,
     Scalar max) {
-  //TODO support half
+  if (self.type().scalarType() == ScalarType::Half) {
+    AT_ERROR("HalfTensor is not supported");
+  }
   return AT_DISPATCH_ALL_TYPES(self.type(), "histc", [&] {
     return _histc_cuda_template<scalar_t>(self, nbins, min.to<scalar_t>(), max.to<scalar_t>());
   });
