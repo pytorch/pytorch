@@ -75,7 +75,7 @@ bool ResizeNearestOp<float, CUDAContext>::RunOnDevice() {
   const auto& X = Input(0);
   
 
-  const auto inputDims = X.dims();
+  const auto inputDims = X.sizes();
   CAFFE_ENFORCE_EQ(4, inputDims.size());
   const int batch_size = X.dim32(0), num_channels = X.dim32(1),
             input_height = X.dim32(2), input_width = X.dim32(3);
@@ -118,7 +118,7 @@ bool ResizeNearestGradientOp<float, CUDAContext>::RunOnDevice() {
   const auto& X = Input(1);
   
 
-  const auto inputDims = dY.dims();
+  const auto inputDims = dY.sizes();
   CAFFE_ENFORCE_EQ(4, inputDims.size());
   const int batch_size = dY.dim32(0), num_channels = dY.dim32(1),
             input_height = dY.dim32(2), input_width = dY.dim32(3);

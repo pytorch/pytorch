@@ -234,9 +234,9 @@ template <typename T>
 bool RemovePaddingOp<CUDAContext>::DoRunWithType() {
   const auto& in = Input(0);
   CAFFE_ENFORCE_GE(in.ndim(), 1);
-  const int32_t outer_size = in.dims()[0];
+  const int32_t outer_size = in.sizes()[0];
   const auto block_size = std::accumulate(
-      in.dims().begin() + 1, in.dims().end(), 1, std::multiplies<int64_t>());
+      in.sizes().begin() + 1, in.sizes().end(), 1, std::multiplies<int64_t>());
 
   // if no lengths is provided, assume it is a single full-span entry
   const int32_t* lengths_ptr = nullptr;
@@ -247,7 +247,7 @@ bool RemovePaddingOp<CUDAContext>::DoRunWithType() {
     lengths_size = lengths.size();
   }
 
-  auto out_dims = in.dims().vec();
+  auto out_dims = in.sizes().vec();
   out_dims[0] -= (startPaddingWidth_ + endPaddingWidth_) * lengths_size;
   auto* out = Output(0, out_dims, at::dtype<T>());
   const auto* in_ptr = in.template data<T>();
