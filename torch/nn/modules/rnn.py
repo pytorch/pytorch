@@ -6,10 +6,10 @@ import numbers
 
 from .module import Module
 from ..parameter import Parameter
-from ..utils.rnn import PackedSequence
+from ..utils.rnn import PackedSequence, get_packed_sequence
 from .. import init
 from .. import _VF
-from ..._jit_internal import weak_module, weak_script_method
+from ..._jit_internal import weak_module, weak_script_method, weak_script
 
 _rnn_impls = {
     'LSTM': _VF.lstm,
@@ -19,15 +19,19 @@ _rnn_impls = {
 }
 
 
+@weak_script
 def apply_permutation(tensor, permutation, dim=1):
+    # type: (Tensor, Tensor, int) -> Tensor
     return tensor.index_select(dim, permutation)
 
 
 class RNNBase(Module):
+    __constants__ = ['mode', 'input_size', 'hidden_size', 'num_layers', 'bias',
+                     'batch_first', 'dropout', 'bidirectional']
 
     def __init__(self, mode, input_size, hidden_size,
                  num_layers=1, bias=True, batch_first=False,
-                 dropout=0, bidirectional=False):
+                 dropout=0., bidirectional=False):
         super(RNNBase, self).__init__()
         self.mode = mode
         self.input_size = input_size
@@ -349,6 +353,7 @@ class RNN(RNNBase):
         super(RNN, self).__init__(mode, *args, **kwargs)
 
 
+@weak_module
 class LSTM(RNNBase):
     r"""Applies a multi-layer long short-term memory (LSTM) RNN to an input
     sequence.
@@ -455,6 +460,100 @@ class LSTM(RNNBase):
 
     def __init__(self, *args, **kwargs):
         super(LSTM, self).__init__('LSTM', *args, **kwargs)
+        torch._jit_internal.overload(type(self), 'forward', (self.forward_tensor, self.forward_packed))
+
+    @weak_script_method
+    def check_hidden_size(self, hx, expected_hidden_size, msg='Expected hidden size {}, got {}'):
+        # type: (Tensor, Tuple[int, int, int], str) -> None
+        if hx.size() != expected_hidden_size:
+            raise RuntimeError(msg.format(expected_hidden_size, tuple(hx.size())))
+
+    @weak_script_method
+    def check_forward_args(self, input, hidden, batch_sizes):
+        # type: (Tensor, Tuple[Tensor, Tensor], Optional[Tensor]) -> None
+        is_input_packed = batch_sizes is not None
+        expected_input_dim = 2 if is_input_packed else 3
+        if input.dim() != expected_input_dim:
+            raise RuntimeError(
+                'input must have {} dimensions, got {}'.format(
+                    expected_input_dim, input.dim()))
+        if self.input_size != input.size(-1):
+            raise RuntimeError(
+                'input.size(-1) must be equal to input_size. Expected {}, got {}'.format(
+                    self.input_size, input.size(-1)))
+
+        if is_input_packed:
+            mini_batch = int(torch.jit._unwrap_optional(batch_sizes)[0])
+        else:
+            mini_batch = input.size(0) if self.batch_first else input.size(1)
+
+        num_directions = 2 if self.bidirectional else 1
+        expected_hidden_size = (self.num_layers * num_directions,
+                                mini_batch, self.hidden_size)
+
+        self.check_hidden_size(hidden[0], expected_hidden_size,
+                          'Expected hidden[0] size {}, got {}')
+        self.check_hidden_size(hidden[1], expected_hidden_size,
+                          'Expected hidden[1] size {}, got {}')
+
+    @weak_script_method
+    def permute_hidden(self, hx, permutation):
+        # type: (Tuple[Tensor, Tensor], Optional[Tensor]) -> Tuple[Tensor, Tensor]
+        if permutation is None:
+            return hx
+        permutation = torch.jit._unwrap_optional(permutation)
+        return apply_permutation(hx[0], permutation), apply_permutation(hx[1], permutation)
+
+    @weak_script_method
+    def forward_impl(self, input, hx, batch_sizes, max_batch_size, sorted_indices):
+        # type: (Tensor, Optional[Tuple[Tensor, Tensor]], Optional[Tensor], int, Optional[Tensor]) -> Tuple[Tensor, Tuple[Tensor, Tensor]]
+        if hx is None:
+            num_directions = 2 if self.bidirectional else 1
+            zeros = torch.zeros(self.num_layers * num_directions,
+                                max_batch_size, self.hidden_size,
+                                dtype=input.dtype, device=input.device)
+            hx = (zeros, zeros)
+        else:
+            # Each batch of the hidden state should match the input sequence that
+            # the user believes he/she is passing in.
+            hx = self.permute_hidden(torch.jit._unwrap_optional(hx), sorted_indices)
+
+        self.check_forward_args(input, hx, batch_sizes)
+        if batch_sizes is None:
+            result = _VF.lstm(input, hx, self._parameters.values(), self.bias, self.num_layers,
+                              self.dropout, self.training, self.bidirectional, self.batch_first)
+        else:
+            batch_sizes = torch.jit._unwrap_optional(batch_sizes)
+            result = _VF.lstm(input, batch_sizes, hx, self._parameters.values(), self.bias,
+                              self.num_layers, self.dropout, self.training, self.bidirectional)
+        output = result[0]
+        hidden = result[1:]
+
+        return output, hidden
+
+    @weak_script_method
+    def forward_tensor(self, input, hx=None):
+        # type: (Tensor, Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tensor, Tuple[Tensor, Tensor]]]
+        batch_sizes = None
+        max_batch_size = input.size(0) if self.batch_first else input.size(1)
+        sorted_indices = None
+        unsorted_indices = None
+
+        output, hidden = self.forward_impl(input, hx, batch_sizes, max_batch_size, sorted_indices)
+
+        return output, self.permute_hidden(hidden, unsorted_indices)
+
+    @weak_script_method
+    def forward_packed(self, input, hx=None):
+        # type: (Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Tuple[Tensor, Tensor]]  # noqa
+        input, batch_sizes, sorted_indices, unsorted_indices = input
+        max_batch_size = int(batch_sizes[0])
+
+        output, hidden = self.forward_impl(input, hx, batch_sizes, max_batch_size, sorted_indices)
+
+        output = get_packed_sequence(output, batch_sizes, sorted_indices, unsorted_indices)
+        # output = torch.jit.annotate(Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], (output, batch_sizes, sorted_indices, unsorted_indices))
+        return output, self.permute_hidden(hidden, unsorted_indices)
 
 
 class GRU(RNNBase):

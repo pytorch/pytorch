@@ -205,6 +205,60 @@ struct VISIBILITY_HIDDEN ConstantPythonTupleValue : public PythonValue {
   }
 };
 
+struct VISIBILITY_HIDDEN ParameterListValues : public SugaredValue {
+  ParameterListValues(std::shared_ptr<Module> module)
+      : module_(std::move(module)) {}
+
+  std::string kind() const override {
+    return "parameter list values";
+  }
+
+  // self._parameters.values()
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Method& m,
+      at::ArrayRef<NamedValue> inputs_,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override {
+    std::vector<Value*> params;
+    const auto& param_list = module_->get_parameters().items();
+    for (auto it = param_list.rbegin(); it != param_list.rend(); ++it) {
+      if (!(*it)->is_buffer) {
+        params.push_back(m.get_or_add_parameter((*it)->slot()));
+      }
+    }
+    auto list = m.graph()->createList(DynamicType::get(), params);
+    m.graph()->insertNode(list);
+    return toSimple(list->output());
+  }
+
+ private:
+  std::shared_ptr<Module> module_;
+};
+
+struct VISIBILITY_HIDDEN ParameterList : public SugaredValue {
+  ParameterList(std::shared_ptr<Module> module) : module_(std::move(module)) {}
+
+  std::string kind() const override {
+    return "parameter list";
+  }
+
+  std::shared_ptr<SugaredValue> attr(
+      const SourceRange& loc,
+      Method& m,
+      const std::string& field) override {
+    if (field == "values") {
+      // only allow self._parameters.values() to be resolved
+      return std::make_shared<ParameterListValues>(module_);
+    }
+
+    return SugaredValue::attr(loc, m, field);
+  }
+
+ private:
+  std::shared_ptr<Module> module_;
+};
+
 // defines how modules/methods behave inside the script subset.
 // for now this does not have any interaction with python.
 // in the future, we will add the ability to resolve `self.foo` to python
@@ -257,6 +311,8 @@ struct ModuleValue : public SugaredValue {
           py::isinstance(attr, py::module::import("torch.nn").attr("Module")) ||
           py_module.attr("_constants_set").contains(field.c_str())) {
         return toSugaredValue(attr, m, loc, true);
+      } else if (py::isinstance(attr, py::module::import("torch.jit").attr("OrderedParameterDict"))) {
+        return std::make_shared<ParameterList>(module);
       } else {
         throw ErrorReport(loc)
             << "attribute '" << field << "' of type '" << typeString(attr)
