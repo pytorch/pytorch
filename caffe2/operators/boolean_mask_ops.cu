@@ -35,10 +35,10 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
 
     CAFFE_ENFORCE(src.ndim() >= 1);
     CAFFE_ENFORCE_EQ(mask.ndim(), 1);
-    CAFFE_ENFORCE(src.dims()[0] == mask.dims()[0]);
+    CAFFE_ENFORCE(src.size(0) == mask.size(0));
 
     const auto* maskData = mask.data<bool>();
-    const auto outerSize = mask.dims()[0];
+    const auto outerSize = mask.size(0);
     indices_.Resize(outerSize);
     auto* indicesData = indices_.mutable_data<int64_t>();
 
@@ -76,7 +76,7 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
     context_.CopyToCPU(1, numOfOutputData, &numOfOutput);
 
     indices_.Resize(numOfOutput);
-    std::vector<int64_t> dims = src.dims().vec();
+    std::vector<int64_t> dims = src.sizes().vec();
     dims[0] = numOfOutput;
     dest->Resize(dims);
     auto* destData = (uint8_t*)dest->raw_mutable_data(src.meta());

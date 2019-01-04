@@ -37,7 +37,7 @@ bool LengthsTileOp<CUDAContext>::RunOnDevice() {
   math::Sum<int32_t, CPUContext>(
       lengths_size, lengths_data, &total_length, &cpuContext);
 
-  auto shape = data.dims().vec();
+  auto shape = data.sizes().vec();
   shape[0] = total_length;
   auto* output = Output(0, shape, at::dtype<float>());
 
