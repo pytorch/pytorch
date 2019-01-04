@@ -53,7 +53,7 @@ neural network on the MNIST dataset:
     // Implement the Net's algorithm.
     torch::Tensor forward(torch::Tensor x) {
       // Use one of many tensor manipulation functions.
-      x = torch::relu(fc1->forward(x.resize_({x.size(0), 784})));
+      x = torch::relu(fc1->forward(x.reshape({x.size(0), 784})));
       x = torch::dropout(x, /*p=*/0.5, /*train=*/is_training());
       x = torch::relu(fc2->forward(x));
       x = torch::log_softmax(fc3->forward(x), /*dim=*/1);
