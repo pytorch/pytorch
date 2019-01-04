@@ -367,7 +367,6 @@ public:
   Tensor & index_put_(TensorList indices, const Tensor & values, bool accumulate=false);
   Tensor inverse() const;
   Tensor isclose(const Tensor & other, double rtol=1e-05, double atol=1e-08, bool equal_nan=false) const;
-  Tensor isnan() const;
   bool is_distributed() const;
   bool is_floating_point() const;
   bool is_complex() const;

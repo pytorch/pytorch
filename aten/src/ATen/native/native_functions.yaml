@@ -918,7 +918,7 @@
   variants: function, method
 
 - func: isnan(Tensor self) -> Tensor
-  variants: function, method
+  variants: function
   device_guard: false
 
 - func: is_distributed(Tensor self) -> bool

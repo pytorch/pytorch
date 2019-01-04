@@ -322,9 +322,6 @@ inline Tensor Tensor::inverse() const {
 inline Tensor Tensor::isclose(const Tensor & other, double rtol, double atol, bool equal_nan) const {
     return type().isclose(*this, other, rtol, atol, equal_nan);
 }
-inline Tensor Tensor::isnan() const {
-    return type().isnan(*this);
-}
 inline bool Tensor::is_distributed() const {
     return type().is_distributed(*this);
 }
