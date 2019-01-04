@@ -7946,7 +7946,6 @@ a")
                     y   # type: Tuple[Tensor, Tensor]
                     ):
                 # type: (...) -> Tuple[{output}, {output}]
-                # type: this is not used
                 return x, x
         ''')
         test_str = []
@@ -7963,7 +7962,8 @@ a")
                    c  # type: Tensor
                    ):
                 # type: (int, int, int) -> Tensor
-                # type: this is fake
+                # type: bad type line
+
                 return a + b + c
 
         with self.assertRaisesRegex(RuntimeError, "Could not parse"):
@@ -7973,7 +7973,6 @@ a")
                    c  # type: Tensor
                    ):
                 # type: (int, int, int) -> Tensor
-                # type: this is fake
                 return a + b + c
 
 
