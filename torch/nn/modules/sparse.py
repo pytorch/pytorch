@@ -34,7 +34,7 @@ class Embedding(Module):
 
     Shape:
         - Input: :math:`(*)`, LongTensor of arbitrary shape containing the indices to extract
-        - Output: :math:`(*, embedding_dim)`, where `*` is the input shape
+        - Output: :math:`(*, H)`, where `*` is the input shape and :math:`H=\text{embedding\_dim}`
 
     .. note::
         Keep in mind that only a limited number of optimizers support

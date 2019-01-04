@@ -188,7 +188,7 @@ class GroupNorm(Module):
             and zeros (for biases). Default: ``True``.
 
     Shape:
-        - Input: :math:`(N, C, *)` where C=num\_channels
+        - Input: :math:`(N, C, *)` where :math:`C=\text{num\_channels}`
         - Output: :math:`(N, C, *)` (same shape as input)
 
     Examples::
