@@ -3800,18 +3800,24 @@ class _TestTorchMixin(object):
 
                 # non-contiguous and expanded tensors test
                 if not (0 in shape or 1 in shape):
-                    # non-contiguous tensors
-                    x_nc = x.clone().transpose(-2, -1)
-                    exp_mask = gen_mask(shape[:-2] + (shape[-1], shape[-2]), diagonal, cast, upper)
-                    assert not x_nc.is_contiguous(), "x is intentionally non-contiguous"
-                    exp_nc = torch.where(exp_mask, torch.tensor(0).type_as(x), x_nc)
-                    self.assertEqual(torch_tri_func(x_nc, diagonal), exp_nc, 0)
-                    if upper:
-                        self.assertEqual(x_nc.triu_(diagonal), exp_nc, 0)
-                    else:
-                        self.assertEqual(x_nc.tril_(diagonal), exp_nc, 0)
-                    self.assertFalse(x_nc.is_contiguous(),
-                                     "x_nc should remain non-contiguous")
+                    for s in range(-len(shape), -1):
+                        # non-contiguous tensors
+                        x_nc = x.clone().transpose(s, s + 1)
+                        exp_mask = gen_mask(x_nc.size(), diagonal, cast, upper)
+                        assert not x_nc.is_contiguous(), "x is intentionally non-contiguous"
+                        exp_nc = torch.where(exp_mask, torch.tensor(0).type_as(x), x_nc)
+                        self.assertEqual(torch_tri_func(x_nc, diagonal), exp_nc, 0)
+                        if upper:
+                            self.assertEqual(x_nc.triu_(diagonal), exp_nc, 0)
+                        else:
+                            self.assertEqual(x_nc.tril_(diagonal), exp_nc, 0)
+
+                        if s == -2:
+                            self.assertFalse(x_nc.is_contiguous(),
+                                             "x_nc should remain non-contiguous")
+                        elif s > -2:
+                            self.assertTrue(x_nc.is_contiguous(),
+                                            "x_nc should become contiguous")
 
                     # expanded tensors
                     expanded_size = (x.size(0),) + x.size()

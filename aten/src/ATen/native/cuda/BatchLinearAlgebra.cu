@@ -371,78 +371,51 @@ Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
   }
 }
 
-#define HANDLE_EQUATION_CASE(MAX1, MAX2, MAX3) \
-  MAX1##idx = n / MAX1##stride; \
-  n = n % MAX1##stride; \
-  MAX2##idx = n / MAX2##stride; \
-  n = n % MAX2##stride; \
-  MAX3##idx = n / MAX3##stride;
-
 template <typename scalar_t, bool upper>
 __global__
 void triu_tril_kernel(
     scalar_t* result, scalar_t* self, int64_t k, int64_t N,
-    int64_t res_batch_stride, int64_t self_batch_stride,
-    int64_t res_row_stride, int64_t res_col_stride,
-    int64_t max_stride, int64_t min_stride, bool row_is_max_stride) {
+    int64_t res_batch_stride, int64_t res_row_stride, int64_t res_col_stride,
+    int64_t self_batch_stride, int64_t self_row_stride, int64_t self_col_stride, int64_t self_ncol) {
   int64_t linear_idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (linear_idx >= N) {
     return;
   }
 
-  int64_t n = linear_idx;
-  int64_t self_batch_idx, max_idx, min_idx;
-
-  // There are three cases:
-  // Case 1: batch_stride >= max_stride > min_stride
-  // Case 2: max_stride >= batch_stride > min_stride
-  // Case 3: max_stride > min_stride >= batch_stride
-  // Since we are dealing with integer indices, a generic way to obtain an integer solution
-  // (x, y, z) for an equation of the form:
-  // n = a.x + b.y + c.z
-  // would be to perform floor division (integer division) in a particular order.
-  // Specifically, we would divide n by the maximum multiplicand to get the variable pertaining
-  // to the maximum multiplicand, and then use the remainder (if any) recursively, to obtain the rest
-  // of the solution.
-  if (self_batch_stride >= max_stride) {  // This is Case 1
-    HANDLE_EQUATION_CASE(self_batch_, max_, min_)
-  } else if (self_batch_stride > min_stride) {  // This is Case 2
-    HANDLE_EQUATION_CASE(max_, self_batch_, min_)
-  } else {  // This is Case 3
-    HANDLE_EQUATION_CASE(max_, min_, self_batch_)
-  }
-
-  int64_t row, col;
-  if (row_is_max_stride) {
-    row = max_idx;
-    col = min_idx;
-  } else {
-    row = min_idx;
-    col = max_idx;
-  }
+  int64_t self_batch_idx = blockIdx.y;
+  int64_t row = linear_idx / self_ncol;
+  int64_t col = linear_idx % self_ncol;
 
   bool mask = upper ? (col - row >= k) : (col - row <= k);
 
-  // Now compute the offset for the result tensor
+  // Now compute the offset for the self and result tensor
   int64_t res_offset = self_batch_idx * res_batch_stride + row * res_row_stride + col * res_col_stride;
-  result[res_offset] = mask ? self[linear_idx] : scalar_t(0);
+  int64_t self_offset = self_batch_idx * self_batch_stride + row * self_row_stride + col * self_col_stride;
+  result[res_offset] = mask ? self[self_offset] : scalar_t(0);
 }
 
-#define DECLARE_TRIL_TRIU_VARIABLES(SELF, RESULT) \
-  int64_t N = SELF.numel(), \
-          self_batch_stride = SELF.dim() > 2 ? SELF.stride(-3) : matrixStride(SELF), \
-          res_batch_stride = RESULT.dim() > 2 ? RESULT.stride(-3) : matrixStride(RESULT), \
-          self_row_stride = SELF.stride(-2), self_col_stride = SELF.stride(-1), \
-          res_row_stride = RESULT.stride(-2), res_col_stride = RESULT.stride(-1); \
-  bool row_is_max_stride = self_row_stride >= self_col_stride; \
-  int64_t max_stride = row_is_max_stride ? self_row_stride : self_col_stride; \
-  int64_t min_stride = row_is_max_stride ? self_col_stride : self_row_stride; \
-  dim3 dim_block = cuda::getApplyBlock(); \
-  dim3 dim_grid; \
-  AT_CHECK(cuda::getApplyGrid(N, dim_grid, SELF.get_device()), "Unable to get dim grid");
+template <bool upper>
+Tensor& triu_tril_cuda_template(Tensor& result, const Tensor& self, int64_t k, const char* name) {
+  int64_t n_batches = batchCount(self), mat_size = self.size(-1) * self.size(-2),
+          res_batch_stride = result.dim() > 2 ? result.stride(-3) : 1,
+          res_row_stride = result.stride(-2), res_col_stride = result.stride(-1),
+          self_batch_stride = self.dim() > 2 ? self.stride(-3) : 1,
+          self_row_stride = self.stride(-2), self_col_stride = self.stride(-1);
+  dim3 dim_block = cuda::getApplyBlock();
+  dim3 dim_grid((mat_size * n_batches + dim_block.x * n_batches - 1) / (dim_block.x * n_batches), n_batches);
+  AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), name, [&]{
+    triu_tril_kernel<scalar_t, upper>
+      <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+        result.data<scalar_t>(), self.data<scalar_t>(), k, mat_size,
+        res_batch_stride, res_row_stride, res_col_stride,
+        self_batch_stride, self_row_stride, self_col_stride, self.size(-1));
+  });
+  AT_CUDA_CHECK(cudaGetLastError());
+  return result;
+}
 
 Tensor& tril_cuda_(Tensor &self, int64_t k) {
-  if (checkZeroStride(self)) self = self.contiguous();
+  if (!checkBatchContiguous(self)) self = self.contiguous();
   return tril_cuda_out(self, self, k);
 }
 
@@ -453,20 +426,12 @@ Tensor& tril_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
   if (self.numel() == 0) {
     return result;
   }
-  Tensor self_c = checkZeroStride(self) ? self.contiguous() : self;
-  DECLARE_TRIL_TRIU_VARIABLES(self_c, result)
-  AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "tril", [&]{
-    triu_tril_kernel<scalar_t, false>
-      <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-        result.data<scalar_t>(), self_c.data<scalar_t>(), k, N,
-        res_batch_stride, self_batch_stride, res_row_stride, res_col_stride,
-        max_stride, min_stride, row_is_max_stride);
-  });
-  return result;
+  Tensor self_c = checkBatchContiguous(self) ? self : self.contiguous();
+  return triu_tril_cuda_template<false>(result, self_c, k, "tril");
 }
 
 Tensor& triu_cuda_(Tensor &self, int64_t k) {
-  if (checkZeroStride(self)) self = self.contiguous();
+  if (!checkBatchContiguous(self)) self = self.contiguous();
   return triu_cuda_out(self, self, k);
 }
 
@@ -477,20 +442,10 @@ Tensor& triu_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
   if (self.numel() == 0) {
     return result;
   }
-  Tensor self_c = checkZeroStride(self) ? self.contiguous() : self;
-  DECLARE_TRIL_TRIU_VARIABLES(self_c, result)
-  AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "triu", [&]{
-    triu_tril_kernel<scalar_t, true>
-      <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-        result.data<scalar_t>(), self_c.data<scalar_t>(), k, N,
-        res_batch_stride, self_batch_stride, res_row_stride, res_col_stride,
-        max_stride, min_stride, row_is_max_stride);
-  });
-  return result;
+  Tensor self_c = checkBatchContiguous(self) ? self : self.contiguous();
+  return triu_tril_cuda_template<true>(result, self_c, k, "triu");
 }
 
 }}  // namespace at::native
 
 #undef ALLOCATE_ARRAY
-#undef HANDLE_EQUATION_CASE
-#undef DECLARE_TRIL_TRIU_VARIABLES

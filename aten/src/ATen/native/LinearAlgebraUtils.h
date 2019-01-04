@@ -41,12 +41,15 @@ static inline int64_t matrixStride(const Tensor& batched_matrices) {
   return batched_matrices.size(-1) * batched_matrices.size(-2);
 }
 
-// Checks if a given tensor has 0s in its stride
-static inline bool checkZeroStride(const Tensor& tensor) {
-  for (const auto& stride : tensor.strides()) {
-    if (stride == 0) return true;
+// Checks if a given tensor has batch contiguous
+static inline bool checkBatchContiguous(const Tensor& tensor) {
+  int64_t expected_stride = tensor.size(-1) * tensor.size(-2);
+  int64_t dims = tensor.dim();
+  for (int64_t i = dims - 3; i >= 0; i--) {
+    if (expected_stride != tensor.stride(i)) return false;
+    expected_stride *= tensor.size(i);
   }
-  return false;
+  return true;
 }
 
 // Returns the epsilon value for floating types except half
