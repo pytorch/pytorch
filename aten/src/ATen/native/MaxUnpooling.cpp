@@ -23,7 +23,6 @@ Tensor max_unpooling2d_forward_out_cpu_frame(
     dimh++;
     dimw++;
   }
-
   int64_t numChannels = input.size(dimc);
   int64_t inputHeight = input.size(dimh);
   int64_t inputWidth = input.size(dimw);
