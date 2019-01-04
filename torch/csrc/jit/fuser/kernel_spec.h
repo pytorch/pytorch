@@ -92,6 +92,13 @@ struct TORCH_API KernelSpec {
     return inputChunks_;
   }
 
+  void setHasRandom(const bool _has_random) {
+    has_random_ = _has_random;
+  }
+  bool hasRandom() const {
+    return has_random_;
+  }
+
   // Cache functions
   c10::optional<std::shared_ptr<FusedKernel>> findKernel(
       const ArgSpec& arg_spec) const {
@@ -114,6 +121,7 @@ struct TORCH_API KernelSpec {
   uint64_t nInputs_;
   std::vector<std::vector<int64_t>> inputBroadcastGroups_;
   std::vector<PartitionInfo> inputChunks_;
+  bool has_random_;
   mutable std::mutex mutex_;
   mutable std::
       unordered_map<ArgSpec, std::shared_ptr<FusedKernel>, torch::hash<ArgSpec>>
