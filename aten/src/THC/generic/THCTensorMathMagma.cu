@@ -539,38 +539,6 @@ void THCTensor_(potri)(THCState *state, THCTensor *ra_, THCTensor *a, const char
 #endif
 }
 
-void THCTensor_(potrs)(THCState *state, THCTensor *rb_, THCTensor *b, THCTensor *a, const char *uplo)
-{
-#ifdef USE_MAGMA
-  THArgCheck(a->size(0) == a->size(1), 2, "A should be square");
-
-  int64_t n = a->size(0);
-  int64_t nrhs = b->size(1);
-  magma_uplo_t ul = uplo[0] == 'U' ?  MagmaUpper : MagmaLower;
-
-  THCTensor *b_ = THCTensor_(newColumnMajor)(state, rb_, b);
-  scalar_t *b_data = THCTensor_(data)(state, b_);
-  THCTensor *a_ = THCTensor_(newColumnMajor)(state, a, a);
-  scalar_t *a_data = THCTensor_(data)(state, a_);
-
-  int info;
-#if defined(THC_REAL_IS_FLOAT)
-  magma_spotrs_gpu(ul, n, nrhs, a_data, n, b_data, n, &info);
-#else
-  magma_dpotrs_gpu(ul, n, nrhs, a_data, n, b_data, n, &info);
-#endif
-
-  // check error value
-  if (info < 0)
-    THError("MAGMA potrs : Argument %d : illegal value", -info);
-
-  THCTensor_(freeCopyTo)(state, b_, rb_);
-  THCTensor_(free)(state, a_);
-#else
-  THError(NoMagma(potrs));
-#endif
-}
-
 void THCTensor_(geqrf)(THCState *state, THCTensor *ra_, THCTensor *rtau_, THCTensor *a_)
 {
 #ifdef USE_MAGMA
