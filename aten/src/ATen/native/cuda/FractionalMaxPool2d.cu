@@ -33,14 +33,14 @@ __device__ inline int get_interval(accscalar_t sample,
   }
 }
 
-template <typename scalar_t>
+// Temlate on PoolSizeWStatic to enable unroll
+template <typename scalar_t, int PoolSizeWStatic>
 __global__ void fractional_max_pool2d_out_cuda_frame(
   PackedTensorAccessor<scalar_t, 4> output,
   PackedTensorAccessor<int64_t, 4> indices,
   PackedTensorAccessor<scalar_t, 4> input,
   PackedTensorAccessor<scalar_t, 3> samples,
-  int poolSizeH, int poolSizeW,
-  int PoolSizeWStatic) {
+  int poolSizeH, int poolSizeW) {
 
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
 
@@ -208,12 +208,21 @@ void fractional_max_pool2d_out_cuda_template(
       auto devOutput = output_.packed_accessor<scalar_t, 4>();
       auto devIndices = indices_.packed_accessor<int64_t, 4>();
       auto devSamples = randomSamples.packed_accessor<scalar_t, 3>();
-      fractional_max_pool2d_out_cuda_frame<scalar_t>
-        <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-          devOutput, devIndices, devInput, devSamples,
-          poolSizeH, poolSizeW,
-          (poolSizeW <= 7 && poolSizeW >= 2) ? poolSizeW : -1
-        );
+#define FMP(POOL_W) \
+      fractional_max_pool2d_out_cuda_frame<scalar_t, POOL_W>\
+        <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(\
+          devOutput, devIndices, devInput, devSamples,\
+          poolSizeH, poolSizeW);
+#define FMP_CASE(POOL_W) case POOL_W: FMP(POOL_W); break
+      switch (poolSizeW) {
+        FMP_CASE(2);
+        FMP_CASE(3);
+        FMP_CASE(4);
+        FMP_CASE(5);
+        FMP_CASE(6);
+        FMP_CASE(7);
+        default: FMP(-1);
+      }
       }
     );
 }
