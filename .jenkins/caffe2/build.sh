@@ -245,7 +245,7 @@ else
   USE_LEVELDB=1 USE_LMDB=1 USE_OPENCV=1 BUILD_TEST=1 BUILD_BINARY=1 python setup.py install --user
 
   # This is to save test binaries for testing
-  cp -r torch/lib/tmp_install $INSTALL_PREFIX
+  cp -r torch $INSTALL_PREFIX
   mkdir -p "$INSTALL_PREFIX/cpp_test/"
   cp -r caffe2/test/* "$INSTALL_PREFIX/cpp_test/"
 
