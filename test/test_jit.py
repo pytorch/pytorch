@@ -3306,13 +3306,22 @@ a")
 
     def test_constant_pooling_none(self):
         @torch.jit.script
+        def typed_nones(a=None, b=None, c=None):
+            # type: (Optional[int], Optional[bool], Optional[Tensor]) -> Tuple[Optional[int], Optional[bool], Optional[Tensor]] # noqa
+            return a, b, c
+
+        @torch.jit.script
         def test(a):
-            # type: (bool)
+            # type: (bool) -> None
             if a:
-                print(None)
+                print(typed_nones())
             else:
-                print(None)
-        self.assertTrue(str(test.graph).count("prim::None") == 1)
+                print(typed_nones())
+
+        graph_str = str(test.graph)
+        self.assertTrue(graph_str.count("bool? = prim::None") == 1)
+        self.assertTrue(graph_str.count("int? = prim::None") == 1)
+        self.assertTrue(graph_str.count("None = prim::None") == 1)
 
     def test_literal(self):
         def func1(a, b):
