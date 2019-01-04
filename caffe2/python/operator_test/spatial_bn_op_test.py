@@ -67,8 +67,7 @@ class TestSpatialBN(serial.SerializedTestCase):
                                    reference_spatialbn_test)
         self.assertDeviceChecks(dc, op, [X, scale, bias, mean, var], [0])
 
-    @unittest.skipIf((not workspace.has_gpu_support) and (
-        not workspace.has_hip_support), "No gpu support")
+    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
     @given(size=st.integers(7, 10),
            input_channels=st.integers(1, 10),
            batch_size=st.integers(0, 3),

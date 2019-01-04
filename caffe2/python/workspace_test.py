@@ -320,8 +320,7 @@ class TestMultiWorkspaces(unittest.TestCase):
         self.assertTrue("test" in workspaces)
 
 
-@unittest.skipIf(not workspace.has_gpu_support
-                and not workspace.has_hip_support, "No gpu support.")
+@unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
 class TestWorkspaceGPU(test_util.TestCase):
 
     def setUp(self):

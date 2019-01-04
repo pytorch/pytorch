@@ -41,8 +41,7 @@ class TestActivations(serial.SerializedTestCase):
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0])
 
-    @unittest.skipIf(not workspace.has_gpu_support and
-                    not workspace.has_hip_support,
+    @unittest.skipIf(not workspace.has_gpu_support,
                      "Relu for float16 can only run on GPU now.")
     @given(X=hu.tensor(dtype=np.float16), in_place=st.booleans(),
            engine=st.sampled_from(["", "CUDNN"]), **hu.gcs)

@@ -11,7 +11,7 @@ import numpy as np
 import unittest
 
 
-@unittest.skipIf((not workspace.has_gpu_support) and (not workspace.has_hip_support), "No gpu support.")
+@unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
 class TestLSTMs(unittest.TestCase):
 
     def testEqualToCudnn(self):

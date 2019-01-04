@@ -10,12 +10,12 @@ from caffe2.python import extension_loader
 # if that still fails, we will exit loud.
 with extension_loader.DlopenGuard():
     has_hip_support = False
-    has_gpu_support = False
+    has_cuda_support = False
 
     try:
         from caffe2.python.caffe2_pybind11_state_gpu import *  # noqa
         if num_cuda_devices():  # noqa
-            has_gpu_support = True
+            has_cuda_support = True
     except ImportError as gpu_e:
         logging.info('Failed to import cuda module: {}'.format(gpu_e))
         try:

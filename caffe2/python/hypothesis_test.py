@@ -320,7 +320,7 @@ class TestOperators(hu.HypothesisTestCase):
         for param, _ in enumerate(inputs):
             self.assertGradientChecks(gc, op, inputs, param, [0])
 
-    @unittest.skipIf(not workspace.has_gpu_support and not workspace.has_hip_support,
+    @unittest.skipIf(not workspace.has_gpu_support,
                      "Skipping test due to no gpu present.")
     @given(hidden_size=st.integers(min_value=1, max_value=3),
            num_layers=st.integers(min_value=1, max_value=3),

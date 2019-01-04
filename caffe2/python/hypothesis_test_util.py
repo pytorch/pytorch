@@ -255,7 +255,7 @@ gpu_do = caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CUDA)
 hip_do = caffe2_pb2.DeviceOption(device_type=caffe2_pb2.HIP)
 # (bddppq) Do not rely on this no_hip option! It's just used to
 # temporarily skip some flaky tests on ROCM before it's getting more mature.
-_device_options_no_hip = [cpu_do] + ([gpu_do] if workspace.has_gpu_support else [])
+_device_options_no_hip = [cpu_do] + ([gpu_do] if workspace.has_cuda_support else [])
 device_options = _device_options_no_hip + ([hip_do] if workspace.has_hip_support else [])
 
 # Include device option for each GPU

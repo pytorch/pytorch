@@ -643,8 +643,7 @@ class TestInferDeviceCpuOnly(test_util.TestCase):
         self.assertEqual(op.input[2], "fc_b")
 
 
-@unittest.skipIf(not workspace.has_gpu_support
-                and not workspace.has_hip_support, 'No GPU support')
+@unittest.skipIf(not workspace.has_gpu_support, 'No GPU support')
 class TestInferDevice(test_util.TestCase):
 
     def setUp(self):

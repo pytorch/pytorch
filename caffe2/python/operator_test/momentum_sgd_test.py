@@ -139,7 +139,7 @@ class TestMomentumSGD(serial.SerializedTestCase):
             [grad, m, lr, w, indices],
             sparse)
 
-    @unittest.skipIf(not workspace.has_gpu_support and not workspace.has_hip_support, "No gpu support.")
+    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
     @given(n=st.integers(4, 8), nesterov=st.booleans(), **hu.gcs)
     def test_fp16momentum_sgd(self, n, nesterov, gc, dc):
         assume(core.IsGPUDeviceType(gc.device_type))
