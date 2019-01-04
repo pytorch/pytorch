@@ -432,9 +432,9 @@ class GLU(Module):
         dim (int): the dimension on which to split the input. Default: -1
 
     Shape:
-        - Input: :math:`(*_1, N, *_2)` where `*` means, any number of additional
+        - Input: :math:`(\ast_1, N, \ast_2)` where `*` means, any number of additional
           dimensions
-        - Output: :math:`(*_1, M, *_2)` where M = N / 2
+        - Output: :math:`(\ast_1, M, \ast_2)` where :math:`M=N/2`
 
     Examples::
 
