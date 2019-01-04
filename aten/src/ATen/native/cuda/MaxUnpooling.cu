@@ -41,8 +41,8 @@ __global__ void max_unpooling3d_forward_kernel(
     PackedTensorAccessor<int64_t, 4> indices,
     T* output,
     const int64_t oT,
-    const int64_t oW,
     const int64_t oH,
+    const int64_t oW,
     const int64_t offsetZ) {
   int64_t iColumn = blockIdx.x * blockDim.x + threadIdx.x;
   int64_t iRow = blockIdx.y * blockDim.y + threadIdx.y;
@@ -502,7 +502,6 @@ at::Tensor& max_unpooling3d_backward_out_cuda(
   int inputTime = 0;
   int64_t inputHeight = 0;
   int64_t inputWidth = 0;
-
 
   TensorArg self_arg{self, "self", 1}, indices_arg{indices, "indices", 2},
       grad_output_arg{grad_output, "grad_output", 3},
