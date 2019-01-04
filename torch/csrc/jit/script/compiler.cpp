@@ -38,9 +38,9 @@ using Refinements = std::unordered_map<Value*, TypePtr>;
 
 struct BoolInfo {
   BoolInfo(Refinements true_refinements, Refinements false_refinements)
-      : true_refinements(true_refinements),
-        false_refinements(false_refinements){};
-  BoolInfo(){};
+      : true_refinements(std::move(true_refinements)),
+        false_refinements(std::move(false_refinements)){};
+  BoolInfo() = default;
 
   Refinements true_refinements;
   Refinements false_refinements;
@@ -143,7 +143,7 @@ struct Environment {
   }
 
   void setBoolInfo(Value* v, BoolInfo info) {
-    bool_information[v] = info;
+    bool_information[v] = std::move(info);
   }
 
   c10::optional<BoolInfo> getBoolInfo(Value* v) {
@@ -2122,7 +2122,7 @@ struct to_ir {
                *method.graph(),
                kind,
                c10::nullopt,
-               {left, right},
+               {std::move(left), std::move(right)},
                {},
                /*required=*/true);
    setIsBoolInfo(val);
