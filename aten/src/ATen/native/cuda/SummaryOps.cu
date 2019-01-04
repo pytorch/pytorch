@@ -21,8 +21,8 @@ namespace {
     IndexType bin = (int)((bVal - minvalue) * nbins / (maxvalue - minvalue));
     // (only applicable for histc)
     // while each bin is inclusive at the lower end and exclusive at the higher, i.e. [start, end)
-    // the last bin is inclusive at both, i.e. [start, end], to include maxvalue if exists
-    // therefore when bin == nbins, adjust bin to be the last bin
+    // the last bin is inclusive at both, i.e. [start, end], in order to include maxvalue if exists
+    // therefore when bin == nbins, adjust bin to the last bin
     if (bin == nbins) bin -= 1;
     return bin;
   }
@@ -68,8 +68,6 @@ __global__ void kernelHistogram1D(
       const auto bVal = b.data[bOffset];
       if (bVal >= minvalue && bVal <= maxvalue) {
         // Use value at `b` as an offset of `smem`
-        // IndexType bin = (int)((bVal - minvalue) * nbins / (maxvalue - minvalue));
-        // if (bin == nbins) bin -= 1;
         const IndexType bin = getBin<input_t, IndexType>(bVal, minvalue, maxvalue, nbins);
         atomicAdd(&smem[bin], getOp(linearIndex));
       }
@@ -96,8 +94,6 @@ __global__ void kernelHistogram1D(
       const auto bVal = b.data[bOffset];
       if (bVal >= minvalue && bVal <= maxvalue) {
         // Use value at `b` as an offset of `p`
-        // IndexType bin = (int)((bVal - minvalue) * nbins / (maxvalue - minvalue));
-        // if (bin == nbins) bin -= 1;
         const IndexType bin = getBin<input_t, IndexType>(bVal, minvalue, maxvalue, nbins);
         const IndexType pIdx = p.strides[0] * blockIdx.x + bin;
         const IndexType pOffset =
@@ -129,8 +125,6 @@ __global__ void kernelHistogram1D(
       const auto bVal = b.data[bOffset];
       if (bVal >= minvalue && bVal <= maxvalue) {
         // Use value at `b` as an offset of `a`
-        // IndexType bin = (int)((bVal - minvalue) * nbins / (maxvalue - minvalue));
-        // if (bin == nbins) bin -= 1;
         const IndexType bin = getBin<input_t, IndexType>(bVal, minvalue, maxvalue, nbins);
         const IndexType aOffset =
             detail::IndexToOffset<output_t, IndexType, ADims>::get(bin, a);
