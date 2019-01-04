@@ -4134,24 +4134,24 @@ a")
         @torch.jit.script
         def test_ternary(x):
             # type: (Optional[int]) -> int
-            x = 1 if x is None else 2
+            x = x if x is not None else 2
             return x
 
         @torch.jit.script
         def test_not_none(x):
-            # type: (Optional[int])
+            # type: (Optional[int]) -> None
             if x is not None:
                 print(x + 1)
 
         @torch.jit.script
         def test_and(x, y):
-            # type: (Optional[int], Optional[int])
+            # type: (Optional[int], Optional[int]) -> None
             if x is not None and y is not None:
                 print(x + y)
 
         @torch.jit.script
         def test_bool_expression(x):
-            # type: (Optional[int])
+            # type: (Optional[int]) -> None
             if x is not None and x < 2:
                 print(x + 1)
 
@@ -4166,7 +4166,7 @@ a")
 
         @torch.jit.script
         def test_or(x, y):
-            # type: (Optional[int], Optional[int])
+            # type: (Optional[int], Optional[int]) -> None
             if y is None or x is None:
                 pass
             else:
@@ -4201,7 +4201,7 @@ a")
         with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
             @torch.jit.script
             def named_var(x):
-                # type: (Optional[int])
+                # type: (Optional[int]) -> None
                 x_none = x is not None
                 if x_none:
                     print(x + 1)
@@ -4209,7 +4209,7 @@ a")
         with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
             @torch.jit.script
             def named_var_and(x, y):
-                # type: (Optional[int], Optional[int])
+                # type: (Optional[int], Optional[int]) -> None
                 x_none = x is not None
                 if y is not None and x_none:
                     print(x + y)
