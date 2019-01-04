@@ -3,7 +3,7 @@ import sys
 import ast
 import inspect
 import torch
-from .._jit_internal import List, Tuple, is_tuple, is_list
+from .._jit_internal import List, BroadcastingList1, BroadcastingList2, BroadcastingList3, Tuple, is_tuple, is_list
 from torch._C import DynamicType, TupleType, FloatType, IntType, ListType
 from textwrap import dedent
 
