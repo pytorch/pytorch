@@ -20,9 +20,9 @@ class Linear(Module):
 
     Shape:
         - Input: :math:`(N, *, H_{in})` where :math:`*` means any number of
-          additional dimensions and H_{in} = \text{in\_features}
+          additional dimensions and :math:`H_{in} = \text{in\_features}`
         - Output: :math:`(N, *, H_{out})` where all but the last dimension
-          are the same shape as the input and H_{out} = \text{out\_features}
+          are the same shape as the input and :math:`H_{out} = \text{out\_features}`.
 
     Attributes:
         weight: the learnable weights of the module of shape
