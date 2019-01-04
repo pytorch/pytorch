@@ -64,8 +64,8 @@ bool WeightedSampleOp<float, CUDAContext>::RunOnDevice() {
     if (OutputSize() == 2) {
       auto& in_val = Input(1);
       CAFFE_ENFORCE_EQ(
-          in_weights.dims(),
-          in_val.dims(),
+          in_weights.sizes(),
+          in_val.sizes(),
           "The sampling weights tensor and the sampling values tensor must have the same dimensions.");
       in_val_data = in_val.data<float>();
 
