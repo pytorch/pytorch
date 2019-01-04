@@ -10,8 +10,8 @@ Tensor max_unpooling2d_forward_out_cpu_frame(
     Tensor& output,
     const Tensor& input,
     const Tensor& indices,
-    int64_t outputHeight,
-    int64_t outputWidth) {
+    int64_t owidth,
+    int64_t oheight) {
   int64_t numBatch = 1;
   int64_t dimc = 0;
   int64_t dimh = 1;
@@ -31,7 +31,7 @@ Tensor max_unpooling2d_forward_out_cpu_frame(
   auto* rawOutput = output.data<scalar_t>();
 
   for (int64_t n = 0; n < numBatch; n++) {
-    int64_t nOutputOffset = n * numChannels * outputWidth * outputHeight;
+    int64_t nOutputOffset = n * numChannels * owidth * oheight;
     int64_t nInputOffset = n * numChannels * inputWidth * inputHeight;
     int64_t k;
     bool has_error = false;
@@ -39,7 +39,7 @@ Tensor max_unpooling2d_forward_out_cpu_frame(
 #pragma omp parallel for private(k)
     for (k = 0; k < numChannels; k++) {
       int64_t finalOutputOffset =
-          nOutputOffset + k * outputWidth * outputHeight;
+          nOutputOffset + k * owidth * oheight;
       int64_t finalInputOffset = nInputOffset + k * inputWidth * inputHeight;
       scalar_t* output_p_k = rawOutput + finalOutputOffset;
       scalar_t* input_p_k = rawInput + finalInputOffset;
@@ -49,7 +49,7 @@ Tensor max_unpooling2d_forward_out_cpu_frame(
       for (int64_t i = 0; i < inputHeight; i++) {
         for (int64_t j = 0; j < inputWidth; j++) {
           maxp = ind_p_k[i * inputWidth + j];
-          if (maxp < 0 || maxp >= outputWidth * outputHeight) {
+          if (maxp < 0 || maxp >= owidth * oheight) {
 #pragma omp critical
             {
               has_error = true;
@@ -63,12 +63,12 @@ Tensor max_unpooling2d_forward_out_cpu_frame(
     }
     if (has_error) {
       AT_ERROR(
-          "Found an invalid max index",
+          "Found an invalid max index: ",
           error_index,
           " (output volumes are of size ",
-          outputHeight,
+          oheight,
           "x",
-          outputWidth);
+          owidth);
     }
   }
   return output;
@@ -79,6 +79,8 @@ Tensor& max_unpooling2d_forward_out_cpu(
     const Tensor& self,
     const Tensor& indices,
     IntList output_size) {
+  auto owidth = output_size[0];
+  auto oheight = output_size[1];
   AT_CHECK(
       indices.scalar_type() == at::ScalarType::Long,
       "elements in indices should be type Long");
@@ -94,20 +96,17 @@ Tensor& max_unpooling2d_forward_out_cpu(
 
   AT_CHECK(self.numel() > 0, "Input must be non-empty");
 
-  auto outputHeight = output_size[0];
-  auto outputWidth = output_size[1];
-
   auto self_contiguous = self.contiguous();
   auto indices_contiguous = indices.contiguous();
 
   if (self_contiguous.ndimension() == 3) {
     int64_t numBatch = 1;
     int64_t numChannels = self.size(0);
-    output.resize_({numChannels, outputHeight, outputWidth});
+    output.resize_({numChannels, oheight, owidth});
   } else {
     int64_t numBatch = self.size(0);
     int64_t numChannels = self.size(1);
-    output.resize_({numBatch, numChannels, outputHeight, outputWidth});
+    output.resize_({numBatch, numChannels, oheight, owidth});
   }
   output.zero_();
 
@@ -117,8 +116,8 @@ Tensor& max_unpooling2d_forward_out_cpu(
             output,
             self_contiguous,
             indices_contiguous,
-            output_size[0],
-            output_size[1]);
+            owidth,
+            oheight);
       }));
   return output;
 };
@@ -201,10 +200,13 @@ Tensor max_unpooling3d_forward_out_cpu_frame(
       }
       if (has_error) {
         AT_ERROR(
-            "found an invalid max index %ld (output volumes are of size %dx%dx%d)",
+            "found an invalid max index ",
             error_index,
+            " (output volumes are of size ",
             oT,
+            "x",
             oH,
+            "x",
             oW);
       }
     }
@@ -219,6 +221,9 @@ void max_unpooling3d_shape_check(
     IntList output_size,
     IntList stride,
     IntList padding) {
+  int64_t oT = output_size[0];
+  int64_t oW = output_size[1];
+  int64_t oH = output_size[2];
   AT_CHECK(
       indices.scalar_type() == at::ScalarType::Long,
       "elements in indices should be type Long");
@@ -228,13 +233,13 @@ void max_unpooling3d_shape_check(
       input.sizes());
   AT_CHECK(
       output_size.size() == 3,
-      "There should be exactly three elements (depth, height, width) in output_size");
+      "There should be exactly three elements (depth, width, height) in output_size");
   AT_CHECK(
       stride.size() == 3,
-      "There should be exactly three elements (depth, height, width) in stride");
+      "There should be exactly three elements (depth, width, height) in stride");
   AT_CHECK(
       padding.size() == 3,
-      "There should be exactly three elements (depth, height, width) in padding");
+      "There should be exactly three elements (depth, width, height) in padding");
   AT_CHECK(
       input.sizes() == indices.sizes(),
       "Shape of indices should match shape of input");
@@ -261,14 +266,22 @@ void max_unpooling3d_shape_check(
   int nslices = input.size(dimn);
 
   if (gradOutput.defined()) {
-    if (output_size[0] != gradOutput.size(dimt) ||
-        output_size[1] != gradOutput.size(dimh) ||
-        output_size[2] != gradOutput.size(dimw)) {
+    if (oT != gradOutput.size(dimt) ||
+        oH != gradOutput.size(dimh) ||
+        oW != gradOutput.size(dimw)) {
       AT_ERROR(
-          "Inconsistent gradOutput size. output_size: ,",
-          output_size,
+          "Inconsistent gradOutput size. oT= ",
+          oT,
+          ", oH= ",
+          oH,
+          ", oW= ",
+          oW,
           ". gradOutput: ",
-          gradOutput);
+          gradOutput.size(dimt),
+          "x",
+          gradOutput.size(dimh),
+          "x",
+          gradOutput.size(dimw));
     }
     AT_CHECK(
         gradOutput.ndimension() == input.ndimension() &&
@@ -284,18 +297,21 @@ Tensor& max_unpooling3d_forward_out_cpu(
     IntList output_size,
     IntList stride,
     IntList padding) {
+  int64_t oT = output_size[0];
+  int64_t oW = output_size[1];
+  int64_t oH = output_size[2];
   max_unpooling3d_shape_check(
       self, Tensor(), indices, output_size, stride, padding);
 
   if (self.ndimension() == 5) {
     output.resize_({self.size(0),
                     self.size(1),
-                    output_size[0],
-                    output_size[1],
-                    output_size[2]});
+                    oT,
+                    oH,
+                    oW});
   } else {
     output.resize_(
-        {self.size(0), output_size[0], output_size[1], output_size[2]});
+        {self.size(0), oT, oH, oW});
   }
   output.zero_();
 
@@ -305,9 +321,9 @@ Tensor& max_unpooling3d_forward_out_cpu(
             output,
             self.contiguous(),
             indices.contiguous(),
-            output_size[0],
-            output_size[1],
-            output_size[2],
+            oT,
+            oW,
+            oH,
             stride[0],
             stride[1],
             stride[2],
@@ -381,6 +397,8 @@ Tensor& max_unpooling2d_backward_out_cpu(
     const Tensor& self,
     const Tensor& indices,
     IntList output_size) {
+  int64_t owidth = output_size[0];
+  int64_t oheight = output_size[1];
   int dimw = 2;
   int dimh = 1;
   int nbatch = 1;
@@ -394,9 +412,6 @@ Tensor& max_unpooling2d_backward_out_cpu(
       self.sizes() == indices.sizes(), "Input shape must match indices shape");
 
   AT_CHECK(output_size.size() == 2, "Output size must be 2");
-
-  int owidth = output_size[0];
-  int oheight = output_size[1];
 
   /* get contiguous gradOutput and indices */
   auto gradOutput = grad_output.contiguous();
@@ -417,13 +432,13 @@ Tensor& max_unpooling2d_backward_out_cpu(
   iheight = self.size(dimh);
   iwidth = self.size(dimw);
 
-  if (output_size[0] != gradOutput.size(dimh) ||
-      output_size[1] != gradOutput.size(dimw)) {
+  if (owidth != gradOutput.size(dimw) ||
+      oheight != gradOutput.size(dimh)) {
     AT_ERROR(
-        "Inconsistent gradOutput size",
-        output_size[0],
-        ", output width= ",
-        output_size[1],
+        "Inconsistent gradOutput size. output height = ",
+        oheight,
+        ", output width = ",
+        owidth,
         ", gradOutput: ",
         gradOutput.size(dimh),
         "x",
@@ -443,8 +458,8 @@ Tensor& max_unpooling2d_backward_out_cpu(
               nslices,
               iwidth,
               iheight,
-              output_size[0],
-              output_size[1]);
+              owidth,
+              oheight);
         }));
   }
   return grad_input;
@@ -513,8 +528,8 @@ Tensor& max_unpooling3d_backward_out_cpu(
     IntList stride,
     IntList padding) {
   auto oT = output_size[0];
-  auto oH = output_size[1];
-  auto oW = output_size[2];
+  auto oW = output_size[1];
+  auto oH = output_size[2];
   int dimw = 3;
   int dimh = 2;
   int dimt = 1;
@@ -552,7 +567,7 @@ Tensor& max_unpooling3d_backward_out_cpu(
   int p;
   for (p = 0; p < nbatch; p++) {
     int inputOffset = p * nslices * iT * iH * iW;
-    int outputOffset = p * nslices * oT * oT * oW;
+    int outputOffset = p * nslices * oT * oH * oW;
     AT_DISPATCH_FLOATING_TYPES(
         self.type(), "max_unpooling3d_backward_out_cpu_frame", ([&] {
           max_unpooling3d_backward_out_cpu_frame<scalar_t>(

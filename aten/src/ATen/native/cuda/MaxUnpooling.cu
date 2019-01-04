@@ -107,8 +107,8 @@ Tensor& max_unpooling2d_forward_out_cuda(
   AT_CHECK(
       indices.scalar_type() == at::ScalarType::Long,
       "elements in indices should be type Long");
-  auto outputHeight = output_size[0];
-  auto outputWidth = output_size[1];
+  auto owidth = output_size[0];
+  auto oheight = output_size[1];
 
   TensorArg output_arg{output, "output", 1}, self_arg{self, "self", 2},
       indices_arg{indices, "indices", 3};
@@ -126,7 +126,7 @@ Tensor& max_unpooling2d_forward_out_cuda(
       "Shape of input must match shape of indices");
   AT_CHECK(
       output_size.size() == 2,
-      "There should be exactly two elements (height, width) in output_size");
+      "There should be exactly two elements (width, height) in output_size");
 
   int64_t dimw = 2;
   int64_t dimh = 1;
@@ -148,7 +148,7 @@ Tensor& max_unpooling2d_forward_out_cuda(
   auto input_contiguous = self.contiguous();
   auto indices_contiguous = indices.contiguous();
 
-  output.resize_({numBatch, numChannels, outputHeight, outputWidth});
+  output.resize_({numBatch, numChannels, oheight, owidth});
 
   output.zero_();
 
@@ -168,8 +168,8 @@ Tensor& max_unpooling2d_forward_out_cuda(
             numChannels,
             inputHeight,
             inputWidth,
-            outputHeight,
-            outputWidth,
+            oheight,
+            owidth,
             output.data<scalar_t>());
       }));
   AT_CHECK(
@@ -177,7 +177,7 @@ Tensor& max_unpooling2d_forward_out_cuda(
       "RoiPooling2d_forward_kernel failed with error code ",
       cudaGetLastError());
   if (self.ndimension() == 3) {
-    output.resize_({numChannels, outputHeight, outputWidth});
+    output.resize_({numChannels, oheight, owidth});
   }
   return output;
 }
@@ -198,6 +198,9 @@ void max_unpooling3d_shape_check(
     IntList output_size,
     IntList stride,
     IntList padding) {
+  int64_t oT = output_size[0];
+  int64_t oW = output_size[1];
+  int64_t oH = output_size[2];
   AT_CHECK(
       indices.scalar_type() == at::ScalarType::Long,
       "elements in indices should be type Long");
@@ -207,13 +210,13 @@ void max_unpooling3d_shape_check(
       input.sizes());
   AT_CHECK(
       output_size.size() == 3,
-      "There should be exactly three elements (depth, height, width) in output_size");
+      "There should be exactly three elements (depth, width, height) in output_size");
   AT_CHECK(
       stride.size() == 3,
-      "There should be exactly three elements (depth, height, width) in stride");
+      "There should be exactly three elements (depth, width, height) in stride");
   AT_CHECK(
       padding.size() == 3,
-      "There should be exactly three elements (depth, height, width) in padding");
+      "There should be exactly three elements (depth, width, height) in padding");
   AT_CHECK(
       input.sizes() == indices.sizes(),
       "Shape of indices should match shape of input");
@@ -240,14 +243,22 @@ void max_unpooling3d_shape_check(
   int nslices = input.size(dimn);
 
   if (gradOutput.defined()) {
-    if (output_size[0] != gradOutput.size(dimt) ||
-        output_size[1] != gradOutput.size(dimh) ||
-        output_size[2] != gradOutput.size(dimw)) {
+    if (oT != gradOutput.size(dimt) ||
+        oH != gradOutput.size(dimh) ||
+        oW != gradOutput.size(dimw)) {
       AT_ERROR(
-          "Inconsistent gradOutput size. output_size: ,",
-          output_size,
+          "Inconsistent gradOutput size. oT= ",
+          oT,
+          ", oH= ",
+          oH,
+          ", oW= ",
+          oW,
           ". gradOutput: ",
-          gradOutput);
+          gradOutput.size(dimt),
+          "x",
+          gradOutput.size(dimh),
+          "x",
+          gradOutput.size(dimw));
     }
     AT_CHECK(
         gradOutput.ndimension() == input.ndimension() &&
@@ -266,17 +277,9 @@ Tensor& max_unpooling3d_forward_out_cuda(
   max_unpooling3d_shape_check(
       self, Tensor(), indices, output_size, stride, padding);
 
-  auto outputTime = output_size[0];
-  auto outputHeight = output_size[1];
-  auto outputWidth = output_size[2];
-
-  auto dT = stride[0];
-  auto dH = stride[1];
-  auto dW = stride[2];
-
-  auto padT = padding[0];
-  auto padH = padding[1];
-  auto padW = padding[2];
+  int64_t oT = output_size[0];
+  int64_t oW = output_size[1];
+  int64_t oH = output_size[2];
 
   TensorArg output_arg{output, "output", 1}, self_arg{self, "self", 2},
       indices_arg{indices, "indices", 3};
@@ -296,7 +299,7 @@ Tensor& max_unpooling3d_forward_out_cuda(
     inputTime = self.size(1);
     inputHeight = self.size(2);
     inputWidth = self.size(3);
-    output.resize_({inputSlices, outputTime, outputHeight, outputWidth});
+    output.resize_({inputSlices, oT, oH, oW});
   } else {
     /* resize output */
     batchSize = self.size(0);
@@ -305,7 +308,7 @@ Tensor& max_unpooling3d_forward_out_cuda(
     inputHeight = self.size(3);
     inputWidth = self.size(4);
     output.resize_(
-        {batchSize, inputSlices, outputTime, outputHeight, outputWidth});
+        {batchSize, inputSlices, oT, oH, oW});
   }
   auto input_contiguous = self.contiguous();
   auto indices_contiguous = indices.contiguous();
@@ -349,9 +352,9 @@ Tensor& max_unpooling3d_forward_out_cuda(
               input_contiguous_reshaped.packed_accessor<scalar_t, 4>(),
               indices_contiguous_reshaped.packed_accessor<int64_t, 4>(),
               output_contiguous.data<scalar_t>(),
-              outputTime,
-              outputHeight,
-              outputWidth,
+              oT,
+              oH,
+              oW,
               offsetZ);
         }));
     AT_CHECK(
@@ -382,6 +385,8 @@ at::Tensor& max_unpooling2d_backward_out_cuda(
     const Tensor& self,
     const Tensor& indices,
     IntList output_size) {
+  int64_t owidth = output_size[0];
+  int64_t oheight = output_size[1];
   AT_CHECK(
       indices.scalar_type() == at::ScalarType::Long,
       "elements in indices should be type Long");
@@ -403,9 +408,6 @@ at::Tensor& max_unpooling2d_backward_out_cuda(
 
   AT_CHECK(output_size.size() == 2, "output_size must have two elements");
 
-  int64_t oheight = output_size[0];
-  int64_t owidth = output_size[1];
-
   int64_t nInputCols, nInputRows, nInputPlane, batchSize;
 
   int dimw = 2;
@@ -426,7 +428,7 @@ at::Tensor& max_unpooling2d_backward_out_cuda(
 
   if (oheight != grad_output.size(dimh) || owidth != grad_output.size(dimw)) {
     AT_ERROR(
-        "Inconsistent gradOutput size",
+        "Inconsistent gradOutput size. output height: ",
         oheight,
         ", output width= ",
         owidth,
@@ -488,6 +490,10 @@ at::Tensor& max_unpooling3d_backward_out_cuda(
     IntList output_size,
     IntList stride,
     IntList padding) {
+  int64_t oT = output_size[0];
+  int64_t oW = output_size[1];
+  int64_t oH = output_size[2];
+
   max_unpooling3d_shape_check(
       self, grad_output, indices, output_size, stride, padding);
 
@@ -497,9 +503,6 @@ at::Tensor& max_unpooling3d_backward_out_cuda(
   int64_t inputHeight = 0;
   int64_t inputWidth = 0;
 
-  auto outputTime = output_size[0];
-  auto outputHeight = output_size[1];
-  auto outputWidth = output_size[2];
 
   TensorArg self_arg{self, "self", 1}, indices_arg{indices, "indices", 2},
       grad_output_arg{grad_output, "grad_output", 3},
@@ -562,9 +565,9 @@ at::Tensor& max_unpooling3d_backward_out_cuda(
               0,
               at::cuda::getCurrentCUDAStream()>>>(
               grad_output.data<scalar_t>(),
-              outputTime,
-              outputHeight,
-              outputWidth,
+              oT,
+              oH,
+              oW,
               indices_contiguous_reshaped.packed_accessor<int64_t, 4>(),
               grad_input_reshaped.packed_accessor<scalar_t, 4>(),
               offsetZ);
