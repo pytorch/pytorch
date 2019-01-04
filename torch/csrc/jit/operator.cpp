@@ -6,9 +6,11 @@
 #include <torch/csrc/jit/script/lexer.h>
 #include <torch/csrc/jit/script/parse_string_literal.h>
 #include <torch/csrc/jit/script/tree.h>
+#include <torch/csrc/jit/script/edit_distance.h>
 
 #include <functional>
 #include <memory>
+#include <queue>
 #include <utility>
 #include <vector>
 
@@ -431,6 +433,32 @@ struct OperatorRegistry {
       return it->second;
     return empty;
   }
+
+  std::vector<Symbol> findSimilarOperators(Symbol input_op) {
+    std::lock_guard<std::mutex> guard(lock);
+    registerPendingOperators();
+
+    using EntryPair = std::pair<int64_t, Symbol>;
+    auto cmp = [](const EntryPair& lhs, const EntryPair& rhs) {
+      return lhs.first > rhs.first;
+    };
+
+    std::priority_queue<EntryPair, std::vector<EntryPair>, decltype(cmp)> rankings(cmp);
+    static constexpr size_t MAX_EDIT_DIST = 2u;
+    for (const auto& op : operators) {
+      auto edit_dist = script::ComputeEditDistance(
+          input_op.toQualString(), op.first.toQualString(), MAX_EDIT_DIST);
+      if (edit_dist <= MAX_EDIT_DIST) {
+        rankings.emplace(edit_dist, op.first);
+      }
+    }
+    std::vector<Symbol> ret;
+    while (!rankings.empty()) {
+      ret.push_back(rankings.top().second);
+      rankings.pop();
+    }
+    return ret;
+  }
 };
 
 OperatorRegistry& getRegistry() {
@@ -457,6 +485,11 @@ void registerOperator(Operator&& op) {
 const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name) {
   return getRegistry().getOperators(name);
 }
+
+std::vector<Symbol> findSimilarOperators(Symbol input_op) {
+  return getRegistry().findSimilarOperators(input_op);
+}
+
 
 Operator& sig(const char* signature) {
   return *getRegistry().lookupByLiteral(signature);

@@ -349,6 +349,7 @@ static std::string prefixLine(
   return ss.str();
 }
 
+
 // Search for operators matching the provided symbol name and input types.
 // If one is found, emit a node to the graph for that operator.
 Value* emitBuiltinCall(
@@ -404,9 +405,24 @@ Value* emitBuiltinCall(
   if (!required) {
     return nullptr;
   }
+  // no operators found with the same name, print out similarly named operators
   if (variants.size() == 0) {
-    throw ErrorReport(loc) << "unknown builtin op";
+    const auto close_symbols = findSimilarOperators(name);
+    auto error = ErrorReport(loc);
+    const auto& user_function_name = name.toQualString();
+    error << "unknown builtin op: " << user_function_name << "\n";
+    if (close_symbols.size() == 0) {
+      error << "Could not find any similar ops to " << user_function_name
+        << ". This op may not exist or may not be currently supported in TorchScript\n";
+    } else {
+      error << "Here are some suggestions: \n";
+      for (const auto& sym : close_symbols) {
+        error << "\t" << sym.toQualString() << "\n";
+      }
+    }
+    throw error;
   }
+
   throw ErrorReport(loc) << "arguments for call are not valid:\n"
                          << prefixLine(failure_messages.str(), "  ")
                          << "for call at";
