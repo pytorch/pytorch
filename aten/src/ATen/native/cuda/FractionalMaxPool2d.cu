@@ -200,31 +200,32 @@ void fractional_max_pool2d_out_cuda_template(
             input_.size(0));
   dim3 block(outputPlaneSize > 128 ? 128 : outputPlaneSize);
 
-
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(),
-    "fractional_max_pool2d_out_cuda_frame",
-    [&] {
-      auto devInput = input_.packed_accessor<scalar_t, 4>();
-      auto devOutput = output_.packed_accessor<scalar_t, 4>();
-      auto devIndices = indices_.packed_accessor<int64_t, 4>();
-      auto devSamples = randomSamples.packed_accessor<scalar_t, 3>();
 #define FMP(POOL_W) \
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), \
+    "fractional_max_pool2d_out_cuda_frame", \
+    [&] { \
+      auto devInput = input_.packed_accessor<scalar_t, 4>(); \
+      auto devOutput = output_.packed_accessor<scalar_t, 4>();\
+      auto devIndices = indices_.packed_accessor<int64_t, 4>();\
+      auto devSamples = randomSamples.packed_accessor<scalar_t, 3>();\
       fractional_max_pool2d_out_cuda_frame<scalar_t, POOL_W>\
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(\
           devOutput, devIndices, devInput, devSamples,\
-          poolSizeH, poolSizeW);
+          poolSizeH, poolSizeW);\
+       }\
+     )
+
 #define FMP_CASE(POOL_W) case POOL_W: FMP(POOL_W); break
-      switch (poolSizeW) {
-        FMP_CASE(2);
-        FMP_CASE(3);
-        FMP_CASE(4);
-        FMP_CASE(5);
-        FMP_CASE(6);
-        FMP_CASE(7);
-        default: FMP(-1);
-      }
-      }
-    );
+
+    switch (poolSizeW) {
+      FMP_CASE(2);
+      FMP_CASE(3);
+      FMP_CASE(4);
+      FMP_CASE(5);
+      FMP_CASE(6);
+      FMP_CASE(7);
+      default: FMP(-1);
+    }
 }
 
 void fractional_max_pool2d_backward_out_cuda_template(
