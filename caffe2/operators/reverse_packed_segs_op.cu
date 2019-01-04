@@ -58,9 +58,9 @@ void ReversePackedSegsOp<CUDAContext>::DoRunWithLengthType() {
       "segments, embeddings>");
   CAFFE_ENFORCE(lengths.ndim() == 1, "LENGTH should be 1-D");
 
-  auto* output = Output(0);
+  
   const auto shape = data.dims();
-  output->Resize(shape);
+  auto* output = Output(0, shape, at::dtype<T>());
 
   const auto max_length = data.dims()[0];
   const auto batch_size = data.dims()[1];

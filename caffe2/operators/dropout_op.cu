@@ -21,8 +21,8 @@ __global__ void DropoutKernel(
 template <>
 bool DropoutOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
-  auto* Y = Output(0);
-  Y->Resize(X.dims());
+  
+  auto* Y = Output(0, X.dims(), at::dtype<float>());
   if (is_test_) {
     if (Y != &X) {
       context_.CopySameDevice<float>(
@@ -34,8 +34,8 @@ bool DropoutOp<float, CUDAContext>::RunOnDevice() {
     // boolean numbers, we will generate into dY and write the result to
     // mask.
     float* Ydata = Y->template mutable_data<float>();
-    auto* mask = Output(1);
-    mask->Resize(X.dims());
+    
+    auto* mask = Output(1, X.dims(), at::dtype<bool>());
     CAFFE_ENFORCE(X.data<float>() != Ydata, "In-place GPU dropout is broken");
     CURAND_ENFORCE(
         curandGenerateUniform(context_.curand_generator(), Ydata, X.size()));
@@ -69,8 +69,8 @@ __global__ void DropoutGradientKernel(
 template <>
 bool DropoutGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& dY = Input(0);
-  auto* dX = Output(0);
-  dX->Resize(dY.dims());
+  
+  auto* dX = Output(0, dY.dims(), at::dtype<float>());
   if (is_test_) {
     if (dX != &dY) {
       context_.CopySameDevice<float>(
