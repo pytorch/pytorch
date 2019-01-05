@@ -171,14 +171,9 @@ CHECK_CXX_SOURCE_COMPILES(
      }" CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
 if (CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
   message(STATUS "Current compiler supports avx2 extension. Will build perfkernels.")
-  # Currently MSVC seems to have a symbol not found error while linking (related
-  # to source file order?). As a result we will currently disable the perfkernel
-  # in msvc.
   # Also see CMakeLists.txt under caffe2/perfkernels.
-  if (NOT MSVC)
-    set(CAFFE2_PERF_WITH_AVX 1)
-    set(CAFFE2_PERF_WITH_AVX2 1)
-  endif()
+  set(CAFFE2_PERF_WITH_AVX 1)
+  set(CAFFE2_PERF_WITH_AVX2 1)
 endif()
 cmake_pop_check_state()
 
