@@ -3472,27 +3472,51 @@
 
 - func: replication_pad2d_out(Tensor output, Tensor self, IntList[4] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: replication_pad2d_out_cpu
+    CUDA: replication_pad2d_out_cuda
 
 - func: replication_pad2d(Tensor self, IntList[4] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: replication_pad2d_cpu
+    CUDA: replication_pad2d_cuda
 
 - func: replication_pad2d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, IntList[4] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: replication_pad2d_backward_out_cpu
+    CUDA: replication_pad2d_backward_out_cuda
 
 - func: replication_pad2d_backward(Tensor grad_output, Tensor self, IntList[4] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: replication_pad2d_backward_cpu
+    CUDA: replication_pad2d_backward_cuda
 
 - func: replication_pad3d_out(Tensor output, Tensor self, IntList[6] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: replication_pad3d_out_cpu
+    CUDA: replication_pad3d_out_cuda
 
 - func: replication_pad3d(Tensor self, IntList[6] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: replication_pad3d_cpu
+    CUDA: replication_pad3d_cuda
 
 - func: replication_pad3d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, IntList[6] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: replication_pad3d_backward_out_cpu
+    CUDA: replication_pad3d_backward_out_cuda
 
 - func: replication_pad3d_backward(Tensor grad_output, Tensor self, IntList[6] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: replication_pad3d_backward_cpu
+    CUDA: replication_pad3d_backward_cuda
 
 - func: upsample_linear1d_out(Tensor output, Tensor self, IntList[1] output_size, bool align_corners) -> Tensor
   python_module: nn
