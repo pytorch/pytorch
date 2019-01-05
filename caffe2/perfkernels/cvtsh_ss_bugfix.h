@@ -32,6 +32,8 @@ _cvtsh_ss(unsigned short a)
 
 #ifdef _MSC_VER
 
+#include <cstdint>
+
 // It seems that microsoft msvc does not have a _cvtsh_ss implementation so
 // we will add a dummy version to it.
 
