@@ -3,10 +3,13 @@
 #include <ATen/TensorUtils.h>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/detail/KernelUtils.h>
 #include <c10/util/Exception.h>
 
 namespace at {
 namespace native {
+
+using namespace at::cuda::detail;
 
 template <typename T>
 __host__ __device__ __forceinline__ T ceilDiv(T a, T b) {
@@ -24,9 +27,7 @@ __global__ void max_unpooling2d_forward_kernel(
     const int64_t outputHeight,
     const int64_t outputWidth,
     T* output) {
-  for (int linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
-       linearIndex < numInputElements;
-       linearIndex += blockDim.x * gridDim.x) {
+  CUDA_KERNEL_LOOP(linearIndex, numInputElements) {
     int c = (linearIndex / inputWidth / inputHeight) % numChannels;
     int n = linearIndex / inputWidth / inputHeight / numChannels;
     output += (n * numChannels + c) * outputHeight * outputWidth;
@@ -66,9 +67,7 @@ __global__ void max_unpooling2d_backward_kernel(
     const int64_t outputHeight,
     const int64_t outputWidth,
     T* output) {
-  for (int linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
-       linearIndex < numInputElements;
-       linearIndex += blockDim.x * gridDim.x) {
+  CUDA_KERNEL_LOOP(linearIndex, numInputElements) {
     int c = (linearIndex / inputWidth / inputHeight) % numChannels;
     int n = linearIndex / inputWidth / inputHeight / numChannels;
     input += (n * numChannels + c) * outputHeight * outputWidth;
@@ -101,28 +100,28 @@ __global__ void max_unpooling3d_backward_kernel(
 
 Tensor& max_unpooling2d_forward_out_cuda(
     Tensor& output,
-    const Tensor& self,
-    const Tensor& indices,
+    const Tensor& self_,
+    const Tensor& indices_,
     IntList output_size) {
   AT_CHECK(
-      indices.scalar_type() == at::ScalarType::Long,
-      "elements in indices should be type Long");
+      indices_.scalar_type() == at::ScalarType::Long,
+      "elements in indices should be type int64");
   auto owidth = output_size[0];
   auto oheight = output_size[1];
 
-  TensorArg output_arg{output, "output", 1}, self_arg{self, "self", 2},
-      indices_arg{indices, "indices", 3};
+  TensorArg output_arg{output, "output", 1}, self_arg{self_, "self_", 2},
+      indices_arg{indices_, "indices_", 3};
   checkAllSameGPU(
       "max_unpooling2d_forward_out_cuda", {output_arg, self_arg, indices_arg});
 
-  AT_CHECK(self.numel() > 0, "Input must be non-empty tensor");
+  AT_CHECK(self_.numel() > 0, "Input must be non-empty tensor");
 
   AT_CHECK(
-      (self.ndimension() == 3 || self.ndimension() == 4),
+      (self_.ndimension() == 3 || self_.ndimension() == 4),
       "Input to max_unpooling2d should be a 3d or 4d Tensor",
-      self.sizes());
+      self_.sizes());
   AT_CHECK(
-      self.sizes() == indices.sizes(),
+      self_.sizes() == indices_.sizes(),
       "Shape of input must match shape of indices");
   AT_CHECK(
       output_size.size() == 2,
@@ -136,6 +135,9 @@ Tensor& max_unpooling2d_forward_out_cuda(
   int64_t inputHeight;
   int64_t inputWidth;
 
+  auto self = self_.contiguous();
+  auto indices = indices_.contiguous();
+
   if (self.ndimension() == 4) {
     numBatch = self.size(0);
     dimw++;
@@ -145,26 +147,23 @@ Tensor& max_unpooling2d_forward_out_cuda(
   inputHeight = self.size(dimh);
   inputWidth = self.size(dimw);
 
-  auto input_contiguous = self.contiguous();
-  auto indices_contiguous = indices.contiguous();
-
   output.resize_({numBatch, numChannels, oheight, owidth});
 
   output.zero_();
 
-  dim3 block(512);
-  dim3 grid((output.numel() + 512 - 1) / 512);
-
+  // dim3 block(512);
+  // dim3 grid((output.numel() + 512 - 1) / 512);
+  auto count = self.numel();
   AT_DISPATCH_ALL_TYPES_AND_HALF(
       self.type(), "max_unpooling2d_forward_kernel", ([&] {
         max_unpooling2d_forward_kernel<<<
-            grid,
-            block,
+            GET_BLOCKS(count),
+            CUDA_NUM_THREADS,
             0,
             at::cuda::getCurrentCUDAStream()>>>(
             self.numel(),
-            input_contiguous.data<scalar_t>(),
-            indices_contiguous.data<int64_t>(),
+            self.data<scalar_t>(),
+            indices.data<int64_t>(),
             numChannels,
             inputHeight,
             inputWidth,
@@ -174,7 +173,7 @@ Tensor& max_unpooling2d_forward_out_cuda(
       }));
   AT_CHECK(
       cudaGetLastError() == cudaSuccess,
-      "RoiPooling2d_forward_kernel failed with error code ",
+      "max_unpooling2d_forward_kernel failed with error code ",
       cudaGetLastError());
   if (self.ndimension() == 3) {
     output.resize_({numChannels, oheight, owidth});
@@ -203,7 +202,7 @@ void max_unpooling3d_shape_check(
   int64_t oH = output_size[2];
   AT_CHECK(
       indices.scalar_type() == at::ScalarType::Long,
-      "elements in indices should be type Long");
+      "elements in indices should be type int64");
   AT_CHECK(
       (input.ndimension() == 4 || input.ndimension() == 5),
       "Input to max_unpooling3d should be a 4d or 5d Tensor",
@@ -225,7 +224,7 @@ void max_unpooling3d_shape_check(
 
   AT_CHECK(
       stride[0] > 0 && stride[1] > 0 && stride[2] > 0,
-      "stride should be never greater than zero, but got stride: ",
+      "strides should be greater than zero, but got stride: ",
       stride);
 
   int dimw = 3;
@@ -243,8 +242,7 @@ void max_unpooling3d_shape_check(
   int nslices = input.size(dimn);
 
   if (gradOutput.defined()) {
-    if (oT != gradOutput.size(dimt) ||
-        oH != gradOutput.size(dimh) ||
+    if (oT != gradOutput.size(dimt) || oH != gradOutput.size(dimh) ||
         oW != gradOutput.size(dimw)) {
       AT_ERROR(
           "Inconsistent gradOutput size. oT= ",
@@ -268,23 +266,26 @@ void max_unpooling3d_shape_check(
 }
 
 Tensor& max_unpooling3d_forward_out_cuda(
-    Tensor& output,
-    const Tensor& self,
-    const Tensor& indices,
+    Tensor& output_,
+    const Tensor& self_,
+    const Tensor& indices_,
     IntList output_size,
     IntList stride,
     IntList padding) {
   max_unpooling3d_shape_check(
-      self, Tensor(), indices, output_size, stride, padding);
+      self_, Tensor(), indices_, output_size, stride, padding);
 
   int64_t oT = output_size[0];
   int64_t oW = output_size[1];
   int64_t oH = output_size[2];
 
-  TensorArg output_arg{output, "output", 1}, self_arg{self, "self", 2},
-      indices_arg{indices, "indices", 3};
+  TensorArg output_arg{output_, "output_", 1}, self_arg{self_, "self_", 2},
+      indices_arg{indices_, "indices_", 3};
   checkAllSameGPU(
       "max_unpooling3d_forward_out_cuda", {output_arg, self_arg, indices_arg});
+
+  auto self = self_.contiguous();
+  auto indices = indices_.contiguous();
 
   int64_t batchSize;
   int64_t inputSlices;
@@ -293,78 +294,69 @@ Tensor& max_unpooling3d_forward_out_cuda(
   int64_t inputWidth;
 
   if (self.ndimension() == 4) {
-    /* 5D */
     batchSize = 1;
     inputSlices = self.size(0);
     inputTime = self.size(1);
     inputHeight = self.size(2);
     inputWidth = self.size(3);
-    output.resize_({inputSlices, oT, oH, oW});
+    output_.resize_({inputSlices, oT, oH, oW});
   } else {
-    /* resize output */
     batchSize = self.size(0);
     inputSlices = self.size(1);
     inputTime = self.size(2);
     inputHeight = self.size(3);
     inputWidth = self.size(4);
-    output.resize_(
-        {batchSize, inputSlices, oT, oH, oW});
+    output_.resize_({batchSize, inputSlices, oT, oH, oW});
   }
-  auto input_contiguous = self.contiguous();
-  auto indices_contiguous = indices.contiguous();
 
-  auto output_contiguous = output.contiguous();
-  output_contiguous.zero_();
+  auto output = output_.contiguous(); // TODO: figure out if contiguous()
+                                      // returns a view or new obj
+  output.zero_();
 
   // Collapse batch and feature dimensions if needed
-  auto input_contiguous_reshaped = input_contiguous;
-  auto indices_contiguous_reshaped = indices_contiguous;
-
-  if (input_contiguous.ndimension() == 5) {
-    input_contiguous_reshaped = input_contiguous.reshape(
-        {input_contiguous.size(0) * input_contiguous.size(1),
-         input_contiguous.size(2),
-         input_contiguous.size(3),
-         input_contiguous.size(4)});
-    indices_contiguous_reshaped = indices_contiguous.reshape(
-        {indices_contiguous.size(0) * indices_contiguous.size(1),
-         indices_contiguous.size(2),
-         indices_contiguous.size(3),
-         indices_contiguous.size(4)});
+  if (self.ndimension() == 5) {
+    self = self.reshape({self.size(0) * self.size(1),
+                         self.size(2),
+                         self.size(3),
+                         self.size(4)});
+    indices = indices.reshape({indices.size(0) * indices.size(1),
+                               indices.size(2),
+                               indices.size(3),
+                               indices.size(4)});
   }
 
   int totalZ = inputTime * inputSlices * batchSize;
   int offsetZ = 0;
   dim3 block(32, 8);
 
-  while (totalZ > 0) {
-    dim3 grid(
-        ceilDiv(inputWidth, static_cast<int64_t>(block.x)),
-        ceilDiv(inputHeight, static_cast<int64_t>(block.y)),
-        totalZ > 65535 ? 65535 : totalZ);
-    AT_DISPATCH_ALL_TYPES_AND_HALF(
-        self.type(), "max_unpooling3d_forward_kernel", ([&] {
+  AT_DISPATCH_ALL_TYPES_AND_HALF(
+      self.type(), "max_unpooling3d_forward_kernel", ([&] {
+        while (totalZ > 0) {
+          dim3 grid(
+              ceilDiv(inputWidth, static_cast<int64_t>(block.x)),
+              ceilDiv(inputHeight, static_cast<int64_t>(block.y)),
+              totalZ > 65535 ? 65535 : totalZ);
           max_unpooling3d_forward_kernel<<<
               grid,
               block,
               0,
               at::cuda::getCurrentCUDAStream()>>>(
-              input_contiguous_reshaped.packed_accessor<scalar_t, 4>(),
-              indices_contiguous_reshaped.packed_accessor<int64_t, 4>(),
-              output_contiguous.data<scalar_t>(),
+              self.packed_accessor<scalar_t, 4>(),
+              indices.packed_accessor<int64_t, 4>(),
+              output.data<scalar_t>(),
               oT,
               oH,
               oW,
               offsetZ);
-        }));
-    AT_CHECK(
-        cudaGetLastError() == cudaSuccess,
-        "RoiPooling3d_forward_kernel failed with error code ",
-        cudaGetLastError());
-    totalZ -= 65535;
-    offsetZ += 65535;
-  }
-  return output;
+          AT_CHECK(
+              cudaGetLastError() == cudaSuccess,
+              "max_unpooling3d_forward_kernel failed with error code ",
+              cudaGetLastError());
+          totalZ -= 65535;
+          offsetZ += 65535;
+        }
+      }));
+  return output_;
 }
 
 Tensor max_unpooling3d_forward_cuda(
@@ -381,29 +373,29 @@ Tensor max_unpooling3d_forward_cuda(
 
 at::Tensor& max_unpooling2d_backward_out_cuda(
     Tensor& grad_input,
-    const Tensor& grad_output,
-    const Tensor& self,
-    const Tensor& indices,
+    const Tensor& grad_output_,
+    const Tensor& self_,
+    const Tensor& indices_,
     IntList output_size) {
   int64_t owidth = output_size[0];
   int64_t oheight = output_size[1];
   AT_CHECK(
-      indices.scalar_type() == at::ScalarType::Long,
-      "elements in indices should be type Long");
+      indices_.scalar_type() == at::ScalarType::Long,
+      "elements in indices should be type int64");
   TensorArg grad_input_arg{grad_input, "grad_input", 1},
-      grad_output_arg{grad_output, "grad_output", 2}, self_arg{self, "self", 3},
-      indices_arg{indices, "indices", 4};
+      grad_output_arg{grad_output_, "grad_output_", 2},
+      self_arg{self_, "self_", 3}, indices_arg{indices_, "indices_", 4};
   checkAllSameGPU(
       "max_unpooling2d_backward_out_cuda",
       {grad_input_arg, grad_output_arg, self_arg, indices_arg});
 
   AT_CHECK(
-      (self.ndimension() == 3 || self.ndimension() == 4),
+      (self_.ndimension() == 3 || self_.ndimension() == 4),
       "Input to max_unpooling2d should be a 3d or 4d Tensor, instead got: ",
-      self);
+      self_);
 
   AT_CHECK(
-      self.sizes() == indices.sizes(),
+      self_.sizes() == indices_.sizes(),
       "Input should have same shape as indices");
 
   AT_CHECK(output_size.size() == 2, "output_size must have two elements");
@@ -412,6 +404,10 @@ at::Tensor& max_unpooling2d_backward_out_cuda(
 
   int dimw = 2;
   int dimh = 1;
+
+  auto self = self_.contiguous();
+  auto indices = indices_.contiguous();
+  auto grad_output = grad_output_.contiguous();
 
   if (self.ndimension() == 3) {
     nInputPlane = self.size(0);
@@ -438,26 +434,23 @@ at::Tensor& max_unpooling2d_backward_out_cuda(
         grad_output.size(dimw));
   }
 
-  auto input_contiguous = self.contiguous();
-  auto indices_contiguous = indices.contiguous();
-  auto grad_output_contiguous = grad_output.contiguous();
-  grad_input.resize_as_(input_contiguous);
+  grad_input.resize_as_(self);
   grad_input.zero_();
 
-  int count = input_contiguous.numel();
+  int count = self.numel();
 
   dim3 block(512);
   dim3 grid((count + 512 - 1) / 512);
   AT_DISPATCH_ALL_TYPES_AND_HALF(
-      input_contiguous.type(), "max_unpooling2d_backward_kernel", ([&] {
+      self.type(), "max_unpooling2d_backward_kernel", ([&] {
         max_unpooling2d_backward_kernel<<<
             grid,
             block,
             0,
             at::cuda::getCurrentCUDAStream()>>>(
             count,
-            grad_output_contiguous.data<scalar_t>(),
-            indices_contiguous.data<int64_t>(),
+            grad_output.data<scalar_t>(),
+            indices.data<int64_t>(),
             nInputPlane,
             nInputRows,
             nInputCols,
@@ -484,9 +477,9 @@ at::Tensor max_unpooling2d_backward_cuda(
 
 at::Tensor& max_unpooling3d_backward_out_cuda(
     Tensor& grad_input,
-    const Tensor& grad_output,
-    const Tensor& self,
-    const Tensor& indices,
+    const Tensor& grad_output_,
+    const Tensor& self_,
+    const Tensor& indices_,
     IntList output_size,
     IntList stride,
     IntList padding) {
@@ -495,7 +488,7 @@ at::Tensor& max_unpooling3d_backward_out_cuda(
   int64_t oH = output_size[2];
 
   max_unpooling3d_shape_check(
-      self, grad_output, indices, output_size, stride, padding);
+      self_, grad_output_, indices_, output_size, stride, padding);
 
   int batchSize = 0;
   int inputSlices = 0;
@@ -503,12 +496,16 @@ at::Tensor& max_unpooling3d_backward_out_cuda(
   int64_t inputHeight = 0;
   int64_t inputWidth = 0;
 
-  TensorArg self_arg{self, "self", 1}, indices_arg{indices, "indices", 2},
-      grad_output_arg{grad_output, "grad_output", 3},
+  TensorArg self_arg{self_, "self_", 1}, indices_arg{indices_, "indices_", 2},
+      grad_output_arg{grad_output_, "grad_output_", 3},
       grad_input_arg{grad_input, "grad_input", 4};
   checkAllSameGPU(
       "max_unpooling3d_backward_out_cuda",
       {self_arg, indices_arg, grad_output_arg, grad_input_arg});
+
+  auto self = self_.contiguous();
+  auto indices = indices_.contiguous();
+  auto grad_output = grad_output_.contiguous();
 
   if (self.ndimension() == 4) {
     batchSize = 1;
@@ -524,40 +521,36 @@ at::Tensor& max_unpooling3d_backward_out_cuda(
     inputWidth = self.size(4);
   }
 
-  auto input_contiguous = self.contiguous();
-  grad_input.resize_as_(input_contiguous);
+  grad_input.resize_as_(self);
   grad_input.zero_();
-  auto indices_contiguous = indices.contiguous();
-  auto grad_output_contiguous = grad_output.contiguous();
 
   // Collapse batch and feature dimensions if needed
   auto grad_input_reshaped = grad_input;
-  auto indices_contiguous_reshaped = indices_contiguous;
-
   if (grad_input.ndimension() == 5) {
     grad_input_reshaped =
         grad_input.reshape({grad_input.size(0) * grad_input.size(1),
                             grad_input.size(2),
                             grad_input.size(3),
                             grad_input.size(4)});
-    indices_contiguous_reshaped = indices_contiguous.reshape(
-        {indices_contiguous.size(0) * indices_contiguous.size(1),
-         indices_contiguous.size(2),
-         indices_contiguous.size(3),
-         indices_contiguous.size(4)});
+
+    indices = indices.reshape({indices.size(0) * indices.size(1),
+                               indices.size(2),
+                               indices.size(3),
+                               indices.size(4)});
   }
 
   int totalZ = inputTime * inputSlices * batchSize;
   int offsetZ = 0;
 
   dim3 block(32, 8);
-  while (totalZ > 0) {
-    dim3 grid(
-        ceilDiv(inputWidth, static_cast<int64_t>(block.x)),
-        ceilDiv(inputHeight, static_cast<int64_t>(block.y)),
-        totalZ > 65535 ? 65535 : totalZ);
-    AT_DISPATCH_ALL_TYPES_AND_HALF(
-        input_contiguous.type(), "max_unpooling3d_backward_kernel", ([&] {
+
+  AT_DISPATCH_ALL_TYPES_AND_HALF(
+      self.type(), "max_unpooling3d_backward_kernel", ([&] {
+        while (totalZ > 0) {
+          dim3 grid(
+              ceilDiv(inputWidth, static_cast<int64_t>(block.x)),
+              ceilDiv(inputHeight, static_cast<int64_t>(block.y)),
+              totalZ > 65535 ? 65535 : totalZ);
           max_unpooling3d_backward_kernel<<<
               grid,
               block,
@@ -567,17 +560,17 @@ at::Tensor& max_unpooling3d_backward_out_cuda(
               oT,
               oH,
               oW,
-              indices_contiguous_reshaped.packed_accessor<int64_t, 4>(),
+              indices.packed_accessor<int64_t, 4>(),
               grad_input_reshaped.packed_accessor<scalar_t, 4>(),
               offsetZ);
-        }));
-    AT_CHECK(
-        cudaGetLastError() == cudaSuccess,
-        "max_unpooling3d_backward_kernel failed with error code ",
-        cudaGetLastError());
-    totalZ -= 65535;
-    offsetZ += 65535;
-  }
+          AT_CHECK(
+              cudaGetLastError() == cudaSuccess,
+              "max_unpooling3d_backward_kernel failed with error code ",
+              cudaGetLastError());
+          totalZ -= 65535;
+          offsetZ += 65535;
+        }
+      }));
   return grad_input;
 }
 

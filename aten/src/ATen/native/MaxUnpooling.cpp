@@ -38,8 +38,7 @@ Tensor max_unpooling2d_forward_out_cpu_frame(
     int64_t error_index = 0;
 #pragma omp parallel for private(k)
     for (k = 0; k < numChannels; k++) {
-      int64_t finalOutputOffset =
-          nOutputOffset + k * owidth * oheight;
+      int64_t finalOutputOffset = nOutputOffset + k * owidth * oheight;
       int64_t finalInputOffset = nInputOffset + k * inputWidth * inputHeight;
       scalar_t* output_p_k = rawOutput + finalOutputOffset;
       scalar_t* input_p_k = rawInput + finalInputOffset;
@@ -76,30 +75,30 @@ Tensor max_unpooling2d_forward_out_cpu_frame(
 
 Tensor& max_unpooling2d_forward_out_cpu(
     Tensor& output,
-    const Tensor& self,
-    const Tensor& indices,
+    const Tensor& self_,
+    const Tensor& indices_,
     IntList output_size) {
   auto owidth = output_size[0];
   auto oheight = output_size[1];
   AT_CHECK(
-      indices.scalar_type() == at::ScalarType::Long,
-      "elements in indices should be type Long");
+      indices_.scalar_type() == at::ScalarType::Long,
+      "elements in indices should be type int64");
   AT_CHECK(
       output_size.size() == 2,
       "There should be exactly two elements (height, width) in output_size");
   AT_CHECK(
-      (self.ndimension() == 3 || self.ndimension() == 4),
+      (self_.ndimension() == 3 || self_.ndimension() == 4),
       "Input to max_unpooling2d should be a 3d or 4d Tensor");
   AT_CHECK(
-      self.sizes() == indices.sizes(),
+      self_.sizes() == indices_.sizes(),
       "Shape of indices should match shape of input");
 
-  AT_CHECK(self.numel() > 0, "Input must be non-empty");
+  AT_CHECK(self_.numel() > 0, "Input must be non-empty");
 
-  auto self_contiguous = self.contiguous();
-  auto indices_contiguous = indices.contiguous();
+  auto self = self_.contiguous();
+  auto indices = indices_.contiguous();
 
-  if (self_contiguous.ndimension() == 3) {
+  if (self.ndimension() == 3) {
     int64_t numBatch = 1;
     int64_t numChannels = self.size(0);
     output.resize_({numChannels, oheight, owidth});
@@ -113,11 +112,7 @@ Tensor& max_unpooling2d_forward_out_cpu(
   AT_DISPATCH_FLOATING_TYPES(
       self.type(), "max_unpooling2d_forward_out_cpu_frame", ([&] {
         max_unpooling2d_forward_out_cpu_frame<scalar_t>(
-            output,
-            self_contiguous,
-            indices_contiguous,
-            owidth,
-            oheight);
+            output, self, indices, owidth, oheight);
       }));
   return output;
 };
@@ -226,7 +221,7 @@ void max_unpooling3d_shape_check(
   int64_t oH = output_size[2];
   AT_CHECK(
       indices.scalar_type() == at::ScalarType::Long,
-      "elements in indices should be type Long");
+      "elements in indices should be type int64");
   AT_CHECK(
       (input.ndimension() == 4 || input.ndimension() == 5),
       "Input to max_unpooling3d should be a 4d or 5d Tensor",
@@ -248,7 +243,7 @@ void max_unpooling3d_shape_check(
 
   AT_CHECK(
       stride[0] > 0 && stride[1] > 0 && stride[2] > 0,
-      "stride should be never greater than zero, but got stride: ",
+      "strides should be greater than zero, but got stride: ",
       stride);
 
   int dimw = 3;
@@ -266,8 +261,7 @@ void max_unpooling3d_shape_check(
   int nslices = input.size(dimn);
 
   if (gradOutput.defined()) {
-    if (oT != gradOutput.size(dimt) ||
-        oH != gradOutput.size(dimh) ||
+    if (oT != gradOutput.size(dimt) || oH != gradOutput.size(dimh) ||
         oW != gradOutput.size(dimw)) {
       AT_ERROR(
           "Inconsistent gradOutput size. oT= ",
@@ -292,26 +286,25 @@ void max_unpooling3d_shape_check(
 
 Tensor& max_unpooling3d_forward_out_cpu(
     Tensor& output,
-    const Tensor& self,
-    const Tensor& indices,
+    const Tensor& self_,
+    const Tensor& indices_,
     IntList output_size,
     IntList stride,
     IntList padding) {
   int64_t oT = output_size[0];
   int64_t oW = output_size[1];
   int64_t oH = output_size[2];
-  max_unpooling3d_shape_check(
-      self, Tensor(), indices, output_size, stride, padding);
 
-  if (self.ndimension() == 5) {
-    output.resize_({self.size(0),
-                    self.size(1),
-                    oT,
-                    oH,
-                    oW});
+  auto self = self_.contiguous();
+  auto indices = indices_.contiguous();
+
+  max_unpooling3d_shape_check(
+      self_, Tensor(), indices_, output_size, stride, padding);
+
+  if (self_.ndimension() == 5) {
+    output.resize_({self.size(0), self.size(1), oT, oH, oW});
   } else {
-    output.resize_(
-        {self.size(0), oT, oH, oW});
+    output.resize_({self.size(0), oT, oH, oW});
   }
   output.zero_();
 
@@ -319,8 +312,8 @@ Tensor& max_unpooling3d_forward_out_cpu(
       self.type(), "max_unpooling3d_forward_out_cpu_frame", ([&] {
         max_unpooling3d_forward_out_cpu_frame<scalar_t>(
             output,
-            self.contiguous(),
-            indices.contiguous(),
+            self,
+            indices,
             oT,
             oW,
             oH,
@@ -372,6 +365,7 @@ static void max_unpooling2d_backward_out_cpu_frame(
       for (j = 0; j < iwidth; j++) {
         maxp = ind_p_k[i * iwidth + j]; /* retrieve position of max */
         if (maxp < 0 || maxp >= owidth * oheight) {
+#pragma omp critical
           has_error = true;
           error_index = maxp;
         }
@@ -393,9 +387,9 @@ static void max_unpooling2d_backward_out_cpu_frame(
 
 Tensor& max_unpooling2d_backward_out_cpu(
     Tensor& grad_input,
-    const Tensor& grad_output,
+    const Tensor& grad_output_,
     const Tensor& self,
-    const Tensor& indices,
+    const Tensor& indices_,
     IntList output_size) {
   int64_t owidth = output_size[0];
   int64_t oheight = output_size[1];
@@ -406,16 +400,16 @@ Tensor& max_unpooling2d_backward_out_cpu(
   int iheight;
   int iwidth;
   AT_CHECK(
-      indices.scalar_type() == at::ScalarType::Long,
-      "elements in indices should be type Long");
+      indices_.scalar_type() == at::ScalarType::Long,
+      "elements in indices should be type int64");
   AT_CHECK(
-      self.sizes() == indices.sizes(), "Input shape must match indices shape");
+      self.sizes() == indices_.sizes(), "Input shape must match indices shape");
 
   AT_CHECK(output_size.size() == 2, "Output size must be 2");
 
   /* get contiguous gradOutput and indices */
-  auto gradOutput = grad_output.contiguous();
-  auto indicesContiguous = indices.contiguous();
+  auto grad_output = grad_output_.contiguous();
+  auto indices = indices_.contiguous();
 
   /* resize */
   grad_input.resize_as_(self);
@@ -432,17 +426,16 @@ Tensor& max_unpooling2d_backward_out_cpu(
   iheight = self.size(dimh);
   iwidth = self.size(dimw);
 
-  if (owidth != gradOutput.size(dimw) ||
-      oheight != gradOutput.size(dimh)) {
+  if (owidth != grad_output.size(dimw) || oheight != grad_output.size(dimh)) {
     AT_ERROR(
         "Inconsistent gradOutput size. output height = ",
         oheight,
         ", output width = ",
         owidth,
         ", gradOutput: ",
-        gradOutput.size(dimh),
+        grad_output.size(dimh),
         "x",
-        gradOutput.size(dimw));
+        grad_output.size(dimw));
   }
 
   int p;
@@ -453,7 +446,7 @@ Tensor& max_unpooling2d_backward_out_cpu(
         self.type(), "max_unpooling2d_backward_out_cpu_frame", ([&] {
           max_unpooling2d_backward_out_cpu_frame<scalar_t>(
               grad_input.data<scalar_t>() + inputOffset,
-              gradOutput.data<scalar_t>() + outputOffset,
+              grad_output.data<scalar_t>() + outputOffset,
               indices.data<int64_t>() + inputOffset,
               nslices,
               iwidth,
@@ -489,6 +482,8 @@ static void max_unpooling3d_backward_out_cpu_frame(
     int64_t oW,
     int64_t oH) {
   int k;
+  bool has_error = false;
+  int error_index = 0;
 #pragma omp parallel for private(k)
   for (k = 0; k < nslices; k++) {
     scalar_t* gradInput_p_k = gradInput_p + k * iT * iH * iW;
@@ -503,27 +498,33 @@ static void max_unpooling3d_backward_out_cpu_frame(
           index = t * iH * iW + i * iW + j;
           maxp = ind_p_k[index]; /* retrieve position of max */
           if (maxp < 0 || maxp >= oT * oH * oW) {
-            AT_ERROR(
-                "invalid max index ",
-                maxp,
-                ", oT= ",
-                oT,
-                ", oW= ",
-                oW,
-                ",oH= ",
-                oH);
+#pragma omp critical
+            has_error = true;
+            error_index = maxp;
           }
           gradInput_p_k[index] = gradOutput_p_k[maxp]; /* update gradient */
         }
       }
     }
   }
+  if (has_error) {
+    AT_ERROR(
+        "invalid max index ",
+        error_index,
+        ", oT= ",
+        oT,
+        ", oW= ",
+        oW,
+        ",oH= ",
+        oH);
+  }
 }
+
 Tensor& max_unpooling3d_backward_out_cpu(
     Tensor& grad_input,
-    const Tensor& grad_output,
+    const Tensor& grad_output_,
     const Tensor& self,
-    const Tensor& indices,
+    const Tensor& indices_,
     IntList output_size,
     IntList stride,
     IntList padding) {
@@ -540,12 +541,12 @@ Tensor& max_unpooling3d_backward_out_cpu(
   int iW;
 
   max_unpooling3d_shape_check(
-      self, grad_output, indices, output_size, stride, padding);
+      self, grad_output_, indices_, output_size, stride, padding);
 
   // TODO (from THNN): check gradOutput shape
   /* get contiguous gradOutput */
-  auto grad_output_contiguous = grad_output.contiguous();
-  auto indices_contiguous = indices.contiguous();
+  auto grad_output = grad_output_.contiguous();
+  auto indices = indices_.contiguous();
 
   /* resize */
   grad_input.resize_as_(self);
@@ -572,8 +573,8 @@ Tensor& max_unpooling3d_backward_out_cpu(
         self.type(), "max_unpooling3d_backward_out_cpu_frame", ([&] {
           max_unpooling3d_backward_out_cpu_frame<scalar_t>(
               grad_input.data<scalar_t>() + inputOffset,
-              grad_output_contiguous.data<scalar_t>() + outputOffset,
-              indices_contiguous.data<int64_t>() + inputOffset,
+              grad_output.data<scalar_t>() + outputOffset,
+              indices.data<int64_t>() + inputOffset,
               nslices,
               iT,
               iW,
