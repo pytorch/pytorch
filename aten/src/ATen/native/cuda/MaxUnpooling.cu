@@ -309,9 +309,8 @@ Tensor& max_unpooling3d_forward_out_cuda(
     output_.resize_({batchSize, inputSlices, oT, oH, oW});
   }
 
-  auto output = output_.contiguous(); // TODO: figure out if contiguous()
-                                      // returns a view or new obj
-  output.zero_();
+  output_ = output_.contiguous();
+  output_.zero_();
 
   // Collapse batch and feature dimensions if needed
   if (self.ndimension() == 5) {
@@ -343,7 +342,7 @@ Tensor& max_unpooling3d_forward_out_cuda(
               at::cuda::getCurrentCUDAStream()>>>(
               self.packed_accessor<scalar_t, 4>(),
               indices.packed_accessor<int64_t, 4>(),
-              output.data<scalar_t>(),
+              output_.data<scalar_t>(),
               oT,
               oH,
               oW,
