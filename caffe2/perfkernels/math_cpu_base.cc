@@ -9,7 +9,11 @@
 
 #include <cfloat>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
+
+using std::size_t;
+using std::uint8_t;
 
 namespace caffe2 {
 

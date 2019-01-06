@@ -8,6 +8,8 @@
 #include <ATen/core/Half.h>
 #include <c10/util/Logging.h>
 
+#include <cstddef>
+
 namespace caffe2 {
 
 namespace internal {
@@ -68,7 +70,7 @@ inline void adagrad_update_prefetch_inlined(
   auto i = 0;
 
 #ifdef CAFFE2_PERFKERNELS_ADAGRAD_H_USE_INTRINSIC
-  constexpr size_t kSize = 8;
+  constexpr std::size_t kSize = 8;
   for (; i + kSize <= N; i += kSize) {
     _mm_prefetch(reinterpret_cast<const char*>(&w_n[i]), _MM_HINT_T0);
     _mm_prefetch(reinterpret_cast<const char*>(&h_n[i]), _MM_HINT_T0);
@@ -115,7 +117,7 @@ inline void rowwise_adagrad_update_inlined(
   auto i = 0;
 
 #ifdef CAFFE2_PERFKERNELS_ADAGRAD_H_USE_INTRINSIC
-  constexpr size_t kSize = 8;
+  constexpr std::size_t kSize = 8;
   _mm_prefetch(reinterpret_cast<const char*>(h_n), _MM_HINT_T0);
   __m256 partial_sum = _mm256_setzero_ps();
   for (; i + kSize <= N; i += kSize) {
@@ -313,6 +315,9 @@ void sparse_adagrad(
       }                                                                  \
     }                                                                    \
   };
+
+SPARSE_ADAGRAD_SPECIALIZATION(int32_t, base);
+SPARSE_ADAGRAD_SPECIALIZATION(int64_t, base);
 
 } // namespace caffe2
 

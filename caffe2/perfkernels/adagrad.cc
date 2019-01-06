@@ -3,6 +3,9 @@
 #include "caffe2/perfkernels/common.h"
 
 #include <cmath>
+#include <cstddef>
+
+using std::size_t;
 
 namespace caffe2 {
 
@@ -195,7 +198,7 @@ void adagrad_update(
   BASE_DO(adagrad_update, N, w, g, h, nw, nh, epsilon, decay, lr);
 }
 
-SPARSE_ADAGRAD_SPECIALIZATION(int32_t, base);
+SPARSE_ADAGRAD_SPECIALIZATION_IMPL(int32_t, base);
 
 template <>
 void sparse_adagrad(
@@ -241,7 +244,7 @@ void sparse_adagrad(
       param_name);
 }
 
-SPARSE_ADAGRAD_SPECIALIZATION(int64_t, base);
+SPARSE_ADAGRAD_SPECIALIZATION_IMPL(int64_t, base);
 
 template <>
 void sparse_adagrad(
