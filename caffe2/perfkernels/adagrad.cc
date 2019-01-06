@@ -1,8 +1,8 @@
 #include "caffe2/perfkernels/adagrad.h"
+#include "caffe2/perfkernels/adagrad_avx.h"
+#include "caffe2/perfkernels/common.h"
 
 #include <cmath>
-
-#include "caffe2/perfkernels/common.h"
 
 namespace caffe2 {
 
