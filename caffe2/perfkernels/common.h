@@ -68,7 +68,6 @@ In foo.cc, do:
 
 #ifdef CAFFE2_PERF_WITH_AVX512
 #define AVX512_DO(funcname, ...)                       \
-  decltype(funcname##__base) funcname##__avx512;       \
   if (GetCpuId().avx512f() && GetCpuId().avx512dq() && \
       GetCpuId().avx512vl()) {                         \
     return funcname##__avx512(__VA_ARGS__);            \
@@ -79,12 +78,10 @@ In foo.cc, do:
 
 #ifdef CAFFE2_PERF_WITH_AVX2
 #define AVX2_DO(funcname, ...)                 \
-  decltype(funcname##__base) funcname##__avx2; \
   if (GetCpuId().avx2()) {                     \
     return funcname##__avx2(__VA_ARGS__);      \
   }
 #define AVX2_FMA_DO(funcname, ...)                 \
-  decltype(funcname##__base) funcname##__avx2_fma; \
   if (GetCpuId().avx2() && GetCpuId().fma()) {     \
     return funcname##__avx2_fma(__VA_ARGS__);      \
   }
@@ -95,12 +92,10 @@ In foo.cc, do:
 
 #ifdef CAFFE2_PERF_WITH_AVX
 #define AVX_DO(funcname, ...)                 \
-  decltype(funcname##__base) funcname##__avx; \
   if (GetCpuId().avx()) {                     \
     return funcname##__avx(__VA_ARGS__);      \
   }
 #define AVX_F16C_DO(funcname, ...)                 \
-  decltype(funcname##__base) funcname##__avx_f16c; \
   if (GetCpuId().avx() && GetCpuId().f16c()) {     \
     return funcname##__avx_f16c(__VA_ARGS__);      \
   }
