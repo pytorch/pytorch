@@ -5,6 +5,7 @@
 //// DO NOT MODIFY!!!
 //// --------------------------
 
+#include "caffe2/perfkernels/embedding_lookup_avx2.h"
 #include <ATen/core/Half.h>
 #include <c10/util/Logging.h>
 #include <immintrin.h>

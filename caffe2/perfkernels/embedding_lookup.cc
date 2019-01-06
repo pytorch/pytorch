@@ -1,4 +1,5 @@
 #include "caffe2/perfkernels/embedding_lookup.h"
+#include "caffe2/perfkernels/embedding_lookup_avx2.h"
 
 #include "caffe2/core/types.h"
 #include "caffe2/perfkernels/common.h"

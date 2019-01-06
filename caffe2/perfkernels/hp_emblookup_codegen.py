@@ -178,7 +178,7 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused):
         else:
             assert False
 
-        code.append("          _mm_prefetch(reinterpret_cast<const char*>(ip_next_T0 + j), _MM_HINT_T0);")
+        code.append("          _mm_prefetch(reinterpret_cast<const char*>(&ip_next_T0[j]), _MM_HINT_T0);")
 
         return code
 
@@ -308,9 +308,9 @@ opts = parser.parse_args()
 if opts.filename:
     filename = opts.filename
 elif opts.fused:
-    filename = "embedding_lookup_fused_8bit_rowwise_avx2.cc"
+    filename = "embedding_lookup_fused_8bit_rowwise_avx2"
 else:
-    filename = "embedding_lookup_avx2.cc"
+    filename = "embedding_lookup_avx2"
 
 options = [
     ["int32_t", "int32_t", "float", "float", "float", "float"],
@@ -322,6 +322,9 @@ options = [
 ]
 
 code = []
+code_h = []
+code_cc = []
+
 # includes
 code.append("//// --------------------------")
 code.append("//// ATTENTION:")
@@ -330,23 +333,36 @@ code.append("//// BY {}".format(sys.argv[0]))
 code.append("//// DO NOT MODIFY!!!")
 code.append("//// --------------------------\n")
 
-code.append("#include <ATen/core/Half.h>")
-code.append("#include <c10/util/Logging.h>")
-code.append("#include <immintrin.h>")
-code.append("#include <cassert>\n")
+code_cc += code
 
-code.append("namespace caffe2 {\n")
+code_h += code
+code_h.append("#pragma once\n")
+
+code_cc.append("#include \"caffe2/perfkernels/" + filename + ".h\"")
+
+code_cc.append("#include <ATen/core/Half.h>")
+code_h.append(code_cc[-1])
+
+code_cc.append("#include <c10/util/Logging.h>")
+code_cc.append("#include <immintrin.h>")
+code_cc.append("#include <cassert>\n")
+
+code_h.append("")
+
+code_cc.append("namespace caffe2 {\n")
+code_h.append(code_cc[-1])
+
 for o in options:
     [IndexTypeName, IndexType, InTypeName, InType, OutTypeName, OutType] = o
 
     prefix = "Fused8BitRowwise" if opts.fused else ""
-    code.append("template <bool IS_WEIGHT_POSITIONAL>")
+    code_cc.append("template <bool IS_WEIGHT_POSITIONAL>")
     fn_base = "{}EmbeddingLookup_{}_{}_{}".format(
         prefix, IndexTypeName, InTypeName, OutTypeName
     )
     suffix = "__avx2_fma"
     fn = "static void " + fn_base + suffix
-    code.append(fn + "(")
+    code_cc.append(fn + "(")
 
     args = []
     args.append("    const int64_t block_size,")
@@ -360,71 +376,88 @@ for o in options:
     if not opts.fused:
         args.append("    const float* scale_bias,")
     args.append("    bool normalize_by_lengths,")
-    args.append("    " + OutType + "* out) {")
-    code += args
+    args.append("    " + OutType + "* out)")
+    code_cc += args
+    code_cc[-1] += " {"
 
-    code.append("  const " + IndexType + " prefdist_T0 = 16;")
+    code_cc.append("  const " + IndexType + " prefdist_T0 = 16;")
     # block_size is the number of elements and fused_block_size is the size of
     # an entire row, including scale and bias.
     offset = (8 // sizeof[InType]) if opts.fused else 0
-    code.append(
+    code_cc.append(
         "  const {} fused_block_size = block_size + {};".format(IndexType, offset)
     )
 
-    # code.append("printf(\"calling " + fn + "\\n\");");
+    # code_cc.append("printf(\"calling " + fn + "\\n\");");
     if not opts.fused:
         if InType != "uint8_t":
-            code.append(
+            code_cc.append(
                 "  CAFFE_ENFORCE(scale_bias == nullptr,"
                 ' "scale_bias must be nullptr");'
             )
         else:
-            code.append(
+            code_cc.append(
                 "  CAFFE_ENFORCE(scale_bias != nullptr,"
                 ' "scale_bias must not be nullptr");'
             )
 
-    code.append("  if (block_size == 128) {")
-    code += unroll(16, IndexType, InType, OutType, True, "AVX2", opts.fused)
-    code.append("  } else if (block_size == 64) {")
-    code += unroll(8, IndexType, InType, OutType, True, "AVX2", opts.fused)
-    code.append("  } else if (block_size == 32) {")
-    code += unroll(4, IndexType, InType, OutType, True, "AVX2", opts.fused)
-    code.append("  } else if (block_size == 16) {")
-    code += unroll(2, IndexType, InType, OutType, True, "AVX2", opts.fused)
-    code.append("  } else {")
-    code.append("    // generic code")
-    code += generic(IndexType, InType, OutType, True, "AVX2", opts.fused)
-    code.append("  }")
+    code_cc.append("  if (block_size == 128) {")
+    code_cc += unroll(16, IndexType, InType, OutType, True, "AVX2", opts.fused)
+    code_cc.append("  } else if (block_size == 64) {")
+    code_cc += unroll(8, IndexType, InType, OutType, True, "AVX2", opts.fused)
+    code_cc.append("  } else if (block_size == 32) {")
+    code_cc += unroll(4, IndexType, InType, OutType, True, "AVX2", opts.fused)
+    code_cc.append("  } else if (block_size == 16) {")
+    code_cc += unroll(2, IndexType, InType, OutType, True, "AVX2", opts.fused)
+    code_cc.append("  } else {")
+    code_cc.append("    // generic code")
+    code_cc += generic(IndexType, InType, OutType, True, "AVX2", opts.fused)
+    code_cc.append("  }")
 
-    code.append("}")
+    code_cc.append("}")
 
     for is_weight_positional in ["false", "true"]:
+        code = []
+
         code.append("void " + fn_base + "_" + is_weight_positional + suffix + "(")
         code += args
-        code.append("  " + fn_base + suffix + "<" + is_weight_positional + ">(")
-        code.append("      block_size,")
-        code.append("      output_size,")
-        code.append("      index_size,")
-        code.append("      data_size,")
-        code.append("      input,")
-        code.append("      indices,")
-        code.append("      lengths,")
-        code.append("      weights,")
+
+        code_cc += code
+        code_cc[-1] += " {"
+
+        code_h += code
+        code_h[-1] += ";\n"
+
+        code_cc.append("  " + fn_base + suffix + "<" + is_weight_positional + ">(")
+        code_cc.append("      block_size,")
+        code_cc.append("      output_size,")
+        code_cc.append("      index_size,")
+        code_cc.append("      data_size,")
+        code_cc.append("      input,")
+        code_cc.append("      indices,")
+        code_cc.append("      lengths,")
+        code_cc.append("      weights,")
         if not opts.fused:
-            code.append("      scale_bias,")
-        code.append("      normalize_by_lengths,")
-        code.append("      out);")
-        code.append("}")
+            code_cc.append("      scale_bias,")
+        code_cc.append("      normalize_by_lengths,")
+        code_cc.append("      out);")
+        code_cc.append("}")
 
-    code.append("")
+    code_cc.append("")
 
-code.append("} // namespace caffe2")
+code_cc.append("} // namespace caffe2")
+code_h.append(code_cc[-1])
 
-with open(filename, "w") as fout:
-    for c in code:
-        # print(c, file = fout)
-        fout.write(c + "\n")
+fout_h = open(filename + ".h", "w")
+for c in code_h:
+    # print(c, file = fout_h)
+    fout_h.write(c + "\n")
+fout_h.close()
 
+fout_cc = open(filename + ".cc", "w")
+for c in code_cc:
+    # print(c, file = fout_cc)
+    fout_cc.write(c + "\n")
+fout_cc.close()
 
 print("Created " + filename)

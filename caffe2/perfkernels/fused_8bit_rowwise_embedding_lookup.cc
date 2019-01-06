@@ -1,3 +1,4 @@
+#include "caffe2/perfkernels/embedding_lookup_fused_8bit_rowwise_avx2.h"
 #include "caffe2/perfkernels/fused_8bit_rowwise_embedding_lookup.h"
 
 #include "caffe2/core/types.h"
