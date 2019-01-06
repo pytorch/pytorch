@@ -4,6 +4,10 @@
 #include <emmintrin.h>
 #include <immintrin.h>
 
+#include <cstddef>
+
+using std::size_t;
+
 namespace caffe2 {
 
 // version with prefetching
