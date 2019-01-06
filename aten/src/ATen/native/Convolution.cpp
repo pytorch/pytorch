@@ -301,7 +301,7 @@ at::Tensor _convolution(
   auto k = weight.ndimension();
   int64_t dim = k - 2;
 
-  AT_CHECK(dim > 0, "weight should at least have at least two dimensions");
+  AT_CHECK(dim > 0, "weight should have at least two dimensions");
 
   ConvParams params;
   params.stride = convolution_expand_param_if_needed(stride_, "stride", dim);
