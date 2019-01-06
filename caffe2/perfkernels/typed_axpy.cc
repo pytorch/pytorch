@@ -1,4 +1,6 @@
 #include "caffe2/perfkernels/typed_axpy.h"
+#include "caffe2/perfkernels/typed_axpy_avx.h"
+#include "caffe2/perfkernels/typed_axpy_avx2.h"
 #include "caffe2/core/types.h"
 #include "caffe2/perfkernels/common.h"
 #include "caffe2/utils/cpuid.h"

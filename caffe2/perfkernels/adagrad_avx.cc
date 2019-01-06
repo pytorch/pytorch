@@ -1,4 +1,4 @@
-#include "caffe2/perfkernels/adagrad.h"
+#include "caffe2/perfkernels/adagrad_avx.h"
 #include "caffe2/perfkernels/cvtsh_ss_bugfix.h"
 
 #include <emmintrin.h>
@@ -142,7 +142,7 @@ void adagrad_update__avx_f16c(
   }
 }
 
-SPARSE_ADAGRAD_SPECIALIZATION(int32_t, avx_f16c);
-SPARSE_ADAGRAD_SPECIALIZATION(int64_t, avx_f16c);
+SPARSE_ADAGRAD_SPECIALIZATION_IMPL(int32_t, avx_f16c);
+SPARSE_ADAGRAD_SPECIALIZATION_IMPL(int64_t, avx_f16c);
 
 } // namespace caffe2

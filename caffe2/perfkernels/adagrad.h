@@ -266,7 +266,10 @@ void sparse_adagrad(
       float* nh,                                                         \
       float epsilon,                                                     \
       float lr,                                                          \
-      const std::string& param_name) {                                   \
+      const std::string& param_name)
+ 
+#define SPARSE_ADAGRAD_SPECIALIZATION_IMPL(SIndex, ISA)                  \
+  SPARSE_ADAGRAD_SPECIALIZATION(SIndex, ISA) {                           \
     for (int i = 0; i < num_rows; ++i) {                                 \
       auto idx = indices[i];                                             \
       auto offsetI = i * block_size;                                     \

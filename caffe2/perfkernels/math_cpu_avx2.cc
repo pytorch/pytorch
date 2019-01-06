@@ -2,7 +2,10 @@
 // The implementation in this file allows us to route the underlying numerical
 // computation library to different compiler options (-mno-avx2 or -mavx2).
 
+#include "caffe2/perfkernels/math_cpu_avx2.h"
+
 #include <immintrin.h>
+
 #include <cfloat>
 #include <cmath>
 #include <cstdint>
