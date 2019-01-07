@@ -197,7 +197,6 @@ class _TestTorchMixin(object):
                        'index_put',
                        'is_coalesced',
                        'is_distributed',
-                       'is_floating_point',
                        'is_complex',
                        'is_nonzero',
                        'is_same_size',
