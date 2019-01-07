@@ -459,7 +459,7 @@ struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
   static constexpr auto DEFAULT_ALGO = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM;
   static BenchmarkCache<algo_t>& cache() { return fwd_algos; }
 
-  static perf_t findAlgorithm(const ConvolutionArgs& args) {
+  static perf_t findAlgorithm(const ConvolutionArgs& args, bool benchmark) {
     static const algo_t algos[] = {
          CUDNN_CONVOLUTION_FWD_ALGO_GEMM,
          CUDNN_CONVOLUTION_FWD_ALGO_FFT,
@@ -475,48 +475,32 @@ struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
                   "Missing cuDNN convolution forward algorithms");
     int perf_count;
     std::unique_ptr<perf_t[]> perf_results(new perf_t[num_algos]);
-    size_t max_ws_size = getMaxWorkspaceSize(args, algos, num_algos);
-    Workspace ws(max_ws_size);
-    AT_CUDNN_CHECK(cudnnFindConvolutionForwardAlgorithmEx(
-        args.handle,
-        args.idesc.desc(), args.input.data_ptr(),
-        args.wdesc.desc(), args.weight.data_ptr(),
-        args.cdesc.desc(),
-        args.odesc.desc(), args.output.data_ptr(),
-        num_algos,
-        &perf_count,
-        perf_results.get(),
-        ws.data,
-        ws.size));
+    if (!benchmark) {
+      AT_CUDNN_CHECK(cudnnGetConvolutionForwardAlgorithm_v7(
+          args.handle,
+          args.idesc.desc(),
+          args.wdesc.desc(),
+          args.cdesc.desc(),
+          args.odesc.desc(),
+          num_algos,
+          &perf_count,
+          perf_results.get()));
+    } else {
+      size_t max_ws_size = getMaxWorkspaceSize(args, algos, num_algos);
+      Workspace ws(max_ws_size);
+      AT_CUDNN_CHECK(cudnnFindConvolutionForwardAlgorithmEx(
+          args.handle,
+          args.idesc.desc(), args.input.data_ptr(),
+          args.wdesc.desc(), args.weight.data_ptr(),
+          args.cdesc.desc(),
+          args.odesc.desc(), args.output.data_ptr(),
+          num_algos,
+          &perf_count,
+          perf_results.get(),
+          ws.data,
+          ws.size));
+    }
     return getBestAlgorithm(perf_results.get(), args.params.deterministic, perf_count);
-  }
-
-  static void getAlgorithm(
-    const ConvolutionArgs& args,
-    algo_t* algo)
-  {
-    cudnnConvolutionFwdPreference_t pref = CUDNN_CONVOLUTION_FWD_PREFER_FASTEST;
-    AT_CUDNN_CHECK(cudnnGetConvolutionForwardAlgorithm(
-        args.handle,
-        args.idesc.desc(),
-        args.wdesc.desc(),
-        args.cdesc.desc(),
-        args.odesc.desc(),
-        pref,
-        0,
-        algo));
-    
-    // cudnnConvolutionFwdAlgoPerf_t perfResults;
-    // int returnedAlgoCount;
-    // AT_CUDNN_CHECK(cudnnGetConvolutionForwardAlgorithm_v7(
-    //     args.handle,
-    //     args.idesc.desc(),
-    //     args.wdesc.desc(),
-    //     args.cdesc.desc(),
-    //     args.odesc.desc(),
-    //     2,
-    //     returnedAlgoCount,
-    //     perfResults));
   }
 
   static void getWorkspaceSize(
@@ -542,7 +526,7 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgo_t> {
   static constexpr auto DEFAULT_ALGO = CUDNN_CONVOLUTION_BWD_DATA_ALGO_1;
   static BenchmarkCache<algo_t>& cache() { return bwd_data_algos; }
 
-  static perf_t findAlgorithm(const ConvolutionArgs& args) {
+  static perf_t findAlgorithm(const ConvolutionArgs& args, bool benchmark) {
     static const algo_t algos[] = {
         CUDNN_CONVOLUTION_BWD_DATA_ALGO_0,
         CUDNN_CONVOLUTION_BWD_DATA_ALGO_1,
@@ -556,32 +540,32 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgo_t> {
                   "Missing cuDNN convolution backward data algorithms.");
     int perf_count;
     std::unique_ptr<perf_t[]> perf_results(new perf_t[num_algos]);
-    size_t max_ws_size = getMaxWorkspaceSize(args, algos, num_algos);
-    Workspace ws(max_ws_size);
-    AT_CUDNN_CHECK(cudnnFindConvolutionBackwardDataAlgorithmEx(
-        args.handle,
-        args.wdesc.desc(), args.weight.data_ptr(),
-        args.odesc.desc(), args.output.data_ptr(),
-        args.cdesc.desc(),
-        args.idesc.desc(), args.input.data_ptr(),
-        num_algos,
-        &perf_count,
-        perf_results.get(),
-        ws.data,
-        ws.size));
+    if (!benchmark) {
+      AT_CUDNN_CHECK(cudnnGetConvolutionBackwardDataAlgorithm_v7(
+          args.handle,
+          args.wdesc.desc(),
+          args.odesc.desc(),
+          args.cdesc.desc(),
+          args.idesc.desc(),
+          num_algos,
+          &perf_count,
+          perf_results.get()));
+    } else {
+      size_t max_ws_size = getMaxWorkspaceSize(args, algos, num_algos);
+      Workspace ws(max_ws_size);
+      AT_CUDNN_CHECK(cudnnFindConvolutionBackwardDataAlgorithmEx(
+          args.handle,
+          args.wdesc.desc(), args.weight.data_ptr(),
+          args.odesc.desc(), args.output.data_ptr(),
+          args.cdesc.desc(),
+          args.idesc.desc(), args.input.data_ptr(),
+          num_algos,
+          &perf_count,
+          perf_results.get(),
+          ws.data,
+          ws.size));
+    }
     return getBestAlgorithm(perf_results.get(), args.params.deterministic, perf_count);
-  }
-
-  static void getAlgorithm(const ConvolutionArgs& args, algo_t* algo) {
-    AT_CUDNN_CHECK(cudnnGetConvolutionBackwardDataAlgorithm(
-        args.handle,
-        args.wdesc.desc(),
-        args.odesc.desc(),
-        args.cdesc.desc(),
-        args.idesc.desc(),
-        CUDNN_CONVOLUTION_BWD_DATA_PREFER_FASTEST,
-        0,
-        algo));
   }
 
   static void getWorkspaceSize(
@@ -608,7 +592,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgo_t> {
 
   static BenchmarkCache<algo_t>& cache() { return bwd_filter_algos; }
 
-  static perf_t findAlgorithm(const ConvolutionArgs& args) {
+  static perf_t findAlgorithm(const ConvolutionArgs& args, bool benchmark) {
     static const algo_t algos[] = {
         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_0,
         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_1,
@@ -624,35 +608,33 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgo_t> {
     static_assert(sizeof(algos) / sizeof(algos[0]) == num_algos,
                   "Missing cuDNN convolution backward filter algorithms.");
     std::unique_ptr<perf_t[]> perf_results(new perf_t[num_algos]);
-    size_t max_ws_size = getMaxWorkspaceSize(args, algos, num_algos);
     int perf_count;
-    Workspace ws(max_ws_size);
-
-    AT_CUDNN_CHECK(cudnnFindConvolutionBackwardFilterAlgorithmEx(
-        args.handle,
-        args.idesc.desc(), args.input.data_ptr(),
-        args.odesc.desc(), args.output.data_ptr(),
-        args.cdesc.desc(),
-        args.wdesc.desc(), args.weight.data_ptr(),
-        num_algos,
-        &perf_count,
-        perf_results.get(),
-        ws.data,
-        ws.size));
+    if (!benchmark) {
+      AT_CUDNN_CHECK(cudnnGetConvolutionBackwardFilterAlgorithm_v7(
+          args.handle,
+          args.idesc.desc(),
+          args.odesc.desc(),
+          args.cdesc.desc(),
+          args.wdesc.desc(),
+          num_algos,
+          &perf_count,
+          perf_results.get()));
+    } else {
+      size_t max_ws_size = getMaxWorkspaceSize(args, algos, num_algos);
+      Workspace ws(max_ws_size);
+      AT_CUDNN_CHECK(cudnnFindConvolutionBackwardFilterAlgorithmEx(
+          args.handle,
+          args.idesc.desc(), args.input.data_ptr(),
+          args.odesc.desc(), args.output.data_ptr(),
+          args.cdesc.desc(),
+          args.wdesc.desc(), args.weight.data_ptr(),
+          num_algos,
+          &perf_count,
+          perf_results.get(),
+          ws.data,
+          ws.size));
+    }
     return getBestAlgorithm<perf_t>(perf_results.get(), args.params.deterministic, perf_count);
-  }
-
-  static void getAlgorithm(const ConvolutionArgs& args, algo_t* algo) {
-    AT_CUDNN_CHECK(cudnnGetConvolutionBackwardFilterAlgorithm(
-        args.handle,
-        args.idesc.desc(),
-        args.odesc.desc(),
-        args.cdesc.desc(),
-        args.wdesc.desc(),
-        CUDNN_CONVOLUTION_BWD_FILTER_PREFER_FASTEST,
-        0,
-        algo)
-    );
   }
 
   static void getWorkspaceSize(const ConvolutionArgs& args, algo_t algo, size_t* workspaceSize)
@@ -682,31 +664,34 @@ void findAlgorithm(const ConvolutionArgs& args, bool benchmark, algo_t* algo) {
     return;
   }
 
-  if (!benchmark) {
-    search::getAlgorithm(args, algo);
-    return;
-  }
+  if (benchmark) {
+    if (cache.find(args.params, algo)) {
+      // re-check cache since another thread may have benchmarked the algorithm
+      return;
+    }
+  } 
 
-  if (cache.find(args.params, algo)) {
-    // re-check cache since another thread may have benchmarked the algorithm
-    return;
-  }
-
-  auto perfResults = search::findAlgorithm(args);
+  auto perfResults = search::findAlgorithm(args, benchmark);
   // for deterministic algo, look at all the perf results and return the best
   // deterministic algo
   if (perfResults.status == CUDNN_STATUS_SUCCESS &&
       !(args.params.deterministic && perfResults.determinism != CUDNN_DETERMINISTIC)) {
       *algo = perfResults.algo;
+      // update convDesc mathType since cudnn now requires both algo + mathType to figure out
+      // whether to use Tensor cores or not
+      AT_CUDNN_CHECK(cudnnSetConvolutionMathType(args.cdesc.desc(), perfResults.mathType));
   } else {
       *algo = search::DEFAULT_ALGO;
   }
-  cache.insert(args.params, *algo);
 
-  // Free the cached blocks in our caching allocator. They are
-  // needed here because the above benchmarking uses a huge amount of memory,
-  // e.g. a few GBs.
-  THCCachingAllocator_emptyCache();
+  if (benchmark) {
+    cache.insert(args.params, *algo);
+
+    // Free the cached blocks in our caching allocator. They are
+    // needed here because the above benchmarking uses a huge amount of memory,
+    // e.g. a few GBs.
+    THCCachingAllocator_emptyCache();
+  }
 }
 
 template<typename algo_t>
