@@ -29,5 +29,6 @@ graph(%cond : Tensor) {
        = prim::Print(%d, %e, %d, %5, %y.4, %5)
       -> (%c.1, %y.4)
     }
-  return (%a, %3, %c, %5, %y);
+  %19 : (int, int, int, Tensor, Tensor) = prim::TupleConstruct(%a, %3, %c, %5, %y)
+  return (%19);
 }

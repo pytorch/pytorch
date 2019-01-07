@@ -6,7 +6,8 @@
 
 #include "caffe2/serialize/inline_container.h"
 
-namespace at {
+namespace caffe2 {
+namespace serialize {
 namespace {
 
 TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
@@ -14,7 +15,7 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
 
   std::ostringstream oss;
   // write records through writers
-  torch::jit::PyTorchStreamWriter writer(&oss);
+  PyTorchStreamWriter writer(&oss);
   std::array<char, 127> data1;
 
   for (int i = 0; i < data1.size(); ++i) {
@@ -37,7 +38,7 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   std::istringstream iss(the_file);
 
   // read records through readers
-  torch::jit::PyTorchStreamReader reader(&iss);
+  PyTorchStreamReader reader(&iss);
   at::DataPtr data_ptr;
   int64_t size;
   std::tie(data_ptr, size) = reader.getRecord("key1");
@@ -58,4 +59,5 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
 }
 
 } // namespace
-} // namespace at
+} // namespace serialize
+} // namespace caffe2

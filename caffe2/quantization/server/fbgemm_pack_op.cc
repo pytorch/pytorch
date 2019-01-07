@@ -4,7 +4,7 @@
 
 #include "caffe2_dnnlowp_utils.h"
 
-C10_DECLARE_int32(dnnlowp_nbits_in_non_outlier);
+C10_DECLARE_int32(caffe2_dnnlowp_nbits_in_non_outlier);
 
 namespace caffe2 {
 
@@ -214,7 +214,7 @@ FullyConnectedDNNLowPPackWeightOp::FullyConnectedDNNLowPPackWeightOp(
       axis_w_(this->GetSingleArgument<int32_t>("axis_w", 1)) {
   if (this->debug_def().engine() == "DNNLOWP_ACC16") {
     nbits_in_non_outlier_ = this->GetSingleArgument<int>(
-        "nbits_in_non_outlier", FLAGS_dnnlowp_nbits_in_non_outlier);
+        "nbits_in_non_outlier", FLAGS_caffe2_dnnlowp_nbits_in_non_outlier);
   }
 }
 
@@ -311,7 +311,7 @@ ConvDNNLowPPackWeightOp::ConvDNNLowPPackWeightOp(
           this->GetSingleArgument<bool>("quantize_groupwise", false)) {
   if (this->debug_def().engine() == "DNNLOWP_ACC16") {
     nbits_in_non_outlier_ = this->GetSingleArgument<int>(
-        "nbits_in_non_outlier", FLAGS_dnnlowp_nbits_in_non_outlier);
+        "nbits_in_non_outlier", FLAGS_caffe2_dnnlowp_nbits_in_non_outlier);
   }
 }
 

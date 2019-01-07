@@ -75,11 +75,13 @@ class Stream(torch._C._CudaStreamBase):
         Returns:
             A boolean indicating if all kernels in this stream are completed.
         """
-        res = cudart().cudaStreamQuery(self)
-        if res == cudaStatus.ERROR_NOT_READY:
-            return False
-        check_error(res)
-        return True
+        with torch.cuda.device(self.device):
+            res = cudart().cudaStreamQuery(self)
+            if res == cudaStatus.ERROR_NOT_READY:
+                return False
+            check_error(res)
+            return True
+        return False
 
     def synchronize(self):
         r"""Wait for all the kernels in this stream to complete.

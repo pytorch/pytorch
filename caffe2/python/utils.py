@@ -407,3 +407,13 @@ def ArgsToDict(args):
         else:
             ans[arg.name] = None
     return ans
+
+
+def NHWC2NCHW(tensor):
+    assert tensor.ndim >= 1
+    return tensor.transpose((0, tensor.ndim - 1) + tuple(range(1, tensor.ndim - 1)))
+
+
+def NCHW2NHWC(tensor):
+    assert tensor.ndim >= 2
+    return tensor.transpose((0,) + tuple(range(2, tensor.ndim)) + (1,))

@@ -1,3 +1,4 @@
 def graph(self,
-    a: Tensor) -> Tuple[]:
+    a: Tensor) -> None:
   print("hi\016")
+  return None

@@ -114,16 +114,20 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
   }
 
   /// Forwards to the call operator of the contained module.
+  /// NOTE: std::forward is qualified to prevent VS2017 emitting
+  ///       error C2872: 'std': ambiguous symbol
   template <typename... Args>
   auto operator()(Args&&... args)
-      -> decltype((*impl_)(std::forward<Args>(args)...)) {
-    return (*impl_)(std::forward<Args>(args)...);
+      -> decltype((*impl_)(::std::forward<Args>(args)...)) {
+    return (*impl_)(::std::forward<Args>(args)...);
   }
 
   /// Forwards to the subscript operator of the contained module.
+  /// NOTE: std::forward is qualified to prevent VS2017 emitting
+  ///       error C2872: 'std': ambiguous symbol
   template <typename Arg>
-  auto operator[](Arg&& arg) -> decltype((*impl_)[std::forward<Arg>(arg)]) {
-    return (*impl_)[std::forward<Arg>(arg)];
+  auto operator[](Arg&& arg) -> decltype((*impl_)[::std::forward<Arg>(arg)]) {
+    return (*impl_)[::std::forward<Arg>(arg)];
   }
 
   /// Returns true if the `ModuleHolder` does not contain a module.
@@ -155,6 +159,14 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
     return nullptr;
   }
 };
+
+/// Pretty prints the given `Module` into the `ostream`.
+template <typename ModuleType>
+std::ostream& operator<<(
+    std::ostream& stream,
+    const nn::ModuleHolder<ModuleType>& module) {
+  return stream << *module;
+}
 
 /// Serializes a `ModuleHolder` into an `OutputArchive`.
 template <typename ModuleType>
