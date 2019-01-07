@@ -3,7 +3,7 @@
 #include <THCUNN/THCUNN.h>
 #include <THC/THCTensor.hpp>
 #include <THCUNN/common.h>
-#include <THCUNN/linear_upsampling.h>
+#include <THCUNN/upsampling.h>
 #include <THC/THCDeviceTensor.cuh>
 #include <THC/THCDeviceTensorUtils.cuh>
 #include <THC/THCDeviceUtils.cuh>

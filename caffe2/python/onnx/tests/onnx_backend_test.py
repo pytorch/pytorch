@@ -52,6 +52,7 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_erf.*'  # Needs implementation
                      '|test_isnan.*'  # Needs implementation
                      '|test_scatter.*'  # Should be similar to ScatterAssign
+                     '|test_constantofshape.*'  # Needs implementation
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.

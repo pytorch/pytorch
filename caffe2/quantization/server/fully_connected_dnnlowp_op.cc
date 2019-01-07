@@ -10,7 +10,7 @@
 #include "mmio.h"
 
 C10_DEFINE_bool(
-    dnnlowp_enforce_default_caffe2_operators,
+    caffe2_dnnlowp_enforce_default_operators,
     false,
     "When true, enforce to use the default Caffe2 operators inside DNNLOWP"
     "instead of using its own implementation that uses AVX2 instructions"
@@ -48,7 +48,7 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
 
   this->ParseDNNLowPOperatorArguments_();
 
-  if ((!GetCpuId().avx2() || FLAGS_dnnlowp_enforce_default_caffe2_operators) &&
+  if ((!GetCpuId().avx2() || FLAGS_caffe2_dnnlowp_enforce_default_operators) &&
       dequantize_output_) {
     if (!GetCpuId().avx2()) {
       static int log_occurences = 0;

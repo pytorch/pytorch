@@ -8,7 +8,7 @@ list(APPEND CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Modules
   ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/public
   ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Modules_CUDA_fix)
-list(APPEND CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/)
+list(APPEND CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/ /usr/lib/aarch64-linux-gnu/)
 
 cmake_policy(SET CMP0012 NEW)
 
@@ -31,7 +31,7 @@ set(ATen_PUBLIC_CUDA_DEPENDENCY_LIBS)
 set(ATen_PUBLIC_HIP_DEPENDENCY_LIBS)
 SET(ATEN_INSTALL_BIN_SUBDIR "bin" CACHE PATH "ATen install binary subdirectory")
 SET(ATEN_INSTALL_LIB_SUBDIR "lib" CACHE PATH "ATen install library subdirectory")
-SET(ATEN_INSTALL_INCLUDE_SUBDIR "include" CACHE PATH "ATen install include subdirectory")
+SET(ATEN_INSTALL_INCLUDE_SUBDIR "lib/include" CACHE PATH "ATen install include subdirectory")
 
 if(USE_CUDA)
   list(APPEND ATen_CUDA_INCLUDE ${CUDA_INCLUDE_DIRS})

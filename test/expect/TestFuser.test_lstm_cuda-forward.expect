@@ -6,7 +6,8 @@ graph(%x : Float(*, *)
       %b_ih : Float(*)
       %b_hh : Float(*)) {
   %hy : Float(*, *), %cy : Float(*, *) = prim::DifferentiableGraph_0(%cx, %b_hh, %b_ih, %hx, %w_hh, %x, %w_ih)
-  return (%hy, %cy);
+  %9 : (Float(*, *), Float(*, *)) = prim::TupleConstruct(%hy, %cy)
+  return (%9);
 }
 with prim::DifferentiableGraph_0 = graph(%0 : Float(*, *)
       %1 : Float(*)

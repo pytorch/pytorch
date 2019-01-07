@@ -9,7 +9,9 @@ torch.cuda
 Random Number Generator
 -------------------------
 .. autofunction:: get_rng_state
+.. autofunction:: get_rng_state_all
 .. autofunction:: set_rng_state
+.. autofunction:: set_rng_state_all
 .. autofunction:: manual_seed
 .. autofunction:: manual_seed_all
 .. autofunction:: seed

@@ -138,11 +138,9 @@ class FullyConnectedDecompGradientOp : public Operator<Context> {
       DCHECK_EQ(X.dim(), 1);
       DCHECK_EQ(N, dY.numel());
     }
-    auto* dU = Output(0);
-    auto* dV = Output(1);
 
-    dU->ResizeLike(U);
-    dV->ResizeLike(V);
+    auto* dU = Output(0, U.sizes(), at::dtype<T>());
+    auto* dV = Output(1, V.sizes(), at::dtype<T>());
     auto* db = Output(2, {N}, at::dtype<T>());
 
     // Compute dU
@@ -189,8 +187,7 @@ class FullyConnectedDecompGradientOp : public Operator<Context> {
         &context_);
     // Compute dX if necessary.
     if (OutputSize() == 4) {
-      auto* dX = Output(3);
-      dX->ResizeLike(X);
+      auto* dX = Output(3, X.sizes(), at::dtype<T>());
       dx_buffer_.Resize(M, middle);
       T* dx_buffer_data = dx_buffer_.template mutable_data<T>();
       math::Gemm<T, Context, Engine>(

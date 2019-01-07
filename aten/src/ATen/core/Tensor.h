@@ -298,10 +298,8 @@ public:
   Tensor argmax() const;
   Tensor argmin(int64_t dim, bool keepdim=false) const;
   Tensor argmin() const;
-  Tensor as_strided(IntList size, IntList stride) const;
-  Tensor & as_strided_(IntList size, IntList stride);
-  Tensor as_strided(IntList size, IntList stride, int64_t storage_offset) const;
-  Tensor & as_strided_(IntList size, IntList stride, int64_t storage_offset);
+  Tensor as_strided(IntList size, IntList stride, c10::optional<int64_t> storage_offset=c10::nullopt) const;
+  Tensor & as_strided_(IntList size, IntList stride, c10::optional<int64_t> storage_offset=c10::nullopt);
   Tensor asin() const;
   Tensor & asin_();
   Tensor atan() const;
@@ -449,13 +447,14 @@ public:
   Tensor & squeeze_();
   Tensor & squeeze_(int64_t dim);
   Tensor sspaddmm(const Tensor & mat1, const Tensor & mat2, Scalar beta=1, Scalar alpha=1) const;
-  Tensor stft(int64_t n_fft, int64_t hop_length, int64_t win_length, const Tensor & window={}, bool normalized=false, bool onesided=true) const;
+  Tensor stft(int64_t n_fft, c10::optional<int64_t> hop_length=c10::nullopt, c10::optional<int64_t> win_length=c10::nullopt, const Tensor & window={}, bool normalized=false, bool onesided=true) const;
   int64_t stride(int64_t dim) const;
   Tensor sum(ScalarType dtype) const;
   Tensor sum() const;
   Tensor sum(IntList dim, bool keepdim, ScalarType dtype) const;
   Tensor sum(IntList dim, bool keepdim=false) const;
   Tensor sum(IntList dim, ScalarType dtype) const;
+  Tensor sum_to_size(IntList size) const;
   Tensor sqrt() const;
   Tensor & sqrt_();
   Tensor std(bool unbiased=true) const;
@@ -486,7 +485,7 @@ public:
   Tensor view_as(const Tensor & other) const;
   Tensor where(const Tensor & condition, const Tensor & other) const;
   Tensor norm(Scalar p=2) const;
-  Tensor norm(Scalar p, int64_t dim, bool keepdim=false) const;
+  Tensor norm(c10::optional<Scalar> p, int64_t dim, bool keepdim=false) const;
   Tensor clone() const;
   Tensor & resize_as_(const Tensor & the_template);
   Tensor pow(Scalar exponent) const;
@@ -633,7 +632,7 @@ public:
   std::tuple<Tensor,Tensor> eig(bool eigenvectors=false) const;
   std::tuple<Tensor,Tensor,Tensor> svd(bool some=true, bool compute_uv=true) const;
   Tensor cholesky(bool upper=false) const;
-  Tensor potrs(const Tensor & input2, bool upper=true) const;
+  Tensor cholesky_solve(const Tensor & input2, bool upper=false) const;
   Tensor potri(bool upper=true) const;
   std::tuple<Tensor,Tensor> pstrf(bool upper=true, Scalar tol=-1) const;
   std::tuple<Tensor,Tensor> qr() const;

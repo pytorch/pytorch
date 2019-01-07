@@ -2244,6 +2244,7 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("/operator_fallback_gpu" , ("/hip/operator_fallback_gpu", API_CAFFE2)),
     ("/spatial_batch_norm_op_gpu_impl" , ("/hip/spatial_batch_norm_op_gpu_impl", API_CAFFE2)),
     ("/recurrent_network_executor_gpu" , ("/hip/recurrent_network_executor_gpu", API_CAFFE2)),
+    ("/generate_proposals_op_util_nms_gpu" , ("/hip/generate_proposals_op_util_nms_gpu", API_CAFFE2)),
     ("/max_pool_with_index_gpu", ("/hip/max_pool_with_index_gpu", API_CAFFE2)),
     ("/THCCachingAllocator_gpu", ("/hip/THCCachingAllocator_gpu", API_CAFFE2)),
     ("/top_k_heap_selection", ("/hip/top_k_heap_selection", API_CAFFE2)),
