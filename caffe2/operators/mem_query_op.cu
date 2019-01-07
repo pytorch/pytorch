@@ -17,8 +17,8 @@ class GetGPUMemoryUsageOp final : public Operator<CUDAContext> {
     std::vector<long> max_by_gpu = CUDAContext::MaxMemoryByGpu();
     CHECK_EQ(total_by_gpu.size(), max_by_gpu.size());
 
-    auto* stats = Output(0);
-    stats->Resize(2, total_by_gpu.size());
+
+    auto* stats = Output(0, {2, static_cast<int64_t>(total_by_gpu.size())}, at::dtype<long>());
     context_.CopyFromCPU<long>(
         total_by_gpu.size(),
         total_by_gpu.data(),

@@ -130,3 +130,8 @@ if PY2:
 elif PY3:
     def get_function_from_type(cls, name):
         return getattr(cls, name, None)
+
+if PY2:
+    import __builtin__ as builtins
+elif PY3:
+    import builtins

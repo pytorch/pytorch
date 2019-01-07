@@ -1,10 +1,10 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/argument_spec.h>
-#include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
 
 #include <torch/csrc/autograd/variable.h>
@@ -18,11 +18,14 @@
 #include <utility>
 #include <vector>
 
-namespace torch { namespace jit {
+namespace torch {
+namespace jit {
 
 struct propagation_error : std::exception {};
 
-#define SHAPE_ASSERT(cond) if (!(cond)) throw propagation_error()
+#define SHAPE_ASSERT(cond) \
+  if (!(cond))             \
+  throw propagation_error()
 
 namespace {
 
@@ -61,6 +64,7 @@ class ShapePropagator {
       }
     }
   }
+
  private:
   const AliasDb aliasDb_;
 
@@ -190,7 +194,6 @@ class ShapePropagator {
       "aten::gesv(Tensor self, Tensor A) -> (Tensor, Tensor)",
       "aten::inverse(Tensor self) -> Tensor",
   };
-
 
   // Check if this node depends on a value that has been mutated previously. If
   // it has, then it's not safe to run this node in isolation, since we don't
@@ -328,11 +331,12 @@ class ShapePropagator {
       }
       return false;
     };
-    auto list_node = ((cat_node->kind() == prim::FusedConcat)
-		      ? cat_node
-		      : cat_node->namedInput(attr::tensors)->node());
-    if (list_node->kind() == prim::ListConstruct
-	|| cat_node->kind() == prim::FusedConcat) {
+    auto list_node =
+        ((cat_node->kind() == prim::FusedConcat)
+             ? cat_node
+             : cat_node->namedInput(attr::tensors)->node());
+    if (list_node->kind() == prim::ListConstruct ||
+        cat_node->kind() == prim::FusedConcat) {
       auto tensors = list_node->inputs();
       if (!tensors.empty()) {
         if (propagate_complete(cat_node, tensors)) {
@@ -392,7 +396,8 @@ class ShapePropagator {
         return; // correct num type is already set
       case prim::NumToTensor: {
         TypePtr typ = node->input()->type();
-        if (typ->isSubtypeOf(IntType::get()) || typ->isSubtypeOf(BoolType::get())) {
+        if (typ->isSubtypeOf(IntType::get()) ||
+            typ->isSubtypeOf(BoolType::get())) {
           node->output()->setType(TensorType::create(at::kLong, at::kCPU, 0));
         } else if (node->input()->type()->isSubtypeOf(FloatType::get())) {
           node->output()->setType(TensorType::create(at::kDouble, at::kCPU, 0));
@@ -446,8 +451,8 @@ class ShapePropagator {
       return;
     }
 
-    if (node->matches("aten::cat(Tensor[] tensors, int dim) -> Tensor")
-	|| node->kind() == prim::FusedConcat) {
+    if (node->matches("aten::cat(Tensor[] tensors, int dim) -> Tensor") ||
+        node->kind() == prim::FusedConcat) {
       return PropagateCatShape(node);
     }
 
@@ -495,8 +500,8 @@ class ShapePropagator {
   // primitive/tensor outputs.
 
   bool PropagateTensorShapeOnNode(Node* node, bool insert_expands) {
-    static const auto broadcast =
-        [](std::vector<TensorTypePtr>& tensor_types, size_t arg_for_type) -> TensorTypePtr {
+    static const auto broadcast = [](std::vector<TensorTypePtr>& tensor_types,
+                                     size_t arg_for_type) -> TensorTypePtr {
       if (tensor_types.size() == 1) {
         return tensor_types[0];
       }
@@ -693,12 +698,12 @@ class ShapePropagator {
           return {};
         }};
 
-    // aten::where is special in that its return type is the second argument's (self)
-    // type rather than the that of condition
+    // aten::where is special in that its return type is the second argument's
+    // (self) type rather than the that of condition
     static const register_formula_for where_op{
         {
             "aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor",
-	},
+        },
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types = gatherTensorTypes<TensorType>(node)) {
             return {broadcast(*maybe_tensor_types, 1)};
@@ -764,8 +769,8 @@ class ShapePropagator {
 
     // Requirements:
     //   dims           : preserved from the first argument
-    //   scalar type    : preserved from the first argument (doesn't have to match other arguments)
-    //   device         : always matching and preserved
+    //   scalar type    : preserved from the first argument (doesn't have to
+    //   match other arguments) device         : always matching and preserved
     //   tensor inputs  : *
     //   tensor outputs : 1
     // NB: those ops (with slight adjustments) are good candidates for restarts.
@@ -946,24 +951,22 @@ class ShapePropagator {
               node, /*num_reduce_dim=*/1, /*integer_upcast=*/true);
         }};
 
-
     // Requirements:
-    //   dims           : preserved if keepdim == false, dim->size() smaller otherwise
-    //   scalar type    : preserved
-    //   device         : preserved
-    //   tensor inputs  : 1
-    //   tensor outputs : 1
+    //   dims           : preserved if keepdim == false, dim->size() smaller
+    //   otherwise scalar type    : preserved device         : preserved tensor
+    //   inputs  : 1 tensor outputs : 1
     // Additionally:
     //   - First input should be the only tensor input
     //   - has a bool keepdim argument
-    static const register_formula_for multidim_reduce_ops {
+    static const register_formula_for multidim_reduce_ops{
         {
             "aten::mean(Tensor self, int[] dim, bool keepdim) -> Tensor",
             "aten::std(Tensor self, int[] dim, bool unbiased, bool keepdim) -> Tensor",
         },
-        [](Node * node) -> type_vec_t {
+        [](Node* node) -> type_vec_t {
           if (auto dim = node->get<std::vector<int64_t>>(attr::dim)) {
-            return multidim_reduce_with_postprocess(node, /*num_reduce_dim=*/dim->size(), /*integer_upcast=*/false);
+            return multidim_reduce_with_postprocess(
+                node, /*num_reduce_dim=*/dim->size(), /*integer_upcast=*/false);
           }
           return {};
         }};
@@ -1578,7 +1581,6 @@ class ShapePropagator {
     setUnshapedType(node);
     return false;
   }
-
 };
 } // anonymous namespace
 
@@ -1589,17 +1591,17 @@ void PropagateInputShapes(const std::shared_ptr<Graph>& graph) {
 namespace {
 
 void EraseShapeInformation(at::ArrayRef<Value*> vals) {
-  for (Value * v : vals) {
+  for (Value* v : vals) {
     v->setType(unshapedType(v->type()));
   }
 }
 
-void EraseShapeInformation(Block * b) {
+void EraseShapeInformation(Block* b) {
   EraseShapeInformation(b->inputs());
   EraseShapeInformation(b->outputs());
-  for (Node * n : b->nodes()) {
+  for (Node* n : b->nodes()) {
     EraseShapeInformation(n->outputs());
-    for (Block *sb : n->blocks()) {
+    for (Block* sb : n->blocks()) {
       EraseShapeInformation(sb);
     }
   }
@@ -1611,4 +1613,5 @@ void EraseShapeInformation(const std::shared_ptr<Graph>& graph) {
   EraseShapeInformation(graph->block());
 }
 
-}}
+} // namespace jit
+} // namespace torch

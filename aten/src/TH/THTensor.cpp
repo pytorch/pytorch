@@ -157,5 +157,5 @@ void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage) {
   // Caffe2 might have tensors whose storages are null, but we
   // don't allow it in PyTorch.
   AT_ASSERT(storage);
-  tensor->storage_ = at::Storage(c10::intrusive_ptr<THStorage>::reclaim(storage));
+  tensor->set_storage(at::Storage(c10::intrusive_ptr<THStorage>::reclaim(storage)));
 }
