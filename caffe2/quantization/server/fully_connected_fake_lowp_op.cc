@@ -179,9 +179,7 @@ bool FullyConnectedGradientFakeLowpFPOp<Q, Context, Engine, TransposeWeight>::
   CAFFE_ENFORCE(M * K == X.size());
   CAFFE_ENFORCE(K * N == W.size());
 
-  auto* dW = Output(0);
-
-  dW->ResizeLike(W);
+  auto* dW = Output(0, W.sizes(), at::dtype<T_DW>());
   auto* db = Output(1, {N}, at::dtype<T_DB>());
 
   if (X.size() == 0) {
@@ -198,9 +196,7 @@ bool FullyConnectedGradientFakeLowpFPOp<Q, Context, Engine, TransposeWeight>::
         &context_);
 
     if (OutputSize() == 3) {
-      auto* dX = Output(2);
-      dX->ResizeLike(X);
-      dX->template mutable_data<T_DX>();
+      Output(2, X.sizes(), at::dtype<T_DX>());
     }
 
     return true;
@@ -270,8 +266,7 @@ bool FullyConnectedGradientFakeLowpFPOp<Q, Context, Engine, TransposeWeight>::
 
   // Compute dX
   if (OutputSize() == 3) {
-    auto* dX = Output(2);
-    dX->ResizeLike(X);
+    auto* dX = Output(2, X.sizes(), at::dtype<T_DX>());
     math::Gemm<T_DX, Context, Engine>(
         CblasNoTrans,
         TransposeWeight ? CblasNoTrans : CblasTrans,

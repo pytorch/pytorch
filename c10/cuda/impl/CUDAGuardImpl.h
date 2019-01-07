@@ -51,6 +51,11 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     setCurrentCUDAStream(cs);
     return old_stream.unwrap();
   }
+  DeviceIndex deviceCount() const override {
+    int deviceCnt;
+    C10_CUDA_CHECK(cudaGetDeviceCount(&deviceCnt));
+    return deviceCnt;
+  }
 };
 
 }}} // namespace c10::cuda::impl

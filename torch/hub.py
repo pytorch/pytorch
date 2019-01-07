@@ -128,7 +128,6 @@ def load(github, model, force_reload=False, *args, **kwargs):
     # Download zipped code from github
     url = _git_archive_link(repo_info, branch)
     cached_file = os.path.join(hub_dir, branch + '.zip')
-    extracted_repo = os.path.join(hub_dir, repo_name + '-' + branch)
     repo_dir = os.path.join(hub_dir, repo_name + '_' + branch)
 
     use_cache = (not force_reload) and os.path.exists(repo_dir)
@@ -140,13 +139,18 @@ def load(github, model, force_reload=False, *args, **kwargs):
         sys.stderr.write('Using cache found in {}'.format(repo_dir))
     else:
         _remove_if_exists(cached_file)
-        _remove_if_exists(extracted_repo)
-        _remove_if_exists(repo_dir)
-
         _download_url_to_file(url, cached_file)
-        zipfile.ZipFile(cached_file).extractall(hub_dir)
+
+        cached_zipfile = zipfile.ZipFile(cached_file)
+
+        # Github renames folder repo-v1.x.x to repo-1.x.x
+        extraced_repo_name = cached_zipfile.infolist()[0].filename
+        extracted_repo = os.path.join(hub_dir, extraced_repo_name)
+        _remove_if_exists(extracted_repo)
+        cached_zipfile.extractall(hub_dir)
 
         _remove_if_exists(cached_file)
+        _remove_if_exists(repo_dir)
         shutil.move(extracted_repo, repo_dir)  # rename the repo
 
     sys.path.insert(0, repo_dir)  # Make Python interpreter aware of the repo

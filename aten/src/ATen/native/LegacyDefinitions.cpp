@@ -111,7 +111,7 @@ Tensor & eq_(Tensor& self, Scalar other) {
 }
 
 Tensor & eq_(Tensor& self, const Tensor & other) {
-  return at::legacy::th::_th_ge_(self, other);
+  return at::legacy::th::_th_eq_(self, other);
 }
 
 Tensor & ne_(Tensor& self, Scalar other) {

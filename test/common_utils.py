@@ -178,7 +178,10 @@ def to_gpu(obj, type_map={}):
 
 
 def get_function_arglist(func):
-    return inspect.getargspec(func).args
+    if sys.version_info > (3,):
+        return inspect.getfullargspec(func).args
+    else:
+        return inspect.getargspec(func).args
 
 
 def set_rng_seed(seed):
@@ -324,7 +327,8 @@ class TestCase(expecttest.TestCase):
             #        needed for inplace operations done on `x`, e.g., copy_().
             #        Remove after implementing something equivalent to CopySlice
             #        for sparse views.
-            x = x.detach()
+            # NOTE: We do clone() after detach() here because we need to be able to change size/storage of x afterwards
+            x = x.detach().clone()
         return x, x._indices().clone(), x._values().clone()
 
     def safeToDense(self, t):
@@ -725,6 +729,20 @@ def random_fullrank_matrix_distinct_singular_value(l, *batches, **kwargs):
         return torch.stack(all_matrices).reshape(*(batches + (l, l)))
 
 
+def brute_pdist(inp, p=2):
+    """Computes the same as torch.pdist using primitives"""
+    n = inp.shape[-2]
+    k = n * (n - 1) // 2
+    if k == 0:
+        # torch complains about empty indices
+        return torch.empty(inp.shape[:-2] + (0,), device=inp.device)
+    square = torch.norm(inp[..., None, :] - inp[..., None, :, :], p=p, dim=-1)
+    unroll = square.view(square.shape[:-2] + (n * n,))
+    inds = torch.ones(k, dtype=torch.int)
+    inds[torch.arange(n - 1, 1, -1, dtype=torch.int).cumsum(0)] += torch.arange(2, n, dtype=torch.int)
+    return unroll[..., inds.cumsum(0)]
+
+
 def do_test_dtypes(self, dtypes, layout, device):
     for dtype in dtypes:
         if dtype != torch.float16:
@@ -827,6 +845,11 @@ def set_running_script_path():
 
 def check_test_defined_in_running_script(test_case):
     if running_script_path is None:
+        return
+    if TEST_WITH_ROCM:
+        # In ROCm CI, to avoid forking after HIP is initialized, we
+        # indeed load test module from test/run_test.py and run all
+        # tests in the same process.
         return
     test_case_class_file = os.path.abspath(os.path.realpath(inspect.getfile(test_case.__class__)))
     assert test_case_class_file == running_script_path, "Class of loaded TestCase \"{}\" " \

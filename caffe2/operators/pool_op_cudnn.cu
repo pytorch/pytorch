@@ -217,10 +217,10 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
       }
     }
 
-    if (cudnn_input_dims_ != X.dims()) {
+    if (cudnn_input_dims_ != X.sizes()) {
       // Dimensions changed; we will need to re-initialize things.
       VLOG(1) << "Changing the cudnn descriptor configurations.";
-      cudnn_input_dims_ = X.dims().vec();
+      cudnn_input_dims_ = X.sizes().vec();
       setTensorDescriptor<T>(X.ndim(), order_, N, C, H, W, D, bottom_desc_);
       setTensorDescriptor<T>(
           Y->ndim(), order_, N, C, H_out, W_out, D_out, top_desc_);
@@ -420,10 +420,10 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
       CAFFE_THROW("Unsupported kernel size :", kernel_.size());
     }
 
-    if (cudnn_input_dims_ != X.dims()) {
+    if (cudnn_input_dims_ != X.sizes()) {
       // Dimensions changed; we will need to re-initialize things.
       VLOG(1) << "Changing the cudnn descriptor configurations.";
-      cudnn_input_dims_ = X.dims().vec();
+      cudnn_input_dims_ = X.sizes().vec();
       setTensorDescriptor<T>(X.ndim(), order_, N, C, H, W, D, bottom_desc_);
       setTensorDescriptor<T>(
           Y.ndim(), order_, N, C, H_out, W_out, D_out, top_desc_);

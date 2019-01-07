@@ -539,6 +539,13 @@ cholesky(upper=False) -> Tensor
 See :func:`torch.cholesky`
 """)
 
+add_docstr_all('cholesky_solve',
+               r"""
+cholesky_solve(input2, upper=False) -> Tensor
+
+See :func:`torch.cholesky_solve`
+""")
+
 add_docstr_all('clamp',
                r"""
 clamp(min, max) -> Tensor
@@ -1256,6 +1263,13 @@ is_contiguous() -> bool
 Returns True if :attr:`self` tensor is contiguous in memory in C order.
 """)
 
+add_docstr_all('is_floating_point',
+               r"""
+is_floating_point() -> bool
+
+Returns True if the data type of :attr:`self` is a floating point data type.
+""")
+
 add_docstr_all('is_set_to',
                r"""
 is_set_to(tensor) -> bool
@@ -1696,13 +1710,6 @@ add_docstr_all('potri',
 potri(upper=True) -> Tensor
 
 See :func:`torch.potri`
-""")
-
-add_docstr_all('potrs',
-               r"""
-potrs(input2, upper=True) -> Tensor
-
-See :func:`torch.potrs`
 """)
 
 add_docstr_all('pow',
@@ -2831,6 +2838,18 @@ Args:
     other (:class:`torch.Tensor`): The result tensor has the same size
         as :attr:`other`.
 """)
+
+add_docstr_all('sum_to_size',
+               r"""
+sum_to_size(*size) -> Tensor
+
+Sum ``this`` tensor to :attr:`size`.
+:attr:`size` must be broadcastable to ``this`` tensor size.
+Args:
+    other (:class:`torch.Tensor`): The result tensor has the same size
+        as :attr:`other`.
+""")
+
 
 add_docstr_all('zero_',
                r"""
