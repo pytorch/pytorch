@@ -468,12 +468,15 @@ from .random import *
 from ..storage import _StorageBase
 
 
-def _dummy_type(name):
+def _dummy_type(name, functions=None):
     def init_err(self):
         class_name = self.__class__.__name__
         raise RuntimeError(
             "Tried to instantiate dummy base class {}".format(class_name))
-    return type(storage_name, (object,), {"__init__": init_err})
+
+    attr = dict.fromkeys(functions or [])
+    attr["__init__"] = init_err
+    return type(name, (object,), attr)
 
 
 if not hasattr(torch._C, 'CudaDoubleStorageBase'):
@@ -485,7 +488,10 @@ if not hasattr(torch._C, 'CudaDoubleStorageBase'):
         torch._C.__dict__[storage_name] = _dummy_type(storage_name)
         torch._C.__dict__[tensor_name] = _dummy_type(tensor_name)
 
-    torch._C.__dict__['_CudaStreamBase'] = _dummy_type('CudaStreamBase')
+    # add functions to make sure _add_docstr works in torch/cuda/streams.py in
+    # absence of CUDA
+    torch._C.__dict__['_CudaStreamBase'] = _dummy_type(
+        'CudaStreamBase', ["query"])
 
 
 @staticmethod

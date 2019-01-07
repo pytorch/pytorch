@@ -5,7 +5,6 @@ from ._utils import _get_device_index
 from torch._C import _add_docstr
 
 
-
 class Stream(torch._C._CudaStreamBase):
     r"""Wrapper around a CUDA stream.
 
