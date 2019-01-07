@@ -89,23 +89,27 @@ class OnnxifiOp final : public Operator<Context> {
         &mapped_ws, &initializer_set, &weight_names, &weight_shapes);
 
     // Build the Onnxifi engine
-    // TODO: In spec, backends are hot-pluggable, so two calls to
-    // onnxGetBackendIDs may result in different number of backend. And we
-    // should retry until it get consistent. For now, we don't do that.
+    int idx = this->template GetSingleArgument<int>("backend_id", 0);
     CAFFE_ENFORCE_EQ(
         lib_->onnxGetBackendIDs(nullptr, &num_backends_),
         ONNXIFI_STATUS_FALLBACK);
     CAFFE_ENFORCE_GT(
         num_backends_, 0, "At least 1 onnxifi backend should be available");
+    CAFFE_ENFORCE_LT(
+        idx,
+        num_backends_,
+        "Backend idx out of bound: ",
+        idx,
+        ", #backends: ",
+        num_backends_);
     backend_ids_.resize(num_backends_);
     CAFFE_ENFORCE_EQ(
         lib_->onnxGetBackendIDs(backend_ids_.data(), &num_backends_),
         ONNXIFI_STATUS_SUCCESS);
 
-    // TODO: choose backend id
     CAFFE_ENFORCE_EQ(
         lib_->onnxInitBackend(
-            backend_ids_[0], property_pointers.data(), &backend_),
+            backend_ids_[idx], property_pointers.data(), &backend_),
         ONNXIFI_STATUS_SUCCESS);
     CAFFE_ENFORCE_EQ(
         lib_->onnxInitGraph(
