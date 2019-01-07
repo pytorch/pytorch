@@ -437,7 +437,7 @@ static std::unique_ptr<BaseContext> ContextFromProto(
 
 Tensor EmptyTensorFromProto(const TensorProto& tensor_proto) {
   auto context = ContextFromProto(tensor_proto);
-  context->SwitchToDevice(0);
+  context->SwitchToDevice();
   if (NumelFromTensorProto(tensor_proto) == 0 &&
       tensor_proto.data_type() == TensorProto_DataType_UNDEFINED) {
     // TODO: remove when serialization of dtype uninitialized tensor is removed
@@ -455,7 +455,7 @@ Tensor EmptyTensorFromProto(const TensorProto& tensor_proto) {
 void TensorDeserializer::Deserialize(const BlobProto& blob_proto, Blob* blob) {
   auto tensor_proto = blob_proto.tensor();
   auto context = ContextFromProto(tensor_proto);
-  context->SwitchToDevice(0);
+  context->SwitchToDevice();
   if (NumelFromTensorProto(tensor_proto) == 0 &&
       tensor_proto.data_type() == TensorProto_DataType_UNDEFINED) {
     // TODO: remove after empty Tensor serialization is forbidden
@@ -486,7 +486,7 @@ void TensorDeserializer::DeserializeToTensor(
   auto uniq_ptr = ContextFromProto(tensor_proto);
   // since CopyFromProtoAsIs accepts BaseContext*
   auto context = uniq_ptr.get();
-  context->SwitchToDevice(0);
+  context->SwitchToDevice();
 
   int64_t chunkBegin = 0;
   auto chunkEnd = tensor->numel();

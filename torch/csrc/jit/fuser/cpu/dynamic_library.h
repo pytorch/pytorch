@@ -3,10 +3,14 @@
 #if USE_CPU_FUSER
 
 #include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/utils/disallow_copy.h>
 
 #include <dlfcn.h>
 
-namespace torch { namespace jit { namespace fuser { namespace cpu {
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace cpu {
 
 static void* checkDL(void* x) {
   if (!x) {
@@ -30,11 +34,12 @@ struct DynamicLibrary {
   }
 
   ~DynamicLibrary() {
-    if (!handle) return;
+    if (!handle)
+      return;
     dlclose(handle);
   }
 
-private:
+ private:
   void* handle = nullptr;
 };
 

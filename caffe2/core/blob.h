@@ -103,5 +103,15 @@ inline Tensor* BlobGetMutableTensor(Blob* blob, DeviceType device_type) {
   return BlobSetTensor(blob, Tensor(device_type));
 }
 
+inline const Tensor& BlobGetTensor(const Blob& blob, DeviceType device_type) {
+  if (blob.IsType<Tensor>()) {
+    const auto& tensor = blob.Get<Tensor>();
+    if (tensor.GetDeviceType() == device_type) {
+      return tensor;
+    }
+  }
+  CAFFE_THROW("Blob didn't contain a Tensor or the device_type doesn't match");
+}
+
 }  // namespace caffe2
 #endif  // CAFFE2_CORE_BLOB_H_

@@ -66,7 +66,7 @@ bool SmoothL1LossOp<float, CUDAContext>::RunOnDevice() {
   auto& Y         = Input(1);
   auto& alpha_in  = Input(2);
   auto& alpha_out = Input(3);
-  auto* avg_loss  = Output(0);
+
 
   int N = Y.dim32(0);
   // Require the same number of elements along axis 0 (batch size), but
@@ -78,7 +78,7 @@ bool SmoothL1LossOp<float, CUDAContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(Y_hat.size(), alpha_in.size());
   CAFFE_ENFORCE_EQ(Y_hat.size(), alpha_out.size());
 
-  avg_loss->Resize(vector<int64_t>());
+  auto* avg_loss = Output(0, vector<int64_t>(), at::dtype<float>());
   buff_.ResizeLike(Y);
 
   // Difference
