@@ -249,46 +249,6 @@
     - long step
 ]]
 [[
-  name: _th_range
-  cname: range
-  variants:
-    - function
-  backends:
-    - CPU
-    - CUDA
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - accreal start
-    - accreal end
-    - accreal step
-]]
-[[
-  name: _th_arange
-  variants:
-    - function
-  backends:
-    - CPU
-    - CUDA
-  return: argument 0
-  options:
-    - cname: arange
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - accreal start
-        - accreal end
-        - accreal step
-    - cname: arange
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - CONSTANT 0
-        - accreal end
-        - CONSTANT 1
-]]
-[[
   name: _th_scatter_
   return: argument 0
   variants: function
@@ -1629,8 +1589,7 @@
         - arg: THTensor* result
           output: True
         - THTensor* self
-        - arg: real p
-          python_default_init: AS_REAL(2)
+        - real p
         - arg: long dim
           wrap_dim: self
         - arg: bool keepdim
@@ -1881,25 +1840,6 @@
       broadcast: end fallback inplace
     - THTensor* end
     - real weight
-]]
-[[
-  name: _th_logspace
-  cname: logspace
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - real start
-    - real end
-    - long steps
 ]]
 [[
   name: _th_histc
@@ -2500,25 +2440,6 @@
     - THTensor* tensor2
 ]]
 [[
-  name: _th_gesv_single
-  cname: gesv
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-    - CUDA
-  variants: function
-  return: argument 0,1
-  arguments:
-    - arg: THTensor* solution
-      output: True
-    - arg: THTensor* lu
-      output: True
-    - THTensor* self
-    - THTensor* A
-]]
-[[
   name: _th_gels
   cname: gels
   types:
@@ -2664,49 +2585,6 @@
     - arg: THTensor* output
       output: True
     - THTensor* self
-]]
-[[
-  name: _th_potrf_single
-  cname: potrf
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* output
-      output: True
-    - THTensor* self
-    - arg: bool upper
-      if_true: U
-      if_false: L
-      default: U
-]]
-[[
-  name: _th_potrs_single
-  cname: potrs
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - THTensor* input2
-    - arg: bool upper
-      if_true: U
-      if_false: L
-      default: U
 ]]
 [[
   name: _th_potri

@@ -28,6 +28,12 @@ class CAFFE2_API Tensor final {
 
  public:
   Tensor() : impl_() {}
+  Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> tensor_impl)
+      : impl_(std::move(tensor_impl)) {
+    if (impl_.get() == nullptr) {
+      throw std::runtime_error("TensorBaseImpl with nullptr not supported");
+    }
+  }
 
   operator bool() const {
     return impl_.defined();

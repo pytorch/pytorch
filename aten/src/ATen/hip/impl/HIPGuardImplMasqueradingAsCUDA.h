@@ -67,6 +67,11 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     setCurrentHIPStream(cs);
     return old_stream.unwrap();
   }
+  DeviceIndex deviceCount() const override {
+    int deviceCnt;
+    C10_HIP_CHECK(hipGetDeviceCount(&deviceCnt));
+    return deviceCnt;
+  }
 };
 
 // All of the guards which have HIPGuardImpl burned in need to also have

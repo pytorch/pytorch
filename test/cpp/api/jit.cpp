@@ -16,6 +16,8 @@ TEST(TorchScriptTest, CanCompileMultipleFunctions) {
           a += a
           i += 1
         return a
+      def test_len(a : List[int]):
+        return len(a)
     )JIT");
   auto a = torch::ones(1);
   auto b = torch::ones(1);
@@ -26,4 +28,8 @@ TEST(TorchScriptTest, CanCompileMultipleFunctions) {
 
   ASSERT_TRUE(
       0x200 == module->run_method("test_while", a, b).toTensor().item<int64_t>());
+
+  at::IValue list = std::vector<int64_t>({3, 4});
+  ASSERT_EQ(2, module->run_method("test_len", list).toInt());
+
 }

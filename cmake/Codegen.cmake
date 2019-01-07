@@ -48,7 +48,7 @@ configure_file(
 
 # ---[ Installing the header files
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../caffe2
-        DESTINATION include
+        DESTINATION lib/include
         FILES_MATCHING PATTERN "*.h")
 if (BUILD_ATEN_MOBILE)
   install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/core
@@ -56,7 +56,7 @@ if (BUILD_ATEN_MOBILE)
           FILES_MATCHING PATTERN "*.h")
 endif()
 install(FILES ${CMAKE_BINARY_DIR}/caffe2/core/macros.h
-        DESTINATION include/caffe2/core)
+        DESTINATION lib/include/caffe2/core)
 
 # ---[ ATen specific
 if (NOT BUILD_ATEN_MOBILE)
