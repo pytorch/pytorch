@@ -366,8 +366,10 @@ static void max_unpooling2d_backward_out_cpu_frame(
         maxp = ind_p_k[i * iwidth + j]; /* retrieve position of max */
         if (maxp < 0 || maxp >= owidth * oheight) {
 #pragma omp critical
-          has_error = true;
-          error_index = maxp;
+          {
+            has_error = true;
+            error_index = maxp;
+          }
         }
         gradInput_p_k[i * iwidth + j] =
             gradOutput_p_k[maxp]; /* update gradient */
@@ -499,8 +501,10 @@ static void max_unpooling3d_backward_out_cpu_frame(
           maxp = ind_p_k[index]; /* retrieve position of max */
           if (maxp < 0 || maxp >= oT * oH * oW) {
 #pragma omp critical
-            has_error = true;
-            error_index = maxp;
+            {
+              has_error = true;
+              error_index = maxp;
+            }
           }
           gradInput_p_k[index] = gradOutput_p_k[maxp]; /* update gradient */
         }

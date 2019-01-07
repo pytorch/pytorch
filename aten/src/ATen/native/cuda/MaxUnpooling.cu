@@ -524,9 +524,8 @@ at::Tensor& max_unpooling3d_backward_out_cuda(
   grad_input.zero_();
 
   // Collapse batch and feature dimensions if needed
-  auto grad_input_reshaped = grad_input;
   if (grad_input.ndimension() == 5) {
-    grad_input_reshaped =
+    grad_input =
         grad_input.reshape({grad_input.size(0) * grad_input.size(1),
                             grad_input.size(2),
                             grad_input.size(3),
@@ -560,7 +559,7 @@ at::Tensor& max_unpooling3d_backward_out_cuda(
               oH,
               oW,
               indices.packed_accessor<int64_t, 4>(),
-              grad_input_reshaped.packed_accessor<scalar_t, 4>(),
+              grad_input.packed_accessor<scalar_t, 4>(),
               offsetZ);
           AT_CHECK(
               cudaGetLastError() == cudaSuccess,
