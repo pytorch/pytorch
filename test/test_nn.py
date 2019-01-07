@@ -4530,6 +4530,7 @@ class TestNN(NNTestCase):
                     self.assertEqual(len(w), 1)
                     self.assertIn('weights are not part of single contiguous chunk of memory', w[0].message.args[0])
                     first_warn = False
+                    warnings.resetwarnings()
                 output_noncontig[0].sum().backward()
                 grads_noncontig = [v.grad.data.clone() for v in all_vars]
                 for v in all_vars:
@@ -4939,10 +4940,11 @@ class TestNN(NNTestCase):
         m = nn.LSTM(input_size, hidden_size, num_layers).cuda()
         input = torch.randn(seq_length, batch, input_size).cuda()
         expected_output = m(input)
-
         # add weight normalization
         name = 'weight_hh_l0'
         m = torch.nn.utils.weight_norm(m, name=name)
+        # otherwise, subsequent warnings will be hidden, and further tests rely on them
+        warnings.simplefilter("always")
         self.assertEqual(m(input), expected_output)
 
         # remove weight norm
