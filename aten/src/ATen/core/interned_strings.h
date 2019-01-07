@@ -67,14 +67,16 @@ namespace c10 {
   _(prim, AnyDefined)              \
   _(prim, FusedConcat)             \
   _(prim, ConstantChunk)           \
-  _(prim, NoneGenerator)           \
   _(prim, MMTreeReduce)            \
   _(prim, MMBatchSide)             \
+  _(prim, min)                     \
+  _(prim, max)                     \
   _(aten, warn)                    \
   _(aten, floordiv)                \
   _(aten, __round_to_zero_floordiv)\
   _(prim, fork)                    \
   _(prim, RaiseException)          \
+  _(prim, Function)                \
   _(aten, append)                  \
   _(aten, format)                  \
   _(aten, __not__)                 \
@@ -84,6 +86,7 @@ namespace c10 {
   _(aten, _set_item)               \
   _(aten, index_put_)              \
   _(aten, device)                  \
+  _(aten, len)                     \
   FORALL_ATEN_BASE_SYMBOLS(_)      \
   _(onnx, Add)                     \
   _(onnx, Concat)                  \
@@ -136,7 +139,8 @@ namespace c10 {
   _(attr, name)                    \
   _(attr, a)                       \
   _(attr, b)                       \
-  _(attr, beg)
+  _(attr, beg)                     \
+  _(attr, idx)
 #else
 #define FORALL_NS_SYMBOLS(_) \
   _(namespaces, prim)              \

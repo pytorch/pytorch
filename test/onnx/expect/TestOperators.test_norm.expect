@@ -3,7 +3,7 @@ producer_name: "pytorch"
 producer_version: "0.4"
 graph {
   node {
-    input: "self"
+    input: "0"
     output: "1"
     op_type: "ReduceL2"
     attribute {
@@ -19,7 +19,7 @@ graph {
   }
   name: "torch-jit-export"
   input {
-    name: "self"
+    name: "0"
     type {
       tensor_type {
         elem_type: 1

@@ -124,7 +124,11 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
 
             conv = core.CreateOperator(
                 op_type,
-                ["X_q" if do_quantize else "X", "W", "b"],
+                [
+                    "X_q" if do_quantize else "X",
+                    "W_packed" if do_prepack_weight else "W",
+                    "b",
+                ],
                 ["Y_q" if do_dequantize else "Y"],
                 stride=stride,
                 kernel=kernel,

@@ -122,11 +122,11 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused):
         code.extend(compute(j, InType, use_weights, isa, prefetch))
     code.append("      }")
 
-    code.append("      if (normalize_by_lengths == false) {")
+    code.append("      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {")
     for i in range(0, uf):
         j = 8 * i
         code.append("        _mm256_storeu_ps(&op[" + str(j) + "], vop" + str(j) + ");")
-    code.append("      } else if (lengths[rangeIndex]) {")
+    code.append("      } else {")
     # inv of length
     code.append("        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);")
     for i in range(0, uf):

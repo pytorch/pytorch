@@ -130,7 +130,7 @@ class DNNLowPOp : public Operator<CPUContext> {
       actual = OutputTensorCPU_(0)->template data<float>();
     } else {
       actual_temp.resize(OutputTensorCPU_(0)->numel());
-      Dequantize(
+      fbgemm::Dequantize<float>(
           OutputTensorCPU_(0)->template data<float>(),
           actual_temp.data(),
           OutputTensorCPU_(0)->numel(),
@@ -151,7 +151,7 @@ class DNNLowPOp : public Operator<CPUContext> {
 
   void RunOnDeviceEpilogue_() {
     if (dequantize_output_) {
-      Dequantize(
+      fbgemm::Dequantize<T>(
           out_temp_.data(),
           OutputTensorCPU_(0)->template mutable_data<float>(),
           OutputTensorCPU_(0)->numel(),

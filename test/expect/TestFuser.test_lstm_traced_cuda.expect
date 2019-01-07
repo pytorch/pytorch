@@ -13,7 +13,8 @@ graph(%input_1 : Float(*, *)
   %12 : Tensor[] = aten::broadcast_tensors(%11)
   %13 : Tensor, %14 : Tensor, %15 : Tensor, %16 : Tensor = prim::ListUnpack(%12)
   %17 : Float(*, *), %cy : Float(*, *) = prim::FusionGroup_0(%cx, %16, %15, %14, %13)
-  return (%17, %cy);
+  %19 : (Float(*, *), Float(*, *)) = prim::TupleConstruct(%17, %cy)
+  return (%19);
 }
 with prim::FusionGroup_0 = graph(%0 : Float(*, *)
       %1 : Tensor

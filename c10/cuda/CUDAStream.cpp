@@ -74,8 +74,10 @@ static std::vector<std::array<CUDAStreamInternals, kStreamsPerPool>> high_priori
 // This is not really for efficiency; it's just easier to write the code
 // to extract the index if we do this with bitmasks :)
 //
-// This is entirely an internal implementation detail, we reserve the right to
-// renumber streams however we like.
+// We are obligated to treat the stream ID 0 as the default stream, per the
+// invariant specified in c10::Stream.  However, all other numbers are entirely
+// an internal implementation detail, we reserve the right to renumber streams
+// however we like.
 //
 // Note that it is really important that the MSB is zero; StreamId is a
 // *signed* integer, and unsigned to signed conversion outside of the
@@ -256,7 +258,9 @@ CUDAStreamInternals* CUDAStream_internals(CUDAStream s) {
   switch (st) {
     case StreamIdType::DEFAULT:
       AT_ASSERTM(si == 0, "Unrecognized stream ", s.unwrap(),
-                          " (I think this should be the default stream, but I got a non-zero index ", si, ")");
+                          " (I think this should be the default stream, but I got a non-zero index ", si, ").",
+                          " Did you manufacture the StreamId yourself?  Don't do that; use the",
+                          " official API like c10::cuda::getStreamFromPool() to get a new stream.");
       return &default_streams[device_index];
     case StreamIdType::LOW:
       return &low_priority_streams[device_index][si];
@@ -269,7 +273,8 @@ CUDAStreamInternals* CUDAStream_internals(CUDAStream s) {
 
 CUDAStream CUDAStream_fromInternals(const CUDAStreamInternals* ptr) {
   return CUDAStream(CUDAStream::UNCHECKED,
-                    Stream(c10::Device(DeviceType::CUDA, ptr->device_index),
+                    Stream(Stream::UNSAFE,
+                           c10::Device(DeviceType::CUDA, ptr->device_index),
                            CUDAStream_getStreamId(ptr)));
 }
 

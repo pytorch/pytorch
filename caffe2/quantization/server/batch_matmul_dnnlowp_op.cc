@@ -419,6 +419,8 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
 #endif
 
     if (!dequantize_output_) {
+      auto Y_data = Y->template mutable_data<T>();
+
       auto row_offset_len_per_thread =
           PackAWithRowOffset<uint8_t>::rowOffsetBufferSize();
       row_offsets_.resize(
@@ -463,8 +465,7 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
           fbgemmPacked(
               packA,
               *Bq_packed_[B_batch_idx],
-              reinterpret_cast<uint8_t*>(Y->template mutable_data<T>()) +
-                  p * Y_stride + i * M * N,
+              reinterpret_cast<uint8_t*>(Y_data) + p * Y_stride + i * M * N,
               Y_int32_.data() + p * Y_stride + i * M * N,
               N,
               outputProcObj,

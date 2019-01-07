@@ -7,6 +7,7 @@ import struct
 import sys
 import torch
 import tarfile
+import zipfile
 import tempfile
 import warnings
 from contextlib import closing, contextmanager
@@ -546,6 +547,9 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
         try:
             return legacy_load(f)
         except tarfile.TarError:
+            if zipfile.is_zipfile(f):
+                # .zip is used for torch.jit.save and will throw an un-pickling error here
+                raise RuntimeError("{} is a zip archive (did you mean to use torch.jit.load()?)".format(f.name))
             # if not a tarfile, reset file offset and proceed
             f.seek(0)
 
