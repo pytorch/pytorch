@@ -8,15 +8,15 @@ static inline void THNN_(Im2Col_shapeCheck)(
                          THNNState *state,
                          THTensor *input,
                          THTensor *gradOutput,
-                         int64_t kH, int64_t kW, int64_t dH, int64_t dW,
-                         int64_t padH, int64_t padW, int64_t sH, int64_t sW) {
+                         int64_t kH, int64_t kW, int64_t dilationH, int64_t dilationW,
+                         int64_t padH, int64_t padW, int64_t dH, int64_t dW) {
 
   THArgCheck(kW > 0 && kH > 0, 4,
              "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
-  THArgCheck(dW > 0 && dH > 0, 6,
-             "dilation should be greater than zero, but got dH: %d dW: %d", dH, dW);
-  THArgCheck(sW > 0 && sH > 0, 10,
-             "stride should be greater than zero, but got sH: %d sW: %d", sH, sW);
+  THArgCheck(dilationW > 0 && dilationH > 0, 6,
+             "dilation should be greater than zero, but got dilationH: %d dilationW: %d", dilationH, dilationW);
+  THArgCheck(dW > 0 && dH > 0, 10,
+             "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
 
   int64_t ndim = THTensor_(nDimensionLegacyNoScalars)(input);
   THNN_ARGCHECK(!input->is_empty() && (ndim == 3 || ndim == 4), 2, input,
@@ -29,8 +29,8 @@ static inline void THNN_(Im2Col_shapeCheck)(
   int64_t nInputPlane  = THTensor_(size)(input, dim_batch + 1);
   int64_t inputHeight  = THTensor_(size)(input, dim_batch + 2);
   int64_t inputWidth   = THTensor_(size)(input, dim_batch + 3);
-  int64_t outputHeight = div_rtn<int64_t>(inputHeight + 2 * padH - (dH * (kH - 1) + 1), sH) + 1;
-  int64_t outputWidth  = div_rtn<int64_t>(inputWidth + 2 * padW - (dW * (kW - 1) + 1), sW) + 1;
+  int64_t outputHeight = div_rtn<int64_t>(inputHeight + 2 * padH - (dilationH * (kH - 1) + 1), dH) + 1;
+  int64_t outputWidth  = div_rtn<int64_t>(inputWidth + 2 * padW - (dilationW * (kW - 1) + 1), dW) + 1;
   int64_t nOutputPlane = nInputPlane * kW * kH;
   int64_t outputLength = outputHeight * outputWidth;
 
@@ -39,7 +39,7 @@ static inline void THNN_(Im2Col_shapeCheck)(
             "dilation=(%d, %d), padding=(%d, %d), calculated "
             "shape of the array of sliding blocks as (%d, %d), which is "
             "too small (non-positive).",
-            inputHeight, inputHeight, kH, kW, dH, dW, padH, padW,
+            inputHeight, inputHeight, kH, kW, dilationH, dilationW, padH, padW,
             outputHeight, outputWidth);
   }
 }
@@ -49,11 +49,11 @@ void THNN_(Im2Col_updateOutput)(
            THTensor *input,
            THTensor *output,
            int64_t kH, int64_t kW,
-           int64_t dH, int64_t dW,
+           int64_t dilationH, int64_t dilationW,
            int64_t padH, int64_t padW,
-           int64_t sH, int64_t sW) {
+           int64_t dH, int64_t dW) {
 
-  THNN_(Im2Col_shapeCheck)(state, input, NULL, kH, kW, dH, dW, padH, padW, sH, sW);
+  THNN_(Im2Col_shapeCheck)(state, input, NULL, kH, kW, dilationH, dilationW, padH, padW, dH, dW);
 
   input = THTensor_(newContiguous)(input);
   bool batched_input = true;
@@ -67,8 +67,8 @@ void THNN_(Im2Col_updateOutput)(
   int64_t inputHeight  = THTensor_(size)(input, 2);
   int64_t inputWidth   = THTensor_(size)(input, 3);
 
-  int64_t outputHeight = (inputHeight + 2 * padH - (dH * (kH - 1) + 1)) / sH + 1;
-  int64_t outputWidth  = (inputWidth + 2 * padW - (dW * (kW - 1) + 1)) / sW + 1;
+  int64_t outputHeight = (inputHeight + 2 * padH - (dilationH * (kH - 1) + 1)) / dH + 1;
+  int64_t outputWidth  = (inputWidth + 2 * padW - (dilationW * (kW - 1) + 1)) / dW + 1;
   int64_t nOutputPlane = nInputPlane * kW * kH;
   int64_t outputLength = outputHeight * outputWidth;
 
@@ -87,8 +87,8 @@ void THNN_(Im2Col_updateOutput)(
       nInputPlane,
       inputHeight, inputWidth,
       outputHeight, outputWidth,
-      kH, kW, padH, padW, sH, sW,
-      dH, dW, output_n->data<scalar_t>());
+      kH, kW, padH, padW, dH, dW,
+      dilationH, dilationW, output_n->data<scalar_t>());
   }
 
   c10::raw::intrusive_ptr::decref(input_n);
@@ -106,15 +106,15 @@ void THNN_(Im2Col_updateGradInput)(
            THTensor *gradInput,
            int64_t inputHeight, int64_t inputWidth,
            int64_t kH, int64_t kW,
-           int64_t dH, int64_t dW,
+           int64_t dilationH, int64_t dilationW,
            int64_t padH, int64_t padW,
-           int64_t sH, int64_t sW) {
+           int64_t dH, int64_t dW) {
 
 
   THNN_(Col2Im_updateOutput)(state, gradOutput, gradInput,
                              inputHeight, inputWidth,
-                             kH, kW, dH, dW,
-                             padH, padW, sH, sW);
+                             kH, kW, dilationH, dilationW,
+                             padH, padW, dH, dW);
 }
 
 

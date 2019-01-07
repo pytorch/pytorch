@@ -187,7 +187,7 @@ bool TopKCudaOp<T, Context>::RunOnDevice() {
   auto* indices = Output(1);
   auto* flatten_indices = OutputSize() > 2 ? Output(2) : nullptr;
 
-  at::IntList input_dims = input.dims();
+  at::IntList input_dims = input.sizes();
   if (axis_ == -1) {
     axis_ = input_dims.size() - 1;
   }

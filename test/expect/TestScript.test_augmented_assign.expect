@@ -5,5 +5,6 @@ graph(%a.1 : Tensor
   %a.3 : Tensor = aten::sub_(%a.2, %b, %2)
   %a.4 : Tensor = aten::div_(%a.3, %b)
   %a : Tensor = aten::mul_(%a.4, %b)
-  return (%a, %b);
+  %7 : (Tensor, Tensor) = prim::TupleConstruct(%a, %b)
+  return (%7);
 }

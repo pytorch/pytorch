@@ -12,6 +12,18 @@ std::vector<at::Tensor> layer_norm(
     at::Tensor input,
     int64_t axis,
     double epsilon) {
+
+  // TODO This code is currently written specifically for LayerNorm, but it is
+  //      *not* the plan to have to write this manually for each operation.
+  //      This is just a proof of concept. To expand this to all operators,
+  //      we'd ideally not need any per-operator code (possibly thanks to boxing
+  //      or templates). If that's not possible, then we should at least offer
+  //      a macro that takes this burden so that we only need to write one line
+  //      for each operation we want to support (i.e. the macro invocation).
+
+  // TODO This currently only handles tensors with requires_grad==False correctly.
+  //      It should also handle autograd.
+
   if (input.requires_grad()) {
     throw std::runtime_error("Autograd not yet supported for c10 ops.");
   }

@@ -55,8 +55,8 @@ void lapackGetri(int n, scalar_t *a, int lda, int *ipiv, scalar_t *work, int lwo
 }
 
 template<class scalar_t>
-void lapackPotrs(char uplo, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, int *info) {
-  AT_ERROR("potrs only takes float or double Tensors");
+void lapackCholeskySolve(char uplo, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, int *info) {
+  AT_ERROR("cholesky_solve only takes float or double Tensors");
 }
 
 template<class scalar_t>
@@ -89,11 +89,11 @@ template<> void lapackGetrf<float>(int m, int n, float *a, int lda, int *ipiv, i
   sgetrf_(&m, &n, a, &lda, ipiv, info);
 }
 
-template<> void lapackPotrs<double>(char uplo, int n, int nrhs, double *a, int lda, double *b, int ldb, int *info) {
+template<> void lapackCholeskySolve<double>(char uplo, int n, int nrhs, double *a, int lda, double *b, int ldb, int *info) {
   dpotrs_(&uplo, &n, &nrhs, a, &lda, b, &ldb, info);
 }
 
-template<> void lapackPotrs<float>(char uplo, int n, int nrhs, float *a, int lda, float *b, int ldb, int *info) {
+template<> void lapackCholeskySolve<float>(char uplo, int n, int nrhs, float *a, int lda, float *b, int ldb, int *info) {
   spotrs_(&uplo, &n, &nrhs, a, &lda, b, &ldb, info);
 }
 
@@ -118,48 +118,54 @@ static void apply_gesv(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
 #else
   auto A_data = A.data<scalar_t>();
   auto b_data = b.data<scalar_t>();
-  auto A_mat_stride = matrixStride(A);
-  auto b_mat_stride = matrixStride(b);
-
-  auto batch_size = batchCount(A);
   auto n = A.size(-2);
   auto nrhs = b.size(-1);
 
   auto ipiv = at::empty({n}, b.type().toScalarType(kInt));
 
   int info;
-  for (int64_t i = 0; i < batch_size; i++) {
-    scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
-    scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
-    lapackGesv<scalar_t>(n, nrhs, A_working_ptr, n, ipiv.data<int>(), b_working_ptr, n, &info);
-    infos[i] = info;
-    if (info != 0) {
-      return;
+  if (b.dim() == 2) {
+    lapackGesv<scalar_t>(n, nrhs, A_data, n, ipiv.data<int>(), b_data, n, &info);
+    infos[0] = info;
+  } else {
+    auto A_mat_stride = matrixStride(A);
+    auto b_mat_stride = matrixStride(b);
+    auto batch_size = batchCount(A);
+
+    for (int64_t i = 0; i < batch_size; i++) {
+      scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
+      scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
+      lapackGesv<scalar_t>(n, nrhs, A_working_ptr, n, ipiv.data<int>(), b_working_ptr, n, &info);
+      infos[i] = info;
+      if (info != 0) {
+        return;
+      }
     }
   }
 #endif
 }
 
 std::tuple<Tensor, Tensor> _gesv_helper_cpu(const Tensor& self, const Tensor& A) {
-  std::vector<int64_t> infos(batchCount(self), 0);
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
+  std::vector<int64_t> infos(batchCount(self), 0);
   AT_DISPATCH_FLOATING_TYPES(self.type(), "gesv", [&]{
     apply_gesv<scalar_t>(self_working_copy, A_working_copy, infos);
   });
-  batchCheckErrors(infos, "gesv");
+  if (self.dim() > 2) {
+    batchCheckErrors(infos, "gesv");
+  } else {
+    singleCheckErrors(infos[0], "gesv");
+  }
   return std::tuple<Tensor, Tensor>(self_working_copy, A_working_copy);
 }
 
 // Supports arbitrary batch dimensions for self and A
 std::tuple<Tensor,Tensor> gesv(const Tensor& self, const Tensor& A) {
-  if (self.dim() <= 2 && A.dim() <= 2) {
-    // TODO: #7102: It's not necessary to have gesv (single) bindings for both
-    // TH and ATen. We should remove the TH gesv bindings, especially
-    // since the lapackGesv function is already in ATen.
-    return at::legacy::th::_th_gesv_single(self, A);
-  }
-
+  AT_CHECK(self.dim() >= 2,
+           "B should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+  AT_CHECK(A.dim() >= 2,
+           "A should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
   Tensor self_broadcasted, A_broadcasted;
   std::tie(self_broadcasted, A_broadcasted) = _linear_solve_broadcast_args(self, A);
   return at::_gesv_helper(self_broadcasted, A_broadcasted);
@@ -169,7 +175,8 @@ std::tuple<Tensor&,Tensor&> gesv_out(Tensor& solution, Tensor& lu, const Tensor&
   AT_CHECK(self.dim() == 2 && A.dim() == 2, 
            "torch.gesv() with the `out` keyword does not support batching. "
            "b.dim() (", self.dim(), ") and A.dim() (", A.dim(), ") must both be 2.");
-  return at::legacy::th::_th_gesv_single_out(solution, lu, self, A);
+  std::tie(solution, lu) = at::_gesv_helper(self, A);
+  return std::tuple<Tensor&, Tensor&>(solution, lu);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -245,64 +252,73 @@ Tensor& inverse_out(Tensor &result, const Tensor &self) {
   return result;
 }
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ potrs ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<typename scalar_t>
-static void apply_potrs(Tensor& b, Tensor& A, bool upper, std::vector<int64_t>& infos) {
+static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, std::vector<int64_t>& infos) {
 #ifndef USE_LAPACK
-  AT_ERROR("potrs: LAPACK library not found in compilation");
+  AT_ERROR("cholesky_solve: LAPACK library not found in compilation");
 #else
   char uplo = upper ? 'U' : 'L';
 
   auto A_data = A.data<scalar_t>();
   auto b_data = b.data<scalar_t>();
-  auto A_mat_stride = matrixStride(A);
-  auto b_mat_stride = matrixStride(b);
-
-  auto batch_size = batchCount(A);
   auto n = A.size(-2);
   auto nrhs = b.size(-1);
 
-  for (int64_t i = 0; i < batch_size; i++) {
-    int info;
-    scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
-    scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
-    lapackPotrs<scalar_t>(uplo, n, nrhs, A_working_ptr, n, b_working_ptr, n, &info);
-    infos[i] = info;
-    if (info != 0) {
-      return;
+  int info;
+  if (b.dim() == 2) {
+    lapackCholeskySolve<scalar_t>(uplo, n, nrhs, A_data, n, b_data, n, &info);
+    infos[0] = info;
+  } else {
+    auto A_mat_stride = matrixStride(A);
+    auto b_mat_stride = matrixStride(b);
+    auto batch_size = batchCount(A);
+    for (int64_t i = 0; i < batch_size; i++) {
+      scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
+      scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
+      lapackCholeskySolve<scalar_t>(uplo, n, nrhs, A_working_ptr, n, b_working_ptr, n, &info);
+      infos[i] = info;
+      if (info != 0) {
+        return;
+      }
     }
   }
 #endif
 }
 
-Tensor _potrs_helper_cpu(const Tensor& self, const Tensor& A, bool upper) {
-  std::vector<int64_t> infos(batchCount(self), 0);
+Tensor _cholesky_solve_helper_cpu(const Tensor& self, const Tensor& A, bool upper) {
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "potrs", [&]{
-    apply_potrs<scalar_t>(self_working_copy, A_working_copy, upper, infos);
+  std::vector<int64_t> infos(batchCount(self), 0);
+  AT_DISPATCH_FLOATING_TYPES(self.type(), "cholesky_solve", [&]{
+    apply_cholesky_solve<scalar_t>(self_working_copy, A_working_copy, upper, infos);
   });
-  batchCheckErrors(infos, "potrs");
+  if (self.dim() > 2) {
+    batchCheckErrors(infos, "cholesky_solve");
+  } else {
+    singleCheckErrors(infos[0], "cholesky_solve");
+  }
   return self_working_copy;
 }
 
 // Supports arbitrary batch dimensions for self and A
-Tensor potrs(const Tensor& self, const Tensor& A, bool upper) {
-  if (self.dim() <= 2 && A.dim() <= 2) {
-    return at::legacy::th::_th_potrs_single(self, A, upper);
-  }
-
+Tensor cholesky_solve(const Tensor& self, const Tensor& A, bool upper) {
+  AT_CHECK(self.dim() >= 2,
+           "b should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+  AT_CHECK(A.dim() >= 2,
+           "u should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
   Tensor self_broadcasted, A_broadcasted;
   std::tie(self_broadcasted, A_broadcasted) = _linear_solve_broadcast_args(self, A);
-  return at::_potrs_helper(self_broadcasted, A_broadcasted, upper);
+  return at::_cholesky_solve_helper(self_broadcasted, A_broadcasted, upper);
 }
 
-Tensor& potrs_out(Tensor& result, const Tensor& self, const Tensor& A, bool upper) {
+Tensor& cholesky_solve_out(Tensor& result, const Tensor& self, const Tensor& A, bool upper) {
   AT_CHECK(self.dim() == 2 && A.dim() == 2,
-           "torch.potrs() with the `out` keyword does not support batching. "
+           "torch.cholesky_solve() with the `out` keyword does not support batching. "
            "b.dim() (", self.dim(), ") and A.dim() (", A.dim(), ") must both be 2.");
-  return at::legacy::th::_th_potrs_single_out(result, self, A, upper);
+  result = at::_cholesky_solve_helper(self, A, upper);
+  return result;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -315,18 +331,22 @@ static void apply_cholesky(Tensor& self, bool upper, std::vector<int64_t>& infos
   char uplo = upper ? 'U' : 'L';
 
   auto self_data = self.data<scalar_t>();
-  auto self_matrix_stride = matrixStride(self);
-
-  auto batch_size = batchCount(self);
   auto n = self.size(-2);
 
   int info;
-  for (int64_t i = 0; i < batch_size; i++) {
-    scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
-    lapackCholesky<scalar_t>(uplo, n, self_working_ptr, n, &info);
-    infos[i] = info;
-    if (info != 0) {
-      return;
+  if (self.dim() == 2) {
+    lapackCholesky<scalar_t>(uplo, n, self_data, n, &info);
+    infos[0] = info;
+  } else {
+    auto self_matrix_stride = matrixStride(self);
+    auto batch_size = batchCount(self);
+    for (int64_t i = 0; i < batch_size; i++) {
+      scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
+      lapackCholesky<scalar_t>(uplo, n, self_working_ptr, n, &info);
+      infos[i] = info;
+      if (info != 0) {
+        return;
+      }
     }
   }
 #endif
@@ -338,16 +358,17 @@ Tensor _cholesky_helper_cpu(const Tensor& self, bool upper) {
   AT_DISPATCH_FLOATING_TYPES(self.type(), "cholesky", [&]{
     apply_cholesky<scalar_t>(self_working_copy, upper, infos);
   });
-  batchCheckErrors(infos, "cholesky");
+  if (self.dim() > 2) {
+    batchCheckErrors(infos, "cholesky");
+  } else {
+    singleCheckErrors(infos[0], "cholesky");
+  }
   return self_working_copy;
 }
 
 Tensor cholesky(const Tensor &self, bool upper) {
   if (self.size(-1) == 0) {
     return at::empty_like(self);
-  }
-  if (self.dim() == 2) {
-    return at::legacy::th::_th_potrf_single(self, upper);
   }
   squareCheckInputs(self);
 
