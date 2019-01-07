@@ -97,9 +97,9 @@ bool SelectSmoothL1LossOp<float, CUDAContext>::RunOnDevice() {
   auto& L         = Input(2);
   // total number of fg boxes across all FPN levels: scalar
   auto& S         = Input(3);
-  auto* avg_loss  = Output(0);
 
-  avg_loss->Resize(vector<int64_t>());
+
+  auto* avg_loss = Output(0, vector<int64_t>(), at::dtype<float>());
   if (Y.size() == 0){
     math::Set<float, CUDAContext>(
       1, static_cast<float>(0), avg_loss->mutable_data<float>(), &context_);

@@ -200,7 +200,16 @@ static PyObject *THPVariable_is_leaf(THPVariable *self)
 static PyObject * THPVariable_get_data(THPVariable *self)
 {
   HANDLE_TH_ERRORS
-  return THPVariable_Wrap(make_variable(self->cdata.data(), false));
+  /// NOTE: Previously, if we change the tensor metadata (e.g. sizes / strides /
+  /// storage / storage_offset) of a tensor created from `.data`, those metadata
+  /// in the original tensor will also be updated. However, the new behavior is that
+  /// those metadata changes to the `.data` tensor will not update the original tensor
+  /// anymore, and here we need to set `allow_tensor_metadata_change_` to false to
+  /// make such changes explicitly illegal, in order to prevent users from changing
+  /// metadata of the `.data` tensor and expecting the original tensor to also
+  /// be updated.
+  auto var = make_variable(self->cdata.data(), /*requires_grad=*/false, /*allow_tensor_metadata_change=*/false);
+  return THPVariable_Wrap(var);
   END_HANDLE_TH_ERRORS
 }
 

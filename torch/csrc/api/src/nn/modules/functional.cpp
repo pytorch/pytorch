@@ -12,6 +12,10 @@ FunctionalImpl::FunctionalImpl(Function function)
 
 void FunctionalImpl::reset() {}
 
+void FunctionalImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Functional()";
+}
+
 Tensor FunctionalImpl::forward(Tensor input) {
   return function_(std::move(input));
 }

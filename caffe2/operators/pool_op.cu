@@ -1,13 +1,21 @@
 // TODO(ataei): reduce the apparent redundancy of all the code below.
+#include "caffe2/operators/pool_op.h"
+
 #include <cfloat>
 
 #include "caffe2/core/context_gpu.h"
-#include "caffe2/operators/pool_op.h"
 
 namespace caffe2 {
 namespace {
-class AveragePool {};
-class MaxPool {};
+
+struct AveragePool {
+  explicit AveragePool(const OperatorBase& /* op */) {}
+};
+
+struct MaxPool {
+  explicit MaxPool(const OperatorBase& /* op */) {}
+};
+
 }  // namespace
 
 namespace {
@@ -722,7 +730,7 @@ bool PoolGradientOp<float, CUDAContext, AveragePool>::
   CAFFE_ENFORCE_EQ(dY.dim32(1), X.dim32(1));
   auto* dX = Output(0);
   dX->ResizeLike(X);
-  vector<int> dims(X.dims().begin() + 2, X.dims().end());
+  vector<int> dims(X.sizes().begin() + 2, X.sizes().end());
   ConvPoolOpBase<CUDAContext>::ComputePads(dims);
   switch (kernel_.size()) {
     case 1:
@@ -806,7 +814,7 @@ bool PoolGradientOp<float, CUDAContext, AveragePool>::
   CAFFE_ENFORCE_EQ(X.dim32(X.ndim() - 1), dY.dim32(dY.ndim() - 1));
   auto* dX = Output(0);
   dX->ResizeLike(X);
-  vector<int> dims(X.dims().begin() + 1, X.dims().end() - 1);
+  vector<int> dims(X.sizes().begin() + 1, X.sizes().end() - 1);
   ConvPoolOpBase<CUDAContext>::ComputePads(dims);
   switch (kernel_.size()) {
     case 1:
@@ -1557,7 +1565,7 @@ bool PoolGradientOp<float, CUDAContext, MaxPool>::RunOnDeviceWithOrderNCHW() {
   CAFFE_ENFORCE_EQ(dY.ndim(), X.ndim());
   auto* dX = Output(0);
   dX->ResizeLike(X);
-  vector<int> dims(X.dims().begin() + 2, X.dims().end());
+  vector<int> dims(X.sizes().begin() + 2, X.sizes().end());
   ConvPoolOpBase<CUDAContext>::ComputePads(dims);
   switch (kernel_.size()) {
     case 1:
@@ -1646,7 +1654,7 @@ bool PoolGradientOp<float, CUDAContext, MaxPool>::RunOnDeviceWithOrderNHWC() {
   CAFFE_ENFORCE_EQ(dY.ndim(), X.ndim());
   auto* dX = Output(0);
   dX->ResizeLike(X);
-  vector<int> dims(X.dims().begin() + 1, X.dims().end() - 1);
+  vector<int> dims(X.sizes().begin() + 1, X.sizes().end() - 1);
   ConvPoolOpBase<CUDAContext>::ComputePads(dims);
   switch (kernel_.size()) {
     case 1:

@@ -7,6 +7,11 @@ namespace c10 {
 /// An index representing a specific stream.  A StreamId is not independently
 /// meaningful without knowing the Device it is associated with; try to
 /// use Stream rather than StreamId directly.
+///
+/// StreamIds are opaque; they are assigned by some DeviceType-specific
+/// numbering system which is not visible to the user.  HOWEVER, we
+/// guarantee that StreamId 0 is always a valid stream, and corresponds
+/// to some sort of "default" stream.
 using StreamId = int32_t;
 
 // NB: I decided not to call the above StreamIndex to avoid confusion with
@@ -54,9 +59,26 @@ private:
   Device device_;
   StreamId id_;
 public:
-  explicit Stream(Device device, StreamId id)
+  enum Unsafe { UNSAFE };
+  enum Default { DEFAULT };
+
+  /// Unsafely construct a stream from a Device and a StreamId.  In
+  /// general, only specific implementations of streams for a
+  /// backend should manufacture Stream directly in this way; other users
+  /// should use the provided APIs to get a stream.  In particular,
+  /// we don't require backends to give any guarantees about non-zero
+  /// StreamIds; they are welcome to allocate in whatever way they like.
+  explicit Stream(Unsafe, Device device, StreamId id)
     : device_(device)
     , id_(id) {}
+
+  /// Construct the default stream of a Device.  The default stream is
+  /// NOT the same as the current stream; default stream is a fixed stream
+  /// that never changes, whereas the current stream may be changed by
+  /// StreamGuard.
+  explicit Stream(Default, Device device)
+    : device_(device)
+    , id_(0) {}
 
   bool operator==(const Stream& other) const noexcept {
     return this->device_ == other.device_ && this->id_ == other.id_;
@@ -99,7 +121,9 @@ public:
     bits >>= 16;
     auto device_type = static_cast<DeviceType>(bits);
     AT_CHECK(isValidDeviceType(device_type));
-    return Stream(Device(device_type, device_index), stream_id);
+    // Unfortunately, we can't check if the StreamId is valid here; it
+    // will be checked upon first use.
+    return Stream(UNSAFE, Device(device_type, device_index), stream_id);
   }
 
   // I decided NOT to provide setters on this class, because really,

@@ -28,7 +28,7 @@ matrix:
         script: mypy @mypy-files.txt
       - env: CPP_DOC_CHECK
         python: "3.6"
-        install: 
+        install:
           - sudo apt-get install -y doxygen
           - pip install -r requirements.txt
         script: cd docs/cpp/source && ./check-doxygen.sh
@@ -41,3 +41,4 @@ matrix:
               - llvm-toolchain-trusty
             packages: clang-tidy
         script: tools/run-clang-tidy-in-ci.sh
+

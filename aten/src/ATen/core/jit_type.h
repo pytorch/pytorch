@@ -532,6 +532,9 @@ struct CAFFE2_API FutureType : public SingleElementType<TypeKind::FutureType, Fu
     ss << "Future[" << getElementType()->python_str() << "]";
     return ss.str();
   }
+  TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
+    return create(contained_types.at(0));
+  }
 private:
   FutureType(TypePtr elem) : SingleElementType(elem) {}
 };
@@ -913,7 +916,7 @@ template<> inline TypePtr getTypePtr<std::vector<at::Tensor>>() { return ListTyp
 template<> inline TypePtr getTypePtr<std::vector<double>>() { return ListType::ofFloats(); }
 template<> inline TypePtr getTypePtr<std::vector<int64_t>>() { return ListType::ofInts(); }
 
-CAFFE2_API TypePtr inferTypeFrom(const IValue& value);
+CAFFE2_API TypePtr incompleteInferTypeFrom(const IValue& value);
 
 using TypeEnv = std::unordered_map<std::string, TypePtr>;
 struct MatchTypeReturn {
