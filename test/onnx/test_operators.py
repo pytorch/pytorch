@@ -227,6 +227,29 @@ class TestOperators(TestCase):
         with self.assertRaisesRegex(TypeError, "occurred when translating MyFun"):
             export_to_pbtxt(FuncModule(MyFun().apply), (x, y))
 
+    def test_symbolic_override(self):
+        # store the parameter in nn.Module, and lift the computation part to
+        # the Function, which supports symbolic override
+        class MyModule(Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.bias = nn.Parameter(torch.ones(1))
+
+            def forward(self, x):
+                return ComputeFunction.apply(x) + self.bias
+
+        class ComputeFunction(Function):
+            @staticmethod
+            def symbolic(g, x):
+                return g.op("Add", x, x);
+
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+        x = torch.randn(1, 2, 3, 4)
+        self.assertONNX(MyModule(), x)
+
     # TODO: Do an nn style test for these
     def test_batchnorm(self):
         x = torch.ones(2, 2, 2, 2, requires_grad=True)
