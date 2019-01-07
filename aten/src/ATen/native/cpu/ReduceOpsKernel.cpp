@@ -58,7 +58,13 @@ static void or_kernel_impl(TensorIterator& iter) {
   binary_kernel_reduce_vec(
     iter,
     [=](uint8_t a, uint8_t b) -> uint8_t { return a || b; },
-    [=](Vec256<uint8_t> a, Vec256<uint8_t> b) {return a || b; },
+    [=](Vec256<uint8_t> a, Vec256<uint8_t> b) {
+      Vec256<uint8_t> c = Vec256<uint8_t>();
+      for (int i = 0; i != Vec256<uint8_t>::size(); i++) {
+        c[i] = a[i] || b[i];
+      }
+      return c;
+    },
     /*ident=*/false);
 }
 
