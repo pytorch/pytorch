@@ -86,13 +86,6 @@ void mean_kernel_impl<int16_t, int16_t, int16_t>(TensorIterator& iter) {
 }
 #endif // __HIPCC__
 
-void and_kernel_impl(TensorIterator& iter) {
-  gpu_reduce_kernel<uint8_t, uint8_t>(
-    iter, func_wrapper<uint8_t> ([]GPU_LAMBDA(uint8_t a, uint8_t b) -> uint8_t {
-      return a && b;
-    }), true);
-}
-
 static void sum_kernel_cuda(TensorIterator& iter) {
   if (iter.type().scalarType() == kHalf) {
     return sum_kernel_impl<at::Half, float>(iter);
@@ -126,8 +119,11 @@ static void mean_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-static void and_kernel_cuda(TensorIterator& iter) {
-  and_kernel_impl(iter);
+void and_kernel_cuda(TensorIterator& iter) {
+  gpu_reduce_kernel<uint8_t, uint8_t>(
+    iter, func_wrapper<uint8_t> ([]GPU_LAMBDA(uint8_t a, uint8_t b) -> uint8_t {
+      return a && b;
+    }), true);
 }
 
 REGISTER_DISPATCH(std_stub, &std_kernel_cuda);

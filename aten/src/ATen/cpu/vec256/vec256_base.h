@@ -308,15 +308,6 @@ template <class T> Vec256<T> inline operator/(const Vec256<T> &a, const Vec256<T
   return c;
 }
 
-template <class T> Vec256<T> inline operator&&(
-    const Vec256<T> &a, const Vec256<T> &b) {
-  Vec256<T> c = Vec256<T>();
-  for (int i = 0; i != Vec256<T>::size(); i++) {
-    c[i] = a[i] && b[i];
-  }
-  return c;
-}
-
 // Implements the IEEE 754 201X `maximum` operation, which propagates NaN if
 // either input is a NaN.
 template <class T> Vec256<T> inline maximum(const Vec256<T> &a, const Vec256<T> &b) {
