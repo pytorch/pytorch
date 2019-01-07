@@ -288,6 +288,8 @@ struct Environment {
           {"_to_tensor",
            std::make_shared<CastValue>(DynamicType::get(), prim::NumToTensor)},
           {"len", std::make_shared<BuiltinFunction>(aten::len, at::nullopt)},
+          {"min", std::make_shared<BuiltinFunction>(prim::min, at::nullopt)},
+          {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
       };
       auto it = globals.find(ident);
       if (it != globals.end())
@@ -2022,7 +2024,7 @@ struct to_ir {
           elem_type = values.at(0)->type();
         }
         for (auto v : values) {
-          if (v->type() != elem_type) {
+          if (*v->type() != *elem_type)  {
             throw ErrorReport(tree)
                 << "Lists must contain only a single type, expected: "
                 << *elem_type << " but found " << *v->type() << " instead";

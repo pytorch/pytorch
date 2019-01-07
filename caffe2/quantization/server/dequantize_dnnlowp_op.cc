@@ -24,7 +24,7 @@ bool DequantizeDNNLowPOp<T>::RunOnDevice() {
 
   CAFFE_ENFORCE(input.template IsType<T>());
   Output(0)->ResizeLike(input);
-  Dequantize(
+  fbgemm::Dequantize<T>(
       input.template data<T>(),
       Output(0)->template mutable_data<float>(),
       input.numel(),

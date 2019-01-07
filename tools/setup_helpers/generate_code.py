@@ -4,7 +4,7 @@ import sys
 
 source_files = {'.py', '.cpp', '.h'}
 
-DECLARATIONS_PATH = 'torch/lib/tmp_install/share/ATen/Declarations.yaml'
+DECLARATIONS_PATH = 'torch/share/ATen/Declarations.yaml'
 
 
 # TODO: This is a little inaccurate, because it will also pick
@@ -22,7 +22,7 @@ def all_generator_source():
 inputs = [
     'torch/lib/THNN.h',
     'torch/lib/THCUNN.h',
-    'torch/lib/tmp_install/share/ATen/Declarations.yaml',
+    'torch/share/ATen/Declarations.yaml',
     'tools/autograd/derivatives.yaml',
     'tools/autograd/deprecated.yaml',
 ]

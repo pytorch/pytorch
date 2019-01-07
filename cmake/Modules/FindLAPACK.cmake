@@ -50,12 +50,12 @@ macro(Check_Lapack_Libraries LIBRARIES _prefix _name _flags _list _blas)
         if(APPLE)
           find_library(${_prefix}_${_library}_LIBRARY
             NAMES ${_library}
-            PATHS /usr/local/lib /usr/lib /usr/local/lib64 /usr/lib64
+            PATHS /usr/local/lib /usr/lib /usr/local/lib64 /usr/lib64 /usr/lib/aarch64-linux-gnu
             ENV DYLD_LIBRARY_PATH)
         else(APPLE)
           find_library(${_prefix}_${_library}_LIBRARY
             NAMES ${_library}
-            PATHS /usr/local/lib /usr/lib /usr/local/lib64 /usr/lib64
+            PATHS /usr/local/lib /usr/lib /usr/local/lib64 /usr/lib64 /usr/lib/aarch64-linux-gnu
             ENV LD_LIBRARY_PATH)
         endif(APPLE)
       endif(WIN32)
