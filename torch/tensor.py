@@ -175,9 +175,17 @@ class Tensor(torch._C._TensorBase):
 
     .. note::
 
-      Returned Tensor uses the same data tensor as the original one.
+      Returned Tensor shares the same storage with the original one.
       In-place modifications on either of them will be seen, and may trigger
       errors in correctness checks.
+      IMPORTANT NOTE: Previously, in-place size / stride / storage changes
+      (such as `resize_` / `resize_as_` / `set_` / `transpose_`) to the returned tensor
+      also update the original tensor. Now, these in-place changes will not update the
+      original tensor anymore, and will instead trigger an error.
+      For sparse tensors:
+      In-place indices / values changes (such as `zero_` / `copy_` / `add_`) to the
+      returned tensor will not update the original tensor anymore, and will instead
+      trigger an error.
     """)
 
     detach_ = _add_docstr(_C._TensorBase.detach_, r"""
@@ -258,6 +266,14 @@ class Tensor(torch._C._TensorBase):
                       ":attr:`upper` argument in torch.cholesky defaults to ``False``.", stacklevel=2)
         return super(Tensor, self).cholesky(upper=upper)
 
+    def potrs(self, u, upper=True):
+        r"""See :func:`torch.cholesky_solve`"""
+        warnings.warn("torch.potrs is deprecated in favour of torch.cholesky_solve and "
+                      "will be removed in the next release. Please use torch.cholesky_solve instead "
+                      "and note that the :attr:`upper` argument in torch.cholesky_solve defaults "
+                      "to ``False``.", stacklevel=2)
+        return super(Tensor, self).cholesky_solve(u, upper=upper)
+
     def stft(self, n_fft, hop_length=None, win_length=None, window=None,
              center=True, pad_mode='reflect', normalized=False, onesided=True):
         r"""See :func:`torch.stft`
@@ -322,7 +338,7 @@ class Tensor(torch._C._TensorBase):
         """
         return self.clone().masked_fill_(mask, value)
 
-    def unique(self, sorted=False, return_inverse=False, dim=None):
+    def unique(self, sorted=True, return_inverse=False, dim=None):
         r"""Returns the unique scalar elements of the tensor as a 1-D tensor.
 
         See :func:`torch.unique`

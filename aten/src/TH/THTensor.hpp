@@ -34,16 +34,16 @@ inline THStorage* THTensor_getStoragePtr(const THTensor* tensor) {
   // for the first time (providing the necessary type).  It is an ERROR to
   // invoke any PyTorch operations on such a half-constructed storage,
   // and this check tests for that case.
-  AT_CHECK(tensor->storage_, "Cannot use PyTorch operations on a half-constructed "
+  AT_CHECK(tensor->storage(), "Cannot use PyTorch operations on a half-constructed "
            "tensor.  If this tensor came from Caffe2, please call GetMutableData on "
            "it first; otherwise, this is a bug, please report it.");
-  return tensor->storage_.unsafeGetStorageImpl();
+  return tensor->storage().unsafeGetStorageImpl();
 }
 
 inline void THTensor_maybe_zero_dim(THTensor *tensor, bool condition_when_zero_dim) {
   bool set_zero_dim = condition_when_zero_dim && tensor->sizes().size() == 1 && tensor->size(0) == 1;
   if (set_zero_dim) {
-    tensor->resize_dim(0);
+    tensor->set_sizes_and_strides({}, {});
   }
 }
 

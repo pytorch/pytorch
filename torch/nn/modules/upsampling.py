@@ -14,8 +14,9 @@ class Upsample(Module):
     `minibatch x channels x [optional depth] x [optional height] x width`.
     Hence, for spatial inputs, we expect a 4D Tensor and for volumetric inputs, we expect a 5D Tensor.
 
-    The algorithms available for upsampling are nearest neighbor and linear, bilinear and trilinear
-    for 3D, 4D and 5D input Tensor, respectively.
+    The algorithms available for upsampling are nearest neighbor and linear,
+    bilinear, bicubic and trilinear for 3D, 4D and 5D input Tensor,
+    respectively.
 
     One can either give a :attr:`scale_factor` or the target output :attr:`size` to
     calculate the output size. (You cannot give both, as it is ambiguous)
@@ -23,8 +24,8 @@ class Upsample(Module):
     Args:
         size (tuple, optional): a tuple of ints `([optional D_out], [optional H_out], W_out)` output sizes
         scale_factor (int / tuple of ints, optional): the multiplier for the image height / width / depth
-        mode (string, optional): the upsampling algorithm: one of `nearest`, `linear`, `bilinear` and `trilinear`.
-                                    Default: `nearest`
+        mode (string, optional): the upsampling algorithm: one of `nearest`, `linear`, `bilinear`,
+            `bicubic` and `trilinear`. Default: `nearest`
         align_corners (bool, optional): if True, the corner pixels of the input
             and output tensors are aligned, and thus preserving the values at
             those pixels. This only has effect when :attr:`mode` is `linear`,
@@ -46,11 +47,12 @@ class Upsample(Module):
 
     .. warning::
         With ``align_corners = True``, the linearly interpolating modes
-        (`linear`, `bilinear`, and `trilinear`) don't proportionally align the
-        output and input pixels, and thus the output values can depend on the
-        input size. This was the default behavior for these modes up to version
-        0.3.1. Since then, the default behavior is ``align_corners = False``.
-        See below for concrete examples on how this affects the outputs.
+        (`linear`, `bilinear`, `bicubic`, and `trilinear`) don't proportionally
+        align the output and input pixels, and thus the output values can depend
+        on the input size. This was the default behavior for these modes up to
+        version 0.3.1. Since then, the default behavior is
+        ``align_corners = False``. See below for concrete examples on how this
+        affects the outputs.
 
     .. note::
         If you want downsampling/general resizing, you should use :func:`~nn.functional.interpolate`.

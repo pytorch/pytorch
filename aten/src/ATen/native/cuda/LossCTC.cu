@@ -44,7 +44,11 @@ __device__ static inline int64_t get_target_prime(const target_t* __restrict__ t
 // In contrast to the cuDNN implementation, we allow large target lengths. For this we need that all previous `s` have been
 // computed when we start a new block_s. This is why we have our own for loop here.
 template<typename scalar_t, typename target_t>
-__global__ void ctc_loss_log_alpha_gpu_kernel(scalar_t* __restrict__ log_alpha_data,
+__global__ void
+#if defined (__HIP_PLATFORM_HCC__)
+__launch_bounds__((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
+#endif
+ctc_loss_log_alpha_gpu_kernel(scalar_t* __restrict__ log_alpha_data,
                                     const scalar_t*log_probs_data, const int64_t* __restrict__ input_lengths, int64_t max_input_length,
                                     const target_t* __restrict__ targets_data, const int64_t* __restrict__ target_lengths, int64_t max_target_length,
                                     scalar_t* __restrict__ neg_log_likelihood_data,
@@ -359,7 +363,11 @@ ctc_loss_backward_log_beta_gpu_kernel(scalar_t* __restrict__ log_beta_data,
 // calculation (with an atomic log add) is similarly in performance, but for large
 // alphabets the inplace nature is a considerable advantage.
 template<typename scalar_t, typename target_t>
-__global__ void ctc_loss_backward_collect_nonblank_gpu_kernel(scalar_t* __restrict__ gradient_data,
+__global__ void
+#if defined (__HIP_PLATFORM_HCC__)
+__launch_bounds__((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
+#endif
+ctc_loss_backward_collect_nonblank_gpu_kernel(scalar_t* __restrict__ gradient_data,
                                                      const scalar_t* __restrict__ grad_out_data, int64_t grad_out_batch_stride,
                                                      const scalar_t* __restrict__ log_alpha_data, const scalar_t* __restrict__ log_beta_data,
                                                      const scalar_t*log_probs_data, const int64_t* __restrict__ input_lengths, int64_t max_input_length,
@@ -404,7 +412,11 @@ __global__ void ctc_loss_backward_collect_nonblank_gpu_kernel(scalar_t* __restri
 // This is the naive implementation of equation (16). It is parallelised in batch and input timestep.
 // It appears to be faster than the above method for small batch sizes.
 template<typename scalar_t, typename target_t>
-__global__ void ctc_loss_backward_collect_gpu_kernel(scalar_t* __restrict__ gradient_data,
+__global__ void
+#if defined (__HIP_PLATFORM_HCC__)
+__launch_bounds__((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
+#endif
+ctc_loss_backward_collect_gpu_kernel(scalar_t* __restrict__ gradient_data,
                                                      const scalar_t* __restrict__ grad_out_data, int64_t grad_out_batch_stride,
                                                      const scalar_t* __restrict__ log_alpha_data, const scalar_t* __restrict__ log_beta_data,
                                                      const scalar_t*log_probs_data, const int64_t* __restrict__ input_lengths, int64_t max_input_length,
