@@ -3602,6 +3602,7 @@ class TestLazyLogitsInitialization(TestCase):
 @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
 class TestAgainstScipy(TestCase):
     def setUp(self):
+        set_rng_seed(0)
         positive_var = torch.randn(20).exp()
         positive_var2 = torch.randn(20).exp()
         random_var = torch.randn(20)
@@ -4398,7 +4399,7 @@ class TestJit(TestCase):
             values, sample = self._perturb(Dist, keys, values, sample)
             expected = f(sample, *values)
             actual = traced_f(sample, *values)
-            self.assertEqual(expected, actual,
+            self.assertEqual(expected, actual, allow_inf=True,
                              message='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
 
 

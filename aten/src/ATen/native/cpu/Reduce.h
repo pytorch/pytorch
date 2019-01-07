@@ -34,7 +34,8 @@ struct all_same : c10::guts::conjunction<
 // acc_t is a type that contains all the necessary data
 // to continue reducing.
 //
-// Then:
+// ops_t is such that &ops_t::reduce, &ops_t::combine, and &ops_t::project exist and satisfy
+// the following.
 // reduce: (acc_t, data_t) -> acc_t adds one data point to the accumulated value.
 // combine: (acc_t, acc_t) -> acc_t combines two accumulated values into one.
 // project: acc_t -> data_t finishes the reduction, getting the required output.
@@ -54,10 +55,11 @@ struct all_same : c10::guts::conjunction<
 // If, on the other hand, there is only one, then we split the input into
 // into several pieces, reduce each separately, and then combine them.
 
-template <typename rf_t,
-          typename cf_t,
-          typename pf_t>
-void binary_kernel_reduce(TensorIterator& iter, rf_t const &reduce, cf_t const &combine, pf_t const &project) {
+template <typename ops_t, typename init_t>
+void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
+  using rf_t = decltype(&ops_t::reduce);
+  using cf_t = decltype(&ops_t::combine);
+  using pf_t = decltype(&ops_t::project);
   using r_traits = binary_function_traits<rf_t>;
   using c_traits = binary_function_traits<cf_t>;
   using p_traits = unary_function_traits<pf_t>;
@@ -66,6 +68,7 @@ void binary_kernel_reduce(TensorIterator& iter, rf_t const &reduce, cf_t const &
   static_assert(
     all_same<
       acc_t,
+      init_t,
       typename r_traits::arg1_t,
       typename r_traits::result_type,
       typename c_traits::arg1_t,
@@ -84,31 +87,32 @@ void binary_kernel_reduce(TensorIterator& iter, rf_t const &reduce, cf_t const &
     bool serial = numel < at::internal::GRAIN_SIZE || at::get_max_threads() == 1 || at::in_parallel_region();
     int max_threads = serial ? 1 : at::get_max_threads();
     AT_ASSERT(max_threads > 0);
-    std::vector<optional<acc_t>> buffer{(unsigned)max_threads, optional<acc_t> {}};
+    std::vector<optional<acc_t>> buffer((unsigned)max_threads, optional<acc_t> {});
     at::parallel_for(0, numel, serial ? (1 + numel) : internal::GRAIN_SIZE,
     [&](int64_t begin, int64_t end) {
       auto &acc = buffer[at::get_thread_num()];
-      sub_iter.serial_for_each([&acc, &reduce](int ntensors, char** data, const int64_t* strides, int64_t size) {
+      sub_iter.serial_for_each([&acc, &ops, &init](int ntensors, char** data, const int64_t* strides, int64_t size) {
         AT_ASSERT(ntensors == 2);
         char *in = data[1];
         int64_t stride = strides[1];
         if (!acc && size > 0) {
-          acc = acc_t {};
+          //acc = acc_t {};
+          acc = init;
         }
         for (int64_t i = 0; i < size; ++i) {
-          acc = reduce(*acc, *(data_t*)in);
+          acc = ops.reduce(*acc, *(data_t*)in);
           in += stride;
         }
       }, {begin, end});
     });
-    acc_t acc;
+    acc_t acc = init;
     for (int i = 0; i < max_threads; ++i) {
       if (buffer[i]) {
-        acc = combine(acc, *buffer[i]);
+        acc = ops.combine(acc, *buffer[i]);
       }
     }
     char *out = (char *)sub_iter.data_ptr(0);
-    *(data_t*)out = project(acc);
+    *(data_t*)out = ops.project(acc);
   });
 }
 

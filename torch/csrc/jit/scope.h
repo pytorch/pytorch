@@ -1,8 +1,8 @@
 #pragma once
-#include <torch/csrc/jit/interned_strings.h>
-#include <torch/csrc/jit/assertions.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <c10/macros/Macros.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/interned_strings.h>
 
 #include <memory>
 
@@ -20,7 +20,7 @@ struct Scope;
 using ScopePtr = c10::intrusive_ptr<Scope>;
 
 struct TORCH_API Scope : public c10::intrusive_ptr_target {
-private:
+ private:
   ScopePtr parent_;
   Symbol name_;
   ScopePtr intrusive_from_this() {
@@ -30,7 +30,8 @@ private:
                                            // to account for this ownership
     return c10::intrusive_ptr<Scope>::reclaim(this);
   }
-public:
+
+ public:
   Scope() {
     name_ = Symbol::scope("");
   }
@@ -62,7 +63,7 @@ public:
     return name_;
   }
 
-  std::string namesFromRoot(const std::string& separator="/") const;
+  std::string namesFromRoot(const std::string& separator = "/") const;
 };
 
 } // namespace jit

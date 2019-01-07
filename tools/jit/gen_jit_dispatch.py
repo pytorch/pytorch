@@ -54,10 +54,12 @@ TYPE_MAP = {
     'Layout': 'Layout',
     'Device': 'Device',
     'ScalarType': 'ScalarType',
+    'ScalarType?': 'ScalarType?',
     'int64_t': 'int',
+    'int64_t?': 'int?',
     'double': 'float',
     'bool': 'bool',
-    'Generator': 'Generator',
+    'Generator': 'Generator?',
 }
 
 
@@ -84,16 +86,18 @@ FROM_IVALUE = {
     'Scalar': '{}.toScalar()',
     'Scalar?': '{}.toOptional<Scalar>()',
     'ScalarType': '{}.toScalarType()',
+    'ScalarType?': '{}.toOptional<ScalarType>()',
     'Tensor': '{}.toTensor()',
     'TensorList': '{}.toTensorList()->elements()',
     'bool': '{}.toBool()',
     'double': '{}.toDouble()',
     'int64_t': '{}.toInt()',
+    'int64_t?': '{}.toOptional<int64_t>()',
     'std::string': '{}.toString()->string()',
     'Generator': 'nullptr',
-    'std::array<bool,2>': 'as_bool_array<2>({}.toIntList()->elements())',
-    'std::array<bool,3>': 'as_bool_array<3>({}.toIntList()->elements())',
-    'std::array<bool,4>': 'as_bool_array<4>({}.toIntList()->elements())',
+    'std::array<bool,2>': 'as_bool_array<2>({}.toBoolListRef())',
+    'std::array<bool,3>': 'as_bool_array<3>({}.toBoolListRef())',
+    'std::array<bool,4>': 'as_bool_array<4>({}.toBoolListRef())',
 }
 
 

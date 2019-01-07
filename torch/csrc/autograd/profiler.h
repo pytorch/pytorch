@@ -35,11 +35,21 @@ constexpr inline size_t ceilToMultiple(size_t a, size_t b) {
   return ((a + b - 1) / b) * b;
 }
 
+#if defined(__MACH__) && !defined(CLOCK_REALTIME)
+#include <sys/time.h>
+// clock_gettime is not implemented on older versions of OS X (< 10.12).
+// If implemented, CLOCK_REALTIME will have already been defined.
+#endif
+
 inline int64_t getTime() {
 #ifdef _WIN32
   using namespace std::chrono;
   using clock = std::conditional<high_resolution_clock::is_steady, high_resolution_clock, steady_clock>::type;
   return duration_cast<nanoseconds>(clock::now().time_since_epoch()).count();
+#elif defined(__MACH__) && !defined(CLOCK_REALTIME)
+  struct timeval now;
+  gettimeofday(&now, NULL);
+  return static_cast<int64_t>(now.tv_sec) * 1000000000 + static_cast<int64_t>(now.tv_usec) * 1000;
 #else
   // clock_gettime is *much* faster than std::chrono implementation on Linux
   struct timespec t{};

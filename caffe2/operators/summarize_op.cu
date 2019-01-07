@@ -96,8 +96,7 @@ bool SummarizeOp<float, CUDAContext>::RunOnDevice() {
                  << standard_deviation << std::endl;
   }
   if (OutputSize()) {
-    auto* Y = Output(0);
-    Y->Resize(4);
+    auto* Y = Output(0, {4}, at::dtype<float>());
     float output_buffer[NUM_STATS] = {result.min, result.max, result.mean,
                                standard_deviation};
     context_.CopyFromCPU<float>(

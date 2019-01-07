@@ -219,7 +219,7 @@ bool PackSegmentsOp<CUDAContext>::DoRunWithType2() {
   }
 
   // create output tensor
-  auto shape = data.dims().vec(); // Shape of out is batch_size x max_len x ...
+  auto shape = data.sizes().vec(); // Shape of out is batch_size x max_len x ...
   shape[0] = max_length;
   shape.insert(shape.begin(), lengths.size());
   out->Resize(shape);
@@ -310,7 +310,7 @@ bool UnpackSegmentsOp<CUDAContext>::DoRunWithType2() {
       context_);
 
   // create output tensor
-  auto shape = data.dims().vec();
+  auto shape = data.sizes().vec();
   CAFFE_ENFORCE_EQ(
       shape[0], lengths.dim(0), "LENGTH should match DATA in dimension 0");
   shape.erase(shape.begin());

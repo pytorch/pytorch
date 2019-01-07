@@ -51,6 +51,12 @@ else:
     FileNotFoundError = FileNotFoundError
 
 
+if PY2:
+    import Queue as queue
+else:
+    import queue
+
+
 def with_metaclass(meta, *bases):
     """Create a base class with a metaclass."""
     # This requires a bit of explanation: the basic idea is to make a dummy
@@ -124,3 +130,8 @@ if PY2:
 elif PY3:
     def get_function_from_type(cls, name):
         return getattr(cls, name, None)
+
+if PY2:
+    import __builtin__ as builtins
+elif PY3:
+    import builtins

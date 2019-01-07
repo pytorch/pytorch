@@ -15,6 +15,5 @@ graph(%a : Tensor) {
     }
   %c : (int, int, int, int) = prim::TupleSlice[beg=0, end=4](%b)
   %e : (int, int) = prim::TupleSlice[beg=1, end=3](%c)
-  %11 : int, %12 : int = prim::TupleUnpack(%e)
-  return (%11, %12);
+  return (%e);
 }

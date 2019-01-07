@@ -105,7 +105,7 @@ static void EmbeddingLookup_int32_t_float_float__avx2_fma(
         vop120 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (120)), vop120);
         // skip unnecessary prefetch of (&ip_next_T0[120])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -122,7 +122,7 @@ static void EmbeddingLookup_int32_t_float_float__avx2_fma(
         _mm256_storeu_ps(&op[104], vop104);
         _mm256_storeu_ps(&op[112], vop112);
         _mm256_storeu_ps(&op[120], vop120);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -195,7 +195,7 @@ static void EmbeddingLookup_int32_t_float_float__avx2_fma(
         vop56 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (56)), vop56);
         // skip unnecessary prefetch of (&ip_next_T0[56])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -204,7 +204,7 @@ static void EmbeddingLookup_int32_t_float_float__avx2_fma(
         _mm256_storeu_ps(&op[40], vop40);
         _mm256_storeu_ps(&op[48], vop48);
         _mm256_storeu_ps(&op[56], vop56);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -257,12 +257,12 @@ static void EmbeddingLookup_int32_t_float_float__avx2_fma(
         vop24 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (24)), vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
         _mm256_storeu_ps(&op[24], vop24);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -305,10 +305,10 @@ static void EmbeddingLookup_int32_t_float_float__avx2_fma(
         vop8 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (8)), vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -520,7 +520,7 @@ static void EmbeddingLookup_int64_t_float_float__avx2_fma(
         vop120 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (120)), vop120);
         // skip unnecessary prefetch of (&ip_next_T0[120])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -537,7 +537,7 @@ static void EmbeddingLookup_int64_t_float_float__avx2_fma(
         _mm256_storeu_ps(&op[104], vop104);
         _mm256_storeu_ps(&op[112], vop112);
         _mm256_storeu_ps(&op[120], vop120);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -610,7 +610,7 @@ static void EmbeddingLookup_int64_t_float_float__avx2_fma(
         vop56 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (56)), vop56);
         // skip unnecessary prefetch of (&ip_next_T0[56])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -619,7 +619,7 @@ static void EmbeddingLookup_int64_t_float_float__avx2_fma(
         _mm256_storeu_ps(&op[40], vop40);
         _mm256_storeu_ps(&op[48], vop48);
         _mm256_storeu_ps(&op[56], vop56);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -672,12 +672,12 @@ static void EmbeddingLookup_int64_t_float_float__avx2_fma(
         vop24 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (24)), vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
         _mm256_storeu_ps(&op[24], vop24);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -720,10 +720,10 @@ static void EmbeddingLookup_int64_t_float_float__avx2_fma(
         vop8 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (8)), vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -999,7 +999,7 @@ static void EmbeddingLookup_int32_t_half_float__avx2_fma(
             vop120);
         // skip unnecessary prefetch of (&ip_next_T0[120])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -1016,7 +1016,7 @@ static void EmbeddingLookup_int32_t_half_float__avx2_fma(
         _mm256_storeu_ps(&op[104], vop104);
         _mm256_storeu_ps(&op[112], vop112);
         _mm256_storeu_ps(&op[120], vop120);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -1121,7 +1121,7 @@ static void EmbeddingLookup_int32_t_half_float__avx2_fma(
             vop56);
         // skip unnecessary prefetch of (&ip_next_T0[56])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -1130,7 +1130,7 @@ static void EmbeddingLookup_int32_t_half_float__avx2_fma(
         _mm256_storeu_ps(&op[40], vop40);
         _mm256_storeu_ps(&op[48], vop48);
         _mm256_storeu_ps(&op[56], vop56);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -1199,12 +1199,12 @@ static void EmbeddingLookup_int32_t_half_float__avx2_fma(
             vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
         _mm256_storeu_ps(&op[24], vop24);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -1255,10 +1255,10 @@ static void EmbeddingLookup_int32_t_half_float__avx2_fma(
             vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -1540,7 +1540,7 @@ static void EmbeddingLookup_int64_t_half_float__avx2_fma(
             vop120);
         // skip unnecessary prefetch of (&ip_next_T0[120])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -1557,7 +1557,7 @@ static void EmbeddingLookup_int64_t_half_float__avx2_fma(
         _mm256_storeu_ps(&op[104], vop104);
         _mm256_storeu_ps(&op[112], vop112);
         _mm256_storeu_ps(&op[120], vop120);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -1662,7 +1662,7 @@ static void EmbeddingLookup_int64_t_half_float__avx2_fma(
             vop56);
         // skip unnecessary prefetch of (&ip_next_T0[56])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -1671,7 +1671,7 @@ static void EmbeddingLookup_int64_t_half_float__avx2_fma(
         _mm256_storeu_ps(&op[40], vop40);
         _mm256_storeu_ps(&op[48], vop48);
         _mm256_storeu_ps(&op[56], vop56);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -1740,12 +1740,12 @@ static void EmbeddingLookup_int64_t_half_float__avx2_fma(
             vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
         _mm256_storeu_ps(&op[24], vop24);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -1796,10 +1796,10 @@ static void EmbeddingLookup_int64_t_half_float__avx2_fma(
             vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2085,7 +2085,7 @@ static void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop120, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[120])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -2102,7 +2102,7 @@ static void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
         _mm256_storeu_ps(&op[104], vop104);
         _mm256_storeu_ps(&op[112], vop112);
         _mm256_storeu_ps(&op[120], vop120);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2211,7 +2211,7 @@ static void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop56, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[56])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -2220,7 +2220,7 @@ static void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
         _mm256_storeu_ps(&op[40], vop40);
         _mm256_storeu_ps(&op[48], vop48);
         _mm256_storeu_ps(&op[56], vop56);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2293,12 +2293,12 @@ static void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop24, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[24])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
         _mm256_storeu_ps(&op[24], vop24);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2353,10 +2353,10 @@ static void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop8, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[8])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2644,7 +2644,7 @@ static void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop120, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[120])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -2661,7 +2661,7 @@ static void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
         _mm256_storeu_ps(&op[104], vop104);
         _mm256_storeu_ps(&op[112], vop112);
         _mm256_storeu_ps(&op[120], vop120);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2770,7 +2770,7 @@ static void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop56, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[56])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -2779,7 +2779,7 @@ static void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
         _mm256_storeu_ps(&op[40], vop40);
         _mm256_storeu_ps(&op[48], vop48);
         _mm256_storeu_ps(&op[56], vop56);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2852,12 +2852,12 @@ static void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop24, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[24])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
         _mm256_storeu_ps(&op[24], vop24);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2912,10 +2912,10 @@ static void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop8, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[8])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
