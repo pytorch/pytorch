@@ -4,7 +4,7 @@ import sys
 
 source_files = {'.py', '.cpp', '.h'}
 
-DECLARATIONS_PATH = 'torch/lib/tmp_install/share/ATen/Declarations.yaml'
+DECLARATIONS_PATH = 'torch/share/ATen/Declarations.yaml'
 
 
 # TODO: This is a little inaccurate, because it will also pick
@@ -22,7 +22,7 @@ def all_generator_source():
 inputs = [
     'torch/lib/THNN.h',
     'torch/lib/THCUNN.h',
-    'torch/lib/tmp_install/share/ATen/Declarations.yaml',
+    'torch/share/ATen/Declarations.yaml',
     'tools/autograd/derivatives.yaml',
     'tools/autograd/deprecated.yaml',
 ]
@@ -38,9 +38,15 @@ outputs = [
     'torch/csrc/autograd/generated/python_variable_methods.cpp',
     'torch/csrc/autograd/generated/python_variable_methods_dispatch.h',
     'torch/csrc/autograd/generated/variable_factories.h',
-    'torch/csrc/autograd/generated/VariableType.cpp',
+    'torch/csrc/autograd/generated/VariableType_0.cpp',
+    'torch/csrc/autograd/generated/VariableType_1.cpp',
+    'torch/csrc/autograd/generated/VariableType_2.cpp',
+    'torch/csrc/autograd/generated/VariableType_3.cpp',
+    'torch/csrc/autograd/generated/VariableType_4.cpp',
     'torch/csrc/autograd/generated/VariableType.h',
-    'torch/csrc/jit/generated/register_aten_ops.cpp',
+    'torch/csrc/jit/generated/register_aten_ops_0.cpp',
+    'torch/csrc/jit/generated/register_aten_ops_1.cpp',
+    'torch/csrc/jit/generated/register_aten_ops_2.cpp',
 ]
 
 

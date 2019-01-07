@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ATen/Parallel.h"
-#include "ATen/TensorUtils.h"
+#include <ATen/Parallel.h>
+#include <ATen/TensorUtils.h>
 #include <limits>
 #include <utility>
 #include <cstring>
@@ -156,12 +156,14 @@ struct strided_tensor_iter_fixed {
   strided_tensor_iter_fixed(Tensor& tensor, bool sort_strides = false)
       : data_(tensor.data<T>()) {
     std::memset(counter_, 0, sizeof(int64_t) * N);
-    std::memcpy(
-        sizes_, tensor.sizes().data(), tensor.ndimension() * sizeof(int64_t));
-    std::memcpy(
-        strides_,
-        tensor.strides().data(),
-        tensor.ndimension() * sizeof(int64_t));
+    if (tensor.dim() > 0) {
+      std::memcpy(
+          sizes_, tensor.sizes().data(), tensor.dim() * sizeof(int64_t));
+      std::memcpy(
+          strides_,
+          tensor.strides().data(),
+          tensor.dim() * sizeof(int64_t));
+    }
     dim_ = std::get<1>(collapse_dims(sizes_, strides_, tensor.ndimension()));
   }
 };
@@ -207,7 +209,7 @@ inline std::string _all_equal_numel_error(at::ArrayRef<Tensor> tensors) {
   for (size_t i = 0; i < tensors.size() - 1; i++) {
     oss << tensors[i].sizes() << ", ";
   }
-  oss << "and " << tensors[tensors.size() - 1]
+  oss << "and " << tensors[tensors.size() - 1].sizes()
       << " to have the same number of elements, but got ";
   for (size_t i = 0; i < tensors.size() - 1; i++) {
     oss << tensors[i].numel() << ", ";
@@ -220,7 +222,7 @@ inline std::string _all_equal_numel_error(at::ArrayRef<Tensor> tensors) {
 inline bool _apply_preamble(ArrayRef<Tensor> tensors) {
   checkBackend("CPU_tensor_apply", tensors, Backend::CPU);
   if (!_all_equal_numel(tensors))
-    throw std::runtime_error(_all_equal_numel_error(tensors));
+    AT_ERROR(_all_equal_numel_error(tensors));
   // An empty tensor has no elements
   for (auto& t : tensors)
     if (t.numel() == 0)

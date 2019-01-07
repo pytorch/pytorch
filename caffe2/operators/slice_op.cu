@@ -73,23 +73,23 @@ bool SliceImplGpu(
   for (int i = 0; i < data.ndim(); ++i) {
     if (i >= starts.size()) {
       starts_idx[i] = 0;
-      ends_idx[i] = data.dims()[i];
+      ends_idx[i] = data.size(i);
       continue;
     }
-    if (data.dims()[i] > 0) {
+    if (data.size(i) > 0) {
       auto start = starts_data[i];
       auto end = ends_data[i];
       if (start < 0) {
-        start = data.dims()[i] + 1 + start;
+        start = data.sizes()[i] + 1 + start;
       }
       if (end < 0) {
-        end = data.dims()[i] + 1 + end;
+        end = data.sizes()[i] + 1 + end;
       }
-      if (start > data.dims()[i]) {
-        start = data.dims()[i];
+      if (start > data.sizes()[i]) {
+        start = data.sizes()[i];
       }
-      if (end > data.dims()[i]) {
-        end = data.dims()[i];
+      if (end > data.sizes()[i]) {
+        end = data.sizes()[i];
       }
       CAFFE_ENFORCE_GE(start, 0);
       CAFFE_ENFORCE_GE(end, 0);
@@ -115,7 +115,7 @@ bool SliceImplGpu(
   // for now only supports slicing in 1 dimension
   int dim = -1;
   for (int i = 0; i < data.ndim(); ++i) {
-    if (starts_idx[i] > 0 || ends_idx[i] < data.dims()[i]) {
+    if (starts_idx[i] > 0 || ends_idx[i] < data.sizes()[i]) {
       CAFFE_ENFORCE_EQ(
           dim, -1, "Currently only possible to slice in 1 dimension.");
       dim = i;
@@ -123,20 +123,20 @@ bool SliceImplGpu(
   }
   if (dim == -1) {
     if (!backward) {
-      output->CopyFrom(data, context);
+      output->CopyFrom(data, true /*async*/);
     } else {
-      gdata->CopyFrom(*go, context);
+      gdata->CopyFrom(*go, true /*async*/);
     }
     return true;
   }
   int unit = std::accumulate(
-      data.dims().begin() + dim + 1,
-      data.dims().end(),
+      data.sizes().begin() + dim + 1,
+      data.sizes().end(),
       1,
       std::multiplies<int>());
   int num_blocks = std::accumulate(
-      data.dims().begin(),
-      data.dims().begin() + dim,
+      data.sizes().begin(),
+      data.sizes().begin() + dim,
       1,
       std::multiplies<int>());
   if (!backward) {
@@ -154,7 +154,7 @@ bool SliceImplGpu(
     size_t src_nbytes = data.nbytes();
     size_t dst_nbytes = output->nbytes();
 
-    size_t src_block_size = unit * data.dims()[dim];
+    size_t src_block_size = unit * data.sizes()[dim];
     size_t dst_block_size = unit * (ends_idx[dim] - starts_idx[dim]);
     size_t src_offset = unit * starts_idx[dim];
 
@@ -187,7 +187,7 @@ bool SliceImplGpu(
     size_t dst_nbytes = gdata->nbytes();
 
     size_t src_block_size = unit * (ends_idx[dim] - starts_idx[dim]);
-    size_t dst_block_size = unit * data.dims()[dim];
+    size_t dst_block_size = unit * data.sizes()[dim];
     size_t dst_offset = unit * starts_idx[dim];
 
     if (num_blocks == 0 || dst_block_size == 0) {
@@ -237,15 +237,15 @@ class SliceOp<CUDAContext> : public Operator<CUDAContext> {
   USE_OPERATOR_FUNCTIONS(CUDAContext);
   SliceOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CUDAContext>(operator_def, ws),
-        starts_(this->template GetRepeatedArgument<TIndex>("starts")),
-        ends_(this->template GetRepeatedArgument<TIndex>("ends")),
+        starts_(this->template GetRepeatedArgument<int64_t>("starts")),
+        ends_(this->template GetRepeatedArgument<int64_t>("ends")),
         statically_inited_(false) {}
 
   bool RunOnDevice() override {
     if (InputSize() > 1) {
-      return DispatchHelper<TensorTypes<int, TIndex>>::call(this, Input(1));
+      return DispatchHelper<TensorTypes<int, int64_t>>::call(this, Input(1));
     } else {
-      return DoRunWithType<TIndex>();
+      return DoRunWithType<int64_t>();
     }
   }
 
@@ -282,8 +282,8 @@ class SliceOp<CUDAContext> : public Operator<CUDAContext> {
         output, data, starts_host_, ends_host_, &context_);
   }
  private:
-  std::vector<TIndex> starts_;
-  std::vector<TIndex> ends_;
+  std::vector<int64_t> starts_;
+  std::vector<int64_t> ends_;
   bool statically_inited_;
   Tensor starts_host_{CPU};
   Tensor ends_host_{CPU};
@@ -298,17 +298,17 @@ class SliceGradientOp<CUDAContext> : public Operator<CUDAContext> {
   USE_OPERATOR_FUNCTIONS(CUDAContext);
   SliceGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CUDAContext>(operator_def, ws),
-        starts_(this->template GetRepeatedArgument<TIndex>("starts")),
-        ends_(this->template GetRepeatedArgument<TIndex>("ends")),
+        starts_(this->template GetRepeatedArgument<int64_t>("starts")),
+        ends_(this->template GetRepeatedArgument<int64_t>("ends")),
         statically_inited_(false) {}
 
-  AT_DISABLE_COPY_AND_ASSIGN(SliceGradientOp);
+  C10_DISABLE_COPY_AND_ASSIGN(SliceGradientOp);
 
   bool RunOnDevice() override {
     if (InputSize() == 4) {
-      return DispatchHelper<TensorTypes<int, TIndex>>::call(this, Input(1));
+      return DispatchHelper<TensorTypes<int, int64_t>>::call(this, Input(1));
     } else {
-      return DoRunWithType<TIndex>();
+      return DoRunWithType<int64_t>();
     }
   }
 
@@ -353,8 +353,8 @@ class SliceGradientOp<CUDAContext> : public Operator<CUDAContext> {
   }
  private:
 
-  std::vector<TIndex> starts_;
-  std::vector<TIndex> ends_;
+  std::vector<int64_t> starts_;
+  std::vector<int64_t> ends_;
   bool statically_inited_;
   Tensor starts_host_{CPU};
   Tensor ends_host_{CPU};

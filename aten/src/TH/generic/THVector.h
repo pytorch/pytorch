@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THVector.h"
+#define TH_GENERIC_FILE "TH/generic/THVector.h"
 #else
 
 // Opaque C++ struct
@@ -12,16 +12,12 @@ TH_API void THVector_(cmul)(scalar_t *z, const scalar_t *x, const scalar_t *y, c
 TH_API void THVector_(muls)(scalar_t *y, const scalar_t *x, const scalar_t c, const ptrdiff_t n);
 TH_API void THVector_(cdiv)(scalar_t *z, const scalar_t *x, const scalar_t *y, const ptrdiff_t n);
 TH_API void THVector_(divs)(scalar_t *y, const scalar_t *x, const scalar_t c, const ptrdiff_t n);
-TH_API void THVector_(copy)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(neg)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(normal_fill)(scalar_t *data,
-                                   const int64_t size,
-                                   struct THGenerator *generator,
-                                   const scalar_t mean,
-                                   const scalar_t stddev);
-#ifndef TH_REAL_IS_INT
-TH_API void THVector_(cvtFromInt)(scalar_t *y, const int *x, const ptrdiff_t n);
-#endif
+								   const int64_t size,
+								   struct THGenerator *generator,
+								   const scalar_t mean,
+								   const scalar_t stddev);
 
 #if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_LONG)
 TH_API void THVector_(abs)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);

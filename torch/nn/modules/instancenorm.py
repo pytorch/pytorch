@@ -1,19 +1,24 @@
 from .batchnorm import _BatchNorm
 from .. import functional as F
+from ..._jit_internal import weak_module, weak_script_method
 
 
 class _InstanceNorm(_BatchNorm):
+    __constants__ = ['running_mean', 'running_var', 'weight', 'bias',
+                     'track_running_stats', 'momentum', 'eps']
+
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=False,
                  track_running_stats=False):
         super(_InstanceNorm, self).__init__(
             num_features, eps, momentum, affine, track_running_stats)
 
+    @weak_script_method
     def _check_input_dim(self, input):
         raise NotImplementedError
 
-    def _load_from_state_dict(self, state_dict, prefix, metadata, strict,
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-        version = metadata.get('version', None)
+        version = local_metadata.get('version', None)
         # at version 1: removed running_mean and running_var when
         # track_running_stats=False (default)
         if version is None and not self.track_running_stats:
@@ -38,9 +43,10 @@ class _InstanceNorm(_BatchNorm):
                     state_dict.pop(key)
 
         super(_InstanceNorm, self)._load_from_state_dict(
-            state_dict, prefix, metadata, strict,
+            state_dict, prefix, local_metadata, strict,
             missing_keys, unexpected_keys, error_msgs)
 
+    @weak_script_method
     def forward(self, input):
         self._check_input_dim(input)
 
@@ -49,6 +55,7 @@ class _InstanceNorm(_BatchNorm):
             self.training or not self.track_running_stats, self.momentum, self.eps)
 
 
+@weak_module
 class InstanceNorm1d(_InstanceNorm):
     r"""Applies Instance Normalization over a 2D or 3D input (a mini-batch of 1D
     inputs with optional additional channel dimension) as described in the paper
@@ -117,12 +124,14 @@ class InstanceNorm1d(_InstanceNorm):
         https://arxiv.org/abs/1607.08022
     """
 
+    @weak_script_method
     def _check_input_dim(self, input):
         if input.dim() != 2 and input.dim() != 3:
             raise ValueError('expected 2D or 3D input (got {}D input)'
                              .format(input.dim()))
 
 
+@weak_module
 class InstanceNorm2d(_InstanceNorm):
     r"""Applies Instance Normalization over a 4D input (a mini-batch of 2D inputs
     with additional channel dimension) as described in the paper
@@ -191,12 +200,14 @@ class InstanceNorm2d(_InstanceNorm):
         https://arxiv.org/abs/1607.08022
     """
 
+    @weak_script_method
     def _check_input_dim(self, input):
         if input.dim() != 4:
             raise ValueError('expected 4D input (got {}D input)'
                              .format(input.dim()))
 
 
+@weak_module
 class InstanceNorm3d(_InstanceNorm):
     r"""Applies Instance Normalization over a 5D input (a mini-batch of 3D inputs
     with additional channel dimension) as described in the paper
@@ -265,6 +276,7 @@ class InstanceNorm3d(_InstanceNorm):
         https://arxiv.org/abs/1607.08022
     """
 
+    @weak_script_method
     def _check_input_dim(self, input):
         if input.dim() != 5:
             raise ValueError('expected 5D input (got {}D input)'

@@ -22,20 +22,19 @@ class ClipTensorByScalingOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     const auto& input_tensor = Input(0);
-    CAFFE_ENFORCE_GT(input_tensor.size(), 0);
+    CAFFE_ENFORCE_GT(input_tensor.numel(), 0);
     const auto& val = Input(1);
-    CAFFE_ENFORCE_EQ(val.size(), 1);
+    CAFFE_ENFORCE_EQ(val.numel(), 1);
 
     const auto* input_tensor_data = input_tensor.template data<float>();
     const auto* val_data = val.template data<float>();
 
-    auto* clipped = Output(0);
-    clipped->ResizeLike(input_tensor);
+    auto* clipped = Output(0, input_tensor.sizes(), at::dtype<float>());
     float* clipped_tensor_data = clipped->template mutable_data<float>();
 
     if (InputSize() > 2) {
       const auto& additional_threshold = Input(2);
-      CAFFE_ENFORCE_EQ(additional_threshold.size(), 1);
+      CAFFE_ENFORCE_EQ(additional_threshold.numel(), 1);
 
       threshold_ *= *(additional_threshold.template data<float>());
     }
@@ -44,14 +43,14 @@ class ClipTensorByScalingOp final : public Operator<Context> {
       float ratio = threshold_ / *val_data;
 
       math::Scale<float, float, Context>(
-          clipped->size(),
+          clipped->numel(),
           ratio,
           input_tensor_data,
           clipped_tensor_data,
           &context_);
     } else {
       if (input_tensor_data != clipped_tensor_data) {
-        clipped->CopyFrom(input_tensor, &context_);
+        clipped->CopyFrom(input_tensor, /*async*/ true);
       }
     }
 

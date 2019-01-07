@@ -35,7 +35,7 @@ class IDEEPSqueezeOp final : public IDEEPOperator {
         (dims_.back() + 1),
         " dimensions.");
     const auto& ideep_dims = X.get_dims();
-    vector<TIndex> dims(ideep_dims.begin(), ideep_dims.end());
+    vector<int64_t> dims(ideep_dims.begin(), ideep_dims.end());
     const auto& new_dims = SqueezeOp<IDEEPContext>::ComputeDims(dims, dims_);
     itensor::dims new_dims_ideep(new_dims.begin(), new_dims.end());
     if (&X != Y) {

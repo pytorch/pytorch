@@ -3,20 +3,25 @@ import torch.nn.functional as F
 from torch._six import inf
 from operator import mul
 from functools import reduce
+from itertools import product
 import math
+import warnings
 
 __all__ = [
     'argmax',
     'argmin',
     'argsort',
-    'btrifact',
     'btriunpack',
+    'chain_matmul',
     'einsum',
     'broadcast_tensors',
     'isfinite',
     'isinf',
     'isnan',
+    'norm',
     'meshgrid',
+    'potrf',
+    'potrs',
     'split',
     'stft',
     'tensordot',
@@ -71,53 +76,6 @@ def split(tensor, split_size_or_sections, dim=0):
     return tensor.split(split_size_or_sections, dim)
 
 
-def btrifact(A, info=None, pivot=True):
-    r"""Batch LU factorization.
-
-    Returns a tuple containing the LU factorization and pivots. Pivoting is done if
-    :attr:`pivot` is set.
-
-    The optional argument :attr:`info` stores information if the factorization
-    succeeded for each minibatch example. The :attr:`info` is provided as an
-    `IntTensor`, its values will be filled from dgetrf and a non-zero value
-    indicates an error occurred. Specifically, the values are from cublas if cuda is
-    being used, otherwise LAPACK.
-
-    .. warning::
-        The :attr:`info` argument is deprecated in favor of :meth:`torch.btrifact_with_info`.
-
-    Arguments:
-        A (Tensor): the tensor to factor
-        info (IntTensor, optional): (deprecated) an `IntTensor` to store values
-            indicating whether factorization succeeds
-        pivot (bool, optional): controls whether pivoting is done
-
-    Returns:
-        A tuple containing factorization and pivots.
-
-    Example::
-
-        >>> A = torch.randn(2, 3, 3)
-        >>> A_LU, pivots = torch.btrifact(A)
-        >>> A_LU
-        tensor([[[ 1.3506,  2.5558, -0.0816],
-                 [ 0.1684,  1.1551,  0.1940],
-                 [ 0.1193,  0.6189, -0.5497]],
-
-                [[ 0.4526,  1.2526, -0.3285],
-                 [-0.7988,  0.7175, -0.9701],
-                 [ 0.2634, -0.9255, -0.3459]]])
-
-        >>> pivots
-        tensor([[ 3,  3,  3],
-                [ 3,  3,  3]], dtype=torch.int32)
-    """
-    # Overwriting reason:
-    # `info` is being deprecated in favor of `btrifact_with_info`. This warning
-    # is in tensor.py, which we call here.
-    return A.btrifact(info, pivot)
-
-
 def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     r"""Unpacks the data and pivots from a batched LU factorization (btrifact) of a tensor.
 
@@ -139,28 +97,25 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
         >>> A_ = torch.bmm(P, torch.bmm(A_L, A_U))
     """
 
-    nBatch, sz, _ = LU_data.size()
+    sz = LU_data.size(-1)
 
     if unpack_data:
-        I_U = torch.triu(torch.ones(sz, sz)).type_as(LU_data).byte().unsqueeze(0).expand(nBatch, sz, sz)
-        I_L = 1 - I_U
-        L = LU_data.new(LU_data.size()).zero_()
-        U = LU_data.new(LU_data.size()).zero_()
-        I_diag = torch.eye(sz).type_as(LU_data).byte().unsqueeze(0).expand(nBatch, sz, sz)
-        L[I_diag] = 1.0
-        L[I_L] = LU_data[I_L]
-        U[I_U] = LU_data[I_U]
+        I_U = torch.ones(sz, sz, device=LU_data.device, dtype=torch.uint8).triu_().expand_as(LU_data)
+        zero = torch.tensor(0.).type_as(LU_data)
+        U = torch.where(I_U, LU_data, zero)
+        L = torch.where(I_U, zero, LU_data)
+        L.diagonal(dim1=-2, dim2=-1).fill_(1)
     else:
         L = U = None
 
     if unpack_pivots:
-        P = torch.eye(sz).type_as(LU_data).unsqueeze(0).repeat(nBatch, 1, 1)
-        for i in range(nBatch):
-            for j in range(sz):
-                k = int(LU_pivots[i, j] - 1)
-                t = P[i, :, j].clone()
-                P[i, :, j] = P[i, :, k]
-                P[i, :, k] = t
+        P = torch.eye(sz, device=LU_data.device, dtype=LU_data.dtype).expand_as(LU_data).clone()
+        LU_pivots = LU_pivots - 1
+        for idx in product(*map(lambda x: list(range(x)), LU_data.shape[:-2])):
+            final_order = list(range(sz))
+            for k, j in enumerate(LU_pivots[idx]):
+                final_order[k], final_order[j] = final_order[j], final_order[k]
+            P[idx] = P[idx].index_select(1, torch.as_tensor(final_order, device=LU_pivots.device))
     else:
         P = None
 
@@ -252,11 +207,18 @@ def isfinite(tensor):
 
     Example::
 
-        >>> torch.isfinite(torch.Tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
+        >>> torch.isfinite(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
         tensor([ 1,  0,  1,  0,  0], dtype=torch.uint8)
     """
     if not isinstance(tensor, torch.Tensor):
         raise ValueError("The argument is not a tensor", str(tensor))
+
+    # Support int input, nan and inf are concepts in floating point numbers.
+    # Numpy uses type 'Object' when the int overflows long, but we don't
+    # have a similar concept. It's safe to assume any created LongTensor doesn't
+    # overflow and it's finite.
+    if not tensor.is_floating_point():
+        return torch.ones_like(tensor, dtype=torch.uint8)
     return (tensor == tensor) & (tensor.abs() != inf)
 
 
@@ -271,11 +233,13 @@ def isinf(tensor):
 
     Example::
 
-        >>> torch.isinf(torch.Tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
+        >>> torch.isinf(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
         tensor([ 0,  1,  0,  1,  0], dtype=torch.uint8)
     """
     if not isinstance(tensor, torch.Tensor):
         raise ValueError("The argument is not a tensor", str(tensor))
+    if tensor.dtype in [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]:
+        return torch.zeros_like(tensor, dtype=torch.uint8)
     return tensor.abs() == inf
 
 
@@ -332,7 +296,7 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
     the frequency that :math:`0 \leq \omega < \text{n\_fft}`. When
     :attr:`onesided` is the default value ``True``,
 
-    * :attr:`input` must be either a 1-D time sequenceor 2-D a batch of time
+    * :attr:`input` must be either a 1-D time sequence or a 2-D batch of time
       sequences.
 
     * If :attr:`hop_length` is ``None`` (default), it is treated as equal to
@@ -377,10 +341,10 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
 
     Arguments:
         input (Tensor): the input tensor
-        n_fft (int, optional): size of Fourier transform
-        hop_length (int): the distance between neighboring sliding window
+        n_fft (int): size of Fourier transform
+        hop_length (int, optional): the distance between neighboring sliding window
             frames. Default: ``None`` (treated as equal to ``floor(n_fft / 4)``)
-        win_length (int): the size of window frame and STFT filter.
+        win_length (int, optional): the size of window frame and STFT filter.
             Default: ``None``  (treated as equal to :attr:`n_fft`)
         window (Tensor, optional): the optional window function.
             Default: ``None`` (treated as window of all :math:`1` s)
@@ -428,7 +392,7 @@ def isnan(tensor):
     return tensor != tensor
 
 
-def unique(input, sorted=False, return_inverse=False, dim=None):
+def unique(input, sorted=True, return_inverse=False, dim=None):
     r"""Returns the unique scalar elements of the input tensor as a 1-D tensor.
 
     Arguments:
@@ -437,6 +401,8 @@ def unique(input, sorted=False, return_inverse=False, dim=None):
             before returning as output.
         return_inverse (bool): Whether to also return the indices for where
             elements in the original input ended up in the returned unique list.
+        dim (int): the dimension to apply unique. If ``None``, the unique of the
+            flattened input is returned. default: ``None``
 
     Returns:
         (Tensor, Tensor (optional)): A tensor or a tuple of tensors containing
@@ -637,3 +603,150 @@ def argsort(input, dim=None, descending=False):
     if dim is None:
         return torch.sort(input, -1, descending)[1]
     return torch.sort(input, dim, descending)[1]
+
+
+def norm(input, p="fro", dim=None, keepdim=False, out=None):
+    r"""Returns the matrix norm or vector norm of a given tensor.
+
+    Args:
+        input (Tensor): the input tensor
+        p (int, float, inf, -inf, 'fro', 'nuc', optional): the order of norm. Default: ``'fro'``
+            The following norms can be calculated:
+
+            =====  ============================  ==========================
+            ord    matrix norm                   vector norm
+            =====  ============================  ==========================
+            None   Frobenius norm                2-norm
+            'fro'  Frobenius norm                --
+            'nuc'  nuclear norm                  --
+            Other  as vec norm when dim is None  sum(abs(x)**ord)**(1./ord)
+            =====  ============================  ==========================
+
+        dim (int, 2-tuple of ints, 2-list of ints, optional): If it is an int,
+            vector norm will be calculated, if it is 2-tuple of ints, matrix norm
+            will be calculated. If the value is None, matrix norm will be calculated
+            when the input tensor only has two dimensions, vector norm will be
+            calculated when the input tensor only has one dimension. If the input
+            tensor has more than two dimensions, the vector norm will be applied to
+            last dimension.
+        keepdim (bool, optional): whether the output tensors have :attr:`dim`
+            retained or not. Ignored if :attr:`dim` = ``None`` and
+            :attr:`out` = ``None``. Default: ``False``
+        out (Tensor, optional): the output tensor. Ignored if
+            :attr:`dim` = ``None`` and :attr:`out` = ``None``.
+
+    Example::
+
+        >>> import torch
+        >>> a = torch.arange(9, dtype= torch.float) - 4
+        >>> b = a.reshape((3, 3))
+        >>> torch.norm(a)
+        tensor(7.7460)
+        >>> torch.norm(b)
+        tensor(7.7460)
+        >>> torch.norm(a, float('inf'))
+        tensor(4.)
+        >>> torch.norm(b, float('inf'))
+        tensor([4., 3., 4.])
+        >>> c = torch.tensor([[ 1, 2, 3],[-1, 1, 4]] , dtype= torch.float)
+        >>> torch.norm(c, dim=0)
+        tensor([1.4142, 2.2361, 5.0000])
+        >>> torch.norm(c, dim=1)
+        tensor([3.7417, 4.2426])
+        >>> torch.norm(c, p=1, dim=1)
+        tensor([6., 6.])
+        >>> d = torch.arange(8, dtype= torch.float).reshape(2,2,2)
+        >>> torch.norm(d, dim=(1,2))
+        tensor([ 3.7417, 11.2250])
+        >>> torch.norm(d[0, :, :]), torch.norm(d[1, :, :])
+        (tensor(3.7417), tensor(11.2250))
+    """
+    ndim = input.dim()
+
+    # catch default case
+    if dim is None and out is None:
+        if p == "fro":
+            return torch._C._VariableFunctions.frobenius_norm(input)
+        elif p != "nuc":
+            return torch._C._VariableFunctions.norm(input, p)
+
+    if p == "fro":
+        if dim is None:
+            dim = tuple(range(ndim))
+        if out is None:
+            return torch._C._VariableFunctions.frobenius_norm(input, dim, keepdim=keepdim)
+        return torch._C._VariableFunctions.frobenius_norm(input, dim, keepdim=keepdim, out=out)
+    elif p == "nuc":
+        if out is None:
+            torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim)
+        return torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim, out=out)
+    else:
+        if out is None:
+            return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim)
+    return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim, out=out)
+
+
+def chain_matmul(*matrices):
+    r"""Returns the matrix product of the :math:`N` 2-D tensors. This product is efficiently computed
+    using the matrix chain order algorithm which selects the order in which incurs the lowest cost in terms
+    of arithmetic operations (`[CLRS]`_). Note that since this is a function to compute the product, :math:`N`
+    needs to be greater than or equal to 2; if equal to 2 then a trivial matrix-matrix product is returned.
+    If :math:`N` is 1, then this is a no-op - the original matrix is returned as is.
+
+
+    Args:
+        matrices (Tensors...): a sequence of 2 or more 2-D tensors whose product is to be determined.
+
+
+    Returns:
+        Tensor: if the :math:`i^{th}` tensor was of dimensions :math:`p_{i} \times p_{i + 1}`, then the product
+        would be of dimensions :math:`p_{1} \times p_{N + 1}`.
+
+    Example::
+
+        >>> a = torch.randn(3, 4)
+        >>> b = torch.randn(4, 5)
+        >>> c = torch.randn(5, 6)
+        >>> d = torch.randn(6, 7)
+        >>> torch.chain_matmul(a, b, c, d)
+        tensor([[ -2.3375,  -3.9790,  -4.1119,  -6.6577,   9.5609, -11.5095,  -3.2614],
+                [ 21.4038,   3.3378,  -8.4982,  -5.2457, -10.2561,  -2.4684,   2.7163],
+                [ -0.9647,  -5.8917,  -2.3213,  -5.2284,  12.8615, -12.2816,  -2.5095]])
+
+    .. _`[CLRS]`: https://mitpress.mit.edu/books/introduction-algorithms-third-edition
+    """
+    return torch._C._VariableFunctions.chain_matmul(matrices)
+
+
+def potrf(a, upper=True, out=None):
+    r"""Computes the Cholesky decomposition of a symmetric positive-definite
+    matrix :math:`A`.
+
+    For more information, regarding :func:`torch.potrf`, please check :func:`torch.cholesky`.
+
+    .. warning::
+        torch.potrf is deprecated in favour of torch.cholesky and will be removed in the next
+        release. Please use torch.cholesky instead and note that the :attr:`upper` argument in
+        torch.cholesky defaults to ``False``.
+    """
+    warnings.warn("torch.potrf is deprecated in favour of torch.cholesky and will be removed in the next "
+                  "release. Please use torch.cholesky instead and note that the :attr:`upper` argument in"
+                  " torch.cholesky defaults to ``False``.", stacklevel=2)
+    return torch.cholesky(a, upper=upper, out=out)
+
+
+def potrs(b, u, upper=True, out=None):
+    r"""Solves a linear system of equations with a positive semidefinite
+    matrix to be inverted given its Cholesky factor matrix :attr:`u`.
+
+    For more information, regarding :func:`torch.potrs`, please check :func:`torch.cholesky_solve`.
+
+    .. warning::
+        torch.potrs is deprecated in favour of torch.cholesky_solve and will be removed in the next
+        release. Please use torch.cholesky_solve instead and note that the :attr:`upper` argument in
+        torch.cholesky_solve defaults to ``False``.
+    """
+    warnings.warn("torch.potrs is deprecated in favour of torch.cholesky_solve and will be removed "
+                  "in the next release. Please use torch.cholesky instead and note that the "
+                  ":attr:`upper` argument in torch.cholesky_solve defaults to ``False``.", stacklevel=2)
+    return torch.cholesky_solve(b, u, upper=upper, out=out)

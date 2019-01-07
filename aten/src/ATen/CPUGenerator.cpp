@@ -1,4 +1,4 @@
-#include "ATen/CPUGenerator.h"
+#include <ATen/CPUGenerator.h>
 
 #define const_generator_cast(generator) \
   dynamic_cast<const CPUGenerator&>(generator)

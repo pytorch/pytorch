@@ -146,8 +146,8 @@ bool MaxPoolWithIndexOp::RunOnDevice() {
 
   if (X.IsType<float>()) {
     return DoRunWithType<float>();
-  } else if (X.IsType<float16>()) {
-    return DoRunWithType<float16>();
+  } else if (X.IsType<at::Half>()) {
+    return DoRunWithType<at::Half>();
   } else {
     CAFFE_THROW("Unsupported input type");
   }
@@ -194,8 +194,8 @@ bool MaxPoolWithIndexGradientOp::RunOnDevice() {
 
   if (X.IsType<float>()) {
     return DoRunWithType<float>();
-  } else if (X.IsType<float16>()) {
-    return DoRunWithType<float16>();
+  } else if (X.IsType<at::Half>()) {
+    return DoRunWithType<at::Half>();
   } else {
     CAFFE_THROW("Unsupported input type");
   }

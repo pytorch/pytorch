@@ -1,26 +1,31 @@
 #pragma once
 
-#include <torch/nn/module.h>
+#include <torch/nn/pimpl.h>
 #include <torch/optim/optimizer.h>
-#include <torch/serialization.h>
-#include <torch/tensor.h>
-
-#include <ATen/ATen.h>
+#include <torch/optim/serialize.h>
+#include <torch/types.h>
 
 #include <utility>
 #include <vector>
 
 namespace torch {
+namespace serialize {
+class OutputArchive;
+class InputArchive;
+} // namespace serialize
+} // namespace torch
+
+namespace torch {
 namespace optim {
 
-struct AdagradOptions {
+struct TORCH_API AdagradOptions {
   AdagradOptions(double learning_rate);
   TORCH_ARG(double, learning_rate);
   TORCH_ARG(double, lr_decay) = 0;
   TORCH_ARG(double, weight_decay) = 0;
 };
 
-class Adagrad : public Optimizer {
+class TORCH_API Adagrad : public Optimizer {
  public:
   template <typename ParameterContainer>
   explicit Adagrad(
@@ -33,29 +38,20 @@ class Adagrad : public Optimizer {
 
   AdagradOptions options;
 
-  template <class Archive>
-  void serialize(Archive& ar) {
-#if defined(TORCH_USE_CEREAL)
-    ar(CEREAL_NVP(sum_));
-    ar(CEREAL_NVP(step_));
-#endif // defined(TORCH_USE_CEREAL)
-  }
+  void save(serialize::OutputArchive& archive) const override;
+  void load(serialize::InputArchive& archive) override;
+
+  std::vector<Tensor> sum_buffers;
+  std::vector<int64_t> step_buffers;
 
  private:
-#if defined(TORCH_USE_CEREAL)
-  friend class cereal::access;
-#endif // defined(TORCH_USE_CEREAL)
   Adagrad() : options(0) {}
 
-  std::vector<Tensor> sum_;
-  std::vector<int64_t> step_;
+  template <typename Self, typename Archive>
+  static void serialize(Self& self, Archive& archive) {
+    TORCH_OPTIM_SERIALIZE(sum_buffers);
+    TORCH_OPTIM_SERIALIZE(step_buffers);
+  }
 };
 } // namespace optim
 } // namespace torch
-
-#if defined(TORCH_USE_CEREAL)
-CEREAL_REGISTER_TYPE(torch::optim::Adagrad);
-CEREAL_REGISTER_POLYMORPHIC_RELATION(
-    torch::optim::Optimizer,
-    torch::optim::Adagrad);
-#endif // defined(TORCH_USE_CEREAL)

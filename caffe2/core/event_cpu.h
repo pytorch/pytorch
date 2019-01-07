@@ -1,7 +1,7 @@
 #include "caffe2/core/event.h"
-#include "caffe2/core/operator.h"
 
 #include <atomic>
+#include <condition_variable>
 
 namespace caffe2 {
 

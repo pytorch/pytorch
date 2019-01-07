@@ -1,8 +1,8 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THVectorDefault.cpp"
+#define TH_GENERIC_FILE "TH/generic/THVectorDefault.cpp"
 #else
 
-#include "../THRandom.h"
+#include <TH/THRandom.h>
 
 void THVector_(copy_DEFAULT)(scalar_t *x, const scalar_t *y, const ptrdiff_t n) {
   ptrdiff_t i = 0;
@@ -129,24 +129,6 @@ void THVector_(divs_DEFAULT)(scalar_t *y, const scalar_t *x, const scalar_t c, c
   for(; i < n; i++)
     y[i] = x[i] / c;
 }
-
-#ifndef TH_REAL_IS_INT
-void THVector_(cvtFromInt_DEFAULT)(scalar_t *y, const int *x, const ptrdiff_t n)
-{
-  ptrdiff_t i = 0;
-
-  for(; i<n-4; i+=4)
-  {
-    y[i] = (scalar_t)x[i];
-    y[i+1] = (scalar_t)x[i+1];
-    y[i+2] = (scalar_t)x[i+2];
-    y[i+3] = (scalar_t)x[i+3];
-  }
-
-  for(; i < n; i++)
-    y[i] = (scalar_t)x[i];
-}
-#endif
 
 // Fills 16 normally distributed samples into data, interleaved with a
 // stride of 8, i.e. in order of ([0], [8]), ([1], [9]), ...

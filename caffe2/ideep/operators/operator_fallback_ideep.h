@@ -36,7 +36,7 @@ namespace caffe2 {
  *                            IDEEPFallbackOp<MyMagicOp, SkipIndices<0>>);
  */
 template <class CPUOp, typename SkipOutputCopy = SkipIndices<>>
-class IDEEPFallbackOp final : public IDEEPOperator {
+class C10_EXPORT IDEEPFallbackOp final : public IDEEPOperator {
  public:
   USE_IDEEP_DEF_ALIASES();
   USE_IDEEP_OPERATOR_FUNCTIONS();
@@ -89,7 +89,7 @@ class IDEEPFallbackOp final : public IDEEPOperator {
           local_input_blobs_[i]->Reset();
         }
         input_share_[i] = false;
-        auto dtensor = local_input_blobs_[i]->GetMutableTensor(CPU);
+        auto dtensor = BlobGetMutableTensor(local_input_blobs_[i], CPU);
         dtensor->Resize(input.get_dims());
         if (input.is_public_format()) {
           dtensor->ShareExternalPointer(
@@ -121,14 +121,12 @@ class IDEEPFallbackOp final : public IDEEPOperator {
         continue;
       }
       CAFFE_ENFORCE(
-          local_output_blobs_[i]->IsTensorType(CPU),
+          BlobIsTensorType(*local_output_blobs_[i], CPU),
           "IDEEP fallback op currently does not support non-TensorCPU "
           "output type who needs copying.");
       const auto& src = local_output_blobs_[i]->template Get<TensorCPU>();
-      auto src_dims = src.dims();
-      if (src.template IsType<float>() &&
-          src.dims().size() != 0 && src.size_from_dim(0) != 0 &&
-          base_op_->type() != "Python") {
+      auto src_dims = src.sizes().vec();
+      if (src.template IsType<float>() && src.dim() != 0 && base_op_->type() != "Python") {
         Blob* dst = OperatorBase::OutputBlob(i);
         // The output tensor must be ideep tensor with public format.
         // If reusing ideep tensor with non-public format, the tensor buffer
@@ -153,7 +151,7 @@ class IDEEPFallbackOp final : public IDEEPOperator {
         VLOG(2) << "Output " << base_def_.output(i) << " as CPUTensor";
         Blob* dst = OperatorBase::OutputBlob(i);
         dst->Reset(new Tensor(CPU));
-        auto dtensor = dst->GetMutableTensor(CPU);
+        auto dtensor = BlobGetMutableTensor(dst, CPU);
         dtensor->Resize(src_dims);
         dtensor->ShareData(src);
       }

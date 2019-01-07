@@ -44,27 +44,30 @@ class ReshapeOp : public Operator<Context> {
           "the argument `shape`.");
 
       auto& shape = Input(1);
-      CAFFE_ENFORCE(shape.ndim() == 1, "Shape should be 1-D");
+      CAFFE_ENFORCE(shape.dim() == 1, "Shape should be 1-D");
 
       const T* shape_data = shape.template data<T>();
 
       // Bit awkward, but needed so works on both CPU and CUDA contexts
-      std::vector<T> tmpv(shape.size());
-      context_.CopyBytesToCPU(shape.size() * sizeof(T), shape_data, &tmpv[0]);
-      actual_new_shape.assign(tmpv.begin(), tmpv.begin() + shape.size());
+      std::vector<T> tmpv(shape.numel());
+      if (shape.numel() > 0) {
+        context_.CopyBytesToCPU(
+            shape.numel() * sizeof(T), shape_data, &tmpv[0]);
+        actual_new_shape.assign(tmpv.begin(), tmpv.begin() + shape.numel());
+      }
     }
 
     // Copy over the dimensions for those that are specified zero.
-    for (int i = 0; i < actual_new_shape.size() && i < input.ndim(); ++i) {
+    for (int i = 0; i < actual_new_shape.size() && i < input.dim(); ++i) {
       if (actual_new_shape[i] == 0) {
-        actual_new_shape[i] = input.dim(i);
+        actual_new_shape[i] = input.size(i);
       }
     }
 
     // Checks if the new shape is valid and fills in the missing dimension
     // specified by -1.
     // NOTE: At most one dimension can be -1.
-    auto total_size = input.size_from_dim(0);
+    auto total_size = input.numel();
     T size = 1;
     int unknown_idx = -1;
     for (int i = 0; i < actual_new_shape.size(); ++i) {
@@ -111,21 +114,21 @@ class ReshapeOp : public Operator<Context> {
     }
 
     // Write the original shape to the second output.
-    auto* old_shape = Output(1);
-    old_shape->Resize(input.ndim());
+
+    auto* old_shape = Output(1, {input.dim()}, at::dtype<T>());
     T* old_shape_data = old_shape->template mutable_data<T>();
-    for (int i = 0; i < input.ndim(); ++i) {
-      math::Set<T, Context>(1, input.dim(i), old_shape_data + i, &context_);
+    for (int i = 0; i < input.dim(); ++i) {
+      math::Set<T, Context>(1, input.size(i), old_shape_data + i, &context_);
     }
 
     output->Resize(actual_new_shape);
     if (output != &input) {
       // If we are not doing in-place computation, a copy is needed.
       context_.CopyItemsSameDevice(
-          input.meta(),
-          input.size(),
+          input.dtype(),
+          input.numel(),
           input.raw_data(),
-          output->raw_mutable_data(input.meta()));
+          output->raw_mutable_data(input.dtype()));
     }
   }
 

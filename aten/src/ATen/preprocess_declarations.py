@@ -70,7 +70,7 @@ def process_types_and_backends(option):
 
 
 def exclude(declaration):
-    return 'only_register' in declaration or declaration.get('python_name') == 'ndimension'
+    return 'only_register' in declaration or declaration.get('name') == 'ndimension'
 
 
 def add_variants(option):
@@ -220,10 +220,6 @@ def discover_sparse_tensor_operations(declaration):
 def is_extended_method(option):
     if 'method' in option['variants']:
         return False
-    elif option.get('deprecated', False):
-        return False
-    elif not option['variants']:
-        return False
     else:
         return True
 
@@ -239,7 +235,9 @@ def run(declarations):
             allow_kwarg=False,
             type_to_signature=TYPE_FORMAL_GENERIC,
             remove_self=True)
+
         common_with_cwrap.sort_by_number_of_options(declaration)
+
         discover_zero_dim_tensor_operations(declaration)
         discover_sparse_tensor_operations(declaration)
 
@@ -253,7 +251,6 @@ def run(declarations):
                 non_extended_methods.add(option['api_name'])
         declaration['options'] = handle_outputs_taken_as_arguments(
             declaration['options'])
-
     # We (very unfortunately) have overloaded virtual methods. Because
     # of C++'s rules, we cannot move one overload without doing some
     # extra work to make sure that overload in a superclass and an

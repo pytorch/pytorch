@@ -31,7 +31,7 @@ template <>
 bool SampleAsOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0); // Input data to be sliced
   auto& L = Input(1); // Target data that provide the identity
-  auto* Y = Output(0); // Sliced data (Y.dim32(0) = num of (L > 0))
+   // Sliced data (Y.dim32(0) = num of (L > 0))
 
   CAFFE_ENFORCE(
       X.dim32(0) == L.dim32(0),
@@ -58,9 +58,9 @@ bool SampleAsOp<float, CUDAContext>::RunOnDevice() {
   assert(count > 0);
 
   // resize Y
-  vector<TIndex> out_shape(X.dims());
+  vector<int64_t> out_shape(X.dims().vec());
   out_shape[0] = count;
-  Y->Resize(out_shape);
+  auto* Y = Output(0, out_shape, at::dtype<float>());
 
   const int len = X.size() / X.dim32(0);
 
