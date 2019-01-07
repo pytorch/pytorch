@@ -30,6 +30,9 @@ Data type                  dtype                                         Tensor 
 64-bit integer (signed)    ``torch.int64`` or ``torch.long``             ``torch.*.LongTensor``
 ========================   ===========================================   ===========================
 
+To find out if a :class:`torch.dtype` is a floating point data type, the property :attr:`is_floating_point`
+can be used, which returns ``True`` if the data type is a floating point data type.
+
 .. _device-doc:
 
 torch.device

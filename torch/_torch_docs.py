@@ -2202,6 +2202,17 @@ Example::
     tensor(1.9073e-06)
 """)
 
+add_docstr(torch.is_floating_point,
+           r"""
+is_floating_point(tensor) -> (bool)
+
+Returns True if the data type of :attr:`tensor` is a floating point data type i.e.,
+one of ``torch.float64``, ``torch.float32`` and ``torch.float16``.
+
+Args:
+    tensor (Tensor): the PyTorch tensor to test
+""")
+
 add_docstr(torch.kthvalue,
            r"""
 kthvalue(input, k, dim=None, keepdim=False, out=None) -> (Tensor, LongTensor)
