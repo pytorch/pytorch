@@ -202,6 +202,15 @@ class TestAutograd(TestCase):
         x_grad, x_grad_clone = compute_grad(create_graph=True)
         self.assertEqual(x_grad, x_grad_clone)
 
+    def test_sum_to_with_empty_dim_grad(self):
+        a = torch.rand(4, 0)
+        b = torch.rand(4, 1, requires_grad=True)
+        c = a + b
+        assert c.shape == (4, 0)
+        c.sum().backward()
+
+        self.assertEqual(b.grad, torch.zeros(4, 1))
+
     def test_hessian_vector(self):
         x = torch.randn(2, 2, requires_grad=True)
         y = torch.randn(2, 2, requires_grad=True)
