@@ -23,7 +23,7 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
         stride=st.integers(1, 2),
         size=st.integers(10, 16),
         # depthwise 3x3 fast path only works for a multiple of 8
-        group=st.sampled_from([8, 32, 40]),
+        group=st.sampled_from([8, 24, 32]),
         batch_size=st.integers(1, 3),
         prepack_weight=st.booleans(),
         share_col_buffer=st.booleans(),
@@ -166,10 +166,10 @@ class DNNLowPOpConvDepthWiseTest(hu.HypothesisTestCase):
 
     @given(
         stride=st.integers(1, 2),
-        size=st.integers(10, 16),
+        size=st.integers(4, 12),
         # depthwise 3x3x3 fast path only works for a multiple of 8
-        group=st.sampled_from([8, 32, 40]),
-        batch_size=st.integers(1, 3),
+        group=st.sampled_from([8, 24, 32]),
+        batch_size=st.integers(1, 2),
         prepack_weight=st.booleans(),
         fuse_relu=st.booleans(),
         share_col_buffer=st.booleans(),

@@ -730,7 +730,7 @@ bool PoolGradientOp<float, CUDAContext, AveragePool>::
   CAFFE_ENFORCE_EQ(dY.dim32(1), X.dim32(1));
   auto* dX = Output(0);
   dX->ResizeLike(X);
-  vector<int> dims(X.dims().begin() + 2, X.dims().end());
+  vector<int> dims(X.sizes().begin() + 2, X.sizes().end());
   ConvPoolOpBase<CUDAContext>::ComputePads(dims);
   switch (kernel_.size()) {
     case 1:
@@ -814,7 +814,7 @@ bool PoolGradientOp<float, CUDAContext, AveragePool>::
   CAFFE_ENFORCE_EQ(X.dim32(X.ndim() - 1), dY.dim32(dY.ndim() - 1));
   auto* dX = Output(0);
   dX->ResizeLike(X);
-  vector<int> dims(X.dims().begin() + 1, X.dims().end() - 1);
+  vector<int> dims(X.sizes().begin() + 1, X.sizes().end() - 1);
   ConvPoolOpBase<CUDAContext>::ComputePads(dims);
   switch (kernel_.size()) {
     case 1:
@@ -1565,7 +1565,7 @@ bool PoolGradientOp<float, CUDAContext, MaxPool>::RunOnDeviceWithOrderNCHW() {
   CAFFE_ENFORCE_EQ(dY.ndim(), X.ndim());
   auto* dX = Output(0);
   dX->ResizeLike(X);
-  vector<int> dims(X.dims().begin() + 2, X.dims().end());
+  vector<int> dims(X.sizes().begin() + 2, X.sizes().end());
   ConvPoolOpBase<CUDAContext>::ComputePads(dims);
   switch (kernel_.size()) {
     case 1:
@@ -1654,7 +1654,7 @@ bool PoolGradientOp<float, CUDAContext, MaxPool>::RunOnDeviceWithOrderNHWC() {
   CAFFE_ENFORCE_EQ(dY.ndim(), X.ndim());
   auto* dX = Output(0);
   dX->ResizeLike(X);
-  vector<int> dims(X.dims().begin() + 1, X.dims().end() - 1);
+  vector<int> dims(X.sizes().begin() + 1, X.sizes().end() - 1);
   ConvPoolOpBase<CUDAContext>::ComputePads(dims);
   switch (kernel_.size()) {
     case 1:

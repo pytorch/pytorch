@@ -229,6 +229,8 @@ def sub(g, self, other, alpha=None):
 
 
 def rsub(g, self, other, alpha=None):
+    other = _maybe_get_scalar(other)
+    other = _if_scalar_type_as(g, other, self)
     return sub(g, other, self, alpha=alpha)
 
 

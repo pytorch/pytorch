@@ -55,6 +55,9 @@
 namespace torch {
 namespace jit {
 
+using caffe2::serialize::PyTorchStreamReader;
+using caffe2::serialize::PyTorchStreamWriter;
+
 // TODO: make a fake future for python
 namespace detail {
 class Future {};
