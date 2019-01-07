@@ -3,15 +3,17 @@
 #if USE_CUDA_FUSER || USE_CPU_FUSER
 
 #include <ATen/ATen.h>
-#include <torch/csrc/utils/disallow_copy.h>
-#include <torch/csrc/jit/fuser/tensor_desc.h>
 #include <torch/csrc/jit/fuser/partition_desc.h>
+#include <torch/csrc/jit/fuser/tensor_desc.h>
+#include <torch/csrc/utils/disallow_copy.h>
 
-#include <string>
 #include <cstdint>
+#include <string>
 #include <vector>
 
-namespace torch { namespace jit { namespace fuser {
+namespace torch {
+namespace jit {
+namespace fuser {
 
 struct FusedKernel {
   TH_DISALLOW_COPY_AND_ASSIGN(FusedKernel);
@@ -34,7 +36,6 @@ struct FusedKernel {
 
   virtual ~FusedKernel() = default;
 
-
   // arguments is a list of pointers to the arguments for the compiled CUDA/CPU
   // code.
   // The format of arguments is suitable for directly passing to a call to
@@ -43,23 +44,36 @@ struct FusedKernel {
   // CUDA code), and the remainder are pointers to the TensorInfo<T> structs
   // that compiled code uses to load Tensor data.
   // launch_with_tensors handles packing at::Tensors into this arguments array.
-  // CPU code uses the same convension so that launch_with_tensors can be shared.
-  virtual void launch_raw(
-    const uint32_t numel
-  , std::vector<void*>& arguments) const = 0;
+  // CPU code uses the same convension so that launch_with_tensors can be
+  // shared.
+  virtual void launch_raw(const uint32_t numel, std::vector<void*>& arguments)
+      const = 0;
   virtual at::Backend backend() const = 0;
 
   // Getters
-  const std::string& name() const { return name_; }
-  const std::string& code() const { return code_; }
-  const std::vector<TensorDesc>& inputDesc() const { return input_desc_; }
-  const std::vector<TensorDesc>& outputDesc() const { return output_desc_; }
-  const std::vector<PartitionDesc>& chunkDesc() const { return chunk_desc_; }
-  const std::vector<PartitionDesc>& concatDesc() const { return concat_desc_; }
-  bool hasRandom() const { return has_random_; }
+  const std::string& name() const {
+    return name_;
+  }
+  const std::string& code() const {
+    return code_;
+  }
+  const std::vector<TensorDesc>& inputDesc() const {
+    return input_desc_;
+  }
+  const std::vector<TensorDesc>& outputDesc() const {
+    return output_desc_;
+  }
+  const std::vector<PartitionDesc>& chunkDesc() const {
+    return chunk_desc_;
+  }
+  const std::vector<PartitionDesc>& concatDesc() const {
+    return concat_desc_;
+  }
+  bool hasRandom() const {
+    return has_random_;
+  }
 
-
-protected:
+ protected:
   const std::string name_;
   const std::string code_;
   const std::vector<TensorDesc> input_desc_;

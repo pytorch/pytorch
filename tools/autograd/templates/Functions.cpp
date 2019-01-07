@@ -88,8 +88,8 @@ int64_t _safe_size(IntList sizes, IntList dim) {
   return size;
 }
 
-Tensor norm_backward(const Tensor & grad, const Tensor & self, const Scalar & p_, const Tensor & norm) {
-  double p = p_.toDouble();
+Tensor norm_backward(const Tensor & grad, const Tensor & self, const optional<Scalar> & p_, const Tensor & norm) {
+  double p = p_.value_or(2.0).toDouble();
   Tensor self_scaled;
   Tensor scale_v;
   if (p == 0.0) {
@@ -114,7 +114,7 @@ Tensor norm_backward(const Tensor & grad, const Tensor & self, const Scalar & p_
   return self_scaled * scale_v;
 }
 
-Tensor norm_backward(Tensor grad, const Tensor & self, const Scalar & p_, Tensor norm, int64_t dim, bool keepdim) {
+Tensor norm_backward(Tensor grad, const Tensor & self, const optional<Scalar> & p_, Tensor norm, int64_t dim, bool keepdim) {
   if (!keepdim && self.dim() != 0) {
     grad = grad.unsqueeze(dim);
     norm = norm.unsqueeze(dim);
@@ -1371,7 +1371,7 @@ static inline int64_t _min_storage_size(IntList sizes, IntList strides, int64_t 
 }
 
 // See NOTE [ as_strided Backward and layout-aware/agnostic autograd ] for explanation
-Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList sizes, IntList strides, int64_t storage_offset) {
+Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList sizes, IntList strides, optional<int64_t> storage_offset_) {
   // For output geometry,
   //   check for size 0 dimensions,
   //   skip size 1 dimensions,
@@ -1379,6 +1379,7 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList s
   // Step (0)     for the algorithm in NOTE [ as_strided Backward and layout-aware/agnostic autograd ]
   // Step (0)~(1) for the algorithm in NOTE [ Detecting Memory Overlap Within A Strided Tensor ]
   //              on output geometry
+  auto storage_offset = storage_offset_.value_or(input_geometry.storage_offset());
   auto odim = grad.dim();
   std::vector<int64_t> out_sizes_, out_strides_;
   out_sizes_.reserve(odim);

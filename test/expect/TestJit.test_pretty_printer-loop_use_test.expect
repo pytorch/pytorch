@@ -7,4 +7,4 @@ def graph(self,
   while _0:
     y_2 = torch.add_(y, 1, 1)
     _0, y, z = bool(torch.lt(y_2, 8)), y_2, x
-  return x, z
+  return (x, z)

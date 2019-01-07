@@ -5,6 +5,7 @@
 #include <c10/util/Exception.h>
 
 #include <cstddef>
+#include <ostream>
 #include <vector>
 
 namespace torch {
@@ -30,8 +31,16 @@ Tensor DropoutImpl::forward(const Tensor& input) {
   return torch::dropout(input, options.rate_, this->is_training());
 }
 
+void DropoutImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Dropout(rate=" << options.rate_ << ")";
+}
+
 Tensor FeatureDropoutImpl::forward(const Tensor& input) {
   return torch::feature_dropout(input, options.rate_, this->is_training());
+}
+
+void FeatureDropoutImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::FeatureDropout(rate=" << options.rate_ << ")";
 }
 } // namespace nn
 } // namespace torch

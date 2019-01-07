@@ -461,16 +461,20 @@ void AsyncNetBase::finalizeEvents() {
 }
 
 ProfDAGProtos AsyncNetBase::GetOperatorStats() const {
-  return counters_.GetOperatorStats();
+  return counters_.GetReport().GetOperatorStats();
 }
 
 ProfDAGProtos AsyncNetBase::GetPerOperatorCost() const {
-  return counters_.GetPerOperatorCost();
+  return counters_.GetReport().GetPerOperatorCost();
+}
+
+ProfDAGReport AsyncNetBase::GetProfReport() const {
+  return counters_.GetReport();
 }
 
 AsyncNetBase::~AsyncNetBase() {
   if (options_.report_stats_) {
-    counters_.PrintStats();
+    counters_.GetReport().PrintStats();
   }
 }
 

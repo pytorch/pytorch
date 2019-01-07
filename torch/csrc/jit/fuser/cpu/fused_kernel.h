@@ -4,15 +4,18 @@
 
 #include <ATen/ATen.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/utils/disallow_copy.h>
 #include <torch/csrc/jit/fuser/cpu/dynamic_library.h>
 #include <torch/csrc/jit/fuser/fused_kernel.h>
+#include <torch/csrc/utils/disallow_copy.h>
 
-#include <string>
 #include <cstdint>
 #include <memory>
+#include <string>
 
-namespace torch { namespace jit { namespace fuser { namespace cpu {
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace cpu {
 
 // Represents a compiled CPU kernel and the metadata necessary to run it
 struct TORCH_API FusedKernelCPU : public ::torch::jit::fuser::FusedKernel {
@@ -34,7 +37,7 @@ struct TORCH_API FusedKernelCPU : public ::torch::jit::fuser::FusedKernel {
     kernel(numel, arguments.data());
   }
 
-private:
+ private:
   std::unique_ptr<DynamicLibrary> so_lib;
   void (*kernel)(uint32_t, void**) = nullptr;
 };

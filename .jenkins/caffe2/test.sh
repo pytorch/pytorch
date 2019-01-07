@@ -95,7 +95,7 @@ pip install --user pytest-sugar
   "$CAFFE2_PYPATH/python" \
   "${EXTRA_TESTS[@]}"
 
-cd ${INSTALL_PREFIX}
+cd /var/lib/jenkins
 
 if [[ -n "$INTEGRATED" ]]; then
   pip install --user torchvision

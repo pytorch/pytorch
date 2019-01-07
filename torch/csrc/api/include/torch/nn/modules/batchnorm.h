@@ -53,6 +53,9 @@ class TORCH_API BatchNormImpl : public torch::nn::Cloneable<BatchNormImpl> {
 
   void reset() override;
 
+  /// Pretty prints the `BatchNorm` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
   /// Applies batch normalization on the `input` using the stored mean and
   /// variance.
   ///

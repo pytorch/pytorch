@@ -310,7 +310,11 @@ class TestCppExtension(common.TestCase):
             verbose=True,
         )
 
-        torch.empty(2, 2, dtype=torch.complex64)
+        # Make sure that the empty tensor is of the desired shape and type
+        # Refer to https://github.com/pytorch/pytorch/issues/14829
+        t = torch.empty(2, 2, dtype=torch.complex64)
+        self.assertEqual(t.size(), torch.Size([2, 2]))
+        self.assertEqual(t.type(), 'torch.ComplexFloatTensor')
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_half_support(self):
@@ -449,7 +453,7 @@ class TestCppExtension(common.TestCase):
         sequential.to(old_dtype)
         self.assertEqual(sequential[2].parameters()[0].dtype, old_dtype)
 
-        # Make sure we can access these method recursively.
+        # Make sure we can access these methods recursively.
         self.assertEqual(len(list(sequential.parameters())), len(net.parameters()) * 2 + 1)
         self.assertEqual(len(list(sequential.named_parameters())), len(net.named_parameters()) * 2 + 1)
         self.assertEqual(len(list(sequential.buffers())), len(net.buffers()) * 2)
@@ -551,6 +555,22 @@ class TestCppExtension(common.TestCase):
             self.assertTrue(p.device.type == "cuda")
             self.assertTrue(p.device.index == 0)
             self.assertEqual(cpu_parameters[i], p)
+
+        net.cpu()
+        net.add_new_parameter("a", torch.eye(5))
+        net.add_new_parameter("b", torch.eye(5))
+        net.add_new_buffer("c", torch.eye(5))
+        net.add_new_buffer("d", torch.eye(5))
+        net.add_new_submodule("fc2")
+        net.add_new_submodule("fc3")
+
+        for p in net.parameters():
+            self.assertTrue(p.device.type == "cpu")
+
+        net.cuda()
+
+        for p in net.parameters():
+            self.assertTrue(p.device.type == "cuda")
 
     def test_returns_shared_library_path_when_is_python_module_is_true(self):
         source = """
