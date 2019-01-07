@@ -126,18 +126,6 @@ static void setInputBroadcastGroups(KernelSpec& spec) {
       std::back_inserter(spec.inputBroadcastGroups()));
 }
 
-// Note: assumes the spec is a single block
-// Note: This is the appropriate place to generalize if you want to add other
-//  passes to upfront compilation that walk the graph.
-static void setHasRandom(KernelSpec& spec) {
-  for (const auto& n : spec.graph()->nodes()) {
-    if (n->kind() == aten::rand_like) {
-      spec.setHasRandom(true);
-      return;
-    } 
-  }
-}
-
 // Performs "upfront" compilation where storage is known but shapes are not.
 // Currently identifies how to expand all tensors so that all intermediate
 // tensors are the same shape, simplifying code generation.
@@ -150,7 +138,6 @@ static void setHasRandom(KernelSpec& spec) {
 static void upfrontCompilation(KernelSpec& spec) {
   setInputBroadcastGroups(spec);
   setInputChunkDescriptors(spec);
-  setHasRandom(spec);
 }
 
 int64_t registerFusion(const Node* fusion_group) {
