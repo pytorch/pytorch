@@ -59,12 +59,11 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     const Tensor& save_mean /* optional */, const Tensor& save_invstd /* optional */,
     const Tensor& running_mean /* optional */, const Tensor& running_var /* optional */,
-    bool train, double momentum, double eps) {
+    bool train, double eps) {
 
   Tensor output = at::empty_like(input);
 
   int64_t n_input = input.size(1);
-  int64_t n = input.numel() / n_input;
 
   auto save_mean_a = conditional_accessor_1d<scalar_t>(save_mean);
   auto save_invstd_a = conditional_accessor_1d<scalar_t>(save_invstd);
@@ -464,10 +463,10 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const Tens
                                                   bool train, double momentum, double eps) {
   return AT_DISPATCH_FLOATING_TYPES(self.type(), "batch_norm", [&] {
       if (!train) {
-        return batch_norm_cpu_transform_input_template<scalar_t>(self, weight, bias, {}, {}, running_mean, running_var, train, momentum, eps);
+        return batch_norm_cpu_transform_input_template<scalar_t>(self, weight, bias, {}, {}, running_mean, running_var, train, eps);
       } else {
         auto save_stats = batch_norm_cpu_update_stats_template<scalar_t, InvStd>(self, running_mean, running_var, momentum, eps);
-        return batch_norm_cpu_transform_input_template<scalar_t>(self, weight, bias, std::get<0>(save_stats), std::get<1>(save_stats), running_mean, running_var, train, momentum, eps);
+        return batch_norm_cpu_transform_input_template<scalar_t>(self, weight, bias, std::get<0>(save_stats), std::get<1>(save_stats), running_mean, running_var, train, eps);
       }
     });
 }
