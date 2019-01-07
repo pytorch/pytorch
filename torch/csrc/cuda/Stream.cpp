@@ -58,7 +58,7 @@ static struct PyMemberDef THCPStream_members[] = {
 };
 
 static PyMethodDef THCPStream_methods[] = {
-  {(char*)"_query", (PyCFunction)THCPStream_query, METH_NOARGS, nullptr},
+  {(char*)"query", (PyCFunction)THCPStream_query, METH_NOARGS, nullptr},
   {nullptr}
 };
 

@@ -75,7 +75,7 @@ class Stream(torch._C._CudaStreamBase):
 
         Returns:
             A boolean indicating if all kernels in this stream are completed."""
-        return self._query()
+        return super(Stream, self).query()
 
     def synchronize(self):
         r"""Wait for all the kernels in this stream to complete.

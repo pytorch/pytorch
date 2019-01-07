@@ -468,7 +468,7 @@ from .random import *
 from ..storage import _StorageBase
 
 
-def _dummy_type(name, functions=None):
+def _dummy_type(name):
     def init_err(self):
         class_name = self.__class__.__name__
         raise RuntimeError(
