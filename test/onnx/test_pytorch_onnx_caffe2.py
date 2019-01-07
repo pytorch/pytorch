@@ -1001,6 +1001,14 @@ class TestCaffe2Backend(unittest.TestCase):
         model = nn.GroupNorm(3, 6)
         self.run_model_test(model, train=True, input=c, batch_size=BATCH_SIZE)
 
+    def test_rsub(self):
+        class RsubModel(torch.nn.Module):
+            def forward(self, x):
+                return 1 - x
+
+        x = torch.randn(1, 2)
+        self.run_model_test(RsubModel(), train=False, input=(x,),
+                            batch_size=BATCH_SIZE, use_gpu=False)
 
 # a bit of metaprogramming to set up all the rnn tests
 

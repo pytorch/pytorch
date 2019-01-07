@@ -3339,6 +3339,25 @@ a")
         self.run_pass('constant_pooling', graph)
         self.assertExpectedGraph(graph)
 
+    def test_constant_pooling_none(self):
+        @torch.jit.script
+        def typed_nones(a=None, b=None, c=None):
+            # type: (Optional[int], Optional[bool], Optional[Tensor]) -> Tuple[Optional[int], Optional[bool], Optional[Tensor]] # noqa
+            return a, b, c
+
+        @torch.jit.script
+        def test(a):
+            # type: (bool) -> None
+            if a:
+                print(typed_nones())
+            else:
+                print(typed_nones())
+
+        graph_str = str(test.graph)
+        self.assertTrue(graph_str.count("bool? = prim::None") == 1)
+        self.assertTrue(graph_str.count("int? = prim::None") == 1)
+        self.assertTrue(graph_str.count("None = prim::None") == 1)
+
     def test_literal(self):
         def func1(a, b):
             c = a, b
@@ -8312,6 +8331,21 @@ a")
         # testing that the correct error message propagates
         with self.assertRaisesRegex(RuntimeError, "Expected 4-dimensional input for 4-dimensional weight"):
             foo(torch.ones([123]))  # wrong size
+
+    def test_builtin_error_messsage(self):
+        from torch.nn.modules.utils import _single, _pair, _triple, _quadruple
+
+        with self.assertRaisesRegex(RuntimeError, "aten::masked_fill_"):
+            @torch.jit.script
+            def close_match(x):
+                return x.masked_fill(True)
+
+        with self.assertRaisesRegex(RuntimeError, "This op may not exist or may not be currently "
+                                    "supported in TorchScript"):
+            @torch.jit.script
+            def unknown_op(x):
+                torch.set_grad_enabled(True)
+                return x
 
     def test_exceptions(self):
         cu = torch.jit.CompilationUnit('''

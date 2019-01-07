@@ -51,6 +51,13 @@ void magmaGetriBatched(
 }
 
 template<class scalar_t>
+void magmaCholeskySolve(
+    magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, scalar_t* dA, magma_int_t ldda,
+    scalar_t* dB, magma_int_t lddb, magma_int_t* info) {
+  AT_ERROR("cholesky_solve only takes float or double Tensors");
+}
+
+template<class scalar_t>
 void magmaCholeskySolveBatched(
     magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, scalar_t** dA_array, magma_int_t ldda,
     scalar_t** dB_array, magma_int_t lddb, magma_int_t& info, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
@@ -131,6 +138,20 @@ void magmaGetriBatched<float>(
     magma_int_t** ipiv_array, float** dinvA_array, magma_int_t lddia,
     magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
   magma_sgetri_outofplace_batched(n, dA_array, ldda, ipiv_array, dinvA_array, lddia, info_array, batchsize, magma_queue.get_queue());
+}
+
+template<>
+void magmaCholeskySolve<double>(
+    magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, double* dA, magma_int_t ldda,
+    double* dB, magma_int_t lddb, magma_int_t* info) {
+  magma_dpotrs_gpu(uplo, n, nrhs, dA, ldda, dB, lddb, info);
+}
+
+template<>
+void magmaCholeskySolve<float>(
+    magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, float* dA, magma_int_t ldda,
+    float* dB, magma_int_t lddb, magma_int_t* info) {
+  magma_spotrs_gpu(uplo, n, nrhs, dA, ldda, dB, lddb, info);
 }
 
 template<>
@@ -326,32 +347,38 @@ AT_ERROR("cholesky_solve: MAGMA library not found in "
 
   auto A_data = A.data<scalar_t>();
   auto b_data = b.data<scalar_t>();
-  auto A_mat_stride = matrixStride(A);
-  auto b_mat_stride = matrixStride(b);
-
-  magma_int_t batch_size = magma_int_cast(batchCount(A), "batchCount");
   magma_int_t n = magma_int_cast(A.size(-2), "A.size(-2)");
   magma_int_t nrhs = magma_int_cast(b.size(-1), "b.size(-1)");
 
-  magma_int_t info_tmp;
-  scalar_t** A_array;
-  scalar_t** b_array;
+  int info_tmp;
+  if (b.dim() == 2) {
+    magmaCholeskySolve<scalar_t>(uplo, n, nrhs, A_data, n,
+                                 b_data, n, &info_tmp);
+    info = info_tmp;
+  } else {
+    auto A_mat_stride = matrixStride(A);
+    auto b_mat_stride = matrixStride(b);
+    magma_int_t batch_size = magma_int_cast(batchCount(A), "batchCount");
 
-  ALLOCATE_ARRAY(A_array, scalar_t*, batch_size, b);
-  ALLOCATE_ARRAY(b_array, scalar_t*, batch_size, b);
+    scalar_t** A_array;
+    scalar_t** b_array;
 
-  // Set up the created arrays
-  for (int64_t i = 0; i < batch_size; i++) {
-    A_array[i] = &A_data[i * A_mat_stride];
-    b_array[i] = &b_data[i * b_mat_stride];
+    ALLOCATE_ARRAY(A_array, scalar_t*, batch_size, b);
+    ALLOCATE_ARRAY(b_array, scalar_t*, batch_size, b);
+
+    // Set up the created arrays
+    for (int64_t i = 0; i < batch_size; i++) {
+      A_array[i] = &A_data[i * A_mat_stride];
+      b_array[i] = &b_data[i * b_mat_stride];
+    }
+
+    MAGMAQueue magma_queue(b.get_device());
+    magmaCholeskySolveBatched<scalar_t>(
+        uplo, n, nrhs, A_array, n, b_array, n,
+        info_tmp, batch_size, magma_queue);
+
+    info = info_tmp;
   }
-
-  MAGMAQueue magma_queue(b.get_device());
-  magmaCholeskySolveBatched<scalar_t>(
-      uplo, n, nrhs, A_array, n, b_array, n,
-      info_tmp, batch_size, magma_queue);
-
-  info = info_tmp;
 #endif
 }
 

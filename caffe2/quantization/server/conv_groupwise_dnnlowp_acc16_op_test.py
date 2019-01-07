@@ -193,7 +193,7 @@ class GroupWiseDNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         in_quantized=st.booleans(),
         out_quantized=st.booleans(),
         prepack_weight=st.booleans(),
-        nbits_in_non_outlier=st.sampled_from((6, 8)),
+        nbits_in_non_outlier=st.sampled_from((0, 1, 6, 8)),
         share_col_buffer=st.booleans(),
         **hu.gcs_cpu_only
     )
@@ -223,54 +223,38 @@ class GroupWiseDNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
         input_channels = input_channels_per_group * group
         output_channels = output_channels_per_group * group
 
-        if nbits_in_non_outlier == 0:
-            X, W, b = generate_conv_inputs(
-                stride,
-                pad,
-                kernel,
-                dilation,
-                size,
-                group,
-                input_channels_per_group,
-                output_channels_per_group,
-                batch_size,
-                order,
-                True,  # group-wise
+        X_min = -77
+        X_max = X_min + 255
+        X = np.random.rand(batch_size, size, size, input_channels) * 4 + X_min
+        X = np.round(X).astype(np.float32)
+        X[..., 0] = X_min
+        X[0, 0, 0, 1] = X_max
+
+        W_min = -100
+        W_max = W_min + 255
+        W = (
+            np.random.rand(
+                output_channels, kernel, kernel, input_channels_per_group
             )
-        else:
-            X_min = -77
-            X_max = X_min + 255
-            X = np.random.rand(batch_size, size, size, input_channels) * 4 + X_min
-            X = np.round(X).astype(np.float32)
-            X[..., 0] = X_min
-            X[0, 0, 0, 1] = X_max
+            * 4
+            - 2
+            + W_min
+            + 128
+        )
+        W = np.round(W).astype(np.float32)
+        W[..., 1] = W_min + 128  # "zeros"
+        for g in range(group):
+            W[g * output_channels_per_group, 0, 0, 0] = W_min
+            W[g * output_channels_per_group + 1, 0, 0, 0] = W_max
+            W[
+                g * output_channels_per_group : (g + 1) * output_channels_per_group,
+            ] += g
 
-            W_min = -100
-            W_max = W_min + 255
-            W = (
-                np.random.rand(
-                    output_channels, kernel, kernel, input_channels_per_group
-                )
-                * 4
-                - 2
-                + W_min
-                + 128
-            )
-            W = np.round(W).astype(np.float32)
-            W[..., 1] = W_min + 128  # "zeros"
-            for g in range(group):
-                W[g * output_channels_per_group, 0, 0, 0] = W_min
-                W[g * output_channels_per_group + 1, 0, 0, 0] = W_max
-                W[
-                    g * output_channels_per_group : (g + 1) * output_channels_per_group,
-                ] += g
+        if order == "NCHW":
+            X = utils.NHWC2NCHW(X)
+            W = utils.NHWC2NCHW(W)
 
-            if order == "NCHW":
-                X = utils.NHWC2NCHW(X)
-                W = utils.NHWC2NCHW(W)
-
-            # No input quantization error in bias
-            b = np.round(np.random.randn(output_channels)).astype(np.float32)
+        b = np.round(np.random.randn(output_channels)).astype(np.float32)
 
         Output = collections.namedtuple("Output", ["Y", "op_type", "engine", "order"])
         outputs = []
