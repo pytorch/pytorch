@@ -492,9 +492,9 @@ class LSTM(RNNBase):
                                 mini_batch, self.hidden_size)
 
         self.check_hidden_size(hidden[0], expected_hidden_size,
-                          'Expected hidden[0] size {}, got {}')
+                               'Expected hidden[0] size {}, got {}')
         self.check_hidden_size(hidden[1], expected_hidden_size,
-                          'Expected hidden[1] size {}, got {}')
+                               'Expected hidden[1] size {}, got {}')
 
     @weak_script_method
     def permute_hidden(self, hx, permutation):
@@ -506,7 +506,7 @@ class LSTM(RNNBase):
 
     @weak_script_method
     def forward_impl(self, input, hx, batch_sizes, max_batch_size, sorted_indices):
-        # type: (Tensor, Optional[Tuple[Tensor, Tensor]], Optional[Tensor], int, Optional[Tensor]) -> Tuple[Tensor, Tuple[Tensor, Tensor]]
+        # type: (Tensor, Optional[Tuple[Tensor, Tensor]], Optional[Tensor], int, Optional[Tensor]) -> Tuple[Tensor, Tuple[Tensor, Tensor]]  # noqa
         if hx is None:
             num_directions = 2 if self.bidirectional else 1
             zeros = torch.zeros(self.num_layers * num_directions,
@@ -552,7 +552,6 @@ class LSTM(RNNBase):
         output, hidden = self.forward_impl(input, hx, batch_sizes, max_batch_size, sorted_indices)
 
         output = get_packed_sequence(output, batch_sizes, sorted_indices, unsorted_indices)
-        # output = torch.jit.annotate(Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], (output, batch_sizes, sorted_indices, unsorted_indices))
         return output, self.permute_hidden(hidden, unsorted_indices)
 
 

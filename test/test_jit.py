@@ -9056,6 +9056,29 @@ a")
 
         self.checkScript(foo, [torch.rand(2, 3)])
 
+    def test_nn_LSTM(self):
+        input = torch.nn.utils.rnn.pack_sequence([torch.randn(5, 5)])
+
+        class S(torch.jit.ScriptModule):
+            def __init__(self):
+                super(S, self).__init__()
+                self.x = torch.nn.LSTM(5, 5)
+
+            @torch.jit.script_method
+            def forward(self, input):
+                # type: (Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]]) -> Tuple[Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Tuple[Tensor, Tensor]]  # noqa
+                return self.x(input)
+
+        eager_out = self.runAndSaveRNG(lambda input: torch.nn.LSTM(5, 5)(input)[0], (input,))
+        script_out = self.runAndSaveRNG(lambda input: S()(input)[0], (input,))
+
+        # jit returns a regular tuple instead of a PackedSequence namedtuple,
+        # so compare the elements directly
+        self.assertEqual(eager_out[0], script_out[0])
+        self.assertEqual(eager_out[1], script_out[1])
+        self.assertEqual(eager_out[2], script_out[2])
+        self.assertEqual(eager_out[3], script_out[3])
+
 
 class MnistNet(nn.Module):
     def __init__(self):

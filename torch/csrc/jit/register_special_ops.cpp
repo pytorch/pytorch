@@ -129,11 +129,7 @@ RegisterOperators reg({
         "aten::_pack_sequence(Tensor output, Tensor batch_sizes, Tensor? sorted_indices, Tensor? unsorted_indices) -> (Tensor, Tensor, Tensor?, Tensor?)",
         [](const Node* node) {
           return [](Stack& stack) {
-            std::vector<IValue> elems{
-                std::make_move_iterator(stack.end() - 4),
-                std::make_move_iterator(stack.end())};
-            drop(stack, 4);
-            push(stack, Tuple::create(std::move(elems)));
+            // Intentional noop
             return 0;
           };
         }),
