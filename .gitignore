@@ -65,7 +65,6 @@ torch/lib/cmake
 torch/lib/include
 torch/lib/pkgconfig
 torch/lib/protoc
-torch/lib/tmp_install
 torch/lib/torch_shm_manager
 torch/lib/python*
 torch/share/

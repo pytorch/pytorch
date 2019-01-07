@@ -184,6 +184,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: ceil_
    .. automethod:: char
    .. automethod:: cholesky
+   .. automethod:: cholesky_solve
    .. automethod:: chunk
    .. automethod:: clamp
    .. automethod:: clamp_
@@ -258,6 +259,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: int
    .. automethod:: inverse
    .. automethod:: is_contiguous
+   .. automethod:: is_floating_point
    .. automethod:: is_pinned
    .. automethod:: is_set_to
    .. automethod:: is_signed

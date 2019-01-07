@@ -135,7 +135,7 @@ bool RoIPoolOp<float, CUDAContext>::RunOnDevice() {
     // mutable_data calls are needed to allocate the tensors
     Y->template mutable_data<float>();
     if (!is_test_) {
-      A->Resize(Y->dims());
+      A->Resize(Y->sizes());
       A->template mutable_data<int>();
     }
     return true;
@@ -143,7 +143,7 @@ bool RoIPoolOp<float, CUDAContext>::RunOnDevice() {
 
   Y->Resize(R.dim32(0), X.dim32(1), pooled_height_, pooled_width_);
   if (!is_test_) {
-    A->Resize(Y->dims());
+    A->Resize(Y->sizes());
   }
   int output_size = Y->size();
   int* argmax_data = is_test_ ? nullptr : A->template mutable_data<int>();
