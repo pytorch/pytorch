@@ -392,7 +392,7 @@ def isnan(tensor):
 
 
 def unique(input, sorted=False, return_inverse=False, return_counts=False, dim=None):
-    r"""Returns the unique scalar elements of the input tensor as a 1-D tensor.
+    r"""Returns the unique elements of the input tensor.
 
     Arguments:
         input (Tensor): the input tensor
@@ -400,18 +400,26 @@ def unique(input, sorted=False, return_inverse=False, return_counts=False, dim=N
             before returning as output.
         return_inverse (bool): Whether to also return the indices for where
             elements in the original input ended up in the returned unique list.
+        return_counts (bool): Whether to also return the counts for each unique
+            element.
         dim (int): the dimension to apply unique. If ``None``, the unique of the
             flattened input is returned. default: ``None``
 
     Returns:
-        (Tensor, Tensor (optional)): A tensor or a tuple of tensors containing
+        (Tensor, Tensor (optional) Tensor (optional)):
+        A tensor or a tuple of tensors containing
 
             - **output** (*Tensor*): the output list of unique scalar elements.
             - **inverse_indices** (*Tensor*): (optional) if
-              :attr:`return_inverse` is True, there will be a
-              2nd returned tensor (same shape as input) representing the indices
+              :attr:`return_inverse` is True, there will be an additional
+              returned tensor (same shape as input) representing the indices
               for where elements in the original input map to in the output;
               otherwise, this function will only return a single tensor.
+              - **counts** (*Tensor*): (optional) if
+              :attr:`return_counts` is True, there will be an additional
+              returned tensor (same shape as output or output.size(dim),
+              if dim was specified) representing the number of occurences
+              for each unique value or tensor.
 
     Example::
 
