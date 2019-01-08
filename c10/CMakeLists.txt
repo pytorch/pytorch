@@ -94,7 +94,7 @@ endif()
 # individual libraries like libc10.so and libcaffe2.so are still self-contained.
 install(TARGETS c10 EXPORT Caffe2Targets DESTINATION lib)
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
-        DESTINATION lib/include
+        DESTINATION include
         FILES_MATCHING PATTERN "*.h")
 install(FILES ${CMAKE_BINARY_DIR}/c10/macros/cmake_macros.h
-        DESTINATION lib/include/c10/macros)
+        DESTINATION include/c10/macros)

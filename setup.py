@@ -230,6 +230,7 @@ except ImportError:
 cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
 third_party_path = os.path.join(cwd, "third_party")
+tmp_install_path = lib_path + "/tmp_install"
 caffe2_build_dir = os.path.join(cwd, "build")
 # lib/pythonx.x/site-packages
 rel_site_packages = distutils.sysconfig.get_python_lib(prefix='')
@@ -446,6 +447,7 @@ class build_deps(PytorchCommand):
             if not same:
                 shutil.copyfile(orig_file, sym_file)
 
+        self.copy_tree('torch/lib/tmp_install/share', 'torch/share')
         self.copy_tree('third_party/pybind11/include/pybind11/',
                        'torch/lib/include/pybind11')
 
@@ -595,7 +597,7 @@ class build_ext(build_ext_parent):
 
     def build_extensions(self):
         # The caffe2 extensions are created in
-        # <pytorch_root>/torch/lib/pythonM.m/site-packages/caffe2/python/
+        # tmp_install/lib/pythonM.m/site-packages/caffe2/python/
         # and need to be copied to build/lib.linux.... , which will be a
         # platform dependent build folder created by the "build" command of
         # setuptools. Only the contents of this folder are installed in the
@@ -616,7 +618,7 @@ class build_ext(build_ext_parent):
             filename = self.get_ext_filename(fullname)
             report("\nCopying extension {}".format(ext.name))
 
-            src = os.path.join(cwd, 'torch', rel_site_packages, filename)
+            src = os.path.join(tmp_install_path, rel_site_packages, filename)
             if not os.path.exists(src):
                 report("{} does not exist".format(src))
                 del self.extensions[i]
