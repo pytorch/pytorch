@@ -35,7 +35,7 @@ C10_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
 // Tensor created from .data or .detach().
 //
 // For more detail, see comment for `allow_tensor_metadata_change_` field.
-C10_DECLARE_string(err_msg_for_changing_metadata_on_derived_tensor);
+CAFFE2_API extern const std::string err_msg_for_changing_metadata_on_derived_tensor;
 
 namespace at {
 class Tensor;
@@ -669,7 +669,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * which is harder to misuse.
    */
   virtual void resize_dim(int64_t ndim) {
-    AT_CHECK(allow_tensor_metadata_change(), "resize_dim " + FLAGS_err_msg_for_changing_metadata_on_derived_tensor);
+    AT_CHECK(allow_tensor_metadata_change(), "resize_dim ", err_msg_for_changing_metadata_on_derived_tensor);
     sizes_.resize(ndim, 0);
     strides_.resize(ndim, 0);
     refresh_numel();
@@ -685,7 +685,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * which is harder to misuse.
    */
   virtual void set_size(int64_t dim, int64_t new_size) {
-    AT_CHECK(allow_tensor_metadata_change(), "set_size " + FLAGS_err_msg_for_changing_metadata_on_derived_tensor);
+    AT_CHECK(allow_tensor_metadata_change(), "set_size ", err_msg_for_changing_metadata_on_derived_tensor);
     sizes_.at(dim) = new_size;
     refresh_numel();
     refresh_contiguous();
@@ -698,7 +698,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * which is harder to misuse.
    */
   virtual void set_stride(int64_t dim, int64_t new_stride) {
-    AT_CHECK(allow_tensor_metadata_change(), "set_stride " + FLAGS_err_msg_for_changing_metadata_on_derived_tensor);
+    AT_CHECK(allow_tensor_metadata_change(), "set_stride ", err_msg_for_changing_metadata_on_derived_tensor);
     strides_[dim] = new_stride;
     refresh_numel();
     refresh_contiguous();
@@ -712,7 +712,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * (and resizing if necessary.)
    */
   virtual void set_storage_offset(int64_t storage_offset) {
-    AT_CHECK(allow_tensor_metadata_change(), "set_storage_offset " + FLAGS_err_msg_for_changing_metadata_on_derived_tensor);
+    AT_CHECK(allow_tensor_metadata_change(), "set_storage_offset ", err_msg_for_changing_metadata_on_derived_tensor);
     storage_offset_ = storage_offset;
   }
 
@@ -727,7 +727,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * See Note [We regret making Variable hold a Tensor]
    */
   void set_sizes_contiguous(IntList new_size) {
-    AT_CHECK(allow_tensor_metadata_change(), "set_sizes_contiguous " + FLAGS_err_msg_for_changing_metadata_on_derived_tensor);
+    AT_CHECK(allow_tensor_metadata_change(), "set_sizes_contiguous ", err_msg_for_changing_metadata_on_derived_tensor);
     AT_ASSERT(!is_variable());
     auto old_dim = sizes_.size();
     auto new_dim = new_size.size();
@@ -752,7 +752,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * See Note [We regret making Variable hold a Tensor]
    */
   void set_sizes_and_strides(IntList new_size, IntList new_stride) {
-    AT_CHECK(allow_tensor_metadata_change(), "set_sizes_and_strides " + FLAGS_err_msg_for_changing_metadata_on_derived_tensor);
+    AT_CHECK(allow_tensor_metadata_change(), "set_sizes_and_strides ", err_msg_for_changing_metadata_on_derived_tensor);
     AT_ASSERT(!is_variable());
     AT_CHECK(
         new_size.size() == new_stride.size(),
@@ -1238,7 +1238,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void set_storage(at::Storage storage) {
-    AT_CHECK(allow_tensor_metadata_change(), "set_storage " + FLAGS_err_msg_for_changing_metadata_on_derived_tensor);
+    AT_CHECK(allow_tensor_metadata_change(), "set_storage ", err_msg_for_changing_metadata_on_derived_tensor);
     storage_ = std::move(storage);
     data_type_ = storage_.dtype();
   }

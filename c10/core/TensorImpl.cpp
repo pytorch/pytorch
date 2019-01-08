@@ -15,13 +15,11 @@ C10_DEFINE_int64(
     "The maximum memory in bytes to keep on shrink, if the difference between "
     "tensor sizes is bigger than this then tensor will be reset.");
 
-C10_DEFINE_string(
-    err_msg_for_changing_metadata_on_derived_tensor,
+const std::string err_msg_for_changing_metadata_on_derived_tensor =
     "is not allowed on Tensor created from .data or .detach(). "
     "If you are using Python API, please make sure the Python function is called on the original tensor "
     "(not the tensor created from .data or .detach()), "
-    "and the function call is wrapped in a `with torch.no_grad():` block",
-    "Error message when changing tensor metadata on Tensor created from .data or .detach()");
+    "and the function call is wrapped in a `with torch.no_grad():` block";
 
 namespace c10 {
 
