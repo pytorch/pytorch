@@ -4,7 +4,6 @@
 #include <torch/csrc/cuda/Module.h>
 
 #include <c10/cuda/CUDAGuard.h>
-#include <c10/cuda/CUDAStream.h>
 
 #include <structmember.h>
 #include <cuda_runtime_api.h>
@@ -38,27 +37,46 @@ static PyObject * THCPStream_pynew(PyTypeObject *type, PyObject *args, PyObject 
 
   THCPStream* self = (THCPStream *)ptr.get();
   self->cdata = stream.pack();
-  self->device = stream.device_index();
-  self->cuda_stream = stream.stream();
+  self->cuda_stream = stream;
   return (PyObject *)ptr.release();
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject * THCPStream_query(THCPStream *self) {
   HANDLE_TH_ERRORS
-  return PyBool_FromLong(at::cuda::CUDAStream::unpack(self->cdata).query());
+  return PyBool_FromLong(self->cuda_stream.query());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THCPStream_device(THCPStream *self) {
+  HANDLE_TH_ERRORS
+  return PyLong_FromLong(self->cuda_stream.device_index());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THCPStream_stream(THCPStream *self) {
+  HANDLE_TH_ERRORS
+  return PyLong_FromUnsignedLongLong(
+    (unsigned long long)self->cuda_stream.stream());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THCPStream_eq(THCPStream *self, THCPStream *other) {
+  HANDLE_TH_ERRORS
+  return PyBool_FromLong(self->cuda_stream == other->cuda_stream);
   END_HANDLE_TH_ERRORS
 }
 
 static struct PyMemberDef THCPStream_members[] = {
   {(char*)"_cdata", T_ULONGLONG, offsetof(THCPStream, cdata), READONLY, nullptr},
-  {(char*)"device", T_INT, offsetof(THCPStream, device), READONLY, nullptr},
-  {(char*)"cuda_stream", T_ULONGLONG, offsetof(THCPStream, cuda_stream), READONLY, nullptr},
   {nullptr}
 };
 
 static PyMethodDef THCPStream_methods[] = {
   {(char*)"query", (PyCFunction)THCPStream_query, METH_NOARGS, nullptr},
+  {(char*)"device", (PyCFunction)THCPStream_device, METH_NOARGS, nullptr},
+  {(char*)"stream", (PyCFunction)THCPStream_stream, METH_NOARGS, nullptr},
+  {(char*)"__eq__", (PyCFunction)THCPStream_eq, METH_O, nullptr},
   {nullptr}
 };
 

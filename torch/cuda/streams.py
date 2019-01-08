@@ -104,19 +104,19 @@ class Stream(torch._C._CudaStreamBase):
 
     @property
     def _as_parameter_(self):
-        return ctypes.c_void_p(self.cuda_stream)
+        return ctypes.c_void_p(self.stream())
+
+    def __hash__(self):
+        return hash((self.stream(), self.device()))
 
     def __eq__(self, o):
         if isinstance(o, Stream):
-            return o.device == self.device and o.cuda_stream == self.cuda_stream
+            return super(Stream, self).__eq__(o)
         return False
-
-    def __hash__(self):
-        return hash((self.cuda_stream, self.device))
 
     def __repr__(self):
         return ('<torch.cuda.Stream device={0} cuda_stream={1:#x}>'
-                .format(self.device, self.cuda_stream))
+                .format(self.device(), self.stream()))
 
 
 class EventHandle(ctypes.Structure):
