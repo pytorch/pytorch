@@ -42,8 +42,13 @@ class PoolOp final : public ConvPoolOpBase<Context> {
     const int N = X.dim32(0);
     const int C = X.dim32(1);
     ConvPoolOpBase<Context>::SetOutputSize(X, Y, C);
-    const std::vector<int> X_dims = GetDims(X);
-    const std::vector<int> Y_dims = GetDims(*Y);
+    const T* X_data = X.template data<T>();
+    T* Y_data = Y->template mutable_data<T>();
+    if (global_pooling_) {
+      const int HxW = X.numel() / (N * C);
+      return functor_.template GlobalPoolingForward<T, StorageOrder::NCHW>(
+          N, C, HxW, X_data, Y_data, &context_);
+    }
     const int image_ndim = ndim - 2;
     switch (image_ndim) {
       case 1: {
@@ -56,8 +61,8 @@ class PoolOp final : public ConvPoolOpBase<Context> {
             {dilation_[0]},
             {stride_[0]},
             {pads_[0], pads_[1]},
-            X.template data<T>(),
-            Y->template mutable_data<T>(),
+            X_data,
+            Y_data,
             &context_);
       }
       case 2: {
@@ -70,8 +75,8 @@ class PoolOp final : public ConvPoolOpBase<Context> {
             {dilation_[0], dilation_[1]},
             {stride_[0], stride_[1]},
             {pads_[0], pads_[1], pads_[2], pads_[3]},
-            X.template data<T>(),
-            Y->template mutable_data<T>(),
+            X_data,
+            Y_data,
             &context_);
       }
       case 3: {
@@ -84,8 +89,8 @@ class PoolOp final : public ConvPoolOpBase<Context> {
             {dilation_[0], dilation_[1], dilation_[2]},
             {stride_[0], stride_[1], stride_[2]},
             {pads_[0], pads_[1], pads_[2], pads_[3], pads_[4], pads_[5]},
-            X.template data<T>(),
-            Y->template mutable_data<T>(),
+            X_data,
+            Y_data,
             &context_);
       }
       default: {
@@ -102,6 +107,13 @@ class PoolOp final : public ConvPoolOpBase<Context> {
     const int N = X.dim32(0);
     const int C = X.dim32(ndim - 1);
     ConvPoolOpBase<Context>::SetOutputSize(X, Y, C);
+    const T* X_data = X.template data<T>();
+    T* Y_data = Y->template mutable_data<T>();
+    if (global_pooling_) {
+      const int HxW = X.numel() / (N * C);
+      return functor_.template GlobalPoolingForward<T, StorageOrder::NHWC>(
+          N, C, HxW, X_data, Y_data, &context_);
+    }
     const int image_ndim = ndim - 2;
     switch (image_ndim) {
       case 1: {
@@ -114,8 +126,8 @@ class PoolOp final : public ConvPoolOpBase<Context> {
             {dilation_[0]},
             {stride_[0]},
             {pads_[0], pads_[1]},
-            X.template data<T>(),
-            Y->template mutable_data<T>(),
+            X_data,
+            Y_data,
             &context_);
       }
       case 2: {
@@ -128,8 +140,8 @@ class PoolOp final : public ConvPoolOpBase<Context> {
             {dilation_[0], dilation_[1]},
             {stride_[0], stride_[1]},
             {pads_[0], pads_[1], pads_[2], pads_[3]},
-            X.template data<T>(),
-            Y->template mutable_data<T>(),
+            X_data,
+            Y_data,
             &context_);
       }
       case 3: {
@@ -142,8 +154,8 @@ class PoolOp final : public ConvPoolOpBase<Context> {
             {dilation_[0], dilation_[1], dilation_[2]},
             {stride_[0], stride_[1], stride_[2]},
             {pads_[0], pads_[1], pads_[2], pads_[3], pads_[4], pads_[5]},
-            X.template data<T>(),
-            Y->template mutable_data<T>(),
+            X_data,
+            Y_data,
             &context_);
       }
       default: {
@@ -310,6 +322,15 @@ struct AveragePoolFunctor {
       : count_include_pad(
             op.template GetSingleArgument<bool>("count_include_pad", false)) {}
 
+  template <typename T, StorageOrder kOrder>
+  bool GlobalPoolingForward(
+      int N,
+      int C,
+      int HxW,
+      const T* X,
+      T* Y,
+      Context* context) const;
+
   template <typename T, StorageOrder kOrder, int D>
   bool Forward(
       int N,
@@ -346,6 +367,15 @@ struct AveragePoolFunctor {
 template <class Context>
 struct MaxPoolFunctor {
   explicit MaxPoolFunctor(const OperatorBase& /* op */) {}
+
+  template <typename T, StorageOrder kOrder>
+  bool GlobalPoolingForward(
+      int N,
+      int C,
+      int HxW,
+      const T* X,
+      T* Y,
+      Context* context) const;
 
   template <typename T, StorageOrder kOrder, int D>
   bool Forward(
