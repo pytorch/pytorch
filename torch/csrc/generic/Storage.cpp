@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/Storage.cpp"
+#define TH_GENERIC_FILE "torch/csrc/generic/Storage.cpp"
 #else
 
 PyObject *THPStorageClass = nullptr;
@@ -328,9 +328,9 @@ void THPStorage_(initCopyMethods)()
 #endif // !defined(THD_GENERIC_FILE)
 }
 
-#include "StorageMethods.cpp"
+#include <torch/csrc/generic/StorageMethods.cpp>
 #ifndef THD_GENERIC_FILE
-#include "StorageSharing.cpp"
+#include <torch/csrc/generic/StorageSharing.cpp>
 #endif
 
 bool THPStorage_(init)(PyObject *module)

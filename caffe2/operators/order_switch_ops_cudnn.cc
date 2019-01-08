@@ -28,6 +28,7 @@ class CuDNNOrderSwithOpBase : public Operator<CUDAContext> {
   }
 
  protected:
+  // TODO: std::vector<int> -> std::vector<int64_t>
   void SetTensorDescriptor(
       const cudnnDataType_t data_type,
       const StorageOrder order,
@@ -82,7 +83,7 @@ class CuDNNNHWC2NCHWOp final : public CuDNNOrderSwithOpBase {
   template <typename T>
   bool DoRunWithType() {
     const auto& X = Input(0);
-    auto* Y = Output(0);
+
     const int ndim = X.dim();
     const int N = X.dim32(0);
     const int C = X.dim32(ndim - 1);
@@ -91,7 +92,9 @@ class CuDNNNHWC2NCHWOp final : public CuDNNOrderSwithOpBase {
     Y_dims[0] = N;
     Y_dims[1] = C;
     std::copy(X_dims.cbegin() + 1, X_dims.cend() - 1, Y_dims.begin() + 2);
-    Y->Resize(Y_dims);
+    std::vector<int64_t> Y_dims_64;
+    std::copy(Y_dims.cbegin(), Y_dims.cend(), std::back_inserter(Y_dims_64));
+    auto* Y = Output(0, Y_dims_64, at::dtype<T>());
     if (cached_X_dims_ != X_dims) {
       cached_X_dims_ = X_dims;
       SetTensorDescriptor(
@@ -123,7 +126,7 @@ class CuDNNNCHW2NHWCOp final : public CuDNNOrderSwithOpBase {
   template <typename T>
   bool DoRunWithType() {
     const auto& X = Input(0);
-    auto* Y = Output(0);
+
     const int ndim = X.dim();
     const int N = X.dim32(0);
     const int C = X.dim32(1);
@@ -132,7 +135,9 @@ class CuDNNNCHW2NHWCOp final : public CuDNNOrderSwithOpBase {
     Y_dims[0] = N;
     Y_dims[ndim - 1] = C;
     std::copy(X_dims.cbegin() + 2, X_dims.cend(), Y_dims.begin() + 1);
-    Y->Resize(Y_dims);
+    std::vector<int64_t> Y_dims_64;
+    std::copy(Y_dims.cbegin(), Y_dims.cend(), std::back_inserter(Y_dims_64));
+    auto* Y = Output(0, Y_dims_64, at::dtype<T>());
     if (cached_X_dims_ != X_dims) {
       cached_X_dims_ = X_dims;
       SetTensorDescriptor(

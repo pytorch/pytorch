@@ -1,8 +1,8 @@
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 #include <system_error>
 
-#include "THP.h"
-#include "serialization.h"
+#include <torch/csrc/THP.h>
+#include <torch/csrc/serialization.h>
 
 template <class io>
 ssize_t doPartialRead(io fildes, void* buf, size_t nbytes);
@@ -177,8 +177,8 @@ void doWrite(io fildes, void* raw_buf, size_t nbytes) {
   }
 }
 
-#include "generic/serialization.cpp"
+#include <torch/csrc/generic/serialization.cpp>
 #include <TH/THGenerateAllTypes.h>
 
-#include "generic/serialization.cpp"
+#include <torch/csrc/generic/serialization.cpp>
 #include <TH/THGenerateHalfType.h>

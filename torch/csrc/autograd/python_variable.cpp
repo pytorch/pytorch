@@ -1,28 +1,28 @@
-#include "torch/csrc/autograd/python_variable.h"
+#include <torch/csrc/autograd/python_variable.h>
 
-#include "THP.h"
-#include "torch/csrc/DynamicTypes.h"
-#include "torch/csrc/Exceptions.h"
-#include "torch/csrc/Device.h"
-#include "torch/csrc/Size.h"
-#include "torch/csrc/Types.h"
-#include "torch/csrc/autograd/edge.h"
-#include "torch/csrc/autograd/python_cpp_function.h"
-#include "torch/csrc/autograd/python_hook.h"
-#include "torch/csrc/autograd/python_variable_indexing.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/autograd/functions/accumulate_grad.h"
-#include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/generated/VariableType.h"
-#include "torch/csrc/autograd/utils/python_error_messages.h"
-#include "torch/csrc/autograd/utils/wrap_outputs.h"
-#include "torch/csrc/tensor/python_tensor.h"
-#include "torch/csrc/utils/auto_gil.h"
-#include "torch/csrc/utils/cuda_lazy_init.h"
-#include "torch/csrc/utils/python_strings.h"
-#include "torch/csrc/utils/python_arg_parser.h"
-#include "torch/csrc/utils/tensor_new.h"
-#include "torch/csrc/jit/tracer.h"
+#include <torch/csrc/THP.h>
+#include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/Device.h>
+#include <torch/csrc/Size.h>
+#include <torch/csrc/Types.h>
+#include <torch/csrc/autograd/edge.h>
+#include <torch/csrc/autograd/python_cpp_function.h>
+#include <torch/csrc/autograd/python_hook.h>
+#include <torch/csrc/autograd/python_variable_indexing.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/autograd/functions/accumulate_grad.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/generated/VariableType.h>
+#include <torch/csrc/autograd/utils/python_error_messages.h>
+#include <torch/csrc/autograd/utils/wrap_outputs.h>
+#include <torch/csrc/tensor/python_tensor.h>
+#include <torch/csrc/utils/auto_gil.h>
+#include <torch/csrc/utils/cuda_lazy_init.h>
+#include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/python_arg_parser.h>
+#include <torch/csrc/utils/tensor_new.h>
+#include <torch/csrc/jit/tracer.h>
 
 #include <ATen/ATen.h>
 
@@ -200,7 +200,16 @@ static PyObject *THPVariable_is_leaf(THPVariable *self)
 static PyObject * THPVariable_get_data(THPVariable *self)
 {
   HANDLE_TH_ERRORS
-  return THPVariable_Wrap(make_variable(self->cdata.data(), false));
+  /// NOTE: Previously, if we change the tensor metadata (e.g. sizes / strides /
+  /// storage / storage_offset) of a tensor created from `.data`, those metadata
+  /// in the original tensor will also be updated. However, the new behavior is that
+  /// those metadata changes to the `.data` tensor will not update the original tensor
+  /// anymore, and here we need to set `allow_tensor_metadata_change_` to false to
+  /// make such changes explicitly illegal, in order to prevent users from changing
+  /// metadata of the `.data` tensor and expecting the original tensor to also
+  /// be updated.
+  auto var = make_variable(self->cdata.data(), /*requires_grad=*/false, /*allow_tensor_metadata_change=*/false);
+  return THPVariable_Wrap(var);
   END_HANDLE_TH_ERRORS
 }
 

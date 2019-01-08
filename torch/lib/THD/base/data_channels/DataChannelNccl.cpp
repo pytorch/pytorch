@@ -1,9 +1,9 @@
-#include "DataChannelNccl.hpp"
+#include <THD/base/data_channels/DataChannelNccl.hpp>
 #include <THD/base/Cuda.hpp>
-#include "DataChannelUtils.hpp"
+#include <THD/base/data_channels/DataChannelUtils.hpp>
 
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAGuard.h>
 
 #include <THC/THC.h>
 #include <cuda.h>

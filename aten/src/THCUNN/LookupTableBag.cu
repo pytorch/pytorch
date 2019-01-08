@@ -1,8 +1,8 @@
-#include "THCUNN.h"
-#include "common.h"
-#include "THCTensor.hpp"
+#include <THCUNN/THCUNN.h>
+#include <THCUNN/common.h>
+#include <THC/THCTensor.hpp>
 
-#include "THCThrustAllocator.cuh"
+#include <THC/THCThrustAllocator.cuh>
 #include <thrust/device_ptr.h>
 #include <thrust/execution_policy.h>
 #include <thrust/iterator/constant_iterator.h>
@@ -11,9 +11,9 @@
 #include <thrust/system/cuda/execution_policy.h>
 #endif
 #include <thrust/unique.h>
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
-#include "THCTensorSort.cuh"
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCTensorSort.cuh>
 
 #if defined(__HIP_PLATFORM_HCC__)
 const int WARP_SIZE = 64;
@@ -143,5 +143,5 @@ __global__ void cunn_LookupTableBag_accGradParametersKernel(
 }
 
 
-#include "generic/LookupTableBag.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/LookupTableBag.cu>
+#include <THC/THCGenerateFloatTypes.h>

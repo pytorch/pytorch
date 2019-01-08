@@ -11,7 +11,7 @@ set BASIC_C_FLAGS=
 set BASIC_CUDA_FLAGS=
 
 IF NOT DEFINED INSTALL_DIR (
-  set "INSTALL_DIR=%cd:\=/%/torch/lib/tmp_install"
+  set "INSTALL_DIR=%cd:\=/%/torch/"
 ) ELSE (
   set "INSTALL_DIR=%INSTALL_DIR:\=/%"
 )
@@ -23,11 +23,9 @@ set C_FLAGS=%BASIC_C_FLAGS% /D_WIN32 /Z7 /EHa /DNOMINMAX
 set LINK_FLAGS=/DEBUG:FULL
 : End cmake variables
 
-if not exist torch\lib\tmp_install mkdir torch\lib\tmp_install
-
 : Variable defaults
 set /a USE_CUDA=0
-set /a USE_FBGEMM=0
+set /a USE_FBGEMM=1
 set /a USE_ROCM=0
 set /a USE_NNPACK=0
 set /a USE_QNNPACK=0
@@ -146,11 +144,6 @@ FOR %%a IN (%_BUILD_ARGS%) DO (
 : Copy Artifacts
 cd torch\lib
 
-copy /Y "%INSTALL_DIR%\lib\*" .
-IF EXIST "%INSTALL_DIR%\bin" (
-  copy /Y "%INSTALL_DIR%\bin\*" .
-)
-xcopy /Y /E "%INSTALL_DIR%\include\*.*" include\*.*
 xcopy /Y ..\..\aten\src\THNN\generic\THNN.h  .
 xcopy /Y ..\..\aten\src\THCUNN\generic\THCUNN.h .
 
@@ -243,6 +236,8 @@ goto:eof
                   -DUSE_MKLDNN=%USE_MKLDNN% ^
                   -DATEN_NO_CONTRIB=1 ^
                   -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
+                  -DTORCH_INSTALL_BIN_DIR="lib" ^
+                  -DTORCH_INSTALL_INCLUDE_DIR="lib/include" ^
                   -DCMAKE_C_FLAGS="%USER_CFLAGS%" ^
                   -DCMAKE_CXX_FLAGS="/EHa %USER_CFLAGS%" ^
                   -DCMAKE_EXE_LINKER_FLAGS="%USER_LDFLAGS%" ^
@@ -254,6 +249,15 @@ goto:eof
   %MAKE_COMMAND%
   IF ERRORLEVEL 1 exit 1
   IF NOT ERRORLEVEL 0 exit 1
+
+  :: Install Python proto files
+  IF "%BUILD_PYTHON%" == "ON" (
+    for /f "delims=" %%i in ('where /R caffe2\proto *.py') do (
+      IF NOT "%%i" == "%CD%\caffe2\proto\__init__.py" (
+        copy /Y %%i ..\caffe2\proto\
+      )
+    )
+  )
 
   popd
   @endlocal

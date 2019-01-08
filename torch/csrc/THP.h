@@ -1,11 +1,11 @@
 #ifndef THP_H
 #define THP_H
 
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 #include <TH/TH.h>
 #include <TH/THTensor.hpp>
 
-#include "THP_export.h"
+#include <torch/csrc/THP_export.h>
 
 // Back-compatibility macros, Thanks to http://cx-oracle.sourceforge.net/
 // define PyInt_* macros for Python 3.x.  NB: We must include Python.h first,
@@ -28,20 +28,20 @@
 #define THWTensor THTensor
 #define THWTensor_(NAME) THTensor_(NAME)
 
-#include "PtrWrapper.h"
-#include "Exceptions.h"
-#include "Generator.h"
-#include "Storage.h"
-#include "Size.h"
-#include "Module.h"
-#include "Types.h"
-#include "utils.h" // This requires defined Storage and Tensor types
-#include "byte_order.h"
+#include <torch/csrc/PtrWrapper.h>
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/Generator.h>
+#include <torch/csrc/Storage.h>
+#include <torch/csrc/Size.h>
+#include <torch/csrc/Module.h>
+#include <torch/csrc/Types.h>
+#include <torch/csrc/utils.h> // This requires defined Storage and Tensor types
+#include <torch/csrc/byte_order.h>
 
 #ifdef _THP_CORE
-#include "serialization.h"
+#include <torch/csrc/serialization.h>
 
-#include "autograd/autograd.h"
+#include <torch/csrc/autograd/autograd.h>
 #endif
 
 #endif

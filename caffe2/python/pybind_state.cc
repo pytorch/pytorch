@@ -6,7 +6,6 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "caffe2/contrib/script/compiler.h"
 #include "caffe2/core/asan.h"
 #include "caffe2/core/blob_stats.h"
 #include "caffe2/core/db.h"
@@ -938,29 +937,6 @@ void addObjectMethods(py::module& m) {
             }
             return pyout;
           });
-
-  py::class_<script::CompilationUnit>(m, "CompilationUnit")
-      .def(py::init<>())
-      .def("define", &script::CompilationUnit::define)
-      .def("get_proto", &script::CompilationUnit::getProto)
-      .def(
-          "create_net",
-          [](script::CompilationUnit* self, const std::string& name) {
-            auto net = self->createNet(gWorkspace, name);
-            CAFFE_ENFORCE(net);
-            return net;
-          })
-      .def(
-          "extern",
-          [](script::CompilationUnit* self,
-             const std::string& name,
-             py::object py_proto) {
-            py::bytes bytes = py_proto.attr("SerializeToString")();
-            std::unique_ptr<caffe2::NetDef> proto(new NetDef());
-            CAFFE_ENFORCE(ParseProtoFromLargeString(
-                bytes.cast<std::string>(), proto.get()));
-            self->defineExtern(name, std::move(proto));
-          });
 }
 
 void addGlobalMethods(py::module& m) {
@@ -1642,7 +1618,10 @@ void addGlobalMethods(py::module& m) {
           tensor_shapes.emplace(
               it.first, CreateTensorShape(it.second, TensorProto::FLOAT));
         }
-        OnnxifiTransformer ts(infer_shapes, debug_builder);
+        OnnxifiTransformerOptions opts;
+        opts.infer_shapes = infer_shapes;
+        opts.debug = debug_builder;
+        OnnxifiTransformer ts(opts);
         ts.Transform(
             GetCurrentWorkspace(),
             &pred_net,

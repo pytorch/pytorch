@@ -6,10 +6,7 @@ circular dependency problems
 
 import weakref
 import inspect
-try:
-    import builtins  # PY3
-except Exception:
-    import __builtin__ as builtins  # PY2
+from torch._six import builtins
 
 # Tracks standalone weak script functions
 _compiled_weak_fns = weakref.WeakKeyDictionary()
@@ -113,7 +110,7 @@ def weak_script_method(fn):
 def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
     """
     Dispatches to either of 2 weak script functions based on a boolean argument.
-    In Torch Script, the boolean argument must be constant so that the correct
+    In TorchScript, the boolean argument must be constant so that the correct
     function to use can be determined at compile time.
     """
     if _compiled_weak_fns.get(if_true) is None or _compiled_weak_fns.get(if_false) is None:
@@ -137,6 +134,9 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
     elif if_false.__doc__ is None and if_true.__doc__ is not None:
         doc = if_true.__doc__
         if_false.__doc__ = doc
+    elif if_false.__doc__ is None and if_true.__doc__ is None:
+        # neither function has a docstring
+        doc = None
     else:
         raise RuntimeError("only one function can have a docstring")
     fn.__doc__ = doc

@@ -9,11 +9,11 @@
 #include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <c10/util/Exception.h>
 
-#include "THC/THC.h"
+#include <THC/THC.h>
 #include <THC/THCGeneral.hpp>
 
 #if AT_CUDNN_ENABLED()
-#include "ATen/cudnn/cudnn-wrapper.h"
+#include <ATen/cudnn/cudnn-wrapper.h>
 #endif
 
 #include <cuda.h>

@@ -80,4 +80,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
 
 #undef TORCH_FORALL_TAGS
 
+void IValue::dump() const {
+  std::cout << *this << "\n";
+}
+
 } // namespace c10

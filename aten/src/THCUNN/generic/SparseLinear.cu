@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/SparseLinear.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/SparseLinear.cu"
 #else
 
 static bool THNN_(checkInput)(THCTensor* t)

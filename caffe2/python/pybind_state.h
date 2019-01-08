@@ -297,6 +297,7 @@ const Func& getGradientFunc(const std::string& token);
 
 } // namespace python_detail
 
+// TODO: Remove template?
 template <class Context, bool use_dlpack>
 class PythonOpBase : public Operator<Context> {
  public:
@@ -314,10 +315,6 @@ class PythonOpBase : public Operator<Context> {
     using namespace python_detail;
     auto pickled = OperatorBase::template GetSingleArgument<std::string>(
         pickled_builder_arg_name, "");
-    auto forced_cpu_outputs_arg =
-        OperatorBase::template GetRepeatedArgument<int>("forced_cpu_outputs");
-    forced_cpu_outputs_.insert(
-        forced_cpu_outputs_arg.begin(), forced_cpu_outputs_arg.end());
     CAFFE_ENFORCE(
         !pickled.empty() || !token_.empty(),
         "PythonOp requires either pickled_builder or token arg.");
@@ -367,28 +364,17 @@ class PythonOpBase : public Operator<Context> {
         const auto* blob = &InputBlob(i);
         // Allow CPU tensors in addition to operator context's tensors
         py::object py_obj;
-        if (blob->template IsType<Tensor>()) {
-          if (use_dlpack) {
-            DLPackWrapper<CPUContext> wrapper(
-                const_cast<Tensor*>(&blob->template Get<Tensor>()), cpu_option);
-            // copy wrapper
-            py_obj = py::cast(wrapper, py::return_value_policy::copy);
-          } else {
-            py_obj = py::cast(
-                &blob->template Get<Tensor>(),
-                py::return_value_policy::reference);
-          }
+        CAFFE_ENFORCE(
+            BlobIsTensorType(*blob, CPU),
+            "We only allow input blob to be CPU Tensor");
+        if (use_dlpack) {
+          DLPackWrapper<CPUContext> wrapper(
+              const_cast<Tensor*>(&(BlobGetTensor(*blob, CPU))), cpu_option);
+          // copy wrapper
+          py_obj = py::cast(wrapper, py::return_value_policy::copy);
         } else {
-          if (use_dlpack) {
-            DLPackWrapper<Context> wrapper(
-                const_cast<Tensor*>(&blob->template Get<Tensor>()),
-                this->device_option());
-            py_obj = py::cast(wrapper, py::return_value_policy::copy);
-          } else {
-            py_obj = py::cast(
-                &blob->template Get<Tensor>(),
-                py::return_value_policy::reference);
-          }
+          py_obj = py::cast(
+              &(BlobGetTensor(*blob, CPU)), py::return_value_policy::reference);
         }
         inputs.push_back(py_obj);
       }
@@ -404,43 +390,19 @@ class PythonOpBase : public Operator<Context> {
         // GPUFallbackOp also allows keeping some of the output blobs on CPU
         // by specifying their indices explicitly in template parameters.
 
-        // PythonDLPack op allows working with CUDA and CPU blobs directly
-        // through DLPack tensors. In order to properly setup mapping we need
-        // to know in advance a type (CUDA or CPU) of an output blob.
-        // Output blob might not be initialized yet, so by default we treat
-        // output blobs as having the same type as operator's context.
-        // This can be overwritten though forced_cpu_outputs argument
-
-        // make sure output blob is initialized before creating the binding
-        if (forced_cpu_outputs_.count(i)) {
-          BlobGetMutableTensor(blob, Context::GetDeviceType());
-        } else {
-          BlobGetMutableTensor(blob, Context::GetDeviceType());
-        }
+        // PythonDLPack op allows working CPU blobs only through DLPack tensors.
+        // We don't have use cases of CUDA version yet, but if there is such use
+        // case, we can use GPUFallbackOp to enable it.
 
         py::object py_obj;
-        if (blob->template IsType<Tensor>()) {
-          if (use_dlpack) {
-            DLPackWrapper<CPUContext> wrapper(
-                BlobGetMutableTensor(blob, Context::GetDeviceType()),
-                cpu_option);
-            py_obj = py::cast(wrapper, py::return_value_policy::copy);
-          } else {
-            py_obj = py::cast(
-                BlobGetMutableTensor(blob, Context::GetDeviceType()),
-                py::return_value_policy::reference);
-          }
+        if (use_dlpack) {
+          DLPackWrapper<CPUContext> wrapper(
+              BlobGetMutableTensor(blob, CPU), cpu_option);
+          py_obj = py::cast(wrapper, py::return_value_policy::copy);
         } else {
-          if (use_dlpack) {
-            DLPackWrapper<Context> wrapper(
-                BlobGetMutableTensor(blob, Context::GetDeviceType()),
-                this->device_option());
-            py_obj = py::cast(wrapper, py::return_value_policy::copy);
-          } else {
-            py_obj = py::cast(
-                BlobGetMutableTensor(blob, Context::GetDeviceType()),
-                py::return_value_policy::reference);
-          }
+          py_obj = py::cast(
+              BlobGetMutableTensor(blob, CPU),
+              py::return_value_policy::reference);
         }
         outputs.push_back(py_obj);
       }
@@ -473,8 +435,6 @@ class PythonOpBase : public Operator<Context> {
  protected:
   virtual const python_detail::Func& getFunc(const std::string& token) = 0;
   Workspace* ws_;
-  // output indices forced to be on CPU
-  std::unordered_set<int> forced_cpu_outputs_;
 
  private:
   const std::string token_;

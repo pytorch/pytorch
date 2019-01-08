@@ -1,6 +1,6 @@
-#include "invalid_arguments.h"
+#include <torch/csrc/utils/invalid_arguments.h>
 
-#include "python_strings.h"
+#include <torch/csrc/utils/python_strings.h>
 
 #include <torch/csrc/utils/memory.h>
 
@@ -149,7 +149,7 @@ std::unique_ptr<Type> _buildType(std::string type_name, bool is_nullable) {
 }
 
 std::pair<Option, std::string> _parseOption(const std::string& _option_str,
-    const std::unordered_map<std::string, PyObject*> kwargs)
+    const std::unordered_map<std::string, PyObject*>& kwargs)
 {
   if (_option_str == "no arguments")
     return std::pair<Option, std::string>(Option(false, false), _option_str);

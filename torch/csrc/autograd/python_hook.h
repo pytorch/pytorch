@@ -1,8 +1,8 @@
 #pragma once
 
-#include "torch/csrc/python_headers.h"
-#include "torch/csrc/autograd/function_hook.h"
-#include "torch/csrc/utils/object_ptr.h"
+#include <torch/csrc/python_headers.h>
+#include <torch/csrc/autograd/function_hook.h>
+#include <torch/csrc/utils/object_ptr.h>
 
 namespace torch { namespace autograd {
 

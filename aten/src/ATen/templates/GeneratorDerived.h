@@ -4,7 +4,7 @@
 
 #include <$header>
 
-#include "ATen/core/Generator.h"
+#include <ATen/core/Generator.h>
 
 namespace at {
 

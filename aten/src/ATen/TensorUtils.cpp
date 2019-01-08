@@ -1,7 +1,7 @@
-#include "ATen/Config.h"
-#include "ATen/TensorUtils.h"
+#include <ATen/Config.h>
+#include <ATen/TensorUtils.h>
 
-#include "ATen/ATen.h"
+#include <ATen/ATen.h>
 
 #include <ostream>
 #include <sstream>

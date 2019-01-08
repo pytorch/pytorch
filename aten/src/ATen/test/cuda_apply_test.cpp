@@ -1,10 +1,10 @@
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
-#include "cuda.h"
-#include "cuda_runtime.h"
+#include <cuda.h>
+#include <cuda_runtime.h>
 
-#include "ATen/cuda/detail/TensorInfo.cuh"
-#include "ATen/cuda/CUDAContext.h"
+#include <ATen/cuda/detail/TensorInfo.cuh>
+#include <ATen/cuda/CUDAContext.h>
 #define ASSERT_EQ_CUDA(X, Y) \
   {                          \
     bool _isEQ = X == Y;     \

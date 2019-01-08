@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/VolumetricMaxUnpooling.c"
+#define TH_GENERIC_FILE "THNN/generic/VolumetricMaxUnpooling.c"
 #else
 
 static inline void THNN_(VolumetricMaxUnpooling_shapeCheck)(

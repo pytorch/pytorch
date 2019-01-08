@@ -154,8 +154,8 @@ bool ChannelStatsOp<CUDAContext>::RunOnDevice() {
   const int W = X.ndim() > 3 ? X.dim32(3) : 1;
   const int D = X.ndim() > 4 ? X.dim32(4) : 1;
 
-  auto sum = Output(SUM);
-  auto sumsq = Output(SUMSQ);
+  
+  
 
   const auto X_arr = X.data<float>();
   const auto valsPerChannel = H * W * D;
@@ -166,8 +166,8 @@ bool ChannelStatsOp<CUDAContext>::RunOnDevice() {
   sumScratch_.Resize(numBlocksTotal);
   sumsqScratch_.Resize(numBlocksTotal);
 
-  sum->Resize(C);
-  sumsq->Resize(C);
+  auto sum = Output(SUM, {C}, at::dtype<float>());
+  auto sumsq = Output(SUMSQ, {C}, at::dtype<float>());
 
   ChannelStatsBlockKernel<CAFFE_CUDA_NUM_THREADS>
       <<<numBlocksTotal, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(

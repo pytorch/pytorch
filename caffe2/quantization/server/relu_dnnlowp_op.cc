@@ -65,7 +65,7 @@ bool ReluDNNLowPOp<T>::RunOnDevice() {
   // If input was not quantized, output should be dequantized because ReLU
   // can be inplace.
   if (!X.template IsType<T>()) {
-    Dequantize(
+    fbgemm::Dequantize<T>(
         Y_data, Y->template mutable_data<float>(), Y->numel(), in_qparams);
   }
 

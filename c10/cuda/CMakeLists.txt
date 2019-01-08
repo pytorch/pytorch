@@ -15,13 +15,22 @@ configure_file(
 # Note: if you want to add ANY dependency to the c10 library, make sure you
 # check with the core PyTorch developers as the dependendency will be
 # transitively passed on to all libraries dependent on PyTorch.
+
+# Note: if you add a new source file/header, you will need to update
+# tools/amd_build/pyHIPIFY/cuda_to_hip_mappings.py for new files
+# and headers you add
 set(C10_CUDA_SRCS
+    CUDAStream.cpp
+    impl/CUDAGuardImpl.cpp
     impl/CUDATest.cpp
 )
 set(C10_CUDA_HEADERS
+    CUDAException.h
+    CUDAGuard.h
     CUDAMacros.h
     CUDAMathCompat.h
-    CUDAException.h
+    CUDAStream.h
+    impl/CUDAGuardImpl.h
     impl/CUDATest.h
 )
 set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
@@ -54,7 +63,7 @@ add_subdirectory(test)
 install(TARGETS c10_cuda EXPORT Caffe2Targets DESTINATION lib)
 foreach(file ${C10_CUDA_HEADERS})
   get_filename_component( dir ${file} DIRECTORY )
-  install( FILES ${file} DESTINATION include/c10/cuda/${dir} )
+  install( FILES ${file} DESTINATION lib/include/c10/cuda/${dir} )
 endforeach()
 install(FILES ${CMAKE_BINARY_DIR}/c10/cuda/impl/cuda_cmake_macros.h
-  DESTINATION include/c10/cuda/impl)
+  DESTINATION lib/include/c10/cuda/impl)

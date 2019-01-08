@@ -7,8 +7,8 @@
 // Graves et al call the probabilities y, we use log_probs (also calling them inputs)
 
 #include <ATen/ATen.h>
-#include "ATen/Dispatch.h"
-#include "ATen/TensorUtils.h"
+#include <ATen/Dispatch.h>
+#include <ATen/TensorUtils.h>
 
 #include <numeric>
 #include <type_traits>

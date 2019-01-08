@@ -1,4 +1,4 @@
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
 // Test IntegerDivider: this tests *all* 32-bit pairs (a, b) where a % b is 0 or
 // (b-1), so it takes a few minutes to run.
@@ -8,8 +8,8 @@
 #include <memory>
 #include <vector>
 
-#include "ATen/cuda/CUDAContext.h"
-#include "THC/THCIntegerDivider.cuh"
+#include <ATen/cuda/CUDAContext.h>
+#include <THC/THCIntegerDivider.cuh>
 
 using std::vector;
 

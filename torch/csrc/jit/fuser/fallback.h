@@ -1,12 +1,14 @@
 #pragma once
-#include "torch/csrc/jit/fuser/config.h"
+#include <torch/csrc/jit/fuser/config.h>
 #if USE_CUDA_FUSER || USE_CPU_FUSER
 
-#include "torch/csrc/jit/stack.h"
+#include <torch/csrc/jit/stack.h>
 
 #include <cstdlib>
 
-namespace torch { namespace jit { namespace fuser {
+namespace torch {
+namespace jit {
+namespace fuser {
 
 void runFallback(int64_t key, Stack& stack);
 

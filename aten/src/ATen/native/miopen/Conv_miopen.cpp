@@ -1,6 +1,9 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
+
+// TODO: Remove the condition on AT_ROCM_ENABLED entirely,
+// don't build this file as part of CPU build.
 #include <ATen/cuda/CUDAConfig.h>
 
 #if !AT_ROCM_ENABLED()
@@ -74,7 +77,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_transpose_backwa
 
 #else  // AT_ROCM_ENABLED
 
-#include "THC/THC.h"
+#include <THH/THH.h>
 
 #include <ATen/miopen/miopen-wrapper.h>
 #include <ATen/miopen/Descriptors.h>
@@ -230,6 +233,7 @@ struct ConvolutionParams
   int dilation[max_dim];
   int64_t groups;
   bool deterministic;
+  int device_id; //This is needed to distinguish between miopen handles of multiple gpus.
   // NB: transposed purposely omitted: transposed just swaps
   // forward and backward, so you can reuse the benchmark entry,
 };
@@ -261,6 +265,9 @@ void setConvolutionParams(
   }
   params->groups = groups;
   params->deterministic = deterministic;
+  int device_id;
+  HIP_CHECK(hipGetDevice(&device_id));
+  params->device_id = device_id;
 }
 
 // Convenience struct for passing around descriptors and data

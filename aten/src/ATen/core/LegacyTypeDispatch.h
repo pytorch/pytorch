@@ -28,7 +28,7 @@
 #include <ATen/core/VariableHooksInterface.h>
 #include <c10/util/Exception.h>
 #include <ATen/core/LegacyDeviceTypeInit.h>
-#include <ATen/core/TensorImpl.h>
+#include <c10/core/TensorImpl.h>
 
 namespace at {
 

@@ -32,24 +32,19 @@ namespace {
 // values tensor for such an empty tensor.
 SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, const caffe2::TypeMeta& data_type)
     : TensorImpl(type_id, data_type, nullptr, false)
-    , size_{0}
     , sparse_dim_(1)
     , dense_dim_(0)
     , indices_(at::empty({1, 0}, at::initialTensorOptions().device(sparseTensorIdToDeviceType(type_id)).dtype(ScalarType::Long)))
     , values_(at::empty({0}, at::initialTensorOptions().device(sparseTensorIdToDeviceType(type_id)).dtype(data_type))) {}
 
 IntList SparseTensorImpl::sizes() const {
-  return size_;
+  return sizes_;
 }
 IntList SparseTensorImpl::strides() const {
   AT_ERROR("sparse tensors do not have strides");
 }
 bool SparseTensorImpl::is_contiguous() const {
   AT_ERROR("sparse tensors do not have is_contiguous");
-}
-int64_t SparseTensorImpl::size(int64_t d) const {
-  d = at::maybe_wrap_dim(d, dim(), false);
-  return size_[d];
 }
 int64_t SparseTensorImpl::stride(int64_t d) const {
   AT_ERROR("sparse tensors do not have strides");
@@ -84,6 +79,7 @@ int64_t SparseTensorImpl::storage_offset() const {
   AT_ERROR("sparse tensors do not have storage");
 }
 void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, const Tensor& values) {
+  AT_CHECK(allow_tensor_metadata_change(), "set_indices_and_values_unsafe is not allowed on Tensor created from .data or .detach()");
   AT_ASSERT(!indices.is_variable() && !values.is_variable());  // They should be plain tensors!
 
   AT_CHECK(!indices.is_sparse(), "expected indices to be a dense tensor, but got indices of layout ", indices.layout());

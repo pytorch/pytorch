@@ -75,11 +75,13 @@ class Stream(torch._C._CudaStreamBase):
         Returns:
             A boolean indicating if all kernels in this stream are completed.
         """
-        res = cudart().cudaStreamQuery(self)
-        if res == cudaStatus.ERROR_NOT_READY:
-            return False
-        check_error(res)
-        return True
+        with torch.cuda.device(self.device):
+            res = cudart().cudaStreamQuery(self)
+            if res == cudaStatus.ERROR_NOT_READY:
+                return False
+            check_error(res)
+            return True
+        return False
 
     def synchronize(self):
         r"""Wait for all the kernels in this stream to complete.
@@ -192,7 +194,7 @@ class Event(object):
         return True
 
     def elapsed_time(self, end_event):
-        r"""Returns the time elapsed before the event was recorded."""
+        r"""Returns the time elapsed in milliseconds before the event was recorded."""
         time_ms = ctypes.c_float()
         check_error(cudart().cudaEventElapsedTime(
             ctypes.byref(time_ms), self, end_event))

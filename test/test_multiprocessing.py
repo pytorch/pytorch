@@ -480,6 +480,9 @@ class TestMultiprocessing(TestCase):
             var = torch.arange(1., 26).view(5, 5).requires_grad_(requires_grad)
             self._test_autograd_sharing(var)
 
+    # See https://github.com/pytorch/pytorch/issues/14997
+    @unittest.skipIf(TEST_WITH_ASAN,
+                     "non-deterministically hangs with ASAN")
     def test_leaf_variable_sharing(self):
         devices = ['cpu']
         if torch.cuda.is_available() and not NO_MULTIPROCESSING_SPAWN and TEST_CUDA_IPC:

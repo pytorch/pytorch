@@ -1,5 +1,5 @@
 IF(NOT LIBSHM_INSTALL_LIB_SUBDIR)
-  SET(LIBSHM_INSTALL_BIN_SUBDIR "bin" CACHE PATH "libshm install binary directory")
+  SET(LIBSHM_INSTALL_BIN_SUBDIR "lib" CACHE PATH "libshm install binary directory")
   SET(LIBSHM_INSTALL_LIB_SUBDIR "lib" CACHE PATH "libshm install library directory")
 ENDIF()
 
@@ -11,10 +11,8 @@ TARGET_COMPILE_DEFINITIONS(shm PRIVATE
 )
 
 target_include_directories(shm PRIVATE
-  ${CMAKE_SOURCE_DIR}/aten/src/TH # provides "THAllocator.h" to THCGeneral.h
-  ${CMAKE_BINARY_DIR}/aten/src # provides "ATen/TypeExtendedInterface.h" to ATen.h
+  ${TORCH_ROOT}/torch/lib # provides "libshm/libshm.h"
   ${CMAKE_BINARY_DIR}/caffe2/aten/src # provides <TH/THGeneral.h> to THC.h
-  ${CMAKE_BINARY_DIR}/caffe2/aten/src/THC # provides "THCGeneral.h" to THC.h
   ${CMAKE_CURRENT_SOURCE_DIR}
   )
 

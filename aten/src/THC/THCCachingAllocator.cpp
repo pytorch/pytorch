@@ -1,8 +1,8 @@
-#include "THCCachingAllocator.h"
+#include <THC/THCCachingAllocator.h>
 
 #include <ATen/Context.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <ATen/cuda/Exceptions.h>
 
 #include <cuda_runtime_api.h>

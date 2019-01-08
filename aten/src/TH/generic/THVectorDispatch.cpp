@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THVectorDispatch.cpp"
+#define TH_GENERIC_FILE "TH/generic/THVectorDispatch.cpp"
 #else
 
 /* For now there are only SIMD implementations for FLOAT and DOUBLE.

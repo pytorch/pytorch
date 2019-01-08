@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorScatterGather.cu"
+#define THC_GENERIC_FILE "THC/generic/THCTensorScatterGather.cu"
 #else
 
 #define RUN(TYPE, DIMS, REAL)                                           \

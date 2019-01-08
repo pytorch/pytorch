@@ -1,11 +1,11 @@
 #pragma once
 
-#include "ATen/core/ATenGeneral.h"
+#include <ATen/core/ATenGeneral.h>
 #include <c10/core/StorageImpl.h>
-#include "ATen/core/UndefinedTensorImpl.h"
+#include <c10/core/UndefinedTensorImpl.h>
 
 #include <c10/core/ScalarType.h>
-#include "ATen/Formatting.h"
+#include <ATen/Formatting.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 
@@ -73,6 +73,9 @@ static inline TensorImpl* checked_tensor_unwrap(const Tensor& expr, const char *
     AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr.scalar_type(),
              " for argument #", pos, " '", name, "'");
   }
+  if (expr.is_variable()) {
+    AT_ERROR("Expected Tensor (not Variable) for argument #", pos, " '", name, "'");
+  }
   return expr.unsafeGetTensorImpl();
 }
 
@@ -88,7 +91,11 @@ static inline std::vector<TensorImpl*> checked_tensor_list_unwrap(ArrayRef<Tenso
     }
     if (expr.scalar_type() != scalar_type) {
       AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr.scalar_type(),
-               " for sequence elment ", i , " in sequence argument at position #", pos, " '", name, "'");
+               " for sequence element ", i , " in sequence argument at position #", pos, " '", name, "'");
+    }
+    if (expr.is_variable()) {
+      AT_ERROR("Expected Tensor (not Variable) for sequence element ",
+               i , " in sequence argument at position #", pos, " '", name, "'");
     }
     unwrapped.emplace_back(expr.unsafeGetTensorImpl());
   }

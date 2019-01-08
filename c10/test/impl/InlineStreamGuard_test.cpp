@@ -14,7 +14,7 @@ static Device dev(DeviceIndex index) {
 }
 
 static Stream stream(DeviceIndex index, StreamId sid) {
-  return Stream(dev(index), sid);
+  return Stream(Stream::UNSAFE, dev(index), sid);
 }
 
 // -- InlineStreamGuard -------------------------------------------------------

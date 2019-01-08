@@ -5,13 +5,14 @@ from __future__ import unicode_literals
 
 import numpy as np
 import caffe2.python.hypothesis_test_util as hu
-from caffe2.python import core, dyndep
+from caffe2.python import core, dyndep, workspace
 from hypothesis import given
 import hypothesis.strategies as st
 import collections
 from dnnlowp_test_utils import check_quantized_results_close
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
+workspace.GlobalInit(["caffe2", "--caffe2_omp_num_threads=11"])
 
 
 class DNNLowPReluOpTest(hu.HypothesisTestCase):

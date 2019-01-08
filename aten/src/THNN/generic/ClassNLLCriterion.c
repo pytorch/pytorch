@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/ClassNLLCriterion.c"
+#define TH_GENERIC_FILE "THNN/generic/ClassNLLCriterion.c"
 #else
 
 void THNN_(ClassNLLCriterion_updateOutput)(
