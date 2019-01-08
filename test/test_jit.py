@@ -4437,6 +4437,19 @@ a")
             self.checkScript(div_int_nofuture, (), optimize=True)
             self.checkScript(div_float_nofuture, (), optimize=True)
 
+    def test_floor_div(self):
+        @torch.jit.script
+        def foo(a, b):
+            # type: (int, int) -> int
+            return a // b
+        for i in range(-8, 8):
+            for j in range(-8, 8):
+                if j != 0:
+                    self.assertEqual(foo(i, j), i // j)
+                else:
+                    with self.assertRaisesRegex(RuntimeError, 'division by 0'):
+                        foo(i, j)
+
     def test_number_augassign(self):
         def func():
             z = 1
