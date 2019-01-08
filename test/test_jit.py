@@ -77,6 +77,25 @@ PY35 = sys.version_info >= (3, 5)
 WINDOWS = sys.platform == 'win32'
 
 
+if WINDOWS:
+    @contextmanager
+    def TemporaryFileName():
+        # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
+        # opens the file, and it cannot be opened multiple times in Windows. To support Windows,
+        # close the file after creation and try to remove it manually
+        f = tempfile.NamedTemporaryFile(delete=False)
+        try:
+            f.close()
+            yield f.name
+        finally:
+            os.unlink(f.name)
+else:
+    @contextmanager
+    def TemporaryFileName():
+        with tempfile.NamedTemporaryFile() as f:
+            yield f.name
+
+
 def LSTMCellF(input, hx, cx, *params):
     return LSTMCell(input, (hx, cx), *params)
 
@@ -282,18 +301,9 @@ class JitTestCase(TestCase):
         if not also_test_file:
             return imported
 
-        # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
-        # opens the file, and it cannot be opened multiple times in Windows. To support Windows,
-        # close the file after creation and try to remove it manually
-        f = tempfile.NamedTemporaryFile(delete=False)
-        try:
-            f.close()
-            imported.save(f.name)
-            result = torch.jit.load(f.name, map_location=map_location)
-        finally:
-            os.unlink(f.name)
-
-        return result
+        with TemporaryFileName() as fname:
+            imported.save(fname)
+            return torch.jit.load(fname, map_location=map_location)
 
     def assertGraphContains(self, graph, kind):
         self.assertTrue(any(n.kind() == kind for n in graph.nodes()))
@@ -554,8 +564,9 @@ class TestJit(JitTestCase):
         self.assertFalse(m2.b0.is_cuda)
 
     def test_model_save_error(self):
-        with self.assertRaisesRegex(pickle.PickleError, "not supported"):
-            torch.save(FooToPickle(), "will_fail")
+        with TemporaryFileName() as fname:
+            with self.assertRaisesRegex(pickle.PickleError, "not supported"):
+                torch.save(FooToPickle(), fname)
 
     def test_single_tuple_trace(self):
         x = torch.tensor(2.)
