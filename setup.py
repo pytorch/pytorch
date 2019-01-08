@@ -595,7 +595,7 @@ class build_ext(build_ext_parent):
 
     def build_extensions(self):
         # The caffe2 extensions are created in
-        # build/caffe2/python/
+        # <pytorch_root>/torch/lib/pythonM.m/site-packages/caffe2/python/
         # and need to be copied to build/lib.linux.... , which will be a
         # platform dependent build folder created by the "build" command of
         # setuptools. Only the contents of this folder are installed in the
@@ -616,7 +616,7 @@ class build_ext(build_ext_parent):
             filename = self.get_ext_filename(fullname)
             report("\nCopying extension {}".format(ext.name))
 
-            src = os.path.join('build', filename)
+            src = os.path.join(cwd, 'torch', rel_site_packages, filename)
             if not os.path.exists(src):
                 report("{} does not exist".format(src))
                 del self.extensions[i]
