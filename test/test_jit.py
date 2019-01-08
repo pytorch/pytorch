@@ -77,6 +77,25 @@ PY35 = sys.version_info >= (3, 5)
 WINDOWS = sys.platform == 'win32'
 
 
+if WINDOWS:
+    @contextmanager
+    def TemporaryFileName():
+        # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
+        # opens the file, and it cannot be opened multiple times in Windows. To support Windows,
+        # close the file after creation and try to remove it manually
+        f = tempfile.NamedTemporaryFile(delete=False)
+        try:
+            f.close()
+            yield f.name
+        finally:
+            os.unlink(f.name)
+else:
+    @contextmanager
+    def TemporaryFileName():
+        with tempfile.NamedTemporaryFile() as f:
+            yield f.name
+
+
 def LSTMCellF(input, hx, cx, *params):
     return LSTMCell(input, (hx, cx), *params)
 
@@ -282,18 +301,9 @@ class JitTestCase(TestCase):
         if not also_test_file:
             return imported
 
-        # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
-        # opens the file, and it cannot be opened multiple times in Windows. To support Windows,
-        # close the file after creation and try to remove it manually
-        f = tempfile.NamedTemporaryFile(delete=False)
-        try:
-            f.close()
-            imported.save(f.name)
-            result = torch.jit.load(f.name, map_location=map_location)
-        finally:
-            os.unlink(f.name)
-
-        return result
+        with TemporaryFileName() as fname:
+            imported.save(fname)
+            return torch.jit.load(fname, map_location=map_location)
 
     def assertGraphContains(self, graph, kind):
         self.assertTrue(any(n.kind() == kind for n in graph.nodes()))
@@ -554,8 +564,9 @@ class TestJit(JitTestCase):
         self.assertFalse(m2.b0.is_cuda)
 
     def test_model_save_error(self):
-        with self.assertRaisesRegex(pickle.PickleError, "not supported"):
-            torch.save(FooToPickle(), "will_fail")
+        with TemporaryFileName() as fname:
+            with self.assertRaisesRegex(pickle.PickleError, "not supported"):
+                torch.save(FooToPickle(), fname)
 
     def test_single_tuple_trace(self):
         x = torch.tensor(2.)
@@ -3338,6 +3349,25 @@ a")
         self.run_pass('constant_propagation', graph)
         self.run_pass('constant_pooling', graph)
         self.assertExpectedGraph(graph)
+
+    def test_constant_pooling_none(self):
+        @torch.jit.script
+        def typed_nones(a=None, b=None, c=None):
+            # type: (Optional[int], Optional[bool], Optional[Tensor]) -> Tuple[Optional[int], Optional[bool], Optional[Tensor]] # noqa
+            return a, b, c
+
+        @torch.jit.script
+        def test(a):
+            # type: (bool) -> None
+            if a:
+                print(typed_nones())
+            else:
+                print(typed_nones())
+
+        graph_str = str(test.graph)
+        self.assertTrue(graph_str.count("bool? = prim::None") == 1)
+        self.assertTrue(graph_str.count("int? = prim::None") == 1)
+        self.assertTrue(graph_str.count("None = prim::None") == 1)
 
     def test_literal(self):
         def func1(a, b):
@@ -9118,6 +9148,17 @@ a")
 
         self.checkScript(foo, [torch.rand(2, 3)])
 
+    def test_list_python_op(self):
+        def python_list_op(lst):
+            # type: (List[Tensor]) -> Tensor
+            return lst[0]
+
+        def fn(lst):
+            # type: (List[Tensor]) -> Tensor
+            return python_list_op(lst)
+
+        self.checkScript(fn, ([torch.ones(2) + 2, torch.ones(2)],))
+
 
 class MnistNet(nn.Module):
     def __init__(self):
@@ -10352,6 +10393,58 @@ class TestFuser(JitTestCase):
 
         ge = self.checkTrace(self.fn_test_exp, (x, y))
         self.assertAllFused(ge.graph_for(x, y))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_fuse_batch_norm(self):
+
+        class ResLike(torch.jit.ScriptModule):
+            def __init__(self, optimize=True):
+                super(ResLike, self).__init__(optimize)
+                self.bn = nn.BatchNorm2d(16)
+
+            @torch.jit.script_method
+            def forward(self, x, y):
+                return y + torch.relu(self.bn(x))
+
+        model = ResLike().cuda()
+        model_noopt = ResLike(optimize=False).cuda()
+        model_noopt.load_state_dict(model.state_dict())
+        x = torch.randn(2, 16, 8, 8, device='cuda')
+        y = torch.randn(2, 16, 8, 8, device='cuda')
+        # FIXME: We need differentiation for CNNs for this optimization to trigger
+        with torch.no_grad():
+            out = model(x, y)
+            graph = model.graph_for(x, y)
+            rep = str(graph)
+
+            out_noopt = model_noopt(x, y)
+            rep_noopt = str(model_noopt.graph_for(x, y))
+            self.assertEqual(out, out_noopt, prec=3e-5)
+
+        # Check that batch_norm has really been decomposed
+        self.assertIn('aten::batch_norm_update_stats', rep)
+        self.assertNotIn('aten::batch_norm(', rep)
+        self.assertIn('aten::batch_norm(', rep_noopt)
+
+        # Make sure the fusion group is big, and contains aten::sqrt, which could
+        # originate only from decomposing batch_norm in this case
+        fusion_groups = [node for node in graph.nodes() if node.kind() == 'prim::FusionGroup']
+        self.assertEqual(len(fusion_groups), 1)
+        fused_graph = fusion_groups[0].g('Subgraph')
+        self.assertTrue(any(node.kind() == 'aten::sqrt' for node in fused_graph.nodes()))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_threshold(self):
+        def f(x):
+            return torch.threshold(x, 0, -10) + x + x + x
+
+        x = torch.tensor([-1, -0.5, 0, 1, 2, 3], device='cuda')
+        scripted = torch.jit.script(f)
+
+        self.assertEqual(f(x), scripted(x))
+        self.assertAllFused(scripted.graph_for(x))
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")

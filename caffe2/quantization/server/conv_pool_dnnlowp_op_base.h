@@ -55,20 +55,11 @@ class ConvPoolDNNLowPOpBase : public ConvPoolOpBase<CPUContext> {
   }
 
   TensorCPU* OutputTensorCPU_(int idx) {
-    if (dequantize_output_) {
-      return Output(idx);
-    } else {
-      return &Outputs()[idx]->template GetMutable<int8::Int8TensorCPU>()->t;
-    }
+    return &Outputs()[idx]->template GetMutable<int8::Int8TensorCPU>()->t;
   }
 
   T* GetQuantizedOutputData_() {
-    if (dequantize_output_) {
-      out_temp_.resize(Output(0)->size());
-      return out_temp_.data();
-    } else {
-      return OutputTensorCPU_(0)->template mutable_data<T>();
-    }
+    return OutputTensorCPU_(0)->template mutable_data<T>();
   }
 
   void MeasureQuantizationError_() {
@@ -104,26 +95,23 @@ class ConvPoolDNNLowPOpBase : public ConvPoolOpBase<CPUContext> {
   }
 
   void RunOnDeviceEpilogue_() {
-    if (dequantize_output_) {
-      fbgemm::Dequantize<T>(
-          out_temp_.data(),
-          OutputTensorCPU_(0)->template mutable_data<float>(),
-          OutputTensorCPU_(0)->size(),
-          out_qparams_);
-    } else {
-      dnnlowp::PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
-    }
+    dnnlowp::PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
 
     MeasureQuantizationError_();
   }
 
   void ParseDNNLowPOperatorArguments_() {
     if (!arguments_parsed_) {
+      bool dequantize_output;
       dnnlowp::ParseDNNLowPOperatorArguments(
           this,
-          &dequantize_output_,
+          &dequantize_output,
           &measure_quantization_error_,
           &followed_by_);
+      CAFFE_ENFORCE_EQ(
+          dequantize_output,
+          false,
+          "Conv DNNLOWP operators don't support dequantize_output");
       arguments_parsed_ = true;
     }
   }
@@ -183,7 +171,7 @@ class ConvPoolDNNLowPOpBase : public ConvPoolOpBase<CPUContext> {
     f(Y_int32);
   }
 
-  bool dequantize_output_{false}, measure_quantization_error_{false};
+  bool measure_quantization_error_{false};
   std::string followed_by_;
 
   std::vector<dnnlowp::TensorQuantizationParams> in_qparams_;
@@ -210,7 +198,6 @@ class ConvPoolDNNLowPOpBase : public ConvPoolOpBase<CPUContext> {
   /* using override */ using BaseType::MeasureQuantizationError_;          \
   /* using override */ using BaseType::OutputTensorCPU_;                   \
   /* using override */ using BaseType::RunOnDeviceEpilogue_;               \
-  /* using override */ using BaseType::dequantize_output_;                 \
   /* using override */ using BaseType::followed_by_;                       \
   /* using override */ using BaseType::in_qparams_;                        \
   /* using override */ using BaseType::measure_quantization_error_;        \
