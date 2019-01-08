@@ -1,7 +1,7 @@
 #pragma once
 
 #ifdef _WIN32
-#if defined(TORCH_BUILD_SHARED_LIBS)
+#if !defined(TORCH_BUILD_STATIC_LIBS)
 #if defined(torch_EXPORTS)
 #define TORCH_API __declspec(dllexport)
 #else
