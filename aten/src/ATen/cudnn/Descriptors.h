@@ -195,9 +195,6 @@ struct AT_CUDA_API ConvolutionDescriptor
                                           CUDNN_CROSS_CORRELATION, mathType));
 #if CUDNN_VERSION >= 7000
     AT_CUDNN_CHECK(cudnnSetConvolutionGroupCount(mut_desc(), groups));
-    AT_CUDNN_CHECK(cudnnSetConvolutionMathType(mut_desc(), CUDNN_DEFAULT_MATH));
-    if(dataType == CUDNN_DATA_HALF)
-      AT_CUDNN_CHECK(cudnnSetConvolutionMathType(mut_desc(), CUDNN_TENSOR_OP_MATH));
 #endif
   }
 };
