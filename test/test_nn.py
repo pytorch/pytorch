@@ -7529,33 +7529,76 @@ for test_params in criterion_tests + new_criterion_tests:
 
 
 class UnpoolingNet(nn.Module):
-    def __init__(self, pool, unpool):
+    def __init__(self, pool, unpool, assert_shape_inverse=False):
         super(UnpoolingNet, self).__init__()
         self.pool = pool
         self.unpool = unpool
+        self.assert_shape_inverse = assert_shape_inverse
 
     def forward(self, input):
-        return self.unpool(*self.pool(input))
+        x, indices = self.pool(input)
+        output = self.unpool(x, indices)
+        # NB: MaxUnpool is supposed to "invert" Unpool, but as far
+        # as shapes are concerned, this is only true when the pooling
+        # window exactly divides the input.  So the test needs to tell
+        # us when to perform this test.  It's important to test for
+        # this, as it helps catch bugs if someone mixes up height
+        # and width.
+        #
+        # NB2: We don't actually have test coverage for the non-inverse
+        # case at the moment. I don't think it's all that important,
+        # because that's more a test that MaxPool handles this case
+        # correctly.  But I wanted to be explicit, so you've got this
+        # kwarg that is True all the time.
+        if self.assert_shape_inverse:
+            assert input.size() == output.size(), \
+                "input {}, output {}".format(input.size(), output.size())
+        return output
 
 
 add_test(NewModuleTest(
     constructor=lambda: UnpoolingNet(
         nn.MaxPool1d(2, return_indices=True),
-        nn.MaxUnpool1d(2)),
+        nn.MaxUnpool1d(2),
+        assert_shape_inverse=True),
     input_size=(1, 1, 4),
     fullname='MaxUnpool1d_net',))
 add_test(NewModuleTest(
     constructor=lambda: UnpoolingNet(
+        nn.MaxPool1d((2,), return_indices=True),
+        nn.MaxUnpool1d((2,)),
+        assert_shape_inverse=True),
+    input_size=(1, 1, 4),
+    fullname='MaxUnpool1d_net_tuple',))
+add_test(NewModuleTest(
+    constructor=lambda: UnpoolingNet(
         nn.MaxPool2d(2, return_indices=True),
-        nn.MaxUnpool2d(2)),
+        nn.MaxUnpool2d(2),
+        assert_shape_inverse=True),
     input_size=(1, 1, 2, 4),
     fullname='MaxUnpool2d_net',))
 add_test(NewModuleTest(
     constructor=lambda: UnpoolingNet(
+        nn.MaxPool2d((2, 3), return_indices=True),
+        nn.MaxUnpool2d((2, 3)),
+        assert_shape_inverse=True),
+    input_size=(1, 1, 2, 6),
+    fullname='MaxUnpool2d_net_tuple',))
+add_test(NewModuleTest(
+    constructor=lambda: UnpoolingNet(
         nn.MaxPool3d(2, return_indices=True),
-        nn.MaxUnpool3d(2)),
+        nn.MaxUnpool3d(2),
+        assert_shape_inverse=True),
     input_size=(1, 1, 2, 4, 6),
     fullname='MaxUnpool3d_net',
+    check_gradgrad=False,))
+add_test(NewModuleTest(
+    constructor=lambda: UnpoolingNet(
+        nn.MaxPool3d((2, 3, 4), return_indices=True),
+        nn.MaxUnpool3d((2, 3, 4)),
+        assert_shape_inverse=True),
+    input_size=(1, 1, 2, 3, 4),
+    fullname='MaxUnpool3d_net_tuple',
     check_gradgrad=False,))
 
 

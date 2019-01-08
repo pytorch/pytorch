@@ -1361,6 +1361,13 @@ new_module_tests = [
         input_size=(1, 3, 7, 7),
     ),
     dict(
+        module_name='MaxPool2d',
+        constructor_args=((2, 4), (2, 4), (1, 2)),
+        input_size=(1, 1, 6, 8),
+        expected_output_size=(1, 1, 4, 3),
+        desc='tuple',
+    ),
+    dict(
         module_name='AvgPool1d',
         constructor_args=(2,),
         input_size=(2, 3, 6),
@@ -1393,6 +1400,20 @@ new_module_tests = [
         constructor_args=((2, 2), (2, 2), (1, 1)),
         input_size=(2, 3, 6, 6),
         desc='stride_pad',
+    ),
+    dict(
+        module_name='AvgPool2d',
+        constructor_args=((2, 4),),
+        input_size=(1, 1, 2, 4),
+        expected_output_size=(1, 1, 1, 1),
+        desc='tuple',
+    ),
+    dict(
+        module_name='AvgPool2d',
+        constructor_args=((2, 4), (2, 4), (1, 2)),
+        input_size=(1, 1, 6, 8),
+        expected_output_size=(1, 1, 4, 3),
+        desc='stride_pad_tuple',
     ),
     dict(
         module_name='LPPool2d',
@@ -1656,6 +1677,12 @@ new_module_tests = [
             2, output_ratio=0.5, _random_samples=torch.DoubleTensor(1, 3, 2).uniform_()),
         input_size=(1, 3, 5, 5),
         fullname='FractionalMaxPool2d_ratio',
+    ),
+    dict(
+        constructor=lambda: nn.FractionalMaxPool2d(
+            (1, 2), output_size=(1, 2), _random_samples=torch.DoubleTensor(1, 3, 2).uniform_()),
+        input_size=(1, 1, 4),
+        fullname='FractionalMaxPool2d_tuple',
     ),
     dict(
         constructor=lambda: nn.FractionalMaxPool2d((2, 2), output_size=(
@@ -2883,11 +2910,13 @@ class TestBase(object):
 
     _required_arg_names = {'constructor_args', 'input', 'extra_args'}
 
-    def __init__(self, constructor, desc='', reference_fn=None, fullname=None, **kwargs):
+    def __init__(self, constructor, desc='', reference_fn=None, expected_output_size=None,
+                 fullname=None, **kwargs):
         self.desc = desc
         self.fullname = fullname
         self.constructor = constructor
         self.reference_fn = reference_fn
+        self.expected_output_size = expected_output_size
         for name in self._required_arg_names:
             if name not in kwargs and name + '_fn' not in kwargs and name + '_size' not in kwargs:
                 if name in {'constructor_args', 'extra_args'}:
@@ -2971,6 +3000,10 @@ class ModuleTest(TestBase):
     def __call__(self, test_case):
         module = self.constructor(*self.constructor_args)
         input = self._get_input()
+
+        if self.expected_output_size is not None:
+            out = test_case._forward(module, input)
+            test_case.assertTupleEqual(out.size(), self.expected_output_size)
 
         if self.reference_fn is not None:
             out = test_case._forward(module, input)
