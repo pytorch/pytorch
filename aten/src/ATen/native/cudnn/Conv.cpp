@@ -459,7 +459,7 @@ struct algorithm_search<cudnnConvolutionFwdAlgoPerf_t> {
   static constexpr auto DEFAULT_ALGO = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM;
   static BenchmarkCache<perf_t>& cache() { return fwd_algos; }
 
-  static perf_t findAlgorithm(const ConvolutionArgs& args, bool benchmark) {
+  static perf_t findAlgorithm(const cudnnDataType_t dataType, const ConvolutionArgs& args, bool benchmark) {
     static const algo_t algos[] = {
          CUDNN_CONVOLUTION_FWD_ALGO_GEMM,
          CUDNN_CONVOLUTION_FWD_ALGO_FFT,
@@ -487,6 +487,7 @@ struct algorithm_search<cudnnConvolutionFwdAlgoPerf_t> {
             &perf_count,
             perf_results.get()));
       #else
+        // construct *Perf_t struct for CUDNN < 7.
         perf_count = 1;
         AT_CUDNN_CHECK(cudnnGetConvolutionForwardAlgorithm(
             args.handle,
@@ -496,7 +497,7 @@ struct algorithm_search<cudnnConvolutionFwdAlgoPerf_t> {
             args.odesc.desc(),
             CUDNN_CONVOLUTION_FWD_PREFER_FASTEST,
             0,
-            perf_results.get()->algo));
+            &(perf_results->algo)));
       #endif
     } else {
       size_t max_ws_size = getMaxWorkspaceSize(args, algos, num_algos);
@@ -539,7 +540,7 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgoPerf_t> {
   static constexpr auto DEFAULT_ALGO = CUDNN_CONVOLUTION_BWD_DATA_ALGO_1;
   static BenchmarkCache<perf_t>& cache() { return bwd_data_algos; }
 
-  static perf_t findAlgorithm(const ConvolutionArgs& args, bool benchmark) {
+  static perf_t findAlgorithm(const cudnnDataType_t dataType, const ConvolutionArgs& args, bool benchmark) {
     static const algo_t algos[] = {
         CUDNN_CONVOLUTION_BWD_DATA_ALGO_0,
         CUDNN_CONVOLUTION_BWD_DATA_ALGO_1,
@@ -565,6 +566,7 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgoPerf_t> {
             &perf_count,
             perf_results.get()));
       #else
+        // construct *Perf_t struct for CUDNN < 7.
         perf_count = 1;
         AT_CUDNN_CHECK(cudnnGetConvolutionBackwardDataAlgorithm(
             args.handle,
@@ -574,7 +576,7 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgoPerf_t> {
             args.idesc.desc(),
             CUDNN_CONVOLUTION_BWD_DATA_PREFER_FASTEST,
             0,
-            perf_results.get()->algo));
+            &(perf_results->algo)));
       #endif
     } else {
       size_t max_ws_size = getMaxWorkspaceSize(args, algos, num_algos);
@@ -618,7 +620,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgoPerf_t> {
 
   static BenchmarkCache<perf_t>& cache() { return bwd_filter_algos; }
 
-  static perf_t findAlgorithm(const ConvolutionArgs& args, bool benchmark) {
+  static perf_t findAlgorithm(const cudnnDataType_t dataType, const ConvolutionArgs& args, bool benchmark) {
     static const algo_t algos[] = {
         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_0,
         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_1,
@@ -647,6 +649,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgoPerf_t> {
             &perf_count,
             perf_results.get()));
       #else
+        // construct *Perf_t struct for CUDNN < 7.
         perf_count = 1;
         AT_CUDNN_CHECK(cudnnGetConvolutionBackwardFilterAlgorithm(
             args.handle,
@@ -656,7 +659,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgoPerf_t> {
             args.wdesc.desc(),
             CUDNN_CONVOLUTION_BWD_FILTER_PREFER_FASTEST,
             0,
-            perf_results.get()->algo));
+            &(perf_results->algo)));
       #endif
     } else {
       size_t max_ws_size = getMaxWorkspaceSize(args, algos, num_algos);
@@ -699,13 +702,13 @@ void findAlgorithm(const cudnnDataType_t dataType, const ConvolutionArgs& args, 
   }
 
   if (args.params.deterministic && !benchmark) {
-    *(algoPerf->algo) = search::DEFAULT_ALGO;
+    algoPerf->algo = search::DEFAULT_ALGO;
     if (dataType == CUDNN_DATA_HALF) {
-      *(algoPerf->mathType) = CUDNN_DEFAULT_MATH;
+      algoPerf->mathType = CUDNN_TENSOR_OP_MATH;
     } else {
-      *(algoPerf->mathType) = CUDNN_TENSOR_OP_MATH;
+      algoPerf->mathType = CUDNN_DEFAULT_MATH;
     }
-    search::getWorkspaceSize(args, *(algoPerf->algo), &(algoPerf->memory));
+    search::getWorkspaceSize(args, algoPerf->algo, &(algoPerf->memory));
     return;
   }
 
@@ -716,7 +719,7 @@ void findAlgorithm(const cudnnDataType_t dataType, const ConvolutionArgs& args, 
     }
   } 
 
-  auto perfResults = search::findAlgorithm(args, benchmark);
+  auto perfResults = search::findAlgorithm(dataType, args, benchmark);
   // for deterministic algo, look at all the perf results and return the best
   // deterministic algo
   if (perfResults.status == CUDNN_STATUS_SUCCESS &&
@@ -737,19 +740,19 @@ void findAlgorithm(const cudnnDataType_t dataType, const ConvolutionArgs& args, 
         search::getWorkspaceSize(args, *(algoPerf->algo), &(algoPerf->memory));
       #endif
   } else {
-      *(algoPerf->algo) = search::DEFAULT_ALGO;
+      algoPerf->algo = search::DEFAULT_ALGO;
       if (dataType == CUDNN_DATA_HALF) {
-        *(algoPerf->mathType) = CUDNN_DEFAULT_MATH;
+        algoPerf->mathType = CUDNN_TENSOR_OP_MATH;
       } else {
-        *(algoPerf->mathType) = CUDNN_TENSOR_OP_MATH;
+        algoPerf->mathType = CUDNN_DEFAULT_MATH;
       }
-      search::getWorkspaceSize(args, *(algoPerf->algo), &(algoPerf->memory));
+      search::getWorkspaceSize(args, algoPerf->algo, &(algoPerf->memory));
   }
 }
 
 template<typename perf_t>
 Workspace chooseAlgorithm(
-    const cudnnDataType_t dataType;
+    const cudnnDataType_t dataType,
     const ConvolutionArgs& args,
     bool benchmark,
     perf_t* algoPerf)
@@ -757,23 +760,22 @@ Workspace chooseAlgorithm(
   findAlgorithm(dataType, args, benchmark, algoPerf);
 
   using search = algorithm_search<perf_t>;
-  size_t workspace_size = algoPerf->memory;
   try {
-    return Workspace(workspace_size);
+    return Workspace(algoPerf->memory);
   } catch (const std::exception& e) {
     cudaGetLastError(); // clear OOM error
 
     // switch to default algorithm and record it in the cache to prevent
     // further OOM errors
-    *(algoPerf->algo) = search::DEFAULT_ALGO;
+    algoPerf->algo = search::DEFAULT_ALGO;
     if (dataType == CUDNN_DATA_HALF) {
-      *(algoPerf->mathType) = CUDNN_DEFAULT_MATH;
+      algoPerf->mathType = CUDNN_TENSOR_OP_MATH;
     } else {
-      *(algoPerf->mathType) = CUDNN_TENSOR_OP_MATH;
+      algoPerf->mathType = CUDNN_DEFAULT_MATH;
     }
+    search::getWorkspaceSize(args, algoPerf->algo, &(algoPerf->memory));
     search::cache().insert(args.params, *algoPerf);
-    search::getWorkspaceSize(args, *(algoPerf->algo), &workspace_size);
-    return Workspace(workspace_size);
+    return Workspace(algoPerf->memory);
   }
 }
 
