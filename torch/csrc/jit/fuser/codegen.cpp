@@ -246,19 +246,6 @@ static std::string encodeRHS(const Node* n) {
   return format(str, env);
 }
 
-// If there is a single user of a node and it's a chunk operation, returns
-//  that user. Returns nullptr otherwise.
-static Node* usedInFusedChunk(const Value* input) {
-  auto uses = input->uses();
-  if (uses.size() == 1) {
-    Node* user = uses[0].user;
-    if (user->kind() == prim::ConstantChunk) {
-      return user;
-    }
-  }
-  return nullptr;
-}
-
 static void emitIndexingFor(
     std::ostream& out,
     const std::string& tensor,
@@ -284,16 +271,11 @@ static void emitIndexingFor(
 }
 
 // TODO: handle cases where we need to generate > 2^32 element tensors
-std::tuple<
-    std::string,
-    std::vector<PartitionDesc>,
-    std::vector<PartitionDesc>,
-    bool>
-generateKernel(
+std::string generateKernel(
     const std::string& name,
     const Graph& graph,
-    const std::vector<TensorDesc>& input_desc,
-    const std::vector<TensorDesc>& output_desc,
+    const std::vector<std::pair<const Value*, const TensorDesc>>& inputs,
+    const std::vector<std::pair<const Value*, const TensorDesc>>& outputs,
     const bool use_cuda) {
   TemplateEnv env;
   env.s("kernelName", name);
@@ -328,55 +310,21 @@ generateKernel(
         env));
   };
 
-  // Writes input parameters and creates flattened inputs
-  std::vector<PartitionDesc> chunk_desc;
-  std::vector<std::pair<const Value*, const TensorDesc&>> flat_inputs;
-  {
-    size_t input_index = 0;
-    for (const auto& p : graph.inputs()) {
-      if (const Node* chunk = usedInFusedChunk(p)) {
-        int64_t dim = chunk->i(attr::dim);
-        int64_t chunks = chunk->i(attr::chunks);
-        chunk_desc.emplace_back(input_desc[input_index++], chunks, dim);
-        for (const auto* o : chunk->outputs()) {
-          flat_inputs.emplace_back(o, *chunk_desc.back().subTensorDesc());
-        }
-      } else {
-        chunk_desc.emplace_back();
-        flat_inputs.emplace_back(p, input_desc[input_index++]);
-      }
-    }
-    for (const auto& input : flat_inputs) {
-      emitFormal(input.first, input.second);
-    }
+  // Writes input parameters
+  for (const auto& input : inputs) {
+    emitFormal(input.first, input.second);
   }
+  
 
-  // Writes output parameters and creates flattened outputs
-  std::vector<PartitionDesc> concat_desc;
-  std::vector<std::pair<const Value*, TensorDesc>> flat_output_nodes;
-  {
-    size_t i = 0;
-    for (const auto& o : graph.outputs()) {
-      const auto& desc = output_desc[i++];
-      if (o->node()->kind() != prim::FusedConcat) {
-        emitFormal(o, desc);
-        concat_desc.emplace_back();
-        flat_output_nodes.emplace_back(o, desc);
-      } else {
-        const auto cat = o->node();
-        concat_desc.emplace_back(desc, cat->inputs().size(), cat->i(attr::dim));
-        for (const auto& c : cat->inputs()) {
-          emitFormal(c, *concat_desc.back().subTensorDesc());
-          flat_output_nodes.emplace_back(c, desc);
-        }
-      }
-    }
+  // Writes output parameters
+  for (const auto& output : outputs) {
+    emitFormal(output.first, output.second);
   }
 
   // Acquires input values
   bool has_half_tensor = false;
   size_t formal_count = 0;
-  for (const auto input : flat_inputs) {
+  for (const auto input : inputs) {
     auto p = input.first;
     env.s("node", valueName(p));
     env.d("formal", formal_count++);
@@ -422,11 +370,10 @@ generateKernel(
   }
 
   // Generates writes to output tensors
-  for (const auto& output : flat_output_nodes) {
-    const auto& o = output.first;
+  for (const auto& output : outputs) {
     env.d("formal", formal_count++);
     env.s("access", format("t${formal}.data[t${formal}_offset]", env));
-    env.s("node", valueName(o));
+    env.s("node", valueName(output.first));
 
     // Acquires and converts (if needed) outputs
     // Note: conversion to half is only supported for CUDA kernels.
@@ -485,8 +432,7 @@ generateKernel(
   if (debugFuser()) {
     std::cerr << "fusion code:" << code_string << std::endl;
   }
-  return std::make_tuple(
-      code_string, std::move(chunk_desc), std::move(concat_desc), has_random);
+  return code_string;
 }
 
 } // namespace fuser
