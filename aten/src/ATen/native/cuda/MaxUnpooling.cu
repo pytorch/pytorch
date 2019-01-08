@@ -106,8 +106,8 @@ Tensor& max_unpooling2d_forward_out_cuda(
   AT_CHECK(
       indices_.scalar_type() == at::ScalarType::Long,
       "elements in indices should be type int64");
-  auto owidth = output_size[0];
-  auto oheight = output_size[1];
+  auto oheight = output_size[0];
+  auto owidth = output_size[1];
 
   TensorArg output_arg{output, "output", 1}, self_arg{self_, "self_", 2},
       indices_arg{indices_, "indices_", 3};
@@ -198,8 +198,8 @@ void max_unpooling3d_shape_check(
     IntList stride,
     IntList padding) {
   int64_t oT = output_size[0];
-  int64_t oW = output_size[1];
-  int64_t oH = output_size[2];
+  int64_t oH = output_size[1];
+  int64_t oW = output_size[2];
   AT_CHECK(
       indices.scalar_type() == at::ScalarType::Long,
       "elements in indices should be type int64");
@@ -276,8 +276,8 @@ Tensor& max_unpooling3d_forward_out_cuda(
       self_, Tensor(), indices_, output_size, stride, padding);
 
   int64_t oT = output_size[0];
-  int64_t oW = output_size[1];
-  int64_t oH = output_size[2];
+  int64_t oH = output_size[1];
+  int64_t oW = output_size[2];
 
   TensorArg output_arg{output_, "output_", 1}, self_arg{self_, "self_", 2},
       indices_arg{indices_, "indices_", 3};
@@ -376,8 +376,8 @@ at::Tensor& max_unpooling2d_backward_out_cuda(
     const Tensor& self_,
     const Tensor& indices_,
     IntList output_size) {
-  int64_t owidth = output_size[0];
-  int64_t oheight = output_size[1];
+  int64_t oheight = output_size[0];
+  int64_t owidth = output_size[1];
   AT_CHECK(
       indices_.scalar_type() == at::ScalarType::Long,
       "elements in indices should be type int64");
@@ -483,8 +483,8 @@ at::Tensor& max_unpooling3d_backward_out_cuda(
     IntList stride,
     IntList padding) {
   int64_t oT = output_size[0];
-  int64_t oW = output_size[1];
-  int64_t oH = output_size[2];
+  int64_t oH = output_size[1];
+  int64_t oW = output_size[2];
 
   max_unpooling3d_shape_check(
       self_, grad_output_, indices_, output_size, stride, padding);
