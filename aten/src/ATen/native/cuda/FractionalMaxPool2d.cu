@@ -33,8 +33,7 @@ __device__ inline int get_interval(accscalar_t sample,
   }
 }
 
-// Temlate on PoolSizeWStatic to enable unroll
-template <typename scalar_t, int PoolSizeWStatic>
+template <typename scalar_t>
 __global__ void fractional_max_pool2d_out_cuda_frame(
   PackedTensorAccessor<scalar_t, 4> output,
   PackedTensorAccessor<int64_t, 4> indices,
@@ -64,7 +63,7 @@ __global__ void fractional_max_pool2d_out_cuda_frame(
     int maxIndex = -1;
 
     for (int h = poolH; h < poolH + poolSizeH; ++h) {
-      if (PoolSizeWStatic == -1) {
+      if (poolSizeW < 2 || poolSizeW > 7) {
         for (int w = poolW; w < poolW + poolSizeW; ++w) {
           scalar_t val = input[batch][plane][h][w];
           // for consistency with THNN, favor the first max
@@ -74,8 +73,7 @@ __global__ void fractional_max_pool2d_out_cuda_frame(
           }
         }
       } else {
-#pragma unroll
-        for (int i = 0; i < PoolSizeWStatic; ++i) {
+        for (int i = 0; i < poolSizeW; ++i) {
           int w = i + poolW;
           scalar_t val = input[batch][plane][h][w];
           // for consistency with THNN, favor the first max
@@ -137,14 +135,11 @@ void fractional_max_pool2d_out_cuda_template(
   int numBatch = 1;
 
   int ndims = input.ndimension();
-  for (int i = 0; i < ndims; i++) {
-     AT_CHECK(input.size(i) > 0,
-       "fractional_max_pool2d(): expected input to have non-empty spatial dimensions, "
-       "but input has sizes ", input.sizes(), " with dimension ", i, " being "
-       "empty");
-   }
+  AT_CHECK(input.numel() > 0,
+    "fractional_max_pool2d(): expected input to have non-empty ",
+    "spatial dimensions.");
 
-   AT_CHECK((ndims == 3 || ndims == 4),
+  AT_CHECK((ndims == 3 || ndims == 4),
      "non-empty 3D or 4D (batch mode) tensor expected for input");
 
   if (ndims == 4) {
@@ -186,46 +181,36 @@ void fractional_max_pool2d_out_cuda_template(
   auto indices_ = indices;
 
   if(ndims == 3) {
-    output_.reshape({1, numPlanes, outputH, outputW});
-    indices_.reshape({1, numPlanes, outputH, outputW});
-    input_.reshape({1, input.size(0), input.size(1), input.size(2)});
+    output_ = output_.reshape({1, numPlanes, outputH, outputW});
+    indices_ = indices_.reshape({1, numPlanes, outputH, outputW});
+    input_ = input_.reshape({1, input.size(0), input.size(1), input.size(2)});
   }
 
   // block is limited to 4 warps
   // grid handles overflow per each plane
   int outputPlaneSize = output_.size(2) *
     output_.size(3);
-  dim3 grid((outputPlaneSize + 127) / 128,
+  dim3 grid((outputPlaneSize + 127) / 128, // ceil(outputPlaneSize / 128)
             input_.size(1),
             input_.size(0));
   dim3 block(outputPlaneSize > 128 ? 128 : outputPlaneSize);
 
-#define FMP(POOL_W) \
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), \
-    "fractional_max_pool2d_out_cuda_frame", \
-    [&] { \
-      auto devInput = input_.packed_accessor<scalar_t, 4>(); \
-      auto devOutput = output_.packed_accessor<scalar_t, 4>();\
-      auto devIndices = indices_.packed_accessor<int64_t, 4>();\
-      auto devSamples = randomSamples.packed_accessor<scalar_t, 3>();\
-      fractional_max_pool2d_out_cuda_frame<scalar_t, POOL_W>\
-        <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(\
-          devOutput, devIndices, devInput, devSamples,\
-          poolSizeH, poolSizeW);\
-       }\
-     )
-
-#define FMP_CASE(POOL_W) case POOL_W: FMP(POOL_W); break
-
-    switch (poolSizeW) {
-      FMP_CASE(2);
-      FMP_CASE(3);
-      FMP_CASE(4);
-      FMP_CASE(5);
-      FMP_CASE(6);
-      FMP_CASE(7);
-      default: FMP(-1);
-    }
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(),
+    "fractional_max_pool2d_out_cuda_frame",
+    [&] {
+      auto devInput = input_.packed_accessor<scalar_t, 4>();
+      auto devOutput = output_.packed_accessor<scalar_t, 4>();
+      auto devIndices = indices_.packed_accessor<int64_t, 4>();
+      auto devSamples = randomSamples.packed_accessor<scalar_t, 3>();
+      fractional_max_pool2d_out_cuda_frame<scalar_t>
+        <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
+          devOutput, devIndices, devInput, devSamples,
+          poolSizeH, poolSizeW);
+       }
+     );
+  AT_CHECK(cudaGetLastError() == cudaSuccess,
+     "fractional_max_pool2d_out_cuda_frame failed with error code ",
+     cudaGetLastError());
 }
 
 void fractional_max_pool2d_backward_out_cuda_template(
@@ -268,9 +253,9 @@ void fractional_max_pool2d_backward_out_cuda_template(
   auto indices_ = indices;
 
   if(ndims == 3) {
-    gradInput_.reshape({1, input.size(0), inputH, inputW});
-    gradOutput_.reshape({1, gradOutput.size(0), outputH, outputW});
-    indices_.reshape({1, indices_.size(0), outputH, outputW});
+    gradInput_ = gradInput_.reshape({1, input.size(0), inputH, inputW});
+    gradOutput_ = gradOutput_.reshape({1, gradOutput.size(0), outputH, outputW});
+    indices_ = indices_.reshape({1, indices_.size(0), outputH, outputW});
   }
 
   /* backprop */
@@ -278,22 +263,25 @@ void fractional_max_pool2d_backward_out_cuda_template(
   // grid handles overflow per each plane
   int outputPlaneSize = gradOutput_.size(2) *
     gradOutput_.size(3);
-  dim3 grid((outputPlaneSize + 127) / 128,
+  dim3 grid((outputPlaneSize + 127) / 128, // ceil(outputPlaneSize / 128)
             gradInput_.size(1),
             gradInput_.size(0));
   dim3 block(outputPlaneSize > 128 ? 128 : outputPlaneSize);
 
   auto devIndices = indices.packed_accessor<int64_t, 4>();
-AT_DISPATCH_FLOATING_TYPES_AND_HALF(gradOutput.type(),
-  "fractional_max_pool2d_backward_out_cuda_frame",
-  [&] {
-    auto devGradInput = gradInput_.packed_accessor<scalar_t, 4>();
-    auto devGradOutput = gradOutput_.packed_accessor<scalar_t, 4>();
-    fractional_max_pool2d_backward_out_cuda_frame<scalar_t>
-      <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(gradOutput.type(),
+    "fractional_max_pool2d_backward_out_cuda_frame",
+    [&] {
+      auto devGradInput = gradInput_.packed_accessor<scalar_t, 4>();
+      auto devGradOutput = gradOutput_.packed_accessor<scalar_t, 4>();
+      fractional_max_pool2d_backward_out_cuda_frame<scalar_t>
+        <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
         devGradInput, devGradOutput, devIndices);
       }
     );
+  AT_CHECK(cudaGetLastError() == cudaSuccess,
+    "fractional_max_pool2d_backward_out_cuda_frame failed with error code ",
+    cudaGetLastError());
 }
 
 }// namespace
@@ -342,7 +330,6 @@ Tensor& fractional_max_pool2d_backward_out_cuda(
   IntList output_size,
   const at::Tensor& indices)
 {
-  gradInput.resize_as_(input);
   fractional_max_pool2d_backward_out_cuda_template(
     gradInput,
     gradOutput_,
