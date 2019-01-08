@@ -264,10 +264,10 @@ endif()
 
 
 if (TORCH_STATIC)
+  target_compile_definitions(torch PUBLIC TORCH_BUILD_STATIC_LIBS)
   add_library(torch STATIC ${TORCH_SRCS})
 else()
   add_library(torch SHARED ${TORCH_SRCS})
-  target_compile_definitions(torch PUBLIC TORCH_BUILD_STATIC_LIBS)
 endif()
 
 target_compile_definitions(torch PUBLIC _THP_CORE)
