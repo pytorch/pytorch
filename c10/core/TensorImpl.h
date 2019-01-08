@@ -35,7 +35,7 @@ C10_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
 // Tensor created from .data or .detach().
 //
 // For more detail, see comment for `allow_tensor_metadata_change_` field.
-CAFFE2_API extern const std::string err_msg_for_changing_metadata_on_derived_tensor;
+extern C10_API const std::string err_msg_for_changing_metadata_on_derived_tensor;
 
 namespace at {
 class Tensor;
