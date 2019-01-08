@@ -2247,7 +2247,7 @@ class _TestTorchMixin(object):
         # test against numpy.histogram() with large input
         input_size = (5000,)
         x = torch.randn(input_size, dtype=torch.float, device=device)
-        xn = x.numpy()
+        xn = x.cpu().numpy()
         actual = torch.histc(x, bins=100)
         expected = np.histogram(xn, bins=100)[0]
         self.assertEqual(expected.shape, actual.shape)
