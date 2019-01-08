@@ -352,8 +352,9 @@ struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
 };
 
 struct VISIBILITY_HIDDEN OverloadedFunctionValue : public SugaredValue {
-  OverloadedFunctionValue(py::list functions)
-      : possible_functions_(std::move(functions)) {}
+  OverloadedFunctionValue(py::object containing_class, py::list functions)
+      : containing_class_(std::move(containing_class)),
+        possible_functions_(std::move(functions)) {}
 
   std::string kind() const override {
     return "overloaded function";
@@ -365,35 +366,36 @@ struct VISIBILITY_HIDDEN OverloadedFunctionValue : public SugaredValue {
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
       size_t n_binders) override {
-    auto possible_functions = py::cast<std::vector<py::object>>(possible_functions_);
-    if (possible_functions.size() == 0) {
-      throw ErrorReport(loc) << "No overloads found";
-    }
-
-    auto containing_class = py::getattr(possible_functions.at(0), "__self__");
-    auto weak_module = py::module::import("torch.jit").attr("_try_get_weak_module")(containing_class);
-
-    if (weak_module.is_none()) {
-      throw ErrorReport(loc) << "Overloaded methods are only allowed on weak script modules";
-    }
-
     std::stringstream err;
-    for (const py::object& fn : possible_functions) {
-      auto fn_name = py::str(py::getattr(fn, "__name__"));
-      py::object py_method = py::getattr(weak_module, fn_name);
-      auto schema = py::cast<FunctionSchema>(py::getattr(py_method, "schema")());
+    auto possible_functions =
+        py::cast<std::vector<py::object>>(possible_functions_);
 
-      auto match = tryMatchSchema(schema, loc, *caller.graph().get(), c10::nullopt, inputs, attributes, err, true);
+    for (const py::str& fn_name : possible_functions) {
+      py::object py_method = py::getattr(containing_class_, fn_name);
+      auto schema =
+          py::cast<FunctionSchema>(py::getattr(py_method, "schema")());
+
+      auto match = tryMatchSchema(
+          schema,
+          loc,
+          *caller.graph().get(),
+          c10::nullopt,
+          inputs,
+          attributes,
+          err,
+          true);
       if (match) {
         Method& m = py::cast<Method&>(py_method);
         MethodValue mv(nullptr, m);
         return mv.call(loc, caller, inputs, attributes, n_binders);
       }
     }
-    throw ErrorReport(loc) << "Could not find any matching overloads\n" << err.str();
+    throw ErrorReport(loc) << "Could not find any matching overloads\n"
+                           << err.str();
   }
 
  private:
+  py::object containing_class_;
   py::list possible_functions_;
 };
 
@@ -483,10 +485,11 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   if (!dispatched_fn.is_none()) {
     return std::make_shared<BooleanDispatchValue>(std::move(dispatched_fn));
   }
-  py::object overloaded_fn =
+  py::object overload_obj =
       py::module::import("torch.jit").attr("_try_get_overloaded_fn")(obj);
-  if (!overloaded_fn.is_none()) {
-    return std::make_shared<OverloadedFunctionValue>(std::move(overloaded_fn));
+  if (!overload_obj.is_none()) {
+    py::tuple overload = overload_obj;
+    return std::make_shared<OverloadedFunctionValue>(overload[0], overload[1]);
   }
   return std::make_shared<PythonValue>(obj);
 }

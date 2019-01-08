@@ -9020,9 +9020,9 @@ a")
             def forward(self, x):
                 # manually do argument switching
                 if isinstance(x, tuple):
-                    return forward_tuple(x)
+                    return self.forward_tuple(x)
                 else:
-                    return forward_tensor(x)
+                    return self.forward_tensor(x)
 
             @torch._jit_internal.weak_script_method
             def forward_tensor(self, x):
@@ -9046,6 +9046,10 @@ a")
         x = torch.ones(1)
         self.assertEqual(s(x), x + 20)
         self.assertEqual(s.forward_tuple(x), x + 5)
+
+        w = W()
+        self.assertEqual(w((x, x)), x + 5)
+        self.assertEqual(w((x)), x + 20)
 
     def test_select_after_chunk(self):
         def foo(x):

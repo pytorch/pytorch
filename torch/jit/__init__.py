@@ -670,13 +670,17 @@ def _try_get_dispatched_fn(fn):
 
 
 def _try_get_overloaded_fn(fn):
-    if not hasattr(fn, '__self__') or type(fn.__self__) is not WeakScriptModuleProxy:
+    if not hasattr(fn, '__self__'):
         return None
-    class_type = type(fn.__self__._original())
-    overloads_by_name = _overloaded_fns.get(class_type)
+    class_type = type(fn.__self__)
+    if class_type is WeakScriptModuleProxy:
+        # get saved original type() if necessary
+        class_type = fn.__self__._original_type
+    overloads_by_name = _overloaded_fns.get(fn.__self__._original_type)
     if overloads_by_name is None:
         return None
-    return overloads_by_name.get(fn.__name__)
+    overload_names = [overload.__name__ for overload in overloads_by_name.get(fn.__name__)]
+    return fn.__self__, overload_names
 
 
 def _try_compile_weak_script(fn):
@@ -1179,6 +1183,7 @@ if _enabled:
             super(WeakScriptModuleProxy, self).__init__()
 
             self.__dict__["_original"] = weakref.ref(original)
+            self.__dict__["_original_type"] = type(original)
 
             # Copy Parameters / Modules / Buffers
             for name in dir(original):
