@@ -76,6 +76,13 @@ class ReLU(Threshold):
         >>> m = nn.ReLU()
         >>> input = torch.randn(2)
         >>> output = m(input)
+
+
+      For implementing CRelu - https://arxiv.org/pdf/1603.05201.pdf
+
+        >>> m = nn.ReLU()
+        >>> input = torch.randn(2).unsqueeze(0)
+        >>> output = torch.cat((m(input),m(-input)))
     """
 
     def __init__(self, inplace=False):
