@@ -9,7 +9,7 @@ See https://github.com/pytorch/pytorch/issues/7434 for the main issue.
 
 This tree is intentionally not part of the main build and will be
 buildable/testable in isolation, as long as ATen is available in
-`<repository root>/torch/`.
+`<repository root>/torch/lib/tmp_install`.
 
 To build and install ATen here, navigate to the root of this
 repository and run:
