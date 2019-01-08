@@ -48,7 +48,7 @@ def unpickle(filename):
     return dict
 
 def is_intel_machine():
-    VENDOR_ID_REGEX = re.compile('^vendor_id\s+: (\S+)')
+    VENDOR_ID_REGEX = re.compile(r'^vendor_id\s+: (\S+)')
     f = open('/proc/cpuinfo')
     for line in f:
         m = VENDOR_ID_REGEX.match(line)

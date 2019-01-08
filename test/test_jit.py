@@ -1160,6 +1160,14 @@ class TestJit(JitTestCase):
         if RUN_CUDA_MULTI_GPU:
             run(device="cuda:1")
 
+    def test_trace_indexed_assignment(self):
+        def stuff(x, y):
+            x = x.clone()
+            x[0] = y
+            return x
+        example = torch.rand(3, 4)
+        self.checkTrace(stuff, (example, example[0] + 1))
+
     # TODO: implement
     @unittest.expectedFailure
     def test_output_unflatten(self):
@@ -2800,6 +2808,17 @@ class TestScript(JitTestCase):
             return torch.ones(x), x
         self.checkScript(stuff3, ([3, 2],))
 
+    def test_bool_list_io(self):
+        @torch.jit.script
+        def stuff4(x):
+            # type: (List[bool]) -> Tuple[List[bool], List[bool], List[List[bool]]]
+            return x, [True, False], [[True]]
+
+        li_1, li_2, li_3 = stuff4([True])
+        li_3 = li_3[0]
+        for li in [li_1, li_2, li_3]:
+            self.assertTrue(type(li[0]) == type(True))
+
     def test_nested_list(self):
         def foo(z):
             # type: (Tuple[int, List[List[int]]]) -> int
@@ -3319,6 +3338,25 @@ a")
         self.run_pass('constant_propagation', graph)
         self.run_pass('constant_pooling', graph)
         self.assertExpectedGraph(graph)
+
+    def test_constant_pooling_none(self):
+        @torch.jit.script
+        def typed_nones(a=None, b=None, c=None):
+            # type: (Optional[int], Optional[bool], Optional[Tensor]) -> Tuple[Optional[int], Optional[bool], Optional[Tensor]] # noqa
+            return a, b, c
+
+        @torch.jit.script
+        def test(a):
+            # type: (bool) -> None
+            if a:
+                print(typed_nones())
+            else:
+                print(typed_nones())
+
+        graph_str = str(test.graph)
+        self.assertTrue(graph_str.count("bool? = prim::None") == 1)
+        self.assertTrue(graph_str.count("int? = prim::None") == 1)
+        self.assertTrue(graph_str.count("None = prim::None") == 1)
 
     def test_literal(self):
         def func1(a, b):
@@ -4347,21 +4385,33 @@ a")
         self.checkScript(tensor_test, (x, y))
 
     def test_number_math(self):
-        template = dedent('''
+        ops_template = dedent('''
         def func():
             return {scalar1} {op} {scalar2}
         ''')
         ops = ['+', '-', '*', '%', '<', '<=', '>', '>=', '==', '!=', '//']
+        funcs_template = dedent('''
+        def func():
+            return {func}({scalar1}, {scalar2})
+        ''')
+        funcs = ['min', 'max']
         scalars = ['7', '2', '3', '-3', '3.14', '0.125', '-0.5', '2.0', '-2.0']
         scalar_pairs = [(scalar1, scalar2) for scalar1 in scalars for scalar2 in scalars]
+
+        def run_test(code):
+            scope = {}
+            exec(code, globals(), scope)
+            cu = torch.jit.CompilationUnit(code)
+
+            self.assertEqual(cu.func(), scope['func']())
+
         for scalar1, scalar2 in scalar_pairs:
             for op in ops:
-                code = template.format(op=op, scalar1=scalar1, scalar2=scalar2)
-                scope = {}
-                exec(code, globals(), scope)
-                cu = torch.jit.CompilationUnit(code)
-
-                self.assertEqual(cu.func(), scope['func']())
+                code = ops_template.format(op=op, scalar1=scalar1, scalar2=scalar2)
+                run_test(code)
+            for func in funcs:
+                code = funcs_template.format(func=func, scalar1=scalar1, scalar2=scalar2)
+                run_test(code)
 
     def test_number_div(self):
         self.checkScript(div_int_future, (), optimize=True)
@@ -4440,6 +4490,84 @@ a")
 
     def test_tensor_number_math(self):
         self._test_tensor_number_math()
+
+    def test_torch_tensor_bad_input(self):
+        with self.assertRaisesRegex(RuntimeError, "Input list to torch.tensor must be of ints, floats, "
+                                    "or bools, got None"):
+            @torch.jit.script
+            def test():
+                return torch.tensor([None])
+
+        with self.assertRaisesRegex(RuntimeError, "Note: empty lists are constructed as Tensor"):
+            @torch.jit.script
+            def tmp():
+                return torch.tensor([])
+
+        @torch.jit.script
+        def foo():
+            return torch.tensor([[2, 2], [1]])
+        with self.assertRaisesRegex(RuntimeError, "Expected sequence of length"):
+            foo()
+
+    @suppress_warnings
+    def test_torch_tensor_empty_list(self):
+        def func():
+            return torch.tensor(torch.jit.annotate(List[int], []))
+        cu = torch.jit.script(func)
+        t1 = cu()
+        t2 = func()
+
+        # torchscript returns int tensor, python returns float tensor
+        self.assertNotEqual(t1.dtype, t2.dtype)
+
+        def func():
+            li = torch.jit.annotate(List[int], [])
+            return torch.tensor([li, li])
+
+        self.checkScript(func, ())
+
+        def func():
+            li = torch.jit.annotate(List[int], [])
+            return torch.tensor([[[li]]])
+
+        self.checkScript(func, ())
+
+    def test_torch_tensor(self):
+        template = dedent('''
+        def func():
+            li = {list_create}
+            return torch.tensor(li {options})
+        ''')
+
+        lists = ["2.5", "4", "True", "False", "[2]", "[-.5]", "[False, True, False]", "[2, 2]",
+                 "torch.jit.annotate(List[int], [])", "[2.5, 2.5]", "[[2], [2]]", "[[-.5], [2.2]]", "[[False], [True]]"]
+
+        dtypes = ["", ", dtype=torch.float", ", dtype=torch.double", ", dtype=torch.half",
+                  ", dtype=torch.uint8", ", dtype=torch.int8", ", dtype=torch.short",
+                  ", dtype=torch.int", ", dtype=torch.long"]
+
+        devices = ['', ", device='cpu'"]
+        if RUN_CUDA:
+            devices.append(", device='cuda'")
+
+        option_pairs = [dtype + device for dtype in dtypes for device in devices]
+        for li in lists:
+            for option in option_pairs:
+                # tensor from empty list is type float in python and annotated type in torchscript
+                if "annotate" in li and "dtype" not in option:
+                    continue
+                code = template.format(list_create=li, options=option)
+                scope = {}
+                exec(code, globals(), scope)
+                cu = torch.jit.CompilationUnit(code)
+                t1 = cu.func()
+                t2 = scope['func']()
+                if t1.dtype == torch.float16:  # equality NYI for half tensor
+                    self.assertTrue(str(t1) == str(t2))
+                else:
+                    self.assertEqual(t1, t2)
+                self.assertEqual(t1.dtype, t2.dtype)
+                self.assertEqual(t1.device, t2.device)
 
     @unittest.skipIf(not RUN_CUDA, "No CUDA")
     @skipIfRocm
@@ -6009,7 +6137,6 @@ a")
         output_orig.sum().backward()
         grad_orig = input.grad.clone()
         input.grad.zero_()
-
         output_import = resnet18_imported(input)
         output_import.sum().backward()
         grad_import = input.grad.clone()
@@ -8087,9 +8214,7 @@ a")
                 x[i, :] = torch.zeros(4)
             return x
 
-        self.assertWarnsRegex(lambda: torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[torch.rand(3, 4)]),
-                              'Output nr 1. of the traced function does not match the '
-                              'corresponding output of the Python function')
+        self.checkTrace(foo, (torch.rand(3, 4),))
 
     def test_trace_checker_inplace_on_view(self):
         def foo(x):
@@ -8206,6 +8331,21 @@ a")
         # testing that the correct error message propagates
         with self.assertRaisesRegex(RuntimeError, "Expected 4-dimensional input for 4-dimensional weight"):
             foo(torch.ones([123]))  # wrong size
+
+    def test_builtin_error_messsage(self):
+        from torch.nn.modules.utils import _single, _pair, _triple, _quadruple
+
+        with self.assertRaisesRegex(RuntimeError, "aten::masked_fill_"):
+            @torch.jit.script
+            def close_match(x):
+                return x.masked_fill(True)
+
+        with self.assertRaisesRegex(RuntimeError, "This op may not exist or may not be currently "
+                                    "supported in TorchScript"):
+            @torch.jit.script
+            def unknown_op(x):
+                torch.set_grad_enabled(True)
+                return x
 
     def test_exceptions(self):
         cu = torch.jit.CompilationUnit('''
@@ -8987,6 +9127,15 @@ a")
                     if bool(x < 3):
                         return 4
                 return 5
+
+    def test_select_after_chunk(self):
+        def foo(x):
+            chunked = torch.chunk(x, 1)
+            foo = chunked[0]
+            foo.add_(5)
+            return x
+
+        self.checkScript(foo, [torch.rand(2, 3)])
 
 
 class MnistNet(nn.Module):
@@ -10721,10 +10870,6 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 2)
 
 
-class TestJitGenerated(JitTestCase):
-    pass
-
-
 class TestCustomOperators(JitTestCase):
 
     def test_dynamic_op_registry(self):
@@ -10834,6 +10979,18 @@ graph(%x : Tensor) {
   return (%1);
 }
 ''')
+
+
+class TestJitGeneratedAutograd(JitTestCase):
+    pass
+
+
+class TestJitGeneratedModule(JitTestCase):
+    pass
+
+
+class TestJitGeneratedFunctional(JitTestCase):
+    pass
 
 
 # UBSAN per-function exclusions don't seem to work with OpenMP pragmas,
@@ -11155,7 +11312,7 @@ def add_autograd_test(
             if hasattr(torch.ones(1), inplace_name) and not broadcast_skip_inplace:
                 check(inplace_name)
 
-        post_add_test(test_name, skipTestIf, do_test)
+        post_add_test(test_name, skipTestIf, do_test, TestJitGeneratedAutograd)
 
 
 def suppress_warnings(fn):
@@ -11211,7 +11368,7 @@ def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=()
             else:
                 run_test()
 
-    post_add_test(test_name, skipTestIf, do_test)
+    post_add_test(test_name, skipTestIf, do_test, TestJitGeneratedFunctional)
 
 
 def add_nn_module_test(*args, **kwargs):
@@ -11321,17 +11478,17 @@ def add_nn_module_test(*args, **kwargs):
         # Check against Python module as reference
         check_against_reference(self, create_script_module, create_nn_module, f_args_variable, no_grad=no_grad)
 
-    post_add_test(test_name, (), do_test)
+    post_add_test(test_name, (), do_test, TestJitGeneratedModule)
 
 
-def post_add_test(test_name, skipTestIf, do_test):
-    assert not hasattr(TestJitGenerated, test_name), 'Two tests have the same name: ' + test_name
+def post_add_test(test_name, skipTestIf, do_test, test_class):
+    assert not hasattr(test_class, test_name), 'Two tests have the same name: ' + test_name
 
     for skip in skipTestIf:
         do_test = skip(do_test)
 
     if not (TEST_WITH_UBSAN and test_name in UBSAN_BLACKLISTED_TESTS):
-        setattr(TestJitGenerated, test_name, do_test)
+        setattr(test_class, test_name, do_test)
 
 
 class TestAsync(JitTestCase):

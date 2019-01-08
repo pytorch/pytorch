@@ -69,6 +69,8 @@ namespace c10 {
   _(prim, ConstantChunk)           \
   _(prim, MMTreeReduce)            \
   _(prim, MMBatchSide)             \
+  _(prim, min)                     \
+  _(prim, max)                     \
   _(aten, _ncf_unsqueeze)          \
   _(aten, warn)                    \
   _(aten, floordiv)                \
@@ -138,7 +140,8 @@ namespace c10 {
   _(attr, name)                    \
   _(attr, a)                       \
   _(attr, b)                       \
-  _(attr, beg)
+  _(attr, beg)                     \
+  _(attr, idx)
 #else
 #define FORALL_NS_SYMBOLS(_) \
   _(namespaces, prim)              \

@@ -95,9 +95,9 @@ FROM_IVALUE = {
     'int64_t?': '{}.toOptional<int64_t>()',
     'std::string': '{}.toString()->string()',
     'Generator': 'nullptr',
-    'std::array<bool,2>': 'as_bool_array<2>({}.toIntList()->elements())',
-    'std::array<bool,3>': 'as_bool_array<3>({}.toIntList()->elements())',
-    'std::array<bool,4>': 'as_bool_array<4>({}.toIntList()->elements())',
+    'std::array<bool,2>': 'as_bool_array<2>({}.toBoolListRef())',
+    'std::array<bool,3>': 'as_bool_array<3>({}.toBoolListRef())',
+    'std::array<bool,4>': 'as_bool_array<4>({}.toBoolListRef())',
 }
 
 

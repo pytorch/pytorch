@@ -1993,7 +1993,7 @@ Example::
 
 add_docstr(torch.gesv,
            r"""
-torch.gesv(B, A) -> (Tensor, Tensor)
+torch.gesv(B, A, out=None) -> (Tensor, Tensor)
 
 This function returns the solution to the system of linear
 equations represented by :math:`AX = B` and the LU factorization of
@@ -3023,8 +3023,8 @@ Example::
 
 .. function:: mul(input, other, out=None)
 
-Each element of the tensor :attr:`input` is multiplied by each element of the
-Tensor :attr:`other`. The resulting tensor is returned.
+Each element of the tensor :attr:`input` is multiplied by the corresponding
+element of the Tensor :attr:`other`. The resulting tensor is returned.
 
 The shapes of :attr:`input` and :attr:`other` must be
 :ref:`broadcastable <broadcasting-semantics>`.

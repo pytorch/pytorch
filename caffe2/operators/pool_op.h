@@ -157,11 +157,158 @@ class PoolOp final : public ConvPoolOpBase<Context> {
   Functor functor_;
 };
 
+template <typename T, class Context, class Functor>
+class PoolGradientOp final : public ConvPoolOpBase<Context> {
+ public:
+  USE_CONV_POOL_BASE_FUNCTIONS(Context);
+  PoolGradientOp(const OperatorDef& operator_def, Workspace* ws)
+      : ConvPoolOpBase<Context>(operator_def, ws), functor_(*this) {}
+
+  ~PoolGradientOp() = default;
+
+  bool RunOnDeviceWithOrderNCHW() override {
+    const auto& X = Input(0);
+    const auto& Y = Input(1);
+    const auto& dY = Input(2);
+    auto* dX = Output(0, X.sizes(), at::dtype<T>());
+    const int ndim = X.ndim();
+    const int N = X.dim32(0);
+    const int C = X.dim32(1);
+    const std::vector<int> image_dims = GetDims(X);
+    ConvPoolOpBase<CPUContext>::ComputePads(image_dims);
+    const int image_ndim = ndim - 2;
+    switch (image_ndim) {
+      case 1: {
+        return functor_.template Backward<T, StorageOrder::NCHW, 1>(
+            N,
+            C,
+            {X.dim32(2)},
+            {Y.dim32(2)},
+            {kernel_[0]},
+            {dilation_[0]},
+            {stride_[0]},
+            {pads_[0], pads_[1]},
+            dY.template data<T>(),
+            X.template data<T>(),
+            Y.template data<T>(),
+            dX->template mutable_data<T>(),
+            &context_);
+      }
+      case 2: {
+        return functor_.template Backward<T, StorageOrder::NCHW, 2>(
+            N,
+            C,
+            {X.dim32(2), X.dim32(3)},
+            {Y.dim32(2), Y.dim32(3)},
+            {kernel_[0], kernel_[1]},
+            {dilation_[0], dilation_[1]},
+            {stride_[0], stride_[1]},
+            {pads_[0], pads_[1], pads_[2], pads_[3]},
+            dY.template data<T>(),
+            X.template data<T>(),
+            Y.template data<T>(),
+            dX->template mutable_data<T>(),
+            &context_);
+      }
+      case 3: {
+        return functor_.template Backward<T, StorageOrder::NCHW, 3>(
+            N,
+            C,
+            {X.dim32(2), X.dim32(3), X.dim32(4)},
+            {Y.dim32(2), Y.dim32(3), Y.dim32(4)},
+            {kernel_[0], kernel_[1], kernel_[2]},
+            {dilation_[0], dilation_[1], dilation_[2]},
+            {stride_[0], stride_[1], stride_[2]},
+            {pads_[0], pads_[1], pads_[2], pads_[3], pads_[4], pads_[5]},
+            dY.template data<T>(),
+            X.template data<T>(),
+            Y.template data<T>(),
+            dX->template mutable_data<T>(),
+            &context_);
+      }
+      default: {
+        CAFFE_THROW("Unsupported pooling dim: ", image_ndim);
+        return false;
+      }
+    }
+  }
+
+  bool RunOnDeviceWithOrderNHWC() override {
+    const auto& X = Input(0);
+    const auto& Y = Input(1);
+    const auto& dY = Input(2);
+    auto* dX = Output(0, X.sizes(), at::dtype<T>());
+    const int ndim = X.ndim();
+    const int N = X.dim32(0);
+    const int C = X.dim32(ndim - 1);
+    const std::vector<int> image_dims = GetDims(X);
+    ConvPoolOpBase<CPUContext>::ComputePads(image_dims);
+    const int image_ndim = ndim - 2;
+    switch (image_ndim) {
+      case 1: {
+        return functor_.template Backward<T, StorageOrder::NHWC, 1>(
+            N,
+            C,
+            {X.dim32(1)},
+            {Y.dim32(1)},
+            {kernel_[0]},
+            {dilation_[0]},
+            {stride_[0]},
+            {pads_[0], pads_[1]},
+            dY.template data<T>(),
+            X.template data<T>(),
+            Y.template data<T>(),
+            dX->template mutable_data<T>(),
+            &context_);
+      }
+      case 2: {
+        return functor_.template Backward<T, StorageOrder::NHWC, 2>(
+            N,
+            C,
+            {X.dim32(1), X.dim32(2)},
+            {Y.dim32(1), Y.dim32(2)},
+            {kernel_[0], kernel_[1]},
+            {dilation_[0], dilation_[1]},
+            {stride_[0], stride_[1]},
+            {pads_[0], pads_[1], pads_[2], pads_[3]},
+            dY.template data<T>(),
+            X.template data<T>(),
+            Y.template data<T>(),
+            dX->template mutable_data<T>(),
+            &context_);
+      }
+      case 3: {
+        return functor_.template Backward<T, StorageOrder::NHWC, 3>(
+            N,
+            C,
+            {X.dim32(1), X.dim32(2), X.dim32(3)},
+            {Y.dim32(1), Y.dim32(2), Y.dim32(3)},
+            {kernel_[0], kernel_[1], kernel_[2]},
+            {dilation_[0], dilation_[1], dilation_[2]},
+            {stride_[0], stride_[1], stride_[2]},
+            {pads_[0], pads_[1], pads_[2], pads_[3], pads_[4], pads_[5]},
+            dY.template data<T>(),
+            X.template data<T>(),
+            Y.template data<T>(),
+            dX->template mutable_data<T>(),
+            &context_);
+      }
+      default: {
+        CAFFE_THROW("Unsupported pooling dim: ", image_ndim);
+        return false;
+      }
+    }
+  }
+
+ private:
+  Functor functor_;
+};
+
 template <class Context>
 struct AveragePoolFunctor {
   explicit AveragePoolFunctor(const OperatorBase& op)
       : count_include_pad(
-            op.GetSingleArgument<bool>("count_include_pad", false)) {}
+            op.template GetSingleArgument<bool>("count_include_pad", false)) {}
 
   template <typename T, StorageOrder kOrder, int D>
   bool Forward(
@@ -175,7 +322,23 @@ struct AveragePoolFunctor {
       const std::array<int, 2 * D>& pads,
       const T* X,
       T* Y,
-      Context* context);
+      Context* context) const;
+
+  template <typename T, StorageOrder kOrder, int D>
+  bool Backward(
+      int N,
+      int C,
+      const std::array<int, D>& X_dims,
+      const std::array<int, D>& Y_dims,
+      const std::array<int, D>& kernel,
+      const std::array<int, D>& dilation,
+      const std::array<int, D>& stride,
+      const std::array<int, 2 * D>& pads,
+      const T* dY,
+      const T* X,
+      const T* Y,
+      T* dX,
+      Context* context) const;
 
   const bool count_include_pad;
 };
@@ -196,22 +359,23 @@ struct MaxPoolFunctor {
       const std::array<int, 2 * D>& pads,
       const T* X,
       T* Y,
-      Context* context);
-};
+      Context* context) const;
 
-template <typename T, class Context, class PoolType>
-class PoolGradientOp final : public ConvPoolOpBase<Context> {
- public:
-  USE_CONV_POOL_BASE_FUNCTIONS(Context);
-  PoolGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<Context>(operator_def, ws) {}
-  ~PoolGradientOp() {}
-
-  bool RunOnDeviceWithOrderNCHW() override;
-  bool RunOnDeviceWithOrderNHWC() override;
-
-  // Input: X, Y, dY
-  // Output: dX
+  template <typename T, StorageOrder kOrder, int D>
+  bool Backward(
+      int N,
+      int C,
+      const std::array<int, D>& X_dims,
+      const std::array<int, D>& Y_dims,
+      const std::array<int, D>& kernel,
+      const std::array<int, D>& dilation,
+      const std::array<int, D>& stride,
+      const std::array<int, 2 * D>& pads,
+      const T* dY,
+      const T* X,
+      const T* Y,
+      T* dX,
+      Context* context) const;
 };
 
 } // namespace caffe2
