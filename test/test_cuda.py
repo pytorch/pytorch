@@ -1476,6 +1476,12 @@ class TestCuda(TestCase):
         self.assertFalse(s0 == s2)
         self.assertFalse(s1 == s3)
 
+        self.assertEqual(s0.device, s1.device)
+        self.assertEqual(s0.cuda_stream, s1.cuda_stream)
+        self.assertEqual(s2.device, s3.device)
+        self.assertEqual(s2.cuda_stream, s3.cuda_stream)
+        self.assertNotEqual(s0.device, s3.device)
+
         self.assertEqual(hash(s0), hash(s1))
         self.assertEqual(hash(s2), hash(s3))
         self.assertNotEqual(hash(s0), hash(s3))
