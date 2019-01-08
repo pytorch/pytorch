@@ -3,6 +3,7 @@
 #include <torch/csrc/THP.h>
 #include <torch/csrc/cuda/Module.h>
 
+#include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 
 #include <structmember.h>
@@ -43,6 +44,12 @@ static PyObject * THCPStream_pynew(PyTypeObject *type, PyObject *args, PyObject 
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THCPStream_query(THCPStream *self) {
+  HANDLE_TH_ERRORS
+  return PyBool_FromLong(at::cuda::CUDAStream::unpack(self->cdata).query());
+  END_HANDLE_TH_ERRORS
+}
+
 static struct PyMemberDef THCPStream_members[] = {
   {(char*)"_cdata", T_ULONGLONG, offsetof(THCPStream, cdata), READONLY, nullptr},
   {(char*)"device", T_INT, offsetof(THCPStream, device), READONLY, nullptr},
@@ -51,6 +58,7 @@ static struct PyMemberDef THCPStream_members[] = {
 };
 
 static PyMethodDef THCPStream_methods[] = {
+  {(char*)"query", (PyCFunction)THCPStream_query, METH_NOARGS, nullptr},
   {nullptr}
 };
 

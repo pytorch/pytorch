@@ -2202,6 +2202,17 @@ Example::
     tensor(1.9073e-06)
 """)
 
+add_docstr(torch.is_floating_point,
+           r"""
+is_floating_point(tensor) -> (bool)
+
+Returns True if the data type of :attr:`tensor` is a floating point data type i.e.,
+one of ``torch.float64``, ``torch.float32`` and ``torch.float16``.
+
+Args:
+    tensor (Tensor): the PyTorch tensor to test
+""")
+
 add_docstr(torch.kthvalue,
            r"""
 kthvalue(input, k, dim=None, keepdim=False, out=None) -> (Tensor, LongTensor)
@@ -3023,8 +3034,8 @@ Example::
 
 .. function:: mul(input, other, out=None)
 
-Each element of the tensor :attr:`input` is multiplied by each element of the
-Tensor :attr:`other`. The resulting tensor is returned.
+Each element of the tensor :attr:`input` is multiplied by the corresponding
+element of the Tensor :attr:`other`. The resulting tensor is returned.
 
 The shapes of :attr:`input` and :attr:`other` must be
 :ref:`broadcastable <broadcasting-semantics>`.

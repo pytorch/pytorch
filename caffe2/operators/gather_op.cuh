@@ -62,7 +62,7 @@ static bool gather_impl_cuda(
   // New shape:
   //  [data dims before axis] + [indices dims] + [data dims after axis]
   vector<int64_t> shape =
-      calc_output_shape_vector<int64_t>(data.dims(), indices.dims(), axis);
+      calc_output_shape_vector<int64_t>(data.sizes(), indices.sizes(), axis);
   Tensor* output = op->Output(outputIdx, shape, at::dtype(dataType));
   float* out = static_cast<float*>(output->raw_mutable_data(dataType));
 

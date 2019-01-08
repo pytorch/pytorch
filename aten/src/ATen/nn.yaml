@@ -196,18 +196,6 @@
     output: 'false'
     grad_input: 'false'
 
-- name: _thnn_replication_pad2d(Tensor self, IntList[4] padding)
-  cname: SpatialReplicationPadding
-  scalar_check:
-    output: 'false'
-    grad_input: 'false'
-
-- name: _thnn_replication_pad3d(Tensor self, IntList[6] padding)
-  cname: VolumetricReplicationPadding
-  scalar_check:
-    output: 'false'
-    grad_input: 'false'
-
 # Upsampling
 
 # Note: The upsampling backwards functions also include an IntList input_size
