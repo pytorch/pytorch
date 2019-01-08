@@ -2239,11 +2239,11 @@ class _TestTorchMixin(object):
 
         # test against numpy.histogram()
         x = torch.tensor([1, 2, 1], dtype=torch.float, device=device)
-        xn = x.numpy()
+        xn = x.cpu().numpy()
         actual = torch.histc(x, bins=4, min=0, max=3)
-        expected = np.histogram(xn, bins=4, range=(0,3))[0]
+        expected = np.histogram(xn, bins=4, range=(0, 3))[0]
         self.assertEqual(expected.shape, actual.shape)
-        self.assertTrue(np.allclose(expected, actual.numpy()))
+        self.assertTrue(np.allclose(expected, actual.cpu().numpy()))
         # test against numpy.histogram() with large input
         input_size = (5000,)
         x = torch.randn(input_size, dtype=torch.float, device=device)
@@ -2251,8 +2251,7 @@ class _TestTorchMixin(object):
         actual = torch.histc(x, bins=100)
         expected = np.histogram(xn, bins=100)[0]
         self.assertEqual(expected.shape, actual.shape)
-        self.assertTrue(np.allclose(expected, actual.numpy()))
-
+        self.assertTrue(np.allclose(expected, actual.cpu().numpy()))
 
     def test_histc_cpu(self):
         self._test_histc(self, 'cpu')
