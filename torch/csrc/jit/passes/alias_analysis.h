@@ -78,8 +78,8 @@ class AliasDb {
   // Helper for topologically-safe node moves.
   class WorkingSet;
   enum class MoveSide { BEFORE, AFTER };
-  bool tryMove(Node* movePoint, Node* toMove, MoveSide moveSide, bool dryRun);
-  void move(Node* movePoint, Node* toMove, MoveSide moveSide);
+  bool tryMove(Node* toMove, Node* movePoint, MoveSide moveSide, bool dryRun);
+  void move(Node* toMove, Node* movePoint, MoveSide moveSide);
   bool isBeforeOrAfter(const Node* n, MoveSide moveSide) const;
 
   // Does `n` use or write to any wildcard aliases?

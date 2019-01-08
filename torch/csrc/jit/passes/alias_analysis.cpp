@@ -814,8 +814,11 @@ class AliasDb::WorkingSet {
   size_t numWriterNodes_ = 0;
 };
 
-// Try to move `this` before/after `movePoint` while preserving value
-// dependencies. Returns false iff such a move could not be made
+// Try to move `toMove` before/after `movePoint` while preserving value
+// dependencies. Returns false iff such a move could not be made.
+//
+// If `dryRun` is set, don't actually execute the move, just check if the move
+// is possible
 //
 // The basic approach is: have a "working set" that we are moving forward, one
 // node at a time. When we can't move past a node (because it depends on the
@@ -857,14 +860,14 @@ bool AliasDb::tryMove(
   // Say we are moving directly before movePoint and `toMove` starts before
   // movePoint in the graph. The move looks like
   //
-  //  `toMove`              `toMove`           |
+  //  `toMove`            `toMove`         |
   //  <dependencies>  ->  `movePoint`      | `toMove` and deps are split
   //  `movePoint`         <dependencies>   |
   //
   // Contrast with the case where `toMove` starts AFTER movePoint:
   //
-  //  `movePoint`         <dependencies>   |
-  //  <dependencies>  ->  `toMove`           | `toMove` and deps are together
+  //  `movePoint`           <dependencies>   |
+  //  <dependencies>  ->    `toMove`         | `toMove` and deps are together
   //  `toMove`              `movePoint`      |
   //
   // In the first case, we need to split `this` off from its dependencies, so we

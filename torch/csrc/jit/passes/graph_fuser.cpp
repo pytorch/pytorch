@@ -1011,8 +1011,8 @@ struct GraphFuser {
     }
     // NB: it is important that this check happens after isFusable, which checks
     // that the blocks match, and it's not a special node like prim::Param
-    if (!producer->node()->couldMoveBeforeTopologically(
-            before_check, aliasDb_.value())) {
+    if (!aliasDb_->couldMoveBeforeTopologically(
+            producer->node(), before_check)) {
       return false;
     }
     // Fusion groups can be merged with concat's group if and only if
