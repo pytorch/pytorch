@@ -37,27 +37,32 @@ static PyObject * THCPStream_pynew(PyTypeObject *type, PyObject *args, PyObject 
 
   THCPStream* self = (THCPStream *)ptr.get();
   self->cdata = stream.pack();
-  self->cuda_stream = stream;
+  new (&self->cuda_stream) at::cuda::CUDAStream(stream);
+
   return (PyObject *)ptr.release();
+  END_HANDLE_TH_ERRORS
+}
+
+static void THCPStream_dealloc(THCPStream *self) {
+  self->cuda_stream.~CUDAStream();
+  Py_TYPE(self)->tp_free((PyObject*)self);
+}
+
+static PyObject * THPVariable_get_device(THCPStream *self) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packInt64(self->cuda_stream.device_index());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_get_cuda_stream(THCPStream *self) {
+  HANDLE_TH_ERRORS
+  return PyLong_FromVoidPtr(self->cuda_stream.stream());
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject * THCPStream_query(THCPStream *self) {
   HANDLE_TH_ERRORS
   return PyBool_FromLong(self->cuda_stream.query());
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject * THCPStream_device(THCPStream *self) {
-  HANDLE_TH_ERRORS
-  return PyLong_FromLong(self->cuda_stream.device_index());
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject * THCPStream_stream(THCPStream *self) {
-  HANDLE_TH_ERRORS
-  return PyLong_FromUnsignedLongLong(
-    (unsigned long long)self->cuda_stream.stream());
   END_HANDLE_TH_ERRORS
 }
 
@@ -72,10 +77,15 @@ static struct PyMemberDef THCPStream_members[] = {
   {nullptr}
 };
 
+static struct PyGetSetDef THPVariable_properties[] = {
+  {"device", (getter)THPVariable_get_device, nullptr, nullptr, nullptr},
+  {"cuda_stream",
+    (getter)THPVariable_get_cuda_stream, nullptr, nullptr, nullptr},
+  {nullptr}
+};
+
 static PyMethodDef THCPStream_methods[] = {
   {(char*)"query", (PyCFunction)THCPStream_query, METH_NOARGS, nullptr},
-  {(char*)"device", (PyCFunction)THCPStream_device, METH_NOARGS, nullptr},
-  {(char*)"stream", (PyCFunction)THCPStream_stream, METH_NOARGS, nullptr},
   {(char*)"__eq__", (PyCFunction)THCPStream_eq, METH_O, nullptr},
   {nullptr}
 };
@@ -85,7 +95,7 @@ PyTypeObject THCPStreamType = {
   "torch._C._CudaStreamBase",             /* tp_name */
   sizeof(THCPStream),                    /* tp_basicsize */
   0,                                     /* tp_itemsize */
-  0,                                     /* tp_dealloc */
+  (destructor)THCPStream_dealloc,        /* tp_dealloc */
   0,                                     /* tp_print */
   0,                                     /* tp_getattr */
   0,                                     /* tp_setattr */
@@ -110,7 +120,7 @@ PyTypeObject THCPStreamType = {
   0,                                     /* tp_iternext */
   THCPStream_methods,                    /* tp_methods */
   THCPStream_members,                    /* tp_members */
-  0,                                     /* tp_getset */
+  THPVariable_properties,                /* tp_getset */
   0,                                     /* tp_base */
   0,                                     /* tp_dict */
   0,                                     /* tp_descr_get */

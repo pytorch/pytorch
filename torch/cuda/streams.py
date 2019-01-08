@@ -103,14 +103,6 @@ class Stream(torch._C._CudaStreamBase):
         return priority.value
 
     @property
-    def device(self):
-        return super(Stream, self).device()
-
-    @property
-    def cuda_stream(self):
-        return self.stream()
-
-    @property
     def _as_parameter_(self):
         return ctypes.c_void_p(self.cuda_stream)
 
