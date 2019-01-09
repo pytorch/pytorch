@@ -6,6 +6,15 @@
 
 namespace c10 {
 
+/**
+ * This is a minimal Tensor class for use in c10 code.
+ * The plan on record is to eventually merge at::Tensor and caffe2::Tensor
+ * and move that merged class to c10, replacing this one.
+ *
+ * At time of writing this, we couldn't do that yet, because their APIs are
+ * not clean enough to make it in c10 and because they have dependencies we want
+ * to avoid, for example at::Tensor depends on at::Type.
+ */
 class C10Tensor final {
 private:
   using TensorImplPtr = intrusive_ptr<TensorImpl, UndefinedTensorImpl>;
