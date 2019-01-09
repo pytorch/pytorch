@@ -43,7 +43,7 @@ void SGD::step() {
     }
 
     NoGradGuard guard;
-    p.add_(-options.learning_rate_*update);
+    p.add_(-options.learning_rate_ * update);
   }
   iteration_ += 1;
 }
