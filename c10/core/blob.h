@@ -49,14 +49,14 @@ class C10_API Blob final : public intrusive_ptr_target {
   /**
    * Returns the meta info of the blob.
    */
-  inline const caffe2::TypeMeta& meta() const noexcept {
+  const caffe2::TypeMeta& meta() const noexcept {
     return meta_;
   }
 
   /**
    * Returns a printable typename of the blob.
    */
-  inline const char* TypeName() const noexcept {
+  const char* TypeName() const noexcept {
     return meta_.name();
   }
 
@@ -153,6 +153,7 @@ class C10_API Blob final : public intrusive_ptr_target {
         caffe2::TypeMeta::Make<typename std::remove_const<T>::type>()));
   }
 
+  // TODO Remove ShareExternal() and have Blob always own its content
   void* ShareExternal(void* allocated, const caffe2::TypeMeta& meta) {
     free_();
     meta_ = meta;
@@ -164,7 +165,7 @@ class C10_API Blob final : public intrusive_ptr_target {
   /**
    * Resets the Blob to an empty one.
    */
-  inline void Reset() {
+  void Reset() {
     free_();
     pointer_ = nullptr;
     meta_ = caffe2::TypeMeta();
