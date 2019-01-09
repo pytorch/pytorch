@@ -361,9 +361,9 @@ def _test_proper_exit(use_workers, pin_memory, exit_method, hold_iter_reference,
                 worker_error_event.set()
 
         if i == error_it:
-            if exit_method == 'main_error':
+            if exit_method == 'loader_error':
                 raise RuntimeError('Loader error')
-            elif exit_method == 'main_kill':
+            elif exit_method == 'loader_kill':
                 kill_pid(os.getpid())
             elif exit_method == 'worker_kill':
                 kill_pid(workers[0].pid)
@@ -691,9 +691,9 @@ class TestDataLoader(TestCase):
             #   - `None` means that no error happens.
             # In all cases, all processes should end properly.
             if use_workers:
-                exit_methods = [None, 'main_error', 'main_kill', 'worker_kill', 'worker_error']
+                exit_methods = [None, 'loader_error', 'loader_kill', 'worker_kill', 'worker_error']
             else:
-                exit_methods = [None, 'main_error', 'main_kill']
+                exit_methods = [None, 'loader_error', 'loader_kill']
 
             for exit_method in exit_methods:
 
@@ -747,7 +747,7 @@ class TestDataLoader(TestCase):
                         self.assertEqual(loader_p.exitcode, 0)
                     else:
                         self.assertNotEqual(loader_p.exitcode, 0)
-                        if exit_method == 'main_error':
+                        if exit_method == 'loader_error':
                             self.assertIsInstance(loader_p.exception, RuntimeError, desc)
                             self.assertIn('Loader error', str(loader_p.exception), desc)
                         elif exit_method == 'worker_kill':
