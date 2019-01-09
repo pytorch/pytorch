@@ -1,4 +1,5 @@
 from __future__ import division
+import time
 import torch
 import torch.jit
 import torch.nn as nn
@@ -254,11 +255,16 @@ class JitTestCase(TestCase):
             torch.jit.TracerWarning.ignore_lib_warnings()
             JitTestCase._restored_warnings = True
         torch._C._jit_set_emit_module_hook(self.emitModuleHook)
+        self.startTime = time.time()
 
     def tearDown(self):
         # needs to be cleared because python might be unloaded before
         # the callback gets destucted
         torch._C._jit_set_emit_module_hook(None)
+        t = time.time() - self.startTime
+        needToPrintTime = os.environ.get('PYTORCH_TEST_TIMING')
+        if needToPrintTime:
+            print "%s: %.3f" % (self.id(), t)
 
     @contextmanager
     def disableModuleHook(self):
