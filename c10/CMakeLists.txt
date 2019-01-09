@@ -29,6 +29,7 @@ file(GLOB C10_SRCS
         *.cpp
         core/*.cpp
         core/dispatch/*.cpp
+        core/opschema/*.cpp
         impl/*.cpp
         macros/*.cpp
         util/*.cpp
