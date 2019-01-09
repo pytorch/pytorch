@@ -78,7 +78,7 @@ class ReLU(Threshold):
         >>> output = m(input)
 
 
-      For implementing CRelu - https://arxiv.org/pdf/1603.05201.pdf
+      An implementation of CReLU - https://arxiv.org/abs/1603.05201
 
         >>> m = nn.ReLU()
         >>> input = torch.randn(2).unsqueeze(0)
