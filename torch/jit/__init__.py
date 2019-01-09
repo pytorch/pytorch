@@ -677,12 +677,14 @@ def _try_get_overloaded_fn(fn):
     if self_type is WeakScriptModuleProxy:
         # get saved original type() if necessary
         self_type = self._original_type
-    overloads_by_name = _overloaded_fns.get(self._original_type)
+    overloads_by_name = _overloaded_fns.get(self_type)
     if overloads_by_name is None:
         return None
-    overloads = [getattr(self, overload.__name__)
-                 for overload in overloads_by_name.get(fn.__name__)]
-    return overloads
+    overloads = overloads_by_name.get(fn.__name__)
+    if overloads is None:
+        return None
+    script_methods = [getattr(self, overload.__name__) for overload in overloads]
+    return script_methods
 
 
 def _try_compile_weak_script(fn):
