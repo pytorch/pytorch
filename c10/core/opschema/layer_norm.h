@@ -2,12 +2,18 @@
 
 #include <c10/core/Tensor.h>
 #include <c10/util/Array.h>
-#include "caffe2/core/context_base.h"
-#include "caffe2/core/tensor.h"
 
-namespace caffe2 {
-namespace ops {
+namespace at {
+class BaseContext;
+}
 
+namespace c10 {
+namespace core {
+namespace opschema {
+
+// TODO This op schema should probably not live in c10 since it's not a method
+// on Tensor. It's only here as a proof-of-concept op and for LATTE team
+// to be able to call caffe2 layer norm from PyTorch.
 struct LayerNorm final {
   static constexpr const char* name = "LayerNorm";
 
@@ -24,7 +30,7 @@ struct LayerNorm final {
       int axis,
       float epsilon,
       Cache* cache,
-      BaseContext* context);
+      at::BaseContext* context);
 
   static constexpr size_t num_dispatch_args() {return 1;}
 
@@ -34,5 +40,6 @@ struct LayerNorm final {
       {"input", "output", "output_mean", "output_stddev", "axis", "epsilon", "cache", "context"}};
 };
 
-} // namespace ops
-} // namespace caffe2
+} // namespace opschema
+} // namespace core
+} // namespace c10

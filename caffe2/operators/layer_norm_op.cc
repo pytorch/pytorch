@@ -1,6 +1,6 @@
 #include "caffe2/operators/layer_norm_op.h"
-#include "caffe2/operators/experimental/c10/schemas/layer_norm.h"
 #include "caffe2/utils/eigen_utils.h"
+#include <c10/core/opschema/layer_norm.h>
 #include <c10/core/dispatch/KernelRegistration.h>
 
 namespace caffe2 {
@@ -193,7 +193,7 @@ void layer_norm_c10(
     const c10::C10Tensor& sig_,
     int axis,
     float epsilon,
-    caffe2::ops::LayerNorm::Cache* cache,
+    c10::core::opschema::LayerNorm::Cache* cache,
     caffe2::BaseContext* context) {
   caffe2::Tensor X(X_);
   caffe2::Tensor Y(Y_);
@@ -220,7 +220,7 @@ void layer_norm_c10(
 }
 }
 namespace c10 {
-C10_REGISTER_KERNEL(caffe2::ops::LayerNorm)
+C10_REGISTER_KERNEL(c10::core::opschema::LayerNorm)
     .kernel(&layer_norm_c10<float>)
     .dispatchKey(c10::DispatchKey<1>{
         c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
