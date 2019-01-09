@@ -135,10 +135,10 @@ void fractional_max_pool2d_out_cpu_template(
   int planeDim = 0;
   int heightDim = 1;
   int widthDim = 2;
-  int outputW = output_size[0];
-  int outputH = output_size[1];
-  int poolSizeW = pool_size[0];
-  int poolSizeH = pool_size[1];
+  int outputH = output_size[0];
+  int outputW = output_size[1];
+  int poolSizeH = pool_size[0];
+  int poolSizeW = pool_size[1];
 
   /* get contiguous input */
   auto input = input_.contiguous();
@@ -265,10 +265,10 @@ Tensor& fractional_max_pool2d_backward_out_cpu_template(
   int heightDim = 1;
   int widthDim = 2;
 
-  int outputW = output_size[0];
-  int outputH = output_size[1];
-  int poolSizeW = pool_size[0];
-  int poolSizeH = pool_size[1];
+  int outputH = output_size[0];
+  int outputW = output_size[1];
+  int poolSizeH = pool_size[0];
+  int poolSizeW = pool_size[1];
 
   int ndims = input.ndimension();
   if (ndims == 4) {
