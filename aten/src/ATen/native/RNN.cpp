@@ -603,6 +603,7 @@ DEFINE_DISPATCH(NAME##_cudnn_stub);                                            \
 DEFINE_DISPATCH(NAME##_packed_cudnn_stub);                                     \
 REGISTER_NO_CPU_DISPATCH(NAME##_cudnn_stub, rnn_fn);                           \
 REGISTER_NO_CPU_DISPATCH(NAME##_packed_cudnn_stub, rnn_packed_fn);             \
+DEFINE_DISPATCH(NAME##_mkldnn_stub);                                           \
                                                                                \
 std::tuple<Tensor, Tensor> NAME(                                               \
       const Tensor& _input, const Tensor& hx,                                  \
@@ -611,6 +612,13 @@ std::tuple<Tensor, Tensor> NAME(                                               \
   if (at::cudnn_is_acceptable(_input)) {                                       \
     Tensor output, hy;                                                         \
     NAME##_cudnn_stub(_input.type().device_type(), output, hy, _input, hx, _params, has_biases, \
+            num_layers, dropout_p, train, bidirectional, batch_first);         \
+    return std::make_tuple(output, hy);                                        \
+  }                                                                            \
+  if (at::mkldnn_is_acceptable(_input)                                         \
+      && (!train || (train && _input.size(2) == hx.size(2) && !bidirectional))) { \
+    Tensor output, hy;                                                         \
+    NAME##_mkldnn_stub(_input.type().device_type(), output, hy, _input, hx, _params, has_biases, \
             num_layers, dropout_p, train, bidirectional, batch_first);         \
     return std::make_tuple(output, hy);                                        \
   }                                                                            \
@@ -653,6 +661,7 @@ DEFINE_DISPATCH(lstm_cudnn_stub);
 DEFINE_DISPATCH(lstm_packed_cudnn_stub);
 REGISTER_NO_CPU_DISPATCH(lstm_cudnn_stub, lstm_fn);
 REGISTER_NO_CPU_DISPATCH(lstm_packed_cudnn_stub, lstm_packed_fn);
+DEFINE_DISPATCH(lstm_mkldnn_stub);
 
 std::tuple<Tensor, Tensor, Tensor> lstm(
       const Tensor& _input, TensorList hx,
@@ -662,6 +671,17 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   if (at::cudnn_is_acceptable(_input)) {
     Tensor output, hy, cy;
     lstm_cudnn_stub(_input.type().device_type(), output, hy, cy, _input, hx, _params, has_biases,
+            num_layers, dropout_p, train, bidirectional, batch_first);
+    return std::make_tuple(output, hy, cy);
+  }
+  if (at::mkldnn_is_acceptable(_input)
+      && (!train || (train && _input.size(2) == hx[0].size(2) && !bidirectional))) {
+    // Disable MKLDNN RNN for training when input_size != hidden_size and bidirectional
+    // since workspace offset is miss calculated on such cases
+    // This issue has been fixed on https://github.com/intel/mkl-dnn since commit d5c4eb5e
+    // TODO: remove these limitations once mkl-dnn is upgraded
+    Tensor output, hy, cy;
+    lstm_mkldnn_stub(_input.type().device_type(), output, hy, cy, _input, hx, _params, has_biases,
             num_layers, dropout_p, train, bidirectional, batch_first);
     return std::make_tuple(output, hy, cy);
   }

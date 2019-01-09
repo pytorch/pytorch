@@ -16,9 +16,8 @@ bool MKLDNNHooks::supportsDilatedConvolutionWithMKLDNN() const {
   return false;
 }
 
-// TODO: add mkldnn rnn support
 bool MKLDNNHooks::supportsRNNWithMKLDNN() const {
-  return false;
+  return true;
 }
 
 using at::MKLDNNHooksRegistry;

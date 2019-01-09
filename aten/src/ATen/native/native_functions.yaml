@@ -1459,6 +1459,12 @@
 - func: mkldnn_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   matches_jit_signature: True
 
+- func: mkldnn_rnn(Tensor input, Tensor[] weight, int64_t weight_stride0, Tensor hx, Tensor? cx, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, double dropout, bool train, bool bidirectional, Int[] batch_sizes, BoolTensor? dropout_state) -> (Tensor, Tensor, Tensor, Tensor[])
+  matches_jit_signature: True
+
+- func: mkldnn_rnn_backward(Tensor input, Tensor[] weight, int64_t weight_stride0, Tensor hx, Tensor? cx, Tensor output, Tensor? grad_output, Tensor? grad_hy, Tensor? grad_cy, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, double dropout, bool train, bool bidirectional, Int[] batch_sizes, BoolTensor? dropout_state, Tensor[] reserve, bool[4] output_mask) -> (Tensor, Tensor, Tensor, Tensor[])
+  matches_jit_signature: True
+
 - func: miopen_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor)
   matches_jit_signature: True
   dispatch:
