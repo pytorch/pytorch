@@ -27,11 +27,6 @@
 #include <queue>
 #include <TH/TH.h>
 
-#ifdef USE_ROCM
-#include <hip/hip_runtime.h>
-#include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h>
-#endif  // USE_ROCM
-
 namespace torch { namespace autograd {
 
 // NB: -1 indicates the CPU worker!
@@ -212,22 +207,19 @@ Engine::~Engine() = default;
 // not CUDA.
 auto Engine::thread_init(int device) -> void {
   THInferNumThreads();
-#if defined(USE_ROCM)
-  at::cuda::OptionalHIPGuardMasqueradingAsCUDA guard;
-  if (device != -1) {
-    guard.set_index(device);
-  }
-#else
   // NB: We MUST NOT construct the guard for device -1,
   // as in some settings we compile with cuda, but
   // have lazy stubs for CUDA functionality (so actually
   // attempting to setup a guard(-1) will cause an
   // error, because it will still query cudaGetDevice).
-  at::OptionalDeviceGuard guard;
-  if (device != -1) {
-    guard.reset_device(at::Device(at::DeviceType::CUDA, device));
+  if (device != -1 && (at::hasCUDA() || at::hasHIP())) {
+    at::OptionalDeviceGuard guard;
+    if (at::hasCUDA()) {
+      guard.reset_device(at::Device(at::DeviceType::CUDA, device));
+    } else if (at::hasHIP()){
+      guard.reset_device(at::Device(at::DeviceType::HIP, device));
+    }
   }
-#endif
   worker_device = device;
   thread_main(nullptr);
 }
@@ -639,23 +631,7 @@ auto Engine::ready_queue(int device) -> ReadyQueue& {
 }
 
 auto Engine::start_threads() -> void {
-  int num_devices = 0;
-
-#ifdef USE_ROCM
-  {
-    int num_hip_devices = 0;
-    // check for case of compiled with CUDA but no available devices
-    if (hipGetDeviceCount(&num_hip_devices) != hipSuccess) {
-      hipGetLastError();
-    } else {
-      num_devices += num_hip_devices;
-    }
-  }
-#else
-  if (at::hasCUDA()) {
-    num_devices += at::getNumCUDAGPUs();
-  }
-#endif
+  int num_devices = at::getNumGPUs();
   // One for CPU, plus one for every GPU device
   int num_threads = num_devices + 1;
   ready_queues = std::vector<std::shared_ptr<ReadyQueue>>(num_threads);
