@@ -467,10 +467,10 @@ class CyclicLR(_LRScheduler):
             max_lr may not actually be reached depending on
             scaling function. Default: 0.006
         step_size_up (int): Number of training iterations in the
-            increasing half of a cycle.
+            increasing half of a cycle. Default: 2000
         step_size_down (int): Number of training iterations in the
             decreasing half of a cycle. If step_size_down is None,
-            it is set to step_size_up.
+            it is set to step_size_up. Default: None
         mode (str): One of {triangular, triangular2, exp_range}.
             Values correspond to policies detailed above.
             If scale_fn is not None, this argument is ignored.
