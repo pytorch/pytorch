@@ -2651,6 +2651,11 @@ class TestBatched(TestCase):
                          w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c, w_hs, b_s, iter_num_batch, idx_batch)
         self.assertEqual(ys, ybs.examples())
 
+def execWrapper(code, glob, loc):
+    if PY2:
+        exec(code) in glob, loc
+    else:
+        exec(code, glob, loc)
 
 class TestScript(JitTestCase):
     @contextmanager
@@ -4411,7 +4416,7 @@ a")
 
         def run_test(code):
             scope = {}
-            exec(code, globals(), scope)
+            execWrapper(code, globals(), scope)
             cu = torch.jit.CompilationUnit(code)
 
             self.assertEqual(cu.func(), scope['func']())
@@ -4483,7 +4488,7 @@ a")
 
             code = template.format(lhs=args[0], rhs=args[1], op=op)
             scope = {}
-            exec(code, globals(), scope)
+            execWrapper(code, globals(), scope)
             cu = torch.jit.CompilationUnit(code)
             self.assertEqual(cu.func(tensor), scope['func'](tensor))
 
@@ -4617,7 +4622,7 @@ a")
         def test(op, args):
             code = template.format(lhs=args[0], rhs=args[1], op=op)
             scope = {}
-            exec(code, globals(), scope)
+            execWrapper(code, globals(), scope)
             cu = torch.jit.CompilationUnit(code)
             self.assertEqual(
                 cu.func(),
@@ -4644,7 +4649,7 @@ a")
         def test(inp, typ, type_hint):
             code = template.format(typ=typ, type_hint=type_hint)
             scope = {}
-            exec(code, globals(), scope)
+            execWrapper(code, globals(), scope)
             cu = torch.jit.CompilationUnit(code)
             self.assertEqual(
                 cu.func(inp),
