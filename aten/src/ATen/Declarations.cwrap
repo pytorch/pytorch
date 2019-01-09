@@ -3012,13 +3012,6 @@
       arguments:
         - IntListSize size
         - IntList stride
-    - cname: newWithStorage
-      arguments:
-        - THStorage* storage
-        - int64_t storageOffset
-        - IntListSize size
-        - arg: IntList stride
-          default: {}
 ]]
 
 # In theory, this could be a part of the above declaration. But in
