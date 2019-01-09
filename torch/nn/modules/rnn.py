@@ -469,7 +469,7 @@ class GRU(RNNBase):
             r_t = \sigma(W_{ir} x_t + b_{ir} + W_{hr} h_{(t-1)} + b_{hr}) \\
             z_t = \sigma(W_{iz} x_t + b_{iz} + W_{hz} h_{(t-1)} + b_{hz}) \\
             n_t = \tanh(W_{in} x_t + b_{in} + r_t (W_{hn} h_{(t-1)}+ b_{hn})) \\
-            h_t = (1 - z_t) * n_t + z_t * h_{(t-1)}
+            h_t = z_t * n_t + (1 - z_t) * h_{(t-1)}
         \end{array}
 
     where :math:`h_t` is the hidden state at time `t`, :math:`x_t` is the input
@@ -781,7 +781,7 @@ class GRUCell(RNNCellBase):
         r = \sigma(W_{ir} x + b_{ir} + W_{hr} h + b_{hr}) \\
         z = \sigma(W_{iz} x + b_{iz} + W_{hz} h + b_{hz}) \\
         n = \tanh(W_{in} x + b_{in} + r * (W_{hn} h + b_{hn})) \\
-        h' = (1 - z) * n + z * h
+        h' = z * n + (1 - z) * h
         \end{array}
 
     where :math:`\sigma` is the sigmoid function.
