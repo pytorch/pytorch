@@ -7,9 +7,11 @@
 #include "caffe2/core/common.h"
 #include "caffe2/proto/caffe2_pb.h"
 
-namespace caffe2 {
-
+namespace c10 {
 class Blob;
+}
+
+namespace caffe2 {
 
 constexpr int kDefaultChunkSize = -1;
 constexpr int kNoChunking = 0;

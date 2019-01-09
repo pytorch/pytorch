@@ -10,9 +10,7 @@
 #include <c10/util/typeid.h>
 #include <c10/macros/Macros.h>
 
-namespace caffe2 {
-
-class Tensor;
+namespace c10 {
 
 /**
  * @brief Blob is a general container that hosts a typed pointer.
@@ -21,7 +19,7 @@ class Tensor;
  * properly when the blob is deallocated or re-allocated with a new type. A blob
  * could contain anything, although the most common case is to contain a Tensor.
  */
-class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
+class C10_API Blob final : public intrusive_ptr_target {
  public:
   /**
    * Initializes an empty Blob.
@@ -51,7 +49,7 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
   /**
    * Returns the meta info of the blob.
    */
-  inline const TypeMeta& meta() const noexcept {
+  inline const caffe2::TypeMeta& meta() const noexcept {
     return meta_;
   }
 
@@ -74,7 +72,7 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
         "wrong type for the Blob instance. Blob contains ",
         meta_.name(),
         " while caller expects ",
-        TypeMeta::TypeName<T>());
+        caffe2::TypeMeta::TypeName<T>());
     // TODO: after we add Get<Tensor>(DeviceType)
     // and changed all the callsites, we can add
     // a static assert here to enforce T != Tensor
@@ -131,7 +129,7 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
   template <class T>
   T* Reset(T* allocated) {
     free_();
-    meta_ = TypeMeta::Make<T>();
+    meta_ = caffe2::TypeMeta::Make<T>();
     pointer_ = static_cast<void*>(allocated);
     has_ownership_ = true;
     return allocated;
@@ -152,10 +150,10 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
       typename std::remove_const<T>::type* allocated) {
     return static_cast<T*>(ShareExternal(
         static_cast<void*>(allocated),
-        TypeMeta::Make<typename std::remove_const<T>::type>()));
+        caffe2::TypeMeta::Make<typename std::remove_const<T>::type>()));
   }
 
-  void* ShareExternal(void* allocated, const TypeMeta& meta) {
+  void* ShareExternal(void* allocated, const caffe2::TypeMeta& meta) {
     free_();
     meta_ = meta;
     pointer_ = static_cast<void*>(allocated);
@@ -169,7 +167,7 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
   inline void Reset() {
     free_();
     pointer_ = nullptr;
-    meta_ = TypeMeta();
+    meta_ = caffe2::TypeMeta();
     has_ownership_ = false;
   }
 
@@ -191,7 +189,7 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
     }
   }
 
-  TypeMeta meta_;
+  caffe2::TypeMeta meta_;
   void* pointer_ = nullptr;
   bool has_ownership_ = false;
 
@@ -206,4 +204,4 @@ inline std::ostream& operator<<(std::ostream& out, const Blob& v) {
   return out << "Blob[" << v.TypeName() << "]";
 }
 
-} // namespace caffe2
+} // namespace c10
