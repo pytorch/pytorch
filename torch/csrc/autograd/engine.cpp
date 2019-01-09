@@ -212,7 +212,7 @@ Engine::~Engine() = default;
 // not CUDA.
 auto Engine::thread_init(int device) -> void {
   THInferNumThreads();
-#if defined(USE_ROCM)
+#if defined(USE_ROCM) && !defined(USE_CUDA)
   at::cuda::OptionalHIPGuardMasqueradingAsCUDA guard;
   if (device != -1) {
     guard.set_index(device);
