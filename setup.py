@@ -270,7 +270,7 @@ def build_libs(libs):
         build_libs_cmd = ['tools\\build_pytorch_libs.bat']
     else:
         build_libs_cmd = ['bash', os.path.join('..', 'tools', 'build_pytorch_libs.sh')]
-    
+
     my_env, extra_flags = get_pytorch_env_with_flags()
     build_libs_cmd.extend(extra_flags)
     my_env["PYTORCH_PYTHON_LIBRARY"] = cmake_python_library
