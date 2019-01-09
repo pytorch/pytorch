@@ -417,7 +417,7 @@ def CppExtension(name, sources, *args, **kwargs):
                     CppExtension(
                         name='extension',
                         sources=['extension.cpp'],
-                        extra_compile_args=['-g'])),
+                        extra_compile_args=['-g']),
                 ],
                 cmdclass={
                     'build_ext': BuildExtension
