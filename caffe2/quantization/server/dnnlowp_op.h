@@ -45,7 +45,12 @@ namespace caffe2 {
  *        C2 operators with DNNLOWP engine have the following arguments:
  *        - dequantize_output (default=false): when true, output is dequantized
  *          as fp32. Useful when we're only quantizing individual operators
- *          rather than doing end-to-end quantization.
+ *          rather than doing end-to-end quantization. Conv operators don't
+            support dequantize_output option as an exception because doing so
+            complicate the implementation significantly and having a separate
+            Dequantize operator doesn't add much overhead because Conv ops are
+            usually used in deep networks where regions of quantization are
+            long chains.
  *        - followed_by (default=null): can be relu, sigmoid, or tanh. When
  *          specified, the current operator is only followed by relu, sigmoid,
  *          or tanh, and this fact can be used for more accurate output

@@ -179,6 +179,14 @@ class TestOperators(TestCase):
         x = torch.tensor([0.0, 1.0, 2.0], requires_grad=True)
         self.assertONNX(lambda x: x.chunk(2), x)
 
+    def test_split(self):
+        x = torch.tensor([[0.0, 1.0, 1.0, 0.0, 2.0, 2.0], [2.0, 3.0, 3.0, 2.0, 1.0, 1.0]])
+        self.assertONNX(lambda x: torch.split(x, 2, 1), x)
+
+    def test_split_with_sizes(self):
+        x = torch.tensor([[0.0, 1.0, 1.0, 0.0, 2.0, 2.0], [2.0, 3.0, 3.0, 2.0, 1.0, 1.0]])
+        self.assertONNX(lambda x: torch.split(x, [2, 1, 3], 1), x)
+
     def test_concat2(self):
         x = torch.randn(2, 3)
         y = torch.randn(2, 3)
