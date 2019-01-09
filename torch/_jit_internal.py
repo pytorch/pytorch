@@ -156,13 +156,14 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
 
 def overload(self, fn_name, fns):
     entry = _overloaded_fns.get(self)
+    weak_fns = weakref.WeakSet(fns)
 
     if entry is None:
         _overloaded_fns[self] = {
-            fn_name: fns,
+            fn_name: weak_fns,
         }
     else:
-        entry[fn_name] = fns
+        entry[fn_name] = weak_fns
 
 
 try:
