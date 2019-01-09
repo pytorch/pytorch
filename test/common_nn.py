@@ -837,13 +837,13 @@ def fractional_max_pool2d_test(test_case):
         return dict(
             constructor=lambda: nn.FractionalMaxPool2d(
                 2, output_ratio=0.5, _random_samples=random_samples),
-            input_size=(1, 3, 5, 5),
+            input_size=(1, 3, 5, 7),
             fullname='FractionalMaxPool2d_ratio')
     elif test_case == 'size':
         return dict(
-            constructor=lambda: nn.FractionalMaxPool2d((2, 2), output_size=(
-                4, 4), _random_samples=random_samples),
-            input_size=(1, 3, 7, 7),
+            constructor=lambda: nn.FractionalMaxPool2d((2, 3), output_size=(
+                4, 3), _random_samples=random_samples),
+            input_size=(1, 3, 7, 6),
             fullname='FractionalMaxPool2d_size')
 
 
