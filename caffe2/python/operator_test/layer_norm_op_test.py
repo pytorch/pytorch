@@ -8,7 +8,6 @@ from caffe2.python.model_helper import ModelHelper
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
-import torch
 import numpy as np
 import os
 import unittest
