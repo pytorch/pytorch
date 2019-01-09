@@ -4,6 +4,7 @@
 #include "caffe2/operators/experimental/c10/schemas/fc.h"
 #include "caffe2/utils/conversions.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/core/tensor.h"
 
 using caffe2::BaseContext;
 using caffe2::Tensor;
@@ -12,14 +13,19 @@ namespace caffe2 {
 namespace {
 template <class DataType, class Context>
 void fc_op_cpu_impl(
-    const Tensor& X,
-    const Tensor& W,
-    const Tensor& b,
-    Tensor* Y,
+    const C10Tensor& X_,
+    const C10Tensor& W_,
+    const C10Tensor& b_,
+    const C10Tensor& Y_,
     int axis,
     int axis_w,
     caffe2::ops::FullyConnected::Cache* cache,
     BaseContext* context) {
+  Tensor X(X_);
+  Tensor W(W_);
+  Tensor b(b_);
+  Tensor Y(Y_);
+
   constexpr bool TransposeWeight = true;
 
   CAFFE_ENFORCE(b.dim() == 1, b.dim());
@@ -61,12 +67,12 @@ void fc_op_cpu_impl(
   DCHECK_LE(canonical_axis + 1, cache->Y_shape_cache_.size());
   cache->Y_shape_cache_.resize(canonical_axis + 1);
   cache->Y_shape_cache_[canonical_axis] = N;
-  Y->Resize(cache->Y_shape_cache_);
-  CAFFE_ENFORCE(M * N == Y->numel(), dimErrorString());
+  Y.Resize(cache->Y_shape_cache_);
+  CAFFE_ENFORCE(M * N == Y.numel(), dimErrorString());
 
   if (X.numel() == 0) {
     // skip the rest of the computation if X is empty
-    Y->template mutable_data<DataType>();
+    Y.template mutable_data<DataType>();
     return;
   }
 
@@ -87,17 +93,18 @@ void fc_op_cpu_impl(
       X.template data<DataType>(),
       W.template data<DataType>(),
       0,
-      Y->template mutable_data<DataType>(),
+      Y.template mutable_data<DataType>(),
       static_cast<Context*>(context),
       math_type);
   // Add bias term
-  if (cache->bias_multiplier_.numel() != M) {
+  Tensor bias_multiplier(cache->bias_multiplier_);
+  if (bias_multiplier.numel() != M) {
     // If the helper bias multiplier is not M, reshape and fill it with one.
-    cache->bias_multiplier_.Resize(M);
+    bias_multiplier.Resize(M);
     caffe2::math::Set<DataType, Context>(
         M,
         caffe2::convert::To<float, DataType>(1),
-        cache->bias_multiplier_.template mutable_data<DataType>(),
+        bias_multiplier.template mutable_data<DataType>(),
         static_cast<Context*>(context));
   }
   caffe2::math::Gemm<DataType, Context, caffe2::DefaultEngine>(
@@ -107,10 +114,10 @@ void fc_op_cpu_impl(
       N,
       1,
       1,
-      cache->bias_multiplier_.template data<DataType>(),
+      bias_multiplier.template data<DataType>(),
       b.template data<DataType>(),
       1,
-      Y->template mutable_data<DataType>(),
+      Y.template mutable_data<DataType>(),
       static_cast<Context*>(context),
       math_type);
 }
