@@ -182,28 +182,57 @@ std::shared_ptr<FusedKernel> compileKernel(
 
   PropagateInputShapes(graph);
 
-  // Creates output descriptions
-  std::vector<TensorDesc> output_desc;
-  for (const Value* output : graph->outputs()) {
-    std::vector<int64_t> sizes = map_size;
-    if (output->node()->kind() == prim::FusedConcat) {
-      sizes.at(output->node()->i(attr::dim)) *= output->node()->inputs().size();
+  // Creates chunk and flattened input descriptions
+  std::vector<PartitionDesc> chunk_desc;
+  std::vector<std::pair<const Value*, const TensorDesc>> flat_inputs;
+  {
+    size_t input_index = 0;
+    for (const auto& p : graph->inputs()) {
+      if (const Node* chunk = usedInFusedChunk(p)) {
+        int64_t dim = chunk->i(attr::dim);
+        int64_t chunks = chunk->i(attr::chunks);
+        chunk_desc.emplace_back(input_desc[input_index++], chunks, dim);
+        for (const auto* o : chunk->outputs()) {
+          flat_inputs.emplace_back(o, *chunk_desc.back().subTensorDesc());
+        }
+      } else {
+        chunk_desc.emplace_back();
+        flat_inputs.emplace_back(p, input_desc[input_index++]);
+      }
     }
-    auto scalar_type =
-        output->type()->expect<c10::TensorType const>()->scalarType();
+  }
+
+  // Creates output, concat, and flattened output descriptions
+  std::vector<TensorDesc> output_desc;
+  std::vector<PartitionDesc> concat_desc;
+  std::vector<std::pair<const Value*, const TensorDesc>> flat_outputs;
+  for (const Value* o : graph->outputs()) {
+    // Creates output description
+    std::vector<int64_t> sizes = map_size;
+    if (o->node()->kind() == prim::FusedConcat) {
+      sizes.at(o->node()->i(attr::dim)) *= o->node()->inputs().size();
+    }
+    auto scalar_type = o->type()->expect<c10::TensorType const>()->scalarType();
     auto type = CompleteTensorType::create(scalar_type, device, sizes);
-    output_desc.emplace_back(std::move(type));
+    output_desc.emplace_back(type);
+    const auto& desc = output_desc.back();
+
+    // Creates concat and flattened output descriptions (relies on output desc)
+    if (o->node()->kind() != prim::FusedConcat) {
+      concat_desc.emplace_back();
+      flat_outputs.emplace_back(o, desc);
+    } else {
+      const auto cat = o->node();
+      concat_desc.emplace_back(desc, cat->inputs().size(), cat->i(attr::dim));
+      for (const auto& c : cat->inputs()) {
+        flat_outputs.emplace_back(c, *concat_desc.back().subTensorDesc());
+      }
+    }
   }
 
   const std::string name = "kernel_" + std::to_string(next_kernel_id++);
   const bool use_cuda = device.is_cuda();
-  std::string code;
-  std::vector<PartitionDesc> chunk_desc;
-  std::vector<PartitionDesc> concat_desc;
-  bool has_random;
-  std::tie(code, chunk_desc, concat_desc, has_random) =
-      generateKernel(name, *graph, input_desc, output_desc, use_cuda);
-
+  std::string code = generateKernel(name, *graph, flat_inputs, flat_outputs, use_cuda);
   std::shared_ptr<FusedKernel> fused_kernel;
   if (use_cuda) {
 #if USE_CUDA_FUSER
@@ -215,7 +244,7 @@ std::shared_ptr<FusedKernel> compileKernel(
         output_desc,
         chunk_desc,
         concat_desc,
-        has_random);
+        spec.hasRandom());
 #else
     throw std::runtime_error("CUDA Fusion is not supported on this build.");
 #endif // USE_CUDA_FUSER
@@ -228,7 +257,7 @@ std::shared_ptr<FusedKernel> compileKernel(
         output_desc,
         chunk_desc,
         concat_desc,
-        has_random);
+        spec.hasRandom());
 #else
     throw std::runtime_error("CPU Fusion is not supported on this build.");
 #endif // USE_CPU_FUSER
