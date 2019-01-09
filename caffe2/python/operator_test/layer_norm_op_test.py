@@ -12,6 +12,7 @@ import numpy as np
 import os
 import unittest
 from functools import partial
+import torch
 
 
 def _layer_norm_ref(axis, epsilon, X):
