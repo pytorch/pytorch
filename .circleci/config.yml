@@ -795,7 +795,7 @@ jobs:
   pytorch_linux_xenial_cuda8_cudnn7_py3_build:
     environment:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn7-py3-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn6-py3:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:278"
       PYTHON_VERSION: "3.6"
       CUDA_VERSION: "8"
       BUILD_ENVIRONMENT: "pytorch-linux-xenial-cuda8-cudnn7-py3"
@@ -804,41 +804,37 @@ jobs:
   pytorch_linux_xenial_cuda8_cudnn7_py3_test:
     environment:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn7-py3-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn6-py3:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:278"
       PYTHON_VERSION: "3.6"
       CUDA_VERSION: "8"
-      BUILD_ENVIRONMENT: "pytorch-linux-xenial-cuda8-cudnn7-py3"
     resource_class: gpu.medium
     <<: *pytorch_linux_test_defaults
 
   pytorch_linux_xenial_cuda8_cudnn7_py3_multigpu_test:
     environment:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn7-py3-multigpu-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn6-py3:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:278"
       PYTHON_VERSION: "3.6"
       CUDA_VERSION: "8"
       MULTI_GPU: "1"
-      BUILD_ENVIRONMENT: "pytorch-linux-xenial-cuda8-cudnn7-py3"
     resource_class: gpu.large
     <<: *pytorch_linux_test_defaults
 
   pytorch_linux_xenial_cuda8_cudnn7_py3_NO_AVX2_test:
     environment:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn7-py3-NO_AVX2-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn6-py3:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:278"
       PYTHON_VERSION: "3.6"
       CUDA_VERSION: "8"
-      BUILD_ENVIRONMENT: "pytorch-linux-xenial-cuda8-cudnn7-py3"
     resource_class: gpu.medium
     <<: *pytorch_linux_test_defaults
 
   pytorch_linux_xenial_cuda8_cudnn7_py3_NO_AVX_NO_AVX2_test:
     environment:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn7-py3-NO_AVX-NO_AVX2-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn6-py3:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:278"
       PYTHON_VERSION: "3.6"
       CUDA_VERSION: "8"
-      BUILD_ENVIRONMENT: "pytorch-linux-xenial-cuda8-cudnn7-py3"
     resource_class: gpu.medium
     <<: *pytorch_linux_test_defaults
 
@@ -904,10 +900,9 @@ jobs:
   pytorch_short_perf_test_gpu:
     environment:
       JOB_BASE_NAME: pytorch-short-perf-test-gpu
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn6-py3:278"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:278"
       PYTHON_VERSION: "3.6"
       CUDA_VERSION: "8"
-      BUILD_ENVIRONMENT: "pytorch-linux-xenial-cuda8-cudnn7-py3"
     resource_class: gpu.medium
     machine:
       image: default
@@ -936,8 +931,7 @@ jobs:
   pytorch_doc_push:
     environment:
       JOB_BASE_NAME: pytorch-doc-push
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn6-py3:278"
-      BUILD_ENVIRONMENT: "pytorch-linux-xenial-cuda8-cudnn7-py3"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:278"
     resource_class: large
     machine:
       image: default
