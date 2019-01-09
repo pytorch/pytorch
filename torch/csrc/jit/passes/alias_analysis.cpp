@@ -384,10 +384,6 @@ void AliasDb::analyze(Node* node) {
       continue;
     }
 
-    if (valueToAlias_.count(actualValue) == 0) {
-      JIT_ASSERTM(0, "ERROR HERE");
-    }
-
     const auto& actualAlias = valueToAlias_.at(actualValue);
 
     // Bind the formal to the actual
