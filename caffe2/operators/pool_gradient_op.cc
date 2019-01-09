@@ -6,9 +6,6 @@
 
 namespace caffe2 {
 
-using std::max;
-using std::min;
-
 namespace {
 
 template <typename T, StorageOrder kOrder>

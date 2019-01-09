@@ -4,72 +4,50 @@ namespace torch {
 namespace jit {
 namespace SubgraphUtils {
 namespace {
-bool isSubgraphNodeKind(Symbol s) {
-  return s == prim::DifferentiableGraph || s == prim::FusionGroup;
-}
 
-bool isSubgraphNodeKind(Node* n) {
-  return isSubgraphNodeKind(n->kind());
+bool hasSubgraph(Node* n) {
+  return n->hasAttribute(attr::Subgraph);
 }
 
 // Combine the nodes in two subgraph together. The nodes will end up in
 // `mergeTo`, and `mergeFrom` is destroyed.
 void mergeSubgraph(Node* mergeTo, Node* mergeFrom) {
-  const auto nodes = unmergeSubgraph(mergeFrom);
-  for (auto it = nodes.rbegin(); it != nodes.rend(); ++it) {
-    mergeNodeIntoSubgraph(*it, mergeTo);
+  Node* nodeBeforeMergeFrom = mergeFrom->prev();
+  Node* nodeAfterMergeFrom = mergeFrom->next();
+  unmergeSubgraph(mergeFrom);
+  std::vector<Node*> nodes;
+  const auto end_it = nodeBeforeMergeFrom->reverseIterator();
+  auto it = nodeAfterMergeFrom->reverseIterator();
+  ++it;
+  while (it != end_it) {
+    // NB: mergeNodeIntoSubgraph destroys node, hence the complications
+    Node* node = *it;
+    ++it;
+    mergeNodeIntoSubgraph(node, mergeTo);
   }
 }
 } // namespace
 
 std::shared_ptr<Graph> getSubgraph(Node* n) {
-  JIT_ASSERT(isSubgraphNodeKind(n));
   return n->g(attr::Subgraph);
 }
 
-std::vector<Node*> unmergeSubgraph(Node* subgraphNode) {
+void unmergeSubgraph(Node* subgraphNode) {
   JIT_ASSERT(subgraphNode->kind() == prim::DifferentiableGraph);
-  auto outerGraph = subgraphNode->owningGraph();
 
-  std::vector<Node*> temporary_nodes;
-  auto subgraph = getSubgraph(subgraphNode);
-
-  // Initialize a map of inner graph values to outer graph values
-  std::unordered_map<const Value*, Value*> innerToOuter;
-  const auto innerInputs = subgraph->inputs();
-  const auto outerInputs = subgraphNode->inputs();
-  for (size_t i = 0; i < innerInputs.size(); ++i) {
-    innerToOuter[innerInputs[i]] = outerInputs[i];
-  }
-
-  // Clone all nodes
-  for (auto inner : subgraph->nodes()) {
-    Node* outer = outerGraph->createClone(
-        inner, [&](Value* k) -> Value* { return innerToOuter.at(k); });
-    outer->insertBefore(subgraphNode);
-    temporary_nodes.emplace_back(outer);
-    const auto innerOutputs = inner->outputs();
-    const auto outerOutputs = outer->outputs();
-    for (size_t i = 0; i < innerOutputs.size(); ++i) {
-      innerToOuter[innerOutputs[i]] = outerOutputs[i];
-    }
-  }
-
-  // Replace uses of group outputs and destroy the group
-  const auto subgraphOutputs = subgraph->outputs();
+  // Inline the graph, replace uses of node outputs and destroy the node
+  const auto subgraphOutputs = inlineGraph(
+      getSubgraph(subgraphNode), subgraphNode->inputs(), subgraphNode);
   JIT_ASSERT(subgraphOutputs.size() >= subgraphNode->outputs().size());
   for (size_t i = 0; i < subgraphNode->outputs().size(); ++i) {
-    const auto outerOutput = innerToOuter.at(subgraphOutputs[i]);
-    subgraphNode->outputs()[i]->replaceAllUsesWith(outerOutput);
+    subgraphNode->outputs()[i]->replaceAllUsesWith(subgraphOutputs[i]);
   }
   subgraphNode->destroy();
-
-  return temporary_nodes;
 }
 
 void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode) {
-  JIT_ASSERT(isSubgraphNodeKind(subgraphNode));
-  if (isSubgraphNodeKind(toMerge)) {
+  JIT_ASSERT(hasSubgraph(subgraphNode));
+  if (hasSubgraph(toMerge)) {
     return mergeSubgraph(subgraphNode, toMerge);
   }
 
@@ -150,8 +128,40 @@ void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode) {
   toMerge->destroy();
 }
 
+// Invariant we depend on in mergeSubgraph: All inlined nodes are created
+// between the node preceding insertBefore and insertBefore.
+std::vector<Value*> inlineGraph(
+    const std::shared_ptr<Graph>& subgraph,
+    at::ArrayRef<Value*> outerInputs,
+    Node* insertBefore) {
+  auto outerGraph = insertBefore->owningGraph();
+
+  // Initialize a map of inner graph values to outer graph values
+  std::unordered_map<const Value*, Value*> innerToOuter;
+  const auto innerInputs = subgraph->inputs();
+  JIT_ASSERT(outerInputs.size() == innerInputs.size());
+  for (size_t i = 0; i < innerInputs.size(); ++i) {
+    innerToOuter[innerInputs[i]] = outerInputs[i];
+  }
+
+  // Clone all nodes
+  for (auto inner : subgraph->nodes()) {
+    Node* outer = outerGraph->createClone(
+        inner, [&](Value* k) -> Value* { return innerToOuter.at(k); });
+    outer->insertBefore(insertBefore);
+    const auto innerOutputs = inner->outputs();
+    const auto outerOutputs = outer->outputs();
+    for (size_t i = 0; i < innerOutputs.size(); ++i) {
+      innerToOuter[innerOutputs[i]] = outerOutputs[i];
+    }
+  }
+
+  return fmap(subgraph->outputs(), [&](Value* output) {
+    return innerToOuter.at(output);
+  });
+}
+
 Node* createSingletonSubgraph(Node* n, Symbol subgraphKind) {
-  JIT_ASSERT(isSubgraphNodeKind(subgraphKind));
   auto graph = n->owningGraph();
   auto subgraph = graph->create(subgraphKind, 0);
   subgraph->g_(attr::Subgraph, std::make_shared<Graph>(graph->current_scope()));
@@ -159,6 +169,7 @@ Node* createSingletonSubgraph(Node* n, Symbol subgraphKind) {
   mergeNodeIntoSubgraph(n, subgraph);
   return subgraph;
 }
+
 } // namespace SubgraphUtils
 } // namespace jit
 } // namespace torch
