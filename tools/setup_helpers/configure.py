@@ -116,13 +116,13 @@ def get_common_env_with_flags():
 
 
 def get_libtorch_env_with_flags():
-    extra_flags, my_env = get_common_env_with_flags()
+    my_env, extra_flags = get_common_env_with_flags()
 
     return my_env, extra_flags
 
 
 def get_pytorch_env_with_flags():
-    extra_flags, my_env = get_common_env_with_flags()
+    my_env, extra_flags = get_common_env_with_flags()
     my_env["NUM_JOBS"] = str(NUM_JOBS)
     if not IS_WINDOWS:
         if USE_NINJA:
