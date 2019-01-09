@@ -117,7 +117,7 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
   /// Calls the `forward()` method of the contained module.
   template <typename... Args>
   auto operator()(Args&&... args)
-      -> detail::return_type_of_forward_t<Contained, Args...> {
+      -> torch::detail::return_type_of_forward_t<Contained, Args...> {
     // This will not compile if the module does not have a `forward()` method
     // (as expected).
     // NOTE: `std::forward` is qualified to prevent VS2017 emitting

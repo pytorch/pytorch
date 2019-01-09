@@ -55,7 +55,7 @@ struct return_type_of_forward_impl;
 
 template <typename C, typename... Args>
 struct return_type_of_forward_impl<true, C, Args...> {
-  using type = decltype(std::declval<C>().forward(std::declval<Args>()...));
+  using type = decltype(::std::declval<C>().forward(::std::declval<Args>()...));
 };
 
 template <typename C, typename... Args>
@@ -64,8 +64,10 @@ struct return_type_of_forward_impl<false, C, Args...> {
 };
 
 template <typename C, typename... Args>
-using return_type_of_forward =
-    return_type_of_forward_impl<has_forward<C>::value, C, Args...>;
+using return_type_of_forward = return_type_of_forward_impl<
+    torch::detail::has_forward<C>::value,
+    C,
+    Args...>;
 
 template <typename C, typename... Args>
 using return_type_of_forward_t =
