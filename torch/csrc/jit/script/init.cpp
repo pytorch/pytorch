@@ -352,9 +352,8 @@ struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
 };
 
 struct VISIBILITY_HIDDEN OverloadedFunctionValue : public SugaredValue {
-  OverloadedFunctionValue(py::object containing_class, py::list functions)
-      : containing_class_(std::move(containing_class)),
-        possible_functions_(std::move(functions)) {}
+  OverloadedFunctionValue(py::list functions)
+      : possible_functions_(std::move(functions)) {}
 
   std::string kind() const override {
     return "overloaded function";
@@ -370,13 +369,10 @@ struct VISIBILITY_HIDDEN OverloadedFunctionValue : public SugaredValue {
     auto possible_functions =
         py::cast<std::vector<py::object>>(possible_functions_);
 
-    for (const py::str& fn_name : possible_functions) {
-      py::object py_method = py::getattr(containing_class_, fn_name);
-      auto schema =
-          py::cast<FunctionSchema>(py::getattr(py_method, "schema")());
-
+    for (const py::object& fn : possible_functions) {
+      auto& method = py::cast<Method&>(fn);
       auto match = tryMatchSchema(
-          schema,
+          method.getSchema(),
           loc,
           *caller.graph().get(),
           c10::nullopt,
@@ -385,9 +381,8 @@ struct VISIBILITY_HIDDEN OverloadedFunctionValue : public SugaredValue {
           err,
           true);
       if (match) {
-        Method& m = py::cast<Method&>(py_method);
-        MethodValue mv(nullptr, m);
-        return mv.call(loc, caller, inputs, attributes, n_binders);
+        return MethodValue(nullptr, method)
+            .call(loc, caller, inputs, attributes, n_binders);
       }
     }
     throw ErrorReport(loc) << "Could not find any matching overloads\n"
@@ -395,7 +390,6 @@ struct VISIBILITY_HIDDEN OverloadedFunctionValue : public SugaredValue {
   }
 
  private:
-  py::object containing_class_;
   py::list possible_functions_;
 };
 
@@ -485,11 +479,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   if (!dispatched_fn.is_none()) {
     return std::make_shared<BooleanDispatchValue>(std::move(dispatched_fn));
   }
-  py::object overload_obj =
+  py::object overloads =
       py::module::import("torch.jit").attr("_try_get_overloaded_fn")(obj);
-  if (!overload_obj.is_none()) {
-    py::tuple overload = overload_obj;
-    return std::make_shared<OverloadedFunctionValue>(overload[0], overload[1]);
+  if (!overloads.is_none()) {
+    return std::make_shared<OverloadedFunctionValue>(std::move(overloads));
   }
   return std::make_shared<PythonValue>(obj);
 }
