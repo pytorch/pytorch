@@ -212,7 +212,7 @@ Engine::~Engine() = default;
 // not CUDA.
 auto Engine::thread_init(int device) -> void {
   THInferNumThreads();
-#if defined(USE_ROCM) && !defined(USE_CUDA)
+#if defined(USE_ROCM)
   at::cuda::OptionalHIPGuardMasqueradingAsCUDA guard;
   if (device != -1) {
     guard.set_index(device);
@@ -640,9 +640,7 @@ auto Engine::ready_queue(int device) -> ReadyQueue& {
 
 auto Engine::start_threads() -> void {
   int num_devices = 0;
-  if (at::hasCUDA()) {
-    num_devices += at::getNumCUDAGPUs();
-  }
+
 #ifdef USE_ROCM
   {
     int num_hip_devices = 0;
@@ -652,6 +650,10 @@ auto Engine::start_threads() -> void {
     } else {
       num_devices += num_hip_devices;
     }
+  }
+#else
+  if (at::hasCUDA()) {
+    num_devices += at::getNumCUDAGPUs();
   }
 #endif
   // One for CPU, plus one for every GPU device
