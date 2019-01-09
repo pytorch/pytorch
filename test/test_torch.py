@@ -3638,10 +3638,10 @@ class _TestTorchMixin(object):
         x[3][0] = float('NaN')
         torch.sort(x, out=(res2val, res2ind))
         self.assertIsOrdered('ascending', x, res2val, res2ind,
-                'random with NaNs')
+                             'random with NaNs')
         torch.sort(x, out=(res2val, res2ind), descending=True)
         self.assertIsOrdered('descending', x, res2val, res2ind,
-                'random with NaNs')
+                             'random with NaNs')
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_tensordot(self):
