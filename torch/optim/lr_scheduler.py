@@ -5,7 +5,6 @@ from torch._six import inf
 from collections import Counter
 from functools import partial
 
-import numpy as np
 from .optimizer import Optimizer
 
 
@@ -559,9 +558,9 @@ class CyclicLR(_LRScheduler):
             if len(lr) != len(optimizer.param_groups):
                 raise ValueError("expected {} values for {}, got {}".format(
                     len(optimizer.param_groups), name, len(lr)))
-            return np.array(lr)
+            return torch.tensor(lr)
         else:
-            return lr * np.ones(len(optimizer.param_groups))
+            return lr * torch.ones(len(optimizer.param_groups))
 
     def _triangular_scale_fn(self, x):
         return 1.
@@ -576,7 +575,7 @@ class CyclicLR(_LRScheduler):
         """Calculates the learning rate at batch index. This function treats
         `self.last_epoch` as the last batch index.
         """
-        cycle = np.floor(1 + self.last_epoch / self.total_size)
+        cycle = math.floor(1 + self.last_epoch / self.total_size)
         x = 1 + self.last_epoch / self.total_size - cycle
         if x <= self.step_ratio:
             scale_factor = x / self.step_ratio
