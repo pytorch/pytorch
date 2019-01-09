@@ -4,8 +4,8 @@
 
 #include "fbgemm_pack_op.h"
 
-C10_DECLARE_int32(dnnlowp_nbits_in_non_outlier);
-C10_DECLARE_int32(dnnlowp_copy_to_32bit_frequency);
+C10_DECLARE_int32(caffe2_dnnlowp_nbits_in_non_outlier);
+C10_DECLARE_int32(caffe2_dnnlowp_copy_to_32bit_frequency);
 
 namespace caffe2 {
 
@@ -15,10 +15,10 @@ FullyConnectedDNNLowPAcc16Op::FullyConnectedDNNLowPAcc16Op(
     : FullyConnectedDNNLowPOp<uint8_t>(operator_def, ws),
       nbits_in_non_outlier_(OperatorBase::GetSingleArgument<int>(
           "nbits_in_non_outlier",
-          FLAGS_dnnlowp_nbits_in_non_outlier)),
+          FLAGS_caffe2_dnnlowp_nbits_in_non_outlier)),
       copy_to_32bit_frequency_(OperatorBase::GetSingleArgument<int>(
           "copy_to_32bit_frequency",
-          FLAGS_dnnlowp_copy_to_32bit_frequency)) {}
+          FLAGS_caffe2_dnnlowp_copy_to_32bit_frequency)) {}
 
 bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
   using namespace std;

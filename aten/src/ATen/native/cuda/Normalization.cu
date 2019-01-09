@@ -24,4 +24,15 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_o
     });
 }
 
+std::tuple<Tensor, Tensor> batch_norm_update_stats_cuda(
+        const Tensor& self, const Tensor& running_mean, const Tensor& running_var, double momentum) {
+  return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.type(), "batch_norm_backward", [&] {
+      if (cuda::detail::canUse32BitIndexMath(self)) {
+        return batch_norm_update_stats_cuda_template<scalar_t, int32_t>(self, running_mean, running_var, momentum);
+      } else {
+        return batch_norm_update_stats_cuda_template<scalar_t, int64_t>(self, running_mean, running_var, momentum);
+      }
+    });
+}
+
 } } // namespace at::native

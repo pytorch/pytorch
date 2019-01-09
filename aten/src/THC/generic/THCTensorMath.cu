@@ -280,12 +280,12 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
   strided_range<Iter> strided_tensor(tensor_data,
                                      tensor_data+N*num_dim, num_dim);
 
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
   cudaStream_t stream = THCState_getCurrentStream(state);
 #endif
 
   strided_range<Iter>::iterator dend = thrust::copy_if(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(stream),
 #endif
     idxfirst,
@@ -302,7 +302,7 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
     strided_range<Iter> stride_dim(tensor_data+dim,
                                    tensor_data+N*num_dim, num_dim);
     thrust::transform(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(stream),
 #endif
       strided_tensor.begin(),
@@ -389,43 +389,6 @@ accreal THCTensor_(trace)(THCState *state, THCTensor *src_) {
   accreal trace = THCTensor_(sumall)(state, diag);
   THCTensor_(free)(state, diag);
   return trace;
-}
-
-void THCTensor_(range)(THCState *state, THCTensor *r_, accreal xmin, accreal xmax, accreal step) {
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, r_));
-  THArgCheck(step > 0 || step < 0, 3, "step must be nonzero");
-  THArgCheck(((step > 0) && (xmax >= xmin)) || ((step < 0) && (xmax <= xmin))
-              , 2, "upper bound and larger bound inconsistent with step sign");
-  ptrdiff_t size = (ptrdiff_t) (((xmax - xmin) / step) + 1);
-  if (THCTensor_(nElement)(state, r_) != size) THCTensor_(resize1d)(state, r_, size);
-  THCTensor *r = THCTensor_(newContiguous)(state, r_);
-  LinspaceOp<scalar_t,accreal> linspace_method(xmin, step);
-  thrust::device_ptr<scalar_t> data_(THCTensor_(data)(state, r));
-  thrust::tabulate(data_, data_ + size, linspace_method);
-  THCTensor_(freeCopyTo)(state, r, r_);
-  THCudaCheck(cudaGetLastError());
-}
-
-void THCTensor_(arange)(THCState* state, THCTensor *r_, accreal xmin, accreal xmax, accreal step) {
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, r_));
-  THArgCheck(step > 0 || step < 0, 3, "step must be nonzero");
-  THArgCheck(std::isfinite(static_cast<double>(xmin)) &&
-              std::isfinite(static_cast<double>(xmax))
-              , 1, "unsupported range: ", xmin, " -> ", xmax);
-  THArgCheck(((step > 0) && (xmax >= xmin)) || ((step < 0) && (xmax <= xmin))
-              , 2, "upper bound and larger bound inconsistent with step sign");
-  double size_d = ceil(ScalarConvert<accreal, double>::to(xmax - xmin) / step);
-  THArgCheck(size_d >= 0 && size_d <= static_cast<double>(PTRDIFF_MAX)
-              , 1, "invalid size, possible overflow?");
-  ptrdiff_t size = static_cast<ptrdiff_t>(size_d);
-
-  if (THCTensor_(nElement)(state, r_) != size) THCTensor_(resize1d)(state, r_, size);
-  THCTensor *r = THCTensor_(newContiguous)(state, r_);
-  LinspaceOp<scalar_t,accreal> linspace_method(xmin, step);
-  thrust::device_ptr<scalar_t> data_(THCTensor_(data)(state, r));
-  thrust::tabulate(data_, data_ + size, linspace_method);
-  THCTensor_(freeCopyTo)(state, r, r_);
-  THCudaCheck(cudaGetLastError());
 }
 
 #endif

@@ -135,6 +135,7 @@ bool test_mnist(
       auto data = batch.data.to(device), targets = batch.target.to(device);
       torch::Tensor prediction = forward_op(std::move(data));
       torch::Tensor loss = torch::nll_loss(prediction, std::move(targets));
+      AT_ASSERT(!torch::isnan(loss).any().item<int64_t>());
       optimizer.zero_grad();
       loss.backward();
       optimizer.step();
