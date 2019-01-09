@@ -147,8 +147,8 @@ bool SoftmaxFocalLossOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);         // Logits
   auto& T = Input(1);         // Labels
   auto& wp = Input(2);        // num of foregound
-  auto* avg_loss = Output(0); // average loss as output
-  auto* P = Output(1);        // softmax probability, going to be re-used in gradient
+   // average loss as output
+          // softmax probability, going to be re-used in gradient
 
   int N = X.dim32(0);
   int D = X.dim32(1);
@@ -157,8 +157,8 @@ bool SoftmaxFocalLossOp<float, CUDAContext>::RunOnDevice() {
   int A = D / num_classes_;
 
   losses_.Resize(N * A * H * W);
-  P->Resize(N * D * H * W);
-  avg_loss->Resize(vector<int64_t>());
+  auto* P = Output(1, {N * D * H * W}, at::dtype<float>());
+  auto* avg_loss = Output(0, vector<int64_t>(), at::dtype<float>());
   math::Set<float, CUDAContext>(
       avg_loss->size(), 0.f, avg_loss->mutable_data<float>(), &context_);
   math::Set<float, CUDAContext>(

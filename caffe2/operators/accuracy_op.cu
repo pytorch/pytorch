@@ -47,13 +47,13 @@ template <>
 bool AccuracyOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(PREDICTION);
   auto& label = Input(LABEL);
-  auto* Y = Output(0);
+  
   CAFFE_ENFORCE_EQ(X.ndim(), 2);
   int N = X.dim32(0);
   int D = X.dim32(1);
   CAFFE_ENFORCE_EQ(label.ndim(), 1);
   CAFFE_ENFORCE_EQ(label.dim32(0), N);
-  Y->Resize(vector<int64_t>());
+  auto* Y = Output(0, vector<int64_t>(), at::dtype<float>());
   float* Ydata = Y->template mutable_data<float>();
   math::Set<float, CUDAContext>(1, 0, Ydata, &context_);
   AccuracyKernel<<<
