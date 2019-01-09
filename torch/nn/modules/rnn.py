@@ -241,7 +241,7 @@ class RNNBase(Module):
 
     @property
     def _flat_weights(self):
-        return list(self._parameters.values())
+        return [p for layerparams in self.all_weights for p in layerparams]
 
     @property
     def all_weights(self):
