@@ -43,8 +43,9 @@ static inline int64_t matrixStride(const Tensor& batched_matrices) {
 
 // Checks if a given tensor has batch contiguous
 static inline bool checkBatchContiguous(const Tensor& tensor) {
-  int64_t expected_stride = tensor.size(-1) * tensor.size(-2);
   int64_t dims = tensor.dim();
+  if (dims <= 3) return true;
+  int64_t expected_stride = tensor.size(-1) * tensor.size(-2);
   for (int64_t i = dims - 3; i >= 0; i--) {
     if (expected_stride != tensor.stride(i)) return false;
     expected_stride *= tensor.size(i);

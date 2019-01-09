@@ -492,7 +492,7 @@ Tensor& triu_tril_cuda_template(Tensor& result, const Tensor& self, int64_t k, c
           self_batch_stride = self.dim() > 2 ? self.stride(-3) : 1,
           self_row_stride = self.stride(-2), self_col_stride = self.stride(-1);
   dim3 dim_block = cuda::getApplyBlock();
-  dim3 dim_grid((mat_size * n_batches + dim_block.x * n_batches - 1) / (dim_block.x * n_batches), n_batches);
+  dim3 dim_grid((mat_size + dim_block.x - 1) / dim_block.x, n_batches);
   AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), name, [&]{
     triu_tril_kernel<scalar_t, upper>
       <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -505,7 +505,11 @@ Tensor& triu_tril_cuda_template(Tensor& result, const Tensor& self, int64_t k, c
 }
 
 Tensor& tril_cuda_(Tensor &self, int64_t k) {
-  if (!checkBatchContiguous(self)) self = self.contiguous();
+  // Only if the tensor is not contiguous, we check for batch contiguity
+  // Else, we are happy with contiguous tensors as is, and can safely bypass the check
+  // This check is written in this way, because if the first predicate fails, then
+  // the next one is not checked
+  if (!self.is_contiguous() && !checkBatchContiguous(self)) self = self.contiguous();
   return tril_cuda_out(self, self, k);
 }
 
@@ -516,12 +520,17 @@ Tensor& tril_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
   if (self.numel() == 0) {
     return result;
   }
-  Tensor self_c = checkBatchContiguous(self) ? self : self.contiguous();
+  // Only if the tensor is not contiguous, we check for batch contiguity
+  // Else, we are happy with contiguous tensors as is, and can safely bypass the check
+  // This check is written in this way, because if the first predicate passes, then
+  // the next one is not checked
+  Tensor self_c = self.is_contiguous() || checkBatchContiguous(self) ? self : self.contiguous();
   return triu_tril_cuda_template<false>(result, self_c, k, "tril");
 }
 
 Tensor& triu_cuda_(Tensor &self, int64_t k) {
-  if (!checkBatchContiguous(self)) self = self.contiguous();
+  // Please check the comment in tril_cuda_ about this check
+  if (!self.is_contiguous() && !checkBatchContiguous(self)) self = self.contiguous();
   return triu_cuda_out(self, self, k);
 }
 
@@ -532,7 +541,8 @@ Tensor& triu_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
   if (self.numel() == 0) {
     return result;
   }
-  Tensor self_c = checkBatchContiguous(self) ? self : self.contiguous();
+  // Please check the comment in tril_cuda_out about this check
+  Tensor self_c = self.is_contiguous() || checkBatchContiguous(self) ? self : self.contiguous();
   return triu_tril_cuda_template<true>(result, self_c, k, "triu");
 }
 
