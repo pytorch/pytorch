@@ -68,12 +68,10 @@ std::string cudnnTypeToString(cudnnDataType_t dtype) {
       return "CUDNN_DATA_INT32";
     case CUDNN_DATA_INT8x4:
       return "CUDNN_DATA_INT8x4";
-#if CUDNN_VERSION >= 7100
     case CUDNN_DATA_UINT8:
       return "CUDNN_DATA_UINT8";
     case CUDNN_DATA_UINT8x4:
       return "CUDNN_DATA_UINT8x4";
-#endif
     default:
       std::ostringstream oss;
       oss << "(unknown data-type " << static_cast<int>(dtype) << ")";
