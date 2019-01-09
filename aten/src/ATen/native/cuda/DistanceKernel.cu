@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/cuda/Exceptions.h>
 #include <THC/THCTensorMathReduce.cuh>
 #include <math.h>
 
@@ -82,7 +83,7 @@ __global__ static void pdist_kernel_cuda_impl(scalar_t * result, const scalar_t 
   const int k = blockIdx.x;
   const int stride = blockDim.x;
 
-  float n2 = n - .5;
+  double n2 = n - .5;
   // The -1 accounts for floating point truncation issues
   int64_t i = static_cast<int64_t>((n2 - device_sqrt<scalar_t>(n2 * n2 - 2 * k - 1)));
   int64_t j = k - n * i + i * (i + 1) / 2 + i + 1;
@@ -133,7 +134,7 @@ __global__ static void pdist_backward_kernel_cuda_impl(scalar_t * buffer, const 
     return;
   }
 
-  float n2 = n - .5;
+  double n2 = n - .5;
   // The -1 accounts for floating point truncation issues
   int64_t i = static_cast<int64_t>((n2 - device_sqrt<scalar_t>(n2 * n2 - 2 * k - 1)));
   int64_t j = k - n * i + i * (i + 1) / 2 + i + 1;
@@ -175,6 +176,7 @@ void pdist_forward_kernel_impl(Tensor& result, const Tensor& self, double p) {
       pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::p><<<grid, block>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p);
     }
   });
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 void pdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor& self, const double p, const Tensor& dist) {
@@ -206,6 +208,7 @@ void pdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
       pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::p><<<grid, block>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(0), n, m, dist.numel(), p);
     }
   });
+  AT_CUDA_CHECK(cudaGetLastError());
 
   at::sum_out(result, buffer, 0);
 }
