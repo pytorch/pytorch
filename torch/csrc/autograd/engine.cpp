@@ -75,9 +75,16 @@ struct FunctionTask {
 };
 
 // Returns true when t2 should be (weakly) BEFORE t1 in the queue.
+// Empty FunctionTask are first.
 struct CompareFunctionTaskTime {
   bool operator()(FunctionTask const & t1, FunctionTask const & t2) {
-    return t1.fn->sequence_nr() < t2.fn->sequence_nr();
+    if (!t1.fn) {
+      return false;
+    } else if (!t2.fn) {
+      return true;
+    } else {
+      return t1.fn->sequence_nr() < t2.fn->sequence_nr();
+    }
   }
 };
 
