@@ -199,6 +199,10 @@ static inline bool hasCUDA() {
   return globalContext().hasCUDA();
 }
 
+static inline size_t getNumCUDAGPUs() {
+  return detail::getCUDAHooks().getNumGPUs();
+}
+
 static inline bool hasHIP() {
   return globalContext().hasHIP();
 }
