@@ -1476,19 +1476,24 @@ class TestAutograd(TestCase):
         gradcheck_input_size = 10
 
         # device, input_length
-        tests = [('cpu', 150)]
+        tests = [('cpu', 150, False),
+                 ('cpu', 150, True)]
         if torch.cuda.is_available():
-            tests += [('cuda', 50),
-                      ('cuda', 150)]
+            tests += [('cuda', 50, False),
+                      ('cuda', 150, False),
+                      ('cuda', 50, True),
+                      ('cuda', 150, True)]
 
-        for device, input_length in tests:
+        for device, input_length, vary_lengths in tests:
             targets = torch.randint(1, num_labels, (batch_size, target_length),
                                     device=device, dtype=torch.long)
             x = torch.randn(gradcheck_input_size, device=device, requires_grad=True)
             tile_factors = torch.randn(input_length * batch_size * num_labels // gradcheck_input_size + 1,
                                        device=device)
-            input_lengths = [input_length for _ in range(batch_size)]
-            target_lengths = [target_length for _ in range(batch_size)]
+            input_lengths = [(torch.randint(input_length // 2, input_length + 1, ()).item()
+                              if vary_lengths or i == 0 else input_length) for i in range(batch_size)]
+            target_lengths = [(torch.randint(target_length // 2, target_length + 1, ()).item()
+                               if vary_lengths or i == 0 else target_length) for i in range(batch_size)]
 
             def ctc_after_softmax(x):
                 x_full = ((x[:, None] * tile_factors[None, :]).view(-1)[:input_length * batch_size * num_labels]
