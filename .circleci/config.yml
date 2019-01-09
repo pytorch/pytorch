@@ -307,6 +307,7 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
 
           export IN_CIRCLECI=1
 
+          brew update
           # moreutils installs a `parallel` executable by default, which conflicts with the executable from the GNU `parallel`
           # so we must unlink GNU `parallel` first, and relink it afterwards
           brew unlink parallel
@@ -459,6 +460,8 @@ smoke_mac_build: &smoke_mac_build
           set -ex
           export DATE=today
           export NIGHTLIES_DATE_PREAMBLE=1.0.0.dev
+
+          brew update
           # moreutils installs a `parallel` executable by default, which conflicts with the executable from the GNU `parallel`
           # so we must unlink GNU `parallel` first, and relink it afterwards
           brew unlink parallel
@@ -814,6 +817,8 @@ jobs:
             set -e
 
             export IN_CIRCLECI=1
+
+            brew update
             # moreutils installs a `parallel` executable by default, which conflicts with the executable from the GNU `parallel`
             # so we must unlink GNU `parallel` first, and relink it afterwards
             brew unlink parallel
@@ -861,6 +866,8 @@ jobs:
           command: |
             set -e
             export IN_CIRCLECI=1
+
+            brew update
             # moreutils installs a `parallel` executable by default, which conflicts with the executable from the GNU `parallel`
             # so we must unlink GNU `parallel` first, and relink it afterwards
             brew unlink parallel
@@ -889,6 +896,7 @@ jobs:
 
             export IN_CIRCLECI=1
 
+            brew update
             # moreutils installs a `parallel` executable by default, which conflicts with the executable from the GNU `parallel`
             # so we must unlink GNU `parallel` first, and relink it afterwards
             brew unlink parallel
