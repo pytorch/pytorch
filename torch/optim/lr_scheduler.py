@@ -481,7 +481,7 @@ class CyclicLR(_LRScheduler):
         scale_fn (function): Custom scaling policy defined by a single
             argument lambda function, where
             0 <= scale_fn(x) <= 1 for all x >= 0.
-            mode paramater is ignored
+            mode parameter is ignored
             Default: None
         scale_mode (str): {'cycle', 'iterations'}.
             Defines whether scale_fn is evaluated on
