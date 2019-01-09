@@ -3,11 +3,14 @@
 #include <ATen/ExpandUtils.h>
 #include <torch/csrc/jit/assertions.h>
 #include <torch/csrc/jit/autodiff.h>
+#include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
+#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/symbolic_variable.h>
 #include <unordered_map>
 
@@ -68,6 +71,7 @@ bool isSimpleMap(Node* node) {
       //"aten::rand_like(Tensor self) -> Tensor",
       "aten::reciprocal(Tensor self) -> Tensor",
       "aten::relu(Tensor self) -> Tensor",
+      "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",
       "aten::remainder(Tensor self, Tensor other) -> Tensor",
       "aten::round(Tensor self) -> Tensor",
       "aten::rsqrt(Tensor self) -> Tensor",
@@ -116,6 +120,44 @@ bool isSimpleMap(Node* node) {
   return true;
 }
 
+RegisterOperators reg_bn_unsqueeze({Operator(
+    "aten::_ncf_unsqueeze(Tensor self, int ndim) -> Tensor",
+    [](const Node* node) {
+      return [](Stack& stack) {
+        const int64_t ndim = pop(stack).toInt();
+        auto self = pop(stack).toTensor();
+        c10::SmallVector<int64_t, 8> sizes(ndim, 1);
+        JIT_ASSERT(self.dim() == 1);
+        sizes.at(1) = self.size(0);
+        push(stack, self.reshape(sizes));
+        return 0;
+      };
+    })});
+
+// Yes, no, or no value if we can't tell
+c10::optional<bool> isDefined(Value* tensor) {
+  if (tensor->type()->isSubtypeOf(DynamicType::get())) {
+    return true;
+  }
+  if (tensor->node()->kind() == prim::None ||
+      tensor->node()->kind() == prim::Undefined) {
+    return false;
+  }
+  return {};
+}
+
+bool isFusableBatchNorm(Node* batch_norm) {
+  if (!batch_norm->matches(
+          "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor")) {
+    return false;
+  }
+  // If we can't determine if weight and bias is defined statically there's
+  // really no point in decomposing batch norm into simpler ops, since it won't
+  // get fused into a single kernel.
+  return isDefined(batch_norm->namedInput(attr::weight)).has_value() &&
+      isDefined(batch_norm->namedInput(attr::bias)).has_value();
+}
+
 Value* broadcastSizes(at::ArrayRef<Value*> sizes) {
   JIT_ASSERT(!sizes.empty());
   Graph* graph = sizes[0]->owningGraph();
@@ -127,6 +169,7 @@ Value* broadcastSizes(at::ArrayRef<Value*> sizes) {
 
 struct GraphFuser {
   Block* block_;
+  c10::optional<AliasDb> aliasDb_;
   std::shared_ptr<Graph> graph_;
 
   GraphFuser(Block* block, std::shared_ptr<Graph> graph)
@@ -139,6 +182,10 @@ struct GraphFuser {
   }
 
   bool isFusable(Node* node) {
+    return isFusableMap(node) || isFusableBatchNorm(node);
+  }
+
+  bool isFusableMap(Node* node) {
     // We don't want to bother with cross-block node movements, as they
     // are not necessarily correct.
     if (node->owningBlock() != block_)
@@ -169,7 +216,7 @@ struct GraphFuser {
   // cannot be fused because it is not a simple map, can be put in a fusion
   // group as long as no items in the group read the output of concat
   bool isFusableAsExitNode(Node* node) {
-    return isFusable(node) || isFusableOnlyAsExitNode(node);
+    return isFusableMap(node) || isFusableOnlyAsExitNode(node);
   }
 
   bool isFusableOnlyAsExitNode(Node* node) {
@@ -203,6 +250,59 @@ struct GraphFuser {
   Graph& getSubgraph(Node* n) {
     JIT_ASSERT(n->kind() == prim::FusionGroup);
     return *n->g(attr::Subgraph);
+  }
+
+  void decomposeBatchNorm(Node* batch_norm) {
+    static std::shared_ptr<Graph> bn_graph;
+    static std::once_flag flag;
+    std::call_once(
+        flag,
+        [](std::shared_ptr<Graph>* graph_ptr) {
+          static const char* source = R"SCRIPT(
+        def batch_norm(input : Tensor, running_mean : Optional[Tensor], running_var : Optional[Tensor], training : bool, momentum : float, eps : float) -> Tensor:
+            if training:
+                norm_mean, norm_var = torch.batch_norm_update_stats(input, running_mean, running_var, momentum)
+            else:
+                norm_mean = torch._unwrap_optional(running_mean)
+                norm_var = torch._unwrap_optional(running_var)
+            norm_mean = torch._ncf_unsqueeze(norm_mean, input.dim())
+            norm_var = torch._ncf_unsqueeze(norm_var, input.dim())
+            norm_invstd = 1 / (eps + torch.sqrt(norm_var))
+            return ((input - norm_mean) * norm_invstd)
+      )SCRIPT";
+          auto module = std::make_shared<script::Module>();
+          defineMethodsInModule(
+              module, source, script::nativeResolver, /*self=*/nullptr);
+          *graph_ptr = module->get_method("batch_norm").graph();
+        },
+        &bn_graph);
+
+    JIT_ASSERT(isFusableBatchNorm(batch_norm));
+    WithInsertPoint insert_guard{batch_norm};
+    Value* input = batch_norm->namedInput(attr::input);
+    Value* input_dim = graph_->insert(aten::dim, {input});
+    std::vector<Value*> inputs{input,
+                               batch_norm->namedInput(attr::running_mean),
+                               batch_norm->namedInput(attr::running_var),
+                               batch_norm->namedInput(attr::training),
+                               batch_norm->namedInput(attr::momentum),
+                               batch_norm->namedInput(attr::eps)};
+    Value* new_output =
+        SubgraphUtils::inlineGraph(bn_graph, inputs, batch_norm).at(0);
+    auto weight = batch_norm->namedInput(attr::weight);
+    auto bias = batch_norm->namedInput(attr::bias);
+    if (isDefined(weight).value()) {
+      Value* expanded_weight =
+          graph_->insert(aten::_ncf_unsqueeze, {weight, input_dim});
+      new_output = graph_->insert(aten::mul, {new_output, expanded_weight});
+    }
+    if (isDefined(bias).value()) {
+      Value* expanded_bias =
+          graph_->insert(aten::_ncf_unsqueeze, {bias, input_dim});
+      new_output = graph_->insert(aten::add, {new_output, expanded_bias});
+    }
+    batch_norm->output()->replaceAllUsesWith(new_output);
+    batch_norm->destroy();
   }
 
   void mergeFusionGroups(Node* consumer_group, Node* producer_group) {
@@ -349,10 +449,7 @@ struct GraphFuser {
     *insertion_point = n;
   }
 
-  at::optional<Node*> tryFuse(
-      Node* consumer,
-      Value* producer,
-      const AliasDb& aliasDb) {
+  at::optional<Node*> tryFuse(Node* consumer, Value* producer) {
     // this handles cases where producer can be moved _into_ the fusion group of
     // consumer.
     // TODO: extend to fusion of consumer into _producer's_ fusion blob
@@ -368,7 +465,8 @@ struct GraphFuser {
         // consumer. Fusion will rewrite those later uses to use the version of
         // producer generated by the fused blob. In this case, producer becomes
         // an output of the fusion group.
-        producer->node()->moveBeforeTopologicallyValid(real_consumer, aliasDb);
+        producer->node()->moveBeforeTopologicallyValid(
+            real_consumer, aliasDb_.value());
 
     if (!shouldFuse) {
       return at::nullopt;
@@ -395,6 +493,14 @@ struct GraphFuser {
       }
     } else if (consumer->kind() != prim::FusionGroup) {
       group = createSingletonFusionGroup(consumer);
+    }
+    if (producer->node()->matches(
+            "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor")) {
+      // We don't do any fusions in here, but simply decompose the batch norm
+      // into a kernel that computes the stats + pointwise ops which will be
+      // considered in this fusion next.
+      decomposeBatchNorm(producer->node());
+      return group;
     }
     if (producer->node()->kind() == prim::FusionGroup) {
       mergeFusionGroups(group, producer->node());
@@ -649,7 +755,7 @@ struct GraphFuser {
         chunk->inputs().begin(),
         chunk->inputs().end(),
         [&](Value* producer_for_chunk) {
-          return isFusable(producer_for_chunk->node()) &&
+          return isFusableMap(producer_for_chunk->node()) &&
               allUsersAreThisConsumerOrCalcSizes(chunk, producer_for_chunk);
         });
     if (it == chunk->inputs().end()) {
@@ -777,9 +883,7 @@ struct GraphFuser {
   }
 
   // returns where to continue scanning, and whether any fusion was made
-  std::pair<graph_node_list::iterator, bool> scanNode(
-      Node* consumer,
-      const AliasDb& aliasDb) {
+  std::pair<graph_node_list::iterator, bool> scanNode(Node* consumer) {
     if (isFusableAsExitNode(consumer)) {
       auto consumer_inputs = consumer->kind() == aten::cat
           ? consumer->namedInput(attr::tensors)->node()->inputs()
@@ -797,7 +901,7 @@ struct GraphFuser {
           // we scan this consumer again to perform the fusion
           return std::make_pair(consumer->reverseIterator(), true);
         }
-        auto fusion_group = tryFuse(consumer, producer, aliasDb);
+        auto fusion_group = tryFuse(consumer, producer);
         if (fusion_group) {
           // after fusion, consumer moves into a FusionGroup, so inputs is no
           // longer valid so we rescan the new FusionGroup for more fusions...
@@ -948,6 +1052,10 @@ struct GraphFuser {
     }
   }
 
+  void refreshAliasDb() {
+    aliasDb_ = AliasAnalysis(graph_);
+  }
+
   void run() {
     // Run the pass until no changes are made.
     // This is neccessary, because the algorithm can miss out on certain fusion
@@ -968,10 +1076,10 @@ struct GraphFuser {
     bool any_changed = true;
     while (any_changed) {
       any_changed = false;
-      auto aliasDb = AliasAnalysis(graph_);
+      refreshAliasDb();
       for (auto it = block_->nodes().rbegin(); it != block_->nodes().rend();) {
         bool changed;
-        std::tie(it, changed) = scanNode(*it, aliasDb);
+        std::tie(it, changed) = scanNode(*it);
         any_changed |= changed;
       }
     }

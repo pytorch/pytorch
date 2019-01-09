@@ -4,10 +4,7 @@
 #include <c10/util/Array.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/DeviceType.h>
-
-namespace caffe2 {
-class Tensor;
-}  // namespace caffe2
+#include <c10/core/Tensor.h>
 
 namespace c10 {
 
@@ -19,7 +16,7 @@ namespace details {
  */
 template <class Arg>
 using is_tensor_arg = std::
-    is_same<caffe2::Tensor, guts::remove_cv_t<guts::remove_reference_t<Arg>>>;
+    is_same<C10Tensor, guts::remove_cv_t<guts::remove_reference_t<Arg>>>;
 
 inline DeviceTypeId to_device_type_id(DeviceType device_type) {
   switch (device_type) {
@@ -32,16 +29,18 @@ inline DeviceTypeId to_device_type_id(DeviceType device_type) {
   }
 }
 
-// TODO get rid of tensor_to_dispatch_key once c2::Tensor is de-templatized. This then fits into a template lambda instead of a functor.
-struct tensor_to_dispatch_key final {
-    template<class TensorType>
-    TensorParameterDispatchKey operator()(const TensorType& tensor) const {
-      return TensorParameterDispatchKey{
-          to_device_type_id(tensor.GetDeviceType()),
-          LayoutId(0),
-          tensor.dtype().id()};
-    }
-};
+inline TensorParameterDispatchKey tensor_to_dispatch_key(const C10Tensor& tensor) {
+  return TensorParameterDispatchKey{
+      to_device_type_id(tensor.impl()->device_type()),
+      LayoutId(0),
+      tensor.impl()->dtype().id()};
+}
+
+// Extract type ids for all tensors from an array of tensors
+template<size_t num_dispatch_args, size_t num_tensor_args, size_t... indices>
+guts::array<TensorParameterDispatchKey, num_dispatch_args> getDispatchTypeIds__(const guts::array<const C10Tensor*, num_tensor_args>& tensor_args, guts::index_sequence<indices...>) {
+  return {tensor_to_dispatch_key(*tensor_args[indices])...};
+}
 
 /**
  * Extract the type ids of all tensors in a variadic list of arguments
@@ -50,12 +49,13 @@ struct tensor_to_dispatch_key final {
  * @param args List of arguments to get type ids from
  * @return guts::array<TensorParameterDispatchKey, n>, where n is the number of tensor arguments (is_tensor_arg) in the class
  */
-template<class... Args> auto getTensorTypeIds_(const Args&... args)
--> guts::array<TensorParameterDispatchKey, guts::typelist::count_if<is_tensor_arg, guts::typelist::typelist<Args...>>::value> {
-  return guts::filter_map<TensorParameterDispatchKey, is_tensor_arg>(tensor_to_dispatch_key(), args...);
+template<size_t num_dispatch_args, class... Args>
+guts::array<TensorParameterDispatchKey, num_dispatch_args> getDispatchTypeIds_(const Args&... args) {
+  auto tensor_args = guts::filter_map<const C10Tensor*, is_tensor_arg>([] (const C10Tensor& v){return &v;}, args...);
+  return getDispatchTypeIds__<num_dispatch_args>(tensor_args, guts::make_index_sequence<num_dispatch_args>());
 }
 
-// TODO Test getTensorTypeIds_
+// TODO Test getDispatchTypeIds_
 
 /**
  * If T is a struct with a type field Signature, provides the member constant
@@ -121,6 +121,8 @@ public:
    */
   static constexpr size_t num_tensor_args = guts::typelist::count_if<details::is_tensor_arg, parameter_types>::value;
 
+  static constexpr size_t num_outputs = OpSchemaDef::num_outputs();
+
 private:
   static_assert(details::has_parameter_names_defined<OpSchemaDef>::value, "Operator schema doesn't define parameter_names member.");
   // TODO Allow simpler definition of parameter_names without having to spell out the guts::array type in the schema def.
@@ -165,7 +167,7 @@ class OpDispatchKeySchema<OpSchemaDef, guts::enable_if_t<!has_function_dispatch_
   // TODO Use an ADL-based debugString(DispatchKey) function instead of operator<< for debug printing.
 
 public:
-  using dispatch_key_type = DispatchKey<signature::num_tensor_args>;
+  using dispatch_key_type = DispatchKey<OpSchemaDef::num_dispatch_args()>;
 
   template<class... Args>
   static inline dispatch_key_type dispatch_key(const Args&... args) {
@@ -176,7 +178,7 @@ public:
       map_t<guts::remove_cv_t, map_t<guts::remove_reference_t, typename signature::parameter_types>>
       >::value, "Invalid argument types passed to OpSchema::dispatch_key()");
     return dispatch_key_type {
-      details::getTensorTypeIds_(args...)
+      details::getDispatchTypeIds_<OpSchemaDef::num_dispatch_args()>(args...)
     };
   }
 };

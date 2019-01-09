@@ -264,6 +264,7 @@ endif()
 
 
 if (TORCH_STATIC)
+  target_compile_definitions(torch PUBLIC TORCH_BUILD_STATIC_LIBS)
   add_library(torch STATIC ${TORCH_SRCS})
 else()
   add_library(torch SHARED ${TORCH_SRCS})
