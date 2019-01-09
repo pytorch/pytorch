@@ -298,9 +298,14 @@ bool runFusion(const int64_t key, Stack& stack) {
   auto& spec = *(*maybe_spec);
 
   // Acquires inputs from stack
-  auto inputs = fmap(last(stack, spec.nInputs()), [](const IValue& i) {
-    return i.toTensor();
-  });
+  auto all_inputs = last(stack, spec.nInputs());
+  std::vector<at::Tensor> inputs;
+  inputs.reserve(all_inputs.size());
+  for (auto& i : all_inputs) {
+    if (i.isTensor()) {
+      inputs.emplace_back(i.toTensor());
+    }
+  }
 
   // Determines device to dispatch to. If there's a device mismatch in the
   // inputs, we use the fallback (which should give a nice error message).
@@ -339,6 +344,12 @@ bool runFusion(const int64_t key, Stack& stack) {
   // Launches fusion
   std::vector<at::Tensor> outputs;
   launchFusion(*(*maybe_kernel), device, inputs, outputs);
+
+  for (size_t i = 0; i < outputs.size(); i++) {
+    if (spec.outputGradSumToSizes()[i] != -1) {
+      outputs[i] = at::sum_to(std::move(outputs[i]), all_inputs[spec.outputGradSumToSizes()[i]].toIntList()->elements());
+    }
+  }
 
   // Updates stack
   drop(stack, spec.nInputs());

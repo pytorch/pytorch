@@ -485,7 +485,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        "prim::GradSumToSize(Tensor(a) self, int[] size) -> Tensor(a)",
+        "aten::_grad_sum_to_size(Tensor(a) self, int[] size) -> Tensor(a)",
         [](const Node* node) {
           return [=](Stack& stack) {
             at::Tensor self;

@@ -181,6 +181,16 @@ struct GraphFuser {
     });
   }
 
+  bool containsGradSumToSize(Node* fusion_group) {
+    auto subgraph = &getSubgraph(fusion_group);
+    for (Node* n : subgraph->nodes()) {
+      if (n->kind() == aten::_grad_sum_to_size) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   bool isFusable(Node* node) {
     return isFusableMap(node) || isFusableBatchNorm(node);
   }
@@ -190,7 +200,8 @@ struct GraphFuser {
     // are not necessarily correct.
     if (node->owningBlock() != block_)
       return false;
-    return node->kind() == prim::FusionGroup || isSimpleMap(node);
+    return node->kind() == prim::FusionGroup ||
+        node->kind() == aten::_grad_sum_to_size || isSimpleMap(node);
   }
 
   bool isFusableCatNode(Node* node) {
@@ -352,16 +363,28 @@ struct GraphFuser {
     // group's subgraph that correspond to them
     std::unordered_map<Value*, Value*> inputs_map;
     size_t i = 0;
+    size_t tensor_insert_idx = 0;
     JIT_ASSERT(group->inputs().size() == subgraph.inputs().size());
     for (auto input : group->inputs()) {
       inputs_map[input] = subgraph.inputs()[i++];
+      if (input->type()->isSubtypeOf(DynamicType::get()))
+	tensor_insert_idx = i;
     }
     // add n's inputs to the fusion group's input list if we don't already have
     // them
+    // we insert tensors first because the fuser assumes that to be the case
+    // (as a legacy from tensors only)
     WithInsertPoint guard(*subgraph.nodes().begin());
     for (auto input : n->inputs()) {
       if (inputs_map.count(input) == 0) {
         if (input->type()->isSubtypeOf(DynamicType::get())) {
+          auto in_group = subgraph.insertInput(tensor_insert_idx);
+          in_group->setType(input->type());
+          inputs_map[input] = in_group;
+          group->insertInput(tensor_insert_idx, input);
+	  tensor_insert_idx++;
+	} else if (n->kind() == aten::_grad_sum_to_size &&
+		   input->type()->isSubtypeOf(ListType::ofInts())) {
           auto in_group = subgraph.addInput();
           in_group->setType(input->type());
           inputs_map[input] = in_group;
@@ -920,7 +943,8 @@ struct GraphFuser {
     auto sinputs = subgraph->inputs();
     JIT_ASSERT(inputs.size() == sinputs.size());
     for (size_t i = 0; i < inputs.size(); ++i) {
-      shape_of[sinputs[i]] = graph->insert(aten::size, {inputs[i]});
+      if (inputs[i]->type()->isSubtypeOf(DynamicType::get()))
+        shape_of[sinputs[i]] = graph->insert(aten::size, {inputs[i]});
     }
 
     // When we have a guarantee that an output won't be removed, because it's
@@ -1019,11 +1043,13 @@ struct GraphFuser {
       return false;
     }
     // Fusion groups can be merged with concat's group if and only if
-    // the value they produce isn't already coming from a concat.
+    // - the value they produce isn't already coming from a concat and
+    // - the fusion group does not contain GradSumToSize
     if (producer->node()->kind() == prim::FusionGroup) {
       auto subgraph = producer->node()->g(attr::Subgraph);
       auto* node = subgraph->outputs().at(producer->offset())->node();
-      return node->kind() != prim::FusedConcat;
+      return node->kind() != prim::FusedConcat &&
+          !containsGradSumToSize(producer->node());
     }
     return true;
   }

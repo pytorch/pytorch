@@ -91,7 +91,7 @@ bool isDifferentiable(Node* n) {
       "aten::sinh(Tensor self) -> Tensor",
       "aten::tan(Tensor self) -> Tensor",
       "aten::trunc(Tensor self) -> Tensor",
-      "prim::GradSumToSize(Tensor(a) self, int[] size) -> Tensor(a)",
+      "aten::_grad_sum_to_size(Tensor(a) self, int[] size) -> Tensor(a)",
       "aten::log_softmax(Tensor self, int dim) -> Tensor",
       "aten::avg_pool2d(Tensor self, int[] kernel_size, int[] stride, int[] padding, bool ceil_mode, bool count_include_pad) -> Tensor",
       "aten::max_pool2d_with_indices(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> (Tensor, Tensor)",
@@ -427,7 +427,7 @@ class GradientHelper {
 
     } else if (
         node->matches(
-            "prim::GradSumToSize(Tensor(a) self, int[] size) -> Tensor(a)")) {
+            "aten::_grad_sum_to_size(Tensor(a) self, int[] size) -> Tensor(a)")) {
       Value* self_size;
       {
         WithInsertPoint insert_guard{node};

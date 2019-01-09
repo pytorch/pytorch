@@ -67,6 +67,7 @@ struct TORCH_API KernelSpec {
     nInputs_{_graph->inputs().size()},
     inputBroadcastGroups_{},
     inputChunks_{},
+    outputGradSumToSizes_{},
     has_random_{false},
     kernels_{} {
     
@@ -106,6 +107,10 @@ struct TORCH_API KernelSpec {
     return inputChunks_;
   }
 
+  std::vector<size_t>& outputGradSumToSizes() {
+    return outputGradSumToSizes_;
+  }
+
   bool hasRandom() const {
     return has_random_;
   }
@@ -132,6 +137,7 @@ struct TORCH_API KernelSpec {
   uint64_t nInputs_;
   std::vector<std::vector<int64_t>> inputBroadcastGroups_;
   std::vector<PartitionInfo> inputChunks_;
+  std::vector<size_t> outputGradSumToSizes_;
   bool has_random_;
   mutable std::mutex mutex_;
   mutable std::

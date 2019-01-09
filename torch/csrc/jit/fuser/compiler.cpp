@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/fuser/kernel_cache.h>
 #include <torch/csrc/jit/fuser/tensor_desc.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/type.h>
@@ -68,11 +69,13 @@ static const Node* usedInFusedChunk(const Value* input) {
 static void setInputChunkDescriptors(KernelSpec& spec) {
   spec.inputChunks().reserve((spec.graph())->inputs().size());
   for (const Value* input : (spec.graph())->inputs()) {
-    if (const Node* chunk = usedInFusedChunk(input)) {
-      spec.inputChunks().emplace_back(
-          chunk->i(attr::chunks), chunk->i(attr::dim));
-    } else {
-      spec.inputChunks().emplace_back(1, 0);
+    if (input->type()->isSubtypeOf(DynamicType::get())) {
+      if (const Node* chunk = usedInFusedChunk(input)) {
+        spec.inputChunks().emplace_back(
+            chunk->i(attr::chunks), chunk->i(attr::dim));
+      } else {
+        spec.inputChunks().emplace_back(1, 0);
+      }
     }
   }
 }
@@ -86,7 +89,8 @@ static std::vector<int64_t> getInputDependencies(const Value* output) {
     const Value* val = queue.back();
     queue.pop_back();
     const Node* producer = val->node();
-    if (producer->kind() == prim::Param) {
+    if (producer->kind() == prim::Param &&
+        val->type()->isSubtypeOf(DynamicType::get())) {
       inputs.insert(val);
       continue;
     }
@@ -126,6 +130,86 @@ static void setInputBroadcastGroups(KernelSpec& spec) {
       std::back_inserter(spec.inputBroadcastGroups()));
 }
 
+// This function moves GradSumToSize nodes inside a fusion group to the end of the fusion
+// group.
+// Note that correctness relies on the invariant that GradSumToSize is only applied
+// to gradient nodes created by autodiff. This is important because it ensures that
+// in the mul and div nodes only one argument (in the case of diff the numerator)
+// has a summed value. If two arguments to mul had one, we would be in trouble,
+// but thanks to the chain rule, we're OK.
+void processGradSumToSize(KernelSpec& spec) {  
+  auto graph = spec.graph();
+
+  // keep track of one sumToSize hitting each output
+  auto &outputGradSumToSizes = spec.outputGradSumToSizes();
+  JIT_ASSERT(outputGradSumToSizes.empty());
+  outputGradSumToSizes.resize(graph->outputs().size(), -1);
+
+  static OperatorSet commutes_with_SumToSize{{
+      "aten::mul(Tensor self, Tensor other) -> Tensor",
+      "aten::div(Tensor self, Tensor other) -> Tensor",
+	// for div we might check whether we're the first argument
+      "aten::mul(Tensor self, Scalar other) -> Tensor",
+      "aten::div(Tensor self, Scalar other) -> Tensor",
+      "aten::neg(Tensor self) -> Tensor",
+      "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
+	 // add this used to be prim::AutogradAdd
+  }};
+  // Scan the graph. As we will delete nodes, we use the backward ordering.
+  for (auto it = graph->nodes().rbegin(); it != graph->nodes().rend();) {
+    auto* node = *it;
+    ++it; // We delete the GradSumToSize nodes, so increment the iterator now.
+    if (node->kind() == aten::_grad_sum_to_size) {
+      use_list uses_to_process(node->output()->uses());
+      while (!uses_to_process.empty()) {
+        auto user = uses_to_process[0].user;
+        auto offset = uses_to_process[0].offset;
+        uses_to_process.erase(uses_to_process.begin());
+        if (user->matches(
+                "aten::type_as(Tensor self, Tensor other) -> Tensor")) {
+          // sometimes, a mask or similar is cast to the same
+          // type as the gradient. But we only want to allow that as offset==1
+          // (i.e. the type)
+          JIT_ASSERT(offset == 1);
+          uses_to_process.insert(
+              uses_to_process.end(),
+              user->output()->uses().begin(),
+              user->output()->uses().end());
+        } else if (commutes_with_SumToSize.find(user)) {
+          // these are expressions that might occur during autotdiff operating
+          // on the gradient (matmul would likely be, too but we don't fuse it)
+          // note that for mul, we know (from the chain rule) that only one
+          // factor will be stemming from a calculation involving gradients so
+          // we know that we can move SumToSize across it
+          uses_to_process.insert(
+              uses_to_process.end(),
+              user->output()->uses().begin(),
+              user->output()->uses().end());
+        } else if (user->kind() == aten::_grad_sum_to_size) {
+          // we can just keep the last, so we're done here (this case might not
+          // happen due to how we organize the search and remove nodes...)
+        } else if (user->kind() == prim::Return) {
+          // only if we don't already have a sumToSize for this
+          if (outputGradSumToSizes[offset] == -1) {
+            // note: we make the assumption that the sizes are inputs to the
+            // fusion group (rather than something calculated).
+            outputGradSumToSizes[offset] = node->inputs()[1]->offset();
+          }
+        } else if (user->kind() == prim::FusedConcat) {
+          throw std::runtime_error("don't know how to do fused concat yet");
+        } else {
+          throw std::runtime_error(
+              "unknown node type for fusion SumToSize processing");
+        }
+      }
+      // remove the GradSumToSize node, a new node outside the fusion graph
+      // will be inserted below
+      node->output()->replaceAllUsesWith(node->inputs()[0]);
+      node->destroy();
+    }
+  }
+}
+
 // Performs "upfront" compilation where storage is known but shapes are not.
 // Currently identifies how to expand all tensors so that all intermediate
 // tensors are the same shape, simplifying code generation.
@@ -138,6 +222,7 @@ static void setInputBroadcastGroups(KernelSpec& spec) {
 static void upfrontCompilation(KernelSpec& spec) {
   setInputBroadcastGroups(spec);
   setInputChunkDescriptors(spec);
+  processGradSumToSize(spec);
 }
 
 int64_t registerFusion(const Node* fusion_group) {
@@ -188,16 +273,18 @@ std::shared_ptr<FusedKernel> compileKernel(
   {
     size_t input_index = 0;
     for (const auto& p : graph->inputs()) {
-      if (const Node* chunk = usedInFusedChunk(p)) {
-        int64_t dim = chunk->i(attr::dim);
-        int64_t chunks = chunk->i(attr::chunks);
-        chunk_desc.emplace_back(input_desc[input_index++], chunks, dim);
-        for (const auto* o : chunk->outputs()) {
-          flat_inputs.emplace_back(o, *chunk_desc.back().subTensorDesc());
+      if (p->type()->isSubtypeOf(DynamicType::get())) {
+        if (const Node* chunk = usedInFusedChunk(p)) {
+          int64_t dim = chunk->i(attr::dim);
+          int64_t chunks = chunk->i(attr::chunks);
+          chunk_desc.emplace_back(input_desc[input_index++], chunks, dim);
+          for (const auto* o : chunk->outputs()) {
+            flat_inputs.emplace_back(o, *chunk_desc.back().subTensorDesc());
+          }
+        } else {
+          chunk_desc.emplace_back();
+          flat_inputs.emplace_back(p, input_desc[input_index++]);
         }
-      } else {
-        chunk_desc.emplace_back();
-        flat_inputs.emplace_back(p, input_desc[input_index++]);
       }
     }
   }
