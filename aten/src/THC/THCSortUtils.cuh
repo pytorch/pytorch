@@ -6,17 +6,17 @@
 #include <THC/THCNumerics.cuh>
 
 // Collection of kernel sort routines
-template <typename T>
+template <typename T, bool handleNaN = false>
 struct LTComp {
   __device__ inline bool operator()(const T& a, const T& b) const {
-    return THCNumerics<T>::lt(a, b);
+    return (handleNaN && THCNumerics<T>::isnan(b)) || THCNumerics<T>::lt(a, b);
   }
 };
 
-template <typename T>
+template <typename T, bool handleNaN = false>
 struct GTComp {
   __device__ inline bool operator()(const T& a, const T& b) const {
-    return THCNumerics<T>::gt(a, b);
+    return (handleNaN && THCNumerics<T>::isnan(a)) || THCNumerics<T>::gt(a, b);
   }
 };
 
