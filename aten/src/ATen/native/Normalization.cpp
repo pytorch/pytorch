@@ -36,35 +36,24 @@ static TensorAccessor<scalar_t, 1> conditional_accessor_1d(const Tensor& t) {
   return t.accessor<scalar_t, 1>();
 }
 
-template<typename T>
-struct InvStd {
-  T operator()(T var, double epsilon) const {
-    T invstd = 0;
-    if (var != static_cast<T>(0) || epsilon != static_cast<T>(0)) {
-      invstd = static_cast<T>(1) / std::sqrt(var + epsilon);
-    }
-    return invstd;
-  }
-};
-
-template<typename T>
-struct Var {
-  T operator()(T var, double epsilon) const {
-    return var;
-  }
-};
 
 template<typename scalar_t>
-std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
-    const Tensor& input, const Tensor& weight, const Tensor& bias,
-    const Tensor& save_mean /* optional */, const Tensor& save_invstd /* optional */,
-    const Tensor& running_mean /* optional */, const Tensor& running_var /* optional */,
-    bool train, double eps) {
+std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_template(const Tensor& input, const Tensor& weight, const Tensor& bias,
+                               const Tensor& running_mean, const Tensor& running_var, bool train, double momentum, double eps) {
 
+  using accscalar_t = at::acc_type<scalar_t, false>;
   Tensor output = at::empty_like(input);
 
   int64_t n_input = input.size(1);
+  int64_t n = input.numel() / n_input;
 
+  Tensor save_mean;
+  Tensor save_invstd;
+  const int64_t zero = 0;
+  if (train) {
+    save_mean = at::empty({n_input}, input.options());
+    save_invstd = at::empty({n_input}, input.options());
+  }
   auto save_mean_a = conditional_accessor_1d<scalar_t>(save_mean);
   auto save_invstd_a = conditional_accessor_1d<scalar_t>(save_invstd);
 
@@ -72,79 +61,58 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
   auto running_var_a = conditional_accessor_1d<scalar_t>(running_var);
 
   parallel_for(0, n_input, 1, [&](int64_t b_begin, int64_t b_end) {
-    for (int64_t f = b_begin; f < b_end; ++f) {
-      Tensor in = input.select(1, f);
-      Tensor out = output.select(1, f);
+      for (int64_t f = b_begin; f < b_end; ++f) {
+        Tensor in = input.select(1, f);
+        Tensor out = output.select(1, f);
 
-      scalar_t mean, invstd;
-      if (train) {
-        mean = save_mean_a[f];
-        invstd = save_invstd_a[f];
-      } else {
-        mean = running_mean_a[f];
-        invstd = 1 / std::sqrt(running_var_a[f] + eps);
+        scalar_t mean, invstd;
+
+        if (train) {
+          // compute mean per input
+          accscalar_t sum = 0;
+          CPU_tensor_apply1<scalar_t>(in, [&] (const scalar_t& i) {
+              sum += i;
+            });
+
+          mean = (scalar_t) (sum / n);
+          save_mean_a[f] = mean;
+
+          // compute variance per input
+          sum = 0;
+          CPU_tensor_apply1<scalar_t>(in, [&] (const scalar_t& i) {
+              sum += (i - mean) * (i - mean);
+            });
+
+          if (sum == 0 && eps == 0.0) {
+            invstd = 0;
+          } else {
+            invstd = (scalar_t) (1 / std::sqrt(sum/n + eps));
+          }
+          save_invstd_a[f] = invstd;
+
+          // update running averages
+          if (running_mean.defined()) {
+            running_mean_a[f] = momentum * mean + (1 - momentum) * running_mean_a[f];
+          }
+          if (running_var.defined()) {
+            accscalar_t unbiased_var = sum / (n - 1);
+            running_var_a[f] = momentum * unbiased_var + (1 - momentum) * running_var_a[f];
+          }
+        } else {
+          mean = running_mean_a[f];
+          invstd = 1 / std::sqrt(running_var_a[f] + eps);
+        }
+
+        // compute output
+        scalar_t w = weight.defined() ? weight.data<scalar_t>()[f * weight.stride(0)] : 1;
+        scalar_t b = bias.defined() ? bias.data<scalar_t>()[f * bias.stride(0)] : 0;
+
+        CPU_tensor_apply2<scalar_t,scalar_t>(out, in, [&](scalar_t& o, const scalar_t& i) {
+            o = ((i - mean) * invstd) * w + b;
+          });
       }
-
-      // compute output
-      scalar_t w = weight.defined() ? weight.data<scalar_t>()[f * weight.stride(0)] : 1;
-      scalar_t b = bias.defined() ? bias.data<scalar_t>()[f * bias.stride(0)] : 0;
-
-      CPU_tensor_apply2<scalar_t,scalar_t>(out, in, [&](scalar_t& o, const scalar_t& i) {
-        o = ((i - mean) * invstd) * w + b;
-      });
-    }
-  });
+    });
   return std::make_tuple(output, save_mean, save_invstd);
-}
-
-template<typename scalar_t, template<typename T> class VarTransform>
-std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
-    const Tensor& input, const Tensor& running_mean, const Tensor& running_var,
-    double momentum, double eps) {
-
-  using accscalar_t = at::acc_type<scalar_t, false>;
-
-  int64_t n_input = input.size(1);
-  int64_t n = input.numel() / n_input;
-
-  Tensor save_mean = at::empty({n_input}, input.options());
-  Tensor save_var_transform = at::empty({n_input}, input.options());
-  auto save_mean_a = save_mean.accessor<scalar_t, 1>();
-  auto save_var_transform_a = save_var_transform.accessor<scalar_t, 1>();
-
-  auto running_mean_a = conditional_accessor_1d<scalar_t>(running_mean);
-  auto running_var_a = conditional_accessor_1d<scalar_t>(running_var);
-
-  parallel_for(0, n_input, 1, [&](int64_t b_begin, int64_t b_end) {
-    for (int64_t f = b_begin; f < b_end; ++f) {
-      Tensor in = input.select(1, f);
-
-      // compute mean per input
-      accscalar_t sum = 0;
-      CPU_tensor_apply1<scalar_t>(in, [&] (const scalar_t& i) {
-          sum += i;
-        });
-      scalar_t mean = sum / n;
-      save_mean_a[f] = mean;
-
-      // compute variance per input
-      accscalar_t var_sum = 0;
-      CPU_tensor_apply1<scalar_t>(in, [&] (const scalar_t& i) {
-        var_sum += (i - mean) * (i - mean);
-      });
-      save_var_transform_a[f] = VarTransform<accscalar_t>{}(var_sum / n, eps);
-
-      // update running averages
-      if (running_mean.defined()) {
-        running_mean_a[f] = momentum * mean + (1 - momentum) * running_mean_a[f];
-      }
-      if (running_var.defined()) {
-        accscalar_t unbiased_var = var_sum / (n - 1);
-        running_var_a[f] = momentum * unbiased_var + (1 - momentum) * running_var_a[f];
-      }
-    }
-  });
-  return std::make_tuple(save_mean, save_var_transform);
 }
 
 
@@ -451,23 +419,11 @@ Tensor group_norm(const Tensor& input, int64_t num_groups,
     }
 }
 
-std::tuple<Tensor, Tensor> batch_norm_update_stats_cpu(
-        const Tensor& self, const Tensor& running_mean, const Tensor& running_var, double momentum) {
-  return AT_DISPATCH_FLOATING_TYPES(self.type(), "batch_norm_update_stats", [&] {
-      return batch_norm_cpu_update_stats_template<scalar_t, Var>(self, running_mean, running_var, momentum, 0);
-    });
-}
-
 std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const Tensor& weight, const Tensor& bias,
                                                   const Tensor& running_mean, const Tensor& running_var,
                                                   bool train, double momentum, double eps) {
   return AT_DISPATCH_FLOATING_TYPES(self.type(), "batch_norm", [&] {
-      if (!train) {
-        return batch_norm_cpu_transform_input_template<scalar_t>(self, weight, bias, {}, {}, running_mean, running_var, train, eps);
-      } else {
-        auto save_stats = batch_norm_cpu_update_stats_template<scalar_t, InvStd>(self, running_mean, running_var, momentum, eps);
-        return batch_norm_cpu_transform_input_template<scalar_t>(self, weight, bias, std::get<0>(save_stats), std::get<1>(save_stats), running_mean, running_var, train, eps);
-      }
+      return batch_norm_cpu_template<scalar_t>(self, weight, bias, running_mean, running_var, train, momentum, eps);
     });
 }
 
