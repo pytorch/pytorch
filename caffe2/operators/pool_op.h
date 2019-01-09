@@ -44,11 +44,11 @@ class PoolOp final : public ConvPoolOpBase<Context> {
     ConvPoolOpBase<Context>::SetOutputSize(X, Y, C);
     const T* X_data = X.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
-    if (global_pooling_) {
-      const int HxW = X.numel() / (N * C);
-      return functor_.template GlobalPoolingForward<T, StorageOrder::NCHW>(
-          N, C, HxW, X_data, Y_data, &context_);
-    }
+    //if (global_pooling_) {
+    //  const int HxW = X.numel() / (N * C);
+    //  return functor_.template GlobalPoolingForward<T, StorageOrder::NCHW>(
+    //      N, C, HxW, X_data, Y_data, &context_);
+    //}
     const int image_ndim = ndim - 2;
     switch (image_ndim) {
       case 1: {
@@ -109,11 +109,11 @@ class PoolOp final : public ConvPoolOpBase<Context> {
     ConvPoolOpBase<Context>::SetOutputSize(X, Y, C);
     const T* X_data = X.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
-    if (global_pooling_) {
-      const int HxW = X.numel() / (N * C);
-      return functor_.template GlobalPoolingForward<T, StorageOrder::NHWC>(
-          N, C, HxW, X_data, Y_data, &context_);
-    }
+    //if (global_pooling_) {
+    //  const int HxW = X.numel() / (N * C);
+    //  return functor_.template GlobalPoolingForward<T, StorageOrder::NHWC>(
+    //      N, C, HxW, X_data, Y_data, &context_);
+    //}
     const int image_ndim = ndim - 2;
     switch (image_ndim) {
       case 1: {
