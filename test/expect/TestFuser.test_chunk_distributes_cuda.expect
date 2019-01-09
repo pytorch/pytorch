@@ -12,8 +12,7 @@ with prim::FusionGroup_0 = graph(%0 : Tensor
   %4 : Float(*, *), %5 : Float(*, *) = prim::ConstantChunk[chunks=2, dim=1](%0)
   %6 : int = prim::Constant[value=1]()
   %7 : Float(*, *) = aten::add(%2, %4, %6)
-  %8 : int = prim::Constant[value=1]()
-  %9 : Float(*, *) = aten::add(%3, %5, %8)
-  %10 : Float(*, *) = aten::mul(%7, %9)
-  return (%10);
+  %8 : Float(*, *) = aten::add(%3, %5, %6)
+  %9 : Float(*, *) = aten::mul(%7, %8)
+  return (%9);
 }

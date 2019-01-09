@@ -917,6 +917,10 @@
 - func: isclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8, bool equal_nan=False) -> Tensor
   variants: function, method
 
+- func: isnan(Tensor self) -> Tensor
+  variants: function
+  device_guard: false
+
 - func: is_distributed(Tensor self) -> bool
   variants: function, method
   device_guard: false

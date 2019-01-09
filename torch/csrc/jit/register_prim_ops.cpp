@@ -72,6 +72,20 @@ Operation listConstruct(int64_t num_inputs) {
   };
 }
 
+static int64_t floordiv(int64_t a, int64_t b) {
+  if (b == 0) {
+    throw std::runtime_error("division by 0");
+  }
+  if ((a > 0) == (b > 0)) {
+    // simple case, both have same sign
+    return a / b;
+  } else {
+    // in python division rounds down, it doesnt not truncate like in c++
+    auto r = lldiv(a,  b);
+    return (r.rem) ? r.quot - 1 : r.quot;
+  }
+}
+
 RegisterOperators reg({
     Operator(
         prim::FusionGroup,
@@ -1182,12 +1196,9 @@ RegisterOperators reg2({
         float),
     DEFINE_INT_FLOAT_OP(aten::remainder, fmod((b + fmod(a, b)), b), float),
 
-    // in c++ int division rounds to the integer closer to 0, in python floordiv
-    // rounds to lower integer
     DEFINE_GENERIC_OP(
         aten::floordiv,
-        static_cast<int64_t>(
-            std::floor(static_cast<double>(a) / static_cast<double>(b))),
+        floordiv(a, b),
         std::floor(a / b),
         int,
         float),

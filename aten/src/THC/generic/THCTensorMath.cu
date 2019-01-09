@@ -280,12 +280,12 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
   strided_range<Iter> strided_tensor(tensor_data,
                                      tensor_data+N*num_dim, num_dim);
 
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
   cudaStream_t stream = THCState_getCurrentStream(state);
 #endif
 
   strided_range<Iter>::iterator dend = thrust::copy_if(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(stream),
 #endif
     idxfirst,
@@ -302,7 +302,7 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
     strided_range<Iter> stride_dim(tensor_data+dim,
                                    tensor_data+N*num_dim, num_dim);
     thrust::transform(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(stream),
 #endif
       strided_tensor.begin(),

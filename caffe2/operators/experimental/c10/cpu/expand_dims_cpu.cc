@@ -1,6 +1,7 @@
 #include <c10/core/dispatch/KernelRegistration.h>
 #include "caffe2/operators/experimental/c10/schemas/expand_dims.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/core/tensor.h"
 
 using caffe2::BaseContext;
 using caffe2::Tensor;
@@ -9,11 +10,14 @@ namespace caffe2 {
 namespace {
 template <class DataType>
 void expand_dims_op_cpu_impl(
-    const Tensor& input,
-    Tensor* output,
+    const C10Tensor& input_,
+    const C10Tensor& output_,
     const std::vector<int>& dims,
     caffe2::ops::ExpandDims::State* state,
     BaseContext* context) {
+  Tensor input(input_);
+  Tensor output(output_);
+
   if (!state->initialized) {
     state->dims = dims;
     auto originalSize = state->dims.size();
@@ -29,7 +33,7 @@ void expand_dims_op_cpu_impl(
     state->initialized = true;
   }
 
-  output->CopyFrom(input, context);
+  output.CopyFrom(input, context);
   if (state->dims.empty()) {
     return;
   }
@@ -44,7 +48,7 @@ void expand_dims_op_cpu_impl(
   for (const auto dim : state->dims) {
     newDims.insert(newDims.begin() + dim, 1);
   }
-  output->Reshape(newDims);
+  output.Reshape(newDims);
 }
 } // namespace
 } // namespace caffe2

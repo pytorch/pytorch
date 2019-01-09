@@ -130,30 +130,29 @@ static void setInputBroadcastGroups(KernelSpec& spec) {
       std::back_inserter(spec.inputBroadcastGroups()));
 }
 
-// This function moves GradSumToSize nodes inside a fusion group to the end of the fusion
-// group.
-// Note that correctness relies on the invariant that GradSumToSize is only applied
-// to gradient nodes created by autodiff. This is important because it ensures that
-// in the mul and div nodes only one argument (in the case of diff the numerator)
-// has a summed value. If two arguments to mul had one, we would be in trouble,
-// but thanks to the chain rule, we're OK.
-void processGradSumToSize(KernelSpec& spec) {  
+// This function moves GradSumToSize nodes inside a fusion group to the end of
+// the fusion group. Note that correctness relies on the invariant that
+// GradSumToSize is only applied to gradient nodes created by autodiff. This is
+// important because it ensures that in the mul and div nodes only one argument
+// (in the case of diff the numerator) has a summed value. If two arguments to
+// mul had one, we would be in trouble, but thanks to the chain rule, we're OK.
+void processGradSumToSize(KernelSpec& spec) {
   auto graph = spec.graph();
 
   // keep track of one sumToSize hitting each output
-  auto &outputGradSumToSizes = spec.outputGradSumToSizes();
+  auto& outputGradSumToSizes = spec.outputGradSumToSizes();
   JIT_ASSERT(outputGradSumToSizes.empty());
   outputGradSumToSizes.resize(graph->outputs().size(), -1);
 
   static OperatorSet commutes_with_SumToSize{{
       "aten::mul(Tensor self, Tensor other) -> Tensor",
       "aten::div(Tensor self, Tensor other) -> Tensor",
-	// for div we might check whether we're the first argument
+      // for div we might check whether we're the first argument
       "aten::mul(Tensor self, Scalar other) -> Tensor",
       "aten::div(Tensor self, Scalar other) -> Tensor",
       "aten::neg(Tensor self) -> Tensor",
       "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
-	 // add this used to be prim::AutogradAdd
+      // add this used to be prim::AutogradAdd
   }};
   // Scan the graph. As we will delete nodes, we use the backward ordering.
   for (auto it = graph->nodes().rbegin(); it != graph->nodes().rend();) {
@@ -319,7 +318,8 @@ std::shared_ptr<FusedKernel> compileKernel(
 
   const std::string name = "kernel_" + std::to_string(next_kernel_id++);
   const bool use_cuda = device.is_cuda();
-  std::string code = generateKernel(name, *graph, flat_inputs, flat_outputs, use_cuda);
+  std::string code =
+      generateKernel(name, *graph, flat_inputs, flat_outputs, use_cuda);
   std::shared_ptr<FusedKernel> fused_kernel;
   if (use_cuda) {
 #if USE_CUDA_FUSER

@@ -116,6 +116,7 @@ namespace c10 {
   _(onnx, Less)                    \
   _(onnx, Not)                     \
   _(onnx, ATen)                    \
+  _(onnx, Split)                   \
   FORALL_ATTR_BASE_SYMBOLS(_)      \
   _(attr, Subgraph)                \
   _(attr, ReverseSubgraph)         \
@@ -141,7 +142,8 @@ namespace c10 {
   _(attr, a)                       \
   _(attr, b)                       \
   _(attr, beg)                     \
-  _(attr, idx)
+  _(attr, idx)                     \
+  _(attr, split)
 #else
 #define FORALL_NS_SYMBOLS(_) \
   _(namespaces, prim)              \
