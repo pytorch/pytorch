@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
+#include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/script/compiler.h>
@@ -1039,7 +1040,6 @@ struct GraphFuser {
                           ->i_(attr::dim, dim);
     fused_cat->insertBefore(list_construct);
     fused_cat->output()->copyMetadata(node->output());
-    node->output()->replaceAllUsesWith(fused_cat->output());
 
     // NB: this deletes the fused_cat node from the original graph
     return createSingletonFusionGroup(fused_cat);
@@ -1054,18 +1054,17 @@ struct GraphFuser {
       }
       Node* list_construct = cat->namedInput(attr::tensors)->node();
       Node* fused_cat = createFusedConcat(cat);
-      it.destroyCurrent();
-      if (list_construct->output()->uses().empty()) {
-        list_construct->destroy();
-      }
+      Value* fused_cat_out = fused_cat->output();
 
       auto sorted_inputs = sortReverseTopological(fused_cat->inputs());
       size_t input_idx = 0;
+      bool any_fused = false;
       while (input_idx < sorted_inputs.size()) {
         Value* input = sorted_inputs[input_idx++];
         if (!canFuseWithConcat(input, fused_cat)) {
           continue;
         }
+        any_fused = true;
         auto maybe_group = tryFuse(fused_cat, input);
         JIT_ASSERT(maybe_group && maybe_group == fused_cat);
         // We could have destroyed multiple inputs when performing this fusion,
@@ -1073,6 +1072,28 @@ struct GraphFuser {
         sorted_inputs = sortReverseTopological(fused_cat->inputs());
         input_idx = 0;
       }
+
+      if (any_fused) {
+        cat->output()->replaceAllUsesWith(fused_cat_out);
+        it.destroyCurrent();
+        if (list_construct->output()->uses().empty()) {
+          list_construct->destroy();
+        }
+      } else {
+        fused_cat->destroy();
+      }
+    }
+  }
+
+  void optimizeFusedGraphs() {
+    for (Node* node : block_->nodes()) {
+      if (node->kind() != prim::FusionGroup) {
+        continue;
+      }
+      auto subgraph = node->g(attr::Subgraph);
+      EliminateDeadCode(subgraph);
+      EliminateCommonSubexpression(subgraph);
+      ConstantPooling(subgraph);
     }
   }
 
@@ -1106,6 +1127,8 @@ struct GraphFuser {
     refreshAliasDb();
 
     fuseConcats();
+
+    optimizeFusedGraphs();
 
     // The graph fuser can add intermediate prim::BroadcastingChunk nodes.
     // Replace them with broadcasts + chunks.
