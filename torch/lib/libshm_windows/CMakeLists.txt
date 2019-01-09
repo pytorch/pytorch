@@ -1,5 +1,5 @@
 IF(NOT LIBSHM_INSTALL_LIB_SUBDIR)
-  SET(LIBSHM_INSTALL_BIN_SUBDIR "lib" CACHE PATH "libshm install binary directory")
+  SET(LIBSHM_INSTALL_BIN_SUBDIR "bin" CACHE PATH "libshm install binary directory")
   SET(LIBSHM_INSTALL_LIB_SUBDIR "lib" CACHE PATH "libshm install library directory")
 ENDIF()
 

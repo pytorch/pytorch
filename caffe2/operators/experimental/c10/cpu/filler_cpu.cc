@@ -1,6 +1,7 @@
 #include <c10/core/dispatch/KernelRegistration.h>
 #include "caffe2/operators/experimental/c10/schemas/filler.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/core/tensor.h"
 
 using caffe2::CPUContext;
 using caffe2::Tensor;
@@ -10,16 +11,17 @@ using std::vector;
 namespace caffe2 {
 namespace {
 void filler_init(
-    at::ArrayRef<const Tensor*> inputs,
-    Tensor* output,
+    at::ArrayRef<C10Tensor> inputs,
+    const C10Tensor& output_,
     const std::vector<int64_t>& shape,
     const std::vector<int>& extra_shape,
     bool input_as_shape) {
+  Tensor output(output_);
   if (inputs.size()) {
     auto real_shape = vector<int64_t>{};
     if (input_as_shape) {
       // Shape input must be in CPU context
-      auto& input = *inputs[0];
+      Tensor input(inputs[0]);
       CAFFE_ENFORCE_EQ(
           input.dim(),
           1,
@@ -29,75 +31,80 @@ void filler_init(
       real_shape.insert(
           real_shape.end(), shape_data, shape_data + input.dim32(0));
     } else {
-      auto& input = *inputs[0];
+      Tensor input(inputs[0]);
       real_shape.insert(
           real_shape.end(), input.sizes().begin(), input.sizes().end());
     }
     real_shape.insert(real_shape.end(), extra_shape.begin(), extra_shape.end());
-    output->Resize(real_shape);
+    output.Resize(real_shape);
   } else {
-    output->Resize(shape);
+    output.Resize(shape);
   }
 }
 
 template <class Type, class Context>
 void given_tensor_fill_op_cpu_impl(
-    at::ArrayRef<const Tensor*> inputs,
-    Tensor* output,
+    at::ArrayRef<C10Tensor> inputs,
+    const C10Tensor& output_,
     const std::vector<int64_t>& shape,
     const std::vector<int>& extra_shape,
     bool input_as_shape,
-    const Tensor& values,
+    const C10Tensor& values_,
     BaseContext* context) {
-  filler_init(inputs, output, shape, extra_shape, input_as_shape);
+  Tensor output(output_);
+  Tensor values(values_);
+
+  filler_init(inputs, output_, shape, extra_shape, input_as_shape);
 
   // TODO T might not be the correct type to call, since float allows others.
 
-  DCHECK_EQ(output->numel(), values.numel())
-      << "output size: " << output->numel()
+  DCHECK_EQ(output.numel(), values.numel())
+      << "output size: " << output.numel()
       << " given size: " << values.numel();
-  auto* data = output->template mutable_data<Type>();
+  auto* data = output.template mutable_data<Type>();
   const Type* values_data = values.template data<Type>();
-  if (output->numel()) {
-    context->CopySameDevice(output->numel(), values_data, data);
+  if (output.numel()) {
+    context->CopySameDevice(output.numel(), values_data, data);
   }
 }
 
 void constant_fill_op_cpu_impl(
-    at::ArrayRef<const Tensor*> inputs,
-    Tensor* output,
+    at::ArrayRef<C10Tensor> inputs,
+    const C10Tensor& output_,
     const std::vector<int64_t>& shape,
     const std::vector<int>& extra_shape,
     bool input_as_shape,
     int dtype,
     caffe2::ops::ConstantFill::Value value,
     BaseContext* context) {
-  filler_init(inputs, output, shape, extra_shape, input_as_shape);
+  Tensor output(output_);
 
-  if (output->numel()) {
+  filler_init(inputs, output_, shape, extra_shape, input_as_shape);
+
+  if (output.numel()) {
     if (dtype == caffe2::TensorProto_DataType_FLOAT) {
       caffe2::math::Set<float, CPUContext>(
-          output->numel(),
+          output.numel(),
           value.as_float,
-          output->template mutable_data<float>(),
+          output.template mutable_data<float>(),
           static_cast<CPUContext*>(context));
     } else if (dtype == caffe2::TensorProto_DataType_INT32) {
       caffe2::math::Set<int32_t, CPUContext>(
-          output->numel(),
+          output.numel(),
           value.as_int32,
-          output->template mutable_data<int32_t>(),
+          output.template mutable_data<int32_t>(),
           static_cast<CPUContext*>(context));
     } else if (dtype == caffe2::TensorProto_DataType_INT64) {
       caffe2::math::Set<int64_t, CPUContext>(
-          output->numel(),
+          output.numel(),
           value.as_int64,
-          output->template mutable_data<int64_t>(),
+          output.template mutable_data<int64_t>(),
           static_cast<CPUContext*>(context));
     } else if (dtype == caffe2::TensorProto_DataType_BOOL) {
       caffe2::math::Set<bool, CPUContext>(
-          output->numel(),
+          output.numel(),
           value.as_bool,
-          output->template mutable_data<bool>(),
+          output.template mutable_data<bool>(),
           static_cast<CPUContext*>(context));
     } else {
       throw std::logic_error(
@@ -108,34 +115,36 @@ void constant_fill_op_cpu_impl(
 }
 
 void uniform_fill_op_cpu_impl(
-    at::ArrayRef<const Tensor*> inputs,
-    Tensor* output,
+    at::ArrayRef<C10Tensor> inputs,
+    const C10Tensor& output_,
     const std::vector<int64_t>& shape,
     const std::vector<int>& extra_shape,
     bool input_as_shape,
     float min,
     float max,
     BaseContext* context) {
-  filler_init(inputs, output, shape, extra_shape, input_as_shape);
+  Tensor output(output_);
+
+  filler_init(inputs, output_, shape, extra_shape, input_as_shape);
 
   if (inputs.size() == 3) {
-    CAFFE_ENFORCE_EQ(1, inputs[1]->numel(), "min blob must be scalar");
-    CAFFE_ENFORCE_EQ(1, inputs[2]->numel(), "max blob must be scalar");
-    min = *inputs[1]->template data<float>();
-    max = *inputs[2]->template data<float>();
+    CAFFE_ENFORCE_EQ(1, Tensor(inputs[1]).numel(), "min blob must be scalar");
+    CAFFE_ENFORCE_EQ(1, Tensor(inputs[2]).numel(), "max blob must be scalar");
+    min = *Tensor(inputs[1]).template data<float>();
+    max = *Tensor(inputs[2]).template data<float>();
     if (min > max) {
-      auto shape = output->sizes().vec();
+      auto shape = output.sizes().vec();
       shape[0] = 0;
-      output->Resize(shape);
-      output->template mutable_data<float>();
+      output.Resize(shape);
+      output.template mutable_data<float>();
       return;
     }
   }
   caffe2::math::RandUniform<float, CPUContext>(
-      output->numel(),
+      output.numel(),
       min,
       max,
-      output->template mutable_data<float>(),
+      output.template mutable_data<float>(),
       static_cast<CPUContext*>(context));
 }
 } // namespace
