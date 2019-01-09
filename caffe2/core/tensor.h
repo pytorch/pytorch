@@ -4,7 +4,7 @@
 #include "caffe2/core/storage.h"
 #include "caffe2/core/tensor_impl.h"
 
-#include <c10/core/UndefinedTensorImpl.h>
+#include <ATen/core/UndefinedTensorImpl.h>
 #include <c10/util/intrusive_ptr.h>
 #include "ATen/core/Tensor.h"
 #include <c10/core/TensorOptions.h>
