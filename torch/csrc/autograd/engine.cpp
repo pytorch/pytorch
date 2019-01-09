@@ -216,7 +216,7 @@ auto Engine::thread_init(int device) -> void {
     at::OptionalDeviceGuard guard;
     if (at::hasCUDA()) {
       guard.reset_device(at::Device(at::DeviceType::CUDA, device));
-    } else if (at::hasHIP()){
+    } else if (at::hasHIP()) {
       guard.reset_device(at::Device(at::DeviceType::HIP, device));
     }
   }
