@@ -831,6 +831,7 @@ def multimarginloss_weights_no_reduce_test():
         check_gradgrad=False,
         pickle=False)
 
+
 def fractional_max_pool2d_test(test_case):
     random_samples = torch.DoubleTensor(1, 3, 2).uniform_()
     if test_case == 'ratio':
