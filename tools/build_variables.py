@@ -97,6 +97,7 @@ torch_sources_no_python_default = [
     "torch/csrc/jit/script/lexer.cpp",
     "torch/csrc/jit/script/module.cpp",
     "torch/csrc/jit/tracer.cpp",
+    "torch/csrc/jit/c10_ops/layer_norm.cpp",
     "torch/csrc/utils/tensor_flatten.cpp",
     "torch/csrc/utils/variadic.cpp",
 ]
