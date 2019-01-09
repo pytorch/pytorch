@@ -1237,7 +1237,6 @@ jobs:
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda8.0-cudnn7-ubuntu16.04:238"
       CUDA_VERSION: "8"
       BUILD_ENVIRONMENT: "py2-cuda8.0-cudnn7-ubuntu16.04"
-      BUILD_ONLY: "1"
     <<: *caffe2_linux_build_defaults
 
   caffe2_py2_cuda8_0_cudnn7_ubuntu16_04_test:
