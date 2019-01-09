@@ -4580,6 +4580,7 @@ class TestNN(NNTestCase):
                     self.assertEqual(len(w), 1)
                     self.assertIn('weights are not part of single contiguous chunk of memory', w[0].message.args[0])
                     first_warn = False
+                    warnings.resetwarnings()
                 output_noncontig[0].sum().backward()
                 grads_noncontig = [v.grad.data.clone() for v in all_vars]
                 for v in all_vars:
@@ -4977,6 +4978,28 @@ class TestNN(NNTestCase):
     @skipIfRocm
     def test_RNN_cpu_vs_cudnn_no_dropout(self):
         self._test_RNN_cpu_vs_cudnn(0)
+
+    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
+    @skipIfRocm
+    def test_RNN_cudnn_weight_norm(self):
+        input_size = 10
+        hidden_size = 6
+        num_layers = 2
+        seq_length = 7
+        batch = 6
+        m = nn.LSTM(input_size, hidden_size, num_layers).cuda()
+        input = torch.randn(seq_length, batch, input_size).cuda()
+        expected_output = m(input)
+        # add weight normalization
+        name = 'weight_hh_l0'
+        m = torch.nn.utils.weight_norm(m, name=name)
+        # otherwise, subsequent warnings will be hidden, and further tests rely on them
+        warnings.simplefilter("always")
+        self.assertEqual(m(input), expected_output)
+
+        # remove weight norm
+        m = torch.nn.utils.remove_weight_norm(m, name=name)
+        self.assertEqual(m(input), expected_output)
 
     @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1")
     @default_tensor_type(torch.FloatTensor)  # FIXME: just until torch.cuda.DoubleTensor.sum() implemented

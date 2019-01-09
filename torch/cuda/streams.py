@@ -2,6 +2,7 @@ import ctypes
 import torch
 from . import cudart, check_error, cudaStatus
 from ._utils import _get_device_index
+from torch._C import _add_docstr
 
 
 class Stream(torch._C._CudaStreamBase):
@@ -73,15 +74,8 @@ class Stream(torch._C._CudaStreamBase):
         r"""Checks if all the work submitted has been completed.
 
         Returns:
-            A boolean indicating if all kernels in this stream are completed.
-        """
-        with torch.cuda.device(self.device):
-            res = cudart().cudaStreamQuery(self)
-            if res == cudaStatus.ERROR_NOT_READY:
-                return False
-            check_error(res)
-            return True
-        return False
+            A boolean indicating if all kernels in this stream are completed."""
+        return super(Stream, self).query()
 
     def synchronize(self):
         r"""Wait for all the kernels in this stream to complete.
