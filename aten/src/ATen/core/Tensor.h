@@ -11,6 +11,7 @@
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
+#include <c10/core/Tensor.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 
 namespace c10{
@@ -56,6 +57,17 @@ public:
 
   Tensor(const Tensor&) = default;
   Tensor(Tensor&&) = default;
+
+  explicit Tensor(C10Tensor tensor)
+      : impl_(std::move(tensor).impl()) {}
+
+  explicit operator C10Tensor() const & {
+    return C10Tensor(impl_);
+  }
+
+  explicit operator C10Tensor() && {
+    return C10Tensor(std::move(impl_));
+  }
 
   int64_t dim() const {
     return impl_->dim();
