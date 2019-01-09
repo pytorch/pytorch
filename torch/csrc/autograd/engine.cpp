@@ -212,11 +212,12 @@ auto Engine::thread_init(int device) -> void {
   // have lazy stubs for CUDA functionality (so actually
   // attempting to setup a guard(-1) will cause an
   // error, because it will still query cudaGetDevice).
-  if (device != -1 && (at::hasCUDA() || at::hasHIP())) {
-    at::OptionalDeviceGuard guard;
+  at::OptionalDeviceGuard guard;
+  if (device != -1) {
     if (at::hasCUDA()) {
       guard.reset_device(at::Device(at::DeviceType::CUDA, device));
-    } else if (at::hasHIP()) {
+    }
+    if (at::hasHIP()) {
       guard.reset_device(at::Device(at::DeviceType::HIP, device));
     }
   }
