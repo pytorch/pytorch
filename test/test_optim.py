@@ -905,8 +905,7 @@ class TestLRScheduler(TestCase):
         epochs = 10
         self.opt.param_groups[0]['lr'] = 0.05
         self.opt.param_groups[1]['lr'] = 0.4
-        targets = [[0.05 * (0.9 ** x) for x in range(epochs)], [0.4 * (0.8 ** x)
-                                                                for x in range(epochs)]]
+        targets = [[0.05 * (0.9 ** x) for x in range(epochs)], [0.4 * (0.8 ** x) for x in range(epochs)]]
         scheduler = LambdaLR(self.opt,
                              lr_lambda=[lambda x1: 0.9 ** x1, lambda x2: 0.8 ** x2])
         self._test(scheduler, targets, epochs)
