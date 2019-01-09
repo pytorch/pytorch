@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 from torch._six import inf
+from torch._C import _add_docstr
 from operator import mul
 from functools import reduce
 from itertools import product
@@ -373,23 +374,20 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
     return torch._C._VariableFunctions.stft(input, n_fft, hop_length, win_length, window, normalized, onesided)
 
 
-def isnan(tensor):
-    r"""Returns a new tensor with boolean elements representing if each element is `NaN` or not.
+isnan = _add_docstr(torch.isnan, r"""
+Returns a new tensor with boolean elements representing if each element is `NaN` or not.
 
-    Arguments:
-        tensor (Tensor): A tensor to check
+Arguments:
+    tensor (Tensor): A tensor to check
 
-    Returns:
-        Tensor: A ``torch.ByteTensor`` containing a 1 at each location of `NaN` elements.
+Returns:
+    Tensor: A ``torch.ByteTensor`` containing a 1 at each location of `NaN` elements.
 
-    Example::
+Example::
 
-        >>> torch.isnan(torch.tensor([1, float('nan'), 2]))
-        tensor([ 0,  1,  0], dtype=torch.uint8)
-    """
-    if not isinstance(tensor, torch.Tensor):
-        raise ValueError("The argument is not a tensor", str(tensor))
-    return tensor != tensor
+    >>> torch.isnan(torch.tensor([1, float('nan'), 2]))
+    tensor([ 0,  1,  0], dtype=torch.uint8)
+""")
 
 
 def unique(input, sorted=True, return_inverse=False, dim=None):

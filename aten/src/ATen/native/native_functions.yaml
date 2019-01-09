@@ -917,6 +917,10 @@
 - func: isclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8, bool equal_nan=False) -> Tensor
   variants: function, method
 
+- func: isnan(Tensor self) -> Tensor
+  variants: function
+  device_guard: false
+
 - func: is_distributed(Tensor self) -> bool
   variants: function, method
   device_guard: false
@@ -1242,6 +1246,11 @@
   dispatch:
     CPU: batch_norm_backward_cpu
     CUDA: batch_norm_backward_cuda
+
+- func: batch_norm_update_stats(Tensor input, Tensor? running_mean, Tensor? running_var, double momentum) -> (Tensor, Tensor)
+  dispatch:
+    CPU: batch_norm_update_stats_cpu
+    CUDA: batch_norm_update_stats_cuda
 
 - func: ones(IntList size, TensorOptions options={}) -> Tensor
 

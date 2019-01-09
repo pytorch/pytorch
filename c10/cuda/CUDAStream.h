@@ -5,7 +5,9 @@
 
 #include <cuda_runtime_api.h>
 
+#include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAMacros.h>
+#include <c10/DeviceGuard.h>
 #include <c10/util/Exception.h>
 #include <c10/Stream.h>
 
@@ -98,6 +100,19 @@ public:
 
   /// Return the stream ID corresponding to this particular stream.
   StreamId id() const { return stream_.id(); }
+
+  bool query() const {
+    DeviceGuard device_guard{stream_.device()};
+    cudaError_t err = cudaStreamQuery(stream());
+
+    if (err == cudaErrorNotReady) {
+      return false;
+    } else if (err != cudaSuccess) {
+      C10_CUDA_CHECK(err);
+    }
+
+    return true;
+  }
 
   /// Explicit conversion to cudaStream_t.
   cudaStream_t stream() const;
