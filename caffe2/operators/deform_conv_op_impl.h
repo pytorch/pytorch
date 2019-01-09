@@ -275,7 +275,7 @@ bool DeformConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   // The col buffer is stored in CHW order as well - kernel_dim, and the
   // height and width.
   vector<int64_t> img_shape;
-  img_shape.assign(X.dims().begin() + 1, X.dims().end());
+  img_shape.assign(X.sizes().begin() + 1, X.sizes().end());
   vector<int64_t> col_buffer_shape;
   col_buffer_shape.push_back(C * kernel_dims_size);
   col_buffer_shape.insert(
@@ -297,8 +297,8 @@ bool DeformConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
 
   T* dbias_data = nullptr;
   if (!no_bias_) {
-    auto* dbias = Output(BIAS_OR_INPUT_GRAD);
-    dbias->Resize(M);
+    
+    auto* dbias = Output(BIAS_OR_INPUT_GRAD, {M}, at::dtype<T>());
     if (bias_multiplier_.size() != output_image_size) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
       bias_multiplier_.Resize(vector<int64_t>(1, output_image_size));
@@ -341,20 +341,20 @@ bool DeformConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
         col_buffer_data,
         Xdata,
         offset_data,
-        X.dims(),
+        X.sizes(),
         col_buffer_shape,
         doffset_data);
 
     // Gradient with respect to input data
     if (dXdata) {
       DeformableCol2im(
-          col_buffer_data, offset_data, X.dims(), col_buffer_shape, dXdata);
+          col_buffer_data, offset_data, X.sizes(), col_buffer_shape, dXdata);
       dXdata += input_offset * group_;
     }
 
     // Gradient with respect to filter
     DeformableIm2col(
-        Xdata, offset_data, X.dims(), col_buffer_shape, col_buffer_data);
+        Xdata, offset_data, X.sizes(), col_buffer_shape, col_buffer_data);
 
     for (int group_id = 0; group_id < group_; ++group_id) {
       math::Gemm<T, Context>(

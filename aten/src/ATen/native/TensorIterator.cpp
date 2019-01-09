@@ -332,7 +332,7 @@ int TensorIterator::num_reduce_dims() const {
   return count;
 }
 static loop2d_t loop_wrapper(const loop_t& loop) {
-  return [loop](int ntensor, char** base, const int64_t* strides, int64_t size0, int64_t size1) {
+  return [&loop](int ntensor, char** base, const int64_t* strides, int64_t size0, int64_t size1) {
     auto data = PtrVector(base, base + ntensor);
     const int64_t* outer_strides = &strides[ntensor];
 

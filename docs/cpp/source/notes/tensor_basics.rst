@@ -77,7 +77,7 @@ otherwise behave as normal tensors.
 Scalars and zero-dimensional tensors
 ------------------------------------
 
-In addition to the ``Tensor`` objects, ATen also includes ``Scalar``s that
+In addition to the ``Tensor`` objects, ATen also includes ``Scalar``\s that
 represent a single number. Like a Tensor, Scalars are dynamically typed and can
 hold any one of ATen's number types. Scalars can be implicitly constructed from
 C++ number types. Scalars are needed because some functions like ``addmm`` take
@@ -100,7 +100,7 @@ will *always* return a Scalar value, like ``sum``.
   torch::Tensor c = ...
   torch::Tensor r = torch::addmm(1.0, a, .5, b, c);
 
-In addition to ``Scalar``s, ATen also allows ``Tensor`` objects to be
+In addition to ``Scalar``\s, ATen also allows ``Tensor`` objects to be
 zero-dimensional. These Tensors hold a single value and they can be references
 to a single element in a larger ``Tensor``. They can be used anywhere a
 ``Tensor`` is expected. They are normally created by operators like `select`
