@@ -505,11 +505,7 @@ Tensor& triu_tril_cuda_template(Tensor& result, const Tensor& self, int64_t k, c
 }
 
 Tensor& tril_cuda_(Tensor &self, int64_t k) {
-  // Only if the tensor is not contiguous, we check for batch contiguity
-  // Else, we are happy with contiguous tensors as is, and can safely bypass the check
-  // This check is written in this way, because if the first predicate fails, then
-  // the next one is not checked
-  if (!self.is_contiguous() && !checkBatchContiguous(self)) self = self.contiguous();
+  if (!checkTrilTriuBatchContiguous(self)) self = self.contiguous();
   return tril_cuda_out(self, self, k);
 }
 
@@ -520,17 +516,12 @@ Tensor& tril_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
   if (self.numel() == 0) {
     return result;
   }
-  // Only if the tensor is not contiguous, we check for batch contiguity
-  // Else, we are happy with contiguous tensors as is, and can safely bypass the check
-  // This check is written in this way, because if the first predicate passes, then
-  // the next one is not checked
-  Tensor self_c = self.is_contiguous() || checkBatchContiguous(self) ? self : self.contiguous();
+  Tensor self_c = checkTrilTriuBatchContiguous(self) ? self : self.contiguous();
   return triu_tril_cuda_template<false>(result, self_c, k, "tril");
 }
 
 Tensor& triu_cuda_(Tensor &self, int64_t k) {
-  // Please check the comment in tril_cuda_ about this check
-  if (!self.is_contiguous() && !checkBatchContiguous(self)) self = self.contiguous();
+  if (!checkTrilTriuBatchContiguous(self)) self = self.contiguous();
   return triu_cuda_out(self, self, k);
 }
 
@@ -541,8 +532,7 @@ Tensor& triu_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
   if (self.numel() == 0) {
     return result;
   }
-  // Please check the comment in tril_cuda_out about this check
-  Tensor self_c = self.is_contiguous() || checkBatchContiguous(self) ? self : self.contiguous();
+  Tensor self_c = checkTrilTriuBatchContiguous(self) ? self : self.contiguous();
   return triu_tril_cuda_template<true>(result, self_c, k, "triu");
 }
 

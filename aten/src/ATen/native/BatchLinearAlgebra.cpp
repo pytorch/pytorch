@@ -468,11 +468,7 @@ Tensor& tril_cpu_(Tensor &self, int64_t k) {
   if (self.numel() == 0) {
     return self;
   }
-  // Only if the tensor is not contiguous, we check for batch contiguity
-  // Else, we are happy with contiguous tensors as is, and can safely bypass the check
-  // This check is written in this way, because if the first predicate fails, then
-  // the next one is not checked
-  if (!self.is_contiguous() && !checkBatchContiguous(self)) self = self.contiguous();
+  if (!checkTrilTriuBatchContiguous(self)) self = self.contiguous();
   AT_DISPATCH_ALL_TYPES(self.type(), "tril", [&]{
     apply_triu_tril<scalar_t, true, false>(self, self, k);
   });
@@ -486,11 +482,7 @@ Tensor& tril_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
   if (self.numel() == 0) {
     return result;
   }
-  // Only if the tensor is not contiguous, we check for batch contiguity
-  // Else, we are happy with contiguous tensors as is, and can safely bypass the check
-  // This check is written in this way, because if the first predicate passes, then
-  // the next one is not checked
-  Tensor self_c = self.is_contiguous() || checkBatchContiguous(self) ? self : self.contiguous();
+  Tensor self_c = checkTrilTriuBatchContiguous(self) ? self : self.contiguous();
   AT_DISPATCH_ALL_TYPES(self.type(), "tril", [&]{
     apply_triu_tril<scalar_t, false, false>(result, self_c, k);
   });
@@ -507,8 +499,7 @@ Tensor& triu_cpu_(Tensor &self, int64_t k) {
   if (self.numel() == 0) {
     return self;
   }
-  // Please check the comment in tril_cpu_ about this check
-  if (!self.is_contiguous() && !checkBatchContiguous(self)) self = self.contiguous();
+  if (!checkTrilTriuBatchContiguous(self)) self = self.contiguous();
   AT_DISPATCH_ALL_TYPES(self.type(), "triu", [&]{
     apply_triu_tril<scalar_t, true, true>(self, self, k);
   });
@@ -522,8 +513,7 @@ Tensor& triu_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
   if (self.numel() == 0) {
     return result;
   }
-  // Please check the comment in tril_cpu_out about this check
-  Tensor self_c = self.is_contiguous() || checkBatchContiguous(self) ? self : self.contiguous();
+  Tensor self_c = checkTrilTriuBatchContiguous(self) ? self : self.contiguous();
   AT_DISPATCH_ALL_TYPES(self.type(), "triu", [&]{
     apply_triu_tril<scalar_t, false, true>(result, self_c, k);
   });
