@@ -4,10 +4,11 @@
 #include "caffe2/core/storage.h"
 #include "caffe2/core/tensor_impl.h"
 
-#include <c10/core/UndefinedTensorImpl.h>
+#include <ATen/core/UndefinedTensorImpl.h>
 #include <c10/util/intrusive_ptr.h>
 #include "ATen/core/Tensor.h"
 #include <c10/core/TensorOptions.h>
+#include <c10/core/Tensor.h>
 
 namespace caffe2 {
 
@@ -94,6 +95,17 @@ class CAFFE2_API Tensor final {
   Tensor(const Tensor& src, DeviceType type)
       : Tensor(type) {
     CopyFrom(src);
+  }
+
+  explicit Tensor(C10Tensor tensor)
+      : impl_(std::move(tensor).impl()) {}
+
+  explicit operator C10Tensor() const & {
+    return C10Tensor(impl_);
+  }
+
+  explicit operator C10Tensor() && {
+    return C10Tensor(std::move(impl_));
   }
 
   Tensor Clone() const {

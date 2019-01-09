@@ -1,6 +1,7 @@
 #include <c10/core/dispatch/KernelRegistration.h>
 #include "caffe2/operators/experimental/c10/schemas/stop_gradient.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/core/tensor.h"
 
 using caffe2::BaseContext;
 using caffe2::Tensor;
@@ -9,11 +10,13 @@ namespace caffe2 {
 namespace {
 template <class DataType>
 void stop_gradient_op_cpu_impl(
-    const Tensor& input,
-    Tensor* output,
+    const C10Tensor& input_,
+    const C10Tensor& output_,
     BaseContext* context) {
-  if (output != &input) {
-    output->CopyFrom(input, context);
+  Tensor input(input_);
+  Tensor output(output_);
+  if (output.getIntrusivePtr() != input.getIntrusivePtr()) {
+    output.CopyFrom(input, context);
   }
 }
 } // namespace
