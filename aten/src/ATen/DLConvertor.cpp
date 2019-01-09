@@ -1,5 +1,5 @@
-#include "ATen/DLConvertor.h"
-#include "ATen/Functions.h"
+#include <ATen/DLConvertor.h>
+#include <ATen/Functions.h>
 
 #include <iostream>
 #include <sstream>
@@ -37,6 +37,12 @@ static DLDataType getDLDataType(const Type& type) {
     case ScalarType::Half:
       dtype.code = DLDataTypeCode::kDLFloat;
       break;
+    case ScalarType::ComplexHalf:
+      throw std::logic_error("ComplexHalf is not supported by dlpack");
+    case ScalarType::ComplexFloat:
+      throw std::logic_error("ComplexFloat is not supported by dlpack");
+    case ScalarType::ComplexDouble:
+      throw std::logic_error("ComplexDouble is not supported by dlpack");
     case ScalarType::Undefined:
       throw std::logic_error("Undefined is not a valid ScalarType");
     case ScalarType::NumOptions:
@@ -146,7 +152,7 @@ DLManagedTensor* toDLPack(const Tensor& src) {
   atDLMTensor->tensor.deleter = &deleter;
   atDLMTensor->tensor.dl_tensor.data = src.data_ptr();
   int64_t device_id = 0;
-  if (src.type().is_cuda()) {
+  if (src.is_cuda()) {
     device_id = src.get_device();
   }
   atDLMTensor->tensor.dl_tensor.ctx = getDLContext(src.type(), device_id);

@@ -1,10 +1,11 @@
 import torch.cuda.comm as comm
+from torch.cuda._utils import _get_device_index
 
 
 def replicate(network, devices, detach=False):
     from ._functions import Broadcast
 
-    devices = tuple(devices)
+    devices = list(map(lambda x: _get_device_index(x, True), devices))
     num_replicas = len(devices)
 
     params = list(network.parameters())

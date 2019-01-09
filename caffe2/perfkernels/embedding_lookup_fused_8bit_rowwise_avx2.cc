@@ -5,18 +5,19 @@
 //// DO NOT MODIFY!!!
 //// --------------------------
 
-#include <caffe2/core/common.h>
-#include <caffe2/core/types.h>
+#include <ATen/core/Half.h>
+#include <c10/util/Logging.h>
 #include <immintrin.h>
+#include <cassert>
 
 namespace caffe2 {
 
 template <bool IS_WEIGHT_POSITIONAL>
 static void Fused8BitRowwiseEmbeddingLookup_int32_t_float_float__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const float* input,
     const int32_t* indices,
     const int* lengths,
@@ -102,7 +103,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int32_t_float_float__avx2_fma(
         vop120 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (120)), vop120);
         // skip unnecessary prefetch of (&ip_next_T0[120])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -119,7 +120,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int32_t_float_float__avx2_fma(
         _mm256_storeu_ps(&op[104], vop104);
         _mm256_storeu_ps(&op[112], vop112);
         _mm256_storeu_ps(&op[120], vop120);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -192,7 +193,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int32_t_float_float__avx2_fma(
         vop56 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (56)), vop56);
         // skip unnecessary prefetch of (&ip_next_T0[56])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -201,7 +202,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int32_t_float_float__avx2_fma(
         _mm256_storeu_ps(&op[40], vop40);
         _mm256_storeu_ps(&op[48], vop48);
         _mm256_storeu_ps(&op[56], vop56);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -254,12 +255,12 @@ static void Fused8BitRowwiseEmbeddingLookup_int32_t_float_float__avx2_fma(
         vop24 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (24)), vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
         _mm256_storeu_ps(&op[24], vop24);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -302,10 +303,10 @@ static void Fused8BitRowwiseEmbeddingLookup_int32_t_float_float__avx2_fma(
         vop8 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (8)), vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -316,7 +317,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int32_t_float_float__avx2_fma(
     int32_t dataInd = 0;
     for (int32_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
-      TIndex j = 0;
+      int64_t j = 0;
       for (; j + 8 <= block_size; j += 8) {
         _mm256_storeu_ps(op + j, _mm256_setzero_ps());
       }
@@ -374,10 +375,10 @@ static void Fused8BitRowwiseEmbeddingLookup_int32_t_float_float__avx2_fma(
   }
 }
 void Fused8BitRowwiseEmbeddingLookup_int32_t_float_float_false__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const float* input,
     const int32_t* indices,
     const int* lengths,
@@ -397,10 +398,10 @@ void Fused8BitRowwiseEmbeddingLookup_int32_t_float_float_false__avx2_fma(
       out);
 }
 void Fused8BitRowwiseEmbeddingLookup_int32_t_float_float_true__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const float* input,
     const int32_t* indices,
     const int* lengths,
@@ -422,10 +423,10 @@ void Fused8BitRowwiseEmbeddingLookup_int32_t_float_float_true__avx2_fma(
 
 template <bool IS_WEIGHT_POSITIONAL>
 static void Fused8BitRowwiseEmbeddingLookup_int64_t_float_float__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const float* input,
     const int64_t* indices,
     const int* lengths,
@@ -511,7 +512,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int64_t_float_float__avx2_fma(
         vop120 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (120)), vop120);
         // skip unnecessary prefetch of (&ip_next_T0[120])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -528,7 +529,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int64_t_float_float__avx2_fma(
         _mm256_storeu_ps(&op[104], vop104);
         _mm256_storeu_ps(&op[112], vop112);
         _mm256_storeu_ps(&op[120], vop120);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -601,7 +602,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int64_t_float_float__avx2_fma(
         vop56 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (56)), vop56);
         // skip unnecessary prefetch of (&ip_next_T0[56])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -610,7 +611,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int64_t_float_float__avx2_fma(
         _mm256_storeu_ps(&op[40], vop40);
         _mm256_storeu_ps(&op[48], vop48);
         _mm256_storeu_ps(&op[56], vop56);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -663,12 +664,12 @@ static void Fused8BitRowwiseEmbeddingLookup_int64_t_float_float__avx2_fma(
         vop24 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (24)), vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
         _mm256_storeu_ps(&op[24], vop24);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -711,10 +712,10 @@ static void Fused8BitRowwiseEmbeddingLookup_int64_t_float_float__avx2_fma(
         vop8 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (8)), vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -725,7 +726,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int64_t_float_float__avx2_fma(
     int64_t dataInd = 0;
     for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
-      TIndex j = 0;
+      int64_t j = 0;
       for (; j + 8 <= block_size; j += 8) {
         _mm256_storeu_ps(op + j, _mm256_setzero_ps());
       }
@@ -783,10 +784,10 @@ static void Fused8BitRowwiseEmbeddingLookup_int64_t_float_float__avx2_fma(
   }
 }
 void Fused8BitRowwiseEmbeddingLookup_int64_t_float_float_false__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const float* input,
     const int64_t* indices,
     const int* lengths,
@@ -806,10 +807,10 @@ void Fused8BitRowwiseEmbeddingLookup_int64_t_float_float_false__avx2_fma(
       out);
 }
 void Fused8BitRowwiseEmbeddingLookup_int64_t_float_float_true__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const float* input,
     const int64_t* indices,
     const int* lengths,
@@ -830,12 +831,12 @@ void Fused8BitRowwiseEmbeddingLookup_int64_t_float_float_true__avx2_fma(
 }
 
 template <bool IS_WEIGHT_POSITIONAL>
-static void Fused8BitRowwiseEmbeddingLookup_int32_t_float16_float__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
-    const float16* input,
+static void Fused8BitRowwiseEmbeddingLookup_int32_t_half_float__avx2_fma(
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
+    const at::Half* input,
     const int32_t* indices,
     const int* lengths,
     const float* weights,
@@ -880,13 +881,13 @@ static void Fused8BitRowwiseEmbeddingLookup_int32_t_float16_float__avx2_fma(
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const float16* ip = &input[idx * fused_block_size];
+        const at::Half* ip = &input[idx * fused_block_size];
         const int32_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const float16* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
+        const at::Half* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -984,7 +985,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int32_t_float16_float__avx2_fma(
             vop120);
         // skip unnecessary prefetch of (&ip_next_T0[120])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -1001,7 +1002,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int32_t_float16_float__avx2_fma(
         _mm256_storeu_ps(&op[104], vop104);
         _mm256_storeu_ps(&op[112], vop112);
         _mm256_storeu_ps(&op[120], vop120);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -1050,13 +1051,13 @@ static void Fused8BitRowwiseEmbeddingLookup_int32_t_float16_float__avx2_fma(
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const float16* ip = &input[idx * fused_block_size];
+        const at::Half* ip = &input[idx * fused_block_size];
         const int32_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const float16* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
+        const at::Half* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -1106,7 +1107,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int32_t_float16_float__avx2_fma(
             vop56);
         // skip unnecessary prefetch of (&ip_next_T0[56])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -1115,7 +1116,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int32_t_float16_float__avx2_fma(
         _mm256_storeu_ps(&op[40], vop40);
         _mm256_storeu_ps(&op[48], vop48);
         _mm256_storeu_ps(&op[56], vop56);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -1152,13 +1153,13 @@ static void Fused8BitRowwiseEmbeddingLookup_int32_t_float16_float__avx2_fma(
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const float16* ip = &input[idx * fused_block_size];
+        const at::Half* ip = &input[idx * fused_block_size];
         const int32_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const float16* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
+        const at::Half* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -1184,12 +1185,12 @@ static void Fused8BitRowwiseEmbeddingLookup_int32_t_float16_float__avx2_fma(
             vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
         _mm256_storeu_ps(&op[24], vop24);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -1220,13 +1221,13 @@ static void Fused8BitRowwiseEmbeddingLookup_int32_t_float16_float__avx2_fma(
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const float16* ip = &input[idx * fused_block_size];
+        const at::Half* ip = &input[idx * fused_block_size];
         const int32_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const float16* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
+        const at::Half* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -1240,10 +1241,10 @@ static void Fused8BitRowwiseEmbeddingLookup_int32_t_float16_float__avx2_fma(
             vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -1254,7 +1255,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int32_t_float16_float__avx2_fma(
     int32_t dataInd = 0;
     for (int32_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
-      TIndex j = 0;
+      int64_t j = 0;
       for (; j + 8 <= block_size; j += 8) {
         _mm256_storeu_ps(op + j, _mm256_setzero_ps());
       }
@@ -1277,13 +1278,13 @@ static void Fused8BitRowwiseEmbeddingLookup_int32_t_float16_float__avx2_fma(
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const float16* ip = &input[idx * fused_block_size];
+        const at::Half* ip = &input[idx * fused_block_size];
         const int32_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const float16* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
+        const at::Half* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         j = 0;
         for (; j + 8 <= block_size; j += 8) {
           _mm256_storeu_ps(
@@ -1295,7 +1296,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int32_t_float16_float__avx2_fma(
                   _mm256_loadu_ps(&op[j])));
           _mm_prefetch((&ip_next_T0[j]), _MM_HINT_T0);
         }
-        float16 vtmp1[8] CAFFE2_ALIGNED(64);
+        alignas(64) at::Half vtmp1[8];
         for (; j < block_size; j++) {
           vtmp1[0] = ip[j];
           __m256 vtmp2 = _mm256_cvtph_ps(*((__m128i*)vtmp1));
@@ -1317,18 +1318,18 @@ static void Fused8BitRowwiseEmbeddingLookup_int32_t_float16_float__avx2_fma(
     }
   }
 }
-void Fused8BitRowwiseEmbeddingLookup_int32_t_float16_float_false__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
-    const float16* input,
+void Fused8BitRowwiseEmbeddingLookup_int32_t_half_float_false__avx2_fma(
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
+    const at::Half* input,
     const int32_t* indices,
     const int* lengths,
     const float* weights,
     bool normalize_by_lengths,
     float* out) {
-  Fused8BitRowwiseEmbeddingLookup_int32_t_float16_float__avx2_fma<false>(
+  Fused8BitRowwiseEmbeddingLookup_int32_t_half_float__avx2_fma<false>(
       block_size,
       output_size,
       index_size,
@@ -1340,18 +1341,18 @@ void Fused8BitRowwiseEmbeddingLookup_int32_t_float16_float_false__avx2_fma(
       normalize_by_lengths,
       out);
 }
-void Fused8BitRowwiseEmbeddingLookup_int32_t_float16_float_true__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
-    const float16* input,
+void Fused8BitRowwiseEmbeddingLookup_int32_t_half_float_true__avx2_fma(
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
+    const at::Half* input,
     const int32_t* indices,
     const int* lengths,
     const float* weights,
     bool normalize_by_lengths,
     float* out) {
-  Fused8BitRowwiseEmbeddingLookup_int32_t_float16_float__avx2_fma<true>(
+  Fused8BitRowwiseEmbeddingLookup_int32_t_half_float__avx2_fma<true>(
       block_size,
       output_size,
       index_size,
@@ -1365,12 +1366,12 @@ void Fused8BitRowwiseEmbeddingLookup_int32_t_float16_float_true__avx2_fma(
 }
 
 template <bool IS_WEIGHT_POSITIONAL>
-static void Fused8BitRowwiseEmbeddingLookup_int64_t_float16_float__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
-    const float16* input,
+static void Fused8BitRowwiseEmbeddingLookup_int64_t_half_float__avx2_fma(
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
+    const at::Half* input,
     const int64_t* indices,
     const int* lengths,
     const float* weights,
@@ -1415,13 +1416,13 @@ static void Fused8BitRowwiseEmbeddingLookup_int64_t_float16_float__avx2_fma(
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const float16* ip = &input[idx * fused_block_size];
+        const at::Half* ip = &input[idx * fused_block_size];
         const int64_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const float16* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
+        const at::Half* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -1519,7 +1520,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int64_t_float16_float__avx2_fma(
             vop120);
         // skip unnecessary prefetch of (&ip_next_T0[120])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -1536,7 +1537,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int64_t_float16_float__avx2_fma(
         _mm256_storeu_ps(&op[104], vop104);
         _mm256_storeu_ps(&op[112], vop112);
         _mm256_storeu_ps(&op[120], vop120);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -1585,13 +1586,13 @@ static void Fused8BitRowwiseEmbeddingLookup_int64_t_float16_float__avx2_fma(
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const float16* ip = &input[idx * fused_block_size];
+        const at::Half* ip = &input[idx * fused_block_size];
         const int64_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const float16* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
+        const at::Half* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -1641,7 +1642,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int64_t_float16_float__avx2_fma(
             vop56);
         // skip unnecessary prefetch of (&ip_next_T0[56])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -1650,7 +1651,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int64_t_float16_float__avx2_fma(
         _mm256_storeu_ps(&op[40], vop40);
         _mm256_storeu_ps(&op[48], vop48);
         _mm256_storeu_ps(&op[56], vop56);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -1687,13 +1688,13 @@ static void Fused8BitRowwiseEmbeddingLookup_int64_t_float16_float__avx2_fma(
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const float16* ip = &input[idx * fused_block_size];
+        const at::Half* ip = &input[idx * fused_block_size];
         const int64_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const float16* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
+        const at::Half* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -1719,12 +1720,12 @@ static void Fused8BitRowwiseEmbeddingLookup_int64_t_float16_float__avx2_fma(
             vop24);
         // skip unnecessary prefetch of (&ip_next_T0[24])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
         _mm256_storeu_ps(&op[24], vop24);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -1755,13 +1756,13 @@ static void Fused8BitRowwiseEmbeddingLookup_int64_t_float16_float__avx2_fma(
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const float16* ip = &input[idx * fused_block_size];
+        const at::Half* ip = &input[idx * fused_block_size];
         const int64_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const float16* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
+        const at::Half* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -1775,10 +1776,10 @@ static void Fused8BitRowwiseEmbeddingLookup_int64_t_float16_float__avx2_fma(
             vop8);
         // skip unnecessary prefetch of (&ip_next_T0[8])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -1789,7 +1790,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int64_t_float16_float__avx2_fma(
     int64_t dataInd = 0;
     for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
-      TIndex j = 0;
+      int64_t j = 0;
       for (; j + 8 <= block_size; j += 8) {
         _mm256_storeu_ps(op + j, _mm256_setzero_ps());
       }
@@ -1812,13 +1813,13 @@ static void Fused8BitRowwiseEmbeddingLookup_int64_t_float16_float__avx2_fma(
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const float16* ip = &input[idx * fused_block_size];
+        const at::Half* ip = &input[idx * fused_block_size];
         const int64_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const float16* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
+        const at::Half* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         j = 0;
         for (; j + 8 <= block_size; j += 8) {
           _mm256_storeu_ps(
@@ -1830,7 +1831,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int64_t_float16_float__avx2_fma(
                   _mm256_loadu_ps(&op[j])));
           _mm_prefetch((&ip_next_T0[j]), _MM_HINT_T0);
         }
-        float16 vtmp1[8] CAFFE2_ALIGNED(64);
+        alignas(64) at::Half vtmp1[8];
         for (; j < block_size; j++) {
           vtmp1[0] = ip[j];
           __m256 vtmp2 = _mm256_cvtph_ps(*((__m128i*)vtmp1));
@@ -1852,18 +1853,18 @@ static void Fused8BitRowwiseEmbeddingLookup_int64_t_float16_float__avx2_fma(
     }
   }
 }
-void Fused8BitRowwiseEmbeddingLookup_int64_t_float16_float_false__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
-    const float16* input,
+void Fused8BitRowwiseEmbeddingLookup_int64_t_half_float_false__avx2_fma(
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
+    const at::Half* input,
     const int64_t* indices,
     const int* lengths,
     const float* weights,
     bool normalize_by_lengths,
     float* out) {
-  Fused8BitRowwiseEmbeddingLookup_int64_t_float16_float__avx2_fma<false>(
+  Fused8BitRowwiseEmbeddingLookup_int64_t_half_float__avx2_fma<false>(
       block_size,
       output_size,
       index_size,
@@ -1875,18 +1876,18 @@ void Fused8BitRowwiseEmbeddingLookup_int64_t_float16_float_false__avx2_fma(
       normalize_by_lengths,
       out);
 }
-void Fused8BitRowwiseEmbeddingLookup_int64_t_float16_float_true__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
-    const float16* input,
+void Fused8BitRowwiseEmbeddingLookup_int64_t_half_float_true__avx2_fma(
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
+    const at::Half* input,
     const int64_t* indices,
     const int* lengths,
     const float* weights,
     bool normalize_by_lengths,
     float* out) {
-  Fused8BitRowwiseEmbeddingLookup_int64_t_float16_float__avx2_fma<true>(
+  Fused8BitRowwiseEmbeddingLookup_int64_t_half_float__avx2_fma<true>(
       block_size,
       output_size,
       index_size,
@@ -1901,10 +1902,10 @@ void Fused8BitRowwiseEmbeddingLookup_int64_t_float16_float_true__avx2_fma(
 
 template <bool IS_WEIGHT_POSITIONAL>
 static void Fused8BitRowwiseEmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const uint8_t* input,
     const int32_t* indices,
     const int* lengths,
@@ -2060,7 +2061,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop120, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[120])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -2077,7 +2078,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
         _mm256_storeu_ps(&op[104], vop104);
         _mm256_storeu_ps(&op[112], vop112);
         _mm256_storeu_ps(&op[120], vop120);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2188,7 +2189,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop56, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[56])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -2197,7 +2198,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
         _mm256_storeu_ps(&op[40], vop40);
         _mm256_storeu_ps(&op[48], vop48);
         _mm256_storeu_ps(&op[56], vop56);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2272,12 +2273,12 @@ static void Fused8BitRowwiseEmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop24, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[24])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
         _mm256_storeu_ps(&op[24], vop24);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2334,10 +2335,10 @@ static void Fused8BitRowwiseEmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop8, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[8])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2348,7 +2349,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
     int32_t dataInd = 0;
     for (int32_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
-      TIndex j = 0;
+      int64_t j = 0;
       for (; j + 8 <= block_size; j += 8) {
         _mm256_storeu_ps(op + j, _mm256_setzero_ps());
       }
@@ -2415,10 +2416,10 @@ static void Fused8BitRowwiseEmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
   }
 }
 void Fused8BitRowwiseEmbeddingLookup_int32_t_uint8_t_float_false__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const uint8_t* input,
     const int32_t* indices,
     const int* lengths,
@@ -2438,10 +2439,10 @@ void Fused8BitRowwiseEmbeddingLookup_int32_t_uint8_t_float_false__avx2_fma(
       out);
 }
 void Fused8BitRowwiseEmbeddingLookup_int32_t_uint8_t_float_true__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const uint8_t* input,
     const int32_t* indices,
     const int* lengths,
@@ -2463,10 +2464,10 @@ void Fused8BitRowwiseEmbeddingLookup_int32_t_uint8_t_float_true__avx2_fma(
 
 template <bool IS_WEIGHT_POSITIONAL>
 static void Fused8BitRowwiseEmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const uint8_t* input,
     const int64_t* indices,
     const int* lengths,
@@ -2622,7 +2623,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop120, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[120])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -2639,7 +2640,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
         _mm256_storeu_ps(&op[104], vop104);
         _mm256_storeu_ps(&op[112], vop112);
         _mm256_storeu_ps(&op[120], vop120);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2750,7 +2751,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop56, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[56])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
@@ -2759,7 +2760,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
         _mm256_storeu_ps(&op[40], vop40);
         _mm256_storeu_ps(&op[48], vop48);
         _mm256_storeu_ps(&op[56], vop56);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2834,12 +2835,12 @@ static void Fused8BitRowwiseEmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop24, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[24])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
         _mm256_storeu_ps(&op[16], vop16);
         _mm256_storeu_ps(&op[24], vop24);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2896,10 +2897,10 @@ static void Fused8BitRowwiseEmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
             _mm256_add_ps(vop8, vbio));
         // skip unnecessary prefetch of (&ip_next_T0[8])
       }
-      if (normalize_by_lengths == false) {
+      if (!normalize_by_lengths || lengths[rangeIndex] == 0) {
         _mm256_storeu_ps(&op[0], vop0);
         _mm256_storeu_ps(&op[8], vop8);
-      } else if (lengths[rangeIndex]) {
+      } else {
         __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);
         _mm256_storeu_ps(&op[0], _mm256_mul_ps(vop0, vlen_inv));
         _mm256_storeu_ps(&op[8], _mm256_mul_ps(vop8, vlen_inv));
@@ -2910,7 +2911,7 @@ static void Fused8BitRowwiseEmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
     int64_t dataInd = 0;
     for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
-      TIndex j = 0;
+      int64_t j = 0;
       for (; j + 8 <= block_size; j += 8) {
         _mm256_storeu_ps(op + j, _mm256_setzero_ps());
       }
@@ -2977,10 +2978,10 @@ static void Fused8BitRowwiseEmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
   }
 }
 void Fused8BitRowwiseEmbeddingLookup_int64_t_uint8_t_float_false__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const uint8_t* input,
     const int64_t* indices,
     const int* lengths,
@@ -3000,10 +3001,10 @@ void Fused8BitRowwiseEmbeddingLookup_int64_t_uint8_t_float_false__avx2_fma(
       out);
 }
 void Fused8BitRowwiseEmbeddingLookup_int64_t_uint8_t_float_true__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const uint8_t* input,
     const int64_t* indices,
     const int* lengths,

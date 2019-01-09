@@ -6,14 +6,16 @@ from caffe2.python import core, workspace
 from hypothesis import given
 
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 
 import numpy as np
 import unittest
 
 
-class TestTransposeOp(hu.HypothesisTestCase):
-    @given(X=hu.tensor(dtype=np.float32), use_axes=st.booleans(), **hu.gcs)
+class TestTransposeOp(serial.SerializedTestCase):
+    @serial.given(
+        X=hu.tensor(dtype=np.float32), use_axes=st.booleans(), **hu.gcs)
     def test_transpose(self, X, use_axes, gc, dc):
         ndim = len(X.shape)
         axes = np.arange(ndim)

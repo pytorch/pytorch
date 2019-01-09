@@ -2,7 +2,7 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/core/operator.h"
 
-#ifdef CAFFE2_USE_IDEEP
+#ifdef CAFFE2_USE_MKLDNN
 #include <caffe2/ideep/operators/operator_fallback_ideep.h>
 #include <caffe2/ideep/utils/ideep_operator.h>
 #endif
@@ -25,7 +25,7 @@ REGISTER_CPU_OPERATOR(CTC, CTCOp<float, CPUContext>);
 OPERATOR_SCHEMA(CTC).NumInputs(3, 4).NumOutputs(2, 3);
 //    .EnforceInputOutputGradient({{0, 0}});
 
-#ifdef CAFFE2_USE_IDEEP
+#ifdef CAFFE2_USE_MKLDNN
 REGISTER_IDEEP_OPERATOR(CTC, IDEEPFallbackOp<CTCOp<float, CPUContext>>);
 #endif
 

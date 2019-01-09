@@ -12,7 +12,7 @@ class CAFFE2_API ConvToNNPackTransform : public SingleOpTransform {
   // Specify what the op needs to be to match the pattern.
   bool MatchOperator(const OperatorDef& op) override {
     return (
-        op.type() == "Conv" && op.device_option().device_type() == CPU &&
+        op.type() == "Conv" && op.device_option().device_type() == PROTO_CPU &&
         op.engine() != "NNPACK");
   }
 

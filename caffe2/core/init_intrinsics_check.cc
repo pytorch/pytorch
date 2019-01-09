@@ -4,7 +4,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/utils/cpuid.h"
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_quit_on_unsupported_cpu_feature,
     false,
     "If set, when Caffe2 is built with a CPU feature (like avx2) but the "

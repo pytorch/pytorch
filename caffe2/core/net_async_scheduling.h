@@ -22,15 +22,15 @@ class CAFFE2_API AsyncSchedulingNet : public AsyncNetBase {
   void reset() override;
   virtual void finishRun();
   void parentCallback(int parent_id);
+  bool isInlineTask(int parent_id, int child_id) const;
 
   std::mutex running_mutex_;
   std::condition_variable running_cv_;
   std::atomic<bool> running_;
-  bool use_dfs_scheduling_;
 
   std::atomic<int> processed_tasks_num_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(AsyncSchedulingNet);
+  C10_DISABLE_COPY_AND_ASSIGN(AsyncSchedulingNet);
 };
 
 } // namespace caffe2

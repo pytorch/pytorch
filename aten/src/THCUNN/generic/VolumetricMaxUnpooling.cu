@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/VolumetricMaxUnpooling.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/VolumetricMaxUnpooling.cu"
 #else
 
 static inline void THNN_(VolumetricMaxUnpooling_shapeCheck)(
@@ -137,12 +137,12 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
     THCIndexTensor_(free)(state, old_indices);
   }
 
-  real* outputData = THCTensor_(data)(state, output);
+  scalar_t* outputData = THCTensor_(data)(state, output);
 
-  THCDeviceTensor<real, 4> cudaInput;
+  THCDeviceTensor<scalar_t, 4> cudaInput;
   THCDeviceTensor<THCIndex_t, 4> cudaIndices;
 
-  cudaInput  = toDeviceTensor<real, 4>(state, input);
+  cudaInput  = toDeviceTensor<scalar_t, 4>(state, input);
   cudaIndices = toDeviceTensor<THCIndex_t, 4>(state, indices);
 
   int totalZ = inputTime * inputSlices * batchSize;
@@ -231,12 +231,12 @@ void THNN_(VolumetricMaxUnpooling_updateGradInput)(
     THCTensor_(retain)(state, gradInput);
   }
 
-  real* gradOutputData = THCTensor_(data)(state, gradOutput);
+  scalar_t* gradOutputData = THCTensor_(data)(state, gradOutput);
 
-  THCDeviceTensor<real, 4> cudaGradInput;
+  THCDeviceTensor<scalar_t, 4> cudaGradInput;
   THCDeviceTensor<THCIndex_t, 4> cudaIndices;
 
-  cudaGradInput  = toDeviceTensor<real, 4>(state, gradInput);
+  cudaGradInput  = toDeviceTensor<scalar_t, 4>(state, gradInput);
   cudaIndices = toDeviceTensor<THCIndex_t, 4>(state, indices);
 
   int totalZ = inputTime * inputSlices * batchSize;

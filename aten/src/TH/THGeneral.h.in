@@ -190,7 +190,9 @@ inline double expm1(double x) { return THExpm1(x); }
 #define popen _popen
 #define pclose _pclose
 #include <BaseTsd.h>
+#if !defined(HAVE_SSIZE_T)
 typedef SSIZE_T ssize_t;
+#endif
 #endif
 
 #endif

@@ -1,12 +1,12 @@
 #pragma once
 
-#include "ATen/cuda/CUDAContext.h"
-#include "ATen/cuda/Exceptions.h"
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/Exceptions.h>
 
-#include "cudnn-wrapper.h"
+#include <ATen/cudnn/cudnn-wrapper.h>
 #include <ATen/ATen.h>
 #include <ATen/TensorUtils.h>
-#include "ATen/cuda/ATenCUDAGeneral.h"
+#include <ATen/cuda/ATenCUDAGeneral.h>
 #include <cuda.h>
 
 #if CUDNN_VERSION < 7000
@@ -251,13 +251,13 @@ struct AT_CUDA_API DropoutDescriptor
   // Initialize a dropout descriptor's RNG state.
   // WARNING: This function is very expensive, avoid calling this function!
   // NB: it takes a Type so that we can generate a Variable if necessary.
-  void initialize_rng(const Type& type, cudnnHandle_t handle, float dropout, long long int seed) {
+  void initialize_rng(cudnnHandle_t handle, float dropout, long long int seed, const TensorOptions& options) {
     AT_ASSERTM(dropout > 0, "dropout must be nonzero; otherwise call set_no_dropout");
     size_t state_size;
     AT_CUDNN_CHECK(cudnnDropoutGetStatesSize(handle, &state_size));
-    AT_ASSERT(type.is_cuda());
-    AT_ASSERT(type.scalarType() == kByte);
-    state = at::empty({static_cast<int64_t>(state_size)}, type);
+    AT_ASSERT(options.device().type() == kCUDA);
+    AT_ASSERT(options.dtype() == kByte);
+    state = at::empty({static_cast<int64_t>(state_size)}, options);
     AT_CUDNN_CHECK(cudnnSetDropoutDescriptor(mut_desc(), handle, dropout, state.data_ptr(), state_size, seed));
   }
 
@@ -291,7 +291,7 @@ struct AT_CUDA_API RNNDescriptor
   DropoutDescriptor dropout_desc_;
   void set(cudnnHandle_t handle, int hidden_size, int num_layers, DropoutDescriptor&& dropout_desc,
            cudnnRNNInputMode_t input_mode, cudnnDirectionMode_t bidirectional,
-           cudnnRNNMode_t mode, cudnnDataType_t datatype) {
+           cudnnRNNMode_t mode, cudnnDataType_t datatype, cudnnRNNAlgo_t algo) {
     dropout_desc_ = std::move(dropout_desc);
     AT_CUDNN_CHECK(cudnnSetRNNDescriptor_v6(
           handle,
@@ -302,7 +302,7 @@ struct AT_CUDA_API RNNDescriptor
           input_mode,
           bidirectional,
           mode,
-          CUDNN_RNN_ALGO_STANDARD,
+          algo,
           datatype));
 #if CUDNN_VERSION >= 7000 && CUDA_VERSION >= 9000
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();

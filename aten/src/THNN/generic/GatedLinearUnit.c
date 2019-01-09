@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/GatedLinearUnit.c"
+#define TH_GENERIC_FILE "THNN/generic/GatedLinearUnit.c"
 #else
 
 void THNN_(GatedLinear_updateOutput)(
@@ -53,8 +53,8 @@ void THNN_(GatedLinear_updateGradInput)(
 
   THTensor_(sigmoid)(gradInputfirstHalf, secondHalf);
 
-  TH_TENSOR_APPLY2(real, gradInputsecondHalf, real, gradInputfirstHalf,
-    real z = *gradInputfirstHalf_data;
+  TH_TENSOR_APPLY2(scalar_t, gradInputsecondHalf, scalar_t, gradInputfirstHalf,
+    scalar_t z = *gradInputfirstHalf_data;
     *gradInputsecondHalf_data = (1. - z) * z;
   );
 

@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensor.h"
+#define THC_GENERIC_FILE "THC/generic/THCTensor.h"
 #else
 
 #define THCTensor THTensor
@@ -28,7 +28,7 @@ THC_API int64_t THCTensor_(size)(THCState *state, const THCTensor *self, int dim
 THC_API int64_t THCTensor_(sizeLegacyNoScalars)(THCState *state, const THCTensor *self, int dim);
 THC_API int64_t THCTensor_(stride)(THCState *state, const THCTensor *self, int dim);
 THC_API int64_t THCTensor_(strideLegacyNoScalars)(THCState *state, const THCTensor *self, int dim);
-THC_API real *THCTensor_(data)(THCState *state, const THCTensor *self);
+THC_API scalar_t *THCTensor_(data)(THCState *state, const THCTensor *self);
 
 THC_API void THCTensor_(setFlag)(THCState *state, THCTensor *self, const char flag);
 THC_API void THCTensor_(clearFlag)(THCState *state, THCTensor *self, const char flag);
@@ -71,6 +71,7 @@ THC_API THCTensor *THCTensor_(newFoldBatchDim)(THCState *state, THCTensor *input
 // values, unless you are doing some size and stride tricks, do not use resize*.
 THC_API void THCTensor_(resizeNd)(THCState *state, THCTensor *tensor, int nDimension, const int64_t *size, const int64_t *stride);
 THC_API void THCTensor_(resizeAs)(THCState *state, THCTensor *tensor, THCTensor *src);
+THC_API void THCTensor_(resize0d)(THCState *state, THCTensor *tensor);
 THC_API void THCTensor_(resize1d)(THCState *state, THCTensor *tensor, int64_t size0_);
 THC_API void THCTensor_(resize2d)(THCState *state, THCTensor *tensor, int64_t size0_, int64_t size1_);
 THC_API void THCTensor_(resize3d)(THCState *state, THCTensor *tensor, int64_t size0_, int64_t size1_, int64_t size2_);
@@ -113,15 +114,17 @@ THC_API void THCTensor_(free)(THCState *state, THCTensor *self);
 THC_API void THCTensor_(freeCopyTo)(THCState *state, THCTensor *self, THCTensor *dst);
 
 /* Slow access methods [check everything] */
-THC_API void THCTensor_(set1d)(THCState *state, THCTensor *tensor, int64_t x0, real value);
-THC_API void THCTensor_(set2d)(THCState *state, THCTensor *tensor, int64_t x0, int64_t x1, real value);
-THC_API void THCTensor_(set3d)(THCState *state, THCTensor *tensor, int64_t x0, int64_t x1, int64_t x2, real value);
-THC_API void THCTensor_(set4d)(THCState *state, THCTensor *tensor, int64_t x0, int64_t x1, int64_t x2, int64_t x3, real value);
+THC_API void THCTensor_(set0d)(THCState *state, THCTensor *tensor, scalar_t value);
+THC_API void THCTensor_(set1d)(THCState *state, THCTensor *tensor, int64_t x0, scalar_t value);
+THC_API void THCTensor_(set2d)(THCState *state, THCTensor *tensor, int64_t x0, int64_t x1, scalar_t value);
+THC_API void THCTensor_(set3d)(THCState *state, THCTensor *tensor, int64_t x0, int64_t x1, int64_t x2, scalar_t value);
+THC_API void THCTensor_(set4d)(THCState *state, THCTensor *tensor, int64_t x0, int64_t x1, int64_t x2, int64_t x3, scalar_t value);
 
-THC_API real THCTensor_(get1d)(THCState *state, const THCTensor *tensor, int64_t x0);
-THC_API real THCTensor_(get2d)(THCState *state, const THCTensor *tensor, int64_t x0, int64_t x1);
-THC_API real THCTensor_(get3d)(THCState *state, const THCTensor *tensor, int64_t x0, int64_t x1, int64_t x2);
-THC_API real THCTensor_(get4d)(THCState *state, const THCTensor *tensor, int64_t x0, int64_t x1, int64_t x2, int64_t x3);
+THC_API scalar_t THCTensor_(get0d)(THCState *state, const THCTensor *tensor);
+THC_API scalar_t THCTensor_(get1d)(THCState *state, const THCTensor *tensor, int64_t x0);
+THC_API scalar_t THCTensor_(get2d)(THCState *state, const THCTensor *tensor, int64_t x0, int64_t x1);
+THC_API scalar_t THCTensor_(get3d)(THCState *state, const THCTensor *tensor, int64_t x0, int64_t x1, int64_t x2);
+THC_API scalar_t THCTensor_(get4d)(THCState *state, const THCTensor *tensor, int64_t x0, int64_t x1, int64_t x2, int64_t x3);
 
 /* CUDA-specific functions */
 THC_API int THCTensor_(getDevice)(THCState *state, const THCTensor *self);

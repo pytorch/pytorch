@@ -43,13 +43,13 @@ bool SquaredL2DistanceOp<float, CUDAContext>::RunOnDevice() {
         X.dim32(i),
         Y.dim32(i),
         "Mismatch in dimensions",
-        X.dims(),
+        X.sizes(),
         " / ",
-        Y.dims());
+        Y.sizes());
   }
   int N = X.ndim() > 0 ? X.dim32(0) : 1;
   int D = X.size() / N;
-  distance->Resize(vector<TIndex>(size_t(1), N));
+  distance->Resize(vector<int64_t>(size_t(1), N));
   SquaredL2DistanceKernel<<<
       std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
       CAFFE_CUDA_NUM_THREADS,
@@ -89,9 +89,9 @@ bool SquaredL2DistanceGradientOp<float, CUDAContext>::RunOnDevice() {
         X.dim32(i),
         Y.dim32(i),
         "Mismatch on dimensions: ",
-        X.dims(),
+        X.sizes(),
         " / ",
-        Y.dims());
+        Y.sizes());
   }
   CAFFE_ENFORCE_EQ(dDistance.ndim(), 1);
   CAFFE_ENFORCE_EQ(dDistance.dim32(0), N);
@@ -164,7 +164,7 @@ bool L1DistanceOp<float, CUDAContext>::RunOnDevice() {
   }
   const int N = X.ndim() > 0 ? X.dim32(0) : 1;
   const int D = N > 0 ? X.size() / N : 0;
-  distance->Resize(vector<TIndex>(size_t(1), N));
+  distance->Resize(vector<int64_t>(size_t(1), N));
   L1DistanceKernel<<<
       std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
       CAFFE_CUDA_NUM_THREADS,
@@ -221,9 +221,9 @@ bool L1DistanceGradientOp<float, CUDAContext>::RunOnDevice() {
         X.dim32(i),
         Y.dim32(i),
         "Mismatch on dimensions: ",
-        X.dims(),
+        X.sizes(),
         " / ",
-        Y.dims());
+        Y.sizes());
   }
   CAFFE_ENFORCE_EQ(dDistance.ndim(), 1);
   CAFFE_ENFORCE_EQ(dDistance.dim32(0), N);

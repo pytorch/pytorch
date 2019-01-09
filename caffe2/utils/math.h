@@ -74,7 +74,7 @@ void Powx(const int N, const T* a, const T b, T* y, Context* context);
 template <typename T, class Context>
 void Inv(const int N, const T* x, T* y, Context* context);
 
-#define CAFFE2_DECLARE_COMPARE_OP(Comp)                                      \
+#define C10_DECLARE_COMPARE_OP(Comp)                                         \
   template <typename T, class Context>                                       \
   void Comp(const int N, const T* A, const T* B, bool* C, Context* context); \
                                                                              \
@@ -107,16 +107,16 @@ void Inv(const int N, const T* x, T* y, Context* context);
       bool* C,                                                               \
       Context* context);
 
-CAFFE2_DECLARE_COMPARE_OP(EQ)
-CAFFE2_DECLARE_COMPARE_OP(NE)
-CAFFE2_DECLARE_COMPARE_OP(LT)
-CAFFE2_DECLARE_COMPARE_OP(LE)
-CAFFE2_DECLARE_COMPARE_OP(GT)
-CAFFE2_DECLARE_COMPARE_OP(GE)
+C10_DECLARE_COMPARE_OP(EQ)
+C10_DECLARE_COMPARE_OP(NE)
+C10_DECLARE_COMPARE_OP(LT)
+C10_DECLARE_COMPARE_OP(LE)
+C10_DECLARE_COMPARE_OP(GT)
+C10_DECLARE_COMPARE_OP(GE)
 
-#undef CAFFE2_DECLARE_COMPARE_OP
+#undef C10_DECLARE_COMPARE_OP
 
-#define CAFFE2_DECLARE_BINARY_OP(Func)                                    \
+#define C10_DECLARE_BINARY_OP(Func)                                       \
   template <typename T, class Context>                                    \
   void Func(const int N, const T* A, const T* B, T* C, Context* context); \
                                                                           \
@@ -149,20 +149,20 @@ CAFFE2_DECLARE_COMPARE_OP(GE)
       T* C,                                                               \
       Context* context);
 
-CAFFE2_DECLARE_BINARY_OP(Add)
-CAFFE2_DECLARE_BINARY_OP(Sub)
-CAFFE2_DECLARE_BINARY_OP(Mul)
-CAFFE2_DECLARE_BINARY_OP(Div)
+C10_DECLARE_BINARY_OP(Add)
+C10_DECLARE_BINARY_OP(Sub)
+C10_DECLARE_BINARY_OP(Mul)
+C10_DECLARE_BINARY_OP(Div)
 
-CAFFE2_DECLARE_BINARY_OP(And)
-CAFFE2_DECLARE_BINARY_OP(Or)
-CAFFE2_DECLARE_BINARY_OP(Xor)
+C10_DECLARE_BINARY_OP(And)
+C10_DECLARE_BINARY_OP(Or)
+C10_DECLARE_BINARY_OP(Xor)
 
-CAFFE2_DECLARE_BINARY_OP(BitwiseAnd)
-CAFFE2_DECLARE_BINARY_OP(BitwiseOr)
-CAFFE2_DECLARE_BINARY_OP(BitwiseXor)
+C10_DECLARE_BINARY_OP(BitwiseAnd)
+C10_DECLARE_BINARY_OP(BitwiseOr)
+C10_DECLARE_BINARY_OP(BitwiseXor)
 
-#undef CAFFE2_DECLARE_BINARY_OP
+#undef C10_DECLARE_BINARY_OP
 
 template <typename T, class Context>
 CAFFE2_API void
@@ -260,6 +260,15 @@ CAFFE2_API void Moments(
     const T* X,
     T* mean,
     T* variance,
+    Context* context);
+
+// Computes inv_std from variance.
+template <typename T, class Context>
+CAFFE2_API void InvStd(
+    const int N,
+    const T epsilon,
+    const T* var,
+    T* inv_std,
     Context* context);
 
 // Adds batch sub-tensors elementwise to output. Stripe is the stripe length
@@ -422,6 +431,12 @@ CAFFE2_API void RandUniformUnique(
     const T* avoid,
     Context* context);
 
+// Generate n values from synthetic data distribution,
+// define by unique accesses and stack distances
+template <typename T, class Context>
+CAFFE2_API void
+RandSyntheticData(const size_t n, const T a, const T b, T* r, Context* context);
+
 template <typename T, class Context>
 CAFFE2_API void
 RandGaussian(const size_t n, const T mean, const T std, T* r, Context* context);
@@ -533,6 +548,7 @@ CAFFE2_API void Im2Col(
     Context* context,
     const int groups = 1);
 
+// groups must be 1 for GPU
 template <typename T, class Context, StorageOrder kOrder>
 CAFFE2_API void Im2ColNd(
     const int N,
@@ -546,7 +562,8 @@ CAFFE2_API void Im2ColNd(
     const int* pad,
     const T* img_data,
     T* col_data,
-    Context* context);
+    Context* context,
+    const int groups = 1);
 
 // groups must be 1 for GPU
 // For NHWC order with groups > 1, the result will be layout in
@@ -573,6 +590,11 @@ CAFFE2_API void Col2Im(
     Context* context,
     const int groups = 1);
 
+// groups must be 1 for GPU
+// For NHWC order with groups > 1, the result will be layout in
+// NHW G RS C/G order to make data within the same group to be contiguous.
+// For NCHW order, groups doesn't make any difference because we're doing Im2Col
+// for each N and C is the slowest moving dimension among CHW.
 template <typename T, class Context, StorageOrder kOrder>
 CAFFE2_API void Col2ImNd(
     const int N,
@@ -586,7 +608,8 @@ CAFFE2_API void Col2ImNd(
     const int* pad,
     const T* col_data,
     T* img_data,
-    Context* context);
+    Context* context,
+    const int groups = 1);
 
 // Applies a per-channel bias value to each channel of the input
 // image. image_size is H * W
@@ -609,7 +632,7 @@ CAFFE2_API void CopyMatrix(
     void* B,
     const int ldb,
     Context* context,
-    TypeMeta::TypedCopy copy = nullptr);
+    TypeMeta::Copy copy = nullptr);
 
 template <typename T, class Context>
 CAFFE2_API void CopyMatrix(
@@ -635,6 +658,35 @@ CAFFE2_API void CopyMatrix(
 
 template <typename T, class Context>
 CAFFE2_API void CopyVector(const int N, const T* A, T* B, Context* context);
+
+template <typename T, class Context, StorageOrder kOrder>
+CAFFE2_API void AffineChannel(
+    const int N,
+    const int C,
+    const int HxW,
+    const T* X,
+    const T* scale,
+    const T* bias,
+    T* Y,
+    Context* context);
+
+template <typename T, class Context>
+CAFFE2_API void NCHW2NHWC(
+    const int N,
+    const int C,
+    const int HxW,
+    const T* X,
+    T* Y,
+    Context* context);
+
+template <typename T, class Context>
+CAFFE2_API void NHWC2NCHW(
+    const int N,
+    const int C,
+    const int HxW,
+    const T* X,
+    T* Y,
+    Context* context);
 
 // Calculates ceil(a / b). User must be careful to ensure that there
 // is no overflow or underflow in the calculation.

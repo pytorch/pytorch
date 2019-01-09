@@ -73,38 +73,29 @@ struct WorkEntry {
 class ProcessGroupMPI : public ProcessGroup {
  public:
   class WorkMPI : public ProcessGroup::Work {
+   protected:
+    friend class ProcessGroupMPI;
+  };
+
+  class AsyncWork : public ProcessGroup::Work {
    public:
-    WorkMPI();
-    virtual ~WorkMPI();
+    AsyncWork(at::Tensor tensor, MPI_Request request);
+    virtual ~AsyncWork();
 
-    // Checks if request has completed. Non-blocking operation.
-    bool isCompleted() const override;
+    bool isCompleted() override;
 
-    // Returns if the work completed successfully
-    // if false, the exception function can be called to get details.
     bool isSuccess() const override;
 
-    // No op for the case of MPI
-    virtual void synchronize() override;
+    int sourceRank() const override;
 
-    // Waits until request completes. Blocking operation
-    // Returns false if the work completed with an exception
-    bool wait() override;
-
-    // Return the exception if wait() returned false.
-    const std::exception& exception() const override;
+    void wait() override;
 
    protected:
-    void finish();
-    void finishWithException(std::exception_ptr caughtWorkException);
+    void populateException();
 
-    std::mutex workMutex_;
-    std::condition_variable workCV_;
-    std::atomic<bool> completed_;
-
-    std::exception_ptr workException_;
-
-    friend class ProcessGroupMPI;
+    at::Tensor tensor_;
+    MPI_Request request_;
+    MPI_Status status_;
   };
 
   // Constructor will spawn up the worker thread loop
@@ -129,7 +120,8 @@ class ProcessGroupMPI : public ProcessGroup {
 
   std::shared_ptr<ProcessGroup::Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
-      std::vector<at::Tensor>& inputTensors) override;
+      std::vector<at::Tensor>& inputTensors,
+      const AllgatherOptions& opts = AllgatherOptions()) override;
 
   std::shared_ptr<ProcessGroup::Work> gather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
@@ -143,17 +135,20 @@ class ProcessGroupMPI : public ProcessGroup {
 
   std::shared_ptr<ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,
-      int dstRank);
+      int dstRank,
+      int tag);
 
   std::shared_ptr<ProcessGroup::Work> recv(
       std::vector<at::Tensor>& tensors,
-      int srcRank);
+      int srcRank,
+      int tag);
 
   std::shared_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensor,
-      int* srcRank);
+      int tag);
 
-  std::shared_ptr<ProcessGroup::Work> barrier();
+  std::shared_ptr<ProcessGroup::Work> barrier(
+      const BarrierOptions& opts = BarrierOptions()) override;
 
   std::unordered_map<int, int> getGroupRank();
 

@@ -2,6 +2,8 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
 
+// TODO: Remove the condition on AT_ROCM_ENABLED entirely,
+// don't build this file as part of CPU build.
 #include <ATen/cuda/CUDAConfig.h>
 
 #if !AT_ROCM_ENABLED()
@@ -14,7 +16,7 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
     const Tensor& input, const Tensor& weight,
     const Tensor& bias, const Tensor& running_mean, const Tensor& running_var,
     bool training, double exponential_average_factor, double epsilon) {
-  throw std::runtime_error("miopen_batch_norm: ATen not compiled with MIOpen support");
+  AT_ERROR("miopen_batch_norm: ATen not compiled with MIOpen support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
@@ -22,7 +24,7 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
     const Tensor& running_mean, const Tensor& running_var,
     const Tensor& save_mean, const Tensor& save_var,
     double epsilon) {
-  throw std::runtime_error("miopen_batch_norm_backward: ATen not compiled with MIOpen support");
+  AT_ERROR("miopen_batch_norm_backward: ATen not compiled with MIOpen support");
 }
 
 }}  // namespace at::native
@@ -67,9 +69,7 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
     checkAllDefined(c, {running_mean, running_var});
   }
   checkAllSameGPU(c, {input, weight, bias, running_mean, running_var});
-  if (input->type().scalarType() == ScalarType::Half) {
-    checkScalarType(c, weight, ScalarType::Float);
-  } else {
+  if (input->type().scalarType() != ScalarType::Half) {
     checkAllSameType(c, {input, weight});
   }
   checkAllSameType(c, {weight, bias, running_mean, running_var});
@@ -89,7 +89,7 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
     mode = miopenBNSpatial;
   }
 
-  auto output_t = input->type().tensor(input->sizes());
+  auto output_t = at::empty(input->sizes(), input->options());
   TensorArg output{ output_t, "output", 0 };
 
   auto handle = getMiopenHandle();
@@ -103,8 +103,8 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
 
   if (training) {
     int64_t num_features = input_t.size(1);
-    save_mean = weight_t.type().tensor({ num_features });
-    save_var = weight_t.type().tensor({ num_features });
+    save_mean = at::empty({ num_features }, weight_t.options());
+    save_var = at::empty({ num_features }, weight_t.options());
     MIOPEN_CHECK(miopenBatchNormalizationForwardTraining(
       handle, mode, &one, &zero,
       idesc.desc(), input->data_ptr(),
@@ -177,9 +177,9 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
     mode = miopenBNSpatial;
   }
 
-  auto grad_input_t  = input->type().tensor(input->sizes());
-  auto grad_weight_t = weight->type().tensor(weight->sizes());
-  auto grad_bias_t   = weight->type().tensor(weight->sizes());
+  auto grad_input_t  = at::empty(input->sizes(), input->options());
+  auto grad_weight_t = at::empty(weight->sizes(), weight->options());
+  auto grad_bias_t   = at::empty(weight->sizes(), weight->options());
 
   auto handle = getMiopenHandle();
   auto dataType = getMiopenDataType(*input);

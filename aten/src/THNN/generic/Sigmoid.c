@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/Sigmoid.c"
+#define TH_GENERIC_FILE "THNN/generic/Sigmoid.c"
 #else
 
 void THNN_(Sigmoid_updateOutput)(
@@ -18,8 +18,8 @@ void THNN_(Sigmoid_updateGradInput)(
 {
   THNN_CHECK_NELEMENT(output, gradOutput);
   THTensor_(resizeAs)(gradInput, output);
-  TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, output,
-    real z = *output_data;
+  TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, gradOutput, scalar_t, output,
+    scalar_t z = *output_data;
     *gradInput_data = *gradOutput_data * (1. - z) * z;
   );
 }

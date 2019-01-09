@@ -1,12 +1,5 @@
-# TODO(orionr): Enable all of this for Windows DLL when we
-# can figure out how to get it to build
-if (MSVC AND BUILD_SHARED_LIBS)
-list(APPEND Caffe2_CPU_SRCS	utils/proto_wrap.cc)
-set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} PARENT_SCOPE)
-return()
-endif()
-
 list(APPEND Caffe2_CPU_SRCS
+  utils/proto_convert.cc
   utils/proto_wrap.cc
   utils/proto_utils.cc
   utils/murmur_hash3.cc
@@ -35,7 +28,7 @@ set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS}
         )
 
 set(Caffe2_HIP_SRCS ${Caffe2_HIP_SRCS}
-        utils/hip/math_hip.cc
+        utils/hip/math_gpu.hip
         )
 
 set(Caffe2_CPU_TEST_SRCS ${Caffe2_CPU_TEST_SRCS}
@@ -54,18 +47,14 @@ set(Caffe2_GPU_TEST_SRCS ${Caffe2_GPU_TEST_SRCS}
         )
 
 set(Caffe2_HIP_TEST_SRCS ${Caffe2_HIP_TEST_SRCS}
-        utils/hip/math_hip_test.cc
-        utils/hip/math_blas_hip_test.cc
+        utils/hip/math_gpu_test.cc
+        utils/hip/math_blas_gpu_test.cc
         )
 
 # TODO Remove the CMake_xxx variables above and add them to the variables for the local library target below instead
 
 set(LIB_SOURCES_CPU
-        Array.cpp
-        Optional.cpp
-        Metaprogramming.cpp
-        TypeList.cpp
-        TypeTraits.cpp
+        dummy.cpp
         )
 
 set(LIB_SOURCES_GPU
@@ -77,10 +66,6 @@ set(LIB_SOURCES_HIP
         )
 
 set(TEST_SOURCES_CPU
-        Array_test.cpp
-        Metaprogramming_test.cpp
-        TypeList_test.cpp
-        TypeTraits_test.cpp
         )
 
 set(LIB_SOURCES_GPU

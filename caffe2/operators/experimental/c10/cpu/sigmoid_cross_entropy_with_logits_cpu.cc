@@ -1,9 +1,9 @@
-#include "caffe2/core/dispatch/KernelRegistration.h"
+#include <c10/core/dispatch/KernelRegistration.h>
 #include "caffe2/operators/experimental/c10/schemas/sigmoid_cross_entropy_with_logits.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/core/tensor.h"
 
 using caffe2::Tensor;
-using caffe2::TIndex;
 
 namespace caffe2 {
 namespace {
@@ -26,22 +26,26 @@ inline float unjoined_sigmoid_xent_forward(float lgt, float tgt) {
 }
 
 void sigmoid_cross_entropy_with_logits_op_cpu_impl(
-    const Tensor& logits,
-    const Tensor& targets,
-    Tensor* out,
+    const C10Tensor& logits_,
+    const C10Tensor& targets_,
+    const C10Tensor& out_,
     bool log_D_trick,
     bool unjoined_lr_loss) {
-  CAFFE_ENFORCE_EQ(logits.dims(), targets.dims());
-  const auto inner_size = logits.ndim() > 0 ? logits.dims().back() : 1;
-  const auto outer_size = logits.size() / inner_size;
+  Tensor logits(logits_);
+  Tensor targets(targets_);
+  Tensor out(out_);
 
-  if (logits.ndim() == 0) {
-    out->Resize(std::vector<TIndex>{});
+  CAFFE_ENFORCE_EQ(logits.sizes(), targets.sizes());
+  const auto inner_size = logits.dim() > 0 ? logits.sizes().back() : 1;
+  const auto outer_size = logits.numel() / inner_size;
+
+  if (logits.dim() == 0) {
+    out.Resize(std::vector<int64_t>{});
   } else {
-    std::vector<TIndex> dims(logits.dims().begin(), logits.dims().end() - 1);
-    out->Resize(dims);
+    std::vector<int64_t> dims(logits.sizes().begin(), logits.sizes().end() - 1);
+    out.Resize(dims);
   }
-  auto* out_ptr = out->mutable_data<float>();
+  auto* out_ptr = out.mutable_data<float>();
 
   auto* logits_ptr = logits.data<float>();
   auto* targets_ptr = targets.data<float>();

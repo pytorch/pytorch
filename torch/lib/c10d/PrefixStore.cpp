@@ -1,4 +1,4 @@
-#include "PrefixStore.hpp"
+#include <c10d/PrefixStore.hpp>
 
 namespace c10d {
 
@@ -36,6 +36,11 @@ int64_t PrefixStore::add(const std::string& key, int64_t value) {
 bool PrefixStore::check(const std::vector<std::string>& keys) {
   auto joinedKeys = joinKeys(keys);
   return store_.check(joinedKeys);
+}
+
+void PrefixStore::wait(const std::vector<std::string>& keys) {
+  auto joinedKeys = joinKeys(keys);
+  store_.wait(joinedKeys);
 }
 
 void PrefixStore::wait(

@@ -679,7 +679,7 @@ void NNApi::init(const TensorVector& inputs, TensorVector* outputs) {
         output_dims.push_back(dim);
       }
 
-      auto* tensor = ws_.CreateBlob(blob)->GetMutableTensor(CPU);
+      auto* tensor = BlobGetMutableTensor(ws_.CreateBlob(blob), CPU);
       tensor->Resize(output_dims);
       outputs->push_back(tensor);
 

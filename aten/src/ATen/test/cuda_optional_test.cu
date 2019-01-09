@@ -1,22 +1,23 @@
-#define CATCH_CONFIG_MAIN
-#include "catch.hpp"
+#include <gtest/gtest.h>
 
-#include "ATen/ATen.h"
-#include "ATen/optional.h"
+#include <ATen/ATen.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <c10/util/Optional.h>
 
 #include <assert.h>
 
 using namespace at;
 
-TEST_CASE( "optional in cuda files", "[cuda]" ) {
-  at::optional<int64_t> trivially_destructible;
-  at::optional<std::vector<int64_t>> non_trivially_destructible;
-  REQUIRE(!trivially_destructible.has_value());
-  REQUIRE(!non_trivially_destructible.has_value());
+// optional in cuda files
+TEST(OptionalTest, OptionalTestCUDA) {
+  if (!at::cuda::is_available()) return;
+  c10::optional<int64_t> trivially_destructible;
+  c10::optional<std::vector<int64_t>> non_trivially_destructible;
+  ASSERT_FALSE(trivially_destructible.has_value());
+  ASSERT_FALSE(non_trivially_destructible.has_value());
 
   trivially_destructible = {5};
   non_trivially_destructible = std::vector<int64_t>{5, 10};
-  REQUIRE(trivially_destructible.has_value());
-  REQUIRE(non_trivially_destructible.has_value());
+  ASSERT_TRUE(trivially_destructible.has_value());
+  ASSERT_TRUE(non_trivially_destructible.has_value());
 }
-

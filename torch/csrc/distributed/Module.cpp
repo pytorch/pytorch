@@ -1,16 +1,16 @@
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 
 #include <memory>
 #include <unordered_map>
 #include <vector>
 
-#include "torch/csrc/utils/python_strings.h"
-#include "THDP.h"
-#include "torch/csrc/PythonTypes.h"
-#include "torch/csrc/autograd/python_variable.h"
+#include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/distributed/THDP.h>
+#include <torch/csrc/PythonTypes.h>
+#include <torch/csrc/autograd/python_variable.h>
 
 #ifdef USE_CUDA
-#include "torch/csrc/cuda/Stream.h"
+#include <torch/csrc/cuda/Stream.h>
 #endif
 
 
@@ -121,7 +121,7 @@ static THDReduceOp _getReduceOp(PyObject *obj)
   auto it = obj2reduceop.find(obj);
   if (it == obj2reduceop.end()) {
     throw std::runtime_error("op should be a constant from "
-        "torch.distributed.reduce_op");
+        "torch.distributed.deprecated.reduce_op");
   }
   return it->second;
 }
@@ -132,7 +132,7 @@ static THDGroup _getGroup(PyObject *obj)
   if (it == obj2group.end()) {
     if (!THPUtils_checkLong(obj))
       throw std::runtime_error("group should be an int or one of the values "
-          "from torch.distributed.group");
+          "from torch.distributed.deprecated.group");
     return THPUtils_unpackLong(obj);
   }
   return it->second;

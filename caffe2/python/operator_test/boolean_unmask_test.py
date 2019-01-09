@@ -3,16 +3,15 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-import numpy as np
-from hypothesis import given
-import hypothesis.strategies as st
-
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
+import hypothesis.strategies as st
+import numpy as np
 
 
-class TestUnmaskOp(hu.HypothesisTestCase):
-    @given(N=st.integers(min_value=2, max_value=20),
+class TestUnmaskOp(serial.SerializedTestCase):
+    @serial.given(N=st.integers(min_value=2, max_value=20),
            dtype=st.sampled_from([
                np.bool_,
                np.int8,

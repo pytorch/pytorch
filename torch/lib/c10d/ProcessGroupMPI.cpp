@@ -1,8 +1,10 @@
-#include "ProcessGroupMPI.hpp"
+#include <c10d/ProcessGroupMPI.hpp>
 
 #include <map>
 
+#if defined(OPEN_MPI) && OPEN_MPI
 #include <mpi-ext.h> // Needed for CUDA-aware check
+#endif
 
 namespace c10d {
 
@@ -37,7 +39,8 @@ std::map<at::ScalarType, MPI_Datatype> mpiDatatype = {
     {at::kShort, MPI_SHORT},
 };
 
-// Checking CUDA-aware MPI support
+// Checking CUDA-aware MPI support, currently we only support CUDA aware
+// MPI ops through Open MPI
 bool cudaAwareMpiCheck() {
 // Run time check
 #if defined(MPIX_CUDA_AWARE_SUPPORT)
@@ -88,53 +91,74 @@ void checkSameSizeAndType(
 
 } // namespace
 
-// ProcessGroupMPI::WorkMPI
-ProcessGroupMPI::WorkMPI::WorkMPI() : completed_(false) {}
-
-ProcessGroupMPI::WorkMPI::~WorkMPI() {}
-
-bool ProcessGroupMPI::WorkMPI::isCompleted() const {
-  return completed_;
+ProcessGroupMPI::AsyncWork::AsyncWork(at::Tensor tensor, MPI_Request request)
+    : tensor_(std::move(tensor)), request_(request) {
+  memset(&status_, 0, sizeof(status_));
 }
 
-bool ProcessGroupMPI::WorkMPI::isSuccess() const {
-  return !workException_;
-}
-
-void ProcessGroupMPI::WorkMPI::synchronize() {}
-
-bool ProcessGroupMPI::WorkMPI::wait() {
-  std::unique_lock<std::mutex> lock(workMutex_);
-  while (!completed_) {
-    workCV_.wait(lock);
+ProcessGroupMPI::AsyncWork::~AsyncWork() {
+  if (request_ != MPI_REQUEST_NULL) {
+    std::cerr
+        << "Attempted destruction of AsyncWork before work has completed, "
+        << "terminating the program." << std::endl;
+    std::terminate();
   }
-  return isSuccess();
 }
 
-void ProcessGroupMPI::WorkMPI::finish() {
-  {
-    std::unique_lock<std::mutex> lock(workMutex_);
-    completed_ = true;
+bool ProcessGroupMPI::AsyncWork::isCompleted() {
+  if (request_ == MPI_REQUEST_NULL) {
+    return true;
   }
-  workCV_.notify_all();
+
+  std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
+  int flag = 0;
+  MPI_CHECK(MPI_Test(&request_, &flag, &status_));
+  if (request_ != MPI_REQUEST_NULL) {
+    return false;
+  }
+
+  // request_ == MPI_REQUEST_NULL; the work has completed
+  // Populate exception if request was not successful
+  if (status_.MPI_ERROR != MPI_SUCCESS) {
+    populateException();
+  }
+
+  return true;
 }
 
-void ProcessGroupMPI::WorkMPI::finishWithException(
-    std::exception_ptr caughtWorkException) {
-  {
-    std::unique_lock<std::mutex> lock(workMutex_);
-    completed_ = true;
-    workException_ = caughtWorkException;
+bool ProcessGroupMPI::AsyncWork::isSuccess() const {
+  if (request_ != MPI_REQUEST_NULL) {
+    throw std::runtime_error(
+        "Invalid call to AsyncWork::isSuccess before work has completed");
   }
-  workCV_.notify_all();
+
+  return status_.MPI_ERROR == MPI_SUCCESS;
 }
 
-const std::exception& ProcessGroupMPI::WorkMPI::exception() const {
-  try {
-    std::rethrow_exception(workException_);
-  } catch (const std::exception& e) {
-    return e;
+int ProcessGroupMPI::AsyncWork::sourceRank() const {
+  return status_.MPI_SOURCE;
+}
+
+void ProcessGroupMPI::AsyncWork::wait() {
+  if (request_ == MPI_REQUEST_NULL) {
+    return;
   }
+
+  std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
+  MPI_CHECK(MPI_Wait(&request_, &status_));
+  auto ok = (status_.MPI_ERROR == MPI_SUCCESS);
+  if (!ok) {
+    populateException();
+    std::rethrow_exception(exception_);
+  }
+}
+
+void ProcessGroupMPI::AsyncWork::populateException() {
+  std::array<char, MPI_MAX_ERROR_STRING> buf;
+  int len = buf.size();
+  MPI_CHECK(MPI_Error_string(status_.MPI_ERROR, buf.data(), &len));
+  exception_ =
+      std::make_exception_ptr(std::runtime_error(std::string(buf.data(), len)));
 }
 
 // Static global states
@@ -181,33 +205,31 @@ std::shared_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(
   MPI_CHECK(MPI_Comm_size(MPI_COMM_WORLD, &size));
   MPI_CHECK(MPI_Comm_rank(MPI_COMM_WORLD, &rank));
 
-  globalLock.unlock();
-
   if (rank < 0 || size < 0) {
     throw std::runtime_error("Failed to get the world_size / rank");
   }
 
+  // If no ranks are specified, assume we're creating the root group
   if (ranks.empty()) {
-    return std::make_shared<ProcessGroupMPI>(rank, size, MPI_COMM_WORLD);
-  } else {
-    std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
-
-    MPI_Group worldGroup;
-    MPI_CHECK(MPI_Comm_group(MPI_COMM_WORLD, &worldGroup));
-
-    MPI_Group ranksGroup;
-    MPI_CHECK(
-        MPI_Group_incl(worldGroup, ranks.size(), ranks.data(), &ranksGroup));
-
-    MPI_Comm groupComm;
-    MPI_CHECK(MPI_Comm_create(MPI_COMM_WORLD, ranksGroup, &groupComm));
-
-    MPI_CHECK(MPI_Group_free(&worldGroup));
-    MPI_CHECK(MPI_Group_free(&ranksGroup));
-
     globalLock.unlock();
-    return std::make_shared<ProcessGroupMPI>(rank, size, groupComm);
+    return std::make_shared<ProcessGroupMPI>(rank, size, MPI_COMM_WORLD);
   }
+
+  MPI_Group worldGroup;
+  MPI_CHECK(MPI_Comm_group(MPI_COMM_WORLD, &worldGroup));
+
+  MPI_Group ranksGroup;
+  MPI_CHECK(
+      MPI_Group_incl(worldGroup, ranks.size(), ranks.data(), &ranksGroup));
+
+  MPI_Comm groupComm;
+  MPI_CHECK(MPI_Comm_create(MPI_COMM_WORLD, ranksGroup, &groupComm));
+
+  MPI_CHECK(MPI_Group_free(&worldGroup));
+  MPI_CHECK(MPI_Group_free(&ranksGroup));
+
+  globalLock.unlock();
+  return std::make_shared<ProcessGroupMPI>(rank, size, groupComm);
 }
 
 ProcessGroupMPI::ProcessGroupMPI(int rank, int size, MPI_Comm pgComm)
@@ -299,7 +321,7 @@ void ProcessGroupMPI::runLoop() {
       workEntry->run(workEntry);
       work->finish();
     } catch (...) {
-      work->finishWithException(std::current_exception());
+      work->finish(std::current_exception());
     }
 
     lock.lock();
@@ -395,7 +417,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::reduce(
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
-    std::vector<at::Tensor>& inputTensors) {
+    std::vector<at::Tensor>& inputTensors,
+    const AllgatherOptions& opts) {
   if (pgComm_ == MPI_COMM_NULL) {
     return nullptr;
   }
@@ -447,17 +470,16 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
   }
   checkSingleTensor(inputTensors);
 
-  if (outputTensors.size() != 1) {
-    throw std::runtime_error("Gather: multi-GPU collective is not supported");
-  }
-
   if (groupRank_ != opts.rootRank) {
-    if (outputTensors[0].size() > 0) {
+    if (outputTensors.size() > 0) {
       throw std::runtime_error(
           "Gather: number of output tensors should be 0 "
           "for non-root");
     }
   } else {
+    if (outputTensors.size() != 1) {
+      throw std::runtime_error("Gather: multi-GPU collective is not supported");
+    }
     if (static_cast<size_t>(groupSize_) != outputTensors[0].size()) {
       throw std::runtime_error(
           "Gather: number of output tensors should equal "
@@ -516,17 +538,17 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
     return nullptr;
   }
   checkSingleTensor(outputTensors);
-  if (inputTensors.size() != 1) {
-    throw std::runtime_error("Scatter: multi-GPU collective is not supported");
-  }
 
   if (groupRank_ != opts.rootRank) {
-    if (inputTensors[0].size() > 0) {
+    if (inputTensors.size() > 0) {
       throw std::runtime_error(
           "Scatter: number of input tensors should be 0 "
           "for non-root");
     }
   } else {
+    if (inputTensors.size() != 1) {
+      throw std::runtime_error("Scatter: multi-GPU collective is not supported");
+    }
     if (static_cast<size_t>(groupSize_) != inputTensors[0].size()) {
       throw std::runtime_error(
           "Scatter: number of input tensors should equal "
@@ -577,85 +599,89 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::send(
     std::vector<at::Tensor>& tensors,
-    int dstRank) {
+    int dstRank,
+    int tag) {
   if (pgComm_ == MPI_COMM_NULL) {
     return nullptr;
   }
-  checkSingleTensor(tensors);
-  std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
-      [dstRank, this](std::unique_ptr<WorkEntry>& entry) {
-        auto data = (entry->src)[0];
 
-        std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
-        MPI_CHECK(MPI_Send(
-            data.data_ptr(),
-            data.numel(),
-            mpiDatatype.at(data.type().scalarType()),
-            dstRank,
-            0,
-            pgComm_));
-      };
-  auto entry = std::unique_ptr<WorkEntry>(
-      new WorkEntry(&tensors, nullptr, std::move(runFunc)));
-  return enqueue(std::move(entry));
+  checkSingleTensor(tensors);
+
+  auto& tensor = tensors[0];
+  MPI_Request request = MPI_REQUEST_NULL;
+
+  {
+    std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
+    MPI_CHECK(MPI_Isend(
+        tensor.data_ptr(),
+        tensor.numel(),
+        mpiDatatype.at(tensor.type().scalarType()),
+        dstRank,
+        tag,
+        pgComm_,
+        &request));
+  }
+
+  return std::make_shared<AsyncWork>(tensor, request);
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recv(
     std::vector<at::Tensor>& tensors,
-    int srcRank) {
+    int srcRank,
+    int tag) {
   if (pgComm_ == MPI_COMM_NULL) {
     return nullptr;
   }
-  checkSingleTensor(tensors);
-  std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
-      [srcRank, this](std::unique_ptr<WorkEntry>& entry) {
-        auto data = (entry->src)[0];
 
-        std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
-        MPI_CHECK(MPI_Recv(
-            data.data_ptr(),
-            data.numel(),
-            mpiDatatype.at(data.type().scalarType()),
-            srcRank,
-            0,
-            pgComm_,
-            MPI_STATUS_IGNORE));
-      };
-  auto entry = std::unique_ptr<WorkEntry>(
-      new WorkEntry(&tensors, nullptr, std::move(runFunc)));
-  return enqueue(std::move(entry));
+  checkSingleTensor(tensors);
+
+  auto& tensor = tensors[0];
+  MPI_Request request = MPI_REQUEST_NULL;
+
+  {
+    std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
+    MPI_CHECK(MPI_Irecv(
+        tensor.data_ptr(),
+        tensor.numel(),
+        mpiDatatype.at(tensor.type().scalarType()),
+        srcRank,
+        tag,
+        pgComm_,
+        &request));
+  }
+
+  return std::make_shared<AsyncWork>(tensor, request);
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recvAnysource(
     std::vector<at::Tensor>& tensors,
-    int* srcRank) {
+    int tag) {
   if (pgComm_ == MPI_COMM_NULL) {
     return nullptr;
   }
-  checkSingleTensor(tensors);
-  std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
-      [srcRank, this](std::unique_ptr<WorkEntry>& entry) {
-        auto data = (entry->src)[0];
-        MPI_Status status;
 
-        std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
-        MPI_CHECK(MPI_Recv(
-            data.data_ptr(),
-            data.numel(),
-            mpiDatatype.at(data.type().scalarType()),
-            MPI_ANY_SOURCE,
-            0,
-            pgComm_,
-            &status));
-        *(entry->srcRank) = status.MPI_SOURCE;
-      };
-  auto entry = std::unique_ptr<WorkEntry>(
-      new WorkEntry(&tensors, nullptr, std::move(runFunc)));
-  entry->srcRank = srcRank;
-  return enqueue(std::move(entry));
+  checkSingleTensor(tensors);
+
+  auto& tensor = tensors[0];
+  MPI_Request request = MPI_REQUEST_NULL;
+
+  {
+    std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
+    MPI_CHECK(MPI_Irecv(
+        tensor.data_ptr(),
+        tensor.numel(),
+        mpiDatatype.at(tensor.type().scalarType()),
+        MPI_ANY_SOURCE,
+        tag,
+        pgComm_,
+        &request));
+  }
+
+  return std::make_shared<AsyncWork>(tensor, request);
 }
 
-std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::barrier() {
+std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::barrier(
+    const BarrierOptions& opts) {
   if (pgComm_ == MPI_COMM_NULL) {
     return nullptr;
   }

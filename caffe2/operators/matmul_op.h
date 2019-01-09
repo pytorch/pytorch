@@ -22,7 +22,6 @@ class MatMulOp final : public Operator<Context> {
   bool RunOnDevice() override {
     const auto& A = Input(0);
     const auto& B = Input(1);
-    auto* Y = Output(0);
 
     const auto canonical_axis_a = A.canonical_axis_index(axis_a_);
     const auto canonical_axis_b = B.canonical_axis_index(axis_b_);
@@ -50,7 +49,7 @@ class MatMulOp final : public Operator<Context> {
     }
 
     auto dimErrorString = [&]() {
-      return MakeString(
+      return c10::str(
           "Dimension mismatch: ",
           trans_a_ ? "trans(A): " : "A: ",
           a_dim0,
@@ -66,8 +65,8 @@ class MatMulOp final : public Operator<Context> {
 
     Y_shape_cache_[0] = a_dim0;
     Y_shape_cache_[1] = b_dim1;
-    Y->Resize(Y_shape_cache_);
-    CAFFE_ENFORCE(a_dim0 * b_dim1 == Y->size(), dimErrorString());
+    auto* Y = Output(0, Y_shape_cache_, at::dtype<T>());
+    CAFFE_ENFORCE(a_dim0 * b_dim1 == Y->numel(), dimErrorString());
     // Y = A * B
     math::Gemm<T, Context, Engine>(
         trans_a_ ? CblasTrans : CblasNoTrans,
@@ -92,7 +91,7 @@ class MatMulOp final : public Operator<Context> {
  protected:
   // A local vector to cache the output shape so we don't need to recreate
   // a vector object every time we run Run().
-  vector<TIndex> Y_shape_cache_{0, 0};
+  vector<int64_t> Y_shape_cache_{0, 0};
   int axis_a_{1};
   int axis_b_{1};
   bool trans_a_;

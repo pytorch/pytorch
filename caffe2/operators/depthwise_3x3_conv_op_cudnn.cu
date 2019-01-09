@@ -455,8 +455,8 @@ class Depthwise3x3ConvGradientOp final : public ConvPoolOpBase<CUDAContext> {
           M,
           dY.dim32(2),
           dY.dim32(3)));
-      auto* dbias = Output(BIAS_OR_INPUT_GRAD);
-      dbias->Resize(M);
+      
+      auto* dbias = Output(BIAS_OR_INPUT_GRAD, {M}, at::dtype<float>());
       CUDNN_ENFORCE(cudnnConvolutionBackwardBias(
           cudnn_wrapper_.inline_cudnn_handle(),
           cudnnTypeWrapper<float>::kOne(),

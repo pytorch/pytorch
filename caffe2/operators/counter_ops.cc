@@ -139,10 +139,11 @@ class CounterSerializer : public BlobSerializerBase {
   ~CounterSerializer() {}
 
   void Serialize(
-      const Blob& blob,
+      const void* pointer,
+      TypeMeta typeMeta,
       const string& name,
       SerializationAcceptor acceptor) override {
-    CAFFE_ENFORCE(blob.IsType<std::unique_ptr<Counter<int64_t>>>());
+    CAFFE_ENFORCE(typeMeta.Match<std::unique_ptr<Counter<int64_t>>>());
 
     BlobProto blob_proto;
     blob_proto.set_name(name);
@@ -152,8 +153,9 @@ class CounterSerializer : public BlobSerializerBase {
     proto.set_data_type(TensorProto_DataType_INT64);
     proto.add_dims(1);
     proto.add_int64_data(
-        blob.template Get<std::unique_ptr<Counter<int64_t>>>()->retrieve());
-    acceptor(name, blob_proto.SerializeAsString());
+        (*static_cast<const std::unique_ptr<Counter<int64_t>>*>(pointer))
+            ->retrieve());
+    acceptor(name, SerializeBlobProtoAsString_EnforceCheck(blob_proto));
   }
 };
 
