@@ -11,7 +11,7 @@ set BASIC_C_FLAGS=
 set BASIC_CUDA_FLAGS=
 
 IF NOT DEFINED INSTALL_DIR (
-  set "INSTALL_DIR=%cd:\=/%/torch/lib/tmp_install"
+  set "INSTALL_DIR=%cd:\=/%/torch/"
 ) ELSE (
   set "INSTALL_DIR=%INSTALL_DIR:\=/%"
 )
@@ -22,8 +22,6 @@ set LDFLAGS=/LIBPATH:%INSTALL_DIR%/lib
 set C_FLAGS=%BASIC_C_FLAGS% /D_WIN32 /Z7 /EHa /DNOMINMAX
 set LINK_FLAGS=/DEBUG:FULL
 : End cmake variables
-
-if not exist torch\lib\tmp_install mkdir torch\lib\tmp_install
 
 : Variable defaults
 set /a USE_CUDA=0
@@ -146,7 +144,6 @@ FOR %%a IN (%_BUILD_ARGS%) DO (
 : Copy Artifacts
 cd torch\lib
 
-copy /Y "%INSTALL_DIR%\lib\*" .
 IF EXIST "%INSTALL_DIR%\bin" (
   copy /Y "%INSTALL_DIR%\bin\*" .
 )

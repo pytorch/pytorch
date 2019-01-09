@@ -131,7 +131,7 @@ fi
 
 BASE_DIR=$(cd $(dirname "$0")/.. && printf "%q\n" "$(pwd)")
 TORCH_LIB_DIR="$BASE_DIR/torch/lib"
-INSTALL_DIR="$TORCH_LIB_DIR/tmp_install"
+INSTALL_DIR="$BASE_DIR/torch"
 THIRD_PARTY_DIR="$BASE_DIR/third_party"
 
 C_FLAGS=""
@@ -174,13 +174,6 @@ elif [[ -n "$REL_WITH_DEB_INFO" && $REL_WITH_DEB_INFO -ne 0 ]]; then
 fi
 
 report "Building in $BUILD_TYPE mode"
-
-function path_remove {
-  # Delete path by parts so we can never accidentally remove sub paths
-  PATH=${PATH//":$1:"/":"} # delete any instances in the middle
-  PATH=${PATH/#"$1:"/} # delete any instance at the beginning
-  PATH=${PATH/%":$1"/} # delete any instance in the at the end
-}
 
 # purposefully not using build() because we need Caffe2 to build the same
 # regardless of whether it is inside PyTorch or not, so it
@@ -297,19 +290,10 @@ function build_caffe2() {
   fi
 }
 
-# In the torch/lib directory, create an installation directory
-mkdir -p $INSTALL_DIR
+build_caffe2
 
-# Build
-for arg in "$@"; do
-    if [[ "$arg" == "caffe2" ]]; then
-        build_caffe2
-    else
-        pushd "$THIRD_PARTY_DIR"
-        build $arg
-        popd
-    fi
-done
+# see discussion in https://github.com/pytorch/pytorch/pull/15883
+# about eventually removing all these copies
 
 pushd $TORCH_LIB_DIR > /dev/null
 
@@ -320,11 +304,11 @@ report "removing $INSTALL_DIR/lib/cmake and $INSTALL_DIR/lib/python"
 rm -rf "$INSTALL_DIR/lib/cmake"
 rm -rf "$INSTALL_DIR/lib/python"
 
-report "Copying $INSTALL_DIR/lib to $(pwd)"
-$SYNC_COMMAND -r "$INSTALL_DIR/lib"/* .
+report "Copying $INSTALL_DIR/lib64 to $(pwd)"
 if [ -d "$INSTALL_DIR/lib64/" ]; then
     $SYNC_COMMAND -r "$INSTALL_DIR/lib64"/* .
 fi
+
 report "Copying $(cd ../.. && pwd)/aten/src/generic/THNN.h to $(pwd)"
 $SYNC_COMMAND ../../aten/src/THNN/generic/THNN.h .
 $SYNC_COMMAND ../../aten/src/THCUNN/generic/THCUNN.h .
