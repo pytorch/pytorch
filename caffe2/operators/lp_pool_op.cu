@@ -13,9 +13,6 @@ struct LpPoolFunctor {
 
 namespace {
 
-using c10::cuda::compat::abs;
-using c10::cuda::compat::pow;
-
 template <typename T>
 __global__ void LpPoolForwardNCHW(
     const int nthreads,
