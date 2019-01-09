@@ -326,7 +326,7 @@ bool ConvDNNLowPPackWeightOp::TakeDepthWise3x3FastPath_() {
       kernel_h() == 3 && kernel_w() == 3 && stride_h() == stride_w() &&
       (stride_h() == 1 || stride_h() == 2) && dilation_h() == 1 &&
       dilation_w() == 1 && pad_t() == 1 && pad_b() == 1 && pad_l() == 1 &&
-      pad_r() == 1 && GetCpuId().avx2() && !quantize_groupwise_;
+      pad_r() == 1 && GetCpuId().avx2();
 }
 
 bool ConvDNNLowPPackWeightOp::TakeDepthWise3x3x3FastPath_() {
@@ -345,7 +345,7 @@ bool ConvDNNLowPPackWeightOp::TakeDepthWise3x3x3FastPath_() {
       this->dilation_[2] == 1 &&
       accumulate(
           this->pads_.begin(), this->pads_.end(), 1, multiplies<int>()) == 1 &&
-      GetCpuId().avx2() && !quantize_groupwise_;
+      GetCpuId().avx2();
   return ret;
 }
 
