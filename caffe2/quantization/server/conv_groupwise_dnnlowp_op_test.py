@@ -28,8 +28,6 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
         output_channels_per_group=st.integers(2, 16),
         batch_size=st.integers(1, 3),
         order=st.sampled_from(["NCHW", "NHWC"]),
-        in_quantized=st.booleans(),
-        out_quantized=st.booleans(),
         prepack_weight=st.booleans(),
         preserve_activation_sparsity=st.booleans(),
         preserve_weight_sparsity=st.booleans(),
@@ -47,8 +45,6 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
         output_channels_per_group,
         batch_size,
         order,
-        in_quantized,
-        out_quantized,
         prepack_weight,
         preserve_activation_sparsity,
         preserve_weight_sparsity,
@@ -88,8 +84,8 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
             init_net = core.Net("test_init_net")
             net = core.Net("test_net")
 
-            do_quantize = "DNNLOWP" in engine and in_quantized
-            do_dequantize = "DNNLOWP" in engine and out_quantized
+            do_quantize = "DNNLOWP" in engine
+            do_dequantize = "DNNLOWP" in engine
             do_prepack_weight = engine == "DNNLOWP" and prepack_weight
 
             if do_quantize:
@@ -135,7 +131,6 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
                 dilation=dilation,
                 pad=pad,
                 order=order,
-                dequantize_output=not do_dequantize,
                 preserve_activation_sparsity=preserve_activation_sparsity,
                 preserve_weight_sparsity=preserve_weight_sparsity,
                 engine=engine,
