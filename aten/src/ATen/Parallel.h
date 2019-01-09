@@ -81,6 +81,22 @@ inline void parallel_for(
 #endif
 }
 
+/*
+Parallel_reduce takes a function that allows you to do a reduction over a
+section of the input (f), a function that is able to combine these partial
+results (sf) and an identity (ident).
+
+For example, you might have a tensor of 10000 entires and want to sum together
+all the elements. Parallel_reduce with a grain_size of 2500 will then allocate
+an intermediate result tensor with 4 elements. Then it will execute the function
+"f" you provide on each of these chunks of 2500 values, so 0-24999, 2500-4999,
+etc. It will write out the result from each of these chunks into the
+intermediate result tensor. After that it'll reduce the partial results from
+each chunk into a single number using the combination function sf and the
+identity ident, which for sum would be "+". This is similar to tbb's approach,
+where you need to provide a function to accumulate a subrange, a function to
+combine two partial results and an identity.
+*/
 template <class scalar_t, class F, class SF>
 inline scalar_t parallel_reduce(
     const int64_t begin,
