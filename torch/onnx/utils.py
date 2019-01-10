@@ -510,14 +510,16 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 elif n.kindOf("value") == "is":
                     value = torch.stack([torch.tensor(v) for v in n["value"]]) if n["value"] else []
                     return g.op("Constant", value_t=value)
+                elif n.output().type().kind() == "DeviceObjType":
+                    return None
                 else:
                     raise RuntimeError("Unsupported prim::Constant kind: `{}`. Send a bug report.".format(
                         n.kindOf("value")))
-            elif op_name == "Undefined" or op_name == "None" or op_name == "ListConstruct":
+            elif op_name == "Undefined" or op_name == "None" or op_name == "ListConstruct" or op_name == "ListUnpack":
                 # Undefined/None is not an ONNX operator; keep it as prim::Undefined/
                 # prim::None and let the exporter handle finally eliminating these
 
-                # For ListConstruct, it will be erased in the ONNX peephole pass
+                # For ListConstruct/ListUnpack, it will be erased in the ONNX peephole pass
                 return None
             elif op_name == 'Loop' or op_name == 'If':
                 new_op_outputs = g.op(op_name, *inputs, outputs=n.outputsSize())

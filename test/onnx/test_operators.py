@@ -179,6 +179,14 @@ class TestOperators(TestCase):
         x = torch.tensor([0.0, 1.0, 2.0], requires_grad=True)
         self.assertONNX(lambda x: x.chunk(2), x)
 
+    def test_split(self):
+        x = torch.tensor([[0.0, 1.0, 1.0, 0.0, 2.0, 2.0], [2.0, 3.0, 3.0, 2.0, 1.0, 1.0]])
+        self.assertONNX(lambda x: torch.split(x, 2, 1), x)
+
+    def test_split_with_sizes(self):
+        x = torch.tensor([[0.0, 1.0, 1.0, 0.0, 2.0, 2.0], [2.0, 3.0, 3.0, 2.0, 1.0, 1.0]])
+        self.assertONNX(lambda x: torch.split(x, [2, 1, 3], 1), x)
+
     def test_concat2(self):
         x = torch.randn(2, 3)
         y = torch.randn(2, 3)
@@ -291,6 +299,11 @@ class TestOperators(TestCase):
     def test_full(self):
         x = torch.randn(3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.full(x.shape, 2), x)
+
+    @skipIfCI
+    def test_full_like(self):
+        x = torch.randn(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: torch.full_like(x, 2), x)
 
     def test_max(self):
         x = torch.randn(3, 4, requires_grad=True)
@@ -462,6 +475,45 @@ class TestOperators(TestCase):
     def test_randn(self):
         x = torch.randn(1, 2, 3, 4)
         self.assertONNX(lambda x: torch.randn(1, 2, 3, 4) + x, x)
+
+    def test_rrelu(self):
+        x = torch.randn(1, 2, 3, 4)
+        self.assertONNX(torch.nn.RReLU(), x)
+
+    def test_log_sigmoid(self):
+        x = torch.randn(1, 2, 3, 4)
+        self.assertONNX(torch.nn.LogSigmoid(), x)
+
+    def test_linear(self):
+        x = torch.randn(3, 4)
+        self.assertONNX(torch.nn.Linear(4, 5, bias=True), x)
+
+    @skipIfCI
+    def test_zeros_like(self):
+        x = torch.randn(5, 8, requires_grad=True)
+        self.assertONNX(lambda x: torch.zeros_like(x), x)
+
+    @skipIfCI
+    def test_ones_like(self):
+        x = torch.randn(6, 10, requires_grad=True)
+        self.assertONNX(lambda x: torch.ones_like(x), x)
+
+    def test_expand(self):
+        x = torch.randn(6, 1, requires_grad=True)
+        self.assertONNX(lambda x: x.expand(4, 6, 2), x)
+
+    def test_ne(self):
+        x = torch.randn(1, 2, 3, 1, requires_grad=False).int()
+        y = torch.randn(1, 4, requires_grad=False).int()
+        self.assertONNX(lambda x, y: torch.ne(x, y), (x, y))
+
+    def test_reducemax(self):
+        x = torch.randn(1, 2, 3, 4)
+        self.assertONNX(lambda x: torch.max(x), x)
+
+    def test_reducemin(self):
+        x = torch.randn(1, 2, 3, 4)
+        self.assertONNX(lambda x: torch.min(x), x)
 
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'

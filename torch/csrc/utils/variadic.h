@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include "torch/csrc/autograd/variable.h"
+#include <torch/csrc/autograd/variable.h>
 
 #include <cstdint>
 #include <tuple>

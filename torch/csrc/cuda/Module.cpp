@@ -1,25 +1,24 @@
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 
-#include <stdbool.h>
 #include <unordered_map>
 #include <thread>
 #include <chrono>
 #include <sstream>
 #include <TH/TH.h>
 #include <ATen/ATen.h>
-#include "ATen/cuda/CUDAContext.h"
+#include <ATen/cuda/CUDAContext.h>
 #include <THC/THCCachingAllocator.h>
 #ifdef USE_NCCL
 #include <nccl.h>
 #endif
 
-#include "THCP.h"
+#include <torch/csrc/cuda/THCP.h>
 
-#include "torch/csrc/utils/pybind.h"
-#include "torch/csrc/autograd/generated/VariableType.h"
-#include "torch/csrc/utils/python_strings.h"
-#include "torch/csrc/cuda/python_comm.h"
-#include "torch/csrc/autograd/generated/variable_factories.h"
+#include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/autograd/generated/VariableType.h>
+#include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/cuda/python_comm.h>
+#include <torch/csrc/autograd/generated/variable_factories.h>
 
 using namespace torch;
 
@@ -364,7 +363,7 @@ static PyObject * THCPModule_initExtension(PyObject *self)
 }
 
 #ifdef USE_NCCL
-#include "python_nccl.h"
+#include <torch/csrc/cuda/python_nccl.h>
 
 void THCPModule_useNccl()
 {

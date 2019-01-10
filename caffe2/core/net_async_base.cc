@@ -161,6 +161,13 @@ TaskThreadPoolBase* AsyncNetBase::poolGetter(
   return pool.get();
 }
 
+TaskThreadPoolBase* AsyncNetBase::pool() {
+  // By default using a non-pinned CPU option
+  DeviceOption dev;
+  dev.set_device_type(PROTO_CPU);
+  return pool(dev);
+}
+
 TaskThreadPoolBase* AsyncNetBase::pool(const DeviceOption& device_option) {
   if (options_.use_single_pool_) {
     return poolGetter(cpu_pools_, PROTO_CPU, -1, num_workers_);
@@ -454,16 +461,20 @@ void AsyncNetBase::finalizeEvents() {
 }
 
 ProfDAGProtos AsyncNetBase::GetOperatorStats() const {
-  return counters_.GetOperatorStats();
+  return counters_.GetReport().GetOperatorStats();
 }
 
 ProfDAGProtos AsyncNetBase::GetPerOperatorCost() const {
-  return counters_.GetPerOperatorCost();
+  return counters_.GetReport().GetPerOperatorCost();
+}
+
+ProfDAGReport AsyncNetBase::GetProfReport() const {
+  return counters_.GetReport();
 }
 
 AsyncNetBase::~AsyncNetBase() {
   if (options_.report_stats_) {
-    counters_.PrintStats();
+    counters_.GetReport().PrintStats();
   }
 }
 

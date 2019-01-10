@@ -1,10 +1,10 @@
-#include "THCUNN.h"
-#include "THCAtomics.cuh"
-#include "THCDeviceTensor.cuh"
-#include "THCDeviceTensorUtils.cuh"
-#include "THCDeviceUtils.cuh"
-#include "THCNumerics.cuh"
-#include "THCTensorTypeUtils.cuh"
+#include <THCUNN/THCUNN.h>
+#include <THC/THCAtomics.cuh>
+#include <THC/THCDeviceTensor.cuh>
+#include <THC/THCDeviceTensorUtils.cuh>
+#include <THC/THCDeviceUtils.cuh>
+#include <THC/THCNumerics.cuh>
+#include <THC/THCTensorTypeUtils.cuh>
 
 #define OUTPUT_FEATURES_PER_THREAD 32
 #define MAX_WARPS_PER_RUN 4
@@ -649,5 +649,5 @@ runFeatureLPPoolingUpdateGradInput(THCState* state,
 #undef LP_WIDTH_CASE
 }
 
-#include "generic/FeatureLPPooling.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/FeatureLPPooling.cu>
+#include <THC/THCGenerateFloatTypes.h>

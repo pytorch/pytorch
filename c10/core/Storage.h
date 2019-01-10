@@ -151,6 +151,10 @@ struct C10_API Storage {
     return storage_impl_.unique();
   }
 
+  bool is_alias_of(const Storage& other) const {
+    return storage_impl_ == other.storage_impl_;
+  }
+
   void UniqueStorageShareExternalPointer(
       void* src,
       const caffe2::TypeMeta& data_type,

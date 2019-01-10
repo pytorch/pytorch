@@ -32,9 +32,16 @@ DeviceType parse_type(const std::string& device_string) {
     return device->second;
   }
   AT_ERROR(
-      "Expected one of cpu, cuda, mkldnn, opengl, opencl, ideep, or hip device type at start of device string");
+      "Expected one of cpu, cuda, mkldnn, opengl, opencl, ideep, or hip device type at start of device string: ", device_string);
 }
 } // namespace
+
+void Device::validate() {
+  AT_CHECK(index_ == -1 || index_ >= 0,
+           "Device index must be -1 or non-negative, got ", index_);
+  AT_CHECK(!is_cpu() || index_ <= 0,
+           "CPU device index must be -1 or zero, got ", index_);
+}
 
 // `std::regex` is still in a very incomplete state in GCC 4.8.x,
 // so we have to do our own parsing, like peasants.
@@ -64,24 +71,23 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
   int index = device_string.find(":");
   if (index == std::string::npos) {
     type_ = parse_type(device_string);
-    return;
   } else {
     std::string s;
     s = device_string.substr(0, index);
     AT_CHECK(!s.empty(), "Device string must not be empty");
     type_ = parse_type(s);
+
+    std::string device_index = device_string.substr(index + 1);
+    try {
+      index_ = c10::stoi(device_index);
+    } catch (const std::exception &) {
+      AT_ERROR("Could not parse device index '", device_index,
+               "' in device string '", device_string, "'");
+    }
+    AT_CHECK(index_ >= 0,
+             "Device index must be non-negative, got ", index_);
   }
-  std::string device_index = device_string.substr(index + 1);
-  try {
-    index_ = c10::stoi(device_index);
-  } catch (const std::exception&) {
-    AT_ERROR(
-        "Could not parse device index '",
-        device_index,
-        "' in device string '",
-        device_string,
-        "'");
-  }
+  validate();
 }
 
 std::ostream& operator<<(std::ostream& stream, const Device& device) {

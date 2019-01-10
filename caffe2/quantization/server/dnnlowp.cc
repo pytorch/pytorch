@@ -11,53 +11,53 @@
 #endif
 
 C10_DEFINE_int32(
-    dnnlowp_activation_quantization_precision,
+    caffe2_dnnlowp_activation_quantization_precision,
     8,
     "Precision used for activation tensors");
 C10_DEFINE_int32(
-    dnnlowp_weight_quantization_precision,
+    caffe2_dnnlowp_weight_quantization_precision,
     8,
     "Precision used for weight tensors");
 C10_DEFINE_int32(
-    dnnlowp_requantization_multiplier_precision,
+    caffe2_dnnlowp_requantization_multiplier_precision,
     32,
     "Precision of integer multipliers used for rescaling quantized numbers");
 C10_DEFINE_int32(
-    dnnlowp_eltwise_quantization_precision,
+    caffe2_dnnlowp_eltwise_quantization_precision,
     16,
     "Precision used for intermediate numbers during elementwise operations");
 C10_DEFINE_bool(
-    dnnlowp_force_scale_power_of_two,
+    caffe2_dnnlowp_force_scale_power_of_two,
     false,
     "When true, force quantization scales to a power of two");
 C10_DEFINE_bool(
-    dnnlowp_preserve_activation_sparsity,
+    caffe2_dnnlowp_preserve_activation_sparsity,
     false,
     "When true, 0 is mapped to 0 after quantization: "
     "i.e., symmetric quantization");
 C10_DEFINE_bool(
-    dnnlowp_preserve_weight_sparsity,
+    caffe2_dnnlowp_preserve_weight_sparsity,
     false,
     "When true, 0 is mapped to 0 after quantization: "
     "i.e., symmetric quantization");
 C10_DEFINE_string(
-    dnnlowp_activation_quantization_kind,
+    caffe2_dnnlowp_activation_quantization_kind,
     "min_max",
     "Quantization method for activation tensors. "
     "Allowed values: min_max, l2, l2_approx, kl, l1, p99");
 C10_DEFINE_string(
-    dnnlowp_weight_quantization_kind,
+    caffe2_dnnlowp_weight_quantization_kind,
     "min_max",
     "Quantization method for weight tensors. "
     "Allowed values: min_max, l2, l2_approx, kl, l1, p99");
 C10_DEFINE_int32(
-    dnnlowp_nbits_in_non_outlier,
+    caffe2_dnnlowp_nbits_in_non_outlier,
     8,
     "When outlier-aware quantization is used, if a quantized number can be "
     "represented by this number of bits, it is considered not an outlier so "
     "handled with 16-bit accumulation");
 C10_DEFINE_int32(
-    dnnlowp_copy_to_32bit_frequency,
+    caffe2_dnnlowp_copy_to_32bit_frequency,
     32,
     "When outlier-aware quantization is used, this option specifies how often "
     "we spill 16-bit accumulated numbers to 32-bit during the first pass");
@@ -81,8 +81,8 @@ QuantizationFactory::QuantizationKind StringToKind(const string& s) {
   } else if (s_lower == "l2") {
     return QuantizationFactory::L2_MIN_QUANTIZATION;
   } else if (s_lower == "l2_approx") {
-    if (FLAGS_dnnlowp_preserve_weight_sparsity ||
-        FLAGS_dnnlowp_preserve_activation_sparsity) {
+    if (FLAGS_caffe2_dnnlowp_preserve_weight_sparsity ||
+        FLAGS_caffe2_dnnlowp_preserve_activation_sparsity) {
       return QuantizationFactory::L2_MIN_QUANTIZATION;
     } else {
       return QuantizationFactory::L2_MIN_QUANTIZATION_APPROX;
@@ -99,39 +99,40 @@ QuantizationFactory::QuantizationKind StringToKind(const string& s) {
 
 QuantizationFactory* QuantizationFactory::GetDefaultInstance() {
   static QuantizationFactory singleton(
-      FLAGS_dnnlowp_activation_quantization_precision,
-      FLAGS_dnnlowp_weight_quantization_precision,
-      FLAGS_dnnlowp_requantization_multiplier_precision,
-      FLAGS_dnnlowp_eltwise_quantization_precision,
-      FLAGS_dnnlowp_preserve_activation_sparsity,
-      FLAGS_dnnlowp_preserve_weight_sparsity,
-      FLAGS_dnnlowp_force_scale_power_of_two,
-      StringToKind(FLAGS_dnnlowp_activation_quantization_kind),
-      StringToKind(FLAGS_dnnlowp_weight_quantization_kind));
+      FLAGS_caffe2_dnnlowp_activation_quantization_precision,
+      FLAGS_caffe2_dnnlowp_weight_quantization_precision,
+      FLAGS_caffe2_dnnlowp_requantization_multiplier_precision,
+      FLAGS_caffe2_dnnlowp_eltwise_quantization_precision,
+      FLAGS_caffe2_dnnlowp_preserve_activation_sparsity,
+      FLAGS_caffe2_dnnlowp_preserve_weight_sparsity,
+      FLAGS_caffe2_dnnlowp_force_scale_power_of_two,
+      StringToKind(FLAGS_caffe2_dnnlowp_activation_quantization_kind),
+      StringToKind(FLAGS_caffe2_dnnlowp_weight_quantization_kind));
 
   static bool log_printed = false;
   if (!log_printed) {
     LOG(INFO) << "activation_precision "
-              << FLAGS_dnnlowp_activation_quantization_precision;
+              << FLAGS_caffe2_dnnlowp_activation_quantization_precision;
     LOG(INFO) << "weight_precision "
-              << FLAGS_dnnlowp_weight_quantization_precision;
+              << FLAGS_caffe2_dnnlowp_weight_quantization_precision;
     LOG(INFO) << "requantization_multiplier_precision "
-              << FLAGS_dnnlowp_requantization_multiplier_precision;
+              << FLAGS_caffe2_dnnlowp_requantization_multiplier_precision;
     LOG(INFO) << "eltwise_quantize_precision "
-              << FLAGS_dnnlowp_eltwise_quantization_precision;
+              << FLAGS_caffe2_dnnlowp_eltwise_quantization_precision;
     LOG(INFO) << "preserve_activation_sparsity "
-              << FLAGS_dnnlowp_preserve_activation_sparsity;
+              << FLAGS_caffe2_dnnlowp_preserve_activation_sparsity;
     LOG(INFO) << "preserve_weight_sparsity "
-              << FLAGS_dnnlowp_preserve_weight_sparsity;
+              << FLAGS_caffe2_dnnlowp_preserve_weight_sparsity;
     LOG(INFO) << "force_scale_power_of_two "
-              << FLAGS_dnnlowp_force_scale_power_of_two;
+              << FLAGS_caffe2_dnnlowp_force_scale_power_of_two;
     LOG(INFO) << "activation_quantization_kind "
-              << FLAGS_dnnlowp_activation_quantization_kind;
+              << FLAGS_caffe2_dnnlowp_activation_quantization_kind;
     LOG(INFO) << "weight_quantization_kind "
-              << FLAGS_dnnlowp_weight_quantization_kind;
-    LOG(INFO) << "nbits_in_non_outlier " << FLAGS_dnnlowp_nbits_in_non_outlier;
+              << FLAGS_caffe2_dnnlowp_weight_quantization_kind;
+    LOG(INFO) << "nbits_in_non_outlier "
+              << FLAGS_caffe2_dnnlowp_nbits_in_non_outlier;
     LOG(INFO) << "copy_to_32bit_frequency "
-              << FLAGS_dnnlowp_copy_to_32bit_frequency;
+              << FLAGS_caffe2_dnnlowp_copy_to_32bit_frequency;
     LOG(INFO) << "omp_get_max_threads() " << caffe2::dnnlowp_get_max_threads();
 
     log_printed = true;

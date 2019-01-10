@@ -1,7 +1,7 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
 
-#include "ATen/Config.h"
+#include <ATen/Config.h>
 
 static const int MIOPEN_DIM_MAX = 4;
 
@@ -301,7 +301,7 @@ at::Tensor _convolution(
   auto k = weight.ndimension();
   int64_t dim = k - 2;
 
-  AT_CHECK(dim > 0, "weight should at least have at least two dimensions");
+  AT_CHECK(dim > 0, "weight should have at least three dimensions");
 
   ConvParams params;
   params.stride = convolution_expand_param_if_needed(stride_, "stride", dim);

@@ -45,7 +45,7 @@ class MIOPENActivationOp final : public MIOPENActivationOpBase {
   }
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
   }
 
   template <typename T>
@@ -100,7 +100,7 @@ class MIOPENActivationGradientOp final : public MIOPENActivationOpBase {
   }
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
   }
 
   template <typename T>

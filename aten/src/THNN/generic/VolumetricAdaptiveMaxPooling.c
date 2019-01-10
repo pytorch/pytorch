@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/VolumetricAdaptiveMaxPooling.c"
+#define TH_GENERIC_FILE "THNN/generic/VolumetricAdaptiveMaxPooling.c"
 #else
 
 #define START_IND(a,b,c) (int)floor((float)(a * c) / b)

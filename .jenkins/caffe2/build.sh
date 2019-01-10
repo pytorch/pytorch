@@ -2,6 +2,14 @@
 
 set -ex
 
+# TODO: Migrate all centos jobs to use proper devtoolset
+if [[ "$BUILD_ENVIRONMENT" == "py2-cuda9.0-cudnn7-centos7" ]]; then
+  # There is a bug in pango packge on Centos7 that causes undefined
+  # symbols, upgrading glib2 to >=2.56.1 solves the issue. See
+  # https://bugs.centos.org/view.php?id=15495
+  sudo yum install -y -q glib2-2.56.1
+fi
+
 pip install --user --no-cache-dir hypothesis==3.59.0
 
 # The INSTALL_PREFIX here must match up with test.sh
@@ -124,7 +132,24 @@ CMAKE_ARGS+=("-DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}")
 
 if [[ $BUILD_ENVIRONMENT == *mkl* ]]; then
   CMAKE_ARGS+=("-DBLAS=MKL")
+  CMAKE_ARGS+=("-DUSE_MKLDNN=ON")
 fi
+
+if [[ $BUILD_ENVIRONMENT == py2-cuda9.0-cudnn7-ubuntu16.04 ]]; then
+
+  # removing http:// duplicate in favor of nvidia-ml.list
+  # which is https:// version of the same repo
+  sudo rm -f /etc/apt/sources.list.d/nvidia-machine-learning.list
+  curl -o ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1604/x86_64/nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
+  sudo dpkg -i ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
+  sudo apt-key add /var/nvinfer-runtime-trt-repo-5.0.2-ga-cuda9.0/7fa2af80.pub
+  sudo apt-get -qq update
+  sudo apt-get install libnvinfer5 libnvinfer-dev
+  rm ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
+
+  CMAKE_ARGS+=("-DUSE_TENSORRT=ON")
+fi
+
 if [[ $BUILD_ENVIRONMENT == *cuda* ]]; then
   CMAKE_ARGS+=("-DUSE_CUDA=ON")
   CMAKE_ARGS+=("-DCUDA_ARCH_NAME=Maxwell")
@@ -148,8 +173,7 @@ if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
   CMAKE_ARGS+=("-USE_LMDB=ON")
 
   ########## HIPIFY Caffe2 operators
-  ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_pytorch_amd.py"
-  ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_caffe2_amd.py"
+  ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_amd.py"
 fi
 
 # building bundled nccl in this config triggers a bug in nvlink. For
@@ -205,6 +229,11 @@ if [[ -z "$INTEGRATED" ]]; then
     exit 1
   fi
 
+  # This is to save test binaries for testing
+  mv "$INSTALL_PREFIX/test/" "$INSTALL_PREFIX/cpp_test/"
+
+  ls $INSTALL_PREFIX
+
 else
 
   # sccache will be stuck if  all cores are used for compiling
@@ -213,10 +242,12 @@ else
     export MAX_JOBS=`expr $(nproc) - 1`
   fi
 
-  USE_LEVELDB=1 USE_LMDB=1 USE_OPENCV=1 BUILD_BINARY=1 python setup.py install --user
+  USE_LEVELDB=1 USE_LMDB=1 USE_OPENCV=1 BUILD_TEST=1 BUILD_BINARY=1 python setup.py install --user
 
   # This is to save test binaries for testing
   cp -r torch/lib/tmp_install $INSTALL_PREFIX
+  mkdir -p "$INSTALL_PREFIX/cpp_test/"
+  cp -r caffe2/test/* "$INSTALL_PREFIX/cpp_test/"
 
   ls $INSTALL_PREFIX
 

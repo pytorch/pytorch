@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/MSECriterion.c"
+#define TH_GENERIC_FILE "THNN/generic/MSECriterion.c"
 #else
 
 void THNN_(MSECriterion_updateOutput)(

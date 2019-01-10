@@ -5,7 +5,7 @@
 #include <intrin.h>
 #endif
 
-#include "AVX.h"
+#include <TH/vector/AVX.h>
 #include <TH/THGeneral.h>
 
 void THDoubleVector_fill_AVX(double *x, const double c, const ptrdiff_t n) {

@@ -1,8 +1,8 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/VolumetricAveragePooling.c"
+#define TH_GENERIC_FILE "THNN/generic/VolumetricAveragePooling.c"
 #else
 
-#include "pooling_shape.h"
+#include <THNN/generic/pooling_shape.h>
 #include <algorithm>
 
 static inline void THNN_(VolumetricAveragePooling_shapeCheck)(

@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/ELU.c"
+#define TH_GENERIC_FILE "THNN/generic/ELU.c"
 #else
 
 void THNN_(ELU_updateOutput)(

@@ -1,8 +1,8 @@
-#include "ATen/ATen.h"
-#include "ATen/TensorUtils.h"
-#include "ATen/NativeFunctions.h"
+#include <ATen/ATen.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/NativeFunctions.h>
 
-#include "TH/THBlasUtils.h"
+#include <TH/THBlasUtils.h>
 
 #include <cstring>
 #include <iostream>

@@ -1,4 +1,4 @@
-#include "Types.h"
+#include <ATen/cudnn/Types.h>
 
 #include <ATen/ATen.h>
 

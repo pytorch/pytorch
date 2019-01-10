@@ -1,25 +1,33 @@
 #pragma once
 
 #include <c10/Device.h>
-#include "ATen/core/Layout.h"
+#include <c10/core/Layout.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
-#include "ATen/core/SparseTensorRef.h"
-#include "c10/core/Storage.h"
-#include "ATen/core/TensorAccessor.h"
-#include "ATen/core/TensorImpl.h"
-#include "ATen/core/UndefinedTensorImpl.h"
+#include <ATen/core/SparseTensorRef.h>
+#include <c10/core/Storage.h>
+#include <ATen/core/TensorAccessor.h>
+#include <c10/core/TensorImpl.h>
+#include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
+#include <c10/core/Tensor.h>
+#include <ATen/core/LegacyTypeDispatch.h>
 
+namespace c10{
+struct TensorOptions;
+}
 namespace at {
 struct Generator;
 struct Type;
 class Tensor;
-struct TensorOptions;
 } // namespace at
 
 namespace at {
+
+class Tensor;
+using TensorList = ArrayRef<Tensor>;
+
 // Tensor is a "generic" object holding a pointer to the underlying TensorImpl object, which
 // has an embedded reference count. In this way, Tensor is similar to boost::intrusive_ptr.
 //
@@ -49,6 +57,17 @@ public:
 
   Tensor(const Tensor&) = default;
   Tensor(Tensor&&) = default;
+
+  explicit Tensor(C10Tensor tensor)
+      : impl_(std::move(tensor).impl()) {}
+
+  explicit operator C10Tensor() const & {
+    return C10Tensor(impl_);
+  }
+
+  explicit operator C10Tensor() && {
+    return C10Tensor(std::move(impl_));
+  }
 
   int64_t dim() const {
     return impl_->dim();
@@ -143,7 +162,7 @@ public:
     return impl_->is_contiguous();
   }
   Type & type() const {
-    return impl_->type();
+    return legacyTensorType(*impl_);
   }
   TensorTypeId type_id() const {
     return impl_->type_id();
@@ -153,6 +172,9 @@ public:
   }
   const Storage& storage() const {
     return impl_->storage();
+  }
+  bool is_alias_of(const at::Tensor& other) const{
+    return impl_->storage().is_alias_of(other.storage());
   }
   Tensor toType(const Type & t, bool non_blocking=false) const;
   Tensor & copy_(const Tensor & src, bool non_blocking=false);
@@ -334,4 +356,4 @@ Tensor make_tensor(Args&&... args) {
 
 } // namespace at
 
-#include "ATen/core/TensorMethods.h"
+#include <ATen/core/TensorMethods.h>

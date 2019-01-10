@@ -1,8 +1,8 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/SpatialAveragePooling.c"
+#define TH_GENERIC_FILE "THNN/generic/SpatialAveragePooling.c"
 #else
 
-#include "pooling_shape.h"
+#include <THNN/generic/pooling_shape.h>
 #include <algorithm>
 
 static inline void THNN_(SpatialAveragePooling_shapeCheck)(

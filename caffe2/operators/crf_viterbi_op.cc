@@ -151,7 +151,6 @@ class SwapBestPathOp : public Operator<CPUContext> {
   bool RunOnDevice() override {
     auto& data = Input(0);
     auto& newBestIdicies = Input(1);
-    auto* updatedData = Output(0);
 
     CAFFE_ENFORCE(
         data.dim() == 2 && newBestIdicies.dim() == 1,
@@ -161,7 +160,7 @@ class SwapBestPathOp : public Operator<CPUContext> {
         data.size(0) == newBestIdicies.size(0),
         "predictions and bestPath dimensions not matching");
 
-    updatedData->ResizeLike(data);
+    auto* updatedData = Output(0, data.sizes(), at::dtype<float>());
     float* outData = updatedData->template mutable_data<float>();
     context_.CopyItemsSameDevice(
         data.dtype(), data.numel(), data.template data<float>(), outData);
