@@ -99,7 +99,10 @@ void Variable::set_data(Tensor new_data) const {
   }
 
   auto autograd_meta_detached = get()->detach_autograd_meta();
-  std::swap(*get(), *new_data.getIntrusivePtr()->shallow_copy_and_detach().get());
+  // yf225 TODO: potential cause of bug
+  // impl_.swap(new_data.getIntrusivePtr()->shallow_copy_and_detach());
+  const_cast<c10::intrusive_ptr<at::TensorImpl, at::UndefinedTensorImpl>&>(impl_) = new_data.getIntrusivePtr()->shallow_copy_and_detach();
+  // set_impl(new_data.getIntrusivePtr()->shallow_copy_and_detach());
   get()->set_autograd_meta(std::move(autograd_meta_detached));
   get()->set_is_variable(true);
 }
