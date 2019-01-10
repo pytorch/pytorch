@@ -4,19 +4,20 @@ from numbers import Number
 import torch
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
-from torch.distributions.utils import _standard_normal, broadcast_all
+from torch.distributions.utils import broadcast_all
 
 
 class Normal(ExponentialFamily):
     r"""
     Creates a normal (also called Gaussian) distribution parameterized by
-    :attr:`loc` and :attr:`scale`.
+    `loc` and `scale`.
 
     Example::
 
         >>> m = Normal(torch.tensor([0.0]), torch.tensor([1.0]))
         >>> m.sample()  # normally distributed with loc=0 and scale=1
-        tensor([ 0.1046])
+         0.1046
+        [torch.FloatTensor of size 1]
 
     Args:
         loc (float or Tensor): mean of the distribution (often referred to as mu)
@@ -48,15 +49,6 @@ class Normal(ExponentialFamily):
             batch_shape = self.loc.size()
         super(Normal, self).__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
-        new = self._get_checked_instance(Normal, _instance)
-        batch_shape = torch.Size(batch_shape)
-        new.loc = self.loc.expand(batch_shape)
-        new.scale = self.scale.expand(batch_shape)
-        super(Normal, new).__init__(batch_shape, validate_args=False)
-        new._validate_args = self._validate_args
-        return new
-
     def sample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
         with torch.no_grad():
@@ -64,7 +56,7 @@ class Normal(ExponentialFamily):
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        eps = _standard_normal(shape, dtype=self.loc.dtype, device=self.loc.device)
+        eps = self.loc.new(shape).normal_()
         return self.loc + eps * self.scale
 
     def log_prob(self, value):

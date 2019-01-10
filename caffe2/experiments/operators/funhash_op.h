@@ -1,19 +1,3 @@
-/**
- * Copyright (c) 2016-present, Facebook, Inc.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 #ifndef CAFFE2_OPERATORS_FUNHASH_OP_H_
 #define CAFFE2_OPERATORS_FUNHASH_OP_H_
 
@@ -37,9 +21,9 @@ class FunHashOp : public Operator<Context> {
   FunHashOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         num_outputs_(
-            OperatorBase::GetSingleArgument<int64_t>("num_outputs", -1)),
+            OperatorBase::GetSingleArgument<TIndex>("num_outputs", -1)),
         num_segments_(
-            OperatorBase::GetSingleArgument<int64_t>("num_segments", -1)),
+            OperatorBase::GetSingleArgument<TIndex>("num_segments", -1)),
         seed_(OperatorBase::GetSingleArgument<uint64_t>("seed", 0)) {
     CAFFE_ENFORCE(
         OperatorBase::HasArgument("num_outputs"),
@@ -54,20 +38,20 @@ class FunHashOp : public Operator<Context> {
     const auto& seg = Input(2);
     const auto& weight = Input(3);
 
-    int64_t num_alpha = 1;
+    TIndex num_alpha = 1;
     if (adaptive_) {
       const auto& alpha = Input(4);
-      num_alpha = alpha.size(0);
+      num_alpha = alpha.dim(0);
     }
 
     const auto* seg_data = seg.template data<int>();
 
-    int64_t num_weight = weight.size(0);
-    int64_t num_nz_ent = seg.size(0);
+    TIndex num_weight = weight.dim(0);
+    TIndex num_nz_ent = seg.dim(0);
 
-    int64_t n_segments = num_segments_;
+    TIndex n_segments = num_segments_;
     if (num_segments_ == -1) {
-      for (int64_t i = 0; i < num_nz_ent; ++i) {
+      for (TIndex i = 0; i < num_nz_ent; ++i) {
         if (seg_data[i] > n_segments) {
           n_segments = seg_data[i];
         }
@@ -75,7 +59,8 @@ class FunHashOp : public Operator<Context> {
       ++n_segments;
     }
 
-    auto* output = Output(0, {n_segments, num_outputs_}, at::dtype<T>());
+    auto* output = Output(0);
+    output->Resize(n_segments, num_outputs_);
 
     T* output_data = output->template mutable_data<T>();
 
@@ -84,16 +69,16 @@ class FunHashOp : public Operator<Context> {
     const auto* weight_data = weight.template data<T>();
     const auto* alpha_data = adaptive_ ? Input(4).template data<T>() : 0;
     const auto* val_data = val.template data<T>();
-    const auto* key_data = key.template data<int64_t>();
+    const auto* key_data = key.template data<TIndex>();
 
-    for (int64_t j = 0; j < num_nz_ent; ++j) {
-      int64_t cur_seg = seg_data[j];
-      int64_t cur_key = key_data[j];
+    for (TIndex j = 0; j < num_nz_ent; ++j) {
+      TIndex cur_seg = seg_data[j];
+      TIndex cur_key = key_data[j];
       T cur_val = val_data[j];
-      int64_t output_stride = cur_seg * num_outputs_;
-      for (int64_t i = 0; i < num_outputs_; ++i) {
+      TIndex output_stride = cur_seg * num_outputs_;
+      for (TIndex i = 0; i < num_outputs_; ++i) {
         T sum = 0;
-        for (int64_t k = 0; k < num_alpha; ++k) {
+        for (TIndex k = 0; k < num_alpha; ++k) {
           uint64_t hash;
           // The hash function takes as input four integers:
           // 1. feature index
@@ -107,7 +92,7 @@ class FunHashOp : public Operator<Context> {
 
           hash_data[3] = INDEX_MAGIC;
           hash = XXH64(hash_data.data(), hash_data.size(), seed_);
-          int64_t index = hash % num_weight;
+          TIndex index = hash % num_weight;
 
           T cur_weight = weight_data[index];
 #ifdef USE_SIGN
@@ -132,8 +117,8 @@ class FunHashOp : public Operator<Context> {
   }
 
  protected:
-  int64_t num_outputs_;
-  int64_t num_segments_;
+  TIndex num_outputs_;
+  TIndex num_segments_;
   uint64_t seed_;
   std::array<uint64_t, 4> hash_data;
   bool adaptive_;
@@ -146,7 +131,7 @@ class FunHashGradientOp : public Operator<Context> {
   FunHashGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         num_outputs_(
-            OperatorBase::GetSingleArgument<int64_t>("num_outputs", -1)),
+            OperatorBase::GetSingleArgument<TIndex>("num_outputs", -1)),
         seed_(OperatorBase::GetSingleArgument<uint64_t>("seed", 0)) {
     adaptive_ = (InputSize() == 6);
   }
@@ -158,42 +143,43 @@ class FunHashGradientOp : public Operator<Context> {
     const auto& seg = Input(3);
     const auto& weight = Input(4);
 
-    int64_t num_alpha = 1;
+    TIndex num_alpha = 1;
     T* grad_alpha_data = 0;
 
     if (adaptive_) {
       const auto& alpha = Input(5);
-      num_alpha = alpha.size(0);
-
-      auto* grad_alpha = Output(1, alpha.sizes(), at::dtype<T>());
+      num_alpha = alpha.dim(0);
+      auto* grad_alpha = Output(1);
+      grad_alpha->ResizeLike(alpha);
       grad_alpha_data = grad_alpha->template mutable_data<T>();
       memset(grad_alpha_data, 0, sizeof(T) * num_alpha);
     }
 
     const auto* seg_data = seg.template data<int>();
 
-    int64_t num_weight = weight.size(0);
-    int64_t num_nz_ent = seg.size(0);
+    TIndex num_weight = weight.dim(0);
+    TIndex num_nz_ent = seg.dim(0);
 
-    auto* grad_weight = Output(0, weight.sizes(), at::dtype<T>());
+    auto* grad_weight = Output(0);
+    grad_weight->ResizeLike(weight);
     T* grad_weight_data = grad_weight->template mutable_data<T>();
 
     const auto* grad_out_data = grad_out.template data<T>();
     const auto* weight_data = weight.template data<T>();
     const auto* alpha_data = adaptive_ ? Input(5).template data<T>() : 0;
     const auto* val_data = val.template data<T>();
-    const auto* key_data = key.template data<int64_t>();
+    const auto* key_data = key.template data<TIndex>();
 
     memset(grad_weight_data, 0, sizeof(T) * num_weight);
 
-    for (int64_t j = 0; j < num_nz_ent; ++j) {
-      int64_t cur_seg = seg_data[j];
-      int64_t cur_key = key_data[j];
+    for (TIndex j = 0; j < num_nz_ent; ++j) {
+      TIndex cur_seg = seg_data[j];
+      TIndex cur_key = key_data[j];
       T cur_val = val_data[j];
-      int64_t grad_out_stride = cur_seg * num_outputs_;
-      for (int64_t i = 0; i < num_outputs_; ++i) {
+      TIndex grad_out_stride = cur_seg * num_outputs_;
+      for (TIndex i = 0; i < num_outputs_; ++i) {
         T grad_out_scale = grad_out_data[grad_out_stride + i] * cur_val;
-        for (int64_t k = 0; k < num_alpha; ++k) {
+        for (TIndex k = 0; k < num_alpha; ++k) {
           uint64_t hash;
           hash_data[0] = cur_key;
           hash_data[1] = i;
@@ -201,7 +187,7 @@ class FunHashGradientOp : public Operator<Context> {
 
           hash_data[3] = INDEX_MAGIC;
           hash = XXH64(hash_data.data(), hash_data.size(), seed_);
-          int64_t index = hash % num_weight;
+          TIndex index = hash % num_weight;
 
           T cur_grad_out_scale = grad_out_scale;
 #ifdef USE_SIGN
@@ -225,7 +211,7 @@ class FunHashGradientOp : public Operator<Context> {
   }
 
  protected:
-  int64_t num_outputs_;
+  TIndex num_outputs_;
   uint64_t seed_;
   std::array<uint64_t, 4> hash_data;
   bool adaptive_;

@@ -1,13 +1,8 @@
 #pragma once
 
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/script/module.h>
-#include <torch/csrc/onnx/onnx.h>
+#include "torch/csrc/jit/ir.h"
 
-#include <ostream>
-
-namespace torch {
-namespace jit {
+namespace torch { namespace jit {
 
 // This map is used to keep track of parameters that should be exported
 // externally. When `defer_weight_export` is true, the returned map contains
@@ -19,29 +14,19 @@ namespace jit {
 // file contents being the raw tensor data.
 using RawDataExportMap = std::unordered_map<std::string, at::Tensor>;
 
-TORCH_API std::tuple<std::string, RawDataExportMap> export_onnx(
+std::tuple<std::string, RawDataExportMap> ExportGraph(
     const std::shared_ptr<Graph>& graph,
     const std::vector<at::Tensor>& initializers,
     int64_t onnx_opset_version,
     bool defer_weight_export = false,
-    ::torch::onnx::OperatorExportTypes operator_export_type =
-        ::torch::onnx::OperatorExportTypes::ONNX);
+    bool export_raw_ir = false);
 
 // For testing purposes
-TORCH_API std::string pretty_print_onnx(
+std::string PrettyPrintExportedGraph(
     const std::shared_ptr<Graph>& graph,
-    const std::vector<at::Tensor>& initializers,
+    const std::vector<at::Tensor> & initializers,
     int64_t onnx_opset_version,
     bool defer_weight_export,
-    ::torch::onnx::OperatorExportTypes operator_export_type =
-        ::torch::onnx::OperatorExportTypes::ONNX,
-    bool google_printer = false);
+    bool export_raw_ir);
 
-TORCH_API void ExportModule(const script::Module& module, std::ostream& out);
-
-TORCH_API void ExportModule(
-    const script::Module& module,
-    const std::string& filename);
-
-} // namespace jit
-} // namespace torch
+}}

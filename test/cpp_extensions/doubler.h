@@ -1,17 +1,17 @@
-#include <torch/extension.h>
+#include <torch/torch.h>
 
 struct Doubler {
   Doubler(int A, int B) {
-    tensor_ =
-        torch::ones({A, B}, torch::dtype(torch::kFloat64).requires_grad(true));
+    tensor_ = at::ones(torch::CPU(at::kDouble), {A, B});
+    torch::set_requires_grad(tensor_, true);
   }
-  torch::Tensor forward() {
+  at::Tensor forward() {
     return tensor_ * 2;
   }
-  torch::Tensor get() const {
+  at::Tensor get() const {
     return tensor_;
   }
 
  private:
-  torch::Tensor tensor_;
+  at::Tensor tensor_;
 };

@@ -42,6 +42,9 @@ RecurrentBaseOp<T>::RecurrentBaseOp(
   CUDNN_ENFORCE(cudnnCreateRNNDescriptor(&rnnDesc_));
   CUDNN_ENFORCE(cudnnCreateFilterDescriptor(&wDesc_));
   CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&hxDesc_));
+  CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&cxDesc_));
+  CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&hyDesc_));
+  CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&cyDesc_));
 }
 
 template <typename T>
@@ -50,20 +53,23 @@ RecurrentBaseOp<T>::~RecurrentBaseOp() {
   CUDNN_ENFORCE(cudnnDestroyRNNDescriptor(rnnDesc_));
   CUDNN_ENFORCE(cudnnDestroyFilterDescriptor(wDesc_));
   CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(hxDesc_));
+  CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(cxDesc_));
+  CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(hyDesc_));
+  CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(cyDesc_));
 }
 
 template <typename T>
 void RecurrentBaseOp<T>::initialize(
-    const Tensor& input,
-    Tensor* dropoutStates,
-    Tensor* output,
-    Tensor* hiddenOutput,
-    Tensor* cellOutput) {
+    const Tensor<CUDAContext>& input,
+    Tensor<CUDAContext>* dropoutStates,
+    Tensor<CUDAContext>* output,
+    Tensor<CUDAContext>* hiddenOutput,
+    Tensor<CUDAContext>* cellOutput) {
   static_assert(sizeof(T) == 4, ""); // workaround clang bug
-  CAFFE_ENFORCE_GE(input.dim(), 3);
-  const int seqLength = input.size(0);
-  const int batchSize = input.size(1);
-  const int inputDim = input.size(2);
+  CAFFE_ENFORCE_GE(input.ndim(), 3);
+  const int seqLength = input.dim(0);
+  const int batchSize = input.dim(1);
+  const int inputDim = input.dim(2);
   const int hiddenSize = OperatorBase::GetSingleArgument<int>("hidden_size", 0);
   CAFFE_ENFORCE_GT(hiddenSize, 0);
   const auto bidirectional =
@@ -163,9 +169,12 @@ void RecurrentBaseOp<T>::initialize(
     const std::array<int, 3> stride{batchSize * hiddenSize, hiddenSize, 1};
     CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
         hxDesc_, cudnnTypeWrapper<T>::type, 3, dim.data(), stride.data()));
-    cxDesc_ = hxDesc_;
-    hyDesc_ = hxDesc_;
-    cyDesc_ = hxDesc_;
+    CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
+        cxDesc_, cudnnTypeWrapper<T>::type, 3, dim.data(), stride.data()));
+    CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
+        hyDesc_, cudnnTypeWrapper<T>::type, 3, dim.data(), stride.data()));
+    CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
+        cyDesc_, cudnnTypeWrapper<T>::type, 3, dim.data(), stride.data()));
 
     if (hiddenOutput) {
       hiddenOutput->Resize(
@@ -210,14 +219,14 @@ void RecurrentBaseOp<T>::initialize(
 template <typename T>
 bool RecurrentOp<T>::RunOnDevice() {
   const int seqLength = Input(INPUT).dim32(0);
-  if (Input(INPUT).sizes() != cachedInputDims_) {
+  if (Input(INPUT).dims() != cachedInputDims_) {
     initialize(
         Input(INPUT),
         Output(DROPOUT_STATES),
         Output(OUTPUT),
         Output(HIDDEN_OUTPUT),
         Output(CELL_OUTPUT));
-    cachedInputDims_ = Input(INPUT).sizes().vec();
+    cachedInputDims_ = Input(INPUT).dims();
   }
 
   // Validation checks
@@ -303,9 +312,9 @@ bool RecurrentOp<T>::RunOnDevice() {
 template <typename T>
 bool RecurrentGradientOp<T>::RunOnDevice() {
   const int seqLength = Input(INPUT).dim32(0);
-  if (Input(INPUT).sizes() != cachedInputDims_) {
+  if (Input(INPUT).dims() != cachedInputDims_) {
     initialize(Input(INPUT), Output(DROPOUT_STATES));
-    cachedInputDims_ = Input(INPUT).sizes().vec();
+    cachedInputDims_ = Input(INPUT).dims();
   }
   CUDNN_ENFORCE(cudnnGetRNNTrainingReserveSize(
       cudnn_wrapper_.inline_cudnn_handle(),
@@ -320,7 +329,7 @@ bool RecurrentGradientOp<T>::RunOnDevice() {
 
   Output(GRAD_WEIGHT)->ResizeLike(Input(WEIGHT));
   math::Set<T, CUDAContext>(
-      Output(GRAD_WEIGHT)->numel(),
+      Output(GRAD_WEIGHT)->size(),
       0.0,
       Output(GRAD_WEIGHT)->template mutable_data<T>(),
       &context_);
@@ -402,7 +411,7 @@ bool RecurrentParamAccessOp<T, mode>::RunOnDevice() {
         cudnnTypeWrapper<T>::type));
 
     CAFFE_ENFORCE_EQ(
-        paramsSize / 4, Input(1).numel(), "Incorrect weight initialization");
+        paramsSize / 4, Input(1).size(), "Incorrect weight initialization");
   }
 
   int layer = OperatorBase::GetSingleArgument<int>("layer", 0);
@@ -448,14 +457,14 @@ bool RecurrentParamAccessOp<T, mode>::RunOnDevice() {
 
     if (mode == SET_PARAM) {
       CAFFE_ENFORCE_EQ(
-          biasDims[0] * biasDims[1] * biasDims[2], Input(2).numel());
-      this->context_.template CopySameDevice<T>(
+          biasDims[0] * biasDims[1] * biasDims[2], Input(2).size());
+      context_.template Copy<T, CUDAContext, CUDAContext>(
           biasDims[0] * biasDims[1] * biasDims[2],
           Input(2).template data<T>(),
           static_cast<T*>(bias));
     } else {
       Output(0)->Resize(biasDims);
-      this->context_.template CopySameDevice<T>(
+      context_.template Copy<T, CUDAContext, CUDAContext>(
           biasDims[0] * biasDims[1] * biasDims[2],
           static_cast<T*>(bias),
           Output(0)->template mutable_data<T>());
@@ -485,14 +494,14 @@ bool RecurrentParamAccessOp<T, mode>::RunOnDevice() {
         matrixParamDesc, 3, &dt, &tf, &numDims, matDims.data()));
     CAFFE_ENFORCE_EQ(numDims, 3);
     if (mode == SET_PARAM) {
-      CAFFE_ENFORCE_EQ(matDims[0] * matDims[1] * matDims[2], Input(2).numel());
-      this->context_.template CopySameDevice<T>(
+      CAFFE_ENFORCE_EQ(matDims[0] * matDims[1] * matDims[2], Input(2).size());
+      context_.template Copy<T, CUDAContext, CUDAContext>(
           matDims[0] * matDims[1] * matDims[2],
           Input(2).template data<T>(),
           static_cast<T*>(pmatrix));
     } else {
       Output(0)->Resize(matDims);
-      this->context_.template CopySameDevice<T>(
+      context_.template Copy<T, CUDAContext, CUDAContext>(
           matDims[0] * matDims[1] * matDims[2],
           static_cast<T*>(pmatrix),
           Output(0)->template mutable_data<T>());

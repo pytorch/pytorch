@@ -8,7 +8,7 @@ from torch.distributions.utils import broadcast_all
 
 class Poisson(ExponentialFamily):
     r"""
-    Creates a Poisson distribution parameterized by :attr:`rate`, the rate parameter.
+    Creates a Poisson distribution parameterized by `rate`, the rate parameter.
 
     Samples are nonnegative integers, with a pmf given by
 
@@ -19,7 +19,8 @@ class Poisson(ExponentialFamily):
 
         >>> m = Poisson(torch.tensor([4]))
         >>> m.sample()
-        tensor([ 3.])
+         3
+        [torch.LongTensor of size 1]
 
     Args:
         rate (Number, Tensor): the rate parameter
@@ -42,14 +43,6 @@ class Poisson(ExponentialFamily):
         else:
             batch_shape = self.rate.size()
         super(Poisson, self).__init__(batch_shape, validate_args=validate_args)
-
-    def expand(self, batch_shape, _instance=None):
-        new = self._get_checked_instance(Poisson, _instance)
-        batch_shape = torch.Size(batch_shape)
-        new.rate = self.rate.expand(batch_shape)
-        super(Poisson, new).__init__(batch_shape, validate_args=False)
-        new._validate_args = self._validate_args
-        return new
 
     def sample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)

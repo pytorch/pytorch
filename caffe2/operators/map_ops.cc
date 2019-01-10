@@ -58,8 +58,7 @@ OPERATOR_SCHEMA(CreateMap)
     .SetDoc("Create an empty map blob")
     .Arg("key_dtype", "Key's TensorProto::DataType (default INT32)")
     .Arg("value_dtype", "Value's TensorProto::DataType (default INT32)")
-    .Output(0, "map blob", "Blob reference to the map")
-    .ScalarType(TensorProto_DataType_UNDEFINED);
+    .Output(0, "map blob", "Blob reference to the map");
 
 OPERATOR_SCHEMA(KeyValueToMap)
     .NumInputs(2)

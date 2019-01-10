@@ -14,9 +14,9 @@ class GatherPaddingOp final : public Operator<Context> {
   GatherPaddingOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         startPaddingWidth_(
-            this->template GetSingleArgument<int>("padding_width", 1)),
+            OperatorBase::GetSingleArgument<int>("padding_width", 1)),
         endPaddingWidth_(
-            this->template GetSingleArgument<int>("end_padding_width", -1)) {
+            OperatorBase::GetSingleArgument<int>("end_padding_width", -1)) {
     CAFFE_ENFORCE_GE(startPaddingWidth_, 0);
     if (endPaddingWidth_ < 0) {
       endPaddingWidth_ = startPaddingWidth_;
@@ -25,16 +25,11 @@ class GatherPaddingOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     if (startPaddingWidth_ == 0 && endPaddingWidth_ == 0) {
-      Output(0)->Resize(std::vector<int64_t>(0));
-      auto output_0_data = Output(0)->template mutable_data<int64_t>();
-      // TODO(zhengxq): as suggested by salex@, change this to a loop.
-      math::Set<int64_t, Context>(
-          Output(0)->numel(), 0, output_0_data, &context_);
+      Output(0)->Resize(std::vector<TIndex>(0));
+      Output(0)->template mutable_data<TIndex>();
       if (OutputSize() == 2) {
-        Output(1)->Resize(std::vector<int64_t>(0));
-        auto output_1_data = Output(1)->template mutable_data<int64_t>();
-        math::Set<int64_t, Context>(
-            Output(1)->numel(), 0, output_1_data, &context_);
+        Output(1)->Resize(std::vector<TIndex>(0));
+        Output(1)->template mutable_data<TIndex>();
       }
       return true;
     }
@@ -45,8 +40,8 @@ class GatherPaddingOp final : public Operator<Context> {
   template <typename T>
   bool DoRunWithType() {
     const auto& in = Input(0);
-    CAFFE_ENFORCE_GE(in.dim(), 1);
-    const int32_t outer_size = in.sizes()[0];
+    CAFFE_ENFORCE_GE(in.ndim(), 1);
+    const int32_t outer_size = in.dims()[0];
     const auto block_size = in.size_from_dim(1);
     const auto pad_width = startPaddingWidth_ + endPaddingWidth_;
 
@@ -56,9 +51,9 @@ class GatherPaddingOp final : public Operator<Context> {
     if (InputSize() > 1) {
       const auto& lengths = Input(1);
       lengths_ptr = lengths.template data<int32_t>();
-      lengths_size = lengths.numel();
+      lengths_size = lengths.size();
     }
-    std::vector<int64_t> padShape(in.sizes().begin() + 1, in.sizes().end());
+    std::vector<TIndex> padShape(in.dims().begin() + 1, in.dims().end());
     // output will contain accumulator over paddings
     Output(0)->Resize(padShape);
     T* padding_start_ptr = Output(0)->template mutable_data<T>();
@@ -98,8 +93,8 @@ class GatherPaddingOp final : public Operator<Context> {
   int startPaddingWidth_;
   int endPaddingWidth_;
   // Scratch space required by the CUDA version
-  Tensor lengths_prefix_sum_buffer_{Context::GetDeviceType()};
-  Tensor lengths_prefix_sum_{Context::GetDeviceType()};
+  Tensor<Context> lengths_prefix_sum_buffer_;
+  Tensor<Context> lengths_prefix_sum_;
 };
 
 template <class Context>
@@ -109,9 +104,9 @@ class RemovePaddingOp final : public Operator<Context> {
   RemovePaddingOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         startPaddingWidth_(
-            this->template GetSingleArgument<int>("padding_width", 1)),
+            OperatorBase::GetSingleArgument<int>("padding_width", 1)),
         endPaddingWidth_(
-            this->template GetSingleArgument<int>("end_padding_width", -1)) {
+            OperatorBase::GetSingleArgument<int>("end_padding_width", -1)) {
     CAFFE_ENFORCE_GE(startPaddingWidth_, 0);
     if (endPaddingWidth_ < 0) {
       endPaddingWidth_ = startPaddingWidth_;
@@ -120,9 +115,9 @@ class RemovePaddingOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     if (startPaddingWidth_ == 0 && endPaddingWidth_ == 0) {
-      Output(0)->CopyFrom(Input(0), true /*async*/);
+      Output(0)->CopyFrom(Input(0), &context_);
       if (OutputSize() == 2) {
-        Output(1)->CopyFrom(Input(1), true /*async*/);
+        Output(1)->CopyFrom(Input(1), &context_);
       }
       return true;
     }
@@ -138,8 +133,8 @@ class RemovePaddingOp final : public Operator<Context> {
   int endPaddingWidth_;
 
   // Scratch space required by the CUDA version
-  Tensor lengths_prefix_sum_buffer_{Context::GetDeviceType()};
-  Tensor lengths_prefix_sum_{Context::GetDeviceType()};
+  Tensor<Context> lengths_prefix_sum_buffer_;
+  Tensor<Context> lengths_prefix_sum_;
 };
 
 template <class Context>
@@ -149,9 +144,9 @@ class AddPaddingOp final : public Operator<Context> {
   AddPaddingOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         startPaddingWidth_(
-            this->template GetSingleArgument<int>("padding_width", 1)),
+            OperatorBase::GetSingleArgument<int>("padding_width", 1)),
         endPaddingWidth_(
-            this->template GetSingleArgument<int>("end_padding_width", -1)) {
+            OperatorBase::GetSingleArgument<int>("end_padding_width", -1)) {
     CAFFE_ENFORCE_GE(startPaddingWidth_, 0);
     if (endPaddingWidth_ < 0) {
       endPaddingWidth_ = startPaddingWidth_;
@@ -160,9 +155,9 @@ class AddPaddingOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     if (startPaddingWidth_ == 0 && endPaddingWidth_ == 0) {
-      Output(0)->CopyFrom(Input(0), true /*async*/);
+      Output(0)->CopyFrom(Input(0), &context_);
       if (OutputSize() == 2) {
-        Output(1)->CopyFrom(Input(1), true /*async*/);
+        Output(1)->CopyFrom(Input(1), &context_);
       }
       return true;
     }
@@ -173,8 +168,8 @@ class AddPaddingOp final : public Operator<Context> {
   template <typename T>
   bool DoRunWithType() {
     const auto& in = Input(0);
-    CAFFE_ENFORCE_GE(in.dim(), 1);
-    const int32_t outer_size = in.sizes()[0];
+    CAFFE_ENFORCE_GE(in.ndim(), 1);
+    const int32_t outer_size = in.dims()[0];
     const auto block_size = in.size_from_dim(1);
 
     // if no lengths is provided, assume it is a single full-span entry
@@ -183,7 +178,7 @@ class AddPaddingOp final : public Operator<Context> {
     if (InputSize() > 1) {
       const auto& lengths = Input(1);
       lengths_ptr = lengths.template data<int32_t>();
-      lengths_size = lengths.numel();
+      lengths_size = lengths.size();
     }
 
     // fetch paddings
@@ -194,21 +189,23 @@ class AddPaddingOp final : public Operator<Context> {
     const T* padding_end_ptr = nullptr;
     if (InputSize() >= 3) {
       auto& padding_start = Input(2);
-      CAFFE_ENFORCE_EQ(block_size, padding_start.numel());
+      CAFFE_ENFORCE_EQ(block_size, padding_start.size());
       padding_start_ptr = padding_start.template data<T>();
     }
     if (InputSize() == 4) {
       auto& padding_end = Input(3);
-      CAFFE_ENFORCE_EQ(block_size, padding_end.numel());
+      CAFFE_ENFORCE_EQ(block_size, padding_end.size());
       padding_end_ptr = padding_end.template data<T>();
     } else {
       padding_end_ptr = padding_start_ptr;
     }
 
-    auto out_dims = in.sizes().vec();
-    out_dims[0] += (startPaddingWidth_ + endPaddingWidth_) * lengths_size;
-    auto* out = Output(0, std::move(out_dims), at::dtype<T>());
-
+    auto* out = Output(0);
+    {
+      auto out_dims = in.dims();
+      out_dims[0] += (startPaddingWidth_ + endPaddingWidth_) * lengths_size;
+      out->Resize(std::move(out_dims));
+    }
     const auto* in_ptr = in.template data<T>();
     auto* out_ptr = out->template mutable_data<T>();
 
@@ -239,8 +236,8 @@ class AddPaddingOp final : public Operator<Context> {
   int endPaddingWidth_;
 
   // Scratch space required by the CUDA version
-  Tensor lengths_prefix_sum_buffer_{Context::GetDeviceType()};
-  Tensor lengths_prefix_sum_{Context::GetDeviceType()};
+  Tensor<Context> lengths_prefix_sum_buffer_;
+  Tensor<Context> lengths_prefix_sum_;
 };
 
 template <class Context>

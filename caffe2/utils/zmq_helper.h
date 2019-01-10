@@ -26,7 +26,7 @@ class ZmqContext {
  private:
   void* ptr_;
 
-  C10_DISABLE_COPY_AND_ASSIGN(ZmqContext);
+  DISABLE_COPY_AND_ASSIGN(ZmqContext);
 };
 
 class ZmqMessage {
@@ -48,7 +48,7 @@ class ZmqMessage {
 
  private:
   zmq_msg_t msg_;
-  C10_DISABLE_COPY_AND_ASSIGN(ZmqMessage);
+  DISABLE_COPY_AND_ASSIGN(ZmqMessage);
 };
 
 class ZmqSocket {

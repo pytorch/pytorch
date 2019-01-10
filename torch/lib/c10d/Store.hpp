@@ -11,11 +11,9 @@ namespace c10d {
 class Store {
  public:
   static constexpr std::chrono::milliseconds kDefaultTimeout =
-      std::chrono::seconds(300);
+      std::chrono::seconds(30);
   static constexpr std::chrono::milliseconds kNoTimeout =
       std::chrono::milliseconds::zero();
-
-  Store() : timeout_(kDefaultTimeout) {}
 
   virtual ~Store();
 
@@ -29,16 +27,9 @@ class Store {
 
   virtual bool check(const std::vector<std::string>& keys) = 0;
 
-  virtual void wait(const std::vector<std::string>& keys) = 0;
-
   virtual void wait(
       const std::vector<std::string>& keys,
-      const std::chrono::milliseconds& timeout) = 0;
-
-  void setTimeout(const std::chrono::seconds& timeoutSec);
-
- protected:
-  std::chrono::milliseconds timeout_;
+      const std::chrono::milliseconds& timeout = kDefaultTimeout) = 0;
 };
 
 } // namespace c10d

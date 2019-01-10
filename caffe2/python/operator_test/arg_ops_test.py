@@ -9,13 +9,11 @@ import numpy as np
 from caffe2.python import core
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
-import caffe2.python.serialized_test.serialized_test_util as serial
 
 
-class TestArgOps(serial.SerializedTestCase):
-    @serial.given(
-        X=hu.tensor(dtype=np.float32), axis=st.integers(-1, 5),
-        keepdims=st.booleans(), **hu.gcs)
+class TestArgOps(hu.HypothesisTestCase):
+    @given(X=hu.tensor(dtype=np.float32), axis=st.integers(-1, 5),
+           keepdims=st.booleans(), **hu.gcs)
     def test_argmax(self, X, axis, keepdims, gc, dc):
         if axis >= len(X.shape):
             axis %= len(X.shape)
@@ -34,9 +32,8 @@ class TestArgOps(serial.SerializedTestCase):
         self.assertReferenceChecks(gc, op, [X], argmax_ref)
         self.assertDeviceChecks(dc, op, [X], [0])
 
-    @serial.given(
-        X=hu.tensor(dtype=np.float32), axis=st.integers(-1, 5),
-        keepdims=st.booleans(), **hu.gcs)
+    @given(X=hu.tensor(dtype=np.float32), axis=st.integers(-1, 5),
+           keepdims=st.booleans(), **hu.gcs)
     def test_argmin(self, X, axis, keepdims, gc, dc):
         if axis >= len(X.shape):
             axis %= len(X.shape)

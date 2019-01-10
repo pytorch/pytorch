@@ -57,8 +57,18 @@ class JustTestWithSomeOutput : public JustTest {
   }
 };
 
+class ThrowException : public Operator<CPUContext> {
+ public:
+  explicit ThrowException(const OperatorDef& op_def, Workspace* ws)
+      : Operator<CPUContext>(op_def, ws) {}
+  bool RunOnDevice() override {
+    CAFFE_THROW("Throwing an exception.");
+  }
+};
+
 OPERATOR_SCHEMA(JustTest).NumInputs(0, 1).NumOutputs(0, 1);
 OPERATOR_SCHEMA(JustTestCPUOnly).NumInputs(0, 1).NumOutputs(0, 1);
+OPERATOR_SCHEMA(ThrowException).NumInputs(0).NumOutputs(0);
 OPERATOR_SCHEMA(JustTestWithSomeOutput);
 
 REGISTER_CPU_OPERATOR(JustTest, JustTest);
@@ -67,10 +77,11 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(JustTest, FOO, JustTestAndNeverConstructs);
 REGISTER_CPU_OPERATOR_WITH_ENGINE(JustTest, BAR, JustTestAndDoesConstruct);
 REGISTER_CPU_OPERATOR_WITH_ENGINE(JustTest, BAZ, JustTestAndDoesConstruct);
 REGISTER_CUDA_OPERATOR(JustTest, JustTest);
+REGISTER_CPU_OPERATOR(ThrowException, ThrowException);
 REGISTER_CPU_OPERATOR(JustTestWithSomeOutput, JustTestWithSomeOutput);
 
 TEST(OperatorTest, DeviceTypeRegistryWorks) {
-  EXPECT_EQ(gDeviceTypeRegistry()->count(CPU), 1);
+  EXPECT_EQ(gDeviceTypeRegistry()->count(DeviceType::CPU), 1);
 }
 
 TEST(OperatorTest, RegistryWorks) {
@@ -83,7 +94,7 @@ TEST(OperatorTest, RegistryWorks) {
   // as it needs to instantiate an Event object with CUDAContext. Thus we will
   // guard this test below.
   if (HasCudaRuntime()) {
-    op_def.mutable_device_option()->set_device_type(PROTO_CUDA);
+    op_def.mutable_device_option()->set_device_type(CUDA);
     op = CreateOperator(op_def, &ws);
     EXPECT_NE(nullptr, op.get());
   }
@@ -93,7 +104,7 @@ TEST(OperatorTest, RegistryWrongDevice) {
   OperatorDef op_def;
   Workspace ws;
   op_def.set_type("JustTypeCPUOnly");
-  op_def.mutable_device_option()->set_device_type(PROTO_CUDA);
+  op_def.mutable_device_option()->set_device_type(CUDA);
   try {
     CreateOperator(op_def, &ws);
     LOG(FATAL) << "No exception was thrown";
@@ -333,7 +344,7 @@ REGISTER_GRADIENT(Foo, GetFooGradient);
 TEST(OperatorGradientRegistryTest, GradientSimple) {
   Argument arg = MakeArgument<int>("arg", 1);
   DeviceOption option;
-  option.set_device_type(PROTO_CPU);
+  option.set_device_type(CPU);
   OperatorDef def = CreateOperatorDef(
       "Foo", "", std::vector<string>{"in"}, std::vector<string>{"out"},
       std::vector<Argument>{arg}, option, "DUMMY_ENGINE");
@@ -351,7 +362,7 @@ TEST(OperatorGradientRegistryTest, GradientSimple) {
   EXPECT_EQ(grad_op.output(0), "in_grad");
   // Checks the engine, device option and arguments.
   EXPECT_EQ(grad_op.engine(), "DUMMY_ENGINE");
-  EXPECT_EQ(grad_op.device_option().device_type(), PROTO_CPU);
+  EXPECT_EQ(grad_op.device_option().device_type(), CPU);
   EXPECT_EQ(grad_op.arg_size(), 1);
   EXPECT_EQ(grad_op.arg(0).SerializeAsString(),
             MakeArgument<int>("arg", 1).SerializeAsString());
@@ -366,7 +377,7 @@ TEST(EnginePrefTest, PerOpEnginePref) {
   Workspace ws;
   op_def.set_type("JustTest");
 
-  SetPerOpEnginePref({{CPU, {{"JustTest", {"BAR"}}}}});
+  SetPerOpEnginePref({{DeviceType::CPU, {{"JustTest", {"BAR"}}}}});
   {
     const auto op = CreateOperator(op_def, &ws);
     EXPECT_NE(nullptr, op.get());
@@ -377,7 +388,8 @@ TEST(EnginePrefTest, PerOpEnginePref) {
 
   // Invalid operator type
   ASSERT_THROW(
-      SetPerOpEnginePref({{CPU, {{"NO_EXIST", {"BAR"}}}}}), EnforceNotMet);
+      SetPerOpEnginePref({{DeviceType::CPU, {{"NO_EXIST", {"BAR"}}}}}),
+      EnforceNotMet);
 }
 
 TEST(EnginePrefTest, GlobalEnginePref) {
@@ -385,7 +397,7 @@ TEST(EnginePrefTest, GlobalEnginePref) {
   Workspace ws;
   op_def.set_type("JustTest");
 
-  SetGlobalEnginePref({{CPU, {"FOO", "BAR"}}});
+  SetGlobalEnginePref({{DeviceType::CPU, {"FOO", "BAR"}}});
   {
     const auto op = CreateOperator(op_def, &ws);
     EXPECT_NE(nullptr, op.get());
@@ -394,7 +406,7 @@ TEST(EnginePrefTest, GlobalEnginePref) {
   // clear
   SetGlobalEnginePref({});
 
-  SetGlobalEnginePref({{CPU, {"FOO"}}});
+  SetGlobalEnginePref({{DeviceType::CPU, {"FOO"}}});
   {
     const auto op = CreateOperator(op_def, &ws);
     EXPECT_NE(nullptr, op.get());
@@ -404,8 +416,7 @@ TEST(EnginePrefTest, GlobalEnginePref) {
   SetGlobalEnginePref({});
 
   // Invalid device type
-  // This check is no longer necessary with the enum class
-  // ASSERT_THROW(SetGlobalEnginePref({{8888, {"FOO"}}}), EnforceNotMet);
+  ASSERT_THROW(SetGlobalEnginePref({{8888, {"FOO"}}}), EnforceNotMet);
 }
 
 TEST(EnginePrefTest, GlobalEnginePrefAndPerOpEnginePref) {
@@ -413,8 +424,8 @@ TEST(EnginePrefTest, GlobalEnginePrefAndPerOpEnginePref) {
   Workspace ws;
   op_def.set_type("JustTest");
 
-  SetPerOpEnginePref({{CPU, {{"JustTest", {"BAR"}}}}});
-  SetGlobalEnginePref({{CPU, {"BAZ"}}});
+  SetPerOpEnginePref({{DeviceType::CPU, {{"JustTest", {"BAR"}}}}});
+  SetGlobalEnginePref({{DeviceType::CPU, {"BAZ"}}});
   {
     const auto op = CreateOperator(op_def, &ws);
     EXPECT_NE(nullptr, op.get());
@@ -432,8 +443,8 @@ TEST(EnginePrefTest, GlobalEnginePrefAndPerOpEnginePrefAndOpDef) {
   op_def.set_type("JustTest");
   op_def.set_engine("BAR");
 
-  SetPerOpEnginePref({{CPU, {{"JustTest", {"BAZ"}}}}});
-  SetGlobalEnginePref({{CPU, {"BAZ"}}});
+  SetPerOpEnginePref({{DeviceType::CPU, {{"JustTest", {"BAZ"}}}}});
+  SetGlobalEnginePref({{DeviceType::CPU, {"BAZ"}}});
   {
     const auto op = CreateOperator(op_def, &ws);
     EXPECT_NE(nullptr, op.get());
@@ -450,8 +461,8 @@ TEST(EnginePrefTest, SetOpEnginePref) {
   Workspace ws;
   op_def.set_type("JustTest");
 
-  SetPerOpEnginePref({{CPU, {{"JustTest", {"BAZ"}}}}});
-  SetOpEnginePref("JustTest", {{CPU, {"BAR"}}});
+  SetPerOpEnginePref({{DeviceType::CPU, {{"JustTest", {"BAZ"}}}}});
+  SetOpEnginePref("JustTest", {{DeviceType::CPU, {"BAR"}}});
   {
     const auto op = CreateOperator(op_def, &ws);
     EXPECT_NE(nullptr, op.get());
@@ -468,8 +479,8 @@ TEST(EnginePrefTest, SetDefaultEngine) {
   Workspace ws;
   op_def.set_type("JustTest");
 
-  SetPerOpEnginePref({{CPU, {{"JustTest", {"DEFAULT"}}}}});
-  SetGlobalEnginePref({{CPU, {"BAR"}}});
+  SetPerOpEnginePref({{DeviceType::CPU, {{"JustTest", {"DEFAULT"}}}}});
+  SetGlobalEnginePref({{DeviceType::CPU, {"BAR"}}});
   {
     const auto op = CreateOperator(op_def, &ws);
     EXPECT_NE(nullptr, op.get());
@@ -593,92 +604,6 @@ TEST(IsTestArg, non_standard) {
   EXPECT_EQ(
       static_cast<JustTest*>(op.get())->type(),
       "JustTestWithNonStandardIsTestArg");
-}
-
-class TestOperatorWithFunctionSchema final : public Operator<CPUContext> {
- public:
-  TestOperatorWithFunctionSchema(const OperatorDef& def, Workspace* ws)
-      : Operator<CPUContext>(def, ws) {}
-
-  TestOperatorWithFunctionSchema(
-      const c10::FunctionSchema& f,
-      const std::vector<c10::IValue>& i,
-      const std::vector<c10::IValue*>& o)
-      : Operator<CPUContext>(f, i, o) {
-    if (HasArgument("test_arg")) {
-      test_arg_ =
-          static_cast<float>(this->GetSingleArgument<float>("test_arg", 0.01));
-    }
-  }
-
-  bool RunOnDevice() override {
-    auto out =
-        OutputTensor(0, {1, 1}, at::TensorOptions(TypeMeta::Make<float>()));
-    out->mutable_data<float>()[0] = test_arg_;
-    return true;
-  }
-
- private:
-  float test_arg_ = 0;
-};
-
-REGISTER_CPU_OPERATOR(
-    TestOperatorWithFunctionSchema,
-    TestOperatorWithFunctionSchema);
-OPERATOR_SCHEMA(TestOperatorWithFunctionSchema)
-    .NumInputs(0, 1)
-    .NumOutputs(0, 1)
-    .Arg("test_arg", "this arg is required", true);
-
-// The new way combines OPERATOR_SCHEMA and REGISTER_OPERATOR
-REGISTER_FUNCTION_SCHEMA_OPERATOR(
-    TestOperatorWithFunctionSchema,
-    {c10::Argument("test_arg")},
-    {c10::Argument("output")},
-    TestOperatorWithFunctionSchema)
-
-TEST(FunctionSchema, Creation) {
-  std::vector<c10::IValue> inputs;
-  float test_val = 1337.0f;
-  inputs.emplace_back(test_val);
-
-  caffe2::Tensor out = TensorCPUFromValues<float>({1, 1}, {123.0f});
-  std::vector<c10::IValue*> outputs;
-  auto t = at::Tensor(std::move(out.getIntrusivePtr()));
-  auto out_val = c10::IValue(t);
-  outputs.emplace_back(&out_val);
-
-  auto fn = FunctionSchemaRegistry()
-                ->Create("TestOperatorWithFunctionSchema")
-                ->getSchema();
-  auto op = FunctionSchemaOperatorRegistry()->Create(
-      "TestOperatorWithFunctionSchema", fn, inputs, outputs);
-
-  op->Run();
-  EXPECT_EQ(out.data<float>()[0], test_val);
-}
-
-TEST(FunctionSchema, OutputChange) {
-  std::vector<c10::IValue> inputs;
-  float test_val = 1337.0f;
-  inputs.emplace_back(test_val);
-
-  // Wrong type
-  caffe2::Tensor out = TensorCPUFromValues<int>({1, 1}, {123});
-  std::vector<c10::IValue*> outputs;
-  auto t = at::Tensor(std::move(out.getIntrusivePtr()));
-  auto out_val = c10::IValue(t);
-  outputs.emplace_back(&out_val);
-
-  auto fn = FunctionSchemaRegistry()
-                ->Create("TestOperatorWithFunctionSchema")
-                ->getSchema();
-  auto op = FunctionSchemaOperatorRegistry()->Create(
-      "TestOperatorWithFunctionSchema", fn, inputs, outputs);
-
-  op->Run();
-  out = caffe2::Tensor(out_val.toTensor());
-  EXPECT_EQ(out.data<float>()[0], test_val);
 }
 
 }  // namespace caffe2

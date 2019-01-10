@@ -5,7 +5,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/core/operator.h"
-#include "caffe2/proto/caffe2_pb.h"
+#include "caffe2/proto/caffe2.pb.h"
 
 namespace caffe2 {
 
@@ -27,34 +27,32 @@ namespace caffe2 {
  * to register the CPU side, you can create its corresponding GPU operator
  * (with performance hits of course) via
  *     REGISTER_CUDA_OPERATOR(MyMagic,
- *                            GPUFallbackOp);
- * Note that you will need to make sure that the operators actually share the
- * same name.
+ *                            GPUFallbackOp<MyMagicOp>);
  *
  * Advanced usage: if you want to have some specific outputs never copied, you
  * can use the SkipOutputCopy template argument to do that. For example, if
  * MyMagic produces two outputs and the first output is always going to live on
  * the CPU, you can do
  *     REGISTER_CUDA_OPERATOR(MyMagic,
- *                            GPUFallbackOpEx<SkipIndices<0>>);
+ *                            GPUFallbackOp<MyMagicOp, SkipIndices<0>>);
  */
-template <typename SkipOutputCopy>
-class GPUFallbackOpEx final : public Operator<CUDAContext> {
+template <class CPUOp, typename SkipOutputCopy = SkipIndices<>>
+class GPUFallbackOp final : public Operator<CUDAContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
-  GPUFallbackOpEx(const OperatorDef& def, Workspace* ws)
+  GPUFallbackOp(const OperatorDef& def, Workspace* ws)
       : Operator<CUDAContext>(def, ws) {
-    CAFFE_ENFORCE_EQ(def.device_option().device_type(), PROTO_CUDA);
+    CAFFE_ENFORCE_EQ(def.device_option().device_type(), CUDA);
     OperatorDef base_def_(def);
     // base_def_ runs on CPU, so we will set its device option to CPU.
     base_def_.clear_device_option();
-    base_def_.mutable_device_option()->set_device_type(PROTO_CPU);
+    base_def_.mutable_device_option()->set_device_type(CPU);
     // Set up the symbols for the local workspace.
     for (const string& name : def.input()) {
       local_input_blobs_.push_back(local_ws_.CreateBlob(name));
       CHECK_NOTNULL(local_input_blobs_.back());
     }
-    base_op_ = CreateOperator(base_def_, &local_ws_);
+    base_op_.reset(new CPUOp(base_def_, &local_ws_));
     for (const string& name : def.output()) {
       local_output_blobs_.push_back(local_ws_.GetBlob(name));
       CHECK_NOTNULL(local_output_blobs_.back());
@@ -62,10 +60,12 @@ class GPUFallbackOpEx final : public Operator<CUDAContext> {
   }
 
   bool RunOnDevice() override {
+    bool need_sync = false;
     for (int i = 0; i < InputSize(); ++i) {
-      if (this->InputIsTensorType(i, CUDA)) {
-        // use sync copy
-        BlobGetMutableTensor(local_input_blobs_[i], CPU)->CopyFrom(Input(i));
+      if (OperatorBase::InputIsType<TensorCUDA>(i)) {
+        local_input_blobs_[i]->template GetMutable<TensorCPU>()->CopyFrom(
+            Input(i), &context_);
+        need_sync = true;
       } else {
         VLOG(1) << "Input " << i << " is not TensorCUDA. Skipping copy.";
         // Note(jiayq): This removes a const but conceptually
@@ -75,6 +75,11 @@ class GPUFallbackOpEx final : public Operator<CUDAContext> {
             const_cast<void*>(OperatorBase::Inputs()[i]->GetRaw()),
             OperatorBase::Inputs()[i]->meta());
       }
+    }
+
+    // Sync to make sure copies are done.
+    if (need_sync) {
+      context_.FinishDeviceComputation();
     }
 
     if (!base_op_->Run()) {
@@ -88,10 +93,11 @@ class GPUFallbackOpEx final : public Operator<CUDAContext> {
         continue;
       }
       CAFFE_ENFORCE(
-          BlobIsTensorType(*local_output_blobs_[i], CPU),
+          local_output_blobs_[i]->template IsType<TensorCPU>(),
           "GPU fallback op currently does not support non-TensorCPU "
           "output type who needs copying.");
-      Output(i)->CopyFrom(local_output_blobs_[i]->template Get<TensorCPU>());
+      Output(i)->CopyFrom(
+          local_output_blobs_[i]->template Get<TensorCPU>(), &context_);
     }
     return true;
   }
@@ -100,10 +106,8 @@ class GPUFallbackOpEx final : public Operator<CUDAContext> {
   Workspace local_ws_;
   vector<Blob*> local_input_blobs_;
   vector<Blob*> local_output_blobs_;
-  unique_ptr<OperatorBase> base_op_;
+  std::unique_ptr<CPUOp> base_op_;
 };
-
-using GPUFallbackOp = GPUFallbackOpEx<SkipIndices<>>;
 
 } // namespace caffe2
 

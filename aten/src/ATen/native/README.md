@@ -23,7 +23,7 @@ Every native function must have an entry in
 `native_functions.yaml`.  The format can be summarized as:
 
 ```
-- func: func_name(ArgType arg0[=default], ArgType arg1[=default], ...) -> Return
+- func: func_name(ArgType arg0[=default], ArgType arg1[=default], ...) -> ReturnType
   variants: function, method
   dispatch:
     CPU: func_cpu
@@ -35,7 +35,7 @@ Each component is described in more detail below:
 ### `func`
 
 ```
-- func: func_name(ArgType arg0[=default], ArgType arg1[=default], ...) -> Return
+- func: func_name(ArgType arg0[=default], ArgType arg1[=default], ...) -> ReturnType
 ```
 
 The `func` entry is a string describing the name of the function and its type
@@ -43,8 +43,7 @@ signature.
 
 **Argument types.** These types are permissible as ArgType:
 
-- `Tensor`.  A `Tensor` argument translates into a C++ argument of type `const Tensor&`
-  (except when the argument is "inplace"; in this case, it is simply `Tensor&`).
+- `Tensor`.  A `Tensor` argument translates into a C++ argument of type `const Tensor&`.
   A trailing `?`, as in `Tensor?`, indicates that the tensor argument is optional
   and may be omitted by passing an undefined tensor.  When a function takes multiple
   `Tensor` arguments, these tensors are assumed to be the same type (e.g.,
@@ -74,40 +73,24 @@ signature.
 - `std::array<bool,N>` (where N is `1-4`).  NB: you MUST NOT put a space after the comma, otherwise
   this argument will not parse correctly.  (If you decide to fix this, make sure you fix the
   argument parser both in ATen and in PyTorch.)
-- `TensorOptions`.  Tensor options provide information about how a
-  tensor should be constructed; it is most useful when you are writing a
-  factory function, where you have no `Tensor` inputs and thus
-  cannot otherwise determine how to construct a `Tensor`.
-- `*` is a special sentinel argument, which doesn't translate into an actual
-  argument, but indicates that in the Python bindings, any subsequent arguments
-  must be specified as keyword arguments (and cannot be provided positionally).
-- `?` is trailing question mark that annotate an argument to be an optional type, grep for
-  `optional` to find some example usages. In general, most functions will not need to use
-  this, but there are some cases that we want to use optional for the different types:
-    - You want to pass in a `None` to a ATen function/method from Python, and handles the
-      None type in the C++ side. For example, `clamp(Tensor self, Scalar? min=None, Scalar? max=None)`
-      can take `None` for its `min` and `max` parameter, and do dispatch to different
-      backend if one of the parameters is `None`. Optional type can accept a `None` type
-      (`nullopt` in C++) from Python and use the [C++ Optional class](https://en.cppreference.com/w/cpp/utility/optional) to interact with the parameters.
-    - You want a default value which is fine in Python but would cause ambiguity in C++.
-      For example, `norm(Tensor self, Scalar p=2, int64_t dim, bool keepdim=false)` would
-      cause ambiguity in C++ since it default args must be adjacent and `p` could not
-      have a default value when `dim` does not. Therefore, we need to make `p` as a
-      optional Scalar, and make `p=2` when `p` is not passed in (nullopt).
-    - You want a value to default to the same value as another argument (this cannot be
-      expressed in C++ default arguments).
 
-Functions with no tensor inputs are called *factory functions*, and
-are handled specially by code generation.  If your function is behaving
-differently than another example, check first and see if one is a
-factory while another is not.
+**Return types.** These types are permissible as ReturnType:
+
+- `Tensor` and `TensorList`, which translate into the C++ types `Tensor` and `std::vector<Tensor>`,
+  respectively.
+- A tuple of any number of `Tensor`, e.g., `(Tensor, Tensor)`, translating into
+  the C++ `std::tuple<Tensor, Tensor>`.
+
+If you need a type that is not listed in this list, it may be possible to extend ATen's
+code generation to support it.  ATen's philosophy on types to support is that it supports
+only simple, universal types, as well as a handful of fundamental Tensor structures
+(e.g., `Tensor` and `Generator*`), because these types can be easily ported to any language
+bound to ATen (in practice, C++ and Python.)
 
 **Argument names.** Argument names are meaningful; downstream binding code may make use of the specific
 argument name you provide, and a rename of an argument name is considered a BC-breaking
 change (e.g., you will probably need to update `tools/autograd/derivatives.yaml` at
-least). In `native_functions.yaml`, if your function (usually functions named with 'out' affix) args
-include the result Tensor, you need to call the argument `Tensor result`. And if there are more
-than one result Tensors, you need to name the args `Tensor result0, Tensor result1, ...`.
+least).
 
 TODO: Do argument names affect Python keyword arguments?
 
@@ -127,37 +110,6 @@ Here are the supported default values:
   a `Tensor` argument to accept undefined tensors).
 * `nullptr` for pointer types (e.g., `Generator*`)
 
-**Returns.** The following are permissible on Return:
-
-Non-tuple return:
-```
-ReturnType [retarg0]
-```
-
-Tuple return:
-```
-(ReturnType [retarg0], ReturnType [retarg1], ...)
-```
-
-The following are permissible on ReturnType:
-- `Tensor` and `TensorList`, which translate into the C++ types `Tensor` and `std::vector<Tensor>`,
-  respectively (unless the operation is in-place, in which case the return type
-  is `Tensor&`.
-- A tuple of any number of `Tensor`, e.g., `(Tensor, Tensor)`, translating into
-  the C++ `std::tuple<Tensor, Tensor>`.
-
-If you need a type that is not listed in this list, it may be possible to extend ATen's
-code generation to support it.  ATen's philosophy on types to support is that it supports
-only simple, universal types, as well as a handful of fundamental Tensor structures
-(e.g., `Tensor` and `Generator*`), because these types can be easily ported to any language
-bound to ATen (in practice, C++ and Python.)
-
-Return also supports specifying (optional) return argument names; these are useful for writing
-derivatives in terms of return arguments in `tools/autograd/derivatives.yaml`.
-
-Note that argument type modifiers such as defaults and optional are not currently supported on Return.
-
-
 The declarations also support the following attributes:
 
 ### `variants`
@@ -174,11 +126,12 @@ list.  For example, given the declaration `where(BoolTensor cond, Tensor self, T
 this generates the function `at::where(cond, self, other)` and the method
 `self.where(cond, other)`.
 
-By default, ATen generates only the function variant for a native function.
-When should you also generate a method variant?  Tensor operations as methods
-are appropriate for "core" Tensor operations (e.g., add, sub, etc.), but not for
-more complicated neural network layers (e.g., `conv2d`) and internal functions
-designed specifically for binding (e.g., `cudnn_convolution`).
+By default, ATen generates both function and method variants for a native function.
+Generally, the function variant is always useful; however, you may not wish
+to generate a method variant. Tensor operations as methods are appropriate for "core"
+Tensor operations (e.g., add, sub, etc.), but not for more complicated neural network
+layers (e.g., `conv2d`) and internal functions designed specifically for binding
+(e.g., `cudnn_convolution`).
 
 ### `dispatch`
 
@@ -195,28 +148,29 @@ to unconditionally dispatch to a native function whose name is different than
 the name in the public ATen API, but this is generally frowned upon (just name
 them the same thing!)
 
-### `device_guard`
+### `python_default_init`
 
 ```
-device_guard: false
+python_default_init:
+  argument_name: initializing_expression
 ```
 
-By default, ATen code generation will generate a DeviceGuard invocation,
-which will ensure that kernel code will run with the current device set
-to match the device of the first Tensor argument (or first tensor of
-the first TensorList argument, if the function takes a list of tensors).
-For the most part, this means kernel authors do not have to worry about
-setting devices.
+A map from argument names to default initializing expressions written in C++. Such default
+expressions will only be used in Python API (in the C++ API, these arguments are
+mandatory).
 
-However, in some cases, setting the device is unnecessary, because,
-e.g., you call a function already manages device guard setting, or
-you're a function that simply does not interact with any devices.  In
-that case, code generation of the device guard can be disabled by adding
-`device_guard: false` to your function definition.
+There are a few situations where you might like to use this functionality:
 
-**Note.** We are considering eliminating automatic generation of DeviceGuard,
-in which case this field would go away.  If you have an opinion on the
-matter, please write in at https://github.com/pytorch/pytorch/issues/14234
+- You want a default value which is fine in Python but would cause ambiguity in C++.
+  For example, `norm(Tensor self, real p=2, int64_t dim=1)` would cause ambiguity
+  with long tensors in C++. Therefore, we need to make `p=2` a python only default
+  initialization value.
+
+- You want a value to default to the same value as another argument (this cannot
+  be expressed in C++ default arguments).
+
+If you grep for `python_default_init`, you can find examples of this being used;
+in general, most functions will not need to use this.
 
 ## Writing an implementation in C++
 
@@ -258,9 +212,8 @@ direct consequences on valid implementations:
 
 * Never create a `Tensor` directly (e.g., `at::CPU` or `at::CUDA`), as a
   caller will be expecting to get `Variable`s out if it passes `Variable`.
-  Instead, create tensors using the `options()` of one of the input
-  tensors.  E.g., `at::empty(sizes, input.options())` or
-  `at::ones(input.options().dtype(kByte))`, if you need
+  Instead, create tensors from the `type()` of one of the input tensors, e.g.,
+  `input.type().tensor()`  or `input.type().toScalarType(kByte)` if you need
   a different scalar type.
 
 * If you need to call other ATen functions, be sure to qualify the call
@@ -279,49 +232,11 @@ is that if you know that you will only ever be called with `Tensor`, a
 direct `at::native` call will be more efficient (as it avoids a dynamic
 dispatch).
 
-### How to handle broadcasting?
-
-Unlike our legacy TH bindings, ATen native functions do not automatically
-handle broadcasting; you will have to insert the necessary broadcasting
-calls yourself.
-
-When writing broadcasting code, we obey the convention that `op` is
-broadcasting, while `s_op` (with the `s_` prefix) is not broadcasting.  The
-relationship is best seen by an example of how you would implement broadcasting
-addition out of non-broadcasting addition:
-
-```
-#include <ATen/ExpandUtils.h>
-
-Tensor add(const Tensor& self, const Tensor& other) {
-  Tensor b_self, b_other;
-  std::tie(b_self, b_other) = expand_outplace(self, other, "add");
-  return s_add(b_self, b_other);
-}
-
-Tensor s_add(const Tensor& self, const Tensor& other) {
-  // non-broadcasting implementation of addition
-}
-```
-
-For inplace operations, the convention looks like this:
-
-```
-Tensor& add_(Tensor& self, const Tensor& other) {
-  Tensor b_other = expand_inplace(self, other, "add_");
-  return s_add_(self, b_other);
-}
-
-Tensor& s_add_(Tensor& self, const Tensor& other) {
-  // non-broadcasting implementation of inplace addition
-}
-```
-
 ### Undefined tensor conventions
 
 By default, `Tensor` arguments to ATen functions are always defined, unless
 you explicitly specified that an undefined tensor was permissible by writing
-`Tensor?` or `Tensor? x={}`, the latter one is needed when you have to assign a default value in C++ (e.g. in the middle of other parameters with default values).
+`Tensor?` or `Tensor x={}`.
 
 The rules for returning undefined Tensors are a bit more subtle, but there
 is only one case you have to remember:

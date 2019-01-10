@@ -1,10 +1,3 @@
-if (UNIX)
-  # prevent Unknown CMake command "check_function_exists".
-  include(CheckFunctionExists)
-endif()
-include(CheckIncludeFile)
-include(CheckCSourceCompiles)
-include(CheckCSourceRuns)
 include(CheckCCompilerFlag)
 include(CheckCXXSourceCompiles)
 include(CheckCXXCompilerFlag)
@@ -37,56 +30,27 @@ if(EXISTS "/etc/os-release")
   endif()
 endif()
 
-if (NOT BUILD_ATEN_MOBILE)
-  # ---[ Check that our programs run.  This is different from the native CMake
-  # compiler check, which just tests if the program compiles and links.  This is
-  # important because with ASAN you might need to help the compiled library find
-  # some dynamic libraries.
-  cmake_push_check_state(RESET)
-  CHECK_C_SOURCE_RUNS("
-  int main() { return 0; }
-  " COMPILER_WORKS)
-  if (NOT COMPILER_WORKS)
-    # Force cmake to retest next time around
-    unset(COMPILER_WORKS CACHE)
-    message(FATAL_ERROR
-        "Could not run a simple program built with your compiler. "
-        "If you are trying to use -fsanitize=address, make sure "
-        "libasan is properly installed on your system (you can confirm "
-        "if the problem is this by attempting to build and run a "
-        "small program.)")
-  endif()
-  cmake_pop_check_state()
+# ---[ Check if the data type long and int32_t/int64_t overlap.
+cmake_push_check_state(RESET)
+set(CMAKE_REQUIRED_FLAGS "-std=c++11")
+CHECK_CXX_SOURCE_COMPILES(
+    "#include <cstdint>
+
+    template <typename T> void Foo();
+    template<> void Foo<int32_t>() {}
+    template<> void Foo<int64_t>() {}
+    int main(int argc, char** argv) {
+      Foo<long>();
+      return 0;
+    }" CAFFE2_LONG_IS_INT32_OR_64)
+
+if (CAFFE2_LONG_IS_INT32_OR_64)
+  message(STATUS "Does not need to define long separately.")
+else()
+  message(STATUS "Need to define long as a separate typeid.")
+  set(CAFFE2_UNIQUE_LONG_TYPEMETA 1)
 endif()
-
-if (NOT BUILD_ATEN_MOBILE)
-  # ---[ Check if certain std functions are supported. Sometimes
-  # _GLIBCXX_USE_C99 macro is not defined and some functions are missing.
-  cmake_push_check_state(RESET)
-  set(CMAKE_REQUIRED_FLAGS "-std=c++11")
-  CHECK_CXX_SOURCE_COMPILES("
-  #include <cmath>
-  #include <string>
-
-  int main() {
-    int a = std::isinf(3.0);
-    int b = std::isnan(0.0);
-    std::string s = std::to_string(1);
-
-    return 0;
-    }" SUPPORT_GLIBCXX_USE_C99)
-  if (NOT SUPPORT_GLIBCXX_USE_C99)
-    # Force cmake to retest next time around
-    unset(SUPPORT_GLIBCXX_USE_C99 CACHE)
-    message(FATAL_ERROR
-        "The C++ compiler does not support required functions. "
-        "This is very likely due to a known bug in GCC 5 "
-        "(and maybe other versions) on Ubuntu 17.10 and newer. "
-        "For more information, see: "
-        "https://github.com/pytorch/pytorch/issues/5229")
-  endif()
-  cmake_pop_check_state()
-endif()
+cmake_pop_check_state()
 
 # ---[ Check if std::exception_ptr is supported.
 cmake_push_check_state(RESET)
@@ -112,26 +76,22 @@ endif()
 cmake_pop_check_state()
 
 # ---[ Check for NUMA support
-if (USE_NUMA)
-  cmake_push_check_state(RESET)
-  set(CMAKE_REQUIRED_FLAGS "-std=c++11")
-  CHECK_CXX_SOURCE_COMPILES(
+cmake_push_check_state(RESET)
+set(CMAKE_REQUIRED_FLAGS "-std=c++11")
+CHECK_CXX_SOURCE_COMPILES(
     "#include <numa.h>
     #include <numaif.h>
 
     int main(int argc, char** argv) {
     }" CAFFE2_IS_NUMA_AVAILABLE)
-  if (CAFFE2_IS_NUMA_AVAILABLE)
-    message(STATUS "NUMA is available")
-  else()
-    message(STATUS "NUMA is not available")
-    set(CAFFE2_DISABLE_NUMA 1)
-  endif()
-  cmake_pop_check_state()
+
+if (CAFFE2_IS_NUMA_AVAILABLE)
+  message(STATUS "NUMA is available")
 else()
-  message(STATUS "NUMA is disabled")
+  message(STATUS "NUMA is not available")
   set(CAFFE2_DISABLE_NUMA 1)
 endif()
+cmake_pop_check_state()
 
 # ---[ Check if we want to turn off deprecated warning due to glog.
 # Note(jiayq): on ubuntu 14.04, the default glog install uses ext/hash_set that
@@ -170,7 +130,7 @@ CHECK_CXX_SOURCE_COMPILES(
        return 0;
      }" CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
 if (CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
-  message(STATUS "Current compiler supports avx2 extension. Will build perfkernels.")
+  message(STATUS "Current compiler supports avx2 extention. Will build perfkernels.")
   # Currently MSVC seems to have a symbol not found error while linking (related
   # to source file order?). As a result we will currently disable the perfkernel
   # in msvc.
@@ -182,33 +142,6 @@ if (CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
 endif()
 cmake_pop_check_state()
 
-# ---[ Check if the compiler has AVX512F support.
-cmake_push_check_state(RESET)
-if (MSVC)
-  set(CMAKE_REQUIRED_FLAGS "/D__AVX512F__")
-else()
-  set(CMAKE_REQUIRED_FLAGS "-mavx512f")
-endif()
-CHECK_CXX_SOURCE_COMPILES(
-    "#if defined(_MSC_VER)
-     #include <intrin.h>
-     #else
-     #include <x86intrin.h>
-     #endif
-     __m512 addConstant(__m512 arg) {
-       return _mm512_add_ps(arg, _mm512_set1_ps(1.f));
-     }
-     int main() {
-       __m512i a = _mm512_set1_epi32(1);
-       __m256i ymm = _mm512_extracti64x4_epi64(a, 0);
-       __mmask16 m = _mm512_cmp_epi32_mask(a, a, _MM_CMPINT_EQ);
-       __m512i r = _mm512_andnot_si512(a, a);
-       }" CAFFE2_COMPILER_SUPPORTS_AVX512F_EXTENSIONS)
-if (CAFFE2_COMPILER_SUPPORTS_AVX512F_EXTENSIONS)
-  message(STATUS "Current compiler supports avx512f extension. Will build fbgemm.")
-endif()
-cmake_pop_check_state()
-
 # ---[ Checks if compiler supports -fvisibility=hidden
 check_cxx_compiler_flag("-fvisibility=hidden" COMPILER_SUPPORTS_HIDDEN_VISIBILITY)
 check_cxx_compiler_flag("-fvisibility-inlines-hidden" COMPILER_SUPPORTS_HIDDEN_INLINE_VISIBILITY)
@@ -217,22 +150,11 @@ if (${COMPILER_SUPPORTS_HIDDEN_INLINE_VISIBILITY})
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CAFFE2_VISIBILITY_FLAG}")
 endif()
 
-# ---[ Checks if linker supports -rdynamic. `-rdynamic` tells linker
-# -to add all (including unused) symbols into the dynamic symbol
-# -table. We need this to get symbols when generating backtrace at
-# -runtime.
-check_cxx_compiler_flag("-rdynamic" COMPILER_SUPPORTS_RDYNAMIC)
-if (${COMPILER_SUPPORTS_RDYNAMIC})
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -rdynamic")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -rdynamic")
-endif()
-
 # ---[ If we are using msvc, set no warning flags
 # Note(jiayq): if you are going to add a warning flag, check if this is
 # totally necessary, and only add when you see fit. If it is needed due to
 # a third party library (like Protobuf), mention it in the comment as
 # "THIRD_PARTY_NAME related"
-# From https://docs.microsoft.com/en-us/cpp/error-messages/compiler-warnings/
 if (${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
   add_compile_options(
       ##########################################
@@ -262,22 +184,6 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
               # Eigen related.
       /wd4805 # (1): Unsafe mix of types in gtest/gtest.h. Gtest related.
       ##########################################
-      # These are directly ATen related. However, several are covered by
-      # the above now. We leave them here for documentation purposes only.
-      #/wd4267 # Conversion from 'size_t' to 'type', possible loss of data.
-      /wd4522 # (3): 'class' : multiple assignment operators specified
-      /wd4838 # (1): conversion from 'type_1' to 'type_2' requires a
-              #      narrowing conversion
-      #/wd4305 # 'identifier' : truncation from 'type1' to 'type2'
-      #/wd4244 # Conversion from 'type1' to 'type2', possible loss of data.
-      /wd4190 # (1): 'identifier1' has C-linkage specified, but returns UDT
-              #      'identifier2' which is incompatible with C
-      /wd4101 # (3): 'identifier' : unreferenced local variable
-      #/wd4996 # (3): Use of deprecated POSIX functions. Since we develop
-      #        #      mainly on Linux, this is ignored.
-      /wd4275 # (2): non - DLL-interface classkey 'identifier' used as
-              #      base for DLL-interface classkey 'identifier'
-      ##########################################
       # These are directly Caffe2 related. However, several are covered by
       # protobuf now. We leave them here for documentation purposes only.
       ##########################################
@@ -292,10 +198,6 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
               #      caffe2 FLAGS_* definition using dllimport in header and
               #      dllexport in cc file. The strategy is copied from gflags.
   )
-
-  # Make sure windef.h does not define max/min macros.
-  # Required by ATen among others.
-  add_definitions("/DNOMINMAX")
 
   # Exception handing for compiler warining C4530, see
   # https://msdn.microsoft.com/en-us/library/2axwkyt4.aspx
@@ -351,6 +253,21 @@ endif()
 
 # ---[ Create CAFFE2_BUILD_SHARED_LIBS for macros.h.in usage.
 set(CAFFE2_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
+
+# ---[ Check if we will need to include the local Modules_CUDA_fix folder.
+# Add your conditions here if needed.
+if (MSVC)
+  # We know that VS2017 needs the new FindCUDA functionality, so we will
+  # simply enable it for the whole Windows build.
+  set(CAFFE2_CMAKE_USE_LOCAL_FINDCUDA ON)
+else (${CMAKE_VERSION} VERSION_LESS 3.12 AND ${USE_CUDA})
+  set(CAFFE2_CMAKE_USE_LOCAL_FINDCUDA ON)
+endif()
+
+if (${CAFFE2_CMAKE_USE_LOCAL_FINDCUDA})
+  list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules_CUDA_fix)
+  include(CMakeInitializeConfigs)
+endif()
 
 if (USE_NATIVE_ARCH)
   check_cxx_compiler_flag("-march=native" COMPILER_SUPPORTS_MARCH_NATIVE)

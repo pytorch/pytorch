@@ -8,8 +8,6 @@
 #include <mutex>
 #include <vector>
 
-#include "caffe2/core/common.h"
-
 //
 // A work-stealing threadpool loosely based off of pthreadpool
 //
@@ -21,15 +19,13 @@ class WorkersPool;
 
 constexpr size_t kCacheLineSize = 64;
 
-// A threadpool with the given number of threads.
+// A work-stealing threadpool with the given number of threads.
 // NOTE: the kCacheLineSize alignment is present only for cache
 // performance, and is not strictly enforced (for example, when
 // the object is created on the heap). Thus, in order to avoid
 // misaligned intrinsics, no SSE instructions shall be involved in
-// the ThreadPool implementation.
-// Note: alignas is disabled because some compilers do not deal with
-// CAFFE2_API and alignas annotations at the same time.
-class CAFFE2_API /*alignas(kCacheLineSize)*/ ThreadPool {
+// the ThreadPool implemetation.
+class alignas(kCacheLineSize) ThreadPool {
  public:
   static std::unique_ptr<ThreadPool> defaultThreadPool();
   ThreadPool(int numThreads);

@@ -2,14 +2,14 @@
 #error "You must define THC_GENERIC_FILE before including THGenerateCharType.h"
 #endif
 
-#define scalar_t int8_t
+#define real int8_t
 #define accreal int64_t
 #define Real Char
 #define CReal CudaChar
 #define THC_REAL_IS_CHAR
 #line 1 THC_GENERIC_FILE
 #include THC_GENERIC_FILE
-#undef scalar_t
+#undef real
 #undef accreal
 #undef Real
 #undef CReal

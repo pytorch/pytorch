@@ -51,6 +51,7 @@ class OptimizerTestBase(object):
     def testDense(self):
         model, perfect_model, data, label = self._createDense()
         optimizer = self.build_optimizer(model)
+
         workspace.FeedBlob('data', data[0])
         workspace.FeedBlob('label', label[0])
         workspace.RunNetOnce(model.param_init_net)
@@ -70,7 +71,7 @@ class OptimizerTestBase(object):
 
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
     def testGPUDense(self, dtype=core.DataType.FLOAT):
-        device_opt = core.DeviceOption(workspace.GpuDeviceType, 0)
+        device_opt = core.DeviceOption(caffe2_pb2.CUDA, 0)
         with core.DeviceScope(device_opt):
             model, _perfect_model, data, label = self._createDense(dtype)
             if dtype == core.DataType.FLOAT16:

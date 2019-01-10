@@ -62,7 +62,7 @@ class AllgatherOp final : public Operator<Context> {
         signalFailure(ws_->GetBlob(status_blob_), ioe);
         return false;
       } else {
-        throw;
+        throw ioe;
       }
     }
     return true;
@@ -74,8 +74,8 @@ class AllgatherOp final : public Operator<Context> {
     CAFFE_ENFORCE_EQ(OutputSize(), 1);
     auto comm_size =
         OperatorBase::Input<std::shared_ptr<::gloo::Context>>(0)->size;
-    const auto dims = std::vector<int64_t>(
-        1, (InputSize() - 1) * Input(1).numel() * comm_size);
+    const auto dims =
+        std::vector<TIndex>(1, (InputSize() - 1) * Input(1).size() * comm_size);
     Output(0)->Resize(dims);
 
     // Store which inputs/outputs this instance initialized with
@@ -84,15 +84,15 @@ class AllgatherOp final : public Operator<Context> {
     CAFFE_ENFORCE_EQ(init_.outputs.size(), 1);
 
     // Verify tensors all have same size
-    size_t size = Input(1).numel();
+    size_t size = Input(1).size();
     for (auto i = 2; i < InputSize(); i++) {
-      CAFFE_ENFORCE_EQ(Input(i).numel(), size);
+      CAFFE_ENFORCE_EQ(Input(i).size(), size);
     }
 
     // Verify tensors all have same type
-    TypeMeta meta = Input(1).dtype();
+    TypeMeta meta = Input(1).meta();
     for (auto i = 2; i < InputSize(); i++) {
-      CAFFE_ENFORCE(Input(i).dtype() == meta);
+      CAFFE_ENFORCE(Input(i).meta() == meta);
     }
 
     // Finally initialize the algorithm
@@ -111,10 +111,10 @@ class AllgatherOp final : public Operator<Context> {
   void update(GlooParameters& params) {
     params.context = OperatorBase::Input<std::shared_ptr<::gloo::Context>>(0);
     params.inputs.resize(InputSize() - 1);
-    params.size = Input(1).numel();
-    params.meta = Input(1).dtype();
+    params.size = Input(1).size();
+    params.meta = Input(1).meta();
     for (auto i = 0; i < params.inputs.size(); i++) {
-      params.inputs[i] = Input(i + 1).raw_data();
+      params.inputs[i] = Input(i + 1).template raw_data();
     }
     params.outputs.resize(OutputSize());
     params.outputs[0] = Output(0)->raw_mutable_data(params.meta);

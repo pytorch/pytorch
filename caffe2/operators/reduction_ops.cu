@@ -54,7 +54,7 @@ __global__ void rowwise_max_gradient_kernel(
 
 template <>
 bool SumSqrElementsOp<CUDAContext>::RunOnDevice() {
-  return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
+  return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
 }
 
 
@@ -86,15 +86,12 @@ bool SumElementsGradientOp<float, CUDAContext>::RunOnDevice() {
   DCHECK_EQ(dY.size(), 1);
   auto* dX = Output(0);
   dX->ResizeLike(X);
-  SumElementsGradientKernel<float>
-      <<<CAFFE_GET_BLOCKS(X.size()),
-         CAFFE_CUDA_NUM_THREADS,
-         0,
-         context_.cuda_stream()>>>(
-          average_,
-          X.size(),
-          dY.data<float>(),
-          dX->template mutable_data<float>());
+  SumElementsGradientKernel<float><<<
+      CAFFE_GET_BLOCKS(X.size()),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      average_, X.size(), dY.data<float>(), dX->mutable_data<float>());
   return true;
 }
 

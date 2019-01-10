@@ -55,17 +55,12 @@ def _init_output(output, capacity, global_init_net, global_exit_net):
     return out_queue, writer
 
 
-def make_processor(processor, reader=None):
+def make_processor(processor):
     if processor is None:
         return lambda rec: rec
     elif isinstance(processor, core.Net):
         return NetProcessor(processor)
     else:
-        if reader is not None and hasattr(processor, "schema_func"):
-            def processor_schema():
-                return processor.schema_func(reader)
-
-            processor.schema = processor_schema
         return processor
 
 
@@ -324,8 +319,7 @@ def _pipe_step(
     elif hasattr(input, 'reader'):
         reader = input.reader()
     else:
-        raise ValueError(
-            'Input must be a reader, queue or stream. Got {}'.format(type(input)))
+        raise ValueError('in must be a reader, queue or stream.')
 
     if processor is not None:
         reader = ProcessingReader(reader, processor)
@@ -358,10 +352,7 @@ class ProcessingReader(Reader):
     def __init__(self, reader, processor):
         Reader.__init__(self)
         self.reader = reader
-        self.processor = make_processor(processor, reader)
-
-    def schema(self):
-        return self.processor.schema()
+        self.processor = make_processor(processor)
 
     def setup_ex(self, init_net, finish_net):
         self.reader.setup_ex(init_net, finish_net)
@@ -412,9 +403,6 @@ class NetProcessor(object):
         self._blob_maps = []
         self._frozen = False
         self._cloned_init_nets = []
-
-    def schema(self):
-        return self.net.output_record()
 
     def setup(self, init_net):
         self._frozen = True

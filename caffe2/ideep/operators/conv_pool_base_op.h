@@ -39,7 +39,7 @@ class IDEEPConvPoolOpBase : public ConvPoolOpBase<IDEEPContext> {
     ideep::tensor::dims output_dims;
 
     auto input_dims = input.get_dims();
-    vector<int64_t> input_Tdims (input_dims.begin(), input_dims.end());
+    vector<TIndex> input_Tdims (input_dims.begin(), input_dims.end());
     InferOutputSize(
         input_Tdims,
         output_channel,
@@ -74,7 +74,7 @@ class IDEEPConvPoolOpBase : public ConvPoolOpBase<IDEEPContext> {
     try {
       return RunOnDeviceWithOrderNCHW();
     } catch (ideep::error& e) {
-      LOG(ERROR) << "IDEEP error:" << e.message;
+      VLOG(1) << "IDEEP error:" << e.message; 
       throw;
     }
   }

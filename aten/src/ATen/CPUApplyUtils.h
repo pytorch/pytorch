@@ -1,100 +1,9 @@
 #pragma once
 
-#include <ATen/Parallel.h>
-#include <ATen/TensorUtils.h>
-#include <limits>
-#include <utility>
-#include <cstring>
+#include "ATen/Parallel.h"
+#include "ATen/TensorUtils.h"
 
 namespace at {
-
-/*
-[collapse dims] Updates sizes, and strides to reflect a "collapse" of
-the info, possibly excluding the optional excludeDim. A "collapsed" version
-of the info is the fewest dims that order the tensor's elements in the same
-way as the original info. If excludeDim is specified, the collapse is the
-fewest dims that order the tensor's elements as the original and preserve the
-excluded dimension, unless the tensor collapses to a point.
-
-This function returns a pair of values.
-
-1) The (new) index of the preserved dimension if excludeDim is
-specified. 0 if the tensor is collapsed to a point. -1
-otherwise.
-
-2) The new number of dimensions.
-*/
-template <typename T>
-inline std::pair<int64_t, int64_t> collapse_dims(
-    T* sizes,
-    T* strides,
-    int64_t dims,
-    const int excludeDim = -1) {
-  AT_CHECK(
-      excludeDim >= -1 && excludeDim < dims,
-      "expected excluded dim between -1 and dims - 1");
-
-  int64_t stopDim = (excludeDim == -1) ? dims : excludeDim;
-  int64_t newIndex = -1;
-  int64_t oldIndex = 0;
-  int64_t remappedExcludedDim = -1;
-
-  while (oldIndex < dims) {
-    // Finds a dimension to collapse into
-    for (; oldIndex < stopDim; ++oldIndex) {
-      if (sizes[oldIndex] == 1) {
-        continue;
-      }
-
-      ++newIndex;
-      sizes[newIndex] = sizes[oldIndex];
-      strides[newIndex] = strides[oldIndex];
-      ++oldIndex;
-      break;
-    }
-
-    // Collapses dims
-    for (; oldIndex < stopDim; ++oldIndex) {
-      if (sizes[oldIndex] == 1) {
-        continue;
-      }
-
-      if (strides[newIndex] == sizes[oldIndex] * strides[oldIndex]) {
-        sizes[newIndex] *= sizes[oldIndex];
-        strides[newIndex] = strides[oldIndex];
-      } else {
-        ++newIndex;
-        sizes[newIndex] = sizes[oldIndex];
-        strides[newIndex] = strides[oldIndex];
-      }
-    }
-
-    // Handles excludeDim being set (oldIndex == excludeDim)
-    if (oldIndex != dims) {
-      // Preserves excluded dimension
-      ++newIndex;
-      sizes[newIndex] = sizes[oldIndex];
-      strides[newIndex] = strides[oldIndex];
-      remappedExcludedDim = newIndex;
-
-      // Restarts iteration after excludeDim
-      ++oldIndex;
-      stopDim = dims;
-    }
-  }
-
-  // Handles special case of all dims size 1
-  if (newIndex == -1 || (newIndex == 0 && sizes[0] == 1)) {
-    dims = 1;
-    sizes[0] = 1;
-    strides[0] = 1;
-
-    return std::pair<int64_t, int64_t>(0, 1);
-  }
-
-  dims = newIndex + 1;
-  return std::pair<int64_t, int64_t>(remappedExcludedDim, dims);
-}
 
 /*
  * The basic strategy for apply is as follows:
@@ -140,31 +49,44 @@ inline Tensor sort_strides(Tensor& tensor_) {
   return tensor;
 }
 
+template <typename Arg>
+inline void _setup_arrays(Tensor& tensor, Arg* iter) {
+  int64_t max_dim = tensor.ndimension();
+  iter->dim_ = 0;
+  for (int64_t i = 0; i < max_dim; i++) {
+    int64_t size = tensor.size(i);
+    int64_t stride = tensor.stride(i);
+    while (i + 1 < max_dim &&
+           (tensor.size(i + 1) == 1 ||
+            tensor.stride(i) == tensor.size(i + 1) * tensor.stride(i + 1))) {
+      size = size * tensor.size(i + 1);
+      if (tensor.size(i + 1) != 1)
+        stride = tensor.stride(i + 1);
+      i++;
+    }
+    iter->sizes_[iter->dim_] = size;
+    iter->strides_[iter->dim_] = stride;
+    iter->dim_++;
+  }
+}
+
 template <typename T, int N>
 struct strided_tensor_iter_fixed {
  public:
   T* data_ = NULL;
-  int64_t dim_ = 0;
+  int64_t dim_;
 
-  int64_t counter_[N] = {0};
-  int64_t sizes_[N] = {0};
-  int64_t strides_[N] = {0};
+  int64_t counter_[N];
+  int64_t sizes_[N];
+  int64_t strides_[N];
 
   strided_tensor_iter_fixed(strided_tensor_iter_fixed const&) = delete;
   void operator=(strided_tensor_iter_fixed const& x) = delete;
   strided_tensor_iter_fixed(strided_tensor_iter_fixed&&) = default;
   strided_tensor_iter_fixed(Tensor& tensor, bool sort_strides = false)
       : data_(tensor.data<T>()) {
-    std::memset(counter_, 0, sizeof(int64_t) * N);
-    if (tensor.dim() > 0) {
-      std::memcpy(
-          sizes_, tensor.sizes().data(), tensor.dim() * sizeof(int64_t));
-      std::memcpy(
-          strides_,
-          tensor.strides().data(),
-          tensor.dim() * sizeof(int64_t));
-    }
-    dim_ = std::get<1>(collapse_dims(sizes_, strides_, tensor.ndimension()));
+    memset(counter_, 0, sizeof(int64_t) * N);
+    _setup_arrays(tensor, this);
   }
 };
 
@@ -186,9 +108,9 @@ struct strided_tensor_iter {
       : data_(tensor.data<T>()),
         dim_(tensor.ndimension()),
         counter_(dim_, 0),
-        sizes_(tensor.sizes().vec()),
-        strides_(tensor.strides().vec()) {
-    dim_ = std::get<1>(collapse_dims(sizes_.data(), strides_.data(), dim_));
+        sizes_(tensor.sizes()),
+        strides_(tensor.strides()) {
+    _setup_arrays(tensor, this);
   }
 };
 
@@ -209,7 +131,7 @@ inline std::string _all_equal_numel_error(at::ArrayRef<Tensor> tensors) {
   for (size_t i = 0; i < tensors.size() - 1; i++) {
     oss << tensors[i].sizes() << ", ";
   }
-  oss << "and " << tensors[tensors.size() - 1].sizes()
+  oss << "and " << tensors[tensors.size() - 1]
       << " to have the same number of elements, but got ";
   for (size_t i = 0; i < tensors.size() - 1; i++) {
     oss << tensors[i].numel() << ", ";
@@ -222,11 +144,12 @@ inline std::string _all_equal_numel_error(at::ArrayRef<Tensor> tensors) {
 inline bool _apply_preamble(ArrayRef<Tensor> tensors) {
   checkBackend("CPU_tensor_apply", tensors, Backend::CPU);
   if (!_all_equal_numel(tensors))
-    AT_ERROR(_all_equal_numel_error(tensors));
+    throw std::runtime_error(_all_equal_numel_error(tensors));
   // An empty tensor has no elements
   for (auto& t : tensors)
-    if (t.numel() == 0)
+    if (t.sizes().equals({0}))
       return false;
+  internal::init_tbb_num_threads();
   return true;
 }
 
@@ -237,13 +160,13 @@ inline int64_t _max_dim_tensors(ArrayRef<Tensor> tensors) {
   return dim;
 }
 
-inline void iterate(int64_t size){};
+inline void iterate(){};
 
 template <typename Arg, typename... Args>
-inline void iterate(int64_t size, Arg& iter, Args&... iter_tail) {
-  iter.counter_[iter.dim_ - 1] += size;
-  iter.data_ = iter.data_ + size * iter.strides_[iter.dim_ - 1];
-  iterate(size, iter_tail...);
+inline void iterate(Arg& iter, Args&... iter_tail) {
+  iter.counter_[iter.dim_ - 1]++;
+  iter.data_ += iter.strides_[iter.dim_ - 1];
+  iterate(iter_tail...);
 }
 
 inline bool iterate_continue() {
@@ -254,17 +177,6 @@ template <typename Arg, typename... Args>
 inline bool iterate_continue(Arg& iter, Args&... iter_tail) {
   return iter.counter_[iter.dim_ - 1] < iter.sizes_[iter.dim_ - 1] &&
       iterate_continue(iter_tail...);
-}
-
-inline int64_t max_iterate_size() {
-  return std::numeric_limits<int64_t>::max();
-};
-
-template <typename Arg, typename... Args>
-inline int64_t max_iterate_size(Arg& iter, Args&... iter_tail) {
-  return std::min(
-      (iter.sizes_[iter.dim_ - 1] - iter.counter_[iter.dim_ - 1]),
-      max_iterate_size(iter_tail...));
 }
 
 inline void iterate_overflow(){};
@@ -323,73 +235,10 @@ apply_op(int64_t numel, int64_t offset, const Op& op, Args... iters) {
   for (int64_t i = 0; i < numel;) {
     for (; iterate_continue(iters...) && i < numel;) {
       op(*iters.data_...);
-      iterate(1, iters...);
+      iterate(iters...);
       i++;
     }
     iterate_overflow(iters...);
-  }
-}
-
-
-inline void apply_kernel(){};
-
-// TODO: Deal elegantly with 0-dim tensors. iters.strides_ of 0-dim
-// strided_tensor_iter will be of size 0 for dim 0 and iters.strides_[iters.dim_
-// - 1] will index at -1. C++14 integer_sequence could be of use here.
-template <typename Op, typename... Args>
-inline void
-apply_kernel(int64_t numel, int64_t offset, const Op& op, Args... iters) {
-  if (offset > 0)
-    forward(offset, iters...);
-  int64_t size = std::min(numel, max_iterate_size(iters...));
-  op(size, iters.data_..., iters.strides_[iters.dim_ - 1]...);
-  iterate(size, iters...);
-  iterate_overflow(iters...);
-  int64_t i = size;
-  size = std::min(numel, max_iterate_size(iters...));
-  for (; i < numel;) {
-    op(size, iters.data_..., iters.strides_[iters.dim_ - 1]...);
-    iterate(size, iters...);
-    i += size;
-    iterate_overflow(iters...);
-  }
-}
-
-template <typename scalar1, typename scalar2, typename Op>
-inline void
-CPU_tensor_parallel_kernel_apply2(Tensor tensor1, Tensor tensor2, const Op op) {
-  if (!_apply_preamble({tensor1, tensor2}))
-    return;
-  if (tensor1.numel() == 1) {
-    op(1, tensor1.data<scalar1>(), tensor2.data<scalar2>(), 0, 0);
-    return;
-  }
-  if (tensor1.ndimension() < 8 && tensor2.ndimension() < 8) {
-    parallel_for(
-        0,
-        tensor1.numel(),
-        1,
-        [&tensor1, &tensor2, &op](int64_t begin, int64_t end) {
-          apply_kernel(
-              end - begin,
-              begin,
-              op,
-              strided_tensor_iter_fixed<scalar1, 8>(tensor1),
-              strided_tensor_iter_fixed<scalar2, 8>(tensor2));
-        });
-  } else {
-    parallel_for(
-        0,
-        tensor1.numel(),
-        1,
-        [&tensor1, &tensor2, &op](int64_t begin, int64_t end) {
-          apply_kernel(
-              end - begin,
-              begin,
-              op,
-              strided_tensor_iter<scalar1>(tensor1),
-              strided_tensor_iter<scalar2>(tensor2));
-        });
   }
 }
 
@@ -499,66 +348,61 @@ inline void CPU_tensor_apply4(
 }
 
 template <typename scalar1, typename Op>
-inline void CPU_tensor_parallel_apply1(
-    Tensor tensor1,
-    const Op op,
-    int64_t grain_size = internal::GRAIN_SIZE) {
+inline void CPU_tensor_parallel_apply1(Tensor tensor1, const Op op) {
   if (!_apply_preamble({tensor1}))
     return;
+  if (tensor1.numel() < internal::TBB_GRAIN_SIZE) {
+    CPU_tensor_apply1<scalar1>(tensor1, op);
+    return;
+  }
+  auto range = tbb::blocked_range<size_t>(0, tensor1.numel());
   if (tensor1.ndimension() < 8) {
-    parallel_for(
-        0,
-        tensor1.numel(),
-        grain_size,
-        [&tensor1, &op](int64_t begin, int64_t end) {
+    tbb::parallel_for(
+        range, [&tensor1, &op](const tbb::blocked_range<size_t> r) {
           apply_op(
-              end - begin,
-              begin,
+              r.end() - r.begin(),
+              r.begin(),
               op,
               strided_tensor_iter_fixed<scalar1, 8>(tensor1, true));
         });
   } else {
-    parallel_for(
-        0,
-        tensor1.numel(),
-        grain_size,
-        [&tensor1, &op](int64_t begin, int64_t end) {
+    tbb::parallel_for(
+        range, [&tensor1, &op](const tbb::blocked_range<size_t> r) {
           apply_op(
-              end - begin, begin, op, strided_tensor_iter<scalar1>(tensor1));
+              r.end() - r.begin(),
+              r.begin(),
+              op,
+              strided_tensor_iter<scalar1>(tensor1));
         });
   }
 }
 
 template <typename scalar1, typename scalar2, typename Op>
-inline void CPU_tensor_parallel_apply2(
-    Tensor tensor1,
-    Tensor tensor2,
-    const Op op,
-    int64_t grain_size = internal::GRAIN_SIZE) {
+inline void
+CPU_tensor_parallel_apply2(Tensor tensor1, Tensor tensor2, const Op op) {
   if (!_apply_preamble({tensor1, tensor2}))
     return;
+  if ((tensor1.numel() + tensor2.numel()) < internal::TBB_GRAIN_SIZE) {
+    CPU_tensor_apply2<scalar1, scalar2>(tensor1, tensor2, op);
+    return;
+  }
+  auto range = tbb::blocked_range<size_t>(0, tensor1.numel());
   if (tensor1.ndimension() < 8 && tensor2.ndimension() < 8) {
-    parallel_for(
-        0,
-        tensor1.numel(),
-        grain_size,
-        [&tensor1, &tensor2, &op](int64_t begin, int64_t end) {
+    tbb::parallel_for(
+        range, [&tensor1, &tensor2, &op](const tbb::blocked_range<size_t> r) {
           apply_op(
-              end - begin,
-              begin,
+              r.end() - r.begin(),
+              r.begin(),
               op,
               strided_tensor_iter_fixed<scalar1, 8>(tensor1),
               strided_tensor_iter_fixed<scalar2, 8>(tensor2));
         });
   } else {
-    parallel_for(
-        0,
-        tensor1.numel(),
-        grain_size,
-        [&tensor1, &tensor2, &op](int64_t begin, int64_t end) {
+    tbb::parallel_for(
+        range, [&tensor1, &tensor2, &op](const tbb::blocked_range<size_t> r) {
           apply_op(
-              end - begin,
-              begin,
+              r.end() - r.begin(),
+              r.begin(),
               op,
               strided_tensor_iter<scalar1>(tensor1),
               strided_tensor_iter<scalar2>(tensor2));

@@ -1,52 +1,51 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "THC/generic/THCStorage.h"
+#define THC_GENERIC_FILE "generic/THCStorage.h"
 #else
 
-#define THCStorage THStorage
+#define TH_STORAGE_REFCOUNTED 1
+#define TH_STORAGE_RESIZABLE  2
+#define TH_STORAGE_FREEMEM    4
 
-// These used to be distinct types; for some measure of backwards compatibility and documentation
-// alias these to the single THCStorage type.
-#define THCudaStorage       THCStorage
-#define THCudaDoubleStorage THCStorage
-#define THCudaHalfStorage   THCStorage
-#define THCudaByteStorage   THCStorage
-#define THCudaCharStorage   THCStorage
-#define THCudaShortStorage  THCStorage
-#define THCudaIntStorage    THCStorage
-#define THCudaLongStorage   THCStorage
+typedef struct THCStorage THCStorage;
 
-THC_API scalar_t* THCStorage_(data)(THCState *state, const THCStorage*);
+THC_API real* THCStorage_(data)(THCState *state, const THCStorage*);
 THC_API ptrdiff_t THCStorage_(size)(THCState *state, const THCStorage*);
 THC_API int THCStorage_(elementSize)(THCState *state);
 
 /* slow access -- checks everything */
-THC_API void THCStorage_(set)(THCState *state, THCStorage*, ptrdiff_t, scalar_t);
-THC_API scalar_t THCStorage_(get)(THCState *state, const THCStorage*, ptrdiff_t);
+THC_API void THCStorage_(set)(THCState *state, THCStorage*, ptrdiff_t, real);
+THC_API real THCStorage_(get)(THCState *state, const THCStorage*, ptrdiff_t);
 
 THC_API THCStorage* THCStorage_(new)(THCState *state);
 THC_API THCStorage* THCStorage_(newWithSize)(THCState *state, ptrdiff_t size);
-THC_API THCStorage* THCStorage_(newWithSize1)(THCState *state, scalar_t);
-THC_API THCStorage* THCStorage_(newWithSize2)(THCState *state, scalar_t, scalar_t);
-THC_API THCStorage* THCStorage_(newWithSize3)(THCState *state, scalar_t, scalar_t, scalar_t);
-THC_API THCStorage* THCStorage_(newWithSize4)(THCState *state, scalar_t, scalar_t, scalar_t, scalar_t);
+THC_API THCStorage* THCStorage_(newWithSize1)(THCState *state, real);
+THC_API THCStorage* THCStorage_(newWithSize2)(THCState *state, real, real);
+THC_API THCStorage* THCStorage_(newWithSize3)(THCState *state, real, real, real);
+THC_API THCStorage* THCStorage_(newWithSize4)(THCState *state, real, real, real, real);
 THC_API THCStorage* THCStorage_(newWithMapping)(THCState *state, const char *filename, ptrdiff_t size, int shared);
 
-#ifdef __cplusplus
+/* takes ownership of data */
+THC_API THCStorage* THCStorage_(newWithData)(THCState *state, real *data, ptrdiff_t size);
+
 THC_API THCStorage* THCStorage_(newWithAllocator)(
   THCState *state, ptrdiff_t size,
-  at::Allocator* allocator);
+  THCDeviceAllocator* allocator,
+  void *allocatorContext);
 THC_API THCStorage* THCStorage_(newWithDataAndAllocator)(
-  THCState *state, at::DataPtr&& data, ptrdiff_t size,
-  at::Allocator* allocator);
-#endif
+  THCState *state, real* data, ptrdiff_t size,
+  THCDeviceAllocator* allocator,
+  void *allocatorContext);
 
 THC_API void THCStorage_(setFlag)(THCState *state, THCStorage *storage, const char flag);
 THC_API void THCStorage_(clearFlag)(THCState *state, THCStorage *storage, const char flag);
 THC_API void THCStorage_(retain)(THCState *state, THCStorage *storage);
 
+/* used by StorageSharing */
+THC_API int THCStorage_(retainIfLive)(THCState *state, THCStorage *storage);
+
 THC_API void THCStorage_(free)(THCState *state, THCStorage *storage);
 THC_API void THCStorage_(resize)(THCState *state, THCStorage *storage, ptrdiff_t size);
-THC_API void THCStorage_(fill)(THCState *state, THCStorage *storage, scalar_t value);
+THC_API void THCStorage_(fill)(THCState *state, THCStorage *storage, real value);
 
 THC_API int THCStorage_(getDevice)(THCState* state, const THCStorage* storage);
 

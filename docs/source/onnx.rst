@@ -7,12 +7,13 @@ Example: End-to-end AlexNet from PyTorch to Caffe2
 
 Here is a simple script which exports a pretrained AlexNet as defined in
 torchvision into ONNX.  It runs a single round of inference and then
-saves the resulting traced model to ``alexnet.onnx``::
+saves the resulting traced model to ``alexnet.proto``::
 
-    import torch
+    from torch.autograd import Variable
+    import torch.onnx
     import torchvision
 
-    dummy_input = torch.randn(10, 3, 224, 224, device='cuda')
+    dummy_input = Variable(torch.randn(10, 3, 224, 224)).cuda()
     model = torchvision.models.alexnet(pretrained=True).cuda()
 
     # Providing input and output names sets the display names for values
@@ -27,9 +28,9 @@ saves the resulting traced model to ``alexnet.onnx``::
     input_names = [ "actual_input_1" ] + [ "learned_%d" % i for i in range(16) ]
     output_names = [ "output1" ]
 
-    torch.onnx.export(model, dummy_input, "alexnet.onnx", verbose=True, input_names=input_names, output_names=output_names)
+    torch.onnx.export(model, dummy_input, "alexnet.proto", verbose=True, input_names=input_names, output_names=output_names)
 
-The resulting ``alexnet.onnx`` is a binary protobuf file which contains both
+The resulting ``alexnet.proto`` is a binary protobuf file which contains both
 the network structure and parameters of the model you exported
 (in this case, AlexNet).  The keyword argument ``verbose=True`` causes the
 exporter to print out a human-readable representation of the network::
@@ -74,7 +75,7 @@ Then, you can run::
     import onnx
 
     # Load the ONNX model
-    model = onnx.load("alexnet.onnx")
+    model = onnx.load("alexnet.proto")
 
     # Check that the IR is well formed
     onnx.checker.check_model(model)
@@ -164,17 +165,7 @@ The following operators are supported:
 * max
 * min
 * eq
-* gt
-* lt
-* ge
-* le
 * exp
-* sin
-* cos
-* tan
-* asin
-* acos
-* atan
 * permute
 * Conv
 * BatchNorm

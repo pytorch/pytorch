@@ -1,36 +1,41 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "THC/generic/THCTensorMasked.cu"
+#define THC_GENERIC_FILE "generic/THCTensorMasked.cu"
 #else
 
 
-void THCTensor_(maskedFill)(THCState* state,
-                            THCTensor *tensor, THCudaByteTensor *mask, scalar_t value)
+THC_API void
+THCTensor_(maskedFill)(THCState* state,
+                       THCTensor *tensor, THCudaByteTensor *mask, real value)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, mask));
   THArgCheck(THCTensor_(nElement)(state, tensor) ==
              THCudaByteTensor_nElement(state, mask),
              2, "sizes do not match");
 
-  if (!THC_pointwiseApply2<scalar_t, uint8_t>(state, tensor, mask,
-                                          TensorMaskedFillOp<scalar_t, unsigned char>(value))) {
+  if (!THC_pointwiseApply2(state, tensor, mask,
+                           TensorMaskedFillOp<real, unsigned char>(value))) {
     THArgCheck(false, 2, CUTORCH_DIM_WARNING);
   }
 
   THCudaCheck(cudaGetLastError());
 }
 
-void THCTensor_(maskedFillByte)(THCState* state,
-                                THCTensor *tensor, THByteTensor *mask, scalar_t value)
+THC_API void
+THCTensor_(maskedFillByte)(THCState* state,
+                           THCTensor *tensor, THByteTensor *mask, real value)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, tensor));
-  THCudaByteTensor* maskCuda = THCudaByteTensor_newWithSize(state, mask->sizes(), {});
-  THCTensor_(copy)(state, maskCuda, mask);
+  THLongStorage* maskSizes = THByteTensor_newSizeOf(mask);
+  THCudaByteTensor* maskCuda = THCudaByteTensor_newWithSize(state, maskSizes, NULL);
+  THLongStorage_free(maskSizes);
+  THCudaByteTensor_copyByte(state, maskCuda, mask);
   THCTensor_(maskedFill)(state, tensor, maskCuda, value);
   THCudaByteTensor_free(state, maskCuda);
 }
 
-void THCTensor_(maskedCopy)(THCState* state,
-                            THCTensor *tensor, THCudaByteTensor *mask, THCTensor *src)
+THC_API void
+THCTensor_(maskedCopy)(THCState* state,
+                       THCTensor *tensor, THCudaByteTensor *mask, THCTensor *src)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, tensor, src, mask));
   ptrdiff_t maskSize = THCudaByteTensor_nElement(state, mask);
@@ -54,13 +59,14 @@ void THCTensor_(maskedCopy)(THCState* state,
   // iterator prefix sums? Convert `mask` to the same datatype as what
   // we're accumulating the prefix sum in (int64_t) to get around it
   THCudaLongTensor* maskLong = THCudaLongTensor_new(state);
-  at::IntList maskSizes = mask->sizes();
-  THCudaLongTensor_resize(state, maskLong, maskSizes, {});
-  THCTensor_(copy)(state, maskLong, mask);
+  THLongStorage* maskSizes = THCudaByteTensor_newSizeOf(state, mask);
+  THCudaLongTensor_resize(state, maskLong, maskSizes, NULL);
+  THCudaLongTensor_copyCudaByte(state, maskLong, mask);
 
   // Use a prefix sum to determine the output locations of the masked elements
   THCudaLongTensor* maskPrefixSum = THCudaLongTensor_new(state);
-  THCudaLongTensor_resize(state, maskPrefixSum, maskSizes, {});
+  THCudaLongTensor_resize(state, maskPrefixSum, maskSizes, NULL);
+  THLongStorage_free(maskSizes);
 
   THCThrustAllocator thrustAlloc(state);
   thrust::device_ptr<int64_t>
@@ -69,7 +75,7 @@ void THCTensor_(maskedCopy)(THCState* state,
     maskPrefixSumData(THCudaLongTensor_data(state, maskPrefixSum));
 
   thrust::exclusive_scan(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
+#if CUDA_VERSION >= 7000
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     maskData,
@@ -82,9 +88,9 @@ void THCTensor_(maskedCopy)(THCState* state,
 
   // update `tensor` where `mask` == 1 but pull from `src` at
   // maskPrefixSum
-  bool status = THC_pointwiseApply3<scalar_t, uint8_t, int64_t>(
+  bool status = THC_pointwiseApply3(
     state, tensor, mask, maskPrefixSum,
-    TensorMaskedCopyOp<scalar_t, unsigned char, int64_t>(
+    TensorMaskedCopyOp<real, unsigned char, int64_t>(
       THCTensor_(data)(state, contigSrc)));
 
   THCTensor_(free)(state, contigSrc);
@@ -95,17 +101,21 @@ void THCTensor_(maskedCopy)(THCState* state,
   THCudaCheck(cudaGetLastError());
 }
 
-void THCTensor_(maskedCopyByte)(THCState* state,
-                                THCTensor *tensor, THByteTensor *mask, THCTensor *src) {
+THC_API void
+THCTensor_(maskedCopyByte)(THCState* state,
+                           THCTensor *tensor, THByteTensor *mask, THCTensor *src) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
-  THCudaByteTensor* maskCuda = THCudaByteTensor_newWithSize(state, mask->sizes(), {});
-  THCTensor_(copy)(state, maskCuda, mask);
+  THLongStorage* maskSizes = THByteTensor_newSizeOf(mask);
+  THCudaByteTensor* maskCuda = THCudaByteTensor_newWithSize(state, maskSizes, NULL);
+  THLongStorage_free(maskSizes);
+  THCudaByteTensor_copyByte(state, maskCuda, mask);
   THCTensor_(maskedCopy)(state, tensor, maskCuda, src);
   THCudaByteTensor_free(state, maskCuda);
 }
 
-void THCTensor_(maskedSelect)(THCState* state,
-                              THCTensor* tensor, THCTensor* src, THCudaByteTensor* mask) {
+THC_API void
+THCTensor_(maskedSelect)(THCState* state,
+                         THCTensor* tensor, THCTensor* src, THCudaByteTensor* mask) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, tensor, src, mask));
   THArgCheck(THCudaByteTensor_nElement(state, mask) ==
              THCTensor_(nElement)(state, src),
@@ -124,13 +134,14 @@ void THCTensor_(maskedSelect)(THCState* state,
   // iterator prefix sums? Convert `mask` to the same datatype as what
   // we're accumulating the prefix sum in (int64_t) to get around it
   THCudaLongTensor* maskLong = THCudaLongTensor_new(state);
-  at::IntList maskSizes = mask->sizes();
-  THCudaLongTensor_resize(state, maskLong, maskSizes, {});
-  THCTensor_(copy)(state, maskLong, mask);
+  THLongStorage* maskSizes = THCudaByteTensor_newSizeOf(state, mask);
+  THCudaLongTensor_resize(state, maskLong, maskSizes, NULL);
+  THCudaLongTensor_copyCudaByte(state, maskLong, mask);
 
   // Use a prefix sum to determine the output locations of the masked elements
   THCudaLongTensor* maskPrefixSum = THCudaLongTensor_new(state);
-  THCudaLongTensor_resize(state, maskPrefixSum, maskSizes, {});
+  THCudaLongTensor_resize(state, maskPrefixSum, maskSizes, NULL);
+  THLongStorage_free(maskSizes);
 
   THCThrustAllocator thrustAlloc(state);
   thrust::device_ptr<int64_t>
@@ -139,7 +150,7 @@ void THCTensor_(maskedSelect)(THCState* state,
     maskPrefixSumData(THCudaLongTensor_data(state, maskPrefixSum));
 
   thrust::exclusive_scan(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
+#if CUDA_VERSION >= 7000
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     maskData,
@@ -147,9 +158,9 @@ void THCTensor_(maskedSelect)(THCState* state,
     maskPrefixSumData);
 
   // Then copy over the masked elements at their desired output index
-  bool status = THC_pointwiseApply3<uint8_t, int64_t, scalar_t>(
+  bool status = THC_pointwiseApply3(
     state, mask, maskPrefixSum,
-    src, TensorMaskedSelectOp<scalar_t, unsigned char, int64_t>(
+    src, TensorMaskedSelectOp<real, unsigned char, int64_t>(
       THCTensor_(data)(state, tensor)));
 
   THCudaLongTensor_free(state, maskLong);
@@ -166,12 +177,15 @@ void THCTensor_(maskedSelect)(THCState* state,
 }
 
 // FIXME: remove now that we have THCudaByteTensor?
-void THCTensor_(maskedSelectByte)(THCState* state,
-                                  THCTensor *tensor, THCTensor *src, THByteTensor *mask)
+THC_API void
+THCTensor_(maskedSelectByte)(THCState* state,
+                             THCTensor *tensor, THCTensor *src, THByteTensor *mask)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
-  THCudaByteTensor* maskCuda = THCudaByteTensor_newWithSize(state, mask->sizes(), {});
-  THCTensor_(copy)(state, maskCuda, mask);
+  THLongStorage* maskSizes = THByteTensor_newSizeOf(mask);
+  THCudaByteTensor* maskCuda = THCudaByteTensor_newWithSize(state, maskSizes, NULL);
+  THLongStorage_free(maskSizes);
+  THCudaByteTensor_copyByte(state, maskCuda, mask);
   THCTensor_(maskedSelect)(state, tensor, src, maskCuda);
   THCudaByteTensor_free(state, maskCuda);
 }

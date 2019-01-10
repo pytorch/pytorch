@@ -32,7 +32,7 @@ class CreateBlobsQueueDBOp : public Operator<CPUContext> {
   }
 
  private:
-  C10_DISABLE_COPY_AND_ASSIGN(CreateBlobsQueueDBOp);
+  DISABLE_COPY_AND_ASSIGN(CreateBlobsQueueDBOp);
 };
 
 REGISTER_CPU_OPERATOR(CreateBlobsQueueDB, CreateBlobsQueueDBOp<CPUContext>);

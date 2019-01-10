@@ -78,6 +78,8 @@ def write(self, filename):
             'to': i.unique(),
             'arrows': 'from',
         }
+        if i.stage() != n.stage():
+            e['color'] = 'green'
         edges.append(e)
 
     counts = {}

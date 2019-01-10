@@ -1,16 +1,10 @@
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
 
-#include "caffe2/sgd/fp16_momentum_sgd_op.h"
+#include "fp16_momentum_sgd_op.h"
 
 namespace caffe2 {
 namespace {
-
-#ifdef __HIPCC__
-typedef __half half;
-typedef __half2 half2;
-#endif
-
 __global__ void FP16MomentumSGDKernel(
     int N,
     const half2* g,
@@ -22,7 +16,7 @@ __global__ void FP16MomentumSGDKernel(
     bool nesterov,
     const float wd,
     half2* param) {
-#if __CUDA_ARCH__ >= 530 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 530
   const float lr2 = lr[0];
   const half2 LR = __float2half2_rn(lr2);
   const half2 momentum = __float2half2_rn(mom);
@@ -87,7 +81,7 @@ __global__ void FP16MomentumSGDKernel(
             __hfma(mi_new_half, __high2half(momentum), mi_new_half),
             mom_mi_half);
         if (param) {
-          param_half[N - 1] = __hsub(param_half[N - 1], ng_half[N - 1]);
+          param_half[N - 1] = __hsub(param_half[i], ng_half[N - 1]);
         }
       }
     }
@@ -109,7 +103,7 @@ __global__ void FP16MomentumSGDFP32Kernel(
     bool nesterov,
     const float wd,
     half2* param) {
-#if __CUDA_ARCH__ >= 530 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 530
   const float lr2 = lr[0];
   const float LR = lr2;
   const float momentum = mom;
@@ -186,19 +180,19 @@ __global__ void FP16MomentumSGDFP32Kernel(
 template <>
 void fp16_momentum_sgd_update<CUDAContext>(
     int N,
-    const at::Half* g,
-    const at::Half* m,
-    at::Half* ng,
-    at::Half* nm,
+    const float16* g,
+    const float16* m,
+    float16* ng,
+    float16* nm,
     const float* lr,
     float momentum,
     bool nesterov,
     float weight_decay,
     bool fp32_update,
-    at::Half* param,
+    float16* param,
     CUDAContext* context) {
   const cudaDeviceProp& prop = GetDeviceProperty(0);
-  if (prop.major >= kFp16CUDADevicePropMajor) {
+  if (prop.major >= 6) {
     if (!fp32_update) {
       FP16MomentumSGDKernel<<<
           CAFFE_GET_BLOCKS(N / 2),
@@ -243,7 +237,7 @@ void fp16_momentum_sgd_update<CUDAContext>(
 
 REGISTER_CUDA_OPERATOR(
     FP16MomentumSGDUpdate,
-    FP16MomentumSGDUpdateOp<at::Half, CUDAContext>);
+    FP16MomentumSGDUpdateOp<float16, CUDAContext>);
 OPERATOR_SCHEMA(FP16MomentumSGDUpdate)
     .NumInputs(4)
     .NumOutputs(3)

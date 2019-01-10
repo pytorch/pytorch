@@ -50,12 +50,12 @@ macro(Check_Lapack_Libraries LIBRARIES _prefix _name _flags _list _blas)
         if(APPLE)
           find_library(${_prefix}_${_library}_LIBRARY
             NAMES ${_library}
-            PATHS /usr/local/lib /usr/lib /usr/local/lib64 /usr/lib64 /usr/lib/aarch64-linux-gnu
+            PATHS /usr/local/lib /usr/lib /usr/local/lib64 /usr/lib64
             ENV DYLD_LIBRARY_PATH)
         else(APPLE)
           find_library(${_prefix}_${_library}_LIBRARY
             NAMES ${_library}
-            PATHS /usr/local/lib /usr/lib /usr/local/lib64 /usr/lib64 /usr/lib/aarch64-linux-gnu
+            PATHS /usr/local/lib /usr/lib /usr/local/lib64 /usr/lib64
             ENV LD_LIBRARY_PATH)
         endif(APPLE)
       endif(WIN32)
@@ -95,35 +95,10 @@ if(BLAS_FOUND)
     SET(LAPACK_INFO "mkl")
   ENDIF()
 
-  # Accelerate
-  IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "accelerate"))
-    SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
-    check_function_exists("cheev_" ACCELERATE_LAPACK_WORKS)
-    set(CMAKE_REQUIRED_LIBRARIES)
-    if(ACCELERATE_LAPACK_WORKS)
-      SET(LAPACK_INFO "accelerate")
-    else()
-      message(STATUS "Strangely, this Accelerate library does not support Lapack?!")
-    endif()
-  endif()
-
-  # vecLib
-  IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "veclib"))
-    SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
-    check_function_exists("cheev_" VECLIB_LAPACK_WORKS)
-    set(CMAKE_REQUIRED_LIBRARIES)
-    if(VECLIB_LAPACK_WORKS)
-      SET(LAPACK_INFO "veclib")
-    else()
-      message(STATUS "Strangely, this vecLib library does not support Lapack?!")
-    endif()
-  endif()
-
   # OpenBlas
   IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "open"))
     SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
     check_function_exists("cheev_" OPEN_LAPACK_WORKS)
-    set(CMAKE_REQUIRED_LIBRARIES)
     if(OPEN_LAPACK_WORKS)
       SET(LAPACK_INFO "open")
     else()
@@ -135,7 +110,6 @@ if(BLAS_FOUND)
   IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "goto"))
     SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
     check_function_exists("cheev_" GOTO_LAPACK_WORKS)
-    set(CMAKE_REQUIRED_LIBRARIES)
     if(GOTO_LAPACK_WORKS)
       SET(LAPACK_INFO "goto")
     else()
@@ -147,11 +121,32 @@ if(BLAS_FOUND)
   IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "acml"))
     SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
     check_function_exists("cheev_" ACML_LAPACK_WORKS)
-    set(CMAKE_REQUIRED_LIBRARIES)
     if(ACML_LAPACK_WORKS)
       SET(LAPACK_INFO "acml")
     else()
       message(STATUS "Strangely, this ACML library does not support Lapack?!")
+    endif()
+  endif()
+
+  # Accelerate
+  IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "accelerate"))
+    SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
+    check_function_exists("cheev_" ACCELERATE_LAPACK_WORKS)
+    if(ACCELERATE_LAPACK_WORKS)
+      SET(LAPACK_INFO "accelerate")
+    else()
+      message(STATUS "Strangely, this Accelerate library does not support Lapack?!")
+    endif()
+  endif()
+
+  # vecLib
+  IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "veclib"))
+    SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
+    check_function_exists("cheev_" VECLIB_LAPACK_WORKS)
+    if(VECLIB_LAPACK_WORKS)
+      SET(LAPACK_INFO "veclib")
+    else()
+      message(STATUS "Strangely, this vecLib library does not support Lapack?!")
     endif()
   endif()
 

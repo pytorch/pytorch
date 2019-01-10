@@ -1,46 +1,40 @@
 #include <torch/nn/modules/dropout.h>
 
-#include <torch/types.h>
+namespace torch { namespace nn {
 
-#include <c10/util/Exception.h>
-
-#include <cstddef>
-#include <ostream>
-#include <vector>
-
-namespace torch {
-namespace nn {
-namespace detail {
-template <typename Derived>
-DropoutImplBase<Derived>::DropoutImplBase(DropoutOptions options_)
-    : options(options_) {
-  AT_CHECK(options.rate_ >= 0, "Dropout rate must not be less than zero");
-  AT_CHECK(options.rate_ <= 1, "Dropout rate must not be greater than one");
+Dropout::Dropout(double p) : p_(p) {
+  assert(p < 1 && p >= 0);
 }
 
-template <typename Derived>
-void DropoutImplBase<Derived>::reset() {}
-
-template class DropoutImplBase<DropoutImpl>;
-template class DropoutImplBase<FeatureDropoutImpl>;
-} // namespace detail
-
-DropoutOptions::DropoutOptions(double rate) : rate_(rate) {}
-
-Tensor DropoutImpl::forward(const Tensor& input) {
-  return torch::dropout(input, options.rate_, this->is_training());
+variable_list Dropout::forward(variable_list inputs) {
+  if (p_ == 0 || !is_training())
+    return inputs;
+  variable_list lst;
+  for (auto x : inputs) {
+    auto noise = x.data().type().tensor(x.sizes());
+    noise = (noise.uniform_(0, 1) > p_)
+                .toType(x.type().scalarType())
+                .mul_(1. / (1 - p_));
+    lst.push_back(x * Var(noise));
+  }
+  return lst;
 }
 
-void DropoutImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::Dropout(rate=" << options.rate_ << ")";
+Dropout2d::Dropout2d(double p) : p_(p) {
+  assert(p < 1 && p >= 0);
 }
 
-Tensor FeatureDropoutImpl::forward(const Tensor& input) {
-  return torch::feature_dropout(input, options.rate_, this->is_training());
+variable_list Dropout2d::forward(variable_list inputs) {
+  if (p_ == 0 || !is_training())
+    return inputs;
+  variable_list lst;
+  for (auto x : inputs) {
+    auto noise = x.data().type().tensor({x.size(0), x.size(1), 1, 1});
+    noise = (noise.uniform_(0, 1) > p_)
+                .toType(x.type().scalarType())
+                .mul_(1. / (1 - p_));
+    lst.push_back(x * Var(noise));
+  }
+  return lst;
 }
-
-void FeatureDropoutImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::FeatureDropout(rate=" << options.rate_ << ")";
-}
-} // namespace nn
-} // namespace torch
+}} // namespace torch::nn

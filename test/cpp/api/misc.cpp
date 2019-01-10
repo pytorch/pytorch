@@ -1,61 +1,43 @@
-#include <gtest/gtest.h>
+#include <catch.hpp>
 
-#include <torch/csrc/utils/tempfile.h>
-#include <torch/nn/init.h>
-#include <torch/nn/modules/linear.h>
-#include <torch/types.h>
-#include <torch/utils.h>
+#include <torch/torch.h>
 
-#include <test/cpp/api/support.h>
+using namespace torch;
+using namespace torch::nn;
 
-TEST(NoGradTest, SetsGradModeCorrectly) {
-  torch::manual_seed(0);
-  torch::NoGradGuard guard;
-  torch::nn::Linear model(5, 2);
-  auto x = torch::randn({10, 5}, torch::requires_grad());
-  auto y = model->forward(x);
-  torch::Tensor s = y.sum();
+TEST_CASE("misc") {
+  SECTION("no_grad") {
+    no_grad_guard guard;
+    auto model = make(Linear(5, 2));
+    auto x = Var(at::CPU(at::kFloat).randn({10, 5}), true);
+    auto y = model->forward({x})[0];
+    Variable s = y.sum();
 
-  s.backward();
-  ASSERT_FALSE(model->weight.grad().defined());
-}
-
-struct AutogradTest : torch::test::SeedingFixture {
-  AutogradTest() {
-    x = torch::randn({3, 3}, torch::requires_grad());
-    y = torch::randn({3, 3});
-    z = x * y;
+    backward(s);
+    REQUIRE(!model->parameters()["weight"].grad().defined());
   }
-  torch::Tensor x, y, z;
-};
 
-TEST_F(AutogradTest, CanTakeDerivatives) {
-  z.backward();
-  ASSERT_TRUE(x.grad().allclose(y));
+  SECTION("CPU random seed") {
+    int size = 100;
+    setSeed(7);
+    auto x1 = Var(at::CPU(at::kFloat).randn({size}));
+    setSeed(7);
+    auto x2 = Var(at::CPU(at::kFloat).randn({size}));
+
+    auto l_inf = (x1.data() - x2.data()).abs().max().toCFloat();
+    REQUIRE(l_inf < 1e-10);
+  }
 }
 
-TEST_F(AutogradTest, CanTakeDerivativesOfZeroDimTensors) {
-  z.sum().backward();
-  ASSERT_TRUE(x.grad().allclose(y));
-}
+TEST_CASE("misc_cuda", "[cuda]") {
+  SECTION("CUDA random seed") {
+    int size = 100;
+    setSeed(7);
+    auto x1 = Var(at::CUDA(at::kFloat).randn({size}));
+    setSeed(7);
+    auto x2 = Var(at::CUDA(at::kFloat).randn({size}));
 
-TEST_F(AutogradTest, CanPassCustomGradientInputs) {
-  z.sum().backward(torch::ones({}) * 2);
-  ASSERT_TRUE(x.grad().allclose(y * 2));
+    auto l_inf = (x1.data() - x2.data()).abs().max().toCFloat();
+    REQUIRE(l_inf < 1e-10);
+  }
 }
-
-TEST(NNInitTest, CanInitializeTensorThatRequiresGrad) {
-  auto tensor = torch::empty({3, 4}, torch::requires_grad());
-  ASSERT_THROWS_WITH(
-      tensor.fill_(1),
-      "a leaf Variable that requires grad "
-      "has been used in an in-place operation");
-  ASSERT_EQ(torch::nn::init::ones_(tensor).sum().item<int32_t>(), 12);
-}
-
-#if !defined(_WIN32)
-TEST(TempFileTest, MatchesExpectedPattern) {
-  torch::utils::TempFile pattern = torch::utils::make_tempfile("test-pattern-");
-  ASSERT_NE(pattern.name.find("test-pattern-"), std::string::npos);
-}
-#endif // !defined(_WIN32)

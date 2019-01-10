@@ -3,15 +3,19 @@
 #include <ATen/Config.h>
 
 #include <THC/THC.h>
-#include <THC/THCGeneral.hpp>
 
 #include <stdexcept>
 
 namespace at { namespace cuda {
 
-at::Allocator* getPinnedMemoryAllocator() {
+void* PinnedMemoryAllocator::allocate(std::size_t n) const {
   auto state = globalContext().lazyInitCUDA();
-  return state->cudaHostAllocator;
+  return state->cudaHostAllocator->malloc(nullptr, n);
+}
+
+void PinnedMemoryAllocator::deallocate(void* ptr) const {
+  auto state = globalContext().lazyInitCUDA();
+  return state->cudaHostAllocator->free(nullptr, ptr);
 }
 
 }} // namespace at::cuda

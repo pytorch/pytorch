@@ -1,44 +1,43 @@
-#include <gtest/gtest.h>
+#define CATCH_CONFIG_MAIN
+#include "catch.hpp"
 
-#include <ATen/ATen.h>
+#include "ATen/ATen.h"
+#include "test_seed.h"
 
 using namespace at;
-void TestSimpleCase(Type& T) {
-  auto a = randn({2, 3, 4, 5}, T);
-  ASSERT_TRUE(a.prod(-4).equal(a.prod(0)));
-  ASSERT_TRUE(a.prod(3).equal(a.prod(-1)));
-}
 
-void TestExpressionSpecification(Type& T) {
-  auto a = randn({2, 3, 4, 5}, T);
-  ASSERT_TRUE(a.unsqueeze(-5).equal(a.unsqueeze(0)));
-  ASSERT_TRUE(a.unsqueeze(4).equal(a.unsqueeze(-1)));
+TEST_CASE( "wrapdim test", "[]" ) {
+  manual_seed(123, at::Backend::CPU);
 
-  // can unsqueeze scalar
-  auto b = randn(1, T);
-  b.unsafeGetTensorImpl()->maybe_zero_dim(true);
-  ASSERT_TRUE(b.unsqueeze(0).equal(b.unsqueeze(-1)));
-}
+  Type & T = CPU(kFloat);
 
-void TestEmptyTensor(Type& T) {
-  auto a = randn(0, T);
-  ASSERT_TRUE(a.prod(0).equal(at::ones({}, T)));
-}
+  SECTION( "simple case" ) {
+    auto a = randn(T, {2, 3, 4, 5});
+    REQUIRE(a.prod(-4).equal(a.prod(0)));
+    REQUIRE(a.prod(3).equal(a.prod(-1)));
+  }
 
-void TestScalarVs1Dim1Size(Type& T) {
-  auto a = randn(1, T);
-  ASSERT_TRUE(a.prod(0).equal(a.prod(-1)));
-  a.unsafeGetTensorImpl()->maybe_zero_dim(true);
-  ASSERT_EQ(a.dim(), 0);
-  ASSERT_TRUE(a.prod(0).equal(a.prod(-1)));
-}
+  SECTION( "expression specification" ) {
+    auto a = randn(T, {2, 3, 4, 5});
+    REQUIRE(a.unsqueeze(-5).equal(a.unsqueeze(0)));
+    REQUIRE(a.unsqueeze(4).equal(a.unsqueeze(-1)));
 
-TEST(TestWrapdim, TestWrapdim) {
-  manual_seed(123);
-  Type& T = CPU(kFloat);
+    // can unsqueeze scalar
+    auto b = randn(T, 1);
+    b.get()->maybeScalar(true);
+    REQUIRE(b.unsqueeze(0).equal(b.unsqueeze(-1)));
+  }
 
-  TestSimpleCase(T);
-  TestEmptyTensor(T);
-  TestScalarVs1Dim1Size(T);
-  TestExpressionSpecification(T);
+  SECTION( "empty tensor" ) {
+    auto a = randn(T, 0);
+    REQUIRE(a.prod(0).equal(T.tensor({0})));
+  }
+
+  SECTION( "scalar vs 1-dim, 1-size" ) {
+    auto a = randn(T, 1);
+    REQUIRE(a.prod(0).equal(a.prod(-1)));
+    a.get()->maybeScalar(true);
+    REQUIRE(a.get()->isScalar());
+    REQUIRE(a.prod(0).equal(a.prod(-1)));
+  }
 }

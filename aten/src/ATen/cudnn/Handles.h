@@ -1,2 +1,9 @@
 #pragma once
-#include <ATen/cudnn/Handle.h>
+
+#include "cudnn-wrapper.h"
+
+namespace at { namespace native {
+
+cudnnHandle_t getCudnnHandle();
+
+}} // namespace

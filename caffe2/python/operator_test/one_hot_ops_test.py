@@ -2,12 +2,10 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
-
-from caffe2.python import core, workspace
+from caffe2.python import core
 from caffe2.proto import caffe2_pb2
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
-import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 
@@ -26,8 +24,8 @@ def _one_hots():
                 max_size=sum(x[1]))))
 
 
-class TestOneHotOps(serial.SerializedTestCase):
-    @serial.given(
+class TestOneHotOps(hu.HypothesisTestCase):
+    @given(
         x=hu.tensor(
             min_dim=2, max_dim=2, dtype=np.int32,
             elements=st.integers(min_value=0, max_value=10)),
@@ -57,7 +55,7 @@ class TestOneHotOps(serial.SerializedTestCase):
         op = core.CreateOperator('BatchOneHot', ["X", "LENS", "VALS"], ["Y"])
         self.assertReferenceChecks(gc, op, [x, lens, vals], ref)
 
-    @serial.given(
+    @given(
         x=hu.tensor(
             min_dim=2, max_dim=2, dtype=np.float32,
             elements=st.integers(min_value=-5, max_value=5)),
@@ -71,8 +69,7 @@ class TestOneHotOps(serial.SerializedTestCase):
         for i in range(d):
             # add [0, 0] as duplicated bounary for duplicated bucketization
             if lens[i] > 2:
-                cur_boundary = np.append(
-                    np.random.randn(lens[i] - 2) * 5, [0, 0])
+                cur_boundary = np.append(np.random.randn(lens[i] - 2) * 5, [0, 0])
             else:
                 cur_boundary = np.random.randn(lens[i]) * 5
             cur_boundary.sort()
@@ -109,7 +106,7 @@ class TestOneHotOps(serial.SerializedTestCase):
                                  ["X", "LENS", "BOUNDARIES"], ["Y"])
         self.assertReferenceChecks(gc, op, [x, lens, boundaries], ref)
 
-    @serial.given(
+    @given(
         hot_indices=hu.tensor(
             min_dim=1, max_dim=1, dtype=np.int64,
             elements=st.integers(min_value=0, max_value=42)),
@@ -135,7 +132,7 @@ class TestOneHotOps(serial.SerializedTestCase):
             one_hot_ref,
             input_device_options={'size': core.DeviceOption(caffe2_pb2.CPU)})
 
-    @serial.given(hot_indices=_one_hots())
+    @given(hot_indices=_one_hots())
     def test_segment_one_hot(self, hot_indices):
         index_size, lengths, indices = hot_indices
 
@@ -161,44 +158,6 @@ class TestOneHotOps(serial.SerializedTestCase):
             op,
             [lengths, indices, index_size],
             segment_one_hot_ref)
-
-    @given(
-        x=hu.tensor(
-            min_dim=2, max_dim=2, dtype=np.float32,
-            elements=st.integers(min_value=-5, max_value=5)),
-        seed=st.integers(min_value=0, max_value=1000),
-        **hu.gcs_cpu_only)
-    def test_batch_bucket_one_hot_shape_inference(self, x, seed, gc, dc):
-        np.random.seed(seed)
-        d = x.shape[1]
-        lens = np.random.randint(low=1, high=5, size=d)
-        boundaries = []
-        for i in range(d):
-            # add [0, 0] as duplicated bounary for duplicated bucketization
-            if lens[i] > 2:
-                cur_boundary = np.append(
-                    np.random.randn(lens[i] - 2) * 5, [0, 0])
-            else:
-                cur_boundary = np.random.randn(lens[i]) * 5
-            cur_boundary.sort()
-            boundaries += cur_boundary.tolist()
-
-        lens = np.array(lens, dtype=np.int32)
-        boundaries = np.array(boundaries, dtype=np.float32)
-
-        workspace.FeedBlob('lens', lens)
-        workspace.FeedBlob('boundaries', boundaries)
-        workspace.FeedBlob('x', x)
-
-        net = core.Net("batch_bucket_one_hot_test")
-        result = net.BatchBucketOneHot(["x", "lens", "boundaries"], 1)
-        (shapes, types) = workspace.InferShapesAndTypes([net])
-        workspace.RunNetOnce(net)
-
-        self.assertEqual(shapes[result], list(workspace.blobs[result].shape))
-        self.assertEqual(
-            shapes[result], [x.shape[0], lens.shape[0] + boundaries.shape[0]])
-        self.assertEqual(types[result], core.DataType.FLOAT)
 
 
 if __name__ == "__main__":

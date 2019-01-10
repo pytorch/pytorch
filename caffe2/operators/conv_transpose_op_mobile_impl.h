@@ -5,22 +5,20 @@
 
 #include "caffe2/core/common.h"
 
-#ifndef C10_MOBILE
+#ifndef CAFFE2_MOBILE
 #error "mobile build state not defined"
 #endif
 
-#if C10_MOBILE
+#if CAFFE2_MOBILE
 
 #include "caffe2/core/logging.h"
 #include "caffe2/operators/conv_op_shared.h"
 #include "caffe2/operators/conv_transpose_op_mobile.h"
 #include "caffe2/utils/cpu_neon.h"
-#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/fixed_divisor.h"
 #include "caffe2/utils/math.h"
-#include "caffe2/utils/math_utils.h"
 
-C10_DECLARE_bool(caffe2_force_shared_col_buffer);
+CAFFE2_DECLARE_bool(caffe2_force_shared_col_buffer);
 
 namespace caffe2 {
 
@@ -91,7 +89,7 @@ void runTileContiguous(
     int rowY = tileId * strideH - padT + h_offset;
 
     // If this row is out of bounds, then skip it
-    if (!math::utils::IsAGeZeroAndALtB(rowY, outputH)) {
+    if (!math::is_a_ge_zero_and_a_lt_b(rowY, outputH)) {
       continue;
     }
 
@@ -386,7 +384,7 @@ void reinterleaveMultithreaded(
                                                         size_t tileId) {
     int h;
     int c;
-    divOutputH.DivMod((int)tileId, &c, &h);
+    divOutputH.divMod((int)tileId, c, h);
 
     REINTERLEAVE(N);
   };
@@ -530,9 +528,9 @@ void sumInto(float* acc, std::vector<float*>& toSum, size_t size) {
 
 template <typename T, class Context>
 bool ConvTransposeMobileOp<T, Context>::RunOnDeviceWithOrderNCHW() {
-  const Tensor& X = Input(INPUT);
+  const Tensor<Context>& X = Input(INPUT);
   auto& filter = Input(FILTER);
-  Tensor* Y = Output(0);
+  Tensor<Context>* Y = Output(0);
   const int N = X.dim32(0), M = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
   CAFFE_ENFORCE(filter.ndim() == 4, "filter must be 4D tensor");
   CAFFE_ENFORCE(
@@ -607,7 +605,7 @@ bool ConvTransposeMobileOp<T, Context>::RunOnDeviceWithOrderNCHW() {
         &context_);
   };
 
-  auto f = [&](Tensor* threadBuffer) {
+  auto f = [&](Tensor<Context>* threadBuffer) {
     threadBuffer->Resize(
         numThreads * threadYBufferSizeAligned +
         numThreads * threadColBufferSize);
@@ -695,6 +693,6 @@ bool ConvTransposeMobileOp<T, Context>::RunOnDeviceWithOrderNHWC() {
 
 } // namespace caffe2
 
-#endif // C10_MOBILE
+#endif // CAFFE2_MOBILE
 
 #endif // CAFFE2_OPERATORS_CONV_TRANSPOSE_MOBILE_OP_IMPL_H_

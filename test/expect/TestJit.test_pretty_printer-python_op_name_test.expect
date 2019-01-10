@@ -1,3 +1,0 @@
-def graph(self,
-    y: Tensor) -> Tensor:
-  return ^python_fn()(y)

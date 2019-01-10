@@ -1,15 +1,17 @@
-#include <ATen/ATen.h>
-#include <ATen/Parallel.h>
-#include <ATen/test/test_assert.h>
+#include "ATen/ATen.h"
+#include "ATen/Parallel.h"
+#include "test_assert.h"
+#include "test_seed.h"
 #include <thread>
 
+using namespace at;
 
 // This checks whether threads can see the global
 // numbers of threads set and also whether the scheduler
-// will throw an exception when multiple threads call
+// will throw an exception when multiple threads call 
 // their first parallel construct.
 void test(int given_num_threads) {
-  auto t = at::ones({1000 * 1000}, at::CPU(at::kFloat));
+  auto t = ones(CPU(kFloat), {1000 * 1000});
   if (given_num_threads >= 0) {
     ASSERT(at::get_num_threads() == given_num_threads);
   } else {
@@ -22,7 +24,7 @@ void test(int given_num_threads) {
 }
 
 int main() {
-  at::manual_seed(123);
+  manual_seed(123, at::Backend::CPU);
 
   test(-1);
   std::thread t1(test, -1);

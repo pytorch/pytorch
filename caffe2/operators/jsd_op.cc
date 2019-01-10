@@ -29,12 +29,13 @@ template <>
 bool BernoulliJSDOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0); // predicted probabilities
   auto& T = Input(1); // target probabilities
-  int N = X.numel();
-  CAFFE_ENFORCE_EQ(T.numel(), N);
-  auto* L = Output(0, X.sizes(), at::dtype<float>()); // JSD loss output
+  auto* L = Output(0); // JSD loss output
+  int N = X.size();
+  CAFFE_ENFORCE_EQ(T.size(), N);
+  L->ResizeLike(X);
   auto* x_data = X.data<float>();
   auto* t_data = T.data<float>();
-  auto* l_data = L->template mutable_data<float>();
+  auto* l_data = L->mutable_data<float>();
   for (int i = 0; i < N; i++) {
     auto p_mdl = x_data[i];
     auto p_emp = t_data[i];
@@ -50,13 +51,13 @@ bool BernoulliJSDGradientOp<float, CPUContext>::RunOnDevice() {
   auto& go = Input(0);
   auto& X = Input(1);
   auto& T = Input(2);
-
-  int N = X.numel();
-  auto* gi = Output(0, X.sizes(), at::dtype<float>());
+  auto* gi = Output(0);
+  int N = X.size();
+  gi->ResizeLike(X);
   auto* go_data = go.data<float>();
   auto* x_data = X.data<float>();
   auto* t_data = T.data<float>();
-  auto* gi_data = gi->template mutable_data<float>();
+  auto* gi_data = gi->mutable_data<float>();
   for (int i = 0; i < N; i++) {
     auto p_mdl = x_data[i];
     auto p_emp = t_data[i];

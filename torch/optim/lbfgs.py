@@ -109,7 +109,7 @@ class LBFGS(Optimizer):
         abs_grad_sum = flat_grad.abs().sum()
 
         if abs_grad_sum <= tolerance_grad:
-            return orig_loss
+            return loss
 
         # tensors cached in state (for tracing)
         d = state.get('d')

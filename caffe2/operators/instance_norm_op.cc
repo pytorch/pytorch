@@ -1,5 +1,4 @@
 #include "caffe2/operators/instance_norm_op.h"
-#include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 
@@ -11,10 +10,8 @@ namespace caffe2 {
 template <typename T, typename Context>
 bool InstanceNormOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   const auto& X = Input(INPUT);
-
-  CAFFE_ENFORCE(
-      !IsInputOutputAlias(INPUT, OUTPUT),
-      "Can't run InstanceNorm NHWC in-place");
+  auto* Y = Output(OUTPUT);
+  CAFFE_ENFORCE(Y != &X, "Can't run InstanceNorm NHWC in-place");
   auto* mean = OutputSize() > 1 ? Output(MEAN) : &mean_;
   auto* inv_stdev = OutputSize() > 1 ? Output(INV_STDEV) : &inv_stdev_;
   const int N = X.dim32(0);
@@ -23,10 +20,10 @@ bool InstanceNormOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   const int C = X.dim32(3);
   const size_t offset = H * W * C;
 
-  CAFFE_ENFORCE_EQ(Input(SCALE).numel(), C);
-  CAFFE_ENFORCE_EQ(Input(BIAS).numel(), C);
+  CAFFE_ENFORCE_EQ(Input(SCALE).size(), C);
+  CAFFE_ENFORCE_EQ(Input(BIAS).size(), C);
 
-  auto* Y = Output(OUTPUT, X.sizes(), at::dtype<T>());
+  Y->ResizeLike(X);
   mean->Resize(N, C);
   inv_stdev->Resize(N, C);
   ConstEigenVectorArrayMap<T> scale(Input(SCALE).template data<T>(), C);
@@ -65,7 +62,7 @@ bool InstanceNormOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const auto& X = Input(INPUT);
   const auto& scale = Input(SCALE);
   const auto& bias = Input(BIAS);
-
+  auto* Y = Output(OUTPUT);
   auto* mean = OutputSize() > 1 ? Output(MEAN) : &mean_;
   auto* inv_stdev = OutputSize() > 1 ? Output(INV_STDEV) : &inv_stdev_;
   const int N = X.dim32(0);
@@ -73,10 +70,10 @@ bool InstanceNormOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const int H = X.dim32(2);
   const int W = X.dim32(3);
 
-  CAFFE_ENFORCE_EQ(scale.numel(), C);
-  CAFFE_ENFORCE_EQ(bias.numel(), C);
+  CAFFE_ENFORCE_EQ(scale.size(), C);
+  CAFFE_ENFORCE_EQ(bias.size(), C);
 
-  auto* Y = Output(OUTPUT, X.sizes(), at::dtype<T>());
+  Y->ResizeLike(X);
   mean->Resize(N, C);
   inv_stdev->Resize(N, C);
 
@@ -111,85 +108,29 @@ OPERATOR_SCHEMA(InstanceNorm)
     .NumOutputs(1, 3)
     .AllowInplace({{0,0}})
     .SetDoc(R"DOC(
-The *InstanceNorm* op applies Instance Normalization over a 4D input as described in [Instance Normalization: The Missing Ingredient for Fast Stylization](https://arxiv.org/abs/1607.08022).
+Carries out instance normalization as described in the paper
+https://arxiv.org/abs/1607.08022. Depending on the mode it is being run,
+there are multiple cases for the number of outputs, which we list below:
 
-$$output = \frac{input-\mu_{input}}{\sqrt{\sigma_{input}^2} + \epsilon}*scale + bias$$
+  * Output case #1: output
+  * Output case #2: output, saved_mean
+    - don't use, doesn't make sense but won't crash
+  * Output case #3: output, saved_mean, saved_inv_stdev
+    - Makes sense for training only
 
-Notice, two of the outputs are optional so there are three output cases for this op. Case 1: output; Case 2: output, saved_mean; Case 3: output, saved_mean, saved_inv_stdev.
-
-Github Links:
-
-- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/instance_norm_op.h
-- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/instance_norm_op.cc
-
-
-<details>
-
-<summary> <b>Example</b> </summary>
-
-**Code**
-
-```
-
-workspace.ResetWorkspace()
-
-op = core.CreateOperator(
-    "InstanceNorm",
-    ["input", "scale", "bias"],
-    ["output"],
-    epsilon=1e-5,
-)
-
-workspace.FeedBlob("input", np.random.randn(2, 1, 3, 3).astype(np.float32))
-print("input:\n", workspace.FetchBlob("input"), "\n")
-
-workspace.FeedBlob("scale", np.array([1.5]).astype(np.float32))
-print("scale: ", workspace.FetchBlob("scale"))
-
-workspace.FeedBlob("bias", np.array([1.]).astype(np.float32))
-print("bias: ", workspace.FetchBlob("bias"))
-
-workspace.RunOperatorOnce(op)
-print("output:\n", workspace.FetchBlob("output"))
-
-```
-
-**Result**
-
-```
-
-input:
- [[[[ 0.97856593 -1.1832817  -0.2540021 ]
-   [-1.3315694  -0.7485018   0.3787225 ]
-   [-0.6826597  -1.4637762   0.57116514]]]
-
-
- [[[-0.44948956  0.85544354 -0.9315333 ]
-   [-0.37202677 -0.22266895 -0.27194235]
-   [ 0.4948163  -0.7296504   1.3393803 ]]]]
-
-scale:  [1.5]
-bias:  [1.]
-output:
- [[[[ 3.5017493  -0.3791256   1.2890853 ]
-   [-0.6453266   0.40137637  2.4249308 ]
-   [ 0.5195738  -0.8826599   2.7703972 ]]]
-
-
- [[[ 0.12639964  2.856744   -0.8821926 ]
-   [ 0.28847694  0.60098207  0.49788612]
-   [ 2.1021945  -0.45978796  3.869297  ]]]]
-
-```
-
-</details>
-
+For training mode, type 3 is faster in the sense that for the backward
+pass, it is able to reuse the saved mean and inv_stdev in the gradient
+computation.
 )DOC")
-    .Arg("epsilon", "*(type: float; default: 1e-5)* The epsilon value to use to avoid division by zero.")
-    .Arg("order", "*(type: string; default: \"NCHW\")* Specifies the order of the input data blob, where $N$ is batch size, $C$ is number of channels, $H$ is spatial height, and $W$ is spatial width. The only other valid option is \"NHWC\".")
-    .Input(0, "input", "The input 4-dimensional NCHW tensor to be operated on.")
-    .Input(1, "scale", "The input 1-dimensional scale tensor of size *C*.")
-    .Input(2, "bias", "The input 1-dimensional bias tensor of size *C*.")
+    .Arg("epsilon", "The epsilon value to use to avoid division by zero.")
+    .Arg("order", "A StorageOrder string.")
+    .Input(
+        0,
+        "input",
+        "The input 4-dimensional tensor of shape NCHW or NHWC depending "
+        "on the order parameter.")
+    .Input(1, "scale", "The input 1-dimensional scale tensor of size C.")
+    .Input(2, "bias", "The input 1-dimensional bias tensor of size C.")
     .Output(
         0,
         "output",
@@ -197,10 +138,12 @@ output:
     .Output(
         1,
         "saved_mean",
-        "(Optional) Saved mean used during training to speed up gradient computation. Should not be used for testing.")
+        "Optional saved mean used during training to speed up gradient "
+        "computation. Should not be used for testing.")
     .Output(
         2,
         "saved_inv_stdev",
-        "(Optional) Saved inverse stdev used during training to speed up gradient computation. Should not be used for testing.");
+        "Optional saved inverse stdev used during training to speed up "
+        "gradient computation. Should not be used for testing.");
 
 } // namespace caffe2

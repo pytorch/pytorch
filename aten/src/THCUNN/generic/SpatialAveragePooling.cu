@@ -1,9 +1,8 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "THCUNN/generic/SpatialAveragePooling.cu"
+#define THC_GENERIC_FILE "generic/SpatialAveragePooling.cu"
 #else
 
-#include <THCUNN/common.h>
-#include <THCUNN/generic/pooling_shape.h>
+#include "../common.h"
 
 static inline void THNN_(SpatialAveragePooling_shapeCheck)(
   THCState *state,
@@ -15,7 +14,7 @@ static inline void THNN_(SpatialAveragePooling_shapeCheck)(
   THArgCheck(dW > 0 && dH > 0, 8,
              "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
 
-  int ndim = input->dim();
+  int ndim = input->nDimension;
   int dimf = 0;
   int dimh = 1;
   int dimw = 2;
@@ -26,20 +25,37 @@ static inline void THNN_(SpatialAveragePooling_shapeCheck)(
     dimw++;
   }
 
-  THCUNN_argCheck(state, !input->is_empty() && (ndim == 3 || ndim == 4), 2, input,
-                  "non-empty 3D or 4D input tensor expected but got: %s");
+  THCUNN_argCheck(state, ndim == 3 || ndim == 4, 2, input,
+                  "3D or 4D input tensor expected but got: %s");
   THArgCheck(kW/2 >= padW && kH/2 >= padH, 2,
              "pad should be smaller than half of kernel size, but got "
              "padW = %d, padH = %d, kW = %d, kH = %d",
              padW, padH, kW, kH);
 
-  int64_t nInputPlane = input->size(dimh-1);
-  int64_t nInputRows = input->size(dimh);
-  int64_t nInputCols = input->size(dimw);
+  int64_t nInputPlane = input->size[dimh-1];
+  int64_t nInputRows = input->size[dimh];
+  int64_t nInputCols = input->size[dimw];
+  int64_t nOutputRows, nOutputCols;
   int64_t nOutputPlane = nInputPlane;
 
-  int64_t nOutputCols = pooling_output_shape<int64_t>(nInputCols, kW, padW, dW, 1, ceil_mode);
-  int64_t nOutputRows = pooling_output_shape<int64_t>(nInputRows, kH, padH, dH, 1, ceil_mode);
+  if(ceil_mode) {
+    nOutputCols = ceil(float(nInputCols - kW + 2*padW) / float(dW)) + 1;
+    nOutputRows = ceil(float(nInputRows - kH + 2*padH) / float(dH)) + 1;
+  }
+  else {
+    nOutputCols = floor(float(nInputCols - kW + 2*padW) / float(dW)) + 1;
+    nOutputRows = floor(float(nInputRows - kH + 2*padH) / float(dH)) + 1;
+  }
+
+  if (padW || padH)
+  {
+    // ensure that the last pooling starts inside the image
+    // needed to avoid problems in ceil mode
+    if ((nOutputRows - 1)*dH >= nInputRows + padH)
+      --nOutputRows;
+    if ((nOutputCols  - 1)*dW >= nInputCols  + padW)
+      --nOutputCols;
+  }
 
   if (nOutputCols < 1 || nOutputRows < 1)
     THError("Given input size: (%dx%dx%d). "
@@ -71,47 +87,62 @@ void THNN_(SpatialAveragePooling_updateOutput)(
   int64_t nInputCols, nInputRows, nInputPlane, batchSize;
   int64_t nOutputCols, nOutputRows;
 
-  if (input->dim() == 3) {
-    nInputCols = input->size(2);
-    nInputRows = input->size(1);
-    nInputPlane = input->size(0);
+  if (input->nDimension == 3) {
+    nInputCols = input->size[2];
+    nInputRows = input->size[1];
+    nInputPlane = input->size[0];
     batchSize = 1;
   }
   else
   {
-    nInputCols = input->size(3);
-    nInputRows = input->size(2);
-    nInputPlane = input->size(1);
-    batchSize = input->size(0);
+    nInputCols = input->size[3];
+    nInputRows = input->size[2];
+    nInputPlane = input->size[1];
+    batchSize = input->size[0];
   }
 
-  nOutputCols = pooling_output_shape<int64_t>(nInputCols, kW, padW, dW, 1, ceil_mode);
-  nOutputRows = pooling_output_shape<int64_t>(nInputRows, kH, padH, dH, 1, ceil_mode);
+  if(ceil_mode) {
+    nOutputCols = ceil(float(nInputCols - kW + 2*padW) / float(dW)) + 1;
+    nOutputRows = ceil(float(nInputRows - kH + 2*padH) / float(dH)) + 1;
+  }
+  else {
+    nOutputCols = floor(float(nInputCols - kW + 2*padW) / float(dW)) + 1;
+    nOutputRows = floor(float(nInputRows - kH + 2*padH) / float(dH)) + 1;
+  }
+  if (padW || padH)
+  {
+    // ensure that the last pooling starts inside the image
+    // needed to avoid problems in ceil mode
+    if ((nOutputRows - 1)*dH >= nInputRows + padH)
+      --nOutputRows;
+    if ((nOutputCols  - 1)*dW >= nInputCols  + padW)
+      --nOutputCols;
+  }
 
   input = THCTensor_(newContiguous)(state, input);
-  scalar_t* input_data = THCTensor_(data)(state, input);
+  real* input_data = THCTensor_(data)(state, input);
 
   THCTensor_(resize4d)(state, output, batchSize, nInputPlane, nOutputRows, nOutputCols);
 
-  scalar_t* output_data = THCTensor_(data)(state, output);
+  real* output_data = THCTensor_(data)(state, output);
 
   int count = THCTensor_(nElement)(state, output);
 
   if(count_include_pad)
-    AvePoolForward<scalar_t, accreal, true>
+    AvePoolForward<real, accreal, true>
       <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>>(
         count, input_data,
         batchSize, nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols,
         kH, kW, dH, dW, padH, padW, output_data);
   else
-    AvePoolForward<scalar_t, accreal, false>
+    AvePoolForward<real, accreal, false>
       <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>>(
         count, input_data,
         batchSize, nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols,
         kH, kW, dH, dW, padH, padW, output_data);
   THCudaCheck(cudaGetLastError());
 
-  if(input->dim() == 3)
+  if(input->nDimension == 3)
     THCTensor_(resize3d)(state, output, nInputPlane, nOutputRows, nOutputCols);
 
   THCTensor_(free)(state, input);
@@ -142,31 +173,46 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
   int dimCol = 2;
   int dimRow = 1;
 
-  if (input->dim() == 3) {
-    nInputPlane = input->size(0);
+  if (input->nDimension == 3) {
+    nInputPlane = input->size[0];
     batchSize = 1;
   }
   else
   {
     dimCol = 3;
     dimRow = 2;
-    nInputPlane = input->size(1);
-    batchSize = input->size(0);
+    nInputPlane = input->size[1];
+    batchSize = input->size[0];
   }
-  nInputCols = input->size(dimCol);
-  nInputRows = input->size(dimRow);
+  nInputCols = input->size[dimCol];
+  nInputRows = input->size[dimRow];
 
-  nOutputCols = pooling_output_shape<int64_t>(nInputCols, kW, padW, dW, 1, ceil_mode);
-  nOutputRows = pooling_output_shape<int64_t>(nInputRows, kH, padH, dH, 1, ceil_mode);
+  if(ceil_mode) {
+    nOutputCols = ceil(float(nInputCols - kW + 2*padW) / float(dW)) + 1;
+    nOutputRows = ceil(float(nInputRows - kH + 2*padH) / float(dH)) + 1;
+  }
+  else {
+    nOutputCols = floor(float(nInputCols - kW + 2*padW) / float(dW)) + 1;
+    nOutputRows = floor(float(nInputRows - kH + 2*padH) / float(dH)) + 1;
+  }
+  if (padW || padH)
+  {
+    // ensure that the last pooling starts inside the image
+    // needed to avoid problems in ceil mode
+    if ((nOutputRows - 1)*dH >= nInputRows + padH)
+      --nOutputRows;
+    if ((nOutputCols  - 1)*dW >= nInputCols  + padW)
+      --nOutputCols;
+  }
 
-  THCUNN_check_dim_size(state, gradOutput, input->dim(), dimRow, nOutputRows);
-  THCUNN_check_dim_size(state, gradOutput, input->dim(), dimCol, nOutputCols);
+  THCUNN_check_dim_size(state, gradOutput, input->nDimension, dimRow, nOutputRows);
+  THCUNN_check_dim_size(state, gradOutput, input->nDimension, dimCol, nOutputCols);
   THCTensor_(resizeAs)(state, gradInput, input);
 
   int count = THCTensor_(nElement)(state, input);
 
   if(count_include_pad)
-    AvePoolBackward<scalar_t, accreal, true>
+    AvePoolBackward<real, accreal, true>
       <<< GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>>
         (count,
         THCTensor_(data)(state, gradOutput),
@@ -174,7 +220,7 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
         kH, kW, dH, dW, padH, padW,
         THCTensor_(data)(state, gradInput));
   else
-    AvePoolBackward<scalar_t, accreal, false>
+    AvePoolBackward<real, accreal, false>
       <<< GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>>
         (count,
         THCTensor_(data)(state, gradOutput),

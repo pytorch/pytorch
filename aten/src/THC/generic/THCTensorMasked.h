@@ -1,17 +1,17 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "THC/generic/THCTensorMasked.h"
+#define THC_GENERIC_FILE "generic/THCTensorMasked.h"
 #else
 
 THC_API void THCTensor_(maskedFill)(THCState *state,
                                     THCTensor *tensor,
                                     THCudaByteTensor *mask,
-                                    scalar_t value);
+                                    real value);
 
 // FIXME: remove now that we have THCudaByteTensor?
 THC_API void THCTensor_(maskedFillByte)(THCState *state,
                                         THCTensor *tensor,
                                         THByteTensor *mask,
-                                        scalar_t value);
+                                        real value);
 
 THC_API void THCTensor_(maskedCopy)(THCState *state,
                                     THCTensor *tensor,

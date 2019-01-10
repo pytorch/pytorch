@@ -1,17 +1,19 @@
-#include <THC/THCCachingHostAllocator.h>
-
+#include "THCCachingHostAllocator.h"
+#include "THCStream.hpp"
 
 #include <cuda_runtime_api.h>
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <stdint.h>
 #include <unordered_map>
-#include <unordered_set>
-#include <set>
 #include <utility>
 
+
 namespace {
+
+typedef std::shared_ptr<THCStream> THCStreamPtr;
 
 struct BlockSize
 {
@@ -25,7 +27,7 @@ struct Block : public BlockSize
 {
   bool  allocated;    // true if the block is currently allocated
   int   event_count;  // number of outstanding cuda events
-  std::unordered_set<at::cuda::CUDAStream> streams;
+  std::set<THCStreamPtr> streams;
 
   Block(size_t size, void* ptr, bool allocated) :
       BlockSize(size, ptr), allocated(allocated), event_count(0), streams() {}
@@ -130,7 +132,7 @@ struct HostAllocator
     return cudaSuccess;
   }
 
-  cudaError_t recordEvent(void* ptr, at::cuda::CUDAStream stream)
+  cudaError_t recordEvent(void* ptr, THCStream *stream)
   {
     std::lock_guard<std::mutex> lock(mutex);
 
@@ -143,7 +145,10 @@ struct HostAllocator
     Block& block = it->second;
     THAssert(block.allocated);
 
-    block.streams.insert(stream);
+    THCStreamPtr stream_ptr(stream, &THCStream_free);
+    THCStream_retain(stream);
+
+    block.streams.insert(std::move(stream_ptr));
     return cudaSuccess;
   }
 
@@ -219,16 +224,18 @@ struct HostAllocator
     err = cudaGetDevice(&prev_device);
     if (err != cudaSuccess) return err;
 
-    std::unordered_set<at::cuda::CUDAStream> streams(std::move(block.streams));
+    std::set<THCStreamPtr> streams(std::move(block.streams));
     for (auto it = streams.begin(); it != streams.end(); ++it) {
-      err = cudaSetDevice(it->device_index());
+      auto& stream = *it;
+
+      err = cudaSetDevice(stream->device);
       if (err != cudaSuccess) break;
 
       cudaEvent_t event;
       err = cudaEventCreateWithFlags(&event, cudaEventDisableTiming);
       if (err != cudaSuccess) break;
 
-      err = cudaEventRecord(event, it->stream());
+      err = cudaEventRecord(event, stream->stream);
       if (err != cudaSuccess) break;
 
       block.event_count++;
@@ -244,7 +251,20 @@ struct HostAllocator
 
 static HostAllocator allocator;
 
-cudaError_t THCCachingHostAllocator_recordEvent(void *ptr, at::cuda::CUDAStream stream)
+static void* THCCachingHostAllocator_malloc(void* ctx, ptrdiff_t size)
+{
+  THAssert(size >= 0);
+  void *ptr;
+  THCudaCheck(allocator.malloc(&ptr, size));
+  return ptr;
+}
+
+static void THCCachingHostAllocator_free(void* ctx, void* ptr)
+{
+  allocator.free(ptr);
+}
+
+cudaError_t THCCachingHostAllocator_recordEvent(void *ptr, THCStream *stream)
 {
   return allocator.recordEvent(ptr, stream);
 }
@@ -254,23 +274,8 @@ void THCCachingHostAllocator_emptyCache()
   allocator.emptyCache();
 }
 
-static void THCCachingHostDeleter(void* ptr) {
-  allocator.free(ptr);
-}
-
-struct THCCachingHostAllocator final : public at::Allocator {
-  at::DataPtr allocate(size_t size) const override {
-    THAssert(size >= 0);
-    void *ptr;
-    THCudaCheck(allocator.malloc(&ptr, size));
-    return {ptr, ptr, &THCCachingHostDeleter, at::DeviceType::CPU};
-  }
-  at::DeleterFnPtr raw_deleter() const override {
-    return &THCCachingHostDeleter;
-  }
+THAllocator THCCachingHostAllocator = {
+  &THCCachingHostAllocator_malloc,
+  NULL,
+  &THCCachingHostAllocator_free,
 };
-
-static THCCachingHostAllocator thc_caching_host_allocator;
-at::Allocator* getTHCCachingHostAllocator() {
-  return &thc_caching_host_allocator;
-}

@@ -1,31 +1,27 @@
 import ctypes
 import torch
 from . import cudart, check_error, cudaStatus
-from ._utils import _get_device_index
-from torch._C import _add_docstr
 
 
 class Stream(torch._C._CudaStreamBase):
-    r"""Wrapper around a CUDA stream.
+    """Wrapper around a CUDA stream.
 
     A CUDA stream is a linear sequence of execution that belongs to a specific
     device, independent from other streams.  See :ref:`cuda-semantics` for
     details.
 
     Arguments:
-        device(torch.device or int, optional): a device on which to allocate
-            the stream. If :attr:`device` is ``None`` (default) or a negative
-            integer, this will use the current device.
+        device(int, optional): a device on which to allocate the Stream.
         priority(int, optional): priority of the stream. Lower numbers
                                  represent higher priorities.
     """
 
-    def __new__(cls, device=None, priority=0, **kwargs):
+    def __new__(cls, device=-1, priority=0, **kwargs):
         with torch.cuda.device(device):
             return super(Stream, cls).__new__(cls, priority=priority, **kwargs)
 
     def wait_event(self, event):
-        r"""Makes all future work submitted to the stream wait for an event.
+        """Makes all future work submitted to the stream wait for an event.
 
         Arguments:
             event (Event): an event to wait for.
@@ -42,7 +38,7 @@ class Stream(torch._C._CudaStreamBase):
         check_error(cudart().cudaStreamWaitEvent(self, event, ctypes.c_int(0)))
 
     def wait_stream(self, stream):
-        r"""Synchronizes with another stream.
+        """Synchronizes with another stream.
 
         All future work submitted to this stream will wait until all kernels
         submitted to a given stream at the time of call complete.
@@ -56,7 +52,7 @@ class Stream(torch._C._CudaStreamBase):
         self.wait_event(stream.record_event())
 
     def record_event(self, event=None):
-        r"""Records an event.
+        """Records an event.
 
         Arguments:
             event (Event, optional): event to record. If not given, a new one
@@ -71,14 +67,19 @@ class Stream(torch._C._CudaStreamBase):
         return event
 
     def query(self):
-        r"""Checks if all the work submitted has been completed.
+        """Checks if all the work submitted has been completed.
 
         Returns:
-            A boolean indicating if all kernels in this stream are completed."""
-        return super(Stream, self).query()
+            A boolean indicating if all kernels in this stream are completed.
+        """
+        res = cudart().cudaStreamQuery(self)
+        if res == cudaStatus.ERROR_NOT_READY:
+            return False
+        check_error(res)
+        return True
 
     def synchronize(self):
-        r"""Wait for all the kernels in this stream to complete.
+        """Wait for all the kernels in this stream to complete.
 
         .. note:: This is a wrapper around ``cudaStreamSynchronize()``: see
            `CUDA documentation`_ for more info.
@@ -108,7 +109,7 @@ class Stream(torch._C._CudaStreamBase):
 
     def __eq__(self, o):
         if isinstance(o, Stream):
-            return super(Stream, self).__eq__(o)
+            return o.device == self.device and o.cuda_stream == self.cuda_stream
         return False
 
     def __hash__(self):
@@ -125,7 +126,7 @@ class EventHandle(ctypes.Structure):
 
 
 class Event(object):
-    r"""Wrapper around CUDA event.
+    """Wrapper around CUDA event.
 
     Arguments:
         enable_timing (bool): indicates if the event should measure time
@@ -164,19 +165,19 @@ class Event(object):
             del self._as_parameter_
 
     def record(self, stream=None):
-        r"""Records the event in a given stream."""
+        """Records the event in a given stream."""
         if stream is None:
             stream = torch.cuda.current_stream()
         stream.record_event(self)
 
     def wait(self, stream=None):
-        r"""Makes a given stream wait for the event."""
+        """Makes a given stream wait for the event."""
         if stream is None:
             stream = torch.cuda.current_stream()
         stream.wait_event(self)
 
     def query(self):
-        r"""Checks if the event has been recorded.
+        """Checks if the event has been recorded.
 
         Returns:
             A boolean indicating if the event has been recorded.
@@ -188,18 +189,18 @@ class Event(object):
         return True
 
     def elapsed_time(self, end_event):
-        r"""Returns the time elapsed in milliseconds before the event was recorded."""
+        """Returns the time elapsed before the event was recorded."""
         time_ms = ctypes.c_float()
         check_error(cudart().cudaEventElapsedTime(
             ctypes.byref(time_ms), self, end_event))
         return time_ms.value
 
     def synchronize(self):
-        r"""Synchronizes with the event."""
+        """Synchronizes with the event."""
         check_error(cudart().cudaEventSynchronize(self))
 
     def ipc_handle(self):
-        r"""Returns an IPC handle of this event."""
+        """Returns an IPC handle of this event."""
         handle = EventHandle()
         check_error(cudart().cudaIpcGetEventHandle(ctypes.byref(handle), self))
         return handle

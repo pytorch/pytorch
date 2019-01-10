@@ -6,12 +6,14 @@
 // This is a stand-alone op: Y = gamma * (X - mu) / sig + beta
 // ------------------------------------------------------------------
 
-#include "caffe2/operators/group_norm_op.h"
+#include "group_norm_op.h"
+
+#include <array>
 
 #include <cub/block/block_reduce.cuh>
 
 #include "caffe2/core/context_gpu.h"
-#include "caffe2/utils/math_utils.h"
+#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
@@ -21,103 +23,49 @@ template <typename T>
 using BlockReduce = cub::BlockReduce<T, CAFFE_CUDA_NUM_THREADS>;
 
 template <typename T>
-__global__ void ComputeFusedParamsCUDAKernel(
-    const int N,
-    const int G,
-    const int D,
-    const T* mu,
-    const T* rsig,
-    const T* gamma,
-    const T* beta,
-    T* scale,
-    T* bias) {
-  const int outer_size = N * G;
-  for (int i = blockIdx.x; i < outer_size; i += gridDim.x) {
-    const int g = i % G;
+inline __device__ T CubeCUDA(const T x) {
+  return x * x * x;
+}
+
+__global__ void InvStdCUDAKernel(
+    const int size,
+    const float epsilon,
+    const float* var,
+    float* rsig) {
+  CUDA_1D_KERNEL_LOOP(i, size) {
 #if __CUDA_ARCH__ >= 350
-    const T mu_val = __ldg(mu + i);
-    const T rsig_val = __ldg(rsig + i);
+    rsig[i] = rsqrtf(__ldg(var + i) + epsilon);
 #else
-    const T mu_val = mu[i];
-    const T rsig_val = rsig[i];
+    rsig[i] = rsqrtf(var[i] + epsilon);
 #endif
-    for (int j = threadIdx.x; j < D; j += blockDim.x) {
-      const int index = i * D + j;
-      const int i_gamma = g * D + j;
-#if __CUDA_ARCH__ >= 350
-      const T scale_val = __ldg(gamma + i_gamma) * rsig_val;
-      scale[index] = scale_val;
-      bias[index] = __ldg(beta + i_gamma) - scale_val * mu_val;
-#else
-      const T scale_val = gamma[i_gamma] * rsig_val;
-      scale[index] = scale_val;
-      bias[index] = beta[i_gamma] - scale_val * mu_val;
-#endif
-    }
   }
 }
 
 template <typename T, StorageOrder kOrder>
 __global__ void GroupNormForwardCUDAKernel(
-    const int N,
-    const int C,
+    const int size,
+    const int G,
+    const int D,
     const int HxW,
     const T* X,
-    const T* scale,
-    const T* bias,
-    T* Y);
-
-template <>
-__global__ void GroupNormForwardCUDAKernel<float, StorageOrder::NCHW>(
-    const int N,
-    const int C,
-    const int HxW,
-    const float* X,
-    const float* scale,
-    const float* bias,
-    float* Y) {
-  const int outer_size = N * C;
-  for (int i = blockIdx.x; i < outer_size; i += gridDim.x) {
+    const T* mu,
+    const T* rsig,
+    const T* gamma,
+    const T* beta,
+    T* Y) {
+  const int C = G * D;
+  CUDA_1D_KERNEL_LOOP(i, size) {
+    const int i_mu = kOrder == StorageOrder::NCHW
+        ? i / (D * HxW)
+        : i / (C * HxW) * G + (i / D % G);
+    const int i_gamma = kOrder == StorageOrder::NCHW ? (i / HxW) % C : i % C;
 #if __CUDA_ARCH__ >= 350
-    const float scale_val = __ldg(scale + i);
-    const float bias_val = __ldg(bias + i);
+    Y[i] = __ldg(gamma + i_gamma) * (__ldg(X + i) - __ldg(mu + i_mu)) *
+            __ldg(rsig + i_mu) +
+        __ldg(beta + i_gamma);
 #else
-    const float scale_val = scale[i];
-    const float bias_val = bias[i];
+    Y[i] = gamma[i_gamma] * (X[i] - mu[i_mu]) * rsig[i_mu] + beta[i_gamma];
 #endif
-    for (int j = threadIdx.x; j < HxW; j += blockDim.x) {
-      const int index = i * HxW + j;
-#if __CUDA_ARCH__ >= 350
-      Y[index] = __ldg(X + index) * scale_val + bias_val;
-#else
-      Y[index] = X[index] * scale_val + bias_val;
-#endif
-    }
-  }
-}
-
-template <>
-__global__ void GroupNormForwardCUDAKernel<float, StorageOrder::NHWC>(
-    const int N,
-    const int C,
-    const int HxW,
-    const float* X,
-    const float* scale,
-    const float* bias,
-    float* Y) {
-  const int outer_size = N * HxW;
-  for (int i = blockIdx.x; i < outer_size; i += gridDim.x) {
-    const int n = i / HxW;
-    for (int j = threadIdx.x; j < C; j += blockDim.x) {
-      const int index = i * C + j;
-      const int i_scale = n * C + j;
-#if __CUDA_ARCH__ >= 350
-      Y[index] =
-          __ldg(X + index) * __ldg(scale + i_scale) + __ldg(bias + i_scale);
-#else
-      Y[index] = X[index] * scale[i_scale] + bias[i_scale];
-#endif
-    }
   }
 }
 
@@ -196,14 +144,13 @@ __global__ void GroupNormBackwardCUDAKernel(
     const int i_gamma = kOrder == StorageOrder::NCHW ? (i / HxW) % C : i % C;
 #if __CUDA_ARCH__ >= 350
     const T u = (__ldg(db + i_mu) * __ldg(mu + i_mu) - __ldg(ds + i_mu)) *
-        (__ldg(X + i) - __ldg(mu + i_mu)) *
-        math::utils::Cube<T>(__ldg(rsig + i_mu));
+        (__ldg(X + i) - __ldg(mu + i_mu)) * CubeCUDA(__ldg(rsig + i_mu));
     const T v = __ldg(db + i_mu) * __ldg(rsig + i_mu);
     dX[i] = __ldg(gamma + i_gamma) * __ldg(dY + i) * __ldg(rsig + i_mu) +
         (u - v) * denom;
 #else
     const T u = (db[i_mu] * mu[i_mu] - ds[i_mu]) * (X[i] - mu[i_mu]) *
-        math::utils::Cube<T>(rsig[i_mu]);
+        CubeCUDA(rsig[i_mu]);
     const T v = db[i_mu] * rsig[i_mu];
     dX[i] = gamma[i_gamma] * dY[i] * rsig[i_mu] + (u - v) * denom;
 #endif
@@ -257,53 +204,71 @@ __global__ void GammaBetaBackwardCUDAKernel(
 } // namespace
 
 template <>
-void GroupNormOp<float, CUDAContext>::ComputeFusedParams(
+bool GroupNormOp<float, CUDAContext>::RunOnDeviceImpl(
     const int N,
     const int G,
     const int D,
-    const float* mu,
-    const float* rsig,
-    const float* gamma,
-    const float* beta,
-    float* scale,
-    float* bias) {
-  ComputeFusedParamsCUDAKernel<float>
-      <<<std::min(N * G, CAFFE_MAXIMUM_NUM_BLOCKS),
-         CAFFE_CUDA_NUM_THREADS,
-         0,
-         context_.cuda_stream()>>>(N, G, D, mu, rsig, gamma, beta, scale, bias);
-}
-
-template <>
-void GroupNormOp<float, CUDAContext>::GroupNormForwardNCHW(
-    const int N,
-    const int C,
     const int HxW,
-    const float* X,
-    const float* scale,
-    const float* bias,
-    float* Y) {
-  GroupNormForwardCUDAKernel<float, StorageOrder::NCHW>
-      <<<std::min(N * C, CAFFE_MAXIMUM_NUM_BLOCKS),
-         CAFFE_CUDA_NUM_THREADS,
-         0,
-         context_.cuda_stream()>>>(N, C, HxW, X, scale, bias, Y);
-}
+    const float* X_data,
+    const float* gamma_data,
+    const float* beta_data,
+    float* Y_data,
+    float* mu_data,
+    float* rsig_data) {
+  const std::array<int, 4> dims = order_ == StorageOrder::NCHW
+      ? std::array<int, 4>{N, G, D, HxW}
+      : std::array<int, 4>{N, HxW, G, D};
+  const std::array<int, 2> axes = order_ == StorageOrder::NCHW
+      ? std::array<int, 2>{2, 3}
+      : std::array<int, 2>{1, 3};
 
-template <>
-void GroupNormOp<float, CUDAContext>::GroupNormForwardNHWC(
-    const int N,
-    const int C,
-    const int HxW,
-    const float* X,
-    const float* scale,
-    const float* bias,
-    float* Y) {
-  GroupNormForwardCUDAKernel<float, StorageOrder::NHWC>
-      <<<std::min(N * HxW, CAFFE_MAXIMUM_NUM_BLOCKS),
-         CAFFE_CUDA_NUM_THREADS,
-         0,
-         context_.cuda_stream()>>>(N, C, HxW, X, scale, bias, Y);
+  // Computes mean and variance.
+  math::Moments<float, CUDAContext>(
+      4, dims.data(), 2, axes.data(), X_data, mu_data, rsig_data, &context_);
+
+  // Uses rsqrt to computes 1 / std which is much faster than computes std.
+  InvStdCUDAKernel<<<
+      CAFFE_GET_BLOCKS(N * G),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(N * G, epsilon_, rsig_data, rsig_data);
+
+  // Computes Y = gamma * (X - mu) * rsig + beta.
+  const int size = N * G * D * HxW;
+  if (order_ == StorageOrder::NCHW) {
+    GroupNormForwardCUDAKernel<float, StorageOrder::NCHW>
+        <<<CAFFE_GET_BLOCKS(size),
+           CAFFE_CUDA_NUM_THREADS,
+           0,
+           context_.cuda_stream()>>>(
+            size,
+            G,
+            D,
+            HxW,
+            X_data,
+            mu_data,
+            rsig_data,
+            gamma_data,
+            beta_data,
+            Y_data);
+  } else {
+    GroupNormForwardCUDAKernel<float, StorageOrder::NHWC>
+        <<<CAFFE_GET_BLOCKS(size),
+           CAFFE_CUDA_NUM_THREADS,
+           0,
+           context_.cuda_stream()>>>(
+            size,
+            G,
+            D,
+            HxW,
+            X_data,
+            mu_data,
+            rsig_data,
+            gamma_data,
+            beta_data,
+            Y_data);
+  }
+  return true;
 }
 
 // Math:

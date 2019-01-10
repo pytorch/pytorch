@@ -21,7 +21,7 @@ class MaxMinOpBase : public Operator<Context> {
     auto* output = Output(0);
 
     output->ResizeLike(input0);
-    output->CopyFrom(input0, /* async */ true);
+    output->CopyFrom(input0, &context_);
 
     if (InputSize() == 1) {
       return true;
@@ -30,14 +30,14 @@ class MaxMinOpBase : public Operator<Context> {
     // Dimension checking
     for (int i = 1; i < InputSize(); ++i) {
       CAFFE_ENFORCE_EQ(
-          output->sizes(),
-          Input(i).sizes(),
+          output->dims(),
+          Input(i).dims(),
           "Description: Input #",
           i,
           ", input dimension:",
-          Input(i).sizes(),
+          Input(i).dims(),
           " should match output dimension: ",
-          output->sizes());
+          output->dims());
     }
 
     return this->Compute();

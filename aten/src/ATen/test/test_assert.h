@@ -41,7 +41,7 @@ static inline void barf(const char *fmt, ...) {
       fn;                                                       \
       _passed = true;                                           \
       els;                                                      \
-    } catch (const std::exception &e) {                         \
+    } catch (std::runtime_error &e) {                           \
       ASSERT(!_passed);                                         \
       catc;                                                     \
     }                                                           \

@@ -18,9 +18,6 @@ NAME_PARAM_REGEX = r'(\w+)\((.*)\)'
 def argument_to_declaration(param, func=None):
     arg = {}
     arg['type'], name = param.split(' ')
-    if (arg['type'].endswith('?')):
-        arg['is_nullable'] = True
-        arg['type'] = arg['type'].rstrip('?')
     if arg['type'] == 'Tensor':
         arg['type'] = 'THTensor*'
     elif arg['type'] == 'LongTensor':
@@ -69,7 +66,7 @@ def output_arguments(thnn_function):
     def is_output_arg(arg_name, func_name):
         if arg_name == 'output' and 'updateOutput' in cname:
             return True
-        if name in {'gradInput', 'gradWeight', 'gradBias', 'gradGrid'}:
+        if name in {'gradInput', 'gradWeight', 'gradBias'}:
             return True
         if arg_name == 'indices' and 'updateOutput' in cname and 'Unpool' not in cname:
             # indices is an output argument in pooling and an input in unpooling
@@ -299,11 +296,6 @@ def backward_declaration(base, thnn_functions):
                 break
         arguments.insert(output_size_idx + 1, input_size_arg)
 
-    if 'im2col' in base['name']:
-        # Add input_size as parameter to im2col backwards function
-        input_size_arg = {'type': 'IntList', 'name': 'input_size', 'size': 2}
-        arguments.insert(2, input_size_arg)
-
     # outputs from the forward may be inputs to the backwards
     for arg in arguments:
         if 'output' in arg:
@@ -363,7 +355,7 @@ def backward_declaration(base, thnn_functions):
         else:
             base_name = arg['name'][len('grad_'):] if arg['name'] != 'grad_input' else 'self'
             if base_name in [a['name'] for a in arguments]:
-                scalar_check[arg['name']] = base_name + '_->dim() == 0'
+                scalar_check[arg['name']] = base_name + '_->isScalar()'
             else:
                 raise ValueError(("Could not infer scalar_check for {} argument of func {} because {} "
                                   "does not exist.  Please explicitly specify scalar_check."
@@ -412,6 +404,7 @@ def run(paths):
                     bwd_functions.append(header_functions[cname + suffix])
 
             base = base_declaration(func, fwd_function, backends)
+            declarations.append(base)
             declarations.append(forward_declaration(base, fwd_function))
             declarations.append(backward_declaration(base, bwd_functions))
 

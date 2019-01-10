@@ -19,7 +19,7 @@ class ReduceOp final : public Operator<Context> {
 
   ReduceOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        axes_(this->template GetRepeatedArgument<int>("axes")),
+        axes_(OperatorBase::GetRepeatedArgument<int>("axes")),
         OP_SINGLE_ARG(bool, "keepdims", keep_dims_, true) {}
 
   bool RunOnDevice() override {
@@ -29,15 +29,12 @@ class ReduceOp final : public Operator<Context> {
   template <typename T>
   bool DoRunWithType() {
     const auto& X = Input(0);
-
-    const int ndim = X.dim();
+    auto* Y = Output(0);
+    const int ndim = X.ndim();
     if (axes_.empty()) {
       axes_.resize(ndim);
       std::iota(axes_.begin(), axes_.end(), 0);
     } else {
-      for (auto& axis: axes_) {
-        axis = X.canonical_axis_index(axis);
-      }
       std::sort(axes_.begin(), axes_.end());
       CAFFE_ENFORCE_GE(axes_.front(), 0, "Axes ids must be non-negative.");
       CAFFE_ENFORCE_LT(
@@ -45,8 +42,8 @@ class ReduceOp final : public Operator<Context> {
           ndim,
           "Axes ids must be smaller than the dimensions of input.");
     }
-    const std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
-    std::vector<int64_t> Y_dims;
+    const std::vector<int> X_dims(X.dims().cbegin(), X.dims().cend());
+    std::vector<int> Y_dims;
     Y_dims.reserve(ndim);
     std::size_t cur_axis = 0;
     for (int i = 0; i < ndim; ++i) {
@@ -59,7 +56,7 @@ class ReduceOp final : public Operator<Context> {
         Y_dims.push_back(X_dims[i]);
       }
     }
-    auto* Y = Output(0, Y_dims, at::dtype<T>());
+    Y->Resize(Y_dims);
     return reducer_.template Forward<T>(
         X_dims,
         axes_,
@@ -81,7 +78,7 @@ class ReduceGradientOp final : public Operator<Context> {
 
   ReduceGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        axes_(this->template GetRepeatedArgument<int>("axes")) {}
+        axes_(OperatorBase::GetRepeatedArgument<int>("axes")) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<InputTypes>::call(this, Input(0));
@@ -92,15 +89,12 @@ class ReduceGradientOp final : public Operator<Context> {
     const auto& dY = Input(0);
     const auto& X = Input(1);
     const auto& Y = Input(2);
-
-    const int ndim = X.dim();
+    auto* dX = Output(0);
+    const int ndim = X.ndim();
     if (axes_.empty()) {
       axes_.resize(ndim);
       std::iota(axes_.begin(), axes_.end(), 0);
     } else {
-      for (auto& axis: axes_) {
-        axis = X.canonical_axis_index(axis);
-      }
       std::sort(axes_.begin(), axes_.end());
       CAFFE_ENFORCE_GE(axes_.front(), 0, "Axes ids must be non-negative.");
       CAFFE_ENFORCE_LT(
@@ -108,12 +102,12 @@ class ReduceGradientOp final : public Operator<Context> {
           ndim,
           "Axes ids must be smaller than the dimensions of input.");
     }
-    const std::vector<int> dX_dims(X.sizes().cbegin(), X.sizes().cend());
+    const std::vector<int> dX_dims(X.dims().cbegin(), X.dims().cend());
     std::vector<int> dY_dims = dX_dims;
     for (const int axis : axes_) {
       dY_dims[axis] = 1;
     }
-    auto* dX = Output(0, X.sizes(), at::dtype<T>());
+    dX->ResizeLike(X);
     return reducer_.template Backward<T>(
         dY_dims,
         dX_dims,
@@ -126,7 +120,7 @@ class ReduceGradientOp final : public Operator<Context> {
 
  private:
   std::vector<int> axes_;
-  Reducer reducer_{};
+  const Reducer reducer_{};
 };
 
 template <class Context>
@@ -143,7 +137,6 @@ struct MinReducer {
         dims.data(),
         axes.size(),
         axes.data(),
-        T(1),
         X_data,
         Y_data,
         context);
@@ -175,7 +168,6 @@ struct MaxReducer {
         dims.data(),
         axes.size(),
         axes.data(),
-        T(1),
         X_data,
         Y_data,
         context);
@@ -207,7 +199,6 @@ struct SumReducer {
         dims.data(),
         axes.size(),
         axes.data(),
-        T(1),
         X_data,
         Y_data,
         context);
@@ -228,7 +219,6 @@ struct SumReducer {
         dY_dims.data(),
         dX_dims.size(),
         dX_dims.data(),
-        T(1),
         dY_data,
         dX_data,
         context);
@@ -250,7 +240,6 @@ struct MeanReducer {
         dims.data(),
         axes.size(),
         axes.data(),
-        T(1),
         X_data,
         Y_data,
         context);
@@ -266,85 +255,26 @@ struct MeanReducer {
       const T* /* Y_data */,
       T* dX_data,
       Context* context) const {
-    const int dY_size = std::accumulate(
-        dY_dims.cbegin(), dY_dims.cend(), 1, std::multiplies<int>());
-    const int dX_size = std::accumulate(
-        dX_dims.cbegin(), dX_dims.cend(), 1, std::multiplies<int>());
     math::Broadcast(
         dY_dims.size(),
         dY_dims.data(),
         dX_dims.size(),
         dX_dims.data(),
-        static_cast<T>(dY_size) / static_cast<T>(dX_size),
         dY_data,
+        dX_data,
+        context);
+    const int dY_size = std::accumulate(
+        dY_dims.cbegin(), dY_dims.cend(), 1, std::multiplies<int>());
+    const int dX_size = std::accumulate(
+        dX_dims.cbegin(), dX_dims.cend(), 1, std::multiplies<int>());
+    math::Scale<T, Context>(
+        dX_size,
+        static_cast<float>(dY_size) / static_cast<float>(dX_size),
+        dX_data,
         dX_data,
         context);
     return true;
   }
-};
-
-template <class Context>
-struct L1Reducer {
-  template <typename T>
-  bool Forward(
-      const std::vector<int>& dims,
-      const std::vector<int>& axes,
-      const T* X_data,
-      T* Y_data,
-      Context* context) const {
-    math::ReduceL1<T, Context>(
-        dims.size(),
-        dims.data(),
-        axes.size(),
-        axes.data(),
-        T(1),
-        X_data,
-        Y_data,
-        context);
-    return true;
-  }
-
-  template <typename T>
-  bool Backward(
-      const std::vector<int>& dY_dims,
-      const std::vector<int>& dX_dims,
-      const T* dY_data,
-      const T* X_data,
-      const T* Y_data,
-      T* dX_data,
-      Context* context) const;
-};
-
-template <class Context>
-struct L2Reducer {
-  template <typename T>
-  bool Forward(
-      const std::vector<int>& dims,
-      const std::vector<int>& axes,
-      const T* X_data,
-      T* Y_data,
-      Context* context) const {
-    math::ReduceL2<T, Context>(
-        dims.size(),
-        dims.data(),
-        axes.size(),
-        axes.data(),
-        T(1),
-        X_data,
-        Y_data,
-        context);
-    return true;
-  }
-
-  template <typename T>
-  bool Backward(
-      const std::vector<int>& dY_dims,
-      const std::vector<int>& dX_dims,
-      const T* dY_data,
-      const T* X_data,
-      const T* Y_data,
-      T* dX_data,
-      Context* context) const;
 };
 
 } // namespace caffe2

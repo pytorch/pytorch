@@ -1,16 +1,16 @@
-#include <torch/csrc/python_headers.h>
+#include "torch/csrc/python_headers.h"
 
 static PyObject* module;
 
 static PyMethodDef TorchNvrtcMethods[] = {
-  {nullptr, nullptr, 0, nullptr}
+  {NULL, NULL, 0, NULL}
 };
 
 #if PY_MAJOR_VERSION != 2
 static struct PyModuleDef torchnvrtcmodule = {
    PyModuleDef_HEAD_INIT,
    "torch._nvrtc",
-   nullptr,
+   NULL,
    -1,
    TorchNvrtcMethods
 };
@@ -26,7 +26,7 @@ PyMODINIT_FUNC PyInit__nvrtc(void)
 #if PY_MAJOR_VERSION == 2
 #define ASSERT_TRUE(cmd) if (!(cmd)) {PyErr_SetString(PyExc_ImportError, "initialization error in torch._nvrtc"); return;}
 #else
-#define ASSERT_TRUE(cmd) if (!(cmd)) return nullptr
+#define ASSERT_TRUE(cmd) if (!(cmd)) return NULL
 #endif
 
 #if PY_MAJOR_VERSION == 2

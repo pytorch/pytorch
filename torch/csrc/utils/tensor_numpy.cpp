@@ -1,8 +1,8 @@
-#include <torch/csrc/utils/tensor_numpy.h>
+#include "tensor_numpy.h"
 
-#include <torch/csrc/utils/numpy_stub.h>
+#include "torch/csrc/utils/numpy_stub.h"
 
-#ifndef USE_NUMPY
+#ifndef WITH_NUMPY
 namespace torch { namespace utils {
 PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
@@ -10,15 +10,12 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
 at::Tensor tensor_from_numpy(PyObject* obj) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
-bool is_numpy_scalar(PyObject* obj) {
-  throw std::runtime_error("PyTorch was compiled without NumPy support");
-}
 }}
 #else
 
-#include <torch/csrc/DynamicTypes.h>
-#include <torch/csrc/Exceptions.h>
-#include <torch/csrc/autograd/python_variable.h>
+#include "torch/csrc/DynamicTypes.h"
+#include "torch/csrc/Exceptions.h"
+#include "torch/csrc/autograd/python_variable.h"
 
 #include <ATen/ATen.h>
 #include <memory>
@@ -71,7 +68,7 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
       0,
       NPY_ARRAY_ALIGNED | NPY_ARRAY_WRITEABLE,
       nullptr));
-  if (!array) return nullptr;
+  if (!array) return NULL;
 
   // TODO: This attempts to keep the underlying memory alive by setting the base
   // object of the ndarray to the tensor and disabling resizes on the storage.
@@ -80,10 +77,9 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   PyObject* py_tensor = THPVariable_Wrap(make_variable(tensor, false));
   if (!py_tensor) throw python_error();
   if (PyArray_SetBaseObject((PyArrayObject*)array.get(), py_tensor) == -1) {
-    return nullptr;
+    return NULL;
   }
-  // Use the private storage API
-  tensor.storage().unsafeGetStorageImpl()->set_resizable(false);
+  tensor.storage()->clear_flag(Storage::RESIZABLE);
 
   return array.release();
 }
@@ -100,11 +96,6 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
   // NumPy strides use bytes. Torch strides use element counts.
   auto element_size_in_bytes = PyArray_ITEMSIZE(array);
   for (auto& stride : strides) {
-    if (stride%element_size_in_bytes != 0) {
-      throw ValueError(
-        "given numpy array strides not a multiple of the element byte size. "
-        "Copy the numpy array to reallocate the memory.");
-    }
     stride /= element_size_in_bytes;
   }
 
@@ -121,11 +112,6 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
 
   void* data_ptr = PyArray_DATA(array);
   auto& type = CPU(numpy_dtype_to_aten(PyArray_TYPE(array)));
-  if (!PyArray_EquivByteorders(PyArray_DESCR(array)->byteorder, NPY_NATIVE)) {
-    throw ValueError(
-        "given numpy array has byte order different from the native byte order. "
-        "Conversion between byte orders is currently not supported.");
-  }
   Py_INCREF(obj);
   return type.tensorFromBlob(data_ptr, sizes, strides, [obj](void* data) {
     AutoGIL gil;
@@ -144,7 +130,7 @@ static int aten_to_dtype(const at::Type& type) {
         "can't convert sparse tensor to numpy. Use Tensor.to_dense() to "
         "convert to a dense tensor first.");
   }
-  if (type.backend() == Backend::CPU) {
+  if (type.backend() == kCPU) {
     switch (type.scalarType()) {
       case kDouble: return NPY_DOUBLE;
       case kFloat: return NPY_FLOAT;
@@ -152,7 +138,6 @@ static int aten_to_dtype(const at::Type& type) {
       case kLong: return NPY_INT64;
       case kInt: return NPY_INT32;
       case kShort: return NPY_INT16;
-      case kChar: return NPY_INT8;
       case kByte: return NPY_UINT8;
       default: break;
     }
@@ -167,7 +152,6 @@ ScalarType numpy_dtype_to_aten(int dtype) {
     case NPY_HALF: return kHalf;
     case NPY_INT32: return kInt;
     case NPY_INT16: return kShort;
-    case NPY_INT8: return kChar;
     case NPY_UINT8: return kByte;
     default:
       // Workaround: MSVC does not support two switch cases that have the same value
@@ -181,15 +165,10 @@ ScalarType numpy_dtype_to_aten(int dtype) {
   if (!pytype) throw python_error();
   throw TypeError(
       "can't convert np.ndarray of type %s. The only supported types are: "
-      "float64, float32, float16, int64, int32, int16, int8, and uint8.",
+      "double, float, float16, int64, int32, and uint8.",
       ((PyTypeObject*)pytype.get())->tp_name);
-}
-
-bool is_numpy_scalar(PyObject* obj) {
-  return (PyArray_IsIntegerScalar(obj) ||
-	  PyArray_IsScalar(obj, Floating));
 }
 
 }} // namespace torch::utils
 
-#endif  // USE_NUMPY
+#endif  // WITH_NUMPY

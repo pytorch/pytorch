@@ -17,7 +17,9 @@
 #ifndef CAFFE2_OPT_FUSION_H_
 #define CAFFE2_OPT_FUSION_H_
 
+#include "caffe2/core/common.h"
 #include "caffe2/core/workspace.h"
+#include "caffe2/proto/caffe2.pb.h"
 #include "nomnigraph/Representations/NeuralNet.h"
 
 namespace caffe2 {
@@ -25,7 +27,7 @@ namespace opt {
 
 using namespace nom;
 
-CAFFE2_API void fuseConvBN(repr::NNModule* nn, caffe2::Workspace* ws);
+void fuseConvBN(repr::NNModule* nn, caffe2::Workspace* ws);
 
 // Generic activation fusion helper.
 //
@@ -33,11 +35,11 @@ CAFFE2_API void fuseConvBN(repr::NNModule* nn, caffe2::Workspace* ws);
 // \tparam ActivationT The activation to be fused.
 // \param nn Neural network module to be modified in place
 // \param should_fuse Given a conv op, check whether we want to fuse it with
-// subsequent relu or not
+// subsequent relu or not 
 // \param postprocess Functor to postprocess the conv node,
 // attaching additional attributes if necessary
 template <typename OperationT, typename ActivationT>
-C10_EXPORT void fuseActivation(
+void fuseActivation(
     repr::NNModule* nn,
     std::function<bool(const OperationT& conv)> should_fuse,
     std::function<void(repr::NNGraph::NodeRef conv_node)> postprocess) {

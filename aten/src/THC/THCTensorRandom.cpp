@@ -1,5 +1,5 @@
-#include <THC/THCTensorRandom.h>
-#include <THC/THCGenerator.hpp>
+#include "THCTensorRandom.h"
+#include "THCGenerator.hpp"
 
 #include <random>
 #include <curand.h>
@@ -15,12 +15,12 @@ void destroyGenerator(THCState *state, THCGenerator* gen)
   std::lock_guard<std::mutex> lock(gen->mutex);
   if (gen->state.gen_states)
   {
-    THCudaFree(state, gen->state.gen_states);
+    THCudaCheck(THCudaFree(state, gen->state.gen_states));
     gen->state.gen_states = NULL;
   }
   if (gen->state.kernel_params)
   {
-    THCudaFree(state, gen->state.kernel_params);
+    THCudaCheck(THCudaFree(state, gen->state.kernel_params));
     gen->state.kernel_params = NULL;
   }
 }
@@ -87,7 +87,7 @@ THCGenerator* THCRandom_getGenerator(THCState* state)
   return gen;
 }
 
-curandStateMtgp32* THCRandom_generatorStates(THCState* state)
+struct curandStateMtgp32* THCRandom_generatorStates(struct THCState* state)
 {
   THCGenerator* gen = THCRandom_getGenerator(state);
   return gen->state.gen_states;

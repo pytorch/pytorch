@@ -13,11 +13,10 @@ import hypothesis.strategies as st
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
-import caffe2.python.serialized_test.serialized_test_util as serial
 
 
-class TestMatMul(serial.SerializedTestCase):
-    @serial.given(
+class TestMatMul(hu.HypothesisTestCase):
+    @given(
         M=st.integers(min_value=1, max_value=10),
         K=st.integers(min_value=1, max_value=10),
         N=st.integers(min_value=1, max_value=10),
@@ -126,7 +125,7 @@ class TestMatMul(serial.SerializedTestCase):
         self.assertGradientChecks(gc, op, [X, Y], 1, [0])
 
 
-class TestBatchMatMul(serial.SerializedTestCase):
+class TestBatchMatMul(hu.HypothesisTestCase):
     @settings(max_examples=30)
     @given(
         C=st.integers(min_value=0, max_value=3),  # number of batch dims
@@ -140,9 +139,9 @@ class TestBatchMatMul(serial.SerializedTestCase):
     )
     def test_batch_matmul(self, C, M, K, N, trans_a, trans_b, dtype, gc, dc):
         if dtype == np.float16:
-            # fp16 is only supported with CUDA/HIP
-            assume(core.IsGPUDeviceType(gc.device_type))
-            dc = [d for d in dc if core.IsGPUDeviceType(d.device_type)]
+            # fp16 is only supported with CUDA
+            assume(gc.device_type == caffe2_pb2.CUDA)
+            dc = [d for d in dc if d.device_type == caffe2_pb2.CUDA]
 
         batch_dims = np.random.randint(
             low=1,
@@ -215,7 +214,7 @@ class TestBatchMatMul(serial.SerializedTestCase):
         # Check over multiple devices
         self.assertDeviceChecks(dc, op, [X, Y], [0])
 
-    @serial.given(
+    @given(
         C_1=st.integers(min_value=0, max_value=3),  # number of batch dims
         C_2=st.integers(min_value=0, max_value=3),
         M=st.integers(min_value=1, max_value=10),

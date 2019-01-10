@@ -1,14 +1,13 @@
 ARG UBUNTU_VERSION
 FROM ubuntu:${UBUNTU_VERSION}
 
-# Include BUILD_ENVIRONMENT environment variable in image
-ARG BUILD_ENVIRONMENT
-ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
-
 ARG EC2
-ARG UBUNTU_VERSION
 ADD ./install_base.sh install_base.sh
 RUN bash ./install_base.sh && rm install_base.sh
+
+# Compile/install ccache for faster builds
+ADD ./install_ccache.sh install_ccache.sh
+RUN bash ./install_ccache.sh && rm install_ccache.sh
 
 # Install Python
 ARG PYTHON_VERSION
@@ -56,17 +55,6 @@ ARG ROCM_VERSION
 ADD ./install_rocm.sh install_rocm.sh
 RUN bash ./install_rocm.sh
 RUN rm install_rocm.sh
-ENV PATH /opt/rocm/bin:$PATH
-ENV PATH /opt/rocm/hcc/bin:$PATH
-ENV PATH /opt/rocm/hip/bin:$PATH
-ENV PATH /opt/rocm/opencl/bin:$PATH
-ENV HIP_PLATFORM hcc
-ENV LANG C.UTF-8
-ENV LC_ALL C.UTF-8
-
-# Compile/install ccache for faster builds
-ADD ./install_ccache.sh install_ccache.sh
-RUN bash ./install_ccache.sh && rm install_ccache.sh
 
 # (optional) Add Jenkins user
 ARG JENKINS
@@ -75,3 +63,7 @@ ARG JENKINS_GID
 ADD ./add_jenkins_user.sh add_jenkins_user.sh
 RUN if [ -n "${JENKINS}" ]; then bash ./add_jenkins_user.sh ${JENKINS_UID} ${JENKINS_GID}; fi
 RUN rm add_jenkins_user.sh
+
+# Include BUILD_ENVIRONMENT environment variable in image
+ARG BUILD_ENVIRONMENT
+ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}

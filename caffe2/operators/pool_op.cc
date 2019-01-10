@@ -1,1069 +1,809 @@
+// TODO(ataei): reduce the apparent redundancy of all the code below.
 #include "caffe2/operators/pool_op.h"
-
-#include <limits>
-#include <string>
-
-#include "caffe2/operators/pool_op_util.h"
-#include "caffe2/utils/eigen_utils.h"
+#include "caffe2/utils/cpu_neon.h"
 
 namespace caffe2 {
 
+using std::max;
+using std::min;
+
 namespace {
 
-template <typename T, StorageOrder kOrder>
-void ComputeAveragePool1D(
-    int l,
-    int r,
-    int y,
-    T scale,
-    const ConstEigenArrayMap<T>& X_arr,
-    EigenArrayMap<T>* Y_arr);
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
 
-template <>
-void ComputeAveragePool1D<float, StorageOrder::NCHW>(
-    const int l,
-    const int r,
-    const int y,
-    const float scale,
-    const ConstEigenArrayMap<float>& X_arr,
-    EigenArrayMap<float>* Y_arr) {
-  (*Y_arr)(y) = X_arr.col(0).segment(l, r - l).sum() * scale;
+bool isNeon4x4p0s0Eligible(
+    int inputH,
+    int inputW,
+    int outputH,
+    int outputW,
+    int kH,
+    int kW,
+    int strideH,
+    int strideW,
+    int padT,
+    int padL,
+    int padB,
+    int padR,
+    int dilationH,
+    int dilationW,
+    const float* input,
+    float* output) {
+  // Use this kernel only if:
+  // Kernel width is 4x4
+  // Kernel stride is 4x4
+  // Padding is 0
+  // Dilation is 1
+  // Output width and height are even divisors of input width
+  // Input width and height are divisible by 4 (should be implied by
+  // all of the above, but just check again)
+  // Input and output pointers are aligned by float32x4_t
+
+  bool kernelOk = (kH == 4) && (kW == 4);
+  bool strideOk = (strideH == 4) && (strideW == 4);
+  bool padOk = (padT == 0) && (padL == 0) && (padB == 0) && (padR == 0);
+  bool dilationOk = (dilationH == 1) && (dilationW == 1);
+
+  bool outputOk = ((inputH % outputH) == 0) && ((inputW % outputW) == 0);
+  bool inputOk = (inputW % 4 == 0) && (inputH % 4 == 0);
+  bool alignOk = isPointerAligned(input, sizeof(float32x4_t)) &&
+      isPointerAligned(output, sizeof(float32x4_t));
+
+  return kernelOk && strideOk && padOk && dilationOk && outputOk && inputOk &&
+      alignOk;
 }
 
-template <>
-void ComputeAveragePool1D<float, StorageOrder::NHWC>(
-    const int l,
-    const int r,
-    const int y,
-    const float scale,
-    const ConstEigenArrayMap<float>& X_arr,
-    EigenArrayMap<float>* Y_arr) {
-  Y_arr->col(y) = X_arr.col(l);
-  for (int i = l + 1; i < r; ++i) {
-    Y_arr->col(y) += X_arr.col(i);
-  }
-  Y_arr->col(y) *= scale;
-}
+// Vectorizes 4x4p0s0 averge pooling for ARM NEON
+void avgPoolNeon4x4p0s0Plane(
+    int inputH,
+    int inputW,
+    const float* input,
+    float* output) {
+  constexpr int kKernelHeight = 4;
+  constexpr int kKernelWidth = 4;
+  constexpr float kDiv = (1.0f / ((float)kKernelHeight * (float)kKernelWidth));
 
-template <typename T, StorageOrder kOrder>
-void ComputeAveragePool2D(
-    int W,
-    int t,
-    int b,
-    int l,
-    int r,
-    int y,
-    T scale,
-    const ConstEigenArrayMap<T>& X_arr,
-    EigenArrayMap<T>* Y_arr);
+  // Handle portion that can be unrolled by 4
+  constexpr int kUnroll = 4;
+  constexpr int kLoadSizeFloat = (sizeof(float32x4_t) / sizeof(float));
+  constexpr int kLoadCols = kUnroll * kLoadSizeFloat;
 
-template <>
-void ComputeAveragePool2D<float, StorageOrder::NCHW>(
-    const int /* W */,
-    const int t,
-    const int b,
-    const int l,
-    const int r,
-    const int y,
-    const float scale,
-    const ConstEigenArrayMap<float>& X_arr,
-    EigenArrayMap<float>* Y_arr) {
-  (*Y_arr)(y) = X_arr.block(l, t, r - l, b - t).sum() * scale;
-}
+  if (inputW % kLoadCols == 0) {
+    //
+    // Manually unroll by 4 (kUnroll)
+    //
 
-template <>
-void ComputeAveragePool2D<float, StorageOrder::NHWC>(
-    const int W,
-    const int t,
-    const int b,
-    const int l,
-    const int r,
-    const int y,
-    const float scale,
-    const ConstEigenArrayMap<float>& X_arr,
-    EigenArrayMap<float>* Y_arr) {
-  Y_arr->col(y).setZero();
-  for (int i = t; i < b; ++i) {
-    for (int j = l; j < r; ++j) {
-      Y_arr->col(y) += X_arr.col(i * W + j);
-    }
-  }
-  Y_arr->col(y) *= scale;
-}
+    for (int h = 0; h < inputH; h += kKernelHeight) {
+      float* outputRow = output + (h / kKernelHeight) * (inputW / kKernelWidth);
+      const float* curInput = input + h * inputW;
 
-template <typename T, StorageOrder kOrder>
-void ComputeAveragePool3D(
-    int H,
-    int W,
-    int p,
-    int a,
-    int t,
-    int b,
-    int l,
-    int r,
-    int y,
-    T scale,
-    const ConstEigenArrayMap<T>& X_arr,
-    EigenArrayMap<T>* Y_arr);
+      for (int w = 0; w < inputW; w += kLoadCols) {
+        float32x4_t out = {};
 
-template <>
-void ComputeAveragePool3D<float, StorageOrder::NCHW>(
-    const int H,
-    const int /* W */,
-    const int p,
-    const int a,
-    const int t,
-    const int b,
-    const int l,
-    const int r,
-    const int y,
-    const float scale,
-    const ConstEigenArrayMap<float>& X_arr,
-    EigenArrayMap<float>* Y_arr) {
-  (*Y_arr)(y) = 0;
-  for (int i = p; i < a; ++i) {
-    (*Y_arr)(y) += X_arr.block(l, i * H + t, r - l, b - t).sum();
-  }
-  (*Y_arr)(y) *= scale;
-}
-
-template <>
-void ComputeAveragePool3D<float, StorageOrder::NHWC>(
-    const int H,
-    const int W,
-    const int p,
-    const int a,
-    const int t,
-    const int b,
-    const int l,
-    const int r,
-    const int y,
-    const float scale,
-    const ConstEigenArrayMap<float>& X_arr,
-    EigenArrayMap<float>* Y_arr) {
-  Y_arr->col(y).setZero();
-  for (int i = p; i < a; ++i) {
-    for (int j = t; j < b; ++j) {
-      for (int k = l; k < r; ++k) {
-        Y_arr->col(y) += X_arr.col(i * H * W + j * W + k);
-      }
-    }
-  }
-  Y_arr->col(y) *= scale;
-}
-
-template <typename T, StorageOrder kOrder>
-void RunAveragePool1D(
-    const int N,
-    const int C,
-    const int X_size,
-    const int Y_size,
-    const int kernel,
-    const int stride,
-    const int pad,
-    const bool count_include_pad,
-    const T* X,
-    T* Y) {
-  const int batch_size = kOrder == StorageOrder::NCHW ? N * C : N;
-  const int X_stride = kOrder == StorageOrder::NCHW ? X_size : X_size * C;
-  const int Y_stride = kOrder == StorageOrder::NCHW ? Y_size : Y_size * C;
-  const T* X_ptr = X;
-  T* Y_ptr = Y;
-  for (int i = 0; i < batch_size; ++i) {
-    ConstEigenArrayMap<T> X_arr = kOrder == StorageOrder::NCHW
-        ? ConstEigenArrayMap<T>(X_ptr, X_size, 1)
-        : ConstEigenArrayMap<T>(X_ptr, C, X_size);
-    EigenArrayMap<T> Y_arr = kOrder == StorageOrder::NCHW
-        ? EigenArrayMap<T>(Y_ptr, Y_size, 1)
-        : EigenArrayMap<T>(Y_ptr, C, Y_size);
-    for (int y = 0; y < Y_size; ++y) {
-      const int l = std::max(y * stride - pad, 0);
-      const int r = std::min(y * stride - pad + kernel, X_size);
-      const T scale = T(1) / static_cast<T>(count_include_pad ? kernel : r - l);
-      ComputeAveragePool1D<T, kOrder>(l, r, y, scale, X_arr, &Y_arr);
-    }
-    X_ptr += X_stride;
-    Y_ptr += Y_stride;
-  }
-}
-
-template <typename T, StorageOrder kOrder>
-void RunAveragePool2D(
-    const int N,
-    const int C,
-    const int X_H,
-    const int X_W,
-    const int Y_H,
-    const int Y_W,
-    const int kernel_h,
-    const int kernel_w,
-    const int stride_h,
-    const int stride_w,
-    const int pad_t,
-    const int pad_l,
-    const bool count_include_pad,
-    const T* X,
-    T* Y) {
-  const int batch_size = kOrder == StorageOrder::NCHW ? N * C : N;
-  const int X_HxW = X_H * X_W;
-  const int Y_HxW = Y_H * Y_W;
-  const int X_stride = kOrder == StorageOrder::NCHW ? X_HxW : X_HxW * C;
-  const int Y_stride = kOrder == StorageOrder::NCHW ? Y_HxW : Y_HxW * C;
-  const T* X_ptr = X;
-  T* Y_ptr = Y;
-  for (int i = 0; i < batch_size; ++i) {
-    ConstEigenArrayMap<T> X_arr = kOrder == StorageOrder::NCHW
-        ? ConstEigenArrayMap<T>(X_ptr, X_W, X_H)
-        : ConstEigenArrayMap<T>(X_ptr, C, X_HxW);
-    EigenArrayMap<T> Y_arr = kOrder == StorageOrder::NCHW
-        ? EigenArrayMap<T>(Y_ptr, Y_W, Y_H)
-        : EigenArrayMap<T>(Y_ptr, C, Y_HxW);
-    for (int h = 0; h < Y_H; ++h) {
-      const int t = std::max(h * stride_h - pad_t, 0);
-      const int b = std::min(h * stride_h - pad_t + kernel_h, X_H);
-      for (int w = 0; w < Y_W; ++w) {
-        const int l = std::max(w * stride_w - pad_l, 0);
-        const int r = std::min(w * stride_w - pad_l + kernel_w, X_W);
-        const int y = h * Y_W + w;
-        const T scale = T(1) /
-            static_cast<T>(count_include_pad ? kernel_h * kernel_w
-                                             : (b - t) * (r - l));
-        ComputeAveragePool2D<T, kOrder>(
-            X_W, t, b, l, r, y, scale, X_arr, &Y_arr);
-      }
-    }
-    X_ptr += X_stride;
-    Y_ptr += Y_stride;
-  }
-}
-
-template <typename T, StorageOrder kOrder>
-void RunAveragePool3D(
-    const int N,
-    const int C,
-    const int X_D,
-    const int X_H,
-    const int X_W,
-    const int Y_D,
-    const int Y_H,
-    const int Y_W,
-    const int kernel_d,
-    const int kernel_h,
-    const int kernel_w,
-    const int stride_d,
-    const int stride_h,
-    const int stride_w,
-    const int pad_p,
-    const int pad_t,
-    const int pad_l,
-    const bool count_include_pad,
-    const T* X,
-    T* Y) {
-  const int batch_size = kOrder == StorageOrder::NCHW ? N * C : N;
-  const int X_HxW = X_D * X_H * X_W;
-  const int Y_HxW = Y_D * Y_H * Y_W;
-  const int X_stride = kOrder == StorageOrder::NCHW ? X_HxW : X_HxW * C;
-  const int Y_stride = kOrder == StorageOrder::NCHW ? Y_HxW : Y_HxW * C;
-  const T* X_ptr = X;
-  T* Y_ptr = Y;
-  for (int i = 0; i < batch_size; ++i) {
-    ConstEigenArrayMap<T> X_arr = kOrder == StorageOrder::NCHW
-        ? ConstEigenArrayMap<T>(X_ptr, X_W, X_D * X_H)
-        : ConstEigenArrayMap<T>(X_ptr, C, X_HxW);
-    EigenArrayMap<T> Y_arr = kOrder == StorageOrder::NCHW
-        ? EigenArrayMap<T>(Y_ptr, Y_W, Y_D * Y_H)
-        : EigenArrayMap<T>(Y_ptr, C, Y_HxW);
-    for (int d = 0; d < Y_D; ++d) {
-      const int p = std::max(d * stride_d - pad_p, 0);
-      const int a = std::min(d * stride_d - pad_p + kernel_d, X_D);
-      for (int h = 0; h < Y_H; ++h) {
-        const int t = std::max(h * stride_h - pad_t, 0);
-        const int b = std::min(h * stride_h - pad_t + kernel_h, X_H);
-        for (int w = 0; w < Y_W; ++w) {
-          const int l = std::max(w * stride_w - pad_l, 0);
-          const int r = std::min(w * stride_w - pad_l + kernel_w, X_W);
-          const int y = d * Y_H * Y_W + h * Y_W + w;
-          const T scale = T(1) /
-              static_cast<T>(count_include_pad ? kernel_d * kernel_h * kernel_w
-                                               : (a - p) * (b - t) * (r - l));
-          ComputeAveragePool3D<T, kOrder>(
-              X_H, X_W, p, a, t, b, l, r, y, scale, X_arr, &Y_arr);
+        {
+          float32x4_t v0_0 = vld1q_f32_aligned(curInput + 0 * inputW);
+          float32x4_t v0_1 = vld1q_f32_aligned(curInput + 1 * inputW);
+          float32x4_t v0_2 = vld1q_f32_aligned(curInput + 2 * inputW);
+          float32x4_t v0_3 = vld1q_f32_aligned(curInput + 3 * inputW);
+          float v0 = horizontal_sum_f32(v0_0, v0_1, v0_2, v0_3);
+          out = vsetq_lane_f32(v0, out, 0);
         }
-      }
-    }
-    X_ptr += X_stride;
-    Y_ptr += Y_stride;
-  }
-}
+        curInput += kLoadSizeFloat;
 
-template <typename T, StorageOrder kOrder>
-void ComputeMaxPool1D(
-    int l,
-    int r,
-    int y,
-    const ConstEigenArrayMap<T>& X_arr,
-    EigenArrayMap<T>* Y_arr);
-
-template <>
-void ComputeMaxPool1D<float, StorageOrder::NCHW>(
-    const int l,
-    const int r,
-    const int y,
-    const ConstEigenArrayMap<float>& X_arr,
-    EigenArrayMap<float>* Y_arr) {
-  (*Y_arr)(y) = X_arr.col(0).segment(l, r - l).maxCoeff();
-}
-
-template <>
-void ComputeMaxPool1D<float, StorageOrder::NHWC>(
-    const int l,
-    const int r,
-    const int y,
-    const ConstEigenArrayMap<float>& X_arr,
-    EigenArrayMap<float>* Y_arr) {
-  Y_arr->col(y) = X_arr.col(l);
-  for (int i = l + 1; i < r; ++i) {
-    Y_arr->col(y) = Y_arr->col(y).max(X_arr.col(i));
-  }
-}
-
-template <typename T, StorageOrder kOrder>
-void ComputeMaxPool2D(
-    int W,
-    int t,
-    int b,
-    int l,
-    int r,
-    int y,
-    const ConstEigenArrayMap<T>& X_arr,
-    EigenArrayMap<T>* Y_arr);
-
-template <>
-void ComputeMaxPool2D<float, StorageOrder::NCHW>(
-    const int /* W */,
-    const int t,
-    const int b,
-    const int l,
-    const int r,
-    const int y,
-    const ConstEigenArrayMap<float>& X_arr,
-    EigenArrayMap<float>* Y_arr) {
-  (*Y_arr)(y) = X_arr.block(l, t, r - l, b - t).maxCoeff();
-}
-
-template <>
-void ComputeMaxPool2D<float, StorageOrder::NHWC>(
-    const int W,
-    const int t,
-    const int b,
-    const int l,
-    const int r,
-    const int y,
-    const ConstEigenArrayMap<float>& X_arr,
-    EigenArrayMap<float>* Y_arr) {
-  Y_arr->col(y).setConstant(std::numeric_limits<float>::lowest());
-  for (int i = t; i < b; ++i) {
-    for (int j = l; j < r; ++j) {
-      Y_arr->col(y) = Y_arr->col(y).max(X_arr.col(i * W + j));
-    }
-  }
-}
-
-template <typename T, StorageOrder kOrder>
-void ComputeMaxPool3D(
-    int H,
-    int W,
-    int p,
-    int a,
-    int t,
-    int b,
-    int l,
-    int r,
-    int y,
-    const ConstEigenArrayMap<T>& X_arr,
-    EigenArrayMap<T>* Y_arr);
-
-template <>
-void ComputeMaxPool3D<float, StorageOrder::NCHW>(
-    const int H,
-    const int /* W */,
-    const int p,
-    const int a,
-    const int t,
-    const int b,
-    const int l,
-    const int r,
-    const int y,
-    const ConstEigenArrayMap<float>& X_arr,
-    EigenArrayMap<float>* Y_arr) {
-  (*Y_arr)(y) = std::numeric_limits<float>::lowest();
-  for (int i = p; i < a; ++i) {
-    (*Y_arr)(y) = std::max(
-        (*Y_arr)(y), X_arr.block(l, i * H + t, r - l, b - t).maxCoeff());
-  }
-}
-
-template <>
-void ComputeMaxPool3D<float, StorageOrder::NHWC>(
-    const int H,
-    const int W,
-    const int p,
-    const int a,
-    const int t,
-    const int b,
-    const int l,
-    const int r,
-    const int y,
-    const ConstEigenArrayMap<float>& X_arr,
-    EigenArrayMap<float>* Y_arr) {
-  Y_arr->col(y).setConstant(std::numeric_limits<float>::lowest());
-  for (int i = p; i < a; ++i) {
-    for (int j = t; j < b; ++j) {
-      for (int k = l; k < r; ++k) {
-        Y_arr->col(y) = Y_arr->col(y).max(X_arr.col(i * H * W + j * W + k));
-      }
-    }
-  }
-}
-
-template <typename T, StorageOrder kOrder>
-void RunMaxPool1D(
-    const int N,
-    const int C,
-    const int X_size,
-    const int Y_size,
-    const int kernel,
-    const int stride,
-    const int pad,
-    const T* X,
-    T* Y) {
-  const int batch_size = kOrder == StorageOrder::NCHW ? N * C : N;
-  const int X_stride = kOrder == StorageOrder::NCHW ? X_size : X_size * C;
-  const int Y_stride = kOrder == StorageOrder::NCHW ? Y_size : Y_size * C;
-  const T* X_ptr = X;
-  T* Y_ptr = Y;
-  for (int i = 0; i < batch_size; ++i) {
-    ConstEigenArrayMap<T> X_arr = kOrder == StorageOrder::NCHW
-        ? ConstEigenArrayMap<T>(X_ptr, X_size, 1)
-        : ConstEigenArrayMap<T>(X_ptr, C, X_size);
-    EigenArrayMap<T> Y_arr = kOrder == StorageOrder::NCHW
-        ? EigenArrayMap<T>(Y_ptr, Y_size, 1)
-        : EigenArrayMap<T>(Y_ptr, C, Y_size);
-    for (int y = 0; y < Y_size; ++y) {
-      const int l = std::max(y * stride - pad, 0);
-      const int r = std::min(y * stride - pad + kernel, X_size);
-      ComputeMaxPool1D<T, kOrder>(l, r, y, X_arr, &Y_arr);
-    }
-    X_ptr += X_stride;
-    Y_ptr += Y_stride;
-  }
-}
-
-template <typename T, StorageOrder kOrder>
-void RunMaxPool2D(
-    const int N,
-    const int C,
-    const int X_H,
-    const int X_W,
-    const int Y_H,
-    const int Y_W,
-    const int kernel_h,
-    const int kernel_w,
-    const int stride_h,
-    const int stride_w,
-    const int pad_t,
-    const int pad_l,
-    const T* X,
-    T* Y) {
-  const int batch_size = kOrder == StorageOrder::NCHW ? N * C : N;
-  const int X_HxW = X_H * X_W;
-  const int Y_HxW = Y_H * Y_W;
-  const int X_stride = kOrder == StorageOrder::NCHW ? X_HxW : X_HxW * C;
-  const int Y_stride = kOrder == StorageOrder::NCHW ? Y_HxW : Y_HxW * C;
-  const T* X_ptr = X;
-  T* Y_ptr = Y;
-  for (int i = 0; i < batch_size; ++i) {
-    ConstEigenArrayMap<T> X_arr = kOrder == StorageOrder::NCHW
-        ? ConstEigenArrayMap<T>(X_ptr, X_W, X_H)
-        : ConstEigenArrayMap<T>(X_ptr, C, X_HxW);
-    EigenArrayMap<T> Y_arr = kOrder == StorageOrder::NCHW
-        ? EigenArrayMap<T>(Y_ptr, Y_W, Y_H)
-        : EigenArrayMap<T>(Y_ptr, C, Y_HxW);
-    for (int h = 0; h < Y_H; ++h) {
-      const int t = std::max(h * stride_h - pad_t, 0);
-      const int b = std::min(h * stride_h - pad_t + kernel_h, X_H);
-      for (int w = 0; w < Y_W; ++w) {
-        const int l = std::max(w * stride_w - pad_l, 0);
-        const int r = std::min(w * stride_w - pad_l + kernel_w, X_W);
-        const int y = h * Y_W + w;
-        ComputeMaxPool2D<T, kOrder>(X_W, t, b, l, r, y, X_arr, &Y_arr);
-      }
-    }
-    X_ptr += X_stride;
-    Y_ptr += Y_stride;
-  }
-}
-template <typename T, StorageOrder kOrder>
-void RunMaxPool3D(
-    const int N,
-    const int C,
-    const int X_D,
-    const int X_H,
-    const int X_W,
-    const int Y_D,
-    const int Y_H,
-    const int Y_W,
-    const int kernel_d,
-    const int kernel_h,
-    const int kernel_w,
-    const int stride_d,
-    const int stride_h,
-    const int stride_w,
-    const int pad_p,
-    const int pad_t,
-    const int pad_l,
-    const T* X,
-    T* Y) {
-  const int batch_size = kOrder == StorageOrder::NCHW ? N * C : N;
-  const int X_HxW = X_D * X_H * X_W;
-  const int Y_HxW = Y_D * Y_H * Y_W;
-  const int X_stride = kOrder == StorageOrder::NCHW ? X_HxW : X_HxW * C;
-  const int Y_stride = kOrder == StorageOrder::NCHW ? Y_HxW : Y_HxW * C;
-  const T* X_ptr = X;
-  T* Y_ptr = Y;
-  for (int i = 0; i < batch_size; ++i) {
-    ConstEigenArrayMap<T> X_arr = kOrder == StorageOrder::NCHW
-        ? ConstEigenArrayMap<T>(X_ptr, X_W, X_D * X_H)
-        : ConstEigenArrayMap<T>(X_ptr, C, X_HxW);
-    EigenArrayMap<T> Y_arr = kOrder == StorageOrder::NCHW
-        ? EigenArrayMap<T>(Y_ptr, Y_W, Y_D * Y_H)
-        : EigenArrayMap<T>(Y_ptr, C, Y_HxW);
-    for (int d = 0; d < Y_D; ++d) {
-      const int p = std::max(d * stride_d - pad_p, 0);
-      const int a = std::min(d * stride_d - pad_p + kernel_d, X_D);
-      for (int h = 0; h < Y_H; ++h) {
-        const int t = std::max(h * stride_h - pad_t, 0);
-        const int b = std::min(h * stride_h - pad_t + kernel_h, X_H);
-        for (int w = 0; w < Y_W; ++w) {
-          const int l = std::max(w * stride_w - pad_l, 0);
-          const int r = std::min(w * stride_w - pad_l + kernel_w, X_W);
-          const int y = d * Y_H * Y_W + h * Y_W + w;
-          ComputeMaxPool3D<T, kOrder>(
-              X_H, X_W, p, a, t, b, l, r, y, X_arr, &Y_arr);
+        {
+          float32x4_t v0_0 = vld1q_f32_aligned(curInput + 0 * inputW);
+          float32x4_t v0_1 = vld1q_f32_aligned(curInput + 1 * inputW);
+          float32x4_t v0_2 = vld1q_f32_aligned(curInput + 2 * inputW);
+          float32x4_t v0_3 = vld1q_f32_aligned(curInput + 3 * inputW);
+          float v0 = horizontal_sum_f32(v0_0, v0_1, v0_2, v0_3);
+          out = vsetq_lane_f32(v0, out, 1);
         }
+        curInput += kLoadSizeFloat;
+
+        {
+          float32x4_t v0_0 = vld1q_f32_aligned(curInput + 0 * inputW);
+          float32x4_t v0_1 = vld1q_f32_aligned(curInput + 1 * inputW);
+          float32x4_t v0_2 = vld1q_f32_aligned(curInput + 2 * inputW);
+          float32x4_t v0_3 = vld1q_f32_aligned(curInput + 3 * inputW);
+          float v0 = horizontal_sum_f32(v0_0, v0_1, v0_2, v0_3);
+          out = vsetq_lane_f32(v0, out, 2);
+        }
+        curInput += kLoadSizeFloat;
+
+        {
+          float32x4_t v0_0 = vld1q_f32_aligned(curInput + 0 * inputW);
+          float32x4_t v0_1 = vld1q_f32_aligned(curInput + 1 * inputW);
+          float32x4_t v0_2 = vld1q_f32_aligned(curInput + 2 * inputW);
+          float32x4_t v0_3 = vld1q_f32_aligned(curInput + 3 * inputW);
+          float v0 = horizontal_sum_f32(v0_0, v0_1, v0_2, v0_3);
+          out = vsetq_lane_f32(v0, out, 3);
+        }
+        curInput += kLoadSizeFloat;
+
+        out = vmulq_f32(out, vdupq_n_f32(kDiv));
+        vst1q_f32_aligned(&outputRow[w / kKernelWidth], out);
       }
     }
-    X_ptr += X_stride;
-    Y_ptr += Y_stride;
+  } else {
+    //
+    // Not unrolled
+    //
+
+    for (int h = 0; h < inputH; h += kKernelHeight) {
+      const float* inputRow = input + h * inputW;
+      float* outputRow = output + (h / kKernelHeight) * (inputW / kKernelWidth);
+
+      for (int w = 0; w < inputW; w += kKernelWidth) {
+        const float* curInput = inputRow + w;
+
+        float32x4_t v0_0 = vld1q_f32_aligned(curInput + 0 * inputW);
+        float32x4_t v0_1 = vld1q_f32_aligned(curInput + 1 * inputW);
+        float32x4_t v0_2 = vld1q_f32_aligned(curInput + 2 * inputW);
+        float32x4_t v0_3 = vld1q_f32_aligned(curInput + 3 * inputW);
+        float v0 = horizontal_sum_f32(v0_0, v0_1, v0_2, v0_3) * kDiv;
+        outputRow[w / kKernelWidth] = v0;
+      }
+    }
   }
 }
+
+void runNeonAveragePool4x4p0s0NCHW(
+    int N,
+    int C,
+    int inputH,
+    int inputW,
+    const float* input,
+    float* output) {
+  // We only have the 4x4p0s0 implementation at present, which is
+  // checked at a higher level
+  int outputH = inputH / 4;
+  int outputW = inputW / 4;
+
+  for (int n = 0; n < N; ++n) {
+    for (int c = 0; c < C; ++c) {
+      const float* curInput = input + (n * C + c) * inputH * inputW;
+      float* curOutput = output + (n * C + c) * outputH * outputW;
+
+      avgPoolNeon4x4p0s0Plane(inputH, inputW, curInput, curOutput);
+    }
+  }
+}
+
+bool isNeon2x2p0s0Eligible(
+    int inputH,
+    int inputW,
+    int outputH,
+    int outputW,
+    int kH,
+    int kW,
+    int strideH,
+    int strideW,
+    int padT,
+    int padL,
+    int padB,
+    int padR,
+    int dilationH,
+    int dilationW,
+    const float* input,
+    float* output) {
+  // Use this kernel only if:
+  // Kernel width is 2x2
+  // Kernel stride is 2x2
+  // Padding is 0
+  // Dilation is 1
+  // Output width and height are even divisors of input width
+  // Input width and height are divisible by 4 (should be implied by
+  // all of the above, but just check again)
+  // Input and output pointers are aligned by float32x4_t
+
+  bool kernelOk = (kH == 2) && (kW == 2);
+  bool strideOk = (strideH == 2) && (strideW == 2);
+  bool padOk = (padT == 0) && (padL == 0) && (padB == 0) && (padR == 0);
+  bool dilationOk = (dilationH == 1) && (dilationW == 1);
+
+  bool outputOk = ((inputH % outputH) == 0) && ((inputW % outputW) == 0);
+  bool inputOk = (inputW % 4 == 0) && (inputH % 4 == 0);
+  bool alignOk = isPointerAligned(input, sizeof(float32x4_t)) &&
+      isPointerAligned(output, sizeof(float32x4_t));
+
+  return kernelOk && strideOk && padOk && dilationOk && outputOk && inputOk &&
+      alignOk;
+}
+
+// Vectorizes 2x2p0s0 averge pooling for ARM NEON
+void maxPoolNeon2x2p0s0Plane(
+    int inputH,
+    int inputW,
+    const float* input,
+    float* output) {
+  constexpr int kKernelHeight = 2;
+  constexpr int kKernelWidth = 2;
+
+  // Handle portion that can be unrolled by 4
+  constexpr int kUnroll = 4;
+  constexpr int kLoadSizeFloat = (sizeof(float32x4_t) / sizeof(float));
+  constexpr int kLoadCols = kUnroll * kLoadSizeFloat;
+
+  if (inputW % kLoadCols == 0) {
+    for (int h = 0; h < inputH; h += kKernelHeight) {
+      float* outputRow = output + (h / kKernelHeight) * (inputW / kKernelWidth);
+      const float* curInput = input + h * inputW;
+
+      for (int w = 0; w < inputW; w += kLoadCols) {
+        float32x2_t hmax_0, hmax_1, hmax_2, hmax_3;
+        {
+          float32x4_t v0_0 = vld1q_f32_aligned(curInput + 0 * inputW);
+          float32x4_t v0_1 = vld1q_f32_aligned(curInput + 1 * inputW);
+          float32x4_t vmax = vmaxq_f32(v0_0, v0_1);
+          hmax_0 = vpmax_f32(vget_low_f32(vmax), vget_high_f32(vmax));
+        }
+        curInput += kLoadSizeFloat;
+        {
+          float32x4_t v0_0 = vld1q_f32_aligned(curInput + 0 * inputW);
+          float32x4_t v0_1 = vld1q_f32_aligned(curInput + 1 * inputW);
+          float32x4_t vmax = vmaxq_f32(v0_0, v0_1);
+          hmax_1 = vpmax_f32(vget_low_f32(vmax), vget_high_f32(vmax));
+        }
+        curInput += kLoadSizeFloat;
+        {
+          float32x4_t v0_0 = vld1q_f32_aligned(curInput + 0 * inputW);
+          float32x4_t v0_1 = vld1q_f32_aligned(curInput + 1 * inputW);
+          float32x4_t vmax = vmaxq_f32(v0_0, v0_1);
+          hmax_2 = vpmax_f32(vget_low_f32(vmax), vget_high_f32(vmax));
+        }
+        curInput += kLoadSizeFloat;
+        {
+          float32x4_t v0_0 = vld1q_f32_aligned(curInput + 0 * inputW);
+          float32x4_t v0_1 = vld1q_f32_aligned(curInput + 1 * inputW);
+          float32x4_t vmax = vmaxq_f32(v0_0, v0_1);
+          hmax_3 = vpmax_f32(vget_low_f32(vmax), vget_high_f32(vmax));
+        }
+        curInput += kLoadSizeFloat;
+
+        float32x4_t out_0 = vcombine_f32(hmax_0, hmax_1);
+        float32x4_t out_1 = vcombine_f32(hmax_2, hmax_3);
+        vst1q_f32_aligned(&outputRow[w / kKernelWidth + 0], out_0);
+        vst1q_f32_aligned(&outputRow[w / kKernelWidth + 4], out_1);
+      }
+    }
+  } else {
+    // Not unrolled
+    for (int h = 0; h < inputH; h += kKernelHeight) {
+      const float* inputRow = input + h * inputW;
+      float* outputRow = output + (h / kKernelHeight) * (inputW / kKernelWidth);
+
+      for (int w = 0; w < inputW; w += kKernelWidth * 2) {
+        const float* curInput = inputRow + w;
+        float32x4_t v0_0 = vld1q_f32_aligned(curInput + 0 * inputW);
+        float32x4_t v0_1 = vld1q_f32_aligned(curInput + 1 * inputW);
+        float32x4_t vmax = vmaxq_f32(v0_0, v0_1);
+        float32x2_t hmax = vpmax_f32(vget_low_f32(vmax), vget_high_f32(vmax));
+        vst1_f32(&outputRow[w / kKernelWidth], hmax);
+      }
+    }
+  }
+}
+
+void runNeonMaxPool2x2p0s0NCHW(
+    int N,
+    int C,
+    int inputH,
+    int inputW,
+    const float* input,
+    float* output) {
+  // We only have the 2x2p0s0 implementation at present, which is
+  // checked at a higher level
+  int outputH = inputH / 2;
+  int outputW = inputW / 2;
+
+  for (int n = 0; n < N; ++n) {
+    for (int c = 0; c < C; ++c) {
+      const float* curInput = input + (n * C + c) * inputH * inputW;
+      float* curOutput = output + (n * C + c) * outputH * outputW;
+      maxPoolNeon2x2p0s0Plane(inputH, inputW, curInput, curOutput);
+    }
+  }
+}
+#endif // defined(__ARM_NEON__) || defined(__ARM_NEON)
 
 } // namespace
 
-#define CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_FORWARD_1D(T, kOrder) \
-  template <>                                                         \
-  template <>                                                         \
-  bool AveragePoolFunctor<CPUContext>::Forward<T, kOrder, 1>(         \
-      const int N,                                                    \
-      const int C,                                                    \
-      const std::array<int, 1>& X_dims,                               \
-      const std::array<int, 1>& Y_dims,                               \
-      const std::array<int, 1>& kernel,                               \
-      const std::array<int, 1>& /* dilation */,                       \
-      const std::array<int, 1>& stride,                               \
-      const std::array<int, 2>& pads,                                 \
-      const T* X,                                                     \
-      T* Y,                                                           \
-      CPUContext* /* context */) const {                              \
-    RunAveragePool1D<T, kOrder>(                                      \
-        N,                                                            \
-        C,                                                            \
-        X_dims[0],                                                    \
-        Y_dims[0],                                                    \
-        kernel[0],                                                    \
-        stride[0],                                                    \
-        pads[0],                                                      \
-        count_include_pad,                                            \
-        X,                                                            \
-        Y);                                                           \
-    return true;                                                      \
+template <typename T>
+class AveragePool {
+ public:
+  static float initialize() {
+    return 0.0;
   }
-CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_FORWARD_1D(float, StorageOrder::NCHW)
-CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_FORWARD_1D(float, StorageOrder::NHWC)
-#undef CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_FORWARD_1D
 
-template <>
-template <>
-bool AveragePoolFunctor<CPUContext>::Forward<float, StorageOrder::NCHW, 2>(
-    const int N,
-    const int C,
-    const std::array<int, 2>& X_dims,
-    const std::array<int, 2>& Y_dims,
-    const std::array<int, 2>& kernel,
-    const std::array<int, 2>& dilation,
-    const std::array<int, 2>& stride,
-    const std::array<int, 4>& pads,
-    const float* X,
-    float* Y,
-    CPUContext* /* context */) const {
-  if (pool_op_util::IsNeon4x4p0s0Eligible(
-          X_dims[0],
-          X_dims[1],
-          Y_dims[0],
-          Y_dims[1],
-          kernel[0],
-          kernel[1],
-          stride[0],
-          stride[1],
-          pads[0],
-          pads[1],
-          pads[2],
-          pads[3],
-          dilation[0],
-          dilation[1],
-          X,
-          Y)) {
-    pool_op_util::RunNeonAveragePool4x4p0s0NCHW(
-        N, C, X_dims[0], X_dims[1], X, Y);
-  } else {
-    RunAveragePool2D<float, StorageOrder::NCHW>(
-        N,
-        C,
-        X_dims[0],
-        X_dims[1],
-        Y_dims[0],
-        Y_dims[1],
-        kernel[0],
-        kernel[1],
-        stride[0],
-        stride[1],
-        pads[0],
-        pads[1],
-        count_include_pad,
-        X,
-        Y);
+  static void process(
+      const int x_col,
+      const int y_col,
+      ConstEigenMatrixMap<float>& x_mat,
+      EigenMatrixMap<float>& y_mat) {
+    y_mat.col(y_col) += x_mat.col(x_col);
+  }
+
+  static void process(const T& x_data, T& y_data) {
+    y_data += x_data;
+  }
+
+  static void finalize(const int size, T& y_data) {
+    y_data /= size;
+  }
+
+  static void
+  finalize(const int size, const int col, EigenMatrixMap<float>& y_mat) {
+    y_mat.col(col) /= size;
+  }
+
+  static bool runSpecialized(
+      int N,
+      int C,
+      int inputH,
+      int inputW,
+      int outputH,
+      int outputW,
+      int kH,
+      int kW,
+      int strideH,
+      int strideW,
+      int padT,
+      int padL,
+      int padB,
+      int padR,
+      int dilationH,
+      int dilationW,
+      const float* input,
+      float* output) {
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
+    if (isNeon4x4p0s0Eligible(
+            inputH,
+            inputW,
+            outputH,
+            outputW,
+            kH,
+            kW,
+            strideH,
+            strideW,
+            padT,
+            padL,
+            padB,
+            padR,
+            dilationH,
+            dilationW,
+            input,
+            output)) {
+      runNeonAveragePool4x4p0s0NCHW(N, C, inputH, inputW, input, output);
+      return true;
+    }
+#else
+    (void)N;
+    (void)C;
+    (void)inputH;
+    (void)inputW;
+    (void)outputH;
+    (void)outputW;
+    (void)kH;
+    (void)kW;
+    (void)strideH;
+    (void)strideW;
+    (void)padT;
+    (void)padL;
+    (void)padB;
+    (void)padR;
+    (void)dilationH;
+    (void)dilationW;
+    (void)input;
+    (void)output;
+#endif
+    return false;
+  }
+};
+
+template <typename T>
+class MaxPool {
+ public:
+  static float initialize() {
+    return std::numeric_limits<float>::lowest();
+  }
+
+  static void process(
+      const int x_col,
+      const int y_col,
+      ConstEigenMatrixMap<float>& x_mat,
+      EigenMatrixMap<float>& y_mat) {
+    y_mat.col(y_col) = y_mat.col(y_col).cwiseMax(x_mat.col(x_col));
+  }
+
+  static void process(const T& x_data, T& y_data) {
+    if (x_data > y_data) {
+      y_data = x_data;
+    }
+  }
+
+  static void finalize(const int /*size*/, T& /*y_data*/) {}
+
+  static void finalize(
+      const int /*size*/,
+      const int /*col*/,
+      EigenMatrixMap<float>& /*y_mat*/) {}
+
+  static bool runSpecialized(
+      int N,
+      int C,
+      int inputH,
+      int inputW,
+      int outputH,
+      int outputW,
+      int kH,
+      int kW,
+      int strideH,
+      int strideW,
+      int padT,
+      int padL,
+      int padB,
+      int padR,
+      int dilationH,
+      int dilationW,
+      const float* input,
+      float* output) {
+#if defined(__ARM_NEON__) || defined(__ARM_NEON)
+    if (isNeon2x2p0s0Eligible(
+            inputH,
+            inputW,
+            outputH,
+            outputW,
+            kH,
+            kW,
+            strideH,
+            strideW,
+            padT,
+            padL,
+            padB,
+            padR,
+            dilationH,
+            dilationW,
+            input,
+            output)) {
+      runNeonMaxPool2x2p0s0NCHW(N, C, inputH, inputW, input, output);
+      return true;
+    }
+#else
+    (void)N;
+    (void)C;
+    (void)inputH;
+    (void)inputW;
+    (void)outputH;
+    (void)outputW;
+    (void)kH;
+    (void)kW;
+    (void)strideH;
+    (void)strideW;
+    (void)padT;
+    (void)padL;
+    (void)padB;
+    (void)padR;
+    (void)dilationH;
+    (void)dilationW;
+    (void)input;
+    (void)output;
+#endif
+    return false;
+  }
+};
+
+template <typename T, class Context, typename PoolType>
+bool PoolOp<T, Context, PoolType>::RunOnDeviceWithOrderNCHW() {
+  auto& X = Input(0);
+  auto* Y = Output(0);
+  ConvPoolOpBase<Context>::SetOutputSize(X, Y, X.dim32(1));
+
+  const float* Xdata = X.template data<float>();
+  float* Ydata = Y->template mutable_data<float>();
+  // The main loop
+  int channels = X.dim32(1);
+  int height = X.dim32(2);
+  int width = kernel_.size() > 1 ? X.dim32(3) : 1;
+  int depth = kernel_.size() > 2 ? X.dim32(4) : 1;
+  int pooled_height = Y->dim32(2);
+  int pooled_width = kernel_.size() > 1 ? Y->dim32(3) : 1;
+  int pooled_depth = kernel_.size() > 2 ? Y->dim32(4) : 1;
+
+  // We specialize certain variants on ARM for vectorization
+  if (kernel_.size() == 2 &&
+      PoolType::runSpecialized(
+          X.dim32(0),
+          X.dim32(1),
+          X.dim32(2),
+          X.dim32(3),
+          Y->dim32(2),
+          Y->dim32(3),
+          kernel_h(),
+          kernel_w(),
+          stride_h(),
+          stride_w(),
+          pad_t(),
+          pad_l(),
+          pad_b(),
+          pad_r(),
+          dilation_h(),
+          dilation_w(),
+          Xdata,
+          Ydata)) {
+    return true;
+  }
+
+  switch (kernel_.size()) {
+    case 1:
+      for (int n = 0; n < X.dim32(0); ++n) {
+        for (int c = 0; c < channels; ++c) {
+          for (int ph = 0; ph < pooled_height; ++ph) {
+            int hstart = ph * stride_h() - pad_t();
+            int hend = min(hstart + kernel_h(), height);
+            hstart = max(hstart, 0);
+            T Yh = PoolType::initialize();
+            for (int h = hstart; h < hend; ++h) {
+              PoolType::process(Xdata[h], Yh);
+            }
+            PoolType::finalize(hend - hstart, Yh);
+            Ydata[ph] = Yh;
+          }
+          // Do offset.
+          Xdata += height;
+          Ydata += pooled_height;
+        }
+      }
+      break;
+    case 2:
+      for (int n = 0; n < X.dim32(0); ++n) {
+        for (int c = 0; c < channels; ++c) {
+          for (int ph = 0; ph < pooled_height; ++ph) {
+            int hstart = ph * stride_h() - pad_t();
+            int hend = min(hstart + kernel_h(), height);
+            hstart = max(hstart, 0);
+            for (int pw = 0; pw < pooled_width; ++pw) {
+              int wstart = pw * stride_w() - pad_l();
+              int wend = min(wstart + kernel_w(), width);
+              wstart = max(wstart, 0);
+              const int pool_index = ph * pooled_width + pw;
+              T Yh = PoolType::initialize();
+              for (int h = hstart; h < hend; ++h) {
+                for (int w = wstart; w < wend; ++w) {
+                  const int input_index = h * width + w;
+                  PoolType::process(Xdata[input_index], Yh);
+                }
+              }
+              PoolType::finalize((hend - hstart) * (wend - wstart), Yh);
+              Ydata[pool_index] = Yh;
+            }
+          }
+          // Do offset.
+          Xdata += height * width;
+          Ydata += pooled_height * pooled_width;
+        }
+      }
+      break;
+    case 3:
+      for (int n = 0; n < X.dim32(0); ++n) {
+        for (int c = 0; c < channels; ++c) {
+          for (int ph = 0; ph < pooled_height; ++ph) {
+            int hstart = ph * stride_h() - pad_t();
+            int hend = min(hstart + kernel_h(), height);
+            hstart = max(hstart, 0);
+            for (int pw = 0; pw < pooled_width; ++pw) {
+              int wstart = pw * stride_w() - pad_l();
+              int wend = min(wstart + kernel_w(), width);
+              wstart = max(wstart, 0);
+              for (int pd = 0; pd < pooled_depth; ++pd) {
+                int dstart = pd * stride_[2] - pads_[2];
+                int dend = min(dstart + kernel_[2], depth);
+                dstart = max(dstart, 0);
+                const int pool_index =
+                    ph * pooled_width * pooled_depth + pw * pooled_depth + pd;
+                T Yh = PoolType::initialize();
+                for (int h = hstart; h < hend; ++h) {
+                  for (int w = wstart; w < wend; ++w) {
+                    for (int d = dstart; d < dend; ++d) {
+                      const int input_index = h * width * depth + w * depth + d;
+                      PoolType::process(Xdata[input_index], Yh);
+                    }
+                  }
+                }
+                PoolType::finalize(
+                    (hend - hstart) * (wend - wstart) * (dend - dstart), Yh);
+                Ydata[pool_index] = Yh;
+              }
+            }
+          }
+          // Do offset.
+          Xdata += height * width * depth;
+          Ydata += pooled_height * pooled_width * pooled_depth;
+        }
+      }
+      break;
+    default:
+      CAFFE_THROW("Unsupported pooling size : ", kernel_.size());
+      return false;
   }
   return true;
 }
 
-template <>
-template <>
-bool AveragePoolFunctor<CPUContext>::Forward<float, StorageOrder::NHWC, 2>(
-    const int N,
-    const int C,
-    const std::array<int, 2>& X_dims,
-    const std::array<int, 2>& Y_dims,
-    const std::array<int, 2>& kernel,
-    const std::array<int, 2>& /* dilation */,
-    const std::array<int, 2>& stride,
-    const std::array<int, 4>& pads,
-    const float* X,
-    float* Y,
-    CPUContext* /* context */) const {
-  RunAveragePool2D<float, StorageOrder::NHWC>(
-      N,
-      C,
-      X_dims[0],
-      X_dims[1],
-      Y_dims[0],
-      Y_dims[1],
-      kernel[0],
-      kernel[1],
-      stride[0],
-      stride[1],
-      pads[0],
-      pads[1],
-      count_include_pad,
-      X,
-      Y);
-  return true;
-}
+template <typename T, class Context, typename PoolType>
+bool PoolOp<T, Context, PoolType>::RunOnDeviceWithOrderNHWC() {
+  auto& X = Input(0);
+  auto* Y = Output(0);
+  int height = X.dim32(1);
+  int width = kernel_.size() > 1 ? X.dim32(2) : 1;
+  int depth = kernel_.size() > 2 ? X.dim32(3) : 1;
+  int channels = X.dim32(X.ndim() - 1);
+  ConvPoolOpBase<Context>::SetOutputSize(X, Y, channels);
 
-#define CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_FORWARD_3D(T, kOrder) \
-  template <>                                                         \
-  template <>                                                         \
-  bool AveragePoolFunctor<CPUContext>::Forward<T, kOrder, 3>(         \
-      const int N,                                                    \
-      const int C,                                                    \
-      const std::array<int, 3>& X_dims,                               \
-      const std::array<int, 3>& Y_dims,                               \
-      const std::array<int, 3>& kernel,                               \
-      const std::array<int, 3>& /* dilation */,                       \
-      const std::array<int, 3>& stride,                               \
-      const std::array<int, 6>& pads,                                 \
-      const T* X,                                                     \
-      T* Y,                                                           \
-      CPUContext* /* context */) const {                              \
-    RunAveragePool3D<T, kOrder>(                                      \
-        N,                                                            \
-        C,                                                            \
-        X_dims[0],                                                    \
-        X_dims[1],                                                    \
-        X_dims[2],                                                    \
-        Y_dims[0],                                                    \
-        Y_dims[1],                                                    \
-        Y_dims[2],                                                    \
-        kernel[0],                                                    \
-        kernel[1],                                                    \
-        kernel[2],                                                    \
-        stride[0],                                                    \
-        stride[1],                                                    \
-        stride[2],                                                    \
-        pads[0],                                                      \
-        pads[1],                                                      \
-        pads[2],                                                      \
-        count_include_pad,                                            \
-        X,                                                            \
-        Y);                                                           \
-    return true;                                                      \
-  }
-CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_FORWARD_3D(float, StorageOrder::NCHW)
-CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_FORWARD_3D(float, StorageOrder::NHWC)
-#undef CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_FORWARD_3D
-
-#define CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_FORWARD_1D(T, kOrder)         \
-  template <>                                                             \
-  template <>                                                             \
-  bool MaxPoolFunctor<CPUContext>::Forward<T, kOrder, 1>(                 \
-      const int N,                                                        \
-      const int C,                                                        \
-      const std::array<int, 1>& X_dims,                                   \
-      const std::array<int, 1>& Y_dims,                                   \
-      const std::array<int, 1>& kernel,                                   \
-      const std::array<int, 1>& /* dilation */,                           \
-      const std::array<int, 1>& stride,                                   \
-      const std::array<int, 2>& pads,                                     \
-      const T* X,                                                         \
-      T* Y,                                                               \
-      CPUContext* /* context */) const {                                  \
-    RunMaxPool1D<T, kOrder>(                                              \
-        N, C, X_dims[0], Y_dims[0], kernel[0], stride[0], pads[0], X, Y); \
-    return true;                                                          \
-  }
-CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_FORWARD_1D(float, StorageOrder::NCHW)
-CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_FORWARD_1D(float, StorageOrder::NHWC)
-#undef CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_FORWARD_1D
-
-template <>
-template <>
-bool MaxPoolFunctor<CPUContext>::Forward<float, StorageOrder::NCHW, 2>(
-    const int N,
-    const int C,
-    const std::array<int, 2>& X_dims,
-    const std::array<int, 2>& Y_dims,
-    const std::array<int, 2>& kernel,
-    const std::array<int, 2>& dilation,
-    const std::array<int, 2>& stride,
-    const std::array<int, 4>& pads,
-    const float* X,
-    float* Y,
-    CPUContext* /* context */) const {
-  if (pool_op_util::IsNeon2x2p0s0Eligible(
-          X_dims[0],
-          X_dims[1],
-          Y_dims[0],
-          Y_dims[1],
-          kernel[0],
-          kernel[1],
-          stride[0],
-          stride[1],
-          pads[0],
-          pads[1],
-          pads[2],
-          pads[3],
-          dilation[0],
-          dilation[1],
-          X,
-          Y)) {
-    pool_op_util::RunNeonMaxPool2x2p0s0NCHW(N, C, X_dims[0], X_dims[1], X, Y);
-  } else {
-    RunMaxPool2D<float, StorageOrder::NCHW>(
-        N,
-        C,
-        X_dims[0],
-        X_dims[1],
-        Y_dims[0],
-        Y_dims[1],
-        kernel[0],
-        kernel[1],
-        stride[0],
-        stride[1],
-        pads[0],
-        pads[1],
-        X,
-        Y);
+  EigenMatrixMap<float> Ymat(
+      Y->template mutable_data<float>(), channels, Y->size() / channels);
+  ConstEigenMatrixMap<float> Xmat(
+      X.template data<float>(), channels, X.size() / channels);
+  int pooled_height = Y->dim32(1);
+  int pooled_width = kernel_.size() > 1 ? Y->dim32(2) : 1;
+  int pooled_depth = kernel_.size() > 2 ? Y->dim32(3) : 1;
+  // The main loop
+  switch (kernel_.size()) {
+    case 1:
+      for (int n = 0; n < X.dim32(0); ++n) {
+        for (int ph = 0; ph < pooled_height; ++ph) {
+          int hstart = ph * stride_h() - pad_t();
+          int hend = min(hstart + kernel_h(), height);
+          hstart = max(hstart, 0);
+          const int y_col = n * pooled_height + ph;
+          Ymat.col(y_col).setConstant(PoolType::initialize());
+          for (int h = hstart; h < hend; ++h) {
+            const int x_col = n * height + h;
+            PoolType::process(x_col, y_col, Xmat, Ymat);
+          }
+          PoolType::finalize((hend - hstart), y_col, Ymat);
+        }
+      }
+      break;
+    case 2:
+      for (int n = 0; n < X.dim32(0); ++n) {
+        for (int ph = 0; ph < pooled_height; ++ph) {
+          int hstart = ph * stride_h() - pad_t();
+          int hend = min(hstart + kernel_h(), height);
+          hstart = max(hstart, 0);
+          for (int pw = 0; pw < pooled_width; ++pw) {
+            int wstart = pw * stride_w() - pad_l();
+            int wend = min(wstart + kernel_w(), width);
+            wstart = max(wstart, 0);
+            const int y_col = (n * pooled_height + ph) * pooled_width + pw;
+            Ymat.col(y_col).setConstant(PoolType::initialize());
+            for (int h = hstart; h < hend; ++h) {
+              for (int w = wstart; w < wend; ++w) {
+                const int x_col = (n * height + h) * width + w;
+                PoolType::process(x_col, y_col, Xmat, Ymat);
+              }
+            }
+            PoolType::finalize((hend - hstart) * (wend - wstart), y_col, Ymat);
+          }
+        }
+      }
+      break;
+    case 3:
+      for (int n = 0; n < X.dim32(0); ++n) {
+        for (int ph = 0; ph < pooled_height; ++ph) {
+          int hstart = ph * stride_h() - pad_t();
+          int hend = min(hstart + kernel_h(), height);
+          hstart = max(hstart, 0);
+          for (int pw = 0; pw < pooled_width; ++pw) {
+            int wstart = pw * stride_w() - pad_l();
+            int wend = min(wstart + kernel_w(), width);
+            wstart = max(wstart, 0);
+            for (int pd = 0; pd < pooled_depth; ++pd) {
+              int dstart = pd * stride_[2] - pads_[2];
+              int dend = min(dstart + kernel_[2], depth);
+              dstart = max(dstart, 0);
+              const int y_col = ((n * pooled_height + ph) * pooled_width + pw) *
+                      pooled_depth +
+                  pd;
+              Ymat.col(y_col).setConstant(PoolType::initialize());
+              for (int h = hstart; h < hend; ++h) {
+                for (int w = wstart; w < wend; ++w) {
+                  for (int d = dstart; d < dend; ++d) {
+                    const int x_col =
+                        ((n * height + h) * width + w) * depth + d;
+                    PoolType::process(x_col, y_col, Xmat, Ymat);
+                  }
+                }
+              }
+              PoolType::finalize(
+                  (hend - hstart) * (wend - wstart) * (dend - dstart),
+                  y_col,
+                  Ymat);
+            }
+          }
+        }
+      }
+      break;
+    default:
+      CAFFE_THROW("Unsupported pooling size : ", kernel_.size());
+      return false;
   }
   return true;
 }
-
-template <>
-template <>
-bool MaxPoolFunctor<CPUContext>::Forward<float, StorageOrder::NHWC, 2>(
-    const int N,
-    const int C,
-    const std::array<int, 2>& X_dims,
-    const std::array<int, 2>& Y_dims,
-    const std::array<int, 2>& kernel,
-    const std::array<int, 2>& /* dilation */,
-    const std::array<int, 2>& stride,
-    const std::array<int, 4>& pads,
-    const float* X,
-    float* Y,
-    CPUContext* /* context */) const {
-  RunMaxPool2D<float, StorageOrder::NHWC>(
-      N,
-      C,
-      X_dims[0],
-      X_dims[1],
-      Y_dims[0],
-      Y_dims[1],
-      kernel[0],
-      kernel[1],
-      stride[0],
-      stride[1],
-      pads[0],
-      pads[1],
-      X,
-      Y);
-  return true;
-}
-
-#define CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_FORWARD_3D(T, kOrder) \
-  template <>                                                     \
-  template <>                                                     \
-  bool MaxPoolFunctor<CPUContext>::Forward<T, kOrder, 3>(         \
-      const int N,                                                \
-      const int C,                                                \
-      const std::array<int, 3>& X_dims,                           \
-      const std::array<int, 3>& Y_dims,                           \
-      const std::array<int, 3>& kernel,                           \
-      const std::array<int, 3>& /* dilation */,                   \
-      const std::array<int, 3>& stride,                           \
-      const std::array<int, 6>& pads,                             \
-      const T* X,                                                 \
-      T* Y,                                                       \
-      CPUContext* /* context */) const {                          \
-    RunMaxPool3D<T, kOrder>(                                      \
-        N,                                                        \
-        C,                                                        \
-        X_dims[0],                                                \
-        X_dims[1],                                                \
-        X_dims[2],                                                \
-        Y_dims[0],                                                \
-        Y_dims[1],                                                \
-        Y_dims[2],                                                \
-        kernel[0],                                                \
-        kernel[1],                                                \
-        kernel[2],                                                \
-        stride[0],                                                \
-        stride[1],                                                \
-        stride[2],                                                \
-        pads[0],                                                  \
-        pads[1],                                                  \
-        pads[2],                                                  \
-        X,                                                        \
-        Y);                                                       \
-    return true;                                                  \
-  }
-CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_FORWARD_3D(float, StorageOrder::NCHW)
-CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_FORWARD_3D(float, StorageOrder::NHWC)
-#undef CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_FORWARD_3D
-
-constexpr char kAveragePoolDoc[] = R"DOC(
-consumes an input blob and applies average pooling across the the blob according
-to kernel sizes, stride sizes, pad lengths and dilation. Average pooling consists
-of taking the average value of a subset of the input tensor according to the kernel
-size and downsampling the data into the output blob for further processing. The
-`brew` module has a wrapper for this operator for use in a `ModelHelper` object.
-
-Pooling layers reduce the spatial dimensionality of the input blob. Each of the
-output blob's dimensions will reduce according to:
-
-$$dim_{out}=\frac{dim_{in}-kernel+2*pad}{stride}+1$$
-
-Github Links:
-
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/pool_op.h
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/pool_op.cc
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/conv_pool_op_base.h
-
-
-<details>
-
-<summary> <b>Example</b> </summary>
-
-**Code**
-
-```
-workspace.ResetWorkspace()
-
-op = core.CreateOperator(
-    "AveragePool",
-    ["X"],
-    ["Y"],
-    kernel=2,
-    stride=2,
-)
-
-workspace.FeedBlob("X", np.random.randn(1, 1, 6, 6).astype(np.float32)) // NCHW
-print("X:\n", workspace.FetchBlob("X"), "\n")
-workspace.RunOperatorOnce(op)
-print("Y:\n", workspace.FetchBlob("Y"))
-```
-
-**Result**
-
-```
-X:
- [[[[-0.2883434   0.43498734  0.05417408  1.912558    0.09390241
-    -0.33173105]
-   [ 1.633709    1.2047161   0.36964908  0.99961185  0.4184147
-     0.9989975 ]
-   [ 1.7644193   0.1789665   1.5812988  -0.6038542  -0.36090398
-     0.33195344]
-   [ 0.9457722  -0.95174325 -0.78124577  1.2062047   1.1903144
-     0.2586746 ]
-   [ 1.252104    0.32645547  1.8073524  -0.78397465  0.9978303
-    -0.97614396]
-   [ 0.5440196   1.5778259  -0.76750124  0.5051756   0.8838398
-    -0.37085298]]]]
-
-Y:
- [[[[0.7462672  0.83399826 0.2948959 ]
-   [0.4843537  0.3506009  0.35500962]
-   [0.9251013  0.19026303 0.13366827]]]]
-```
-
-</details>
-
+const char* kAveragePoolDoc = R"DOC(
+consumes an input blob X and applies average pooling across the
+the blob according to kernel sizes, stride sizes, and pad lengths defined by the
+ConvPoolOpBase operator. Average pooling consisting of averaging all values of a
+subset of the input tensor according to the kernel size and downsampling the
+data into the output blob Y for further processing.
 )DOC";
 
-constexpr char kMaxPoolDoc[] = R"DOC(
-consumes an input blob and applies max pooling across the the blob according to
-kernel sizes, stride sizes, pad lengths and dilation. Max pooling consists of
-taking the maximum value of a subset of the input tensor according to the kernel
-size and downsampling the data into the output blob for further processing. The
-`brew` module has a wrapper for this operator for use in a `ModelHelper` object.
-
-Pooling layers reduce the spatial dimensionality of the input blob. Each of the
-output blob's dimensions will reduce according to:
-
-$$dim_{out}=\frac{dim_{in}-kernel+2*pad}{stride}+1$$
-
-Github Links:
-
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/pool_op.h
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/pool_op.cc
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/conv_pool_op_base.h
-
-<details>
-
-<summary> <b>Example</b> </summary>
-
-**Code**
-
-```
-workspace.ResetWorkspace()
-
-op = core.CreateOperator(
-    "MaxPool",
-    ["X"],
-    ["Y"],
-    kernel=2,
-    stride=2,
-)
-
-workspace.FeedBlob("X", np.random.randn(1, 1, 6, 6).astype(np.float32)) // NCHW
-print("X:\n", workspace.FetchBlob("X"), "\n")
-workspace.RunOperatorOnce(op)
-print("Y:\n", workspace.FetchBlob("Y"))
-```
-
-**Result**
-
-```
-X:
- [[[[-2.8534958e-01 -1.7719941e+00 -8.2277227e-04  1.1088650e+00
-    -2.1476576e+00 -3.5070452e-01]
-   [-9.0058845e-01 -3.0070004e-01 -1.7907504e+00 -7.1746534e-01
-     1.2798511e+00 -3.2214901e-01]
-   [ 1.5806322e+00  1.6845188e+00 -2.6633200e-01 -3.8576153e-01
-    -9.6424848e-02 -3.9696163e-01]
-   [ 1.2572408e-01  6.3612902e-01 -3.9554062e-01 -6.9735396e-01
-    -9.1898698e-01 -1.9609968e-01]
-   [-1.1587460e+00  2.4605224e+00 -1.5497679e+00  1.3020347e-01
-    -8.1293899e-01 -7.8803545e-01]
-   [ 1.4323474e+00  1.3618395e+00  9.8975077e-02 -1.1307785e-01
-     7.2035044e-01  2.7642491e-01]]]]
-
-Y:
- [[[[-0.28534958  1.108865    1.2798511 ]
-   [ 1.6845188  -0.266332   -0.09642485]
-   [ 2.4605224   0.13020347  0.72035044]]]]
-
-```
-
-</details>
-
+const char* kMaxPoolDoc = R"DOC(
+consumes an input blob X and applies max pooling across the
+the blob according to kernel sizes, stride sizes, and pad lengths defined by the
+ConvPoolOpBase operator. Max pooling consisting of taking the maximum value of a
+subset of the input tensor according to the kernel size and downsampling the
+data into the output blob Y for further processing.
 )DOC";
 
 std::function<void(OpSchema&)> AveragePoolDocGenerator(const char* dim) {
   return [=](OpSchema& schema) {
-    std::string doc = "AveragePool{dim} {pool_doc}";
-    c10::ReplaceAll(doc, "{dim}", dim);
-    c10::ReplaceAll(doc, "{pool_doc}", kAveragePoolDoc);
+    string doc = "AveragePool{dim} {pool_doc}";
+    ReplaceAll(doc, "{dim}", dim);
+    ReplaceAll(doc, "{pool_doc}", kAveragePoolDoc);
     schema.SetDoc(doc);
     schema.Input(
         0,
         "X",
-        "*(type: Tensor`<float>`)* Input data tensor of shape NCHW or NHWC.");
-    schema.Output(0, "Y", "*(type: Tensor`<float>`)* Output data tensor.");
-    /*
-    schema.Arg("kernel", "*(type: int)* Size of the window to take an average
-    over."); schema.Arg("stride", "*(type: int)* Stride of the window.");
-    schema.Arg("pad", "*(type: int)* Implicit zero padding to be added on both
-    sides."); schema.Arg("dilation", "*(type: int)* Parameter that controls
-    the stride of elements in the window."); schema.Arg("order", "*(type:
-    string; default: 'NCHW')* Order of the blob dimensions.");
-    */
+        "Input data tensor from the previous operator; dimensions depend on "
+        "whether the NCHW or NHWC operators are being used. For example, in "
+        "the former, the input has size (N x C x H x W), where N is the batch "
+        "size, C is the number of channels, and H and W are the height and the "
+        "width of the data. The corresponding permutation of dimensions is "
+        "used in the latter case.");
+    schema.Output(
+        0,
+        "Y",
+        "Output data tensor from average pooling across the input "
+        "tensor. Dimensions will vary based on various kernel, stride, and pad "
+        "sizes.");
   };
 }
 
 std::function<void(OpSchema&)> MaxPoolDocGenerator(const char* dim) {
   return [=](OpSchema& schema) {
-    std::string doc = "MaxPool{dim} {pool_doc}";
-    c10::ReplaceAll(doc, "{dim}", dim);
-    c10::ReplaceAll(doc, "{pool_doc}", kMaxPoolDoc);
+    string doc = "MaxPool{dim} {pool_doc}";
+    ReplaceAll(doc, "{dim}", dim);
+    ReplaceAll(doc, "{pool_doc}", kMaxPoolDoc);
     schema.SetDoc(doc);
     schema.Input(
         0,
         "X",
-        "*(type: Tensor`<float>`)* Input data tensor of shape NCHW or NHWC.");
-    schema.Output(0, "Y", "*(type: Tensor`<float>`)* Output data tensor.");
-    /*
-    schema.Arg("kernel", "*(type: int)* Size of the window to take an average
-    over."); schema.Arg("stride", "*(type: int)* Stride of the window.");
-    schema.Arg("pad", "*(type: int)* Implicit zero padding to be added on both
-    sides."); schema.Arg("dilation", "*(type: int)* Parameter that controls
-    the stride of elements in the window."); schema.Arg("order", "*(type:
-    string; default: 'NCHW')* Order of the blob dimensions.");
-    */
+        "Input data tensor from the previous operator; dimensions depend on "
+        "whether the NCHW or NHWC operators are being used. For example, in "
+        "the former, the input has size (N x C x H x W), where N is the batch "
+        "size, C is the number of channels, and H and W are the height and the "
+        "width of the data. The corresponding permutation of dimensions is "
+        "used in the latter case.");
+    schema.Output(
+        0,
+        "Y",
+        "Output data tensor from max pooling across the input "
+        "tensor. Dimensions will vary based on various kernel, stride, and pad "
+        "sizes.");
   };
 }
 REGISTER_CPU_OPERATOR(
     AveragePool,
-    PoolOp<float, CPUContext, AveragePoolFunctor<CPUContext>>);
+    PoolOp<float, CPUContext, AveragePool<float>>);
 
 OPERATOR_SCHEMA(AveragePool)
     .NumInputs(1)
     .NumOutputs(1)
     .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForPool)
     .FillUsing(AveragePoolDocGenerator(""))
-    .InheritOnnxSchema();
+    .InheritOnnxSchema("AveragePool");
 
 REGISTER_CPU_OPERATOR(
     AveragePool1D,
-    PoolOp<float, CPUContext, AveragePoolFunctor<CPUContext>>);
+    PoolOp<float, CPUContext, AveragePool<float>>);
 
 OPERATOR_SCHEMA(AveragePool1D)
     .NumInputs(1)
@@ -1074,7 +814,7 @@ OPERATOR_SCHEMA(AveragePool1D)
 
 REGISTER_CPU_OPERATOR(
     AveragePool2D,
-    PoolOp<float, CPUContext, AveragePoolFunctor<CPUContext>>);
+    PoolOp<float, CPUContext, AveragePool<float>>);
 
 OPERATOR_SCHEMA(AveragePool2D)
     .NumInputs(1)
@@ -1085,7 +825,7 @@ OPERATOR_SCHEMA(AveragePool2D)
 
 REGISTER_CPU_OPERATOR(
     AveragePool3D,
-    PoolOp<float, CPUContext, AveragePoolFunctor<CPUContext>>);
+    PoolOp<float, CPUContext, AveragePool<float>>);
 
 OPERATOR_SCHEMA(AveragePool3D)
     .NumInputs(1)
@@ -1094,20 +834,16 @@ OPERATOR_SCHEMA(AveragePool3D)
     .FillUsing(AveragePoolDocGenerator("3D"))
     .InheritOnnxSchema("AveragePool");
 
-REGISTER_CPU_OPERATOR(
-    MaxPool,
-    PoolOp<float, CPUContext, MaxPoolFunctor<CPUContext>>);
+REGISTER_CPU_OPERATOR(MaxPool, PoolOp<float, CPUContext, MaxPool<float>>);
 
 OPERATOR_SCHEMA(MaxPool)
     .NumInputs(1)
     .NumOutputs(1)
     .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForPool)
     .FillUsing(MaxPoolDocGenerator(""))
-    .InheritOnnxSchema();
+    .InheritOnnxSchema("MaxPool");
 
-REGISTER_CPU_OPERATOR(
-    MaxPool1D,
-    PoolOp<float, CPUContext, MaxPoolFunctor<CPUContext>>);
+REGISTER_CPU_OPERATOR(MaxPool1D, PoolOp<float, CPUContext, MaxPool<float>>);
 
 OPERATOR_SCHEMA(MaxPool1D)
     .NumInputs(1)
@@ -1116,9 +852,7 @@ OPERATOR_SCHEMA(MaxPool1D)
     .FillUsing(MaxPoolDocGenerator("1D"))
     .InheritOnnxSchema("MaxPool");
 
-REGISTER_CPU_OPERATOR(
-    MaxPool2D,
-    PoolOp<float, CPUContext, MaxPoolFunctor<CPUContext>>);
+REGISTER_CPU_OPERATOR(MaxPool2D, PoolOp<float, CPUContext, MaxPool<float>>);
 
 OPERATOR_SCHEMA(MaxPool2D)
     .NumInputs(1)
@@ -1127,9 +861,7 @@ OPERATOR_SCHEMA(MaxPool2D)
     .FillUsing(MaxPoolDocGenerator("2D"))
     .InheritOnnxSchema("MaxPool");
 
-REGISTER_CPU_OPERATOR(
-    MaxPool3D,
-    PoolOp<float, CPUContext, MaxPoolFunctor<CPUContext>>);
+REGISTER_CPU_OPERATOR(MaxPool3D, PoolOp<float, CPUContext, MaxPool<float>>);
 
 OPERATOR_SCHEMA(MaxPool3D)
     .NumInputs(1)
@@ -1137,5 +869,4 @@ OPERATOR_SCHEMA(MaxPool3D)
     .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForPool)
     .FillUsing(MaxPoolDocGenerator("3D"))
     .InheritOnnxSchema("MaxPool");
-
 } // namespace caffe2

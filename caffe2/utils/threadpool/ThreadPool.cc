@@ -4,37 +4,40 @@
 
 #include <cpuinfo.h>
 
-C10_DEFINE_bool(
-    caffe2_threadpool_force_inline,
-    false,
-    "Force to always run jobs on the calling thread");
+CAFFE2_DEFINE_bool(caffe2_threadpool_force_inline, false,
+                   "Force to always run jobs on the calling thread");
 
 // Whether or not threadpool caps apply to Android
-C10_DEFINE_int(caffe2_threadpool_android_cap, true, "");
+CAFFE2_DEFINE_int(caffe2_threadpool_android_cap, true, "");
 
 // Whether or not threadpool caps apply to iOS
-C10_DEFINE_int(caffe2_threadpool_ios_cap, true, "");
+CAFFE2_DEFINE_int(caffe2_threadpool_ios_cap, true, "");
+
 
 namespace caffe2 {
 
 // Default smallest amount of work that will be partitioned between
 // multiple threads; the runtime value is configurable
-constexpr size_t kDefaultMinWorkSize = 1;
+#if CAFFE2_ANDROID
+constexpr size_t kDefaultMinWorkSize = 8;
+#else
+constexpr size_t kDefaultMinWorkSize = 80;
+#endif
 
 std::unique_ptr<ThreadPool> ThreadPool::defaultThreadPool() {
   CAFFE_ENFORCE(cpuinfo_initialize(), "cpuinfo initialization failed");
   int numThreads = cpuinfo_get_processors_count();
 
   bool applyCap = false;
-#if C10_ANDROID
-  applyCap = FLAGS_caffe2_threadpool_android_cap;
-#elif C10_IOS
-  applyCap = FLAGS_caffe2_threadpool_ios_cap;
+#if CAFFE2_ANDROID
+  applyCap = caffe2::FLAGS_caffe2_threadpool_android_cap;
+#elif CAFFE2_IOS
+  applyCap = caffe2::FLAGS_caffe2_threadpool_ios_cap;
 #endif
 
   if (applyCap) {
     switch (numThreads) {
-#if C10_ANDROID && (CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64)
+#if CAFFE2_ANDROID && (CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64)
       case 4:
           switch (cpuinfo_get_core(0)->midr & UINT32_C(0xFF00FFF0)) {
             case UINT32_C(0x51002110): /* Snapdragon 820 Kryo Silver */
@@ -101,7 +104,8 @@ void ThreadPool::run(const std::function<void(int, size_t)>& fn, size_t range) {
   // If there are no worker threads, or if the range is too small (too
   // little work), just run locally
   const bool runLocally = range < minWorkSize_ ||
-      FLAGS_caffe2_threadpool_force_inline || (numThreads_ == 0);
+                          FLAGS_caffe2_threadpool_force_inline ||
+                          (numThreads_ == 0);
   if (runLocally) {
     // Work is small enough to just run locally; multithread overhead
     // is too high

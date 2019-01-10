@@ -1,8 +1,8 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "THCUNN/generic/Square.cu"
+#define THC_GENERIC_FILE "generic/Square.cu"
 #else
 
-#include <THCUNN/common.h>
+#include "../common.h"
 
 void THNN_(Square_updateOutput)(
            THCState *state,
@@ -11,7 +11,7 @@ void THNN_(Square_updateOutput)(
 {
   THCUNN_assertSameGPU(state, 2, input, output);
   THCTensor_(resizeAs)(state, output, input);
-  THC_pointwiseApply2<scalar_t, scalar_t>(state, output, input, squareupdateOutput_functor<scalar_t>());
+  THC_pointwiseApply2(state, output, input, squareupdateOutput_functor<real>());
 }
 
 void THNN_(Square_updateGradInput)(
@@ -23,7 +23,7 @@ void THNN_(Square_updateGradInput)(
   THCUNN_check_shape(state, input, gradOutput);
   THCUNN_assertSameGPU(state, 3, input, gradOutput, gradInput);
   THCTensor_(resizeAs)(state, gradInput, input);
-  THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, gradInput, input, gradOutput, squareupdateGradInput_functor<scalar_t>());
+  THC_pointwiseApply3(state, gradInput, input, gradOutput, squareupdateGradInput_functor<real>());
 }
 
 #endif

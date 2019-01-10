@@ -37,6 +37,7 @@ class Tags(object):
     EXCLUDE_FROM_ACCUMULATE_PRED = 'exclude_from_accumulate_pred'
     PREPROCESSING = 'preprocessing'
     HANDLE_AS_SPARSE_LAYER = 'handle_as_sparse_layer'
+    GRADIENT_FROM_PS = 'gradient_from_ps'
     PREFER_GPU = 'prefer_gpu'
     CPU_ONLY = 'cpu_only'
 
@@ -61,16 +62,6 @@ class Tags(object):
     """
     Valid tag prefixes for distributed training framework.
     """
-    """
-    Used to pass on info to the 'extra_info' field in the net
-    Proto. Typically to provide info for distributed training.
-    """
-    EXTRA_INFO = 'extra_info:'
-    """
-    An empty tag, used to make conditional statement on with(Tags) block more concise
-    """
-    EMPTY_TAG = 'empty_tag'
-
     DT_TAGS = (SPARSE_SHARDED, SPARSE_DONT_SHARD, COMPONENT)
 
     # In certain cases we want to have different schema for training and

@@ -64,11 +64,10 @@ FeatureSpec = namedtuple(
         'feature_ids',
         'feature_is_request_only',
         'desired_hash_size',
-        'feature_to_index',
     ]
 )
 
-FeatureSpec.__new__.__defaults__ = (None, None, None, None, None, None)
+FeatureSpec.__new__.__defaults__ = (None, None, None, None, None)
 
 
 class Metadata(
@@ -237,7 +236,7 @@ class List(Field):
         return self.lengths.has_blobs() and self._items.has_blobs()
 
     def clone(self, keep_blobs=True):
-        return type(self)(
+        return List(
             _normalize_field(self._items, keep_blobs=keep_blobs),
             _normalize_field(self.lengths, keep_blobs=keep_blobs)
         )
@@ -383,7 +382,7 @@ class Struct(Field):
             (k, _normalize_field(v, keep_blobs=keep_blobs))
             for k, v in viewitems(self.fields)
         ]
-        return type(self)(*normalized_fields)
+        return Struct(*normalized_fields)
 
     def _get_field_by_nested_name(self, nested_name):
         names = nested_name.split(FIELD_SEPARATOR, 1)
@@ -1181,13 +1180,6 @@ def data_type_for_dtype(dtype):
         if dtype.base == np_type:
             return dt
     raise TypeError('Unknown dtype: ' + str(dtype.base))
-
-
-def dtype_for_core_type(core_type):
-    for np_type, dt in _DATA_TYPE_FOR_DTYPE:
-        if dt == core_type:
-            return np_type
-    raise TypeError('Unknown core type: ' + str(core_type))
 
 
 def attach_metadata_to_scalars(field, metadata):

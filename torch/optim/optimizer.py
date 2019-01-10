@@ -1,17 +1,10 @@
-from collections import defaultdict
-from torch._six import container_abcs
+from collections import defaultdict, Iterable
 
 import torch
 from copy import deepcopy
 from itertools import chain
 
-
-class _RequiredParameter(object):
-    """Singleton class representing a required parameter for an Optimizer."""
-    def __repr__(self):
-        return "<required parameter>"
-
-required = _RequiredParameter()
+required = object()
 
 
 class Optimizer(object):
@@ -130,7 +123,7 @@ class Optimizer(object):
                 return value
             elif isinstance(value, dict):
                 return {k: cast(param, v) for k, v in value.items()}
-            elif isinstance(value, container_abcs.Iterable):
+            elif isinstance(value, Iterable):
                 return type(value)(cast(param, v) for v in value)
             else:
                 return value

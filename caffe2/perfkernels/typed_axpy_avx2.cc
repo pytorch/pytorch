@@ -1,15 +1,17 @@
+#include "caffe2/core/types.h"
 #include "caffe2/perfkernels/cvtsh_ss_bugfix.h"
+#include "caffe2/perfkernels/typed_axpy.h"
+#include "caffe2/utils/math.h"
 
-#include <ATen/core/Half.h>
 #include <emmintrin.h>
 #include <immintrin.h>
 
 namespace caffe2 {
 
-void TypedAxpyHalffloat__avx2_fma(
+void TypedAxpy_float16_float__avx2_fma(
     int N,
     const float a,
-    const at::Half* x,
+    const float16* x,
     float* y) {
   // if x does not start at the 16 byte boundary, we will process the first few.
   // before we get to a real one.

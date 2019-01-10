@@ -1,10 +1,10 @@
-#include <THD/base/Cuda.hpp>
+#include "Cuda.hpp"
 #include <unordered_map>
 
-#ifdef USE_CUDA
+#ifdef WITH_CUDA
 THCState** _THDCudaState;
 
-void THDSetCudaStatePtr(THCState** state) {
+void THDSetCudaStatePtr(THCState **state) {
   _THDCudaState = state;
 }
 
@@ -16,12 +16,10 @@ void THDRegisterCudaStream(cudaStream_t stream) {
 }
 
 int THDGetStreamId(cudaStream_t stream) {
-  if (!stream)
-    return 0;
+  if (!stream) return 0;
   auto it = streamIdMap.find(stream);
   if (it == streamIdMap.end()) {
-    throw std::runtime_error(
-        "using a stream that's hasn't been registered in THD");
+    throw std::runtime_error("using a stream that's hasn't been registered in THD");
   }
   return it->second;
 }

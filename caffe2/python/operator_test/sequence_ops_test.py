@@ -2,16 +2,13 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
-
 from caffe2.python import core
-from functools import partial
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
-import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 import unittest
-import os
+from functools import partial
 
 
 def _gen_test_add_padding(with_pad_data=True,
@@ -101,8 +98,8 @@ def _gather_padding_ref(start_pad_width, end_pad_width, data, lengths):
     return (start_padding, end_padding)
 
 
-class TestSequenceOps(serial.SerializedTestCase):
-    @serial.given(start_pad_width=st.integers(min_value=1, max_value=2),
+class TestSequenceOps(hu.HypothesisTestCase):
+    @given(start_pad_width=st.integers(min_value=1, max_value=2),
            end_pad_width=st.integers(min_value=0, max_value=2),
            args=_gen_test_add_padding(with_pad_data=True),
            ret_lengths=st.booleans(),
@@ -188,7 +185,7 @@ class TestSequenceOps(serial.SerializedTestCase):
             inputs=[data, lengths],
             reference=partial(_remove_padding_ref, start_pad_width, end_pad_width))
 
-    @serial.given(start_pad_width=st.integers(min_value=0, max_value=2),
+    @given(start_pad_width=st.integers(min_value=0, max_value=2),
            end_pad_width=st.integers(min_value=0, max_value=2),
            args=_gen_test_add_padding(with_pad_data=True),
            **hu.gcs)
@@ -209,7 +206,7 @@ class TestSequenceOps(serial.SerializedTestCase):
             inputs=[padded_data, padded_lengths],
             reference=partial(_gather_padding_ref, start_pad_width, end_pad_width))
 
-    @serial.given(data=hu.tensor(min_dim=3, max_dim=3, dtype=np.float32,
+    @given(data=hu.tensor(min_dim=3, max_dim=3, dtype=np.float32,
                           elements=st.floats(min_value=-np.inf,
                                              max_value=np.inf),
                           min_value=1, max_value=10),
@@ -243,7 +240,7 @@ class TestSequenceOps(serial.SerializedTestCase):
             output_to_grad='reversed_data',
             grad_reference=op_grad_ref)
 
-    @serial.given(data=hu.tensor(min_dim=1, max_dim=3, dtype=np.float32,
+    @given(data=hu.tensor(min_dim=1, max_dim=3, dtype=np.float32,
                           elements=st.floats(min_value=-np.inf,
                                              max_value=np.inf),
                           min_value=10, max_value=10),
@@ -271,7 +268,7 @@ class TestSequenceOps(serial.SerializedTestCase):
             inputs=[data, indices],
             reference=op_ref)
 
-    @serial.given(elements=st.lists(st.integers(min_value=0, max_value=9),
+    @given(elements=st.lists(st.integers(min_value=0, max_value=9),
                              min_size=0,
                              max_size=10),
            **hu.gcs_cpu_only)

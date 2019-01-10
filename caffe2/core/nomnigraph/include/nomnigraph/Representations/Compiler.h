@@ -1,28 +1,27 @@
 #ifndef NOM_REPRESENTATIONS_COMPILER_H
 #define NOM_REPRESENTATIONS_COMPILER_H
 
-#include "caffe2/core/common.h"
 #include "nomnigraph/Graph/Graph.h"
 #include "nomnigraph/Support/Casting.h"
 
 namespace nom {
 namespace repr {
 
-class CAFFE2_API Value {
+class Value {
  public:
   enum class ValueKind { Value, Instruction, Data };
-  Value(ValueKind K) : kind_(K) {}
-  Value() : kind_(ValueKind::Value) {}
+  Value(ValueKind K) : Kind(K) {}
+  Value() : Kind(ValueKind::Value) {}
   ValueKind getKind() const {
-    return kind_;
+    return Kind;
   }
   virtual ~Value() = default;
 
  private:
-  const ValueKind kind_;
+  const ValueKind Kind;
 };
 
-class CAFFE2_API Data : public Value {
+class Data : public Value {
  public:
   Data() : Value(ValueKind::Data) {}
   static bool classof(const Value* V) {
@@ -30,18 +29,18 @@ class CAFFE2_API Data : public Value {
   }
   virtual ~Data() = default;
   size_t getVersion() const {
-    return version_;
+    return Version;
   }
 
   void setVersion(size_t version) {
-    version_ = version;
+    Version = version;
   }
 
  private:
-  size_t version_ = 0;
+  size_t Version = 0;
 };
 
-class CAFFE2_API Instruction : public Value {
+class Instruction : public Value {
  public:
   /// \brief All the different types of execution.
   enum class Opcode {
@@ -52,21 +51,21 @@ class CAFFE2_API Instruction : public Value {
     TerminatorEnd,
     Phi
   };
-  Instruction() : Value(ValueKind::Instruction), op_(Opcode::Generic) {}
-  Instruction(Opcode op) : Value(ValueKind::Instruction), op_(op) {}
+  Instruction() : Value(ValueKind::Instruction), Op(Opcode::Generic) {}
+  Instruction(Opcode op) : Value(ValueKind::Instruction), Op(op) {}
   static bool classof(const Value* V) {
     return V->getKind() == ValueKind::Instruction;
   }
   virtual ~Instruction() = default;
   Opcode getOpcode() const {
-    return op_;
+    return Op;
   }
 
  private:
-  Opcode op_;
+  Opcode Op;
 };
 
-class CAFFE2_API Terminator : public Instruction {
+class Terminator : public Instruction {
  public:
   Terminator(Instruction::Opcode op) : Instruction(op) {}
 
@@ -80,17 +79,17 @@ class CAFFE2_API Terminator : public Instruction {
   }
 };
 
-class CAFFE2_API Branch : public Terminator {
+class Branch : public Terminator {
  public:
   Branch() : Terminator(Instruction::Opcode::Branch) {}
 };
 
-class CAFFE2_API Return : public Terminator {
+class Return : public Terminator {
  public:
   Return() : Terminator(Instruction::Opcode::Return) {}
 };
 
-class CAFFE2_API Phi : public Instruction {
+class Phi : public Instruction {
  public:
   Phi() : Instruction(Instruction::Opcode::Phi) {}
 };

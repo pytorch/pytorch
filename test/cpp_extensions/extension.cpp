@@ -1,26 +1,26 @@
-#include <torch/extension.h>
+#include <torch/torch.h>
 
-torch::Tensor sigmoid_add(torch::Tensor x, torch::Tensor y) {
+at::Tensor sigmoid_add(at::Tensor x, at::Tensor y) {
   return x.sigmoid() + y.sigmoid();
 }
 
 struct MatrixMultiplier {
   MatrixMultiplier(int A, int B) {
-    tensor_ =
-        torch::ones({A, B}, torch::dtype(torch::kFloat64).requires_grad(true));
+    tensor_ = at::ones(torch::CPU(at::kDouble), {A, B});
+    torch::set_requires_grad(tensor_, true);
   }
-  torch::Tensor forward(torch::Tensor weights) {
+  at::Tensor forward(at::Tensor weights) {
     return tensor_.mm(weights);
   }
-  torch::Tensor get() const {
+  at::Tensor get() const {
     return tensor_;
   }
 
  private:
-  torch::Tensor tensor_;
+  at::Tensor tensor_;
 };
 
-bool function_taking_optional(c10::optional<torch::Tensor> tensor) {
+bool function_taking_optional(at::optional<at::Tensor> tensor) {
   return tensor.has_value();
 }
 

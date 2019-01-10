@@ -1,7 +1,7 @@
 #pragma once
 
 #include "caffe2/core/common.h"
-#include "caffe2/proto/caffe2_pb.h"
+#include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
 
@@ -16,7 +16,7 @@ namespace transform {
 /**
  *  Graph representation of an operator.
  */
-struct CAFFE2_API Node {
+struct Node {
  public:
   // Empty constructor for resize
   Node() {}
@@ -45,7 +45,7 @@ struct CAFFE2_API Node {
 /**
  *  Graph representation of a Netdef.
  */
-struct CAFFE2_API Graph {
+struct Graph {
  public:
   /**
    * Given a subgraph, gets all of the parents of the subgraph, as well as
@@ -102,7 +102,7 @@ struct CAFFE2_API Graph {
    */
   void DeactivateSubgraph(std::vector<int> subgraph);
 
-  size_t size() const {
+  const size_t size() const {
     return nodes_.size();
   }
 
@@ -155,7 +155,7 @@ struct CAFFE2_API Graph {
 
 // Adds an operator def to a netdef.
 // Returns the ptr, if you want to add anything extra (such as device_option)
-CAFFE2_API OperatorDef* AddOp(
+OperatorDef* AddOp(
     NetDef* netdef_ptr,
     string op_type,
     std::vector<string> inputs,
@@ -168,12 +168,12 @@ CAFFE2_API OperatorDef* AddOp(
  * For example, if we wanted to match an operator to Conv or FC, we can give:
  * "Conv|FC" as the type() of that op.
  */
-CAFFE2_API bool MatchStrings(string p, string s);
+bool MatchStrings(string p, string s);
 
 /**
  * This ensures that each named arg that exists in the pattern exists in g_op,
  * is equal in value.
  */
-CAFFE2_API bool MatchArguments(const OperatorDef& p_op, const OperatorDef& g_op);
+bool MatchArguments(const OperatorDef& p_op, const OperatorDef& g_op);
 
 } // namespace caffe2

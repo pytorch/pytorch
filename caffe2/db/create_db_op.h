@@ -34,7 +34,7 @@ class CreateDBOp final : public Operator<Context> {
   string db_name_;
   uint32_t num_shards_;
   uint32_t shard_id_;
-  C10_DISABLE_COPY_AND_ASSIGN(CreateDBOp);
+  DISABLE_COPY_AND_ASSIGN(CreateDBOp);
 };
 
 } // namespace caffe2

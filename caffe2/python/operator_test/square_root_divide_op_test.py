@@ -9,7 +9,6 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 import caffe2.python.hypothesis_test_util as hu
-import caffe2.python.serialized_test.serialized_test_util as serial
 import math
 import numpy as np
 
@@ -56,8 +55,8 @@ def grad(output_grad, ref_outputs, inputs):
             None)
 
 
-class TestSquareRootDivide(serial.SerializedTestCase):
-    @serial.given(data_and_scale=_data_and_scale(),
+class TestSquareRootDivide(hu.HypothesisTestCase):
+    @given(data_and_scale=_data_and_scale(),
            **hu.gcs_cpu_only)
     def test_square_root_divide(self, data_and_scale, gc, dc):
         self.assertReferenceChecks(

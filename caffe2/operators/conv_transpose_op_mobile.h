@@ -3,11 +3,11 @@
 
 #include "caffe2/core/common.h"
 
-#ifndef C10_MOBILE
+#ifndef CAFFE2_MOBILE
 #error "mobile build state not defined"
 #endif
 
-#if C10_MOBILE
+#if CAFFE2_MOBILE
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
@@ -35,7 +35,7 @@ class ConvTransposeMobileOp final : public ConvTransposeUnpoolBase<Context> {
  private:
   // We store a numThreasds per-worker  tiles of Y, and numThreads per-worker threadBuffer for the
   // gemm output, laid out in that order.
-  Tensor threadBuffer_{CPU};
+  TensorCPU threadBuffer_;
 
   // Input: X, W, b
   // Output: Y
@@ -44,6 +44,6 @@ class ConvTransposeMobileOp final : public ConvTransposeUnpoolBase<Context> {
 
 } // namespace caffe2
 
-#endif // C10_MOBILE
+#endif // CAFFE2_MOBILE
 
 #endif // CAFFE2_OPERATORS_CONV_TRANSPOSE_MOBILE_OP_H_

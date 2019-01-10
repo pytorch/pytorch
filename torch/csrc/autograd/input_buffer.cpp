@@ -1,18 +1,14 @@
-#include <torch/csrc/autograd/input_buffer.h>
+#include "torch/csrc/autograd/input_buffer.h"
 
-#include <torch/csrc/autograd/functions/basic_ops.h>
-
-#include <ATen/DeviceGuard.h>
-
-#include <cstddef>
-#include <utility>
-#include <vector>
+#include "torch/csrc/assertions.h"
+#include "torch/csrc/autograd/functions/basic_ops.h"
+#include "torch/csrc/utils/auto_gpu.h"
 
 namespace torch { namespace autograd {
 
 
 void InputBuffer::add(size_t pos, Variable var) {
-  AT_ASSERT(pos < buffer.size());
+  TORCH_ASSERT(pos < buffer.size());
   if (!var.defined()) {
     return;
   }
@@ -20,9 +16,9 @@ void InputBuffer::add(size_t pos, Variable var) {
   if (!old_var.defined()) {
     buffer[pos] = std::move(var);
   } else {
-    at::OptionalDeviceGuard device_guard(device_of(var));
+    AutoGPU auto_gpu(var);
     // ATen doesn't route sparse additions correctly...
-    if (old_var.is_sparse()) {
+    if (old_var.type().is_sparse()) {
       buffer[pos] = var + old_var;
     } else {
       buffer[pos] = old_var + var;
@@ -32,7 +28,7 @@ void InputBuffer::add(size_t pos, Variable var) {
 
 auto InputBuffer::device() const -> int {
   for (auto& var : buffer) {
-    if (var.defined() && var.is_cuda()) {
+    if (var.defined() && var.type().is_cuda()) {
       return var.get_device();
     }
   }

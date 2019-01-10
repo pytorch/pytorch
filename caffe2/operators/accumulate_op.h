@@ -13,20 +13,20 @@ class AccumulateOp final : public Operator<Context> {
   AccumulateOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         gamma_(static_cast<T>(
-            this->template GetSingleArgument<float>("gamma", 1.0))) {}
+            OperatorBase::template GetSingleArgument<float>("gamma", 1.0))) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {
     auto& input = Input(0);
     auto* output = Output(0);
-    if (output->sizes() != input.sizes()) {
+    if (output->dims() != input.dims()) {
       LOG(INFO) << "Reshaping and initializing output.";
       output->ResizeLike(input);
       math::Set<T, Context>(
-          output->numel(), 0, output->template mutable_data<T>(), &context_);
+          output->size(), 0, output->template mutable_data<T>(), &context_);
     }
-    math::Axpby<T, T, Context>(
-        input.numel(),
+    math::Axpby<T, Context>(
+        input.size(),
         static_cast<T>(1),
         input.template data<T>(),
         gamma_,

@@ -28,27 +28,34 @@ def pickle(filename, data):
     if type(filename) == str:
         fo = open(filename, "w")
     
-    with fo:
-        cPickle.dump(data, fo, protocol=cPickle.HIGHEST_PROTOCOL)
+    cPickle.dump(data, fo, protocol=cPickle.HIGHEST_PROTOCOL)
+    fo.close()
     
 def unpickle(filename):
     if not os.path.exists(filename):
         raise UnpickleError("Path '%s' does not exist." % filename)
 
-    with open(filename) as fo, StringIO() as z:
-        file_size = os.fstat(fo.fileno()).st_size
-        # Read 1GB at a time to avoid overflow
-        while fo.tell() < file_size:
-            z.write(fo.read(1 << 30))
-        return cPickle.loads(z.getvalue())
+    fo = open(filename, 'r')
+    z = StringIO()
+    file_size = os.fstat(fo.fileno()).st_size
+    # Read 1GB at a time to avoid overflow
+    while fo.tell() < file_size:
+        z.write(fo.read(1 << 30))
+    fo.close()
+    dict = cPickle.loads(z.getvalue())
+    z.close()
+    
+    return dict
 
 def is_intel_machine():
-    VENDOR_ID_REGEX = re.compile(r'^vendor_id\s+: (\S+)')
-    with open('/proc/cpuinfo') as f:
-        for line in f:
-            m = VENDOR_ID_REGEX.match(line)
-            if m:
-                return m.group(1) == 'GenuineIntel'
+    VENDOR_ID_REGEX = re.compile('^vendor_id\s+: (\S+)')
+    f = open('/proc/cpuinfo')
+    for line in f:
+        m = VENDOR_ID_REGEX.match(line)
+        if m:
+            f.close()
+            return m.group(1) == 'GenuineIntel'
+    f.close()
     return False
 
 # Returns the CPUs associated with a given GPU
@@ -62,8 +69,9 @@ def get_cpus_for_gpu(gpu):
             if line.startswith('Bus Location'):
                 bus_id = line.split(':', 1)[1].strip()
                 bus_id = bus_id[:7] + ':' + bus_id[8:]
-                with open('/sys/module/nvidia/drivers/pci:nvidia/%s/local_cpulist' % bus_id) as ff:
-                    cpus_str = ff.readline()
+                ff = open('/sys/module/nvidia/drivers/pci:nvidia/%s/local_cpulist' % bus_id)
+                cpus_str = ff.readline()
+                ff.close()
                 cpus = [cpu for s in cpus_str.split(',') for cpu in range(int(s.split('-')[0]),int(s.split('-')[1])+1)]
                 return cpus
     return [-1]

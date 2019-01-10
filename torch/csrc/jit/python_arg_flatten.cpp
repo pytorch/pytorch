@@ -1,36 +1,34 @@
-#include <torch/csrc/jit/python_arg_flatten.h>
+#include "python_arg_flatten.h"
 
-#include <torch/csrc/autograd/grad_mode.h>
+#include "torch/csrc/autograd/grad_mode.h"
 
-namespace torch {
-namespace jit {
-namespace python {
+namespace torch { namespace jit { namespace python {
 
 using namespace torch::autograd;
 using namespace at;
 
 // Alphabet used to describe structure of inputs/outputs (D for desc)
 namespace D {
-static constexpr char ListOpen = '[';
-static constexpr char ListClose = ']';
-static constexpr char TupleOpen = '(';
-static constexpr char TupleClose = ')';
-static constexpr char Variable = 'v';
+static constexpr char ListOpen          = '[';
+static constexpr char ListClose         = ']';
+static constexpr char TupleOpen         = '(';
+static constexpr char TupleClose        = ')';
+static constexpr char Variable          = 'v';
 } // namespace D
 
 namespace {
 
-template <typename T>
+template<typename T>
 py::object cast_handle_sequence(std::vector<py::handle> objs) {
   auto num_objs = objs.size();
-  T sequence{num_objs};
-  for (size_t i = 0; i < num_objs; ++i)
+  T sequence { num_objs };
+  for (std::size_t i = 0; i < num_objs; ++i)
     sequence[i] = py::reinterpret_borrow<py::object>(objs[i]);
   return sequence;
 }
 
 void flatten_rec(PyObject* obj, ParsedArgs& args) {
-  auto& structure = args.desc.structure;
+  auto & structure = args.desc.structure;
   if (PyTuple_Check(obj)) {
     structure.push_back(D::TupleOpen);
     for (auto item : py::reinterpret_borrow<py::tuple>(obj))
@@ -47,8 +45,7 @@ void flatten_rec(PyObject* obj, ParsedArgs& args) {
     args.desc.metadata.emplace_back(var);
     args.desc.structure.push_back(D::Variable);
   } else {
-    std::string msg =
-        "Only tuples, lists and Variables supported as JIT inputs, but got ";
+    std::string msg = "Only tuples, lists and Variables supported as JIT inputs, but got ";
     msg += THPUtils_typename(obj);
     throw std::runtime_error(msg);
   }
@@ -65,19 +62,18 @@ ParsedArgs flatten(py::handle obj) {
 
 namespace {
 
-template <typename T>
+template<typename T>
 py::object cast_sequence(std::vector<py::object> objs) {
   auto num_objs = objs.size();
-  T sequence{num_objs};
-  for (size_t i = 0; i < num_objs; ++i)
+  T sequence { num_objs };
+  for (std::size_t i = 0; i < num_objs; ++i)
     sequence[i] = std::move(objs[i]);
   return sequence;
 }
 
-py::object unflatten_rec(
-    ArrayRef<Variable>::iterator& var_it,
-    ArrayRef<Variable>::iterator& var_it_end,
-    std::string::const_iterator& desc_it) {
+py::object unflatten_rec(ArrayRef<Variable>::iterator& var_it,
+                         ArrayRef<Variable>::iterator& var_it_end,
+                         std::string::const_iterator& desc_it) {
   char type = *desc_it++;
   if (type == D::TupleOpen) {
     std::vector<py::object> objs;
@@ -113,6 +109,4 @@ PyObject* unflatten(ArrayRef<Variable> vars, const IODescriptor& desc) {
   return output.release().ptr();
 }
 
-} // namespace python
-} // namespace jit
-} // namespace torch
+}}} // namespace torch::jit::python

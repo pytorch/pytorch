@@ -1,4 +1,4 @@
-# @package onnx
+## @package onnx
 # Module caffe2.python.onnx.tests.c2_ref_test
 
 from __future__ import absolute_import
@@ -8,7 +8,6 @@ from __future__ import unicode_literals
 
 import json
 import os
-import six
 import unittest
 
 from caffe2.python import core
@@ -25,12 +24,12 @@ import caffe2.python.onnx.backend as c2
 import numpy as np
 from caffe2.python.models.download import downloadFromURLToFile, getURLFromName, deleteDirectory
 
-from caffe2.python.onnx.tests.test_utils import DownloadingTestCase
+from caffe2.python.onnx.tests.test_utils import TestCase
 
 import caffe2.python._import_c_extension as C
 
 
-class TestCaffe2Basic(DownloadingTestCase):
+class TestCaffe2Basic(TestCase):
     def test_dummy_name(self):
         g = C.DummyName()
         n1 = g.new_dummy_name()
@@ -38,16 +37,20 @@ class TestCaffe2Basic(DownloadingTestCase):
         assert n1 != n2, "Got same names in different calls: {}".format(n1)
 
     def test_check_arguments(self):
+        X = np.random.randn(3, 2).astype(np.float32)
+        Y = np.random.randn(3, 2).astype(np.float32)
+        Z = np.zeros((3, 2)).astype(np.float32)
+
         b2 = C.Caffe2Backend()
 
-        node_def = make_node("Add", inputs=["X", "Y"], outputs=["Z"])
-        b2.convert_node(node_def.SerializeToString())
+        node_def = make_node("Add", inputs = ["X", "Y"], outputs = ["Z"], broadcast = 0)
+        output = b2.convert_node(node_def.SerializeToString(), 6)
 
-        bad_node_def = make_node("Add", inputs=["X", "Y"], outputs=["Z"], foo=42, bar=56)
-        with six.assertRaisesRegex(self,
-                                   RuntimeError,
-                                   "Don't know how to map unexpected argument (foo|bar)"):
-            b2.convert_node(bad_node_def.SerializeToString())
+        bad_node_def = make_node("Add", inputs = ["X", "Y"], outputs = ["Z"], foo = 42, bar = 56)
+        with self.assertRaisesRegexp(
+            RuntimeError,
+            ".*?Don't know how to map unexpected argument (foo|bar) \(from operator .*?\).*$"):
+            output = b2.convert_node(bad_node_def.SerializeToString(), 6)
 
     def test_relu_graph(self):
         X = np.random.randn(3, 2).astype(np.float32)
@@ -102,37 +105,6 @@ class TestCaffe2Basic(DownloadingTestCase):
         output = c2_rep.run({"X": X, "Y": Y})
         np.testing.assert_almost_equal(output["W3"], W_ref)
 
-    def test_upsample(self):
-        X = np.random.randn(1, 1, 2, 2).astype(np.float32)
-        width_scale = 2.0
-        height_scale = 2.0
-
-        predict_net = caffe2_pb2.NetDef()
-        predict_net.name = 'test-upsample-net'
-        predict_net.external_input[:] = ['X']
-        predict_net.external_output[:] = ['Y']
-        predict_net.op.extend([
-            core.CreateOperator(
-                'ResizeNearest',
-                inputs=['X'],
-                outputs=['Y'],
-                width_scale=width_scale,
-                height_scale=height_scale,
-            ),
-        ])
-        ws, c2_outputs = c2_native_run_net(
-            init_net=None,
-            predict_net=predict_net,
-            inputs=[X])
-
-        onnx_model = c2_onnx.caffe2_net_to_onnx_model(
-            predict_net=predict_net,
-            value_info={
-                'X': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[X.dtype], X.shape)
-            })
-        onnx_outputs = c2.run_model(onnx_model, inputs=[X])
-        self.assertSameOutputs(c2_outputs, onnx_outputs)
-
     def test_gemm(self):
         # simple
         A = np.random.randn(3, 2).astype(np.float32)
@@ -151,7 +123,7 @@ class TestCaffe2Basic(DownloadingTestCase):
             'Gemm',
             ['A', 'B', 'C'],
             ["Y"],
-            transA=1)
+            transA=True)
         output = c2.run_node(node_def, [A, B, C])
         np.testing.assert_almost_equal(
             output["Y"],
@@ -165,12 +137,12 @@ class TestCaffe2Basic(DownloadingTestCase):
             'Gemm',
             ['A', 'B', 'C'],
             ["Y"],
-            transB=1)
+            transB=True)
         output = c2.run_node(node_def, [A, B, C])
         np.testing.assert_almost_equal(
             output["Y"],
             np.dot(A, np.transpose(B)) + C)
-        # revert B
+        # revert A
         B = np.transpose(B)
 
         # scale
@@ -187,21 +159,8 @@ class TestCaffe2Basic(DownloadingTestCase):
             output["Y"],
             alpha * np.dot(A, B) + beta * C)
 
-        # setup broadcastable C
+        # broadcast
         C = np.random.randn(4).astype(np.float32)
-
-        # broadcast for opset7
-        node_def = make_node(
-            'Gemm',
-            ['A', 'B', 'C'],
-            ["Y"],
-            alpha=alpha,
-            beta=beta)
-        output = c2.run_node(node_def, [A, B, C], opset_version=7)
-        np.testing.assert_almost_equal(
-            output["Y"],
-            alpha * np.dot(A, B) + beta * C)
-        # broadcast for opset3 and 6
         node_def = make_node(
             'Gemm',
             ['A', 'B', 'C'],
@@ -209,217 +168,10 @@ class TestCaffe2Basic(DownloadingTestCase):
             alpha=alpha,
             beta=beta,
             broadcast=1)
-        output = c2.run_node(node_def, [A, B, C], opset_version=6)
+        output = c2.run_node(node_def, [A, B, C])
         np.testing.assert_almost_equal(
             output["Y"],
             alpha * np.dot(A, B) + beta * C)
-
-        # transB
-        B = np.transpose(B)
-
-        # transB and broadcast for opset7
-        node_def = make_node(
-            'Gemm',
-            ['A', 'B', 'C'],
-            ["Y"],
-            alpha=alpha,
-            beta=beta,
-            transB=1)
-        output = c2.run_node(node_def, [A, B, C], opset_version=7)
-        np.testing.assert_almost_equal(
-            output["Y"],
-            alpha * np.dot(A, np.transpose(B)) + beta * C)
-        # transB and broadcast for opset3 and 6
-        node_def = make_node(
-            'Gemm',
-            ['A', 'B', 'C'],
-            ["Y"],
-            alpha=alpha,
-            beta=beta,
-            broadcast=1,
-            transB=1)
-        output = c2.run_node(node_def, [A, B, C], opset_version=6)
-        np.testing.assert_almost_equal(
-            output["Y"],
-            alpha * np.dot(A, np.transpose(B)) + beta * C)
-
-        # revert B
-        B = np.transpose(B)
-        # set a scalar to C
-        C = np.random.randn(1).astype(np.float32)
-
-        # scalar broadcast for opset7
-        node_def = make_node(
-            'Gemm',
-            ['A', 'B', 'C'],
-            ["Y"],
-            alpha=alpha,
-            beta=beta)
-        output = c2.run_node(node_def, [A, B, C], opset_version=7)
-        np.testing.assert_almost_equal(
-            output["Y"],
-            alpha * np.dot(A, B) + beta * C)
-        # scalar broadcast for opset3 and 6
-        node_def = make_node(
-            'Gemm',
-            ['A', 'B', 'C'],
-            ["Y"],
-            alpha=alpha,
-            beta=beta,
-            broadcast=1)
-        output = c2.run_node(node_def, [A, B, C], opset_version=6)
-        np.testing.assert_almost_equal(
-            output["Y"],
-            alpha * np.dot(A, B) + beta * C)
-
-    def test_gemm_conversion(self):
-        node_def = make_node(
-            'Gemm',
-            ['A', 'B', 'C'],
-            ["Y"],
-            alpha=2.,
-            beta=3.)
-        node_def_broadcast = make_node(
-            'Gemm',
-            ['A', 'B', 'C'],
-            ["Y"],
-            alpha=2.,
-            beta=3.,
-            broadcast=1)
-        node_def_transpose_b = make_node(
-            'Gemm',
-            ['A', 'B', 'C'],
-            ["Y"],
-            alpha=2.,
-            beta=3.,
-            transB=1)
-
-        node_def_transpose_b_broadcast = make_node(
-            'Gemm',
-            ['A', 'B', 'C'],
-            ["Y"],
-            alpha=2.,
-            beta=3.,
-            transB=1,
-            broadcast=1)
-
-        backend = C.Caffe2Backend()
-
-        # without broadcast and without shape info, gemm will be
-        # converted to matmul + add
-        _, op_strs = backend.convert_node(node_def.SerializeToString())
-        op_names = []
-        for s in op_strs:
-            op = caffe2_pb2.OperatorDef()
-            op.ParseFromString(s)
-            op_names.append(op.type)
-        self.assertEqual(op_names, ['Scale', 'Scale', 'MatMul', 'Add'])
-
-        # opset7
-        # If C is a 1d tensor, gemm will be converted to FC/FCTransposed
-        _, op_strs = backend.convert_node(node_def_transpose_b.SerializeToString(
-        ), [make_tensor_value_info("C", onnx.TensorProto.FLOAT, (3,)).SerializeToString()],
-        7)
-        op_names = []
-        for s in op_strs:
-            op = caffe2_pb2.OperatorDef()
-            op.ParseFromString(s)
-            op_names.append(op.type)
-        self.assertEqual(op_names, ['Scale', 'Scale', 'FC'])
-
-        _, op_strs = backend.convert_node(node_def.SerializeToString(
-        ), [make_tensor_value_info("C", onnx.TensorProto.FLOAT, (3,)).SerializeToString()],
-        7)
-        op_names = []
-        for s in op_strs:
-            op = caffe2_pb2.OperatorDef()
-            op.ParseFromString(s)
-            op_names.append(op.type)
-        self.assertEqual(op_names, ['Scale', 'Scale', 'FCTransposed'])
-
-        # opset6 without broadcast(C should match A*B's dim)
-        # The gemm will be converted to matmul + add, since the FC requires c
-        # to be 1d tensor.
-        _, op_strs = backend.convert_node(node_def.SerializeToString(
-        ), [make_tensor_value_info("A", onnx.TensorProto.FLOAT, (3,2)).SerializeToString(),
-            make_tensor_value_info("B", onnx.TensorProto.FLOAT, (2,3)).SerializeToString(),
-            make_tensor_value_info("C", onnx.TensorProto.FLOAT, (3,3)).SerializeToString()],
-        6)
-        op_names = []
-        for s in op_strs:
-            op = caffe2_pb2.OperatorDef()
-            op.ParseFromString(s)
-            op_names.append(op.type)
-        self.assertEqual(op_names, ['Scale', 'Scale', 'MatMul', 'Add'])
-
-        # opset6 with broadcast
-        # If C is a 1d tensor, gemm will be converted to FC/FCTransposed
-        _, op_strs = backend.convert_node(node_def_transpose_b_broadcast.SerializeToString(
-        ), [make_tensor_value_info("C", onnx.TensorProto.FLOAT, (3,)).SerializeToString()],
-        6)
-        op_names = []
-        for s in op_strs:
-            op = caffe2_pb2.OperatorDef()
-            op.ParseFromString(s)
-            op_names.append(op.type)
-        self.assertEqual(op_names, ['Scale', 'Scale', 'FC'])
-
-        _, op_strs = backend.convert_node(node_def_broadcast.SerializeToString(
-        ), [make_tensor_value_info("C", onnx.TensorProto.FLOAT, (3,)).SerializeToString()],
-        6)
-        op_names = []
-        for s in op_strs:
-            op = caffe2_pb2.OperatorDef()
-            op.ParseFromString(s)
-            op_names.append(op.type)
-        self.assertEqual(op_names, ['Scale', 'Scale', 'FCTransposed'])
-
-        # opset7
-        # If C is a scalar and B's last dim is 1, gemm will be converted to FC/FCTransposed
-        _, op_strs = backend.convert_node(node_def_transpose_b.SerializeToString(
-        ), [make_tensor_value_info("B", onnx.TensorProto.FLOAT, (1,2)).SerializeToString(),
-            make_tensor_value_info("C", onnx.TensorProto.FLOAT, (1,)).SerializeToString()],
-        7)
-        op_names = []
-        for s in op_strs:
-            op = caffe2_pb2.OperatorDef()
-            op.ParseFromString(s)
-            op_names.append(op.type)
-        self.assertEqual(op_names, ['Scale', 'Scale', 'FC'])
-
-        _, op_strs = backend.convert_node(node_def.SerializeToString(
-        ), [make_tensor_value_info("B", onnx.TensorProto.FLOAT, (2,1)).SerializeToString(),
-            make_tensor_value_info("C", onnx.TensorProto.FLOAT, (1,)).SerializeToString()],
-        7)
-        op_names = []
-        for s in op_strs:
-            op = caffe2_pb2.OperatorDef()
-            op.ParseFromString(s)
-            op_names.append(op.type)
-        self.assertEqual(op_names, ['Scale', 'Scale', 'FCTransposed'])
-        # If C is a scalar and B's last dim is not 1, gemm will be converted
-        # to matmul + add.
-        _, op_strs = backend.convert_node(node_def_transpose_b.SerializeToString(
-        ), [make_tensor_value_info("B", onnx.TensorProto.FLOAT, (2,2)).SerializeToString(),
-            make_tensor_value_info("C", onnx.TensorProto.FLOAT, (1,)).SerializeToString()],
-        7)
-        op_names = []
-        for s in op_strs:
-            op = caffe2_pb2.OperatorDef()
-            op.ParseFromString(s)
-            op_names.append(op.type)
-        self.assertEqual(op_names, ['Scale', 'Scale', 'MatMul', 'Add'])
-        # If C is a scalar and B's shape info is not available,
-        # gemm will be converted to matmul + add.
-        _, op_strs = backend.convert_node(node_def_transpose_b.SerializeToString(
-        ), [make_tensor_value_info("C", onnx.TensorProto.FLOAT, (1,)).SerializeToString()],
-        7)
-        op_names = []
-        for s in op_strs:
-            op = caffe2_pb2.OperatorDef()
-            op.ParseFromString(s)
-            op_names.append(op.type)
-        self.assertEqual(op_names, ['Scale', 'Scale', 'MatMul', 'Add'])
 
     def test_tensor_filling_ops(self):
         for dtype in [
@@ -489,35 +241,6 @@ class TestCaffe2Basic(DownloadingTestCase):
             np.testing.assert_almost_equal(output[0], vals)
             np.testing.assert_almost_equal(ws.FetchBlob(op.output[0]), vals)
 
-    def test_concat(self):
-        I0 = np.random.randn(20, 4).astype(np.float32)
-        I1 = np.random.randn(20, 4).astype(np.float32)
-        for i in range(2):
-            predict_net = caffe2_pb2.NetDef()
-            predict_net.name = 'test-concat-net'
-            predict_net.external_input[:] = ['I0', 'I1']
-            predict_net.external_output[:] = ['Y', 'output_dim']
-            predict_net.op.extend([
-                core.CreateOperator(
-                    'Concat',
-                    inputs=['I0', 'I1'],
-                    outputs=['Y', 'output_dim'],
-                    axis=1,
-                    add_axis=(1 if i == 0 else 0),
-                ),
-            ])
-            ws, c2_outputs = c2_native_run_net(
-                init_net=None,
-                predict_net=predict_net,
-                inputs=[I0, I1])
-            onnx_model = c2_onnx.caffe2_net_to_onnx_model(
-                predict_net=predict_net,
-                value_info={
-                    'I0': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[I0.dtype], I0.shape),
-                    'I1': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[I1.dtype], I1.shape),
-                })
-            onnx_outputs = c2.run_model(onnx_model, inputs=[I0, I1])
-            self.assertSameOutputs(c2_outputs, onnx_outputs)
 
     def test_slice(self):
         X = np.random.randn(1, 2, 3).astype(np.float32)
@@ -581,7 +304,7 @@ class TestCaffe2Basic(DownloadingTestCase):
             self.assertSameOutputs(c2_outputs, onnx_outputs)
 
 
-class TestCaffe2End2End(DownloadingTestCase):
+class TestCaffe2End2End(TestCase):
     def _model_dir(self, model):
         caffe2_home = os.path.expanduser(os.getenv('CAFFE2_HOME', '~/.caffe2'))
         models_dir = os.getenv('ONNX_MODELS', os.path.join(caffe2_home, 'models'))
@@ -613,14 +336,35 @@ class TestCaffe2End2End(DownloadingTestCase):
         _, c2_outputs = c2_native_run_net(c2_init_net, c2_predict_net, inputs)
         del _
 
-        with open(os.path.join(model_dir, 'value_info.json'), 'r') as value_info_conf:
-            model = c2_onnx.caffe2_net_to_onnx_model(
-                predict_net=c2_predict_net,
-                init_net=c2_init_net,
-                value_info=json.load(value_info_conf))
+        model = c2_onnx.caffe2_net_to_onnx_model(
+            predict_net=c2_predict_net,
+            init_net=c2_init_net,
+            value_info=json.load(open(os.path.join(model_dir, 'value_info.json'))))
         c2_ir = c2.prepare(model)
         onnx_outputs = c2_ir.run(inputs)
         self.assertSameOutputs(c2_outputs, onnx_outputs, decimal=decimal)
+
+    def _download(self, model):
+        model_dir = self._model_dir(model)
+        assert not os.path.exists(model_dir)
+        os.makedirs(model_dir)
+        for f in ['predict_net.pb', 'init_net.pb', 'value_info.json']:
+            url = getURLFromName(model, f)
+            dest = os.path.join(model_dir, f)
+            try:
+                try:
+                    downloadFromURLToFile(url, dest,
+                                          show_progress=False)
+                except TypeError:
+                    # show_progress not supported prior to
+                    # Caffe2 78c014e752a374d905ecfb465d44fa16e02a28f1
+                    # (Sep 17, 2017)
+                    downloadFromURLToFile(url, dest)
+            except Exception as e:
+                print("Abort: {reason}".format(reason=e))
+                print("Cleaning up...")
+                deleteDirectory(model_dir)
+                exit(1)
 
     def test_alexnet(self):
         self._test_net('bvlc_alexnet', decimal=4)
@@ -636,9 +380,9 @@ class TestCaffe2End2End(DownloadingTestCase):
 
     @unittest.skipIf(
         os.environ.get('JENKINS_URL'),
-        'Taking too long to download!')
-    def test_zfnet(self):
-        self._test_net('zfnet')
+        'Running vgg19 on Travis with Python 2 keeps getting OOM!')
+    def test_vgg19(self):
+        self._test_net('vgg19')
 
     def test_inception_v1(self):
         self._test_net('inception_v1', decimal=2)

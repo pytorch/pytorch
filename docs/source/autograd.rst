@@ -65,22 +65,13 @@ Variable (deprecated)
 Tensor autograd functions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 .. autoclass:: torch.Tensor
-   :members: grad, requires_grad, is_leaf, backward, detach, detach_, register_hook, retain_grad
+    :members: backward, detach, detach_, register_hook, retain_grad
 
 :hidden:`Function`
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. autoclass:: Function
     :members:
-
-.. _grad-check:
-
-Numerical gradient checking
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-.. autofunction:: gradcheck
-
-.. autofunction:: gradgradcheck
 
 Profiler
 ^^^^^^^^
@@ -98,10 +89,3 @@ and nvprof based (registers both CPU and GPU activity) using
     :members:
 
 .. autofunction:: torch.autograd.profiler.load_nvprof
-
-Anomaly detection
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-.. autoclass:: detect_anomaly
-
-.. autoclass:: set_detect_anomaly

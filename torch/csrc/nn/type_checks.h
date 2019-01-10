@@ -5,7 +5,7 @@
 
 #include <ATen/ATen.h>
 
-#include <torch/csrc/autograd/python_variable.h>
+#include "torch/csrc/autograd/python_variable.h"
 
 namespace torch { namespace nn {
 
@@ -18,7 +18,7 @@ inline bool check_type(PyObject* obj, at::TypeID typeID) {
 
 template<typename T>
 inline T* unpack(PyObject* obj) {
-  return (T*) ((THPVariable*)obj)->cdata.data().unsafeGetTensorImpl();
+  return (T*) ((THPVariable*)obj)->cdata.data().unsafeGetTH(false);
 }
 
 }} // namespace torch::nn
@@ -28,7 +28,7 @@ static inline int get_device(PyObject* args) {
     PyObject* arg = PyTuple_GET_ITEM(args, i);
     if (THPVariable_Check(arg)) {
       auto& tensor = THPVariable_UnpackData(arg);
-      if (tensor.is_cuda()) {
+      if (tensor.type().is_cuda()) {
         return tensor.get_device();
       }
     }
@@ -68,7 +68,7 @@ static inline THIntTensor* THNN_IntTensor_Unpack(PyObject* obj) {
   return torch::nn::unpack<THIntTensor>(obj);
 }
 
-#ifdef USE_CUDA
+#ifdef WITH_CUDA
 
 static inline bool THNN_CudaHalfTensor_Check(PyObject* obj) {
   return torch::nn::check_type(obj, at::TypeID::CUDAHalf);
@@ -102,4 +102,4 @@ static inline THCudaLongTensor* THNN_CudaLongTensor_Unpack(PyObject* obj) {
   return torch::nn::unpack<THCudaLongTensor>(obj);
 }
 
-#endif  // USE_CUDA
+#endif  // WITH_CUDA

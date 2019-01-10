@@ -2,6 +2,7 @@
 #define CAFFE2_VIDEO_VIDEO_IO_H_
 
 #include <caffe2/core/common.h>
+#include <caffe/proto/caffe.pb.h>
 #include <caffe2/video/optical_flow.h>
 #include <caffe2/video/video_decoder.h>
 #include <opencv2/opencv.hpp>
@@ -12,7 +13,7 @@
 
 namespace caffe2 {
 
-CAFFE2_API void ClipTransformRGB(
+void ClipTransformRGB(
     const unsigned char* buffer_rgb,
     const int multi_crop_count,
     const int crop_height,
@@ -40,7 +41,7 @@ CAFFE2_API void ClipTransformRGB(
     std::mt19937* randgen,
     float* transformed_clip);
 
-CAFFE2_API void ClipTransformOpticalFlow(
+void ClipTransformOpticalFlow(
     const unsigned char* buffer_rgb,
     const int crop_height,
     const int crop_width,
@@ -60,10 +61,9 @@ CAFFE2_API void ClipTransformOpticalFlow(
     const std::vector<float>& inv_std_of,
     float* transformed_clip);
 
-CAFFE2_API void FreeDecodedData(
-    std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames);
+void FreeDecodedData(std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames);
 
-CAFFE2_API bool DecodeMultipleClipsFromVideo(
+bool DecodeMultipleClipsFromVideo(
     const char* video_buffer,
     const std::string& video_filename,
     const int encoded_size,

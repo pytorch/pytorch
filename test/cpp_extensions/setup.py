@@ -1,15 +1,12 @@
-import sys
 import torch.cuda
 from setuptools import setup
-from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtension
+from torch.utils.cpp_extension import CppExtension, CUDAExtension
 from torch.utils.cpp_extension import CUDA_HOME
-
-CXX_FLAGS = [] if sys.platform == 'win32' else ['-g', '-Werror']
 
 ext_modules = [
     CppExtension(
         'torch_test_cpp_extension.cpp', ['extension.cpp'],
-        extra_compile_args=CXX_FLAGS),
+        extra_compile_args=['-g']),
 ]
 
 if torch.cuda.is_available() and CUDA_HOME is not None:
@@ -19,7 +16,7 @@ if torch.cuda.is_available() and CUDA_HOME is not None:
             'cuda_extension_kernel.cu',
             'cuda_extension_kernel2.cu',
         ],
-        extra_compile_args={'cxx': CXX_FLAGS,
+        extra_compile_args={'cxx': ['-g'],
                             'nvcc': ['-O2']})
     ext_modules.append(extension)
 
@@ -27,4 +24,4 @@ setup(
     name='torch_test_cpp_extension',
     packages=['torch_test_cpp_extension'],
     ext_modules=ext_modules,
-    cmdclass={'build_ext': BuildExtension})
+    cmdclass={'build_ext': torch.utils.cpp_extension.BuildExtension})

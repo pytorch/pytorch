@@ -1,4 +1,0 @@
-def graph(self,
-    y: Tensor) -> int:
-  x = annotate(List[int], [])
-  return torch.select(x, 0)

@@ -2,7 +2,7 @@
 
 #include <functional>
 #include <vector>
-#include <torch/csrc/Types.h>
+#include "Types.h"
 
 typedef std::function<void(PyObject*, PyObject*, bool)> THPCopyFunction;
 struct THPCopyInfo {
@@ -15,9 +15,9 @@ typedef std::vector<THPCopyInfo> THPCopyList;
 
 inline bool tryTHPCopy(const THPCopyList& v, PyObject* dst, PyObject* src, bool non_blocking, bool broadcast)
 {
-  for (auto& i : v) {
-    if (i.non_blocking == non_blocking && PyType_IsSubtype(Py_TYPE(src), i.srcType)) {
-      (i.copy)(dst, src, broadcast);
+  for (auto it = v.begin(); it != v.end(); ++it) {
+    if (it->non_blocking == non_blocking && PyType_IsSubtype(Py_TYPE(src), it->srcType)) {
+      (it->copy)(dst, src, broadcast);
       return true;
     }
   }
@@ -40,32 +40,31 @@ inline PyObject * THPStorageCopyMethod(const THPCopyList& v, PyObject *self, PyO
 {
   PyObject *src;
   int non_blocking = 0;
-  static char *kwlist[] = {"source", "non_blocking", nullptr};
+  static char *kwlist[] = {"source", "non_blocking", NULL};
   // use int as parse type because bool not available in python2.
   if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|i:copy_", kwlist, &src, &non_blocking)) {
-    return nullptr;
+    return NULL;
   }
 
   if (!THPCopy(v, self, src, non_blocking, false)) {
-    return nullptr;
+    return NULL;
   }
 
   Py_INCREF(self);
   return self;
 }
 
-template <typename THPStorageDst, typename THPStorageSrc, typename StorageDst, typename StorageSrc>
+template <typename StorageDst, typename StorageSrc>
 void THPInsertStorageCopyFunction(
-  PyTypeObject *srcType,
   THPCopyList& copyList,
   void (*copyFunc)(LIBRARY_STATE_TYPE StorageDst* x, StorageSrc* z),
   bool non_blocking=false)
 {
   auto wrapper = [copyFunc](PyObject* dst_, PyObject* src_, bool broadcast) {
-    auto dst = ((THPStorageDst*)dst_)->cdata;
-    auto src = ((THPStorageSrc*)src_)->cdata;
+    StorageDst* dst = THPTypeInfo<StorageDst>::cdata(dst_);
+    StorageSrc* src = THPTypeInfo<StorageSrc>::cdata(src_);
 
-    PyThreadState *_save = nullptr;
+    PyThreadState *_save = NULL;
     try {
       Py_UNBLOCK_THREADS;
       copyFunc(LIBRARY_STATE dst, src);
@@ -78,5 +77,6 @@ void THPInsertStorageCopyFunction(
     }
   };
 
+  PyTypeObject* srcType = THPTypeInfo<StorageSrc>::pyType();
   copyList.push_back({ srcType, wrapper, non_blocking, false });
 }

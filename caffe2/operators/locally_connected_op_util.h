@@ -15,8 +15,7 @@ struct ShapeParams {
   int input_image_size;
   int output_image_size;
   int kernel_size;
-  std::vector<int> X_dims;
-  std::vector<int> column_slice_dims;
+  std::vector<int> input_image_dims;
   std::vector<int> column_dims;
   std::vector<int> column_transposed_dims;
   std::vector<int> column_axes;
@@ -35,18 +34,16 @@ struct CUDAConvNetShapeParams {
   int Y_W;
 };
 
-CAFFE2_API void SetColumnBufferShape(
+void SetColumnBufferShape(
     int N,
     int kernel_dim,
     int output_image_size,
-    const std::vector<int>& output_image_dims,
     StorageOrder order,
-    std::vector<int>* column_slice_dims,
     std::vector<int>* column_dims,
     std::vector<int>* column_transposed_dims,
     std::vector<int>* column_axes);
 
-CAFFE2_API void SetYBufferShape(
+void SetYBufferShape(
     int N,
     int M,
     int output_image_size,

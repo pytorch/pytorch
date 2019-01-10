@@ -1,7 +1,5 @@
 #pragma once
 
-// ${generated_comment}
-
 namespace at {
 
 class Context;

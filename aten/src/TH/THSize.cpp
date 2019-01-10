@@ -1,4 +1,4 @@
-#include <TH/THSize.h>
+#include "THSize.h"
 
 int THSize_isSameSizeAs(const int64_t *sizeA, int64_t dimsA, const int64_t *sizeB, int64_t dimsB) {
   int d;

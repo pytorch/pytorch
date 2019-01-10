@@ -1,4 +1,4 @@
-#include <THC/THCSortUtils.cuh>
+#include "THCSortUtils.cuh"
 
 // Returns 2^(ceil(lg(n)) from Stanford bit twiddling hacks
 uint64_t nextHighestPowerOf2(uint64_t n) {

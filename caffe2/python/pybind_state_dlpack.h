@@ -3,7 +3,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/types.h"
-#include "caffe2/proto/caffe2_pb.h"
+#include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/python/dlpack.h"
 
 #include <pybind11/pybind11.h>
@@ -20,11 +20,10 @@ const DLDataType* CaffeToDLType(const TypeMeta& meta);
 
 const TypeMeta& DLTypeToCaffe(const DLDataType& dl_type);
 
-// TODO: remove context
 template <class Context>
 class DLPackWrapper {
  public:
-  DLPackWrapper(Tensor* tensor, DeviceOption device_option)
+  DLPackWrapper(Tensor<Context>* tensor, DeviceOption device_option)
       : tensor(tensor), device_option(device_option) {}
 
   py::object data() {
@@ -35,37 +34,37 @@ class DLPackWrapper {
         "Unsupported device type: ",
         device_option.device_type());
     tensor_context.device_type = *device_type_ptr;
-    tensor_context.device_id = device_option.device_id();
+    tensor_context.device_id = device_option.cuda_gpu_id();
 
-    if (tensor->numel() <= 0) {
+    if (tensor->size() <= 0) {
       tensor->Resize(0);
     }
-    if (tensor->dtype().id() == TypeIdentifier::uninitialized()) {
+    if (tensor->meta().id() == 0) {
       // treat uninitialized tensor as float tensor
       tensor->template mutable_data<float>();
     }
-    CAFFE_ENFORCE_GT(tensor->dim(), 0);
+    CAFFE_ENFORCE_GT(tensor->ndim(), 0);
 
-    auto type_ptr = CaffeToDLType(tensor->dtype());
+    auto type_ptr = CaffeToDLType(tensor->meta());
     CAFFE_ENFORCE(
         type_ptr,
         "Tensor type is not supported in DLPack: ",
-        tensor->dtype().name());
+        tensor->meta().name());
     DLDataType tensor_type = *type_ptr;
 
     DLTensor dlTensor;
     dlTensor.data = const_cast<void*>(tensor->raw_data());
     dlTensor.ctx = tensor_context;
-    dlTensor.ndim = tensor->dim();
+    dlTensor.ndim = tensor->ndim();
     dlTensor.dtype = tensor_type;
-    dlTensor.shape = const_cast<int64_t*>(&(tensor->sizes()[0]));
+    dlTensor.shape = const_cast<int64_t*>(&(tensor->dims()[0]));
     dlTensor.strides = nullptr;
     dlTensor.byte_offset = 0;
 
-    managed_tensor.dl_tensor = dlTensor;
+    managed_tensor.dlTensor = dlTensor;
     // C2 Tensor memory is managed by C2
-    managed_tensor.manager_ctx = nullptr;
-    managed_tensor.deleter= [](DLManagedTensor*) {};
+    managed_tensor.ctx = nullptr;
+    managed_tensor.destructor = [](DLManagedTensor*) {};
 
     return py::reinterpret_steal<py::object>(
         PyCapsule_New(&managed_tensor, "dltensor", nullptr));
@@ -76,7 +75,7 @@ class DLPackWrapper {
     DLManagedTensor* dlMTensor =
         (DLManagedTensor*)PyCapsule_GetPointer(obj.ptr(), "dltensor");
     CAFFE_ENFORCE(dlMTensor, "Invalid DLPack capsule");
-    DLTensor* dlTensor = &dlMTensor->dl_tensor;
+    DLTensor* dlTensor = &dlMTensor->dlTensor;
     auto device_type_ptr = CaffeToDLDeviceType(device_option.device_type());
     CAFFE_ENFORCE(
         device_type_ptr,
@@ -88,10 +87,10 @@ class DLPackWrapper {
     int dlpack_device_id = dlTensor->ctx.device_id;
     CAFFE_ENFORCE_EQ(
         dlpack_device_id,
-        device_option.device_id(),
+        device_option.cuda_gpu_id(),
         "Expected same device id for DLPack and C2 tensors");
 
-    std::vector<int64_t> dims;
+    std::vector<TIndex> dims;
     dims.reserve(dlTensor->ndim);
     for (int idx = 0; idx < dlTensor->ndim; ++idx) {
       dims.push_back(dlTensor->shape[idx]);
@@ -109,24 +108,19 @@ class DLPackWrapper {
     }
 
     tensor->Resize(dims);
-    caffe2::TypeMeta meta = DLTypeToCaffe(dlTensor->dtype);
-    at::Device device = at::Device(tensor->GetDeviceType());
+    const auto& meta = DLTypeToCaffe(dlTensor->dtype);
     tensor->ShareExternalPointer(
-        at::DataPtr(
-            (void*)(((int8_t*)dlTensor->data) + dlTensor->byte_offset),
-            static_cast<void*>(dlMTensor),
-            [](void* t_ptr) -> void {
-              DLManagedTensor* mt_ptr = static_cast<DLManagedTensor*>(t_ptr);
-              if (mt_ptr->deleter) {
-                mt_ptr->deleter(mt_ptr);
-              }
-            },
-            device),
+        ((int8_t*)dlTensor->data) + dlTensor->byte_offset,
         meta,
-        0);
+        0,
+        [dlMTensor](void*) {
+          if (dlMTensor->destructor) {
+            dlMTensor->destructor(dlMTensor);
+          }
+        });
   }
 
-  Tensor* tensor;
+  Tensor<Context>* tensor;
   DeviceOption device_option;
   DLManagedTensor managed_tensor;
 };

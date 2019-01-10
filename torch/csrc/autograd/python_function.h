@@ -1,19 +1,16 @@
 #pragma once
 
-#include <torch/csrc/python_headers.h>
-
-#include <torch/csrc/Exceptions.h>
-#include <torch/csrc/autograd/function.h>
-#include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/autograd/saved_variable.h>
-#include <torch/csrc/utils/object_ptr.h>
-
-#include <c10/util/Optional.h>
-#include <c10/DeviceGuard.h>
-
+#include "torch/csrc/python_headers.h"
 #include <vector>
 #include <utility>
 #include <memory>
+
+#include "torch/csrc/Exceptions.h"
+#include "torch/csrc/autograd/function.h"
+#include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/autograd/saved_variable.h"
+#include "torch/csrc/utils/object_ptr.h"
+
 
 namespace torch { namespace jit { struct Graph; }}
 namespace torch { namespace autograd {
@@ -21,10 +18,10 @@ namespace torch { namespace autograd {
 struct VariableInfo {
   explicit VariableInfo(const Variable& var);
 
-  Variable zeros(at::OptionalDeviceGuard& device_guard) const;
+  Variable zeros(AutoGPU& gpu_guard) const;
 
   at::Type* type;
-  at::Device device = at::kCPU;
+  int device;
   std::vector<int64_t> size;
   bool requires_grad;
 };
@@ -34,13 +31,13 @@ struct VariableInfo {
 struct PyFunction : public Function {
   PyFunction(PyObject* obj) : obj(obj) {}
 
-  variable_list apply(variable_list&& inputs) override;
+  virtual variable_list apply(const variable_list& inputs) override;
   variable_list legacy_apply(const variable_list& inputs);
 
-  void release_variables() override;
-  std::string name() const override;
-  std::shared_ptr<Function> get_shared_ptr() override;
-  bool is_traceable() override;
+  virtual void release_variables() override;
+  virtual std::string name() override;
+  virtual std::shared_ptr<Function> get_shared_ptr() override;
+  virtual bool is_traceable() override;
 
   // THPFunction this Function is wrapping.
   PyObject* obj;
@@ -87,6 +84,7 @@ struct THPFunction {
     // For each input, true if the input is a THPVariable
     std::vector<bool> is_variable_input;
     char has_freed_buffers;
+    char is_traced;
 
     // The C++ wrapper for this Python function.
     // See a comment in THPFunction_asFunction for details about this field.

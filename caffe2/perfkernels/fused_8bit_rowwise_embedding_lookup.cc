@@ -4,7 +4,6 @@
 #include "caffe2/perfkernels/common.h"
 #include "caffe2/perfkernels/typed_axpy.h"
 #include "caffe2/utils/cpuid.h"
-#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -16,10 +15,10 @@ template <
     typename OutType,
     bool IS_WEIGHT_POSITIONAL = false>
 static void Fused8BitRowwiseEmbeddingLookupGenericSlow(
-    const int64_t block_size,
-    const int64_t output_size,
-    const int64_t index_size,
-    const int64_t data_size,
+    const TIndex block_size,
+    const TIndex output_size,
+    const TIndex index_size,
+    const TIndex data_size,
     const InType* input,
     const IndexType* indices,
     const int* lengths,
@@ -29,14 +28,14 @@ static void Fused8BitRowwiseEmbeddingLookupGenericSlow(
   // block_size is the number of elements and fused_block_size is the size of
   // an entire row, including scale and bias.
   const auto scale_bias_offset = 8 / sizeof(InType);
-  const int64_t fused_block_size = block_size + scale_bias_offset;
-  int64_t current = 0;
+  const TIndex fused_block_size = block_size + scale_bias_offset;
+  TIndex current = 0;
   for (int m = 0; m < output_size; ++m) {
     memset(out, 0, sizeof(OutType) * block_size);
     EigenVectorArrayMap<OutType> out_vector(out, block_size);
     for (int i = 0; i < lengths[m]; ++i) {
       CAFFE_ENFORCE_LT(current, index_size);
-      int64_t idx = indices[current];
+      TIndex idx = indices[current];
       CAFFE_ENFORCE(
           0 <= idx && idx < data_size,
           "Index ",
@@ -72,7 +71,7 @@ static void Fused8BitRowwiseEmbeddingLookupGenericSlow(
     }
     if (normalize_by_lengths && lengths[m]) {
       // hack: context is not really used
-      math::Scale<float, OutType, CPUContext>(
+      math::Scale<OutType, CPUContext>(
           block_size, 1.f / lengths[m], out, out, nullptr);
     }
     out += block_size;
@@ -89,10 +88,10 @@ static void Fused8BitRowwiseEmbeddingLookupGenericSlow(
     IndexType, InType, OutType)                                                         \
   void                                                                                  \
       Fused8BitRowwiseEmbeddingLookup_##IndexType##_##InType##_##OutType##_false__base( \
-          const int64_t block_size,                                                      \
-          const int64_t output_size,                                                     \
-          const int64_t index_size,                                                      \
-          const int64_t data_size,                                                       \
+          const TIndex block_size,                                                      \
+          const TIndex output_size,                                                     \
+          const TIndex index_size,                                                      \
+          const TIndex data_size,                                                       \
           const InType* input,                                                          \
           const IndexType* indices,                                                     \
           const int* lengths,                                                           \
@@ -117,10 +116,10 @@ static void Fused8BitRowwiseEmbeddingLookupGenericSlow(
   }                                                                                     \
   template <>                                                                           \
   void Fused8BitRowwiseEmbeddingLookup<IndexType, InType, OutType, false>(              \
-      const int64_t block_size,                                                          \
-      const int64_t output_size,                                                         \
-      const int64_t index_size,                                                          \
-      const int64_t data_size,                                                           \
+      const TIndex block_size,                                                          \
+      const TIndex output_size,                                                         \
+      const TIndex index_size,                                                          \
+      const TIndex data_size,                                                           \
       const InType* input,                                                              \
       const IndexType* indices,                                                         \
       const int* lengths,                                                               \

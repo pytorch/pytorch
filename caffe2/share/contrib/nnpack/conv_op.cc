@@ -11,9 +11,10 @@
 #include "caffe2/operators/conv_pool_op_base.h"
 
 #include "caffe2/utils/math.h"
+#include "caffe2/utils/threadpool/pthreadpool_impl.h"
 #include "nnpack.h"
 
-C10_DEFINE_bool(caffe2_profile_nnpack, false, "");
+CAFFE2_DEFINE_bool(caffe2_profile_nnpack, false, "");
 namespace caffe2 {
 
 void initNNPACK() {
@@ -34,8 +35,8 @@ class NNPACKConvOp final : public ConvPoolOpBase<CPUContext> {
   NNPACKConvOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<CPUContext>(operator_def, ws),
         algorithm_(getConvolutionAlgorithm()),
-        activation_(getActivationType()),
         transformStrategy_(getConvolutionTransformStrategy()),
+        activation_(getActivationType()),
         ws_(ws) {
     OPERATOR_NEEDS_FEATURE(
         this->order_ == StorageOrder::NCHW,
@@ -195,9 +196,9 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
   const nnp_size output_subsample = {.width = static_cast<size_t>(stride_w()),
                                      .height = static_cast<size_t>(stride_h())};
   initNNPACK();
-  pthreadpool_t pool = reinterpret_cast<pthreadpool_t>(ws_->GetThreadPool());
+  pthreadpool pool(ws_->GetThreadPool());
 
-  runWithSharedBuffer<CPUContext>(ws_, [&](Tensor* buffer) {
+  runWithSharedBuffer<CPUContext>(ws_, [&](Tensor<CPUContext>* buffer) {
     if (transformStrategy_ == nnp_convolution_transform_strategy_precompute) {
       transformedFilters_.resize(group_);
 
@@ -219,7 +220,7 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
           &transformedFilterSize,
           nnp_activation_identity,
           nullptr /* activation parameter */,
-          pool,
+          &pool,
           nullptr /* profile */);
       if (status == nnp_status_success) {
         /* For these convolution parameters filter transforms can be
@@ -231,12 +232,11 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
             (transformedFilterSize + sizeof(float) - 1) / sizeof(float);
 
         for (auto g = 0; g < group_; g++) {
-          transformedFilters_[g] = BlobGetMutableTensor(
+          transformedFilters_[g] =
               ws_->CreateBlob(
-                  "__transformed_kernel_" +
-                  to_string(
-                      __sync_fetch_and_add(&precomputed_transform_id, 1))),
-              CPU);
+                     "__transformed_kernel_" +
+                     to_string(__sync_fetch_and_add(&precomputed_transform_id, 1)))
+                  ->GetMutable<TensorCPU>();
           transformedFilters_[g]->Resize(transformedFilterElements);
 
           status = nnp_convolution_inference(
@@ -257,7 +257,7 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
               &transformedFilterSize,
               nnp_activation_identity,
               nullptr /* activation parameter */,
-              pool,
+              &pool,
               nullptr /* profile */);
           CAFFE_ENFORCE(
               nnp_status_success == status,
@@ -320,7 +320,7 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
             &workspaceSize,
             activation_,
             nullptr /* activation parameter */,
-            pool,
+            &pool,
             FLAGS_caffe2_profile_nnpack ? &profile : nullptr);
         if (status == nnp_status_insufficient_buffer) {
           /* Query required workspace size, increase buffer, and try again */
@@ -341,7 +341,7 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
               &workspaceSize,
               activation_,
               nullptr /* activation parameter */,
-              pool,
+              &pool,
               nullptr /* profile */);
           if (status == nnp_status_success) {
             /* Division with rounding up, in case size is not multiple of
@@ -374,7 +374,7 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
                 &workspaceSize,
                 activation_,
                 nullptr /* activation parameter */,
-                pool,
+                &pool,
                 FLAGS_caffe2_profile_nnpack ? &profile : nullptr);
           }
         }

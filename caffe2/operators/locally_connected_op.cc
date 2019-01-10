@@ -26,15 +26,14 @@ std::function<void(OpSchema&)> LCDocGenerator(const char* dim) {
     string doc = R"DOC(
 The locally connected operator consumes an input vector, a {dim}filter blob
 and a bias blob and computes the output. {lc_doc})DOC";
-    c10::ReplaceAll(doc, "{dim}", dim);
-    c10::ReplaceAll(doc, "{lc_doc}", kLCDoc);
+    ReplaceAll(doc, "{dim}", dim);
+    ReplaceAll(doc, "{lc_doc}", kLCDoc);
     schema.SetDoc(doc);
     schema.Input(
         1,
         "filter",
         "The filter blob that will be used in the locally connected op; "
-        "has size (YH * YW * M x C x kH x kW) if order == NCHW else "
-        "(YH * YW * M  * KH * KW * C), where YH and YW are the height "
+        "has size (YH * YW * M x C x kH x kW), where YH and YW are the height "
         "and width of the output image, C is the number of channels, and kH "
         "and kW are the height and width of the kernel.");
     schema.Input(
@@ -59,7 +58,7 @@ REGISTER_CPU_OPERATOR(LC, LocallyConnectedOp<float, CPUContext>);
 OPERATOR_SCHEMA(LC)
     .NumInputs(2, 3)
     .NumOutputs(1)
-    .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForLC)
+    .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForConv)
     .FillUsing(LCDocGenerator(""));
 
 REGISTER_CPU_OPERATOR(LC1D, LocallyConnectedOp<float, CPUContext>);
@@ -67,7 +66,7 @@ REGISTER_CPU_OPERATOR(LC1D, LocallyConnectedOp<float, CPUContext>);
 OPERATOR_SCHEMA(LC1D)
     .NumInputs(2, 3)
     .NumOutputs(1)
-    .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForLC)
+    .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForConv)
     .FillUsing(LCDocGenerator("1D "));
 
 REGISTER_CPU_OPERATOR(LC2D, LocallyConnectedOp<float, CPUContext>);
@@ -75,7 +74,7 @@ REGISTER_CPU_OPERATOR(LC2D, LocallyConnectedOp<float, CPUContext>);
 OPERATOR_SCHEMA(LC2D)
     .NumInputs(2, 3)
     .NumOutputs(1)
-    .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForLC)
+    .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForConv)
     .FillUsing(LCDocGenerator("2D "));
 
 REGISTER_CPU_OPERATOR(LC3D, LocallyConnectedOp<float, CPUContext>);
@@ -83,7 +82,7 @@ REGISTER_CPU_OPERATOR(LC3D, LocallyConnectedOp<float, CPUContext>);
 OPERATOR_SCHEMA(LC3D)
     .NumInputs(2, 3)
     .NumOutputs(1)
-    .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForLC)
+    .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForConv)
     .FillUsing(LCDocGenerator("3D "));
 
 REGISTER_CPU_OPERATOR(

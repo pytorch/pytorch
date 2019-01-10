@@ -2,7 +2,7 @@
 #include <cmath>
 #include <vector>
 #include "caffe2/core/context_gpu.h"
-#include "caffe2/operators/lstm_unit_op.h"
+#include "lstm_unit_op.h"
 
 namespace caffe2 {
 
@@ -141,20 +141,20 @@ void LSTMUnit<float, CUDAContext>(
 }
 
 template <>
-void LSTMUnit<at::Half, CUDAContext>(
+void LSTMUnit<float16, CUDAContext>(
     int N,
     int D,
     int t,
-    const at::Half* H_prev,
-    const at::Half* C_prev,
-    const at::Half* X,
+    const float16* H_prev,
+    const float16* C_prev,
+    const float16* X,
     const int32_t* seqLengths,
     bool drop_states,
-    at::Half* C,
-    at::Half* H,
+    float16* C,
+    float16* H,
     const float forget_bias,
     CUDAContext* context) {
-  LSTMUnitKernel<at::Half, float><<<
+  LSTMUnitKernel<float16, float><<<
       CAFFE_GET_BLOCKS(N * D),
       CAFFE_CUDA_NUM_THREADS,
       0,
@@ -213,24 +213,24 @@ void LSTMUnitGradient<float, CUDAContext>(
 }
 
 template <>
-void LSTMUnitGradient<at::Half, CUDAContext>(
+void LSTMUnitGradient<float16, CUDAContext>(
     int N,
     int D,
     int t,
-    const at::Half* C_prev,
-    const at::Half* X,
+    const float16* C_prev,
+    const float16* X,
     const int32_t* seqLengths,
-    const at::Half* C,
-    const at::Half* H,
-    const at::Half* C_diff,
-    const at::Half* H_diff,
+    const float16* C,
+    const float16* H,
+    const float16* C_diff,
+    const float16* H_diff,
     bool drop_states,
-    at::Half* H_prev_diff,
-    at::Half* C_prev_diff,
-    at::Half* X_diff,
+    float16* H_prev_diff,
+    float16* C_prev_diff,
+    float16* X_diff,
     const float forget_bias,
     CUDAContext* context) {
-  LSTMUnitGradientKernel<at::Half, float><<<
+  LSTMUnitGradientKernel<float16, float><<<
       CAFFE_GET_BLOCKS(N * D),
       CAFFE_CUDA_NUM_THREADS,
       0,
@@ -255,12 +255,12 @@ void LSTMUnitGradient<at::Half, CUDAContext>(
 
 template <>
 bool LSTMUnitOp<CUDAContext>::RunOnDevice() {
-  return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
+  return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
 }
 
 template <>
 bool LSTMUnitGradientOp<CUDAContext>::RunOnDevice() {
-  return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
+  return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
 }
 
 REGISTER_CUDA_OPERATOR(LSTMUnit, LSTMUnitOp<CUDAContext>);

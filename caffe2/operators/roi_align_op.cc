@@ -3,6 +3,10 @@
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
+#ifdef CAFFE2_USE_MKL
+#include "caffe2/mkl/operators/operator_fallback_mkl.h"
+#endif // CAFFE2_USE_MKL
+
 namespace caffe2 {
 namespace {
 
@@ -132,10 +136,9 @@ void ROIAlignForward(
   DCHECK(roi_cols == 4 || roi_cols == 5);
 
   int n_rois = nthreads / channels / pooled_width / pooled_height;
-
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
+  // (n, c, ph, pw) is an element in the pooled output
+  // can be parallelized using omp
+  // #pragma omp parallel for num_threads(32)
   for (int n = 0; n < n_rois; n++) {
     int index_n = n * channels * pooled_width * pooled_height;
 
@@ -269,32 +272,29 @@ template <>
 bool RoIAlignOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0); // Input data to pool, NCHW
   auto& R = Input(1); // RoIs
+  auto* Y = Output(0); // RoI pooled data
 
-  if (R.numel() == 0) {
-    std::vector<int64_t> sizes;
+  if (R.size() == 0) {
     // Handle empty rois
     if (order_ == StorageOrder::NCHW) {
-      sizes = {0, X.dim32(1), pooled_height_, pooled_width_};
+      Y->Resize(0, X.dim32(1), pooled_height_, pooled_width_);
     } else if (order_ == StorageOrder::NHWC) {
-      sizes = {0, pooled_height_, pooled_width_, X.dim32(3)};
+      Y->Resize(0, pooled_height_, pooled_width_, X.dim32(3));
     }
-    // Output Tensor is inititalized with proper sizes and data type
-    Output(0, sizes, at::dtype<float>());
+    // The following mutable_data calls are needed to allocate the tensors
+    Y->mutable_data<float>();
     return true;
   }
 
-  CAFFE_ENFORCE_EQ(R.dim(), 2);
+  CAFFE_ENFORCE_EQ(R.ndim(), 2);
   // if R has 5 columns, the first column is the index, otherwise 0
   CAFFE_ENFORCE(R.dim32(1) == 4 || R.dim32(1) == 5);
 
   assert(sampling_ratio_ >= 0);
 
   if (order_ == StorageOrder::NCHW) {
-    auto* Y = Output(
-        0,
-        {R.dim32(0), X.dim32(1), pooled_height_, pooled_width_},
-        at::dtype<float>());  // RoI pooled data
-    int output_size = Y->numel();
+    Y->Resize(R.dim32(0), X.dim32(1), pooled_height_, pooled_width_);
+    int output_size = Y->size();
     ROIAlignForward<float>(
         output_size,
         X.data<float>(),
@@ -307,14 +307,11 @@ bool RoIAlignOp<float, CPUContext>::RunOnDevice() {
         sampling_ratio_,
         R.data<float>(),
         R.dim32(1),
-        Y->template mutable_data<float>(),
+        Y->mutable_data<float>(),
         order_);
   } else if (order_ == StorageOrder::NHWC) {
-    auto* Y = Output(
-        0,
-        {R.dim32(0), pooled_height_, pooled_width_, X.dim32(3)},
-        at::dtype<float>());  // RoI pooled data
-    int output_size = Y->numel();
+    Y->Resize(R.dim32(0), pooled_height_, pooled_width_, X.dim32(3));
+    int output_size = Y->size();
     ROIAlignForward<float>(
         output_size,
         X.data<float>(),
@@ -327,7 +324,7 @@ bool RoIAlignOp<float, CPUContext>::RunOnDevice() {
         sampling_ratio_,
         R.data<float>(),
         R.dim32(1),
-        Y->template mutable_data<float>(),
+        Y->mutable_data<float>(),
         order_);
   }
 
@@ -335,6 +332,12 @@ bool RoIAlignOp<float, CPUContext>::RunOnDevice() {
 }
 
 REGISTER_CPU_OPERATOR(RoIAlign, RoIAlignOp<float, CPUContext>);
+
+#ifdef CAFFE2_HAS_MKL_DNN
+REGISTER_MKL_OPERATOR(
+    RoIAlign,
+    mkl::MKLFallbackOp<RoIAlignOp<float, CPUContext>>);
+#endif // CAFFE2_HAS_MKL_DNN
 
 // Input: X, rois; Output: Y
 OPERATOR_SCHEMA(RoIAlign)

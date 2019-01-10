@@ -3,9 +3,9 @@
 
 #include <mutex>
 
-#include "c10/util/Registry.h"
 #include "caffe2/core/blob_serialization.h"
-#include "caffe2/proto/caffe2_pb.h"
+#include "caffe2/core/registry.h"
+#include "caffe2/proto/caffe2.pb.h"
 
 namespace caffe2 {
 namespace db {
@@ -19,7 +19,7 @@ enum Mode { READ, WRITE, NEW };
 /**
  * An abstract class for the cursor of the database while reading.
  */
-class CAFFE2_API Cursor {
+class Cursor {
  public:
   Cursor() { }
   virtual ~Cursor() { }
@@ -52,13 +52,13 @@ class CAFFE2_API Cursor {
    */
   virtual bool Valid() = 0;
 
-  C10_DISABLE_COPY_AND_ASSIGN(Cursor);
+  DISABLE_COPY_AND_ASSIGN(Cursor);
 };
 
 /**
  * An abstract class for the current database transaction while writing.
  */
-class CAFFE2_API Transaction {
+class Transaction {
  public:
   Transaction() { }
   virtual ~Transaction() { }
@@ -71,13 +71,13 @@ class CAFFE2_API Transaction {
    */
   virtual void Commit() = 0;
 
-  C10_DISABLE_COPY_AND_ASSIGN(Transaction);
+  DISABLE_COPY_AND_ASSIGN(Transaction);
 };
 
 /**
  * An abstract class for accessing a database of key-value pairs.
  */
-class CAFFE2_API DB {
+class DB {
  public:
   DB(const string& /*source*/, Mode mode) : mode_(mode) {}
   virtual ~DB() { }
@@ -99,14 +99,14 @@ class CAFFE2_API DB {
  protected:
   Mode mode_;
 
-  C10_DISABLE_COPY_AND_ASSIGN(DB);
+  DISABLE_COPY_AND_ASSIGN(DB);
 };
 
 // Database classes are registered by their names so we can do optional
 // dependencies.
-C10_DECLARE_REGISTRY(Caffe2DBRegistry, DB, const string&, Mode);
+CAFFE_DECLARE_REGISTRY(Caffe2DBRegistry, DB, const string&, Mode);
 #define REGISTER_CAFFE2_DB(name, ...) \
-  C10_REGISTER_CLASS(Caffe2DBRegistry, name, __VA_ARGS__)
+  CAFFE_REGISTER_CLASS(Caffe2DBRegistry, name, __VA_ARGS__)
 
 /**
  * Returns a database object of the given database type, source and mode. The
@@ -141,7 +141,7 @@ inline bool DBExists(const string& db_type, const string& full_db_name) {
 /**
  * A reader wrapper for DB that also allows us to serialize it.
  */
-class CAFFE2_API DBReader {
+class DBReader {
  public:
 
   friend class DBReaderSerializer;
@@ -226,7 +226,7 @@ class CAFFE2_API DBReader {
     *value = cursor_->value();
 
     // In sharded mode, each read skips num_shards_ records
-    for (uint32_t s = 0; s < num_shards_; s++) {
+    for (int s = 0; s < num_shards_; s++) {
       cursor_->Next();
       if (!cursor_->Valid()) {
         MoveToBeginning();
@@ -252,8 +252,8 @@ class CAFFE2_API DBReader {
    * accessing the same cursor. You should consider using Read() explicitly.
    */
   inline Cursor* cursor() const {
-    VLOG(1) << "Usually for a DBReader you should use Read() to be "
-               "thread safe. Consider refactoring your code.";
+    LOG(ERROR) << "Usually for a DBReader you should use Read() to be "
+                  "thread safe. Consider refactoring your code.";
     return cursor_.get();
   }
 
@@ -270,10 +270,10 @@ class CAFFE2_API DBReader {
 
   void MoveToBeginning() const {
     cursor_->SeekToFirst();
-    for (uint32_t s = 0; s < shard_id_; s++) {
+    for (auto s = 0; s < shard_id_; s++) {
       cursor_->Next();
       CAFFE_ENFORCE(
-          cursor_->Valid(), "Db has fewer rows than shard id: ", s, shard_id_);
+          cursor_->Valid(), "Db has less rows than shard id: ", s, shard_id_);
     }
   }
 
@@ -285,23 +285,22 @@ class CAFFE2_API DBReader {
   uint32_t num_shards_;
   uint32_t shard_id_;
 
-  C10_DISABLE_COPY_AND_ASSIGN(DBReader);
+  DISABLE_COPY_AND_ASSIGN(DBReader);
 };
 
-class CAFFE2_API DBReaderSerializer : public BlobSerializerBase {
+class DBReaderSerializer : public BlobSerializerBase {
  public:
   /**
    * Serializes a DBReader. Note that this blob has to contain DBReader,
    * otherwise this function produces a fatal error.
    */
   void Serialize(
-      const void* pointer,
-      TypeMeta typeMeta,
+      const Blob& blob,
       const string& name,
       BlobSerializerBase::SerializationAcceptor acceptor) override;
 };
 
-class CAFFE2_API DBReaderDeserializer : public BlobDeserializerBase {
+class DBReaderDeserializer : public BlobDeserializerBase {
  public:
   void Deserialize(const BlobProto& proto, Blob* blob) override;
 };

@@ -1,7 +1,7 @@
 #ifndef TH_DISK_FILE_INC
 #define TH_DISK_FILE_INC
 
-#include <TH/THFile.h>
+#include "THFile.h"
 
 TH_API THFile *THDiskFile_new(const char *name, const char *mode, int isQuiet);
 TH_API THFile *THPipeFile_new(const char *name, const char *mode, int isQuiet);

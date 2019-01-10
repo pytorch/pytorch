@@ -158,6 +158,5 @@ pip install --no-cache-dir \
     virtualenv \
     mock \
     typing \
-    typing-extensions \
-    pyyaml
+    typing-extensions
 

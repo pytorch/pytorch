@@ -9,10 +9,10 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/static_tracepoint.h"
 #include "caffe2/core/timer.h"
-#include "caffe2/proto/caffe2_pb.h"
+#include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/proto_utils.h"
 
-C10_DEFINE_bool(
+CAFFE2_DEFINE_bool(
     caffe2_simple_net_benchmark_run_whole_net,
     true,
     "If false, whole net passes won't be performed");
@@ -120,13 +120,11 @@ vector<float> SimpleNet::TEST_Benchmark(
   }
   vector<float> time_per_op(operators_.size(), 0);
   vector<uint64_t> flops_per_op;
-  vector<uint64_t> memory_bytes_read_per_op;
-  vector<uint64_t> memory_bytes_written_per_op;
+  vector<uint64_t> memory_bytes_per_op;
   vector<uint64_t> param_bytes_per_op;
   CaffeMap<string, float> time_per_op_type;
   CaffeMap<string, float> flops_per_op_type;
-  CaffeMap<string, float> memory_bytes_read_per_op_type;
-  CaffeMap<string, float> memory_bytes_written_per_op_type;
+  CaffeMap<string, float> memory_bytes_per_op_type;
   CaffeMap<string, float> param_bytes_per_op_type;
   if (run_individual) {
     for (int i = 0; i < main_runs; ++i) {
@@ -141,32 +139,15 @@ vector<float> SimpleNet::TEST_Benchmark(
           if (schema && schema->HasCostInferenceFunction()) {
             vector<TensorShape> shapes = op->InputTensorShapes();
 
-            auto all_good_shapes = std::accumulate(
-                shapes.begin(),
-                shapes.end(),
-                true,
-                [](bool acc, const TensorShape& shape) {
-                  return acc && !shape.unknown_shape();
-                });
-            OpSchema::Cost cost;
-            if (all_good_shapes) {
-              cost = schema->InferCost(op->debug_def(), shapes);
-            }
+            OpSchema::Cost cost = schema->InferCost(op->debug_def(), shapes);
 
             flops_per_op.emplace_back(cost.flops);
-            memory_bytes_read_per_op.emplace_back(cost.bytes_read);
-            memory_bytes_written_per_op.emplace_back(cost.bytes_written);
+            memory_bytes_per_op.emplace_back(cost.bytes_moved);
             param_bytes_per_op.emplace_back(cost.params_bytes);
 
             flops_per_op_type[op_type] += cost.flops;
-            memory_bytes_read_per_op_type[op_type] += cost.bytes_read;
-            memory_bytes_written_per_op_type[op_type] += cost.bytes_written;
+            memory_bytes_per_op_type[op_type] += cost.bytes_moved;
             param_bytes_per_op_type[op_type] += cost.params_bytes;
-          } else {
-            flops_per_op.emplace_back(0);
-            memory_bytes_read_per_op.emplace_back(0);
-            memory_bytes_written_per_op.emplace_back(0);
-            param_bytes_per_op.emplace_back(0);
           }
         }
         timer.Start();
@@ -183,7 +164,7 @@ vector<float> SimpleNet::TEST_Benchmark(
         ++idx;
       }
     }
-    size_t idx = 0;
+    int idx = 0;
     for (auto& op : operators_) {
       const string& op_type = op->debug_def().type();
       const string& print_name =
@@ -194,52 +175,37 @@ vector<float> SimpleNet::TEST_Benchmark(
       std::stringstream flops_str;
       if (idx < flops_per_op.size() && flops_per_op[idx]) {
         flops_str << " (" << to_string(1.0e-9 * flops_per_op[idx]) << " GFLOP, "
-                  << to_string(
-                         1.0e-6 * flops_per_op[idx] / time_per_op[idx] *
-                         main_runs)
+                  << to_string(1.0e-6 * flops_per_op[idx] / time_per_op[idx])
                   << " GFLOPS)";
       }
-      std::stringstream memory_bytes_read_str;
-      if (idx < memory_bytes_read_per_op.size() &&
-          memory_bytes_read_per_op[idx]) {
-        memory_bytes_read_str
-            << " (" << to_string(1.0e-6 * memory_bytes_read_per_op[idx])
-            << " MB)";
-      }
-      std::stringstream memory_bytes_written_str;
-      if (idx < memory_bytes_written_per_op.size() &&
-          memory_bytes_written_per_op[idx]) {
-        memory_bytes_written_str
-            << " (" << to_string(1.0e-6 * memory_bytes_written_per_op[idx])
-            << " MB)";
+      std::stringstream memory_bytes_str;
+      if (idx < memory_bytes_per_op.size() && memory_bytes_per_op[idx]) {
+        memory_bytes_str << " (" << to_string(1.0e-6 * memory_bytes_per_op[idx])
+                         << " MB)";
       }
       std::stringstream param_bytes_str;
       if (idx < param_bytes_per_op.size() && param_bytes_per_op[idx]) {
-        param_bytes_str << " (" << to_string(1.0e-6 * param_bytes_per_op[idx])
-                        << " MB)";
+        memory_bytes_str << " (" << to_string(1.0e-6 * param_bytes_per_op[idx])
+                         << " MB)";
       }
       std::cout << "Operator #" << idx << " (" << print_name << ", " << op_type
                 << ") " << time_per_op[idx] / main_runs << " ms/iter"
-                << flops_str.str() << memory_bytes_written_str.str()
+                << flops_str.str() << memory_bytes_str.str()
                 << param_bytes_str.str() << std::endl;
       ++idx;
     }
-    const std::vector<string> metric({"Time",
-                                      "FLOP",
-                                      "Feature Memory Read",
-                                      "Feature Memory Written",
-                                      "Parameter Memory"});
+    const std::vector<string> metric(
+        {"Time", "FLOP", "Feature Memory", "Parameter Memory"});
     const std::vector<double> normalizer(
-        {1.0 / main_runs, 1.0e-9, 1.0e-6, 1.0e-6, 1.0e-6});
-    const std::vector<string> unit({"ms", "GFLOP", "MB", "MB", "MB"});
+        {1.0 / main_runs, 1.0e-9, 1.0e-6, 1.0e-6});
+    const std::vector<string> unit({"ms", "GFLOP", "MB", "MB"});
 
     std::vector<CaffeMap<string, float>*> metric_per_op_type_vec_vec;
     metric_per_op_type_vec_vec.emplace_back(&time_per_op_type);
     metric_per_op_type_vec_vec.emplace_back(&flops_per_op_type);
-    metric_per_op_type_vec_vec.emplace_back(&memory_bytes_read_per_op_type);
-    metric_per_op_type_vec_vec.emplace_back(&memory_bytes_written_per_op_type);
+    metric_per_op_type_vec_vec.emplace_back(&memory_bytes_per_op_type);
     metric_per_op_type_vec_vec.emplace_back(&param_bytes_per_op_type);
-    for (size_t i = 0; i < metric_per_op_type_vec_vec.size(); ++i) {
+    for (int i = 0; i < metric_per_op_type_vec_vec.size(); ++i) {
       std::cout << metric[i] << " per operator type:" << std::endl;
       auto* item = metric_per_op_type_vec_vec[i];
       std::vector<std::pair<string, float>> metric_per_op_type_vec(
@@ -267,7 +233,7 @@ vector<float> SimpleNet::TEST_Benchmark(
     }
   }
   // We will reuse time_per_op to return the result of BenchmarkNet.
-  for (size_t i = 0; i < time_per_op.size(); ++i) {
+  for (int i = 0; i < time_per_op.size(); ++i) {
     time_per_op[i] /= main_runs;
   }
   if (FLAGS_caffe2_simple_net_benchmark_run_whole_net) {

@@ -1,16 +1,15 @@
 #pragma once
 
-#include "observers/macros.h"
 #include "observers/net_observer_reporter.h"
-
-#include "caffe2/core/common.h"
 
 namespace caffe2 {
 
-class CAFFE2_OBSERVER_API NetObserverReporterPrint : public NetObserverReporter {
+class NetObserverReporterPrint : public NetObserverReporter {
  public:
   static const std::string IDENTIFIER;
-  void report(NetBase* net, std::map<std::string, PerformanceInformation>&);
+  void reportDelay(
+      NetBase* net,
+      std::map<std::string, double>& delays,
+      const char* unit);
 };
-
-} // namespace caffe2
+}

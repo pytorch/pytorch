@@ -45,22 +45,11 @@ class ConstTensorView {
 // anchors: predefined anchors, size(A, 4)
 // Return: all_anchors_vec: (H * W, A * 4)
 // Need to reshape to (H * W * A, 4) to match the format in python
-CAFFE2_API ERMatXf ComputeAllAnchors(
+ERMatXf ComputeAllAnchors(
     const TensorCPU& anchors,
     int height,
     int width,
     float feat_stride);
-
-// Like ComputeAllAnchors, but instead of computing anchors for every single
-// spatial location, only computes anchors for the already sorted and filtered
-// positions after NMS is applied to avoid unnecessary computation.
-// `order` is a raveled array of sorted indices in (A, H, W) format.
-CAFFE2_API ERArrXXf ComputeSortedAnchors(
-    const Eigen::Map<const ERArrXXf>& anchors,
-    int height,
-    int width,
-    float feat_stride,
-    const vector<int>& order);
 
 } // namespace utils
 
@@ -70,7 +59,7 @@ CAFFE2_API ERArrXXf ComputeSortedAnchors(
 //     regression result 'deltas' as well as predefined bounding box shapes
 //     'anchors'. Greedy non-maximum suppression is applied to generate the
 //     final bounding boxes.
-// Reference: facebookresearch/Detectron/detectron/ops/generate_proposals.py
+// Reference: detectron/lib/ops/generate_proposals.py
 template <class Context>
 class GenerateProposalsOp final : public Operator<Context> {
  public:
@@ -78,26 +67,18 @@ class GenerateProposalsOp final : public Operator<Context> {
   GenerateProposalsOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         spatial_scale_(
-            this->template GetSingleArgument<float>("spatial_scale", 1.0 / 16)),
+            OperatorBase::GetSingleArgument<float>("spatial_scale", 1.0 / 16)),
         feat_stride_(1.0 / spatial_scale_),
         rpn_pre_nms_topN_(
-            this->template GetSingleArgument<int>("pre_nms_topN", 6000)),
+            OperatorBase::GetSingleArgument<int>("pre_nms_topN", 6000)),
         rpn_post_nms_topN_(
-            this->template GetSingleArgument<int>("post_nms_topN", 300)),
+            OperatorBase::GetSingleArgument<int>("post_nms_topN", 300)),
         rpn_nms_thresh_(
-            this->template GetSingleArgument<float>("nms_thresh", 0.7f)),
-        rpn_min_size_(this->template GetSingleArgument<float>("min_size", 16)),
-        correct_transform_coords_(this->template GetSingleArgument<bool>(
+            OperatorBase::GetSingleArgument<float>("nms_thresh", 0.7f)),
+        rpn_min_size_(OperatorBase::GetSingleArgument<float>("min_size", 16)),
+        correct_transform_coords_(OperatorBase::GetSingleArgument<bool>(
             "correct_transform_coords",
-            false)),
-        angle_bound_on_(
-            this->template GetSingleArgument<bool>("angle_bound_on", true)),
-        angle_bound_lo_(
-            this->template GetSingleArgument<int>("angle_bound_lo", -90)),
-        angle_bound_hi_(
-            this->template GetSingleArgument<int>("angle_bound_hi", 90)),
-        clip_angle_thresh_(
-            this->template GetSingleArgument<float>("clip_angle_thresh", 1.0)) {}
+            false)) {}
 
   ~GenerateProposalsOp() {}
 
@@ -112,7 +93,7 @@ class GenerateProposalsOp final : public Operator<Context> {
   // out_probs: n
   void ProposalsForOneImage(
       const Eigen::Array3f& im_info,
-      const Eigen::Map<const ERArrXXf>& anchors,
+      const Eigen::Map<const ERMatXf>& all_anchors,
       const utils::ConstTensorView<float>& bbox_deltas_tensor,
       const utils::ConstTensorView<float>& scores_tensor,
       ERArrXXf* out_boxes,
@@ -135,42 +116,6 @@ class GenerateProposalsOp final : public Operator<Context> {
   // Set to true to match the detectron code, set to false for backward
   // compatibility
   bool correct_transform_coords_{false};
-  // If set, for rotated boxes in RRPN, output angles are normalized to be
-  // within [angle_bound_lo, angle_bound_hi].
-  bool angle_bound_on_{true};
-  int angle_bound_lo_{-90};
-  int angle_bound_hi_{90};
-  // For RRPN, clip almost horizontal boxes within this threshold of
-  // tolerance for backward compatibility. Set to negative value for
-  // no clipping.
-  float clip_angle_thresh_{1.0};
-
-  // Scratch space required by the CUDA version
-  // CUB buffers
-  Tensor dev_cub_sort_buffer_{Context::GetDeviceType()};
-  Tensor dev_cub_select_buffer_{Context::GetDeviceType()};
-  Tensor dev_image_offset_{Context::GetDeviceType()};
-  Tensor dev_conv_layer_indexes_{Context::GetDeviceType()};
-  Tensor dev_sorted_conv_layer_indexes_{Context::GetDeviceType()};
-  Tensor dev_sorted_scores_{Context::GetDeviceType()};
-  Tensor dev_boxes_{Context::GetDeviceType()};
-  Tensor dev_boxes_keep_flags_{Context::GetDeviceType()};
-
-  // prenms proposals (raw proposals minus empty boxes)
-  Tensor dev_image_prenms_boxes_{Context::GetDeviceType()};
-  Tensor dev_image_prenms_scores_{Context::GetDeviceType()};
-  Tensor dev_prenms_nboxes_{Context::GetDeviceType()};
-  Tensor host_prenms_nboxes_{CPU};
-
-  Tensor dev_image_boxes_keep_list_{Context::GetDeviceType()};
-
-  // Tensors used by NMS
-  Tensor dev_nms_mask_{Context::GetDeviceType()};
-  Tensor host_nms_mask_{CPU};
-
-  // Buffer for output
-  Tensor dev_postnms_rois_{Context::GetDeviceType()};
-  Tensor dev_postnms_rois_probs_{Context::GetDeviceType()};
 };
 
 } // namespace caffe2

@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "THNN/generic/AbsCriterion.c"
+#define TH_GENERIC_FILE "generic/AbsCriterion.c"
 #else
 
 void THNN_(AbsCriterion_updateOutput)(
@@ -7,28 +7,29 @@ void THNN_(AbsCriterion_updateOutput)(
           THTensor *input,
           THTensor *target,
           THTensor *output,
-          int64_t reduction)
+          bool sizeAverage,
+          bool reduce)
 {
   THNN_CHECK_SHAPE(input, target);
 
-  if (reduction == Reduction::None) {
+  if (!reduce) {
     THTensor_(resizeAs)(output, input);
-    TH_TENSOR_APPLY3(scalar_t, input, scalar_t, target, scalar_t, output,
+    TH_TENSOR_APPLY3(real, input, real, target, real, output,
       *output_data = fabs(*input_data - *target_data);
     );
     return;
   }
 
-  scalar_t sum = 0;
-  THTensor_(resize0d)(output);
-  TH_TENSOR_APPLY2(scalar_t, input, scalar_t, target,
+  real sum = 0;
+  THTensor_(resize1d)(output, 1);
+  TH_TENSOR_APPLY2(real, input, real, target,
     sum += fabs(*input_data - *target_data);
   );
 
-  if (reduction == Reduction::Mean)
+  if (sizeAverage)
     sum /= THTensor_(nElement)(input);
 
-  THTensor_(set0d)(output, sum);
+  THTensor_(set1d)(output, 0, sum);
 }
 
 void THNN_(AbsCriterion_updateGradInput)(
@@ -37,26 +38,27 @@ void THNN_(AbsCriterion_updateGradInput)(
           THTensor *target,
           THTensor *gradOutput,
           THTensor *gradInput,
-          int64_t reduction)
+          bool sizeAverage,
+          bool reduce)
 {
   THNN_CHECK_SHAPE(input, target);
   THTensor_(resizeAs)(gradInput, input);
 
-  if (reduction == Reduction::None) {
+  if (!reduce) {
     THNN_CHECK_SHAPE(gradOutput, input);
-    TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, input, scalar_t, target,
+    TH_TENSOR_APPLY3(real, gradInput, real, input, real, target,
       *gradInput_data = ((*input_data - *target_data) >= 0 ? 1 : -1);
     );
-    TH_TENSOR_APPLY2(scalar_t, gradInput, scalar_t, gradOutput,
+    TH_TENSOR_APPLY2(real, gradInput, real, gradOutput,
       *gradInput_data *= *gradOutput_data;
     );
     return;
   }
 
   THNN_CHECK_DIM_SIZE(gradOutput, 1, 0, 1);
-  scalar_t norm = (reduction == Reduction::Mean ? 1./((scalar_t)THTensor_(nElement)(input)) : 1.) * THTensor_(fastGetLegacy1dNoScalars)(gradOutput, 0);
+  real norm = (sizeAverage ? 1./((real)THTensor_(nElement)(input)) : 1.) * THTensor_fastGet1d(gradOutput, 0);
 
-  TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, input, scalar_t, target,
+  TH_TENSOR_APPLY3(real, gradInput, real, input, real, target,
     *gradInput_data = (*input_data - *target_data) >= 0 ? norm : -norm;
   );
 }

@@ -1,7 +1,7 @@
 import math
 import torch
 from . import Sampler
-import torch.distributed as dist
+from torch.distributed import get_world_size, get_rank
 
 
 class DistributedSampler(Sampler):
@@ -24,13 +24,9 @@ class DistributedSampler(Sampler):
 
     def __init__(self, dataset, num_replicas=None, rank=None):
         if num_replicas is None:
-            if not dist.is_available():
-                raise RuntimeError("Requires distributed package to be available")
-            num_replicas = dist.get_world_size()
+            num_replicas = get_world_size()
         if rank is None:
-            if not dist.is_available():
-                raise RuntimeError("Requires distributed package to be available")
-            rank = dist.get_rank()
+            rank = get_rank()
         self.dataset = dataset
         self.num_replicas = num_replicas
         self.rank = rank
@@ -42,14 +38,15 @@ class DistributedSampler(Sampler):
         # deterministically shuffle based on epoch
         g = torch.Generator()
         g.manual_seed(self.epoch)
-        indices = torch.randperm(len(self.dataset), generator=g).tolist()
+        indices = list(torch.randperm(len(self.dataset), generator=g))
 
         # add extra samples to make it evenly divisible
         indices += indices[:(self.total_size - len(indices))]
         assert len(indices) == self.total_size
 
         # subsample
-        indices = indices[self.rank:self.total_size:self.num_replicas]
+        offset = self.num_samples * self.rank
+        indices = indices[offset:offset + self.num_samples]
         assert len(indices) == self.num_samples
 
         return iter(indices)

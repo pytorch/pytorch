@@ -20,9 +20,10 @@ class MeanOp final : public Operator<Context> {
   template <typename T>
   bool DoRunWithType() {
     auto& input0 = Input(0);
+    auto* output = Output(0);
 
-    auto* output = Output(0, input0.sizes(), at::dtype<T>());
-    output->CopyFrom(input0, true /*async*/);
+    output->ResizeLike(input0);
+    output->CopyFrom(input0, &context_);
 
     if (InputSize() == 1) {
       return true;
@@ -30,22 +31,22 @@ class MeanOp final : public Operator<Context> {
 
     // Dimension checking
     for (int i = 1; i < InputSize(); ++i) {
-      if (output->sizes() != Input(i).sizes()) {
+      if (output->dims() != Input(i).dims()) {
         CAFFE_THROW(
             "Check failed: output->dims() == Input(i).dims().",
             "Description: Input #",
             i,
             ", input dimension:",
-            Input(i).sizes(),
+            Input(i).dims(),
             " should match output dimension: ",
-            output->sizes());
+            output->dims());
       }
     }
 
     T* output_data = output->template mutable_data<T>();
     for (int i = 1; i < InputSize(); ++i) {
       math::Add(
-          output->numel(),
+          output->size(),
           output_data,
           Input(i).template data<T>(),
           output_data,
@@ -53,7 +54,7 @@ class MeanOp final : public Operator<Context> {
     }
 
     math::Scale(
-        output->numel(),
+        output->size(),
         1.0f / InputSize(),
         output_data,
         output_data,
@@ -69,7 +70,7 @@ class MeanOp final : public Operator<Context> {
       CAFFE_THROW(
           "Mean operator only supports 32-bit float, but",
           " input was of type ",
-          Input(0).dtype().name());
+          Input(0).meta().name());
     }
   }
 };
@@ -86,14 +87,14 @@ class MeanGradientOp : public Operator<Context> {
   bool DoRunWithType() {
     auto& dY = Input(0);
     const auto* dY_data = dY.template data<T>();
-    int size = dY.numel();
+    int size = dY.size();
 
     int num_inputs = OutputSize();
     float scale = 1.0f / num_inputs;
 
     // dX0 = scale * dY
-
-    auto* dX0 = Output(0, dY.sizes(), at::dtype<T>());
+    auto* dX0 = Output(0);
+    dX0->ResizeLike(dY);
     math::Scale(
         size, scale, dY_data, dX0->template mutable_data<T>(), &context_);
 
@@ -101,7 +102,7 @@ class MeanGradientOp : public Operator<Context> {
     for (int i = 1; i < num_inputs; i++) {
       auto* cur_dX = Output(i);
       cur_dX->ResizeLike(dY);
-      cur_dX->CopyFrom(*dX0, true /*async*/);
+      cur_dX->CopyFrom(*dX0, &context_);
     }
 
     return true;
@@ -114,7 +115,7 @@ class MeanGradientOp : public Operator<Context> {
       CAFFE_THROW(
           "Mean operator only supports 32-bit float, but",
           " input was of type ",
-          Input(0).dtype().name());
+          Input(0).meta().name());
     }
   }
 };

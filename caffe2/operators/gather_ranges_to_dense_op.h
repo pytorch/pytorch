@@ -10,7 +10,6 @@
 #include "caffe2/core/types.h"
 #include "caffe2/utils/math.h"
 
-#include <cstring>
 #include <map>
 #include <utility>
 
@@ -21,7 +20,7 @@ class GatherRangesToDenseOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   GatherRangesToDenseOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        lengths_(this->template GetRepeatedArgument<int>("lengths")) {
+        lengths_(OperatorBase::GetRepeatedArgument<int>("lengths")) {
     CAFFE_ENFORCE_GT(lengths_.size(), 0, "There has to be at least one length");
     for (auto length : lengths_) {
       CAFFE_ENFORCE_GT(length, 0, "Each length should be positive");
@@ -30,45 +29,45 @@ class GatherRangesToDenseOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-        this, this->template Input<Tensor>(RANGES, CPU));
+        this, OperatorBase::Input<TensorCPU>(RANGES));
   }
 
   template <typename Index>
   bool DoRunWithType() {
     auto& data = Input(DATA);
     auto& ranges = Input(RANGES);
-    CAFFE_ENFORCE_EQ(data.dim(), 1, "Data has to be 1-D");
-    CAFFE_ENFORCE_EQ(ranges.dim(), 3, "Ranges has to be 3-D");
+    CAFFE_ENFORCE_EQ(data.ndim(), 1, "Data has to be 1-D");
+    CAFFE_ENFORCE_EQ(ranges.ndim(), 3, "Ranges has to be 3-D");
     if (InputSize() == 3) {
       auto& key = Input(KEY);
-      CAFFE_ENFORCE_EQ(key.dim(), 1, "Key has to be 1-D");
+      CAFFE_ENFORCE_EQ(key.ndim(), 1, "Key has to be 1-D");
       CAFFE_ENFORCE(
-          key.dtype().template Match<int64_t>(), "Key has to be type int64_t");
+          key.meta().template Match<int64_t>(), "Key has to be type int64_t");
     }
     CAFFE_ENFORCE_EQ(
-        ranges.size(1),
+        ranges.dim(1),
         lengths_.size(),
         "Nummber of ranges should match number of lengths");
     CAFFE_ENFORCE_EQ(
-        ranges.size(1),
+        ranges.dim(1),
         OutputSize(),
         "Nummber of ranges should match number of outputs");
     CAFFE_ENFORCE_EQ(
-        ranges.size(2), 2, "Ranges last dimension should be of size 2");
+        ranges.dim(2), 2, "Ranges last dimension should be of size 2");
 
     auto* rawData = static_cast<const char*>(data.raw_data());
     auto* rangesData = ranges.template data<Index>();
     int rangesDataOffset = 0;
-    auto itemsize = data.dtype().itemsize();
+    auto itemsize = data.meta().itemsize();
 
-    auto batchSize = ranges.size(0);
-    vector<int64_t> outputDims{batchSize, 0};
+    auto batchSize = ranges.dim(0);
+    vector<TIndex> outputDims{batchSize, 0};
     vector<char*> outputRawData;
     for (int i = 0; i < OutputSize(); ++i) {
       auto* output = Output(i);
       outputDims[1] = lengths_[i];
       output->Resize(outputDims);
-      char* ptr = static_cast<char*>(output->raw_mutable_data(data.dtype()));
+      char* ptr = static_cast<char*>(output->raw_mutable_data(data.meta()));
       memset(ptr, 0, output->nbytes());
       outputRawData.push_back(ptr);
     }
@@ -88,8 +87,8 @@ class GatherRangesToDenseOp final : public Operator<Context> {
             j);
 
         if (InputSize() == 2) {
-          context_.CopyItemsSameDevice(
-              data.dtype(),
+          context_.template CopyItems<Context, Context>(
+              data.meta(),
               rangeLength,
               rawData + rangeStart * itemsize,
               outputRawData[j] + i * itemsize * lengths_[j]);
@@ -119,7 +118,7 @@ class GatherRangesToDenseOp final : public Operator<Context> {
         }
       }
     }
-    CAFFE_ENFORCE_EQ(rangesDataOffset, ranges.numel());
+    CAFFE_ENFORCE_EQ(rangesDataOffset, ranges.size());
 
     return true;
   }

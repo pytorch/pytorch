@@ -15,59 +15,50 @@ template <typename T, typename Data_T>
 bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
   const auto& data = Input(DATA);
   const auto& lengths = Input(LENGTHS);
-
-  Tensor* presence_mask = nullptr;
+  auto* output = Output(0);
+  Tensor<CPUContext>* presence_mask = nullptr;
   if (return_presence_mask_) {
     presence_mask = Output(1);
   }
 
-  CAFFE_ENFORCE_GE(data.dim(), 1, "DATA should be at least 1-D");
-  CAFFE_ENFORCE_EQ(lengths.dim(), 1, "LENGTH should be 1-D");
+  CAFFE_ENFORCE(data.ndim() >= 1, "DATA should be at least 1-D");
+  CAFFE_ENFORCE(lengths.ndim() == 1, "LENGTH should be 1-D");
 
   // Find the length of the longest sequence.
   const T* l = lengths.template data<T>();
   T max_length = 0;
-  int64_t total_length = 0;
-  for (T i = 0; i < lengths.size(0); ++i) {
+  TIndex total_length = 0;
+  for (T i = 0; i < lengths.dim(0); ++i) {
     max_length = std::max(max_length, l[i]);
     total_length += l[i];
-  }
-  if (max_length_ != -1) {
-    // Final dim must be greater than the max_length
-    CAFFE_ENFORCE_GE(
-        max_length_,
-        max_length,
-        "Pre-defined max_length should be greater than the real max_length");
-    max_length = max_length_;
   }
 
   // Total lengths must be the same as data.dims(0)
   CAFFE_ENFORCE_EQ(
-      data.size(0),
+      data.dim(0),
       total_length,
       " PackSegments requires that the sum of the lengths ",
       total_length,
       " is equal to the first data dimension ",
-      data.size(0));
+      data.dim(0));
 
-  auto shape =
-      data.sizes().vec(); // Shape of output is batch_size x max_len x ...
+  auto shape = data.dims(); // Shape of output is batch_size x max_len x ...
   shape[0] = max_length;
-  shape.insert(shape.begin(), lengths.numel());
-  auto* output = Output(0, shape, at::dtype(data.dtype()));
+  shape.insert(shape.begin(), lengths.size());
+  output->Resize(shape);
 
   // create output tensor
-  auto* out = static_cast<char*>(output->raw_mutable_data(data.dtype()));
+  auto* out = static_cast<char*>(output->raw_mutable_data(data.meta()));
 
   bool* presence_mask_data = nullptr;
   if (return_presence_mask_) {
     // Shape of presence is batch_size x max_len
-    std::vector<int64_t> presence_shape{lengths.numel(), max_length};
+    std::vector<caffe2::TIndex> presence_shape{lengths.size(), max_length};
     presence_mask->Resize(presence_shape);
     presence_mask_data = presence_mask->template mutable_data<bool>();
   }
 
-  if (!data.size(0)) {
+  if (!data.dim(0)) {
     // Return empty output (with the proper shape)
     return true;
   }
@@ -75,22 +66,22 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
   // Do padding
   if (output->template IsType<float>()) {
     math::Set<float, CPUContext>(
-        output->numel(),
+        output->size(),
         padding_,
         output->template mutable_data<float>(),
         &context_);
   }
   if (return_presence_mask_) {
-    memset(presence_mask_data, (int)false, presence_mask->numel());
+    memset(presence_mask_data, (int)false, presence_mask->size());
   }
 
   auto block_size = data.size_from_dim(1);
   auto block_bytesize = data.itemsize() * block_size;
   const auto* d = static_cast<const char*>(data.raw_data());
-  int64_t start = 0;
-  for (int64_t i = 0; i < lengths.size(0); ++i) {
-    context_.CopyItemsSameDevice(
-        data.dtype(),
+  TIndex start = 0;
+  for (TIndex i = 0; i < lengths.dim(0); ++i) {
+    context_.template CopyItems<CPUContext, CPUContext>(
+        data.meta(),
         l[i] * block_size,
         d + block_bytesize * start,
         out + block_bytesize * max_length * i);
@@ -118,38 +109,33 @@ bool UnpackSegmentsOp<CPUContext>::DoRunWithType2() {
   const auto& lengths = Input(LENGTHS);
   auto* output = Output(0);
 
-  CAFFE_ENFORCE_GE(data.dim(), 2, "DATA should be at least 2-D");
-  CAFFE_ENFORCE_EQ(lengths.dim(), 1, "LENGTH should be 1-D");
-  if (max_length_ != -1) {
-    CAFFE_ENFORCE_EQ(
-        max_length_,
-        data.size(1),
-        "max_length should be equal to the second dimension of the packed segments");
-  }
+  CAFFE_ENFORCE(data.ndim() >= 2, "DATA should be at least 2-D");
+  CAFFE_ENFORCE(lengths.ndim() == 1, "LENGTH should be 1-D");
+
   const T* l = lengths.template data<T>();
 
-  int64_t total_l = std::accumulate(l, l + lengths.size(0), (int64_t)0);
+  TIndex total_l = std::accumulate(l, l + lengths.dim(0), (TIndex)0);
 
-  auto shape = data.sizes().vec();
-  CAFFE_ENFORCE_EQ(
-      shape[0], lengths.size(0), "LENGTH should match DATA in dimension 0");
+  auto shape = data.dims();
+  CAFFE_ENFORCE(
+      shape[0] == lengths.dim(0), "LENGTH should match DATA in dimension 0");
   shape.erase(shape.begin());
   shape[0] = total_l;
   output->Resize(shape);
   // create output tensor
-  auto* out = static_cast<char*>(output->raw_mutable_data(data.dtype()));
-  if (!(data.size(0) && data.size(1))) {
+  auto* out = static_cast<char*>(output->raw_mutable_data(data.meta()));
+  if (!(data.dim(0) * data.dim(1))) {
     return true;
   }
   auto block_size = data.size_from_dim(2);
   auto block_bytesize = data.itemsize() * block_size;
   const auto* d = static_cast<const char*>(data.raw_data());
-  int64_t start = 0;
-  for (int64_t i = 0; i < lengths.size(0); ++i) {
-    context_.CopyItemsSameDevice(
-        data.dtype(),
+  TIndex start = 0;
+  for (TIndex i = 0; i < lengths.dim(0); ++i) {
+    context_.template CopyItems<CPUContext, CPUContext>(
+        data.meta(),
         l[i] * block_size,
-        d + block_bytesize * data.size(1) * i,
+        d + block_bytesize * data.dim(1) * i,
         out + block_bytesize * start);
     start += l[i];
   }
@@ -181,7 +167,6 @@ OPERATOR_SCHEMA(PackSegments)
         "presence_mask",
         "2 dim boolean tensor"
         ", false where packed_tensor is padded, true otherwise.")
-    .Arg("max_length", "The pre-defined max_length for the packed segments")
     .Arg(
         "pad_minf",
         "Padding number in the packed segments. Use true to pad \
@@ -198,8 +183,7 @@ OPERATOR_SCHEMA(UnpackSegments)
         "lengths",
         "1-d int/long tensor contains the length in each of the input.")
     .Input(1, "tensor", "N+1 dim Tensor.")
-    .Output(0, "packed_tensor", "N dim Tensor")
-    .Arg("max_length", "The pre-defined max_length for the packed segments");
+    .Output(0, "packed_tensor", "N dim Tensor");
 
 class GetPackSegmentsGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

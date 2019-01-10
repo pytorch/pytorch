@@ -1,17 +1,12 @@
 from collections import namedtuple
-import warnings
 
 import torch
+import torch.onnx
 
 
-PackedSequence_ = namedtuple('PackedSequence',
-                             ['data', 'batch_sizes', 'sorted_indices', 'unsorted_indices'])
+from .._functions.packing import PackPadded
 
-
-def bind(optional, fn):
-    if optional is None:
-        return None
-    return fn(optional)
+PackedSequence_ = namedtuple('PackedSequence', ['data', 'batch_sizes'])
 
 
 class PackedSequence(PackedSequence_):
@@ -35,86 +30,60 @@ class PackedSequence(PackedSequence_):
             information about the batch size at each sequence step
 
     """
-    def __new__(cls, data, batch_sizes=None, sorted_indices=None, unsorted_indices=None):
-        # PackedSequence used to only have __init__(self, data, batch_sizes)
-        # without a __new__ like this. So to preserve BC for calling in keyword
-        # arg style (e.g., `PackedSequence(data=..., batch_sizes=...)`), we have
-        # to provide two arguments with exact names `data` and `batch_sizes`.
-
-        # NB: if unsorted_indices is provided, it should be the inverse permutation
-        # to sorted_indices. Don't assert it here because the PackedSequence ctor
-        # should only be used internally.
-        if unsorted_indices is None:
-            unsorted_indices = invert_permutation(sorted_indices)
-
-        # support being called as `PackedSequence(data, batch_sizes, sorted_indices)`
-        if batch_sizes is not None:
-            return super(PackedSequence, cls).__new__(
-                cls, data, batch_sizes, sorted_indices, unsorted_indices)
-
-        # support being called as `PackedSequence((data, batch_sizes), *, sorted_indices)`
+    def __new__(cls, *args):
+        # support being called as `PackedSequence(data, batch_sizes)`
+        if len(args) == 2:
+            return super(PackedSequence, cls).__new__(cls, *args)
+        # support being called as `PackedSequence((data, batch_sizes))`
         else:
-            assert isinstance(data, (list, tuple)) and len(data) == 2
-            return super(PackedSequence, cls).__new__(
-                cls, data[0], data[1], sorted_indices)
+            assert len(args) == 1
+            return super(PackedSequence, cls).__new__(cls, *args[0])
 
     def cuda(self, *args, **kwargs):
         """Returns a GPU copy if `self.data` not already on the GPU"""
         if self.is_cuda:
             return self
         else:
-            return type(self)(self.data.cuda(*args, **kwargs), self.batch_sizes,
-                              bind(self.sorted_indices, lambda t: t.cuda(*args, **kwargs)),
-                              bind(self.unsorted_indices, lambda t: t.cuda(*args, **kwargs)))
+            return type(self)(self.data.cuda(*args, **kwargs), self.batch_sizes)
 
     def cpu(self):
         """Returns a CPU copy if `self.data` not already on the CPU"""
         if self.is_cuda:
-            return type(self)(self.data.cpu(), self.batch_sizes,
-                              bind(self.sorted_indices, lambda t: t.cpu()),
-                              bind(self.unsorted_indices, lambda t: t.cpu()))
+            return type(self)(self.data.cpu(), self.batch_sizes)
         else:
             return self
 
     def double(self):
         r"""Returns copy with `self.data` cast to double type"""
-        return type(self)(self.data.double(), self.batch_sizes,
-                          self.sorted_indices, self.unsorted_indices)
+        return type(self)(self.data.double(), self.batch_sizes)
 
     def float(self):
         r"""Returns copy with `self.data` cast to float type"""
-        return type(self)(self.data.float(), self.batch_sizes,
-                          self.sorted_indices, self.unsorted_indices)
+        return type(self)(self.data.float(), self.batch_sizes)
 
     def half(self):
         r"""Returns copy with `self.data` cast to half type"""
-        return type(self)(self.data.half(), self.batch_sizes,
-                          self.sorted_indices, self.unsorted_indices)
+        return type(self)(self.data.half(), self.batch_sizes)
 
     def long(self):
         r"""Returns copy with `self.data` cast to long type"""
-        return type(self)(self.data.long(), self.batch_sizes,
-                          self.sorted_indices, self.unsorted_indices)
+        return type(self)(self.data.long(), self.batch_sizes)
 
     def int(self):
         r"""Returns copy with `self.data` cast to int type"""
-        return type(self)(self.data.int(), self.batch_sizes,
-                          self.sorted_indices, self.unsorted_indices)
+        return type(self)(self.data.int(), self.batch_sizes)
 
     def short(self):
         r"""Returns copy with `self.data` cast to short type"""
-        return type(self)(self.data.short(), self.batch_sizes,
-                          self.sorted_indices, self.unsorted_indices)
+        return type(self)(self.data.short(), self.batch_sizes)
 
     def char(self):
         r"""Returns copy with `self.data` cast to char type"""
-        return type(self)(self.data.char(), self.batch_sizes,
-                          self.sorted_indices, self.unsorted_indices)
+        return type(self)(self.data.char(), self.batch_sizes)
 
     def byte(self):
         r"""Returns copy with `self.data` cast to byte type"""
-        return type(self)(self.data.byte(), self.batch_sizes,
-                          self.sorted_indices, self.unsorted_indices)
+        return type(self)(self.data.byte(), self.batch_sizes)
 
     def to(self, *args, **kwargs):
         r"""Performs dtype and/or device conversion on `self.data`.
@@ -128,17 +97,10 @@ class PackedSequence(PackedSequence_):
             Otherwise, returns a copy with the desired configuration.
         """
         data = self.data.to(*args, **kwargs)
-        sorted_indices = self.sorted_indices
-        unsorted_indices = self.unsorted_indices
-        device_kw = 'device'
-        if device_kw in kwargs:
-            sorted_indices = bind(sorted_indices, lambda t: t.to(kwargs[device_kw]))
-            unsorted_indices = bind(unsorted_indices, lambda t: t.to(kwargs[device_kw]))
         if data is self.data:
             return self
         else:
-            return type(self)(data, self.batch_sizes,
-                              sorted_indices, unsorted_indices)
+            return type(self)(data, self.batch_sizes)
 
     @property
     def is_cuda(self):
@@ -146,16 +108,7 @@ class PackedSequence(PackedSequence_):
         return self.data.is_cuda
 
 
-def invert_permutation(permutation):
-    if permutation is None:
-        return None
-    output = torch.empty_like(permutation)
-    output.scatter_(0, permutation,
-                    torch.arange(0, permutation.numel(), device=permutation.device))
-    return output
-
-
-def pack_padded_sequence(input, lengths, batch_first=False, enforce_sorted=True):
+def pack_padded_sequence(input, lengths, batch_first=False):
     r"""Packs a Tensor containing padded sequences of variable length.
 
     Input can be of size ``T x B x *`` where `T` is the length of the longest sequence
@@ -163,10 +116,9 @@ def pack_padded_sequence(input, lengths, batch_first=False, enforce_sorted=True)
     dimensions (including 0). If ``batch_first`` is True ``B x T x *`` inputs are
     expected.
 
-    For unsorted sequences, use `enforce_sorted = False`. If ``enforce_sorted`` is
-    ``True``, the sequences should be sorted by length in a decreasing order, i.e.
-    ``input[:,0]`` should be the longest sequence, and ``input[:,B-1]`` the shortest
-    one. `enforce_sorted = True` is only necessary for ONNX export.
+    The sequences should be sorted by length in a decreasing order, i.e.
+    ``input[:,0]`` should be the longest sequence, and ``input[:,B-1]`` the
+    shortest one.
 
     Note:
         This function accepts any input that has at least two dimensions. You
@@ -179,31 +131,41 @@ def pack_padded_sequence(input, lengths, batch_first=False, enforce_sorted=True)
         lengths (Tensor): list of sequences lengths of each batch element.
         batch_first (bool, optional): if ``True``, the input is expected in ``B x T x *``
             format.
-        enforce_sorted (bool, optional): if ``True``, the input is expected to
-            contain sequences sorted by length in a decreasing order. If
-            ``False``, this condition is not checked. Default: ``True``.
 
     Returns:
         a :class:`PackedSequence` object
     """
-    if torch._C._get_tracing_state() and not isinstance(lengths, torch.Tensor):
-        warnings.warn('pack_padded_sequence has been called with a Python list of '
-                      'sequence lengths. The tracer cannot track the data flow of Python '
-                      'values, and it will treat them as constants, likely rendering '
-                      'the trace incorrect for any other combination of lengths.',
-                      category=torch.jit.TracerWarning, stacklevel=2)
-    lengths = torch.as_tensor(lengths, dtype=torch.int64)
-    if enforce_sorted:
-        sorted_indices = None
-    else:
-        lengths, sorted_indices = torch.sort(lengths, descending=True)
-        sorted_indices = sorted_indices.to(input.device)
-        batch_dim = 0 if batch_first else 1
-        input = input.index_select(batch_dim, sorted_indices)
+    if isinstance(lengths, list):
+        lengths = torch.LongTensor(lengths)
 
-    data, batch_sizes = \
-        torch._C._VariableFunctions._pack_padded_sequence(input, lengths, batch_first)
-    return PackedSequence(data, batch_sizes, sorted_indices)
+    data, batch_sizes = PackPadded.apply(input, lengths, batch_first)
+
+    return PackedSequence(data, batch_sizes)
+
+
+def _symbolic_pack_padded_sequence(g, input, lengths, batch_first=False, padding_value=0.0, total_length=None):
+    if total_length is not None:
+        raise ValueError("_symbolic_pad_packed_sequence only supports total_length=None")
+    # There currently is no PackPadded operator in ONNX. We rely on an
+    # optimization pass to remove this later. It is an error if all
+    # PackPadded operators cannot be optimized out.
+
+    def _onnx_symbolic_pack_padded_sequence(g, input, lengths):
+        if batch_first:
+            input = g.op('Transpose', input, perm_i=[1, 0, 2])
+        return g.op("prim::PackPadded", input, lengths, outputs=2)
+
+    def pack_padded_sequence_trace_wrapper(input, lengths):
+        return pack_padded_sequence(input, lengths, batch_first=batch_first)
+
+    outputs = g.wrapPyFuncWithSymbolic(
+        pack_padded_sequence_trace_wrapper, [input, lengths], 2,
+        _onnx_symbolic_pack_padded_sequence)
+    return tuple(o for o in outputs)
+
+
+pack_padded_sequence = torch.onnx.symbolic_override_first_arg_based(
+    _symbolic_pack_padded_sequence)(pack_padded_sequence)
 
 
 def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_length=None):
@@ -239,7 +201,9 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_le
         containing the list of lengths of each sequence in the batch.
 
     """
-    max_seq_length = sequence.batch_sizes.size(0)
+    var_data, batch_sizes = sequence
+    max_batch_size = int(batch_sizes[0])
+    max_seq_length = batch_sizes.size(0)
     if total_length is not None:
         if total_length < max_seq_length:
             raise ValueError("Expected total_length to be at least the length "
@@ -247,13 +211,54 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_le
                              "total_length={} and max sequence length being {}"
                              .format(total_length, max_seq_length))
         max_seq_length = total_length
-    padded_output, lengths = torch._C._VariableFunctions._pad_packed_sequence(
-        sequence.data, sequence.batch_sizes, batch_first, padding_value, max_seq_length)
-    if sequence.unsorted_indices is not None:
-        batch_dim = 0 if batch_first else 1
-        return padded_output.index_select(batch_dim, sequence.unsorted_indices), \
-            lengths[sequence.unsorted_indices]
-    return padded_output, lengths
+    output = var_data.data.new(max_seq_length, max_batch_size, *var_data.size()[1:]).fill_(padding_value)
+
+    lengths = []
+    data_offset = 0
+    prev_batch_size = int(batch_sizes[0])
+    prev_i = 0
+    for i, batch_size in enumerate(batch_sizes.tolist() + [0]):
+        if batch_size != prev_batch_size:
+            l = prev_batch_size * (i - prev_i)
+            tmp = var_data[data_offset:data_offset + l]
+            output[prev_i:i, :prev_batch_size] = tmp.view(i - prev_i, prev_batch_size, *tmp.size()[1:])
+            data_offset += l
+            prev_i = i
+        dec = prev_batch_size - batch_size
+        if dec > 0:
+            lengths.extend((i,) * dec)
+        prev_batch_size = batch_size
+
+    lengths.reverse()
+
+    if batch_first:
+        output = output.transpose(0, 1)
+    # This Tensor doesn't actually have any history (well,
+    # technically it does; it's just untracked), it is purely here to
+    # make ONNX export easier. That is to say, from an autodiff
+    # standpoint this doesn't make any sense.
+    return output, torch.LongTensor(lengths)
+
+
+def _symbolic_pad_packed_sequence(g, input, batch_first=False, padding_value=0.0):
+    def _onnx_symbolic_pad_packed_sequence(g, data, batch_sizes):
+        data, lengths = g.op("prim::PadPacked", data, batch_sizes, outputs=2)
+        if batch_first:
+            data = g.op('Transpose', data, perm_i=[1, 0, 2])
+        return data, lengths
+
+    def pad_packed_sequence_trace_wrapper(data, batch_sizes):
+        return pad_packed_sequence(PackedSequence(data, batch_sizes),
+                                   batch_first=batch_first, padding_value=padding_value)
+
+    data, lengths = g.wrapPyFuncWithSymbolic(
+        pad_packed_sequence_trace_wrapper, [input.data, input.batch_sizes], 2,
+        _onnx_symbolic_pad_packed_sequence)
+    return data, lengths
+
+
+pad_packed_sequence = torch.onnx.symbolic_override_packed_sequence_based(
+    _symbolic_pad_packed_sequence)(pad_packed_sequence)
 
 
 def pad_sequence(sequences, batch_first=False, padding_value=0):
@@ -262,9 +267,10 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
     ``pad_sequence`` stacks a list of Tensors along a new dimension,
     and pads them to equal length. For example, if the input is list of
     sequences with size ``L x *`` and if batch_first is False, and ``T x B x *``
-    otherwise.
+    otherwise. The list of sequences should be sorted in the order of
+    decreasing length.
 
-    `B` is batch size. It is equal to the number of elements in ``sequences``.
+    `B` is batch size. It's equal to the number of elements in ``sequences``.
     `T` is length of the longest sequence.
     `L` is length of the sequence.
     `*` is any number of trailing dimensions, including none.
@@ -278,26 +284,27 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
         torch.Size([25, 3, 300])
 
     Note:
-        This function returns a Tensor of size ``T x B x *`` or ``B x T x *``
-        where `T` is the length of the longest sequence. This function assumes
-        trailing dimensions and type of all the Tensors in sequences are same.
+        This function returns a Tensor of size ``T x B x *`` or ``B x T x *`` where `T` is the
+            length of longest sequence.
+        Function assumes trailing dimensions and type of all the Tensors
+            in sequences are same.
 
     Arguments:
         sequences (list[Tensor]): list of variable length sequences.
         batch_first (bool, optional): output will be in ``B x T x *`` if True, or in
             ``T x B x *`` otherwise
-        padding_value (float, optional): value for padded elements. Default: 0.
+        padding_value (float, optional): value for padded elements.
 
     Returns:
-        Tensor of size ``T x B x *`` if :attr:`batch_first` is ``False``.
+        Tensor of size ``T x B x *`` if batch_first is False
         Tensor of size ``B x T x *`` otherwise
     """
 
     # assuming trailing dimensions and type of all the Tensors
     # in sequences are same and fetching those from sequences[0]
     max_size = sequences[0].size()
-    trailing_dims = max_size[1:]
-    max_len = max([s.size(0) for s in sequences])
+    max_len, trailing_dims = max_size[0], max_size[1:]
+    prev_l = max_len
     if batch_first:
         out_dims = (len(sequences), max_len) + trailing_dims
     else:
@@ -306,6 +313,11 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
     out_tensor = sequences[0].data.new(*out_dims).fill_(padding_value)
     for i, tensor in enumerate(sequences):
         length = tensor.size(0)
+        # temporary sort check, can be removed when we handle sorting internally
+        if prev_l < length:
+            raise ValueError(
+                "sequences must be sorted in the order of decreasing length")
+        prev_l = length
         # use index notation to prevent duplicate references to the tensor
         if batch_first:
             out_tensor[i, :length, ...] = tensor
@@ -315,17 +327,12 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
     return out_tensor
 
 
-def pack_sequence(sequences, enforce_sorted=True):
+def pack_sequence(sequences):
     r"""Packs a list of variable length Tensors
 
     ``sequences`` should be a list of Tensors of size ``L x *``, where `L` is
     the length of a sequence and `*` is any number of trailing dimensions,
-    including zero.
-
-    For unsorted sequences, use `enforce_sorted = False`. If ``enforce_sorted``
-    is ``True``, the sequences should be sorted in the order of decreasing length.
-    ``enforce_sorted = True`` is only necessary for ONNX export.
-
+    including zero. They should be sorted in the order of decreasing length.
 
     Example:
         >>> from torch.nn.utils.rnn import pack_sequence
@@ -338,12 +345,8 @@ def pack_sequence(sequences, enforce_sorted=True):
 
     Arguments:
         sequences (list[Tensor]): A list of sequences of decreasing length.
-        enforce_sorted (bool, optional): if ``True``, checks that the input
-            contains sequences sorted by length in a decreasing order. If
-            ``False``, this condition is not checked. Default: ``True``.
 
     Returns:
         a :class:`PackedSequence` object
     """
-    lengths = [v.size(0) for v in sequences]
-    return pack_padded_sequence(pad_sequence(sequences), lengths, enforce_sorted=enforce_sorted)
+    return pack_padded_sequence(pad_sequence(sequences), [v.size(0) for v in sequences])

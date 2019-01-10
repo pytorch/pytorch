@@ -11,23 +11,23 @@ nccl::NCCLExecution getNCCLElements(
   // We either do an N-N op, or an N-1 op.
   CAFFE_ENFORCE(op->InputSize() == op->OutputSize() || op->OutputSize() == 1);
   nccl::NCCLExecution ex;
-  ex.stream_gpu_id = context.device_id();
+  ex.stream_gpu_id = context.cuda_gpu_id();
   ex.stream = context.cuda_stream();
   ex.root = op->template GetSingleArgument<int>("root", 0);
   ex.elements.resize(op->InputSize());
   for (auto i = 0; i < op->InputSize(); ++i) {
     auto& el = ex.elements[i];
-    el.src = &(op->Input<Tensor>(i, CUDA));
+    el.src = &(op->Input<TensorCUDA>(i));
     if (op->OutputSize() == 1) {
       // Reduce op
       if (i == ex.root) {
-        el.dst = op->Output<Tensor>(0, CUDA);
+        el.dst = op->Output<TensorCUDA>(0);
       }
     } else if (i < op->OutputSize()) {
-      el.dst = op->Output<Tensor>(i, CUDA);
+      el.dst = op->Output<TensorCUDA>(i);
     }
     // TODO - expensive (>1ms) - cache these.
-    el.device = GetGPUIDForPointer(op->Input<Tensor>(i, CUDA).raw_data());
+    el.device = GetGPUIDForPointer(op->Input<TensorCUDA>(i).raw_data());
   }
 
   return ex;
@@ -38,7 +38,7 @@ namespace {
 template <typename T>
 bool AllInputsAre(OperatorBase* op) {
   for (auto i = 0; i < op->InputSize(); ++i) {
-    if (op->Input<Tensor>(i, CUDA).IsType<T>()) {
+    if (op->Input<TensorCUDA>(i).IsType<T>()) {
       continue;
     } else {
       return false;
@@ -60,53 +60,12 @@ class NCCLAllreduceOp final : public Operator<CUDAContext> {
     if (AllInputsAre<float>(this)) {
       nccl::NCCL<float>::AllReduce(getNCCLElements(this, context_));
       return true;
-    } else if (AllInputsAre<at::Half>(this)) {
-      nccl::NCCL<at::Half>::AllReduce(getNCCLElements(this, context_));
+    } else if (AllInputsAre<float16>(this)) {
+      nccl::NCCL<float16>::AllReduce(getNCCLElements(this, context_));
       return true;
     } else {
       return false;
     }
-  }
-
-  static std::vector<TensorShape> ShapeInference(
-      const OperatorDef& def,
-      const std::vector<TensorShape>& in) {
-    auto n_outputs = def.output_size();
-    CAFFE_ENFORCE(
-        n_outputs == 1 || n_outputs == in.size(),
-        "NCCLAllreduce only supports N-1 or N-N reductions");
-
-    for (auto i = 0; i < in.size(); i++) {
-      CAFFE_ENFORCE(
-          in[0].dims_size() == in[i].dims_size(),
-          "NCCLAllreduce requires inputs of same dimension");
-      for (auto j = 0; j < in[0].dims_size(); j++) {
-        CAFFE_ENFORCE(
-            in[0].dims(j) == in[i].dims(j),
-            "NCCLAllreduce requires inputs to be of same shape");
-      }
-    }
-
-    std::vector<TensorShape> out(n_outputs);
-    for (auto i = 0; i < out.size(); i++) {
-      out[i] = in[0];
-    }
-    return out;
-  }
-
-  static struct OpSchema::Cost CostInference(
-      const OperatorDef& def,
-      const vector<TensorShape>& inputs) {
-    CAFFE_ENFORCE_GE(inputs.size(), 1, "Conv requires at least 1 input");
-    const TensorShape X0 = inputs[0];
-    const auto nElem = nElemFromDim(inputs[0]);
-
-    struct OpSchema::Cost c;
-    c.flops = (inputs.size() - 1) * nElem;
-    c.bytes_read = inputs.size() * nElem;
-    c.bytes_written = def.output_size() * nElem;
-    c.params_bytes = 0;
-    return c;
   }
 
  protected:
@@ -122,8 +81,8 @@ class NCCLBroadcastOp final : public Operator<CUDAContext> {
     if (AllInputsAre<float>(this)) {
       nccl::NCCL<float>::Broadcast(getNCCLElements(this, context_));
       return true;
-    } else if (AllInputsAre<at::Half>(this)) {
-      nccl::NCCL<at::Half>::Broadcast(getNCCLElements(this, context_));
+    } else if (AllInputsAre<float16>(this)) {
+      nccl::NCCL<float16>::Broadcast(getNCCLElements(this, context_));
       return true;
     } else {
       return false;
@@ -145,8 +104,8 @@ class NCCLReduceOp final : public Operator<CUDAContext> {
     if (AllInputsAre<float>(this)) {
       nccl::NCCL<float>::Reduce(ex);
       return true;
-    } else if (AllInputsAre<at::Half>(this)) {
-      nccl::NCCL<at::Half>::Reduce(ex);
+    } else if (AllInputsAre<float16>(this)) {
+      nccl::NCCL<float16>::Reduce(ex);
       return true;
     } else {
       return false;
@@ -166,8 +125,8 @@ class NCCLAllGatherOp final : public Operator<CUDAContext> {
     if (AllInputsAre<float>(this)) {
       nccl::NCCL<float>::AllGather(getNCCLElements(this, context_));
       return true;
-    } else if (AllInputsAre<at::Half>(this)) {
-      nccl::NCCL<at::Half>::AllGather(getNCCLElements(this, context_));
+    } else if (AllInputsAre<float16>(this)) {
+      nccl::NCCL<float16>::AllGather(getNCCLElements(this, context_));
       return true;
     } else {
       return false;
@@ -185,8 +144,8 @@ class NCCLReduceScatterOp final : public Operator<CUDAContext> {
     if (AllInputsAre<float>(this)) {
       nccl::NCCL<float>::ReduceScatter(getNCCLElements(this, context_));
       return true;
-    } else if (AllInputsAre<at::Half>(this)) {
-      nccl::NCCL<at::Half>::ReduceScatter(getNCCLElements(this, context_));
+    } else if (AllInputsAre<float16>(this)) {
+      nccl::NCCL<float16>::ReduceScatter(getNCCLElements(this, context_));
       return true;
     } else {
       return false;
@@ -204,7 +163,7 @@ std::pair<std::vector<DeviceOption>, std::vector<DeviceOption>> ncclOpDevInfer(
   for (int i = 0; i < def.input().size(); ++i) {
     DeviceOption dev;
     dev.set_device_type(1);
-    dev.set_device_id(i);
+    dev.set_cuda_gpu_id(i);
     opt.push_back(dev);
   }
   return std::make_pair(opt, opt);
@@ -214,8 +173,6 @@ REGISTER_CUDA_OPERATOR(NCCLAllreduce, NCCLAllreduceOp);
 OPERATOR_SCHEMA(NCCLAllreduce)
     .NumInputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
     .NumOutputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
-    .CostInferenceFunction(NCCLAllreduceOp::CostInference)
-    .TensorInferenceFunction(NCCLAllreduceOp::ShapeInference)
     .IdenticalTypeAndShape()
     .InputsCanCrossDevices()
     .AllowOneToOneInplace()

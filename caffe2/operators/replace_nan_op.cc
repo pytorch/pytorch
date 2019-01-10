@@ -6,10 +6,10 @@ template <>
 template <typename T>
 void ReplaceNaNOp<CPUContext>::ReplaceNaN(
     const T& value,
-    const int64_t size,
+    const TIndex size,
     const T* X,
     T* Y) {
-  for (int64_t i = 0; i < size; i++) {
+  for (TIndex i = 0; i < size; i++) {
     if (std::isnan(X[i])) {
       Y[i] = value;
     } else {

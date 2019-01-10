@@ -1,9 +1,8 @@
 #pragma once
 
 #include "caffe2/core/common.h"
-#include "caffe2/core/tensor.h"
 #include "caffe2/onnx/helper.h"
-#include "caffe2/proto/caffe2_pb.h"
+#include "caffe2/proto/caffe2.pb.h"
 #include "onnx/onnx_pb.h"
 
 #include <string>
@@ -26,20 +25,18 @@ using ConvertedResult =
 
 // Rewrite Caffe2 nets into SSA forms. Notice that we will preserve the external
 // output names for predict net.
-CAFFE2_API std::unordered_map<std::string, std::string> SsaRewrite(
+std::unordered_map<std::string, std::string> SsaRewrite(
     caffe2::NetDef* init_net,
     caffe2::NetDef* pred_net);
 
-::ONNX_NAMESPACE::TensorProto::DataType Caffe2TypeToOnnxType(
-    caffe2::TensorProto::DataType t);
-
-class CAFFE2_API OnnxExporter {
+class OnnxExporter {
   using SpecialOpConverter = ConvertedResult (OnnxExporter::*)(
       const caffe2::OperatorDef&,
       const std::unordered_map<std::string, caffe2::TensorShape>&);
 
  public:
-  OnnxExporter(DummyName* dummy = nullptr) {
+  OnnxExporter(DummyName* dummy = nullptr, bool legacy_mode = false)
+      : legacy_mode_(legacy_mode) {
     if (dummy) {
       dummy_ = std::shared_ptr<DummyName>(dummy, [](DummyName*) {});
     } else {
@@ -54,14 +51,6 @@ class CAFFE2_API OnnxExporter {
   void InitOpToTensorProto(const caffe2::OperatorDef& def, TensorProto* tensor);
  private:
   ConvertedResult CommonCaffe2OpToOnnxNodes(const caffe2::OperatorDef& def);
-
-  ConvertedResult CreateArgMaxMinOpNodes(
-      const caffe2::OperatorDef& def,
-      const std::unordered_map<std::string, caffe2::TensorShape>& shapes);
-
-  ConvertedResult CreateBinaryElementwiseOpNodes(
-      const caffe2::OperatorDef& def,
-      const std::unordered_map<std::string, caffe2::TensorShape>& shapes);
 
   ConvertedResult CreateCastNodes(
       const caffe2::OperatorDef& def,
@@ -95,10 +84,6 @@ class CAFFE2_API OnnxExporter {
       const caffe2::OperatorDef& def,
       const std::unordered_map<std::string, caffe2::TensorShape>& shapes);
 
-  ConvertedResult CreateUpsampleNodes(
-      const caffe2::OperatorDef& def,
-      const std::unordered_map<std::string, caffe2::TensorShape>& shapes);
-
   // \brief Check black listed arguemnts where we won't pass down when
   // converting to ONNX node
   bool IsBlackListed(const caffe2::Argument& arg);
@@ -118,6 +103,9 @@ class CAFFE2_API OnnxExporter {
       get_per_op_renamed_attrs() const;
   const std::unordered_map<std::string, OnnxExporter::SpecialOpConverter>&
   get_special_operators() const;
+
+  // To generate onnx models with opset < 6
+  bool legacy_mode_{false};
 
   // Dummy name generator
   std::shared_ptr<DummyName> dummy_;

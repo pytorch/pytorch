@@ -1,4 +1,3 @@
-
 class Relu : public NeuralNetOperator {
  public:
   Relu() : NeuralNetOperator(NNKind::Relu) {}
@@ -19,62 +18,62 @@ class Conv : public NeuralNetOperator {
       int group = 1,
       vector<int> dilations = {1, 1})
       : NeuralNetOperator(NNKind::Conv),
-        kernelShape_(kernelShape),
-        pads_(pads),
-        strides_(strides),
-        group_(group),
-        dilations_(dilations) {}
+        KernelShape(kernelShape),
+        Pads(pads),
+        Strides(strides),
+        Group(group),
+        Dilations(dilations) {}
 
   ~Conv() {}
 
   NOMNIGRAPH_DEFINE_NN_RTTI(Conv);
 
   vector<int> getKernelShape() const {
-    return kernelShape_;
+    return KernelShape;
   }
 
   vector<int> getPads() const {
-    return pads_;
+    return Pads;
   }
 
   vector<int> getStrides() const {
-    return strides_;
+    return Strides;
   }
 
   int getGroup() const {
-    return group_;
+    return Group;
   }
 
   vector<int> getDilations() const {
-    return dilations_;
+    return Dilations;
   }
 
   void setKernelShape(vector<int> kernelShape) {
-    kernelShape_ = kernelShape;
+    KernelShape = kernelShape;
   }
 
   void setPads(vector<int> pads) {
-    pads_ = pads;
+    Pads = pads;
   }
 
   void setStrides(vector<int> strides) {
-    strides_ = strides;
+    Strides = strides;
   }
 
   void setGroup(int group) {
-    group_ = group;
+    Group = group;
   }
 
   void setDilations(vector<int> dilations) {
-    dilations_ = dilations;
+    Dilations = dilations;
   }
 
  private:
-  vector<int> kernelShape_;
-  vector<int> pads_;
-  vector<int> strides_;
-  int group_;
-  vector<int> dilations_;
+  vector<int> KernelShape;
+  vector<int> Pads;
+  vector<int> Strides;
+  int Group;
+  vector<int> Dilations;
 };
 
 class ConvRelu : public NeuralNetOperator {
@@ -86,70 +85,70 @@ class ConvRelu : public NeuralNetOperator {
       int group = 1,
       vector<int> dilations = {1, 1})
       : NeuralNetOperator(NNKind::ConvRelu),
-        kernelShape_(kernelShape),
-        pads_(pads),
-        strides_(strides),
-        group_(group),
-        dilations_(dilations) {}
+        KernelShape(kernelShape),
+        Pads(pads),
+        Strides(strides),
+        Group(group),
+        Dilations(dilations) {}
 
   ConvRelu(const Conv& conv)
       : NeuralNetOperator(NNKind::ConvRelu),
-        kernelShape_(conv.getKernelShape()),
-        pads_(conv.getPads()),
-        strides_(conv.getStrides()),
-        group_(conv.getGroup()),
-        dilations_(conv.getDilations()) {}
+        KernelShape(conv.getKernelShape()),
+        Pads(conv.getPads()),
+        Strides(conv.getStrides()),
+        Group(conv.getGroup()),
+        Dilations(conv.getDilations()) {}
 
   ~ConvRelu() {}
 
   NOMNIGRAPH_DEFINE_NN_RTTI(ConvRelu);
 
   vector<int> getKernelShape() const {
-    return kernelShape_;
+    return KernelShape;
   }
 
   vector<int> getPads() const {
-    return pads_;
+    return Pads;
   }
 
   vector<int> getStrides() const {
-    return strides_;
+    return Strides;
   }
 
   int getGroup() const {
-    return group_;
+    return Group;
   }
 
   vector<int> getDilations() const {
-    return dilations_;
+    return Dilations;
   }
 
   void setKernelShape(vector<int> kernelShape) {
-    kernelShape_ = kernelShape;
+    KernelShape = kernelShape;
   }
 
   void setPads(vector<int> pads) {
-    pads_ = pads;
+    Pads = pads;
   }
 
   void setStrides(vector<int> strides) {
-    strides_ = strides;
+    Strides = strides;
   }
 
   void setGroup(int group) {
-    group_ = group;
+    Group = group;
   }
 
   void setDilations(vector<int> dilations) {
-    dilations_ = dilations;
+    Dilations = dilations;
   }
 
  private:
-  vector<int> kernelShape_;
-  vector<int> pads_;
-  vector<int> strides_;
-  int group_;
-  vector<int> dilations_;
+  vector<int> KernelShape;
+  vector<int> Pads;
+  vector<int> Strides;
+  int Group;
+  vector<int> Dilations;
 };
 
 class ConvTranspose : public NeuralNetOperator {
@@ -161,62 +160,62 @@ class ConvTranspose : public NeuralNetOperator {
       int group = 1,
       vector<int> dilations = {1, 1})
       : NeuralNetOperator(NNKind::ConvTranspose),
-        kernelShape_(kernelShape),
-        pads_(pads),
-        strides_(strides),
-        group_(group),
-        dilations_(dilations) {}
+        KernelShape(kernelShape),
+        Pads(pads),
+        Strides(strides),
+        Group(group),
+        Dilations(dilations) {}
 
   ~ConvTranspose() {}
 
   NOMNIGRAPH_DEFINE_NN_RTTI(ConvTranspose);
 
   vector<int> getKernelShape() const {
-    return kernelShape_;
+    return KernelShape;
   }
 
   vector<int> getPads() const {
-    return pads_;
+    return Pads;
   }
 
   vector<int> getStrides() const {
-    return strides_;
+    return Strides;
   }
 
   int getGroup() const {
-    return group_;
+    return Group;
   }
 
   vector<int> getDilations() const {
-    return dilations_;
+    return Dilations;
   }
 
   void setKernelShape(vector<int> kernelShape) {
-    kernelShape_ = kernelShape;
+    KernelShape = kernelShape;
   }
 
   void setPads(vector<int> pads) {
-    pads_ = pads;
+    Pads = pads;
   }
 
   void setStrides(vector<int> strides) {
-    strides_ = strides;
+    Strides = strides;
   }
 
   void setGroup(int group) {
-    group_ = group;
+    Group = group;
   }
 
   void setDilations(vector<int> dilations) {
-    dilations_ = dilations;
+    Dilations = dilations;
   }
 
  private:
-  vector<int> kernelShape_;
-  vector<int> pads_;
-  vector<int> strides_;
-  int group_;
-  vector<int> dilations_;
+  vector<int> KernelShape;
+  vector<int> Pads;
+  vector<int> Strides;
+  int Group;
+  vector<int> Dilations;
 };
 
 class AveragePool : public NeuralNetOperator {
@@ -226,42 +225,42 @@ class AveragePool : public NeuralNetOperator {
       vector<int> pads = {0, 0},
       vector<int> strides = {1, 1})
       : NeuralNetOperator(NNKind::AveragePool),
-        kernelShape_(kernelShape),
-        pads_(pads),
-        strides_(strides) {}
+        KernelShape(kernelShape),
+        Pads(pads),
+        Strides(strides) {}
 
   ~AveragePool() {}
 
   NOMNIGRAPH_DEFINE_NN_RTTI(AveragePool);
 
   vector<int> getKernelShape() const {
-    return kernelShape_;
+    return KernelShape;
   }
 
   vector<int> getPads() const {
-    return pads_;
+    return Pads;
   }
 
   vector<int> getStrides() const {
-    return strides_;
+    return Strides;
   }
 
   void setKernelShape(vector<int> kernelShape) {
-    kernelShape_ = kernelShape;
+    KernelShape = kernelShape;
   }
 
   void setPads(vector<int> pads) {
-    pads_ = pads;
+    Pads = pads;
   }
 
   void setStrides(vector<int> strides) {
-    strides_ = strides;
+    Strides = strides;
   }
 
  private:
-  vector<int> kernelShape_;
-  vector<int> pads_;
-  vector<int> strides_;
+  vector<int> KernelShape;
+  vector<int> Pads;
+  vector<int> Strides;
 };
 
 class AveragePoolRelu : public NeuralNetOperator {
@@ -271,48 +270,48 @@ class AveragePoolRelu : public NeuralNetOperator {
       vector<int> pads = {0, 0},
       vector<int> strides = {1, 1})
       : NeuralNetOperator(NNKind::AveragePoolRelu),
-        kernelShape_(kernelShape),
-        pads_(pads),
-        strides_(strides) {}
+        KernelShape(kernelShape),
+        Pads(pads),
+        Strides(strides) {}
 
   AveragePoolRelu(const AveragePool& averagePool)
       : NeuralNetOperator(NNKind::AveragePoolRelu),
-        kernelShape_(averagePool.getKernelShape()),
-        pads_(averagePool.getPads()),
-        strides_(averagePool.getStrides()) {}
+        KernelShape(averagePool.getKernelShape()),
+        Pads(averagePool.getPads()),
+        Strides(averagePool.getStrides()) {}
 
   ~AveragePoolRelu() {}
 
   NOMNIGRAPH_DEFINE_NN_RTTI(AveragePoolRelu);
 
   vector<int> getKernelShape() const {
-    return kernelShape_;
+    return KernelShape;
   }
 
   vector<int> getPads() const {
-    return pads_;
+    return Pads;
   }
 
   vector<int> getStrides() const {
-    return strides_;
+    return Strides;
   }
 
   void setKernelShape(vector<int> kernelShape) {
-    kernelShape_ = kernelShape;
+    KernelShape = kernelShape;
   }
 
   void setPads(vector<int> pads) {
-    pads_ = pads;
+    Pads = pads;
   }
 
   void setStrides(vector<int> strides) {
-    strides_ = strides;
+    Strides = strides;
   }
 
  private:
-  vector<int> kernelShape_;
-  vector<int> pads_;
-  vector<int> strides_;
+  vector<int> KernelShape;
+  vector<int> Pads;
+  vector<int> Strides;
 };
 
 class MaxPool : public NeuralNetOperator {
@@ -322,42 +321,42 @@ class MaxPool : public NeuralNetOperator {
       vector<int> pads = {0, 0},
       vector<int> strides = {1, 1})
       : NeuralNetOperator(NNKind::MaxPool),
-        kernelShape_(kernelShape),
-        pads_(pads),
-        strides_(strides) {}
+        KernelShape(kernelShape),
+        Pads(pads),
+        Strides(strides) {}
 
   ~MaxPool() {}
 
   NOMNIGRAPH_DEFINE_NN_RTTI(MaxPool);
 
   vector<int> getKernelShape() const {
-    return kernelShape_;
+    return KernelShape;
   }
 
   vector<int> getPads() const {
-    return pads_;
+    return Pads;
   }
 
   vector<int> getStrides() const {
-    return strides_;
+    return Strides;
   }
 
   void setKernelShape(vector<int> kernelShape) {
-    kernelShape_ = kernelShape;
+    KernelShape = kernelShape;
   }
 
   void setPads(vector<int> pads) {
-    pads_ = pads;
+    Pads = pads;
   }
 
   void setStrides(vector<int> strides) {
-    strides_ = strides;
+    Strides = strides;
   }
 
  private:
-  vector<int> kernelShape_;
-  vector<int> pads_;
-  vector<int> strides_;
+  vector<int> KernelShape;
+  vector<int> Pads;
+  vector<int> Strides;
 };
 
 class MaxPoolRelu : public NeuralNetOperator {
@@ -367,48 +366,48 @@ class MaxPoolRelu : public NeuralNetOperator {
       vector<int> pads = {0, 0},
       vector<int> strides = {1, 1})
       : NeuralNetOperator(NNKind::MaxPoolRelu),
-        kernelShape_(kernelShape),
-        pads_(pads),
-        strides_(strides) {}
+        KernelShape(kernelShape),
+        Pads(pads),
+        Strides(strides) {}
 
   MaxPoolRelu(const MaxPool& maxPool)
       : NeuralNetOperator(NNKind::MaxPoolRelu),
-        kernelShape_(maxPool.getKernelShape()),
-        pads_(maxPool.getPads()),
-        strides_(maxPool.getStrides()) {}
+        KernelShape(maxPool.getKernelShape()),
+        Pads(maxPool.getPads()),
+        Strides(maxPool.getStrides()) {}
 
   ~MaxPoolRelu() {}
 
   NOMNIGRAPH_DEFINE_NN_RTTI(MaxPoolRelu);
 
   vector<int> getKernelShape() const {
-    return kernelShape_;
+    return KernelShape;
   }
 
   vector<int> getPads() const {
-    return pads_;
+    return Pads;
   }
 
   vector<int> getStrides() const {
-    return strides_;
+    return Strides;
   }
 
   void setKernelShape(vector<int> kernelShape) {
-    kernelShape_ = kernelShape;
+    KernelShape = kernelShape;
   }
 
   void setPads(vector<int> pads) {
-    pads_ = pads;
+    Pads = pads;
   }
 
   void setStrides(vector<int> strides) {
-    strides_ = strides;
+    Strides = strides;
   }
 
  private:
-  vector<int> kernelShape_;
-  vector<int> pads_;
-  vector<int> strides_;
+  vector<int> KernelShape;
+  vector<int> Pads;
+  vector<int> Strides;
 };
 
 class Sum : public NeuralNetOperator {
@@ -438,43 +437,42 @@ class SumRelu : public NeuralNetOperator {
 class Send : public NeuralNetOperator {
  public:
   Send(string destination)
-      : NeuralNetOperator(NNKind::Send), destination_(destination) {}
+      : NeuralNetOperator(NNKind::Send), Destination(destination) {}
 
   ~Send() {}
 
   NOMNIGRAPH_DEFINE_NN_RTTI(Send);
 
   string getDestination() const {
-    return destination_;
+    return Destination;
   }
 
   void setDestination(string destination) {
-    destination_ = destination;
+    Destination = destination;
   }
 
  private:
-  string destination_;
+  string Destination;
 };
 
 class Receive : public NeuralNetOperator {
  public:
-  Receive(string source)
-      : NeuralNetOperator(NNKind::Receive), source_(source) {}
+  Receive(string source) : NeuralNetOperator(NNKind::Receive), Source(source) {}
 
   ~Receive() {}
 
   NOMNIGRAPH_DEFINE_NN_RTTI(Receive);
 
   string getSource() const {
-    return source_;
+    return Source;
   }
 
   void setSource(string source) {
-    source_ = source;
+    Source = source;
   }
 
  private:
-  string source_;
+  string Source;
 };
 
 class BatchNormalization : public NeuralNetOperator {
@@ -485,112 +483,63 @@ class BatchNormalization : public NeuralNetOperator {
       bool spatial = true,
       bool isTest = false)
       : NeuralNetOperator(NNKind::BatchNormalization),
-        epsilon_(epsilon),
-        momentum_(momentum),
-        spatial_(spatial),
-        isTest_(isTest) {}
+        Epsilon(epsilon),
+        Momentum(momentum),
+        Spatial(spatial),
+        IsTest(isTest) {}
 
   ~BatchNormalization() {}
 
   NOMNIGRAPH_DEFINE_NN_RTTI(BatchNormalization);
 
   float getEpsilon() const {
-    return epsilon_;
+    return Epsilon;
   }
 
   float getMomentum() const {
-    return momentum_;
+    return Momentum;
   }
 
   bool getSpatial() const {
-    return spatial_;
+    return Spatial;
   }
 
   bool getIsTest() const {
-    return isTest_;
+    return IsTest;
   }
 
   void setEpsilon(float epsilon) {
-    epsilon_ = epsilon;
+    Epsilon = epsilon;
   }
 
   void setMomentum(float momentum) {
-    momentum_ = momentum;
+    Momentum = momentum;
   }
 
   void setSpatial(bool spatial) {
-    spatial_ = spatial;
+    Spatial = spatial;
   }
 
   void setIsTest(bool isTest) {
-    isTest_ = isTest;
+    IsTest = isTest;
   }
 
  private:
-  float epsilon_;
-  float momentum_;
-  bool spatial_;
-  bool isTest_;
-};
-
-class Clip : public NeuralNetOperator {
- public:
-  Clip(float min, float max)
-      : NeuralNetOperator(NNKind::Clip), min_(min), max_(max) {}
-
-  ~Clip() {}
-
-  NOMNIGRAPH_DEFINE_NN_RTTI(Clip);
-
-  float getMin() const {
-    return min_;
-  }
-
-  float getMax() const {
-    return max_;
-  }
-
-  void setMin(float min) {
-    min_ = min;
-  }
-
-  void setMax(float max) {
-    max_ = max;
-  }
-
- private:
-  float min_;
-  float max_;
+  float Epsilon;
+  float Momentum;
+  bool Spatial;
+  bool IsTest;
 };
 
 class FC : public NeuralNetOperator {
  public:
-  FC(int axis = 1, int axisW = 1)
-      : NeuralNetOperator(NNKind::FC), axis_(axis), axisW_(axisW) {}
+  FC() : NeuralNetOperator(NNKind::FC) {}
 
   ~FC() {}
 
   NOMNIGRAPH_DEFINE_NN_RTTI(FC);
 
-  int getAxis() const {
-    return axis_;
-  }
-
-  int getAxisW() const {
-    return axisW_;
-  }
-
-  void setAxis(int axis) {
-    axis_ = axis;
-  }
-
-  void setAxisW(int axisW) {
-    axisW_ = axisW;
-  }
-
  private:
-  int axis_;
-  int axisW_;
 };
 
 class GivenTensorFill : public NeuralNetOperator {
@@ -606,32 +555,13 @@ class GivenTensorFill : public NeuralNetOperator {
 
 class Concat : public NeuralNetOperator {
  public:
-  Concat(int axis = -1, bool addAxis = false)
-      : NeuralNetOperator(NNKind::Concat), axis_(axis), addAxis_(addAxis) {}
+  Concat() : NeuralNetOperator(NNKind::Concat) {}
 
   ~Concat() {}
 
   NOMNIGRAPH_DEFINE_NN_RTTI(Concat);
 
-  int getAxis() const {
-    return axis_;
-  }
-
-  bool getAddAxis() const {
-    return addAxis_;
-  }
-
-  void setAxis(int axis) {
-    axis_ = axis;
-  }
-
-  void setAddAxis(bool addAxis) {
-    addAxis_ = addAxis;
-  }
-
  private:
-  int axis_;
-  bool addAxis_;
 };
 
 class Softmax : public NeuralNetOperator {
@@ -658,23 +588,13 @@ class ChannelShuffle : public NeuralNetOperator {
 
 class Add : public NeuralNetOperator {
  public:
-  Add(int broadcast = 0)
-      : NeuralNetOperator(NNKind::Add), broadcast_(broadcast) {}
+  Add() : NeuralNetOperator(NNKind::Add) {}
 
   ~Add() {}
 
   NOMNIGRAPH_DEFINE_NN_RTTI(Add);
 
-  int getBroadcast() const {
-    return broadcast_;
-  }
-
-  void setBroadcast(int broadcast) {
-    broadcast_ = broadcast;
-  }
-
  private:
-  int broadcast_;
 };
 
 class Reshape : public NeuralNetOperator {
@@ -699,68 +619,270 @@ class Flatten : public NeuralNetOperator {
  private:
 };
 
-class CopyToOpenCL : public NeuralNetOperator {
+class Int8Quantize : public NeuralNetOperator {
  public:
-  CopyToOpenCL() : NeuralNetOperator(NNKind::CopyToOpenCL) {}
+  Int8Quantize() : NeuralNetOperator(NNKind::Int8Quantize) {}
 
-  ~CopyToOpenCL() {}
+  ~Int8Quantize() {}
 
-  NOMNIGRAPH_DEFINE_NN_RTTI(CopyToOpenCL);
+  NOMNIGRAPH_DEFINE_NN_RTTI(Int8Quantize);
 
  private:
 };
 
-class CopyFromOpenCL : public NeuralNetOperator {
+class Int8Dequantize : public NeuralNetOperator {
  public:
-  CopyFromOpenCL() : NeuralNetOperator(NNKind::CopyFromOpenCL) {}
+  Int8Dequantize() : NeuralNetOperator(NNKind::Int8Dequantize) {}
 
-  ~CopyFromOpenCL() {}
+  ~Int8Dequantize() {}
 
-  NOMNIGRAPH_DEFINE_NN_RTTI(CopyFromOpenCL);
+  NOMNIGRAPH_DEFINE_NN_RTTI(Int8Dequantize);
 
  private:
 };
 
-class NCHW2NHWC : public NeuralNetOperator {
+class Int8AveragePool : public NeuralNetOperator {
  public:
-  NCHW2NHWC() : NeuralNetOperator(NNKind::NCHW2NHWC) {}
+  Int8AveragePool() : NeuralNetOperator(NNKind::Int8AveragePool) {}
 
-  ~NCHW2NHWC() {}
+  Int8AveragePool(const AveragePool& averagePool)
+      : NeuralNetOperator(NNKind::Int8AveragePool) {}
 
-  NOMNIGRAPH_DEFINE_NN_RTTI(NCHW2NHWC);
+  ~Int8AveragePool() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(Int8AveragePool);
 
  private:
 };
 
-class NHWC2NCHW : public NeuralNetOperator {
+class Int8Conv : public NeuralNetOperator {
  public:
-  NHWC2NCHW() : NeuralNetOperator(NNKind::NHWC2NCHW) {}
+  Int8Conv() : NeuralNetOperator(NNKind::Int8Conv) {}
 
-  ~NHWC2NCHW() {}
+  Int8Conv(const Conv& conv) : NeuralNetOperator(NNKind::Int8Conv) {}
 
-  NOMNIGRAPH_DEFINE_NN_RTTI(NHWC2NCHW);
+  ~Int8Conv() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(Int8Conv);
 
  private:
 };
 
-class Declare : public NeuralNetOperator {
+class Int8ConvTranspose : public NeuralNetOperator {
  public:
-  Declare() : NeuralNetOperator(NNKind::Declare) {}
+  Int8ConvTranspose() : NeuralNetOperator(NNKind::Int8ConvTranspose) {}
 
-  ~Declare() {}
+  Int8ConvTranspose(const ConvTranspose& convTranspose)
+      : NeuralNetOperator(NNKind::Int8ConvTranspose) {}
 
-  NOMNIGRAPH_DEFINE_NN_RTTI(Declare);
+  ~Int8ConvTranspose() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(Int8ConvTranspose);
 
  private:
 };
 
-class Export : public NeuralNetOperator {
+class Int8FC : public NeuralNetOperator {
  public:
-  Export() : NeuralNetOperator(NNKind::Export) {}
+  Int8FC() : NeuralNetOperator(NNKind::Int8FC) {}
 
-  ~Export() {}
+  Int8FC(const FC& fC) : NeuralNetOperator(NNKind::Int8FC) {}
 
-  NOMNIGRAPH_DEFINE_NN_RTTI(Export);
+  ~Int8FC() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(Int8FC);
+
+ private:
+};
+
+class Int8MaxPool : public NeuralNetOperator {
+ public:
+  Int8MaxPool() : NeuralNetOperator(NNKind::Int8MaxPool) {}
+
+  Int8MaxPool(const MaxPool& maxPool)
+      : NeuralNetOperator(NNKind::Int8MaxPool) {}
+
+  ~Int8MaxPool() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(Int8MaxPool);
+
+ private:
+};
+
+class Int8Relu : public NeuralNetOperator {
+ public:
+  Int8Relu() : NeuralNetOperator(NNKind::Int8Relu) {}
+
+  Int8Relu(const Relu& relu) : NeuralNetOperator(NNKind::Int8Relu) {}
+
+  ~Int8Relu() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(Int8Relu);
+
+ private:
+};
+
+class Int8GivenTensorFill : public NeuralNetOperator {
+ public:
+  Int8GivenTensorFill() : NeuralNetOperator(NNKind::Int8GivenTensorFill) {}
+
+  Int8GivenTensorFill(const GivenTensorFill& givenTensorFill)
+      : NeuralNetOperator(NNKind::Int8GivenTensorFill) {}
+
+  ~Int8GivenTensorFill() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(Int8GivenTensorFill);
+
+ private:
+};
+
+class Int8Concat : public NeuralNetOperator {
+ public:
+  Int8Concat() : NeuralNetOperator(NNKind::Int8Concat) {}
+
+  Int8Concat(const Concat& concat) : NeuralNetOperator(NNKind::Int8Concat) {}
+
+  ~Int8Concat() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(Int8Concat);
+
+ private:
+};
+
+class Int8Softmax : public NeuralNetOperator {
+ public:
+  Int8Softmax() : NeuralNetOperator(NNKind::Int8Softmax) {}
+
+  Int8Softmax(const Softmax& softmax)
+      : NeuralNetOperator(NNKind::Int8Softmax) {}
+
+  ~Int8Softmax() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(Int8Softmax);
+
+ private:
+};
+
+class Int8ChannelShuffle : public NeuralNetOperator {
+ public:
+  Int8ChannelShuffle() : NeuralNetOperator(NNKind::Int8ChannelShuffle) {}
+
+  Int8ChannelShuffle(const ChannelShuffle& channelShuffle)
+      : NeuralNetOperator(NNKind::Int8ChannelShuffle) {}
+
+  ~Int8ChannelShuffle() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(Int8ChannelShuffle);
+
+ private:
+};
+
+class Int8Sum : public NeuralNetOperator {
+ public:
+  Int8Sum() : NeuralNetOperator(NNKind::Int8Sum) {}
+
+  Int8Sum(const Sum& sum) : NeuralNetOperator(NNKind::Int8Sum) {}
+
+  ~Int8Sum() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(Int8Sum);
+
+ private:
+};
+
+class Int8Add : public NeuralNetOperator {
+ public:
+  Int8Add() : NeuralNetOperator(NNKind::Int8Add) {}
+
+  Int8Add(const Add& add) : NeuralNetOperator(NNKind::Int8Add) {}
+
+  ~Int8Add() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(Int8Add);
+
+ private:
+};
+
+class Int8Reshape : public NeuralNetOperator {
+ public:
+  Int8Reshape() : NeuralNetOperator(NNKind::Int8Reshape) {}
+
+  Int8Reshape(const Reshape& reshape)
+      : NeuralNetOperator(NNKind::Int8Reshape) {}
+
+  ~Int8Reshape() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(Int8Reshape);
+
+ private:
+};
+
+class Int8Flatten : public NeuralNetOperator {
+ public:
+  Int8Flatten() : NeuralNetOperator(NNKind::Int8Flatten) {}
+
+  Int8Flatten(const Flatten& flatten)
+      : NeuralNetOperator(NNKind::Int8Flatten) {}
+
+  ~Int8Flatten() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(Int8Flatten);
+
+ private:
+};
+
+class Int8ConvRelu : public NeuralNetOperator {
+ public:
+  Int8ConvRelu() : NeuralNetOperator(NNKind::Int8ConvRelu) {}
+
+  Int8ConvRelu(const ConvRelu& convRelu)
+      : NeuralNetOperator(NNKind::Int8ConvRelu) {}
+
+  ~Int8ConvRelu() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(Int8ConvRelu);
+
+ private:
+};
+
+class Int8SumRelu : public NeuralNetOperator {
+ public:
+  Int8SumRelu() : NeuralNetOperator(NNKind::Int8SumRelu) {}
+
+  Int8SumRelu(const SumRelu& sumRelu)
+      : NeuralNetOperator(NNKind::Int8SumRelu) {}
+
+  ~Int8SumRelu() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(Int8SumRelu);
+
+ private:
+};
+
+class Int8AveragePoolRelu : public NeuralNetOperator {
+ public:
+  Int8AveragePoolRelu() : NeuralNetOperator(NNKind::Int8AveragePoolRelu) {}
+
+  Int8AveragePoolRelu(const AveragePoolRelu& averagePoolRelu)
+      : NeuralNetOperator(NNKind::Int8AveragePoolRelu) {}
+
+  ~Int8AveragePoolRelu() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(Int8AveragePoolRelu);
+
+ private:
+};
+
+class Int8MaxPoolRelu : public NeuralNetOperator {
+ public:
+  Int8MaxPoolRelu() : NeuralNetOperator(NNKind::Int8MaxPoolRelu) {}
+
+  Int8MaxPoolRelu(const MaxPoolRelu& maxPoolRelu)
+      : NeuralNetOperator(NNKind::Int8MaxPoolRelu) {}
+
+  ~Int8MaxPoolRelu() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(Int8MaxPoolRelu);
 
  private:
 };

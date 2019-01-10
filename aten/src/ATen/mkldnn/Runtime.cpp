@@ -1,4 +1,4 @@
-#include <ATen/mkldnn/Runtime.h>
+#include "Runtime.h"
 
 namespace at { namespace native {
 

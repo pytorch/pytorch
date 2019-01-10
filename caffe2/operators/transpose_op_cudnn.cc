@@ -42,13 +42,13 @@ class CuDNNTransposeOp final : public Operator<CUDAContext> {
   bool RunOnDevice() override {
     const auto& X = Input(0);
     auto* Y = Output(0);
-    const int ndim = X.dim();
-    X_dims_.assign(X.sizes().cbegin(), X.sizes().cend());
+    const int ndim = X.ndim();
+    X_dims_.assign(X.dims().cbegin(), X.dims().cend());
     if (axes_.empty()) {
       axes_.resize(ndim);
       std::iota(axes_.rbegin(), axes_.rend(), 0);
     } else {
-      CAFFE_ENFORCE_EQ(X.dim(), axes_.size());
+      CAFFE_ENFORCE_EQ(X.ndim(), axes_.size());
     }
     std::vector<int> Y_dims(ndim);
     for (int i = 0; i < ndim; ++i) {
@@ -69,7 +69,7 @@ class CuDNNTransposeOp final : public Operator<CUDAContext> {
   bool DoRunWithType() {
     const auto& input = Input(0);
     auto* output = Output(0);
-    int ndim = input.dim();
+    int ndim = input.ndim();
 
     if (ndim == 0) {
       return true;

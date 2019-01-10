@@ -6,17 +6,16 @@ from __future__ import unicode_literals
 from caffe2.python import core
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
-import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 
 
-class TestLengthsTileOp(serial.SerializedTestCase):
+class TestLengthsTileOp(hu.HypothesisTestCase):
 
-    @serial.given(
+    @given(
         inputs=st.integers(min_value=1, max_value=20).flatmap(
             lambda size: st.tuples(
-                hu.arrays([size], dtype=np.float32),
+                hu.arrays([size]),
                 hu.arrays([size], dtype=np.int32,
                           elements=st.integers(min_value=0, max_value=20)),
             )
@@ -33,7 +32,7 @@ class TestLengthsTileOp(serial.SerializedTestCase):
         op = core.CreateOperator(
             "LengthsTile",
             ["data", "lengths"],
-            ["output"],
+            ["output"]
         )
 
         self.assertReferenceChecks(

@@ -11,13 +11,13 @@ namespace at { namespace native {
 
 Tensor cudnn_grid_sampler_forward(
     const Tensor& input_t, const Tensor& grid_t) {
-  AT_ERROR("cudnn_grid_sampler_forward: ATen not compiled with cuDNN support");
+  throw std::runtime_error("cudnn_grid_sampler_forward: ATen not compiled with cuDNN support");
 }
 
 std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
     const Tensor& input_t, const Tensor& grid_t,
     const Tensor& grad_output_t) {
-  AT_ERROR("cudnn_grid_sampler_backward: ATen not compiled with cuDNN support");
+  throw std::runtime_error("cudnn_grid_sampler_backward: ATen not compiled with cuDNN support");
 }
 
 }}
@@ -27,7 +27,6 @@ std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
 #include <ATen/cudnn/Descriptors.h>
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>
-#include <ATen/cuda/Exceptions.h>
 
 #include <ATen/TensorUtils.h>
 
@@ -75,7 +74,7 @@ Tensor cudnn_grid_sampler_forward(
   checkGridSize(c, grid, input);
   checkDim(c, input, 4);
 
-  auto output_t = at::empty({0}, input->options());
+  auto output_t = input->type().tensor();
   output_t.resize_({input->size(0), input->size(1), grid->size(1), grid->size(2)});
 
   TensorDescriptor idesc{ *input };  // input descriptor
@@ -88,7 +87,7 @@ Tensor cudnn_grid_sampler_forward(
 
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
-  AT_CUDNN_CHECK(cudnnSpatialTfSamplerForward(
+  CUDNN_CHECK(cudnnSpatialTfSamplerForward(
       handle, desc.desc(),
       &one, idesc.desc(), input->data_ptr(),
       grid->data_ptr(),
@@ -114,9 +113,9 @@ std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
   checkDim(c, input, 4);
   checkDim(c, grad_output, 4);
 
-  auto grad_input_t = at::empty({0}, input->options());
+  auto grad_input_t = input->type().tensor();
   grad_input_t.resize_(input->sizes());
-  auto grad_grid_t = at::empty({0}, grid->options());
+  auto grad_grid_t = grid->type().tensor();
   grad_grid_t.resize_(grid->sizes());
 
   TensorDescriptor idesc{ *input };  // input descriptor
@@ -130,7 +129,7 @@ std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
 
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
-  AT_CUDNN_CHECK(cudnnSpatialTfSamplerBackward(
+  CUDNN_CHECK(cudnnSpatialTfSamplerBackward(
     handle, desc.desc(),
     &one, idesc.desc(), input->data_ptr(),
     &zero, gdesc.desc(), grad_input_t.data_ptr(),

@@ -1,4 +1,4 @@
-#include <THC/THCReduceApplyUtils.cuh>
+#include "THCReduceApplyUtils.cuh"
 
 #include <assert.h>
 #include <stdlib.h>
@@ -7,7 +7,7 @@
 #define MAX_GRID_SIZE 65535LL
 
 void THCCheckTensorDims(THCState* state, THCudaTensor* tensor, int arg) {
-  int64_t dims = THCudaTensor_nDimensionLegacyAll(state, tensor);
+  int64_t dims = THCudaTensor_nDimension(state, tensor);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, arg, CUTORCH_DIM_WARNING);
 }
 

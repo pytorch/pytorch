@@ -9,13 +9,14 @@ from torch.distributions.utils import broadcast_all
 
 class Beta(ExponentialFamily):
     r"""
-    Beta distribution parameterized by :attr:`concentration1` and :attr:`concentration0`.
+    Beta distribution parameterized by `concentration1` and `concentration0`.
 
     Example::
 
         >>> m = Beta(torch.tensor([0.5]), torch.tensor([0.5]))
         >>> m.sample()  # Beta distributed with concentration concentration1 and concentration0
-        tensor([ 0.1046])
+         0.1046
+        [torch.FloatTensor of size 1]
 
     Args:
         concentration1 (float or Tensor): 1st concentration parameter of the distribution
@@ -35,14 +36,6 @@ class Beta(ExponentialFamily):
             concentration1_concentration0 = torch.stack([concentration1, concentration0], -1)
         self._dirichlet = Dirichlet(concentration1_concentration0)
         super(Beta, self).__init__(self._dirichlet._batch_shape, validate_args=validate_args)
-
-    def expand(self, batch_shape, _instance=None):
-        new = self._get_checked_instance(Beta, _instance)
-        batch_shape = torch.Size(batch_shape)
-        new._dirichlet = self._dirichlet.expand(batch_shape)
-        super(Beta, new).__init__(batch_shape, validate_args=False)
-        new._validate_args = self._validate_args
-        return new
 
     @property
     def mean(self):
@@ -73,7 +66,7 @@ class Beta(ExponentialFamily):
     def concentration1(self):
         result = self._dirichlet.concentration[..., 0]
         if isinstance(result, Number):
-            return torch.tensor([result])
+            return torch.Tensor([result])
         else:
             return result
 
@@ -81,7 +74,7 @@ class Beta(ExponentialFamily):
     def concentration0(self):
         result = self._dirichlet.concentration[..., 1]
         if isinstance(result, Number):
-            return torch.tensor([result])
+            return torch.Tensor([result])
         else:
             return result
 

@@ -1,13 +1,12 @@
-#include <ATen/Config.h>
+#include "ATen/Config.h"
 
-#include <ATen/CUDAGenerator.h>
-#include <ATen/Context.h>
-#include <THC/THCTensorRandom.h>
+#include "ATen/CUDAGenerator.h"
+#include "ATen/Context.h"
+#include "THCTensorRandom.h"
 #include <stdexcept>
 
-// There is only one CUDAGenerator instance. Calls to seed(), manualSeed(),
-// initialSeed(), and unsafeGetTH() refer to the THCGenerator on the current
-// device.
+#define const_generator_cast(generator) \
+  dynamic_cast<const CUDAGenerator&>(generator)
 
 THCGenerator* THCRandom_getGenerator(THCState* state);
 
@@ -16,6 +15,9 @@ namespace at {
 CUDAGenerator::CUDAGenerator(Context * context_)
   : context(context_)
 {
+  // there's no reason to call THCRandom_init, because it is called
+  // during THCudaInit, which is called before this initializer
+  generator = THCRandom_getGenerator(context->getTHCState());
 }
 
 CUDAGenerator::~CUDAGenerator() {
@@ -50,7 +52,7 @@ CUDAGenerator& CUDAGenerator::manualSeedAll(uint64_t seed) {
 }
 
 void * CUDAGenerator::unsafeGetTH() {
-  return (void*)THCRandom_getGenerator(context->getTHCState());
+  return (void *) generator;
 }
 
 } // namespace at

@@ -13,10 +13,10 @@ void TypedAxpy<float, float>(int N, const float a, const float* x, float* y) {
   math::Axpy<float, CPUContext>(N, a, x, y, nullptr);
 }
 
-void TypedAxpyHalffloat__base(
+void TypedAxpy_float16_float__base(
     int N,
     const float a,
-    const at::Half* x,
+    const float16* x,
     float* y) {
   for (int i = 0; i < N; ++i) {
     union {
@@ -37,14 +37,14 @@ void TypedAxpyHalffloat__base(
 }
 
 template <>
-void TypedAxpy<at::Half, float>(
+void TypedAxpy<float16, float>(
     int N,
     const float a,
-    const at::Half* x,
+    const float16* x,
     float* y) {
-  AVX2_FMA_DO(TypedAxpyHalffloat, N, a, x, y);
-  AVX_F16C_DO(TypedAxpyHalffloat, N, a, x, y);
-  BASE_DO(TypedAxpyHalffloat, N, a, x, y);
+  AVX2_FMA_DO(TypedAxpy_float16_float, N, a, x, y);
+  AVX_F16C_DO(TypedAxpy_float16_float, N, a, x, y);
+  BASE_DO(TypedAxpy_float16_float, N, a, x, y);
 }
 
 void TypedAxpy_uint8_float__base(

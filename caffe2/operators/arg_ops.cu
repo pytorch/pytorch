@@ -7,41 +7,37 @@
 
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
-#include "caffe2/utils/fixed_divisor.h"
 
 namespace caffe2 {
 
 namespace {
 
-template <typename K, typename V>
-using KeyValuePair = cub::KeyValuePair<K, V>;
+template <typename T>
+using KeyValuePair = cub::KeyValuePair<TIndex, T>;
 
-template <typename K, typename V>
-using BlockReduce =
-    cub::BlockReduce<KeyValuePair<K, V>, CAFFE_CUDA_NUM_THREADS>;
+template <typename T>
+using BlockReduce = cub::BlockReduce<KeyValuePair<T>, CAFFE_CUDA_NUM_THREADS>;
 
 template <typename T, class Reducer>
 __global__ void ComputeArgCUDAKernel(
-    const int outer_size,
-    const int inner_size,
-    const FixedDivisor<int> stride,
+    const TIndex outer_size,
+    const TIndex inner_size,
+    const TIndex stride,
     const Reducer reducer,
     const T init,
     const T* X,
-    int64_t* Y) {
-  __shared__ typename BlockReduce<int, T>::TempStorage temp_storage;
-  const int d = stride.d();
-  for (int idx = blockIdx.x; idx < outer_size; idx += gridDim.x) {
-    int i;
-    int j;
-    stride.DivMod(idx, &i, &j);
-    KeyValuePair<int, T> kv = {-1, init};
-    for (int k = threadIdx.x; k < inner_size; k += blockDim.x) {
-      kv = reducer({k, X[i * inner_size * d + k * d + j]}, kv);
+    TIndex* Y) {
+  __shared__ typename BlockReduce<T>::TempStorage temp_storage;
+  for (TIndex idx = blockIdx.x; idx < outer_size; idx += gridDim.x) {
+    const TIndex i = idx / stride;
+    const TIndex j = idx % stride;
+    KeyValuePair<T> kv = {-1, init};
+    for (TIndex k = threadIdx.x; k < inner_size; k += blockDim.x) {
+      kv = reducer({k, X[i * inner_size * stride + k * stride + j]}, kv);
     }
-    kv = BlockReduce<int, T>(temp_storage).Reduce(kv, reducer);
+    kv = BlockReduce<T>(temp_storage).Reduce(kv, reducer);
     if (threadIdx.x == 0) {
-      Y[idx] = static_cast<int64_t>(kv.key);
+      Y[idx] = kv.key;
     }
     __syncthreads();
   }
@@ -52,22 +48,21 @@ __global__ void ComputeArgCUDAKernel(
 template <>
 template <typename T>
 bool ArgMaxReducer<CUDAContext>::operator()(
-    const int prev_size,
-    const int next_size,
-    const int n,
+    const TIndex prev_size,
+    const TIndex next_size,
+    const TIndex n,
     const T* X,
-    int64_t* Y,
+    TIndex* Y,
     CUDAContext* context) const {
-  const int outer_size = prev_size * next_size;
-  const FixedDivisor<int> stride(next_size);
+  const TIndex outer_size = prev_size * next_size;
   ComputeArgCUDAKernel<<<
-      std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS),
+      std::min(outer_size, static_cast<TIndex>(CAFFE_MAXIMUM_NUM_BLOCKS)),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context->cuda_stream()>>>(
       outer_size,
       n,
-      stride,
+      next_size,
       cub::ArgMax(),
       std::numeric_limits<T>::lowest(),
       X,
@@ -78,22 +73,21 @@ bool ArgMaxReducer<CUDAContext>::operator()(
 template <>
 template <typename T>
 bool ArgMinReducer<CUDAContext>::operator()(
-    const int prev_size,
-    const int next_size,
-    const int n,
+    const TIndex prev_size,
+    const TIndex next_size,
+    const TIndex n,
     const T* X,
-    int64_t* Y,
+    TIndex* Y,
     CUDAContext* context) const {
-  const int outer_size = prev_size * next_size;
-  const FixedDivisor<int> stride(next_size);
+  const TIndex outer_size = prev_size * next_size;
   ComputeArgCUDAKernel<<<
-      std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS),
+      std::min(outer_size, static_cast<TIndex>(CAFFE_MAXIMUM_NUM_BLOCKS)),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context->cuda_stream()>>>(
       outer_size,
       n,
-      stride,
+      next_size,
       cub::ArgMin(),
       std::numeric_limits<T>::max(),
       X,

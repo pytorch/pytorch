@@ -1,37 +1,37 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "THC/generic/THCTensorMode.cu"
+#define THC_GENERIC_FILE "generic/THCTensorMode.cu"
 #else
 
-void THCTensor_(calculateMode)(THCState *state,
-                               THCTensor *values,
-                               THCudaLongTensor *indices,
-                               THCTensor *input,
-                               THCudaLongStorage *sortBuffer,
-                               int dimension,
-                               THLongStorage *position) {
+THC_API void THCTensor_(calculateMode)(THCState *state,
+                                        THCTensor *values,
+                                        THCudaLongTensor *indices,
+                                        THCTensor *input,
+                                        THCudaLongStorage *sortBuffer,
+                                        int dimension,
+                                        THLongStorage *position) {
   THAssert(THCTensor_(isContiguous)(state, input));
 
   // Because the input is contiguous, we want to get a reference to the
   // location of the buffer at the innermost dimension that we are going
   // to calculate the mode for --> we do this by manually doing the stride
   // calculations to get an offset
-  scalar_t *data = THCTensor_(data)(state, input);
+  real *data = THCTensor_(data)(state, input);
   for (int i = 0; i < THLongStorage_size(position); ++i) {
-    data += THLongStorage_data(position)[i] * THTensor_strideLegacyNoScalars(input, i);
+    data += THLongStorage_data(position)[i] * THCTensor_(stride)(state, input, i);
   }
 
-  int64_t nElement = THCTensor_(sizeLegacyNoScalars)(state, input, THCTensor_(nDimensionLegacyAll)(state, input) - 1);
+  int64_t nElement = THCTensor_(size)(state, input, THCTensor_(nDimension)(state, input) - 1);
   THCThrustAllocator thrustAlloc(state);
 
   // Wrap input data, sortBuffer, in Thrust device vectors
-  thrust::device_ptr<scalar_t> vecPtr = thrust::device_pointer_cast(data);
-  thrust::device_vector<scalar_t> iter(vecPtr, vecPtr + nElement);
+  thrust::device_ptr<real> vecPtr = thrust::device_pointer_cast(data);
+  thrust::device_vector<real> iter(vecPtr, vecPtr + nElement);
   thrust::device_ptr<int64_t> sbPtr = thrust::device_pointer_cast(THCudaLongStorage_data(state, sortBuffer));
   thrust::device_vector<int64_t> seq(sbPtr, sbPtr + nElement);
 
   // Fill sortBuffer with [0, 1, 2, ... nElement - 1]
   thrust::sequence(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
+#if CUDA_VERSION >= 7000
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #else
     thrust::device,
@@ -40,7 +40,7 @@ void THCTensor_(calculateMode)(THCState *state,
 
   // Sort the input data. The original indices of the data are stored in seq
   thrust::sort_by_key(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
+#if CUDA_VERSION >= 7000
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #else
     thrust::device,
@@ -54,7 +54,7 @@ void THCTensor_(calculateMode)(THCState *state,
   // Count # of unique elements via an inner product between adjacent elements.
   // Add 1 if two neighboring element are not equal.
   int unique = 1 + thrust::inner_product(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
+#if CUDA_VERSION >= 7000
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #else
     thrust::device,
@@ -63,15 +63,15 @@ void THCTensor_(calculateMode)(THCState *state,
 #if defined(THC_REAL_IS_HALF)
     ThrustHalfNotEqualTo()
 #else
-    thrust::not_equal_to<scalar_t>()
+    thrust::not_equal_to<real>()
 #endif
   );
 
   // Count frequency of each element
-  thrust::device_vector<scalar_t> keys(unique);
+  thrust::device_vector<real> keys(unique);
   thrust::device_vector<int> counts(unique);
   thrust::reduce_by_key(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
+#if CUDA_VERSION >= 7000
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #else
     thrust::device,
@@ -85,26 +85,26 @@ void THCTensor_(calculateMode)(THCState *state,
 
   // Find index of maximum count
   thrust::device_vector<int>::iterator it = thrust::max_element(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
+#if CUDA_VERSION >= 7000
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #else
     thrust::device,
 #endif
     counts.begin(), counts.end());
-  scalar_t mode = keys[it - counts.begin()];
+  real mode = keys[it - counts.begin()];
 
   // Find first index within which it occurs
 #if defined(THC_REAL_IS_HALF)
-  thrust::device_vector<scalar_t>::iterator positionIter = thrust::find_if(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
+  thrust::device_vector<real>::iterator positionIter = thrust::find_if(
+#if CUDA_VERSION >= 7000
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #else
     thrust::device,
 #endif
     iter.begin(), iter.end(), ThrustHalfEqualToPredicate(mode));
 #else
-  thrust::device_vector<scalar_t>::iterator positionIter = thrust::find(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
+  thrust::device_vector<real>::iterator positionIter = thrust::find(
+#if CUDA_VERSION >= 7000
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #else
     thrust::device,
@@ -121,23 +121,23 @@ void THCTensor_(calculateMode)(THCState *state,
 
   for (int i = 0; i < THLongStorage_size(position); ++i) {
     int64_t pos = THLongStorage_data(position)[i];
-    valuesOffset += THTensor_strideLegacyNoScalars(values, i) * pos;
-    indicesOffset += THTensor_strideLegacyNoScalars(indices, i) * pos;
+    valuesOffset += THCTensor_(stride)(state, values, i) * pos;
+    indicesOffset += THCudaLongTensor_stride(state, indices, i) * pos;
   }
   THCStorage_(set)(state, THCTensor_(storage)(state, values), valuesOffset, mode);
   THCudaLongStorage_set(state, THCudaLongTensor_storage(state, indices), indicesOffset, index);
 }
 
 // this probably could be a loop, not a recursive algorithm
-void THCTensor_(dimApplyMode)(THCState *state,
-                              THCTensor *values,
-                              THCudaLongTensor *indices,
-                              THCTensor *input,
-                              THCudaLongStorage *sortBuffer,
-                              int dimension,
-                              THLongStorage *position,
-                              int curDim) {
-  int64_t ndim = THCTensor_(nDimensionLegacyAll)(state, input);
+THC_API void THCTensor_(dimApplyMode)(THCState *state,
+                               THCTensor *values,
+                               THCudaLongTensor *indices,
+                               THCTensor *input,
+                               THCudaLongStorage *sortBuffer,
+                               int dimension,
+                               THLongStorage *position,
+                               int curDim) {
+  int64_t ndim = THCTensor_(nDimension)(state, input);
 
   // Because we have transposed the Tensor, the data for the dimension we are mode'ing along
   // is always in the innermost dimension
@@ -145,8 +145,8 @@ void THCTensor_(dimApplyMode)(THCState *state,
     THCTensor_(calculateMode)(state, values, indices, input, sortBuffer, dimension, position);
   } else {
     // Loop through the values and recurse
-    for (int i = 0; i < THCTensor_(sizeLegacyNoScalars)(state, input, curDim); ++i) {
-      THLongStorage_data(position)[curDim] = i;
+    for (int i = 0; i < THCTensor_(size)(state, input, curDim); ++i) {
+      position->data[curDim] = i;
       THCTensor_(dimApplyMode)(state, values, indices, input, sortBuffer, dimension, position, curDim + 1);
     }
   }
@@ -155,12 +155,13 @@ void THCTensor_(dimApplyMode)(THCState *state,
 #define MAX_GRID_SIZE  65535
 #define MAX_BLOCK_SIZE 1024
 
-void THCTensor_(mode)(THCState *state,
-                      THCTensor *values,
-                      THCudaLongTensor *indices,
-                      THCTensor *input,
-                      int dimension,
-                      int keepdim) {
+THC_API void THCTensor_(mode)(THCState *state,
+                              THCTensor *values,
+                              THCudaLongTensor *indices,
+                              THCTensor *input,
+                              int dimension,
+                              int keepdim) {
+  THLongStorage *dim;
   THCTensor *transposed, *contiguous, *valuesTransposed;
   THLongStorage *position;
   THCudaLongStorage *sortBuffer;
@@ -171,22 +172,23 @@ void THCTensor_(mode)(THCState *state,
   THAssert(THCTensor_(checkGPU)(state, 1, values));
 
   // Verify they are asking for a valid dimension
-  ndim = THCTensor_(nDimensionLegacyAll)(state, input);
+  ndim = THCTensor_(nDimension)(state, input);
   THArgCheck(dimension >= 0 && dimension < ndim, 4, "Dimension of out bounds");
 
-  sliceSize = THCTensor_(sizeLegacyNoScalars)(state, input, dimension);
+  sliceSize = THCTensor_(size)(state, input, dimension);
   slices = THCTensor_(nElement)(state, input) / sliceSize;
 
   // Resize output value, index Tensors to appropriate sizes (i.e. the same as
   // the input Tensor, except at dim=dimension, the size is 1)
-  THCTensor_preserveReduceDimSemantics(
+  TensorUtils<THCTensor>::preserveReduceDimSemantics(
       state, values, ndim, dimension, keepdim);
-  THCTensor_preserveReduceDimSemantics(
+  TensorUtils<THCudaLongTensor>::preserveReduceDimSemantics(
       state, indices, ndim, dimension, keepdim);
-  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(input);
-  dim[dimension] = 1;
-  THCTensor_(resize)(state, values, dim, {});
-  THCudaLongTensor_resize(state, indices, dim, {});
+  dim = THCTensor_(newSizeOf)(state, input);
+  THLongStorage_set(dim, dimension, 1);
+  THCTensor_(resize)(state, values, dim, NULL);
+  THCudaLongTensor_resize(state, indices, dim, NULL);
+  THLongStorage_free(dim);
 
   // If sliceSize is 1, copy input to values and set indices
   if (sliceSize == 1) {
@@ -207,7 +209,7 @@ void THCTensor_(mode)(THCState *state,
   // 3. Can use 32-bit index math for indexing (mainly just for implementation conciseness, could be changed)
   if (sliceSize <= MAX_BLOCK_SIZE &&
       slices <= MAX_GRID_SIZE &&
-      THCTensor_canUse32BitIndexMath(state, input)) {
+      TensorUtils<THCTensor>::canUse32BitIndexMath(state, input)) {
     // Beginning our optimized implementation. First thing we want to do is to transpose
     // the input Tensor along the sort dimension, and then make it contiguous
     transposed = THCTensor_(newTranspose)(state, input, dimension, ndim - 1);
@@ -220,8 +222,8 @@ void THCTensor_(mode)(THCState *state,
     indicesTransposed = THCudaLongTensor_newTranspose(state, indices, dimension, ndim-1);
 
     // Set-up TensorInfo structs for passing to kernel
-    TensorInfo<scalar_t, unsigned int> tiValues = getTensorInfo<scalar_t, THCTensor, unsigned int>(state, valuesTransposed);
-    TensorInfo<int64_t, unsigned int> tiIndices = getTensorInfo<int64_t, THCudaLongTensor, unsigned int>(state, indicesTransposed);
+    TensorInfo<real, unsigned int> tiValues = getTensorInfo<THCTensor, unsigned int>(state, valuesTransposed);
+    TensorInfo<int64_t, unsigned int> tiIndices = getTensorInfo<THCudaLongTensor, unsigned int>(state, indicesTransposed);
 
     // The number of blocks is the number of slices that we need to calculate the mode for. Each block
     // is responsible for computing a single mode
@@ -237,8 +239,8 @@ void THCTensor_(mode)(THCState *state,
   { \
     dim3 blockSize(SIZE / 2); \
 \
-    int memsize = (sizeof(scalar_t) * SIZE) + (2 * SIZE * sizeof(unsigned int)); \
-    computeMode<scalar_t, SIZE> \
+    int memsize = (sizeof(real) * SIZE) + (2 * SIZE * sizeof(unsigned int)); \
+    computeMode<real, SIZE> \
       <<<grid, blockSize, memsize, THCState_getCurrentStream(state)>>>( \
         THCTensor_(data)(state, contiguous), tiValues, tiIndices, sliceSize); \
   }

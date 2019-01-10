@@ -2,7 +2,6 @@ import os
 import ctypes
 import sys
 import torch
-import types
 import warnings
 from torch.version import cuda
 from contextlib import contextmanager
@@ -27,7 +26,7 @@ __allow_nonbracketed_mutation_flag = True
 
 
 def find_cudnn_windows_lib():
-    proc = Popen(['where', 'cudnn64*.dll'], stdout=PIPE, stderr=PIPE, stdin=PIPE)
+    proc = Popen(['where', 'cudnn64*.dll'], stdout=PIPE, stderr=PIPE)
     out, err = proc.communicate()
     out = out.decode().strip()
     if len(out) > 0:
@@ -52,22 +51,10 @@ def _libcudnn():
             lib.cudnnGetErrorString.restype = ctypes.c_char_p
             __cudnn_version = lib.cudnnGetVersion()
             compile_version = torch._C._cudnn_version()
-            # cuDNN version is MAJOR*1000 + MINOR*100 + PATCH
-            runtime_major = __cudnn_version // 1000
-            runtime_minor = (__cudnn_version % 1000) // 100
-            compile_major = compile_version // 1000
-            compile_minor = (compile_version % 1000) // 100
-            # Different major versions are always incompatible
-            # Starting with cuDNN 7, minor versions are backwards-compatible
-            if runtime_major != compile_major:
-                cudnn_compatible = False
-            elif runtime_major < 7:
-                cudnn_compatible = runtime_minor == compile_minor
-            else:
-                cudnn_compatible = runtime_minor >= compile_minor
-            if not cudnn_compatible:
+            # Check that cuDNN major and minor versions match
+            if (__cudnn_version // 100) != (compile_version // 100):
                 raise RuntimeError(
-                    'cuDNN version incompatibility: PyTorch was compiled against {} '
+                    'cuDNN version mismatch: PyTorch was compiled against {} '
                     'but linked against {}'.format(compile_version, __cudnn_version))
         else:
             lib = None
@@ -87,17 +74,12 @@ CUDNN_TENSOR_TYPES = {
 }
 
 
-def is_available():
-    r"""Returns a bool indicating if CUDNN is currently available."""
-    return torch._C.has_cudnn
-
-
 def is_acceptable(tensor):
     if not torch._C._get_cudnn_enabled():
         return False
     if tensor.type() not in CUDNN_TENSOR_TYPES:
         return False
-    if not is_available():
+    if not torch._C.has_cudnn:
         warnings.warn(
             "PyTorch was compiled without cuDNN support. To use cuDNN, rebuild "
             "PyTorch making sure the library is visible to the build system.")
@@ -456,18 +438,17 @@ class ContextProp(object):
                                "after disable_global_flags; please use flags() context manager instead")
 
 
-class CudnnModule(types.ModuleType):
-    def __init__(self, m, name):
-        super(CudnnModule, self).__init__(name)
-        self.m = m
-
-    def __getattr__(self, attr):
-        return self.m.__getattribute__(attr)
-
+class CudnnModule(object):
+    def __init__(self, m):
+        self.__dict__ = m.__dict__
+        # You have to retain the old module, otherwise it will
+        # get GC'ed and a lot of things will break.  See:
+        # https://stackoverflow.com/questions/47540722/how-do-i-use-the-sys-modules-replacement-trick-in-init-py-on-python-2
+        self.__old_mod = m
     enabled = ContextProp(torch._C._get_cudnn_enabled, torch._C._set_cudnn_enabled)
     deterministic = ContextProp(torch._C._get_cudnn_deterministic, torch._C._set_cudnn_deterministic)
     benchmark = ContextProp(torch._C._get_cudnn_benchmark, torch._C._set_cudnn_benchmark)
 
 # This is the sys.modules replacement trick, see
 # https://stackoverflow.com/questions/2447353/getattr-on-a-module/7668273#7668273
-sys.modules[__name__] = CudnnModule(sys.modules[__name__], __name__)
+sys.modules[__name__] = CudnnModule(sys.modules[__name__])

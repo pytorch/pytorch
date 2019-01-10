@@ -9,12 +9,12 @@
 #include "caffe2/core/common.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/tensor.h"
-#include <c10/util/typeid.h>
+#include "caffe2/core/typeid.h"
 
 namespace caffe2 {
 
 template <class Context>
-class C10_EXPORT QTensor {
+class QTensor {
  public:
   QTensor() {}
   virtual ~QTensor() {}
@@ -46,24 +46,23 @@ class C10_EXPORT QTensor {
    * many low precision integers as a sum of popcnt(A & B) * 1 << bit.
    * Explained here: https://arxiv.org/abs/1606.06160
    */
-  // TODO: changing at::ArrayRef<int> to at::ArrayRef<int64_t>?
   explicit QTensor(
-      at::ArrayRef<int> dims,
+      const std::vector<int>& dims,
       const unsigned char precision,
       const bool signbit = false)
       : precision_(precision), signed_(signbit) {
     Resize(dims);
   }
 
-  void Resize(at::ArrayRef<int> dim_source) {
+  void Resize(std::vector<int> dim_source) {
     if (dims_ != dim_source) {
       size_t source_size = std::accumulate(
           dim_source.begin(), dim_source.end(), 1, std::multiplies<int>());
       if ((source_size * (precision_ + signed_)) > capacity_) {
-        data_ptr_.clear();
+        data_.reset();
         capacity_ = 0;
       }
-      dims_ = dim_source.vec();
+      dims_ = dim_source;
       size_ = source_size;
     }
   }
@@ -105,12 +104,12 @@ class C10_EXPORT QTensor {
 
   void SetPrecision(const unsigned char precision) {
     precision_ = precision;
-    data_ptr_.clear();
+    data_.reset();
   }
 
   void SetSigned(const bool make_signed = true) {
     signed_ = make_signed;
-    data_ptr_.clear();
+    data_.reset();
   }
 
   void SetScale(const double scale) {
@@ -122,16 +121,19 @@ class C10_EXPORT QTensor {
   }
 
   unsigned char* mutable_data() {
-    if (!data_ptr_) {
-      data_ptr_ = Context::New(nbytes());
+    if (!data_) {
+      auto ptr_and_deleter = Context::New(nbytes());
+      data_.reset(
+          static_cast<unsigned char*>(ptr_and_deleter.first),
+          ptr_and_deleter.second);
       capacity_ = nbytes() * CHAR_BIT;
     }
     CAFFE_ENFORCE(capacity_ == nbytes() * CHAR_BIT);
-    return static_cast<unsigned char*>(data_ptr_.get());
+    return data_.get();
   }
 
   inline const unsigned char* data() const {
-    return static_cast<unsigned char*>(data_ptr_.get());
+    return data_.get();
   }
 
   inline size_t size() const {
@@ -146,7 +148,7 @@ class C10_EXPORT QTensor {
     return precision_;
   }
 
-  inline at::ArrayRef<int> dims() const {
+  inline const vector<int>& dims() const {
     return dims_;
   }
 
@@ -210,8 +212,8 @@ class C10_EXPORT QTensor {
   /**
    * Return product of all dimensions starting from K.
    */
-  inline int64_t size_from_dim(int k) const {
-    int64_t r = 1;
+  inline TIndex size_from_dim(int k) const {
+    TIndex r = 1;
     for (int i = k; i < dims_.size(); ++i) {
       r *= dims_[i];
     }
@@ -221,9 +223,9 @@ class C10_EXPORT QTensor {
   /**
    * Product of all dims up to.
    */
-  inline int64_t size_to_dim(int k) const {
+  inline TIndex size_to_dim(int k) const {
     CAFFE_ENFORCE(k < dims_.size());
-    int64_t r = 1;
+    TIndex r = 1;
     for (int i = 0; i < k; ++i) {
       r *= dims_[i];
     }
@@ -240,7 +242,7 @@ class C10_EXPORT QTensor {
   unsigned char alignment_ = CHAR_BIT;
 
   // Allocated data.
-  at::DataPtr data_ptr_;
+  std::shared_ptr<unsigned char> data_;
 
   // value = scale_ * (x + bias_)
   double scale_;

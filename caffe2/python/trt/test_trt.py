@@ -13,7 +13,7 @@ from caffe2.python.models.download import downloadFromURLToFile, getURLFromName,
 import caffe2.python.onnx.backend as c2
 from caffe2.python.onnx.workspace import Workspace
 from caffe2.python.trt.transform import convert_onnx_model_to_trt_op, transform_caffe2_net
-from caffe2.python.onnx.tests.test_utils import TestCase, DownloadingTestCase
+from caffe2.python.onnx.tests.test_utils import TestCase
 import numpy as np
 import os.path
 import json
@@ -37,12 +37,11 @@ def _print_net(net):
             print("  output: {}".format(y))
 
 
-def _base_url(opset_version):
-    return 'https://s3.amazonaws.com/download.onnx/models/opset_{}'.format(opset_version)
+_BASE_URL = 'https://s3.amazonaws.com/download.onnx/models/opset_{}'.format(onnx.defs.onnx_opset_version())
 
 # TODO: This is copied from https://github.com/onnx/onnx/blob/master/onnx/backend/test/runner/__init__.py. Maybe we should
 # expose a model retrival API from ONNX
-def _download_onnx_model(model_name, opset_version):
+def _download_onnx_model(model_name):
     onnx_home = os.path.expanduser(os.getenv('ONNX_HOME', os.path.join('~', '.onnx')))
     models_dir = os.getenv('ONNX_MODELS',
                            os.path.join(onnx_home, 'models'))
@@ -61,7 +60,7 @@ def _download_onnx_model(model_name, opset_version):
 
         # On Windows, NamedTemporaryFile can not be opened for a
         # second time
-        url = '{}/{}.tar.gz'.format(_base_url(opset_version), model_name)
+        url = '{}/{}.tar.gz'.format(_BASE_URL, model_name)
         download_file = tempfile.NamedTemporaryFile(delete=False)
         try:
             download_file.close()
@@ -114,9 +113,8 @@ class TensorRTOpTest(TestCase):
         X = np.random.randn(52, 1, 3, 2).astype(np.float32)
         self._test_relu_graph(X, 52, 50)
 
-    def _test_onnx_importer(self, model_name, data_input_index,
-                            opset_version = onnx.defs.onnx_opset_version()):
-        model_dir = _download_onnx_model(model_name, opset_version)
+    def _test_onnx_importer(self, model_name, data_input_index = 0):
+        model_dir = _download_onnx_model(model_name)
         model_def = onnx.load(os.path.join(model_dir, 'model.onnx'))
         input_blob_dims = [int(x.dim_value) for x in model_def.graph.input[data_input_index].type.tensor_type.shape.dim]
         op_inputs = [x.name for x in model_def.graph.input]
@@ -136,29 +134,29 @@ class TensorRTOpTest(TestCase):
             Y_trt = namedtupledict('Outputs', op_outputs)(*output_values)
         np.testing.assert_allclose(Y_c2, Y_trt, rtol=1e-3)
 
-    @unittest.skip("Until fixing Reshape op")
+    @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_resnet50(self):
-        self._test_onnx_importer('resnet50', 0)
+        self._test_onnx_importer('resnet50')
 
     @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_bvlc_alexnet(self):
-        self._test_onnx_importer('bvlc_alexnet', 0)
+        self._test_onnx_importer('bvlc_alexnet')
 
-    @unittest.skip("Until fixing Unsqueeze op")
+    @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_densenet121(self):
-        self._test_onnx_importer('densenet121', -1, 3)
+        self._test_onnx_importer('densenet121', -1)
 
-    @unittest.skip("Until fixing Reshape op")
+    @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_inception_v1(self):
-        self._test_onnx_importer('inception_v1', -1, 3)
+        self._test_onnx_importer('inception_v1', -1)
 
-    @unittest.skip("Until fixing Reshape op")
+    @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_inception_v2(self):
-        self._test_onnx_importer('inception_v2', 0, 3)
+        self._test_onnx_importer('inception_v2')
 
     @unittest.skip('Need to revisit our ChannelShuffle exporter to avoid generating 5D tensor')
     def test_shufflenet(self):
-        self._test_onnx_importer('shufflenet', 0)
+        self._test_onnx_importer('shufflenet')
 
     @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_squeezenet(self):
@@ -166,18 +164,39 @@ class TensorRTOpTest(TestCase):
 
     @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_vgg16(self):
-        self._test_onnx_importer('vgg16', 0)
+        self._test_onnx_importer('vgg16')
 
-    @unittest.skip("Until fixing Reshape op")
+    @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_vgg19(self):
-        self._test_onnx_importer('vgg19', -1, 3)
+        self._test_onnx_importer('vgg19', -1)
 
-
-class TensorRTTransformTest(DownloadingTestCase):
+class TensorRTTransformTest(TestCase):
     def _model_dir(self, model):
         caffe2_home = os.path.expanduser(os.getenv('CAFFE2_HOME', '~/.caffe2'))
         models_dir = os.getenv('CAFFE2_MODELS', os.path.join(caffe2_home, 'models'))
         return os.path.join(models_dir, model)
+
+    def _download(self, model):
+        model_dir = self._model_dir(model)
+        assert not os.path.exists(model_dir)
+        os.makedirs(model_dir)
+        for f in ['predict_net.pb', 'init_net.pb', 'value_info.json']:
+            url = getURLFromName(model, f)
+            dest = os.path.join(model_dir, f)
+            try:
+                try:
+                    downloadFromURLToFile(url, dest,
+                                          show_progress=False)
+                except TypeError:
+                    # show_progress not supported prior to
+                    # Caffe2 78c014e752a374d905ecfb465d44fa16e02a28f1
+                    # (Sep 17, 2017)
+                    downloadFromURLToFile(url, dest)
+            except Exception as e:
+                print("Abort: {reason}".format(reason=e))
+                print("Cleaning up...")
+                deleteDirectory(model_dir)
+                exit(1)
 
     def _get_c2_model(self, model_name):
         model_dir = self._model_dir(model_name)
@@ -268,11 +287,8 @@ class TensorRTTransformTest(DownloadingTestCase):
         start = time.time()
         pred_net_cut = transform_caffe2_net(pred_net,
                                             {input_name: input_blob_dims},
-                                            build_serializable_op=False)
+                                            build_serializable_op=True)
         del init_net, pred_net
-        pred_net_cut.device_option.CopyFrom(device_option)
-        for op in pred_net_cut.op:
-            op.device_option.CopyFrom(device_option)
         #_print_net(pred_net_cut)
 
         Y_trt = None

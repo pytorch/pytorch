@@ -23,12 +23,12 @@ class EnforceFiniteOp final : public Operator<Context> {
   bool DoRunWithType();
 
  private:
-  Tensor buffer_{CPU};
+  Tensor<CPUContext> buffer_;
 
   template <typename T>
-  void EnforceOnCPU(const Tensor& input) {
+  void EnforceOnCPU(const Tensor<CPUContext>& input) {
     const T* input_data = input.template data<T>();
-    auto size = input.numel();
+    auto size = input.size();
 
     for (auto i = 0; i < size; i++) {
       CAFFE_ENFORCE(

@@ -1,15 +1,15 @@
-#include <THC/THCGeneral.h>
-#include <THC/THCTensorMath.h>
-#include <THC/THCTensorCopy.h>
-#include <THC/THCTensorMathMagma.cuh>
-#include <THC/THCTensor.hpp>
-#include <THC/THCStorage.hpp>
+#include "THCGeneral.h"
+#include "THCTensorMath.h"
+#include "THCTensorCopy.h"
+#include "THCTensorMathMagma.cuh"
+#include "THCTensor.hpp"
+#include "THCStorage.hpp"
 #include <algorithm>
 
 #ifdef USE_MAGMA
 #include <magma.h>
 #else
-#include <THC/THCBlas.h>
+#include "THCBlas.h"
 #endif
 
 #ifndef DIVUP
@@ -25,5 +25,5 @@ void THCMagma_init(THCState *state)
 #endif
 }
 
-#include <THC/generic/THCTensorMathMagma.cu>
-#include <THC/THCGenerateAllTypes.h>
+#include "generic/THCTensorMathMagma.cu"
+#include "THCGenerateAllTypes.h"

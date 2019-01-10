@@ -2,25 +2,25 @@
 
 #include <ideep.hpp>
 #include <caffe2/core/operator.h>
-#include <caffe2/proto/caffe2_pb.h>
+#include <caffe2/proto/caffe2.pb.h>
 
 namespace caffe2 {
 
-C10_DECLARE_REGISTRY(
+CAFFE_DECLARE_REGISTRY(
     IDEEPOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
 
 #define REGISTER_IDEEP_OPERATOR_CREATOR(key, ...) \
-  C10_REGISTER_CREATOR(IDEEPOperatorRegistry, key, __VA_ARGS__)
+  CAFFE_REGISTER_CREATOR(IDEEPOperatorRegistry, key, __VA_ARGS__)
 #define REGISTER_IDEEP_OPERATOR(name, ...) \
-  C10_REGISTER_CLASS(IDEEPOperatorRegistry, name, __VA_ARGS__)
+  CAFFE_REGISTER_CLASS(IDEEPOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_IDEEP_OPERATOR_STR(str_name, ...) \
-  C10_REGISTER_TYPED_CLASS(IDEEPOperatorRegistry, str_name, __VA_ARGS__)
+  CAFFE_REGISTER_TYPED_CLASS(IDEEPOperatorRegistry, str_name, __VA_ARGS__)
 
 #define REGISTER_IDEEP_OPERATOR_WITH_ENGINE(name, engine, ...) \
-  C10_REGISTER_CLASS(IDEEPOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
+  CAFFE_REGISTER_CLASS(IDEEPOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
 
 // IDEEPOperator is the base scaffolding of the operators that uses IDEEP. It
 // provides a few operators that are useful to IDEEP specific implementations.
@@ -51,15 +51,12 @@ class IDEEPOperator : public OperatorBase {
     // FinishDeviceComputation,
     // it is always just a re-route to RunOnDevice().
     try {
-      StartAllObservers();
-      bool result =  RunOnDevice();
-      StopAllObservers();
-      return result;
+      return RunOnDevice();
     } catch (EnforceNotMet& err) {
       err.AppendMessage(getErrorMsg());
       throw;
     } catch (ideep::error& e) {
-      LOG(ERROR) << "IDEEP error:" << e.message;
+      VLOG(1) << "IDEEP error:" << e.message; 
       throw;
     }
   }

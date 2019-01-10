@@ -7,18 +7,17 @@ from caffe2.python import core
 from hypothesis import given
 import hypothesis.strategies as st
 import caffe2.python.hypothesis_test_util as hu
-import caffe2.python.serialized_test.serialized_test_util as serial
 import numpy as np
 
 import unittest
 
 
-class TestThresholdedRelu(serial.SerializedTestCase):
+class TestThresholdedRelu(hu.HypothesisTestCase):
 
     # test case 1 - default alpha - we do reference and dc checks.
     # test case 2 does dc and reference checks over range of alphas.
     # test case 3 does gc over range of alphas.
-    @serial.given(input=hu.tensor(),
+    @given(input=hu.tensor(),
            engine=st.sampled_from(["", "CUDNN"]),
            **hu.gcs)
     def test_thresholded_relu_1(self, input, gc, dc, engine):

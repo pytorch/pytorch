@@ -1,11 +1,7 @@
 r"""
 The ``distributions`` package contains parameterizable probability distributions
 and sampling functions. This allows the construction of stochastic computation
-graphs and stochastic gradient estimators for optimization. This package
-generally follows the design of the `TensorFlow Distributions`_ package.
-
-.. _`TensorFlow Distributions`:
-    https://arxiv.org/abs/1711.10604
+graphs and stochastic gradient estimators for optimization.
 
 It is not possible to directly backpropagate through random samples. However,
 there are two main methods for creating surrogate functions that can be
@@ -86,17 +82,13 @@ from .fishersnedecor import FisherSnedecor
 from .gamma import Gamma
 from .geometric import Geometric
 from .gumbel import Gumbel
-from .half_cauchy import HalfCauchy
-from .half_normal import HalfNormal
 from .independent import Independent
 from .kl import kl_divergence, register_kl
 from .laplace import Laplace
 from .log_normal import LogNormal
 from .logistic_normal import LogisticNormal
-from .lowrank_multivariate_normal import LowRankMultivariateNormal
 from .multinomial import Multinomial
 from .multivariate_normal import MultivariateNormal
-from .negative_binomial import NegativeBinomial
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
 from .pareto import Pareto
@@ -107,7 +99,6 @@ from .studentT import StudentT
 from .transformed_distribution import TransformedDistribution
 from .transforms import *
 from .uniform import Uniform
-from .weibull import Weibull
 
 __all__ = [
     'Bernoulli',
@@ -128,10 +119,8 @@ __all__ = [
     'Laplace',
     'LogNormal',
     'LogisticNormal',
-    'LowRankMultivariateNormal',
     'Multinomial',
     'MultivariateNormal',
-    'NegativeBinomial',
     'Normal',
     'OneHotCategorical',
     'Pareto',
@@ -140,7 +129,6 @@ __all__ = [
     'StudentT',
     'Poisson',
     'Uniform',
-    'Weibull',
     'TransformedDistribution',
     'biject_to',
     'kl_divergence',

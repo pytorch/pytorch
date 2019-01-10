@@ -1,7 +1,6 @@
 #ifndef CAFFE2_OPERATORS_TOP_K_RADIX_SELECTION_H_
 #define CAFFE2_OPERATORS_TOP_K_RADIX_SELECTION_H_
 
-#include "caffe2/core/common_gpu.h"
 #include "caffe2/utils/GpuDefs.cuh"
 #include "caffe2/utils/GpuScanUtils.cuh"
 #include "caffe2/utils/math.h"
@@ -76,7 +75,7 @@ struct TopKTypeConfig<short> {
   typedef unsigned int RadixType;
 
   static inline __device__ RadixType convert(short v) {
-    CUDA_KERNEL_ASSERT(sizeof(short) == 2);
+    assert(sizeof(short) == 2);
     return 32768u + v;
   }
 
@@ -90,7 +89,7 @@ struct TopKTypeConfig<int> {
   typedef unsigned int RadixType;
 
   static inline __device__ RadixType convert(int v) {
-    CUDA_KERNEL_ASSERT(sizeof(int) == 4);
+    assert(sizeof(int) == 4);
     return 2147483648u + v;
   }
 
@@ -104,7 +103,7 @@ struct TopKTypeConfig<long> {
   typedef unsigned long long int RadixType;
 
   static inline __device__ RadixType convert(long v) {
-    CUDA_KERNEL_ASSERT(sizeof(long) == 8);
+    assert(sizeof(long) == 8);
     return 9223372036854775808ull + v;
   }
 
@@ -168,15 +167,11 @@ __device__ void countRadixUsingMask(CountType counts[RadixSize],
 #pragma unroll
     for (unsigned int j = 0; j < RadixSize; ++j) {
       bool vote = hasVal && (digitInRadix == j);
-#if defined(__HIP_PLATFORM_HCC__)
-      counts[j] += __popcll(__ballot(vote));
-#else
 #if CUDA_VERSION >= 9000
       counts[j] += __popc(__ballot_sync(__activemask(), vote));
 #else
       counts[j] += __popc(__ballot(vote));
 #endif
-#endif  // __HIP_PLATFORM_HCC__
     }
   }
 
@@ -212,7 +207,7 @@ __device__ DataType findPattern(DataType* smem,
                                 int sliceSize,
                                 BitDataType desired,
                                 BitDataType desiredMask) {
-  if (threadIdx.x < kWarpSize) {
+  if (threadIdx.x < 32) {
     smem[threadIdx.x] = (DataType) 0;
   }
   __syncthreads();
@@ -245,7 +240,7 @@ __device__ DataType findPattern(DataType* smem,
   }
 
   // should not get here
-  CUDA_KERNEL_ASSERT(false);
+  assert(false);
   return (DataType)0;
 }
 
@@ -355,7 +350,7 @@ __global__ void gatherTopK(const T* inputPtr,
                            int numInputSlices,
                            T* topKPtr,
                            IndicesType* indicesPtr) {
-  __shared__ int smem[kWarpSize]; // one per each warp, up to warp limit
+  __shared__ int smem[32]; // one per each warp, up to warp limit
 
   int slice = blockIdx.x;
   if (slice >= numInputSlices) {
@@ -365,7 +360,7 @@ __global__ void gatherTopK(const T* inputPtr,
   // Find the start offset for our slice
   const T* inputSliceStart = &inputPtr[slice * inputSliceSize];
   T* topKSliceStart = &topKPtr[slice * outputSliceSize];
-  IndicesType* indicesSliceStart = &indicesPtr[slice * outputSliceSize];
+  caffe2::TIndex* indicesSliceStart = &indicesPtr[slice * outputSliceSize];
 
   // Find the k-th highest element in our input
   T topKValue = (T)0;
@@ -407,7 +402,7 @@ __global__ void gatherTopK(const T* inputPtr,
 
     if (hasTopK) {
       int writeIndex = writeIndexStart + index;
-      CUDA_KERNEL_ASSERT(writeIndex < outputSliceSize);
+      assert(writeIndex < outputSliceSize);
 
       int topKOffset = writeIndex;
       int indexOffset = writeIndex;
@@ -424,7 +419,7 @@ __global__ void gatherTopK(const T* inputPtr,
   // writeIndexStart. There might be more than that number available,
   // in which case we have to choose the first seen set. We do this
   // via a prefix sum to calculate indices for writing results.
-  CUDA_KERNEL_ASSERT(outputSliceSize >= writeIndexStart);
+  assert(outputSliceSize >= writeIndexStart);
   int topKRemaining = (outputSliceSize - writeIndexStart);
 
   for (int i = threadIdx.x; i < numIterations; i += blockDim.x) {
@@ -438,7 +433,7 @@ __global__ void gatherTopK(const T* inputPtr,
 
     if (hasTopK && index < topKRemaining) {
       int writeIndex = writeIndexStart + index;
-      CUDA_KERNEL_ASSERT(writeIndex < outputSliceSize);
+      assert(writeIndex < outputSliceSize);
 
       int topKOffset = writeIndex;
       int indexOffset = writeIndex;

@@ -2,20 +2,18 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
-
 from caffe2.python import core, workspace
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
-import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 
 import unittest
 
 
-class TestSoftmaxOps(serial.SerializedTestCase):
+class TestSoftmaxOps(hu.HypothesisTestCase):
 
-    @serial.given(n=st.sampled_from([0, 2, 4, 71, 103]),
+    @given(n=st.sampled_from([2, 4, 71, 103]),
            D=st.sampled_from([4, 8, 64, 79, 256, 333]),
            engine=st.sampled_from([None, 'CUDNN']),
            **hu.gcs)
@@ -53,7 +51,7 @@ class TestSoftmaxOps(serial.SerializedTestCase):
             reference=label_softmax,
         )
 
-    @serial.given(n=st.sampled_from([0, 2, 4, 71, 103, 555, 751, 1201]),
+    @given(n=st.sampled_from([2, 4, 71, 103, 555, 751, 1201]),
            D=st.sampled_from([4, 8, 64, 79, 256, 333, 1000]),
            engine=st.sampled_from([None, 'CUDNN']),
            **hu.gcs)
@@ -136,7 +134,7 @@ class TestSoftmaxOps(serial.SerializedTestCase):
         self.assertGradientChecks(
             gc, op, [X], 0, [0], stepsize=1e-4, threshold=1e-2)
 
-    @serial.given(n=st.integers(2, 10), D=st.integers(4, 16),
+    @given(n=st.integers(2, 10), D=st.integers(4, 16),
            only_loss=st.booleans(), **hu.gcs)
     def test_softmax_with_loss(self, n, D, gc, only_loss, dc):
         # n = number of examples, D = |labels|
@@ -451,7 +449,7 @@ class TestSoftmaxOps(serial.SerializedTestCase):
         self.assertGradientChecks(
             gc, op, [X, label, weights], 0, [1], stepsize=1e-4, threshold=1e-2)
 
-    @serial.given(n=st.integers(2, 5), D=st.integers(2, 4),
+    @given(n=st.integers(2, 5), D=st.integers(2, 4),
            weighted=st.booleans(), **hu.gcs)
     def test_spatial_softmax_with_loss(self, n, D, weighted, gc, dc):
         # n = number of examples, D = |labels|

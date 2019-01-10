@@ -1,7 +1,6 @@
 #ifndef NOM_TESTS_TEST_UTIL_H
 #define NOM_TESTS_TEST_UTIL_H
 
-#include "caffe2/core/common.h"
 #include "nomnigraph/Graph/Graph.h"
 #include "nomnigraph/Graph/Algorithms.h"
 #include "nomnigraph/Representations/NeuralNet.h"
@@ -33,23 +32,6 @@ struct NNEquality {
     }
     return sameKind;
   }
-};
-
-// Very simple random number generator used to generate platform independent
-// random test data.
-class TestRandom {
- public:
-  TestRandom(unsigned int seed) : seed_(seed){};
-
-  unsigned int nextInt() {
-    seed_ = A * seed_ + C;
-    return seed_;
-  }
-
- private:
-  static const unsigned int A = 1103515245;
-  static const unsigned int C = 12345;
-  unsigned int seed_;
 };
 
 /** Our test graph looks like this:
@@ -102,9 +84,9 @@ class TestRandom {
  *      return labelMap;
  *    });
  */
-CAFFE2_API nom::Graph<std::string> createGraph();
+nom::Graph<std::string> createGraph();
 
-CAFFE2_API nom::Graph<std::string> createGraphWithCycle();
+nom::Graph<std::string> createGraphWithCycle();
 
 std::map<std::string, std::string> BBPrinter(typename nom::repr::NNCFGraph::NodeRef node);
 
@@ -112,9 +94,4 @@ std::map<std::string, std::string> cfgEdgePrinter(typename nom::repr::NNCFGraph:
 
 std::map<std::string, std::string> NNPrinter(typename nom::repr::NNGraph::NodeRef node);
 
-CAFFE2_API nom::Graph<TestClass>::NodeRef createTestNode(
-    nom::Graph<TestClass>& g);
-
-CAFFE2_API std::map<std::string, std::string> TestNodePrinter(
-    nom::Graph<TestClass>::NodeRef node);
 #endif // NOM_TESTS_TEST_UTIL_H

@@ -5,13 +5,14 @@ from torch.autograd import Function
 from torch.autograd.function import once_differentiable
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
-from torch.distributions.utils import broadcast_all, clamp_probs
+from torch.distributions.utils import _finfo, broadcast_all
 
 
 def _dirichlet_sample_nograd(concentration):
     probs = torch._standard_gamma(concentration)
     probs /= probs.sum(-1, True)
-    return clamp_probs(probs)
+    eps = _finfo(probs).eps
+    return probs.clamp_(min=eps, max=1 - eps)
 
 
 # This helper is exposed for testing.
@@ -37,13 +38,15 @@ class _Dirichlet(Function):
 
 class Dirichlet(ExponentialFamily):
     r"""
-    Creates a Dirichlet distribution parameterized by concentration :attr:`concentration`.
+    Creates a Dirichlet distribution parameterized by concentration `concentration`.
 
     Example::
 
         >>> m = Dirichlet(torch.tensor([0.5, 0.5]))
         >>> m.sample()  # Dirichlet distributed with concentrarion concentration
-        tensor([ 0.1046,  0.8954])
+         0.1046
+         0.8954
+        [torch.FloatTensor of size 2]
 
     Args:
         concentration (Tensor): concentration parameter of the distribution
@@ -54,19 +57,9 @@ class Dirichlet(ExponentialFamily):
     has_rsample = True
 
     def __init__(self, concentration, validate_args=None):
-        if concentration.dim() < 1:
-            raise ValueError("`concentration` parameter must be at least one-dimensional.")
-        self.concentration = concentration
+        self.concentration, = broadcast_all(concentration)
         batch_shape, event_shape = concentration.shape[:-1], concentration.shape[-1:]
         super(Dirichlet, self).__init__(batch_shape, event_shape, validate_args=validate_args)
-
-    def expand(self, batch_shape, _instance=None):
-        new = self._get_checked_instance(Dirichlet, _instance)
-        batch_shape = torch.Size(batch_shape)
-        new.concentration = self.concentration.expand(batch_shape + self.event_shape)
-        super(Dirichlet, new).__init__(batch_shape, self.event_shape, validate_args=False)
-        new._validate_args = self._validate_args
-        return new
 
     def rsample(self, sample_shape=()):
         shape = self._extended_shape(sample_shape)

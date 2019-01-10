@@ -1,43 +1,48 @@
 #include "caffe2/operators/rsqrt_op.h"
 
-#include "caffe2/utils/eigen_utils.h"
-
-#include <algorithm>
-#include <functional>
 #include <string>
+#include <vector>
 
 namespace caffe2 {
 
 template <>
+struct RSqrtFunctor<CPUContext> {
+  template <typename T>
+  inline void operator()(
+      const int size,
+      const T* X,
+      T* Y,
+      CPUContext* /* context */) const {
+    EigenArrayMap<T>(Y, 1, size) = ConstEigenArrayMap<T>(X, 1, size).rsqrt();
+  }
+};
+
+template <>
 template <typename T>
-bool RsqrtGradientFunctor<CPUContext>::Forward(
-    const std::vector<int>& dY_dims,
-    const std::vector<int>& /* Y_dims */,
+void RSqrtGradientFunctor<CPUContext>::Run(
+    const int size,
     const T* dY,
     const T* Y,
     T* dX,
     CPUContext* /* context */) const {
-  const int size = std::accumulate(
-      dY_dims.cbegin(), dY_dims.cend(), 1, std::multiplies<int>());
-  EigenVectorMap<T>(dX, size) = ConstEigenVectorMap<T>(dY, size).array() *
-      ConstEigenVectorMap<T>(Y, size).array().cube() * static_cast<T>(-0.5);
-  return true;
+  EigenArrayMap<T>(dX, 1, size) = ConstEigenArrayMap<T>(dY, 1, size) *
+      ConstEigenArrayMap<T>(Y, 1, size).cube() * static_cast<T>(-0.5);
 }
 
 REGISTER_CPU_OPERATOR(
-    Rsqrt,
+    RSqrt,
     UnaryElementwiseOp<
         TensorTypes<float>,
         CPUContext,
-        RsqrtFunctor<CPUContext>>);
+        RSqrtFunctor<CPUContext>>);
 REGISTER_CPU_OPERATOR(
-    RsqrtGradient,
+    RSqrtGradient,
     BinaryElementwiseOp<
         TensorTypes<float>,
         CPUContext,
-        RsqrtGradientFunctor<CPUContext>>);
+        WithoutBroadcast<RSqrtGradientFunctor<CPUContext>>>);
 
-OPERATOR_SCHEMA(Rsqrt)
+OPERATOR_SCHEMA(RSqrt)
     .NumInputs(1)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
@@ -46,19 +51,19 @@ OPERATOR_SCHEMA(Rsqrt)
     .Input(0, "X", "ND input tensor")
     .Output(0, "Y", "ND output tensor");
 
-OPERATOR_SCHEMA(RsqrtGradient)
+OPERATOR_SCHEMA(RSqrtGradient)
     .NumInputs(2)
     .NumOutputs(1)
     .AllowInplace({{0, 0}});
 
 namespace {
 
-class GetRsqrtGradient final : public GradientMakerBase {
+class GetRSqrtGradient final : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
 
   std::vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
-        "RsqrtGradient",
+        "RSqrtGradient",
         "",
         std::vector<std::string>{GO(0), O(0)},
         std::vector<std::string>{GI(0)});
@@ -67,6 +72,6 @@ class GetRsqrtGradient final : public GradientMakerBase {
 
 } // namespace
 
-REGISTER_GRADIENT(Rsqrt, GetRsqrtGradient);
+REGISTER_GRADIENT(RSqrt, GetRSqrtGradient);
 
 } // namespace caffe2

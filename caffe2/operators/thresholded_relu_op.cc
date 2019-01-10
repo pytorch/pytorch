@@ -1,6 +1,5 @@
 #include "caffe2/operators/thresholded_relu_op.h"
 
-#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -8,16 +7,15 @@ namespace caffe2 {
 template <>
 bool ThresholdedReluOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
+  auto* Y = Output(0);
+  Y->ResizeLike(X);
 
-  auto* Y = Output(0, X.sizes(), at::dtype<float>());
-
-  ConstEigenVectorArrayMap<float> Xvec(X.data<float>(), X.numel());
-  EigenVectorArrayMap<float> Yvec(
-      Y->template mutable_data<float>(), Y->numel());
+  ConstEigenVectorArrayMap<float> Xvec(X.data<float>(), X.size());
+  EigenVectorArrayMap<float> Yvec(Y->mutable_data<float>(), Y->size());
   Yvec = (Xvec > alpha_).select(Xvec, 0.f);
   /* Naive implementation
   const float* Xdata = X.data<float>();
-  float* Ydata = Y->template mutable_data<float>();
+  float* Ydata = Y->mutable_data<float>();
   for (int i = 0; i < X.size(); ++i) {
     Xdata[i] -= alpha_;
     Ydata[i] = std::max(Xdata[i], 0.0f);
@@ -30,16 +28,16 @@ template <>
 bool ThresholdedReluGradientOp<float, CPUContext>::RunOnDevice() {
   auto& Y = Input(0);
   auto& dY = Input(1);
-
-  CAFFE_ENFORCE_EQ(dY.numel(), Y.numel());
-  auto* dX = Output(0, Y.sizes(), at::dtype<float>());
+  auto* dX = Output(0);
+  CAFFE_ENFORCE_EQ(dY.size(), Y.size());
+  dX->ResizeLike(Y);
 
   const float* Ydata = Y.data<float>();
   const float* dYdata = dY.data<float>();
-  float* dXdata = dX->template mutable_data<float>();
-  EigenVectorArrayMap<float> dXvec(dXdata, dX->numel());
-  ConstEigenVectorArrayMap<float> Yvec(Ydata, Y.numel());
-  ConstEigenVectorArrayMap<float> dYvec(dYdata, dY.numel());
+  float* dXdata = dX->mutable_data<float>();
+  EigenVectorArrayMap<float> dXvec(dXdata, dX->size());
+  ConstEigenVectorArrayMap<float> Yvec(Ydata, Y.size());
+  ConstEigenVectorArrayMap<float> dYvec(dYdata, dY.size());
   dXvec = dYvec * Yvec.cwiseSign();
   /* Non vectorized implementation
   for (int i = 0; i < Y.size(); ++i) {

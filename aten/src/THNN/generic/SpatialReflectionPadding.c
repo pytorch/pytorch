@@ -1,9 +1,9 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "THNN/generic/SpatialReflectionPadding.c"
+#define TH_GENERIC_FILE "generic/SpatialReflectionPadding.c"
 #else
 
 static void THNN_(SpatialReflectionPadding_updateOutput_frame)(
-  scalar_t *input_p, scalar_t *output_p,
+  real *input_p, real *output_p,
   int64_t nslices,
   int64_t iwidth, int64_t iheight,
   int64_t owidth, int64_t oheight,
@@ -41,8 +41,8 @@ static void THNN_(SpatialReflectionPadding_updateOutput_frame)(
         }
         ip_y = ip_y - oStartY + iStartY;
 
-        scalar_t *dest_p = output_p + k*owidth*oheight + i * owidth + j;
-        scalar_t *src_p = input_p + k*iwidth*iheight + ip_y * iwidth + ip_x;
+        real *dest_p = output_p + k*owidth*oheight + i * owidth + j;
+        real *src_p = input_p + k*iwidth*iheight + ip_y * iwidth + ip_x;
         *dest_p = *src_p;
       }
     }
@@ -64,32 +64,34 @@ void THNN_(SpatialReflectionPadding_updateOutput)(THNNState *state,
   int64_t iwidth;
   int64_t oheight;
   int64_t owidth;
-  scalar_t *input_data;
-  scalar_t *output_data;
+  real *input_data;
+  real *output_data;
 
-  THNN_ARGCHECK(!input->is_empty() && (input->dim() == 3 || input->dim() == 4), 2, input,
-		"non-empty 3D or 4D (batch mode) tensor expected for input, but got: %s");
+  THNN_ARGCHECK(input->nDimension == 3 || input->nDimension == 4, 2, input,
+		"3D or 4D (batch mode) tensor expected for input, but got: %s");
 
-  if (input->dim() == 4)
+  if (input->nDimension == 4)
   {
-    nbatch = input->size(0);
+    nbatch = input->size[0];
     dimw++;
     dimh++;
     dimslices++;
   }
 
   /* input sizes */
-  nslices = input->size(dimslices);
-  iheight = input->size(dimh);
-  iwidth = input->size(dimw);
+  nslices = input->size[dimslices];
+  iheight = input->size[dimh];
+  iwidth = input->size[dimw];
 
-  AT_CHECK(pad_l < iwidth && pad_r < iwidth,
-           "Argument #4: Padding size should be less than the corresponding input dimension, "
-           "but got: padding (", pad_l, ", ", pad_r, ") at dimension ", dimw, " of input ", input->sizes());
+  THArgCheck(pad_l < iwidth && pad_r < iwidth, 4,
+             "Padding size should be less than the corresponding input dimension, "
+             "but got: padding (%d, %d) at dimension %d of input %s",
+             pad_l, pad_r, dimw, _THSizeDesc(input->size, input->nDimension).str);
 
-  AT_CHECK(pad_t < iheight && pad_b < iheight,
-           "Argument #6: Padding size should be less than the corresponding input dimension, "
-           "but got: padding (", pad_t, ", ", pad_b, ") at dimension ", dimh, " of input ", input->sizes());
+  THArgCheck(pad_t < iheight && pad_b < iheight, 6,
+             "Padding size should be less than the corresponding input dimension, "
+             "but got: padding (%d, %d) at dimension %d of input %s",
+             pad_t, pad_b, dimh, _THSizeDesc(input->size, input->nDimension).str);
 
   /* output sizes */
   oheight = iheight + pad_t + pad_b;
@@ -104,12 +106,12 @@ void THNN_(SpatialReflectionPadding_updateOutput)(THNNState *state,
   input = THTensor_(newContiguous)(input);
 
   /* resize output */
-  if (input->dim() == 3)
+  if (input->nDimension == 3)
   {
     THTensor_(resize3d)(output, nslices, oheight, owidth);
 
-    input_data = input->data<scalar_t>();
-    output_data = output->data<scalar_t>();
+    input_data = THTensor_(data)(input);
+    output_data = THTensor_(data)(output);
 
     THNN_(SpatialReflectionPadding_updateOutput_frame)(input_data, output_data,
                                                     nslices,
@@ -124,8 +126,8 @@ void THNN_(SpatialReflectionPadding_updateOutput)(THNNState *state,
 
     THTensor_(resize4d)(output, nbatch, nslices, oheight, owidth);
 
-    input_data = input->data<scalar_t>();
-    output_data = output->data<scalar_t>();
+    input_data = THTensor_(data)(input);
+    output_data = THTensor_(data)(output);
 
 #pragma omp parallel for private(p)
     for (p = 0; p < nbatch; p++)
@@ -142,11 +144,11 @@ void THNN_(SpatialReflectionPadding_updateOutput)(THNNState *state,
   }
 
   /* cleanup */
-  c10::raw::intrusive_ptr::decref(input);
+  THTensor_(free)(input);
 }
 
 static void THNN_(SpatialReflectionPadding_updateGradInput_frame)(
-  scalar_t *ginput_p, scalar_t *goutput_p,
+  real *ginput_p, real *goutput_p,
   int64_t nslices,
   int64_t iwidth, int64_t iheight,
   int64_t owidth, int64_t oheight,
@@ -184,8 +186,8 @@ static void THNN_(SpatialReflectionPadding_updateGradInput_frame)(
         }
         ip_y = ip_y - oStartY + iStartY;
 
-        scalar_t *src_p = goutput_p + k*owidth*oheight + i * owidth + j;
-        scalar_t *dest_p = ginput_p + k*iwidth*iheight + ip_y * iwidth + ip_x;
+        real *src_p = goutput_p + k*owidth*oheight + i * owidth + j;
+        real *dest_p = ginput_p + k*iwidth*iheight + ip_y * iwidth + ip_x;
         *dest_p += *src_p;
       }
     }
@@ -209,18 +211,18 @@ void THNN_(SpatialReflectionPadding_updateGradInput)(THNNState *state,
   int64_t oheight;
   int64_t owidth;
 
-  if (input->dim() == 4)
+  if (input->nDimension == 4)
   {
-    nbatch = input->size(0);
+    nbatch = input->size[0];
     dimw++;
     dimh++;
     dimslices++;
   }
 
   /* sizes */
-  nslices = input->size(dimslices);
-  iheight = input->size(dimh);
-  iwidth = input->size(dimw);
+  nslices = input->size[dimslices];
+  iheight = input->size[dimh];
+  iwidth = input->size[dimw];
   oheight = iheight + pad_t + pad_b;
   owidth  = iwidth + pad_l + pad_r;
 
@@ -239,10 +241,10 @@ void THNN_(SpatialReflectionPadding_updateGradInput)(THNNState *state,
   THTensor_(zero)(gradInput);
 
   /* backprop */
-  if (input->dim() == 3) {
+  if (input->nDimension == 3) {
     THNN_(SpatialReflectionPadding_updateGradInput_frame)(
-      gradInput->data<scalar_t>(),
-      gradOutput->data<scalar_t>(),
+      THTensor_(data)(gradInput),
+      THTensor_(data)(gradOutput),
       nslices,
       iwidth, iheight,
       owidth, oheight,
@@ -253,8 +255,8 @@ void THNN_(SpatialReflectionPadding_updateGradInput)(THNNState *state,
 #pragma omp parallel for private(p)
     for (p = 0; p < nbatch; p++) {
       THNN_(SpatialReflectionPadding_updateGradInput_frame)(
-        gradInput->data<scalar_t>() + p * nslices * iheight * iwidth,
-        gradOutput->data<scalar_t>() + p * nslices * oheight * owidth,
+        THTensor_(data)(gradInput) + p * nslices * iheight * iwidth,
+        THTensor_(data)(gradOutput) + p * nslices * oheight * owidth,
         nslices,
         iwidth, iheight,
         owidth, oheight,
@@ -264,7 +266,7 @@ void THNN_(SpatialReflectionPadding_updateGradInput)(THNNState *state,
   }
 
   /* cleanup */
-  c10::raw::intrusive_ptr::decref(gradOutput);
+  THTensor_(free)(gradOutput);
 }
 
 #endif

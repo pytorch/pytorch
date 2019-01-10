@@ -1,19 +1,17 @@
-#include <torch/csrc/autograd/python_cpp_function.h>
+#include "torch/csrc/autograd/python_cpp_function.h"
 
-#include <torch/csrc/python_headers.h>
+#include "torch/csrc/python_headers.h"
 #include <memory>
-#include <cstdio>
+#include <stdio.h>
 #include <typeindex>
 #include <unordered_map>
 
-#include <torch/csrc/autograd/python_function.h>
-#include <torch/csrc/autograd/python_variable.h>
-#include <torch/csrc/autograd/python_hook.h>
-#include <torch/csrc/autograd/python_anomaly_mode.h>
-#include <torch/csrc/utils/auto_gil.h>
-#include <torch/csrc/utils/python_strings.h>
-#include <torch/csrc/DynamicTypes.h>
-#include <torch/csrc/Exceptions.h>
+#include "torch/csrc/autograd/python_function.h"
+#include "torch/csrc/autograd/python_variable.h"
+#include "torch/csrc/autograd/python_hook.h"
+#include "torch/csrc/utils/auto_gil.h"
+#include "torch/csrc/DynamicTypes.h"
+#include "torch/csrc/Exceptions.h"
 
 using namespace torch::autograd;
 
@@ -28,11 +26,6 @@ PyObject* THPCppFunction_call(PyObject* self, PyObject* args, PyObject *kwargs)
   }
 
   int num_inputs = PyTuple_GET_SIZE(args);
-  int num_inputs_required = ((THPCppFunction*)self)->cdata->num_inputs();
-  if (num_inputs != num_inputs_required) {
-    return PyErr_Format(PyExc_TypeError, "expected %d arguments, got %d instead",
-                        num_inputs_required, num_inputs);
-  }
   variable_list vars(num_inputs);
   for (int i = 0; i != num_inputs; ++i) {
     PyObject* arg = PyTuple_GET_ITEM(args, i);
@@ -49,7 +42,7 @@ PyObject* THPCppFunction_call(PyObject* self, PyObject* args, PyObject *kwargs)
 
   HANDLE_TH_ERRORS {
     AutoNoGIL nogil;
-    output = (*((THPCppFunction*)self)->cdata)(std::move(vars));
+    output = (*((THPCppFunction*)self)->cdata)(vars);
   }
   END_HANDLE_TH_ERRORS
 
@@ -122,14 +115,6 @@ PyObject* THPCppFunction_next_functions(THPCppFunction* self, PyObject* hook)
   return py_functions.release();
 }
 
-PyObject* THPCppFunction_metadata(THPCppFunction *self, void *_unused)
-{
-  auto metadata = static_cast<PyAnomalyMetadata*>(self->cdata->metadata())->dict();
-
-  Py_INCREF(metadata);
-  return metadata;
-}
-
 PyObject* THPCppFunction_requires_grad(THPCppFunction* self) {
   Py_RETURN_TRUE;
 }
@@ -153,10 +138,6 @@ PyObject* THPCppFunction_register_hook(PyObject* self, PyObject* hook)
   return registerFunctionHook(fn, hook);
 }
 
-PyObject* THPCppFunction_name(PyObject* self) {
-  auto& fn = *((THPCppFunction*)self)->cdata;
-  return THPUtils_packString(fn.name());
-}
 
 static struct PyMethodDef default_methods[] = {
   THP_FUNCTION_DEFAULT_METHODS,
@@ -189,19 +170,8 @@ PyTypeObject* _initFunctionPyTypeObject(PyTypeObject& type, const char* name,
 
 static std::unordered_map<std::type_index, THPObjectPtr> cpp_function_types;
 
-struct DefaultFunctionType {
-  DefaultFunctionType() : type() {
-    _initFunctionPyTypeObject(type, "CppFunction", nullptr, nullptr);
-    Py_INCREF(&type);
-  }
-
-  PyTypeObject type;
-};
-
-PyObject* functionToPyObject(const std::shared_ptr<Function>& cdata)
+PyObject* functionToPyObject(std::shared_ptr<Function> cdata)
 {
-  static DefaultFunctionType default_type;
-
   if (!cdata) {
     Py_RETURN_NONE;
   }
@@ -217,13 +187,12 @@ PyObject* functionToPyObject(const std::shared_ptr<Function>& cdata)
   } else {
     auto& fn = *cdata;
     auto it = cpp_function_types.find(std::type_index(typeid(fn)));
-    PyTypeObject* type;
     if (it == cpp_function_types.end()) {
-      type = &default_type.type;
-    } else {
-      type = (PyTypeObject*)it->second.get();
+      return PyErr_Format(PyExc_TypeError,
+          "Don't know how to create Python object for %s", typeid(fn).name());
     }
 
+    PyTypeObject* type = (PyTypeObject*)it->second.get();
     THPObjectPtr obj(type->tp_alloc(type, 0));
     if (!obj) return nullptr;
     THPCppFunction* f = (THPCppFunction*)obj.get();

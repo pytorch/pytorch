@@ -8,7 +8,7 @@ namespace caffe2 {
 // explicit specify the type of the tensor while calling the Print() method.
 // It also supports a convenience function with a default constructed printer as
 // a static method.
-class CAFFE2_API SmartTensorPrinter {
+class SmartTensorPrinter {
  public:
   // The proliferation of constructors is to give the feature parity with
   // TensorPrinter
@@ -27,17 +27,19 @@ class CAFFE2_API SmartTensorPrinter {
       const std::string& file_name,
       int limit);
 
-  void Print(const Tensor& tensor);
+  void Print(const Tensor<CPUContext>& tensor);
 
-  void PrintMeta(const Tensor& tensor) {
+  template <class Context>
+  void PrintMeta(const Tensor<Context>& tensor) {
     tensorPrinter_.PrintMeta(tensor);
   }
 
   // Uses a default constructed SmartTensorPrinter
-  static void PrintTensor(const Tensor& tensor);
+  static void PrintTensor(const Tensor<CPUContext>& tensor);
 
   // Uses a default constructed SmartTensorPrinter
-  void PrintTensorMeta(const Tensor& tensor) {
+  template <class Context>
+  void PrintTensorMeta(const Tensor<Context>& tensor) {
     DefaultTensorPrinter().PrintMeta(tensor);
   }
 

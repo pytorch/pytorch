@@ -14,10 +14,10 @@ _set_global_flags = (
 
 
 @contextlib.contextmanager
-def DlopenGuard(extra_flags=ctypes.RTLD_GLOBAL):
+def DlopenGuard():
     if _set_global_flags:
         old_flags = sys.getdlopenflags()
-        sys.setdlopenflags(old_flags | extra_flags)
+        sys.setdlopenflags(old_flags | ctypes.RTLD_GLOBAL)
     yield
     if _set_global_flags:
         sys.setdlopenflags(old_flags)

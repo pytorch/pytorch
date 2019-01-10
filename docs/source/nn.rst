@@ -34,22 +34,10 @@ Containers
 .. autoclass:: ModuleList
     :members:
 
-:hidden:`ModuleDict`
-~~~~~~~~~~~~~~~~~~~~
-
-.. autoclass:: ModuleDict
-    :members:
-
 :hidden:`ParameterList`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: ParameterList
-    :members:
-
-:hidden:`ParameterDict`
-~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autoclass:: ParameterDict
     :members:
 
 Convolution layers
@@ -90,18 +78,6 @@ Convolution layers
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: ConvTranspose3d
-    :members:
-
-:hidden:`Unfold`
-~~~~~~~~~~~~~~~~
-
-.. autoclass:: Unfold
-    :members:
-
-:hidden:`Fold`
-~~~~~~~~~~~~~~
-
-.. autoclass:: Fold
     :members:
 
 
@@ -338,12 +314,6 @@ Non-linear activations (weighted sum, nonlinearity)
 .. autoclass:: SELU
     :members:
 
-:hidden:`CELU`
-~~~~~~~~~~~~~~
-
-.. autoclass:: CELU
-    :members:
-
 :hidden:`Sigmoid`
 ~~~~~~~~~~~~~~~~~
 
@@ -413,12 +383,6 @@ Non-linear activations (other)
 .. autoclass:: LogSoftmax
     :members:
 
-:hidden:`AdaptiveLogSoftmaxWithLoss`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autoclass:: AdaptiveLogSoftmaxWithLoss
-    :members:
-
 Normalization layers
 ----------------------------------
 
@@ -440,13 +404,13 @@ Normalization layers
 .. autoclass:: BatchNorm3d
     :members:
 
-:hidden:`GroupNorm`
-~~~~~~~~~~~~~~~~~~~
+:hidden:`GroupNorm
+~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: GroupNorm
     :members:
 
-:hidden:`InstanceNorm1d`
+    :hidden:`InstanceNorm1d`
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: InstanceNorm1d
@@ -610,12 +574,6 @@ Loss functions
 .. autoclass:: CrossEntropyLoss
     :members:
 
-:hidden:`CTCLoss`
-~~~~~~~~~~~~~~~~~
-
-.. autoclass:: CTCLoss
-    :members:
-
 :hidden:`NLLLoss`
 ~~~~~~~~~~~~~~~~~
 
@@ -744,12 +702,6 @@ DataParallel layers (multi-GPU, distributed)
 .. autoclass:: torch.nn.parallel.DistributedDataParallel
     :members:
 
-:hidden:`DistributedDataParallelCPU`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autoclass:: torch.nn.parallel.DistributedDataParallelCPU
-    :members:
-
 
 Utilities
 ---------
@@ -764,16 +716,6 @@ Utilities
 
 .. autofunction:: torch.nn.utils.clip_grad_value_
 
-:hidden:`parameters_to_vector`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: torch.nn.utils.parameters_to_vector
-
-:hidden:`vector_to_parameters`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: torch.nn.utils.vector_to_parameters
-
 :hidden:`weight_norm`
 ~~~~~~~~~~~~~~~~~~~~~
 
@@ -785,19 +727,14 @@ Utilities
 .. autofunction:: torch.nn.utils.remove_weight_norm
 
 :hidden:`spectral_norm`
-~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: torch.nn.utils.spectral_norm
 
 :hidden:`remove_spectral_norm`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: torch.nn.utils.remove_spectral_norm
-
-:hidden:`one_hot`
-~~~~~~~~~~~~~~~~~
-
-.. autofunction:: torch.nn.utils.one_hot
 
 
 .. currentmodule:: torch.nn.utils.rnn
@@ -869,16 +806,6 @@ Convolution functions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: conv_transpose3d
-
-:hidden:`unfold`
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: unfold
-
-:hidden:`fold`
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: fold
 
 Pooling functions
 ----------------------------------
@@ -1007,11 +934,6 @@ Non-linear activation functions
 
 .. autofunction:: selu
 
-:hidden:`celu`
-~~~~~~~~~~~~~~
-
-.. autofunction:: celu
-
 :hidden:`leaky_relu`
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -1074,11 +996,6 @@ Non-linear activation functions
 
 .. autofunction:: softshrink
 
-:hidden:`gumbel_softmax`
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: gumbel_softmax
-
 :hidden:`log_softmax`
 ~~~~~~~~~~~~~~~~~~~~~
 
@@ -1130,11 +1047,6 @@ Linear functions
 
 .. autofunction:: linear
 
-:hidden:`bilinear`
-~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: bilinear
-
 Dropout functions
 -----------------
 
@@ -1158,19 +1070,6 @@ Dropout functions
 
 .. autofunction:: dropout3d
 
-Sparse functions
-----------------------------------
-
-:hidden:`embedding`
-~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: embedding
-
-:hidden:`embedding_bag`
-~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: embedding_bag
-
 Distance functions
 ----------------------------------
 
@@ -1184,11 +1083,6 @@ Distance functions
 
 .. autofunction:: cosine_similarity
 
-:hidden:`pdist`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: pdist
-
 
 Loss functions
 --------------
@@ -1197,11 +1091,6 @@ Loss functions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: binary_cross_entropy
-
-:hidden:`binary_cross_entropy_with_logits`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: binary_cross_entropy_with_logits
 
 :hidden:`poisson_nll_loss`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1217,11 +1106,6 @@ Loss functions
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: cross_entropy
-
-:hidden:`ctc_loss`
-~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: ctc_loss
 
 :hidden:`hinge_embedding_loss`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1268,6 +1152,11 @@ Loss functions
 
 .. autofunction:: nll_loss
 
+:hidden:`binary_cross_entropy_with_logits`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: binary_cross_entropy_with_logits
+
 :hidden:`smooth_l1_loss`
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -1295,11 +1184,6 @@ Vision functions
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: pad
-
-:hidden:`interpolate`
-~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autofunction:: interpolate
 
 :hidden:`upsample`
 ~~~~~~~~~~~~~~~~~~~~~~~

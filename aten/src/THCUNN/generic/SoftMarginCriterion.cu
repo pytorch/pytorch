@@ -1,21 +1,24 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "THCUNN/generic/SoftMarginCriterion.cu"
+#define THC_GENERIC_FILE "generic/SoftMarginCriterion.cu"
 #else
+
+#include "THCApply.cuh"
 
 void THNN_(SoftMarginCriterion_updateOutput)(
            THCState *state,
            THCTensor *input,
            THCTensor *target,
            THCTensor *output,
-           int64_t reduction)
+           bool sizeAverage,
+           bool reduce)
 {
   THCUNN_check_shape(state, input, target);
   THCUNN_assertSameGPU(state, 3, input, target, output);
 
-  if (reduction == Reduction::None) {
+  if (!reduce) {
     THCTensor_(resizeAs)(state, output, input);
-    THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, input, target, output,
-        softmargin_no_reduce_functor<scalar_t, accreal>());
+    THC_pointwiseApply3(state, input, target, output,
+        softmargin_no_reduce_functor<real, accreal>());
     return;
   }
 
@@ -24,19 +27,19 @@ void THNN_(SoftMarginCriterion_updateOutput)(
 
   input = THCTensor_(newContiguous)(state, input);
   target = THCTensor_(newContiguous)(state, target);
-  THCTensor_(resize0d)(state, output);
+  THCTensor_(resize1d)(state, output, 1);
 
-  thrust::device_ptr<scalar_t> input_data(THCTensor_(data)(state, input));
-  thrust::device_ptr<scalar_t> target_data(THCTensor_(data)(state, target));
-  sum = thrust::inner_product(input_data, input_data+size, target_data, (accreal) 0, thrust::plus<accreal>(), softmargin_functor<scalar_t, accreal>());
+  thrust::device_ptr<real> input_data(THCTensor_(data)(state, input));
+  thrust::device_ptr<real> target_data(THCTensor_(data)(state, target));
+  sum = thrust::inner_product(input_data, input_data+size, target_data, (accreal) 0, thrust::plus<accreal>(), softmargin_functor<real, accreal>());
 
-  if (reduction == Reduction::Mean)
+  if(sizeAverage)
     sum /= size;
 
   THCTensor_(free)(state, input);
   THCTensor_(free)(state, target);
 
-  THCTensor_(set0d)(state, output, ScalarConvert<accreal, scalar_t>::to(sum));
+  THCTensor_(set1d)(state, output, 0, ScalarConvert<accreal, real>::to(sum));
 }
 
 void THNN_(SoftMarginCriterion_updateGradInput)(
@@ -45,34 +48,35 @@ void THNN_(SoftMarginCriterion_updateGradInput)(
            THCTensor *target,
            THCTensor *gradOutput,
            THCTensor *gradInput,
-           int64_t reduction)
+           bool sizeAverage,
+           bool reduce)
 {
   THCUNN_check_shape(state, input, target);
   THCUNN_assertSameGPU(state, 4, input, target, gradInput, gradOutput);
 
   THCTensor_(resizeAs)(state, gradInput, input);
 
-  if (reduction == Reduction::None) {
+  if (!reduce) {
     THCUNN_check_shape(state, gradOutput, input);
-    THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, input, target, gradInput,
-        softmargin_updateGradInput_no_reduce_functor<scalar_t, accreal>());
+    THC_pointwiseApply3(state, input, target, gradInput,
+        softmargin_updateGradInput_no_reduce_functor<real, accreal>());
     THCTensor_(cmul)(state, gradInput, gradInput, gradOutput);
     return;
   }
 
   ptrdiff_t size = THCTensor_(nElement)(state, input);
-  accreal norm = (reduction == Reduction::Mean ? 1./size : 1.);
+  accreal norm = (sizeAverage ? 1./size : 1.);
 
   input = THCTensor_(newContiguous)(state, input);
   target = THCTensor_(newContiguous)(state, target);
 
 
-  thrust::device_ptr<scalar_t> input_data(THCTensor_(data)(state, input));
-  thrust::device_ptr<scalar_t> target_data(THCTensor_(data)(state, target));
-  thrust::device_ptr<scalar_t> gradInput_data(THCTensor_(data)(state, gradInput));
+  thrust::device_ptr<real> input_data(THCTensor_(data)(state, input));
+  thrust::device_ptr<real> target_data(THCTensor_(data)(state, target));
+  thrust::device_ptr<real> gradInput_data(THCTensor_(data)(state, gradInput));
 
   thrust::transform(input_data, input_data+size, target_data, gradInput_data,
-                    softmargin_updateGradInput_functor<scalar_t, accreal>(norm, THCTensor_(get0d)(state, gradOutput)));
+                    softmargin_updateGradInput_functor<real, accreal>(norm, THCTensor_(get1d)(state, gradOutput, 0)));
 
   THCTensor_(free)(state, input);
   THCTensor_(free)(state, target);

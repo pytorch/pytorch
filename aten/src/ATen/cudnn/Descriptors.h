@@ -1,12 +1,10 @@
 #pragma once
 
-#include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/Exceptions.h>
+#include "Exceptions.h"
 
-#include <ATen/cudnn/cudnn-wrapper.h>
+#include "cudnn-wrapper.h"
 #include <ATen/ATen.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/cuda/ATenCUDAGeneral.h>
 #include <cuda.h>
 
 #if CUDNN_VERSION < 7000
@@ -87,7 +85,7 @@ template <typename T, cudnnStatus_t (*dtor)(T*)>
 struct DescriptorDeleter {
   void operator()(T* x) {
     if (x != nullptr) {
-      AT_CUDNN_CHECK(dtor(x));
+      CUDNN_CHECK(dtor(x));
     }
   }
 };
@@ -102,7 +100,7 @@ struct DescriptorDeleter {
 // initialized the first time you call set() or any other initializing
 // function.
 template <typename T, cudnnStatus_t (*ctor)(T**), cudnnStatus_t (*dtor)(T*)>
-class AT_CUDA_API Descriptor
+class Descriptor
 {
 public:
   // TODO: Figure out why const-correctness doesn't work here
@@ -123,7 +121,7 @@ protected:
   void init() {
     if (desc_ == nullptr) {
       T* raw_desc;
-      AT_CUDNN_CHECK(ctor(&raw_desc));
+      CUDNN_CHECK(ctor(&raw_desc));
       desc_.reset(raw_desc);
     }
   }
@@ -131,7 +129,7 @@ private:
   std::unique_ptr<T, DescriptorDeleter<T, dtor>> desc_;
 };
 
-class AT_CUDA_API TensorDescriptor
+class TensorDescriptor
   : public Descriptor<cudnnTensorStruct,
                       &cudnnCreateTensorDescriptor,
                       &cudnnDestroyTensorDescriptor>
@@ -163,7 +161,7 @@ public:
 private:
   void set(cudnnDataType_t dataType, int dim, int* size, int* stride) {
     fixSizeOneDimStride(dim, size, stride);
-    AT_CUDNN_CHECK(cudnnSetTensorNdDescriptor(mut_desc(), dataType, dim, size, stride));
+    CUDNN_CHECK(cudnnSetTensorNdDescriptor(mut_desc(), dataType, dim, size, stride));
   }
 };
 
@@ -179,11 +177,11 @@ public:
 
 private:
   void set(cudnnDataType_t dataType, int dim, int* size) {
-    AT_CUDNN_CHECK(cudnnSetFilterNdDescriptor(mut_desc(), dataType, CUDNN_TENSOR_NCHW, dim, size));
+    CUDNN_CHECK(cudnnSetFilterNdDescriptor(mut_desc(), dataType, CUDNN_TENSOR_NCHW, dim, size));
   }
 };
 
-struct AT_CUDA_API ConvolutionDescriptor
+struct ConvolutionDescriptor
   : public Descriptor<cudnnConvolutionStruct,
                       &cudnnCreateConvolutionDescriptor,
                       &cudnnDestroyConvolutionDescriptor>
@@ -191,24 +189,24 @@ struct AT_CUDA_API ConvolutionDescriptor
   void set(cudnnDataType_t dataType, int dim, int* pad, int* stride, int * upscale /* aka dilation */, int groups) {
     cudnnDataType_t mathType = dataType;
     if (dataType == CUDNN_DATA_HALF) mathType = CUDNN_DATA_FLOAT;
-    AT_CUDNN_CHECK(cudnnSetConvolutionNdDescriptor(mut_desc(), dim, pad, stride, upscale,
+    CUDNN_CHECK(cudnnSetConvolutionNdDescriptor(mut_desc(), dim, pad, stride, upscale,
                                           CUDNN_CROSS_CORRELATION, mathType));
 #if CUDNN_VERSION >= 7000
-    AT_CUDNN_CHECK(cudnnSetConvolutionGroupCount(mut_desc(), groups));
-    AT_CUDNN_CHECK(cudnnSetConvolutionMathType(mut_desc(), CUDNN_DEFAULT_MATH));
+    CUDNN_CHECK(cudnnSetConvolutionGroupCount(mut_desc(), groups));
+    CUDNN_CHECK(cudnnSetConvolutionMathType(mut_desc(), CUDNN_DEFAULT_MATH));
     if(dataType == CUDNN_DATA_HALF)
-      AT_CUDNN_CHECK(cudnnSetConvolutionMathType(mut_desc(), CUDNN_TENSOR_OP_MATH));
+      CUDNN_CHECK(cudnnSetConvolutionMathType(mut_desc(), CUDNN_TENSOR_OP_MATH));
 #endif
   }
 };
 
-struct AT_CUDA_API SpatialTransformerDescriptor
+struct SpatialTransformerDescriptor
   : public Descriptor<cudnnSpatialTransformerStruct,
                       &cudnnCreateSpatialTransformerDescriptor,
                       &cudnnDestroySpatialTransformerDescriptor>
 {
   void set(cudnnDataType_t dataType, int dim, int* size) {
-    AT_CUDNN_CHECK(cudnnSetSpatialTransformerNdDescriptor(mut_desc(), CUDNN_SAMPLER_BILINEAR, dataType, dim, size));
+    CUDNN_CHECK(cudnnSetSpatialTransformerNdDescriptor(mut_desc(), CUDNN_SAMPLER_BILINEAR, dataType, dim, size));
   }
 };
 
@@ -241,7 +239,7 @@ inline cudnnStatus_t cudnnRestoreDropoutDescriptor(
 
 #endif // CUDNN_VERSION
 
-struct AT_CUDA_API DropoutDescriptor
+struct DropoutDescriptor
   : public Descriptor<cudnnDropoutStruct,
                       &cudnnCreateDropoutDescriptor,
                       &cudnnDestroyDropoutDescriptor>
@@ -250,15 +248,15 @@ struct AT_CUDA_API DropoutDescriptor
 
   // Initialize a dropout descriptor's RNG state.
   // WARNING: This function is very expensive, avoid calling this function!
-  // NB: it takes a Type so that we can generate a Variable if necessary.
-  void initialize_rng(cudnnHandle_t handle, float dropout, long long int seed, const TensorOptions& options) {
+  // NB: it takes a Type so that we can generate a Variable if necessary
+  void initialize_rng(const at::Type& ty, cudnnHandle_t handle, float dropout, long long int seed) {
     AT_ASSERTM(dropout > 0, "dropout must be nonzero; otherwise call set_no_dropout");
     size_t state_size;
-    AT_CUDNN_CHECK(cudnnDropoutGetStatesSize(handle, &state_size));
-    AT_ASSERT(options.device().type() == kCUDA);
-    AT_ASSERT(options.dtype() == kByte);
-    state = at::empty({static_cast<int64_t>(state_size)}, options);
-    AT_CUDNN_CHECK(cudnnSetDropoutDescriptor(mut_desc(), handle, dropout, state.data_ptr(), state_size, seed));
+    CUDNN_CHECK(cudnnDropoutGetStatesSize(handle, &state_size));
+    AT_ASSERT(ty.is_cuda());
+    AT_ASSERT(ty.scalarType() == kByte);
+    state = ty.tensor({static_cast<int64_t>(state_size)});
+    CUDNN_CHECK(cudnnSetDropoutDescriptor(mut_desc(), handle, dropout, state.data_ptr(), state_size, seed));
   }
 
   // Restore a dropout descriptor given a dropout probability and existing RNG state.
@@ -269,7 +267,7 @@ struct AT_CUDA_API DropoutDescriptor
     void *state_ptr = state.data_ptr();
     size_t state_size = state.size(0);
     // NB: The seed doesn't actually matter, so we give a dummy value
-    AT_CUDNN_CHECK(cudnnRestoreDropoutDescriptor(mut_desc(), handle, dropout, state_ptr, state_size, 0 /* seed */));
+    CUDNN_CHECK(cudnnRestoreDropoutDescriptor(mut_desc(), handle, dropout, state_ptr, state_size, 0 /* seed */));
   }
 
   // Restore a dropout descriptor corresponding to no dropout
@@ -279,11 +277,11 @@ struct AT_CUDA_API DropoutDescriptor
     // initialization actually takes place when there is no dropout.
     // NB: Empirically, cudnnSetDropoutDescriptor is cheap when
     // dropoot == 0
-    AT_CUDNN_CHECK(cudnnSetDropoutDescriptor(mut_desc(), handle, 0 /* dropout */, nullptr, 0 /* state_size */, 0 /* seed */));
+    CUDNN_CHECK(cudnnSetDropoutDescriptor(mut_desc(), handle, 0 /* dropout */, nullptr, 0 /* state_size */, 0 /* seed */));
   }
 };
 
-struct AT_CUDA_API RNNDescriptor
+struct RNNDescriptor
   : public Descriptor<cudnnRNNStruct,
                       &cudnnCreateRNNDescriptor,
                       &cudnnDestroyRNNDescriptor>
@@ -291,9 +289,9 @@ struct AT_CUDA_API RNNDescriptor
   DropoutDescriptor dropout_desc_;
   void set(cudnnHandle_t handle, int hidden_size, int num_layers, DropoutDescriptor&& dropout_desc,
            cudnnRNNInputMode_t input_mode, cudnnDirectionMode_t bidirectional,
-           cudnnRNNMode_t mode, cudnnDataType_t datatype, cudnnRNNAlgo_t algo) {
+           cudnnRNNMode_t mode, cudnnDataType_t datatype) {
     dropout_desc_ = std::move(dropout_desc);
-    AT_CUDNN_CHECK(cudnnSetRNNDescriptor_v6(
+    CUDNN_CHECK(cudnnSetRNNDescriptor_v6(
           handle,
           mut_desc(),
           hidden_size,
@@ -302,10 +300,10 @@ struct AT_CUDA_API RNNDescriptor
           input_mode,
           bidirectional,
           mode,
-          algo,
+          CUDNN_RNN_ALGO_STANDARD,
           datatype));
 #if CUDNN_VERSION >= 7000 && CUDA_VERSION >= 9000
-    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+    cudaDeviceProp* prop = globalContext().getCurrentDeviceProperties();
     if (prop->major >= 7) {
       if (datatype == CUDNN_DATA_HALF) {
         cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_TENSOR_OP_MATH);
@@ -319,27 +317,13 @@ struct AT_CUDA_API RNNDescriptor
   }
 };
 
-#if CUDNN_VERSION >= 7000
-
-struct AT_CUDA_API CTCLossDescriptor
-  : public Descriptor<cudnnCTCLossStruct,
-                      &cudnnCreateCTCLossDescriptor,
-                      &cudnnDestroyCTCLossDescriptor>
-{
-  void set(cudnnDataType_t datatype) {
-    AT_CUDNN_CHECK(cudnnSetCTCLossDescriptor(mut_desc(), datatype));
-  }
-};
-
-#endif
-
 union Constant
 {
   float f;
   double d;
   Constant(cudnnDataType_t dataType, double value) {
     if (dataType == CUDNN_DATA_HALF || dataType == CUDNN_DATA_FLOAT) {
-      f = static_cast<float>(value);
+      f = (float) value;
     } else {
       d = value;
     }

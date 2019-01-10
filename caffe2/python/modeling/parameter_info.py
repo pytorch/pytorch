@@ -14,6 +14,11 @@ class ParameterTags(object):
     COMPUTED_PARAM = 'COMPUTED_PARAM'
 
 
+class ParameterType(object):
+    DENSE = 'dense'
+    SPARSE = 'sparse'
+
+
 class ParameterInfo(object):
 
     def __init__(
@@ -36,6 +41,14 @@ class ParameterInfo(object):
         # each param_info can have its own optimizer. It can be set within
         # OptimizerContext (caffe2/python/optimizer.py)
         self._optimizer = None
+
+    def grad_type(self):
+        # self.grad could be None for model parallelism with parameter server
+        if self.grad is None:
+            return
+        return (
+            ParameterType.SPARSE if isinstance(self.grad, core.GradientSlice)
+            else ParameterType.DENSE)
 
     @property
     def parameter(self):

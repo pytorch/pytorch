@@ -2,7 +2,6 @@
 
 #include <memory>
 #include <unordered_set>
-
 #include "caffe2/core/logging.h"
 
 namespace caffe2 {
@@ -44,15 +43,7 @@ class ObserverBase {
 template <class T>
 class Observable {
  public:
-  Observable() = default;
-
-  Observable(Observable&&) = default;
-  Observable& operator =(Observable&&) = default;
-
-  virtual ~Observable() = default;
-
-  C10_DISABLE_COPY_AND_ASSIGN(Observable);
-
+  virtual ~Observable(){};
   using Observer = ObserverBase<T>;
 
   /* Returns a reference to the observer after addition. */
@@ -68,7 +59,6 @@ class Observable {
       return observer_ptr;
     }
     observers_list_.push_back(std::move(observer));
-    UpdateCache();
 
     return observer_ptr;
   }
@@ -82,7 +72,6 @@ class Observable {
       if (it->get() == observer_ptr) {
         auto res = std::move(*it);
         observers_list_.erase(it);
-        UpdateCache();
         return res;
       }
     }
@@ -90,72 +79,20 @@ class Observable {
   }
 
   virtual size_t NumObservers() {
-    return num_observers_;
+    return observers_list_.size();
   }
 
- private:
-  inline static void StartObserver(Observer* observer) {
-    try {
-      observer->Start();
-    } catch (const std::exception& e) {
-      LOG(ERROR) << "Exception from observer: " << e.what();
-    } catch (...) {
-      LOG(ERROR) << "Exception from observer: unknown";
-    }
-  }
-
-  inline static void StopObserver(Observer* observer) {
-    try {
-      observer->Stop();
-    } catch (const std::exception& e) {
-      LOG(ERROR) << "Exception from observer: " << e.what();
-    } catch (...) {
-      LOG(ERROR) << "Exception from observer: unknown";
-    }
-  }
-
-  void UpdateCache() {
-    num_observers_ = observers_list_.size();
-    if (num_observers_ != 1) {
-      // we cannot take advantage of the cache
-      return;
-    }
-    observer_cache_ = observers_list_[0].get();
-  }
-
- public:
   void StartAllObservers() {
-    // do not access observers_list_ unless necessary
-    if (num_observers_ == 0) {
-      return;
-    } else if (num_observers_ == 1) {
-      StartObserver(observer_cache_);
-    } else {
-      for (auto& observer : observers_list_) {
-        StartObserver(observer.get());
-      }
+    for (auto& observer : observers_list_) {
+      observer->Start();
     }
   }
 
   void StopAllObservers() {
-    // do not access observers_list_ unless necessary
-    if (num_observers_ == 0) {
-      return;
-    } else if (num_observers_ == 1) {
-      StopObserver(observer_cache_);
-    } else {
-      for (auto& observer : observers_list_) {
-        StopObserver(observer.get());
-      }
+    for (auto& observer : observers_list_) {
+      observer->Stop();
     }
   }
-
- private:
-  // an on-stack cache for fast iteration;
-  // ideally, inside StartAllObservers and StopAllObservers,
-  // we should never access observers_list_
-  Observer* observer_cache_;
-  size_t num_observers_ = 0;
 
  protected:
   std::vector<std::unique_ptr<Observer>> observers_list_;

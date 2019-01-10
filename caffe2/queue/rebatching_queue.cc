@@ -17,11 +17,11 @@ void concat(
   const auto numRows = inputs.size();
 
   // Precompute the output sizes to avoid resizing
-  std::vector<std::vector<int64_t>> outputDims(numTensors);
+  std::vector<std::vector<TIndex>> outputDims(numTensors);
 
   for (int i = 0; i < numTensors; ++i) {
     SmartTensorPrinter::PrintTensor(inputZero.at(i));
-    outputDims[i] = inputZero.at(i).dims().vec();
+    outputDims[i] = inputZero.at(i).dims();
     outputDims[i].insert(outputDims[i].begin(), numRows);
   }
 
@@ -38,27 +38,27 @@ void concat(
     for (int j = 0; j < numTensors; ++j) {
       const auto& input = inputs[i][j];
 
-      CAFFE_ENFORCE(inputZero[j].meta() == input.dtype());
+      CAFFE_ENFORCE(inputZero[j].meta() == input.meta());
       CAFFE_ENFORCE_EQ(inputZero[j].itemsize(), input.itemsize());
-      CAFFE_ENFORCE_EQ(inputZero[j].ndim(), input.dim());
-      for (int k = 0; k < input.dim(); ++k) {
-        CAFFE_ENFORCE_EQ(input.sizes()[k], inputZero[j].dims()[k]);
+      CAFFE_ENFORCE_EQ(inputZero[j].ndim(), input.ndim());
+      for (int k = 0; k < input.ndim(); ++k) {
+        CAFFE_ENFORCE_EQ(input.dims()[k], inputZero[j].dims()[k]);
       }
 
       // Skip empty tensors
-      if (input.numel() == 0) {
+      if (input.size() == 0) {
         continue;
       }
 
-      context.CopyItemsToCPU(
-          input.dtype(),
-          input.numel(),
+      context.CopyItems<CPUContext, CPUContext>(
+          input.meta(),
+          input.size(),
           input.raw_data() /* src */,
           destinations[j] /* dst */
-      );
+          );
 
       destinations[j] =
-          (char*)destinations[j] + input.numel() * input.itemsize();
+          (char*)destinations[j] + input.size() * input.itemsize();
     }
   }
 }
@@ -68,7 +68,7 @@ std::vector<std::vector<TensorCPU>> split(
     const std::vector<const TensorCPU*>& inputs) {
   CAFFE_ENFORCE(!inputs.empty());
 
-  const auto outputSize = inputs[0]->sizes().at(0);
+  const auto outputSize = inputs[0]->dims().at(0);
   std::vector<std::vector<TensorCPU>> outputs(outputSize);
 
   for (const auto* inputPtr : inputs) {
@@ -76,20 +76,20 @@ std::vector<std::vector<TensorCPU>> split(
 
     const auto& input = *inputPtr;
     const auto innerSize = input.size_from_dim(1);
-    const auto itemSize = input.dtype().itemsize();
+    const auto itemSize = input.meta().itemsize();
 
-    auto outputDims = input.sizes().vec();
+    auto outputDims = input.dims();
     CAFFE_ENFORCE(!outputDims.empty());
     outputDims.erase(outputDims.begin());
-    CAFFE_ENFORCE_EQ(input.sizes().at(0), outputSize);
+    CAFFE_ENFORCE_EQ(input.dims().at(0), outputSize);
 
     for (int i = 0; i < outputSize; ++i) {
-      outputs[i].push_back(Tensor(outputDims, CPU));
-      context.CopyItemsToCPU(
-          input.dtype(),
+      outputs[i].push_back(TensorCPU(outputDims));
+      context.CopyItems<CPUContext, CPUContext>(
+          input.meta(),
           innerSize,
           (char*)input.raw_data() + i * innerSize * itemSize /* src */,
-          outputs[i].back().raw_mutable_data(input.dtype()) /* dst */);
+          outputs[i].back().raw_mutable_data(input.meta()) /* dst */);
     }
   }
 
@@ -163,7 +163,7 @@ bool RebatchingQueue::enqueueOne(
   auto& tensorVector = splittedInputs.back();
   tensorVector.reserve(inputs.size());
   for (const auto* tensorPtr : inputs) {
-    tensorVector.push_back(tensorPtr->Clone());
+    tensorVector.push_back(*tensorPtr);
   }
 
   return enqueue(std::move(splittedInputs));

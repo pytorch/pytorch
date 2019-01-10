@@ -161,16 +161,16 @@ bool ChannelBackpropStatsOp<CUDAContext>::RunOnDevice() {
   const int W = X.ndim() > 3 ? X.dim32(3) : 1;
   const int D = X.ndim() > 4 ? X.dim32(4) : 1;
 
-  
-  
+  auto dScale = Output(SCALE_GRAD);
+  auto dBias = Output(BIAS_GRAD);
 
   const auto Xarr = X.data<float>();
   const auto dYarr = dY.data<float>();
   const auto meanArr = mean.data<float>();
   const auto invStddevArr = invStddev.data<float>();
 
-  auto dBias = Output(BIAS_GRAD, {C}, at::dtype<float>());
-  auto dScale = Output(SCALE_GRAD, {C}, at::dtype<float>());
+  dBias->Resize(C);
+  dScale->Resize(C);
 
   const auto valsPerChannel = H * W * D;
 
@@ -199,8 +199,8 @@ bool ChannelBackpropStatsOp<CUDAContext>::RunOnDevice() {
           numBlocksPerChannel,
           dBiasScratch_.data<float>(),
           dScaleScratch_.data<float>(),
-          dBias->template mutable_data<float>(),
-          dScale->template mutable_data<float>());
+          dBias->mutable_data<float>(),
+          dScale->mutable_data<float>());
 
   return true;
 }

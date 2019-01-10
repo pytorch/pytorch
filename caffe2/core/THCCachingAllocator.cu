@@ -1,4 +1,4 @@
-#include "caffe2/core/THCCachingAllocator_gpu.h"
+#include "THCCachingAllocator.h"
 
 #include <deque>
 #include <map>

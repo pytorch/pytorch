@@ -9,19 +9,19 @@
 #include <unordered_map>
 #include <vector>
 
-#include "c10/util/Registry.h"
 #include "caffe2/core/blob.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/observer.h"
 #include "caffe2/core/operator_schema.h"
+#include "caffe2/core/registry.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/workspace.h"
-#include "caffe2/proto/caffe2_pb.h"
+#include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/simple_queue.h"
 #include "caffe2/utils/thread_pool.h"
 
-C10_DECLARE_string(caffe2_override_executor);
+CAFFE2_DECLARE_string(caffe2_override_executor);
 
 namespace caffe2 {
 
@@ -35,7 +35,7 @@ class Workspace;
 
 // Net is a thin struct that owns all the operators together with the operator
 // contexts.
-class CAFFE2_API NetBase : public Observable<NetBase> {
+class NetBase : public Observable<NetBase> {
  public:
   NetBase(const std::shared_ptr<const NetDef>& net_def, Workspace* ws);
   virtual ~NetBase() noexcept {}
@@ -58,7 +58,16 @@ class CAFFE2_API NetBase : public Observable<NetBase> {
       return false;
     }
     Wait();
-    return handleRunError();
+    handleRunError();
+    return true;
+  }
+
+  virtual void handleRunError() {
+    for (const Event* event : events_) {
+      if (event->Query() != EventStatus::EVENT_SUCCESS) {
+        CAFFE_THROW(event->ErrorMessage());
+      }
+    }
   }
 
   virtual bool RunAsync();
@@ -75,7 +84,10 @@ class CAFFE2_API NetBase : public Observable<NetBase> {
   virtual vector<float> TEST_Benchmark(
       const int /*warmup_runs*/,
       const int /*main_runs*/,
-      const bool /*run_individual*/);
+      const bool /*run_individual*/) {
+    LOG(ERROR) << "Benchmark not implemented for this net type.";
+    return vector<float>();
+  }
 
   inline const vector<string>& external_output() const {
     return external_output_;
@@ -110,41 +122,31 @@ class CAFFE2_API NetBase : public Observable<NetBase> {
     CAFFE_THROW("Not implemented");
   };
 
-  virtual bool handleRunError() {
-    for (const Event* event : events_) {
-      if (event->Query() != EventStatus::EVENT_SUCCESS) {
-        CAFFE_THROW(event->ErrorMessage());
-      }
-    }
-    return true;
-  }
-
   vector<string> external_input_;
   vector<string> external_output_;
   string name_;
   vector<const Event*> events_;
   std::shared_ptr<const NetDef> net_def_;
-  C10_DISABLE_COPY_AND_ASSIGN(NetBase);
+  DISABLE_COPY_AND_ASSIGN(NetBase);
 };
 
-class CAFFE2_API ExecutorHelper {
+class ExecutorHelper {
  public:
   ExecutorHelper() {}
-  virtual TaskThreadPoolBase* GetPool(const DeviceOption& option) const;
-  virtual std::vector<OperatorBase*> GetOperators() const;
-  virtual int GetNumWorkers() const;
+  virtual std::shared_ptr<TaskThreadPool> GetPool(
+      const DeviceOption& option) const;
   virtual ~ExecutorHelper() {}
 };
 
-C10_DECLARE_REGISTRY(
+CAFFE_DECLARE_REGISTRY(
     NetRegistry,
     NetBase,
     const std::shared_ptr<const NetDef>&,
     Workspace*);
 #define REGISTER_NET_CREATOR(key, ...) \
-  C10_REGISTER_CREATOR(NetRegistry, key, __VA_ARGS__)
+  CAFFE_REGISTER_CREATOR(NetRegistry, key, __VA_ARGS__)
 #define REGISTER_NET(name, ...) \
-  C10_REGISTER_CLASS(NetRegistry, name, __VA_ARGS__)
+  CAFFE_REGISTER_CLASS(NetRegistry, name, __VA_ARGS__)
 
 /**
  * @brief Creates a network, accessing / creating blobs in the given workspace.
@@ -153,14 +155,14 @@ C10_DECLARE_REGISTRY(
  * created net object to the workspace's net map, while this function returns
  * a standalone net object.
  */
-CAFFE2_API unique_ptr<NetBase> CreateNet(const NetDef& net_def, Workspace* ws);
-CAFFE2_API unique_ptr<NetBase> CreateNet(
+unique_ptr<NetBase> CreateNet(const NetDef& net_def, Workspace* ws);
+unique_ptr<NetBase> CreateNet(
     const std::shared_ptr<const NetDef>& net_def,
     Workspace* ws);
 
-CAFFE2_API void AddGlobalNetObserverCreator(NetObserverCreator creator);
+void AddGlobalNetObserverCreator(NetObserverCreator creator);
 
-CAFFE2_API void ClearGlobalNetObservers();
+void ClearGlobalNetObservers();
 
 } // namespace caffe2
 

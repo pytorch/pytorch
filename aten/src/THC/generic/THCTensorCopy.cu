@@ -1,64 +1,48 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "THC/generic/THCTensorCopy.cu"
+#define THC_GENERIC_FILE "generic/THCTensorCopy.cu"
 #else
 
-void THCTensor_(copy)(THCState* state, THCTensor* dst, THCTensor* src) {
+THC_API void
+THCTensor_(copy)(THCState* state, THCTensor* dst, THCTensor* src) {
   if (dst == src) return;
-  at::Tensor dst_wrap = THTensor_wrap(dst);
-  at::Tensor src_wrap = THTensor_wrap(src);
-  at::s_copy_(dst_wrap, src_wrap);
+  THC_copyTensor<THCTensor, THCTensor>(state, dst, src);
 }
 
-template <>
-THCTensor *THCTensor_newClone<scalar_t>(THCState *state, THCTensor *self) {
-  THCTensor* tensor =
-      THCTensor_new(state, THTensor_getStoragePtr(self)->dtype());
-  THCTensor_resizeAs(state, tensor, self);
-  at::Tensor tensor_wrap = THTensor_wrap(tensor);
-  at::Tensor self_wrap = THTensor_wrap(self);
-  at::s_copy_(tensor_wrap, self_wrap);
-  return tensor;
-}
-
-template <>
-THCTensor *THCTensor_newContiguous<scalar_t>(THCState *state, THCTensor *self)
-{
-  if(!self->is_contiguous()) {
-    return THCTensor_newClone<scalar_t>(state, self);
-  } else {
-    THCTensor_retain(state, self);
-    return self;
-  }
-}
-
-
-template <>
-void THCTensor_freeCopyTo<scalar_t>(THCState *state, THCTensor *self, THCTensor *dst) {
-  if(self != dst) {
-    at::Tensor dst_wrap = THTensor_wrap(dst);
-    at::Tensor self_wrap = THTensor_wrap(self);
-    at::s_copy_(dst_wrap, self_wrap);
-  }
-
-  THCTensor_free(state, self);
-}
-
-template <>
-void THCTensor_copyIgnoringOverlaps<scalar_t>(THCState* state, THCTensor* dst, THCTensor* src) {
+THC_API void
+THCTensor_(copyIgnoringOverlaps)(THCState* state, THCTensor* dst, THCTensor* src) {
   // Called when we are copying into an overlapping index `dst`, but
   // we don't care which writer wins. Hacky but it works.
   // This is itself invoked by pointwiseApply2 / THCTensor_copy in
   // case that there are write overlaps.
   // FIXME: really, overlapping writes should be illegal/an error in Torch
-  THC_pointwiseApply2<scalar_t, scalar_t>(
+  THC_pointwiseApply2(
     state, dst, src,
-    CopyOp<scalar_t, scalar_t>(),
+    CopyOp<typename TensorUtils<THCTensor>::DataType,
+           typename TensorUtils<THCTensor>::DataType>(),
     ReadOnly, /* ignore overwrites */
     ReadOnly);
 }
 
-void THCTensor_(copyIgnoringOverlaps)(THCState* state, THCTensor* dst, THCTensor* src) {
-  THCTensor_copyIgnoringOverlaps<scalar_t>(state, dst, src);
-}
+#define IMPLEMENT_THC_CUDA_TENSOR_COPY(TYPEC, TYPECUDA)                 \
+  THC_API void                                                          \
+  THCTensor_(copyCuda##TYPEC)(THCState *state,                          \
+                              THCTensor *self,                          \
+                              THCuda##TYPECUDA##Tensor *src) {          \
+    THC_copyTensor<THCTensor, THCuda##TYPECUDA##Tensor>(state, self, src); \
+  }
+
+IMPLEMENT_THC_CUDA_TENSOR_COPY(Byte, Byte)
+IMPLEMENT_THC_CUDA_TENSOR_COPY(Char, Char)
+IMPLEMENT_THC_CUDA_TENSOR_COPY(Short, Short)
+IMPLEMENT_THC_CUDA_TENSOR_COPY(Int, Int)
+IMPLEMENT_THC_CUDA_TENSOR_COPY(Long, Long)
+// THCudaTensor aka the non-existent THCudaFloatTensor
+IMPLEMENT_THC_CUDA_TENSOR_COPY(Float, )
+IMPLEMENT_THC_CUDA_TENSOR_COPY(Double, Double)
+#ifdef CUDA_HALF_TENSOR
+IMPLEMENT_THC_CUDA_TENSOR_COPY(Half, Half)
+#endif
+
+#undef IMPLEMENT_THC_CUDA_TENSOR_COPY
 
 #endif

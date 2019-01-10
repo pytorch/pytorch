@@ -6,7 +6,6 @@ from __future__ import division
 from __future__ import print_function
 
 import json
-import six
 import tempfile
 import textwrap
 import traceback
@@ -56,7 +55,7 @@ class TestConversion(TestCase):
         caffe2_init_net.write(init_model.net.Proto().SerializeToString())
         caffe2_init_net.flush()
 
-        self._run_command(
+        result = self._run_command(
             caffe2_to_onnx, [
                 caffe2_net.name,
                 '--caffe2-init-net', caffe2_init_net.name,
@@ -82,16 +81,16 @@ class TestConversion(TestCase):
         caffe2_net.flush()
 
         args = [caffe2_net.name, '--output', output.name]
-        six.assertRaisesRegex(self, Exception,
-                              'value info',
-                              self._run_command, caffe2_to_onnx, args)
+        self.assertRaisesRegexp(Exception,
+                                'value info',
+                                self._run_command, caffe2_to_onnx, args)
 
         args.extend([
             '--value-info',
             json.dumps({
                 'X': (TensorProto.FLOAT, (2, 2)),
             })])
-        self._run_command(caffe2_to_onnx, args)
+        result = self._run_command(caffe2_to_onnx, args)
 
         onnx_model = ModelProto()
         onnx_model.ParseFromString(output.read())
@@ -120,7 +119,7 @@ class TestConversion(TestCase):
         onnx_model.write(model_def.SerializeToString())
         onnx_model.flush()
 
-        self._run_command(
+        result = self._run_command(
             onnx_to_caffe2, [
                 onnx_model.name,
                 '--output', output.name,
@@ -139,9 +138,12 @@ class TestConversion(TestCase):
                                   for init_op in caffe2_init_net.op], [])),
                          {'W'})
 
+
     def test_onnx_to_caffe2_zipfile(self):
         buf = tempfile.NamedTemporaryFile()
         onnx_model = zipfile.ZipFile(buf, 'w')
+        output = tempfile.NamedTemporaryFile()
+        init_net_output = tempfile.NamedTemporaryFile()
 
         node_def = helper.make_node(
             "MatMul", ["X", "W"], ["Y"])
@@ -173,10 +175,10 @@ class TestConversion(TestCase):
     def _make_fake_if_op(self, true_nodes, false_nodes, output_types):
         true = helper.make_tensor("condition", TensorProto.BOOL, (), [True])
         true_graph = helper.make_graph(true_nodes, "true_graph", [], [
-            helper.make_tensor_value_info("Y", TensorProto.FLOAT, (2, 2)),
+            helper.make_tensor_value_info("_Y", TensorProto.FLOAT, (2, 2)),
         ])
         false_graph = helper.make_graph(false_nodes, "false_graph", [], [
-            helper.make_tensor_value_info("Y", TensorProto.FLOAT, (2, 2)),
+            helper.make_tensor_value_info("_Y", TensorProto.FLOAT, (2, 2)),
         ])
         if_inputs = ["condition"]
         if_outputs = [name for _, _, name in output_types]
@@ -189,9 +191,8 @@ class TestConversion(TestCase):
 
     def test_onnx_to_caffe2_if(self):
         true_nodes = [helper.make_node(
-            "MatMul", ["X", "W"], ["Y"])]
-        false_nodes = [helper.make_node("Slice", ["X"], ["Y"], axes=[0, 1],
-                                        starts=[0, 0], ends=[2, 2])]
+            "MatMul", ["X", "W"], ["_Y"])]
+        false_nodes = [helper.make_node("Slice", ["X"], ["_Y"], axes=[0, 1], starts=[0, 0], ends=[0, 2])]
         nodes = self._make_fake_if_op(true_nodes, false_nodes, [(TensorProto.FLOAT, (2, 2), "Y")])
         X = np.random.rand(2, 3).astype(np.float32)
         W = np.random.rand(3, 2).flatten().astype(np.float32)

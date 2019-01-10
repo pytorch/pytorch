@@ -1,4 +1,5 @@
-#include <gtest/gtest.h>
+#define CATCH_CONFIG_MAIN
+#include "catch.hpp"
 
 #include <iostream>
 // define constants like M_PI and C keywords for MSVC
@@ -6,8 +7,9 @@
 #define _USE_MATH_DEFINES
 #include <math.h>
 #endif
-#include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
+#include "ATen/ATen.h"
+#include "ATen/Dispatch.h"
+#include "test_seed.h"
 
 using std::cout;
 using namespace at;
@@ -29,83 +31,109 @@ struct Foo<Half> {
   static void apply(Tensor a, Tensor b) {}
 };
 
+void test_ctors() {
+  // create scalars backed by tensors
+  auto s1 = Scalar(CPU(kFloat).scalarTensor(1));
+  auto s2 = Scalar(CPU(kFloat).scalarTensor(2));
+  Scalar{s1};
+  Scalar{std::move(s2)};
+  REQUIRE(s2.isBackedByTensor());
+  REQUIRE(!s2.toTensor().defined());
+  s2 = s1;
+  REQUIRE(s2.isBackedByTensor());
+  REQUIRE(s2.toFloat() == 1.0);
+  Scalar s3;
+  s3 = std::move(s2);
+  REQUIRE(s2.isBackedByTensor());
+  REQUIRE(!s2.toTensor().defined());
+  REQUIRE(s3.isBackedByTensor());
+  REQUIRE(s3.toFloat() == 1.0);
+}
+
 void test_overflow() {
   auto s1 = Scalar(M_PI);
-  ASSERT_EQ(s1.toFloat(), static_cast<float>(M_PI));
+  REQUIRE(s1.toFloat() == static_cast<float>(M_PI));
   s1.toHalf();
 
   s1 = Scalar(100000);
-  ASSERT_EQ(s1.toFloat(), 100000.0);
-  ASSERT_EQ(s1.toInt(), 100000);
+  REQUIRE(s1.toFloat() == 100000.0);
+  REQUIRE(s1.toInt() == 100000);
 
-  ASSERT_THROW(s1.toHalf(), std::domain_error);
+  REQUIRE_THROWS_AS(s1.toHalf(), std::domain_error);
 
   s1 = Scalar(NAN);
-  ASSERT_TRUE(std::isnan(s1.toFloat()));
-  ASSERT_THROW(s1.toInt(), std::domain_error);
+  REQUIRE(std::isnan(s1.toFloat()));
+  REQUIRE_THROWS_AS(s1.toInt(), std::domain_error);
 
   s1 = Scalar(INFINITY);
-  ASSERT_TRUE(std::isinf(s1.toFloat()));
-  ASSERT_THROW(s1.toInt(), std::domain_error);
+  REQUIRE(std::isinf(s1.toFloat()));
+  REQUIRE_THROWS_AS(s1.toInt(), std::domain_error);
 }
 
-TEST(TestScalar, TestScalar) {
-  manual_seed(123);
+TEST_CASE( "scalar test", "[]" ) {
+
+  manual_seed(123, at::Backend::CPU);
+  manual_seed(123, at::Backend::CUDA);
 
   Scalar what = 257;
   Scalar bar = 3.0;
   Half h = bar.toHalf();
   Scalar h2 = h;
-  cout << "H2: " << h2.toDouble() << " " << what.toFloat() << " "
-       << bar.toDouble() << " " << what.isIntegral() << "\n";
-  Generator& gen = at::globalContext().defaultGenerator(at::kCPU);
-  ASSERT_NO_THROW(gen.seed());
-  auto&& C = at::globalContext();
-  if (at::hasCUDA()) {
-    auto t2 = zeros({4, 4}, at::kCUDA);
+  cout << "H2: " << h2.toDouble() << " " << what.toFloat() << " " << bar.toDouble() << " " << what.isIntegral() <<  "\n";
+  Generator & gen = at::globalContext().defaultGenerator(Backend::CPU);
+  REQUIRE_NOTHROW(gen.seed());
+  auto && C = at::globalContext();
+  if(at::hasCUDA()) {
+    auto & CUDAFloat = C.getType(Backend::CUDA,ScalarType::Float);
+    auto t2 = zeros(CUDAFloat, {4,4});
     cout << &t2 << "\n";
+    cout << "AFTER GET TYPE " << &CUDAFloat << "\n";
+    auto s = CUDAFloat.storage(4);
+    REQUIRE( s->get(3).toFloat() == 0.0 );
+    s->fill(7);
+    REQUIRE( s->get(3).toFloat() == 7.0 );
   }
-  auto t = ones({4, 4});
+  auto t = ones(CPU(Float), {4,4});
 
-  auto wha2 = zeros({4, 4}).add(t).sum();
-  ASSERT_EQ(wha2.item<double>(), 16.0);
+  auto wha2 = zeros(CPU(Float), {4,4}).add(t).sum();
+  REQUIRE( wha2.toCDouble() == 16.0 );
 
-  ASSERT_EQ(t.sizes()[0], 4);
-  ASSERT_EQ(t.sizes()[1], 4);
-  ASSERT_EQ(t.strides()[0], 4);
-  ASSERT_EQ(t.strides()[1], 1);
+  REQUIRE( t.sizes()[0] == 4 );
+  REQUIRE( t.sizes()[1] == 4 );
+  REQUIRE( t.strides()[0] == 4 );
+  REQUIRE( t.strides()[1] == 1 );
 
-  TensorOptions options = dtype(kFloat);
-  Tensor x = randn({1, 10}, options);
-  Tensor prev_h = randn({1, 20}, options);
-  Tensor W_h = randn({20, 20}, options);
-  Tensor W_x = randn({20, 10}, options);
+  Type & T = CPU(Float);
+  Tensor x = randn(T, {1,10});
+  Tensor prev_h = randn(T, {1,20});
+  Tensor W_h = randn(T, {20,20});
+  Tensor W_x = randn(T, {20,10});
   Tensor i2h = at::mm(W_x, x.t());
   Tensor h2h = at::mm(W_h, prev_h.t());
   Tensor next_h = i2h.add(h2h);
   next_h = next_h.tanh();
 
-  ASSERT_ANY_THROW(Tensor{}.item());
+  REQUIRE_THROWS(Scalar{Tensor{}});
 
+  test_ctors();
   test_overflow();
 
-  if (at::hasCUDA()) {
+  if(at::hasCUDA()) {
     auto r = CUDA(Float).copy(next_h);
-    ASSERT_TRUE(CPU(Float).copy(r).equal(next_h));
+    REQUIRE(CPU(Float).copy(r).equal(next_h));
   }
-  ASSERT_NO_THROW(randn({10, 10, 2}, options));
+  REQUIRE_NOTHROW(randn(T, {10,10,2}));
 
   // check Scalar.toTensor on Scalars backed by different data types
-  ASSERT_EQ(scalar_to_tensor(bar).scalar_type(), kDouble);
-  ASSERT_EQ(scalar_to_tensor(what).scalar_type(), kLong);
-  ASSERT_EQ(scalar_to_tensor(ones({}).item()).scalar_type(), kDouble);
+  REQUIRE(bar.toTensor().type().scalarType() == kDouble);
+  REQUIRE(what.toTensor().type().scalarType() == kLong);
+  REQUIRE(Scalar(ones(CPU(kFloat), {})).toTensor().type().scalarType() == kFloat);
 
-  if (x.scalar_type() != ScalarType::Half) {
+  if (x.type().scalarType() != ScalarType::Half) {
     AT_DISPATCH_ALL_TYPES(x.type(), "foo", [&] {
       scalar_t s = 1;
       std::stringstream ss;
-      ASSERT_NO_THROW(
-          ss << "hello, dispatch" << x.type().toString() << s << "\n");
+      REQUIRE_NOTHROW(ss << "hello, dispatch" << x.type().toString() << s << "\n");
       auto data = (scalar_t*)x.data_ptr();
       (void)data;
     });
@@ -113,11 +141,11 @@ TEST(TestScalar, TestScalar) {
 
   // test direct C-scalar type conversions
   {
-    auto x = ones({1, 2}, options);
-    ASSERT_ANY_THROW(x.item<float>());
+    auto x = ones(T, {1,2});
+    REQUIRE_THROWS(x.toCFloat());
   }
-  auto float_one = ones({}, options);
-  ASSERT_EQ(float_one.item<float>(), 1);
-  ASSERT_EQ(float_one.item<int32_t>(), 1);
-  ASSERT_EQ(float_one.item<at::Half>(), 1);
+  auto float_one = ones(T, {});
+  REQUIRE(float_one.toCFloat() == 1);
+  REQUIRE(float_one.toCInt() == 1);
+  REQUIRE((float_one.toCHalf() == 1));
 }

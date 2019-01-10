@@ -2,7 +2,7 @@
 
 #include <thread>
 
-#include <c10/util/typeid.h>
+#include "caffe2/core/typeid.h"
 #include "caffe2/utils/proto_utils.h"
 
 namespace caffe2 {

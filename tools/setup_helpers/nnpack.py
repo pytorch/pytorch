@@ -1,6 +1,6 @@
 from .env import check_env_flag
 
 if check_env_flag('NO_NNPACK'):
-    USE_NNPACK = False
+    WITH_NNPACK = False
 else:
-    USE_NNPACK = True
+    WITH_NNPACK = True

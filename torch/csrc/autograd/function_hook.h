@@ -10,12 +10,12 @@ struct Variable;
 using variable_list = std::vector<Variable>;
 
 struct FunctionPreHook {
-  virtual ~FunctionPreHook() = default;
+  virtual ~FunctionPreHook() {}
   virtual variable_list operator()(const variable_list& grads) = 0;
 };
 
 struct FunctionPostHook {
-  virtual ~FunctionPostHook() = default;
+  virtual ~FunctionPostHook() {}
   virtual variable_list operator()(const variable_list& grad_input, const variable_list& grad_output) = 0;
 };
 

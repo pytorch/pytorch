@@ -1,0 +1,18 @@
+PyTorch version: 0.5.0a0
+Is debug build: No
+CUDA used to build PyTorch: 9.0
+
+OS: Microsoft Windows Server 2012 R2 Standard
+GCC version: Could not collect
+CMake version: version 3.10.X
+
+Python version: 3.6
+Is CUDA available: Yes
+CUDA runtime version: 9.0.X
+GPU models and configuration: Could not collect
+Nvidia driver version: Could not collect
+cuDNN version: Could not collect
+
+Versions of relevant libraries:
+[pip] numpy (1.14.X)
+[conda] Could not collect

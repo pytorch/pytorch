@@ -1,7 +1,7 @@
 #ifndef TH_LOG_ADD_INC
 #define TH_LOG_ADD_INC
 
-#include <TH/THGeneral.h>
+#include "THGeneral.h"
 
 TH_API const double THLog2Pi;
 TH_API const double THLogZero;

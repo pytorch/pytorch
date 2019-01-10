@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/cudnn/cudnn-wrapper.h>
+#include "cudnn-wrapper.h"
 #include <ATen/Tensor.h>
 
 namespace at { namespace native {

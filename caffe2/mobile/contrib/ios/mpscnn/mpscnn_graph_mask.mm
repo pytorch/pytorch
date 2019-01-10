@@ -16,7 +16,7 @@ enum class StorageType {
   INVALID
 };
 
-string asString(StorageType st) {
+string as_string(StorageType st) {
   switch (st) {
   case StorageType::MPSTEMPORARYIMAGE:
     return "MPSTEMPORARYIMAGE";
@@ -27,11 +27,6 @@ string asString(StorageType st) {
   case StorageType::INVALID:
     return "INVALID";
   }
-}
-
-bool isImage(StorageType type) {
-  return type == StorageType::MPSTEMPORARYIMAGE ||
-      type == StorageType::MPSIMAGE;
 }
 
 std::unordered_map<string, std::vector<StorageType>> inputStorageTypeMap = {
@@ -64,10 +59,6 @@ std::unordered_map<string, std::vector<StorageType>> inputStorageTypeMap = {
                               StorageType::CPU}},
     {"MPSCNNSub",
      std::vector<StorageType>{StorageType::MPSTEMPORARYIMAGE,
-                              StorageType::CPU}},
-    {"MPSCNNNormalizePlanarYUV",
-     std::vector<StorageType>{StorageType::MPSTEMPORARYIMAGE,
-                              StorageType::CPU,
                               StorageType::CPU}}};
 std::unordered_map<string, std::vector<StorageType>> outputStorageTypeMap = {
     {"MPSCNNGenerateProposalsCPP", std::vector<StorageType>{StorageType::CPU, StorageType::CPU}}};
@@ -130,9 +121,8 @@ void ssaAnalysis(Analysis& analysis, const NetDef& net) {
       } else {
         analysis.blobInfoMap[s][frontier[s]].storageType = StorageType::CPU;
       }
-      VLOG(2) << op.type() << " outputBlobTypes:" << s << " " << frontier[s]
-              << " "
-              << asString(analysis.blobInfoMap[s][frontier[s]].storageType);
+      VLOG(2) << op.type() << " outputBlobTypes:" << s << " " << frontier[s] << " "
+              << as_string(analysis.blobInfoMap[s][frontier[s]].storageType);
     }
     analysis.ssa.push_back(Analysis::SSA{inVersions, outVersions});
   };
@@ -446,20 +436,22 @@ NetDef insertCopies(const NetDef& def) {
       if (analysis.blobInfoMap.find(inputBlob) != analysis.blobInfoMap.end() &&
           analysis.blobInfoMap[inputBlob][version].storageType != StorageType::INVALID) {
         actualBlobType = analysis.blobInfoMap[inputBlob][version].storageType;
-        VLOG(2) << "Found " << inputBlob << " " << j << " with type"
-                << asString(actualBlobType);
+        VLOG(2) << "Found " << inputBlob << " " << j << " with type" << as_string(actualBlobType);
       }
       if (inputStorageTypeMap.find(ogOp.type()) != inputStorageTypeMap.end()) {
         expectedBlobType = inputStorageTypeMap[ogOp.type()][j];
       }
       if (expectedBlobType != actualBlobType) {
-        if (expectedBlobType == StorageType::CPU && (isImage(actualBlobType))) {
+        if (expectedBlobType == StorageType::CPU &&
+            (actualBlobType == StorageType::MPSTEMPORARYIMAGE ||
+             actualBlobType == StorageType::MPSIMAGE)) {
           // copy input(MPSCNN) to input_I(CPU)
           insertInputCopyFromMPSCNNOp(mdef, ogOp.input(j));
           // rewrite input to input_I for the operator
           inputsToRewrite.push_back(j);
-        } else if (
-            isImage(expectedBlobType) && actualBlobType == StorageType::CPU) {
+        } else if ((expectedBlobType == StorageType::MPSTEMPORARYIMAGE ||
+                    expectedBlobType == StorageType::MPSIMAGE) &&
+                   actualBlobType == StorageType::CPU) {
           insertInputCopyToMPSCNNOp(mdef, ogOp.input(j));
           inputsToRewrite.push_back(j);
         } // We don't need to insert copies in other cases

@@ -16,8 +16,6 @@
 #include <direct.h> // for _mkdir
 #endif
 
-#include "c10/util/StringUtil.h"
-
 #include "caffe2/utils/murmur_hash3.h"
 
 namespace caffe2 {
@@ -93,14 +91,12 @@ void FileStoreHandler::set(const std::string& name, const std::string& data) {
   CAFFE_ENFORCE_EQ(rv, 0, "rename: ", strerror(errno));
 }
 
-std::string FileStoreHandler::get(
-    const std::string& name,
-    const std::chrono::milliseconds& timeout) {
+std::string FileStoreHandler::get(const std::string& name) {
   auto path = objectPath(name);
   std::string result;
 
   // Block until key is set
-  wait({name}, timeout);
+  wait({name});
 
   std::ifstream ifs(path.c_str(), std::ios::in);
   if (!ifs) {
@@ -155,8 +151,7 @@ void FileStoreHandler::wait(
     const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::steady_clock::now() - start);
     if (timeout != kNoTimeout && elapsed > timeout) {
-      STORE_HANDLER_TIMEOUT(
-          "Wait timeout for name(s): ", c10::Join(" ", names));
+      STORE_HANDLER_TIMEOUT("Wait timeout for name(s): ", Join(" ", names));
     }
     /* sleep override */
     std::this_thread::sleep_for(std::chrono::milliseconds(10));

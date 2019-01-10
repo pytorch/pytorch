@@ -12,7 +12,7 @@ class IDEEPSumOp final : public IDEEPOperator {
   virtual ~IDEEPSumOp() {}
 
   bool RunOnDevice() override {
-    const auto& X = Input(INPUT0);
+    const auto &X = Input(INPUT0);
     auto* Y = Output(OUTPUT);
 
     if (InputSize() == 1) {
@@ -20,15 +20,8 @@ class IDEEPSumOp final : public IDEEPOperator {
 
     } else {
       vector<itensor> inputs;
-      const vector<float> scales(InputSize(), 1.0);
-      const auto dims = X.get_dims();
+      vector<float> scales (InputSize(), 1.0);
       for (int i = 0; i < InputSize(); ++i) {
-        if (Input(i).get_dims() != dims) {
-          CAFFE_ENFORCE_EQ(
-              dims,
-              Input(i).get_dims(),
-              "Broadcast is not yet supported with IDEEP.");
-        }
         inputs.emplace_back(Input(i));
       }
 
@@ -39,11 +32,11 @@ class IDEEPSumOp final : public IDEEPOperator {
   }
 
  private:
+
   INPUT_TAGS(INPUT0);
   OUTPUT_TAGS(OUTPUT);
 };
 
 REGISTER_IDEEP_OPERATOR(Sum, IDEEPSumOp);
-REGISTER_IDEEP_OPERATOR(Add, IDEEPSumOp);
 
 } // namespace caffe2

@@ -1,4 +1,4 @@
-#include "caffe2/operators/roi_align_gradient_op.h"
+#include "roi_align_gradient_op.h"
 
 #include <stdio.h>
 #include <cfloat>
@@ -115,8 +115,8 @@ __global__ void RoIAlignBackwardFeature(
     // T roi_end_h = roundf(offset_bottom_rois[4] * spatial_scale);
 
     // Force malformed ROIs to be 1x1
-    T roi_width = c10::cuda::compat::max(roi_end_w - roi_start_w, (T)1.);
-    T roi_height = c10::cuda::compat::max(roi_end_h - roi_start_h, (T)1.);
+    T roi_width = max(roi_end_w - roi_start_w, (T)1.);
+    T roi_height = max(roi_end_h - roi_start_h, (T)1.);
     T bin_size_h = static_cast<T>(roi_height) / static_cast<T>(pooled_height);
     T bin_size_w = static_cast<T>(roi_width) / static_cast<T>(pooled_width);
 
@@ -193,15 +193,15 @@ bool RoIAlignGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& R = Input(1); // RoIs
   auto& dY = Input(2); // Gradient of net w.r.t. output of "forward" op
                        // (aka "gradOutput")
-  auto* dX = Output(0); // Gradient of net w.r.t. input to
-                        // "forward" op (aka "gradInput")
+  auto* dX = Output(0); // Gradient of net w.r.t. input to "forward" op
+                        // (aka "gradInput")
 
   dX->ResizeLike(X);
 
   // Must zero-out dX before accumulating gradients
   // (TODO): Kaiming - is this safe?
   math::Set<float, CUDAContext>(
-      dX->size(), 0.f, dX->template mutable_data<float>(), &context_);
+      dX->size(), 0.f, dX->mutable_data<float>(), &context_);
 
   if (dY.size() > 0) { // Handle possibly empty gradient if there were no rois
     RoIAlignBackwardFeature<float>
@@ -219,7 +219,7 @@ bool RoIAlignGradientOp<float, CUDAContext>::RunOnDevice() {
             pooled_height_,
             pooled_width_,
             sampling_ratio_,
-            dX->template mutable_data<float>(),
+            dX->mutable_data<float>(),
             R.data<float>());
   }
   return true;

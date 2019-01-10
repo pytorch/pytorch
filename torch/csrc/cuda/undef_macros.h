@@ -16,19 +16,20 @@
 #undef THPTensorType
 
 #undef THPStorage_
+#undef THPStorage
 #undef THPStorageBaseStr
 #undef THPStorageStr
 #undef THPStorageClass
 #undef THPStorageType
 
-#undef THWStorage
-#undef THWStorage_
-#undef THWTensor
-#undef THWTensor_
+#undef THStorage
+#undef THStorage_
+#undef THTensor
+#undef THTensor_
 
-#undef THWStoragePtr
+#undef THStoragePtr
 #undef THPStoragePtr
-#undef THWTensorPtr
+#undef THTensorPtr
 #undef THPTensorPtr
 
 
@@ -43,6 +44,9 @@
 #undef THSPTensorStateless
 #undef THSPTensorType
 
+#undef THSTensor
+#undef THSTensor_
+#undef THSTensorPtr
 #undef THSPTensorPtr
 
 

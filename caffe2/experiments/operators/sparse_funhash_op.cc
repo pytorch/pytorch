@@ -1,19 +1,3 @@
-/**
- * Copyright (c) 2016-present, Facebook, Inc.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 #include "caffe2/experiments/operators/sparse_funhash_op.h"
 
 namespace caffe2 {
@@ -27,7 +11,6 @@ REGISTER_CPU_OPERATOR(
 OPERATOR_SCHEMA(SparseFunHash)
     .NumInputs(4, 5)
     .NumOutputs(1)
-    .DisallowInputFillers() // TODO: enable the filler
     .SetDoc(R"DOC(
 This layer compresses a fully-connected layer for sparse inputs
 via hashing.
@@ -66,10 +49,7 @@ randomly mapped from the weight vector, provided the input
     .Arg("num_outputs", "Number of outputs")
     .Arg("num_segments", "Number of segments");
 
-OPERATOR_SCHEMA(SparseFunHashGradient)
-    .NumInputs(5, 6)
-    .NumOutputs(2, 3)
-    .DisallowInputFillers();
+OPERATOR_SCHEMA(SparseFunHashGradient).NumInputs(5, 6).NumOutputs(2, 3);
 
 class GetSparseFunHashGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

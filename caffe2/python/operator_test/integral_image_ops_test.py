@@ -2,16 +2,15 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
-
+from hypothesis import given
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
-import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 
 
-class TestIntegralImageOps(serial.SerializedTestCase):
-    @serial.given(batch_size=st.integers(1, 3),
+class TestIntegralImageOps(hu.HypothesisTestCase):
+    @given(batch_size=st.integers(1, 3),
            height=st.integers(7, 10),
            width=st.integers(7, 10),
            channels=st.integers(1, 8),
@@ -46,7 +45,7 @@ class TestIntegralImageOps(serial.SerializedTestCase):
         self.assertDeviceChecks(dc, op, [im], [0])
         self.assertReferenceChecks(gc, op, [im], integral_image)
 
-    @serial.given(batch_size=st.integers(1, 3),
+    @given(batch_size=st.integers(1, 3),
            height=st.integers(7, 10),
            width=st.integers(7, 10),
            channels=st.integers(1, 8),

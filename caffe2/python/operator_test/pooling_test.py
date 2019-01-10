@@ -8,9 +8,9 @@ import hypothesis.strategies as st
 import os
 import unittest
 
-from caffe2.python import core, utils, workspace
-import caffe2.python.hip_test_util as hiputl
+from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
+
 
 class TestPooling(hu.HypothesisTestCase):
     # CUDNN does NOT support different padding values and we skip it
@@ -54,7 +54,7 @@ class TestPooling(hu.HypothesisTestCase):
             batch_size, size, size, input_channels).astype(np.float32)
 
         if order == "NCHW":
-            X = utils.NHWC2NCHW(X)
+            X = X.transpose((0, 3, 1, 2))
         self.assertDeviceChecks(dc, op, [X], [0])
         if 'MaxPool' not in op_type:
             self.assertGradientChecks(gc, op, [X], 0, [0])
@@ -105,7 +105,7 @@ class TestPooling(hu.HypothesisTestCase):
         X = np.random.rand(
             batch_size, size, input_channels).astype(np.float32)
         if order == "NCHW":
-            X = utils.NHWC2NCHW(X)
+            X = X.transpose((0, 2, 1))
 
         self.assertDeviceChecks(dc, op, [X], [0])
         if 'MaxPool' not in op_type:
@@ -126,9 +126,6 @@ class TestPooling(hu.HypothesisTestCase):
                         batch_size, order, op_type, engine, gc, dc):
         assume(pad < kernel)
         assume(size + pad + pad >= kernel)
-        # Currently MIOpen Pooling only supports 2d pooling
-        if hiputl.run_in_hip(gc, dc):
-            assume(engine != "CUDNN")
         # some case here could be calculated with global pooling, but instead
         # calculated with general implementation, slower but should still
         # be corect.
@@ -145,7 +142,7 @@ class TestPooling(hu.HypothesisTestCase):
         X = np.random.rand(
             batch_size, size, size, size, input_channels).astype(np.float32)
         if order == "NCHW":
-            X = utils.NHWC2NCHW(X)
+            X = X.transpose((0, 4, 1, 2, 3))
 
         self.assertDeviceChecks(dc, op, [X], [0], threshold=0.001)
         if 'MaxPool' not in op_type:
@@ -162,9 +159,6 @@ class TestPooling(hu.HypothesisTestCase):
            **hu.gcs)
     def test_global_pooling_3d(self, kernel, size, input_channels,
                                batch_size, order, op_type, engine, gc, dc):
-        # Currently MIOpen Pooling only supports 2d pooling
-        if hiputl.run_in_hip(gc, dc):
-            assume(engine != "CUDNN")
         # pad and stride ignored because they will be infered in global_pooling
         op = core.CreateOperator(
             op_type,
@@ -178,7 +172,7 @@ class TestPooling(hu.HypothesisTestCase):
         X = np.random.rand(
             batch_size, size, size, size, input_channels).astype(np.float32)
         if order == "NCHW":
-            X = utils.NHWC2NCHW(X)
+            X = X.transpose((0, 4, 1, 2, 3))
 
         self.assertDeviceChecks(dc, op, [X], [0], threshold=0.001)
         if 'MaxPool' not in op_type:
@@ -209,7 +203,7 @@ class TestPooling(hu.HypothesisTestCase):
             batch_size, size, size, input_channels).astype(np.float32)
 
         # transpose due to order = NCHW
-        X = utils.NHWC2NCHW(X)
+        X = X.transpose((0, 3, 1, 2))
 
         self.assertDeviceChecks(dc, op, [X], [0])
 
@@ -282,9 +276,6 @@ class TestPooling(hu.HypothesisTestCase):
                      input_channels, batch_size,
                      order, op_type, engine, gc, dc):
         assume(pad < kernel)
-        if hiputl.run_in_hip(gc, dc) and engine == "CUDNN":
-            assume(order == "NCHW" and op_type != "LpPool")
-
         op = core.CreateOperator(
             op_type,
             ["X"],
@@ -298,7 +289,7 @@ class TestPooling(hu.HypothesisTestCase):
         X = np.random.rand(
             batch_size, size, size, input_channels).astype(np.float32)
         if order == "NCHW":
-            X = utils.NHWC2NCHW(X)
+            X = X.transpose((0, 3, 1, 2))
 
         self.assertDeviceChecks(dc, op, [X], [0])
         if 'MaxPool' not in op_type:
@@ -315,9 +306,6 @@ class TestPooling(hu.HypothesisTestCase):
                             order, op_type, engine, gc, dc):
         # CuDNN 5 does not support deterministic max pooling.
         assume(workspace.GetCuDNNVersion() >= 6000 or op_type != "MaxPool")
-
-        if hiputl.run_in_hip(gc, dc) and engine == "CUDNN":
-            assume(order == "NCHW" and op_type != "LpPool")
         op = core.CreateOperator(
             op_type,
             ["X"],
@@ -329,7 +317,7 @@ class TestPooling(hu.HypothesisTestCase):
         X = np.random.rand(
             batch_size, size, size, input_channels).astype(np.float32)
         if order == "NCHW":
-            X = utils.NHWC2NCHW(X)
+            X = X.transpose((0, 3, 1, 2))
 
         self.assertDeviceChecks(dc, op, [X], [0])
         if 'MaxPool' not in op_type:

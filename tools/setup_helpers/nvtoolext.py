@@ -3,11 +3,11 @@ import platform
 import ctypes.util
 from subprocess import Popen, PIPE
 
-from .cuda import USE_CUDA
+from .cuda import WITH_CUDA
 
 WINDOWS_HOME = 'C:/Program Files/NVIDIA Corporation/NvToolsExt'
 
-if not USE_CUDA:
+if not WITH_CUDA:
     NVTOOLEXT_HOME = None
 else:
     # We use nvcc path on Linux and cudart path on macOS

@@ -19,8 +19,7 @@ def add_tensor(net, name, blob):
         np.dtype('float32'): "GivenTensorFill",
         np.dtype('int32'): "GivenTensorIntFill",
         np.dtype('int64'): "GivenTensorInt64Fill",
-        np.dtype('uint8'): "GivenTensorByteStringToUInt8Fill",
-        np.dtype('O'): "GivenTensorStringFill"
+        np.dtype('uint8'): "GivenTensorStringFill",
     }
 
     shape = blob.shape
@@ -28,14 +27,8 @@ def add_tensor(net, name, blob):
     # pass array of uint8 as a string to save storage
     # storing uint8_t has a large overhead for now
     if blob.dtype == np.dtype('uint8'):
-        shape = blob.shape
-        values = [blob.tobytes()]
-    # Only allow string arrays as objects.
-    # The only intended use case for this is to store arrays of strings in the
-    # model which can be used for post processing results in subsequent ops.
-    if blob.dtype == np.dtype('O'):
-        for blob_val in blob:
-            assert(isinstance(blob_val, bytes))
+        shape = [1]
+        values = [str(blob.data)]
 
     op = core.CreateOperator(
         kTypeNameMapper[blob.dtype],
@@ -92,14 +85,9 @@ def Export(workspace, net, params):
 
     # Now we make input/output_blobs line up with what Predictor expects.
     del predict_net.external_input[:]
-
-    new_external_inputs = input_blobs
-    for external_input in proto.external_input:
-        if external_input not in new_external_inputs:
-            new_external_inputs.append(external_input)
-
+    predict_net.external_input.extend(input_blobs)
     # For populating weights
-    predict_net.external_input.extend(new_external_inputs)
+    predict_net.external_input.extend(proto.external_input)
     # Ensure the output is also consistent with what we want
     del predict_net.external_output[:]
     predict_net.external_output.extend(output_blobs)

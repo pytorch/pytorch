@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "THNN/generic/MultiMarginCriterion.c"
+#define TH_GENERIC_FILE "generic/MultiMarginCriterion.c"
 #else
 
 // TODO: improve error messages
@@ -8,32 +8,33 @@ void THNN_(MultiMarginCriterion_updateOutput)(
           THTensor *input,
           THIndexTensor *target,
           THTensor *output,
-          int64_t reduction,
+          bool sizeAverage,
           int p,
           THTensor *weights,
-          accreal margin_)
+          accreal margin_,
+          bool reduce)
 {
-  scalar_t margin = TH_CONVERT_ACCREAL_TO_REAL(margin_);
-  scalar_t *input_data, *weights_data;
+  real margin = TH_CONVERT_ACCREAL_TO_REAL(margin_);
+  real *input_data, *weights_data;
   THIndex_t *target_data;
   int64_t nframe, dim;
   int64_t t, d;
-  scalar_t sum;
+  real sum;
 
-  AT_CHECK(!input->is_empty() && input->dim() <= 2,
-           "non-empty vector or matrix expected, got size: ", input->sizes());
+  THArgCheck((input->nDimension == 1) || (input->nDimension == 2), 2,
+	     "vector or matrix expected");
 
-  if (input->dim() <= 1)
+  if (input->nDimension == 1)
   {
     nframe = 1;
-    dim = THTensor_sizeLegacyNoScalars(input, 0);
+    dim = input->size[0];
   }
   else
   {
-    nframe = input->size(0);
-    dim = input->size(1);
-    AT_CHECK(!target->is_empty() && (THTensor_nDimensionLegacyNoScalars(target) == 1) && (THTensor_sizeLegacyNoScalars(target, 0) == nframe),
-             "inconsistent target size, got: ", target->sizes());
+    nframe = input->size[0];
+    dim = input->size[1];
+    THArgCheck((target->nDimension == 1) && (target->size[0] == nframe), 3,
+	       "inconsistent target size");
   }
 
   for (t = 0; t < nframe; t++)
@@ -46,11 +47,11 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   input = THTensor_(newContiguous)(input);
   target = THIndexTensor_(newContiguous)(target);
   weights = weights ? THTensor_(newContiguous)(weights) : NULL;
-  input_data = input->data<scalar_t>();
+  input_data = THTensor_(data)(input);
   target_data = THIndexTensor_(data)(target);
-  weights_data = weights ? weights->data<scalar_t>() : NULL;
+  weights_data = weights ? THTensor_(data)(weights) : NULL;
 
-  if (reduction == Reduction::None)
+  if (!reduce)
   {
     THTensor_(resize1d)(output, nframe);
 
@@ -58,15 +59,15 @@ void THNN_(MultiMarginCriterion_updateOutput)(
     {
       sum = 0;
       THIndex_t target_idx = target_data[t] - TH_INDEX_BASE;
-      scalar_t input_target = input_data[target_idx];
+      real input_target = input_data[target_idx];
       for (d = 0; d < dim; d++)
       {
-        scalar_t z = margin - input_target + input_data[d];
+        real z = margin - input_target + input_data[d];
         if (d == target_idx)
           continue;
 
         if (z > 0) {
-          scalar_t h = (p==1) ? z : z*z;
+          real h = (p==1) ? z : z*z;
           if(weights_data)
             h *= weights_data[target_idx];
           sum += h;
@@ -74,7 +75,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
       }
 
       sum /= dim;
-      THTensor_(fastSet1d)(output, t, sum);
+      THTensor_fastSet1d(output, t, sum);
       input_data += dim;
     }
   }
@@ -86,15 +87,15 @@ void THNN_(MultiMarginCriterion_updateOutput)(
     for (t = 0; t < nframe; t++)
     {
       THIndex_t target_idx = target_data[t] - TH_INDEX_BASE;
-      scalar_t input_target = input_data[target_idx];
+      real input_target = input_data[target_idx];
       for (d = 0; d < dim; d++)
       {
-        scalar_t z = margin - input_target + input_data[d];
+        real z = margin - input_target + input_data[d];
         if (d == target_idx)
           continue;
 
         if (z > 0) {
-          scalar_t h = (p==1) ? z : z*z;
+          real h = (p==1) ? z : z*z;
           if(weights_data)
             h *= weights_data[target_idx];
           sum += h;
@@ -104,16 +105,16 @@ void THNN_(MultiMarginCriterion_updateOutput)(
     }
 
     sum /= dim;
-    if(reduction == Reduction::Mean)
+    if(sizeAverage)
       sum /= nframe;
 
     THTensor_(set1d)(output, 0, sum);
   }
 
-  c10::raw::intrusive_ptr::decref(input);
+  THTensor_(free)(input);
   THIndexTensor_(free)(target);
   if(weights)
-    c10::raw::intrusive_ptr::decref(weights);
+    THTensor_(free)(weights);
 }
 
 void THNN_(MultiMarginCriterion_updateGradInput)(
@@ -122,64 +123,65 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
           THIndexTensor *target,
           THTensor *gradOutput,
           THTensor *gradInput,
-          int64_t reduction,
+          bool sizeAverage,
           int p,
           THTensor *weights,
-          accreal margin_)
+          accreal margin_,
+          bool reduce)
 {
-  scalar_t margin = TH_CONVERT_ACCREAL_TO_REAL(margin_);
-  scalar_t *input_data;
-  scalar_t *gradInput_data;
+  real margin = TH_CONVERT_ACCREAL_TO_REAL(margin_);
+  real *input_data;
+  real *gradInput_data;
   THIndex_t *target_data;
-  scalar_t *weights_data;
+  real *weights_data;
   int64_t nframe, dim;
   int64_t t, d;
-  scalar_t g;
+  real g;
 
-  AT_CHECK(!input->is_empty() && (input->dim() <= 2),
-           "non-empty vector or matrix expected, got size: ", input->sizes());
+  THArgCheck((input->nDimension == 1) || (input->nDimension == 2), 2,
+	     "vector or matrix expected");
 
-  if (input->dim() <= 1)
+  if (input->nDimension == 1)
   {
     nframe = 1;
-    dim = THTensor_sizeLegacyNoScalars(input, 0);
+    dim = input->size[0];
   }
   else
   {
-    nframe = input->size(0);
-    dim = input->size(1);
-    AT_CHECK(!target->is_empty() && (target->dim() <= 1) && (THTensor_sizeLegacyNoScalars(target, 0) == nframe),
-             "inconsistent target size, got: ", target->sizes());
+    nframe = input->size[0];
+    dim = input->size[1];
+    THArgCheck((target->nDimension == 1) && (target->size[0] == nframe), 3,
+	       "inconsistent target size");
   }
 
-  g = (reduction == Reduction::Mean ? 1./((scalar_t)(nframe*dim)) : 1./((scalar_t)dim));
+  g = (sizeAverage && reduce ? 1./((real)(nframe*dim)) : 1./((real)dim));
 
   input = THTensor_(newContiguous)(input);
   target = THIndexTensor_(newContiguous)(target);
-  input_data = input->data<scalar_t>();
+  input_data = THTensor_(data)(input);
 
   THTensor_(resizeAs)(gradInput, input);
   THArgCheck(THTensor_(isContiguous)(gradInput), 5, "gradInput must be contiguous");
-  gradInput_data = gradInput->data<scalar_t>();
+  gradInput_data = THTensor_(data)(gradInput);
 
   target_data = THIndexTensor_(data)(target);
   weights = weights ? THTensor_(newContiguous)(weights) : NULL;
-  weights_data = weights ? weights->data<scalar_t>() : NULL;
+  weights_data = weights ? THTensor_(data)(weights) : NULL;
 
   for (t = 0; t < nframe; t++)
   {
     THIndex_t target_idx = target_data[t] - TH_INDEX_BASE;
-    scalar_t input_target = input_data[target_idx];
-    scalar_t gradInput_target = 0;
+    real input_target = input_data[target_idx];
+    real gradInput_target = 0;
     for (d = 0; d < dim; d++)
     {
-      scalar_t z = margin - input_target + input_data[d];
+      real z = margin - input_target + input_data[d];
       if (d == target_idx)
         continue;
 
       if (z > 0)
       {
-        scalar_t h = (p == 1) ? g : 2*g*z;
+        real h = (p == 1) ? g : 2*g*z;
         if(weights_data)
           h *= weights_data[target_idx];
         gradInput_target -= h;
@@ -193,13 +195,13 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
     input_data += dim;
     gradInput_data += dim;
   }
-  gradInput_data = gradInput->data<scalar_t>();
+  gradInput_data = THTensor_(data)(gradInput);
 
-  if (reduction != Reduction::None)
+  if (reduce)
   {
     THNN_CHECK_DIM_SIZE(gradOutput, 1, 0, 1);
     for (t = 0; t < nframe * dim; t++) {
-      gradInput_data[t] *= THTensor_(fastGetLegacy1dNoScalars)(gradOutput, 0);
+      gradInput_data[t] *= THTensor_fastGet1d(gradOutput, 0);
     }
   }
   else
@@ -209,15 +211,15 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
     {
       for (d = 0; d < dim; d++)
       {
-        gradInput_data[t * dim + d] *= THTensor_(fastGetLegacy1dNoScalars)(gradOutput, t);
+        gradInput_data[t * dim + d] *= THTensor_fastGet1d(gradOutput, t);
       }
     }
   }
 
-  c10::raw::intrusive_ptr::decref(input);
+  THTensor_(free)(input);
   THIndexTensor_(free)(target);
   if(weights)
-    c10::raw::intrusive_ptr::decref(weights);
+    THTensor_(free)(weights);
 }
 
 #endif

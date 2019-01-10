@@ -3,17 +3,18 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import workspace, core
-import caffe2.python.hypothesis_test_util as hu
-import caffe2.python.serialized_test.serialized_test_util as serial
+import numpy as np
 from hypothesis import given
 import hypothesis.strategies as st
-import numpy as np
+import caffe2.python.hypothesis_test_util as hu
+from caffe2.python import workspace, core
 
 
-class TestNegateGradient(serial.SerializedTestCase):
+class TestNegateGradient(hu.HypothesisTestCase):
 
-    @serial.given(X=hu.tensor(), inplace=st.booleans(), **hu.gcs)
+    @given(X=hu.tensor(),
+           inplace=st.booleans(),
+            **hu.gcs)
     def test_forward(self, X, inplace, gc, dc):
         def neg_grad_ref(X):
             return (X,)

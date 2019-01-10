@@ -6,14 +6,13 @@ from __future__ import unicode_literals
 from caffe2.python import core
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
-import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 
 
-class TestPackRNNSequenceOperator(serial.SerializedTestCase):
+class TestPackRNNSequenceOperator(hu.HypothesisTestCase):
 
-    @serial.given(n=st.integers(0, 10), k=st.integers(1, 5),
+    @given(n=st.integers(0, 10), k=st.integers(1, 5),
            dim=st.integers(1, 5), **hu.gcs_cpu_only)
     def test_pack_rnn_seqence(self, n, k, dim, gc, dc):
         lengths = np.random.randint(k, size=n).astype(np.int32) + 1
@@ -48,7 +47,7 @@ class TestPackRNNSequenceOperator(serial.SerializedTestCase):
         # Gradient check
         self.assertGradientChecks(gc, op, [values, lengths], 0, [0])
 
-    @serial.given(n=st.integers(0, 10), k=st.integers(2, 5),
+    @given(n=st.integers(0, 10), k=st.integers(2, 5),
            dim=st.integers(1, 5), **hu.gcs_cpu_only)
     def test_unpack_rnn_seqence(self, n, k, dim, gc, dc):
         lengths = np.random.randint(k, size=n).astype(np.int32) + 1

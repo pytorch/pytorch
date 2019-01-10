@@ -10,12 +10,9 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#ifdef CAFFE2_USE_CUDNN
 #include "caffe2/core/common_cudnn.h"
-#endif // CAFFE2_USE_CUDNN
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/operator_fallback_gpu.h"
-#include "caffe2/python/pybind_state_registry.h"
 
 #ifdef CAFFE2_USE_TRT
 #include "caffe2/contrib/tensorrt/tensorrt_tranformer.h"
@@ -24,14 +21,17 @@
 namespace caffe2 {
 namespace python {
 
-REGISTER_CUDA_OPERATOR(Python, GPUFallbackOp);
+REGISTER_CUDA_OPERATOR(Python, GPUFallbackOp<PythonOp<CPUContext, false>>);
 REGISTER_CUDA_OPERATOR(
     PythonGradient,
-    GPUFallbackOp);
+    GPUFallbackOp<PythonGradientOp<CPUContext, false>>);
 
-REGISTER_CUDA_OPERATOR(PythonDLPack, GPUFallbackOp);
-REGISTER_CUDA_OPERATOR(PythonDLPackGradient, GPUFallbackOp);
+REGISTER_CUDA_OPERATOR(PythonDLPack, PythonOp<CUDAContext, true>);
+REGISTER_CUDA_OPERATOR(
+    PythonDLPackGradient,
+    PythonGradientOp<CUDAContext, true>);
 
+REGISTER_BLOB_FETCHER((TypeMeta::Id<TensorCUDA>()), TensorFetcher<CUDAContext>);
 REGISTER_BLOB_FEEDER(CUDA, TensorFeeder<CUDAContext>);
 
 namespace py = pybind11;
@@ -39,12 +39,7 @@ namespace py = pybind11;
 void addCUDAGlobalMethods(py::module& m) {
   m.def("num_cuda_devices", &NumCudaDevices);
   m.def("get_cuda_version", &CudaVersion);
-#ifdef CAFFE2_USE_CUDNN
   m.def("get_cudnn_version", &cudnnCompiledVersion);
-  m.attr("cudnn_convolution_fwd_algo_count") = py::int_((int) CUDNN_CONVOLUTION_FWD_ALGO_COUNT);
-  m.attr("cudnn_convolution_bwd_data_algo_count") = py::int_((int) CUDNN_CONVOLUTION_BWD_DATA_ALGO_COUNT);
-  m.attr("cudnn_convolution_bwd_filter_algo_count") = py::int_((int) CUDNN_CONVOLUTION_BWD_FILTER_ALGO_COUNT);
-#endif
   m.def("get_cuda_peer_access_pattern", []() {
     std::vector<std::vector<bool>> pattern;
     CAFFE_ENFORCE(caffe2::GetCudaPeerAccessPattern(&pattern));
@@ -123,7 +118,7 @@ void addCUDAObjectMethods(py::module& m) {
           [](DLPackWrapper<CUDAContext>* t) -> py::object {
             CAFFE_ENFORCE_EQ(
                 t->device_option.device_type(),
-                PROTO_CUDA,
+                CUDA,
                 "Expected CUDA device option for CUDA tensor");
 
             return t->data();
@@ -134,17 +129,17 @@ void addCUDAObjectMethods(py::module& m) {
           [](DLPackWrapper<CUDAContext>* t, py::object obj) {
             CAFFE_ENFORCE_EQ(
                 t->device_option.device_type(),
-                PROTO_CUDA,
+                CUDA,
                 "Expected CUDA device option for CUDA tensor");
             t->feed(obj);
           },
           "Copy data from given DLPack tensor into this tensor.")
       .def_property_readonly(
           "_shape",
-          [](const DLPackWrapper<CUDAContext>& t) { return t.tensor->sizes(); })
+          [](const DLPackWrapper<CUDAContext>& t) { return t.tensor->dims(); })
       .def(
           "_reshape",
-          [](DLPackWrapper<CUDAContext>* t, std::vector<int64_t> dims) {
+          [](DLPackWrapper<CUDAContext>* t, std::vector<TIndex> dims) {
             t->tensor->Resize(dims);
           });
 }
@@ -156,9 +151,6 @@ PYBIND11_MODULE(caffe2_pybind11_state_gpu, m) {
   addCUDAGlobalMethods(m);
   addObjectMethods(m);
   addCUDAObjectMethods(m);
-  for (const auto& addition : PybindAdditionRegistry()->Keys()) {
-    PybindAdditionRegistry()->Create(addition, m);
-  }
 }
 } // namespace python
 } // namespace caffe2

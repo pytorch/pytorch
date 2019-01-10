@@ -1,29 +1,31 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "THC/generic/THCTensorSort.cu"
+#define THC_GENERIC_FILE "generic/THCTensorSort.cu"
 #else
 
 // In alignment with default sort on a c++ map, this function
 // will permute key and value tensors identically, and
 // in such a way that the 'key' tensor is ordered numerically
-void THCTensor_(sortKeyValueInplace)(THCState* state,
-                                     THCTensor* key,
-                                     THCudaLongTensor* value,
-                                     int dim, bool dir) {
-  THArgCheck(key->sizes().equals(value->sizes()), 2,
+THC_API void THCTensor_(sortKeyValueInplace)(THCState* state,
+                                           THCTensor* key,
+                                           THCudaLongTensor* value,
+                                           int dim, bool dir) {
+  THLongStorage *valueSize = THCudaLongTensor_newSizeOf(state, value);
+  THArgCheck(THCTensor_(isSize)(state, key, valueSize), 2,
              "Key tensor must have same size as value tensor");
-  int dims = THCudaLongTensor_nDimensionLegacyNoScalars(state, value);
+  THLongStorage_free(valueSize);
+  int dims = THCudaLongTensor_nDimension(state, value);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 3, CUTORCH_DIM_WARNING);
-  dims = THCTensor_(nDimensionLegacyNoScalars)(state, key);
+  dims = THCTensor_(nDimension)(state, key);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
 
   ptrdiff_t inElements = THCTensor_(nElement)(state, key);
+  int64_t keySliceSize = THCTensor_(size)(state, key, dim);
+  ptrdiff_t keySlices = inElements / keySliceSize;
 
-  if (inElements == 0) {
+  if (THCTensor_(nDimension)(state, key) == 0) {
+    // Zero-dim tensor; do nothing
     return;
   }
-
-  int64_t keySliceSize = THCTensor_(sizeLegacyNoScalars)(state, key, dim);
-  ptrdiff_t keySlices = inElements / keySliceSize;
 
   // The amount of shared memory and block size is based on
   // 2^ceil(lg(n)); we choose that sorting implementation for a given
@@ -53,7 +55,7 @@ void THCTensor_(sortKeyValueInplace)(THCState* state,
     dim3 block(blockSize);                                              \
                                                                         \
     if (dir) {                                                          \
-      bitonicSortKVInPlace<scalar_t, int64_t, A, -1, GTComp<scalar_t>, TYPE, SIZE> \
+      bitonicSortKVInPlace<real, int64_t, A, -1, GTComp<real>, TYPE, SIZE> \
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(         \
           keyInfo,                                                      \
           keySlices,                                                    \
@@ -61,9 +63,9 @@ void THCTensor_(sortKeyValueInplace)(THCState* state,
           (TYPE) keyInfo.strides[collapseKeyDim],                       \
           valueInfo,                                                    \
           (TYPE) valueInfo.strides[collapseValueDim],                   \
-          GTComp<scalar_t>());                                              \
+          GTComp<real>());                                              \
     } else {                                                            \
-      bitonicSortKVInPlace<scalar_t, int64_t, A, -1, LTComp<scalar_t>, TYPE, SIZE> \
+      bitonicSortKVInPlace<real, int64_t, A, -1, LTComp<real>, TYPE, SIZE> \
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(         \
           keyInfo,                                                      \
           keySlices,                                                    \
@@ -71,7 +73,7 @@ void THCTensor_(sortKeyValueInplace)(THCState* state,
           (TYPE) keyInfo.strides[collapseKeyDim],                       \
           valueInfo,                                                    \
           (TYPE) valueInfo.strides[collapseValueDim],                   \
-          LTComp<scalar_t>());                                              \
+          LTComp<real>());                                              \
     }                                                                   \
   } while (0)
 
@@ -107,14 +109,14 @@ void THCTensor_(sortKeyValueInplace)(THCState* state,
 
   // The constructed key/value tensor info is used to select the slice
   // we are sorting on a per-block basis
-  if (THCTensor_canUse32BitIndexMath(state, key)) {
-    TensorInfo<scalar_t, unsigned int> keyInfo =
-      getTensorInfo<scalar_t, THCTensor, unsigned int>(state, key);
+  if (TensorUtils<THCTensor>::canUse32BitIndexMath(state, key)) {
+    TensorInfo<real, unsigned int> keyInfo =
+      getTensorInfo<THCTensor, unsigned int>(state, key);
     keyInfo.reduceDim(dim);
     int collapseKeyDim = keyInfo.collapseDims(dim);
 
     TensorInfo<int64_t, unsigned int> valueInfo =
-      getTensorInfo<int64_t, THCudaLongTensor, unsigned int>(state, value);
+      getTensorInfo<THCudaLongTensor, unsigned int>(state, value);
     valueInfo.reduceDim(dim);
     int collapseValueDim = valueInfo.collapseDims(dim);
 
@@ -131,13 +133,13 @@ void THCTensor_(sortKeyValueInplace)(THCState* state,
       }
     }
   } else {
-    TensorInfo<scalar_t, uint64_t> keyInfo =
-      getTensorInfo<scalar_t, THCTensor, uint64_t>(state, key);
+    TensorInfo<real, uint64_t> keyInfo =
+      getTensorInfo<THCTensor, uint64_t>(state, key);
     keyInfo.reduceDim(dim);
     int collapseKeyDim = keyInfo.collapseDims(dim);
 
     TensorInfo<int64_t, uint64_t> valueInfo =
-      getTensorInfo<int64_t, THCudaLongTensor, uint64_t>(state, value);
+      getTensorInfo<THCudaLongTensor, uint64_t>(state, value);
     valueInfo.reduceDim(dim);
     int collapseValueDim = valueInfo.collapseDims(dim);
 
@@ -151,16 +153,16 @@ void THCTensor_(sortKeyValueInplace)(THCState* state,
   THCudaCheck(cudaGetLastError());
 }
 
-void THCTensor_(sortViaThrust)(THCState* state,
-                               THCTensor* sorted,
-                               THCudaLongTensor* indices,
-                               THCTensor* input,
-                               int dim, bool dir) {
-  int nDims = THCTensor_(nDimensionLegacyAll)(state, input);
+void sortViaThrust(THCState* state,
+                   THCTensor* sorted,
+                   THCudaLongTensor* indices,
+                   THCTensor* input,
+                   int dim, bool dir) {
+  int nDims = THCTensor_(nDimension)(state, input);
 
   ptrdiff_t totalElements = THCTensor_(nElement)(state, input);
-  int64_t sliceSize = THCTensor_(sizeLegacyNoScalars)(state, input, dim);
-  int64_t sliceStride = THTensor_strideLegacyNoScalars(input, dim);
+  int64_t sliceSize = THCTensor_(size)(state, input, dim);
+  int64_t sliceStride = THCTensor_(stride)(state, input, dim);
 
   // We perform a vectorized segmented sort in Thrust.
   // Say we are sorting a (2, 3) tensor. We have in flattened form:
@@ -209,7 +211,7 @@ void THCTensor_(sortViaThrust)(THCState* state,
 
   THCThrustAllocator thrustAlloc(state);
 
-  thrust::device_ptr<scalar_t> keyIter(THCTensor_(data)(state, trContigKey));
+  thrust::device_ptr<real> keyIter(THCTensor_(data)(state, trContigKey));
 
   // Since we are composing a global index across all segments rather
   // than a per-segment index, we treat the memory as int so we don't
@@ -222,7 +224,7 @@ void THCTensor_(sortViaThrust)(THCState* state,
   thrust::counting_iterator<int64_t> countIter(0);
 
   thrust::copy(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
+#if CUDA_VERSION >= 7000
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     countIter, countIter + totalElements, indexIter);
@@ -231,16 +233,16 @@ void THCTensor_(sortViaThrust)(THCState* state,
   // (the values we're sorting)
   if (dir) {
     thrust::stable_sort_by_key(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
+#if CUDA_VERSION >= 7000
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
-      keyIter, keyIter + totalElements, indexIter, ThrustGTOp<scalar_t>());
+      keyIter, keyIter + totalElements, indexIter, ThrustGTOp<real>());
   } else {
     thrust::stable_sort_by_key(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
+#if CUDA_VERSION >= 7000
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
-      keyIter, keyIter + totalElements, indexIter, ThrustLTOp<scalar_t>());
+      keyIter, keyIter + totalElements, indexIter, ThrustLTOp<real>());
   }
 
   // Then, re-sort according to slice that each index is
@@ -248,7 +250,7 @@ void THCTensor_(sortViaThrust)(THCState* state,
   // stably sorting here, preserving the relative order of values
   // per each slice
   thrust::stable_sort_by_key(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
+#if CUDA_VERSION >= 7000
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     indexIter, indexIter + totalElements, keyIter,
@@ -257,7 +259,7 @@ void THCTensor_(sortViaThrust)(THCState* state,
   // Translate the global integer 0-based index to a per-slice real
   // Lua index
   thrust::for_each(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
+#if CUDA_VERSION >= 7000
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     indexIter, indexIter + totalElements,
@@ -274,26 +276,28 @@ void THCTensor_(sortViaThrust)(THCState* state,
   THCudaLongTensor_freeCopyTo(state, trContigIndices, indices);
 }
 
-void THCTensor_(sort)(THCState* state,
-                      THCTensor *sorted,
-                      THCudaLongTensor *indices,
-                      THCTensor *input,
-                      int dim, int order) {
+THC_API void THCTensor_(sort)(THCState* state,
+                               THCTensor *sorted,
+                               THCudaLongTensor *indices,
+                               THCTensor *input,
+                               int dim, int order) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, sorted, input));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, indices));
-  int64_t dims = THCTensor_(nDimensionLegacyNoScalars)(state, sorted);
+  int64_t dims = THCTensor_(nDimension)(state, sorted);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
-  dims = THCTensor_(nDimensionLegacyNoScalars)(state, input);
+  dims = THCTensor_(nDimension)(state, input);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 4, CUTORCH_DIM_WARNING);
-  dims = THCudaLongTensor_nDimensionLegacyNoScalars(state, indices);
+  dims = THCudaLongTensor_nDimension(state, indices);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 3, CUTORCH_DIM_WARNING);
 
   // Make sure sufficient output space is allocated
   THCTensor_(resizeAs)(state, sorted, input);
-  THCudaLongTensor_resize(state, indices, input->sizes(), {});
+  THLongStorage *inputSize = THCTensor_(newSizeOf)(state, input);
+  THCudaLongTensor_resize(state, indices, inputSize, NULL);
+  THLongStorage_free(inputSize);
 
   // How large are the slices that we are sorting?
-  int64_t sliceSize = THCTensor_(sizeLegacyNoScalars)(state, input, dim);
+  int64_t sliceSize = THCTensor_(size)(state, input, dim);
 
   // Workaround:
   // CUDA 8 uses more shared memory than 7.5 for bitonicSortKVInPlace,
@@ -309,12 +313,7 @@ void THCTensor_(sort)(THCState* state,
   int maxSliceSize = 2048;
 #endif
 
-#ifdef __HIP_PLATFORM_HCC__
-  // TODO bitonicSortKVInPlace hangs on ROCm currently.
-  if (0) {
-#else
   if (sliceSize <= maxSliceSize) {
-#endif
     // Fill `indices` (the values) with the
     // slice-relative index.
     THCudaLongTensor_fillSliceWithIndex(state, indices, dim);
@@ -328,7 +327,7 @@ void THCTensor_(sort)(THCState* state,
   } else {
     // Otherwise, fall back upon Thrust, which handles all other cases
     // (potentially slowly, with extra copies/memory allocations)
-    THCTensor_(sortViaThrust)(state, sorted, indices, input, dim, (bool) order);
+    sortViaThrust(state, sorted, indices, input, dim, (bool) order);
   }
 
   THCudaCheck(cudaGetLastError());

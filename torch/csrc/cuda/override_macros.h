@@ -1,16 +1,17 @@
-#include <torch/csrc/cuda/undef_macros.h>
+#include "undef_macros.h"
 
-#define THWStoragePtr THCStoragePtr
+#define THStoragePtr THCStoragePtr
 #define THPStoragePtr THCPStoragePtr
-#define THWTensorPtr THCTensorPtr
+#define THTensorPtr THCTensorPtr
 #define THPTensorPtr THCPTensorPtr
 
-#define THWStorage THCStorage
-#define THWStorage_(NAME) THCStorage_(NAME)
-#define THWTensor THCTensor
-#define THWTensor_(NAME) THCTensor_(NAME)
+#define THStorage THCStorage
+#define THStorage_(NAME) THCStorage_(NAME)
+#define THTensor THCTensor
+#define THTensor_(NAME) THCTensor_(NAME)
 
 #define THPStorage_(NAME) TH_CONCAT_4(THCP,Real,Storage_,NAME)
+#define THPStorage THCPStorage
 #define THPStorageBaseStr THCPStorageBaseStr
 #define THPStorageStr THCPStorageStr
 #define THPStorageClass THCPStorageClass
@@ -28,7 +29,10 @@
 #define THPTensorStateless THCPTensorStateless
 
 
+#define THSTensorPtr THCSTensorPtr
 #define THSPTensorPtr THCSPTensorPtr
+#define THSTensor THCSTensor
+#define THSTensor_(NAME) THCSTensor_(NAME)
 
 #define THSPTensor_(NAME) TH_CONCAT_4(THCSP,Real,Tensor_,NAME)
 #define THSPTensor_stateless_(NAME) TH_CONCAT_4(THCSP,Real,Tensor_stateless_,NAME)

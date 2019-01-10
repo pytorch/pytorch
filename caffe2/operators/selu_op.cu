@@ -33,16 +33,12 @@ bool SeluOp<float, CUDAContext>::RunOnDevice() {
   auto* Y = Output(0);
   CAFFE_ENFORCE_GT(X.size(), 0);
   Y->ResizeLike(X);
-  SeluKernel<float>
-      <<<CAFFE_GET_BLOCKS(X.size()),
-         CAFFE_CUDA_NUM_THREADS,
-         0,
-         context_.cuda_stream()>>>(
-          X.size(),
-          X.data<float>(),
-          Y->template mutable_data<float>(),
-          alpha_,
-          lambda_);
+  SeluKernel<<<
+      CAFFE_GET_BLOCKS(X.size()),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      X.size(), X.data<float>(), Y->mutable_data<float>(), alpha_, lambda_);
   return true;
 }
 
@@ -54,17 +50,17 @@ bool SeluGradientOp<float, CUDAContext>::RunOnDevice() {
   CAFFE_ENFORCE_GT(Y.size(), 0);
   CAFFE_ENFORCE_EQ(dY.size(), Y.size());
   dX->ResizeLike(Y);
-  SeluGradientKernel<float>
-      <<<CAFFE_GET_BLOCKS(Y.size()),
-         CAFFE_CUDA_NUM_THREADS,
-         0,
-         context_.cuda_stream()>>>(
-          Y.size(),
-          Y.data<float>(),
-          dY.data<float>(),
-          dX->template mutable_data<float>(),
-          alpha_,
-          lambda_);
+  SeluGradientKernel<<<
+      CAFFE_GET_BLOCKS(Y.size()),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      Y.size(),
+      Y.data<float>(),
+      dY.data<float>(),
+      dX->mutable_data<float>(),
+      alpha_,
+      lambda_);
   return true;
 }
 

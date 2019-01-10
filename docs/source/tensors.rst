@@ -46,7 +46,7 @@ A tensor can be constructed from a Python :class:`list` or sequence using the
     If you have a numpy array and want to avoid a copy, use
     :func:`torch.as_tensor`.
 
-A tensor of specific data type can be constructed by passing a
+An tensor of specific data type can be constructed by passing a
 :class:`torch.dtype` and/or a :class:`torch.device` to a
 constructor or tensor creation op:
 
@@ -139,9 +139,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: new_ones
    .. automethod:: new_zeros
 
-   .. autoattribute:: is_cuda
-   .. autoattribute:: device
-
    .. automethod:: abs
    .. automethod:: abs_
    .. automethod:: acos
@@ -160,7 +157,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: addmv_
    .. automethod:: addr
    .. automethod:: addr_
-   .. automethod:: allclose
    .. automethod:: apply_
    .. automethod:: argmax
    .. automethod:: argmin
@@ -183,8 +179,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: ceil
    .. automethod:: ceil_
    .. automethod:: char
-   .. automethod:: cholesky
-   .. automethod:: cholesky_solve
    .. automethod:: chunk
    .. automethod:: clamp
    .. automethod:: clamp_
@@ -202,8 +196,9 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cumsum
    .. automethod:: data_ptr
    .. automethod:: det
+   .. autoattribute:: device
+      :annotation:
    .. automethod:: diag
-   .. automethod:: diag_embed
    .. automethod:: dim
    .. automethod:: dist
    .. automethod:: div
@@ -217,8 +212,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: equal
    .. automethod:: erf
    .. automethod:: erf_
-   .. automethod:: erfc
-   .. automethod:: erfc_
    .. automethod:: erfinv
    .. automethod:: erfinv_
    .. automethod:: exp
@@ -229,8 +222,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: expand_as
    .. automethod:: exponential_
    .. automethod:: fill_
-   .. automethod:: flatten
-   .. automethod:: flip
    .. automethod:: float
    .. automethod:: floor
    .. automethod:: floor_
@@ -246,11 +237,11 @@ view of a storage and defines numeric operations on it.
    .. automethod:: geqrf
    .. automethod:: ger
    .. automethod:: gesv
-   .. automethod:: get_device
    .. automethod:: gt
    .. automethod:: gt_
    .. automethod:: half
    .. automethod:: histc
+   .. automethod:: index
    .. automethod:: index_add_
    .. automethod:: index_copy_
    .. automethod:: index_fill_
@@ -259,7 +250,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: int
    .. automethod:: inverse
    .. automethod:: is_contiguous
-   .. automethod:: is_floating_point
+   .. autoattribute:: is_cuda
+      :annotation:
    .. automethod:: is_pinned
    .. automethod:: is_set_to
    .. automethod:: is_signed
@@ -279,7 +271,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: log2
    .. automethod:: log2_
    .. automethod:: log_normal_
-   .. automethod:: logsumexp
    .. automethod:: long
    .. automethod:: lt
    .. automethod:: lt_
@@ -288,7 +279,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: masked_fill_
    .. automethod:: masked_select
    .. automethod:: matmul
-   .. automethod:: matrix_power
    .. automethod:: max
    .. automethod:: mean
    .. automethod:: median
@@ -299,8 +289,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: mul_
    .. automethod:: multinomial
    .. automethod:: mv
-   .. automethod:: mvlgamma
-   .. automethod:: mvlgamma_
    .. automethod:: narrow
    .. automethod:: ndimension
    .. automethod:: ne
@@ -317,7 +305,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: ormqr
    .. automethod:: permute
    .. automethod:: pin_memory
-   .. automethod:: pinverse
    .. automethod:: potrf
    .. automethod:: potri
    .. automethod:: potrs
@@ -337,16 +324,13 @@ view of a storage and defines numeric operations on it.
    .. automethod:: repeat
    .. automethod:: requires_grad_
    .. automethod:: reshape
-   .. automethod:: reshape_as
    .. automethod:: resize_
    .. automethod:: resize_as_
-   .. automethod:: roll
    .. automethod:: round
    .. automethod:: round_
    .. automethod:: rsqrt
    .. automethod:: rsqrt_
    .. automethod:: scatter_
-   .. automethod:: scatter_add_
    .. automethod:: select
    .. automethod:: set_
    .. automethod:: share_memory_
@@ -363,7 +347,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: slogdet
    .. automethod:: sort
    .. automethod:: split
-   .. automethod:: sparse_mask
    .. automethod:: sqrt
    .. automethod:: sqrt_
    .. automethod:: squeeze
@@ -388,7 +371,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: tanh_
    .. automethod:: tolist
    .. automethod:: topk
-   .. automethod:: to_sparse
    .. automethod:: trace
    .. automethod:: transpose
    .. automethod:: transpose_

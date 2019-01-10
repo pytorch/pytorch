@@ -1,33 +1,23 @@
-#pragma once
+#ifndef LIBSHM_H
+#define LIBSHM_H
 
 #include <TH/TH.h>
 
 #ifdef __cplusplus
+#define EXPORT_API extern "C"
+#else
+#define EXPORT_API
+#endif
 
-void libshm_init(const char *manager_exec_path);
+typedef struct {
+  char *manager_handle;
+  THMapAllocatorContext *th_context;
+} libshm_context;
 
-// Superclass to run a constructor before THRefcountedMapAllocator
-class THManagedMapAllocatorInit {
-protected:
-  THManagedMapAllocatorInit(const char* manager_handle, const char* filename);
-  std::string manager_handle_;
-};
+EXPORT_API void libshm_init(const char *manager_exec_path);
+EXPORT_API libshm_context * libshm_context_new(const char *manager_handle, const char *filename, int flags);
+EXPORT_API void libshm_context_free(libshm_context *context);
 
-// Like a THRefcountedMapAllocator, but it also makes use of an external
-// shared memory manager process to ensure that shared memory regions actually
-// get freed in the end (even if processes lose the memory).
-class THManagedMapAllocator : private THManagedMapAllocatorInit, public THRefcountedMapAllocator {
-public:
-  THManagedMapAllocator(const char* manager_handle, const char* filename, int flags, ptrdiff_t size);
-
-  void close() override;
-
-  ~THManagedMapAllocator() { close(); }
-
-  static at::DataPtr makeDataPtr(const char* manager_handle, const char* filename, int flags, ptrdiff_t size);
-  static THManagedMapAllocator* fromDataPtr(const at::DataPtr&);
-
-  const char* manager_handle() const { return manager_handle_.c_str(); }
-};
+extern THAllocator THManagedSharedAllocator;
 
 #endif

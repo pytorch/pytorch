@@ -28,7 +28,8 @@ class Float16ConstantFillOp : public Operator<CPUContext> {
  public:
   Float16ConstantFillOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CPUContext>(operator_def, ws),
-        shape_(this->template GetRepeatedArgument<int64_t>("shape")) {}
+        shape_(
+            ToVectorTIndex(OperatorBase::GetRepeatedArgument<int>("shape"))) {}
 
   USE_OPERATOR_FUNCTIONS(CPUContext);
   virtual ~Float16ConstantFillOp() {}
@@ -36,38 +37,7 @@ class Float16ConstantFillOp : public Operator<CPUContext> {
   bool RunOnDevice() override;
 
  private:
-  vector<int64_t> shape_;
-};
-
-class Float16UniformFillOp : public Operator<CPUContext> {
- public:
-  Float16UniformFillOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws),
-        shape_(this->template GetRepeatedArgument<int64_t>("shape")),
-        min_(this->template GetSingleArgument<float>("min", 0)),
-        max_(this->template GetSingleArgument<float>("max", 1)) {
-    if (InputSize() == 3) {
-      CAFFE_ENFORCE(
-          !this->template HasSingleArgumentOfType<float>("min"),
-          "Cannot set both min arg and min input blob");
-      CAFFE_ENFORCE(
-          !this->template HasSingleArgumentOfType<float>("max"),
-          "Cannot set both max arg and max input blob");
-    } else {
-      CAFFE_ENFORCE_LT(
-          min_, max_, "Max value should be bigger than min value.");
-    }
-  }
-
-  USE_OPERATOR_FUNCTIONS(CPUContext);
-  virtual ~Float16UniformFillOp() {}
-
-  bool RunOnDevice() override;
-
- private:
-  vector<int64_t> shape_;
-  float min_;
-  float max_;
+  vector<TIndex> shape_;
 };
 
 inline std::vector<TensorShape> Float16FillerTensorInference(
@@ -76,7 +46,7 @@ inline std::vector<TensorShape> Float16FillerTensorInference(
   vector<TensorShape> out(1);
   ArgumentHelper helper(def);
   out[0].set_data_type(static_cast<TensorProto_DataType>(
-      helper.GetSingleArgument<int>("dtype", TensorProto_DataType_FLOAT16)));
+      helper.GetSingleArgument<int>("dtype", TensorProto_DataType_FLOAT)));
   auto shape = helper.GetRepeatedArgument<int>("shape");
   for (int d : shape) {
     out[0].add_dims(d);

@@ -1,4 +1,0 @@
-def graph(self,
-    y: Tensor) -> None:
-  print("hi\016")
-  return None

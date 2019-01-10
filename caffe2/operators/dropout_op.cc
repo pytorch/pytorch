@@ -5,12 +5,12 @@ namespace caffe2 {
 template <>
 bool DropoutOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
-  auto* Y = Output(0, X.sizes(), at::dtype<float>());
-
+  auto* Y = Output(0);
+  Y->Resize(X.dims());
   if (is_test_) {
-    if (!IsInputOutputAlias(0, 0)) {
-      context_.CopyFromCPU<float>(
-          X.numel(), X.data<float>(), Y->template mutable_data<float>());
+    if (Y != &X) {
+      context_.Copy<float, CPUContext, CPUContext>(
+          X.size(), X.data<float>(), Y->mutable_data<float>());
     }
     return true;
   } else {
@@ -19,12 +19,12 @@ bool DropoutOp<float, CPUContext>::RunOnDevice() {
     // generate probability depending on 1-ratio.
     std::bernoulli_distribution dist(1. - ratio_);
     const float* Xdata = X.data<float>();
-    float* Ydata = Y->template mutable_data<float>();
-
-    auto mask = Output(1, X.sizes(), at::dtype<bool>());
-    bool* mask_data = mask->template mutable_data<bool>();
+    float* Ydata = Y->mutable_data<float>();
+    auto mask = Output(1);
+    mask->Resize(X.dims());
+    bool* mask_data = mask->mutable_data<bool>();
     auto& gen = context_.RandGenerator();
-    for (int i = 0; i < X.numel(); ++i) {
+    for (int i = 0; i < X.size(); ++i) {
       mask_data[i] = dist(gen);
       Ydata[i] = Xdata[i] * scale * mask_data[i];
     }
@@ -35,22 +35,22 @@ bool DropoutOp<float, CPUContext>::RunOnDevice() {
 template <>
 bool DropoutGradientOp<float, CPUContext>::RunOnDevice() {
   auto& dY = Input(0);
-
-  auto* dX = Output(0, dY.sizes(), at::dtype<float>());
+  auto* dX = Output(0);
+  dX->Resize(dY.dims());
   if (is_test_) {
     if (dX != &dY) {
-      context_.CopyFromCPU<float>(
-          dY.numel(), dY.data<float>(), dX->template mutable_data<float>());
+      context_.Copy<float, CPUContext, CPUContext>(
+          dY.size(), dY.data<float>(), dX->mutable_data<float>());
     }
     return true;
   } else {
     auto& mask = Input(1);
-    CAFFE_ENFORCE_EQ(dY.numel(), mask.numel());
+    CAFFE_ENFORCE_EQ(dY.size(), mask.size());
     const float* dYdata = dY.data<float>();
     const bool* mask_data = mask.data<bool>();
-    float* dXdata = dX->template mutable_data<float>();
+    float* dXdata = dX->mutable_data<float>();
     float scale = 1. / (1. - ratio_);
-    for (int i = 0; i < dY.numel(); ++i) {
+    for (int i = 0; i < dY.size(); ++i) {
       dXdata[i] = dYdata[i] * mask_data[i] * scale;
     }
     return true;
@@ -58,9 +58,7 @@ bool DropoutGradientOp<float, CPUContext>::RunOnDevice() {
 }
 
 REGISTER_CPU_OPERATOR(Dropout, DropoutOp<float, CPUContext>);
-REGISTER_CPU_GRADIENT_OPERATOR(
-    DropoutGrad,
-    DropoutGradientOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(DropoutGrad, DropoutGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(Dropout)
     .NumInputs(1)
@@ -79,90 +77,25 @@ OPERATOR_SCHEMA(Dropout)
       return out;
     })
     .SetDoc(R"DOC(
-
-`Dropout` takes one input data tensor (`X`) and produces two tensor outputs, `Y` and
-`mask`. If the `is_test` argument is zero (default=0), the output `Y` will be the input
-with random elements zeroed. The probability that a given element is zeroed is
-determined by the `ratio` argument.
-
-If the `is_test` argument is set to non-zero, the output `Y` is exactly the same as the
-input `X`. Note that outputs are scaled by a factor of $\frac{1}{1-ratio}$ during
-training, so that during test time, we can simply compute an identity function. This
-scaling is important because we want the output at test time to equal the expected value
-at training time. Dropout has been proven to be an effective regularization technique to
-prevent overfitting during training.
-
-
-Github Links:
-
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/dropout_op.h
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/dropout_op.cc
-
-
-<details>
-
-<summary> <b>Example</b> </summary>
-
-**Code**
-
-```
-workspace.ResetWorkspace()
-
-op = core.CreateOperator(
-    "Dropout",
-    ["X"],
-    ["Y"] + ["mask"],
-    ratio=0.5,
-    is_test=0
-)
-
-workspace.FeedBlob("X", np.random.randint(10, size=(5, 5)).astype(np.float32))
-print("X:", workspace.FetchBlob("X"))
-workspace.RunOperatorOnce(op)
-print("Y:", workspace.FetchBlob("Y"))
-print("mask:", workspace.FetchBlob("mask"))
-```
-
-**Result**
-
-```
-X: [[5. 4. 3. 6. 9.]
- [2. 1. 8. 0. 9.]
- [7. 3. 0. 6. 3.]
- [1. 8. 2. 6. 4.]
- [6. 2. 6. 4. 0.]]
-Y: [[ 0.  0.  0. 12. 18.]
- [ 0.  0. 16.  0.  0.]
- [ 0.  0.  0. 12.  6.]
- [ 0.  0.  4.  0.  0.]
- [12.  0.  0.  0.  0.]]
-mask: [[False False False  True  True]
- [False False  True  True False]
- [False False  True  True  True]
- [False False  True False False]
- [ True False False False False]]
-```
-
-</details>
-
+Dropout takes one input data (Tensor<float>) and produces two Tensor outputs,
+output (Tensor<float>) and mask (Tensor<bool>). Depending on whether it is in
+test mode or not, the output Y will either be a random dropout, or a simple
+copy of the input. Note that our implementation of Dropout does scaling in
+the training phase, so during testing nothing needs to be done.
 )DOC")
-    .Arg(
-        "ratio",
-        "*(type: float; default: 0.5)* Probability of an element to be zeroed.")
+    .Arg("ratio", "(float, default 0.5) the ratio of random dropout")
     .ArgIsTest(
-        "*(type: int; default: 0)* If zero (train mode), perform dropout. If non-zero"
-        "(test mode), Y = X.")
-    .Input(0, "X", "*(type: Tensor`<float>`)* Input data tensor.")
-    .Output(0, "Y", "*(type: Tensor`<float>`)* Output tensor.")
+        "(int) if nonzero, run dropout in test mode where "
+        "the output is simply Y = X.")
+    .Input(0, "data", "The input data as Tensor.")
+    .Output(0, "output", "The output.")
     .Output(
         1,
         "mask",
-        "*(type: Tensor`<bool>`)* The output mask containing boolean values for"
-        "each element, signifying which elements are dropped out. If `is_test` is"
-        "nonzero, this output is not filled.")
-    .InheritOnnxSchema();
+        "The output mask. If is_test is nonzero, this output is not filled.")
+    .InheritOnnxSchema("Dropout");
 
-GRADIENT_OPERATOR_SCHEMA(DropoutGrad)
+OPERATOR_SCHEMA(DropoutGrad)
     .NumInputs(1, 2)
     .NumOutputs(1)
     .AllowInplace({{0, 0}});

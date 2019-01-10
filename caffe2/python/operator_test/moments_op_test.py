@@ -7,13 +7,12 @@ from caffe2.python import core
 from hypothesis import given
 
 import caffe2.python.hypothesis_test_util as hu
-import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
-import itertools as it
 import numpy as np
+import itertools as it
 
 
-class TestMomentsOp(serial.SerializedTestCase):
+class TestMomentsOp(hu.HypothesisTestCase):
     def run_moments_test(self, X, axes, keepdims, gc, dc):
         if axes is None:
             op = core.CreateOperator(
@@ -42,7 +41,7 @@ class TestMomentsOp(serial.SerializedTestCase):
         self.assertDeviceChecks(dc, op, [X], [0, 1])
         self.assertGradientChecks(gc, op, [X], 0, [0, 1])
 
-    @serial.given(X=hu.tensor(dtype=np.float32), keepdims=st.booleans(),
+    @given(X=hu.tensor(dtype=np.float32), keepdims=st.booleans(),
            num_axes=st.integers(1, 4), **hu.gcs)
     def test_moments(self, X, keepdims, num_axes, gc, dc):
         self.run_moments_test(X, None, keepdims, gc, dc)

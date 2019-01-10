@@ -1,26 +1,13 @@
 (def
   (ident fn)
-  (decl
-    (list
-      (param
-        (ident x)
-        (variable (ident Tensor))
-        (option))
-      (param
-        (ident y)
-        (variable (ident Tensor))
-        (option))
-      (param
-        (ident z)
-        (variable (ident Tensor))
-        (option)))
-    (option))
+  (list
+    (param (ident x) (tensor_type))
+    (param (ident y) (tensor_type))
+    (param (ident z) (tensor_type)))
   (list
     (assign
-      (variable (ident q))
-      (None))
-    (assign
-      (variable (ident q))
+      (list (variable (ident q)))
+      (=)
       (-
         (+
           (variable (ident x))
@@ -32,12 +19,14 @@
           (list)
           (list))))
     (expression statement
-      (apply
-        (variable (ident print))
-        (list (variable (ident q)))
-        (list)))
+      (list
+        (apply
+          (variable (ident print))
+          (list (variable (ident q)))
+          (list))))
     (assign
-      (variable (ident w))
+      (list (variable (ident w)))
+      (=)
       (unary minus
         (variable (ident z))))
     (if
@@ -48,7 +37,8 @@
         (variable (ident z)))
       (list
         (assign
-          (variable (ident m))
+          (list (variable (ident m)))
+          (=)
           (if
             (not (variable (ident z)))
             (variable (ident x))
@@ -64,9 +54,8 @@
           (variable (ident z))))
       (list
         (assign
-          (variable (ident q))
+          (list (variable (ident q)))
+          (=)
           (variable (ident x)))))
-    (assert
-      (eq (const 1) (const 1))
-      (option (string_literal hello)))
-    (return (variable (ident x)))))
+    (return
+      (list (variable (ident x))))))

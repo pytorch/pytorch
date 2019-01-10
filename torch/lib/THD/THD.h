@@ -7,14 +7,24 @@
 #endif
 
 #ifndef _THD_CORE
-#include <THD/base/DataChannelRequest.h>
-#include <THD/base/TensorDescriptor.h>
+#include "base/TensorDescriptor.h"
+#include "base/DataChannelRequest.h"
 #else
-#include <THD/base/DataChannelRequest.hpp>
-#include <THD/base/TensorDescriptor.hpp>
+#include "base/TensorDescriptor.hpp"
+#include "base/DataChannelRequest.hpp"
 #endif
-#include <THD/base/ChannelType.h>
-#include <THD/base/Cuda.h>
+#include "base/ChannelType.h"
+#include "base/Cuda.h"
 
-#include <THD/process_group/Collectives.h>
-#include <THD/process_group/General.h>
+#include "process_group/General.h"
+#include "process_group/Collectives.h"
+
+#ifdef WITH_DISTRIBUTED_MW
+#include "master_worker/master/Master.h"
+#include "master_worker/master/State.h"
+#include "master_worker/master/THDRandom.h"
+#include "master_worker/master/THDStorage.h"
+#include "master_worker/master/THDTensor.h"
+
+#include "master_worker/worker/Worker.h"
+#endif

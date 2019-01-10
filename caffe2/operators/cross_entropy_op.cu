@@ -13,7 +13,7 @@ __global__ void LabelCrossEntropyKernel(
     const float log_threshold, float* Ydata) {
   CUDA_1D_KERNEL_LOOP(i, N) {
     CUDA_KERNEL_ASSERT(labeldata[i] >= 0 && labeldata[i] < D);
-    Ydata[i] = -logf(fmaxf(Xdata[i * D + labeldata[i]], log_threshold));
+    Ydata[i] = -logf(max(Xdata[i * D + labeldata[i]], log_threshold));
   }
 }
 __global__ void LabelCrossEntropyGradientKernel(
@@ -21,7 +21,7 @@ __global__ void LabelCrossEntropyGradientKernel(
     const float* dYdata, const float log_threshold, float* dXdata) {
   CUDA_1D_KERNEL_LOOP(i, N) {
     int idx = i * D + labeldata[i];
-    dXdata[idx] = - dYdata[i] / fmaxf(Xdata[idx], log_threshold);
+    dXdata[idx] = - dYdata[i] / max(Xdata[idx], log_threshold);
   }
 }
 }  // namespace
@@ -30,7 +30,7 @@ template <>
 bool LabelCrossEntropyOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& label = Input(1);
-
+  auto* Y = Output(0);
   int N, D;
   if (X.ndim() > 1) {
     N = X.dim32(0);
@@ -42,18 +42,11 @@ bool LabelCrossEntropyOp<float, CUDAContext>::RunOnDevice() {
   CAFFE_ENFORCE(
       (label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == 1));
   CAFFE_ENFORCE_EQ(label.dim32(0), N);
-  auto* Y = Output(0, vector<int64_t>(size_t(1), N), at::dtype<float>());
-  LabelCrossEntropyKernel<<<
-      CAFFE_GET_BLOCKS(N),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      N,
-      D,
-      X.data<float>(),
-      label.data<int>(),
-      kLOG_THRESHOLD(),
-      Y->template mutable_data<float>());
+  Y->Resize(vector<TIndex>(size_t(1), N));
+  LabelCrossEntropyKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
+                            0, context_.cuda_stream()>>>(
+      N, D, X.data<float>(), label.data<int>(), kLOG_THRESHOLD(),
+      Y->mutable_data<float>());
   return true;
 }
 
@@ -78,19 +71,11 @@ bool LabelCrossEntropyGradientOp<float, CUDAContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(dY.dim32(0), N);
   dX->ResizeLike(X);
   math::Set<float, CUDAContext>(
-      dX->size(), 0.f, dX->template mutable_data<float>(), &context_);
-  LabelCrossEntropyGradientKernel<<<
-      CAFFE_GET_BLOCKS(N),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      N,
-      D,
-      X.data<float>(),
-      label.data<int>(),
-      dY.data<float>(),
-      kLOG_THRESHOLD(),
-      dX->template mutable_data<float>());
+      dX->size(), 0.f, dX->mutable_data<float>(), &context_);
+  LabelCrossEntropyGradientKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
+                                    0, context_.cuda_stream()>>>(
+      N, D, X.data<float>(), label.data<int>(), dY.data<float>(),
+      kLOG_THRESHOLD(), dX->mutable_data<float>());
   return true;
 }
 
@@ -113,36 +98,32 @@ __global__ void MakeTwoClassGradientKernel(
 template <>
 bool MakeTwoClassOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
-  auto shape = X.sizes().vec();
+  auto* Y = Output(0);
+  auto shape = X.dims();
   shape.push_back(2);
   CAFFE_ENFORCE_LT(X.size(), std::numeric_limits<int>::max() / 2);
-  auto* Y = Output(0, shape, at::dtype<float>());
+  Y->Resize(shape);
   int N = X.size();
-  MakeTwoClassKernel<<<
-      CAFFE_GET_BLOCKS(N),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      N, X.data<float>(), Y->template mutable_data<float>());
+  MakeTwoClassKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
+                       0, context_.cuda_stream()>>>(
+      N, X.data<float>(), Y->mutable_data<float>());
   return true;
 }
 
 template <>
 bool MakeTwoClassGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& dY = Input(0);
-  auto shape = dY.sizes().vec();
+  auto* dX = Output(0);
+  auto shape = dY.dims();
   CAFFE_ENFORCE_GE(shape.size(), 1);
   CAFFE_ENFORCE_EQ(shape.back(), 2);
   shape.pop_back();
   CAFFE_ENFORCE_LT(dY.size(), std::numeric_limits<int>::max());
-  auto* dX = Output(0, shape, at::dtype<float>());
+  dX->Resize(shape);
   int N = dX->size();
-  MakeTwoClassGradientKernel<<<
-      CAFFE_GET_BLOCKS(N),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      N, dY.data<float>(), dX->template mutable_data<float>());
+  MakeTwoClassGradientKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,
+                               0, context_.cuda_stream()>>>(
+      N, dY.data<float>(), dX->mutable_data<float>());
   return true;
 }
 
@@ -242,17 +223,18 @@ template <>
 bool SigmoidCrossEntropyWithLogitsOp<float, CUDAContext>::RunOnDevice() {
   auto& logits = Input(0);
   auto& targets = Input(1);
-  CAFFE_ENFORCE(logits.sizes() == targets.sizes());
-  const auto inner_size = logits.ndim() > 0 ? logits.sizes().back() : 1;
+  CAFFE_ENFORCE(logits.dims() == targets.dims());
+  const auto inner_size = logits.ndim() > 0 ? logits.dims().back() : 1;
   const auto outer_size = logits.size() / inner_size;
 
-  std::vector<int64_t> dims;
-  if (logits.dim() != 0) {
-    dims =
-        std::vector<int64_t>(logits.sizes().begin(), logits.sizes().end() - 1);
+  auto* out = Output(0);
+  if (logits.ndim() == 0) {
+    out->Resize(std::vector<TIndex>{});
+  } else {
+    std::vector<TIndex> dims(logits.dims().begin(), logits.dims().end() - 1);
+    out->Resize(dims);
   }
-  auto* out = Output(0, dims, at::dtype<float>());
-  auto* out_ptr = out->template mutable_data<float>();
+  auto* out_ptr = out->mutable_data<float>();
 
   auto* logits_ptr = logits.data<float>();
   auto* targets_ptr = targets.data<float>();
@@ -283,14 +265,14 @@ bool SigmoidCrossEntropyWithLogitsGradientOp<float, CUDAContext>::
   auto& g = Input(0);
   auto& logits = Input(1);
   auto& targets = Input(2);
-  CAFFE_ENFORCE(logits.sizes() == targets.sizes());
-  const auto inner_size = logits.ndim() > 0 ? logits.sizes().back() : 1;
+  CAFFE_ENFORCE(logits.dims() == targets.dims());
+  const auto inner_size = logits.ndim() > 0 ? logits.dims().back() : 1;
   const auto outer_size = logits.size() / inner_size;
   CAFFE_ENFORCE(g.size() == outer_size);
 
   auto* out = Output(0);
   out->ResizeLike(logits);
-  auto* out_ptr = out->template mutable_data<float>();
+  auto* out_ptr = out->mutable_data<float>();
 
   auto* logits_ptr = logits.data<float>();
   auto* targets_ptr = targets.data<float>();
@@ -362,18 +344,19 @@ bool WeightedSigmoidCrossEntropyWithLogitsOp<float, CUDAContext>::
   auto& logits = Input(0);
   auto& targets = Input(1);
   auto& weights = Input(2);
-  CAFFE_ENFORCE(logits.sizes() == targets.sizes());
-  CAFFE_ENFORCE(weights.sizes() == targets.sizes());
-  const auto inner_size = logits.ndim() > 0 ? logits.sizes().back() : 1;
+  CAFFE_ENFORCE(logits.dims() == targets.dims());
+  CAFFE_ENFORCE(weights.dims() == targets.dims());
+  const auto inner_size = logits.ndim() > 0 ? logits.dims().back() : 1;
   const auto outer_size = logits.size() / inner_size;
 
-  std::vector<int64_t> dims;
-  if (logits.dim() != 0) {
-    dims =
-        std::vector<int64_t>(logits.sizes().begin(), logits.sizes().end() - 1);
+  auto* out = Output(0);
+  if (logits.ndim() == 0) {
+    out->Resize(std::vector<TIndex>{});
+  } else {
+    std::vector<TIndex> dims(logits.dims().begin(), logits.dims().end() - 1);
+    out->Resize(dims);
   }
-  auto* out = Output(0, dims, at::dtype<float>());
-  auto* out_ptr = out->template mutable_data<float>();
+  auto* out_ptr = out->mutable_data<float>();
 
   auto* logits_ptr = logits.data<float>();
   auto* targets_ptr = targets.data<float>();
@@ -395,15 +378,15 @@ bool WeightedSigmoidCrossEntropyWithLogitsGradientOp<float, CUDAContext>::
   auto& logits = Input(1);
   auto& targets = Input(2);
   auto& weights = Input(3);
-  CAFFE_ENFORCE(logits.sizes() == targets.sizes());
-  CAFFE_ENFORCE(weights.sizes() == targets.sizes());
-  const auto inner_size = logits.ndim() > 0 ? logits.sizes().back() : 1;
+  CAFFE_ENFORCE(logits.dims() == targets.dims());
+  CAFFE_ENFORCE(weights.dims() == targets.dims());
+  const auto inner_size = logits.ndim() > 0 ? logits.dims().back() : 1;
   const auto outer_size = logits.size() / inner_size;
   CAFFE_ENFORCE(g.size() == outer_size);
 
   auto* out = Output(0);
   out->ResizeLike(logits);
-  auto* out_ptr = out->template mutable_data<float>();
+  auto* out_ptr = out->mutable_data<float>();
 
   auto* logits_ptr = logits.data<float>();
   auto* targets_ptr = targets.data<float>();
@@ -450,7 +433,9 @@ REGISTER_CUDA_OPERATOR(MakeTwoClassGradient,
                        MakeTwoClassGradientOp<float, CUDAContext>);
 
 //TODO(surya) Add full GPU/CUDA support for the CrossEntropyOp
-REGISTER_CUDA_OPERATOR(CrossEntropy, GPUFallbackOp);
-REGISTER_CUDA_OPERATOR(CrossEntropyGradient, GPUFallbackOp);
+REGISTER_CUDA_OPERATOR(CrossEntropy,
+                       GPUFallbackOp<CrossEntropyOp<float, CPUContext>>);
+REGISTER_CUDA_OPERATOR(CrossEntropyGradient,
+                       GPUFallbackOp<CrossEntropyGradientOp<float, CPUContext>>);
 
 }  // namespace caffe2

@@ -49,6 +49,7 @@ class PositionWeighted(ModelLayer):
         )
 
         self.tags.update({Tags.HANDLE_AS_SPARSE_LAYER})
+        self.tags.update({Tags.GRADIENT_FROM_PS})
 
     def get_memory_usage(self):
         return self.shape

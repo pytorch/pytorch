@@ -1,53 +1,21 @@
 #pragma once
 
-#include <torch/nn/cloneable.h>
-#include <torch/nn/pimpl.h>
-#include <torch/types.h>
+#include <torch/nn/module.h>
 
-#include <cstddef>
-#include <vector>
+#include <torch/csrc/autograd/variable.h>
 
-namespace torch {
-namespace nn {
+#include <cstdint>
 
-/// Options for the `Embedding` module.
-struct TORCH_API EmbeddingOptions {
-  EmbeddingOptions(int64_t count, int64_t dimension);
-  /// The number of embeddings (number of rows in the table).
-  TORCH_ARG(int64_t, count);
-  /// The size of each embedding vector (number of columns in the table).
-  TORCH_ARG(int64_t, dimension);
-};
-
-/// Performs a lookup in a fixed size embedding table.
-class TORCH_API EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
+namespace torch { namespace nn {
+class Embedding : public torch::nn::CloneableModule<Embedding> {
  public:
-  EmbeddingImpl(int64_t count, int64_t dimension)
-      : EmbeddingImpl(EmbeddingOptions(count, dimension)) {}
-  explicit EmbeddingImpl(EmbeddingOptions options);
+  Embedding(uint32_t num_embeddings, uint32_t embedding_dim);
 
-  void reset() override;
+  variable_list forward(variable_list) override;
+  void reset_parameters() override;
+  void initialize_parameters() override;
 
-  /// Pretty prints the `Embedding` module into the given `stream`.
-  void pretty_print(std::ostream& stream) const override;
-
-  /// Performs a lookup on the embedding table stored in `weight` using the
-  /// `indices` supplied and returns the result.
-  Tensor forward(const Tensor& indices);
-
-  /// The `Options` used to configure this `Embedding` module.
-  /// Changes to `EmbeddingOptions` *after construction* have no effect.
-  EmbeddingOptions options;
-
-  /// The embedding table.
-  Tensor weight;
+  Variable weight;
+  uint32_t num_embeddings, embedding_dim;
 };
-
-/// A `ModuleHolder` subclass for `EmbeddingImpl`.
-/// See the documentation for `EmbeddingImpl` class to learn what methods it
-/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
-/// module storage semantics.
-TORCH_MODULE(Embedding);
-
-} // namespace nn
-} // namespace torch
+}} // namespace torch::nn

@@ -10,16 +10,16 @@ template <>
 bool CosineEmbeddingCriterionOp<CPUContext>::RunOnDevice() {
   auto& S = Input(0);
   auto& Y = Input(1);
-
+  auto* output = Output(0);
   CAFFE_ENFORCE(
-      S.numel() == Y.numel(),
+      S.size() == Y.size(),
       "The embedding and label should have the same size.");
-  auto* output = Output(0, S.sizes(), at::dtype<float>());
+  output->ResizeLike(S);
 
   const float* Sdata = S.data<float>();
   const int* Ydata = Y.data<int>();
-  float* output_data = output->template mutable_data<float>();
-  for (int i = 0; i < S.numel(); ++i) {
+  float* output_data = output->mutable_data<float>();
+  for (int i = 0; i < S.size(); ++i) {
     output_data[i] =
         Ydata[i] == 1 ? (1.f - Sdata[i]) : std::max(0.f, Sdata[i] - margin_);
   }
@@ -31,14 +31,15 @@ bool CosineEmbeddingCriterionGradientOp<CPUContext>::RunOnDevice() {
   auto& S = Input(0);
   auto& Y = Input(1);
   auto& dOutput = Input(2);
+  auto* dS = Output(0);
 
-  auto* dS = Output(0, S.sizes(), at::dtype<float>());
+  dS->ResizeLike(S);
 
   const float* Sdata = S.data<float>();
   const int* Ydata = Y.data<int>();
   const float* dOutput_data = dOutput.data<float>();
-  float* dSdata = dS->template mutable_data<float>();
-  for (int i = 0; i < S.numel(); ++i) {
+  float* dSdata = dS->mutable_data<float>();
+  for (int i = 0; i < S.size(); ++i) {
     dSdata[i] = dOutput_data[i] *
         (Ydata[i] == 1 ? -1.f : static_cast<float>(Sdata[i] >= margin_));
   }

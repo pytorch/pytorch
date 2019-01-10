@@ -54,27 +54,23 @@ private:
     #undef DEFINE_CASE
   }
 
-  at::Type& typeFor(const Tensor& ten) {
-    return at::getNonVariableType(backend(), atScalarTypeFor(ten.meta()));
+  at::Type & typeFor(const Tensor<Context> & ten) {
+    return at::getType(backend(), atScalarTypeFor(ten.meta()));
   }
-  at::Tensor tensorWrapping(const Tensor& ten_) {
-    auto& ten = const_cast<Tensor&>(ten_);
+  at::Tensor tensorWrapping(const Tensor<Context>& ten_) {
+    auto& ten = const_cast<Tensor<Context>&>(ten_);
     return typeFor(ten).tensorFromBlob(ten.raw_mutable_data(), ten.dims());
   }
-
-  at::Tensor peek(size_t i, size_t N) {
-    auto real_idx = InputSize() - N + i;
-    return tensorWrapping(Input(real_idx));
+  at::Tensor loadInput(size_t i) {
+    return tensorWrapping(Input(i));
   }
-
-  std::vector<at::Tensor> peekSlice(size_t i, size_t len, size_t N) {
+  std::vector<at::Tensor> loadInputsAtOffset(size_t s) {
     std::vector<at::Tensor> results;
-    for (size_t ii = i; ii < i + len; ++ii) {
-      results.push_back(peek(ii, N));
+    for (size_t i = s; i < InputSize(); i++) {
+      results.push_back(loadInput(i));
     }
     return results;
   }
-
   at::ScalarType atScalarTypeFor(const TypeMeta & meta) {
     #define DEFINE_IF(ctype,aten_name,_) \
     if(meta.Match<ctype>()) { \
@@ -82,31 +78,19 @@ private:
     }
     AT_FORALL_SCALAR_TYPES(DEFINE_IF)
     #undef DEFINE_IF
-    // Special case for bool, since the type in ATen is actually Byte
-    if (meta.Match<bool>()) {
-      return at::kByte;
-    }
     CAFFE_THROW("Unknown type meta"); // TODO: improve error message...
   }
-  void assignTo(Tensor* dst, const at::Tensor& src_) {
+  void assignTo(Tensor<Context> * dst, const at::Tensor & src_) {
     at::Tensor src = src_.contiguous();
     auto at_sizes = src.sizes();
-    caffe2::TypeMeta type_meta = typeMetaFor(src);
-    at::Device device = src.device();
-    at::TensorImpl* src_impl = src.unsafeReleaseTensorImpl();
-    std::vector<int64_t> dims(at_sizes.begin(), at_sizes.end());
+    std::vector<int64_t> dims(at_sizes.begin(),at_sizes.end());
     dst->Resize(dims);
     dst->ShareExternalPointer(
-        at::DataPtr(
-            src_impl->data(),
-            static_cast<void*>(src_impl),
-            [](void* t_ptr) -> void {
-              at::TensorImpl* local_impl = static_cast<at::TensorImpl*>(t_ptr);
-              c10::raw::intrusive_ptr::decref(local_impl);
-            },
-            device),
-        type_meta,
-        0);
+        src.data_ptr(), typeMetaFor(src), 0, [src](void* ptr) mutable {
+          // return a closure that holds a handle to t until it is called
+          // to keep the aten memory alive
+          return src.reset();
+        });
   }
   void assignListStartingAt(
       size_t offset,
@@ -129,7 +113,7 @@ private:
     return s.toLong();
   }
 
-  void assignTo(Tensor* dst, at::Type& inferred_type, at::Scalar scalar) {
+  void assignTo(Tensor<Context> * dst, at::Type & inferred_type, at::Scalar scalar) {
     switch(inferred_type.scalarType()) {
       #define DEFINE_CASE(ctype,aten_name,native) \
         case at::k##aten_name: { \
@@ -142,9 +126,9 @@ private:
         CAFFE_THROW("Unknown ATen Type");
     }
   }
-  template <typename T>
-  void assignToValue(Tensor* dst, T v) {
-    dst->Resize(std::vector<int64_t>());
+  template<typename T>
+  void assignToValue(Tensor<Context> * dst, T v) {
+    dst->Resize(std::vector<TIndex>());
     math::Set(1, v, dst->template mutable_data<T>(), &context_);
   }
   int findImplementation(const OperatorDef& operator_def) {
@@ -167,7 +151,7 @@ private:
       descriptor << "-" << a;
 
     std::string descriptor_sized =
-        descriptor.str() + "-" + c10::to_string(InputSize());
+        descriptor.str() + "-" + caffe2::to_string(InputSize());
     std::string descriptor_var_args = descriptor.str() + "-*";
     if (op_to_key.count(descriptor_sized) > 0) {
       return op_to_key[descriptor_sized];
@@ -212,7 +196,7 @@ private:
     #define DEFINE_IF(type,aten) \
       if(#type == name) \
         return at::k##aten;
-    DEFINE_IF(at::Half, Half)
+    DEFINE_IF(float16, Half)
     DEFINE_IF(float, Float)
     DEFINE_IF(double, Double)
     DEFINE_IF(uint8, Byte)
@@ -222,10 +206,10 @@ private:
     DEFINE_IF(int64, Long)
     CAFFE_THROW("unsupported type annotation: ", name);
   }
-  at::TypeExtendedInterface & stringToType(const std::string & name) {
-    return at::getNonVariableType(backend(), stringToScalarType(name));
+  at::Type & stringToType(const std::string & name) {
+    return at::getType(backend(), stringToScalarType(name));
   }
-  at::TypeExtendedInterface * readTypeAttribute(const std::string & name) {
+  at::Type * readTypeAttribute(const std::string & name) {
     CAFFE_ENFORCE(OperatorBase::HasSingleArgumentOfType<std::string>(name));
     return &stringToType(OperatorBase::GetSingleArgument<std::string>(name, ""));
   }

@@ -1,0 +1,30 @@
+TODO: Clarify and add more documentation all around.
+
+All of the *.cpp files in this folder will be compiled under all compiler 
+flags specified by CPU_CAPABILITY_FLAGS in aten/src/ATen/CMakeLists.txt.
+
+The purpose of this is to allow the compilation with various compiler
+flags to enable features such as AVX instructions, while using runtime
+dispatch, which makes sure only valid instructions will be used on any
+given platform.
+
+Vec256.h provides a generic implementation of a vec256 type that allows
+the programmer to write code packing various primitives (such as floats)
+within 256bit registers. vec256 defines various operators such as + and *
+and provides functions to allow operations such as max, min, etc.
+
+As an example ReduceOpsKernel.cpp implements a generic kernel_ that reduces
+an entire array using a given associative binary operation such as +.
+
+More explicity, calling kernel_ with template argument std::plus will cause
+it to sum up the entire array into a single value.
+
+ReduceOpsKernel.cpp uses the CPU_CAPABILITY_* macros to "know" under which
+compiler flags it is currently compiled. This allows the programmer to write
+generic code, which will be compiled under multipled compilation settings.
+
+../ReduceOps.cpp now includes the header ReduceOpsKernel.h, which contains 
+a generic definition of sumImplAll. This function allows the user to reduce
+over a dimension or all dimensions. The appropiate capability is chosen at
+runtime using cpuinfo. If the current platform has avx, sumImpl will be set
+to umImplAll<CPUCapability::AVX>.
