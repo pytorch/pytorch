@@ -295,19 +295,6 @@ function build_caffe2() {
           fi
       done
   fi
-
-
-  # Fix rpaths of shared libraries
-  if [[ $(uname) == 'Darwin' ]]; then
-      # root/torch/lib/tmp_install/lib
-      report "Updating all install_names in $INSTALL_DIR/lib"
-      pushd "$INSTALL_DIR/lib"
-      for lib in *.dylib; do
-          report "Updating install_name for $(pwd)/$lib"
-          install_name_tool -id @rpath/$lib $lib
-      done
-      popd
-  fi
 }
 
 # In the torch/lib directory, create an installation directory
