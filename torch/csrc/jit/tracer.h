@@ -287,6 +287,7 @@ void addOutput(Node* node, T&&) {
       " in the JIT tracer. File a bug report.");
 }
 TORCH_API void addOutput(Node* node, const at::Tensor& tensor);
+TORCH_API void setOutput(Value* value, const at::Tensor& output);
 TORCH_API void addOutput(Node* node, const std::vector<at::Tensor>& list);
 
 TORCH_API autograd::Variable getSizeOf(

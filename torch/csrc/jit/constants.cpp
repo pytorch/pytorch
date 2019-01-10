@@ -72,7 +72,6 @@ Value* insertConstant(
 }
 
 RegisterOperators reg({
-    // Implementation of constant node, computes and IValue
     Operator(
         FunctionSchema(
             prim::Constant,
@@ -117,7 +116,8 @@ RegisterOperators reg({
               return 0;
             };
           } else if (type->isSubtypeOf(ListType::ofBools())) {
-            const auto& bs = node->is(attr::value);
+            const auto& int_list = node->is(attr::value);
+            const std::vector<bool> bs(int_list.begin(), int_list.end());
             return [bs](Stack& stack) {
               push(stack, bs);
               return 0;

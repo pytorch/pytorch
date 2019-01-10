@@ -145,38 +145,16 @@ import json
 import glob
 import importlib
 
-from tools.setup_helpers.env import (check_env_flag, check_negative_env_flag,
-                                     hotpatch_build_env_vars)
-
-
-hotpatch_build_env_vars()
-
-from tools.setup_helpers.cuda import USE_CUDA, CUDA_HOME, CUDA_VERSION
-from tools.setup_helpers.build import (BUILD_BINARY, BUILD_TEST,
-                                       BUILD_CAFFE2_OPS, USE_LEVELDB,
-                                       USE_LMDB, USE_OPENCV, USE_TENSORRT,
-                                       USE_FFMPEG, USE_FBGEMM)
-from tools.setup_helpers.rocm import USE_ROCM, ROCM_HOME, ROCM_VERSION
-from tools.setup_helpers.cudnn import (USE_CUDNN, CUDNN_LIBRARY,
-                                       CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR)
-from tools.setup_helpers.miopen import (USE_MIOPEN, MIOPEN_LIBRARY,
-                                        MIOPEN_LIB_DIR, MIOPEN_INCLUDE_DIR)
-from tools.setup_helpers.nccl import USE_NCCL, USE_SYSTEM_NCCL, NCCL_LIB_DIR, \
-    NCCL_INCLUDE_DIR, NCCL_ROOT_DIR, NCCL_SYSTEM_LIB
-from tools.setup_helpers.nnpack import USE_NNPACK
-from tools.setup_helpers.qnnpack import USE_QNNPACK
-from tools.setup_helpers.nvtoolext import NVTOOLEXT_HOME
+# If you want to modify flags or environmental variables that is set when
+# building torch, you should do it in tools/setup_helpers/configure.py.
+# Please don't add it here unless it's only used in PyTorch.
+from tools.setup_helpers.configure import *
 from tools.setup_helpers.generate_code import generate_code
 from tools.setup_helpers.ninja_builder import NinjaBuilder, ninja_build_ext
-from tools.setup_helpers.dist_check import USE_DISTRIBUTED, \
-    USE_GLOO_IBVERBS
 
 ################################################################################
 # Parameters parsed from environment
 ################################################################################
-
-DEBUG = check_env_flag('DEBUG')
-REL_WITH_DEB_INFO = check_env_flag('REL_WITH_DEB_INFO')
 
 VERBOSE_SCRIPT = True
 # see if the user passed a quiet flag to setup.py arguments and respect
@@ -193,38 +171,6 @@ if VERBOSE_SCRIPT:
 else:
     def report(*args):
         pass
-
-IS_WINDOWS = (platform.system() == 'Windows')
-IS_DARWIN = (platform.system() == 'Darwin')
-IS_LINUX = (platform.system() == 'Linux')
-IS_PPC = (platform.machine() == 'ppc64le')
-IS_ARM = (platform.machine() == 'aarch64')
-
-BUILD_PYTORCH = check_env_flag('BUILD_PYTORCH')
-# ppc64le and aarch64 do not support MKLDNN
-if IS_PPC or IS_ARM:
-    USE_MKLDNN = check_env_flag('USE_MKLDNN', 'OFF')
-else:
-    USE_MKLDNN = check_env_flag('USE_MKLDNN', 'ON')
-
-USE_CUDA_STATIC_LINK = check_env_flag('USE_CUDA_STATIC_LINK')
-RERUN_CMAKE = True
-
-NUM_JOBS = multiprocessing.cpu_count()
-max_jobs = os.getenv("MAX_JOBS")
-if max_jobs is not None:
-    NUM_JOBS = min(NUM_JOBS, int(max_jobs))
-
-ONNX_NAMESPACE = os.getenv("ONNX_NAMESPACE")
-if not ONNX_NAMESPACE:
-    ONNX_NAMESPACE = "onnx_torch"
-
-# Ninja
-try:
-    import ninja
-    USE_NINJA = True
-except ImportError:
-    USE_NINJA = False
 
 # Constant known variables used throughout this file
 cwd = os.path.dirname(os.path.abspath(__file__))
@@ -324,8 +270,9 @@ def build_libs(libs):
         build_libs_cmd = ['tools\\build_pytorch_libs.bat']
     else:
         build_libs_cmd = ['bash', os.path.join('..', 'tools', 'build_pytorch_libs.sh')]
-    my_env = os.environ.copy()
-    my_env["PYTORCH_PYTHON"] = sys.executable
+
+    my_env, extra_flags = get_pytorch_env_with_flags()
+    build_libs_cmd.extend(extra_flags)
     my_env["PYTORCH_PYTHON_LIBRARY"] = cmake_python_library
     my_env["PYTORCH_PYTHON_INCLUDE_DIR"] = cmake_python_include_dir
     my_env["PYTORCH_BUILD_VERSION"] = version
@@ -335,64 +282,6 @@ def build_libs(libs):
         cmake_prefix_path = my_env["CMAKE_PREFIX_PATH"] + ";" + cmake_prefix_path
     my_env["CMAKE_PREFIX_PATH"] = cmake_prefix_path
 
-    my_env["NUM_JOBS"] = str(NUM_JOBS)
-    my_env["ONNX_NAMESPACE"] = ONNX_NAMESPACE
-    if not IS_WINDOWS:
-        if USE_NINJA:
-            my_env["CMAKE_GENERATOR"] = '-GNinja'
-            my_env["CMAKE_INSTALL"] = 'ninja install'
-        else:
-            my_env['CMAKE_GENERATOR'] = ''
-            my_env['CMAKE_INSTALL'] = 'make install'
-    if USE_SYSTEM_NCCL:
-        my_env["NCCL_ROOT_DIR"] = NCCL_ROOT_DIR
-        my_env["NCCL_INCLUDE_DIR"] = NCCL_INCLUDE_DIR
-        my_env["NCCL_SYSTEM_LIB"] = NCCL_SYSTEM_LIB
-    if USE_CUDA:
-        my_env["CUDA_BIN_PATH"] = CUDA_HOME
-        build_libs_cmd += ['--use-cuda']
-        if IS_WINDOWS:
-            my_env["NVTOOLEXT_HOME"] = NVTOOLEXT_HOME
-    if USE_CUDA_STATIC_LINK:
-        build_libs_cmd += ['--cuda-static-link']
-    if USE_FBGEMM:
-        build_libs_cmd += ['--use-fbgemm']
-    if USE_ROCM:
-        build_libs_cmd += ['--use-rocm']
-    if USE_NNPACK:
-        build_libs_cmd += ['--use-nnpack']
-    if USE_NUMPY:
-        my_env["NUMPY_INCLUDE_DIR"] = NUMPY_INCLUDE_DIR
-    if USE_CUDNN:
-        my_env["CUDNN_LIB_DIR"] = CUDNN_LIB_DIR
-        my_env["CUDNN_LIBRARY"] = CUDNN_LIBRARY
-        my_env["CUDNN_INCLUDE_DIR"] = CUDNN_INCLUDE_DIR
-    if USE_MIOPEN:
-        my_env["MIOPEN_LIB_DIR"] = MIOPEN_LIB_DIR
-        my_env["MIOPEN_LIBRARY"] = MIOPEN_LIBRARY
-        my_env["MIOPEN_INCLUDE_DIR"] = MIOPEN_INCLUDE_DIR
-    if USE_MKLDNN:
-        build_libs_cmd += ['--use-mkldnn']
-    if USE_QNNPACK:
-        build_libs_cmd += ['--use-qnnpack']
-    if USE_GLOO_IBVERBS:
-        build_libs_cmd += ['--use-gloo-ibverbs']
-    if not RERUN_CMAKE:
-        build_libs_cmd += ['--dont-rerun-cmake']
-
-    my_env["BUILD_TORCH"] = "ON"
-    my_env["BUILD_PYTHON"] = "ON"
-    my_env["BUILD_BINARY"] = "ON" if BUILD_BINARY else "OFF"
-    my_env["BUILD_TEST"] = "ON" if BUILD_TEST else "OFF"
-    my_env["BUILD_CAFFE2_OPS"] = "ON" if BUILD_CAFFE2_OPS else "OFF"
-    my_env["INSTALL_TEST"] = "ON" if BUILD_TEST else "OFF"
-    my_env["USE_LEVELDB"] = "ON" if USE_LEVELDB else "OFF"
-    my_env["USE_LMDB"] = "ON" if USE_LMDB else "OFF"
-    my_env["USE_OPENCV"] = "ON" if USE_OPENCV else "OFF"
-    my_env["USE_TENSORRT"] = "ON" if USE_TENSORRT else "OFF"
-    my_env["USE_FFMPEG"] = "ON" if USE_FFMPEG else "OFF"
-    my_env["USE_DISTRIBUTED"] = "ON" if USE_DISTRIBUTED else "OFF"
-    my_env["USE_SYSTEM_NCCL"] = "ON" if USE_SYSTEM_NCCL else "OFF"
     if VERBOSE_SCRIPT:
         my_env['VERBOSE_SCRIPT'] = '1'
     try:

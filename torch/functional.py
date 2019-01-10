@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 from torch._six import inf
+from torch._C import _add_docstr
 from operator import mul
 from functools import reduce
 from itertools import product
@@ -100,10 +101,8 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     sz = LU_data.size(-1)
 
     if unpack_data:
-        I_U = torch.ones(sz, sz, device=LU_data.device, dtype=torch.uint8).triu_().expand_as(LU_data)
-        zero = torch.tensor(0.).type_as(LU_data)
-        U = torch.where(I_U, LU_data, zero)
-        L = torch.where(I_U, zero, LU_data)
+        U = LU_data.triu()
+        L = LU_data.tril()
         L.diagonal(dim1=-2, dim2=-1).fill_(1)
     else:
         L = U = None
@@ -373,23 +372,20 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
     return torch._C._VariableFunctions.stft(input, n_fft, hop_length, win_length, window, normalized, onesided)
 
 
-def isnan(tensor):
-    r"""Returns a new tensor with boolean elements representing if each element is `NaN` or not.
+isnan = _add_docstr(torch.isnan, r"""
+Returns a new tensor with boolean elements representing if each element is `NaN` or not.
 
-    Arguments:
-        tensor (Tensor): A tensor to check
+Arguments:
+    tensor (Tensor): A tensor to check
 
-    Returns:
-        Tensor: A ``torch.ByteTensor`` containing a 1 at each location of `NaN` elements.
+Returns:
+    Tensor: A ``torch.ByteTensor`` containing a 1 at each location of `NaN` elements.
 
-    Example::
+Example::
 
-        >>> torch.isnan(torch.tensor([1, float('nan'), 2]))
-        tensor([ 0,  1,  0], dtype=torch.uint8)
-    """
-    if not isinstance(tensor, torch.Tensor):
-        raise ValueError("The argument is not a tensor", str(tensor))
-    return tensor != tensor
+    >>> torch.isnan(torch.tensor([1, float('nan'), 2]))
+    tensor([ 0,  1,  0], dtype=torch.uint8)
+""")
 
 
 def unique(input, sorted=True, return_inverse=False, dim=None):

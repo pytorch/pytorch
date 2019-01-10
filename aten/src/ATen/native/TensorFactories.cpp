@@ -72,6 +72,10 @@ const TypeExtendedInterface& getFactoryType(const TensorOptions& options) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ arange ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+Tensor arange(Scalar end, const TensorOptions& options) {
+  return native::arange(/*start=*/0, end, options);
+}
+
 Tensor arange(Scalar start, Scalar end, const TensorOptions& options) {
   return native::arange(start, end, /*step=*/1, options);
 }
@@ -81,29 +85,20 @@ Tensor arange(
     Scalar end,
     Scalar step,
     const TensorOptions& options) {
-  // Note [Native bindings for legacy TH factory functions]
-  return getFactoryType(options)._th_arange(start, end, step);
-}
-
-Tensor& arange_out(Tensor& result, Scalar start, Scalar end) {
-  return native::arange_out(result, start, end, /*step=*/1);
-}
-
-Tensor& arange_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
-  return at::legacy::th::_th_arange_out(result, start, end, step);
-}
-
-Tensor arange(Scalar end, const TensorOptions& options) {
-  // Note [Native bindings for legacy TH factory functions]
-  return getFactoryType(options)._th_arange(end);
+  Tensor result = at::empty({0}, options);  // to be filled by arange_out
+  return at::arange_out(result, start, end, step);
 }
 
 Tensor& arange_out(Tensor& result, Scalar end) {
-  return at::legacy::th::_th_arange_out(result, end);
+  return at::arange_out(result, /*start=*/0, end);
+}
+
+Tensor& arange_out(Tensor& result, Scalar start, Scalar end) {
+  return at::arange_out(result, start, end, /*step=*/1);
 }
 
 Tensor _dim_arange(const Tensor& like, int64_t dim) {
-  return getFactoryType(like.options().dtype(at::kLong))._th_arange(like.size(dim));
+  return at::arange(like.size(dim), like.options().dtype(at::kLong));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

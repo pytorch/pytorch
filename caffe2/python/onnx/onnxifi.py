@@ -20,7 +20,8 @@ def onnxifi_caffe2_net(
         pred_net,
         input_shapes,
         infer_shapes=False,
-        debug=False):
+        debug=False,
+        use_onnx=True):
     """
     Transform the caffe2_net by collapsing ONNXIFI-runnable nodes into Onnxifi c2 ops
     """
@@ -45,7 +46,8 @@ def onnxifi_caffe2_net(
                              external_inputs,
                              shape_hints,
                              infer_shapes,
-                             debug)
+                             debug,
+                             use_onnx)
     pred_net_cut = caffe2_pb2.NetDef()
     pred_net_cut.ParseFromString(pred_net_str)
     return pred_net_cut
