@@ -10416,6 +10416,58 @@ class TestFuser(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_fuse_batch_norm(self):
+
+        class ResLike(torch.jit.ScriptModule):
+            def __init__(self, optimize=True):
+                super(ResLike, self).__init__(optimize)
+                self.bn = nn.BatchNorm2d(16)
+
+            @torch.jit.script_method
+            def forward(self, x, y):
+                return y + torch.relu(self.bn(x))
+
+        model = ResLike().cuda()
+        model_noopt = ResLike(optimize=False).cuda()
+        model_noopt.load_state_dict(model.state_dict())
+        x = torch.randn(2, 16, 8, 8, device='cuda')
+        y = torch.randn(2, 16, 8, 8, device='cuda')
+        # FIXME: We need differentiation for CNNs for this optimization to trigger
+        with torch.no_grad():
+            out = model(x, y)
+            graph = model.graph_for(x, y)
+            rep = str(graph)
+
+            out_noopt = model_noopt(x, y)
+            rep_noopt = str(model_noopt.graph_for(x, y))
+            self.assertEqual(out, out_noopt, prec=3e-5)
+
+        # Check that batch_norm has really been decomposed
+        self.assertIn('aten::batch_norm_update_stats', rep)
+        self.assertNotIn('aten::batch_norm(', rep)
+        self.assertIn('aten::batch_norm(', rep_noopt)
+
+        # Make sure the fusion group is big, and contains aten::sqrt, which could
+        # originate only from decomposing batch_norm in this case
+        fusion_groups = [node for node in graph.nodes() if node.kind() == 'prim::FusionGroup']
+        self.assertEqual(len(fusion_groups), 1)
+        fused_graph = fusion_groups[0].g('Subgraph')
+        self.assertTrue(any(node.kind() == 'aten::sqrt' for node in fused_graph.nodes()))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_threshold(self):
+        def f(x):
+            return torch.threshold(x, 0, -10) + x + x + x
+
+        x = torch.tensor([-1, -0.5, 0, 1, 2, 3], device='cuda')
+        scripted = torch.jit.script(f)
+
+        self.assertEqual(f(x), scripted(x))
+        self.assertAllFused(scripted.graph_for(x))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
     @skipIfRocm
     @enable_cpu_fuser
