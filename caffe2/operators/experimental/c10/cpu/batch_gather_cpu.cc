@@ -1,6 +1,7 @@
 #include <c10/core/dispatch/KernelRegistration.h>
 #include "caffe2/operators/experimental/c10/schemas/batch_gather.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/core/tensor.h"
 
 using caffe2::BaseContext;
 using caffe2::Tensor;
@@ -11,17 +12,21 @@ namespace {
 
 template <class TInd>
 void batch_gather_op_cpu_impl(
-    const Tensor& data,
-    const Tensor& indices,
-    Tensor* output,
+    const C10Tensor& data_,
+    const C10Tensor& indices_,
+    const C10Tensor& output_,
     BaseContext* context) {
+  Tensor data(data_);
+  Tensor indices(indices_);
+  Tensor output(output_);
+
   CAFFE_ENFORCE_GE(data.dim(), 2, "DATA should be at least 2-D");
 
   vector<int64_t> shape;
   shape.push_back(data.size(0));
   shape.insert(shape.end(), indices.sizes().begin(), indices.sizes().end());
   shape.insert(shape.end(), data.sizes().begin() + 2, data.sizes().end());
-  output->Resize(shape);
+  output.Resize(shape);
 
   auto block_size = data.size_from_dim(2);
   auto block_bytesize = block_size * data.dtype().itemsize();
@@ -31,7 +36,7 @@ void batch_gather_op_cpu_impl(
       N * data.size_from_dim(2) * data.dtype().itemsize();
   const TInd* idxs = indices.template data<TInd>();
   auto src_base = static_cast<const char*>(data.raw_data());
-  auto out = static_cast<char*>(output->raw_mutable_data(data.dtype()));
+  auto out = static_cast<char*>(output.raw_mutable_data(data.dtype()));
 
   for (auto batch = 0; batch < data.size(0); ++batch) {
     for (auto i = 0; i < N; ++i) {

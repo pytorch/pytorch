@@ -2,7 +2,7 @@
 #include "caffe2/core/flags.h"
 #include "caffe2/core/tensor.h"
 
-#if defined(CAFFE2_USE_MPSCNN) && CAFFE2_MOBILE
+#if defined(CAFFE2_USE_MPSCNN) && C10_MOBILE
 #include "caffe2/mobile/contrib/ios/mpscnn/mpscnn.h"
 #endif
 
@@ -14,7 +14,7 @@ Caffe2IOSPredictor* Caffe2IOSPredictor::NewCaffe2IOSPredictor(const caffe2::NetD
                                                               bool allowMetalOperators) {
   caffe2::NetDef metal_predict_net;
   bool usingMetalOperators = false;
-#if defined(CAFFE2_USE_MPSCNN) && CAFFE2_MOBILE
+#if defined(CAFFE2_USE_MPSCNN) && C10_MOBILE
   if (allowMetalOperators) {
     caffe2::dumpDef(predict_net);
     if (caffe2::tryConvertToMPSCNN(init_net, predict_net, &metal_predict_net)) {
@@ -38,7 +38,7 @@ Caffe2IOSPredictor::Caffe2IOSPredictor(const caffe2::NetDef& init_net,
                                        bool disableMultithreadProcessing,
                                        bool usingMetalOperators)
     : usingMetalOperators(usingMetalOperators), predictor_(init_net, predict_net) {
-#if CAFFE2_MOBILE
+#if C10_MOBILE
   if (disableMultithreadProcessing) {
     caffe2::ThreadPool* threadpool = predictor_.ws()->GetThreadPool();
     if (threadpool != nullptr) {
