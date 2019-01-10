@@ -284,6 +284,7 @@ struct ModuleValue : public SugaredValue {
           }
           // slots are all params, so make a list and return
           std::vector<Value*> params;
+          params.reserve(slots.size());
           for (auto slot : slots) {
             params.push_back(m.get_or_add_parameter(slot));
           }
