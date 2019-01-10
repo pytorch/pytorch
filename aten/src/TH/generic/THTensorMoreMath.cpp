@@ -677,7 +677,7 @@ void THTensor_(randperm)(THTensor *r_, THGenerator *_generator, int64_t n)
 /* Emulate NumPy behavior of putting NaNs
  * at the end of an ascending list. */
 #define GT_OR_NAN(x, y) \
-  ((x != x) || (x > y))
+  ((x != x && y == y) || (x > y))
 
 static void THTensor_(quicksortascend)(scalar_t *arr, int64_t *idx, int64_t elements, int64_t stride)
 {
