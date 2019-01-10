@@ -461,6 +461,81 @@ Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
   }
 }
 
+template <typename scalar_t, bool upper>
+__global__
+void triu_tril_kernel(
+    scalar_t* result, scalar_t* self, int64_t k, int64_t N,
+    int64_t res_batch_stride, int64_t res_row_stride, int64_t res_col_stride,
+    int64_t self_batch_stride, int64_t self_row_stride, int64_t self_col_stride, int64_t self_ncol) {
+  int64_t linear_idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (linear_idx >= N) {
+    return;
+  }
+
+  int64_t self_batch_idx = blockIdx.y;
+  int64_t row = linear_idx / self_ncol;
+  int64_t col = linear_idx % self_ncol;
+
+  bool mask = upper ? (col - row >= k) : (col - row <= k);
+
+  // Now compute the offset for the self and result tensor
+  int64_t res_offset = self_batch_idx * res_batch_stride + row * res_row_stride + col * res_col_stride;
+  int64_t self_offset = self_batch_idx * self_batch_stride + row * self_row_stride + col * self_col_stride;
+  result[res_offset] = mask ? self[self_offset] : scalar_t(0);
+}
+
+template <bool upper>
+Tensor& triu_tril_cuda_template(Tensor& result, const Tensor& self, int64_t k, const char* name) {
+  int64_t n_batches = batchCount(self), mat_size = self.size(-1) * self.size(-2),
+          res_batch_stride = result.dim() > 2 ? result.stride(-3) : 1,
+          res_row_stride = result.stride(-2), res_col_stride = result.stride(-1),
+          self_batch_stride = self.dim() > 2 ? self.stride(-3) : 1,
+          self_row_stride = self.stride(-2), self_col_stride = self.stride(-1);
+  dim3 dim_block = cuda::getApplyBlock();
+  dim3 dim_grid((mat_size + dim_block.x - 1) / dim_block.x, n_batches);
+  AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), name, [&]{
+    triu_tril_kernel<scalar_t, upper>
+      <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+        result.data<scalar_t>(), self.data<scalar_t>(), k, mat_size,
+        res_batch_stride, res_row_stride, res_col_stride,
+        self_batch_stride, self_row_stride, self_col_stride, self.size(-1));
+  });
+  AT_CUDA_CHECK(cudaGetLastError());
+  return result;
+}
+
+Tensor& tril_cuda_(Tensor &self, int64_t k) {
+  if (!checkTrilTriuBatchContiguous(self)) self = self.contiguous();
+  return tril_cuda_out(self, self, k);
+}
+
+Tensor& tril_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
+  if (result.sizes() != self.sizes()) {
+    result.resize_as_(self);
+  }
+  if (self.numel() == 0) {
+    return result;
+  }
+  Tensor self_c = checkTrilTriuBatchContiguous(self) ? self : self.contiguous();
+  return triu_tril_cuda_template<false>(result, self_c, k, "tril");
+}
+
+Tensor& triu_cuda_(Tensor &self, int64_t k) {
+  if (!checkTrilTriuBatchContiguous(self)) self = self.contiguous();
+  return triu_cuda_out(self, self, k);
+}
+
+Tensor& triu_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
+  if (result.sizes() != self.sizes()) {
+    result.resize_as_(self);
+  }
+  if (self.numel() == 0) {
+    return result;
+  }
+  Tensor self_c = checkTrilTriuBatchContiguous(self) ? self : self.contiguous();
+  return triu_tril_cuda_template<true>(result, self_c, k, "triu");
+}
+
 }}  // namespace at::native
 
 #undef ALLOCATE_ARRAY
