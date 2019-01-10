@@ -3452,15 +3452,27 @@
 
 - func: reflection_pad2d_out(Tensor output, Tensor self, IntList[4] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: reflection_pad2d_out_cpu
+    CUDA: reflection_pad2d_out_cuda
 
 - func: reflection_pad2d(Tensor self, IntList[4] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: reflection_pad2d_cpu
+    CUDA: reflection_pad2d_cuda
 
 - func: reflection_pad2d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, IntList[4] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: reflection_pad2d_backward_out_cpu
+    CUDA: reflection_pad2d_backward_out_cuda
 
 - func: reflection_pad2d_backward(Tensor grad_output, Tensor self, IntList[4] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: reflection_pad2d_backward_cpu
+    CUDA: reflection_pad2d_backward_cuda
 
 - func: replication_pad1d_out(Tensor output, Tensor self, IntList[2] padding) -> Tensor
   python_module: nn
