@@ -16,6 +16,25 @@
 #include <utility>
 
 namespace c10 {
+
+struct C10_API NonVariableTypeMode {
+  static bool is_enabled();
+  static void set_enabled(bool enabled);
+};
+
+// A RAII, thread local (!) guard that controls whether `legacyTensorType()`
+// should resolve to non-autograd type upon construction, and sets it back
+// to the original value upon destruction.
+struct C10_API AutoNonVariableTypeMode {
+  AutoNonVariableTypeMode(bool enabled) : prev_mode(NonVariableTypeMode::is_enabled()) {
+    NonVariableTypeMode::set_enabled(enabled);
+  }
+  ~AutoNonVariableTypeMode() {
+    NonVariableTypeMode::set_enabled(prev_mode);
+  }
+  bool prev_mode;
+};
+
 /// A class to encapsulate construction axes of an Tensor.  TensorOptions was
 /// designed to support the Python style API for specifying construction options
 /// on factory functions, e.g.,
@@ -310,7 +329,7 @@ struct C10_API TensorOptions {
 
   /// Returns the `is_variable` property of the `TensorOptions`.
   bool is_variable() const noexcept {
-    return has_is_variable_ ? is_variable_ : false;
+    return has_is_variable_ ? is_variable_ && !at::NonVariableTypeMode::is_enabled() : false;
   }
 
   /// Returns whether the `is_variable` is specified.

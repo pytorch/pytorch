@@ -9,6 +9,16 @@
 
 namespace c10 {
 
+thread_local bool NonVariableTypeMode_enabled = false;
+
+bool NonVariableTypeMode::is_enabled() {
+  return NonVariableTypeMode_enabled;
+}
+
+void NonVariableTypeMode::set_enabled(bool enabled) {
+  NonVariableTypeMode_enabled = enabled;
+}
+
 std::ostream& operator<<(
     std::ostream& stream,
     const TensorOptions& options) {
