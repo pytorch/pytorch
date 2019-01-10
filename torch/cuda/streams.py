@@ -124,7 +124,7 @@ class EventHandle(ctypes.Structure):
     _fields_ = [('reserved', ctypes.c_char * IPC_HANDLE_SIZE)]
 
 
-class Event(object):
+class Event(torch._C._CudaEventBase):
     r"""Wrapper around CUDA event.
 
     Arguments:
@@ -135,45 +135,23 @@ class Event(object):
             (default: ``False``)
     """
 
-    DEFAULT = 0x0
-    BLOCKING_SYNC = 0x1
-    DISABLE_TIMING = 0x2
-    INTERPROCESS = 0x4
-
-    def __init__(self, enable_timing=False, blocking=False, interprocess=False,
-                 _handle=None):
-        flags = Event.DEFAULT
-        if not enable_timing:
-            flags |= Event.DISABLE_TIMING
-        if blocking:
-            flags |= Event.BLOCKING_SYNC
-        if interprocess:
-            flags |= Event.INTERPROCESS
-
-        ptr = ctypes.c_void_p()
-        self._cudart = cudart()
-        if _handle:
-            check_error(self._cudart.cudaIpcOpenEventHandle(ctypes.byref(ptr), _handle))
-        else:
-            check_error(self._cudart.cudaEventCreateWithFlags(ctypes.byref(ptr), ctypes.c_uint(flags)))
-        self._as_parameter_ = ptr
-
-    def __del__(self):
-        if hasattr(self, '_as_parameter_'):
-            check_error(self._cudart.cudaEventDestroy(self._as_parameter_))
-            del self._as_parameter_
+    def __new__(cls, enable_timing=False, blocking=False, interprocess=False,
+                **kwargs):
+        return super(Event, cls).__new__(
+            cls, enable_timing=enable_timing, blocking=blocking,
+            interprocess=interprocess, **kwargs)
 
     def record(self, stream=None):
         r"""Records the event in a given stream."""
         if stream is None:
             stream = torch.cuda.current_stream()
-        stream.record_event(self)
+        super(Event, self).record(stream)
 
     def wait(self, stream=None):
         r"""Makes a given stream wait for the event."""
         if stream is None:
             stream = torch.cuda.current_stream()
-        stream.wait_event(self)
+        super(Event, self).wait(stream)
 
     def query(self):
         r"""Checks if the event has been recorded.
@@ -186,6 +164,17 @@ class Event(object):
             return False
         check_error(res)
         return True
+
+    @property
+    def _as_parameter_(self):
+        return ctypes.c_void_p(self.cuda_event)
+
+
+
+
+
+
+
 
     def elapsed_time(self, end_event):
         r"""Returns the time elapsed in milliseconds before the event was recorded."""

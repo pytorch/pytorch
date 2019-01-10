@@ -30,6 +30,17 @@ struct AT_CUDA_API CUDAEvent {
   CUDAEvent(unsigned int flags = DEFAULT_FLAGS)
   : flags_{flags} { }
 
+  CUDAEvent(const cudaIpcEventHandle_t& handle)
+  : CUDAEvent(handle, getCurrentCUDAStream()) { }
+
+  CUDAEvent(const cudaIpcEventHandle_t& handle, const CUDAStream& stream) {
+    CUDAGuard guard(static_cast<int16_t>(stream.device_index()));
+
+    is_created_ = true;
+    device_index_ = stream.device_index();
+    cudaIpcOpenEventHandle(&event_, handle);
+  }
+
   // Note: event destruction done on creating device to avoid creating a
   // CUDA context on other devices.
   ~CUDAEvent() {
