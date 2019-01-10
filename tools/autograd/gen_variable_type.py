@@ -586,29 +586,27 @@ def emit_body(declaration):
         combined = nested_dict(env, declaration)
         extra_wrapping_stmts = []
         if strategy == 'use_derived':
-            call = CALL_VIA_DERIVED.substitute(combined)
-            if not modifies_arguments:
-                call, extra_wrapping_stmts = wrap_output(call)
-        else:
-            call = CALL_VIA_TYPE.substitute(declaration)
-
-        if strategy == 'use_derived':
             code_block = ''
+            base_type_call = CALL_VIA_DERIVED.substitute(combined)
             if not modifies_arguments and not returns_void:
-                return_values_decl = "decltype({}) tmp;\n".format(call)
-                code_block += return_values_decl
+                code_block += "decltype({}) tmp;\n".format(base_type_call)
                 code_block += '{\n'
                 code_block += '  ' + 'at::AutoNonVariableTypeMode non_var_type_mode(true);' + '\n'
-                code_block += '  ' + 'tmp = {};\n'.format(call)
+                code_block += '  ' + 'tmp = {};\n'.format(base_type_call)
                 code_block += '}\n'
-                code_block += '{} = tmp;\n'.format(tie_return_values())
+                if not modifies_arguments:
+                    rhs_value, extra_wrapping_stmts = wrap_output("tmp")
+                else:
+                    rhs_value = "tmp"
+                code_block += '{} = {};\n'.format(tie_return_values(), rhs_value)
             else:
                 code_block += '{\n'
                 code_block += '  ' + 'at::AutoNonVariableTypeMode non_var_type_mode(true);' + '\n'
-                code_block += '  ' + '{};\n'.format(call)
+                code_block += '  ' + '{};\n'.format(base_type_call)
                 code_block += '}\n'
             call = code_block
         else:
+            call = CALL_VIA_TYPE.substitute(declaration)
             if not modifies_arguments and not returns_void:
                 call = '{} = {}'.format(tie_return_values(), call)
             call = call + ';'

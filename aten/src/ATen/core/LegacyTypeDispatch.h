@@ -140,24 +140,6 @@ private:
 
 CAFFE2_API LegacyTypeDispatch& globalLegacyTypeDispatch();
 
-struct CAFFE2_API NonVariableTypeMode {
-  static bool is_enabled();
-  static void set_enabled(bool enabled);
-};
-
-// A RAII, thread local (!) guard that controls whether `legacyTensorType()`
-// should resolve to non-autograd type upon construction, and sets it back
-// to the original value upon destruction.
-struct CAFFE2_API AutoNonVariableTypeMode {
-  AutoNonVariableTypeMode(bool enabled) : prev_mode(NonVariableTypeMode::is_enabled()) {
-    NonVariableTypeMode::set_enabled(enabled);
-  }
-  ~AutoNonVariableTypeMode() {
-    NonVariableTypeMode::set_enabled(prev_mode);
-  }
-  bool prev_mode;
-};
-
 /**
  * Return the Type object corresponding to this Tensor, which we can
  * use to do dynamic dispatch to operators from.  This method is NOT
@@ -169,7 +151,7 @@ inline Type& legacyTensorType(const TensorImpl& tensor) {
   // could not have been created without initializing the Type first.
   // TODO: This is not actually true via the Caffe2 codepath!  Make
   // it so.
-  return *globalLegacyTypeDispatch().getTypeRaw(tensorTypeIdToBackend(tensor.type_id()), typeMetaToScalarType(tensor.dtype()), tensor.is_variable() && !at::NonVariableTypeMode::is_enabled());
+  return *globalLegacyTypeDispatch().getTypeRaw(tensorTypeIdToBackend(tensor.type_id()), typeMetaToScalarType(tensor.dtype()), tensor.is_variable());
 }
 
 } // namespace at

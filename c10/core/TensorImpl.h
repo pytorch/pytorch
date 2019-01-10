@@ -736,7 +736,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * True if a tensor is a variable.  See Note [Tensor versus Variable in C++]
    */
-  bool is_variable() const { return is_variable_; };
+  bool is_variable() const { return is_variable_ && !at::NonVariableTypeMode::is_enabled(); };
 
   /**
    * Set whether a tensor is a variable.  See Note [Tensor versus Variable in C++]
