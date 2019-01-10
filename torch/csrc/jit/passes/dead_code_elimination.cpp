@@ -227,6 +227,13 @@ class DeadCodeEliminator {
     return has_side_effects;
   }
 
+  void removeIfNodeOutput(Node * node, size_t i) {
+    node->eraseOutput(i);
+    for (Block* b : node->blocks()) {
+      b->eraseOutput(i);
+    }
+  }
+
   void removeDeadBlockOutputs(Node* node) {
     if (node->kind() != prim::If && node->kind() != prim::GradOf) {
       return;
@@ -234,35 +241,33 @@ class DeadCodeEliminator {
 
     for (size_t i_1 = node->outputs().size(); i_1 > 0; --i_1) {
       size_t i = i_1 - 1;
-      if (!node->outputs().at(i)->hasUses()) {
-        node->eraseOutput(i);
-        for (Block* b : node->blocks()) {
-          b->eraseOutput(i);
-        }
-      } else if (node->kind() == prim::If) {
+      if (node->kind() == prim::If) {
         Value* b1_val = node->blocks().at(0)->outputs().at(i);
         Value* b2_val = node->blocks().at(1)->outputs().at(i);
 
-        Value * input_val;
+        Value * unwrap_optional_output;
         bool value_not_written_to = false;
 
         // if the output of one block is the output of an unchecked_unwrap_optional
         // and its input is the output of the other block, then the value has not been written to,
         if (b1_val->node()->kind() == prim::unchecked_unwrap_optional) {
           value_not_written_to = b1_val->node()->input() == b2_val;
-          input_val = b2_val;
+          unwrap_optional_output = b1_val;
         } else if (b2_val->node()->kind() == prim::unchecked_unwrap_optional) {
           value_not_written_to = b2_val->node()->input() == b1_val;
-          input_val = b1_val;
+          unwrap_optional_output = b2_val;
         }
 
         if (value_not_written_to) {
-          node->outputs().at(i)->replaceAllUsesWith(input_val);
-          node->eraseOutput(i);
-          for (Block* b : node->blocks()) {
-            b->eraseOutput(i);
+          Node * unchecked_unwrap_optional = unwrap_optional_output->node();
+          node->outputs().at(i)->replaceAllUsesWith(unchecked_unwrap_optional->input());
+          removeIfNodeOutput(node, i);
+          if (!unwrap_optional_output->hasUses()) {
+            unchecked_unwrap_optional->destroy();
           }
         }
+      } else if (!node->outputs().at(i)->hasUses()) {
+        removeIfNodeOutput(node, i);
       }
     }
   }
