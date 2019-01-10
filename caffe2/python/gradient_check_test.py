@@ -23,9 +23,9 @@ from caffe2.proto import caffe2_pb2
 import unittest
 
 
-if workspace.has_gpu_support and workspace.NumCudaDevices() > 0:
+if (workspace.has_gpu_support or workspace.has_hip_support) and workspace.NumGpuDevices() > 0:
     gpu_device_option = caffe2_pb2.DeviceOption()
-    gpu_device_option.device_type = caffe2_pb2.CUDA
+    gpu_device_option.device_type = workspace.GpuDeviceType
     cpu_device_option = caffe2_pb2.DeviceOption()
     gpu_device_checker = device_checker.DeviceChecker(
         0.01, [gpu_device_option]
@@ -330,6 +330,9 @@ class TestSum(test_util.TestCase):
                 res, grad, grad_estimated = checker.CheckSimple(
                     op, [X1, X2], 0, [0])
                 self.assertTrue(res)
+                res, grad, grad_estimated = checker.CheckSimple(
+                    op, [X1, X2], 1, [0])
+                self.assertTrue(res)
 
 
 class TestMakeTwoClass(test_util.TestCase):
@@ -455,7 +458,7 @@ class TestIf(test_util.TestCase):
 
         init_net = init_nb.get()[0]
         ITER = init_net.ConstantFill(
-            [], "ITER", shape=[1], value=0, dtype=core.DataType.INT32)
+            [], "ITER", shape=[1], value=0, dtype=core.DataType.INT64)
         train_net.Iter(ITER, ITER)
         LR = train_net.LearningRate(ITER, "LR", base_lr=-0.1,
                                         policy="step", stepsize=20, gamma=0.9)
@@ -507,6 +510,7 @@ class TestIf(test_util.TestCase):
 
 
 class TestWhile(test_util.TestCase):
+    @unittest.skip("Skip flaky test.")
     def testWhile(self):
         with NetBuilder(_use_control_ops=True) as nb:
             ops.Copy(ops.Const(0), "i")

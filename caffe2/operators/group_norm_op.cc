@@ -6,41 +6,11 @@
 // This is a stand-alone op: Y = gamma * (X - mu) / sig + beta
 // ------------------------------------------------------------------
 
-#include "group_norm_op.h"
-
-#include <array>
-
-#include "caffe2/utils/math.h"
+#include "caffe2/operators/group_norm_op.h"
 
 namespace caffe2 {
 
 namespace {
-
-template <typename T>
-inline T Cube(const T& x) {
-  return x * x * x;
-}
-
-template <typename T, StorageOrder kOrder>
-void GroupNormForward(
-    const std::array<int, 4>& dims,
-    const T* X,
-    const T* mu,
-    const T* rsig,
-    const T* gamma,
-    const T* beta,
-    T* Y) {
-  constexpr int kGDim = kOrder == StorageOrder::NCHW ? 1 : 2;
-  constexpr int kDDim = kOrder == StorageOrder::NCHW ? 2 : 3;
-  const int size = dims[0] * dims[1] * dims[2] * dims[3];
-  std::array<int, 4> index = {0, 0, 0, 0};
-  for (int i = 0; i < size; ++i) {
-    const int i_mu = index[0] * dims[kGDim] + index[kGDim];
-    const int i_gamma = index[kGDim] * dims[kDDim] + index[kDDim];
-    Y[i] = gamma[i_gamma] * (X[i] - mu[i_mu]) * rsig[i_mu] + beta[i_gamma];
-    math::internal::IncreaseIndexInDims(4, dims.data(), index.data());
-  }
-}
 
 template <typename T, StorageOrder kOrder>
 void ComputeInternalGradients(
@@ -59,7 +29,7 @@ void ComputeInternalGradients(
     const int i_gamma = index[kGDim] * dims[kDDim] + index[kDDim];
     ds[i_mu] += gamma[i_gamma] * dY[i] * X[i];
     db[i_mu] += gamma[i_gamma] * dY[i];
-    math::internal::IncreaseIndexInDims(4, dims.data(), index.data());
+    math::utils::IncreaseIndexInDims(4, dims.data(), index.data());
   }
 }
 
@@ -96,55 +66,17 @@ void GroupNormBackward(
   for (int i = 0; i < size; ++i) {
     const int i_mu = index[0] * dims[kGDim] + index[kGDim];
     const int i_gamma = index[kGDim] * dims[kDDim] + index[kDDim];
-    const T u =
-        (db[i_mu] * mu[i_mu] - ds[i_mu]) * (X[i] - mu[i_mu]) * Cube(rsig[i_mu]);
+    const T u = (db[i_mu] * mu[i_mu] - ds[i_mu]) * (X[i] - mu[i_mu]) *
+        math::utils::Cube(rsig[i_mu]);
     const T v = db[i_mu] * rsig[i_mu];
     dX[i] = gamma[i_gamma] * dY[i] * rsig[i_mu] + (u - v) * denom;
     dgamma[i_gamma] += dY[i] * (X[i] - mu[i_mu]) * rsig[i_mu];
     dbeta[i_gamma] += dY[i];
-    math::internal::IncreaseIndexInDims(4, dims.data(), index.data());
+    math::utils::IncreaseIndexInDims(4, dims.data(), index.data());
   }
 }
 
 } // namespace
-
-template <typename T, class Context>
-bool GroupNormOp<T, Context>::RunOnDeviceImpl(
-    const int N,
-    const int G,
-    const int D,
-    const int HxW,
-    const T* X_data,
-    const T* gamma_data,
-    const T* beta_data,
-    T* Y_data,
-    T* mu_data,
-    T* rsig_data) {
-  const std::array<int, 4> dims = order_ == StorageOrder::NCHW
-      ? std::array<int, 4>{N, G, D, HxW}
-      : std::array<int, 4>{N, HxW, G, D};
-  const std::array<int, 2> axes = order_ == StorageOrder::NCHW
-      ? std::array<int, 2>{2, 3}
-      : std::array<int, 2>{1, 3};
-
-  // Computes mean and variance.
-  math::Moments<T, Context>(
-      4, dims.data(), 2, axes.data(), X_data, mu_data, rsig_data, &context_);
-
-  // Uses rsqrt to computes 1 / std which is much faster than computes std.
-  EigenArrayMap<T> rsig_array(rsig_data, G, N);
-  rsig_array = (rsig_array += epsilon_).rsqrt();
-
-  // Computes Y = gamma * (X - mu) * rsig + beta.
-  if (order_ == StorageOrder::NCHW) {
-    GroupNormForward<T, StorageOrder::NCHW>(
-        dims, X_data, mu_data, rsig_data, gamma_data, beta_data, Y_data);
-  } else {
-    GroupNormForward<T, StorageOrder::NHWC>(
-        dims, X_data, mu_data, rsig_data, gamma_data, beta_data, Y_data);
-  }
-  return true;
-}
 
 // Math:
 // let: s = gamma * rsig
@@ -230,7 +162,7 @@ REGISTER_CPU_OPERATOR(
 // Input: X, gamma, beta; Output: Y, mu, sig
 OPERATOR_SCHEMA(GroupNorm)
     .NumInputs(3)
-    .NumOutputs(3)
+    .NumOutputs({1, 3})
     .SetDoc(R"DOC(
 Group Normalization (GN) operation: https://arxiv.org/abs/1803.08494
 )DOC")

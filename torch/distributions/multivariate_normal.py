@@ -1,21 +1,9 @@
 import math
-from numbers import Number
 
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import lazy_property
-
-
-def _get_batch_shape(bmat, bvec):
-    r"""
-    Given a batch of matrices and a batch of vectors, compute the combined `batch_shape`.
-    """
-    try:
-        vec_shape = torch._C._infer_size(bvec.shape, bmat.shape[:-1])
-    except RuntimeError:
-        raise ValueError("Incompatible batch shapes: vector {}, matrix {}".format(bvec.shape, bmat.shape))
-    return torch.Size(vec_shape[:-1])
+from torch.distributions.utils import _standard_normal, lazy_property
 
 
 def _batch_mv(bmat, bvec):
@@ -29,52 +17,42 @@ def _batch_mv(bmat, bvec):
     to a batch shape. They are not necessarily assumed to have the same batch shape,
     just ones which can be broadcasted.
     """
-    n = bvec.size(-1)
-    batch_shape = _get_batch_shape(bmat, bvec)
-
-    # to conform with `torch.bmm` interface, both bmat and bvec should have `.dim() == 3`
-    bmat = bmat.expand(batch_shape + (n, n)).reshape((-1, n, n))
-    bvec = bvec.unsqueeze(-1).expand(batch_shape + (n, 1)).reshape((-1, n, 1))
-    return torch.bmm(bmat, bvec).view(batch_shape + (n,))
-
-
-def _batch_potrf_lower(bmat):
-    r"""
-    Applies a Cholesky decomposition to all matrices in a batch of arbitrary shape.
-    """
-    n = bmat.size(-1)
-    cholesky = torch.stack([C.potrf(upper=False) for C in bmat.reshape((-1, n, n))])
-    return cholesky.view(bmat.shape)
+    return torch.matmul(bmat, bvec.unsqueeze(-1)).squeeze(-1)
 
 
 def _batch_diag(bmat):
     r"""
     Returns the diagonals of a batch of square matrices.
     """
-    return bmat.reshape(bmat.shape[:-2] + (-1,))[..., ::bmat.size(-1) + 1]
+    return torch.diagonal(bmat, dim1=-2, dim2=-1)
 
 
-def _batch_inverse(bmat):
-    r"""
-    Returns the inverses of a batch of square matrices.
+def _batch_trtrs_lower(bb, bA):
     """
-    n = bmat.size(-1)
-    flat_bmat = bmat.reshape(-1, n, n)
-    flat_inv_bmat = torch.stack([m.inverse() for m in flat_bmat], 0)
-    return flat_inv_bmat.view(bmat.shape)
+    Applies `torch.trtrs` for batches of matrices. `bb` and `bA` should have
+    the same batch shape.
+    """
+    flat_b = bb.reshape((-1,) + bb.shape[-2:])
+    flat_A = bA.reshape((-1,) + bA.shape[-2:])
+    flat_X = torch.stack([torch.trtrs(b, A, upper=False)[0] for b, A in zip(flat_b, flat_A)])
+    return flat_X.reshape(bb.shape)
 
 
-def _batch_mahalanobis(L, x):
+def _batch_mahalanobis(bL, bx):
     r"""
     Computes the squared Mahalanobis distance :math:`\mathbf{x}^\top\mathbf{M}^{-1}\mathbf{x}`
     for a factored :math:`\mathbf{M} = \mathbf{L}\mathbf{L}^\top`.
 
-    Accepts batches for both L and x.
+    Accepts batches for both bL and bx. They are not necessarily assumed to have the same batch
+    shape, but `bL` one should be able to broadcasted to `bx` one.
     """
-    # TODO: use `torch.potrs` or similar once a backwards pass is implemented.
-    flat_L = L.unsqueeze(0).reshape((-1,) + L.shape[-2:])
-    L_inv = torch.stack([torch.inverse(Li.t()) for Li in flat_L]).view(L.shape)
-    return (x.unsqueeze(-1) * L_inv).sum(-2).pow(2.0).sum(-1)
+    n = bx.size(-1)
+    bL = bL.expand(bx.shape[bx.dim() - bL.dim() + 1:] + (n,))
+    flat_L = bL.reshape(-1, n, n)  # shape = b x n x n
+    flat_x = bx.reshape(-1, flat_L.size(0), n)  # shape = c x b x n
+    flat_x_swap = flat_x.permute(1, 2, 0)  # shape = b x n x c
+    M_swap = _batch_trtrs_lower(flat_x_swap, flat_L).pow(2).sum(-2)  # shape = b x c
+    return M_swap.t().reshape(bx.shape[:-1])
 
 
 class MultivariateNormal(Distribution):
@@ -84,7 +62,7 @@ class MultivariateNormal(Distribution):
 
     The multivariate normal distribution can be parameterized either
     in terms of a positive definite covariance matrix :math:`\mathbf{\Sigma}`
-    or a positive definite precition matrix :math:`\mathbf{\Sigma}^{-1}`
+    or a positive definite precision matrix :math:`\mathbf{\Sigma}^{-1}`
     or a lower-triangular matrix :math:`\mathbf{L}` with positive-valued
     diagonal entries, such that
     :math:`\mathbf{\Sigma} = \mathbf{L}\mathbf{L}^\top`. This triangular matrix
@@ -94,9 +72,7 @@ class MultivariateNormal(Distribution):
 
         >>> m = MultivariateNormal(torch.zeros(2), torch.eye(2))
         >>> m.sample()  # normally distributed with mean=`[0,0]` and covariance_matrix=`I`
-        -0.2102
-        -0.5429
-        [torch.FloatTensor of size 2]
+        tensor([-0.2102, -0.5429])
 
     Args:
         loc (Tensor): mean of the distribution
@@ -121,44 +97,75 @@ class MultivariateNormal(Distribution):
     has_rsample = True
 
     def __init__(self, loc, covariance_matrix=None, precision_matrix=None, scale_tril=None, validate_args=None):
-        event_shape = torch.Size(loc.shape[-1:])
+        if loc.dim() < 1:
+            raise ValueError("loc must be at least one-dimensional.")
         if (covariance_matrix is not None) + (scale_tril is not None) + (precision_matrix is not None) != 1:
             raise ValueError("Exactly one of covariance_matrix or precision_matrix or scale_tril may be specified.")
+
+        loc_ = loc.unsqueeze(-1)  # temporarily add dim on right
         if scale_tril is not None:
             if scale_tril.dim() < 2:
                 raise ValueError("scale_tril matrix must be at least two-dimensional, "
                                  "with optional leading batch dimensions")
-            self.scale_tril = scale_tril
-            batch_shape = _get_batch_shape(scale_tril, loc)
+            self.scale_tril, loc_ = torch.broadcast_tensors(scale_tril, loc_)
         elif covariance_matrix is not None:
             if covariance_matrix.dim() < 2:
                 raise ValueError("covariance_matrix must be at least two-dimensional, "
                                  "with optional leading batch dimensions")
-            self.covariance_matrix = covariance_matrix
-            batch_shape = _get_batch_shape(covariance_matrix, loc)
+            self.covariance_matrix, loc_ = torch.broadcast_tensors(covariance_matrix, loc_)
         else:
             if precision_matrix.dim() < 2:
                 raise ValueError("precision_matrix must be at least two-dimensional, "
                                  "with optional leading batch dimensions")
-            self.precision_matrix = precision_matrix
-            self.covariance_matrix = _batch_inverse(precision_matrix)
-            batch_shape = _get_batch_shape(precision_matrix, loc)
-        self.loc = loc
+            self.precision_matrix, loc_ = torch.broadcast_tensors(precision_matrix, loc_)
+        self.loc = loc_[..., 0]  # drop rightmost dim
+
+        batch_shape, event_shape = self.loc.shape[:-1], self.loc.shape[-1:]
         super(MultivariateNormal, self).__init__(batch_shape, event_shape, validate_args=validate_args)
+
+        if scale_tril is not None:
+            self._unbroadcasted_scale_tril = scale_tril
+        else:
+            if precision_matrix is not None:
+                self.covariance_matrix = torch.inverse(precision_matrix).expand_as(loc_)
+            self._unbroadcasted_scale_tril = torch.cholesky(self.covariance_matrix)
+
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(MultivariateNormal, _instance)
+        batch_shape = torch.Size(batch_shape)
+        loc_shape = batch_shape + self.event_shape
+        cov_shape = batch_shape + self.event_shape + self.event_shape
+        new.loc = self.loc.expand(loc_shape)
+        new._unbroadcasted_scale_tril = self._unbroadcasted_scale_tril
+        if 'covariance_matrix' in self.__dict__:
+            new.covariance_matrix = self.covariance_matrix.expand(cov_shape)
+        if 'scale_tril' in self.__dict__:
+            new.scale_tril = self.scale_tril.expand(cov_shape)
+        if 'precision_matrix' in self.__dict__:
+            new.precision_matrix = self.precision_matrix.expand(cov_shape)
+        super(MultivariateNormal, new).__init__(batch_shape,
+                                                self.event_shape,
+                                                validate_args=False)
+        new._validate_args = self._validate_args
+        return new
 
     @lazy_property
     def scale_tril(self):
-        return _batch_potrf_lower(self.covariance_matrix)
+        return self._unbroadcasted_scale_tril.expand(
+            self._batch_shape + self._event_shape + self._event_shape)
 
     @lazy_property
     def covariance_matrix(self):
-        return torch.matmul(self.scale_tril, self.scale_tril.transpose(-1, -2))
+        return (torch.matmul(self._unbroadcasted_scale_tril,
+                             self._unbroadcasted_scale_tril.transpose(-1, -2))
+                .expand(self._batch_shape + self._event_shape + self._event_shape))
 
     @lazy_property
     def precision_matrix(self):
         # TODO: use `torch.potri` on `scale_tril` once a backwards pass is implemented.
-        scale_tril_inv = _batch_inverse(self.scale_tril)
-        return torch.matmul(scale_tril_inv.transpose(-1, -2), scale_tril_inv)
+        scale_tril_inv = torch.inverse(self._unbroadcasted_scale_tril)
+        return torch.matmul(scale_tril_inv.transpose(-1, -2), scale_tril_inv).expand(
+            self._batch_shape + self._event_shape + self._event_shape)
 
     @property
     def mean(self):
@@ -166,26 +173,25 @@ class MultivariateNormal(Distribution):
 
     @property
     def variance(self):
-        n = self.covariance_matrix.size(-1)
-        var = torch.stack([cov.diag() for cov in self.covariance_matrix.view(-1, n, n)])
-        return var.view(self.covariance_matrix.size()[:-1])
+        return self._unbroadcasted_scale_tril.pow(2).sum(-1).expand(
+            self._batch_shape + self._event_shape)
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        eps = self.loc.new(*shape).normal_()
-        return self.loc + _batch_mv(self.scale_tril, eps)
+        eps = _standard_normal(shape, dtype=self.loc.dtype, device=self.loc.device)
+        return self.loc + _batch_mv(self._unbroadcasted_scale_tril, eps)
 
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
         diff = value - self.loc
-        M = _batch_mahalanobis(self.scale_tril, diff)
-        log_det = _batch_diag(self.scale_tril).abs().log().sum(-1)
-        return -0.5 * (M + self.loc.size(-1) * math.log(2 * math.pi)) - log_det
+        M = _batch_mahalanobis(self._unbroadcasted_scale_tril, diff)
+        half_log_det = _batch_diag(self._unbroadcasted_scale_tril).log().sum(-1)
+        return -0.5 * (self._event_shape[0] * math.log(2 * math.pi) + M) - half_log_det
 
     def entropy(self):
-        log_det = _batch_diag(self.scale_tril).abs().log().sum(-1)
-        H = 0.5 * (1.0 + math.log(2 * math.pi)) * self._event_shape[0] + log_det
+        half_log_det = _batch_diag(self._unbroadcasted_scale_tril).log().sum(-1)
+        H = 0.5 * self._event_shape[0] * (1.0 + math.log(2 * math.pi)) + half_log_det
         if len(self._batch_shape) == 0:
             return H
         else:

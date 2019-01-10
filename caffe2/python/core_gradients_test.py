@@ -9,9 +9,8 @@ import hypothesis.strategies as st
 import unittest
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core, test_util
+from caffe2.python import core, test_util, workspace
 from caffe2.python.core import CreateOperator, GradientRegistry
-from caffe2.python import workspace
 
 import numpy as np
 
@@ -94,7 +93,7 @@ class TestGradientCalculation(test_util.TestCase):
 
     @given(device_option=st.sampled_from([
         None,
-        core.DeviceOption(caffe2_pb2.CUDA, 1)]))
+        core.DeviceOption(workspace.GpuDeviceType, 1)]))
     def testDirect(self, device_option):
         operators = [
             CreateOperator('Direct', 'in', 'hidden'),
@@ -279,7 +278,7 @@ class TestGradientCalculation(test_util.TestCase):
 
     @given(device_option=st.sampled_from([
         None,
-        core.DeviceOption(caffe2_pb2.CUDA, 1)]))
+        core.DeviceOption(workspace.GpuDeviceType, 1)]))
     def testMultiUseInput(self, device_option):
         """Test gradient for the following case:
 
@@ -710,7 +709,7 @@ class TestGradientsAccumulationWithPassThroughGradients(test_util.TestCase):
         input_to_grad = net.AddGradientOperators({"x4": "x4_grad"})
         sum_op = net.Proto().op[-2]
         self.assertEqual(sum_op.input[0], "x2_grad")
-        self.assertEqual(sum_op.input[1], "x4_grad")
+        self.assertEqual(sum_op.input[1], "_x2_grad_autosplit_0")
         self.assertEqual(sum_op.output[0], "x2_grad")
         self.assertEqual(input_to_grad["x1"], "x1_grad")
 
@@ -762,7 +761,7 @@ class TestGradientsAccumulationWithPassThroughGradients(test_util.TestCase):
         print(str(net.Proto()))
         sum_op = net.Proto().op[-2]
         self.assertEqual(sum_op.input[0], "x2_grad")
-        self.assertEqual(sum_op.input[1], "x4_grad")
+        self.assertEqual(sum_op.input[1], "_x2_grad_autosplit_0")
         self.assertEqual(sum_op.output[0], "x2_grad")
         self.assertEqual(input_to_grad["x1"], "x1_grad")
 
@@ -788,12 +787,12 @@ class TestGradientsAccumulationWithPassThroughGradients(test_util.TestCase):
         net.DotProduct(["x4", "x5"], "x6")
         input_to_grad = net.AddGradientOperators({"x6": "x6_grad"})
         sum_op = net.Proto().op[-1]
-        self.assertEqual(sum_op.input[0], "x5_grad")
-        self.assertEqual(sum_op.input[1], "x4_grad")
+        self.assertEqual(sum_op.input[0], "x2_grad")
+        self.assertEqual(sum_op.input[1], "_x2_grad_autosplit_0")
         self.assertEqual(sum_op.output[0], "x2_grad")
-        self.assertEqual(input_to_grad["x1"], "x4_grad")
+        self.assertEqual(input_to_grad["x1"], "x1_grad")
         self.assertEqual(input_to_grad["x2"], "x2_grad")
-        self.assertEqual(input_to_grad["x3"], "x5_grad")
+        self.assertEqual(input_to_grad["x3"], "x3_grad")
 
     def testSubOpAtLeaf(self):
         # x1
@@ -818,9 +817,9 @@ class TestGradientsAccumulationWithPassThroughGradients(test_util.TestCase):
         input_to_grad = net.AddGradientOperators({"x6": "x6_grad"})
         sum_op = net.Proto().op[-1]
         self.assertEqual(sum_op.input[0], "x2_grad")
-        self.assertEqual(sum_op.input[1], "x5_grad")
+        self.assertEqual(sum_op.input[1], "_x2_grad_autosplit_0")
         self.assertEqual(sum_op.output[0], "x2_grad")
-        self.assertEqual(input_to_grad["x1"], "x4_grad")
+        self.assertEqual(input_to_grad["x1"], "x1_grad")
         self.assertEqual(input_to_grad["x2"], "x2_grad")
         self.assertEqual(input_to_grad["x3"], "x3_grad")
 
@@ -846,12 +845,12 @@ class TestGradientsAccumulationWithPassThroughGradients(test_util.TestCase):
         net.Add(["x4", "x5"], "x6")
         input_to_grad = net.AddGradientOperators({"x6": "x6_grad"})
         sum_op = net.Proto().op[-1]
-        self.assertEqual(sum_op.input[0], "x6_grad")
-        self.assertEqual(sum_op.input[1], "x6_grad")
+        self.assertEqual(sum_op.input[0], "x2_grad")
+        self.assertEqual(sum_op.input[1], "_x2_grad_autosplit_0")
         self.assertEqual(sum_op.output[0], "x2_grad")
-        self.assertEqual(input_to_grad["x1"], "x6_grad")
+        self.assertEqual(input_to_grad["x1"], "x1_grad")
         self.assertEqual(input_to_grad["x2"], "x2_grad")
-        self.assertEqual(input_to_grad["x3"], "x6_grad")
+        self.assertEqual(input_to_grad["x3"], "x3_grad")
 
     def testMultiLayerSubOps(self):
         # x1
@@ -876,9 +875,9 @@ class TestGradientsAccumulationWithPassThroughGradients(test_util.TestCase):
         input_to_grad = net.AddGradientOperators({"x6": "x6_grad"})
         sum_op = net.Proto().op[-1]
         self.assertEqual(sum_op.input[0], "x2_grad")
-        self.assertEqual(sum_op.input[1], "x5_grad")
+        self.assertEqual(sum_op.input[1], "_x2_grad_autosplit_0")
         self.assertEqual(sum_op.output[0], "x2_grad")
-        self.assertEqual(input_to_grad["x1"], "x6_grad")
+        self.assertEqual(input_to_grad["x1"], "x1_grad")
         self.assertEqual(input_to_grad["x2"], "x2_grad")
         self.assertEqual(input_to_grad["x3"], "x3_grad")
 

@@ -1,4 +1,5 @@
 import torch
+import functools
 
 
 class no_grad(object):
@@ -10,6 +11,9 @@ class no_grad(object):
     In this mode, the result of every computation will have
     `requires_grad=False`, even when the inputs have `requires_grad=True`.
 
+    Also functions as a decorator.
+
+
     Example::
 
         >>> x = torch.tensor([1], requires_grad=True)
@@ -17,17 +21,27 @@ class no_grad(object):
         ...   y = x * 2
         >>> y.requires_grad
         False
+        >>> @torch.no_grad()
+        ... def doubler(x):
+        ...     return x * 2
+        >>> z = doubler(x)
+        >>> z.requires_grad
+        False
     """
-
-    def __init__(self):
-        self.prev = torch.is_grad_enabled()
-
     def __enter__(self):
+        self.prev = torch.is_grad_enabled()
         torch._C.set_grad_enabled(False)
 
     def __exit__(self, *args):
         torch.set_grad_enabled(self.prev)
         return False
+
+    def __call__(self, func):
+        @functools.wraps(func)
+        def decorate_no_grad(*args, **kwargs):
+            with self:
+                return func(*args, **kwargs)
+        return decorate_no_grad
 
 
 class enable_grad(object):
@@ -35,6 +49,8 @@ class enable_grad(object):
 
     Enables gradient calculation inside a :class:`~no_grad` context. This has
     no effect outside of :class:`~no_grad`.
+
+    Also functions as a decorator.
 
 
     Example::
@@ -47,18 +63,29 @@ class enable_grad(object):
         True
         >>> y.backward()
         >>> x.grad
+        >>> @torch.enable_grad()
+        ... def doubler(x):
+        ...     return x * 2
+        >>> with torch.no_grad():
+        ...     z = doubler(x)
+        >>> z.requires_grad
+        True
 
     """
-
-    def __init__(self):
-        self.prev = torch.is_grad_enabled()
-
     def __enter__(self):
+        self.prev = torch.is_grad_enabled()
         torch._C.set_grad_enabled(True)
 
     def __exit__(self, *args):
         torch.set_grad_enabled(self.prev)
         return False
+
+    def __call__(self, func):
+        @functools.wraps(func)
+        def decorate_enable_grad(*args, **kwargs):
+            with self:
+                return func(*args, **kwargs)
+        return decorate_enable_grad
 
 
 class set_grad_enabled(object):
@@ -81,11 +108,11 @@ class set_grad_enabled(object):
         ...   y = x * 2
         >>> y.requires_grad
         False
-        >>> set_grad_enabled(True)
+        >>> torch.set_grad_enabled(True)
         >>> y = x * 2
         >>> y.requires_grad
         True
-        >>> set_grad_enabled(False)
+        >>> torch.set_grad_enabled(False)
         >>> y = x * 2
         >>> y.requires_grad
         False

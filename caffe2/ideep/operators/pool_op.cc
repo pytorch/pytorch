@@ -8,7 +8,9 @@ class IDEEPPoolOp final : public IDEEPConvPoolOpBase {
   USE_IDEEP_CONV_POOL_BASE_FUNCTIONS();
 
   IDEEPPoolOp(const OperatorDef& operator_def, Workspace* ws)
-      : IDEEPConvPoolOpBase(operator_def, ws) {
+      : IDEEPConvPoolOpBase(operator_def, ws),
+        training_mode_(
+            OperatorBase::GetSingleArgument<int>("training_mode", 1)) {
     CAFFE_ENFORCE(
         (dilation_h() == 1) && (dilation_w() == 1),
         "Pooling op does not support dilation right now.");
@@ -33,15 +35,18 @@ class IDEEPPoolOp final : public IDEEPConvPoolOpBase {
     auto& X = Input(INPUT);
     auto* Y = Output(OUTPUT);
     auto Y_dims = CalcOutputDims(X, X.get_dim(1));
+    mkldnn::prop_kind pk = training_mode_ ?
+      mkldnn::prop_kind::forward_training : mkldnn::prop_kind::forward_inference;
 
     ideep::pooling_forward::compute(X, Y_dims, *Y,
-        stride_, kernel_, pad_tl(), pad_br(), algo_);
+        stride_, kernel_, pad_tl(), pad_br(), algo_, pk);
 
     return true;
   }
 
  private:
   ialgo algo_;
+  bool training_mode_;
 
   INPUT_TAGS(INPUT);
   OUTPUT_TAGS(OUTPUT);

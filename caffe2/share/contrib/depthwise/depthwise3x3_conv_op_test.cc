@@ -13,13 +13,13 @@ namespace caffe2 {
 namespace {
 
 void AddNoiseInput(
-    const vector<TIndex>& shape,
+    const vector<int64_t>& shape,
     const string& name,
     Workspace* ws) {
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutable<TensorCPU>();
+  auto* tensor = BlobGetMutableTensor(blob, CPU);
   tensor->Resize(shape);
 
   math::RandGaussian<float, CPUContext>(
@@ -78,10 +78,10 @@ void compare(
   depthwiseOpDef.add_arg()->CopyFrom(MakeArgument("pad_r", padR));
   depthwiseOpDef.add_arg()->CopyFrom(MakeArgument("group", group));
 
-  AddNoiseInput(vector<TIndex>{N, inputC, H, W}, "X", &ws);
+  AddNoiseInput(vector<int64_t>{N, inputC, H, W}, "X", &ws);
   AddNoiseInput(
-      vector<TIndex>{outputC, inputC / group, kernelH, kernelW}, "W", &ws);
-  AddNoiseInput(vector<TIndex>{outputC}, "B", &ws);
+      vector<int64_t>{outputC, inputC / group, kernelH, kernelW}, "W", &ws);
+  AddNoiseInput(vector<int64_t>{outputC}, "B", &ws);
 
   unique_ptr<OperatorBase> depthwiseOp(CreateOperator(depthwiseOpDef, &ws));
   EXPECT_NE(nullptr, depthwiseOp.get());

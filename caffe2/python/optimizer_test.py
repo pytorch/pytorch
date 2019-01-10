@@ -4,8 +4,9 @@ from __future__ import print_function
 from caffe2.proto import caffe2_pb2
 import caffe2.python.optimizer as optimizer
 from caffe2.python.optimizer import (
-    build_sgd, build_multi_precision_sgd, build_ftrl, build_adagrad,
-    build_adam, build_yellowfin, build_rms_prop, add_weight_decay, SgdOptimizer)
+    build_sgd, build_multi_precision_sgd, build_ftrl, build_gftrl, build_wngrad,
+    build_adagrad, build_adadelta, build_adam, build_yellowfin, build_rms_prop,
+    add_weight_decay, SgdOptimizer)
 from caffe2.python.optimizer_context import UseOptimizer
 from caffe2.python.optimizer_test_util import (
     OptimizerTestBase, LRModificationTestBase
@@ -101,10 +102,77 @@ class TestFtrl(OptimizerTestBase, TestCase):
             workspace.FetchBlob(param)
 
 
+class TestGFtrl(OptimizerTestBase, TestCase):
+    def testSparse(self):
+        raise unittest.SkipTest("no sparse support")
+
+    def build_optimizer(self, model, **kwargs):
+        self._skip_gpu = True
+        return build_gftrl(
+            model,
+            engine=None,
+            alpha=1.0,
+            beta=0.1,
+            lambda1=0.0,
+            lambda2=0.0,
+            **kwargs
+        )
+
+    def check_optimizer(self, optimizer):
+        self.assertFalse(optimizer.get_auxiliary_parameters().shared)
+        self.assertTrue(optimizer.get_auxiliary_parameters().local)
+        for param in optimizer.get_auxiliary_parameters().local:
+            workspace.FetchBlob(param)
+
+
 class TestAdagrad(OptimizerTestBase, LRModificationTestBase, TestCase):
     def build_optimizer(self, model, **kwargs):
         self._skip_gpu = False
         return build_adagrad(model, base_learning_rate=1.0, lars=0.5, **kwargs)
+
+    def check_optimizer(self, optimizer):
+        self.assertFalse(optimizer.get_auxiliary_parameters().shared)
+        self.assertTrue(optimizer.get_auxiliary_parameters().local)
+        for param in optimizer.get_auxiliary_parameters().local:
+            workspace.FetchBlob(param)
+
+
+class TestRowWiseAdagrad(OptimizerTestBase, TestCase):
+    def build_optimizer(self, model, **kwargs):
+        self._skip_gpu = True
+        return build_adagrad(
+            model, base_learning_rate=1.0, lars=0.5, rowWise=True, **kwargs
+        )
+
+    def check_optimizer(self, optimizer):
+        self.assertFalse(optimizer.get_auxiliary_parameters().shared)
+        self.assertTrue(optimizer.get_auxiliary_parameters().local)
+        for param in optimizer.get_auxiliary_parameters().local:
+            workspace.FetchBlob(param)
+
+    def testDense(self):
+        raise unittest.SkipTest("no dense support")
+
+    def testGPUDense(self):
+        raise unittest.SkipTest("no dense support")
+
+
+class TestWngrad(OptimizerTestBase, LRModificationTestBase, TestCase):
+    def build_optimizer(self, model, **kwargs):
+        self._skip_gpu = True
+        return build_wngrad(model, base_learning_rate=25.0, **kwargs)
+
+    def check_optimizer(self, optimizer):
+        self.assertFalse(optimizer.get_auxiliary_parameters().shared)
+        self.assertTrue(optimizer.get_auxiliary_parameters().local)
+        for param in optimizer.get_auxiliary_parameters().local:
+            workspace.FetchBlob(param)
+
+
+class TestAdadelta(OptimizerTestBase, LRModificationTestBase, TestCase):
+    def build_optimizer(self, model, **kwargs):
+        self._skip_gpu = False
+        return build_adadelta(model, base_learning_rate=1.0, decay=0.995, **kwargs)
 
     def check_optimizer(self, optimizer):
         self.assertFalse(optimizer.get_auxiliary_parameters().shared)
@@ -386,11 +454,12 @@ class TestYellowFin(OptimizerTestBase, TestCase):
                 )
 
     @unittest.skip("Results might vary too much. Only for individual use.")
-    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
+    @unittest.skipIf(not workspace.has_gpu_support
+                    and not workspace.has_hip_support, "No gpu support")
     def test_caffe2_gpu_vs_numpy(self):
         n_dim = 1000000
         n_iter = 50
-        gpu_device_opt = core.DeviceOption(caffe2_pb2.CUDA, 0)
+        gpu_device_opt = core.DeviceOption(workspace.GpuDeviceType, 0)
         with core.DeviceScope(gpu_device_opt):
             for zero_debias in [False, True]:
                 for grad_coef in [1.0, 0.1, 0.01]:

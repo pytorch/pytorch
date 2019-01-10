@@ -8,7 +8,7 @@
 
 namespace caffe2 {
 
-class IDEEPContext final {
+class IDEEPContext final : public BaseContext {
  public:
   typedef std::mt19937 rand_gen_type;
   IDEEPContext() : random_seed_(RandomNumberSeed()) {}
@@ -16,15 +16,15 @@ class IDEEPContext final {
       : random_seed_(
             option.has_random_seed() ? option.random_seed()
                                      : RandomNumberSeed()) {
-    CAFFE_ENFORCE_EQ(option.device_type(), IDEEP);
+    CAFFE_ENFORCE_EQ(option.device_type(), PROTO_IDEEP);
   }
+  explicit IDEEPContext(const at::Device& device)
+      : IDEEPContext(DeviceToOption(device)) {}
 
-  ~IDEEPContext() noexcept {}
+  ~IDEEPContext() noexcept override {}
 
   inline void SwitchToDevice(int /*stream_id*/) {}
-  inline void SwitchToDevice() {
-    SwitchToDevice(0);
-  }
+  using BaseContext::SwitchToDevice;
 
   inline void WaitEvent(const Event& ev) {
     ev.Wait(IDEEP, this);
@@ -45,8 +45,30 @@ class IDEEPContext final {
     return *random_generator_.get();
   }
 
-  inline static std::pair<void*, MemoryDeleter> New(size_t nbytes) {
-    return GetCPUAllocator()->New(nbytes);
+  inline static at::DataPtr New(size_t nbytes) {
+    return GetAllocator(CPU)->allocate(nbytes);
+  }
+
+  void CopyBytesSameDevice(size_t nbytes, const void* src, void* dst) override {
+    if (nbytes == 0) {
+      return;
+    }
+    CAFFE_ENFORCE(src);
+    CAFFE_ENFORCE(dst);
+    memcpy(dst, src, nbytes);
+  }
+
+  void CopyBytesFromCPU(size_t nbytes, const void* src, void* dst) override {
+    CopyBytesSameDevice(nbytes, src, dst);
+  }
+
+  void CopyBytesToCPU(size_t nbytes, const void* src, void* dst) override {
+    CopyBytesSameDevice(nbytes, src, dst);
+  }
+
+  bool SupportsNonFundamentalTypes() const override {
+    // IDEEP meta copy is OK
+    return true;
   }
 
   // Two copy functions that deals with cross-device copies.
@@ -87,6 +109,18 @@ class IDEEPContext final {
 
   static bool IsStreamFree(const DeviceOption& /* unused */, int /* unused */) {
     return true;
+  }
+
+  at::Device device() const override {
+    return at::Device(IDEEP);
+  }
+
+  DeviceType device_type() const override {
+    return IDEEP;
+  }
+
+  static constexpr DeviceType GetDeviceType() {
+    return IDEEP;
   }
 
  protected:
@@ -133,4 +167,5 @@ inline void IDEEPContext::CopyBytes<IDEEPContext, CPUContext>(
   CAFFE_ENFORCE(dst);
   memcpy(dst, src, nbytes);
 }
+
 } // namespace caffe2

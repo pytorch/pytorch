@@ -10,14 +10,16 @@ extern "C" {
 
 namespace caffe2 {
 
-class RedisStoreHandler : public StoreHandler {
+class CAFFE2_API RedisStoreHandler : public StoreHandler {
  public:
   explicit RedisStoreHandler(std::string& host, int port, std::string& prefix);
   virtual ~RedisStoreHandler();
 
   virtual void set(const std::string& name, const std::string& data) override;
 
-  virtual std::string get(const std::string& name) override;
+  virtual std::string get(
+      const std::string& name,
+      const std::chrono::milliseconds& timeout = kDefaultTimeout) override;
 
   virtual int64_t add(const std::string& name, int64_t value) override;
 

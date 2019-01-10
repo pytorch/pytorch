@@ -118,14 +118,14 @@ bool SigmoidFocalLossOp<float, CUDAContext>::RunOnDevice() {
   // Number of positive examples: scalar
   auto& wp = Input(2);
   // output avg Sigmoid focal loss as mentioned in RetinaNet paper
-  auto* avg_loss = Output(0);
+
 
   int N = X.dim32(0);
   int D = X.dim32(1);
   int H = X.dim32(2);
   int W = X.dim32(3);
 
-  avg_loss->Resize(vector<TIndex>());
+  auto* avg_loss = Output(0, vector<int64_t>(), at::dtype<float>());
   losses_.ResizeLike(X);
   float* avg_loss_data = avg_loss->mutable_data<float>();
 
@@ -137,7 +137,7 @@ bool SigmoidFocalLossOp<float, CUDAContext>::RunOnDevice() {
 
   math::Sum<float, CUDAContext>(
       losses_.size(), losses_.data<float>(), avg_loss_data, &context_);
-  math::Scale<float, CUDAContext>(
+  math::Scale<float, float, CUDAContext>(
       1, scale_, avg_loss_data, avg_loss_data, &context_);
 
   return true;
@@ -165,8 +165,12 @@ bool SigmoidFocalLossGradientOp<float, CUDAContext>::RunOnDevice() {
       N, D, H, W, X.data<float>(), T.data<int>(), dX->mutable_data<float>(),
       wp.data<float>(), gamma_, alpha_, num_classes_,
       d_avg_loss.data<float>());
-  math::Scale<float, CUDAContext>(
-    dX->size(), scale_, dX->data<float>(), dX->mutable_data<float>(), &context_);
+  math::Scale<float, float, CUDAContext>(
+      dX->size(),
+      scale_,
+      dX->data<float>(),
+      dX->mutable_data<float>(),
+      &context_);
 
   return true;
 }

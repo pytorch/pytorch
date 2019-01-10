@@ -11,6 +11,7 @@ REGISTER_CPU_OPERATOR(
 OPERATOR_SCHEMA(SparseToDenseMask)
     .NumInputs(3, 4)
     .NumOutputs(1, 2)
+    .DisallowInputFillers() // TODO: enable the filler
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       ArgumentHelper helper(def);
@@ -47,8 +48,8 @@ vector and `values` tensor into a compacted tensor where the first dimension
 corresponds to each id provided in mask argument. Missing values are filled with
 the value of `default_value`. After running this op:
 
-  output[j, :] = values[i] # where mask[j] == indices[i]
-  output[j, ...] = default_value # when mask[j] doesn't appear in indices
+  output[j, :] = values[i] // where mask[j] == indices[i]
+  output[j, ...] = default_value // when mask[j] doesn't appear in indices
 
 If `lengths` is provided and not empty, and extra "batch" dimension is prepended
 to the output.
@@ -94,6 +95,7 @@ of size `len(lengths) X len(mask)`
 OPERATOR_SCHEMA(SparseToDenseMaskGradient)
     .NumInputs(2, 3)
     .NumOutputs(1)
+    .DisallowInputFillers() // TODO: enable the filler
     .SetDoc(R"DOC(
 The output is the gradient of the input value from SparseToDenseMask. The
 gradient for default_value has not been implemented.

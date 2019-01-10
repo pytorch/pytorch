@@ -8,7 +8,7 @@
 namespace caffe2 {
 
 namespace internal {
-class Caffe2InitializeRegistry {
+class CAFFE2_API Caffe2InitializeRegistry {
  public:
   typedef bool (*InitFunction)(int*, char***);
   // Registry() is defined in .cpp file to make registration work across
@@ -18,18 +18,26 @@ class Caffe2InitializeRegistry {
   void Register(InitFunction function, bool run_early,
                 const char* description) {
     if (run_early) {
+      // Disallow late registration of early init functions
+      CAFFE_ENFORCE(!early_init_functions_run_yet_);
       early_init_functions_.emplace_back(function, description);
     } else {
+      // Disallow late registration of init functions
+      CAFFE_ENFORCE(!init_functions_run_yet_);
       init_functions_.emplace_back(function, description);
     }
   }
 
   bool RunRegisteredEarlyInitFunctions(int* pargc, char*** pargv) {
+    CAFFE_ENFORCE(!early_init_functions_run_yet_);
+    early_init_functions_run_yet_ = true;
     return RunRegisteredInitFunctionsInternal(
         early_init_functions_, pargc, pargv);
   }
 
   bool RunRegisteredInitFunctions(int* pargc, char*** pargv) {
+    CAFFE_ENFORCE(!init_functions_run_yet_);
+    init_functions_run_yet_ = true;
     return RunRegisteredInitFunctionsInternal(init_functions_, pargc, pargv);
   }
 
@@ -53,10 +61,12 @@ class Caffe2InitializeRegistry {
   Caffe2InitializeRegistry() {}
   vector<std::pair<InitFunction, const char*> > early_init_functions_;
   vector<std::pair<InitFunction, const char*> > init_functions_;
+  bool early_init_functions_run_yet_ = false;
+  bool init_functions_run_yet_ = false;
 };
 }  // namespace internal
 
-class InitRegisterer {
+class CAFFE2_API InitRegisterer {
  public:
   InitRegisterer(internal::Caffe2InitializeRegistry::InitFunction function,
                  bool run_early, const char* description) {
@@ -78,6 +88,21 @@ class InitRegisterer {
   }  // namespace
 
 /**
+ * @brief Determine whether GlobalInit has already been run
+ */
+CAFFE2_API bool GlobalInitAlreadyRun();
+
+class CAFFE2_API GlobalInitIsCalledGuard {
+ public:
+  GlobalInitIsCalledGuard() {
+    if (!GlobalInitAlreadyRun()) {
+      LOG(WARNING)
+          << "Caffe2 GlobalInit should be run before any other API calls.";
+    }
+  }
+};
+
+/**
  * @brief Initialize the global environment of caffe2.
  *
  * Caffe2 uses a registration pattern for initialization functions. Custom
@@ -93,8 +118,24 @@ class InitRegisterer {
  * If there is something wrong at each stage, the function returns false. If
  * the global initialization has already been run, the function returns false
  * as well.
+ *
+ * GlobalInit is re-entrant safe; a re-entrant call will no-op and exit.
+ *
+ * GlobalInit is safe to call multiple times but not idempotent;
+ * successive calls will parse flags and re-set caffe2 logging levels from
+ * flags as needed, but NOT re-run early init and init functions.
+ *
+ * GlobalInit is also thread-safe and can be called concurrently.
  */
-bool GlobalInit(int* pargc, char*** argv);
+CAFFE2_API bool GlobalInit(int* pargc, char*** argv);
 
+/**
+ * @brief Initialize the global environment without command line arguments
+ *
+ * This is a version of the GlobalInit where no argument is passed in.
+ * On mobile devices, use this global init, since we cannot pass the
+ * command line options to caffe2, no arguments are passed.
+ */
+CAFFE2_API bool GlobalInit();
 }  // namespace caffe2
 #endif  // CAFFE2_CORE_INIT_H_

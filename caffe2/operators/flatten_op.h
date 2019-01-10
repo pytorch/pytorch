@@ -12,19 +12,19 @@ class FlattenOp : public Operator<Context> {
 
   FlattenOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        axis_(OperatorBase::GetSingleArgument<int>("axis", 1)) {}
+        axis_(this->template GetSingleArgument<int>("axis", 1)) {}
 
   bool RunOnDevice() override {
     auto& input = Input(0);
     auto* output = Output(0);
     CAFFE_ENFORCE_GE(
-        input.dims().size(), axis_, "The rank of the tensor must be >= axis.");
+        input.sizes().size(), axis_, "The rank of the tensor must be >= axis.");
     output->Resize(input.size_to_dim(axis_), input.size_from_dim(axis_));
-    context_.template CopyItems<Context, Context>(
-        input.meta(),
-        input.size(),
+    context_.CopyItemsSameDevice(
+        input.dtype(),
+        input.numel(),
         input.raw_data(),
-        output->raw_mutable_data(input.meta()));
+        output->raw_mutable_data(input.dtype()));
     return true;
   }
 

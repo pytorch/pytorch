@@ -85,9 +85,6 @@ CMAKE_ARGS+=("-DANDROID_NDK=$ANDROID_NDK")
 CMAKE_ARGS+=("-DANDROID_ABI=armeabi-v7a with NEON")
 CMAKE_ARGS+=("-DANDROID_NATIVE_API_LEVEL=21")
 CMAKE_ARGS+=("-DANDROID_CPP_FEATURES=rtti exceptions")
-# TODO: As the toolchain file doesn't support NEON-FP16 extension,
-# we disable USE_MOBILE_OPENGL for now, it will be re-enabled in the future.
-CMAKE_ARGS+=("-DUSE_MOBILE_OPENGL=OFF")
 
 # Use-specified CMake arguments go last to allow overridding defaults
 CMAKE_ARGS+=($@)
@@ -98,8 +95,11 @@ cmake "$CAFFE2_ROOT" \
     "${CMAKE_ARGS[@]}"
 
 # Cross-platform parallel build
-if [ "$(uname)" == "Darwin" ]; then
-  cmake --build . -- "-j$(sysctl -n hw.ncpu)"
-else
-  cmake --build . -- "-j$(nproc)"
+if [ -z "$MAX_JOBS" ]; then
+  if [ "$(uname)" == 'Darwin' ]; then
+    MAX_JOBS=$(sysctl -n hw.ncpu)
+  else
+    MAX_JOBS=$(nproc)
+  fi
 fi
+cmake --build . -- "-j${MAX_JOBS}"

@@ -11,10 +11,11 @@ import unittest
 
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 
-class TestTile(hu.HypothesisTestCase):
-    @given(M=st.integers(min_value=1, max_value=10),
+class TestTile(serial.SerializedTestCase):
+    @serial.given(M=st.integers(min_value=1, max_value=10),
            K=st.integers(min_value=1, max_value=10),
            N=st.integers(min_value=1, max_value=10),
            tiles=st.integers(min_value=1, max_value=3),

@@ -34,9 +34,9 @@ class StumpFuncOp final : public Operator<Context> {
 
   StumpFuncOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        threshold_(OperatorBase::GetSingleArgument<TIN>("threshold", 0)),
-        low_value_(OperatorBase::GetSingleArgument<TOUT>("low_value", 0)),
-        high_value_(OperatorBase::GetSingleArgument<TOUT>("high_value", 0)) {}
+        threshold_(this->template GetSingleArgument<TIN>("threshold", 0)),
+        low_value_(this->template GetSingleArgument<TOUT>("low_value", 0)),
+        high_value_(this->template GetSingleArgument<TOUT>("high_value", 0)) {}
 
   bool RunOnDevice() override;
 
@@ -55,7 +55,7 @@ class StumpFuncIndexOp final : public Operator<Context> {
 
   StumpFuncIndexOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        threshold_(OperatorBase::GetSingleArgument<TIN>("threshold", 0)) {}
+        threshold_(this->template GetSingleArgument<TIN>("threshold", 0)) {}
 
   bool RunOnDevice() override;
 

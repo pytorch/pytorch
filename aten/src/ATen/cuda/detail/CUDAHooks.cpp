@@ -1,34 +1,47 @@
 #include <ATen/cuda/detail/CUDAHooks.h>
-#include <ATen/cuda/PinnedMemoryAllocator.h>
+
 #include <ATen/CUDAGenerator.h>
+#include <ATen/Context.h>
 #include <ATen/RegisterCUDA.h>
 #include <ATen/cuda/CUDAConfig.h>
-#include <ATen/Context.h>
+#include <ATen/cuda/PinnedMemoryAllocator.h>
+#include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/native/cuda/CuFFTPlanCache.h>
+#include <c10/util/Exception.h>
 
-#include "THC/THC.h"
+#include <THC/THC.h>
+#include <THC/THCGeneral.hpp>
 
 #if AT_CUDNN_ENABLED()
-#include "ATen/cudnn/cudnn-wrapper.h"
+#include <ATen/cudnn/cudnn-wrapper.h>
 #endif
 
 #include <cuda.h>
 
-namespace at { namespace cuda { namespace detail {
+#include <cstddef>
+#include <functional>
+#include <memory>
+
+namespace at {
+namespace cuda {
+namespace detail {
 
 // NB: deleter is dynamic, because we need it to live in a separate
 // compilation unit (alt is to have another method in hooks, but
 // let's not if we don't need to!)
-std::unique_ptr<THCState, void(*)(THCState*)> CUDAHooks::initCUDA() const {
+std::unique_ptr<THCState, void (*)(THCState*)> CUDAHooks::initCUDA() const {
   THCState* thc_state = THCState_alloc();
-  THCState_setDeviceAllocator(thc_state, THCCachingAllocator_get());
-  thc_state->cudaHostAllocator = &THCCachingHostAllocator;
+
   THCudaInit(thc_state);
-  return std::unique_ptr<THCState, void(*)(THCState*)>(thc_state, [](THCState* p) {
-        if (p) THCState_free(p);
+  return std::unique_ptr<THCState, void (*)(THCState*)>(
+      thc_state, [](THCState* p) {
+        if (p)
+          THCState_free(p);
       });
 }
 
-std::unique_ptr<Generator> CUDAHooks::initCUDAGenerator(Context* context) const {
+std::unique_ptr<Generator> CUDAHooks::initCUDAGenerator(
+    Context* context) const {
   return std::unique_ptr<Generator>(new CUDAGenerator(context));
 }
 
@@ -41,18 +54,16 @@ bool CUDAHooks::hasCUDA() const {
   return true;
 }
 
-bool CUDAHooks::hasCuDNN() const {
-  return AT_CUDNN_ENABLED();
+bool CUDAHooks::hasMAGMA() const {
+#ifdef USE_MAGMA
+  return true;
+#else
+  return false;
+#endif
 }
 
-cudaStream_t CUDAHooks::getCurrentCUDAStream(THCState* thc_state) const {
-  return THCState_getCurrentStream(thc_state);
-}
-struct cudaDeviceProp* CUDAHooks::getCurrentDeviceProperties(THCState* thc_state) const {
-  return THCState_getCurrentDeviceProperties(thc_state);
-}
-struct cudaDeviceProp* CUDAHooks::getDeviceProperties(THCState* thc_state, int device) const {
-  return THCState_getDeviceProperties(thc_state, device);
+bool CUDAHooks::hasCuDNN() const {
+  return AT_CUDNN_ENABLED();
 }
 
 int64_t CUDAHooks::current_device() const {
@@ -64,8 +75,8 @@ int64_t CUDAHooks::current_device() const {
   return -1;
 }
 
-std::unique_ptr<Allocator> CUDAHooks::newPinnedMemoryAllocator() const {
-  return std::unique_ptr<Allocator>(new PinnedMemoryAllocator());
+Allocator* CUDAHooks::getPinnedMemoryAllocator() const {
+  return at::cuda::getPinnedMemoryAllocator();
 }
 
 void CUDAHooks::registerCUDATypes(Context* context) const {
@@ -76,12 +87,19 @@ bool CUDAHooks::compiledWithCuDNN() const {
   return AT_CUDNN_ENABLED();
 }
 
+bool CUDAHooks::compiledWithMIOpen() const {
+  return AT_ROCM_ENABLED();
+}
+
 bool CUDAHooks::supportsDilatedConvolutionWithCuDNN() const {
 #if AT_CUDNN_ENABLED()
-  cudaDeviceProp* prop = getCurrentDeviceProperties(globalContext().getTHCState());
+  cudaDeviceProp* prop =
+      THCState_getCurrentDeviceProperties(globalContext().getTHCState());
   // NOTE: extra parenthesis around numbers disable clang warnings about
   // dead code
-  return ((CUDNN_VERSION >= (6021)) || (CUDNN_VERSION >= (6000) && prop->major >= 5));
+  return (
+      (CUDNN_VERSION >= (6021)) ||
+      (CUDNN_VERSION >= (6000) && prop->major >= 5));
 #else
   return false;
 #endif
@@ -99,7 +117,40 @@ double CUDAHooks::batchnormMinEpsilonCuDNN() const {
 #if AT_CUDNN_ENABLED()
   return CUDNN_BN_MIN_EPSILON;
 #else
-  AT_ERROR("Cannot query CUDNN_BN_MIN_EPSILON if ATen_cuda is not built with CuDNN");
+  AT_ERROR(
+      "Cannot query CUDNN_BN_MIN_EPSILON if ATen_cuda is not built with CuDNN");
+#endif
+}
+
+int64_t CUDAHooks::cuFFTGetPlanCacheMaxSize() const {
+#ifndef __HIP_PLATFORM_HCC__
+  return at::native::detail::cufft_get_plan_cache_max_size_impl();
+#else
+  AT_ERROR("cuFFT with HIP is not supported");
+#endif
+}
+
+void CUDAHooks::cuFFTSetPlanCacheMaxSize(int64_t max_size) const {
+#ifndef __HIP_PLATFORM_HCC__
+  at::native::detail::cufft_set_plan_cache_max_size_impl(max_size);
+#else
+  AT_ERROR("cuFFT with HIP is not supported");
+#endif
+}
+
+int64_t CUDAHooks::cuFFTGetPlanCacheSize() const {
+#ifndef __HIP_PLATFORM_HCC__
+  return at::native::detail::cufft_get_plan_cache_size_impl();
+#else
+  AT_ERROR("cuFFT with HIP is not supported");
+#endif
+}
+
+void CUDAHooks::cuFFTClearPlanCache() const {
+#ifndef __HIP_PLATFORM_HCC__
+  at::native::detail::cufft_clear_plan_cache_impl();
+#else
+  AT_ERROR("cuFFT with HIP is not supported");
 #endif
 }
 
@@ -109,9 +160,18 @@ int CUDAHooks::getNumGPUs() const {
   if (err == cudaErrorNoDevice) {
     return 0;
   } else if (err != cudaSuccess) {
-    AT_ERROR("CUDA error (", static_cast<int>(err), "): ", cudaGetErrorString(err));
+    AT_ERROR(
+        "CUDA error (", static_cast<int>(err), "): ", cudaGetErrorString(err));
   }
   return count;
 }
 
-}}} // namespace at::cuda::detail
+// Sigh, the registry doesn't support namespaces :(
+using at::CUDAHooksRegistry;
+using at::RegistererCUDAHooksRegistry;
+
+REGISTER_CUDA_HOOKS(CUDAHooks);
+
+} // namespace detail
+} // namespace cuda
+} // namespace at

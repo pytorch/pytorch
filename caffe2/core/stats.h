@@ -11,7 +11,7 @@
 
 namespace caffe2 {
 
-class StatValue {
+class CAFFE2_API StatValue {
   std::atomic<int64_t> v_{0};
 
  public:
@@ -28,7 +28,7 @@ class StatValue {
   }
 };
 
-struct ExportedStatValue {
+struct CAFFE2_API ExportedStatValue {
   std::string key;
   int64_t value;
   std::chrono::time_point<std::chrono::high_resolution_clock> ts;
@@ -40,7 +40,7 @@ struct ExportedStatValue {
 using ExportedStatList = std::vector<ExportedStatValue>;
 using ExportedStatMap = std::unordered_map<std::string, int64_t>;
 
-ExportedStatMap toMap(const ExportedStatList& stats);
+CAFFE2_API ExportedStatMap toMap(const ExportedStatList& stats);
 
 /**
  * @brief Holds a map of atomic counters keyed by name.
@@ -114,7 +114,7 @@ ExportedStatMap toMap(const ExportedStatList& stats);
  * structure by calling StatRegistry::update().
  *
  */
-class StatRegistry {
+class CAFFE2_API StatRegistry {
   std::mutex mutex_;
   std::unordered_map<std::string, std::unique_ptr<StatValue>> stats_;
 
@@ -153,7 +153,7 @@ class StatRegistry {
   ~StatRegistry();
 };
 
-struct Stat {
+struct CAFFE2_API Stat {
   std::string groupName;
   std::string name;
   Stat(const std::string& gn, const std::string& n) : groupName(gn), name(n) {}
@@ -164,7 +164,7 @@ struct Stat {
   }
 };
 
-class ExportedStat : public Stat {
+class CAFFE2_API ExportedStat : public Stat {
   StatValue* value_;
 
  public:
@@ -181,7 +181,7 @@ class ExportedStat : public Stat {
   }
 };
 
-class AvgExportedStat : public ExportedStat {
+class CAFFE2_API AvgExportedStat : public ExportedStat {
  private:
   ExportedStat count_;
 
@@ -200,7 +200,7 @@ class AvgExportedStat : public ExportedStat {
   }
 };
 
-class StdDevExportedStat : public ExportedStat {
+class CAFFE2_API StdDevExportedStat : public ExportedStat {
   // Uses an offset (first_) to remove issue of cancellation
   // Variance is then (sumsqoffset_ - (sumoffset_^2) / count_) / (count_ - 1)
  private:
@@ -234,7 +234,7 @@ class StdDevExportedStat : public ExportedStat {
   }
 };
 
-class DetailedExportedStat : public ExportedStat {
+class CAFFE2_API DetailedExportedStat : public ExportedStat {
  private:
   std::vector<ExportedStat> details_;
 
@@ -255,6 +255,25 @@ class DetailedExportedStat : public ExportedStat {
       details_[detailIndex].increment(value);
     }
     return ExportedStat::increment(value);
+  }
+};
+
+class CAFFE2_API StaticStat : public Stat {
+ private:
+  StatValue* value_;
+
+ public:
+  StaticStat(const std::string& groupName, const std::string& name)
+      : Stat(groupName, name),
+        value_(StatRegistry::get().add(groupName + "/" + name)) {}
+
+  int64_t increment(int64_t value = 1) {
+    return value_->reset(value);
+  }
+
+  template <typename T, typename Unused1, typename... Unused>
+  int64_t increment(T value, Unused1, Unused...) {
+    return increment(value);
   }
 };
 
@@ -285,7 +304,7 @@ template <class T>
 _ScopeGuard<T> ScopeGuard(T f) {
   return _ScopeGuard<T>(f);
 }
-}
+} // namespace detail
 
 #define CAFFE_STAT_CTOR(ClassName)                 \
   ClassName(std::string name) : groupName(name) {} \
@@ -316,6 +335,11 @@ _ScopeGuard<T> ScopeGuard(T f) {
     groupName, #name     \
   }
 
+#define CAFFE_STATIC_STAT(name) \
+  StaticStat name {             \
+    groupName, #name            \
+  }
+
 #define CAFFE_EVENT(stats, field, ...)                              \
   {                                                                 \
     auto __caffe_event_value_ = stats.field.increment(__VA_ARGS__); \
@@ -326,8 +350,8 @@ _ScopeGuard<T> ScopeGuard(T f) {
         ##__VA_ARGS__);                                             \
   }
 
-#define CAFFE_DURATION(stats, field, ...)                \
-  if (auto g = detail::ScopeGuard([&](int64_t nanos) {   \
-        CAFFE_EVENT(stats, field, nanos, ##__VA_ARGS__); \
+#define CAFFE_DURATION(stats, field, ...)                        \
+  if (auto g = ::caffe2::detail::ScopeGuard([&](int64_t nanos) { \
+        CAFFE_EVENT(stats, field, nanos, ##__VA_ARGS__);         \
       }))
-}
+} // namespace caffe2

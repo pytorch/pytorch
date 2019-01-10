@@ -122,10 +122,6 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
 
     Each function object is meant to be used only once (in the forward pass).
 
-    Attributes:
-        requires_grad: Boolean indicating whether the :func:`backward` will
-            ever need to be called.
-
     Examples::
 
         >>> class Exp(Function):
@@ -168,14 +164,18 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
 
         This function is to be overridden by all subclasses.
 
-        It must accept a context ctx as the first argument, followed by as many
-        outputs did :func:`forward` return, and it should return as many
+        It must accept a context :attr:`ctx` as the first argument, followed by
+        as many outputs did :func:`forward` return, and it should return as many
         tensors, as there were inputs to :func:`forward`. Each argument is the
         gradient w.r.t the given output, and each returned value should be the
         gradient w.r.t. the corresponding input.
 
         The context can be used to retrieve tensors saved during the forward
-        pass.
+        pass. It also has an attribute :attr:`ctx.needs_input_grad` as a tuple
+        of booleans representing whether each input needs gradient. E.g.,
+        :func:`backward` will have ``ctx.needs_input_grad[0] = True`` if the
+        first input to :func:`forward` needs gradient computated w.r.t. the
+        output.
         """
         raise NotImplementedError
 
@@ -204,12 +204,12 @@ def once_differentiable(fn):
         if not requires_grad:
             return outputs
 
-        err_fn = torch._C._functions.DelayedError(
-            b"trying to differentiate twice a function that was marked"
-            b"with @once_differentiable")
-
         if not isinstance(outputs, tuple):
             outputs = (outputs,)
+
+        err_fn = torch._C._functions.DelayedError(
+            b"trying to differentiate twice a function that was marked"
+            b"with @once_differentiable", len(outputs))
 
         # Create aliases of each output that has requires_grad=True. We need
         # at least one of the inputs to err_fn to require grad so that the
@@ -264,8 +264,17 @@ def _nested_map(condition, fn, condition_msg=None):
     return _map
 
 
-def _iter_filter(condition, allow_unknown=False, condition_msg=None):
+def _jit_unwrap_structured(obj):
+    if hasattr(obj, "_jit_unwrap"):
+        return obj._jit_unwrap()
+    return obj
+
+
+def _iter_filter(condition, allow_unknown=False, condition_msg=None,
+                 conversion=None):
     def _iter(obj):
+        if conversion is not None:
+            obj = conversion(obj)
         if condition(obj):
             yield obj
         elif obj is None:
@@ -291,6 +300,8 @@ def _unflatten(input, proto):
     # specified by proto
     def unflatten_helper(input, proto):
         res = []
+        if hasattr(proto, "_jit_wrap"):
+            return proto._jit_wrap(input)
         if not isinstance(proto, (list, tuple)):
             return input[0], input[1:]
         for e in proto:
@@ -306,7 +317,8 @@ def _unflatten(input, proto):
 
 _iter_jit_values = _iter_filter(lambda o: o is None or isinstance(o, torch._C.Value),
                                 condition_msg="jit's Values or None")
-_iter_tensors = _iter_filter(lambda x: isinstance(x, torch.Tensor), condition_msg="Tensors")
+_iter_tensors = _iter_filter(lambda x: isinstance(x, torch.Tensor), condition_msg="Tensors",
+                             conversion=_jit_unwrap_structured)
 _iter_tensors_permissive = _iter_filter(lambda x: isinstance(x, torch.Tensor),
                                         allow_unknown=True,
                                         condition_msg="Tensors (permissive)")

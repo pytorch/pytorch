@@ -4,8 +4,10 @@
 #include "leveldb/db.h"
 #include "leveldb/write_batch.h"
 
-CAFFE2_DEFINE_int(caffe2_leveldb_block_size, 65536,
-                  "The caffe2 leveldb block size when writing a leveldb.");
+C10_DEFINE_int(
+    caffe2_leveldb_block_size,
+    65536,
+    "The caffe2 leveldb block size when writing a leveldb.");
 
 namespace caffe2 {
 namespace db {
@@ -51,7 +53,7 @@ class LevelDBTransaction : public Transaction {
   leveldb::DB* db_;
   std::unique_ptr<leveldb::WriteBatch> batch_;
 
-  DISABLE_COPY_AND_ASSIGN(LevelDBTransaction);
+  C10_DISABLE_COPY_AND_ASSIGN(LevelDBTransaction);
 };
 
 class LevelDB : public DB {

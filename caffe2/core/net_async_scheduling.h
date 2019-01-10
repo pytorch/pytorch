@@ -5,7 +5,7 @@
 
 namespace caffe2 {
 
-class AsyncSchedulingNet : public AsyncNetBase {
+class CAFFE2_API AsyncSchedulingNet : public AsyncNetBase {
  public:
   AsyncSchedulingNet(
       const std::shared_ptr<const NetDef>& net_def,
@@ -15,25 +15,22 @@ class AsyncSchedulingNet : public AsyncNetBase {
   void Wait() override;
 
  protected:
-  bool DoRunAsync() override;
+  bool RunAsync() override;
 
   void pollAndSchedule(int task_id);
-  void schedule(int task_id);
-  void reset();
+  void schedule(int task_id, bool run_inline = false);
+  void reset() override;
   virtual void finishRun();
-  int updateParentCount(int child_id);
+  void parentCallback(int parent_id);
+  bool isInlineTask(int parent_id, int child_id) const;
 
   std::mutex running_mutex_;
   std::condition_variable running_cv_;
   std::atomic<bool> running_;
-  std::atomic<bool> success_;
-
-  std::mutex cleanup_mutex_;
-  std::atomic<bool> cleanup_;
 
   std::atomic<int> processed_tasks_num_;
 
-  DISABLE_COPY_AND_ASSIGN(AsyncSchedulingNet);
+  C10_DISABLE_COPY_AND_ASSIGN(AsyncSchedulingNet);
 };
 
 } // namespace caffe2

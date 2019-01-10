@@ -1,11 +1,11 @@
 #ifndef THC_TENSORMATH_COMPARE_CUH
 #define THC_TENSORMATH_COMPARE_CUH
 
-#include "THCTensorMath.h"
-#include "THCGeneral.h"
-#include "THCTensorCopy.h"
-#include "THCApply.cuh"
-#include "THCNumerics.cuh"
+#include <THC/THCTensorMath.h>
+#include <THC/THCGeneral.h>
+#include <THC/THCTensorCopy.h>
+#include <THC/THCApply.cuh>
+#include <THC/THCNumerics.cuh>
 
 template <typename T, typename TOut>
 struct TensorLTValueOp {
@@ -68,16 +68,14 @@ struct TensorNEValueOp {
   const T value;
 };
 
-template<typename TensorType, typename TensorTypeOut, class Op>
+template<typename ScalarTypeOut, typename ScalarType, typename TensorTypeOut, typename TensorType, class Op>
 void THC_logicalValue(THCState *state,
                       TensorTypeOut *self_,
                       TensorType *src,
                       Op op) {
-  THLongStorage* st = TensorUtils<TensorType>::newSizeOf(state, src);
-  TensorUtils<TensorTypeOut>::resize(state, self_, st, NULL);
-  THLongStorage_free(st);
+  THCTensor_resize(state, self_, src->sizes(), {});
 
-  if (!THC_pointwiseApply2(state, self_, src, op)) {
+  if (!THC_pointwiseApply2<ScalarTypeOut, ScalarType>(state, self_, src, op)) {
     THArgCheck(false, 2, CUTORCH_DIM_WARNING);
   }
 

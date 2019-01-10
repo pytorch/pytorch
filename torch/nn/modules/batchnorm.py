@@ -1,12 +1,20 @@
+from __future__ import division
+
 import torch
 from .module import Module
 from torch.nn.parameter import Parameter
 from .. import functional as F
+from .. import init
+from ..._jit_internal import weak_module, weak_script_method
 
 
 # TODO: check contiguous in THNN
 # TODO: use separate backend functions?
+@weak_module
 class _BatchNorm(Module):
+    _version = 2
+    __constants__ = ['track_running_stats', 'momentum', 'eps', 'weight', 'bias',
+                     'running_mean', 'running_var', 'num_batches_tracked']
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
                  track_running_stats=True):
@@ -41,23 +49,26 @@ class _BatchNorm(Module):
     def reset_parameters(self):
         self.reset_running_stats()
         if self.affine:
-            self.weight.data.uniform_()
-            self.bias.data.zero_()
+            init.uniform_(self.weight)
+            init.zeros_(self.bias)
 
     def _check_input_dim(self, input):
         raise NotImplementedError
 
+    @weak_script_method
     def forward(self, input):
         self._check_input_dim(input)
 
         exponential_average_factor = 0.0
 
         if self.training and self.track_running_stats:
-            self.num_batches_tracked += 1
-            if self.momentum is None:  # use cumulative moving average
-                exponential_average_factor = 1.0 / self.num_batches_tracked.item()
-            else:  # use exponential moving average
-                exponential_average_factor = self.momentum
+            # TODO: if statement only here to tell the jit to skip emitting this when it is None
+            if self.num_batches_tracked is not None:
+                self.num_batches_tracked += 1
+                if self.momentum is None:  # use cumulative moving average
+                    exponential_average_factor = 1.0 / float(self.num_batches_tracked)
+                else:  # use exponential moving average
+                    exponential_average_factor = self.momentum
 
         return F.batch_norm(
             input, self.running_mean, self.running_var, self.weight, self.bias,
@@ -68,25 +79,23 @@ class _BatchNorm(Module):
         return '{num_features}, eps={eps}, momentum={momentum}, affine={affine}, ' \
                'track_running_stats={track_running_stats}'.format(**self.__dict__)
 
-    def _load_from_state_dict(self,
-                              state_dict, prefix, strict,
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-        try:
-            version = state_dict._metadata[prefix[:-1]]['version']
-        except (AttributeError, KeyError):
-            version = None
+        version = local_metadata.get('version', None)
 
-        if version is None and self.track_running_stats:
+        if (version is None or version < 2) and self.track_running_stats:
+            # at version 2: added num_batches_tracked buffer
+            #               this should have a default value of 0
             num_batches_tracked_key = prefix + 'num_batches_tracked'
             if num_batches_tracked_key not in state_dict:
-                # Add the missing num_batches_tracked counter
                 state_dict[num_batches_tracked_key] = torch.tensor(0, dtype=torch.long)
 
         super(_BatchNorm, self)._load_from_state_dict(
-            state_dict, prefix, strict,
+            state_dict, prefix, local_metadata, strict,
             missing_keys, unexpected_keys, error_msgs)
 
 
+@weak_module
 class BatchNorm1d(_BatchNorm):
     r"""Applies Batch Normalization over a 2D or 3D input (a mini-batch of 1D
     inputs with optional additional channel dimension) as described in the paper
@@ -98,9 +107,10 @@ class BatchNorm1d(_BatchNorm):
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
-    of size `C` (where `C` is the input size).
+    of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are sampled
+    from :math:`\mathcal{U}(0, 1)` and the elements of :math:`\beta` are set to 0.
 
-    By default, during training this layer keeps running estimates of its
+    Also by default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
     evaluation. The running estimates are kept with a default :attr:`momentum`
     of 0.1.
@@ -152,12 +162,14 @@ class BatchNorm1d(_BatchNorm):
         https://arxiv.org/abs/1502.03167
     """
 
+    @weak_script_method
     def _check_input_dim(self, input):
         if input.dim() != 2 and input.dim() != 3:
             raise ValueError('expected 2D or 3D input (got {}D input)'
                              .format(input.dim()))
 
 
+@weak_module
 class BatchNorm2d(_BatchNorm):
     r"""Applies Batch Normalization over a 4D input (a mini-batch of 2D inputs
     with additional channel dimension) as described in the paper
@@ -169,9 +181,10 @@ class BatchNorm2d(_BatchNorm):
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
-    of size `C` (where `C` is the input size).
+    of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are sampled
+    from :math:`\mathcal{U}(0, 1)` and the elements of :math:`\beta` are set to 0.
 
-    By default, during training this layer keeps running estimates of its
+    Also by default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
     evaluation. The running estimates are kept with a default :attr:`momentum`
     of 0.1.
@@ -223,12 +236,14 @@ class BatchNorm2d(_BatchNorm):
         https://arxiv.org/abs/1502.03167
     """
 
+    @weak_script_method
     def _check_input_dim(self, input):
         if input.dim() != 4:
             raise ValueError('expected 4D input (got {}D input)'
                              .format(input.dim()))
 
 
+@weak_module
 class BatchNorm3d(_BatchNorm):
     r"""Applies Batch Normalization over a 5D input (a mini-batch of 3D inputs
     with additional channel dimension) as described in the paper
@@ -240,9 +255,10 @@ class BatchNorm3d(_BatchNorm):
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
-    of size `C` (where `C` is the input size).
+    of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are sampled
+    from :math:`\mathcal{U}(0, 1)` and the elements of :math:`\beta` are set to 0.
 
-    By default, during training this layer keeps running estimates of its
+    Also by default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
     evaluation. The running estimates are kept with a default :attr:`momentum`
     of 0.1.
@@ -295,6 +311,7 @@ class BatchNorm3d(_BatchNorm):
         https://arxiv.org/abs/1502.03167
     """
 
+    @weak_script_method
     def _check_input_dim(self, input):
         if input.dim() != 5:
             raise ValueError('expected 5D input (got {}D input)'

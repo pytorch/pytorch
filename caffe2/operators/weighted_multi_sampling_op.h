@@ -12,7 +12,7 @@ class WeightedMultiSamplingOp : public Operator<Context> {
   WeightedMultiSamplingOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         num_samples_(
-            OperatorBase::GetSingleArgument<int64_t>("num_samples", 0)) {
+            this->template GetSingleArgument<int64_t>("num_samples", 0)) {
     CAFFE_ENFORCE_GE(num_samples_, 0);
   }
 

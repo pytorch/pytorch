@@ -13,15 +13,15 @@ class SoftmaxOp final : public Operator<Context> {
  public:
   SoftmaxOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-      axis_(OperatorBase::GetSingleArgument<int>("axis", 1)) {}
+      axis_(this->template GetSingleArgument<int>("axis", 1)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   bool RunOnDevice() override;
 
  protected:
   int axis_;
-  Tensor<Context> scale_;
-  Tensor<Context> rowmax_;
-  Tensor<Context> sum_multiplier_;
+  Tensor scale_{Context::GetDeviceType()};
+  Tensor rowmax_{Context::GetDeviceType()};
+  Tensor sum_multiplier_{Context::GetDeviceType()};
 };
 
 template <typename T, class Context>
@@ -29,14 +29,14 @@ class SoftmaxGradientOp final : public Operator<Context> {
  public:
   SoftmaxGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        axis_(OperatorBase::GetSingleArgument<int>("axis", 1)) {}
+        axis_(this->template GetSingleArgument<int>("axis", 1)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   bool RunOnDevice() override;
 
  protected:
   int axis_;
-  Tensor<Context> scale_;
-  Tensor<Context> sum_multiplier_;
+  Tensor scale_{Context::GetDeviceType()};
+  Tensor sum_multiplier_{Context::GetDeviceType()};
 };
 
 } // namespace caffe2

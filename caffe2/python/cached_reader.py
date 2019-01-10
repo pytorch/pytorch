@@ -71,7 +71,7 @@ class CachedReader(DBFileReader):
             batch_size,
         )
 
-    def _init_reader_schema(self):
+    def _init_reader_schema(self, *args, **kwargs):
         """Prepare the reader schema.
 
             Since an original reader is given,

@@ -1,91 +1,100 @@
-#include "THCUNN.h"
-#include "common.h"
-#include "THCThrustAllocator.cuh"
+#include <THCUNN/THCUNN.h>
+#include <THCUNN/common.h>
+#include <THC/THCThrustAllocator.cuh>
 #include <thrust/unique.h>
-#include "THCHalf.h"
-#include "THCHalfAutoNumerics.cuh"
-#include "THCTensorSort.cuh"
-#include "../THC/THCTensorMathReduce.cuh"
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCTensorSort.cuh>
+#include <THC/THCTensorMathReduce.cuh>
 
-const int WARP_SIZE = 32;
-
-__device__ __forceinline__ bool warpHasCollision(int val)
-{
-  // Compare our value to the values stored in the next 16 lanes,
-  // wrapping around at 32. If any pair of values is the same than
-  // there is a collision in the warp.
-  bool dup = 0;
-  const int laneId = threadIdx.x % 32;
-
-#if __CUDA_ARCH__ >= 300
-
-  #pragma unroll
-  for (int i = 1; i <= 16; i++)
-  {
-    dup |= (__shfl(val, (laneId + i) % 32) == val);
-  }
-
+#ifdef __HIP_PLATFORM_HCC__
+const int WARP_SIZE = 64;
 #else
-
-  volatile __shared__ int values[128];
-  values[threadIdx.x] = val;
-  const int offset = threadIdx.x - laneId;
-
-  #pragma unroll
-  for (int i = 1; i <= 16; i++)
-  {
-    dup |= (values[offset + ((laneId + i) % 32)] == val);
-  }
-
+const int WARP_SIZE = 32;
 #endif
 
-  return __any(dup) != 0;
-}
+template
+  <typename Dtype,
+   typename Acctype>
+__global__ void cunn_LookupTable_accGradParametersKernelByFeature
+  (int64_t *indices,
+   Dtype *grad,
+   Dtype *grad_weight,
+   Dtype scale,
+   ptrdiff_t n,
+   int64_t stride,
+   int padding_idx)
+{
+  extern __shared__ char buf[];
+  Acctype* smem = (Acctype*)buf;
+  Acctype* my_s = smem + WARP_SIZE*threadIdx.y;
+  int* indices_batch = (int*)(buf + sizeof(Acctype)*WARP_SIZE*blockDim.y);
 
-template <typename Dtype>
-__global__ void cunn_LookupTable_accGradParametersKernelByFeature(
-  int64_t *input, Dtype *gradOutput, Dtype *gradWeight, Dtype scale, ptrdiff_t numel,
-  int64_t stride, int paddingValue) {
+  const int s = (int)stride; // OK to make int, we don't expect 2 billion+ embedding row size
 
-  const int featureDim = blockIdx.x * 4 + threadIdx.x / 32;
-  if (featureDim >= stride) {
-    return;
-  }
+  const int f = threadIdx.x + blockIdx.x*blockDim.x; // feature_dim
 
-  // The strategy here is that each warp handles a single feature
-  // dimension.
-  // Within that feature dimension, points in the [batch][element]
-  // dimension can overlap, and we need to determine if threads want
-  // to add to the gradient in a colliding manner.
-  // Typically one would use floating-point atomicAdd() to resolve
-  // these collisions, but that is non-deterministic if there are
-  // collisions. Non-determinism for this code is really bad,
-  // especially in RNNs, and is prone to snowballing error.
-  // In order to get a deterministic order of execution, we handle
-  // non-colliding updates separately from colliding ones. Colliding
-  // updates are serialized in their order of execution by using the
-  // warp-wide collision detector `warpHasCollision`.
-  const int laneId = threadIdx.x % 32;
-  for (ptrdiff_t i = laneId; i < numel; i += WARP_SIZE) {
-    const int weightIndex = (int) (input[i] - TH_INDEX_BASE);
-    if (weightIndex == paddingValue - TH_INDEX_BASE) {
-      continue;
-    }
+  for(int batch_start = 0; batch_start < n; batch_start += blockDim.x*blockDim.y)
+  {
+    // Entire block cooperates to load a batch of 1024 indices to process
+    int tid = threadIdx.x + threadIdx.y*blockDim.x;
+    if(batch_start + tid < n)
+      indices_batch[tid] = (int)(indices[batch_start + tid] - TH_INDEX_BASE);
 
-    Dtype update = gradOutput[i*stride + featureDim] * scale;
+    // Loop over the batch of <= 1024 loaded indices in chunks of blockDim.y = 32
+    for(int chunk_start = batch_start; chunk_start < n; chunk_start += blockDim.y)
+    {
+      // This does double duty:  it makes sure indices_batch is ready, and it makes sure match-group
+      // leaders are done with their accumulates before other warps start loading again.
+      __syncthreads();
 
-    // FIXME: should we accumulate as accreal?
-    // Check for collision
-    if (warpHasCollision(weightIndex)) {
-      // Run all lanes sequentially; warp divergence
-      for (int i = 0; i < WARP_SIZE; ++i) {
-        if (laneId == i) {
-          gradWeight[weightIndex*stride + featureDim] += update;
+      int n_this_chunk = (n - chunk_start) < blockDim.y ? (n - chunk_start) : blockDim.y;
+
+      int src_row = chunk_start + threadIdx.y;
+      int dst_row = indices_batch[src_row - batch_start]; // This warp's target row in grad_weight
+
+      // All warps load their smem segments with incoming grad data
+      if(src_row < n && f < s && dst_row != padding_idx - TH_INDEX_BASE)
+        my_s[threadIdx.x] =  ScalarConvert<Dtype, Acctype>::to(scale*grad[src_row*stride + f]);
+
+      __syncthreads();
+
+      // To ensure determinism, we can't just have each warp add its grad data to its dst_row.
+      // We need to check if any other warps pulled grad data targeting dst_row.
+      // If so, we elect the first warp in each matching group as the leader.
+      // Each leader warp serializes the accumulates targeting dst_row in shared memory,
+      // then finishes by adding the accumulated buffer to dst_row in grad_weight.
+      if(dst_row != padding_idx - TH_INDEX_BASE && src_row < n) // Per-warp exit condition
+      {
+        int match_found_this_thread =
+          (dst_row == indices_batch[chunk_start - batch_start + threadIdx.x]);
+        if(threadIdx.x >= n_this_chunk)
+          match_found_this_thread = 0;
+#ifdef __HIP_PLATFORM_HCC__
+        unsigned long long int matchmask = WARP_BALLOT(match_found_this_thread);
+        int first_remaining_peer = __ffsll(matchmask) - 1;
+#else
+        unsigned int matchmask = WARP_BALLOT(match_found_this_thread);
+        int first_remaining_peer = __ffs(matchmask) - 1;
+#endif
+
+        if(threadIdx.y == first_remaining_peer) // Nominate lowest-indexed warp as the leader
+        {
+          matchmask ^= (1 << first_remaining_peer);
+          while(matchmask)
+          {
+#ifdef __HIP_PLATFORM_HCC__
+            first_remaining_peer = __ffsll(matchmask) - 1;
+#else
+            first_remaining_peer = __ffs(matchmask) - 1;
+#endif
+	    my_s[threadIdx.x] += smem[threadIdx.x + WARP_SIZE*first_remaining_peer];
+            matchmask ^= (1 << first_remaining_peer);
+          }
+          if(f < s)
+            grad_weight[dst_row*stride + f] += ScalarConvert<Acctype, Dtype>::to(my_s[threadIdx.x]);
         }
       }
-    } else {
-      // No collision; warp coherence
-      gradWeight[weightIndex*stride + featureDim] += update;
     }
   }
 }
@@ -188,10 +197,10 @@ struct FastPow<DType, AccType, 2>
 /* Calculate norms of the rows of weight_ptr given by idx_ptr and capture them in norms */
 template <typename DType, typename AccType, typename IndexType, int Norm>
 __global__
-void calculate_norms_and_renorm(DType *weights, 
-                                THCIndex_t *indices, 
+void calculate_norms_and_renorm(DType *weights,
+                                THCIndex_t *indices,
                                 AccType normType,
-                                AccType maxNorm, 
+                                AccType maxNorm,
                                 IndexType dim)
 {
   // Some casting hacks since dynamic shared memory and templates don't work together:
@@ -207,11 +216,11 @@ void calculate_norms_and_renorm(DType *weights,
     v += FastPow<DType, AccType, Norm>::pow(weights[baseIndex + i], normType);
   }
 
-  v = reduceBlock<AccType, ReduceAdd<AccType, AccType>>
-        (sdata, blockDim.x, v, ReduceAdd<AccType, AccType>(), accZero);
+  v = reduceBlock<AccType, ReduceAdd<AccType>>
+        (sdata, blockDim.x, v, ReduceAdd<AccType>(), accZero);
 
   if (tid == 0) {
-    sdata[0] = std::pow(v, 
+    sdata[0] = std::pow(v,
         THCNumerics<AccType>::div(ScalarConvert<int, AccType>::to(1), normType)
     );
   }
@@ -226,5 +235,5 @@ void calculate_norms_and_renorm(DType *weights,
 
 }
 
-#include "generic/LookupTable.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/LookupTable.cu>
+#include <THC/THCGenerateFloatTypes.h>

@@ -1,9 +1,9 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/WrapDimUtils.h"
-#include "ATen/detail/CUDAHooksInterface.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/WrapDimUtils.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 
-#include "ATen/Config.h"
+#include <ATen/Config.h>
 namespace at {
 namespace native {
 
@@ -29,10 +29,34 @@ bool cudnn_is_acceptable(const Tensor& self) {
   auto st = self.type().scalarType();
   if (!(st == kDouble || st == kFloat || st == kHalf)) return false;
   if (!detail::getCUDAHooks().compiledWithCuDNN()) return false;
+  // cuDNN functions like grid_sampler returns CUDNN_STATUS_BAD_PARAM on empty
+  // tensors. Maybe some cuDNN functions actually support empty tensors, but
+  // native/THNN kernels shouldn't be much slower because the output is also
+  // likely empty.
+  if (self.numel() == 0) return false;
   // NB: In the old Python code, there was also a test to see if the
   // cuDNN library was actually dynamically linked or not.  I'm not
   // sure if we can actually test this.
   return true;
+}
+
+Tensor detach(const Tensor& self) {
+  // this just exists to give us a hook in VariableType and an entry in Declarations.yaml
+  AT_ERROR("detach is not implemented for Tensor");
+  return self;
+}
+
+Tensor & detach_(Tensor & self) {
+  // this just exists to give us a hook in VariableType and an entry in Declarations.yaml
+  AT_ERROR("detach_ is not implemented for Tensor");
+  return self;
+}
+
+Tensor contiguous(const Tensor & self) {
+  if (self.is_contiguous()) {
+    return self;
+  }
+  return self.clone();
 }
 
 }

@@ -11,20 +11,20 @@ bool MarginRankingCriterionOp<CPUContext>::RunOnDevice() {
   auto& X1 = Input(0);
   auto& X2 = Input(1);
   auto& Y = Input(2);
-  auto* loss = Output(0);
+
   CAFFE_ENFORCE_EQ(
-      X1.size(),
-      X2.size(),
+      X1.numel(),
+      X2.numel(),
       "The two inputs for computing ranking loss should have the same size.");
   CAFFE_ENFORCE_EQ(
-      X1.size(), Y.size(), "The input and label should have the same size.");
-  loss->ResizeLike(X1);
+      X1.numel(), Y.numel(), "The input and label should have the same size.");
+  auto* loss = Output(0, X1.sizes(), at::dtype<float>());
 
   const float* X1data = X1.data<float>();
   const float* X2data = X2.data<float>();
   const int* Ydata = Y.data<int>();
-  float* output = loss->mutable_data<float>();
-  for (int i = 0; i < X1.size(); ++i) {
+  float* output = loss->template mutable_data<float>();
+  for (int i = 0; i < X1.numel(); ++i) {
     output[i] = std::max(-Ydata[i] * (X1data[i] - X2data[i]) + margin_, 0.f);
   }
   return true;
@@ -36,20 +36,18 @@ bool MarginRankingCriterionGradientOp<CPUContext>::RunOnDevice() {
   auto& X2 = Input(1);
   auto& Y = Input(2);
   auto& dLoss = Input(3);
-  auto* dX1 = Output(0);
-  auto* dX2 = Output(1);
 
-  dX1->ResizeLike(X1);
-  dX2->ResizeLike(X2);
+  auto* dX1 = Output(0, X1.sizes(), at::dtype<float>());
+  auto* dX2 = Output(1, X2.sizes(), at::dtype<float>());
 
   const float* X1data = X1.data<float>();
   const float* X2data = X2.data<float>();
   const int* Ydata = Y.data<int>();
   const float* dLoss_data = dLoss.data<float>();
 
-  float* dX1_data = dX1->mutable_data<float>();
-  float* dX2_data = dX2->mutable_data<float>();
-  for (int i = 0; i < X1.size(); ++i) {
+  float* dX1_data = dX1->template mutable_data<float>();
+  float* dX2_data = dX2->template mutable_data<float>();
+  for (int i = 0; i < X1.numel(); ++i) {
     auto dist = -Ydata[i] * (X1data[i] - X2data[i]) + margin_;
     if (dist < 0.f) {
       dX1_data[i] = dX2_data[i] = 0.f;
@@ -72,9 +70,9 @@ OPERATOR_SCHEMA(MarginRankingCriterion)
     .NumInputs(3)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-MarginRankingCriterion takes two input data X1 (Tensor<float>),
-X2 (Tensor<float>), and label Y (Tensor<int>) to produce the
-loss (Tensor<float>) where the loss function,
+MarginRankingCriterion takes two input data X1 (Tensor),
+X2 (Tensor), and label Y (Tensor) to produce the
+loss (Tensor) where the loss function,
 loss(X1, X2, Y) = max(0, -Y * (X1 - X2) + margin), is applied to
 the tensor elementwise.
 
@@ -82,6 +80,7 @@ If y == 1 then it assumed the first input should be ranked higher
 (have a larger value) than the second input, and vice-versa for
 y == -1.
 )DOC")
+    .Arg("margin", "The margin value as a float. Default is 1.0.")
     .Input(0, "X1", "The left input vector as a 1-dim TensorCPU.")
     .Input(1, "X2", "The right input vector as a 1-dim TensorCPU.")
     .Input(2, "Y", "The label as a 1-dim TensorCPU with int value of 1 or -1.")

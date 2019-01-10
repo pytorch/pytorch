@@ -540,7 +540,7 @@ ${cpu}
             generated = '#if !defined(TH_REAL_IS_HALF) && !IS_DISTRIBUTED\n' + generated + '\n#endif\n\n'
         return generated
 
-    def process_full_file(self, code):
+    def process_full_file(self, code, template_path):
         # We have to find a place before all undefs
         idx = code.find('// PUT DEFINITIONS IN HERE PLEASE')
         return (code[:idx] +

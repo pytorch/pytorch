@@ -1,4 +1,5 @@
 #include "caffe2/operators/prelu_op.h"
+#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
 #include "caffe2/core/types.h"
@@ -97,17 +98,17 @@ template <>
 bool PReluOp<float, CPUContext>::RunOnDevice() {
   const auto& X = Input(0);
   const auto& W = Input(1);
-  auto* Y = Output(0);
-  Y->ResizeLike(X);
+
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
   const auto* Xdata = X.template data<float>();
   const auto* Wdata = W.template data<float>();
   auto* Ydata = Y->template mutable_data<float>();
 
-  const auto C = order_ == StorageOrder::NCHW ? X.dim(1) : X.dim(X.ndim() - 1);
-  const auto C_shared = (W.size() == 1);
+  const auto C = order_ == StorageOrder::NCHW ? X.size(1) : X.size(X.dim() - 1);
+  const auto C_shared = (W.numel() == 1);
 
   if (!C_shared) {
-    CAFFE_ENFORCE_EQ(C, W.size());
+    CAFFE_ENFORCE_EQ(C, W.numel());
   }
 
   if (C_shared) {
@@ -115,8 +116,8 @@ bool PReluOp<float, CPUContext>::RunOnDevice() {
     // The function is completely pointwise
     runNeonPrelu(Ydata, Xdata, X.size(), Wdata[0]);
 #else
-    ConstEigenVectorMap<float> Xvec(Xdata, X.size());
-    EigenVectorMap<float> Yvec(Ydata, Y->size());
+    ConstEigenVectorMap<float> Xvec(Xdata, X.numel());
+    EigenVectorMap<float> Yvec(Ydata, Y->numel());
     Yvec = Xvec.cwiseMax(0.f) + Xvec.cwiseMin(0.f) * Wdata[0];
 #endif // defined(__ARM_NEON__) || defined(__ARM_NEON)
     return true;
@@ -125,7 +126,7 @@ bool PReluOp<float, CPUContext>::RunOnDevice() {
   // non-shared case.
   switch (order_) {
     case StorageOrder::NCHW: {
-      const auto N = X.dim(0);
+      const auto N = X.size(0);
       const auto dim = X.size_from_dim(2);
 
 #if defined(__ARM_NEON__) || defined(__ARM_NEON)
@@ -152,7 +153,7 @@ bool PReluOp<float, CPUContext>::RunOnDevice() {
     }
     case StorageOrder::NHWC: {
       // Lay out matrix as (NHW, C) and multiply by C
-      const auto NHW = X.size() / C;
+      const auto NHW = X.numel() / C;
       ConstEigenArrayMap<float> Xmat(Xdata, C, NHW);
       ConstEigenVectorArrayMap<float> Wvec(Wdata, C);
       EigenArrayMap<float> Ymat(Ydata, C, NHW);
@@ -173,40 +174,38 @@ bool PReluGradientOp<float, CPUContext>::RunOnDevice() {
   auto& W = Input(3);
 
   CAFFE_ENFORCE(&Y != &X, "Cannot backpropagate through an in-place PReLU");
-  auto* dX = Output(0);
-  auto* dW = Output(1);
 
-  DCHECK_EQ(dY.size(), Y.size());
-  dX->ResizeLike(Y);
-  dW->ResizeLike(W);
+  DCHECK_EQ(dY.numel(), Y.numel());
+  auto* dX = Output(0, Y.sizes(), at::dtype<float>());
+  auto* dW = Output(1, W.sizes(), at::dtype<float>());
 
-  const auto C = order_ == StorageOrder::NCHW ? X.dim(1) : X.dim(X.ndim() - 1);
-  const auto C_shared = (W.size() == 1);
+  const auto C = order_ == StorageOrder::NCHW ? X.size(1) : X.size(X.dim() - 1);
+  const auto C_shared = (W.numel() == 1);
 
   const float* Ydata = Y.data<float>();
   const float* dYdata = dY.data<float>();
   const float* Xdata = X.data<float>();
   const float* Wdata = W.data<float>();
-  float* dXdata = dX->mutable_data<float>();
-  float* dWdata = dW->mutable_data<float>();
+  float* dXdata = dX->template mutable_data<float>();
+  float* dWdata = dW->template mutable_data<float>();
 
   // non-shared case.
   switch (order_) {
     case StorageOrder::NCHW: {
       const auto dim = X.size_from_dim(2);
       const auto div_factor = C_shared ? C : 1;
-      for (auto c = 0; c < W.size(); ++c) {
+      for (auto c = 0; c < W.numel(); ++c) {
         dWdata[c] = 0;
       }
 
-      for (int i = 0; i < Y.size(); ++i) {
+      for (int i = 0; i < Y.numel(); ++i) {
         if (Xdata[i] <= 0) {
           int c = (i / dim) % C / div_factor;
           dWdata[c] += dYdata[i] * Xdata[i];
         }
       }
 
-      for (int i = 0; i < Y.size(); ++i) {
+      for (int i = 0; i < Y.numel(); ++i) {
         if (Xdata[i] > 0) {
           dXdata[i] = dYdata[i];
         } else {
@@ -217,9 +216,9 @@ bool PReluGradientOp<float, CPUContext>::RunOnDevice() {
       break;
     }
     case StorageOrder::NHWC: {
-      const auto NHW = X.size() / C;
-      ConstEigenVectorArrayMap<float> Wvec(Wdata, W.size());
-      EigenVectorArrayMap<float> dWvec(dWdata, dW->size());
+      const auto NHW = X.numel() / C;
+      ConstEigenVectorArrayMap<float> Wvec(Wdata, W.numel());
+      EigenVectorArrayMap<float> dWvec(dWdata, dW->numel());
 
       ConstEigenArrayMap<float> Ymat(Ydata, C, NHW);
       ConstEigenArrayMap<float> dYmat(dYdata, C, NHW);
@@ -253,7 +252,9 @@ bool PReluGradientOp<float, CPUContext>::RunOnDevice() {
 }
 
 REGISTER_CPU_OPERATOR(PRelu, PReluOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(PReluGradient, PReluGradientOp<float, CPUContext>);
+REGISTER_CPU_GRADIENT_OPERATOR(
+    PReluGradient,
+    PReluGradientOp<float, CPUContext>);
 
 // Input: X, Slope, output: Y
 OPERATOR_SCHEMA(PRelu)
@@ -263,22 +264,78 @@ OPERATOR_SCHEMA(PRelu)
     .IdenticalTypeAndShapeOfInput(0)
     .SetDoc(R"DOC(
 
-PRelu takes input data (Tensor<T>) and slope tensor as input, and produces one
-output data (Tensor<T>) where the function `f(x) = slope * x for x < 0`,
-`f(x) = x for x >= 0`., is applied to the data tensor elementwise.
+The *PRelu* op takes input data tensor $X$, an input slope tensor $slope$, and produces one output tensor $Y$ of the same shape as $X.$ The op performs the element wise *PRelu* operation, defined as
+
+$$y=prelu(x) =\begin{cases}slope * x & x < 0\\x & otherwise\end{cases}$$
+
+Note, is slope is size 1, the value is shared across the channels, otherwise $X$ and $slope$ must be the same shape. See [Delving Deep into Rectifiers: Surpassing Human-Level Performance on ImageNet Classification](https://arxiv.org/abs/1502.01852) for more information.
+
+Github Links:
+
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/prelu_op.h
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/prelu_op.cc
+
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "PRelu",
+    ["X","Slope"],
+    ["Y"],
+)
+
+workspace.FeedBlob("X", np.random.randn(3, 3).astype(np.float32))
+print("X:\n", workspace.FetchBlob("X"), "\n")
+
+workspace.FeedBlob("Slope", np.array([0.1]).astype(np.float32))
+print("Slope:\n", workspace.FetchBlob("Slope"), "\n")
+
+workspace.RunOperatorOnce(op)
+print("Y:\n", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X:
+ [[ 0.3957382  -0.19725518 -0.26991343]
+ [ 1.5513182  -0.27427664 -0.14584002]
+ [-0.4121164   0.9292345   0.96426094]]
+
+Slope:
+ [0.1]
+
+Y:
+ [[ 0.3957382  -0.01972552 -0.02699134]
+ [ 1.5513182  -0.02742766 -0.014584  ]
+ [-0.04121164  0.9292345   0.96426094]]
+
+```
+
+</details>
+
 
 )DOC")
-    .Input(0, "X", "1D input tensor")
+    .Input(0, "X", "Input tensor of data to be operated on.")
     .Input(
         1,
         "Slope",
-        "1D slope tensor. If `Slope` is of size 1, the value is shared"
-        "across different channels")
-    .Output(0, "Y", "1D input tensor")
-    .InheritOnnxSchema("PRelu");
+        "1D input slope tensor. If `Slope` is of size 1, the value is shared across different channels")
+    .Output(0, "Y", "Output tensor, with same shape as $X$.")
+    .InheritOnnxSchema();
 
 // Input: Y, dY, output: dX
-OPERATOR_SCHEMA(PReluGradient).NumInputs(4).NumOutputs(2).SetDoc(R"DOC(
+GRADIENT_OPERATOR_SCHEMA(PReluGradient).NumInputs(4).NumOutputs(2).SetDoc(R"DOC(
 
 PReluGradient takes both Y and dY and uses this to update dX and dW according
 to the chain rule and derivatives of the rectified linear function.

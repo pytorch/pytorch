@@ -1,5 +1,10 @@
-#include "ATen/NativeFunctions.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <c10/util/Exception.h>
+
 #include <cfloat>
+#include <tuple>
 
 namespace at {
 namespace native {
@@ -117,20 +122,20 @@ std::tuple<Tensor, Tensor> RoiPooling2d_forward_cuda(
   auto inputWidth = input.size(3);
 
   // Output Tensor is (num_rois, C, pooledHeight, pooledWidth)
-  auto output = input.type().tensor({proposals, inputChannels, pooledHeight, pooledWidth});
+  auto output = at::empty({proposals, inputChannels, pooledHeight, pooledWidth}, input.options());
 
   // TODO: need some mechanism for determining train vs. test
 
   // During training, we need to store the argmaxes for the pooling operation, so
   // the argmaxes Tensor should be the same size as the output Tensor
-  auto argmaxes = input.type().toScalarType(kInt).tensor({proposals, inputChannels, pooledHeight, pooledWidth});
+  auto argmaxes = at::empty({proposals, inputChannels, pooledHeight, pooledWidth}, input.options().dtype(kInt));
 
   AT_CHECK(input.is_contiguous(), "input must be contiguous");
   AT_CHECK(rois.is_contiguous(), "rois must be contiguous");
 
   dim3 block(512);
   dim3 grid((output.numel() + 512 - 1) / 512);
-  RoiPooling2d_forward_kernel<<<grid, block, 0, globalContext().getCurrentCUDAStream()>>>(
+  RoiPooling2d_forward_kernel<<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
     output.numel(), input.data<float>(), rois.data<float>(), static_cast<float>(spatialScale), inputChannels,
     inputHeight, inputWidth, pooledHeight, pooledWidth, output.data<float>(), argmaxes.data<int>());
   AT_CHECK(cudaGetLastError() == cudaSuccess, "RoiPooling2d_forward_kernel failed with error code ", cudaGetLastError());
@@ -193,11 +198,11 @@ Tensor RoiPooling2d_backward_cuda(
   auto inputHeight = input.size(2);
   auto inputWidth = input.size(3);
 
-  auto gradInput = input.type().tensor(input.sizes());
+  auto gradInput = at::empty(input.sizes(), input.options());
 
   dim3 block(512);
   dim3 grid((gradInput.numel() + 512 - 1) / 512);
-  RoiPooling2d_backward_kernel<<<grid, block, 0, globalContext().getCurrentCUDAStream()>>>(
+  RoiPooling2d_backward_kernel<<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
     gradOutput.numel(), gradOutput.data<float>(), argmaxes.data<int>(), proposals,
     static_cast<float>(spatialScale), inputChannels, inputHeight, inputWidth,
     pooledHeight, pooledWidth, gradInput.data<float>(), rois.data<float>());

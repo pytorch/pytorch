@@ -18,8 +18,8 @@ class ConvTransposeOp final : public ConvTransposeUnpoolBase<Context> {
   bool RunOnDeviceWithOrderNHWC() override;
 
  private:
-  Tensor<Context> col_buffer_;
-  Tensor<Context> bias_multiplier_;
+  Tensor col_buffer_{Context::GetDeviceType()};
+  Tensor bias_multiplier_{Context::GetDeviceType()};
   // Input: X, W, b
   // Output: Y
   INPUT_TAGS(INPUT, FILTER, BIAS);
@@ -31,7 +31,7 @@ class ConvTransposeGradientOp final : public ConvTransposeUnpoolBase<Context> {
   USE_CONV_TRANSPOSE_UNPOOL_BASE_FUNCTIONS(Context);
   ConvTransposeGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvTransposeUnpoolBase<Context>(operator_def, ws),
-        no_bias_(OperatorBase::GetSingleArgument<bool>("no_bias", false)) {
+        no_bias_(this->template GetSingleArgument<bool>("no_bias", false)) {
     CAFFE_ENFORCE(
         !(no_bias_ && OutputSize() == 3),
         "If bias is not present, you should not have 3 grad output.");
@@ -41,8 +41,8 @@ class ConvTransposeGradientOp final : public ConvTransposeUnpoolBase<Context> {
   bool RunOnDeviceWithOrderNHWC() override;
 
  private:
-  Tensor<Context> col_buffer_;
-  Tensor<Context> bias_multiplier_;
+  Tensor col_buffer_{Context::GetDeviceType()};
+  Tensor bias_multiplier_{Context::GetDeviceType()};
   const bool no_bias_;
   // input: X, W, dY
   // output: dW, optionally db and dX

@@ -130,6 +130,7 @@ __global__ void PSRoIPoolForward(
     T bin_size_h = roi_height / static_cast<T>(pooled_height);
     T bin_size_w = roi_width / static_cast<T>(pooled_width);
 
+    // Add roi offsets and clip to input boundaries
     int hstart = floor(
       static_cast<T>(ph) * bin_size_h + roi_start_h);
     int wstart = floor(
@@ -138,7 +139,7 @@ __global__ void PSRoIPoolForward(
       static_cast<T>(ph + 1) * bin_size_h + roi_start_h);
     int wend = ceil(
       static_cast<T>(pw + 1) * bin_size_w + roi_start_w);
-    // Add roi offsets and clip to input boundaries
+
     hstart = min(max(hstart, 0), height);
     hend = min(max(hend, 0), height);
     wstart = min(max(wstart, 0),width);
@@ -242,11 +243,11 @@ template<>
 bool PSRoIPoolOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);  // Input data to pool
   auto& R = Input(1);  // RoIs
-  auto* Y = Output(0); // PSRoI pooled data
-  auto* A = Output(1); // mapping_channel
+   // PSRoI pooled data
+   // mapping_channel
 
-  Y->Resize(R.dim32(0), output_dim_, pooled_height_, pooled_width_);
-  A->Resize(Y->dims());
+  auto* Y = Output(0, {R.dim32(0), output_dim_, pooled_height_, pooled_width_}, at::dtype<float>());
+  auto* A = Output(1, Y->sizes(), at::dtype<int>());
   int output_size = Y->size();
   PSRoIPoolForward<float><<<CAFFE_GET_BLOCKS(output_size),
                             CAFFE_CUDA_NUM_THREADS,

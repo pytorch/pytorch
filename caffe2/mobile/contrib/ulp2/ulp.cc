@@ -1,5 +1,8 @@
 #include "ulp.h"
+
+#include <cstring>
 #include "caffe2/operators/conv_pool_op_base.h"
+#include "caffe2/utils/eigen_utils.h"
 #include "ulp_neon.h"
 
 namespace caffe2 {
@@ -12,7 +15,7 @@ void uniformQuantize2b1b(const TensorCPU& X,
   const auto N = X.size_to_dim(X.ndim() - 1);
   auto C = X.size() / N;
   const auto QC = divRoundUp(C,  8);
-  auto XQs = X.dims();
+  auto XQs = X.dims().vec();
   XQs[X.ndim() - 1] = QC;
   CAFFE_ENFORCE_EQ(XQ.size(), k2b1bXBits);
   for (auto i = 0; i < k2b1bXBits; ++i) {
@@ -134,7 +137,7 @@ void signQuantize(const TensorCPU& X, TensorCPU* XQ) {
   const auto N = X.size_to_dim(X.ndim() - 1);
   auto C = X.size() / N;
   const auto QC = divRoundUp(C,  8);
-  auto XQs = X.dims();
+  auto XQs = X.dims().vec();
   XQs[X.ndim() - 1] = QC;
   XQ->Resize(XQs);
   const float* Xdata = X.data<float>();
@@ -258,14 +261,14 @@ std::unique_ptr<QConvState> create2b1bConvState(Workspace* ws,
   state->XQs.resize(k2b1bXBits);
   state->YQs.resize(k2b1bXBits);
   for (auto i = 0; i < k2b1bXBits; ++i) {
-    state->XQs[i] = caffe2::make_unique<TensorCPU>();
-    state->YQs[i] = caffe2::make_unique<TensorCPU>();
+    state->XQs[i] = caffe2::make_unique<Tensor>(CPU);
+    state->YQs[i] = caffe2::make_unique<Tensor>(CPU);
   }
-  state->WQ = caffe2::make_unique<TensorCPU>();
-  state->WQN = caffe2::make_unique<TensorCPU>();
-  state->WQL1Norm = caffe2::make_unique<TensorCPU>();
-  state->scratch = caffe2::make_unique<TensorCPU>();
-  state->scratchColBuffer = caffe2::make_unique<TensorCPU>();
+  state->WQ = caffe2::make_unique<Tensor>(CPU);
+  state->WQN = caffe2::make_unique<Tensor>(CPU);
+  state->WQL1Norm = caffe2::make_unique<Tensor>(CPU);
+  state->scratch = caffe2::make_unique<Tensor>(CPU);
+  state->scratchColBuffer = caffe2::make_unique<Tensor>(CPU);
 
   signQuantize(W, state->WQ.get());
   filterNormalization11(*(state->WQ), state->WQN.get());
@@ -277,7 +280,7 @@ std::unique_ptr<QConvState> create2b1bConvState(Workspace* ws,
   //   r->WQL1Norm.mutable_data<float>()[i] *= center_distance;
   // }
   state->parallelFor = [ws](size_t range, std::function<void(size_t)> f) {
-#if CAFFE2_MOBILE
+#if C10_MOBILE
     ws->GetThreadPool()->run([&](int, size_t v) { f(v); }, range);
 #else
     for (size_t v = 0; v < range; ++v) {
@@ -286,7 +289,7 @@ std::unique_ptr<QConvState> create2b1bConvState(Workspace* ws,
 #endif
   };
   if (b) {
-    state->bias = caffe2::make_unique<TensorCPU>(*b);
+    state->bias = caffe2::make_unique<Tensor>(*b, CPU);
   }
   return state;
 }

@@ -6,6 +6,7 @@ Tensors
 ----------------------------------
 .. autofunction:: is_tensor
 .. autofunction:: is_storage
+.. autofunction:: is_floating_point
 .. autofunction:: set_default_dtype
 .. autofunction:: get_default_dtype
 .. autofunction:: set_default_tensor_type
@@ -33,6 +34,7 @@ Creation Ops
     range of distributions.
 
 .. autofunction:: tensor
+.. autofunction:: sparse_coo_tensor
 .. autofunction:: as_tensor
 .. autofunction:: from_numpy
 .. autofunction:: zeros
@@ -56,6 +58,7 @@ Indexing, Slicing, Joining, Mutating Ops
 .. autofunction:: gather
 .. autofunction:: index_select
 .. autofunction:: masked_select
+.. autofunction:: narrow
 .. autofunction:: nonzero
 .. autofunction:: reshape
 .. autofunction:: split
@@ -167,7 +170,9 @@ Pointwise Ops
 .. autofunction:: cos
 .. autofunction:: cosh
 .. autofunction:: div
+.. autofunction:: digamma
 .. autofunction:: erf
+.. autofunction:: erfc
 .. autofunction:: erfinv
 .. autofunction:: exp
 .. autofunction:: expm1
@@ -180,6 +185,7 @@ Pointwise Ops
 .. autofunction:: log1p
 .. autofunction:: log2
 .. autofunction:: mul
+.. autofunction:: mvlgamma
 .. autofunction:: neg
 .. autofunction:: pow
 .. autofunction:: reciprocal
@@ -203,6 +209,7 @@ Reduction Ops
 .. autofunction:: cumprod
 .. autofunction:: cumsum
 .. autofunction:: dist
+.. autofunction:: logsumexp
 .. autofunction:: mean
 .. autofunction:: median
 .. autofunction:: mode
@@ -216,10 +223,14 @@ Reduction Ops
 
 Comparison Ops
 ~~~~~~~~~~~~~~~~~~~~~~
+.. autofunction:: allclose
+.. autofunction:: argsort
 .. autofunction:: eq
 .. autofunction:: equal
 .. autofunction:: ge
 .. autofunction:: gt
+.. autofunction:: isfinite
+.. autofunction:: isinf
 .. autofunction:: isnan
 .. autofunction:: kthvalue
 .. autofunction:: le
@@ -238,20 +249,30 @@ Spectral Ops
 .. autofunction:: rfft
 .. autofunction:: irfft
 .. autofunction:: stft
-.. autofunction:: hann_window
-.. autofunction:: hamming_window
 .. autofunction:: bartlett_window
+.. autofunction:: blackman_window
+.. autofunction:: hamming_window
+.. autofunction:: hann_window
 
 
 Other Operations
 ~~~~~~~~~~~~~~~~~~~~~~
+.. autofunction:: bincount
+.. autofunction:: broadcast_tensors
 .. autofunction:: cross
 .. autofunction:: diag
+.. autofunction:: diag_embed
 .. autofunction:: diagflat
 .. autofunction:: diagonal
 .. autofunction:: einsum
+.. autofunction:: flatten
+.. autofunction:: flip
+.. autofunction:: rot90
 .. autofunction:: histc
+.. autofunction:: meshgrid
 .. autofunction:: renorm
+.. autofunction:: roll
+.. autofunction:: tensordot
 .. autofunction:: trace
 .. autofunction:: tril
 .. autofunction:: triu
@@ -270,6 +291,9 @@ BLAS and LAPACK Operations
 .. autofunction:: btrifact_with_info
 .. autofunction:: btrisolve
 .. autofunction:: btriunpack
+.. autofunction:: chain_matmul
+.. autofunction:: cholesky
+.. autofunction:: cholesky_solve
 .. autofunction:: dot
 .. autofunction:: eig
 .. autofunction:: gels
@@ -281,10 +305,13 @@ BLAS and LAPACK Operations
 .. autofunction:: logdet
 .. autofunction:: slogdet
 .. autofunction:: matmul
+.. autofunction:: matrix_power
+.. autofunction:: matrix_rank
 .. autofunction:: mm
 .. autofunction:: mv
 .. autofunction:: orgqr
 .. autofunction:: ormqr
+.. autofunction:: pinverse
 .. autofunction:: potrf
 .. autofunction:: potri
 .. autofunction:: potrs
@@ -293,3 +320,7 @@ BLAS and LAPACK Operations
 .. autofunction:: svd
 .. autofunction:: symeig
 .. autofunction:: trtrs
+
+Utilities
+----------------------------------
+.. autofunction:: compiled_with_cxx11_abi

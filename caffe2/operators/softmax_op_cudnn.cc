@@ -29,13 +29,17 @@ class CuDNNSoftmaxOp final : public Operator<CUDAContext> {
   template <typename T>
   bool DoRunWithType() {
     auto& X = Input(0);
-    auto* Y = Output(0);
+
     const auto canonical_axis = X.canonical_axis_index(axis_);
     const int N = X.size_to_dim(canonical_axis);
     const int D = X.size_from_dim(canonical_axis);
 
-    Y->ResizeLike(X);
-    if (dims_ != X.dims()) {
+    auto* Y = Output(0, X.sizes(), at::dtype<T>());
+    auto* Y_data = Y->template mutable_data<T>();
+    if (N == 0) {
+      return true;
+    }
+    if (dims_ != X.sizes()) {
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           desc_,
           GetCudnnTensorFormat(StorageOrder::NCHW),
@@ -44,7 +48,7 @@ class CuDNNSoftmaxOp final : public Operator<CUDAContext> {
           D,
           1,
           1));
-      dims_ = X.dims();
+      dims_ = X.sizes().vec();
     }
     CUDNN_ENFORCE(cudnnSoftmaxForward(
         cudnn_wrapper_.inline_cudnn_handle(),
@@ -55,19 +59,19 @@ class CuDNNSoftmaxOp final : public Operator<CUDAContext> {
         X.template data<T>(),
         cudnnTypeWrapper<T>::kZero(),
         desc_,
-        Y->template mutable_data<T>()));
+        Y_data));
     return true;
   }
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
   }
 
  protected:
   CuDNNWrapper cudnn_wrapper_;
   int axis_;
   cudnnTensorDescriptor_t desc_;
-  vector<TIndex> dims_;
+  vector<int64_t> dims_;
 };
 
 
@@ -88,14 +92,18 @@ class CuDNNSoftmaxGradientOp final : public Operator<CUDAContext> {
   bool DoRunWithType() {
     auto& Y = Input(0);
     auto& dY = Input(1);
-    auto* dX = Output(0);
+
     const auto canonical_axis = Y.canonical_axis_index(axis_);
     const int N = Y.size_to_dim(canonical_axis);
     const int D = Y.size_from_dim(canonical_axis);
 
-    CHECK_EQ(Y.dims(), dY.dims());
-    dX->ResizeLike(Y);
-    if (dims_ != Y.dims()) {
+    CHECK_EQ(Y.sizes(), dY.sizes());
+    auto* dX = Output(0, Y.sizes(), at::dtype<T>());
+    auto* dX_data = dX->template mutable_data<T>();
+    if (N == 0) {
+      return true;
+    }
+    if (dims_ != Y.sizes()) {
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           desc_,
           GetCudnnTensorFormat(StorageOrder::NCHW),
@@ -104,7 +112,7 @@ class CuDNNSoftmaxGradientOp final : public Operator<CUDAContext> {
           D,
           1,
           1));
-      dims_ = Y.dims();
+      dims_ = Y.sizes().vec();
     }
     CUDNN_ENFORCE(cudnnSoftmaxBackward(
         cudnn_wrapper_.inline_cudnn_handle(),
@@ -117,19 +125,19 @@ class CuDNNSoftmaxGradientOp final : public Operator<CUDAContext> {
         dY.template data<T>(),
         cudnnTypeWrapper<T>::kZero(),
         desc_,
-        dX->template mutable_data<T>()));
+        dX_data));
     return true;
   }
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
   }
 
  protected:
   CuDNNWrapper cudnn_wrapper_;
   int axis_;
   cudnnTensorDescriptor_t desc_;
-  vector<TIndex> dims_;
+  vector<int64_t> dims_;
 };
 
 namespace {

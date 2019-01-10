@@ -6,9 +6,11 @@
 #include <string>
 #include <vector>
 
+#include "caffe2/core/common.h"
+
 namespace caffe2 {
 
-class StoreHandler {
+class CAFFE2_API StoreHandler {
  public:
   static constexpr std::chrono::milliseconds kDefaultTimeout =
       std::chrono::seconds(30);
@@ -25,10 +27,12 @@ class StoreHandler {
 
   /*
    * Get the data for the key.
-   * The call should wait until the key is stored with default timeout
+   * The call should wait until the key is stored with specified timeout
    * and return data if set else fail.
    */
-  virtual std::string get(const std::string& name) = 0;
+  virtual std::string get(
+      const std::string& name,
+      const std::chrono::milliseconds& timeout = kDefaultTimeout) = 0;
 
   /*
    * Does an atomic add operation on the key and returns the latest updated
@@ -50,13 +54,28 @@ class StoreHandler {
       const std::chrono::milliseconds& timeout = kDefaultTimeout) = 0;
 };
 
-struct StoreHandlerTimeoutException : public std::runtime_error {
-  StoreHandlerTimeoutException() = default;
+/*
+ * The backing store is no longer available. It may have been deleted.
+ */
+struct CAFFE2_API StoreHandlerNotAvailableException
+    : public std::runtime_error {
+  explicit StoreHandlerNotAvailableException(const std::string& msg)
+      : std::runtime_error(msg) {}
+};
+
+#define STORE_HANDLER_NOT_AVAILABLE(...)             \
+  throw ::caffe2::StoreHandlerNotAvailableException( \
+      ::c10::str("[", __FILE__, ":", __LINE__, "] ", __VA_ARGS__));
+
+/*
+ * Timeout accessing the store.
+ */
+struct CAFFE2_API StoreHandlerTimeoutException : public std::runtime_error {
   explicit StoreHandlerTimeoutException(const std::string& msg)
       : std::runtime_error(msg) {}
 };
 
 #define STORE_HANDLER_TIMEOUT(...)              \
   throw ::caffe2::StoreHandlerTimeoutException( \
-      ::caffe2::MakeString("[", __FILE__, ":", __LINE__, "] ", __VA_ARGS__));
-}
+      ::c10::str("[", __FILE__, ":", __LINE__, "] ", __VA_ARGS__));
+} // namespace caffe2

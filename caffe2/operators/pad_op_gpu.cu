@@ -261,7 +261,7 @@ bool PadImageOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   const int padded_height = Y->dim32(2);
   const int padded_width = Y->dim32(3);
   const float* Xdata = X.data<float>();
-  float* Ydata = Y->mutable_data<float>();
+  float* Ydata = Y->template mutable_data<float>();
 
   switch (mode_) {
     case PadMode::CONSTANT:
@@ -337,7 +337,7 @@ bool PadImageOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   const int padded_height = Y->dim32(1);
   const int padded_width = Y->dim32(2);
   const float* Xdata = X.data<float>();
-  float* Ydata = Y->mutable_data<float>();
+  float* Ydata = Y->template mutable_data<float>();
 
   switch (mode_) {
     case PadMode::CONSTANT:
@@ -403,12 +403,11 @@ bool PadImageOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
 template<>
 bool PadImageGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   auto& dY = Input(0);
-  auto* dX = Output(0);
-  dX->Resize(
-      dY.dim32(0),
+  
+  auto* dX = Output(0, { dY.dim32(0),
       dY.dim32(1),
       dY.dim32(2) - pad_t() - pad_b(),
-      dY.dim32(3) - pad_l() - pad_r());
+      dY.dim32(3) - pad_l() - pad_r()}, at::dtype<float>());
   const int input_size = dY.size();
   const int padded_height = dY.dim32(2);
   const int padded_width = dY.dim32(3);
@@ -418,7 +417,7 @@ bool PadImageGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   const int height = dX->dim32(2);
   const int width = dX->dim32(3);
   const float* dYdata = dY.data<float>();
-  float* dXdata = dX->mutable_data<float>();
+  float* dXdata = dX->template mutable_data<float>();
   math::Set<float, CUDAContext>(output_size, 0, dXdata, &context_);
 
   switch (mode_) {
@@ -484,12 +483,11 @@ bool PadImageGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
 template<>
 bool PadImageGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   auto& dY = Input(0);
-  auto* dX = Output(0);
-  dX->Resize(
-      dY.dim32(0),
+  
+  auto* dX = Output(0, { dY.dim32(0),
       dY.dim32(1) - pad_t() - pad_b(),
       dY.dim32(2) - pad_l() - pad_r(),
-      dY.dim32(3));
+      dY.dim32(3)}, at::dtype<float>());
   const int input_size = dY.size();
   const int padded_height = dY.dim32(1);
   const int padded_width = dY.dim32(2);
@@ -499,7 +497,7 @@ bool PadImageGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   const int width = dX->dim32(2);
   const int channels = dX->dim32(3);
   const float* dYdata = dY.data<float>();
-  float* dXdata = dX->mutable_data<float>();
+  float* dXdata = dX->template mutable_data<float>();
   math::Set<float, CUDAContext>(output_size, 0, dXdata, &context_);
 
   switch (mode_) {

@@ -5,12 +5,13 @@
 #include <string>
 #include <type_traits>
 #include <ATen/ATen.h>
-#include "torch/csrc/utils/object_ptr.h"
-#include "torch/csrc/utils/python_numbers.h"
-#include "torch/csrc/utils/python_compat.h"
+#include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/python_numbers.h>
+#include <torch/csrc/utils/python_compat.h>
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include <THC/THC.h>
+#include <c10/cuda/CUDAStream.h>
 #endif
 
 #define THPUtils_(NAME) TH_CONCAT_4(THP,Real,Utils_,NAME)
@@ -74,13 +75,8 @@
 #define THPFloatUtils_unpackAccreal(object)   (double)THPUtils_unpackReal_FLOAT(object)
 #define THPFloatUtils_newAccreal(value)       THPUtils_newReal_FLOAT(value)
 #define THPHalfUtils_checkReal(object)        THPUtils_checkReal_FLOAT(object)
-#ifndef THP_HOST_HALF
-#define THPHalfUtils_unpackReal(object)       (half)THC_float2half(THPUtils_unpackReal_FLOAT(object))
-#define THPHalfUtils_newReal(value)           PyFloat_FromDouble(THC_half2float(value))
-#else
-#define THPHalfUtils_unpackReal(object)       TH_float2half(THPUtils_unpackReal_FLOAT(object))
-#define THPHalfUtils_newReal(value)           PyFloat_FromDouble(TH_half2float(value))
-#endif
+#define THPHalfUtils_unpackReal(object)       (at::Half)THPUtils_unpackReal_FLOAT(object)
+#define THPHalfUtils_newReal(value)           PyFloat_FromDouble(value)
 #define THPHalfUtils_checkAccreal(object)     THPUtils_checkReal_FLOAT(object)
 #define THPHalfUtils_unpackAccreal(object)    (double)THPUtils_unpackReal_FLOAT(object)
 #define THPHalfUtils_newAccreal(value)        THPUtils_newReal_FLOAT(value)
@@ -116,7 +112,7 @@
 #define THPByteUtils_unpackAccreal(object)    (int64_t)THPUtils_unpackReal_INT(object)
 #define THPByteUtils_newAccreal(value)        THPUtils_newReal_INT(value)
 
-#define THPUtils_assert(cond, ...) THPUtils_assertRet(NULL, cond, __VA_ARGS__)
+#define THPUtils_assert(cond, ...) THPUtils_assertRet(nullptr, cond, __VA_ARGS__)
 #define THPUtils_assertRet(value, cond, ...)                                   \
 if (THP_EXPECT(!(cond), 0)) { THPUtils_setError(__VA_ARGS__); return value; }
 THP_API void THPUtils_setError(const char *format, ...);
@@ -133,11 +129,10 @@ void THPUtils_addPyMethodDefs(std::vector<PyMethodDef>& vector, PyMethodDef* met
 
 int THPUtils_getCallable(PyObject *arg, PyObject **result);
 
-#define THStoragePtr TH_CONCAT_3(TH,Real,StoragePtr)
-#define THTensorPtr  TH_CONCAT_3(TH,Real,TensorPtr)
+#define THWStoragePtr TH_CONCAT_3(TH,Real,StoragePtr)
+#define THWTensorPtr  TH_CONCAT_3(TH,Real,TensorPtr)
 #define THPStoragePtr TH_CONCAT_3(THP,Real,StoragePtr)
 #define THPTensorPtr  TH_CONCAT_3(THP,Real,TensorPtr)
-#define THSTensorPtr  TH_CONCAT_3(THS,Real,TensorPtr)
 #define THSPTensorPtr  TH_CONCAT_3(THSP,Real,TensorPtr)
 
 typedef THPPointer<THPGenerator> THPGeneratorPtr;
@@ -145,10 +140,10 @@ typedef THPPointer<THPGenerator> THPGeneratorPtr;
 template <typename T>
 struct THPUtils_typeTraits {};
 
-#include "generic/utils.h"
+#include <torch/csrc/generic/utils.h>
 #include <TH/THGenerateAllTypes.h>
 
-#include "generic/utils.h"
+#include <torch/csrc/generic/utils.h>
 #include <TH/THGenerateHalfType.h>
 
 THLongStoragePtr THPUtils_unpackSize(PyObject *arg);
@@ -177,8 +172,9 @@ void setBackCompatKeepdimWarn(bool warn);
 bool getBackCompatKeepdimWarn();
 bool maybeThrowBackCompatKeepdimWarn(char *func);
 
-#ifdef WITH_CUDA
-std::vector <THCStream*> THPUtils_PySequence_to_THCStreamList(PyObject *obj);
+// NB: This is in torch/csrc/cuda/utils.cpp, for whatever reason
+#ifdef USE_CUDA
+std::vector<c10::optional<at::cuda::CUDAStream>> THPUtils_PySequence_to_CUDAStreamList(PyObject *obj);
 #endif
 
 #endif /* _THP_CORE */

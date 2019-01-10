@@ -1,34 +1,144 @@
-#include "torch/csrc/autograd/profiler.h"
-#include "torch/csrc/autograd/function.h"
+#include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/autograd/function.h>
+
+#ifdef USE_CUDA
+#include <c10/cuda/CUDAGuard.h>
+#endif
+
+#include <sstream>
 
 namespace torch { namespace autograd { namespace profiler {
 
 ProfilerState state = ProfilerState::Disabled;
-uint32_t next_thread_id = 0;
+uint16_t next_thread_id = 0;
 std::mutex all_event_lists_mutex;
 std::list<std::shared_ptr<RangeEventList>> all_event_lists;
 thread_local std::shared_ptr<RangeEventList> event_list;
-thread_local int32_t thread_id;
+thread_local uint16_t thread_id;
 
-void RecordFunction::pushFunctionRange(Function* fn) {
-  pushRange(fn->name());
+RangeEventList& getEventList() {
+  if (!event_list) {
+    std::lock_guard<std::mutex> guard(all_event_lists_mutex);
+    event_list = std::make_shared<RangeEventList>();
+    thread_id = next_thread_id++;
+    all_event_lists.emplace_front(event_list);
+  }
+  return *event_list;
 }
 
-#ifdef WITH_CUDA
+void mark(std::string name, bool include_cuda /* = true */) {
+  if (state == ProfilerState::Disabled) {
+    return;
+  }
+  if (state == ProfilerState::NVTX) {
+#ifdef USE_CUDA
+    nvtxMarkA(name.c_str());
+#else
+    throw std::logic_error(
+        "mark called with NVTX tracing, but compiled without CUDA");
+#endif
+  } else {
+    getEventList().record(
+        EventKind::Mark,
+        std::move(name),
+        thread_id,
+        include_cuda && state == ProfilerState::CUDA);
+  }
+}
+
+const char* c_str(const char *str) { return str; }
+// NB: non-const to disallow temporaries (lifetime issues)
+const char* c_str(std::string& str) { return str.c_str(); }
+
+template<typename T>
+void pushRangeImpl(T name, const char* msg="", int64_t sequence_nr=-1) {
+  if (state == ProfilerState::Disabled) {
+    return;
+  }
+  if (state == ProfilerState::NVTX) {
+#ifdef USE_CUDA
+    if(sequence_nr >= 0) {
+      std::stringstream s;
+      s << name << msg << sequence_nr;
+      nvtxRangePushA(s.str().c_str());
+    } else {
+      nvtxRangePushA(c_str(name));
+    }
+#else
+    throw std::logic_error(
+        "pushRange called with NVTX tracing, but compiled without CUDA");
+#endif
+  } else {
+    getEventList().record(
+        EventKind::PushRange,
+        std::move(name),
+        thread_id,
+        state == ProfilerState::CUDA);
+  }
+}
+
+void pushRange(std::string name) {
+  pushRangeImpl(std::move(name));
+}
+
+void popRange() {
+  if (state == ProfilerState::Disabled) {
+    return;
+  }
+  if (state == ProfilerState::NVTX) {
+#ifdef USE_CUDA
+    nvtxRangePop();
+#else
+    throw std::logic_error(
+        "popRange called with NVTX tracing, but compiled without CUDA");
+#endif
+  } else {
+    getEventList().record(
+        EventKind::PopRange,
+        "",
+        thread_id,
+        state == ProfilerState::CUDA);
+  }
+}
+
+RecordFunction::RecordFunction(Function* fn) {
+  // typeid(*fn).name() would avoid an additional string allocation.
+  // However, typeid(*fn).name() would cause nvtx annotations for all user-defined 
+  // (Python-side) custom autograd function backward() methods to have the same name,
+  // because they route through the same C++ side class.
+  // fn->name() ensures that nvtx annotations for custom function backward() methods
+  // receive a relevant, demangled name.
+  pushRangeImpl(fn->name(), ", stashed seq=", fn->sequence_nr());
+}
+
+RecordFunction::RecordFunction(std::string name) {
+  pushRangeImpl(std::move(name));
+}
+
+RecordFunction::RecordFunction(const char* name) {
+  pushRangeImpl<const char*>(name);
+}
+
+RecordFunction::RecordFunction(const char* name, int64_t current_sequence_nr)
+{
+  pushRangeImpl<const char*>(name, ", seq=", current_sequence_nr);
+}
+
+#ifdef USE_CUDA
 static void onEachDevice(std::function<void(int)> op) {
-  AutoGPU gpu_guard;
+  at::cuda::OptionalCUDAGuard device_guard;
   int count;
   TORCH_CUDA_CHECK(cudaGetDeviceCount(&count));
   for(int i = 0; i < count; i++) {
-    gpu_guard.setDevice(i);
+    device_guard.set_index(i);
     op(i);
   }
 }
 #endif
 
 void enableProfiler(ProfilerState new_state) {
-  TORCH_ASSERT(new_state != ProfilerState::Disabled);
-#ifndef WITH_CUDA
+  AT_ASSERT(new_state != ProfilerState::Disabled);
+#ifndef USE_CUDA
   if (new_state == ProfilerState::NVTX)
     throw std::runtime_error("Can't use NVTX profiler - PyTorch was compiled without CUDA");
 #endif
@@ -37,7 +147,7 @@ void enableProfiler(ProfilerState new_state) {
   }
   state = new_state;
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
   if(state == ProfilerState::CUDA) {
     // event recording appears to have some startup overhead, so we need to
     // to generate some dummy events first before recording syncrhonization events

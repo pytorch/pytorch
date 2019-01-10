@@ -1,4 +1,4 @@
-#include "THGeneral.h"
+#include <TH/THGeneral.h>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -21,10 +21,7 @@
 #endif
 
 #ifdef TH_BLAS_MKL
-// this is the C prototype, while mkl_set_num_threads is the fortran prototype
-TH_EXTERNC void MKL_Set_Num_Threads(int);
-// this is the C prototype, while mkl_get_max_threads is the fortran prototype
-TH_EXTERNC int  MKL_Get_Max_Threads(void);
+#include <mkl.h>
 #endif
 
 /* Torch Error Handling */
@@ -269,7 +266,14 @@ void THSetNumThreads(int num_threads)
   omp_set_num_threads(num_threads);
 #endif
 #ifdef TH_BLAS_MKL
-  MKL_Set_Num_Threads(num_threads);
+  mkl_set_num_threads(num_threads);
+
+  // because PyTorch uses OpenMP outside of MKL invocations
+  // as well, we want this flag to be false, so that
+  // threads aren't destroyed and recreated across every
+  // MKL / non-MKL boundary of OpenMP usage
+  // See https://github.com/pytorch/pytorch/issues/13757
+  mkl_set_dynamic(false);
 #endif
 
 }
@@ -299,11 +303,11 @@ TH_API void THInferNumThreads(void)
   // Otherwise, MKL and our OpenMP-enabled functions will keep changing the
   // size of the OpenMP thread pool, resulting in worse performance (and memory
   // leaks in GCC 5.4)
-  omp_set_num_threads(MKL_Get_Max_Threads());
+  omp_set_num_threads(mkl_get_max_threads());
 #endif
 }
 
-TH_API THDescBuff _THSizeDesc(const int64_t *size, const int64_t ndim) {
+THDescBuff _THSizeDesc(const int64_t *size, const int64_t ndim) {
   const int L = TH_DESC_BUFF_LEN;
   THDescBuff buf;
   char *str = buf.str;

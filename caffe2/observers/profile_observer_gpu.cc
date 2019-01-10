@@ -26,13 +26,13 @@ void ProfileOperatorObserver::Dump() const {
   LOG(INFO) << "--------- Starting operator " << subject_->debug_def().type()
             << " op#" << getId() << " ---------";
   for (int i = 0; i < subject_->InputSize(); ++i) {
-    if (subject_->InputIsType<TensorCPU>(i)) {
-      const auto& tensor = subject_->Input<TensorCPU>(i);
+    if (subject_->InputIsTensorType(i, CPU)) {
+      const auto& tensor = subject_->Input<Tensor>(i, CPU);
       const auto& name = subject_->debug_def().input(i);
       TensorPrinter printer(name);
       LOG(INFO) << "Input " << i << ": " << printer.MetaStr(tensor);
-    } else if (subject_->InputIsType<TensorCUDA>(i)) {
-      const auto& tensor = subject_->Input<TensorCUDA>(i);
+    } else if (subject_->InputIsTensorType(i, CUDA)) {
+      const auto& tensor = subject_->Input<Tensor>(i, CUDA);
       const auto& name = subject_->debug_def().input(i);
       TensorPrinter printer(name);
       LOG(INFO) << "Input " << i << ": " << printer.MetaStr(tensor);
@@ -46,13 +46,13 @@ void ProfileOperatorObserver::Dump() const {
   }
 
   for (int o = 0; o < subject_->OutputSize(); ++o) {
-    if (subject_->OutputIsType<TensorCPU>(o)) {
-      auto* tensor = subject_->Output<TensorCPU>(o);
+    if (subject_->OutputIsTensorType(o, CPU)) {
+      auto* tensor = subject_->Output<Tensor>(o, CPU);
       const auto& name = subject_->debug_def().output(o);
       TensorPrinter printer(name);
       LOG(INFO) << "Output " << o << ": " << printer.MetaStr(*tensor);
-    } else if (subject_->OutputIsType<TensorCUDA>(o)) {
-      auto* tensor = subject_->Output<TensorCUDA>(o);
+    } else if (subject_->OutputIsTensorType(o, CUDA)) {
+      auto* tensor = subject_->Output<Tensor>(o, CUDA);
       const auto& name = subject_->debug_def().output(o);
       TensorPrinter printer(name);
       LOG(INFO) << "Output " << o << ": " << printer.MetaStr(*tensor);
@@ -70,7 +70,7 @@ void ProfileOperatorObserver::Start() {
     int device;
     cudaGetDevice(&device);
 
-    cudaSetDevice(context->cuda_gpu_id());
+    cudaSetDevice(context->device_id());
     cudaEventCreate(&start_);
     cudaEventRecord(start_, context->cuda_stream());
 
@@ -92,7 +92,7 @@ void ProfileOperatorObserver::Stop() {
     int device;
     cudaGetDevice(&device);
 
-    cudaSetDevice(context->cuda_gpu_id());
+    cudaSetDevice(context->device_id());
     cudaEventCreate(&stop_);
     cudaEventRecord(stop_, context->cuda_stream());
     cudaEventSynchronize(stop_);

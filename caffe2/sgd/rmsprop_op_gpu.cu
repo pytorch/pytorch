@@ -1,4 +1,4 @@
-#include "rmsprop_op.h"
+#include "caffe2/sgd/rmsprop_op.h"
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
 
@@ -21,7 +21,7 @@ __global__ void RmsPropUpdate(
     nms[i] = ms[i] + (1.0f - decay) * (g[i] * g[i] - ms[i]);
     // Update momentum estimate
     nmom[i] =
-        mom[i] * momentum + lr[0] * g[i] / std::sqrt(epsilon + nms[i]);
+        mom[i] * momentum + lr[0] * g[i] / sqrtf(epsilon + nms[i]);
     // New gradient is the momentum
     ng[i] = nmom[i];
   }

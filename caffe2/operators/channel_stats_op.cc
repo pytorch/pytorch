@@ -1,23 +1,26 @@
 #include "caffe2/operators/channel_stats_op.h"
+#include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 
 template <>
 bool ChannelStatsOp<CPUContext>::RunOnDevice() {
   const auto& X = Input(INPUT);
-  CAFFE_ENFORCE(X.ndim() >= 3 && X.ndim() <= 5);
+  CAFFE_ENFORCE(X.dim() >= 3 && X.dim() <= 5);
   const int N = X.dim32(0);
   const int C = X.dim32(1);
   const int H = X.dim32(2);
-  const int W = X.ndim() > 3 ? X.dim32(3) : 1;
-  const int D = X.ndim() > 4 ? X.dim32(4) : 1;
+  const int W = X.dim() > 3 ? X.dim32(3) : 1;
+  const int D = X.dim() > 4 ? X.dim32(4) : 1;
 
   const int sampleSize = H * W * D;
 
   Output(SUM)->Resize(C);
   Output(SUMSQ)->Resize(C);
-  EigenVectorArrayMap<float> sum(Output(SUM)->mutable_data<float>(), C);
-  EigenVectorArrayMap<float> sumsq(Output(SUMSQ)->mutable_data<float>(), C);
+  EigenVectorArrayMap<float> sum(
+      Output(SUM)->template mutable_data<float>(), C);
+  EigenVectorArrayMap<float> sumsq(
+      Output(SUMSQ)->template mutable_data<float>(), C);
 
   sum.setZero();
   sumsq.setZero();

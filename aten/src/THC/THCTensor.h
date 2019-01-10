@@ -1,11 +1,10 @@
 #ifndef THC_TENSOR_INC
 #define THC_TENSOR_INC
 
-#include "THTensor.h"
-#include "THCStorage.h"
-#include "THCGeneral.h"
+#include <TH/THTensor.h>
+#include <THC/THCStorage.h>
+#include <THC/THCGeneral.h>
 
-#define THCTensor          TH_CONCAT_3(TH,CReal,Tensor)
 #define THCTensor_(NAME)   TH_CONCAT_4(TH,CReal,Tensor_,NAME)
 
 #define THC_DESC_BUFF_LEN 64
@@ -15,7 +14,7 @@ typedef struct THC_CLASS THCDescBuff
     char str[THC_DESC_BUFF_LEN];
 } THCDescBuff;
 
-#include "generic/THCTensor.h"
-#include "THCGenerateAllTypes.h"
+#include <THC/generic/THCTensor.h>
+#include <THC/THCGenerateAllTypes.h>
 
 #endif

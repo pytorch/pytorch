@@ -11,47 +11,47 @@ namespace {
 
 template <class SIndex, class Context>
 bool SliceImpl(
-    Tensor<Context>* output,
-    const Tensor<Context>& data,
-    const Tensor<Context>& starts,
-    const Tensor<Context>& ends,
+    Tensor* output,
+    const Tensor& data,
+    const Tensor& starts,
+    const Tensor& ends,
     Context* context,
-    Tensor<Context>* gdata = nullptr,
-    const Tensor<Context>* go = nullptr) {
+    Tensor* gdata = nullptr,
+    const Tensor* go = nullptr) {
   bool backward = output == nullptr;
 
   auto* starts_data = starts.template data<SIndex>();
   auto* ends_data = ends.template data<SIndex>();
 
-  CAFFE_ENFORCE_EQ(starts.ndim(), 1);
-  CAFFE_ENFORCE_EQ(ends.ndim(), 1);
-  CAFFE_ENFORCE_GE(data.ndim(), starts.size());
-  CAFFE_ENFORCE_EQ(starts.size(), ends.size());
+  CAFFE_ENFORCE_EQ(starts.dim(), 1);
+  CAFFE_ENFORCE_EQ(ends.dim(), 1);
+  CAFFE_ENFORCE_GE(data.dim(), starts.numel());
+  CAFFE_ENFORCE_EQ(starts.numel(), ends.numel());
 
-  std::vector<SIndex> starts_idx(data.ndim());
-  std::vector<SIndex> ends_idx(data.ndim());
-  std::vector<SIndex> dst_sizes(data.ndim());
+  std::vector<SIndex> starts_idx(data.dim());
+  std::vector<SIndex> ends_idx(data.dim());
+  std::vector<SIndex> dst_sizes(data.dim());
 
-  for (int i = 0; i < data.ndim(); ++i) {
-    if (i >= starts.size()) {
+  for (int i = 0; i < data.dim(); ++i) {
+    if (i >= starts.numel()) {
       starts_idx[i] = 0;
-      ends_idx[i] = data.dims()[i];
+      ends_idx[i] = data.sizes()[i];
       continue;
     }
-    if (data.dims()[i] > 0) {
+    if (data.sizes()[i] > 0) {
       auto start = starts_data[i];
       auto end = ends_data[i];
       if (start < 0) {
-        start = data.dims()[i] + 1 + start;
+        start = data.sizes()[i] + 1 + start;
       }
       if (end < 0) {
-        end = data.dims()[i] + 1 + end;
+        end = data.sizes()[i] + 1 + end;
       }
-      if (start > data.dims()[i]) {
-        start = data.dims()[i];
+      if (start > data.sizes()[i]) {
+        start = data.sizes()[i];
       }
-      if (end > data.dims()[i]) {
-        end = data.dims()[i];
+      if (end > data.sizes()[i]) {
+        end = data.sizes()[i];
       }
       CAFFE_ENFORCE_GE(start, 0);
       CAFFE_ENFORCE_GE(end, 0);
@@ -66,18 +66,18 @@ bool SliceImpl(
     }
   }
 
-  if (data.size() <= 0) {
+  if (data.numel() <= 0) {
     // When the input is empty, we do not need to do copy.
     if (!backward) {
       output->Resize(dst_sizes);
-      output->raw_mutable_data(data.meta());
+      output->raw_mutable_data(data.dtype());
     }
     return true;
   }
   // for now only supports slicing in 1 dimension
   int dim = -1;
-  for (int i = 0; i < data.ndim(); ++i) {
-    if (starts_idx[i] > 0 || ends_idx[i] < data.dims()[i]) {
+  for (int i = 0; i < data.dim(); ++i) {
+    if (starts_idx[i] > 0 || ends_idx[i] < data.sizes()[i]) {
       CAFFE_ENFORCE_EQ(
           dim, -1, "Currently only possible to slice in 1 dimension.");
       dim = i;
@@ -85,20 +85,20 @@ bool SliceImpl(
   }
   if (dim == -1) {
     if (!backward) {
-      output->CopyFrom(data, context);
+      output->CopyFrom(data, true /*async*/);
     } else {
-      gdata->CopyFrom(*go, context);
+      gdata->CopyFrom(*go, true /*async*/);
     }
     return true;
   }
   size_t unit = std::accumulate(
-      data.dims().begin() + dim + 1,
-      data.dims().end(),
+      data.sizes().begin() + dim + 1,
+      data.sizes().end(),
       1,
       std::multiplies<SIndex>());
   size_t num_blocks = std::accumulate(
-      data.dims().begin(),
-      data.dims().begin() + dim,
+      data.sizes().begin(),
+      data.sizes().begin() + dim,
       1,
       std::multiplies<SIndex>());
   if (!backward) {
@@ -107,16 +107,16 @@ bool SliceImpl(
     gdata->ResizeLike(data);
   }
 
-  size_t itemsize = data.meta().itemsize();
+  size_t itemsize = data.dtype().itemsize();
 
   if (!backward) {
     char* src_bytes = (char*)data.raw_data();
-    char* dst_bytes = (char*)output->raw_mutable_data(data.meta());
+    char* dst_bytes = (char*)output->raw_mutable_data(data.dtype());
 
     size_t src_nbytes = data.nbytes();
     size_t dst_nbytes = output->nbytes();
 
-    size_t src_block_size = unit * data.dims()[dim];
+    size_t src_block_size = unit * data.sizes()[dim];
     size_t dst_block_size = unit * (ends_idx[dim] - starts_idx[dim]);
     size_t src_offset = unit * starts_idx[dim];
 
@@ -140,21 +140,21 @@ bool SliceImpl(
       DCHECK_LE(
           static_cast<void*>(local_dst_offset_bytes + dst_block_size_bytes),
           static_cast<void*>(dst_bytes + dst_nbytes));
-      context->template CopyItems<Context, Context>(
-          data.meta(),
+      context->CopyItemsSameDevice(
+          data.dtype(),
           dst_block_size,
           (void*)local_src_offset_bytes,
           (void*)local_dst_offset_bytes);
     }
   } else {
     char* src_bytes = (char*)go->raw_data();
-    char* dst_bytes = (char*)gdata->raw_mutable_data(go->meta());
+    char* dst_bytes = (char*)gdata->raw_mutable_data(go->dtype());
 
     size_t src_nbytes = go->nbytes();
     size_t dst_nbytes = gdata->nbytes();
 
     size_t src_block_size = unit * (ends_idx[dim] - starts_idx[dim]);
-    size_t dst_block_size = unit * data.dims()[dim];
+    size_t dst_block_size = unit * data.sizes()[dim];
     size_t dst_offset = unit * starts_idx[dim];
 
     if (num_blocks == 0 || dst_block_size == 0) {
@@ -186,8 +186,8 @@ bool SliceImpl(
       DCHECK_LE(
           local_dst_offset_bytes + src_block_size_bytes,
           dst_bytes + dst_nbytes);
-      context->template CopyItems<Context, Context>(
-          go->meta(),
+      context->CopyItemsSameDevice(
+          go->dtype(),
           src_block_size,
           (void*)local_src_offset_bytes,
           (void*)local_dst_offset_bytes);
@@ -198,25 +198,29 @@ bool SliceImpl(
 
 } // namespace
 
-template <class SIndex, class Context>
+template <class Context>
 class SliceOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SliceOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        starts_(OperatorBase::GetRepeatedArgument<SIndex>("starts")),
-        ends_(OperatorBase::GetRepeatedArgument<SIndex>("ends")),
+        starts_(this->template GetRepeatedArgument<int64_t>("starts")),
+        ends_(this->template GetRepeatedArgument<int64_t>("ends")),
         statically_inited_(false) {}
 
   bool RunOnDevice() override {
-    return RunOnDeviceImpl(Input(0), Output(0));
+    if (InputSize() > 1) {
+      return DispatchHelper<TensorTypes<int, int64_t>>::call(this, Input(1));
+    } else {
+      return DoRunWithType<int64_t>();
+    }
   }
 
- protected:
-  bool RunOnDeviceImpl(const Tensor<Context>& data, Tensor<Context>* output) {
+  template <typename SIndex>
+  bool DoRunWithType() {
     if (InputSize() > 1) {
-      starts_host_.template CopyFrom<Context>(Input(1));
-      ends_host_.template CopyFrom<Context>(Input(2));
+      starts_host_.CopyFrom(Input(1));
+      ends_host_.CopyFrom(Input(2));
     } else {
       if (!statically_inited_) {
         CAFFE_ENFORCE(HasArgument("starts"));
@@ -238,37 +242,51 @@ class SliceOp : public Operator<Context> {
       }
     }
 
+    auto data = Input(0);
+    auto output = Output(0);
+
     return SliceImpl<SIndex, Context>(
         output, data, starts_host_, ends_host_, &context_);
   }
 
-  DISABLE_COPY_AND_ASSIGN(SliceOp);
+  C10_DISABLE_COPY_AND_ASSIGN(SliceOp);
 
- private:
-  std::vector<SIndex> starts_;
-  std::vector<SIndex> ends_;
+ protected:
+  std::vector<int64_t> starts_;
+  std::vector<int64_t> ends_;
   bool statically_inited_;
-  TensorCPU starts_host_;
-  TensorCPU ends_host_;
+  Tensor starts_host_{CPU};
+  Tensor ends_host_{CPU};
 };
 
-template <class SIndex, class Context>
+template <class Context>
 class SliceGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SliceGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        starts_(OperatorBase::GetRepeatedArgument<SIndex>("starts")),
-        ends_(OperatorBase::GetRepeatedArgument<SIndex>("ends")),
+        starts_(this->template GetRepeatedArgument<int64_t>("starts")),
+        ends_(this->template GetRepeatedArgument<int64_t>("ends")),
         statically_inited_(false) {}
 
+  C10_DISABLE_COPY_AND_ASSIGN(SliceGradientOp);
+
   bool RunOnDevice() override {
+    if (InputSize() == 4) {
+      return DispatchHelper<TensorTypes<int, int64_t>>::call(this, Input(1));
+    } else {
+      return DoRunWithType<int64_t>();
+    }
+  }
+
+  template <typename SIndex>
+  bool DoRunWithType()  {
     auto* gdata = Output(0);
     auto& data = Input(0);
 
     if (InputSize() == 4) {
-      starts_host_.template CopyFrom<Context>(Input(1));
-      ends_host_.template CopyFrom<Context>(Input(2));
+      starts_host_.CopyFrom(Input(1));
+      ends_host_.CopyFrom(Input(2));
 
       auto& go = Input(3);
 
@@ -301,13 +319,12 @@ class SliceGradientOp : public Operator<Context> {
     }
   }
 
-  DISABLE_COPY_AND_ASSIGN(SliceGradientOp);
-
  private:
-  std::vector<SIndex> starts_;
-  std::vector<SIndex> ends_;
+
+  std::vector<int64_t> starts_;
+  std::vector<int64_t> ends_;
   bool statically_inited_;
-  TensorCPU starts_host_;
-  TensorCPU ends_host_;
+  Tensor starts_host_{CPU};
+  Tensor ends_host_{CPU};
 };
 } // namespace caffe2

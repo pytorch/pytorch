@@ -1,4 +1,4 @@
-#include "sparse_to_dense_op.h"
+#include "caffe2/operators/sparse_to_dense_op.h"
 
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
@@ -7,7 +7,7 @@ namespace caffe2 {
 
   template <typename TInd, typename TData>
   __global__ void SparseToDenseKernel(
-    size_t N, TIndex block_nitems, const TInd* indices, const TData* vals, TData* dst) {
+    size_t N, int64_t block_nitems, const TInd* indices, const TData* vals, TData* dst) {
     CUDA_1D_KERNEL_LOOP(i, N) {
       int idx = indices[i / block_nitems];
       int dst_idx = block_nitems * idx + i % block_nitems;
@@ -45,10 +45,10 @@ namespace caffe2 {
     const int output_first_dim =
         GetOutputFirstDim(sparse_indices_vec, sparse_indices_len);
 
-    auto shape = sparse_values.dims();
+    auto shape = sparse_values.sizes().vec();
     shape[0] = output_first_dim;
-    auto* output = Output(0);
-    output->Resize(shape);
+
+    auto* output = Output(0, shape, at::dtype<TData>());
 
     TData* output_data = output->template mutable_data<TData>();
     math::Set<TData>(output->size(), TData(0), output_data, &context_);

@@ -6,22 +6,21 @@ template <>
 bool MultiClassAccuracyOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(PREDICTION);
   auto& label = Input(LABEL);
-  auto* Y0 = Output(0);
-  auto* Y1 = Output(1);
-  DCHECK_EQ(X.ndim(), 2);
+
+  DCHECK_EQ(X.dim(), 2);
   // amount, number of instances
   int N = X.dim32(0);
   // dimension, number of classes
   int D = X.dim32(1);
-  DCHECK_EQ(label.ndim(), 1);
+  DCHECK_EQ(label.dim(), 1);
   DCHECK_EQ(label.dim32(0), N);
-  Y0->Resize(D);
-  Y1->Resize(D);
+  auto* Y0 = Output(0, {D}, at::dtype<float>());
+  auto* Y1 = Output(1, {D}, at::dtype<int>());
 
   const auto* Xdata = X.data<float>();
   const auto* labeldata = label.data<int>();
-  auto* accuracies = Y0->mutable_data<float>();
-  auto* amounts = Y1->mutable_data<int>();
+  auto* accuracies = Y0->template mutable_data<float>();
+  auto* amounts = Y1->template mutable_data<int>();
   std::fill(accuracies, accuracies + D, 0);
   std::fill(amounts, amounts + D, 0);
 

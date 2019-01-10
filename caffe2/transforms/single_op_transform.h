@@ -2,7 +2,7 @@
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/transform.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 
 namespace caffe2 {
@@ -15,7 +15,7 @@ namespace caffe2 {
  * Transforms which derive from SingleOpTransform need to override:
  * ReplaceOperator and MatchOperator.
  */
-class SingleOpTransform : public Transform {
+class CAFFE2_API SingleOpTransform : public Transform {
  protected:
   bool PatternRule(
       const transform::Graph& g,

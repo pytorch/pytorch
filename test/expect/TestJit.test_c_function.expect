@@ -1,6 +1,0 @@
-graph(%0 : Double(1, 3, 10, 10)
-      %1 : Double(8, 3, 3, 3)
-      %2 : Double(8)) {
-  %3 : Double(1, 8, 8, 8) = aten::_convolution[stride=[1, 1], padding=[0, 0], dilation=[1, 1], transposed=0, output_padding=[0, 0], groups=1, benchmark=0, deterministic=0, cudnn_enabled=1](%0, %1, %2)
-  return (%3);
-}

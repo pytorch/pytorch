@@ -1,6 +1,7 @@
 #ifndef THC_DEVICE_UTILS_INC
 #define THC_DEVICE_UTILS_INC
 
+#include <cuda.h>
 /* The largest consecutive integer representable in float32 (2^24) */
 #define FLOAT32_MAX_CONSECUTIVE_INT 16777216.0f
 
@@ -43,7 +44,13 @@ __device__ __forceinline__ unsigned int ACTIVE_MASK()
 #endif
 }
 
-__device__ __forceinline__ int WARP_BALLOT(int predicate, unsigned int mask = 0xffffffff)
+#if defined(__HIP_PLATFORM_HCC__)
+__device__ __forceinline__ unsigned long long int WARP_BALLOT(int predicate)
+{
+   return __ballot(predicate);
+}
+#else
+__device__ __forceinline__ unsigned int WARP_BALLOT(int predicate, unsigned int mask = 0xffffffff)
 {
 #if CUDA_VERSION >= 9000
     return __ballot_sync(mask, predicate);
@@ -51,7 +58,15 @@ __device__ __forceinline__ int WARP_BALLOT(int predicate, unsigned int mask = 0x
     return __ballot(predicate);
 #endif
 }
+#endif
 
+#ifdef __HIP_PLATFORM_HCC__
+//To handle ambiguity, add a type double version.
+__device__ __forceinline__ double WARP_SHFL_XOR(double value, int laneMask, int width = warpSize, unsigned int mask = 0xffffffff) {
+  //(HIP doesn't support double)
+  return (double) __shfl_xor((float) value, laneMask, width);
+}
+#endif
 template <typename T>
 __device__ __forceinline__ T WARP_SHFL_XOR(T value, int laneMask, int width = warpSize, unsigned int mask = 0xffffffff)
 {
@@ -82,6 +97,22 @@ __device__ __forceinline__ T WARP_SHFL_UP(T value, unsigned int delta, int width
 #endif
 }
 
+#ifdef __HIP_PLATFORM_HCC__
+//To handle ambiguity, add a type double version.
+__device__ __forceinline__ double WARP_SHFL_DOWN(double value, unsigned int delta, int width = warpSize, unsigned int mask = 0xffffffff)
+{
+  //(HIP doesn't support double)
+  return (double) __shfl_down((float) value, delta, width);
+}
+__device__ __forceinline__ int64_t WARP_SHFL_DOWN(int64_t value, unsigned int delta, int width = warpSize, unsigned int mask = 0xffffffff)
+{
+  //(HIP doesn't support int64_t). Trick from https://devblogs.nvidia.com/faster-parallel-reductions-kepler/
+  int2 a = *reinterpret_cast<int2*>(&value);
+  a.x = __shfl_down(a.x, delta);
+  a.y = __shfl_down(a.y, delta);
+  return *reinterpret_cast<int64_t*>(&a);
+}
+#endif
 template <typename T>
 __device__ __forceinline__ T WARP_SHFL_DOWN(T value, unsigned int delta, int width = warpSize, unsigned int mask = 0xffffffff)
 {

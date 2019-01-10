@@ -12,7 +12,7 @@ CAFFE_KNOWN_TYPE(db::Cursor);
 
 namespace db {
 
-CAFFE_DEFINE_REGISTRY(Caffe2DBRegistry, DB, const string&, Mode);
+C10_DEFINE_REGISTRY(Caffe2DBRegistry, DB, const string&, Mode);
 
 // Below, we provide a bare minimum database "minidb" as a reference
 // implementation as well as a portable choice to store data.
@@ -52,10 +52,10 @@ class MiniDBCursor : public Cursor {
     CAFFE_ENFORCE_GT(key_len_, 0);
     CAFFE_ENFORCE_GT(value_len_, 0);
     // Resize if the key and value len is larger than the current one.
-    if (key_len_ > key_.size()) {
+    if (key_len_ > (int)key_.size()) {
       key_.resize(key_len_);
     }
-    if (value_len_ > value_.size()) {
+    if (value_len_ > (int)value_.size()) {
       value_.resize(value_len_);
     }
     // Actually read in the contents.
@@ -119,7 +119,7 @@ class MiniDBTransaction : public Transaction {
   FILE* file_;
   std::lock_guard<std::mutex> lock_;
 
-  DISABLE_COPY_AND_ASSIGN(MiniDBTransaction);
+  C10_DISABLE_COPY_AND_ASSIGN(MiniDBTransaction);
 };
 
 class MiniDB : public DB {
@@ -170,11 +170,12 @@ REGISTER_CAFFE2_DB(MiniDB, MiniDB);
 REGISTER_CAFFE2_DB(minidb, MiniDB);
 
 void DBReaderSerializer::Serialize(
-    const Blob& blob,
+    const void* pointer,
+    TypeMeta typeMeta,
     const string& name,
     BlobSerializerBase::SerializationAcceptor acceptor) {
-  CAFFE_ENFORCE(blob.IsType<DBReader>());
-  auto& reader = blob.Get<DBReader>();
+  CAFFE_ENFORCE(typeMeta.Match<DBReader>());
+  const auto& reader = *static_cast<const DBReader*>(pointer);
   DBReaderProto proto;
   proto.set_name(name);
   proto.set_source(reader.source_);
@@ -185,8 +186,8 @@ void DBReaderSerializer::Serialize(
   BlobProto blob_proto;
   blob_proto.set_name(name);
   blob_proto.set_type("DBReader");
-  blob_proto.set_content(proto.SerializeAsString());
-  acceptor(name, blob_proto.SerializeAsString());
+  blob_proto.set_content(SerializeAsString_EnforceCheck(proto));
+  acceptor(name, SerializeBlobProtoAsString_EnforceCheck(blob_proto));
 }
 
 void DBReaderDeserializer::Deserialize(const BlobProto& proto, Blob* blob) {

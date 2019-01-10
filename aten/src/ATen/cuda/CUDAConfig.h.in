@@ -5,3 +5,4 @@
 //    c.f. https://stackoverflow.com/questions/33759787/generating-an-error-if-checked-boolean-macro-is-not-defined
 
 #define AT_CUDNN_ENABLED() @AT_CUDNN_ENABLED@
+#define AT_ROCM_ENABLED() @AT_ROCM_ENABLED@

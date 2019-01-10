@@ -21,12 +21,12 @@ logger.setLevel(logging.INFO)
 class Functional(ModelLayer):
 
     def __init__(self, model, input_record, output_names_or_num, function,
-                 name='functional', output_dtypes=None, **kwargs):
+                 name='functional', output_dtypes=None, tags=None, **kwargs):
 
         # allow coercion
         input_record = schema.as_record(input_record)
 
-        super(Functional, self).__init__(model, name, input_record, **kwargs)
+        super(Functional, self).__init__(model, name, input_record, tags=tags, **kwargs)
         self._function = function
         self._kwargs = kwargs
         return_struct = (

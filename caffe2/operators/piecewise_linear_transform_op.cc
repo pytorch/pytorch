@@ -11,7 +11,7 @@ OPERATOR_SCHEMA(PiecewiseLinearTransform)
     .NumOutputs(1)
     .SetDoc(R"DOC(
 PiecewiseLinearTransform takes inputs -- predictions, a 2-D or 1-D tensor
-(Tensor<float>) of size (batch_size x prediction_dimensions). The piecewise
+(Tensor) of size (batch_size x prediction_dimensions). The piecewise
 linear functions are stored in bounds, slopes and intercepts. The output tensor
 has the same shape of input `predictions` and contains the predictions
 transformed by the piecewise linear functions. Each column of predictions has
@@ -57,7 +57,7 @@ bound.
     .Input(
         0,
         "predictions",
-        "2-D tensor (Tensor<float>) of size "
+        "2-D tensor (Tensor) of size "
         "(num_batches x num_classes) containing scores")
     .Input(
         1,
@@ -77,7 +77,7 @@ bound.
     .Output(
         0,
         "transforms",
-        "2-D tensor (Tensor<float>) of size (num_batches x num_classes) "
+        "2-D tensor (Tensor) of size (num_batches x num_classes) "
         "containing transformed predictions");
 
 SHOULD_NOT_DO_GRADIENT(PiecewiseLinearTransform);

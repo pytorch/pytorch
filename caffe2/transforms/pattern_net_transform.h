@@ -2,7 +2,7 @@
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/transform.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 
 namespace caffe2 {
@@ -15,7 +15,7 @@ namespace caffe2 {
  * and this Transform will find subgraphs which fit the pattern net,
  * and replace it with the replace net.
  */
-class PatternNetTransform : public Transform {
+class CAFFE2_API PatternNetTransform : public Transform {
  public:
   PatternNetTransform(const NetDef& pattern_net, const NetDef& replace_net)
       : p_(transform::Graph(pattern_net)), r_(transform::Graph(replace_net)) {
@@ -124,7 +124,7 @@ class PatternNetTransform : public Transform {
   bool argument_match_ = false;
 
   const string TransformBlobWrapper(const string& blob_name) {
-    return "transform/" + blob_name + "_" + caffe2::to_string(ssa_id_);
+    return "transform/" + blob_name + "_" + c10::to_string(ssa_id_);
   }
 
   int ssa_id_ = 0;

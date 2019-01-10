@@ -1,8 +1,8 @@
 #pragma once
 
-#include "../THD.h"
 #include <TH/TH.h>
-#ifdef WITH_CUDA
+#include <THD/THD.h>
+#ifdef USE_CUDA
 #include <THC/THC.h>
 #endif
 

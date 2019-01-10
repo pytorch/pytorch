@@ -30,18 +30,13 @@ template <
     typename EqualityClass = NodeEqualityDefault<typename G::NodeRef>>
 class Match {
  public:
-  using SubgraphType = Subgraph<typename G::NodeType, typename G::EdgeType>;
+  using SubgraphType = typename G::SubgraphType;
 
   Match(G& g) : MatchGraph(g) {
     // First we sort both the matching graph topologically.
     // This could give us a useful anchor in the best case.
-    auto topoMatch = nom::algorithm::tarjans(&MatchGraph);
-    for (auto scc : topoMatch) {
-      for (auto node : scc.getNodes()) {
-        MatchNodeList.emplace_back(node);
-      }
-    }
-    std::reverse(MatchNodeList.begin(), MatchNodeList.end());
+    auto result = nom::algorithm::topoSort(&MatchGraph);
+    MatchNodeList = result.nodes;
   }
 
   std::vector<SubgraphType> recursiveMatch(

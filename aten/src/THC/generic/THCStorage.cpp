@@ -1,38 +1,41 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCStorage.cpp"
+#define THC_GENERIC_FILE "THC/generic/THCStorage.cpp"
 #else
 
-real* THCStorage_(data)(THCState *state, const THCStorage *self)
+#include <c10/util/intrusive_ptr.h>
+#include <c10/util/typeid.h>
+
+scalar_t* THCStorage_(data)(THCState *state, const THCStorage *self)
 {
-  return self->data;
+  return self->data<scalar_t>();
 }
 
 ptrdiff_t THCStorage_(size)(THCState *state, const THCStorage *self)
 {
-  return self->size;
+  return THStorage_size(self);
 }
 
 int THCStorage_(elementSize)(THCState *state)
 {
-  return sizeof(real);
+  return sizeof(scalar_t);
 }
 
-void THCStorage_(set)(THCState *state, THCStorage *self, ptrdiff_t index, real value)
+void THCStorage_(set)(THCState *state, THCStorage *self, ptrdiff_t index, scalar_t value)
 {
-  THArgCheck((index >= 0) && (index < self->size), 2, "index out of bounds");
+  THArgCheck((index >= 0) && (index < self->numel()), 2, "index out of bounds");
   cudaStream_t stream = THCState_getCurrentStream(state);
-  THCudaCheck(cudaMemcpyAsync(self->data + index, &value, sizeof(real),
+  THCudaCheck(cudaMemcpyAsync(THCStorage_(data)(state, self) + index, &value, sizeof(scalar_t),
                               cudaMemcpyHostToDevice,
                               stream));
   THCudaCheck(cudaStreamSynchronize(stream));
 }
 
-real THCStorage_(get)(THCState *state, const THCStorage *self, ptrdiff_t index)
+scalar_t THCStorage_(get)(THCState *state, const THCStorage *self, ptrdiff_t index)
 {
-  THArgCheck((index >= 0) && (index < self->size), 2, "index out of bounds");
-  real value;
+  THArgCheck((index >= 0) && (index < self->numel()), 2, "index out of bounds");
+  scalar_t value;
   cudaStream_t stream = THCState_getCurrentStream(state);
-  THCudaCheck(cudaMemcpyAsync(&value, self->data + index, sizeof(real),
+  THCudaCheck(cudaMemcpyAsync(&value, THCStorage_(data)(state, self) + index, sizeof(scalar_t),
                               cudaMemcpyDeviceToHost, stream));
   THCudaCheck(cudaStreamSynchronize(stream));
   return value;
@@ -40,60 +43,43 @@ real THCStorage_(get)(THCState *state, const THCStorage *self, ptrdiff_t index)
 
 THCStorage* THCStorage_(new)(THCState *state)
 {
-  return THCStorage_(newWithSize)(state, 0);
+  THStorage* storage = c10::make_intrusive<at::StorageImpl>(
+      caffe2::TypeMeta::Make<scalar_t>(),
+      0,
+      state->cudaDeviceAllocator,
+      true).release();
+  return storage;
 }
 
 THCStorage* THCStorage_(newWithSize)(THCState *state, ptrdiff_t size)
 {
-  return THCStorage_(newWithAllocator)(
-    state, size,
-    state->cudaDeviceAllocator,
-    state->cudaDeviceAllocator->state);
-}
-
-THCStorage* THCStorage_(newWithAllocator)(THCState *state, ptrdiff_t size,
-                                          THCDeviceAllocator* allocator,
-                                          void* allocatorContext)
-{
-  THArgCheck(size >= 0, 2, "invalid size");
-  int device;
-  THCudaCheck(cudaGetDevice(&device));
-
-  THCStorage *storage = (THCStorage*)THAlloc(sizeof(THCStorage));
-  memset(storage, 0, sizeof(THCStorage));
-  new (&storage->refcount) std::atomic<int>(1);
-  storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
-  storage->allocator = allocator;
-  storage->allocatorContext = allocatorContext;
-  storage->size = size;
-  storage->device = device;
-
-  if(size > 0)
-  {
-    // update heap *before* attempting malloc, to free space for the malloc
-    cudaError_t err =
-      (*allocator->malloc)(allocatorContext,
-                           (void**)&(storage->data),
-                           size * sizeof(real),
-                           THCState_getCurrentStream(state));
-    if(err != cudaSuccess){
-      free(storage);
-    }
-    THCudaCheck(err);
-  } else {
-    storage->data = NULL;
-  }
+  THStorage* storage = c10::make_intrusive<at::StorageImpl>(
+      caffe2::TypeMeta::Make<scalar_t>(),
+      size,
+      state->cudaDeviceAllocator,
+      true).release();
   return storage;
 }
 
-THCStorage* THCStorage_(newWithSize1)(THCState *state, real data0)
+THCStorage* THCStorage_(newWithAllocator)(THCState *state, ptrdiff_t size,
+                                          at::Allocator* allocator)
+{
+  THStorage* storage = c10::make_intrusive<at::StorageImpl>(
+      caffe2::TypeMeta::Make<scalar_t>(),
+      size,
+      allocator,
+      true).release();
+  return storage;
+}
+
+THCStorage* THCStorage_(newWithSize1)(THCState *state, scalar_t data0)
 {
   THCStorage *self = THCStorage_(newWithSize)(state, 1);
   THCStorage_(set)(state, self, 0, data0);
   return self;
 }
 
-THCStorage* THCStorage_(newWithSize2)(THCState *state, real data0, real data1)
+THCStorage* THCStorage_(newWithSize2)(THCState *state, scalar_t data0, scalar_t data1)
 {
   THCStorage *self = THCStorage_(newWithSize)(state, 2);
   THCStorage_(set)(state, self, 0, data0);
@@ -101,7 +87,7 @@ THCStorage* THCStorage_(newWithSize2)(THCState *state, real data0, real data1)
   return self;
 }
 
-THCStorage* THCStorage_(newWithSize3)(THCState *state, real data0, real data1, real data2)
+THCStorage* THCStorage_(newWithSize3)(THCState *state, scalar_t data0, scalar_t data1, scalar_t data2)
 {
   THCStorage *self = THCStorage_(newWithSize)(state, 3);
   THCStorage_(set)(state, self, 0, data0);
@@ -110,7 +96,7 @@ THCStorage* THCStorage_(newWithSize3)(THCState *state, real data0, real data1, r
   return self;
 }
 
-THCStorage* THCStorage_(newWithSize4)(THCState *state, real data0, real data1, real data2, real data3)
+THCStorage* THCStorage_(newWithSize4)(THCState *state, scalar_t data0, scalar_t data1, scalar_t data2, scalar_t data3)
 {
   THCStorage *self = THCStorage_(newWithSize)(state, 4);
   THCStorage_(set)(state, self, 0, data0);
@@ -126,81 +112,27 @@ THCStorage* THCStorage_(newWithMapping)(THCState *state, const char *fileName, p
   return NULL;
 }
 
-THCStorage* THCStorage_(newWithData)(THCState *state, real *data, ptrdiff_t size)
-{
-  return THCStorage_(newWithDataAndAllocator)(state, data, size,
-                                              state->cudaDeviceAllocator,
-                                              state->cudaDeviceAllocator->state);
-}
-
 THCStorage* THCStorage_(newWithDataAndAllocator)(
-  THCState *state, real *data, ptrdiff_t size,
-  THCDeviceAllocator *allocator, void *allocatorContext) {
-  THCStorage *storage = (THCStorage*)THAlloc(sizeof(THCStorage));
-  memset(storage, 0, sizeof(THCStorage));
-  storage->data = data;
-  storage->size = size;
-  storage->refcount = 1;
-  storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
-  storage->allocator = allocator;
-  storage->allocatorContext = allocatorContext;
-  int device;
-  if (data) {
-    struct cudaPointerAttributes attr;
-    THCudaCheck(cudaPointerGetAttributes(&attr, data));
-    device = attr.device;
-  } else {
-    THCudaCheck(cudaGetDevice(&device));
-  }
-  storage->device = device;
+    THCState* state,
+    at::DataPtr&& data,
+    ptrdiff_t size,
+    at::Allocator* allocator) {
+  THStorage* storage = c10::make_intrusive<at::StorageImpl>(
+      caffe2::TypeMeta::Make<scalar_t>(),
+      size,
+      std::move(data),
+      allocator,
+      true).release();
   return storage;
-}
-
-void THCStorage_(setFlag)(THCState *state, THCStorage *storage, const char flag)
-{
-  storage->flag |= flag;
-}
-
-void THCStorage_(clearFlag)(THCState *state, THCStorage *storage, const char flag)
-{
-  storage->flag &= ~flag;
 }
 
 void THCStorage_(retain)(THCState *state, THCStorage *self)
 {
-  if(self && (self->flag & TH_STORAGE_REFCOUNTED))
-    self->refcount++;
-}
-
-int THCStorage_(retainIfLive)(THCState *state, THCStorage *storage)
-{
-  // TODO: Check if THC_STORAGE_REFCOUNTED?
-  int refcount = storage->refcount.load();
-  while (refcount > 0) {
-    if (storage->refcount.compare_exchange_strong(refcount, refcount + 1)) {
-      return 1;
-    }
-    refcount = storage->refcount.load();
-  }
-  return 0;
+  THStorage_retain(self);
 }
 
 void THCStorage_(free)(THCState *state, THCStorage *self)
 {
-  if(!(self->flag & TH_STORAGE_REFCOUNTED))
-    return;
-
-  if (--self->refcount == 0)
-  {
-    if(self->flag & TH_STORAGE_FREEMEM) {
-      THCudaCheck(
-        (*self->allocator->free)(self->allocatorContext, self->data));
-    }
-    if(self->flag & TH_STORAGE_VIEW) {
-      THCStorage_(free)(state, self->view);
-    }
-    self->refcount.~atomic<int>();
-    THFree(self);
-  }
+  THStorage_free(self);
 }
 #endif

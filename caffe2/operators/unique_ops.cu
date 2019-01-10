@@ -54,7 +54,6 @@ bool UniqueOp<CUDAContext>::DoRunWithType() {
   // use dim32 to enforce that it's fine to have remapping of type int
   int N = inputTensor.dim32(0);
   CAFFE_ENFORCE_EQ(inputTensor.ndim(), 1, "Input should be a vector");
-  auto* uniqueTensor = Output(UNIQUE);
 
   int* remapping = nullptr;
   if (REMAPPING < OutputSize()) {
@@ -65,16 +64,14 @@ bool UniqueOp<CUDAContext>::DoRunWithType() {
 
   if (N <= 0) {
     // if the input is empty, we have nothing to do, not even launch kernel.
-    uniqueTensor->Resize(0);
-    T* unique = uniqueTensor->template mutable_data<T>();
+    /* auto* uniqueTensor = */ Output(UNIQUE, {0}, at::dtype<T>());
     return true;
   }
 
   const T* input = inputTensor.template data<T>();
   thrust_unique_buffer_.Resize(N);
   auto* buffer = thrust_unique_buffer_.template mutable_data<T>();
-  context_.template CopyItems<CUDAContext, CUDAContext>(
-      inputTensor.meta(), N, input, buffer);
+  context_.CopyItemsSameDevice(inputTensor.meta(), N, input, buffer);
 
   // Create two vectors of {0, 1, ..., N-1} on CUDA device
   thrust::device_vector<int> order1(N), order2(N);
@@ -113,10 +110,9 @@ bool UniqueOp<CUDAContext>::DoRunWithType() {
       order2.begin());
   int K = new_last.first - buffer;
 
-  uniqueTensor->Resize(K);
+  auto* uniqueTensor = Output(UNIQUE, {K}, at::dtype<T>());
   T* unique = uniqueTensor->template mutable_data<T>();
-  context_.template CopyItems<CUDAContext, CUDAContext>(
-      thrust_unique_buffer_.meta(), K, buffer, unique);
+  context_.CopyItemsSameDevice(thrust_unique_buffer_.meta(), K, buffer, unique);
 
   // Compute the remapping. For example, for the number 1, if we look at
   // order2[0] and order2[1], we know that input2[0:2) are all 1. They are all

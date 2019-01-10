@@ -6,6 +6,7 @@
 
 #include <functional>
 #include <iostream>
+#include <array>
 
 #include "caffe2/core/common.h"
 
@@ -13,6 +14,7 @@ namespace {
 void* dummy_thread(void*) {
   while (1) {
   }
+  return nullptr;
 }
 
 bool forkAndPipe(
@@ -100,7 +102,7 @@ bool forkAndPipe(
     }));                                                                     \
     int keyPhraseCount = 0;                                                  \
     std::string keyPhrase =                                                  \
-        std::string(name) + "(" + caffe2::to_string(signum) + "), Thread";   \
+        std::string(name) + "(" + c10::to_string(signum) + "), Thread";      \
     size_t loc = 0;                                                          \
     while ((loc = stderrBuffer.find(keyPhrase, loc)) != std::string::npos) { \
       keyPhraseCount += 1;                                                   \

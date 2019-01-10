@@ -6,8 +6,8 @@ from __future__ import unicode_literals
 from caffe2.python import core, workspace
 from hypothesis import given
 from hypothesis import strategies as st
-
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 import numpy as np
 
 
@@ -121,8 +121,9 @@ def gather_ranges_to_dense_with_key(data, ranges, key, lengths):
     return outputs
 
 
-class TestGatherRanges(hu.HypothesisTestCase):
-    @given(boarders_and_data=batched_boarders_and_data(), **hu.gcs_cpu_only)
+class TestGatherRanges(serial.SerializedTestCase):
+    @serial.given(
+        boarders_and_data=batched_boarders_and_data(), **hu.gcs_cpu_only)
     def test_gather_ranges(self, boarders_and_data, gc, dc):
         boarders, data = boarders_and_data
 
@@ -142,7 +143,7 @@ class TestGatherRanges(hu.HypothesisTestCase):
             reference=gather_ranges,
         )
 
-    @given(tensor_splits=_tensor_splits(), **hu.gcs_cpu_only)
+    @serial.given(tensor_splits=_tensor_splits(), **hu.gcs_cpu_only)
     def test_gather_ranges_split(self, tensor_splits, gc, dc):
         data, ranges, lengths, _ = tensor_splits
 

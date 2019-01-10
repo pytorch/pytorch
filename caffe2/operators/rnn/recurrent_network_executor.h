@@ -110,11 +110,11 @@ class RecurrentNetworkExecutorBase {
       // avoid conflicting timestep blobs when reusing workspaces, as with
       // the forward-only mode.
       std::string this_timestep_blob =
-          timestep_blob_ + "_rnnexec_t" + caffe2::to_string(t);
-      ws->CreateBlob(this_timestep_blob)->GetMutable<TensorCPU>()->Resize(1);
+          timestep_blob_ + "_rnnexec_t" + c10::to_string(t);
+      BlobGetMutableTensor(ws->CreateBlob(this_timestep_blob), CPU)->Resize(1);
       auto b = ws->GetBlob(this_timestep_blob);
       CAFFE_ENFORCE(b);
-      b->GetMutable<TensorCPU>()->mutable_data<int32_t>()[0] = t;
+      BlobGetMutableTensor(b, CPU)->template mutable_data<int32_t>()[0] = t;
 
       // Copy the operators from template
       for (auto& template_rnn_op : timestep_ops_template_) {
@@ -466,7 +466,7 @@ std::unique_ptr<RecurrentNetworkExecutorBase> createRNNExecutor(
     std::string timestep_blob,
     ArgumentHelper rnn_args);
 
-class ThreadedRecurrentNetworkExecutor : public RecurrentNetworkExecutorBase {
+class CAFFE2_API ThreadedRecurrentNetworkExecutor : public RecurrentNetworkExecutorBase {
  public:
   ThreadedRecurrentNetworkExecutor(
       const NetDef& step_net_def,

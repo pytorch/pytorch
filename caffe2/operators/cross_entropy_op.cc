@@ -1,4 +1,5 @@
 #include "caffe2/operators/cross_entropy_op.h"
+#include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 
@@ -40,9 +41,9 @@ template <>
 bool LabelCrossEntropyOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& label = Input(1);
-  auto* Y = Output(0);
+
   int N, D;
-  if (X.ndim() > 1) {
+  if (X.dim() > 1) {
     N = X.dim32(0);
     D = X.size_from_dim(1);
   } else {
@@ -50,12 +51,12 @@ bool LabelCrossEntropyOp<float, CPUContext>::RunOnDevice() {
     D = X.dim32(0);
   }
   CAFFE_ENFORCE(
-      (label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == 1));
+      (label.dim() == 1) || (label.dim() == 2 && label.dim32(1) == 1));
   CAFFE_ENFORCE_EQ(label.dim32(0), N);
-  Y->Resize(N);
+  auto* Y = Output(0, {N}, at::dtype<float>());
   const auto* Xdata = X.data<float>();
   const auto* labelData = label.data<int>();
-  auto* Ydata = Y->mutable_data<float>();
+  auto* Ydata = Y->template mutable_data<float>();
   CAFFE_ENFORCE(
       (ConstEigenVectorArrayMap<int>(labelData, N) < D).all() &&
           (ConstEigenVectorArrayMap<int>(labelData, N) >= 0).all(),
@@ -73,18 +74,17 @@ template <>
 bool SigmoidCrossEntropyWithLogitsOp<float, CPUContext>::RunOnDevice() {
   auto& logits = Input(0);
   auto& targets = Input(1);
-  CAFFE_ENFORCE_EQ(logits.dims(), targets.dims());
-  const auto inner_size = logits.ndim() > 0 ? logits.dims().back() : 1;
-  const auto outer_size = logits.size() / inner_size;
+  CAFFE_ENFORCE_EQ(logits.sizes(), targets.sizes());
+  const auto inner_size = logits.dim() > 0 ? logits.sizes().back() : 1;
+  const auto outer_size = logits.numel() / inner_size;
 
-  auto* out = Output(0);
-  if (logits.ndim() == 0) {
-    out->Resize(std::vector<TIndex>{});
-  } else {
-    std::vector<TIndex> dims(logits.dims().begin(), logits.dims().end() - 1);
-    out->Resize(dims);
+  std::vector<int64_t> dims;
+  if (logits.dim() != 0) {
+    dims =
+        std::vector<int64_t>(logits.sizes().begin(), logits.sizes().end() - 1);
   }
-  auto* out_ptr = out->mutable_data<float>();
+  auto* out = Output(0, dims, at::dtype<float>());
+  auto* out_ptr = out->template mutable_data<float>();
 
   auto* logits_ptr = logits.data<float>();
   auto* targets_ptr = targets.data<float>();
@@ -115,14 +115,13 @@ bool SigmoidCrossEntropyWithLogitsGradientOp<float, CPUContext>::RunOnDevice() {
   auto& g = Input(0);
   auto& logits = Input(1);
   auto& targets = Input(2);
-  CAFFE_ENFORCE(logits.dims() == targets.dims());
-  const auto inner_size = logits.ndim() > 0 ? logits.dims().back() : 1;
-  const auto outer_size = logits.size() / inner_size;
-  CAFFE_ENFORCE(g.size() == outer_size);
+  CAFFE_ENFORCE(logits.sizes() == targets.sizes());
+  const auto inner_size = logits.dim() > 0 ? logits.sizes().back() : 1;
+  const auto outer_size = logits.numel() / inner_size;
+  CAFFE_ENFORCE(g.numel() == outer_size);
 
-  auto* out = Output(0);
-  out->ResizeLike(logits);
-  auto* out_ptr = out->mutable_data<float>();
+  auto* out = Output(0, logits.sizes(), at::dtype<float>());
+  auto* out_ptr = out->template mutable_data<float>();
 
   auto* logits_ptr = logits.data<float>();
   auto* targets_ptr = targets.data<float>();
@@ -154,19 +153,19 @@ bool WeightedSigmoidCrossEntropyWithLogitsOp<float, CPUContext>::RunOnDevice() {
   auto& logits = Input(0);
   auto& targets = Input(1);
   auto& weights = Input(2);
-  CAFFE_ENFORCE(logits.dims() == targets.dims());
-  CAFFE_ENFORCE(weights.dims() == targets.dims());
-  const auto inner_size = logits.ndim() > 0 ? logits.dims().back() : 1;
-  const auto outer_size = logits.size() / inner_size;
+  CAFFE_ENFORCE(logits.sizes() == targets.sizes());
+  CAFFE_ENFORCE(weights.sizes() == targets.sizes());
+  const auto inner_size = logits.dim() > 0 ? logits.sizes().back() : 1;
+  const auto outer_size = logits.numel() / inner_size;
 
-  auto* out = Output(0);
-  if (logits.ndim() == 0) {
-    out->Resize(std::vector<TIndex>{});
-  } else {
-    std::vector<TIndex> dims(logits.dims().begin(), logits.dims().end() - 1);
-    out->Resize(dims);
+  std::vector<int64_t> dims;
+  if (logits.dim() != 0) {
+    dims =
+        std::vector<int64_t>(logits.sizes().begin(), logits.sizes().end() - 1);
   }
-  auto* out_ptr = out->mutable_data<float>();
+
+  auto* out = Output(0, dims, at::dtype<float>());
+  auto* out_ptr = out->template mutable_data<float>();
 
   auto* logits_ptr = logits.data<float>();
   auto* targets_ptr = targets.data<float>();
@@ -192,15 +191,14 @@ bool WeightedSigmoidCrossEntropyWithLogitsGradientOp<float, CPUContext>::
   auto& logits = Input(1);
   auto& targets = Input(2);
   auto& weights = Input(3);
-  CAFFE_ENFORCE(logits.dims() == targets.dims());
-  CAFFE_ENFORCE(weights.dims() == targets.dims());
-  const auto inner_size = logits.ndim() > 0 ? logits.dims().back() : 1;
-  const auto outer_size = logits.size() / inner_size;
-  CAFFE_ENFORCE(g.size() == outer_size);
+  CAFFE_ENFORCE(logits.sizes() == targets.sizes());
+  CAFFE_ENFORCE(weights.sizes() == targets.sizes());
+  const auto inner_size = logits.dim() > 0 ? logits.sizes().back() : 1;
+  const auto outer_size = logits.numel() / inner_size;
+  CAFFE_ENFORCE(g.numel() == outer_size);
 
-  auto* out = Output(0);
-  out->ResizeLike(logits);
-  auto* out_ptr = out->mutable_data<float>();
+  auto* out = Output(0, logits.sizes(), at::dtype<float>());
+  auto* out_ptr = out->template mutable_data<float>();
 
   auto* logits_ptr = logits.data<float>();
   auto* targets_ptr = targets.data<float>();
@@ -225,9 +223,9 @@ bool LabelCrossEntropyGradientOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& label = Input(1);
   auto& dY = Input(2);
-  auto* dX = Output(0);
+
   int N, D;
-  if (X.ndim() > 1) {
+  if (X.dim() > 1) {
     N = X.dim32(0);
     D = X.size_from_dim(1);
   } else {
@@ -235,17 +233,17 @@ bool LabelCrossEntropyGradientOp<float, CPUContext>::RunOnDevice() {
     D = X.dim32(0);
   }
   CAFFE_ENFORCE(
-      (label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == 1));
+      (label.dim() == 1) || (label.dim() == 2 && label.dim32(1) == 1));
   CAFFE_ENFORCE_EQ(label.dim32(0), N);
-  CAFFE_ENFORCE_EQ(dY.ndim(), 1);
+  CAFFE_ENFORCE_EQ(dY.dim(), 1);
   CAFFE_ENFORCE_EQ(dY.dim32(0), N);
-  dX->ResizeLike(X);
-  math::Set<float, CPUContext>(dX->size(), 0.f, dX->mutable_data<float>(),
-                               &context_);
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
+  math::Set<float, CPUContext>(
+      dX->numel(), 0.f, dX->template mutable_data<float>(), &context_);
   const float* Xdata = X.data<float>();
   const float* dYdata = dY.data<float>();
   const int* labelData = label.data<int>();
-  float* dXdata = dX->mutable_data<float>();
+  float* dXdata = dX->template mutable_data<float>();
   for (int i = 0; i < N; ++i) {
     dXdata[i * D + labelData[i]] =
         - dYdata[i] / std::max(Xdata[i * D + labelData[i]], kLOG_THRESHOLD());
@@ -256,14 +254,14 @@ bool LabelCrossEntropyGradientOp<float, CPUContext>::RunOnDevice() {
 template <>
 bool MakeTwoClassOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
-  auto* Y = Output(0);
-  auto shape = X.dims();
+
+  auto shape = X.sizes().vec();
   shape.push_back(2);
-  TIndex N = X.size();
-  Y->Resize(shape);
+  int64_t N = X.numel();
+  auto* Y = Output(0, shape, at::dtype<float>());
   const auto* Xdata = X.data<float>();
-  auto* Ydata = Y->mutable_data<float>();
-  for (TIndex i = 0; i < N; ++i) {
+  auto* Ydata = Y->template mutable_data<float>();
+  for (int64_t i = 0; i < N; ++i) {
     DCHECK_GE(Xdata[i], 0.0);
     DCHECK_LE(Xdata[i], 1.0);
     Ydata[i * 2] = 1.0 - Xdata[i];
@@ -275,17 +273,17 @@ bool MakeTwoClassOp<float, CPUContext>::RunOnDevice() {
 template <>
 bool MakeTwoClassGradientOp<float, CPUContext>::RunOnDevice() {
   auto& dY = Input(0);
-  auto* dX = Output(0);
-  auto shape = dY.dims();
+
+  auto shape = dY.sizes().vec();
   CAFFE_ENFORCE_GE(shape.size(), 1);
   CAFFE_ENFORCE_EQ(shape.back(), 2);
   shape.pop_back();
-  dX->Resize(shape);
+  auto* dX = Output(0, shape, at::dtype<float>());
   const float* dYdata = dY.data<float>();
-  float* dXdata = dX->mutable_data<float>();
-  TIndex N = dX->size();
+  float* dXdata = dX->template mutable_data<float>();
+  int64_t N = dX->numel();
   // use eigen?
-  for (TIndex i = 0; i < N; ++i) {
+  for (int64_t i = 0; i < N; ++i) {
     dXdata[i] = dYdata[i * 2 + 1] - dYdata[i * 2];
   }
   return true;
@@ -295,9 +293,9 @@ template <>
 bool CrossEntropyOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& label = Input(1);
-  auto* Y = Output(0);
+
   int N, D;
-  if (X.ndim() > 1) {
+  if (X.dim() > 1) {
     N = X.dim32(0);
     D = X.size_from_dim(1);
   } else {
@@ -305,12 +303,12 @@ bool CrossEntropyOp<float, CPUContext>::RunOnDevice() {
     D = X.dim32(0);
   }
   CAFFE_ENFORCE(
-      (label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == D));
+      (label.dim() == 1) || (label.dim() == 2 && label.dim32(1) == D));
   CAFFE_ENFORCE_EQ(label.dim32(0), N);
-  Y->Resize(vector<TIndex>{N});
+  auto* Y = Output(0, vector<int64_t>{N}, at::dtype<float>());
   const float* Xdata = X.data<float>();
   const float* labelData = label.data<float>();
-  auto* Ydata = Y->mutable_data<float>();
+  auto* Ydata = Y->template mutable_data<float>();
   CAFFE_ENFORCE(
       (ConstEigenArrayMap<float>(labelData, D, N) <= 1.0f).all() &&
           (ConstEigenArrayMap<float>(labelData, D, N) >= 0.0f).all(),
@@ -333,9 +331,9 @@ bool CrossEntropyGradientOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& label = Input(1);
   auto& dY = Input(2);
-  auto* dX = Output(0);
+
   int N, D;
-  if (X.ndim() > 1) {
+  if (X.dim() > 1) {
     N = X.dim32(0);
     D = X.size_from_dim(1);
   } else {
@@ -343,17 +341,17 @@ bool CrossEntropyGradientOp<float, CPUContext>::RunOnDevice() {
     D = X.dim32(0);
   }
   CAFFE_ENFORCE(
-      (label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == D));
+      (label.dim() == 1) || (label.dim() == 2 && label.dim32(1) == D));
   CAFFE_ENFORCE_EQ(label.dim32(0), N);
-  CAFFE_ENFORCE_EQ(dY.ndim(), 1);
+  CAFFE_ENFORCE_EQ(dY.dim(), 1);
   CAFFE_ENFORCE_EQ(dY.dim32(0), N);
-  dX->ResizeLike(X);
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
   math::Set<float, CPUContext>(
-    dX->size(), 0.f, dX->mutable_data<float>(), &context_);
+      dX->numel(), 0.f, dX->template mutable_data<float>(), &context_);
   const float* Xdata = X.data<float>();
   const float* dYdata = dY.data<float>();
   const float* labelData = label.data<float>();
-  float* dXdata = dX->mutable_data<float>();
+  float* dXdata = dX->template mutable_data<float>();
   EigenArrayMap<float>(dXdata, D, N) =
       (ConstEigenArrayMap<float>(labelData, D, N) /
        ConstEigenArrayMap<float>(Xdata, D, N).cwiseMax(kLOG_THRESHOLD()))
@@ -372,27 +370,84 @@ OPERATOR_SCHEMA(LabelCrossEntropy)
     .NumOutputs(1)
     .IdenticalTypeAndShapeOfInputDim(0, 0)
     .SetDoc(R"DOC(
-Operator computes the cross entropy between the input and the label set. In
- practice, it is most commonly used at the end of models, after the SoftMax
- operator and before the AveragedLoss operator. Note that LabelCrossEntropy
- assumes that the label provided is either a 1D array of size N (batch size), or
- a 2D array of size N x 1 (batch size). Each entry in the label vector indicates
- which is the correct class; as such, each entry must be between 0 and D - 1,
- inclusive, where D is the total number of classes. The formula used is:
+This operator computes the cross entropy between a $NxD$ dimensional input data tensor $X$  and a one dimensional input label tensor $label$. The op produces a single length $N$ output tensor $Y$. Here, $N$ is considered the batch size and $D$ is the size of each element in the batch. In practice, it is most commonly used at the end of models as a part of the loss computation, after the SoftMax operator and before the AveragedLoss operator. The cross entropy operation is defined as follows
 
-                            Y[i] = -log(X[i][j])
+$$Y_i = -log(X_{ij})$$
 
- where (i, j) is the classifier's prediction of the jth class (the correct one),
- and i is the batch size. Each log has a lower limit for numerical stability.
+where ($i$, $j$) is the classifier's prediction of the $j$th class (the correct one), and $i$ is the batch size. Each log has a lower limit for numerical stability.
+
+The difference between *LabelCrossEntropy* and *CrossEntropy* is how the labels are specified. Here, the labels are a length $N$ list of integers, whereas in CrossEntropy the labels are a $NxD$ dimensional matrix of one hot label vectors. However, the results of computation should be the same, as shown in the two examples where ($i$, $j$) is the classifier's prediction of the $j$th class (the correct one), and $i$ is the batch size. Each log has a lower limit for numerical stability.
+
+Github Links:
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/cross_entropy_op.h
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/cross_entropy_op.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "LabelCrossEntropy",
+    ["X", "label"],
+    ["Y"]
+)
+
+// Create X: Sample softmax output for 5-class model
+X = np.array([[.01, .05, .02, .02, .9],[.03, .1, .42, .05, .4]])
+print("X:\n",X)
+
+// Create label: Sample 1-hot ground truth label vectors
+label = np.array([4,2])
+print("label:\n",label)
+
+// Feed X & label into workspace
+workspace.FeedBlob("X", X.astype(np.float32))
+workspace.FeedBlob("label", label.astype(np.int32))
+
+// Run op
+workspace.RunOperatorOnce(op)
+
+// Collect Output
+print("Y:\n", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X:
+ [[0.01 0.05 0.02 0.02 0.9 ]
+ [0.03 0.1  0.42 0.05 0.4 ]]
+label:
+ [4 2]
+Y:
+ [0.10536055 0.8675006 ]
+
+```
+
+</details>
+
+
 )DOC")
-    .Input(
-        0,
-        "X",
-        "Input blob from the previous layer, which is almost always "
-        "the result of a softmax operation; X is a 2D array of size N x D, where N "
-        "is the batch size and D is the number of classes")
-    .Input(1, "label", "Blob containing the labels used to compare the input")
-    .Output(0, "Y", "Output blob after the cross entropy computation");
+  .Input(
+      0,
+      "X",
+      "Input tensor which is almost always the result of a softmax operation. $X$ is a 2D array of size $NxD$, where $N$ is the batch size and $D$ is the number of classes.")
+  .Input(
+      1,
+      "label",
+      "Blob containing the labels used to compare the input. $label$ is a length $N$ list of integers, where each element is the integer label for the $n$th element of the batch.")
+  .Output(
+      0,
+      "Y",
+      "Output blob from the cross entropy computation. $Y$ is 1D length $N$ tensor.");
 OPERATOR_SCHEMA(LabelCrossEntropyGradient)
   .NumInputs(3)
   .NumOutputs(1);
@@ -551,28 +606,83 @@ OPERATOR_SCHEMA(CrossEntropy)
     .NumOutputs(1)
     .IdenticalTypeAndShapeOfInputDim(0, 0)
     .SetDoc(R"DOC(
-Operator computes the cross entropy between the input and the label set. In
- practice, it is most commonly used at the end of models, after the SoftMax
- operator and before the AveragedLoss operator. Note that CrossEntropy
- assumes that the soft labels provided is a 2D array of size N x D
- (batch size x number of classes). Each entry in the 2D label corresponds to
- the soft label for the input, where each element represents the correct
- probability of the class being selected. As such, each element must be between
- 0 and 1, and all elements in an entry must sum to 1. The formula used is:
+This operator computes the cross entropy between a $NxD$ dimensional input data tensor $X$  and a $NxD$ dimensional input label tensor $label$. The op produces a single length $N$ output tensor $Y$. Here, $N$ is considered the batch size and $D$ is the size of each element in the batch. In practice, it is most commonly used at the end of models as a part of the loss computation, after the SoftMax operator and before the AveragedLoss operator. The cross entropy operation is defined as follows
 
-                Y[i] = sum_j (label[i][j] * log(X[i][j]))
+$$Y_i = \sum_j (label_{ij} * log(X_{ij}))$$
 
- where (i, j) is the classifier's prediction of the jth class (the correct one),
- and i is the batch size. Each log has a lower limit for numerical stability.
+where ($i$, $j$) is the classifier's prediction of the $j$th class (the correct one), and $i$ is the batch size. Each log has a lower limit for numerical stability.
+
+Github Links:
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/cross_entropy_op.h
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/cross_entropy_op.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "CrossEntropy",
+    ["X", "label"],
+    ["Y"]
+)
+
+// Create X: Sample softmax output for 5-class model
+X = np.array([[.01, .05, .02, .02, .9],[.03, .1, .42, .05, .4]])
+print("X:\n",X)
+
+// Create label: Sample 1-hot ground truth label vectors
+label = np.array([[0.,0.,0.,0.,1.],[0.,0.,1.,0.,0.]])
+print("label:\n",label)
+
+// Feed X & label into workspace
+workspace.FeedBlob("X", X.astype(np.float32))
+workspace.FeedBlob("label", label.astype(np.float32))
+
+// Run op
+workspace.RunOperatorOnce(op)
+
+// Collect Output
+print("Y:\n", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X:
+ [[0.01 0.05 0.02 0.02 0.9 ]
+ [0.03 0.1  0.42 0.05 0.4 ]]
+label:
+ [[0. 0. 0. 0. 1.]
+ [0. 0. 1. 0. 0.]]
+Y:
+ [0.10536055 0.8675006 ]
+
+```
+
+</details>
+
+
 )DOC")
     .Input(
         0,
         "X",
-        "Input blob from the previous layer, which is almost always "
-        "the result of a softmax operation; X is a 2D array of size N x D, where N "
-        "is the batch size and D is the number of classes")
-    .Input(1, "label", "Blob containing the labels used to compare the input")
-    .Output(0, "Y", "Output blob after the cross entropy computation");
+        "Input tensor which is almost always the result of a softmax operation. $X$ is a 2D array of size $NxD$, where $N$ is the batch size and $D$ is the number of classes.")
+    .Input(
+        1,
+        "label",
+        "Blob containing the labels used to compare the input. $label$ is the same shape as $X$.")
+    .Output(
+        0,
+        "Y",
+        "Output blob from the cross entropy computation. $Y$ is 1D length $N$ tensor.");
 OPERATOR_SCHEMA(CrossEntropyGradient)
   .NumInputs(3)
   .NumOutputs(1);

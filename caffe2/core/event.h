@@ -1,13 +1,17 @@
 #ifndef CAFFE2_CORE_EVENT_H_
 #define CAFFE2_CORE_EVENT_H_
 
+#include <chrono>
+
+#include <c10/DeviceType.h>
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 namespace caffe2 {
 
-constexpr int MaxDeviceTypes = DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES;
+constexpr int MaxDeviceTypes =
+    DeviceTypeProto::PROTO_COMPILE_TIME_MAX_DEVICE_TYPES;
 class Event;
 
 enum EventStatus {
@@ -47,7 +51,11 @@ typedef const std::string& (*EventErrorMessageFunction)(const Event*);
 typedef void (*EventSetFinishedFunction)(const Event*, const char*);
 typedef void (*EventResetFunction)(Event*);
 
-class Event {
+// Sets callback that is called when event is finished
+typedef std::function<void()> EventCallbackFunction;
+typedef void (*EventSetCallbackFunction)(Event*, EventCallbackFunction);
+
+class CAFFE2_API Event {
  public:
   explicit Event(const DeviceOption& option)
       : event_(), type_(option.device_type()), option_(option) {
@@ -61,20 +69,22 @@ class Event {
   ~Event() {}
 
   void Record(
-      int recorder_type,
+      DeviceType recorder_type,
       const void* context,
       const char* err_msg = nullptr) {
+    auto recorder_index = TypeToProto(recorder_type);
     CAFFE_ENFORCE_EQ(
-        recorder_type,
+        recorder_index,
         type_,
         "You are trying to record with a wrong device type.");
-    CAFFE_ENFORCE(event_recorder_[recorder_type]);
-    event_recorder_[recorder_type](this, context, err_msg);
+    CAFFE_ENFORCE(event_recorder_[recorder_index]);
+    event_recorder_[recorder_index](this, context, err_msg);
   }
 
-  void Wait(int waiter_type, void* context) const {
-    CAFFE_ENFORCE(event_waiter_[waiter_type][type_]);
-    event_waiter_[waiter_type][type_](this, context);
+  void Wait(DeviceType waiter_type, void* context) const {
+    auto waiter_index = TypeToProto(waiter_type);
+    CAFFE_ENFORCE(event_waiter_[waiter_index][type_]);
+    event_waiter_[waiter_index][type_](this, context);
   }
 
   void Finish() const {
@@ -95,6 +105,10 @@ class Event {
   void Reset() {
     CAFFE_ENFORCE(event_resetter_[type_]);
     event_resetter_[type_](this);
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+    caught_exception_ = nullptr;
+    exception_timestamp_ = 0;
+#endif // CAFFE2_USE_EXCEPTION_PTR
   }
 
   const DeviceOption& GetDeviceOption() const {
@@ -114,6 +128,16 @@ class Event {
   void SetFinished(const char* err_msg = nullptr) {
     CAFFE_ENFORCE(event_finished_setter_[type_]);
     return event_finished_setter_[type_](this, err_msg);
+  }
+
+  bool SupportsCallback() const {
+    return event_callback_setter_[type_] != nullptr;
+  }
+
+  void SetCallback(EventCallbackFunction callback) {
+    CAFFE_ENFORCE(
+        event_callback_setter_[type_], "Event does not support callbacks");
+    event_callback_setter_[type_](this, callback);
   }
 
   // If parent op has succeeded, then we can run any child op;
@@ -147,6 +171,53 @@ class Event {
     return type_;
   }
 
+  void SetFinishedWithException(const char* err_msg = nullptr) {
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+    if (!caught_exception_) {
+      caught_exception_ = std::current_exception();
+      typedef std::chrono::high_resolution_clock clock;
+      exception_timestamp_ =
+          clock::now().time_since_epoch() / std::chrono::milliseconds(1);
+    }
+    CAFFE_ENFORCE(caught_exception_, "No exception found");
+#else
+    VLOG(1) << "No support for exceptions in Event";
+#endif // CAFFE2_USE_EXCEPTION_PTR
+    if (err_msg) {
+      SetFinished(err_msg);
+    } else {
+      SetFinished("Error happened during an operator run");
+    }
+  }
+
+  bool HasException() const {
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+    return (bool)caught_exception_;
+#else
+    VLOG(1) << "No support for exceptions in Event";
+    return false;
+#endif // CAFFE2_USE_EXCEPTION_PTR
+  }
+
+  int64_t ExceptionTimestamp() const {
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+    return exception_timestamp_;
+#else
+    VLOG(1) << "No support for exceptions in Event";
+    return 0;
+#endif // CAFFE2_USE_EXCEPTION_PTR
+  }
+
+  void RethrowException() const {
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+    if (caught_exception_) {
+      std::rethrow_exception(caught_exception_);
+    }
+#else
+    VLOG(1) << "No support for exceptions in Event";
+#endif // CAFFE2_USE_EXCEPTION_PTR
+  }
+
   // event_ is going to be accessed by the EventCreate/Record/Wait/Finish
   // functions, but one should not use it outside the own Event functionalities.
   // In the future we may move it to a private member.
@@ -156,68 +227,77 @@ class Event {
   int type_;
   DeviceOption option_;
 
-  CAFFE2_API static EventCreateFunction event_creator_[MaxDeviceTypes];
-  CAFFE2_API static EventRecordFunction event_recorder_[MaxDeviceTypes];
-  CAFFE2_API static EventWaitFunction event_waiter_[MaxDeviceTypes]
-                                                   [MaxDeviceTypes];
-  CAFFE2_API static EventFinishFunction event_finisher_[MaxDeviceTypes];
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+  std::exception_ptr caught_exception_;
+  int64_t exception_timestamp_;
+#endif // CAFFE2_USE_EXCEPTION_PTR
 
-  CAFFE2_API static EventQueryFunction event_querier_[MaxDeviceTypes];
-  CAFFE2_API static EventErrorMessageFunction
+  static EventCreateFunction event_creator_[MaxDeviceTypes];
+  static EventRecordFunction event_recorder_[MaxDeviceTypes];
+  static EventWaitFunction event_waiter_[MaxDeviceTypes]
+                                        [MaxDeviceTypes];
+  static EventFinishFunction event_finisher_[MaxDeviceTypes];
+
+  static EventQueryFunction event_querier_[MaxDeviceTypes];
+  static EventErrorMessageFunction
       event_err_msg_getter_[MaxDeviceTypes];
-  CAFFE2_API static EventSetFinishedFunction
+  static EventSetFinishedFunction
       event_finished_setter_[MaxDeviceTypes];
-  CAFFE2_API static EventResetFunction event_resetter_[MaxDeviceTypes];
+  static EventResetFunction event_resetter_[MaxDeviceTypes];
 
-  template <int d>
+  static EventSetCallbackFunction event_callback_setter_[MaxDeviceTypes];
+
+  template <DeviceType t>
   friend struct EventCreateFunctionRegisterer;
-  template <int d>
+  template <DeviceType t>
   friend struct EventRecordFunctionRegisterer;
-  template <int w, int d>
+  template <DeviceType w, DeviceType d>
   friend struct EventWaitFunctionRegisterer;
-  template <int d>
+  template <DeviceType t>
   friend struct EventFinishFunctionRegisterer;
 
-  template <int d>
+  template <DeviceType t>
   friend struct EventQueryFunctionRegisterer;
-  template <int d>
+  template <DeviceType t>
   friend struct EventErrorMessageFunctionRegisterer;
-  template <int d>
+  template <DeviceType t>
   friend struct EventSetFinishedFunctionRegisterer;
-  template <int d>
+  template <DeviceType t>
+  friend struct EventSetCallbackFunctionRegisterer;
+  template <DeviceType t>
   friend struct EventResetFunctionRegisterer;
 };
 
-template <int d>
+template <DeviceType t>
 struct EventCreateFunctionRegisterer {
   explicit EventCreateFunctionRegisterer(EventCreateFunction f) {
-    static_assert(d < MaxDeviceTypes, "");
+    auto d = TypeToProto(t);
     Event::event_creator_[d] = f;
   }
 };
-#define REGISTER_EVENT_CREATE_FUNCTION(d, f)                     \
+#define REGISTER_EVENT_CREATE_FUNCTION(t, f)                     \
   namespace {                                                    \
-  static EventCreateFunctionRegisterer<d> g_event_create_##d(f); \
+  static EventCreateFunctionRegisterer<t> g_event_create_##d(f); \
   }
 
-template <int d>
+template <DeviceType t>
 struct EventRecordFunctionRegisterer {
   explicit EventRecordFunctionRegisterer(EventRecordFunction f) {
-    static_assert(d < MaxDeviceTypes, "");
+    auto d = TypeToProto(t);
     Event::event_recorder_[d] = f;
   }
 };
-#define REGISTER_EVENT_RECORD_FUNCTION(d, f)                     \
+#define REGISTER_EVENT_RECORD_FUNCTION(t, f)                     \
   namespace {                                                    \
-  static EventRecordFunctionRegisterer<d> g_event_record_##d(f); \
+  static EventRecordFunctionRegisterer<t> g_event_record_##d(f); \
   }
 
-template <int waiter_type, int event_type>
+template <DeviceType waiter_type, DeviceType event_type>
 struct EventWaitFunctionRegisterer {
   explicit EventWaitFunctionRegisterer(EventWaitFunction f) {
-    static_assert(waiter_type < MaxDeviceTypes, "");
-    static_assert(event_type < MaxDeviceTypes, "");
-    Event::event_waiter_[waiter_type][event_type] = f;
+    auto waiter_index = TypeToProto(waiter_type);
+    auto event_index = TypeToProto(event_type);
+    Event::event_waiter_[waiter_index][event_index] = f;
   }
 };
 #define REGISTER_EVENT_WAIT_FUNCTION(w, d, f)                         \
@@ -225,64 +305,76 @@ struct EventWaitFunctionRegisterer {
   static EventWaitFunctionRegisterer<w, d> g_event_wait_##w##_##d(f); \
   }
 
-template <int d>
+template <DeviceType t>
 struct EventQueryFunctionRegisterer {
   explicit EventQueryFunctionRegisterer(EventQueryFunction f) {
-    static_assert(d < MaxDeviceTypes, "");
+    auto d = TypeToProto(t);
     Event::event_querier_[d] = f;
   }
 };
-#define REGISTER_EVENT_QUERY_FUNCTION(d, f)                    \
+#define REGISTER_EVENT_QUERY_FUNCTION(t, f)                    \
   namespace {                                                  \
-  static EventQueryFunctionRegisterer<d> g_event_query_##d(f); \
+  static EventQueryFunctionRegisterer<t> g_event_query_##d(f); \
   }
 
-template <int d>
+template <DeviceType t>
 struct EventErrorMessageFunctionRegisterer {
   explicit EventErrorMessageFunctionRegisterer(EventErrorMessageFunction f) {
-    static_assert(d < MaxDeviceTypes, "");
+    auto d = TypeToProto(t);
     Event::event_err_msg_getter_[d] = f;
   }
 };
-#define REGISTER_EVENT_ERROR_MESSAGE_FUNCTION(d, f)                     \
+#define REGISTER_EVENT_ERROR_MESSAGE_FUNCTION(t, f)                     \
   namespace {                                                           \
-  static EventErrorMessageFunctionRegisterer<d> g_event_err_msg_##d(f); \
+  static EventErrorMessageFunctionRegisterer<t> g_event_err_msg_##d(f); \
   }
 
-template <int d>
+template <DeviceType t>
 struct EventSetFinishedFunctionRegisterer {
   explicit EventSetFinishedFunctionRegisterer(EventSetFinishedFunction f) {
-    static_assert(d < MaxDeviceTypes, "");
+    auto d = TypeToProto(t);
     Event::event_finished_setter_[d] = f;
   }
 };
-#define REGISTER_EVENT_SET_FINISHED_FUNCTION(d, f)                          \
+#define REGISTER_EVENT_SET_FINISHED_FUNCTION(t, f)                          \
   namespace {                                                               \
-  static EventSetFinishedFunctionRegisterer<d> g_event_set_finished_##d(f); \
+  static EventSetFinishedFunctionRegisterer<t> g_event_set_finished_##d(f); \
   }
 
-template <int d>
+template <DeviceType t>
+struct EventSetCallbackFunctionRegisterer {
+  explicit EventSetCallbackFunctionRegisterer(EventSetCallbackFunction f) {
+    auto d = TypeToProto(t);
+    Event::event_callback_setter_[d] = f;
+  }
+};
+#define REGISTER_EVENT_SET_CALLBACK_FUNCTION(t, f)                          \
+  namespace {                                                               \
+  static EventSetCallbackFunctionRegisterer<t> g_event_set_callback_##d(f); \
+  }
+
+template <DeviceType t>
 struct EventFinishFunctionRegisterer {
   explicit EventFinishFunctionRegisterer(EventFinishFunction f) {
-    static_assert(d < MaxDeviceTypes, "");
+    auto d = TypeToProto(t);
     Event::event_finisher_[d] = f;
   }
 };
-#define REGISTER_EVENT_FINISH_FUNCTION(d, f)                     \
+#define REGISTER_EVENT_FINISH_FUNCTION(t, f)                     \
   namespace {                                                    \
-  static EventFinishFunctionRegisterer<d> g_event_finish_##d(f); \
+  static EventFinishFunctionRegisterer<t> g_event_finish_##d(f); \
   }
 
-template <int d>
+template <DeviceType t>
 struct EventResetFunctionRegisterer {
   explicit EventResetFunctionRegisterer(EventResetFunction f) {
-    static_assert(d < MaxDeviceTypes, "");
+    auto d = TypeToProto(t);
     Event::event_resetter_[d] = f;
   }
 };
-#define REGISTER_EVENT_RESET_FUNCTION(d, f)                    \
+#define REGISTER_EVENT_RESET_FUNCTION(t, f)                    \
   namespace {                                                  \
-  static EventResetFunctionRegisterer<d> g_event_reset_##d(f); \
+  static EventResetFunctionRegisterer<t> g_event_reset_##d(f); \
   }
 
 } // namespace caffe2

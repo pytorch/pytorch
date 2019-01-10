@@ -16,7 +16,7 @@ class MergeSingleScalarFeatureTensorsOp : public Operator<Context> {
       Workspace* ws)
       : Operator<Context>(operator_def, ws) {
     numInputs_ = InputSize() / kNumTensorsPerInput;
-    featureIDs_ = OperatorBase::GetRepeatedArgument<int64_t>("feature_ids");
+    featureIDs_ = this->template GetRepeatedArgument<int64_t>("feature_ids");
   }
   virtual ~MergeSingleScalarFeatureTensorsOp() noexcept {}
 
@@ -28,7 +28,7 @@ class MergeSingleScalarFeatureTensorsOp : public Operator<Context> {
 
   template <typename T>
   bool DoRunWithType() {
-    int numExamples = Input(0).size();
+    int numExamples = Input(0).numel();
     int totalNumFeatures = 0;
     for (int inputIndex = 0; inputIndex < numInputs_; ++inputIndex) {
       const bool* inPresenceData =
@@ -40,13 +40,9 @@ class MergeSingleScalarFeatureTensorsOp : public Operator<Context> {
       }
     }
 
-    auto* outLengths = Output(0);
-    auto* outKeys = Output(1);
-    auto* outValues = Output(2);
-
-    outLengths->Resize(numExamples);
-    outKeys->Resize(totalNumFeatures);
-    outValues->Resize(totalNumFeatures);
+    auto* outLengths = Output(0, {numExamples}, at::dtype<int32_t>());
+    auto* outKeys = Output(1, {totalNumFeatures}, at::dtype<int64_t>());
+    auto* outValues = Output(2, {totalNumFeatures}, at::dtype<T>());
 
     int32_t* outLengthsData = outLengths->template mutable_data<int32_t>();
     int64_t* outKeysData = outKeys->template mutable_data<int64_t>();
@@ -98,7 +94,7 @@ class MergeSingleScalarFeatureTensorsGradientOp : public Operator<Context> {
 
   template <typename T>
   bool DoRunWithType() {
-    int numExamples = Input(0).size();
+    int numExamples = Input(0).numel();
     for (int inputIndex = 0; inputIndex < numFeatureInputs_; ++inputIndex) {
       Output(inputIndex)->ResizeLike(Input(inputIndex));
     }
@@ -137,7 +133,7 @@ class MergeSingleListFeatureTensorsOp : public Operator<Context> {
       : Operator<Context>(operator_def, ws) {
     numInputs_ = InputSize() / kNumTensorsPerInput;
     inValuesOffset_.resize(numInputs_);
-    featureIDs_ = OperatorBase::GetRepeatedArgument<int64_t>("feature_ids");
+    featureIDs_ = this->template GetRepeatedArgument<int64_t>("feature_ids");
   }
   virtual ~MergeSingleListFeatureTensorsOp() noexcept {}
 
@@ -149,7 +145,7 @@ class MergeSingleListFeatureTensorsOp : public Operator<Context> {
 
   template <typename T>
   bool DoRunWithType() {
-    int numExamples = Input(0).size();
+    int numExamples = Input(0).numel();
     int totalNumFeatures = 0;
     int totalNumValues = 0;
     for (int inputIndex = 0; inputIndex < numInputs_; ++inputIndex) {
@@ -165,15 +161,11 @@ class MergeSingleListFeatureTensorsOp : public Operator<Context> {
       }
     }
 
-    auto* outLengths = Output(0);
-    auto* outKeys = Output(1);
-    auto* outValuesLengths = Output(2);
-    auto* outValuesValues = Output(3);
-
-    outLengths->Resize(numExamples);
-    outKeys->Resize(totalNumFeatures);
-    outValuesLengths->Resize(totalNumFeatures);
-    outValuesValues->Resize(totalNumValues);
+    auto* outLengths = Output(0, {numExamples}, at::dtype<int32_t>());
+    auto* outKeys = Output(1, {totalNumFeatures}, at::dtype<int64_t>());
+    auto* outValuesLengths =
+        Output(2, {totalNumFeatures}, at::dtype<int32_t>());
+    auto* outValuesValues = Output(3, {totalNumValues}, at::dtype<T>());
 
     int32_t* outLengthsData = outLengths->template mutable_data<int32_t>();
     int64_t* outKeysData = outKeys->template mutable_data<int64_t>();
@@ -198,8 +190,8 @@ class MergeSingleListFeatureTensorsOp : public Operator<Context> {
           ++outLengthsData[exampleIndex];
           outKeysData[keysOffset] = featureIDs_[inputIndex];
           outValuesLengthsData[keysOffset] = inLengthsData[exampleIndex];
-          context_.template CopyItems<Context, Context>(
-              inValues.meta(),
+          context_.CopyItemsSameDevice(
+              inValues.dtype(),
               inLengthsData[exampleIndex],
               &inValues.template data<T>()[inValuesOffset_[inputIndex]],
               &outValuesValuesData[valuesOffset]);
@@ -240,7 +232,7 @@ class MergeSingleListOrMapFeatureTensorsGradientOp : public Operator<Context> {
 
   template <typename T>
   bool DoRunWithType() {
-    int numExamples = Input(0).size();
+    int numExamples = Input(0).numel();
     std::vector<int> outValuesOffset(numFeatureInputs_);
     for (int inputIndex = 0; inputIndex < numFeatureInputs_; ++inputIndex) {
       int inputNumValues = 0;
@@ -268,8 +260,8 @@ class MergeSingleListOrMapFeatureTensorsGradientOp : public Operator<Context> {
             Input(kNumTensorsPerInput * inputIndex + 1).template data<bool>();
         if (inPresenceData[exampleIndex]) {
           T* outFeatureValues = Output(inputIndex)->template mutable_data<T>();
-          context_.template CopyItems<Context, Context>(
-              inValuesValuesGrad.meta(),
+          context_.CopyItemsSameDevice(
+              inValuesValuesGrad.dtype(),
               inLengthsData[exampleIndex],
               &inValuesValuesGradData[inValuesValuesOffset],
               &outFeatureValues[outValuesOffset[inputIndex]]);
@@ -295,7 +287,7 @@ class MergeSingleMapFeatureTensorsOp : public Operator<Context> {
       : Operator<Context>(operator_def, ws) {
     numInputs_ = InputSize() / kNumTensorsPerInput;
     inValuesOffset_.resize(numInputs_);
-    featureIDs_ = OperatorBase::GetRepeatedArgument<int64_t>("feature_ids");
+    featureIDs_ = this->template GetRepeatedArgument<int64_t>("feature_ids");
   }
   virtual ~MergeSingleMapFeatureTensorsOp() noexcept {}
 
@@ -314,7 +306,7 @@ class MergeSingleMapFeatureTensorsOp : public Operator<Context> {
 
   template <typename K, typename V>
   bool DoRunWithType2() {
-    int numExamples = Input(0).size();
+    int numExamples = Input(0).numel();
     int totalNumFeatures = 0;
     int totalNumValues = 0;
     for (int inputIndex = 0; inputIndex < numInputs_; ++inputIndex) {
@@ -330,17 +322,12 @@ class MergeSingleMapFeatureTensorsOp : public Operator<Context> {
       }
     }
 
-    auto* outLengths = Output(0);
-    auto* outKeys = Output(1);
-    auto* outValuesLengths = Output(2);
-    auto* outValuesKeys = Output(3);
-    auto* outValuesValues = Output(4);
-
-    outLengths->Resize(numExamples);
-    outKeys->Resize(totalNumFeatures);
-    outValuesLengths->Resize(totalNumFeatures);
-    outValuesKeys->Resize(totalNumValues);
-    outValuesValues->Resize(totalNumValues);
+    auto* outLengths = Output(0, {numExamples}, at::dtype<int32_t>());
+    auto* outKeys = Output(1, {totalNumFeatures}, at::dtype<int64_t>());
+    auto* outValuesLengths =
+        Output(2, {totalNumFeatures}, at::dtype<int32_t>());
+    auto* outValuesKeys = Output(3, {totalNumValues}, at::dtype<K>());
+    auto* outValuesValues = Output(4, {totalNumValues}, at::dtype<V>());
 
     int32_t* outLengthsData = outLengths->template mutable_data<int32_t>();
     int64_t* outKeysData = outKeys->template mutable_data<int64_t>();
@@ -367,13 +354,13 @@ class MergeSingleMapFeatureTensorsOp : public Operator<Context> {
           ++outLengthsData[exampleIndex];
           outKeysData[keysOffset] = featureIDs_[inputIndex];
           outValuesLengthsData[keysOffset] = inLengthsData[exampleIndex];
-          context_.template CopyItems<Context, Context>(
-              inKeys.meta(),
+          context_.CopyItemsSameDevice(
+              inKeys.dtype(),
               inLengthsData[exampleIndex],
               &inKeys.template data<K>()[inValuesOffset_[inputIndex]],
               &outValuesKeysData[valuesOffset]);
-          context_.template CopyItems<Context, Context>(
-              inValues.meta(),
+          context_.CopyItemsSameDevice(
+              inValues.dtype(),
               inLengthsData[exampleIndex],
               &inValues.template data<V>()[inValuesOffset_[inputIndex]],
               &outValuesValuesData[valuesOffset]);
@@ -415,19 +402,15 @@ class MergeMultiScalarFeatureTensorsOp : public Operator<Context> {
 
   template <typename T>
   bool DoRunWithType() {
-    int numExamples = Input(0).size();
+    int numExamples = Input(0).numel();
     int totalNumFeatures = 0;
     for (int inputIndex = 0; inputIndex < numInputs_; ++inputIndex) {
-      totalNumFeatures += Input(kNumTensorsPerInput * inputIndex + 1).size();
+      totalNumFeatures += Input(kNumTensorsPerInput * inputIndex + 1).numel();
     }
 
-    auto* outLengths = Output(0);
-    auto* outKeys = Output(1);
-    auto* outValues = Output(2);
-
-    outLengths->Resize(numExamples);
-    outKeys->Resize(totalNumFeatures);
-    outValues->Resize(totalNumFeatures);
+    auto* outLengths = Output(0, {numExamples}, at::dtype<int32_t>());
+    auto* outKeys = Output(1, {totalNumFeatures}, at::dtype<int64_t>());
+    auto* outValues = Output(2, {totalNumFeatures}, at::dtype<T>());
 
     int32_t* outLengthsData = outLengths->template mutable_data<int32_t>();
     int64_t* outKeysData = outKeys->template mutable_data<int64_t>();
@@ -488,7 +471,7 @@ class MergeMultiScalarFeatureTensorsGradientOp : public Operator<Context> {
 
   template <typename T>
   bool DoRunWithType() {
-    int numExamples = Input(0).size();
+    int numExamples = Input(0).numel();
     std::vector<int> outValuesOffset(numFeatureInputs_);
     for (int inputIndex = 0; inputIndex < numFeatureInputs_; ++inputIndex) {
       int inputNumValues = 0;
@@ -510,8 +493,8 @@ class MergeMultiScalarFeatureTensorsGradientOp : public Operator<Context> {
             Input(kNumTensorsPerInput * inputIndex).template data<int32_t>();
         if (inLengthsData[exampleIndex] > 0) {
           T* outFeatureValues = Output(inputIndex)->template mutable_data<T>();
-          context_.template CopyItems<Context, Context>(
-              inValuesGrad.meta(),
+          context_.CopyItemsSameDevice(
+              inValuesGrad.dtype(),
               inLengthsData[exampleIndex],
               &inValuesGradData[inValuesOffset],
               &outFeatureValues[outValuesOffset[inputIndex]]);
@@ -549,23 +532,19 @@ class MergeMultiListFeatureTensorsOp : public Operator<Context> {
 
   template <typename T>
   bool DoRunWithType() {
-    int numExamples = Input(0).size();
+    int numExamples = Input(0).numel();
     int totalNumFeatures = 0;
     int totalNumValues = 0;
     for (int inputIndex = 0; inputIndex < numInputs_; ++inputIndex) {
-      totalNumFeatures += Input(kNumTensorsPerInput * inputIndex + 1).size();
-      totalNumValues += Input(kNumTensorsPerInput * inputIndex + 3).size();
+      totalNumFeatures += Input(kNumTensorsPerInput * inputIndex + 1).numel();
+      totalNumValues += Input(kNumTensorsPerInput * inputIndex + 3).numel();
     }
 
-    auto* outLengths = Output(0);
-    auto* outKeys = Output(1);
-    auto* outValuesLengths = Output(2);
-    auto* outValuesValues = Output(3);
-
-    outLengths->Resize(numExamples);
-    outKeys->Resize(totalNumFeatures);
-    outValuesLengths->Resize(totalNumFeatures);
-    outValuesValues->Resize(totalNumValues);
+    auto* outLengths = Output(0, {numExamples}, at::dtype<int32_t>());
+    auto* outKeys = Output(1, {totalNumFeatures}, at::dtype<int64_t>());
+    auto* outValuesLengths =
+        Output(2, {totalNumFeatures}, at::dtype<int32_t>());
+    auto* outValuesValues = Output(3, {totalNumValues}, at::dtype<T>());
 
     int32_t* outLengthsData = outLengths->template mutable_data<int32_t>();
     int64_t* outKeysData = outKeys->template mutable_data<int64_t>();
@@ -597,8 +576,8 @@ class MergeMultiListFeatureTensorsOp : public Operator<Context> {
           outKeysData[outKeysOffset] = inKeysData[inKeysOffset_[inputIndex]];
           outValuesLengthsData[outKeysOffset] =
               inValuesLengthsData[inKeysOffset_[inputIndex]];
-          context_.template CopyItems<Context, Context>(
-              inValuesValues.meta(),
+          context_.CopyItemsSameDevice(
+              inValuesValues.dtype(),
               inValuesLengthsData[inKeysOffset_[inputIndex]],
               &inValuesValues
                    .template data<T>()[inValuesValuesOffset_[inputIndex]],
@@ -651,25 +630,20 @@ class MergeMultiMapFeatureTensorsOp : public Operator<Context> {
 
   template <typename K, typename V>
   bool DoRunWithType2() {
-    int numExamples = Input(0).size();
+    int numExamples = Input(0).numel();
     int totalNumFeatures = 0;
     int totalNumValues = 0;
     for (int inputIndex = 0; inputIndex < numInputs_; ++inputIndex) {
-      totalNumFeatures += Input(kNumTensorsPerInput * inputIndex + 1).size();
-      totalNumValues += Input(kNumTensorsPerInput * inputIndex + 4).size();
+      totalNumFeatures += Input(kNumTensorsPerInput * inputIndex + 1).numel();
+      totalNumValues += Input(kNumTensorsPerInput * inputIndex + 4).numel();
     }
 
-    auto* outLengths = Output(0);
-    auto* outKeys = Output(1);
-    auto* outValuesLengths = Output(2);
-    auto* outValuesKeys = Output(3);
-    auto* outValuesValues = Output(4);
-
-    outLengths->Resize(numExamples);
-    outKeys->Resize(totalNumFeatures);
-    outValuesLengths->Resize(totalNumFeatures);
-    outValuesKeys->Resize(totalNumValues);
-    outValuesValues->Resize(totalNumValues);
+    auto* outLengths = Output(0, {numExamples}, at::dtype<int32_t>());
+    auto* outKeys = Output(1, {totalNumFeatures}, at::dtype<int64_t>());
+    auto* outValuesLengths =
+        Output(2, {totalNumFeatures}, at::dtype<int32_t>());
+    auto* outValuesKeys = Output(3, {totalNumValues}, at::dtype<K>());
+    auto* outValuesValues = Output(4, {totalNumValues}, at::dtype<V>());
 
     int32_t* outLengthsData = outLengths->template mutable_data<int32_t>();
     int64_t* outKeysData = outKeys->template mutable_data<int64_t>();
@@ -703,14 +677,14 @@ class MergeMultiMapFeatureTensorsOp : public Operator<Context> {
           outKeysData[outKeysOffset] = inKeysData[inKeysOffset_[inputIndex]];
           outValuesLengthsData[outKeysOffset] =
               inValuesLengthsData[inKeysOffset_[inputIndex]];
-          context_.template CopyItems<Context, Context>(
-              inValuesKeys.meta(),
+          context_.CopyItemsSameDevice(
+              inValuesKeys.dtype(),
               inValuesLengthsData[inKeysOffset_[inputIndex]],
               &inValuesKeys
                    .template data<K>()[inValuesValuesOffset_[inputIndex]],
               &outValuesKeysData[outValuesValuesOffset]);
-          context_.template CopyItems<Context, Context>(
-              inValuesValues.meta(),
+          context_.CopyItemsSameDevice(
+              inValuesValues.dtype(),
               inValuesLengthsData[inKeysOffset_[inputIndex]],
               &inValuesValues
                    .template data<V>()[inValuesValuesOffset_[inputIndex]],
@@ -756,7 +730,7 @@ class MergeMultiListOrMapFeatureTensorsGradientOp : public Operator<Context> {
 
   template <typename T>
   bool DoRunWithType() {
-    int numExamples = Input(0).size();
+    int numExamples = Input(0).numel();
     std::vector<int> outValuesLengthOffset(numFeatureInputs_);
     std::vector<int> outValuesValuesOffset(numFeatureInputs_);
     for (int inputIndex = 0; inputIndex < numFeatureInputs_; ++inputIndex) {
@@ -764,7 +738,7 @@ class MergeMultiListOrMapFeatureTensorsGradientOp : public Operator<Context> {
       auto& inValuesLength = Input(kNumTensorsPerInput * inputIndex + 1);
       const int32_t* inValuesLengthsData =
           inValuesLength.template data<int32_t>();
-      for (int valuesIndex = 0; valuesIndex < inValuesLength.size();
+      for (int valuesIndex = 0; valuesIndex < inValuesLength.numel();
            ++valuesIndex) {
         inputNumValues += inValuesLengthsData[valuesIndex];
       }
@@ -791,8 +765,8 @@ class MergeMultiListOrMapFeatureTensorsGradientOp : public Operator<Context> {
         }
         if (valuesLengthCopy > 0) {
           T* outFeatureValues = Output(inputIndex)->template mutable_data<T>();
-          context_.template CopyItems<Context, Context>(
-              inValuesValuesGrad.meta(),
+          context_.CopyItemsSameDevice(
+              inValuesValuesGrad.dtype(),
               valuesLengthCopy,
               &inValuesValuesGradData[inValuesValuesOffset],
               &outFeatureValues[outValuesValuesOffset[inputIndex]]);

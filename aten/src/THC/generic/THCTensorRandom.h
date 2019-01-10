@@ -1,12 +1,10 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorRandom.h"
+#define THC_GENERIC_FILE "THC/generic/THCTensorRandom.h"
 #else
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
 
 THC_API void THCTensor_(uniform)(struct THCState *state, THCTensor *self, double a, double b);
-THC_API void THCTensor_(rand)(THCState *state, THCTensor *r_, THLongStorage *size);
-THC_API void THCTensor_(randn)(THCState *state, THCTensor *r_, THLongStorage *size);
 THC_API void THCTensor_(normal)(struct THCState *state, THCTensor *self, double mean, double stdv);
 THC_API void THCTensor_(normal_means)(struct THCState *state, THCTensor *self, THCTensor *means, double stddev);
 THC_API void THCTensor_(normal_stddevs)(struct THCState *state, THCTensor *self, double mean, THCTensor *stddevs);
@@ -23,10 +21,6 @@ THC_API void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor 
 THC_API void THCTensor_(random)(struct THCState *state, THCTensor *self);
 THC_API void THCTensor_(clampedRandom)(struct THCState *state, THCTensor *self, int64_t min, int64_t max);
 THC_API void THCTensor_(cappedRandom)(struct THCState *state, THCTensor *self, int64_t max);
-THC_API void THCTensor_(bernoulli)(struct THCState *state, THCTensor *self, double p);
-THC_API void THCTensor_(bernoulli_FloatTensor)(struct THCState *state, THCTensor *self, THCudaTensor *p);
-THC_API void THCTensor_(bernoulli_DoubleTensor)(struct THCState *state, THCTensor *self, THCudaDoubleTensor *p);
-THC_API void THCTensor_(bernoulli_Tensor)(THCState *state, THCTensor *self, THCTensor* p);
 THC_API void THCTensor_(geometric)(struct THCState *state, THCTensor *self, double p);
 
 #endif

@@ -1,7 +1,7 @@
 #ifndef TH_LAPACK_INC
 #define TH_LAPACK_INC
 
-#include "THGeneral.h"
+#include <TH/THGeneral.h>
 
 #define THLapack_(NAME) TH_CONCAT_4(TH,Real,Lapack_,NAME)
 
@@ -21,7 +21,7 @@ if (info < 0) {                                                     \
   THError(fmt, func, info, ##__VA_ARGS__);                          \
 }
 
-#include "generic/THLapack.h"
-#include "THGenerateAllTypes.h"
+#include <TH/generic/THLapack.h>
+#include <TH/THGenerateAllTypes.h>
 
 #endif

@@ -29,10 +29,10 @@ class RoIPoolFOp final : public Operator<Context> {
  public:
   RoIPoolFOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        spatial_scale_(OperatorBase::GetSingleArgument<float>(
+        spatial_scale_(this->template GetSingleArgument<float>(
               "spatial_scale", 1.)),
-        pooled_height_(OperatorBase::GetSingleArgument<int>("pooled_h", 1)),
-        pooled_width_(OperatorBase::GetSingleArgument<int>("pooled_w", 1)) {
+        pooled_height_(this->template GetSingleArgument<int>("pooled_h", 1)),
+        pooled_width_(this->template GetSingleArgument<int>("pooled_w", 1)) {
     DCHECK_GT(spatial_scale_, 0);
     DCHECK_GT(pooled_height_, 0);
     DCHECK_GT(pooled_width_, 0);
@@ -55,10 +55,10 @@ class RoIPoolFGradientOp final : public Operator<Context> {
  public:
   RoIPoolFGradientOp(const OperatorDef& def, Workspace* ws)
       : Operator<Context>(def, ws),
-        spatial_scale_(OperatorBase::GetSingleArgument<float>(
+        spatial_scale_(this->template GetSingleArgument<float>(
               "spatial_scale", 1.)),
-        pooled_height_(OperatorBase::GetSingleArgument<int>("pooled_h", 1)),
-        pooled_width_(OperatorBase::GetSingleArgument<int>("pooled_w", 1)) {
+        pooled_height_(this->template GetSingleArgument<int>("pooled_h", 1)),
+        pooled_width_(this->template GetSingleArgument<int>("pooled_w", 1)) {
     DCHECK_GT(spatial_scale_, 0);
     DCHECK_GT(pooled_height_, 0);
     DCHECK_GT(pooled_width_, 0);

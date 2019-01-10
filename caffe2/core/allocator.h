@@ -1,26 +1,29 @@
 #ifndef CAFFE2_CORE_ALLOCATOR_H_
 #define CAFFE2_CORE_ALLOCATOR_H_
 
+#include <cstring>
 #include <unordered_map>
 
+#include <c10/core/Allocator.h>
 #include "caffe2/core/logging.h"
 #include "caffe2/core/numa.h"
 
-CAFFE2_DECLARE_bool(caffe2_report_cpu_memory_usage);
-CAFFE2_DECLARE_bool(caffe2_cpu_allocator_do_zero_fill);
+C10_DECLARE_bool(caffe2_report_cpu_memory_usage);
+C10_DECLARE_bool(caffe2_cpu_allocator_do_zero_fill);
+C10_DECLARE_bool(caffe2_cpu_allocator_do_junk_fill);
 
 namespace caffe2 {
 
-// Use 32-byte alignment should be enough for computation up to AVX512.
-constexpr size_t gCaffe2Alignment = 32;
+// Use 64-byte alignment should be enough for computation up to AVX512.
+constexpr size_t gCaffe2Alignment = 64;
 
 using MemoryDeleter = void (*)(void*);
 
 // A helper function that is basically doing nothing.
-void NoDelete(void*);
+CAFFE2_API void NoDelete(void*);
 
 // A virtual allocator class to do memory allocation and deallocation.
-struct CPUAllocator {
+struct CAFFE2_API CPUAllocator {
   CPUAllocator() {}
   virtual ~CPUAllocator() noexcept {}
   virtual std::pair<void*, MemoryDeleter> New(size_t nbytes) = 0;
@@ -29,7 +32,7 @@ struct CPUAllocator {
 
 // A virtual struct that is used to report Caffe2's memory allocation and
 // deallocation status
-class MemoryAllocationReporter {
+class CAFFE2_API MemoryAllocationReporter {
  public:
   MemoryAllocationReporter() : allocated_(0) {}
   void New(void* ptr, size_t nbytes);
@@ -41,10 +44,15 @@ class MemoryAllocationReporter {
   size_t allocated_;
 };
 
-struct DefaultCPUAllocator final : CPUAllocator {
+// Fill the data memory region of num bytes with a particular garbage pattern.
+// The garbage value is chosen to be NaN if interpreted as floating point value,
+// or a very large integer.
+CAFFE2_API void memset_junk(void* data, size_t num);
+
+struct CAFFE2_API DefaultCPUAllocator final : at::Allocator {
   DefaultCPUAllocator() {}
   ~DefaultCPUAllocator() override {}
-  std::pair<void*, MemoryDeleter> New(size_t nbytes) override {
+  at::DataPtr allocate(size_t nbytes) const override {
     void* data = nullptr;
 #ifdef __ANDROID__
     data = memalign(gCaffe2Alignment, nbytes);
@@ -56,10 +64,20 @@ struct DefaultCPUAllocator final : CPUAllocator {
     CAFFE_ENFORCE(data);
     // move data to a thread's NUMA node
     NUMAMove(data, nbytes, GetCurrentNUMANode());
+    CHECK(
+        !FLAGS_caffe2_cpu_allocator_do_zero_fill ||
+        !FLAGS_caffe2_cpu_allocator_do_junk_fill)
+        << "Cannot request both zero-fill and junk-fill at the same time";
     if (FLAGS_caffe2_cpu_allocator_do_zero_fill) {
       memset(data, 0, nbytes);
+    } else if (FLAGS_caffe2_cpu_allocator_do_junk_fill) {
+      memset_junk(data, nbytes);
     }
-    return {data, Delete};
+    if (FLAGS_caffe2_report_cpu_memory_usage) {
+      reporter_.New(data, nbytes);
+      return {data, data, &ReportAndDelete, at::Device(at::DeviceType::CPU)};
+    }
+    return {data, data, &Delete, at::Device(at::DeviceType::CPU)};
   }
 
 #ifdef _MSC_VER
@@ -72,16 +90,27 @@ struct DefaultCPUAllocator final : CPUAllocator {
   }
 #endif
 
-  MemoryDeleter GetDeleter() override {
-    return Delete;
+  static void ReportAndDelete(void* ptr) {
+    reporter_.Delete(ptr);
+    Delete(ptr);
   }
+
+  at::DeleterFnPtr raw_deleter() const override {
+    if (FLAGS_caffe2_report_cpu_memory_usage) {
+      return &ReportAndDelete;
+    }
+    return &Delete;
+  }
+
+ protected:
+  static MemoryAllocationReporter reporter_;
 };
 
 // Get the CPU Alloctor.
-CPUAllocator* GetCPUAllocator();
+CAFFE2_API at::Allocator* GetCPUAllocator();
 // Sets the CPU allocator to the given allocator: the caller gives away the
 // ownership of the pointer.
-void SetCPUAllocator(CPUAllocator* alloc);
+CAFFE2_API void SetCPUAllocator(at::Allocator* alloc);
 
 } // namespace caffe2
 

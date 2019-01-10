@@ -1,8 +1,8 @@
 #pragma once
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include <THC/THC.h>
-#include "Cuda.h"
+#include <THD/base/Cuda.h>
 
 extern THCState** _THDCudaState;
 

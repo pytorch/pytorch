@@ -51,33 +51,30 @@ BatchNormalization
 - Spatial : bool : true
 - IsTest : bool : false
 
+Clip
+- Min : float
+- Max : float
 
 FC
+- Axis : int : 1
+- AxisW : int : 1
+
 GivenTensorFill
 Concat
+- Axis : int : -1
+- AddAxis : bool : false
 Softmax
 ChannelShuffle
 Add
+- Broadcast : int : 0
 Reshape
 Flatten
 
-Int8Quantize
-Int8Dequantize
-Int8AveragePool : AveragePool
-Int8Conv : Conv
-Int8ConvTranspose : ConvTranspose
-Int8FC : FC
-Int8MaxPool : MaxPool
-Int8Relu : Relu
-Int8GivenTensorFill : GivenTensorFill
-Int8Concat : Concat
-Int8Softmax : Softmax
-Int8ChannelShuffle : ChannelShuffle
-Int8Sum : Sum
-Int8Add : Add
-Int8Reshape : Reshape
-Int8Flatten : Flatten
-Int8ConvRelu : ConvRelu
-Int8SumRelu : SumRelu
-Int8AveragePoolRelu : AveragePoolRelu
-Int8MaxPoolRelu : MaxPoolRelu
+CopyToOpenCL
+CopyFromOpenCL
+
+NCHW2NHWC
+NHWC2NCHW
+
+Declare
+Export

@@ -117,5 +117,31 @@ TEST(StatsTest, StatsTestSimple) {
       toMap(reg2.publish()), ExportedStatMap({{"i1/s3", 0}, {"i2/s3", 0}}));
 }
 
+TEST(StatsTest, StatsTestStatic) {
+  struct TestStats {
+    CAFFE_STAT_CTOR(TestStats);
+    CAFFE_STATIC_STAT(cpuUsage);
+    CAFFE_STATIC_STAT(memUsage);
+  };
+  TestStats i1("i1");
+  TestStats i2("i2");
+  CAFFE_EVENT(i1, cpuUsage, 95);
+  CAFFE_EVENT(i2, memUsage, 80);
+
+  ExportedStatList data;
+  StatRegistry::get().publish(data);
+  EXPECT_SUBSET(
+      toMap(data), ExportedStatMap({{"i1/cpuUsage", 95}, {"i2/memUsage", 80}}));
+
+  CAFFE_EVENT(i1, cpuUsage, 80);
+  CAFFE_EVENT(i1, memUsage, 50);
+  CAFFE_EVENT(i2, memUsage, 90);
+
+  StatRegistry::get().publish(data);
+  EXPECT_SUBSET(
+      toMap(data),
+      ExportedStatMap(
+          {{"i1/cpuUsage", 80}, {"i1/memUsage", 50}, {"i2/memUsage", 90}}));
+}
 } // namespace
 } // namespace caffe2

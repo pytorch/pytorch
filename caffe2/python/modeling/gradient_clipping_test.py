@@ -199,3 +199,73 @@ class GradientClippingTest(unittest.TestCase):
         fc1_w_grad = workspace.FetchBlob('fc1_w_grad')
         self.assertLessEqual(np.amax(fc1_w_grad), clip_max)
         self.assertGreaterEqual(np.amin(fc1_w_grad), clip_min)
+
+    def test_gradient_clipping_by_norm_including_blobs(self):
+        model = model_helper.ModelHelper(name="test")
+        data = model.net.AddExternalInput("data")
+        fc1 = brew.fc(model, data, "fc1", dim_in=4, dim_out=2)
+
+        # no operator name set, will use default
+        fc2 = brew.fc(model, fc1, "fc2", dim_in=2, dim_out=1)
+
+        sigm = model.net.Sigmoid(fc2, 'sigm')
+        sq = model.net.SquaredL2Distance([sigm, 'label'], 'sq')
+        loss = model.net.SumElements(sq, 'loss')
+
+        grad_map = model.AddGradientOperators([loss])
+
+        grad_map_for_param = {key: grad_map[key] for key in ['fc1_w', 'fc2_w']}
+
+        net_modifier = GradientClipping(
+            grad_clip_method='by_norm',
+            clip_norm_type='l2_norm',
+            clip_threshold=0.1,
+            blobs_to_include=['fc1_w'],
+            blobs_to_exclude=None
+        )
+
+        net_modifier(model.net, grad_map=grad_map_for_param)
+
+        workspace.FeedBlob('data', np.random.rand(10, 4).astype(np.float32))
+        workspace.FeedBlob('label', np.random.rand(10, 1).astype(np.float32))
+
+        workspace.RunNetOnce(model.param_init_net)
+        workspace.RunNetOnce(model.net)
+
+        # 5 forward ops + 6 backward ops + 1 * (3 gradient clipping ops)
+        self.assertEqual(len(model.net.Proto().op), 14)
+
+    def test_gradient_clipping_by_norm_excluding_blobs(self):
+        model = model_helper.ModelHelper(name="test")
+        data = model.net.AddExternalInput("data")
+        fc1 = brew.fc(model, data, "fc1", dim_in=4, dim_out=2)
+
+        # no operator name set, will use default
+        fc2 = brew.fc(model, fc1, "fc2", dim_in=2, dim_out=1)
+
+        sigm = model.net.Sigmoid(fc2, 'sigm')
+        sq = model.net.SquaredL2Distance([sigm, 'label'], 'sq')
+        loss = model.net.SumElements(sq, 'loss')
+
+        grad_map = model.AddGradientOperators([loss])
+
+        grad_map_for_param = {key: grad_map[key] for key in ['fc1_w', 'fc2_w']}
+
+        net_modifier = GradientClipping(
+            grad_clip_method='by_norm',
+            clip_norm_type='l2_norm',
+            clip_threshold=0.1,
+            blobs_to_include=None,
+            blobs_to_exclude=['fc1_w', 'fc2_w']
+        )
+
+        net_modifier(model.net, grad_map=grad_map_for_param)
+
+        workspace.FeedBlob('data', np.random.rand(10, 4).astype(np.float32))
+        workspace.FeedBlob('label', np.random.rand(10, 1).astype(np.float32))
+
+        workspace.RunNetOnce(model.param_init_net)
+        workspace.RunNetOnce(model.net)
+
+        # 5 forward ops + 6 backward ops + 0 * (3 gradient clipping ops)
+        self.assertEqual(len(model.net.Proto().op), 11)

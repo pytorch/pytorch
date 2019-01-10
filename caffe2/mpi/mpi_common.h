@@ -4,6 +4,7 @@
 #include <mpi.h>
 #include <mutex>
 
+#include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
 
 namespace caffe2 {
@@ -29,7 +30,7 @@ MPI_DATATYPE_WRAPPER(double, MPI_DOUBLE)
 #undef MPI_DATATYPE_WRAPPER
 
 // For all Caffe MPI calls, we will wrap it inside an MPI mutex lock guard.
-std::mutex& MPIMutex();
+CAFFE2_API std::mutex& MPIMutex();
 
 #define MPI_CHECK(condition)                                 \
   do {                                                       \
@@ -49,23 +50,23 @@ std::mutex& MPIMutex();
  * @brief Gets the global MPI communicator used by Caffe2. In default, this
  * is MPI_COMM_WORLD unless you call SetGlobalMPIComm().
  */
-MPI_Comm GlobalMPIComm();
+CAFFE2_API MPI_Comm GlobalMPIComm();
 
 /**
  * @brief Sets the global MPI communicator. Caffe2 takes over the ownership
  * of the passed in communicator.
  */
-void SetGlobalMPIComm(MPI_Comm new_comm);
+CAFFE2_API void SetGlobalMPIComm(MPI_Comm new_comm);
 
 /**
  * @brief A helper function to return the size of the given communicator.
  */
-int MPICommSize(MPI_Comm comm);
+CAFFE2_API int MPICommSize(MPI_Comm comm);
 
 /**
  * @brief A helper function to return the rank of the given communicator.
  */
-int MPICommRank(MPI_Comm comm);
+CAFFE2_API int MPICommRank(MPI_Comm comm);
 
 /**
  * @brief A simple wrapper over an MPI common world.

@@ -31,6 +31,12 @@ class DBFileReader(Reader):
             Default to '<db_name>_<default_name_suffix>'.
         batch_size: int.
             How many examples are read for each time the read_net is run.
+        loop_over: bool.
+            If True given, will go through examples in random order endlessly.
+        field_names: List[str]. If the schema.field_names() should not in
+            alphabetic order, it must be specified.
+            Otherwise, schema will be automatically restored with
+            schema.field_names() sorted in alphabetic order.
     """
     def __init__(
         self,
@@ -38,6 +44,8 @@ class DBFileReader(Reader):
         db_type,
         name=None,
         batch_size=100,
+        loop_over=False,
+        field_names=None,
     ):
         assert db_path is not None, "db_path can't be None."
         assert db_type in C.registered_dbs(), \
@@ -47,17 +55,18 @@ class DBFileReader(Reader):
                 registered_dbs=C.registered_dbs(),
         )
 
-        self.db_path = db_path
+        self.db_path = os.path.expanduser(db_path)
         self.db_type = db_type
         self.name = name or '{db_name}_{default_name_suffix}'.format(
             db_name=self._extract_db_name_from_db_path(),
             default_name_suffix=self.default_name_suffix,
         )
         self.batch_size = batch_size
+        self.loop_over = loop_over
 
         # Before self._init_reader_schema(...),
         # self.db_path and self.db_type are required to be set.
-        super(DBFileReader, self).__init__(self._init_reader_schema())
+        super(DBFileReader, self).__init__(self._init_reader_schema(field_names))
         self.ds = Dataset(self._schema, self.name + '_dataset')
         self.ds_reader = None
 
@@ -65,14 +74,21 @@ class DBFileReader(Reader):
         return name or self._extract_db_name_from_db_path(
         ) + '_db_file_reader'
 
-    def _init_reader_schema(self):
+    def _init_reader_schema(self, field_names=None):
         """Restore a reader schema from the DB file.
 
-        Here it is assumed that:
+        If `field_names` given, restore scheme according to it.
+
+        Overwise, loade blobs from the DB file into the workspace,
+        and restore schema from these blob names.
+        It is also assumed that:
         1). Each field of the schema have corresponding blobs
             stored in the DB file.
         2). Each blob loaded from the DB file corresponds to
             a field of the schema.
+        3). field_names in the original schema are in alphabetic order,
+            since blob names loaded to the workspace from the DB file
+            will be in alphabetic order.
 
         Load a set of blobs from a DB file. From names of these blobs,
         restore the DB file schema using `from_column_list(...)`.
@@ -80,6 +96,9 @@ class DBFileReader(Reader):
         Returns:
             schema: schema.Struct. Used in Reader.__init__(...).
         """
+        if field_names:
+            return from_column_list(field_names)
+
         assert os.path.exists(self.db_path), \
             'db_path [{db_path}] does not exist'.format(db_path=self.db_path)
         with core.NameScope(self.name):
@@ -118,10 +137,13 @@ class DBFileReader(Reader):
         else:
             self._init_field_blobs_as_empty(init_net)
             self._feed_field_blobs_from_db_file(init_net)
-            self.ds_reader = self.ds.reader(
+            self.ds_reader = self.ds.random_reader(
                 init_net,
                 batch_size=self.batch_size,
+                loop_over=self.loop_over,
             )
+            self.ds_reader.sort_and_shuffle(init_net)
+            self.ds_reader.computeoffset(init_net)
 
     def read(self, read_net):
         assert self.ds_reader, 'setup_ex must be called first'

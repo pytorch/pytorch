@@ -9,6 +9,8 @@ from future.utils import viewitems, viewkeys, viewvalues
 import logging
 import copy
 
+from multiprocessing import cpu_count
+
 from caffe2.python import \
     model_helper, dyndep, scope, workspace, core, memonger, utils
 from caffe2.proto import caffe2_pb2
@@ -44,6 +46,7 @@ def Parallelize(
     param_update_builder_fun=None,
     optimizer_builder_fun=None,
     post_sync_builder_fun=None,
+    pre_grad_net_transformer_fun=None,
     net_transformer_fun=None,
     devices=None,
     rendezvous=None,
@@ -91,6 +94,11 @@ def Parallelize(
                         Signature:
                         net_transformer_fun(
                             model, num_devices, device_prefix, device_type)
+      pre_grad_net_transformer_fun:
+                        Optional function to transform the network similar to
+                        net_transformer_fun, but happens before gradient ops
+                        been add.
+                        Signature: pre_grad_net_transformer_fun(model)
       post_sync_builder_fun:
                         Function applied after initial parameter sync has been
                         completed, such as keeping multi-precision parameters
@@ -127,15 +135,18 @@ def Parallelize(
         device scope was: {}".format(scope.CurrentDeviceScope())
 
     if devices is None:
-        devices = list(range(0, workspace.NumCudaDevices())),
+        if not cpu_device:
+            devices = list(range(0, workspace.NumGpuDevices()))
+        else:
+            devices = list(range(0, cpu_count()))
 
     if not cpu_device:
         for gpu in devices:
-            if gpu >= workspace.NumCudaDevices():
+            if gpu >= workspace.NumGpuDevices():
                 log.warning("** Only {} GPUs available, GPUs {} requested".format(
-                    workspace.NumCudaDevices(), devices))
+                    workspace.NumGpuDevices(), devices))
                 break
-        model_helper_obj._device_type = caffe2_pb2.CUDA
+        model_helper_obj._device_type = workspace.GpuDeviceType
         model_helper_obj._device_prefix = "gpu"
         model_helper_obj._shared_model = False
         device_name = "GPU"
@@ -234,6 +245,9 @@ def Parallelize(
     model_helper_obj._computed_param_names =\
         list(viewkeys(computed_params_grouped))
 
+    if pre_grad_net_transformer_fun:
+        pre_grad_net_transformer_fun(model_helper_obj)
+
     if has_parameter_updates:
         log.info("Adding gradient operators")
         _AddGradientOperators(devices, model_helper_obj, losses_by_gpu)
@@ -251,12 +265,13 @@ def Parallelize(
         return
 
     if combine_spatial_bn:
-        assert(cpu_device), \
-            'combine_spatial_bn is currently only supported on the CPU'
         assert(has_parameter_updates), \
             'combine_spatial_bn should only be used for train model'
         _InterleaveOps(model_helper_obj)
-        _InterDeviceBatchNormalization(model_helper_obj)
+        if cpu_device:
+            _CPUInterDeviceBatchNormalization(model_helper_obj)
+        else:
+            _GPUInterDeviceBatchNormalization(model_helper_obj)
 
     _ValidateParams(model_helper_obj.params)
 
@@ -432,17 +447,17 @@ def Parallelize_BMUF(
     assert isinstance(model_helper_obj, model_helper.ModelHelper)
 
     if devices is None:
-        devices = list(range(0, workspace.NumCudaDevices()))
+        devices = list(range(0, workspace.NumGpuDevices()))
     if master_device is None:
         master_device = devices[0]
 
     if not cpu_device:
         for gpu in devices:
-            if gpu >= workspace.NumCudaDevices():
+            if gpu >= workspace.NumGpuDevices():
                 log.warning("** Only {} GPUs available, GPUs {} requested".format(
-                    workspace.NumCudaDevices(), devices))
+                    workspace.NumGpuDevices(), devices))
                 break
-        model_helper_obj._device_type = caffe2_pb2.CUDA
+        model_helper_obj._device_type = workspace.GpuDeviceType
         model_helper_obj._device_prefix = "gpu"
     else:
         model_helper_obj._device_type = caffe2_pb2.CPU
@@ -687,15 +702,18 @@ def Parallelize_BMUF(
     ]
     _AddBarrierToModelNets(model_helper_obj, barrier_net_timeout_sec)
 
+def CreateNet(model, overwrite=False):
+    for net_iters in model._data_parallel_model_nets:
+        if isinstance(net_iters, tuple):
+            workspace.CreateNet(net_iters[0], overwrite=overwrite)
+        else:
+            workspace.CreateNet(net_iters, overwrite=overwrite)
+
 
 def RunInitNet(model):
     for init_net in model._data_parallel_model_init_nets:
         workspace.RunNetOnce(init_net)
-    for net_iters in model._data_parallel_model_nets:
-        if isinstance(net_iters, tuple):
-            workspace.CreateNet(net_iters[0])
-        else:
-            workspace.CreateNet(net_iters)
+    CreateNet(model)
 
 
 def RunWarmup(model):
@@ -720,8 +738,14 @@ def _AddBarrierToModelNets(model, barrier_net_timeout_sec):
         # (_DEFAULT_TIMEOUT_SEC).
         # We pass in model.param_init_net so that the barrier net can be run as
         # part of the param_init_net.
-        model._barrier_net = _CreateBarrierNet(model, model.param_init_net,
-                "pre_training", barrier_net_timeout_sec)
+
+        model._barrier_init_net = core.Net("barrier_init_net")
+
+        model._barrier_net = _CreateBarrierNet(model, model._barrier_init_net,
+        "pre_training", barrier_net_timeout_sec)
+
+        model._data_parallel_model_init_nets.insert(0, model._barrier_init_net)
+
         model._data_parallel_model_nets.insert(0, model._barrier_net)
 
 
@@ -732,7 +756,6 @@ def _CreateBarrierNet(model, init_net, name_prefix, timeout_sec):
         init_net,
         name_prefix + "_barrier_cw",
         rendezvous=model._rendezvous,
-        status_blob=name_prefix + "_barrier_cw_status",
         timeout_sec=timeout_sec,
     )
     barrier_net = core.Net(name_prefix + "_barrier_net")
@@ -740,7 +763,6 @@ def _CreateBarrierNet(model, init_net, name_prefix, timeout_sec):
         inputs=[comm_world],
         outputs=[],
         engine=model._rendezvous['engine'],
-        status_blob=name_prefix + "_barrier_status",
     )
     return barrier_net
 
@@ -790,9 +812,9 @@ def ConvertNetForDevice(net, device=None):
     if device is None:
         device = scope.CurrentDeviceScope()
 
-    device_prefix = "gpu" if device.device_type == caffe2_pb2.CUDA else "cpu"
+    device_prefix = "gpu" if core.IsGPUDeviceType(device.device_type) else "cpu"
 
-    namescope = "{}_{}/".format(device_prefix, device.cuda_gpu_id)
+    namescope = "{}_{}/".format(device_prefix, device.device_id)
     for op in mnet.Proto().op:
         if "RecurrentNetwork" in op.type:
             raise("RecurrentNetwork conversion not yet supported")
@@ -885,7 +907,7 @@ def GetCheckpointParams(model):
     return first_gpu_blobs.union(iteration_blobs)
 
 
-def FinalizeAfterCheckpoint(model, blobs=None):
+def FinalizeAfterCheckpoint(model, blobs=None, cpu_mode=False):
     '''
     This function should be called after loading parameters from a
     checkpoint / initial parameters file.
@@ -914,12 +936,14 @@ def FinalizeAfterCheckpoint(model, blobs=None):
                 model._device_grouped_blobs[name] = grouped
 
         model._checkpoint_net = core.Net("checkpoint_sync_net")
-        model._checkpoint_net.RunAllOnGPU()
+        if not cpu_mode:
+            model._checkpoint_net.RunAllOnGPU()
 
         checkpoint_init_net = None
         if (model._rendezvous is not None and model._rendezvous['num_shards'] > 1):
             checkpoint_init_net = core.Net("checkpoint_init_net")
-            checkpoint_init_net.RunAllOnGPU()
+            if not cpu_mode:
+                checkpoint_init_net.RunAllOnGPU()
 
         _SyncAllParams(
             devices,
@@ -947,7 +971,7 @@ def GetLearningRateBlobNames(model):
     if model._optimizer is not None:
         if model._device_type == caffe2_pb2.CPU:
             return [model._optimizer.get_cpu_blob_name('lr')]
-        elif model._device_type == caffe2_pb2.CUDA:
+        elif core.IsGPUDeviceType(model._device_type):
             return [model._optimizer.get_gpu_blob_name('lr', gpu, '')
                     for gpu in model._devices]
         else:
@@ -982,7 +1006,7 @@ def _Broadcast(devices, model, net, param, use_nccl=False):
 
     for dev_idx in devices[1:]:
         if _IsGPUBlob(model, param):
-            device_opt = core.DeviceOption(caffe2_pb2.CUDA, dev_idx)
+            device_opt = core.DeviceOption(workspace.GpuDeviceType, dev_idx)
         else:
             device_opt = core.DeviceOption(caffe2_pb2.CPU, 0)
         with core.DeviceScope(device_opt):
@@ -1001,8 +1025,8 @@ def _AllReduce(devices, model, net, param, use_nccl=False, control_input=None):
         )
         return
 
-    if model._device_type == caffe2_pb2.CUDA:
-        p2p_access_pattern = workspace.GetCudaPeerAccessPattern()
+    if model._device_type == workspace.GpuDeviceType:
+        p2p_access_pattern = workspace.GetGpuPeerAccessPattern()
     else:
         p2p_access_pattern = None
 
@@ -1016,19 +1040,19 @@ def _AllReduce(devices, model, net, param, use_nccl=False, control_input=None):
         """
         devices = [model._devices[idx] for idx in dev_indices]
         blobs = [blobs_group[idx] for idx in dev_indices]
-        for i, peer in enumerate(devices):
-            if i == 0:
-                continue  # Skip the first device
-            if p2p_access_pattern is not None and not p2p_access_pattern[
-                devices[0], peer
-            ]:
-                # Copy from peer to d0
-                blobs[i] = model.Copy(
-                    blobs[i],
-                    'gpu_{}/{}_gpu{}_copy'.format(devices[0], param, peer)
-                )
         device_opt = core.DeviceOption(model._device_type, devices[0])
         with core.DeviceScope(device_opt):
+            for i, peer in enumerate(devices):
+                if i == 0:
+                    continue  # Skip the first device
+                if p2p_access_pattern is not None and not p2p_access_pattern[
+                    devices[0], peer
+                ]:
+                    # Copy from peer to d0
+                    blobs[i] = model.Copy(
+                        blobs[i],
+                        'gpu_{}/{}_gpu{}_copy'.format(devices[0], param, peer)
+                    )
             net.Sum(blobs, [blobs[0]], name='dpm')
 
     if len(devices) == 16:
@@ -1114,16 +1138,12 @@ def AddDistributedBlobSync(model, blobs):
         model.param_init_net,
         "blob_sync_cw_" + synth_name,
         rendezvous=model._rendezvous,
-        status_blob="create_blob_sync_cw_{}_cw_status".format(
-            synth_name,
-        ),
     )
 
     model.net.Allreduce(
         inputs=[comm_world] + blobs,
         outputs=blobs,
         engine=model._rendezvous['engine'],
-        status_blob="blob_sync_allred_{}_status".format(synth_name),
     )
 
 
@@ -1161,7 +1181,6 @@ def _SyncAllParamsDistributed(
                 outputs=params,
                 name=param_name,
                 engine=rendezvous['engine'],
-                status_blob="broadcast_{}_status".format(str(param_name)),
                 control_input=control_input
             )
 
@@ -1292,10 +1311,6 @@ class CollectivesConcurrencyControl(object):
                 self.param_init_net,
                 "{}_{}_cw".format(self.name, current_slot),
                 rendezvous=self.rendezvous,
-                status_blob="create_{}_cw_{}_status".format(
-                    self.name,
-                    current_slot
-                ),
             )
             self.common_worlds.append(common_world)
             self.control_inputs.append(control_output_blob)
@@ -1352,7 +1367,6 @@ def _AllReduceBlobsDistributed(
                     name=blob_name,
                     engine=all_reduce_engine,
                     control_input=control_input,
-                    status_blob="allreduce_{}_status".format(blob_name),
                     **kwargs
                 )
 
@@ -1529,10 +1543,10 @@ def _AnalyzeOperators(model):
             continue
 
         op_dev = op.device_option
-        op_gpu = op_dev.cuda_gpu_id
+        op_gpu = op_dev.device_id
 
         # This avoids failing on operators that are only for CPU
-        if op_dev.device_type != caffe2_pb2.CUDA:
+        if not core.IsGPUDeviceType(op_dev.device_type):
             continue
 
         namescope = "{}_{}/".format(model._device_prefix, op_gpu)
@@ -1575,14 +1589,14 @@ def _InferBlobDevice(model):
 
 def _IsGPUBlob(model, blob_name):
     if blob_name in model._blob_to_device:
-        return model._blob_to_device[blob_name].device_type == caffe2_pb2.CUDA
+        return core.IsGPUDeviceType(model._blob_to_device[blob_name].device_type)
     else:
         blob_name = "{}_{}/{}".format(
             model._device_prefix, model._devices[0], blob_name
         )
         if blob_name not in model._blob_to_device:
-            return model._device_type == caffe2_pb2.CUDA
-        return model._blob_to_device[blob_name].device_type == caffe2_pb2.CUDA
+            return core.IsGPUDeviceType(model._device_type)
+        return core.IsGPUDeviceType(model._blob_to_device[blob_name].device_type)
 
 
 def _GroupByDevice(model, devices, params, non_data_params):
@@ -1759,7 +1773,6 @@ def _CreateOrCloneCommonWorld(
         common_world_blob,
         rendezvous,
         name=None,
-        status_blob=None,
         timeout_sec=None):
 
     if timeout_sec is None:
@@ -1798,7 +1811,6 @@ def _CreateOrCloneCommonWorld(
             common_world_blob,
             name=name,
             engine=rendezvous['engine'],
-            status_blob=status_blob,
         )
     else:
         kwargs=dict()
@@ -1815,7 +1827,6 @@ def _CreateOrCloneCommonWorld(
             size=rendezvous['num_shards'],
             rank=rendezvous['shard_id'],
             engine=rendezvous['engine'],
-            status_blob=status_blob,
             timeout_ms=timeout_ms,
             **kwargs
         )
@@ -1847,7 +1858,6 @@ def _RunComparison(model, blob_name, device=None):
             size=rendezvous['num_shards'],
             rank=rendezvous['shard_id'],
             engine=rendezvous['engine'],
-            status_blob="cw_master_select",
             **kwargs
         )
 
@@ -1867,7 +1877,6 @@ def _RunComparison(model, blob_name, device=None):
             inputs=[comm_world, blob_name_gather],
             outputs=[blob_name_gather],
             engine=rendezvous['engine'],
-            status_blob="all_reduce_master_select_status",
         )
 
         workspace.RunNetOnce(comparison_net)
@@ -1898,7 +1907,7 @@ def _InterleaveOps(model):
     new_ops = []
     ops = {d: [] for d in range(num_devices)}
     for op in orig_ops:
-        ops[op.device_option.cuda_gpu_id].append(op)
+        ops[op.device_option.device_id].append(op)
 
     for j in range(num_ops_per_dev):
         tp = None
@@ -1914,7 +1923,7 @@ def _InterleaveOps(model):
     model.net.Proto().op.extend(new_ops)
 
 
-def _InterDeviceBatchNormalization(model):
+def _CPUInterDeviceBatchNormalization(model):
     orig_ops = list(model.net.Proto().op)
     new_ops = []
     num_devices = len(model._devices)
@@ -1930,6 +1939,23 @@ def _InterDeviceBatchNormalization(model):
     spatial_bn_gradient_phase = False
     scale_grad_blobs = []
     bias_grad_blobs = []
+
+    def _cpuReduce(param, input_blobs, destination_blobs):
+        """
+        Reduce results from multiple cpus and distributes the results back
+        to each device. This is done by copying values to cpu_0 and summing
+        them. The cpu_0 result is then copied back to each of the devices.
+
+        param: the name of the data (blobs) to reduce
+        input_blobs: the list of blobs to reduce
+        destination_blobs: list of blobs to copy the result to
+        """
+        added_ops = []
+        result_blob = "cpu_0/" + param + "_combined"
+        added_ops.append(core.CreateOperator("Sum", input_blobs, result_blob))
+        for blob in destination_blobs:
+            added_ops.append(core.CreateOperator("Copy", result_blob, blob))
+        return added_ops
 
     for op in orig_ops:
         if op.type != 'SpatialBN' and op.type != 'SpatialBNGradient':
@@ -1952,19 +1978,14 @@ def _InterDeviceBatchNormalization(model):
                 input_blob_name = None
             elif spatial_bn_gradient_phase:
                 new_ops.extend(injected_ops)
-                scale_blob = \
-                    "cpu_0/" + stripBlobName(scale_grad_blobs[0]) + "_combined"
-                bias_blob = \
-                    "cpu_0/" + stripBlobName(bias_grad_blobs[0]) + "_combined"
-                new_ops.append(
-                    core.CreateOperator("Sum", scale_grad_blobs, scale_blob))
-                new_ops.append(
-                    core.CreateOperator("Sum", bias_grad_blobs, bias_blob))
-                for blob in scale_grad_blobs:
-                    new_ops.append(
-                        core.CreateOperator("Copy", scale_blob, blob))
-                for blob in bias_grad_blobs:
-                    new_ops.append(core.CreateOperator("Copy", bias_blob, blob))
+                new_ops.extend(_cpuReduce(
+                    stripBlobName(scale_grad_blobs[0]),
+                    scale_grad_blobs,
+                    scale_grad_blobs))
+                new_ops.extend(_cpuReduce(
+                    stripBlobName(bias_grad_blobs[0]),
+                    bias_grad_blobs,
+                    bias_grad_blobs))
                 new_ops.extend(batch_norm_ops)
                 injected_ops = []
                 batch_norm_ops = []
@@ -2002,6 +2023,158 @@ def _InterDeviceBatchNormalization(model):
             batch_norm_ops.append(op)
 
     assert not spatial_bn_phase, \
-        "Net modification for inter-device batch normalization failed"
+        "Net modification for cpu inter-device batch normalization failed"
+    del model.net.Proto().op[:]
+    model.net.Proto().op.extend(new_ops)
+
+
+def _GPUInterDeviceBatchNormalization(model):
+    orig_ops = list(model.net.Proto().op)
+    new_ops = []
+    num_devices = len(model._devices)
+    batch_norm_ops = []
+    injected_ops = []
+
+    spatial_bn_phase = False
+    sums_blobs = []
+    sumsq_blobs = []
+    name = []
+    input_blob_name = None
+
+    spatial_bn_gradient_phase = False
+    scale_grad_blobs = []
+    bias_grad_blobs = []
+    master_device = "cpu_0"
+    master_device_option = core.DeviceOption(caffe2_pb2.CPU)
+
+    def _gpuReduce(param, num_devices, master_device, result_blobs=None):
+        """
+        Reduces results from multiple gpus and distributes the results back
+        to each device. This is done by copying values to the master device
+        and summing them. The master device result is then copied back to
+        each of the devices.
+
+        param: the name of the data (blobs) to reduce
+        num_devices: the number of devices
+        master_device: the device to copy/compute values on
+        result_blobs: optional list of result blobs to copy to
+        """
+        added_ops = []
+        source_blobs = []
+        destination_blobs = []
+        if result_blobs is None:
+            result_blobs = [
+                "gpu_{}/{}_combined".format(i, param) for i in range(num_devices)
+            ]
+        for i in range(num_devices):
+            device_option = core.DeviceOption(model._device_type, i)
+            source_blobs.append("gpu_{}/{}".format(i, param))
+            destination_blobs.append(
+                "{}/{}_gpu_{}_copy".format(master_device, param, i))
+            added_ops.append(
+                core.CreateOperator(
+                    "CopyGPUToCPU",
+                    source_blobs[i],
+                    destination_blobs[i],
+                    device_option=device_option))
+        added_ops.append(
+            core.CreateOperator(
+                "Sum",
+                destination_blobs,
+                "{}/{}_combined".format(master_device, param),
+                device_option=master_device_option))
+        for i in range(num_devices):
+            device_option = core.DeviceOption(model._device_type, i)
+            added_ops.append(
+                core.CreateOperator(
+                    "CopyCPUToGPU",
+                    "{}/{}_combined".format(master_device, param),
+                    result_blobs[i],
+                    device_option=device_option))
+        return added_ops
+
+    for op in orig_ops:
+        if op.type != 'SpatialBN' and op.type != 'SpatialBNGradient':
+            if spatial_bn_phase:
+                new_ops.extend(injected_ops)
+                new_ops.extend(_gpuReduce(
+                    stripBlobName(input_blob_name) + "_sums",
+                    num_devices,
+                    master_device,
+                ))
+                new_ops.extend(_gpuReduce(
+                    stripBlobName(input_blob_name) + "_sumsq",
+                    num_devices,
+                    master_device,
+                ))
+                new_ops.extend(batch_norm_ops)
+                injected_ops = []
+                batch_norm_ops = []
+                sums_blobs = []
+                sumsq_blobs = []
+                spatial_bn_phase = False
+                input_blob_name = None
+            elif spatial_bn_gradient_phase:
+                new_ops.extend(injected_ops)
+                new_ops.extend(_gpuReduce(
+                    stripBlobName(scale_grad_blobs[0]),
+                    num_devices,
+                    master_device,
+                    scale_grad_blobs,
+                ))
+                new_ops.extend(_gpuReduce(
+                    stripBlobName(bias_grad_blobs[0]),
+                    num_devices,
+                    master_device,
+                    bias_grad_blobs,
+                ))
+                new_ops.extend(batch_norm_ops)
+                injected_ops = []
+                batch_norm_ops = []
+                scale_grad_blobs = []
+                bias_grad_blobs = []
+                spatial_bn_gradient_phase = False
+            new_ops.append(op)
+        elif op.type == 'SpatialBN':
+            spatial_bn_phase = True
+            if input_blob_name is None:
+                input_blob_name = op.input[0]
+            name = op.input[0]
+            device_option = core.DeviceOption(
+                model._device_type,
+                op.device_option.device_id,
+            )
+            injected_ops.append(
+                core.CreateOperator(
+                    "ChannelStats",
+                    name,
+                    [name + "_sums", name + "_sumsq"],
+                    device_option=device_option))
+            sums_blobs.append(name + "_sums")
+            sumsq_blobs.append(name + "_sumsq")
+            op.input.append(name + "_sums_combined")
+            op.input.append(name + "_sumsq_combined")
+            op.arg.extend([utils.MakeArgument("num_batches", num_devices)])
+            batch_norm_ops.append(op)
+        elif op.type == 'SpatialBNGradient':
+            spatial_bn_gradient_phase = True
+            device_option = core.DeviceOption(
+                model._device_type,
+                op.device_option.device_id,
+            )
+            injected_ops.append(
+                core.CreateOperator("ChannelBackpropStats",
+                                    [op.input[0], op.input[3], op.input[4],
+                                     op.input[2]],
+                                    [op.output[1], op.output[2]],
+                                    device_option=device_option))
+            scale_grad_blobs.append(op.output[1])
+            bias_grad_blobs.append(op.output[2])
+            op.arg.extend([utils.MakeArgument("num_batches", num_devices)])
+            op.input.extend([op.output[1], op.output[2]])
+            batch_norm_ops.append(op)
+
+    assert not spatial_bn_phase, \
+        "Net modification for gpu inter-device batch normalization failed"
     del model.net.Proto().op[:]
     model.net.Proto().op.extend(new_ops)

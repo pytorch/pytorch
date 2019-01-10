@@ -1,13 +1,13 @@
 #ifndef THC_TENSOR_RANDOM_CUH
 #define THC_TENSOR_RANDOM_CUH
 
-#include "THCNumerics.cuh"
-#include "THCReduceApplyUtils.cuh"
-#include "THCTensorMathReduce.cuh"
+#include <THC/THCNumerics.cuh>
+#include <THC/THCReduceApplyUtils.cuh>
+#include <THC/THCTensorMathReduce.cuh>
 
 #include <curand_kernel.h>
 
-#define MAX_NUM_BLOCKS 200 
+#define MAX_NUM_BLOCKS 200
 #define BLOCK_SIZE 256
 /* Separate kernel because curand_log_normal gets extra parameters. */
 
@@ -100,13 +100,13 @@ __global__ void renormRowsL1(T* dist, long rows, long cols) {
     T sum = ScalarConvert<int, T>::to(0);
     for (int64_t col = threadIdx.x; col < cols; col += blockDim.x) {
       val = dist[row * cols + col];
-      assert(THCNumerics<T>::ge(val, zero));
+      assert(! THCNumerics<T>::lt(val, zero)); // ! < 0 for NaN handling
       sum = THCNumerics<T>::add(sum, val);
     }
 
-    sum = reduceBlock(smem, blockDim.x, sum, ReduceAdd<T, T>(), zero);
+    sum = reduceBlock(smem, blockDim.x, sum, ReduceAdd<T>(), zero);
     if (threadIdx.x == 0) {
-      assert(THCNumerics<T>::gt(sum, zero));
+      assert(! THCNumerics<T>::lt(sum, zero)); // ! < 0 for NaN handling
       smem[0] = sum;
     }
     __syncthreads();
@@ -126,6 +126,8 @@ __device__ int binarySearchForMultinomial(T* dist,
                                           T val) {
   int start = 0;
   int end = size;
+  // dist[size - 1] = 0 => all zero prob dist
+  assert(THCNumerics<T>::gt(dist[size - 1], 0));
 
   while (end - start > 0) {
     int mid = start + (end - start) / 2;
@@ -160,8 +162,8 @@ sampleMultinomialOnce(int64_t* dest,
                       int categories,
                       T* sampled,
                       T* dist,
-                      int stride_dist,        // dist->stride[0]
-                      int stride_categories   // dist->stride[1]
+                      int stride_dist,        // dist->stride(0)
+                      int stride_categories   // dist->stride(1)
                       ) {
   extern __shared__  unsigned char my_smem[];
   __shared__ bool found;
@@ -183,11 +185,13 @@ sampleMultinomialOnce(int64_t* dest,
     for (int cat = threadIdx.x; cat < categories; cat += blockDim.x) {
       val = dist[curDist * stride_dist + cat * stride_categories];
       assert(THCNumerics<T>::ge(val, zero));
+      assert(!THCNumerics<T>::isinf(val));
+      assert(!THCNumerics<T>::isnan(val));
       sum = THCNumerics<AccT>::add(sum, ScalarConvert<T, AccT>::to(val));
     }
 
     // threadIdx.x == 0 has the sum value from this
-    sum = reduceBlock(asmem, blockDim.x, sum, ReduceAdd<AccT, AccT>(), accZero);
+    sum = reduceBlock(asmem, blockDim.x, sum, ReduceAdd<AccT>(), accZero);
 
     // Broadcast sum and sample value
     if (threadIdx.x == 0) {
@@ -204,7 +208,7 @@ sampleMultinomialOnce(int64_t* dest,
     T sample = smem[0];
     __syncthreads();
 
-    if (THCNumerics<AccT>::eq(sum,  accZero) || THCNumerics<T>::eq(sample, zero)) {
+    if (THCNumerics<AccT>::eq(sum,  accZero)) {
       // Choose the first element
       if (threadIdx.x == 0) {
         dest[curDist] = TH_INDEX_BASE;
@@ -221,14 +225,14 @@ sampleMultinomialOnce(int64_t* dest,
       // All threads in bounds load a value
       int cat = chunk * blockDim.x + threadIdx.x;
 
-      AccT val =
+      T dist_val = ScalarConvert<AccT, T>::to(
         cat < categories ?
           THCNumerics<AccT>::div(
               ScalarConvert<T, AccT>::to(dist[curDist * stride_dist + cat * stride_categories]),
               sum) :
-          accZero;
+	  accZero);
 
-      smem[threadIdx.x] = ScalarConvert<AccT, T>::to(val);
+      smem[threadIdx.x] = dist_val;
       __syncthreads();
 
       // Perform an inclusive prefix sum of the shared memory contents
@@ -254,8 +258,9 @@ sampleMultinomialOnce(int64_t* dest,
         THCNumerics<T>::add(smem[threadIdx.x - 1], prevHighProb);
       bool inBucket =
         (cat < categories) &&
-        (!THCNumerics<T>::gt(sample, curBucket)) &&
-        (THCNumerics<T>::gt(sample, prevBucket));
+        (!THCNumerics<T>::ge(sample, curBucket)) &&
+        (THCNumerics<T>::ge(sample, prevBucket)) &&
+        (THCNumerics<T>::gt(dist_val, zero));
 
       if (inBucket) {
         // We're done; we have the sample

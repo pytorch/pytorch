@@ -1,6 +1,9 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/VolumetricDilatedMaxPooling.c"
+#define TH_GENERIC_FILE "THNN/generic/VolumetricDilatedMaxPooling.c"
 #else
+
+#include <THNN/generic/pooling_shape.h>
+#include <algorithm>
 
 static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
                          THNNState *state,
@@ -12,7 +15,7 @@ static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
                          int pT, int pW, int pH,
                          int dilationT, int dilationW, int dilationH,
                          bool ceilMode) {
-  int ndim = input->nDimension;
+  int ndim = input->dim();
   int dimN = 0;
   int dimt = 1;
   int dimh = 2;
@@ -35,10 +38,10 @@ static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
              "dilation should be greater than 0, but got dilationT: %d dilationH: %d dilationW: %d",
              dilationT, dilationH, dilationW);
 
-  THNN_ARGCHECK(input->nDimension == 4 || input->nDimension == 5, 2, input,
-                "4D or 5D (batch mode) tensor expected for input, but got: %s");
+  THNN_ARGCHECK(!input->is_empty() && (input->dim() == 4 || input->dim() == 5), 2, input,
+                "non-empty 4D or 5D (batch mode) tensor expected for input, but got: %s");
 
-  if (input->nDimension == 5)
+  if (input->dim() == 5)
   {
     dimN++;
     dimt++;
@@ -51,33 +54,13 @@ static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
              "kT: %d kW: %d, kH: %d, padT: %d, padW: %d, padH: %d",
              kT, kW, kH, pT, pW, pH);
 
-  nslices = input->size[dimN];
-  itime   = input->size[dimt];
-  iheight = input->size[dimh];
-  iwidth  = input->size[dimw];
-  if (ceilMode)
-  {
-    otime = (int)(ceil((float)(itime - (dilationT * (kT - 1) + 1) + 2*pT) / dT)) + 1;
-    oheight = (int)(ceil((float)(iheight - (dilationH * (kH - 1) + 1) + 2*pH) / dH)) + 1;
-    owidth  = (int)(ceil((float)(iwidth  - (dilationW * (kW - 1) + 1) + 2*pW) / dW)) + 1;
-  }
-  else
-  {
-    otime = (int)(floor((float)(itime - (dilationT * (kT - 1) + 1) + 2*pT) / dT)) + 1;
-    oheight = (int)(floor((float)(iheight - (dilationH * (kH - 1) + 1) + 2*pH) / dH)) + 1;
-    owidth  = (int)(floor((float)(iwidth  - (dilationW * (kW - 1) + 1) + 2*pW) / dW)) + 1;
-  }
-
-  if (pT || pW || pH)
-  {
-    // ensure that the last pooling starts inside the image
-    if ((otime - 1)*dT >= itime + pT)
-      --otime;
-    if ((oheight - 1)*dH >= iheight + pH)
-      --oheight;
-    if ((owidth  - 1)*dW >= iwidth  + pW)
-      --owidth;
-  }
+  nslices = input->size(dimN);
+  itime   = input->size(dimt);
+  iheight = input->size(dimh);
+  iwidth  = input->size(dimw);
+  otime = pooling_output_shape<int64_t>(itime, kT, pT, dT, dilationT, ceilMode);
+  oheight = pooling_output_shape<int64_t>(iheight, kH, pH, dH, dilationH, ceilMode);
+  owidth = pooling_output_shape<int64_t>(iwidth, kW, pW, dW, dilationW, ceilMode);
 
   if (otime < 1 || owidth < 1 || oheight < 1)
     THError("Given input size: (%dx%dx%dx%d). Calculated output size: (%dx%dx%dx%d). Output size is too small",
@@ -98,8 +81,8 @@ static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
 }
 
 static void THNN_(VolumetricDilatedMaxPooling_updateOutput_frame)(
-          real *input_p,
-          real *output_p,
+          scalar_t *input_p,
+          scalar_t *output_p,
           THIndex_t *indz_p,
           int64_t nslices,
           int64_t itime,
@@ -127,7 +110,7 @@ static void THNN_(VolumetricDilatedMaxPooling_updateOutput_frame)(
   {
     /* loop over output */
     int64_t i, j, ti;
-    real *ip = input_p + k * itime * iwidth * iheight;
+    scalar_t *ip = input_p + k * itime * iwidth * iheight;
     for (ti = 0; ti < otime; ti++)
     {
       for (i = 0; i < oheight; i++)
@@ -140,9 +123,9 @@ static void THNN_(VolumetricDilatedMaxPooling_updateOutput_frame)(
           int64_t start_h = i * dH - pH;
           int64_t start_w = j * dW - pW;
 
-          int64_t end_t = fminf(start_t + (kT - 1) * dilationT + 1, itime);
-          int64_t end_h = fminf(start_h + (kH - 1) * dilationH + 1, iheight);
-          int64_t end_w = fminf(start_w + (kW - 1) * dilationW + 1, iwidth);
+          int64_t end_t = std::min(start_t + (kT - 1) * dilationT + 1, itime);
+          int64_t end_h = std::min(start_h + (kH - 1) * dilationH + 1, iheight);
+          int64_t end_w = std::min(start_w + (kW - 1) * dilationW + 1, iwidth);
 
           while(start_t < 0)
             start_t += dilationT;
@@ -151,14 +134,14 @@ static void THNN_(VolumetricDilatedMaxPooling_updateOutput_frame)(
           while(start_w < 0)
             start_w += dilationW;
 
-          real *op = output_p + k * otime * owidth * oheight
+          scalar_t *op = output_p + k * otime * owidth * oheight
             + ti * owidth * oheight + i * owidth + j;
           THIndex_t *indzp = indz_p + k * otime * owidth * oheight
             + ti * owidth * oheight + i * owidth + j;
 
           /* compute local max: */
           int64_t maxindex = -1;
-          real maxval = -THInf;
+          scalar_t maxval = -THInf;
           int64_t x,y,z;
           int64_t index = 0;
 
@@ -169,8 +152,8 @@ static void THNN_(VolumetricDilatedMaxPooling_updateOutput_frame)(
               for (x = start_w; x < end_w; x += dilationW)
               {
                 index = z * iwidth * iheight + y * iwidth + x;
-                real val = ip[index];
-                if (val > maxval)
+                scalar_t val = ip[index];
+                if ((val > maxval) || std::isnan(val))
                 {
                   maxval = val;
                   maxindex = index;
@@ -216,8 +199,8 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
   int64_t otime;
   int64_t oheight;
   int64_t owidth;
-  real *input_data;
-  real *output_data;
+  scalar_t *input_data;
+  scalar_t *output_data;
   THIndex_t *indices_data;
 
 
@@ -226,7 +209,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
   int dimh = 2;
   int dimw = 3;
 
-  if (input->nDimension == 5)
+  if (input->dim() == 5)
   {
     dimN++;
     dimt++;
@@ -241,46 +224,26 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
         ceilMode);
 
   /* sizes */
-  nslices = input->size[dimN];
-  itime   = input->size[dimt];
-  iheight = input->size[dimh];
-  iwidth  = input->size[dimw];
-  if (ceilMode)
-  {
-    otime = (int)(ceil((float)(itime - (dilationT * (kT - 1) + 1) + 2*pT) / dT)) + 1;
-    oheight = (int)(ceil((float)(iheight - (dilationH * (kH - 1) + 1) + 2*pH) / dH)) + 1;
-    owidth  = (int)(ceil((float)(iwidth  - (dilationW * (kW - 1) + 1) + 2*pW) / dW)) + 1;
-  }
-  else
-  {
-    otime = (int)(floor((float)(itime - (dilationT * (kT - 1) + 1) + 2*pT) / dT)) + 1;
-    oheight = (int)(floor((float)(iheight - (dilationH * (kH - 1) + 1) + 2*pH) / dH)) + 1;
-    owidth  = (int)(floor((float)(iwidth  - (dilationW * (kW - 1) + 1) + 2*pW) / dW)) + 1;
-  }
-
-  if (pT || pW || pH)
-  {
-    // ensure that the last pooling starts inside the image
-    if ((otime - 1)*dT >= itime + pT)
-      --otime;
-    if ((oheight - 1)*dH >= iheight + pH)
-      --oheight;
-    if ((owidth  - 1)*dW >= iwidth  + pW)
-      --owidth;
-  }
+  nslices = input->size(dimN);
+  itime   = input->size(dimt);
+  iheight = input->size(dimh);
+  iwidth  = input->size(dimw);
+  otime = pooling_output_shape<int64_t>(itime, kT, pT, dT, dilationT, ceilMode);
+  oheight = pooling_output_shape<int64_t>(iheight, kH, pH, dH, dilationH, ceilMode);
+  owidth = pooling_output_shape<int64_t>(iwidth, kW, pW, dW, dilationW, ceilMode);
 
   /* get contiguous input */
   input = THTensor_(newContiguous)(input);
 
-  if (input->nDimension == 4) /* non-batch mode */
+  if (input->dim() == 4) /* non-batch mode */
   {
     /* resize output */
     THTensor_(resize4d)(output, nslices, otime, oheight, owidth);
     /* indices will contain ti,i,j uchar locations packed into float/double */
     THIndexTensor_(resize4d)(indices, nslices, otime, oheight, owidth);
 
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<scalar_t>();
+    output_data = output->data<scalar_t>();
     indices_data = THIndexTensor_(data)(indices);
 
     THNN_(VolumetricDilatedMaxPooling_updateOutput_frame)(
@@ -298,7 +261,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
   else /* batch mode */
   {
     int64_t p;
-    int64_t nBatch = input->size[0];
+    int64_t nBatch = input->size(0);
 
     int64_t istride = nslices * itime * iwidth * iheight;
     int64_t ostride = nslices * otime * owidth * oheight;
@@ -308,8 +271,8 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
     /* indices will contain ti,i,j locations for each output point */
     THIndexTensor_(resize5d)(indices, nBatch, nslices, otime, oheight, owidth);
 
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<scalar_t>();
+    output_data = output->data<scalar_t>();
     indices_data = THIndexTensor_(data)(indices);
 
 #pragma omp parallel for private(p)
@@ -331,12 +294,12 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
   }
 
   /* cleanup */
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
 }
 
 static void THNN_(VolumetricDilatedMaxPooling_updateGradInput_frame)(
-          real *gradInput_p,
-          real *gradOutput_p,
+          scalar_t *gradInput_p,
+          scalar_t *gradOutput_p,
           THIndex_t *indz_p,
           int64_t nslices,
           int64_t itime,
@@ -359,8 +322,8 @@ static void THNN_(VolumetricDilatedMaxPooling_updateGradInput_frame)(
 #pragma omp parallel for private(k)
   for (k = 0; k < nslices; k++)
   {
-    real *gradInput_p_k  = gradInput_p  + k * itime * iwidth * iheight;
-    real *gradOutput_p_k = gradOutput_p + k * otime * owidth * oheight;
+    scalar_t *gradInput_p_k  = gradInput_p  + k * itime * iwidth * iheight;
+    scalar_t *gradOutput_p_k = gradOutput_p + k * otime * owidth * oheight;
     THIndex_t *indz_p_k = indz_p + k * otime * owidth * oheight;
 
     /* calculate max points */
@@ -412,8 +375,8 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
   int otime;
   int oheight;
   int owidth;
-  real *gradInput_data;
-  real *gradOutput_data;
+  scalar_t *gradInput_data;
+  scalar_t *gradOutput_data;
   THIndex_t *indices_data;
 
   int dimN = 0;
@@ -435,7 +398,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
   THTensor_(resizeAs)(gradInput, input);
   THTensor_(zero)(gradInput);
 
-  if (input->nDimension == 5)
+  if (input->dim() == 5)
   {
     dimN++;
     dimt++;
@@ -444,21 +407,21 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
   }
 
   /* sizes */
-  nslices = input->size[dimN];
-  itime = input->size[dimt];
-  iheight = input->size[dimh];
-  iwidth = input->size[dimw];
-  otime = gradOutput->size[dimt];
-  oheight = gradOutput->size[dimh];
-  owidth = gradOutput->size[dimw];
+  nslices = input->size(dimN);
+  itime = input->size(dimt);
+  iheight = input->size(dimh);
+  iwidth = input->size(dimw);
+  otime = gradOutput->size(dimt);
+  oheight = gradOutput->size(dimh);
+  owidth = gradOutput->size(dimw);
 
   /* get raw pointers */
-  gradInput_data = THTensor_(data)(gradInput);
-  gradOutput_data = THTensor_(data)(gradOutput);
+  gradInput_data = gradInput->data<scalar_t>();
+  gradOutput_data = gradOutput->data<scalar_t>();
   indices_data = THIndexTensor_(data)(indices);
 
   /* backprop */
-  if (input->nDimension == 4) /* non-batch mode*/
+  if (input->dim() == 4) /* non-batch mode*/
   {
     THNN_(VolumetricDilatedMaxPooling_updateGradInput_frame)(
       gradInput_data, gradOutput_data,
@@ -474,7 +437,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
   else /* batch mode */
   {
     int64_t p;
-    int64_t nBatch = input->size[0];
+    int64_t nBatch = input->size(0);
 
     int64_t istride = nslices * itime * iwidth * iheight;
     int64_t ostride = nslices * otime * owidth * oheight;
@@ -497,7 +460,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
   }
 
   /* cleanup */
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

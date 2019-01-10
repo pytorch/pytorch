@@ -1,6 +1,6 @@
-#include "THCUNN.h"
-#include "THCHalf.h"
-#include "THCHalfAutoNumerics.cuh"
+#include <THCUNN/THCUNN.h>
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
 #include <THC/THCApply.cuh>
 
 template <typename T>
@@ -8,7 +8,7 @@ struct absupdateOutput_functor
 {
   __device__ void operator()(T* output, const T* input) const
   {
-    *output = abs(*input);
+    *output = THCNumerics<T>::abs(*input);
   }
 };
 
@@ -21,5 +21,5 @@ struct absupdateGradInput_functor
   }
 };
 
-#include "generic/Abs.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/Abs.cu>
+#include <THC/THCGenerateFloatTypes.h>

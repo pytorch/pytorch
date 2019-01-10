@@ -20,18 +20,18 @@ class BooleanMaskLengthsOp final : public Operator<Context> {
   bool DoRunWithType() {
     auto& lengths = Input(0);
     auto& mask = Input(1);
-    auto* lengthsOut = Output(0);
-    CAFFE_ENFORCE(lengths.ndim() == 1);
-    CAFFE_ENFORCE(mask.ndim() == 1);
+
+    CAFFE_ENFORCE(lengths.dim() == 1);
+    CAFFE_ENFORCE(mask.dim() == 1);
     const auto* lengthsPtr = lengths.template data<T>();
     const auto* maskPtr = mask.template data<bool>();
     auto totalLength =
-        std::accumulate(lengthsPtr, lengthsPtr + lengths.size(), 0);
-    CAFFE_ENFORCE(mask.size() == totalLength);
-    lengthsOut->ResizeLike(lengths);
+        std::accumulate(lengthsPtr, lengthsPtr + lengths.numel(), 0);
+    CAFFE_ENFORCE(mask.numel() == totalLength);
+    auto* lengthsOut = Output(0, lengths.sizes(), at::dtype<T>());
     auto* lengthsOutPtr = lengthsOut->template mutable_data<T>();
     int p = 0;
-    for (int i = 0; i < lengths.size(); ++i) {
+    for (int i = 0; i < lengths.numel(); ++i) {
       T lengthOut = 0;
       for (int j = 0; j < lengthsPtr[i]; ++j) {
         if (maskPtr[p++]) {
@@ -50,28 +50,27 @@ bool BooleanMaskOp<CPUContext>::RunOnDevice() {
   auto& data = Input(0);
   auto& mask = Input(1);
   auto* dataOut = Output(0);
-  CAFFE_ENFORCE(data.ndim() >= 1);
-  CAFFE_ENFORCE_EQ(mask.ndim(), 1);
-  CAFFE_ENFORCE(data.dims()[0] == mask.dims()[0]);
+  CAFFE_ENFORCE(data.dim() >= 1);
+  CAFFE_ENFORCE_EQ(mask.dim(), 1);
+  CAFFE_ENFORCE(data.size(0) == mask.size(0));
 
   const auto* maskPtr = mask.template data<bool>();
   int numOutputs = 0;
-  int outerSize = mask.size();
+  int outerSize = mask.numel();
   for (int i = 0; i < outerSize; ++i) {
     if (maskPtr[i]) {
       ++numOutputs;
     }
   }
-  std::vector<TIndex> outShape;
+  std::vector<int64_t> outShape;
   outShape.push_back(numOutputs);
-  outShape.insert(outShape.end(), data.dims().begin() + 1, data.dims().end());
+  outShape.insert(outShape.end(), data.sizes().begin() + 1, data.sizes().end());
   dataOut->Resize(outShape);
-  auto* outPtr = (char*)dataOut->raw_mutable_data(data.meta());
+  auto* outPtr = (char*)dataOut->raw_mutable_data(data.dtype());
 
   int64_t* out_vec = nullptr;
   if (OutputSize() == 2) {
-    auto* indicesOut = Output(1);
-    indicesOut->Resize(numOutputs);
+    auto* indicesOut = Output(1, {numOutputs}, at::dtype<int64_t>());
     out_vec = indicesOut->template mutable_data<int64_t>();
   }
 
@@ -79,20 +78,20 @@ bool BooleanMaskOp<CPUContext>::RunOnDevice() {
     return true;
   }
   const auto innerSize = data.size_from_dim(1);
-  const auto innerSizeBytes = innerSize * data.meta().itemsize();
+  const auto innerSizeBytes = innerSize * data.dtype().itemsize();
 
-  TIndex lastStart = -1;
+  int64_t lastStart = -1;
   const auto* inPtr = (char*)data.raw_data();
-  TIndex outStart = 0;
+  int64_t outStart = 0;
 
-  for (TIndex i = 0;; ++i) {
+  for (int64_t i = 0;; ++i) {
     // mask was true and either a) became false, or b) sequence finished
     if (lastStart != -1 && ((i >= outerSize) || !maskPtr[i])) {
       const auto* src = inPtr + lastStart * innerSizeBytes;
       auto* dst = outPtr + outStart * innerSizeBytes;
       int numItems = i - lastStart;
-      context_.template CopyItems<CPUContext, CPUContext>(
-          data.meta(), numItems * innerSize, src, dst);
+      context_.CopyItemsSameDevice(
+          data.dtype(), numItems * innerSize, src, dst);
       outStart += numItems;
       lastStart = -1;
     }
@@ -117,25 +116,110 @@ OPERATOR_SCHEMA(BooleanMask)
     .NumInputs(2)
     .NumOutputs(1, 2)
     .SetDoc(R"DOC(
-Given a data tensor and a 1D boolean mask tensor, returns a tensor containing
-only the elements corresponding to positions where the mask is true.
+Given a 1D `data` tensor and a boolean `mask` tensor of the same shape, returns a `masked_data` tensor containing only the elements corresponding to positions where the `mask` is True, and a `masked_indices` tensor containing the indices of the True elements.
+
+
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/boolean_mask_ops.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "BooleanMask",
+    ["data", "mask"],
+    ["masked_data", "masked_indices"]
+)
+
+workspace.FeedBlob("data", np.array([1,2,3,4,5,6]))
+workspace.FeedBlob("mask", np.array([True,False,False,True,True,False]))
+print("data:", workspace.FetchBlob("data"))
+print("mask:", workspace.FetchBlob("mask"))
+workspace.RunOperatorOnce(op)
+print("masked_data:", workspace.FetchBlob("masked_data"))
+print("masked_indices:", workspace.FetchBlob("masked_indices"))
+
+```
+
+**Result**
+
+```
+
+data: [1 2 3 4 5 6]
+mask: [ True False False  True  True False]
+masked_data: [1 4 5]
+masked_indices: [0 3 4]
+
+```
+
+</details>
+
 )DOC")
-    .Input(0, "data", "The 1D, original data tensor.")
-    .Input(1, "mask", "A tensor of bools of same shape as `data`.")
-    .Output(0, "masked_data", "A tensor of same type as `data`.")
-    .Output(1, "masked_indices", "A tensor for indices.");
+    .Input(0, "data", "(*Tensor*): 1D input tensor")
+    .Input(1, "mask", "(*Tensor`<bool>`*): tensor of bools which determines the input elements that will be left in the `masked_data` output tensor; same shape as `data`")
+    .Output(0, "masked_data", "(*Tensor*): 1D tensor of same type as `data` input that contains the masked input tensor")
+    .Output(1, "masked_indices", "(*Tensor`<int>`*): 1D tensor of indices of the True elements in the `mask` tensor");
 
 OPERATOR_SCHEMA(BooleanMaskLengths)
     .NumInputs(2)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-Given a tensor of int32 segment lengths and a mask (boolean) tensor, return
-the segment lengths of a corresponding segmented tensor after BooleanMask is
-applied.
+Given a tensor of int32 `lengths` tensor representing segment lengths and a `mask` (boolean) tensor, return the segment lengths of the corresponding segmented tensor after **BooleanMask** is applied.
+
+If `lengths` tensor is $[a_1, a_2, ..., a_n]$, then length of `mask` tensor must be $a_1 + a_2 + ... + a_n$.
+
+
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/boolean_mask_ops.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "BooleanMaskLengths",
+    ["lengths", "mask"],
+    ["masked_lengths"]
+)
+
+workspace.FeedBlob("lengths", np.array([1,3,2], dtype=np.int32))
+workspace.FeedBlob("mask", np.array([False,True,True,False,True,True]))
+print("lengths:", workspace.FetchBlob("lengths"))
+print("mask:", workspace.FetchBlob("mask"))
+workspace.RunOperatorOnce(op)
+print("masked_lengths:", workspace.FetchBlob("masked_lengths"))
+
+```
+
+**Result**
+
+```
+
+lengths: [1 3 2]
+mask: [False  True  True False  True  True]
+masked_lengths: [0 2 2]
+
+```
+
+</details>
+
 )DOC")
-    .Input(0, "lengths", "A 1D int32 tensor representing segment lengths.")
-    .Input(1, "mask", "A 1D bool tensor of values to keep.")
-    .Output(0, "masked_lengths", "Segment lengths of a masked tensor.");
+    .Input(0, "lengths", "(*Tensor`<int>`*): input tensor containing segment lengths")
+    .Input(1, "mask", "(*Tensor`<bool>`*): A 1D bool tensor of values to keep.")
+    .Output(0, "masked_lengths", "(*Tensor`<int>`*): 1D tensor of same type as inputs that contains the sequence");
 
 NO_GRADIENT(BooleanMask)
 NO_GRADIENT(BooleanMaskLengths);
@@ -271,9 +355,9 @@ bool SequenceMaskOp<CPUContext>::RunOnDevice() {
 template <>
 template <class T>
 bool SequenceMaskOp<CPUContext>::DoRunWithType() {
-  const Tensor<CPUContext>* input = &Input(0);
-  const Tensor<CPUContext>* sequence_lengths = nullptr;
-  const Tensor<CPUContext>* window_centers = nullptr;
+  const Tensor* input = &Input(0);
+  const Tensor* sequence_lengths = nullptr;
+  const Tensor* window_centers = nullptr;
 
   if (mode_ == "sequence") {
     sequence_lengths = &Input(1);
@@ -281,8 +365,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
     window_centers = &Input(1);
   }
 
-  auto* output = Output(0);
-  output->ResizeLike(*input);
+  auto* output = Output(0, input->sizes(), at::dtype<T>());
 
   const auto canonical_axis = input->canonical_axis_index(axis_);
 
@@ -308,7 +391,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
   // product of dims from 1 to batch
   const int batch_dim =
       (canonical_batch >= 0
-           ? input->size_to_dim(canonical_batch) * input->dim(canonical_batch)
+           ? input->size_to_dim(canonical_batch) * input->size(canonical_batch)
            : -1);
 
   T fill_val = convert::To<float, T>(grad_ ? 0.0f : fill_val_);
@@ -326,9 +409,9 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
           repeated_dims,
           input->data<T>(),
           SequenceFunctor(
-              sequence_lengths->data<int>(), sequence_lengths->size()),
+              sequence_lengths->data<int>(), sequence_lengths->numel()),
           fill_val,
-          output->mutable_data<T>());
+          output->template mutable_data<T>());
     } else {
       MaskWithFunctor(
           left,
@@ -336,9 +419,9 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
           batch_dim,
           input->data<T>(),
           SequenceFunctor(
-              sequence_lengths->data<int>(), sequence_lengths->size()),
+              sequence_lengths->data<int>(), sequence_lengths->numel()),
           fill_val,
-          output->mutable_data<T>());
+          output->template mutable_data<T>());
     }
   } else if (mode_ == "window") {
     MaskWithFunctor(
@@ -348,7 +431,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
         input->data<T>(),
         WindowFunctor(window_centers->data<int>(), radius_),
         fill_val,
-        output->mutable_data<T>());
+        output->template mutable_data<T>());
   } else if (mode_ == "upper") {
     MaskWithFunctor(
         left,
@@ -357,7 +440,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
         input->data<T>(),
         UpperFunctor(),
         fill_val,
-        output->mutable_data<T>());
+        output->template mutable_data<T>());
   } else if (mode_ == "lower") {
     MaskWithFunctor(
         left,
@@ -366,7 +449,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
         input->data<T>(),
         LowerFunctor(),
         fill_val,
-        output->mutable_data<T>());
+        output->template mutable_data<T>());
   } else if (mode_ == "upperdiag") {
     MaskWithFunctor(
         left,
@@ -375,7 +458,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
         input->data<T>(),
         UpperDiagFunctor(),
         fill_val,
-        output->mutable_data<T>());
+        output->template mutable_data<T>());
   } else if (mode_ == "lowerdiag") {
     MaskWithFunctor(
         left,
@@ -384,7 +467,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
         input->data<T>(),
         LowerDiagFunctor(),
         fill_val,
-        output->mutable_data<T>());
+        output->template mutable_data<T>());
   } else {
     CAFFE_ENFORCE(false, "Unsupported mode for SequenceMaskOp!");
     return false;

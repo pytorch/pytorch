@@ -22,7 +22,7 @@ bool CeilOp<float, CUDAContext>::RunOnDevice() {
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      X.size(), X.data<float>(), Y->mutable_data<float>());
+      X.size(), X.data<float>(), Y->template mutable_data<float>());
   return true;
 }
 

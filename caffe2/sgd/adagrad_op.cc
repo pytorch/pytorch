@@ -37,6 +37,33 @@ Optionally returns effective_lr and update as well.
         "Default 1. If it is in (0, 1), the gradient square sum "
         "is decayed by this factor.");
 
+static OpSchema::Cost CostInferenceForSparseAdagrad(
+    const OperatorDef& /* unused */,
+    const vector<TensorShape>& inputs) {
+  CAFFE_ENFORCE_GE(
+      inputs.size(), 4, "SparseAdagrad requires at least 4 inputs");
+
+  const TensorShape param = inputs[0];
+  const TensorShape moment = inputs[1];
+  const TensorShape indices = inputs[2];
+  const TensorShape grad = inputs[3];
+
+  uint64_t n = nElemFromDim(indices);
+  uint64_t grad_size = nElemFromDim(grad);
+
+  OpSchema::Cost c;
+  // See adagrad_op.h (note that decay is 1 for SparseAdagrad).
+  // 2 multiplications, 3 additions, 1 division, and 1 sqrt
+  // (optimistically count sqrt as one flop).
+  c.flops = grad_size * 7;
+  c.bytes_written =
+      grad_size * (sizeof(param.data_type()) + sizeof(moment.data_type()));
+  c.bytes_read = c.bytes_written + grad_size * sizeof(grad.data_type()) +
+      n * sizeof(indices.data_type());
+
+  return c;
+}
+
 REGISTER_CPU_OPERATOR(SparseAdagrad, SparseAdagradOp<float, CPUContext>);
 OPERATOR_SCHEMA(SparseAdagrad)
     .NumInputs(5)
@@ -56,7 +83,9 @@ new_moment) as in the dense case.
     .Input(4, "lr", "learning rate")
     .Output(0, "output_param", "Updated parameters")
     .Output(1, "output_moment_1", "Updated moment")
-    .Arg("epsilon", "Default 1e-5");
+    .Arg("epsilon", "Default 1e-5")
+    .CostInferenceFunction(
+        OpSchema::CostInferenceFunctionType(CostInferenceForSparseAdagrad));
 
 REGISTER_CPU_OPERATOR(
     RowWiseSparseAdagrad,

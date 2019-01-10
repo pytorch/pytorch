@@ -5,9 +5,9 @@ from string import Template
 class AssertNDim(CWrapPlugin):
 
     PRE_CODE_TEMPLATE = Template(
-        """if(THTensor_(nDimension)(LIBRARY_STATE ${arg_op}) != ${dim_value}) {
+        """if(THTensor_(nDimensionLegacyNoScalars)(LIBRARY_STATE ${arg_op}) != ${dim_value}) {
              THError("Expected argument %s to have %d dimension(s), but has %d",
-                     "${op}", ${dim_value}, THTensor_(nDimension)(LIBRARY_STATE ${arg_op}));
+                     "${op}", ${dim_value}, THTensor_(nDimensionLegacyNoScalars)(LIBRARY_STATE ${arg_op}));
            }
         """)
 

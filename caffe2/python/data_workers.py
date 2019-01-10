@@ -121,15 +121,16 @@ def init_data_input_workers(
         timeout=timeout
     )
 
-    # Create coordinator object
-    coordinator = WorkerCoordinator(
-        input_source_name, init_fun, batch_feeder)
-
     # Launch fetch worker threads
     worker_ids = [
         global_coordinator.get_new_worker_id()
         for i in range(num_worker_threads)
     ]
+
+    # Create coordinator object
+    coordinator = WorkerCoordinator(
+        input_source_name, worker_ids, init_fun, batch_feeder)
+
     workers = [
         threading.Thread(
             target=run_worker,
@@ -241,7 +242,7 @@ class BatchFeeder(State):
                 qsize = self._internal_queue.qsize()
                 if qsize < 2 and (time.time() - self._last_warning) > LOG_INT_SECS:
                     log.warning("Warning, data loading lagging behind: " +
-                                "name={}".format(qsize, self._input_source_name))
+                                "queue size={}, name={}".format(qsize, self._input_source_name))
                     self._last_warning = time.time()
                 self._counter += 1
                 self._internal_queue.put(chunk, block=True, timeout=0.5)

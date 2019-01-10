@@ -6,17 +6,16 @@
 namespace caffe2 {
 
 namespace {
-template <typename T>
 __global__ void BooleanMaskCopyKernel(
-    const TIndex numOfOutput,
-    const TIndex numBytes,
-    const TIndex* indices,
-    const T* src,
-    T* dest) {
-  for (TIndex i = blockIdx.x; i < numOfOutput; i += gridDim.x) {
+    const int64_t numOfOutput,
+    const int64_t numBytes,
+    const int64_t* indices,
+    const uint8_t* src,
+    uint8_t* dest) {
+  for (int64_t i = blockIdx.x; i < numOfOutput; i += gridDim.x) {
     const auto srcBase = indices[i] * numBytes;
     const auto destBase = i * numBytes;
-    for (TIndex j = threadIdx.x; j < numBytes; j += blockDim.x) {
+    for (int64_t j = threadIdx.x; j < numBytes; j += blockDim.x) {
       dest[destBase + j] = src[srcBase + j];
     }
   }
@@ -36,12 +35,12 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
 
     CAFFE_ENFORCE(src.ndim() >= 1);
     CAFFE_ENFORCE_EQ(mask.ndim(), 1);
-    CAFFE_ENFORCE(src.dims()[0] == mask.dims()[0]);
+    CAFFE_ENFORCE(src.size(0) == mask.size(0));
 
     const auto* maskData = mask.data<bool>();
-    const auto outerSize = mask.dims()[0];
+    const auto outerSize = mask.size(0);
     indices_.Resize(outerSize);
-    auto* indicesData = indices_.mutable_data<TIndex>();
+    auto* indicesData = indices_.mutable_data<int64_t>();
 
     size_t numBytes = 0;
     cub::CountingInputIterator<int> itr(0);
@@ -51,16 +50,16 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
         itr,
         maskData,
         indicesData,
-        static_cast<TIndex*>(nullptr),
+        static_cast<int64_t*>(nullptr),
         outerSize,
         context_.cuda_stream());
 
-    auto numTIndex =
-        static_cast<TIndex>((numBytes + sizeof(TIndex) - 1) / sizeof(TIndex));
-    // allocate one more TIndex at the end of scratch for storing numOfOutput
-    scratch_.Resize(numTIndex + 1);
-    auto* scratchData = scratch_.mutable_data<TIndex>();
-    auto* numOfOutputData = scratchData + numTIndex;
+    auto numint64_t =
+        static_cast<int64_t>((numBytes + sizeof(int64_t) - 1) / sizeof(int64_t));
+    // allocate one more int64_t at the end of scratch for storing numOfOutput
+    scratch_.Resize(numint64_t + 1);
+    auto* scratchData = scratch_.mutable_data<int64_t>();
+    auto* numOfOutputData = scratchData + numint64_t;
 
     cub::DeviceSelect::Flagged(
         static_cast<void*>(scratchData),
@@ -73,25 +72,24 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
         context_.cuda_stream());
 
     // Copy numOfOutput from gpu to cpu
-    TIndex numOfOutput;
-    context_.Copy<TIndex, CUDAContext, CPUContext>(
-        1, numOfOutputData, &numOfOutput);
+    int64_t numOfOutput;
+    context_.CopyToCPU(1, numOfOutputData, &numOfOutput);
 
     indices_.Resize(numOfOutput);
-    std::vector<TIndex> dims = src.dims();
+    std::vector<int64_t> dims = src.sizes().vec();
     dims[0] = numOfOutput;
     dest->Resize(dims);
-    auto* destData = (char*)dest->raw_mutable_data(src.meta());
-    const auto* srcData = (char*)src.raw_data();
+    auto* destData = (uint8_t*)dest->raw_mutable_data(src.meta());
+    const auto* srcData = (uint8_t*)src.raw_data();
     if (OutputSize() == 2) {
-      auto* indicesOut = Output(1);
-      indicesOut->Resize(numOfOutput);
-      indicesOut->mutable_data<TIndex>();
+      
+      auto* indicesOut = Output(1, {numOfOutput}, at::dtype<int64_t>());
+      indicesOut->template mutable_data<int64_t>();
     }
 
     if (numOfOutput > 0) {
       BooleanMaskCopyKernel<<<
-          min(numOfOutput, static_cast<TIndex>(CAFFE_MAXIMUM_NUM_BLOCKS)),
+          min(numOfOutput, static_cast<int64_t>(CAFFE_MAXIMUM_NUM_BLOCKS)),
           CAFFE_CUDA_NUM_THREADS,
           0,
           context_.cuda_stream()>>>(
@@ -102,7 +100,7 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
           destData);
 
       if (OutputSize() == 2) {
-        Output(1)->CopyFrom(indices_, &context_);
+        Output(1)->CopyFrom(indices_, /* async */ true);
       }
     }
 
@@ -110,8 +108,8 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
   }
 
  private:
-  Tensor<CUDAContext> indices_;
-  Tensor<CUDAContext> scratch_;
+  Tensor indices_{CUDA};
+  Tensor scratch_{CUDA};
 };
 
 REGISTER_CUDA_OPERATOR(BooleanMask, BooleanMaskOp<CUDAContext>);
@@ -292,15 +290,15 @@ lowerDiagMaskKernel(int N, int M, int B, const T* in, T fill_val, T* out) {
 
 template <>
 bool SequenceMaskOp<CUDAContext>::RunOnDevice() {
-    return DispatchHelper<TensorTypes<float16, float>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<at::Half, float>>::call(this, Input(0));
 }
 
 template <>
 template <class T>
 bool SequenceMaskOp<CUDAContext>::DoRunWithType() {
-  const Tensor<CUDAContext>* input = &Input(0);
-  const Tensor<CUDAContext>* sequence_lengths = nullptr;
-  const Tensor<CUDAContext>* window_centers = nullptr;
+  const Tensor* input = &Input(0);
+  const Tensor* sequence_lengths = nullptr;
+  const Tensor* window_centers = nullptr;
 
   if (mode_ == "sequence") {
     sequence_lengths = &Input(1);
@@ -356,7 +354,7 @@ bool SequenceMaskOp<CUDAContext>::DoRunWithType() {
           input->data<T>(),
           sequence_lengths->data<int>(),
           fill_val,
-          output->mutable_data<T>());
+          output->template mutable_data<T>());
     } else {
       sequenceMaskKernel<<<
           CAFFE_GET_BLOCKS(left * right),
@@ -369,7 +367,7 @@ bool SequenceMaskOp<CUDAContext>::DoRunWithType() {
           input->data<T>(),
           sequence_lengths->data<int>(),
           fill_val,
-          output->mutable_data<T>());
+          output->template mutable_data<T>());
     }
   } else if (mode_ == "window") {
     windowMaskKernel<<<
@@ -384,7 +382,7 @@ bool SequenceMaskOp<CUDAContext>::DoRunWithType() {
         window_centers->data<int>(),
         radius_,
         fill_val,
-        output->mutable_data<T>());
+        output->template mutable_data<T>());
   } else if (mode_ == "upper") {
     upperMaskKernel<<<
         CAFFE_GET_BLOCKS(left * right),
@@ -396,7 +394,7 @@ bool SequenceMaskOp<CUDAContext>::DoRunWithType() {
         batch_dim,
         input->data<T>(),
         fill_val,
-        output->mutable_data<T>());
+        output->template mutable_data<T>());
   } else if (mode_ == "lower") {
     lowerMaskKernel<<<
         CAFFE_GET_BLOCKS(left * right),
@@ -408,7 +406,7 @@ bool SequenceMaskOp<CUDAContext>::DoRunWithType() {
         batch_dim,
         input->data<T>(),
         fill_val,
-        output->mutable_data<T>());
+        output->template mutable_data<T>());
   } else if (mode_ == "upperdiag") {
     upperDiagMaskKernel<<<
         CAFFE_GET_BLOCKS(left * right),
@@ -420,7 +418,7 @@ bool SequenceMaskOp<CUDAContext>::DoRunWithType() {
         batch_dim,
         input->data<T>(),
         fill_val,
-        output->mutable_data<T>());
+        output->template mutable_data<T>());
   } else if (mode_ == "lowerdiag") {
     lowerDiagMaskKernel<<<
         CAFFE_GET_BLOCKS(left * right),
@@ -432,7 +430,7 @@ bool SequenceMaskOp<CUDAContext>::DoRunWithType() {
         batch_dim,
         input->data<T>(),
         fill_val,
-        output->mutable_data<T>());
+        output->template mutable_data<T>());
   } else {
     CAFFE_ENFORCE(false, "Unsupported mode for SequenceMaskOp!");
   }

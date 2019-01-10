@@ -13,12 +13,12 @@ class PiecewiseLinearTransformOp final : public Operator<Context> {
 
   PiecewiseLinearTransformOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {
-    binary_ = OperatorBase::GetSingleArgument<bool>("binary", false);
+    binary_ = this->template GetSingleArgument<bool>("binary", false);
 
     // Retrieve transform params (i.e., the linear functions).
-    bounds_from_arg_ = OperatorBase::GetRepeatedArgument<T>("bounds");
-    slopes_from_arg_ = OperatorBase::GetRepeatedArgument<T>("slopes");
-    intercepts_from_arg_ = OperatorBase::GetRepeatedArgument<T>("intercepts");
+    bounds_from_arg_ = this->template GetRepeatedArgument<T>("bounds");
+    slopes_from_arg_ = this->template GetRepeatedArgument<T>("slopes");
+    intercepts_from_arg_ = this->template GetRepeatedArgument<T>("intercepts");
     transform_param_from_arg_ = CheckTransParamFromArg();
   }
 
@@ -32,11 +32,11 @@ class PiecewiseLinearTransformOp final : public Operator<Context> {
   // num_group: The number of groups of linear functions. Each group is for
   // transforming one column of predictions.
   void InferNumFunctionsPerGroup(
-      const TIndex num_bounds,
-      const TIndex num_slopes,
-      const TIndex num_intercepts,
-      TIndex* num_func_per_group,
-      TIndex* num_group) {
+      const int64_t num_bounds,
+      const int64_t num_slopes,
+      const int64_t num_intercepts,
+      int64_t* num_func_per_group,
+      int64_t* num_group) {
     CAFFE_ENFORCE_EQ(num_slopes, num_intercepts);
 
     // This is based on the facts:
@@ -54,10 +54,10 @@ class PiecewiseLinearTransformOp final : public Operator<Context> {
 
   bool CheckBoundsSorted(
       const T* bounds,
-      const TIndex num_bounds_per_group,
-      const TIndex num_group) {
+      const int64_t num_bounds_per_group,
+      const int64_t num_group) {
     const T* start = bounds;
-    for (TIndex i = 0; i < num_group; i++) {
+    for (int64_t i = 0; i < num_group; i++) {
       if (!std::is_sorted(start, start + num_bounds_per_group)) {
         return false;
       }
@@ -77,8 +77,8 @@ class PiecewiseLinearTransformOp final : public Operator<Context> {
         good_param == 0 || good_param == 3,
         "bounds, slopes, intercepts must be all set or all not set");
     if (good_param == 3) {
-      TIndex num_func_per_group;
-      TIndex num_group;
+      int64_t num_func_per_group;
+      int64_t num_group;
       InferNumFunctionsPerGroup(
           bounds_from_arg_.size(),
           slopes_from_arg_.size(),
@@ -94,17 +94,17 @@ class PiecewiseLinearTransformOp final : public Operator<Context> {
     return good_param == 3;
   }
 
-  void setUpTensors(TIndex& num_func_per_group, TIndex& num_group, TIndex M);
+  void setUpTensors(int64_t& num_func_per_group, int64_t& num_group, int64_t M);
 
   void GetTransParamData(
       const T** bounds,
       const T** slopes,
       const T** intercepts,
-      TIndex* num_func_per_group,
-      TIndex* num_group) {
-    TIndex num_bounds;
-    TIndex num_slopes;
-    TIndex num_intercepts;
+      int64_t* num_func_per_group,
+      int64_t* num_group) {
+    int64_t num_bounds;
+    int64_t num_slopes;
+    int64_t num_intercepts;
 
     if (transform_param_from_arg_) {
       CAFFE_ENFORCE_EQ(InputSize(), 1);
@@ -122,9 +122,9 @@ class PiecewiseLinearTransformOp final : public Operator<Context> {
       *bounds = bounds_input.template data<T>();
       *slopes = slopes_input.template data<T>();
       *intercepts = intercepts_input.template data<T>();
-      num_bounds = bounds_input.size();
-      num_slopes = slopes_input.size();
-      num_intercepts = intercepts_input.size();
+      num_bounds = bounds_input.numel();
+      num_slopes = slopes_input.numel();
+      num_intercepts = intercepts_input.numel();
     }
     InferNumFunctionsPerGroup(
         num_bounds, num_slopes, num_intercepts, num_func_per_group, num_group);
@@ -132,28 +132,28 @@ class PiecewiseLinearTransformOp final : public Operator<Context> {
 
   bool TransformGeneral() {
     auto& X = Input(0);
-    auto* Y = Output(0);
-    CAFFE_ENFORCE_EQ(X.ndim(), 2);
-    TIndex N = X.dim32(0);
-    TIndex M = X.dim32(1);
-    Y->ResizeLike(X);
+
+    CAFFE_ENFORCE_EQ(X.dim(), 2);
+    int64_t N = X.dim32(0);
+    int64_t M = X.dim32(1);
+    auto* Y = Output(0, X.sizes(), at::dtype<T>());
     const auto* Xdata = X.template data<T>();
     T* Ydata = Y->template mutable_data<T>();
 
     const T* bounds;
     const T* slopes;
     const T* intercepts;
-    TIndex num_func_per_group;
-    TIndex num_group;
+    int64_t num_func_per_group;
+    int64_t num_group;
     GetTransParamData(
         &bounds, &slopes, &intercepts, &num_func_per_group, &num_group);
     CAFFE_ENFORCE_EQ(num_group, M);
 
-    for (TIndex j = 0; j < M; ++j) {
+    for (int64_t j = 0; j < M; ++j) {
       const T* bounds_group = bounds + j * (num_func_per_group + 1);
       const T* slopes_group = slopes + j * num_func_per_group;
       const T* intercepts_group = intercepts + j * num_func_per_group;
-      for (TIndex i = 0; i < N; ++i) {
+      for (int64_t i = 0; i < N; ++i) {
         Ydata[i * M + j] = PiecewiseLinearTransform(
             Xdata[i * M + j],
             bounds_group,
@@ -167,33 +167,33 @@ class PiecewiseLinearTransformOp final : public Operator<Context> {
 
   bool TransformBinary() {
     auto& X = Input(PREDICTIONS);
-    auto* Y = Output(0);
-    CAFFE_ENFORCE(X.ndim() == 1 || X.ndim() == 2);
-    TIndex N = X.dim32(0);
-    TIndex M = X.ndim() == 2 ? X.dim32(1) : 1;
+
+    CAFFE_ENFORCE(X.dim() == 1 || X.dim() == 2);
+    int64_t N = X.dim32(0);
+    int64_t M = X.dim() == 2 ? X.dim32(1) : 1;
     CAFFE_ENFORCE(
         M == 1 || M == 2,
         "If binary is set to true, the input must be Nx2 or Nx1 tensor");
-    Y->ResizeLike(X);
+    auto* Y = Output(0, X.sizes(), at::dtype<T>());
     const auto* Xdata = X.template data<T>();
     T* Ydata = Y->template mutable_data<T>();
 
     const T* bounds;
     const T* slopes;
     const T* intercepts;
-    TIndex num_func_per_group;
-    TIndex num_group;
+    int64_t num_func_per_group;
+    int64_t num_group;
     GetTransParamData(
         &bounds, &slopes, &intercepts, &num_func_per_group, &num_group);
     CAFFE_ENFORCE_EQ(num_group, 1);
 
     if (M == 1) {
-      for (TIndex i = 0; i < N; ++i) {
+      for (int64_t i = 0; i < N; ++i) {
         Ydata[i] = PiecewiseLinearTransform(
             Xdata[i], bounds, slopes, intercepts, num_func_per_group);
       }
     } else {
-      for (TIndex i = 0; i < N; ++i) {
+      for (int64_t i = 0; i < N; ++i) {
         Ydata[i * M + 1] = PiecewiseLinearTransform(
             Xdata[i * M + 1], bounds, slopes, intercepts, num_func_per_group);
         Ydata[i * M] = 1.0f - Ydata[i * M + 1];
@@ -208,7 +208,7 @@ class PiecewiseLinearTransformOp final : public Operator<Context> {
       const T* bounds,
       const T* slopes,
       const T* intercepts,
-      const TIndex num_func_per_group) {
+      const int64_t num_func_per_group) {
     T y = 0;
     // deal with samples out of bounds
     // make it the same as the upper/lower bound value
@@ -233,9 +233,9 @@ class PiecewiseLinearTransformOp final : public Operator<Context> {
   vector<T> slopes_from_arg_;
   vector<T> intercepts_from_arg_;
 
-  Tensor<Context> bounds_device_;
-  Tensor<Context> intercepts_device_;
-  Tensor<Context> slopes_device_;
+  Tensor bounds_device_{Context::GetDeviceType()};
+  Tensor intercepts_device_{Context::GetDeviceType()};
+  Tensor slopes_device_{Context::GetDeviceType()};
   bool gpu_copied_ = false;
 
   // If true, the piecewise linear functions are passed through args,

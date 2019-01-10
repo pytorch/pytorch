@@ -1,8 +1,8 @@
 
 #include "ios_caffe.h"
-#include "caffe2/core/predictor.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/mobile/contrib/ios/ios_caffe_predictor.h"
+#include "caffe2/predictor/predictor.h"
 
 Caffe2IOSPredictor* MakeCaffe2Predictor(const std::string& init_net_str,
                                         const std::string& predict_net_str,
@@ -41,14 +41,15 @@ void GenerateStylizedImage(std::vector<float>& originalImage,
   caffe2::Predictor p(init_net, predict_net);
 
   std::vector<int> dims({1, 3, height, width});
-  caffe2::TensorCPU input;
+  caffe2::Tensor input(caffe2::CPU);
   input.Resize(dims);
   input.ShareExternalPointer(originalImage.data());
-  caffe2::Predictor::TensorVector input_vec{&input};
-  caffe2::Predictor::TensorVector output_vec;
-  p.run(input_vec, &output_vec);
+  caffe2::Predictor::TensorList input_vec;
+  input_vec.emplace_back(std::move(input));
+  caffe2::Predictor::TensorList output_vec;
+  p(input_vec, &output_vec);
   assert(output_vec.size() == 1);
-  caffe2::TensorCPU* output = output_vec.front();
+  caffe2::TensorCPU* output = &output_vec.front();
   // output is our styled image
   float* outputArray = output->mutable_data<float>();
   dataOut.assign(outputArray, outputArray + output->size());

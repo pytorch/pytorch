@@ -45,28 +45,39 @@ class CTCOp final : public Operator<Context> {
   bool RunOnDevice() override {
     // inputs
     const auto& inputs = Input(INPUTS);
-    const auto minibatchSize = inputs.dim(1);
-    const auto alphabetSize = inputs.dim(2);
-    const auto& labels = OperatorBase::template Input<TensorCPU>(LABELS);
+    const auto maxTimeSteps = inputs.size(0);
+    const auto minibatchSize = inputs.size(1);
+    const auto alphabetSize = inputs.size(2);
+    const auto& labels = OperatorBase::template Input<Tensor>(LABELS, CPU);
     const auto& labelLengths =
-        OperatorBase::template Input<TensorCPU>(LABEL_LENGTHS);
-    const auto& inputLengths =
-        OperatorBase::template Input<TensorCPU>(INPUT_LENGTHS);
+        OperatorBase::template Input<Tensor>(LABEL_LENGTHS, CPU);
+
+    const int* inputLengthsData = nullptr;
+    if (InputSize() == 4) {
+      const auto& inputLengths =
+          OperatorBase::template Input<Tensor>(INPUT_LENGTHS, CPU);
+      inputLengthsData = inputLengths.template data<int>();
+    } else {
+      // Input lengths not passed in. Default to max timesteps for
+      // each item in minibatch.
+      default_input_lengths_.resize(minibatchSize, maxTimeSteps);
+      inputLengthsData = default_input_lengths_.data();
+    }
 
     // outputs
-    Tensor<Context>* gradients = nullptr;
+    Tensor* gradients = nullptr;
     TensorCPU* costs;
-    Tensor<Context>* workspace;
+    Tensor* workspace;
     if (!is_test_) {
       // [grads, costs, workspace] to maintain backward compatibility
       gradients = Output(0);
       gradients->ResizeLike(inputs);
-      costs = OperatorBase::template Output<TensorCPU>(1);
+      costs = OperatorBase::template Output<Tensor>(1, CPU);
       costs->ResizeLike(labelLengths);
       workspace = Output(2);
     } else {
       // [costs, workspace]
-      costs = OperatorBase::template Output<TensorCPU>(0);
+      costs = OperatorBase::template Output<Tensor>(0, CPU);
       costs->ResizeLike(labelLengths);
       workspace = Output(1);
     }
@@ -74,28 +85,40 @@ class CTCOp final : public Operator<Context> {
     size_t workspaceSizeBytes;
     CTC_CHECK(get_workspace_size(
         labelLengths.template data<int>(),
-        inputLengths.template data<int>(),
+        inputLengthsData,
         alphabetSize,
         minibatchSize,
         detail::workspaceInfo(context_),
         &workspaceSizeBytes));
     workspace->Resize(workspaceSizeBytes);
+    auto* workspaceData = workspace->template mutable_data<uint8_t>();
+
+    if (is_test_ && labels.size(0) == 0) {
+      // compute_ctc_loss doesn't handle empty labels well
+      T* costsData = costs->template mutable_data<T>();
+      for (int i = 0; i < costs->numel(); ++i) {
+        costsData[i] = 0;
+      }
+      return true;
+    }
+
     CTC_CHECK(compute_ctc_loss(
         inputs.template data<T>(),
         gradients ? gradients->template mutable_data<T>() : nullptr,
         labels.template data<int>(),
         labelLengths.template data<int>(),
-        inputLengths.template data<int>(),
+        inputLengthsData,
         alphabetSize,
         minibatchSize,
         costs->template mutable_data<T>(),
-        workspace->template mutable_data<uint8_t>(),
+        workspaceData,
         detail::workspaceInfo(context_)));
     return true;
   }
 
 private:
  bool is_test_;
+ std::vector<int> default_input_lengths_;
 
  INPUT_TAGS(INPUTS, LABELS, LABEL_LENGTHS, INPUT_LENGTHS);
 };

@@ -1,8 +1,8 @@
-#include "THCUNN.h"
-#include "THCHalf.h"
-#include "THCHalfAutoNumerics.cuh"
-#include "THCAtomics.cuh"
-#include "THCTensor.hpp"
+#include <THCUNN/THCUNN.h>
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCAtomics.cuh>
+#include <THC/THCTensor.hpp>
 
 #define CUDA_MAX_THREADS 1024   // this is safe, in reality 256 is our limit
 
@@ -80,7 +80,7 @@ __global__ void cunn_VolumetricAdaptiveMaxPooling_updateOutput_kernel(
         for(ih = 0; ih < kH; ++ih) {
           for(iw = 0; iw < kW; ++iw) {
             T val = ptr_input[ih*istrideH + iw*istrideW];
-            if (val > max) {
+            if ((val > max) || THCNumerics<T>::isnan(val)) {
               max = val;
               argmax = (it+istartT)*isizeH*isizeW + (ih+istartH)*isizeW + iw+istartW;
             }
@@ -201,7 +201,7 @@ __global__ void cunn_atomic_VolumetricAdaptiveMaxPooling_updateGradInput_kernel(
   }
 }
 
-#include "generic/VolumetricAdaptiveMaxPooling.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/VolumetricAdaptiveMaxPooling.cu>
+#include <THC/THCGenerateFloatTypes.h>
 
 #undef CUDA_MAX_THREADS

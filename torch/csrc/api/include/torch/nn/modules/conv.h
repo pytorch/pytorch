@@ -1,97 +1,165 @@
 #pragma once
 
-#include <torch/nn/module.h>
+#include <torch/expanding_array.h>
+#include <torch/nn/cloneable.h>
+#include <torch/nn/pimpl.h>
+#include <torch/types.h>
 
-#include <cstdint>
+#include <cstddef>
+#include <vector>
 
-namespace torch { namespace nn {
-class Conv : public torch::nn::CloneableModule<Conv> {
- private:
-  Conv(uint32_t Nd, uint32_t in_chan, uint32_t out_chan);
+namespace torch {
+namespace nn {
 
- public:
-  Conv(uint32_t Nd, uint32_t in_chan, uint32_t out_chan, int ks)
-      : Conv(Nd, in_chan, out_chan) {
-    ks_ = makeTup(ks, 1);
-  }
+/// Options for a `D`-dimensional convolution module.
+template <size_t D>
+struct ConvOptions {
+  ConvOptions(
+      int64_t input_channels,
+      int64_t output_channels,
+      ExpandingArray<D> kernel_size) :
+		input_channels_(input_channels),
+		output_channels_(output_channels),
+		kernel_size_(std::move(kernel_size)) {}
 
-  Conv(uint32_t Nd, uint32_t in_chan, uint32_t out_chan, IntVec ks)
-      : Conv(Nd, in_chan, out_chan) {
-    ks_ = makeTup(ks);
-  }
+  /// The number of channels the input volumes will have.
+  /// Changing this parameter after construction __has no effect__.
+  TORCH_ARG(int64_t, input_channels);
 
-  void reset_parameters() override;
-  variable_list forward(variable_list) override;
-  void initialize_parameters() override;
+  /// The number of output channels the convolution should produce.
+  /// Changing this parameter after construction __has no effect__.
+  TORCH_ARG(int64_t, output_channels);
 
-  template <typename T>
-  Conv& stride(T s) {
-    stride_ = makeTup(s, 1);
-    return *this;
-  }
-  template <typename T>
-  Conv& padding(T s) {
-    padding_ = makeTup(s);
-    return *this;
-  }
-  template <typename T>
-  Conv& dilation(T s) {
-    dilation_ = makeTup(s, 1);
-    return *this;
-  }
-  template <typename T>
-  Conv& output_padding(T s) {
-    output_padding_ = makeTup(s);
-    return *this;
-  }
+  /// The kernel size to use.
+  /// For a `D`-dim convolution, must be a single number or a list of `D`
+  /// numbers.
+  /// This parameter __can__ be changed after construction.
+  TORCH_ARG(ExpandingArray<D>, kernel_size);
 
-  TORCH_AUTOGRAD_KWARG(Conv, bool, transposed, false, true)
-  TORCH_AUTOGRAD_KWARG(Conv, bool, no_bias, false, true)
-  TORCH_AUTOGRAD_KWARG(Conv, int, groups, 1, 1)
+  /// The stride of the convolution.
+  /// For a `D`-dim convolution, must be a single number or a list of `D`
+  /// numbers.
+  /// This parameter __can__ be changed after construction.
+  TORCH_ARG(ExpandingArray<D>, stride) = 1;
 
-  Variable weight, bias;
-  uint32_t Nd_;
-  uint32_t in_channels_;
-  uint32_t out_channels_;
-  IntVec ks_;
-  IntVec stride_;
-  IntVec padding_;
-  IntVec dilation_;
-  bool dilated_;
-  IntVec output_padding_;
+  /// The padding to add to the input volumes.
+  /// For a `D`-dim convolution, must be a single number or a list of `D`
+  /// numbers.
+  /// This parameter __can__ be changed after construction.
+  TORCH_ARG(ExpandingArray<D>, padding) = 0;
 
- protected:
-  IntVec makeTup(int x, int def = 0) {
-    IntVec ret;
-    if (Nd_ == 1) {
-      ret.push_back(x);
-      ret.push_back(def);
-    } else {
-      for (auto i = 0U; i < Nd_; i++)
-        ret.push_back(x);
-    }
-    return ret;
-  }
-  IntVec makeTup(IntVec x) {
-    return x;
-  }
+  /// The kernel dilation.
+  /// For a `D`-dim convolution, must be a single number or a list of `D`
+  /// numbers.
+  /// This parameter __can__ be changed after construction.
+  TORCH_ARG(ExpandingArray<D>, dilation) = 1;
+
+  /// For transpose convolutions, the padding to add to output volumes.
+  /// For a `D`-dim convolution, must be a single number or a list of `D`
+  /// numbers.
+  /// This parameter __can__ be changed after construction.
+  TORCH_ARG(ExpandingArray<D>, output_padding) = 0;
+
+  /// If true, convolutions will be transpose convolutions (a.k.a.
+  /// deconvolutions).
+  /// Changing this parameter after construction __has no effect__.
+  TORCH_ARG(bool, transposed) = false;
+
+  /// Whether to add a bias after individual applications of the kernel.
+  /// Changing this parameter after construction __has no effect__.
+  TORCH_ARG(bool, with_bias) = true;
+
+  /// The number of convolution groups.
+  /// This parameter __can__ be changed after construction.
+  TORCH_ARG(int64_t, groups) = 1;
 };
 
-class Conv1d : public Conv {
+/// Base class for all (dimension-specialized) convolution modules.
+template <size_t D, typename Derived>
+class ConvImpl : public torch::nn::Cloneable<Derived> {
  public:
-  Conv1d(uint32_t i, uint32_t o, int ks) : Conv(1, i, o, ks) {}
-  Conv1d(uint32_t i, uint32_t o, IntVec ks) : Conv(1, i, o, ks) {}
+  ConvImpl(
+      int64_t input_channels,
+      int64_t output_channels,
+      ExpandingArray<D> kernel_size)
+      : ConvImpl(ConvOptions<D>(input_channels, output_channels, kernel_size)) {
+  }
+  explicit ConvImpl(ConvOptions<D> options);
+
+  void reset() override;
+
+  /// Pretty prints the `Conv{1,2,3}d` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  ConvOptions<D> options;
+
+  /// The learned kernel (or "weight").
+  Tensor weight;
+
+  /// The learned bias. Only defined if the `with_bias` option was true.
+  Tensor bias;
 };
 
-class Conv2d : public Conv {
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Conv1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies convolution over a 1-D input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.Conv1d to learn about
+/// the exact behavior of this module.
+class TORCH_API Conv1dImpl : public ConvImpl<1, Conv1dImpl> {
  public:
-  Conv2d(uint32_t i, uint32_t o, int ks) : Conv(2, i, o, ks) {}
-  Conv2d(uint32_t i, uint32_t o, IntVec ks) : Conv(2, i, o, ks) {}
+  using ConvImpl<1, Conv1dImpl>::ConvImpl;
+  Tensor forward(const Tensor& input);
 };
 
-class Conv3d : public Conv {
+/// `ConvOptions` specialized for 1-D convolution.
+using Conv1dOptions = ConvOptions<1>;
+
+/// A `ModuleHolder` subclass for `Conv1dImpl`.
+/// See the documentation for `Conv1dImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(Conv1d);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Conv2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies convolution over a 2-D input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.Conv2d to learn about
+/// the exact behavior of this module.
+class TORCH_API Conv2dImpl : public ConvImpl<2, Conv2dImpl> {
  public:
-  Conv3d(uint32_t i, uint32_t o, int ks) : Conv(3, i, o, ks) {}
-  Conv3d(uint32_t i, uint32_t o, IntVec ks) : Conv(3, i, o, ks) {}
+  using ConvImpl<2, Conv2dImpl>::ConvImpl;
+  Tensor forward(const Tensor& input);
 };
-}} // namespace torch::nn
+
+/// `ConvOptions` specialized for 2-D convolution.
+using Conv2dOptions = ConvOptions<2>;
+
+/// A `ModuleHolder` subclass for `Conv2dImpl`.
+/// See the documentation for `Conv2dImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(Conv2d);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Conv3d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies convolution over a 3-D input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.Conv3d to learn about
+/// the exact behavior of this module.
+class TORCH_API Conv3dImpl : public ConvImpl<3, Conv3dImpl> {
+ public:
+  using ConvImpl<3, Conv3dImpl>::ConvImpl;
+  Tensor forward(const Tensor& input);
+};
+
+/// `ConvOptions` specialized for 3-D convolution.
+using Conv3dOptions = ConvOptions<3>;
+
+/// A `ModuleHolder` subclass for `Conv3dImpl`.
+/// See the documentation for `Conv3dImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(Conv3d);
+
+} // namespace nn
+} // namespace torch

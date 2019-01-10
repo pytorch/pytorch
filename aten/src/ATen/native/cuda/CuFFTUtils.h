@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ATen/ATen.h"
-#include "ATen/Config.h"
+#include <ATen/ATen.h>
+#include <ATen/Config.h>
 
 #include <string>
 #include <stdexcept>
@@ -9,8 +9,11 @@
 #include <cufft.h>
 #include <cufftXt.h>
 
-
 namespace at { namespace native {
+
+// This means that max dim is 3 + 2 = 5 with batch dimension and possible
+// complex dimension
+constexpr int max_rank = 3;
 
 static inline std::string _cudaGetErrorEnum(cufftResult error)
 {
@@ -46,8 +49,10 @@ static inline std::string _cudaGetErrorEnum(cufftResult error)
       return "CUFFT_NO_WORKSPACE";
     case CUFFT_NOT_IMPLEMENTED:
       return "CUFFT_NOT_IMPLEMENTED";
+#ifndef __HIP_PLATFORM_HCC__
     case CUFFT_LICENSE_ERROR:
       return "CUFFT_LICENSE_ERROR";
+#endif
     case CUFFT_NOT_SUPPORTED:
       return "CUFFT_NOT_SUPPORTED";
     default:
@@ -62,23 +67,8 @@ static inline void CUFFT_CHECK(cufftResult error)
   if (error != CUFFT_SUCCESS) {
     std::ostringstream ss;
     ss << "cuFFT error: " << _cudaGetErrorEnum(error);
-    throw std::runtime_error(ss.str());
+    AT_ERROR(ss.str());
   }
 }
-
-class CufftHandle {
-public:
-  explicit CufftHandle() {
-    CUFFT_CHECK(cufftCreate(&raw_plan));
-  }
-
-  const cufftHandle &get() const { return raw_plan; }
-
-  ~CufftHandle() {
-    CUFFT_CHECK(cufftDestroy(raw_plan));
-  }
-private:
-  cufftHandle raw_plan;
-};
 
 }} // at::native

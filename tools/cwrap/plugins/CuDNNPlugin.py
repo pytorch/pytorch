@@ -175,5 +175,5 @@ static PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
             methods += entry
         return self.METHODS_DECLARATION.substitute(methods=methods)
 
-    def process_full_file(self, code):
+    def process_full_file(self, code, template_path):
         return code + self.declare_methods()

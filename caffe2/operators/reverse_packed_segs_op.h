@@ -37,20 +37,19 @@ class ReversePackedSegsOp final : public Operator<Context> {
     const auto& lengths = Input(LENGTHS);
 
     CAFFE_ENFORCE(
-        data.ndim() == 3,
+        data.dim() == 3,
         "DATA should be 3-D tensor <lengths, "
         "segments, embeddings>");
-    CAFFE_ENFORCE(lengths.ndim() == 1, "LENGTH should be 1-D");
+    CAFFE_ENFORCE(lengths.dim() == 1, "LENGTH should be 1-D");
 
-    auto* output = Output(0);
-    const auto& shape = data.dims();
-    output->Resize(shape);
+    const auto shape = data.sizes();
+    auto* output = Output(0, shape, at::dtype<T>());
 
-    const auto& max_length = data.dims()[0];
-    const auto& batch_size = data.dims()[1];
-    const auto& block_size = data.dims()[2];
+    const auto max_length = data.sizes()[0];
+    const auto batch_size = data.sizes()[1];
+    const auto block_size = data.sizes()[2];
     CAFFE_ENFORCE(
-        lengths.dims()[0] == batch_size,
+        lengths.sizes()[0] == batch_size,
         "lenths size should be"
         " equal to batch size");
 
@@ -58,27 +57,27 @@ class ReversePackedSegsOp final : public Operator<Context> {
     const LengthType* lengths_ptr = lengths.template data<LengthType>();
 
     vector<LengthType> lengths_host(batch_size);
-    context_.template Copy<LengthType, Context, CPUContext>(
+    context_.template CopyToCPU<LengthType>(
         batch_size, lengths_ptr, &lengths_host[0]);
     context_.FinishDeviceComputation();
 
     T* rev_data_ptr = output->template mutable_data<T>();
-    for (TIndex i = 0; i < batch_size; i++) {
+    for (int64_t i = 0; i < batch_size; i++) {
       const auto& seg_length = lengths_host[i];
       CAFFE_ENFORCE_LE(seg_length, max_length);
-      TIndex j = 0;
+      int64_t j = 0;
       for (; j < seg_length; j++) {
         const T* data_block_ptr = data_ptr + (j * batch_size + i) * block_size;
         T* rev_data_block_ptr =
             rev_data_ptr + ((seg_length - 1 - j) * batch_size + i) * block_size;
-        context_.template Copy<T, Context, Context>(
+        context_.template CopySameDevice<T>(
             block_size, data_block_ptr, rev_data_block_ptr);
       }
       for (; j < max_length; j++) {
         const T* data_block_ptr = data_ptr + (j * batch_size + i) * block_size;
         T* rev_data_block_ptr =
             rev_data_ptr + (j * batch_size + i) * block_size;
-        context_.template Copy<T, Context, Context>(
+        context_.template CopySameDevice<T>(
             block_size, data_block_ptr, rev_data_block_ptr);
       }
     }

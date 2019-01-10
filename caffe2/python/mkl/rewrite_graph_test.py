@@ -160,7 +160,7 @@ def alexnet():
         model, drop7, "fc8", 4096, 1000, ('XavierFill', {}), ('ConstantFill', {})
     )
     relu8 = brew.relu(model, fc8, "fc8")
-    _ = brew.dropout(model, relu8, "fc8_dropout", is_test=1, ratio=0.5)
+    brew.dropout(model, relu8, "fc8_dropout", is_test=1, ratio=0.5)
     return model, [(1, 3, 224, 224)]
 
 
@@ -180,8 +180,7 @@ def complex_resnet():
     return model, [(1, 1, 224, 224)]
 
 
-@unittest.skipIf(not workspace.C.has_mkldnn,
-                 "Skipping as we do not have mkldnn.")
+@unittest.skipIf(not workspace.C.use_mkldnn, "No MKLDNN support.")
 class MKLRewriteTest(hu.HypothesisTestCase):
     @given(gen=st.sampled_from([simple_relu, simple_fc,
                                 simple_mlp, simple_cnn]))

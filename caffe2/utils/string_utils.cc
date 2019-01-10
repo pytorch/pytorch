@@ -16,6 +16,15 @@ std::vector<std::string> split(char separator, const std::string& string) {
   return pieces;
 }
 
+std::string trim(const std::string& str) {
+  size_t left = str.find_first_not_of(' ');
+  if (left == std::string::npos) {
+    return str;
+  }
+  size_t right = str.find_last_not_of(' ');
+  return str.substr(left, (right - left + 1));
+}
+
 size_t editDistance(
   const std::string& s1, const std::string& s2, size_t max_distance)
   {
@@ -104,5 +113,4 @@ int32_t editDistanceHelper(const char* s1,
 
     return current[s1_len];
   }
-
 } // namespace caffe2

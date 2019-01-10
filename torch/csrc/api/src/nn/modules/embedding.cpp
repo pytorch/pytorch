@@ -1,25 +1,37 @@
 #include <torch/nn/modules/embedding.h>
 
-namespace torch { namespace nn {
+#include <torch/types.h>
+#include <torch/utils.h>
 
-Embedding::Embedding(uint32_t num_embeddings, uint32_t embedding_dim)
-    : num_embeddings(num_embeddings), embedding_dim(embedding_dim) {}
+#include <cstddef>
+#include <ostream>
+#include <utility>
+#include <vector>
 
-variable_list Embedding::forward(variable_list input) {
-  auto x = input[0];
-  return variable_list({at::embedding(weight, x, -1, false, false)});
+namespace torch {
+namespace nn {
+
+EmbeddingOptions::EmbeddingOptions(int64_t count, int64_t dimension)
+    : count_(count), dimension_(dimension) {}
+
+EmbeddingImpl::EmbeddingImpl(EmbeddingOptions options) : options(options) {
+  reset();
 }
 
-void Embedding::reset_parameters() {
-  for (auto& p : parameters()) {
-    p.second.data().normal_(0, 1);
-  }
+void EmbeddingImpl::reset() {
+  weight = register_parameter(
+      "weight", torch::empty({options.count_, options.dimension_}));
+  NoGradGuard guard;
+  weight.normal_(0, 1);
 }
 
-void Embedding::initialize_parameters() {
-  weight = this->add(
-      Var(at::CPU(at::kFloat).empty({num_embeddings, embedding_dim})),
-      "weight");
+void EmbeddingImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Embedding(count=" << options.count_
+         << ", dimension=" << options.dimension_ << ")";
 }
 
-}} // namespace torch::nn
+Tensor EmbeddingImpl::forward(const Tensor& input) {
+  return torch::embedding(weight, /*indices=*/input);
+}
+} // namespace nn
+} // namespace torch

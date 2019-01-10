@@ -9,6 +9,7 @@
 #include "caffe2/core/operator.h"
 
 #include "Eigen/Core"
+#include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 
@@ -17,29 +18,28 @@ class SinusoidPositionEncodingOp : public Operator<Context> {
  public:
   SinusoidPositionEncodingOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        embedding_size_(OperatorBase::template GetSingleArgument<int>(
+        embedding_size_(this->template GetSingleArgument<int>(
             "embedding_size",
             100)),
-        alpha_(OperatorBase::template GetSingleArgument<float>("alpha", 10000)),
+        alpha_(this->template GetSingleArgument<float>("alpha", 10000)),
         amplitude_(
-            OperatorBase::template GetSingleArgument<float>("amplitude", 1)) {}
+            this->template GetSingleArgument<float>("amplitude", 1)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-        this, OperatorBase::Input<TensorCPU>(0));
+        this, this->template Input<Tensor>(0, CPU));
   }
 
   template <typename Index>
   bool DoRunWithType() {
     auto& positions = Input(0);
-    auto* output = Output(0);
 
-    CAFFE_ENFORCE_EQ(positions.ndim(), 2, "POSITIONS should be a 2-D tensor");
+    CAFFE_ENFORCE_EQ(positions.dim(), 2, "POSITIONS should be a 2-D tensor");
 
-    auto shape = positions.dims();
+    auto shape = positions.sizes().vec();
     shape.push_back(embedding_size_);
-    output->Resize(shape);
+    auto* output = Output(0, shape, at::dtype<float>());
 
     int M = shape[0];
     int K = shape[1];

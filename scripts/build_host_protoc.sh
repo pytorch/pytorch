@@ -49,8 +49,11 @@ fi
 
 cmake "$CAFFE2_ROOT/third_party/protobuf/cmake" ${CMAKE_ARGS[@]}
 
-if [ "$(uname)" == 'Darwin' ]; then
-  cmake --build . -- "-j$(sysctl -n hw.ncpu)" install
-else
-  cmake --build . -- "-j$(nproc)" install
+if [ -z "$MAX_JOBS" ]; then
+  if [ "$(uname)" == 'Darwin' ]; then
+    MAX_JOBS=$(sysctl -n hw.ncpu)
+  else
+    MAX_JOBS=$(nproc)
+  fi
 fi
+cmake --build . -- "-j${MAX_JOBS}" install

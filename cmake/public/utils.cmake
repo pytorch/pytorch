@@ -1,8 +1,12 @@
 ##############################################################################
 # Macro to update cached options.
 macro (caffe2_update_option variable value)
-  get_property(__help_string CACHE ${variable} PROPERTY HELPSTRING)
-  set(${variable} ${value} CACHE BOOL ${__help_string} FORCE)
+  if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
+    get_property(__help_string CACHE ${variable} PROPERTY HELPSTRING)
+    set(${variable} ${value} CACHE BOOL ${__help_string} FORCE)
+  else()
+    set(${variable} ${value})
+  endif()
 endmacro()
 
 
@@ -27,9 +31,8 @@ macro(caffe2_interface_library SRC DST)
           ${DST} INTERFACE -WHOLEARCHIVE:$<TARGET_FILE:${SRC}>)
     else()
       # Assume everything else is like gcc
-      target_link_libraries(
-          ${DST} INTERFACE
-          "-Wl,--whole-archive $<TARGET_FILE:${SRC}> -Wl,--no-whole-archive")
+      target_link_libraries(${DST} INTERFACE
+          "-Wl,--whole-archive,$<TARGET_FILE:${SRC}> -Wl,--no-whole-archive")
     endif()
     # Link all interface link libraries of the src target as well.
     # For static library, we need to explicitly depend on all the libraries
@@ -52,8 +55,8 @@ macro(caffe2_interface_library SRC DST)
         $<TARGET_PROPERTY:${SRC},LINK_LIBRARIES>)
   elseif(${__src_target_type} STREQUAL "SHARED_LIBRARY")
     if("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU")
-      target_link_libraries(
-          ${DST} INTERFACE -Wl,--no-as-needed ${SRC} -Wl,--as-needed)
+      target_link_libraries(${DST} INTERFACE
+          "-Wl,--no-as-needed,$<TARGET_FILE:${SRC}> -Wl,--as-needed")
     else()
       target_link_libraries(${DST} INTERFACE ${SRC})
     endif()
@@ -90,7 +93,10 @@ endmacro()
 # target name is given by the first argument and the rest are the source files
 # to build the target.
 function(caffe2_binary_target target_name_or_src)
-  if (${ARGN})
+  # https://cmake.org/cmake/help/latest/command/function.html
+  # Checking that ARGC is greater than # is the only way to ensure
+  # that ARGV# was passed to the function as an extra argument.
+  if (ARGC GREATER 1)
     set(__target ${target_name_or_src})
     prepend(__srcs "${CMAKE_CURRENT_SOURCE_DIR}/" "${ARGN}")
   else()
@@ -104,4 +110,112 @@ function(caffe2_binary_target target_name_or_src)
     target_link_libraries(${__target} ${Caffe2_MODULES})
   endif()
   install(TARGETS ${__target} DESTINATION bin)
+endfunction()
+
+function(caffe2_hip_binary_target target_name_or_src)
+  if (ARGC GREATER 1)
+    set(__target ${target_name_or_src})
+    prepend(__srcs "${CMAKE_CURRENT_SOURCE_DIR}/" "${ARGN}")
+  else()
+    get_filename_component(__target ${target_name_or_src} NAME_WE)
+    prepend(__srcs "${CMAKE_CURRENT_SOURCE_DIR}/" "${target_name_or_src}")
+  endif()
+
+  caffe2_binary_target(${target_name_or_src})
+
+  target_compile_options(${__target} PRIVATE ${HIP_CXX_FLAGS})
+  target_include_directories(${__target} PRIVATE ${Caffe2_HIP_INCLUDE})
+endfunction()
+
+##############################################################################
+# Multiplex between loading executables for CUDA versus HIP (AMD Software Stack).
+# Usage:
+#   torch_cuda_based_add_executable(cuda_target)
+#
+macro(torch_cuda_based_add_executable cuda_target)
+  IF (USE_ROCM)
+    hip_add_executable(${cuda_target} ${ARGN})
+  ELSEIF(USE_CUDA)
+    cuda_add_executable(${cuda_target} ${ARGN})
+  ELSE()
+
+  ENDIF()
+endmacro()
+
+
+##############################################################################
+# Multiplex between adding libraries for CUDA versus HIP (AMD Software Stack).
+# Usage:
+#   torch_cuda_based_add_library(cuda_target)
+#
+macro(torch_cuda_based_add_library cuda_target)
+  IF (USE_ROCM)
+    hip_add_library(${cuda_target} ${ARGN})
+  ELSEIF(USE_CUDA)
+    cuda_add_library(${cuda_target} ${ARGN})
+  ELSE()
+  ENDIF()
+endmacro()
+
+
+##############################################################################
+# Get the NVCC arch flags specified by TORCH_CUDA_ARCH_LIST and CUDA_ARCH_NAME.
+# Usage:
+#   torch_cuda_get_nvcc_gencode_flag(variable_to_store_flags)
+#
+macro(torch_cuda_get_nvcc_gencode_flag store_var)
+  # setting nvcc arch flags
+  if ((NOT EXISTS ${TORCH_CUDA_ARCH_LIST}) AND (DEFINED ENV{TORCH_CUDA_ARCH_LIST}))
+    message(WARNING
+        "In the future we will require one to explicitly pass "
+        "TORCH_CUDA_ARCH_LIST to cmake instead of implicitly setting it as an "
+        "env variable. This will become a FATAL_ERROR in future version of "
+        "pytorch.")
+    set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
+  endif()
+  if (EXISTS ${CUDA_ARCH_NAME})
+    message(WARNING
+        "CUDA_ARCH_NAME is no longer used. Use TORCH_CUDA_ARCH_LIST instead. "
+        "Right now, CUDA_ARCH_NAME is ${CUDA_ARCH_NAME} and "
+        "TORCH_CUDA_ARCH_LIST is ${TORCH_CUDA_ARCH_LIST}.")
+    set(TORCH_CUDA_ARCH_LIST TORCH_CUDA_ARCH_LIST ${CUDA_ARCH_NAME})
+  endif()
+
+  # Invoke cuda_select_nvcc_arch_flags from proper cmake FindCUDA.
+  cuda_select_nvcc_arch_flags(${store_var} ${TORCH_CUDA_ARCH_LIST})
+endmacro()
+
+
+##############################################################################
+# Add standard compile options.
+# Usage:
+#   torch_compile_options(lib_name)
+function(torch_compile_options libname)
+  target_compile_options(${libname}
+    PRIVATE
+    -Wall
+    -Wextra
+    -fexceptions
+    -Wno-missing-field-initializers
+    -Wno-strict-overflow
+    -Wno-type-limits
+    -Wno-unused-parameter
+    -Wno-unknown-warning-option
+    -Wno-unknown-pragmas)
+  if ($ENV{WERROR})
+    target_compile_options(${libname} PRIVATE -Werror)
+  endif()
+endfunction()
+
+
+##############################################################################
+# Set standard target properties.
+# Usage:
+#   torch_set_target_props(lib_name)
+function(torch_set_target_props libname)
+  if(MSVC AND AT_MKL_MT)
+    set_target_properties(${libname} PROPERTIES LINK_FLAGS_RELEASE "/NODEFAULTLIB:${VCOMP_LIB}")
+    set_target_properties(${libname} PROPERTIES LINK_FLAGS_DEBUG "/NODEFAULTLIB:${VCOMP_LIB}")
+    set_target_properties(${libname} PROPERTIES STATIC_LIBRARY_FLAGS "/NODEFAULTLIB:${VCOMP_LIB}")
+  endif()
 endfunction()

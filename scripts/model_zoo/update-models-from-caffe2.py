@@ -218,10 +218,11 @@ model_mapping = {
     'inception_v1': 'inception_v1',
     'inception_v2': 'inception_v2',
     'resnet50': 'resnet50',
+    'shufflenet': 'shufflenet',
     'squeezenet': 'squeezenet_old',
     #'vgg16': 'vgg16',
     'vgg19': 'vgg19',
-    'zfnet': 'zfnet',
+    'zfnet512': 'zfnet512',
 }
 
 

@@ -29,10 +29,10 @@ class PSRoIPoolOp final : public Operator<Context> {
  public:
   PSRoIPoolOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        spatial_scale_(OperatorBase::GetSingleArgument<float>(
+        spatial_scale_(this->template GetSingleArgument<float>(
               "spatial_scale", 1.)),
-        group_size_(OperatorBase::GetSingleArgument<int>("group_size", 1)),
-        output_dim_(OperatorBase::GetSingleArgument<int>("output_dim", 1)) {
+        group_size_(this->template GetSingleArgument<int>("group_size", 1)),
+        output_dim_(this->template GetSingleArgument<int>("output_dim", 1)) {
     DCHECK_GT(spatial_scale_, 0);
     DCHECK_GT(group_size_, 0);
     pooled_height_ = group_size_;
@@ -61,10 +61,10 @@ class PSRoIPoolGradientOp final : public Operator<Context> {
  public:
   PSRoIPoolGradientOp(const OperatorDef& def, Workspace* ws)
       : Operator<Context>(def, ws),
-        spatial_scale_(OperatorBase::GetSingleArgument<float>(
+        spatial_scale_(this->template GetSingleArgument<float>(
               "spatial_scale", 1.)),
-        group_size_(OperatorBase::GetSingleArgument<int>("group_size", 1)),
-        output_dim_(OperatorBase::GetSingleArgument<int>("output_dim", 1)) {
+        group_size_(this->template GetSingleArgument<int>("group_size", 1)),
+        output_dim_(this->template GetSingleArgument<int>("output_dim", 1)) {
     DCHECK_GT(spatial_scale_, 0);
     DCHECK_GT(group_size_, 0);
     pooled_height_ = group_size_;

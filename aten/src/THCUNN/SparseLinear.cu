@@ -1,7 +1,7 @@
-#include "THCUNN.h"
-#include "THCHalf.h"
-#include "THCHalfAutoNumerics.cuh"
-#include "THCTensor.hpp"
+#include <THCUNN/THCUNN.h>
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCTensor.hpp>
 
 #include <cusparse.h>
 
@@ -16,7 +16,6 @@ static void init_cusparse() {
   }
 }
 
-#ifdef CUDA_HALF_TENSOR
 void THNN_CudaHalfSparseLinear_updateOutput(
           THCState *state,
           THCudaHalfTensor *input,
@@ -79,9 +78,8 @@ void THNN_CudaHalfSparseLinear_updateParameters(
           float learningRate) {
   THError("THCudaHalfTensor not supported with SparseLinear");
 }
-#endif
 
-#include "generic/SparseLinear.cu"
-#include "THCGenerateFloatType.h"
-#include "generic/SparseLinear.cu"
-#include "THCGenerateDoubleType.h"
+#include <THCUNN/generic/SparseLinear.cu>
+#include <THC/THCGenerateFloatType.h>
+#include <THCUNN/generic/SparseLinear.cu>
+#include <THC/THCGenerateDoubleType.h>

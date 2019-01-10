@@ -1,25 +1,21 @@
-#include "torch/csrc/python_headers.h"
-#include <stdarg.h>
+#include <torch/csrc/python_headers.h>
+#include <cstdarg>
 #include <string>
 #include <vector>
 #include <sstream>
 #include <algorithm>
 #include <unordered_map>
-#include "THP.h"
-#include "torch/csrc/utils/python_strings.h"
-#include "torch/csrc/utils/invalid_arguments.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/DynamicTypes.h"
+#include <torch/csrc/THP.h>
+#include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/invalid_arguments.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/DynamicTypes.h>
 
-#include "generic/utils.cpp"
+#include <torch/csrc/generic/utils.cpp>
 #include <TH/THGenerateAllTypes.h>
 
-#include "generic/utils.cpp"
+#include <torch/csrc/generic/utils.cpp>
 #include <TH/THGenerateHalfType.h>
-
-#ifdef WITH_CUDA
-#include "torch/csrc/cuda/THCP.h"
-#endif
 
 int THPUtils_getCallable(PyObject *arg, PyObject **result) {
   if (!PyCallable_Check(arg))
@@ -141,10 +137,10 @@ void THPUtils_setError(const char *format, ...)
 void THPUtils_addPyMethodDefs(std::vector<PyMethodDef>& vector, PyMethodDef* methods)
 {
   if (!vector.empty()) {
-    // remove NULL terminator
+    // remove nullptr terminator
     vector.pop_back();
   }
-  while (1) {
+  while (true) {
     vector.push_back(*methods);
     if (!methods->ml_name) {
       break;
@@ -187,7 +183,7 @@ void THPUtils_invalidArguments(PyObject *given_args, PyObject *given_kwargs,
   va_list option_list;
   va_start(option_list, num_options);
   for (size_t i = 0; i < num_options; i++)
-    option_strings.push_back(va_arg(option_list, const char*));
+    option_strings.emplace_back(va_arg(option_list, const char*));
   va_end(option_list);
 
   PyErr_SetString(PyExc_TypeError, torch::format_invalid_args(
@@ -232,29 +228,17 @@ bool maybeThrowBackCompatKeepdimWarn(char *func) {
   return true;
 }
 
-#ifdef WITH_CUDA
-std::vector <THCStream*> THPUtils_PySequence_to_THCStreamList(PyObject *obj) {
-  if (!PySequence_Check(obj)) {
-    throw std::runtime_error("Expected a sequence in THPUtils_PySequence_to_THCStreamList");
+template<>
+void THPPointer<THTensor>::free() {
+  if (ptr) {
+    THTensor_free(LIBRARY_STATE ptr);
   }
-  THPObjectPtr seq = THPObjectPtr(PySequence_Fast(obj, NULL));
-  if (seq.get() == NULL) {
-    throw std::runtime_error("expected PySequence, but got " + std::string(THPUtils_typename(obj)));
-  }
-
-  std::vector<THCStream*> streams;
-  Py_ssize_t length = PySequence_Fast_GET_SIZE(seq.get());
-  for (Py_ssize_t i = 0; i < length; i++) {
-    PyObject *stream = PySequence_Fast_GET_ITEM(seq.get(), i);
-
-    if (PyObject_IsInstance(stream, THCPStreamClass)) {
-      streams.push_back( ((THCPStream *)stream)->cdata);
-    } else if (stream == Py_None) {
-      streams.push_back(NULL);
-    } else {
-      std::runtime_error("Unknown data type found in stream list. Need THCStream or None");
-    }
-  }
-  return streams;
 }
-#endif
+
+template<>
+void THPPointer<THPStorage>::free() {
+  if (ptr)
+    Py_DECREF(ptr);
+}
+
+template class THPPointer<THPStorage>;

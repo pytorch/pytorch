@@ -3,7 +3,7 @@
 #include "caffe2/core/flags.h"
 #include "caffe2/core/workspace.h"
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_force_shared_col_buffer,
     false,
     "Always use the shared col buffer");
@@ -19,16 +19,16 @@ void createSharedBuffer<CPUContext>(Workspace* ws) {
 }
 
 template <>
-void runWithSharedBuffer(
+void runWithSharedBuffer<CPUContext>(
     Workspace* ws,
-    std::function<void(Tensor<CPUContext>* buffer)> f) {
+    std::function<void(Tensor* buffer)> f) {
   auto* mutexBlob = ws->GetBlob("__CAFFE2_SHARED_CONV_BUFFER_CPU_MUTEX__");
   CAFFE_ENFORCE(mutexBlob, "Must call createSharedBuffer() first");
 
   auto* mutexPtr = mutexBlob->GetMutable<std::unique_ptr<std::mutex>>();
   std::lock_guard<std::mutex> g(**mutexPtr);
-  auto* buffer =
-      ws->GetBlob("__CAFFE2_SHARED_CONV_BUFFER_CPU__")->GetMutable<TensorCPU>();
+  auto* buffer = BlobGetMutableTensor(
+      ws->GetBlob("__CAFFE2_SHARED_CONV_BUFFER_CPU__"), CPU);
   f(buffer);
 }
 }

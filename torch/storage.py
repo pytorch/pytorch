@@ -1,3 +1,5 @@
+import io
+
 import torch
 from ._utils import _type, _cuda
 
@@ -28,14 +30,18 @@ class _StorageBase(object):
         return new_storage
 
     def __reduce__(self):
-        return type(self), (self.tolist(),)
+        b = io.BytesIO()
+        torch.save(self, b)
+        return (_load_from_bytes, (b.getvalue(),))
 
     def __sizeof__(self):
         return super(_StorageBase, self).__sizeof__() + self.element_size() * self.size()
 
     def clone(self):
         """Returns a copy of this storage"""
-        return type(self)(self.size()).copy_(self)
+        device = self.get_device() if self.is_cuda else -1
+        with torch.cuda.device(device):
+            return type(self)(self.size()).copy_(self)
 
     def tolist(self):
         """Returns a list containing the elements of this storage"""
@@ -114,6 +120,10 @@ class _StorageBase(object):
             return cls._new_using_filename(size)
         else:
             return cls._new_using_fd(size)
+
+
+def _load_from_bytes(b):
+    return torch.load(io.BytesIO(b))
 
 
 _StorageBase.type = _type

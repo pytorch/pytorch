@@ -33,13 +33,13 @@ class CWrapPlugin(object):
 
         Template('PyBool_Check($arg)')
 
-        Note that the name of the identifier that will be subsituted must be
+        Note that the name of the identifier that will be substituted must be
         $arg.
 
         Args:
             arg: a Python object with a 'type' field representing the type
             to generate a check string for.
-            option: dictionary containing the information for this specific
+            option: a dictionary containing the information for this specific
             option.
 
         Returns:
@@ -186,7 +186,7 @@ class CWrapPlugin(object):
         """
         pass
 
-    def process_full_file(self, code):
+    def process_full_file(self, code, template_path):
         """Used to modify the code for the entire output file.
 
         The last thing any plugin can do. Code contains the results of wrapping
@@ -432,4 +432,3 @@ from .GILRelease import GILRelease
 from .AutoGPU import AutoGPU
 from .CuDNNPlugin import CuDNNPlugin
 from .WrapDim import WrapDim
-from .Broadcast import Broadcast
