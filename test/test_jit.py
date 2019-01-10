@@ -2651,11 +2651,13 @@ class TestBatched(TestCase):
                          w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c, w_hs, b_s, iter_num_batch, idx_batch)
         self.assertEqual(ys, ybs.examples())
 
+
 def execWrapper(code, glob, loc):
     if PY2:
         exec(code) in glob, loc
     else:
         exec(code, glob, loc)
+
 
 class TestScript(JitTestCase):
     @contextmanager
