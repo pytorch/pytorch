@@ -2337,6 +2337,7 @@ class TestBatched(TestCase):
         res_batch = batch_sum(batch)
         res = [xs[j].sum().unsqueeze(0) for j in range(4)]
         self.assertEqual(res, res_batch.examples())
+        self.assertEqual(res_batch.get_mask().device, batch.get_mask().device)
 
     def test_if_else(self):
         def single_if(a, b):
