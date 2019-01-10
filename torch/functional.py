@@ -146,14 +146,9 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     nBatch, sz, _ = LU_data.size()
 
     if unpack_data:
-        I_U = torch.triu(torch.ones(sz, sz)).type_as(LU_data).byte().unsqueeze(0).expand(nBatch, sz, sz)
-        I_L = 1 - I_U
-        L = LU_data.new(LU_data.size()).zero_()
-        U = LU_data.new(LU_data.size()).zero_()
-        I_diag = torch.eye(sz).type_as(LU_data).byte().unsqueeze(0).expand(nBatch, sz, sz)
-        L[I_diag] = 1.0
-        L[I_L] = LU_data[I_L]
-        U[I_U] = LU_data[I_U]
+        U = LU_data.triu()
+        L = LU_data.tril()
+        L.diagonal(dim1=-2, dim2=-1).fill_(1)
     else:
         L = U = None
 
