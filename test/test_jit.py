@@ -9371,7 +9371,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 out = self.conv2d(out)
                 return out
 
-        self.checkTrace(TransformerNet(), (torch.rand(5, 3, 64, 64),), export_import=check_export_import)
+        self.checkTrace(TransformerNet(), (torch.rand(5, 3, 16, 16),), export_import=check_export_import)
 
     def test_neural_style(self):
         self._test_neural_style(self, device='cpu')
@@ -9523,7 +9523,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
             d_embed = 100
             d_proj = 300
             dp_ratio = 0.0  # For deterministic testing TODO: change by fixing seed in checkTrace?
-            d_hidden = 300
+            d_hidden = 30
             birnn = True
             d_out = 300
             fix_emb = True
@@ -9531,8 +9531,8 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
             n_layers = 2
             n_cells = 4  # 2 * n_layers because birnn = True
 
-        premise = torch.LongTensor(48, 128).random_(0, 100).to(device)
-        hypothesis = torch.LongTensor(24, 128).random_(0, 100).to(device)
+        premise = torch.LongTensor(48, 64).random_(0, 100).to(device)
+        hypothesis = torch.LongTensor(24, 64).random_(0, 100).to(device)
 
         if quantized:
             snli = SNLIClassifier(Config()).cpu()
@@ -9584,7 +9584,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 return x
 
         net = Net(upscale_factor=4).to(device)
-        self.checkTrace(net, (torch.rand(5, 1, 64, 64, device=device),),
+        self.checkTrace(net, (torch.rand(5, 1, 32, 32, device=device),),
                         export_import=check_export_import)
 
     @skipIfRocm
