@@ -18,16 +18,17 @@ static PyObject * THCPEvent_pynew(
   int current_device;
   THCudaCheck(cudaGetDevice(&current_device));
 
-  int enable_timing = false;
-  int blocking = false;
-  int interprocess = false;
-  const char * _handle = nullptr;
-  int _handle_size = 0;
+  unsigned char enable_timing = 0;
+  unsigned char blocking = 0;
+  unsigned char interprocess = 0;
+  const char * handle_bytes = nullptr;
+  int handle_size = 0;
 
+  // cannot use bool 'p' and bytearray 'Y' as they are not available in Python 2
   static char *kwlist[] =
     {"enable_timing", "blocking", "interprocess", "_handle", nullptr};
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|ppps#", kwlist,
-      &enable_timing, &blocking, &interprocess, &_handle, &_handle_size)) {
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|bbbs#", kwlist,
+      &enable_timing, &blocking, &interprocess, &handle_bytes, &handle_size)) {
     return nullptr;
   }
 
@@ -36,22 +37,22 @@ static PyObject * THCPEvent_pynew(
     return nullptr;
   }
 
-  unsigned int flags =
-    (blocking ? cudaEventBlockingSync : cudaEventDefault) |
-    (enable_timing ? cudaEventDefault : cudaEventDisableTiming) |
-    (interprocess ? cudaEventInterprocess : cudaEventDefault);
-
   THCPEvent* self = (THCPEvent *)ptr.get();
-  if (_handle) {
-    AT_CHECK(sizeof(cudaIpcEventHandle_t) == _handle_size,
-      "Expect cudaIpcEventHandle_t size ", sizeof(cudaIpcEventHandle_t),
-      ", but got ", _handle_size);
-    // no need to delete the buffer for handle_ as it is automatically managed
+  if (handle_bytes) {
+    AT_CHECK(handle_size == sizeof(cudaIpcEventHandle_t),
+      "cudaIpcEventHandle_t expects byte array of size ",
+      sizeof(cudaIpcEventHandle_t), ", but got ", handle_size);
+    // no need to release the handle byte array as it is automatically managed
     // by the corresponding THCPEvent python object.
     // see https://docs.python.org/3/c-api/arg.html#strings-and-buffers
     new (&self->cuda_event) at::cuda::CUDAEvent(
-      * reinterpret_cast<const cudaIpcEventHandle_t*>(_handle));
+      (const cudaIpcEventHandle_t *) handle_bytes);
   } else {
+    unsigned int flags =
+      (blocking ? cudaEventBlockingSync : cudaEventDefault) |
+      (enable_timing ? cudaEventDefault : cudaEventDisableTiming) |
+      (interprocess ? cudaEventInterprocess : cudaEventDefault);
+
     new (&self->cuda_event) at::cuda::CUDAEvent(flags);
   }
 
@@ -86,7 +87,7 @@ static PyObject * THCPEvent_wait(THCPEvent *self, THCPStream *stream) {
 
 static PyObject * THCPEvent_query(THCPEvent *self) {
   HANDLE_TH_ERRORS
-  return PyBool_FromLong(self->cuda_event.happened());
+  return PyBool_FromLong(self->cuda_event.query());
   END_HANDLE_TH_ERRORS
 }
 
@@ -103,11 +104,11 @@ static PyObject * THCPEvent_synchronize(THCPEvent *self) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THCPEvent_ipc_handle(THCPEvent *self, PyObject *handle) {
+static PyObject * THCPEvent_ipc_handle(THCPEvent *self) {
   HANDLE_TH_ERRORS
-  self->cuda_event.ipc_handle(
-    reinterpret_cast<cudaIpcEventHandle_t *>(PyLong_AsVoidPtr(handle)));
-  Py_RETURN_NONE;
+  cudaIpcEventHandle_t handle;
+  self->cuda_event.ipc_handle(&handle);
+  return PyBytes_FromStringAndSize((const char *)&handle, sizeof(handle));
   END_HANDLE_TH_ERRORS
 }
 
@@ -123,7 +124,7 @@ static PyMethodDef THCPEvent_methods[] = {
   {(char*)"elapsed_time", (PyCFunction)THCPEvent_elapsed_time, METH_O, nullptr},
   {(char*)"synchronize",
     (PyCFunction)THCPEvent_synchronize, METH_NOARGS, nullptr},
-  {(char*)"ipc_handle", (PyCFunction)THCPEvent_ipc_handle, METH_O, nullptr},
+  {(char*)"ipc_handle", (PyCFunction)THCPEvent_ipc_handle, METH_NOARGS, nullptr},
   {nullptr}
 };
 

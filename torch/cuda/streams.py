@@ -1,8 +1,5 @@
 import ctypes
 import torch
-from . import cudart, check_error, cudaStatus
-from ._utils import _get_device_index
-from torch._C import _add_docstr
 
 
 class Stream(torch._C._CudaStreamBase):
@@ -105,11 +102,6 @@ class Stream(torch._C._CudaStreamBase):
                 .format(self.device, self.cuda_stream))
 
 
-class EventHandle(ctypes.Structure):
-    IPC_HANDLE_SIZE = 64
-    _fields_ = [('reserved', ctypes.c_char * IPC_HANDLE_SIZE)]
-
-
 class Event(torch._C._CudaEventBase):
     r"""Wrapper around CUDA event.
 
@@ -140,15 +132,18 @@ class Event(torch._C._CudaEventBase):
         super(Event, self).wait(stream)
 
     def query(self):
-        r"""Checks if the event has been recorded.
+        r"""Checks if all work currently captured by event has completed.
 
         Returns:
-            A boolean indicating if the event has been recorded.
+            A boolean indicating if all work currently captured by event has
+            completed.
         """
         return super(Event, self).query()
 
     def elapsed_time(self, end_event):
-        r"""Returns the time elapsed in milliseconds before the event was recorded."""
+        r"""Returns the time elapsed in milliseconds before the event was
+        recorded.
+        """
         return super(Event, self).elapsed_time(end_event)
 
     def synchronize(self):
@@ -157,9 +152,7 @@ class Event(torch._C._CudaEventBase):
 
     def ipc_handle(self):
         r"""Returns an IPC handle of this event."""
-        handle = EventHandle()
-        return super(Event, self).ipc_handle(ctypes.byref(handle))
-        return handle
+        return super(Event, self).ipc_handle()
 
     @property
     def _as_parameter_(self):

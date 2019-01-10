@@ -17,10 +17,11 @@ namespace at { namespace cuda {
 /*
 * CUDAEvents are movable not copyable wrappers around CUDA's events.
 *
-* CUDAEvents are constructed lazily when recorded on streams. The events
-* have a device, and this device is acquired from the first recording stream.
-* Later streams that record to the event must share this device, but streams
-* on any device can wait on the event.
+* CUDAEvents are constructed lazily when recorded unless it is reconstructed
+* from a cudaIpcEventHandle_t. The events have a device, and this device is
+* acquired from the first recording stream or the stream where it is
+* reconstructed from a handle. Later streams that record to the event must share
+* this device, but streams on any device can wait on the event.
 */
 struct AT_CUDA_API CUDAEvent {
   // Constants
@@ -30,15 +31,19 @@ struct AT_CUDA_API CUDAEvent {
   CUDAEvent(unsigned int flags = DEFAULT_FLAGS)
   : flags_{flags} { }
 
-  CUDAEvent(const cudaIpcEventHandle_t& handle)
-  : CUDAEvent(handle, getCurrentCUDAStream()) { }
+  CUDAEvent(const cudaIpcEventHandle_t* handle)
+  : CUDAEvent(getCurrentCUDAStream(), handle) { }
 
-  CUDAEvent(const cudaIpcEventHandle_t& handle, const CUDAStream& stream) {
-    CUDAGuard guard(static_cast<int16_t>(stream.device_index()));
+  CUDAEvent(const CUDAStream& stream, const cudaIpcEventHandle_t* handle) {
+    #ifndef __HIP_PLATFORM_HCC__
+      CUDAGuard guard(static_cast<int16_t>(stream.device_index()));
 
-    device_index_ = stream.device_index();
-    cudaIpcOpenEventHandle(&event_, handle);
-    is_created_ = true;
+      device_index_ = stream.device_index();
+      AT_CUDA_CHECK(cudaIpcOpenEventHandle(&event_, *handle));
+      is_created_ = true;
+    #else
+      AT_ERROR("cuIpcOpenEventHandle with HIP is not supported");
+    #endif
   }
 
   // Note: event destruction done on creating device to avoid creating a
@@ -73,14 +78,24 @@ struct AT_CUDA_API CUDAEvent {
   cudaEvent_t event() const { return event_; }
 
   // Note: cudaEventQuery can be safely called from any device
+  bool query() const {
+    if (!is_created_) {
+      return true;
+    }
+
+    cudaError_t err = cudaEventQuery(event_);
+    if (err == cudaSuccess) {
+      return true;
+    } else if (err != cudaErrorNotReady) {
+      C10_CUDA_CHECK(err);
+    }
+
+    return false;
+  }
+
   bool happened() const {
     if (was_recorded_) {
-      cudaError_t err = cudaEventQuery(event_);
-      if (err == cudaSuccess) {
-        return true;
-      } else if (err != cudaErrorNotReady) {
-        C10_CUDA_CHECK(err);
-      }
+      return query();
     }
 
     return false;
@@ -119,8 +134,7 @@ struct AT_CUDA_API CUDAEvent {
 
   float elapsed_time(const CUDAEvent& other) const {
     float time_ms = 0;
-    // raise cudaErrorNotReady as well, which could happen if either event is
-    // recorded but not yet completed
+    // raise cudaErrorNotReady if either event is recorded but not yet completed
     AT_CUDA_CHECK(cudaEventElapsedTime(&time_ms, event_, other.event_));
     return time_ms;
   }
@@ -131,10 +145,15 @@ struct AT_CUDA_API CUDAEvent {
     }
   }
 
-  void ipc_handle(cudaIpcEventHandle_t * handle) const {
-    if (is_created_) {
+  void ipc_handle(cudaIpcEventHandle_t * handle) {
+    #ifndef __HIP_PLATFORM_HCC__
+      AT_CHECK(is_created_,
+        "Events must be recorded before creating IPC handles.");
+
       AT_CUDA_CHECK(cudaIpcGetEventHandle(handle, event_));
-    }
+    #else
+      AT_ERROR("cuIpcGetEventHandle with HIP is not supported");
+    #endif
   }
 
 private:
