@@ -23,10 +23,10 @@ void SGD::step() {
       continue;
     }
 
-    auto update = options.learning_rate_ * p.grad();
+    auto update = p.grad();
 
     if (options.weight_decay_ > 0) {
-      update += options.learning_rate_ * options.weight_decay_ * p;
+      update += options.weight_decay_ * p;
     }
 
     if (options.momentum_ != 0) {
@@ -43,7 +43,7 @@ void SGD::step() {
     }
 
     NoGradGuard guard;
-    p.add_(-update);
+    p.add_(-options.learning_rate_ * update);
   }
   iteration_ += 1;
 }
