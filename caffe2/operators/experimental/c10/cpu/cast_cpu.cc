@@ -1,6 +1,7 @@
 #include <c10/core/dispatch/KernelRegistration.h>
 #include "caffe2/operators/experimental/c10/schemas/cast.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/core/tensor.h"
 
 using caffe2::CPUContext;
 using caffe2::Tensor;
@@ -10,10 +11,10 @@ namespace caffe2 {
 namespace {
 
 template <typename DstType, typename SrcType>
-void do_cast_(const Tensor& input, Tensor* output) {
-  output->ResizeLike(input);
+void do_cast_(const Tensor& input, const Tensor& output) {
+  output.ResizeLike(input);
   const auto* data = input.template data<SrcType>();
-  auto* out = output->template mutable_data<DstType>();
+  auto* out = output.template mutable_data<DstType>();
   auto N = input.numel();
   for (int64_t i = 0; i < N; ++i) {
     out[i] = static_cast<DstType>(data[i]);
@@ -22,9 +23,12 @@ void do_cast_(const Tensor& input, Tensor* output) {
 
 template <class SrcType>
 void cast_op_cpu_impl(
-    const Tensor& input,
-    Tensor* output,
+    const C10Tensor& input_,
+    const C10Tensor& output_,
     TensorProto_DataType to) {
+  Tensor input(input_);
+  Tensor output(output_);
+
   switch (to) {
     case caffe2::TensorProto_DataType_FLOAT:
       do_cast_<float, SrcType>(input, output);

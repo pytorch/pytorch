@@ -311,7 +311,6 @@ elif opts.fused:
     filename = "embedding_lookup_fused_8bit_rowwise_avx2.cc"
 else:
     filename = "embedding_lookup_avx2.cc"
-fout = open(filename, "w")
 
 options = [
     ["int32_t", "int32_t", "float", "float", "float", "float"],
@@ -422,10 +421,10 @@ for o in options:
 
 code.append("} // namespace caffe2")
 
-for c in code:
-    # print(c, file = fout)
-    fout.write(c + "\n")
-fout.close()
+with open(filename, "w") as fout:
+    for c in code:
+        # print(c, file = fout)
+        fout.write(c + "\n")
 
 
 print("Created " + filename)
