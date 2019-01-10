@@ -1,6 +1,6 @@
 #include "caffe2/core/common.h"
 
-#if CAFFE2_MOBILE && defined(CAFFE2_USE_MPSCNN_TEST)
+#if C10_MOBILE && defined(CAFFE2_USE_MPSCNN_TEST)
 
 #include "mpscnn_context.h"
 #include "mpscnn_graph_mask.h"

@@ -108,7 +108,7 @@ class Stream(torch._C._CudaStreamBase):
 
     def __eq__(self, o):
         if isinstance(o, Stream):
-            return o.device == self.device and o.cuda_stream == self.cuda_stream
+            return super(Stream, self).__eq__(o)
         return False
 
     def __hash__(self):
