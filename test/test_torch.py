@@ -2238,20 +2238,33 @@ class _TestTorchMixin(object):
             actual)
 
         # test against numpy.histogram()
-        x = torch.tensor([1, 2, 1], dtype=torch.float, device=device)
-        xn = x.cpu().numpy()
-        actual = torch.histc(x, bins=4, min=0, max=3)
-        expected = np.histogram(xn, bins=4, range=(0, 3))[0]
-        self.assertEqual(expected.shape, actual.shape)
-        self.assertTrue(np.allclose(expected, actual.cpu().numpy()))
-        # test against numpy.histogram() with large input
-        input_size = (5000,)
-        x = torch.randn(input_size, dtype=torch.float, device=device)
-        xn = x.cpu().numpy()
-        actual = torch.histc(x, bins=100)
-        expected = np.histogram(xn, bins=100)[0]
-        self.assertEqual(expected.shape, actual.shape)
-        self.assertTrue(np.allclose(expected, actual.cpu().numpy()))
+        def test_against_np(tensor, bins=100, min=0, max=0):
+            if min == 0 and max == 0:
+                min = tensor.min().item()
+                max = tensor.max().item()
+            nparr = tensor.cpu().numpy()
+            actual = torch.histc(tensor, bins=bins, min=min, max=max)
+            expected = torch.from_numpy(np.histogram(nparr, bins=bins, range=(min, max))[0])
+            self.assertEqual(actual.cpu(), expected)
+
+        if TEST_NUMPY:
+            test_against_np(torch.tensor([1., 2, 1], device=device))
+            test_against_np(torch.randn(5000, device=device))
+
+            # Test bins arg
+            test_against_np(torch.randn(301, device=device), bins=10)
+
+            # Test truncated range
+            test_against_np(torch.randn(201, device=device), min=0.1, max=1)
+
+            noncontig = torch.randn(100, 3, device=device)[:, 2]
+            test_against_np(noncontig)
+
+            multidim = torch.randn(3, 5, 7, 2, device=device)
+            test_against_np(multidim)
+
+            expanded = torch.randn(1, 5, 1, 2, device=device).expand(3, 5, 7, 2)
+            test_against_np(expanded)
 
     def test_histc_cpu(self):
         self._test_histc(self, 'cpu')

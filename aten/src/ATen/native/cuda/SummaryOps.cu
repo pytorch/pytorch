@@ -135,7 +135,7 @@ __global__ void kernelHistogram1D(
 }
 
 #define HANDLE_CASE(MEMORY_TYPE, WEIGHTS_OP, SHARED_MEM)                   \
-  kernelHistogram1D<output_t, input_t, IndexType, 1, 2, 1, MEMORY_TYPE>    \
+  kernelHistogram1D<output_t, input_t, IndexType, 1, 2, -1, MEMORY_TYPE>    \
       <<<grid,                                                             \
          block,                                                            \
          SHARED_MEM,                                                       \
@@ -198,7 +198,7 @@ bool CUDA_tensor_histogram(
   if (HasWeights) {
     checkBackend("CUDA_tensor_histogram", {c}, Backend::CUDA);
   }
-  auto totalElements = b.size(0);
+  auto totalElements = b.numel();
 
   const dim3 block = getApplyBlock();
   dim3 grid;
