@@ -847,21 +847,6 @@ THC_API void THNN_(SpatialMaxUnpooling_updateGradInput)(
                   THCIndexTensor *indices,
                   int owidth, int oheight);
 
-THC_API void THNN_(SpatialReflectionPadding_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  int padL, int padR,
-                  int padT, int padB);
-
-THC_API void THNN_(SpatialReflectionPadding_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  int padL, int padR,
-                  int padT, int padB);
-
 THC_API void THNN_(SpatialSubSampling_updateOutput)(
                   THCState *state,
                   THCTensor *input,
