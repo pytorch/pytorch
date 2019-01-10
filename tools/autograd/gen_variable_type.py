@@ -586,9 +586,16 @@ def emit_body(declaration):
         combined = nested_dict(env, declaration)
         extra_wrapping_stmts = []
         if strategy == 'use_derived':
+            # We only care about adding `at::AutoNonVariableTypeMode` guard for `baseType` dispatch
+            # (which corresponds to 'use_derived' strategy). The purpose of this guard is to make sure
+            # the baseType operations still dispatch to non-Variable type, even if the arguments are
+            # now Variables.
             code_block = ''
             base_type_call = CALL_VIA_DERIVED.substitute(combined)
             if not modifies_arguments and not returns_void:
+                # If the `baseType` operation has return values, we use the `tmp` variable to hold the
+                # values temporarily and pass the values to the return variables outside of the
+                # `at::AutoNonVariableTypeMode` guard block.
                 code_block += "decltype({}) tmp;\n".format(base_type_call)
                 code_block += '{\n'
                 code_block += '  ' + 'at::AutoNonVariableTypeMode non_var_type_mode(true);' + '\n'
