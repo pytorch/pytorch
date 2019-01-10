@@ -9172,6 +9172,39 @@ a")
 
         self.checkScript(fn, ([torch.ones(2) + 2, torch.ones(2)],))
 
+    def test_aliased_parameters(self):
+        @torch.jit.script
+        def list_op(l):
+            # type: (List[Tensor]) -> Tensor
+            return l[0]
+
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__()
+                self.p1 = nn.Parameter(torch.ones(2, 2))
+                self.p2 = nn.Parameter(torch.ones(2, 2))
+                self.p3 = nn.Parameter(torch.ones(2, 2))
+                self.p4 = nn.Parameter(torch.ones(2, 2))
+
+            @property
+            def one(self):
+                return self.p1
+
+            @property
+            def some(self):
+                return [self.p1, self.p3]
+
+            @property
+            def all_params(self):
+                return [p for p in self._parameters.values()]
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return x + self.one + self.some[0] + list_op(self.all_params)
+
+        m = M()
+        self.assertEqual(m(torch.ones(2, 2)), torch.ones(2, 2) + 3)
+
 
 class MnistNet(nn.Module):
     def __init__(self):

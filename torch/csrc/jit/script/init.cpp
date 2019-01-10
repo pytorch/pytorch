@@ -218,6 +218,15 @@ struct ModuleValue : public SugaredValue {
     return "module";
   }
 
+  at::Tensor* reverse_parameter_lookup(at::Tensor tensor) {
+    for (auto& item : module->get_parameters().items()) {
+      if (item->slot()->getIntrusivePtr() == tensor.getIntrusivePtr()) {
+        return item->slot();
+      }
+    }
+    return nullptr;
+  }
+
   // select an attribute on it, e.g. `this.field`
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
@@ -251,12 +260,37 @@ struct ModuleValue : public SugaredValue {
     // This can also be a call to a non-script module, or a plain
     // python method. If so return this as a python value.
     py::object py_module = py::cast(module);
+
     if (py::object attr = py::getattr(py_module, field.c_str(), py::none())) {
       if (py::isinstance<py::function>(attr) ||
           py::isinstance(attr, py::module::import("torch.nn").attr("Module")) ||
           py_module.attr("_constants_set").contains(field.c_str())) {
         return toSugaredValue(attr, m, loc, true);
       } else {
+        if (py::isinstance(attr, py::module::import("torch").attr("Tensor"))) {
+          // Check if it's a parameter
+          if (auto slot = reverse_parameter_lookup(py::cast<at::Tensor>(attr))) {
+            return toSimple(m.get_or_add_parameter(slot));
+          }
+        } else if (py::isinstance<py::list>(attr)) {
+          // Check if all the elements are parameters, if so, make them into a list and return it
+          std::vector<at::Tensor*> slots;
+          for (auto item : py::cast<py::list>(attr)) {
+            auto slot = reverse_parameter_lookup(py::cast<at::Tensor>(item));
+            if (!slot) {
+              break;
+            }
+            slots.push_back(slot);
+          }
+          // slots are all params, so make a list and return
+          std::vector<Value*> params;
+          for (auto slot : slots) {
+            params.push_back(m.get_or_add_parameter(slot));
+          }
+          auto param_list = m.graph()->createList(DynamicType::get(), params);
+          m.graph()->insertNode(param_list);
+          return toSimple(param_list->output());
+        }
         throw ErrorReport(loc)
             << "attribute '" << field << "' of type '" << typeString(attr)
             << "' is not usable in a script method (did you forget to add it __constants__?)";
