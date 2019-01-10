@@ -22,9 +22,11 @@ struct C10_API NonVariableTypeMode {
   static void set_enabled(bool enabled);
 };
 
-// A RAII, thread local (!) guard that controls whether `legacyTensorType()`
-// should resolve to non-autograd type upon construction, and sets it back
-// to the original value upon destruction.
+// A RAII, thread local (!) guard that has the following effect:
+// Upon construction: sets NonVariableTypeMode_enabled for the current thread to
+// control whether we are in non-Variable-type mode (if we are, `is_variable()`
+// will always return false, regardless of the actual value of `is_variable_`).
+// Upon destruction: sets NonVariableTypeMode_enabled back to the original value.
 struct C10_API AutoNonVariableTypeMode {
   AutoNonVariableTypeMode(bool enabled) : prev_mode(NonVariableTypeMode::is_enabled()) {
     NonVariableTypeMode::set_enabled(enabled);
