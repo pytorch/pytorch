@@ -1139,6 +1139,62 @@ class _TestTorchMixin(object):
                         self.assertEqual(expected.shape, actual.shape)
                         self.assertTrue(torch.allclose(expected, actual))
 
+    def test_squareform(self):
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            # small case, empty
+            vec = torch.empty(0, device=device)
+            sq = [[0]]
+            full_square = torch.tensor(sq, device=device)
+            full_square_ret = torch.squareform(vec)
+            self.assertEqual(full_square_ret, full_square)
+
+            # small case, [1]
+            vec = torch.arange(1, 2, device=device)
+            sq = [[0, 1], [1, 0]]
+            full_square = torch.tensor(sq, device=device)
+            full_square_ret = torch.squareform(vec)
+            self.assertEqual(full_square_ret, full_square)
+
+            # test [1..6]
+            vec = torch.arange(1, 7, device=device)
+            sq = [[0, 1, 2, 3], [1, 0, 4, 5], [2, 4, 0, 6], [3, 5, 6, 0]]
+            full_square = torch.tensor(sq, device=device)
+            full_square_ret = torch.squareform(vec)
+            self.assertEqual(full_square_ret, full_square, "{} did not equal expected result".format(full_square_ret))
+            vec_ret = torch.squareform(full_square)
+            self.assertEqual(vec_ret, vec, "{} did not equal expected result".format(vec))
+
+            # test symmetric
+            self.assertEqual(full_square, torch.squareform(torch.squareform(full_square)))
+            self.assertEqual(vec, torch.squareform(torch.squareform(vec)))
+
+            # test contiguous
+            non_contiguous_vec = torch.tensor([[0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [0, 6]])[:, 1]
+            self.assertFalse(non_contiguous_vec.is_contiguous())
+            full_square_ret = torch.squareform(non_contiguous_vec)
+            self.assertEqual(full_square_ret, full_square, "{} did not equal expected result".format(full_square_ret))
+
+            # expected failure case
+            # test error message
+            vec = torch.arange(1, 58, device=device)
+            rect = torch.zeros((4, 2), device=device)
+            self.assertRaisesRegex(RuntimeError, 'Incompatible vector size', lambda: torch.squareform(vec))
+            self.assertRaisesRegex(RuntimeError, 'Expected square matrix as input', lambda: torch.squareform(rect))
+
+            # test non symmetric or non-zero diagonal 2D input
+            non_symmetric_sq = [[0, 9, 2, 3], [1, 0, 4, 5], [2, 4, 0, 6], [3, 5, 6, 0]]
+            non_symmetric_square = torch.tensor(non_symmetric_sq, device=device)
+            non_zero_in_diag_sq = [[1, 1, 2, 3], [1, 0, 4, 5], [2, 4, 0, 6], [3, 5, 6, 1]]
+            non_zero_in_diag_square = torch.tensor(non_zero_in_diag_sq, device=device)
+            torch.squareform(non_symmetric_square, False)
+            torch.squareform(non_zero_in_diag_square, False)
+            self.assertRaises(RuntimeError, lambda: torch.squareform(non_symmetric_square, True))
+            self.assertRaises(RuntimeError, lambda: torch.squareform(non_zero_in_diag_square, True))
+            self.assertRaises(RuntimeError, lambda: torch.squareform(non_symmetric_square))
+            self.assertRaises(RuntimeError, lambda: torch.squareform(non_zero_in_diag_square))
+
+
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_logsumexp(self):
         from scipy.special import logsumexp

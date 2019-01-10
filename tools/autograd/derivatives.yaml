@@ -572,6 +572,13 @@
   self: not_implemented("_pdist_backward")
   pdist: not_implemented("_pdist_backward")
 
+- name: squareform(Tensor self, bool checks)
+  self: squareform_backward(grad, self)
+
+- name: squareform_backward(Tensor grad_out, Tensor self)
+  grad_out: squareform(grad, false)
+  self: zeros_like(self)
+
 - name: normal_(Tensor self, double mean, double std, Generator generator)
   self: zeros_like(grad)
 

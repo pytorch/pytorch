@@ -804,6 +804,13 @@ def method_tests():
 # TODO: clamp with min/max
 
 
+def torch_function_tests():
+    return [
+        ('squareform', (1,), NO_ARGS, '1d'),
+        ('squareform', (45,), NO_ARGS, '1d_large'),
+    ]
+
+
 def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwargs=None):
     if not isinstance(call_args, tuple):
         call_args = (call_args,)
