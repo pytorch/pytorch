@@ -20,8 +20,8 @@ Value* insertConstant(
       n->destroy();
       return g.insertNode(g.createUndefined())->output();
     }
-    if (ref.is_variable()) {
-      ref = autograd::Variable(ref).data();
+    if (!ref.is_variable()) {
+      ref = autograd::make_variable(ref);
     }
     n->output()->inferTypeFrom(
         ref); // note: before t_ because of std::move(ref)
@@ -46,9 +46,7 @@ Value* insertConstant(
   } else if (val.isTensorList()) {
     n->ts_(
         attr::value,
-        fmap(val.toTensorList()->elements(), [](const at::Tensor& t) {
-          return autograd::Variable(t).data();
-        }));
+        val.toTensorList()->elements());
     n->output()->setType(ListType::ofTensors());
   } else if (val.isString()) {
     n->s_(attr::value, val.toString()->string());
@@ -85,7 +83,7 @@ RegisterOperators reg({
         [](const Node* node) -> Operation {
           TypePtr type = node->output()->type();
           if (type->isSubtypeOf(DynamicType::get())) {
-            auto t = autograd::make_variable(node->t(attr::value));
+            auto t = node->t(attr::value);
             return [t](Stack& stack) {
               push(stack, t);
               return 0;

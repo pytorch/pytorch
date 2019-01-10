@@ -81,7 +81,7 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
         msg += "')'";
         throw std::runtime_error(msg);
       }
-      tensor_results[i] = ((THPVariable*)obj)->cdata.data();
+      tensor_results[i] = ((THPVariable*)obj)->cdata;
     }
   }
 

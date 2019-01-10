@@ -157,8 +157,8 @@ static void check_single_result(PyObject* _original, PyObject* _result, PyObject
     throw python_error();
   }
 
-  auto& original = ((THPVariable*)_original)->cdata.data();
-  auto& result = ((THPVariable*)_result)->cdata.data();
+  auto& original = ((THPVariable*)_original)->cdata;
+  auto& result = ((THPVariable*)_result)->cdata;
 
   if (original.type().ID() != result.type().ID()) {
     std::stringstream ss;

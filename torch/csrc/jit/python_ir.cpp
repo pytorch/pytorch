@@ -409,7 +409,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "t_",
           [](Node& n, const char* name, torch::autograd::Variable v) {
-            return n.t_(Symbol::attr(name), v.data());
+            return n.t_(Symbol::attr(name), v);
           })
       .def(
           "t",
@@ -426,7 +426,7 @@ void initPythonIRBindings(PyObject* module_) {
             std::vector<at::Tensor> tensors;
             tensors.reserve(vs.size());
             for (auto& variable : vs) {
-              tensors.push_back(variable.data());
+              tensors.push_back(variable);
             }
             return n.ts_(Symbol::attr(name), std::move(tensors));
           })
@@ -446,7 +446,7 @@ void initPythonIRBindings(PyObject* module_) {
           "z_",
           [](Node& n, const char* name, at::Tensor v) {
             return n.t_(
-                Symbol::attr(name), autograd::Variable(v.view({})).data());
+                Symbol::attr(name), autograd::Variable(v.view({})));
           })
       .def(
           "z",
@@ -455,7 +455,7 @@ void initPythonIRBindings(PyObject* module_) {
           "zs_",
           [](Node& n, const char* name, TensorsAttr::ValueType v) {
             for (auto& i : v) {
-              i = autograd::Variable(i.view({})).data();
+              i = autograd::Variable(i.view({}));
             }
             return n.ts_(Symbol::attr(name), std::move(v));
           })

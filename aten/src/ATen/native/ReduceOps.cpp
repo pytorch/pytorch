@@ -429,7 +429,8 @@ Tensor _norm(const Tensor &self, Scalar p) {
       return at::legacy::th::_th_norm(self, p);
     } else {
       if (self.is_contiguous()) {
-        Tensor result = at::scalar_tensor(0, CPU(kFloat).options()).toType(self.type());
+        auto& self_type = at::globalContext().getNonVariableType(self.type().backend(), self.type().scalarType());
+        Tensor result = at::scalar_tensor(0, CPU(kFloat).options()).toType(self_type);
         norm_kernel(kCPU, result, self, p, c10::nullopt);
         return result;
       } else {

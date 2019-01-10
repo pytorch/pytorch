@@ -193,15 +193,15 @@ Variable & VariableType::checked_cast_variable(Tensor & t, const char * name, in
 }
 
 const Tensor & VariableType::unpack(const Tensor & t, const char * name, int pos) {
-  return checked_cast_variable(t, name, pos).data();
+  return checked_cast_variable(t, name, pos);
 }
 
 Tensor & VariableType::unpack(Tensor & t, const char * name, int pos) {
-  return checked_cast_variable(t, name, pos).data();
+  return checked_cast_variable(t, name, pos);
 }
 
 SparseTensorRef VariableType::unpack(SparseTensorRef t, const char * name, int pos) {
-  return SparseTensorRef(checked_cast_variable(t.tref, name, pos).data());
+  return SparseTensorRef(checked_cast_variable(t.tref, name, pos));
 }
 
 Tensor VariableType::unpack_opt(const Tensor & t, const char * name, int pos) {
@@ -222,7 +222,7 @@ std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name
       AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " at position #", i, " "
                     "for iterable argument #", pos, " '", name, "'");
     }
-    ret[i] = static_cast<const Variable&>(t).data();
+    ret[i] = static_cast<const Variable&>(t);
   }
   return ret;
 }
@@ -264,9 +264,12 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
     grad_fn->src_type = &src.type();
     grad_fn->src_device = src.device();
   }
-  if (self.is_sparse() && src.is_sparse()) baseType->copy_sparse_to_sparse_(self_, src_, non_blocking);
-  else if (!self.is_sparse() && !src.is_sparse()) baseType->s_copy_(self_, src_, non_blocking);
-  else AT_ERROR("copy_() between dense and sparse Tensors is not implemented! Found self type = ", self.type(), " and src type = ", src.type());
+  {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    if (self.is_sparse() && src.is_sparse()) baseType->copy_sparse_to_sparse_(self_, src_, non_blocking);
+    else if (!self.is_sparse() && !src.is_sparse()) baseType->s_copy_(self_, src_, non_blocking);
+    else AT_ERROR("copy_() between dense and sparse Tensors is not implemented! Found self type = ", self.type(), " and src type = ", src.type());
+  }
   increment_version(self);
   rebase_history(as_variable_ref( self ), std::move(grad_fn));
   if(torch::jit::tracer::isTracing()) {
@@ -289,7 +292,10 @@ Tensor & VariableType::resize_(Tensor & self, IntList size) const {
     jit::tracer::warn("resize_", jit::tracer::WARN_RESIZE);
     jit::tracer::delValueTrace(self);
   }
-  baseType->resize_(self_, size);
+  {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    baseType->resize_(self_, size);
+  }
   return self;
 }
 
@@ -303,7 +309,10 @@ Tensor & VariableType::resize_as_(Tensor & self, const Tensor & the_template) co
     jit::tracer::warn("resize_as_", jit::tracer::WARN_RESIZE);
     jit::tracer::delValueTrace(self);
   }
-  baseType->resize_as_(self_, the_template_);
+  {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    baseType->resize_as_(self_, the_template_);
+  }
   return self;
 }
 

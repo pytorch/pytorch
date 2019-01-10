@@ -11,14 +11,15 @@ namespace torch { namespace nn {
 
 inline bool check_type(PyObject* obj, at::TypeID typeID) {
   if (THPVariable_Check(obj)) {
-    return ((THPVariable*)obj)->cdata.data().type().ID() == typeID;
+    auto& data_type = ((THPVariable*)obj)->cdata.type();
+    return at::globalContext().getNonVariableType(data_type.backend(), data_type.scalarType()).ID() == typeID;
   }
   return false;
 }
 
 template<typename T>
 inline T* unpack(PyObject* obj) {
-  return (T*) ((THPVariable*)obj)->cdata.data().unsafeGetTensorImpl();
+  return (T*) ((THPVariable*)obj)->cdata.unsafeGetTensorImpl();
 }
 
 }} // namespace torch::nn
@@ -27,7 +28,7 @@ static inline int get_device(PyObject* args) {
   for (int i = 0, n = PyTuple_GET_SIZE(args); i != n; i++) {
     PyObject* arg = PyTuple_GET_ITEM(args, i);
     if (THPVariable_Check(arg)) {
-      auto& tensor = THPVariable_UnpackData(arg);
+      auto& tensor = THPVariable_Unpack(arg);
       if (tensor.is_cuda()) {
         return tensor.get_device();
       }

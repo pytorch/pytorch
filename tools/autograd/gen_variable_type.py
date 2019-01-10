@@ -591,9 +591,27 @@ def emit_body(declaration):
                 call, extra_wrapping_stmts = wrap_output(call)
         else:
             call = CALL_VIA_TYPE.substitute(declaration)
-        if not modifies_arguments and not returns_void:
-            call = '{} = {}'.format(tie_return_values(), call)
-        call = call + ';'
+
+        if strategy == 'use_derived':
+            code_block = ''
+            if not modifies_arguments and not returns_void:
+                return_values_decl = "decltype({}) tmp;\n".format(call)
+                code_block += return_values_decl
+                code_block += '{\n'
+                code_block += '  ' + 'at::AutoNonVariableTypeMode non_var_type_mode(true);' + '\n'
+                code_block += '  ' + 'tmp = {};\n'.format(call)
+                code_block += '}\n'
+                code_block += '{} = tmp;\n'.format(tie_return_values())
+            else:
+                code_block += '{\n'
+                code_block += '  ' + 'at::AutoNonVariableTypeMode non_var_type_mode(true);' + '\n'
+                code_block += '  ' + '{};\n'.format(call)
+                code_block += '}\n'
+            call = code_block
+        else:
+            if not modifies_arguments and not returns_void:
+                call = '{} = {}'.format(tie_return_values(), call)
+            call = call + ';'
         for stmt in extra_wrapping_stmts:
             call += '\n' + stmt
         return call
