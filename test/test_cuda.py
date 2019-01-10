@@ -2226,6 +2226,9 @@ class TestCuda(TestCase):
         for test_args in tri_large_tests_args:
             _compare_large_trilu_indices(self, *test_args, device='cuda')
 
+    def test_triu_tril(self):
+        _TestTorchMixin._test_triu_tril(self, lambda t: t.cuda())
+
 
 def load_ignore_file():
     from os.path import join, dirname
