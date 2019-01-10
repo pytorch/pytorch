@@ -239,6 +239,30 @@ class DeadCodeEliminator {
         for (Block* b : node->blocks()) {
           b->eraseOutput(i);
         }
+      } else if (node->kind() == prim::If) {
+        Value* b1_val = node->blocks().at(0)->outputs().at(i);
+        Value* b2_val = node->blocks().at(1)->outputs().at(i);
+
+        Value * input_val;
+        bool value_not_written_to = false;
+
+        // if the output of one block is the output of an unchecked_unwrap_optional
+        // and its input is the output of the other block, then the value has not been written to,
+        if (b1_val->node()->kind() == prim::unchecked_unwrap_optional) {
+          value_not_written_to = b1_val->node()->input() == b2_val;
+          input_val = b2_val;
+        } else if (b2_val->node()->kind() == prim::unchecked_unwrap_optional) {
+          value_not_written_to = b2_val->node()->input() == b1_val;
+          input_val = b1_val;
+        }
+
+        if (value_not_written_to) {
+          node->outputs().at(i)->replaceAllUsesWith(input_val);
+          node->eraseOutput(i);
+          for (Block* b : node->blocks()) {
+            b->eraseOutput(i);
+          }
+        }
       }
     }
   }

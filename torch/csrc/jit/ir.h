@@ -1242,11 +1242,6 @@ inline Node* Graph::createPythonOp(
 }
 
 TORCH_API void LintGraph(std::shared_ptr<Graph>& graph);
-inline const SourceRange& fakeRange() {
-  static SourceRange range(
-      std::make_shared<std::string>("<internally-created-node>"), 0, 1);
-  return range;
-}
 
 TORCH_API at::ArrayRef<Value*> createTupleUnpack(Value* v);
 // unpack_outputs - if true, and the callee returns a single tuple value, then
