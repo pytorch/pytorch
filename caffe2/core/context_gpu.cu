@@ -72,6 +72,79 @@ REGISTER_CONTEXT(DeviceType::CUDA, caffe2::CUDAContext);
 
 namespace caffe2 {
 
+// Generic implementation - CUDA will handle the right function to call for us
+void CUDAContext::CopyBytesAsync(
+    size_t nbytes,
+    const void* src,
+    Device src_device,
+    void* dst,
+    Device dst_device) {
+  // TODO: verify that the CUDA handles copy from device to device correctly
+  // even without SetDevice()
+  // TODO: verify whether source or dest device should be a priority in picking
+  // the stream
+  // NB: right now the cross-device copy logic is invoked only in the contexts
+  // when surrounding code explicitly manages data dependencies and sets up
+  // events, so it's fine.  In order to make it a standalone function proper
+  // synchronization between stream is required
+  int gpu_id = 0;
+  if (dst_device.type() == DeviceType::CUDA) {
+    gpu_id = dst_device.index();
+  } else if (src_device.type() == DeviceType::CUDA) {
+    gpu_id = src_device.index();
+  } else {
+    LOG(FATAL) << "shouldn't be called with non-cuda device";
+  }
+  CUDA_ENFORCE(cudaMemcpyAsync(
+      dst,
+      src,
+      nbytes,
+      cudaMemcpyDefault,
+      CUDAContext::getCudaObjects().GetStream(gpu_id)));
+}
+
+void CUDAContext::CopyBytesSync(
+    size_t nbytes,
+    const void* src,
+    Device src_device,
+    void* dst,
+    Device dst_device) {
+  // This emulates Caffe2 original behavior where sync copy doesn't change the
+  // device. It's probably better for clarity to switch to the target device
+  // explicitly here, but in the worst case CUDA would sync for us.
+  // TODO: change it to DeviceGuard
+  CUDAContext context(-1); // take current device
+  CUDA_ENFORCE(cudaMemcpyAsync(
+      dst, src, nbytes, cudaMemcpyDefault, context.cuda_stream()));
+  // destructor of context synchronizes
+}
+
+// For the CPU context, we also allow a (probably expensive) function
+// to copy the data from a cuda context. Inside the function, we create
+// a temporary CUDAContext object to carry out the copy. From the caller's
+// side, these functions are synchronous with respect to the host, similar
+// to a normal CPUContext::CopyBytes<CPUContext, CPUContext> call.
+template <>
+inline void CPUContext::CopyBytes<CUDAContext, CPUContext>(
+    size_t nbytes,
+    const void* src,
+    void* dst) {
+  CUDAContext context(GetGPUIDForPointer(src));
+  context.CopyBytes<CUDAContext, CPUContext>(nbytes, src, dst);
+}
+template <>
+inline void CPUContext::CopyBytes<CPUContext, CUDAContext>(
+    size_t nbytes,
+    const void* src,
+    void* dst) {
+  CUDAContext context(GetGPUIDForPointer(dst));
+  context.CopyBytes<CPUContext, CUDAContext>(nbytes, src, dst);
+}
+
+} // namespace caffe2
+
+namespace caffe2 {
+
 ThreadLocalCUDAObjects& CUDAContext::getCudaObjects() {
   static thread_local ThreadLocalCUDAObjects cuda_objects_;
   return cuda_objects_;
@@ -140,7 +213,7 @@ static void Caffe2InitializeCuda() {
       CAFFE2_COMPILE_TIME_MAX_GPUS,
       "). Increase that and recompile the caffe binary.");
 
-  for (int i = 0; i < NumCudaDevices(); ++i) {
+  for (DeviceIndex i = 0; i < NumCudaDevices(); ++i) {
     DeviceGuard g(i);
     // Enable peer access.
     const int peer_group = i / CAFFE2_CUDA_MAX_PEER_SIZE;
@@ -255,11 +328,11 @@ struct Caffe2CudaInitializerHelper {
  * gpu id to be -1, it means that we will just use the current gpu id when
  * the function is being called.
  */
-static inline int RectifyGPUID(const int gpu_id) {
+static inline DeviceIndex RectifyGPUID(DeviceIndex gpu_id) {
   return gpu_id == -1 ? CaffeCudaGetDevice() : gpu_id;
 }
 
-CUDAContext::CUDAContext(const int gpu_id)
+CUDAContext::CUDAContext(DeviceIndex gpu_id)
     : gpu_id_(RectifyGPUID(gpu_id)), random_seed_(RandomNumberSeed()) {
   static Caffe2CudaInitializerHelper g_cuda_initializer_;
 }
@@ -311,14 +384,14 @@ void TrackMemoryAlloc(size_t nbytes) {
       long max_t = g_max_by_gpu_map[gpu];
       if (max_t > 0) {
         if (max_t != t) {
-          LOG(INFO) << "GPU " << gpu << ": " << t / 1024 / 1024 << " MB"
-                    << " (max: " << max_t / 1024 / 1024 << " MB)";
+          VLOG(1) << "GPU " << gpu << ": " << t / 1024 / 1024 << " MB"
+                  << " (max: " << max_t / 1024 / 1024 << " MB)";
         } else {
-          LOG(INFO) << "GPU " << gpu << ": " << t / 1024 / 1024 << " MB";
+          VLOG(1) << "GPU " << gpu << ": " << t / 1024 / 1024 << " MB";
         }
       }
     }
-    LOG(INFO) << "Total: " << g_total_mem / 1024 / 1024 << " MB";
+    VLOG(1) << "Total: " << g_total_mem / 1024 / 1024 << " MB";
     g_last_rep = g_total_mem;
   }
 }
@@ -426,4 +499,24 @@ struct DefaultCUDAAllocator final : public at::Allocator {
 static DefaultCUDAAllocator g_cuda_alloc;
 REGISTER_ALLOCATOR(CUDA, &g_cuda_alloc);
 
-}  // namespace caffe2
+} // namespace caffe2
+
+namespace at {
+REGISTER_COPY_BYTES_FUNCTION(
+    DeviceType::CUDA,
+    DeviceType::CUDA,
+    caffe2::CUDAContext::CopyBytesSync,
+    caffe2::CUDAContext::CopyBytesAsync);
+
+REGISTER_COPY_BYTES_FUNCTION(
+    DeviceType::CUDA,
+    DeviceType::CPU,
+    caffe2::CUDAContext::CopyBytesSync,
+    caffe2::CUDAContext::CopyBytesAsync);
+
+REGISTER_COPY_BYTES_FUNCTION(
+    DeviceType::CPU,
+    DeviceType::CUDA,
+    caffe2::CUDAContext::CopyBytesSync,
+    caffe2::CUDAContext::CopyBytesAsync);
+} // namespace at

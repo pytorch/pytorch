@@ -155,7 +155,7 @@ class CounterSerializer : public BlobSerializerBase {
     proto.add_int64_data(
         (*static_cast<const std::unique_ptr<Counter<int64_t>>*>(pointer))
             ->retrieve());
-    acceptor(name, blob_proto.SerializeAsString());
+    acceptor(name, SerializeBlobProtoAsString_EnforceCheck(blob_proto));
   }
 };
 

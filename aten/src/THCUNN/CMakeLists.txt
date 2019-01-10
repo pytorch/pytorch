@@ -1,7 +1,6 @@
 SET(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
 ${CMAKE_CURRENT_SOURCE_DIR}/AbsCriterion.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/Abs.cu
-${CMAKE_CURRENT_SOURCE_DIR}/BatchNormalization.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/BCECriterion.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/ClassNLLCriterion.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/Col2Im.cu
@@ -28,7 +27,6 @@ ${CMAKE_CURRENT_SOURCE_DIR}/SoftMarginCriterion.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SoftPlus.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SoftShrink.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SparseLinear.cu
-${CMAKE_CURRENT_SOURCE_DIR}/SpatialAdaptiveAveragePooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialAdaptiveMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialAveragePooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialClassNLLCriterion.cu
@@ -43,9 +41,8 @@ ${CMAKE_CURRENT_SOURCE_DIR}/SpatialFullConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialFullDilatedConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialMaxUnpooling.cu
-${CMAKE_CURRENT_SOURCE_DIR}/SpatialReflectionPadding.cu
-${CMAKE_CURRENT_SOURCE_DIR}/SpatialReplicationPadding.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialSubSampling.cu
+${CMAKE_CURRENT_SOURCE_DIR}/SpatialUpSamplingBicubic.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialUpSamplingBilinear.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialUpSamplingNearest.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/Sqrt.cu
@@ -53,12 +50,9 @@ ${CMAKE_CURRENT_SOURCE_DIR}/Square.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/Tanh.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/TemporalConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/TemporalMaxPooling.cu
-${CMAKE_CURRENT_SOURCE_DIR}/TemporalReflectionPadding.cu
-${CMAKE_CURRENT_SOURCE_DIR}/TemporalReplicationPadding.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/TemporalRowConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/TemporalUpSamplingLinear.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/TemporalUpSamplingNearest.cu
-${CMAKE_CURRENT_SOURCE_DIR}/Threshold.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricAdaptiveAveragePooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricAdaptiveMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricAveragePooling.cu
@@ -70,7 +64,6 @@ ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricFullConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricFullDilatedConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricMaxUnpooling.cu
-${CMAKE_CURRENT_SOURCE_DIR}/VolumetricReplicationPadding.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricUpSamplingNearest.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricUpSamplingTrilinear.cu
 PARENT_SCOPE)

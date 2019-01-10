@@ -7,8 +7,8 @@ namespace py = pybind11;
 
 const DLDeviceType* CaffeToDLDeviceType(int device_type) {
   static std::map<int, DLDeviceType> dl_device_type_map{
-      {PROTO_CPU, kCPU},
-      {PROTO_CUDA, kGPU},
+      {PROTO_CPU, kDLCPU},
+      {PROTO_CUDA, kDLGPU},
   };
   const auto it = dl_device_type_map.find(device_type);
   return it == dl_device_type_map.end() ? nullptr : &it->second;

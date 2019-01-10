@@ -1,4 +1,4 @@
-#include "caffe2/core/dispatch/KernelRegistration.h"
+#include <c10/core/dispatch/KernelRegistration.h>
 #include "caffe2/operators/elementwise_ops_utils.h"
 #include "caffe2/operators/experimental/c10/schemas/add.h"
 #include "caffe2/utils/math.h"
@@ -11,12 +11,15 @@ namespace {
 
 template <class DataType>
 void add_op_cpu_impl(
-    const Tensor& A,
-    const Tensor& B,
-    Tensor* C,
+    const C10Tensor& A_,
+    const C10Tensor& B_,
+    const C10Tensor& C_,
     bool legacy_broadcast,
     int axis,
     BaseContext* context) {
+  Tensor A(A_);
+  Tensor B(B_);
+  Tensor C(C_);
   const DataType* A_data = A.template data<DataType>();
   const DataType* B_data = B.template data<DataType>();
   std::vector<int> A_dims;
@@ -24,13 +27,13 @@ void add_op_cpu_impl(
 
   if (legacy_broadcast) {
     CAFFE_ENFORCE_NE(
-        C,
-        &B,
+        C.getIntrusivePtr(),
+        B.getIntrusivePtr(),
         "In-place is allowed only with the first tensor when "
         "legacy-broadcasting");
-    C->ResizeLike(A);
-    if (B.size() == 1) {
-      A_dims = {static_cast<int>(A.size())};
+    C.ResizeLike(A);
+    if (B.numel() == 1) {
+      A_dims = {static_cast<int>(A.numel())};
       B_dims = {1};
     } else {
       size_t pre, n, post;
@@ -42,20 +45,20 @@ void add_op_cpu_impl(
       B_dims = {static_cast<int>(n), 1};
     }
   } else {
-    std::copy(A.dims().cbegin(), A.dims().cend(), std::back_inserter(A_dims));
-    std::copy(B.dims().cbegin(), B.dims().cend(), std::back_inserter(B_dims));
+    std::copy(A.sizes().cbegin(), A.sizes().cend(), std::back_inserter(A_dims));
+    std::copy(B.sizes().cbegin(), B.sizes().cend(), std::back_inserter(B_dims));
     const std::vector<int> C_dims =
         caffe2::elementwise_ops_utils::ComputeBinaryBroadcastForwardDims(
             A_dims, B_dims);
-    if (C == &A) {
+    if (C.getIntrusivePtr() == A.getIntrusivePtr()) {
       CAFFE_ENFORCE_EQ(C_dims, A_dims);
-    } else if (C == &B) {
+    } else if (C.getIntrusivePtr() == B.getIntrusivePtr()) {
       CAFFE_ENFORCE_EQ(C_dims, B_dims);
     } else {
-      C->Resize(C_dims);
+      C.Resize(C_dims);
     }
   }
-  auto* C_data = C->template mutable_data<DataType>();
+  auto* C_data = C.template mutable_data<DataType>();
 
   caffe2::math::Add(
       A_dims.size(),
@@ -64,7 +67,7 @@ void add_op_cpu_impl(
       B_dims.data(),
       A.data<DataType>(),
       B.data<DataType>(),
-      C->mutable_data<DataType>(),
+      C.mutable_data<DataType>(),
       static_cast<CPUContext*>(context));
 }
 } // namespace

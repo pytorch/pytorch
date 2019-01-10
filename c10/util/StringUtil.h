@@ -2,6 +2,7 @@
 #define C10_UTIL_STRINGUTIL_H_
 
 #include <c10/macros/Macros.h>
+#include <c10/util/string_utils.h>
 
 #include <cstddef>
 #include <ostream>

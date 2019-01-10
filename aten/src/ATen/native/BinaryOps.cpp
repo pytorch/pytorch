@@ -1,4 +1,4 @@
-#include "ATen/native/BinaryOps.h"
+#include <ATen/native/BinaryOps.h>
 
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
@@ -29,6 +29,7 @@ Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
   }
   auto iter = TensorIterator::binary_op(result, self, other);
   add_stub(iter->device_type(), *iter, alpha);
+  result = iter->output();
   return result;
 }
 
@@ -54,6 +55,7 @@ Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
   }
   auto iter = TensorIterator::binary_op(result, self, other);
   div_stub(iter->device_type(), *iter);
+  result = iter->output();
   return result;
 }
 
@@ -75,6 +77,7 @@ Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
   }
   auto iter = TensorIterator::binary_op(result, self, other);
   mul_stub(iter->device_type(), *iter);
+  result = iter->output();
   return result;
 }
 
@@ -106,6 +109,7 @@ Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
   }
   auto iter = TensorIterator::binary_op(result, self, other);
   sub_stub(iter->device_type(), *iter, alpha);
+  result = iter->output();
   return result;
 }
 
@@ -118,46 +122,54 @@ Tensor& sub_(Tensor& self, const Tensor& other, Scalar alpha) {
   return native::sub_out(self, self, other, alpha);
 }
 
+Tensor rsub(const Tensor& self, const Tensor& other, Scalar alpha) {
+  return native::sub(other, self, alpha);
+}
+
 // These are still needed because we don't have C++ conversions from number
 // types (int, float, etc.) to Tensor (only to Scalar). They're not exposed
 // to Python.
 
-static Tensor scalar_tensor(Scalar scalar) {
+static Tensor wrapped_scalar_tensor(Scalar scalar) {
   auto tensor = scalar_to_tensor(scalar);
   tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
   return tensor;
 }
 
 Tensor add(const Tensor& self, Scalar other, Scalar alpha) {
-  return native::add(self, scalar_tensor(other), alpha);
+  return native::add(self, wrapped_scalar_tensor(other), alpha);
 }
 
 Tensor& add_(Tensor& self, Scalar other, Scalar alpha) {
-  return native::add_(self, scalar_tensor(other), alpha);
+  return native::add_(self, wrapped_scalar_tensor(other), alpha);
 }
 
 Tensor div(const Tensor& self, Scalar other) {
-  return native::div(self, scalar_tensor(other));
+  return native::div(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& div_(Tensor& self, Scalar other) {
-  return native::div_(self, scalar_tensor(other));
+  return native::div_(self, wrapped_scalar_tensor(other));
 }
 
 Tensor mul(const Tensor& self, Scalar other) {
-  return native::mul(self, scalar_tensor(other));
+  return native::mul(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& mul_(Tensor& self, Scalar other) {
-  return native::mul_(self, scalar_tensor(other));
+  return native::mul_(self, wrapped_scalar_tensor(other));
 }
 
 Tensor sub(const Tensor& self, Scalar other, Scalar alpha) {
-  return native::sub(self, scalar_tensor(other), alpha);
+  return native::sub(self, wrapped_scalar_tensor(other), alpha);
 }
 
 Tensor& sub_(Tensor& self, Scalar other, Scalar alpha) {
-  return native::sub_(self, scalar_tensor(other), alpha);
+  return native::sub_(self, wrapped_scalar_tensor(other), alpha);
+}
+
+Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {
+  return native::rsub(self, wrapped_scalar_tensor(other), alpha);
 }
 
 }

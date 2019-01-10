@@ -112,6 +112,19 @@ warpHeap(K k, V v, K& keyHeapHead, K* keyHeap, V* valueHeap) {
   bool wantInsert = Dir ? (k > keyHeapHead) : (k < keyHeapHead);
 
   // Find out all the lanes that have elements to add to the heap
+#if defined(__HIP_PLATFORM_HCC__)
+  unsigned long long int vote = __ballot(wantInsert);
+
+  if (!vote) {
+    // Everything the warp has is smaller than our heap
+    return;
+  }
+
+  // Otherwise, we want to serialize execution of the threads
+  // that have elements
+  int index = __popcll(getLaneMaskLt() & vote);
+  int total = __popcll(vote);
+#else
 #if CUDA_VERSION >= 9000
   unsigned int vote = __ballot_sync(__activemask(), wantInsert);
 #else
@@ -127,6 +140,7 @@ warpHeap(K k, V v, K& keyHeapHead, K* keyHeap, V* valueHeap) {
   // that have elements
   int index = __popc(getLaneMaskLt() & vote);
   int total = __popc(vote);
+#endif  // __HIP_PLATFORM_HCC__
 
   // FIXME: try switch statement and explicitly handle cases
   // FIXME: how do cases work?

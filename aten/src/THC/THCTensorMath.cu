@@ -1,12 +1,12 @@
-#include "THCTensorMath.h"
-#include "THCGeneral.h"
-#include "THCTensorCopy.h"
-#include "THCApply.cuh"
-#include "THCNumerics.cuh"
-#include "THCTensorMath.cuh"
-#include "THCThrustAllocator.cuh"
-#include "THCTensor.hpp"
-#include "THCStream.h"
+#include <THC/THCTensorMath.h>
+#include <THC/THCGeneral.h>
+#include <THC/THCTensorCopy.h>
+#include <THC/THCApply.cuh>
+#include <THC/THCNumerics.cuh>
+#include <THC/THCTensorMath.cuh>
+#include <THC/THCThrustAllocator.cuh>
+#include <THC/THCTensor.hpp>
+
 
 #include <thrust/copy.h>
 #include <thrust/count.h>
@@ -17,7 +17,7 @@
 #include <thrust/sequence.h>
 #include <thrust/iterator/transform_iterator.h>
 #include <thrust/transform.h>
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
 #include <thrust/system/cuda/execution_policy.h>
 #endif
 #include <cfloat>
@@ -109,32 +109,5 @@ struct NonZeroOp
   }
 };
 
-template<typename T, typename accT = T>
-struct LinspaceOp {
-  __host__ __device__ LinspaceOp(accT start, accT step): 
-    start_(start), step_(step) { }
-  __device__ __forceinline__ T operator()(ptrdiff_t index) {
-    accT increment = THCNumerics<accT>::mul(step_, ScalarConvert<ptrdiff_t,accT>::to(index));
-    accT value = THCNumerics<accT>::add(start_, increment);
-    return ScalarConvert<accT,T>::to(value);
-  }
-
-  const accT start_, step_;
-};
-
-template<typename T, typename accT = T>
-struct LogspaceOp {
-  __host__ __device__ LogspaceOp(accT start, accT step): 
-    start_(start), step_(step) { }
-  __device__ __forceinline__ T operator()(ptrdiff_t index) {
-    accT increment = THCNumerics<accT>::mul(step_, ScalarConvert<ptrdiff_t,accT>::to(index));
-    accT value = THCNumerics<accT>::exp10(THCNumerics<accT>::add(start_, increment));
-    return ScalarConvert<accT,T>::to(value);
-  }
-
-  const accT start_, step_;
-};
-
-
-#include "generic/THCTensorMath.cu"
-#include "THCGenerateAllTypes.h"
+#include <THC/generic/THCTensorMath.cu>
+#include <THC/THCGenerateAllTypes.h>

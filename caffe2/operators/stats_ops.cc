@@ -64,8 +64,8 @@ class StatRegistryUpdateOp : public Operator<CPUContext> {
     auto registry = InputSize() == 3
         ? OperatorBase::Input<std::unique_ptr<StatRegistry>>(2).get()
         : &StatRegistry::get();
-    CAFFE_ENFORCE_EQ(keys.size(), values.size());
-    ExportedStatList data(keys.size());
+    CAFFE_ENFORCE_EQ(keys.numel(), values.numel());
+    ExportedStatList data(keys.numel());
     auto* pkeys = keys.data<std::string>();
     auto* pvals = values.data<int64_t>();
     int i = 0;

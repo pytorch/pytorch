@@ -1,6 +1,6 @@
 #include <torch/nn/init.h>
 
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <ATen/ATen.h>

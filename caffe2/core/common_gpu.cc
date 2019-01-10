@@ -10,18 +10,6 @@
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
 
-C10_DEFINE_bool(
-    caffe2_cuda_full_device_control,
-    false,
-    "If true, assume all the cudaSetDevice and cudaGetDevice calls will be "
-    "controlled by Caffe2, and non-Caffe2 code will ensure that the entry and "
-    "exit point has the same cuda device. Under the hood, Caffe2 will use "
-    "thread local variables to cache the device, in order to speed up set and "
-    "get device calls. This is an experimental feature that may have non "
-    "trivial side effects, so use it with care and only enable it if you are "
-    "absolutely sure. Also, this flag should not be changed after the program "
-    "initializes.");
-
 namespace caffe2 {
 
 int NumCudaDevices() {
@@ -89,8 +77,6 @@ int NumCudaDevices() {
 
 namespace {
 int gDefaultGPUID = 0;
-// Only used when FLAGS_caffe2_cuda_full_device_control is set true.
-thread_local int gCurrentDevice = -1;
 }  // namespace
 
 void SetDefaultGPUID(const int deviceid) {
@@ -108,27 +94,13 @@ void SetDefaultGPUID(const int deviceid) {
 int GetDefaultGPUID() { return gDefaultGPUID; }
 
 int CaffeCudaGetDevice() {
-  if (FLAGS_caffe2_cuda_full_device_control) {
-    if (gCurrentDevice < 0) {
-      CUDA_ENFORCE(cudaGetDevice(&gCurrentDevice));
-    }
-    return gCurrentDevice;
-  } else {
-    int gpu_id = 0;
-    CUDA_ENFORCE(cudaGetDevice(&gpu_id));
-    return gpu_id;
-  }
+  int gpu_id = 0;
+  CUDA_ENFORCE(cudaGetDevice(&gpu_id));
+  return gpu_id;
 }
 
 void CaffeCudaSetDevice(const int id) {
-  if (FLAGS_caffe2_cuda_full_device_control) {
-    if (gCurrentDevice != id) {
-      CUDA_ENFORCE(cudaSetDevice(id));
-    }
-    gCurrentDevice = id;
-  } else {
-    CUDA_ENFORCE(cudaSetDevice(id));
-  }
+  CUDA_ENFORCE(cudaSetDevice(id));
 }
 
 int GetGPUIDForPointer(const void* ptr) {
@@ -194,7 +166,9 @@ void DeviceQuery(const int device) {
      << std::endl;
   ss << "Total registers per block:     " << prop.regsPerBlock << std::endl;
   ss << "Warp size:                     " << prop.warpSize << std::endl;
+#ifndef __HIP_PLATFORM_HCC__
   ss << "Maximum memory pitch:          " << prop.memPitch << std::endl;
+#endif
   ss << "Maximum threads per block:     " << prop.maxThreadsPerBlock
      << std::endl;
   ss << "Maximum dimension of block:    "
@@ -205,13 +179,17 @@ void DeviceQuery(const int device) {
      << prop.maxGridSize[2] << std::endl;
   ss << "Clock rate:                    " << prop.clockRate << std::endl;
   ss << "Total constant memory:         " << prop.totalConstMem << std::endl;
+#ifndef __HIP_PLATFORM_HCC__
   ss << "Texture alignment:             " << prop.textureAlignment << std::endl;
   ss << "Concurrent copy and execution: "
      << (prop.deviceOverlap ? "Yes" : "No") << std::endl;
+#endif
   ss << "Number of multiprocessors:     " << prop.multiProcessorCount
      << std::endl;
+#ifndef __HIP_PLATFORM_HCC__
   ss << "Kernel execution timeout:      "
      << (prop.kernelExecTimeoutEnabled ? "Yes" : "No") << std::endl;
+#endif
   LOG(INFO) << ss.str();
   return;
 }
@@ -260,10 +238,12 @@ const char* cublasGetErrorString(cublasStatus_t error) {
     return "CUBLAS_STATUS_INVALID_VALUE";
   case CUBLAS_STATUS_ARCH_MISMATCH:
     return "CUBLAS_STATUS_ARCH_MISMATCH";
+#ifndef __HIP_PLATFORM_HCC__
   case CUBLAS_STATUS_MAPPING_ERROR:
     return "CUBLAS_STATUS_MAPPING_ERROR";
   case CUBLAS_STATUS_EXECUTION_FAILED:
     return "CUBLAS_STATUS_EXECUTION_FAILED";
+#endif
   case CUBLAS_STATUS_INTERNAL_ERROR:
     return "CUBLAS_STATUS_INTERNAL_ERROR";
 #if CUDA_VERSION >= 6000
@@ -274,6 +254,10 @@ const char* cublasGetErrorString(cublasStatus_t error) {
     return "CUBLAS_STATUS_LICENSE_ERROR";
 #endif  // CUDA_VERSION >= 6050
 #endif  // CUDA_VERSION >= 6000
+#ifdef __HIP_PLATFORM_HCC__
+  case rocblas_status_invalid_size:
+    return "rocblas_status_invalid_size";
+#endif
   }
   // To suppress compiler warning.
   return "Unrecognized cublas error string";
@@ -307,6 +291,10 @@ const char* curandGetErrorString(curandStatus_t error) {
     return "CURAND_STATUS_ARCH_MISMATCH";
   case CURAND_STATUS_INTERNAL_ERROR:
     return "CURAND_STATUS_INTERNAL_ERROR";
+#ifdef __HIP_PLATFORM_HCC__
+  case HIPRAND_STATUS_NOT_IMPLEMENTED:
+    return "HIPRAND_STATUS_NOT_IMPLEMENTED";
+#endif
   }
   // To suppress compiler warning.
   return "Unrecognized curand error string";

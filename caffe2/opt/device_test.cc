@@ -20,8 +20,8 @@ TEST(DeviceTest, InsertCopies) {
       caffe2::OperatorDef* def = net.add_op();
       def->set_type("Conv");
       def->add_input("X");
-      def->add_input("W" + caffe2::to_string(i));
-      def->add_input("b" + caffe2::to_string(i));
+      def->add_input("W" + c10::to_string(i));
+      def->add_input("b" + c10::to_string(i));
       ADD_ARG(def, "kernel", i, 3);
       ADD_ARG(def, "stride", i, 1);
       ADD_ARG(def, "pad", i, 0);

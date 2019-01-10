@@ -98,17 +98,17 @@ template <>
 bool PReluOp<float, CPUContext>::RunOnDevice() {
   const auto& X = Input(0);
   const auto& W = Input(1);
-  auto* Y = Output(0);
-  Y->ResizeLike(X);
+
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
   const auto* Xdata = X.template data<float>();
   const auto* Wdata = W.template data<float>();
   auto* Ydata = Y->template mutable_data<float>();
 
-  const auto C = order_ == StorageOrder::NCHW ? X.dim(1) : X.dim(X.ndim() - 1);
-  const auto C_shared = (W.size() == 1);
+  const auto C = order_ == StorageOrder::NCHW ? X.size(1) : X.size(X.dim() - 1);
+  const auto C_shared = (W.numel() == 1);
 
   if (!C_shared) {
-    CAFFE_ENFORCE_EQ(C, W.size());
+    CAFFE_ENFORCE_EQ(C, W.numel());
   }
 
   if (C_shared) {
@@ -116,8 +116,8 @@ bool PReluOp<float, CPUContext>::RunOnDevice() {
     // The function is completely pointwise
     runNeonPrelu(Ydata, Xdata, X.size(), Wdata[0]);
 #else
-    ConstEigenVectorMap<float> Xvec(Xdata, X.size());
-    EigenVectorMap<float> Yvec(Ydata, Y->size());
+    ConstEigenVectorMap<float> Xvec(Xdata, X.numel());
+    EigenVectorMap<float> Yvec(Ydata, Y->numel());
     Yvec = Xvec.cwiseMax(0.f) + Xvec.cwiseMin(0.f) * Wdata[0];
 #endif // defined(__ARM_NEON__) || defined(__ARM_NEON)
     return true;
@@ -126,7 +126,7 @@ bool PReluOp<float, CPUContext>::RunOnDevice() {
   // non-shared case.
   switch (order_) {
     case StorageOrder::NCHW: {
-      const auto N = X.dim(0);
+      const auto N = X.size(0);
       const auto dim = X.size_from_dim(2);
 
 #if defined(__ARM_NEON__) || defined(__ARM_NEON)
@@ -153,7 +153,7 @@ bool PReluOp<float, CPUContext>::RunOnDevice() {
     }
     case StorageOrder::NHWC: {
       // Lay out matrix as (NHW, C) and multiply by C
-      const auto NHW = X.size() / C;
+      const auto NHW = X.numel() / C;
       ConstEigenArrayMap<float> Xmat(Xdata, C, NHW);
       ConstEigenVectorArrayMap<float> Wvec(Wdata, C);
       EigenArrayMap<float> Ymat(Ydata, C, NHW);
@@ -174,15 +174,13 @@ bool PReluGradientOp<float, CPUContext>::RunOnDevice() {
   auto& W = Input(3);
 
   CAFFE_ENFORCE(&Y != &X, "Cannot backpropagate through an in-place PReLU");
-  auto* dX = Output(0);
-  auto* dW = Output(1);
 
-  DCHECK_EQ(dY.size(), Y.size());
-  dX->ResizeLike(Y);
-  dW->ResizeLike(W);
+  DCHECK_EQ(dY.numel(), Y.numel());
+  auto* dX = Output(0, Y.sizes(), at::dtype<float>());
+  auto* dW = Output(1, W.sizes(), at::dtype<float>());
 
-  const auto C = order_ == StorageOrder::NCHW ? X.dim(1) : X.dim(X.ndim() - 1);
-  const auto C_shared = (W.size() == 1);
+  const auto C = order_ == StorageOrder::NCHW ? X.size(1) : X.size(X.dim() - 1);
+  const auto C_shared = (W.numel() == 1);
 
   const float* Ydata = Y.data<float>();
   const float* dYdata = dY.data<float>();
@@ -196,18 +194,18 @@ bool PReluGradientOp<float, CPUContext>::RunOnDevice() {
     case StorageOrder::NCHW: {
       const auto dim = X.size_from_dim(2);
       const auto div_factor = C_shared ? C : 1;
-      for (auto c = 0; c < W.size(); ++c) {
+      for (auto c = 0; c < W.numel(); ++c) {
         dWdata[c] = 0;
       }
 
-      for (int i = 0; i < Y.size(); ++i) {
+      for (int i = 0; i < Y.numel(); ++i) {
         if (Xdata[i] <= 0) {
           int c = (i / dim) % C / div_factor;
           dWdata[c] += dYdata[i] * Xdata[i];
         }
       }
 
-      for (int i = 0; i < Y.size(); ++i) {
+      for (int i = 0; i < Y.numel(); ++i) {
         if (Xdata[i] > 0) {
           dXdata[i] = dYdata[i];
         } else {
@@ -218,9 +216,9 @@ bool PReluGradientOp<float, CPUContext>::RunOnDevice() {
       break;
     }
     case StorageOrder::NHWC: {
-      const auto NHW = X.size() / C;
-      ConstEigenVectorArrayMap<float> Wvec(Wdata, W.size());
-      EigenVectorArrayMap<float> dWvec(dWdata, dW->size());
+      const auto NHW = X.numel() / C;
+      ConstEigenVectorArrayMap<float> Wvec(Wdata, W.numel());
+      EigenVectorArrayMap<float> dWvec(dWdata, dW->numel());
 
       ConstEigenArrayMap<float> Ymat(Ydata, C, NHW);
       ConstEigenArrayMap<float> dYmat(dYdata, C, NHW);
@@ -254,7 +252,9 @@ bool PReluGradientOp<float, CPUContext>::RunOnDevice() {
 }
 
 REGISTER_CPU_OPERATOR(PRelu, PReluOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(PReluGradient, PReluGradientOp<float, CPUContext>);
+REGISTER_CPU_GRADIENT_OPERATOR(
+    PReluGradient,
+    PReluGradientOp<float, CPUContext>);
 
 // Input: X, Slope, output: Y
 OPERATOR_SCHEMA(PRelu)
@@ -335,7 +335,7 @@ Y:
     .InheritOnnxSchema();
 
 // Input: Y, dY, output: dX
-OPERATOR_SCHEMA(PReluGradient).NumInputs(4).NumOutputs(2).SetDoc(R"DOC(
+GRADIENT_OPERATOR_SCHEMA(PReluGradient).NumInputs(4).NumOutputs(2).SetDoc(R"DOC(
 
 PReluGradient takes both Y and dY and uses this to update dX and dW according
 to the chain rule and derivatives of the rectified linear function.

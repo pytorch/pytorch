@@ -1,12 +1,12 @@
-#include "ATen/native/cpu/TensorCompareKernel.h"
+#include <ATen/native/cpu/TensorCompareKernel.h>
 
 #include <numeric>
 #include <iterator>
 #include <algorithm>
 
-#include "ATen/Dispatch.h"
-#include "ATen/Parallel.h"
-#include "ATen/optional.h"
+#include <ATen/Dispatch.h>
+#include <ATen/Parallel.h>
+#include <c10/util/Optional.h>
 
 namespace at { namespace native { namespace {
 
@@ -65,7 +65,7 @@ struct Reduction {
           }
           out_[b] = result;
           indices_[b] = result_index;
-        }             
+        }
       });
     } else {
       parallel_for(0, batch * stride, 1, [=](int64_t begin, int64_t end) {

@@ -1,39 +1,45 @@
-#include "torch/csrc/jit/script/lexer.h"
+#include <torch/csrc/jit/script/lexer.h>
 
 #include <c10/util/Exception.h>
 
+#include <mutex>
 #include <string>
 #include <unordered_map>
-#include <mutex>
 
 namespace torch {
 namespace jit {
 namespace script {
 
 static const std::unordered_map<int, int> binary_prec = {
-    {TK_IF,  1},
+    {TK_IF, 1},
     {TK_AND, 2},
-    {TK_OR,  2},
+    {TK_OR, 2},
     // reserve a level for unary not
-    {'<',    4},
-    {'>',    4},
-    {TK_EQ,  4},
-    {TK_LE,  4},
-    {TK_GE,  4},
-    {TK_NE,  4},
-    {'+',    5},
-    {'-',    5},
-    {'*',    6},
-    {'/',    6},
-    {'%',    6},
-    {'@',    6},
-    {TK_POW, 7},
+    {'<', 4},
+    {'>', 4},
+    {TK_IS, 4},
+    {TK_ISNOT, 4},
+    {TK_EQ, 4},
+    {TK_LE, 4},
+    {TK_GE, 4},
+    {TK_NE, 4},
+    {'|', 5},
+    {'^', 6},
+    {'&', 7},
+    {'+', 8},
+    {'-', 8},
+    {'*', 9},
+    {'/', 9},
+    {TK_FLOOR_DIV, 9},
+    {'%', 9},
+    {'@', 9},
+    {TK_POW, 10},
 };
 
 static const std::unordered_map<int, int> unary_prec = {
     {TK_NOT, 3},
-    {'-',    8},
-    {'*',    8},
+    {'-', 9},
+    {'*', 9},
 };
 
 bool SharedParserData::isUnary(int kind, int* prec) {
@@ -53,14 +59,15 @@ bool SharedParserData::isBinary(int kind, int* prec) {
   return false;
 }
 
-int stringToKind(std::string str) {
+int stringToKind(const std::string& str) {
   static std::once_flag init_flag;
   static std::unordered_map<std::string, int> str_to_kind;
   std::call_once(init_flag, []() {
     for (char tok : std::string(valid_single_char_tokens))
       str_to_kind[std::string(1, tok)] = tok;
 #define DEFINE_CASE(tok, _, str) \
-    if (std::string(str) != "") str_to_kind[str] = tok;
+  if (std::string(str) != "")    \
+    str_to_kind[str] = tok;
     TC_FORALL_TOKEN_KINDS(DEFINE_CASE)
 #undef DEFINE_CASE
   });

@@ -1,8 +1,8 @@
 #pragma once
 
-#include "caffe2/core/dispatch/Dispatcher.h"
+#include <c10/core/dispatch/Dispatcher.h>
 #include "caffe2/core/operator.h"
-#include <ATen/core/ArrayRef.h>
+#include <c10/util/ArrayRef.h>
 #include <c10/util/Metaprogramming.h>
 
 namespace caffe2 {
@@ -21,8 +21,7 @@ inline std::shared_ptr<void> init_state<void>() {
 template <class T>
 using is_output_arg = std::is_same<Tensor*, T>;
 template <class ParameterDef>
-using extract_type_t =
-    c10::guts::result_of_t<decltype (&ParameterDef::parse)(ArgumentHelper)>;
+using extract_type_t = typename ParameterDef::type;
 } // namespace details
 
 /**
@@ -80,9 +79,7 @@ class C10OperatorWrapper final : public Operator<Context> {
   }
 
   static constexpr size_t num_outputs() {
-    return c10::guts::typelist::count_if<
-        details::is_output_arg,
-        typename Schema::signature::parameter_types>::value;
+    return Schema::signature::num_outputs;
   }
 
   bool RunOnDevice() override {
@@ -123,8 +120,8 @@ class C10OperatorWrapper final : public Operator<Context> {
       c10::guts::index_sequence<OutputIndex...>,
       c10::guts::index_sequence<ParameterIndex...>) {
     c10::Dispatcher<OpSchemaDef>::call(
-        Input(InputIndex)...,
-        Output(OutputIndex)...,
+        C10Tensor(Input(InputIndex))...,
+        C10Tensor(*Output(OutputIndex))...,
         std::get<ParameterIndex>(parameters_)...,
         state_.get(),
         static_cast<BaseContext*>(&context_));
@@ -143,8 +140,8 @@ class C10OperatorWrapper final : public Operator<Context> {
       c10::guts::index_sequence<OutputIndex...>,
       c10::guts::index_sequence<ParameterIndex...>) {
     c10::Dispatcher<OpSchemaDef>::call(
-        Input(InputIndex)...,
-        Output(OutputIndex)...,
+        C10Tensor(Input(InputIndex))...,
+        C10Tensor(*Output(OutputIndex))...,
         std::get<ParameterIndex>(parameters_)...,
         static_cast<BaseContext*>(&context_));
   }
@@ -162,8 +159,8 @@ class C10OperatorWrapper final : public Operator<Context> {
       c10::guts::index_sequence<OutputIndex...>,
       c10::guts::index_sequence<ParameterIndex...>) {
     c10::Dispatcher<OpSchemaDef>::call(
-        Input(InputIndex)...,
-        Output(OutputIndex)...,
+        C10Tensor(Input(InputIndex))...,
+        C10Tensor(*Output(OutputIndex))...,
         std::get<ParameterIndex>(parameters_)...,
         state_.get());
   }
@@ -181,8 +178,8 @@ class C10OperatorWrapper final : public Operator<Context> {
       c10::guts::index_sequence<OutputIndex...>,
       c10::guts::index_sequence<ParameterIndex...>) {
     c10::Dispatcher<OpSchemaDef>::call(
-        Input(InputIndex)...,
-        Output(OutputIndex)...,
+        C10Tensor(Input(InputIndex))...,
+        C10Tensor(*Output(OutputIndex))...,
         std::get<ParameterIndex>(parameters_)...);
   }
 
@@ -199,8 +196,8 @@ class C10OperatorWrapper final : public Operator<Context> {
       c10::guts::index_sequence<OutputIndex...>,
       c10::guts::index_sequence<ParameterIndex...>) {
     c10::Dispatcher<OpSchemaDef>::call(
-        at::ArrayRef<const Tensor*>(array_inputs_()),
-        Output(OutputIndex)...,
+        at::ArrayRef<C10Tensor>(array_inputs_()),
+        C10Tensor(*Output(OutputIndex))...,
         std::get<ParameterIndex>(parameters_)...,
         state_.get(),
         static_cast<BaseContext*>(&context_));
@@ -219,8 +216,8 @@ class C10OperatorWrapper final : public Operator<Context> {
       c10::guts::index_sequence<OutputIndex...>,
       c10::guts::index_sequence<ParameterIndex...>) {
     c10::Dispatcher<OpSchemaDef>::call(
-        at::ArrayRef<const Tensor*>(array_inputs_()),
-        Output(OutputIndex)...,
+        at::ArrayRef<C10Tensor>(array_inputs_()),
+        C10Tensor(*Output(OutputIndex))...,
         std::get<ParameterIndex>(parameters_)...,
         static_cast<BaseContext*>(&context_));
   }
@@ -238,8 +235,8 @@ class C10OperatorWrapper final : public Operator<Context> {
       c10::guts::index_sequence<OutputIndex...>,
       c10::guts::index_sequence<ParameterIndex...>) {
     c10::Dispatcher<OpSchemaDef>::call(
-        at::ArrayRef<const Tensor*>(array_inputs_()),
-        Output(OutputIndex)...,
+        at::ArrayRef<C10Tensor>(array_inputs_()),
+        C10Tensor(*Output(OutputIndex))...,
         std::get<ParameterIndex>(parameters_)...,
         state_.get());
   }
@@ -257,16 +254,16 @@ class C10OperatorWrapper final : public Operator<Context> {
       c10::guts::index_sequence<OutputIndex...>,
       c10::guts::index_sequence<ParameterIndex...>) {
     c10::Dispatcher<OpSchemaDef>::call(
-        at::ArrayRef<const Tensor*>(array_inputs_()),
-        Output(OutputIndex)...,
+        at::ArrayRef<C10Tensor>(array_inputs_()),
+        C10Tensor(*Output(OutputIndex))...,
         std::get<ParameterIndex>(parameters_)...);
   }
 
-  std::vector<const Tensor*> array_inputs_() {
-    std::vector<const Tensor*> result;
+  std::vector<C10Tensor> array_inputs_() {
+    std::vector<C10Tensor> result;
     result.reserve(InputSize());
     for (size_t i = 0; i < InputSize(); ++i) {
-      result.push_back(&Input(i));
+      result.push_back(C10Tensor(Input(i)));
     }
     return result;
   }
@@ -278,6 +275,7 @@ class C10OperatorWrapper final : public Operator<Context> {
 
 template <class ParameterDef>
 struct ParameterHelper final {
+  using type = typename ParameterDef::type;
   static typename ParameterDef::type parse(const ArgumentHelper& helper) {
     return helper.GetSingleArgument<typename ParameterDef::type>(
         ParameterDef::name(), ParameterDef::default_value());

@@ -7,11 +7,9 @@ namespace caffe2 {
 
 class StringJoinOpTest : public testing::Test {
  public:
-  bool runOp(const TensorCPU& input) {
+  bool runOp(const Tensor& input) {
     auto* blob = ws_.CreateBlob("X");
-    auto* tensor = BlobGetMutableTensor(blob, CPU);
-    tensor->ResizeLike(input);
-    tensor->ShareData(input);
+    BlobSetTensor(blob, input.Alias());
 
     OperatorDef def;
     def.set_name("test");
@@ -28,9 +26,9 @@ class StringJoinOpTest : public testing::Test {
     EXPECT_NE(output, nullptr);
     EXPECT_TRUE(BlobIsTensorType(*output, CPU));
     const auto& outputTensor = output->Get<TensorCPU>();
-    EXPECT_EQ(outputTensor.ndim(), 1);
-    EXPECT_EQ(outputTensor.dim(0), outputSize);
-    EXPECT_EQ(outputTensor.size(), outputSize);
+    EXPECT_EQ(outputTensor.dim(), 1);
+    EXPECT_EQ(outputTensor.size(0), outputSize);
+    EXPECT_EQ(outputTensor.numel(), outputSize);
     return outputTensor.data<std::string>();
   }
 

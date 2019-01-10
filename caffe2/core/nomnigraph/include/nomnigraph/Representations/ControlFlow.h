@@ -19,6 +19,9 @@ class BasicBlock {
  public:
   using NodeRef = typename Subgraph<T, U...>::NodeRef;
   BasicBlock() {}
+  BasicBlock(const BasicBlock&) = delete;
+  BasicBlock(BasicBlock&&) = default;
+  BasicBlock& operator=(const BasicBlock&) = delete;
   ~BasicBlock() {
     for (auto pair : callbacks_) {
       pair.first->deleteDestructorCallback(pair.second);

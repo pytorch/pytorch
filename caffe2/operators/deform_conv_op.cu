@@ -394,8 +394,9 @@ __global__ void deformable_col2im_gpu_kernel(
     for (int dy = -2; dy <= 2; dy++) {
       for (int dx = -2; dx <= 2; dx++) {
         if (cur_h + dy >= 0 && cur_h + dy < height && cur_w + dx >= 0 &&
-            cur_w + dx < width && abs(cur_inv_h_data - (cur_h + dy)) < 1 &&
-            abs(cur_inv_w_data - (cur_w + dx)) < 1) {
+            cur_w + dx < width &&
+            c10::cuda::compat::abs(cur_inv_h_data - (cur_h + dy)) < 1 &&
+            c10::cuda::compat::abs(cur_inv_w_data - (cur_w + dx)) < 1) {
           int cur_bottom_grad_pos =
               (c * height + cur_h + dy) * width + cur_w + dx;
           DType weight = get_gradient_weight(

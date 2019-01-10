@@ -147,7 +147,7 @@ class TreeWalker {
     }
 
     inline const TypeMeta& meta() const {
-      return walker_.input(fieldId_).meta();
+      return walker_.input(fieldId_).dtype();
     }
 
     inline void* ptr() const {

@@ -1,7 +1,9 @@
 #pragma once
+
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/stack.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <string>
 #include <memory>
@@ -18,6 +20,7 @@ namespace jit {
 /// For example:
 /// \rst
 /// .. code-block:: cpp
+///
 ///   auto module = torch::jit::compile(R"JIT(
 ///     def relu_script(a, b):
 ///       return torch.relu(a + b)
@@ -29,7 +32,7 @@ namespace jit {
 ///   )JIT");
 ///   IValue output = module->run_method("relu_script", a, b);
 /// \endrst
-std::shared_ptr<script::Module> compile(const std::string& source);
+TORCH_API std::shared_ptr<script::Module> compile(const std::string& source);
 
 } // namespace jit
 } // namespace torch

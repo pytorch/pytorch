@@ -2,17 +2,31 @@
 
 namespace caffe2 {
 
+template <typename DstType, typename SrcType>
+struct CastHelper {
+  static DstType call(SrcType data) {
+    return static_cast<DstType>(data);
+  }
+};
+
+template <typename SrcType>
+struct CastHelper<std::string, SrcType> {
+  static std::string call(SrcType data) {
+    return caffe2::to_string(data);
+  }
+};
+
 template <>
 template <typename DstType, typename SrcType>
 bool CastOp<CPUContext>::DoRunWithType() {
   auto& input = Input(0);
-  auto* output = Output(0);
-  output->ResizeLike(input);
+
+  auto* output = Output(0, input.sizes(), at::dtype<DstType>());
   const auto* data = input.template data<SrcType>();
   auto* out = output->template mutable_data<DstType>();
-  auto N = input.size();
+  auto N = input.numel();
   for (int64_t i = 0; i < N; ++i) {
-    out[i] = static_cast<DstType>(data[i]);
+    out[i] = CastHelper<DstType, SrcType>::call(data[i]);
   }
   return true;
 }
@@ -31,8 +45,8 @@ void CastOp<CPUContext>::SetBody(TensorProto_DataType to) {
       LOG(FATAL) << "BYTE is deprecated";
       break;
     case TensorProto_DataType_STRING:
-      CAFFE_THROW("Casting to and from strings is not supported yet");
-      // break;
+      body_ = &CastOp<CPUContext>::DoRunWithDstType<std::string>;
+      break;
     case TensorProto_DataType_BOOL:
       body_ = &CastOp<CPUContext>::DoRunWithDstType<bool>;
       break;
@@ -55,7 +69,7 @@ void CastOp<CPUContext>::SetBody(TensorProto_DataType to) {
       CAFFE_THROW("Casting to and from at::Half on CPU is not supported yet");
       // break;
     case TensorProto_DataType_DOUBLE:
-      //body_ = &CastOp::DoRunIncFp16WithDstType<double>;
+      // body_ = &CastOp::DoRunIncFp16WithDstType<double>;
       body_ = &CastOp<CPUContext>::DoRunWithDstType<double>;
       break;
     case TensorProto_DataType_UNDEFINED:
@@ -104,7 +118,8 @@ enum field in the TensorProto message (see below). If the `to` argument is not
 provided or is not one of the enumerated types in *DataType*, Caffe2 throws an
 Enforce error.
 
-NOTE: Casting to and from strings is not supported yet.
+NOTE: Casting from strings is not supported, and casting to strings is only
+supported on CPU.
 
 TensorProto *DataType* field:
 ```

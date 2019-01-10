@@ -105,7 +105,7 @@ inline bool getShouldStop(const Blob* b) {
   }
 
   const auto& t = b->Get<TensorCPU>();
-  CAFFE_ENFORCE(t.IsType<bool>() && t.size() == 1, "expects a scalar boolean");
+  CAFFE_ENFORCE(t.IsType<bool>() && t.numel() == 1, "expects a scalar boolean");
   return *(t.template data<bool>());
 }
 

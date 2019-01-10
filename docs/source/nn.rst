@@ -744,6 +744,12 @@ DataParallel layers (multi-GPU, distributed)
 .. autoclass:: torch.nn.parallel.DistributedDataParallel
     :members:
 
+:hidden:`DistributedDataParallelCPU`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: torch.nn.parallel.DistributedDataParallelCPU
+    :members:
+
 
 Utilities
 ---------
@@ -787,6 +793,11 @@ Utilities
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: torch.nn.utils.remove_spectral_norm
+
+:hidden:`one_hot`
+~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.one_hot
 
 
 .. currentmodule:: torch.nn.utils.rnn

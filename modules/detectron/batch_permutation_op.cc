@@ -15,14 +15,14 @@
  */
 
 #include "batch_permutation_op.h"
-#ifdef CAFFE2_USE_IDEEP
+#ifdef CAFFE2_USE_MKLDNN
 #include <caffe2/ideep/operators/operator_fallback_ideep.h>
 #include <caffe2/ideep/utils/ideep_operator.h>
 #endif
 
 namespace caffe2 {
 
-#ifdef CAFFE2_USE_IDEEP
+#ifdef CAFFE2_USE_MKLDNN
 REGISTER_IDEEP_OPERATOR(
     BatchPermutation,
     IDEEPFallbackOp<BatchPermutationOp<float, CPUContext>>);
@@ -78,9 +78,8 @@ template <>
 bool BatchPermutationOp<float, CPUContext>::RunOnDevice() {
   const auto& X = Input(0);
   const auto& indices = Input(1);
-  auto* Y = Output(0);
 
-  CAFFE_ENFORCE_EQ(indices.ndim(), 1, "indices must be 1-d");
+  CAFFE_ENFORCE_EQ(indices.dim(), 1, "indices must be 1-d");
   CAFFE_ENFORCE_EQ(
     X.dim32(0), indices.dim32(0),
     "X.dim32(0) must be equal to indices.dim32(0)",
@@ -90,7 +89,7 @@ bool BatchPermutationOp<float, CPUContext>::RunOnDevice() {
     indices.dim32(0),
     ")");
 
-  Y->ResizeLike(X);
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
 
   const int N = X.dim32(0);
   const int C = X.dim32(1);

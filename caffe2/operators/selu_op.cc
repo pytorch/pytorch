@@ -8,11 +8,12 @@ namespace caffe2 {
 template <>
 bool SeluOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
-  auto* Y = Output(0);
-  Y->ResizeLike(X);
 
-  ConstEigenVectorArrayMap<float> Xvec(X.data<float>(), X.size());
-  EigenVectorArrayMap<float> Yvec(Y->template mutable_data<float>(), Y->size());
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
+
+  ConstEigenVectorArrayMap<float> Xvec(X.data<float>(), X.numel());
+  EigenVectorArrayMap<float> Yvec(
+      Y->template mutable_data<float>(), Y->numel());
   Yvec = lambda_ * (Xvec > 0).select(Xvec, (alpha_ * Xvec.exp() - alpha_));
   return true;
 }
@@ -21,14 +22,14 @@ template <>
 bool SeluGradientOp<float, CPUContext>::RunOnDevice() {
   auto& Y = Input(0);
   auto& dY = Input(1);
-  auto* dX = Output(0);
-  CAFFE_ENFORCE_EQ(dY.size(), Y.size());
-  dX->ResizeLike(Y);
 
-  ConstEigenVectorArrayMap<float> Yvec(Y.data<float>(), Y.size());
-  ConstEigenVectorArrayMap<float> dYvec(dY.data<float>(), dY.size());
+  CAFFE_ENFORCE_EQ(dY.numel(), Y.numel());
+  auto* dX = Output(0, Y.sizes(), at::dtype<float>());
+
+  ConstEigenVectorArrayMap<float> Yvec(Y.data<float>(), Y.numel());
+  ConstEigenVectorArrayMap<float> dYvec(dY.data<float>(), dY.numel());
   EigenVectorArrayMap<float> dXvec(
-      dX->template mutable_data<float>(), dX->size());
+      dX->template mutable_data<float>(), dX->numel());
 
   const float la = lambda_ * alpha_;
   dXvec = (Yvec > 0).select(lambda_ * dYvec, dYvec * (Yvec + la));

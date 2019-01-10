@@ -42,6 +42,6 @@ struct is_module_holder_of_impl<true, T, C>
 // Helper template.
 template <typename T, typename C>
 struct is_module_holder_of : is_module_holder_of_impl<
-                                 detail::is_module_holder<T>::value,
-                                 torch::decay_t<T>,
-                                 torch::decay_t<C>> {};
+                                 is_module_holder<T>::value,
+                                 decay_t<T>,
+                                 decay_t<C>> {};

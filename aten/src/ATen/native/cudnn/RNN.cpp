@@ -549,7 +549,7 @@ namespace {
   void _copyParams(MatrixRef<Tensor> params_from, MatrixRef<Tensor> params_to) {
     _viewOrCopyParams(params_from, params_to, true);
   }
-  
+
   void _viewParams(MatrixRef<Tensor> params_from, MatrixRef<Tensor> params_to) {
     _viewOrCopyParams(params_from, params_to, false);
   }
@@ -581,8 +581,9 @@ namespace {
 #else
       cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
       const int64_t bsize = tensors.mini_batch;
-      if (prop->major == 7 && rnn.datatype == CUDNN_DATA_HALF && !tensors.is_input_packed()) {
-          if (rnn.num_layers == 1 && rnn.hidden_size <= 1024 && rnn.num_directions() == 1 && 
+      //excluding Turing from using persistent rnn.
+      if (prop->major == 7 && prop->minor != 5 && rnn.datatype == CUDNN_DATA_HALF && !tensors.is_input_packed()) {
+          if (rnn.num_layers == 1 && rnn.hidden_size <= 1024 && rnn.num_directions() == 1 &&
                   rnn.hidden_size % 128 == 0 && tensors.input_size % 128 == 0){
               //technically, batch size should be multiple of 8, but there are quite a few multiple-of-8 batchsizes that give bad perf,
               //weed them out
@@ -1119,7 +1120,7 @@ struct DropoutState {
     // could then define it before we get to unlock().
     mutex.lock();
     if (event) {
-      cuda::getCurrentCUDAStream().synchronize_with(*event);
+      event->block(cuda::getCurrentCUDAStream());
     }
   }
 

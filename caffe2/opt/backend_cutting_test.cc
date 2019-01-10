@@ -11,10 +11,10 @@ namespace {
   void AddConv(caffe2::NetDef* net, int tick) {
     auto* op = net->add_op();
     op->set_type("MyConv");
-    op->add_input("N" + caffe2::to_string(tick));
-    op->add_input("W" + caffe2::to_string(tick));
-    op->add_input("b" + caffe2::to_string(tick));
-    op->add_output("N" + caffe2::to_string(tick+1));
+    op->add_input("N" + c10::to_string(tick));
+    op->add_input("W" + c10::to_string(tick));
+    op->add_input("b" + c10::to_string(tick));
+    op->add_output("N" + c10::to_string(tick + 1));
   }
 
   bool Supports(const caffe2::OperatorDef& op) {

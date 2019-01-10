@@ -6,10 +6,10 @@ namespace caffe2 {
 template <>
 bool ClipOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
-  auto* Y = Output(0);
-  Y->ResizeLike(X);
-  EigenVectorMap<float>(Y->template mutable_data<float>(), Y->size()) =
-      ConstEigenVectorMap<float>(X.data<float>(), X.size())
+
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
+  EigenVectorMap<float>(Y->template mutable_data<float>(), Y->numel()) =
+      ConstEigenVectorMap<float>(X.data<float>(), X.numel())
           .cwiseMax(min_)
           .cwiseMin(max_);
   return true;
@@ -19,21 +19,21 @@ template <>
 bool ClipGradientOp<float, CPUContext>::RunOnDevice() {
   auto& Y = Input(0);
   auto& dY = Input(1);
-  auto* dX = Output(0);
-  CAFFE_ENFORCE_GT(Y.size(), 0);
-  CAFFE_ENFORCE_EQ(dY.size(), Y.size());
-  dX->ResizeLike(Y);
+
+  CAFFE_ENFORCE_GE(Y.numel(), 0);
+  CAFFE_ENFORCE_EQ(dY.numel(), Y.numel());
+  auto* dX = Output(0, Y.sizes(), at::dtype<float>());
   const float* Ydata = Y.data<float>();
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->template mutable_data<float>();
-  for (int i = 0; i < Y.size(); ++i) {
+  for (int i = 0; i < Y.numel(); ++i) {
     dXdata[i] = dYdata[i] * (Ydata[i] > min_ && Ydata[i] < max_);
   }
   return true;
 }
 
 REGISTER_CPU_OPERATOR(Clip, ClipOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(ClipGradient, ClipGradientOp<float, CPUContext>);
+REGISTER_CPU_GRADIENT_OPERATOR(ClipGradient, ClipGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(Clip)
     .NumInputs(1)
@@ -113,7 +113,10 @@ Y: [[45. 20. 59. 60. 48.]
         "*(Tensor`<float>`)* Output tensor clipped within range [`min`, `max`].")
     .InheritOnnxSchema();
 
-OPERATOR_SCHEMA(ClipGradient).NumInputs(2).NumOutputs(1).AllowInplace({{1, 0}});
+GRADIENT_OPERATOR_SCHEMA(ClipGradient)
+    .NumInputs(2)
+    .NumOutputs(1)
+    .AllowInplace({{1, 0}});
 
 class GetClipGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

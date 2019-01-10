@@ -1,20 +1,19 @@
 #pragma once
 
 #include <ATen/CPUGeneral.h>
-#include "ATen/CUDAStream.h"
-#include "ATen/Type.h"
-#include "ATen/TypeExtendedInterface.h"
-#include "ATen/Utils.h"
-#include "ATen/core/ATenGeneral.h"
-#include "ATen/core/Generator.h"
-#include "ATen/core/LegacyTypeDispatch.h"
-#include "ATen/core/VariableHooksInterface.h"
-#include "ATen/detail/CUDAHooksInterface.h"
-#include "ATen/detail/ComplexHooksInterface.h"
-#include "c10/util/Exception.h"
-
-// This is temporary
-#include "ATen/core/ATenCoreTest.h"
+#include <ATen/Type.h>
+#include <ATen/TypeExtendedInterface.h>
+#include <ATen/Utils.h>
+#include <ATen/LegacyTHDispatch.h>
+#include <ATen/LegacyTHDispatcher.h>
+#include <ATen/core/ATenGeneral.h>
+#include <ATen/core/Generator.h>
+#include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/core/VariableHooksInterface.h>
+#include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/detail/HIPHooksInterface.h>
+#include <ATen/detail/ComplexHooksInterface.h>
+#include <c10/util/Exception.h>
 
 #include <memory>
 #include <mutex>
@@ -42,6 +41,9 @@ class CAFFE2_API Context {
   TypeExtendedInterface & getType(Backend p, ScalarType s, bool is_variable) {
     return static_cast<TypeExtendedInterface&>(globalLegacyTypeDispatch().getType(p, s, is_variable));
   }
+  LegacyTHDispatcher& getLegacyTHDispatcher(Backend p, ScalarType s) {
+    return globalLegacyTHDispatch().getLegacyTHDispatcher(p, s);
+  }
   // The passed in Type must be delete'able
   // TODO: Just make it take a unique_ptr
   void registerType(Backend b, ScalarType s, Type* t) {
@@ -49,8 +51,14 @@ class CAFFE2_API Context {
       LegacyTypeDispatch::TypeUniquePtr{t, LegacyTypeDeleter([](Type* p) { delete p; }) });
   }
 
+  void registerLegacyTHDispatcher(Backend b, ScalarType s, LegacyTHDispatcher* t) {
+    globalLegacyTHDispatch().registerDispatcher(b, s,
+      LegacyTHDispatch::LegacyTHDispatcherUniquePtr{t, LegacyTHDispatcherDeleter([](LegacyTHDispatcher* p) { delete p; }) });
+  }
+
   Generator & defaultGenerator(DeviceType device_type) {
     initCUDAIfNeeded(device_type);
+    initHIPIfNeeded(device_type);
     auto & generator = generator_registry[static_cast<int>(device_type)];
     if(!generator)
       AT_ERROR(DeviceTypeName(device_type), " backend type not enabled.");
@@ -64,11 +72,8 @@ class CAFFE2_API Context {
   bool hasCUDA() const {
     return detail::getCUDAHooks().hasCUDA();
   }
-  bool hasCuDNN() const {
-    return detail::getCUDAHooks().hasCuDNN();
-  }
-  int64_t current_device() const {
-    return detail::getCUDAHooks().current_device();
+  bool hasHIP() const {
+    return detail::getHIPHooks().hasHIP();
   }
   // defined in header so that getNonVariableType has ability to inline
   // call_once check. getNonVariableType is called fairly frequently
@@ -81,6 +86,15 @@ class CAFFE2_API Context {
     });
     return thc_state.get();
   }
+  THHState* lazyInitHIP() {
+    std::call_once(thh_init,[&] {
+      thh_state = detail::getHIPHooks().initHIP();
+      generator_registry[static_cast<int>(DeviceType::HIP)] =
+        detail::getHIPHooks().initHIPGenerator(this);
+      detail::getHIPHooks().registerHIPTypes(this);
+    });
+    return thh_state.get();
+  }
   void lazyInitComplex() {
     std::call_once(complex_init_, [&] {
       detail::getComplexHooks().registerComplexTypes(this);
@@ -91,10 +105,10 @@ class CAFFE2_API Context {
     // AT_ASSERT(thc_state);
     return thc_state.get();
   }
-
-  int getNumGPUs() const {
-    return detail::getCUDAHooks().getNumGPUs();
+  THHState* getTHHState() {
+    return thh_state.get();
   }
+
   size_t freshTypeID() {
     return next_id++;
   }
@@ -118,18 +132,25 @@ private:
       lazyInitCUDA();
     }
   }
+  void initHIPIfNeeded(DeviceType p) {
+    if (p == DeviceType::HIP) {
+      lazyInitHIP();
+    }
+  }
   void initComplexIfNeeded(ScalarType s) {
     if (isComplexType(s)) {
       lazyInitComplex();
     }
   }
   std::once_flag thc_init;
+  std::once_flag thh_init;
   std::once_flag complex_init_;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
   bool benchmark_cudnn = false;
   std::atomic<size_t> next_id;
   std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
+  std::unique_ptr<THHState, void(*)(THHState*)> thh_state;
   friend struct Type;
 };
 
@@ -167,12 +188,19 @@ static inline TypeExtendedInterface& CUDA(ScalarType s) {
   return getNonVariableType(Backend::CUDA, s);
 }
 
+static inline TypeExtendedInterface& HIP(ScalarType s) {
+  return getNonVariableType(Backend::HIP, s);
+}
+
+CAFFE2_API LegacyTHDispatcher& getLegacyTHDispatcher(TensorOptions options);
+CAFFE2_API LegacyTHDispatcher& getLegacyTHDispatcher(const Tensor&);
+
 static inline bool hasCUDA() {
   return globalContext().hasCUDA();
 }
 
-static inline bool hasCuDNN() {
-  return globalContext().hasCuDNN();
+static inline bool hasHIP() {
+  return globalContext().hasHIP();
 }
 
 static inline bool hasMKL() {
@@ -187,8 +215,13 @@ static inline bool hasMAGMA() {
   return globalContext().hasMAGMA();
 }
 
-static inline int64_t current_device() {
-  return globalContext().current_device();
+static inline void manual_seed(uint64_t seed) {
+  globalContext().defaultGenerator(DeviceType::CPU).manualSeed(seed);
+  // NB: Sometimes we build with CUDA, but we don't have any GPUs
+  // available. In that case, we must not seed CUDA; it will fail!
+  if (hasCUDA() && detail::getCUDAHooks().getNumGPUs() > 0) {
+    globalContext().defaultGenerator(DeviceType::CUDA).manualSeedAll(seed);
+  }
 }
 
 } // namespace at

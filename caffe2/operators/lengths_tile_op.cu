@@ -22,14 +22,13 @@ template <>
 bool LengthsTileOp<CUDAContext>::RunOnDevice() {
   auto& data = Input(DATA);
   auto& lengths = Input(LENGTHS);
-  auto* output = Output(0);
+  
 
   CAFFE_ENFORCE_EQ(lengths.ndim(), 1, "LENGTHS must be 1-D");
   CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
   CAFFE_ENFORCE_EQ(lengths.size(), data.dim(0));
 
-  lengths_host_.CopyFrom(lengths, &context_);
-  context_.FinishDeviceComputation();
+  lengths_host_.CopyFrom(lengths); // sync copy
   auto lengths_size = lengths_host_.size();
   auto* lengths_data = lengths_host_.data<int32_t>();
 
@@ -38,9 +37,9 @@ bool LengthsTileOp<CUDAContext>::RunOnDevice() {
   math::Sum<int32_t, CPUContext>(
       lengths_size, lengths_data, &total_length, &cpuContext);
 
-  auto shape = data.dims().vec();
+  auto shape = data.sizes().vec();
   shape[0] = total_length;
-  output->Resize(shape);
+  auto* output = Output(0, shape, at::dtype<float>());
 
   auto numElementsPerRow = data.size_from_dim(1);
   auto numElements = total_length * numElementsPerRow;

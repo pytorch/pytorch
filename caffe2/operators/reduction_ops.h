@@ -23,17 +23,17 @@ class SumElementsOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& X = Input(0);
-    auto* sum = Output(0);
-    sum->Resize(vector<int64_t>());
+
+    auto* sum = Output(0, vector<int64_t>(), at::dtype<T>());
 
     T* data = sum->template mutable_data<T>();
 
     math::Sum<T, Context>(
-        X.size(), X.template data<T>(), data, &context_, &scratch_);
-    if (average_ && X.size() > 0) {
+        X.numel(), X.template data<T>(), data, &context_, &scratch_);
+    if (average_ && X.numel() > 0) {
       math::Scale<float, T, Context>(
           1,
-          static_cast<T>(1.) / X.size(),
+          static_cast<T>(1.) / X.numel(),
           sum->template data<T>(),
           data,
           &context_);
@@ -57,11 +57,11 @@ class SumElementsIntOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& X = Input(0);
-    auto* sum = Output(0);
-    sum->Resize(vector<int64_t>());
+
+    auto* sum = Output(0, vector<int64_t>(), at::dtype<T>());
     T* data = sum->template mutable_data<T>();
     math::Sum<T, Context>(
-        X.size(), X.template data<T>(), data, &context_, &scratch_);
+        X.numel(), X.template data<T>(), data, &context_, &scratch_);
     return true;
   }
 
@@ -104,18 +104,18 @@ class SumSqrElementsOp : public Operator<Context> {
   bool DoRunWithType() {
     bool average = this->template GetSingleArgument<bool>("average", false);
     auto& X = Input(0);
-    auto* sum = Output(0);
-    sum->Resize(vector<int64_t>());
+
+    auto* sum = Output(0, vector<int64_t>(), at::dtype<T>());
     math::SumSqr<T, Context>(
-        X.size(),
+        X.numel(),
         X.template data<T>(),
         sum->template mutable_data<T>(),
         &context_,
         &scratch_);
-    if (average && X.size() > 0) {
+    if (average && X.numel() > 0) {
       math::Scale<float, T, Context>(
           1,
-          float(1.) / X.size(),
+          float(1.) / X.numel(),
           sum->template data<T>(),
           sum->template mutable_data<T>(),
           &context_);
@@ -135,14 +135,13 @@ class MaxReductionOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& X = Input(0);
-    CAFFE_ENFORCE_EQ(X.ndim(), 3);
+    CAFFE_ENFORCE_EQ(X.dim(), 3);
 
     const int batch_size = X.dim32(0);
     const int M = X.dim32(1);
     const int N = X.dim32(2);
 
-    auto* Y = Output(0);
-    ROWWISE ? Y->Resize(batch_size, M) : Y->Resize(batch_size, N);
+    auto* Y = Output(0, {batch_size, ROWWISE ? M : N}, at::dtype<T>());
 
     if (ROWWISE) {
       math::RowwiseMax<T, Context>(

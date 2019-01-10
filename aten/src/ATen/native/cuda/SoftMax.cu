@@ -1,14 +1,14 @@
-#include "ATen/ATen.h"
-#include "ATen/cuda/CUDAContext.h"
-#include "ATen/TensorUtils.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/WrapDimUtils.h"
+#include <ATen/ATen.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/WrapDimUtils.h>
 #include <THC/THCTensorMathReduce.cuh>
 #include <THC/THCTensorSort.cuh>
 #include <THC/THCThrustAllocator.cuh>
 
-#include "ATen/AccumulateType.h"
-#include "ATen/cuda/NumericLimits.cuh"
+#include <ATen/AccumulateType.h>
+#include <ATen/cuda/NumericLimits.cuh>
 #include <type_traits>
 
 namespace at {
@@ -594,7 +594,7 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
             &cunn_SpatialSoftMaxBackward<scalar_t, accscalar_t, scalar_t, Epilogue>,
             outer_size, dim_size, inner_size,
             grid, block, smem_size);
-    
+
         cunn_SpatialSoftMaxBackward<scalar_t, accscalar_t, scalar_t, Epilogue>
           <<<grid, block, smem_size, stream>>>(
             gI.data<scalar_t>(), output.data<scalar_t>(), grad.data<scalar_t>(),
@@ -605,7 +605,7 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
             &cunn_SpatialSoftMaxBackward<scalar_t, accscalar_t, accscalar_t, Epilogue>,
             outer_size, dim_size, inner_size,
             grid, block, smem_size);
-    
+
         cunn_SpatialSoftMaxBackward<scalar_t, accscalar_t, accscalar_t, Epilogue>
           <<<grid, block, smem_size, stream>>>(
             gI.data<scalar_t>(), output.data<accscalar_t>(), grad.data<accscalar_t>(),

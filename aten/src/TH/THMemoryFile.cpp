@@ -1,8 +1,8 @@
-#include "THMemoryFile.h"
-#include "THStorageFunctions.hpp"
-#include "THFilePrivate.h"
-#include "THDiskFile.h"
-#include "stdint.h"
+#include <TH/THMemoryFile.h>
+#include <TH/THStorageFunctions.hpp>
+#include <TH/THFilePrivate.h>
+#include <TH/THDiskFile.h>
+#include <stdint.h>
 
 #ifndef _WIN32
 #include <sys/types.h>

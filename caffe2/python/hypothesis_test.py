@@ -2223,36 +2223,6 @@ class TestOperators(hu.HypothesisTestCase):
         for blob, arr in feeds:
             np.testing.assert_array_equal(ws.blobs[blob].fetch(), arr)
 
-    @given(sizes=st.lists(st.integers(1, 100), min_size=1),
-           in_place=st.booleans(),
-           **hu.gcs)
-    def test_unsafe_coalesce(self, sizes, in_place, gc, dc):
-        gAlignment = 64
-        Xs = [np.random.randn(size)
-              .astype(np.random.choice([np.float32, np.float64, np.uint8]))
-              for size in sizes]
-        op = core.CreateOperator(
-            "UnsafeCoalesce",
-            ["X_{}".format(i) for i, _ in enumerate(sizes)],
-            [("X_{}" if in_place else "Y_{}").format(i)
-             for i, _ in enumerate(sizes)] + ["coalesced"])
-        self.assertDeviceChecks(dc, op, Xs, list(range(len(sizes) + 1)))
-
-        def unsafe_coalesce(*xs):
-            def to_uint8(x):
-                x_aligned_bytes = ((x.nbytes + gAlignment - 1) // gAlignment) \
-                    * gAlignment
-                x_aligned = np.zeros(
-                    shape=(x_aligned_bytes // x.dtype.itemsize, ),
-                    dtype=x.dtype)
-                x_aligned[:x.size] = x
-                x_cast = np.fromstring(x_aligned.tobytes(), dtype='<u1')
-                return x_cast
-            flat = [to_uint8(x) for x in xs]
-            coalesced = np.concatenate(flat)
-            return list(xs) + [coalesced]
-        self.assertReferenceChecks(gc, op, Xs, unsafe_coalesce)
-
     @given(inp=_dtypes().flatmap(lambda dt: _tensor_and_indices(
         elements=st.floats(min_value=0, max_value=1), dtype=dt)),
         **hu.gcs)

@@ -1,20 +1,20 @@
-#include "torch/csrc/autograd/generated/VariableType.h"
+#include <torch/csrc/autograd/generated/VariableType.h>
 
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/edge.h"
-#include "torch/csrc/autograd/grad_mode.h"
-#include "torch/csrc/autograd/saved_variable.h"
-#include "torch/csrc/autograd/generated/Functions.h"
-#include "torch/csrc/autograd/functions/tensor.h"
-#include "torch/csrc/autograd/functions/basic_ops.h"
-#include "torch/csrc/jit/tracer.h"
-#include "torch/csrc/jit/constants.h"
-#include "torch/csrc/jit/symbolic_variable.h"
-#include "torch/csrc/jit/ir.h"
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/edge.h>
+#include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/saved_variable.h>
+#include <torch/csrc/autograd/generated/Functions.h>
+#include <torch/csrc/autograd/functions/tensor.h>
+#include <torch/csrc/autograd/functions/basic_ops.h>
+#include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/symbolic_variable.h>
+#include <torch/csrc/jit/ir.h>
 
-#include "torch/csrc/utils/variadic.h"
-#include "torch/csrc/autograd/functions/utils.h"
+#include <torch/csrc/utils/variadic.h>
+#include <torch/csrc/autograd/functions/utils.h>
 
 #include <ATen/core/VariableHooksInterface.h>
 
@@ -65,13 +65,13 @@ inline void rebase_history(Variable& var, std::shared_ptr<Function> grad_fn) {
   }
 }
 
-inline void rebase_history(ArrayRef<Variable> vars, std::shared_ptr<Function> grad_fn) {
+inline void rebase_history(std::vector<Variable>&& vars, std::shared_ptr<Function> grad_fn) {
   if (grad_fn) {
     for (auto& var : vars) {
       if (var.defined()) {
         // TODO: eliminate const_cast
         auto output_nr = grad_fn->add_input_metadata(var);
-        const_cast<Variable&>(var).rebase_history({grad_fn, output_nr});
+        var.rebase_history({std::move(grad_fn), output_nr});
       } else {
         grad_fn->add_input_metadata(Function::undefined_input());
       }
@@ -103,21 +103,24 @@ template<typename... Args> inline variable_list flatten_tensor_args(Args&&... ar
   return out; // RVO
 }
 
-inline Tensor as_view(const Tensor & base, Tensor tensor) {
+// See NOTE [ Autograd View Variables ] for details.
+inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable = true) {
   auto base_var = Variable(base);
   if (base_var.is_view()) {
     base_var = base_var.base();
   }
-  return make_variable_view(std::move(base_var), std::move(tensor));
+  return make_variable_view(std::move(base_var), std::move(tensor), is_differentiable);
 }
 
-inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tensors) {
+// See NOTE [ Autograd View Variables ] for details.
+inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tensors,
+                                   bool is_differentiable = true) {
   auto base_var = Variable(base);
   if (base_var.is_view()) {
     base_var = base_var.base();
   }
   for(Tensor &tensor : tensors) {
-    tensor = make_variable_view(base_var, std::move(tensor));
+    tensor = make_variable_view(base_var, std::move(tensor), is_differentiable);
   }
   return tensors;
 }
@@ -129,6 +132,12 @@ inline void check_no_requires_grad(const Tensor& tensor, const char* name) {
     msg += name;
     msg += "' is not implemented";
     throw std::runtime_error(msg);
+  }
+}
+
+inline void check_no_requires_grad(TensorList tensors, const char* name) {
+  for (auto& tensor : tensors) {
+    check_no_requires_grad(tensor, name);
   }
 }
 
@@ -144,7 +153,7 @@ inline Tensor as_variable(Tensor tensor) {
 
 inline std::vector<Tensor> as_variable(TensorList tl) {
   return fmap(tl, [](const Tensor& t) -> Tensor {
-      return make_variable(std::move(t), /*requires_grad=*/false);
+      return make_variable(t, /*requires_grad=*/false);
   });
 }
 

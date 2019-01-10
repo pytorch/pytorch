@@ -7,10 +7,11 @@
 #include <unordered_map>
 
 #include <ATen/core/ATenGeneral.h>
-#include <ATen/core/Allocator.h>
-#include <ATen/core/typeid.h>
+#include <c10/core/Allocator.h>
+#include <c10/util/typeid.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
+#include <c10/core/CopyBytes.h>
 
 namespace caffe2 {
 class Event;
@@ -62,25 +63,6 @@ class CAFFE2_API BaseContext {
   virtual void CopyBytesFromCPU(size_t nbytes, const void* src, void* dst) = 0;
 
   virtual void CopyBytesToCPU(size_t nbytes, const void* src, void* dst) = 0;
-
-  virtual void CopyBytesToDevice(
-      size_t nbytes,
-      const void* src,
-      void* dst,
-      DeviceType type) {
-    if (type == DeviceType::CPU) {
-      CopyBytesToCPU(nbytes, src, dst);
-    } else if (type == device_type()) {
-      CopyBytesSameDevice(nbytes, src, dst);
-    } else {
-      AT_ERROR(
-          "CopyBytesToDevice can only copy to CPU or between same "
-          "device. Can't copy from: ",
-          device_type(),
-          " to",
-          type);
-    }
-  }
 
   template <typename T>
   inline void CopySameDevice(size_t n, const T* src, T* dst) {
@@ -178,5 +160,5 @@ inline std::unique_ptr<at::BaseContext> CreateContext(
 namespace caffe2 {
 
 using at::BaseContext;
-
+using at::CreateContext;
 } // namespace caffe2

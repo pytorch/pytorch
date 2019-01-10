@@ -12,10 +12,15 @@ import unittest
 import subprocess
 import itertools
 from torch import multiprocessing as mp
-from torch.utils.data import Dataset, TensorDataset, DataLoader, ConcatDataset
+from torch.utils.data import _utils, Dataset, TensorDataset, DataLoader, ConcatDataset
+from torch.utils.data._utils import ExceptionWrapper, MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
-from torch.utils.data.dataloader import default_collate, ExceptionWrapper, MP_STATUS_CHECK_INTERVAL
-from common_utils import TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm
+from common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, IS_PPC, NO_MULTIPROCESSING_SPAWN,
+                          skipIfRocm, load_tests)
+
+# load_tests from common_utils is used to automatically filter tests for
+# sharding on sandcastle. This line silences flake warnings
+load_tests = load_tests
 
 # We cannot import TEST_CUDA from common_cuda here, because if we do that,
 # the TEST_CUDNN line from common_cuda will be executed multiple times
@@ -29,7 +34,7 @@ if not NO_MULTIPROCESSING_SPAWN:
     mp = mp.get_context(method='spawn')
 
 
-JOIN_TIMEOUT = 17.0 if IS_WINDOWS else 8.5
+JOIN_TIMEOUT = 17.0 if IS_WINDOWS or IS_PPC else 8.5
 
 
 class TestDatasetRandomSplit(TestCase):
@@ -777,22 +782,61 @@ class TestDataLoader(TestCase):
             batch = next(iter(loader))
             self.assertIsInstance(batch, tt)
 
+    def test_default_collate_dtype(self):
+        arr = [1, 2, -1]
+        collated = _utils.collate.default_collate(arr)
+        self.assertEqual(collated, torch.tensor(arr))
+        self.assertEqual(collated.dtype, torch.int64)
+
+        arr = [1.1, 2.3, -0.9]
+        collated = _utils.collate.default_collate(arr)
+        self.assertEqual(collated, torch.tensor(arr))
+        self.assertEqual(collated.dtype, torch.float64)
+
+        arr = [True, False]
+        collated = _utils.collate.default_collate(arr)
+        self.assertEqual(collated, torch.tensor(arr))
+        self.assertEqual(collated.dtype, torch.uint8)
+
+        # Should be a no-op
+        arr = ['a', 'b', 'c']
+        self.assertEqual(arr, _utils.collate.default_collate(arr))
+
     @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
     def test_default_collate_bad_numpy_types(self):
         import numpy as np
 
         # Should be a no-op
         arr = np.array(['a', 'b', 'c'])
-        default_collate(arr)
+        self.assertEqual(arr, _utils.collate.default_collate(arr))
 
         arr = np.array([[['a', 'b', 'c']]])
-        self.assertRaises(TypeError, lambda: default_collate(arr))
+        self.assertRaises(TypeError, lambda: _utils.collate.default_collate(arr))
 
         arr = np.array([object(), object(), object()])
-        self.assertRaises(TypeError, lambda: default_collate(arr))
+        self.assertRaises(TypeError, lambda: _utils.collate.default_collate(arr))
 
         arr = np.array([[[object(), object(), object()]]])
-        self.assertRaises(TypeError, lambda: default_collate(arr))
+        self.assertRaises(TypeError, lambda: _utils.collate.default_collate(arr))
+
+    @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
+    def test_default_collate_shared_tensor(self):
+        import numpy as np
+        t_in = torch.zeros(1)
+        n_in = np.zeros(1)
+
+        self.assertEqual(t_in.is_shared(), False)
+
+        self.assertEqual(_utils.collate.default_collate([t_in]).is_shared(), False)
+        self.assertEqual(_utils.collate.default_collate([n_in]).is_shared(), False)
+
+        old = _utils.collate._use_shared_memory
+        try:
+            _utils.collate._use_shared_memory = True
+            self.assertEqual(_utils.collate.default_collate([t_in]).is_shared(), True)
+            self.assertEqual(_utils.collate.default_collate([n_in]).is_shared(), True)
+        finally:
+            _utils.collate._use_shared_memory = old
 
 
 class StringDataset(Dataset):

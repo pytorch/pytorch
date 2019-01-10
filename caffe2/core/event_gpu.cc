@@ -13,7 +13,7 @@ struct CudaEventWrapper {
         status_(EventStatus::EVENT_INITIALIZED) {
     CAFFE_ENFORCE(option.device_type(), PROTO_CUDA);
     DeviceGuard g(device_id_);
-    CUDA_ENFORCE(cudaEventCreate(
+    CUDA_ENFORCE(cudaEventCreateWithFlags(
         &cuda_event_, cudaEventDefault | cudaEventDisableTiming));
   }
   ~CudaEventWrapper() {

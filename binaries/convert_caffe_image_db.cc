@@ -79,7 +79,7 @@ int main(int argc, char** argv) {
       data->add_dims(datum.channels());
       data->set_byte_data(buffer, datum.data().size());
     }
-    transaction->Put(cursor->key(), protos.SerializeAsString());
+    transaction->Put(cursor->key(), SerializeAsString_EnforceCheck(protos));
     if (++count % FLAGS_batch_size == 0) {
       transaction->Commit();
       LOG(INFO) << "Converted " << count << " items so far.";
@@ -88,4 +88,3 @@ int main(int argc, char** argv) {
   LOG(INFO) << "A total of " << count << " items processed.";
   return 0;
 }
-

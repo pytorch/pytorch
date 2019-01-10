@@ -34,8 +34,8 @@ class FullyConnectedOp final : public Operator<Context> {
     const auto& X = Input(0);
     const auto& W = Input(1);
     const auto& b = Input(2);
-    auto* Y = Output(0);
-    CAFFE_ENFORCE(b.ndim() == 1, b.ndim());
+
+    CAFFE_ENFORCE(b.dim() == 1, b.dim());
     // batch size
     const auto canonical_axis = X.canonical_axis_index(axis_);
     const auto M = X.size_to_dim(canonical_axis);
@@ -48,11 +48,11 @@ class FullyConnectedOp final : public Operator<Context> {
       return c10::str(
           "Dimension mismatch: ",
           "X: ",
-          X.dims(),
+          X.sizes(),
           ", W: ",
-          W.dims(),
+          W.sizes(),
           ", b: ",
-          b.dims(),
+          b.sizes(),
           ", axis: ",
           axis_,
           ", M: ",
@@ -64,20 +64,20 @@ class FullyConnectedOp final : public Operator<Context> {
     };
 
     // Error checking
-    CAFFE_ENFORCE(M == X.size() / K, dimErrorString());
-    CAFFE_ENFORCE(K == W.size() / N, dimErrorString());
+    CAFFE_ENFORCE(M == X.numel() / K, dimErrorString());
+    CAFFE_ENFORCE(K == W.numel() / N, dimErrorString());
     CAFFE_ENFORCE(N == b.dim32(0), dimErrorString());
-    CAFFE_ENFORCE(N == b.size(), dimErrorString());
+    CAFFE_ENFORCE(N == b.numel(), dimErrorString());
 
-    Y_shape_cache_ = X.dims().vec();
+    Y_shape_cache_ = X.sizes().vec();
     // This is an invariant of canonical_axis, so we can DCHECK.
     DCHECK_LE(canonical_axis + 1, Y_shape_cache_.size());
     Y_shape_cache_.resize(canonical_axis + 1);
     Y_shape_cache_[canonical_axis] = N;
-    Y->Resize(Y_shape_cache_);
-    CAFFE_ENFORCE(M * N == Y->size(), dimErrorString());
+    auto* Y = Output(0, Y_shape_cache_, at::dtype<T_Y>());
+    CAFFE_ENFORCE(M * N == Y->numel(), dimErrorString());
 
-    if (X.size() == 0) {
+    if (X.numel() == 0) {
       // skip the rest of the computation if X is empty
       Y->template mutable_data<T_Y>();
       return true;
@@ -104,7 +104,7 @@ class FullyConnectedOp final : public Operator<Context> {
         &context_,
         math_type);
     // Add bias term
-    if (bias_multiplier_.size() != M) {
+    if (bias_multiplier_.numel() != M) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
       bias_multiplier_.Resize(M);
       math::Set<T_B, Context>(
@@ -189,11 +189,11 @@ class FullyConnectedGradientOp : public Operator<Context> {
       return c10::str(
           "Dimension mismatch: ",
           "X: ",
-          X.dims(),
+          X.sizes(),
           ", W: ",
-          W.dims(),
+          W.sizes(),
           ", dY: ",
-          dY.dims(),
+          dY.sizes(),
           ", axis: ",
           axis_,
           ", M: ",
@@ -204,31 +204,27 @@ class FullyConnectedGradientOp : public Operator<Context> {
           K);
     };
 
-    CAFFE_ENFORCE(M * K == X.size(), dimErrorString());
-    CAFFE_ENFORCE(K * N == W.size(), dimErrorString());
+    CAFFE_ENFORCE(M * K == X.numel(), dimErrorString());
+    CAFFE_ENFORCE(K * N == W.numel(), dimErrorString());
 
-    auto* dW = Output(0);
-    auto* db = Output(1);
-    dW->ResizeLike(W);
-    db->Resize(N);
+    auto* dW = Output(0, W.sizes(), at::dtype<T_DW>());
+    auto* db = Output(1, {N}, at::dtype<T_DB>());
 
-    if (X.size() == 0) {
+    if (X.numel() == 0) {
       // generate a zero blob for db and dW when X is empty
       math::Set<T_DB, Context>(
-          db->size(),
+          db->numel(),
           convert::To<float, T_DB>(0),
           db->template mutable_data<T_DB>(),
           &context_);
       math::Set<T_DW, Context>(
-          dW->size(),
+          dW->numel(),
           convert::To<float, T_DW>(0),
           dW->template mutable_data<T_DW>(),
           &context_);
 
       if (OutputSize() == 3) {
-        auto* dX = Output(2);
-        dX->ResizeLike(X);
-        dX->template mutable_data<T_DX>();
+        Output(2, X.sizes(), at::dtype<T_DX>());
       }
 
       return true;
@@ -254,7 +250,7 @@ class FullyConnectedGradientOp : public Operator<Context> {
         dW->template mutable_data<T_DW>(),
         &context_,
         math_type);
-    if (bias_multiplier_.size() != M) {
+    if (bias_multiplier_.numel() != M) {
       // If the helper bias multiplier is not M, reshape and fill it
       // with one.
       bias_multiplier_.Resize(M);
@@ -278,8 +274,7 @@ class FullyConnectedGradientOp : public Operator<Context> {
 
     // Compute dX
     if (OutputSize() == 3) {
-      auto* dX = Output(2);
-      dX->ResizeLike(X);
+      auto* dX = Output(2, X.sizes(), at::dtype<T_DX>());
       math::Gemm<T_DX, Context, Engine>(
           CblasNoTrans,
           TransposeWeight ? CblasNoTrans : CblasTrans,

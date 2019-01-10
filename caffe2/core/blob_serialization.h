@@ -9,7 +9,7 @@
 #include "caffe2/core/blob.h"
 #include "caffe2/core/blob_serializer_base.h"
 #include "caffe2/core/tensor.h"
-#include "caffe2/core/typeid.h"
+#include <c10/util/typeid.h>
 #include "caffe2/core/types.h"
 #include "caffe2/utils/simple_queue.h"
 
@@ -54,6 +54,28 @@ CAFFE2_API string SerializeBlob(const Blob& blob, const string& name);
  */
 CAFFE2_API void DeserializeBlob(const string& content, Blob* result);
 CAFFE2_API void DeserializeBlob(const BlobProto& proto, Blob* result);
+
+/*
+ * Get an empty Tensor from the TensorProto given the meta data in proto (data
+ * type and size of the Tensor) without actually filling in the data.
+ *
+ * We need this function because we want to construct a fully initialized Tensor
+ * in the beginning instead of keeping partially initialized Tensor around the
+ * process. Consider the case when we have a Tensor that is split into multiple
+ * protos during serialization, in deserialization, we have to fill the Tensor
+ * in multiple calls to Deserialize, therefore we need to create a new Tensor
+ * with the correct size and data type before the call to Deserialize, because
+ * otherwise we will have to check whether the function call is the first call
+ * to initialize the underlying Tensor, which makes the function stateful and
+ * complicated.
+ *
+ * The legacy code get away with this problem by passing in a partially
+ * initialized Tensor and use Resize and mutable_data to set the correct size,
+ * data type and allocate memory for the Tensor, so the state is encoded in
+ * these function calls. e.g. mutable_data will allocate memory on the first
+ * call and it will return a pointer to the allocated memory on later calls.
+ */
+CAFFE2_API Tensor EmptyTensorFromProto(const TensorProto& proto);
 
 /**
  * @brief TensorSerializer is the serializer for Tensors.
@@ -106,7 +128,22 @@ class CAFFE2_API TensorSerializer : public BlobSerializerBase {
 class CAFFE2_API TensorDeserializer : public BlobDeserializerBase {
  public:
   void Deserialize(const BlobProto& proto, Blob* blob) override;
-  void Deserialize(const TensorProto& proto, Tensor* tensor);
+
+  /* There are cases when a Tensor is split into multiple protos and
+   * we have to call Deserialize multiple times to get the complete deserialized
+   * Tensor, each call will fill part of the Tensor given the segment begin and
+   * end information in proto, therefore we have to pass in the Tensor pointer
+   * rather than create a new Tensor everytime.
+   *
+   * Precondition: Tensor must be initialized
+   */
+  void DeserializeToTensor(const TensorProto& proto, Tensor* tensor);
+
+  /* Deserialize the proto and return a new Tensor
+   * This is a utility function that combines EmptyTensorFromProto and
+   * Deserialize(const TensorProto&, Tensor*);
+   */
+  Tensor Deserialize(const TensorProto& proto);
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -184,6 +221,24 @@ inline void CopyFromProtoWithCast(
 }
 
 }  // namespace detail
+
+////////////////////////////////////////////////////////////////////////////////
+// Serialization Helpers
+////////////////////////////////////////////////////////////////////////////////
+
+// Converts MessageLite to string while also checking that SerializeAsString
+// succeeds. Pass description of class/function of the call if you'd
+// like it appended to the error message.
+CAFFE2_API std::string SerializeAsString_EnforceCheck(
+    const google::protobuf::MessageLite&,
+    const char* error_location = nullptr);
+
+// Convert BlobProto to string with success checks.
+inline std::string SerializeBlobProtoAsString_EnforceCheck(
+    const BlobProto& blob) {
+  return SerializeAsString_EnforceCheck(blob, blob.name().c_str());
+}
+
 }  // namespace caffe2
 
 #endif  // CAFFE2_CORE_BLOB_SERIALIZATION_H_

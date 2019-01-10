@@ -172,10 +172,10 @@ class ConvPoolOpBase : public Operator<Context> {
     vector<int> dims;
     switch (order_) {
       case StorageOrder::NCHW:
-        dims.assign(input.dims().begin() + 2, input.dims().end());
+        dims.assign(input.sizes().begin() + 2, input.sizes().end());
         break;
       case StorageOrder::NHWC:
-        dims.assign(input.dims().begin() + 1, input.dims().end() - 1);
+        dims.assign(input.sizes().begin() + 1, input.sizes().end() - 1);
         break;
       default:
         CAFFE_THROW("Unknown storage order : ", order_);
@@ -189,15 +189,15 @@ class ConvPoolOpBase : public Operator<Context> {
     switch (order_) {
       case StorageOrder::NCHW:
         size = std::accumulate(
-            input.dims().begin() + 2,
-            input.dims().end(),
+            input.sizes().begin() + 2,
+            input.sizes().end(),
             1,
             std::multiplies<int>());
         break;
       case StorageOrder::NHWC:
         size = std::accumulate(
-            input.dims().begin() + 1,
-            input.dims().end() - 1,
+            input.sizes().begin() + 1,
+            input.sizes().end() - 1,
             1,
             std::multiplies<int>());
         break;
@@ -216,12 +216,12 @@ class ConvPoolOpBase : public Operator<Context> {
   // MKL operator. One can still call this function with dummy
   // Tensor objects in order to obtain the sizes.
   void SetOutputSize(const Tensor& input, Tensor* output, int output_channel) {
-    CAFFE_ENFORCE(input.size() > 0);
+    CAFFE_ENFORCE(input.numel() > 0);
     vector<int> output_dims;
     int N = input.dim32(0);
     bool channel_first;
     InferOutputSize(
-        input.dims(),
+        input.sizes(),
         output_channel,
         order_,
         global_pooling_,
@@ -334,7 +334,7 @@ class ConvPoolOpBase : public Operator<Context> {
   void SetDeviceTensor(const std::vector<int>& data, Tensor* tensor) {
     bool reset_tensor_device_ = false;
 
-    if (tensor->size() != data.size()) {
+    if (tensor->numel() != data.size()) {
       tensor->Resize(data.size());
       reset_tensor_device_ = true;
     } else {
@@ -355,7 +355,7 @@ class ConvPoolOpBase : public Operator<Context> {
 
   template <typename T>
   void SetBiasMultiplier(const int size, Tensor* bias_multiplier_) {
-    if (bias_multiplier_->size() != size) {
+    if (bias_multiplier_->numel() != size) {
       // If the helper bias multiplier is not image size, reshape and fill it
       // with one.
       bias_multiplier_->Resize(std::vector<int64_t>{size});
@@ -406,12 +406,12 @@ class ConvPoolOpBase : public Operator<Context> {
     const auto order =
         StringToStorageOrder(helper.GetSingleArgument<string>("order", "NCHW"));
     uint64_t N;
-    uint64_t Y_t = 1;
     uint64_t Y_h;
-    uint64_t Y_w;
-    uint64_t kernel_t = 1;
+    uint64_t Y_w = 1;
+    uint64_t Y_t = 1;
     uint64_t kernel_h;
-    uint64_t kernel_w;
+    uint64_t kernel_w = 1;
+    uint64_t kernel_t = 1;
     uint64_t in_channels;
     uint64_t out_channels;
 
@@ -430,9 +430,8 @@ class ConvPoolOpBase : public Operator<Context> {
       kernel_w = W.dims(4);
       in_channels = W.dims(1);
       out_channels = W.dims(0);
-    } else {
+    } else if (X.dims_size() == 4) {
       // 2D convolution
-      CAFFE_ENFORCE_EQ(X.dims_size(), 4, "Conv2D should have 4D input tensor");
       CAFFE_ENFORCE_EQ(W.dims_size(), 4, "Conv2D should have 4D filter tensor");
       if (order == StorageOrder::NHWC) {
         Y_h = Y.dims(1);
@@ -446,6 +445,20 @@ class ConvPoolOpBase : public Operator<Context> {
         Y_w = Y.dims(3);
         kernel_h = W.dims(2);
         kernel_w = W.dims(3);
+        in_channels = W.dims(1);
+        out_channels = W.dims(0);
+      }
+    } else {
+      // 1D convolution
+      CAFFE_ENFORCE_EQ(W.dims_size(), 3, "Conv1D should have 3D filter tensor");
+      if (order == StorageOrder::NHWC) {
+        Y_h = Y.dims(1);
+        kernel_h = W.dims(1);
+        in_channels = W.dims(2);
+        out_channels = W.dims(0);
+      } else {
+        Y_h = Y.dims(2);
+        kernel_h = W.dims(2);
         in_channels = W.dims(1);
         out_channels = W.dims(0);
       }

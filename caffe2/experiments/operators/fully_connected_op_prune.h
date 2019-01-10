@@ -135,34 +135,36 @@ namespace caffe2 {
           const auto& W = Input(1);
           const auto& Mask = Input(2);
           const auto& b = Input(3);
-          auto* Y = Output(0);
-          CAFFE_ENFORCE_GE(X.ndim(), 1);
-          CAFFE_ENFORCE_GE(W.ndim(), 2);
-          if (X.ndim() > 2 || W.ndim() > 2) {
+
+          CAFFE_ENFORCE_GE(X.dim(), 1);
+          CAFFE_ENFORCE_GE(W.dim(), 2);
+          if (X.dim() > 2 || W.dim() > 2) {
             VLOG(1) << "Using legacy support for arbitrary input and weight "
               "dimensions.";
           }
-          CAFFE_ENFORCE_EQ(b.ndim(), 1);
+          CAFFE_ENFORCE_EQ(b.dim(), 1);
           // batch size
-          int M = X.ndim() > 1 ? X.dim32(0) : 1;
+          int M = X.dim() > 1 ? X.dim32(0) : 1;
           // Feature dimension
-          int K = X.size() / M;
+          int K = X.numel() / M;
           // number of outputs.
           int N = W.dim32(0);
-          CAFFE_ENFORCE_EQ(K, W.size() / W.dim32(0));
+          CAFFE_ENFORCE_EQ(K, W.numel() / W.dim32(0));
           CAFFE_ENFORCE_EQ(N, b.dim32(0));
-          if (X.ndim() > 1) {
-            Y->Resize(M, N);
+          std::vector<int64_t> dims;
+          if (X.dim() > 1) {
+            dims = {M, N};
           } else {
-            Y->Resize(N);
+            dims = {N};
           }
+          auto* Y = Output(0, dims, at::dtype<T>());
           // W * x
           math::Gemm<T, Context, Engine>(
               CblasNoTrans, CblasTrans, M, N, K, 1, X.template data<T>(),
               W.template data<T>(), 0, Y->template mutable_data<T>(),
               &context_);
           // Add bias term
-          if (bias_multiplier_.size() != M) {
+          if (bias_multiplier_.numel() != M) {
             // If the helper bias multiplier is not M,
             // reshape and fill it with one.
             bias_multiplier_.Resize(M);
@@ -176,14 +178,13 @@ namespace caffe2 {
               bias_multiplier_.template data<T>(), b.template data<T>(), 1,
               Y->template mutable_data<T>(), &context_);
           if (OutputSize() == 2){
-            auto* Comp_rate = Output(1);
-            Comp_rate->Resize(vector<int64_t>());
+            auto* Comp_rate = Output(1, vector<int64_t>(), at::dtype<T>());
             T* comp_data = Comp_rate->template mutable_data<T>();
             math::Sum<T, Context>(
-                Mask.size(), Mask.template data<T>(), comp_data, &context_);
+                Mask.numel(), Mask.template data<T>(), comp_data, &context_);
             math::Scale<float, T, Context>(
                 1,
-                static_cast<T>(1.) / Mask.size(),
+                static_cast<T>(1.) / Mask.numel(),
                 comp_data,
                 comp_data,
                 &context_);
@@ -219,18 +220,18 @@ namespace caffe2 {
           auto* Ag_dW_ptr = Output(4);
           auto& Ag_dW = *Ag_dW_ptr;
           // it is also the Input(5)
-          auto* mask_seq_auto = Output(5);
+
           // how about get threshold
           auto& thres = Input(6);
           //TODO(wyiming): check comp_lb is a float
           auto& comp_lb = Input(7);
-          DCHECK_GE(X.ndim(), 1);
-          DCHECK_GE(W.ndim(), 2);
-          DCHECK_LE(dY.ndim(), 2);
+          DCHECK_GE(X.dim(), 1);
+          DCHECK_GE(W.dim(), 2);
+          DCHECK_LE(dY.dim(), 2);
           // batch size
-          int M = X.ndim() > 1 ? X.dim32(0) : 1;
+          int M = X.dim() > 1 ? X.dim32(0) : 1;
           // Feature dimension
-          int K = X.size() / M;
+          int K = X.numel() / M;
           // number of outputs.
           int N = W.dim32(0);
           // TODO(wyiming): add this window_size to workspace?
@@ -242,18 +243,17 @@ namespace caffe2 {
           DCHECK_EQ(Mask.dim32(1), W.dim32(1));
           DCHECK_EQ(Ag_dW.dim32(0), W.dim32(0));
           DCHECK_EQ(Ag_dW.dim32(1), W.dim32(1));
-          DCHECK_EQ(K, W.size() / W.dim32(0));
-          if (dY.ndim() > 1) {
+          DCHECK_EQ(K, W.numel() / W.dim32(0));
+          if (dY.dim() > 1) {
             DCHECK_EQ(M, dY.dim32(0));
             DCHECK_EQ(N, dY.dim32(1));
           } else {
-            DCHECK_EQ(X.ndim(), 1);
-            DCHECK_EQ(N, dY.size());
+            DCHECK_EQ(X.dim(), 1);
+            DCHECK_EQ(N, dY.numel());
           }
-          auto* dW = Output(0);
-          auto* db = Output(1);
-          dW->ResizeLike(W);
-          db->Resize(N);
+
+          auto* dW = Output(0, W.sizes(), at::dtype<T>());
+          auto* db = Output(1, {N}, at::dtype<T>());
 
           // Compute dW
           math::Gemm<T, Context, Engine>(
@@ -265,10 +265,10 @@ namespace caffe2 {
           comp_r_buf_.Resize(vector<int64_t>());
           T* comp_data = comp_r_buf_.template mutable_data<T>();
           math::Sum<T, Context>(
-              Mask.size(), Mask.template data<T>(), comp_data, &context_);
+              Mask.numel(), Mask.template data<T>(), comp_data, &context_);
           math::Scale<float, T, Context>(
               1,
-              static_cast<T>(1.) / Mask.size(),
+              static_cast<T>(1.) / Mask.numel(),
               comp_data,
               comp_data,
               &context_);
@@ -285,12 +285,13 @@ namespace caffe2 {
             if (iter_offset % window_size == 0) {
               // TODO(wyiming):do the prune here;
               sum_buffer_.ResizeLike(W);
-              math::Add<T, Context>(W.size(),
+              math::Add<T, Context>(
+                  W.numel(),
                   W.template mutable_data<T>(),
                   Ag_dW.template mutable_data<T>(),
                   sum_buffer_.template mutable_data<T>(),
                   &context_);
-              mask_seq_auto->ResizeLike(W);
+              auto* mask_seq_auto = Output(5, W.sizes(), at::dtype<T>());
               T* mask_seq = mask_seq_auto->template mutable_data<T>();
               math::Set<T, Context>(N*K, static_cast<T>(0),
                   mask_seq_auto->template mutable_data<T>(), &context_);
@@ -319,7 +320,7 @@ namespace caffe2 {
                   N, K, &context_);
             }
           }
-          if (bias_multiplier_.size() != M) {
+          if (bias_multiplier_.numel() != M) {
             // If the helper bias multiplier is not M,
             // reshape and fill it with one.
             bias_multiplier_.Resize(M);
@@ -336,8 +337,7 @@ namespace caffe2 {
               &context_);
           // Compute dX if necessary.
           if (OutputSize() == 7) {
-            auto* dX = Output(6);
-            dX->ResizeLike(X);
+            auto* dX = Output(6, X.sizes(), at::dtype<T>());
             math::Gemm<T, Context, Engine>(
                 CblasNoTrans, CblasNoTrans, M, K, N, 1,
                 dY.template data<T>(), W.template data<T>(),

@@ -280,7 +280,7 @@ std::unique_ptr<QConvState> create2b1bConvState(Workspace* ws,
   //   r->WQL1Norm.mutable_data<float>()[i] *= center_distance;
   // }
   state->parallelFor = [ws](size_t range, std::function<void(size_t)> f) {
-#if CAFFE2_MOBILE
+#if C10_MOBILE
     ws->GetThreadPool()->run([&](int, size_t v) { f(v); }, range);
 #else
     for (size_t v = 0; v < range; ++v) {
@@ -289,8 +289,7 @@ std::unique_ptr<QConvState> create2b1bConvState(Workspace* ws,
 #endif
   };
   if (b) {
-    CPUContext context;
-    state->bias = caffe2::make_unique<Tensor>(*b, &context, CPU);
+    state->bias = caffe2::make_unique<Tensor>(*b, CPU);
   }
   return state;
 }

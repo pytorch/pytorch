@@ -38,27 +38,27 @@ void concat(
     for (int j = 0; j < numTensors; ++j) {
       const auto& input = inputs[i][j];
 
-      CAFFE_ENFORCE(inputZero[j].meta() == input.meta());
+      CAFFE_ENFORCE(inputZero[j].meta() == input.dtype());
       CAFFE_ENFORCE_EQ(inputZero[j].itemsize(), input.itemsize());
-      CAFFE_ENFORCE_EQ(inputZero[j].ndim(), input.ndim());
-      for (int k = 0; k < input.ndim(); ++k) {
-        CAFFE_ENFORCE_EQ(input.dims()[k], inputZero[j].dims()[k]);
+      CAFFE_ENFORCE_EQ(inputZero[j].ndim(), input.dim());
+      for (int k = 0; k < input.dim(); ++k) {
+        CAFFE_ENFORCE_EQ(input.sizes()[k], inputZero[j].dims()[k]);
       }
 
       // Skip empty tensors
-      if (input.size() == 0) {
+      if (input.numel() == 0) {
         continue;
       }
 
       context.CopyItemsToCPU(
-          input.meta(),
-          input.size(),
+          input.dtype(),
+          input.numel(),
           input.raw_data() /* src */,
           destinations[j] /* dst */
       );
 
       destinations[j] =
-          (char*)destinations[j] + input.size() * input.itemsize();
+          (char*)destinations[j] + input.numel() * input.itemsize();
     }
   }
 }
@@ -68,7 +68,7 @@ std::vector<std::vector<TensorCPU>> split(
     const std::vector<const TensorCPU*>& inputs) {
   CAFFE_ENFORCE(!inputs.empty());
 
-  const auto outputSize = inputs[0]->dims().at(0);
+  const auto outputSize = inputs[0]->sizes().at(0);
   std::vector<std::vector<TensorCPU>> outputs(outputSize);
 
   for (const auto* inputPtr : inputs) {
@@ -76,20 +76,20 @@ std::vector<std::vector<TensorCPU>> split(
 
     const auto& input = *inputPtr;
     const auto innerSize = input.size_from_dim(1);
-    const auto itemSize = input.meta().itemsize();
+    const auto itemSize = input.dtype().itemsize();
 
-    auto outputDims = input.dims().vec();
+    auto outputDims = input.sizes().vec();
     CAFFE_ENFORCE(!outputDims.empty());
     outputDims.erase(outputDims.begin());
-    CAFFE_ENFORCE_EQ(input.dims().at(0), outputSize);
+    CAFFE_ENFORCE_EQ(input.sizes().at(0), outputSize);
 
     for (int i = 0; i < outputSize; ++i) {
       outputs[i].push_back(Tensor(outputDims, CPU));
       context.CopyItemsToCPU(
-          input.meta(),
+          input.dtype(),
           innerSize,
           (char*)input.raw_data() + i * innerSize * itemSize /* src */,
-          outputs[i].back().raw_mutable_data(input.meta()) /* dst */);
+          outputs[i].back().raw_mutable_data(input.dtype()) /* dst */);
     }
   }
 

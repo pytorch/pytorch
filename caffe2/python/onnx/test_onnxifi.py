@@ -19,6 +19,8 @@ from caffe2.python.models.download import downloadFromURLToFile, getURLFromName,
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
 from caffe2.python.onnx.tests.test_utils import TestCase
 
+ONNXIFI_DATATYPE_FLOAT32 = 1
+
 
 def _print_net(net):
     for i in net.external_input:
@@ -51,7 +53,9 @@ class OnnxifiTest(TestCase):
             ["X"],
             ["Y"],
             onnx_model=model_def.SerializeToString(),
-            output_size_hint_0=[batch_size, 1, 3, 2])
+            input_names=["X"],
+            output_names=["Y"],
+            output_shape_hint_0=[ONNXIFI_DATATYPE_FLOAT32, batch_size, 1, 3, 2])
         workspace.FeedBlob("X", X)
         workspace.RunOperatorOnce(op)
         Y = workspace.FetchBlob("Y")
@@ -86,17 +90,21 @@ class OnnxifiTest(TestCase):
             outputs=[make_tensor_value_info("Y", onnx.TensorProto.FLOAT,
                 [1, 1, 3, 3])])
         model_def = make_model(graph_def, producer_name='conv-test')
+        # We intentional rewrite the input/output name so test that the
+        # input/output binding of c2 op is positional
         op = core.CreateOperator(
             "Onnxifi",
-            ["X"],
-            ["Y"],
+            ["X0"],
+            ["Y0"],
             onnx_model=model_def.SerializeToString(),
-            initializers=["W", "W"],
-            output_size_hint_0=[1, 1, 3, 3])
-        workspace.FeedBlob("X", X)
-        workspace.FeedBlob("W", W)
+            initializers=["W", "W0"],
+            input_names=["X"],
+            output_names=["Y"],
+            output_shape_hint_0=[ONNXIFI_DATATYPE_FLOAT32, 1, 1, 3, 3])
+        workspace.FeedBlob("X0", X)
+        workspace.FeedBlob("W0", W)
         workspace.RunOperatorOnce(op)
-        Y = workspace.FetchBlob("Y")
+        Y = workspace.FetchBlob("Y0")
         np.testing.assert_almost_equal(Y, Y_without_padding)
 
 

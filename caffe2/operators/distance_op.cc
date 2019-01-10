@@ -1,6 +1,6 @@
 #include "caffe2/operators/distance_op.h"
 #include "caffe2/utils/eigen_utils.h"
-#ifdef CAFFE2_USE_IDEEP
+#ifdef CAFFE2_USE_MKLDNN
 #include <caffe2/ideep/operators/operator_fallback_ideep.h>
 #include <caffe2/ideep/utils/ideep_operator.h>
 #endif
@@ -11,14 +11,14 @@ template<>
 bool SquaredL2DistanceOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& Y = Input(1);
-  auto* distance = Output(0);
-  CAFFE_ENFORCE_EQ(X.ndim(), Y.ndim());
-  for (int i = 0; i < X.ndim(); ++i) {
+
+  CAFFE_ENFORCE_EQ(X.dim(), Y.dim());
+  for (int i = 0; i < X.dim(); ++i) {
     CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i));
   }
-  int N = X.ndim() > 0 ? X.dim32(0) : 1;
-  distance->Resize(N);
-  int D = N > 0 ? X.size() / N : 0;
+  int N = X.dim() > 0 ? X.dim32(0) : 1;
+  auto* distance = Output(0, {N}, at::dtype<float>());
+  int D = N > 0 ? X.numel() / N : 0;
   float* distance_data = distance->template mutable_data<float>();
   const float* X_data = X.data<float>();
   const float* Y_data = Y.data<float>();
@@ -39,14 +39,14 @@ template <>
 bool L1DistanceOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& Y = Input(1);
-  auto* distance = Output(0);
-  CAFFE_ENFORCE_EQ(X.ndim(), Y.ndim());
-  for (int i = 0; i < X.ndim(); ++i) {
+
+  CAFFE_ENFORCE_EQ(X.dim(), Y.dim());
+  for (int i = 0; i < X.dim(); ++i) {
     CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i));
   }
-  int N = X.ndim() > 0 ? X.dim32(0) : 1;
-  distance->Resize(N);
-  int D = N > 0 ? X.size() / N : 0;
+  int N = X.dim() > 0 ? X.dim32(0) : 1;
+  auto* distance = Output(0, {N}, at::dtype<float>());
+  int D = N > 0 ? X.numel() / N : 0;
 
   const float* X_data = X.data<float>();
   const float* Y_data = Y.data<float>();
@@ -66,22 +66,21 @@ bool L1DistanceGradientOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& Y = Input(1);
   auto& dDistance = Input(2);
-  auto* dX = Output(0);
-  auto* dY = Output(1);
-  CAFFE_ENFORCE_EQ(X.ndim(), Y.ndim());
-  for (int i = 0; i < X.ndim(); ++i) {
+
+  CAFFE_ENFORCE_EQ(X.dim(), Y.dim());
+  for (int i = 0; i < X.dim(); ++i) {
     CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i));
   }
-  int N = X.ndim() > 0 ? X.dim32(0) : 1;
-  int D = N > 0 ? X.size() / N : 0;
-  CAFFE_ENFORCE(X.ndim() == Y.ndim());
-  for (int i = 0; i < X.ndim(); ++i) {
+  int N = X.dim() > 0 ? X.dim32(0) : 1;
+  int D = N > 0 ? X.numel() / N : 0;
+  CAFFE_ENFORCE(X.dim() == Y.dim());
+  for (int i = 0; i < X.dim(); ++i) {
     CAFFE_ENFORCE(X.dim32(i) == Y.dim32(i));
   }
-  CAFFE_ENFORCE(dDistance.ndim() == 1);
+  CAFFE_ENFORCE(dDistance.dim() == 1);
   CAFFE_ENFORCE(dDistance.dim32(0) == N);
-  dX->ResizeLike(X);
-  dY->ResizeLike(Y);
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
+  auto* dY = Output(1, Y.sizes(), at::dtype<float>());
 
   for (int i = 0; i < N; ++i) {
     auto offset = i * D;
@@ -112,14 +111,14 @@ template <>
 bool CosineSimilarityOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(X_IN);
   auto& Y = Input(Y_IN);
-  auto* result = Output(COS_OUT);
-  CAFFE_ENFORCE_EQ(X.ndim(), Y.ndim());
-  for (int i = 0; i < X.ndim(); ++i) {
+
+  CAFFE_ENFORCE_EQ(X.dim(), Y.dim());
+  for (int i = 0; i < X.dim(); ++i) {
     CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i));
   }
-  const int N = X.ndim() > 0 ? X.dim32(0) : 1;
+  const int N = X.dim() > 0 ? X.dim32(0) : 1;
   const int D = X.size_from_dim(1);
-  result->Resize(N);
+  auto* result = Output(COS_OUT, {N}, at::dtype<float>());
   float* result_data = result->template mutable_data<float>();
   const float* X_data = X.data<float>();
   const float* Y_data = Y.data<float>();
@@ -143,18 +142,17 @@ bool CosineSimilarityGradientOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(X_IN);
   auto& Y = Input(Y_IN);
   auto& dCos = Input(DER_COS_IN);
-  auto* dX = Output(DER_X_OUT);
-  auto* dY = Output(DER_Y_OUT);
-  const int N = X.ndim() > 0 ? X.dim32(0) : 1;
+
+  const int N = X.dim() > 0 ? X.dim32(0) : 1;
   const int D = X.size_from_dim(1);
-  CAFFE_ENFORCE(X.ndim() == Y.ndim());
-  for (int i = 0; i < X.ndim(); ++i) {
+  CAFFE_ENFORCE(X.dim() == Y.dim());
+  for (int i = 0; i < X.dim(); ++i) {
     CAFFE_ENFORCE(X.dim32(i) == Y.dim32(i));
   }
-  CAFFE_ENFORCE(dCos.ndim() == 1);
+  CAFFE_ENFORCE(dCos.dim() == 1);
   CAFFE_ENFORCE(dCos.dim32(0) == N);
-  dX->ResizeLike(X);
-  dY->ResizeLike(Y);
+  auto* dX = Output(DER_X_OUT, X.sizes(), at::dtype<float>());
+  auto* dY = Output(DER_Y_OUT, Y.sizes(), at::dtype<float>());
 
   const auto* X_data = X.template data<float>();
   const auto* Y_data = Y.template data<float>();
@@ -207,20 +205,20 @@ template <>
 bool DotProductOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(X_IN);
   auto& Y = Input(Y_IN);
-  auto* result = Output(DOT_OUT);
-  CAFFE_ENFORCE_EQ(X.ndim(), Y.ndim());
-  for (int i = 0; i < X.ndim(); ++i) {
+
+  CAFFE_ENFORCE_EQ(X.dim(), Y.dim());
+  for (int i = 0; i < X.dim(); ++i) {
     CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i), "dimension at ", i);
   }
   int N, D;
-  if (X.size() > 0) {
-    N = X.ndim() > 0 ? X.dim32(0) : 1;
-    D = X.size() / N;
+  if (X.numel() > 0) {
+    N = X.dim() > 0 ? X.dim32(0) : 1;
+    D = X.numel() / N;
   } else {
     N = 0;
     D = 0;
   }
-  result->Resize(N);
+  auto* result = Output(DOT_OUT, {N}, at::dtype<float>());
   float* result_data = result->template mutable_data<float>();
   const float* X_data = X.template data<float>();
   const float* Y_data = Y.template data<float>();
@@ -260,24 +258,23 @@ bool DotProductGradientOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(X_IN);
   auto& Y = Input(Y_IN);
   auto& dDot = Input(DER_DOT_IN);
-  auto* dX = Output(DER_X_OUT);
-  auto* dY = Output(DER_Y_OUT);
+
   int N, D;
-  if (X.size() > 0) {
-    N = X.ndim() > 0 ? X.dim32(0) : 1;
-    D = X.size() / N;
+  if (X.numel() > 0) {
+    N = X.dim() > 0 ? X.dim32(0) : 1;
+    D = X.numel() / N;
   } else {
     N = 0;
     D = 0;
   }
-  CAFFE_ENFORCE(X.ndim() == Y.ndim());
-  for (int i = 0; i < X.ndim(); ++i) {
+  CAFFE_ENFORCE(X.dim() == Y.dim());
+  for (int i = 0; i < X.dim(); ++i) {
     CAFFE_ENFORCE(X.dim32(i) == Y.dim32(i));
   }
-  CAFFE_ENFORCE(dDot.ndim() == 1);
+  CAFFE_ENFORCE(dDot.dim() == 1);
   CAFFE_ENFORCE(dDot.dim32(0) == N);
-  dX->ResizeLike(X);
-  dY->ResizeLike(Y);
+  auto* dX = Output(DER_X_OUT, X.sizes(), at::dtype<float>());
+  auto* dY = Output(DER_Y_OUT, Y.sizes(), at::dtype<float>());
 
   const auto* X_data = X.template data<float>();
   const auto* Y_data = Y.template data<float>();
@@ -298,15 +295,15 @@ template <>
 bool DotProductWithPaddingOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(X_IN);
   auto& Y = Input(Y_IN);
-  auto* result = Output(DOT_OUT);
-  CAFFE_ENFORCE_EQ(X.ndim(), Y.ndim());
+
+  CAFFE_ENFORCE_EQ(X.dim(), Y.dim());
   CAFFE_ENFORCE_EQ(X.dim32(0), Y.dim32(0));
 
   int N, D, DX, DY, restD;
-  if (X.size() > 0) {
-    N = X.ndim() > 0 ? X.dim32(0) : 1;
-    DX = X.size() / N;
-    DY = Y.size() / N;
+  if (X.numel() > 0) {
+    N = X.dim() > 0 ? X.dim32(0) : 1;
+    DX = X.numel() / N;
+    DY = Y.numel() / N;
   } else {
     N = 0;
     DX = 0;
@@ -315,7 +312,7 @@ bool DotProductWithPaddingOp<float, CPUContext>::RunOnDevice() {
 
   D = std::min(DX, DY);
   restD = std::max(DX, DY) - D;
-  result->Resize(N);
+  auto* result = Output(DOT_OUT, {N}, at::dtype<float>());
   float* result_data = result->template mutable_data<float>();
   const float* X_data = X.data<float>();
   const float* Y_data = Y.data<float>();
@@ -400,7 +397,7 @@ REGISTER_CPU_OPERATOR(L1Distance, L1DistanceOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(
     L1DistanceGradient,
     L1DistanceGradientOp<float, CPUContext>);
-#ifdef CAFFE2_USE_IDEEP
+#ifdef CAFFE2_USE_MKLDNN
 REGISTER_IDEEP_OPERATOR(
     L1DistanceGradient,
     IDEEPFallbackOp<L1DistanceGradientOp<float, CPUContext>>);

@@ -1,37 +1,40 @@
 #pragma once
 
-#include "caffe2/core/tensor.h"
+#include <c10/core/Tensor.h>
 #include <c10/util/Array.h>
+#include "caffe2/core/context_base.h"
 
 namespace caffe2 {
 namespace ops {
 
 struct BatchMatmul final {
   struct State final {
-    std::shared_ptr<Tensor> scratch;
+    std::shared_ptr<C10Tensor> scratch;
   };
 
   static constexpr const char* name = "batch_matmul";
 
   using Signature = void(
-      const Tensor& A,
-      const Tensor& B,
-      Tensor* output,
+      const C10Tensor& A,
+      const C10Tensor& B,
+      const C10Tensor& output,
       int trans_a,
       int trans_b,
       int broadcast,
-      int use_scratch,
       State* state,
       BaseContext* context);
 
-  static constexpr c10::guts::array<const char*, 9> parameter_names = {
+  static constexpr size_t num_dispatch_args() {return 2;}
+
+  static constexpr size_t num_outputs() {return 1;}
+
+  static constexpr c10::guts::array<const char*, 8> parameter_names = {
       {"A",
        "B",
        "output",
        "trans_a",
        "trans_b",
        "broadcast",
-       "use_scratch",
        "state",
        "context"}};
 };

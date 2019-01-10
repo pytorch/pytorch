@@ -19,7 +19,7 @@
 #include <string>
 #include <thread>
 
-#include "binaries/benchmark_helper.h"
+#include <binaries/benchmark_helper.h>
 #include "caffe2/core/blob_serialization.h"
 #ifdef __CUDA_ARCH__
 #include "caffe2/core/context_gpu.h"
@@ -31,9 +31,9 @@
 #include "caffe2/core/tensor_int8.h"
 #include "caffe2/utils/bench_utils.h"
 #include "caffe2/utils/string_utils.h"
-#include "observers/net_observer_reporter_print.h"
-#include "observers/observer_config.h"
-#include "observers/perf_observer.h"
+#include <observers/net_observer_reporter_print.h>
+#include <observers/observer_config.h>
+#include <observers/perf_observer.h>
 
 using std::map;
 using std::shared_ptr;
@@ -93,7 +93,7 @@ void setOperatorEngine(caffe2::NetDef* net_def, const string& backend) {
   }
 }
 
-void loadInput(
+int loadInput(
     shared_ptr<caffe2::Workspace> workspace,
     const bool run_on_gpu,
     map<string, caffe2::TensorProtos>& tensor_protos_map,
@@ -101,6 +101,8 @@ void loadInput(
     const string& input_file,
     const string& input_dims,
     const string& input_type) {
+  // How many input blobs are in the inputs
+  int blob_num = 1;
   // Load input.
   if (input.size()) {
     vector<string> input_names = caffe2::split(',', input);
@@ -116,6 +118,15 @@ void loadInput(
             caffe2::ReadProtoFromFile(input_files[i], &tensor_protos));
         workspace->CreateBlob(input_names[i]);
         tensor_protos_map.insert(std::make_pair(input_names[i], tensor_protos));
+      }
+      // Check that all blobs have the same number of entries
+      blob_num = tensor_protos_map[input_names[0]].protos_size();
+      for (int i = 1; i < input_names.size(); ++i) {
+        int bnum = tensor_protos_map[input_names[i]].protos_size();
+        CAFFE_ENFORCE_EQ(
+            blob_num,
+            bnum,
+            "Number of blobs are not the same for all inputs");
       }
     } else if (input_dims.size() || input_type.size()) {
       CAFFE_ENFORCE_GE(
@@ -141,7 +152,7 @@ void loadInput(
         vector<string> input_dims_str = caffe2::split(',', input_dims_list[i]);
         vector<int> input_dims;
         for (const string& s : input_dims_str) {
-          input_dims.push_back(caffe2::stoi(s));
+          input_dims.push_back(c10::stoi(s));
         }
         caffe2::Blob* blob = workspace->GetBlob(input_names[i]);
         if (blob == nullptr) {
@@ -175,6 +186,11 @@ void loadInput(
             CHECK_NOTNULL(tensor);
             tensor->Resize(input_dims);
             tensor->mutable_data<float>();
+          } else if (input_type_list[i] == "int") {
+            caffe2::TensorCPU* tensor = BlobGetMutableTensor(blob, caffe2::CPU);
+            CHECK_NOTNULL(tensor);
+            tensor->Resize(input_dims);
+            tensor->mutable_data<int>();
           } else {
             CAFFE_THROW("Unsupported input type: ", input_type_list[i]);
           }
@@ -186,6 +202,7 @@ void loadInput(
           "input_dims is set.");
     }
   }
+  return blob_num;
 }
 
 void fillInputBlob(
@@ -195,7 +212,7 @@ void fillInputBlob(
   if (tensor_protos_map.empty()) {
     return;
   }
-  static caffe2::TensorDeserializer serializer;
+  static caffe2::TensorDeserializer deserializer;
   for (auto& tensor_kv : tensor_protos_map) {
     caffe2::Blob* blob = workspace->GetBlob(tensor_kv.first);
     if (blob == nullptr) {
@@ -203,25 +220,15 @@ void fillInputBlob(
     }
     // todo: support gpu and make this function a tempalte
     int protos_size = tensor_kv.second.protos_size();
+    if (protos_size == 1 && iteration > 0) {
+      // Do not override the input data if there is only one input data,
+      // since it will clear all caches. Rely on wipe_cache to
+      // clear caches
+      continue;
+    }
     caffe2::TensorProto* tensor_proto =
         tensor_kv.second.mutable_protos(iteration % protos_size);
-    if (tensor_proto->data_type() == caffe2::TensorProto::STRING) {
-      caffe2::TensorCPU* tensor = BlobGetMutableTensor(blob, caffe2::CPU);
-      int total_size = tensor_proto->string_data_size();
-      for (size_t i = 0; i < total_size; i++) {
-        (tensor->mutable_data<string>())[i] = tensor_proto->string_data(i);
-      }
-    } else if (tensor_proto->data_type() == caffe2::TensorProto::FLOAT) {
-      vector<int64_t> dims;
-      for (const int64_t d : tensor_proto->dims()) {
-        dims.push_back(d);
-      }
-      // int total_size = tensor_proto->float_data_size();
-      caffe2::TensorCPU* tensor =
-          new caffe2::TensorCPU(dims, caffe2::DeviceType::CPU);
-      serializer.Deserialize(*tensor_proto, tensor);
-      blob->Reset(tensor);
-    }
+    BlobSetTensor(blob, deserializer.Deserialize(*tensor_proto));
     // todo: for other types
   }
 }
@@ -232,9 +239,17 @@ void runNetwork(
     map<string, caffe2::TensorProtos>& tensor_protos_map,
     const bool wipe_cache,
     const bool run_individual,
+    const bool run_on_gpu,
+    const bool text_output,
     const int warmup,
     const int iter,
-    const int sleep_before_run) {
+    const int num_blobs,
+    const int sleep_before_run,
+    const int sleep_between_iteration,
+    const int sleep_between_net_and_operator,
+    const std::string& output,
+    const std::string& output_folder) {
+
   if (!net_def.has_name()) {
     net_def.set_name("benchmark");
   }
@@ -262,6 +277,7 @@ void runNetwork(
       "Number of main runs should be non negative, provided ",
       iter,
       ".");
+  LOG(INFO) << "net runs.";
   for (int i = 0; i < iter; ++i) {
     caffe2::ObserverConfig::initSampleRate(1, 1, 1, 0, warmup);
     fillInputBlob(workspace, tensor_protos_map, i);
@@ -269,12 +285,40 @@ void runNetwork(
       caffe2::wipe_cache();
     }
     CAFFE_ENFORCE(net->Run(), "Main run ", i, " has failed.");
+    // Write the output for the first num_blobs times
+    writeOutput(
+        workspace,
+        run_on_gpu,
+        output,
+        output_folder,
+        text_output,
+        i,
+        num_blobs);
     if (wipe_cache) {
       caffe2::wipe_cache();
     }
-    if (run_individual) {
+    if (sleep_between_iteration > 0) {
+      std::this_thread::sleep_for(
+          std::chrono::seconds(sleep_between_iteration));
+    }
+  }
+  if (run_individual) {
+    LOG(INFO) << "operator runs.";
+    if (sleep_between_net_and_operator > 0) {
+      std::this_thread::sleep_for(
+          std::chrono::seconds(sleep_between_net_and_operator));
+    }
+    for (int i = 0; i < iter; ++i) {
       caffe2::ObserverConfig::initSampleRate(1, 1, 1, 1, warmup);
+      fillInputBlob(workspace, tensor_protos_map, i);
       CAFFE_ENFORCE(net->Run(), "Main run ", i, " with operator has failed.");
+      if (wipe_cache) {
+        caffe2::wipe_cache();
+      }
+      if (sleep_between_iteration > 0) {
+        std::this_thread::sleep_for(
+            std::chrono::seconds(sleep_between_iteration));
+      }
     }
   }
 }
@@ -284,39 +328,50 @@ void writeOutput(
     const bool run_on_gpu,
     const string& output,
     const string& output_folder,
-    const bool text_output) {
+    const bool text_output,
+    const int index,
+    const int num_blobs) {
+  if (output.size() == 0) {
+    return;
+  }
   string output_prefix = output_folder.size() ? output_folder + "/" : "";
-  if (output.size()) {
-    vector<string> output_names = caffe2::split(',', output);
-    if (output == "*") {
-      output_names = workspace->Blobs();
-    }
-    for (const string& name : output_names) {
-      CAFFE_ENFORCE(
-          workspace->HasBlob(name),
-          "You requested a non-existing blob: ",
-          name);
-      if (text_output) {
-        if (run_on_gpu) {
+  vector<string> output_names = caffe2::split(',', output);
+  if (output == "*") {
+    output_names = workspace->Blobs();
+  }
+  for (const string& name : output_names) {
+    CAFFE_ENFORCE(
+        workspace->HasBlob(name),
+        "You requested a non-existing blob: ",
+        name);
+    if (text_output) {
+      if (run_on_gpu) {
 #ifdef __CUDA_ARCH__
-          writeTextOutput<caffe2::CUDAContext, caffe2::TensorCUDA>(
-              workspace->GetBlob(name)->GetMutable<caffe2::TensorCUDA>(),
-              output_prefix,
-              name);
+        writeTextOutput<caffe2::CUDAContext, caffe2::TensorCUDA>(
+            workspace->GetBlob(name)->GetMutable<caffe2::TensorCUDA>(),
+            output_prefix,
+            name,
+            index,
+            num_blobs);
 #else
-          CAFFE_THROW("Not support GPU.");
+        CAFFE_THROW("Not support GPU.");
 #endif
-        } else {
-          writeTextOutput<caffe2::CPUContext, caffe2::TensorCPU>(
-              BlobGetMutableTensor(workspace->GetBlob(name), caffe2::CPU),
-              output_prefix,
-              name);
-        }
       } else {
-        string serialized = SerializeBlob(*workspace->GetBlob(name), name);
-        string output_filename = output_prefix + name;
-        caffe2::WriteStringToFile(serialized, output_filename.c_str());
+        writeTextOutput<caffe2::CPUContext, caffe2::TensorCPU>(
+            BlobGetMutableTensor(workspace->GetBlob(name), caffe2::CPU),
+            output_prefix,
+            name,
+            index,
+            num_blobs);
       }
+    } else {
+      // Do not support multiple entries per blob.
+      CAFFE_ENFORCE(
+          index == 0,
+          "Binary file only support one output.");
+      string serialized = SerializeBlob(*workspace->GetBlob(name), name);
+      string output_filename = output_prefix + name;
+      caffe2::WriteStringToFile(serialized, output_filename.c_str());
     }
   }
 }
@@ -336,6 +391,8 @@ int benchmark(
     const string& FLAGS_output_folder,
     bool FLAGS_run_individual,
     int FLAGS_sleep_before_run,
+    int FLAGS_sleep_between_iteration,
+    int FLAGS_sleep_between_net_and_operator,
     bool FLAGS_text_output,
     int FLAGS_warmup,
     bool FLAGS_wipe_cache) {
@@ -379,7 +436,7 @@ int benchmark(
 
   map<string, caffe2::TensorProtos> tensor_protos_map;
 
-  loadInput(
+  int num_blobs = loadInput(
       workspace,
       run_on_gpu,
       tensor_protos_map,
@@ -394,16 +451,16 @@ int benchmark(
       tensor_protos_map,
       FLAGS_wipe_cache,
       FLAGS_run_individual,
+      run_on_gpu,
+      FLAGS_text_output,
       FLAGS_warmup,
       FLAGS_iter,
-      FLAGS_sleep_before_run);
-
-  writeOutput(
-      workspace,
-      run_on_gpu,
+      num_blobs,
+      FLAGS_sleep_before_run,
+      FLAGS_sleep_between_iteration,
+      FLAGS_sleep_between_net_and_operator,
       FLAGS_output,
-      FLAGS_output_folder,
-      FLAGS_text_output);
+      FLAGS_output_folder);
 
   return 0;
 }

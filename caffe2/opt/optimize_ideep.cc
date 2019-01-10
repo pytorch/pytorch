@@ -2,7 +2,7 @@
 #include "caffe2/opt/converter.h"
 #include "caffe2/opt/fusion.h"
 
-#ifdef CAFFE2_USE_IDEEP
+#ifdef CAFFE2_USE_MKLDNN
 #include "caffe2/ideep/ideep_utils.h"
 #endif
 
@@ -11,7 +11,7 @@ namespace opt {
 
 using namespace nom;
 
-#ifndef CAFFE2_USE_IDEEP
+#ifndef CAFFE2_USE_MKLDNN
 void OptimizeForIdeep(
     repr::NNModule* nn,
     caffe2::Workspace* ws,
@@ -51,6 +51,15 @@ caffe2::OperatorDef* getMutableOpDef(repr::NeuralNetOperator& nnOp) {
     CAFFE_THROW("Cannot get Operator annotation");
   }
   return dyn_cast<Caffe2Annotation>(annotation)->getMutableOperatorDef();
+}
+
+bool isOpType(const repr::NNGraph::NodeRef& nodeRef, string typeName) {
+  if (!repr::nn::is<repr::NeuralNetOperator>(nodeRef)) {
+    return false;
+  }
+  auto op = repr::nn::get<repr::NeuralNetOperator>(nodeRef);
+  auto opDef = getOpDef(*op);
+  return opDef.type() == typeName;
 }
 
 bool isOnIdeepDevice(const repr::NeuralNetOperator& nnOp) {
@@ -245,11 +254,13 @@ void fuseConvSumForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
       continue;
     }
 
-    if (!repr::nn::is<repr::Sum>(sumNode)) {
+    // CAUTION: On IDEEP device, only element-wise Add operator is
+    // supported yet. It totally works as element-wise sum without scalar broadcast.
+    if (!repr::nn::is<repr::Sum>(sumNode) && !isOpType(sumNode, "Add")) {
       continue;
     }
 
-    auto sum = repr::nn::get<repr::Sum>(sumNode);
+    auto sum = repr::nn::get<repr::NeuralNetOperator>(sumNode);
     if (!isOnIdeepDevice(*sum)) {
       LOG(WARNING) << "Not a IDEEP operator";
       continue;
@@ -440,7 +451,7 @@ void OptimizeForIdeep(
   setPoolingInferenceMode(nn);
 }
 
-#endif // CAFFE2_USE_IDEEP
+#endif // CAFFE2_USE_MKLDNN
 
 } // namespace opt
 } // namespace caffe2

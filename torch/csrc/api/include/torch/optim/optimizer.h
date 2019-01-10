@@ -1,5 +1,7 @@
 #pragma once
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
+
 #include <algorithm>
 #include <functional>
 #include <iterator>
@@ -7,21 +9,20 @@
 #include <string>
 #include <vector>
 
+// Forward declarations confuse Doxygen
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace at {
 class Tensor;
 } // namespace at
 
 namespace torch {
 using at::Tensor;
-namespace detail {
-template <typename T>
-class CursorBase;
-} // namespace detail
 namespace serialize {
 class OutputArchive;
 class InputArchive;
 } // namespace serialize
 } // namespace torch
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 namespace torch {
 namespace optim {
@@ -30,24 +31,15 @@ namespace detail {
 /// mechanism. All it specifies is that optimizers must be supplied with a
 /// vector of parameters. It also defines certain methods that all optimizers
 /// shall have, such as `zero_grad`.
-class OptimizerBase {
+class TORCH_API OptimizerBase {
  public:
-  using ParameterCursor = torch::detail::CursorBase<Tensor>;
-
   /// Constructs the `Optimizer` from a vector of parameters.
   explicit OptimizerBase(std::vector<Tensor> parameters);
-
-  /// Constructs the `Optimizer` from a ParameterCursor, such as
-  /// `nn::Module::parameters()` returns.
-  explicit OptimizerBase(const ParameterCursor& cursor);
 
   virtual ~OptimizerBase() = default;
 
   /// Adds the given vector of parameters to the optimizer's parameter list.
   void add_parameters(const std::vector<Tensor>& parameters);
-
-  /// Adds the `ParameterCursor`'s parameters to the optimizer's parameter list.
-  void add_parameters(const ParameterCursor& cursor);
 
   /// Zeros out the gradients of all parameters.
   virtual void zero_grad();
@@ -89,12 +81,12 @@ class OptimizerBase {
 };
 
 /// Serializes an `OptimizerBase` into an `OutputArchive`.
-serialize::OutputArchive& operator<<(
+TORCH_API serialize::OutputArchive& operator<<(
     serialize::OutputArchive& archive,
     const OptimizerBase& optimizer);
 
 /// Deserializes a `Tensor` from an `InputArchive`.
-serialize::InputArchive& operator>>(
+TORCH_API serialize::InputArchive& operator>>(
     serialize::InputArchive& archive,
     OptimizerBase& optimizer);
 } // namespace detail

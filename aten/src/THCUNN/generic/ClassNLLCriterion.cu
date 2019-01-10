@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/ClassNLLCriterion.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/ClassNLLCriterion.cu"
 #else
 
 void THNN_(ClassNLLCriterion_updateOutput)(
@@ -88,7 +88,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
         input_data,
         target_data,
         weights_data,
-        reduction == Reduction::ElementwiseMean,
+        reduction == Reduction::Mean,
         n_classes,
         ignore_index
     );
@@ -101,7 +101,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
         input_data,
         target_data,
         weights_data,
-        reduction == Reduction::ElementwiseMean,
+        reduction == Reduction::Mean,
         THCTensor_(size)(state, input, 0),
         THCTensor_(size)(state, input, 1),
         n_classes,
@@ -205,7 +205,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
         weights_data,
         target_data,
         total_weight_data,
-        reduction == Reduction::ElementwiseMean,
+        reduction == Reduction::Mean,
         n_classes,
         ignore_index
     );
@@ -217,7 +217,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
         target_data,
         weights_data,
         total_weight_data,
-        reduction == Reduction::ElementwiseMean,
+        reduction == Reduction::Mean,
         THCTensor_(size)(state, input, 0),
         THCTensor_(size)(state, input, 1),
         n_classes,
