@@ -521,18 +521,11 @@ binary_linux_build: &binary_linux_build
         # Clone the Pytorch branch
         git clone https://github.com/pytorch/pytorch.git /pytorch
         pushd /pytorch
-        if [[ -n "$CIRCLE_TAG" || -n "$CIRCLE_PR_NUMBER" ]]; then
-          if [[ -n "$CIRCLE_TAG" ]]; then
-            # TODO is this needed? when does this happen?
-            git fetch --force origin "refs/tags/${CIRCLE_TAG}"
-            git reset --hard "$CIRCLE_SHA1"
-            git checkout -q "$CIRCLE_TAG"
-          else
-            # "smoke" binary build on PRs
-            git fetch --force origin "pull/${CIRCLE_PR_NUMBER}/head:remotes/origin/pull/${CIRCLE_PR_NUMBER}"
-            git reset --hard "$CIRCLE_SHA1"
-            git checkout -q -B "$CIRCLE_BRANCH"
-          fi
+        if [[ -n "$CIRCLE_PR_NUMBER" ]]; then
+          # "smoke" binary build on PRs
+          git fetch --force origin "pull/${CIRCLE_PR_NUMBER}/head:remotes/origin/pull/${CIRCLE_PR_NUMBER}"
+          git reset --hard "$CIRCLE_SHA1"
+          git checkout -q -B "$CIRCLE_BRANCH"
           git reset --hard "$CIRCLE_SHA1"
         fi
         git submodule update --init --recursive
@@ -618,18 +611,11 @@ binary_linux_test_and_upload: &binary_linux_test_and_upload
         # Clone the Pytorch branch
         git clone https://github.com/pytorch/pytorch.git /pytorch
         pushd /pytorch
-        if [[ -n "$CIRCLE_TAG" || -n "$CIRCLE_PR_NUMBER" ]]; then
-          if [[ -n "$CIRCLE_TAG" ]]; then
-            # TODO is this needed? when does this happen?
-            git fetch --force origin "refs/tags/${CIRCLE_TAG}"
-            git reset --hard "$CIRCLE_SHA1"
-            git checkout -q "$CIRCLE_TAG"
-          else
-            # "smoke" binary build on PRs
-            git fetch --force origin "pull/${CIRCLE_PR_NUMBER}/head:remotes/origin/pull/${CIRCLE_PR_NUMBER}"
-            git reset --hard "$CIRCLE_SHA1"
-            git checkout -q -B "$CIRCLE_BRANCH"
-          fi
+        if [[ -n "$CIRCLE_PR_NUMBER" ]]; then
+          # "smoke" binary build on PRs
+          git fetch --force origin "pull/${CIRCLE_PR_NUMBER}/head:remotes/origin/pull/${CIRCLE_PR_NUMBER}"
+          git reset --hard "$CIRCLE_SHA1"
+          git checkout -q -B "$CIRCLE_BRANCH"
           git reset --hard "$CIRCLE_SHA1"
         fi
         git submodule update --init --recursive
