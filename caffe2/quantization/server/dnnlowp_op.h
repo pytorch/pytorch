@@ -135,8 +135,8 @@ class DNNLowPOp : public Operator<CPUContext> {
       actual = OutputTensorCPU_(0)->template data<float>();
     } else {
       actual_temp.resize(OutputTensorCPU_(0)->numel());
-      fbgemm::Dequantize<float>(
-          OutputTensorCPU_(0)->template data<float>(),
+      fbgemm::Dequantize<T>(
+          OutputTensorCPU_(0)->template data<T>(),
           actual_temp.data(),
           OutputTensorCPU_(0)->numel(),
           out_qparams_);

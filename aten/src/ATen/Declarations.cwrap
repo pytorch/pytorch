@@ -2044,55 +2044,6 @@
     - arg: THTensor* tensor
 ]]
 [[
-  name: _th_tril
-  cname: tril
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - arg: long diagonal
-      default: 0
-]]
-[[
-  name: _th_tril_
-  cname: tril
-  variants: function
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-    - arg: long diagonal
-      default: 0
-]]
-[[
-  name: _th_triu
-  cname: triu
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - arg: long diagonal
-      default: 0
-]]
-[[
-  name: _th_triu_
-  cname: triu
-  variants:
-    - function
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-    - arg: long diagonal
-      default: 0
-]]
-[[
   name: _th_cross
   cname: cross
   variants:

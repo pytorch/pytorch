@@ -120,6 +120,8 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
   ptrdiff_t numel = 0;
   int64_t *subscript_data;
   int64_t i = 0;
+  int64_t dim;
+  int64_t div = 1;
 #ifdef TH_REAL_IS_HALF
 #define IS_NONZERO(val) ((val.x & 0x7fff) != 0)
 #else
@@ -135,43 +137,21 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
   THAssert(numel <= LONG_MAX);
 #endif
   THLongTensor_resize2d(subscript, numel, tensor->dim());
-  if (numel <= 0) {
-    return;
-  }
-  int64_t dimensions = tensor->dim();
-  int64_t sizes[dimensions+1]; // +1 faster than additional condition check inside loop
-  int64_t idx[dimensions+1];
-  int64_t *ii;
-  int64_t *ss;
-  std::fill(idx, idx+dimensions+1, 0);
-  for (i = 0; i < dimensions; ++i) {
-    sizes[dimensions - i - 1] = THTensor_(size)(tensor, i); // reverse order important
-  }
-  sizes[dimensions] = 0;
+
   /* Second pass populates subscripts */
   subscript_data = THLongTensor_data(subscript);
-  auto subscript_strides = THTensor_stridesLegacyNoScalars(subscript);
-  subscript_strides[0] -= subscript_strides[1] * tensor->dim();
   TH_TENSOR_APPLY(scalar_t, tensor,
                   if IS_NONZERO(*tensor_data) {
-                    ii = idx + dimensions;
-                    for (int64_t dim = dimensions - 1; dim >= 0; dim--) {
-                      --ii;
-                      *subscript_data = *ii;
-                      subscript_data += subscript_strides[1];
+                    div = 1;
+
+                    for (dim = tensor->dim() - 1; dim >= 0; dim--) {
+                      *(subscript_data + dim) = (i/div) % THTensor_sizeLegacyNoScalars(tensor, dim);
+                      div *= THTensor_sizeLegacyNoScalars(tensor, dim);
                     }
-                    subscript_data += subscript_strides[0];
+
+                    subscript_data += tensor->dim();
                   }
-                  ii = idx;
-                  ss = sizes;
-                  ++(*ii);
-                  while (*ii == *ss) {
-                    *ii = 0;
-                    ++ii;
-                    ++ss;
-                    ++(*ii);
-                  }
-                );
+                  ++i;);
 }
 
 void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTensor *index)
