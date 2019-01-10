@@ -139,8 +139,9 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
     return;
   }
   int64_t dimensions = tensor->dim();
-  int64_t sizes[dimensions+1]; // +1 faster than additional condition check inside loop
-  int64_t idx[dimensions+1];
+  // +1 faster than additional condition check inside loop
+  int64_t *sizes = new int64_t[dimensions+1];
+  int64_t *idx = new int64_t[dimensions+1];
   int64_t *ii;
   int64_t *ss;
   std::fill(idx, idx+dimensions+1, 0);
@@ -172,6 +173,8 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
                     ++(*ii);
                   }
                 );
+  delete sizes;
+  delete idx;
 }
 
 void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTensor *index)
