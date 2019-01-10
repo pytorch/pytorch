@@ -306,7 +306,6 @@ def _generate_function_classes(scope_dict):
         'TemporalConvolution': 'Conv1d',
         'SpatialDilatedConvolution': 'DilatedConv2d',
         'SpatialMaxUnpooling': 'MaxUnpool2d',
-        'SpatialReflectionPadding': 'ReflectionPad2d',
         'VolumetricMaxUnpooling': 'MaxUnpool3d',
         'HardTanh': 'Hardtanh',
         'HardShrink': 'Hardshrink',

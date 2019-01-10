@@ -492,22 +492,6 @@ Tensor max_unpool3d_backward(const Tensor & grad_output, const Tensor & self, co
   return at::legacy::th::_thnn_max_unpool3d_backward(grad_output, self, indices, output_size, stride, padding);
 }
 
-Tensor & reflection_pad2d_out(Tensor & output, const Tensor & self, IntList padding) {
-  return at::legacy::th::_thnn_reflection_pad2d_forward_out(output, self, padding);
-}
-
-Tensor reflection_pad2d(const Tensor & self, IntList padding) {
-  return at::legacy::th::_thnn_reflection_pad2d_forward(self, padding);
-}
-
-Tensor & reflection_pad2d_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, IntList padding) {
-  return at::legacy::th::_thnn_reflection_pad2d_backward_out(grad_input, grad_output, self, padding);
-}
-
-Tensor reflection_pad2d_backward(const Tensor & grad_output, const Tensor & self, IntList padding) {
-  return at::legacy::th::_thnn_reflection_pad2d_backward(grad_output, self, padding);
-}
-
 Tensor & upsample_linear1d_out(Tensor & output, const Tensor & self, IntList output_size, bool align_corners) {
   return at::legacy::th::_thnn_upsample_linear1d_forward_out(output, self, output_size, align_corners);
 }
