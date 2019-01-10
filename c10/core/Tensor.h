@@ -31,6 +31,10 @@ public:
 
   TensorTypeId type_id() const;
 
+  bool defined() const noexcept {
+    return impl_;
+  }
+
 private:
   TensorImplPtr impl_;
 };

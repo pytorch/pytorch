@@ -31,7 +31,7 @@ std::ostream& printList(std::ostream & out, const List &v,
 } // anonymous namespace
 
 std::ostream& operator<<(std::ostream & out, const IValue & v) {
-  switch(v.tag) {
+  switch(v.tag()) {
     case IValue::Tag::None:
       return out << v.toNone();
     case IValue::Tag::Tensor:
