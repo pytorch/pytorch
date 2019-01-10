@@ -11,8 +11,8 @@
 
 PyObject *THCPEventClass = nullptr;
 
-static PyObject * THCPEvent_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
-{
+static PyObject * THCPEvent_pynew(
+    PyTypeObject *type, PyObject *args, PyObject *kwargs) {
   HANDLE_TH_ERRORS
 
   int current_device;
@@ -37,9 +37,9 @@ static PyObject * THCPEvent_pynew(PyTypeObject *type, PyObject *args, PyObject *
   }
 
   unsigned int flags =
-    (blocking ? 0x01 : 0) |
-    (enable_timing ? 0 : 0x02) |
-    (interprocess ? 0x04 : 0);
+    (blocking ? cudaEventBlockingSync : cudaEventDefault) |
+    (enable_timing ? cudaEventDefault : cudaEventDisableTiming) |
+    (interprocess ? cudaEventInterprocess : cudaEventDefault);
 
   THCPEvent* self = (THCPEvent *)ptr.get();
   if (_handle) {
@@ -73,55 +73,66 @@ static PyObject * THPVariable_get_cuda_event(THCPEvent *self) {
 static PyObject * THCPEvent_record(THCPEvent *self, THCPStream *stream) {
   HANDLE_TH_ERRORS
   self->cuda_event.record(stream->cuda_stream);
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_get_device(THCPStream *self) {
+static PyObject * THCPEvent_wait(THCPEvent *self, THCPStream *stream) {
   HANDLE_TH_ERRORS
-  return THPUtils_packInt64(self->cuda_stream.device_index());
+  self->cuda_event.block(stream->cuda_stream);
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_get_cuda_stream(THCPStream *self) {
+static PyObject * THCPEvent_query(THCPEvent *self) {
   HANDLE_TH_ERRORS
-  return PyLong_FromVoidPtr(self->cuda_stream.stream());
+  return PyBool_FromLong(self->cuda_event.happened());
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THCPStream_query(THCPStream *self) {
+static PyObject * THCPEvent_elapsed_time(THCPEvent *self, THCPEvent *other) {
   HANDLE_TH_ERRORS
-  return PyBool_FromLong(self->cuda_stream.query());
+  return PyFloat_FromDouble(self->cuda_event.elapsed_time(other->cuda_event));
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THCPStream_eq(THCPStream *self, THCPStream *other) {
+static PyObject * THCPEvent_synchronize(THCPEvent *self) {
   HANDLE_TH_ERRORS
-  return PyBool_FromLong(self->cuda_stream == other->cuda_stream);
+  self->cuda_event.synchronize();
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-static struct PyMemberDef THCPStream_members[] = {
-  {(char*)"_cdata", T_ULONGLONG, offsetof(THCPStream, cdata), READONLY, nullptr},
-  {nullptr}
-};
+static PyObject * THCPEvent_ipc_handle(THCPEvent *self, PyObject *handle) {
+  HANDLE_TH_ERRORS
+  self->cuda_event.ipc_handle(
+    reinterpret_cast<cudaIpcEventHandle_t *>(PyLong_AsVoidPtr(handle)));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
 
 static struct PyGetSetDef THPVariable_properties[] = {
   {"cuda_event", (getter)THPVariable_get_cuda_event, nullptr, nullptr, nullptr},
   {nullptr}
 };
 
-static PyMethodDef THCPStream_methods[] = {
-  {(char*)"query", (PyCFunction)THCPStream_query, METH_NOARGS, nullptr},
-  {(char*)"__eq__", (PyCFunction)THCPStream_eq, METH_O, nullptr},
+static PyMethodDef THCPEvent_methods[] = {
+  {(char*)"record", (PyCFunction)THCPEvent_record, METH_O, nullptr},
+  {(char*)"wait", (PyCFunction)THCPEvent_wait, METH_O, nullptr},
+  {(char*)"query", (PyCFunction)THCPEvent_query, METH_NOARGS, nullptr},
+  {(char*)"elapsed_time", (PyCFunction)THCPEvent_elapsed_time, METH_O, nullptr},
+  {(char*)"synchronize",
+    (PyCFunction)THCPEvent_synchronize, METH_NOARGS, nullptr},
+  {(char*)"ipc_handle", (PyCFunction)THCPEvent_ipc_handle, METH_O, nullptr},
   {nullptr}
 };
 
-PyTypeObject THCPStreamType = {
+PyTypeObject THCPEventType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
-  "torch._C._CudaStreamBase",             /* tp_name */
-  sizeof(THCPStream),                    /* tp_basicsize */
+  "torch._C._CudaEventBase",             /* tp_name */
+  sizeof(THCPEvent),                     /* tp_basicsize */
   0,                                     /* tp_itemsize */
-  (destructor)THCPStream_dealloc,        /* tp_dealloc */
+  (destructor)THCPEvent_dealloc,         /* tp_dealloc */
   0,                                     /* tp_print */
   0,                                     /* tp_getattr */
   0,                                     /* tp_setattr */
@@ -144,8 +155,8 @@ PyTypeObject THCPStreamType = {
   0,                                     /* tp_weaklistoffset */
   0,                                     /* tp_iter */
   0,                                     /* tp_iternext */
-  THCPStream_methods,                    /* tp_methods */
-  THCPStream_members,                    /* tp_members */
+  THCPEvent_methods,                     /* tp_methods */
+  0,                                     /* tp_members */
   THPVariable_properties,                /* tp_getset */
   0,                                     /* tp_base */
   0,                                     /* tp_dict */
@@ -154,15 +165,14 @@ PyTypeObject THCPStreamType = {
   0,                                     /* tp_dictoffset */
   0,                                     /* tp_init */
   0,                                     /* tp_alloc */
-  THCPStream_pynew,                      /* tp_new */
+  THCPEvent_pynew,                       /* tp_new */
 };
 
-
-bool THCPStream_init(PyObject *module)
-{
-  THCPStreamClass = (PyObject*)&THCPStreamType;
-  if (PyType_Ready(&THCPStreamType) < 0)
+bool THCPEvent_init(PyObject *module) {
+  THCPEventClass = (PyObject*)&THCPEventType;
+  if (PyType_Ready(&THCPEventType) < 0)
     return false;
-  Py_INCREF(&THCPStreamType);
-  PyModule_AddObject(module, "_CudaStreamBase", (PyObject *)&THCPStreamType);
+  Py_INCREF(&THCPEventType);
+  PyModule_AddObject(module, "_CudaEventBase", (PyObject *)&THCPEventType);
   return true;
+}

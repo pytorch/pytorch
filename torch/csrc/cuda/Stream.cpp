@@ -60,9 +60,38 @@ static PyObject * THPVariable_get_cuda_stream(THCPStream *self) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_get_priority(THCPStream *self) {
+  HANDLE_TH_ERRORS
+  return PyLong_FromLong(self->cuda_stream.priority());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THCPStream_priority_range(THCPStream *self) {
+  HANDLE_TH_ERRORS
+  THPObjectPtr tuple(PyTuple_New(2));
+  if (!tuple) return nullptr;
+
+  int least_priority, greatest_priority;
+  std::tie(least_priority, greatest_priority) =
+    self->cuda_stream.priority_range();
+
+  PyTuple_SET_ITEM(tuple.get(), 0, PyLong_FromLong(least_priority));
+  PyTuple_SET_ITEM(tuple.get(), 1, PyLong_FromLong(greatest_priority));
+
+  return tuple.release();
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THCPStream_query(THCPStream *self) {
   HANDLE_TH_ERRORS
   return PyBool_FromLong(self->cuda_stream.query());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THCPStream_synchronize(THCPStream *self) {
+  HANDLE_TH_ERRORS
+  self->cuda_stream.synchronize();
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -81,18 +110,23 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"device", (getter)THPVariable_get_device, nullptr, nullptr, nullptr},
   {"cuda_stream",
     (getter)THPVariable_get_cuda_stream, nullptr, nullptr, nullptr},
+  {"priority", (getter)THPVariable_get_priority, nullptr, nullptr, nullptr},
   {nullptr}
 };
 
 static PyMethodDef THCPStream_methods[] = {
   {(char*)"query", (PyCFunction)THCPStream_query, METH_NOARGS, nullptr},
+  {(char*)"synchronize",
+    (PyCFunction)THCPStream_synchronize, METH_NOARGS, nullptr},
+  {(char*)"priority_range",
+    (PyCFunction)THCPStream_priority_range, METH_STATIC | METH_NOARGS, nullptr},
   {(char*)"__eq__", (PyCFunction)THCPStream_eq, METH_O, nullptr},
   {nullptr}
 };
 
 PyTypeObject THCPStreamType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
-  "torch._C._CudaStreamBase",             /* tp_name */
+  "torch._C._CudaStreamBase",            /* tp_name */
   sizeof(THCPStream),                    /* tp_basicsize */
   0,                                     /* tp_itemsize */
   (destructor)THCPStream_dealloc,        /* tp_dealloc */

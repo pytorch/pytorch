@@ -36,9 +36,9 @@ struct AT_CUDA_API CUDAEvent {
   CUDAEvent(const cudaIpcEventHandle_t& handle, const CUDAStream& stream) {
     CUDAGuard guard(static_cast<int16_t>(stream.device_index()));
 
-    is_created_ = true;
     device_index_ = stream.device_index();
     cudaIpcOpenEventHandle(&event_, handle);
+    is_created_ = true;
   }
 
   // Note: event destruction done on creating device to avoid creating a
@@ -74,7 +74,16 @@ struct AT_CUDA_API CUDAEvent {
 
   // Note: cudaEventQuery can be safely called from any device
   bool happened() const {
-    return (was_recorded_ && cudaEventQuery(event_) == cudaSuccess);
+    if (was_recorded_) {
+      cudaError_t err = cudaEventQuery(event_);
+      if (err == cudaSuccess) {
+        return true;
+      } else if (err != cudaErrorNotReady) {
+        C10_CUDA_CHECK(err);
+      }
+    }
+
+    return false;
   }
 
   void record() { record(getCurrentCUDAStream()); }
@@ -101,10 +110,30 @@ struct AT_CUDA_API CUDAEvent {
 
   // Note: cudaStreamWaitEvent must be called on the same device as the stream.
   // The event has no actual GPU resources associated with it.
-  void block(const CUDAStream& stream) {
+  void block(const CUDAStream& stream) const {
     if (is_created_) {
       CUDAGuard guard(static_cast<int16_t>(stream.device_index()));
       AT_CUDA_CHECK(cudaStreamWaitEvent(stream, event_, 0));
+    }
+  }
+
+  float elapsed_time(const CUDAEvent& other) const {
+    float time_ms = 0;
+    // raise cudaErrorNotReady as well, which could happen if either event is
+    // recorded but not yet completed
+    AT_CUDA_CHECK(cudaEventElapsedTime(&time_ms, event_, other.event_));
+    return time_ms;
+  }
+
+  void synchronize() const {
+    if (is_created_) {
+      AT_CUDA_CHECK(cudaEventSynchronize(event_));
+    }
+  }
+
+  void ipc_handle(cudaIpcEventHandle_t * handle) const {
+    if (is_created_) {
+      AT_CUDA_CHECK(cudaIpcGetEventHandle(handle, event_));
     }
   }
 

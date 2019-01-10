@@ -39,7 +39,7 @@ class Stream(torch._C._CudaStreamBase):
         .. _CUDA documentation:
            http://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html
         """
-        check_error(cudart().cudaStreamWaitEvent(self, event, ctypes.c_int(0)))
+        event.wait(self)
 
     def wait_stream(self, stream):
         r"""Synchronizes with another stream.
@@ -67,7 +67,7 @@ class Stream(torch._C._CudaStreamBase):
         """
         if event is None:
             event = Event()
-        check_error(cudart().cudaEventRecord(event, self))
+        event.record(self)
         return event
 
     def query(self):
@@ -86,21 +86,7 @@ class Stream(torch._C._CudaStreamBase):
         .. _CUDA documentation:
            http://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html
         """
-        check_error(cudart().cudaStreamSynchronize(self))
-
-    @staticmethod
-    def priority_range():
-        least_priority = ctypes.c_int()
-        greatest_priority = ctypes.c_int()
-        check_error(cudart().cudaDeviceGetStreamPriorityRange(
-            ctypes.byref(least_priority), ctypes.byref(greatest_priority)))
-        return (least_priority.value, greatest_priority.value)
-
-    @property
-    def priority(self):
-        priority = ctypes.c_int()
-        check_error(cudart().cudaStreamGetPriority(self, ctypes.byref(priority)))
-        return priority.value
+        super(Stream, self).synchronize()
 
     @property
     def _as_parameter_(self):
@@ -159,39 +145,25 @@ class Event(torch._C._CudaEventBase):
         Returns:
             A boolean indicating if the event has been recorded.
         """
-        res = cudart().cudaEventQuery(self)
-        if res == cudaStatus.ERROR_NOT_READY:
-            return False
-        check_error(res)
-        return True
-
-    @property
-    def _as_parameter_(self):
-        return ctypes.c_void_p(self.cuda_event)
-
-
-
-
-
-
-
+        return super(Event, self).query()
 
     def elapsed_time(self, end_event):
         r"""Returns the time elapsed in milliseconds before the event was recorded."""
-        time_ms = ctypes.c_float()
-        check_error(cudart().cudaEventElapsedTime(
-            ctypes.byref(time_ms), self, end_event))
-        return time_ms.value
+        return super(Event, self).elapsed_time(end_event)
 
     def synchronize(self):
         r"""Synchronizes with the event."""
-        check_error(cudart().cudaEventSynchronize(self))
+        super(Event, self).synchronize()
 
     def ipc_handle(self):
         r"""Returns an IPC handle of this event."""
         handle = EventHandle()
-        check_error(cudart().cudaIpcGetEventHandle(ctypes.byref(handle), self))
+        return super(Event, self).ipc_handle(ctypes.byref(handle))
         return handle
+
+    @property
+    def _as_parameter_(self):
+        return ctypes.c_void_p(self.cuda_event)
 
     def __repr__(self):
         return '<torch.cuda.Event {0:#x}>'.format(self._as_parameter_.value)
