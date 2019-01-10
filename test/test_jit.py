@@ -2914,6 +2914,19 @@ class TestScript(JitTestCase):
 
         self.checkScript(to_device, (torch.ones(3, 4),))
 
+    def test_tensor_to_cpu(self):
+        def to_cpu(x):
+            return x.cpu()
+
+        self.checkScript(to_cpu, (torch.ones(3, 4),))
+
+    @unittest.skipIf(not RUN_CUDA, "device tests require CUDA")
+    def test_tensor_to_cuda(self):
+        def to_cuda(x):
+            return x.cuda()
+
+        self.checkScript(to_cpu, (torch.ones(3, 4),))
+
     def test_generic_list_errors(self):
         with self.assertRaisesRegex(RuntimeError, "previously matched to type"):
             @torch.jit.script
