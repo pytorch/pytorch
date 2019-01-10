@@ -124,6 +124,12 @@ constexpr uint32_t CUDA_MAX_THREADS_PER_BLOCK = 1024;
 // 256 is a good number for this fallback and should give good occupancy and 
 // versatility across all architectures.
 constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
+// NOTE: if you are thinking of constexpr-ify the inputs to launch bounds, it
+//       turns out that although __launch_bounds__ can take constexpr, it 
+//       can't take a constexpr that has anything to do with templates. 
+//       Currently we use launch_bounds that depend on template arguments in 
+//       Loops.cuh, Reduce.cuh and LossCTC.cuh. Hence, C10_MAX_THREADS_PER_BLOCK and 
+//       C10_MIN_BLOCKS_PER_SM are kept as macros.
 // Suppose you were planning to write __launch_bounds__(a, b), based on your performance tuning on a modern GPU. 
 // Instead, you should write __launch_bounds__(C10_MAX_THREADS_PER_BLOCK(a), C10_MIN_BLOCKS_PER_SM(a, b)), 
 // which will also properly respect limits on old architectures.
