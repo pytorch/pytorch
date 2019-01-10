@@ -173,8 +173,8 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
                     ++(*ii);
                   }
                 );
-  delete sizes;
-  delete idx;
+  delete [] sizes;
+  delete [] idx;
 }
 
 void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTensor *index)
