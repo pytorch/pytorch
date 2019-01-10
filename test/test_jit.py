@@ -4243,17 +4243,18 @@ a")
         self.checkScript(second_branch, (1, 2))
         check_unwrap_count(second_branch, 0) # y not set by unchecked unwrap
 
-        def both_branches(x, y):
-            # type: (Optional[int], Optional[int]) -> Optional[int]
-            if x is not None:
-                y = x
-            else:
-                y = x
-            return y
+        with self.disableModuleHook():
+            def both_branches(x, y):
+                # type: (Optional[int], Optional[int]) -> Optional[int]
+                if x is not None:
+                    y = x
+                else:
+                    y = x
+                return y
 
-        self.checkScript(both_branches, (None, 2))
-        self.checkScript(both_branches, (1, 2))
-        check_unwrap_count(both_branches, 0)
+            self.checkScript(both_branches, (None, 2))
+            self.checkScript(both_branches, (1, 2))
+            check_unwrap_count(both_branches, 0)
 
     def test_while_write_outer_then_read(self):
         def func(a, b):
