@@ -119,7 +119,10 @@ bool DeformConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       // If the helper bias multiplier is not image size, reshape and fill it
       // with
       // one.
-      bias_multiplier_.Resize(vector<int64_t>(1, output_image_size));
+      ReinitializeTensor(
+          &bias_multiplier_,
+          vector<int64_t>(1, output_image_size),
+          at::dtype<T>().device(Context::GetDeviceType()));
       math::Set<T, Context>(
           output_image_size,
           static_cast<T>(1),
@@ -280,7 +283,10 @@ bool DeformConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   col_buffer_shape.push_back(C * kernel_dims_size);
   col_buffer_shape.insert(
       col_buffer_shape.end(), output_dims.begin(), output_dims.end());
-  col_buffer_.Resize(col_buffer_shape);
+  ReinitializeTensor(
+      &col_buffer_,
+      col_buffer_shape,
+      at::dtype<T>().device(Context::GetDeviceType()));
 
   const int col_buffer_offset = col_buffer_.size() / group_;
 
@@ -301,7 +307,10 @@ bool DeformConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     auto* dbias = Output(BIAS_OR_INPUT_GRAD, {M}, at::dtype<T>());
     if (bias_multiplier_.size() != output_image_size) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
-      bias_multiplier_.Resize(vector<int64_t>(1, output_image_size));
+      ReinitializeTensor(
+          &bias_multiplier_,
+          vector<int64_t>(1, output_image_size),
+          at::dtype<T>().device(Context::GetDeviceType()));
       math::Set<T, Context>(
           output_image_size,
           static_cast<T>(1),
