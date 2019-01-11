@@ -169,8 +169,7 @@ class AliasOp final : public Operator<Context> {
   bool RunOnDevice() override {
     auto& input = Input(0);
     CAFFE_ENFORCE_GE(input.numel(), 0, "Tensor is not initialized");
-    Output(0)->ResizeLike(input);
-    Output(0)->ShareData(input);
+    OutputTensorAlias(0, input);
     return true;
   }
 };
@@ -212,7 +211,7 @@ class FlattenToVecOp : public Operator<Context> {
     auto& input = Input(0);
     auto* output = Output(0);
     CAFFE_ENFORCE_GE(
-        input.sizes().size(), 1, "The rank of the tensor must be >= 1.");
+        input.dim(), 1, "The rank of the tensor must be >= 1.");
     output->Resize(input.numel());
 
     context_.CopyItemsSameDevice(
@@ -955,9 +954,8 @@ class SizeOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& input = Input(0);
-    auto* output = Output(0);
 
-    output->Resize(vector<int64_t>());
+    auto* output = Output(0, vector<int64_t>(), at::dtype<int64_t>());
     auto* output_data = output->template mutable_data<int64_t>();
 
     auto size = input.numel();
@@ -1269,15 +1267,13 @@ class RangeOp : public Operator<Context> {
     } else {
       length = static_cast<int>(ceil(diff / step));
     }
-    auto* output = Output(0);
+
     // Match numpy's behavior here.
     if (length <= 0) {
-      output->Resize(0);
-      // Called for the side effect of setting the data.
-      output->template mutable_data<T>();
+      Output(0, {0}, at::dtype<T>());
       return true;
     } else {
-      output->Resize(length);
+      auto* output = Output(0, {length}, at::dtype<T>());
       return DoRunOnDevice<T>(start, step, output);
     }
   }

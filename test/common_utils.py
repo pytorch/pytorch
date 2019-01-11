@@ -178,7 +178,10 @@ def to_gpu(obj, type_map={}):
 
 
 def get_function_arglist(func):
-    return inspect.getargspec(func).args
+    if sys.version_info > (3,):
+        return inspect.getfullargspec(func).args
+    else:
+        return inspect.getargspec(func).args
 
 
 def set_rng_seed(seed):
@@ -324,7 +327,8 @@ class TestCase(expecttest.TestCase):
             #        needed for inplace operations done on `x`, e.g., copy_().
             #        Remove after implementing something equivalent to CopySlice
             #        for sparse views.
-            x = x.detach()
+            # NOTE: We do clone() after detach() here because we need to be able to change size/storage of x afterwards
+            x = x.detach().clone()
         return x, x._indices().clone(), x._values().clone()
 
     def safeToDense(self, t):

@@ -76,17 +76,17 @@ bool SpatialNarrowAsOp<CUDAContext>::DoRunWithType() {
   // Narrows input 0 (A) spatially to match input 1 (B)
   auto& A = Input(0);
   auto& B = Input(1);
-  auto* C = Output(0);
+
 
   CAFFE_ENFORCE_EQ(A.dim32(0), B.dim32(0), "Input dim 0 must be equal.");
+  std::vector<int64_t> sizes;
   if (A.ndim() == B.ndim()) {
     CAFFE_ENFORCE_EQ(A.dim32(1), B.dim32(1), "Input dim 1 must be equal.");
     CAFFE_ENFORCE_GE(
         A.dim32(2), B.dim32(2), "Input 0 height must be >= input 1 height.");
     CAFFE_ENFORCE_GE(
         A.dim32(3), B.dim32(3), "Input 0 width must be >= input 1 width.");
-
-    C->ResizeLike(B);
+    sizes = B.sizes().vec();
   } else {
     // For (N, H, W) case
     CAFFE_ENFORCE_EQ(A.ndim() - 1, B.ndim(), "Dimension mismatch.");
@@ -94,8 +94,9 @@ bool SpatialNarrowAsOp<CUDAContext>::DoRunWithType() {
         A.dim32(2), B.dim32(1), "Input 0 height must be >= input 1 height.");
     CAFFE_ENFORCE_GE(
         A.dim32(3), B.dim32(2), "Input 0 width must be >= input 1 width.");
-    C->Resize(A.dim32(0), A.dim32(1), B.dim32(1), B.dim32(2));
+    sizes = {A.dim32(0), A.dim32(1), B.dim32(1), B.dim32(2)};
   }
+  auto* C = Output(0, sizes, at::dtype<T>());
   int out_width = C->dim32(3);
   int out_height = C->dim32(2);
   int in_width = A.dim32(3);

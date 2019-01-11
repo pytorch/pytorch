@@ -249,46 +249,6 @@
     - long step
 ]]
 [[
-  name: _th_range
-  cname: range
-  variants:
-    - function
-  backends:
-    - CPU
-    - CUDA
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - accreal start
-    - accreal end
-    - accreal step
-]]
-[[
-  name: _th_arange
-  variants:
-    - function
-  backends:
-    - CPU
-    - CUDA
-  return: argument 0
-  options:
-    - cname: arange
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - accreal start
-        - accreal end
-        - accreal step
-    - cname: arange
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - CONSTANT 0
-        - accreal end
-        - CONSTANT 1
-]]
-[[
   name: _th_scatter_
   return: argument 0
   variants: function
@@ -1882,25 +1842,6 @@
     - real weight
 ]]
 [[
-  name: _th_logspace
-  cname: logspace
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - real start
-    - real end
-    - long steps
-]]
-[[
   name: _th_histc
   cname: histc
   types:
@@ -2101,55 +2042,6 @@
   arguments:
     - arg: THTensor* self
     - arg: THTensor* tensor
-]]
-[[
-  name: _th_tril
-  cname: tril
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - arg: long diagonal
-      default: 0
-]]
-[[
-  name: _th_tril_
-  cname: tril
-  variants: function
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-    - arg: long diagonal
-      default: 0
-]]
-[[
-  name: _th_triu
-  cname: triu
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - arg: long diagonal
-      default: 0
-]]
-[[
-  name: _th_triu_
-  cname: triu
-  variants:
-    - function
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-    - arg: long diagonal
-      default: 0
 ]]
 [[
   name: _th_cross
@@ -2499,25 +2391,6 @@
     - THTensor* tensor2
 ]]
 [[
-  name: _th_gesv_single
-  cname: gesv
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-    - CUDA
-  variants: function
-  return: argument 0,1
-  arguments:
-    - arg: THTensor* solution
-      output: True
-    - arg: THTensor* lu
-      output: True
-    - THTensor* self
-    - THTensor* A
-]]
-[[
   name: _th_gels
   cname: gels
   types:
@@ -2663,49 +2536,6 @@
     - arg: THTensor* output
       output: True
     - THTensor* self
-]]
-[[
-  name: _th_potrf_single
-  cname: potrf
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* output
-      output: True
-    - THTensor* self
-    - arg: bool upper
-      if_true: U
-      if_false: L
-      default: U
-]]
-[[
-  name: _th_potrs_single
-  cname: potrs
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - THTensor* input2
-    - arg: bool upper
-      if_true: U
-      if_false: L
-      default: U
 ]]
 [[
   name: _th_potri
@@ -3122,24 +2952,6 @@
         - THTensor* x
         - THTensor* alpha
         - THTensor* total
-]]
-[[
-  name: _th_tensor
-  return: THTensor*
-  cpu_half: True
-  variants: [function]
-  options:
-    - cname: newWithSize
-      arguments:
-        - IntListSize size
-        - IntList stride
-    - cname: newWithStorage
-      arguments:
-        - THStorage* storage
-        - int64_t storageOffset
-        - IntListSize size
-        - arg: IntList stride
-          default: {}
 ]]
 
 # In theory, this could be a part of the above declaration. But in

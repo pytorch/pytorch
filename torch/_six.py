@@ -131,6 +131,11 @@ elif PY3:
     def get_function_from_type(cls, name):
         return getattr(cls, name, None)
 
+if PY2:
+    import __builtin__ as builtins
+elif PY3:
+    import builtins
+
 
 # The codes below is not copied from the six package, so the copyright
 # declaration at the beginning does not apply.

@@ -28,13 +28,13 @@ class SumReduceDimsOp final : public Operator<Context> {
     auto& X = Input(0);
 
     CAFFE_ENFORCE(
-        num_reduce_dims_ >= 0 && num_reduce_dims_ <= X.sizes().size(),
+        num_reduce_dims_ >= 0 && num_reduce_dims_ <= X.dim(),
         "For N-dim input tensor, support num_reduce_dims in range [0, N].");
 
     vector<int64_t> output_shape;
     int start_index = FIRSTDIMS ? num_reduce_dims_ : 0;
     int end_index =
-        FIRSTDIMS ? X.sizes().size() : X.sizes().size() - num_reduce_dims_;
+        FIRSTDIMS ? X.dim() : X.dim() - num_reduce_dims_;
     for (int i = start_index; i < end_index; ++i) {
       output_shape.push_back(X.sizes()[i]);
     }

@@ -35,10 +35,10 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
 
     CAFFE_ENFORCE(src.ndim() >= 1);
     CAFFE_ENFORCE_EQ(mask.ndim(), 1);
-    CAFFE_ENFORCE(src.dims()[0] == mask.dims()[0]);
+    CAFFE_ENFORCE(src.size(0) == mask.size(0));
 
     const auto* maskData = mask.data<bool>();
-    const auto outerSize = mask.dims()[0];
+    const auto outerSize = mask.size(0);
     indices_.Resize(outerSize);
     auto* indicesData = indices_.mutable_data<int64_t>();
 
@@ -76,14 +76,14 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
     context_.CopyToCPU(1, numOfOutputData, &numOfOutput);
 
     indices_.Resize(numOfOutput);
-    std::vector<int64_t> dims = src.dims().vec();
+    std::vector<int64_t> dims = src.sizes().vec();
     dims[0] = numOfOutput;
     dest->Resize(dims);
     auto* destData = (uint8_t*)dest->raw_mutable_data(src.meta());
     const auto* srcData = (uint8_t*)src.raw_data();
     if (OutputSize() == 2) {
-      auto* indicesOut = Output(1);
-      indicesOut->Resize(numOfOutput);
+
+      auto* indicesOut = Output(1, {numOfOutput}, at::dtype<int64_t>());
       indicesOut->template mutable_data<int64_t>();
     }
 
@@ -306,8 +306,7 @@ bool SequenceMaskOp<CUDAContext>::DoRunWithType() {
     window_centers = &Input(1);
   }
 
-  auto* output = Output(0);
-  output->ResizeLike(*input);
+  auto* output = Output(0, input->sizes(), at::dtype<T>());
 
   const auto canonical_axis = input->canonical_axis_index(axis_);
 

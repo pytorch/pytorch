@@ -179,6 +179,14 @@ class TestOperators(TestCase):
         x = torch.tensor([0.0, 1.0, 2.0], requires_grad=True)
         self.assertONNX(lambda x: x.chunk(2), x)
 
+    def test_split(self):
+        x = torch.tensor([[0.0, 1.0, 1.0, 0.0, 2.0, 2.0], [2.0, 3.0, 3.0, 2.0, 1.0, 1.0]])
+        self.assertONNX(lambda x: torch.split(x, 2, 1), x)
+
+    def test_split_with_sizes(self):
+        x = torch.tensor([[0.0, 1.0, 1.0, 0.0, 2.0, 2.0], [2.0, 3.0, 3.0, 2.0, 1.0, 1.0]])
+        self.assertONNX(lambda x: torch.split(x, [2, 1, 3], 1), x)
+
     def test_concat2(self):
         x = torch.randn(2, 3)
         y = torch.randn(2, 3)
@@ -292,6 +300,7 @@ class TestOperators(TestCase):
         x = torch.randn(3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.full(x.shape, 2), x)
 
+    @skipIfCI
     def test_full_like(self):
         x = torch.randn(3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.full_like(x, 2), x)
@@ -479,10 +488,12 @@ class TestOperators(TestCase):
         x = torch.randn(3, 4)
         self.assertONNX(torch.nn.Linear(4, 5, bias=True), x)
 
+    @skipIfCI
     def test_zeros_like(self):
         x = torch.randn(5, 8, requires_grad=True)
         self.assertONNX(lambda x: torch.zeros_like(x), x)
 
+    @skipIfCI
     def test_ones_like(self):
         x = torch.randn(6, 10, requires_grad=True)
         self.assertONNX(lambda x: torch.ones_like(x), x)
