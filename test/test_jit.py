@@ -4229,7 +4229,7 @@ a")
 
         self.checkScript(first_branch, (None, 2))
         self.checkScript(first_branch, (1, 2))
-        check_unwrap_count(first_branch, 1) # y set by unchecked unwrap
+        check_unwrap_count(first_branch, 1)  # y set by unchecked unwrap
 
         def second_branch(x, y):
             # type: (Optional[int], Optional[int]) -> Optional[int]
@@ -4241,7 +4241,7 @@ a")
 
         self.checkScript(second_branch, (None, 2))
         self.checkScript(second_branch, (1, 2))
-        check_unwrap_count(second_branch, 0) # y not set by unchecked unwrap
+        check_unwrap_count(second_branch, 0)  # y not set by unchecked unwrap
 
         with self.disableModuleHook():
             def both_branches(x, y):
