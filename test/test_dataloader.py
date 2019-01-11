@@ -1,3 +1,4 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
 import math
 import sys
 import errno
@@ -596,7 +597,7 @@ class TestDataLoader(TestCase):
         for i in range(num_processes):
             s = DistributedSampler(data_set, num_processes, i)
             d_loader = DataLoader(data_set, batch_size=int(num_batches / num_processes), drop_last=True, sampler=s)
-            for k, data in enumerate(d_loader):
+            for _, data in enumerate(d_loader):
                 scanned_data = torch.cat((scanned_data, data), 0)
 
         self.assertEqual(scanned_data.size(), scanned_data.unique().size())
@@ -652,7 +653,7 @@ class TestDataLoader(TestCase):
             workers = loader.workers
             if pin_memory:
                 pin_memory_thread = loader.pin_memory_thread
-            for i, sample in enumerate(loader):
+            for i, _ in enumerate(loader):
                 if i == 10:
                     break
             assert i == 10
@@ -763,7 +764,7 @@ class TestDataLoader(TestCase):
         def check_len(dl, expected):
             self.assertEqual(len(dl), expected)
             n = 0
-            for sample in dl:
+            for _ in dl:
                 n += 1
             self.assertEqual(n, expected)
         check_len(self.dataset, 100)
@@ -876,7 +877,7 @@ class TestStringDataLoader(TestCase):
     @skipIfRocm
     def test_shuffle_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, shuffle=True, num_workers=4, pin_memory=True)
-        for batch_ndx, (s, n) in enumerate(loader):
+        for _, (s, n) in enumerate(loader):
             self.assertIsInstance(s[0], str)
             self.assertTrue(n.is_pinned())
 
@@ -920,7 +921,7 @@ class TestDictDataLoader(TestCase):
     @skipIfRocm
     def test_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
-        for batch_ndx, sample in enumerate(loader):
+        for _, sample in enumerate(loader):
             self.assertTrue(sample['a_tensor'].is_pinned())
             self.assertTrue(sample['another_dict']['a_number'].is_pinned())
 
