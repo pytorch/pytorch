@@ -46,10 +46,10 @@ ConvDNNLowPAcc16Op<ReluFused>::ConvDNNLowPAcc16Op(
     const OperatorDef& operator_def,
     Workspace* ws)
     : ConvDNNLowPOp<uint8_t, ReluFused>(operator_def, ws),
-      nbits_in_non_outlier_(OperatorBase::GetSingleArgument<int>(
+      nbits_in_non_outlier_(this->template GetSingleArgument<int>(
           "nbits_in_non_outlier",
           FLAGS_caffe2_dnnlowp_nbits_in_non_outlier)),
-      copy_to_32bit_frequency_(OperatorBase::GetSingleArgument<int>(
+      copy_to_32bit_frequency_(this->template GetSingleArgument<int>(
           "copy_to_32bit_frequency",
           FLAGS_caffe2_dnnlowp_copy_to_32bit_frequency)) {
   if (nbits_in_non_outlier_ == 0) {
@@ -181,8 +181,7 @@ bool ConvDNNLowPAcc16Op<ReluFused>::GetQuantizationParameters_() {
         static int log_occurences = 0;
         if (log_occurences < 32) {
           ++log_occurences;
-          LOG(WARNING) << "Conv with weight "
-                       << OperatorBase::debug_def().input(FILTER)
+          LOG(WARNING) << "Conv with weight " << this->debug_def().input(FILTER)
                        << " falls back to slow path because " << reason;
         }
       }
@@ -772,8 +771,8 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNHWC() {
   dt = chrono::duration<double>(t_end - t_very_begin).count();
   double ops = 2. * N * output_image_size * M * kernel_dim;
   double gops = ops / dt / 1e9;
-  LOG(INFO) << "this=" << this << " " << OperatorBase::debug_def().type()
-            << " output=" << OperatorBase::debug_def().output(0) << " "
+  LOG(INFO) << "this=" << this << " " << this->debug_def().type()
+            << " output=" << this->debug_def().output(0) << " "
             << N * output_image_size << "x" << M << "x" << kernel_dim
             << " G=" << group_ << " C/G=" << C / group_ << " K/G=" << M / group_
             << " R=" << kernel_h() << " S=" << kernel_w() << " : " << dt * 1e3
