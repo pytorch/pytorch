@@ -1094,9 +1094,8 @@ def zeros(g, sizes, dtype, layout, device):
 @parse_args('v', 'i', 'v', 'v')
 def zeros_like(g, input, dtype, layout, device):
     shape = g.op("Shape", input)
-    print(dtype, torch.float32)
     return g.op("ConstantOfShape", shape,
-                value_t=torch.tensor(0, dtype=pytorch_type_to_scalar_type[dtype]))
+                value_t=torch.tensor(0, dtype=scalar_type_to_pytorch_type[dtype]))
 
 
 @parse_args('v', 'i', 'v', 'v')
@@ -1108,7 +1107,7 @@ def ones(g, sizes, dtype, layout, device):
 def ones_like(g, input, dtype, layout, device):
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
-                value_t=torch.tensor(1, dtype=pytorch_type_to_scalar_type[dtype]))
+                value_t=torch.tensor(1, dtype=scalar_type_to_pytorch_type[dtype]))
 
 
 def full(g, sizes, value, dtype, layout, device):
@@ -1126,7 +1125,7 @@ def full(g, sizes, value, dtype, layout, device):
 def full_like(g, input, fill_value, dtype, layout, device):
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
-                value_t=torch.tensor(fill_value, dtype=pytorch_type_to_scalar_type[dtype]))
+                value_t=torch.tensor(fill_value, dtype=scalar_type_to_pytorch_type[dtype]))
 
 
 @parse_args('v', 'v', 'v', 'v', 'i')
