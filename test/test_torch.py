@@ -3551,10 +3551,14 @@ class _TestTorchMixin(object):
         SIZE = 4
         if order == 'descending':
             def check_order(a, b):
-                return a >= b
+                # `a != a` because we put NaNs
+                # at the end of ascending sorted lists,
+                # and the beginning of descending ones.
+                return a != a or a >= b
         elif order == 'ascending':
             def check_order(a, b):
-                return a <= b
+                # see above
+                return b != b or a <= b
         else:
             error('unknown order "{}", must be "ascending" or "descending"'.format(order))
 
@@ -3628,6 +3632,17 @@ class _TestTorchMixin(object):
 
         # Test that we still have proper sorting with duplicate keys
         self.assertIsOrdered('descending', x, res2val, res2ind, 'random with duplicate keys')
+
+        # Test sorting with NaNs
+        x = torch.rand(SIZE, SIZE)
+        x[1][2] = float('NaN')
+        x[3][0] = float('NaN')
+        torch.sort(x, out=(res2val, res2ind))
+        self.assertIsOrdered('ascending', x, res2val, res2ind,
+                             'random with NaNs')
+        torch.sort(x, out=(res2val, res2ind), descending=True)
+        self.assertIsOrdered('descending', x, res2val, res2ind,
+                             'random with NaNs')
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_tensordot(self):
