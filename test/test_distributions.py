@@ -959,12 +959,16 @@ class TestDistributions(TestCase):
         total_count = 1000000.
         x = torch.tensor([10, 9999], dtype=torch.float)
         expected = scipy.stats.binom(total_count, probs.numpy()).logpmf(x.numpy())
-        log_prob = Binomial(total_count, probs).log_prob(x)
+        log_prob = Binomial(total_count, probs).log_prob(x).numpy()
         # Comparison is again scipy distributions which use float64.
-        self.assertTrue(np.allclose(log_prob, expected, rtol=0.05))
+        self.assertTrue(np.allclose(log_prob, expected, rtol=0.05),
+                        msg="Values not equal within the desired tolerance: \n"
+                            "actual={} \nexpected={}".format(log_prob, expected))
         logits = probs_to_logits(probs, is_binary=True)
-        log_prob = Binomial(total_count, logits=logits).log_prob(x)
-        self.assertTrue(np.allclose(log_prob, expected, rtol=0.05))
+        log_prob = Binomial(total_count, logits=logits).log_prob(x).numpy()
+        self.assertTrue(np.allclose(log_prob, expected, rtol=0.05),
+                        msg="Values not equal within the desired tolerance: \n"
+                            "actual={} \nexpected={}".format(log_prob, expected))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_binomial_log_prob_vectorized_count(self):
