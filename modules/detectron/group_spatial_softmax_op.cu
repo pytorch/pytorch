@@ -134,7 +134,7 @@ bool GroupSpatialSoftmaxGradientOp<float, CUDAContext>::RunOnDevice() {
   dX->ResizeLike(Y);
 
   if (sum_probs_.size() != N * A * H * W) {
-    sum_probs_.Resize(N * A * H * W);
+    ReinitializeTensor(&sum_probs_, {N * A * H * W}, at::dtype<float>().device(CUDA));
   }
 
   const float* Ydata = Y.data<float>();
