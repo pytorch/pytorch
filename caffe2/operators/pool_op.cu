@@ -2,6 +2,8 @@
 #include "caffe2/operators/pool_op.h"
 
 #include <cfloat>
+#include <functional>
+#include <numeric>
 
 #include "caffe2/core/context_gpu.h"
 
@@ -200,7 +202,7 @@ __global__ void AveragePool3DForwardNCHWCUDAKernel(
     const int xh = yh * stride_h;
     const int xw = yw * stride_w;
     const int p = max(xd - pad_p, 0);
-    const int a = min(xd - pad_p + kernel_h, X_D);
+    const int a = min(xd - pad_p + kernel_d, X_D);
     const int t = max(xh - pad_t, 0);
     const int b = min(xh - pad_t + kernel_h, X_H);
     const int l = max(xw - pad_l, 0);
@@ -253,7 +255,7 @@ __global__ void AveragePool3DForwardNHWCCUDAKernel(
   const int xh = yh * stride_h;
   const int xw = yw * stride_w;
   const int p = max(xd - pad_p, 0);
-  const int a = min(xd - pad_p + kernel_h, X_D);
+  const int a = min(xd - pad_p + kernel_d, X_D);
   const int t = max(xh - pad_t, 0);
   const int b = min(xh - pad_t + kernel_h, X_H);
   const int l = max(xw - pad_l, 0);
@@ -573,208 +575,167 @@ __global__ void Ave3DPoolBackwardNHWC(
 
 template <>
 template <>
-bool AveragePoolFunctor<CUDAContext>::Forward<float, StorageOrder::NCHW, 1>(
+bool AveragePoolFunctor<CUDAContext>::Forward<float, StorageOrder::NCHW>(
     const int N,
     const int C,
-    const std::array<int, 1>& X_dims,
-    const std::array<int, 1>& Y_dims,
-    const std::array<int, 1>& kernel,
-    const std::array<int, 1>& /* dilation */,
-    const std::array<int, 1>& stride,
-    const std::array<int, 2>& pads,
+    const std::vector<int>& X_dims,
+    const std::vector<int>& Y_dims,
+    const std::vector<int>& kernel,
+    const std::vector<int>& /* dilation */,
+    const std::vector<int>& stride,
+    const std::vector<int>& pads,
     const float* X,
     float* Y,
     CUDAContext* context) const {
-  const int K =
-      (Y_dims[0] + CAFFE_CUDA_NUM_THREADS - 1) / CAFFE_CUDA_NUM_THREADS;
-  AveragePool1DForwardNCHWCUDAKernel<float>
-      <<<N * C * K, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
-          K,
-          X_dims[0],
-          Y_dims[0],
-          kernel[0],
-          stride[0],
-          pads[0],
-          count_include_pad,
-          X,
-          Y);
-  return true;
-}
-
-template <>
-template <>
-bool AveragePoolFunctor<CUDAContext>::Forward<float, StorageOrder::NHWC, 1>(
-    const int N,
-    const int C,
-    const std::array<int, 1>& X_dims,
-    const std::array<int, 1>& Y_dims,
-    const std::array<int, 1>& kernel,
-    const std::array<int, 1>& /* dilation */,
-    const std::array<int, 1>& stride,
-    const std::array<int, 2>& pads,
-    const float* X,
-    float* Y,
-    CUDAContext* context) const {
-  AveragePool1DForwardNHWCCUDAKernel<float>
-      <<<N * Y_dims[0], CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
-          C,
-          X_dims[0],
-          Y_dims[0],
-          kernel[0],
-          stride[0],
-          pads[0],
-          count_include_pad,
-          X,
-          Y);
-  return true;
-}
-
-template <>
-template <>
-bool AveragePoolFunctor<CUDAContext>::Forward<float, StorageOrder::NCHW, 2>(
-    const int N,
-    const int C,
-    const std::array<int, 2>& X_dims,
-    const std::array<int, 2>& Y_dims,
-    const std::array<int, 2>& kernel,
-    const std::array<int, 2>& /* dilation */,
-    const std::array<int, 2>& stride,
-    const std::array<int, 4>& pads,
-    const float* X,
-    float* Y,
-    CUDAContext* context) const {
-  const int Y_HxW = Y_dims[0] * Y_dims[1];
+  const int ndim = X_dims.size();
+  const int Y_HxW = std::accumulate(
+      Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>());
   const int K = (Y_HxW + CAFFE_CUDA_NUM_THREADS - 1) / CAFFE_CUDA_NUM_THREADS;
-  AveragePool2DForwardNCHWCUDAKernel<float>
-      <<<N * C * K, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
-          K,
-          X_dims[0],
-          X_dims[1],
-          Y_dims[0],
-          Y_dims[1],
-          kernel[0],
-          kernel[1],
-          stride[0],
-          stride[1],
-          pads[0],
-          pads[1],
-          count_include_pad,
-          X,
-          Y);
-  return true;
+  switch (ndim) {
+    case 1: {
+      AveragePool1DForwardNCHWCUDAKernel<float>
+          <<<N * C * K, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
+              K,
+              X_dims[0],
+              Y_dims[0],
+              kernel[0],
+              stride[0],
+              pads[0],
+              count_include_pad,
+              X,
+              Y);
+      return true;
+    }
+    case 2: {
+      AveragePool2DForwardNCHWCUDAKernel<float>
+          <<<N * C * K, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
+              K,
+              X_dims[0],
+              X_dims[1],
+              Y_dims[0],
+              Y_dims[1],
+              kernel[0],
+              kernel[1],
+              stride[0],
+              stride[1],
+              pads[0],
+              pads[1],
+              count_include_pad,
+              X,
+              Y);
+      return true;
+    }
+    case 3: {
+      AveragePool3DForwardNCHWCUDAKernel<float>
+          <<<N * C * K, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
+              K,
+              X_dims[0],
+              X_dims[1],
+              X_dims[2],
+              Y_dims[0],
+              Y_dims[1],
+              Y_dims[2],
+              kernel[0],
+              kernel[1],
+              kernel[2],
+              stride[0],
+              stride[1],
+              stride[2],
+              pads[0],
+              pads[1],
+              pads[2],
+              count_include_pad,
+              X,
+              Y);
+      return true;
+    }
+    default: {
+      CAFFE_THROW("Unsupported pooling dim: ", ndim);
+      return false;
+    }
+  }
 }
 
 template <>
 template <>
-bool AveragePoolFunctor<CUDAContext>::Forward<float, StorageOrder::NHWC, 2>(
+bool AveragePoolFunctor<CUDAContext>::Forward<float, StorageOrder::NHWC>(
     const int N,
     const int C,
-    const std::array<int, 2>& X_dims,
-    const std::array<int, 2>& Y_dims,
-    const std::array<int, 2>& kernel,
-    const std::array<int, 2>& /* dilation */,
-    const std::array<int, 2>& stride,
-    const std::array<int, 4>& pads,
+    const std::vector<int>& X_dims,
+    const std::vector<int>& Y_dims,
+    const std::vector<int>& kernel,
+    const std::vector<int>& /* dilation */,
+    const std::vector<int>& stride,
+    const std::vector<int>& pads,
     const float* X,
     float* Y,
     CUDAContext* context) const {
-  const int Y_HxW = Y_dims[0] * Y_dims[1];
-  AveragePool2DForwardNHWCCUDAKernel<float>
-      <<<N * Y_HxW, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
-          C,
-          X_dims[0],
-          X_dims[1],
-          Y_dims[0],
-          Y_dims[1],
-          kernel[0],
-          kernel[1],
-          stride[0],
-          stride[1],
-          pads[0],
-          pads[1],
-          count_include_pad,
-          X,
-          Y);
-  return true;
-}
-
-template <>
-template <>
-bool AveragePoolFunctor<CUDAContext>::Forward<float, StorageOrder::NCHW, 3>(
-    const int N,
-    const int C,
-    const std::array<int, 3>& X_dims,
-    const std::array<int, 3>& Y_dims,
-    const std::array<int, 3>& kernel,
-    const std::array<int, 3>& /* dilation */,
-    const std::array<int, 3>& stride,
-    const std::array<int, 6>& pads,
-    const float* X,
-    float* Y,
-    CUDAContext* context) const {
-  const int Y_HxW = Y_dims[0] * Y_dims[1] * Y_dims[2];
-  const int K = (Y_HxW + CAFFE_CUDA_NUM_THREADS - 1) / CAFFE_CUDA_NUM_THREADS;
-  AveragePool3DForwardNCHWCUDAKernel<float>
-      <<<N * C * K, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
-          K,
-          X_dims[0],
-          X_dims[1],
-          X_dims[2],
-          Y_dims[0],
-          Y_dims[1],
-          Y_dims[2],
-          kernel[0],
-          kernel[1],
-          kernel[2],
-          stride[0],
-          stride[1],
-          stride[2],
-          pads[0],
-          pads[1],
-          pads[2],
-          count_include_pad,
-          X,
-          Y);
-  return true;
-}
-
-template <>
-template <>
-bool AveragePoolFunctor<CUDAContext>::Forward<float, StorageOrder::NHWC, 3>(
-    const int N,
-    const int C,
-    const std::array<int, 3>& X_dims,
-    const std::array<int, 3>& Y_dims,
-    const std::array<int, 3>& kernel,
-    const std::array<int, 3>& /* dilation */,
-    const std::array<int, 3>& stride,
-    const std::array<int, 6>& pads,
-    const float* X,
-    float* Y,
-    CUDAContext* context) const {
-  const int Y_HxW = Y_dims[0] * Y_dims[1] * Y_dims[2];
-  AveragePool3DForwardNHWCCUDAKernel<float>
-      <<<N * Y_HxW, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
-          C,
-          X_dims[0],
-          X_dims[1],
-          X_dims[2],
-          Y_dims[0],
-          Y_dims[1],
-          Y_dims[2],
-          kernel[0],
-          kernel[1],
-          kernel[2],
-          stride[0],
-          stride[1],
-          stride[2],
-          pads[0],
-          pads[1],
-          pads[2],
-          count_include_pad,
-          X,
-          Y);
-  return true;
+  const int ndim = X_dims.size();
+  const int Y_HxW = std::accumulate(
+      Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>());
+  switch (ndim) {
+    case 1: {
+      AveragePool1DForwardNHWCCUDAKernel<float>
+          <<<N * Y_HxW, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
+              C,
+              X_dims[0],
+              Y_dims[0],
+              kernel[0],
+              stride[0],
+              pads[0],
+              count_include_pad,
+              X,
+              Y);
+      return true;
+    }
+    case 2: {
+      AveragePool2DForwardNHWCCUDAKernel<float>
+          <<<N * Y_HxW, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
+              C,
+              X_dims[0],
+              X_dims[1],
+              Y_dims[0],
+              Y_dims[1],
+              kernel[0],
+              kernel[1],
+              stride[0],
+              stride[1],
+              pads[0],
+              pads[1],
+              count_include_pad,
+              X,
+              Y);
+      return true;
+    }
+    case 3: {
+      AveragePool3DForwardNHWCCUDAKernel<float>
+          <<<N * Y_HxW, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
+              C,
+              X_dims[0],
+              X_dims[1],
+              X_dims[2],
+              Y_dims[0],
+              Y_dims[1],
+              Y_dims[2],
+              kernel[0],
+              kernel[1],
+              kernel[2],
+              stride[0],
+              stride[1],
+              stride[2],
+              pads[0],
+              pads[1],
+              pads[2],
+              count_include_pad,
+              X,
+              Y);
+      return true;
+    }
+    default: {
+      CAFFE_THROW("Unsupported pooling dim: ", ndim);
+      return false;
+    }
+  }
 }
 
 template <>

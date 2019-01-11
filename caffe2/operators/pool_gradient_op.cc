@@ -617,242 +617,172 @@ void RunMaxPoolGradient3D(
 
 } // namespace
 
-#define CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_BACKWARD_1D(T, kOrder) \
-  template <>                                                          \
-  template <>                                                          \
-  bool AveragePoolFunctor<CPUContext>::Backward<T, kOrder, 1>(         \
-      const int N,                                                     \
-      const int C,                                                     \
-      const std::array<int, 1>& X_dims,                                \
-      const std::array<int, 1>& Y_dims,                                \
-      const std::array<int, 1>& kernel,                                \
-      const std::array<int, 1>& /* dilation */,                        \
-      const std::array<int, 1>& stride,                                \
-      const std::array<int, 2>& pads,                                  \
-      const T* dY,                                                     \
-      const T* /* X */,                                                \
-      const T* /* Y */,                                                \
-      T* dX,                                                           \
-      CPUContext* /* context */) const {                               \
-    RunAveragePoolGradient1D<T, kOrder>(                               \
-        N,                                                             \
-        C,                                                             \
-        X_dims[0],                                                     \
-        Y_dims[0],                                                     \
-        kernel[0],                                                     \
-        stride[0],                                                     \
-        pads[0],                                                       \
-        count_include_pad,                                             \
-        dY,                                                            \
-        dX);                                                           \
-    return true;                                                       \
+template <>
+template <typename T, StorageOrder kOrder>
+bool AveragePoolFunctor<CPUContext>::Backward(
+    const int N,
+    const int C,
+    const std::vector<int>& X_dims,
+    const std::vector<int>& Y_dims,
+    const std::vector<int>& kernel,
+    const std::vector<int>& /* dilation */,
+    const std::vector<int>& stride,
+    const std::vector<int>& pads,
+    const T* dY,
+    const T* /* X */,
+    const T* /* Y */,
+    T* dX,
+    CPUContext* /* context */) const {
+  const int ndim = X_dims.size();
+  switch (ndim) {
+    case 1: {
+      RunAveragePoolGradient1D<T, kOrder>(
+          N,
+          C,
+          X_dims[0],
+          Y_dims[0],
+          kernel[0],
+          stride[0],
+          pads[0],
+          count_include_pad,
+          dY,
+          dX);
+      return true;
+    }
+    case 2: {
+      RunAveragePoolGradient2D<T, kOrder>(
+          N,
+          C,
+          X_dims[0],
+          X_dims[1],
+          Y_dims[0],
+          Y_dims[1],
+          kernel[0],
+          kernel[1],
+          stride[0],
+          stride[1],
+          pads[0],
+          pads[1],
+          count_include_pad,
+          dY,
+          dX);
+      return true;
+    }
+    case 3: {
+      RunAveragePoolGradient3D<T, kOrder>(
+          N,
+          C,
+          X_dims[0],
+          X_dims[1],
+          X_dims[2],
+          Y_dims[0],
+          Y_dims[1],
+          Y_dims[2],
+          kernel[0],
+          kernel[1],
+          kernel[2],
+          stride[0],
+          stride[1],
+          stride[2],
+          pads[0],
+          pads[1],
+          pads[2],
+          count_include_pad,
+          dY,
+          dX);
+      return true;
+    }
+    default: {
+      CAFFE_THROW("Unsupported pooling dim: ", ndim);
+      return false;
+    }
   }
-CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_BACKWARD_1D(float, StorageOrder::NCHW)
-CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_BACKWARD_1D(float, StorageOrder::NHWC)
-#undef CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_BACKWARD_1D
+}
 
-#define CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_BACKWARD_2D(T, kOrder) \
-  template <>                                                          \
-  template <>                                                          \
-  bool AveragePoolFunctor<CPUContext>::Backward<T, kOrder, 2>(         \
-      const int N,                                                     \
-      const int C,                                                     \
-      const std::array<int, 2>& X_dims,                                \
-      const std::array<int, 2>& Y_dims,                                \
-      const std::array<int, 2>& kernel,                                \
-      const std::array<int, 2>& /* dilation */,                        \
-      const std::array<int, 2>& stride,                                \
-      const std::array<int, 4>& pads,                                  \
-      const T* dY,                                                     \
-      const T* /* X */,                                                \
-      const T* /* Y */,                                                \
-      T* dX,                                                           \
-      CPUContext* /* context */) const {                               \
-    RunAveragePoolGradient2D<T, kOrder>(                               \
-        N,                                                             \
-        C,                                                             \
-        X_dims[0],                                                     \
-        X_dims[1],                                                     \
-        Y_dims[0],                                                     \
-        Y_dims[1],                                                     \
-        kernel[0],                                                     \
-        kernel[1],                                                     \
-        stride[0],                                                     \
-        stride[1],                                                     \
-        pads[0],                                                       \
-        pads[1],                                                       \
-        count_include_pad,                                             \
-        dY,                                                            \
-        dX);                                                           \
-    return true;                                                       \
+template <>
+template <typename T, StorageOrder kOrder>
+bool MaxPoolFunctor<CPUContext>::Backward(
+    const int N,
+    const int C,
+    const std::vector<int>& X_dims,
+    const std::vector<int>& Y_dims,
+    const std::vector<int>& kernel,
+    const std::vector<int>& /* dilation */,
+    const std::vector<int>& stride,
+    const std::vector<int>& pads,
+    const T* dY,
+    const T* X,
+    const T* Y,
+    T* dX,
+    CPUContext* /* context */) const {
+  const int ndim = X_dims.size();
+  switch (ndim) {
+    case 1: {
+      RunMaxPoolGradient1D<T, kOrder>(
+          N,
+          C,
+          X_dims[0],
+          Y_dims[0],
+          kernel[0],
+          stride[0],
+          pads[0],
+          dY,
+          X,
+          Y,
+          dX);
+      return true;
+    }
+    case 2: {
+      RunMaxPoolGradient2D<T, kOrder>(
+          N,
+          C,
+          X_dims[0],
+          X_dims[1],
+          Y_dims[0],
+          Y_dims[1],
+          kernel[0],
+          kernel[1],
+          stride[0],
+          stride[1],
+          pads[0],
+          pads[1],
+          dY,
+          X,
+          Y,
+          dX);
+      return true;
+    }
+    case 3: {
+      RunMaxPoolGradient3D<T, kOrder>(
+          N,
+          C,
+          X_dims[0],
+          X_dims[1],
+          X_dims[2],
+          Y_dims[0],
+          Y_dims[1],
+          Y_dims[2],
+          kernel[0],
+          kernel[1],
+          kernel[2],
+          stride[0],
+          stride[1],
+          stride[2],
+          pads[0],
+          pads[1],
+          pads[2],
+          dY,
+          X,
+          Y,
+          dX);
+      return true;
+    }
+    default: {
+      CAFFE_THROW("Unsupported pooling dim: ", ndim);
+      return false;
+    }
   }
-CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_BACKWARD_2D(float, StorageOrder::NCHW)
-CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_BACKWARD_2D(float, StorageOrder::NHWC)
-#undef CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_BACKWARD_2D
-
-#define CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_BACKWARD_3D(T, kOrder) \
-  template <>                                                          \
-  template <>                                                          \
-  bool AveragePoolFunctor<CPUContext>::Backward<T, kOrder, 3>(         \
-      const int N,                                                     \
-      const int C,                                                     \
-      const std::array<int, 3>& X_dims,                                \
-      const std::array<int, 3>& Y_dims,                                \
-      const std::array<int, 3>& kernel,                                \
-      const std::array<int, 3>& /* dilation */,                        \
-      const std::array<int, 3>& stride,                                \
-      const std::array<int, 6>& pads,                                  \
-      const T* dY,                                                     \
-      const T* /* X */,                                                \
-      const T* /* Y */,                                                \
-      T* dX,                                                           \
-      CPUContext* /* context */) const {                               \
-    RunAveragePoolGradient3D<T, kOrder>(                               \
-        N,                                                             \
-        C,                                                             \
-        X_dims[0],                                                     \
-        X_dims[1],                                                     \
-        X_dims[2],                                                     \
-        Y_dims[0],                                                     \
-        Y_dims[1],                                                     \
-        Y_dims[2],                                                     \
-        kernel[0],                                                     \
-        kernel[1],                                                     \
-        kernel[2],                                                     \
-        stride[0],                                                     \
-        stride[1],                                                     \
-        stride[2],                                                     \
-        pads[0],                                                       \
-        pads[1],                                                       \
-        pads[2],                                                       \
-        count_include_pad,                                             \
-        dY,                                                            \
-        dX);                                                           \
-    return true;                                                       \
-  }
-CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_BACKWARD_3D(float, StorageOrder::NCHW)
-CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_BACKWARD_3D(float, StorageOrder::NHWC)
-#undef CAFFE2_SPECIALIZED_AVERAGE_POOL_FUNCTOR_BACKWARD_3D
-
-#define CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_BACKWARD_1D(T, kOrder) \
-  template <>                                                      \
-  template <>                                                      \
-  bool MaxPoolFunctor<CPUContext>::Backward<T, kOrder, 1>(         \
-      const int N,                                                 \
-      const int C,                                                 \
-      const std::array<int, 1>& X_dims,                            \
-      const std::array<int, 1>& Y_dims,                            \
-      const std::array<int, 1>& kernel,                            \
-      const std::array<int, 1>& /* dilation */,                    \
-      const std::array<int, 1>& stride,                            \
-      const std::array<int, 2>& pads,                              \
-      const T* dY,                                                 \
-      const T* X,                                                  \
-      const T* Y,                                                  \
-      T* dX,                                                       \
-      CPUContext* /* context */) const {                           \
-    RunMaxPoolGradient1D<T, kOrder>(                               \
-        N,                                                         \
-        C,                                                         \
-        X_dims[0],                                                 \
-        Y_dims[0],                                                 \
-        kernel[0],                                                 \
-        stride[0],                                                 \
-        pads[0],                                                   \
-        dY,                                                        \
-        X,                                                         \
-        Y,                                                         \
-        dX);                                                       \
-    return true;                                                   \
-  }
-CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_BACKWARD_1D(float, StorageOrder::NCHW)
-CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_BACKWARD_1D(float, StorageOrder::NHWC)
-#undef CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_BACKWARD_1D
-
-#define CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_BACKWARD_2D(T, kOrder) \
-  template <>                                                      \
-  template <>                                                      \
-  bool MaxPoolFunctor<CPUContext>::Backward<T, kOrder, 2>(         \
-      const int N,                                                 \
-      const int C,                                                 \
-      const std::array<int, 2>& X_dims,                            \
-      const std::array<int, 2>& Y_dims,                            \
-      const std::array<int, 2>& kernel,                            \
-      const std::array<int, 2>& /* dilation */,                    \
-      const std::array<int, 2>& stride,                            \
-      const std::array<int, 4>& pads,                              \
-      const T* dY,                                                 \
-      const T* X,                                                  \
-      const T* Y,                                                  \
-      T* dX,                                                       \
-      CPUContext* /* context */) const {                           \
-    RunMaxPoolGradient2D<T, kOrder>(                               \
-        N,                                                         \
-        C,                                                         \
-        X_dims[0],                                                 \
-        X_dims[1],                                                 \
-        Y_dims[0],                                                 \
-        Y_dims[1],                                                 \
-        kernel[0],                                                 \
-        kernel[1],                                                 \
-        stride[0],                                                 \
-        stride[1],                                                 \
-        pads[0],                                                   \
-        pads[1],                                                   \
-        dY,                                                        \
-        X,                                                         \
-        Y,                                                         \
-        dX);                                                       \
-    return true;                                                   \
-  }
-CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_BACKWARD_2D(float, StorageOrder::NCHW)
-CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_BACKWARD_2D(float, StorageOrder::NHWC)
-#undef CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_BACKWARD_2D
-
-#define CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_BACKWARD_3D(T, kOrder) \
-  template <>                                                      \
-  template <>                                                      \
-  bool MaxPoolFunctor<CPUContext>::Backward<T, kOrder, 3>(         \
-      const int N,                                                 \
-      const int C,                                                 \
-      const std::array<int, 3>& X_dims,                            \
-      const std::array<int, 3>& Y_dims,                            \
-      const std::array<int, 3>& kernel,                            \
-      const std::array<int, 3>& /* dilation */,                    \
-      const std::array<int, 3>& stride,                            \
-      const std::array<int, 6>& pads,                              \
-      const T* dY,                                                 \
-      const T* X,                                                  \
-      const T* Y,                                                  \
-      T* dX,                                                       \
-      CPUContext* /* context */) const {                           \
-    RunMaxPoolGradient3D<T, kOrder>(                               \
-        N,                                                         \
-        C,                                                         \
-        X_dims[0],                                                 \
-        X_dims[1],                                                 \
-        X_dims[2],                                                 \
-        Y_dims[0],                                                 \
-        Y_dims[1],                                                 \
-        Y_dims[2],                                                 \
-        kernel[0],                                                 \
-        kernel[1],                                                 \
-        kernel[2],                                                 \
-        stride[0],                                                 \
-        stride[1],                                                 \
-        stride[2],                                                 \
-        pads[0],                                                   \
-        pads[1],                                                   \
-        pads[2],                                                   \
-        dY,                                                        \
-        X,                                                         \
-        Y,                                                         \
-        dX);                                                       \
-    return true;                                                   \
-  }
-CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_BACKWARD_3D(float, StorageOrder::NCHW)
-CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_BACKWARD_3D(float, StorageOrder::NHWC)
-#undef CAFFE2_SPECIALIZED_MAX_POOL_FUNCTOR_BACKWARD_3D
+}
 
 REGISTER_CPU_OPERATOR(
     AveragePoolGradient,
