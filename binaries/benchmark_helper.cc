@@ -369,7 +369,7 @@ void writeOutput(
       CAFFE_ENFORCE(
           index == 0,
           "Binary file only support one output.");
-      string serialized = SerializeBlob(*workspace->GetBlob(name), name);
+      string serialized = caffe2::SerializeBlob(*workspace->GetBlob(name), name);
       string output_filename = output_prefix + name;
       caffe2::WriteStringToFile(serialized, output_filename.c_str());
     }
