@@ -203,36 +203,29 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/c10_ops/layer_norm.cpp
   ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
   ${TORCH_SRC_DIR}/csrc/utils/variadic.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fuser/kernel_cache.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fuser/compiler.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fuser/executor.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fuser/codegen.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
   ${TORCH_ROOT}/test/cpp/jit/no-gtest.cpp
   )
 
-SET(USE_CPU_FUSER 0)
-if (NOT WIN32)
-  SET(USE_CPU_FUSER 1)
-
+if (WIN32)
   list(APPEND TORCH_SRCS
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/kernel_cache.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/compiler.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/executor.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/codegen.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/dynamic_library_win.cpp
+  )
+else ()
+  list(APPEND TORCH_SRCS
+    ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/dynamic_library_unix.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp
   )
-endif()
-
-SET(USE_CUDA_FUSER 0)
-if (USE_CUDA AND NOT USE_ROCM AND NOT WIN32)
-  SET(USE_CUDA_FUSER 1)
-
-  list(APPEND TORCH_SRCS
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
-  )
-
-endif()
-
-CONFIGURE_FILE(
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/config.h.in
-    ${CMAKE_CURRENT_SOURCE_DIR}/csrc/jit/fuser/config.h)
+  if (USE_CUDA AND NOT USE_ROCM)
+    list(APPEND TORCH_SRCS
+      ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
+    )
+  endif()
+endif ()
 
 if (NOT NO_API)
   list(APPEND TORCH_SRCS

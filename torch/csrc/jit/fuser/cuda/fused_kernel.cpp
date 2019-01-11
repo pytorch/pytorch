@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/fuser/cuda/fused_kernel.h>
+#include <torch/csrc/jit/fuser/compiler.h>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <THC/THC.h>
@@ -197,6 +198,28 @@ void FusedKernelCUDA::launch_raw(
   // Resets device (see at::DeviceGuard notes above)
   at::cuda::set_device(prior_device);
 }
+
+static std::shared_ptr<FusedKernel> createFusionKernel(
+    int16_t device,
+    std::string name,
+    std::string code,
+    std::vector<TensorDesc> input_desc,
+    std::vector<TensorDesc> output_desc,
+    std::vector<PartitionDesc> chunk_desc,
+    std::vector<PartitionDesc> concat_desc,
+    bool has_random) {
+  return std::make_shared<FusedKernelCUDA>(
+      device,
+      std::move(name),
+      std::move(code),
+      std::move(input_desc),
+      std::move(output_desc),
+      std::move(chunk_desc),
+      std::move(concat_desc),
+      has_random);
+}
+
+RegisterFusionBackend reg(at::DeviceType::CUDA, createFusionKernel);
 
 } // namespace cuda
 } // namespace fuser
