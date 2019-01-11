@@ -12,14 +12,14 @@ template <class DataType, class Context>
 void flatten_op_cpu_impl(
     const C10Tensor& input_,
     const C10Tensor& output_,
-    int axis,
-    BaseContext* context) {
+    int axis) {
   Tensor input(input_);
   Tensor output(output_);
+  CPUContext context;
   CAFFE_ENFORCE_GE(
       input.sizes().size(), axis, "The rank of the tensor must be >= axis.");
   output.Resize(input.size_to_dim(axis), input.size_from_dim(axis));
-  context->CopyItemsSameDevice(
+  context.CopyItemsSameDevice(
       input.dtype(),
       input.numel(),
       input.raw_data(),

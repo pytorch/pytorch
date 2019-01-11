@@ -1247,6 +1247,11 @@
     CPU: batch_norm_backward_cpu
     CUDA: batch_norm_backward_cuda
 
+- func: batch_norm_update_stats(Tensor input, Tensor? running_mean, Tensor? running_var, double momentum) -> (Tensor, Tensor)
+  dispatch:
+    CPU: batch_norm_update_stats_cpu
+    CUDA: batch_norm_update_stats_cuda
+
 - func: ones(IntList size, TensorOptions options={}) -> Tensor
 
 - func: ones_out(Tensor result, IntList size) -> Tensor
@@ -2558,9 +2563,15 @@
 
 - func: tril_(Tensor self, int64_t diagonal=0) -> Tensor
   variants: method
+  dispatch:
+    CPU: tril_cpu_
+    CUDA: tril_cuda_
 
 - func: triu_(Tensor self,  int64_t diagonal=0) -> Tensor
   variants: method
+  dispatch:
+    CPU: triu_cpu_
+    CUDA: triu_cuda_
 
 - func: digamma_(Tensor self) -> Tensor
   variants: method
@@ -2661,11 +2672,17 @@
   variants: method, function
 
 - func: triu_out(Tensor result, Tensor self, int64_t diagonal=0) -> Tensor
+  dispatch:
+    CPU: triu_cpu_out
+    CUDA: triu_cuda_out
 
 - func: triu(Tensor self, int64_t diagonal=0) -> Tensor
   variants: method, function
 
 - func: tril_out(Tensor result, Tensor self, int64_t diagonal=0) -> Tensor
+  dispatch:
+    CPU: tril_cpu_out
+    CUDA: tril_cuda_out
 
 - func: tril(Tensor self, int64_t diagonal=0) -> Tensor
   variants: method, function
@@ -3440,15 +3457,27 @@
 
 - func: reflection_pad2d_out(Tensor output, Tensor self, IntList[4] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: reflection_pad2d_out_cpu
+    CUDA: reflection_pad2d_out_cuda
 
 - func: reflection_pad2d(Tensor self, IntList[4] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: reflection_pad2d_cpu
+    CUDA: reflection_pad2d_cuda
 
 - func: reflection_pad2d_backward_out(Tensor grad_input, Tensor grad_output, Tensor self, IntList[4] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: reflection_pad2d_backward_out_cpu
+    CUDA: reflection_pad2d_backward_out_cuda
 
 - func: reflection_pad2d_backward(Tensor grad_output, Tensor self, IntList[4] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: reflection_pad2d_backward_cpu
+    CUDA: reflection_pad2d_backward_cuda
 
 - func: replication_pad1d_out(Tensor output, Tensor self, IntList[2] padding) -> Tensor
   python_module: nn

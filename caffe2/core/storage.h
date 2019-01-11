@@ -17,8 +17,8 @@
 #include <c10/util/typeid.h>
 
 #include <c10/core/Allocator.h>
-#include <c10/Device.h>
-#include <c10/DeviceType.h>
+#include <c10/core/Device.h>
+#include <c10/core/DeviceType.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/core/Storage.h>
 #include <c10/core/StorageImpl.h>
