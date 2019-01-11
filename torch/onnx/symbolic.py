@@ -1106,7 +1106,8 @@ def ones(g, sizes, dtype, layout, device):
 def ones_like(g, input, dtype, layout, device):
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
-                    value_t=torch.tensor(1, dtype=pytorch_type_to_scalar_type[dtype]))
+                value_t=torch.tensor(1, dtype=pytorch_type_to_scalar_type[dtype]))
+
 
 def full(g, sizes, value, dtype, layout, device):
     const_value = _maybe_get_const(value, 't')
