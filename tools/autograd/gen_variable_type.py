@@ -590,6 +590,7 @@ def emit_body(declaration):
             # (which corresponds to 'use_derived' strategy). The purpose of this guard is to make sure
             # the baseType operations still dispatch to non-Variable type, even if the arguments are
             # now Variables.
+            # See NOTE [ Treating Variables as non-Variables in `is_variable()` ] for details.
             code_block = ''
             base_type_call = CALL_VIA_DERIVED.substitute(combined)
             if not modifies_arguments and not returns_void:
