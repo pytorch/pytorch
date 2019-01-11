@@ -73,9 +73,6 @@ THC_API void THCudaShutdown(THCState* state);
 /* 1; otherwise, 0. */
 THC_API int THCState_getPeerToPeerAccess(THCState* state, int dev, int devToAccess);
 
-THC_API struct cudaDeviceProp* THCState_getCurrentDeviceProperties(THCState* state);
-THC_API struct cudaDeviceProp* THCState_getDeviceProperties(THCState* state, int device);
-
 THC_API struct THCRNGState* THCState_getRngState(THCState* state);
 THC_API THAllocator* THCState_getCudaHostAllocator(THCState* state);
 

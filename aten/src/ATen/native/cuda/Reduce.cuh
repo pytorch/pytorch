@@ -10,6 +10,7 @@
 #include <THC/THCGeneral.hpp>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <c10/macros/Macros.h>
 #include <functional>
 #include <iosfwd>
 #include <tuple>
@@ -146,7 +147,7 @@ struct ReduceConfig {
 std::ostream& operator<<(std::ostream& out, const ReduceConfig& config);
 
 template<int nt, typename R>
-__launch_bounds__(nt, 4)
+C10_LAUNCH_BOUNDS(nt, 4)
 __global__ void reduce_kernel(R reduction) {
   reduction.run();
 }
