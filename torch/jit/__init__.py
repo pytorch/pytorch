@@ -1204,7 +1204,7 @@ if _enabled:
             self.__dict__["_initialized"] = True
             _create_methods_from_stubs(self, stubs)
 
-            entry = _overloaded_fns[type(original)]
+            entry = _overloaded_fns.get(type(original))
             if entry is not None:
                 _overloaded_fns[self] = {}
                 for fn_name in entry:
