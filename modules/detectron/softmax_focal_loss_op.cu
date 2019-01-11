@@ -156,7 +156,7 @@ bool SoftmaxFocalLossOp<float, CUDAContext>::RunOnDevice() {
   int W = X.dim32(3);
   int A = D / num_classes_;
 
-  losses_.Resize(N * A * H * W);
+  ReinitializeTensor(&losses_, {N * A * H * W}, at::dtype<float>().device(CUDA));
   auto* P = Output(1, {N * D * H * W}, at::dtype<float>());
   auto* avg_loss = Output(0, vector<int64_t>(), at::dtype<float>());
   math::Set<float, CUDAContext>(
@@ -212,7 +212,7 @@ bool SoftmaxFocalLossGradientOp<float, CUDAContext>::RunOnDevice() {
   int W = X.dim32(3);
   int A = D / num_classes_;
 
-  buff_.Resize(N * A * H * W);
+  ReinitializeTensor(&buff_, {N * A * H * W}, at::dtype<float>().device(CUDA));
 
   dX->ResizeLike(X);
 
