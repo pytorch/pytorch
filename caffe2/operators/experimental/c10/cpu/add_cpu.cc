@@ -15,20 +15,19 @@ void add_op_cpu_impl(
     const C10Tensor& B_,
     const C10Tensor& C_,
     bool legacy_broadcast,
-    int axis,
-    BaseContext* context) {
+    int axis) {
   Tensor A(A_);
   Tensor B(B_);
   Tensor C(C_);
+  CPUContext context;
   const DataType* A_data = A.template data<DataType>();
   const DataType* B_data = B.template data<DataType>();
   std::vector<int> A_dims;
   std::vector<int> B_dims;
 
   if (legacy_broadcast) {
-    CAFFE_ENFORCE_NE(
-        C.getIntrusivePtr(),
-        B.getIntrusivePtr(),
+    CAFFE_ENFORCE(
+        !B.is_same(C),
         "In-place is allowed only with the first tensor when "
         "legacy-broadcasting");
     C.ResizeLike(A);
@@ -50,9 +49,9 @@ void add_op_cpu_impl(
     const std::vector<int> C_dims =
         caffe2::elementwise_ops_utils::ComputeBinaryBroadcastForwardDims(
             A_dims, B_dims);
-    if (C.getIntrusivePtr() == A.getIntrusivePtr()) {
+    if (A.is_same(C)) {
       CAFFE_ENFORCE_EQ(C_dims, A_dims);
-    } else if (C.getIntrusivePtr() == B.getIntrusivePtr()) {
+    } else if (B.is_same(C)) {
       CAFFE_ENFORCE_EQ(C_dims, B_dims);
     } else {
       C.Resize(C_dims);
@@ -68,7 +67,7 @@ void add_op_cpu_impl(
       A.data<DataType>(),
       B.data<DataType>(),
       C.mutable_data<DataType>(),
-      static_cast<CPUContext*>(context));
+      static_cast<CPUContext*>(&context));
 }
 } // namespace
 } // namespace caffe2

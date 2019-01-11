@@ -11,6 +11,7 @@
 #include <THC/THCTensorTypeUtils.cuh>
 #include <THC/THCReduceApplyUtils.cuh>
 #include <THC/THCNumerics.cuh>
+#include <c10/macros/Macros.h>
 
 // Threads per thread block
 #define THC_NONCONTIG_REDUCE_BLOCK_SIZE 32 * 16
@@ -140,7 +141,7 @@ template
    typename FinalizeOp,
    int ADims, int BDims>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-__launch_bounds__(32 * 16, 4)
+C10_LAUNCH_BOUNDS(512, 4)
 #endif
 __global__ void kernelReduceNoncontigDim_shared
   (TensorInfo<T, IndexType> out,
@@ -255,7 +256,7 @@ template <typename T,
           typename FinalizeOp,
           int ADims, int BDims>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-__launch_bounds__(32 * 16, 4)
+C10_LAUNCH_BOUNDS(512, 4)
 #endif
 __global__ void
 kernelReduceNoncontigDim(TensorInfo<T, IndexType> out,
