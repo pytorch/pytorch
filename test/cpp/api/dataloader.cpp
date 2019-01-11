@@ -455,7 +455,7 @@ struct DummyTensorDataset
   Example<torch::Tensor, int> get(size_t index) override {
     const auto channels = static_cast<int64_t>(index);
     torch::Tensor tensor =
-        (channels > 0) ? torch::ones({4, 4, channels}) : torch::ones({4, 4});
+        (channels > 0) ? torch::ones({channels, 4, 4}) : torch::ones({4, 4});
     return {tensor, static_cast<int>(channels)};
   }
 
@@ -471,33 +471,57 @@ TEST(DataTest, NormalizeTransform) {
   std::vector<Example<torch::Tensor, int>> output = dataset.get_batch(0);
   ASSERT_EQ(output.size(), 1);
   // (1 - 0.5) / 0.1 = 5
-  ASSERT_TRUE(output[0].data.allclose(torch::ones({4, 4}) * 5));
+  ASSERT_TRUE(output[0].data.allclose(torch::ones({4, 4}) * 5))
+      << output[0].data;
 
   // Works for one explicit channel
   output = dataset.get_batch(1);
   ASSERT_EQ(output.size(), 1);
-  ASSERT_EQ(output[0].data.size(2), 1);
-  ASSERT_TRUE(output[0].data.allclose(torch::ones({4, 4, 1}) * 5));
+  ASSERT_EQ(output[0].data.size(0), 1);
+  ASSERT_TRUE(output[0].data.allclose(torch::ones({1, 4, 4}) * 5))
+      << output[0].data;
 
   // Works for two channels with different moments
   dataset = DummyTensorDataset().map(
       transforms::Normalize<int>({0.5, 1.5}, {0.1, 0.2}));
   output = dataset.get_batch(2);
   ASSERT_EQ(output.size(), 1);
-  ASSERT_EQ(output[0].data.size(2), 2);
+  ASSERT_EQ(output[0].data.size(0), 2);
   ASSERT_TRUE(output[0]
-                  .data.slice(/*dim=*/2, /*start=*/0, /*end=*/1)
-                  .allclose(torch::ones({4, 4, 1}) * 5));
+                  .data.slice(/*dim=*/0, /*start=*/0, /*end=*/1)
+                  .allclose(torch::ones({1, 4, 4}) * 5))
+      << output[0].data;
   ASSERT_TRUE(output[0]
-                  .data.slice(/*dim=*/2, /*start=*/1)
-                  .allclose(torch::ones({4, 4, 1}) * -2.5));
+                  .data.slice(/*dim=*/0, /*start=*/1)
+                  .allclose(torch::ones({1, 4, 4}) * -2.5))
+      << output[0].data;
 
   // Works for three channels with one moment value
   dataset = DummyTensorDataset().map(transforms::Normalize<int>(1.5, 0.2));
   output = dataset.get_batch(3);
   ASSERT_EQ(output.size(), 1);
-  ASSERT_EQ(output[0].data.size(2), 3);
-  ASSERT_TRUE(output[0].data.allclose(torch::ones({4, 4, 3}) * -2.5));
+  ASSERT_EQ(output[0].data.size(0), 3);
+  ASSERT_TRUE(output[0].data.allclose(torch::ones({3, 4, 4}) * -2.5))
+      << output[0].data;
+
+  // Works for three channels with different moments
+  dataset = DummyTensorDataset().map(
+      transforms::Normalize<int>({0.5, 1.5, -1.5}, {0.1, 0.2, 0.2}));
+  output = dataset.get_batch(3);
+  ASSERT_EQ(output.size(), 1);
+  ASSERT_EQ(output[0].data.size(0), 3);
+  ASSERT_TRUE(output[0]
+                  .data.slice(/*dim=*/0, /*start=*/0, /*end=*/1)
+                  .allclose(torch::ones({1, 4, 4}) * 5))
+      << output[0].data;
+  ASSERT_TRUE(output[0]
+                  .data.slice(/*dim=*/0, /*start=*/1, /*end=*/2)
+                  .allclose(torch::ones({1, 4, 4}) * -2.5))
+      << output[0].data;
+  ASSERT_TRUE(output[0]
+                  .data.slice(/*dim=*/0, /*start=*/2)
+                  .allclose(torch::ones({1, 4, 4}) * 12.5))
+      << output[0].data;
 }
 
 struct UnCopyableDataset : public datasets::Dataset<UnCopyableDataset> {

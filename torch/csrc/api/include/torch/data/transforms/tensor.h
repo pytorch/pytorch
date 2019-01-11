@@ -59,7 +59,12 @@ struct Normalize : public TensorTransform<Target> {
   /// anything that is broadcastable over the input tensors (like single
   /// scalars).
   Normalize(ArrayRef<double> mean, ArrayRef<double> stddev)
-      : mean(torch::tensor(mean)), stddev(torch::tensor(stddev)) {}
+      : mean(torch::tensor(mean, torch::kFloat32)
+                 .unsqueeze(/*dim=*/1)
+                 .unsqueeze(/*dim=*/2)),
+        stddev(torch::tensor(stddev, torch::kFloat32)
+                   .unsqueeze(/*dim=*/1)
+                   .unsqueeze(/*dim=*/2)) {}
 
   torch::Tensor operator()(Tensor input) {
     return input.sub(mean).div(stddev);
