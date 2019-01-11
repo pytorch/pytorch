@@ -60,6 +60,13 @@ void setValueTrace(const IValue& v, Value* value) {
     for (size_t i = 0; i < outputs.size(); ++i) {
       setValueTrace(outputs[i], unpack_node->outputs()[i]);
     }
+  } else if (v.isGenericList()) {
+    auto elements = v.toGenericListRef();
+    auto graph = getTracingState()->graph;
+    Node* unpack_node = graph->appendNode(graph->createListUnpack(value, elements.size()));
+    for (size_t i = 0; i < elements.size(); ++i) {
+      setValueTrace(elements[i], unpack_node->outputs()[i]);
+    }
   } else {
     std::ostringstream os;
     os << "Tracer cannot set value trace for type " << v.tagKind() << ". "

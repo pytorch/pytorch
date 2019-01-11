@@ -6382,6 +6382,19 @@ a")
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs))
 
+    def test_trace_nested_datatypes(self):
+        @torch.jit.script
+        def foo(x):
+            return [[x + 1, x - 1], [x + 2, x - 2]]
+
+        def bar(x):
+            list_stuff = foo(x)
+            return list_stuff[0][0], list_stuff[1][1]
+
+        traced = torch.jit.trace(bar, torch.rand(3, 4))
+        x = torch.rand(3, 4)
+        self.assertEqual(bar(x), traced(x))
+
     @suppress_warnings
     def test_onnx_export_func_with_warnings(self):
         @torch.jit.script
