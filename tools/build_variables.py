@@ -100,6 +100,14 @@ torch_sources_no_python_default = [
     "torch/csrc/jit/c10_ops/layer_norm.cpp",
     "torch/csrc/utils/tensor_flatten.cpp",
     "torch/csrc/utils/variadic.cpp",
+    "torch/csrc/jit/fuser/kernel_cache.cpp",
+    "torch/csrc/jit/fuser/compiler.cpp",
+    "torch/csrc/jit/fuser/executor.cpp",
+    "torch/csrc/jit/fuser/codegen.cpp",
+    "torch/csrc/jit/fuser/fallback.cpp",
+    "torch/csrc/jit/fuser/cpu/fused_kernel.cpp",
+    "torch/csrc/jit/fuser/cpu/dynamic_library_unix.cpp",
+    "torch/csrc/jit/fuser/interface.cpp",
 ]
 
 
@@ -129,13 +137,10 @@ def torch_vars():
 
     r["torch_sources_no_python"] = (
         torch_sources_no_python_default
-        + ["torch/csrc/cuda/comm.cpp", "torch/csrc/cuda/nccl.cpp"]
-        + native.glob(["torch/csrc/jit/fuser/**/*.cpp"])
+        + ["torch/csrc/cuda/comm.cpp", "torch/csrc/cuda/nccl.cpp", "torch/csrc/jit/fuser/cuda/fused_kernel.cpp"]
     )
 
-    r["torch_sources_no_python_cpu"] = torch_sources_no_python_default + native.glob(
-        ["torch/csrc/jit/fuser/**/*.cpp"], exclude=["torch/csrc/jit/fuser/cuda/*.cpp"]
-    )
+    r["torch_sources_no_python_cpu"] = torch_sources_no_python_default
 
     r["torch_csrc_flags"] = {
         "compiler_flags": [
@@ -172,8 +177,6 @@ def torch_vars():
             "-Icaffe2/torch/csrc",
             "-Icaffe2/torch/csrc/nn",
             "-Icaffe2/torch/lib",
-            "-DUSE_CPU_FUSER_FBCODE=1",
-            "-DUSE_CUDA_FUSER_FBCODE=1",
         ],
     }
 
@@ -185,7 +188,5 @@ def torch_vars():
         "-Icaffe2/torch/csrc",
         "-Icaffe2/torch/csrc/nn",
         "-Icaffe2/torch/lib",
-        "-DUSE_CPU_FUSER_FBCODE=1",
-        "-DUSE_CUDA_FUSER_FBCODE=0",
     ]
     return r

@@ -1,6 +1,4 @@
 #pragma once
-#include <torch/csrc/jit/fuser/config.h>
-#if USE_CPU_FUSER
 
 #include <torch/csrc/jit/code_template.h>
 
@@ -67,5 +65,3 @@ void ${kernelName}(IndexType totalElements, void ** args) {
 } // namespace fuser
 } // namespace jit
 } // namespace torch
-
-#endif // USE_CPU_FUSER
