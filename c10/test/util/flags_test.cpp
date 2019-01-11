@@ -2,7 +2,7 @@
 
 #include <iostream>
 
-#include "c10/util/Flags.h"
+#include <c10/util/Flags.h>
 
 C10_DEFINE_bool(c10_flags_test_only_flag, true, "Only used in test.");
 
