@@ -212,8 +212,8 @@ std::pair<std::vector<DeviceOption>, std::vector<DeviceOption>> ncclOpDevInfer(
 
 REGISTER_CUDA_OPERATOR(NCCLAllreduce, NCCLAllreduceOp);
 OPERATOR_SCHEMA(NCCLAllreduce)
-    .NumInputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
-    .NumOutputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
+    .NumInputs(1, C10_COMPILE_TIME_MAX_GPUS)
+    .NumOutputs(1, C10_COMPILE_TIME_MAX_GPUS)
     .CostInferenceFunction(NCCLAllreduceOp::CostInference)
     .TensorInferenceFunction(NCCLAllreduceOp::ShapeInference)
     .IdenticalTypeAndShape()
@@ -224,8 +224,8 @@ SHOULD_NOT_DO_GRADIENT(NCCLAllreduce);
 
 REGISTER_CUDA_OPERATOR(NCCLBroadcast, NCCLBroadcastOp);
 OPERATOR_SCHEMA(NCCLBroadcast)
-    .NumInputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
-    .NumOutputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
+    .NumInputs(1, C10_COMPILE_TIME_MAX_GPUS)
+    .NumOutputs(1, C10_COMPILE_TIME_MAX_GPUS)
     .IdenticalTypeAndShape()
     .InputsCanCrossDevices()
     .EnforceOneToOneInplace()
@@ -235,7 +235,7 @@ SHOULD_NOT_DO_GRADIENT(NCCLBroadcast);
 
 REGISTER_CUDA_OPERATOR(NCCLReduce, NCCLReduceOp);
 OPERATOR_SCHEMA(NCCLReduce)
-    .NumInputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
+    .NumInputs(1, C10_COMPILE_TIME_MAX_GPUS)
     .NumOutputs(1)
     .IdenticalTypeAndShapeOfInput(0)
     .InputsCanCrossDevices()
@@ -245,16 +245,16 @@ SHOULD_NOT_DO_GRADIENT(NCCLReduce);
 
 REGISTER_CUDA_OPERATOR(NCCLAllGather, NCCLAllGatherOp);
 OPERATOR_SCHEMA(NCCLAllGather)
-    .NumInputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
-    .NumOutputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
+    .NumInputs(1, C10_COMPILE_TIME_MAX_GPUS)
+    .NumOutputs(1, C10_COMPILE_TIME_MAX_GPUS)
     .InputsCanCrossDevices()
     .DeviceInferenceFunction(ncclOpDevInfer);
 SHOULD_NOT_DO_GRADIENT(NCCLAllGather);
 
 REGISTER_CUDA_OPERATOR(NCCLReduceScatter, NCCLReduceScatterOp);
 OPERATOR_SCHEMA(NCCLReduceScatter)
-    .NumInputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
-    .NumOutputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
+    .NumInputs(1, C10_COMPILE_TIME_MAX_GPUS)
+    .NumOutputs(1, C10_COMPILE_TIME_MAX_GPUS)
     .InputsCanCrossDevices()
     .DeviceInferenceFunction(ncclOpDevInfer);
 SHOULD_NOT_DO_GRADIENT(NCCLReduceScatter);
