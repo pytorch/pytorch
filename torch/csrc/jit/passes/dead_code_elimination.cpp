@@ -265,8 +265,10 @@ class DeadCodeEliminator {
           if (!unwrap_optional_output->hasUses()) {
             unchecked_unwrap_optional->destroy();
           }
+          continue;
         }
-      } else if (!node->outputs().at(i)->hasUses()) {
+      }
+      if (!node->outputs().at(i)->hasUses()) {
         removeIfNodeOutput(node, i);
       }
     }
