@@ -950,7 +950,7 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
     CAFFE_ENFORCE_EQ(1, segment_ids.ndim(), "SEGMENT_IDS must be a vector");
     int64_t slize_sz = data.size_from_dim(1);
 
-    K_tensor_.Resize(1);
+    ReinitializeTensor(&K_tensor_, {1}, at::dtype<SIndex>().device(CUDA));
     // Get maximum segment id so we can size the output.
     // This must be done synchronously with host.
     if (segment_ids.size() > 4096) {
@@ -966,7 +966,7 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
           context_.cuda_stream());
 
       // the second call do the real computation.
-      buffer_tensor_.Resize(tmp_storage_bytes);
+      ReinitializeTensor(&buffer_tensor_, {static_cast<int64_t>(tmp_storage_bytes)}, at::dtype<char>().device(CUDA));
       cub::DeviceReduce::Max(
           static_cast<void*>(buffer_tensor_.mutable_data<char>()),
           tmp_storage_bytes,
@@ -1009,7 +1009,7 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
           nullptr);
     } else {
       // For mean, we need to compute scaling factors
-      scaling_factors_.Resize(K + 1);
+      ReinitializeTensor(&scaling_factors_, {K + 1}, at::dtype<int>().device(CUDA));
       math::Set<int, CUDAContext>(
           scaling_factors_.size(),
           int(0),
@@ -1041,9 +1041,9 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
   }
 
  private:
-  Tensor buffer_tensor_{CUDA};
-  Tensor K_tensor_{CUDA};
-  Tensor scaling_factors_{CUDA}; // for mean
+  Tensor buffer_tensor_;
+  Tensor K_tensor_;
+  Tensor scaling_factors_; // for mean
 };
 
 template <typename SIndex>
@@ -1202,7 +1202,7 @@ class SortedSegmentRangeMeanGradientOp : public Operator<Context> {
     K += 1;
 
     if (segment_len_.size() != K) {
-      segment_len_.Resize(K);
+      ReinitializeTensor(&segment_len_, {K}, at::dtype<SIndex>().device(CUDA));
     }
 
     math::Set<SIndex, CUDAContext>(
@@ -1236,7 +1236,7 @@ class SortedSegmentRangeMeanGradientOp : public Operator<Context> {
   }
 
  private:
-  Tensor segment_len_{CUDA}; // for mean
+  Tensor segment_len_; // for mean
 };
 
 REGISTER_CUDA_OPERATOR_STR(
