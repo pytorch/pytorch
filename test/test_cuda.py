@@ -1510,6 +1510,24 @@ class TestCuda(TestCase):
         self.assertGreater(start_event.elapsed_time(event), 0)
 
     @skipIfRocm
+    def test_events_handle(self):
+        e0 = torch.cuda.Event(enable_timing=False, interprocess=True)
+        s = torch.cuda.current_stream()
+        e0 = s.record_event(e0)
+
+        handle = e0.ipc_handle()
+        torch.cuda._sleep(50000000)  # spin for about 50 ms
+        e0 = s.record_event(e0)
+
+        e1 = torch.cuda.Event(_handle=handle)
+        self.assertFalse(e0.query())
+        self.assertFalse(e1.query())
+
+        e1.synchronize()
+        self.assertTrue(e0.query())
+        self.assertTrue(e1.query())
+
+    @skipIfRocm
     def test_record_stream(self):
         cycles_per_ms = get_cycles_per_ms()
 
