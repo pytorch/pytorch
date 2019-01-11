@@ -9,6 +9,8 @@
 
 namespace c10 {
 
+#if !C10_MOBILE && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
+
 thread_local bool NonVariableTypeMode_enabled = false;
 
 bool NonVariableTypeMode::is_enabled() {
@@ -18,6 +20,18 @@ bool NonVariableTypeMode::is_enabled() {
 void NonVariableTypeMode::set_enabled(bool enabled) {
   NonVariableTypeMode_enabled = enabled;
 }
+
+#else // C10_MOBILE
+
+bool NonVariableTypeMode::is_enabled() {
+  throw std::runtime_error("NonVariableTypeMode is not supported on mobile");
+}
+
+void NonVariableTypeMode::set_enabled(bool enabled) {
+  throw std::runtime_error("NonVariableTypeMode is not supported on mobile");
+}
+
+#endif // C10_MOBILE
 
 std::ostream& operator<<(
     std::ostream& stream,
