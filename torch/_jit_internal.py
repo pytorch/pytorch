@@ -154,15 +154,18 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
     return fn
 
 
-def overload(self, fn_name, fns):
-    entry = _overloaded_fns.get(self)
+def overload(self_type, fn_name, fns):
+    entry = _overloaded_fns.get(self_type)
+    # Bound methods are created for each use, so we can't store a weak reference
+    # to them (it dies immediately0)
+    weak_fns = weakref.WeakSet([fn.__func__ for fn in fns])
 
     if entry is None:
-        _overloaded_fns[self] = {
-            fn_name: fns,
+        _overloaded_fns[self_type] = {
+            fn_name: weak_fns,
         }
     else:
-        entry[fn_name] = fns
+        entry[fn_name] = weak_fns
 
 
 try:

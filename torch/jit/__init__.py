@@ -671,20 +671,15 @@ def _try_get_dispatched_fn(fn):
 
 def _try_get_overloaded_fn(fn):
     if not hasattr(fn, '__self__'):
+        # Only allow overloads for bound methods
         return None
-    self = fn.__self__
-    self_type = type(self)
-    if self_type is WeakScriptModuleProxy:
-        # get saved original type() if necessary
-        self_type = self._original_type
-    overloads_by_name = _overloaded_fns.get(self_type)
+    overloads_by_name = _overloaded_fns.get(type(fn.__self__))
+    if overloads_by_name is None:
+        # Have to grab methods off a particualr instance for weak modules
+        overloads_by_name = _overloaded_fns.get(fn.__self__)
     if overloads_by_name is None:
         return None
-    overloads = overloads_by_name.get(fn.__name__)
-    if overloads is None:
-        return None
-    script_methods = [getattr(self, overload.__name__) for overload in overloads]
-    return script_methods
+    return overloads_by_name.get(fn.__name__)
 
 
 def _try_compile_weak_script(fn):
@@ -1206,9 +1201,15 @@ if _enabled:
 
             # Copy constants
             self.__dict__["_constants_set"] = set(getattr(original, "__constants__", []))
-
             self.__dict__["_initialized"] = True
+
             _create_methods_from_stubs(self, stubs)
+            entry = _overloaded_fns[type(original)]
+            if entry is not None:
+                _overloaded_fns[self] = {}
+                for fn_name in entry:
+                    script_methods = [getattr(self, x.__name__) for x in entry[fn_name]]
+                    _overloaded_fns[self][fn_name] = script_methods
 
         def __getattr__(self, attr):
             # Try to get the attribute directly, if that fails, fall back to the
