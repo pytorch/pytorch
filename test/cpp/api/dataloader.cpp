@@ -456,7 +456,7 @@ struct DummyTensorDataset
     const auto channels = static_cast<int64_t>(index);
     torch::Tensor tensor =
         (channels > 0) ? torch::ones({4, 4, channels}) : torch::ones({4, 4});
-    return {tensor, static_cast<int64_t>(channels)};
+    return {tensor, static_cast<int>(channels)};
   }
 
   torch::optional<size_t> size() const override {

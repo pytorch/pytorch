@@ -55,10 +55,10 @@ class TensorLambda : public TensorTransform<Target> {
 /// the given standard deviation.
 template <typename Target = Tensor>
 struct Normalize : public TensorTransform<Target> {
-
   /// Constructs a `Normalize` transform. The mean and standard deviation can be
-  //anything that is broadcastable over the input tensors (like single scalars).
-  Normalize(ArrayRef<float> mean, ArrayRef<float> stddev)
+  /// anything that is broadcastable over the input tensors (like single
+  /// scalars).
+  Normalize(ArrayRef<double> mean, ArrayRef<double> stddev)
       : mean(torch::tensor(mean)), stddev(torch::tensor(stddev)) {}
 
   torch::Tensor operator()(Tensor input) {
