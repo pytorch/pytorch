@@ -9036,16 +9036,11 @@ a")
 
             @torch.jit.script_method
             def forward(self, x):
-                return self.weak(x)
-
-            @torch.jit.script_method
-            def forward_tuple(self, x):
-                return self.weak((x, x))
+                return self.weak(x) + self.weak((x, x))
 
         s = S()
         x = torch.ones(1)
-        self.assertEqual(s(x), x + 20)
-        self.assertEqual(s.forward_tuple(x), x + 5)
+        self.assertEqual(s(x), x + 20 + 5 + x)
 
         w = W()
         self.assertEqual(w((x, x)), x + 5)
