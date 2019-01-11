@@ -63,13 +63,13 @@ TEST(TestTensorInterop, PytorchToCaffe2Op) {
   auto at_tensor_b = at::ones({5, 5}, at::dtype(at::kFloat));
   auto at_tensor_c = at::ones({5, 5}, at::dtype(at::kFloat));
 
-  auto* c2_tensor_a = BlobSetTensor(workspace.CreateBlob("a"), at_tensor_a.getIntrusivePtr());
-  auto* c2_tensor_b = BlobSetTensor(workspace.CreateBlob("b"), at_tensor_b.getIntrusivePtr());
+  auto* c2_tensor_a = caffe2::BlobSetTensor(workspace.CreateBlob("a"), at_tensor_a.getIntrusivePtr());
+  auto* c2_tensor_b = caffe2::BlobSetTensor(workspace.CreateBlob("b"), at_tensor_b.getIntrusivePtr());
 
   // Test Alias
   {
     caffe2::Tensor c2_tensor_from_aten(at_tensor_c.getIntrusivePtr());
-    BlobSetTensor(workspace.CreateBlob("c"), c2_tensor_from_aten.Alias());
+    caffe2::BlobSetTensor(workspace.CreateBlob("c"), c2_tensor_from_aten.Alias());
 
   }
 
@@ -84,7 +84,7 @@ TEST(TestTensorInterop, PytorchToCaffe2Op) {
 
   workspace.RunNetOnce(net);
 
-  auto result = XBlobGetMutableTensor(workspace.CreateBlob("d"), {5, 5}, at::kCPU);
+  auto result = caffe2::XBlobGetMutableTensor(workspace.CreateBlob("d"), {5, 5}, at::kCPU);
 
   auto it = result.data<float>();
   for (int64_t i = 0; i < 25; i++) {
@@ -101,8 +101,8 @@ TEST(TestTensorInterop, PytorchToCaffe2SharedStorage) {
   auto at_tensor_a = at::ones({5, 5}, at::dtype(at::kFloat));
   auto at_tensor_b = at_tensor_a.view({5, 5});
 
-  auto* c2_tensor_a = BlobSetTensor(workspace.CreateBlob("a"), at_tensor_a.getIntrusivePtr());
-  auto* c2_tensor_b = BlobSetTensor(workspace.CreateBlob("b"), at_tensor_b.getIntrusivePtr());
+  auto* c2_tensor_a = caffe2::BlobSetTensor(workspace.CreateBlob("a"), at_tensor_a.getIntrusivePtr());
+  auto* c2_tensor_b = caffe2::BlobSetTensor(workspace.CreateBlob("b"), at_tensor_b.getIntrusivePtr());
 
   {
     auto op = net.add_op();
@@ -114,7 +114,7 @@ TEST(TestTensorInterop, PytorchToCaffe2SharedStorage) {
 
   workspace.RunNetOnce(net);
 
-  auto result = XBlobGetMutableTensor(workspace.CreateBlob("c"), {5, 5}, at::kCPU);
+  auto result = caffe2::XBlobGetMutableTensor(workspace.CreateBlob("c"), {5, 5}, at::kCPU);
   auto it = result.data<float>();
   for (int64_t i = 0; i < 25; i++) {
     ASSERT_EQ(it[i], 2.0);
@@ -128,7 +128,7 @@ TEST(TestTensorInterop, PytorchToCaffe2Strided) {
   caffe2::NetDef net;
 
   auto at_tensor = at::ones({5, 5}, at::dtype(at::kFloat)).t();
-  auto* c2_tensor = BlobSetTensor(workspace.CreateBlob("blob"), at_tensor.getIntrusivePtr());
+  auto* c2_tensor = caffe2::BlobSetTensor(workspace.CreateBlob("blob"), at_tensor.getIntrusivePtr());
 
   {
     auto op = net.add_op();
