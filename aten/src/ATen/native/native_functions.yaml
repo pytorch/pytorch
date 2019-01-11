@@ -108,10 +108,13 @@
     CUDA: _acos_out_cuda
 
 - func: avg_pool1d(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, bool ceil_mode=false, bool count_include_pad=true) -> Tensor
+  python_module: nn
 
 - func: adaptive_avg_pool1d(Tensor self, IntList[1] output_size) -> Tensor
+  python_module: nn
 
 - func: adaptive_max_pool1d(Tensor self, IntList[1] output_size) -> (Tensor, Tensor)
+  python_module: nn
 
 - func: add(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function, method
