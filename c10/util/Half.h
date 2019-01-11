@@ -9,7 +9,7 @@
 /// If you are writing a compute bound kernel, you can use the CUDA half
 /// intrinsics directly on the Half type from device code.
 
-#include <c10/core/bitcasts.h>
+#include <c10/util/bitcasts.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/C++17.h>
 
@@ -459,4 +459,4 @@ C10_API std::ostream& operator<<(std::ostream& out, const Half& value);
 
 } // namespace c10
 
-#include "c10/Half-inl.h"
+#include <c10/util/Half-inl.h>

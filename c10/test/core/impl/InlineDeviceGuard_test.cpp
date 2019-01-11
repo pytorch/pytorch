@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
-#include "c10/impl/InlineDeviceGuard.h"
-#include "c10/impl/FakeGuardImpl.h"
+#include "c10/core/impl/InlineDeviceGuard.h"
+#include "c10/core/impl/FakeGuardImpl.h"
 
 using namespace c10;
 using namespace c10::impl;

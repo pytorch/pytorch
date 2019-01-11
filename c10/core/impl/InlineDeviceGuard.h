@@ -2,9 +2,9 @@
 
 // This file provides implementations of InlineDeviceGuard and InlineOptionalDeviceGuard.
 
-#include <c10/Device.h>
-#include <c10/impl/DeviceGuardImplInterface.h>
-#include <c10/impl/VirtualGuardImpl.h>
+#include <c10/core/Device.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/core/impl/VirtualGuardImpl.h>
 #include <c10/util/Optional.h>
 #include <c10/util/C++17.h>
 
