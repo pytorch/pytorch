@@ -674,6 +674,11 @@ void THTensor_(randperm)(THTensor *r_, THGenerator *_generator, int64_t n)
   REAL_SWAP(ARR(III), ARR(JJJ)); \
   LONG_SWAP(IDX(III), IDX(JJJ))
 
+/* Emulate NumPy behavior of putting NaNs
+ * at the end of an ascending list. */
+#define GT_OR_NAN(x, y) \
+  ((x != x && y == y) || (x > y))
+
 static void THTensor_(quicksortascend)(scalar_t *arr, int64_t *idx, int64_t elements, int64_t stride)
 {
   int64_t beg[MAX_LEVELS], end[MAX_LEVELS], i, j, L, R, P, swap, pid, stack = 0, sz_right, sz_left;
@@ -689,15 +694,15 @@ static void THTensor_(quicksortascend)(scalar_t *arr, int64_t *idx, int64_t elem
       /* Use median of three for pivot choice */
     P=(L+R)>>1;
     BOTH_SWAP(P, L+1);
-    if (ARR(L+1) > ARR(R)) { BOTH_SWAP(L+1, R); }
-    if (ARR(L) > ARR(R)) { BOTH_SWAP(L, R); }
-    if (ARR(L+1) > ARR(L)) { BOTH_SWAP(L+1, L); }
+    if (GT_OR_NAN(ARR(L+1), ARR(R))) { BOTH_SWAP(L+1, R); }
+    if (GT_OR_NAN(ARR(L), ARR(R))) { BOTH_SWAP(L, R); }
+    if (GT_OR_NAN(ARR(L+1), ARR(L))) { BOTH_SWAP(L+1, L); }
 
     i = L+1; j = R; piv = ARR(L); pid = IDX(L);
 
     do {
-      do { i = i+1; } while(ARR(i) < piv);
-      do { j = j-1; } while(ARR(j) > piv);
+      do { i = i+1; } while(GT_OR_NAN(piv, ARR(i)));
+      do { j = j-1; } while(GT_OR_NAN(ARR(j), piv));
       if (j < i)
           break;
       BOTH_SWAP(i, j);
@@ -748,7 +753,7 @@ static void THTensor_(quicksortascend)(scalar_t *arr, int64_t *idx, int64_t elem
   } /* while not done */
   /* Now insertion sort on the concatenation of subfiles */
   for(i=elements-2; i>=0; i--) {
-    if (ARR(i) > ARR(i+1)) {
+    if (GT_OR_NAN(ARR(i),ARR(i+1))) {
       piv = ARR(i);
       pid = IDX(i);
       j = i+1;
@@ -756,7 +761,7 @@ static void THTensor_(quicksortascend)(scalar_t *arr, int64_t *idx, int64_t elem
         ARR(j-1) = ARR(j);
         IDX(j-1) = IDX(j);
         j = j+1;
-      } while(j < elements && ARR(j) < piv);
+      } while(j < elements && GT_OR_NAN(piv, ARR(j)));
       ARR(j-1) = piv;
       IDX(j-1) = pid;
      }
@@ -778,15 +783,15 @@ static void THTensor_(quicksortdescend)(scalar_t *arr, int64_t *idx, int64_t ele
       /* Use median of three for pivot choice */
     P=(L+R)>>1;
     BOTH_SWAP(P, L+1);
-    if (ARR(L+1) < ARR(R)) { BOTH_SWAP(L+1, R); }
-    if (ARR(L) < ARR(R)) { BOTH_SWAP(L, R); }
-    if (ARR(L+1) < ARR(L)) { BOTH_SWAP(L+1, L); }
+    if (GT_OR_NAN(ARR(R), ARR(L+1))) { BOTH_SWAP(L+1, R); }
+    if (GT_OR_NAN(ARR(R), ARR(L))) { BOTH_SWAP(L, R); }
+    if (GT_OR_NAN(ARR(L), ARR(L+1))) { BOTH_SWAP(L+1, L); }
 
     i = L+1; j = R; piv = ARR(L); pid = IDX(L);
 
     do {
-      do { i = i+1; } while(ARR(i) > piv);
-      do { j = j-1; } while(ARR(j) < piv);
+      do { i = i+1; } while(GT_OR_NAN(ARR(i), piv));
+      do { j = j-1; } while(GT_OR_NAN(piv, ARR(j)));
       if (j < i)
           break;
       BOTH_SWAP(i, j);
@@ -837,7 +842,7 @@ static void THTensor_(quicksortdescend)(scalar_t *arr, int64_t *idx, int64_t ele
   } /* while not done */
   /* Now insertion sort on the concatenation of subfiles */
   for(i=elements-2; i>=0; i--) {
-    if (ARR(i) < ARR(i+1)) {
+    if (GT_OR_NAN(ARR(i+1), ARR(i))) {
       piv = ARR(i);
       pid = IDX(i);
       j = i+1;
@@ -845,7 +850,7 @@ static void THTensor_(quicksortdescend)(scalar_t *arr, int64_t *idx, int64_t ele
         ARR(j-1) = ARR(j);
         IDX(j-1) = IDX(j);
         j = j+1;
-      } while(j < elements && ARR(j) > piv);
+      } while(j < elements && GT_OR_NAN(ARR(j), piv));
       ARR(j-1) = piv;
       IDX(j-1) = pid;
      }
