@@ -20,7 +20,7 @@ class ReshapeOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     if (InputSize() == 2) {
-      return DispatchHelper<TensorTypes<int, int64_t, float, double>>::call(this, Input(1));
+      return DispatchHelper<TensorTypes<int, int64_t>>::call(this, Input(1));
     }
     CAFFE_ENFORCE(
         OperatorBase::HasArgument("shape"), "Argument `shape` is missing.");
@@ -46,20 +46,14 @@ class ReshapeOp : public Operator<Context> {
       auto& shape = Input(1);
       CAFFE_ENFORCE(shape.dim() == 1, "Shape should be 1-D");
 
-      if (shape.dtype() == TypeMeta::Make<int64_t>() ||
-          shape.dtype() == TypeMeta::Make<int32_t>()) {
-        const T* shape_data = shape.template data<T>();
-        // Bit awkward, but needed so works on both CPU and CUDA contexts
-        std::vector<T> tmpv(shape.numel());
-        if (shape.numel() > 0) {
-          context_.CopyBytesToCPU(shape.numel() * sizeof(T), shape_data, &tmpv[0]);
-          actual_new_shape.assign(tmpv.begin(), tmpv.begin() + shape.numel());
-        }
-      } else {  // opset>=5 may bring any data type (usually float)
-        actual_new_shape.resize(input.dim());
-        for (int i = 0; i < actual_new_shape.size(); ++i) {
-          actual_new_shape[i] = input.size(i);
-        }
+      const T* shape_data = shape.template data<T>();
+
+      // Bit awkward, but needed so works on both CPU and CUDA contexts
+      std::vector<T> tmpv(shape.numel());
+      if (shape.numel() > 0) {
+        context_.CopyBytesToCPU(
+            shape.numel() * sizeof(T), shape_data, &tmpv[0]);
+        actual_new_shape.assign(tmpv.begin(), tmpv.begin() + shape.numel());
       }
     }
 
@@ -73,8 +67,8 @@ class ReshapeOp : public Operator<Context> {
     // Checks if the new shape is valid and fills in the missing dimension
     // specified by -1.
     // NOTE: At most one dimension can be -1.
-    int64_t total_size = input.numel();
-    int64_t size = 1L;
+    auto total_size = input.numel();
+    T size = 1;
     int unknown_idx = -1;
     for (int i = 0; i < actual_new_shape.size(); ++i) {
       const auto dim = actual_new_shape[i];

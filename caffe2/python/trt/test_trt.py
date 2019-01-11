@@ -131,6 +131,8 @@ class TensorRTOpTest(TestCase):
         ws = Workspace()
         with core.DeviceScope(device_option):
             ws.FeedBlob(op_inputs[data_input_index], data)
+            if opset_version >= 5:
+                ws.FeedBlob("data_0", data)
             ws.RunOperatorsOnce([op])
             output_values = [ws.FetchBlob(name) for name in op_outputs]
             Y_trt = namedtupledict('Outputs', op_outputs)(*output_values)
@@ -150,7 +152,7 @@ class TensorRTOpTest(TestCase):
 
     @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_inception_v1(self):
-        self._test_onnx_importer('inception_v1', -1, 3)
+        self._test_onnx_importer('inception_v1', -3, 9)
 
     @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
     def test_inception_v2(self):
