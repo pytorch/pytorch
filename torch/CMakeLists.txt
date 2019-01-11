@@ -200,6 +200,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
   ${TORCH_SRC_DIR}/csrc/jit/tracer.cpp
   ${TORCH_SRC_DIR}/csrc/jit/hooks_for_testing.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/c10_ops/layer_norm.cpp
   ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
   ${TORCH_SRC_DIR}/csrc/utils/variadic.cpp
   ${TORCH_ROOT}/test/cpp/jit/no-gtest.cpp
@@ -264,6 +265,7 @@ endif()
 
 
 if (TORCH_STATIC)
+  target_compile_definitions(torch PUBLIC TORCH_BUILD_STATIC_LIBS)
   add_library(torch STATIC ${TORCH_SRCS})
 else()
   add_library(torch SHARED ${TORCH_SRCS})

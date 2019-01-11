@@ -20,8 +20,8 @@
 #include "caffe2/core/common_cudnn.h"
 #endif // CAFFE2_USE_CUDNN
 
-#include <c10/Device.h>
-#include <c10/Stream.h>
+#include <c10/core/Device.h>
+#include <c10/core/Stream.h>
 #include <c10/cuda/CUDAStream.h>
 
 namespace caffe2 {

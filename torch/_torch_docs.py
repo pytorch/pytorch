@@ -1522,6 +1522,9 @@ eig(a, eigenvectors=False, out=None) -> (Tensor, Tensor)
 
 Computes the eigenvalues and eigenvectors of a real square matrix.
 
+.. note:: Since eigenvalues and eigenvectors might be complex, backward pass is supported only
+for :func:`torch.symeig`
+
 Args:
     a (Tensor): the square matrix of shape :math:`(n \times n)` for which the eigenvalues and eigenvectors
         will be computed
@@ -4633,8 +4636,12 @@ only the upper triangular portion is used by default.
 
 If :attr:`upper` is ``False``, then lower triangular portion is used.
 
-Note: Irrespective of the original strides, the returned matrix `V` will
+.. note:: Irrespective of the original strides, the returned matrix `V` will
 be transposed, i.e. with strides `(1, m)` instead of `(m, 1)`.
+
+.. note:: Extra care needs to be taken when backward through outputs. Such
+          operation is really only stable when all eigenvalues are distinct.
+          Otherwise, ``NaN`` can appear as the gradients are not properly defined.
 
 Args:
     input (Tensor): the input symmetric matrix
@@ -4951,8 +4958,8 @@ add_docstr(torch.tril,
            r"""
 tril(input, diagonal=0, out=None) -> Tensor
 
-Returns the lower triangular part of the matrix (2-D tensor) :attr:`input`,
-the other elements of the result tensor :attr:`out` are set to 0.
+Returns the lower triangular part of the matrix (2-D tensor) or batch of matrices
+:attr:`input`, the other elements of the result tensor :attr:`out` are set to 0.
 
 The lower triangular part of the matrix is defined as the elements on and
 below the diagonal.
@@ -5056,8 +5063,8 @@ add_docstr(torch.triu,
            r"""
 triu(input, diagonal=0, out=None) -> Tensor
 
-Returns the upper triangular part of the matrix (2-D tensor) :attr:`input`,
-the other elements of the result tensor :attr:`out` are set to 0.
+Returns the upper triangular part of a matrix (2-D tensor) or batch of matrices
+:attr:`input`, the other elements of the result tensor :attr:`out` are set to 0.
 
 The upper triangular part of the matrix is defined as the elements on and
 above the diagonal.
@@ -5101,19 +5108,19 @@ Example::
             [-0.2447,  0.9556, -1.2919,  1.3378, -0.1768, -1.0857],
             [ 0.4333,  0.3146,  0.6576, -1.0432,  0.9348, -0.4410],
             [-0.9888,  1.0679, -1.3337, -1.6556,  0.4798,  0.2830]])
-    >>> torch.tril(b, diagonal=1)
-    tensor([[ 0.5876, -0.0794,  0.0000,  0.0000,  0.0000,  0.0000],
-            [-0.2447,  0.9556, -1.2919,  0.0000,  0.0000,  0.0000],
-            [ 0.4333,  0.3146,  0.6576, -1.0432,  0.0000,  0.0000],
-            [-0.9888,  1.0679, -1.3337, -1.6556,  0.4798,  0.0000]])
-    >>> torch.tril(b, diagonal=-1)
-    tensor([[ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
-            [-0.2447,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
-            [ 0.4333,  0.3146,  0.0000,  0.0000,  0.0000,  0.0000],
-            [-0.9888,  1.0679, -1.3337,  0.0000,  0.0000,  0.0000]])
+    >>> torch.triu(b, diagonal=1)
+    tensor([[ 0.0000, -0.0794, -1.8373,  0.6654,  0.2604,  1.5235],
+            [ 0.0000,  0.0000, -1.2919,  1.3378, -0.1768, -1.0857],
+            [ 0.0000,  0.0000,  0.0000, -1.0432,  0.9348, -0.4410],
+            [ 0.0000,  0.0000,  0.0000,  0.0000,  0.4798,  0.2830]])
+    >>> torch.triu(b, diagonal=-1)
+    tensor([[ 0.5876, -0.0794, -1.8373,  0.6654,  0.2604,  1.5235],
+            [-0.2447,  0.9556, -1.2919,  1.3378, -0.1768, -1.0857],
+            [ 0.0000,  0.3146,  0.6576, -1.0432,  0.9348, -0.4410],
+            [ 0.0000,  0.0000, -1.3337, -1.6556,  0.4798,  0.2830]])
 """)
 
-# docstr is split in two parts to avoid format mis-captureing :math: braces '{}'
+# docstr is split in two parts to avoid format mis-capturing :math: braces '{}'
 # as common args.
 add_docstr(torch.triu_indices,
            r"""

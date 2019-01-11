@@ -1068,47 +1068,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     storage_offset_ = 0;
   }
 
-  /**
-   * @brief Shares the data with another tensor.
-   *
-   * To share data between two tensors, the sizes of the two tensors must be
-   * equal already. The reason we do not implicitly do a Resize to make the two
-   * tensors have the same shape is that we want to allow tensors of different
-   * shapes but the same number of items to still be able to share data. This
-   * allows one to e.g. have a n-dimensional Tensor and a flattened version
-   * sharing the same underlying storage.
-   *
-   * The source tensor should already have its data allocated.
-   */
-  void ShareData(const TensorImpl& src) {
-    // Right now, we are assuming the device_type are the same, since it is
-    // inherently the same in the non-templatized code. We should probably add
-    // an assert here which might affect perf a little bit.
-    AT_ASSERTM(
-        src.numel_ == numel_,
-        "Size mismatch - did you call reshape before sharing the data?");
-    // It is possible that the source tensor hasn't called mutable_data() yet,
-    // in which case ShareData() doesn't make much sense since we don't really
-    // know what to share yet.
-    // TODO: Add the assert after all uninitialized states are eliminated
-    // AT_ASSERTM(src.dtype_initialized(),
-    //            "Source tensor don't have a data type (did you call mutable_data<T> on the tensor?)");
-    if (!src.dtype_initialized()) {
-      C10_LOG_EVERY_MS(WARNING, 1000) <<
-                   "Source tensor don't have a data type (did you call mutable_data<T> on the tensor?)";
-    }
-    AT_ASSERTM(
-        src.storage_initialized(),
-        "Source tensor has no content and has size > 0");
-    // Finally, do sharing.
-    /* Since we create new Storage whenever we need to change data_type/capacity
-     * this still keeps the original semantics
-     */
-    storage_ = src.storage();
-    data_type_ = src.dtype();
-    storage_offset_ = src.storage_offset();
-  }
-
   void ShareExternalPointer(
       DataPtr&& data_ptr,
       const caffe2::TypeMeta& data_type,

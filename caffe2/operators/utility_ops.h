@@ -169,8 +169,7 @@ class AliasOp final : public Operator<Context> {
   bool RunOnDevice() override {
     auto& input = Input(0);
     CAFFE_ENFORCE_GE(input.numel(), 0, "Tensor is not initialized");
-    Output(0)->ResizeLike(input);
-    Output(0)->ShareData(input);
+    OutputTensorAlias(0, input);
     return true;
   }
 };
@@ -212,7 +211,7 @@ class FlattenToVecOp : public Operator<Context> {
     auto& input = Input(0);
     auto* output = Output(0);
     CAFFE_ENFORCE_GE(
-        input.sizes().size(), 1, "The rank of the tensor must be >= 1.");
+        input.dim(), 1, "The rank of the tensor must be >= 1.");
     output->Resize(input.numel());
 
     context_.CopyItemsSameDevice(

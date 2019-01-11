@@ -1202,37 +1202,6 @@ void THTensor_(topk)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int64_t k, i
   THLongTensor_free(tmpIndices);
 }
 
-void THTensor_(tril)(THTensor *r_, THTensor *t, int64_t k)
-{
-  int64_t t_size_0, t_size_1;
-  int64_t t_stride_0, t_stride_1;
-  int64_t r__stride_0, r__stride_1;
-  scalar_t *t_data, *r__data;
-  int64_t r, c;
-
-  THArgCheck(THTensor_(nDimensionLegacyAll)(t) == 2, 1, "expected a matrix");
-
-  THTensor_(resizeAs)(r_, t);
-
-  t_size_0 = THTensor_(size)(t, 0);
-  t_size_1 = THTensor_(size)(t, 1);
-  t_stride_0 = THTensor_(stride)(t, 0);
-  t_stride_1 = THTensor_(stride)(t, 1);
-  r__stride_0 = THTensor_(stride)(r_, 0);
-  r__stride_1 = THTensor_(stride)(r_, 1);
-  r__data = r_->data<scalar_t>();
-  t_data = t->data<scalar_t>();
-
-  for(r = 0; r < t_size_0; r++)
-  {
-    int64_t sz = THMin(r+k+1, t_size_1);
-    for(c = THMax(0, r+k+1); c < t_size_1; c++)
-      r__data[r*r__stride_0+c*r__stride_1] = 0;
-    for(c = 0; c < sz; c++)
-      r__data[r*r__stride_0+c*r__stride_1] = t_data[r*t_stride_0+c*t_stride_1];
-  }
-}
-
 void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k)
 {
   int64_t t_size_0, t_size_1;
