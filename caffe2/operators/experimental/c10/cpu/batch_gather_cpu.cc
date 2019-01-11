@@ -14,11 +14,11 @@ template <class TInd>
 void batch_gather_op_cpu_impl(
     const C10Tensor& data_,
     const C10Tensor& indices_,
-    const C10Tensor& output_,
-    BaseContext* context) {
+    const C10Tensor& output_) {
   Tensor data(data_);
   Tensor indices(indices_);
   Tensor output(output_);
+  CPUContext context;
 
   CAFFE_ENFORCE_GE(data.dim(), 2, "DATA should be at least 2-D");
 
@@ -49,7 +49,7 @@ void batch_gather_op_cpu_impl(
           data.size(1));
       auto src = src_base + idx * block_bytesize + batch * data_batch_bytesize;
       auto dst = out + i * block_bytesize + batch * gathered_batch_bytesize;
-      context->CopyItemsSameDevice(data.dtype(), block_size, src, dst);
+      context.CopyItemsSameDevice(data.dtype(), block_size, src, dst);
     }
   }
 }

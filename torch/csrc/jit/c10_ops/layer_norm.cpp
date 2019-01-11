@@ -2,7 +2,6 @@
 #include <c10/core/opschema/layer_norm.h>
 #include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/autograd/variable.h>
-#include <caffe2/core/context.h>
 
 using c10::C10Tensor;
 
