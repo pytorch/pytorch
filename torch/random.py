@@ -59,7 +59,7 @@ def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="device
             If you explicitly specify devices, this warning will be suppressed
         enabled (bool): if ``False``, the RNG is not forked.  This is a convenience
             argument for easily disabling the context manager without having
-            to reindent your Python code.
+            to unindent your Python code.
     """
 
     import torch.cuda
