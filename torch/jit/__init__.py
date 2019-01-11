@@ -1182,7 +1182,6 @@ if _enabled:
             super(WeakScriptModuleProxy, self).__init__()
 
             self.__dict__["_original"] = weakref.ref(original)
-            self.__dict__["_original_type"] = type(original)
 
             # Copy Parameters / Modules / Buffers
             for name in dir(original):
@@ -1201,9 +1200,10 @@ if _enabled:
 
             # Copy constants
             self.__dict__["_constants_set"] = set(getattr(original, "__constants__", []))
-            self.__dict__["_initialized"] = True
 
+            self.__dict__["_initialized"] = True
             _create_methods_from_stubs(self, stubs)
+
             entry = _overloaded_fns[type(original)]
             if entry is not None:
                 _overloaded_fns[self] = {}

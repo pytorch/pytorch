@@ -155,9 +155,18 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
 
 
 def overload(self_type, fn_name, fns):
+    """
+    When calling 'fn_name' from script from an object of type 'self_type',
+    overload it with 'fns'. The first match in 'fns' will be chosen as the
+    overload.
+
+    ```
+    torch._jit_internal.overload(type(self), 'forward', (self.overload1, self.overload2))
+    ```
+    """
     entry = _overloaded_fns.get(self_type)
     # Bound methods are created for each use, so we can't store a weak reference
-    # to them (it dies immediately0)
+    # to them (it dies immediately)
     weak_fns = weakref.WeakSet([fn.__func__ for fn in fns])
 
     if entry is None:
