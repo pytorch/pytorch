@@ -1522,6 +1522,9 @@ eig(a, eigenvectors=False, out=None) -> (Tensor, Tensor)
 
 Computes the eigenvalues and eigenvectors of a real square matrix.
 
+.. note:: Since eigenvalues and eigenvectors might be complex, backward pass is supported only
+for :func:`torch.symeig`
+
 Args:
     a (Tensor): the square matrix of shape :math:`(n \times n)` for which the eigenvalues and eigenvectors
         will be computed
@@ -4633,8 +4636,12 @@ only the upper triangular portion is used by default.
 
 If :attr:`upper` is ``False``, then lower triangular portion is used.
 
-Note: Irrespective of the original strides, the returned matrix `V` will
+.. note:: Irrespective of the original strides, the returned matrix `V` will
 be transposed, i.e. with strides `(1, m)` instead of `(m, 1)`.
+
+.. note:: Extra care needs to be taken when backward through outputs. Such
+          operation is really only stable when all eigenvalues are distinct.
+          Otherwise, ``NaN`` can appear as the gradients are not properly defined.
 
 Args:
     input (Tensor): the input symmetric matrix
