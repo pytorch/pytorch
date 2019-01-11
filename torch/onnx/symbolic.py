@@ -1060,17 +1060,6 @@ for k, v in cast_pytorch_to_onnx.items():
     name = '_cast_{}'.format(k)
     globals()[name] = parse_args('v', 'i')(partial(_cast_func_template, v))
 
-pytorch_type_to_scalar_type = [
-    torch.uint8,    # 0
-    torch.int8,     # 1
-    torch.short,    # 2
-    torch.int,      # 3
-    torch.int64,    # 4
-    torch.half,     # 5
-    torch.float,    # 6
-    torch.double,   # 7
-]
-
 scalar_type_to_onnx = [
     cast_pytorch_to_onnx["Byte"],
     cast_pytorch_to_onnx["Char"],
