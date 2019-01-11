@@ -954,6 +954,19 @@ class TestDistributions(TestCase):
             self._check_log_prob(Binomial(total_count, logits=logits), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_binomial_log_prob_float(self):
+        probs = torch.tensor([1e-5, 0.99999], dtype=torch.float)
+        total_count = 1000000.
+        x = torch.tensor([10, 9999], dtype=torch.float)
+        expected = scipy.stats.binom(total_count, probs.numpy()).logpmf(x.numpy())
+        log_prob = Binomial(total_count, probs).log_prob(x)
+        # Comparison is again scipy distributions which use float64.
+        self.assertTrue(np.allclose(log_prob, expected, rtol=0.05))
+        logits = probs_to_logits(probs, is_binary=True)
+        log_prob = Binomial(total_count, logits=logits).log_prob(x)
+        self.assertTrue(np.allclose(log_prob, expected, rtol=0.05))
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_binomial_log_prob_vectorized_count(self):
         probs = torch.tensor([0.2, 0.7, 0.9])
         for total_count, sample in [(torch.tensor([10]), torch.tensor([7., 3., 9.])),
