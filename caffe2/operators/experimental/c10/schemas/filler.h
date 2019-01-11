@@ -23,17 +23,15 @@ struct GivenTensorFill final {
       const std::vector<int64_t>& shape,
       const std::vector<int>& extra_shape,
       bool input_as_shape,
-      const C10Tensor& values,
-      BaseContext* context);
+      const C10Tensor& values);
 
-  static constexpr c10::guts::array<const char*, 7> parameter_names = {
+  static constexpr c10::guts::array<const char*, 6> parameter_names = {
       {"inputs",
        "output",
        "shape",
        "extra_shape",
        "input_as_shape",
-       "values",
-       "context"}};
+       "values"}};
 
    static constexpr size_t num_outputs() {return 1;}
 
@@ -43,8 +41,7 @@ struct GivenTensorFill final {
       const std::vector<int64_t>& shape,
       const std::vector<int>& extra_shape,
       bool input_as_shape,
-      const C10Tensor& values,
-      BaseContext* context) {
+      const C10Tensor& values) {
     return c10::DeviceTypeId::CPU;
   }
 };
@@ -65,20 +62,18 @@ struct ConstantFill final {
       const std::vector<int>& extra_shape,
       bool input_as_shape,
       int dtype,
-      Value value,
-      BaseContext* context);
+      Value value);
 
   static constexpr size_t num_outputs() {return 1;}
 
-  static constexpr c10::guts::array<const char*, 8> parameter_names = {
+  static constexpr c10::guts::array<const char*, 7> parameter_names = {
       {"inputs",
        "output",
        "shape",
        "extra_shape",
        "input_as_shape",
        "dtype",
-       "value",
-       "context"}};
+       "value"}};
 
   static c10::DeviceTypeId dispatch_key(
       at::ArrayRef<C10Tensor> inputs,
@@ -87,8 +82,7 @@ struct ConstantFill final {
       const std::vector<int>& extra_shape,
       bool input_as_shape,
       int dtype,
-      Value value,
-      BaseContext* context) {
+      Value value) {
     return c10::DeviceTypeId::CPU;
   }
 };
@@ -103,20 +97,18 @@ struct UniformFill final {
       const std::vector<int>& extra_shape,
       bool input_as_shape,
       float min,
-      float max,
-      BaseContext* context);
+      float max);
 
   static constexpr size_t num_outputs() {return 1;}
 
-  static constexpr c10::guts::array<const char*, 8> parameter_names = {
+  static constexpr c10::guts::array<const char*, 7> parameter_names = {
       {"inputs",
        "output",
        "shape",
        "extra_shape",
        "input_as_shape",
        "min",
-       "max",
-       "context"}};
+       "max"}};
 
   static c10::DeviceTypeId dispatch_key(
       at::ArrayRef<C10Tensor> inputs,
@@ -125,8 +117,7 @@ struct UniformFill final {
       const std::vector<int>& extra_shape,
       bool input_as_shape,
       float min,
-      float max,
-      BaseContext* context) {
+      float max) {
     return c10::DeviceTypeId::CPU;
   }
 };

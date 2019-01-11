@@ -19,11 +19,11 @@ void batch_matmul_op_cpu_impl(
     int trans_a,
     int trans_b,
     int broadcast,
-    caffe2::ops::BatchMatmul::State* state,
-    BaseContext* context) {
+    caffe2::ops::BatchMatmul::State* state) {
   Tensor A(A_);
   Tensor B(B_);
   Tensor Y(Y_);
+  CPUContext context;
   using Engine = caffe2::DefaultEngine;
 
   auto ndims_A = A.dim();
@@ -83,7 +83,7 @@ void batch_matmul_op_cpu_impl(
         "be the same size.");
     Y.Resize(1);
     math::Dot<T, Context>(
-        dims_A[0], data_A, data_B, Y.template mutable_data<T>(), static_cast<Context*>(context));
+        dims_A[0], data_A, data_B, Y.template mutable_data<T>(), static_cast<Context*>(&context));
   } else {
     bool A_broadcasted = false, B_broadcasted = false;
     if (ndims_A == 1) {
@@ -260,7 +260,7 @@ void batch_matmul_op_cpu_impl(
           0.0f,
           Y_data + p * Y_stride,
           M * N,
-          static_cast<Context*>(context));
+          static_cast<Context*>(&context));
     }
   }
 }
